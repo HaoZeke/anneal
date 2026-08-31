@@ -385,6 +385,7 @@ fn live_claim_executes_reports_and_returns_the_connected_minimum() {
     };
 
     assert!(credit.certified_connection);
+    assert_eq!(credit.failure, None);
     assert!(credit.novel_edge);
     assert_eq!(credit.total_charged_evaluations, producer_calls + 15);
     assert!((destination.coordinates[3] - destination.coordinates[0] - 2.0).abs() < 1e-4);
@@ -418,6 +419,7 @@ fn receiving_disagreement_is_charged_and_releases_the_live_claim() {
         panic!("fresh energy disagreement must become shared negative evidence")
     };
     assert!(!credit.certified_connection);
+    assert_eq!(credit.failure, Some(RideFailure::Surface));
     assert!(!credit.novel_edge);
     assert_eq!(credit.total_charged_evaluations, producer_calls + 1);
     let RideClaimOutcome::Work(next) = run.claim_ride(7, 0x5eed).unwrap() else {

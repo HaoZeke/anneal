@@ -45,7 +45,7 @@ fn shared_failure_evidence_redirects_the_next_replica_to_an_untried_arm() {
         .unwrap();
 
     let failed = ledger.claim(2, 101).unwrap();
-    ledger
+    let credit = ledger
         .report(
             2,
             failed.id,
@@ -56,6 +56,7 @@ fn shared_failure_evidence_redirects_the_next_replica_to_an_untried_arm() {
     let reassigned = ledger.claim(7, 102).unwrap();
 
     assert_ne!(reassigned.arm, failed.arm);
+    assert_eq!(credit.failure, Some(RideFailure::SaddleNotConverged));
     assert_eq!(ledger.completed_attempts(), 1);
     assert_eq!(ledger.charged_evaluations(), 83);
 }
@@ -95,6 +96,8 @@ fn duplicate_certified_connections_do_not_masquerade_as_new_pes_edges() {
 
     assert!(first_credit.certified_connection);
     assert!(duplicate_credit.certified_connection);
+    assert_eq!(first_credit.failure, None);
+    assert_eq!(duplicate_credit.failure, None);
     assert!(first_credit.novel_edge);
     assert!(!duplicate_credit.novel_edge);
     assert_eq!(first_credit.total_charged_evaluations, 140);
