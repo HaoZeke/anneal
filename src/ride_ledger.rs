@@ -210,6 +210,10 @@ pub enum RideFailure {
     QuenchNotConverged,
     /// The minimum-mode search did not reach its force condition.
     SaddleNotConverged,
+    /// Expanding along the supplied mode did not leave positive curvature.
+    ActivationNotEscaped,
+    /// A force-converged minimum-mode ride no longer had negative curvature.
+    MinimumModeLostCurvature,
     /// Receiving-side certification found no unstable mode.
     NoNegativeMode,
     /// Receiving-side certification found more than one unstable mode.

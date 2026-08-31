@@ -122,6 +122,10 @@ fn classify_failure(error: PesExplorationError, budget_exhausted: bool) -> RideF
     match error {
         PesExplorationError::QuenchNotConverged { .. } => RideFailure::QuenchNotConverged,
         PesExplorationError::SaddleNotConverged { .. } => RideFailure::SaddleNotConverged,
+        PesExplorationError::ActivationNotEscaped { .. } => RideFailure::ActivationNotEscaped,
+        PesExplorationError::MinimumModeLostCurvature { .. } => {
+            RideFailure::MinimumModeLostCurvature
+        }
         PesExplorationError::NotFirstOrder {
             negative_modes: 0, ..
         } => RideFailure::NoNegativeMode,

@@ -2583,6 +2583,8 @@ fn ride_failure_reason(failure: anneal_core::ride_ledger::RideFailure) -> &'stat
     match failure {
         RideFailure::QuenchNotConverged => "ride_quench_not_converged",
         RideFailure::SaddleNotConverged => "ride_saddle_not_converged",
+        RideFailure::ActivationNotEscaped => "ride_activation_not_escaped",
+        RideFailure::MinimumModeLostCurvature => "ride_minimum_mode_lost_curvature",
         RideFailure::NoNegativeMode => "ride_no_negative_mode",
         RideFailure::HigherIndex => "ride_higher_index",
         RideFailure::IrcNotConverged => "ride_irc_not_converged",

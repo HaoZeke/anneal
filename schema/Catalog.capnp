@@ -270,6 +270,8 @@ enum RideFailure {
   surface @6;
   budgetExhausted @7;
   disconnectedConnection @8;
+  activationNotEscaped @9;
+  minimumModeLostCurvature @10;
 }
 
 # Exclusive transition experiment plus the validated minimum from which it
