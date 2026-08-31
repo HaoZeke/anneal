@@ -2,6 +2,9 @@ use anneal_core::catalog::lj::{
     accepts_repeated_quench, descriptor_space, discovered_minimum_id, fresh_evaluation,
     parse_reference_coordinates, perturb_reference, system_signature, validator_config,
 };
+use anneal_core::descriptor_space::{
+    DescriptorGeometry, UNIVERSAL_DESCRIPTOR_SCHEMA, UNIVERSAL_DESCRIPTOR_VERSION,
+};
 use ndarray::ArrayView1;
 
 #[test]
@@ -14,6 +17,21 @@ fn larger_lj_signatures_scale_without_changing_the_descriptor_contract() {
     assert_eq!(lj75.descriptor, lj104.descriptor);
     assert_ne!(lj75.digest(), lj104.digest());
     assert_eq!(lj75.engine.kind, "lennard-jones-reduced-v1");
+}
+
+#[test]
+fn lj_catalog_uses_the_universal_descriptor_with_reduced_unit_geometry() {
+    let descriptor = descriptor_space();
+    let signature = system_signature(75).unwrap();
+
+    assert_eq!(descriptor.schema().name(), UNIVERSAL_DESCRIPTOR_SCHEMA);
+    assert_eq!(descriptor.schema().version(), UNIVERSAL_DESCRIPTOR_VERSION);
+    assert_eq!(
+        descriptor.geometry(),
+        Some(DescriptorGeometry::finite(1.0).unwrap())
+    );
+    assert_eq!(signature.descriptor.schema, UNIVERSAL_DESCRIPTOR_SCHEMA);
+    assert_eq!(signature.descriptor.version, UNIVERSAL_DESCRIPTOR_VERSION);
 }
 
 #[test]
