@@ -2254,13 +2254,16 @@ fn resolve_validation(
     })
 }
 
-fn validate_candidate(
+fn validate_candidate<F>(
     signature: &SystemSignature,
     validator: &CandidateValidator,
-    evaluate: &FreshEvaluator,
+    evaluate: &F,
     identity: &CatalogIdentity,
     candidate: &CatalogCandidate,
-) -> Result<ValidatedCandidate, ()> {
+) -> Result<ValidatedCandidate, ()>
+where
+    F: Fn(&[f64]) -> Result<FreshEvaluation, String> + Send + Sync + ?Sized,
+{
     if candidate.producer_replica != identity.replica
         || candidate.descriptor_schema_version != signature.descriptor.version
         || candidate.census_basin.is_some()
@@ -2296,9 +2299,12 @@ fn validate_candidate(
         .map_err(|_| ())
 }
 
-struct ReceivingRideSurface<'a>(&'a FreshEvaluator);
+struct ReceivingRideSurface<'a, F: ?Sized>(&'a F);
 
-impl PesSurface for ReceivingRideSurface<'_> {
+impl<F> PesSurface for ReceivingRideSurface<'_, F>
+where
+    F: Fn(&[f64]) -> Result<FreshEvaluation, String> + Send + Sync + ?Sized,
+{
     type Error = String;
 
     fn evaluate(
