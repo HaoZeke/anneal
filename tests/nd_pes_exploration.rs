@@ -27,6 +27,34 @@ impl PesSurface for FiveDimensionalDoubleWell {
     }
 }
 
+/// The reaction valley bends away from the launch ray. Along `y = 0` the
+/// coupling keeps every sampled x-direction curvature positive, while a
+/// constrained y relaxation exposes the negative mode of the double well.
+struct CurvedFiveDimensionalDoubleWell;
+
+impl PesSurface for CurvedFiveDimensionalDoubleWell {
+    type Error = Infallible;
+
+    fn evaluate(&self, point: ArrayView1<f64>) -> Result<(f64, Array1<f64>), Self::Error> {
+        let reaction = point[0];
+        let progress = reaction + 1.0;
+        let valley_offset = point[1] - progress * progress;
+        let coupling = 10.0;
+        let mut energy =
+            (reaction * reaction - 1.0).powi(2) + coupling * valley_offset * valley_offset;
+        let mut gradient = Array1::zeros(point.len());
+        gradient[0] = 4.0 * reaction * (reaction * reaction - 1.0)
+            - 4.0 * coupling * progress * valley_offset;
+        gradient[1] = 2.0 * coupling * valley_offset;
+        for index in 2..point.len() {
+            let stiffness = index as f64 + 1.0;
+            energy += stiffness * point[index] * point[index];
+            gradient[index] = 2.0 * stiffness * point[index];
+        }
+        Ok((energy, gradient))
+    }
+}
+
 struct PointWitness;
 
 impl ExactStructureWitness for PointWitness {
@@ -103,6 +131,41 @@ fn bowl_breakout_reaches_negative_curvature_before_minimum_mode_following() {
 
     let connection = discover_nd_connection(
         &FiveDimensionalDoubleWell,
+        &mut network,
+        start.view(),
+        mode.view(),
+        &config,
+        &PointWitness,
+    )
+    .unwrap();
+
+    assert_eq!(connection.negative_modes, 1);
+    assert!(connection.curvature < 0.0);
+    assert_eq!(network.minimum_count(), 2);
+}
+
+#[test]
+fn perpendicular_relaxation_finds_a_curved_saddle_channel() {
+    let mut network = NdPesNetwork::new();
+    let config = PesExplorationConfig {
+        ride_method: RideMethod::Lanczos,
+        quench_steps: 500,
+        saddle_steps: 800,
+        activation_attempts: 4,
+        activation_growth: 2.0,
+        activation_relaxation_steps: 8,
+        quench_gradient_tolerance: 1e-8,
+        saddle_force_tolerance: 1e-6,
+        saddle_displacement: 0.1,
+        irc_step: 0.08,
+        refine_with_prfo: false,
+        ..PesExplorationConfig::default()
+    };
+    let start = Array1::from_vec(vec![-0.83, 0.04, -0.07, 0.03, 0.09]);
+    let mode = Array1::from_vec(vec![1.0, 0.0, 0.0, 0.0, 0.0]);
+
+    let connection = discover_nd_connection(
+        &CurvedFiveDimensionalDoubleWell,
         &mut network,
         start.view(),
         mode.view(),
