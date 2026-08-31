@@ -169,6 +169,13 @@ fn direction_toward_saddle() -> RideDirection {
     }
 }
 
+fn opposite(direction: RideDirection) -> RideDirection {
+    match direction {
+        RideDirection::Negative => RideDirection::Positive,
+        RideDirection::Positive => RideDirection::Negative,
+    }
+}
+
 fn execution_config(maximum_evaluations: u64) -> CatalogRideExecutionConfig {
     CatalogRideExecutionConfig {
         exploration: exploration_config(),
@@ -345,6 +352,32 @@ fn claimed_ride_executes_a_counted_minimum_saddle_minimum_connection() {
     separations.sort_by(f64::total_cmp);
     assert!((separations[0] - 1.2).abs() < 1e-4);
     assert!((separations[1] - 2.0).abs() < 1e-4);
+}
+
+#[test]
+fn convex_ray_failure_is_distinct_from_stationary_index_failure() {
+    let surface = RadialDoubleWell::new();
+    let work = work(opposite(direction_toward_saddle()));
+    let descriptor_space = universal_descriptor_space(DescriptorGeometry::finite(1.0).unwrap());
+    let mut config = execution_config(5_000);
+    config.exploration.activation_attempts = 1;
+    config.exploration.saddle_displacement = 0.01;
+
+    let report = execute_catalog_ride(
+        &surface,
+        &descriptor_space,
+        &work,
+        &[18, 18],
+        array![1.0, 1.0].view(),
+        &[false; 2],
+        &config,
+        &SeparationWitness,
+    );
+
+    assert_eq!(
+        report.outcome,
+        CatalogRideOutcome::Failed(RideFailure::ActivationNotEscaped)
+    );
 }
 
 #[test]

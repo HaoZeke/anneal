@@ -151,6 +151,20 @@ fn every_catalog_operation_round_trips_all_identity_and_sequence_fields() {
                 outcome: CatalogRideOutcome::Failed(RideFailure::DisconnectedConnection),
             },
         },
+        CatalogOperation::ReportRide {
+            report: CatalogRideReport {
+                work: 54,
+                charged_evaluations: 21,
+                outcome: CatalogRideOutcome::Failed(RideFailure::ActivationNotEscaped),
+            },
+        },
+        CatalogOperation::ReportRide {
+            report: CatalogRideReport {
+                work: 55,
+                charged_evaluations: 73,
+                outcome: CatalogRideOutcome::Failed(RideFailure::MinimumModeLostCurvature),
+            },
+        },
     ];
     for operation in operations {
         let request = CatalogRequest {
