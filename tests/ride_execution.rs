@@ -97,7 +97,7 @@ fn exploration_config() -> PesExplorationConfig {
         irc_steps: 200,
         prfo_steps: 100,
         quench_gradient_tolerance: 1e-8,
-        saddle_force_tolerance: 1e-7,
+        saddle_force_tolerance: 1e-8,
         saddle_displacement: 0.12,
         negative_curvature_tolerance: 1e-6,
         hessian_step: 1e-5,
@@ -362,8 +362,21 @@ fn live_claim_executes_reports_and_returns_the_connected_minimum() {
     let producer_calls = report.charged_evaluations;
     let destination = connected_destination(&work, &report, &SeparationWitness)
         .expect("certified connection must expose its non-source endpoint");
-    let RideReportOutcome::Credited(credit) = run.report_ride(7, report).unwrap() else {
-        panic!("receiving-side index certification did not credit the connection")
+    let CatalogRideOutcome::Certified(connection) = &report.outcome else {
+        unreachable!("a connected destination requires a certified report")
+    };
+    let saddle_gradient_norm = connection.saddle.gradient_norm;
+    let endpoint_gradient_norms = connection
+        .endpoints
+        .each_ref()
+        .map(|endpoint| endpoint.gradient_norm);
+    let report_outcome = run.report_ride(7, report).unwrap();
+    let RideReportOutcome::Credited(credit) = report_outcome else {
+        panic!(
+            "receiving-side index certification returned {report_outcome:?}; producer calls \
+             {producer_calls}, saddle gradient norm {saddle_gradient_norm}, endpoint gradient norms \
+             {endpoint_gradient_norms:?}"
+        )
     };
 
     assert!(credit.novel_edge);
