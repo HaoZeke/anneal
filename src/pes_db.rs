@@ -18,7 +18,7 @@ use crate::pes_exploration::{
 
 const METADATA_KEY: &str = "anneal_pes";
 const STORE_SCHEMA: &str = "anneal-pes-network";
-const STORE_VERSION: u32 = 1;
+const STORE_VERSION: u32 = 2;
 
 /// Conversion from a surface's native units to CON v3 storage units.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -392,7 +392,7 @@ impl ContextMetadata {
 struct DescriptorMetadata {
     schema_name: String,
     schema_version: u32,
-    values: Vec<f64>,
+    value_bits: Vec<u64>,
     blocks: Vec<BlockMetadata>,
 }
 
@@ -401,10 +401,10 @@ struct BlockMetadata {
     kind: String,
     n_max: usize,
     l_max: usize,
-    cutoff: f64,
+    cutoff_bits: u64,
     offset: usize,
     len: usize,
-    raw_norm: f64,
+    raw_norm_bits: u64,
     normalization: String,
 }
 
@@ -413,7 +413,11 @@ impl DescriptorMetadata {
         Self {
             schema_name: descriptor.schema_name().into(),
             schema_version: descriptor.schema_version(),
-            values: descriptor.values().to_vec(),
+            value_bits: descriptor
+                .values()
+                .iter()
+                .map(|value| value.to_bits())
+                .collect(),
             blocks: descriptor
                 .blocks()
                 .iter()
@@ -421,10 +425,10 @@ impl DescriptorMetadata {
                     kind: block_kind_name(block.kind()).into(),
                     n_max: block.n_max(),
                     l_max: block.l_max(),
-                    cutoff: block.cutoff(),
+                    cutoff_bits: block.cutoff().to_bits(),
                     offset: block.offset(),
                     len: block.len(),
-                    raw_norm: block.raw_norm(),
+                    raw_norm_bits: block.raw_norm().to_bits(),
                     normalization: block.normalization().into(),
                 })
                 .collect(),
@@ -444,24 +448,23 @@ impl DescriptorMetadata {
                 reproduced.schema_version
             )));
         }
-        if self.values.len() != reproduced.values.len() {
+        if self.value_bits.len() != reproduced.value_bits.len() {
             return Err(PesDbError::InvalidRecord(format!(
                 "descriptor value count {} reproduces as {}",
-                self.values.len(),
-                reproduced.values.len()
+                self.value_bits.len(),
+                reproduced.value_bits.len()
             )));
         }
         if let Some((index, (stored, computed))) = self
-            .values
+            .value_bits
             .iter()
-            .zip(&reproduced.values)
+            .zip(&reproduced.value_bits)
             .enumerate()
-            .find(|(_, (stored, computed))| stored.to_bits() != computed.to_bits())
+            .find(|(_, (stored, computed))| stored != computed)
         {
             return Err(PesDbError::InvalidRecord(format!(
                 "descriptor value {index} has bits {:016x}, reproduced {:016x}",
-                stored.to_bits(),
-                computed.to_bits()
+                stored, computed
             )));
         }
         if self.blocks.len() != reproduced.blocks.len() {
