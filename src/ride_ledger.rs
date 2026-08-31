@@ -245,6 +245,8 @@ pub enum RideOutcome {
 pub struct RideCredit {
     /// Whether receiving-side certification accepted a physical connection.
     pub certified_connection: bool,
+    /// Typed negative evidence, absent for a certified connection.
+    pub failure: Option<RideFailure>,
     /// Whether this report introduced a previously unseen endpoint pair.
     pub novel_edge: bool,
     /// Producer plus receiving-side PES evaluations charged for this report.
@@ -470,7 +472,11 @@ impl RideLedger {
             return Err(RideLedgerError::WrongReplica { replica, work });
         }
 
-        let certified_connection = matches!(&outcome, RideOutcome::Certified { .. });
+        let failure = match &outcome {
+            RideOutcome::Certified { .. } => None,
+            RideOutcome::Failed(failure) => Some(*failure),
+        };
+        let certified_connection = failure.is_none();
         let canonical_edge = match outcome {
             RideOutcome::Certified { endpoints, .. } => {
                 if endpoints[0] == endpoints[1] {
@@ -539,6 +545,7 @@ impl RideLedger {
             .ok_or(RideLedgerError::CounterOverflow)?;
         let credit = RideCredit {
             certified_connection,
+            failure,
             novel_edge,
             total_charged_evaluations: charged_evaluations,
         };

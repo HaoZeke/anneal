@@ -311,6 +311,10 @@ struct RideReportReply {
   novelEdge @0 :Bool;
   totalChargedEvaluations @1 :UInt64;
   certifiedConnection @2 :Bool;
+  result :union {
+    certified @3 :Void;
+    failed @4 :RideFailure;
+  }
 }
 
 # Which selection produced a barrier's parent map. The two branches carry

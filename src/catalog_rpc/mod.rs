@@ -10,7 +10,8 @@ use crate::Catalog_capnp::{
     QuenchStatus as WireQuenchStatus, RejectionKind, RideDirection as WireRideDirection,
     RideFailure as WireRideFailure, RideMethod as WireRideMethod, accepted_reply,
     bridge_assignment, candidate_record, catalog_mutation_reply, catalog_reply, catalog_request,
-    policy_state_reply, population_epoch_reply, ride_report_request, transition_record,
+    policy_state_reply, population_epoch_reply, ride_report_reply, ride_report_request,
+    transition_record,
 };
 use crate::pes_exploration::RideMethod;
 use crate::ride_ledger::{RideCredit, RideDirection, RideFailure, RideWorkOrder};
@@ -20,7 +21,7 @@ pub mod mailbox;
 pub mod server;
 
 /// Wire protocol version accepted by this release.
-pub const PROTOCOL_VERSION: u16 = 18;
+pub const PROTOCOL_VERSION: u16 = 19;
 /// `Sample` draw that returns the active-catalog incumbent.
 pub const INCUMBENT_SAMPLE_DRAW: u64 = u64::MAX;
 
@@ -1253,6 +1254,11 @@ pub(crate) fn encode_reply(reply: CatalogReply) -> Result<Vec<u8>, ProtocolError
                     output.set_novel_edge(credit.novel_edge);
                     output.set_total_charged_evaluations(credit.total_charged_evaluations);
                     output.set_certified_connection(credit.certified_connection);
+                    let mut result = output.init_result();
+                    match credit.failure {
+                        Some(failure) => result.set_failed(failure.into()),
+                        None => result.set_certified(()),
+                    }
                 }
                 AcceptedPayload::PolicyState(state) => {
                     let mut output = payload.init_policy_state();
@@ -1465,8 +1471,15 @@ pub(crate) fn decode_reply_reader(
                 }
                 accepted_reply::payload::RideCredit(credit) => {
                     let credit = credit.map_err(wire_error)?;
+                    let failure = match credit.get_result().which().map_err(wire_error)? {
+                        ride_report_reply::result::Certified(()) => None,
+                        ride_report_reply::result::Failed(failure) => {
+                            Some(failure.map_err(wire_error)?.into())
+                        }
+                    };
                     AcceptedPayload::RideCredit(RideCredit {
                         certified_connection: credit.get_certified_connection(),
+                        failure,
                         novel_edge: credit.get_novel_edge(),
                         total_charged_evaluations: credit.get_total_charged_evaluations(),
                     })
