@@ -289,6 +289,49 @@ mod option_tests {
 
     #[cfg(feature = "bank-rpc")]
     #[test]
+    fn ride_budget_reserves_receiver_certification_and_the_live_quench() {
+        assert_eq!(ride_producer_budget(10_000, 453, 4_002, 5_000), Some(5_000));
+        assert_eq!(ride_producer_budget(5_000, 453, 4_002, 5_000), Some(545));
+        assert_eq!(ride_producer_budget(4_455, 453, 4_002, 5_000), None);
+    }
+
+    #[cfg(all(feature = "bank-rpc", feature = "ira"))]
+    #[test]
+    fn lj_ride_identity_absorbs_rigid_permutations_but_not_distortion() {
+        let source = Array1::from(vec![
+            1.0, 1.0, 1.0, -1.0, -1.0, 1.0, -1.0, 1.0, -1.0, 1.0, -1.0, -1.0,
+        ]);
+        let permutation = [2usize, 0, 3, 1];
+        let mut equivalent = Array1::zeros(source.len());
+        for (destination, source_atom) in permutation.into_iter().enumerate() {
+            let x = source[3 * source_atom];
+            let y = source[3 * source_atom + 1];
+            let z = source[3 * source_atom + 2];
+            equivalent[3 * destination] = -y + 3.0;
+            equivalent[3 * destination + 1] = x - 2.0;
+            equivalent[3 * destination + 2] = z + 0.5;
+        }
+        let mut distorted = equivalent.clone();
+        distorted[0] += 0.05;
+        let witness = LjRideWitness {
+            metric: IraMetric::default(),
+            radius: 1e-4,
+        };
+
+        assert!(anneal_core::pes_exploration::ExactStructureWitness::equivalent(
+            &witness,
+            source.view(),
+            equivalent.view(),
+        ));
+        assert!(!anneal_core::pes_exploration::ExactStructureWitness::equivalent(
+            &witness,
+            source.view(),
+            distorted.view(),
+        ));
+    }
+
+    #[cfg(feature = "bank-rpc")]
+    #[test]
     fn fixed_probe_is_seeded_target_blind_and_translation_free() {
         let current = Array1::from(vec![0.0; 12]);
         let mut first_rng = <rand::rngs::StdRng as rand::SeedableRng>::seed_from_u64(71);
