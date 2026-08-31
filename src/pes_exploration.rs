@@ -851,13 +851,11 @@ pub struct StationaryIndex {
     pub negative_modes: usize,
 }
 
-/// Certify a stationary-point index from central differences of PES gradients.
-pub fn stationary_index<S: PesSurface + ?Sized>(
+fn finite_difference_hessian<S: PesSurface + ?Sized>(
     surface: &S,
     coordinates: ArrayView1<f64>,
     step: f64,
-    negative_tolerance: f64,
-) -> Result<StationaryIndex, PesExplorationError> {
+) -> Result<Array2<f64>, PesExplorationError> {
     if coordinates.is_empty() {
         return Err(PesExplorationError::InvalidShape(
             "stationary coordinates must be nonempty",
@@ -871,11 +869,6 @@ pub fn stationary_index<S: PesSurface + ?Sized>(
     if !step.is_finite() || step <= 0.0 {
         return Err(PesExplorationError::InvalidConfig(
             "Hessian finite-difference step",
-        ));
-    }
-    if !negative_tolerance.is_finite() || negative_tolerance < 0.0 {
-        return Err(PesExplorationError::InvalidConfig(
-            "negative curvature tolerance",
         ));
     }
 
@@ -898,6 +891,18 @@ pub fn stationary_index<S: PesSurface + ?Sized>(
             hessian[(row, column)] = symmetric;
             hessian[(column, row)] = symmetric;
         }
+    }
+    Ok(hessian)
+}
+
+fn index_hessian(
+    hessian: Array2<f64>,
+    negative_tolerance: f64,
+) -> Result<StationaryIndex, PesExplorationError> {
+    if !negative_tolerance.is_finite() || negative_tolerance < 0.0 {
+        return Err(PesExplorationError::InvalidConfig(
+            "negative curvature tolerance",
+        ));
     }
 
     let (eigenvalues, eigenvectors) = exact_eigh(hessian.view())
@@ -922,6 +927,87 @@ pub fn stationary_index<S: PesSurface + ?Sized>(
         eigenvalues,
         negative_modes,
     })
+}
+
+/// Certify a stationary-point index from central differences of PES gradients.
+///
+/// This arbitrary-dimensional form counts every native coordinate. Atomistic
+/// callers with rigid or frozen directions use [`stationary_index_cartesian`].
+pub fn stationary_index<S: PesSurface + ?Sized>(
+    surface: &S,
+    coordinates: ArrayView1<f64>,
+    step: f64,
+    negative_tolerance: f64,
+) -> Result<StationaryIndex, PesExplorationError> {
+    index_hessian(
+        finite_difference_hessian(surface, coordinates, step)?,
+        negative_tolerance,
+    )
+}
+
+/// Certify the index on the free Cartesian tangent space of one atomic system.
+///
+/// Frozen coordinates are removed exactly. An unconstrained finite system also
+/// removes translation and rotation, while an unconstrained periodic system
+/// removes translation. The projected directions remain as numerical zero
+/// eigenvalues and therefore cannot masquerade as unstable physical modes.
+pub fn stationary_index_cartesian<S: PesSurface + ?Sized>(
+    surface: &S,
+    coordinates: ArrayView1<f64>,
+    frozen_atoms: &[bool],
+    periodic: [bool; 3],
+    step: f64,
+    negative_tolerance: f64,
+) -> Result<StationaryIndex, PesExplorationError> {
+    if !coordinates.len().is_multiple_of(3) {
+        return Err(PesExplorationError::InvalidShape(
+            "Cartesian coordinates must have dimension 3N",
+        ));
+    }
+    let atom_count = coordinates.len() / 3;
+    if frozen_atoms.len() != atom_count {
+        return Err(PesExplorationError::InvalidShape(
+            "frozen mask must contain one value per atom",
+        ));
+    }
+
+    let mut constraints = Vec::new();
+    for (atom, frozen) in frozen_atoms.iter().copied().enumerate() {
+        if frozen {
+            for axis in 0..3 {
+                let mut coordinate = Array1::zeros(coordinates.len());
+                coordinate[3 * atom + axis] = 1.0;
+                constraints.push(coordinate);
+            }
+        }
+    }
+    if constraints.is_empty() {
+        constraints = if periodic.iter().any(|axis| *axis) {
+            translation_basis(atom_count)
+        } else {
+            rigid_basis(coordinates)
+        };
+    }
+
+    let mut hessian = finite_difference_hessian(surface, coordinates, step)?;
+    for column in 0..hessian.ncols() {
+        let mut projected = hessian.column(column).to_owned();
+        project_rigid_with(&mut projected, &constraints);
+        hessian.column_mut(column).assign(&projected);
+    }
+    for row in 0..hessian.nrows() {
+        let mut projected = hessian.row(row).to_owned();
+        project_rigid_with(&mut projected, &constraints);
+        hessian.row_mut(row).assign(&projected);
+    }
+    for row in 0..hessian.nrows() {
+        for column in 0..row {
+            let symmetric = 0.5 * (hessian[(row, column)] + hessian[(column, row)]);
+            hessian[(row, column)] = symmetric;
+            hessian[(column, row)] = symmetric;
+        }
+    }
+    index_hessian(hessian, negative_tolerance)
 }
 
 fn quench<S: PesSurface + ?Sized>(
