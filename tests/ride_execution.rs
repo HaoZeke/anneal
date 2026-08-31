@@ -1,14 +1,27 @@
 #![cfg(feature = "bank-rpc")]
 
+use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use anneal_core::catalog_rpc::{CatalogCandidate, CatalogRideOutcome, CatalogRideWork};
+use anneal_core::catalog::{
+    DescriptorSignature, EngineSignature, FreshEvaluation, SystemSignature, ValidatorConfig,
+};
+use anneal_core::catalog_rpc::client::{CatalogClient, ClientConfig};
+use anneal_core::catalog_rpc::server::{CatalogServer, ServerConfig};
+use anneal_core::catalog_rpc::{
+    CatalogCandidate, CatalogIdentity, CatalogRideOutcome, CatalogRideWork,
+};
+use anneal_core::cooperative_search::{
+    CatalogOfferOutcome, CooperativeRun, RideClaimOutcome, RideReportOutcome,
+};
 use anneal_core::descriptor_space::{DescriptorGeometry, universal_descriptor_space};
 use anneal_core::pes_exploration::{
     ExactStructureWitness, PesExplorationConfig, PesSurface, RideMethod, RideModeDirection,
     localized_cartesian_mode,
 };
-use anneal_core::ride_execution::{CatalogRideExecutionConfig, execute_catalog_ride};
+use anneal_core::ride_execution::{
+    CatalogRideExecutionConfig, connected_destination, execute_catalog_ride,
+};
 use anneal_core::ride_ledger::{RideArm, RideDirection, RideFailure, RideWorkOrder};
 use ndarray::{Array1, ArrayView1, array};
 
@@ -164,6 +177,105 @@ fn execution_config(maximum_evaluations: u64) -> CatalogRideExecutionConfig {
     }
 }
 
+fn live_signature() -> SystemSignature {
+    let descriptor_space = universal_descriptor_space(DescriptorGeometry::finite(1.0).unwrap());
+    SystemSignature {
+        atomic_numbers: vec![18, 18],
+        coordinate_dim: 6,
+        group_labels: vec![0, 1],
+        group_schema: "independent-sites-v1".into(),
+        frozen_mask: vec![false, false],
+        cell: None,
+        periodic: [false; 3],
+        length_scale: 1.0,
+        energy_scale: 1.0,
+        engine: EngineSignature {
+            kind: "radial-double-well".into(),
+            config_digest: [0x52; 32],
+            external_inputs: BTreeMap::new(),
+        },
+        descriptor: DescriptorSignature {
+            schema: descriptor_space.schema().name().into(),
+            version: descriptor_space.schema().version(),
+            hyperparameters: BTreeMap::new(),
+            species_channels: vec![18],
+        },
+        validation_schema_version: 1,
+    }
+}
+
+fn live_source(replica: u32) -> CatalogCandidate {
+    let mut source = work(RideDirection::Negative).source;
+    source.producer_replica = replica;
+    source.census_basin = None;
+    source
+}
+
+fn live_server() -> CatalogServer {
+    let signature = live_signature();
+    let digest = signature.digest();
+    let descriptor_space = universal_descriptor_space(DescriptorGeometry::finite(1.0).unwrap());
+    let descriptor_dim = descriptor_space
+        .describe(
+            ArrayView1::from(&live_source(7).coordinates),
+            Some(&[18, 18]),
+        )
+        .unwrap()
+        .values()
+        .len();
+    let config = ServerConfig::new("ride-live", "radial-double-well", digest, [7])
+        .unwrap()
+        .with_scientific_state(
+            signature,
+            descriptor_space,
+            ValidatorConfig {
+                reference_coordinates: live_source(7).coordinates,
+                descriptor_dim,
+                min_separation: 0.8,
+                coordinate_tolerance: 1e-10,
+                max_gradient_norm: 1e-7,
+                energy_abs_tolerance: 1e-10,
+                energy_rel_tolerance: 1e-10,
+            },
+            4,
+            0.05,
+            20_000,
+            |coordinates| {
+                let surface = RadialDoubleWell::new();
+                let (energy, gradient) = surface.evaluate(ArrayView1::from(coordinates))?;
+                Ok(FreshEvaluation {
+                    energy,
+                    forces: gradient.iter().map(|component| -*component).collect(),
+                })
+            },
+        )
+        .unwrap();
+    CatalogServer::start("127.0.0.1:0", config).unwrap()
+}
+
+fn first_claim_seed_toward_saddle() -> u64 {
+    for seed in 0..10_000 {
+        let points_toward_saddle = [0, 1].iter().all(|&representative_atom| {
+            let mode = localized_cartesian_mode(
+                array![0.0, 0.0, 0.0, 1.2, 0.0, 0.0].view(),
+                representative_atom,
+                &[false; 2],
+                DescriptorGeometry::finite(1.0).unwrap(),
+                1.0,
+                seed,
+                0,
+                RideModeDirection::Negative,
+            )
+            .unwrap();
+            mode[3] - mode[0] > 0.0
+        });
+        if points_toward_saddle {
+            return seed;
+        }
+    }
+    panic!("no deterministic first-arm seed points toward the analytic saddle")
+}
+
 #[test]
 fn claimed_ride_executes_a_counted_minimum_saddle_minimum_connection() {
     let surface = RadialDoubleWell::new();
@@ -201,6 +313,62 @@ fn claimed_ride_executes_a_counted_minimum_saddle_minimum_connection() {
     separations.sort_by(f64::total_cmp);
     assert!((separations[0] - 1.2).abs() < 1e-4);
     assert!((separations[1] - 2.0).abs() < 1e-4);
+}
+
+#[test]
+fn live_claim_executes_reports_and_returns_the_connected_minimum() {
+    let server = live_server();
+    let signature = live_signature();
+    let mut run = CooperativeRun::new([7], 20_000).unwrap();
+    run.attach_client(
+        7,
+        CatalogClient::connect(
+            server.addr(),
+            CatalogIdentity {
+                campaign: "ride-live".into(),
+                ensemble: "radial-double-well".into(),
+                replica: 7,
+                signature_digest: signature.digest(),
+            },
+            ClientConfig::default(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        run.offer_candidate(7, live_source(7)).unwrap(),
+        CatalogOfferOutcome::Admitted
+    );
+
+    let RideClaimOutcome::Work(work) = run.claim_ride(7, first_claim_seed_toward_saddle()).unwrap()
+    else {
+        panic!("the admitted source did not produce transition-search work")
+    };
+    assert_eq!(work.order.arm.mode_rank, 0);
+    assert_eq!(work.order.arm.direction, RideDirection::Negative);
+    assert_eq!(work.order.arm.method, RideMethod::Dimer);
+    let surface = RadialDoubleWell::new();
+    let descriptor_space = universal_descriptor_space(DescriptorGeometry::finite(1.0).unwrap());
+    let report = execute_catalog_ride(
+        &surface,
+        &descriptor_space,
+        &work,
+        &[18, 18],
+        array![1.0, 1.0].view(),
+        &[false; 2],
+        &execution_config(5_000),
+        &SeparationWitness,
+    );
+    let producer_calls = report.charged_evaluations;
+    let destination = connected_destination(&work, &report, &SeparationWitness)
+        .expect("certified connection must expose its non-source endpoint");
+    let RideReportOutcome::Credited(credit) = run.report_ride(7, report).unwrap() else {
+        panic!("receiving-side index certification did not credit the connection")
+    };
+
+    assert!(credit.novel_edge);
+    assert_eq!(credit.total_charged_evaluations, producer_calls + 15);
+    assert!((destination.coordinates[3] - destination.coordinates[0] - 2.0).abs() < 1e-4);
 }
 
 #[test]
