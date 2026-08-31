@@ -243,6 +243,8 @@ pub enum RideOutcome {
 /// Credit assigned by the coordinator rather than trusted from a worker.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RideCredit {
+    /// Whether receiving-side certification accepted a physical connection.
+    pub certified_connection: bool,
     /// Whether this report introduced a previously unseen endpoint pair.
     pub novel_edge: bool,
     /// Producer plus receiving-side PES evaluations charged for this report.
@@ -468,6 +470,7 @@ impl RideLedger {
             return Err(RideLedgerError::WrongReplica { replica, work });
         }
 
+        let certified_connection = matches!(&outcome, RideOutcome::Certified { .. });
         let canonical_edge = match outcome {
             RideOutcome::Certified { endpoints, .. } => {
                 if endpoints[0] == endpoints[1] {
@@ -535,6 +538,7 @@ impl RideLedger {
             .checked_add(charged_evaluations)
             .ok_or(RideLedgerError::CounterOverflow)?;
         let credit = RideCredit {
+            certified_connection,
             novel_edge,
             total_charged_evaluations: charged_evaluations,
         };
