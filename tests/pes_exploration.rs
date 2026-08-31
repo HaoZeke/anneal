@@ -26,6 +26,36 @@ impl PesSurface for DoubleWell {
     }
 }
 
+struct ComponentwiseConvergedSaddle;
+
+impl PesSurface for ComponentwiseConvergedSaddle {
+    type Error = Infallible;
+
+    fn evaluate(&self, coordinates: ArrayView1<f64>) -> Result<(f64, Array1<f64>), Self::Error> {
+        let reaction = coordinates[0];
+        let shell = 1.0 - reaction * reaction;
+        let shell_squared = shell * shell;
+        let shell_derivative = -4.0 * reaction * shell;
+        let tilt = 8e-4;
+        let transverse_curvature = 1e-5;
+        let mut energy = shell_squared;
+        let mut gradient = Array1::zeros(coordinates.len());
+        gradient[0] = shell_derivative;
+        for index in 1..=2 {
+            let transverse = coordinates[index];
+            energy += 0.5 * transverse_curvature * transverse * transverse
+                + tilt * transverse * shell_squared;
+            gradient[0] += tilt * transverse * shell_derivative;
+            gradient[index] = transverse_curvature * transverse + tilt * shell_squared;
+        }
+        for index in 3..coordinates.len() {
+            energy += coordinates[index] * coordinates[index];
+            gradient[index] = 2.0 * coordinates[index];
+        }
+        Ok((energy, gradient))
+    }
+}
+
 struct IndexTwoSaddle;
 
 impl PesSurface for IndexTwoSaddle {
@@ -163,6 +193,44 @@ fn rgmin_rgsaddle_connection_finds_both_double_well_minima() {
         assert!((minimum.coordinates[0].abs() - 1.0).abs() < 1e-5);
         assert!(minimum.max_gradient < config.quench_gradient_tolerance);
     }
+}
+
+#[test]
+fn prfo_refinement_uses_the_receivers_componentwise_force_gate() {
+    let descriptor_space = universal_descriptor_space(DescriptorGeometry::finite(1.0).unwrap());
+    let mut network = PesNetwork::new();
+    let config = PesExplorationConfig {
+        ride_method: RideMethod::Dimer,
+        quench_steps: 500,
+        saddle_steps: 800,
+        irc_steps: 120,
+        prfo_steps: 1,
+        quench_gradient_tolerance: 1e-3,
+        saddle_force_tolerance: 1e-3,
+        saddle_displacement: 0.25,
+        refine_with_prfo: true,
+        ..PesExplorationConfig::default()
+    };
+    let mut start = Array1::zeros(6);
+    start[0] = -0.82;
+    let mut mode = Array1::zeros(6);
+    mode[0] = 1.0;
+
+    let connection = discover_mode_connection(
+        &ComponentwiseConvergedSaddle,
+        &descriptor_space,
+        &mut network,
+        start.view(),
+        Array1::from_vec(vec![1.0, 1.0]).view(),
+        mode.view(),
+        Some(&[1, 1]),
+        &config,
+        &CartesianWitness { tolerance: 1e-3 },
+    )
+    .unwrap();
+
+    assert_eq!(connection.negative_modes, 1);
+    assert!(connection.saddle_max_gradient <= config.saddle_force_tolerance);
 }
 
 #[test]
