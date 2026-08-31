@@ -10,9 +10,7 @@ use sha2::{Digest, Sha256};
 use super::{
     DescriptorSignature, EngineSignature, FreshEvaluation, SystemSignature, ValidatorConfig,
 };
-use crate::descriptor_space::{
-    DescriptorBlockKind, DescriptorBlockSpec, DescriptorSchema, DescriptorSpace,
-};
+use crate::descriptor_space::{DescriptorGeometry, DescriptorSpace, universal_descriptor_space};
 use crate::potentials::PairPotential;
 
 /// Invalid Lennard-Jones catalog preset input.
@@ -134,22 +132,10 @@ pub fn discovered_minimum_id(n_points: usize, source_seed: u64, energy: f64) -> 
     )
 }
 
-/// Versioned multiscale SOAP/ACE space used by every LJ catalog size.
+/// Fixed-dimensional universal invariant space used by every LJ catalog size.
 pub fn descriptor_space() -> DescriptorSpace {
-    DescriptorSpace::new(
-        DescriptorSchema::new(
-            "jcc-lj-multiscale-soap-ace",
-            1,
-            vec![
-                DescriptorBlockSpec::new(DescriptorBlockKind::SoapMean, 3, 6, 3.5)
-                    .expect("fixed LJ SOAP mean block is valid"),
-                DescriptorBlockSpec::new(DescriptorBlockKind::SoapVariance, 3, 6, 3.5)
-                    .expect("fixed LJ SOAP variance block is valid"),
-                DescriptorBlockSpec::new(DescriptorBlockKind::AceNu3Mean, 2, 3, 2.5)
-                    .expect("fixed LJ ACE block is valid"),
-            ],
-        )
-        .expect("fixed LJ descriptor schema is valid"),
+    universal_descriptor_space(
+        DescriptorGeometry::finite(1.0).expect("LJ reduced-unit descriptor geometry is valid"),
     )
 }
 
@@ -166,11 +152,12 @@ pub fn system_signature(n_points: usize) -> Result<SystemSignature, LjCatalogPre
     let mut hyperparameters = BTreeMap::new();
     hyperparameters.insert(
         "blocks".into(),
-        "soap-mean,soap-variance,ace-nu3-mean".into(),
+        "pair-radial@2.5,6;three-body-angular@3,6;graph-topology@6;\
+         invariant-soap@3,6;invariant-ace-nu3@3,6;chiral-moment@3,6"
+            .into(),
     );
-    hyperparameters.insert("normalization".into(), "block-l2-v1".into());
-    hyperparameters.insert("soap".into(), "nmax=3,lmax=6,cutoff=3.5".into());
-    hyperparameters.insert("ace".into(), "nu=3,nmax=2,lmax=3,cutoff=2.5".into());
+    hyperparameters.insert("normalization".into(), "soft-l2-eps-v1".into());
+    hyperparameters.insert("geometry".into(), "finite;length-scale=1".into());
     let mut engine_hasher = Sha256::new();
     engine_hasher.update(b"lennard-jones-reduced-v1;epsilon=1;sigma=1;cutoff=none");
     Ok(SystemSignature {
