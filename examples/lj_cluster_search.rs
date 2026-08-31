@@ -259,6 +259,7 @@ mod option_tests {
         let action = ride_checkpoint_action(
             RideReportOutcome::Credited(RideCredit {
                 certified_connection: true,
+                failure: None,
                 novel_edge: false,
                 total_charged_evaluations: 140,
             }),
@@ -285,6 +286,7 @@ mod option_tests {
         let action = ride_checkpoint_action(
             RideReportOutcome::Credited(RideCredit {
                 certified_connection: false,
+                failure: Some(anneal_core::ride_ledger::RideFailure::Surface),
                 novel_edge: false,
                 total_charged_evaluations: 97,
             }),
@@ -309,6 +311,34 @@ mod option_tests {
             action,
             CheckpointAction::ExternalWork { external_calls: 81 }
         );
+    }
+
+    #[cfg(feature = "bank-rpc")]
+    #[test]
+    fn typed_ride_failures_have_stage_specific_trace_reasons() {
+        use anneal_core::ride_ledger::RideFailure;
+
+        let cases = [
+            (RideFailure::QuenchNotConverged, "ride_quench_not_converged"),
+            (RideFailure::SaddleNotConverged, "ride_saddle_not_converged"),
+            (RideFailure::NoNegativeMode, "ride_no_negative_mode"),
+            (RideFailure::HigherIndex, "ride_higher_index"),
+            (RideFailure::IrcNotConverged, "ride_irc_not_converged"),
+            (
+                RideFailure::CollapsedConnection,
+                "ride_collapsed_connection",
+            ),
+            (RideFailure::Surface, "ride_surface_error"),
+            (RideFailure::BudgetExhausted, "ride_budget_exhausted"),
+            (
+                RideFailure::DisconnectedConnection,
+                "ride_disconnected_connection",
+            ),
+        ];
+
+        for (failure, expected) in cases {
+            assert_eq!(ride_failure_reason(failure), expected);
+        }
     }
 
     #[cfg(feature = "bank-rpc")]
