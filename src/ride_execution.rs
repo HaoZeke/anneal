@@ -201,6 +201,36 @@ fn direction(direction: RideDirection) -> RideModeDirection {
     }
 }
 
+/// Return the certified endpoint that is not the coordinator-issued source.
+///
+/// A usable one-sided ride contains exactly one endpoint equivalent to its
+/// claimed source. Reports with the wrong work identity, no source endpoint,
+/// or two source-equivalent endpoints do not define a connected proposal.
+pub fn connected_destination<W>(
+    work: &CatalogRideWork,
+    report: &CatalogRideReport,
+    witness: &W,
+) -> Option<CatalogCandidate>
+where
+    W: ExactStructureWitness + ?Sized,
+{
+    if report.work != work.order.id {
+        return None;
+    }
+    let CatalogRideOutcome::Certified(connection) = &report.outcome else {
+        return None;
+    };
+    let source = ArrayView1::from(work.source.coordinates.as_slice());
+    let source_endpoint = connection.endpoints.each_ref().map(|endpoint| {
+        witness.equivalent(source, ArrayView1::from(endpoint.coordinates.as_slice()))
+    });
+    match source_endpoint {
+        [true, false] => Some(connection.endpoints[1].clone()),
+        [false, true] => Some(connection.endpoints[0].clone()),
+        [false, false] | [true, true] => None,
+    }
+}
+
 /// Execute one exclusive claim and construct evidence for coordinator review.
 ///
 /// The work source, local-environment target, ranked Gaussian mode, solver, and
