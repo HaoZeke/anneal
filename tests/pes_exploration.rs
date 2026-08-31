@@ -3,7 +3,8 @@ use std::convert::Infallible;
 use anneal_core::descriptor_space::{DescriptorGeometry, universal_descriptor_space};
 use anneal_core::pes_exploration::{
     ExactStructureWitness, PesExplorationConfig, PesNetwork, PesSurface, RideMethod,
-    StructureContext, discover_mode_connection, stationary_index, stationary_index_cartesian,
+    StructureContext, discover_cartesian_mode_connection, discover_mode_connection,
+    stationary_index, stationary_index_cartesian,
 };
 use ndarray::{Array1, ArrayView1};
 
@@ -162,6 +163,47 @@ fn rgmin_rgsaddle_connection_finds_both_double_well_minima() {
         assert!((minimum.coordinates[0].abs() - 1.0).abs() < 1e-5);
         assert!(minimum.max_gradient < config.quench_gradient_tolerance);
     }
+}
+
+#[test]
+fn constrained_atomistic_connection_certifies_only_free_modes() {
+    let descriptor_space = universal_descriptor_space(DescriptorGeometry::finite(1.0).unwrap());
+    let mut network = PesNetwork::new();
+    let config = PesExplorationConfig {
+        ride_method: RideMethod::Dimer,
+        quench_steps: 300,
+        saddle_steps: 600,
+        irc_steps: 100,
+        quench_gradient_tolerance: 1e-8,
+        saddle_force_tolerance: 1e-5,
+        saddle_displacement: 0.1,
+        negative_curvature_tolerance: 1e-7,
+        hessian_step: 1e-5,
+        maximum_move: 0.1,
+        irc_step: 0.05,
+        refine_with_prfo: false,
+        ..PesExplorationConfig::default()
+    };
+    let start = array![-0.25, 0.0, 0.0, 0.25, 0.0, 0.0];
+    let mode = array![-1.0, 0.0, 0.0, 1.0, 0.0, 0.0];
+
+    let connection = discover_cartesian_mode_connection(
+        &RadialPairBarrier,
+        &descriptor_space,
+        &mut network,
+        start.view(),
+        array![1.0, 1.0].view(),
+        &[false, false],
+        mode.view(),
+        Some(&[1, 1]),
+        &config,
+        &CartesianWitness { tolerance: 1e-4 },
+    )
+    .unwrap();
+
+    assert_eq!(connection.negative_modes, 1);
+    assert_eq!(network.minimum_count(), 2);
+    assert_eq!(network.saddle_count(), 1);
 }
 
 #[test]
