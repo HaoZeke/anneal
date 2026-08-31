@@ -2517,7 +2517,7 @@ fn finite_trace_energy(energy: f64) -> Option<f64> {
     energy.is_finite().then_some(energy)
 }
 
-#[cfg(feature = "bank-rpc")]
+#[cfg(all(feature = "bank-rpc", feature = "ira"))]
 fn snapshot_index_cost(coordinate_dim: usize) -> usize {
     coordinate_dim
         .checked_mul(2)
@@ -2662,10 +2662,11 @@ fn run_capnp_catalog(
     use anneal_core::cooperative_search::{
         CatalogBoundaryOutcome, CatalogBridgeOutcome, CatalogHoleOutcome, CatalogSampleOutcome,
         CatalogSamplesOutcome, CooperativeRun, PolicyEvidenceOutcome, PolicyRole,
-        PopulationSynchronizationOutcome, ProposalFamily, RideClaimOutcome, RideReportOutcome,
-        RunManifest, SliceAdoption, SliceQuench, SliceTrace, SliceValidation,
-        TransitionRecordOutcome,
+        PopulationSynchronizationOutcome, ProposalFamily, RunManifest, SliceAdoption, SliceQuench,
+        SliceTrace, SliceValidation, TransitionRecordOutcome,
     };
+    #[cfg(feature = "ira")]
+    use anneal_core::cooperative_search::{RideClaimOutcome, RideReportOutcome};
     use anneal_core::methods::feynman_kac::{
         population_family_position, population_rejuvenation_draw,
     };
