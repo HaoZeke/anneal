@@ -245,6 +245,8 @@ pub enum RideOutcome {
 pub struct RideCredit {
     /// Whether this report introduced a previously unseen endpoint pair.
     pub novel_edge: bool,
+    /// Producer plus receiving-side PES evaluations charged for this report.
+    pub total_charged_evaluations: u64,
 }
 
 /// Invalid source, claim, or report.
@@ -532,7 +534,10 @@ impl RideLedger {
             .charged_evaluations
             .checked_add(charged_evaluations)
             .ok_or(RideLedgerError::CounterOverflow)?;
-        let credit = RideCredit { novel_edge };
+        let credit = RideCredit {
+            novel_edge,
+            total_charged_evaluations: charged_evaluations,
+        };
         self.completed_reports.insert(
             work,
             CompletedReport {
