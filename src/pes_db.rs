@@ -18,7 +18,7 @@ use crate::pes_exploration::{
 
 const METADATA_KEY: &str = "anneal_pes";
 const STORE_SCHEMA: &str = "anneal-pes-network";
-const STORE_VERSION: u32 = 2;
+const STORE_VERSION: u32 = 3;
 
 /// Conversion from a surface's native units to CON v3 storage units.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -263,33 +263,42 @@ impl PesNetworkDatabase {
             match envelope.record {
                 RecordMetadata::Minimum {
                     id,
-                    energy,
-                    max_gradient,
-                } => insert_record(
-                    &mut minima,
-                    id,
-                    MinimumRecord {
+                    energy_bits,
+                    max_gradient_bits,
+                } => {
+                    let energy = decode_finite_scalar(energy_bits, "minimum energy")?;
+                    let max_gradient =
+                        decode_finite_scalar(max_gradient_bits, "minimum maximum gradient")?;
+                    insert_record(
+                        &mut minima,
                         id,
-                        energy,
-                        coordinates,
-                        context,
-                        max_gradient,
-                        descriptor,
-                    },
-                    "minimum",
-                )?,
+                        MinimumRecord {
+                            id,
+                            energy,
+                            coordinates,
+                            context,
+                            max_gradient,
+                            descriptor,
+                        },
+                        "minimum",
+                    )?
+                }
                 RecordMetadata::Saddle {
                     id,
                     origin,
                     endpoints,
-                    energy,
-                    curvature,
+                    energy_bits,
+                    curvature_bits,
                     lowest_mode_bits,
                     negative_modes,
-                    max_gradient,
+                    max_gradient_bits,
                     ride_method,
                     irc_at_minimum,
                 } => {
+                    let energy = decode_finite_scalar(energy_bits, "saddle energy")?;
+                    let curvature = decode_finite_scalar(curvature_bits, "saddle curvature")?;
+                    let max_gradient =
+                        decode_finite_scalar(max_gradient_bits, "saddle maximum gradient")?;
                     let lowest_mode = decode_finite_bits(
                         &lowest_mode_bits,
                         coordinates.len(),
@@ -494,18 +503,18 @@ impl DescriptorMetadata {
 enum RecordMetadata {
     Minimum {
         id: usize,
-        energy: f64,
-        max_gradient: f64,
+        energy_bits: u64,
+        max_gradient_bits: u64,
     },
     Saddle {
         id: usize,
         origin: usize,
         endpoints: [usize; 2],
-        energy: f64,
-        curvature: f64,
+        energy_bits: u64,
+        curvature_bits: u64,
         lowest_mode_bits: Vec<u64>,
         negative_modes: usize,
-        max_gradient: f64,
+        max_gradient_bits: u64,
         ride_method: String,
         irc_at_minimum: [bool; 2],
     },
@@ -524,8 +533,8 @@ fn frame_for_minimum(
         minimum.energy,
         RecordMetadata::Minimum {
             id: minimum.id,
-            energy: minimum.energy,
-            max_gradient: minimum.max_gradient,
+            energy_bits: minimum.energy.to_bits(),
+            max_gradient_bits: minimum.max_gradient.to_bits(),
         },
         provenance,
     )
@@ -546,15 +555,15 @@ fn frame_for_saddle(
             id: saddle.id,
             origin: saddle.origin,
             endpoints: saddle.endpoints,
-            energy: saddle.saddle_energy,
-            curvature: saddle.curvature,
+            energy_bits: saddle.saddle_energy.to_bits(),
+            curvature_bits: saddle.curvature.to_bits(),
             lowest_mode_bits: saddle
                 .lowest_mode
                 .iter()
                 .map(|value| value.to_bits())
                 .collect(),
             negative_modes: saddle.negative_modes,
-            max_gradient: saddle.saddle_max_gradient,
+            max_gradient_bits: saddle.saddle_max_gradient.to_bits(),
             ride_method: saddle.ride_method.name().into(),
             irc_at_minimum: saddle.irc_at_minimum,
         },
@@ -690,6 +699,14 @@ fn decode_finite_bits(
         return Err(PesDbError::InvalidRecord(format!("{field} is nonfinite")));
     }
     Ok(Array1::from_vec(values))
+}
+
+fn decode_finite_scalar(bits: u64, field: &str) -> Result<f64, PesDbError> {
+    let value = f64::from_bits(bits);
+    if !value.is_finite() {
+        return Err(PesDbError::InvalidRecord(format!("{field} is nonfinite")));
+    }
+    Ok(value)
 }
 
 fn validate_physical_frame(
