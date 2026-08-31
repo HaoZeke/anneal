@@ -2569,6 +2569,23 @@ fn ride_producer_budget(
 }
 
 #[cfg(feature = "bank-rpc")]
+fn ride_failure_reason(failure: anneal_core::ride_ledger::RideFailure) -> &'static str {
+    use anneal_core::ride_ledger::RideFailure;
+
+    match failure {
+        RideFailure::QuenchNotConverged => "ride_quench_not_converged",
+        RideFailure::SaddleNotConverged => "ride_saddle_not_converged",
+        RideFailure::NoNegativeMode => "ride_no_negative_mode",
+        RideFailure::HigherIndex => "ride_higher_index",
+        RideFailure::IrcNotConverged => "ride_irc_not_converged",
+        RideFailure::CollapsedConnection => "ride_collapsed_connection",
+        RideFailure::Surface => "ride_surface_error",
+        RideFailure::BudgetExhausted => "ride_budget_exhausted",
+        RideFailure::DisconnectedConnection => "ride_disconnected_connection",
+    }
+}
+
+#[cfg(feature = "bank-rpc")]
 fn ride_checkpoint_action(
     report: anneal_core::cooperative_search::RideReportOutcome,
     destination: Option<Array1<f64>>,
@@ -3472,13 +3489,19 @@ fn run_capnp_catalog(
                         Some(if credit.novel_edge { 1.0 } else { 0.0 }),
                     )
                 }
-                RideReportOutcome::Credited(_) => (
-                    "ride_rejected",
-                    SliceValidation::Rejected,
-                    SliceQuench::Rejected,
-                    SliceAdoption::Rejected,
-                    Some(0.0),
-                ),
+                RideReportOutcome::Credited(credit) => {
+                    let reason = credit
+                        .failure
+                        .map(ride_failure_reason)
+                        .unwrap_or("ride_destination_unavailable");
+                    (
+                        reason,
+                        SliceValidation::Rejected,
+                        SliceQuench::Rejected,
+                        SliceAdoption::Rejected,
+                        Some(0.0),
+                    )
+                }
                 RideReportOutcome::Rejected => (
                     "ride_report_rejected",
                     SliceValidation::Rejected,
