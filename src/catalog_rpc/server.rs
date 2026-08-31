@@ -45,7 +45,9 @@ use crate::methods::feynman_kac::{
 };
 use crate::methods::landscape_graph::LandscapeGraph;
 use crate::methods::neus_bridge::{BridgeString, EntryLists, WeightLedger};
-use crate::pes_exploration::{PesExplorationConfig, PesSurface, RideMethod, stationary_index};
+use crate::pes_exploration::{
+    PesExplorationConfig, PesSurface, RideMethod, stationary_index_cartesian,
+};
 use crate::region_assignment::{RegionCandidate, RegionUtility, diversity_constrained_assignment};
 use crate::ride_ledger::{EnvironmentBook, RideLedger, RideOutcome, RidePortfolio, RideSource};
 use crate::soap::local_nu3_z;
@@ -2362,9 +2364,11 @@ fn certify_ride_connection(
         ];
 
         let config = PesExplorationConfig::default();
-        let index = stationary_index(
+        let index = stationary_index_cartesian(
             &ReceivingRideSurface(&counted_evaluate),
             ArrayView1::from(&saddle.candidate.coordinates),
+            &signature.frozen_mask,
+            signature.periodic,
             config.hessian_step,
             config.negative_curvature_tolerance,
         )
