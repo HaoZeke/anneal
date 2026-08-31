@@ -5,7 +5,7 @@ use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
@@ -2002,18 +2002,7 @@ fn apply_request(
             let mut next_scientific = scientific.clone();
             let (outcome, receiving_evaluations) = match &report.outcome {
                 CatalogRideOutcome::Certified(connection) => {
-                    let Ok(certified) = certify_ride_connection(
-                        &mut next_scientific,
-                        &request.identity,
-                        connection,
-                    ) else {
-                        return rejected(
-                            state,
-                            request.event_sequence,
-                            ProtocolRejection::ValidationRejected,
-                        );
-                    };
-                    certified
+                    certify_ride_connection(&mut next_scientific, &request.identity, connection)
                 }
                 CatalogRideOutcome::Failed(failure) => (RideOutcome::Failed(*failure), 0),
             };
@@ -2329,84 +2318,94 @@ fn certify_ride_connection(
     scientific: &mut ScientificState,
     identity: &CatalogIdentity,
     connection: &CatalogRideConnection,
-) -> Result<(RideOutcome, u64), ()> {
+) -> (RideOutcome, u64) {
     let signature = scientific.signature.clone();
     let validator = scientific.validator.clone();
     let evaluate = Arc::clone(&scientific.evaluate);
-    let saddle = validate_candidate(
-        &signature,
-        &validator,
-        evaluate.as_ref(),
-        identity,
-        &connection.saddle,
-    )?;
-    let endpoints = [
-        validate_candidate(
+    let receiving_evaluations = AtomicU64::new(0);
+    let counted_evaluate = |coordinates: &[f64]| {
+        receiving_evaluations.fetch_add(1, Ordering::Relaxed);
+        evaluate(coordinates)
+    };
+    let result = (|| -> Result<RideOutcome, crate::ride_ledger::RideFailure> {
+        let saddle = validate_candidate(
             &signature,
             &validator,
-            evaluate.as_ref(),
+            &counted_evaluate,
             identity,
-            &connection.endpoints[0],
-        )?,
-        validate_candidate(
-            &signature,
-            &validator,
-            evaluate.as_ref(),
-            identity,
-            &connection.endpoints[1],
-        )?,
-    ];
+            &connection.saddle,
+        )
+        .map_err(|_| crate::ride_ledger::RideFailure::Surface)?;
+        let endpoints = [
+            validate_candidate(
+                &signature,
+                &validator,
+                &counted_evaluate,
+                identity,
+                &connection.endpoints[0],
+            )
+            .map_err(|_| crate::ride_ledger::RideFailure::Surface)?,
+            validate_candidate(
+                &signature,
+                &validator,
+                &counted_evaluate,
+                identity,
+                &connection.endpoints[1],
+            )
+            .map_err(|_| crate::ride_ledger::RideFailure::Surface)?,
+        ];
 
-    let config = PesExplorationConfig::default();
-    let index = stationary_index(
-        &ReceivingRideSurface(evaluate.as_ref()),
-        ArrayView1::from(&saddle.candidate.coordinates),
-        config.hessian_step,
-        config.negative_curvature_tolerance,
-    )
-    .map_err(|_| ())?;
-    if index.negative_modes != 1 {
-        return Err(());
-    }
+        let config = PesExplorationConfig::default();
+        let index = stationary_index(
+            &ReceivingRideSurface(&counted_evaluate),
+            ArrayView1::from(&saddle.candidate.coordinates),
+            config.hessian_step,
+            config.negative_curvature_tolerance,
+        )
+        .map_err(|_| crate::ride_ledger::RideFailure::Surface)?;
+        match index.negative_modes {
+            0 => return Err(crate::ride_ledger::RideFailure::NoNegativeMode),
+            1 => {}
+            _ => return Err(crate::ride_ledger::RideFailure::HigherIndex),
+        }
 
-    let saddle_id = scientific.next_ride_saddle;
-    scientific.next_ride_saddle = saddle_id.checked_add(1).ok_or(())?;
-    scientific.ride_saddles.insert(
-        saddle_id,
-        CertifiedRideSaddle {
-            candidate: candidate_from_validated(&saddle, None),
-            lowest_curvature: index.eigenvalues[0],
-            lowest_mode: index.lowest_mode.to_vec(),
-            negative_modes: index.negative_modes,
-        },
-    );
+        let mut staged = scientific.clone();
+        let saddle_id = staged.next_ride_saddle;
+        staged.next_ride_saddle = saddle_id
+            .checked_add(1)
+            .ok_or(crate::ride_ledger::RideFailure::Surface)?;
+        staged.ride_saddles.insert(
+            saddle_id,
+            CertifiedRideSaddle {
+                candidate: candidate_from_validated(&saddle, None),
+                lowest_curvature: index.eigenvalues[0],
+                lowest_mode: index.lowest_mode.to_vec(),
+                negative_modes: index.negative_modes,
+            },
+        );
 
-    let mut endpoint_ids = [0_u64; 2];
-    for (slot, validated) in endpoints.into_iter().enumerate() {
-        let observation = scientific
-            .census
-            .observe(&validated.candidate.descriptor)
-            .map_err(|_| ())?;
-        let canonical = candidate_from_validated(&validated, Some(observation.basin_id));
-        observe_ride_source(scientific, &canonical)?;
-        scientific
-            .catalog
-            .admit(observation.basin_id, observation.basin_visits, validated);
-        endpoint_ids[slot] = observation.basin_id.as_raw();
-    }
-
-    let dimension = u64::try_from(connection.saddle.coordinates.len()).map_err(|_| ())?;
-    let receiving_evaluations = dimension
-        .checked_mul(2)
-        .and_then(|calls| calls.checked_add(3))
-        .ok_or(())?;
-    Ok((
-        RideOutcome::Certified {
+        let mut endpoint_ids = [0_u64; 2];
+        for (slot, validated) in endpoints.into_iter().enumerate() {
+            let observation = staged
+                .census
+                .observe(&validated.candidate.descriptor)
+                .map_err(|_| crate::ride_ledger::RideFailure::Surface)?;
+            let canonical = candidate_from_validated(&validated, Some(observation.basin_id));
+            observe_ride_source(&mut staged, &canonical)
+                .map_err(|_| crate::ride_ledger::RideFailure::Surface)?;
+            staged
+                .catalog
+                .admit(observation.basin_id, observation.basin_visits, validated);
+            endpoint_ids[slot] = observation.basin_id.as_raw();
+        }
+        *scientific = staged;
+        Ok(RideOutcome::Certified {
             saddle: saddle_id,
             endpoints: endpoint_ids,
-        },
-        receiving_evaluations,
-    ))
+        })
+    })();
+    let charged = receiving_evaluations.load(Ordering::Relaxed);
+    (result.unwrap_or_else(RideOutcome::Failed), charged)
 }
 
 fn candidate_from_validated(
