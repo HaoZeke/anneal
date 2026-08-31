@@ -93,6 +93,8 @@ fn duplicate_certified_connections_do_not_masquerade_as_new_pes_edges() {
         )
         .unwrap();
 
+    assert!(first_credit.certified_connection);
+    assert!(duplicate_credit.certified_connection);
     assert!(first_credit.novel_edge);
     assert!(!duplicate_credit.novel_edge);
     assert_eq!(first_credit.total_charged_evaluations, 140);
