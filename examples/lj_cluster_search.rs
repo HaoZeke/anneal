@@ -322,6 +322,15 @@ mod option_tests {
             (RideFailure::QuenchNotConverged, "ride_quench_not_converged"),
             (RideFailure::SaddleNotConverged, "ride_saddle_not_converged"),
             (
+                RideFailure::MinimumModeNotConverged,
+                "ride_minimum_mode_not_converged",
+            ),
+            (RideFailure::PrfoNotConverged, "ride_prfo_not_converged"),
+            (
+                RideFailure::SaddleForceNotConverged,
+                "ride_saddle_force_not_converged",
+            ),
+            (
                 RideFailure::ActivationNotEscaped,
                 "ride_activation_not_escaped",
             ),
