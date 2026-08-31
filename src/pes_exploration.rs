@@ -16,8 +16,8 @@ use rgmin::{
     Solver, lowest_mode,
 };
 use rgsaddle::{
-    IrcConfig, IrcDirection, IrcSession, MinModeConfig, MinModeKind, MinModeSession, MinModeStatus,
-    PointSurface, SaddleError, SellaSaddleConfig, SellaSaddleSession, exact_eigh,
+    ForceGate, IrcConfig, IrcDirection, IrcSession, MinModeConfig, MinModeKind, MinModeSession,
+    MinModeStatus, PointSurface, SaddleError, SellaSaddleConfig, SellaSaddleSession, exact_eigh,
 };
 
 use crate::curvature::{project_rigid_with, rigid_basis};
@@ -1685,6 +1685,7 @@ where
     if config.refine_with_prfo {
         let prfo_config = SellaSaddleConfig {
             force_tol: config.saddle_force_tolerance,
+            force_gate: ForceGate::LinfNorm,
             ..SellaSaddleConfig::default()
         };
         let mut prfo =
