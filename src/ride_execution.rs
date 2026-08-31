@@ -18,7 +18,8 @@ use crate::catalog_rpc::{
 use crate::descriptor_space::DescriptorSpace;
 use crate::pes_exploration::{
     ExactStructureWitness, PesExplorationConfig, PesExplorationError, PesNetwork, PesSurface,
-    RideModeDirection, discover_cartesian_mode_connection, localized_cartesian_mode,
+    RideModeDirection, SaddleConvergenceStage, discover_cartesian_mode_connection,
+    localized_cartesian_mode,
 };
 use crate::ride_ledger::{RideDirection, RideFailure};
 
@@ -121,7 +122,15 @@ fn classify_failure(error: PesExplorationError, budget_exhausted: bool) -> RideF
     }
     match error {
         PesExplorationError::QuenchNotConverged { .. } => RideFailure::QuenchNotConverged,
-        PesExplorationError::SaddleNotConverged { .. } => RideFailure::SaddleNotConverged,
+        PesExplorationError::SaddleNotConverged {
+            stage: SaddleConvergenceStage::MinimumMode,
+        } => RideFailure::MinimumModeNotConverged,
+        PesExplorationError::SaddleNotConverged {
+            stage: SaddleConvergenceStage::Prfo,
+        } => RideFailure::PrfoNotConverged,
+        PesExplorationError::SaddleNotConverged {
+            stage: SaddleConvergenceStage::ForceCertification,
+        } => RideFailure::SaddleForceNotConverged,
         PesExplorationError::ActivationNotEscaped { .. } => RideFailure::ActivationNotEscaped,
         PesExplorationError::MinimumModeLostCurvature { .. } => {
             RideFailure::MinimumModeLostCurvature

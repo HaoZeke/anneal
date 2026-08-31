@@ -208,8 +208,14 @@ pub struct RideWorkOrder {
 pub enum RideFailure {
     /// The source quench did not reach its force condition.
     QuenchNotConverged,
-    /// The minimum-mode search did not reach its force condition.
+    /// Legacy aggregate for a saddle search that did not reach its force condition.
     SaddleNotConverged,
+    /// Minimum-mode following exhausted its iteration allowance.
+    MinimumModeNotConverged,
+    /// Partitioned rational-function refinement exhausted its iteration allowance.
+    PrfoNotConverged,
+    /// Independent saddle certification rejected the final force norm.
+    SaddleForceNotConverged,
     /// Expanding along the supplied mode did not leave positive curvature.
     ActivationNotEscaped,
     /// A force-converged minimum-mode ride no longer had negative curvature.

@@ -272,6 +272,9 @@ enum RideFailure {
   disconnectedConnection @8;
   activationNotEscaped @9;
   minimumModeLostCurvature @10;
+  minimumModeNotConverged @11;
+  prfoNotConverged @12;
+  saddleForceNotConverged @13;
 }
 
 # Exclusive transition experiment plus the validated minimum from which it
