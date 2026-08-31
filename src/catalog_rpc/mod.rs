@@ -20,7 +20,7 @@ pub mod mailbox;
 pub mod server;
 
 /// Wire protocol version accepted by this release.
-pub const PROTOCOL_VERSION: u16 = 17;
+pub const PROTOCOL_VERSION: u16 = 18;
 /// `Sample` draw that returns the active-catalog incumbent.
 pub const INCUMBENT_SAMPLE_DRAW: u64 = u64::MAX;
 
@@ -1252,6 +1252,7 @@ pub(crate) fn encode_reply(reply: CatalogReply) -> Result<Vec<u8>, ProtocolError
                     let mut output = payload.init_ride_credit();
                     output.set_novel_edge(credit.novel_edge);
                     output.set_total_charged_evaluations(credit.total_charged_evaluations);
+                    output.set_certified_connection(credit.certified_connection);
                 }
                 AcceptedPayload::PolicyState(state) => {
                     let mut output = payload.init_policy_state();
@@ -1465,6 +1466,7 @@ pub(crate) fn decode_reply_reader(
                 accepted_reply::payload::RideCredit(credit) => {
                     let credit = credit.map_err(wire_error)?;
                     AcceptedPayload::RideCredit(RideCredit {
+                        certified_connection: credit.get_certified_connection(),
                         novel_edge: credit.get_novel_edge(),
                         total_charged_evaluations: credit.get_total_charged_evaluations(),
                     })
