@@ -253,6 +253,32 @@ fn live_server() -> CatalogServer {
     CatalogServer::start("127.0.0.1:0", config).unwrap()
 }
 
+fn live_run() -> (CatalogServer, CooperativeRun) {
+    let server = live_server();
+    let signature = live_signature();
+    let mut run = CooperativeRun::new([7], 20_000).unwrap();
+    run.attach_client(
+        7,
+        CatalogClient::connect(
+            server.addr(),
+            CatalogIdentity {
+                campaign: "ride-live".into(),
+                ensemble: "radial-double-well".into(),
+                replica: 7,
+                signature_digest: signature.digest(),
+            },
+            ClientConfig::default(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        run.offer_candidate(7, live_source(7)).unwrap(),
+        CatalogOfferOutcome::Admitted
+    );
+    (server, run)
+}
+
 fn first_claim_seed_toward_saddle() -> u64 {
     for seed in 0..10_000 {
         let points_toward_saddle = [0, 1].iter().all(|&representative_atom| {
@@ -317,28 +343,7 @@ fn claimed_ride_executes_a_counted_minimum_saddle_minimum_connection() {
 
 #[test]
 fn live_claim_executes_reports_and_returns_the_connected_minimum() {
-    let server = live_server();
-    let signature = live_signature();
-    let mut run = CooperativeRun::new([7], 20_000).unwrap();
-    run.attach_client(
-        7,
-        CatalogClient::connect(
-            server.addr(),
-            CatalogIdentity {
-                campaign: "ride-live".into(),
-                ensemble: "radial-double-well".into(),
-                replica: 7,
-                signature_digest: signature.digest(),
-            },
-            ClientConfig::default(),
-        )
-        .unwrap(),
-    )
-    .unwrap();
-    assert_eq!(
-        run.offer_candidate(7, live_source(7)).unwrap(),
-        CatalogOfferOutcome::Admitted
-    );
+    let (_server, mut run) = live_run();
 
     let RideClaimOutcome::Work(work) = run.claim_ride(7, first_claim_seed_toward_saddle()).unwrap()
     else {
@@ -382,6 +387,42 @@ fn live_claim_executes_reports_and_returns_the_connected_minimum() {
     assert!(credit.novel_edge);
     assert_eq!(credit.total_charged_evaluations, producer_calls + 15);
     assert!((destination.coordinates[3] - destination.coordinates[0] - 2.0).abs() < 1e-4);
+}
+
+#[test]
+fn receiving_disagreement_is_charged_and_releases_the_live_claim() {
+    let (_server, mut run) = live_run();
+    let RideClaimOutcome::Work(work) = run.claim_ride(7, first_claim_seed_toward_saddle()).unwrap()
+    else {
+        panic!("the admitted source did not produce transition-search work")
+    };
+    let surface = RadialDoubleWell::new();
+    let mut report = execute_catalog_ride(
+        &surface,
+        &universal_descriptor_space(DescriptorGeometry::finite(1.0).unwrap()),
+        &work,
+        &[18, 18],
+        array![1.0, 1.0].view(),
+        &[false; 2],
+        &execution_config(5_000),
+        &SeparationWitness,
+    );
+    let CatalogRideOutcome::Certified(connection) = &mut report.outcome else {
+        panic!("the analytic ride must reach producer certification")
+    };
+    connection.saddle.energy += 1e-4;
+    let producer_calls = report.charged_evaluations;
+
+    let RideReportOutcome::Credited(credit) = run.report_ride(7, report).unwrap() else {
+        panic!("fresh energy disagreement must become shared negative evidence")
+    };
+    assert!(!credit.novel_edge);
+    assert_eq!(credit.total_charged_evaluations, producer_calls + 1);
+    let RideClaimOutcome::Work(next) = run.claim_ride(7, 0x5eed).unwrap() else {
+        panic!("negative evidence did not release the replica's live claim")
+    };
+    assert_ne!(next.order.id, work.order.id);
+    assert_ne!(next.order.arm, work.order.arm);
 }
 
 #[test]
