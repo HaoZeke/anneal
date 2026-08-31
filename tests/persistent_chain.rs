@@ -96,6 +96,78 @@ fn no_action_checkpoints_are_identical_to_an_uninterrupted_run() {
 }
 
 #[test]
+fn checkpoint_external_work_is_charged_without_fabricating_a_proposal() {
+    let mut cfg = Config::recommended(6);
+    cfg.max_hops = Some(3);
+    cfg.relax_steps = 1;
+    let mut seeding_rng = StdRng::seed_from_u64(0xe7_7e_a1);
+    let start = random_cluster(cfg.n_points, 0.7, cfg.min_separation, &mut seeding_rng);
+    let mut baseline_rng = seeding_rng.clone();
+    let mut external_rng = seeding_rng;
+    let mut baseline_ledger = Ledger::new(10_000);
+    let mut external_ledger = Ledger::new(10_000);
+    let mut baseline_bias = fresh_bias(&cfg);
+    let mut external_bias = fresh_bias(&cfg);
+    let mut baseline_relax = toy_relax;
+    let mut external_relax = toy_relax;
+    let mut baseline_checkpoint = |_: ChainCheckpoint<'_>| CheckpointAction::Continue;
+
+    let baseline = run_with_bias_at_checkpoints(
+        &cfg,
+        start.view(),
+        &mut baseline_ledger,
+        &mut baseline_relax,
+        None,
+        &mut baseline_bias,
+        &mut baseline_rng,
+        1,
+        &mut baseline_checkpoint,
+    );
+
+    const EXTERNAL_CALLS: usize = 37;
+    let mut settled = false;
+    let mut external_checkpoint = |_: ChainCheckpoint<'_>| {
+        if settled {
+            CheckpointAction::Continue
+        } else {
+            settled = true;
+            CheckpointAction::ExternalWork {
+                external_calls: EXTERNAL_CALLS,
+            }
+        }
+    };
+    let external = run_with_bias_at_checkpoints(
+        &cfg,
+        start.view(),
+        &mut external_ledger,
+        &mut external_relax,
+        None,
+        &mut external_bias,
+        &mut external_rng,
+        1,
+        &mut external_checkpoint,
+    );
+
+    assert!(settled, "checkpoint did not settle the external work");
+    assert_eq!(
+        external_ledger.spent(),
+        baseline_ledger.spent() + EXTERNAL_CALLS,
+        "external PES work was not charged exactly once"
+    );
+    assert_eq!(external.best, baseline.best);
+    assert_eq!(external.best_state, baseline.best_state);
+    assert_eq!(external.final_energy, baseline.final_energy);
+    assert_eq!(external.final_state, baseline.final_state);
+    assert_eq!(external.hops, baseline.hops);
+    assert_eq!(external.accepted_transitions, baseline.accepted_transitions);
+    assert_eq!(
+        external_rng.random::<u64>(),
+        baseline_rng.random::<u64>(),
+        "settling external work consumed the local random stream"
+    );
+}
+
+#[test]
 fn checkpoint_boundary_proposal_is_quenched_and_chain_continues() {
     let mut cfg = Config::recommended(6);
     cfg.relax_steps = 1;
