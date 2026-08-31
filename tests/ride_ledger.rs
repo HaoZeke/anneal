@@ -95,6 +95,8 @@ fn duplicate_certified_connections_do_not_masquerade_as_new_pes_edges() {
 
     assert!(first_credit.novel_edge);
     assert!(!duplicate_credit.novel_edge);
+    assert_eq!(first_credit.total_charged_evaluations, 140);
+    assert_eq!(duplicate_credit.total_charged_evaluations, 131);
     assert_eq!(ledger.unique_edges(), 1);
     assert_eq!(ledger.certified_connections(), 2);
 }

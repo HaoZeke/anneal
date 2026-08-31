@@ -287,6 +287,8 @@ fn replicas_share_exclusive_ride_arms_and_coordinator_computes_edge_novelty() {
 
     assert!(first_credit.novel_edge);
     assert!(!duplicate_credit.novel_edge);
+    assert_eq!(first_credit.total_charged_evaluations, 159);
+    assert_eq!(duplicate_credit.total_charged_evaluations, 148);
 }
 
 #[test]
@@ -320,6 +322,7 @@ fn cooperative_run_routes_certified_ride_work_through_the_live_mailbox() {
     };
 
     assert!(credit.novel_edge);
+    assert_eq!(credit.total_charged_evaluations, 159);
     assert!(
         run.events()
             .iter()
