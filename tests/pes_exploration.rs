@@ -6,7 +6,7 @@ use anneal_core::pes_exploration::{
     StructureContext, discover_cartesian_mode_connection, discover_mode_connection,
     stationary_index, stationary_index_cartesian,
 };
-use ndarray::{Array1, ArrayView1};
+use ndarray::{Array1, ArrayView1, array};
 
 struct DoubleWell;
 
