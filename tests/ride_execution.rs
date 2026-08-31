@@ -211,7 +211,7 @@ fn live_source(replica: u32) -> CatalogCandidate {
     source
 }
 
-fn live_server() -> CatalogServer {
+fn live_server_with_gradient_tolerance(max_gradient_norm: f64) -> CatalogServer {
     let signature = live_signature();
     let digest = signature.digest();
     let descriptor_space = universal_descriptor_space(DescriptorGeometry::finite(1.0).unwrap());
@@ -233,7 +233,7 @@ fn live_server() -> CatalogServer {
                 descriptor_dim,
                 min_separation: 0.8,
                 coordinate_tolerance: 1e-10,
-                max_gradient_norm: 1e-7,
+                max_gradient_norm,
                 energy_abs_tolerance: 1e-10,
                 energy_rel_tolerance: 1e-10,
             },
@@ -253,8 +253,8 @@ fn live_server() -> CatalogServer {
     CatalogServer::start("127.0.0.1:0", config).unwrap()
 }
 
-fn live_run() -> (CatalogServer, CooperativeRun) {
-    let server = live_server();
+fn live_run_with_gradient_tolerance(max_gradient_norm: f64) -> (CatalogServer, CooperativeRun) {
+    let server = live_server_with_gradient_tolerance(max_gradient_norm);
     let signature = live_signature();
     let mut run = CooperativeRun::new([7], 20_000).unwrap();
     run.attach_client(
@@ -277,6 +277,10 @@ fn live_run() -> (CatalogServer, CooperativeRun) {
         CatalogOfferOutcome::Admitted
     );
     (server, run)
+}
+
+fn live_run() -> (CatalogServer, CooperativeRun) {
+    live_run_with_gradient_tolerance(1e-7)
 }
 
 fn first_claim_seed_toward_saddle() -> u64 {
@@ -389,6 +393,50 @@ fn live_claim_executes_reports_and_returns_the_connected_minimum() {
     assert!(credit.novel_edge);
     assert_eq!(credit.total_charged_evaluations, producer_calls + 15);
     assert!((destination.coordinates[3] - destination.coordinates[0] - 2.0).abs() < 1e-4);
+}
+
+#[test]
+fn receiver_excludes_rigid_curvature_from_saddle_index() {
+    let (_server, mut run) = live_run_with_gradient_tolerance(1e-5);
+    let RideClaimOutcome::Work(work) = run.claim_ride(7, first_claim_seed_toward_saddle()).unwrap()
+    else {
+        panic!("the admitted source did not produce transition-search work")
+    };
+    let surface = RadialDoubleWell::new();
+    let descriptor_space = universal_descriptor_space(DescriptorGeometry::finite(1.0).unwrap());
+    let mut report = execute_catalog_ride(
+        &surface,
+        &descriptor_space,
+        &work,
+        &[18, 18],
+        array![1.0, 1.0].view(),
+        &[false; 2],
+        &execution_config(5_000),
+        &SeparationWitness,
+    );
+    let CatalogRideOutcome::Certified(connection) = &mut report.outcome else {
+        panic!("the analytic ride must reach producer certification")
+    };
+    connection.saddle.coordinates[3] += 1e-7;
+    let (energy, gradient) = surface
+        .evaluate(ArrayView1::from(&connection.saddle.coordinates))
+        .unwrap();
+    connection.saddle.energy = energy;
+    connection.saddle.forces = gradient.iter().map(|component| -*component).collect();
+    connection.saddle.gradient_norm = gradient.dot(&gradient).sqrt();
+    let descriptor = descriptor_space
+        .describe(
+            ArrayView1::from(&connection.saddle.coordinates),
+            Some(&[18, 18]),
+        )
+        .unwrap();
+    connection.saddle.descriptor = descriptor.values().to_vec();
+
+    let RideReportOutcome::Credited(credit) = run.report_ride(7, report).unwrap() else {
+        panic!("a near-stationary radial barrier must produce receiver credit")
+    };
+    assert!(credit.certified_connection);
+    assert_eq!(credit.failure, None);
 }
 
 #[test]
