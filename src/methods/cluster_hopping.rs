@@ -195,6 +195,17 @@ pub enum CheckpointAction {
         /// Probe action label retained separately from adaptive moves.
         action: String,
     },
+    /// Settle potential evaluations consumed by an external search that did
+    /// not produce a proposal.
+    ///
+    /// A failed saddle search, disconnected ride, or rejected certificate
+    /// still expends objective work. Charging it without a Cartesian state
+    /// keeps the matched-work ledger exact without inventing a quench or a
+    /// trajectory edge.
+    ExternalWork {
+        /// Potential calls the external search consumed.
+        external_calls: usize,
+    },
     /// Quench an externally produced perturbation whose construction
     /// burned potential evaluations outside the chain's oracle.
     ///
@@ -1211,6 +1222,10 @@ where
                     Some((state, action, true))
                 }
                 CheckpointAction::ProbeProposal { state, action } => Some((state, action, false)),
+                CheckpointAction::ExternalWork { external_calls } => {
+                    ledger.charge_many(external_calls);
+                    None
+                }
                 CheckpointAction::ExternalProposal {
                     state,
                     action,
