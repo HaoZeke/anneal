@@ -33,7 +33,7 @@ use ndarray::{Array1, ArrayView1};
 use std::io::{self, Write};
 use std::time::Instant;
 
-#[cfg(all(feature = "ira", not(feature = "featomic")))]
+#[cfg(feature = "ira")]
 use anneal_core::shape::IraMetric;
 
 fn apply_boolean_options(cfg: &mut Config, opts: &[&str]) {
@@ -92,6 +92,34 @@ fn lj(x: ArrayView1<f64>) -> (f64, Array1<f64>) {
         }
     }
     (e, g)
+}
+
+#[cfg(all(feature = "bank-rpc", feature = "ira"))]
+struct LjRideSurface;
+
+#[cfg(all(feature = "bank-rpc", feature = "ira"))]
+impl anneal_core::pes_exploration::PesSurface for LjRideSurface {
+    type Error = std::convert::Infallible;
+
+    fn evaluate(
+        &self,
+        coordinates: ArrayView1<'_, f64>,
+    ) -> Result<(f64, Array1<f64>), Self::Error> {
+        Ok(lj(coordinates))
+    }
+}
+
+#[cfg(all(feature = "bank-rpc", feature = "ira"))]
+struct LjRideWitness {
+    metric: IraMetric,
+    radius: f64,
+}
+
+#[cfg(all(feature = "bank-rpc", feature = "ira"))]
+impl anneal_core::pes_exploration::ExactStructureWitness for LjRideWitness {
+    fn equivalent(&self, left: ArrayView1<f64>, right: ArrayView1<f64>) -> bool {
+        left.len() == right.len() && self.metric.distance(left, right) <= self.radius
+    }
 }
 
 #[cfg(test)]
@@ -266,9 +294,7 @@ mod option_tests {
 
         assert_eq!(
             action,
-            CheckpointAction::ExternalWork {
-                external_calls: 97,
-            }
+            CheckpointAction::ExternalWork { external_calls: 97 }
         );
     }
 
@@ -281,9 +307,7 @@ mod option_tests {
 
         assert_eq!(
             action,
-            CheckpointAction::ExternalWork {
-                external_calls: 81,
-            }
+            CheckpointAction::ExternalWork { external_calls: 81 }
         );
     }
 
@@ -318,16 +342,20 @@ mod option_tests {
             radius: 1e-4,
         };
 
-        assert!(anneal_core::pes_exploration::ExactStructureWitness::equivalent(
-            &witness,
-            source.view(),
-            equivalent.view(),
-        ));
-        assert!(!anneal_core::pes_exploration::ExactStructureWitness::equivalent(
-            &witness,
-            source.view(),
-            distorted.view(),
-        ));
+        assert!(
+            anneal_core::pes_exploration::ExactStructureWitness::equivalent(
+                &witness,
+                source.view(),
+                equivalent.view(),
+            )
+        );
+        assert!(
+            !anneal_core::pes_exploration::ExactStructureWitness::equivalent(
+                &witness,
+                source.view(),
+                distorted.view(),
+            )
+        );
     }
 
     #[cfg(feature = "bank-rpc")]
@@ -2490,6 +2518,27 @@ fn finite_trace_energy(energy: f64) -> Option<f64> {
 }
 
 #[cfg(feature = "bank-rpc")]
+fn snapshot_index_cost(coordinate_dim: usize) -> usize {
+    coordinate_dim
+        .checked_mul(2)
+        .and_then(|evaluations| evaluations.checked_add(3))
+        .expect("receiving ride certification cost must fit usize")
+}
+
+#[cfg(feature = "bank-rpc")]
+fn ride_producer_budget(
+    remaining: usize,
+    receiver_reserve: usize,
+    proposal_reserve: usize,
+    configured_cap: u64,
+) -> Option<u64> {
+    let reserved = receiver_reserve.checked_add(proposal_reserve)?;
+    let available = remaining.checked_sub(reserved)?;
+    let available = u64::try_from(available).unwrap_or(u64::MAX);
+    (available > 0).then_some(available.min(configured_cap))
+}
+
+#[cfg(feature = "bank-rpc")]
 fn ride_checkpoint_action(
     report: anneal_core::cooperative_search::RideReportOutcome,
     destination: Option<Array1<f64>>,
@@ -2500,8 +2549,8 @@ fn ride_checkpoint_action(
     let known_producer_calls = usize::try_from(producer_calls).unwrap_or(usize::MAX);
     match report {
         RideReportOutcome::Credited(credit) => {
-            let total_calls = usize::try_from(credit.total_charged_evaluations)
-                .unwrap_or(usize::MAX);
+            let total_calls =
+                usize::try_from(credit.total_charged_evaluations).unwrap_or(usize::MAX);
             match (credit.certified_connection, destination) {
                 (true, Some(state)) => CheckpointAction::ExternalProposal {
                     state,
@@ -2613,11 +2662,18 @@ fn run_capnp_catalog(
     use anneal_core::cooperative_search::{
         CatalogBoundaryOutcome, CatalogBridgeOutcome, CatalogHoleOutcome, CatalogSampleOutcome,
         CatalogSamplesOutcome, CooperativeRun, PolicyEvidenceOutcome, PolicyRole,
-        PopulationSynchronizationOutcome, ProposalFamily, RunManifest, SliceAdoption, SliceQuench,
-        SliceTrace, SliceValidation, TransitionRecordOutcome,
+        PopulationSynchronizationOutcome, ProposalFamily, RideClaimOutcome, RideReportOutcome,
+        RunManifest, SliceAdoption, SliceQuench, SliceTrace, SliceValidation,
+        TransitionRecordOutcome,
     };
     use anneal_core::methods::feynman_kac::{
         population_family_position, population_rejuvenation_draw,
+    };
+    #[cfg(feature = "ira")]
+    use anneal_core::pes_exploration::{PesExplorationConfig, RideMethod};
+    #[cfg(feature = "ira")]
+    use anneal_core::ride_execution::{
+        CatalogRideExecutionConfig, connected_destination, execute_catalog_ride,
     };
     use rand::{Rng, SeedableRng};
 
@@ -3001,12 +3057,88 @@ fn run_capnp_catalog(
         .and_then(|value| value.parse::<u64>().ok())
         .unwrap_or(64)
         .max(1);
+    #[cfg(not(feature = "ira"))]
+    if std::env::var("CATALOG_RIDES").is_ok_and(|value| value != "0") {
+        panic!("CATALOG_RIDES requires --features ira for exact LJ endpoint identity");
+    }
+    #[cfg(feature = "ira")]
+    let rides_enabled = std::env::var("CATALOG_RIDES")
+        .ok()
+        .map_or(endpoint.is_some(), |value| value != "0");
+    #[cfg(feature = "ira")]
+    let ride_interval = std::env::var("CATALOG_RIDE_INTERVAL")
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+        .unwrap_or(8)
+        .max(1);
+    #[cfg(feature = "ira")]
+    let ride_budget_cap = std::env::var("CATALOG_RIDE_BUDGET")
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+        .unwrap_or(5_000)
+        .max(1);
+    #[cfg(feature = "ira")]
+    let ride_localization_radius = std::env::var("CATALOG_RIDE_LOCAL_RADIUS")
+        .ok()
+        .and_then(|value| value.parse::<f64>().ok())
+        .filter(|value| value.is_finite() && *value > 0.0)
+        .unwrap_or(1.5 * run_cfg.length_scale);
+    #[cfg(feature = "ira")]
+    let ride_identity_radius = std::env::var("CATALOG_RIDE_IDENTITY_RADIUS")
+        .ok()
+        .and_then(|value| value.parse::<f64>().ok())
+        .filter(|value| value.is_finite() && *value > 0.0)
+        .unwrap_or(anneal_core::catalog::lj::CALIBRATION_IRA_TOLERANCE * run_cfg.length_scale);
+    #[cfg(feature = "ira")]
+    let ride_receiver_reserve = snapshot_index_cost(3 * run_cfg.n_points);
+    #[cfg(feature = "ira")]
+    let ride_proposal_reserve = run_cfg
+        .relax_steps
+        .checked_add(2)
+        .expect("ride proposal reserve must fit usize");
+    #[cfg(feature = "ira")]
+    let mut ride_exploration = PesExplorationConfig::default();
+    #[cfg(feature = "ira")]
+    {
+        let stationary_component_tolerance = 0.5
+            * anneal_core::catalog::lj::CALIBRATION_GRADIENT_TOLERANCE
+            / ((3 * run_cfg.n_points) as f64).sqrt();
+        ride_exploration.ride_method = RideMethod::Dimer;
+        ride_exploration.quench_steps = run_cfg.relax_steps.max(1_000);
+        ride_exploration.saddle_steps = 1_000;
+        ride_exploration.irc_steps = 200;
+        ride_exploration.prfo_steps = 300;
+        ride_exploration.quench_gradient_tolerance = stationary_component_tolerance;
+        ride_exploration.saddle_force_tolerance = stationary_component_tolerance;
+        ride_exploration.saddle_displacement = 0.1 * run_cfg.length_scale;
+        ride_exploration.negative_curvature_tolerance = 1e-6;
+        ride_exploration.hessian_step = 1e-4 * run_cfg.length_scale;
+        ride_exploration.maximum_move = 0.2 * run_cfg.length_scale;
+        ride_exploration.irc_step = 0.1 * run_cfg.length_scale;
+        ride_exploration.irc_force_tolerance = 0.05;
+        ride_exploration.refine_with_prfo = true;
+    }
+    #[cfg(feature = "ira")]
+    let ride_witness = LjRideWitness {
+        metric: IraMetric {
+            kmax_factor: if run_cfg.n_points >= 55 { 2.5 } else { 1.8 },
+        },
+        radius: ride_identity_radius,
+    };
+    #[cfg(feature = "ira")]
+    let ride_surface = LjRideSurface;
+    #[cfg(feature = "ira")]
+    let ride_masses = Array1::ones(run_cfg.n_points);
+    #[cfg(feature = "ira")]
+    let ride_frozen = signature.frozen_mask.clone();
     let mut local_rng = rand::rngs::StdRng::seed_from_u64(seed);
     let mut probe_rng = rand::rngs::StdRng::seed_from_u64(seed ^ 0x90be_4a11_7a2e_0001);
     let mut transport_rng = rand::rngs::StdRng::seed_from_u64(seed ^ 0xc04f_5a7a_109e_57a1);
     let mut bridge_rng = rand::rngs::StdRng::seed_from_u64(seed ^ 0xb41d_6e55_0b41_d6e5);
     let mut md_rng = rand::rngs::StdRng::seed_from_u64(seed ^ 0x3d5e_9a1c_44d0_77ff);
     let mut histo_rng = rand::rngs::StdRng::seed_from_u64(seed ^ 0x715a_0c1a_5571_5a0c);
+    #[cfg(feature = "ira")]
+    let mut ride_rng = rand::rngs::StdRng::seed_from_u64(seed ^ 0x7a21_d3e5_c4b8_910f);
     let mut bias = BasinBias::new(
         ClusterFingerprint::of_config(&run_cfg, &Array1::zeros(0)),
         run_cfg.merge_radius,
@@ -3243,6 +3375,128 @@ fn run_capnp_catalog(
         for candidate in boundary_candidates {
             let _ = cooperative.post_offer_candidate(replica, candidate.clone());
             freshest_boundary = Some(candidate);
+        }
+
+        #[cfg(feature = "ira")]
+        if rides_enabled
+            && checkpoint_sequence.is_multiple_of(ride_interval)
+            && let Some(maximum_evaluations) = ride_producer_budget(
+                snapshot.remaining(),
+                ride_receiver_reserve,
+                ride_proposal_reserve,
+                ride_budget_cap,
+            )
+            && let RideClaimOutcome::Work(work) = cooperative
+                .claim_ride(replica, ride_rng.random())
+                .expect("ride claim must preserve cooperative invariants")
+        {
+            let producer_event_sequence = candidate_sequence
+                .checked_add(1)
+                .expect("ride event sequence must fit u64");
+            candidate_sequence = candidate_sequence
+                .checked_add(3)
+                .expect("ride event sequence must fit u64");
+            let execution = CatalogRideExecutionConfig {
+                exploration: ride_exploration.clone(),
+                localization_radius: ride_localization_radius,
+                maximum_evaluations,
+                producer_event_sequence,
+                producer_charged_work: u64::try_from(snapshot.charged())
+                    .expect("LJ charged work must fit u64"),
+            };
+            let report = execute_catalog_ride(
+                &ride_surface,
+                &descriptor_space,
+                &work,
+                &signature.atomic_numbers,
+                ride_masses.view(),
+                &ride_frozen,
+                &execution,
+                &ride_witness,
+            );
+            let producer_calls = report.charged_evaluations;
+            let destination = connected_destination(&work, &report, &ride_witness)
+                .map(|candidate| Array1::from(candidate.coordinates));
+            let cartesian_step_norm = destination.as_ref().map(|state| {
+                vector_distance(
+                    snapshot
+                        .current_state()
+                        .as_slice()
+                        .expect("LJ state is contiguous"),
+                    state.as_slice().expect("LJ ride endpoint is contiguous"),
+                )
+            });
+            let report_outcome = cooperative
+                .report_ride(replica, report)
+                .expect("ride report must preserve cooperative invariants");
+            let (policy_reason, validation, quench, adoption, novelty) = match report_outcome {
+                RideReportOutcome::Credited(credit)
+                    if credit.certified_connection && destination.is_some() =>
+                {
+                    (
+                        "ride_certified",
+                        SliceValidation::Accepted,
+                        SliceQuench::Converged,
+                        SliceAdoption::NotAttempted,
+                        Some(if credit.novel_edge { 1.0 } else { 0.0 }),
+                    )
+                }
+                RideReportOutcome::Credited(_) => (
+                    "ride_rejected",
+                    SliceValidation::Rejected,
+                    SliceQuench::Rejected,
+                    SliceAdoption::Rejected,
+                    Some(0.0),
+                ),
+                RideReportOutcome::Rejected => (
+                    "ride_report_rejected",
+                    SliceValidation::Rejected,
+                    SliceQuench::NotAttempted,
+                    SliceAdoption::Rejected,
+                    None,
+                ),
+                RideReportOutcome::LocalFallback => (
+                    "ride_report_fallback",
+                    SliceValidation::NotAttempted,
+                    SliceQuench::NotAttempted,
+                    SliceAdoption::Rejected,
+                    None,
+                ),
+                RideReportOutcome::SharingDisabled => (
+                    "ride_sharing_disabled",
+                    SliceValidation::NotAttempted,
+                    SliceQuench::NotAttempted,
+                    SliceAdoption::Rejected,
+                    None,
+                ),
+            };
+            slice_sequence = slice_sequence
+                .checked_add(1)
+                .expect("slice sequence must fit u64");
+            cooperative
+                .record_slice(
+                    replica,
+                    SliceTrace {
+                        slice: slice_sequence,
+                        current_basin: None,
+                        active_relation: None,
+                        policy_role: PolicyRole::Explore,
+                        policy_reason,
+                        proposal_family: ProposalFamily::TransitionRide,
+                        sampled_basin: work.source.census_basin,
+                        descriptor_step_norm: None,
+                        cartesian_step_norm,
+                        validation,
+                        quench,
+                        adoption,
+                        novelty,
+                        energy: finite_trace_energy(snapshot.best_energy()),
+                        charged_work: u64::try_from(checkpoint_charged)
+                            .expect("checkpoint charge must fit u64"),
+                    },
+                )
+                .expect("ride checkpoint trace must remain complete");
+            return ride_checkpoint_action(report_outcome, destination, producer_calls);
         }
 
         let local_deepened = snapshot.best_energy() < best_at_checkpoint - 1e-10;
