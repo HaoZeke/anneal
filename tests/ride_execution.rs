@@ -98,6 +98,7 @@ fn exploration_config() -> PesExplorationConfig {
         prfo_steps: 100,
         activation_attempts: 4,
         activation_growth: 2.0,
+        activation_relaxation_steps: 3,
         quench_gradient_tolerance: 1e-8,
         saddle_force_tolerance: 1e-8,
         saddle_displacement: 0.12,

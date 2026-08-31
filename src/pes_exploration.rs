@@ -6,11 +6,15 @@
 //! same universal descriptor remains available for novelty and acquisition.
 
 use std::fmt::Display;
+use std::sync::Mutex;
 
 use ndarray::{Array1, Array2, ArrayView1};
 use rand::{SeedableRng, rngs::StdRng};
 use rand_distr::{Distribution, StandardNormal};
-use rgmin::{GradNorm, Lbfgs};
+use rgmin::{
+    ApplyHessian, Control, EigenParams, EigensolverKind, FireKind, GradNorm, Lbfgs, Method, Oracle,
+    Solver, lowest_mode,
+};
 use rgsaddle::{
     IrcConfig, IrcDirection, IrcSession, MinModeConfig, MinModeKind, MinModeSession, MinModeStatus,
     PointSurface, SaddleError, SellaSaddleConfig, SellaSaddleSession, exact_eigh,
@@ -302,10 +306,12 @@ pub struct PesExplorationConfig {
     pub irc_steps: usize,
     /// Maximum Sella P-RFO refinement steps.
     pub prfo_steps: usize,
-    /// Number of expanding hyperspheres probed before minimum-mode following.
+    /// Number of expanding activation shells probed before minimum-mode following.
     pub activation_attempts: usize,
     /// Multiplicative radius increase while leaving the convex basin.
     pub activation_growth: f64,
+    /// rgmin FIRE steps in the perpendicular hyperplane at each shell.
+    pub activation_relaxation_steps: usize,
     /// Infinity-norm gradient threshold for a certified minimum.
     pub quench_gradient_tolerance: f64,
     /// Force threshold for the saddle sessions.
@@ -336,6 +342,7 @@ impl Default for PesExplorationConfig {
             prfo_steps: 300,
             activation_attempts: 4,
             activation_growth: 2.0,
+            activation_relaxation_steps: 3,
             quench_gradient_tolerance: 1e-6,
             saddle_force_tolerance: 1e-3,
             saddle_displacement: 0.1,
@@ -356,6 +363,7 @@ impl PesExplorationConfig {
             || self.irc_steps == 0
             || self.prfo_steps == 0
             || self.activation_attempts == 0
+            || self.activation_relaxation_steps == 0
         {
             return Err(PesExplorationError::InvalidConfig(
                 "iteration limits must be positive",
@@ -1130,23 +1138,212 @@ fn directional_curvature<S: PesSurface + ?Sized>(
     Ok(curvature)
 }
 
+fn activation_basis(
+    coordinates: ArrayView1<f64>,
+    cartesian_index: Option<(&[bool], [bool; 3])>,
+) -> Vec<Array1<f64>> {
+    let Some((frozen_atoms, periodic)) = cartesian_index else {
+        return Vec::new();
+    };
+    let mut basis = Vec::new();
+    for (atom, frozen) in frozen_atoms.iter().copied().enumerate() {
+        if frozen {
+            for axis in 0..3 {
+                let mut coordinate = Array1::zeros(coordinates.len());
+                coordinate[3 * atom + axis] = 1.0;
+                basis.push(coordinate);
+            }
+        }
+    }
+    if basis.is_empty() {
+        basis = if periodic.iter().any(|axis| *axis) {
+            translation_basis(coordinates.len() / 3)
+        } else {
+            rigid_basis(coordinates)
+        };
+    }
+    basis
+}
+
+fn project_activation_vector(values: &mut Array1<f64>, basis: &[Array1<f64>]) {
+    if !basis.is_empty() {
+        project_rigid_with(values, basis);
+    }
+}
+
+struct ActivationHessian<'a, S: PesSurface + ?Sized> {
+    surface: &'a S,
+    gradient: Array1<f64>,
+    step: f64,
+    basis: Vec<Array1<f64>>,
+    failure: Mutex<Option<PesExplorationError>>,
+}
+
+impl<S: PesSurface + ?Sized> ApplyHessian for ActivationHessian<'_, S> {
+    fn apply_hessian(&self, coordinates: ArrayView1<f64>, mode: ArrayView1<f64>) -> Array1<f64> {
+        let mut mode = mode.to_owned();
+        project_activation_vector(&mut mode, &self.basis);
+        let mode = match normalize_mode(mode.view()) {
+            Ok(mode) => mode,
+            Err(error) => {
+                *self.failure.lock().expect("activation failure lock") = Some(error);
+                return Array1::zeros(coordinates.len());
+            }
+        };
+        let shifted = &coordinates + &(&mode * self.step);
+        let (_, shifted_gradient) = match checked_evaluate(self.surface, shifted.view()) {
+            Ok(value) => value,
+            Err(error) => {
+                *self.failure.lock().expect("activation failure lock") = Some(error);
+                return Array1::zeros(coordinates.len());
+            }
+        };
+        let mut hessian_mode = (&shifted_gradient - &self.gradient) / self.step;
+        project_activation_vector(&mut hessian_mode, &self.basis);
+        hessian_mode
+    }
+}
+
+fn lowest_activation_mode<S: PesSurface + ?Sized>(
+    surface: &S,
+    coordinates: ArrayView1<f64>,
+    seed: ArrayView1<f64>,
+    cartesian_index: Option<(&[bool], [bool; 3])>,
+    config: &PesExplorationConfig,
+) -> Result<(f64, Array1<f64>), PesExplorationError> {
+    let (_, gradient) = checked_evaluate(surface, coordinates)?;
+    let basis = activation_basis(coordinates, cartesian_index);
+    let mut seed = seed.to_owned();
+    project_activation_vector(&mut seed, &basis);
+    let seed = normalize_mode(seed.view())?;
+    let hessian = ActivationHessian {
+        surface,
+        gradient,
+        step: config.hessian_step,
+        basis,
+        failure: Mutex::new(None),
+    };
+    let params = EigenParams {
+        kind: EigensolverKind::Lanczos,
+        krylov: coordinates.len().min(12),
+        ..EigenParams::default()
+    };
+    let result = lowest_mode(&hessian, coordinates, seed.view(), &params);
+    let failure = hessian
+        .failure
+        .lock()
+        .map_err(|_| PesExplorationError::Saddle("activation failure lock poisoned".into()))?
+        .take();
+    if let Some(error) = failure {
+        return Err(error);
+    }
+    let result = result.map_err(|error| {
+        PesExplorationError::Saddle(format!("activation Lanczos failed: {error}"))
+    })?;
+    let mut mode = result.vector;
+    project_activation_vector(&mut mode, &hessian.basis);
+    let mode = normalize_mode(mode.view())?;
+    let curvature = directional_curvature(surface, coordinates, mode.view(), config.hessian_step)?;
+    Ok((curvature, mode))
+}
+
+fn relax_activation_shell<S: PesSurface + ?Sized>(
+    surface: &S,
+    origin: ArrayView1<f64>,
+    push_mode: ArrayView1<f64>,
+    target_radius: f64,
+    mut coordinates: Array1<f64>,
+    cartesian_index: Option<(&[bool], [bool; 3])>,
+    config: &PesExplorationConfig,
+) -> Result<Array1<f64>, PesExplorationError> {
+    let failure = Mutex::new(None);
+    let push_mode = push_mode.to_owned();
+    let oracle =
+        Oracle::unbounded(
+            coordinates.len(),
+            |position: ArrayView1<f64>| match checked_evaluate(surface, position) {
+                Ok((energy, mut gradient)) => {
+                    let basis = activation_basis(position, cartesian_index);
+                    project_activation_vector(&mut gradient, &basis);
+                    let parallel = gradient.dot(&push_mode);
+                    gradient -= &(&push_mode * parallel);
+                    (energy, gradient)
+                }
+                Err(error) => {
+                    *failure.lock().expect("activation failure lock") = Some(error);
+                    (f64::INFINITY, Array1::zeros(position.len()))
+                }
+            },
+        );
+    let control = Control {
+        maxiter: usize::MAX,
+        gtol: 0.0,
+        istep: 1.0,
+        maxmove: Some(0.25 * config.maximum_move),
+    };
+    let mut solver = Solver::new(
+        Method::Fire { kind: FireKind::V2 },
+        control,
+        coordinates.len(),
+    );
+    for _ in 0..config.activation_relaxation_steps {
+        let step = solver.step(&oracle, &mut coordinates);
+        if let Some(error) = failure.lock().expect("activation failure lock").take() {
+            return Err(error);
+        }
+        step.map_err(|error| {
+            PesExplorationError::Saddle(format!("activation relaxation failed: {error}"))
+        })?;
+        let axial = (&coordinates - &origin).dot(&push_mode);
+        coordinates += &(&push_mode * (target_radius - axial));
+    }
+    Ok(coordinates)
+}
+
+struct ActivationStart {
+    coordinates: Array1<f64>,
+    mode: Array1<f64>,
+}
+
 fn bowl_breakout<S: PesSurface + ?Sized>(
     surface: &S,
     origin: ArrayView1<f64>,
     mode: ArrayView1<f64>,
+    cartesian_index: Option<(&[bool], [bool; 3])>,
     config: &PesExplorationConfig,
-) -> Result<Array1<f64>, PesExplorationError> {
-    let mode = normalize_mode(mode)?;
+) -> Result<ActivationStart, PesExplorationError> {
+    let push_mode = normalize_mode(mode)?;
+    let mut eigenmode = push_mode.clone();
+    let mut trial = origin.to_owned();
     let mut radius = config.saddle_displacement;
     let mut lowest_curvature = f64::INFINITY;
     for _ in 0..config.activation_attempts {
-        let trial = &origin + &(&mode * radius);
-        let curvature =
-            directional_curvature(surface, trial.view(), mode.view(), config.hessian_step)?;
+        let axial = (&trial - &origin).dot(&push_mode);
+        trial += &(&push_mode * (radius - axial));
+        trial = relax_activation_shell(
+            surface,
+            origin,
+            push_mode.view(),
+            radius,
+            trial,
+            cartesian_index,
+            config,
+        )?;
+        let (curvature, mode) = lowest_activation_mode(
+            surface,
+            trial.view(),
+            eigenmode.view(),
+            cartesian_index,
+            config,
+        )?;
         lowest_curvature = lowest_curvature.min(curvature);
         if curvature < -config.negative_curvature_tolerance {
-            return Ok(trial);
+            return Ok(ActivationStart {
+                coordinates: trial,
+                mode,
+            });
         }
+        eigenmode = mode;
         radius *= config.activation_growth;
         if !radius.is_finite() {
             return Err(PesExplorationError::InvalidEvaluation(
@@ -1217,15 +1414,20 @@ where
     let origin_minimum = quench(surface, start, config)?;
     let origin = network.admit_minimum(origin_minimum.clone(), witness);
     let mode = normalize_mode(mode)?;
-    let saddle_start = bowl_breakout(
+    let activation = bowl_breakout(
         surface,
         origin_minimum.coordinates.view(),
         mode.view(),
+        None,
         config,
     )?;
     let adapter = SaddleSurface(surface);
-    let mut min_mode = MinModeSession::new(min_mode_config(config), saddle_start, mode)
-        .map_err(|error| PesExplorationError::Saddle(error.to_string()))?;
+    let mut min_mode = MinModeSession::new(
+        min_mode_config(config),
+        activation.coordinates,
+        activation.mode,
+    )
+    .map_err(|error| PesExplorationError::Saddle(error.to_string()))?;
     let min_mode_report = min_mode
         .run(&adapter, config.saddle_steps)
         .map_err(|error| PesExplorationError::Saddle(error.to_string()))?;
@@ -1430,15 +1632,20 @@ where
     )?;
 
     let mode = normalize_mode(mode)?;
-    let saddle_start = bowl_breakout(
+    let activation = bowl_breakout(
         surface,
         origin_minimum.coordinates.view(),
         mode.view(),
+        cartesian_index,
         config,
     )?;
     let adapter = SaddleSurface(surface);
-    let mut min_mode = MinModeSession::new(min_mode_config(config), saddle_start, mode.clone())
-        .map_err(|error| PesExplorationError::Saddle(error.to_string()))?;
+    let mut min_mode = MinModeSession::new(
+        min_mode_config(config),
+        activation.coordinates,
+        activation.mode,
+    )
+    .map_err(|error| PesExplorationError::Saddle(error.to_string()))?;
     let min_mode_report = min_mode
         .run(&adapter, config.saddle_steps)
         .map_err(|error| PesExplorationError::Saddle(error.to_string()))?;
