@@ -417,6 +417,20 @@ pub enum PesExplorationError {
         /// Saddle stage that stopped.
         stage: &'static str,
     },
+    /// The activation ray did not reach negative directional curvature.
+    #[error(
+        "activation ray did not escape the convex basin; lowest directional curvature {lowest_curvature}"
+    )]
+    ActivationNotEscaped {
+        /// Lowest directional curvature observed across all activation radii.
+        lowest_curvature: f64,
+    },
+    /// Minimum-mode following ended without retaining an unstable mode.
+    #[error("minimum-mode ride lost negative curvature; final curvature {curvature}")]
+    MinimumModeLostCurvature {
+        /// Curvature reported at the force-converged minimum-mode candidate.
+        curvature: f64,
+    },
     /// The stationary candidate is not an index-one saddle.
     #[error(
         "stationary candidate has index {negative_modes} and lowest curvature {lowest_curvature}"
@@ -1140,10 +1154,7 @@ fn bowl_breakout<S: PesSurface + ?Sized>(
             ));
         }
     }
-    Err(PesExplorationError::NotFirstOrder {
-        negative_modes: 0,
-        lowest_curvature,
-    })
+    Err(PesExplorationError::ActivationNotEscaped { lowest_curvature })
 }
 
 fn roll_branch<S: PesSurface>(
@@ -1224,9 +1235,8 @@ where
         });
     }
     if min_mode_report.curvature >= -config.negative_curvature_tolerance {
-        return Err(PesExplorationError::NotFirstOrder {
-            negative_modes: 0,
-            lowest_curvature: min_mode_report.curvature,
+        return Err(PesExplorationError::MinimumModeLostCurvature {
+            curvature: min_mode_report.curvature,
         });
     }
 
@@ -1438,9 +1448,8 @@ where
         });
     }
     if min_mode_report.curvature >= -config.negative_curvature_tolerance {
-        return Err(PesExplorationError::NotFirstOrder {
-            negative_modes: 0,
-            lowest_curvature: min_mode_report.curvature,
+        return Err(PesExplorationError::MinimumModeLostCurvature {
+            curvature: min_mode_report.curvature,
         });
     }
     let mut saddle_coordinates = min_mode.position().to_owned();
