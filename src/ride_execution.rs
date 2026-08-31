@@ -18,7 +18,7 @@ use crate::catalog_rpc::{
 use crate::descriptor_space::DescriptorSpace;
 use crate::pes_exploration::{
     ExactStructureWitness, PesExplorationConfig, PesExplorationError, PesNetwork, PesSurface,
-    RideModeDirection, discover_mode_connection, localized_cartesian_mode,
+    RideModeDirection, discover_cartesian_mode_connection, localized_cartesian_mode,
 };
 use crate::ride_ledger::{RideDirection, RideFailure};
 
@@ -278,12 +278,13 @@ where
     let mut exploration = config.exploration.clone();
     exploration.ride_method = work.order.arm.method;
     let mut network = PesNetwork::new();
-    let connection = match discover_mode_connection(
+    let connection = match discover_cartesian_mode_connection(
         &counted,
         descriptor_space,
         &mut network,
         source,
         masses,
+        frozen_atoms,
         mode.view(),
         Some(species),
         &exploration,

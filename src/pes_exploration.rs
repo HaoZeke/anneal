@@ -1225,6 +1225,81 @@ where
     S: PesSurface,
     W: ExactStructureWitness + ?Sized,
 {
+    discover_mode_connection_impl(
+        surface,
+        descriptor_space,
+        network,
+        start,
+        masses,
+        mode,
+        species,
+        config,
+        None,
+        witness,
+    )
+}
+
+/// Discover an atomistic connection and certify its index only on free modes.
+///
+/// The descriptor geometry determines whether rotations are rigid symmetries;
+/// `frozen_atoms` removes externally fixed coordinates. This is the production
+/// path for finite clusters, molecules, and periodic surfaces. The native
+/// [`discover_mode_connection`] path remains available for Cartesian-shaped
+/// mathematical surfaces whose coordinates do not obey atomistic symmetries.
+#[allow(clippy::too_many_arguments)]
+pub fn discover_cartesian_mode_connection<S, W>(
+    surface: &S,
+    descriptor_space: &DescriptorSpace,
+    network: &mut PesNetwork,
+    start: ArrayView1<f64>,
+    masses: ArrayView1<f64>,
+    frozen_atoms: &[bool],
+    mode: ArrayView1<f64>,
+    species: Option<&[u32]>,
+    config: &PesExplorationConfig,
+    witness: &W,
+) -> Result<SaddleConnection, PesExplorationError>
+where
+    S: PesSurface,
+    W: ExactStructureWitness + ?Sized,
+{
+    let periodic = descriptor_space
+        .geometry()
+        .ok_or(PesExplorationError::InvalidConfig(
+            "atomistic descriptor geometry",
+        ))?
+        .periodic();
+    discover_mode_connection_impl(
+        surface,
+        descriptor_space,
+        network,
+        start,
+        masses,
+        mode,
+        species,
+        config,
+        Some((frozen_atoms, periodic)),
+        witness,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn discover_mode_connection_impl<S, W>(
+    surface: &S,
+    descriptor_space: &DescriptorSpace,
+    network: &mut PesNetwork,
+    start: ArrayView1<f64>,
+    masses: ArrayView1<f64>,
+    mode: ArrayView1<f64>,
+    species: Option<&[u32]>,
+    config: &PesExplorationConfig,
+    cartesian_index: Option<(&[bool], [bool; 3])>,
+    witness: &W,
+) -> Result<SaddleConnection, PesExplorationError>
+where
+    S: PesSurface,
+    W: ExactStructureWitness + ?Sized,
+{
     config.validate()?;
     if start.is_empty() || !start.len().is_multiple_of(3) {
         return Err(PesExplorationError::InvalidShape(
@@ -1244,6 +1319,11 @@ where
     if species.is_some_and(|species| species.len() * 3 != start.len()) {
         return Err(PesExplorationError::InvalidShape(
             "species must contain one value per atom",
+        ));
+    }
+    if cartesian_index.is_some_and(|(frozen_atoms, _)| frozen_atoms.len() * 3 != start.len()) {
+        return Err(PesExplorationError::InvalidShape(
+            "frozen mask must contain one value per atom",
         ));
     }
 
@@ -1305,12 +1385,22 @@ where
             stage: "receiving-side force certification",
         });
     }
-    let index = stationary_index(
-        surface,
-        saddle_coordinates.view(),
-        config.hessian_step,
-        config.negative_curvature_tolerance,
-    )?;
+    let index = match cartesian_index {
+        Some((frozen_atoms, periodic)) => stationary_index_cartesian(
+            surface,
+            saddle_coordinates.view(),
+            frozen_atoms,
+            periodic,
+            config.hessian_step,
+            config.negative_curvature_tolerance,
+        )?,
+        None => stationary_index(
+            surface,
+            saddle_coordinates.view(),
+            config.hessian_step,
+            config.negative_curvature_tolerance,
+        )?,
+    };
     let curvature = index.eigenvalues[0];
     if index.negative_modes != 1 {
         return Err(PesExplorationError::NotFirstOrder {
