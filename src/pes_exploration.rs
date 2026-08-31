@@ -398,6 +398,27 @@ impl PesExplorationConfig {
     }
 }
 
+/// Numerical stage that must converge before a saddle can be certified.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SaddleConvergenceStage {
+    /// Minimum-mode following along the activated unstable direction.
+    MinimumMode,
+    /// Sella partitioned rational-function refinement.
+    Prfo,
+    /// Independent force check at the proposed saddle coordinates.
+    ForceCertification,
+}
+
+impl Display for SaddleConvergenceStage {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(match self {
+            Self::MinimumMode => "minimum-mode ride",
+            Self::Prfo => "Sella P-RFO refinement",
+            Self::ForceCertification => "receiving-side force certification",
+        })
+    }
+}
+
 /// Failure that prevents one connection from becoming catalog evidence.
 #[derive(Debug, thiserror::Error)]
 pub enum PesExplorationError {
@@ -419,11 +440,11 @@ pub enum PesExplorationError {
         /// Final infinity norm.
         max_gradient: f64,
     },
-    /// rgsaddle stopped before the saddle force condition.
-    #[error("rgsaddle {stage} stopped before convergence")]
+    /// A saddle-search or certification stage stopped before its force condition.
+    #[error("{stage} stopped before convergence")]
     SaddleNotConverged {
         /// Saddle stage that stopped.
-        stage: &'static str,
+        stage: SaddleConvergenceStage,
     },
     /// The activation ray did not reach negative directional curvature.
     #[error(
@@ -1433,7 +1454,7 @@ where
         .map_err(|error| PesExplorationError::Saddle(error.to_string()))?;
     if min_mode_report.status != MinModeStatus::Converged {
         return Err(PesExplorationError::SaddleNotConverged {
-            stage: "minimum-mode ride",
+            stage: SaddleConvergenceStage::MinimumMode,
         });
     }
     if min_mode_report.curvature >= -config.negative_curvature_tolerance {
@@ -1447,7 +1468,7 @@ where
     let saddle_max_gradient = max_abs(saddle_gradient.view());
     if saddle_max_gradient > config.saddle_force_tolerance {
         return Err(PesExplorationError::SaddleNotConverged {
-            stage: "receiving-side force certification",
+            stage: SaddleConvergenceStage::ForceCertification,
         });
     }
     let index = stationary_index(
@@ -1651,7 +1672,7 @@ where
         .map_err(|error| PesExplorationError::Saddle(error.to_string()))?;
     if min_mode_report.status != MinModeStatus::Converged {
         return Err(PesExplorationError::SaddleNotConverged {
-            stage: "minimum-mode ride",
+            stage: SaddleConvergenceStage::MinimumMode,
         });
     }
     if min_mode_report.curvature >= -config.negative_curvature_tolerance {
@@ -1674,7 +1695,7 @@ where
             .map_err(|error| PesExplorationError::Saddle(error.to_string()))?;
         if !report.at_saddle {
             return Err(PesExplorationError::SaddleNotConverged {
-                stage: "Sella P-RFO refinement",
+                stage: SaddleConvergenceStage::Prfo,
             });
         }
         saddle_coordinates = prfo.position().to_owned();
@@ -1684,7 +1705,7 @@ where
     let saddle_max_gradient = max_abs(saddle_gradient.view());
     if saddle_max_gradient > config.saddle_force_tolerance {
         return Err(PesExplorationError::SaddleNotConverged {
-            stage: "receiving-side force certification",
+            stage: SaddleConvergenceStage::ForceCertification,
         });
     }
     let index = match cartesian_index {

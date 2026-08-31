@@ -21,7 +21,7 @@ pub mod mailbox;
 pub mod server;
 
 /// Wire protocol version accepted by this release.
-pub const PROTOCOL_VERSION: u16 = 20;
+pub const PROTOCOL_VERSION: u16 = 21;
 /// `Sample` draw that returns the active-catalog incumbent.
 pub const INCUMBENT_SAMPLE_DRAW: u64 = u64::MAX;
 
@@ -1717,6 +1717,9 @@ impl From<RideFailure> for WireRideFailure {
         match value {
             RideFailure::QuenchNotConverged => Self::QuenchNotConverged,
             RideFailure::SaddleNotConverged => Self::SaddleNotConverged,
+            RideFailure::MinimumModeNotConverged => Self::MinimumModeNotConverged,
+            RideFailure::PrfoNotConverged => Self::PrfoNotConverged,
+            RideFailure::SaddleForceNotConverged => Self::SaddleForceNotConverged,
             RideFailure::ActivationNotEscaped => Self::ActivationNotEscaped,
             RideFailure::MinimumModeLostCurvature => Self::MinimumModeLostCurvature,
             RideFailure::NoNegativeMode => Self::NoNegativeMode,
@@ -1735,6 +1738,9 @@ impl From<WireRideFailure> for RideFailure {
         match value {
             WireRideFailure::QuenchNotConverged => Self::QuenchNotConverged,
             WireRideFailure::SaddleNotConverged => Self::SaddleNotConverged,
+            WireRideFailure::MinimumModeNotConverged => Self::MinimumModeNotConverged,
+            WireRideFailure::PrfoNotConverged => Self::PrfoNotConverged,
+            WireRideFailure::SaddleForceNotConverged => Self::SaddleForceNotConverged,
             WireRideFailure::ActivationNotEscaped => Self::ActivationNotEscaped,
             WireRideFailure::MinimumModeLostCurvature => Self::MinimumModeLostCurvature,
             WireRideFailure::NoNegativeMode => Self::NoNegativeMode,
