@@ -185,6 +185,8 @@ mod run {
         DescriptorHole,
         /// Aligned displacement from an observed attraction-region crossing.
         BoundaryTransport,
+        /// Minimum--saddle--minimum endpoint certified by the coordinator.
+        TransitionRide,
         /// Synchronous fixed-population reconfiguration.
         PopulationReconfiguration,
         /// New random start after successive-halving prune.
@@ -2504,6 +2506,7 @@ mod run {
             ProposalFamily::CatalogSample => "catalog_sample",
             ProposalFamily::DescriptorHole => "descriptor_hole",
             ProposalFamily::BoundaryTransport => "boundary_transport",
+            ProposalFamily::TransitionRide => "transition_ride",
             ProposalFamily::PopulationReconfiguration => "population_reconfiguration",
             ProposalFamily::HyperbandReseed => "hyperband_reseed",
         }
