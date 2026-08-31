@@ -302,6 +302,10 @@ pub struct PesExplorationConfig {
     pub irc_steps: usize,
     /// Maximum Sella P-RFO refinement steps.
     pub prfo_steps: usize,
+    /// Number of expanding hyperspheres probed before minimum-mode following.
+    pub activation_attempts: usize,
+    /// Multiplicative radius increase while leaving the convex basin.
+    pub activation_growth: f64,
     /// Infinity-norm gradient threshold for a certified minimum.
     pub quench_gradient_tolerance: f64,
     /// Force threshold for the saddle sessions.
@@ -330,6 +334,8 @@ impl Default for PesExplorationConfig {
             saddle_steps: 1_000,
             irc_steps: 200,
             prfo_steps: 300,
+            activation_attempts: 4,
+            activation_growth: 2.0,
             quench_gradient_tolerance: 1e-6,
             saddle_force_tolerance: 1e-3,
             saddle_displacement: 0.1,
@@ -349,6 +355,7 @@ impl PesExplorationConfig {
             || self.saddle_steps == 0
             || self.irc_steps == 0
             || self.prfo_steps == 0
+            || self.activation_attempts == 0
         {
             return Err(PesExplorationError::InvalidConfig(
                 "iteration limits must be positive",
@@ -358,6 +365,7 @@ impl PesExplorationConfig {
             ("quench gradient tolerance", self.quench_gradient_tolerance),
             ("saddle force tolerance", self.saddle_force_tolerance),
             ("saddle displacement", self.saddle_displacement),
+            ("activation growth", self.activation_growth),
             ("Hessian finite-difference step", self.hessian_step),
             ("maximum move", self.maximum_move),
             ("IRC step", self.irc_step),
@@ -366,6 +374,11 @@ impl PesExplorationConfig {
             if !value.is_finite() || value <= 0.0 {
                 return Err(PesExplorationError::InvalidConfig(name));
             }
+        }
+        if self.activation_growth <= 1.0 {
+            return Err(PesExplorationError::InvalidConfig(
+                "activation growth must exceed one",
+            ));
         }
         if !self.negative_curvature_tolerance.is_finite() || self.negative_curvature_tolerance < 0.0
         {
@@ -1082,6 +1095,57 @@ fn normalize_mode(mode: ArrayView1<f64>) -> Result<Array1<f64>, PesExplorationEr
     Ok(mode.mapv(|value| value / norm))
 }
 
+fn directional_curvature<S: PesSurface + ?Sized>(
+    surface: &S,
+    coordinates: ArrayView1<f64>,
+    mode: ArrayView1<f64>,
+    step: f64,
+) -> Result<f64, PesExplorationError> {
+    let mode = normalize_mode(mode)?;
+    let plus = &coordinates + &(&mode * step);
+    let minus = &coordinates - &(&mode * step);
+    let (_, plus_gradient) = checked_evaluate(surface, plus.view())?;
+    let (_, minus_gradient) = checked_evaluate(surface, minus.view())?;
+    let hessian_mode = (&plus_gradient - &minus_gradient) / (2.0 * step);
+    let curvature = mode.dot(&hessian_mode);
+    if !curvature.is_finite() {
+        return Err(PesExplorationError::InvalidEvaluation(
+            "a nonfinite directional curvature",
+        ));
+    }
+    Ok(curvature)
+}
+
+fn bowl_breakout<S: PesSurface + ?Sized>(
+    surface: &S,
+    origin: ArrayView1<f64>,
+    mode: ArrayView1<f64>,
+    config: &PesExplorationConfig,
+) -> Result<Array1<f64>, PesExplorationError> {
+    let mode = normalize_mode(mode)?;
+    let mut radius = config.saddle_displacement;
+    let mut lowest_curvature = f64::INFINITY;
+    for _ in 0..config.activation_attempts {
+        let trial = &origin + &(&mode * radius);
+        let curvature =
+            directional_curvature(surface, trial.view(), mode.view(), config.hessian_step)?;
+        lowest_curvature = lowest_curvature.min(curvature);
+        if curvature < -config.negative_curvature_tolerance {
+            return Ok(trial);
+        }
+        radius *= config.activation_growth;
+        if !radius.is_finite() {
+            return Err(PesExplorationError::InvalidEvaluation(
+                "a nonfinite activation radius",
+            ));
+        }
+    }
+    Err(PesExplorationError::NotFirstOrder {
+        negative_modes: 0,
+        lowest_curvature,
+    })
+}
+
 fn roll_branch<S: PesSurface>(
     surface: &S,
     saddle: &Array1<f64>,
@@ -1142,7 +1206,12 @@ where
     let origin_minimum = quench(surface, start, config)?;
     let origin = network.admit_minimum(origin_minimum.clone(), witness);
     let mode = normalize_mode(mode)?;
-    let saddle_start = &origin_minimum.coordinates + &(&mode * config.saddle_displacement);
+    let saddle_start = bowl_breakout(
+        surface,
+        origin_minimum.coordinates.view(),
+        mode.view(),
+        config,
+    )?;
     let adapter = SaddleSurface(surface);
     let mut min_mode = MinModeSession::new(min_mode_config(config), saddle_start, mode)
         .map_err(|error| PesExplorationError::Saddle(error.to_string()))?;
@@ -1152,6 +1221,12 @@ where
     if min_mode_report.status != MinModeStatus::Converged {
         return Err(PesExplorationError::SaddleNotConverged {
             stage: "minimum-mode ride",
+        });
+    }
+    if min_mode_report.curvature >= -config.negative_curvature_tolerance {
+        return Err(PesExplorationError::NotFirstOrder {
+            negative_modes: 0,
+            lowest_curvature: min_mode_report.curvature,
         });
     }
 
@@ -1345,7 +1420,12 @@ where
     )?;
 
     let mode = normalize_mode(mode)?;
-    let saddle_start = &origin_minimum.coordinates + &(&mode * config.saddle_displacement);
+    let saddle_start = bowl_breakout(
+        surface,
+        origin_minimum.coordinates.view(),
+        mode.view(),
+        config,
+    )?;
     let adapter = SaddleSurface(surface);
     let mut min_mode = MinModeSession::new(min_mode_config(config), saddle_start, mode.clone())
         .map_err(|error| PesExplorationError::Saddle(error.to_string()))?;
@@ -1355,6 +1435,12 @@ where
     if min_mode_report.status != MinModeStatus::Converged {
         return Err(PesExplorationError::SaddleNotConverged {
             stage: "minimum-mode ride",
+        });
+    }
+    if min_mode_report.curvature >= -config.negative_curvature_tolerance {
+        return Err(PesExplorationError::NotFirstOrder {
+            negative_modes: 0,
+            lowest_curvature: min_mode_report.curvature,
         });
     }
     let mut saddle_coordinates = min_mode.position().to_owned();
