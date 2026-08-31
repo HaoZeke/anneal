@@ -2447,6 +2447,38 @@ fn finite_trace_energy(energy: f64) -> Option<f64> {
 }
 
 #[cfg(feature = "bank-rpc")]
+fn ride_checkpoint_action(
+    report: anneal_core::cooperative_search::RideReportOutcome,
+    destination: Option<Array1<f64>>,
+    producer_calls: u64,
+) -> CheckpointAction {
+    use anneal_core::cooperative_search::RideReportOutcome;
+
+    let known_producer_calls = usize::try_from(producer_calls).unwrap_or(usize::MAX);
+    match report {
+        RideReportOutcome::Credited(credit) => {
+            let total_calls = usize::try_from(credit.total_charged_evaluations)
+                .unwrap_or(usize::MAX);
+            match (credit.certified_connection, destination) {
+                (true, Some(state)) => CheckpointAction::ExternalProposal {
+                    state,
+                    action: "certified_ride".into(),
+                    external_calls: total_calls,
+                },
+                _ => CheckpointAction::ExternalWork {
+                    external_calls: total_calls,
+                },
+            }
+        }
+        RideReportOutcome::Rejected
+        | RideReportOutcome::LocalFallback
+        | RideReportOutcome::SharingDisabled => CheckpointAction::ExternalWork {
+            external_calls: known_producer_calls,
+        },
+    }
+}
+
+#[cfg(feature = "bank-rpc")]
 fn complete_checkpoint_trace<T>(
     cooperative: &mut anneal_core::cooperative_search::CooperativeRun,
     replica: u32,
