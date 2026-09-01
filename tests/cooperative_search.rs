@@ -29,9 +29,11 @@ use anneal_core::cooperative_search::{
     TraceKind, TransitionRecordOutcome,
 };
 use anneal_core::descriptor_space::{
-    DescriptorBlockKind, DescriptorBlockSpec, DescriptorSchema, DescriptorSpace,
+    DescriptorBlockKind, DescriptorBlockSpec, DescriptorGeometry, DescriptorSchema,
+    DescriptorSpace, universal_descriptor_space,
 };
 use anneal_core::pes_exploration::ExactStructureWitness;
+use anneal_core::ride_ledger::RideFailure;
 use anneal_core::transition_graph::AttractionRegionConfig;
 use ndarray::ArrayView1;
 
@@ -308,6 +310,114 @@ fn replicas_share_exclusive_ride_arms_and_coordinator_computes_edge_novelty() {
     assert!(!duplicate_credit.novel_edge);
     assert_eq!(first_credit.total_charged_evaluations, 159);
     assert_eq!(duplicate_credit.total_charged_evaluations, 148);
+}
+
+#[test]
+fn coordinator_schedules_each_universal_water_environment() {
+    let coordinates = vec![0.0, 0.0, 0.0, 0.7572, 0.5865, 0.0, -0.7572, 0.5865, 0.0];
+    let species = vec![8, 1, 1];
+    let descriptor_space = universal_descriptor_space(DescriptorGeometry::finite(1.32).unwrap());
+    let descriptor = descriptor_space
+        .describe(ArrayView1::from(&coordinates), Some(&species))
+        .unwrap();
+    let signature = SystemSignature {
+        atomic_numbers: species.clone(),
+        coordinate_dim: coordinates.len().try_into().unwrap(),
+        group_labels: vec![0, 1, 2],
+        group_schema: "independent-atoms-v1".into(),
+        frozen_mask: vec![false; 3],
+        cell: None,
+        periodic: [false; 3],
+        length_scale: 1.32,
+        energy_scale: 1.0,
+        engine: EngineSignature {
+            kind: "water-site-fixture".into(),
+            config_digest: [0x71; 32],
+            external_inputs: BTreeMap::new(),
+        },
+        descriptor: DescriptorSignature {
+            schema: descriptor.schema_name().into(),
+            version: descriptor.schema_version(),
+            hyperparameters: BTreeMap::new(),
+            species_channels: vec![1, 8],
+        },
+        validation_schema_version: 1,
+    };
+    let digest = signature.digest();
+    let candidate = CatalogCandidate {
+        producer_replica: 0,
+        coordinates: coordinates.clone(),
+        cell: None,
+        energy: -1.0,
+        forces: vec![0.0; coordinates.len()],
+        gradient_norm: 0.0,
+        descriptor: descriptor.values().to_vec(),
+        descriptor_schema_version: descriptor.schema_version(),
+        quench_converged: true,
+        charged_work: 1,
+        event_sequence: 1,
+        seed: 17,
+        census_basin: None,
+    };
+    let config = ServerConfig::new("jcc-2026", "scientific-ensemble", digest, [0])
+        .unwrap()
+        .with_scientific_state(
+            signature,
+            descriptor_space,
+            ValidatorConfig {
+                reference_coordinates: coordinates,
+                descriptor_dim: descriptor.values().len(),
+                min_separation: 0.5,
+                coordinate_tolerance: 1e-10,
+                max_gradient_norm: 1e-8,
+                energy_abs_tolerance: 1e-12,
+                energy_rel_tolerance: 1e-12,
+            },
+            4,
+            0.05,
+            1_000,
+            |coordinates| {
+                Ok(FreshEvaluation {
+                    energy: -1.0,
+                    forces: vec![0.0; coordinates.len()],
+                })
+            },
+        )
+        .unwrap()
+        .with_exact_structure_witness(SeparationWitness)
+        .unwrap();
+    let server = CatalogServer::start("127.0.0.1:0", config).unwrap();
+    let mut client =
+        CatalogClient::connect(server.addr(), identity(0, digest), ClientConfig::default())
+            .unwrap();
+    client.offer_candidate(1, candidate).unwrap();
+
+    let mut atoms = std::collections::BTreeSet::new();
+    let mut arms = std::collections::BTreeSet::new();
+    let mut sequence = 2;
+    for attempt in 0..16 {
+        let work = client
+            .claim_ride(sequence, 10_000 + attempt)
+            .unwrap()
+            .unwrap();
+        sequence += 1;
+        atoms.insert(work.order.representative_atom);
+        arms.insert(work.order.arm.clone());
+        client
+            .report_ride(
+                sequence,
+                CatalogRideReport {
+                    work: work.order.id,
+                    charged_evaluations: 1,
+                    outcome: CatalogRideOutcome::Failed(RideFailure::ActivationNotEscaped),
+                },
+            )
+            .unwrap();
+        sequence += 1;
+    }
+
+    assert_eq!(atoms, [0, 1].into_iter().collect());
+    assert_eq!(arms.len(), 16);
 }
 
 #[test]
