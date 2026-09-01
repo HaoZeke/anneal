@@ -26,6 +26,25 @@ impl PesSurface for DoubleWell {
     }
 }
 
+struct LastCoordinateDoubleWell;
+
+impl PesSurface for LastCoordinateDoubleWell {
+    type Error = Infallible;
+
+    fn evaluate(&self, coordinates: ArrayView1<f64>) -> Result<(f64, Array1<f64>), Self::Error> {
+        let reaction_index = coordinates.len() - 1;
+        let reaction = coordinates[reaction_index];
+        let mut energy = (reaction * reaction - 1.0).powi(2);
+        let mut gradient = Array1::zeros(coordinates.len());
+        gradient[reaction_index] = 4.0 * reaction * (reaction * reaction - 1.0);
+        for index in 0..reaction_index {
+            energy += coordinates[index] * coordinates[index];
+            gradient[index] = 2.0 * coordinates[index];
+        }
+        Ok((energy, gradient))
+    }
+}
+
 struct ComponentwiseConvergedSaddle;
 
 impl PesSurface for ComponentwiseConvergedSaddle {
@@ -193,6 +212,48 @@ fn rgmin_rgsaddle_connection_finds_both_double_well_minima() {
         assert!((minimum.coordinates[0].abs() - 1.0).abs() < 1e-5);
         assert!(minimum.max_gradient < config.quench_gradient_tolerance);
     }
+}
+
+#[test]
+fn prfo_handoff_preserves_a_nonleading_unstable_mode() {
+    let descriptor_space = universal_descriptor_space(DescriptorGeometry::finite(1.0).unwrap());
+    let mut network = PesNetwork::new();
+    let config = PesExplorationConfig {
+        ride_method: RideMethod::Lanczos,
+        quench_steps: 300,
+        saddle_steps: 500,
+        minimum_mode_force_tolerance: 5e-1,
+        irc_steps: 80,
+        prfo_steps: 50,
+        quench_gradient_tolerance: 1e-7,
+        saddle_force_tolerance: 1e-7,
+        saddle_displacement: 0.25,
+        refine_with_prfo: true,
+        ..PesExplorationConfig::default()
+    };
+    let mut start = Array1::zeros(6);
+    start[0] = 0.06;
+    start[5] = -0.82;
+    let mut mode = Array1::zeros(6);
+    mode[5] = 1.0;
+
+    let connection = discover_mode_connection(
+        &LastCoordinateDoubleWell,
+        &descriptor_space,
+        &mut network,
+        start.view(),
+        Array1::from_vec(vec![1.0, 1.0]).view(),
+        mode.view(),
+        Some(&[1, 1]),
+        &config,
+        &CartesianWitness { tolerance: 1e-4 },
+    )
+    .unwrap();
+
+    assert_eq!(connection.negative_modes, 1);
+    assert!(connection.saddle_coordinates[5].abs() < 1e-6);
+    assert!(connection.saddle_max_gradient <= config.saddle_force_tolerance);
+    assert_eq!(network.minimum_count(), 2);
 }
 
 #[test]
