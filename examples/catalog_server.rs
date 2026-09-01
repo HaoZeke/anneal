@@ -14,9 +14,11 @@
 //! invent a GFN2 energy.
 
 use anneal_core::catalog::lj::{
-    descriptor_space, fresh_evaluation, reference_coordinates, system_signature, validator_config,
+    CALIBRATION_IRA_TOLERANCE, descriptor_space, fresh_evaluation, reference_coordinates,
+    system_signature, validator_config,
 };
 use anneal_core::catalog_rpc::server::{CatalogServer, ServerConfig};
+use anneal_core::shape::IraStructureWitness;
 use anneal_core::transition_graph::AttractionRegionConfig;
 use std::io::Write;
 
@@ -82,6 +84,10 @@ fn run_lj_coordinator() -> Result<(), Box<dyn std::error::Error>> {
             total_work,
             move |coordinates| fresh_evaluation(n_points, coordinates),
         )?
+        .with_exact_structure_witness(IraStructureWitness {
+            kmax_factor: 1.8,
+            radius: CALIBRATION_IRA_TOLERANCE,
+        })?
         .with_attraction_region_config(AttractionRegionConfig {
             probe_action: "probe".into(),
             concentration,
@@ -162,6 +168,10 @@ fn run_gfn2_water_coordinator() -> Result<(), Box<dyn std::error::Error>> {
             total_work,
             move |coordinates| water_fresh_evaluation(n_molecules, coordinates),
         )?
+        .with_exact_structure_witness(IraStructureWitness {
+            kmax_factor: 1.8,
+            radius: 1e-4,
+        })?
         .with_attraction_region_config(AttractionRegionConfig {
             probe_action: "probe".into(),
             concentration,
