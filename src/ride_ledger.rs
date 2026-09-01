@@ -616,6 +616,11 @@ impl RideLedger {
         self.active.len()
     }
 
+    /// Active order identified by its coordinator-issued work id.
+    pub fn active_order(&self, work: u64) -> Option<&RideWorkOrder> {
+        self.active.get(&work)
+    }
+
     fn source_energy(&self, basin: u64) -> f64 {
         self.sources
             .get(&basin)

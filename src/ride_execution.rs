@@ -13,13 +13,14 @@ use ndarray::{Array1, ArrayView1};
 
 use crate::catalog::euclidean_gradient_norm;
 use crate::catalog_rpc::{
-    CatalogCandidate, CatalogRideConnection, CatalogRideOutcome, CatalogRideReport, CatalogRideWork,
+    CatalogCandidate, CatalogRideConnection, CatalogRideOutcome, CatalogRideReport,
+    CatalogRideSaddleEvidence, CatalogRideWork,
 };
 use crate::descriptor_space::DescriptorSpace;
 use crate::pes_exploration::{
     ExactStructureWitness, PesExplorationConfig, PesExplorationError, PesNetwork, PesSurface,
-    RideModeDirection, SaddleConvergenceStage, discover_cartesian_mode_connection,
-    localized_cartesian_mode,
+    RideModeDirection, SaddleConvergenceStage, deflate_cartesian_mode,
+    discover_cartesian_mode_connection, localized_cartesian_mode,
 };
 use crate::ride_ledger::{RideDirection, RideFailure};
 
@@ -283,7 +284,19 @@ where
         work.order.arm.mode_rank,
         direction(work.order.arm.direction),
     ) {
-        Ok(mode) => mode,
+        Ok(mode) => {
+            let avoided = work
+                .avoid_saddles
+                .iter()
+                .map(|saddle| saddle.coordinates.clone())
+                .collect::<Vec<_>>();
+            match deflate_cartesian_mode(source, mode.view(), &avoided, frozen_atoms, geometry) {
+                Ok(mode) => mode,
+                Err(error) => {
+                    return failed_report(work_id, 0, classify_failure(error, false));
+                }
+            }
+        }
         Err(error) => {
             return failed_report(work_id, 0, classify_failure(error, false));
         }
@@ -305,6 +318,8 @@ where
     ) {
         Ok(connection) => connection,
         Err(error) => {
+            let error_message = error.to_string();
+            let failure = classify_failure(error, counted.exhausted());
             if std::env::var_os("ANNEAL_PES_TRACE").is_some() {
                 eprintln!(
                     "{}",
@@ -312,15 +327,46 @@ where
                         "kind": "pes_failure",
                         "work": work_id,
                         "evaluations": counted.evaluations(),
-                        "error": error.to_string(),
+                        "error": error_message,
+                        "failure": format!("{failure:?}"),
                     })
                 );
             }
-            return failed_report(
-                work_id,
-                counted.evaluations(),
-                classify_failure(error, counted.exhausted()),
-            );
+            if failure == RideFailure::CollapsedConnection
+                && let Some(saddle) = network.unresolved_saddles().last()
+            {
+                match stationary_candidate(
+                    &counted,
+                    descriptor_space,
+                    saddle.saddle_coordinates.view(),
+                    species,
+                    work.order.replica,
+                    work.source.cell,
+                    config.producer_event_sequence,
+                    work.order.seed,
+                    config.producer_charged_work,
+                ) {
+                    Ok(saddle) => {
+                        return CatalogRideReport {
+                            work: work_id,
+                            charged_evaluations: counted.evaluations(),
+                            outcome: CatalogRideOutcome::Unresolved(CatalogRideSaddleEvidence {
+                                saddle,
+                                failure,
+                            }),
+                        };
+                    }
+                    Err(_) if counted.exhausted() => {
+                        return failed_report(
+                            work_id,
+                            counted.evaluations(),
+                            RideFailure::BudgetExhausted,
+                        );
+                    }
+                    Err(_) => {}
+                }
+            }
+            return failed_report(work_id, counted.evaluations(), failure);
         }
     };
     if connection

@@ -21,7 +21,7 @@ pub mod mailbox;
 pub mod server;
 
 /// Wire protocol version accepted by this release.
-pub const PROTOCOL_VERSION: u16 = 21;
+pub const PROTOCOL_VERSION: u16 = 22;
 /// `Sample` draw that returns the active-catalog incumbent.
 pub const INCUMBENT_SAMPLE_DRAW: u64 = u64::MAX;
 
@@ -129,11 +129,22 @@ pub struct CatalogRideConnection {
     pub endpoints: [CatalogCandidate; 2],
 }
 
+/// Producer-side index-one saddle whose branch identity remains unresolved.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CatalogRideSaddleEvidence {
+    /// Force-converged saddle requiring fresh receiving-side certification.
+    pub saddle: CatalogCandidate,
+    /// Connectivity classification produced after saddle convergence.
+    pub failure: RideFailure,
+}
+
 /// Producer evidence for one claimed transition experiment.
 #[derive(Debug, Clone, PartialEq)]
 pub enum CatalogRideOutcome {
     /// Stationary structures requiring fresh receiving-side certification.
     Certified(CatalogRideConnection),
+    /// A stationary saddle retained despite unresolved branch connectivity.
+    Unresolved(CatalogRideSaddleEvidence),
     /// Explicit local failure retained as shared negative evidence.
     Failed(RideFailure),
 }
@@ -156,6 +167,8 @@ pub struct CatalogRideWork {
     pub order: RideWorkOrder,
     /// Receiving-side validated source structure.
     pub source: CatalogCandidate,
+    /// Receiving-certified same-source saddles that new modes must avoid.
+    pub avoid_saddles: Vec<CatalogCandidate>,
 }
 
 /// Exact serialized outcome of one active-catalog admission attempt.
@@ -929,6 +942,11 @@ pub fn encode_request(request: &CatalogRequest) -> Result<Vec<u8>, ProtocolError
                     );
                     fill_candidate(certified.init_endpoint_b(), &connection.endpoints[1]);
                 }
+                CatalogRideOutcome::Unresolved(evidence) => {
+                    let mut unresolved = outcome.init_unresolved();
+                    fill_candidate(unresolved.reborrow().init_saddle(), &evidence.saddle);
+                    unresolved.set_failure(evidence.failure.into());
+                }
                 CatalogRideOutcome::Failed(failure) => outcome.set_failed((*failure).into()),
             }
         }
@@ -1103,6 +1121,13 @@ pub(crate) fn decode_request_reader(
                         ],
                     })
                 }
+                ride_report_request::outcome::Unresolved(unresolved) => {
+                    let unresolved = unresolved.map_err(wire_error)?;
+                    CatalogRideOutcome::Unresolved(CatalogRideSaddleEvidence {
+                        saddle: read_candidate(unresolved.get_saddle().map_err(wire_error)?)?,
+                        failure: unresolved.get_failure().map_err(wire_error)?.into(),
+                    })
+                }
                 ride_report_request::outcome::Failed(failure) => {
                     CatalogRideOutcome::Failed(failure.map_err(wire_error)?.into())
                 }
@@ -1247,7 +1272,11 @@ pub(crate) fn encode_reply(reply: CatalogReply) -> Result<Vec<u8>, ProtocolError
                     output.set_method(work.order.arm.method.into());
                     output.set_attempt(work.order.attempt);
                     output.set_seed(work.order.seed);
-                    fill_candidate(output.init_source(), &work.source);
+                    fill_candidate(output.reborrow().init_source(), &work.source);
+                    let mut avoided = output.init_avoid_saddles(work.avoid_saddles.len() as u32);
+                    for (index, saddle) in work.avoid_saddles.iter().enumerate() {
+                        fill_candidate(avoided.reborrow().get(index as u32), saddle);
+                    }
                 }
                 AcceptedPayload::RideCredit(credit) => {
                     let mut output = payload.init_ride_credit();
@@ -1451,6 +1480,12 @@ pub(crate) fn decode_reply_reader(
                 accepted_reply::payload::RideWork(work) => {
                     let work = work.map_err(wire_error)?;
                     let source = read_candidate(work.get_source().map_err(wire_error)?)?;
+                    let avoid_saddles = work
+                        .get_avoid_saddles()
+                        .map_err(wire_error)?
+                        .iter()
+                        .map(read_candidate)
+                        .collect::<Result<Vec<_>, _>>()?;
                     AcceptedPayload::RideWork(CatalogRideWork {
                         order: RideWorkOrder {
                             id: work.get_id(),
@@ -1467,6 +1502,7 @@ pub(crate) fn decode_reply_reader(
                             seed: work.get_seed(),
                         },
                         source,
+                        avoid_saddles,
                     })
                 }
                 accepted_reply::payload::RideCredit(credit) => {

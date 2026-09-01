@@ -291,6 +291,9 @@ struct RideWorkOrder {
   seed @8 :UInt64;
   source @9 :CandidateRecord;
   replica @10 :UInt32;
+  # Same-source stationary saddles already found by another experiment. A
+  # worker removes their source-to-saddle escape directions from new modes.
+  avoidSaddles @11 :List(CandidateRecord);
 }
 
 struct RideCertifiedConnection {
@@ -303,12 +306,21 @@ struct RideCertifiedConnection {
   endpointB @2 :CandidateRecord;
 }
 
+struct RideUnresolvedSaddle {
+  # Producer-side stationary candidate. The coordinator applies the same
+  # fresh force and index certification as it does for a complete connection.
+  saddle @0 :CandidateRecord;
+  # Connectivity classification observed after the saddle was certified.
+  failure @1 :RideFailure;
+}
+
 struct RideReportRequest {
   work @0 :UInt64;
   chargedEvaluations @1 :UInt64;
   outcome :union {
     certified @2 :RideCertifiedConnection;
     failed @3 :RideFailure;
+    unresolved @4 :RideUnresolvedSaddle;
   }
 }
 

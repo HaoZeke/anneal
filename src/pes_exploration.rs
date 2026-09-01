@@ -467,6 +467,97 @@ pub fn localized_cartesian_mode(
     Ok(mode * direction.sign())
 }
 
+/// Remove escape directions leading to already certified saddles.
+///
+/// Every avoided saddle is expressed in the same labelled Cartesian frame as
+/// `coordinates`. Minimum-image displacements are projected onto the live
+/// free-coordinate tangent space and orthonormalized before they are removed
+/// from `mode`. If the supplied mode lies entirely in the known subspace, the
+/// largest remaining canonical tangent direction provides a deterministic
+/// replacement.
+pub fn deflate_cartesian_mode(
+    coordinates: ArrayView1<f64>,
+    mode: ArrayView1<f64>,
+    avoided_saddles: &[Vec<f64>],
+    frozen_atoms: &[bool],
+    geometry: DescriptorGeometry,
+) -> Result<Array1<f64>, PesExplorationError> {
+    if coordinates.is_empty()
+        || !coordinates.len().is_multiple_of(3)
+        || mode.len() != coordinates.len()
+        || frozen_atoms.len() * 3 != coordinates.len()
+    {
+        return Err(PesExplorationError::InvalidShape(
+            "known-saddle deflation needs matching 3N coordinates",
+        ));
+    }
+    let constraints = activation_basis(coordinates, Some((frozen_atoms, geometry.periodic())));
+    let mut deflated = mode.to_owned();
+    project_rigid_with(&mut deflated, &constraints);
+    let mut known_directions = Vec::<Array1<f64>>::new();
+    for saddle in avoided_saddles {
+        if saddle.len() != coordinates.len() || saddle.iter().any(|value| !value.is_finite()) {
+            return Err(PesExplorationError::InvalidShape(
+                "known saddle must match the source coordinates",
+            ));
+        }
+        let mut direction = Array1::zeros(coordinates.len());
+        for atom in 0..frozen_atoms.len() {
+            let displacement = geometry.displacement([
+                saddle[3 * atom] - coordinates[3 * atom],
+                saddle[3 * atom + 1] - coordinates[3 * atom + 1],
+                saddle[3 * atom + 2] - coordinates[3 * atom + 2],
+            ]);
+            for axis in 0..3 {
+                direction[3 * atom + axis] = displacement[axis];
+            }
+        }
+        project_rigid_with(&mut direction, &constraints);
+        for known in &known_directions {
+            direction -= &(known * direction.dot(known));
+        }
+        let norm = direction.dot(&direction).sqrt();
+        if norm > 1e-10 {
+            known_directions.push(direction / norm);
+        }
+    }
+    for known in &known_directions {
+        deflated -= &(known * deflated.dot(known));
+    }
+    let mut norm = deflated.dot(&deflated).sqrt();
+    if norm <= 1e-10 {
+        let mut replacement = None::<(f64, Array1<f64>)>;
+        for coordinate in 0..coordinates.len() {
+            let mut candidate = Array1::zeros(coordinates.len());
+            candidate[coordinate] = 1.0;
+            project_rigid_with(&mut candidate, &constraints);
+            for known in &known_directions {
+                candidate -= &(known * candidate.dot(known));
+            }
+            let candidate_norm = candidate.dot(&candidate).sqrt();
+            if replacement
+                .as_ref()
+                .is_none_or(|(best_norm, _)| candidate_norm > *best_norm)
+            {
+                replacement = Some((candidate_norm, candidate));
+            }
+        }
+        let Some((replacement_norm, candidate)) = replacement else {
+            return Err(PesExplorationError::InvalidShape(
+                "known saddles span every free Cartesian direction",
+            ));
+        };
+        if replacement_norm <= 1e-10 {
+            return Err(PesExplorationError::InvalidShape(
+                "known saddles span every free Cartesian direction",
+            ));
+        }
+        deflated = candidate;
+        norm = replacement_norm;
+    }
+    Ok(deflated / norm)
+}
+
 /// Controls for one minimum--saddle--minimum connection attempt.
 #[derive(Debug, Clone)]
 pub struct PesExplorationConfig {

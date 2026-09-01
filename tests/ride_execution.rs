@@ -159,6 +159,7 @@ fn work(direction: RideDirection) -> CatalogRideWork {
             seed: 5,
             census_basin: Some(3),
         },
+        avoid_saddles: Vec::new(),
     }
 }
 
