@@ -5,7 +5,7 @@
 //! keeps catalog admission independent of a fixed descriptor radius while the
 //! same universal descriptor remains available for novelty and acquisition.
 
-use std::fmt::Display;
+use std::fmt::{Display, Formatter};
 use std::sync::Mutex;
 
 use ndarray::{Array1, Array2, ArrayView1, ArrayView2};
@@ -1076,6 +1076,17 @@ pub struct NdSaddleConnection {
     pub ride_method: RideMethod,
 }
 
+/// Result and exact potential charge of one budgeted N-dimensional ridge ride.
+#[derive(Debug)]
+pub struct NdConnectionAttempt {
+    /// Certified connection or the scientific failure returned by the ride.
+    pub connection: Result<NdSaddleConnection, PesExplorationError>,
+    /// PES evaluations accepted by the hard counter.
+    pub charged_evaluations: u64,
+    /// Whether the ride attempted an evaluation beyond its assigned slice.
+    pub budget_exhausted: bool,
+}
+
 /// Exact stationary-point graph for a single arbitrary-dimensional surface.
 ///
 /// Point coordinates are used only to order exact-witness checks. The graph
@@ -1230,6 +1241,65 @@ where
     fn eval(&self, coordinates: ArrayView1<f64>) -> Result<(f64, Array1<f64>), SaddleError> {
         checked_evaluate(self.0, coordinates)
             .map_err(|error| SaddleError::Surface(error.to_string()))
+    }
+}
+
+#[derive(Debug)]
+enum EvaluationBudgetError {
+    Exhausted,
+    Surface(String),
+}
+
+impl Display for EvaluationBudgetError {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Exhausted => formatter.write_str("PES-call budget exhausted"),
+            Self::Surface(error) => formatter.write_str(error),
+        }
+    }
+}
+
+struct EvaluationBudgetSurface<'a, S: ?Sized> {
+    surface: &'a S,
+    maximum_evaluations: u64,
+    state: Mutex<(u64, bool)>,
+}
+
+impl<'a, S: ?Sized> EvaluationBudgetSurface<'a, S> {
+    fn new(surface: &'a S, maximum_evaluations: u64) -> Self {
+        Self {
+            surface,
+            maximum_evaluations,
+            state: Mutex::new((0, false)),
+        }
+    }
+
+    fn state(&self) -> (u64, bool) {
+        *self.state.lock().unwrap_or_else(|error| error.into_inner())
+    }
+}
+
+impl<S> PesSurface for EvaluationBudgetSurface<'_, S>
+where
+    S: PesSurface + ?Sized,
+{
+    type Error = EvaluationBudgetError;
+
+    fn evaluate(
+        &self,
+        coordinates: ArrayView1<'_, f64>,
+    ) -> Result<(f64, Array1<f64>), Self::Error> {
+        {
+            let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
+            if state.0 >= self.maximum_evaluations {
+                state.1 = true;
+                return Err(EvaluationBudgetError::Exhausted);
+            }
+            state.0 += 1;
+        }
+        self.surface
+            .evaluate(coordinates)
+            .map_err(|error| EvaluationBudgetError::Surface(error.to_string()))
     }
 }
 
@@ -2728,6 +2798,35 @@ where
     }
 
     Ok(network.admit_saddle(candidate, witness))
+}
+
+/// Run one N-dimensional ridge ride under a hard PES-evaluation boundary.
+///
+/// Calls refused at the boundary are not charged. The supplied network keeps
+/// any certified minima or unresolved saddle evidence accumulated before a
+/// scientific failure, so a hybrid explorer can reuse the evidence.
+#[allow(clippy::too_many_arguments)]
+pub fn discover_nd_connection_with_budget<S, W>(
+    surface: &S,
+    network: &mut NdPesNetwork,
+    start: ArrayView1<f64>,
+    mode: ArrayView1<f64>,
+    config: &PesExplorationConfig,
+    witness: &W,
+    maximum_evaluations: u64,
+) -> NdConnectionAttempt
+where
+    S: PesSurface + ?Sized,
+    W: ExactStructureWitness + ?Sized,
+{
+    let budgeted = EvaluationBudgetSurface::new(surface, maximum_evaluations);
+    let connection = discover_nd_connection(&budgeted, network, start, mode, config, witness);
+    let (charged_evaluations, budget_exhausted) = budgeted.state();
+    NdConnectionAttempt {
+        connection,
+        charged_evaluations,
+        budget_exhausted,
+    }
 }
 
 /// Quench a basin, ride one supplied mode, roll both IRC branches, and admit
