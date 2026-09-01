@@ -98,6 +98,12 @@ pub enum ShapeError {
     NonBijectivePermutation,
     /// Structures hold different numbers of points, so no permutation exists.
     SizeMismatch(usize, usize),
+    /// A species array does not carry one entry per Cartesian point.
+    SpeciesDimension(usize, usize),
+    /// Species populations differ, so no species-preserving permutation exists.
+    SpeciesMismatch,
+    /// An atomic number cannot be represented by IRA's integer interface.
+    SpeciesValue(u32),
     /// IRA reported a non-zero status, or anneal refused the call because
     /// the point set cannot define a basis (`DEGENERATE_BASIS`).
     Library(i32),
@@ -112,6 +118,16 @@ impl std::fmt::Display for ShapeError {
         match self {
             ShapeError::SizeMismatch(a, b) => {
                 write!(f, "shape match needs equal point counts, got {a} and {b}")
+            }
+            ShapeError::SpeciesDimension(atoms, species) => write!(
+                f,
+                "shape match needs one species per point, got {atoms} points and {species} species"
+            ),
+            ShapeError::SpeciesMismatch => {
+                write!(f, "shape match needs equal species populations")
+            }
+            ShapeError::SpeciesValue(value) => {
+                write!(f, "atomic number {value} is outside IRA's integer range")
             }
             ShapeError::NotThreeDimensional(n) => {
                 write!(f, "coordinate length {n} is not a multiple of three")
@@ -276,11 +292,71 @@ pub fn match_shapes(
     b: ArrayView1<f64>,
     kmax_factor: f64,
 ) -> Result<Match, ShapeError> {
+    validate_point_counts(a, b)?;
+    let n1 = a.len() / 3;
+    let types = vec![1_i32; n1];
+    match_shapes_with_types(a, &types, b, &types, kmax_factor)
+}
+
+/// Optimal rigid match constrained to permutations within atomic species.
+pub fn match_shapes_typed(
+    a: ArrayView1<f64>,
+    species_a: &[u32],
+    b: ArrayView1<f64>,
+    species_b: &[u32],
+    kmax_factor: f64,
+) -> Result<Match, ShapeError> {
+    validate_point_counts(a, b)?;
+    let n1 = a.len() / 3;
+    let n2 = b.len() / 3;
+    if species_a.len() != n1 {
+        return Err(ShapeError::SpeciesDimension(n1, species_a.len()));
+    }
+    if species_b.len() != n2 {
+        return Err(ShapeError::SpeciesDimension(n2, species_b.len()));
+    }
+    let mut population_a = species_a.to_vec();
+    let mut population_b = species_b.to_vec();
+    population_a.sort_unstable();
+    population_b.sort_unstable();
+    if population_a != population_b {
+        return Err(ShapeError::SpeciesMismatch);
+    }
+    let types_a = species_a
+        .iter()
+        .map(|&species| c_int::try_from(species).map_err(|_| ShapeError::SpeciesValue(species)))
+        .collect::<Result<Vec<_>, _>>()?;
+    let types_b = species_b
+        .iter()
+        .map(|&species| c_int::try_from(species).map_err(|_| ShapeError::SpeciesValue(species)))
+        .collect::<Result<Vec<_>, _>>()?;
+    match_shapes_with_types(a, &types_a, b, &types_b, kmax_factor)
+}
+
+fn validate_point_counts(a: ArrayView1<f64>, b: ArrayView1<f64>) -> Result<(), ShapeError> {
+    if !a.len().is_multiple_of(3) {
+        return Err(ShapeError::NotThreeDimensional(a.len()));
+    }
+    if !b.len().is_multiple_of(3) {
+        return Err(ShapeError::NotThreeDimensional(b.len()));
+    }
     let n1 = a.len() / 3;
     let n2 = b.len() / 3;
     if n1 != n2 || n1 == 0 {
         return Err(ShapeError::SizeMismatch(n1, n2));
     }
+    Ok(())
+}
+
+fn match_shapes_with_types(
+    a: ArrayView1<f64>,
+    types_a: &[c_int],
+    b: ArrayView1<f64>,
+    types_b: &[c_int],
+    kmax_factor: f64,
+) -> Result<Match, ShapeError> {
+    let n1 = a.len() / 3;
+    let n2 = b.len() / 3;
     // IRA builds its frames from three points of the structure and indexes
     // one past the atom count when no such triple exists, reading outside
     // `coords1`. A coincident or collinear set is the case that reaches it:
@@ -293,7 +369,6 @@ pub fn match_shapes(
     // IRA expects contiguous row-major coordinates; a view may be strided.
     let ca: Vec<f64> = a.iter().copied().collect();
     let cb: Vec<f64> = b.iter().copied().collect();
-    let typ = vec![1_i32; n1];
 
     // Length `nat` with a leading -1, the sentinel IRA's own interface uses for
     // equal atom counts to mean "choose your own frames". A null pointer is not
@@ -352,11 +427,11 @@ pub fn match_shapes(
     unsafe {
         libira_match(
             n1 as c_int,
-            typ.as_ptr(),
+            types_a.as_ptr(),
             ca.as_ptr(),
             candidate_a.as_ptr(),
             n2 as c_int,
-            typ.as_ptr(),
+            types_b.as_ptr(),
             cb.as_ptr(),
             candidate_b.as_ptr(),
             kmax_factor,
@@ -438,6 +513,43 @@ impl IraMetric {
         match_shapes(a, b, self.kmax_factor)
             .map(|m| m.distance)
             .unwrap_or(f64::INFINITY)
+    }
+}
+
+/// Exact stationary-structure witness using rigid, species-aware IRA matching.
+pub struct IraStructureWitness {
+    /// Search breadth passed to IRA.
+    pub kmax_factor: f64,
+    /// Largest Hausdorff distance accepted as one stationary structure.
+    pub radius: f64,
+}
+
+impl crate::pes_exploration::ExactStructureWitness for IraStructureWitness {
+    fn equivalent(&self, left: ArrayView1<f64>, right: ArrayView1<f64>) -> bool {
+        match_shapes(left, right, self.kmax_factor)
+            .is_ok_and(|matched| matched.distance <= self.radius)
+    }
+
+    fn equivalent_structures(
+        &self,
+        left: crate::pes_exploration::StructureView<'_>,
+        right: crate::pes_exploration::StructureView<'_>,
+    ) -> bool {
+        if left.context != right.context {
+            return false;
+        }
+        match (left.context.species(), right.context.species()) {
+            (Some(species_left), Some(species_right)) => match_shapes_typed(
+                left.coordinates,
+                species_left,
+                right.coordinates,
+                species_right,
+                self.kmax_factor,
+            )
+            .is_ok_and(|matched| matched.distance <= self.radius),
+            (None, None) => self.equivalent(left.coordinates, right.coordinates),
+            _ => false,
+        }
     }
 }
 

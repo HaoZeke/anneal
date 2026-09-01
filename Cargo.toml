@@ -138,7 +138,7 @@ required-features = ["bank-rpc"]
 
 [[example]]
 name = "catalog_server"
-required-features = ["bank-rpc"]
+required-features = ["bank-rpc", "ira"]
 
 [[example]]
 name = "ttt_lj38"
