@@ -6,11 +6,13 @@
 
 #![allow(dead_code)]
 
+use anneal_core::catalog::FreshEvaluation;
 use anneal_core::compatibility::{AbiStamp, EngineDescriptor, ProtocolVersion};
 use eindir_core::ffi::{
     EindirObjectiveWrapper, eindir_core_abi_compatible, eindir_objective_descriptor,
     eindir_objective_t,
 };
+use eindir_core::gradient::DifferentiableObjective;
 use libloading::{Library, Symbol};
 use rgpot_core::eindir::{
     rgpot_eindir_abi_stamp, rgpot_potential_free_eindir, rgpot_potential_new_eindir,
@@ -257,7 +259,12 @@ unsafe extern "C" fn drop_cuh2(p: *mut c_void) {
 /// An rgpot potential viewed as an eindir objective.
 pub(crate) struct RgpotObjective {
     pot: *mut rgpot_core::eindir::rgpot_potential_t,
+    dim: usize,
 }
+
+// SAFETY: the handle is uniquely owned and rgpot declares its embedded
+// potential Send. Callers serialize evaluation because the handle is not Sync.
+unsafe impl Send for RgpotObjective {}
 
 impl Drop for RgpotObjective {
     fn drop(&mut self) {
@@ -277,6 +284,25 @@ impl RgpotObjective {
         let semantic_descriptor = unsafe { eindir_objective_descriptor(obj) };
         assert!(!semantic_descriptor.is_null());
         unsafe { EindirObjectiveWrapper::new(obj) }
+    }
+
+    pub(crate) fn fresh_evaluation(&self, coordinates: &[f64]) -> Result<FreshEvaluation, String> {
+        if coordinates.len() != self.dim || coordinates.iter().any(|value| !value.is_finite()) {
+            return Err("rgpot coordinate dimension or values are invalid".into());
+        }
+        let objective = self.wrapper();
+        let (energy, gradient) =
+            objective.value_and_gradient(ndarray::ArrayView1::from(coordinates));
+        if !energy.is_finite()
+            || gradient.len() != self.dim
+            || gradient.iter().any(|value| !value.is_finite())
+        {
+            return Err("rgpot returned an invalid energy or gradient".into());
+        }
+        Ok(FreshEvaluation {
+            energy,
+            forces: gradient.iter().map(|value| -*value).collect(),
+        })
     }
 
     pub(crate) fn xtb(atmnrs: &[i32], box_: [f64; 9]) -> Self {
@@ -335,7 +361,10 @@ impl RgpotObjective {
         assert!(!handle.is_null(), "rgpot_potential_new_eindir xtb");
         println!("  eindir objective from rgpot xtb ({})", path.display());
         let _ = std::io::Write::flush(&mut std::io::stdout());
-        Self { pot: handle }
+        Self {
+            pot: handle,
+            dim: 3 * n,
+        }
     }
 
     pub(crate) fn cuh2(atmnrs: &[i32], box_: [f64; 9]) -> Self {
@@ -368,6 +397,9 @@ impl RgpotObjective {
         assert!(!handle.is_null(), "rgpot_potential_new_eindir cuh2");
         println!("  eindir objective from rgpot cuh2 ({})", path.display());
         let _ = std::io::Write::flush(&mut std::io::stdout());
-        Self { pot: handle }
+        Self {
+            pot: handle,
+            dim: 3 * n,
+        }
     }
 }
