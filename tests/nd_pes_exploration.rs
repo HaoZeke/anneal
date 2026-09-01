@@ -141,6 +141,38 @@ fn generic_nd_ride_certifies_both_minima_without_atomistic_metadata() {
 }
 
 #[test]
+fn loose_minimum_mode_handoff_retains_strict_prfo_certification() {
+    let mut network = NdPesNetwork::new();
+    let config = PesExplorationConfig {
+        ride_method: RideMethod::Lanczos,
+        quench_steps: 300,
+        saddle_steps: 100,
+        prfo_steps: 100,
+        minimum_mode_force_tolerance: 5e-2,
+        quench_gradient_tolerance: 1e-8,
+        saddle_force_tolerance: 1e-8,
+        saddle_displacement: 0.2,
+        irc_step: 0.08,
+        refine_with_prfo: true,
+        ..PesExplorationConfig::default()
+    };
+
+    let connection = discover_nd_connection(
+        &FiveDimensionalDoubleWell,
+        &mut network,
+        Array1::from_vec(vec![-0.83, 0.12, -0.07, 0.03, 0.09]).view(),
+        Array1::from_vec(vec![1.0, 0.0, 0.0, 0.0, 0.0]).view(),
+        &config,
+        &PointWitness,
+    )
+    .unwrap();
+
+    assert_eq!(connection.negative_modes, 1);
+    assert!(connection.saddle_max_gradient < config.saddle_force_tolerance);
+    assert_eq!(network.minimum_count(), 2);
+}
+
+#[test]
 fn adaptive_branch_displacement_separates_a_force_converged_shallow_saddle() {
     let mut network = NdPesNetwork::new();
     let config = PesExplorationConfig {
