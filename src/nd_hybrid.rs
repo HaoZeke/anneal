@@ -6,12 +6,16 @@
 //! caller-supplied surface and witness; no identity, energy model, or evidence
 //! crosses between systems.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use ndarray::{Array1, ArrayView1};
-use rand::{SeedableRng, rngs::StdRng};
+use rand::{Rng, SeedableRng, rngs::StdRng};
 
 use crate::allocate::{ChargedDiscoveryAllocator, FlooredThompson};
+use crate::catalog::{
+    PRODUCTION_MAX_UNSEEN_MASS, PRODUCTION_MINIMUM_VISITS, leftover_esty_stable,
+    leftover_esty_upper,
+};
 use crate::methods::minima_hopping::EscapeFeedback;
 use crate::movekernel::{Gaussian, MoveKernel, TsallisVisit};
 use crate::pes_exploration::{
@@ -85,6 +89,12 @@ pub struct NdHybridEvent {
     pub new_saddle_ids: Vec<usize>,
     /// Unresolved index-one saddle identities introduced by this event.
     pub new_unresolved_saddle_ids: Vec<usize>,
+    /// Successful source quenches included in the exact-basin census.
+    pub escape_observations: u64,
+    /// Esty one-sided upper bound on unseen exact-basin mass.
+    pub escape_unseen_mass_upper: Option<f64>,
+    /// Whether the source census meets its visit and unseen-mass criteria.
+    pub escape_coverage_saturated: bool,
     /// PES evaluations charged to this event.
     pub charged_evaluations: u64,
     /// Whether the selected numerical path returned its certified object.
@@ -125,6 +135,14 @@ pub struct NdHybridReport {
     pub move_pulls: Vec<usize>,
     /// Posterior exact-basin discovery rates for the escape proposals.
     pub move_success_rates: Vec<f64>,
+    /// Successful source quenches included in the exact-basin census.
+    pub escape_observations: u64,
+    /// Exact basins represented by one source-quench observation.
+    pub escape_singletons: u64,
+    /// Esty one-sided upper bound on unseen exact-basin mass.
+    pub escape_unseen_mass_upper: Option<f64>,
+    /// Whether the source census meets its visit and unseen-mass criteria.
+    pub escape_coverage_saturated: bool,
     /// Terminal budget condition.
     pub termination: NdHybridTermination,
 }
@@ -231,6 +249,47 @@ fn new_ids(before: usize, after: usize) -> Vec<usize> {
     (before..after).collect()
 }
 
+#[derive(Debug, Clone, Copy)]
+struct EscapeCoverageEvidence {
+    observations: u64,
+    singletons: u64,
+    unseen_mass_upper: Option<f64>,
+    saturated: bool,
+}
+
+#[derive(Debug, Default)]
+struct EscapeCoverage {
+    visits: HashMap<usize, u64>,
+    observations: u64,
+}
+
+impl EscapeCoverage {
+    fn observe(&mut self, basin: usize) {
+        self.observations = self.observations.saturating_add(1);
+        let visits = self.visits.entry(basin).or_insert(0);
+        *visits = visits.saturating_add(1);
+    }
+
+    fn evidence(&self) -> EscapeCoverageEvidence {
+        let singletons = self.visits.values().filter(|visits| **visits == 1).count() as u64;
+        let doubletons = self.visits.values().filter(|visits| **visits == 2).count() as u64;
+        let unseen_mass_upper = leftover_esty_upper(self.observations, singletons, doubletons);
+        let saturated = self.observations >= PRODUCTION_MINIMUM_VISITS
+            && leftover_esty_stable(
+                self.observations,
+                singletons,
+                doubletons,
+                PRODUCTION_MAX_UNSEEN_MASS,
+            );
+        EscapeCoverageEvidence {
+            observations: self.observations,
+            singletons,
+            unseen_mass_upper,
+            saturated,
+        }
+    }
+}
+
 /// Explore one arbitrary-dimensional PES with cooperative basin and ridge arms.
 ///
 /// Every discovered minimum enters one exact-witness network immediately. The
@@ -311,6 +370,8 @@ where
         config.initial_acceptance_threshold,
     );
     escape_feedback.observe(None, live_basin);
+    let mut escape_coverage = EscapeCoverage::default();
+    escape_coverage.observe(live_basin);
     let tsallis = TsallisVisit::new(config.visiting_q);
     let ranks = dimension * usize::from(config.ride_mode_blocks);
     let mut attempted = HashSet::new();
@@ -323,7 +384,19 @@ where
             break NdHybridTermination::BudgetConsumed;
         }
         let ride_task = next_ride_task(&network, &attempted, source_cursor, ranks);
+        let coverage = escape_coverage.evidence();
         let selected = match policy {
+            NdHybridPolicy::Adaptive if ride_task.is_some() && coverage.saturated => {
+                let escape_probability = coverage
+                    .unseen_mass_upper
+                    .unwrap_or(PRODUCTION_MAX_UNSEEN_MASS)
+                    .clamp(0.02, PRODUCTION_MAX_UNSEEN_MASS);
+                if rng.random::<f64>() < escape_probability {
+                    ESCAPE_ARM
+                } else {
+                    RIDGE_ARM
+                }
+            }
             NdHybridPolicy::Adaptive if ride_task.is_some() => mechanism_allocator.select(&mut rng),
             NdHybridPolicy::Adaptive => ESCAPE_ARM,
             NdHybridPolicy::RidgeOnly if ride_task.is_some() => RIDGE_ARM,
@@ -367,6 +440,7 @@ where
             let converged = ridge.connection.is_ok();
             let error = ridge.connection.err().map(|error| error.to_string());
             let event_charge = ridge.charged_evaluations;
+            let coverage = escape_coverage.evidence();
             events.push(NdHybridEvent {
                 attempt,
                 mechanism: NdHybridMechanism::Ridge,
@@ -376,6 +450,9 @@ where
                 new_minimum_ids,
                 new_saddle_ids,
                 new_unresolved_saddle_ids,
+                escape_observations: coverage.observations,
+                escape_unseen_mass_upper: coverage.unseen_mass_upper,
+                escape_coverage_saturated: coverage.saturated,
                 charged_evaluations: event_charge,
                 converged,
                 budget_exhausted: ridge.budget_exhausted,
@@ -417,6 +494,7 @@ where
                     .min(config.evaluation_budget);
                 let event_charge = failure.charged_evaluations;
                 let budget_exhausted = failure.error.contains("budget exhausted");
+                let coverage = escape_coverage.evidence();
                 events.push(NdHybridEvent {
                     attempt,
                     mechanism: NdHybridMechanism::BasinEscape,
@@ -426,6 +504,9 @@ where
                     new_minimum_ids: Vec::new(),
                     new_saddle_ids: Vec::new(),
                     new_unresolved_saddle_ids: Vec::new(),
+                    escape_observations: coverage.observations,
+                    escape_unseen_mass_upper: coverage.unseen_mass_upper,
+                    escape_coverage_saturated: coverage.saturated,
                     charged_evaluations: event_charge,
                     converged: false,
                     budget_exhausted,
@@ -442,6 +523,7 @@ where
                 let discovered = admission.is_new;
                 let new_minimum_ids = discovered.then_some(admission.id).into_iter().collect();
                 escape_feedback.observe(Some(live_basin), admission.id);
+                escape_coverage.observe(admission.id);
                 let accepted = escape_feedback.accept(candidate_energy - live_energy);
                 if accepted {
                     live_basin = admission.id;
@@ -458,6 +540,7 @@ where
                     .saturating_add(record.charged_evaluations)
                     .min(config.evaluation_budget);
                 let event_charge = record.charged_evaluations;
+                let coverage = escape_coverage.evidence();
                 events.push(NdHybridEvent {
                     attempt,
                     mechanism: NdHybridMechanism::BasinEscape,
@@ -467,6 +550,9 @@ where
                     new_minimum_ids,
                     new_saddle_ids: Vec::new(),
                     new_unresolved_saddle_ids: Vec::new(),
+                    escape_observations: coverage.observations,
+                    escape_unseen_mass_upper: coverage.unseen_mass_upper,
+                    escape_coverage_saturated: coverage.saturated,
                     charged_evaluations: event_charge,
                     converged: true,
                     budget_exhausted: false,
@@ -479,6 +565,7 @@ where
         }
     };
 
+    let coverage = escape_coverage.evidence();
     Ok(NdHybridReport {
         network,
         policy,
@@ -488,6 +575,10 @@ where
         mechanism_discovery_rates: mechanism_allocator.rates(),
         move_pulls: move_allocator.pulls().to_vec(),
         move_success_rates: move_allocator.rates(),
+        escape_observations: coverage.observations,
+        escape_singletons: coverage.singletons,
+        escape_unseen_mass_upper: coverage.unseen_mass_upper,
+        escape_coverage_saturated: coverage.saturated,
         termination,
     })
 }
