@@ -230,6 +230,51 @@ fn sample_gamma<R: Rng + ?Sized>(shape: f64, rng: &mut R) -> f64 {
 }
 
 #[cfg(test)]
+mod charged_discovery_tests {
+    use super::ChargedDiscoveryAllocator;
+    use rand::SeedableRng;
+    use rand::rngs::StdRng;
+
+    #[test]
+    fn every_discovery_mechanism_receives_initial_exposure() {
+        let mut allocator = ChargedDiscoveryAllocator::new(3);
+        let mut rng = StdRng::seed_from_u64(7);
+
+        for expected in 0..3 {
+            let selected = allocator.select(&mut rng);
+            assert_eq!(selected, expected);
+            allocator.update(selected, 0, 50);
+        }
+
+        assert_eq!(allocator.pulls(), &[1, 1, 1]);
+    }
+
+    #[test]
+    fn posterior_rates_compare_discoveries_per_charged_evaluation() {
+        let mut allocator = ChargedDiscoveryAllocator::new(2);
+        allocator.update(0, 1, 1_000);
+        allocator.update(1, 1, 100);
+
+        let rates = allocator.rates();
+        assert!(rates[1] > 5.0 * rates[0], "rates={rates:?}");
+    }
+
+    #[test]
+    fn thompson_allocation_prefers_the_measured_discovery_rate() {
+        let mut allocator = ChargedDiscoveryAllocator::new(2);
+        allocator.floor_scale = 0.0;
+        for _ in 0..20 {
+            allocator.update(0, 0, 100);
+            allocator.update(1, 1, 100);
+        }
+        let mut rng = StdRng::seed_from_u64(11);
+        let preferred = (0..200).filter(|_| allocator.select(&mut rng) == 1).count();
+
+        assert!(preferred > 180, "preferred draws={preferred}");
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use rand::{SeedableRng, rngs::StdRng};
