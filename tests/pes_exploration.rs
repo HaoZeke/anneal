@@ -4,7 +4,7 @@ use anneal_core::descriptor_space::{DescriptorGeometry, universal_descriptor_spa
 use anneal_core::pes_exploration::{
     ExactStructureWitness, PesExplorationConfig, PesNetwork, PesSurface, RideMethod,
     StructureContext, discover_cartesian_mode_connection, discover_mode_connection,
-    stationary_index, stationary_index_cartesian,
+    quench_minimum_with_norm, stationary_index, stationary_index_cartesian,
 };
 use ndarray::{Array1, ArrayView1, array};
 
@@ -42,6 +42,16 @@ impl PesSurface for LastCoordinateDoubleWell {
             gradient[index] = 2.0 * coordinates[index];
         }
         Ok((energy, gradient))
+    }
+}
+
+struct NumericalForceFloor;
+
+impl PesSurface for NumericalForceFloor {
+    type Error = Infallible;
+
+    fn evaluate(&self, coordinates: ArrayView1<f64>) -> Result<(f64, Array1<f64>), Self::Error> {
+        Ok((0.0, Array1::from_elem(coordinates.len(), 2e-6)))
     }
 }
 
@@ -254,6 +264,19 @@ fn prfo_handoff_preserves_a_nonleading_unstable_mode() {
     assert!(connection.saddle_coordinates[5].abs() < 1e-6);
     assert!(connection.saddle_max_gradient <= config.saddle_force_tolerance);
     assert_eq!(network.minimum_count(), 2);
+}
+
+#[test]
+fn quench_certification_accepts_a_measured_force_floor_inside_the_norm_gate() {
+    let minimum =
+        quench_minimum_with_norm(&NumericalForceFloor, Array1::zeros(3).view(), 4, 1e-6, 1e-5)
+            .unwrap();
+
+    assert!(minimum.max_gradient > 1e-6);
+    let (_, gradient) = NumericalForceFloor
+        .evaluate(minimum.coordinates.view())
+        .unwrap();
+    assert!(gradient.dot(&gradient).sqrt() < 1e-5);
 }
 
 #[test]
