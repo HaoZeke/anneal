@@ -357,6 +357,7 @@ pub struct RideLedger {
     sources: BTreeMap<u64, SourceRecord>,
     evidence: BTreeMap<RideArm, ArmEvidence>,
     environment_evidence: BTreeMap<(u64, u32), ArmEvidence>,
+    mode_evidence: BTreeMap<(u64, u32, u16), ArmEvidence>,
     method_evidence: BTreeMap<RideMethod, ArmEvidence>,
     active: BTreeMap<u64, RideWorkOrder>,
     active_arms: BTreeSet<RideArm>,
@@ -377,6 +378,7 @@ impl RideLedger {
             sources: BTreeMap::new(),
             evidence: BTreeMap::new(),
             environment_evidence: BTreeMap::new(),
+            mode_evidence: BTreeMap::new(),
             method_evidence: BTreeMap::new(),
             active: BTreeMap::new(),
             active_arms: BTreeSet::new(),
@@ -421,8 +423,9 @@ impl RideLedger {
     /// A retry by the same replica returns its existing order. Solver
     /// reliability transfers across arms through a same-PES upper-confidence
     /// estimate. Environment-level novel-edge uncertainty provides the outer
-    /// acquisition score, so unseen local environments precede repeated arms;
-    /// exact-arm novelty remains local. Raw energy only breaks acquisition ties
+    /// acquisition score, followed by mode-rank uncertainty, so unseen local
+    /// environments and orthogonal seeds precede sign or method repetitions.
+    /// Exact-arm novelty remains local. Raw energy only breaks acquisition ties
     /// inside this ledger.
     pub fn claim(&mut self, replica: u32, seed: u64) -> Option<RideWorkOrder> {
         if let Some(id) = self.replica_work.get(&replica) {
@@ -436,6 +439,10 @@ impl RideLedger {
             .max_by(|(left, left_atom), (right, right_atom)| {
                 self.environment_acquisition(left, total)
                     .total_cmp(&self.environment_acquisition(right, total))
+                    .then_with(|| {
+                        self.mode_acquisition(left, total)
+                            .total_cmp(&self.mode_acquisition(right, total))
+                    })
                     .then_with(|| {
                         self.acquisition(left, total)
                             .total_cmp(&self.acquisition(right, total))
@@ -537,6 +544,19 @@ impl RideLedger {
         )?;
         record_evidence(
             self.method_evidence.entry(order.arm.method).or_default(),
+            charged_evaluations,
+            failure,
+            stationary_saddle,
+            novel_edge,
+        )?;
+        record_evidence(
+            self.mode_evidence
+                .entry((
+                    order.arm.source_basin,
+                    order.arm.environment_class,
+                    order.arm.mode_rank,
+                ))
+                .or_default(),
             charged_evaluations,
             failure,
             stationary_saddle,
@@ -662,6 +682,22 @@ impl RideLedger {
             certification * novelty_given_certification
         });
         method_reliability * local_novel_yield
+    }
+
+    fn mode_acquisition(&self, arm: &RideArm, total: u64) -> f64 {
+        let key = (arm.source_basin, arm.environment_class, arm.mode_rank);
+        match self.mode_evidence.get(&key) {
+            Some(row) => upper_probability(row.novel_edges, row.completed, total),
+            None if !self.active_arms.iter().any(|active| {
+                active.source_basin == arm.source_basin
+                    && active.environment_class == arm.environment_class
+                    && active.mode_rank == arm.mode_rank
+            }) =>
+            {
+                f64::INFINITY
+            }
+            None => 1.0,
+        }
     }
 
     fn arms(&self) -> impl Iterator<Item = (RideArm, u32)> + '_ {
