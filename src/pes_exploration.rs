@@ -312,7 +312,7 @@ impl RideMethod {
 }
 
 /// Sign of a deterministic transition-search initialization.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum RideModeDirection {
     /// Reverse the generated mode.
     Negative,

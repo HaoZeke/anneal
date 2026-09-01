@@ -137,6 +137,8 @@ pub mod methods;
 pub mod model_hessian;
 /// The move-kernel trait: temperature-indexed proposal sampling.
 pub mod movekernel;
+/// Cooperative basin and ridge exploration on one arbitrary-dimensional PES.
+pub mod nd_hybrid;
 /// The neighborhood trait: `state -> set-of-states`.
 pub mod neigh;
 /// Incremental neighbour table shared across the hop.
