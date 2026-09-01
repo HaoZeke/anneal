@@ -62,6 +62,37 @@ fn shared_failure_evidence_redirects_the_next_replica_to_an_untried_arm() {
 }
 
 #[test]
+fn environment_coverage_precedes_repeated_local_portfolio_arms() {
+    let portfolio = RidePortfolio::new(2, vec![RideMethod::Dimer, RideMethod::Lanczos]).unwrap();
+    let mut serial = RideLedger::new(portfolio.clone());
+    serial
+        .register_source(source(17, -104.2, &[(4, 6), (9, 11)]))
+        .unwrap();
+
+    let first = serial.claim(2, 101).unwrap();
+    serial
+        .report(
+            2,
+            first.id,
+            83,
+            RideOutcome::Failed(RideFailure::SaddleNotConverged),
+        )
+        .unwrap();
+    let second = serial.claim(2, 102).unwrap();
+
+    assert_ne!(second.arm.environment_class, first.arm.environment_class);
+
+    let mut parallel = RideLedger::new(portfolio);
+    parallel
+        .register_source(source(17, -104.2, &[(4, 6), (9, 11)]))
+        .unwrap();
+    let first = parallel.claim(2, 201).unwrap();
+    let second = parallel.claim(7, 202).unwrap();
+
+    assert_ne!(second.arm.environment_class, first.arm.environment_class);
+}
+
+#[test]
 fn duplicate_certified_connections_do_not_masquerade_as_new_pes_edges() {
     let portfolio = RidePortfolio::new(1, vec![RideMethod::Dimer]).unwrap();
     let mut ledger = RideLedger::new(portfolio);
