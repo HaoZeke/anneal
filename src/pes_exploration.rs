@@ -42,14 +42,41 @@ pub trait PesSurface: Sync {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
     use ndarray::{Array1, Array2, ArrayView1, array};
 
     use super::{
-        IrcDirection, PesExplorationConfig, PesSurface, home_uphill_mode, refine_irc_step,
-        roll_branch,
+        IrcDirection, PesExplorationConfig, PesSurface, home_uphill_mode,
+        refine_cartesian_with_prfo, refine_irc_step, roll_branch,
     };
 
     struct FailingIrcSurface;
+
+    struct CountingQuarticSaddle {
+        evaluations: AtomicUsize,
+    }
+
+    impl PesSurface for CountingQuarticSaddle {
+        type Error = &'static str;
+
+        fn evaluate(
+            &self,
+            coordinates: ArrayView1<f64>,
+        ) -> Result<(f64, Array1<f64>), Self::Error> {
+            self.evaluations.fetch_add(1, Ordering::Relaxed);
+            let reaction = coordinates[0];
+            let mut energy = (reaction * reaction - 1.0).powi(2);
+            let mut gradient = Array1::zeros(coordinates.len());
+            gradient[0] = 4.0 * reaction * (reaction * reaction - 1.0);
+            for index in 1..coordinates.len() {
+                let stiffness = 1.0 + index as f64 / coordinates.len() as f64;
+                energy += 0.5 * stiffness * coordinates[index] * coordinates[index];
+                gradient[index] = stiffness * coordinates[index];
+            }
+            Ok((energy, gradient))
+        }
+    }
 
     impl PesSurface for FailingIrcSurface {
         type Error = &'static str;
@@ -96,6 +123,31 @@ mod tests {
         assert_eq!(homed.source_index, 0);
         assert_eq!(homed.eigenvalues, array![0.1, 0.2, 3.0]);
         assert!(homed.eigenvectors.column(0).dot(&reference) > 0.0);
+    }
+
+    #[test]
+    fn cartesian_prfo_reuses_secant_hessian_between_exact_refreshes() {
+        let surface = CountingQuarticSaddle {
+            evaluations: AtomicUsize::new(0),
+        };
+        let mut start = Array1::from_elem(18, 0.08);
+        start[0] = 0.6;
+        let mut mode = Array1::zeros(18);
+        mode[0] = 1.0;
+        let config = PesExplorationConfig {
+            prfo_steps: 80,
+            saddle_force_tolerance: 1e-8,
+            saddle_displacement: 0.08,
+            maximum_move: 0.08,
+            hessian_step: 1e-5,
+            ..PesExplorationConfig::default()
+        };
+
+        let saddle =
+            refine_cartesian_with_prfo(&surface, start.view(), mode.view(), None, &config).unwrap();
+
+        assert!(saddle.iter().all(|coordinate| coordinate.abs() < 1e-7));
+        assert!(surface.evaluations.load(Ordering::Relaxed) < 100);
     }
 
     #[test]
