@@ -138,6 +138,77 @@ fn duplicate_certified_connections_do_not_masquerade_as_new_pes_edges() {
 }
 
 #[test]
+fn a_certified_edge_is_useful_even_when_it_misses_the_nominal_source() {
+    let portfolio = RidePortfolio::new(1, vec![RideMethod::Dimer]).unwrap();
+    let mut ledger = RideLedger::new(portfolio);
+    ledger
+        .register_source(source(17, -104.2, &[(4, 6)]))
+        .unwrap();
+    let work = ledger.claim(2, 101).unwrap();
+
+    let credit = ledger
+        .report(
+            2,
+            work.id,
+            140,
+            RideOutcome::Certified {
+                saddle: 70,
+                endpoints: [29, 31],
+            },
+        )
+        .unwrap();
+
+    assert!(credit.certified_connection);
+    assert!(credit.novel_edge);
+    assert_eq!(ledger.unique_edges(), 1);
+}
+
+#[test]
+fn an_unresolved_saddle_counts_as_method_reliability_not_edge_novelty() {
+    let portfolio = RidePortfolio::new(1, vec![RideMethod::Dimer, RideMethod::Lanczos]).unwrap();
+    let mut ledger = RideLedger::new(portfolio);
+    ledger
+        .register_source(source(17, -104.2, &[(4, 6)]))
+        .unwrap();
+    let first = ledger.claim(2, 101).unwrap();
+    let second = ledger.claim(7, 102).unwrap();
+    let (dimer, lanczos) = if first.arm.method == RideMethod::Dimer {
+        (first, second)
+    } else {
+        (second, first)
+    };
+    ledger
+        .report(
+            dimer.replica,
+            dimer.id,
+            4_000,
+            RideOutcome::Failed(RideFailure::MinimumModeLostCurvature),
+        )
+        .unwrap();
+    let credit = ledger
+        .report(
+            lanczos.replica,
+            lanczos.id,
+            2_000,
+            RideOutcome::Unresolved {
+                saddle: 70,
+                failure: RideFailure::CollapsedConnection,
+            },
+        )
+        .unwrap();
+    ledger
+        .register_source(source(23, -107.5, &[(4, 8)]))
+        .unwrap();
+
+    let guided = ledger.claim(9, 103).unwrap();
+
+    assert!(!credit.certified_connection);
+    assert_eq!(credit.failure, Some(RideFailure::CollapsedConnection));
+    assert!(!credit.novel_edge);
+    assert_eq!(guided.arm.method, RideMethod::Lanczos);
+}
+
+#[test]
 fn ape_energy_priority_selects_the_lowest_untried_source() {
     let portfolio = RidePortfolio::new(1, vec![RideMethod::Dimer]).unwrap();
     let mut ledger = RideLedger::new(portfolio);

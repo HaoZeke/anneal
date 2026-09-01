@@ -89,6 +89,14 @@ impl ExactStructureWitness for SeparationWitness {
     }
 }
 
+struct CollapsedWitness;
+
+impl ExactStructureWitness for CollapsedWitness {
+    fn equivalent(&self, _left: ArrayView1<f64>, _right: ArrayView1<f64>) -> bool {
+        true
+    }
+}
+
 fn exploration_config() -> PesExplorationConfig {
     PesExplorationConfig {
         ride_method: RideMethod::Dimer,
@@ -366,6 +374,66 @@ fn claimed_ride_executes_a_counted_minimum_saddle_minimum_connection() {
     separations.sort_by(f64::total_cmp);
     assert!((separations[0] - 1.2).abs() < 1e-4);
     assert!((separations[1] - 2.0).abs() < 1e-4);
+}
+
+#[test]
+fn collapsed_connection_preserves_its_certified_saddle_for_other_chains() {
+    let surface = RadialDoubleWell::new();
+    let work = work(direction_toward_saddle());
+    let descriptor_space = universal_descriptor_space(DescriptorGeometry::finite(1.0).unwrap());
+    let report = execute_catalog_ride(
+        &surface,
+        &descriptor_space,
+        &work,
+        &[18, 18],
+        array![1.0, 1.0].view(),
+        &[false; 2],
+        &execution_config(5_000),
+        &CollapsedWitness,
+    );
+
+    let CatalogRideOutcome::Unresolved(evidence) = report.outcome else {
+        panic!("a collapsed connection must retain its stationary saddle")
+    };
+    assert_eq!(evidence.failure, RideFailure::CollapsedConnection);
+    assert!(evidence.saddle.gradient_norm < 1e-7);
+    assert!((evidence.saddle.energy - 1.0).abs() < 1e-7);
+    assert_eq!(report.charged_evaluations, surface.calls());
+}
+
+#[test]
+fn coordinator_returns_a_collapsed_saddle_as_same_pes_avoidance_evidence() {
+    let (_server, mut run) = live_run();
+    let RideClaimOutcome::Work(work) = run.claim_ride(7, first_claim_seed_toward_saddle()).unwrap()
+    else {
+        panic!("the admitted source did not produce transition-search work")
+    };
+    let surface = RadialDoubleWell::new();
+    let report = execute_catalog_ride(
+        &surface,
+        &universal_descriptor_space(DescriptorGeometry::finite(1.0).unwrap()),
+        &work,
+        &[18, 18],
+        array![1.0, 1.0].view(),
+        &[false; 2],
+        &execution_config(5_000),
+        &CollapsedWitness,
+    );
+    let CatalogRideOutcome::Unresolved(evidence) = &report.outcome else {
+        panic!("the producer did not retain its collapsed saddle")
+    };
+    let saddle_coordinates = evidence.saddle.coordinates.clone();
+
+    let RideReportOutcome::Credited(credit) = run.report_ride(7, report).unwrap() else {
+        panic!("the coordinator rejected index-one unresolved evidence")
+    };
+    assert!(!credit.certified_connection);
+    assert_eq!(credit.failure, Some(RideFailure::CollapsedConnection));
+    let RideClaimOutcome::Work(next) = run.claim_ride(7, 0x5eed).unwrap() else {
+        panic!("the unresolved saddle did not release the live claim")
+    };
+    assert_eq!(next.avoid_saddles.len(), 1);
+    assert_eq!(next.avoid_saddles[0].coordinates, saddle_coordinates);
 }
 
 #[test]
