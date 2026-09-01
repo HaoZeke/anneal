@@ -409,9 +409,10 @@ impl RideLedger {
 
     /// Claim the highest-acquisition experiment not held by another replica.
     ///
-    /// A retry by the same replica returns its existing order. Every arm is
-    /// attempted once before Bayesian upper-confidence scheduling repeats an
-    /// arm. Raw energy only breaks acquisition ties inside this ledger.
+    /// A retry by the same replica returns its existing order. Solver
+    /// reliability transfers across arms through a same-PES upper-confidence
+    /// estimate, while exact-arm novelty remains local. Raw energy only breaks
+    /// acquisition ties inside this ledger.
     pub fn claim(&mut self, replica: u32, seed: u64) -> Option<RideWorkOrder> {
         if let Some(id) = self.replica_work.get(&replica) {
             return self.active.get(id).cloned();
@@ -598,29 +599,24 @@ impl RideLedger {
     }
 
     fn acquisition(&self, arm: &RideArm, total: u64) -> f64 {
-        let (posterior_mean, local_completed) = match self.evidence.get(arm) {
-            Some(row) => (
-                (row.novel_edges as f64 + 0.5) / (row.completed as f64 + 1.0),
-                row.completed,
-            ),
-            None => match self.method_evidence.get(&arm.method) {
-                Some(row) => (
-                    (row.novel_edges as f64 + 0.5) / (row.completed as f64 + 1.0),
-                    0,
-                ),
-                None if !self
-                    .active_arms
-                    .iter()
-                    .any(|active| active.method == arm.method) =>
-                {
-                    return f64::INFINITY;
-                }
-                None => (0.5, 0),
-            },
+        let method_reliability = match self.method_evidence.get(&arm.method) {
+            Some(row) => upper_probability(row.certified, row.completed, total),
+            None if !self
+                .active_arms
+                .iter()
+                .any(|active| active.method == arm.method) =>
+            {
+                return f64::INFINITY;
+            }
+            None => 1.0,
         };
-        let exploration =
-            (2.0 * ((total as f64) + 2.0).ln() / (local_completed as f64 + 1.0)).sqrt();
-        posterior_mean + exploration
+        let local_novel_yield = self.evidence.get(arm).map_or(1.0, |row| {
+            let certification = (row.certified as f64 + 0.5) / (row.completed as f64 + 1.0);
+            let novelty_given_certification =
+                (row.novel_edges as f64 + 0.5) / (row.certified as f64 + 1.0);
+            certification * novelty_given_certification
+        });
+        method_reliability * local_novel_yield
     }
 
     fn arms(&self) -> impl Iterator<Item = (RideArm, u32)> + '_ {
@@ -652,6 +648,13 @@ impl RideLedger {
                     })
             })
     }
+}
+
+fn upper_probability(successes: u64, trials: u64, total: u64) -> f64 {
+    let trials = trials as f64;
+    let posterior_mean = (successes as f64 + 0.5) / (trials + 1.0);
+    let confidence_radius = (((total as f64) + 2.0).ln() / (2.0 * (trials + 1.0))).sqrt();
+    (posterior_mean + confidence_radius).min(1.0)
 }
 
 fn record_evidence(
