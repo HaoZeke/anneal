@@ -930,6 +930,12 @@ fn max_abs(values: ArrayView1<f64>) -> f64 {
     values.iter().map(|value| value.abs()).fold(0.0, f64::max)
 }
 
+fn emit_pes_trace(event: serde_json::Value) {
+    if std::env::var_os("ANNEAL_PES_TRACE").is_some() {
+        eprintln!("{event}");
+    }
+}
+
 /// Dense receiving-side Hessian eigensystem and stationary-point index.
 #[derive(Debug, Clone)]
 pub struct StationaryIndex {
@@ -1447,14 +1453,24 @@ fn refine_cartesian_with_prfo<S: PesSurface + ?Sized>(
     config: &PesExplorationConfig,
 ) -> Result<Array1<f64>, PesExplorationError> {
     let mut coordinates = start.to_owned();
-    for _ in 0..config.prfo_steps {
-        let (_, gradient) = checked_evaluate(surface, coordinates.view())?;
+    for iteration in 0..config.prfo_steps {
+        let (energy, gradient) = checked_evaluate(surface, coordinates.view())?;
         let constraints = activation_basis(coordinates.view(), cartesian_index);
         let basis = orthonormal_complement(coordinates.len(), &constraints)?;
         let free_gradient = basis.t().dot(&gradient);
         let mut tangent_gradient = gradient;
         project_rigid_with(&mut tangent_gradient, &constraints);
-        if max_abs(tangent_gradient.view()) <= config.saddle_force_tolerance {
+        let maximum_gradient = max_abs(tangent_gradient.view());
+        if maximum_gradient <= config.saddle_force_tolerance {
+            emit_pes_trace(serde_json::json!({
+                "kind": "pes_stage",
+                "stage": "prfo",
+                "status": "converged",
+                "iteration": iteration,
+                "energy": energy,
+                "maximum_gradient": maximum_gradient,
+                "free_dimension": basis.ncols(),
+            }));
             return Ok(coordinates);
         }
         let hessian = finite_difference_free_hessian(
@@ -1464,6 +1480,10 @@ fn refine_cartesian_with_prfo<S: PesSurface + ?Sized>(
             config.hessian_step,
         )?;
         let (eigenvalues, eigenvectors) = sorted_eigensystem(hessian.view())?;
+        let negative_modes = eigenvalues
+            .iter()
+            .filter(|value| **value < -config.negative_curvature_tolerance)
+            .count();
         let free_step = prfo_trust_region(
             &eigenvalues,
             &eigenvectors,
@@ -1472,6 +1492,19 @@ fn refine_cartesian_with_prfo<S: PesSurface + ?Sized>(
             config.maximum_move,
         );
         let step = basis.dot(&free_step);
+        let step_norm = step.dot(&step).sqrt();
+        emit_pes_trace(serde_json::json!({
+            "kind": "pes_stage",
+            "stage": "prfo",
+            "status": "running",
+            "iteration": iteration,
+            "energy": energy,
+            "maximum_gradient": maximum_gradient,
+            "lowest_curvature": eigenvalues[0],
+            "negative_modes": negative_modes,
+            "step_norm": step_norm,
+            "free_dimension": basis.ncols(),
+        }));
         if step.len() != coordinates.len() || step.iter().any(|value| !value.is_finite()) {
             return Err(PesExplorationError::Saddle(
                 "P-RFO returned an invalid Cartesian step".into(),
@@ -1967,6 +2000,16 @@ where
     let min_mode_report = min_mode
         .run(&adapter, config.saddle_steps)
         .map_err(|error| PesExplorationError::Saddle(error.to_string()))?;
+    emit_pes_trace(serde_json::json!({
+        "kind": "pes_stage",
+        "stage": "minimum_mode",
+        "status": format!("{:?}", min_mode_report.status),
+        "method": format!("{:?}", config.ride_method),
+        "iteration": min_mode_report.iteration,
+        "maximum_gradient": min_mode_report.max_force,
+        "lowest_curvature": min_mode_report.curvature,
+        "rotations": min_mode_report.rotations,
+    }));
     if min_mode_report.status != MinModeStatus::Converged {
         return Err(PesExplorationError::SaddleNotConverged {
             stage: SaddleConvergenceStage::MinimumMode,
@@ -2189,6 +2232,16 @@ where
     let min_mode_report = min_mode
         .run(&adapter, config.saddle_steps)
         .map_err(|error| PesExplorationError::Saddle(error.to_string()))?;
+    emit_pes_trace(serde_json::json!({
+        "kind": "pes_stage",
+        "stage": "minimum_mode",
+        "status": format!("{:?}", min_mode_report.status),
+        "method": format!("{:?}", config.ride_method),
+        "iteration": min_mode_report.iteration,
+        "maximum_gradient": min_mode_report.max_force,
+        "lowest_curvature": min_mode_report.curvature,
+        "rotations": min_mode_report.rotations,
+    }));
     if min_mode_report.status != MinModeStatus::Converged {
         return Err(PesExplorationError::SaddleNotConverged {
             stage: SaddleConvergenceStage::MinimumMode,
