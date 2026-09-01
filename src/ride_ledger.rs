@@ -246,6 +246,16 @@ pub enum RideOutcome {
         /// Exact minima connected by the saddle.
         endpoints: [u64; 2],
     },
+    /// An index-one saddle whose descent did not expose a distinct edge.
+    ///
+    /// The saddle remains positive method evidence and can be sent to other
+    /// replicas for deflation even though it contributes no graph edge.
+    Unresolved {
+        /// Exact saddle identifier within the same system catalogue.
+        saddle: u64,
+        /// Connectivity failure observed after saddle certification.
+        failure: RideFailure,
+    },
     /// Classified failure, retained as negative search evidence.
     Failed(RideFailure),
 }
@@ -312,9 +322,6 @@ pub enum RideLedgerError {
     /// Certified IRC endpoints must be distinct.
     #[error("certified ride endpoints collapse to one basin")]
     CollapsedCertifiedConnection,
-    /// A one-sided ride must reconnect to its exact source basin.
-    #[error("certified ride does not contain source basin {0}")]
-    DisconnectedSource(u64),
     /// A monotonic counter cannot be represented.
     #[error("ride-ledger counter overflow")]
     CounterOverflow,
@@ -324,7 +331,7 @@ pub enum RideLedgerError {
 struct ArmEvidence {
     completed: u64,
     novel_edges: u64,
-    certified: u64,
+    stationary_saddles: u64,
     charged_evaluations: u64,
     failures: BTreeMap<RideFailure, u64>,
 }
@@ -493,26 +500,24 @@ impl RideLedger {
             return Err(RideLedgerError::WrongReplica { replica, work });
         }
 
-        let failure = match &outcome {
-            RideOutcome::Certified { .. } => None,
-            RideOutcome::Failed(failure) => Some(*failure),
+        let (failure, stationary_saddle) = match &outcome {
+            RideOutcome::Certified { .. } => (None, true),
+            RideOutcome::Unresolved { failure, .. } => (Some(*failure), true),
+            RideOutcome::Failed(failure) => (Some(*failure), false),
         };
         let certified_connection = failure.is_none();
-        let canonical_edge = match outcome {
+        let canonical_edge = match &outcome {
             RideOutcome::Certified { endpoints, .. } => {
                 if endpoints[0] == endpoints[1] {
                     return Err(RideLedgerError::CollapsedCertifiedConnection);
                 }
-                if !endpoints.contains(&order.arm.source_basin) {
-                    return Err(RideLedgerError::DisconnectedSource(order.arm.source_basin));
-                }
                 Some(if endpoints[0] < endpoints[1] {
-                    endpoints
+                    *endpoints
                 } else {
                     [endpoints[1], endpoints[0]]
                 })
             }
-            RideOutcome::Failed(_) => None,
+            RideOutcome::Unresolved { .. } | RideOutcome::Failed(_) => None,
         };
 
         let order = self
@@ -527,12 +532,14 @@ impl RideLedger {
             self.evidence.entry(order.arm.clone()).or_default(),
             charged_evaluations,
             failure,
+            stationary_saddle,
             novel_edge,
         )?;
         record_evidence(
             self.method_evidence.entry(order.arm.method).or_default(),
             charged_evaluations,
             failure,
+            stationary_saddle,
             novel_edge,
         )?;
         record_evidence(
@@ -541,6 +548,7 @@ impl RideLedger {
                 .or_default(),
             charged_evaluations,
             failure,
+            stationary_saddle,
             novel_edge,
         )?;
         if certified_connection {
@@ -631,7 +639,7 @@ impl RideLedger {
 
     fn acquisition(&self, arm: &RideArm, total: u64) -> f64 {
         let method_reliability = match self.method_evidence.get(&arm.method) {
-            Some(row) => upper_probability(row.certified, row.completed, total),
+            Some(row) => upper_probability(row.stationary_saddles, row.completed, total),
             None if !self
                 .active_arms
                 .iter()
@@ -642,9 +650,10 @@ impl RideLedger {
             None => 1.0,
         };
         let local_novel_yield = self.evidence.get(arm).map_or(1.0, |row| {
-            let certification = (row.certified as f64 + 0.5) / (row.completed as f64 + 1.0);
+            let certification =
+                (row.stationary_saddles as f64 + 0.5) / (row.completed as f64 + 1.0);
             let novelty_given_certification =
-                (row.novel_edges as f64 + 0.5) / (row.certified as f64 + 1.0);
+                (row.novel_edges as f64 + 0.5) / (row.stationary_saddles as f64 + 1.0);
             certification * novelty_given_certification
         });
         method_reliability * local_novel_yield
@@ -692,6 +701,7 @@ fn record_evidence(
     evidence: &mut ArmEvidence,
     charged_evaluations: u64,
     failure: Option<RideFailure>,
+    stationary_saddle: bool,
     novel_edge: bool,
 ) -> Result<(), RideLedgerError> {
     evidence.completed = evidence
@@ -702,25 +712,23 @@ fn record_evidence(
         .charged_evaluations
         .checked_add(charged_evaluations)
         .ok_or(RideLedgerError::CounterOverflow)?;
-    match failure {
-        None => {
-            evidence.certified = evidence
-                .certified
-                .checked_add(1)
-                .ok_or(RideLedgerError::CounterOverflow)?;
-            if novel_edge {
-                evidence.novel_edges = evidence
-                    .novel_edges
-                    .checked_add(1)
-                    .ok_or(RideLedgerError::CounterOverflow)?;
-            }
-        }
-        Some(failure) => {
-            let count = evidence.failures.entry(failure).or_default();
-            *count = count
-                .checked_add(1)
-                .ok_or(RideLedgerError::CounterOverflow)?;
-        }
+    if stationary_saddle {
+        evidence.stationary_saddles = evidence
+            .stationary_saddles
+            .checked_add(1)
+            .ok_or(RideLedgerError::CounterOverflow)?;
+    }
+    if novel_edge {
+        evidence.novel_edges = evidence
+            .novel_edges
+            .checked_add(1)
+            .ok_or(RideLedgerError::CounterOverflow)?;
+    }
+    if let Some(failure) = failure {
+        let count = evidence.failures.entry(failure).or_default();
+        *count = count
+            .checked_add(1)
+            .ok_or(RideLedgerError::CounterOverflow)?;
     }
     Ok(())
 }
