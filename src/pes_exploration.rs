@@ -71,17 +71,29 @@ mod tests {
     }
 
     #[test]
-    fn mode_homing_promotes_the_overlapping_eigenvector_with_continuous_sign() {
+    fn mode_homing_stays_in_the_negative_subspace_after_instability_appears() {
         let eigenvalues = array![-2.0, 0.4, 3.0];
         let eigenvectors = Array2::eye(3);
-        let reference = array![0.0, 0.0, -1.0];
+        let reference = array![0.2, 0.0, -0.98];
 
-        let homed = home_uphill_mode(&eigenvalues, &eigenvectors, reference.view()).unwrap();
+        let homed = home_uphill_mode(&eigenvalues, &eigenvectors, reference.view(), 1e-6).unwrap();
 
-        assert_eq!(homed.source_index, 2);
-        assert!((homed.overlap - 1.0).abs() < 1e-14);
-        assert_eq!(homed.eigenvalues, array![3.0, -2.0, 0.4]);
-        assert_eq!(homed.eigenvectors.column(0), reference.view());
+        assert_eq!(homed.source_index, 0);
+        assert!(homed.eigenvalues[0] < 0.0);
+        assert!(homed.eigenvectors.column(0).dot(&reference) > 0.0);
+    }
+
+    #[test]
+    fn fuzzy_mode_homing_prefers_the_lower_overlapping_root_before_instability() {
+        let eigenvalues = array![0.1, 0.2, 3.0];
+        let eigenvectors = Array2::eye(3);
+        let reference = array![0.65, 0.0, -0.76];
+
+        let homed = home_uphill_mode(&eigenvalues, &eigenvectors, reference.view(), 1e-6).unwrap();
+
+        assert_eq!(homed.source_index, 0);
+        assert_eq!(homed.eigenvalues, array![0.1, 0.2, 3.0]);
+        assert!(homed.eigenvectors.column(0).dot(&reference) > 0.0);
     }
 
     #[test]
