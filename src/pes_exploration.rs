@@ -9,17 +9,17 @@ use std::fmt::Display;
 use std::sync::Mutex;
 
 use ndarray::{Array1, Array2, ArrayView1, ArrayView2};
-use rand::{SeedableRng, rngs::StdRng};
+use rand::{rngs::StdRng, SeedableRng};
 use rand_distr::{Distribution, StandardNormal};
 use rgmin::{
-    ApplyHessian, Control, EigenParams, EigensolverKind, FireKind, GradNorm, Lbfgs, Method, Oracle,
-    Solver, lowest_mode,
+    lowest_mode, ApplyHessian, Control, EigenParams, EigensolverKind, FireKind, GradNorm, Lbfgs,
+    Method, Oracle, Solver,
 };
 use rgsaddle::geom::update_trust;
 use rgsaddle::{
-    HessUpdate, IrcConfig, IrcDirection, IrcSession, MinModeConfig, MinModeKind, MinModeSession,
-    MinModeStatus, PointSurface, SaddleError, TrustSchedule, exact_eigh, prfo_trust_region,
-    update_h,
+    exact_eigh, prfo_trust_region, update_h, HessUpdate, IrcConfig, IrcDirection, IrcSession,
+    MinModeConfig, MinModeKind, MinModeSession, MinModeStatus, PointSurface, SaddleError,
+    TrustSchedule,
 };
 
 use crate::curvature::{project_rigid_with, rigid_basis};
@@ -50,11 +50,11 @@ pub trait PesSurface: Sync {
 mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
-    use ndarray::{Array1, Array2, ArrayView1, array};
+    use ndarray::{array, Array1, Array2, ArrayView1};
 
     use super::{
-        IrcDirection, PesExplorationConfig, PesSurface, activation_basis, deflate_cartesian_mode,
-        finest_irc_step, home_uphill_mode, refine_cartesian_with_prfo, roll_branch,
+        activation_basis, deflate_cartesian_mode, finest_irc_step, home_uphill_mode,
+        refine_cartesian_with_prfo, roll_branch, IrcDirection, PesExplorationConfig, PesSurface,
     };
     use crate::curvature::project_rigid_with;
     use crate::descriptor_space::DescriptorGeometry;
@@ -1040,6 +1040,17 @@ pub struct NdMinimumRecord {
     pub max_gradient: f64,
 }
 
+/// Result of exact-witness minimum admission on one N-dimensional surface.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct NdMinimumAdmission {
+    /// Stable minimum index.
+    pub id: usize,
+    /// Whether a new exact point identity entered the network.
+    pub is_new: bool,
+    /// Nearest coordinate distance before the exact witness decision.
+    pub nearest_coordinate_distance: Option<f64>,
+}
+
 /// One certified index-one connection on an arbitrary-dimensional surface.
 #[derive(Debug, Clone)]
 pub struct NdSaddleConnection {
@@ -1108,11 +1119,28 @@ impl NdPesNetwork {
         &self.unresolved_saddles
     }
 
-    fn admit_minimum<W: ExactStructureWitness + ?Sized>(
+    /// Admit a force-certified source minimum using the network's exact witness.
+    pub fn admit_minimum<W: ExactStructureWitness + ?Sized>(
+        &mut self,
+        minimum: QuenchedMinimum,
+        witness: &W,
+    ) -> NdMinimumAdmission {
+        self.admit_quenched(
+            Quenched {
+                energy: minimum.energy,
+                coordinates: minimum.coordinates,
+                gradient: minimum.gradient,
+                max_gradient: minimum.max_gradient,
+            },
+            witness,
+        )
+    }
+
+    fn admit_quenched<W: ExactStructureWitness + ?Sized>(
         &mut self,
         minimum: Quenched,
         witness: &W,
-    ) -> usize {
+    ) -> NdMinimumAdmission {
         let mut ordered = self
             .minima
             .iter()
@@ -1133,12 +1161,22 @@ impl NdPesNetwork {
                 .total_cmp(&right.0)
                 .then_with(|| left.1.cmp(&right.1))
         });
+        let nearest_coordinate_distance = ordered.first().map(|entry| entry.0);
         for (_, index) in ordered {
             if witness.equivalent(
                 self.minima[index].coordinates.view(),
                 minimum.coordinates.view(),
             ) {
-                return index;
+                if minimum.energy < self.minima[index].energy {
+                    self.minima[index].energy = minimum.energy;
+                    self.minima[index].coordinates = minimum.coordinates;
+                    self.minima[index].max_gradient = minimum.max_gradient;
+                }
+                return NdMinimumAdmission {
+                    id: index,
+                    is_new: false,
+                    nearest_coordinate_distance,
+                };
             }
         }
         let id = self.minima.len();
@@ -1148,7 +1186,11 @@ impl NdPesNetwork {
             coordinates: minimum.coordinates,
             max_gradient: minimum.max_gradient,
         });
-        id
+        NdMinimumAdmission {
+            id,
+            is_new: true,
+            nearest_coordinate_distance,
+        }
     }
 
     fn admit_saddle<W: ExactStructureWitness + ?Sized>(
@@ -2665,9 +2707,9 @@ where
         config,
         witness,
     )?;
-    let origin = network.admit_minimum(origin_minimum, witness);
-    let positive_id = network.admit_minimum(positive, witness);
-    let negative_id = network.admit_minimum(negative, witness);
+    let origin = network.admit_quenched(origin_minimum, witness).id;
+    let positive_id = network.admit_quenched(positive, witness).id;
+    let negative_id = network.admit_quenched(negative, witness).id;
     let candidate = NdSaddleConnection {
         id: usize::MAX,
         origin,
