@@ -1,8 +1,8 @@
 use std::convert::Infallible;
 
 use anneal_core::pes_exploration::{
-    ExactStructureWitness, NdPesNetwork, PesExplorationConfig, PesSurface, RideMethod,
-    discover_nd_connection,
+    discover_nd_connection, ExactStructureWitness, NdPesNetwork, PesExplorationConfig, PesSurface,
+    QuenchedMinimum, RideMethod,
 };
 use ndarray::{Array1, ArrayView1};
 
@@ -96,6 +96,47 @@ impl ExactStructureWitness for PointWitness {
             .sqrt()
             < 1e-5
     }
+}
+
+#[test]
+fn exact_source_admission_retains_isolated_nd_minima() {
+    let mut network = NdPesNetwork::new();
+    let first = QuenchedMinimum {
+        energy: -1.0,
+        coordinates: Array1::from_vec(vec![-1.0, 0.0]),
+        gradient: Array1::zeros(2),
+        max_gradient: 0.0,
+    };
+
+    let first_admission = network.admit_minimum(first, &PointWitness);
+    assert!(first_admission.is_new);
+    assert_eq!(first_admission.id, 0);
+    assert_eq!(first_admission.nearest_coordinate_distance, None);
+
+    let duplicate = QuenchedMinimum {
+        energy: -1.1,
+        coordinates: Array1::from_vec(vec![-1.0 + 1e-7, 0.0]),
+        gradient: Array1::from_vec(vec![1e-10, 0.0]),
+        max_gradient: 1e-10,
+    };
+    let duplicate_admission = network.admit_minimum(duplicate, &PointWitness);
+    assert!(!duplicate_admission.is_new);
+    assert_eq!(duplicate_admission.id, 0);
+    assert!(duplicate_admission.nearest_coordinate_distance.unwrap() < 1e-6);
+    assert_eq!(network.minimum_count(), 1);
+    assert_eq!(network.minima()[0].energy, -1.1);
+
+    let distinct = QuenchedMinimum {
+        energy: -0.9,
+        coordinates: Array1::from_vec(vec![1.0, 0.0]),
+        gradient: Array1::zeros(2),
+        max_gradient: 0.0,
+    };
+    let distinct_admission = network.admit_minimum(distinct, &PointWitness);
+    assert!(distinct_admission.is_new);
+    assert_eq!(distinct_admission.id, 1);
+    assert!(distinct_admission.nearest_coordinate_distance.unwrap() > 1.9);
+    assert_eq!(network.minimum_count(), 2);
 }
 
 #[test]
