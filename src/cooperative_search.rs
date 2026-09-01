@@ -17,13 +17,15 @@ mod run {
     use crate::catalog_rpc::{
         BoundaryCrossingRecord, BridgeAssignmentRecord, BridgeCrossingRecord, CatalogCandidate,
         CatalogFrontierPost, CatalogLedgerEvent, CatalogMutation, CatalogRelation,
-        CatalogRideReport, CatalogRideWork, CatalogSnapshot, DescriptorHoleProposal,
-        INCUMBENT_SAMPLE_DRAW, PolicyState, PopulationEpochState, PopulationPlan,
-        PopulationSelection, ProtocolRejection, SPARSE_SAMPLE_DRAW, TransitionDestination,
+        CatalogRideOutcome, CatalogRideReport, CatalogRideWork, CatalogSnapshot,
+        DescriptorHoleProposal, INCUMBENT_SAMPLE_DRAW, PolicyState, PopulationEpochState,
+        PopulationPlan, PopulationSelection, ProtocolRejection, SPARSE_SAMPLE_DRAW,
+        TransitionDestination,
     };
     use crate::compatibility::EngineDescriptor;
     use crate::methods::feynman_kac::population_family_position;
-    use crate::ride_ledger::RideCredit;
+    use crate::pes_exploration::RideMethod;
+    use crate::ride_ledger::{RideCredit, RideDirection, RideFailure, RideWorkOrder};
 
     use super::ledger::{ChargeKind, CooperativeLedger, LedgerError, ReplicaLedgerEvent};
 
@@ -115,6 +117,101 @@ mod run {
         pub catalog: Option<CatalogMutation>,
         /// Action and outcome attached to a transition event.
         pub transition: Option<TransitionTrace>,
+        /// Work identity and producer/receiver evidence for a transition ride.
+        pub ride: Option<RideTrace>,
+    }
+
+    /// Auditable identity, cost, and verdict of one transition-search experiment.
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    pub struct RideTrace {
+        /// Coordinator-local work identifier.
+        pub work: u64,
+        /// Exact source basin named by the commissioned arm.
+        pub source_basin: Option<u64>,
+        /// Source-local invariant environment class.
+        pub environment_class: Option<u32>,
+        /// Ranked localized mode seed.
+        pub mode_rank: Option<u16>,
+        /// Sign of the initial displacement.
+        pub direction: Option<RideDirection>,
+        /// Minimum-mode solver assigned by the coordinator.
+        pub method: Option<RideMethod>,
+        /// Atom representing the commissioned environment class.
+        pub representative_atom: Option<u32>,
+        /// One-based attempt number for the arm.
+        pub attempt: Option<u64>,
+        /// Deterministic experiment seed.
+        pub seed: Option<u64>,
+        /// PES evaluations charged by the producer.
+        pub producer_charged_evaluations: Option<u64>,
+        /// Whether the producer supplied a certified connection.
+        pub producer_certified_connection: Option<bool>,
+        /// Producer-side classified failure.
+        pub producer_failure: Option<RideFailure>,
+        /// PES evaluations charged during receiving certification.
+        pub receiver_charged_evaluations: Option<u64>,
+        /// Whether the receiver certified the physical connection.
+        pub receiver_certified_connection: Option<bool>,
+        /// Receiver-side classified failure.
+        pub receiver_failure: Option<RideFailure>,
+        /// Whether the receiver added a previously unseen endpoint pair.
+        pub novel_edge: Option<bool>,
+        /// Producer plus receiving-side charged evaluations.
+        pub total_charged_evaluations: Option<u64>,
+    }
+
+    impl RideTrace {
+        fn claim(order: &RideWorkOrder) -> Self {
+            Self::with_order(order.id, Some(order))
+        }
+
+        fn report(order: Option<&RideWorkOrder>, report: &CatalogRideReport) -> Self {
+            let mut trace = Self::with_order(report.work, order);
+            trace.producer_charged_evaluations = Some(report.charged_evaluations);
+            match &report.outcome {
+                CatalogRideOutcome::Certified(_) => {
+                    trace.producer_certified_connection = Some(true);
+                }
+                CatalogRideOutcome::Failed(failure) => {
+                    trace.producer_certified_connection = Some(false);
+                    trace.producer_failure = Some(*failure);
+                }
+            }
+            trace
+        }
+
+        fn with_credit(mut self, credit: RideCredit) -> Self {
+            self.receiver_charged_evaluations = self
+                .producer_charged_evaluations
+                .and_then(|producer| credit.total_charged_evaluations.checked_sub(producer));
+            self.receiver_certified_connection = Some(credit.certified_connection);
+            self.receiver_failure = credit.failure;
+            self.novel_edge = Some(credit.novel_edge);
+            self.total_charged_evaluations = Some(credit.total_charged_evaluations);
+            self
+        }
+
+        fn with_order(work: u64, order: Option<&RideWorkOrder>) -> Self {
+            Self {
+                work,
+                source_basin: order.map(|order| order.arm.source_basin),
+                environment_class: order.map(|order| order.arm.environment_class),
+                mode_rank: order.map(|order| order.arm.mode_rank),
+                direction: order.map(|order| order.arm.direction),
+                method: order.map(|order| order.arm.method),
+                representative_atom: order.map(|order| order.representative_atom),
+                attempt: order.map(|order| order.attempt),
+                seed: order.map(|order| order.seed),
+                producer_charged_evaluations: None,
+                producer_certified_connection: None,
+                producer_failure: None,
+                receiver_charged_evaluations: None,
+                receiver_certified_connection: None,
+                receiver_failure: None,
+                novel_edge: None,
+                total_charged_evaluations: None,
+            }
+        }
     }
 
     /// Replayable action-conditioned transition diagnostic.
@@ -617,6 +714,7 @@ mod run {
             Arc<Mutex<Option<Result<Option<BoundaryCrossingRecord>, CatalogClientError>>>>,
         crossing_pending: bool,
         crossing_request: Option<BoundaryCrossingRequest>,
+        ride_claims: BTreeMap<u64, RideWorkOrder>,
     }
 
     /// Four-replica-compatible driver for accounting, policy, RPC, and event output.
@@ -664,6 +762,7 @@ mod run {
                             crossing_slot: Arc::new(Mutex::new(None)),
                             crossing_pending: false,
                             crossing_request: None,
+                            ride_claims: BTreeMap::new(),
                         },
                     )
                 })
@@ -1311,7 +1410,15 @@ mod run {
                     Ok(RideClaimOutcome::SharingDisabled)
                 }
                 Some(Ok(Some(work))) => {
+                    let trace = RideTrace::claim(&work.order);
+                    self.replica_mut(replica)?
+                        .ride_claims
+                        .insert(work.order.id, work.order.clone());
                     self.push_event(replica, TraceKind::RideClaim, None, None)?;
+                    self.events
+                        .last_mut()
+                        .expect("ride-claim push appends one trace event")
+                        .ride = Some(trace);
                     Ok(RideClaimOutcome::Work(work))
                 }
                 Some(Ok(None)) => {
@@ -1341,6 +1448,13 @@ mod run {
             report: CatalogRideReport,
         ) -> Result<RideReportOutcome, CooperativeRunError> {
             let rpc_sequence = self.next_rpc_sequence(replica)?;
+            let order = self
+                .replica_mut(replica)?
+                .ride_claims
+                .get(&report.work)
+                .cloned();
+            let ride_trace = RideTrace::report(order.as_ref(), &report);
+            let work = report.work;
             let result = {
                 let state = self.replica_mut(replica)?;
                 state.client.as_ref().map(|mailbox| {
@@ -1350,10 +1464,19 @@ mod run {
             match result {
                 None => {
                     self.push_event(replica, TraceKind::SharingDisabled, None, None)?;
+                    self.events
+                        .last_mut()
+                        .expect("sharing-disabled push appends one trace event")
+                        .ride = Some(ride_trace);
                     Ok(RideReportOutcome::SharingDisabled)
                 }
                 Some(Ok(credit)) => {
                     self.push_event(replica, TraceKind::RideReport, None, None)?;
+                    self.events
+                        .last_mut()
+                        .expect("ride-report push appends one trace event")
+                        .ride = Some(ride_trace.with_credit(credit));
+                    self.replica_mut(replica)?.ride_claims.remove(&work);
                     Ok(RideReportOutcome::Credited(credit))
                 }
                 Some(Err(CatalogClientError::Rejected(reason))) => {
@@ -1363,10 +1486,18 @@ mod run {
                         None,
                         Some(rejection_code(reason)),
                     )?;
+                    self.events
+                        .last_mut()
+                        .expect("ride rejection push appends one trace event")
+                        .ride = Some(ride_trace);
                     Ok(RideReportOutcome::Rejected)
                 }
                 Some(Err(_)) => {
                     self.push_event(replica, TraceKind::RpcFallback, None, None)?;
+                    self.events
+                        .last_mut()
+                        .expect("ride fallback push appends one trace event")
+                        .ride = Some(ride_trace);
                     Ok(RideReportOutcome::LocalFallback)
                 }
             }
@@ -2118,8 +2249,55 @@ mod run {
                         )
                     },
                 );
+                let [
+                    ride_work,
+                    ride_source_basin,
+                    ride_environment_class,
+                    ride_mode_rank,
+                    ride_direction,
+                    ride_method,
+                    ride_representative_atom,
+                    ride_attempt,
+                    ride_seed,
+                    ride_producer_charged,
+                    ride_producer_certified,
+                    ride_producer_failure,
+                    ride_receiver_charged,
+                    ride_receiver_certified,
+                    ride_receiver_failure,
+                    ride_novel_edge,
+                    ride_total_charged,
+                ] = event
+                    .ride
+                    .as_ref()
+                    .map_or_else(
+                        || vec!["null".to_owned(); 17],
+                        |ride| {
+                            vec![
+                                ride.work.to_string(),
+                                optional_u64(ride.source_basin),
+                                optional_u64(ride.environment_class.map(u64::from)),
+                                optional_u64(ride.mode_rank.map(u64::from)),
+                                optional_ride_direction(ride.direction),
+                                optional_ride_method(ride.method),
+                                optional_u64(ride.representative_atom.map(u64::from)),
+                                optional_u64(ride.attempt),
+                                optional_u64(ride.seed),
+                                optional_u64(ride.producer_charged_evaluations),
+                                optional_bool(ride.producer_certified_connection),
+                                optional_ride_failure(ride.producer_failure),
+                                optional_u64(ride.receiver_charged_evaluations),
+                                optional_bool(ride.receiver_certified_connection),
+                                optional_ride_failure(ride.receiver_failure),
+                                optional_bool(ride.novel_edge),
+                                optional_u64(ride.total_charged_evaluations),
+                            ]
+                        },
+                    )
+                    .try_into()
+                    .expect("ride JSON field count is fixed");
                 output.push_str(&format!(
-                "{{\"kind\":\"{}\",\"replica\":{},\"sequence\":{},\"aggregate_charged\":{},\"catalog_version\":{},\"reason\":{},\"population_epoch\":{},\"population_parent\":{},\"population_family_ordinal\":{},\"population_family_size\":{},\"population_effective_sample_size\":{},\"population_selection\":{},\"policy_local_basin\":{},\"policy_relation\":{},\"policy_total_visits\":{},\"policy_singleton_basins\":{},\"policy_local_basin_visits\":{},\"policy_globally_saturated\":{},\"policy_local_basin_distance\":{},\"policy_novelty\":{},\"policy_transition_uncertainty\":{},\"policy_query_energy\":{},\"slice\":{},\"slice_current_basin\":{},\"slice_active_relation\":{},\"slice_policy_role\":{},\"slice_policy_reason\":{},\"slice_proposal_family\":{},\"slice_sampled_basin\":{},\"slice_descriptor_step_norm\":{},\"slice_cartesian_step_norm\":{},\"slice_validation\":{},\"slice_quench\":{},\"slice_adoption\":{},\"slice_novelty\":{},\"slice_energy\":{},\"slice_charged_work\":{},\"catalog_basin\":{},\"catalog_mutation\":{},\"catalog_evicted\":{},\"catalog_incumbent\":{},\"transition_action\":{},\"transition_hop\":{},\"transition_from_energy\":{},\"transition_to_energy\":{},\"transition_resolved\":{},\"transition_adopted\":{}}}\n",
+                "{{\"kind\":\"{}\",\"replica\":{},\"sequence\":{},\"aggregate_charged\":{},\"catalog_version\":{},\"reason\":{},\"population_epoch\":{},\"population_parent\":{},\"population_family_ordinal\":{},\"population_family_size\":{},\"population_effective_sample_size\":{},\"population_selection\":{},\"policy_local_basin\":{},\"policy_relation\":{},\"policy_total_visits\":{},\"policy_singleton_basins\":{},\"policy_local_basin_visits\":{},\"policy_globally_saturated\":{},\"policy_local_basin_distance\":{},\"policy_novelty\":{},\"policy_transition_uncertainty\":{},\"policy_query_energy\":{},\"slice\":{},\"slice_current_basin\":{},\"slice_active_relation\":{},\"slice_policy_role\":{},\"slice_policy_reason\":{},\"slice_proposal_family\":{},\"slice_sampled_basin\":{},\"slice_descriptor_step_norm\":{},\"slice_cartesian_step_norm\":{},\"slice_validation\":{},\"slice_quench\":{},\"slice_adoption\":{},\"slice_novelty\":{},\"slice_energy\":{},\"slice_charged_work\":{},\"catalog_basin\":{},\"catalog_mutation\":{},\"catalog_evicted\":{},\"catalog_incumbent\":{},\"transition_action\":{},\"transition_hop\":{},\"transition_from_energy\":{},\"transition_to_energy\":{},\"transition_resolved\":{},\"transition_adopted\":{},\"ride_work\":{},\"ride_source_basin\":{},\"ride_environment_class\":{},\"ride_mode_rank\":{},\"ride_direction\":{},\"ride_method\":{},\"ride_representative_atom\":{},\"ride_attempt\":{},\"ride_seed\":{},\"ride_producer_charged\":{},\"ride_producer_certified\":{},\"ride_producer_failure\":{},\"ride_receiver_charged\":{},\"ride_receiver_certified\":{},\"ride_receiver_failure\":{},\"ride_novel_edge\":{},\"ride_total_charged\":{}}}\n",
                 event.kind.code(),
                 event.replica,
                 event.sequence,
@@ -2167,6 +2345,23 @@ mod run {
                 transition_to_energy,
                 transition_resolved,
                 transition_adopted,
+                ride_work,
+                ride_source_basin,
+                ride_environment_class,
+                ride_mode_rank,
+                ride_direction,
+                ride_method,
+                ride_representative_atom,
+                ride_attempt,
+                ride_seed,
+                ride_producer_charged,
+                ride_producer_certified,
+                ride_producer_failure,
+                ride_receiver_charged,
+                ride_receiver_certified,
+                ride_receiver_failure,
+                ride_novel_edge,
+                ride_total_charged,
             ));
             }
             output
@@ -2454,6 +2649,7 @@ mod run {
                 slice: None,
                 catalog: None,
                 transition: None,
+                ride: None,
             });
             Ok(())
         }
@@ -2543,6 +2739,66 @@ mod run {
 
     fn optional_f64(value: Option<f64>) -> String {
         value.map_or_else(|| "null".to_owned(), |value| value.to_string())
+    }
+
+    fn optional_bool(value: Option<bool>) -> String {
+        value.map_or_else(|| "null".to_owned(), |value| value.to_string())
+    }
+
+    fn optional_ride_direction(value: Option<RideDirection>) -> String {
+        value.map_or_else(
+            || "null".to_owned(),
+            |value| {
+                format!(
+                    "\"{}\"",
+                    match value {
+                        RideDirection::Negative => "negative",
+                        RideDirection::Positive => "positive",
+                    }
+                )
+            },
+        )
+    }
+
+    fn optional_ride_method(value: Option<RideMethod>) -> String {
+        value.map_or_else(
+            || "null".to_owned(),
+            |value| {
+                format!(
+                    "\"{}\"",
+                    match value {
+                        RideMethod::Dimer => "dimer",
+                        RideMethod::Lanczos => "lanczos",
+                    }
+                )
+            },
+        )
+    }
+
+    fn optional_ride_failure(value: Option<RideFailure>) -> String {
+        value.map_or_else(
+            || "null".to_owned(),
+            |value| format!("\"{}\"", ride_failure_code(value)),
+        )
+    }
+
+    fn ride_failure_code(value: RideFailure) -> &'static str {
+        match value {
+            RideFailure::QuenchNotConverged => "quench_not_converged",
+            RideFailure::SaddleNotConverged => "saddle_not_converged",
+            RideFailure::MinimumModeNotConverged => "minimum_mode_not_converged",
+            RideFailure::PrfoNotConverged => "prfo_not_converged",
+            RideFailure::SaddleForceNotConverged => "saddle_force_not_converged",
+            RideFailure::ActivationNotEscaped => "activation_not_escaped",
+            RideFailure::MinimumModeLostCurvature => "minimum_mode_lost_curvature",
+            RideFailure::NoNegativeMode => "no_negative_mode",
+            RideFailure::HigherIndex => "higher_index",
+            RideFailure::IrcNotConverged => "irc_not_converged",
+            RideFailure::CollapsedConnection => "collapsed_connection",
+            RideFailure::Surface => "surface",
+            RideFailure::BudgetExhausted => "budget_exhausted",
+            RideFailure::DisconnectedConnection => "disconnected_connection",
+        }
     }
 
     fn optional_catalog_relation(value: Option<CatalogRelation>) -> String {
