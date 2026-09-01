@@ -18,6 +18,7 @@ use rgmin::{
 use rgsaddle::{
     ForceGate, IrcConfig, IrcDirection, IrcSession, MinModeConfig, MinModeKind, MinModeSession,
     MinModeStatus, PointSurface, SaddleError, SellaSaddleConfig, SellaSaddleSession, exact_eigh,
+    prfo_trust_region,
 };
 
 use crate::curvature::{project_rigid_with, rigid_basis};
@@ -1327,6 +1328,48 @@ fn min_mode_config(config: &PesExplorationConfig) -> MinModeConfig {
     }
 }
 
+fn refine_nd_with_prfo<S: PesSurface + ?Sized>(
+    surface: &S,
+    start: ArrayView1<f64>,
+    config: &PesExplorationConfig,
+) -> Result<Array1<f64>, PesExplorationError> {
+    let mut coordinates = start.to_owned();
+    for _ in 0..config.prfo_steps {
+        let (_, gradient) = checked_evaluate(surface, coordinates.view())?;
+        if max_abs(gradient.view()) <= config.saddle_force_tolerance {
+            return Ok(coordinates);
+        }
+        let hessian = finite_difference_hessian(surface, coordinates.view(), config.hessian_step)?;
+        let (eigenvalues, eigenvectors) = exact_eigh(hessian.view())
+            .map_err(|error| PesExplorationError::Saddle(error.to_string()))?;
+        let mut order = (0..eigenvalues.len()).collect::<Vec<_>>();
+        order.sort_by(|&left, &right| eigenvalues[left].total_cmp(&eigenvalues[right]));
+        let sorted_values = Array1::from_iter(order.iter().map(|&index| eigenvalues[index]));
+        let mut sorted_vectors = Array2::zeros(eigenvectors.raw_dim());
+        for (column, &index) in order.iter().enumerate() {
+            sorted_vectors
+                .column_mut(column)
+                .assign(&eigenvectors.column(index));
+        }
+        let step = prfo_trust_region(
+            &sorted_values,
+            &sorted_vectors,
+            &gradient,
+            1,
+            config.maximum_move,
+        );
+        if step.len() != coordinates.len() || step.iter().any(|value| !value.is_finite()) {
+            return Err(PesExplorationError::Saddle(
+                "P-RFO returned an invalid N-D step".into(),
+            ));
+        }
+        coordinates += &step;
+    }
+    Err(PesExplorationError::SaddleNotConverged {
+        stage: SaddleConvergenceStage::Prfo,
+    })
+}
+
 fn irc_config(config: &PesExplorationConfig, branch_step: f64) -> IrcConfig {
     IrcConfig {
         dx: branch_step,
@@ -1810,7 +1853,10 @@ where
         });
     }
 
-    let saddle_coordinates = min_mode.position().to_owned();
+    let mut saddle_coordinates = min_mode.position().to_owned();
+    if config.refine_with_prfo {
+        saddle_coordinates = refine_nd_with_prfo(surface, saddle_coordinates.view(), config)?;
+    }
     let (saddle_energy, saddle_gradient) = checked_evaluate(surface, saddle_coordinates.view())?;
     let saddle_max_gradient = max_abs(saddle_gradient.view());
     if saddle_max_gradient > config.saddle_force_tolerance {
