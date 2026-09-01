@@ -17,8 +17,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use anneal_core::catalog::euclidean_gradient_norm;
 use anneal_core::catalog::molecular::{
-    descriptor_space, engine_binary_digest, length_scale, reference_coordinates, system_signature,
-    water_groups, water_species,
+    MolecularCatalogPresetError, component_gradient_tolerance, descriptor_space,
+    engine_binary_digest, length_scale, reference_coordinates, system_signature, water_groups,
+    water_species,
 };
 use anneal_core::catalog_rpc::client::{CatalogClient, ClientConfig};
 use anneal_core::catalog_rpc::{
@@ -38,7 +39,6 @@ use serde_json::json;
 const WATER_BOX: [f64; 9] = [60.0, 0.0, 0.0, 0.0, 60.0, 0.0, 0.0, 0.0, 60.0];
 const OXYGEN_MASS: f64 = 15.999;
 const HYDROGEN_MASS: f64 = 1.008;
-const RECEIVER_MAX_GRADIENT: f64 = 1e-5;
 const EXACT_STRUCTURE_RADIUS: f64 = 1e-4;
 
 struct WaterSurface {
@@ -119,10 +119,12 @@ fn record_charge(
     Ok(())
 }
 
-fn ride_config(length_scale: f64, coordinate_dim: usize) -> PesExplorationConfig {
-    let stationary_component_tolerance =
-        0.5 * RECEIVER_MAX_GRADIENT / (coordinate_dim as f64).sqrt();
-    PesExplorationConfig {
+fn ride_config(
+    length_scale: f64,
+    coordinate_dim: usize,
+) -> Result<PesExplorationConfig, MolecularCatalogPresetError> {
+    let stationary_component_tolerance = component_gradient_tolerance(coordinate_dim)?;
+    Ok(PesExplorationConfig {
         ride_method: RideMethod::Dimer,
         quench_steps: 2_000,
         saddle_steps: 1_000,
@@ -139,7 +141,7 @@ fn ride_config(length_scale: f64, coordinate_dim: usize) -> PesExplorationConfig
         irc_force_tolerance: 0.05,
         refine_with_prfo: true,
         ..PesExplorationConfig::default()
-    }
+    })
 }
 
 fn failure_name(outcome: &CatalogRideOutcome) -> Option<String> {
@@ -230,7 +232,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         kmax_factor: 1.8,
         radius: EXACT_STRUCTURE_RADIUS,
     };
-    let exploration = ride_config(scale, coordinate_dim);
+    let exploration = ride_config(scale, coordinate_dim)?;
     let localization_radius = std::env::var("CATALOG_RIDE_LOCAL_RADIUS")
         .ok()
         .map(|value| value.parse::<f64>())

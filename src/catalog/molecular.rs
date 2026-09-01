@@ -70,11 +70,24 @@ pub const GFN2_ACCURACY: f64 = 0.01;
 /// SCF iteration ceiling paired with [`GFN2_ACCURACY`].
 pub const GFN2_MAX_ITERATIONS: i32 = 500;
 
+/// Receiving-side Euclidean gradient-norm gate for GFN2 stationary points.
+pub const MAX_GRADIENT_NORM: f64 = 1e-5;
+
 /// Vacuum box edge used by `molecular_cluster` (A).
 pub const VACUUM_BOX: f64 = 60.0;
 
 /// Paper water-hexamer molecule count.
 pub const WATER_HEXAMER_MOLECULES: usize = 6;
+
+/// Componentwise solver tolerance that guarantees [`MAX_GRADIENT_NORM`].
+pub fn component_gradient_tolerance(
+    coordinate_dim: usize,
+) -> Result<f64, MolecularCatalogPresetError> {
+    if coordinate_dim == 0 {
+        return Err(MolecularCatalogPresetError::CoordinateDimension);
+    }
+    Ok(MAX_GRADIENT_NORM / (coordinate_dim as f64).sqrt())
+}
 
 /// Isolated-water geometry used to seed `(H2O)m` (A).
 const WATER: [[f64; 3]; 3] = [
@@ -346,7 +359,7 @@ pub fn validator_config(
         descriptor_dim,
         min_separation: 0.5,
         coordinate_tolerance: 1e-10,
-        max_gradient_norm: 1e-5,
+        max_gradient_norm: MAX_GRADIENT_NORM,
         energy_abs_tolerance: 1e-9,
         energy_rel_tolerance: 1e-10,
     })
