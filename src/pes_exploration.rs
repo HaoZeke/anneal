@@ -42,7 +42,10 @@ pub trait PesSurface: Sync {
 mod tests {
     use ndarray::{Array1, Array2, ArrayView1, array};
 
-    use super::{IrcDirection, PesExplorationConfig, PesSurface, home_uphill_mode, roll_branch};
+    use super::{
+        IrcDirection, PesExplorationConfig, PesSurface, home_uphill_mode, refine_irc_step,
+        roll_branch,
+    };
 
     struct FailingIrcSurface;
 
@@ -95,6 +98,18 @@ mod tests {
         .unwrap_err();
 
         assert!(error.to_string().contains("IRC Forward step 0"));
+    }
+
+    #[test]
+    fn collapsed_irc_retries_refine_the_integration_radius() {
+        let config = PesExplorationConfig {
+            branch_growth: 2.5,
+            ..PesExplorationConfig::default()
+        };
+
+        let refined = refine_irc_step(0.2, &config).unwrap();
+
+        assert!((refined - 0.08).abs() < 1e-15);
     }
 }
 
