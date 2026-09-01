@@ -1,9 +1,9 @@
 use anneal_core::catalog::molecular::{
     DESCRIPTOR_SCHEMA, ENGINE_BINARY_INPUT, ENGINE_KIND, GFN2_ACCURACY, GFN2_MAX_ITERATIONS,
-    GROUP_SCHEMA, WATER_HEXAMER_MOLECULES, descriptor_space, engine_binary_digest,
-    engine_config_digest, fresh_evaluation, leftover_descriptor_dim, leftover_space, leftover_spec,
-    leftover_values, length_scale, reference_coordinates, system_signature, validator_config,
-    water_groups, water_species,
+    GROUP_SCHEMA, MAX_GRADIENT_NORM, WATER_HEXAMER_MOLECULES, component_gradient_tolerance,
+    descriptor_space, engine_binary_digest, engine_config_digest, fresh_evaluation,
+    leftover_descriptor_dim, leftover_space, leftover_spec, leftover_values, length_scale,
+    reference_coordinates, system_signature, validator_config, water_groups, water_species,
 };
 use anneal_core::descriptor_space::{UNIVERSAL_DESCRIPTOR_SCHEMA, UNIVERSAL_DESCRIPTOR_VERSION};
 use anneal_core::methods::cluster_hopping::Config;
@@ -141,6 +141,21 @@ fn validator_uses_universal_dimension() {
     let validator = validator_config(&coordinates, descriptor_dim).unwrap();
     assert_eq!(validator.descriptor_dim, descriptor_dim);
     assert_eq!(validator.reference_coordinates, coordinates);
+}
+
+#[test]
+fn producer_component_gate_is_the_receiver_euclidean_gate() {
+    let coordinate_dim = 18;
+    let component = component_gradient_tolerance(coordinate_dim).unwrap();
+    let reconstructed_norm = component * (coordinate_dim as f64).sqrt();
+
+    assert!((reconstructed_norm - MAX_GRADIENT_NORM).abs() < 1e-20);
+    assert_eq!(
+        validator_config(&reference_coordinates(2).unwrap(), 1)
+            .unwrap()
+            .max_gradient_norm,
+        MAX_GRADIENT_NORM
+    );
 }
 
 #[test]
