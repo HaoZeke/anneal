@@ -305,6 +305,17 @@ where
     ) {
         Ok(connection) => connection,
         Err(error) => {
+            if std::env::var_os("ANNEAL_PES_TRACE").is_some() {
+                eprintln!(
+                    "{}",
+                    serde_json::json!({
+                        "kind": "pes_failure",
+                        "work": work_id,
+                        "evaluations": counted.evaluations(),
+                        "error": error.to_string(),
+                    })
+                );
+            }
             return failed_report(
                 work_id,
                 counted.evaluations(),
