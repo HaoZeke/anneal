@@ -45,7 +45,7 @@ dependencies = [
  "cc",
  "criterion",
  "dlpk",
- "eindir-core 0.6.0 (git+https://github.com/HaoZeke/eindir.git?rev=f3c42130bb389ba6cd6e4cfdc8b2e182f4a764e9)",
+ "eindir-core",
  "featomic",
  "libloading",
  "linkcell",
@@ -518,21 +518,6 @@ name = "dyn-clone"
 version = "1.0.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d0881ea181b1df73ff77ffaaf9c7544ecc11e82fba9b5f27b262a3c73a332555"
-
-[[package]]
-name = "eindir-core"
-version = "0.6.0"
-source = "git+https://github.com/HaoZeke/eindir.git?rev=091c6f7d6ea70821c3374152481fb9500e799af2#091c6f7d6ea70821c3374152481fb9500e799af2"
-dependencies = [
- "cbindgen 0.29.4",
- "dlpk",
- "ndarray 0.17.2",
- "num-traits",
- "rand 0.9.5",
- "rand_distr",
- "rayon",
- "thiserror",
-]
 
 [[package]]
 name = "eindir-core"
@@ -1722,7 +1707,7 @@ source = "git+https://github.com/HaoZeke/rgmin.git?rev=20832fd169932a1cd0d47ac84
 dependencies = [
  "cbindgen 0.29.4",
  "dlpk",
- "eindir-core 0.6.0 (git+https://github.com/HaoZeke/eindir.git?rev=f3c42130bb389ba6cd6e4cfdc8b2e182f4a764e9)",
+ "eindir-core",
  "ndarray 0.17.2",
  "rand 0.9.5",
  "thiserror",
@@ -1731,10 +1716,10 @@ dependencies = [
 [[package]]
 name = "rgpot-core"
 version = "3.0.2"
-source = "git+https://github.com/HaoZeke/potlib.git?rev=65d5488f202e0c7b1b3aeddeb388b3d3ba707fcf#65d5488f202e0c7b1b3aeddeb388b3d3ba707fcf"
+source = "git+https://github.com/HaoZeke/potlib.git?rev=386c0342e008903472925ad78f8f32a91db51e14#386c0342e008903472925ad78f8f32a91db51e14"
 dependencies = [
  "dlpk",
- "eindir-core 0.6.0 (git+https://github.com/HaoZeke/eindir.git?rev=091c6f7d6ea70821c3374152481fb9500e799af2)",
+ "eindir-core",
 ]
 
 [[package]]
@@ -1742,7 +1727,7 @@ name = "rgsaddle"
 version = "0.1.0"
 source = "git+https://github.com/OmniPotentRPC/rgsaddle.git?rev=3015f68b12ebac9b7950469efa86d0f1ecfa001d#3015f68b12ebac9b7950469efa86d0f1ecfa001d"
 dependencies = [
- "eindir-core 0.6.0 (git+https://github.com/HaoZeke/eindir.git?rev=f3c42130bb389ba6cd6e4cfdc8b2e182f4a764e9)",
+ "eindir-core",
  "linkcell",
  "ndarray 0.17.2",
  "rgmin",
