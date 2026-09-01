@@ -37,6 +37,27 @@ pub trait PesSurface: Sync {
     fn evaluate(&self, coordinates: ArrayView1<f64>) -> Result<(f64, Array1<f64>), Self::Error>;
 }
 
+#[cfg(test)]
+mod tests {
+    use ndarray::{Array2, array};
+
+    use super::home_uphill_mode;
+
+    #[test]
+    fn mode_homing_promotes_the_overlapping_eigenvector_with_continuous_sign() {
+        let eigenvalues = array![-2.0, 0.4, 3.0];
+        let eigenvectors = Array2::eye(3);
+        let reference = array![0.0, 0.0, -1.0];
+
+        let homed = home_uphill_mode(&eigenvalues, &eigenvectors, reference.view()).unwrap();
+
+        assert_eq!(homed.source_index, 2);
+        assert!((homed.overlap - 1.0).abs() < 1e-14);
+        assert_eq!(homed.eigenvalues, array![3.0, -2.0, 0.4]);
+        assert_eq!(homed.eigenvectors.column(0), reference.view());
+    }
+}
+
 /// Species, boundary geometry, and caller domain carried by exact identity.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct StructureContext {
