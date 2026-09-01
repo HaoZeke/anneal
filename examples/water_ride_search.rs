@@ -17,7 +17,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use anneal_core::catalog::euclidean_gradient_norm;
 use anneal_core::catalog::molecular::{
-    MolecularCatalogPresetError, component_gradient_tolerance, descriptor_space,
+    MAX_GRADIENT_NORM, MolecularCatalogPresetError, component_gradient_tolerance, descriptor_space,
     engine_binary_digest, length_scale, reference_coordinates, system_signature, water_groups,
     water_species,
 };
@@ -27,7 +27,9 @@ use anneal_core::catalog_rpc::{
 };
 use anneal_core::cooperative_search::ledger::ChargeKind;
 use anneal_core::methods::cluster_hopping::repack_rigid_groups;
-use anneal_core::pes_exploration::{PesExplorationConfig, PesSurface, RideMethod, quench_minimum};
+use anneal_core::pes_exploration::{
+    PesExplorationConfig, PesSurface, RideMethod, quench_minimum_with_norm,
+};
 use anneal_core::ride_execution::{CatalogRideExecutionConfig, execute_catalog_ride};
 use anneal_core::shape::IraStructureWitness;
 use common::rgpot_eindir::{RgpotObjective, emit_engine_manifest};
@@ -123,7 +125,7 @@ fn ride_config(
     length_scale: f64,
     coordinate_dim: usize,
 ) -> Result<PesExplorationConfig, MolecularCatalogPresetError> {
-    let stationary_component_tolerance = component_gradient_tolerance(coordinate_dim)?;
+    let stationary_component_tolerance = 0.5 * component_gradient_tolerance(coordinate_dim)?;
     Ok(PesExplorationConfig {
         ride_method: RideMethod::Dimer,
         quench_steps: 2_000,
@@ -132,6 +134,7 @@ fn ride_config(
         irc_steps: 200,
         prfo_steps: 300,
         quench_gradient_tolerance: stationary_component_tolerance,
+        quench_gradient_norm_tolerance: Some(MAX_GRADIENT_NORM),
         saddle_force_tolerance: stationary_component_tolerance,
         saddle_displacement: 0.1 * length_scale,
         negative_curvature_tolerance: 1e-6,
@@ -250,11 +253,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         &mut rng,
     );
     let quench_tolerance = exploration.quench_gradient_tolerance;
-    let minimum = quench_minimum(
+    let minimum = quench_minimum_with_norm(
         &surface,
         start.view(),
         exploration.quench_steps,
         quench_tolerance,
+        MAX_GRADIENT_NORM,
     )?;
     let (minimum_energy, minimum_gradient) = surface.evaluate(minimum.coordinates.view())?;
     let producer_initial_calls = surface.evaluations();
