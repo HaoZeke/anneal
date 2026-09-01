@@ -392,10 +392,12 @@ impl RideLedger {
         }
     }
 
-    /// Add or enrich an exact source minimum.
+    /// Add one exact source minimum or refresh its energy.
     ///
-    /// Re-observation is idempotent. One representative, the smallest atom
-    /// index, is kept for each environment class.
+    /// The first complete local-environment observation fixes the source's
+    /// portfolio. Re-observing the same exact basin may refine its energy and
+    /// representative atom for an existing class, but cannot append classes
+    /// produced by numerical drift around the same minimum.
     pub fn register_source(&mut self, source: RideSource) -> Result<(), RideLedgerError> {
         if !source.energy.is_finite() {
             return Err(RideLedgerError::NonfiniteSourceEnergy);
@@ -403,18 +405,29 @@ impl RideLedger {
         if source.environments.is_empty() {
             return Err(RideLedgerError::EmptyEnvironmentSet);
         }
-        let record = self.sources.entry(source.basin).or_insert(SourceRecord {
-            energy: source.energy,
-            representatives: BTreeMap::new(),
-        });
-        record.energy = record.energy.min(source.energy);
+        if let Some(record) = self.sources.get_mut(&source.basin) {
+            record.energy = record.energy.min(source.energy);
+            for target in source.environments {
+                if let Some(atom) = record.representatives.get_mut(&target.class) {
+                    *atom = (*atom).min(target.atom);
+                }
+            }
+            return Ok(());
+        }
+        let mut representatives = BTreeMap::new();
         for target in source.environments {
-            record
-                .representatives
+            representatives
                 .entry(target.class)
                 .and_modify(|atom| *atom = (*atom).min(target.atom))
                 .or_insert(target.atom);
         }
+        self.sources.insert(
+            source.basin,
+            SourceRecord {
+                energy: source.energy,
+                representatives,
+            },
+        );
         Ok(())
     }
 
