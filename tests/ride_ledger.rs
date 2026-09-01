@@ -93,6 +93,29 @@ fn environment_coverage_precedes_repeated_local_portfolio_arms() {
 }
 
 #[test]
+fn mode_rank_coverage_precedes_the_opposite_sign_of_a_tried_rank() {
+    let portfolio = RidePortfolio::new(2, vec![RideMethod::Dimer]).unwrap();
+    let mut ledger = RideLedger::new(portfolio);
+    ledger
+        .register_source(source(17, -104.2, &[(4, 6)]))
+        .unwrap();
+
+    let first = ledger.claim(2, 101).unwrap();
+    ledger
+        .report(
+            2,
+            first.id,
+            83,
+            RideOutcome::Failed(RideFailure::SaddleNotConverged),
+        )
+        .unwrap();
+    let second = ledger.claim(2, 102).unwrap();
+
+    assert_ne!(second.arm.mode_rank, first.arm.mode_rank);
+    assert_eq!(second.arm.direction, first.arm.direction);
+}
+
+#[test]
 fn duplicate_certified_connections_do_not_masquerade_as_new_pes_edges() {
     let portfolio = RidePortfolio::new(1, vec![RideMethod::Dimer]).unwrap();
     let mut ledger = RideLedger::new(portfolio);
