@@ -3248,6 +3248,12 @@ fn observe_ride_source(
     candidate: &CatalogCandidate,
 ) -> Result<(), ()> {
     let basin = candidate.census_basin.ok_or(())?;
+    if let Some(stored) = scientific.ride_candidates.get_mut(&basin) {
+        if candidate.energy < stored.energy {
+            *stored = candidate.clone();
+        }
+        return Ok(());
+    }
     let local = if scientific.descriptor_space.geometry().is_some() {
         scientific
             .descriptor_space
