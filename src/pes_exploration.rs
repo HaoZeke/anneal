@@ -8,7 +8,7 @@
 use std::fmt::Display;
 use std::sync::Mutex;
 
-use ndarray::{Array1, Array2, ArrayView1};
+use ndarray::{Array1, Array2, ArrayView1, ArrayView2};
 use rand::{SeedableRng, rngs::StdRng};
 use rand_distr::{Distribution, StandardNormal};
 use rgmin::{
@@ -16,9 +16,8 @@ use rgmin::{
     Solver, lowest_mode,
 };
 use rgsaddle::{
-    ForceGate, IrcConfig, IrcDirection, IrcSession, MinModeConfig, MinModeKind, MinModeSession,
-    MinModeStatus, PointSurface, SaddleError, SellaSaddleConfig, SellaSaddleSession, exact_eigh,
-    prfo_trust_region,
+    IrcConfig, IrcDirection, IrcSession, MinModeConfig, MinModeKind, MinModeSession, MinModeStatus,
+    PointSurface, SaddleError, exact_eigh, prfo_trust_region,
 };
 
 use crate::curvature::{project_rigid_with, rigid_basis};
@@ -1328,6 +1327,87 @@ fn min_mode_config(config: &PesExplorationConfig) -> MinModeConfig {
     }
 }
 
+fn sorted_eigensystem(
+    hessian: ArrayView2<'_, f64>,
+) -> Result<(Array1<f64>, Array2<f64>), PesExplorationError> {
+    if hessian.nrows() != hessian.ncols() || hessian.is_empty() {
+        return Err(PesExplorationError::InvalidShape(
+            "Hessian must be nonempty and square",
+        ));
+    }
+    let (eigenvalues, eigenvectors) =
+        exact_eigh(hessian).map_err(|error| PesExplorationError::Saddle(error.to_string()))?;
+    let mut order = (0..eigenvalues.len()).collect::<Vec<_>>();
+    order.sort_by(|&left, &right| eigenvalues[left].total_cmp(&eigenvalues[right]));
+    let sorted_values = Array1::from_iter(order.iter().map(|&index| eigenvalues[index]));
+    let mut sorted_vectors = Array2::zeros(eigenvectors.raw_dim());
+    for (column, &index) in order.iter().enumerate() {
+        sorted_vectors
+            .column_mut(column)
+            .assign(&eigenvectors.column(index));
+    }
+    Ok((sorted_values, sorted_vectors))
+}
+
+fn orthonormal_complement(
+    dimension: usize,
+    constraints: &[Array1<f64>],
+) -> Result<Array2<f64>, PesExplorationError> {
+    let mut columns = Vec::<Array1<f64>>::new();
+    for coordinate in 0..dimension {
+        let mut direction = Array1::zeros(dimension);
+        direction[coordinate] = 1.0;
+        project_rigid_with(&mut direction, constraints);
+        for _ in 0..2 {
+            for basis in &columns {
+                direction -= &(basis * direction.dot(basis));
+            }
+        }
+        let norm = direction.dot(&direction).sqrt();
+        if norm > 1e-10 {
+            columns.push(direction / norm);
+        }
+    }
+    if columns.is_empty() {
+        return Err(PesExplorationError::InvalidShape(
+            "Cartesian constraints remove every coordinate",
+        ));
+    }
+    let mut basis = Array2::zeros((dimension, columns.len()));
+    for (column, direction) in columns.iter().enumerate() {
+        basis.column_mut(column).assign(direction);
+    }
+    Ok(basis)
+}
+
+fn finite_difference_free_hessian<S: PesSurface + ?Sized>(
+    surface: &S,
+    coordinates: ArrayView1<f64>,
+    basis: &Array2<f64>,
+    step: f64,
+) -> Result<Array2<f64>, PesExplorationError> {
+    let mut hessian = Array2::zeros((basis.ncols(), basis.ncols()));
+    for column in 0..basis.ncols() {
+        let direction = basis.column(column);
+        let plus = &coordinates + &(&direction * step);
+        let minus = &coordinates - &(&direction * step);
+        let (_, plus_gradient) = checked_evaluate(surface, plus.view())?;
+        let (_, minus_gradient) = checked_evaluate(surface, minus.view())?;
+        let action = (plus_gradient - minus_gradient) / (2.0 * step);
+        for row in 0..basis.ncols() {
+            hessian[(row, column)] = basis.column(row).dot(&action);
+        }
+    }
+    for row in 0..hessian.nrows() {
+        for column in 0..row {
+            let symmetric = 0.5 * (hessian[(row, column)] + hessian[(column, row)]);
+            hessian[(row, column)] = symmetric;
+            hessian[(column, row)] = symmetric;
+        }
+    }
+    Ok(hessian)
+}
+
 fn refine_nd_with_prfo<S: PesSurface + ?Sized>(
     surface: &S,
     start: ArrayView1<f64>,
@@ -1340,17 +1420,7 @@ fn refine_nd_with_prfo<S: PesSurface + ?Sized>(
             return Ok(coordinates);
         }
         let hessian = finite_difference_hessian(surface, coordinates.view(), config.hessian_step)?;
-        let (eigenvalues, eigenvectors) = exact_eigh(hessian.view())
-            .map_err(|error| PesExplorationError::Saddle(error.to_string()))?;
-        let mut order = (0..eigenvalues.len()).collect::<Vec<_>>();
-        order.sort_by(|&left, &right| eigenvalues[left].total_cmp(&eigenvalues[right]));
-        let sorted_values = Array1::from_iter(order.iter().map(|&index| eigenvalues[index]));
-        let mut sorted_vectors = Array2::zeros(eigenvectors.raw_dim());
-        for (column, &index) in order.iter().enumerate() {
-            sorted_vectors
-                .column_mut(column)
-                .assign(&eigenvectors.column(index));
-        }
+        let (sorted_values, sorted_vectors) = sorted_eigensystem(hessian.view())?;
         let step = prfo_trust_region(
             &sorted_values,
             &sorted_vectors,
@@ -1368,6 +1438,61 @@ fn refine_nd_with_prfo<S: PesSurface + ?Sized>(
     Err(PesExplorationError::SaddleNotConverged {
         stage: SaddleConvergenceStage::Prfo,
     })
+}
+
+fn refine_cartesian_with_prfo<S: PesSurface + ?Sized>(
+    surface: &S,
+    start: ArrayView1<f64>,
+    cartesian_index: Option<(&[bool], [bool; 3])>,
+    config: &PesExplorationConfig,
+) -> Result<Array1<f64>, PesExplorationError> {
+    let mut coordinates = start.to_owned();
+    for _ in 0..config.prfo_steps {
+        let (_, gradient) = checked_evaluate(surface, coordinates.view())?;
+        let constraints = activation_basis(coordinates.view(), cartesian_index);
+        let basis = orthonormal_complement(coordinates.len(), &constraints)?;
+        let free_gradient = basis.t().dot(&gradient);
+        let mut tangent_gradient = gradient;
+        project_rigid_with(&mut tangent_gradient, &constraints);
+        if max_abs(tangent_gradient.view()) <= config.saddle_force_tolerance {
+            return Ok(coordinates);
+        }
+        let hessian = finite_difference_free_hessian(
+            surface,
+            coordinates.view(),
+            &basis,
+            config.hessian_step,
+        )?;
+        let (eigenvalues, eigenvectors) = sorted_eigensystem(hessian.view())?;
+        let free_step = prfo_trust_region(
+            &eigenvalues,
+            &eigenvectors,
+            &free_gradient,
+            1,
+            config.maximum_move,
+        );
+        let step = basis.dot(&free_step);
+        if step.len() != coordinates.len() || step.iter().any(|value| !value.is_finite()) {
+            return Err(PesExplorationError::Saddle(
+                "P-RFO returned an invalid Cartesian step".into(),
+            ));
+        }
+        coordinates += &step;
+    }
+    Err(PesExplorationError::SaddleNotConverged {
+        stage: SaddleConvergenceStage::Prfo,
+    })
+}
+
+fn cartesian_max_gradient(
+    coordinates: ArrayView1<f64>,
+    gradient: ArrayView1<f64>,
+    cartesian_index: Option<(&[bool], [bool; 3])>,
+) -> Result<f64, PesExplorationError> {
+    let constraints = activation_basis(coordinates, cartesian_index);
+    let mut tangent_gradient = gradient.to_owned();
+    project_rigid_with(&mut tangent_gradient, &constraints);
+    Ok(max_abs(tangent_gradient.view()))
 }
 
 fn irc_config(config: &PesExplorationConfig, branch_step: f64) -> IrcConfig {
@@ -2077,27 +2202,20 @@ where
     let mut saddle_coordinates = min_mode.position().to_owned();
 
     if config.refine_with_prfo {
-        let prfo_config = SellaSaddleConfig {
-            force_tol: config.saddle_force_tolerance,
-            force_gate: ForceGate::LinfNorm,
-            ..SellaSaddleConfig::default()
-        };
-        let mut prfo =
-            SellaSaddleSession::new(prfo_config, saddle_coordinates.clone(), masses.to_owned())
-                .map_err(|error| PesExplorationError::Saddle(error.to_string()))?;
-        let report = prfo
-            .run(&adapter, config.prfo_steps)
-            .map_err(|error| PesExplorationError::Saddle(error.to_string()))?;
-        if !report.at_saddle {
-            return Err(PesExplorationError::SaddleNotConverged {
-                stage: SaddleConvergenceStage::Prfo,
-            });
-        }
-        saddle_coordinates = prfo.position().to_owned();
+        saddle_coordinates = refine_cartesian_with_prfo(
+            surface,
+            saddle_coordinates.view(),
+            cartesian_index,
+            config,
+        )?;
     }
 
     let (saddle_energy, saddle_gradient) = checked_evaluate(surface, saddle_coordinates.view())?;
-    let saddle_max_gradient = max_abs(saddle_gradient.view());
+    let saddle_max_gradient = cartesian_max_gradient(
+        saddle_coordinates.view(),
+        saddle_gradient.view(),
+        cartesian_index,
+    )?;
     if saddle_max_gradient > config.saddle_force_tolerance {
         return Err(PesExplorationError::SaddleNotConverged {
             stage: SaddleConvergenceStage::ForceCertification,
