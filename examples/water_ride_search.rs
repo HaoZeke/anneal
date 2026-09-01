@@ -35,7 +35,7 @@ use rand::SeedableRng;
 use rand::rngs::StdRng;
 use serde_json::json;
 
-const WATER_BOX: [f64; 9] = [60.0, 0.0, 0.0, 0.0, 60.0, 0.0, 0.0, 60.0];
+const WATER_BOX: [f64; 9] = [60.0, 0.0, 0.0, 0.0, 60.0, 0.0, 0.0, 0.0, 60.0];
 const OXYGEN_MASS: f64 = 15.999;
 const HYDROGEN_MASS: f64 = 1.008;
 const RECEIVER_MAX_GRADIENT: f64 = 1e-5;
