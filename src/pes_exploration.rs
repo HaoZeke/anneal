@@ -15,9 +15,10 @@ use rgmin::{
     ApplyHessian, Control, EigenParams, EigensolverKind, FireKind, GradNorm, Lbfgs, Method, Oracle,
     Solver, lowest_mode,
 };
+use rgsaddle::geom::update_trust;
 use rgsaddle::{
     IrcConfig, IrcDirection, IrcSession, MinModeConfig, MinModeKind, MinModeSession, MinModeStatus,
-    PointSurface, SaddleError, exact_eigh, prfo_trust_region,
+    PointSurface, SaddleError, TrustSchedule, exact_eigh, prfo_trust_region,
 };
 
 use crate::curvature::{project_rigid_with, rigid_basis};
@@ -1376,6 +1377,55 @@ fn sorted_eigensystem(
     Ok((sorted_values, sorted_vectors))
 }
 
+struct HomedEigensystem {
+    eigenvalues: Array1<f64>,
+    eigenvectors: Array2<f64>,
+    source_index: usize,
+    overlap: f64,
+}
+
+fn home_uphill_mode(
+    eigenvalues: &Array1<f64>,
+    eigenvectors: &Array2<f64>,
+    reference: ArrayView1<f64>,
+) -> Result<HomedEigensystem, PesExplorationError> {
+    if eigenvalues.is_empty()
+        || eigenvectors.nrows() != eigenvalues.len()
+        || eigenvectors.ncols() != eigenvalues.len()
+        || reference.len() != eigenvalues.len()
+    {
+        return Err(PesExplorationError::InvalidShape(
+            "mode homing requires one square eigensystem and matching reference",
+        ));
+    }
+    let reference = normalize_mode(reference)?;
+    let (source_index, signed_overlap) = (0..eigenvalues.len())
+        .map(|index| (index, eigenvectors.column(index).dot(&reference)))
+        .max_by(|left, right| left.1.abs().total_cmp(&right.1.abs()))
+        .ok_or(PesExplorationError::InvalidShape(
+            "mode homing eigensystem is empty",
+        ))?;
+    let mut order = Vec::with_capacity(eigenvalues.len());
+    order.push(source_index);
+    order.extend((0..eigenvalues.len()).filter(|index| *index != source_index));
+    let eigenvalues = Array1::from_iter(order.iter().map(|&index| eigenvalues[index]));
+    let mut homed_vectors = Array2::zeros(eigenvectors.raw_dim());
+    for (column, &index) in order.iter().enumerate() {
+        homed_vectors
+            .column_mut(column)
+            .assign(&eigenvectors.column(index));
+    }
+    if signed_overlap < 0.0 {
+        homed_vectors.column_mut(0).mapv_inplace(|value| -value);
+    }
+    Ok(HomedEigensystem {
+        eigenvalues,
+        eigenvectors: homed_vectors,
+        source_index,
+        overlap: signed_overlap.abs(),
+    })
+}
+
 fn orthonormal_complement(
     dimension: usize,
     constraints: &[Array1<f64>],
@@ -1470,16 +1520,20 @@ fn refine_nd_with_prfo<S: PesSurface + ?Sized>(
 fn refine_cartesian_with_prfo<S: PesSurface + ?Sized>(
     surface: &S,
     start: ArrayView1<f64>,
+    initial_mode: ArrayView1<f64>,
     cartesian_index: Option<(&[bool], [bool; 3])>,
     config: &PesExplorationConfig,
 ) -> Result<Array1<f64>, PesExplorationError> {
     let mut coordinates = start.to_owned();
+    let mut uphill_mode = normalize_mode(initial_mode)?;
+    let mut trust_radius = config.saddle_displacement.min(config.maximum_move);
+    let trust_schedule = TrustSchedule::saddle();
+    let (mut energy, mut gradient) = checked_evaluate(surface, coordinates.view())?;
     for iteration in 0..config.prfo_steps {
-        let (energy, gradient) = checked_evaluate(surface, coordinates.view())?;
         let constraints = activation_basis(coordinates.view(), cartesian_index);
         let basis = orthonormal_complement(coordinates.len(), &constraints)?;
         let free_gradient = basis.t().dot(&gradient);
-        let mut tangent_gradient = gradient;
+        let mut tangent_gradient = gradient.clone();
         project_rigid_with(&mut tangent_gradient, &constraints);
         let maximum_gradient = max_abs(tangent_gradient.view());
         if maximum_gradient <= config.saddle_force_tolerance {
@@ -1505,33 +1559,60 @@ fn refine_cartesian_with_prfo<S: PesSurface + ?Sized>(
             .iter()
             .filter(|value| **value < -config.negative_curvature_tolerance)
             .count();
+        let free_reference = basis.t().dot(&uphill_mode);
+        let homed = home_uphill_mode(&eigenvalues, &eigenvectors, free_reference.view())?;
         let free_step = prfo_trust_region(
-            &eigenvalues,
-            &eigenvectors,
+            &homed.eigenvalues,
+            &homed.eigenvectors,
             &free_gradient,
             1,
-            config.maximum_move,
+            trust_radius,
         );
         let step = basis.dot(&free_step);
         let step_norm = step.dot(&step).sqrt();
+        if step.len() != coordinates.len() || step.iter().any(|value| !value.is_finite()) {
+            return Err(PesExplorationError::Saddle(
+                "P-RFO returned an invalid Cartesian step".into(),
+            ));
+        }
+        let candidate = &coordinates + &step;
+        let (candidate_energy, candidate_gradient) = checked_evaluate(surface, candidate.view())?;
+        let prediction =
+            free_gradient.dot(&free_step) + 0.5 * free_step.dot(&hessian.dot(&free_step));
+        let rho = if prediction.abs() >= 1e-14 {
+            (candidate_energy - energy) / prediction
+        } else {
+            1.0
+        };
+        let next_trust_radius = if rho.is_finite() {
+            update_trust(trust_radius, rho, step_norm, &trust_schedule).min(config.maximum_move)
+        } else {
+            trust_schedule.delta_min.min(config.maximum_move)
+        };
         emit_pes_trace(serde_json::json!({
             "kind": "pes_stage",
             "stage": "prfo",
             "status": "running",
             "iteration": iteration,
             "energy": energy,
+            "candidate_energy": candidate_energy,
             "maximum_gradient": maximum_gradient,
             "lowest_curvature": eigenvalues[0],
+            "followed_curvature": homed.eigenvalues[0],
+            "mode_overlap": homed.overlap,
+            "followed_mode_index": homed.source_index,
             "negative_modes": negative_modes,
             "step_norm": step_norm,
+            "rho": rho,
+            "trust_radius": trust_radius,
+            "next_trust_radius": next_trust_radius,
             "free_dimension": basis.ncols(),
         }));
-        if step.len() != coordinates.len() || step.iter().any(|value| !value.is_finite()) {
-            return Err(PesExplorationError::Saddle(
-                "P-RFO returned an invalid Cartesian step".into(),
-            ));
-        }
-        coordinates += &step;
+        uphill_mode = normalize_mode(basis.dot(&homed.eigenvectors.column(0)).view())?;
+        coordinates = candidate;
+        energy = candidate_energy;
+        gradient = candidate_gradient;
+        trust_radius = next_trust_radius;
     }
     Err(PesExplorationError::SaddleNotConverged {
         stage: SaddleConvergenceStage::Prfo,
@@ -2274,11 +2355,13 @@ where
         });
     }
     let mut saddle_coordinates = min_mode.position().to_owned();
+    let saddle_mode = min_mode.mode().to_owned();
 
     if config.refine_with_prfo {
         saddle_coordinates = refine_cartesian_with_prfo(
             surface,
             saddle_coordinates.view(),
+            saddle_mode.view(),
             cartesian_index,
             config,
         )?;
