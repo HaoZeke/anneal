@@ -232,3 +232,72 @@ fn same_system_method_evidence_guides_untried_arms() {
 
     assert_eq!(guided.arm.method, RideMethod::Lanczos);
 }
+
+#[test]
+fn certification_reliability_transfers_when_a_source_edge_is_saturated() {
+    let portfolio = RidePortfolio::new(2, vec![RideMethod::Dimer, RideMethod::Lanczos]).unwrap();
+    let mut ledger = RideLedger::new(portfolio);
+    ledger
+        .register_source(source(17, -104.2, &[(4, 6)]))
+        .unwrap();
+
+    let orders = (0..8)
+        .map(|replica| ledger.claim(replica, 1_000 + u64::from(replica)).unwrap())
+        .collect::<Vec<_>>();
+    let mut dimers = orders
+        .iter()
+        .filter(|order| order.arm.method == RideMethod::Dimer)
+        .cloned()
+        .collect::<Vec<_>>();
+    let lanczos = orders
+        .iter()
+        .filter(|order| order.arm.method == RideMethod::Lanczos)
+        .cloned()
+        .collect::<Vec<_>>();
+    assert_eq!(dimers.len(), 4);
+    assert_eq!(lanczos.len(), 4);
+
+    let first_dimer = dimers.remove(0);
+    ledger
+        .report(
+            first_dimer.replica,
+            first_dimer.id,
+            3_000,
+            RideOutcome::Certified {
+                saddle: 70,
+                endpoints: [17, 29],
+            },
+        )
+        .unwrap();
+    for order in dimers {
+        ledger
+            .report(
+                order.replica,
+                order.id,
+                4_000,
+                RideOutcome::Failed(RideFailure::MinimumModeLostCurvature),
+            )
+            .unwrap();
+    }
+    for (offset, order) in lanczos.into_iter().enumerate() {
+        ledger
+            .report(
+                order.replica,
+                order.id,
+                2_000,
+                RideOutcome::Certified {
+                    saddle: 80 + offset as u64,
+                    endpoints: [17, 29],
+                },
+            )
+            .unwrap();
+    }
+    ledger
+        .register_source(source(23, -107.5, &[(4, 8)]))
+        .unwrap();
+
+    let guided = ledger.claim(9, 2_000).unwrap();
+
+    assert_eq!(guided.arm.source_basin, 23);
+    assert_eq!(guided.arm.method, RideMethod::Lanczos);
+}
