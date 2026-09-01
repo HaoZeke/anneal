@@ -40,6 +40,23 @@ impl PesSurface for ShallowDoubleWell {
     }
 }
 
+/// A shallow barrier satisfies the force gate before the minimum-mode session
+/// reaches the exact saddle. The first signed branch shell therefore lies on
+/// one side of the separatrix even though the Hessian has one negative mode.
+struct OffsetShallowDoubleWell;
+
+impl PesSurface for OffsetShallowDoubleWell {
+    type Error = Infallible;
+
+    fn evaluate(&self, point: ArrayView1<f64>) -> Result<(f64, Array1<f64>), Self::Error> {
+        let reaction = point[0];
+        let scale = 5e-4;
+        let energy = scale * (reaction * reaction - 1.0).powi(2);
+        let gradient = Array1::from_vec(vec![4.0 * scale * reaction * (reaction * reaction - 1.0)]);
+        Ok((energy, gradient))
+    }
+}
+
 /// The reaction valley bends away from the launch ray. Along `y = 0` the
 /// coupling keeps every sampled x-direction curvature positive, while a
 /// constrained y relaxation exposes the negative mode of the double well.
@@ -145,6 +162,38 @@ fn adaptive_branch_displacement_separates_a_force_converged_shallow_saddle() {
         &mut network,
         start.view(),
         mode.view(),
+        &config,
+        &PointWitness,
+    )
+    .unwrap();
+
+    assert_ne!(connection.endpoints[0], connection.endpoints[1]);
+    assert_eq!(network.minimum_count(), 2);
+    assert_eq!(network.saddle_count(), 1);
+}
+
+#[test]
+fn geometric_branch_shells_recover_connectivity_from_an_offset_saddle() {
+    let mut network = NdPesNetwork::new();
+    let config = PesExplorationConfig {
+        ride_method: RideMethod::Lanczos,
+        quench_steps: 300,
+        saddle_steps: 500,
+        activation_attempts: 4,
+        activation_growth: 2.0,
+        quench_gradient_tolerance: 1e-10,
+        saddle_force_tolerance: 1e-3,
+        saddle_displacement: 0.25,
+        irc_step: 0.01,
+        refine_with_prfo: false,
+        ..PesExplorationConfig::default()
+    };
+
+    let connection = discover_nd_connection(
+        &OffsetShallowDoubleWell,
+        &mut network,
+        Array1::from_vec(vec![-0.83]).view(),
+        Array1::from_vec(vec![1.0]).view(),
         &config,
         &PointWitness,
     )
