@@ -378,6 +378,7 @@ where
     let mut source_cursor = 0usize;
     let mut events = Vec::new();
     let mut attempt = 0u64;
+    let mut escape_coverage_latched = false;
     let termination = loop {
         let remaining = config.evaluation_budget.saturating_sub(charged_evaluations);
         if remaining == 0 {
@@ -385,13 +386,10 @@ where
         }
         let ride_task = next_ride_task(&network, &attempted, source_cursor, ranks);
         let coverage = escape_coverage.evidence();
+        escape_coverage_latched |= coverage.saturated;
         let selected = match policy {
-            NdHybridPolicy::Adaptive if ride_task.is_some() && coverage.saturated => {
-                let escape_probability = coverage
-                    .unseen_mass_upper
-                    .unwrap_or(PRODUCTION_MAX_UNSEEN_MASS)
-                    .clamp(0.02, PRODUCTION_MAX_UNSEEN_MASS);
-                if rng.random::<f64>() < escape_probability {
+            NdHybridPolicy::Adaptive if ride_task.is_some() && escape_coverage_latched => {
+                if rng.random::<f64>() < 0.02 {
                     ESCAPE_ARM
                 } else {
                     RIDGE_ARM
@@ -521,6 +519,9 @@ where
                 let candidate_coordinates = record.minimum.coordinates.clone();
                 let admission = network.admit_minimum(record.minimum, witness);
                 let discovered = admission.is_new;
+                if discovered {
+                    escape_coverage_latched = false;
+                }
                 let new_minimum_ids = discovered.then_some(admission.id).into_iter().collect();
                 escape_feedback.observe(Some(live_basin), admission.id);
                 escape_coverage.observe(admission.id);
