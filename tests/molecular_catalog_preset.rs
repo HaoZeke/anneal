@@ -1,8 +1,8 @@
 use anneal_core::catalog::molecular::{
-    DESCRIPTOR_SCHEMA, ENGINE_BINARY_INPUT, ENGINE_KIND, WATER_HEXAMER_MOLECULES, descriptor_space,
-    engine_binary_digest, engine_config_digest, fresh_evaluation, leftover_descriptor_dim,
-    leftover_space, leftover_spec, leftover_values, length_scale, reference_coordinates,
-    system_signature, validator_config, water_groups, water_species,
+    DESCRIPTOR_SCHEMA, ENGINE_BINARY_INPUT, ENGINE_KIND, GROUP_SCHEMA, WATER_HEXAMER_MOLECULES,
+    descriptor_space, engine_binary_digest, engine_config_digest, fresh_evaluation,
+    leftover_descriptor_dim, leftover_space, leftover_spec, leftover_values, length_scale,
+    reference_coordinates, system_signature, validator_config, water_groups, water_species,
 };
 use anneal_core::descriptor_space::{UNIVERSAL_DESCRIPTOR_SCHEMA, UNIVERSAL_DESCRIPTOR_VERSION};
 use anneal_core::methods::cluster_hopping::Config;
@@ -106,6 +106,16 @@ fn larger_water_signatures_scale_without_changing_engine_kind() {
     assert_ne!(dimer.digest(), hexamer.digest());
     assert_eq!(dimer.coordinate_dim, 18);
     assert_eq!(hexamer.coordinate_dim, 54);
+}
+
+#[test]
+fn water_proposal_groups_do_not_constrain_flexible_gfn2_minima() {
+    let signature = system_signature(2, engine_digest(0x11)).unwrap();
+
+    assert_eq!(GROUP_SCHEMA, "flexible-water-atoms-v1");
+    assert_eq!(signature.group_schema, GROUP_SCHEMA);
+    assert_eq!(signature.group_labels, (0_u32..6).collect::<Vec<_>>());
+    assert_eq!(water_groups(2), Ok(vec![vec![0, 1, 2], vec![3, 4, 5]]));
 }
 
 #[test]
