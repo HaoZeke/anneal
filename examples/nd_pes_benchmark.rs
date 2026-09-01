@@ -221,3 +221,20 @@ fn main() -> Result<(), Box<dyn Error>> {
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::Moments;
+
+    #[test]
+    fn benchmark_moments_report_sample_uncertainty() {
+        let mut moments = Moments::default();
+        for value in [1.0, 2.0, 3.0] {
+            moments.observe(value);
+        }
+
+        assert_eq!(moments.count(), 3);
+        assert!((moments.mean() - 2.0).abs() < 1e-14);
+        assert!((moments.sample_standard_deviation() - 1.0).abs() < 1e-14);
+    }
+}
