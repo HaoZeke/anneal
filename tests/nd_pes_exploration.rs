@@ -1,8 +1,9 @@
 use std::convert::Infallible;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use anneal_core::pes_exploration::{
-    discover_nd_connection, ExactStructureWitness, NdPesNetwork, PesExplorationConfig, PesSurface,
-    QuenchedMinimum, RideMethod,
+    discover_nd_connection, discover_nd_connection_with_budget, ExactStructureWitness,
+    NdPesNetwork, PesExplorationConfig, PesSurface, QuenchedMinimum, RideMethod,
 };
 use ndarray::{Array1, ArrayView1};
 
@@ -24,6 +25,31 @@ impl PesSurface for FiveDimensionalDoubleWell {
             gradient[index] = 2.0 * stiffness * point[index];
         }
         Ok((energy, gradient))
+    }
+}
+
+struct CountingFiveDimensionalDoubleWell {
+    calls: AtomicU64,
+}
+
+impl CountingFiveDimensionalDoubleWell {
+    fn new() -> Self {
+        Self {
+            calls: AtomicU64::new(0),
+        }
+    }
+
+    fn calls(&self) -> u64 {
+        self.calls.load(Ordering::Relaxed)
+    }
+}
+
+impl PesSurface for CountingFiveDimensionalDoubleWell {
+    type Error = Infallible;
+
+    fn evaluate(&self, point: ArrayView1<f64>) -> Result<(f64, Array1<f64>), Self::Error> {
+        self.calls.fetch_add(1, Ordering::Relaxed);
+        FiveDimensionalDoubleWell.evaluate(point)
     }
 }
 
@@ -137,6 +163,37 @@ fn exact_source_admission_retains_isolated_nd_minima() {
     assert_eq!(distinct_admission.id, 1);
     assert!(distinct_admission.nearest_coordinate_distance.unwrap() > 1.9);
     assert_eq!(network.minimum_count(), 2);
+}
+
+#[test]
+fn generic_nd_ride_has_a_hard_pes_call_boundary() {
+    let surface = CountingFiveDimensionalDoubleWell::new();
+    let mut network = NdPesNetwork::new();
+    let config = PesExplorationConfig {
+        quench_steps: 300,
+        saddle_steps: 500,
+        quench_gradient_tolerance: 1e-8,
+        saddle_force_tolerance: 1e-6,
+        saddle_displacement: 0.2,
+        irc_step: 0.08,
+        refine_with_prfo: false,
+        ..PesExplorationConfig::default()
+    };
+
+    let attempt = discover_nd_connection_with_budget(
+        &surface,
+        &mut network,
+        Array1::from_vec(vec![-0.83, 0.12, -0.07, 0.03, 0.09]).view(),
+        Array1::from_vec(vec![1.0, 0.0, 0.0, 0.0, 0.0]).view(),
+        &config,
+        &PointWitness,
+        1,
+    );
+
+    assert!(attempt.connection.is_err());
+    assert!(attempt.budget_exhausted);
+    assert_eq!(attempt.charged_evaluations, 1);
+    assert_eq!(surface.calls(), 1);
 }
 
 #[test]
