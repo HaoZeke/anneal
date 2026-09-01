@@ -13,7 +13,7 @@
 //! fields:
 //! - `kind`: [`ENGINE_KIND`]
 //! - `config_digest`: SHA-256 of the declared GFN2 handle
-//!   (`method=3`, `accuracy=1`, `etemp=300`, `maxiter=250`,
+//!   (`method=3`, `accuracy=0.01`, `etemp=300`, `maxiter=500`,
 //!   `net_electron_count=0`, `uhf=0`, `vacuum_box=60`)
 //! - `external_inputs["libxtb_engine"]`: SHA-256 of the loaded
 //!   `libxtb_engine.so`
@@ -64,6 +64,12 @@ pub const ENGINE_BINARY_INPUT: &str = "libxtb_engine";
 /// xtb method code for GFN2 in the rgpot handle (`XtbConfig::method`).
 pub const GFN2_METHOD: i32 = 3;
 
+/// SCF accuracy resolving cold-start force noise below the catalog threshold.
+pub const GFN2_ACCURACY: f64 = 0.01;
+
+/// SCF iteration ceiling paired with [`GFN2_ACCURACY`].
+pub const GFN2_MAX_ITERATIONS: i32 = 500;
+
 /// Vacuum box edge used by `molecular_cluster` (A).
 pub const VACUUM_BOX: f64 = 60.0;
 
@@ -86,7 +92,7 @@ const LEFTOVER_CUTOFF_PER_LENGTH: f64 = 3.5;
 const COVALENT_DIAMETER: f64 = 2.0;
 
 /// Declared GFN2 handle configuration, excluding the engine binary.
-const ENGINE_CONFIG: &[u8] = b"gfn2-xtb-rgpot-v1;method=3;accuracy=1;etemp=300;maxiter=250;net_electron_count=0;uhf=0;vacuum_box=60";
+const ENGINE_CONFIG: &[u8] = b"gfn2-xtb-rgpot-v1;method=3;accuracy=0.01;etemp=300;maxiter=500;net_electron_count=0;uhf=0;vacuum_box=60";
 
 /// Flexible atomic degrees of freedom of the GFN2 water PES.
 pub const GROUP_SCHEMA: &str = "flexible-water-atoms-v1";

@@ -7,6 +7,7 @@
 #![allow(dead_code)]
 
 use anneal_core::catalog::FreshEvaluation;
+use anneal_core::catalog::molecular::{GFN2_ACCURACY, GFN2_MAX_ITERATIONS};
 use anneal_core::compatibility::{AbiStamp, EngineDescriptor, ProtocolVersion};
 use eindir_core::ffi::{EindirObjectiveWrapper, eindir_core_abi_compatible, eindir_objective_t};
 use eindir_core::gradient::DifferentiableObjective;
@@ -315,9 +316,9 @@ impl RgpotObjective {
             unsafe { lib.get(b"rgpot_xtb_force\0") }.expect("rgpot_xtb_force");
         let cfg = XtbConfig {
             method: GFN2,
-            accuracy: 1.0,
+            accuracy: GFN2_ACCURACY,
             electronic_temperature: 300.0,
-            max_iterations: 250,
+            max_iterations: GFN2_MAX_ITERATIONS,
             charge: 0.0,
             uhf: 0,
         };
