@@ -2106,12 +2106,81 @@ fn roll_branch<S: PesSurface>(
         direction,
         &adapter,
     )
-    .map_err(|error| PesExplorationError::Saddle(error.to_string()))?;
-    let report = session
-        .run(&adapter, config.irc_steps)
-        .map_err(|error| PesExplorationError::Saddle(error.to_string()))?;
+    .map_err(|error| {
+        PesExplorationError::Saddle(format!("IRC {direction:?} initialization: {error}"))
+    })?;
+    let mut final_report = None;
+    for step in 0..config.irc_steps {
+        let report = match session.step(&adapter) {
+            Ok(report) => report,
+            Err(error) => {
+                let position = session.position();
+                emit_pes_trace(serde_json::json!({
+                    "kind": "pes_stage",
+                    "stage": "irc",
+                    "status": "failed",
+                    "direction": format!("{direction:?}"),
+                    "iteration": step,
+                    "branch_step": branch_step,
+                    "displacement_from_saddle": cartesian_distance(position, saddle.view()),
+                    "minimum_pair_distance": minimum_pair_distance(position),
+                    "error": error.to_string(),
+                }));
+                return Err(PesExplorationError::Saddle(format!(
+                    "IRC {direction:?} step {step}: {error}"
+                )));
+            }
+        };
+        let position = session.position();
+        emit_pes_trace(serde_json::json!({
+            "kind": "pes_stage",
+            "stage": "irc",
+            "status": if report.at_minimum { "converged" } else { "running" },
+            "direction": format!("{direction:?}"),
+            "iteration": step,
+            "branch_step": branch_step,
+            "energy": report.energy,
+            "maximum_gradient": report.max_force,
+            "arc": report.arc,
+            "inner_steps": report.inner_steps,
+            "displacement_from_saddle": cartesian_distance(position, saddle.view()),
+            "minimum_pair_distance": minimum_pair_distance(position),
+        }));
+        let at_minimum = report.at_minimum;
+        final_report = Some(report);
+        if at_minimum {
+            break;
+        }
+    }
+    let report = final_report.ok_or(PesExplorationError::InvalidConfig("IRC steps"))?;
     let endpoint = session.position().to_owned();
     Ok((quench(surface, endpoint.view(), config)?, report.at_minimum))
+}
+
+fn cartesian_distance(left: ArrayView1<f64>, right: ArrayView1<f64>) -> f64 {
+    left.iter()
+        .zip(right)
+        .map(|(left, right)| (left - right) * (left - right))
+        .sum::<f64>()
+        .sqrt()
+}
+
+fn minimum_pair_distance(coordinates: ArrayView1<f64>) -> Option<f64> {
+    let atom_count = coordinates.len() / 3;
+    (coordinates.len().is_multiple_of(3) && atom_count >= 2).then(|| {
+        (0..atom_count)
+            .flat_map(|first| (first + 1..atom_count).map(move |second| (first, second)))
+            .map(|(first, second)| {
+                (0..3)
+                    .map(|axis| {
+                        let delta = coordinates[3 * first + axis] - coordinates[3 * second + axis];
+                        delta * delta
+                    })
+                    .sum::<f64>()
+                    .sqrt()
+            })
+            .fold(f64::INFINITY, f64::min)
+    })
 }
 
 #[allow(clippy::too_many_arguments)]
