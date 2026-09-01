@@ -221,7 +221,7 @@ fn live_source(replica: u32) -> CatalogCandidate {
     source
 }
 
-fn live_server_with_gradient_tolerance(max_gradient_norm: f64) -> CatalogServer {
+fn live_server_with_limits(max_gradient_norm: f64, census_radius: f64) -> CatalogServer {
     let signature = live_signature();
     let digest = signature.digest();
     let descriptor_space = universal_descriptor_space(DescriptorGeometry::finite(1.0).unwrap());
@@ -248,7 +248,7 @@ fn live_server_with_gradient_tolerance(max_gradient_norm: f64) -> CatalogServer 
                 energy_rel_tolerance: 1e-10,
             },
             4,
-            0.05,
+            census_radius,
             20_000,
             |coordinates| {
                 let surface = RadialDoubleWell::new();
@@ -259,12 +259,21 @@ fn live_server_with_gradient_tolerance(max_gradient_norm: f64) -> CatalogServer 
                 })
             },
         )
+        .unwrap()
+        .with_exact_structure_witness(SeparationWitness)
         .unwrap();
     CatalogServer::start("127.0.0.1:0", config).unwrap()
 }
 
 fn live_run_with_gradient_tolerance(max_gradient_norm: f64) -> (CatalogServer, CooperativeRun) {
-    let server = live_server_with_gradient_tolerance(max_gradient_norm);
+    live_run_with_limits(max_gradient_norm, 0.05)
+}
+
+fn live_run_with_limits(
+    max_gradient_norm: f64,
+    census_radius: f64,
+) -> (CatalogServer, CooperativeRun) {
+    let server = live_server_with_limits(max_gradient_norm, census_radius);
     let signature = live_signature();
     let mut run = CooperativeRun::new([7], 20_000).unwrap();
     run.attach_client(
@@ -429,6 +438,32 @@ fn live_claim_executes_reports_and_returns_the_connected_minimum() {
     assert!(credit.novel_edge);
     assert_eq!(credit.total_charged_evaluations, producer_calls + 15);
     assert!((destination.coordinates[3] - destination.coordinates[0] - 2.0).abs() < 1e-4);
+}
+
+#[test]
+fn exact_endpoint_identity_does_not_depend_on_descriptor_radius() {
+    let (_server, mut run) = live_run_with_limits(1e-7, 0.0);
+    let RideClaimOutcome::Work(work) = run.claim_ride(7, first_claim_seed_toward_saddle()).unwrap()
+    else {
+        panic!("the admitted source did not produce transition-search work")
+    };
+    let surface = RadialDoubleWell::new();
+    let report = execute_catalog_ride(
+        &surface,
+        &universal_descriptor_space(DescriptorGeometry::finite(1.0).unwrap()),
+        &work,
+        &[18, 18],
+        array![1.0, 1.0].view(),
+        &[false; 2],
+        &execution_config(5_000),
+        &SeparationWitness,
+    );
+
+    let RideReportOutcome::Credited(credit) = run.report_ride(7, report).unwrap() else {
+        panic!("an exact source witness must survive a zero descriptor radius")
+    };
+    assert!(credit.certified_connection);
+    assert!(credit.novel_edge);
 }
 
 #[test]
