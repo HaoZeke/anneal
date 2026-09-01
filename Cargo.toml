@@ -141,6 +141,10 @@ name = "catalog_server"
 required-features = ["bank-rpc", "ira"]
 
 [[example]]
+name = "water_ride_search"
+required-features = ["bank-rpc", "ira", "rgpot-ex"]
+
+[[example]]
 name = "ttt_lj38"
 required-features = []
 
