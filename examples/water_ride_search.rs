@@ -126,6 +126,7 @@ fn ride_config(length_scale: f64, coordinate_dim: usize) -> PesExplorationConfig
         ride_method: RideMethod::Dimer,
         quench_steps: 2_000,
         saddle_steps: 1_000,
+        minimum_mode_force_tolerance: 5e-2,
         irc_steps: 200,
         prfo_steps: 300,
         quench_gradient_tolerance: stationary_component_tolerance,

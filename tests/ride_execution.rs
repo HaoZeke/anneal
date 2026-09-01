@@ -94,6 +94,7 @@ fn exploration_config() -> PesExplorationConfig {
         ride_method: RideMethod::Dimer,
         quench_steps: 300,
         saddle_steps: 600,
+        minimum_mode_force_tolerance: 1e-8,
         irc_steps: 200,
         prfo_steps: 100,
         activation_attempts: 4,
