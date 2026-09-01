@@ -305,6 +305,8 @@ pub struct PesExplorationConfig {
     pub quench_steps: usize,
     /// Maximum rgsaddle lowest-mode steps.
     pub saddle_steps: usize,
+    /// Force threshold for handing minimum-mode following to P-RFO.
+    pub minimum_mode_force_tolerance: f64,
     /// Maximum rgsaddle IRC outer points per direction.
     pub irc_steps: usize,
     /// Maximum Sella P-RFO refinement steps.
@@ -345,6 +347,7 @@ impl Default for PesExplorationConfig {
             ride_method: RideMethod::Dimer,
             quench_steps: 1_000,
             saddle_steps: 1_000,
+            minimum_mode_force_tolerance: 1e-3,
             irc_steps: 200,
             prfo_steps: 300,
             activation_attempts: 4,
@@ -381,6 +384,10 @@ impl PesExplorationConfig {
         }
         for (name, value) in [
             ("quench gradient tolerance", self.quench_gradient_tolerance),
+            (
+                "minimum-mode force tolerance",
+                self.minimum_mode_force_tolerance,
+            ),
             ("saddle force tolerance", self.saddle_force_tolerance),
             ("saddle displacement", self.saddle_displacement),
             ("activation growth", self.activation_growth),
@@ -1310,7 +1317,11 @@ fn descriptor(
 fn min_mode_config(config: &PesExplorationConfig) -> MinModeConfig {
     MinModeConfig {
         kind: config.ride_method.min_mode(),
-        force_tol: config.saddle_force_tolerance,
+        force_tol: if config.refine_with_prfo {
+            config.minimum_mode_force_tolerance
+        } else {
+            config.saddle_force_tolerance
+        },
         max_move: config.maximum_move,
         ..MinModeConfig::default()
     }
