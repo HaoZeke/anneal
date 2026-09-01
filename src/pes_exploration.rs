@@ -25,6 +25,9 @@ use crate::descriptor_space::{
     DescriptorError, DescriptorGeometry, DescriptorSpace, DescriptorVector,
 };
 
+/// Minimum ART downhill displacement as a fraction of source--saddle distance.
+const ART_BRANCH_FRACTION: f64 = 0.15;
+
 /// Energy and Cartesian-gradient evaluator used by all exploration stages.
 pub trait PesSurface: Sync {
     /// Surface-specific evaluation failure.
@@ -1232,9 +1235,9 @@ fn min_mode_config(config: &PesExplorationConfig) -> MinModeConfig {
     }
 }
 
-fn irc_config(config: &PesExplorationConfig) -> IrcConfig {
+fn irc_config(config: &PesExplorationConfig, branch_step: f64) -> IrcConfig {
     IrcConfig {
-        dx: config.irc_step,
+        dx: branch_step,
         force_tol: config.irc_force_tolerance,
         max_move: config.maximum_move,
         ..IrcConfig::default()
@@ -1250,6 +1253,36 @@ fn normalize_mode(mode: ArrayView1<f64>) -> Result<Array1<f64>, PesExplorationEr
         return Err(PesExplorationError::InvalidShape("mode has zero norm"));
     }
     Ok(mode.mapv(|value| value / norm))
+}
+
+fn source_scaled_branch_step(
+    origin: ArrayView1<f64>,
+    saddle: ArrayView1<f64>,
+    configured_step: f64,
+) -> f64 {
+    let source_distance = origin
+        .iter()
+        .zip(saddle)
+        .map(|(origin, saddle)| (saddle - origin).powi(2))
+        .sum::<f64>()
+        .sqrt();
+    configured_step.max(ART_BRANCH_FRACTION * source_distance)
+}
+
+fn mass_weighted_source_branch_step(
+    origin: ArrayView1<f64>,
+    saddle: ArrayView1<f64>,
+    masses: ArrayView1<f64>,
+    configured_step: f64,
+) -> f64 {
+    let source_distance = origin
+        .iter()
+        .zip(saddle)
+        .enumerate()
+        .map(|(coordinate, (origin, saddle))| masses[coordinate / 3] * (saddle - origin).powi(2))
+        .sum::<f64>()
+        .sqrt();
+    configured_step.max(ART_BRANCH_FRACTION * source_distance)
 }
 
 fn directional_curvature<S: PesSurface + ?Sized>(
@@ -1495,11 +1528,12 @@ fn roll_branch<S: PesSurface>(
     masses: &Array1<f64>,
     mode: &Array1<f64>,
     direction: IrcDirection,
+    branch_step: f64,
     config: &PesExplorationConfig,
 ) -> Result<(Quenched, bool), PesExplorationError> {
     let adapter = SaddleSurface(surface);
     let mut session = IrcSession::from_surface(
-        irc_config(config),
+        irc_config(config, branch_step),
         saddle.clone(),
         masses.clone(),
         mode.clone(),
@@ -1598,8 +1632,13 @@ where
         });
     }
     let lowest_mode = index.lowest_mode;
-    let positive_start = &saddle_coordinates + &(&lowest_mode * config.irc_step);
-    let negative_start = &saddle_coordinates - &(&lowest_mode * config.irc_step);
+    let branch_step = source_scaled_branch_step(
+        origin_minimum.coordinates.view(),
+        saddle_coordinates.view(),
+        config.irc_step,
+    );
+    let positive_start = &saddle_coordinates + &(&lowest_mode * branch_step);
+    let negative_start = &saddle_coordinates - &(&lowest_mode * branch_step);
     let positive = quench(surface, positive_start.view(), config)?;
     let negative = quench(surface, negative_start.view(), config)?;
     let (origin_minimum, positive, negative) =
@@ -1839,6 +1878,12 @@ where
         });
     }
     let saddle_mode = index.lowest_mode;
+    let branch_step = mass_weighted_source_branch_step(
+        origin_minimum.coordinates.view(),
+        saddle_coordinates.view(),
+        masses,
+        config.irc_step,
+    );
 
     let (forward, forward_irc) = roll_branch(
         surface,
@@ -1846,6 +1891,7 @@ where
         &masses.to_owned(),
         &saddle_mode,
         IrcDirection::Forward,
+        branch_step,
         config,
     )?;
     let (reverse, reverse_irc) = roll_branch(
@@ -1854,6 +1900,7 @@ where
         &masses.to_owned(),
         &saddle_mode,
         IrcDirection::Reverse,
+        branch_step,
         config,
     )?;
     let (origin_minimum, forward, reverse) =
