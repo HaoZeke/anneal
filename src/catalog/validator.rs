@@ -196,10 +196,14 @@ pub enum ValidationFailure {
     #[error("candidate producer quench is unconverged")]
     UnconvergedQuench,
     /// Producer or receiving-side gradient evidence exceeds the threshold.
-    #[error("{source:?} gradient exceeds the validation threshold")]
+    #[error("{source} gradient norm {actual:.6e} exceeds threshold {maximum:.6e}")]
     GradientThreshold {
         /// Side of the validation boundary that supplied the gradient.
         source: GradientSource,
+        /// Euclidean gradient norm presented by that side.
+        actual: f64,
+        /// Largest Euclidean gradient norm admitted by the validator.
+        maximum: f64,
     },
     /// Producer and receiving-side energies disagree outside tolerance.
     #[error("producer and fresh energies disagree")]
@@ -301,6 +305,8 @@ impl CandidateValidator {
         if candidate.gradient_norm > self.config.max_gradient_norm {
             return Err(ValidationFailure::GradientThreshold {
                 source: GradientSource::Producer,
+                actual: candidate.gradient_norm,
+                maximum: self.config.max_gradient_norm,
             });
         }
         let fresh =
@@ -318,6 +324,8 @@ impl CandidateValidator {
         if fresh_gradient_norm > self.config.max_gradient_norm {
             return Err(ValidationFailure::GradientThreshold {
                 source: GradientSource::Fresh,
+                actual: fresh_gradient_norm,
+                maximum: self.config.max_gradient_norm,
             });
         }
         let energy_tolerance = self.config.energy_abs_tolerance
