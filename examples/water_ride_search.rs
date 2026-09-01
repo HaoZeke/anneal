@@ -10,11 +10,13 @@
 
 mod common;
 
+use std::collections::HashSet;
 use std::io;
 use std::net::SocketAddr;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
 
+use anneal_core::allocate::{ChargedDiscoveryAllocator, FlooredThompson};
 use anneal_core::catalog::euclidean_gradient_norm;
 use anneal_core::catalog::molecular::{
     MAX_GRADIENT_NORM, MolecularCatalogPresetError, component_gradient_tolerance, descriptor_space,
@@ -26,12 +28,16 @@ use anneal_core::catalog_rpc::{
     CatalogCandidate, CatalogIdentity, CatalogRideOutcome, CatalogRideReport,
 };
 use anneal_core::cooperative_search::ledger::ChargeKind;
-use anneal_core::methods::cluster_hopping::repack_rigid_groups;
+use anneal_core::methods::cluster_hopping::{
+    Config as ClusterConfig, SoapProposalMode, repack_rigid_groups,
+};
+use anneal_core::methods::minima_hopping::EscapeFeedback;
 use anneal_core::pes_exploration::{
     PesExplorationConfig, PesSurface, RideMethod, quench_minimum_with_norm,
 };
 use anneal_core::ride_execution::{CatalogRideExecutionConfig, execute_catalog_ride};
 use anneal_core::shape::IraStructureWitness;
+use anneal_core::source_escape::{SourceEscapeConfig, SourceEscapeOutcome, quench_source_escape};
 use common::rgpot_eindir::{RgpotObjective, emit_engine_manifest};
 use ndarray::{Array1, ArrayView1};
 use rand::SeedableRng;
@@ -42,6 +48,8 @@ const WATER_BOX: [f64; 9] = [60.0, 0.0, 0.0, 0.0, 60.0, 0.0, 0.0, 0.0, 60.0];
 const OXYGEN_MASS: f64 = 15.999;
 const HYDROGEN_MASS: f64 = 1.008;
 const EXACT_STRUCTURE_RADIUS: f64 = 1e-4;
+const RIDE_DISCOVERY_ARM: usize = 0;
+const SOURCE_ESCAPE_ARM: usize = 1;
 
 struct WaterSurface {
     objective: Mutex<RgpotObjective>,
@@ -197,6 +205,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .transpose()?
         .unwrap_or(5_000)
         .max(1);
+    let escape_budget_cap = std::env::var("CATALOG_ESCAPE_BUDGET")
+        .ok()
+        .map(|value| value.parse::<u64>())
+        .transpose()?
+        .unwrap_or(1_000)
+        .max(1);
 
     let campaign = required_environment("CATALOG_CAMPAIGN")?;
     let ensemble = required_environment("CATALOG_ENSEMBLE")?;
@@ -348,97 +362,290 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         })
     );
 
+    let mut known_basins = HashSet::new();
+    let mut live_basin = offer.catalog.as_ref().map(|mutation| mutation.basin_id);
+    if let Some(basin) = live_basin {
+        known_basins.insert(basin);
+    }
+    let mut live_coordinates = minimum.coordinates.clone();
+    let mut live_energy = minimum_energy;
+    let mut hopping = ClusterConfig::recommended_molecular(species.clone(), groups.clone(), 1.0);
+    hopping.soap_mode = SoapProposalMode::Rigid;
+    hopping.minima_hopping = true;
+    hopping.record_gradient = MAX_GRADIENT_NORM;
+    let escape_moves = hopping.move_library.kernels(&hopping);
+    let mut mechanism_allocator = ChargedDiscoveryAllocator::new(2);
+    let mut move_allocator = FlooredThompson::new(escape_moves.len());
+    let mut escape_feedback = EscapeFeedback::new(1.0, hopping.temperature.max(1e-6));
+    if let Some(basin) = live_basin {
+        escape_feedback.observe(None, basin as usize);
+    }
+    let mut ride_available = true;
     let mut producer_event_sequence = 2_u64;
     let mut attempts = 0_u64;
+    let mut source_attempts = 0_u64;
+    let mut source_discoveries = 0_u64;
     let mut certified = 0_u64;
     let mut novel_edges = 0_u64;
     let mut reported_producer_calls = 0_u64;
     let termination;
     loop {
         let remaining = budget.saturating_sub(charged);
-        if remaining <= receiver_reserve {
-            termination = "receiver_reserve";
+        if remaining <= 1 {
+            termination = "validation_reserve";
             break;
         }
-        let maximum_evaluations = (remaining - receiver_reserve).min(ride_budget_cap);
-        let Some(work) = client.claim_ride(
-            next_sequence(&mut event_sequence)?,
-            seed ^ attempts.wrapping_mul(0x9e37_79b9_7f4a_7c15),
-        )?
-        else {
-            termination = "portfolio_exhausted";
-            break;
+        let ride_feasible = ride_available && remaining > receiver_reserve;
+        let mechanism = if ride_feasible {
+            mechanism_allocator.select(&mut rng)
+        } else {
+            SOURCE_ESCAPE_ARM
         };
-        let execution = CatalogRideExecutionConfig {
-            exploration: exploration.clone(),
-            localization_radius,
+        if mechanism == RIDE_DISCOVERY_ARM {
+            let maximum_evaluations = (remaining - receiver_reserve).min(ride_budget_cap);
+            let Some(work) = client.claim_ride(
+                next_sequence(&mut event_sequence)?,
+                seed ^ attempts.wrapping_mul(0x9e37_79b9_7f4a_7c15),
+            )?
+            else {
+                ride_available = false;
+                continue;
+            };
+            let execution = CatalogRideExecutionConfig {
+                exploration: exploration.clone(),
+                localization_radius,
+                maximum_evaluations,
+                producer_event_sequence,
+                producer_charged_work: charged,
+            };
+            producer_event_sequence = producer_event_sequence
+                .checked_add(3)
+                .ok_or_else(|| io::Error::other("producer event sequence overflow"))?;
+            let report: CatalogRideReport = execute_catalog_ride(
+                &surface,
+                &descriptor,
+                &work,
+                &species,
+                masses.view(),
+                &frozen,
+                &execution,
+                &witness,
+            );
+            let producer_calls = report.charged_evaluations;
+            let failure = failure_name(&report.outcome);
+            let credit = client.report_ride(next_sequence(&mut event_sequence)?, report)?;
+            if credit.total_charged_evaluations < producer_calls {
+                return Err(io::Error::other("coordinator ride credit lost producer calls").into());
+            }
+            let receiver_calls = credit.total_charged_evaluations - producer_calls;
+            reported_producer_calls = reported_producer_calls
+                .checked_add(producer_calls)
+                .ok_or_else(|| io::Error::other("producer call counter overflow"))?;
+            record_charge(
+                &mut client,
+                &mut event_sequence,
+                &mut charged,
+                budget,
+                ChargeKind::AuxiliaryEvaluation,
+                producer_calls,
+            )?;
+            record_charge(
+                &mut client,
+                &mut event_sequence,
+                &mut charged,
+                budget,
+                ChargeKind::FreshValidation,
+                receiver_calls,
+            )?;
+            mechanism_allocator.update(
+                RIDE_DISCOVERY_ARM,
+                u32::from(credit.novel_edge),
+                credit.total_charged_evaluations,
+            );
+            attempts += 1;
+            certified += u64::from(credit.certified_connection);
+            novel_edges += u64::from(credit.novel_edge);
+            println!(
+                "{}",
+                json!({
+                    "kind": "water_ride_report",
+                    "work": work.order.id,
+                    "source_basin": work.order.arm.source_basin,
+                    "environment_class": work.order.arm.environment_class,
+                    "representative_atom": work.order.representative_atom,
+                    "mode_rank": work.order.arm.mode_rank,
+                    "direction": format!("{:?}", work.order.arm.direction),
+                    "method": format!("{:?}", work.order.arm.method),
+                    "attempt": work.order.attempt,
+                    "producer_calls": producer_calls,
+                    "receiver_calls": receiver_calls,
+                    "total_calls": credit.total_charged_evaluations,
+                    "certified": credit.certified_connection,
+                    "novel_edge": credit.novel_edge,
+                    "failure": failure,
+                    "charged": charged,
+                })
+            );
+            continue;
+        }
+
+        let maximum_evaluations = (remaining - 1).min(escape_budget_cap);
+        let move_index = move_allocator
+            .pulls()
+            .iter()
+            .position(|&pulls| pulls == 0)
+            .unwrap_or_else(|| move_allocator.select(&mut rng));
+        let move_name = escape_moves[move_index].name();
+        let proposal = escape_moves[move_index].propose_scaled(
+            live_coordinates.view(),
+            hopping.temperature,
+            escape_feedback.escape(),
+            &mut rng,
+        );
+        let escape_config = SourceEscapeConfig {
             maximum_evaluations,
-            producer_event_sequence,
-            producer_charged_work: charged,
+            quench_steps: exploration.quench_steps,
+            gradient_tolerance: exploration.quench_gradient_tolerance,
+            gradient_norm_tolerance: MAX_GRADIENT_NORM,
         };
-        producer_event_sequence = producer_event_sequence
-            .checked_add(3)
-            .ok_or_else(|| io::Error::other("producer event sequence overflow"))?;
-        let report: CatalogRideReport = execute_catalog_ride(
-            &surface,
-            &descriptor,
-            &work,
-            &species,
-            masses.view(),
-            &frozen,
-            &execution,
-            &witness,
-        );
-        let producer_calls = report.charged_evaluations;
-        let failure = failure_name(&report.outcome);
-        let credit = client.report_ride(next_sequence(&mut event_sequence)?, report)?;
-        if credit.total_charged_evaluations < producer_calls {
-            return Err(io::Error::other("coordinator ride credit lost producer calls").into());
+        let outcome = quench_source_escape(&surface, proposal.view(), &escape_config);
+        source_attempts += 1;
+        match outcome {
+            SourceEscapeOutcome::Failed(failure) => {
+                if failure.charged_evaluations == 0 {
+                    return Err(io::Error::other(format!(
+                        "source escape made no PES progress: {}",
+                        failure.error
+                    ))
+                    .into());
+                }
+                reported_producer_calls = reported_producer_calls
+                    .checked_add(failure.charged_evaluations)
+                    .ok_or_else(|| io::Error::other("producer call counter overflow"))?;
+                record_charge(
+                    &mut client,
+                    &mut event_sequence,
+                    &mut charged,
+                    budget,
+                    ChargeKind::RejectedQuench,
+                    failure.charged_evaluations,
+                )?;
+                mechanism_allocator.update(SOURCE_ESCAPE_ARM, 0, failure.charged_evaluations);
+                move_allocator.update(move_index, false);
+                println!(
+                    "{}",
+                    json!({
+                        "kind": "water_source_escape",
+                        "attempt": source_attempts,
+                        "move": move_name,
+                        "escape_scale": escape_feedback.escape(),
+                        "producer_calls": failure.charged_evaluations,
+                        "converged": false,
+                        "error": failure.error,
+                        "charged": charged,
+                    })
+                );
+            }
+            SourceEscapeOutcome::Converged(record) => {
+                let producer_calls = record.charged_evaluations;
+                let candidate_sequence = producer_event_sequence;
+                producer_event_sequence = producer_event_sequence
+                    .checked_add(1)
+                    .ok_or_else(|| io::Error::other("producer event sequence overflow"))?;
+                let minimum_descriptor =
+                    descriptor.describe(record.minimum.coordinates.view(), Some(&species))?;
+                let candidate = CatalogCandidate {
+                    producer_replica: replica,
+                    coordinates: record.minimum.coordinates.to_vec(),
+                    cell: None,
+                    energy: record.minimum.energy,
+                    forces: record
+                        .minimum
+                        .gradient
+                        .iter()
+                        .map(|gradient| -*gradient)
+                        .collect(),
+                    gradient_norm: euclidean_gradient_norm(
+                        record.minimum.gradient.as_slice().ok_or_else(|| {
+                            io::Error::other("escape gradient must be contiguous")
+                        })?,
+                    ),
+                    descriptor: minimum_descriptor.values().to_vec(),
+                    descriptor_schema_version: minimum_descriptor.schema_version(),
+                    quench_converged: true,
+                    charged_work: charged
+                        .checked_add(producer_calls)
+                        .ok_or_else(|| io::Error::other("charged counter overflow"))?,
+                    event_sequence: candidate_sequence,
+                    seed: seed ^ source_attempts.wrapping_mul(0xd1b5_4a32_d192_ed03),
+                    census_basin: None,
+                };
+                let offer =
+                    client.offer_candidate(next_sequence(&mut event_sequence)?, candidate)?;
+                reported_producer_calls = reported_producer_calls
+                    .checked_add(producer_calls)
+                    .ok_or_else(|| io::Error::other("producer call counter overflow"))?;
+                record_charge(
+                    &mut client,
+                    &mut event_sequence,
+                    &mut charged,
+                    budget,
+                    ChargeKind::AcceptedQuench,
+                    producer_calls,
+                )?;
+                record_charge(
+                    &mut client,
+                    &mut event_sequence,
+                    &mut charged,
+                    budget,
+                    ChargeKind::FreshValidation,
+                    1,
+                )?;
+                let reached_basin = offer.catalog.as_ref().map(|mutation| mutation.basin_id);
+                let discovered = reached_basin.is_some_and(|basin| known_basins.insert(basin));
+                source_discoveries += u64::from(discovered);
+                mechanism_allocator.update(
+                    SOURCE_ESCAPE_ARM,
+                    u32::from(discovered),
+                    producer_calls + 1,
+                );
+                move_allocator.update(move_index, discovered);
+                let visit = reached_basin.map(|basin| {
+                    escape_feedback.observe(live_basin.map(|value| value as usize), basin as usize)
+                });
+                let accepted = reached_basin.is_some()
+                    && escape_feedback.accept(record.minimum.energy - live_energy);
+                if accepted {
+                    live_basin = reached_basin;
+                    live_energy = record.minimum.energy;
+                    live_coordinates = record.minimum.coordinates.clone();
+                }
+                if discovered {
+                    ride_available = true;
+                }
+                println!(
+                    "{}",
+                    json!({
+                        "kind": "water_source_escape",
+                        "attempt": source_attempts,
+                        "move": move_name,
+                        "escape_scale": escape_feedback.escape(),
+                        "acceptance_threshold": escape_feedback.threshold(),
+                        "producer_calls": producer_calls,
+                        "receiver_calls": 1,
+                        "converged": true,
+                        "energy": record.minimum.energy,
+                        "gradient_norm": record.minimum.gradient.dot(&record.minimum.gradient).sqrt(),
+                        "basin": reached_basin,
+                        "visit": visit.map(|value| format!("{value:?}")),
+                        "new_basin": discovered,
+                        "adopted": accepted,
+                        "catalog_mutation": offer.catalog.as_ref().map(|mutation| mutation.kind.code()),
+                        "charged": charged,
+                    })
+                );
+            }
         }
-        let receiver_calls = credit.total_charged_evaluations - producer_calls;
-        reported_producer_calls = reported_producer_calls
-            .checked_add(producer_calls)
-            .ok_or_else(|| io::Error::other("producer call counter overflow"))?;
-        record_charge(
-            &mut client,
-            &mut event_sequence,
-            &mut charged,
-            budget,
-            ChargeKind::AuxiliaryEvaluation,
-            producer_calls,
-        )?;
-        record_charge(
-            &mut client,
-            &mut event_sequence,
-            &mut charged,
-            budget,
-            ChargeKind::FreshValidation,
-            receiver_calls,
-        )?;
-        attempts += 1;
-        certified += u64::from(credit.certified_connection);
-        novel_edges += u64::from(credit.novel_edge);
-        println!(
-            "{}",
-            json!({
-                "kind": "water_ride_report",
-                "work": work.order.id,
-                "source_basin": work.order.arm.source_basin,
-                "environment_class": work.order.arm.environment_class,
-                "representative_atom": work.order.representative_atom,
-                "mode_rank": work.order.arm.mode_rank,
-                "direction": format!("{:?}", work.order.arm.direction),
-                "method": format!("{:?}", work.order.arm.method),
-                "attempt": work.order.attempt,
-                "producer_calls": producer_calls,
-                "receiver_calls": receiver_calls,
-                "total_calls": credit.total_charged_evaluations,
-                "certified": credit.certified_connection,
-                "novel_edge": credit.novel_edge,
-                "failure": failure,
-                "charged": charged,
-            })
-        );
     }
 
     let snapshot = client.snapshot(next_sequence(&mut event_sequence)?)?;
@@ -461,8 +668,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "replica": replica,
             "molecules": molecule_count,
             "attempts": attempts,
+            "source_attempts": source_attempts,
+            "source_discoveries": source_discoveries,
             "certified": certified,
             "novel_edges": novel_edges,
+            "mechanism_pulls": mechanism_allocator.pulls(),
+            "mechanism_discovery_rates": mechanism_allocator.rates(),
+            "move_pulls": move_allocator.pulls(),
+            "move_success_rates": move_allocator.rates(),
+            "known_basins": known_basins.len(),
             "charged": charged,
             "budget": budget,
             "producer_surface_evaluations": surface.evaluations(),
