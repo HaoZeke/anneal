@@ -378,6 +378,44 @@ fn same_system_method_evidence_guides_untried_arms() {
 }
 
 #[test]
+fn same_pes_method_transfer_uses_stationary_yield_per_charged_call() {
+    let portfolio = RidePortfolio::new(1, vec![RideMethod::Dimer, RideMethod::Lanczos]).unwrap();
+    let mut ledger = RideLedger::new(portfolio);
+    ledger
+        .register_source(source(17, -104.2, &[(4, 6)]))
+        .unwrap();
+
+    let orders = (0..4)
+        .map(|replica| ledger.claim(replica, 1_000 + u64::from(replica)).unwrap())
+        .collect::<Vec<_>>();
+    for (offset, order) in orders.into_iter().enumerate() {
+        let charged = match order.arm.method {
+            RideMethod::Dimer => 4_000,
+            RideMethod::Lanczos => 500,
+        };
+        ledger
+            .report(
+                order.replica,
+                order.id,
+                charged,
+                RideOutcome::Certified {
+                    saddle: 70 + offset as u64,
+                    endpoints: [17, 29 + offset as u64],
+                },
+            )
+            .unwrap();
+    }
+    ledger
+        .register_source(source(23, -107.5, &[(4, 8)]))
+        .unwrap();
+
+    let guided = ledger.claim(9, 2_000).unwrap();
+
+    assert_eq!(guided.arm.source_basin, 23);
+    assert_eq!(guided.arm.method, RideMethod::Lanczos);
+}
+
+#[test]
 fn certification_reliability_transfers_when_a_source_edge_is_saturated() {
     let portfolio = RidePortfolio::new(2, vec![RideMethod::Dimer, RideMethod::Lanczos]).unwrap();
     let mut ledger = RideLedger::new(portfolio);
