@@ -17,8 +17,9 @@ use rgmin::{
 };
 use rgsaddle::geom::update_trust;
 use rgsaddle::{
-    IrcConfig, IrcDirection, IrcSession, MinModeConfig, MinModeKind, MinModeSession, MinModeStatus,
-    PointSurface, SaddleError, TrustSchedule, exact_eigh, prfo_trust_region,
+    HessUpdate, IrcConfig, IrcDirection, IrcSession, MinModeConfig, MinModeKind, MinModeSession,
+    MinModeStatus, PointSurface, SaddleError, TrustSchedule, exact_eigh, prfo_trust_region,
+    update_h,
 };
 
 use crate::curvature::{project_rigid_with, rigid_basis};
@@ -30,6 +31,11 @@ use crate::descriptor_space::{
 const ART_BRANCH_FRACTION: f64 = 0.15;
 /// Lowest root whose overlap reaches this fraction of the best candidate.
 const MODE_HOMING_OVERLAP_FRACTION: f64 = 0.7;
+/// A transition-state secant model is rebuilt when its measured step has
+/// opposite sign to the predicted energy change.
+const PRFO_MODEL_MIN_RHO: f64 = 0.0;
+/// A nearly orthogonal homed root is not reliable enough to transport.
+const PRFO_MODEL_MIN_OVERLAP: f64 = 0.2;
 
 /// Energy and Cartesian-gradient evaluator used by all exploration stages.
 pub trait PesSurface: Sync {
@@ -1764,6 +1770,10 @@ fn refine_cartesian_with_prfo<S: PesSurface + ?Sized>(
     let mut trust_radius = config.saddle_displacement.min(config.maximum_move);
     let trust_schedule = TrustSchedule::saddle();
     let (mut energy, mut gradient) = checked_evaluate(surface, coordinates.view())?;
+    let mut hessian_model: Option<(Array2<f64>, Array2<f64>)> = None;
+    let mut refresh_hessian = true;
+    let mut exact_refreshes = 0usize;
+    let mut secant_updates = 0usize;
     for iteration in 0..config.prfo_steps {
         let constraints = activation_basis(coordinates.view(), cartesian_index);
         let basis = orthonormal_complement(coordinates.len(), &constraints)?;
@@ -1780,15 +1790,43 @@ fn refine_cartesian_with_prfo<S: PesSurface + ?Sized>(
                 "energy": energy,
                 "maximum_gradient": maximum_gradient,
                 "free_dimension": basis.ncols(),
+                "exact_hessian_refreshes": exact_refreshes,
+                "ts_bfgs_updates": secant_updates,
             }));
             return Ok(coordinates);
         }
-        let hessian = finite_difference_free_hessian(
-            surface,
-            coordinates.view(),
-            &basis,
-            config.hessian_step,
-        )?;
+        let (mut hessian, hessian_source) = match hessian_model.take() {
+            Some((model, old_basis))
+                if !refresh_hessian
+                    && model.nrows() == basis.ncols()
+                    && old_basis.nrows() == basis.nrows()
+                    && old_basis.ncols() == basis.ncols() =>
+            {
+                let transport = basis.t().dot(&old_basis);
+                let mut transported = transport.dot(&model).dot(&transport.t());
+                for row in 0..transported.nrows() {
+                    for column in 0..row {
+                        let symmetric =
+                            0.5 * (transported[(row, column)] + transported[(column, row)]);
+                        transported[(row, column)] = symmetric;
+                        transported[(column, row)] = symmetric;
+                    }
+                }
+                (transported, "ts-bfgs")
+            }
+            _ => {
+                exact_refreshes += 1;
+                (
+                    finite_difference_free_hessian(
+                        surface,
+                        coordinates.view(),
+                        &basis,
+                        config.hessian_step,
+                    )?,
+                    "finite-difference",
+                )
+            }
+        };
         let (eigenvalues, eigenvectors) = sorted_eigensystem(hessian.view())?;
         let negative_modes = eigenvalues
             .iter()
@@ -1829,6 +1867,12 @@ fn refine_cartesian_with_prfo<S: PesSurface + ?Sized>(
         } else {
             trust_schedule.delta_min.min(config.maximum_move)
         };
+        let secant = &candidate_gradient - &gradient;
+        let free_secant = basis.t().dot(&secant);
+        update_h(&mut hessian, &free_step, &free_secant, HessUpdate::TsBfgs);
+        secant_updates += 1;
+        let refresh_next =
+            !rho.is_finite() || rho < PRFO_MODEL_MIN_RHO || homed.overlap < PRFO_MODEL_MIN_OVERLAP;
         emit_pes_trace(serde_json::json!({
             "kind": "pes_stage",
             "stage": "prfo",
@@ -1847,8 +1891,14 @@ fn refine_cartesian_with_prfo<S: PesSurface + ?Sized>(
             "trust_radius": trust_radius,
             "next_trust_radius": next_trust_radius,
             "free_dimension": basis.ncols(),
+            "hessian_source": hessian_source,
+            "exact_hessian_refreshes": exact_refreshes,
+            "ts_bfgs_updates": secant_updates,
+            "refresh_hessian": refresh_next,
         }));
         uphill_mode = normalize_mode(basis.dot(&homed.eigenvectors.column(0)).view())?;
+        hessian_model = Some((hessian, basis));
+        refresh_hessian = refresh_next;
         coordinates = candidate;
         energy = candidate_energy;
         gradient = candidate_gradient;
