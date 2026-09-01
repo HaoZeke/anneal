@@ -8,7 +8,7 @@
 //!
 //! `CATALOG_SYSTEM` selects the preset. Unset or `lj` is reduced-unit LJ
 //! (`n` is the site count). `CATALOG_SYSTEM=gfn2-water` selects the
-//! GFN2-xTB leftover SOAP coordinator (`n` is the molecule count).
+//! GFN2-xTB universal-descriptor coordinator (`n` is the molecule count).
 //! That arm requires `RGPOT_XTB_ENGINE` so the system signature hashes
 //! the loaded engine. The receiving-side evaluator still refuses to
 //! invent a GFN2 energy.
@@ -101,16 +101,15 @@ fn run_lj_coordinator() -> Result<(), Box<dyn std::error::Error>> {
     park_coordinator(CatalogServer::start(addr, config)?)
 }
 
-/// GFN2-xTB leftover SOAP coordinator. `n` is the molecule count.
+/// GFN2-xTB universal-descriptor coordinator. `n` is the molecule count.
 ///
 /// `RGPOT_XTB_ENGINE` must name the loaded `libxtb_engine.so` so the
 /// system signature hashes that file. The receiving-side evaluator is
 /// still the refusing stub: anneal-core does not vendor GFN2.
 fn run_gfn2_water_coordinator() -> Result<(), Box<dyn std::error::Error>> {
     use anneal_core::catalog::molecular::{
-        engine_binary_digest, fresh_evaluation as water_fresh_evaluation, leftover_descriptor_dim,
-        leftover_space, leftover_values, reference_coordinates, system_signature, validator_config,
-        water_species,
+        descriptor_space, engine_binary_digest, fresh_evaluation as water_fresh_evaluation,
+        reference_coordinates, system_signature, validator_config, water_species,
     };
 
     let args = std::env::args().collect::<Vec<_>>();
@@ -145,12 +144,14 @@ fn run_gfn2_water_coordinator() -> Result<(), Box<dyn std::error::Error>> {
 
     let species = water_species(n_molecules)?;
     let reference = reference_coordinates(n_molecules)?;
-    let leftover = leftover_values(&reference, &species)?;
-    let leftover_dim = leftover_descriptor_dim(&species)?;
-    if leftover.len() != leftover_dim {
-        return Err("water leftover length disagrees with leftover_descriptor_dim".into());
-    }
-    let descriptor = leftover_space(&species)?;
+    let descriptor = descriptor_space(&species)?;
+    let descriptor_dim = descriptor
+        .describe(
+            ndarray::ArrayView1::from(reference.as_slice()),
+            Some(&species),
+        )?
+        .values()
+        .len();
     let signature = system_signature(n_molecules, digest)?;
     if water_fresh_evaluation(n_molecules, &reference).is_ok() {
         return Err(
@@ -162,7 +163,7 @@ fn run_gfn2_water_coordinator() -> Result<(), Box<dyn std::error::Error>> {
         .with_scientific_state(
             signature,
             descriptor,
-            validator_config(&reference, leftover_dim)?,
+            validator_config(&reference, descriptor_dim)?,
             capacity,
             census_radius,
             total_work,

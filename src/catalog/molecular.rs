@@ -1,14 +1,11 @@
 //! GFN2-xTB water-cluster catalog identity.
 //!
-//! Sketch of the system signature used by the paper water protocol
-//! (`examples/molecular_cluster.rs` + `Config::recommended_molecular`,
-//! GFN2-xTB through rgpot). The leftover SOAP dimension is the stacked
-//! species-conditioned residual `p_i - mu_z(i)` of the molecular hop
-//! spec (`n_max = 3`, `l_max = 6`, cutoff `3.5 * length_scale`).
-//! The featomic hop (`l >= 5`) is a high-`l` slice of that same
-//! calculator; that runtime length is not a compile-time identity.
-//! Leftover SOAP is [`leftover_space`]: one `SoapLeftover` block of
-//! stacked `p_i - mu_z(i)`. That is the catalog `describe()` space.
+//! The catalog uses the same fixed-dimensional multiscale invariant schema as
+//! clusters and surfaces through [`descriptor_space`]. The GFN2 engine,
+//! atomic species, rigid-water groups, and coordinate dimension remain in the
+//! system signature, so sharing a descriptor schema never merges PES state.
+//! [`leftover_space`] remains the molecular proposal feature: its stacked
+//! species-conditioned residual `p_i - mu_z(i)` is not basin identity.
 //!
 //! A complete visit still needs a loaded rgpot engine. Required engine
 //! fields:
@@ -32,7 +29,9 @@ use super::{
     DescriptorSignature, EngineSignature, FreshEvaluation, SystemSignature, ValidatorConfig,
 };
 use crate::descriptor_space::{
-    DescriptorBlockKind, DescriptorBlockSpec, DescriptorSchema, DescriptorSpace,
+    DescriptorBlockKind, DescriptorBlockSpec, DescriptorGeometry, DescriptorSchema,
+    DescriptorSpace, UNIVERSAL_DESCRIPTOR_SCHEMA, UNIVERSAL_DESCRIPTOR_VERSION,
+    universal_descriptor_space,
 };
 use crate::methods::cluster_hopping::covalent_radius;
 use crate::soap::{SoapSpec, local_spectra_z};
@@ -46,8 +45,8 @@ pub enum MolecularCatalogPresetError {
     /// Cartesian length must be exactly nine times the molecule count.
     #[error("water Cartesian dimension is inconsistent")]
     CoordinateDimension,
-    /// Leftover descriptor dimension must be positive.
-    #[error("water leftover descriptor dimension must be positive")]
+    /// Descriptor dimension must be positive.
+    #[error("water descriptor dimension must be positive")]
     DescriptorDimension,
     /// Species vector must be `[8, 1, 1]` repeated once per molecule.
     #[error("water species vector is inconsistent")]
@@ -90,11 +89,17 @@ const ENGINE_CONFIG: &[u8] = b"gfn2-xtb-rgpot-v1;method=3;accuracy=1;etemp=300;m
 /// Rigid-molecule grouping of one water per three consecutive atoms.
 pub const GROUP_SCHEMA: &str = "rigid-water-molecules-v1";
 
-/// Leftover SOAP schema recorded on the system signature.
-pub const DESCRIPTOR_SCHEMA: &str = "jcc-water-soap-leftover";
+/// Universal catalog descriptor schema shared across system families.
+pub const DESCRIPTOR_SCHEMA: &str = UNIVERSAL_DESCRIPTOR_SCHEMA;
 
 /// Schema version of [`DESCRIPTOR_SCHEMA`].
-pub const DESCRIPTOR_VERSION: u32 = 1;
+pub const DESCRIPTOR_VERSION: u32 = UNIVERSAL_DESCRIPTOR_VERSION;
+
+/// Molecular proposal-only leftover SOAP schema.
+pub const LEFTOVER_DESCRIPTOR_SCHEMA: &str = "jcc-water-soap-leftover";
+
+/// Schema version of [`LEFTOVER_DESCRIPTOR_SCHEMA`].
+pub const LEFTOVER_DESCRIPTOR_VERSION: u32 = 1;
 
 /// Atomic numbers of `(H2O)m` in coordinate order.
 pub fn water_species(n_molecules: usize) -> Result<Vec<u32>, MolecularCatalogPresetError> {
@@ -208,7 +213,7 @@ pub fn leftover_values(
     Ok(leftover)
 }
 
-/// Leftover SOAP as a catalog `DescriptorSpace`.
+/// Leftover SOAP used by the molecular proposal mechanism.
 pub fn leftover_space(species: &[u32]) -> Result<DescriptorSpace, MolecularCatalogPresetError> {
     let spec = leftover_spec(species)?;
     let block = DescriptorBlockSpec::new(
@@ -218,9 +223,20 @@ pub fn leftover_space(species: &[u32]) -> Result<DescriptorSpace, MolecularCatal
         spec.rcut_nn,
     )
     .map_err(|_| MolecularCatalogPresetError::DescriptorDimension)?;
-    let schema = DescriptorSchema::new(DESCRIPTOR_SCHEMA, DESCRIPTOR_VERSION, vec![block])
-        .map_err(|_| MolecularCatalogPresetError::DescriptorDimension)?;
+    let schema = DescriptorSchema::new(
+        LEFTOVER_DESCRIPTOR_SCHEMA,
+        LEFTOVER_DESCRIPTOR_VERSION,
+        vec![block],
+    )
+    .map_err(|_| MolecularCatalogPresetError::DescriptorDimension)?;
     Ok(DescriptorSpace::new(schema))
+}
+
+/// Fixed-dimensional universal invariant space for a water catalog.
+pub fn descriptor_space(species: &[u32]) -> Result<DescriptorSpace, MolecularCatalogPresetError> {
+    let geometry = DescriptorGeometry::finite(length_scale(species)?)
+        .map_err(|_| MolecularCatalogPresetError::DescriptorDimension)?;
+    Ok(universal_descriptor_space(geometry))
 }
 
 /// SHA-256 of the declared GFN2 handle. This is not the engine binary.
@@ -252,20 +268,23 @@ pub fn system_signature(
         .and_then(|dimension| u64::try_from(dimension).ok())
         .ok_or(MolecularCatalogPresetError::CoordinateDimension)?;
     let scale = length_scale(&species)?;
-    let spec = leftover_spec(&species)?;
-    let leftover_dim = leftover_descriptor_dim(&species)?;
+    let descriptor = descriptor_space(&species)?;
+    let reference = reference_coordinates(n_molecules)?;
+    let descriptor_dim = descriptor
+        .describe(ArrayView1::from(reference.as_slice()), Some(&species))
+        .map_err(|_| MolecularCatalogPresetError::DescriptorDimension)?
+        .values()
+        .len();
     let mut hyperparameters = BTreeMap::new();
-    hyperparameters.insert("blocks".into(), "soap-leftover".into());
-    hyperparameters.insert("leftover".into(), "p_i-mu_z".into());
     hyperparameters.insert(
-        "soap".into(),
-        format!(
-            "nmax={},lmax={},cutoff={}",
-            spec.n_max, spec.l_max, spec.rcut_nn
-        ),
+        "blocks".into(),
+        "pair-radial@2.5,6;three-body-angular@3,6;graph-topology@6;\
+         invariant-soap@3,6;invariant-ace-nu3@3,6;chiral-moment@3,6"
+            .into(),
     );
-    hyperparameters.insert("leftover_dim".into(), leftover_dim.to_string());
-    hyperparameters.insert("length_scale".into(), scale.to_string());
+    hyperparameters.insert("normalization".into(), "soft-l2-eps-v1".into());
+    hyperparameters.insert("geometry".into(), format!("finite;length-scale={scale}"));
+    hyperparameters.insert("descriptor_dim".into(), descriptor_dim.to_string());
     let mut external_inputs = BTreeMap::new();
     external_inputs.insert(ENGINE_BINARY_INPUT.into(), engine_binary_digest);
     let mut species_channels = species.clone();
@@ -292,8 +311,8 @@ pub fn system_signature(
             external_inputs,
         },
         descriptor: DescriptorSignature {
-            schema: DESCRIPTOR_SCHEMA.into(),
-            version: DESCRIPTOR_VERSION,
+            schema: descriptor.schema().name().into(),
+            version: descriptor.schema().version(),
             hyperparameters,
             species_channels,
         },
