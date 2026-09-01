@@ -414,7 +414,7 @@ impl RideLedger {
             }
             return Ok(());
         }
-        let mut representatives = BTreeMap::new();
+        let mut representatives = BTreeMap::<u32, u32>::new();
         for target in source.environments {
             representatives
                 .entry(target.class)
