@@ -40,9 +40,32 @@ pub trait PesSurface: Sync {
 
 #[cfg(test)]
 mod tests {
-    use ndarray::{Array2, array};
+    use ndarray::{Array1, Array2, ArrayView1, array};
 
-    use super::home_uphill_mode;
+    use super::{IrcDirection, PesExplorationConfig, PesSurface, home_uphill_mode, roll_branch};
+
+    struct FailingIrcSurface;
+
+    impl PesSurface for FailingIrcSurface {
+        type Error = &'static str;
+
+        fn evaluate(
+            &self,
+            coordinates: ArrayView1<f64>,
+        ) -> Result<(f64, Array1<f64>), Self::Error> {
+            if coordinates[0] > 0.05 {
+                return Err("branch left the valid domain");
+            }
+            let mut energy = -0.5 * coordinates[0] * coordinates[0];
+            let mut gradient = Array1::zeros(coordinates.len());
+            gradient[0] = -coordinates[0];
+            for index in 1..coordinates.len() {
+                energy += 0.5 * coordinates[index] * coordinates[index];
+                gradient[index] = coordinates[index];
+            }
+            Ok((energy, gradient))
+        }
+    }
 
     #[test]
     fn mode_homing_promotes_the_overlapping_eigenvector_with_continuous_sign() {
@@ -56,6 +79,22 @@ mod tests {
         assert!((homed.overlap - 1.0).abs() < 1e-14);
         assert_eq!(homed.eigenvalues, array![3.0, -2.0, 0.4]);
         assert_eq!(homed.eigenvectors.column(0), reference.view());
+    }
+
+    #[test]
+    fn irc_surface_failure_identifies_the_branch_and_outer_step() {
+        let error = roll_branch(
+            &FailingIrcSurface,
+            &Array1::zeros(6),
+            &Array1::ones(2),
+            &array![1.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+            IrcDirection::Forward,
+            0.1,
+            &PesExplorationConfig::default(),
+        )
+        .unwrap_err();
+
+        assert!(error.to_string().contains("IRC Forward step 0"));
     }
 }
 
