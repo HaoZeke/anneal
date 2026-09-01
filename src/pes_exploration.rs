@@ -1195,6 +1195,7 @@ where
 struct Quenched {
     energy: f64,
     coordinates: Array1<f64>,
+    gradient: Array1<f64>,
     max_gradient: f64,
 }
 
@@ -1205,6 +1206,8 @@ pub struct QuenchedMinimum {
     pub energy: f64,
     /// Coordinates satisfying the requested force condition.
     pub coordinates: Array1<f64>,
+    /// Fresh Cartesian gradient used to certify the returned coordinates.
+    pub gradient: Array1<f64>,
     /// Infinity norm of the final Cartesian gradient.
     pub max_gradient: f64,
 }
@@ -1445,6 +1448,7 @@ pub fn quench_minimum<S: PesSurface + ?Sized>(
     Ok(QuenchedMinimum {
         energy: quenched.energy,
         coordinates: quenched.coordinates,
+        gradient: quenched.gradient,
         max_gradient: quenched.max_gradient,
     })
 }
@@ -1482,6 +1486,7 @@ pub fn quench_minimum_with_norm<S: PesSurface + ?Sized>(
     Ok(QuenchedMinimum {
         energy: quenched.energy,
         coordinates: quenched.coordinates,
+        gradient: quenched.gradient,
         max_gradient: quenched.max_gradient,
     })
 }
@@ -1533,6 +1538,7 @@ fn quench_with_certification<S: PesSurface + ?Sized>(
     Ok(Quenched {
         energy,
         coordinates,
+        gradient,
         max_gradient,
     })
 }
@@ -1605,6 +1611,7 @@ where
     Ok(Quenched {
         energy,
         coordinates,
+        gradient,
         max_gradient,
     })
 }
