@@ -349,6 +349,7 @@ pub struct RideLedger {
     portfolio: RidePortfolio,
     sources: BTreeMap<u64, SourceRecord>,
     evidence: BTreeMap<RideArm, ArmEvidence>,
+    environment_evidence: BTreeMap<(u64, u32), ArmEvidence>,
     method_evidence: BTreeMap<RideMethod, ArmEvidence>,
     active: BTreeMap<u64, RideWorkOrder>,
     active_arms: BTreeSet<RideArm>,
@@ -368,6 +369,7 @@ impl RideLedger {
             portfolio,
             sources: BTreeMap::new(),
             evidence: BTreeMap::new(),
+            environment_evidence: BTreeMap::new(),
             method_evidence: BTreeMap::new(),
             active: BTreeMap::new(),
             active_arms: BTreeSet::new(),
@@ -411,8 +413,10 @@ impl RideLedger {
     ///
     /// A retry by the same replica returns its existing order. Solver
     /// reliability transfers across arms through a same-PES upper-confidence
-    /// estimate, while exact-arm novelty remains local. Raw energy only breaks
-    /// acquisition ties inside this ledger.
+    /// estimate. Environment-level novel-edge uncertainty provides the outer
+    /// acquisition score, so unseen local environments precede repeated arms;
+    /// exact-arm novelty remains local. Raw energy only breaks acquisition ties
+    /// inside this ledger.
     pub fn claim(&mut self, replica: u32, seed: u64) -> Option<RideWorkOrder> {
         if let Some(id) = self.replica_work.get(&replica) {
             return self.active.get(id).cloned();
@@ -423,8 +427,12 @@ impl RideLedger {
             .arms()
             .filter(|(arm, _)| !self.active_arms.contains(arm))
             .max_by(|(left, left_atom), (right, right_atom)| {
-                self.acquisition(left, total)
-                    .total_cmp(&self.acquisition(right, total))
+                self.environment_acquisition(left, total)
+                    .total_cmp(&self.environment_acquisition(right, total))
+                    .then_with(|| {
+                        self.acquisition(left, total)
+                            .total_cmp(&self.acquisition(right, total))
+                    })
                     .then_with(|| {
                         self.source_energy(right.source_basin)
                             .total_cmp(&self.source_energy(left.source_basin))
@@ -527,6 +535,14 @@ impl RideLedger {
             failure,
             novel_edge,
         )?;
+        record_evidence(
+            self.environment_evidence
+                .entry((order.arm.source_basin, order.arm.environment_class))
+                .or_default(),
+            charged_evaluations,
+            failure,
+            novel_edge,
+        )?;
         if certified_connection {
             self.certified_connections = self
                 .certified_connections
@@ -596,6 +612,21 @@ impl RideLedger {
         self.sources
             .get(&basin)
             .map_or(f64::INFINITY, |source| source.energy)
+    }
+
+    fn environment_acquisition(&self, arm: &RideArm, total: u64) -> f64 {
+        let key = (arm.source_basin, arm.environment_class);
+        match self.environment_evidence.get(&key) {
+            Some(row) => upper_probability(row.novel_edges, row.completed, total),
+            None if !self.active_arms.iter().any(|active| {
+                active.source_basin == arm.source_basin
+                    && active.environment_class == arm.environment_class
+            }) =>
+            {
+                f64::INFINITY
+            }
+            None => 1.0,
+        }
     }
 
     fn acquisition(&self, arm: &RideArm, total: u64) -> f64 {
