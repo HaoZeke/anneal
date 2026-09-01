@@ -28,6 +28,8 @@ use crate::descriptor_space::{
 
 /// Minimum ART downhill displacement as a fraction of source--saddle distance.
 const ART_BRANCH_FRACTION: f64 = 0.15;
+/// Lowest root whose overlap reaches this fraction of the best candidate.
+const MODE_HOMING_OVERLAP_FRACTION: f64 = 0.7;
 
 /// Energy and Cartesian-gradient evaluator used by all exploration stages.
 pub trait PesSurface: Sync {
@@ -1543,6 +1545,7 @@ fn home_uphill_mode(
     eigenvalues: &Array1<f64>,
     eigenvectors: &Array2<f64>,
     reference: ArrayView1<f64>,
+    negative_tolerance: f64,
 ) -> Result<HomedEigensystem, PesExplorationError> {
     if eigenvalues.is_empty()
         || eigenvectors.nrows() != eigenvalues.len()
@@ -1553,12 +1556,37 @@ fn home_uphill_mode(
             "mode homing requires one square eigensystem and matching reference",
         ));
     }
+    if !negative_tolerance.is_finite() || negative_tolerance < 0.0 {
+        return Err(PesExplorationError::InvalidConfig(
+            "mode-homing negative tolerance",
+        ));
+    }
     let reference = normalize_mode(reference)?;
-    let (source_index, signed_overlap) = (0..eigenvalues.len())
-        .map(|index| (index, eigenvectors.column(index).dot(&reference)))
-        .max_by(|left, right| left.1.abs().total_cmp(&right.1.abs()))
+    let negative = (0..eigenvalues.len())
+        .filter(|&index| eigenvalues[index] < -negative_tolerance)
+        .collect::<Vec<_>>();
+    let candidates = if negative.is_empty() {
+        (0..eigenvalues.len()).collect::<Vec<_>>()
+    } else {
+        negative
+    };
+    let overlaps = candidates
+        .iter()
+        .map(|&index| (index, eigenvectors.column(index).dot(&reference)))
+        .collect::<Vec<_>>();
+    let maximum_overlap = overlaps
+        .iter()
+        .map(|(_, overlap)| overlap.abs())
+        .max_by(f64::total_cmp)
         .ok_or(PesExplorationError::InvalidShape(
             "mode homing eigensystem is empty",
+        ))?;
+    let overlap_gate = MODE_HOMING_OVERLAP_FRACTION * maximum_overlap;
+    let (source_index, signed_overlap) = overlaps
+        .into_iter()
+        .find(|(_, overlap)| overlap.abs() >= overlap_gate)
+        .ok_or(PesExplorationError::InvalidShape(
+            "mode homing found no admissible root",
         ))?;
     let mut order = Vec::with_capacity(eigenvalues.len());
     order.push(source_index);
@@ -1715,7 +1743,12 @@ fn refine_cartesian_with_prfo<S: PesSurface + ?Sized>(
             .filter(|value| **value < -config.negative_curvature_tolerance)
             .count();
         let free_reference = basis.t().dot(&uphill_mode);
-        let homed = home_uphill_mode(&eigenvalues, &eigenvectors, free_reference.view())?;
+        let homed = home_uphill_mode(
+            &eigenvalues,
+            &eigenvectors,
+            free_reference.view(),
+            config.negative_curvature_tolerance,
+        )?;
         let free_step = prfo_trust_region(
             &homed.eigenvalues,
             &homed.eigenvectors,
