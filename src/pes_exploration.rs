@@ -396,7 +396,8 @@ pub fn orthonormal_nd_mode(
         });
         for _ in 0..2 {
             for previous in &basis {
-                candidate.scaled_add(-candidate.dot(previous), previous);
+                let projection = candidate.dot(previous);
+                candidate.scaled_add(-projection, previous);
             }
         }
         let norm = candidate.dot(&candidate).sqrt();
@@ -404,7 +405,8 @@ pub fn orthonormal_nd_mode(
             candidate.fill(0.0);
             candidate[(basis_index + block) % dimension] = 1.0;
             for previous in &basis {
-                candidate.scaled_add(-candidate.dot(previous), previous);
+                let projection = candidate.dot(previous);
+                candidate.scaled_add(-projection, previous);
             }
         }
         basis.push(normalize_mode(candidate.view())?);
