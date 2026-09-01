@@ -1,11 +1,11 @@
 use std::convert::Infallible;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use anneal_core::nd_hybrid::{explore_nd_hybrid, NdHybridConfig, NdHybridMechanism};
+use anneal_core::nd_hybrid::{NdHybridConfig, NdHybridMechanism, explore_nd_hybrid};
 use anneal_core::pes_exploration::{
     ExactStructureWitness, PesExplorationConfig, PesSurface, RideMethod,
 };
-use ndarray::{array, Array1, ArrayView1};
+use ndarray::{Array1, ArrayView1, array};
 
 struct ProductDoubleWell {
     calls: AtomicU64,
@@ -116,17 +116,21 @@ fn hybrid_nd_search_shares_escaped_minima_with_budgeted_ridge_rides() {
 
     for minimum in report.network.minima() {
         assert!(minimum.max_gradient < 2e-8);
-        assert!(minimum
-            .coordinates
-            .iter()
-            .all(|coordinate| (coordinate.abs() - 1.0).abs() < 1e-6));
+        assert!(
+            minimum
+                .coordinates
+                .iter()
+                .all(|coordinate| (coordinate.abs() - 1.0).abs() < 1e-6)
+        );
     }
     for saddle in report.network.saddles() {
         assert_eq!(saddle.negative_modes, 1);
         assert!(saddle.saddle_max_gradient < config.exploration.saddle_force_tolerance);
-        assert!(saddle
-            .endpoints
-            .iter()
-            .all(|endpoint| *endpoint < report.network.minimum_count()));
+        assert!(
+            saddle
+                .endpoints
+                .iter()
+                .all(|endpoint| *endpoint < report.network.minimum_count())
+        );
     }
 }
