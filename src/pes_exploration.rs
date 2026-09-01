@@ -1071,11 +1071,25 @@ fn quench<S: PesSurface + ?Sized>(
     start: ArrayView1<f64>,
     config: &PesExplorationConfig,
 ) -> Result<Quenched, PesExplorationError> {
+    quench_with_tolerance(
+        surface,
+        start,
+        config.quench_steps,
+        config.quench_gradient_tolerance,
+    )
+}
+
+fn quench_with_tolerance<S: PesSurface + ?Sized>(
+    surface: &S,
+    start: ArrayView1<f64>,
+    steps: usize,
+    gradient_tolerance: f64,
+) -> Result<Quenched, PesExplorationError> {
     let mut optimizer = Lbfgs::default();
-    optimizer.gtol = config.quench_gradient_tolerance;
+    optimizer.gtol = gradient_tolerance;
     optimizer.norm = GradNorm::Infinity;
     let mut failure = None;
-    let (_, coordinates, _) = optimizer.minimize(start, config.quench_steps, |trial| {
+    let (_, coordinates, _) = optimizer.minimize(start, steps, |trial| {
         match checked_evaluate(surface, trial) {
             Ok(value_gradient) => Some(value_gradient),
             Err(error) => {
@@ -1091,7 +1105,7 @@ fn quench<S: PesSurface + ?Sized>(
     }
     let (energy, gradient) = checked_evaluate(surface, coordinates.view())?;
     let max_gradient = max_abs(gradient.view());
-    if max_gradient >= config.quench_gradient_tolerance {
+    if max_gradient >= gradient_tolerance {
         return Err(PesExplorationError::QuenchNotConverged { max_gradient });
     }
     Ok(Quenched {
@@ -1099,6 +1113,106 @@ fn quench<S: PesSurface + ?Sized>(
         coordinates,
         max_gradient,
     })
+}
+
+fn quench_recognizing<W, S>(
+    surface: &S,
+    start: ArrayView1<f64>,
+    known: &Quenched,
+    witness: &W,
+    steps: usize,
+    gradient_tolerance: f64,
+) -> Result<Quenched, PesExplorationError>
+where
+    S: PesSurface + ?Sized,
+    W: ExactStructureWitness + ?Sized,
+{
+    if witness.equivalent(known.coordinates.view(), start) {
+        return Ok(known.clone());
+    }
+    let mut optimizer = Lbfgs::default();
+    optimizer.gtol = gradient_tolerance;
+    optimizer.norm = GradNorm::Infinity;
+    let mut failure = None;
+    let (_, coordinates, _, recognized) = optimizer.minimize_recognized(
+        start,
+        steps,
+        |trial| match checked_evaluate(surface, trial) {
+            Ok(value_gradient) => Some(value_gradient),
+            Err(error) => {
+                if failure.is_none() {
+                    failure = Some(error);
+                }
+                None
+            }
+        },
+        |_, _, trial| {
+            witness
+                .equivalent(known.coordinates.view(), trial)
+                .then(|| (known.energy, known.coordinates.clone()))
+        },
+    );
+    if let Some(error) = failure {
+        return Err(error);
+    }
+    if recognized {
+        return Ok(known.clone());
+    }
+    let (energy, gradient) = checked_evaluate(surface, coordinates.view())?;
+    let max_gradient = max_abs(gradient.view());
+    if max_gradient >= gradient_tolerance {
+        return Err(PesExplorationError::QuenchNotConverged { max_gradient });
+    }
+    Ok(Quenched {
+        energy,
+        coordinates,
+        max_gradient,
+    })
+}
+
+fn reconcile_source_connection<W, S>(
+    surface: &S,
+    origin: Quenched,
+    positive: Quenched,
+    negative: Quenched,
+    config: &PesExplorationConfig,
+    witness: &W,
+) -> Result<(Quenched, Quenched, Quenched), PesExplorationError>
+where
+    S: PesSurface + ?Sized,
+    W: ExactStructureWitness + ?Sized,
+{
+    if witness.equivalent(origin.coordinates.view(), positive.coordinates.view())
+        || witness.equivalent(origin.coordinates.view(), negative.coordinates.view())
+    {
+        return Ok((origin, positive, negative));
+    }
+
+    let identity_tolerance =
+        (config.quench_gradient_tolerance * f64::EPSILON.sqrt()).max(f64::MIN_POSITIVE);
+    let origin = quench_with_tolerance(
+        surface,
+        origin.coordinates.view(),
+        config.quench_steps,
+        identity_tolerance,
+    )?;
+    let positive = quench_recognizing(
+        surface,
+        positive.coordinates.view(),
+        &origin,
+        witness,
+        config.quench_steps,
+        identity_tolerance,
+    )?;
+    let negative = quench_recognizing(
+        surface,
+        negative.coordinates.view(),
+        &origin,
+        witness,
+        config.quench_steps,
+        identity_tolerance,
+    )?;
+    Ok((origin, positive, negative))
 }
 
 fn descriptor(
@@ -1433,7 +1547,6 @@ where
     }
 
     let origin_minimum = quench(surface, start, config)?;
-    let origin = network.admit_minimum(origin_minimum.clone(), witness);
     let mode = normalize_mode(mode)?;
     let activation = bowl_breakout(
         surface,
@@ -1489,6 +1602,9 @@ where
     let negative_start = &saddle_coordinates - &(&lowest_mode * config.irc_step);
     let positive = quench(surface, positive_start.view(), config)?;
     let negative = quench(surface, negative_start.view(), config)?;
+    let (origin_minimum, positive, negative) =
+        reconcile_source_connection(surface, origin_minimum, positive, negative, config, witness)?;
+    let origin = network.admit_minimum(origin_minimum, witness);
     let positive_id = network.admit_minimum(positive, witness);
     let negative_id = network.admit_minimum(negative, witness);
     if positive_id == negative_id {
@@ -1642,16 +1758,6 @@ where
         None,
     )
     .with_masses(Some(masses.to_vec()));
-    let origin_descriptor = descriptor(descriptor_space, &origin_minimum, context.species())?;
-    let origin = network.admit_minimum_with_context(
-        origin_minimum.energy,
-        origin_minimum.coordinates.clone(),
-        origin_minimum.max_gradient,
-        origin_descriptor,
-        context.clone(),
-        witness,
-    )?;
-
     let mode = normalize_mode(mode)?;
     let activation = bowl_breakout(
         surface,
@@ -1750,8 +1856,19 @@ where
         IrcDirection::Reverse,
         config,
     )?;
+    let (origin_minimum, forward, reverse) =
+        reconcile_source_connection(surface, origin_minimum, forward, reverse, config, witness)?;
+    let origin_descriptor = descriptor(descriptor_space, &origin_minimum, context.species())?;
     let forward_descriptor = descriptor(descriptor_space, &forward, context.species())?;
     let reverse_descriptor = descriptor(descriptor_space, &reverse, context.species())?;
+    let origin = network.admit_minimum_with_context(
+        origin_minimum.energy,
+        origin_minimum.coordinates,
+        origin_minimum.max_gradient,
+        origin_descriptor,
+        context.clone(),
+        witness,
+    )?;
     let forward_id = network.admit_minimum_with_context(
         forward.energy,
         forward.coordinates,
