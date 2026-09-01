@@ -8,10 +8,7 @@
 
 use anneal_core::catalog::FreshEvaluation;
 use anneal_core::compatibility::{AbiStamp, EngineDescriptor, ProtocolVersion};
-use eindir_core::ffi::{
-    EindirObjectiveWrapper, eindir_core_abi_compatible, eindir_objective_descriptor,
-    eindir_objective_t,
-};
+use eindir_core::ffi::{EindirObjectiveWrapper, eindir_core_abi_compatible, eindir_objective_t};
 use eindir_core::gradient::DifferentiableObjective;
 use libloading::{Library, Symbol};
 use rgpot_core::eindir::{
@@ -281,8 +278,6 @@ impl RgpotObjective {
             "rgpot/eindir ABI stamp is incompatible with anneal's eindir boundary"
         );
         let obj = unsafe { &*(self.pot as *const eindir_objective_t) };
-        let semantic_descriptor = unsafe { eindir_objective_descriptor(obj) };
-        assert!(!semantic_descriptor.is_null());
         unsafe { EindirObjectiveWrapper::new(obj) }
     }
 
