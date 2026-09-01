@@ -93,6 +93,25 @@ fn environment_coverage_precedes_repeated_local_portfolio_arms() {
 }
 
 #[test]
+fn reobserving_an_exact_basin_does_not_expand_its_environment_portfolio() {
+    let portfolio = RidePortfolio::new(1, vec![RideMethod::Dimer]).unwrap();
+    let mut ledger = RideLedger::new(portfolio);
+    ledger
+        .register_source(source(17, -104.2, &[(4, 6)]))
+        .unwrap();
+    ledger
+        .register_source(source(17, -104.3, &[(4, 2), (99, 1)]))
+        .unwrap();
+
+    let first = ledger.claim(1, 101).unwrap();
+    let second = ledger.claim(2, 102).unwrap();
+
+    assert_eq!(first.arm.environment_class, 4);
+    assert_eq!(second.arm.environment_class, 4);
+    assert!(ledger.claim(3, 103).is_none());
+}
+
+#[test]
 fn mode_rank_coverage_precedes_the_opposite_sign_of_a_tried_rank() {
     let portfolio = RidePortfolio::new(2, vec![RideMethod::Dimer]).unwrap();
     let mut ledger = RideLedger::new(portfolio);
