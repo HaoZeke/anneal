@@ -342,16 +342,54 @@ fn cooperative_run_routes_certified_ride_work_through_the_live_mailbox() {
 
     assert!(credit.novel_edge);
     assert_eq!(credit.total_charged_evaluations, 159);
-    assert!(
-        run.events()
-            .iter()
-            .any(|event| event.kind == TraceKind::RideClaim)
+    let claim = run
+        .events()
+        .iter()
+        .find(|event| event.kind == TraceKind::RideClaim)
+        .and_then(|event| event.ride.as_ref())
+        .expect("a claimed experiment must carry its complete arm identity");
+    assert_eq!(claim.work, work.order.id);
+    assert_eq!(claim.source_basin, Some(work.order.arm.source_basin));
+    assert_eq!(
+        claim.environment_class,
+        Some(work.order.arm.environment_class)
     );
-    assert!(
-        run.events()
-            .iter()
-            .any(|event| event.kind == TraceKind::RideReport)
+    assert_eq!(claim.mode_rank, Some(work.order.arm.mode_rank));
+    assert_eq!(claim.direction, Some(work.order.arm.direction));
+    assert_eq!(claim.method, Some(work.order.arm.method));
+    assert_eq!(
+        claim.representative_atom,
+        Some(work.order.representative_atom)
     );
+    assert_eq!(claim.attempt, Some(work.order.attempt));
+    assert_eq!(claim.seed, Some(work.order.seed));
+
+    let reported = run
+        .events()
+        .iter()
+        .find(|event| event.kind == TraceKind::RideReport)
+        .and_then(|event| event.ride.as_ref())
+        .expect("a credited experiment must expose producer and receiver evidence");
+    assert_eq!(reported.work, work.order.id);
+    assert_eq!(reported.producer_charged_evaluations, Some(144));
+    assert_eq!(reported.receiver_charged_evaluations, Some(15));
+    assert_eq!(reported.total_charged_evaluations, Some(159));
+    assert_eq!(reported.producer_certified_connection, Some(true));
+    assert_eq!(reported.receiver_certified_connection, Some(true));
+    assert_eq!(reported.producer_failure, None);
+    assert_eq!(reported.receiver_failure, None);
+    assert_eq!(reported.novel_edge, Some(true));
+
+    let trace = run.json_lines(&RunManifest {
+        campaign: "jcc-2026".into(),
+        ensemble: "scientific-ensemble".into(),
+        sharing: true,
+        engine: anneal_core::compatibility::EngineDescriptor::default(),
+    });
+    assert!(trace.contains(&format!("\"ride_work\":{}", work.order.id)));
+    assert!(trace.contains("\"ride_method\":\"dimer\""));
+    assert!(trace.contains("\"ride_receiver_charged\":15"));
+    assert!(trace.contains("\"ride_novel_edge\":true"));
 }
 
 #[test]
