@@ -5,7 +5,7 @@ mod universal;
 
 pub use universal::{
     DescriptorGeometry, UNIVERSAL_DESCRIPTOR_SCHEMA, UNIVERSAL_DESCRIPTOR_VERSION,
-    universal_descriptor_space,
+    UNIVERSAL_LOCAL_ENVIRONMENT_RADIUS, universal_descriptor_space,
 };
 
 use crate::soap::{SoapSpec, jacobian_ace, jacobian_z, local_nu3_z, local_spectra_z};
@@ -382,23 +382,7 @@ impl DescriptorSpace {
         coordinates: ArrayView1<f64>,
         species: Option<&[u32]>,
     ) -> Result<DescriptorVector, DescriptorError> {
-        if coordinates.is_empty() || !coordinates.len().is_multiple_of(3) {
-            return Err(DescriptorError::CoordinateDimension {
-                actual: coordinates.len(),
-            });
-        }
-        if let Some(index) = coordinates.iter().position(|value| !value.is_finite()) {
-            return Err(DescriptorError::NonFiniteCoordinate { index });
-        }
-        let atoms = coordinates.len() / 3;
-        if let Some(species) = species
-            && species.len() != atoms
-        {
-            return Err(DescriptorError::SpeciesDimension {
-                expected: atoms,
-                actual: species.len(),
-            });
-        }
+        validate_coordinates(coordinates, species)?;
 
         if let Some(geometry) = self.geometry {
             return universal::describe(&self.schema, geometry, coordinates, species);
@@ -479,6 +463,24 @@ impl DescriptorSpace {
             values,
             blocks: metadata,
         })
+    }
+
+    /// Evaluate one fixed-dimensional invariant row for every atomic centre.
+    ///
+    /// Universal local rows use the same geometry, species sketch, ordered
+    /// blocks, and soft normalization as the global descriptor. Their final
+    /// norm is at most one, so one schema-bound Euclidean radius has stable
+    /// meaning for clusters, molecules, and surfaces.
+    pub fn describe_local(
+        &self,
+        coordinates: ArrayView1<f64>,
+        species: Option<&[u32]>,
+    ) -> Result<Array2<f64>, DescriptorError> {
+        validate_coordinates(coordinates, species)?;
+        let geometry = self
+            .geometry
+            .ok_or(DescriptorError::UniversalGeometryRequired)?;
+        universal::describe_local(&self.schema, geometry, coordinates, species)
     }
 
     /// Evaluate the Cartesian Jacobian of the normalized descriptor by central differences.
@@ -566,6 +568,30 @@ impl DescriptorSpace {
         }
         Ok(jacobian)
     }
+}
+
+fn validate_coordinates(
+    coordinates: ArrayView1<'_, f64>,
+    species: Option<&[u32]>,
+) -> Result<(), DescriptorError> {
+    if coordinates.is_empty() || !coordinates.len().is_multiple_of(3) {
+        return Err(DescriptorError::CoordinateDimension {
+            actual: coordinates.len(),
+        });
+    }
+    if let Some(index) = coordinates.iter().position(|value| !value.is_finite()) {
+        return Err(DescriptorError::NonFiniteCoordinate { index });
+    }
+    let atoms = coordinates.len() / 3;
+    if let Some(species) = species
+        && species.len() != atoms
+    {
+        return Err(DescriptorError::SpeciesDimension {
+            expected: atoms,
+            actual: species.len(),
+        });
+    }
+    Ok(())
 }
 
 fn mean_with_jacobian(
