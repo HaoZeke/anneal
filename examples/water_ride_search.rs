@@ -163,6 +163,34 @@ fn failure_name(outcome: &CatalogRideOutcome) -> Option<String> {
     }
 }
 
+fn stationary_evidence(
+    outcome: &CatalogRideOutcome,
+) -> (Option<f64>, Option<f64>, Vec<f64>, Vec<f64>) {
+    match outcome {
+        CatalogRideOutcome::Certified(connection) => (
+            Some(connection.saddle.energy),
+            Some(connection.saddle.gradient_norm),
+            connection
+                .endpoints
+                .iter()
+                .map(|endpoint| endpoint.energy)
+                .collect(),
+            connection
+                .endpoints
+                .iter()
+                .map(|endpoint| endpoint.gradient_norm)
+                .collect(),
+        ),
+        CatalogRideOutcome::Unresolved(evidence) => (
+            Some(evidence.saddle.energy),
+            Some(evidence.saddle.gradient_norm),
+            Vec::new(),
+            Vec::new(),
+        ),
+        CatalogRideOutcome::Failed(_) => (None, None, Vec::new(), Vec::new()),
+    }
+}
+
 fn minimum_pair_distance(coordinates: &[f64]) -> f64 {
     let atom_count = coordinates.len() / 3;
     (0..atom_count)
@@ -433,6 +461,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             );
             let producer_calls = report.charged_evaluations;
             let failure = failure_name(&report.outcome);
+            let (saddle_energy, saddle_gradient_norm, endpoint_energies, endpoint_gradient_norms) =
+                stationary_evidence(&report.outcome);
             let credit = client.report_ride(next_sequence(&mut event_sequence)?, report)?;
             if credit.total_charged_evaluations < producer_calls {
                 return Err(io::Error::other("coordinator ride credit lost producer calls").into());
@@ -483,6 +513,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     "certified": credit.certified_connection,
                     "novel_edge": credit.novel_edge,
                     "failure": failure,
+                    "saddle_energy": saddle_energy,
+                    "saddle_gradient_norm": saddle_gradient_norm,
+                    "endpoint_energies": endpoint_energies,
+                    "endpoint_gradient_norms": endpoint_gradient_norms,
                     "charged": charged,
                 })
             );
