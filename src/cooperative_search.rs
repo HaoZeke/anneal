@@ -172,6 +172,10 @@ mod run {
                 CatalogRideOutcome::Certified(_) => {
                     trace.producer_certified_connection = Some(true);
                 }
+                CatalogRideOutcome::Unresolved(evidence) => {
+                    trace.producer_certified_connection = Some(false);
+                    trace.producer_failure = Some(evidence.failure);
+                }
                 CatalogRideOutcome::Failed(failure) => {
                     trace.producer_certified_connection = Some(false);
                     trace.producer_failure = Some(*failure);

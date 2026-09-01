@@ -150,6 +150,7 @@ fn ride_config(
 fn failure_name(outcome: &CatalogRideOutcome) -> Option<String> {
     match outcome {
         CatalogRideOutcome::Certified(_) => None,
+        CatalogRideOutcome::Unresolved(evidence) => Some(format!("{:?}", evidence.failure)),
         CatalogRideOutcome::Failed(failure) => Some(format!("{failure:?}")),
     }
 }
