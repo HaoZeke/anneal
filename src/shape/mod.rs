@@ -577,6 +577,42 @@ mod tests {
         }
     }
 
+    #[test]
+    fn typed_match_absorbs_only_species_preserving_relabelling() {
+        let reference = generic12();
+        let species = [8_u32, 1, 1, 8, 1, 1, 8, 1, 1, 8, 1, 1];
+        let shift = 5usize;
+        let relabelled = relabel(reference.view(), shift);
+        let mut relabelled_species = [0_u32; 12];
+        for (atom, atomic_number) in species.into_iter().enumerate() {
+            relabelled_species[(atom + shift) % species.len()] = atomic_number;
+        }
+
+        let matched = match_shapes_typed(
+            reference.view(),
+            &species,
+            relabelled.view(),
+            &relabelled_species,
+            1.8,
+        )
+        .expect("species-preserving relabelling must be matchable");
+        assert!(matched.distance < 1e-9);
+
+        let mut exchanged = reference.clone();
+        for axis in 0..3 {
+            exchanged.swap(axis, 3 + axis);
+        }
+        assert!(
+            match_shapes(reference.view(), exchanged.view(), 1.8)
+                .unwrap()
+                .distance
+                < 1e-9
+        );
+        let typed = match_shapes_typed(reference.view(), &species, exchanged.view(), &species, 1.8)
+            .expect("equal species populations must produce a typed match");
+        assert!(typed.distance > 1e-3);
+    }
+
     /// A generic structure with no symmetry, where the canonical order is
     /// unique and relabelling is absorbed exactly.
     fn generic12() -> Array1<f64> {
