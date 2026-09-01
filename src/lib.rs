@@ -175,6 +175,8 @@ pub mod sampler;
 pub mod screen;
 /// SOAP power spectrum and Cartesian pullback through `∂p/∂R`.
 pub mod soap;
+/// Budgeted perturb--quench source generation for hybrid PES exploration.
+pub mod source_escape;
 pub mod spectral;
 pub mod structure;
 /// How a leftover chain uses the shared packing catalog.
