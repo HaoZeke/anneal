@@ -26,7 +26,7 @@ use super::{
 use crate::Catalog_capnp::catalog_request;
 use crate::catalog::{
     AdmissionOutcome, AdmissionRejection, Archive, AttractorStrength, BasinCatalog, BasinCensus,
-    BasinId, CHAMPION_RANK, CandidateRecord, CandidateValidator, Curiosity,
+    BasinId, CHAMPION_RANK, CandidateRecord, CandidateValidator, CensusObservation, Curiosity,
     DEFAULT_MIN_OCCUPIED_FAMILIES, FreshEvaluation, GoodTuringSample, INTERFACE_HORIZON,
     InterfaceSeat, MixingEvidence, PackingBook, PackingRole, QuenchStatus, REDUCTION_FACTOR,
     SystemSignature, ValidatedCandidate, ValidatorConfig, WalkRecord, euclidean_gradient_norm,
@@ -46,7 +46,8 @@ use crate::methods::feynman_kac::{
 use crate::methods::landscape_graph::LandscapeGraph;
 use crate::methods::neus_bridge::{BridgeString, EntryLists, WeightLedger};
 use crate::pes_exploration::{
-    PesExplorationConfig, PesSurface, RideMethod, stationary_index_cartesian,
+    ExactStructureWitness, PesExplorationConfig, PesSurface, RideMethod, StructureContext,
+    StructureView, stationary_index_cartesian,
 };
 use crate::region_assignment::{RegionCandidate, RegionUtility, diversity_constrained_assignment};
 use crate::ride_ledger::{EnvironmentBook, RideLedger, RideOutcome, RidePortfolio, RideSource};
@@ -54,6 +55,7 @@ use crate::soap::local_nu3_z;
 use crate::transition_graph::{AttractionRegionConfig, TransitionGraph, TransitionOutcome};
 
 type FreshEvaluator = dyn Fn(&[f64]) -> Result<FreshEvaluation, String> + Send + Sync;
+type StructuralWitness = dyn ExactStructureWitness + Send + Sync;
 
 /// Immutable identity and allowed replicas for one coordinator.
 #[derive(Clone)]
@@ -70,12 +72,14 @@ pub struct ServerConfig {
 #[derive(Clone)]
 struct ScientificConfig {
     signature: SystemSignature,
+    descriptor_space: DescriptorSpace,
     validator: ValidatorConfig,
     catalog_capacity: usize,
     census_radius: f64,
     total_charged_work: u64,
     attraction_regions: AttractionRegionConfig,
     evaluate: Arc<FreshEvaluator>,
+    exact_witness: Option<Arc<StructuralWitness>>,
 }
 
 impl ServerConfig {
@@ -174,6 +178,7 @@ impl ServerConfig {
             .map_err(|_| CatalogServerError::InvalidScientificConfiguration)?;
         self.scientific = Some(ScientificConfig {
             signature,
+            descriptor_space,
             validator,
             catalog_capacity,
             census_radius,
@@ -186,7 +191,20 @@ impl ServerConfig {
                 minimum_probes: 8,
             },
             evaluate: Arc::new(evaluate),
+            exact_witness: None,
         });
+        Ok(self)
+    }
+
+    /// Bind the symmetry-aware witness that makes final basin-identity decisions.
+    pub fn with_exact_structure_witness<W>(mut self, witness: W) -> Result<Self, CatalogServerError>
+    where
+        W: ExactStructureWitness + Send + Sync + 'static,
+    {
+        let Some(scientific) = self.scientific.as_mut() else {
+            return Err(CatalogServerError::InvalidScientificConfiguration);
+        };
+        scientific.exact_witness = Some(Arc::new(witness));
         Ok(self)
     }
 
@@ -270,6 +288,9 @@ struct CertifiedRideSaddle {
 #[derive(Clone)]
 struct ScientificState {
     signature: SystemSignature,
+    descriptor_space: DescriptorSpace,
+    structure_context: StructureContext,
+    exact_witness: Arc<StructuralWitness>,
     validator: CandidateValidator,
     census: BasinCensus,
     catalog: BasinCatalog,
@@ -380,8 +401,19 @@ impl CoordinatorState {
             .scientific
             .as_ref()
             .map(|scientific| {
+                let exact_witness = scientific
+                    .exact_witness
+                    .as_ref()
+                    .ok_or(CatalogServerError::InvalidScientificConfiguration)?;
                 Ok::<ScientificState, CatalogServerError>(ScientificState {
                     signature: scientific.signature.clone(),
+                    descriptor_space: scientific.descriptor_space.clone(),
+                    structure_context: StructureContext::new(
+                        Some(scientific.signature.atomic_numbers.clone()),
+                        scientific.descriptor_space.geometry(),
+                        Some(format!("{:02x?}", scientific.signature.digest())),
+                    ),
+                    exact_witness: Arc::clone(exact_witness),
                     validator: CandidateValidator::new(
                         scientific.signature.clone(),
                         scientific.validator.clone(),
@@ -736,7 +768,7 @@ fn precompute_validation(
     identity: &CatalogIdentity,
     candidate: &CatalogCandidate,
 ) -> Result<ValidatedCandidate, ()> {
-    let (signature, validator, evaluate) = {
+    let (signature, descriptor_space, validator, evaluate) = {
         let locked = match state.lock() {
             Ok(state) => state,
             Err(poisoned) => poisoned.into_inner(),
@@ -744,12 +776,14 @@ fn precompute_validation(
         let scientific = locked.scientific.as_ref().ok_or(())?;
         (
             scientific.signature.clone(),
+            scientific.descriptor_space.clone(),
             scientific.validator.clone(),
             Arc::clone(&scientific.evaluate),
         )
     };
     validate_candidate(
         &signature,
+        &descriptor_space,
         &validator,
         evaluate.as_ref(),
         identity,
@@ -1583,8 +1617,7 @@ fn apply_request(
                         ProtocolRejection::ValidationRejected,
                     );
                 };
-                let Ok(observation) = scientific.census.observe(&validated.candidate.descriptor)
-                else {
+                let Ok(observation) = observe_exact_basin(scientific, &validated) else {
                     return rejected(
                         state,
                         request.event_sequence,
@@ -1689,8 +1722,7 @@ fn apply_request(
                         ProtocolRejection::ValidationRejected,
                     );
                 };
-                let Ok(observation) = scientific.census.observe(&validated.candidate.descriptor)
-                else {
+                let Ok(observation) = observe_exact_basin(scientific, &validated) else {
                     return rejected(
                         state,
                         request.event_sequence,
@@ -1868,9 +1900,7 @@ fn apply_request(
                             ProtocolRejection::ValidationRejected,
                         );
                     };
-                    let Ok(observation) =
-                        scientific.census.observe(&validated.candidate.descriptor)
-                    else {
+                    let Ok(observation) = observe_exact_basin(scientific, &validated) else {
                         return rejected(
                             state,
                             request.event_sequence,
@@ -2248,6 +2278,7 @@ fn resolve_validation(
     precomputed.take().unwrap_or_else(|| {
         validate_candidate(
             &scientific.signature,
+            &scientific.descriptor_space,
             &scientific.validator,
             scientific.evaluate.as_ref(),
             identity,
@@ -2258,6 +2289,7 @@ fn resolve_validation(
 
 fn validate_candidate<F>(
     signature: &SystemSignature,
+    descriptor_space: &DescriptorSpace,
     validator: &CandidateValidator,
     evaluate: &F,
     identity: &CatalogIdentity,
@@ -2296,9 +2328,23 @@ where
         event_sequence: candidate.event_sequence,
         seed: candidate.seed,
     };
-    validator
+    let mut validated = validator
         .validate(&record, |coordinates| evaluate(coordinates))
-        .map_err(|_| ())
+        .map_err(|_| ())?;
+    let descriptor = descriptor_space
+        .describe(
+            ArrayView1::from(&validated.candidate.coordinates),
+            Some(&signature.atomic_numbers),
+        )
+        .map_err(|_| ())?;
+    if descriptor.values().len() != validated.candidate.descriptor.len()
+        || descriptor.schema_version() != signature.descriptor.version
+    {
+        return Err(());
+    }
+    validated.candidate.descriptor = descriptor.values().to_vec();
+    validated.candidate.descriptor_schema_version = descriptor.schema_version();
+    Ok(validated)
 }
 
 struct ReceivingRideSurface<'a, F: ?Sized>(&'a F);
@@ -2328,6 +2374,7 @@ fn certify_ride_connection(
     connection: &CatalogRideConnection,
 ) -> (RideOutcome, u64) {
     let signature = scientific.signature.clone();
+    let descriptor_space = scientific.descriptor_space.clone();
     let validator = scientific.validator.clone();
     let evaluate = Arc::clone(&scientific.evaluate);
     let receiving_evaluations = AtomicU64::new(0);
@@ -2338,6 +2385,7 @@ fn certify_ride_connection(
     let result = (|| -> Result<RideOutcome, crate::ride_ledger::RideFailure> {
         let saddle = validate_candidate(
             &signature,
+            &descriptor_space,
             &validator,
             &counted_evaluate,
             identity,
@@ -2347,6 +2395,7 @@ fn certify_ride_connection(
         let endpoints = [
             validate_candidate(
                 &signature,
+                &descriptor_space,
                 &validator,
                 &counted_evaluate,
                 identity,
@@ -2355,6 +2404,7 @@ fn certify_ride_connection(
             .map_err(|_| crate::ride_ledger::RideFailure::Surface)?,
             validate_candidate(
                 &signature,
+                &descriptor_space,
                 &validator,
                 &counted_evaluate,
                 identity,
@@ -2396,9 +2446,7 @@ fn certify_ride_connection(
 
         let mut endpoint_ids = [0_u64; 2];
         for (slot, validated) in endpoints.into_iter().enumerate() {
-            let observation = staged
-                .census
-                .observe(&validated.candidate.descriptor)
+            let observation = observe_exact_basin(&mut staged, &validated)
                 .map_err(|_| crate::ride_ledger::RideFailure::Surface)?;
             let canonical = candidate_from_validated(&validated, Some(observation.basin_id));
             observe_ride_source(&mut staged, &canonical)
@@ -2416,6 +2464,54 @@ fn certify_ride_connection(
     })();
     let charged = receiving_evaluations.load(Ordering::Relaxed);
     (result.unwrap_or_else(RideOutcome::Failed), charged)
+}
+
+fn observe_exact_basin(
+    scientific: &mut ScientificState,
+    validated: &ValidatedCandidate,
+) -> Result<CensusObservation, ()> {
+    let assigned = {
+        let mut representatives = scientific
+            .ride_candidates
+            .iter()
+            .map(|(&basin, stored)| {
+                let distance_squared = stored
+                    .descriptor
+                    .iter()
+                    .zip(&validated.candidate.descriptor)
+                    .map(|(left, right)| {
+                        let delta = left - right;
+                        delta * delta
+                    })
+                    .sum::<f64>();
+                (basin, distance_squared, stored)
+            })
+            .collect::<Vec<_>>();
+        representatives.sort_by(|left, right| {
+            left.1
+                .total_cmp(&right.1)
+                .then_with(|| left.0.cmp(&right.0))
+        });
+        representatives.into_iter().find_map(|(basin, _, stored)| {
+            scientific
+                .exact_witness
+                .equivalent_structures(
+                    StructureView {
+                        coordinates: ArrayView1::from(&stored.coordinates),
+                        context: &scientific.structure_context,
+                    },
+                    StructureView {
+                        coordinates: ArrayView1::from(&validated.candidate.coordinates),
+                        context: &scientific.structure_context,
+                    },
+                )
+                .then_some(BasinId::from_raw(basin))
+        })
+    };
+    scientific
+        .census
+        .observe_assigned(&validated.candidate.descriptor, assigned)
+        .map_err(|_| ())
 }
 
 fn candidate_from_validated(

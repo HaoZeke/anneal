@@ -106,6 +106,12 @@ pub enum CensusError {
         /// Index of the first invalid value.
         index: usize,
     },
+    /// An exact-identity assignment names no census entry.
+    #[error("assigned basin {basin} is not present in the census")]
+    UnknownBasin {
+        /// Canonical integer identifier supplied by the caller.
+        basin: u64,
+    },
     /// A visit or identifier counter cannot be represented by `u64`.
     #[error("census counter overflow")]
     CounterOverflow,
@@ -141,12 +147,48 @@ impl BasinCensus {
     /// Assign one descriptor to its nearest existing medoid within the radius.
     pub fn observe(&mut self, descriptor: &[f64]) -> Result<CensusObservation, CensusError> {
         self.validate_descriptor(descriptor)?;
+        let basin = self
+            .nearest_within_radius(descriptor)
+            .map(|index| self.entries[index].id);
+        self.observe_validated_assignment(descriptor, basin)
+    }
+
+    /// Record an observation under an identity assignment made by an exact witness.
+    ///
+    /// `Some` increments that immutable basin irrespective of descriptor
+    /// distance. `None` opens a new basin. The descriptor remains the geometry
+    /// used for retrieval and coverage, while the caller owns structural
+    /// identity.
+    pub fn observe_assigned(
+        &mut self,
+        descriptor: &[f64],
+        basin: Option<BasinId>,
+    ) -> Result<CensusObservation, CensusError> {
+        self.validate_descriptor(descriptor)?;
+        if let Some(basin) = basin
+            && self.entry(basin).is_none()
+        {
+            return Err(CensusError::UnknownBasin {
+                basin: basin.as_raw(),
+            });
+        }
+        self.observe_validated_assignment(descriptor, basin)
+    }
+
+    fn observe_validated_assignment(
+        &mut self,
+        descriptor: &[f64],
+        basin: Option<BasinId>,
+    ) -> Result<CensusObservation, CensusError> {
         let next_total = self
             .total_visits
             .checked_add(1)
             .ok_or(CensusError::CounterOverflow)?;
 
-        if let Some(index) = self.nearest_within_radius(descriptor) {
+        if let Some(basin) = basin {
+            let index = usize::try_from(basin.as_raw()).map_err(|_| CensusError::UnknownBasin {
+                basin: basin.as_raw(),
+            })?;
             let next_basin_visits = self.entries[index]
                 .visits
                 .checked_add(1)
@@ -154,7 +196,7 @@ impl BasinCensus {
             self.entries[index].visits = next_basin_visits;
             self.total_visits = next_total;
             return Ok(CensusObservation {
-                basin_id: self.entries[index].id,
+                basin_id: basin,
                 created: false,
                 basin_visits: next_basin_visits,
                 total_visits: next_total,
