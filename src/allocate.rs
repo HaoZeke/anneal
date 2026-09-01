@@ -190,6 +190,102 @@ impl FlooredThompson {
     }
 }
 
+/// Cost-aware Thompson allocation over mechanisms that discover discrete
+/// minima, saddles, or connections.
+///
+/// Each arm carries the conjugate Gamma posterior for a Poisson discovery
+/// process whose exposure is charged PES evaluations. A Thompson draw is
+/// therefore a discovery rate per unit of potential work, rather than a
+/// success probability per attempt. This keeps mechanisms with very different
+/// internal costs comparable under one matched evaluation budget.
+#[derive(Debug, Clone)]
+pub struct ChargedDiscoveryAllocator {
+    alpha: Vec<f64>,
+    beta: Vec<f64>,
+    pulls: Vec<usize>,
+    t: usize,
+    /// Discount applied to accumulated evidence after each observation.
+    pub discount: f64,
+    /// Scale of the decaying uniform exploration floor.
+    pub floor_scale: f64,
+}
+
+impl ChargedDiscoveryAllocator {
+    /// Creates an allocator over `n_arms` discovery mechanisms.
+    pub fn new(n_arms: usize) -> Self {
+        assert!(n_arms > 0, "an allocator needs at least one arm");
+        Self {
+            alpha: vec![1.0; n_arms],
+            beta: vec![1.0; n_arms],
+            pulls: vec![0; n_arms],
+            t: 0,
+            discount: 0.995,
+            floor_scale: 1.0,
+        }
+    }
+
+    /// Selects a mechanism by its posterior discovery rate.
+    ///
+    /// Every mechanism receives one measured exposure before posterior
+    /// competition begins. The uniform floor then decays as `1/sqrt(t)` so a
+    /// run cannot permanently suppress a mechanism on sparse early evidence.
+    pub fn select<R: Rng + ?Sized>(&mut self, rng: &mut R) -> usize {
+        self.t += 1;
+        if let Some(unmeasured) = self.pulls.iter().position(|&pulls| pulls == 0) {
+            return unmeasured;
+        }
+        let floor = (self.floor_scale / (self.t as f64).sqrt()).min(0.5);
+        if rng.random::<f64>() < floor {
+            return rng.random_range(0..self.alpha.len());
+        }
+        let mut best = 0usize;
+        let mut best_rate = f64::NEG_INFINITY;
+        for arm in 0..self.alpha.len() {
+            let rate = sample_gamma(self.alpha[arm], rng) / self.beta[arm];
+            if rate > best_rate {
+                best_rate = rate;
+                best = arm;
+            }
+        }
+        best
+    }
+
+    /// Records distinct discoveries and charged PES exposure for one arm.
+    ///
+    /// A zero-cost observation carries no rate information and is ignored.
+    pub fn update(&mut self, arm: usize, discoveries: u32, charged: u64) {
+        assert!(arm < self.alpha.len(), "discovery arm is out of range");
+        if charged == 0 {
+            return;
+        }
+        assert!(
+            self.discount > 0.0 && self.discount <= 1.0,
+            "discount must lie in (0, 1]"
+        );
+        for index in 0..self.alpha.len() {
+            self.alpha[index] = 1.0 + (self.alpha[index] - 1.0) * self.discount;
+            self.beta[index] = 1.0 + (self.beta[index] - 1.0) * self.discount;
+        }
+        self.alpha[arm] += f64::from(discoveries);
+        self.beta[arm] += charged as f64;
+        self.pulls[arm] += 1;
+    }
+
+    /// Posterior mean discoveries per charged PES evaluation for each arm.
+    pub fn rates(&self) -> Vec<f64> {
+        self.alpha
+            .iter()
+            .zip(&self.beta)
+            .map(|(alpha, beta)| alpha / beta)
+            .collect()
+    }
+
+    /// Measured exposures assigned to each arm.
+    pub fn pulls(&self) -> &[usize] {
+        &self.pulls
+    }
+}
+
 /// A Beta draw from two Gamma draws, since the crate carries no Beta sampler.
 /// A Beta draw, public for posteriors held outside this module.
 pub fn beta_draw<R: Rng + ?Sized>(a: f64, b: f64, rng: &mut R) -> f64 {
