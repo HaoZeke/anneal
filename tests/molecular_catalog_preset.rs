@@ -13,11 +13,21 @@ fn engine_digest(byte: u8) -> [u8; 32] {
 }
 
 #[test]
-fn hexamer_signature_records_gfn2_kind_and_leftover_dim() {
+fn hexamer_signature_records_gfn2_kind_and_universal_dim() {
     let species = water_species(WATER_HEXAMER_MOLECULES).unwrap();
+    let coordinates = reference_coordinates(WATER_HEXAMER_MOLECULES).unwrap();
     let leftover_dim = leftover_descriptor_dim(&species).unwrap();
     let signature = system_signature(WATER_HEXAMER_MOLECULES, engine_digest(0x11)).unwrap();
     let spec = leftover_spec(&species).unwrap();
+    let descriptor_dim = descriptor_space(&species)
+        .unwrap()
+        .describe(
+            ndarray::ArrayView1::from(coordinates.as_slice()),
+            Some(&species),
+        )
+        .unwrap()
+        .values()
+        .len();
 
     assert_eq!(signature.engine.kind, ENGINE_KIND);
     assert_eq!(signature.engine.kind, "gfn2-xtb-rgpot-v1");
@@ -29,10 +39,12 @@ fn hexamer_signature_records_gfn2_kind_and_leftover_dim() {
     assert_eq!(signature.coordinate_dim, 54);
     assert_eq!(signature.atomic_numbers, species);
     assert_eq!(signature.descriptor.schema, DESCRIPTOR_SCHEMA);
+    assert_eq!(signature.descriptor.schema, UNIVERSAL_DESCRIPTOR_SCHEMA);
+    assert_eq!(signature.descriptor.version, UNIVERSAL_DESCRIPTOR_VERSION);
     assert_eq!(signature.descriptor.species_channels, vec![1, 8]);
     assert_eq!(
-        signature.descriptor.hyperparameters.get("leftover_dim"),
-        Some(&leftover_dim.to_string())
+        signature.descriptor.hyperparameters.get("descriptor_dim"),
+        Some(&descriptor_dim.to_string())
     );
     assert_eq!(leftover_dim, species.len() * spec.feat_dim(Some(&species)));
     let leftover_spec = SoapSpec {
@@ -97,12 +109,20 @@ fn larger_water_signatures_scale_without_changing_engine_kind() {
 }
 
 #[test]
-fn validator_uses_leftover_dimension() {
+fn validator_uses_universal_dimension() {
     let species = water_species(2).unwrap();
     let coordinates = reference_coordinates(2).unwrap();
-    let leftover_dim = leftover_descriptor_dim(&species).unwrap();
-    let validator = validator_config(&coordinates, leftover_dim).unwrap();
-    assert_eq!(validator.descriptor_dim, leftover_dim);
+    let descriptor_dim = descriptor_space(&species)
+        .unwrap()
+        .describe(
+            ndarray::ArrayView1::from(coordinates.as_slice()),
+            Some(&species),
+        )
+        .unwrap()
+        .values()
+        .len();
+    let validator = validator_config(&coordinates, descriptor_dim).unwrap();
+    assert_eq!(validator.descriptor_dim, descriptor_dim);
     assert_eq!(validator.reference_coordinates, coordinates);
 }
 
@@ -117,13 +137,12 @@ fn fresh_evaluation_does_not_invent_an_energy() {
 }
 
 #[test]
-fn leftover_space_is_the_catalog_descriptor() {
+fn leftover_space_remains_a_distinct_proposal_feature() {
     let species = water_species(WATER_HEXAMER_MOLECULES).unwrap();
     let space = leftover_space(&species).unwrap();
     let signature = system_signature(WATER_HEXAMER_MOLECULES, engine_digest(0x11)).unwrap();
-    assert_eq!(space.schema().name(), DESCRIPTOR_SCHEMA);
-    assert_eq!(space.schema().name(), signature.descriptor.schema);
-    assert_eq!(space.schema().version(), signature.descriptor.version);
+    assert_ne!(space.schema().name(), signature.descriptor.schema);
+    assert_ne!(space.schema().name(), UNIVERSAL_DESCRIPTOR_SCHEMA);
     assert_eq!(
         engine_binary_digest(&[0x11; 8]),
         engine_binary_digest(&[0x11; 8])
@@ -174,20 +193,28 @@ fn water_catalog_uses_the_universal_schema_without_sharing_system_identity() {
 
 #[cfg(feature = "bank-rpc")]
 #[test]
-fn leftover_space_builds_a_gfn2_water_scientific_config() {
+fn universal_space_builds_a_gfn2_water_scientific_config() {
     use anneal_core::catalog_rpc::server::ServerConfig;
 
     let species = water_species(2).unwrap();
     let reference = reference_coordinates(2).unwrap();
-    let leftover_dim = leftover_descriptor_dim(&species).unwrap();
+    let space = descriptor_space(&species).unwrap();
+    let descriptor_dim = space
+        .describe(
+            ndarray::ArrayView1::from(reference.as_slice()),
+            Some(&species),
+        )
+        .unwrap()
+        .values()
+        .len();
     let signature = system_signature(2, engine_digest(0x11)).unwrap();
     let digest = signature.digest();
     let config = ServerConfig::new("gfn2-water", "hexamer-test", digest, [0, 1, 2, 3])
         .unwrap()
         .with_scientific_state(
             signature,
-            leftover_space(&species).unwrap(),
-            validator_config(&reference, leftover_dim).unwrap(),
+            space,
+            validator_config(&reference, descriptor_dim).unwrap(),
             8,
             0.05,
             400,
