@@ -598,10 +598,16 @@ impl RideLedger {
     }
 
     fn acquisition(&self, arm: &RideArm, total: u64) -> f64 {
-        let row = match self.evidence.get(arm) {
-            Some(row) => row,
+        let (posterior_mean, local_completed) = match self.evidence.get(arm) {
+            Some(row) => (
+                (row.novel_edges as f64 + 0.5) / (row.completed as f64 + 1.0),
+                row.completed,
+            ),
             None => match self.method_evidence.get(&arm.method) {
-                Some(row) => row,
+                Some(row) => (
+                    (row.novel_edges as f64 + 0.5) / (row.completed as f64 + 1.0),
+                    0,
+                ),
                 None if !self
                     .active_arms
                     .iter()
@@ -609,14 +615,11 @@ impl RideLedger {
                 {
                     return f64::INFINITY;
                 }
-                None => {
-                    return 0.5 + (2.0 * ((total as f64) + 2.0).ln()).sqrt();
-                }
+                None => (0.5, 0),
             },
         };
-        let completed = row.completed as f64;
-        let posterior_mean = (row.novel_edges as f64 + 0.5) / (completed + 1.0);
-        let exploration = (2.0 * ((total as f64) + 2.0).ln() / (completed + 1.0)).sqrt();
+        let exploration =
+            (2.0 * ((total as f64) + 2.0).ln() / (local_completed as f64 + 1.0)).sqrt();
         posterior_mean + exploration
     }
 
