@@ -1878,7 +1878,7 @@ fn four_replica_trace_covers_policy_ingress_refresh_and_fallback() {
         interface_threshold: 0.0,
         occupied_family_count: 0,
         packing_saturated: false,
-        leftover_dwell: false,
+        leftover_dwell: true,
         ei_exhausted: false,
         min_families: 1,
         on_published_prize: false,
