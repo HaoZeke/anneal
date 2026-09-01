@@ -273,10 +273,8 @@ fn quench_certification_accepts_a_measured_force_floor_inside_the_norm_gate() {
             .unwrap();
 
     assert!(minimum.max_gradient > 1e-6);
-    let (_, gradient) = NumericalForceFloor
-        .evaluate(minimum.coordinates.view())
-        .unwrap();
-    assert!(gradient.dot(&gradient).sqrt() < 1e-5);
+    assert_eq!(minimum.gradient, Array1::from_elem(3, 2e-6));
+    assert!(minimum.gradient.dot(&minimum.gradient).sqrt() < 1e-5);
 }
 
 #[test]
