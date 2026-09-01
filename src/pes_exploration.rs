@@ -414,9 +414,9 @@ pub struct PesExplorationConfig {
     pub maximum_move: f64,
     /// IRC mass-weighted outer radius.
     pub irc_step: f64,
-    /// Maximum geometric branch shells used to resolve collapsed endpoints.
+    /// Maximum branch retries used to resolve collapsed endpoints.
     pub branch_attempts: usize,
-    /// Multiplicative branch-shell growth after both sides reach one exact basin.
+    /// N-D branch-shell growth and reciprocal molecular IRC refinement factor.
     pub branch_growth: f64,
     /// IRC force threshold before endpoint quenching.
     pub irc_force_tolerance: f64,
@@ -1850,20 +1850,14 @@ where
     unreachable!("a positive branch-shell count returns inside the loop")
 }
 
-fn mass_weighted_source_branch_step(
-    origin: ArrayView1<f64>,
-    saddle: ArrayView1<f64>,
-    masses: ArrayView1<f64>,
-    configured_step: f64,
-) -> f64 {
-    let source_distance = origin
-        .iter()
-        .zip(saddle)
-        .enumerate()
-        .map(|(coordinate, (origin, saddle))| masses[coordinate / 3] * (saddle - origin).powi(2))
-        .sum::<f64>()
-        .sqrt();
-    configured_step.max(ART_BRANCH_FRACTION * source_distance)
+fn refine_irc_step(step: f64, config: &PesExplorationConfig) -> Result<f64, PesExplorationError> {
+    let next = step / config.branch_growth;
+    if !next.is_finite() || next <= 0.0 {
+        return Err(PesExplorationError::InvalidEvaluation(
+            "an invalid refined IRC radius",
+        ));
+    }
+    Ok(next)
 }
 
 fn directional_curvature<S: PesSurface + ?Sized>(
@@ -2258,7 +2252,7 @@ where
             ));
         }
         origin = resolved_origin;
-        step = grow_branch_step(step, config)?;
+        step = refine_irc_step(step, config)?;
     }
     unreachable!("a positive branch-shell count returns inside the loop")
 }
@@ -2614,12 +2608,7 @@ where
         });
     }
     let saddle_mode = index.lowest_mode;
-    let branch_step = mass_weighted_source_branch_step(
-        origin_minimum.coordinates.view(),
-        saddle_coordinates.view(),
-        masses,
-        config.irc_step,
-    );
+    let branch_step = config.irc_step;
 
     let (origin_minimum, forward, reverse, irc_at_minimum) = roll_branch_shells(
         surface,
