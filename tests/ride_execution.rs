@@ -106,6 +106,8 @@ fn exploration_config() -> PesExplorationConfig {
         hessian_step: 1e-5,
         maximum_move: 0.1,
         irc_step: 0.05,
+        branch_attempts: 4,
+        branch_growth: 2.0,
         irc_force_tolerance: 0.05,
         refine_with_prfo: false,
     }

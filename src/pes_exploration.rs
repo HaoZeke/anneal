@@ -329,6 +329,10 @@ pub struct PesExplorationConfig {
     pub maximum_move: f64,
     /// IRC mass-weighted outer radius.
     pub irc_step: f64,
+    /// Maximum geometric branch shells used to resolve collapsed endpoints.
+    pub branch_attempts: usize,
+    /// Multiplicative branch-shell growth after both sides reach one exact basin.
+    pub branch_growth: f64,
     /// IRC force threshold before endpoint quenching.
     pub irc_force_tolerance: f64,
     /// Refine the lowest-mode candidate with Sella order-1 P-RFO.
@@ -353,6 +357,8 @@ impl Default for PesExplorationConfig {
             hessian_step: 1e-4,
             maximum_move: 0.2,
             irc_step: 0.1,
+            branch_attempts: 4,
+            branch_growth: 2.0,
             irc_force_tolerance: 0.05,
             refine_with_prfo: true,
         }
@@ -367,6 +373,7 @@ impl PesExplorationConfig {
             || self.prfo_steps == 0
             || self.activation_attempts == 0
             || self.activation_relaxation_steps == 0
+            || self.branch_attempts == 0
         {
             return Err(PesExplorationError::InvalidConfig(
                 "iteration limits must be positive",
@@ -380,6 +387,7 @@ impl PesExplorationConfig {
             ("Hessian finite-difference step", self.hessian_step),
             ("maximum move", self.maximum_move),
             ("IRC step", self.irc_step),
+            ("branch growth", self.branch_growth),
             ("IRC force tolerance", self.irc_force_tolerance),
         ] {
             if !value.is_finite() || value <= 0.0 {
@@ -389,6 +397,11 @@ impl PesExplorationConfig {
         if self.activation_growth <= 1.0 {
             return Err(PesExplorationError::InvalidConfig(
                 "activation growth must exceed one",
+            ));
+        }
+        if self.branch_growth <= 1.0 {
+            return Err(PesExplorationError::InvalidConfig(
+                "branch growth must exceed one",
             ));
         }
         if !self.negative_curvature_tolerance.is_finite() || self.negative_curvature_tolerance < 0.0
@@ -1123,6 +1136,7 @@ fn quench_recognizing<W, S>(
     start: ArrayView1<f64>,
     known: &Quenched,
     witness: &W,
+    context: Option<&StructureContext>,
     steps: usize,
     gradient_tolerance: f64,
 ) -> Result<Quenched, PesExplorationError>
@@ -1130,7 +1144,7 @@ where
     S: PesSurface + ?Sized,
     W: ExactStructureWitness + ?Sized,
 {
-    if witness.equivalent(known.coordinates.view(), start) {
+    if equivalent_with_context(witness, known.coordinates.view(), start, context) {
         return Ok(known.clone());
     }
     let mut optimizer = Lbfgs::default();
@@ -1150,8 +1164,7 @@ where
             }
         },
         |_, _, trial| {
-            witness
-                .equivalent(known.coordinates.view(), trial)
+            equivalent_with_context(witness, known.coordinates.view(), trial, context)
                 .then(|| (known.energy, known.coordinates.clone()))
         },
     );
@@ -1173,6 +1186,29 @@ where
     })
 }
 
+fn equivalent_with_context<W: ExactStructureWitness + ?Sized>(
+    witness: &W,
+    left: ArrayView1<f64>,
+    right: ArrayView1<f64>,
+    context: Option<&StructureContext>,
+) -> bool {
+    context.map_or_else(
+        || witness.equivalent(left, right),
+        |context| {
+            witness.equivalent_structures(
+                StructureView {
+                    coordinates: left,
+                    context,
+                },
+                StructureView {
+                    coordinates: right,
+                    context,
+                },
+            )
+        },
+    )
+}
+
 fn reconcile_source_connection<W, S>(
     surface: &S,
     origin: Quenched,
@@ -1180,14 +1216,23 @@ fn reconcile_source_connection<W, S>(
     negative: Quenched,
     config: &PesExplorationConfig,
     witness: &W,
+    context: Option<&StructureContext>,
 ) -> Result<(Quenched, Quenched, Quenched), PesExplorationError>
 where
     S: PesSurface + ?Sized,
     W: ExactStructureWitness + ?Sized,
 {
-    if witness.equivalent(origin.coordinates.view(), positive.coordinates.view())
-        || witness.equivalent(origin.coordinates.view(), negative.coordinates.view())
-    {
+    if equivalent_with_context(
+        witness,
+        origin.coordinates.view(),
+        positive.coordinates.view(),
+        context,
+    ) || equivalent_with_context(
+        witness,
+        origin.coordinates.view(),
+        negative.coordinates.view(),
+        context,
+    ) {
         return Ok((origin, positive, negative));
     }
 
@@ -1204,6 +1249,7 @@ where
         positive.coordinates.view(),
         &origin,
         witness,
+        context,
         config.quench_steps,
         identity_tolerance,
     )?;
@@ -1212,6 +1258,7 @@ where
         negative.coordinates.view(),
         &origin,
         witness,
+        context,
         config.quench_steps,
         identity_tolerance,
     )?;
@@ -1267,6 +1314,49 @@ fn source_scaled_branch_step(
         .sum::<f64>()
         .sqrt();
     configured_step.max(ART_BRANCH_FRACTION * source_distance)
+}
+
+fn grow_branch_step(step: f64, config: &PesExplorationConfig) -> Result<f64, PesExplorationError> {
+    let next = step * config.branch_growth;
+    if !next.is_finite() {
+        return Err(PesExplorationError::InvalidEvaluation(
+            "a nonfinite downhill branch radius",
+        ));
+    }
+    Ok(next)
+}
+
+fn quench_branch_shells<S, W>(
+    surface: &S,
+    mut origin: Quenched,
+    saddle: ArrayView1<f64>,
+    mode: ArrayView1<f64>,
+    initial_step: f64,
+    config: &PesExplorationConfig,
+    witness: &W,
+) -> Result<(Quenched, Quenched, Quenched), PesExplorationError>
+where
+    S: PesSurface + ?Sized,
+    W: ExactStructureWitness + ?Sized,
+{
+    let mut step = initial_step;
+    for shell in 0..config.branch_attempts {
+        let positive_start = &saddle + &(&mode * step);
+        let negative_start = &saddle - &(&mode * step);
+        let positive = quench(surface, positive_start.view(), config)?;
+        let negative = quench(surface, negative_start.view(), config)?;
+        let (resolved_origin, positive, negative) = reconcile_source_connection(
+            surface, origin, positive, negative, config, witness, None,
+        )?;
+        let collapsed =
+            witness.equivalent(positive.coordinates.view(), negative.coordinates.view());
+        if !collapsed || shell + 1 == config.branch_attempts {
+            return Ok((resolved_origin, positive, negative));
+        }
+        origin = resolved_origin;
+        step = grow_branch_step(step, config)?;
+    }
+    unreachable!("a positive branch-shell count returns inside the loop")
 }
 
 fn mass_weighted_source_branch_step(
@@ -1548,6 +1638,71 @@ fn roll_branch<S: PesSurface>(
     Ok((quench(surface, endpoint.view(), config)?, report.at_minimum))
 }
 
+#[allow(clippy::too_many_arguments)]
+fn roll_branch_shells<S, W>(
+    surface: &S,
+    mut origin: Quenched,
+    saddle: &Array1<f64>,
+    masses: &Array1<f64>,
+    mode: &Array1<f64>,
+    initial_step: f64,
+    config: &PesExplorationConfig,
+    context: &StructureContext,
+    witness: &W,
+) -> Result<(Quenched, Quenched, Quenched, [bool; 2]), PesExplorationError>
+where
+    S: PesSurface,
+    W: ExactStructureWitness + ?Sized,
+{
+    let mut step = initial_step;
+    for shell in 0..config.branch_attempts {
+        let (forward, forward_irc) = roll_branch(
+            surface,
+            saddle,
+            masses,
+            mode,
+            IrcDirection::Forward,
+            step,
+            config,
+        )?;
+        let (reverse, reverse_irc) = roll_branch(
+            surface,
+            saddle,
+            masses,
+            mode,
+            IrcDirection::Reverse,
+            step,
+            config,
+        )?;
+        let (resolved_origin, forward, reverse) = reconcile_source_connection(
+            surface,
+            origin,
+            forward,
+            reverse,
+            config,
+            witness,
+            Some(context),
+        )?;
+        let collapsed = equivalent_with_context(
+            witness,
+            forward.coordinates.view(),
+            reverse.coordinates.view(),
+            Some(context),
+        );
+        if !collapsed || shell + 1 == config.branch_attempts {
+            return Ok((
+                resolved_origin,
+                forward,
+                reverse,
+                [forward_irc, reverse_irc],
+            ));
+        }
+        origin = resolved_origin;
+        step = grow_branch_step(step, config)?;
+    }
+    unreachable!("a positive branch-shell count returns inside the loop")
+}
+
 /// Quench a point, ride one supplied mode to an index-one saddle, and quench
 /// both downhill branches on an arbitrary-dimensional surface.
 ///
@@ -1637,12 +1792,15 @@ where
         saddle_coordinates.view(),
         config.irc_step,
     );
-    let positive_start = &saddle_coordinates + &(&lowest_mode * branch_step);
-    let negative_start = &saddle_coordinates - &(&lowest_mode * branch_step);
-    let positive = quench(surface, positive_start.view(), config)?;
-    let negative = quench(surface, negative_start.view(), config)?;
-    let (origin_minimum, positive, negative) =
-        reconcile_source_connection(surface, origin_minimum, positive, negative, config, witness)?;
+    let (origin_minimum, positive, negative) = quench_branch_shells(
+        surface,
+        origin_minimum,
+        saddle_coordinates.view(),
+        lowest_mode.view(),
+        branch_step,
+        config,
+        witness,
+    )?;
     let origin = network.admit_minimum(origin_minimum, witness);
     let positive_id = network.admit_minimum(positive, witness);
     let negative_id = network.admit_minimum(negative, witness);
@@ -1885,26 +2043,17 @@ where
         config.irc_step,
     );
 
-    let (forward, forward_irc) = roll_branch(
+    let (origin_minimum, forward, reverse, irc_at_minimum) = roll_branch_shells(
         surface,
+        origin_minimum,
         &saddle_coordinates,
         &masses.to_owned(),
         &saddle_mode,
-        IrcDirection::Forward,
         branch_step,
         config,
+        &context,
+        witness,
     )?;
-    let (reverse, reverse_irc) = roll_branch(
-        surface,
-        &saddle_coordinates,
-        &masses.to_owned(),
-        &saddle_mode,
-        IrcDirection::Reverse,
-        branch_step,
-        config,
-    )?;
-    let (origin_minimum, forward, reverse) =
-        reconcile_source_connection(surface, origin_minimum, forward, reverse, config, witness)?;
     let origin_descriptor = descriptor(descriptor_space, &origin_minimum, context.species())?;
     let forward_descriptor = descriptor(descriptor_space, &forward, context.species())?;
     let reverse_descriptor = descriptor(descriptor_space, &reverse, context.species())?;
@@ -1956,7 +2105,7 @@ where
                 saddle_max_gradient,
                 descriptor: saddle_descriptor,
                 ride_method: config.ride_method,
-                irc_at_minimum: [forward_irc, reverse_irc],
+                irc_at_minimum,
             },
             witness,
         )
