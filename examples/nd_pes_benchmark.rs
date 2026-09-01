@@ -210,6 +210,10 @@ fn main() -> Result<(), Box<dyn Error>> {
                     "mechanism_discovery_rates": report.mechanism_discovery_rates,
                     "move_pulls": report.move_pulls,
                     "move_success_rates": report.move_success_rates,
+                    "escape_observations": report.escape_observations,
+                    "escape_singletons": report.escape_singletons,
+                    "escape_unseen_mass_upper": report.escape_unseen_mass_upper,
+                    "escape_coverage_saturated": report.escape_coverage_saturated,
                     "termination": format!("{:?}", report.termination),
                 })
             );
