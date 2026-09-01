@@ -186,3 +186,49 @@ fn novel_edge_yield_outweighs_a_failed_arm_after_initial_coverage() {
     assert_eq!(repeated.arm, productive.arm);
     assert_ne!(repeated.arm, failed.arm);
 }
+
+#[test]
+fn same_system_method_evidence_guides_untried_arms() {
+    let portfolio = RidePortfolio::new(1, vec![RideMethod::Dimer, RideMethod::Lanczos]).unwrap();
+    let mut ledger = RideLedger::new(portfolio);
+    ledger
+        .register_source(source(17, -104.2, &[(4, 6)]))
+        .unwrap();
+
+    let first = ledger.claim(2, 101).unwrap();
+    let second = ledger.claim(7, 102).unwrap();
+    let (dimer, lanczos) = if first.arm.method == RideMethod::Dimer {
+        (first, second)
+    } else {
+        (second, first)
+    };
+    assert_eq!(dimer.arm.method, RideMethod::Dimer);
+    assert_eq!(lanczos.arm.method, RideMethod::Lanczos);
+
+    ledger
+        .report(
+            dimer.replica,
+            dimer.id,
+            4_000,
+            RideOutcome::Failed(RideFailure::MinimumModeLostCurvature),
+        )
+        .unwrap();
+    ledger
+        .report(
+            lanczos.replica,
+            lanczos.id,
+            2_000,
+            RideOutcome::Certified {
+                saddle: 70,
+                endpoints: [17, 29],
+            },
+        )
+        .unwrap();
+    ledger
+        .register_source(source(23, -107.5, &[(4, 8)]))
+        .unwrap();
+
+    let guided = ledger.claim(9, 103).unwrap();
+
+    assert_eq!(guided.arm.method, RideMethod::Lanczos);
+}
