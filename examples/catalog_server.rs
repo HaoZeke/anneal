@@ -168,7 +168,7 @@ fn run_gfn2_water_coordinator() -> Result<(), Box<dyn std::error::Error>> {
                 .collect::<Vec<_>>();
             let objective = Arc::new(Mutex::new(RgpotObjective::xtb(
                 &atomic_numbers,
-                [60.0, 0.0, 0.0, 0.0, 60.0, 0.0, 0.0, 60.0],
+                [60.0, 0.0, 0.0, 0.0, 60.0, 0.0, 0.0, 0.0, 60.0],
             )));
             Box::new(move |coordinates| {
                 objective
