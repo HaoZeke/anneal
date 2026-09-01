@@ -387,6 +387,8 @@ fn producer_gradient_above_threshold_is_rejected_before_engine_evaluation() {
         record,
         ValidationFailure::GradientThreshold {
             source: GradientSource::Producer,
+            actual: 1e-5,
+            maximum: 1e-6,
         },
     );
 }
@@ -406,6 +408,8 @@ fn fresh_gradient_above_threshold_is_rejected() {
         result.unwrap_err(),
         ValidationFailure::GradientThreshold {
             source: GradientSource::Fresh,
+            actual: 1e-5,
+            maximum: 1e-6,
         }
     );
 }
