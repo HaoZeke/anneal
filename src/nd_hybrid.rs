@@ -55,6 +55,17 @@ pub enum NdHybridMechanism {
     BasinEscape,
 }
 
+/// Mechanism policy used for matched-budget comparisons.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NdHybridPolicy {
+    /// Allocate between ridge and escape by posterior discovery per PES call.
+    Adaptive,
+    /// Explore only the finite signed mode portfolio of discovered sources.
+    RidgeOnly,
+    /// Generate exact minima by perturb--quench escapes without riding them.
+    BasinEscapeOnly,
+}
+
 /// One observable mechanism decision and its stationary-point yield.
 #[derive(Debug)]
 pub struct NdHybridEvent {
@@ -91,6 +102,8 @@ pub enum NdHybridTermination {
     BudgetConsumed,
     /// A numerical path returned without issuing a PES evaluation.
     NoPesProgress,
+    /// Every configured signed ridge mode has been attempted.
+    RidePortfolioExhausted,
 }
 
 /// Exact stationary network and allocation evidence from one surface.
@@ -98,6 +111,8 @@ pub enum NdHybridTermination {
 pub struct NdHybridReport {
     /// System-local exact minimum--saddle graph.
     pub network: NdPesNetwork,
+    /// Adaptive or fixed mechanism policy used by the campaign.
+    pub policy: NdHybridPolicy,
     /// Total PES evaluations, including the initial source quench.
     pub charged_evaluations: u64,
     /// Ordered mechanism evidence.
@@ -234,6 +249,32 @@ where
     S: PesSurface + ?Sized,
     W: ExactStructureWitness + ?Sized,
 {
+    explore_nd_with_policy(
+        surface,
+        initial,
+        config,
+        witness,
+        seed,
+        NdHybridPolicy::Adaptive,
+    )
+}
+
+/// Explore one PES under an adaptive or fixed matched-budget mechanism policy.
+///
+/// Fixed policies use the same quench, ridge, witness, and accounting paths as
+/// the adaptive campaign, isolating the contribution of mechanism allocation.
+pub fn explore_nd_with_policy<S, W>(
+    surface: &S,
+    initial: ArrayView1<'_, f64>,
+    config: &NdHybridConfig,
+    witness: &W,
+    seed: u64,
+    policy: NdHybridPolicy,
+) -> Result<NdHybridReport, NdHybridError>
+where
+    S: PesSurface + ?Sized,
+    W: ExactStructureWitness + ?Sized,
+{
     validate(config, initial.len())?;
     let dimension = initial.len();
     let norm_tolerance = config
@@ -282,10 +323,14 @@ where
             break NdHybridTermination::BudgetConsumed;
         }
         let ride_task = next_ride_task(&network, &attempted, source_cursor, ranks);
-        let selected = if ride_task.is_some() {
-            mechanism_allocator.select(&mut rng)
-        } else {
-            ESCAPE_ARM
+        let selected = match policy {
+            NdHybridPolicy::Adaptive if ride_task.is_some() => mechanism_allocator.select(&mut rng),
+            NdHybridPolicy::Adaptive => ESCAPE_ARM,
+            NdHybridPolicy::RidgeOnly if ride_task.is_some() => RIDGE_ARM,
+            NdHybridPolicy::RidgeOnly => {
+                break NdHybridTermination::RidePortfolioExhausted;
+            }
+            NdHybridPolicy::BasinEscapeOnly => ESCAPE_ARM,
         };
         attempt += 1;
 
@@ -436,6 +481,7 @@ where
 
     Ok(NdHybridReport {
         network,
+        policy,
         charged_evaluations,
         events,
         mechanism_pulls: mechanism_allocator.pulls().to_vec(),
