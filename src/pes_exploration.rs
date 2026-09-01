@@ -601,7 +601,8 @@ pub struct PesExplorationConfig {
     pub maximum_move: f64,
     /// IRC mass-weighted outer radius.
     pub irc_step: f64,
-    /// Maximum branch retries used to resolve collapsed endpoints.
+    /// Resolution levels used to choose the molecular IRC launch radius and
+    /// the maximum N-D branch shells used to escape a collapsed quench.
     pub branch_attempts: usize,
     /// N-D branch-shell growth and reciprocal molecular IRC refinement factor.
     pub branch_growth: f64,
@@ -2148,6 +2149,13 @@ fn refine_irc_step(step: f64, config: &PesExplorationConfig) -> Result<f64, PesE
     Ok(next)
 }
 
+fn finest_irc_step(
+    initial_step: f64,
+    config: &PesExplorationConfig,
+) -> Result<f64, PesExplorationError> {
+    (1..config.branch_attempts).try_fold(initial_step, |step, _| refine_irc_step(step, config))
+}
+
 fn directional_curvature<S: PesSurface + ?Sized>(
     surface: &S,
     coordinates: ArrayView1<f64>,
@@ -2483,7 +2491,7 @@ fn minimum_pair_distance(coordinates: ArrayView1<f64>) -> Option<f64> {
 #[allow(clippy::too_many_arguments)]
 fn roll_branch_shells<S, W>(
     surface: &S,
-    mut origin: Quenched,
+    origin: Quenched,
     saddle: &Array1<f64>,
     masses: &Array1<f64>,
     mode: &Array1<f64>,
@@ -2496,53 +2504,47 @@ where
     S: PesSurface,
     W: ExactStructureWitness + ?Sized,
 {
-    let mut step = initial_step;
-    for shell in 0..config.branch_attempts {
-        let (forward, forward_irc) = roll_branch(
-            surface,
-            saddle,
-            masses,
-            mode,
-            IrcDirection::Forward,
-            step,
-            config,
-        )?;
-        let (reverse, reverse_irc) = roll_branch(
-            surface,
-            saddle,
-            masses,
-            mode,
-            IrcDirection::Reverse,
-            step,
-            config,
-        )?;
-        let (resolved_origin, forward, reverse) = reconcile_source_connection(
-            surface,
-            origin,
-            forward,
-            reverse,
-            config,
-            witness,
-            Some(context),
-        )?;
-        let collapsed = equivalent_with_context(
-            witness,
-            forward.coordinates.view(),
-            reverse.coordinates.view(),
-            Some(context),
-        );
-        if !collapsed || shell + 1 == config.branch_attempts {
-            return Ok((
-                resolved_origin,
-                forward,
-                reverse,
-                [forward_irc, reverse_irc],
-            ));
-        }
-        origin = resolved_origin;
-        step = refine_irc_step(step, config)?;
-    }
-    unreachable!("a positive branch-shell count returns inside the loop")
+    let step = finest_irc_step(initial_step, config)?;
+    emit_pes_trace(serde_json::json!({
+        "kind": "pes_stage",
+        "stage": "irc_resolution",
+        "initial_step": initial_step,
+        "selected_step": step,
+        "resolution_levels": config.branch_attempts,
+    }));
+    let (forward, forward_irc) = roll_branch(
+        surface,
+        saddle,
+        masses,
+        mode,
+        IrcDirection::Forward,
+        step,
+        config,
+    )?;
+    let (reverse, reverse_irc) = roll_branch(
+        surface,
+        saddle,
+        masses,
+        mode,
+        IrcDirection::Reverse,
+        step,
+        config,
+    )?;
+    let (resolved_origin, forward, reverse) = reconcile_source_connection(
+        surface,
+        origin,
+        forward,
+        reverse,
+        config,
+        witness,
+        Some(context),
+    )?;
+    Ok((
+        resolved_origin,
+        forward,
+        reverse,
+        [forward_irc, reverse_irc],
+    ))
 }
 
 /// Quench a point, ride one supplied mode to an index-one saddle, and quench
