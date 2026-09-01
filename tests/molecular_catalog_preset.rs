@@ -1,9 +1,10 @@
 use anneal_core::catalog::molecular::{
-    DESCRIPTOR_SCHEMA, ENGINE_BINARY_INPUT, ENGINE_KIND, WATER_HEXAMER_MOLECULES,
+    DESCRIPTOR_SCHEMA, ENGINE_BINARY_INPUT, ENGINE_KIND, WATER_HEXAMER_MOLECULES, descriptor_space,
     engine_binary_digest, engine_config_digest, fresh_evaluation, leftover_descriptor_dim,
     leftover_space, leftover_spec, leftover_values, length_scale, reference_coordinates,
     system_signature, validator_config, water_groups, water_species,
 };
+use anneal_core::descriptor_space::{UNIVERSAL_DESCRIPTOR_SCHEMA, UNIVERSAL_DESCRIPTOR_VERSION};
 use anneal_core::methods::cluster_hopping::Config;
 use anneal_core::soap::SoapSpec;
 
@@ -131,6 +132,44 @@ fn leftover_space_is_the_catalog_descriptor() {
         engine_binary_digest(&[0x11; 8]),
         engine_binary_digest(&[0x22; 8])
     );
+}
+
+#[test]
+fn water_catalog_uses_the_universal_schema_without_sharing_system_identity() {
+    let species = water_species(2).unwrap();
+    let water_coordinates = reference_coordinates(2).unwrap();
+    let water_space = descriptor_space(&species).unwrap();
+    let water_descriptor = water_space
+        .describe(
+            ndarray::ArrayView1::from(water_coordinates.as_slice()),
+            Some(&species),
+        )
+        .unwrap();
+    let lj_space = anneal_core::catalog::lj::descriptor_space();
+    let lj_coordinates = anneal_core::catalog::lj::reference_coordinates(6).unwrap();
+    let lj_species = vec![18; 6];
+    let lj_descriptor = lj_space
+        .describe(
+            ndarray::ArrayView1::from(lj_coordinates.as_slice()),
+            Some(&lj_species),
+        )
+        .unwrap();
+
+    assert_eq!(DESCRIPTOR_SCHEMA, UNIVERSAL_DESCRIPTOR_SCHEMA);
+    assert_eq!(water_space.schema().name(), UNIVERSAL_DESCRIPTOR_SCHEMA);
+    assert_eq!(water_space.schema().version(), UNIVERSAL_DESCRIPTOR_VERSION);
+    assert_eq!(
+        water_descriptor.values().len(),
+        lj_descriptor.values().len()
+    );
+
+    let water_signature = system_signature(2, engine_digest(0x11)).unwrap();
+    let lj_signature = anneal_core::catalog::lj::system_signature(6).unwrap();
+    assert_eq!(
+        water_signature.descriptor.schema,
+        lj_signature.descriptor.schema
+    );
+    assert_ne!(water_signature.digest(), lj_signature.digest());
 }
 
 #[cfg(feature = "bank-rpc")]
