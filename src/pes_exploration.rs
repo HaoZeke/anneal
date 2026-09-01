@@ -885,6 +885,17 @@ struct Quenched {
     max_gradient: f64,
 }
 
+/// A force-converged local minimum produced by the rgmin quench contract.
+#[derive(Debug, Clone, PartialEq)]
+pub struct QuenchedMinimum {
+    /// Potential energy at the converged coordinates.
+    pub energy: f64,
+    /// Coordinates satisfying the requested force condition.
+    pub coordinates: Array1<f64>,
+    /// Infinity norm of the final Cartesian gradient.
+    pub max_gradient: f64,
+}
+
 fn checked_evaluate<S: PesSurface + ?Sized>(
     surface: &S,
     coordinates: ArrayView1<f64>,
@@ -1093,6 +1104,29 @@ fn quench<S: PesSurface + ?Sized>(
         config.quench_steps,
         config.quench_gradient_tolerance,
     )
+}
+
+/// Quench an arbitrary-dimensional PES point with rgmin L-BFGS.
+///
+/// The returned point must satisfy the requested Cartesian infinity-norm
+/// gradient condition; exhausting the iteration limit is an explicit error.
+pub fn quench_minimum<S: PesSurface + ?Sized>(
+    surface: &S,
+    start: ArrayView1<f64>,
+    steps: usize,
+    gradient_tolerance: f64,
+) -> Result<QuenchedMinimum, PesExplorationError> {
+    if steps == 0 || !gradient_tolerance.is_finite() || gradient_tolerance <= 0.0 {
+        return Err(PesExplorationError::InvalidConfig(
+            "minimum quench controls",
+        ));
+    }
+    let quenched = quench_with_tolerance(surface, start, steps, gradient_tolerance)?;
+    Ok(QuenchedMinimum {
+        energy: quenched.energy,
+        coordinates: quenched.coordinates,
+        max_gradient: quenched.max_gradient,
+    })
 }
 
 fn quench_with_tolerance<S: PesSurface + ?Sized>(
