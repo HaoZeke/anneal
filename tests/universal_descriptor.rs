@@ -1,7 +1,8 @@
 use anneal_core::descriptor_space::{
     DescriptorBlockKind, DescriptorGeometry, DescriptorVector, UNIVERSAL_DESCRIPTOR_SCHEMA,
-    UNIVERSAL_DESCRIPTOR_VERSION, universal_descriptor_space,
+    UNIVERSAL_DESCRIPTOR_VERSION, UNIVERSAL_LOCAL_ENVIRONMENT_RADIUS, universal_descriptor_space,
 };
+use anneal_core::ride_ledger::EnvironmentBook;
 use ndarray::Array1;
 
 fn finite(length_scale: f64) -> anneal_core::descriptor_space::DescriptorSpace {
@@ -164,6 +165,109 @@ fn one_schema_has_one_dimension_for_lj_molecules_and_surfaces() {
     assert!(kinds.contains(&DescriptorBlockKind::InvariantSoapMean));
     assert!(kinds.contains(&DescriptorBlockKind::InvariantAceNu3Mean));
     assert!(kinds.contains(&DescriptorBlockKind::ChiralMoment));
+}
+
+#[test]
+fn universal_local_descriptor_has_one_dimension_across_systems() {
+    let lj = finite(1.0)
+        .describe_local(
+            Array1::from_vec(vec![0.0, 0.0, 0.0, 1.12, 0.0, 0.0, 0.2, 1.1, 0.0]).view(),
+            Some(&[18, 18, 18]),
+        )
+        .unwrap();
+    let water = finite(1.32)
+        .describe_local(
+            Array1::from_vec(vec![
+                0.0, 0.0, 0.0, 0.7572, 0.5865, 0.0, -0.7572, 0.5865, 0.0, 2.8, 0.1, 0.0, 3.5572,
+                0.6865, 0.0, 2.0428, 0.6865, 0.0,
+            ])
+            .view(),
+            Some(&[8, 1, 1, 8, 1, 1]),
+        )
+        .unwrap();
+    let surface = universal_descriptor_space(
+        DescriptorGeometry::new(
+            1.0,
+            Some([8.0, 0.0, 0.0, 0.0, 8.0, 0.0, 0.0, 0.0, 20.0]),
+            [true, true, false],
+        )
+        .unwrap(),
+    )
+    .describe_local(
+        Array1::from_vec(vec![
+            0.0, 0.0, 0.0, 2.0, 0.0, 0.0, 0.0, 2.0, 0.0, 2.0, 2.0, 0.0, 0.8, 0.8, 1.7, 1.6, 0.8,
+            1.7,
+        ])
+        .view(),
+        Some(&[29, 29, 29, 29, 1, 1]),
+    )
+    .unwrap();
+
+    assert_eq!(lj.nrows(), 3);
+    assert_eq!(water.nrows(), 6);
+    assert_eq!(surface.nrows(), 6);
+    assert_eq!(lj.ncols(), water.ncols());
+    assert_eq!(lj.ncols(), surface.ncols());
+    for row in lj
+        .rows()
+        .into_iter()
+        .chain(water.rows())
+        .chain(surface.rows())
+    {
+        assert!(norm(row.as_slice().unwrap()) <= 1.0 + 1e-12);
+    }
+}
+
+#[test]
+fn universal_local_descriptor_is_rigid_motion_and_permutation_equivariant() {
+    let coordinates = Array1::from_vec(vec![
+        0.0, 0.0, 0.0, 1.1, 0.2, -0.1, -0.3, 1.3, 0.4, 0.4, -0.5, 1.5, -1.0, -0.7, 0.2,
+    ]);
+    let species = [6, 8, 6, 8, 6];
+    let descriptor_space = finite(1.0);
+    let original = descriptor_space
+        .describe_local(coordinates.view(), Some(&species))
+        .unwrap();
+    let moved = descriptor_space
+        .describe_local(rigid_transform(&coordinates).view(), Some(&species))
+        .unwrap();
+    let order = [4, 1, 2, 3, 0];
+    let (permuted, permuted_species) = permute(&coordinates, &species, &order);
+    let reordered = descriptor_space
+        .describe_local(permuted.view(), Some(&permuted_species))
+        .unwrap();
+
+    assert!(
+        original
+            .iter()
+            .zip(&moved)
+            .all(|(left, right)| (left - right).abs() < 1e-9)
+    );
+    for (new_row, &old_row) in order.iter().enumerate() {
+        assert!(
+            reordered
+                .row(new_row)
+                .iter()
+                .zip(original.row(old_row))
+                .all(|(left, right)| (left - right).abs() < 1e-9)
+        );
+    }
+}
+
+#[test]
+fn universal_local_environment_distance_separates_water_sites() {
+    let coordinates = Array1::from_vec(vec![
+        0.0, 0.0, 0.0, 0.7572, 0.5865, 0.0, -0.7572, 0.5865, 0.0,
+    ]);
+    let local = finite(1.32)
+        .describe_local(coordinates.view(), Some(&[8, 1, 1]))
+        .unwrap();
+    let mut book = EnvironmentBook::new(UNIVERSAL_LOCAL_ENVIRONMENT_RADIUS).unwrap();
+    let targets = book.observe(local.view()).unwrap();
+
+    assert_eq!(targets.len(), 2);
+    assert_eq!(targets[0].atom, 0);
+    assert_eq!(targets[1].atom, 1);
 }
 
 #[test]
