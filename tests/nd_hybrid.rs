@@ -116,6 +116,27 @@ fn hybrid_nd_search_shares_escaped_minima_with_budgeted_ridge_rides() {
         event.mechanism == NdHybridMechanism::Ridge && event.source_basin == Some(escaped.1)
     }));
 
+    let saturated = report
+        .events
+        .iter()
+        .position(|event| event.escape_coverage_saturated)
+        .expect("the exact escape census must acquire a finite unseen-mass bound");
+    let coverage_window = report.events[saturated + 1..].iter().take(20);
+    let (ridge_after_saturation, observed_after_saturation) =
+        coverage_window.fold((0usize, 0usize), |(ridge, observed), event| {
+            (
+                ridge + usize::from(event.mechanism == NdHybridMechanism::Ridge),
+                observed + 1,
+            )
+        });
+    assert_eq!(observed_after_saturation, 20);
+    assert!(
+        ridge_after_saturation >= 15,
+        "saturated escape coverage issued only {ridge_after_saturation}/20 ridge events"
+    );
+    assert!(report.escape_coverage_saturated);
+    assert!(report.escape_unseen_mass_upper.unwrap() < 0.2);
+
     for minimum in report.network.minima() {
         assert!(minimum.max_gradient < 2e-8);
         assert!(
