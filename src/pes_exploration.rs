@@ -364,6 +364,54 @@ pub fn gaussian_nd_mode(
     Ok(normalized_gaussian(dimension, seed, rank)? * direction.sign())
 }
 
+/// Generate one direction from a seeded orthonormal basis block in arbitrary N.
+///
+/// Ranks `0..dimension` cover one Gaussian-distributed orthonormal basis before
+/// the next independently seeded block begins. This preserves isotropy while
+/// preventing a finite ride portfolio from repeatedly sampling nearly parallel
+/// directions. The direction sign is applied after orthogonalization.
+pub fn orthonormal_nd_mode(
+    dimension: usize,
+    seed: u64,
+    rank: u16,
+    direction: RideModeDirection,
+) -> Result<Array1<f64>, PesExplorationError> {
+    if dimension == 0 {
+        return Err(PesExplorationError::InvalidShape(
+            "ride dimension must be nonempty",
+        ));
+    }
+    let rank = usize::from(rank);
+    let block = rank / dimension;
+    let selected = rank % dimension;
+    let block_rank = u16::try_from(block).map_err(|_| {
+        PesExplorationError::InvalidShape("ride mode block exceeds the supported rank")
+    })?;
+    let mut rng = StdRng::seed_from_u64(ranked_seed(seed ^ 0xa076_1d64_78bd_642f, block_rank));
+    let mut basis = Vec::<Array1<f64>>::with_capacity(selected + 1);
+    for basis_index in 0..=selected {
+        let mut candidate = Array1::from_shape_simple_fn(dimension, || {
+            let sample: f64 = StandardNormal.sample(&mut rng);
+            sample
+        });
+        for _ in 0..2 {
+            for previous in &basis {
+                candidate.scaled_add(-candidate.dot(previous), previous);
+            }
+        }
+        let norm = candidate.dot(&candidate).sqrt();
+        if !norm.is_finite() || norm <= 1e-12 {
+            candidate.fill(0.0);
+            candidate[(basis_index + block) % dimension] = 1.0;
+            for previous in &basis {
+                candidate.scaled_add(-candidate.dot(previous), previous);
+            }
+        }
+        basis.push(normalize_mode(candidate.view())?);
+    }
+    Ok(basis.pop().expect("selected basis direction exists") * direction.sign())
+}
+
 fn translation_basis(atom_count: usize) -> Vec<Array1<f64>> {
     let mut basis = Vec::with_capacity(3);
     let scale = (atom_count as f64).sqrt().recip();
