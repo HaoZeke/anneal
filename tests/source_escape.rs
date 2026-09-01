@@ -29,7 +29,7 @@ impl PesSurface for CountingQuadratic {
         coordinates: ArrayView1<'_, f64>,
     ) -> Result<(f64, Array1<f64>), Self::Error> {
         self.calls.fetch_add(1, Ordering::Relaxed);
-        let displacement = coordinates - array![1.0, -2.0, 0.5].view();
+        let displacement = coordinates.to_owned() - array![1.0, -2.0, 0.5];
         Ok((0.5 * displacement.dot(&displacement), displacement))
     }
 }
