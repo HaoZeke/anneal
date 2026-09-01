@@ -6,13 +6,15 @@ use super::{
 };
 use crate::soap::central_spectrum_from_displacements;
 use linkcell::Cell;
-use ndarray::ArrayView1;
+use ndarray::{Array2, ArrayView1};
 use std::f64::consts::{PI, TAU};
 
 /// Stable schema name for the cross-system descriptor.
 pub const UNIVERSAL_DESCRIPTOR_SCHEMA: &str = "anneal-universal-pes";
 /// Stable schema version for the cross-system descriptor.
 pub const UNIVERSAL_DESCRIPTOR_VERSION: u32 = 1;
+/// Euclidean radius for block-balanced universal local environments.
+pub const UNIVERSAL_LOCAL_ENVIRONMENT_RADIUS: f64 = 0.2;
 
 const PAIR_CHANNELS: usize = 4;
 const TRIPLE_CHANNELS: usize = 3;
@@ -208,6 +210,83 @@ pub(super) fn describe(
     })
 }
 
+pub(super) fn describe_local(
+    schema: &DescriptorSchema,
+    geometry: DescriptorGeometry,
+    coordinates: ArrayView1<f64>,
+    species: Option<&[u32]>,
+) -> Result<Array2<f64>, DescriptorError> {
+    let maximum_cutoff = schema
+        .blocks
+        .iter()
+        .map(|block| block.cutoff())
+        .fold(0.0, f64::max);
+    let environment = Environment::new(geometry, coordinates, species, maximum_cutoff)?;
+    let atoms = environment.atoms;
+    let mut blocks = Vec::with_capacity(schema.blocks.len() + 1);
+    let mut centres = Array2::zeros((atoms, SPECIES_CHANNELS));
+    for atom in 0..atoms {
+        let sketch = species_sketch(environment.species[atom]);
+        for (column, value) in sketch.into_iter().enumerate() {
+            centres[[atom, column]] = value;
+        }
+    }
+    normalize_local_block(&mut centres);
+    blocks.push(centres);
+    for (block_index, block) in schema.blocks.iter().copied().enumerate() {
+        let mut local = match block.kind() {
+            DescriptorBlockKind::PairRadial => local_pair_radial(&environment, block),
+            DescriptorBlockKind::ThreeBodyAngular => local_three_body_angular(&environment, block),
+            DescriptorBlockKind::GraphTopology => local_graph_topology(&environment, block),
+            DescriptorBlockKind::InvariantSoapMean => {
+                local_invariant_spectrum(&environment, block, false)
+            }
+            DescriptorBlockKind::InvariantAceNu3Mean => {
+                local_invariant_spectrum(&environment, block, true)
+            }
+            DescriptorBlockKind::ChiralMoment => local_chiral_moments(&environment, block),
+            DescriptorBlockKind::SoapMean
+            | DescriptorBlockKind::SoapVariance
+            | DescriptorBlockKind::AceNu3Mean
+            | DescriptorBlockKind::SoapLeftover => {
+                return Err(DescriptorError::UniversalGeometryRequired);
+            }
+        };
+        if let Some(index) = local.iter().position(|value| !value.is_finite()) {
+            return Err(DescriptorError::NonFiniteDescriptor {
+                block: block_index,
+                index,
+            });
+        }
+        normalize_local_block(&mut local);
+        blocks.push(local);
+    }
+
+    let columns = blocks.iter().map(|block| block.ncols()).sum();
+    let block_scale = 1.0 / (blocks.len() as f64).sqrt();
+    let mut output = Array2::zeros((atoms, columns));
+    let mut offset = 0;
+    for block in blocks {
+        for atom in 0..atoms {
+            for column in 0..block.ncols() {
+                output[[atom, offset + column]] = block_scale * block[[atom, column]];
+            }
+        }
+        offset += block.ncols();
+    }
+    Ok(output)
+}
+
+fn normalize_local_block(block: &mut Array2<f64>) {
+    for mut row in block.rows_mut() {
+        let raw_norm = row.iter().map(|value| value * value).sum::<f64>().sqrt();
+        let denominator = raw_norm.hypot(NORMALIZATION_EPSILON);
+        for value in &mut row {
+            *value /= denominator;
+        }
+    }
+}
+
 struct Environment {
     atoms: usize,
     species: Vec<u32>,
@@ -364,6 +443,35 @@ fn pair_radial(environment: &Environment, block: DescriptorBlockSpec) -> Vec<f64
     spectrum
 }
 
+fn local_pair_radial(environment: &Environment, block: DescriptorBlockSpec) -> Array2<f64> {
+    let radial_bins = block.n_max();
+    let cutoff = block.cutoff();
+    let width = cutoff / radial_bins as f64;
+    let mut spectrum = Array2::zeros((environment.atoms, radial_bins * PAIR_CHANNELS));
+    for centre in 0..environment.atoms {
+        for neighbor in &environment.neighbors[centre] {
+            let distance = neighbor.distance;
+            if distance <= 1e-12 || distance >= cutoff {
+                continue;
+            }
+            let cutoff_weight = cosine_cutoff(distance, cutoff);
+            let species = pair_species(
+                environment.species[centre],
+                environment.species[neighbor.atom],
+            );
+            for radial in 0..radial_bins {
+                let shell = (radial as f64 + 0.5) * width;
+                let scaled = (distance - shell) / (0.65 * width);
+                let basis = (-0.5 * scaled * scaled).exp() * cutoff_weight;
+                for channel in 0..PAIR_CHANNELS {
+                    spectrum[[centre, channel * radial_bins + radial]] += basis * species[channel];
+                }
+            }
+        }
+    }
+    spectrum
+}
+
 fn three_body_angular(environment: &Environment, block: DescriptorBlockSpec) -> Vec<f64> {
     let radial_bins = block.n_max();
     let angular_orders = block.l_max() + 1;
@@ -417,6 +525,59 @@ fn three_body_angular(environment: &Environment, block: DescriptorBlockSpec) -> 
     spectrum
 }
 
+fn local_three_body_angular(environment: &Environment, block: DescriptorBlockSpec) -> Array2<f64> {
+    let radial_bins = block.n_max();
+    let angular_orders = block.l_max() + 1;
+    let cutoff = block.cutoff();
+    let width = cutoff / radial_bins as f64;
+    let mut spectrum = Array2::zeros((
+        environment.atoms,
+        radial_bins * angular_orders * TRIPLE_CHANNELS,
+    ));
+    for centre in 0..environment.atoms {
+        let neighbors = environment.neighbors[centre]
+            .iter()
+            .filter(|neighbor| neighbor.distance < cutoff)
+            .collect::<Vec<_>>();
+        for left_index in 0..neighbors.len() {
+            let left = neighbors[left_index];
+            if left.distance <= 1e-12 || left.distance >= cutoff {
+                continue;
+            }
+            for &right in neighbors.iter().skip(left_index + 1) {
+                if right.distance <= 1e-12 || right.distance >= cutoff {
+                    continue;
+                }
+                let cosine = (dot(left.displacement, right.displacement)
+                    / (left.distance * right.distance))
+                    .clamp(-1.0, 1.0);
+                let angular = legendre_values(cosine, block.l_max());
+                let mean_distance = 0.5 * (left.distance + right.distance);
+                let cutoff_weight =
+                    cosine_cutoff(left.distance, cutoff) * cosine_cutoff(right.distance, cutoff);
+                let species = triple_species(
+                    environment.species[centre],
+                    environment.species[left.atom],
+                    environment.species[right.atom],
+                );
+                for radial in 0..radial_bins {
+                    let shell = (radial as f64 + 0.5) * width;
+                    let scaled = (mean_distance - shell) / (0.7 * width);
+                    let radial_weight = (-0.5 * scaled * scaled).exp() * cutoff_weight;
+                    for (order, &angular_value) in angular.iter().enumerate() {
+                        for channel in 0..TRIPLE_CHANNELS {
+                            let index = (channel * radial_bins + radial) * angular_orders + order;
+                            spectrum[[centre, index]] +=
+                                radial_weight * angular_value * species[channel];
+                        }
+                    }
+                }
+            }
+        }
+    }
+    spectrum
+}
+
 fn graph_topology(environment: &Environment, block: DescriptorBlockSpec) -> Vec<f64> {
     let scales = block.n_max();
     let mut spectrum = Vec::with_capacity(scales * GRAPH_FEATURES);
@@ -430,6 +591,21 @@ fn graph_topology(environment: &Environment, block: DescriptorBlockSpec) -> Vec<
             }
         }
         spectrum.extend(averaged);
+    }
+    spectrum
+}
+
+fn local_graph_topology(environment: &Environment, block: DescriptorBlockSpec) -> Array2<f64> {
+    let scales = block.n_max();
+    let mut spectrum = Array2::zeros((environment.atoms, scales * GRAPH_FEATURES));
+    for centre in 0..environment.atoms {
+        for scale in 1..=scales {
+            let threshold = block.cutoff() * scale as f64 / scales as f64;
+            let local = graph_features(environment, centre, threshold);
+            for (feature, value) in local.into_iter().enumerate() {
+                spectrum[[centre, (scale - 1) * GRAPH_FEATURES + feature]] = value;
+            }
+        }
     }
     spectrum
 }
@@ -567,6 +743,43 @@ fn invariant_spectrum(
     spectrum
 }
 
+fn local_invariant_spectrum(
+    environment: &Environment,
+    block: DescriptorBlockSpec,
+    ace: bool,
+) -> Array2<f64> {
+    let per_channel = if ace {
+        crate::ace::dim(block.n_max(), block.l_max())
+    } else {
+        block.n_max() * (block.n_max() + 1) / 2 * (block.l_max() + 1)
+    };
+    let mut spectrum = Array2::zeros((environment.atoms, per_channel * SPECIES_CHANNELS));
+    for centre in 0..environment.atoms {
+        for channel in 0..SPECIES_CHANNELS {
+            let neighbors = environment.neighbors[centre]
+                .iter()
+                .filter(|neighbor| neighbor.distance < block.cutoff())
+                .map(|neighbor| {
+                    (
+                        neighbor.displacement,
+                        species_sketch(environment.species[neighbor.atom])[channel],
+                    )
+                })
+                .collect::<Vec<_>>();
+            let (soap, coefficients) = central_spectrum_from_displacements(&neighbors, block.soap);
+            let local = if ace {
+                crate::ace::from_c(&coefficients, block.n_max(), block.l_max())
+            } else {
+                soap
+            };
+            for (index, value) in local.into_iter().enumerate() {
+                spectrum[[centre, channel * per_channel + index]] += value;
+            }
+        }
+    }
+    spectrum
+}
+
 fn chiral_moments(environment: &Environment, block: DescriptorBlockSpec) -> Vec<f64> {
     let radial_channels = block.n_max();
     let moment_channels = radial_channels * SPECIES_CHANNELS;
@@ -613,6 +826,60 @@ fn chiral_moments(environment: &Environment, block: DescriptorBlockSpec) -> Vec<
                     for channel in 0..SPECIES_CHANNELS {
                         spectrum[channel * triple_count + triple] +=
                             centre_scale * centre_species[channel] * pseudoscalar;
+                    }
+                    triple += 1;
+                }
+            }
+        }
+    }
+    spectrum
+}
+
+fn local_chiral_moments(environment: &Environment, block: DescriptorBlockSpec) -> Array2<f64> {
+    let radial_channels = block.n_max();
+    let moment_channels = radial_channels * SPECIES_CHANNELS;
+    let triple_count = moment_channels
+        .saturating_mul(moment_channels.saturating_sub(1))
+        .saturating_mul(moment_channels.saturating_sub(2))
+        / 6;
+    let mut spectrum = Array2::zeros((environment.atoms, triple_count * SPECIES_CHANNELS));
+    let radial_width = 1.0 / radial_channels as f64;
+    for centre in 0..environment.atoms {
+        let mut moments = vec![[0.0; 3]; moment_channels];
+        for neighbor in environment.neighbors[centre]
+            .iter()
+            .filter(|neighbor| neighbor.distance < block.cutoff())
+        {
+            let direction = [
+                neighbor.displacement[0] / neighbor.distance,
+                neighbor.displacement[1] / neighbor.distance,
+                neighbor.displacement[2] / neighbor.distance,
+            ];
+            let reduced_distance = neighbor.distance / block.cutoff();
+            let envelope = cosine_cutoff(neighbor.distance, block.cutoff());
+            let species = species_sketch(environment.species[neighbor.atom]);
+            for radial in 0..radial_channels {
+                let radial_centre = (radial as f64 + 0.5) * radial_width;
+                let scaled = (reduced_distance - radial_centre) / (0.65 * radial_width);
+                let radial_weight = (-0.5 * scaled * scaled).exp() * envelope;
+                for channel in 0..SPECIES_CHANNELS {
+                    let weight = radial_weight * species[channel];
+                    let moment = &mut moments[radial * SPECIES_CHANNELS + channel];
+                    for axis in 0..3 {
+                        moment[axis] += weight * direction[axis];
+                    }
+                }
+            }
+        }
+        let centre_species = species_sketch(environment.species[centre]);
+        let mut triple = 0;
+        for left in 0..moment_channels {
+            for middle in left + 1..moment_channels {
+                for right in middle + 1..moment_channels {
+                    let pseudoscalar = dot(moments[left], cross(moments[middle], moments[right]));
+                    for channel in 0..SPECIES_CHANNELS {
+                        spectrum[[centre, channel * triple_count + triple]] =
+                            centre_species[channel] * pseudoscalar;
                     }
                     triple += 1;
                 }
