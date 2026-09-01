@@ -735,6 +735,7 @@ pub struct SaddleConnection {
 pub struct PesNetwork {
     minima: Vec<MinimumRecord>,
     saddles: Vec<SaddleConnection>,
+    unresolved_saddles: Vec<SaddleConnection>,
 }
 
 impl PesNetwork {
@@ -763,8 +764,17 @@ impl PesNetwork {
         &self.saddles
     }
 
+    /// Index-one saddles whose downhill branches did not define a new edge.
+    pub fn unresolved_saddles(&self) -> &[SaddleConnection] {
+        &self.unresolved_saddles
+    }
+
     pub(crate) fn from_records(minima: Vec<MinimumRecord>, saddles: Vec<SaddleConnection>) -> Self {
-        Self { minima, saddles }
+        Self {
+            minima,
+            saddles,
+            unresolved_saddles: Vec::new(),
+        }
     }
 
     /// Admit a certified minimum without applying a descriptor cutoff.
@@ -894,6 +904,11 @@ impl PesNetwork {
         self.saddles.push(candidate.clone());
         Ok(candidate)
     }
+
+    fn retain_unresolved_saddle(&mut self, mut candidate: SaddleConnection) {
+        candidate.id = self.unresolved_saddles.len();
+        self.unresolved_saddles.push(candidate);
+    }
 }
 
 /// One rgmin-certified minimum on an arbitrary-dimensional point surface.
@@ -943,6 +958,7 @@ pub struct NdSaddleConnection {
 pub struct NdPesNetwork {
     minima: Vec<NdMinimumRecord>,
     saddles: Vec<NdSaddleConnection>,
+    unresolved_saddles: Vec<NdSaddleConnection>,
 }
 
 impl NdPesNetwork {
@@ -969,6 +985,11 @@ impl NdPesNetwork {
     /// Stored saddle connections in stable admission order.
     pub fn saddles(&self) -> &[NdSaddleConnection] {
         &self.saddles
+    }
+
+    /// Index-one saddles whose downhill branches collapsed to one minimum.
+    pub fn unresolved_saddles(&self) -> &[NdSaddleConnection] {
+        &self.unresolved_saddles
     }
 
     fn admit_minimum<W: ExactStructureWitness + ?Sized>(
@@ -1034,6 +1055,11 @@ impl NdPesNetwork {
         candidate.id = self.saddles.len();
         self.saddles.push(candidate.clone());
         candidate
+    }
+
+    fn retain_unresolved_saddle(&mut self, mut candidate: NdSaddleConnection) {
+        candidate.id = self.unresolved_saddles.len();
+        self.unresolved_saddles.push(candidate);
     }
 }
 
@@ -2518,28 +2544,24 @@ where
     let origin = network.admit_minimum(origin_minimum, witness);
     let positive_id = network.admit_minimum(positive, witness);
     let negative_id = network.admit_minimum(negative, witness);
+    let candidate = NdSaddleConnection {
+        id: usize::MAX,
+        origin,
+        endpoints: [positive_id, negative_id],
+        saddle_energy,
+        saddle_coordinates,
+        curvature,
+        lowest_mode,
+        negative_modes: index.negative_modes,
+        saddle_max_gradient,
+        ride_method: config.ride_method,
+    };
     if positive_id == negative_id {
+        network.retain_unresolved_saddle(candidate);
         return Err(PesExplorationError::CollapsedConnection);
     }
-    if positive_id != origin && negative_id != origin {
-        return Err(PesExplorationError::DisconnectedConnection);
-    }
 
-    Ok(network.admit_saddle(
-        NdSaddleConnection {
-            id: usize::MAX,
-            origin,
-            endpoints: [positive_id, negative_id],
-            saddle_energy,
-            saddle_coordinates,
-            curvature,
-            lowest_mode,
-            negative_modes: index.negative_modes,
-            saddle_max_gradient,
-            ride_method: config.ride_method,
-        },
-        witness,
-    ))
+    Ok(network.admit_saddle(candidate, witness))
 }
 
 /// Quench a basin, ride one supplied mode, roll both IRC branches, and admit
@@ -2795,33 +2817,29 @@ where
         context.clone(),
         witness,
     )?;
-    if forward_id.id == reverse_id.id {
-        return Err(PesExplorationError::CollapsedConnection);
-    }
-    if forward_id.id != origin.id && reverse_id.id != origin.id {
-        return Err(PesExplorationError::DisconnectedConnection);
-    }
-
     let saddle_descriptor =
         descriptor_space.describe(saddle_coordinates.view(), context.species())?;
+    let candidate = SaddleConnection {
+        id: usize::MAX,
+        origin: origin.id,
+        endpoints: [forward_id.id, reverse_id.id],
+        saddle_energy,
+        saddle_coordinates,
+        context,
+        curvature,
+        lowest_mode: saddle_mode,
+        negative_modes: index.negative_modes,
+        saddle_max_gradient,
+        descriptor: saddle_descriptor,
+        ride_method: config.ride_method,
+        irc_at_minimum,
+    };
+    if forward_id.id == reverse_id.id {
+        network.retain_unresolved_saddle(candidate);
+        return Err(PesExplorationError::CollapsedConnection);
+    }
+
     network
-        .admit_saddle(
-            SaddleConnection {
-                id: usize::MAX,
-                origin: origin.id,
-                endpoints: [forward_id.id, reverse_id.id],
-                saddle_energy,
-                saddle_coordinates,
-                context,
-                curvature,
-                lowest_mode: saddle_mode,
-                negative_modes: index.negative_modes,
-                saddle_max_gradient,
-                descriptor: saddle_descriptor,
-                ride_method: config.ride_method,
-                irc_at_minimum,
-            },
-            witness,
-        )
+        .admit_saddle(candidate, witness)
         .map_err(PesExplorationError::from)
 }
