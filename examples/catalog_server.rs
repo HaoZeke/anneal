@@ -10,8 +10,11 @@
 //! (`n` is the site count). `CATALOG_SYSTEM=gfn2-water` selects the
 //! GFN2-xTB universal-descriptor coordinator (`n` is the molecule count).
 //! That arm requires `RGPOT_XTB_ENGINE` so the system signature hashes
-//! the loaded engine. The receiving-side evaluator still refuses to
-//! invent a GFN2 energy.
+//! the loaded engine. Feature `rgpot-ex` provides receiving-side energy and
+//! force validation through that exact handle.
+
+#[cfg(feature = "rgpot-ex")]
+mod common;
 
 use anneal_core::catalog::lj::{
     CALIBRATION_IRA_TOLERANCE, descriptor_space, fresh_evaluation, reference_coordinates,
@@ -104,12 +107,12 @@ fn run_lj_coordinator() -> Result<(), Box<dyn std::error::Error>> {
 /// GFN2-xTB universal-descriptor coordinator. `n` is the molecule count.
 ///
 /// `RGPOT_XTB_ENGINE` must name the loaded `libxtb_engine.so` so the
-/// system signature hashes that file. The receiving-side evaluator is
-/// still the refusing stub: anneal-core does not vendor GFN2.
+/// system signature hashes the same binary used by receiving-side evaluation.
 fn run_gfn2_water_coordinator() -> Result<(), Box<dyn std::error::Error>> {
+    use anneal_core::catalog::FreshEvaluation;
     use anneal_core::catalog::molecular::{
-        descriptor_space, engine_binary_digest, fresh_evaluation as water_fresh_evaluation,
-        reference_coordinates, system_signature, validator_config, water_species,
+        descriptor_space, engine_binary_digest, reference_coordinates, system_signature,
+        validator_config, water_species,
     };
 
     let args = std::env::args().collect::<Vec<_>>();
@@ -153,11 +156,34 @@ fn run_gfn2_water_coordinator() -> Result<(), Box<dyn std::error::Error>> {
         .values()
         .len();
     let signature = system_signature(n_molecules, digest)?;
-    if water_fresh_evaluation(n_molecules, &reference).is_ok() {
-        return Err(
-            "GFN2-xTB catalog evaluation invented an energy without a loaded rgpot engine".into(),
-        );
-    }
+    let evaluate: Box<dyn Fn(&[f64]) -> Result<FreshEvaluation, String> + Send + Sync + 'static> = {
+        #[cfg(feature = "rgpot-ex")]
+        {
+            use common::rgpot_eindir::RgpotObjective;
+            use std::sync::{Arc, Mutex};
+
+            let atomic_numbers = species
+                .iter()
+                .map(|&atomic_number| atomic_number as i32)
+                .collect::<Vec<_>>();
+            let objective = Arc::new(Mutex::new(RgpotObjective::xtb(
+                &atomic_numbers,
+                [60.0, 0.0, 0.0, 0.0, 60.0, 0.0, 0.0, 60.0],
+            )));
+            Box::new(move |coordinates| {
+                objective
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner())
+                    .fresh_evaluation(coordinates)
+            })
+        }
+        #[cfg(not(feature = "rgpot-ex"))]
+        {
+            Box::new(|_| {
+                Err("GFN2-xTB coordinator requires feature rgpot-ex and a loaded engine".into())
+            })
+        }
+    };
 
     let mut config = ServerConfig::new(campaign, ensemble, signature.digest(), replicas)?
         .with_scientific_state(
@@ -167,7 +193,7 @@ fn run_gfn2_water_coordinator() -> Result<(), Box<dyn std::error::Error>> {
             capacity,
             census_radius,
             total_work,
-            move |coordinates| water_fresh_evaluation(n_molecules, coordinates),
+            move |coordinates| evaluate(coordinates),
         )?
         .with_exact_structure_witness(IraStructureWitness {
             kmax_factor: 1.8,
