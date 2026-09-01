@@ -38,7 +38,7 @@ use crate::catalog::{
 };
 use crate::catalog_policy::proposal::farthest_hole;
 use crate::cooperative_search::ledger::{ChargeKind, CooperativeLedger, ReplicaLedgerEvent};
-use crate::descriptor_space::DescriptorSpace;
+use crate::descriptor_space::{DescriptorSpace, UNIVERSAL_LOCAL_ENVIRONMENT_RADIUS};
 use crate::methods::feynman_kac::{
     EpochSubmissionOutcome, PackingOccupant, PopulationEpochPlan, PopulationMember,
     SelectionCoefficients, SynchronousPopulation, assign_parents_by_packing,
@@ -455,7 +455,11 @@ impl CoordinatorState {
                     population_plans: BTreeMap::new(),
                     packing: PackingBook::default(),
                     ride_environments: EnvironmentBook::new(
-                        crate::catalog::packing::ENVIRONMENT_RADIUS,
+                        if scientific.descriptor_space.geometry().is_some() {
+                            UNIVERSAL_LOCAL_ENVIRONMENT_RADIUS
+                        } else {
+                            crate::catalog::packing::ENVIRONMENT_RADIUS
+                        },
                     )
                     .map_err(|_| CatalogServerError::InvalidScientificConfiguration)?,
                     ride_ledger: RideLedger::new(
@@ -3079,11 +3083,21 @@ fn observe_ride_source(
     candidate: &CatalogCandidate,
 ) -> Result<(), ()> {
     let basin = candidate.census_basin.ok_or(())?;
-    let local = local_nu3_z(
-        ArrayView1::from(&candidate.coordinates),
-        crate::catalog::packing::PACKING_SPEC,
-        Some(&scientific.signature.atomic_numbers),
-    );
+    let local = if scientific.descriptor_space.geometry().is_some() {
+        scientific
+            .descriptor_space
+            .describe_local(
+                ArrayView1::from(&candidate.coordinates),
+                Some(&scientific.signature.atomic_numbers),
+            )
+            .map_err(|_| ())?
+    } else {
+        local_nu3_z(
+            ArrayView1::from(&candidate.coordinates),
+            crate::catalog::packing::PACKING_SPEC,
+            Some(&scientific.signature.atomic_numbers),
+        )
+    };
     let environments = scientific
         .ride_environments
         .observe(local.view())
