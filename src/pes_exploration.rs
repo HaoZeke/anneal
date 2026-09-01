@@ -53,9 +53,11 @@ mod tests {
     use ndarray::{Array1, Array2, ArrayView1, array};
 
     use super::{
-        IrcDirection, PesExplorationConfig, PesSurface, home_uphill_mode,
-        refine_cartesian_with_prfo, refine_irc_step, roll_branch,
+        IrcDirection, PesExplorationConfig, PesSurface, activation_basis, deflate_cartesian_mode,
+        home_uphill_mode, refine_cartesian_with_prfo, refine_irc_step, roll_branch,
     };
+    use crate::curvature::project_rigid_with;
+    use crate::descriptor_space::DescriptorGeometry;
 
     struct FailingIrcSurface;
 
@@ -154,6 +156,27 @@ mod tests {
 
         assert!(saddle.iter().all(|coordinate| coordinate.abs() < 1e-7));
         assert!(surface.evaluations.load(Ordering::Relaxed) < 100);
+    }
+
+    #[test]
+    fn known_saddle_deflation_removes_the_previous_escape_direction() {
+        let source = array![0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0];
+        let avoided = array![0.2, 0.0, 0.0, 0.8, 0.0, 0.0, 0.0, 1.0, 0.0];
+        let mode = array![0.8, 0.3, 0.0, -0.4, -0.2, 0.0, -0.4, -0.1, 0.0];
+        let deflated = deflate_cartesian_mode(
+            source.view(),
+            mode.view(),
+            &[avoided.to_vec()],
+            &[false; 3],
+            DescriptorGeometry::finite(1.0).unwrap(),
+        )
+        .unwrap();
+        let mut escape = &avoided - &source;
+        project_rigid_with(&mut escape, &activation_basis(source.view(), None));
+        escape /= escape.dot(&escape).sqrt();
+
+        assert!(deflated.dot(&escape).abs() < 1e-10);
+        assert!((deflated.dot(&deflated) - 1.0).abs() < 1e-12);
     }
 
     #[test]
