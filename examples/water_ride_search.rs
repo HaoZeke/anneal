@@ -148,6 +148,22 @@ fn failure_name(outcome: &CatalogRideOutcome) -> Option<String> {
     }
 }
 
+fn minimum_pair_distance(coordinates: &[f64]) -> f64 {
+    let atom_count = coordinates.len() / 3;
+    (0..atom_count)
+        .flat_map(|first| (first + 1..atom_count).map(move |second| (first, second)))
+        .map(|(first, second)| {
+            (0..3)
+                .map(|axis| {
+                    let delta = coordinates[3 * first + axis] - coordinates[3 * second + axis];
+                    delta * delta
+                })
+                .sum::<f64>()
+                .sqrt()
+        })
+        .fold(f64::INFINITY, f64::min)
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let arguments = std::env::args().collect::<Vec<_>>();
     let molecule_count = arguments
@@ -274,6 +290,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
     let mut client = CatalogClient::connect(endpoint, identity, ClientConfig::default())?;
     let mut event_sequence = 1_u64;
+    println!(
+        "{}",
+        json!({
+            "kind": "water_initial_proposal",
+            "energy": initial_candidate.energy,
+            "gradient_norm": initial_candidate.gradient_norm,
+            "maximum_gradient": minimum.max_gradient,
+            "minimum_pair_distance": minimum_pair_distance(&initial_candidate.coordinates),
+            "descriptor_dim": initial_candidate.descriptor.len(),
+            "descriptor_schema_version": initial_candidate.descriptor_schema_version,
+            "producer_calls": producer_initial_calls,
+        })
+    );
     let offer = client.offer_candidate(next_sequence(&mut event_sequence)?, initial_candidate)?;
     let mut charged = 0_u64;
     record_charge(

@@ -2298,10 +2298,22 @@ fn validate_candidate<F>(
 where
     F: Fn(&[f64]) -> Result<FreshEvaluation, String> + Send + Sync + ?Sized,
 {
-    if candidate.producer_replica != identity.replica
-        || candidate.descriptor_schema_version != signature.descriptor.version
-        || candidate.census_basin.is_some()
-    {
+    let reject = |reason: &str| {
+        eprintln!(
+            "catalog candidate rejected: replica={} event={} reason={reason}",
+            identity.replica, candidate.event_sequence
+        );
+    };
+    if candidate.producer_replica != identity.replica {
+        reject("producer replica does not match request identity");
+        return Err(());
+    }
+    if candidate.descriptor_schema_version != signature.descriptor.version {
+        reject("descriptor schema version does not match system signature");
+        return Err(());
+    }
+    if candidate.census_basin.is_some() {
+        reject("producer supplied a coordinator-owned census basin");
         return Err(());
     }
     // The worker already evaluated leftover SOAP. The book merges the
@@ -2330,16 +2342,27 @@ where
     };
     let mut validated = validator
         .validate(&record, |coordinates| evaluate(coordinates))
-        .map_err(|_| ())?;
+        .map_err(|error| {
+            eprintln!(
+                "catalog candidate rejected: replica={} event={} reason={error}",
+                identity.replica, candidate.event_sequence
+            );
+        })?;
     let descriptor = descriptor_space
         .describe(
             ArrayView1::from(&validated.candidate.coordinates),
             Some(&signature.atomic_numbers),
         )
-        .map_err(|_| ())?;
+        .map_err(|error| {
+            eprintln!(
+                "catalog candidate rejected: replica={} event={} reason=descriptor recomputation failed: {error}",
+                identity.replica, candidate.event_sequence
+            );
+        })?;
     if descriptor.values().len() != validated.candidate.descriptor.len()
         || descriptor.schema_version() != signature.descriptor.version
     {
+        reject("recomputed descriptor shape does not match candidate record");
         return Err(());
     }
     validated.candidate.descriptor = descriptor.values().to_vec();
