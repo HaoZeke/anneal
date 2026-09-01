@@ -54,7 +54,7 @@ mod tests {
 
     use super::{
         IrcDirection, PesExplorationConfig, PesSurface, activation_basis, deflate_cartesian_mode,
-        home_uphill_mode, refine_cartesian_with_prfo, refine_irc_step, roll_branch,
+        finest_irc_step, home_uphill_mode, refine_cartesian_with_prfo, roll_branch,
     };
     use crate::curvature::project_rigid_with;
     use crate::descriptor_space::DescriptorGeometry;
@@ -196,15 +196,16 @@ mod tests {
     }
 
     #[test]
-    fn collapsed_irc_retries_refine_the_integration_radius() {
+    fn molecular_irc_starts_at_the_finest_configured_resolution() {
         let config = PesExplorationConfig {
+            branch_attempts: 4,
             branch_growth: 2.5,
             ..PesExplorationConfig::default()
         };
 
-        let refined = refine_irc_step(0.2, &config).unwrap();
+        let refined = finest_irc_step(0.2, &config).unwrap();
 
-        assert!((refined - 0.08).abs() < 1e-15);
+        assert!((refined - 0.0128).abs() < 1e-15);
     }
 }
 
