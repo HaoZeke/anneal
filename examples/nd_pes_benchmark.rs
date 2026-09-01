@@ -97,6 +97,64 @@ impl ExactStructureWitness for PointWitness {
     }
 }
 
+#[derive(Debug, Clone, Copy, Default)]
+struct Moments {
+    count: u64,
+    mean: f64,
+    squared_deviation: f64,
+}
+
+impl Moments {
+    fn observe(&mut self, value: f64) {
+        self.count += 1;
+        let delta = value - self.mean;
+        self.mean += delta / self.count as f64;
+        let updated_delta = value - self.mean;
+        self.squared_deviation += delta * updated_delta;
+    }
+
+    fn count(&self) -> u64 {
+        self.count
+    }
+
+    fn mean(&self) -> f64 {
+        self.mean
+    }
+
+    fn sample_standard_deviation(&self) -> f64 {
+        if self.count < 2 {
+            0.0
+        } else {
+            (self.squared_deviation / (self.count - 1) as f64).sqrt()
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+struct PolicySummary {
+    minima: Moments,
+    edges: Moments,
+    stationary_objects: Moments,
+    full_minimum_runs: u64,
+    full_edge_runs: u64,
+}
+
+impl PolicySummary {
+    fn observe(
+        &mut self,
+        minima: usize,
+        edges: usize,
+        stationary_objects: usize,
+        expected: [usize; 2],
+    ) {
+        self.minima.observe(minima as f64);
+        self.edges.observe(edges as f64);
+        self.stationary_objects.observe(stationary_objects as f64);
+        self.full_minimum_runs += u64::from(minima == expected[0]);
+        self.full_edge_runs += u64::from(edges == expected[1]);
+    }
+}
+
 fn policy_name(policy: NdHybridPolicy) -> &'static str {
     match policy {
         NdHybridPolicy::Adaptive => "adaptive",
@@ -153,9 +211,10 @@ fn main() -> Result<(), Box<dyn Error>> {
         NdHybridPolicy::RidgeOnly,
         NdHybridPolicy::BasinEscapeOnly,
     ];
+    let mut summaries = [PolicySummary::default(); 3];
 
     for seed in 0..seeds {
-        for policy in policies {
+        for (policy_index, policy) in policies.iter().copied().enumerate() {
             let surface = RotatedProductWell::new(dimension);
             let rotated_start =
                 Array1::from_shape_fn(dimension, |index| -1.0 + 0.11 * ((index + 1) as f64).sin());
@@ -188,6 +247,15 @@ fn main() -> Result<(), Box<dyn Error>> {
                         || !event.new_unresolved_saddle_ids.is_empty()
                 })
                 .count();
+            let stationary_objects = report.network.minimum_count()
+                + report.network.saddle_count()
+                + report.network.unresolved_saddles().len();
+            summaries[policy_index].observe(
+                report.network.minimum_count(),
+                report.network.saddle_count(),
+                stationary_objects,
+                [expected_minima, expected_edges],
+            );
             println!(
                 "{}",
                 json!({
@@ -204,6 +272,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                     "certified_edges": report.network.saddle_count(),
                     "edge_coverage": report.network.saddle_count() as f64 / expected_edges as f64,
                     "unresolved_index_one_saddles": report.network.unresolved_saddles().len(),
+                    "stationary_objects": stationary_objects,
                     "events": report.events.len(),
                     "discovery_events": discovery_events,
                     "mechanism_pulls": report.mechanism_pulls,
@@ -218,6 +287,28 @@ fn main() -> Result<(), Box<dyn Error>> {
                 })
             );
         }
+    }
+    for (policy, summary) in policies.into_iter().zip(summaries) {
+        println!(
+            "{}",
+            json!({
+                "kind": "nd_pes_benchmark_summary",
+                "dimension": dimension,
+                "policy": policy_name(policy),
+                "budget": budget,
+                "seeds": summary.minima.count(),
+                "expected_minima": expected_minima,
+                "mean_exact_minima": summary.minima.mean(),
+                "sd_exact_minima": summary.minima.sample_standard_deviation(),
+                "full_minimum_runs": summary.full_minimum_runs,
+                "expected_edges": expected_edges,
+                "mean_certified_edges": summary.edges.mean(),
+                "sd_certified_edges": summary.edges.sample_standard_deviation(),
+                "full_edge_runs": summary.full_edge_runs,
+                "mean_stationary_objects": summary.stationary_objects.mean(),
+                "sd_stationary_objects": summary.stationary_objects.sample_standard_deviation(),
+            })
+        );
     }
     Ok(())
 }
