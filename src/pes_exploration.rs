@@ -341,6 +341,13 @@ pub struct PesExplorationConfig {
     pub activation_relaxation_steps: usize,
     /// Infinity-norm gradient threshold for a certified minimum.
     pub quench_gradient_tolerance: f64,
+    /// Optional Euclidean gradient-norm certification threshold.
+    ///
+    /// The infinity-norm threshold remains the rgmin stopping target. This
+    /// second gate lets a receiving-side force contract certify the measured
+    /// endpoint when numerical force noise prevents the optimizer from
+    /// reaching its stricter component target.
+    pub quench_gradient_norm_tolerance: Option<f64>,
     /// Force threshold for the saddle sessions.
     pub saddle_force_tolerance: f64,
     /// Displacement from the quenched minimum along the supplied mode.
@@ -376,6 +383,7 @@ impl Default for PesExplorationConfig {
             activation_growth: 2.0,
             activation_relaxation_steps: 3,
             quench_gradient_tolerance: 1e-6,
+            quench_gradient_norm_tolerance: None,
             saddle_force_tolerance: 1e-3,
             saddle_displacement: 0.1,
             negative_curvature_tolerance: 1e-6,
@@ -437,6 +445,14 @@ impl PesExplorationConfig {
         {
             return Err(PesExplorationError::InvalidConfig(
                 "negative curvature tolerance",
+            ));
+        }
+        if self
+            .quench_gradient_norm_tolerance
+            .is_some_and(|tolerance| !tolerance.is_finite() || tolerance <= 0.0)
+        {
+            return Err(PesExplorationError::InvalidConfig(
+                "quench gradient-norm tolerance",
             ));
         }
         Ok(())
@@ -1133,11 +1149,12 @@ fn quench<S: PesSurface + ?Sized>(
     start: ArrayView1<f64>,
     config: &PesExplorationConfig,
 ) -> Result<Quenched, PesExplorationError> {
-    quench_with_tolerance(
+    quench_with_certification(
         surface,
         start,
         config.quench_steps,
         config.quench_gradient_tolerance,
+        config.quench_gradient_norm_tolerance,
     )
 }
 
@@ -1164,11 +1181,58 @@ pub fn quench_minimum<S: PesSurface + ?Sized>(
     })
 }
 
+/// Quench an arbitrary-dimensional PES point with a strict rgmin target and
+/// an independent Euclidean force-norm certification gate.
+///
+/// The component tolerance controls rgmin. The returned point is accepted if
+/// its measured gradient satisfies either that infinity-norm target or the
+/// supplied Euclidean norm contract.
+pub fn quench_minimum_with_norm<S: PesSurface + ?Sized>(
+    surface: &S,
+    start: ArrayView1<f64>,
+    steps: usize,
+    gradient_tolerance: f64,
+    gradient_norm_tolerance: f64,
+) -> Result<QuenchedMinimum, PesExplorationError> {
+    if steps == 0
+        || !gradient_tolerance.is_finite()
+        || gradient_tolerance <= 0.0
+        || !gradient_norm_tolerance.is_finite()
+        || gradient_norm_tolerance <= 0.0
+    {
+        return Err(PesExplorationError::InvalidConfig(
+            "minimum quench controls",
+        ));
+    }
+    let quenched = quench_with_certification(
+        surface,
+        start,
+        steps,
+        gradient_tolerance,
+        Some(gradient_norm_tolerance),
+    )?;
+    Ok(QuenchedMinimum {
+        energy: quenched.energy,
+        coordinates: quenched.coordinates,
+        max_gradient: quenched.max_gradient,
+    })
+}
+
 fn quench_with_tolerance<S: PesSurface + ?Sized>(
     surface: &S,
     start: ArrayView1<f64>,
     steps: usize,
     gradient_tolerance: f64,
+) -> Result<Quenched, PesExplorationError> {
+    quench_with_certification(surface, start, steps, gradient_tolerance, None)
+}
+
+fn quench_with_certification<S: PesSurface + ?Sized>(
+    surface: &S,
+    start: ArrayView1<f64>,
+    steps: usize,
+    gradient_tolerance: f64,
+    gradient_norm_tolerance: Option<f64>,
 ) -> Result<Quenched, PesExplorationError> {
     let mut optimizer = Lbfgs::default();
     optimizer.gtol = gradient_tolerance;
@@ -1190,7 +1254,12 @@ fn quench_with_tolerance<S: PesSurface + ?Sized>(
     }
     let (energy, gradient) = checked_evaluate(surface, coordinates.view())?;
     let max_gradient = max_abs(gradient.view());
-    if max_gradient >= gradient_tolerance {
+    if !gradient_certified(
+        gradient.view(),
+        max_gradient,
+        gradient_tolerance,
+        gradient_norm_tolerance,
+    ) {
         return Err(PesExplorationError::QuenchNotConverged { max_gradient });
     }
     Ok(Quenched {
@@ -1198,6 +1267,17 @@ fn quench_with_tolerance<S: PesSurface + ?Sized>(
         coordinates,
         max_gradient,
     })
+}
+
+fn gradient_certified(
+    gradient: ArrayView1<f64>,
+    max_gradient: f64,
+    gradient_tolerance: f64,
+    gradient_norm_tolerance: Option<f64>,
+) -> bool {
+    max_gradient < gradient_tolerance
+        || gradient_norm_tolerance
+            .is_some_and(|tolerance| gradient.dot(&gradient).sqrt() <= tolerance)
 }
 
 fn quench_recognizing<W, S>(
@@ -1208,6 +1288,7 @@ fn quench_recognizing<W, S>(
     context: Option<&StructureContext>,
     steps: usize,
     gradient_tolerance: f64,
+    gradient_norm_tolerance: Option<f64>,
 ) -> Result<Quenched, PesExplorationError>
 where
     S: PesSurface + ?Sized,
@@ -1245,7 +1326,12 @@ where
     }
     let (energy, gradient) = checked_evaluate(surface, coordinates.view())?;
     let max_gradient = max_abs(gradient.view());
-    if max_gradient >= gradient_tolerance {
+    if !gradient_certified(
+        gradient.view(),
+        max_gradient,
+        gradient_tolerance,
+        gradient_norm_tolerance,
+    ) {
         return Err(PesExplorationError::QuenchNotConverged { max_gradient });
     }
     Ok(Quenched {
@@ -1307,11 +1393,12 @@ where
 
     let identity_tolerance =
         (config.quench_gradient_tolerance * f64::EPSILON.sqrt()).max(f64::MIN_POSITIVE);
-    let origin = quench_with_tolerance(
+    let origin = quench_with_certification(
         surface,
         origin.coordinates.view(),
         config.quench_steps,
         identity_tolerance,
+        config.quench_gradient_norm_tolerance,
     )?;
     let positive = quench_recognizing(
         surface,
@@ -1321,6 +1408,7 @@ where
         context,
         config.quench_steps,
         identity_tolerance,
+        config.quench_gradient_norm_tolerance,
     )?;
     let negative = quench_recognizing(
         surface,
@@ -1330,6 +1418,7 @@ where
         context,
         config.quench_steps,
         identity_tolerance,
+        config.quench_gradient_norm_tolerance,
     )?;
     Ok((origin, positive, negative))
 }
