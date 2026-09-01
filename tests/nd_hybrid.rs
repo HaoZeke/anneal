@@ -1,7 +1,9 @@
 use std::convert::Infallible;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use anneal_core::nd_hybrid::{NdHybridConfig, NdHybridMechanism, explore_nd_hybrid};
+use anneal_core::nd_hybrid::{
+    NdHybridConfig, NdHybridMechanism, NdHybridPolicy, explore_nd_hybrid, explore_nd_with_policy,
+};
 use anneal_core::pes_exploration::{
     ExactStructureWitness, PesExplorationConfig, PesSurface, RideMethod,
 };
@@ -132,5 +134,60 @@ fn hybrid_nd_search_shares_escaped_minima_with_budgeted_ridge_rides() {
                 .iter()
                 .all(|endpoint| *endpoint < report.network.minimum_count())
         );
+    }
+}
+
+#[test]
+fn fixed_nd_policies_issue_only_the_named_mechanism() {
+    let exploration = PesExplorationConfig {
+        ride_method: RideMethod::Lanczos,
+        quench_steps: 200,
+        saddle_steps: 300,
+        quench_gradient_tolerance: 1e-8,
+        quench_gradient_norm_tolerance: Some(2e-8),
+        saddle_force_tolerance: 1e-6,
+        saddle_displacement: 0.15,
+        irc_step: 0.08,
+        refine_with_prfo: false,
+        ..PesExplorationConfig::default()
+    };
+    let config = NdHybridConfig {
+        evaluation_budget: 4_000,
+        ride_evaluation_cap: 1_000,
+        escape_evaluation_cap: 200,
+        ride_mode_blocks: 4,
+        initial_escape_scale: 0.45,
+        initial_acceptance_threshold: 10.0,
+        visiting_q: 2.0,
+        exploration,
+    };
+
+    for (policy, expected) in [
+        (NdHybridPolicy::RidgeOnly, NdHybridMechanism::Ridge),
+        (
+            NdHybridPolicy::BasinEscapeOnly,
+            NdHybridMechanism::BasinEscape,
+        ),
+    ] {
+        let surface = ProductDoubleWell::new();
+        let report = explore_nd_with_policy(
+            &surface,
+            array![-0.91, -1.08, -0.87, -1.12].view(),
+            &config,
+            &PointWitness,
+            0x51ce,
+            policy,
+        )
+        .unwrap();
+
+        assert!(!report.events.is_empty());
+        assert!(
+            report
+                .events
+                .iter()
+                .all(|event| event.mechanism == expected)
+        );
+        assert_eq!(report.charged_evaluations, surface.calls());
+        assert!(report.charged_evaluations <= config.evaluation_budget);
     }
 }
