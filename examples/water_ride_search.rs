@@ -261,7 +261,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         quench_tolerance,
         MAX_GRADIENT_NORM,
     )?;
-    let (minimum_energy, minimum_gradient) = surface.evaluate(minimum.coordinates.view())?;
+    let minimum_energy = minimum.energy;
+    let minimum_gradient = minimum.gradient.clone();
     let producer_initial_calls = surface.evaluations();
     if producer_initial_calls
         .checked_add(1)
