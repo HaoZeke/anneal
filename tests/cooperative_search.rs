@@ -31,8 +31,23 @@ use anneal_core::cooperative_search::{
 use anneal_core::descriptor_space::{
     DescriptorBlockKind, DescriptorBlockSpec, DescriptorSchema, DescriptorSpace,
 };
+use anneal_core::pes_exploration::ExactStructureWitness;
 use anneal_core::transition_graph::AttractionRegionConfig;
 use ndarray::ArrayView1;
+
+struct SeparationWitness;
+
+impl ExactStructureWitness for SeparationWitness {
+    fn equivalent(&self, left: ArrayView1<f64>, right: ArrayView1<f64>) -> bool {
+        let separation = |point: ArrayView1<'_, f64>| {
+            (0..3)
+                .map(|axis| (point[3 + axis] - point[axis]).powi(2))
+                .sum::<f64>()
+                .sqrt()
+        };
+        (separation(left) - separation(right)).abs() < 1e-8
+    }
+}
 
 fn descriptor_space() -> DescriptorSpace {
     DescriptorSpace::new(
@@ -140,6 +155,8 @@ fn server_with_region_evidence(capacity: usize, minimum_probes: u64) -> CatalogS
             },
         )
         .unwrap()
+        .with_exact_structure_witness(SeparationWitness)
+        .unwrap()
         .with_attraction_region_config(AttractionRegionConfig {
             probe_action: "probe".into(),
             concentration: 0.5,
@@ -191,6 +208,8 @@ fn ride_server() -> CatalogServer {
                 })
             },
         )
+        .unwrap()
+        .with_exact_structure_witness(SeparationWitness)
         .unwrap();
     CatalogServer::start("127.0.0.1:0", config).unwrap()
 }
