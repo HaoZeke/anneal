@@ -2,8 +2,10 @@
 //!
 //! The catalog uses the same fixed-dimensional multiscale invariant schema as
 //! clusters and surfaces through [`descriptor_space`]. The GFN2 engine,
-//! atomic species, rigid-water groups, and coordinate dimension remain in the
-//! system signature, so sharing a descriptor schema never merges PES state.
+//! atomic species, flexible Cartesian degrees of freedom, and coordinate
+//! dimension remain in the system signature, so sharing a descriptor schema
+//! never merges PES state. Water groups remain proposal metadata and do not
+//! impose rigid distances on GFN2 minima.
 //! [`leftover_space`] remains the molecular proposal feature: its stacked
 //! species-conditioned residual `p_i - mu_z(i)` is not basin identity.
 //!
@@ -86,8 +88,8 @@ const COVALENT_DIAMETER: f64 = 2.0;
 /// Declared GFN2 handle configuration, excluding the engine binary.
 const ENGINE_CONFIG: &[u8] = b"gfn2-xtb-rgpot-v1;method=3;accuracy=1;etemp=300;maxiter=250;net_electron_count=0;uhf=0;vacuum_box=60";
 
-/// Rigid-molecule grouping of one water per three consecutive atoms.
-pub const GROUP_SCHEMA: &str = "rigid-water-molecules-v1";
+/// Flexible atomic degrees of freedom of the GFN2 water PES.
+pub const GROUP_SCHEMA: &str = "flexible-water-atoms-v1";
 
 /// Universal catalog descriptor schema shared across system families.
 pub const DESCRIPTOR_SCHEMA: &str = UNIVERSAL_DESCRIPTOR_SCHEMA;
@@ -109,7 +111,7 @@ pub fn water_species(n_molecules: usize) -> Result<Vec<u32>, MolecularCatalogPre
     Ok((0..n_molecules).flat_map(|_| [8, 1, 1]).collect())
 }
 
-/// Rigid groups of `(H2O)m`: one water per three consecutive atoms.
+/// Molecular proposal groups of `(H2O)m`: one water per three consecutive atoms.
 pub fn water_groups(n_molecules: usize) -> Result<Vec<Vec<usize>>, MolecularCatalogPresetError> {
     if n_molecules == 0 {
         return Err(MolecularCatalogPresetError::InvalidMoleculeCount);
@@ -295,8 +297,7 @@ pub fn system_signature(
         coordinate_dim,
         group_labels: (0..n_atoms)
             .map(|index| {
-                u32::try_from(index / 3)
-                    .map_err(|_| MolecularCatalogPresetError::CoordinateDimension)
+                u32::try_from(index).map_err(|_| MolecularCatalogPresetError::CoordinateDimension)
             })
             .collect::<Result<Vec<_>, _>>()?,
         group_schema: GROUP_SCHEMA.into(),
