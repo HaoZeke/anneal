@@ -32,6 +32,15 @@ fn lj_catalog_uses_the_universal_descriptor_with_reduced_unit_geometry() {
     );
     assert_eq!(signature.descriptor.schema, UNIVERSAL_DESCRIPTOR_SCHEMA);
     assert_eq!(signature.descriptor.version, UNIVERSAL_DESCRIPTOR_VERSION);
+    assert_eq!(UNIVERSAL_DESCRIPTOR_VERSION, 2);
+    assert_eq!(
+        signature
+            .descriptor
+            .hyperparameters
+            .get("normalization")
+            .map(String::as_str),
+        Some("contractive-l2-unit-v2")
+    );
 }
 
 #[test]

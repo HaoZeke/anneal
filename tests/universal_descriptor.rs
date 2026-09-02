@@ -149,6 +149,7 @@ fn one_schema_has_one_dimension_for_lj_molecules_and_surfaces() {
 
     assert_eq!(lj.schema_name(), UNIVERSAL_DESCRIPTOR_SCHEMA);
     assert_eq!(lj.schema_version(), UNIVERSAL_DESCRIPTOR_VERSION);
+    assert_eq!(UNIVERSAL_DESCRIPTOR_VERSION, 2);
     assert_eq!(lj.values().len(), water.values().len());
     assert_eq!(lj.values().len(), surface.values().len());
     assert!(lj.distance(&water).is_ok());
@@ -489,20 +490,17 @@ fn descriptor_is_continuous_when_the_last_neighbor_crosses_a_cutoff() {
 }
 
 #[test]
-fn zero_signal_blocks_stay_finite_under_soft_normalization() {
+fn universal_blocks_use_a_unit_scale_contractive_normalization() {
     let descriptor = finite(1.0)
         .describe(Array1::from_vec(vec![0.0, 0.0, 0.0]).view(), Some(&[2]))
         .unwrap();
 
     assert!(descriptor.values().iter().all(|value| value.is_finite()));
     for block in descriptor.blocks() {
-        assert_eq!(block.normalization(), "soft-l2-eps-v1");
+        assert_eq!(block.normalization(), "contractive-l2-unit-v2");
         let values = &descriptor.values()[block.offset()..block.offset() + block.len()];
-        if block.raw_norm() == 0.0 {
-            assert!(values.iter().all(|&value| value == 0.0));
-        } else {
-            assert!(norm(values) <= 1.0);
-        }
+        let expected_norm = block.raw_norm() / block.raw_norm().hypot(1.0);
+        assert!((norm(values) - expected_norm).abs() < 1e-14);
     }
 }
 
