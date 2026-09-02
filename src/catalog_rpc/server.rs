@@ -191,6 +191,12 @@ impl ServerConfig {
             },
         )
         .map_err(|_| CatalogServerError::InvalidScientificConfiguration)?;
+        let minimum_information = MinimumInformationSearch::new(
+            CoverageConfig::default().energy_length_scale,
+            energy_scale,
+            coverage_noise,
+        )
+        .map_err(|_| CatalogServerError::InvalidScientificConfiguration)?;
         BasinCensus::new(validator.descriptor_dim, census_radius)
             .map_err(|_| CatalogServerError::InvalidScientificConfiguration)?;
         BasinCatalog::new(catalog_capacity, census_radius, total_charged_work)
@@ -218,6 +224,7 @@ impl ServerConfig {
                 minimum_probes: 8,
             },
             coverage,
+            minimum_information,
             evaluate: Arc::new(evaluate),
             exact_witness: None,
         });
@@ -325,6 +332,7 @@ struct ScientificState {
     catalog: BasinCatalog,
     transition_graph: TransitionGraph,
     coverage: UniversalCoverage,
+    minimum_information: MinimumInformationSearch,
     attraction_regions: AttractionRegionConfig,
     transition_nodes: BTreeMap<BasinId, usize>,
     landscape: LandscapeGraph,
@@ -463,19 +471,7 @@ impl CoordinatorState {
                     .map_err(|_| CatalogServerError::InvalidScientificConfiguration)?,
                     transition_graph: TransitionGraph::new(),
                     coverage: scientific.coverage.clone(),
-                    minimum_information: MinimumInformationSearch::new(
-                        CoverageConfig::default().energy_length_scale,
-                        scientific.signature.energy_scale.abs().max(1e-12),
-                        scientific
-                            .validator
-                            .energy_abs_tolerance
-                            .max(
-                                scientific.validator.energy_rel_tolerance
-                                    * scientific.signature.energy_scale.abs(),
-                            )
-                            .max(1e-12),
-                    )
-                    .map_err(|_| CatalogServerError::InvalidScientificConfiguration)?,
+                    minimum_information: scientific.minimum_information.clone(),
                     attraction_regions: scientific.attraction_regions.clone(),
                     transition_nodes: BTreeMap::new(),
                     landscape: LandscapeGraph::new(),
