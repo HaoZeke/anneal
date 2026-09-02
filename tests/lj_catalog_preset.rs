@@ -2,9 +2,13 @@ use anneal_core::catalog::lj::{
     accepts_repeated_quench, descriptor_space, discovered_minimum_id, fresh_evaluation,
     parse_reference_coordinates, perturb_reference, system_signature, validator_config,
 };
+use anneal_core::descriptor_space::DescriptorGeometry;
+#[cfg(feature = "featomic")]
 use anneal_core::descriptor_space::{
-    DescriptorGeometry, UNIVERSAL_DESCRIPTOR_SCHEMA, UNIVERSAL_DESCRIPTOR_VERSION,
+    FEATOMIC_SOAP_NORMALIZATION, FEATOMIC_SOAP_SCHEMA, FEATOMIC_SOAP_VERSION,
 };
+#[cfg(not(feature = "featomic"))]
+use anneal_core::descriptor_space::{UNIVERSAL_DESCRIPTOR_SCHEMA, UNIVERSAL_DESCRIPTOR_VERSION};
 use ndarray::ArrayView1;
 
 #[test]
@@ -20,27 +24,51 @@ fn larger_lj_signatures_scale_without_changing_the_descriptor_contract() {
 }
 
 #[test]
-fn lj_catalog_uses_the_universal_descriptor_with_reduced_unit_geometry() {
+fn lj_catalog_uses_the_configured_invariant_descriptor_with_reduced_unit_geometry() {
     let descriptor = descriptor_space();
     let signature = system_signature(75).unwrap();
 
-    assert_eq!(descriptor.schema().name(), UNIVERSAL_DESCRIPTOR_SCHEMA);
-    assert_eq!(descriptor.schema().version(), UNIVERSAL_DESCRIPTOR_VERSION);
     assert_eq!(
         descriptor.geometry(),
         Some(DescriptorGeometry::finite(1.0).unwrap())
     );
-    assert_eq!(signature.descriptor.schema, UNIVERSAL_DESCRIPTOR_SCHEMA);
-    assert_eq!(signature.descriptor.version, UNIVERSAL_DESCRIPTOR_VERSION);
-    assert_eq!(UNIVERSAL_DESCRIPTOR_VERSION, 2);
-    assert_eq!(
-        signature
-            .descriptor
-            .hyperparameters
-            .get("normalization")
-            .map(String::as_str),
-        Some("contractive-l2-unit-v2")
-    );
+    #[cfg(feature = "featomic")]
+    {
+        let contract = descriptor.provider_contract().unwrap();
+        assert_eq!(descriptor.schema().name(), FEATOMIC_SOAP_SCHEMA);
+        assert_eq!(descriptor.schema().version(), FEATOMIC_SOAP_VERSION);
+        assert_eq!(signature.descriptor.schema, FEATOMIC_SOAP_SCHEMA);
+        assert_eq!(signature.descriptor.version, FEATOMIC_SOAP_VERSION);
+        assert_eq!(contract.normalization(), FEATOMIC_SOAP_NORMALIZATION);
+        assert_eq!(
+            signature.descriptor.hyperparameters.get("model_sha256"),
+            Some(&contract.model_digest_hex())
+        );
+        assert_eq!(
+            signature
+                .descriptor
+                .hyperparameters
+                .get("normalization")
+                .map(String::as_str),
+            Some(FEATOMIC_SOAP_NORMALIZATION)
+        );
+    }
+    #[cfg(not(feature = "featomic"))]
+    {
+        assert_eq!(descriptor.schema().name(), UNIVERSAL_DESCRIPTOR_SCHEMA);
+        assert_eq!(descriptor.schema().version(), UNIVERSAL_DESCRIPTOR_VERSION);
+        assert_eq!(signature.descriptor.schema, UNIVERSAL_DESCRIPTOR_SCHEMA);
+        assert_eq!(signature.descriptor.version, UNIVERSAL_DESCRIPTOR_VERSION);
+        assert_eq!(UNIVERSAL_DESCRIPTOR_VERSION, 2);
+        assert_eq!(
+            signature
+                .descriptor
+                .hyperparameters
+                .get("normalization")
+                .map(String::as_str),
+            Some("contractive-l2-unit-v2")
+        );
+    }
 }
 
 #[test]

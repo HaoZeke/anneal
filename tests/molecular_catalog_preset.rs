@@ -5,6 +5,11 @@ use anneal_core::catalog::molecular::{
     leftover_descriptor_dim, leftover_space, leftover_spec, leftover_values, length_scale,
     reference_coordinates, system_signature, validator_config, water_groups, water_species,
 };
+#[cfg(feature = "featomic")]
+use anneal_core::descriptor_space::{
+    FEATOMIC_SOAP_NORMALIZATION, FEATOMIC_SOAP_SCHEMA, FEATOMIC_SOAP_VERSION,
+};
+#[cfg(not(feature = "featomic"))]
 use anneal_core::descriptor_space::{UNIVERSAL_DESCRIPTOR_SCHEMA, UNIVERSAL_DESCRIPTOR_VERSION};
 use anneal_core::methods::cluster_hopping::Config;
 use anneal_core::soap::SoapSpec;
@@ -40,17 +45,39 @@ fn hexamer_signature_records_gfn2_kind_and_universal_dim() {
     assert_eq!(signature.coordinate_dim, 54);
     assert_eq!(signature.atomic_numbers, species);
     assert_eq!(signature.descriptor.schema, DESCRIPTOR_SCHEMA);
-    assert_eq!(signature.descriptor.schema, UNIVERSAL_DESCRIPTOR_SCHEMA);
-    assert_eq!(signature.descriptor.version, UNIVERSAL_DESCRIPTOR_VERSION);
-    assert_eq!(UNIVERSAL_DESCRIPTOR_VERSION, 2);
-    assert_eq!(
-        signature
-            .descriptor
-            .hyperparameters
-            .get("normalization")
-            .map(String::as_str),
-        Some("contractive-l2-unit-v2")
-    );
+    #[cfg(feature = "featomic")]
+    {
+        assert_eq!(signature.descriptor.schema, FEATOMIC_SOAP_SCHEMA);
+        assert_eq!(signature.descriptor.version, FEATOMIC_SOAP_VERSION);
+        assert_eq!(
+            signature
+                .descriptor
+                .hyperparameters
+                .get("normalization")
+                .map(String::as_str),
+            Some(FEATOMIC_SOAP_NORMALIZATION)
+        );
+        assert!(
+            signature
+                .descriptor
+                .hyperparameters
+                .contains_key("model_sha256")
+        );
+    }
+    #[cfg(not(feature = "featomic"))]
+    {
+        assert_eq!(signature.descriptor.schema, UNIVERSAL_DESCRIPTOR_SCHEMA);
+        assert_eq!(signature.descriptor.version, UNIVERSAL_DESCRIPTOR_VERSION);
+        assert_eq!(UNIVERSAL_DESCRIPTOR_VERSION, 2);
+        assert_eq!(
+            signature
+                .descriptor
+                .hyperparameters
+                .get("normalization")
+                .map(String::as_str),
+            Some("contractive-l2-unit-v2")
+        );
+    }
     assert_eq!(signature.descriptor.species_channels, vec![1, 8]);
     assert_eq!(
         signature.descriptor.hyperparameters.get("descriptor_dim"),
@@ -183,7 +210,7 @@ fn leftover_space_remains_a_distinct_proposal_feature() {
     let space = leftover_space(&species).unwrap();
     let signature = system_signature(WATER_HEXAMER_MOLECULES, engine_digest(0x11)).unwrap();
     assert_ne!(space.schema().name(), signature.descriptor.schema);
-    assert_ne!(space.schema().name(), UNIVERSAL_DESCRIPTOR_SCHEMA);
+    assert_ne!(space.schema().name(), DESCRIPTOR_SCHEMA);
     assert_eq!(
         engine_binary_digest(&[0x11; 8]),
         engine_binary_digest(&[0x11; 8])
@@ -195,7 +222,7 @@ fn leftover_space_remains_a_distinct_proposal_feature() {
 }
 
 #[test]
-fn water_catalog_uses_the_universal_schema_without_sharing_system_identity() {
+fn water_and_lj_catalogs_do_not_share_descriptor_identity() {
     let species = water_species(2).unwrap();
     let water_coordinates = reference_coordinates(2).unwrap();
     let water_space = descriptor_space(&species).unwrap();
@@ -215,21 +242,44 @@ fn water_catalog_uses_the_universal_schema_without_sharing_system_identity() {
         )
         .unwrap();
 
-    assert_eq!(DESCRIPTOR_SCHEMA, UNIVERSAL_DESCRIPTOR_SCHEMA);
-    assert_eq!(water_space.schema().name(), UNIVERSAL_DESCRIPTOR_SCHEMA);
-    assert_eq!(water_space.schema().version(), UNIVERSAL_DESCRIPTOR_VERSION);
-    assert_eq!(
-        water_descriptor.values().len(),
-        lj_descriptor.values().len()
-    );
-
     let water_signature = system_signature(2, engine_digest(0x11)).unwrap();
     let lj_signature = anneal_core::catalog::lj::system_signature(6).unwrap();
-    assert_eq!(
-        water_signature.descriptor.schema,
-        lj_signature.descriptor.schema
-    );
     assert_ne!(water_signature.digest(), lj_signature.digest());
+    #[cfg(feature = "featomic")]
+    {
+        assert_eq!(DESCRIPTOR_SCHEMA, FEATOMIC_SOAP_SCHEMA);
+        assert_eq!(water_space.schema().name(), FEATOMIC_SOAP_SCHEMA);
+        assert_eq!(water_space.schema().version(), FEATOMIC_SOAP_VERSION);
+        assert_ne!(
+            water_descriptor.values().len(),
+            lj_descriptor.values().len()
+        );
+        assert_eq!(
+            water_descriptor.distance(&lj_descriptor),
+            Err(anneal_core::descriptor_space::DescriptorError::IncompatibleDescriptorVectors)
+        );
+        assert_ne!(
+            water_signature
+                .descriptor
+                .hyperparameters
+                .get("model_sha256"),
+            lj_signature.descriptor.hyperparameters.get("model_sha256")
+        );
+    }
+    #[cfg(not(feature = "featomic"))]
+    {
+        assert_eq!(DESCRIPTOR_SCHEMA, UNIVERSAL_DESCRIPTOR_SCHEMA);
+        assert_eq!(water_space.schema().name(), UNIVERSAL_DESCRIPTOR_SCHEMA);
+        assert_eq!(water_space.schema().version(), UNIVERSAL_DESCRIPTOR_VERSION);
+        assert_eq!(
+            water_descriptor.values().len(),
+            lj_descriptor.values().len()
+        );
+        assert_eq!(
+            water_signature.descriptor.schema,
+            lj_signature.descriptor.schema
+        );
+    }
 }
 
 #[cfg(feature = "bank-rpc")]
