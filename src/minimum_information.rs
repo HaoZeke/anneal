@@ -325,7 +325,8 @@ impl MinimumInformationSearch {
     /// actions without a diversity coefficient. Greedy increments are divided
     /// by each action's charged PES cost. `families` supplies the partition
     /// constrained by `max_family_size`; a candidate remains selectable until
-    /// its family reaches that capacity.
+    /// its family reaches that capacity. Selected indices are returned in
+    /// candidate order so assignment does not depend on greedy discovery order.
     pub fn assign_batch(
         &mut self,
         candidates: &[SearchActionCandidate],
@@ -395,6 +396,7 @@ impl MinimumInformationSearch {
             *family_sizes.entry(families[candidate_index]).or_default() += 1;
             batch_information = enlarged_information;
         }
+        selected.sort_unstable();
         Ok(selected)
     }
 
