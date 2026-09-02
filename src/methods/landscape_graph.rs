@@ -366,6 +366,29 @@ mod tests {
     }
 
     #[test]
+    fn the_fiedler_split_does_not_depend_on_start_vector_overlap() {
+        // The index-ramp vector used by the iterative implementation is
+        // orthogonal to this graph's Fiedler vector [1, -1, -1, 1].  An
+        // eigensolve must still recover the weak cut {0, 3} | {1, 2} and
+        // lambda_2 = 2 * 0.1.
+        let mut g = LandscapeGraph::new();
+        g.observe_crossing(0, 3, 5.0);
+        g.observe_crossing(1, 2, 5.0);
+        g.observe_crossing(0, 1, 0.1);
+        g.observe_crossing(3, 2, 0.1);
+
+        let split = g.spectral_split().unwrap();
+        let mut sides = [split.left.clone(), split.right.clone()];
+        for side in &mut sides {
+            side.sort_unstable();
+        }
+        sides.sort();
+
+        assert!((split.algebraic_connectivity - 0.2).abs() < 1e-10);
+        assert_eq!(sides, [vec![0, 3], vec![1, 2]]);
+    }
+
+    #[test]
     fn a_disconnected_landscape_reports_zero_connectivity_and_components() {
         let mut g = LandscapeGraph::new();
         g.observe_crossing(0, 1, 3.0);
