@@ -108,7 +108,7 @@ fn hard_lj_manifests_pin_every_scientific_input() {
 }
 
 #[test]
-fn hard_lj_campaigns_bind_every_coordination_channel() {
+fn hard_lj_campaigns_bind_structural_coordination_only() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let submitter = fs::read_to_string(root.join("scripts/elja_submit_jcc_lj.sh"))
         .unwrap_or_else(|error| panic!("failed to read LJ submitter: {error}"));
@@ -121,7 +121,7 @@ fn hard_lj_campaigns_bind_every_coordination_channel() {
         ("CATALOG_ENTROPIC_BIAS", "0"),
         ("CATALOG_HISTO_SCREEN", "0"),
         ("CATALOG_SEAM_LADDER", "1"),
-        ("CATALOG_FRONTIER_EXCHANGE", "1"),
+        ("CATALOG_FRONTIER_EXCHANGE", "0"),
         ("CATALOG_COOP_WELLS", "1"),
         ("CATALOG_BRIDGE", "0"),
         ("CATALOG_DIFFICULTY", "0"),
@@ -142,7 +142,13 @@ fn hard_lj_campaigns_bind_every_coordination_channel() {
         );
     }
 
-    for forbidden in ["CATALOG_TEMP_LADDER", "CATALOG_MD_ENGINE"] {
+    for forbidden in [
+        "CATALOG_TEMP_LADDER",
+        "CATALOG_MD_ENGINE",
+        "CATALOG_BRAIN_LISTEN",
+        "CATALOG_BRAIN_PEERS",
+        "CATALOG_BRAIN_PORT_BASE",
+    ] {
         assert!(
             runner.contains(&format!("reject_protocol_variable {forbidden}")),
             "the production LJ runner must reject inherited {forbidden}"
@@ -412,7 +418,7 @@ fn strict_pipefail_scripts_do_not_short_circuit_producers() {
 }
 
 #[test]
-fn legacy_campaigns_preserve_seal_and_peer_failures() {
+fn legacy_campaigns_preserve_seal_failures_without_kinetic_peers() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let runner = fs::read_to_string(root.join("scripts/elja_jcc_lj_ensemble.sh"))
         .expect("failed to read legacy LJ ensemble runner");
@@ -434,12 +440,8 @@ fn legacy_campaigns_preserve_seal_and_peer_failures() {
     let many = fs::read_to_string(root.join("scripts/elja_jcc_lj_many_chains.sh"))
         .expect("failed to read many-chain runner");
     assert!(
-        many.contains("brain_peer_list=$(brain_peers"),
-        "many-chain runner must observe brain peer construction failure"
-    );
-    assert!(
-        many.contains("export CATALOG_BRAIN_PEERS=$brain_peer_list"),
-        "many-chain runner must export the checked brain peer list"
+        !many.contains("CATALOG_BRAIN_"),
+        "many-chain structural discovery must not start a kinetic-network peer layer"
     );
 }
 
@@ -630,78 +632,52 @@ fn cooperative_driver_honours_a_hop_cap() {
 }
 
 #[test]
-fn occupancy_many_chains_starts_one_brain_per_replica() {
+fn occupancy_many_chains_communicate_through_the_same_pes_catalog() {
     let script = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("scripts")
         .join("elja_jcc_lj_many_chains.sh");
     let source = fs::read_to_string(&script)
         .unwrap_or_else(|error| panic!("failed to read {}: {error}", script.display()));
 
-    for required in [
-        "CATALOG_BRAIN_LISTEN",
-        "CATALOG_BRAIN_PEERS",
-        "CATALOG_BRAIN_PORT_BASE",
-    ] {
-        assert!(
-            source.contains(required),
-            "many-chains occupancy talking must export {required} on every replica"
-        );
-    }
     assert!(
-        source.contains(r#"${r}=tcp://127.0.0.1:$((BRAIN_PORT_BASE + r))"#),
-        "brain peers must be replica=tcp://host:port pairs the worker already parses"
+        source.contains("export CATALOG_RPC=\"$endpoint\""),
+        "many-chain workers must communicate through their same-PES catalog"
     );
     assert!(
-        source.contains(r#"brain_peers "$replica" "$wave_start" "$wave_end""#),
-        "brain peers must be the live wave, not all 48 replicas"
+        !source.contains("CATALOG_BRAIN_"),
+        "many-chain workers must not infer a kinetic graph during structural discovery"
     );
 }
 
 #[test]
-fn causal_lj_array_brains_use_job_scoped_ipc_endpoints() {
+fn causal_lj_array_has_no_kinetic_graph_brain() {
     let script = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("scripts")
         .join("elja_jcc_lj_causal_pair.sh");
     let source = fs::read_to_string(&script)
         .unwrap_or_else(|error| panic!("failed to read {}: {error}", script.display()));
 
-    for required in [
-        r#"BRAIN_NAMESPACE="${SLURM_ARRAY_JOB_ID:-$SLURM_JOB_ID}-${SLURM_ARRAY_TASK_ID:-0}-${SLURM_JOB_ID}""#,
-        r#"BRAIN_IPC_PREFIX="/tmp/anneal-brain-${BRAIN_NAMESPACE}""#,
-        r#"printf 'ipc://%s-%s.sock' "$BRAIN_IPC_PREFIX" "$replica""#,
-        r#"export CATALOG_BRAIN_LISTEN=$(brain_endpoint "$replica")"#,
-        r#"printf 'brain_transport=%s\n' "$brain_transport""#,
-    ] {
-        assert!(
-            source.contains(required),
-            "causal LJ runner is missing collision-free brain endpoint contract {required}"
-        );
-    }
     assert!(
-        source.contains(r#"tcp://127.0.0.1:$((CATALOG_BRAIN_PORT_BASE + replica))"#),
-        "an explicit TCP base must remain available for externally reserved ports"
+        source.contains("brain_topology=none"),
+        "the manifest must state that no kinetic-network consensus layer is active"
+    );
+    assert!(
+        !source.contains("brain_endpoint") && !source.contains("export CATALOG_BRAIN_"),
+        "the causal LJ runner must leave kinetic-network inference to the downstream analysis"
     );
 }
 
 #[test]
-fn occupancy_driver_compiles_brains_into_the_bank_rpc_build() {
+fn production_lj_driver_does_not_consume_kinetic_boundary_crossings() {
     let driver = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("examples")
         .join("lj_cluster_search.rs");
     let source = fs::read_to_string(&driver)
         .unwrap_or_else(|error| panic!("failed to read {}: {error}", driver.display()));
 
-    let listen = source
-        .find(r#"std::env::var("CATALOG_BRAIN_LISTEN")"#)
-        .expect("worker must read CATALOG_BRAIN_LISTEN");
-    let prelude = &source[listen.saturating_sub(250)..listen];
     assert!(
-        prelude.contains(r#"#[cfg(feature = "bank-rpc")]"#),
-        "occupancy is featomic,ira,bank-rpc; brains gated on nng-transport never start"
-    );
-    assert!(
-        !prelude.contains("nng-transport"),
-        "nng-transport is not an occupancy feature; brains must not require it"
+        !source.contains(".try_boundary_crossing("),
+        "PES-local acquisition must not be selected by a reconstructed kinetic boundary"
     );
 }
 
