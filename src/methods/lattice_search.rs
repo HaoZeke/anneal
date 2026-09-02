@@ -419,6 +419,7 @@ mod tests {
     use super::*;
     use crate::methods::warm_lbfgs::WarmLbfgs;
     use crate::potentials::PairPotential;
+    use ndarray::Array1;
 
     fn search(n: usize, budget: usize, seed: u64) -> Outcome {
         let cfg = LatticeSearchConfig::lennard_jones(n);
@@ -436,6 +437,102 @@ mod tests {
         };
         let mut ledger = Ledger::new(budget);
         run(&cfg, &mut ledger, &mut relax, seed)
+    }
+
+    fn fixture(name: &str) -> Array1<f64> {
+        let path = format!("{}/tests/fixtures/{name}.xyz", env!("CARGO_MANIFEST_DIR"));
+        let text = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{path}: {e}"));
+        let mut coords = Vec::new();
+        for line in text.lines().skip(2) {
+            let f: Vec<f64> = line
+                .split_whitespace()
+                .skip(1)
+                .map(|v| v.parse().expect("coordinate"))
+                .collect();
+            if f.len() == 3 {
+                coords.extend(f);
+            }
+        }
+        Array1::from(coords)
+    }
+
+    fn quench(n: usize, x: ArrayView1<f64>) -> f64 {
+        let pot = PairPotential::lennard_jones(n);
+        let mut opt = WarmLbfgs::default();
+        let (f, _, _) = opt.minimize(x, 5000, |v| Some(pot.value_and_gradient(v)));
+        f
+    }
+
+    /// The eight least coordinated points scattered onto a sphere outside
+    /// the cluster.
+    fn displace_surface(x: &Array1<f64>, cutoff: f64, seed: u64) -> Array1<f64> {
+        use rand::{Rng, SeedableRng};
+        let n = x.len() / 3;
+        let xs = x.to_vec();
+        let cut2 = cutoff * cutoff;
+        let mut coordination = vec![0usize; n];
+        let mut rmax: f64 = 0.0;
+        for a in 0..n {
+            rmax = rmax.max(dist2([0.0; 3], point(&xs, a)).sqrt());
+            for b in (a + 1)..n {
+                if dist2(point(&xs, a), point(&xs, b)) < cut2 {
+                    coordination[a] += 1;
+                    coordination[b] += 1;
+                }
+            }
+        }
+        let mut order: Vec<usize> = (0..n).collect();
+        order.sort_by_key(|&i| coordination[i]);
+        let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
+        let mut out = xs;
+        for &atom in order.iter().take(8) {
+            let u: f64 = rng.random_range(-1.0..1.0);
+            let phi: f64 = rng.random_range(0.0..std::f64::consts::TAU);
+            let r = 1.15 * rmax;
+            let s = (1.0 - u * u).sqrt();
+            out[3 * atom] = r * s * phi.cos();
+            out[3 * atom + 1] = r * s * phi.sin();
+            out[3 * atom + 2] = r * u;
+        }
+        Array1::from(out)
+    }
+
+    fn restores(name: &str, n: usize, reference: f64, seed: u64) -> (f64, f64) {
+        let gm = fixture(name);
+        assert_eq!(gm.len(), 3 * n);
+        let cfg = LatticeSearchConfig::lennard_jones(n);
+        let start = displace_surface(&gm, cfg.neighbour_cutoff, seed);
+        let mut ledger = Ledger::new(400_000);
+        let (built, _) = optimise_occupation(&cfg, &mut ledger, start.view());
+        let occupied = quench(n, built.view());
+        let mut ledger = Ledger::new(400_000);
+        let rebuilt = reoccupy(&cfg, &mut ledger, gm.view());
+        let reoccupied = quench(n, rebuilt.view());
+        assert!(
+            quench(n, gm.view()) < reference + 1e-3,
+            "fixture {name} does not quench to {reference}"
+        );
+        (occupied, reoccupied)
+    }
+
+    #[test]
+    fn occupation_optimisation_restores_displaced_surface_atoms_of_lj98() {
+        let (occupied, reoccupied) = restores("lj98_gm", 98, -543.665361, 1);
+        assert!(occupied < -543.665361 + 1e-3, "occupation gave {occupied}");
+        assert!(
+            reoccupied < -543.665361 + 1e-3,
+            "reoccupation gave {reoccupied}"
+        );
+    }
+
+    #[test]
+    fn occupation_optimisation_restores_displaced_surface_atoms_of_lj104() {
+        let (occupied, reoccupied) = restores("lj104_gm", 104, -582.086642, 1);
+        assert!(occupied < -582.086642 + 1e-3, "occupation gave {occupied}");
+        assert!(
+            reoccupied < -582.086642 + 1e-3,
+            "reoccupation gave {reoccupied}"
+        );
     }
 
     #[test]
