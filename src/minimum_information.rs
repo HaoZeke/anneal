@@ -318,3 +318,24 @@ fn validate_candidate(candidate: &SearchActionCandidate) -> Result<(), MinimumIn
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn lower_truncation_at_the_mean_has_the_half_normal_variance() {
+        let variance = lower_truncated_variance(0.0, 1.0, 0.0);
+
+        assert!((variance - (1.0 - 2.0 / std::f64::consts::PI)).abs() < 1e-10);
+    }
+
+    #[test]
+    fn a_sampled_optimum_location_reduces_correlated_query_variance() {
+        let (_, correlated_variance) = condition_on_noiseless_pair(0.2, 1.0, -0.5, 2.0, 0.8, -1.0);
+        let (_, independent_variance) = condition_on_noiseless_pair(0.2, 1.0, -0.5, 2.0, 0.0, -1.0);
+
+        assert!((correlated_variance - 0.68).abs() < 1e-12);
+        assert!((independent_variance - 1.0).abs() < 1e-12);
+    }
+}
