@@ -2160,7 +2160,7 @@ fn refine_cartesian_with_prfo<S: PesSurface>(
     let free_dimension = cartesian_sella_free_dimension(start.len(), cartesian_index)?;
     let initial_trust = config.saddle_displacement.min(config.maximum_move);
     let sella_config = SellaSaddleConfig {
-        delta: initial_trust,
+        delta: initial_trust / free_dimension as f64,
         force_tol: config.saddle_force_tolerance,
         force_gate: ForceGate::LinfNorm,
         order: 1,
