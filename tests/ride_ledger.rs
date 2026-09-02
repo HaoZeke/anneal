@@ -311,31 +311,32 @@ fn a_certified_edge_is_useful_even_when_it_misses_the_nominal_source() {
 }
 
 #[test]
-fn an_unresolved_saddle_counts_as_method_reliability_not_edge_novelty() {
+fn an_unresolved_saddle_is_diagnostic_not_an_allocation_reward() {
     let portfolio = RidePortfolio::new(1, vec![RideMethod::Dimer, RideMethod::Lanczos]).unwrap();
-    let mut ledger = RideLedger::new(portfolio);
-    ledger
+    let mut diagnostic = RideLedger::new(portfolio);
+    diagnostic
         .register_source(source(17, -104.2, &[(4, 6)]))
         .unwrap();
-    let first = ledger.claim(2, 101).unwrap();
-    let second = ledger.claim(7, 102).unwrap();
-    let (dimer, lanczos) = if first.arm.method == RideMethod::Dimer {
-        (first, second)
-    } else {
-        (second, first)
-    };
-    ledger
+    let mut control = diagnostic.clone();
+    let diagnostic_first = diagnostic.claim(2, 101).unwrap();
+    let diagnostic_second = diagnostic.claim(7, 102).unwrap();
+    let control_first = control.claim(2, 101).unwrap();
+    let control_second = control.claim(7, 102).unwrap();
+    assert_eq!(diagnostic_first.arm, control_first.arm);
+    assert_eq!(diagnostic_second.arm, control_second.arm);
+
+    diagnostic
         .report(
-            dimer.replica,
-            dimer.id,
+            diagnostic_first.replica,
+            diagnostic_first.id,
             4_000,
             RideOutcome::Failed(RideFailure::MinimumModeLostCurvature),
         )
         .unwrap();
-    let credit = ledger
+    let credit = diagnostic
         .report(
-            lanczos.replica,
-            lanczos.id,
+            diagnostic_second.replica,
+            diagnostic_second.id,
             2_000,
             RideOutcome::Unresolved {
                 saddle: 70,
@@ -343,18 +344,39 @@ fn an_unresolved_saddle_counts_as_method_reliability_not_edge_novelty() {
             },
         )
         .unwrap();
-    ledger
+    control
+        .report(
+            control_first.replica,
+            control_first.id,
+            4_000,
+            RideOutcome::Failed(RideFailure::MinimumModeLostCurvature),
+        )
+        .unwrap();
+    control
+        .report(
+            control_second.replica,
+            control_second.id,
+            2_000,
+            RideOutcome::Failed(RideFailure::CollapsedConnection),
+        )
+        .unwrap();
+    diagnostic
+        .register_source(source(23, -107.5, &[(4, 8)]))
+        .unwrap();
+    control
         .register_source(source(23, -107.5, &[(4, 8)]))
         .unwrap();
 
-    let guided = ledger.claim(9, 103).unwrap();
+    let diagnostic_next = diagnostic.claim(9, 103).unwrap();
+    let control_next = control.claim(9, 103).unwrap();
 
     assert!(!credit.certified_connection);
     assert_eq!(credit.failure, Some(RideFailure::CollapsedConnection));
     assert!(credit.novel_saddle);
     assert!(!credit.novel_edge);
-    assert_eq!(ledger.unique_saddles(), 1);
-    assert_eq!(guided.arm.method, RideMethod::Lanczos);
+    assert_eq!(diagnostic.unique_saddles(), 1);
+    assert_eq!(control.unique_saddles(), 0);
+    assert_eq!(diagnostic_next.arm, control_next.arm);
 }
 
 #[test]
@@ -403,18 +425,25 @@ fn local_environment_book_exposes_one_stable_representative_per_class() {
 }
 
 #[test]
-fn novel_edge_yield_outweighs_a_failed_arm_after_initial_coverage() {
+fn edge_novelty_is_recorded_without_becoming_an_allocation_reward() {
     let portfolio = RidePortfolio::new(1, vec![RideMethod::Dimer]).unwrap();
-    let mut ledger = RideLedger::new(portfolio);
-    ledger
+    let mut diagnostic = RideLedger::new(portfolio);
+    diagnostic
         .register_source(source(17, -104.2, &[(4, 6)]))
         .unwrap();
+    let mut control = diagnostic.clone();
 
-    let productive = ledger.claim(2, 101).unwrap();
-    ledger
+    let diagnostic_first = diagnostic.claim(2, 101).unwrap();
+    let diagnostic_second = diagnostic.claim(7, 102).unwrap();
+    let control_first = control.claim(2, 101).unwrap();
+    let control_second = control.claim(7, 102).unwrap();
+    assert_eq!(diagnostic_first.arm, control_first.arm);
+    assert_eq!(diagnostic_second.arm, control_second.arm);
+
+    let credit = diagnostic
         .report(
             2,
-            productive.id,
+            diagnostic_first.id,
             140,
             RideOutcome::Certified {
                 saddle: 70,
@@ -422,41 +451,63 @@ fn novel_edge_yield_outweighs_a_failed_arm_after_initial_coverage() {
             },
         )
         .unwrap();
-    let failed = ledger.claim(7, 102).unwrap();
-    ledger
+    diagnostic
         .report(
             7,
-            failed.id,
+            diagnostic_second.id,
+            90,
+            RideOutcome::Failed(RideFailure::SaddleNotConverged),
+        )
+        .unwrap();
+    control
+        .report(
+            2,
+            control_first.id,
+            140,
+            RideOutcome::Failed(RideFailure::SaddleNotConverged),
+        )
+        .unwrap();
+    control
+        .report(
+            7,
+            control_second.id,
             90,
             RideOutcome::Failed(RideFailure::SaddleNotConverged),
         )
         .unwrap();
 
-    let repeated = ledger.claim(9, 103).unwrap();
+    let diagnostic_next = diagnostic.claim(9, 103).unwrap();
+    let control_next = control.claim(9, 103).unwrap();
 
-    assert_eq!(repeated.arm, productive.arm);
-    assert_ne!(repeated.arm, failed.arm);
+    assert!(credit.novel_saddle);
+    assert!(credit.novel_edge);
+    assert_eq!(diagnostic.unique_edges(), 1);
+    assert_eq!(control.unique_edges(), 0);
+    assert_eq!(diagnostic_next.arm, control_next.arm);
 }
 
 #[test]
-fn same_system_method_evidence_guides_untried_arms() {
+fn method_outcomes_do_not_transfer_between_source_minima() {
     let portfolio = RidePortfolio::new(1, vec![RideMethod::Dimer, RideMethod::Lanczos]).unwrap();
-    let mut ledger = RideLedger::new(portfolio);
-    ledger
+    let mut lanczos_succeeds = RideLedger::new(portfolio);
+    lanczos_succeeds
         .register_source(source(17, -104.2, &[(4, 6)]))
         .unwrap();
+    let mut dimer_succeeds = lanczos_succeeds.clone();
 
-    let first = ledger.claim(2, 101).unwrap();
-    let second = ledger.claim(7, 102).unwrap();
+    let first = lanczos_succeeds.claim(2, 101).unwrap();
+    let second = lanczos_succeeds.claim(7, 102).unwrap();
     let (dimer, lanczos) = if first.arm.method == RideMethod::Dimer {
         (first, second)
     } else {
         (second, first)
     };
-    assert_eq!(dimer.arm.method, RideMethod::Dimer);
-    assert_eq!(lanczos.arm.method, RideMethod::Lanczos);
+    let dimer_control = dimer_succeeds.claim(dimer.replica, dimer.seed).unwrap();
+    let lanczos_control = dimer_succeeds.claim(lanczos.replica, lanczos.seed).unwrap();
+    assert_eq!(dimer.arm, dimer_control.arm);
+    assert_eq!(lanczos.arm, lanczos_control.arm);
 
-    ledger
+    lanczos_succeeds
         .report(
             dimer.replica,
             dimer.id,
@@ -464,7 +515,7 @@ fn same_system_method_evidence_guides_untried_arms() {
             RideOutcome::Failed(RideFailure::MinimumModeLostCurvature),
         )
         .unwrap();
-    ledger
+    lanczos_succeeds
         .report(
             lanczos.replica,
             lanczos.id,
@@ -475,17 +526,122 @@ fn same_system_method_evidence_guides_untried_arms() {
             },
         )
         .unwrap();
-    ledger
+    dimer_succeeds
+        .report(
+            dimer_control.replica,
+            dimer_control.id,
+            4_000,
+            RideOutcome::Certified {
+                saddle: 71,
+                endpoints: [17, 31],
+            },
+        )
+        .unwrap();
+    dimer_succeeds
+        .report(
+            lanczos_control.replica,
+            lanczos_control.id,
+            2_000,
+            RideOutcome::Failed(RideFailure::MinimumModeLostCurvature),
+        )
+        .unwrap();
+    lanczos_succeeds
+        .register_source(source(23, -107.5, &[(4, 8)]))
+        .unwrap();
+    dimer_succeeds
         .register_source(source(23, -107.5, &[(4, 8)]))
         .unwrap();
 
-    let guided = ledger.claim(9, 103).unwrap();
+    let after_lanczos_success = lanczos_succeeds.claim(9, 103).unwrap();
+    let after_dimer_success = dimer_succeeds.claim(9, 103).unwrap();
 
-    assert_eq!(guided.arm.method, RideMethod::Lanczos);
+    assert_eq!(after_lanczos_success.arm, after_dimer_success.arm);
 }
 
 #[test]
-fn same_pes_method_transfer_uses_stationary_yield_per_charged_call() {
+fn charged_cost_cannot_rank_default_claims() {
+    let portfolio = RidePortfolio::new(1, vec![RideMethod::Dimer, RideMethod::Lanczos]).unwrap();
+    let mut dimer_expensive = RideLedger::new(portfolio);
+    dimer_expensive
+        .register_source(source(17, -104.2, &[(4, 6)]))
+        .unwrap();
+    let mut lanczos_expensive = dimer_expensive.clone();
+
+    let dimer_expensive_orders = (0..4)
+        .map(|replica| {
+            dimer_expensive
+                .claim(replica, 1_000 + u64::from(replica))
+                .unwrap()
+        })
+        .collect::<Vec<_>>();
+    let lanczos_expensive_orders = (0..4)
+        .map(|replica| {
+            lanczos_expensive
+                .claim(replica, 1_000 + u64::from(replica))
+                .unwrap()
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        dimer_expensive_orders
+            .iter()
+            .map(|order| &order.arm)
+            .collect::<Vec<_>>(),
+        lanczos_expensive_orders
+            .iter()
+            .map(|order| &order.arm)
+            .collect::<Vec<_>>()
+    );
+    for (offset, (left, right)) in dimer_expensive_orders
+        .into_iter()
+        .zip(lanczos_expensive_orders)
+        .enumerate()
+    {
+        let left_charged = match left.arm.method {
+            RideMethod::Dimer => 4_000,
+            RideMethod::Lanczos => 500,
+        };
+        let right_charged = match right.arm.method {
+            RideMethod::Dimer => 500,
+            RideMethod::Lanczos => 4_000,
+        };
+        dimer_expensive
+            .report(
+                left.replica,
+                left.id,
+                left_charged,
+                RideOutcome::Certified {
+                    saddle: 70 + offset as u64,
+                    endpoints: [17, 29 + offset as u64],
+                },
+            )
+            .unwrap();
+        lanczos_expensive
+            .report(
+                right.replica,
+                right.id,
+                right_charged,
+                RideOutcome::Certified {
+                    saddle: 70 + offset as u64,
+                    endpoints: [17, 29 + offset as u64],
+                },
+            )
+            .unwrap();
+    }
+    dimer_expensive
+        .register_source(source(23, -107.5, &[(4, 8)]))
+        .unwrap();
+    lanczos_expensive
+        .register_source(source(23, -107.5, &[(4, 8)]))
+        .unwrap();
+
+    let after_expensive_dimers = dimer_expensive.claim(9, 2_000).unwrap();
+    let after_expensive_lanczos = lanczos_expensive.claim(9, 2_000).unwrap();
+
+    assert_eq!(after_expensive_dimers.arm, after_expensive_lanczos.arm);
+}
+
+#[test]
+fn explicit_information_scores_override_network_history() {
     let portfolio = RidePortfolio::new(1, vec![RideMethod::Dimer, RideMethod::Lanczos]).unwrap();
     let mut ledger = RideLedger::new(portfolio);
     ledger
@@ -496,86 +652,13 @@ fn same_pes_method_transfer_uses_stationary_yield_per_charged_call() {
         .map(|replica| ledger.claim(replica, 1_000 + u64::from(replica)).unwrap())
         .collect::<Vec<_>>();
     for (offset, order) in orders.into_iter().enumerate() {
-        let charged = match order.arm.method {
-            RideMethod::Dimer => 4_000,
-            RideMethod::Lanczos => 500,
-        };
         ledger
             .report(
                 order.replica,
                 order.id,
-                charged,
+                500 + offset as u64,
                 RideOutcome::Certified {
-                    saddle: 70 + offset as u64,
-                    endpoints: [17, 29 + offset as u64],
-                },
-            )
-            .unwrap();
-    }
-    ledger
-        .register_source(source(23, -107.5, &[(4, 8)]))
-        .unwrap();
-
-    let guided = ledger.claim(9, 2_000).unwrap();
-
-    assert_eq!(guided.arm.source_basin, 23);
-    assert_eq!(guided.arm.method, RideMethod::Lanczos);
-}
-
-#[test]
-fn certification_reliability_transfers_when_a_source_edge_is_saturated() {
-    let portfolio = RidePortfolio::new(2, vec![RideMethod::Dimer, RideMethod::Lanczos]).unwrap();
-    let mut ledger = RideLedger::new(portfolio);
-    ledger
-        .register_source(source(17, -104.2, &[(4, 6)]))
-        .unwrap();
-
-    let orders = (0..8)
-        .map(|replica| ledger.claim(replica, 1_000 + u64::from(replica)).unwrap())
-        .collect::<Vec<_>>();
-    let mut dimers = orders
-        .iter()
-        .filter(|order| order.arm.method == RideMethod::Dimer)
-        .cloned()
-        .collect::<Vec<_>>();
-    let lanczos = orders
-        .iter()
-        .filter(|order| order.arm.method == RideMethod::Lanczos)
-        .cloned()
-        .collect::<Vec<_>>();
-    assert_eq!(dimers.len(), 4);
-    assert_eq!(lanczos.len(), 4);
-
-    let first_dimer = dimers.remove(0);
-    ledger
-        .report(
-            first_dimer.replica,
-            first_dimer.id,
-            3_000,
-            RideOutcome::Certified {
-                saddle: 70,
-                endpoints: [17, 29],
-            },
-        )
-        .unwrap();
-    for order in dimers {
-        ledger
-            .report(
-                order.replica,
-                order.id,
-                4_000,
-                RideOutcome::Failed(RideFailure::MinimumModeLostCurvature),
-            )
-            .unwrap();
-    }
-    for (offset, order) in lanczos.into_iter().enumerate() {
-        ledger
-            .report(
-                order.replica,
-                order.id,
-                2_000,
-                RideOutcome::Certified {
-                    saddle: 80 + offset as u64,
+                    saddle: 70,
                     endpoints: [17, 29],
                 },
             )
@@ -585,10 +668,25 @@ fn certification_reliability_transfers_when_a_source_edge_is_saturated() {
         .register_source(source(23, -107.5, &[(4, 8)]))
         .unwrap();
 
-    let guided = ledger.claim(9, 2_000).unwrap();
+    let preferred = ledger
+        .claimable_arms()
+        .into_iter()
+        .find(|(arm, _)| arm.source_basin == 23 && arm.method == RideMethod::Lanczos)
+        .unwrap()
+        .0;
+    let scores = ledger
+        .claimable_arms()
+        .into_iter()
+        .map(|(arm, _)| {
+            let score = f64::from(arm == preferred);
+            (arm, score)
+        })
+        .collect::<BTreeMap<_, _>>();
+    let ranked = ledger.claim_ranked(9, 2_000, &scores).unwrap();
 
-    assert_eq!(guided.arm.source_basin, 23);
-    assert_eq!(guided.arm.method, RideMethod::Lanczos);
+    assert_eq!(ledger.unique_saddles(), 1);
+    assert_eq!(ledger.unique_edges(), 1);
+    assert_eq!(ranked.arm, preferred);
 }
 
 #[test]
