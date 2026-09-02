@@ -22,7 +22,7 @@ pub mod mailbox;
 pub mod server;
 
 /// Wire protocol version accepted by this release.
-pub const PROTOCOL_VERSION: u16 = 26;
+pub const PROTOCOL_VERSION: u16 = 27;
 /// `Sample` draw that returns the active-catalog incumbent.
 pub const INCUMBENT_SAMPLE_DRAW: u64 = u64::MAX;
 
@@ -251,6 +251,11 @@ pub enum CatalogOperation {
     Sample {
         /// Explicit deterministic random draw.
         draw: u64,
+    },
+    /// Retrieve one immutable census basin's validated representative.
+    SampleBasin {
+        /// Coordinator-assigned basin identity.
+        basin: u64,
     },
     /// Request a sampled farthest-hole proposal.
     DescriptorHole {
@@ -837,6 +842,7 @@ pub fn encode_request(request: &CatalogRequest) -> Result<Vec<u8>, ProtocolError
             fill_candidate(operation.init_offer_candidate(), candidate);
         }
         CatalogOperation::Sample { draw } => operation.set_sample(*draw),
+        CatalogOperation::SampleBasin { basin } => operation.set_sample_basin(*basin),
         CatalogOperation::DescriptorHole {
             current,
             samples,
@@ -1023,6 +1029,7 @@ pub(crate) fn decode_request_reader(
             candidate: read_candidate(candidate.map_err(wire_error)?)?,
         },
         catalog_request::operation::Sample(draw) => CatalogOperation::Sample { draw },
+        catalog_request::operation::SampleBasin(basin) => CatalogOperation::SampleBasin { basin },
         catalog_request::operation::PostFrontier(post) => {
             let post = post.map_err(wire_error)?;
             CatalogOperation::PostFrontier {

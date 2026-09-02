@@ -405,6 +405,34 @@ impl CatalogClient {
         }
     }
 
+    /// Retrieve the validated representative of one immutable census basin.
+    pub fn sample_basin(
+        &mut self,
+        event_sequence: u64,
+        basin: u64,
+    ) -> Result<Option<CatalogCandidate>, CatalogClientError> {
+        match self
+            .call(event_sequence, CatalogOperation::SampleBasin { basin })?
+            .payload
+        {
+            AcceptedPayload::Candidate(candidate) => Ok(Some(candidate)),
+            AcceptedPayload::None => Ok(None),
+            AcceptedPayload::DescriptorHole(_)
+            | AcceptedPayload::BoundaryCrossing(_)
+            | AcceptedPayload::CoordinatorStatus(_)
+            | AcceptedPayload::BridgeAssignment(_)
+            | AcceptedPayload::PolicyState(_)
+            | AcceptedPayload::PopulationEpoch(_)
+            | AcceptedPayload::CatalogMutation(_)
+            | AcceptedPayload::FrontierPost(_)
+            | AcceptedPayload::RideWork(_)
+            | AcceptedPayload::RideCredit(_) => Err(ProtocolError::Malformed(
+                "basin sample returned an incompatible payload".into(),
+            )
+            .into()),
+        }
+    }
+
     /// Post one raw frontier excursion state to the shared ladder.
     pub fn post_frontier(
         &mut self,

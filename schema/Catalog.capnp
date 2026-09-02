@@ -419,6 +419,10 @@ struct CatalogRequest {
     ledgerBatch @22 :List(LedgerBatchEvent);
     claimRide @23 :UInt64;
     reportRide @24 :RideReportRequest;
+    # Retrieve the coordinator-validated representative of one immutable
+    # census basin. This addresses spectral-seam assignments by basin identity
+    # instead of relying on the capacity-limited active-catalog slot order.
+    sampleBasin @25 :UInt64;
   }
 }
 

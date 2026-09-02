@@ -1057,6 +1057,13 @@ fn apply_request(
                 ));
             }
         }
+        CatalogOperation::SampleBasin { basin } => {
+            if let Some(scientific) = state.scientific.as_ref()
+                && let Some(candidate) = scientific.ride_candidates.get(basin)
+            {
+                payload = AcceptedPayload::Candidate(candidate.clone());
+            }
+        }
         CatalogOperation::PostFrontier { post } => {
             // A post is banked, never validated as a minimum: it is a
             // live excursion state and the census must not see it. The
