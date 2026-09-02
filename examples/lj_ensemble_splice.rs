@@ -33,7 +33,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use anneal_core::bias::BasinBias;
-use anneal_core::corekey::{CoreRule, core_key_nn};
+use anneal_core::corekey::{CoreRule, core_key_nn, motif_class};
 use anneal_core::methods::cluster_hopping::{
     ChainCheckpoint, CheckpointAction, ClusterFingerprint, Config, Ledger, Outcome, random_cluster,
     run_with_bias_at_checkpoints,
@@ -567,6 +567,9 @@ fn run_chain(
     let temperature = cfg.temperature;
     let min_separation = cfg.min_separation;
     let species = vec![1u32; n];
+    // CORE_KEY=motif keys the core table on the coarse five-fold class
+    // instead of the per-minimum ring-graph hash.
+    let motif_key = env_string("CORE_KEY", "ring") == "motif";
     let mut child_opt = WarmLbfgs::default();
     let mut checkpoint = |snapshot: ChainCheckpoint<'_>| {
         {
@@ -603,12 +606,16 @@ fn run_chain(
             return CheckpointAction::ExternalWork { external_calls };
         }
         if let Some(cores) = cores.as_ref() {
-            let key = core_key_nn(
-                snapshot.current_state(),
-                &species,
-                CoreRule::NearMaximum { slack: 1 },
-            )
-            .key;
+            let key = if motif_key {
+                u64::from(motif_class(snapshot.current_state()).index())
+            } else {
+                core_key_nn(
+                    snapshot.current_state(),
+                    &species,
+                    CoreRule::NearMaximum { slack: 1 },
+                )
+                .key
+            };
             let energy = snapshot.current_energy();
             let mut table = cores.lock().expect("core table");
             let stat = table.stats.entry(key).or_insert(CoreStat {
