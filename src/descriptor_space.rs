@@ -1,9 +1,13 @@
 //! Versioned multiscale invariant descriptor spaces for catalog geometry.
 
+#[cfg(feature = "featomic")]
+mod featomic;
 mod provider;
 pub mod pullback;
 mod universal;
 
+#[cfg(feature = "featomic")]
+pub use featomic::{FeatomicSoapProvider, FeatomicSoapProviderError, FeatomicSoapScale};
 pub use provider::{
     DescriptorOutputSpec, DescriptorProviderContract, DescriptorProviderError,
     DescriptorProviderInput, InvariantDescriptorProvider,
