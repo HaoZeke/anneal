@@ -39,6 +39,7 @@ use anneal_core::methods::cluster_hopping::{
     run_with_bias_at_checkpoints,
 };
 use anneal_core::methods::cluster_search::{Encounter, median_encounter};
+use anneal_core::methods::lattice_search::{LatticeSearchConfig, reoccupy};
 use anneal_core::methods::splice::cut_and_splice;
 use anneal_core::methods::two_phase::{
     Cutoff, SharedSurfaceAllocator, SurfacePortfolio, TwoPhase, largest_pair_distance, penalty,
@@ -247,6 +248,12 @@ struct ExchangeConfig {
     /// Calls a core is allowed without improvement before a chain in it
     /// restarts from a fresh random cluster.
     core_patience: usize,
+    /// Whether the chain rebuilds its surface from its interior on the
+    /// lattice grown from that interior at every `reoccupy_interval` calls,
+    /// quenches the rebuilt structure and adopts it when it is lower.
+    reoccupy: bool,
+    /// Calls between reoccupation attempts.
+    reoccupy_interval: usize,
 }
 
 /// One core superbasin shared by the chains of an ensemble.
@@ -551,6 +558,11 @@ fn run_chain(
     );
     let mut tally = ExchangeTally::default();
     let mut next_attempt = exchange.interval;
+    let mut next_reoccupy = exchange.reoccupy_interval;
+    let lattice_cfg = match &surface_kind {
+        Surface::LennardJones => LatticeSearchConfig::lennard_jones(n),
+        Surface::Morse(_, rho) => LatticeSearchConfig::morse(n, *rho),
+    };
     let relax_steps = cfg.relax_steps;
     let temperature = cfg.temperature;
     let min_separation = cfg.min_separation;
@@ -620,6 +632,29 @@ fn run_chain(
                 );
             }
             return CheckpointAction::Continue;
+        }
+        if exchange.reoccupy && snapshot.charged() >= next_reoccupy {
+            next_reoccupy = snapshot.charged() + exchange.reoccupy_interval;
+            let mut private = Ledger::new(usize::MAX / 2);
+            let rebuilt = reoccupy(&lattice_cfg, &mut private, snapshot.current_state());
+            let mut external_calls = private.spent();
+            child_opt.forget();
+            let (energy, relaxed, _) = child_opt.minimize(rebuilt.view(), relax_steps, |v| {
+                external_calls += 1;
+                Some(child_surface.energy(v))
+            });
+            tally.attempts += 1;
+            tally.external_calls += external_calls;
+            if energy.is_finite() && energy < snapshot.current_energy() - 1e-6 {
+                tally.adopted += 1;
+                tally.below_current += 1;
+                return CheckpointAction::ExternalAdopt {
+                    state: relaxed,
+                    action: "reoccupy".to_owned(),
+                    external_calls,
+                };
+            }
+            return CheckpointAction::ExternalWork { external_calls };
         }
         if !exchange.enabled || snapshot.charged() < next_attempt {
             return CheckpointAction::Continue;
@@ -738,7 +773,7 @@ fn run_chain(
             .iter()
             .filter(|t| t.to_energy < reference + 1e-4)
             .min_by_key(|t| t.hop)
-            .is_some_and(|t| t.action == "splice" || t.action == "pbh")
+            .is_some_and(|t| t.action == "splice" || t.action == "pbh" || t.action == "reoccupy")
     });
     ChainReport {
         charged: ledger.spent(),
@@ -790,6 +825,8 @@ fn main() {
         pbh_dcut_scale: env_f64("PBH_DCUT", 1.5),
         core_tabu: mode == "coretabu",
         core_patience: env_usize("CORE_PATIENCE", 20_000),
+        reoccupy: env_usize("REOCCUPY", 0) == 1,
+        reoccupy_interval: env_usize("REOCCUPY_INTERVAL", 5_000),
     };
     let surface = Surface::from_environment(n);
     let target = surface.reference(n);
