@@ -42,6 +42,15 @@ fn hexamer_signature_records_gfn2_kind_and_universal_dim() {
     assert_eq!(signature.descriptor.schema, DESCRIPTOR_SCHEMA);
     assert_eq!(signature.descriptor.schema, UNIVERSAL_DESCRIPTOR_SCHEMA);
     assert_eq!(signature.descriptor.version, UNIVERSAL_DESCRIPTOR_VERSION);
+    assert_eq!(UNIVERSAL_DESCRIPTOR_VERSION, 2);
+    assert_eq!(
+        signature
+            .descriptor
+            .hyperparameters
+            .get("normalization")
+            .map(String::as_str),
+        Some("contractive-l2-unit-v2")
+    );
     assert_eq!(signature.descriptor.species_channels, vec![1, 8]);
     assert_eq!(
         signature.descriptor.hyperparameters.get("descriptor_dim"),
