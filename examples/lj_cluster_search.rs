@@ -1375,6 +1375,14 @@ fn main() {
     // superbasin plus AS-KMC height is an intra-packing leftover walk:
     // LJ75 sits on the Mackay shelf and never reaches ico or Marks.
     cfg.anneal_diversity = opts.contains(&"csa");
+    // Key the basin bias on the prospective superbasin: the coloured core
+    // ring-graph key, so every shelf isomer deposits into one well and the
+    // filling raises the whole family at once.
+    if opts.contains(&"corekey") {
+        cfg.keying = anneal_core::methods::cluster_hopping::Keying::Core;
+        cfg.merge_radius = 0.5;
+        println!("  keying on the core ring-graph key, merge radius 0.5");
+    }
     // Two-phase relaxation on the compacted surface (Locatelli and Schoen;
     // Doye). TWO_PHASE_KAPPA sets a relative cutoff, TWO_PHASE_D a fixed
     // one in pair-well units, TWO_PHASE_BETA the penalty strength and

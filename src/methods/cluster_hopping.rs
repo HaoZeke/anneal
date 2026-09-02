@@ -4400,6 +4400,13 @@ pub enum ClusterFingerprint {
     /// Euclidean distance between two of them is a shape distance.
     #[cfg(feature = "ira")]
     Canonical(Box<crate::shape::CanonicalOrder>),
+    /// Coloured core ring-graph key: one point per superbasin, spread over
+    /// four coordinates at least one apart, so any merge radius below one
+    /// keys exactly on the superbasin.
+    Core {
+        /// Optional atomic numbers, one per point.
+        species: Option<Vec<u32>>,
+    },
     /// Unit high-`l` mean SOAP. Packing superbasin, not an isomer.
     #[cfg(feature = "featomic")]
     SoapMean {
@@ -4446,6 +4453,7 @@ impl ClusterFingerprint {
         let _ = reference;
         match keying {
             Keying::Shape => ClusterFingerprint::Coordinates,
+            Keying::Core => ClusterFingerprint::Core { species: None },
             Keying::Distances => ClusterFingerprint::Spectrum(SortedPairs { n_points }),
             Keying::Sites => ClusterFingerprint::Sites(SiteEnergies { n_points }),
             Keying::SoapPacking => ClusterFingerprint::Spectrum(SortedPairs { n_points }),
@@ -4469,6 +4477,9 @@ impl ClusterFingerprint {
     /// and species.
     pub fn of_config(cfg: &Config, reference: &Array1<f64>) -> Self {
         match effective_keying(cfg) {
+            Keying::Core => ClusterFingerprint::Core {
+                species: cfg.species.clone(),
+            },
             Keying::SoapPacking => {
                 #[cfg(feature = "featomic")]
                 {
@@ -4494,6 +4505,14 @@ impl Fingerprint for ClusterFingerprint {
         match self {
             ClusterFingerprint::Spectrum(s) => s.describe(x),
             ClusterFingerprint::Coordinates => x.to_owned(),
+            ClusterFingerprint::Core { species } => {
+                let key = crate::corekey::core_key_nn(
+                    x,
+                    species.as_deref().unwrap_or(&[]),
+                    crate::corekey::CoreRule::default(),
+                );
+                Array1::from(key.coordinates().to_vec())
+            }
             ClusterFingerprint::Sites(s) => s.describe(x),
             #[cfg(feature = "ira")]
             ClusterFingerprint::Canonical(c) => c.describe(x),
