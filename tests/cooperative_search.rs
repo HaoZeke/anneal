@@ -2089,7 +2089,7 @@ fn cooperative_trace_records_policy_diagnostic_evidence() {
     assert!(trace.contains("\"policy_relation\":\"incumbent\""));
     assert!(trace.contains("\"policy_total_visits\":2"));
     assert!(trace.contains("\"policy_transition_uncertainty\":"));
-    assert!(trace.contains("\"policy_discovery_role\":\"saddle_ride\""));
+    assert!(trace.contains("\"policy_discovery_role\":\"basin_escape\""));
     assert!(trace.contains("\"policy_discovery_epoch\":0"));
     assert!(trace.contains("\"policy_basin_unseen_mass_upper\":1"));
     assert!(trace.contains("\"policy_saddle_unseen_mass_upper\":1"));
