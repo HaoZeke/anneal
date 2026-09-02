@@ -269,10 +269,46 @@ pub struct StructureView<'a> {
     pub context: &'a StructureContext,
 }
 
+/// Exact relation between two stationary-structure representatives.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ExactStructureRelation {
+    /// The structures are different stationary points.
+    Distinct,
+    /// The structures are the same representative within the witness tolerance.
+    Equivalent,
+    /// A non-identity atom permutation is required to establish equivalence.
+    NontrivialPermutation(Vec<usize>),
+}
+
+impl ExactStructureRelation {
+    /// Whether the relation belongs to one exact stationary-point identity.
+    pub fn is_equivalent(&self) -> bool {
+        !matches!(self, Self::Distinct)
+    }
+
+    /// Whether the relation certifies a quotient-space rearrangement.
+    pub fn is_nontrivial_permutation(&self) -> bool {
+        matches!(self, Self::NontrivialPermutation(_))
+    }
+}
+
 /// Symmetry-aware final witness for structural identity.
 pub trait ExactStructureWitness {
     /// Whether two Cartesian structures represent the same stationary point.
     fn equivalent(&self, left: ArrayView1<f64>, right: ArrayView1<f64>) -> bool;
+
+    /// Exact relation between two Cartesian representatives.
+    ///
+    /// The default distinguishes identity from non-identity but does not claim
+    /// a symmetry operation. Implementations backed by an exact matcher can
+    /// return the atom permutation that certifies a quotient-space self-loop.
+    fn relation(&self, left: ArrayView1<f64>, right: ArrayView1<f64>) -> ExactStructureRelation {
+        if self.equivalent(left, right) {
+            ExactStructureRelation::Equivalent
+        } else {
+            ExactStructureRelation::Distinct
+        }
+    }
 
     /// Whether two fully contextualized structures represent one identity.
     ///
@@ -281,6 +317,19 @@ pub trait ExactStructureWitness {
     /// this method to canonicalize symmetry-equivalent cells or domains.
     fn equivalent_structures(&self, left: StructureView<'_>, right: StructureView<'_>) -> bool {
         left.context == right.context && self.equivalent(left.coordinates, right.coordinates)
+    }
+
+    /// Exact relation between two fully contextualized representatives.
+    fn relation_structures(
+        &self,
+        left: StructureView<'_>,
+        right: StructureView<'_>,
+    ) -> ExactStructureRelation {
+        if left.context == right.context {
+            self.relation(left.coordinates, right.coordinates)
+        } else {
+            ExactStructureRelation::Distinct
+        }
     }
 }
 
@@ -658,13 +707,6 @@ pub struct PesExplorationConfig {
     pub branch_growth: f64,
     /// IRC force threshold before endpoint quenching.
     pub irc_force_tolerance: f64,
-    /// Preserve index-one paths whose quenched branches are symmetry-equivalent.
-    ///
-    /// Enable this when the exact-structure witness quotients rotations,
-    /// permutations, or periodic images. The resulting transition is a
-    /// self-loop in the quotient kinetic-transition network and never a
-    /// proposal to another basin.
-    pub certify_degenerate_rearrangements: bool,
     /// Refine the lowest-mode candidate with Sella order-1 P-RFO.
     pub refine_with_prfo: bool,
 }
@@ -692,7 +734,6 @@ impl Default for PesExplorationConfig {
             branch_attempts: 4,
             branch_growth: 2.0,
             irc_force_tolerance: 0.05,
-            certify_degenerate_rearrangements: false,
             refine_with_prfo: true,
         }
     }
@@ -2835,6 +2876,8 @@ where
         config,
         witness,
     )?;
+    let endpoint_relation =
+        witness.relation(positive.coordinates.view(), negative.coordinates.view());
     let origin = network.admit_quenched(origin_minimum, witness).id;
     let positive_id = network.admit_quenched(positive, witness).id;
     let negative_id = network.admit_quenched(negative, witness).id;
@@ -2850,7 +2893,7 @@ where
         saddle_max_gradient,
         ride_method: config.ride_method,
     };
-    if positive_id == negative_id && !config.certify_degenerate_rearrangements {
+    if positive_id == negative_id && !endpoint_relation.is_nontrivial_permutation() {
         network.retain_unresolved_saddle(candidate);
         return Err(PesExplorationError::CollapsedConnection);
     }
@@ -3116,6 +3159,16 @@ where
     let origin_descriptor = descriptor(descriptor_space, &origin_minimum, context.species())?;
     let forward_descriptor = descriptor(descriptor_space, &forward, context.species())?;
     let reverse_descriptor = descriptor(descriptor_space, &reverse, context.species())?;
+    let endpoint_relation = witness.relation_structures(
+        StructureView {
+            coordinates: forward.coordinates.view(),
+            context: &context,
+        },
+        StructureView {
+            coordinates: reverse.coordinates.view(),
+            context: &context,
+        },
+    );
     let origin = network.admit_minimum_with_context(
         origin_minimum.energy,
         origin_minimum.coordinates,
@@ -3157,7 +3210,7 @@ where
         ride_method: config.ride_method,
         irc_at_minimum,
     };
-    if forward_id.id == reverse_id.id && !config.certify_degenerate_rearrangements {
+    if forward_id.id == reverse_id.id && !endpoint_relation.is_nontrivial_permutation() {
         network.retain_unresolved_saddle(candidate);
         return Err(PesExplorationError::CollapsedConnection);
     }

@@ -524,10 +524,68 @@ pub struct IraStructureWitness {
     pub radius: f64,
 }
 
+fn exact_relation_from_match(
+    left: ArrayView1<f64>,
+    right: ArrayView1<f64>,
+    matched: Result<Match, ShapeError>,
+    radius: f64,
+) -> crate::pes_exploration::ExactStructureRelation {
+    use crate::pes_exploration::ExactStructureRelation;
+
+    let Ok(matched) = matched else {
+        return ExactStructureRelation::Distinct;
+    };
+    if !matched.distance.is_finite() || matched.distance > radius {
+        return ExactStructureRelation::Distinct;
+    }
+    let Some(permutation) = matched.permutation.as_ref() else {
+        return ExactStructureRelation::Equivalent;
+    };
+    if permutation
+        .iter()
+        .enumerate()
+        .all(|(slot, source)| slot == *source)
+    {
+        return ExactStructureRelation::Equivalent;
+    }
+    let identity_distance = (0..left.len() / 3)
+        .map(|atom| {
+            let point = [right[3 * atom], right[3 * atom + 1], right[3 * atom + 2]];
+            (0..3)
+                .map(|axis| {
+                    let transformed = matched.rotation[3 * axis] * point[0]
+                        + matched.rotation[3 * axis + 1] * point[1]
+                        + matched.rotation[3 * axis + 2] * point[2]
+                        + matched.translation[axis];
+                    (left[3 * atom + axis] - transformed).powi(2)
+                })
+                .sum::<f64>()
+                .sqrt()
+        })
+        .fold(0.0_f64, f64::max);
+    if identity_distance.is_finite() && identity_distance > radius {
+        ExactStructureRelation::NontrivialPermutation(permutation.clone())
+    } else {
+        ExactStructureRelation::Equivalent
+    }
+}
+
 impl crate::pes_exploration::ExactStructureWitness for IraStructureWitness {
     fn equivalent(&self, left: ArrayView1<f64>, right: ArrayView1<f64>) -> bool {
-        match_shapes(left, right, self.kmax_factor)
-            .is_ok_and(|matched| matched.distance <= self.radius)
+        self.relation(left, right).is_equivalent()
+    }
+
+    fn relation(
+        &self,
+        left: ArrayView1<f64>,
+        right: ArrayView1<f64>,
+    ) -> crate::pes_exploration::ExactStructureRelation {
+        exact_relation_from_match(
+            left,
+            right,
+            match_shapes(left, right, self.kmax_factor),
+            self.radius,
+        )
     }
 
     fn equivalent_structures(
@@ -535,20 +593,34 @@ impl crate::pes_exploration::ExactStructureWitness for IraStructureWitness {
         left: crate::pes_exploration::StructureView<'_>,
         right: crate::pes_exploration::StructureView<'_>,
     ) -> bool {
+        self.relation_structures(left, right).is_equivalent()
+    }
+
+    fn relation_structures(
+        &self,
+        left: crate::pes_exploration::StructureView<'_>,
+        right: crate::pes_exploration::StructureView<'_>,
+    ) -> crate::pes_exploration::ExactStructureRelation {
+        use crate::pes_exploration::ExactStructureRelation;
+
         if left.context != right.context {
-            return false;
+            return ExactStructureRelation::Distinct;
         }
         match (left.context.species(), right.context.species()) {
-            (Some(species_left), Some(species_right)) => match_shapes_typed(
+            (Some(species_left), Some(species_right)) => exact_relation_from_match(
                 left.coordinates,
-                species_left,
                 right.coordinates,
-                species_right,
-                self.kmax_factor,
-            )
-            .is_ok_and(|matched| matched.distance <= self.radius),
-            (None, None) => self.equivalent(left.coordinates, right.coordinates),
-            _ => false,
+                match_shapes_typed(
+                    left.coordinates,
+                    species_left,
+                    right.coordinates,
+                    species_right,
+                    self.kmax_factor,
+                ),
+                self.radius,
+            ),
+            (None, None) => self.relation(left.coordinates, right.coordinates),
+            _ => ExactStructureRelation::Distinct,
         }
     }
 }
@@ -699,7 +771,7 @@ mod tests {
                 q.view(),
             ),
             crate::pes_exploration::ExactStructureRelation::NontrivialPermutation(operation)
-                if operation == *perm
+                if operation.as_slice() == perm.as_slice()
         ));
     }
 
