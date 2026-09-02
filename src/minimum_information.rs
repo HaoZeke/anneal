@@ -14,10 +14,11 @@
 
 use ndarray::ArrayView1;
 
-use crate::funnel_bo::FunnelModel;
+use crate::funnel_bo::{FunnelCompression, FunnelModel};
 
 const BASIN_DRAW_SALT: u64 = 0x6a09_e667_f3bc_c909;
 const RIDE_DRAW_SALT: u64 = 0xbb67_ae85_84ca_a73b;
+const DEFAULT_MAXIMUM_MODEL_RANK: usize = 64;
 
 /// Proposal operator whose terminal quenched energy is modelled.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -69,6 +70,9 @@ pub enum MinimumInformationError {
     /// GP scales must be finite and positive.
     #[error("minimum-information GP scales must be finite and positive")]
     InvalidModelScale,
+    /// Kernel approximation rank must be positive.
+    #[error("minimum-information GP rank must be positive")]
+    InvalidModelRank,
     /// Candidate data must be finite and cost positive.
     #[error("minimum-information action contains invalid numeric data")]
     InvalidAction,
@@ -90,6 +94,8 @@ pub struct MinimumInformationSearch {
     models: [FunnelModel; 2],
     feature_dimensions: [Option<usize>; 2],
     observations: [u64; 2],
+    maximum_model_rank: usize,
+    compression: [FunnelCompression; 2],
     incumbent_terminal_energy: Option<f64>,
     version: u64,
 }
@@ -101,19 +107,40 @@ impl MinimumInformationSearch {
         amplitude: f64,
         noise: f64,
     ) -> Result<Self, MinimumInformationError> {
+        Self::new_with_maximum_model_rank(
+            length_scale,
+            amplitude,
+            noise,
+            DEFAULT_MAXIMUM_MODEL_RANK,
+        )
+    }
+
+    /// Construct bounded zero-change-prior GP models with identical scales.
+    pub fn new_with_maximum_model_rank(
+        length_scale: f64,
+        amplitude: f64,
+        noise: f64,
+        maximum_model_rank: usize,
+    ) -> Result<Self, MinimumInformationError> {
         if [length_scale, amplitude, noise]
             .into_iter()
             .any(|value| !value.is_finite() || value <= 0.0)
         {
             return Err(MinimumInformationError::InvalidModelScale);
         }
+        if maximum_model_rank == 0 {
+            return Err(MinimumInformationError::InvalidModelRank);
+        }
+        let mut basin_model = FunnelModel::new_euclidean(length_scale, amplitude, noise);
+        basin_model.set_prior_mean(0.0);
+        let mut ride_model = FunnelModel::new_euclidean(length_scale, amplitude, noise);
+        ride_model.set_prior_mean(0.0);
         Ok(Self {
-            models: [
-                FunnelModel::new_euclidean(length_scale, amplitude, noise),
-                FunnelModel::new_euclidean(length_scale, amplitude, noise),
-            ],
+            models: [basin_model, ride_model],
             feature_dimensions: [None, None],
             observations: [0, 0],
+            maximum_model_rank,
+            compression: [FunnelCompression::default(); 2],
             incumbent_terminal_energy: None,
             version: 0,
         })
@@ -139,6 +166,15 @@ impl MinimumInformationSearch {
         let index = mechanism.index();
         self.models[index].observe(ArrayView1::from(feature), terminal_energy - source_energy);
         self.observations[index] = self.observations[index].saturating_add(1);
+        let compressed = self.models[index].compress(self.maximum_model_rank);
+        self.compression[index] = FunnelCompression {
+            input_count: usize::try_from(self.observations[index]).unwrap_or(usize::MAX),
+            retained_rank: compressed.retained_rank,
+            residual_fraction: self.compression[index]
+                .residual_fraction
+                .max(compressed.residual_fraction),
+            rank_limited: self.compression[index].rank_limited || compressed.rank_limited,
+        };
         self.incumbent_terminal_energy = Some(
             self.incumbent_terminal_energy
                 .map_or(terminal_energy, |held| held.min(terminal_energy)),
@@ -219,6 +255,11 @@ impl MinimumInformationSearch {
     /// Number of terminal outcomes learned for one operator.
     pub fn observations(&self, mechanism: SearchMechanism) -> u64 {
         self.observations[mechanism.index()]
+    }
+
+    /// Retained rank and cumulative covariance-loss evidence for one operator.
+    pub fn compression(&self, mechanism: SearchMechanism) -> FunnelCompression {
+        self.compression[mechanism.index()]
     }
 
     /// Lowest terminal energy seen through either operator.
