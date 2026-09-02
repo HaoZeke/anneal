@@ -653,8 +653,11 @@ fn run_halving(
         let mut launches = 0usize;
         let mut brackets = 0usize;
         let mut next_seed = ensemble.wrapping_mul(0x9E37_79B9).wrapping_add(7);
-        while pool > 0 {
+        // A bracket needs at least one first-rung launch per chain; below
+        // that the remainder is not worth a start and the ensemble is done.
+        while pool >= chains {
             brackets += 1;
+            let pool_before = pool;
             // Live walks of this bracket: (state, best so far, seed).
             let mut live: Vec<(Option<Array1<f64>>, f64, u64)> = (0..chains)
                 .map(|_| {
@@ -741,6 +744,9 @@ fn run_halving(
                 if per_chain < slice {
                     break;
                 }
+            }
+            if pool == pool_before {
+                break;
             }
         }
         let solved = target.is_some_and(|t| deepest < t + 1e-4);
