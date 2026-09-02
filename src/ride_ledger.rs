@@ -261,7 +261,7 @@ pub enum RideOutcome {
     },
     /// An index-one saddle whose descent did not expose a distinct edge.
     ///
-    /// The saddle remains positive method evidence and can be sent to other
+    /// The saddle can be exported to the landscape database and sent to other
     /// replicas for deflation even though it contributes no graph edge.
     Unresolved {
         /// Exact saddle identifier within the same system catalogue.
@@ -269,7 +269,7 @@ pub enum RideOutcome {
         /// Connectivity failure observed after saddle certification.
         failure: RideFailure,
     },
-    /// Classified failure, retained as negative search evidence.
+    /// Classified execution failure retained for diagnostics.
     Failed(RideFailure),
 }
 
@@ -356,15 +356,6 @@ pub enum RideLedgerError {
     CounterOverflow,
 }
 
-#[derive(Debug, Clone, Default)]
-struct ArmEvidence {
-    completed: u64,
-    discoveries: u64,
-    stationary_saddles: u64,
-    charged_evaluations: u64,
-    failures: BTreeMap<RideFailure, u64>,
-}
-
 #[derive(Debug, Clone)]
 struct SourceRecord {
     energy: f64,
@@ -384,10 +375,9 @@ struct CompletedReport {
 pub struct RideLedger {
     portfolio: RidePortfolio,
     sources: BTreeMap<u64, SourceRecord>,
-    evidence: BTreeMap<RideArm, ArmEvidence>,
-    environment_evidence: BTreeMap<(u64, u32), ArmEvidence>,
-    mode_evidence: BTreeMap<(u64, u32, u16), ArmEvidence>,
-    method_evidence: BTreeMap<RideMethod, ArmEvidence>,
+    arm_completions: BTreeMap<RideArm, u64>,
+    environment_completions: BTreeMap<(u64, u32), u64>,
+    mode_completions: BTreeMap<(u64, u32, u16), u64>,
     active: BTreeMap<u64, RideWorkOrder>,
     active_arms: BTreeSet<RideArm>,
     replica_work: BTreeMap<u32, u64>,
@@ -407,10 +397,9 @@ impl RideLedger {
         Self {
             portfolio,
             sources: BTreeMap::new(),
-            evidence: BTreeMap::new(),
-            environment_evidence: BTreeMap::new(),
-            mode_evidence: BTreeMap::new(),
-            method_evidence: BTreeMap::new(),
+            arm_completions: BTreeMap::new(),
+            environment_completions: BTreeMap::new(),
+            mode_completions: BTreeMap::new(),
             active: BTreeMap::new(),
             active_arms: BTreeSet::new(),
             replica_work: BTreeMap::new(),
@@ -514,9 +503,9 @@ impl RideLedger {
         let arm = selected.0;
         let representative_atom = selected.1;
         let attempt = self
-            .evidence
+            .arm_completions
             .get(&arm)
-            .map_or(1, |row| row.completed.saturating_add(1));
+            .map_or(1, |completed| completed.saturating_add(1));
         let id = self.next_work;
         self.next_work = self.next_work.checked_add(1)?;
         let order = RideWorkOrder {
@@ -571,7 +560,6 @@ impl RideLedger {
             } => (Some(*failure), Some(*saddle)),
             RideOutcome::Failed(failure) => (Some(*failure), None),
         };
-        let stationary_saddle = saddle.is_some();
         let certified_connection = failure.is_none();
         let degenerate_rearrangement = matches!(
             &outcome,
@@ -611,45 +599,18 @@ impl RideLedger {
             self.degenerate_saddles.insert(saddle);
         }
         let novel_edge = canonical_edge.is_some_and(|edge| self.edges.insert(edge));
-        record_evidence(
-            self.evidence.entry(order.arm.clone()).or_default(),
-            charged_evaluations,
-            failure,
-            stationary_saddle,
-            novel_saddle,
-            novel_edge,
+        increment_count(&mut self.arm_completions, order.arm.clone())?;
+        increment_count(
+            &mut self.mode_completions,
+            (
+                order.arm.source_basin,
+                order.arm.environment_class,
+                order.arm.mode_rank,
+            ),
         )?;
-        record_evidence(
-            self.method_evidence.entry(order.arm.method).or_default(),
-            charged_evaluations,
-            failure,
-            stationary_saddle,
-            novel_saddle,
-            novel_edge,
-        )?;
-        record_evidence(
-            self.mode_evidence
-                .entry((
-                    order.arm.source_basin,
-                    order.arm.environment_class,
-                    order.arm.mode_rank,
-                ))
-                .or_default(),
-            charged_evaluations,
-            failure,
-            stationary_saddle,
-            novel_saddle,
-            novel_edge,
-        )?;
-        record_evidence(
-            self.environment_evidence
-                .entry((order.arm.source_basin, order.arm.environment_class))
-                .or_default(),
-            charged_evaluations,
-            failure,
-            stationary_saddle,
-            novel_saddle,
-            novel_edge,
+        increment_count(
+            &mut self.environment_completions,
+            (order.arm.source_basin, order.arm.environment_class),
         )?;
         if certified_connection {
             self.certified_connections = self
@@ -777,9 +738,10 @@ impl RideLedger {
 
     fn environment_attempts(&self, arm: &RideArm) -> u64 {
         let key = (arm.source_basin, arm.environment_class);
-        self.environment_evidence
+        self.environment_completions
             .get(&key)
-            .map_or(0, |row| row.completed)
+            .copied()
+            .unwrap_or(0)
             .saturating_add(
                 self.active_arms
                     .iter()
@@ -792,17 +754,19 @@ impl RideLedger {
     }
 
     fn arm_attempts(&self, arm: &RideArm) -> u64 {
-        self.evidence
+        self.arm_completions
             .get(arm)
-            .map_or(0, |row| row.completed)
+            .copied()
+            .unwrap_or(0)
             .saturating_add(u64::from(self.active_arms.contains(arm)))
     }
 
     fn mode_attempts(&self, arm: &RideArm) -> u64 {
         let key = (arm.source_basin, arm.environment_class, arm.mode_rank);
-        self.mode_evidence
+        self.mode_completions
             .get(&key)
-            .map_or(0, |row| row.completed)
+            .copied()
+            .unwrap_or(0)
             .saturating_add(
                 self.active_arms
                     .iter()
@@ -846,39 +810,10 @@ impl RideLedger {
     }
 }
 
-fn record_evidence(
-    evidence: &mut ArmEvidence,
-    charged_evaluations: u64,
-    failure: Option<RideFailure>,
-    stationary_saddle: bool,
-    novel_saddle: bool,
-    novel_edge: bool,
-) -> Result<(), RideLedgerError> {
-    evidence.completed = evidence
-        .completed
+fn increment_count<K: Ord>(counts: &mut BTreeMap<K, u64>, key: K) -> Result<(), RideLedgerError> {
+    let count = counts.entry(key).or_default();
+    *count = count
         .checked_add(1)
         .ok_or(RideLedgerError::CounterOverflow)?;
-    evidence.charged_evaluations = evidence
-        .charged_evaluations
-        .checked_add(charged_evaluations)
-        .ok_or(RideLedgerError::CounterOverflow)?;
-    if stationary_saddle {
-        evidence.stationary_saddles = evidence
-            .stationary_saddles
-            .checked_add(1)
-            .ok_or(RideLedgerError::CounterOverflow)?;
-    }
-    if novel_saddle || novel_edge {
-        evidence.discoveries = evidence
-            .discoveries
-            .checked_add(1)
-            .ok_or(RideLedgerError::CounterOverflow)?;
-    }
-    if let Some(failure) = failure {
-        let count = evidence.failures.entry(failure).or_default();
-        *count = count
-            .checked_add(1)
-            .ok_or(RideLedgerError::CounterOverflow)?;
-    }
     Ok(())
 }
