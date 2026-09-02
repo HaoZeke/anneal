@@ -739,6 +739,9 @@ mod run {
         hole_pending: bool,
         hole_request: Option<DescriptorHoleRequest>,
         sample_channels: [SampleChannel; 3],
+        basin_sample_slot: Arc<Mutex<Option<SampleResult>>>,
+        basin_sample_pending: bool,
+        basin_sample_request: Option<u64>,
         sample_batch_slot: Arc<Mutex<Option<SampleBatchResult>>>,
         sample_batch_pending: bool,
         crossing_slot:
@@ -788,6 +791,9 @@ mod run {
                                 SampleChannel::new(),
                                 SampleChannel::new(),
                             ],
+                            basin_sample_slot: Arc::new(Mutex::new(None)),
+                            basin_sample_pending: false,
+                            basin_sample_request: None,
                             sample_batch_slot: Arc::new(Mutex::new(None)),
                             sample_batch_pending: false,
                             crossing_slot: Arc::new(Mutex::new(None)),
@@ -832,6 +838,9 @@ mod run {
             for channel in &mut state.sample_channels {
                 channel.reset();
             }
+            state.basin_sample_pending = false;
+            state.basin_sample_request = None;
+            *state.basin_sample_slot.lock().expect("basin sample slot") = None;
             state.sample_batch_pending = false;
             *state.sample_batch_slot.lock().expect("sample batch slot") = None;
             state.crossing_pending = false;
@@ -1618,6 +1627,59 @@ mod run {
                         *slot.lock().expect("sample slot") = Some(answer);
                     });
                     state.sample_channels[role.index()].pending = true;
+                }
+            }
+            Ok(CatalogSampleOutcome::LocalFallback)
+        }
+
+        /// Poll one immutable census-basin representative without blocking.
+        ///
+        /// A completed response is returned only when it addresses the basin
+        /// requested by the current exploration decree. A superseded response
+        /// is consumed and the current basin request is posted in its place.
+        pub fn try_sample_basin(
+            &mut self,
+            replica: u32,
+            basin: u64,
+        ) -> Result<CatalogSampleOutcome, CooperativeRunError> {
+            if self.replica_mut(replica)?.client.is_none() {
+                return Ok(CatalogSampleOutcome::SharingDisabled);
+            }
+            let finished = {
+                let state = self.replica_mut(replica)?;
+                if state.basin_sample_pending {
+                    let result = state
+                        .basin_sample_slot
+                        .lock()
+                        .expect("basin sample slot")
+                        .take();
+                    result.map(|result| (result, state.basin_sample_request.take()))
+                } else {
+                    None
+                }
+            };
+            if let Some((result, request)) = finished {
+                self.replica_mut(replica)?.basin_sample_pending = false;
+                if request == Some(basin) {
+                    return Ok(match result {
+                        Ok(Some(candidate)) => CatalogSampleOutcome::Candidate(candidate),
+                        Ok(None) => CatalogSampleOutcome::Empty,
+                        Err(CatalogClientError::Rejected(_)) => CatalogSampleOutcome::Rejected,
+                        Err(_) => CatalogSampleOutcome::LocalFallback,
+                    });
+                }
+            }
+            if !self.replica_mut(replica)?.basin_sample_pending {
+                let rpc_sequence = self.next_rpc_sequence(replica)?;
+                let state = self.replica_mut(replica)?;
+                let slot = Arc::clone(&state.basin_sample_slot);
+                if let Some(mailbox) = state.client.as_ref() {
+                    state.basin_sample_request = Some(basin);
+                    mailbox.post(move |client| {
+                        let answer = client.sample_basin(rpc_sequence, basin);
+                        *slot.lock().expect("basin sample slot") = Some(answer);
+                    });
+                    state.basin_sample_pending = true;
                 }
             }
             Ok(CatalogSampleOutcome::LocalFallback)
