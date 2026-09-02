@@ -79,9 +79,9 @@ pub mod compatibility;
 pub mod construct;
 /// The cooling-schedule trait: `epoch -> temperature`.
 pub mod contextual;
-pub mod corekey;
 pub mod cool;
 pub mod cooperative_search;
+pub mod corekey;
 pub mod curvature;
 /// Transport for consensus traffic between server brains.
 #[cfg(feature = "bank-rpc")]
@@ -111,9 +111,6 @@ pub mod free_energy;
 pub mod funnel_bo;
 pub mod funnel_spectral;
 pub mod grad;
-/// Action-outcome models for cost-aware global-minimum information.
-pub mod minima_db;
-pub mod minimum_information;
 /// Exact basin identity by canonical contact-graph labelling (nauty).
 #[cfg(feature = "graphkey")]
 pub mod graphkey;
@@ -142,6 +139,9 @@ pub mod md_engine;
 /// MCMC-style multi-chain SA with Gelman-Rubin termination, Bayesian
 /// pilot adaptation, parallel tempering, etc.
 pub mod methods;
+/// Action-outcome models for cost-aware global-minimum information.
+pub mod minima_db;
+pub mod minimum_information;
 pub mod model_hessian;
 /// The move-kernel trait: temperature-indexed proposal sampling.
 pub mod movekernel;

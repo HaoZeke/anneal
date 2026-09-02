@@ -208,12 +208,7 @@ fn is_primitive(dist: &[Vec<usize>], ring: &[usize]) -> bool {
 /// `cutoff` is the contact distance. The core is taken by `rule` on the
 /// full contact graph, rings are found on the core-induced subgraph, and
 /// the coloured ring graph is refined and hashed.
-pub fn core_key(
-    x: ArrayView1<f64>,
-    species: &[u32],
-    cutoff: f64,
-    rule: CoreRule,
-) -> CoreKey {
+pub fn core_key(x: ArrayView1<f64>, species: &[u32], cutoff: f64, rule: CoreRule) -> CoreKey {
     let n = x.len() / 3;
     let neighbours = contact_neighbours(x, n, cutoff);
     let core = core_atoms(&neighbours, rule);

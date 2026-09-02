@@ -363,17 +363,13 @@ impl Population {
             return false;
         }
         // A new region: the worst member moves there if the child beats it.
-        let worst = filled
-            .iter()
-            .copied()
-            .filter(|&i| i != p)
-            .max_by(|&a, &b| {
-                self.members[a]
-                    .as_ref()
-                    .unwrap()
-                    .0
-                    .total_cmp(&self.members[b].as_ref().unwrap().0)
-            });
+        let worst = filled.iter().copied().filter(|&i| i != p).max_by(|&a, &b| {
+            self.members[a]
+                .as_ref()
+                .unwrap()
+                .0
+                .total_cmp(&self.members[b].as_ref().unwrap().0)
+        });
         if let Some(w) = worst
             && energy < self.members[w].as_ref().unwrap().0 - 1e-9
         {
