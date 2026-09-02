@@ -71,6 +71,15 @@ two consumers are
 [`examples/molecular_cluster.rs`](examples/molecular_cluster.rs) and
 [`examples/slab_adsorption.rs`](examples/slab_adsorption.rs).
 
+The `vesin-nl` feature compiles vesin's own cell-list sources into the
+neighbour list instead of the crate's reimplementation. Its build script
+reads `VESIN_SRC`, a checkout of [vesin](https://github.com/Luthaf/vesin),
+so `cargo test --all-features` needs it set:
+
+```bash
+VESIN_SRC=/path/to/vesin cargo test --locked --all-features
+```
+
 ## Install
 
 ```bash
