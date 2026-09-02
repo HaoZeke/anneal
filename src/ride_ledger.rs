@@ -11,7 +11,13 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use ndarray::ArrayView2;
 
+use crate::catalog::leftover_esty_upper;
 use crate::pes_exploration::RideMethod;
+
+/// Minimum stationary observations required for saddle-coverage retirement.
+pub const SADDLE_COVERAGE_MINIMUM_OBSERVATIONS: u64 = 20;
+/// Maximum one-sided unseen-saddle mass accepted as covered.
+pub const SADDLE_COVERAGE_MAX_UNSEEN_MASS: f64 = 0.05;
 
 /// One sign of a localized initial mode.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -275,6 +281,21 @@ pub struct RideCredit {
     pub total_charged_evaluations: u64,
 }
 
+/// Exact-saddle Good--Turing/Esty coverage evidence for one PES.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SaddleCoverage {
+    /// Successful stationary-saddle observations, including reobservations.
+    pub observations: u64,
+    /// Exact saddles observed once.
+    pub singletons: u64,
+    /// Exact saddles observed twice.
+    pub doubletons: u64,
+    /// One-sided Esty upper bound on unseen saddle mass.
+    pub unseen_mass_upper: Option<f64>,
+    /// Whether the observation floor and unseen-mass condition both hold.
+    pub saturated: bool,
+}
+
 /// Invalid source, claim, or report.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum RideLedgerError {
@@ -365,7 +386,7 @@ pub struct RideLedger {
     active_arms: BTreeSet<RideArm>,
     replica_work: BTreeMap<u32, u64>,
     completed_reports: BTreeMap<u64, CompletedReport>,
-    saddles: BTreeSet<u64>,
+    saddle_visits: BTreeMap<u64, u64>,
     edges: BTreeSet<[u64; 2]>,
     next_work: u64,
     completed_attempts: u64,
@@ -387,7 +408,7 @@ impl RideLedger {
             active_arms: BTreeSet::new(),
             replica_work: BTreeMap::new(),
             completed_reports: BTreeMap::new(),
-            saddles: BTreeSet::new(),
+            saddle_visits: BTreeMap::new(),
             edges: BTreeSet::new(),
             next_work: 0,
             completed_attempts: 0,
@@ -555,7 +576,16 @@ impl RideLedger {
         self.active_arms.remove(&order.arm);
         self.replica_work.remove(&replica);
 
-        let novel_saddle = saddle.is_some_and(|saddle| self.saddles.insert(saddle));
+        let novel_saddle = if let Some(saddle) = saddle {
+            let visits = self.saddle_visits.entry(saddle).or_default();
+            let novel = *visits == 0;
+            *visits = visits
+                .checked_add(1)
+                .ok_or(RideLedgerError::CounterOverflow)?;
+            novel
+        } else {
+            false
+        };
         let novel_edge = canonical_edge.is_some_and(|edge| self.edges.insert(edge));
         record_evidence(
             self.evidence.entry(order.arm.clone()).or_default(),
@@ -655,7 +685,36 @@ impl RideLedger {
 
     /// Number of unique exact index-one saddles.
     pub fn unique_saddles(&self) -> usize {
-        self.saddles.len()
+        self.saddle_visits.len()
+    }
+
+    /// Good--Turing/Esty evidence from exact saddle reobservations.
+    pub fn saddle_coverage(&self) -> SaddleCoverage {
+        let observations = self.saddle_visits.values().copied().sum::<u64>();
+        let singletons = self
+            .saddle_visits
+            .values()
+            .filter(|visits| **visits == 1)
+            .count() as u64;
+        let doubletons = self
+            .saddle_visits
+            .values()
+            .filter(|visits| **visits == 2)
+            .count() as u64;
+        let unseen_mass_upper = leftover_esty_upper(observations, singletons, doubletons);
+        SaddleCoverage {
+            observations,
+            singletons,
+            doubletons,
+            unseen_mass_upper,
+            saturated: observations >= SADDLE_COVERAGE_MINIMUM_OBSERVATIONS
+                && unseen_mass_upper.is_some_and(|upper| upper < SADDLE_COVERAGE_MAX_UNSEEN_MASS),
+        }
+    }
+
+    /// Whether at least one portfolio arm is not held by a live replica.
+    pub fn has_claimable_work(&self) -> bool {
+        self.arms().any(|(arm, _)| !self.active_arms.contains(&arm))
     }
 
     /// PES evaluations charged to completed experiments.
