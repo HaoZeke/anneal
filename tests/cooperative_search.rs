@@ -820,6 +820,39 @@ fn registered_policy_query_assigns_the_live_chain_to_a_census_basin() {
 }
 
 #[test]
+fn policy_query_keeps_the_last_exact_basin_when_its_descriptor_reaches_another_medoid() {
+    let server = server();
+    let digest = signature().digest();
+    let mut first =
+        CatalogClient::connect(server.addr(), identity(0, digest), ClientConfig::default())
+            .unwrap();
+    let mut second =
+        CatalogClient::connect(server.addr(), identity(1, digest), ClientConfig::default())
+            .unwrap();
+
+    let first_basin = first
+        .offer_candidate(1, candidate(0, 1, 1.2))
+        .unwrap()
+        .catalog
+        .unwrap()
+        .basin_id;
+    let other = candidate(1, 1, 2.0);
+    let other_descriptor = other.descriptor.clone();
+    let other_basin = second
+        .offer_candidate(1, other)
+        .unwrap()
+        .catalog
+        .unwrap()
+        .basin_id;
+    assert_ne!(first_basin, other_basin);
+
+    let policy = first.policy_state(2, other_descriptor, -2.0).unwrap();
+
+    assert_eq!(policy.local_basin, Some(first_basin));
+    assert!(policy.local_basin_distance > 0.0);
+}
+
+#[test]
 fn try_policy_input_does_not_block_the_hop() {
     let server = server();
     let digest = signature().digest();
