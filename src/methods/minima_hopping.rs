@@ -97,6 +97,70 @@ pub struct MdEscapeReport {
     pub kinetic: f64,
     /// Force evaluations used to soften the launch direction.
     pub softening_evaluations: usize,
+    /// Difference between the largest and smallest potential energy sampled.
+    pub potential_energy_span: f64,
+    /// Difference between the largest and smallest total energy sampled.
+    pub total_energy_span: f64,
+}
+
+impl MdEscapeReport {
+    /// Relative NVE drift used by the established minima-hopping step control.
+    pub fn energy_conservation_ratio(&self) -> f64 {
+        if self.potential_energy_span.is_finite() && self.potential_energy_span > 0.0 {
+            self.total_energy_span / self.potential_energy_span
+        } else {
+            f64::INFINITY
+        }
+    }
+}
+
+/// Energy-conservation feedback for the Verlet step between escape attempts.
+///
+/// The update follows the production minima-hopping controller: a trajectory
+/// with total-energy drift below one percent of its potential-energy excursion
+/// grows the step by 1.05; any other trajectory shrinks it by the same factor.
+#[derive(Debug, Clone, Copy)]
+pub struct MdTimeStepFeedback {
+    time_step: f64,
+    minimum_time_step: f64,
+}
+
+impl MdTimeStepFeedback {
+    /// Start the controller at `time_step` with a hard stability floor.
+    pub fn new(time_step: f64, minimum_time_step: f64) -> Self {
+        assert!(time_step.is_finite() && time_step > 0.0);
+        assert!(minimum_time_step.is_finite() && minimum_time_step > 0.0);
+        assert!(minimum_time_step <= time_step);
+        Self {
+            time_step,
+            minimum_time_step,
+        }
+    }
+
+    /// Current Verlet step.
+    pub fn time_step(&self) -> f64 {
+        self.time_step
+    }
+
+    /// Observe one NVE report and return the step for the next escape.
+    pub fn observe(&mut self, report: &MdEscapeReport) -> f64 {
+        const FACTOR: f64 = 1.05;
+        const CONSERVATION_TOLERANCE: f64 = 1e-2;
+        if report.energy_conservation_ratio() < CONSERVATION_TOLERANCE {
+            self.time_step *= FACTOR;
+        } else {
+            self.time_step = (self.time_step / FACTOR).max(self.minimum_time_step);
+        }
+        self.time_step
+    }
+}
+
+fn sampled_energy_span(minimum: f64, maximum: f64) -> f64 {
+    if minimum.is_finite() && maximum.is_finite() && maximum >= minimum {
+        maximum - minimum
+    } else {
+        0.0
+    }
 }
 
 struct CallbackSurface<'a, F> {
@@ -194,6 +258,10 @@ where
     let mut minima = 0usize;
     let mut last_energy = f64::NAN;
     let mut last_kinetic = initial_kinetic;
+    let mut minimum_potential = f64::INFINITY;
+    let mut maximum_potential = f64::NEG_INFINITY;
+    let mut minimum_total = f64::INFINITY;
+    let mut maximum_total = f64::NEG_INFINITY;
 
     for steps in 1..=config.maximum_steps {
         let report = match config.geometry {
@@ -204,11 +272,16 @@ where
         };
         last_energy = report.energy;
         last_kinetic = report.kinetic;
-        turning_window.push_back((
-            report.energy,
-            report.kinetic,
-            session.position().to_owned(),
-        ));
+        if report.energy.is_finite() {
+            minimum_potential = minimum_potential.min(report.energy);
+            maximum_potential = maximum_potential.max(report.energy);
+        }
+        let total_energy = report.energy + report.kinetic;
+        if total_energy.is_finite() {
+            minimum_total = minimum_total.min(total_energy);
+            maximum_total = maximum_total.max(total_energy);
+        }
+        turning_window.push_back((report.energy, report.kinetic, session.position().to_owned()));
         if turning_window.len() > 5 {
             turning_window.pop_front();
         }
@@ -228,6 +301,11 @@ where
                     energy,
                     kinetic,
                     softening_evaluations,
+                    potential_energy_span: sampled_energy_span(
+                        minimum_potential,
+                        maximum_potential,
+                    ),
+                    total_energy_span: sampled_energy_span(minimum_total, maximum_total),
                 });
             }
         }
@@ -240,6 +318,8 @@ where
         energy: last_energy,
         kinetic: last_kinetic,
         softening_evaluations,
+        potential_energy_span: sampled_energy_span(minimum_potential, maximum_potential),
+        total_energy_span: sampled_energy_span(minimum_total, maximum_total),
     })
 }
 
