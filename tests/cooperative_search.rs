@@ -487,6 +487,50 @@ fn coordinator_segments_live_replicas_by_shared_minimum_information() {
 }
 
 #[test]
+fn basin_assigned_replica_cannot_steal_a_same_epoch_ride() {
+    let server = ride_server();
+    let digest = signature().digest();
+    let query = ride_candidate(0, 1, 1.2);
+    let mut clients = (0..4)
+        .map(|replica| {
+            CatalogClient::connect(
+                server.addr(),
+                identity(replica, digest),
+                ClientConfig::default(),
+            )
+            .unwrap()
+        })
+        .collect::<Vec<_>>();
+    clients[0].offer_candidate(1, query.clone()).unwrap();
+
+    let states = clients
+        .iter_mut()
+        .enumerate()
+        .map(|(replica, client)| {
+            client
+                .policy_state(
+                    if replica == 0 { 2 } else { 1 },
+                    query.descriptor.clone(),
+                    query.energy,
+                )
+                .unwrap()
+        })
+        .collect::<Vec<_>>();
+    let basin_replica = states
+        .iter()
+        .position(|state| state.discovery_role == DiscoveryRole::BasinEscape)
+        .expect("one live chain must retain the basin action");
+
+    assert!(
+        clients[basin_replica]
+            .claim_ride(3, 0x5eed)
+            .unwrap()
+            .is_none(),
+        "a basin-assigned chain consumed an exclusive ride from the shared batch"
+    );
+}
+
+#[test]
 fn coordinator_divides_minimum_information_by_observed_pes_cost() {
     let ride_count = |basin_calls: u64, ride_calls: u64| {
         let server = ride_server();
