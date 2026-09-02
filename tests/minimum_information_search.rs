@@ -78,3 +78,27 @@ fn each_operator_has_one_immutable_feature_dimension() {
         .unwrap_err();
     assert!(error.to_string().contains("feature dimension"));
 }
+
+#[test]
+fn action_models_bound_kernel_rank_without_losing_observation_counts() {
+    let mut search =
+        MinimumInformationSearch::new_with_maximum_model_rank(0.3, 2.0, 1e-3, 8).unwrap();
+    for index in 0..40 {
+        let coordinate = 0.1 * index as f64;
+        search
+            .observe(
+                SearchMechanism::BasinEscape,
+                &[coordinate, 0.0],
+                -10.0,
+                -10.0 - coordinate,
+            )
+            .unwrap();
+    }
+
+    let compression = search.compression(SearchMechanism::BasinEscape);
+    assert_eq!(search.observations(SearchMechanism::BasinEscape), 40);
+    assert!(compression.retained_rank <= 8);
+    assert!(compression.residual_fraction.is_finite());
+    assert!((0.0..=1.0).contains(&compression.residual_fraction));
+    assert!(compression.rank_limited);
+}

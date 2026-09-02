@@ -1118,4 +1118,53 @@ mod tests {
 
         assert_eq!(selected, vec![0, 2]);
     }
+
+    #[test]
+    fn joint_posterior_matches_scalar_predictions_and_covariances() {
+        let mut model = FunnelModel::new_euclidean(0.7, 2.0, 0.05);
+        model.set_prior_mean(0.0);
+        for (x, y) in [
+            (pt(&[-1.0, 0.0]), -0.5),
+            (pt(&[0.0, 0.5]), 0.25),
+            (pt(&[1.0, 0.0]), -0.2),
+        ] {
+            model.observe(x.view(), y);
+        }
+        let sites = [pt(&[-0.4, 0.2]), pt(&[0.3, 0.7]), pt(&[0.8, -0.1])];
+        let views = sites.iter().map(|site| site.view()).collect::<Vec<_>>();
+
+        let (means, covariance) = model.posterior_joint(&views);
+
+        for (index, site) in sites.iter().enumerate() {
+            let (mean, standard_deviation) = model.predict(site.view());
+            assert!((means[index] - mean).abs() < 1e-12);
+            assert!(
+                (covariance[[index, index]] - standard_deviation * standard_deviation).abs()
+                    < 1e-12
+            );
+            for (other_index, other) in sites.iter().enumerate() {
+                let expected = model.posterior_latent_covariance(site.view(), other.view());
+                assert!((covariance[[index, other_index]] - expected).abs() < 1e-12);
+            }
+        }
+    }
+
+    #[test]
+    fn pivoted_kernel_compression_bounds_rank_and_preserves_the_incumbent() {
+        let mut model = FunnelModel::new_euclidean(0.2, 1.0, 1e-3);
+        model.set_prior_mean(0.0);
+        for index in 0..40 {
+            model.observe(pt(&[0.1 * index as f64, 0.0]).view(), -(index as f64));
+        }
+        let incumbent = model.incumbent();
+
+        let compression = model.compress(8);
+
+        assert_eq!(compression.input_count, 40);
+        assert!(compression.retained_rank <= 8);
+        assert!(compression.residual_fraction.is_finite());
+        assert!((0.0..=1.0).contains(&compression.residual_fraction));
+        assert_eq!(model.len(), compression.retained_rank);
+        assert_eq!(model.incumbent(), incumbent);
+    }
 }
