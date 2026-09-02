@@ -8,7 +8,7 @@
 //! coordinates, seeds, target, and charged-call ceiling.
 //!
 //! Usage:
-//! `lj_joint_optimum <N> <budget> <seeds> [all|adaptive|ridge|basin|bh|bh-sym|mh|mh-soft|mh-bounded|mh-bounded-soft|feedback] [gs2|morokuma|both] [seed0]`
+//! `lj_joint_optimum <N> <budget> <seeds> [all|adaptive|ridge|basin|bh|bh-sym|bh-csm-ci|mh|mh-soft|mh-bounded|mh-bounded-soft|feedback] [gs2|morokuma|both] [seed0]`
 
 use std::error::Error;
 use std::path::{Path, PathBuf};
@@ -18,7 +18,8 @@ use anneal_core::atomistic_hybrid::{
 };
 use anneal_core::catalog::lj;
 use anneal_core::methods::cluster_hopping::{
-    Config as HoppingConfig, Ledger, MoveLibrary, Outcome, random_cluster, run, run_with_gradient,
+    Config as HoppingConfig, ContinuousSymmetry, Ledger, MoveLibrary, Outcome, random_cluster, run,
+    run_with_gradient,
 };
 use anneal_core::methods::cluster_search::{Encounter, first_encounter, median_encounter};
 use anneal_core::methods::minima_hopping::{
@@ -39,6 +40,7 @@ const TARGET_TOLERANCE: f64 = 1e-3;
 const MH_SOFTENING_STEPS: usize = 20;
 const MH_SOFTENING_DISPLACEMENT: f64 = 0.1;
 const MH_SOFTENING_MIXING: f64 = 0.15;
+const CSM_INTERVAL: usize = 10;
 
 #[derive(Clone, Copy, Debug)]
 enum Arm {
@@ -47,6 +49,7 @@ enum Arm {
     Basin,
     BasinHopping,
     BasinHoppingSymmetry,
+    BasinHoppingCsmCi,
     MinimaHopping,
     MinimaHoppingSoftened,
     MinimaHoppingBounded,
@@ -62,6 +65,7 @@ impl Arm {
             Self::Basin => "basin-ablation".into(),
             Self::BasinHopping => "basin-hopping".into(),
             Self::BasinHoppingSymmetry => "basin-hopping-stall-symmetry".into(),
+            Self::BasinHoppingCsmCi => "basin-hopping-csm-ci".into(),
             Self::MinimaHopping => "minima-hopping".into(),
             Self::MinimaHoppingSoftened => "minima-hopping-softened".into(),
             Self::MinimaHoppingBounded => "minima-hopping-bounded".into(),
@@ -143,6 +147,7 @@ fn selected_arms(selector: &str, irc: &[IrcKind]) -> Result<Vec<Arm>, String> {
                 Arm::Basin,
                 Arm::BasinHopping,
                 Arm::BasinHoppingSymmetry,
+                Arm::BasinHoppingCsmCi,
                 Arm::MinimaHopping,
                 Arm::MinimaHoppingSoftened,
                 Arm::MinimaHoppingBounded,
@@ -155,6 +160,7 @@ fn selected_arms(selector: &str, irc: &[IrcKind]) -> Result<Vec<Arm>, String> {
         "basin" => arms.push(Arm::Basin),
         "bh" => arms.push(Arm::BasinHopping),
         "bh-sym" => arms.push(Arm::BasinHoppingSymmetry),
+        "bh-csm-ci" => arms.push(Arm::BasinHoppingCsmCi),
         "mh" => arms.push(Arm::MinimaHopping),
         "mh-soft" => arms.push(Arm::MinimaHoppingSoftened),
         "mh-bounded" => arms.push(Arm::MinimaHoppingBounded),
@@ -162,7 +168,7 @@ fn selected_arms(selector: &str, irc: &[IrcKind]) -> Result<Vec<Arm>, String> {
         "feedback" => arms.push(Arm::MinimaFeedback),
         _ => {
             return Err(
-                "arm must be all, adaptive, ridge, basin, bh, bh-sym, mh, mh-soft, mh-bounded, mh-bounded-soft, or feedback"
+                "arm must be all, adaptive, ridge, basin, bh, bh-sym, bh-csm-ci, mh, mh-soft, mh-bounded, mh-bounded-soft, or feedback"
                     .into(),
             );
         }
@@ -225,12 +231,14 @@ fn run_hopping(
     seed: u64,
     minima_hopping: bool,
     symmetrise_on_stall: bool,
+    continuous_symmetry: ContinuousSymmetry,
 ) -> Outcome {
     let mut config = HoppingConfig::for_cluster(n);
     config.bias_height = 0.0;
     config.move_library = MoveLibrary::WalesDoye;
     config.minima_hopping = minima_hopping;
     config.symmetrise_on_stall = symmetrise_on_stall;
+    config.continuous_symmetry = continuous_symmetry;
     let mut ledger = Ledger::new(budget);
     let mut optimizer = WarmLbfgs::default();
     let mut relax = |ledger: &mut Ledger, start: ArrayView1<'_, f64>, steps: usize| {
@@ -248,7 +256,7 @@ fn run_hopping(
             .then(|| potential.value_and_gradient(point).1)
     };
     let mut rng = StdRng::seed_from_u64(seed);
-    if minima_hopping {
+    if minima_hopping || !matches!(continuous_symmetry, ContinuousSymmetry::Off) {
         run_with_gradient(
             &config,
             initial,
@@ -622,6 +630,14 @@ fn main() -> Result<(), Box<dyn Error>> {
                     "mixing": MH_SOFTENING_MIXING,
                 },
             },
+            "continuous_symmetry": {
+                "arm": "basin-hopping-csm-ci",
+                "group": "Ci",
+                "interval": CSM_INTERVAL,
+                "assignment": "minimum-cost-bijection",
+                "orientation": "rotation-independent",
+                "adoption": "downhill",
+            },
             "arms": arms.iter().copied().map(Arm::label).collect::<Vec<_>>(),
         })
     );
@@ -745,6 +761,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                 }
                 Arm::BasinHopping
                 | Arm::BasinHoppingSymmetry
+                | Arm::BasinHoppingCsmCi
                 | Arm::MinimaHopping
                 | Arm::MinimaHoppingSoftened
                 | Arm::MinimaHoppingBounded
@@ -786,6 +803,13 @@ fn main() -> Result<(), Box<dyn Error>> {
                             seed,
                             matches!(arm, Arm::MinimaFeedback),
                             matches!(arm, Arm::BasinHoppingSymmetry),
+                            if matches!(arm, Arm::BasinHoppingCsmCi) {
+                                ContinuousSymmetry::Inversion {
+                                    interval: CSM_INTERVAL,
+                                }
+                            } else {
+                                ContinuousSymmetry::Off
+                            },
                         )
                     };
                     let encounter =
@@ -813,6 +837,8 @@ fn main() -> Result<(), Box<dyn Error>> {
                             "visit_counts": outcome.visit_counts,
                             "symmetrised_attempts": outcome.symmetrised.0,
                             "symmetry_energy_gain": outcome.symmetrised.1,
+                            "continuous_symmetry_attempts": outcome.continuous_symmetry.0,
+                            "continuous_symmetry_energy_gain": outcome.continuous_symmetry.1,
                             "failed_actions": outcome.unconverged_records,
                         })
                     );
