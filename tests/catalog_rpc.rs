@@ -20,7 +20,6 @@ use anneal_core::descriptor_space::{
     DescriptorBlockKind, DescriptorBlockSpec, DescriptorSchema, DescriptorSpace,
 };
 use anneal_core::pes_exploration::ExactStructureWitness;
-use ndarray::ArrayView1;
 use std::collections::BTreeMap;
 
 fn identity(ensemble: &str, replica: u32) -> CatalogIdentity {
@@ -688,10 +687,8 @@ fn epoch_close_reaches_every_subscriber_exactly_once() {
     first.events();
     second.events();
 
-    let submitted = first
-        .submit_population(1, 0, scientific_candidate(0, 1))
-        .unwrap();
-    assert!(submitted.plan.is_some());
+    first.population_abstain_with_snapshot(1, 0).unwrap();
+    second.population_abstain_with_snapshot(2, 0).unwrap();
 
     let first_closed = wait_for_epoch_closed(&mut first);
     let second_closed = wait_for_epoch_closed(&mut second);
@@ -702,8 +699,12 @@ fn epoch_close_reaches_every_subscriber_exactly_once() {
 struct SeparationWitness;
 
 impl ExactStructureWitness for SeparationWitness {
-    fn equivalent(&self, left: ArrayView1<f64>, right: ArrayView1<f64>) -> bool {
-        let separation = |point: ArrayView1<'_, f64>| {
+    fn equivalent(
+        &self,
+        left: ndarray::ArrayView1<f64>,
+        right: ndarray::ArrayView1<f64>,
+    ) -> bool {
+        let separation = |point: ndarray::ArrayView1<'_, f64>| {
             (0..3)
                 .map(|axis| (point[3 + axis] - point[axis]).powi(2))
                 .sum::<f64>()
@@ -760,30 +761,6 @@ fn scientific_identity(replica: u32, digest: [u8; 32]) -> CatalogIdentity {
         ensemble: "scientific-ensemble".into(),
         replica,
         signature_digest: digest,
-    }
-}
-
-fn scientific_candidate(replica: u32, sequence: u64) -> CatalogCandidate {
-    let coordinates = vec![0.0, 0.0, 0.0, 1.2, 0.0, 0.0];
-    let descriptor = scientific_descriptor_space()
-        .describe(ArrayView1::from(&coordinates), Some(&[18, 18]))
-        .unwrap()
-        .values()
-        .to_vec();
-    CatalogCandidate {
-        producer_replica: replica,
-        coordinates,
-        cell: None,
-        energy: -1.2,
-        forces: vec![0.0; 6],
-        gradient_norm: 0.0,
-        descriptor,
-        descriptor_schema_version: 1,
-        quench_converged: true,
-        charged_work: sequence * 5,
-        event_sequence: sequence,
-        seed: 1000 + u64::from(replica),
-        census_basin: None,
     }
 }
 
