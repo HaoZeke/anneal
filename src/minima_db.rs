@@ -13,6 +13,7 @@ use std::collections::BTreeMap;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use ndarray::ArrayView1;
 use readcon_core::helpers::atomic_number_to_symbol;
@@ -94,18 +95,35 @@ pub enum MinimaDbError {
 
 /// A readcon-db corpus of minima.
 pub struct MinimaCorpus {
-    corpus: ConCorpus,
+    corpus: Arc<ConCorpus>,
     path: PathBuf,
 }
 
+/// One open environment per path per process: the store refuses a second
+/// environment on the same path, and a driver that loops over seeds opens
+/// the corpus once per seed.
+fn registry() -> &'static Mutex<BTreeMap<PathBuf, Arc<ConCorpus>>> {
+    static REGISTRY: OnceLock<Mutex<BTreeMap<PathBuf, Arc<ConCorpus>>>> = OnceLock::new();
+    REGISTRY.get_or_init(|| Mutex::new(BTreeMap::new()))
+}
+
 impl MinimaCorpus {
-    /// Open or create the corpus at `path`.
+    /// Open or create the corpus at `path`; a second open of the same path in
+    /// one process shares the first environment.
     pub fn open(path: impl AsRef<Path>) -> Result<Self, MinimaDbError> {
         let path = path.as_ref().to_path_buf();
-        Ok(Self {
-            corpus: ConCorpus::open(&path)?,
-            path,
-        })
+        let canonical = std::fs::canonicalize(&path).unwrap_or_else(|_| path.clone());
+        let mut open = registry().lock().expect("minima corpus registry");
+        let corpus = match open.get(&canonical) {
+            Some(shared) => Arc::clone(shared),
+            None => {
+                let shared = Arc::new(ConCorpus::open(&path)?);
+                let canonical = std::fs::canonicalize(&path).unwrap_or(canonical);
+                open.insert(canonical, Arc::clone(&shared));
+                shared
+            }
+        };
+        Ok(Self { corpus, path })
     }
 
     /// Where the corpus lives.
