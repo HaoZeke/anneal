@@ -221,6 +221,24 @@ pub enum CheckpointAction {
         /// Potential calls the external engine consumed.
         external_calls: usize,
     },
+    /// Charge external potential work, quench the proposal, and move the
+    /// live chain onto it.
+    ///
+    /// A checkpoint that constructs and pre-relaxes a candidate outside the
+    /// chain's oracle, and has already applied its own acceptance test to it,
+    /// settles that work here and hands the accepted state over; the
+    /// candidate is then adopted the way a [`CheckpointAction::BoundaryProposal`]
+    /// is. Recombination between chains is the case: the child of two live
+    /// structures is quenched and judged at the checkpoint, and only a child
+    /// that passed is worth the chain's relocation.
+    ExternalAdopt {
+        /// Cartesian candidate the checkpoint already relaxed and accepted.
+        state: Array1<f64>,
+        /// Action label retained on the trajectory edge.
+        action: String,
+        /// Potential calls the checkpoint consumed constructing the candidate.
+        external_calls: usize,
+    },
     /// Deposit bias at remote minima so the chain's own acceptance feels
     /// what the ensemble has already visited.
     ///
@@ -1236,6 +1254,17 @@ where
                     } else {
                         // The engine's own work drained the budget; the
                         // proposal is unaffordable and the debt stands.
+                        None
+                    }
+                }
+                CheckpointAction::ExternalAdopt {
+                    state,
+                    action,
+                    external_calls,
+                } => {
+                    if ledger.charge_many(external_calls) {
+                        Some((state, action, true))
+                    } else {
                         None
                     }
                 }
