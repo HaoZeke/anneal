@@ -339,7 +339,11 @@ fn run_minima_hopping(
         dt: 0.005,
         potential_minima: 2,
         maximum_steps: 2_000,
-        geometry: MdEscapeGeometry::RigidQuotient,
+        geometry: if n >= 3 {
+            MdEscapeGeometry::RigidQuotient
+        } else {
+            MdEscapeGeometry::Euclidean
+        },
         softening: soften.then_some(VelocitySofteningConfig {
             steps: MH_SOFTENING_STEPS,
             displacement: MH_SOFTENING_DISPLACEMENT,
