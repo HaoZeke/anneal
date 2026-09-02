@@ -110,6 +110,14 @@ impl DescriptorProviderContract {
         self.model_digest
     }
 
+    /// Lowercase hexadecimal SHA-256 digest for catalog signatures and manifests.
+    pub fn model_digest_hex(&self) -> String {
+        self.model_digest
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect()
+    }
+
     /// Required one-row-per-system output.
     pub fn system_output(&self) -> &DescriptorOutputSpec {
         &self.system_output

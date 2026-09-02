@@ -31,9 +31,15 @@ use super::{
     DescriptorSignature, EngineSignature, FreshEvaluation, SystemSignature, ValidatorConfig,
 };
 use crate::descriptor_space::{
-    DescriptorBlockKind, DescriptorBlockSpec, DescriptorGeometry, DescriptorSchema,
-    DescriptorSpace, UNIVERSAL_DESCRIPTOR_SCHEMA, UNIVERSAL_DESCRIPTOR_VERSION,
-    universal_descriptor_space,
+    DescriptorBlockKind, DescriptorBlockSpec, DescriptorGeometry, DescriptorSchema, DescriptorSpace,
+};
+#[cfg(feature = "featomic")]
+use crate::descriptor_space::{
+    FEATOMIC_SOAP_SCHEMA, FEATOMIC_SOAP_VERSION, FeatomicSoapProvider, FeatomicSoapScale,
+};
+#[cfg(not(feature = "featomic"))]
+use crate::descriptor_space::{
+    UNIVERSAL_DESCRIPTOR_SCHEMA, UNIVERSAL_DESCRIPTOR_VERSION, universal_descriptor_space,
 };
 use crate::methods::cluster_hopping::covalent_radius;
 use crate::soap::{SoapSpec, local_spectra_z};
@@ -110,11 +116,21 @@ const ENGINE_CONFIG: &[u8] = b"gfn2-xtb-rgpot-v1;method=3;accuracy=0.01;etemp=30
 /// Flexible atomic degrees of freedom of the GFN2 water PES.
 pub const GROUP_SCHEMA: &str = "flexible-water-atoms-v1";
 
-/// Universal catalog descriptor schema shared across system families.
+/// Catalog descriptor schema selected by this build.
+#[cfg(not(feature = "featomic"))]
 pub const DESCRIPTOR_SCHEMA: &str = UNIVERSAL_DESCRIPTOR_SCHEMA;
 
+/// Featomic-backed catalog descriptor schema used by production builds.
+#[cfg(feature = "featomic")]
+pub const DESCRIPTOR_SCHEMA: &str = FEATOMIC_SOAP_SCHEMA;
+
 /// Schema version of [`DESCRIPTOR_SCHEMA`].
+#[cfg(not(feature = "featomic"))]
 pub const DESCRIPTOR_VERSION: u32 = UNIVERSAL_DESCRIPTOR_VERSION;
+
+/// Schema version of [`DESCRIPTOR_SCHEMA`].
+#[cfg(feature = "featomic")]
+pub const DESCRIPTOR_VERSION: u32 = FEATOMIC_SOAP_VERSION;
 
 /// Molecular proposal-only leftover SOAP schema.
 pub const LEFTOVER_DESCRIPTOR_SCHEMA: &str = "jcc-water-soap-leftover";
@@ -257,7 +273,28 @@ pub fn leftover_space(species: &[u32]) -> Result<DescriptorSpace, MolecularCatal
 pub fn descriptor_space(species: &[u32]) -> Result<DescriptorSpace, MolecularCatalogPresetError> {
     let geometry = DescriptorGeometry::finite(length_scale(species)?)
         .map_err(|_| MolecularCatalogPresetError::DescriptorDimension)?;
-    Ok(universal_descriptor_space(geometry))
+    #[cfg(feature = "featomic")]
+    {
+        let mut channels = species.to_vec();
+        channels.sort_unstable();
+        channels.dedup();
+        let provider = FeatomicSoapProvider::new(
+            channels,
+            vec![
+                FeatomicSoapScale::new(3.0, 3, 4)
+                    .map_err(|_| MolecularCatalogPresetError::DescriptorDimension)?,
+                FeatomicSoapScale::new(6.0, 3, 6)
+                    .map_err(|_| MolecularCatalogPresetError::DescriptorDimension)?,
+            ],
+        )
+        .map_err(|_| MolecularCatalogPresetError::DescriptorDimension)?;
+        return DescriptorSpace::from_provider(geometry, provider)
+            .map_err(|_| MolecularCatalogPresetError::DescriptorDimension);
+    }
+    #[cfg(not(feature = "featomic"))]
+    {
+        Ok(universal_descriptor_space(geometry))
+    }
 }
 
 /// SHA-256 of the declared GFN2 handle. This is not the engine binary.
@@ -297,15 +334,39 @@ pub fn system_signature(
         .values()
         .len();
     let mut hyperparameters = BTreeMap::new();
-    hyperparameters.insert(
-        "blocks".into(),
-        "pair-radial@2.5,6;three-body-angular@3,6;graph-topology@6;\
-         invariant-soap@3,6;invariant-ace-nu3@3,6;chiral-moment@3,6"
-            .into(),
-    );
-    hyperparameters.insert("normalization".into(), "contractive-l2-unit-v2".into());
     hyperparameters.insert("geometry".into(), format!("finite;length-scale={scale}"));
     hyperparameters.insert("descriptor_dim".into(), descriptor_dim.to_string());
+    if let Some(contract) = descriptor.provider_contract() {
+        hyperparameters.insert("provider".into(), contract.schema_name().into());
+        hyperparameters.insert("model_sha256".into(), contract.model_digest_hex());
+        hyperparameters.insert(
+            "system_output".into(),
+            format!(
+                "{};dimension={}",
+                contract.system_output().name(),
+                contract.system_output().dimension()
+            ),
+        );
+        if let Some(output) = contract.atomic_output() {
+            hyperparameters.insert(
+                "atomic_output".into(),
+                format!("{};dimension={}", output.name(), output.dimension()),
+            );
+        }
+        hyperparameters.insert(
+            "interaction_range".into(),
+            contract.interaction_range().to_string(),
+        );
+        hyperparameters.insert("normalization".into(), contract.normalization().into());
+    } else {
+        hyperparameters.insert(
+            "blocks".into(),
+            "pair-radial@2.5,6;three-body-angular@3,6;graph-topology@6;\
+             invariant-soap@3,6;invariant-ace-nu3@3,6;chiral-moment@3,6"
+                .into(),
+        );
+        hyperparameters.insert("normalization".into(), "contractive-l2-unit-v2".into());
+    }
     let mut external_inputs = BTreeMap::new();
     external_inputs.insert(ENGINE_BINARY_INPUT.into(), engine_binary_digest);
     let mut species_channels = species.clone();
