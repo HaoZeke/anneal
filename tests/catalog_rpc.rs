@@ -572,7 +572,10 @@ fn sequence_regression_is_rejected() {
     )
     .unwrap();
     assert_eq!(
-        client.record_visit(2, candidate(0, 2, 0.1)).unwrap().version,
+        client
+            .record_visit(2, candidate(0, 2, 0.1))
+            .unwrap()
+            .version,
         1
     );
     assert_eq!(
@@ -698,11 +701,7 @@ fn epoch_close_reaches_every_subscriber_exactly_once() {
 struct SeparationWitness;
 
 impl ExactStructureWitness for SeparationWitness {
-    fn equivalent(
-        &self,
-        left: ndarray::ArrayView1<f64>,
-        right: ndarray::ArrayView1<f64>,
-    ) -> bool {
+    fn equivalent(&self, left: ndarray::ArrayView1<f64>, right: ndarray::ArrayView1<f64>) -> bool {
         let separation = |point: ndarray::ArrayView1<'_, f64>| {
             (0..3)
                 .map(|axis| (point[3 + axis] - point[axis]).powi(2))

@@ -2089,9 +2089,7 @@ pub(crate) fn fill_roster(mut output: roster_reply::Builder<'_>, roster: &Roster
     output.set_spawn_requested(roster.spawn_requested);
 }
 
-pub(crate) fn read_roster(
-    roster: roster_reply::Reader<'_>,
-) -> Result<RosterReply, ProtocolError> {
+pub(crate) fn read_roster(roster: roster_reply::Reader<'_>) -> Result<RosterReply, ProtocolError> {
     Ok(RosterReply {
         version: roster.get_version(),
         live: list_u32(roster.get_live().map_err(wire_error)?),

@@ -7,10 +7,10 @@ use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
 use capnp::capability::Promise;
+use capnp_rpc::RpcSystem;
 use capnp_rpc::pry;
 use capnp_rpc::rpc_twoparty_capnp::Side;
 use capnp_rpc::twoparty::VatNetwork;
-use capnp_rpc::RpcSystem;
 use futures::AsyncReadExt;
 use tokio_util::compat::TokioAsyncReadCompatExt;
 
@@ -223,8 +223,10 @@ impl subscriber::Server for EventInbox {
         params: subscriber::EventParams,
         _results: subscriber::EventResults,
     ) -> Promise<(), capnp::Error> {
-        let event = pry!(read_event(pry!(pry!(params.get()).get_event()))
-            .map_err(|error| capnp::Error::failed(error.to_string())));
+        let event = pry!(
+            read_event(pry!(pry!(params.get()).get_event()))
+                .map_err(|error| capnp::Error::failed(error.to_string()))
+        );
         self.events
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
@@ -259,7 +261,14 @@ impl CatalogClient {
         let thread = thread::Builder::new()
             .name("catalog-rpc-client".to_owned())
             .spawn(move || {
-                run_client_executor(addr, config, thread_identity, thread_events, thread_snapshots, rx);
+                run_client_executor(
+                    addr,
+                    config,
+                    thread_identity,
+                    thread_events,
+                    thread_snapshots,
+                    rx,
+                );
             })
             .expect("catalog RPC client thread starts");
         Ok(Self {
@@ -936,10 +945,7 @@ impl CatalogClient {
         self.dispatch(request)
     }
 
-    fn dispatch(
-        &mut self,
-        request: CatalogRequest,
-    ) -> Result<AcceptedReply, CatalogClientError> {
+    fn dispatch(&mut self, request: CatalogRequest) -> Result<AcceptedReply, CatalogClientError> {
         self.post(|reply| ClientJob::Call { request, reply })
     }
 }
@@ -1030,7 +1036,8 @@ async fn handle_job(session: &mut ClientSession, job: ClientJob) {
             identity,
             reply,
         } => {
-            let _ = reply.send(call_session_raw(session, version, digest, sequence, identity).await);
+            let _ =
+                reply.send(call_session_raw(session, version, digest, sequence, identity).await);
         }
         ClientJob::Shutdown => {}
     }
@@ -1050,7 +1057,9 @@ async fn open_rpc(
             ))
         })?
         .map_err(CatalogClientError::Transport)?;
-    stream.set_nodelay(true).map_err(CatalogClientError::Transport)?;
+    stream
+        .set_nodelay(true)
+        .map_err(CatalogClientError::Transport)?;
     let (reader, writer) = TokioAsyncReadCompatExt::compat(stream).split();
     let network = VatNetwork::new(
         futures::io::BufReader::new(reader),
@@ -1090,11 +1099,11 @@ async fn attach_session(
     session: &mut ClientSession,
     identity: CatalogIdentity,
 ) -> Result<RosterReply, CatalogClientError> {
-    if session.session.is_none() {
-        if let Err(error) = ensure_coordinator(session).await {
-            reconnect(session).await?;
-            ensure_coordinator(session).await.map_err(|_| error)?;
-        }
+    if session.session.is_none()
+        && let Err(error) = ensure_coordinator(session).await
+    {
+        reconnect(session).await?;
+        ensure_coordinator(session).await.map_err(|_| error)?;
     }
     let subscriber: subscriber::Client = capnp_rpc::new_client(EventInbox {
         events: Arc::clone(&session.events),
@@ -1114,7 +1123,13 @@ async fn attach_session(
             ))
         })?
         .map_err(|error| ProtocolError::Malformed(error.to_string()))?;
-    let roster = read_roster(response.get().map_err(|error| ProtocolError::Malformed(error.to_string()))?.get_roster().map_err(|error| ProtocolError::Malformed(error.to_string()))?)?;
+    let roster = read_roster(
+        response
+            .get()
+            .map_err(|error| ProtocolError::Malformed(error.to_string()))?
+            .get_roster()
+            .map_err(|error| ProtocolError::Malformed(error.to_string()))?,
+    )?;
     session.session = Some(
         response
             .get()
@@ -1223,8 +1238,7 @@ async fn call_session_once(
         ))
     })?;
     let mut rpc = bound.call_request();
-    fill_request(rpc.get().init_request(), request)
-        .map_err(CatalogClientError::from)?;
+    fill_request(rpc.get().init_request(), request).map_err(CatalogClientError::from)?;
     let response = tokio::time::timeout(session.config.io_timeout, rpc.send().promise)
         .await
         .map_err(|_| {
@@ -1255,12 +1269,10 @@ async fn call_session_once(
             reason,
             ..
         } if event_sequence == request.event_sequence => Err(CatalogClientError::Rejected(reason)),
-        CatalogReply::Accepted(_) | CatalogReply::Rejected { .. } => {
-            Err(ProtocolError::Malformed(
-                "catalog reply sequence does not match the request".into(),
-            )
-            .into())
-        }
+        CatalogReply::Accepted(_) | CatalogReply::Rejected { .. } => Err(ProtocolError::Malformed(
+            "catalog reply sequence does not match the request".into(),
+        )
+        .into()),
     }
 }
 

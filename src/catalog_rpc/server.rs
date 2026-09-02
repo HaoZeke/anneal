@@ -1,22 +1,22 @@
 //! Serialized coordinator for one campaign ensemble and system signature.
 
+use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
-use std::cell::RefCell;
 use std::net::{SocketAddr, TcpListener};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
 use capnp::capability::Promise;
+use capnp_rpc::RpcSystem;
 use capnp_rpc::pry;
 use capnp_rpc::rpc_twoparty_capnp::Side;
 use capnp_rpc::twoparty::VatNetwork;
-use capnp_rpc::RpcSystem;
 use futures::AsyncReadExt;
 use ndarray::{Array1, ArrayView1};
 use rand::SeedableRng;
@@ -27,10 +27,9 @@ use super::{
     CatalogMutation, CatalogMutationKind, CatalogOperation, CatalogRelation, CatalogReply,
     CatalogRequest, CatalogRideConnection, CatalogRideOutcome, CatalogRideSaddleEvidence,
     CatalogRideWork, CatalogSnapshot, CoordinatorEvent, CoordinatorStatus, DescriptorHoleProposal,
-    PolicyState,
-    PopulationEpochState, PopulationPlan, PopulationSelection, ProtocolError, ProtocolRejection,
-    RosterReply, TransitionDestination, decode_request, decode_request_reader, encode_request,
-    fill_coordinator_status, fill_event, fill_reply, fill_roster, read_identity,
+    PolicyState, PopulationEpochState, PopulationPlan, PopulationSelection, ProtocolError,
+    ProtocolRejection, RosterReply, TransitionDestination, decode_request, decode_request_reader,
+    encode_request, fill_coordinator_status, fill_event, fill_reply, fill_roster, read_identity,
 };
 use crate::Catalog_capnp::{coordinator, session, subscriber};
 use crate::catalog::{
@@ -841,9 +840,10 @@ impl coordinator::Server for CoordinatorImpl {
         mut results: coordinator::AttachResults,
     ) -> Promise<(), capnp::Error> {
         let params = pry!(params.get());
-        let identity = pry!(read_identity(pry!(params.get_identity())).map_err(|error| {
-            capnp::Error::failed(error.to_string())
-        }));
+        let identity = pry!(
+            read_identity(pry!(params.get_identity()))
+                .map_err(|error| { capnp::Error::failed(error.to_string()) })
+        );
         let subscriber = pry!(params.get_subscriber());
         let roster = {
             let mut shared = self.shared.borrow_mut();
@@ -902,9 +902,9 @@ impl coordinator::Server for CoordinatorImpl {
             return Promise::ok(());
         }
         let shared = Rc::clone(&self.shared);
-        Promise::from_future(async move {
-            push_event(&shared, CoordinatorEvent::Spawn(spawn)).await
-        })
+        Promise::from_future(
+            async move { push_event(&shared, CoordinatorEvent::Spawn(spawn)).await },
+        )
     }
 }
 
@@ -926,8 +926,10 @@ impl session::Server for SessionImpl {
                     event_sequence,
                     rejection_for_protocol_error(&error),
                 );
-                pry!(fill_reply(results.get().init_reply(), reply)
-                    .map_err(|error| capnp::Error::failed(error.to_string())));
+                pry!(
+                    fill_reply(results.get().init_reply(), reply)
+                        .map_err(|error| capnp::Error::failed(error.to_string()))
+                );
                 return Promise::ok(());
             }
         };
@@ -937,8 +939,10 @@ impl session::Server for SessionImpl {
                 request.event_sequence,
                 ProtocolRejection::ReplicaMismatch,
             );
-            pry!(fill_reply(results.get().init_reply(), reply)
-                .map_err(|error| capnp::Error::failed(error.to_string())));
+            pry!(
+                fill_reply(results.get().init_reply(), reply)
+                    .map_err(|error| capnp::Error::failed(error.to_string()))
+            );
             return Promise::ok(());
         }
         let shared = Rc::clone(&self.shared);
@@ -953,13 +957,9 @@ impl session::Server for SessionImpl {
                 let mut shared = shared.borrow_mut();
                 let epoch_before = open_population_epoch(&shared.state);
                 let config = shared.config.clone();
-                let reply = process_request(
-                    &config,
-                    &mut shared.state,
-                    request.clone(),
-                    precomputed,
-                )
-                .map_err(capnp::Error::failed)?;
+                let reply =
+                    process_request(&config, &mut shared.state, request.clone(), precomputed)
+                        .map_err(capnp::Error::failed)?;
                 let mut events = Vec::new();
                 if matches!(
                     request.operation,
@@ -1085,13 +1085,9 @@ fn process_request(
         // An observer need not occupy a replica slot, but it must identify the
         // same system as the coordinator so live state cannot cross PESes.
         if let Some(reason) = system_identity_rejection(config, &request.identity) {
-            return Ok(rejected(&state, request.event_sequence, reason));
+            return Ok(rejected(state, request.event_sequence, reason));
         }
-        return Ok(observer_status_reply(
-            config,
-            &state,
-            request.event_sequence,
-        ));
+        return Ok(observer_status_reply(config, state, request.event_sequence));
     }
     // Identity before the replay cache. The cache is keyed by replica
     // and sequence alone, so a caller from another campaign or ensemble
@@ -1099,15 +1095,15 @@ fn process_request(
     // and is told its sequence replayed rather than that it is talking
     // to the wrong coordinator.
     if let Some(reason) = identity_rejection(config, &request.identity) {
-        return Ok(rejected(&state, request.event_sequence, reason));
+        return Ok(rejected(state, request.event_sequence, reason));
     }
     let key = (request.identity.replica, request.event_sequence);
     if let Some((stored, payload)) = state.requests.get(&key) {
         return Ok(if stored == &request {
-            accepted_with_payload(&state, request.event_sequence, true, payload.clone())
+            accepted_with_payload(state, request.event_sequence, true, payload.clone())
         } else {
             rejected(
-                &state,
+                state,
                 request.event_sequence,
                 ProtocolRejection::SequenceReplay,
             )
@@ -1125,7 +1121,7 @@ fn process_request(
     // PolicyState took exactly this trade first, because it is the
     // request every replica sends on every checkpoint; every other
     // operation now takes the same trade for the same reason.
-    let reply = apply_request(config, &mut state, request.clone(), precomputed);
+    let reply = apply_request(config, state, request.clone(), precomputed);
     if matches!(
         reply,
         CatalogReply::Accepted(AcceptedReply {
@@ -3074,17 +3070,18 @@ fn observe_certified_ride_saddle(
         .ride_saddles
         .iter()
         .filter_map(|(&id, stored)| {
-            (stored.candidate.descriptor.len() == candidate.descriptor.len()).then(|| {
-                let distance = stored
-                    .candidate
-                    .descriptor
-                    .iter()
-                    .zip(&candidate.descriptor)
-                    .map(|(left, right)| (left - right).powi(2))
-                    .sum::<f64>()
-                    .sqrt();
-                (distance, id)
-            })
+            if stored.candidate.descriptor.len() != candidate.descriptor.len() {
+                return None;
+            }
+            let distance = stored
+                .candidate
+                .descriptor
+                .iter()
+                .zip(&candidate.descriptor)
+                .map(|(left, right)| (left - right).powi(2))
+                .sum::<f64>()
+                .sqrt();
+            Some((distance, id))
         })
         .collect::<Vec<_>>();
     ordered.sort_by(|left, right| {
@@ -3795,6 +3792,7 @@ fn observe_descriptor(scientific: &mut ScientificState, descriptor: &[f64]) {
 ///
 /// A fixed denominator, which is what makes this a coverage rather
 /// than a count. Falls back to nothing when no tessellation exists yet.
+#[allow(dead_code)]
 fn archive_coverage(scientific: &ScientificState) -> Option<f64> {
     if scientific.archive.cells() == 0 {
         return None;
@@ -4875,6 +4873,7 @@ fn nearest_other_census_distance(census: &BasinCensus, local: BasinId, descripto
         .unwrap_or(0.0)
 }
 
+#[allow(dead_code)]
 fn nearest_census_distance(census: &BasinCensus, descriptor: &[f64]) -> Option<f64> {
     census
         .entries()
@@ -5067,5 +5066,3 @@ fn rejected(
         reason,
     }
 }
-
-
