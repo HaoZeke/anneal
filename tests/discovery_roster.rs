@@ -1,58 +1,58 @@
 use anneal_core::discovery_roster::{
-    DiscoveryCoverage, DiscoveryRole, assign_discovery_roles, coverage_allocation_weight,
-    good_ucb_missing_mass_index,
+    DiscoveryOpportunity, DiscoveryRole, assign_discovery_roles,
 };
 
 #[test]
-fn coverage_allocation_keeps_full_uncertainty_before_the_observation_floor() {
-    assert_eq!(coverage_allocation_weight(4, 20, Some(0.0)), 1.0);
-    assert_eq!(coverage_allocation_weight(20, 20, Some(0.0)), 0.0);
-    assert_eq!(coverage_allocation_weight(20, 20, None), 1.0);
-}
-
-#[test]
-fn unresolved_saddle_coverage_receives_the_discovery_batch() {
+fn roster_maximizes_total_minimum_information_under_ride_capacity() {
     let assignments = assign_discovery_roles(
-        &[7, 2, 9, 4],
-        DiscoveryCoverage {
-            basin_observations: 10,
-            basin_singletons: 0,
-            saddle_observations: 10,
-            saddle_singletons: 8,
-            ride_available: true,
-        },
+        &[
+            DiscoveryOpportunity::new(7, 0.8, Some(0.9)).unwrap(),
+            DiscoveryOpportunity::new(2, 0.4, Some(1.1)).unwrap(),
+            DiscoveryOpportunity::new(9, 0.7, Some(0.6)).unwrap(),
+            DiscoveryOpportunity::new(4, 0.2, Some(0.5)).unwrap(),
+        ],
+        2,
         11,
     )
     .unwrap();
 
-    assert_eq!(
+    let rides = assignments
+        .iter()
+        .filter(|assignment| assignment.role == DiscoveryRole::SaddleRide)
+        .map(|assignment| assignment.replica)
+        .collect::<Vec<_>>();
+    assert_eq!(rides, vec![2, 4]);
+}
+
+#[test]
+fn unavailable_rides_leave_every_replica_on_basin_search() {
+    let assignments = assign_discovery_roles(
+        &[
+            DiscoveryOpportunity::new(7, 0.8, None).unwrap(),
+            DiscoveryOpportunity::new(2, 0.4, None).unwrap(),
+        ],
+        4,
+        11,
+    )
+    .unwrap();
+
+    assert!(
         assignments
             .iter()
-            .filter(|assignment| assignment.role == DiscoveryRole::BasinEscape)
-            .count(),
-        0
+            .all(|assignment| assignment.role == DiscoveryRole::BasinEscape)
     );
-    assert_eq!(
-        assignments
-            .iter()
-            .filter(|assignment| assignment.role == DiscoveryRole::SaddleRide)
-            .count(),
-        4
-    );
-    assert!(assignments.iter().all(|assignment| assignment.epoch == 11));
 }
 
 #[test]
 fn discovery_roles_stay_stable_when_only_the_evidence_epoch_changes() {
-    let coverage = DiscoveryCoverage {
-        basin_observations: 10,
-        basin_singletons: 5,
-        saddle_observations: 10,
-        saddle_singletons: 5,
-        ride_available: true,
-    };
-    let first = assign_discovery_roles(&[7, 2, 9, 4], coverage, 11).unwrap();
-    let second = assign_discovery_roles(&[7, 2, 9, 4], coverage, 12).unwrap();
+    let opportunities = [
+        DiscoveryOpportunity::new(7, 0.8, Some(0.9)).unwrap(),
+        DiscoveryOpportunity::new(2, 0.4, Some(1.1)).unwrap(),
+        DiscoveryOpportunity::new(9, 0.7, Some(0.6)).unwrap(),
+        DiscoveryOpportunity::new(4, 0.2, Some(0.5)).unwrap(),
+    ];
+    let first = assign_discovery_roles(&opportunities, 2, 11).unwrap();
+    let second = assign_discovery_roles(&opportunities, 2, 12).unwrap();
 
     let roles = |assignments: &[anneal_core::discovery_roster::DiscoveryAssignment]| {
         assignments
@@ -74,50 +74,15 @@ fn discovery_roles_stay_stable_when_only_the_evidence_epoch_changes() {
 }
 
 #[test]
-fn absent_ride_work_assigns_every_replica_to_basin_discovery() {
+fn exact_information_ties_split_without_changing_the_maximum() {
     let assignments = assign_discovery_roles(
-        &[0, 1, 2],
-        DiscoveryCoverage {
-            basin_observations: 100,
-            basin_singletons: 1,
-            saddle_observations: 0,
-            saddle_singletons: 0,
-            ride_available: false,
-        },
-        3,
-    )
-    .unwrap();
-
-    assert!(
-        assignments
-            .iter()
-            .all(|assignment| assignment.role == DiscoveryRole::BasinEscape)
-    );
-}
-
-#[test]
-fn good_ucb_index_is_the_good_turing_estimate_plus_the_distribution_free_bonus() {
-    let actual = good_ucb_missing_mass_index(3, 10, 40);
-    let expected = 0.3 + (1.0 + 2.0_f64.sqrt()) * (160.0_f64.ln() / 10.0).sqrt();
-
-    assert!(
-        (actual - expected).abs() < 1e-12,
-        "actual={actual}, expected={expected}"
-    );
-    assert!(good_ucb_missing_mass_index(0, 0, 40).is_infinite());
-}
-
-#[test]
-fn unobserved_mechanisms_split_a_parallel_discovery_batch() {
-    let assignments = assign_discovery_roles(
-        &[0, 1, 2, 3],
-        DiscoveryCoverage {
-            basin_observations: 0,
-            basin_singletons: 0,
-            saddle_observations: 0,
-            saddle_singletons: 0,
-            ride_available: true,
-        },
+        &[
+            DiscoveryOpportunity::new(0, 1.0, Some(1.0)).unwrap(),
+            DiscoveryOpportunity::new(1, 1.0, Some(1.0)).unwrap(),
+            DiscoveryOpportunity::new(2, 1.0, Some(1.0)).unwrap(),
+            DiscoveryOpportunity::new(3, 1.0, Some(1.0)).unwrap(),
+        ],
+        2,
         17,
     )
     .unwrap();
@@ -136,4 +101,10 @@ fn unobserved_mechanisms_split_a_parallel_discovery_batch() {
             .count(),
         2
     );
+}
+
+#[test]
+fn invalid_information_rates_are_rejected() {
+    assert!(DiscoveryOpportunity::new(0, f64::NAN, None).is_err());
+    assert!(DiscoveryOpportunity::new(0, 1.0, Some(-1.0)).is_err());
 }
