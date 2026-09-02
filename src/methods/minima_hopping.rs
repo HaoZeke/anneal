@@ -35,7 +35,7 @@
 //! `1 + c ln(N)` for visit count `N`, and report that this finds the LJ75 Marks
 //! decahedron where a cut-and-splice evolutionary algorithm does not.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::sync::Mutex;
 
 use ndarray::{Array1, ArrayView1};
@@ -190,8 +190,7 @@ where
     };
     let mut session = SamdSession::new(samd_config, start.to_owned(), velocity, &surface)?;
     let noise = Array1::zeros(start.len());
-    let mut older_energy = None;
-    let mut previous_energy = None;
+    let mut turning_window = VecDeque::<(f64, f64, Array1<f64>)>::with_capacity(5);
     let mut minima = 0usize;
     let mut last_energy = f64::NAN;
     let mut last_kinetic = initial_kinetic;
@@ -205,24 +204,33 @@ where
         };
         last_energy = report.energy;
         last_kinetic = report.kinetic;
-        if let (Some(older), Some(previous)) = (older_energy, previous_energy)
-            && previous < older
-            && previous <= report.energy
-        {
+        turning_window.push_back((
+            report.energy,
+            report.kinetic,
+            session.position().to_owned(),
+        ));
+        if turning_window.len() > 5 {
+            turning_window.pop_front();
+        }
+        let passed_minimum = turning_window.len() == 5
+            && turning_window[0].0 >= turning_window[1].0
+            && turning_window[1].0 >= turning_window[2].0
+            && turning_window[2].0 <= turning_window[3].0
+            && turning_window[3].0 <= turning_window[4].0;
+        if passed_minimum {
             minima += 1;
             if minima >= config.potential_minima {
+                let (energy, kinetic, position) = turning_window[2].clone();
                 return Ok(MdEscapeReport {
-                    position: session.position().to_owned(),
+                    position,
                     steps,
                     potential_minima: minima,
-                    energy: last_energy,
-                    kinetic: last_kinetic,
+                    energy,
+                    kinetic,
                     softening_evaluations,
                 });
             }
         }
-        older_energy = previous_energy;
-        previous_energy = Some(report.energy);
     }
 
     Ok(MdEscapeReport {
