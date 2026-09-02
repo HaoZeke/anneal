@@ -272,6 +272,30 @@ fn coordinator_segments_live_replicas_by_shared_pes_coverage() {
 }
 
 #[test]
+fn discovery_assignment_does_not_retire_a_small_repeated_basin_sample() {
+    let server = ride_server();
+    let digest = signature().digest();
+    let mut client =
+        CatalogClient::connect(server.addr(), identity(0, digest), ClientConfig::default())
+            .unwrap();
+
+    for sequence in 1..=4 {
+        client
+            .offer_candidate(sequence, ride_candidate(0, sequence, 1.2))
+            .unwrap();
+    }
+    let query = ride_candidate(0, 5, 1.2);
+    let state = client
+        .policy_state(5, query.descriptor, query.energy)
+        .unwrap();
+
+    assert_eq!(state.total_visits, 4);
+    assert_eq!(state.singleton_basins, 0);
+    assert!(!state.globally_saturated);
+    assert_eq!(state.basin_unseen_mass_upper, 1.0);
+}
+
+#[test]
 fn coordinator_validates_before_census_and_catalog_mutation() {
     let server = server();
     let digest = signature().digest();
