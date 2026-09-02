@@ -456,6 +456,17 @@ pub struct SynchronousPopulation {
     /// When set, [`Self::required`] counts [`Self::live`] even if retirement
     /// has emptied that set, instead of falling back to the configured roster.
     live_roster: bool,
+    /// Fraction of the required roster whose submissions close an epoch
+    /// once the deadline has passed; one waits for everyone.
+    quorum: f64,
+    /// Coordinator ticks after the first submission of an epoch before the
+    /// quorum may close it; `u64::MAX` never closes short of everyone.
+    deadline_ticks: u64,
+    /// Ticks the coordinator has delivered so far.
+    ticks: u64,
+    /// The epoch and tick at which the open epoch received its first
+    /// submission.
+    first_submission: Option<(u64, u64)>,
 }
 
 impl SynchronousPopulation {
@@ -496,7 +507,79 @@ impl SynchronousPopulation {
             abstained: BTreeSet::new(),
             live: BTreeSet::new(),
             live_roster: false,
+            quorum: 1.0,
+            deadline_ticks: u64::MAX,
+            ticks: 0,
+            first_submission: None,
         })
+    }
+
+    /// Close epochs on `quorum` of the required roster once `deadline_ticks`
+    /// coordinator ticks have passed since the epoch's first submission.
+    pub fn with_quorum(
+        mut self,
+        quorum: f64,
+        deadline_ticks: u64,
+    ) -> Result<Self, ReconfigurationError> {
+        if !(quorum.is_finite() && quorum > 0.0 && quorum <= 1.0) {
+            return Err(ReconfigurationError::InvalidParameter {
+                field: "quorum",
+                value: quorum,
+            });
+        }
+        self.quorum = quorum;
+        self.deadline_ticks = deadline_ticks;
+        Ok(self)
+    }
+
+    /// Add a replica to the roster at runtime, live from now on.
+    pub fn attach(&mut self, replica: u32) -> Result<(), ReconfigurationError> {
+        if self.replicas.contains(&replica) {
+            return Err(ReconfigurationError::DuplicateReplica { replica });
+        }
+        self.replicas.push(replica);
+        self.live.insert(replica);
+        self.live_roster = true;
+        Ok(())
+    }
+
+    /// Replicas currently counted live, in configured order.
+    pub fn live_replicas(&self) -> Vec<u32> {
+        self.replicas
+            .iter()
+            .copied()
+            .filter(|replica| self.live.contains(replica))
+            .collect()
+    }
+
+    /// Advance the coordinator clock by one tick, closing the open epoch
+    /// when its quorum stands past the deadline.
+    pub fn tick(&mut self) -> Result<Option<EpochSubmissionOutcome>, ReconfigurationError> {
+        self.ticks = self.ticks.saturating_add(1);
+        if !self.quorum_deadline_passed() || !self.quorum_met() {
+            return Ok(None);
+        }
+        let epoch = self.open_epoch;
+        Ok(Some(self.complete_open_epoch(epoch)?))
+    }
+
+    /// Submissions that satisfy the quorum for the open epoch.
+    fn quorum_required(&self) -> usize {
+        let required = self.required();
+        ((self.quorum * required as f64).ceil() as usize).clamp(1, required.max(1))
+    }
+
+    fn quorum_met(&self) -> bool {
+        !self.submissions.is_empty() && self.submissions.len() >= self.quorum_required()
+    }
+
+    fn quorum_deadline_passed(&self) -> bool {
+        match self.first_submission {
+            Some((epoch, tick)) if epoch == self.open_epoch => {
+                self.ticks.saturating_sub(tick) >= self.deadline_ticks
+            }
+            _ => false,
+        }
     }
 
     /// Epoch currently accepting one submission from every replica.
@@ -574,7 +657,9 @@ impl SynchronousPopulation {
 
     /// Whether every replica that can still submit has done so.
     fn epoch_is_complete(&self) -> bool {
-        !self.submissions.is_empty() && self.submissions.len() >= self.required()
+        !self.submissions.is_empty()
+            && (self.submissions.len() >= self.required()
+                || (self.quorum_deadline_passed() && self.quorum_met()))
     }
 
     /// Close the open epoch when the barrier is met or nobody remains.
@@ -704,6 +789,9 @@ impl SynchronousPopulation {
         }
         if self.live.len() >= 2 {
             self.live_roster = true;
+        }
+        if self.submissions.is_empty() {
+            self.first_submission = Some((self.open_epoch, self.ticks));
         }
         self.submissions.insert(member.replica, member);
         self.close_if_ready(epoch)
