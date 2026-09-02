@@ -265,9 +265,9 @@ mod run {
         pub novelty: f64,
         /// Posterior uncertainty of the latent Gaussian transition field.
         pub transition_uncertainty: f64,
-        /// Good-UCB stationary-object role for this same-system replica.
+        /// Joint-minimum-information role for this same-system replica.
         pub discovery_role: DiscoveryRole,
-        /// Exact census-plus-ride observation epoch behind the role assignment.
+        /// Exact terminal-outcome observation epoch behind the role assignment.
         pub discovery_epoch: u64,
         /// One-sided upper bound on unseen exact-basin mass.
         pub basin_unseen_mass_upper: f64,
