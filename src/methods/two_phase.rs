@@ -19,12 +19,29 @@
 //! <https://doi.org/10.1007/s10107-006-0006-3>; Doye, J. P. K. *Phys. Rev.
 //! E* **2000**, *62*, 8753 <https://doi.org/10.1103/PhysRevE.62.8753>.
 
+use std::sync::{Arc, Mutex};
+
 use ndarray::{Array1, ArrayView1};
 use rand::SeedableRng;
 use rand::rngs::StdRng;
 use serde::Serialize;
 
 use crate::allocate::DepthAllocator;
+
+/// A surface allocator posterior several chains update together.
+///
+/// Pooled evidence is the cooperative channel that never touches a walk:
+/// every chain draws its arm from the same Normal-Gamma posterior and
+/// credits its block back to it, so an ensemble of `n` chains learns which
+/// surface pays `n` times faster than one chain does, and no chain is
+/// steered, relocated or interrupted to get that.
+pub type SharedSurfaceAllocator = Arc<Mutex<DepthAllocator>>;
+
+/// A fresh shared posterior over the plain surface plus `transforms`.
+pub fn shared_surface_allocator(transforms: &[TwoPhase]) -> SharedSurfaceAllocator {
+    let arms = 1 + transforms.iter().filter(|two| two.is_active()).count();
+    Arc::new(Mutex::new(DepthAllocator::new(arms)))
+}
 
 /// How the diameter cutoff is chosen for one relaxation.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize)]
@@ -172,6 +189,9 @@ pub fn penalty(x: ArrayView1<f64>, cutoff: f64, beta: f64, mu: f64) -> (f64, Arr
 pub struct SurfacePortfolio {
     arms: Vec<Option<TwoPhase>>,
     allocator: DepthAllocator,
+    /// When set, draws and credits go through this posterior instead of
+    /// the private one, which then only mirrors this chain's own draws.
+    shared: Option<SharedSurfaceAllocator>,
     held: Option<usize>,
     block: usize,
     hops_in_block: usize,
@@ -196,6 +216,7 @@ impl SurfacePortfolio {
         Self {
             allocator: DepthAllocator::new(arms.len()),
             arms,
+            shared: None,
             held: None,
             block: block.max(1),
             hops_in_block: 0,
@@ -203,6 +224,38 @@ impl SurfacePortfolio {
             latest_best: f64::INFINITY,
             rng: StdRng::seed_from_u64(seed ^ 0x5a2f_ace5),
         }
+    }
+
+    /// Draw from and credit a posterior shared with other chains.
+    pub fn sharing(mut self, shared: SharedSurfaceAllocator) -> Self {
+        let arms = shared.lock().expect("shared surface allocator").arms();
+        assert_eq!(
+            arms,
+            self.arms.len(),
+            "a shared surface allocator must cover the same arms"
+        );
+        self.shared = Some(shared);
+        self
+    }
+
+    fn select_arm(&mut self) -> usize {
+        match self.shared.as_ref() {
+            Some(shared) => shared
+                .lock()
+                .expect("shared surface allocator")
+                .select(&mut self.rng),
+            None => self.allocator.select(&mut self.rng),
+        }
+    }
+
+    fn credit_arm(&mut self, arm: usize, reward: f64) {
+        if let Some(shared) = self.shared.as_ref() {
+            shared
+                .lock()
+                .expect("shared surface allocator")
+                .update(arm, reward);
+        }
+        self.allocator.update(arm, reward);
     }
 
     /// The surface for the relaxation about to start.
@@ -218,7 +271,7 @@ impl SurfacePortfolio {
             self.hops_in_block += 1;
         }
         if self.held.is_none() {
-            self.held = Some(self.allocator.select(&mut self.rng));
+            self.held = Some(self.select_arm());
             self.hops_in_block = self.hops_in_block.max(1);
             self.block_start_best = self.latest_best;
         }
@@ -247,7 +300,7 @@ impl SurfacePortfolio {
             } else {
                 0.0
             };
-            self.allocator.update(arm, reward);
+            self.credit_arm(arm, reward);
         }
         self.hops_in_block = 0;
     }
@@ -357,6 +410,33 @@ mod tests {
         );
         let means = portfolio.means();
         assert!(means[1] > means[0] && means[1] > means[2], "{means:?}");
+    }
+
+    #[test]
+    fn chains_sharing_a_posterior_learn_from_each_other_s_blocks() {
+        let deep = TwoPhase::diameter(2.0, 1.0);
+        let shared = shared_surface_allocator(&[deep]);
+        let mut teacher = SurfacePortfolio::with_block(&[deep], 1, 2).sharing(Arc::clone(&shared));
+        let mut best = 0.0_f64;
+        for _ in 0..200 {
+            let arm = teacher.begin(true);
+            let reached = if arm == Some(deep) { best - 1.0 } else { best + 1.0 };
+            best = best.min(reached);
+            teacher.observe(false, reached, best);
+        }
+        let mut student = SurfacePortfolio::with_block(&[deep], 2, 2).sharing(Arc::clone(&shared));
+        let deep_draws = (0..40)
+            .filter(|_| {
+                let arm = student.begin(true);
+                student.observe(false, 0.0, 0.0);
+                arm == Some(deep)
+            })
+            .count();
+        assert!(
+            deep_draws >= 30,
+            "a fresh chain on the shared posterior drew the learned arm {deep_draws} of 40 times"
+        );
+        assert!(student.draws().iter().sum::<usize>() > 0, "the private mirror records draws");
     }
 
     #[test]

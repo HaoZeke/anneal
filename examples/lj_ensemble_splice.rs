@@ -37,7 +37,10 @@ use anneal_core::methods::cluster_hopping::{
     random_cluster, run_with_bias_at_checkpoints,
 };
 use anneal_core::methods::splice::cut_and_splice;
-use anneal_core::methods::two_phase::{largest_pair_distance, penalty};
+use anneal_core::methods::two_phase::{
+    Cutoff, SharedSurfaceAllocator, SurfacePortfolio, TwoPhase, largest_pair_distance, penalty,
+    shared_surface_allocator,
+};
 use anneal_core::methods::warm_lbfgs::WarmLbfgs;
 use ndarray::{Array1, ArrayView1};
 use rand::rngs::StdRng;
@@ -135,7 +138,7 @@ struct ChainReport {
     hit_by_splice: bool,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 struct ExchangeConfig {
     enabled: bool,
     interval: usize,
@@ -152,6 +155,41 @@ struct ExchangeConfig {
     /// Relative cutoff: `kappa` times the largest pair distance of the
     /// structure entering the quench; zero keeps the fixed cutoff.
     diameter_kappa: f64,
+    /// Learned portfolio over surfaces (plain plus these), one arm held
+    /// per block of hops; empty runs the fixed surface above.
+    portfolio: Vec<TwoPhase>,
+    /// Hops an arm is held for.
+    portfolio_block: usize,
+    /// Whether the chains of an ensemble share one portfolio posterior.
+    portfolio_shared: bool,
+}
+
+/// `SURFACES` items `mu:5`, `d:3.5` (pair-well units), `kappa:0.7`, with an
+/// optional `:beta` suffix on the diameter forms.
+fn parse_surfaces(spec: &str) -> Vec<TwoPhase> {
+    let unit = 2f64.powf(1.0 / 6.0);
+    spec.split(',')
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(|item| {
+            let parts: Vec<&str> = item.split(':').collect();
+            let value: f64 = parts
+                .get(1)
+                .and_then(|v| v.parse().ok())
+                .unwrap_or_else(|| panic!("SURFACES item {item:?} needs a number"));
+            let beta: f64 = parts.get(2).and_then(|v| v.parse().ok()).unwrap_or(1.0);
+            match parts[0] {
+                "mu" => TwoPhase {
+                    cutoff: Cutoff::Fixed(0.0),
+                    beta: 0.0,
+                    mu: value,
+                },
+                "d" => TwoPhase::diameter(value * unit, beta),
+                "kappa" => TwoPhase::relative(value, beta),
+                other => panic!("SURFACES item {item:?}: unknown kind {other:?}"),
+            }
+        })
+        .collect()
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -164,6 +202,7 @@ fn run_chain(
     exchange: ExchangeConfig,
     target: Option<f64>,
     resume: Option<Array1<f64>>,
+    shared_surfaces: Option<SharedSurfaceAllocator>,
 ) -> ChainReport {
     let cfg = Config::recommended(n);
     let mut rng = StdRng::seed_from_u64(seed);
@@ -176,21 +215,41 @@ fn run_chain(
     let beta = exchange.diameter_beta;
     let kappa = exchange.diameter_kappa;
     let two_phase = compress_mu > 0.0 || ((diameter > 0.0 || kappa > 0.0) && beta > 0.0);
+    let screen_steps = cfg.screen_steps;
+    let mut portfolio = (!exchange.portfolio.is_empty()).then(|| {
+        let mut portfolio =
+            SurfacePortfolio::with_block(&exchange.portfolio, seed, exchange.portfolio_block);
+        if let Some(shared) = shared_surfaces.clone() {
+            portfolio = portfolio.sharing(shared);
+        }
+        portfolio
+    });
     let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, iters: usize| {
         let before = led.spent();
+        let screening = iters <= screen_steps;
         let mut start = x.to_owned();
-        if two_phase {
-            let cutoff = if kappa > 0.0 {
-                kappa * largest_pair_distance(x)
-            } else {
-                diameter
-            };
+        // The learned portfolio names the surface when present; otherwise
+        // the fixed transform from the environment applies to every quench.
+        let surface = match portfolio.as_mut() {
+            Some(portfolio) => portfolio
+                .begin(screening)
+                .map(|two| (two.mu, two.cutoff_for(x), two.beta)),
+            None => two_phase.then(|| {
+                let cutoff = if kappa > 0.0 {
+                    kappa * largest_pair_distance(x)
+                } else {
+                    diameter
+                };
+                (compress_mu, cutoff, beta)
+            }),
+        };
+        if let Some((mu, cutoff, beta)) = surface {
             opt.forget();
             let (_, compressed, _) = opt.minimize(x, iters, |v| {
                 if !led.charge() {
                     return None;
                 }
-                Some(lj_compressed(v, compress_mu, cutoff, beta))
+                Some(lj_compressed(v, mu, cutoff, beta))
             });
             start = compressed;
         }
@@ -201,6 +260,9 @@ fn run_chain(
             }
             Some(lj(v))
         });
+        if let Some(portfolio) = portfolio.as_mut() {
+            portfolio.observe(screening, f, led.best);
+        }
         led.record_quench_boundary(before, f, xr.clone(), None);
         (f, xr)
     };
@@ -364,10 +426,10 @@ fn main() {
     let mode = args.get(5).cloned().unwrap_or_else(|| "indep".to_owned());
     let seed0: u64 = args.get(6).and_then(|v| v.parse().ok()).unwrap_or(0);
     let enabled = match mode.as_str() {
-        "indep" | "halving" => false,
+        "indep" | "halving" | "shared" => false,
         "splice" => true,
         other => {
-            eprintln!("unknown mode {other:?}: expected indep, splice or halving");
+            eprintln!("unknown mode {other:?}: expected indep, splice, halving or shared");
             std::process::exit(2);
         }
     };
@@ -384,11 +446,16 @@ fn main() {
         diameter: env_f64("DIAMETER_D", 0.0) * 2f64.powf(1.0 / 6.0),
         diameter_beta: env_f64("DIAMETER_BETA", 1.0),
         diameter_kappa: env_f64("DIAMETER_KAPPA", 0.0),
+        portfolio: std::env::var("SURFACES")
+            .map(|spec| parse_surfaces(&spec))
+            .unwrap_or_default(),
+        portfolio_block: env_usize("SURFACE_BLOCK", 100),
+        portfolio_shared: mode == "shared",
     };
     let target = reference(n);
     println!(
         "LJ{n}, {chains} chains x {budget} charged, {ensembles} ensembles, mode {mode}, \
-         interval {} images {} partner {} source {} checkpoint {} compress {} diameter {:.3} kappa {} beta {}, reference {}",
+         interval {} images {} partner {} source {} checkpoint {} compress {} diameter {:.3} kappa {} beta {} portfolio {:?} block {} shared {}, reference {}",
         exchange.interval,
         exchange.images,
         if exchange.partner_best { "best" } else { "random" },
@@ -398,6 +465,9 @@ fn main() {
         exchange.diameter,
         exchange.diameter_kappa,
         exchange.diameter_beta,
+        exchange.portfolio,
+        exchange.portfolio_block,
+        exchange.portfolio_shared,
         target.map(|r| format!("{r:.6}")).unwrap_or_else(|| "none".into())
     );
 
@@ -420,16 +490,21 @@ fn main() {
             };
             chains
         ]));
+        let shared = exchange
+            .portfolio_shared
+            .then(|| shared_surface_allocator(&exchange.portfolio));
         let reports: Vec<ChainReport> = std::thread::scope(|scope| {
             let handles: Vec<_> = (0..chains)
                 .map(|chain| {
                     let board = Arc::clone(&board);
+                    let shared = shared.clone();
+                    let exchange = exchange.clone();
                     let seed = ensemble
                         .wrapping_mul(0x9E37_79B9)
                         .wrapping_add(chain as u64)
                         .wrapping_add(7);
                     scope.spawn(move || {
-                        run_chain(n, budget, seed, chain, &board, exchange, target, None)
+                        run_chain(n, budget, seed, chain, &board, exchange, target, None, shared)
                     })
                 })
                 .collect();
@@ -576,10 +651,12 @@ fn run_halving(
                         .map(|(chain, (state, _, seed))| {
                             let board = Arc::clone(&board);
                             let resume = state.clone();
+                            let exchange = exchange.clone();
                             let seed = seed.wrapping_add(rung_index as u64 * 0x1000);
                             scope.spawn(move || {
                                 run_chain(
                                     n, per_chain, seed, chain, &board, exchange, target, resume,
+                                    None,
                                 )
                             })
                         })
