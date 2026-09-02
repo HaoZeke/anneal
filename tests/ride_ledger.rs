@@ -37,6 +37,22 @@ fn live_replicas_claim_each_transition_experiment_at_most_once() {
 }
 
 #[test]
+fn a_replica_claims_the_exact_arm_selected_by_the_joint_batch() {
+    let portfolio = RidePortfolio::new(2, vec![RideMethod::Dimer]).unwrap();
+    let mut ledger = RideLedger::new(portfolio);
+    ledger
+        .register_source(source(17, -104.2, &[(4, 6)]))
+        .unwrap();
+    let selected = ledger.claimable_arms().last().unwrap().0.clone();
+
+    let work = ledger.claim_arm(2, 101, &selected).unwrap();
+
+    assert_eq!(work.arm, selected);
+    assert!(ledger.claim_arm(7, 102, &selected).is_none());
+    assert_eq!(ledger.claim_arm(2, 999, &selected), Some(work));
+}
+
+#[test]
 fn shared_failure_evidence_redirects_the_next_replica_to_an_untried_arm() {
     let portfolio = RidePortfolio::new(1, vec![RideMethod::Dimer]).unwrap();
     let mut ledger = RideLedger::new(portfolio);
