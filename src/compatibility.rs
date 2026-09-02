@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use eindir_core::ffi::{EINDIR_ABI_FEATURE_BATCH, EINDIR_ABI_FEATURE_GRADIENT, eindir_objective_t};
+use eindir_core::ffi::{eindir_abi_stamp_t, eindir_core_abi_stamp, eindir_objective_t};
 
 /// Protocol family used by the anneal objective boundary.
 pub const PROTOCOL_FAMILY: &str = "anneal.objective";
@@ -33,6 +33,10 @@ pub struct AbiStamp {
     pub abi_minor: u16,
     /// ABI layout revision for the embedded objective handle.
     pub layout_revision: u32,
+    /// Size of the embedded objective handle in bytes.
+    pub objective_size: usize,
+    /// Alignment of the embedded objective handle in bytes.
+    pub objective_align: usize,
     /// Major DLPack callback revision.
     pub dlpack_major: u16,
     /// Minor DLPack callback revision.
@@ -42,16 +46,27 @@ pub struct AbiStamp {
 }
 
 impl AbiStamp {
-    /// The stamp required by the anneal-side bridge.
-    pub const fn anneal_default() -> Self {
+    /// Convert the ABI stamp exported by an eindir-compatible producer.
+    pub fn from_eindir_stamp(stamp: eindir_abi_stamp_t) -> Self {
         Self {
-            abi_major: 1,
-            abi_minor: 1,
-            layout_revision: 3,
-            dlpack_major: 1,
-            dlpack_minor: 0,
-            features: EINDIR_ABI_FEATURE_GRADIENT | EINDIR_ABI_FEATURE_BATCH,
+            abi_major: u16::try_from(stamp.abi_major)
+                .expect("eindir ABI major fits the manifest type"),
+            abi_minor: u16::try_from(stamp.abi_minor)
+                .expect("eindir ABI minor fits the manifest type"),
+            layout_revision: stamp.objective_layout,
+            objective_size: stamp.objective_size,
+            objective_align: stamp.objective_align,
+            dlpack_major: u16::try_from(stamp.dlpack_major)
+                .expect("eindir DLPack major fits the manifest type"),
+            dlpack_minor: u16::try_from(stamp.dlpack_minor)
+                .expect("eindir DLPack minor fits the manifest type"),
+            features: stamp.features,
         }
+    }
+
+    /// The stamp required by the anneal-side bridge.
+    pub fn anneal_default() -> Self {
+        Self::from_eindir_stamp(eindir_core_abi_stamp())
     }
 }
 
@@ -129,6 +144,18 @@ impl EngineDescriptor {
                 received: self.abi.layout_revision,
             });
         }
+        if self.abi.objective_size != expected_abi.objective_size {
+            return Err(CompatibilityError::AbiSize {
+                expected: expected_abi.objective_size,
+                received: self.abi.objective_size,
+            });
+        }
+        if self.abi.objective_align != expected_abi.objective_align {
+            return Err(CompatibilityError::AbiAlignment {
+                expected: expected_abi.objective_align,
+                received: self.abi.objective_align,
+            });
+        }
         if self.abi.abi_major != expected_abi.abi_major {
             return Err(CompatibilityError::AbiMajor {
                 expected: expected_abi.abi_major,
@@ -174,9 +201,9 @@ impl Default for EngineDescriptor {
 /// Validate the memory and numerical shape invariants required by an eindir
 /// objective before adapting it to an [`eindir_core::Objective`].
 ///
-/// The handle is borrowed and no callback is invoked. The optional embedded
-/// descriptor carries semantic metadata such as units and force sign; callers
-/// that require those semantics validate it separately.
+/// The handle is borrowed and no callback is invoked. Semantic metadata such as
+/// units and force sign belongs to the versioned [`EngineDescriptor`] and is
+/// validated separately.
 ///
 /// # Safety
 ///
@@ -301,6 +328,22 @@ pub enum CompatibilityError {
         expected: u32,
         /// Producer-reported layout revision.
         received: u32,
+    },
+    /// The embedded objective size differs.
+    #[error("ABI objective size mismatch: expected {expected}, received {received}")]
+    AbiSize {
+        /// Consumer-required handle size.
+        expected: usize,
+        /// Producer-reported handle size.
+        received: usize,
+    },
+    /// The embedded objective alignment differs.
+    #[error("ABI objective alignment mismatch: expected {expected}, received {received}")]
+    AbiAlignment {
+        /// Consumer-required handle alignment.
+        expected: usize,
+        /// Producer-reported handle alignment.
+        received: usize,
     },
     /// The DLPack major differs.
     #[error("DLPack major mismatch: expected {expected}, received {received}")]
