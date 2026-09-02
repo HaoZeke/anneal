@@ -63,7 +63,8 @@ run_seeds() {
     for seed in $(seq 0 $((SEEDS - 1))); do
       (
         export SEED_OFFSET=$seed
-        "$@" >"$dir/seed_${seed}.out" 2>"$dir/seed_${seed}.err"
+        timeout --signal=TERM --kill-after=30s "${SEED_TIMEOUT:-25m}" \
+          "$@" >"$dir/seed_${seed}.out" 2>"$dir/seed_${seed}.err"
       ) &
     done
     wait
