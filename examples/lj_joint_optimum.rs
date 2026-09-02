@@ -323,10 +323,18 @@ fn run_minima_hopping(
         hopping.relax_steps,
         hopping.record_gradient,
     ) else {
-        return Outcome::default();
+        return Outcome {
+            best: ledger.best,
+            best_state: ledger.best_state.clone(),
+            final_energy: f64::INFINITY,
+            charged: ledger.spent(),
+            ..Outcome::default()
+        };
     };
     if !initial_valid {
         return Outcome {
+            best: ledger.best,
+            best_state: ledger.best_state.clone(),
             final_state: Some(state),
             final_energy: energy,
             charged: ledger.spent(),
