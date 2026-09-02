@@ -506,11 +506,16 @@ impl FunnelModel {
                     .collect::<Vec<_>>();
                 batch.push(descriptor.view());
                 let score = self.gibbon_batch(&batch, &minima);
-                if score.is_finite()
-                    && best
-                        .as_ref()
-                        .is_none_or(|(held, _)| score.total_cmp(held).is_gt())
-                {
+                let replace = best.as_ref().is_none_or(|(held, held_index)| {
+                    score.total_cmp(held).is_gt()
+                        || (score.total_cmp(held).is_eq()
+                            && family_sizes.get(source).copied().unwrap_or(0)
+                                < family_sizes
+                                    .get(&candidates[*held_index].0)
+                                    .copied()
+                                    .unwrap_or(0))
+                });
+                if score.is_finite() && replace {
                     best = Some((score, candidate_index));
                 }
             }
