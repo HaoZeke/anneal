@@ -299,6 +299,104 @@ pub fn core_key_nn(x: ArrayView1<f64>, species: &[u32], rule: CoreRule) -> CoreK
     core_key(x, species, contact_cutoff(x), rule)
 }
 
+/// Common-neighbour signature counts of a structure: pairs of contacts whose
+/// common neighbours form a five-ring (555, a local five-fold axis), a
+/// four-chain with two bonds (421, fcc) and with two bonds in a different
+/// arrangement (422, hcp), at the structure's own contact cutoff.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct MotifCounts {
+    /// Contact pairs with five common neighbours bonded in a ring.
+    pub five_fold: usize,
+    /// Contact pairs with four common neighbours and two bonds among them
+    /// that do not share an atom.
+    pub fcc: usize,
+    /// Contact pairs with four common neighbours and two bonds among them
+    /// that share an atom.
+    pub hcp: usize,
+    /// Contact pairs.
+    pub contacts: usize,
+}
+
+/// Coarse packing class of a structure from its five-fold pair count per
+/// atom: close packed (no local five-fold axes), decahedral (one axis, a
+/// few pairs) or icosahedral (many).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum MotifClass {
+    /// No five-fold pairs: fcc, hcp and the tetrahedral packings.
+    ClosePacked,
+    /// A single five-fold axis or a few.
+    Decahedral,
+    /// Five-fold pairs throughout.
+    Icosahedral,
+}
+
+/// Common-neighbour counts of `x` at its contact cutoff.
+pub fn motif_counts(x: ArrayView1<f64>) -> MotifCounts {
+    let n = x.len() / 3;
+    let nb = contact_neighbours(x, n, contact_cutoff(x));
+    let mut counts = MotifCounts::default();
+    for i in 0..n {
+        for &j in &nb[i] {
+            if j <= i {
+                continue;
+            }
+            counts.contacts += 1;
+            let common: Vec<usize> = nb[i]
+                .iter()
+                .copied()
+                .filter(|k| nb[j].contains(k))
+                .collect();
+            let mut bonds: Vec<(usize, usize)> = Vec::new();
+            for (a, &p) in common.iter().enumerate() {
+                for &q in &common[a + 1..] {
+                    if nb[p].contains(&q) {
+                        bonds.push((p, q));
+                    }
+                }
+            }
+            match (common.len(), bonds.len()) {
+                (5, 5) => {
+                    let mut degree = vec![0usize; common.len()];
+                    for &(p, q) in &bonds {
+                        degree[common.iter().position(|&c| c == p).expect("member")] += 1;
+                        degree[common.iter().position(|&c| c == q).expect("member")] += 1;
+                    }
+                    if degree.iter().all(|&d| d == 2) {
+                        counts.five_fold += 1;
+                    }
+                }
+                (4, 2) => {
+                    let (a, b) = (bonds[0], bonds[1]);
+                    let shared = a.0 == b.0 || a.0 == b.1 || a.1 == b.0 || a.1 == b.1;
+                    if shared {
+                        counts.hcp += 1;
+                    } else {
+                        counts.fcc += 1;
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    counts
+}
+
+/// Five-fold pairs per atom above which a structure counts as icosahedral.
+pub const ICOSAHEDRAL_FIVE_FOLD_PER_ATOM: f64 = 0.15;
+
+/// The coarse packing class of `x`.
+pub fn motif_class(x: ArrayView1<f64>) -> MotifClass {
+    let n = (x.len() / 3).max(1);
+    let counts = motif_counts(x);
+    if counts.five_fold == 0 {
+        MotifClass::ClosePacked
+    } else if (counts.five_fold as f64) / (n as f64) < ICOSAHEDRAL_FIVE_FOLD_PER_ATOM {
+        MotifClass::Decahedral
+    } else {
+        MotifClass::Icosahedral
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -413,5 +511,41 @@ mod tests {
             .sum::<f64>()
             .sqrt();
         assert!(gap >= 1.0);
+    }
+
+    #[test]
+    fn motif_counts_separate_the_fixture_packings() {
+        for name in [
+            "lj38_fcc",
+            "lj38_ico",
+            "lj75_ico",
+            "lj75_marks",
+            "lj98_gm",
+            "lj104_gm",
+        ] {
+            let x = fixture(name);
+            let counts = motif_counts(x.view());
+            eprintln!("MOTIF {name}: {counts:?} class {:?}", motif_class(x.view()));
+        }
+        assert_eq!(
+            motif_class(fixture("lj38_fcc").view()),
+            MotifClass::ClosePacked
+        );
+        assert_eq!(
+            motif_class(fixture("lj38_ico").view()),
+            MotifClass::Icosahedral
+        );
+        assert_eq!(
+            motif_class(fixture("lj75_ico").view()),
+            MotifClass::Icosahedral
+        );
+        assert_eq!(
+            motif_class(fixture("lj75_marks").view()),
+            MotifClass::Decahedral
+        );
+        assert_eq!(
+            motif_class(fixture("lj104_gm").view()),
+            MotifClass::Decahedral
+        );
     }
 }
