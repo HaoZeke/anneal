@@ -1,4 +1,7 @@
-use anneal_core::discovery_roster::{DiscoveryOpportunity, DiscoveryRole, assign_discovery_roles};
+use anneal_core::discovery_roster::{
+    DiscoveryOpportunity, DiscoveryRole, assign_discovery_roles,
+    assign_discovery_roles_with_minimum,
+};
 
 #[test]
 fn roster_maximizes_total_minimum_information_under_ride_capacity() {
@@ -103,13 +106,14 @@ fn exact_information_ties_split_without_changing_the_maximum() {
 
 #[test]
 fn available_ride_arms_form_an_exact_consumer_capacity() {
-    let assignments = assign_discovery_roles(
+    let assignments = assign_discovery_roles_with_minimum(
         &[
             DiscoveryOpportunity::new(0, 1.0, Some(0.2)).unwrap(),
             DiscoveryOpportunity::new(1, 0.9, Some(0.3)).unwrap(),
             DiscoveryOpportunity::new(2, 0.8, Some(0.1)).unwrap(),
             DiscoveryOpportunity::new(3, 0.7, Some(0.1)).unwrap(),
         ],
+        2,
         2,
         17,
     )
