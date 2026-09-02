@@ -52,6 +52,7 @@ pub fn apply_two_phase(cfg: &mut Config) {
         cutoff: anneal_core::methods::two_phase::Cutoff::Relative(kappa),
         beta: if kappa > 0.0 { beta } else { 0.0 },
         mu,
+        anisotropic: false,
     });
     println!("  two-phase relaxation: {:?}", cfg.two_phase);
 }

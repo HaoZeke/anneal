@@ -43,6 +43,7 @@ fn a_surface_portfolio_runs_to_the_end_of_its_ledger() {
             cutoff: anneal_core::methods::two_phase::Cutoff::Fixed(0.0),
             beta: 0.0,
             mu: 5.0,
+            anisotropic: false,
         },
     ];
     let (best, hops, spent) = run(&cfg, 6_000, 3);
