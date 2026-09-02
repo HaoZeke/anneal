@@ -1,8 +1,13 @@
 //! Versioned multiscale invariant descriptor spaces for catalog geometry.
 
+mod provider;
 pub mod pullback;
 mod universal;
 
+pub use provider::{
+    DescriptorOutputSpec, DescriptorProviderContract, DescriptorProviderError,
+    DescriptorProviderInput, InvariantDescriptorProvider,
+};
 pub use universal::{
     DescriptorGeometry, UNIVERSAL_DESCRIPTOR_SCHEMA, UNIVERSAL_DESCRIPTOR_VERSION,
     UNIVERSAL_LOCAL_ENVIRONMENT_RADIUS, universal_descriptor_space,
@@ -10,6 +15,7 @@ pub use universal::{
 
 use crate::soap::{SoapSpec, jacobian_ace, jacobian_z, local_nu3_z, local_spectra_z};
 use ndarray::{Array2, ArrayView1};
+use std::sync::Arc;
 
 const L2_NORMALIZATION_SCHEMA: &str = "l2-v1";
 pub(super) const CONTRACTIVE_L2_NORMALIZATION_SCHEMA: &str = "contractive-l2-unit-v2";
@@ -37,6 +43,8 @@ pub enum DescriptorBlockKind {
     InvariantAceNu3Mean,
     /// Permutation-invariant pseudoscalar moments that distinguish mirror minima.
     ChiralMoment,
+    /// Fixed-dimensional invariant output supplied by an external provider.
+    ProviderFeature,
 }
 
 impl DescriptorBlockKind {
@@ -49,6 +57,7 @@ impl DescriptorBlockKind {
                 | Self::InvariantSoapMean
                 | Self::InvariantAceNu3Mean
                 | Self::ChiralMoment
+                | Self::ProviderFeature
         )
     }
 }
@@ -163,7 +172,7 @@ pub struct DescriptorBlockMetadata {
     offset: usize,
     len: usize,
     raw_norm: f64,
-    normalization: &'static str,
+    normalization: String,
 }
 
 impl DescriptorBlockMetadata {
@@ -208,8 +217,8 @@ impl DescriptorBlockMetadata {
     }
 
     /// Versioned normalization convention.
-    pub fn normalization(&self) -> &'static str {
-        self.normalization
+    pub fn normalization(&self) -> &str {
+        &self.normalization
     }
 }
 
@@ -220,6 +229,7 @@ pub struct DescriptorVector {
     schema_version: u32,
     values: Vec<f64>,
     blocks: Vec<DescriptorBlockMetadata>,
+    provider_identity: Option<[u8; 32]>,
 }
 
 impl DescriptorVector {
@@ -247,6 +257,7 @@ impl DescriptorVector {
     pub fn distance(&self, other: &Self) -> Result<f64, DescriptorError> {
         let compatible = self.schema_name == other.schema_name
             && self.schema_version == other.schema_version
+            && self.provider_identity == other.provider_identity
             && self.values.len() == other.values.len()
             && self.blocks.len() == other.blocks.len()
             && self.blocks.iter().zip(&other.blocks).all(|(left, right)| {
@@ -341,6 +352,58 @@ pub enum DescriptorError {
     /// Periodic linked-cell construction or search rejected the geometry.
     #[error("universal descriptor neighbour search failed")]
     NeighborSearch,
+    /// A provider output needs a stable name.
+    #[error("descriptor provider output name must be nonempty")]
+    EmptyProviderOutput,
+    /// A provider output must have at least one scalar channel.
+    #[error("descriptor provider output dimension must be positive")]
+    ZeroProviderDimension,
+    /// Provider identity must pin a model or complete calculator configuration.
+    #[error("descriptor provider model digest must be nonzero")]
+    MissingProviderDigest,
+    /// Provider interaction range must be finite and positive.
+    #[error("descriptor provider interaction range must be finite and positive")]
+    InvalidProviderInteractionRange,
+    /// Provider normalization must identify its fixed metric semantics.
+    #[error("descriptor provider normalization must be nonempty")]
+    EmptyProviderNormalization,
+    /// The external provider could not evaluate its declared output.
+    #[error("descriptor provider {provider} failed: {message}")]
+    ProviderEvaluation {
+        /// Stable provider schema name.
+        provider: String,
+        /// Provider-supplied diagnostic.
+        message: String,
+    },
+    /// A provider returned a vector that violates its fixed shape contract.
+    #[error("descriptor provider output {output} has dimension {actual}, expected {expected}")]
+    ProviderDimension {
+        /// Declared output name.
+        output: String,
+        /// Declared fixed dimension.
+        expected: usize,
+        /// Returned dimension.
+        actual: usize,
+    },
+    /// Local descriptor rows are required for atom-targeted exploration.
+    #[error("descriptor provider does not declare an atomic output")]
+    ProviderAtomicOutputRequired,
+    /// A provider returned an atomic matrix that violates its fixed shape contract.
+    #[error(
+        "descriptor provider output {output} has shape ({actual_rows}, {actual_columns}), expected ({expected_rows}, {expected_columns})"
+    )]
+    ProviderAtomicShape {
+        /// Declared output name.
+        output: String,
+        /// Expected atom rows.
+        expected_rows: usize,
+        /// Expected feature columns.
+        expected_columns: usize,
+        /// Returned rows.
+        actual_rows: usize,
+        /// Returned columns.
+        actual_columns: usize,
+    },
 }
 
 /// Evaluator bound to one immutable descriptor schema.
@@ -348,6 +411,7 @@ pub enum DescriptorError {
 pub struct DescriptorSpace {
     schema: DescriptorSchema,
     geometry: Option<DescriptorGeometry>,
+    provider: Option<Arc<dyn InvariantDescriptorProvider>>,
 }
 
 impl DescriptorSpace {
@@ -356,6 +420,7 @@ impl DescriptorSpace {
         Self {
             schema,
             geometry: None,
+            provider: None,
         }
     }
 
@@ -363,7 +428,40 @@ impl DescriptorSpace {
         Self {
             schema,
             geometry: Some(geometry),
+            provider: None,
         }
+    }
+
+    /// Bind an externally implemented invariant descriptor to this evaluator.
+    pub fn from_provider<P>(
+        geometry: DescriptorGeometry,
+        provider: P,
+    ) -> Result<Self, DescriptorError>
+    where
+        P: InvariantDescriptorProvider + 'static,
+    {
+        let contract = provider.contract();
+        let block = DescriptorBlockSpec::new(
+            DescriptorBlockKind::ProviderFeature,
+            contract.system_output().dimension(),
+            0,
+            contract.interaction_range(),
+        )?;
+        let schema = DescriptorSchema::new(
+            contract.schema_name(),
+            contract.schema_version(),
+            vec![block],
+        )?;
+        Ok(Self {
+            schema,
+            geometry: Some(geometry),
+            provider: Some(Arc::new(provider)),
+        })
+    }
+
+    /// External descriptor contract, or `None` for an in-tree legacy evaluator.
+    pub fn provider_contract(&self) -> Option<&DescriptorProviderContract> {
+        self.provider.as_ref().map(|provider| provider.contract())
     }
 
     /// Immutable schema interpreted by this evaluator.
@@ -383,6 +481,47 @@ impl DescriptorSpace {
         species: Option<&[u32]>,
     ) -> Result<DescriptorVector, DescriptorError> {
         validate_coordinates(coordinates, species)?;
+
+        if let Some(provider) = &self.provider {
+            let geometry = self
+                .geometry
+                .ok_or(DescriptorError::UniversalGeometryRequired)?;
+            let contract = provider.contract();
+            let output = contract.system_output();
+            let values = provider
+                .describe_system(DescriptorProviderInput::new(geometry, coordinates, species))
+                .map_err(|error| DescriptorError::ProviderEvaluation {
+                    provider: contract.schema_name().into(),
+                    message: error.message().into(),
+                })?;
+            if values.len() != output.dimension() {
+                return Err(DescriptorError::ProviderDimension {
+                    output: output.name().into(),
+                    expected: output.dimension(),
+                    actual: values.len(),
+                });
+            }
+            if let Some(index) = values.iter().position(|value| !value.is_finite()) {
+                return Err(DescriptorError::NonFiniteDescriptor { block: 0, index });
+            }
+            let raw_norm = values.iter().map(|value| value * value).sum::<f64>().sqrt();
+            return Ok(DescriptorVector {
+                schema_name: self.schema.name.clone(),
+                schema_version: self.schema.version,
+                values,
+                blocks: vec![DescriptorBlockMetadata {
+                    kind: DescriptorBlockKind::ProviderFeature,
+                    n_max: output.dimension(),
+                    l_max: 0,
+                    cutoff: contract.interaction_range(),
+                    offset: 0,
+                    len: output.dimension(),
+                    raw_norm,
+                    normalization: contract.normalization().into(),
+                }],
+                provider_identity: Some(contract.identity_digest()),
+            });
+        }
 
         if let Some(geometry) = self.geometry {
             return universal::describe(&self.schema, geometry, coordinates, species);
@@ -411,7 +550,8 @@ impl DescriptorSpace {
                 | DescriptorBlockKind::GraphTopology
                 | DescriptorBlockKind::InvariantSoapMean
                 | DescriptorBlockKind::InvariantAceNu3Mean
-                | DescriptorBlockKind::ChiralMoment => unreachable!(),
+                | DescriptorBlockKind::ChiralMoment
+                | DescriptorBlockKind::ProviderFeature => unreachable!(),
             };
             let mut aggregated = match block.kind {
                 DescriptorBlockKind::SoapMean => column_mean(&local, 0),
@@ -425,7 +565,8 @@ impl DescriptorSpace {
                 | DescriptorBlockKind::GraphTopology
                 | DescriptorBlockKind::InvariantSoapMean
                 | DescriptorBlockKind::InvariantAceNu3Mean
-                | DescriptorBlockKind::ChiralMoment => unreachable!(),
+                | DescriptorBlockKind::ChiralMoment
+                | DescriptorBlockKind::ProviderFeature => unreachable!(),
             };
             if let Some(index) = aggregated.iter().position(|value| !value.is_finite()) {
                 return Err(DescriptorError::NonFiniteDescriptor {
@@ -454,7 +595,7 @@ impl DescriptorSpace {
                 offset,
                 len,
                 raw_norm,
-                normalization: L2_NORMALIZATION_SCHEMA,
+                normalization: L2_NORMALIZATION_SCHEMA.into(),
             });
         }
         Ok(DescriptorVector {
@@ -462,6 +603,7 @@ impl DescriptorSpace {
             schema_version: self.schema.version,
             values,
             blocks: metadata,
+            provider_identity: None,
         })
     }
 
@@ -480,6 +622,33 @@ impl DescriptorSpace {
         let geometry = self
             .geometry
             .ok_or(DescriptorError::UniversalGeometryRequired)?;
+        if let Some(provider) = &self.provider {
+            let contract = provider.contract();
+            let output = contract
+                .atomic_output()
+                .ok_or(DescriptorError::ProviderAtomicOutputRequired)?;
+            let local = provider
+                .describe_atoms(DescriptorProviderInput::new(geometry, coordinates, species))
+                .map_err(|error| DescriptorError::ProviderEvaluation {
+                    provider: contract.schema_name().into(),
+                    message: error.message().into(),
+                })?
+                .ok_or(DescriptorError::ProviderAtomicOutputRequired)?;
+            let expected_rows = coordinates.len() / 3;
+            if local.nrows() != expected_rows || local.ncols() != output.dimension() {
+                return Err(DescriptorError::ProviderAtomicShape {
+                    output: output.name().into(),
+                    expected_rows,
+                    expected_columns: output.dimension(),
+                    actual_rows: local.nrows(),
+                    actual_columns: local.ncols(),
+                });
+            }
+            if let Some(index) = local.iter().position(|value| !value.is_finite()) {
+                return Err(DescriptorError::NonFiniteDescriptor { block: 0, index });
+            }
+            return Ok(local);
+        }
         universal::describe_local(&self.schema, geometry, coordinates, species)
     }
 
@@ -519,7 +688,7 @@ impl DescriptorSpace {
         coordinates: ArrayView1<f64>,
         species: Option<&[u32]>,
     ) -> Result<Array2<f64>, DescriptorError> {
-        if self.geometry.is_some() {
+        if self.geometry.is_some() || self.provider.is_some() {
             return self.jacobian_fd(coordinates, species, 1e-6);
         }
         let descriptor = self.describe(coordinates, species)?;
@@ -557,7 +726,8 @@ impl DescriptorSpace {
                 | DescriptorBlockKind::GraphTopology
                 | DescriptorBlockKind::InvariantSoapMean
                 | DescriptorBlockKind::InvariantAceNu3Mean
-                | DescriptorBlockKind::ChiralMoment => {
+                | DescriptorBlockKind::ChiralMoment
+                | DescriptorBlockKind::ProviderFeature => {
                     return Err(DescriptorError::UniversalGeometryRequired);
                 }
             };

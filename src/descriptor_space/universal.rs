@@ -196,7 +196,7 @@ pub(super) fn describe(
             offset,
             len,
             raw_norm,
-            normalization: CONTRACTIVE_L2_NORMALIZATION_SCHEMA,
+            normalization: CONTRACTIVE_L2_NORMALIZATION_SCHEMA.into(),
         });
     }
     Ok(DescriptorVector {
@@ -204,6 +204,7 @@ pub(super) fn describe(
         schema_version: schema.version,
         values,
         blocks: metadata,
+        provider_identity: None,
     })
 }
 
