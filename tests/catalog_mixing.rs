@@ -1,7 +1,7 @@
 use anneal_core::catalog::{
-    explore_collapsed, explore_must_leave, invert_mixing, mixed, occupancy_complete_at,
-    occupant_rhat, rhat_series, sampled_minimum_is_dominant, stronger, AttractorStrength,
-    OccupancyCertificate, MIXED_RHAT,
+    AttractorStrength, MIXED_RHAT, OccupancyCertificate, explore_collapsed, explore_must_leave,
+    invert_mixing, mixed, occupancy_complete_at, occupant_rhat, rhat_series,
+    sampled_minimum_is_dominant, stronger,
 };
 
 fn constant(value: f64, len: usize) -> Vec<f64> {
