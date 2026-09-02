@@ -1,6 +1,4 @@
-use anneal_core::discovery_roster::{
-    DiscoveryOpportunity, DiscoveryRole, assign_discovery_roles,
-};
+use anneal_core::discovery_roster::{DiscoveryOpportunity, DiscoveryRole, assign_discovery_roles};
 
 #[test]
 fn roster_maximizes_total_minimum_information_under_ride_capacity() {
