@@ -502,3 +502,53 @@ fn certification_reliability_transfers_when_a_source_edge_is_saturated() {
     assert_eq!(guided.arm.source_basin, 23);
     assert_eq!(guided.arm.method, RideMethod::Lanczos);
 }
+
+#[test]
+fn exact_saddle_reobservations_produce_coverage_evidence() {
+    let portfolio = RidePortfolio::new(1, vec![RideMethod::Dimer]).unwrap();
+    let mut ledger = RideLedger::new(portfolio);
+    ledger
+        .register_source(source(17, -104.2, &[(4, 6)]))
+        .unwrap();
+
+    for attempt in 0..20_u64 {
+        let work = ledger.claim(2, 3_000 + attempt).unwrap();
+        ledger
+            .report(
+                2,
+                work.id,
+                100,
+                RideOutcome::Certified {
+                    saddle: 70,
+                    endpoints: [17, 29],
+                },
+            )
+            .unwrap();
+    }
+
+    let covered = ledger.saddle_coverage();
+    assert_eq!(covered.observations, 20);
+    assert_eq!(covered.singletons, 0);
+    assert_eq!(covered.doubletons, 0);
+    assert_eq!(covered.unseen_mass_upper, Some(0.0));
+    assert!(covered.saturated);
+
+    let work = ledger.claim(2, 4_000).unwrap();
+    let credit = ledger
+        .report(
+            2,
+            work.id,
+            100,
+            RideOutcome::Unresolved {
+                saddle: 71,
+                failure: RideFailure::CollapsedConnection,
+            },
+        )
+        .unwrap();
+    let reopened = ledger.saddle_coverage();
+
+    assert!(credit.novel_saddle);
+    assert_eq!(reopened.observations, 21);
+    assert_eq!(reopened.singletons, 1);
+    assert!(!reopened.saturated);
+}
