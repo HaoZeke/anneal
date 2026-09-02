@@ -190,6 +190,164 @@ impl FlooredThompson {
     }
 }
 
+/// One auditable EXP3-IX arm draw.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Exp3IxSelection {
+    arm: usize,
+    probability: f64,
+    learning_rate: f64,
+    implicit_exploration: f64,
+    round: u64,
+}
+
+impl Exp3IxSelection {
+    /// Selected arm.
+    pub fn arm(self) -> usize {
+        self.arm
+    }
+
+    /// Probability assigned to the selected arm.
+    pub fn probability(self) -> f64 {
+        self.probability
+    }
+
+    /// Exponential-weights learning rate `eta_t`.
+    pub fn learning_rate(self) -> f64 {
+        self.learning_rate
+    }
+
+    /// Implicit-exploration bias `gamma_t = eta_t / 2`.
+    pub fn implicit_exploration(self) -> f64 {
+        self.implicit_exploration
+    }
+
+    /// One-indexed bandit round.
+    pub fn round(self) -> u64 {
+        self.round
+    }
+}
+
+/// Anytime EXP3-IX allocation for overlapping, non-stationary arms.
+///
+/// The learner follows Algorithm 1 and the horizon-free rates in Theorem 1 of
+/// Neu, *Explore no more: Improved high-probability regret bounds for
+/// non-stochastic bandits* (NeurIPS 2015):
+/// `eta_t = sqrt(log(K) / (K t))` and `gamma_t = eta_t / 2`. Observed losses
+/// must lie in `[0, 1]`. Unlike [`FlooredThompson`], this rule assumes neither a
+/// stationary Bernoulli likelihood nor a hand-set discount or exploration
+/// floor.
+#[derive(Debug, Clone)]
+pub struct Exp3Ix {
+    estimated_losses: Vec<f64>,
+    pulls: Vec<usize>,
+    rewards: Vec<f64>,
+    rounds: u64,
+    pending: Option<Exp3IxSelection>,
+}
+
+impl Exp3Ix {
+    /// Construct an equal-weight learner over `arms` actions.
+    pub fn new(arms: usize) -> Self {
+        assert!(arms > 0, "an EXP3-IX learner needs at least one arm");
+        Self {
+            estimated_losses: vec![0.0; arms],
+            pulls: vec![0; arms],
+            rewards: vec![0.0; arms],
+            rounds: 0,
+            pending: None,
+        }
+    }
+
+    fn next_rates(&self) -> (f64, f64) {
+        let arms = self.estimated_losses.len() as f64;
+        let round = self.rounds.saturating_add(1) as f64;
+        let eta = (arms.ln() / (arms * round)).sqrt();
+        (eta, eta / 2.0)
+    }
+
+    /// Sampling distribution for the next round.
+    pub fn next_probabilities(&self) -> Vec<f64> {
+        let (eta, _) = self.next_rates();
+        let logits = self
+            .estimated_losses
+            .iter()
+            .map(|loss| -eta * loss)
+            .collect::<Vec<_>>();
+        let maximum = logits.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+        let minimum_log_weight = f64::MIN_POSITIVE.ln();
+        let weights = logits
+            .iter()
+            .map(|logit| (*logit - maximum).max(minimum_log_weight).exp())
+            .collect::<Vec<_>>();
+        let total = weights.iter().sum::<f64>();
+        weights.into_iter().map(|weight| weight / total).collect()
+    }
+
+    /// Draw one arm from the current exponential-weights distribution.
+    ///
+    /// Every draw must be followed by exactly one [`Exp3Ix::update`].
+    pub fn select<R: Rng + ?Sized>(&mut self, rng: &mut R) -> Exp3IxSelection {
+        assert!(self.pending.is_none(), "EXP3-IX selection needs its loss");
+        let probabilities = self.next_probabilities();
+        let draw = rng.random::<f64>();
+        let mut cumulative = 0.0;
+        let mut arm = probabilities.len() - 1;
+        for (index, probability) in probabilities.iter().copied().enumerate() {
+            cumulative += probability;
+            if draw < cumulative {
+                arm = index;
+                break;
+            }
+        }
+        let (learning_rate, implicit_exploration) = self.next_rates();
+        let selection = Exp3IxSelection {
+            arm,
+            probability: probabilities[arm],
+            learning_rate,
+            implicit_exploration,
+            round: self.rounds.saturating_add(1),
+        };
+        self.pending = Some(selection);
+        selection
+    }
+
+    /// Apply the selected arm's observed loss in `[0, 1]`.
+    pub fn update(&mut self, loss: f64) {
+        assert!(loss.is_finite() && (0.0..=1.0).contains(&loss));
+        let selection = self
+            .pending
+            .take()
+            .expect("EXP3-IX update needs a selected arm");
+        let estimate = loss / (selection.probability + selection.implicit_exploration);
+        self.estimated_losses[selection.arm] += estimate;
+        self.pulls[selection.arm] = self.pulls[selection.arm]
+            .checked_add(1)
+            .expect("EXP3-IX pull count must fit usize");
+        self.rewards[selection.arm] += 1.0 - loss;
+        self.rounds = self.rounds.saturating_add(1);
+    }
+
+    /// Completed selections per arm.
+    pub fn pulls(&self) -> &[usize] {
+        &self.pulls
+    }
+
+    /// Empirical mean reward per arm without a prior or discount.
+    pub fn success_rates(&self) -> Vec<f64> {
+        self.rewards
+            .iter()
+            .zip(&self.pulls)
+            .map(|(reward, pulls)| {
+                if *pulls == 0 {
+                    0.0
+                } else {
+                    reward / *pulls as f64
+                }
+            })
+            .collect()
+    }
+}
+
 /// Exact diagnostic counters for stationary-object discovery mechanisms.
 ///
 /// Selection belongs to the coordinator's exact-species discovery rule. This
