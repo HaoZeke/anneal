@@ -1725,7 +1725,7 @@ dependencies = [
 [[package]]
 name = "rgsaddle"
 version = "0.1.0"
-source = "git+https://github.com/OmniPotentRPC/rgsaddle.git?rev=a291bf76da0e65b5190d383f711ebf3132f1f578#a291bf76da0e65b5190d383f711ebf3132f1f578"
+source = "git+https://github.com/OmniPotentRPC/rgsaddle.git?rev=65b1f51dc329af15e332a4bb46d80d61d63df37a#65b1f51dc329af15e332a4bb46d80d61d63df37a"
 dependencies = [
  "eindir-core",
  "linkcell",
