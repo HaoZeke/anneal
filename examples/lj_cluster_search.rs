@@ -1402,6 +1402,35 @@ fn main() {
         });
         println!("  two-phase relaxation: {:?}", cfg.two_phase);
     }
+    // A learned portfolio of relaxation surfaces: SURFACES names the arms
+    // beside the plain one, comma-separated, as `mu:5`, `d:3.5` (pair-well
+    // units) or `kappa:0.75`, with an optional `:beta` suffix on the two
+    // diameter forms. The depth-rewarded allocator picks one per hop.
+    if opts.contains(&"surfaces") {
+        let spec = std::env::var("SURFACES").unwrap_or_else(|_| "mu:5,mu:2.5,d:3.5".into());
+        let unit = cfg.length_scale * 2f64.powf(1.0 / 6.0);
+        let mut arms = Vec::new();
+        for item in spec.split(',').map(str::trim).filter(|s| !s.is_empty()) {
+            let parts: Vec<&str> = item.split(':').collect();
+            let value: f64 = parts
+                .get(1)
+                .and_then(|v| v.parse().ok())
+                .unwrap_or_else(|| panic!("SURFACES item {item:?} needs a number"));
+            let beta: f64 = parts.get(2).and_then(|v| v.parse().ok()).unwrap_or(1.0);
+            arms.push(match parts[0] {
+                "mu" => anneal_core::methods::two_phase::TwoPhase {
+                    cutoff: anneal_core::methods::two_phase::Cutoff::Fixed(0.0),
+                    beta: 0.0,
+                    mu: value,
+                },
+                "d" => anneal_core::methods::two_phase::TwoPhase::diameter(value * unit, beta),
+                "kappa" => anneal_core::methods::two_phase::TwoPhase::relative(value, beta),
+                other => panic!("SURFACES item {item:?}: unknown kind {other:?}"),
+            });
+        }
+        cfg.surfaces = arms;
+        println!("  surface portfolio: plain + {:?}", cfg.surfaces);
+    }
     cfg.path_on_stall = opts.contains(&"path");
     // Stall exits through the recorded basin entry, named so it is
     // measurable against the Lanczos climb rather than replacing it.
@@ -1676,6 +1705,8 @@ fn main() {
             seed.wrapping_mul(0x9E3779B97F4A7C15).wrapping_add(17),
         );
         let two_phase = cfg.two_phase.filter(|two| two.is_active());
+        let mut surfaces = (!cfg.surfaces.is_empty())
+            .then(|| anneal_core::methods::two_phase::SurfacePortfolio::new(&cfg.surfaces, seed));
         let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, iters: usize| {
             let charged_before = led.spent();
             // Curvature is not carried between relaxations: measured on this
@@ -1718,7 +1749,12 @@ fn main() {
             // Phase one, when configured: the compacted-surface relaxation
             // whose minimum the plain relaxation below starts from.
             let compacted;
-            let x = match two_phase {
+            let screening_pass = iters <= screen_steps;
+            let surface = match surfaces.as_mut() {
+                Some(portfolio) => portfolio.begin(screening_pass),
+                None => two_phase,
+            };
+            let x = match surface {
                 Some(two) => {
                     let cutoff = two.cutoff_for(x);
                     let (_, phase_one, _) = opt.minimize(x, iters, |v| {
@@ -1742,6 +1778,9 @@ fn main() {
             } else {
                 opt.minimize(x, iters, |v| charged(led, v))
             };
+            if let Some(portfolio) = surfaces.as_mut() {
+                portfolio.observe(screening_pass, f, led.best);
+            }
             let mut boundary_energy = f;
             let mut validated_gradient = None;
             let mut xr = xr;

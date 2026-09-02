@@ -133,6 +133,8 @@ where
     let screen_iters = cfg.screen_steps;
     let adaptive = cfg.adaptive_screen;
     let probe = cfg.probe_screen;
+    let mut surfaces = (!cfg.surfaces.is_empty())
+        .then(|| crate::methods::two_phase::SurfacePortfolio::new(&cfg.surfaces, seed));
     let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, iters: usize| {
         opt.forget();
         let before = led.spent();
@@ -149,7 +151,11 @@ where
         // Phase one, when configured: relax on the compacted surface and hand
         // that minimum to the plain relaxation below. Both phases charge.
         let compacted;
-        let x = match cfg.two_phase.filter(|two| two.is_active()) {
+        let surface = match surfaces.as_mut() {
+            Some(portfolio) => portfolio.begin(screening),
+            None => cfg.two_phase.filter(|two| two.is_active()),
+        };
+        let x = match surface {
             Some(two) => {
                 let cutoff = two.cutoff_for(x);
                 let (_, phase_one, _) = opt.minimize(x, iters, |v| {
@@ -236,6 +242,9 @@ where
         } else {
             f
         };
+        if let Some(portfolio) = surfaces.as_mut() {
+            portfolio.observe(screening, f, target);
+        }
         // A descent stopped on a verdict is known not to be converged, so
         // asking is spending an evaluation on an answer already in hand. The
         // check stays on every other path, where the answer is not known.
@@ -290,6 +299,8 @@ where
     let screen_iters = cfg.screen_steps;
     let adaptive = cfg.adaptive_screen;
     let probe = cfg.probe_screen;
+    let mut surfaces = (!cfg.surfaces.is_empty())
+        .then(|| crate::methods::two_phase::SurfacePortfolio::new(&cfg.surfaces, seed));
     let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, iters: usize| {
         opt.forget();
         let before = led.spent();
@@ -303,7 +314,11 @@ where
         // Phase one, when configured: relax on the compacted surface and hand
         // that minimum to the plain relaxation below. Both phases charge.
         let compacted;
-        let x = match cfg.two_phase.filter(|two| two.is_active()) {
+        let surface = match surfaces.as_mut() {
+            Some(portfolio) => portfolio.begin(screening),
+            None => cfg.two_phase.filter(|two| two.is_active()),
+        };
+        let x = match surface {
             Some(two) => {
                 let cutoff = two.cutoff_for(x);
                 let (_, phase_one, _) = opt.minimize(x, iters, |v| {
@@ -366,6 +381,9 @@ where
         } else {
             f
         };
+        if let Some(portfolio) = surfaces.as_mut() {
+            portfolio.observe(screening, f, target);
+        }
         if early {
             stats.capped += 1;
             return (f, xr);
@@ -675,6 +693,8 @@ where
     let screen_iters = cfg.screen_steps;
     let adaptive = cfg.adaptive_screen;
     let probe = cfg.probe_screen;
+    let mut surfaces = (!cfg.surfaces.is_empty())
+        .then(|| crate::methods::two_phase::SurfacePortfolio::new(&cfg.surfaces, seed));
     let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, iters: usize| {
         opt.forget();
         let before = led.spent();
@@ -688,7 +708,11 @@ where
         // Phase one, when configured: relax on the compacted surface and hand
         // that minimum to the plain relaxation below. Both phases charge.
         let compacted;
-        let x = match cfg.two_phase.filter(|two| two.is_active()) {
+        let surface = match surfaces.as_mut() {
+            Some(portfolio) => portfolio.begin(screening),
+            None => cfg.two_phase.filter(|two| two.is_active()),
+        };
+        let x = match surface {
             Some(two) => {
                 let cutoff = two.cutoff_for(x);
                 let (_, phase_one, _) = opt.minimize(x, iters, |v| {
@@ -751,6 +775,9 @@ where
         } else {
             f
         };
+        if let Some(portfolio) = surfaces.as_mut() {
+            portfolio.observe(screening, f, target);
+        }
         if early {
             stats.capped += 1;
             return (f, xr);
