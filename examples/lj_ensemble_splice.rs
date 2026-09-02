@@ -37,6 +37,7 @@ use anneal_core::methods::cluster_hopping::{
     random_cluster, run_with_bias_at_checkpoints,
 };
 use anneal_core::methods::splice::cut_and_splice;
+use anneal_core::methods::two_phase::{largest_pair_distance, penalty};
 use anneal_core::methods::warm_lbfgs::WarmLbfgs;
 use ndarray::{Array1, ArrayView1};
 use rand::rngs::StdRng;
@@ -82,51 +83,11 @@ fn reference(n: usize) -> Option<f64> {
     })
 }
 
-/// First-phase surface: the plain energy plus Doye's centroid compression
-/// `mu * sum_i |r_i - r_cm|^2` and the Locatelli--Schoen diameter penalty
-/// `beta * sum_{i<j} max(0, r_ij^2 - D^2)^2`. The centroid term contributes
-/// no gradient of its own because the displacements from it sum to zero.
+/// First-phase surface: the plain energy plus the library's two-phase penalty.
 fn lj_compressed(x: ArrayView1<f64>, mu: f64, diameter: f64, beta: f64) -> (f64, Array1<f64>) {
-    let (mut e, mut g) = lj(x);
-    let n = x.len() / 3;
-    if diameter > 0.0 && beta > 0.0 {
-        let d2 = diameter * diameter;
-        for i in 0..n {
-            for j in (i + 1)..n {
-                let d = [
-                    x[3 * i] - x[3 * j],
-                    x[3 * i + 1] - x[3 * j + 1],
-                    x[3 * i + 2] - x[3 * j + 2],
-                ];
-                let excess = d[0] * d[0] + d[1] * d[1] + d[2] * d[2] - d2;
-                if excess > 0.0 {
-                    e += beta * excess * excess;
-                    let coef = 4.0 * beta * excess;
-                    for k in 0..3 {
-                        g[3 * i + k] += coef * d[k];
-                        g[3 * j + k] -= coef * d[k];
-                    }
-                }
-            }
-        }
-    }
-    let mut cm = [0.0_f64; 3];
-    for i in 0..n {
-        for k in 0..3 {
-            cm[k] += x[3 * i + k];
-        }
-    }
-    for value in cm.iter_mut() {
-        *value /= n.max(1) as f64;
-    }
-    for i in 0..n {
-        for k in 0..3 {
-            let d = x[3 * i + k] - cm[k];
-            e += mu * d * d;
-            g[3 * i + k] += 2.0 * mu * d;
-        }
-    }
-    (e, g)
+    let (e, g) = lj(x);
+    let (pe, pg) = penalty(x, diameter, beta, mu);
+    (e + pe, g + pg)
 }
 
 fn env_f64(key: &str, default: f64) -> f64 {
@@ -191,23 +152,6 @@ struct ExchangeConfig {
     /// Relative cutoff: `kappa` times the largest pair distance of the
     /// structure entering the quench; zero keeps the fixed cutoff.
     diameter_kappa: f64,
-}
-
-/// Largest pair distance in a 3N coordinate vector.
-fn largest_pair_distance(x: ArrayView1<f64>) -> f64 {
-    let n = x.len() / 3;
-    let mut best = 0.0_f64;
-    for i in 0..n {
-        for j in (i + 1)..n {
-            let mut r2 = 0.0;
-            for k in 0..3 {
-                let d = x[3 * i + k] - x[3 * j + k];
-                r2 += d * d;
-            }
-            best = best.max(r2);
-        }
-    }
-    best.sqrt()
 }
 
 #[allow(clippy::too_many_arguments)]
