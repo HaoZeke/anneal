@@ -3092,9 +3092,14 @@ fn run_capnp_catalog(
             signature_digest,
         };
         match CatalogClient::connect(address, identity, ClientConfig::default()) {
-            Ok(client) => cooperative
-                .attach_client(replica, client)
-                .expect("configured replica must accept its catalog client"),
+            Ok(mut client) => {
+                if let Err(error) = client.attach(1) {
+                    eprintln!("catalog attach rejected ({error}); local execution remains active");
+                }
+                cooperative
+                    .attach_client(replica, client)
+                    .expect("configured replica must accept its catalog client");
+            }
             Err(error) => eprintln!(
                 "catalog {endpoint} unavailable ({error}); local execution remains active"
             ),
@@ -4365,7 +4370,26 @@ fn run_capnp_catalog(
             )
             .expect("coordinator policy evidence must preserve local invariants")
         {
-            PolicyEvidenceOutcome::Remote(input) => input,
+            PolicyEvidenceOutcome::Remote(input) => {
+                if cooperative
+                    .events()
+                    .last()
+                    .and_then(|event| event.policy)
+                    .is_some_and(|policy| policy.retired)
+                {
+                    return complete_checkpoint_trace(
+                        &mut cooperative,
+                        replica,
+                        &mut slice_sequence,
+                        checkpoint_charged,
+                        snapshot.best_energy(),
+                        |_cooperative, _slice_sequence| CheckpointAction::Retire {
+                            reason: "halving".to_owned(),
+                        },
+                    );
+                }
+                input
+            }
             PolicyEvidenceOutcome::Rejected
             | PolicyEvidenceOutcome::LocalFallback
             | PolicyEvidenceOutcome::SharingDisabled => {
