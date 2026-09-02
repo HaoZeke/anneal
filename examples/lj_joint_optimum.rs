@@ -570,7 +570,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
 #[cfg(test)]
 mod tests {
-    use super::{optbench_start_path, parse_plain_coordinates};
+    use super::{Arm, optbench_start_path, parse_plain_coordinates, selected_arms};
     use std::path::Path;
 
     #[test]
@@ -600,5 +600,13 @@ mod tests {
         assert_eq!(parsed.as_slice().unwrap(), &[0.0, 1.0, 2.0, 3.0, 4.0, 5.0]);
         assert!(parse_plain_coordinates("0 1 2", 2).is_err());
         assert!(parse_plain_coordinates("0 1 NaN\n3 4 5", 2).is_err());
+    }
+
+    #[test]
+    fn minima_hopping_selector_names_the_md_escape_algorithm() {
+        let arms = selected_arms("mh", &[]).unwrap();
+
+        assert!(matches!(arms.as_slice(), [Arm::MinimaHopping]));
+        assert_eq!(arms[0].label(), "minima-hopping");
     }
 }
