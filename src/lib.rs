@@ -57,6 +57,8 @@ pub mod adapter;
 /// Cost-augmenting bias operators (well-tempered metadynamics, etc.).
 /// Proposal allocation and the budget-window temperature law.
 pub mod allocate;
+/// Same-PES atomistic basin and ridge exploration by joint-optimum information.
+pub mod atomistic_hybrid;
 pub mod bias;
 /// Transport proposals from observed attraction-region crossings.
 pub mod boundary_transport;
