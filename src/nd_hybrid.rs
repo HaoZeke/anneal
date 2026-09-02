@@ -1,21 +1,22 @@
 //! Same-surface hybrid exploration for arbitrary-dimensional energy landscapes.
 //!
 //! Basin escapes generate force-certified sources and minimum-mode rides turn
-//! those sources into index-one connections. Both mechanisms compete on exact
-//! discoveries per charged PES evaluation. The returned network belongs to one
-//! caller-supplied surface and witness; no identity, energy model, or evidence
-//! crosses between systems.
+//! those sources into index-one connections. Good-UCB assigns each successive
+//! experiment from exact basin and saddle singleton occupancy. The returned
+//! network belongs to one caller-supplied surface and witness; no identity,
+//! energy model, or evidence crosses between systems.
 
 use std::collections::{HashMap, HashSet};
 
 use ndarray::{Array1, ArrayView1};
 use rand::{Rng, SeedableRng, rngs::StdRng};
 
-use crate::allocate::{ChargedDiscoveryAllocator, FlooredThompson};
+use crate::allocate::FlooredThompson;
 use crate::catalog::{
     PRODUCTION_MAX_UNSEEN_MASS, PRODUCTION_MINIMUM_VISITS, leftover_esty_stable,
     leftover_esty_upper,
 };
+use crate::discovery_roster::good_ucb_missing_mass_index;
 use crate::methods::minima_hopping::EscapeFeedback;
 use crate::movekernel::{Gaussian, MoveKernel, TsallisVisit};
 use crate::pes_exploration::{
@@ -28,6 +29,44 @@ const RIDGE_ARM: usize = 0;
 const ESCAPE_ARM: usize = 1;
 const GAUSSIAN_MOVE: usize = 0;
 const TSALLIS_MOVE: usize = 1;
+
+#[derive(Debug)]
+struct MechanismAccounting {
+    pulls: [usize; 2],
+    discoveries: [u64; 2],
+    charged: [u64; 2],
+}
+
+impl MechanismAccounting {
+    fn with_initial_escape(charged: u64) -> Self {
+        Self {
+            pulls: [0, 1],
+            discoveries: [0, 1],
+            charged: [0, charged],
+        }
+    }
+
+    fn observe(&mut self, arm: usize, discoveries: usize, charged: u64) {
+        self.pulls[arm] = self.pulls[arm].saturating_add(1);
+        self.discoveries[arm] =
+            self.discoveries[arm].saturating_add(u64::try_from(discoveries).unwrap_or(u64::MAX));
+        self.charged[arm] = self.charged[arm].saturating_add(charged);
+    }
+
+    fn rates(&self) -> Vec<f64> {
+        self.discoveries
+            .iter()
+            .zip(self.charged)
+            .map(|(discoveries, charged)| {
+                if charged == 0 {
+                    0.0
+                } else {
+                    *discoveries as f64 / charged as f64
+                }
+            })
+            .collect()
+    }
+}
 
 /// Controls for one system-local generic PES exploration campaign.
 #[derive(Debug, Clone)]
@@ -62,7 +101,7 @@ pub enum NdHybridMechanism {
 /// Mechanism policy used for matched-budget comparisons.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NdHybridPolicy {
-    /// Allocate between ridge and escape by posterior discovery per PES call.
+    /// Allocate between ridge and escape by exact-species Good-UCB.
     Adaptive,
     /// Explore only the finite signed mode portfolio of discovered sources.
     RidgeOnly,
@@ -75,7 +114,7 @@ pub enum NdHybridPolicy {
 pub struct NdHybridEvent {
     /// Monotonic event index after the initial source quench.
     pub attempt: u64,
-    /// Mechanism selected by the charged-discovery allocator.
+    /// Mechanism selected by the declared discovery policy.
     pub mechanism: NdHybridMechanism,
     /// Exact source basin for the proposal or ridge.
     pub source_basin: Option<usize>,
@@ -129,7 +168,7 @@ pub struct NdHybridReport {
     pub events: Vec<NdHybridEvent>,
     /// Ridge then basin-escape exposure counts.
     pub mechanism_pulls: Vec<usize>,
-    /// Posterior mean discoveries per PES evaluation for both mechanisms.
+    /// Empirical distinct-stationary-object discoveries per PES evaluation.
     pub mechanism_discovery_rates: Vec<f64>,
     /// Gaussian then Tsallis proposal exposure counts.
     pub move_pulls: Vec<usize>,
@@ -290,13 +329,31 @@ impl EscapeCoverage {
     }
 }
 
+fn good_ucb_mechanism(
+    escape: EscapeCoverageEvidence,
+    network: &NdPesNetwork,
+    pulls: [usize; 2],
+) -> usize {
+    let ridge_pulls = u64::try_from(pulls[RIDGE_ARM]).unwrap_or(u64::MAX);
+    let escape_pulls = u64::try_from(pulls[ESCAPE_ARM]).unwrap_or(u64::MAX);
+    let total = ridge_pulls.saturating_add(escape_pulls);
+    let ridge_index = good_ucb_missing_mass_index(network.saddle_singletons(), ridge_pulls, total);
+    let escape_index = good_ucb_missing_mass_index(escape.singletons, escape_pulls, total);
+    match ridge_index.total_cmp(&escape_index) {
+        std::cmp::Ordering::Greater => RIDGE_ARM,
+        std::cmp::Ordering::Less => ESCAPE_ARM,
+        std::cmp::Ordering::Equal if ridge_pulls <= escape_pulls => RIDGE_ARM,
+        std::cmp::Ordering::Equal => ESCAPE_ARM,
+    }
+}
+
 /// Explore one arbitrary-dimensional PES with cooperative basin and ridge arms.
 ///
 /// Every discovered minimum enters one exact-witness network immediately. The
 /// round-robin ridge scheduler can therefore consume a basin found by any
-/// escape event, while the charged-discovery posterior decides which mechanism
-/// receives the next PES slice. A new invocation creates a new network, so two
-/// different surfaces cannot share basins, saddles, energies, or calibration.
+/// escape event, while exact basin and saddle occupancy determines the next
+/// Good-UCB mechanism. A new invocation creates a new network, so two different
+/// surfaces cannot share basins, saddles, energies, or calibration.
 pub fn explore_nd_hybrid<S, W>(
     surface: &S,
     initial: ArrayView1<'_, f64>,
@@ -363,7 +420,8 @@ where
     let mut live_energy = network.minima()[live_basin].energy;
 
     let mut rng = StdRng::seed_from_u64(seed);
-    let mut mechanism_allocator = ChargedDiscoveryAllocator::new(2);
+    let mut mechanism_accounting =
+        MechanismAccounting::with_initial_escape(initial_record.charged_evaluations);
     let mut move_allocator = FlooredThompson::new(2);
     let mut escape_feedback = EscapeFeedback::new(
         config.initial_escape_scale,
@@ -378,7 +436,6 @@ where
     let mut source_cursor = 0usize;
     let mut events = Vec::new();
     let mut attempt = 0u64;
-    let mut escape_coverage_latched = false;
     let termination = loop {
         let remaining = config.evaluation_budget.saturating_sub(charged_evaluations);
         if remaining == 0 {
@@ -386,16 +443,10 @@ where
         }
         let ride_task = next_ride_task(&network, &attempted, source_cursor, ranks);
         let coverage = escape_coverage.evidence();
-        escape_coverage_latched |= coverage.saturated;
         let selected = match policy {
-            NdHybridPolicy::Adaptive if ride_task.is_some() && escape_coverage_latched => {
-                if rng.random::<f64>() < 0.02 {
-                    ESCAPE_ARM
-                } else {
-                    RIDGE_ARM
-                }
+            NdHybridPolicy::Adaptive if ride_task.is_some() => {
+                good_ucb_mechanism(coverage, &network, mechanism_accounting.pulls)
             }
-            NdHybridPolicy::Adaptive if ride_task.is_some() => mechanism_allocator.select(&mut rng),
             NdHybridPolicy::Adaptive => ESCAPE_ARM,
             NdHybridPolicy::RidgeOnly if ride_task.is_some() => RIDGE_ARM,
             NdHybridPolicy::RidgeOnly => {
@@ -428,10 +479,15 @@ where
             let new_saddle_ids = new_ids(saddles_before, network.saddle_count());
             let new_unresolved_saddle_ids =
                 new_ids(unresolved_before, network.unresolved_saddles().len());
-            let discovery = !new_minimum_ids.is_empty()
-                || !new_saddle_ids.is_empty()
-                || !new_unresolved_saddle_ids.is_empty();
-            mechanism_allocator.update(RIDGE_ARM, u32::from(discovery), ridge.charged_evaluations);
+            let stationary_discoveries = new_minimum_ids
+                .len()
+                .saturating_add(new_saddle_ids.len())
+                .saturating_add(new_unresolved_saddle_ids.len());
+            mechanism_accounting.observe(
+                RIDGE_ARM,
+                stationary_discoveries,
+                ridge.charged_evaluations,
+            );
             charged_evaluations = charged_evaluations
                 .saturating_add(ridge.charged_evaluations)
                 .min(config.evaluation_budget);
@@ -485,7 +541,7 @@ where
         let escape = quench_source_escape(surface, proposal.view(), &escape_config);
         match escape {
             SourceEscapeOutcome::Failed(failure) => {
-                mechanism_allocator.update(ESCAPE_ARM, 0, failure.charged_evaluations);
+                mechanism_accounting.observe(ESCAPE_ARM, 0, failure.charged_evaluations);
                 move_allocator.update(move_index, false);
                 charged_evaluations = charged_evaluations
                     .saturating_add(failure.charged_evaluations)
@@ -519,9 +575,6 @@ where
                 let candidate_coordinates = record.minimum.coordinates.clone();
                 let admission = network.admit_minimum(record.minimum, witness);
                 let discovered = admission.is_new;
-                if discovered {
-                    escape_coverage_latched = false;
-                }
                 let new_minimum_ids = discovered.then_some(admission.id).into_iter().collect();
                 escape_feedback.observe(Some(live_basin), admission.id);
                 escape_coverage.observe(admission.id);
@@ -531,9 +584,9 @@ where
                     live_energy = candidate_energy;
                     live_coordinates = candidate_coordinates;
                 }
-                mechanism_allocator.update(
+                mechanism_accounting.observe(
                     ESCAPE_ARM,
-                    u32::from(discovered),
+                    usize::from(discovered),
                     record.charged_evaluations,
                 );
                 move_allocator.update(move_index, discovered);
@@ -572,8 +625,8 @@ where
         policy,
         charged_evaluations,
         events,
-        mechanism_pulls: mechanism_allocator.pulls().to_vec(),
-        mechanism_discovery_rates: mechanism_allocator.rates(),
+        mechanism_pulls: mechanism_accounting.pulls.to_vec(),
+        mechanism_discovery_rates: mechanism_accounting.rates(),
         move_pulls: move_allocator.pulls().to_vec(),
         move_success_rates: move_allocator.rates(),
         escape_observations: coverage.observations,
