@@ -45,6 +45,19 @@ enum DescriptorMetric {
     Euclidean,
 }
 
+/// Auditable covariance loss from a pivoted-Cholesky kernel compression.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct FunnelCompression {
+    /// Number of observations offered to this compression step.
+    pub input_count: usize,
+    /// Number of kernel pivots retained by the GP.
+    pub retained_rank: usize,
+    /// Remaining prior-covariance trace divided by the original trace.
+    pub residual_fraction: f64,
+    /// Whether the rank ceiling was reached above the numerical covariance floor.
+    pub rank_limited: bool,
+}
+
 /// A Gaussian process over a structural descriptor.
 ///
 /// Squared-exponential kernel with a single length scale, which is right when
@@ -211,16 +224,179 @@ impl FunnelModel {
             {
                 if y < self.ys[i] {
                     self.ys[i] = y;
-                    self.chol = None;
+                    if self.fixed_prior_mean.is_some() {
+                        self.refresh_alpha();
+                    } else {
+                        self.chol = None;
+                        self.alpha = None;
+                    }
                     self.version = self.version.wrapping_add(1);
                 }
                 return;
             }
         }
+        let extended_cholesky = self
+            .fixed_prior_mean
+            .and_then(|_| self.extended_cholesky(x));
         self.xs.push(x.to_owned());
         self.ys.push(y);
-        self.chol = None;
+        if let Some(cholesky) = extended_cholesky {
+            self.alpha = Some(alpha_from_cholesky(&cholesky, &self.ys, self.prior_mean));
+            self.chol = Some(cholesky);
+        } else {
+            self.chol = None;
+            self.alpha = None;
+        }
         self.version = self.version.wrapping_add(1);
+    }
+
+    /// Bound the retained kernel rank by pivoted Cholesky.
+    ///
+    /// The lowest observed response is always a pivot. Remaining pivots greedily
+    /// maximize conditional prior variance until either the covariance floor or
+    /// `maximum_rank` is reached. Exact caller-owned observations can therefore
+    /// remain outside this numerical surrogate.
+    pub fn compress(&mut self, maximum_rank: usize) -> FunnelCompression {
+        assert!(maximum_rank > 0, "kernel compression needs positive rank");
+        let input_count = self.xs.len();
+        if input_count <= maximum_rank {
+            return FunnelCompression {
+                input_count,
+                retained_rank: input_count,
+                residual_fraction: 0.0,
+                rank_limited: false,
+            };
+        }
+
+        let diagonal = self.amplitude * self.amplitude;
+        let covariance_floor = (self.noise * self.noise)
+            .max(diagonal * f64::EPSILON.sqrt())
+            .min(diagonal);
+        let target_trace = covariance_floor * input_count as f64;
+        let mut residual = vec![diagonal; input_count];
+        let mut columns = Vec::<Vec<f64>>::new();
+        let mut selected = vec![false; input_count];
+        let mut indices = Vec::with_capacity(maximum_rank.min(input_count));
+        let incumbent = self
+            .ys
+            .iter()
+            .enumerate()
+            .min_by(|(left_index, left), (right_index, right)| {
+                left.total_cmp(right)
+                    .then_with(|| left_index.cmp(right_index))
+            })
+            .map(|(index, _)| index)
+            .expect("a nonempty GP has an incumbent");
+        self.append_kernel_pivot(incumbent, &mut residual, &mut columns, &mut selected);
+        indices.push(incumbent);
+
+        while indices.len() < maximum_rank.min(input_count) {
+            let residual_trace = residual.iter().sum::<f64>();
+            if residual_trace <= target_trace {
+                break;
+            }
+            let pivot = (0..input_count)
+                .filter(|index| !selected[*index])
+                .max_by(|left, right| {
+                    residual[*left]
+                        .total_cmp(&residual[*right])
+                        .then_with(|| right.cmp(left))
+                });
+            let Some(pivot) = pivot else {
+                break;
+            };
+            if residual[pivot] <= covariance_floor {
+                break;
+            }
+            self.append_kernel_pivot(pivot, &mut residual, &mut columns, &mut selected);
+            indices.push(pivot);
+        }
+
+        let residual_trace = residual.iter().sum::<f64>();
+        let residual_fraction = (residual_trace / (diagonal * input_count as f64)).clamp(0.0, 1.0);
+        let retained_rank = indices.len();
+        let rank_limited = retained_rank == maximum_rank.min(input_count)
+            && retained_rank < input_count
+            && residual_trace > target_trace;
+        self.xs = indices
+            .iter()
+            .map(|index| self.xs[*index].clone())
+            .collect();
+        self.ys = indices.iter().map(|index| self.ys[*index]).collect();
+        self.chol = None;
+        self.alpha = None;
+        FunnelCompression {
+            input_count,
+            retained_rank,
+            residual_fraction,
+            rank_limited,
+        }
+    }
+
+    fn append_kernel_pivot(
+        &self,
+        pivot: usize,
+        residual: &mut [f64],
+        columns: &mut Vec<Vec<f64>>,
+        selected: &mut [bool],
+    ) {
+        let diagonal = self.amplitude * self.amplitude;
+        let denominator = residual[pivot].max(diagonal * f64::EPSILON).sqrt();
+        let mut column = vec![0.0; self.xs.len()];
+        for index in 0..self.xs.len() {
+            let projection = columns
+                .iter()
+                .map(|held| held[index] * held[pivot])
+                .sum::<f64>();
+            let covariance = self.kernel(self.xs[index].view(), self.xs[pivot].view());
+            column[index] = (covariance - projection) / denominator;
+        }
+        selected[pivot] = true;
+        for index in 0..residual.len() {
+            residual[index] = if selected[index] {
+                0.0
+            } else {
+                (residual[index] - column[index] * column[index]).max(0.0)
+            };
+        }
+        columns.push(column);
+    }
+
+    fn extended_cholesky(&self, x: ArrayView1<f64>) -> Option<Array2<f64>> {
+        let held = self.chol.as_ref()?;
+        let count = self.xs.len();
+        if held.nrows() != count || held.ncols() != count {
+            return None;
+        }
+        let covariance = self
+            .xs
+            .iter()
+            .map(|site| self.kernel(site.view(), x))
+            .collect::<Array1<_>>();
+        let projection = forward_substitute(held, &covariance);
+        let conditional = self.kernel(x, x) + self.noise * self.noise
+            - projection.iter().map(|value| value * value).sum::<f64>();
+        if !conditional.is_finite() || conditional <= 0.0 {
+            return None;
+        }
+        let mut extended = Array2::<f64>::zeros((count + 1, count + 1));
+        for row in 0..count {
+            for column in 0..=row {
+                extended[[row, column]] = held[[row, column]];
+            }
+        }
+        for column in 0..count {
+            extended[[count, column]] = projection[column];
+        }
+        extended[[count, count]] = conditional.sqrt();
+        Some(extended)
+    }
+
+    fn refresh_alpha(&mut self) {
+        self.alpha = self
+            .chol
+            .as_ref()
+            .map(|cholesky| alpha_from_cholesky(cholesky, &self.ys, self.prior_mean));
     }
 
     /// Refits the factorisation. Called automatically when needed.
@@ -263,22 +439,7 @@ impl FunnelModel {
             }
         }
         // alpha = K^-1 (y - prior), by forward then back substitution.
-        let mut v = Array1::<f64>::zeros(n);
-        for i in 0..n {
-            let mut s = self.ys[i] - self.prior_mean;
-            for m in 0..i {
-                s -= l[[i, m]] * v[m];
-            }
-            v[i] = s / l[[i, i]];
-        }
-        let mut a = Array1::<f64>::zeros(n);
-        for i in (0..n).rev() {
-            let mut s = v[i];
-            for m in (i + 1)..n {
-                s -= l[[m, i]] * a[m];
-            }
-            a[i] = s / l[[i, i]];
-        }
+        let a = alpha_from_cholesky(&l, &self.ys, self.prior_mean);
         self.chol = Some(l);
         self.alpha = Some(a);
     }
@@ -309,6 +470,57 @@ impl FunnelModel {
         }
         let var = (self.kernel(x, x) - v.iter().map(|z| z * z).sum::<f64>()).max(0.0);
         (mean, var.sqrt())
+    }
+
+    fn posterior_joint(&mut self, sites: &[ArrayView1<'_, f64>]) -> (Vec<f64>, Array2<f64>) {
+        if self.chol.is_none() {
+            self.fit();
+        }
+        let count = sites.len();
+        let mut covariance = Array2::<f64>::zeros((count, count));
+        let (Some(cholesky), Some(alpha)) = (&self.chol, &self.alpha) else {
+            let means = vec![self.prior_mean; count];
+            for row in 0..count {
+                for column in 0..=row {
+                    let value = self.kernel(sites[row], sites[column]);
+                    covariance[[row, column]] = value;
+                    covariance[[column, row]] = value;
+                }
+            }
+            return (means, covariance);
+        };
+        let mut projections = Vec::with_capacity(count);
+        let mut means = Vec::with_capacity(count);
+        for site in sites {
+            let kernel = self
+                .xs
+                .iter()
+                .map(|observed| self.kernel(observed.view(), *site))
+                .collect::<Array1<_>>();
+            means.push(
+                self.prior_mean
+                    + kernel
+                        .iter()
+                        .zip(alpha.iter())
+                        .map(|(left, right)| left * right)
+                        .sum::<f64>(),
+            );
+            projections.push(forward_substitute(cholesky, &kernel));
+        }
+        for row in 0..count {
+            for column in 0..=row {
+                let value = self.kernel(sites[row], sites[column])
+                    - projections[row]
+                        .iter()
+                        .zip(projections[column].iter())
+                        .map(|(left, right)| left * right)
+                        .sum::<f64>();
+                let value = if row == column { value.max(0.0) } else { value };
+                covariance[[row, column]] = value;
+                covariance[[column, row]] = value;
+            }
+        }
+        (means, covariance)
     }
 
     /// Expected improvement at a morphology, for a minimisation.
@@ -613,18 +825,13 @@ impl FunnelModel {
                 sites.push((extra.to_owned(), *offset));
             }
         }
-        let means = sites
+        let views = sites
             .iter()
-            .map(|(site, offset)| offset + self.predict(site.view()).0)
+            .map(|(site, _)| site.view())
             .collect::<Vec<_>>();
-        let mut covariance = Array2::<f64>::zeros((sites.len(), sites.len()));
-        for row in 0..sites.len() {
-            for column in 0..=row {
-                let value =
-                    self.posterior_latent_covariance(sites[row].0.view(), sites[column].0.view());
-                covariance[[row, column]] = value;
-                covariance[[column, row]] = value;
-            }
+        let (mut means, mut covariance) = self.posterior_joint(&views);
+        for (mean, (_, offset)) in means.iter_mut().zip(&sites) {
+            *mean += offset;
         }
         let jitter = self.amplitude * self.amplitude * 1e-12;
         for index in 0..sites.len() {
@@ -788,6 +995,21 @@ fn forward_substitute(cholesky: &Array2<f64>, rhs: &Array1<f64>) -> Array1<f64> 
         solved[row] = value / cholesky[[row, row]];
     }
     solved
+}
+
+fn alpha_from_cholesky(cholesky: &Array2<f64>, ys: &[f64], prior_mean: f64) -> Array1<f64> {
+    let count = ys.len();
+    let residual = Array1::from_iter(ys.iter().map(|value| value - prior_mean));
+    let forward = forward_substitute(cholesky, &residual);
+    let mut alpha = Array1::<f64>::zeros(count);
+    for row in (0..count).rev() {
+        let mut value = forward[row];
+        for column in (row + 1)..count {
+            value -= cholesky[[column, row]] * alpha[column];
+        }
+        alpha[row] = value / cholesky[[row, row]];
+    }
+    alpha
 }
 
 fn positive_definite_cholesky(matrix: &Array2<f64>) -> Option<Array2<f64>> {
