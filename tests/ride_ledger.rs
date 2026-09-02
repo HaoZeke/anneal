@@ -1,4 +1,4 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use anneal_core::pes_exploration::RideMethod;
 use anneal_core::ride_ledger::{
@@ -59,6 +59,62 @@ fn shared_failure_evidence_redirects_the_next_replica_to_an_untried_arm() {
     assert_eq!(credit.failure, Some(RideFailure::SaddleNotConverged));
     assert_eq!(ledger.completed_attempts(), 1);
     assert_eq!(ledger.charged_evaluations(), 83);
+}
+
+#[test]
+fn minimum_information_scores_are_the_only_ranked_claim_reward() {
+    let portfolio = RidePortfolio::new(1, vec![RideMethod::Dimer]).unwrap();
+    let mut ledger = RideLedger::new(portfolio);
+    ledger
+        .register_source(source(17, -104.2, &[(4, 6)]))
+        .unwrap();
+    ledger
+        .register_source(source(23, -107.5, &[(4, 8)]))
+        .unwrap();
+    let arms = ledger.claimable_arms();
+    assert_eq!(arms.len(), 4);
+
+    let preferred = arms
+        .iter()
+        .find(|(arm, _)| arm.source_basin == 17)
+        .unwrap()
+        .0
+        .clone();
+    let scores = arms
+        .iter()
+        .map(|(arm, _)| (arm.clone(), f64::from(arm == &preferred)))
+        .collect::<BTreeMap<_, _>>();
+    let first = ledger.claim_ranked(2, 101, &scores).unwrap();
+    assert_eq!(first.arm, preferred);
+    ledger
+        .report(
+            2,
+            first.id,
+            140,
+            RideOutcome::Certified {
+                saddle: 70,
+                endpoints: [17, 29],
+            },
+        )
+        .unwrap();
+
+    let alternative = ledger
+        .claimable_arms()
+        .into_iter()
+        .find(|(arm, _)| arm.source_basin == 23)
+        .unwrap()
+        .0;
+    let scores = ledger
+        .claimable_arms()
+        .into_iter()
+        .map(|(arm, _)| {
+            let score = f64::from(arm == alternative);
+            (arm, score)
+        })
+        .collect::<BTreeMap<_, _>>();
+    let second = ledger.claim_ranked(7, 102, &scores).unwrap();
+
+    assert_eq!(second.arm, alternative);
 }
 
 #[test]
