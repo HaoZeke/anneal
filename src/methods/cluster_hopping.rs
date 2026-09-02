@@ -991,6 +991,7 @@ where
     let mut surrogate_here: Option<f64> = None;
     let mut unconverged_records = usize::from(!initial_recordable);
     let mut pending_raw: Option<(f64, f64)> = None;
+    let mut pending_design: Option<Array1<f64>> = None;
     // A posterior over what to build, consulted when a growth move is drawn.
     // The allocator decides which move; this decides the move's parameters,
     // which is the one place a model can change what a hop reaches rather than
@@ -2146,15 +2147,24 @@ where
             // it will fall: in a locally quadratic basin the depth goes as
             // |g|^2 / 2 lambda. One evaluation against the twenty-five a
             // quench costs.
-            let gnorm = match grad.as_deref_mut().and_then(|g| g(ledger, trial.view())) {
-                Some(v) => v.iter().fold(0.0_f64, |a, q| a + q * q).sqrt(),
-                None => 0.0,
+            let gvec = match grad.as_deref_mut().and_then(|g| g(ledger, trial.view())) {
+                Some(v) => v.to_owned(),
+                None => Array1::zeros(trial.len()),
             };
+            let gnorm = gvec.iter().fold(0.0_f64, |a, q| a + q * q).sqrt();
             pending_raw = Some((raw_y, gnorm));
+            let design = crate::delayed::features_with_depth(
+                trial.view(),
+                n,
+                raw_y,
+                gvec.view(),
+                x.view(),
+            );
+            pending_design = Some(design.clone());
             // The first stage speaks only where the posterior is sharp against
             // the temperature that scales the acceptance ratio.
             let tol = cfg.surrogate_tolerance * temperature;
-            match sur.predict_full(trial.view(), n, raw_y, gnorm, tol) {
+            match sur.predict_features(design.view(), raw_y, tol) {
                 None => sur.abstained += 1,
                 Some(pred_y) => {
                     let pred_x = match surrogate_here {
@@ -2340,7 +2350,11 @@ where
         // Every quench trains the surrogate, including the ones taken before
         // it had an opinion. This is where its training data comes from.
         if let (Some(sur), Some((raw_y, gnorm))) = (surrogate.as_mut(), pending_raw.take()) {
-            sur.observe_full(trial.view(), n, raw_y, gnorm, e_new);
+            if let Some(design) = pending_design.take() {
+                sur.observe_features(design.view(), raw_y, e_new);
+            } else {
+                sur.observe_full(trial.view(), n, raw_y, gnorm, e_new);
+            }
             // And the relaxed end of the same quench, whose depth is zero.
             //
             // Without it the model sees only unrelaxed structures and is asked

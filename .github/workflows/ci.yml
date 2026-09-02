@@ -42,7 +42,7 @@ jobs:
         uses: actions/checkout@v6
         with:
           repository: Luthaf/vesin
-          ref: 976b5dbbdf392db5197353037eefc01a46e9e667
+          ref: 5ac39b6e57a8f00c717f08c83f93ee4746d6e471
           path: .ci/vesin
           persist-credentials: false
 
@@ -125,7 +125,7 @@ jobs:
         uses: actions/checkout@v6
         with:
           repository: Luthaf/vesin
-          ref: 976b5dbbdf392db5197353037eefc01a46e9e667
+          ref: 5ac39b6e57a8f00c717f08c83f93ee4746d6e471
           path: .ci/vesin
           persist-credentials: false
 

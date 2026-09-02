@@ -152,6 +152,12 @@ fn main() {
     if let Ok(v) = std::env::var("QUENCH_CONF") {
         cfg.quench_confidence = v.parse().unwrap_or(2.0);
     }
+    // The delayed-acceptance first stage abstains above this many temperatures
+    // of predictive spread. `inf` makes it always speak, which is what
+    // separates a surrogate that is silent from one that is wrong.
+    if let Ok(v) = std::env::var("SURROGATE_TOL") {
+        cfg.surrogate_tolerance = v.parse().unwrap_or(0.5);
+    }
     cfg.contextual_moves = opts.contains(&"ctx");
     cfg.bayes_screen = opts.contains(&"bayes");
     cfg.angular_moves = opts.contains(&"angular");

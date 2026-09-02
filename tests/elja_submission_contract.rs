@@ -668,6 +668,28 @@ fn causal_lj_array_has_no_kinetic_graph_brain() {
 }
 
 #[test]
+fn occupancy_driver_compiles_brains_into_the_bank_rpc_build() {
+    let driver = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("examples")
+        .join("lj_cluster_search.rs");
+    let source = fs::read_to_string(&driver)
+        .unwrap_or_else(|error| panic!("failed to read {}: {error}", driver.display()));
+
+    let listen = source
+        .find(r#"std::env::var("CATALOG_BRAIN_LISTEN")"#)
+        .expect("worker must read CATALOG_BRAIN_LISTEN");
+    let prelude = &source[listen.saturating_sub(250)..listen];
+    assert!(
+        prelude.contains(r#"#[cfg(feature = "bank-rpc")]"#),
+        "occupancy is featomic,ira,bank-rpc; brains gated on nng-transport never start"
+    );
+    assert!(
+        !prelude.contains("nng-transport"),
+        "nng-transport is not an occupancy feature; brains must not require it"
+    );
+}
+
+#[test]
 fn production_lj_driver_does_not_consume_kinetic_boundary_crossings() {
     let driver = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("examples")
