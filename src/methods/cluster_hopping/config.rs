@@ -60,6 +60,21 @@ pub enum SoapProposalMode {
     Off,
 }
 
+/// Deterministic continuous-symmetry proposal inserted into basin hopping.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize)]
+#[serde(tag = "group", rename_all = "snake_case")]
+pub enum ContinuousSymmetry {
+    /// No continuous-symmetry proposal.
+    #[default]
+    Off,
+    /// Project onto the inversion group `C_i` every `interval` hopping
+    /// steps, quench the group average, and adopt it only when it is lower.
+    Inversion {
+        /// Ordinary hopping steps between continuous-symmetry attempts.
+        interval: usize,
+    },
+}
+
 /// Driver settings.
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct Config {
@@ -222,6 +237,14 @@ pub struct Config {
     /// approximate symmetry and lands the structure on it, or finds none and
     /// leaves the chain alone. See [`crate::symmetrise`].
     pub symmetrise_on_stall: bool,
+    /// Published continuous-symmetry move, independent of stall detection.
+    ///
+    /// This is distinct from [`Config::symmetrise_on_stall`]. The
+    /// continuous-symmetry construction solves a global atom assignment for
+    /// each group image and quenches the averaged geometry on a fixed
+    /// schedule. The current implementation provides `C_i`, whose inversion
+    /// operation makes the orientation objective rotation independent.
+    pub continuous_symmetry: ContinuousSymmetry,
     /// Largest deviation at which an approximate symmetry is worth using.
     pub symmetry_tolerance: f64,
     /// Coordinate-space radius used to merge points after symmetrisation.
@@ -809,6 +832,7 @@ impl Config {
             track_funnels: false,
             funnel_period: 20_000,
             symmetrise_on_stall: false,
+            continuous_symmetry: ContinuousSymmetry::Off,
             symmetry_tolerance: LennardJonesPreset::SYMMETRY_TOLERANCE * length_scale,
             symmetry_merge_radius: LennardJonesPreset::SYMMETRY_MERGE_RADIUS * length_scale,
             symmetrise_patience: 2_000,
