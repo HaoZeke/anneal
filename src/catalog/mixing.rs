@@ -4,14 +4,14 @@
 //! distribution. Cooperative search splits that diagnostic:
 //!
 //! - explore-role chains must stay unmixed (\(\hat R\) large);
-//! - a putative global minimum is certified only when occupant chains
-//!   have mixed onto it *and* it is uniquely deepest *and* it is
-//!   strictly more occupied than every competing basin.
+//! - a sampled incumbent is dominant only when occupant chains have mixed
+//!   onto it, it is uniquely deepest among observed attractors, and it is
+//!   strictly more occupied than every observed competing basin.
 //!
-//! Mixing onto a lone icosahedral floor is the sampled-mode
-//! certificate. A mixed ico floor plus a mixed shallower competitor
-//! is a putative, not MixingCertified: unseen modes are leftover
-//! dwell and FunnelModel EI.
+//! Mixing onto a lone icosahedral floor diagnoses one sampled mode. It does
+//! not prove that an unobserved lower mode is absent. Catalog saturation and
+//! leftover-mass diagnostics quantify search evidence without converting it
+//! into a global-optimality certificate.
 
 use std::cmp::Ordering;
 
@@ -106,9 +106,9 @@ pub const CERTIFY_CHAINS: usize = 2;
 pub const CERTIFY_SPLIT_HALVES: usize = 2;
 /// Vehtari minimum draws per split half.
 pub const CERTIFY_DRAWS_PER_HALF: usize = 4;
-/// Occupant traces shorter than this are not a Gelman--Rubin
-/// certificate. Two quench reports on two random-start families
-/// give \(\hat R = 0\) and are not a global minimum.
+/// Occupant traces shorter than this do not support the mixing diagnostic.
+/// Two quench reports on two random-start families give \(\hat R = 0\) but do
+/// not establish convergence or global optimality.
 /// `2 × 2 × 4 = 16` (`Hop.certify_min_samples`).
 pub const CERTIFY_MIN_SAMPLES: usize =
     CERTIFY_CHAINS * CERTIFY_SPLIT_HALVES * CERTIFY_DRAWS_PER_HALF;
@@ -162,19 +162,14 @@ pub fn stronger(left: &AttractorStrength, right: &AttractorStrength) -> bool {
     }
 }
 
-/// A putative global minimum is certified when occupant chains have
-/// mixed onto a uniquely deepest attractor.
+/// Whether an observed minimum is dominant within the sampled attractors.
 ///
-/// Gelman--Rubin and Vehtari certify the *sampled* target. A second
-/// mixed competitor is required only when a competitor is on file:
-/// that competitor must be mixed (an attractor, not a flyby) and the
-/// putative must be strictly more occupied. An empty competitor set
-/// is one sampled mode, not a missed mode. MixingCertified from
-/// [`crate::catalog::occupancy_complete_at`] still needs leftover
-/// dwell when the book holds more than one family. Unseen modes are
-/// leftover dwell and FunnelModel EI, the Boender--Rinnooy Kan /
-/// Good--Turing stop, not a second R-hat series that does not exist.
-pub fn certified_global_minimum(
+/// A second mixed competitor is required only when a competitor is on file:
+/// that competitor must be mixed (an attractor, not a flyby), and the sampled
+/// incumbent must be strictly more occupied. An empty competitor set means
+/// only that the sample contains one mode. This predicate makes no statement
+/// about unobserved modes or global optimality.
+pub fn sampled_minimum_is_dominant(
     putative: &AttractorStrength,
     competitors: &[AttractorStrength],
     uniquely_deepest: bool,
@@ -237,7 +232,7 @@ pub fn invert_mixing(
                 .filter(|(other, _)| *other != index)
                 .map(|(_, attractor)| attractor.clone())
                 .collect();
-            certified_global_minimum(putative, &competitors, true)
+            sampled_minimum_is_dominant(putative, &competitors, true)
         }),
         pruned: false,
     }

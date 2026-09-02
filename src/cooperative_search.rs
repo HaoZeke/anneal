@@ -265,7 +265,7 @@ mod run {
         pub novelty: f64,
         /// Posterior uncertainty of the latent Gaussian transition field.
         pub transition_uncertainty: f64,
-        /// Coverage-proportional stationary-object role for this replica.
+        /// Good-UCB stationary-object role for this same-system replica.
         pub discovery_role: DiscoveryRole,
         /// Exact census-plus-ride observation epoch behind the role assignment.
         pub discovery_epoch: u64,

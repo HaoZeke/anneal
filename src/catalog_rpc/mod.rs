@@ -509,7 +509,7 @@ pub struct PolicyState {
     pub ei_exhausted: bool,
     /// Measured Fiedler-and-DECAF family floor for this hop graph.
     pub min_families: u32,
-    /// Coverage-proportional stationary-object role for this replica.
+    /// Good-UCB stationary-object role for this same-system replica.
     pub discovery_role: DiscoveryRole,
     /// Exact census-plus-ride observation epoch behind the role assignment.
     pub discovery_epoch: u64,

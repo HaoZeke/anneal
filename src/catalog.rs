@@ -51,8 +51,9 @@ pub use leave_learn::{
 };
 pub use mixing::{
     AttractorStrength, CERTIFY_CHAINS, CERTIFY_DRAWS_PER_HALF, CERTIFY_MIN_SAMPLES,
-    CERTIFY_SPLIT_HALVES, MIXED_RHAT, MixingEvidence, certified_global_minimum, explore_collapsed,
-    explore_must_leave, invert_mixing, mixed, occupant_rhat, rhat_series, rhat_split, stronger,
+    CERTIFY_SPLIT_HALVES, MIXED_RHAT, MixingEvidence, explore_collapsed, explore_must_leave,
+    invert_mixing, mixed, occupant_rhat, rhat_series, rhat_split, sampled_minimum_is_dominant,
+    stronger,
 };
 pub use occupancy::{
     CHAMPION_RANK, COMPACT_RMAX_OVER_CBRT, DEFAULT_MIN_OCCUPIED_FAMILIES, ESTY_Z95,
