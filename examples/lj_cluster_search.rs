@@ -2747,6 +2747,43 @@ struct AppliedDecree {
 }
 
 #[cfg(feature = "bank-rpc")]
+fn committed_decree_audit_line(
+    replica: u32,
+    decree: &anneal_core::raft::wire::ExplorationDecree,
+) -> Option<String> {
+    let assignment = decree
+        .assignments
+        .iter()
+        .find(|assignment| assignment.replica == replica)?;
+    Some(
+        serde_json::json!({
+            "kind": "brain_commit",
+            "replica": replica,
+            "snapshot": assignment.decree_index,
+            "anchor_basin": assignment.anchor_basin,
+            "right_side": assignment.right_side,
+            "bridge_duty": assignment.bridge_duty,
+            "left_basin": decree.left_basin,
+            "right_basin": decree.right_basin,
+            "normalized_lambda2": decree.algebraic_connectivity,
+            "conductance": decree.seam_conductance,
+        })
+        .to_string(),
+    )
+}
+
+#[cfg(feature = "bank-rpc")]
+fn applied_decree_audit_line(replica: u32, snapshot: u64, anchor_basin: u64) -> String {
+    serde_json::json!({
+        "kind": "spectral_anchor",
+        "replica": replica,
+        "snapshot": snapshot,
+        "anchor_basin": anchor_basin,
+    })
+    .to_string()
+}
+
+#[cfg(feature = "bank-rpc")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum DecreeAnchorAction {
     Ignore,
@@ -3047,10 +3084,14 @@ fn run_capnp_catalog(
                     }
                 }
                 for decree in node.take_committed() {
-                    if let Ok(decoded) = decode_decree(&decree.payload)
-                        && let Ok(mut held) = slot.lock()
-                    {
-                        *held = Some(decoded);
+                    if let Ok(decoded) = decode_decree(&decree.payload) {
+                        if let Some(line) = committed_decree_audit_line(replica, &decoded) {
+                            println!("{line}");
+                            let _ = io::stdout().flush();
+                        }
+                        if let Ok(mut held) = slot.lock() {
+                            *held = Some(decoded);
+                        }
                     }
                 }
                 // Leader duty every ~2 s of brain time: read the seam,
@@ -4462,6 +4503,11 @@ fn run_capnp_catalog(
                         snapshot: decree_snapshot,
                         basin,
                     });
+                    println!(
+                        "{}",
+                        applied_decree_audit_line(replica, decree_snapshot, basin)
+                    );
+                    let _ = io::stdout().flush();
                     trace.policy_role = PolicyRole::Explore;
                     trace.policy_reason = "spectral_anchor";
                     trace.proposal_family = ProposalFamily::CatalogSample;
