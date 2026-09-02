@@ -1194,8 +1194,14 @@ where
     let mut checkpoint_transition_start = 0usize;
     let mut next_checkpoint = checkpoint_interval;
     let mut next_reoccupy = cfg.reoccupy_interval;
+    let mut best_seen = ledger.best;
+    let mut charged_at_best = ledger.spent();
 
     loop {
+        if ledger.best < best_seen - 1e-9 {
+            best_seen = ledger.best;
+            charged_at_best = ledger.spent();
+        }
         // The reoccupation move runs inside the chain and charges the
         // ledger directly; its result enters the same adoption path as an
         // external proposal.
@@ -1211,6 +1217,25 @@ where
                 internal_action = Some(CheckpointAction::ExternalAdopt {
                     state: relaxed,
                     action: "reoccupy".to_owned(),
+                    external_calls: 0,
+                });
+            }
+        }
+        // A stalled chain restarts from a fresh random cluster; the bias it
+        // built stays and steers the new walk away from where it was.
+        if internal_action.is_none()
+            && cfg.restart_on_stall
+            && hops > 0
+            && ledger.spent().saturating_sub(charged_at_best) >= cfg.restart_patience.max(1)
+        {
+            let fresh = random_cluster(x.len() / 3, 0.7, cfg.min_separation, rng);
+            let (energy, relaxed) = relax(ledger, fresh.view(), cfg.relax_steps);
+            charged_at_best = ledger.spent();
+            best_seen = ledger.best;
+            if energy.is_finite() && relaxed.len() == x.len() {
+                internal_action = Some(CheckpointAction::ExternalAdopt {
+                    state: relaxed,
+                    action: "restart".to_owned(),
                     external_calls: 0,
                 });
             }

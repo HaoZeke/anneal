@@ -423,6 +423,9 @@ pub struct Config {
     /// spends nothing and discards nothing: the bias the old chain built is
     /// what steers the new one away from where the old one was.
     pub restart_on_stall: bool,
+    /// Charged calls without a new best before a stalled chain restarts
+    /// from a fresh random cluster.
+    pub restart_patience: usize,
     /// Set the merge radius from how far an accepted hop actually reaches.
     ///
     /// A radius chosen by hand does not transfer: one calibrated at 38 points
@@ -827,6 +830,7 @@ impl Config {
             angular_moves: false,
             angular_target: 0.5,
             restart_on_stall: false,
+            restart_patience: 5_000,
             calibrate_radius: false,
             calibrate_quantile: 0.9,
             calibrate_warmup: 200,

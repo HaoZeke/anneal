@@ -1546,6 +1546,15 @@ fn main() {
     cfg.calibrate_radius = opts.contains(&"calib");
     // The walker restarted, the landscape memory kept.
     cfg.restart_on_stall = opts.contains(&"restart");
+    // RESTART_PATIENCE sets the charged calls without a new best before a
+    // stalled chain restarts from a fresh random cluster.
+    if let Some(patience) = std::env::var("RESTART_PATIENCE")
+        .ok()
+        .and_then(|v| v.parse::<usize>().ok())
+    {
+        cfg.restart_patience = patience.max(1);
+        println!("  restart patience {} charged calls", cfg.restart_patience);
+    }
     // STALL_PATIENCE sets the hops without improvement before a stall.
     if let Some(patience) = std::env::var("STALL_PATIENCE")
         .ok()
