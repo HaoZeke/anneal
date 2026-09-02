@@ -16,8 +16,8 @@ use anneal_core::cooperative_search::{
 };
 use anneal_core::descriptor_space::{DescriptorGeometry, universal_descriptor_space};
 use anneal_core::pes_exploration::{
-    ExactStructureWitness, PesExplorationConfig, PesSurface, RideMethod, RideModeDirection,
-    localized_cartesian_mode,
+    ExactStructureWitness, IrcKind, PesExplorationConfig, PesSurface, RideMethod,
+    RideModeDirection, localized_cartesian_mode,
 };
 use anneal_core::ride_execution::{
     CatalogRideExecutionConfig, connected_destination, execute_catalog_ride,
@@ -116,6 +116,7 @@ fn exploration_config() -> PesExplorationConfig {
         hessian_step: 1e-5,
         maximum_move: 0.1,
         irc_step: 0.05,
+        irc_kind: IrcKind::Gs2,
         branch_attempts: 4,
         branch_growth: 2.0,
         irc_force_tolerance: 0.05,
