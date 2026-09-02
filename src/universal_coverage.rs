@@ -230,8 +230,9 @@ pub struct UniversalCoverage {
     template: DescriptorVector,
     config: CoverageConfig,
     blocks: Vec<BlockLayout>,
-    observations: Vec<DescriptorVector>,
+    class_representatives: Vec<Option<Vec<f64>>>,
     observed_classes: Vec<bool>,
+    observation_count: usize,
     energy: FunnelModel,
     block_models: Vec<FunnelModel>,
     deep_kernel: Option<StableDeepKernel>,
@@ -305,8 +306,9 @@ impl UniversalCoverage {
             template: reference.clone(),
             config,
             blocks,
-            observations: Vec::new(),
+            class_representatives: Vec::new(),
             observed_classes: Vec::new(),
+            observation_count: 0,
             energy: FunnelModel::new_euclidean(
                 config.energy_length_scale,
                 config.amplitude,
@@ -327,24 +329,45 @@ impl UniversalCoverage {
         energy: f64,
     ) -> Result<(), CoverageError> {
         self.ensure_compatible(descriptor)?;
+        self.observe_values(class, descriptor.values(), energy)
+    }
+
+    /// Record schema-bound descriptor values assigned by an exact witness.
+    pub fn observe_values(
+        &mut self,
+        class: usize,
+        descriptor: &[f64],
+        energy: f64,
+    ) -> Result<(), CoverageError> {
+        self.ensure_values(descriptor)?;
         if !energy.is_finite() {
             return Err(CoverageError::NonFiniteEnergy);
         }
         if class >= self.observed_classes.len() {
             self.observed_classes.resize(class + 1, false);
+            self.class_representatives.resize(class + 1, None);
         }
-        self.observed_classes[class] = true;
+        if !self.observed_classes[class] {
+            self.observed_classes[class] = true;
+            self.class_representatives[class] = Some(descriptor.to_vec());
+        }
+        let representative = self.class_representatives[class]
+            .as_deref()
+            .expect("an observed exact class has a representative");
         self.residual.observe(class, energy);
         self.energy
-            .observe(ArrayView1::from(descriptor.values()), energy);
+            .observe(ArrayView1::from(representative), energy);
         for (model, layout) in self.block_models.iter_mut().zip(&self.blocks) {
-            model.observe(ArrayView1::from(block_values(descriptor, *layout)), energy);
+            model.observe(
+                ArrayView1::from(block_values(representative, *layout)),
+                energy,
+            );
         }
         if let (Some(kernel), Some(model)) = (&self.deep_kernel, &mut self.deep_model) {
-            let embedded = kernel.embed(descriptor.values())?;
+            let embedded = kernel.embed(representative)?;
             model.observe(ArrayView1::from(embedded.as_slice()), energy);
         }
-        self.observations.push(descriptor.clone());
+        self.observation_count = self.observation_count.saturating_add(1);
         Ok(())
     }
 
@@ -363,7 +386,7 @@ impl UniversalCoverage {
 
     /// Number of energy/descriptor observations, including repeat effort.
     pub fn observation_count(&self) -> usize {
-        self.observations.len()
+        self.observation_count
     }
 
     /// Assemble novelty, posterior uncertainty, disagreement, and graph evidence.
@@ -373,10 +396,20 @@ impl UniversalCoverage {
         assigned_class: Option<usize>,
     ) -> Result<CoverageEvidence, CoverageError> {
         self.ensure_compatible(descriptor)?;
+        self.evidence_values(descriptor.values(), assigned_class)
+    }
+
+    /// Assemble evidence from values already validated against this schema.
+    pub fn evidence_values(
+        &mut self,
+        descriptor: &[f64],
+        assigned_class: Option<usize>,
+    ) -> Result<CoverageEvidence, CoverageError> {
+        self.ensure_values(descriptor)?;
         if let Some(class) = assigned_class {
             self.ensure_class(class)?;
         }
-        let values = ArrayView1::from(descriptor.values());
+        let values = ArrayView1::from(descriptor);
         let (energy_mean, energy_standard_deviation) = self.energy.predict(values);
         let expected_improvement = self.energy.expected_improvement(values);
         let mut block_means = Vec::with_capacity(self.blocks.len());
@@ -389,7 +422,7 @@ impl UniversalCoverage {
         }
         let (deep_kernel_mean, deep_kernel_standard_deviation) =
             if let (Some(kernel), Some(model)) = (&self.deep_kernel, &mut self.deep_model) {
-                let embedded = kernel.embed(descriptor.values())?;
+                let embedded = kernel.embed(descriptor)?;
                 let (mean, standard_deviation) =
                     model.predict(ArrayView1::from(embedded.as_slice()));
                 (Some(mean), Some(standard_deviation))
@@ -442,12 +475,13 @@ impl UniversalCoverage {
         })
     }
 
-    fn nearest_block_distances(&self, descriptor: &DescriptorVector) -> Vec<Option<f64>> {
+    fn nearest_block_distances(&self, descriptor: &[f64]) -> Vec<Option<f64>> {
         self.blocks
             .iter()
             .map(|&layout| {
-                self.observations
+                self.class_representatives
                     .iter()
+                    .flatten()
                     .map(|observed| {
                         euclidean(
                             block_values(descriptor, layout),
@@ -461,6 +495,19 @@ impl UniversalCoverage {
 
     fn ensure_compatible(&self, descriptor: &DescriptorVector) -> Result<(), CoverageError> {
         self.template.distance(descriptor)?;
+        Ok(())
+    }
+
+    fn ensure_values(&self, descriptor: &[f64]) -> Result<(), CoverageError> {
+        if descriptor.len() != self.template.values().len() {
+            return Err(CoverageError::DescriptorDimension {
+                expected: self.template.values().len(),
+                actual: descriptor.len(),
+            });
+        }
+        if let Some(index) = descriptor.iter().position(|value| !value.is_finite()) {
+            return Err(CoverageError::NonFiniteDescriptor { index });
+        }
         Ok(())
     }
 
@@ -485,6 +532,20 @@ pub enum CoverageError {
     /// Only finite stationary energies can train the evidence models.
     #[error("universal coverage energy must be finite")]
     NonFiniteEnergy,
+    /// Schema-bound values have the wrong descriptor dimension.
+    #[error("descriptor dimension is {actual}, expected {expected}")]
+    DescriptorDimension {
+        /// Descriptor dimension fixed at model construction.
+        expected: usize,
+        /// Descriptor dimension supplied by the caller.
+        actual: usize,
+    },
+    /// Schema-bound values contain NaN or infinity.
+    #[error("nonfinite descriptor value at index {index}")]
+    NonFiniteDescriptor {
+        /// Index of the first invalid coordinate.
+        index: usize,
+    },
     /// A graph edge or assigned query names a class without observations.
     #[error("unknown exact stationary class {class}")]
     UnknownClass {
@@ -496,8 +557,8 @@ pub enum CoverageError {
     Descriptor(#[from] DescriptorError),
 }
 
-fn block_values(descriptor: &DescriptorVector, layout: BlockLayout) -> &[f64] {
-    &descriptor.values()[layout.offset..layout.offset + layout.len]
+fn block_values(descriptor: &[f64], layout: BlockLayout) -> &[f64] {
+    &descriptor[layout.offset..layout.offset + layout.len]
 }
 
 fn novelty(distances: &[Option<f64>]) -> f64 {
