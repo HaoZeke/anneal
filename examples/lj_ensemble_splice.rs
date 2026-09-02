@@ -21,7 +21,10 @@
 //! `CHECKPOINT` charged evaluations between board updates (default 500),
 //! `COMPRESS_MU` two-phase quench: relax first on the compressed surface
 //! `E + mu * sum |r_i - r_cm|^2`, then on the plain potential from there
-//! (default 0, plain quench). Every evaluation of either phase is charged.
+//! (default 0, plain quench), `DIAMETER_D` and `DIAMETER_BETA` add the
+//! Locatelli--Schoen diameter penalty `beta * sum_{i<j} max(0, r_ij^2 - D^2)^2`
+//! to the same first phase (`D` in units of the pair-well minimum distance,
+//! default 0 and 1). Every evaluation of either phase is charged.
 
 use std::sync::{Arc, Mutex};
 
@@ -76,12 +79,34 @@ fn reference(n: usize) -> Option<f64> {
     })
 }
 
-/// Compressed surface: the plain energy plus `mu` times the squared radius of
-/// gyration sum. The centroid term contributes no gradient because the
-/// displacements from it sum to zero.
-fn lj_compressed(x: ArrayView1<f64>, mu: f64) -> (f64, Array1<f64>) {
+/// First-phase surface: the plain energy plus Doye's centroid compression
+/// `mu * sum_i |r_i - r_cm|^2` and the Locatelli--Schoen diameter penalty
+/// `beta * sum_{i<j} max(0, r_ij^2 - D^2)^2`. The centroid term contributes
+/// no gradient of its own because the displacements from it sum to zero.
+fn lj_compressed(x: ArrayView1<f64>, mu: f64, diameter: f64, beta: f64) -> (f64, Array1<f64>) {
     let (mut e, mut g) = lj(x);
     let n = x.len() / 3;
+    if diameter > 0.0 && beta > 0.0 {
+        let d2 = diameter * diameter;
+        for i in 0..n {
+            for j in (i + 1)..n {
+                let d = [
+                    x[3 * i] - x[3 * j],
+                    x[3 * i + 1] - x[3 * j + 1],
+                    x[3 * i + 2] - x[3 * j + 2],
+                ];
+                let excess = d[0] * d[0] + d[1] * d[1] + d[2] * d[2] - d2;
+                if excess > 0.0 {
+                    e += beta * excess * excess;
+                    let coef = 4.0 * beta * excess;
+                    for k in 0..3 {
+                        g[3 * i + k] += coef * d[k];
+                        g[3 * j + k] -= coef * d[k];
+                    }
+                }
+            }
+        }
+    }
     let mut cm = [0.0_f64; 3];
     for i in 0..n {
         for k in 0..3 {
@@ -156,6 +181,10 @@ struct ExchangeConfig {
     checkpoint: usize,
     /// Compression strength of the first quench phase; zero is a plain quench.
     compress_mu: f64,
+    /// Diameter penalty cutoff in sigma units; zero disables the penalty.
+    diameter: f64,
+    /// Diameter penalty strength.
+    diameter_beta: f64,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -175,16 +204,19 @@ fn run_chain(
     let mut ledger = Ledger::new(budget);
     let mut opt = WarmLbfgs::default();
     let compress_mu = exchange.compress_mu;
+    let diameter = exchange.diameter;
+    let beta = exchange.diameter_beta;
+    let two_phase = compress_mu > 0.0 || (diameter > 0.0 && beta > 0.0);
     let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, iters: usize| {
         let before = led.spent();
         let mut start = x.to_owned();
-        if compress_mu > 0.0 {
+        if two_phase {
             opt.forget();
             let (_, compressed, _) = opt.minimize(x, iters, |v| {
                 if !led.charge() {
                     return None;
                 }
-                Some(lj_compressed(v, compress_mu))
+                Some(lj_compressed(v, compress_mu, diameter, beta))
             });
             start = compressed;
         }
@@ -373,17 +405,23 @@ fn main() {
         source_best: env_string("SPLICE_SOURCE", "current") == "best",
         checkpoint: env_usize("CHECKPOINT", 500),
         compress_mu: env_f64("COMPRESS_MU", 0.0),
+        // The published cutoff is quoted in pair-well minimum units; the
+        // objective here is in sigma units, so the cutoff scales by 2^(1/6).
+        diameter: env_f64("DIAMETER_D", 0.0) * 2f64.powf(1.0 / 6.0),
+        diameter_beta: env_f64("DIAMETER_BETA", 1.0),
     };
     let target = reference(n);
     println!(
         "LJ{n}, {chains} chains x {budget} charged, {ensembles} ensembles, mode {mode}, \
-         interval {} images {} partner {} source {} checkpoint {} compress {}, reference {}",
+         interval {} images {} partner {} source {} checkpoint {} compress {} diameter {:.3} beta {}, reference {}",
         exchange.interval,
         exchange.images,
         if exchange.partner_best { "best" } else { "random" },
         if exchange.source_best { "best" } else { "current" },
         exchange.checkpoint,
         exchange.compress_mu,
+        exchange.diameter,
+        exchange.diameter_beta,
         target.map(|r| format!("{r:.6}")).unwrap_or_else(|| "none".into())
     );
 
