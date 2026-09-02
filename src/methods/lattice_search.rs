@@ -524,7 +524,7 @@ pub fn place_successively_on(
 }
 
 /// Occupation walk steps per point.
-pub const OCCUPATION_WALK_STEPS: usize = 200;
+pub const OCCUPATION_WALK_STEPS: usize = 20;
 /// Occupation walk final temperature in pair-well units.
 pub const OCCUPATION_WALK_TEMPERATURE: f64 = 0.4;
 /// The walk starts at this multiple of the final temperature and cools
