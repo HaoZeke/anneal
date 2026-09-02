@@ -747,7 +747,7 @@ pub mod wire {
     /// The decree payload: seam evidence and per-replica assignments.
     #[derive(Debug, Clone, PartialEq)]
     pub struct ExplorationDecree {
-        /// Second Laplacian eigenvalue behind the decree.
+        /// Second normalized-Laplacian eigenvalue behind the decree.
         pub algebraic_connectivity: f64,
         /// Conductance of the seam behind the decree.
         pub seam_conductance: f64,
@@ -761,18 +761,17 @@ pub mod wire {
 
     /// Allocate one deterministic wave across both sides of a landscape seam.
     ///
-    /// Community population is evidence of explored support, so seats are
-    /// apportioned inversely to the two observed community sizes. Both sides
-    /// retain a seat when the wave has at least two replicas. Rotating the
-    /// sorted membership by coordinator snapshot prevents a fixed replica from
-    /// owning the same role for the whole campaign without introducing another
-    /// random stream into the replicated state machine.
+    /// With no calibrated directional success probabilities, the minimax
+    /// allocation balances launches across the two sides. Their seat counts
+    /// differ by at most one; an odd seat alternates sides across snapshots.
+    /// Rotating the sorted membership prevents a fixed replica from owning the
+    /// same role for the whole campaign without introducing another random
+    /// stream into the replicated state machine. Every assigned replica polls
+    /// the coordinator's stratified bridge, when one is commissioned.
     pub fn assign_seam_work(
         members: &[u32],
         left_basin: u64,
         right_basin: u64,
-        community_left: u32,
-        community_right: u32,
         decree_index: u64,
     ) -> Vec<ReplicaAssignment> {
         let mut members = members.to_vec();
@@ -783,16 +782,12 @@ pub mod wire {
             return Vec::new();
         }
 
-        let left_slots = if count == 1 {
-            usize::from(community_left <= community_right)
+        let left_slots = if count.is_multiple_of(2) {
+            count / 2
+        } else if decree_index.is_multiple_of(2) {
+            count / 2 + 1
         } else {
-            let left_weight = u64::from(community_right.max(1));
-            let right_weight = u64::from(community_left.max(1));
-            let total_weight = left_weight + right_weight;
-            let rounded = ((count as u64) * left_weight + total_weight / 2) / total_weight;
-            usize::try_from(rounded)
-                .unwrap_or(count - 1)
-                .clamp(1, count - 1)
+            count / 2
         };
         let rotation = usize::try_from(decree_index % count as u64)
             .expect("decree rotation is bounded by membership");
@@ -809,7 +804,7 @@ pub mod wire {
                     histogram_classes: Vec::new(),
                     histogram_masses: Vec::new(),
                     anchor_basin: if right_side { right_basin } else { left_basin },
-                    bridge_duty: false,
+                    bridge_duty: true,
                     decree_index,
                 }
             })

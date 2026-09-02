@@ -3045,8 +3045,6 @@ fn run_capnp_catalog(
                                         &decree_members,
                                         seam.left_basin,
                                         seam.right_basin,
-                                        seam.community_left,
-                                        seam.community_right,
                                         status.snapshot_version,
                                     );
                                     let decree = ExplorationDecree {
