@@ -1138,7 +1138,9 @@ fn apply_request(
                     ProtocolRejection::ValidationRejected,
                 );
             };
-            if let Some(crossing) = sample_boundary_crossing(scientific, current, *draw) {
+            if let Some(crossing) =
+                sample_boundary_crossing(scientific, request.identity.replica, current, *draw)
+            {
                 payload = AcceptedPayload::BoundaryCrossing(crossing);
             }
         }
@@ -1365,8 +1367,7 @@ fn apply_request(
                     ProtocolRejection::ValidationRejected,
                 );
             };
-            let Ok(Some(basin_id)) = scientific.census.basin_for(&validated.candidate.descriptor)
-            else {
+            let Some(basin_id) = exact_basin_for(scientific, &validated) else {
                 return rejected(
                     state,
                     request.event_sequence,
@@ -1517,7 +1518,10 @@ fn apply_request(
                     ProtocolRejection::ValidationRejected,
                 );
             };
-            let Ok(Some(basin_id)) = scientific.census.basin_for(&member_candidate.descriptor)
+            let Some(basin_id) = member_candidate
+                .census_basin
+                .map(BasinId::from_raw)
+                .filter(|basin| scientific.census.entry(*basin).is_some())
             else {
                 return rejected(
                     state,
@@ -2778,48 +2782,53 @@ fn observe_exact_basin(
     scientific: &mut ScientificState,
     validated: &ValidatedCandidate,
 ) -> Result<CensusObservation, ()> {
-    let assigned = {
-        let mut representatives = scientific
-            .ride_candidates
-            .iter()
-            .map(|(&basin, stored)| {
-                let distance_squared = stored
-                    .descriptor
-                    .iter()
-                    .zip(&validated.candidate.descriptor)
-                    .map(|(left, right)| {
-                        let delta = left - right;
-                        delta * delta
-                    })
-                    .sum::<f64>();
-                (basin, distance_squared, stored)
-            })
-            .collect::<Vec<_>>();
-        representatives.sort_by(|left, right| {
-            left.1
-                .total_cmp(&right.1)
-                .then_with(|| left.0.cmp(&right.0))
-        });
-        representatives.into_iter().find_map(|(basin, _, stored)| {
-            scientific
-                .exact_witness
-                .equivalent_structures(
-                    StructureView {
-                        coordinates: ArrayView1::from(&stored.coordinates),
-                        context: &scientific.structure_context,
-                    },
-                    StructureView {
-                        coordinates: ArrayView1::from(&validated.candidate.coordinates),
-                        context: &scientific.structure_context,
-                    },
-                )
-                .then_some(BasinId::from_raw(basin))
-        })
-    };
+    let assigned = exact_basin_for(scientific, validated);
     scientific
         .census
         .observe_assigned(&validated.candidate.descriptor, assigned)
         .map_err(|_| ())
+}
+
+fn exact_basin_for(
+    scientific: &ScientificState,
+    validated: &ValidatedCandidate,
+) -> Option<BasinId> {
+    let mut representatives = scientific
+        .ride_candidates
+        .iter()
+        .map(|(&basin, stored)| {
+            let distance_squared = stored
+                .descriptor
+                .iter()
+                .zip(&validated.candidate.descriptor)
+                .map(|(left, right)| {
+                    let delta = left - right;
+                    delta * delta
+                })
+                .sum::<f64>();
+            (basin, distance_squared, stored)
+        })
+        .collect::<Vec<_>>();
+    representatives.sort_by(|left, right| {
+        left.1
+            .total_cmp(&right.1)
+            .then_with(|| left.0.cmp(&right.0))
+    });
+    representatives.into_iter().find_map(|(basin, _, stored)| {
+        scientific
+            .exact_witness
+            .equivalent_structures(
+                StructureView {
+                    coordinates: ArrayView1::from(&stored.coordinates),
+                    context: &scientific.structure_context,
+                },
+                StructureView {
+                    coordinates: ArrayView1::from(&validated.candidate.coordinates),
+                    context: &scientific.structure_context,
+                },
+            )
+            .then_some(BasinId::from_raw(basin))
+    })
 }
 
 fn candidate_from_validated(
@@ -3134,10 +3143,17 @@ fn region_population_assignment(
 
 fn sample_boundary_crossing(
     scientific: &ScientificState,
+    replica: u32,
     current: &[f64],
     draw: u64,
 ) -> Option<BoundaryCrossingRecord> {
-    let query_basin = scientific.census.basin_for(current).ok().flatten()?;
+    scientific.census.validate_descriptor(current).ok()?;
+    let query_basin = scientific
+        .last_candidate_by_replica
+        .get(&replica)?
+        .census_basin
+        .map(BasinId::from_raw)
+        .filter(|basin| scientific.census.entry(*basin).is_some())?;
     let query_node = *scientific.transition_nodes.get(&query_basin)?;
     let regions = scientific
         .transition_graph
