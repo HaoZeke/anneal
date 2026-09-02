@@ -245,8 +245,8 @@ pub struct EscapeFeedback {
     /// Shrink on reaching a new basin.
     pub beta_new: f64,
     /// Enhanced feedback: the known-basin growth is multiplied by
-    /// `1 + visits_coeff * visits`, so a repeatedly seen basin is escaped
-    /// harder than one seen once (Schoenborn et al.).
+    /// `1 + visits_coeff * ln(visits)`, so a repeatedly seen basin is escaped
+    /// harder than one seen once (Schönborn et al.).
     pub visits_coeff: f64,
     /// Threshold multiplier on acceptance; below one.
     pub alpha_accept: f64,
@@ -354,8 +354,8 @@ impl EscapeFeedback {
                 self.n_same += 1;
             }
             Visit::Known => {
-                let v = self.visits(reached) as f64;
-                self.escape *= self.beta_known * (1.0 + self.visits_coeff * v);
+                let visits = self.visits(reached).max(1) as f64;
+                self.escape *= self.beta_known * (1.0 + self.visits_coeff * visits.ln());
                 self.n_known += 1;
             }
             Visit::New => {
