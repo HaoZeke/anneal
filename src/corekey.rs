@@ -27,7 +27,7 @@ use std::hash::{Hash, Hasher};
 
 use ndarray::ArrayView1;
 
-use crate::structure::contact_cutoff_from_gr;
+use crate::structure::{RING_CUTOFF_SCALE, median_nearest_neighbour};
 
 /// Rings longer than this are not part of the key.
 pub const MAX_RING: usize = 6;
@@ -290,10 +290,18 @@ pub fn core_key(
     }
 }
 
-/// [`core_key`] at the structure's own first-shell contact cutoff.
-pub fn core_key_nn(x: ArrayView1<f64>, species: &[u32], rule: CoreRule) -> CoreKey {
+/// The contact cutoff the key uses: [`RING_CUTOFF_SCALE`] times the median
+/// nearest-neighbour distance, which sits between the first and second
+/// shells of every packing measured here and, unlike a histogram minimum,
+/// cannot slip a shell on a strained decahedron.
+pub fn contact_cutoff(x: ArrayView1<f64>) -> f64 {
     let n = x.len() / 3;
-    core_key(x, species, contact_cutoff_from_gr(x, n), rule)
+    RING_CUTOFF_SCALE * median_nearest_neighbour(x, n)
+}
+
+/// [`core_key`] at the structure's own contact cutoff.
+pub fn core_key_nn(x: ArrayView1<f64>, species: &[u32], rule: CoreRule) -> CoreKey {
+    core_key(x, species, contact_cutoff(x), rule)
 }
 
 #[cfg(test)]
@@ -353,7 +361,7 @@ mod tests {
             let a = core_key_nn(x.view(), &[], CoreRule::default());
             let b = core_key_nn(y.view(), &[], CoreRule::default());
             assert_eq!(a, b, "{name}");
-            assert!(a.core_atoms > 0 && a.rings > 0, "{name}: {a:?}");
+            assert!(a.core_atoms >= 6 && a.rings > 0, "{name}: {a:?}");
         }
     }
 
@@ -373,7 +381,7 @@ mod tests {
         // surface atom keeps the Mackay core and therefore the key.
         let x = fixture("lj75_ico");
         let n = x.len() / 3;
-        let cutoff = contact_cutoff_from_gr(x.view(), n);
+        let cutoff = contact_cutoff(x.view());
         let nb = contact_neighbours(x.view(), n, cutoff);
         let loose = (0..n).min_by_key(|&i| nb[i].len()).unwrap();
         let mut y = Vec::with_capacity(3 * (n - 1));
