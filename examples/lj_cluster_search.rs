@@ -3188,6 +3188,7 @@ fn run_capnp_catalog(
         ride_exploration.maximum_move = 0.2 * run_cfg.length_scale;
         ride_exploration.irc_step = 0.1 * run_cfg.length_scale;
         ride_exploration.irc_force_tolerance = 0.05;
+        ride_exploration.certify_degenerate_rearrangements = true;
         ride_exploration.refine_with_prfo = true;
     }
     #[cfg(feature = "ira")]

@@ -658,6 +658,13 @@ pub struct PesExplorationConfig {
     pub branch_growth: f64,
     /// IRC force threshold before endpoint quenching.
     pub irc_force_tolerance: f64,
+    /// Preserve index-one paths whose quenched branches are symmetry-equivalent.
+    ///
+    /// Enable this when the exact-structure witness quotients rotations,
+    /// permutations, or periodic images. The resulting transition is a
+    /// self-loop in the quotient kinetic-transition network and never a
+    /// proposal to another basin.
+    pub certify_degenerate_rearrangements: bool,
     /// Refine the lowest-mode candidate with Sella order-1 P-RFO.
     pub refine_with_prfo: bool,
 }
@@ -685,6 +692,7 @@ impl Default for PesExplorationConfig {
             branch_attempts: 4,
             branch_growth: 2.0,
             irc_force_tolerance: 0.05,
+            certify_degenerate_rearrangements: false,
             refine_with_prfo: true,
         }
     }
@@ -2842,7 +2850,7 @@ where
         saddle_max_gradient,
         ride_method: config.ride_method,
     };
-    if positive_id == negative_id {
+    if positive_id == negative_id && !config.certify_degenerate_rearrangements {
         network.retain_unresolved_saddle(candidate);
         return Err(PesExplorationError::CollapsedConnection);
     }
@@ -3149,7 +3157,7 @@ where
         ride_method: config.ride_method,
         irc_at_minimum,
     };
-    if forward_id.id == reverse_id.id {
+    if forward_id.id == reverse_id.id && !config.certify_degenerate_rearrangements {
         network.retain_unresolved_saddle(candidate);
         return Err(PesExplorationError::CollapsedConnection);
     }
