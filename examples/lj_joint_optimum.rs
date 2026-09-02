@@ -881,6 +881,20 @@ mod tests {
     }
 
     #[test]
+    fn bounded_soft_selector_names_the_cost_controlled_nve_arm() {
+        let arms = selected_arms("mh-bounded-soft", &[]).unwrap();
+
+        assert!(matches!(
+            arms.as_slice(),
+            [Arm::MinimaHoppingBoundedSoftened]
+        ));
+        assert_eq!(
+            arms[0].label(),
+            "minima-hopping-bounded-softened"
+        );
+    }
+
+    #[test]
     fn exhausted_initial_quench_cannot_report_zero_as_a_minimum() {
         let potential = PairPotential::lennard_jones(2);
         let initial = Array1::from(vec![0.0, 0.0, 0.0, 1.2, 0.0, 0.0]);
