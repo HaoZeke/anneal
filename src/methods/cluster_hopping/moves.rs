@@ -1382,6 +1382,16 @@ mod move_scaling_tests {
     use rand::SeedableRng;
     use rand::rngs::StdRng;
 
+    #[test]
+    fn wales_doye_library_is_the_collective_displacement_kernel() {
+        let cfg = Config::for_cluster(13);
+        let kernels = MoveLibrary::WalesDoye.kernels(&cfg);
+
+        assert_eq!(kernels.len(), 1);
+        assert!(matches!(kernels[0], ClusterMove::AllPoints { .. }));
+        assert_eq!(kernels[0].name(), "all");
+    }
+
     /// The escape scale has to reach the step, which is the whole mechanism.
     /// It did not: the amplitude moves ignored the temperature argument, so a
     /// controller multiplying it changed nothing about how far a proposal
