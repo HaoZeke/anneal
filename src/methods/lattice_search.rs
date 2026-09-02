@@ -155,41 +155,99 @@ pub fn hollow_sites(x: &[f64], neighbour_cutoff: f64) -> Vec<[f64; 3]> {
                     u[2] * v[0] - u[0] * v[2],
                     u[0] * v[1] - u[1] * v[0],
                 ];
-                let norm =
-                    (normal[0] * normal[0] + normal[1] * normal[1] + normal[2] * normal[2]).sqrt();
-                if norm < 1e-12 {
-                    continue;
-                }
                 let height2 = bond * bond - dist2(centre, pa);
-                if height2 <= 0.0 {
-                    continue;
+                push_site(
+                    x, c, centre, normal, height2, exclusion2, merge2, &mut sites,
+                );
+            }
+        }
+    }
+    // Four-fold sites over squares: two second neighbours at about the
+    // square diagonal that share two first neighbours which are themselves
+    // a diagonal apart, as on a (100) facet.
+    let diag_lo = 1.3 * bond;
+    let diag_hi = 1.5 * bond;
+    for a in 0..n {
+        for b in (a + 1)..n {
+            let dab = dist2(point(x, a), point(x, b)).sqrt();
+            if !(diag_lo..diag_hi).contains(&dab) {
+                continue;
+            }
+            let common: Vec<usize> = nb[a]
+                .iter()
+                .copied()
+                .filter(|e| nb[b].contains(e))
+                .collect();
+            for (i, &p) in common.iter().enumerate() {
+                for &q in &common[i + 1..] {
+                    let dpq = dist2(point(x, p), point(x, q)).sqrt();
+                    if !(diag_lo..diag_hi).contains(&dpq) {
+                        continue;
+                    }
+                    let (pa, pb, pp, pq) = (point(x, a), point(x, b), point(x, p), point(x, q));
+                    let centre = [
+                        (pa[0] + pb[0] + pp[0] + pq[0]) / 4.0,
+                        (pa[1] + pb[1] + pp[1] + pq[1]) / 4.0,
+                        (pa[2] + pb[2] + pp[2] + pq[2]) / 4.0,
+                    ];
+                    let u = [pb[0] - pa[0], pb[1] - pa[1], pb[2] - pa[2]];
+                    let v = [pq[0] - pp[0], pq[1] - pp[1], pq[2] - pp[2]];
+                    let normal = [
+                        u[1] * v[2] - u[2] * v[1],
+                        u[2] * v[0] - u[0] * v[2],
+                        u[0] * v[1] - u[1] * v[0],
+                    ];
+                    let height2 = bond * bond - dist2(centre, pa);
+                    push_site(
+                        x, c, centre, normal, height2, exclusion2, merge2, &mut sites,
+                    );
                 }
-                let height = height2.sqrt();
-                let outward = if (centre[0] - c[0]) * normal[0]
-                    + (centre[1] - c[1]) * normal[1]
-                    + (centre[2] - c[2]) * normal[2]
-                    >= 0.0
-                {
-                    1.0
-                } else {
-                    -1.0
-                };
-                let site = [
-                    centre[0] + outward * height * normal[0] / norm,
-                    centre[1] + outward * height * normal[1] / norm,
-                    centre[2] + outward * height * normal[2] / norm,
-                ];
-                if (0..n).any(|e| dist2(site, point(x, e)) < exclusion2) {
-                    continue;
-                }
-                if sites.iter().any(|s| dist2(*s, site) < merge2) {
-                    continue;
-                }
-                sites.push(site);
             }
         }
     }
     sites
+}
+
+/// Place a site at `height2.sqrt()` above `centre` along `normal`, on the
+/// side away from the centroid `c`, unless it overlaps a point or a site.
+#[allow(clippy::too_many_arguments)]
+fn push_site(
+    x: &[f64],
+    c: [f64; 3],
+    centre: [f64; 3],
+    normal: [f64; 3],
+    height2: f64,
+    exclusion2: f64,
+    merge2: f64,
+    sites: &mut Vec<[f64; 3]>,
+) {
+    let n = x.len() / 3;
+    let norm = (normal[0] * normal[0] + normal[1] * normal[1] + normal[2] * normal[2]).sqrt();
+    if norm < 1e-12 || height2 <= 0.0 {
+        return;
+    }
+    let height = height2.sqrt();
+    let outward = if (centre[0] - c[0]) * normal[0]
+        + (centre[1] - c[1]) * normal[1]
+        + (centre[2] - c[2]) * normal[2]
+        >= 0.0
+    {
+        1.0
+    } else {
+        -1.0
+    };
+    let site = [
+        centre[0] + outward * height * normal[0] / norm,
+        centre[1] + outward * height * normal[1] / norm,
+        centre[2] + outward * height * normal[2] / norm,
+    ];
+    if (0..n).any(|e| dist2(site, point(x, e)) < exclusion2) {
+        return;
+    }
+    if sites.iter().any(|s| dist2(*s, site) < merge2) {
+        return;
+    }
+    sites.push(site);
 }
 
 /// Occupation optimisation: at every step the lattice is rebuilt from the
