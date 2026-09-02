@@ -12,15 +12,15 @@ use ndarray::{Array1, Array2, ArrayView1, ArrayView2};
 use rand::{SeedableRng, rngs::StdRng};
 use rand_distr::{Distribution, StandardNormal};
 use rgmin::{
-    ApplyHessian, Control, EigenParams, EigensolverKind, FireKind, GradNorm, Lbfgs, Method, Oracle,
-    Solver, lowest_mode,
+    ApplyHessian, Control, EigenParams, EigensolverKind, FireKind, GradNorm, Lbfgs, ManifoldKind,
+    Method, Oracle, Solver, lowest_mode,
 };
 pub use rgsaddle::IrcKind;
-use rgsaddle::geom::update_trust;
+use rgsaddle::internal::{CartAxis, Translation};
 use rgsaddle::{
-    HessUpdate, IrcConfig, IrcDirection, IrcSession, MinModeConfig, MinModeKind, MinModeSession,
-    MinModeStatus, PointSurface, SaddleError, TrustSchedule, exact_eigh, prfo_trust_region,
-    update_h,
+    Constraints, ForceGate, HessUpdate, IrcConfig, IrcDirection, IrcSession, MinModeConfig,
+    MinModeKind, MinModeSession, MinModeStatus, PointSurface, SaddleError, SellaGeom,
+    SellaSaddleConfig, SellaSaddleSession, exact_eigh, prfo_trust_region,
 };
 
 use crate::curvature::{project_rigid_with, rigid_basis};
@@ -30,13 +30,6 @@ use crate::descriptor_space::{
 
 /// Minimum ART downhill displacement as a fraction of source--saddle distance.
 const ART_BRANCH_FRACTION: f64 = 0.15;
-/// Lowest root whose overlap reaches this fraction of the best candidate.
-const MODE_HOMING_OVERLAP_FRACTION: f64 = 0.7;
-/// A transition-state secant model is rebuilt when its measured step has
-/// opposite sign to the predicted energy change.
-const PRFO_MODEL_MIN_RHO: f64 = 0.0;
-/// A nearly orthogonal homed root is not reliable enough to transport.
-const PRFO_MODEL_MIN_OVERLAP: f64 = 0.2;
 
 /// Energy and Cartesian-gradient evaluator used by all exploration stages.
 pub trait PesSurface: Sync {
@@ -51,11 +44,11 @@ pub trait PesSurface: Sync {
 mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
-    use ndarray::{Array1, Array2, ArrayView1, array};
+    use ndarray::{Array1, ArrayView1, array};
 
     use super::{
         IrcDirection, PesExplorationConfig, PesSurface, activation_basis, deflate_cartesian_mode,
-        finest_irc_step, home_uphill_mode, refine_cartesian_with_prfo, roll_branch,
+        finest_irc_step, refine_cartesian_with_prfo, roll_branch,
     };
     use crate::curvature::project_rigid_with;
     use crate::descriptor_space::DescriptorGeometry;
@@ -117,32 +110,6 @@ mod tests {
             }
             Ok((energy, gradient))
         }
-    }
-
-    #[test]
-    fn mode_homing_stays_in_the_negative_subspace_after_instability_appears() {
-        let eigenvalues = array![-2.0, 0.4, 3.0];
-        let eigenvectors = Array2::eye(3);
-        let reference = array![0.2, 0.0, -0.98];
-
-        let homed = home_uphill_mode(&eigenvalues, &eigenvectors, reference.view(), 1e-6).unwrap();
-
-        assert_eq!(homed.source_index, 0);
-        assert!(homed.eigenvalues[0] < 0.0);
-        assert!(homed.eigenvectors.column(0).dot(&reference) > 0.0);
-    }
-
-    #[test]
-    fn fuzzy_mode_homing_prefers_the_lower_overlapping_root_before_instability() {
-        let eigenvalues = array![0.1, 0.2, 3.0];
-        let eigenvectors = Array2::eye(3);
-        let reference = array![0.65, 0.0, -0.76];
-
-        let homed = home_uphill_mode(&eigenvalues, &eigenvectors, reference.view(), 1e-6).unwrap();
-
-        assert_eq!(homed.source_index, 0);
-        assert_eq!(homed.eigenvalues, array![0.1, 0.2, 3.0]);
-        assert!(homed.eigenvectors.column(0).dot(&reference) > 0.0);
     }
 
     #[test]
@@ -2024,140 +1991,6 @@ fn sorted_eigensystem(
     Ok((sorted_values, sorted_vectors))
 }
 
-struct HomedEigensystem {
-    eigenvalues: Array1<f64>,
-    eigenvectors: Array2<f64>,
-    source_index: usize,
-    overlap: f64,
-}
-
-fn home_uphill_mode(
-    eigenvalues: &Array1<f64>,
-    eigenvectors: &Array2<f64>,
-    reference: ArrayView1<f64>,
-    negative_tolerance: f64,
-) -> Result<HomedEigensystem, PesExplorationError> {
-    if eigenvalues.is_empty()
-        || eigenvectors.nrows() != eigenvalues.len()
-        || eigenvectors.ncols() != eigenvalues.len()
-        || reference.len() != eigenvalues.len()
-    {
-        return Err(PesExplorationError::InvalidShape(
-            "mode homing requires one square eigensystem and matching reference",
-        ));
-    }
-    if !negative_tolerance.is_finite() || negative_tolerance < 0.0 {
-        return Err(PesExplorationError::InvalidConfig(
-            "mode-homing negative tolerance",
-        ));
-    }
-    let reference = normalize_mode(reference)?;
-    let negative = (0..eigenvalues.len())
-        .filter(|&index| eigenvalues[index] < -negative_tolerance)
-        .collect::<Vec<_>>();
-    let candidates = if negative.is_empty() {
-        (0..eigenvalues.len()).collect::<Vec<_>>()
-    } else {
-        negative
-    };
-    let overlaps = candidates
-        .iter()
-        .map(|&index| (index, eigenvectors.column(index).dot(&reference)))
-        .collect::<Vec<_>>();
-    let maximum_overlap = overlaps
-        .iter()
-        .map(|(_, overlap)| overlap.abs())
-        .max_by(f64::total_cmp)
-        .ok_or(PesExplorationError::InvalidShape(
-            "mode homing eigensystem is empty",
-        ))?;
-    let overlap_gate = MODE_HOMING_OVERLAP_FRACTION * maximum_overlap;
-    let (source_index, signed_overlap) = overlaps
-        .into_iter()
-        .find(|(_, overlap)| overlap.abs() >= overlap_gate)
-        .ok_or(PesExplorationError::InvalidShape(
-            "mode homing found no admissible root",
-        ))?;
-    let mut order = Vec::with_capacity(eigenvalues.len());
-    order.push(source_index);
-    order.extend((0..eigenvalues.len()).filter(|index| *index != source_index));
-    let eigenvalues = Array1::from_iter(order.iter().map(|&index| eigenvalues[index]));
-    let mut homed_vectors = Array2::zeros(eigenvectors.raw_dim());
-    for (column, &index) in order.iter().enumerate() {
-        homed_vectors
-            .column_mut(column)
-            .assign(&eigenvectors.column(index));
-    }
-    if signed_overlap < 0.0 {
-        homed_vectors.column_mut(0).mapv_inplace(|value| -value);
-    }
-    Ok(HomedEigensystem {
-        eigenvalues,
-        eigenvectors: homed_vectors,
-        source_index,
-        overlap: signed_overlap.abs(),
-    })
-}
-
-fn orthonormal_complement(
-    dimension: usize,
-    constraints: &[Array1<f64>],
-) -> Result<Array2<f64>, PesExplorationError> {
-    let mut columns = Vec::<Array1<f64>>::new();
-    for coordinate in 0..dimension {
-        let mut direction = Array1::zeros(dimension);
-        direction[coordinate] = 1.0;
-        project_rigid_with(&mut direction, constraints);
-        for _ in 0..2 {
-            for basis in &columns {
-                direction -= &(basis * direction.dot(basis));
-            }
-        }
-        let norm = direction.dot(&direction).sqrt();
-        if norm > 1e-10 {
-            columns.push(direction / norm);
-        }
-    }
-    if columns.is_empty() {
-        return Err(PesExplorationError::InvalidShape(
-            "Cartesian constraints remove every coordinate",
-        ));
-    }
-    let mut basis = Array2::zeros((dimension, columns.len()));
-    for (column, direction) in columns.iter().enumerate() {
-        basis.column_mut(column).assign(direction);
-    }
-    Ok(basis)
-}
-
-fn finite_difference_free_hessian<S: PesSurface + ?Sized>(
-    surface: &S,
-    coordinates: ArrayView1<f64>,
-    basis: &Array2<f64>,
-    step: f64,
-) -> Result<Array2<f64>, PesExplorationError> {
-    let mut hessian = Array2::zeros((basis.ncols(), basis.ncols()));
-    for column in 0..basis.ncols() {
-        let direction = basis.column(column);
-        let plus = &coordinates + &(&direction * step);
-        let minus = &coordinates - &(&direction * step);
-        let (_, plus_gradient) = checked_evaluate(surface, plus.view())?;
-        let (_, minus_gradient) = checked_evaluate(surface, minus.view())?;
-        let action = (plus_gradient - minus_gradient) / (2.0 * step);
-        for row in 0..basis.ncols() {
-            hessian[(row, column)] = basis.column(row).dot(&action);
-        }
-    }
-    for row in 0..hessian.nrows() {
-        for column in 0..row {
-            let symmetric = 0.5 * (hessian[(row, column)] + hessian[(column, row)]);
-            hessian[(row, column)] = symmetric;
-            hessian[(column, row)] = symmetric;
-        }
-    }
-    Ok(hessian)
-}
-
 fn refine_nd_with_prfo<S: PesSurface + ?Sized>(
     surface: &S,
     start: ArrayView1<f64>,
@@ -2190,151 +2023,114 @@ fn refine_nd_with_prfo<S: PesSurface + ?Sized>(
     })
 }
 
-fn refine_cartesian_with_prfo<S: PesSurface + ?Sized>(
+fn cartesian_sella_free_dimension(
+    dimension: usize,
+    cartesian_index: Option<(&[bool], [bool; 3])>,
+) -> Result<usize, PesExplorationError> {
+    let free = match cartesian_index {
+        None => dimension,
+        Some((frozen_atoms, _)) if frozen_atoms.iter().any(|frozen| *frozen) => {
+            dimension.saturating_sub(3 * frozen_atoms.iter().filter(|frozen| **frozen).count())
+        }
+        Some((_, periodic)) if periodic.iter().any(|axis| *axis) => dimension.saturating_sub(3),
+        Some(_) if dimension >= 9 => dimension.saturating_sub(6),
+        Some(_) => dimension,
+    };
+    if free == 0 {
+        return Err(PesExplorationError::InvalidShape(
+            "Cartesian constraints remove every coordinate",
+        ));
+    }
+    Ok(free)
+}
+
+fn cartesian_sella_session(
+    config: SellaSaddleConfig,
+    start: ArrayView1<f64>,
+    masses: ArrayView1<f64>,
+    cartesian_index: Option<(&[bool], [bool; 3])>,
+) -> Result<SellaSaddleSession, PesExplorationError> {
+    let atom_count = start.len() / 3;
+    let result = match cartesian_index {
+        None => SellaSaddleSession::on(
+            config,
+            start.to_owned(),
+            masses.to_owned(),
+            SellaGeom::Kind(ManifoldKind::Euclidean),
+        ),
+        Some((frozen_atoms, _)) if frozen_atoms.iter().any(|frozen| *frozen) => {
+            let mut chart = Constraints::new(atom_count)
+                .map_err(|error| PesExplorationError::Saddle(error.to_string()))?;
+            for (atom, frozen) in frozen_atoms.iter().copied().enumerate() {
+                if frozen {
+                    for axis in CartAxis::ALL {
+                        let coordinate = Translation::new(vec![atom], axis)
+                            .map_err(|error| PesExplorationError::Saddle(error.to_string()))?;
+                        chart
+                            .fix_translation(coordinate, start, None)
+                            .map_err(|error| PesExplorationError::Saddle(error.to_string()))?;
+                    }
+                }
+            }
+            SellaSaddleSession::with_chart(config, start.to_owned(), masses.to_owned(), chart)
+        }
+        Some((_, periodic)) if periodic.iter().any(|axis| *axis) => {
+            let mut chart = Constraints::new(atom_count)
+                .map_err(|error| PesExplorationError::Saddle(error.to_string()))?;
+            chart
+                .fix_com(start)
+                .map_err(|error| PesExplorationError::Saddle(error.to_string()))?;
+            SellaSaddleSession::with_chart(config, start.to_owned(), masses.to_owned(), chart)
+        }
+        Some(_) => SellaSaddleSession::new(config, start.to_owned(), masses.to_owned()),
+    };
+    result.map_err(|error| PesExplorationError::Saddle(error.to_string()))
+}
+
+fn refine_cartesian_with_prfo<S: PesSurface>(
     surface: &S,
     start: ArrayView1<f64>,
+    masses: ArrayView1<f64>,
     initial_mode: ArrayView1<f64>,
+    initial_curvature: f64,
     cartesian_index: Option<(&[bool], [bool; 3])>,
     config: &PesExplorationConfig,
 ) -> Result<Array1<f64>, PesExplorationError> {
-    let mut coordinates = start.to_owned();
-    let mut uphill_mode = normalize_mode(initial_mode)?;
-    let mut trust_radius = config.saddle_displacement.min(config.maximum_move);
-    let trust_schedule = TrustSchedule::saddle();
-    let (mut energy, mut gradient) = checked_evaluate(surface, coordinates.view())?;
-    let mut hessian_model: Option<(Array2<f64>, Array2<f64>)> = None;
-    let mut refresh_hessian = true;
-    let mut exact_refreshes = 0usize;
-    let mut secant_updates = 0usize;
+    let free_dimension = cartesian_sella_free_dimension(start.len(), cartesian_index)?;
+    let initial_trust = config.saddle_displacement.min(config.maximum_move);
+    let sella_config = SellaSaddleConfig {
+        delta: initial_trust / free_dimension as f64,
+        force_tol: config.saddle_force_tolerance,
+        force_gate: ForceGate::LinfNorm,
+        order: 1,
+        ..SellaSaddleConfig::default()
+    };
+    let mut session = cartesian_sella_session(sella_config, start, masses, cartesian_index)?;
+    session.set_update(HessUpdate::TsBfgs);
+    session
+        .seed_mode(initial_mode, initial_curvature)
+        .map_err(|error| PesExplorationError::Saddle(error.to_string()))?;
+    let adapter = SaddleSurface(surface);
     for iteration in 0..config.prfo_steps {
-        let constraints = activation_basis(coordinates.view(), cartesian_index);
-        let basis = orthonormal_complement(coordinates.len(), &constraints)?;
-        let free_gradient = basis.t().dot(&gradient);
-        let mut tangent_gradient = gradient.clone();
-        project_rigid_with(&mut tangent_gradient, &constraints);
-        let maximum_gradient = max_abs(tangent_gradient.view());
-        if maximum_gradient <= config.saddle_force_tolerance {
-            emit_pes_trace(serde_json::json!({
-                "kind": "pes_stage",
-                "stage": "prfo",
-                "status": "converged",
-                "iteration": iteration,
-                "energy": energy,
-                "maximum_gradient": maximum_gradient,
-                "free_dimension": basis.ncols(),
-                "exact_hessian_refreshes": exact_refreshes,
-                "ts_bfgs_updates": secant_updates,
-            }));
-            return Ok(coordinates);
-        }
-        let (mut hessian, hessian_source) = match hessian_model.take() {
-            Some((model, old_basis))
-                if !refresh_hessian
-                    && model.nrows() == basis.ncols()
-                    && old_basis.nrows() == basis.nrows()
-                    && old_basis.ncols() == basis.ncols() =>
-            {
-                let transport = basis.t().dot(&old_basis);
-                let mut transported = transport.dot(&model).dot(&transport.t());
-                for row in 0..transported.nrows() {
-                    for column in 0..row {
-                        let symmetric =
-                            0.5 * (transported[(row, column)] + transported[(column, row)]);
-                        transported[(row, column)] = symmetric;
-                        transported[(column, row)] = symmetric;
-                    }
-                }
-                (transported, "ts-bfgs")
-            }
-            _ => {
-                exact_refreshes += 1;
-                (
-                    finite_difference_free_hessian(
-                        surface,
-                        coordinates.view(),
-                        &basis,
-                        config.hessian_step,
-                    )?,
-                    "finite-difference",
-                )
-            }
-        };
-        let (eigenvalues, eigenvectors) = sorted_eigensystem(hessian.view())?;
-        let negative_modes = eigenvalues
-            .iter()
-            .filter(|value| **value < -config.negative_curvature_tolerance)
-            .count();
-        let free_reference = basis.t().dot(&uphill_mode);
-        let homed = home_uphill_mode(
-            &eigenvalues,
-            &eigenvectors,
-            free_reference.view(),
-            config.negative_curvature_tolerance,
-        )?;
-        let free_step = prfo_trust_region(
-            &homed.eigenvalues,
-            &homed.eigenvectors,
-            &free_gradient,
-            1,
-            trust_radius,
-        );
-        let step = basis.dot(&free_step);
-        let step_norm = step.dot(&step).sqrt();
-        if step.len() != coordinates.len() || step.iter().any(|value| !value.is_finite()) {
-            return Err(PesExplorationError::Saddle(
-                "P-RFO returned an invalid Cartesian step".into(),
-            ));
-        }
-        let candidate = &coordinates + &step;
-        let (candidate_energy, candidate_gradient) = checked_evaluate(surface, candidate.view())?;
-        let prediction =
-            free_gradient.dot(&free_step) + 0.5 * free_step.dot(&hessian.dot(&free_step));
-        let rho = if prediction.abs() >= 1e-14 {
-            (candidate_energy - energy) / prediction
-        } else {
-            1.0
-        };
-        let next_trust_radius = if rho.is_finite() {
-            update_trust(trust_radius, rho, step_norm, &trust_schedule).min(config.maximum_move)
-        } else {
-            trust_schedule.delta_min.min(config.maximum_move)
-        };
-        let secant = &candidate_gradient - &gradient;
-        let free_secant = basis.t().dot(&secant);
-        update_h(&mut hessian, &free_step, &free_secant, HessUpdate::TsBfgs);
-        secant_updates += 1;
-        let refresh_next =
-            !rho.is_finite() || rho < PRFO_MODEL_MIN_RHO || homed.overlap < PRFO_MODEL_MIN_OVERLAP;
+        let report = session
+            .step(&adapter)
+            .map_err(|error| PesExplorationError::Saddle(error.to_string()))?;
         emit_pes_trace(serde_json::json!({
             "kind": "pes_stage",
             "stage": "prfo",
-            "status": "running",
+            "backend": "rgsaddle-sella",
+            "status": if report.at_saddle { "converged" } else { "running" },
             "iteration": iteration,
-            "energy": energy,
-            "candidate_energy": candidate_energy,
-            "maximum_gradient": maximum_gradient,
-            "lowest_curvature": eigenvalues[0],
-            "followed_curvature": homed.eigenvalues[0],
-            "mode_overlap": homed.overlap,
-            "followed_mode_index": homed.source_index,
-            "negative_modes": negative_modes,
-            "step_norm": step_norm,
-            "rho": rho,
-            "trust_radius": trust_radius,
-            "next_trust_radius": next_trust_radius,
-            "free_dimension": basis.ncols(),
-            "hessian_source": hessian_source,
-            "exact_hessian_refreshes": exact_refreshes,
-            "ts_bfgs_updates": secant_updates,
-            "refresh_hessian": refresh_next,
+            "energy": report.energy,
+            "maximum_gradient": report.max_force,
+            "rho": report.rho,
+            "trust_radius": report.delta,
+            "free_dimension": free_dimension,
+            "seed_curvature": initial_curvature,
         }));
-        uphill_mode = normalize_mode(basis.dot(&homed.eigenvectors.column(0)).view())?;
-        hessian_model = Some((hessian, basis));
-        refresh_hessian = refresh_next;
-        coordinates = candidate;
-        energy = candidate_energy;
-        gradient = candidate_gradient;
-        trust_radius = next_trust_radius;
+        if report.at_saddle {
+            return Ok(session.position().to_owned());
+        }
     }
     Err(PesExplorationError::SaddleNotConverged {
         stage: SaddleConvergenceStage::Prfo,
@@ -3301,7 +3097,9 @@ where
         saddle_coordinates = refine_cartesian_with_prfo(
             surface,
             saddle_coordinates.view(),
+            masses,
             saddle_mode.view(),
+            min_mode_report.curvature,
             cartesian_index,
             config,
         )?;
