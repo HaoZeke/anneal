@@ -497,6 +497,28 @@ impl UniversalCoverage {
         })
     }
 
+    /// Select a same-system launch batch by GIBBON minimum-value information.
+    ///
+    /// Candidate descriptors must match this coverage model's immutable schema.
+    /// The full invariant descriptor GP supplies both the singleton information
+    /// and posterior correlations, while `max_family_size` remains a hard
+    /// feasibility constraint rather than an acquisition term.
+    pub fn assign_minimum_information_values(
+        &mut self,
+        candidates: &[(usize, Vec<f64>)],
+        batch_size: usize,
+        max_family_size: usize,
+        minimum_samples: usize,
+    ) -> Result<Vec<usize>, CoverageError> {
+        for (_, descriptor) in candidates {
+            self.ensure_values(descriptor)?;
+        }
+        self.rebuild_models();
+        Ok(self
+            .energy
+            .assign_gibbon(candidates, batch_size, max_family_size, minimum_samples))
+    }
+
     fn rebuild_models(&mut self) {
         if !self.models_dirty {
             return;
