@@ -1284,6 +1284,29 @@ fn catalog_outputs_are_actionable_and_seeded() {
 }
 
 #[test]
+fn exact_basin_sample_survives_active_catalog_eviction() {
+    let server = server_with_capacity(1);
+    let digest = signature().digest();
+    let mut client =
+        CatalogClient::connect(server.addr(), identity(0, digest), ClientConfig::default())
+            .unwrap();
+    let first = candidate(0, 1, 1.2);
+    let second = candidate(0, 2, 2.0);
+
+    client.offer_candidate(1, first.clone()).unwrap();
+    client.offer_candidate(2, second).unwrap();
+
+    let sampled = client
+        .sample_basin(3, 0)
+        .unwrap()
+        .expect("the uncapped basin store retains a validated seam anchor");
+    assert_eq!(sampled.coordinates, first.coordinates);
+    assert_eq!(sampled.descriptor, first.descriptor);
+    assert_eq!(sampled.census_basin, Some(0));
+    assert!(client.sample_basin(4, 99).unwrap().is_none());
+}
+
+#[test]
 fn catalog_trace_records_admission_eviction_and_incumbent_identity() {
     let server = server_with_capacity(1);
     let digest = signature().digest();
