@@ -39,7 +39,9 @@ use crate::diversity::DiversityAnnealer;
 use crate::exchange::MetropolisExchange;
 use crate::methods::activation::{Activation, activate};
 use crate::methods::minima_hopping::EscapeFeedback;
-use crate::movekernel::{HollowRelocate, MoveKernel, ShellRotate, SurfaceRelocate, Symmetrise};
+use crate::movekernel::{
+    HollowFill, HollowRelocate, MoveKernel, ShellRotate, SurfaceRelocate, Symmetrise,
+};
 use crate::path::{StallDetector, interpolate_path};
 use crate::screen::Screen;
 

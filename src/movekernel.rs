@@ -622,6 +622,78 @@ impl MoveKernel<f64> for HollowRelocate {
     }
 }
 
+/// Greedy dynamic-lattice fill: repeated hollow-site relocations of the
+/// loosest point until the surface stops improving, as one proposal.
+///
+/// This is the inner loop of dynamic lattice searching: the site list is
+/// rebuilt from the structure after every relocation, the least-coordinated
+/// point moves to the site that gains it the most neighbours, and the sweep
+/// ends when the best site offers no more than the point already has, or
+/// after `max_moves`. A single relaxation then pays for the whole sweep.
+pub struct HollowFill {
+    /// Points in the state; the state length must be `3 * n_points`.
+    pub n_points: usize,
+    /// Separation below which two points count as neighbours.
+    pub neighbour_cutoff: f64,
+    /// Relocations one sweep may compose.
+    pub max_moves: usize,
+}
+
+impl MoveKernel<f64> for HollowFill {
+    fn propose<R: Rng + ?Sized>(&self, i: ArrayView1<f64>, t: f64, rng: &mut R) -> Array1<f64> {
+        let n = self.n_points;
+        let single = HollowRelocate {
+            n_points: n,
+            neighbour_cutoff: self.neighbour_cutoff,
+        };
+        if n < 4 {
+            return single.propose(i, t, rng);
+        }
+        let cut2 = self.neighbour_cutoff * self.neighbour_cutoff;
+        let mut cur = i.to_owned();
+        let mut moved_any = false;
+        for _ in 0..self.max_moves.max(1) {
+            let mut coord = vec![0usize; n];
+            for a in 0..n {
+                for b in (a + 1)..n {
+                    let mut d2 = 0.0;
+                    for k in 0..3 {
+                        let d = cur[3 * a + k] - cur[3 * b + k];
+                        d2 += d * d;
+                    }
+                    if d2 < cut2 {
+                        coord[a] += 1;
+                        coord[b] += 1;
+                    }
+                }
+            }
+            let worst = (0..n).min_by_key(|&a| coord[a]).unwrap_or(0);
+            let sites = single.sites(cur.view(), worst);
+            let Some(best) = sites.iter().map(|(_, c)| *c).max() else {
+                break;
+            };
+            if best <= coord[worst] {
+                break;
+            }
+            let candidates: Vec<&([f64; 3], usize)> =
+                sites.iter().filter(|(_, c)| *c == best).collect();
+            let pick = candidates[rng.random_range(0..candidates.len())].0;
+            for k in 0..3 {
+                cur[3 * worst + k] = pick[k];
+            }
+            moved_any = true;
+        }
+        if moved_any {
+            cur
+        } else {
+            // Nothing to fill: the surface is already saturated, so hand the
+            // hop to the plain relocation rather than proposing the same
+            // structure back.
+            single.propose(i, t, rng)
+        }
+    }
+}
+
 /// Rotates the outer half of the set against its core.
 ///
 /// Packings that share a core differ in how the surface sits on it, so twisting
@@ -941,5 +1013,61 @@ mod cluster_move_tests {
                 assert_eq!(out[3 * a + k], x[3 * a + k], "only the loose point moves");
             }
         }
+    }
+
+    #[test]
+    fn the_fill_raises_the_loosest_point_until_the_surface_saturates() {
+        use rand::SeedableRng;
+        let h = (2.0_f64 / 3.0).sqrt();
+        // A tetrahedron with two loose points far away.
+        let x = ndarray::Array1::from(vec![
+            0.0,
+            0.0,
+            0.0,
+            1.0,
+            0.0,
+            0.0,
+            0.5,
+            0.75_f64.sqrt(),
+            0.0,
+            0.5,
+            0.75_f64.sqrt() / 3.0,
+            h,
+            6.0,
+            6.0,
+            6.0,
+            -6.0,
+            -6.0,
+            -6.0,
+        ]);
+        let kernel = HollowFill {
+            n_points: 6,
+            neighbour_cutoff: 1.3,
+            max_moves: 4,
+        };
+        let mut rng = rand::rngs::StdRng::seed_from_u64(9);
+        let out = kernel.propose(x.view(), 1.0, &mut rng);
+        let coordination = |a: usize| {
+            (0..6)
+                .filter(|&b| b != a)
+                .filter(|&b| {
+                    ((out[3 * a] - out[3 * b]).powi(2)
+                        + (out[3 * a + 1] - out[3 * b + 1]).powi(2)
+                        + (out[3 * a + 2] - out[3 * b + 2]).powi(2))
+                    .sqrt()
+                        < 1.3
+                })
+                .count()
+        };
+        assert!(
+            coordination(4) >= 3,
+            "first loose point gained {}",
+            coordination(4)
+        );
+        assert!(
+            coordination(5) >= 3,
+            "second loose point gained {}",
+            coordination(5)
+        );
     }
 }

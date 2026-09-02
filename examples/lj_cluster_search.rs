@@ -1502,6 +1502,7 @@ fn main() {
         ("lean", MoveLibrary::Lean),
         ("burst", MoveLibrary::LeanBurst),
         ("hollow", MoveLibrary::LeanBurstHollow),
+        ("fill", MoveLibrary::LeanBurstFill),
         ("twin", MoveLibrary::Twin),
         ("gtwin", MoveLibrary::GrowthAndTwin),
     ];
