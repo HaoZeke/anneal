@@ -20,6 +20,25 @@ fn event(
 }
 
 #[test]
+fn attach_admits_a_new_replica_and_rejects_unknown_until_then() {
+    let mut ledger = CooperativeLedger::new([0, 1], 100).unwrap();
+    assert_eq!(
+        ledger
+            .record(event(2, 1, ChargeKind::AcceptedQuench, 3, 3))
+            .unwrap_err(),
+        LedgerError::UnknownReplica { replica: 2 }
+    );
+    ledger.attach(2).unwrap();
+    assert_eq!(
+        ledger.record(event(2, 1, ChargeKind::AcceptedQuench, 3, 3)),
+        Ok(LedgerUpdate::Recorded)
+    );
+    assert_eq!(ledger.replica_total(2), Some(3));
+    ledger.attach(2).unwrap();
+    assert_eq!(ledger.aggregate_budget(), 300);
+}
+
+#[test]
 fn four_replica_total_is_the_sum_of_unique_charged_work() {
     let mut ledger = CooperativeLedger::new([0, 1, 2, 3], 100).unwrap();
     for (replica, calls) in [(0, 7), (1, 11), (2, 13), (3, 17)] {
