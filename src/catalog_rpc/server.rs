@@ -1466,19 +1466,27 @@ fn apply_request(
             );
             let (basin_action_cost, ride_action_cost) =
                 empirical_action_costs(basin_effort, saddle_effort);
-            let Some((discovery_role, discovery_epoch)) = minimum_information_role(
-                scientific,
-                request.identity.replica,
-                descriptor,
-                *energy,
-                basin_action_cost,
-                ride_action_cost,
-            ) else {
-                return rejected(
-                    state,
-                    request.event_sequence,
-                    ProtocolRejection::ValidationRejected,
-                );
+            let (discovery_role, discovery_epoch) = if retired {
+                (
+                    DiscoveryRole::BasinEscape,
+                    scientific.discovery_assignment_epoch,
+                )
+            } else {
+                let Some(assignment) = minimum_information_role(
+                    scientific,
+                    request.identity.replica,
+                    descriptor,
+                    *energy,
+                    basin_action_cost,
+                    ride_action_cost,
+                ) else {
+                    return rejected(
+                        state,
+                        request.event_sequence,
+                        ProtocolRejection::ValidationRejected,
+                    );
+                };
+                assignment
             };
             let mut mixing = mixing_from_state(scientific);
             mixing.pruned = hyperband_prune(scientific, request.identity.replica);
@@ -2375,9 +2383,7 @@ fn apply_request(
                 Some(DiscoveryRole::SaddleRide) => scientific
                     .discovery_ride_assignments
                     .get(&request.identity.replica)
-                    .and_then(|arm| {
-                        ride_ledger.claim_arm(request.identity.replica, *seed, arm)
-                    }),
+                    .and_then(|arm| ride_ledger.claim_arm(request.identity.replica, *seed, arm)),
                 None => ride_ledger.claim_ranked(
                     request.identity.replica,
                     *seed,
