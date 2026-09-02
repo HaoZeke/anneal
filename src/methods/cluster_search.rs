@@ -107,10 +107,11 @@ fn two_phase_penalty(
     cutoff: f64,
     beta: f64,
     mu: f64,
+    shape: Option<&crate::methods::two_phase::Shape>,
 ) -> (f64, Array1<f64>) {
     match groups.filter(|declared| !declared.is_empty()) {
         Some(groups) => crate::methods::two_phase::penalty_groups(x, groups, cutoff, beta, mu),
-        None => crate::methods::two_phase::penalty(x, cutoff, beta, mu),
+        None => crate::methods::two_phase::penalty_shaped(x, cutoff, beta, mu, shape),
     }
 }
 
@@ -171,6 +172,7 @@ where
         let x = match surface {
             Some(two) => {
                 let cutoff = two.cutoff_for(x);
+                let shape = two.shape_for(x);
                 let (_, phase_one, _) = opt.minimize(x, iters, |v| {
                     if !led.charge() {
                         return None;
@@ -182,6 +184,7 @@ where
                         cutoff,
                         two.beta,
                         two.mu,
+                        shape.as_ref(),
                     );
                     Some((e + pe, g + pg))
                 });
@@ -340,6 +343,7 @@ where
         let x = match surface {
             Some(two) => {
                 let cutoff = two.cutoff_for(x);
+                let shape = two.shape_for(x);
                 let (_, phase_one, _) = opt.minimize(x, iters, |v| {
                     if !led.charge() {
                         return None;
@@ -351,6 +355,7 @@ where
                         cutoff,
                         two.beta,
                         two.mu,
+                        shape.as_ref(),
                     );
                     Some((e + pe, g + pg))
                 });
@@ -740,6 +745,7 @@ where
         let x = match surface {
             Some(two) => {
                 let cutoff = two.cutoff_for(x);
+                let shape = two.shape_for(x);
                 let (_, phase_one, _) = opt.minimize(x, iters, |v| {
                     if !led.charge() {
                         return None;
@@ -751,6 +757,7 @@ where
                         cutoff,
                         two.beta,
                         two.mu,
+                        shape.as_ref(),
                     );
                     Some((e + pe, g + pg))
                 });
