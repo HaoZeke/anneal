@@ -2214,6 +2214,39 @@ fn coordinator_closes_population_epoch_only_after_all_replicas_submit() {
 }
 
 #[test]
+fn population_epoch_does_not_commission_a_kinetic_graph_bridge() {
+    let server = server();
+    let digest = signature().digest();
+    let mut clients = (0..4)
+        .map(|replica| {
+            CatalogClient::connect(
+                server.addr(),
+                identity(replica, digest),
+                ClientConfig::default(),
+            )
+            .unwrap()
+        })
+        .collect::<Vec<_>>();
+    let separations = [1.2, 1.2, 4.0, 4.0];
+
+    for (replica, client) in clients.iter_mut().enumerate() {
+        client
+            .record_visit(1, candidate(replica as u32, 1, separations[replica]))
+            .unwrap();
+    }
+    for (replica, client) in clients.iter_mut().enumerate() {
+        client
+            .submit_population(2, 0, candidate(replica as u32, 2, separations[replica]))
+            .unwrap();
+    }
+
+    assert!(
+        clients[0].bridge_assignment(3, 17).unwrap().is_none(),
+        "structural population selection must not schedule a graph-seam probe"
+    );
+}
+
+#[test]
 fn population_submission_uses_exact_handedness_when_descriptors_alias() {
     let server = chiral_server();
     let original = chiral_candidate(0, 1, false);
