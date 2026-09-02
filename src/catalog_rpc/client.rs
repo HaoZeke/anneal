@@ -1,21 +1,28 @@
 //! Timeout-bounded client for one isolated catalog coordinator.
 
 use std::collections::BTreeMap;
-use std::io::Write;
-use std::net::{SocketAddr, TcpStream};
+use std::net::SocketAddr;
+use std::sync::{Arc, Mutex};
+use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
-use capnp::message::ReaderOptions;
-use capnp::serialize;
+use capnp::capability::Promise;
+use capnp_rpc::pry;
+use capnp_rpc::rpc_twoparty_capnp::Side;
+use capnp_rpc::twoparty::VatNetwork;
+use capnp_rpc::RpcSystem;
+use futures::AsyncReadExt;
+use tokio_util::compat::TokioAsyncReadCompatExt;
 
 use super::{
     AcceptedPayload, AcceptedReply, BoundaryCrossingRecord, CatalogCandidate, CatalogFrontierPost,
     CatalogIdentity, CatalogLedgerEvent, CatalogMutation, CatalogOperation, CatalogReply,
-    CatalogRequest, CatalogRideReport, CatalogRideWork, CatalogSnapshot, DescriptorHoleProposal,
-    PROTOCOL_VERSION, PolicyState, PopulationEpochState, ProtocolError, ProtocolRejection,
-    TransitionDestination, decode_reply_reader, encode_request,
+    CatalogRequest, CatalogRideReport, CatalogRideWork, CatalogSnapshot, CoordinatorEvent,
+    CoordinatorStatus, DescriptorHoleProposal, PROTOCOL_VERSION, PolicyState, PopulationEpochState,
+    ProtocolError, ProtocolRejection, RosterReply, TransitionDestination, decode_reply_reader,
+    encode_reply, fill_identity, fill_request, read_coordinator_status, read_event, read_roster,
 };
-use crate::Catalog_capnp::catalog_reply;
+use crate::Catalog_capnp::{coordinator, session, subscriber};
 use crate::cooperative_search::ledger::ChargeKind;
 
 /// Connection and I/O deadlines for a catalog client.
@@ -180,14 +187,60 @@ impl SyncSchedule {
     }
 }
 
+enum ClientJob {
+    Attach {
+        identity: CatalogIdentity,
+        reply: std::sync::mpsc::Sender<Result<RosterReply, CatalogClientError>>,
+    },
+    Detach {
+        reason: String,
+        reply: std::sync::mpsc::Sender<Result<(), CatalogClientError>>,
+    },
+    Observe {
+        reply: std::sync::mpsc::Sender<Result<CoordinatorStatus, CatalogClientError>>,
+    },
+    Call {
+        request: CatalogRequest,
+        reply: std::sync::mpsc::Sender<Result<AcceptedReply, CatalogClientError>>,
+    },
+    CallRaw {
+        version: u16,
+        digest: Vec<u8>,
+        sequence: u64,
+        identity: CatalogIdentity,
+        reply: std::sync::mpsc::Sender<Result<CatalogReply, CatalogClientError>>,
+    },
+    Shutdown,
+}
+
+struct EventInbox {
+    events: Arc<Mutex<Vec<CoordinatorEvent>>>,
+}
+
+impl subscriber::Server for EventInbox {
+    fn event(
+        &mut self,
+        params: subscriber::EventParams,
+        _results: subscriber::EventResults,
+    ) -> Promise<(), capnp::Error> {
+        let event = pry!(read_event(pry!(pry!(params.get()).get_event()))
+            .map_err(|error| capnp::Error::failed(error.to_string())));
+        self.events
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .push(event);
+        Promise::ok(())
+    }
+}
+
 /// Persistent client bound to one replica identity.
 pub struct CatalogClient {
-    stream: TcpStream,
-    addr: SocketAddr,
-    config: ClientConfig,
+    jobs: Option<tokio::sync::mpsc::UnboundedSender<ClientJob>>,
+    thread: Option<JoinHandle<()>>,
     identity: CatalogIdentity,
-    snapshot_version: u64,
+    snapshot_version: Arc<Mutex<u64>>,
     requests: BTreeMap<u64, CatalogRequest>,
+    events: Arc<Mutex<Vec<CoordinatorEvent>>>,
 }
 
 impl CatalogClient {
@@ -197,31 +250,119 @@ impl CatalogClient {
         identity: CatalogIdentity,
         config: ClientConfig,
     ) -> Result<Self, CatalogClientError> {
-        let stream = Self::open_stream(addr, config)?;
-        Ok(Self {
-            stream,
-            addr,
-            config,
+        let (jobs, rx) = tokio::sync::mpsc::unbounded_channel();
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let snapshot_version = Arc::new(Mutex::new(0));
+        let thread_events = Arc::clone(&events);
+        let thread_identity = identity.clone();
+        let thread_snapshots = Arc::clone(&snapshot_version);
+        let thread = thread::Builder::new()
+            .name("catalog-rpc-client".to_owned())
+            .spawn(move || {
+                run_client_executor(addr, config, thread_identity, thread_events, thread_snapshots, rx);
+            })
+            .expect("catalog RPC client thread starts");
+        let mut client = Self {
+            jobs: Some(jobs),
+            thread: Some(thread),
             identity,
-            snapshot_version: 0,
+            snapshot_version,
             requests: BTreeMap::new(),
+            events,
+        };
+        let _ = client.attach();
+        Ok(client)
+    }
+
+    /// Attach this replica and subscribe to coordinator events.
+    pub fn attach(&mut self) -> Result<RosterReply, CatalogClientError> {
+        self.post(|reply| ClientJob::Attach {
+            identity: self.identity.clone(),
+            reply,
         })
     }
 
-    fn open_stream(
-        addr: SocketAddr,
-        config: ClientConfig,
-    ) -> Result<TcpStream, CatalogClientError> {
-        let stream = TcpStream::connect_timeout(&addr, config.connect_timeout)?;
-        stream.set_nodelay(true)?;
-        stream.set_read_timeout(Some(config.io_timeout))?;
-        stream.set_write_timeout(Some(config.io_timeout))?;
-        Ok(stream)
+    /// Detach this replica from the live roster.
+    pub fn detach(&mut self, reason: impl Into<String>) -> Result<(), CatalogClientError> {
+        self.post(|reply| ClientJob::Detach {
+            reason: reason.into(),
+            reply,
+        })
     }
 
-    fn reconnect(&mut self) -> Result<(), CatalogClientError> {
-        self.stream = Self::open_stream(self.addr, self.config)?;
-        Ok(())
+    /// Read coordinator status without presenting an identity.
+    pub fn observe(&mut self) -> Result<CoordinatorStatus, CatalogClientError> {
+        self.post(|reply| ClientJob::Observe { reply })
+    }
+
+    /// Drain queued coordinator events.
+    pub fn events(&mut self) -> Vec<CoordinatorEvent> {
+        self.events
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .drain(..)
+            .collect()
+    }
+
+    /// Send one catalog request on the bound session.
+    pub fn session_call(
+        &mut self,
+        request: CatalogRequest,
+    ) -> Result<CatalogReply, CatalogClientError> {
+        match self.dispatch(request.clone()) {
+            Ok(accepted) => Ok(CatalogReply::Accepted(accepted)),
+            Err(CatalogClientError::Rejected(reason)) => Ok(CatalogReply::Rejected {
+                event_sequence: request.event_sequence,
+                snapshot_version: *self
+                    .snapshot_version
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner()),
+                reason,
+            }),
+            Err(error) => Err(error),
+        }
+    }
+
+    /// Send a session call whose identity digest is not necessarily 32 bytes.
+    pub fn session_call_digest(
+        &mut self,
+        version: u16,
+        digest: &[u8],
+        sequence: u64,
+    ) -> Result<CatalogReply, CatalogClientError> {
+        self.post(|reply| ClientJob::CallRaw {
+            version,
+            digest: digest.to_vec(),
+            sequence,
+            identity: self.identity.clone(),
+            reply,
+        })
+    }
+
+    fn post<T, F>(&self, job: F) -> Result<T, CatalogClientError>
+    where
+        T: Send + 'static,
+        F: FnOnce(std::sync::mpsc::Sender<Result<T, CatalogClientError>>) -> ClientJob,
+    {
+        let (tx, rx) = std::sync::mpsc::sync_channel(1);
+        let Some(jobs) = self.jobs.as_ref() else {
+            return Err(CatalogClientError::Transport(std::io::Error::new(
+                std::io::ErrorKind::NotConnected,
+                "catalog client is shut down",
+            )));
+        };
+        jobs.send(job(tx)).map_err(|_| {
+            CatalogClientError::Transport(std::io::Error::new(
+                std::io::ErrorKind::BrokenPipe,
+                "catalog RPC executor stopped",
+            ))
+        })?;
+        rx.recv().map_err(|_| {
+            CatalogClientError::Transport(std::io::Error::new(
+                std::io::ErrorKind::BrokenPipe,
+                "catalog RPC executor stopped",
+            ))
+        })?
     }
 
     /// Read the current coordinator snapshot.
@@ -758,38 +899,20 @@ impl CatalogClient {
         &mut self,
         event_sequence: u64,
     ) -> Result<Vec<u8>, CatalogClientError> {
-        let request = CatalogRequest {
-            protocol_version: PROTOCOL_VERSION,
-            identity: self.identity.clone(),
+        let status = self.observer_status(event_sequence)?;
+        let reply = CatalogReply::Accepted(AcceptedReply {
             event_sequence,
-            snapshot_version: self.snapshot_version,
-            operation: CatalogOperation::ObserverStatus,
-        };
-        self.stream.write_all(&encode_request(&request)?)?;
-        self.stream.flush()?;
-        let message = serialize::read_message(&mut self.stream, ReaderOptions::new())
-            .map_err(|error| ProtocolError::Malformed(error.to_string()))?;
-        {
-            let root = message
-                .get_root::<catalog_reply::Reader>()
-                .map_err(|error| ProtocolError::Malformed(error.to_string()))?;
-            match decode_reply_reader(root)? {
-                CatalogReply::Accepted(reply)
-                    if matches!(reply.payload, AcceptedPayload::CoordinatorStatus(_)) => {}
-                CatalogReply::Accepted(_) => {
-                    return Err(CatalogClientError::Protocol(ProtocolError::Malformed(
-                        "observer status reply carried the wrong payload".to_owned(),
-                    )));
-                }
-                CatalogReply::Rejected { reason, .. } => {
-                    return Err(CatalogClientError::Rejected(reason));
-                }
-            }
-        }
-        let mut frame = Vec::new();
-        capnp::serialize::write_message_segments(&mut frame, &message.into_segments())
-            .map_err(|error| ProtocolError::Malformed(error.to_string()))?;
-        Ok(frame)
+            duplicate: true,
+            snapshot: CatalogSnapshot {
+                version: status.snapshot_version,
+                census_visits: status.census_visits,
+                active_entries: status.active_entries,
+                aggregate_charged: status.aggregate_charged,
+                aggregate_budget: status.aggregate_budget,
+            },
+            payload: AcceptedPayload::CoordinatorStatus(status),
+        });
+        encode_reply(reply).map_err(CatalogClientError::from)
     }
 
     fn call(
@@ -797,6 +920,10 @@ impl CatalogClient {
         event_sequence: u64,
         operation: CatalogOperation,
     ) -> Result<AcceptedReply, CatalogClientError> {
+        let snapshot_version = *self
+            .snapshot_version
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let request = self
             .requests
             .entry(event_sequence)
@@ -804,46 +931,389 @@ impl CatalogClient {
                 protocol_version: PROTOCOL_VERSION,
                 identity: self.identity.clone(),
                 event_sequence,
-                snapshot_version: self.snapshot_version,
+                snapshot_version,
                 operation,
             })
             .clone();
-        match self.exchange(&request) {
-            Ok(reply) => return Ok(reply),
-            Err(error @ CatalogClientError::Rejected(_)) => return Err(error),
-            Err(_) => self.reconnect()?,
-        }
-        self.exchange(&request)
+        self.dispatch(request)
     }
 
-    fn exchange(&mut self, request: &CatalogRequest) -> Result<AcceptedReply, CatalogClientError> {
-        self.stream.write_all(&encode_request(request)?)?;
-        self.stream.flush()?;
-        let message = serialize::read_message(&mut self.stream, ReaderOptions::new())
-            .map_err(|error| ProtocolError::Malformed(error.to_string()))?;
-        let root = message
-            .get_root::<catalog_reply::Reader>()
-            .map_err(|error| ProtocolError::Malformed(error.to_string()))?;
-        match decode_reply_reader(root)? {
-            CatalogReply::Accepted(reply) if reply.event_sequence == request.event_sequence => {
-                self.snapshot_version = self.snapshot_version.max(reply.snapshot.version);
-                Ok(reply)
-            }
-            CatalogReply::Rejected {
-                event_sequence,
-                reason,
-                ..
-            } if event_sequence == request.event_sequence => {
-                Err(CatalogClientError::Rejected(reason))
-            }
-            CatalogReply::Accepted(_) | CatalogReply::Rejected { .. } => {
-                Err(ProtocolError::Malformed(
-                    "catalog reply sequence does not match the request".into(),
-                )
-                .into())
-            }
+    fn dispatch(
+        &mut self,
+        request: CatalogRequest,
+    ) -> Result<AcceptedReply, CatalogClientError> {
+        self.post(|reply| ClientJob::Call { request, reply })
+    }
+}
+
+impl Drop for CatalogClient {
+    fn drop(&mut self) {
+        if let Some(jobs) = self.jobs.take() {
+            let _ = jobs.send(ClientJob::Shutdown);
+        }
+        if let Some(thread) = self.thread.take() {
+            let _ = thread.join();
         }
     }
+}
+
+struct ClientSession {
+    coordinator: coordinator::Client,
+    session: Option<session::Client>,
+    attached: Option<CatalogIdentity>,
+    connected: bool,
+    events: Arc<Mutex<Vec<CoordinatorEvent>>>,
+    snapshot_version: Arc<Mutex<u64>>,
+    addr: SocketAddr,
+    config: ClientConfig,
+}
+
+fn run_client_executor(
+    addr: SocketAddr,
+    config: ClientConfig,
+    _identity: CatalogIdentity,
+    events: Arc<Mutex<Vec<CoordinatorEvent>>>,
+    snapshot_version: Arc<Mutex<u64>>,
+    mut jobs: tokio::sync::mpsc::UnboundedReceiver<ClientJob>,
+) {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("catalog client runtime starts");
+    let local = tokio::task::LocalSet::new();
+    local.block_on(&runtime, async move {
+        let mut session = match open_rpc(addr, config, Arc::clone(&events)).await {
+            Ok(mut opened) => {
+                opened.snapshot_version = snapshot_version;
+                opened
+            }
+            Err(_) => ClientSession {
+                coordinator: capnp_rpc::new_client(UnreachableCoordinator),
+                session: None,
+                attached: None,
+                connected: false,
+                events,
+                snapshot_version,
+                addr,
+                config,
+            },
+        };
+        while let Some(job) = jobs.recv().await {
+            if matches!(job, ClientJob::Shutdown) {
+                break;
+            }
+            handle_job(&mut session, job).await;
+        }
+    });
+}
+
+struct UnreachableCoordinator;
+
+impl coordinator::Server for UnreachableCoordinator {}
+
+async fn handle_job(session: &mut ClientSession, job: ClientJob) {
+    match job {
+        ClientJob::Attach { identity, reply } => {
+            let _ = reply.send(attach_session(session, identity).await);
+        }
+        ClientJob::Detach { reason, reply } => {
+            let _ = reply.send(detach_session(session, reason).await);
+        }
+        ClientJob::Observe { reply } => {
+            let _ = reply.send(observe_status(session).await);
+        }
+        ClientJob::Call { request, reply } => {
+            let _ = reply.send(call_session(session, request).await);
+        }
+        ClientJob::CallRaw {
+            version,
+            digest,
+            sequence,
+            identity,
+            reply,
+        } => {
+            let _ = reply.send(call_session_raw(session, version, digest, sequence, identity).await);
+        }
+        ClientJob::Shutdown => {}
+    }
+}
+
+async fn open_rpc(
+    addr: SocketAddr,
+    config: ClientConfig,
+    events: Arc<Mutex<Vec<CoordinatorEvent>>>,
+) -> Result<ClientSession, CatalogClientError> {
+    let stream = tokio::time::timeout(config.connect_timeout, tokio::net::TcpStream::connect(addr))
+        .await
+        .map_err(|_| {
+            CatalogClientError::Transport(std::io::Error::new(
+                std::io::ErrorKind::TimedOut,
+                "catalog connect timed out",
+            ))
+        })?
+        .map_err(CatalogClientError::Transport)?;
+    stream.set_nodelay(true).map_err(CatalogClientError::Transport)?;
+    let (reader, writer) = TokioAsyncReadCompatExt::compat(stream).split();
+    let network = VatNetwork::new(
+        futures::io::BufReader::new(reader),
+        futures::io::BufWriter::new(writer),
+        Side::Client,
+        Default::default(),
+    );
+    let mut rpc = RpcSystem::new(Box::new(network), None);
+    let coordinator: coordinator::Client = rpc.bootstrap(Side::Server);
+    tokio::task::spawn_local(rpc);
+    Ok(ClientSession {
+        coordinator,
+        session: None,
+        attached: None,
+        connected: true,
+        events,
+        snapshot_version: Arc::new(Mutex::new(0)),
+        addr,
+        config,
+    })
+}
+
+async fn reconnect(session: &mut ClientSession) -> Result<(), CatalogClientError> {
+    let events = Arc::clone(&session.events);
+    let snapshot_version = Arc::clone(&session.snapshot_version);
+    let addr = session.addr;
+    let config = session.config;
+    let attached = session.attached.clone();
+    *session = open_rpc(addr, config, events).await?;
+    session.snapshot_version = snapshot_version;
+    session.attached = attached;
+    session.connected = true;
+    Ok(())
+}
+
+async fn attach_session(
+    session: &mut ClientSession,
+    identity: CatalogIdentity,
+) -> Result<RosterReply, CatalogClientError> {
+    if session.session.is_none() {
+        if let Err(error) = ensure_coordinator(session).await {
+            reconnect(session).await?;
+            ensure_coordinator(session).await.map_err(|_| error)?;
+        }
+    }
+    let subscriber: subscriber::Client = capnp_rpc::new_client(EventInbox {
+        events: Arc::clone(&session.events),
+    });
+    let mut request = session.coordinator.attach_request();
+    {
+        let mut params = request.get();
+        fill_identity(params.reborrow().init_identity(), &identity);
+        params.set_subscriber(subscriber);
+    }
+    let response = tokio::time::timeout(session.config.io_timeout, request.send().promise)
+        .await
+        .map_err(|_| {
+            CatalogClientError::Transport(std::io::Error::new(
+                std::io::ErrorKind::TimedOut,
+                "catalog attach timed out",
+            ))
+        })?
+        .map_err(|error| ProtocolError::Malformed(error.to_string()))?;
+    let roster = read_roster(response.get().map_err(|error| ProtocolError::Malformed(error.to_string()))?.get_roster().map_err(|error| ProtocolError::Malformed(error.to_string()))?)?;
+    session.session = Some(
+        response
+            .get()
+            .map_err(|error| ProtocolError::Malformed(error.to_string()))?
+            .get_session()
+            .map_err(|error| ProtocolError::Malformed(error.to_string()))?,
+    );
+    session.attached = Some(identity);
+    Ok(roster)
+}
+
+async fn ensure_coordinator(session: &mut ClientSession) -> Result<(), CatalogClientError> {
+    if session.connected {
+        return Ok(());
+    }
+    let snapshot_version = Arc::clone(&session.snapshot_version);
+    let attached = session.attached.clone();
+    let opened = open_rpc(session.addr, session.config, Arc::clone(&session.events)).await?;
+    session.coordinator = opened.coordinator;
+    session.connected = true;
+    session.snapshot_version = snapshot_version;
+    session.attached = attached;
+    Ok(())
+}
+
+async fn detach_session(
+    session: &mut ClientSession,
+    reason: String,
+) -> Result<(), CatalogClientError> {
+    let Some(bound) = session.session.clone() else {
+        return Ok(());
+    };
+    let mut request = bound.detach_request();
+    request.get().set_reason(reason.as_str());
+    tokio::time::timeout(session.config.io_timeout, request.send().promise)
+        .await
+        .map_err(|_| {
+            CatalogClientError::Transport(std::io::Error::new(
+                std::io::ErrorKind::TimedOut,
+                "catalog detach timed out",
+            ))
+        })?
+        .map_err(|error| ProtocolError::Malformed(error.to_string()))?;
+    session.session = None;
+    session.attached = None;
+    Ok(())
+}
+
+async fn observe_status(
+    session: &mut ClientSession,
+) -> Result<CoordinatorStatus, CatalogClientError> {
+    if let Err(error) = ensure_coordinator(session).await {
+        reconnect(session).await?;
+        ensure_coordinator(session).await.map_err(|_| error)?;
+    }
+    let request = session.coordinator.observe_request();
+    let response = tokio::time::timeout(session.config.io_timeout, request.send().promise)
+        .await
+        .map_err(|_| {
+            CatalogClientError::Transport(std::io::Error::new(
+                std::io::ErrorKind::TimedOut,
+                "catalog observe timed out",
+            ))
+        })?
+        .map_err(|error| ProtocolError::Malformed(error.to_string()))?;
+    read_coordinator_status(
+        response
+            .get()
+            .map_err(|error| ProtocolError::Malformed(error.to_string()))?
+            .get_status()
+            .map_err(|error| ProtocolError::Malformed(error.to_string()))?,
+    )
+    .map_err(CatalogClientError::from)
+}
+
+async fn call_session(
+    session: &mut ClientSession,
+    request: CatalogRequest,
+) -> Result<AcceptedReply, CatalogClientError> {
+    match call_session_once(session, &request).await {
+        Ok(reply) => Ok(reply),
+        Err(error @ CatalogClientError::Rejected(_)) => Err(error),
+        Err(_) => {
+            reconnect(session).await?;
+            if let Some(identity) = session.attached.clone() {
+                attach_session(session, identity).await?;
+            } else {
+                attach_session(session, request.identity.clone()).await?;
+            }
+            call_session_once(session, &request).await
+        }
+    }
+}
+
+async fn call_session_once(
+    session: &mut ClientSession,
+    request: &CatalogRequest,
+) -> Result<AcceptedReply, CatalogClientError> {
+    if session.session.is_none() {
+        attach_session(session, request.identity.clone()).await?;
+    }
+    let bound = session.session.clone().ok_or_else(|| {
+        CatalogClientError::Transport(std::io::Error::new(
+            std::io::ErrorKind::NotConnected,
+            "catalog session is not attached",
+        ))
+    })?;
+    let mut rpc = bound.call_request();
+    fill_request(rpc.get().init_request(), request)
+        .map_err(CatalogClientError::from)?;
+    let response = tokio::time::timeout(session.config.io_timeout, rpc.send().promise)
+        .await
+        .map_err(|_| {
+            CatalogClientError::Transport(std::io::Error::new(
+                std::io::ErrorKind::TimedOut,
+                "catalog call timed out",
+            ))
+        })?
+        .map_err(|error| ProtocolError::Malformed(error.to_string()))?;
+    let reply = decode_reply_reader(
+        response
+            .get()
+            .map_err(|error| ProtocolError::Malformed(error.to_string()))?
+            .get_reply()
+            .map_err(|error| ProtocolError::Malformed(error.to_string()))?,
+    )?;
+    match reply {
+        CatalogReply::Accepted(accepted) if accepted.event_sequence == request.event_sequence => {
+            let mut version = session
+                .snapshot_version
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            *version = (*version).max(accepted.snapshot.version);
+            Ok(accepted)
+        }
+        CatalogReply::Rejected {
+            event_sequence,
+            reason,
+            ..
+        } if event_sequence == request.event_sequence => Err(CatalogClientError::Rejected(reason)),
+        CatalogReply::Accepted(_) | CatalogReply::Rejected { .. } => {
+            Err(ProtocolError::Malformed(
+                "catalog reply sequence does not match the request".into(),
+            )
+            .into())
+        }
+    }
+}
+
+async fn call_session_raw(
+    session: &mut ClientSession,
+    version: u16,
+    digest: Vec<u8>,
+    sequence: u64,
+    identity: CatalogIdentity,
+) -> Result<CatalogReply, CatalogClientError> {
+    if session.session.is_none() {
+        attach_session(session, identity.clone()).await?;
+    }
+    let bound = session.session.clone().ok_or_else(|| {
+        CatalogClientError::Transport(std::io::Error::new(
+            std::io::ErrorKind::NotConnected,
+            "catalog session is not attached",
+        ))
+    })?;
+    let mut rpc = bound.call_request();
+    {
+        let mut root = rpc.get().init_request();
+        root.set_protocol_version(version);
+        root.set_event_sequence(sequence);
+        root.set_snapshot_version(0);
+        {
+            let mut wire_identity = root.reborrow().init_identity();
+            wire_identity.set_campaign(identity.campaign.as_str());
+            wire_identity.set_ensemble(identity.ensemble.as_str());
+            wire_identity.set_replica(identity.replica);
+            wire_identity.set_signature_digest(&digest);
+        }
+        root.init_operation().set_snapshot(());
+    }
+    let response = tokio::time::timeout(session.config.io_timeout, rpc.send().promise)
+        .await
+        .map_err(|_| {
+            CatalogClientError::Transport(std::io::Error::new(
+                std::io::ErrorKind::TimedOut,
+                "catalog call timed out",
+            ))
+        })?
+        .map_err(|error| ProtocolError::Malformed(error.to_string()))?;
+    decode_reply_reader(
+        response
+            .get()
+            .map_err(|error| ProtocolError::Malformed(error.to_string()))?
+            .get_reply()
+            .map_err(|error| ProtocolError::Malformed(error.to_string()))?,
+    )
+    .map_err(CatalogClientError::from)
 }
 
 fn population_epoch_payload(
