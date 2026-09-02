@@ -163,53 +163,93 @@ pub fn penalty(x: ArrayView1<f64>, cutoff: f64, beta: f64, mu: f64) -> (f64, Arr
 /// quench reached picks one per hop, the same reward that allocates move
 /// kernels in [`crate::methods::cluster_hopping`].
 ///
-/// A hop is a screening relaxation followed by a full one on the same trial;
-/// the arm is drawn at the screen and held for the full relaxation, whose
-/// reached energy against the run's best is the reward.
+/// An arm is held for a block of hops, not one: a walk on the compacted
+/// surface and a walk on the plain one visit different minima, and
+/// alternating them every hop is a walk on neither. A screening relaxation
+/// opens a hop; every `block` hops the arm is redrawn, and the block's reward
+/// is the energy its walk took off the run's best, zero when it took none.
 #[derive(Debug, Clone)]
 pub struct SurfacePortfolio {
     arms: Vec<Option<TwoPhase>>,
     allocator: DepthAllocator,
     held: Option<usize>,
+    block: usize,
+    hops_in_block: usize,
+    block_start_best: f64,
+    latest_best: f64,
     rng: StdRng,
 }
+
+/// Hops an arm is held for before the allocator redraws.
+pub const DEFAULT_SURFACE_BLOCK: usize = 100;
 
 impl SurfacePortfolio {
     /// The plain surface plus every transform, uninformative until fed.
     pub fn new(transforms: &[TwoPhase], seed: u64) -> Self {
+        Self::with_block(transforms, seed, DEFAULT_SURFACE_BLOCK)
+    }
+
+    /// As [`Self::new`], holding each drawn arm for `block` hops.
+    pub fn with_block(transforms: &[TwoPhase], seed: u64, block: usize) -> Self {
         let mut arms = vec![None];
         arms.extend(transforms.iter().copied().filter(|two| two.is_active()).map(Some));
         Self {
             allocator: DepthAllocator::new(arms.len()),
             arms,
             held: None,
+            block: block.max(1),
+            hops_in_block: 0,
+            block_start_best: f64::INFINITY,
+            latest_best: f64::INFINITY,
             rng: StdRng::seed_from_u64(seed ^ 0x5a2f_ace5),
         }
     }
 
     /// The surface for the relaxation about to start.
     ///
-    /// A screening relaxation opens a hop and draws a fresh arm; a full
-    /// relaxation keeps the arm its screen drew, or draws one if it stands
-    /// alone.
+    /// A screening relaxation opens a hop; the block's arm is redrawn once
+    /// the block is spent, with the finished block's improvement credited
+    /// to the arm that walked it.
     pub fn begin(&mut self, screening: bool) -> Option<TwoPhase> {
-        if screening || self.held.is_none() {
+        if screening {
+            if self.hops_in_block >= self.block {
+                self.settle_block();
+            }
+            self.hops_in_block += 1;
+        }
+        if self.held.is_none() {
             self.held = Some(self.allocator.select(&mut self.rng));
+            self.hops_in_block = self.hops_in_block.max(1);
+            self.block_start_best = self.latest_best;
         }
         self.held.and_then(|arm| self.arms[arm])
     }
 
-    /// Credits the held arm with the depth a full relaxation reached.
+    /// Records the run's best after a full relaxation on the held arm.
     pub fn observe(&mut self, screening: bool, reached: f64, best: f64) {
         if screening {
             return;
         }
-        if let Some(arm) = self.held.take()
-            && reached.is_finite()
-            && best.is_finite()
-        {
-            self.allocator.update(arm, -(reached - best));
+        let best = best.min(reached);
+        if best.is_finite() {
+            self.latest_best = self.latest_best.min(best);
         }
+    }
+
+    fn settle_block(&mut self) {
+        if let Some(arm) = self.held.take() {
+            let reward = if self.block_start_best.is_finite() && self.latest_best.is_finite() {
+                (self.block_start_best - self.latest_best).max(0.0)
+            } else if self.latest_best.is_finite() {
+                // The first block has no earlier best to improve on; its
+                // reward is neutral rather than infinite.
+                0.0
+            } else {
+                0.0
+            };
+            self.allocator.update(arm, reward);
+        }
+        self.hops_in_block = 0;
     }
 
     /// Draws taken per arm, the plain surface first.
@@ -283,38 +323,51 @@ mod tests {
     }
 
     #[test]
-    fn the_portfolio_learns_the_arm_that_reaches_deeper() {
+    fn the_portfolio_learns_the_arm_whose_blocks_improve_the_best() {
         let deep = TwoPhase::diameter(2.0, 1.0);
         let shallow = TwoPhase::relative(0.5, 1.0);
-        let mut portfolio = SurfacePortfolio::new(&[deep, shallow], 7);
+        let mut portfolio = SurfacePortfolio::with_block(&[deep, shallow], 7, 5);
         assert_eq!(portfolio.arms().len(), 3);
-        for _ in 0..400 {
+        let mut best = 0.0_f64;
+        let mut held: Option<Option<TwoPhase>> = None;
+        let mut switches = 0usize;
+        for hop in 0..2000 {
             let arm = portfolio.begin(true);
+            if held.is_some_and(|previous| previous != arm) {
+                switches += 1;
+            }
+            held = Some(arm);
+            // Only the deep arm ever lowers the best; the others walk in place.
             let reached = match arm {
-                Some(two) if two == deep => -10.0,
-                Some(_) => -2.0,
-                None => -5.0,
+                Some(two) if two == deep => best - 1.0,
+                _ => best + 3.0,
             };
             assert_eq!(portfolio.begin(false), arm, "the full relaxation changed surface");
-            portfolio.observe(false, reached, -10.0);
+            best = best.min(reached);
+            portfolio.observe(false, reached, best);
+            if hop % 5 != 4 {
+                assert_eq!(portfolio.begin(false), arm, "the arm changed inside a block");
+            }
         }
+        assert!(switches < 2000 / 5, "the arm is redrawn more often than once per block");
         let draws = portfolio.draws();
         assert!(
             draws[1] > draws[0] + draws[2],
-            "the deeper arm was not preferred: {draws:?}"
+            "the improving arm was not preferred: {draws:?}"
         );
         let means = portfolio.means();
-        assert!(means[1] > means[0] && means[0] > means[2], "{means:?}");
+        assert!(means[1] > means[0] && means[1] > means[2], "{means:?}");
     }
 
     #[test]
-    fn a_screened_out_hop_leaves_no_reward() {
-        let mut portfolio = SurfacePortfolio::new(&[TwoPhase::diameter(2.0, 1.0)], 3);
-        portfolio.begin(true);
-        portfolio.observe(true, -1.0, -3.0);
-        assert!(portfolio.draws().iter().all(|d| *d == 0));
-        portfolio.begin(false);
-        portfolio.observe(false, -1.0, -3.0);
-        assert_eq!(portfolio.draws().iter().sum::<usize>(), 1);
+    fn a_block_without_improvement_is_credited_zero_not_negative() {
+        let mut portfolio = SurfacePortfolio::with_block(&[TwoPhase::diameter(2.0, 1.0)], 3, 2);
+        for _ in 0..6 {
+            portfolio.begin(true);
+            portfolio.begin(false);
+            portfolio.observe(false, -1.0, -3.0);
+        }
+        assert!(portfolio.means().iter().all(|m| *m >= 0.0));
+        assert!(portfolio.draws().iter().sum::<usize>() >= 2);
     }
 }
