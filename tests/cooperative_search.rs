@@ -306,6 +306,8 @@ fn replicas_share_exclusive_ride_arms_and_coordinator_computes_edge_novelty() {
         )
         .unwrap();
 
+    assert!(first_credit.novel_saddle);
+    assert!(!duplicate_credit.novel_saddle);
     assert!(first_credit.novel_edge);
     assert!(!duplicate_credit.novel_edge);
     assert_eq!(first_credit.total_charged_evaluations, 159);
@@ -450,6 +452,7 @@ fn cooperative_run_routes_certified_ride_work_through_the_live_mailbox() {
         panic!("a receiving-certified index-one connection must be credited")
     };
 
+    assert!(credit.novel_saddle);
     assert!(credit.novel_edge);
     assert_eq!(credit.total_charged_evaluations, 159);
     let claim = run
@@ -488,6 +491,7 @@ fn cooperative_run_routes_certified_ride_work_through_the_live_mailbox() {
     assert_eq!(reported.receiver_certified_connection, Some(true));
     assert_eq!(reported.producer_failure, None);
     assert_eq!(reported.receiver_failure, None);
+    assert_eq!(reported.novel_saddle, Some(true));
     assert_eq!(reported.novel_edge, Some(true));
 
     let trace = run.json_lines(&RunManifest {
@@ -499,6 +503,7 @@ fn cooperative_run_routes_certified_ride_work_through_the_live_mailbox() {
     assert!(trace.contains(&format!("\"ride_work\":{}", work.order.id)));
     assert!(trace.contains("\"ride_method\":\"dimer\""));
     assert!(trace.contains("\"ride_receiver_charged\":15"));
+    assert!(trace.contains("\"ride_novel_saddle\":true"));
     assert!(trace.contains("\"ride_novel_edge\":true"));
 }
 

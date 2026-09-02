@@ -154,6 +154,8 @@ mod run {
         pub receiver_certified_connection: Option<bool>,
         /// Receiver-side classified failure.
         pub receiver_failure: Option<RideFailure>,
+        /// Whether the receiver added a previously unseen exact saddle.
+        pub novel_saddle: Option<bool>,
         /// Whether the receiver added a previously unseen endpoint pair.
         pub novel_edge: Option<bool>,
         /// Producer plus receiving-side charged evaluations.
@@ -190,6 +192,7 @@ mod run {
                 .and_then(|producer| credit.total_charged_evaluations.checked_sub(producer));
             self.receiver_certified_connection = Some(credit.certified_connection);
             self.receiver_failure = credit.failure;
+            self.novel_saddle = Some(credit.novel_saddle);
             self.novel_edge = Some(credit.novel_edge);
             self.total_charged_evaluations = Some(credit.total_charged_evaluations);
             self
@@ -212,6 +215,7 @@ mod run {
                 receiver_charged_evaluations: None,
                 receiver_certified_connection: None,
                 receiver_failure: None,
+                novel_saddle: None,
                 novel_edge: None,
                 total_charged_evaluations: None,
             }
@@ -2269,13 +2273,14 @@ mod run {
                     ride_receiver_charged,
                     ride_receiver_certified,
                     ride_receiver_failure,
+                    ride_novel_saddle,
                     ride_novel_edge,
                     ride_total_charged,
                 ] = event
                     .ride
                     .as_ref()
                     .map_or_else(
-                        || vec!["null".to_owned(); 17],
+                        || vec!["null".to_owned(); 18],
                         |ride| {
                             vec![
                                 ride.work.to_string(),
@@ -2293,6 +2298,7 @@ mod run {
                                 optional_u64(ride.receiver_charged_evaluations),
                                 optional_bool(ride.receiver_certified_connection),
                                 optional_ride_failure(ride.receiver_failure),
+                                optional_bool(ride.novel_saddle),
                                 optional_bool(ride.novel_edge),
                                 optional_u64(ride.total_charged_evaluations),
                             ]
@@ -2301,7 +2307,7 @@ mod run {
                     .try_into()
                     .expect("ride JSON field count is fixed");
                 output.push_str(&format!(
-                "{{\"kind\":\"{}\",\"replica\":{},\"sequence\":{},\"aggregate_charged\":{},\"catalog_version\":{},\"reason\":{},\"population_epoch\":{},\"population_parent\":{},\"population_family_ordinal\":{},\"population_family_size\":{},\"population_effective_sample_size\":{},\"population_selection\":{},\"policy_local_basin\":{},\"policy_relation\":{},\"policy_total_visits\":{},\"policy_singleton_basins\":{},\"policy_local_basin_visits\":{},\"policy_globally_saturated\":{},\"policy_local_basin_distance\":{},\"policy_novelty\":{},\"policy_transition_uncertainty\":{},\"policy_query_energy\":{},\"slice\":{},\"slice_current_basin\":{},\"slice_active_relation\":{},\"slice_policy_role\":{},\"slice_policy_reason\":{},\"slice_proposal_family\":{},\"slice_sampled_basin\":{},\"slice_descriptor_step_norm\":{},\"slice_cartesian_step_norm\":{},\"slice_validation\":{},\"slice_quench\":{},\"slice_adoption\":{},\"slice_novelty\":{},\"slice_energy\":{},\"slice_charged_work\":{},\"catalog_basin\":{},\"catalog_mutation\":{},\"catalog_evicted\":{},\"catalog_incumbent\":{},\"transition_action\":{},\"transition_hop\":{},\"transition_from_energy\":{},\"transition_to_energy\":{},\"transition_resolved\":{},\"transition_adopted\":{},\"ride_work\":{},\"ride_source_basin\":{},\"ride_environment_class\":{},\"ride_mode_rank\":{},\"ride_direction\":{},\"ride_method\":{},\"ride_representative_atom\":{},\"ride_attempt\":{},\"ride_seed\":{},\"ride_producer_charged\":{},\"ride_producer_certified\":{},\"ride_producer_failure\":{},\"ride_receiver_charged\":{},\"ride_receiver_certified\":{},\"ride_receiver_failure\":{},\"ride_novel_edge\":{},\"ride_total_charged\":{}}}\n",
+                "{{\"kind\":\"{}\",\"replica\":{},\"sequence\":{},\"aggregate_charged\":{},\"catalog_version\":{},\"reason\":{},\"population_epoch\":{},\"population_parent\":{},\"population_family_ordinal\":{},\"population_family_size\":{},\"population_effective_sample_size\":{},\"population_selection\":{},\"policy_local_basin\":{},\"policy_relation\":{},\"policy_total_visits\":{},\"policy_singleton_basins\":{},\"policy_local_basin_visits\":{},\"policy_globally_saturated\":{},\"policy_local_basin_distance\":{},\"policy_novelty\":{},\"policy_transition_uncertainty\":{},\"policy_query_energy\":{},\"slice\":{},\"slice_current_basin\":{},\"slice_active_relation\":{},\"slice_policy_role\":{},\"slice_policy_reason\":{},\"slice_proposal_family\":{},\"slice_sampled_basin\":{},\"slice_descriptor_step_norm\":{},\"slice_cartesian_step_norm\":{},\"slice_validation\":{},\"slice_quench\":{},\"slice_adoption\":{},\"slice_novelty\":{},\"slice_energy\":{},\"slice_charged_work\":{},\"catalog_basin\":{},\"catalog_mutation\":{},\"catalog_evicted\":{},\"catalog_incumbent\":{},\"transition_action\":{},\"transition_hop\":{},\"transition_from_energy\":{},\"transition_to_energy\":{},\"transition_resolved\":{},\"transition_adopted\":{},\"ride_work\":{},\"ride_source_basin\":{},\"ride_environment_class\":{},\"ride_mode_rank\":{},\"ride_direction\":{},\"ride_method\":{},\"ride_representative_atom\":{},\"ride_attempt\":{},\"ride_seed\":{},\"ride_producer_charged\":{},\"ride_producer_certified\":{},\"ride_producer_failure\":{},\"ride_receiver_charged\":{},\"ride_receiver_certified\":{},\"ride_receiver_failure\":{},\"ride_novel_saddle\":{},\"ride_novel_edge\":{},\"ride_total_charged\":{}}}\n",
                 event.kind.code(),
                 event.replica,
                 event.sequence,
@@ -2364,6 +2370,7 @@ mod run {
                 ride_receiver_charged,
                 ride_receiver_certified,
                 ride_receiver_failure,
+                ride_novel_saddle,
                 ride_novel_edge,
                 ride_total_charged,
             ));

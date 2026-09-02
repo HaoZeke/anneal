@@ -267,6 +267,8 @@ pub struct RideCredit {
     pub certified_connection: bool,
     /// Typed negative evidence, absent for a certified connection.
     pub failure: Option<RideFailure>,
+    /// Whether this report introduced a previously unseen exact saddle.
+    pub novel_saddle: bool,
     /// Whether this report introduced a previously unseen endpoint pair.
     pub novel_edge: bool,
     /// Producer plus receiving-side PES evaluations charged for this report.
@@ -330,7 +332,7 @@ pub enum RideLedgerError {
 #[derive(Debug, Clone, Default)]
 struct ArmEvidence {
     completed: u64,
-    novel_edges: u64,
+    discoveries: u64,
     stationary_saddles: u64,
     charged_evaluations: u64,
     failures: BTreeMap<RideFailure, u64>,
@@ -363,6 +365,7 @@ pub struct RideLedger {
     active_arms: BTreeSet<RideArm>,
     replica_work: BTreeMap<u32, u64>,
     completed_reports: BTreeMap<u64, CompletedReport>,
+    saddles: BTreeSet<u64>,
     edges: BTreeSet<[u64; 2]>,
     next_work: u64,
     completed_attempts: u64,
@@ -384,6 +387,7 @@ impl RideLedger {
             active_arms: BTreeSet::new(),
             replica_work: BTreeMap::new(),
             completed_reports: BTreeMap::new(),
+            saddles: BTreeSet::new(),
             edges: BTreeSet::new(),
             next_work: 0,
             completed_attempts: 0,
@@ -435,11 +439,11 @@ impl RideLedger {
     ///
     /// A retry by the same replica returns its existing order. Solver
     /// reliability transfers across arms through a same-PES upper-confidence
-    /// estimate. Environment-level novel-edge uncertainty provides the outer
-    /// acquisition score, followed by mode-rank uncertainty, so unseen local
-    /// environments and orthogonal seeds precede sign or method repetitions.
-    /// Exact-arm novelty remains local. Raw energy only breaks acquisition ties
-    /// inside this ledger.
+    /// estimate. Environment-level exact stationary-object uncertainty provides
+    /// the outer acquisition score, followed by mode-rank uncertainty, so unseen
+    /// local environments and orthogonal seeds precede sign or method
+    /// repetitions. Exact-arm novelty remains local. Raw energy only breaks
+    /// acquisition ties inside this ledger.
     pub fn claim(&mut self, replica: u32, seed: u64) -> Option<RideWorkOrder> {
         if let Some(id) = self.replica_work.get(&replica) {
             return self.active.get(id).cloned();
@@ -521,11 +525,14 @@ impl RideLedger {
             return Err(RideLedgerError::WrongReplica { replica, work });
         }
 
-        let (failure, stationary_saddle) = match &outcome {
-            RideOutcome::Certified { .. } => (None, true),
-            RideOutcome::Unresolved { failure, .. } => (Some(*failure), true),
-            RideOutcome::Failed(failure) => (Some(*failure), false),
+        let (failure, saddle) = match &outcome {
+            RideOutcome::Certified { saddle, .. } => (None, Some(*saddle)),
+            RideOutcome::Unresolved {
+                saddle, failure, ..
+            } => (Some(*failure), Some(*saddle)),
+            RideOutcome::Failed(failure) => (Some(*failure), None),
         };
+        let stationary_saddle = saddle.is_some();
         let certified_connection = failure.is_none();
         let canonical_edge = match &outcome {
             RideOutcome::Certified { endpoints, .. } => {
@@ -548,12 +555,14 @@ impl RideLedger {
         self.active_arms.remove(&order.arm);
         self.replica_work.remove(&replica);
 
+        let novel_saddle = saddle.is_some_and(|saddle| self.saddles.insert(saddle));
         let novel_edge = canonical_edge.is_some_and(|edge| self.edges.insert(edge));
         record_evidence(
             self.evidence.entry(order.arm.clone()).or_default(),
             charged_evaluations,
             failure,
             stationary_saddle,
+            novel_saddle,
             novel_edge,
         )?;
         record_evidence(
@@ -561,6 +570,7 @@ impl RideLedger {
             charged_evaluations,
             failure,
             stationary_saddle,
+            novel_saddle,
             novel_edge,
         )?;
         record_evidence(
@@ -574,6 +584,7 @@ impl RideLedger {
             charged_evaluations,
             failure,
             stationary_saddle,
+            novel_saddle,
             novel_edge,
         )?;
         record_evidence(
@@ -583,6 +594,7 @@ impl RideLedger {
             charged_evaluations,
             failure,
             stationary_saddle,
+            novel_saddle,
             novel_edge,
         )?;
         if certified_connection {
@@ -602,6 +614,7 @@ impl RideLedger {
         let credit = RideCredit {
             certified_connection,
             failure,
+            novel_saddle,
             novel_edge,
             total_charged_evaluations: charged_evaluations,
         };
@@ -640,6 +653,11 @@ impl RideLedger {
         self.edges.len()
     }
 
+    /// Number of unique exact index-one saddles.
+    pub fn unique_saddles(&self) -> usize {
+        self.saddles.len()
+    }
+
     /// PES evaluations charged to completed experiments.
     pub fn charged_evaluations(&self) -> u64 {
         self.charged_evaluations
@@ -664,7 +682,7 @@ impl RideLedger {
     fn environment_acquisition(&self, arm: &RideArm, total: u64) -> f64 {
         let key = (arm.source_basin, arm.environment_class);
         match self.environment_evidence.get(&key) {
-            Some(row) => upper_probability(row.novel_edges, row.completed, total),
+            Some(row) => upper_probability(row.discoveries, row.completed, total),
             None if !self.active_arms.iter().any(|active| {
                 active.source_basin == arm.source_basin
                     && active.environment_class == arm.environment_class
@@ -697,7 +715,7 @@ impl RideLedger {
             let certification =
                 (row.stationary_saddles as f64 + 0.5) / (row.completed as f64 + 1.0);
             let novelty_given_certification =
-                (row.novel_edges as f64 + 0.5) / (row.stationary_saddles as f64 + 1.0);
+                (row.discoveries as f64 + 0.5) / (row.stationary_saddles as f64 + 1.0);
             certification * novelty_given_certification
         });
         method_reliability * local_novel_yield
@@ -706,7 +724,7 @@ impl RideLedger {
     fn mode_acquisition(&self, arm: &RideArm, total: u64) -> f64 {
         let key = (arm.source_basin, arm.environment_class, arm.mode_rank);
         match self.mode_evidence.get(&key) {
-            Some(row) => upper_probability(row.novel_edges, row.completed, total),
+            Some(row) => upper_probability(row.discoveries, row.completed, total),
             None if !self.active_arms.iter().any(|active| {
                 active.source_basin == arm.source_basin
                     && active.environment_class == arm.environment_class
@@ -776,6 +794,7 @@ fn record_evidence(
     charged_evaluations: u64,
     failure: Option<RideFailure>,
     stationary_saddle: bool,
+    novel_saddle: bool,
     novel_edge: bool,
 ) -> Result<(), RideLedgerError> {
     evidence.completed = evidence
@@ -792,9 +811,9 @@ fn record_evidence(
             .checked_add(1)
             .ok_or(RideLedgerError::CounterOverflow)?;
     }
-    if novel_edge {
-        evidence.novel_edges = evidence
-            .novel_edges
+    if novel_saddle || novel_edge {
+        evidence.discoveries = evidence
+            .discoveries
             .checked_add(1)
             .ok_or(RideLedgerError::CounterOverflow)?;
     }

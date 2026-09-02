@@ -260,6 +260,7 @@ mod option_tests {
             RideReportOutcome::Credited(RideCredit {
                 certified_connection: true,
                 failure: None,
+                novel_saddle: false,
                 novel_edge: false,
                 total_charged_evaluations: 140,
             }),
@@ -287,6 +288,7 @@ mod option_tests {
             RideReportOutcome::Credited(RideCredit {
                 certified_connection: false,
                 failure: Some(anneal_core::ride_ledger::RideFailure::Surface),
+                novel_saddle: false,
                 novel_edge: false,
                 total_charged_evaluations: 97,
             }),
@@ -3508,7 +3510,11 @@ fn run_capnp_catalog(
                         SliceValidation::Accepted,
                         SliceQuench::Converged,
                         SliceAdoption::NotAttempted,
-                        Some(if credit.novel_edge { 1.0 } else { 0.0 }),
+                        Some(if credit.novel_saddle || credit.novel_edge {
+                            1.0
+                        } else {
+                            0.0
+                        }),
                     )
                 }
                 RideReportOutcome::Credited(credit) => {

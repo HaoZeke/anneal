@@ -414,6 +414,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut source_attempts = 0_u64;
     let mut source_discoveries = 0_u64;
     let mut certified = 0_u64;
+    let mut novel_saddles = 0_u64;
     let mut novel_edges = 0_u64;
     let mut reported_producer_calls = 0_u64;
     let termination;
@@ -489,11 +490,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             )?;
             mechanism_allocator.update(
                 RIDE_DISCOVERY_ARM,
-                u32::from(credit.novel_edge),
+                u32::from(credit.novel_saddle || credit.novel_edge),
                 credit.total_charged_evaluations,
             );
             attempts += 1;
             certified += u64::from(credit.certified_connection);
+            novel_saddles += u64::from(credit.novel_saddle);
             novel_edges += u64::from(credit.novel_edge);
             println!(
                 "{}",
@@ -511,6 +513,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     "receiver_calls": receiver_calls,
                     "total_calls": credit.total_charged_evaluations,
                     "certified": credit.certified_connection,
+                    "novel_saddle": credit.novel_saddle,
                     "novel_edge": credit.novel_edge,
                     "failure": failure,
                     "saddle_energy": saddle_energy,
@@ -705,6 +708,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "source_attempts": source_attempts,
             "source_discoveries": source_discoveries,
             "certified": certified,
+            "novel_saddles": novel_saddles,
             "novel_edges": novel_edges,
             "mechanism_pulls": mechanism_allocator.pulls(),
             "mechanism_discovery_rates": mechanism_allocator.rates(),

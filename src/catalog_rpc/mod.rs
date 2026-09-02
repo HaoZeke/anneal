@@ -1280,6 +1280,7 @@ pub(crate) fn encode_reply(reply: CatalogReply) -> Result<Vec<u8>, ProtocolError
                 }
                 AcceptedPayload::RideCredit(credit) => {
                     let mut output = payload.init_ride_credit();
+                    output.set_novel_saddle(credit.novel_saddle);
                     output.set_novel_edge(credit.novel_edge);
                     output.set_total_charged_evaluations(credit.total_charged_evaluations);
                     output.set_certified_connection(credit.certified_connection);
@@ -1516,6 +1517,7 @@ pub(crate) fn decode_reply_reader(
                     AcceptedPayload::RideCredit(RideCredit {
                         certified_connection: credit.get_certified_connection(),
                         failure,
+                        novel_saddle: credit.get_novel_saddle(),
                         novel_edge: credit.get_novel_edge(),
                         total_charged_evaluations: credit.get_total_charged_evaluations(),
                     })

@@ -508,6 +508,7 @@ fn live_claim_executes_reports_and_returns_the_connected_minimum() {
 
     assert!(credit.certified_connection);
     assert_eq!(credit.failure, None);
+    assert!(credit.novel_saddle);
     assert!(credit.novel_edge);
     assert_eq!(credit.total_charged_evaluations, producer_calls + 15);
     assert!((destination.coordinates[3] - destination.coordinates[0] - 2.0).abs() < 1e-4);
@@ -536,6 +537,7 @@ fn exact_endpoint_identity_does_not_depend_on_descriptor_radius() {
         panic!("an exact source witness must survive a zero descriptor radius")
     };
     assert!(credit.certified_connection);
+    assert!(credit.novel_saddle);
     assert!(credit.novel_edge);
 }
 
@@ -612,6 +614,7 @@ fn receiving_disagreement_is_charged_and_releases_the_live_claim() {
     };
     assert!(!credit.certified_connection);
     assert_eq!(credit.failure, Some(RideFailure::Surface));
+    assert!(!credit.novel_saddle);
     assert!(!credit.novel_edge);
     assert_eq!(credit.total_charged_evaluations, producer_calls + 1);
     let RideClaimOutcome::Work(next) = run.claim_ride(7, 0x5eed).unwrap() else {
