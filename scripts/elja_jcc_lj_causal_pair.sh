@@ -53,7 +53,7 @@ require_protocol_value CATALOG_SHARED_BIAS 0
 require_protocol_value CATALOG_ENTROPIC_BIAS 0
 require_protocol_value CATALOG_HISTO_SCREEN 0
 require_protocol_value CATALOG_SEAM_LADDER 1
-require_protocol_value CATALOG_FRONTIER_EXCHANGE 1
+require_protocol_value CATALOG_FRONTIER_EXCHANGE 0
 require_protocol_value CATALOG_COOP_WELLS 1
 require_protocol_value CATALOG_BRIDGE 0
 require_protocol_value CATALOG_DIFFICULTY 0
@@ -75,6 +75,9 @@ reject_protocol_variable CATALOG_MD_STEPS
 reject_protocol_variable CATALOG_MD_TEMP
 reject_protocol_variable CATALOG_START_FILE
 reject_protocol_variable CATALOG_START_REPLICA
+reject_protocol_variable CATALOG_BRAIN_LISTEN
+reject_protocol_variable CATALOG_BRAIN_PEERS
+reject_protocol_variable CATALOG_BRAIN_PORT_BASE
 reject_protocol_variable CATALOG_BRAIN_PUBLISH
 
 REPLICAS=${CATALOG_REPLICAS:-4}
@@ -119,44 +122,8 @@ POPULATION_INTERVAL=${CATALOG_POPULATION_INTERVAL:-50000}
 TOTAL_BUDGET=$((PER_REPLICA_BUDGET * REPLICAS))
 SEED_BASE=$((${SEED_OFFSET_BASE:-400000} + ENSEMBLE_INDEX * REPLICAS))
 REPLICA_LIST=$(seq -s, 0 $((REPLICAS - 1)))
-if [[ -n ${CATALOG_BRAIN_PORT_BASE:-} ]]; then
-  if [[ ! $CATALOG_BRAIN_PORT_BASE =~ ^[0-9]+$ ]] \
-    || ((CATALOG_BRAIN_PORT_BASE < 1024 \
-      || CATALOG_BRAIN_PORT_BASE + REPLICAS - 1 > 65535)); then
-    echo "CATALOG_BRAIN_PORT_BASE does not reserve a valid replica port block" >&2
-    exit 2
-  fi
-  brain_transport=tcp
-else
-  BRAIN_NAMESPACE="${SLURM_ARRAY_JOB_ID:-$SLURM_JOB_ID}-${SLURM_ARRAY_TASK_ID:-0}-${SLURM_JOB_ID}"
-  BRAIN_IPC_PREFIX="/tmp/anneal-brain-${BRAIN_NAMESPACE}"
-  brain_transport=ipc
-fi
-
-brain_endpoint() {
-  local replica=$1
-  if [[ $brain_transport == tcp ]]; then
-    local endpoint="tcp://127.0.0.1:$((CATALOG_BRAIN_PORT_BASE + replica))"
-    printf '%s' "$endpoint"
-  else
-    printf 'ipc://%s-%s.sock' "$BRAIN_IPC_PREFIX" "$replica"
-  fi
-}
-
-brain_peers() {
-  local me=$1
-  local lo=$2
-  local hi=$3
-  local parts=()
-  local replica
-  for replica in $(seq "$lo" $((hi - 1))); do
-    if ((replica != me)); then
-      parts+=("${replica}=$(brain_endpoint "$replica")")
-    fi
-  done
-  local IFS=,
-  printf '%s' "${parts[*]}"
-}
+brain_topology=none
+brain_transport=none
 
 if [[ -e $OUT ]]; then
   echo "ensemble output already exists: $OUT" >&2
@@ -298,10 +265,8 @@ if [[ $ARM == shared ]]; then
     "$OUT/state/shared"
   shared_endpoint=$last_started_endpoint
   catalog_topology=shared
-  brain_topology=wave_peers
 else
   catalog_topology=private_per_replica
-  brain_topology=singleton
 fi
 
 status=0
@@ -334,11 +299,9 @@ while ((replica < REPLICAS)); do
     if [[ $ARM == shared ]]; then
       worker_endpoint=$shared_endpoint
       worker_ensemble=$ENSEMBLE
-      worker_brain_peers=$(brain_peers "$replica" "$wave_start" "$wave_end")
     else
       worker_endpoint=${private_endpoints[$replica]}
       worker_ensemble=$ENSEMBLE
-      worker_brain_peers=
     fi
     (
       export CATALOG_CAMPAIGN="$CAMPAIGN"
@@ -356,9 +319,6 @@ while ((replica < REPLICAS)); do
       export ANNEAL_RESOLVED_CONFIG=$worker/resolved-config.json
       export SEED_OFFSET="$seed"
       export CATALOG_RPC="$worker_endpoint"
-      export CATALOG_BRAIN_LISTEN=$(brain_endpoint "$replica")
-      CATALOG_BRAIN_PEERS=$worker_brain_peers
-      export CATALOG_BRAIN_PEERS
       exec "$BIN" "$N" "$PER_REPLICA_BUDGET" 1 rec
     ) >"$OUT/workers/replica-${replica}.out" 2>"$OUT/workers/replica-${replica}.err" &
     pids+=("$!")

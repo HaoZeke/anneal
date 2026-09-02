@@ -36,21 +36,6 @@ POPULATION_INTERVAL=${CATALOG_POPULATION_INTERVAL:-50000}
 TOTAL_BUDGET=$((PER_REPLICA_BUDGET * REPLICAS))
 SEED_BASE=${SEED_OFFSET_BASE:-400000}
 REPLICA_LIST=$(seq -s, 0 $((REPLICAS - 1)))
-BRAIN_PORT_BASE=${CATALOG_BRAIN_PORT_BASE:-$((27000 + ${SLURM_JOB_ID:-0} % 2000))}
-brain_peers() {
-  local me=$1
-  local lo=$2
-  local hi=$3
-  local parts=()
-  local r
-  for r in $(seq "$lo" $((hi - 1))); do
-    if (( r != me )); then
-      parts+=("${r}=tcp://127.0.0.1:$((BRAIN_PORT_BASE + r))")
-    fi
-  done
-  local IFS=,
-  printf '%s' "${parts[*]}"
-}
 
 if [[ -e $OUT ]]; then
   echo "ensemble output already exists: $OUT" >&2
@@ -141,7 +126,6 @@ while (( replica < REPLICAS )); do
     worker=$OUT/workers/replica-${replica}
     mkdir -p "$worker"
     (
-      brain_peer_list=$(brain_peers "$replica" "$wave_start" "$wave_end")
       export CATALOG_CAMPAIGN="$CAMPAIGN"
       export CATALOG_ENSEMBLE="$ENSEMBLE"
       export CATALOG_REPLICA="$replica"
@@ -156,8 +140,6 @@ while (( replica < REPLICAS )); do
       export ANNEAL_RESOLVED_CONFIG=$worker/resolved-config.json
       export SEED_OFFSET="$seed"
       export CATALOG_RPC="$endpoint"
-      export CATALOG_BRAIN_LISTEN="tcp://127.0.0.1:$((BRAIN_PORT_BASE + replica))"
-      export CATALOG_BRAIN_PEERS=$brain_peer_list
       exec "$BIN" "$N" "$PER_REPLICA_BUDGET" 1 rec
     ) >"$OUT/workers/replica-${replica}.out" 2>"$OUT/workers/replica-${replica}.err" &
     pids+=("$!")
