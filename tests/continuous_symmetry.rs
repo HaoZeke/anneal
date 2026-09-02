@@ -1,6 +1,8 @@
 use anneal_core::assignment::minimum_cost_assignment;
 use anneal_core::continuous_symmetry::{inversion_rms, project_inversion};
-use ndarray::Array1;
+use anneal_core::methods::cluster_hopping::{Config, ContinuousSymmetry, Ledger, run};
+use ndarray::{Array1, ArrayView1};
+use rand::{SeedableRng, rngs::StdRng};
 
 #[test]
 fn assignment_is_bijective_when_rowwise_nearest_neighbours_collide() {
@@ -84,4 +86,32 @@ fn ci_projection_commutes_with_translation() {
             assert!((translated.coordinates[3 * atom + axis] - expected).abs() < 1e-12);
         }
     }
+}
+
+#[test]
+fn scheduled_ci_move_is_quenched_charged_and_adopted_only_downhill() {
+    let start = Array1::from(vec![1.4, 0.1, 0.0, -0.4, 1.2, 0.2, -0.2, -0.3, 0.0]);
+    let initial_energy = start.iter().map(|value| value * value).sum::<f64>();
+    let mut config = Config::for_cluster(3);
+    config.relax_steps = 1;
+    config.return_screen = false;
+    config.max_hops = Some(1);
+    config.continuous_symmetry = ContinuousSymmetry::Inversion { interval: 1 };
+    let mut ledger = Ledger::new(2);
+    let mut relax =
+        |ledger: &mut Ledger, state: ArrayView1<'_, f64>, _steps: usize| -> (f64, Array1<f64>) {
+            if !ledger.charge() {
+                return (f64::INFINITY, state.to_owned());
+            }
+            let energy = state.iter().map(|value| value * value).sum();
+            (energy, state.to_owned())
+        };
+    let mut rng = StdRng::seed_from_u64(7);
+
+    let outcome = run(&config, start.view(), &mut ledger, &mut relax, &mut rng);
+
+    assert_eq!(outcome.continuous_symmetry.0, 1);
+    assert!(outcome.continuous_symmetry.1 > 0.0);
+    assert!(outcome.best < initial_energy);
+    assert_eq!(outcome.charged, 2);
 }
