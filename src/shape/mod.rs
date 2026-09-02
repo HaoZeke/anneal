@@ -687,6 +687,20 @@ mod tests {
                 "slot {slot} mapped to {src} in {perm:?}"
             );
         }
+
+        let witness = IraStructureWitness {
+            kmax_factor: 1.8,
+            radius: 1e-6,
+        };
+        assert!(matches!(
+            crate::pes_exploration::ExactStructureWitness::relation(
+                &witness,
+                r.view(),
+                q.view(),
+            ),
+            crate::pes_exploration::ExactStructureRelation::NontrivialPermutation(operation)
+                if operation == *perm
+        ));
     }
 
     #[test]
