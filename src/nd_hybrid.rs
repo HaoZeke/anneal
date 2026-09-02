@@ -252,29 +252,29 @@ fn validate(config: &NdHybridConfig, dimension: usize) -> Result<(), NdHybridErr
     Ok(())
 }
 
-fn next_ride_task(
-    network: &NdPesNetwork,
+fn ride_tasks(
+    minima: usize,
     attempted: &HashSet<(usize, u16, RideModeDirection)>,
     source_cursor: usize,
     ranks: usize,
-) -> Option<(usize, u16, RideModeDirection)> {
-    let minima = network.minimum_count();
+) -> Vec<(usize, u16, RideModeDirection)> {
     if minima == 0 {
-        return None;
+        return Vec::new();
     }
+    let mut tasks = Vec::new();
     for offset in 0..minima {
         let basin = (source_cursor + offset) % minima;
         for rank in 0..ranks {
-            let rank = u16::try_from(rank).ok()?;
+            let rank = u16::try_from(rank).expect("validated mode portfolio fits u16");
             for direction in [RideModeDirection::Positive, RideModeDirection::Negative] {
                 let task = (basin, rank, direction);
                 if !attempted.contains(&task) {
-                    return Some(task);
+                    tasks.push(task);
                 }
             }
         }
     }
-    None
+    tasks
 }
 
 fn new_ids(before: usize, after: usize) -> Vec<usize> {
@@ -344,12 +344,15 @@ fn ridge_action_feature(
         .collect()
 }
 
-fn expected_cost(charged: u64, pulls: usize, maximum: u64) -> f64 {
-    if pulls == 0 || charged == 0 {
-        maximum.max(1) as f64
-    } else {
-        charged as f64 / pulls as f64
-    }
+fn empirical_cost(charged: u64, pulls: usize) -> Option<f64> {
+    (charged > 0 && pulls > 0).then(|| charged as f64 / pulls as f64)
+}
+
+fn expected_cost(charged: u64, pulls: usize, fallback: Option<f64>, maximum: u64) -> f64 {
+    empirical_cost(charged, pulls)
+        .or(fallback)
+        .unwrap_or(maximum.max(1) as f64)
+        .clamp(1.0, maximum.max(1) as f64)
 }
 
 fn best_information_rate(scores: &[SearchActionScore], mechanism: SearchMechanism) -> Option<f64> {
@@ -511,33 +514,34 @@ where
         if remaining == 0 {
             break NdHybridTermination::BudgetConsumed;
         }
-        let ride_task = next_ride_task(&network, &attempted, source_cursor, ranks);
-        if policy == NdHybridPolicy::RidgeOnly && ride_task.is_none() {
+        let ride_tasks = ride_tasks(network.minimum_count(), &attempted, source_cursor, ranks);
+        if policy == NdHybridPolicy::RidgeOnly && ride_tasks.is_empty() {
             break NdHybridTermination::RidePortfolioExhausted;
         }
 
         let mut plans = Vec::<PlannedAction>::new();
-        if policy != NdHybridPolicy::BasinEscapeOnly
-            && let Some((source_basin, mode_rank, direction)) = ride_task
-        {
-            let source = network.minima()[source_basin].coordinates.clone();
-            let source_energy = network.minima()[source_basin].energy;
-            let mode_seed = seed ^ (source_basin as u64 + 1).wrapping_mul(0x9e37_79b9_7f4a_7c15);
-            let mode = orthonormal_nd_mode(dimension, mode_seed, mode_rank, direction)?;
-            let feature = ridge_action_feature(
-                source.view(),
-                mode.view(),
-                config.exploration.saddle_displacement,
-            );
-            plans.push(PlannedAction::Ridge {
-                source_basin,
-                source_energy,
-                mode_rank,
-                direction,
-                source,
-                mode,
-                feature,
-            });
+        if policy != NdHybridPolicy::BasinEscapeOnly {
+            for (source_basin, mode_rank, direction) in ride_tasks {
+                let source = network.minima()[source_basin].coordinates.clone();
+                let source_energy = network.minima()[source_basin].energy;
+                let mode_seed =
+                    seed ^ (source_basin as u64 + 1).wrapping_mul(0x9e37_79b9_7f4a_7c15);
+                let mode = orthonormal_nd_mode(dimension, mode_seed, mode_rank, direction)?;
+                let feature = ridge_action_feature(
+                    source.view(),
+                    mode.view(),
+                    config.exploration.saddle_displacement,
+                );
+                plans.push(PlannedAction::Ridge {
+                    source_basin,
+                    source_energy,
+                    mode_rank,
+                    direction,
+                    source,
+                    mode,
+                    feature,
+                });
+            }
         }
         if policy != NdHybridPolicy::RidgeOnly {
             let escape_scale = escape_feedback.escape();
@@ -561,17 +565,30 @@ where
                 });
             }
         }
+        let pooled_cost = empirical_cost(
+            mechanism_accounting.charged_calls().iter().copied().sum(),
+            mechanism_accounting.pulls().iter().copied().sum(),
+        );
+        let ride_cost = expected_cost(
+            mechanism_accounting.charged_calls()[RIDGE_ARM],
+            mechanism_accounting.pulls()[RIDGE_ARM],
+            pooled_cost,
+            remaining.min(config.ride_evaluation_cap),
+        );
+        let escape_cost = expected_cost(
+            mechanism_accounting.charged_calls()[ESCAPE_ARM],
+            mechanism_accounting.pulls()[ESCAPE_ARM],
+            pooled_cost,
+            remaining.min(config.escape_evaluation_cap),
+        );
         let candidates = plans
             .iter()
             .map(|plan| match plan {
-                PlannedAction::Ridge { .. } => plan.candidate(expected_cost(
-                    mechanism_accounting.charged_calls()[RIDGE_ARM],
-                    mechanism_accounting.pulls()[RIDGE_ARM],
-                    remaining.min(config.ride_evaluation_cap),
-                )),
+                PlannedAction::Ridge { .. } => plan.candidate(ride_cost),
                 PlannedAction::Escape { move_index, .. } => plan.candidate(expected_cost(
                     move_charged[*move_index],
                     move_pulls[*move_index],
+                    Some(escape_cost),
                     remaining.min(config.escape_evaluation_cap),
                 )),
             })
