@@ -1409,8 +1409,17 @@ fn main() {
             cutoff,
             beta,
             mu: envf("TWO_PHASE_MU", 0.0),
+            anisotropic: false,
         });
         println!("  two-phase relaxation: {:?}", cfg.two_phase);
+    }
+    // The ellipsoidal metric read from the entering structure's own gyration
+    // tensor, so the compaction keeps the walker's aspect.
+    if opts.contains(&"aniso")
+        && let Some(two) = cfg.two_phase.as_mut()
+    {
+        two.anisotropic = true;
+        println!("  two-phase relaxation in the entering structure's own metric");
     }
     // A learned portfolio of relaxation surfaces: SURFACES names the arms
     // beside the plain one, comma-separated, as `mu:5`, `d:3.5` (pair-well
@@ -1432,6 +1441,7 @@ fn main() {
                     cutoff: anneal_core::methods::two_phase::Cutoff::Fixed(0.0),
                     beta: 0.0,
                     mu: value,
+                    anisotropic: false,
                 },
                 "d" => anneal_core::methods::two_phase::TwoPhase::diameter(value * unit, beta),
                 "kappa" => anneal_core::methods::two_phase::TwoPhase::relative(value, beta),
@@ -1788,10 +1798,16 @@ fn main() {
             let x = match surface {
                 Some(two) => {
                     let cutoff = two.cutoff_for(x);
+                    let shape = two.shape_for(x);
                     let (_, phase_one, _) = opt.minimize(x, iters, |v| {
                         let (e, g) = charged(led, v)?;
-                        let (pe, pg) =
-                            anneal_core::methods::two_phase::penalty(v, cutoff, two.beta, two.mu);
+                        let (pe, pg) = anneal_core::methods::two_phase::penalty_shaped(
+                            v,
+                            cutoff,
+                            two.beta,
+                            two.mu,
+                            shape.as_ref(),
+                        );
                         Some((e + pe, g + pg))
                     });
                     opt.forget();
