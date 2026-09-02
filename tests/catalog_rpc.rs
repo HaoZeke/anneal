@@ -694,6 +694,7 @@ fn epoch_close_reaches_every_subscriber_exactly_once() {
     second.events();
 
     first.population_abstain_with_snapshot(2, 0).unwrap();
+    second.detach(2, "done").unwrap();
 
     let first_closed = wait_for_epoch_closed(&mut first);
     let second_closed = wait_for_epoch_closed(&mut second);
