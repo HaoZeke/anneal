@@ -267,7 +267,7 @@ mod run {
         pub transition_uncertainty: f64,
         /// Joint-minimum-information role for this same-system replica.
         pub discovery_role: DiscoveryRole,
-        /// Exact terminal-outcome observation epoch behind the role assignment.
+        /// Coordinator evidence epoch behind the stable shared-batch assignment.
         pub discovery_epoch: u64,
         /// One-sided upper bound on unseen exact-basin mass.
         pub basin_unseen_mass_upper: f64,
