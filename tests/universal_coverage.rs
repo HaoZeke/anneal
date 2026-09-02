@@ -245,3 +245,20 @@ fn kernel_coreset_bounds_gp_rank_without_discarding_exact_classes() {
     assert!(evidence.ensemble_standard_deviation.is_finite());
     assert!(evidence.acquisition.is_finite());
 }
+
+#[test]
+fn universal_energy_model_assigns_a_nonredundant_batch() {
+    let reference = tetrahedron();
+    let mut coverage = UniversalCoverage::new(&reference, CoverageConfig::default()).unwrap();
+    let base = vec![0.0; reference.values().len()];
+    let mut near = base.clone();
+    near[0] = 1e-3;
+    let mut far = base.clone();
+    far[0] = 2.0;
+
+    let selected = coverage
+        .assign_minimum_information_values(&[(0, base), (1, near), (2, far)], 2, 1, 64)
+        .unwrap();
+
+    assert_eq!(selected, vec![0, 2]);
+}
