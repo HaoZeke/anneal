@@ -11,7 +11,7 @@ use std::collections::{HashMap, HashSet};
 use ndarray::{Array1, ArrayView1};
 use rand::{SeedableRng, rngs::StdRng};
 
-use crate::allocate::FlooredThompson;
+use crate::allocate::{DiscoveryAccounting, FlooredThompson};
 use crate::catalog::{
     PRODUCTION_MAX_UNSEEN_MASS, PRODUCTION_MINIMUM_VISITS, leftover_esty_stable,
     leftover_esty_upper,
@@ -29,44 +29,6 @@ const RIDGE_ARM: usize = 0;
 const ESCAPE_ARM: usize = 1;
 const GAUSSIAN_MOVE: usize = 0;
 const TSALLIS_MOVE: usize = 1;
-
-#[derive(Debug)]
-struct MechanismAccounting {
-    pulls: [usize; 2],
-    discoveries: [u64; 2],
-    charged: [u64; 2],
-}
-
-impl MechanismAccounting {
-    fn with_initial_escape(charged: u64) -> Self {
-        Self {
-            pulls: [0, 1],
-            discoveries: [0, 1],
-            charged: [0, charged],
-        }
-    }
-
-    fn observe(&mut self, arm: usize, discoveries: usize, charged: u64) {
-        self.pulls[arm] = self.pulls[arm].saturating_add(1);
-        self.discoveries[arm] =
-            self.discoveries[arm].saturating_add(u64::try_from(discoveries).unwrap_or(u64::MAX));
-        self.charged[arm] = self.charged[arm].saturating_add(charged);
-    }
-
-    fn rates(&self) -> Vec<f64> {
-        self.discoveries
-            .iter()
-            .zip(self.charged)
-            .map(|(discoveries, charged)| {
-                if charged == 0 {
-                    0.0
-                } else {
-                    *discoveries as f64 / charged as f64
-                }
-            })
-            .collect()
-    }
-}
 
 /// Controls for one system-local generic PES exploration campaign.
 #[derive(Debug, Clone)]
@@ -425,8 +387,8 @@ where
     let mut live_energy = network.minima()[live_basin].energy;
 
     let mut rng = StdRng::seed_from_u64(seed);
-    let mut mechanism_accounting =
-        MechanismAccounting::with_initial_escape(initial_record.charged_evaluations);
+    let mut mechanism_accounting = DiscoveryAccounting::new(2);
+    mechanism_accounting.observe(ESCAPE_ARM, 1, initial_record.charged_evaluations);
     let mut move_allocator = FlooredThompson::new(2);
     let mut escape_feedback = EscapeFeedback::new(
         config.initial_escape_scale,
@@ -450,8 +412,9 @@ where
         let coverage = escape_coverage.evidence();
         let (selected, discovery_indices) = match policy {
             NdHybridPolicy::Adaptive if ride_task.is_some() => {
+                let pulls = mechanism_accounting.pulls();
                 let (selected, indices) =
-                    good_ucb_mechanism(coverage, &network, mechanism_accounting.pulls);
+                    good_ucb_mechanism(coverage, &network, [pulls[RIDGE_ARM], pulls[ESCAPE_ARM]]);
                 (selected, Some(indices))
             }
             NdHybridPolicy::Adaptive => (ESCAPE_ARM, None),
@@ -492,7 +455,7 @@ where
                 .saturating_add(new_unresolved_saddle_ids.len());
             mechanism_accounting.observe(
                 RIDGE_ARM,
-                stationary_discoveries,
+                u64::try_from(stationary_discoveries).unwrap_or(u64::MAX),
                 ridge.charged_evaluations,
             );
             charged_evaluations = charged_evaluations
@@ -597,7 +560,7 @@ where
                 }
                 mechanism_accounting.observe(
                     ESCAPE_ARM,
-                    usize::from(discovered),
+                    u64::from(discovered),
                     record.charged_evaluations,
                 );
                 move_allocator.update(move_index, discovered);
@@ -638,7 +601,7 @@ where
         policy,
         charged_evaluations,
         events,
-        mechanism_pulls: mechanism_accounting.pulls.to_vec(),
+        mechanism_pulls: mechanism_accounting.pulls().to_vec(),
         mechanism_discovery_rates: mechanism_accounting.rates(),
         move_pulls: move_allocator.pulls().to_vec(),
         move_success_rates: move_allocator.rates(),

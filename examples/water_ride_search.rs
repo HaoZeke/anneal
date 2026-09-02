@@ -16,7 +16,7 @@ use std::net::SocketAddr;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use anneal_core::allocate::{ChargedDiscoveryAllocator, FlooredThompson};
+use anneal_core::allocate::{DiscoveryAccounting, FlooredThompson};
 use anneal_core::catalog::euclidean_gradient_norm;
 use anneal_core::catalog::molecular::{
     MAX_GRADIENT_NORM, MolecularCatalogPresetError, component_gradient_tolerance, descriptor_space,
@@ -442,7 +442,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     hopping.minima_hopping = true;
     hopping.record_gradient = MAX_GRADIENT_NORM;
     let escape_moves = hopping.move_library.kernels(&hopping);
-    let mut mechanism_allocator = ChargedDiscoveryAllocator::new(2);
+    let mut mechanism_accounting = DiscoveryAccounting::new(2);
     let mut move_allocator = FlooredThompson::new(escape_moves.len());
     let mut escape_feedback = EscapeFeedback::new(1.0, hopping.temperature.max(1e-6));
     if let Some(basin) = live_basin {
@@ -548,9 +548,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 ChargeKind::FreshValidation,
                 receiver_calls,
             )?;
-            mechanism_allocator.update(
+            mechanism_accounting.observe(
                 RIDE_DISCOVERY_ARM,
-                u32::from(credit.novel_saddle || credit.novel_edge),
+                u64::from(credit.novel_saddle || credit.novel_edge),
                 credit.total_charged_evaluations,
             );
             attempts += 1;
@@ -639,7 +639,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     ChargeKind::BasinEscape,
                     failure.charged_evaluations,
                 )?;
-                mechanism_allocator.update(SOURCE_ESCAPE_ARM, 0, failure.charged_evaluations);
+                mechanism_accounting.observe(SOURCE_ESCAPE_ARM, 0, failure.charged_evaluations);
                 move_allocator.update(move_index, false);
                 println!(
                     "{}",
@@ -729,9 +729,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     .as_ref()
                     .is_some_and(|mutation| mutation.new_basin);
                 source_discoveries += u64::from(discovered);
-                mechanism_allocator.update(
+                mechanism_accounting.observe(
                     SOURCE_ESCAPE_ARM,
-                    u32::from(discovered),
+                    u64::from(discovered),
                     producer_calls + 1,
                 );
                 move_allocator.update(move_index, discovered);
@@ -810,8 +810,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "novel_saddles": novel_saddles,
             "degenerate_rearrangements": degenerate_rearrangements,
             "novel_edges": novel_edges,
-            "mechanism_pulls": mechanism_allocator.pulls(),
-            "mechanism_discovery_rates": mechanism_allocator.rates(),
+            "mechanism_pulls": mechanism_accounting.pulls(),
+            "mechanism_discoveries": mechanism_accounting.discoveries(),
+            "mechanism_charged_calls": mechanism_accounting.charged_calls(),
+            "mechanism_discovery_rates": mechanism_accounting.rates(),
             "move_pulls": move_allocator.pulls(),
             "move_success_rates": move_allocator.rates(),
             "known_basins": known_basins.len(),
