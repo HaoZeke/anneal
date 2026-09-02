@@ -1,9 +1,11 @@
 //! Catalog I/O on a dedicated thread.
 //!
-//! The hop loop never owns the socket. Talking is a mailbox: post a
+//! The hop loop never owns the RPC executor. Talking is a mailbox: post a
 //! request, keep hopping, apply the last answer when it arrives. That
 //! is how a cooperative replica stays at least as strong as the same
 //! single chain. A blocking `recv` on the hop thread can only be worse.
+//! `CatalogClient` itself runs `RpcSystem` on a LocalSet; this queue
+//! keeps that work off the hop thread.
 
 use std::sync::mpsc::{self, Sender};
 use std::thread::{self, JoinHandle};

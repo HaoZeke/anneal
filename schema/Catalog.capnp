@@ -501,3 +501,31 @@ struct AcceptedReply {
   aggregateCharged @7 :UInt64;
   aggregateBudget @8 :UInt64;
 }
+
+# RPC surface. CatalogRequest and CatalogReply remain the Session.call
+# payload so journal identity, idempotent replay, and every operation
+# handler stay on the same structs.
+interface Coordinator {
+  attach @0 (identity :CatalogIdentity, subscriber :Subscriber) -> (session :Session, roster :RosterReply);
+  observe @1 () -> (status :CoordinatorStatus);
+  scale @2 (liveTarget :UInt32) -> (roster :RosterReply);
+}
+
+interface Session {
+  call @0 (request :CatalogRequest) -> (reply :CatalogReply);
+  detach @1 (reason :Text) -> (roster :RosterReply);
+}
+
+interface Subscriber {
+  event @0 (event :CoordinatorEvent) -> ();
+}
+
+struct CoordinatorEvent {
+  union {
+    epochClosed @0 :UInt64;
+    rosterChanged @1 :UInt64;
+    retire @2 :Text;
+    spawn @3 :UInt32;
+    tick @4 :UInt64;
+  }
+}

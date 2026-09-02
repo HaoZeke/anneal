@@ -305,7 +305,7 @@ mod tests {
     use ndarray::Array1;
 
     fn fixture(name: &str) -> Array1<f64> {
-        let path = format!("{}/examples/data/{name}.xyz", env!("CARGO_MANIFEST_DIR"));
+        let path = format!("{}/tests/fixtures/{name}.xyz", env!("CARGO_MANIFEST_DIR"));
         let text = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{path}: {e}"));
         let mut lines = text.lines();
         let n: usize = lines.next().unwrap().trim().parse().unwrap();

@@ -1100,57 +1100,47 @@ accumulate on the roster reply and observer status.
 ** Cap'n Proto catalog protocol
 
 What it is: the versioned wire protocol and coordinator/client
-implementation carrying every mechanism above between processes:
-candidate offers, descriptor-hole and boundary-crossing requests,
-policy-state reads, population submit/poll/abstain/join, live-roster
-attach/detach/tick/scale, and a
-read-only observer status op that requires no replica identity.
+implementation carrying every mechanism above between processes over
+Cap'n Proto RPC. =Coordinator.attach= binds a replica identity and a
+=Subscriber= capability and returns a =Session= plus the live
+=RosterReply=. =Session.call= carries the existing =CatalogRequest= /
+=CatalogReply= payload, including candidate offers, descriptor-hole
+and boundary-crossing requests, policy-state reads, population
+submit/poll/abstain/join, rides, live-roster attach/detach/tick/scale,
+and the identity-checked observer-status operation. Attach and detach
+on the session return the packing =RosterReply=.
+=Coordinator.observe= returns aggregate status with no identity.
+=Session.detach= retires the replica and returns the same roster
+reply. The coordinator pushes =CoordinatorEvent= values (epoch
+closed, roster changed, retire, spawn, tick) to every attached
+subscriber.
 
-Key types and functions: =PROTOCOL_VERSION = 10= (src/catalog_rpc/mod.rs:19);
-=CatalogIdentity= (mod.rs:23); =CatalogCandidate= (mod.rs:36);
-=TransitionDestination= (mod.rs:67); =CatalogMutationKind=/
-=CatalogMutation= (mod.rs:76/121); =CatalogOperation=/=CatalogRequest=
-(mod.rs:134/222); =ProtocolRejection= (mod.rs:237); =CatalogSnapshot=
-(mod.rs:262); =DescriptorHoleProposal= (mod.rs:277);
-=BoundaryCrossingRecord= (mod.rs:288); =CatalogRelation= (mod.rs:303);
-=PolicyState= (mod.rs:318); =PopulationSelection= (mod.rs:348);
-=PopulationPlan=/=PopulationEpochState= (mod.rs:370/395);
-=ReplicaProgress=/=CoordinatorStatus= (mod.rs:409/420); =AcceptedReply=/
-=CatalogReply= (mod.rs:463/476). Server: =ServerConfig=
-(src/catalog_rpc/server.rs:45); =ServerHeader=/=CatalogServerError=
-(server.rs:198/213); =CatalogServer= (server.rs:431), with a
-=Drop= impl that persists state; =observer_status_reply=
-(server.rs:1839), the aggregate read-only status op (snapshot version,
-open epoch, submitted/required counts, census visits, active entries,
-aggregate charged/budget, per-replica progress) requiring no signature
-or journal entry. Client: =ClientConfig= (src/catalog_rpc/client.rs:22);
-=CatalogClientError= (client.rs:40); =MutationReceipt=
-(client.rs:65); =PolicyStateReceipt=/=PopulationEpochReceipt=
-(client.rs:78/87); =CatalogAccess=/=CatalogClientEvent=
-(client.rs:96/105); =SyncSchedule= (client.rs:134), a counter-based
-synchronization schedule with a declared staleness bound;
-=CatalogClient= (client.rs:190), including =observer_status=/
-=observer_status_frame= (client.rs:546/561). Schema:
-schema/Catalog.capnp defines the wire structs 1:1 with the Rust types
-(=CatalogIdentity=, =CandidateRecord=, =QuenchStatus=,
-=DescriptorHoleRequest/Reply=, =BoundaryCrossingRequest/Reply=,
-=PolicyStateRequest/Reply=, =CatalogMutationReply=,
-=PopulationSubmitRequest=, =PopulationPlanRequest=,
-=PopulationAbstainRequest=, =PopulationJoinRequest=, =ReplicaProgress=,
-=CoordinatorStatus=, =TransitionRecord=, =PopulationSelection=,
-=PopulationPlan=, =PopulationEpochReply=, =CatalogRequest=,
-=RejectionKind=, =CatalogReply=, =AcceptedReply=).
+Key types and functions: =PROTOCOL_VERSION= (src/catalog_rpc/mod.rs);
+=CatalogIdentity=; =CatalogCandidate=; =CatalogOperation=/=CatalogRequest=;
+=ProtocolRejection=; =CatalogSnapshot=; =CoordinatorStatus=;
+=AcceptedReply=/=CatalogReply=; =RosterReply=; =CoordinatorEvent=.
+Server: =ServerConfig=; =CatalogServer::start=, which runs one
+=RpcSystem= accept loop on a dedicated =LocalSet= thread. Client:
+=CatalogClient::connect= keeps its synchronous signature and posts
+onto that executor; sequenced =attach=/=detach=/=tick=/=scale=,
+=observe=, and =events= are the RPC surface drivers use besides the
+existing catalog methods.
+Schema: schema/Catalog.capnp defines the request/reply structs 1:1
+with the Rust types and the =Coordinator= / =Session= / =Subscriber=
+interfaces.
 
 Constants and defaults: coordinator journal file name
 =JOURNAL_FILE = "catalog-requests-v5.bin"=,
-=MAX_JOURNAL_FRAME = 256 * 1024 * 1024= (src/catalog_rpc/server.rs:326-327).
+=MAX_JOURNAL_FRAME = 256 * 1024 * 1024=.
 
-Feeds/consumes: gated behind the =bank-rpc= Cargo feature; every request
-carries a =CatalogIdentity= checked against the coordinator's own
-system signature (see [[file:catalog.org::*System signature and candidate validation][signature entry]]) before anything mutates.
-The observer status op is what =examples/catalog_status.rs= polls,
-carrying no replica identity so it can watch any ensemble whose
-campaign/ensemble name it knows.
+Feeds/consumes: gated behind the =bank-rpc= Cargo feature. A
+=Session= is bound to the identity given at attach; a call whose
+request identity differs is rejected with =replicaMismatch=.
+Scientific mutations still check campaign, ensemble, replica
+membership, and system signature (see [[file:catalog.org::*System signature and candidate validation][signature entry]]).
+=Coordinator.observe= is the identity-free watch path;
+=examples/catalog_status.rs= can poll either that or the
+identity-checked observer-status operation.
 
 ** CooperativeRun composition layer
 
