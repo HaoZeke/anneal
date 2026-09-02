@@ -332,7 +332,7 @@ fn coordinator_segments_live_replicas_by_shared_pes_coverage() {
 }
 
 #[test]
-fn coordinator_shares_cost_normalized_discovery_assignments() {
+fn coordinator_does_not_replace_exact_species_occupancy_with_charge_ratios() {
     let server = ride_server();
     let digest = signature().digest();
     let query = ride_candidate(0, 1, 1.2);
@@ -378,14 +378,14 @@ fn coordinator_shares_cost_normalized_discovery_assignments() {
             .iter()
             .filter(|state| state.discovery_role == DiscoveryRole::BasinEscape)
             .count(),
-        3
+        2
     );
     assert_eq!(
         states
             .iter()
             .filter(|state| state.discovery_role == DiscoveryRole::SaddleRide)
             .count(),
-        1
+        2
     );
 }
 
