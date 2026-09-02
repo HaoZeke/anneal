@@ -38,23 +38,26 @@ use crate::catalog::{
     retis_exchange_adjacent, same_packing, seat_extras,
 };
 use crate::catalog_policy::proposal::farthest_hole;
-use crate::cooperative_search::ledger::{ChargeKind, CooperativeLedger, ReplicaLedgerEvent};
-use crate::descriptor_space::{DescriptorSpace, UNIVERSAL_LOCAL_ENVIRONMENT_RADIUS};
-use crate::discovery_roster::{
-    DiscoveryCoverage, assign_discovery_roles, coverage_allocation_weight,
+use crate::cooperative_search::ledger::{
+    ChargeKind, ChargeSummary, CooperativeLedger, ReplicaLedgerEvent,
 };
+use crate::descriptor_space::{DescriptorSpace, UNIVERSAL_LOCAL_ENVIRONMENT_RADIUS};
+use crate::discovery_roster::{DiscoveryOpportunity, assign_discovery_roles};
 use crate::methods::feynman_kac::{
     EpochSubmissionOutcome, PopulationEpochPlan, PopulationMember, SelectionCoefficients,
     SynchronousPopulation,
 };
 use crate::methods::landscape_graph::LandscapeGraph;
 use crate::methods::neus_bridge::{BridgeString, EntryLists, WeightLedger};
+use crate::minimum_information::{
+    MinimumInformationSearch, SearchActionCandidate, SearchMechanism,
+};
 use crate::pes_exploration::{
     ExactStructureRelation, ExactStructureWitness, PesExplorationConfig, PesSurface, RideMethod,
     StationaryIndex, StructureContext, StructureView, stationary_index_cartesian,
 };
 use crate::ride_ledger::{
-    EnvironmentBook, RideLedger, RideOutcome, RidePortfolio, RideSource,
+    EnvironmentBook, RideArm, RideDirection, RideLedger, RideOutcome, RidePortfolio, RideSource,
     SADDLE_COVERAGE_MINIMUM_OBSERVATIONS,
 };
 use crate::soap::local_nu3_z;
@@ -86,6 +89,7 @@ struct ScientificConfig {
     total_charged_work: u64,
     attraction_regions: AttractionRegionConfig,
     coverage: UniversalCoverage,
+    minimum_information: MinimumInformationSearch,
     evaluate: Arc<FreshEvaluator>,
     exact_witness: Option<Arc<StructuralWitness>>,
 }
@@ -337,6 +341,7 @@ struct ScientificState {
     packing: PackingBook,
     ride_environments: EnvironmentBook,
     ride_ledger: RideLedger,
+    ride_information_scores: BTreeMap<RideArm, f64>,
     ride_candidates: BTreeMap<u64, CatalogCandidate>,
     ride_saddles: BTreeMap<u64, CertifiedRideSaddle>,
     next_ride_saddle: u64,
@@ -458,6 +463,19 @@ impl CoordinatorState {
                     .map_err(|_| CatalogServerError::InvalidScientificConfiguration)?,
                     transition_graph: TransitionGraph::new(),
                     coverage: scientific.coverage.clone(),
+                    minimum_information: MinimumInformationSearch::new(
+                        CoverageConfig::default().energy_length_scale,
+                        scientific.signature.energy_scale.abs().max(1e-12),
+                        scientific
+                            .validator
+                            .energy_abs_tolerance
+                            .max(
+                                scientific.validator.energy_rel_tolerance
+                                    * scientific.signature.energy_scale.abs(),
+                            )
+                            .max(1e-12),
+                    )
+                    .map_err(|_| CatalogServerError::InvalidScientificConfiguration)?,
                     attraction_regions: scientific.attraction_regions.clone(),
                     transition_nodes: BTreeMap::new(),
                     landscape: LandscapeGraph::new(),
@@ -494,6 +512,7 @@ impl CoordinatorState {
                         RidePortfolio::new(2, vec![RideMethod::Dimer, RideMethod::Lanczos])
                             .map_err(|_| CatalogServerError::InvalidScientificConfiguration)?,
                     ),
+                    ride_information_scores: BTreeMap::new(),
                     ride_candidates: BTreeMap::new(),
                     ride_saddles: BTreeMap::new(),
                     next_ride_saddle: 0,
@@ -1251,7 +1270,7 @@ fn apply_request(
             let novelty = coverage.acquisition;
             let transition_uncertainty =
                 local_basin.map_or_else(|| 1.0, |id| transition_uncertainty(scientific, id));
-            let basin_unseen_mass_upper = coverage_allocation_weight(
+            let basin_unseen_mass_upper = diagnostic_unseen_mass_upper(
                 scientific.census.total_visits(),
                 PRODUCTION_MINIMUM_VISITS,
                 leftover_esty_upper(
@@ -1261,34 +1280,21 @@ fn apply_request(
                 ),
             );
             let saddle_coverage = scientific.ride_ledger.saddle_coverage();
-            let saddle_unseen_mass_upper = coverage_allocation_weight(
+            let saddle_unseen_mass_upper = diagnostic_unseen_mass_upper(
                 saddle_coverage.observations,
                 SADDLE_COVERAGE_MINIMUM_OBSERVATIONS,
                 saddle_coverage.unseen_mass_upper,
             );
-            let discovery_epoch = scientific
-                .census
-                .total_visits()
-                .saturating_add(scientific.ride_ledger.completed_attempts());
-            let discovery_role = assign_discovery_roles(
-                &scientific.discovery_replicas,
-                DiscoveryCoverage {
-                    basin_observations: scientific.census.total_visits(),
-                    basin_singletons: scientific.census.singleton_count(),
-                    saddle_observations: saddle_coverage.observations,
-                    saddle_singletons: saddle_coverage.singletons,
-                    ride_available: scientific.ride_ledger.has_claimable_work(),
-                },
-                discovery_epoch,
-            )
-            .ok()
-            .and_then(|assignments| {
-                assignments
-                    .into_iter()
-                    .find(|assignment| assignment.replica == request.identity.replica)
-            })
-            .map(|assignment| assignment.role);
-            let Some(discovery_role) = discovery_role else {
+            let (basin_action_cost, ride_action_cost) =
+                empirical_action_costs(basin_effort, saddle_effort);
+            let Some((discovery_role, discovery_epoch)) = minimum_information_role(
+                scientific,
+                request.identity.replica,
+                descriptor,
+                *energy,
+                basin_action_cost,
+                ride_action_cost,
+            ) else {
                 return rejected(
                     state,
                     request.event_sequence,
@@ -2037,8 +2043,11 @@ fn apply_request(
                 .last_candidate_by_replica
                 .get(&request.identity.replica)
                 .cloned();
-            let outcome = match destination {
-                TransitionDestination::Unresolved => TransitionOutcome::Unresolved,
+            let (outcome, terminal_energy) = match destination {
+                TransitionDestination::Unresolved => (
+                    TransitionOutcome::Unresolved,
+                    source_candidate.as_ref().map(|candidate| candidate.energy),
+                ),
                 TransitionDestination::Resolved(candidate) => {
                     let Ok(validated) = resolve_validation(
                         &mut precomputed,
@@ -2069,6 +2078,7 @@ fn apply_request(
                     };
                     let destination_candidate =
                         candidate_from_validated(&validated, Some(observation.basin_id));
+                    let terminal_energy = destination_candidate.energy;
                     if observe_ride_source(scientific, &destination_candidate).is_err() {
                         return rejected(
                             state,
@@ -2129,13 +2139,34 @@ fn apply_request(
                             ProtocolRejection::ValidationRejected,
                         );
                     }
-                    TransitionOutcome::Resolved(destination_node)
+                    (
+                        TransitionOutcome::Resolved(destination_node),
+                        Some(terminal_energy),
+                    )
                 }
             };
             if scientific
                 .transition_graph
                 .observe(action.clone(), source_node, outcome)
                 .is_err()
+            {
+                return rejected(
+                    state,
+                    request.event_sequence,
+                    ProtocolRejection::ValidationRejected,
+                );
+            }
+            if let (Some(source), Some(terminal_energy)) =
+                (source_candidate.as_ref(), terminal_energy)
+                && scientific
+                    .minimum_information
+                    .observe(
+                        SearchMechanism::BasinEscape,
+                        &source.descriptor,
+                        source.energy,
+                        terminal_energy,
+                    )
+                    .is_err()
             {
                 return rejected(
                     state,
@@ -2161,7 +2192,11 @@ fn apply_request(
                 );
             };
             let mut ride_ledger = scientific.ride_ledger.clone();
-            if let Some(order) = ride_ledger.claim(request.identity.replica, *seed) {
+            if let Some(order) = ride_ledger.claim_ranked(
+                request.identity.replica,
+                *seed,
+                &scientific.ride_information_scores,
+            ) {
                 let Some(source) = scientific
                     .ride_candidates
                     .get(&order.arm.source_basin)
@@ -2219,6 +2254,15 @@ fn apply_request(
                 );
             }
             let source_basin = order.arm.source_basin;
+            let Some((ride_feature, source_energy)) =
+                ride_action_feature(&next_scientific, &order.arm)
+            else {
+                return rejected(
+                    state,
+                    request.event_sequence,
+                    ProtocolRejection::ValidationRejected,
+                );
+            };
             let (outcome, receiving_evaluations) = match &report.outcome {
                 CatalogRideOutcome::Certified(connection) => certify_ride_connection(
                     &mut next_scientific,
@@ -2256,6 +2300,30 @@ fn apply_request(
                     ProtocolRejection::ValidationRejected,
                 );
             };
+            let terminal_energy = match &outcome {
+                RideOutcome::Certified { endpoints, .. } => endpoints
+                    .iter()
+                    .filter_map(|basin| next_scientific.ride_candidates.get(basin))
+                    .map(|candidate| candidate.energy)
+                    .fold(source_energy, f64::min),
+                RideOutcome::Unresolved { .. } | RideOutcome::Failed(_) => source_energy,
+            };
+            if next_scientific
+                .minimum_information
+                .observe(
+                    SearchMechanism::SaddleRide,
+                    &ride_feature,
+                    source_energy,
+                    terminal_energy,
+                )
+                .is_err()
+            {
+                return rejected(
+                    state,
+                    request.event_sequence,
+                    ProtocolRejection::ValidationRejected,
+                );
+            }
             if let RideOutcome::Certified { endpoints, .. } = &outcome
                 && endpoints[0] != endpoints[1]
             {
@@ -3073,6 +3141,126 @@ fn commission_bridge(scientific: &mut ScientificState, census_radius: f64) {
 }
 
 const MINIMUM_INFORMATION_SAMPLES: usize = 128;
+
+#[derive(Debug, Clone)]
+enum SearchActionKey {
+    Basin(u32),
+    Ride(RideArm),
+}
+
+fn empirical_action_costs(basin: ChargeSummary, ride: ChargeSummary) -> (f64, f64) {
+    let basin_observed = (basin.events > 0 && basin.charged_calls > 0)
+        .then(|| basin.charged_calls as f64 / basin.events as f64);
+    let ride_observed = (ride.events > 0 && ride.charged_calls > 0)
+        .then(|| ride.charged_calls as f64 / ride.events as f64);
+    (
+        basin_observed.or(ride_observed).unwrap_or(1.0),
+        ride_observed.or(basin_observed).unwrap_or(1.0),
+    )
+}
+
+fn ride_action_feature(scientific: &ScientificState, arm: &RideArm) -> Option<(Vec<f64>, f64)> {
+    let source = scientific.ride_candidates.get(&arm.source_basin)?;
+    let local = scientific
+        .ride_environments
+        .feature(arm.environment_class)?;
+    let mut feature = Vec::with_capacity(source.descriptor.len() + local.len() + 4);
+    feature.extend_from_slice(&source.descriptor);
+    feature.extend_from_slice(local);
+    feature.push(f64::from(arm.mode_rank));
+    feature.push(match arm.direction {
+        RideDirection::Negative => -1.0,
+        RideDirection::Positive => 1.0,
+    });
+    feature.extend(match arm.method {
+        RideMethod::Dimer => [1.0, 0.0],
+        RideMethod::Lanczos => [0.0, 1.0],
+    });
+    Some((feature, source.energy))
+}
+
+fn minimum_information_role(
+    scientific: &mut ScientificState,
+    query_replica: u32,
+    query_descriptor: &[f64],
+    query_energy: f64,
+    basin_cost: f64,
+    ride_cost: f64,
+) -> Option<(crate::discovery_roster::DiscoveryRole, u64)> {
+    let mut candidates = Vec::<SearchActionCandidate>::new();
+    let mut keys = Vec::<SearchActionKey>::new();
+    for &replica in &scientific.discovery_replicas {
+        let (descriptor, energy) = if replica == query_replica {
+            (query_descriptor, query_energy)
+        } else if let Some(candidate) = scientific.last_candidate_by_replica.get(&replica) {
+            (candidate.descriptor.as_slice(), candidate.energy)
+        } else {
+            (query_descriptor, query_energy)
+        };
+        candidates.push(SearchActionCandidate {
+            mechanism: SearchMechanism::BasinEscape,
+            feature: descriptor.to_vec(),
+            source_energy: energy,
+            expected_charged_evaluations: basin_cost,
+        });
+        keys.push(SearchActionKey::Basin(replica));
+    }
+    let claimable = scientific.ride_ledger.claimable_arms();
+    for (arm, _) in &claimable {
+        let (feature, source_energy) = ride_action_feature(scientific, arm)?;
+        candidates.push(SearchActionCandidate {
+            mechanism: SearchMechanism::SaddleRide,
+            feature,
+            source_energy,
+            expected_charged_evaluations: ride_cost,
+        });
+        keys.push(SearchActionKey::Ride(arm.clone()));
+    }
+    let scores = scientific
+        .minimum_information
+        .score(&candidates, MINIMUM_INFORMATION_SAMPLES)
+        .ok()?;
+    let mut basin_rates = BTreeMap::<u32, f64>::new();
+    let mut ride_rates = BTreeMap::<RideArm, f64>::new();
+    for (key, score) in keys.into_iter().zip(scores) {
+        match key {
+            SearchActionKey::Basin(replica) => {
+                basin_rates.insert(replica, score.information_per_charged_evaluation);
+            }
+            SearchActionKey::Ride(arm) => {
+                ride_rates.insert(arm, score.information_per_charged_evaluation);
+            }
+        }
+    }
+    let best_ride = ride_rates.values().copied().max_by(f64::total_cmp);
+    scientific.ride_information_scores = ride_rates;
+    let opportunities = scientific
+        .discovery_replicas
+        .iter()
+        .map(|replica| {
+            DiscoveryOpportunity::new(*replica, basin_rates.get(replica).copied()?, best_ride).ok()
+        })
+        .collect::<Option<Vec<_>>>()?;
+    let epoch = scientific.minimum_information.version();
+    assign_discovery_roles(&opportunities, claimable.len(), epoch)
+        .ok()?
+        .into_iter()
+        .find(|assignment| assignment.replica == query_replica)
+        .map(|assignment| (assignment.role, assignment.epoch))
+}
+
+fn diagnostic_unseen_mass_upper(
+    observations: u64,
+    minimum_observations: u64,
+    unseen_mass_upper: Option<f64>,
+) -> f64 {
+    if observations < minimum_observations {
+        return 1.0;
+    }
+    unseen_mass_upper
+        .filter(|upper| upper.is_finite() && *upper >= 0.0)
+        .map_or(1.0, |upper| upper.clamp(0.0, 1.0))
+}
 
 fn minimum_information_population_assignment(
     coverage: &mut UniversalCoverage,
