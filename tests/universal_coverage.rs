@@ -20,6 +20,12 @@ fn tetrahedron_coordinates() -> Vec<f64> {
     vec![0.0, 0.0, 0.0, 1.1, 0.0, 0.0, 0.2, 1.0, 0.0, 0.3, 0.4, 0.9]
 }
 
+fn distorted_tetrahedron(index: usize) -> DescriptorVector {
+    let mut coordinates = tetrahedron_coordinates();
+    coordinates[11] = 0.55 + 0.075 * index as f64;
+    descriptor(coordinates, &[6, 8, 6, 8])
+}
+
 fn proper_transform(coordinates: &[f64]) -> Vec<f64> {
     let axis = [
         1.0_f64 / 6.0_f64.sqrt(),
@@ -204,4 +210,38 @@ fn coverage_rejects_an_incompatible_descriptor_schema() {
 
     assert!(coverage.observe(0, &other, -1.0).is_err());
     assert!(coverage.evidence(&other, None).is_err());
+}
+
+#[test]
+fn kernel_coreset_bounds_gp_rank_without_discarding_exact_classes() {
+    let reference = distorted_tetrahedron(0);
+    let config = CoverageConfig {
+        maximum_model_rank: 3,
+        ..CoverageConfig::default()
+    };
+    let mut coverage = UniversalCoverage::new(&reference, config).unwrap();
+    for class in 0..24 {
+        let structure = distorted_tetrahedron(class);
+        coverage
+            .observe(class, &structure, -20.0 + 0.2 * class as f64)
+            .unwrap();
+    }
+
+    let compression = coverage.compression();
+    assert_eq!(compression.exact_classes, 24);
+    assert!(compression.full_rank <= config.maximum_model_rank);
+    assert!(
+        compression
+            .block_ranks
+            .iter()
+            .all(|&rank| rank <= config.maximum_model_rank)
+    );
+    assert!(compression.maximum_residual_fraction.is_finite());
+    assert!((0.0..=1.0).contains(&compression.maximum_residual_fraction));
+    assert_eq!(coverage.exact_class_count(), 24);
+
+    let evidence = coverage.evidence(&distorted_tetrahedron(30), None).unwrap();
+    assert!(evidence.ensemble_mean.is_finite());
+    assert!(evidence.ensemble_standard_deviation.is_finite());
+    assert!(evidence.acquisition.is_finite());
 }
