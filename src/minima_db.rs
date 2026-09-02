@@ -185,9 +185,16 @@ impl MinimaCorpus {
                     coordinates[3 * atom] + OPEN_BOX / 2.0,
                     coordinates[3 * atom + 1] + OPEN_BOX / 2.0,
                     coordinates[3 * atom + 2] + OPEN_BOX / 2.0,
+                    [false; 3],
+                    atom as u64,
+                    1.0,
                 );
             }
-            frames.push(builder.build());
+            frames.push(
+                builder
+                    .build()
+                    .map_err(|error| MinimaDbError::InvalidRecord(error.to_string()))?,
+            );
         }
         let source = serde_json::to_string(set)?;
         let appended = self.corpus.extend_trajectory_frames(
