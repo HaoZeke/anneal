@@ -178,7 +178,13 @@ impl SurfacePortfolio {
     /// The plain surface plus every transform, uninformative until fed.
     pub fn new(transforms: &[TwoPhase], seed: u64) -> Self {
         let mut arms = vec![None];
-        arms.extend(transforms.iter().copied().filter(|two| two.is_active()).map(Some));
+        arms.extend(
+            transforms
+                .iter()
+                .copied()
+                .filter(|two| two.is_active())
+                .map(Some),
+        );
         Self {
             allocator: DepthAllocator::new(arms.len()),
             arms,
@@ -295,7 +301,11 @@ mod tests {
                 Some(_) => -2.0,
                 None => -5.0,
             };
-            assert_eq!(portfolio.begin(false), arm, "the full relaxation changed surface");
+            assert_eq!(
+                portfolio.begin(false),
+                arm,
+                "the full relaxation changed surface"
+            );
             portfolio.observe(false, reached, -10.0);
         }
         let draws = portfolio.draws();
