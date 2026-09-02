@@ -28,9 +28,6 @@ use crate::descriptor_space::{
     DescriptorError, DescriptorGeometry, DescriptorSpace, DescriptorVector,
 };
 
-/// Minimum ART downhill displacement as a fraction of source--saddle distance.
-const ART_BRANCH_FRACTION: f64 = 0.15;
-
 /// Energy and Cartesian-gradient evaluator used by all exploration stages.
 pub trait PesSurface: Sync {
     /// Surface-specific evaluation failure.
@@ -778,14 +775,13 @@ pub struct PesExplorationConfig {
     pub hessian_step: f64,
     /// Maximum Cartesian move used by minimum-mode and IRC steppers.
     pub maximum_move: f64,
-    /// IRC mass-weighted outer radius.
+    /// IRC outer radius in the selected coordinate metric.
     pub irc_step: f64,
     /// Established rgsaddle IRC integration backend.
     pub irc_kind: IrcKind,
-    /// Resolution levels used to choose the molecular IRC launch radius and
-    /// the maximum N-D branch shells used to escape a collapsed quench.
+    /// Resolution levels used to choose the molecular IRC launch radius.
     pub branch_attempts: usize,
-    /// N-D branch-shell growth and reciprocal molecular IRC refinement factor.
+    /// Reciprocal molecular IRC refinement factor.
     pub branch_growth: f64,
     /// IRC force threshold before endpoint quenching.
     pub irc_force_tolerance: f64,
@@ -2262,63 +2258,6 @@ fn normalize_mode(mode: ArrayView1<f64>) -> Result<Array1<f64>, PesExplorationEr
     Ok(mode.mapv(|value| value / norm))
 }
 
-fn source_scaled_branch_step(
-    origin: ArrayView1<f64>,
-    saddle: ArrayView1<f64>,
-    configured_step: f64,
-) -> f64 {
-    let source_distance = origin
-        .iter()
-        .zip(saddle)
-        .map(|(origin, saddle)| (saddle - origin).powi(2))
-        .sum::<f64>()
-        .sqrt();
-    configured_step.max(ART_BRANCH_FRACTION * source_distance)
-}
-
-fn grow_branch_step(step: f64, config: &PesExplorationConfig) -> Result<f64, PesExplorationError> {
-    let next = step * config.branch_growth;
-    if !next.is_finite() {
-        return Err(PesExplorationError::InvalidEvaluation(
-            "a nonfinite downhill branch radius",
-        ));
-    }
-    Ok(next)
-}
-
-fn quench_branch_shells<S, W>(
-    surface: &S,
-    mut origin: Quenched,
-    saddle: ArrayView1<f64>,
-    mode: ArrayView1<f64>,
-    initial_step: f64,
-    config: &PesExplorationConfig,
-    witness: &W,
-) -> Result<(Quenched, Quenched, Quenched), PesExplorationError>
-where
-    S: PesSurface + ?Sized,
-    W: ExactStructureWitness + ?Sized,
-{
-    let mut step = initial_step;
-    for shell in 0..config.branch_attempts {
-        let positive_start = &saddle + &(&mode * step);
-        let negative_start = &saddle - &(&mode * step);
-        let positive = quench(surface, positive_start.view(), config)?;
-        let negative = quench(surface, negative_start.view(), config)?;
-        let (resolved_origin, positive, negative) = reconcile_source_connection(
-            surface, origin, positive, negative, config, witness, None,
-        )?;
-        let collapsed =
-            witness.equivalent(positive.coordinates.view(), negative.coordinates.view());
-        if !collapsed || shell + 1 == config.branch_attempts {
-            return Ok((resolved_origin, positive, negative));
-        }
-        origin = resolved_origin;
-        step = grow_branch_step(step, config)?;
-    }
-    unreachable!("a positive branch-shell count returns inside the loop")
-}
-
 fn refine_irc_step(step: f64, config: &PesExplorationConfig) -> Result<f64, PesExplorationError> {
     let next = step / config.branch_growth;
     if !next.is_finite() || next <= 0.0 {
@@ -2582,8 +2521,7 @@ fn roll_branch<S: PesSurface>(
     branch_step: f64,
     config: &PesExplorationConfig,
 ) -> Result<(Quenched, bool), PesExplorationError> {
-    let adapter = SaddleSurface(surface);
-    let mut session = IrcSession::new(
+    let session = IrcSession::new(
         irc_config(config, branch_step),
         saddle.clone(),
         masses.clone(),
@@ -2593,6 +2531,53 @@ fn roll_branch<S: PesSurface>(
     .map_err(|error| {
         PesExplorationError::Saddle(format!("IRC {direction:?} initialization: {error}"))
     })?;
+    drive_irc_branch(
+        surface,
+        session,
+        saddle,
+        direction,
+        branch_step,
+        config,
+        true,
+    )
+}
+
+fn roll_nd_branch<S: PesSurface>(
+    surface: &S,
+    saddle: &Array1<f64>,
+    mode: &Array1<f64>,
+    direction: IrcDirection,
+    branch_step: f64,
+    config: &PesExplorationConfig,
+) -> Result<(Quenched, bool), PesExplorationError> {
+    let mut path_config = irc_config(config, branch_step);
+    path_config.force_gate = ForceGate::LinfNorm;
+    let session = IrcSession::new_euclidean(path_config, saddle.clone(), mode.clone(), direction)
+        .map_err(|error| {
+        PesExplorationError::Saddle(format!("IRC {direction:?} initialization: {error}"))
+    })?;
+    drive_irc_branch(
+        surface,
+        session,
+        saddle,
+        direction,
+        branch_step,
+        config,
+        false,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn drive_irc_branch<S: PesSurface>(
+    surface: &S,
+    mut session: IrcSession,
+    saddle: &Array1<f64>,
+    direction: IrcDirection,
+    branch_step: f64,
+    config: &PesExplorationConfig,
+    atomistic: bool,
+) -> Result<(Quenched, bool), PesExplorationError> {
+    let adapter = SaddleSurface(surface);
     let mut final_report = None;
     for step in 0..config.irc_steps {
         let report = match session.step(&adapter) {
@@ -2607,7 +2592,7 @@ fn roll_branch<S: PesSurface>(
                     "iteration": step,
                     "branch_step": branch_step,
                     "displacement_from_saddle": cartesian_distance(position, saddle.view()),
-                    "minimum_pair_distance": minimum_pair_distance(position),
+                    "minimum_pair_distance": atomistic.then(|| minimum_pair_distance(position)).flatten(),
                     "error": error.to_string(),
                 }));
                 return Err(PesExplorationError::Saddle(format!(
@@ -2628,7 +2613,7 @@ fn roll_branch<S: PesSurface>(
             "arc": report.arc,
             "inner_steps": report.inner_steps,
             "displacement_from_saddle": cartesian_distance(position, saddle.view()),
-            "minimum_pair_distance": minimum_pair_distance(position),
+            "minimum_pair_distance": atomistic.then(|| minimum_pair_distance(position)).flatten(),
         }));
         let at_minimum = report.at_minimum;
         final_report = Some(report);
@@ -2729,11 +2714,11 @@ where
 /// Quench a point, ride one supplied mode to an index-one saddle, and quench
 /// both downhill branches on an arbitrary-dimensional surface.
 ///
-/// This path deliberately has no atomistic descriptor, mass, species, or 3N
-/// requirement. The two branches use small signed displacements along the
-/// receiving-side unstable eigenvector followed by rgmin certification. A
-/// molecular caller needing a mass-weighted IRC uses
-/// [`discover_mode_connection`] instead.
+/// This path has no atomistic descriptor, mass, species, or 3N requirement.
+/// Both branches use the established rgsaddle IRC session with a Euclidean
+/// coordinate metric, then rgmin certifies their endpoint minima. An
+/// atomistic caller uses [`discover_mode_connection`] to select the
+/// mass-weighted rigid quotient instead.
 pub fn discover_nd_connection<S, W>(
     surface: &S,
     network: &mut NdPesNetwork,
@@ -2823,19 +2808,30 @@ where
         });
     }
     let lowest_mode = index.lowest_mode;
-    let branch_step = source_scaled_branch_step(
-        origin_minimum.coordinates.view(),
-        saddle_coordinates.view(),
+    let (positive, _) = roll_nd_branch(
+        surface,
+        &saddle_coordinates,
+        &lowest_mode,
+        IrcDirection::Forward,
         config.irc_step,
-    );
-    let (origin_minimum, positive, negative) = quench_branch_shells(
+        config,
+    )?;
+    let (negative, _) = roll_nd_branch(
+        surface,
+        &saddle_coordinates,
+        &lowest_mode,
+        IrcDirection::Reverse,
+        config.irc_step,
+        config,
+    )?;
+    let (origin_minimum, positive, negative) = reconcile_source_connection(
         surface,
         origin_minimum,
-        saddle_coordinates.view(),
-        lowest_mode.view(),
-        branch_step,
+        positive,
+        negative,
         config,
         witness,
+        None,
     )?;
     let endpoint_relation =
         witness.relation(positive.coordinates.view(), negative.coordinates.view());
