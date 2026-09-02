@@ -374,6 +374,9 @@ mod tests {
         // reflected-Laplacian iteration instead of seeding the missing mode
         // through decimal roundoff.
         let mut g = LandscapeGraph::new();
+        for basin in 0..4 {
+            g.observe_basin(basin);
+        }
         g.observe_crossing(0, 3, 4.0);
         g.observe_crossing(1, 2, 4.0);
         g.observe_crossing(0, 1, 1.0);
