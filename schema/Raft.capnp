@@ -10,9 +10,9 @@ struct Decree {
 }
 
 # An exploration decree payload: where the leader sends each replica
-# next. Versioned by the log index it is committed at; a chain applies
-# the highest committed decree it has seen and never blocks waiting
-# for a newer one.
+# next. Assignments carry the monotone coordinator snapshot from which
+# the spectral split was computed; a chain applies a snapshot once and
+# never blocks waiting for a newer one.
 struct ExplorationDecree {
   # Seam evidence the decree was computed from.
   algebraicConnectivity @0 :Float64;
@@ -36,7 +36,7 @@ struct ReplicaAssignment {
   anchorBasin @2 :UInt64;
   # Whether the replica should run confined bridge segments.
   bridgeDuty @3 :Bool;
-  # Decree sequence for tracing.
+  # Coordinator snapshot version; the field name is retained on the wire.
   decreeIndex @4 :UInt64;
 }
 

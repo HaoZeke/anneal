@@ -2663,6 +2663,38 @@ fn discovery_role_allows_ride(role: Option<anneal_core::discovery_roster::Discov
 }
 
 #[cfg(feature = "bank-rpc")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DecreeAnchorAction {
+    Ignore,
+    MarkApplied { snapshot: u64 },
+    Fetch { snapshot: u64, basin: u64 },
+}
+
+#[cfg(feature = "bank-rpc")]
+fn decree_anchor_action(
+    applied_snapshot: Option<u64>,
+    assignment: Option<&anneal_core::raft::wire::ReplicaAssignment>,
+    current_basin: Option<u64>,
+) -> DecreeAnchorAction {
+    let Some(assignment) = assignment else {
+        return DecreeAnchorAction::Ignore;
+    };
+    if applied_snapshot.is_some_and(|applied| assignment.decree_index <= applied) {
+        return DecreeAnchorAction::Ignore;
+    }
+    if current_basin == Some(assignment.anchor_basin) {
+        DecreeAnchorAction::MarkApplied {
+            snapshot: assignment.decree_index,
+        }
+    } else {
+        DecreeAnchorAction::Fetch {
+            snapshot: assignment.decree_index,
+            basin: assignment.anchor_basin,
+        }
+    }
+}
+
+#[cfg(feature = "bank-rpc")]
 fn settled_external_calls(requested: u64, remaining: usize) -> u64 {
     requested.min(u64::try_from(remaining).unwrap_or(u64::MAX))
 }
@@ -2915,7 +2947,7 @@ fn run_capnp_catalog(
             let mut observer = None;
             let mut now = 0u64;
             let mut last_lead_work = 0u64;
-            let mut decree_sequence = 0u64;
+            let mut last_proposed_snapshot = 0u64;
             while !stop.load(std::sync::atomic::Ordering::Relaxed) {
                 std::thread::sleep(std::time::Duration::from_millis(10));
                 now += 1;
@@ -2962,15 +2994,16 @@ fn run_capnp_catalog(
                         match client.observer_status(*sequence) {
                             Ok(status) => {
                                 *sequence += 1;
-                                if let Some(seam) = status.seam {
-                                    decree_sequence += 1;
+                                if status.snapshot_version > last_proposed_snapshot
+                                    && let Some(seam) = status.seam
+                                {
                                     let assignments = assign_seam_work(
                                         &decree_members,
                                         seam.left_basin,
                                         seam.right_basin,
                                         seam.community_left,
                                         seam.community_right,
-                                        decree_sequence,
+                                        status.snapshot_version,
                                     );
                                     let decree = ExplorationDecree {
                                         algebraic_connectivity: seam.algebraic_connectivity,
@@ -2979,7 +3012,9 @@ fn run_capnp_catalog(
                                         right_basin: seam.right_basin,
                                         assignments,
                                     };
-                                    let _ = node.propose(encode_decree(&decree));
+                                    if node.propose(encode_decree(&decree)).is_ok() {
+                                        last_proposed_snapshot = status.snapshot_version;
+                                    }
                                 }
                             }
                             Err(_) => {
@@ -3331,6 +3366,7 @@ fn run_capnp_catalog(
     let mut last_charged = 0usize;
     #[cfg(feature = "ira")]
     let mut assigned_discovery_role = None;
+    let mut applied_decree_snapshot = None;
     let mut best_at_checkpoint = f64::INFINITY;
     let mut announced_score = false;
     let mut announced_personal = None;
@@ -4309,6 +4345,49 @@ fn run_capnp_catalog(
                 .record_slice(replica, trace)
                 .expect("terminal checkpoint trace must remain complete");
             return CheckpointAction::Continue;
+        }
+        match decree_anchor_action(
+            applied_decree_snapshot,
+            decree_assignment.as_ref(),
+            policy_trace.local_basin,
+        ) {
+            DecreeAnchorAction::Ignore => {}
+            DecreeAnchorAction::MarkApplied { snapshot } => {
+                applied_decree_snapshot = Some(snapshot);
+            }
+            DecreeAnchorAction::Fetch {
+                snapshot: decree_snapshot,
+                basin,
+            } => {
+                if let CatalogSampleOutcome::Candidate(candidate) = cooperative
+                    .try_sample_basin(replica, basin)
+                    .expect("seam-anchor access must preserve local execution")
+                    && candidate.census_basin == Some(basin)
+                    && candidate.coordinates.len() == snapshot.current_state().len()
+                {
+                    cooperative
+                        .record_work(replica, ChargeKind::RemoteProposal, 0)
+                        .expect("seam-anchor transfer must enter the cooperative ledger");
+                    anneal_core::catalog::include_packing_reference(&candidate.coordinates);
+                    anneal_core::catalog::offer_known_minimum(
+                        candidate.energy,
+                        &candidate.coordinates,
+                    );
+                    applied_decree_snapshot = Some(decree_snapshot);
+                    trace.policy_role = PolicyRole::Explore;
+                    trace.policy_reason = "spectral_anchor";
+                    trace.proposal_family = ProposalFamily::CatalogSample;
+                    trace.sampled_basin = Some(basin);
+                    trace.adoption = SliceAdoption::Adopted;
+                    cooperative
+                        .record_slice(replica, trace)
+                        .expect("seam-anchor checkpoint trace must remain complete");
+                    return CheckpointAction::BoundaryProposal {
+                        state: Array1::from(candidate.coordinates),
+                        action: "spectral_anchor".to_owned(),
+                    };
+                }
+            }
         }
         if histo_screen {
             cooperative
