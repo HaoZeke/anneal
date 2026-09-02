@@ -308,10 +308,10 @@ pub fn construct(
 }
 
 /// Rebuild the whole cluster on the lattice of occupied positions and hollow
-/// sites of `x`: the site nearest the centroid is placed first, then each
-/// further point takes the vacant lattice site with the lowest energy in the
-/// field of the points already placed, and the occupation is then relaxed
-/// by swaps. Every site energy is charged at its pair fraction.
+/// sites of `x`: the fully coordinated interior stays, then each further
+/// point takes the vacant lattice site with the lowest energy in the field
+/// of the points already placed, and the occupation is then relaxed by
+/// swaps. Every site energy is charged at its pair fraction.
 pub fn reoccupy(cfg: &LatticeSearchConfig, ledger: &mut Ledger, x: ArrayView1<f64>) -> Array1<f64> {
     let n = cfg.n_points;
     let xs = x.to_vec();
@@ -323,14 +323,35 @@ pub fn reoccupy(cfg: &LatticeSearchConfig, ledger: &mut Ledger, x: ArrayView1<f6
             c[k] += xs[3 * i + k] / n as f64;
         }
     }
-    let first = (0..lattice.len())
-        .min_by(|&a, &b| dist2(lattice[a], c).total_cmp(&dist2(lattice[b], c)))
-        .unwrap_or(0);
-    let mut placed: Vec<f64> = lattice[first].to_vec();
+    // The interior stays: points with a full coordination shell seed the
+    // placement, and only the rest of the lattice is reoccupied. A structure
+    // without an interior starts from the site nearest its centroid.
+    let cut2 = cfg.neighbour_cutoff * cfg.neighbour_cutoff;
+    let mut coordination = vec![0usize; n];
+    for a in 0..n {
+        for b in (a + 1)..n {
+            if dist2(point(&xs, a), point(&xs, b)) < cut2 {
+                coordination[a] += 1;
+                coordination[b] += 1;
+            }
+        }
+    }
+    let mut seeds: Vec<usize> = (0..n).filter(|&i| coordination[i] >= 12).collect();
+    if seeds.is_empty() {
+        seeds.push(
+            (0..lattice.len())
+                .min_by(|&a, &b| dist2(lattice[a], c).total_cmp(&dist2(lattice[b], c)))
+                .unwrap_or(0),
+        );
+    }
+    let mut placed: Vec<f64> = Vec::with_capacity(3 * n);
+    for &i in &seeds {
+        placed.extend_from_slice(&lattice[i]);
+    }
     let mut vacant: Vec<[f64; 3]> = lattice
         .iter()
         .enumerate()
-        .filter(|(i, _)| *i != first)
+        .filter(|(i, _)| !seeds.contains(i))
         .map(|(_, s)| *s)
         .collect();
     let frac = 2.0 / n.max(1) as f64;
