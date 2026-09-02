@@ -349,6 +349,7 @@ struct ScientificState {
     ride_environments: EnvironmentBook,
     ride_ledger: RideLedger,
     ride_information_scores: BTreeMap<RideArm, f64>,
+    discovery_ride_assignments: BTreeMap<u32, RideArm>,
     ride_candidates: BTreeMap<u64, CatalogCandidate>,
     ride_saddles: BTreeMap<u64, CertifiedRideSaddle>,
     next_ride_saddle: u64,
@@ -507,6 +508,7 @@ impl CoordinatorState {
                             .map_err(|_| CatalogServerError::InvalidScientificConfiguration)?,
                     ),
                     ride_information_scores: BTreeMap::new(),
+                    discovery_ride_assignments: BTreeMap::new(),
                     ride_candidates: BTreeMap::new(),
                     ride_saddles: BTreeMap::new(),
                     next_ride_saddle: 0,
@@ -2182,11 +2184,19 @@ fn apply_request(
                 );
             };
             let mut ride_ledger = scientific.ride_ledger.clone();
-            if let Some(order) = ride_ledger.claim_ranked(
-                request.identity.replica,
-                *seed,
-                &scientific.ride_information_scores,
-            ) {
+            let assigned_arm = scientific
+                .discovery_ride_assignments
+                .get(&request.identity.replica);
+            let order = assigned_arm
+                .and_then(|arm| ride_ledger.claim_arm(request.identity.replica, *seed, arm))
+                .or_else(|| {
+                    ride_ledger.claim_ranked(
+                        request.identity.replica,
+                        *seed,
+                        &scientific.ride_information_scores,
+                    )
+                });
+            if let Some(order) = order {
                 let Some(source) = scientific
                     .ride_candidates
                     .get(&order.arm.source_basin)
@@ -2212,6 +2222,9 @@ fn apply_request(
                     );
                 };
                 scientific.ride_ledger = ride_ledger;
+                scientific
+                    .discovery_ride_assignments
+                    .remove(&request.identity.replica);
                 payload = AcceptedPayload::RideWork(CatalogRideWork {
                     order,
                     source,
@@ -3168,8 +3181,19 @@ fn minimum_information_role(
         .filter_map(|assignment| assignment.ride_action)
         .filter_map(|index| ride_arms.get(index).cloned())
         .collect::<BTreeSet<_>>();
+    let ride_assignments = assignments
+        .iter()
+        .filter_map(|assignment| {
+            let index = assignment.ride_action?;
+            Some((assignment.replica, ride_arms.get(index)?.clone()))
+        })
+        .collect::<BTreeMap<_, _>>();
+    if ride_assignments.len() != selected_rides.len() {
+        return None;
+    }
     ride_rates.retain(|arm, _| selected_rides.contains(arm));
     scientific.ride_information_scores = ride_rates;
+    scientific.discovery_ride_assignments = ride_assignments;
     assignments
         .into_iter()
         .find(|assignment| assignment.replica == query_replica)
