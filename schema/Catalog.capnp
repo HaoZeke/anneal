@@ -252,6 +252,12 @@ struct CoordinatorStatus {
   communityRight @13 :UInt32;
   seamLeftBasin @14 :UInt64;
   seamRightBasin @15 :UInt64;
+  # Exact transition census. Edges exclude symmetry-reduced self-loops;
+  # degenerate rearrangements count the latter by exact saddle identity.
+  uniqueSaddles @16 :UInt64;
+  uniqueEdges @17 :UInt64;
+  uniqueDegenerateRearrangements @18 :UInt64;
+  certifiedConnections @19 :UInt64;
 }
 
 struct TransitionRecord {
@@ -348,6 +354,7 @@ struct RideReportReply {
     failed @4 :RideFailure;
   }
   novelSaddle @5 :Bool;
+  degenerateRearrangement @6 :Bool;
 }
 
 # Which selection produced a barrier's parent map. The two branches carry
