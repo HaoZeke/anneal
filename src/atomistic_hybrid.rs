@@ -21,7 +21,7 @@ use crate::minimum_information::{
 use crate::movekernel::{Gaussian, MoveKernel};
 use crate::nd_hybrid::{ActionFeatureError, ActionFeatureMap, DescriptorActionFeatures};
 use crate::pes_exploration::{
-    discover_cartesian_mode_connection_with_budget, localized_cartesian_mode,
+    discover_cartesian_mode_connection_in_context_with_budget, localized_cartesian_mode,
     ExactStructureWitness, PesExplorationConfig, PesExplorationError, PesNetwork, PesSurface,
     RideModeDirection, StructureContext,
 };
@@ -355,8 +355,12 @@ fn validate(
 }
 
 fn structure_context(system: &AtomisticSystem, geometry: DescriptorGeometry) -> StructureContext {
-    StructureContext::new(Some(system.species.clone()), Some(geometry), None)
-        .with_masses(Some(system.masses.clone()))
+    StructureContext::new(
+        Some(system.species.clone()),
+        Some(geometry),
+        Some(system.identity_domain.clone()),
+    )
+    .with_masses(Some(system.masses.clone()))
 }
 
 fn action_seed(seed: u64, attempt: u64, source: usize, family: usize, rank: u16) -> u64 {
@@ -599,15 +603,15 @@ where
                 let minima_before = network.minimum_count();
                 let saddles_before = network.saddle_count();
                 let unresolved_before = network.unresolved_saddles().len();
-                let ride = discover_cartesian_mode_connection_with_budget(
+                let context = structure_context(system, geometry);
+                let ride = discover_cartesian_mode_connection_in_context_with_budget(
                     surface,
                     descriptor_space,
                     &mut network,
                     source.view(),
-                    ArrayView1::from(system.masses.as_slice()),
                     &system.frozen_atoms,
                     mode.view(),
-                    Some(&system.species),
+                    &context,
                     &config.exploration,
                     witness,
                     remaining.min(config.ride_evaluation_cap),

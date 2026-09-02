@@ -3007,6 +3007,7 @@ where
         species,
         config,
         None,
+        None,
         witness,
     )
 }
@@ -3051,6 +3052,7 @@ where
         species,
         config,
         Some((frozen_atoms, periodic)),
+        None,
         witness,
     )
 }
@@ -3100,6 +3102,64 @@ where
     }
 }
 
+/// Run one budgeted atomistic ridge ride in a caller-owned identity domain.
+///
+/// The context supplies the species, masses, descriptor geometry, and system
+/// namespace stored on every admitted minimum and saddle. This keeps records
+/// from distinct PES invocations non-interchangeable even when their Cartesian
+/// shapes happen to be equivalent.
+#[allow(clippy::too_many_arguments)]
+pub fn discover_cartesian_mode_connection_in_context_with_budget<S, W>(
+    surface: &S,
+    descriptor_space: &DescriptorSpace,
+    network: &mut PesNetwork,
+    start: ArrayView1<f64>,
+    frozen_atoms: &[bool],
+    mode: ArrayView1<f64>,
+    context: &StructureContext,
+    config: &PesExplorationConfig,
+    witness: &W,
+    maximum_evaluations: u64,
+) -> CartesianConnectionAttempt
+where
+    S: PesSurface + ?Sized,
+    W: ExactStructureWitness + ?Sized,
+{
+    let budgeted = EvaluationBudgetSurface::new(surface, maximum_evaluations);
+    let connection = match (context.masses(), context.geometry()) {
+        (Some(masses), Some(geometry)) if descriptor_space.geometry() == Some(geometry) => {
+            discover_mode_connection_impl(
+                &budgeted,
+                descriptor_space,
+                network,
+                start,
+                ArrayView1::from(masses),
+                mode,
+                context.species(),
+                config,
+                Some((frozen_atoms, geometry.periodic())),
+                Some(context.clone()),
+                witness,
+            )
+        }
+        (None, _) => Err(PesExplorationError::InvalidShape(
+            "atomistic context must contain one mass per atom",
+        )),
+        (_, None) => Err(PesExplorationError::InvalidShape(
+            "atomistic context must contain descriptor geometry",
+        )),
+        (Some(_), Some(_)) => Err(PesExplorationError::InvalidShape(
+            "atomistic context geometry must match the descriptor space",
+        )),
+    };
+    let (charged_evaluations, budget_exhausted) = budgeted.state();
+    CartesianConnectionAttempt {
+        connection,
+        charged_evaluations,
+        budget_exhausted,
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn discover_mode_connection_impl<S, W>(
     surface: &S,
@@ -3111,6 +3171,7 @@ fn discover_mode_connection_impl<S, W>(
     species: Option<&[u32]>,
     config: &PesExplorationConfig,
     cartesian_index: Option<(&[bool], [bool; 3])>,
+    context_override: Option<StructureContext>,
     witness: &W,
 ) -> Result<SaddleConnection, PesExplorationError>
 where
@@ -3145,12 +3206,32 @@ where
     }
 
     let origin_minimum = quench(surface, start, config)?;
-    let context = StructureContext::new(
-        species.map(<[u32]>::to_vec),
-        descriptor_space.geometry(),
-        None,
-    )
-    .with_masses(Some(masses.to_vec()));
+    let context = match context_override {
+        Some(context) => {
+            let masses_match = context.masses().is_some_and(|context_masses| {
+                context_masses.len() == masses.len()
+                    && context_masses
+                        .iter()
+                        .zip(masses.iter())
+                        .all(|(left, right)| left == right)
+            });
+            if context.species() != species
+                || !masses_match
+                || context.geometry() != descriptor_space.geometry()
+            {
+                return Err(PesExplorationError::InvalidShape(
+                    "atomistic context must match species, masses, and descriptor geometry",
+                ));
+            }
+            context
+        }
+        None => StructureContext::new(
+            species.map(<[u32]>::to_vec),
+            descriptor_space.geometry(),
+            None,
+        )
+        .with_masses(Some(masses.to_vec())),
+    };
     let mode = normalize_mode(mode)?;
     let activation = bowl_breakout(
         surface,
