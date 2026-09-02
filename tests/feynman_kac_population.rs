@@ -516,3 +516,85 @@ fn deepest_ico_is_the_only_packing_donor() {
     let parents = assign_parents_by_packing(&occupants, 3);
     assert_eq!(parents, vec![7, 7, 9, 2, 1]);
 }
+
+#[test]
+fn an_attached_replica_is_required_by_the_open_barrier() {
+    let mut population = SynchronousPopulation::new([0, 1], coefficients(), 1, 3).unwrap();
+    population.attach(2).unwrap();
+    assert!(population.attach(2).is_err(), "a second attach of one replica is a duplicate");
+    assert_eq!(population.live_replicas(), vec![2]);
+
+    let first = population
+        .submit(0, PopulationMember::new(0, -4.0, 0.4, 2.0).unwrap())
+        .unwrap();
+    assert_eq!(
+        first,
+        EpochSubmissionOutcome::Pending {
+            epoch: 0,
+            submitted: 1,
+            required: 3,
+        }
+    );
+    population
+        .submit(0, PopulationMember::new(1, -3.0, 0.8, 1.0).unwrap())
+        .unwrap();
+    let ready = population
+        .submit(0, PopulationMember::new(2, -5.0, 0.2, 1.0).unwrap())
+        .unwrap();
+    let EpochSubmissionOutcome::Ready(plan) = ready else {
+        panic!("the attached replica must close the epoch it is required by")
+    };
+    assert_eq!(plan.destinations(), &[0, 1, 2]);
+}
+
+#[test]
+fn the_barrier_closes_on_quorum_once_the_deadline_passes() {
+    let mut population = SynchronousPopulation::new([0, 1, 2, 3], coefficients(), 2, 11)
+        .unwrap()
+        .with_quorum(0.5, 3)
+        .unwrap();
+    assert!(population.tick().unwrap().is_none(), "nothing submitted, nothing to close");
+    population
+        .submit(0, PopulationMember::new(0, -10.0, 0.2, 8.0).unwrap())
+        .unwrap();
+    population
+        .submit(0, PopulationMember::new(1, -11.0, 0.9, 1.0).unwrap())
+        .unwrap();
+    assert!(population.tick().unwrap().is_none());
+    assert!(population.tick().unwrap().is_none());
+    let closed = population.tick().unwrap();
+    let Some(EpochSubmissionOutcome::Ready(plan)) = closed else {
+        panic!("half the roster past the deadline must close the epoch: {closed:?}")
+    };
+    assert_eq!(plan.epoch(), 0);
+    assert_eq!(plan.destinations(), &[0, 1]);
+    assert_eq!(population.open_epoch(), 1);
+    // A late submission to the closed epoch is answered with its plan and
+    // finds itself unaddressed there rather than reopening the barrier.
+    let late = population
+        .submit(0, PopulationMember::new(2, -9.0, 0.5, 3.0).unwrap())
+        .unwrap();
+    let EpochSubmissionOutcome::Ready(plan) = late else {
+        panic!("a closed epoch answers with its plan")
+    };
+    assert!(population_family_position(plan.destinations(), plan.parents(), 2).is_none());
+}
+
+#[test]
+fn a_quorum_short_barrier_outlasts_the_deadline() {
+    let mut population = SynchronousPopulation::new([0, 1, 2, 3], coefficients(), 2, 11)
+        .unwrap()
+        .with_quorum(0.75, 2)
+        .unwrap();
+    population
+        .submit(0, PopulationMember::new(0, -10.0, 0.2, 8.0).unwrap())
+        .unwrap();
+    for _ in 0..5 {
+        assert!(population.tick().unwrap().is_none());
+    }
+    assert_eq!(population.open_epoch(), 0);
+    assert!(SynchronousPopulation::new([0, 1], coefficients(), 1, 1)
+        .unwrap()
+        .with_quorum(0.0, 2)
+        .is_err());
+}
