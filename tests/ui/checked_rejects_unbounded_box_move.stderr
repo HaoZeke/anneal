@@ -1,13 +1,13 @@
-error[E0277]: the trait bound `Gaussian: CertifiedMoveFor<f64, BoxConstrained<f64>>` is not satisfied
+error[E0277]: the trait bound `anneal_core::movekernel::Gaussian: CertifiedMoveFor<f64, BoxConstrained<f64>>` is not satisfied
   --> tests/ui/checked_rejects_unbounded_box_move.rs:16:9
    |
 12 |     let _ = SaVariant::checked(
    |             ------------------ required by a bound introduced by this call
 ...
 16 |         Gaussian::new(0.5),
-   |         ^^^^^^^^^^^^^^^^^^ the trait `CertifiedMoveFor<f64, BoxConstrained<f64>>` is not implemented for `Gaussian`
+   |         ^^^^^^^^^^^^^^^^^^ the trait `CertifiedMoveFor<f64, BoxConstrained<f64>>` is not implemented for `anneal_core::movekernel::Gaussian`
    |
-help: the trait `CertifiedMoveFor<f64, BoxConstrained<f64>>` is not implemented for `Gaussian`
+help: the trait `CertifiedMoveFor<f64, BoxConstrained<f64>>` is not implemented for `anneal_core::movekernel::Gaussian`
       but trait `CertifiedMoveFor<f64, ContinuousR_n>` is implemented for it
   --> src/variant.rs
    |
