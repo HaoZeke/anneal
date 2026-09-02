@@ -154,11 +154,11 @@ pub fn assign_discovery_roles(
         .basin_observations
         .saturating_add(coverage.saddle_observations);
     let mut provisional = [0_u64; 2];
-    let mut basin_seats = 0_usize;
+    let mut roles = Vec::with_capacity(count);
     for seat in 0..count {
         if !coverage.ride_available {
-            basin_seats += 1;
             provisional[0] = provisional[0].saturating_add(1);
+            roles.push(DiscoveryRole::BasinEscape);
             continue;
         }
         let total = base_total
@@ -183,18 +183,18 @@ pub fn assign_discovery_roles(
         };
         let arm = usize::from(!choose_basin);
         provisional[arm] = provisional[arm].saturating_add(1);
-        basin_seats += usize::from(choose_basin);
+        roles.push(if choose_basin {
+            DiscoveryRole::BasinEscape
+        } else {
+            DiscoveryRole::SaddleRide
+        });
     }
     Ok(members
         .into_iter()
-        .enumerate()
-        .map(|(seat, replica)| DiscoveryAssignment {
+        .zip(roles)
+        .map(|(replica, role)| DiscoveryAssignment {
             replica,
-            role: if seat < basin_seats {
-                DiscoveryRole::BasinEscape
-            } else {
-                DiscoveryRole::SaddleRide
-            },
+            role,
             epoch,
         })
         .collect())
