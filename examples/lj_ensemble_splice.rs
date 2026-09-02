@@ -248,6 +248,9 @@ struct ExchangeConfig {
     /// Calls a core is allowed without improvement before a chain in it
     /// restarts from a fresh random cluster.
     core_patience: usize,
+    /// Calls a core class is allowed without any chain improving on it
+    /// before chains in it that do not hold its best restart.
+    core_tabu: usize,
     /// Whether the chain rebuilds its surface from its interior on the
     /// lattice grown from that interior at every `reoccupy_interval` calls,
     /// quenches the rebuilt structure and adopts it when it is lower.
@@ -570,6 +573,11 @@ fn run_chain(
     // CORE_KEY=motif keys the core table on the coarse five-fold class
     // instead of the per-minimum ring-graph hash.
     let motif_key = env_string("CORE_KEY", "ring") == "motif";
+    // The chain's own progress inside its current core: the key it sits in,
+    // its best energy there and the charged calls at that best.
+    let mut own_key: Option<u64> = None;
+    let mut own_best = f64::INFINITY;
+    let mut own_best_at = 0usize;
     let mut child_opt = WarmLbfgs::default();
     let mut checkpoint = |snapshot: ChainCheckpoint<'_>| {
         {
@@ -629,10 +637,23 @@ fn run_chain(
                 stat.best = energy;
                 stat.calls_since_improvement = 0;
             }
-            if stat.calls_since_improvement < exchange.core_patience {
+            if own_key != Some(key) {
+                own_key = Some(key);
+                own_best = f64::INFINITY;
+                own_best_at = snapshot.charged();
+            }
+            if energy < own_best - 1e-6 {
+                own_best = energy;
+                own_best_at = snapshot.charged();
+            }
+            let own_stalled =
+                snapshot.charged().saturating_sub(own_best_at) >= exchange.core_patience;
+            let class_tabu =
+                stat.calls_since_improvement >= exchange.core_tabu && energy > stat.best + 1e-6;
+            if !own_stalled && !class_tabu {
                 return CheckpointAction::Continue;
             }
-            stat.calls_since_improvement = 0;
+            own_key = None;
             table.restarts += 1;
             drop(table);
             tally.adopted += 1;
@@ -832,6 +853,7 @@ fn main() {
         pbh_dcut_scale: env_f64("PBH_DCUT", 1.5),
         core_tabu: mode == "coretabu",
         core_patience: env_usize("CORE_PATIENCE", 20_000),
+        core_tabu: env_usize("CORE_TABU", 50_000),
         reoccupy: env_usize("REOCCUPY", 0) == 1,
         reoccupy_interval: env_usize("REOCCUPY_INTERVAL", 5_000),
     };
