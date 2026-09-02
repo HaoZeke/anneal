@@ -41,7 +41,13 @@ pub mod Raft_capnp {
 }
 /// Generated Cap'n Proto schema for [`catalog_rpc`].
 #[cfg(feature = "bank-rpc")]
-#[allow(missing_docs, dead_code, clippy::all, non_camel_case_types)]
+#[allow(
+    missing_docs,
+    dead_code,
+    unused_parens,
+    clippy::all,
+    non_camel_case_types
+)]
 #[rustfmt::skip]
 #[allow(non_snake_case)]
 pub mod Catalog_capnp {

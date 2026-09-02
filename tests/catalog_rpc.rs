@@ -1,21 +1,29 @@
 #![cfg(feature = "bank-rpc")]
 
-use std::io::{Read, Write};
-use std::net::TcpStream;
+use std::io::Read;
 use std::path::PathBuf;
 use std::sync::{Arc, Barrier};
 use std::thread;
 use std::time::Duration;
 
-use anneal_core::Catalog_capnp::{RejectionKind, catalog_reply, catalog_request};
+use anneal_core::catalog::{
+    DescriptorSignature, EngineSignature, FreshEvaluation, SystemSignature, ValidatorConfig,
+};
 use anneal_core::catalog_rpc::client::{CatalogClient, CatalogClientError, ClientConfig};
 use anneal_core::catalog_rpc::server::{CatalogServer, ServerConfig};
 use anneal_core::catalog_rpc::{
-    CatalogCandidate, CatalogIdentity, CatalogLedgerEvent, PROTOCOL_VERSION, ProtocolRejection,
+    CatalogCandidate, CatalogIdentity, CatalogLedgerEvent, CatalogOperation, CatalogReply,
+    CatalogRequest, CoordinatorEvent, PROTOCOL_VERSION, ProtocolRejection,
 };
 use anneal_core::cooperative_search::ledger::ChargeKind;
-use capnp::message::{Builder, ReaderOptions};
-use capnp::serialize;
+use anneal_core::descriptor_space::{
+    DescriptorBlockKind, DescriptorBlockSpec, DescriptorSchema, DescriptorSpace,
+};
+use anneal_core::pes_exploration::ExactStructureWitness;
+use anneal_core::scaling::SuccessiveHalving;
+use anneal_core::transition_graph::AttractionRegionConfig;
+use ndarray::ArrayView1;
+use std::collections::BTreeMap;
 
 fn identity(ensemble: &str, replica: u32) -> CatalogIdentity {
     CatalogIdentity {
@@ -521,77 +529,184 @@ fn parseable_wire_failures_are_structured_and_do_not_mutate_state() {
         ServerConfig::new("jcc-2026", "ensemble-41", [0x5a; 32], [0]).unwrap(),
     )
     .unwrap();
-
-    assert_eq!(
-        raw_rejection(server.addr(), PROTOCOL_VERSION + 1, &[0x5a; 32]),
-        (41, 0, RejectionKind::UnsupportedVersion)
-    );
-    assert_eq!(
-        raw_rejection(server.addr(), PROTOCOL_VERSION, &[0x5a; 31]),
-        (41, 0, RejectionKind::Malformed)
-    );
-
-    let mut observer = CatalogClient::connect(
+    let mut client = CatalogClient::connect(
         server.addr(),
         identity("ensemble-41", 0),
         ClientConfig::default(),
     )
     .unwrap();
-    assert_eq!(observer.snapshot(1).unwrap().version, 0);
+
+    let unsupported = client
+        .session_call_digest(PROTOCOL_VERSION + 1, &[0x5a; 32], 41)
+        .unwrap();
+    assert!(matches!(
+        unsupported,
+        CatalogReply::Rejected {
+            event_sequence: 41,
+            reason: ProtocolRejection::UnsupportedVersion,
+            ..
+        }
+    ));
+    let malformed = client
+        .session_call_digest(PROTOCOL_VERSION, &[0x5a; 31], 41)
+        .unwrap();
+    assert!(matches!(
+        malformed,
+        CatalogReply::Rejected {
+            event_sequence: 41,
+            reason: ProtocolRejection::Malformed,
+            ..
+        }
+    ));
+    assert_eq!(client.snapshot(1).unwrap().version, 0);
 }
 
-fn raw_rejection(
-    addr: std::net::SocketAddr,
-    version: u16,
-    digest: &[u8],
-) -> (u64, u64, RejectionKind) {
-    let mut stream = TcpStream::connect(addr).unwrap();
-    let mut message = Builder::new_default();
-    let mut root = message.init_root::<catalog_request::Builder>();
-    root.set_protocol_version(version);
-    root.set_event_sequence(41);
-    root.set_snapshot_version(0);
-    {
-        let mut wire_identity = root.reborrow().init_identity();
-        wire_identity.set_campaign("jcc-2026");
-        wire_identity.set_ensemble("ensemble-41");
-        wire_identity.set_replica(0);
-        wire_identity.set_signature_digest(digest);
-    }
-    root.init_operation().set_snapshot(());
-    serialize::write_message(&mut stream, &message).unwrap();
-    stream.flush().unwrap();
-
-    let reply = serialize::read_message(&mut stream, ReaderOptions::new()).unwrap();
-    let root = reply.get_root::<catalog_reply::Reader>().unwrap();
-    let reason = match root.get_result().which().unwrap() {
-        catalog_reply::result::Rejected(reason) => reason.unwrap(),
-        catalog_reply::result::Accepted(_) => panic!("invalid request was accepted"),
-    };
-    (
-        root.get_event_sequence(),
-        root.get_snapshot_version(),
-        reason,
+#[test]
+fn sequence_regression_is_rejected() {
+    let server = CatalogServer::start(
+        "127.0.0.1:0",
+        ServerConfig::new("jcc-2026", "ensemble-seq", [0x5a; 32], [0]).unwrap(),
     )
+    .unwrap();
+    let mut client = CatalogClient::connect(
+        server.addr(),
+        identity("ensemble-seq", 0),
+        ClientConfig::default(),
+    )
+    .unwrap();
+    assert_eq!(
+        client
+            .record_visit(2, candidate(0, 2, 0.1))
+            .unwrap()
+            .version,
+        1
+    );
+    assert_eq!(
+        client.record_visit(1, candidate(0, 1, 0.2)).unwrap_err(),
+        CatalogClientError::Rejected(ProtocolRejection::SequenceRegression)
+    );
 }
 
-use anneal_core::catalog::{
-    DescriptorSignature, EngineSignature, FreshEvaluation, SystemSignature, ValidatorConfig,
-};
-use anneal_core::descriptor_space::{
-    DescriptorBlockKind, DescriptorBlockSpec, DescriptorSchema, DescriptorSpace,
-};
-use anneal_core::pes_exploration::ExactStructureWitness;
-use anneal_core::scaling::SuccessiveHalving;
-use anneal_core::transition_graph::AttractionRegionConfig;
-use ndarray::ArrayView1;
-use std::collections::BTreeMap;
+#[test]
+fn attach_binds_identity_and_rejects_a_foreign_session_call() {
+    let server = CatalogServer::start(
+        "127.0.0.1:0",
+        ServerConfig::new("jcc-2026", "ensemble-bind", [0x5a; 32], [0, 1]).unwrap(),
+    )
+    .unwrap();
+    let mut client = CatalogClient::connect(
+        server.addr(),
+        identity("ensemble-bind", 0),
+        ClientConfig::default(),
+    )
+    .unwrap();
+    let roster = client.attach(1).unwrap();
+    assert!(roster.live.contains(&0));
+
+    let foreign = CatalogRequest {
+        protocol_version: PROTOCOL_VERSION,
+        identity: identity("ensemble-bind", 1),
+        event_sequence: 1,
+        snapshot_version: 0,
+        operation: CatalogOperation::Snapshot,
+    };
+    let reply = client.session_call(foreign).unwrap();
+    assert!(matches!(
+        reply,
+        CatalogReply::Rejected {
+            reason: ProtocolRejection::ReplicaMismatch,
+            ..
+        }
+    ));
+    assert_eq!(client.snapshot(2).unwrap().version, 0);
+}
+
+#[test]
+fn detach_removes_the_replica_from_the_roster() {
+    let server = CatalogServer::start(
+        "127.0.0.1:0",
+        ServerConfig::new("jcc-2026", "ensemble-detach", [0x5a; 32], [0, 1]).unwrap(),
+    )
+    .unwrap();
+    let mut first = CatalogClient::connect(
+        server.addr(),
+        identity("ensemble-detach", 0),
+        ClientConfig::default(),
+    )
+    .unwrap();
+    let mut second = CatalogClient::connect(
+        server.addr(),
+        identity("ensemble-detach", 1),
+        ClientConfig::default(),
+    )
+    .unwrap();
+    first.attach(1).unwrap();
+    second.attach(1).unwrap();
+    first.detach(2, "done").unwrap();
+    let roster = second.attach(2).unwrap();
+    assert!(!roster.live.contains(&0));
+    assert!(roster.live.contains(&1));
+    assert!(roster.retired.contains(&0));
+}
+
+#[test]
+fn observe_needs_no_identity() {
+    let server = CatalogServer::start(
+        "127.0.0.1:0",
+        ServerConfig::new("jcc-2026", "ensemble-observe", [0x5a; 32], [0]).unwrap(),
+    )
+    .unwrap();
+    let mut client = CatalogClient::connect(
+        server.addr(),
+        CatalogIdentity {
+            campaign: String::new(),
+            ensemble: String::new(),
+            replica: u32::MAX,
+            signature_digest: [0; 32],
+        },
+        ClientConfig::default(),
+    )
+    .unwrap();
+    let status = client.observe().unwrap();
+    assert_eq!(status.snapshot_version, 0);
+    assert_eq!(status.census_visits, 0);
+}
+
+#[test]
+fn epoch_close_reaches_every_subscriber_exactly_once() {
+    let server = scientific_population_server();
+    let digest = server_digest();
+    let mut first = CatalogClient::connect(
+        server.addr(),
+        scientific_identity(0, digest),
+        ClientConfig::default(),
+    )
+    .unwrap();
+    let mut second = CatalogClient::connect(
+        server.addr(),
+        scientific_identity(1, digest),
+        ClientConfig::default(),
+    )
+    .unwrap();
+    first.attach(1).unwrap();
+    second.attach(1).unwrap();
+    first.events();
+    second.events();
+
+    first.population_abstain_with_snapshot(2, 0).unwrap();
+    second.detach(2, "done").unwrap();
+
+    let first_closed = wait_for_epoch_closed(&mut first);
+    let second_closed = wait_for_epoch_closed(&mut second);
+    assert_eq!(first_closed, vec![CoordinatorEvent::EpochClosed(0)]);
+    assert_eq!(second_closed, vec![CoordinatorEvent::EpochClosed(0)]);
+}
 
 struct SeparationWitness;
 
 impl ExactStructureWitness for SeparationWitness {
-    fn equivalent(&self, left: ArrayView1<f64>, right: ArrayView1<f64>) -> bool {
-        let separation = |point: ArrayView1<'_, f64>| {
+    fn equivalent(&self, left: ndarray::ArrayView1<f64>, right: ndarray::ArrayView1<f64>) -> bool {
+        let separation = |point: ndarray::ArrayView1<'_, f64>| {
             (0..3)
                 .map(|axis| (point[3 + axis] - point[axis]).powi(2))
                 .sum::<f64>()
@@ -599,6 +714,108 @@ impl ExactStructureWitness for SeparationWitness {
         };
         (separation(left) - separation(right)).abs() < 1e-8
     }
+}
+
+fn scientific_descriptor_space() -> DescriptorSpace {
+    DescriptorSpace::new(
+        DescriptorSchema::new(
+            "cooperative-test-soap",
+            1,
+            vec![DescriptorBlockSpec::new(DescriptorBlockKind::SoapMean, 2, 2, 3.5).unwrap()],
+        )
+        .unwrap(),
+    )
+}
+
+fn scientific_signature() -> SystemSignature {
+    SystemSignature {
+        atomic_numbers: vec![18, 18],
+        coordinate_dim: 6,
+        group_labels: vec![0, 1],
+        group_schema: "independent-atoms-v1".into(),
+        frozen_mask: vec![false, false],
+        cell: None,
+        periodic: [false; 3],
+        length_scale: 1.0,
+        energy_scale: 1.0,
+        engine: EngineSignature {
+            kind: "fixture".into(),
+            config_digest: [0x31; 32],
+            external_inputs: BTreeMap::new(),
+        },
+        descriptor: DescriptorSignature {
+            schema: "cooperative-test-soap".into(),
+            version: 1,
+            hyperparameters: BTreeMap::new(),
+            species_channels: vec![18],
+        },
+        validation_schema_version: 1,
+    }
+}
+
+fn server_digest() -> [u8; 32] {
+    scientific_signature().digest()
+}
+
+fn scientific_identity(replica: u32, digest: [u8; 32]) -> CatalogIdentity {
+    CatalogIdentity {
+        campaign: "jcc-2026".into(),
+        ensemble: "scientific-ensemble".into(),
+        replica,
+        signature_digest: digest,
+    }
+}
+
+fn scientific_population_server() -> CatalogServer {
+    let signature = scientific_signature();
+    let digest = signature.digest();
+    let config = ServerConfig::new("jcc-2026", "scientific-ensemble", digest, [0, 1])
+        .unwrap()
+        .with_scientific_state(
+            signature,
+            scientific_descriptor_space(),
+            ValidatorConfig {
+                reference_coordinates: vec![0.0, 0.0, 0.0, 1.2, 0.0, 0.0],
+                descriptor_dim: 9,
+                min_separation: 0.8,
+                coordinate_tolerance: 1e-10,
+                max_gradient_norm: 1e-8,
+                energy_abs_tolerance: 1e-12,
+                energy_rel_tolerance: 1e-12,
+            },
+            2,
+            0.05,
+            400,
+            |coordinates| {
+                Ok(FreshEvaluation {
+                    energy: -coordinates[3],
+                    forces: vec![0.0; coordinates.len()],
+                })
+            },
+        )
+        .unwrap()
+        .with_exact_structure_witness(SeparationWitness)
+        .unwrap();
+    CatalogServer::start("127.0.0.1:0", config).unwrap()
+}
+
+fn wait_for_epoch_closed(client: &mut CatalogClient) -> Vec<CoordinatorEvent> {
+    for _ in 0..50 {
+        let events: Vec<_> = client
+            .events()
+            .into_iter()
+            .filter(|event| matches!(event, CoordinatorEvent::EpochClosed(_)))
+            .collect();
+        if !events.is_empty() {
+            return events;
+        }
+        thread::sleep(Duration::from_millis(10));
+    }
+    client
+        .events()
+        .into_iter()
+        .filter(|event| matches!(event, CoordinatorEvent::EpochClosed(_)))
+        .collect()
 }
 
 fn roster_descriptor_space() -> DescriptorSpace {
