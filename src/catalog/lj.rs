@@ -156,7 +156,7 @@ pub fn system_signature(n_points: usize) -> Result<SystemSignature, LjCatalogPre
          invariant-soap@3,6;invariant-ace-nu3@3,6;chiral-moment@3,6"
             .into(),
     );
-    hyperparameters.insert("normalization".into(), "soft-l2-eps-v1".into());
+    hyperparameters.insert("normalization".into(), "contractive-l2-unit-v2".into());
     hyperparameters.insert("geometry".into(), "finite;length-scale=1".into());
     let mut engine_hasher = Sha256::new();
     engine_hasher.update(b"lennard-jones-reduced-v1;epsilon=1;sigma=1;cutoff=none");

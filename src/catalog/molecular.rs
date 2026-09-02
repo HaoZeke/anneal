@@ -303,7 +303,7 @@ pub fn system_signature(
          invariant-soap@3,6;invariant-ace-nu3@3,6;chiral-moment@3,6"
             .into(),
     );
-    hyperparameters.insert("normalization".into(), "soft-l2-eps-v1".into());
+    hyperparameters.insert("normalization".into(), "contractive-l2-unit-v2".into());
     hyperparameters.insert("geometry".into(), format!("finite;length-scale={scale}"));
     hyperparameters.insert("descriptor_dim".into(), descriptor_dim.to_string());
     let mut external_inputs = BTreeMap::new();

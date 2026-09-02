@@ -1,8 +1,8 @@
 //! Fixed-dimensional invariant geometry for cross-system basin catalogues.
 
 use super::{
-    DescriptorBlockKind, DescriptorBlockMetadata, DescriptorBlockSpec, DescriptorError,
-    DescriptorSchema, DescriptorSpace, DescriptorVector, SOFT_L2_NORMALIZATION_SCHEMA,
+    CONTRACTIVE_L2_NORMALIZATION_SCHEMA, DescriptorBlockKind, DescriptorBlockMetadata,
+    DescriptorBlockSpec, DescriptorError, DescriptorSchema, DescriptorSpace, DescriptorVector,
 };
 use crate::soap::central_spectrum_from_displacements;
 use linkcell::Cell;
@@ -12,7 +12,7 @@ use std::f64::consts::{PI, TAU};
 /// Stable schema name for the cross-system descriptor.
 pub const UNIVERSAL_DESCRIPTOR_SCHEMA: &str = "anneal-universal-pes";
 /// Stable schema version for the cross-system descriptor.
-pub const UNIVERSAL_DESCRIPTOR_VERSION: u32 = 1;
+pub const UNIVERSAL_DESCRIPTOR_VERSION: u32 = 2;
 /// Euclidean radius for block-balanced universal local environments.
 pub const UNIVERSAL_LOCAL_ENVIRONMENT_RADIUS: f64 = 0.2;
 
@@ -20,9 +20,6 @@ const PAIR_CHANNELS: usize = 4;
 const TRIPLE_CHANNELS: usize = 3;
 const SPECIES_CHANNELS: usize = 3;
 const GRAPH_FEATURES: usize = 10;
-// Numerical-scale cutoff remnants fade to zero instead of being promoted to a
-// unit vector; resolved intensive blocks still approach ordinary L2 scaling.
-const NORMALIZATION_EPSILON: f64 = 1.490_116_119_384_765_6e-8;
 
 /// Length scale, simulation cell, and periodic axes used by one descriptor space.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -184,7 +181,7 @@ pub(super) fn describe(
             });
         }
         let raw_norm = norm(&aggregated);
-        let denominator = raw_norm.hypot(NORMALIZATION_EPSILON);
+        let denominator = contractive_denominator(raw_norm);
         for value in &mut aggregated {
             *value /= denominator;
         }
@@ -199,7 +196,7 @@ pub(super) fn describe(
             offset,
             len,
             raw_norm,
-            normalization: SOFT_L2_NORMALIZATION_SCHEMA,
+            normalization: CONTRACTIVE_L2_NORMALIZATION_SCHEMA,
         });
     }
     Ok(DescriptorVector {
@@ -280,11 +277,20 @@ pub(super) fn describe_local(
 fn normalize_local_block(block: &mut Array2<f64>) {
     for mut row in block.rows_mut() {
         let raw_norm = row.iter().map(|value| value * value).sum::<f64>().sqrt();
-        let denominator = raw_norm.hypot(NORMALIZATION_EPSILON);
+        let denominator = contractive_denominator(raw_norm);
         for value in &mut row {
             *value /= denominator;
         }
     }
+}
+
+/// Unit-scale radial contraction for dimensionless invariant blocks.
+///
+/// The map `x -> x / sqrt(1 + ||x||^2)` has norm below one and Jacobian
+/// spectral norm at most one. It is therefore nonexpansive, retains amplitude
+/// near zero, and cannot promote cancellation-scale signals to unit vectors.
+fn contractive_denominator(raw_norm: f64) -> f64 {
+    raw_norm.hypot(1.0)
 }
 
 struct Environment {
