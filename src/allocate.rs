@@ -457,6 +457,39 @@ mod tests {
             "the reversal was not tracked: {after:?}"
         );
     }
+
+    #[test]
+    fn exp3_ix_uses_the_anytime_learning_and_implicit_exploration_rates() {
+        let mut rng = StdRng::seed_from_u64(17);
+        let mut alloc = Exp3Ix::new(2);
+
+        assert_eq!(alloc.next_probabilities(), vec![0.5, 0.5]);
+        let selection = alloc.select(&mut rng);
+        let expected_eta = (2.0_f64.ln() / 2.0).sqrt();
+        assert!((selection.learning_rate() - expected_eta).abs() < 1e-15);
+        assert!((selection.implicit_exploration() - expected_eta / 2.0).abs() < 1e-15);
+
+        let penalized = selection.arm();
+        alloc.update(1.0);
+        let probabilities = alloc.next_probabilities();
+        assert!(probabilities[penalized] < 0.5, "{probabilities:?}");
+        assert!(probabilities[1 - penalized] > 0.5, "{probabilities:?}");
+    }
+
+    #[test]
+    fn exp3_ix_tracks_the_best_fixed_kernel_under_adversarial_feedback() {
+        let mut rng = StdRng::seed_from_u64(23);
+        let mut alloc = Exp3Ix::new(3);
+        for _ in 0..2_000 {
+            let selection = alloc.select(&mut rng);
+            alloc.update(if selection.arm() == 1 { 0.0 } else { 1.0 });
+        }
+
+        assert!(alloc.pulls()[1] > alloc.pulls()[0] + alloc.pulls()[2]);
+        assert_eq!(alloc.success_rates()[1], 1.0);
+        assert_eq!(alloc.success_rates()[0], 0.0);
+        assert_eq!(alloc.success_rates()[2], 0.0);
+    }
 }
 
 /// Thompson sampling over arms by the depth they reach, not by whether they are
