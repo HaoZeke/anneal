@@ -23,7 +23,7 @@ use anneal_core::methods::warm_lbfgs::WarmLbfgs;
 use anneal_core::pes_exploration::{IrcKind, PesExplorationConfig, RideMethod};
 use anneal_core::potentials::{PairKind, PairPotential};
 use anneal_core::shape::IraStructureWitness;
-use ndarray::{Array1, ArrayView1};
+use ndarray::ArrayView1;
 use rand::{SeedableRng, rngs::StdRng};
 use serde_json::json;
 
@@ -254,7 +254,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         .unwrap_or(8);
     let selector = arguments.get(4).map(String::as_str).unwrap_or("all");
     let irc_selector = arguments.get(5).map(String::as_str).unwrap_or("gs2");
-    let seed0 = arguments
+    let seed0: u64 = arguments
         .get(6)
         .and_then(|value| value.parse().ok())
         .unwrap_or(0);
