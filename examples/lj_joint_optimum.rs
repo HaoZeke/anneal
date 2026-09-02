@@ -979,7 +979,7 @@ mod tests {
         let potential = PairPotential::lennard_jones(2);
         let initial = Array1::from(vec![0.0, 0.0, 0.0, 1.2, 0.0, 0.0]);
 
-        let outcome = run_minima_hopping(
+        let run = run_minima_hopping(
             &potential,
             initial.view(),
             2,
@@ -990,8 +990,32 @@ mod tests {
             false,
         );
 
-        assert_eq!(outcome.best, f64::INFINITY);
-        assert!(outcome.best_state.is_none());
-        assert_eq!(outcome.charged, 0);
+        assert_eq!(run.outcome.best, f64::INFINITY);
+        assert!(run.outcome.best_state.is_none());
+        assert_eq!(run.outcome.charged, 0);
+    }
+
+    #[test]
+    fn minima_hopping_accounts_for_adaptive_escape_work_by_stage() {
+        let potential = PairPotential::lennard_jones(2);
+        let initial = Array1::from(vec![0.0, 0.0, 0.0, 1.2, 0.0, 0.0]);
+
+        let run = run_minima_hopping(
+            &potential,
+            initial.view(),
+            2,
+            2_000,
+            7,
+            &DistinctWitness,
+            false,
+            false,
+        );
+
+        assert_eq!(
+            run.initial_quench_calls + run.dynamics_calls + run.proposal_quench_calls,
+            run.outcome.charged
+        );
+        assert!(run.dynamics_steps > 0);
+        assert_ne!(run.final_time_step, 0.005);
     }
 }
