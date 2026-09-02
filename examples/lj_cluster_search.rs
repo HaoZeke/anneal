@@ -1501,6 +1501,7 @@ fn main() {
         ("learncon", MoveLibrary::LearnedReseed),
         ("lean", MoveLibrary::Lean),
         ("burst", MoveLibrary::LeanBurst),
+        ("hollow", MoveLibrary::LeanBurstHollow),
         ("twin", MoveLibrary::Twin),
         ("gtwin", MoveLibrary::GrowthAndTwin),
     ];
