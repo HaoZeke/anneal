@@ -2080,6 +2080,33 @@ fn sorted_eigensystem(
     Ok((sorted_values, sorted_vectors))
 }
 
+fn nd_prfo_model<S: PesSurface + ?Sized>(
+    surface: &S,
+    coordinates: ArrayView1<f64>,
+    config: &PesExplorationConfig,
+) -> Result<(Array1<f64>, Array1<f64>, Array2<f64>), PesExplorationError> {
+    let (_, gradient) = checked_evaluate(surface, coordinates)?;
+    let hessian = finite_difference_hessian(surface, coordinates, config.hessian_step)?;
+    let (eigenvalues, eigenvectors) = sorted_eigensystem(hessian.view())?;
+    Ok((gradient, eigenvalues, eigenvectors))
+}
+
+fn nd_prfo_increment(
+    gradient: &Array1<f64>,
+    eigenvalues: &Array1<f64>,
+    eigenvectors: &Array2<f64>,
+    dimension: usize,
+    config: &PesExplorationConfig,
+) -> Result<Array1<f64>, PesExplorationError> {
+    let step = prfo_trust_region(eigenvalues, eigenvectors, gradient, 1, config.maximum_move);
+    if step.len() != dimension || step.iter().any(|value| !value.is_finite()) {
+        return Err(PesExplorationError::Saddle(
+            "P-RFO returned an invalid N-D step".into(),
+        ));
+    }
+    Ok(step)
+}
+
 fn refine_nd_with_prfo<S: PesSurface + ?Sized>(
     surface: &S,
     start: ArrayView1<f64>,
@@ -2087,24 +2114,79 @@ fn refine_nd_with_prfo<S: PesSurface + ?Sized>(
 ) -> Result<Array1<f64>, PesExplorationError> {
     let mut coordinates = start.to_owned();
     for _ in 0..config.prfo_steps {
-        let (_, gradient) = checked_evaluate(surface, coordinates.view())?;
+        let (gradient, eigenvalues, eigenvectors) =
+            nd_prfo_model(surface, coordinates.view(), config)?;
         if max_abs(gradient.view()) <= config.saddle_force_tolerance {
             return Ok(coordinates);
         }
-        let hessian = finite_difference_hessian(surface, coordinates.view(), config.hessian_step)?;
-        let (sorted_values, sorted_vectors) = sorted_eigensystem(hessian.view())?;
-        let step = prfo_trust_region(
-            &sorted_values,
-            &sorted_vectors,
+        let step = nd_prfo_increment(
             &gradient,
-            1,
-            config.maximum_move,
-        );
-        if step.len() != coordinates.len() || step.iter().any(|value| !value.is_finite()) {
-            return Err(PesExplorationError::Saddle(
-                "P-RFO returned an invalid N-D step".into(),
-            ));
+            &eigenvalues,
+            &eigenvectors,
+            coordinates.len(),
+            config,
+        )?;
+        coordinates += &step;
+    }
+    Err(PesExplorationError::SaddleNotConverged {
+        stage: SaddleConvergenceStage::Prfo,
+    })
+}
+
+fn unstable_coordinate_error(
+    gradient: ArrayView1<f64>,
+    mode: ArrayView1<f64>,
+    curvature: f64,
+) -> Result<f64, PesExplorationError> {
+    let error = (gradient.dot(&mode) / curvature).abs();
+    if !error.is_finite() {
+        return Err(PesExplorationError::InvalidEvaluation(
+            "a nonfinite unstable-coordinate stationarity error",
+        ));
+    }
+    Ok(error)
+}
+
+fn center_nd_irc_saddle<S: PesSurface + ?Sized>(
+    surface: &S,
+    start: ArrayView1<f64>,
+    config: &PesExplorationConfig,
+) -> Result<Array1<f64>, PesExplorationError> {
+    let mut coordinates = start.to_owned();
+    for iteration in 0..config.prfo_steps {
+        let (gradient, eigenvalues, eigenvectors) =
+            nd_prfo_model(surface, coordinates.view(), config)?;
+        let negative_modes = eigenvalues
+            .iter()
+            .filter(|value| **value < -config.negative_curvature_tolerance)
+            .count();
+        let curvature = eigenvalues[0];
+        if negative_modes != 1 {
+            return Err(PesExplorationError::NotFirstOrder {
+                negative_modes,
+                lowest_curvature: curvature,
+            });
         }
+        let mode = eigenvectors.column(0);
+        let coordinate_error = unstable_coordinate_error(gradient.view(), mode, curvature)?;
+        emit_pes_trace(serde_json::json!({
+            "kind": "pes_stage",
+            "stage": "irc_center",
+            "iteration": iteration,
+            "unstable_coordinate_error": coordinate_error,
+            "irc_step": config.irc_step,
+            "lowest_curvature": curvature,
+        }));
+        if coordinate_error < config.irc_step {
+            return Ok(coordinates);
+        }
+        let step = nd_prfo_increment(
+            &gradient,
+            &eigenvalues,
+            &eigenvectors,
+            coordinates.len(),
+            config,
+        )?;
         coordinates += &step;
     }
     Err(PesExplorationError::SaddleNotConverged {
@@ -2787,25 +2869,51 @@ where
     if config.refine_with_prfo {
         saddle_coordinates = refine_nd_with_prfo(surface, saddle_coordinates.view(), config)?;
     }
-    let (saddle_energy, saddle_gradient) = checked_evaluate(surface, saddle_coordinates.view())?;
-    let saddle_max_gradient = max_abs(saddle_gradient.view());
+    let (mut saddle_energy, mut saddle_gradient) =
+        checked_evaluate(surface, saddle_coordinates.view())?;
+    let mut saddle_max_gradient = max_abs(saddle_gradient.view());
     if saddle_max_gradient > config.saddle_force_tolerance {
         return Err(PesExplorationError::SaddleNotConverged {
             stage: SaddleConvergenceStage::ForceCertification,
         });
     }
-    let index = stationary_index(
+    let mut index = stationary_index(
         surface,
         saddle_coordinates.view(),
         config.hessian_step,
         config.negative_curvature_tolerance,
     )?;
-    let curvature = index.eigenvalues[0];
+    let mut curvature = index.eigenvalues[0];
     if index.negative_modes != 1 {
         return Err(PesExplorationError::NotFirstOrder {
             negative_modes: index.negative_modes,
             lowest_curvature: curvature,
         });
+    }
+    let coordinate_error =
+        unstable_coordinate_error(saddle_gradient.view(), index.lowest_mode.view(), curvature)?;
+    if coordinate_error >= config.irc_step {
+        saddle_coordinates = center_nd_irc_saddle(surface, saddle_coordinates.view(), config)?;
+        (saddle_energy, saddle_gradient) = checked_evaluate(surface, saddle_coordinates.view())?;
+        saddle_max_gradient = max_abs(saddle_gradient.view());
+        if saddle_max_gradient > config.saddle_force_tolerance {
+            return Err(PesExplorationError::SaddleNotConverged {
+                stage: SaddleConvergenceStage::ForceCertification,
+            });
+        }
+        index = stationary_index(
+            surface,
+            saddle_coordinates.view(),
+            config.hessian_step,
+            config.negative_curvature_tolerance,
+        )?;
+        curvature = index.eigenvalues[0];
+        if index.negative_modes != 1 {
+            return Err(PesExplorationError::NotFirstOrder {
+                negative_modes: index.negative_modes,
+                lowest_curvature: curvature,
+            });
+        }
     }
     let lowest_mode = index.lowest_mode;
     let (positive, _) = roll_nd_branch(
