@@ -295,7 +295,8 @@ impl BasinCensus {
                 .is_some_and(|mass| mass < maximum_unseen_mass)
     }
 
-    fn validate_descriptor(&self, descriptor: &[f64]) -> Result<(), CensusError> {
+    /// Validate descriptor shape and finiteness without assigning a basin.
+    pub fn validate_descriptor(&self, descriptor: &[f64]) -> Result<(), CensusError> {
         if descriptor.len() != self.descriptor_dim {
             return Err(CensusError::DescriptorDimension {
                 expected: self.descriptor_dim,
