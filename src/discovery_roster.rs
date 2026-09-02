@@ -3,9 +3,8 @@
 //! A roster receives only evidence owned by one system-signature coordinator.
 //! Exact minima and exact index-one saddles are distinct species, so basin
 //! escape and saddle riding form the non-intersecting expert supports required
-//! by the Good-UCB analysis. Stable roster rotation changes which replica owns
-//! each role without introducing a separate random stream into matched
-//! campaigns.
+//! by the Good-UCB analysis. Replica identity breaks exact index ties, keeping
+//! segmented duties stable until the shared scientific evidence changes.
 
 use std::collections::BTreeSet;
 
@@ -149,7 +148,7 @@ pub fn assign_discovery_roles(
             return Err(DiscoveryRosterError::DuplicateReplica(replica));
         }
     }
-    let mut members = unique.into_iter().collect::<Vec<_>>();
+    let members = unique.into_iter().collect::<Vec<_>>();
     let count = members.len();
     let base_total = coverage
         .basin_observations
@@ -180,16 +179,12 @@ pub fn assign_discovery_roles(
         let choose_basin = match basin_index.total_cmp(&saddle_index) {
             std::cmp::Ordering::Greater => true,
             std::cmp::Ordering::Less => false,
-            std::cmp::Ordering::Equal => epoch.saturating_add(seat as u64).is_multiple_of(2),
+            std::cmp::Ordering::Equal => seat.is_multiple_of(2),
         };
         let arm = usize::from(!choose_basin);
         provisional[arm] = provisional[arm].saturating_add(1);
         basin_seats += usize::from(choose_basin);
     }
-    let rotation = usize::try_from(epoch % count as u64)
-        .expect("discovery-roster rotation is bounded by membership");
-    members.rotate_left(rotation);
-
     Ok(members
         .into_iter()
         .enumerate()

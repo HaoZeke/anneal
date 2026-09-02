@@ -2616,6 +2616,34 @@ fn ride_failure_reason(failure: anneal_core::ride_ledger::RideFailure) -> &'stat
 }
 
 #[cfg(feature = "bank-rpc")]
+fn discovery_role_allows_ride(role: Option<anneal_core::discovery_roster::DiscoveryRole>) -> bool {
+    matches!(
+        role,
+        Some(anneal_core::discovery_roster::DiscoveryRole::SaddleRide)
+    )
+}
+
+#[cfg(feature = "bank-rpc")]
+fn settled_external_calls(requested: u64, remaining: usize) -> u64 {
+    requested.min(u64::try_from(remaining).unwrap_or(u64::MAX))
+}
+
+#[cfg(feature = "bank-rpc")]
+fn ride_total_charged_calls(
+    report: anneal_core::cooperative_search::RideReportOutcome,
+    producer_calls: u64,
+) -> u64 {
+    match report {
+        anneal_core::cooperative_search::RideReportOutcome::Credited(credit) => {
+            credit.total_charged_evaluations
+        }
+        anneal_core::cooperative_search::RideReportOutcome::Rejected
+        | anneal_core::cooperative_search::RideReportOutcome::LocalFallback
+        | anneal_core::cooperative_search::RideReportOutcome::SharingDisabled => producer_calls,
+    }
+}
+
+#[cfg(feature = "bank-rpc")]
 fn ride_checkpoint_action(
     report: anneal_core::cooperative_search::RideReportOutcome,
     destination: Option<Array1<f64>>,
@@ -2623,26 +2651,23 @@ fn ride_checkpoint_action(
 ) -> CheckpointAction {
     use anneal_core::cooperative_search::RideReportOutcome;
 
-    let known_producer_calls = usize::try_from(producer_calls).unwrap_or(usize::MAX);
+    let total_calls =
+        usize::try_from(ride_total_charged_calls(report, producer_calls)).unwrap_or(usize::MAX);
     match report {
-        RideReportOutcome::Credited(credit) => {
-            let total_calls =
-                usize::try_from(credit.total_charged_evaluations).unwrap_or(usize::MAX);
-            match (credit.certified_connection, destination) {
-                (true, Some(state)) => CheckpointAction::ExternalProposal {
-                    state,
-                    action: "certified_ride".into(),
-                    external_calls: total_calls,
-                },
-                _ => CheckpointAction::ExternalWork {
-                    external_calls: total_calls,
-                },
-            }
-        }
+        RideReportOutcome::Credited(credit) => match (credit.certified_connection, destination) {
+            (true, Some(state)) => CheckpointAction::ExternalProposal {
+                state,
+                action: "certified_ride".into(),
+                external_calls: total_calls,
+            },
+            _ => CheckpointAction::ExternalWork {
+                external_calls: total_calls,
+            },
+        },
         RideReportOutcome::Rejected
         | RideReportOutcome::LocalFallback
         | RideReportOutcome::SharingDisabled => CheckpointAction::ExternalWork {
-            external_calls: known_producer_calls,
+            external_calls: total_calls,
         },
     }
 }
@@ -3265,6 +3290,8 @@ fn run_capnp_catalog(
     let mut checkpoint_sequence = 0u64;
     let mut slice_sequence = 0u64;
     let mut last_charged = 0usize;
+    #[cfg(feature = "ira")]
+    let mut assigned_discovery_role = None;
     let mut best_at_checkpoint = f64::INFINITY;
     let mut announced_score = false;
     let mut announced_personal = None;
@@ -3336,10 +3363,7 @@ fn run_capnp_catalog(
         let mut checkpoint_work = Vec::with_capacity(snapshot.quench_boundaries().len() + 1);
         for boundary in snapshot.quench_boundaries() {
             checkpoint_work.push((
-                match boundary.status() {
-                    QuenchStatus::Validated => ChargeKind::AcceptedQuench,
-                    QuenchStatus::Rejected => ChargeKind::RejectedQuench,
-                },
+                ChargeKind::BasinEscape,
                 u64::try_from(boundary.charged_calls()).expect("quench charge must fit u64"),
             ));
         }
@@ -3455,6 +3479,7 @@ fn run_capnp_catalog(
 
         #[cfg(feature = "ira")]
         if rides_enabled
+            && discovery_role_allows_ride(assigned_discovery_role)
             && checkpoint_sequence.is_multiple_of(ride_interval)
             && let Some(maximum_evaluations) = ride_producer_budget(
                 snapshot.remaining(),
@@ -3505,6 +3530,16 @@ fn run_capnp_catalog(
             let report_outcome = cooperative
                 .report_ride(replica, report)
                 .expect("ride report must preserve cooperative invariants");
+            let ride_calls = ride_total_charged_calls(report_outcome, producer_calls);
+            let settled_ride_calls = settled_external_calls(ride_calls, snapshot.remaining());
+            if settled_ride_calls > 0 {
+                cooperative
+                    .record_work(replica, ChargeKind::SaddleRide, settled_ride_calls)
+                    .expect("ride work must enter the cooperative ledger");
+                last_charged = snapshot
+                    .charged()
+                    .saturating_add(usize::try_from(settled_ride_calls).unwrap_or(usize::MAX));
+            }
             let (policy_reason, validation, quench, adoption, novelty) = match report_outcome {
                 RideReportOutcome::Credited(credit)
                     if credit.certified_connection && destination.is_some() =>
@@ -3584,8 +3619,7 @@ fn run_capnp_catalog(
                         adoption,
                         novelty,
                         energy: finite_trace_energy(snapshot.best_energy()),
-                        charged_work: u64::try_from(checkpoint_charged)
-                            .expect("checkpoint charge must fit u64"),
+                        charged_work: settled_ride_calls,
                     },
                 )
                 .expect("ride checkpoint trace must remain complete");
@@ -4180,6 +4214,10 @@ fn run_capnp_catalog(
             .last()
             .and_then(|event| event.policy)
             .expect("registered policy evidence must remain attached to its snapshot");
+        #[cfg(feature = "ira")]
+        {
+            assigned_discovery_role = Some(policy_trace.discovery_role);
+        }
         if difficulty_enabled && checkpoint_sequence.is_multiple_of(32) {
             let charged = policy.progress.charged();
             let singles = policy.census.singleton_basins();
