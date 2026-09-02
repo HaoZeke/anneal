@@ -1,9 +1,10 @@
 use std::convert::Infallible;
 use std::sync::atomic::{AtomicU64, Ordering};
 
+use anneal_core::descriptor_space::{DescriptorGeometry, universal_descriptor_space};
 use anneal_core::nd_hybrid::{
-    NdEscapeKernel, NdHybridConfig, NdHybridMechanism, NdHybridPolicy, explore_nd_hybrid,
-    explore_nd_with_policy,
+    ActionFeatureMap, CoordinateActionFeatures, DescriptorActionFeatures, NdEscapeKernel,
+    NdHybridConfig, NdHybridMechanism, NdHybridPolicy, explore_nd_hybrid, explore_nd_with_policy,
 };
 use anneal_core::pes_exploration::{
     ExactStructureWitness, PesExplorationConfig, PesSurface, RideMethod,
@@ -49,6 +50,47 @@ impl ExactStructureWitness for PointWitness {
     fn equivalent(&self, left: ArrayView1<'_, f64>, right: ArrayView1<'_, f64>) -> bool {
         (&left - &right).dot(&(&left - &right)).sqrt() < 1e-5
     }
+}
+
+#[test]
+fn coordinate_action_features_preserve_generic_nd_points() {
+    let point = array![0.25, -0.5, 1.75, -2.0];
+
+    let feature = CoordinateActionFeatures.encode(point.view()).unwrap();
+
+    assert_eq!(feature, point.to_vec());
+}
+
+#[test]
+fn descriptor_action_features_ignore_rigid_like_species_permutations() {
+    let source = array![
+        1.0, 1.0, 1.0, -1.0, -1.0, 1.0, -1.0, 1.0, -1.0, 1.0, -1.0, -1.0,
+    ];
+    let permutation = [2usize, 0, 3, 1];
+    let mut equivalent = Array1::zeros(source.len());
+    for (destination, source_atom) in permutation.into_iter().enumerate() {
+        let x = source[3 * source_atom];
+        let y = source[3 * source_atom + 1];
+        let z = source[3 * source_atom + 2];
+        equivalent[3 * destination] = -y + 3.0;
+        equivalent[3 * destination + 1] = x - 2.0;
+        equivalent[3 * destination + 2] = z + 0.5;
+    }
+    let features = DescriptorActionFeatures::new(
+        universal_descriptor_space(DescriptorGeometry::finite(1.0).unwrap()),
+        vec![18; 4],
+    );
+
+    let source_feature = features.encode(source.view()).unwrap();
+    let equivalent_feature = features.encode(equivalent.view()).unwrap();
+    let distance = source_feature
+        .iter()
+        .zip(equivalent_feature)
+        .map(|(left, right)| (left - right).powi(2))
+        .sum::<f64>()
+        .sqrt();
+
+    assert!(distance < 1e-10, "descriptor distance {distance}");
 }
 
 #[test]
@@ -123,8 +165,7 @@ fn hybrid_nd_search_shares_escaped_minima_with_budgeted_ridge_rides() {
     for event in &report.events {
         assert!(event.selected_information.is_finite() && event.selected_information >= 0.0);
         assert!(
-            event.selected_information_rate.is_finite()
-                && event.selected_information_rate >= 0.0
+            event.selected_information_rate.is_finite() && event.selected_information_rate >= 0.0
         );
         assert!(event.source_energy.is_finite());
         assert!(event.terminal_energy.is_finite());
@@ -134,10 +175,9 @@ fn hybrid_nd_search_shares_escaped_minima_with_budgeted_ridge_rides() {
         }
         .expect("the selected mechanism must retain its information rate");
         assert!((selected_role_rate - event.selected_information_rate).abs() < 1e-14);
-        if let (Some(ridge), Some(escape)) = (
-            event.ridge_information_rate,
-            event.escape_information_rate,
-        ) {
+        if let (Some(ridge), Some(escape)) =
+            (event.ridge_information_rate, event.escape_information_rate)
+        {
             compared_mechanisms += 1;
             assert!(event.selected_information_rate >= ridge.min(escape));
             assert!(event.selected_information_rate >= ridge.max(escape) - 1e-14);
