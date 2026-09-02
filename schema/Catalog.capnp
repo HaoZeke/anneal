@@ -332,6 +332,7 @@ struct RideReportReply {
     certified @3 :Void;
     failed @4 :RideFailure;
   }
+  novelSaddle @5 :Bool;
 }
 
 # Which selection produced a barrier's parent map. The two branches carry
