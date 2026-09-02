@@ -28,18 +28,21 @@ use crate::catalog::{
     AdmissionOutcome, AdmissionRejection, Archive, AttractorStrength, BasinCatalog, BasinCensus,
     BasinId, CHAMPION_RANK, CandidateRecord, CandidateValidator, CensusObservation, Curiosity,
     DEFAULT_MIN_OCCUPIED_FAMILIES, FreshEvaluation, GoodTuringSample, INTERFACE_HORIZON,
-    InterfaceSeat, MixingEvidence, PackingBook, PackingRole, QuenchStatus, REDUCTION_FACTOR,
-    SystemSignature, ValidatedCandidate, ValidatorConfig, WalkRecord, euclidean_gradient_norm,
-    explore_must_leave, invert_mixing, leftover_dwell_from_census, leftover_esty_stable,
-    leftover_esty_upper, leftover_lambda, occupancy_ei_exhausted, occupancy_family_floor,
-    occupancy_fes_delta, occupancy_landfold_split, occupancy_min_families, occupancy_ring_profile,
-    occupancy_ring_split, occupancy_sparsify_packing, occupant_rhat, packing_role,
-    promote_one_sided, prune, retis_exchange_adjacent, same_packing, seat_extras,
+    InterfaceSeat, MixingEvidence, PRODUCTION_MINIMUM_VISITS, PackingBook, PackingRole,
+    QuenchStatus, REDUCTION_FACTOR, SystemSignature, ValidatedCandidate, ValidatorConfig,
+    WalkRecord, euclidean_gradient_norm, explore_must_leave, invert_mixing,
+    leftover_dwell_from_census, leftover_esty_stable, leftover_esty_upper, leftover_lambda,
+    occupancy_ei_exhausted, occupancy_family_floor, occupancy_fes_delta, occupancy_landfold_split,
+    occupancy_min_families, occupancy_ring_profile, occupancy_ring_split,
+    occupancy_sparsify_packing, occupant_rhat, packing_role, promote_one_sided, prune,
+    retis_exchange_adjacent, same_packing, seat_extras,
 };
 use crate::catalog_policy::proposal::farthest_hole;
 use crate::cooperative_search::ledger::{ChargeKind, CooperativeLedger, ReplicaLedgerEvent};
 use crate::descriptor_space::{DescriptorSpace, UNIVERSAL_LOCAL_ENVIRONMENT_RADIUS};
-use crate::discovery_roster::{DiscoveryCoverage, assign_discovery_roles};
+use crate::discovery_roster::{
+    DiscoveryCoverage, assign_discovery_roles, coverage_allocation_weight,
+};
 use crate::methods::feynman_kac::{
     EpochSubmissionOutcome, PackingOccupant, PopulationEpochPlan, PopulationMember,
     SelectionCoefficients, SynchronousPopulation, assign_parents_by_packing,
@@ -51,7 +54,10 @@ use crate::pes_exploration::{
     StructureContext, StructureView, stationary_index_cartesian,
 };
 use crate::region_assignment::{RegionCandidate, RegionUtility, diversity_constrained_assignment};
-use crate::ride_ledger::{EnvironmentBook, RideLedger, RideOutcome, RidePortfolio, RideSource};
+use crate::ride_ledger::{
+    EnvironmentBook, RideLedger, RideOutcome, RidePortfolio, RideSource,
+    SADDLE_COVERAGE_MINIMUM_OBSERVATIONS,
+};
 use crate::soap::local_nu3_z;
 use crate::transition_graph::{AttractionRegionConfig, TransitionGraph, TransitionOutcome};
 
@@ -1189,18 +1195,21 @@ fn apply_request(
             );
             let transition_uncertainty =
                 local_basin.map_or_else(|| 1.0, |id| transition_uncertainty(scientific, id));
-            let basin_unseen_mass_upper = leftover_esty_upper(
+            let basin_unseen_mass_upper = coverage_allocation_weight(
                 scientific.census.total_visits(),
-                scientific.census.singleton_count(),
-                scientific.census.doubleton_count(),
-            )
-            .unwrap_or(1.0)
-            .clamp(0.0, 1.0);
+                PRODUCTION_MINIMUM_VISITS,
+                leftover_esty_upper(
+                    scientific.census.total_visits(),
+                    scientific.census.singleton_count(),
+                    scientific.census.doubleton_count(),
+                ),
+            );
             let saddle_coverage = scientific.ride_ledger.saddle_coverage();
-            let saddle_unseen_mass_upper = saddle_coverage
-                .unseen_mass_upper
-                .unwrap_or(1.0)
-                .clamp(0.0, 1.0);
+            let saddle_unseen_mass_upper = coverage_allocation_weight(
+                saddle_coverage.observations,
+                SADDLE_COVERAGE_MINIMUM_OBSERVATIONS,
+                saddle_coverage.unseen_mass_upper,
+            );
             let discovery_epoch = scientific
                 .census
                 .total_visits()

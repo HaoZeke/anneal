@@ -56,6 +56,24 @@ pub enum DiscoveryRosterError {
     InvalidCoverage,
 }
 
+/// Conservative missing-mass weight used before role allocation.
+///
+/// An asymptotic estimator cannot retire a discovery mechanism before its
+/// declared observation floor. Missing or invalid upper bounds also retain
+/// full uncertainty.
+pub fn coverage_allocation_weight(
+    observations: u64,
+    minimum_observations: u64,
+    unseen_mass_upper: Option<f64>,
+) -> f64 {
+    if observations < minimum_observations {
+        return 1.0;
+    }
+    unseen_mass_upper
+        .filter(|upper| upper.is_finite() && *upper >= 0.0)
+        .map_or(1.0, |upper| upper.clamp(0.0, 1.0))
+}
+
 /// Assign one isolated ensemble between basin escapes and saddle rides.
 ///
 /// Esty upper bounds act as unresolved-coverage weights. With two or more
