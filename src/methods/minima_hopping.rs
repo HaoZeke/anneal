@@ -426,6 +426,16 @@ mod tests {
     }
 
     #[test]
+    fn initial_minimum_remains_known_after_the_chain_leaves_it() {
+        let mut feedback = EscapeFeedback::new(1.0, 1.0);
+        feedback.register_initial(7);
+
+        assert_eq!(feedback.classify(Some(8), 7), Visit::Known);
+        assert_eq!(feedback.visits(7), 1);
+        assert_eq!(feedback.escape(), 1.0);
+    }
+
+    #[test]
     fn revisiting_the_same_basin_escalates_the_escape() {
         let mut f = EscapeFeedback::new(1.0, 1.0);
         let before = f.escape();
