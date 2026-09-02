@@ -941,6 +941,14 @@ mod tests {
     }
 
     #[test]
+    fn continuous_symmetry_selector_names_the_ci_csm_algorithm() {
+        let arms = selected_arms("bh-csm-ci", &[]).unwrap();
+
+        assert!(matches!(arms.as_slice(), [Arm::BasinHoppingCsmCi]));
+        assert_eq!(arms[0].label(), "basin-hopping-csm-ci");
+    }
+
+    #[test]
     fn exhausted_initial_quench_cannot_report_zero_as_a_minimum() {
         let potential = PairPotential::lennard_jones(2);
         let initial = Array1::from(vec![0.0, 0.0, 0.0, 1.2, 0.0, 0.0]);
