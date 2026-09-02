@@ -15,7 +15,9 @@
 
 use ndarray::{Array2, ArrayView1};
 
-use crate::funnel_bo::{FunnelCompression, FunnelModel, inverse_mills_lower};
+use crate::funnel_bo::{
+    FunnelCompression, FunnelModel, inverse_mills_lower, positive_definite_log_determinant,
+};
 
 const BASIN_DRAW_SALT: u64 = 0x6a09_e667_f3bc_c909;
 const RIDE_DRAW_SALT: u64 = 0xbb67_ae85_84ca_a73b;
@@ -86,6 +88,14 @@ pub enum MinimumInformationError {
         expected: usize,
         /// Supplied dimension.
         actual: usize,
+    },
+    /// A batch family label is required for every candidate action.
+    #[error("minimum-information batch has {families} families for {candidates} candidates")]
+    BatchFamilyDimension {
+        /// Number of candidate actions.
+        candidates: usize,
+        /// Number of supplied family labels.
+        families: usize,
     },
 }
 
@@ -308,6 +318,86 @@ impl MinimumInformationSearch {
             .collect())
     }
 
+    /// Select a parallel action batch by conditional joint-optimum information.
+    ///
+    /// Singleton terms are JES information about the optimum identity and
+    /// value. The predictive-observation log determinant discounts redundant
+    /// actions without a diversity coefficient. Greedy increments are divided
+    /// by each action's charged PES cost. `families` supplies the partition
+    /// constrained by `max_family_size`; a candidate remains selectable until
+    /// its family reaches that capacity.
+    pub fn assign_batch(
+        &mut self,
+        candidates: &[SearchActionCandidate],
+        families: &[usize],
+        batch_size: usize,
+        max_family_size: usize,
+        minimum_samples: usize,
+    ) -> Result<Vec<usize>, MinimumInformationError> {
+        if candidates.len() != families.len() {
+            return Err(MinimumInformationError::BatchFamilyDimension {
+                candidates: candidates.len(),
+                families: families.len(),
+            });
+        }
+        if candidates.is_empty() || batch_size == 0 || max_family_size == 0 || minimum_samples == 0
+        {
+            return Ok(Vec::new());
+        }
+        let singleton_scores = self.score(candidates, minimum_samples)?;
+        let mut selected = Vec::<usize>::with_capacity(batch_size);
+        let mut family_sizes = std::collections::BTreeMap::<usize, usize>::new();
+        let mut batch_information = 0.0;
+
+        while selected.len() < batch_size {
+            let mut best: Option<(f64, usize, f64)> = None;
+            for candidate_index in 0..candidates.len() {
+                let family = families[candidate_index];
+                let family_size = family_sizes.get(&family).copied().unwrap_or(0);
+                if family_size >= max_family_size {
+                    continue;
+                }
+                let mut enlarged = selected.clone();
+                enlarged.push(candidate_index);
+                let Some(enlarged_information) =
+                    self.batch_information(candidates, &singleton_scores, enlarged.as_slice())
+                else {
+                    continue;
+                };
+                let marginal_rate = (enlarged_information - batch_information)
+                    / candidates[candidate_index].expected_charged_evaluations;
+                if !marginal_rate.is_finite() {
+                    continue;
+                }
+                let replace = best.as_ref().is_none_or(|(held_rate, held_index, _)| {
+                    match marginal_rate.total_cmp(held_rate) {
+                        std::cmp::Ordering::Greater => true,
+                        std::cmp::Ordering::Equal => {
+                            let held_family_size = family_sizes
+                                .get(&families[*held_index])
+                                .copied()
+                                .unwrap_or(0);
+                            family_size < held_family_size
+                                || (family_size == held_family_size
+                                    && candidate_index < *held_index)
+                        }
+                        std::cmp::Ordering::Less => false,
+                    }
+                });
+                if replace {
+                    best = Some((marginal_rate, candidate_index, enlarged_information));
+                }
+            }
+            let Some((_, candidate_index, enlarged_information)) = best else {
+                break;
+            };
+            selected.push(candidate_index);
+            *family_sizes.entry(families[candidate_index]).or_default() += 1;
+            batch_information = enlarged_information;
+        }
+        Ok(selected)
+    }
+
     /// Number of terminal outcomes learned for one operator.
     pub fn observations(&self, mechanism: SearchMechanism) -> u64 {
         self.observations[mechanism.index()]
@@ -353,6 +443,40 @@ impl MinimumInformationSearch {
             });
         }
         Ok(())
+    }
+
+    fn batch_information(
+        &mut self,
+        candidates: &[SearchActionCandidate],
+        singleton_scores: &[SearchActionScore],
+        selected: &[usize],
+    ) -> Option<f64> {
+        if selected.is_empty() {
+            return Some(0.0);
+        }
+        let singleton_information = selected
+            .iter()
+            .map(|index| singleton_scores[*index].information)
+            .sum::<f64>();
+        let mut correlation = Array2::<f64>::eye(selected.len());
+        for row in 0..selected.len() {
+            let left = &candidates[selected[row]];
+            for column in 0..row {
+                let right = &candidates[selected[column]];
+                let value = if left.mechanism == right.mechanism {
+                    self.models[left.mechanism.index()].predictive_observation_correlation(
+                        ArrayView1::from(left.feature.as_slice()),
+                        ArrayView1::from(right.feature.as_slice()),
+                    )
+                } else {
+                    0.0
+                };
+                correlation[[row, column]] = value;
+                correlation[[column, row]] = value;
+            }
+        }
+        let log_determinant = positive_definite_log_determinant(&correlation)?;
+        Some(singleton_information + 0.5 * log_determinant)
     }
 }
 
