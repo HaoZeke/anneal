@@ -684,7 +684,7 @@ pub mod wire {
         pub anchor_basin: u64,
         /// Whether the replica runs confined bridge segments.
         pub bridge_duty: bool,
-        /// Decree sequence for tracing.
+        /// Coordinator snapshot version retained under the wire field name.
         pub decree_index: u64,
     }
 
@@ -708,9 +708,9 @@ pub mod wire {
     /// Community population is evidence of explored support, so seats are
     /// apportioned inversely to the two observed community sizes. Both sides
     /// retain a seat when the wave has at least two replicas. Rotating the
-    /// sorted membership by decree index prevents a fixed replica from owning
-    /// the same role for the whole campaign without introducing another random
-    /// stream into the replicated state machine.
+    /// sorted membership by coordinator snapshot prevents a fixed replica from
+    /// owning the same role for the whole campaign without introducing another
+    /// random stream into the replicated state machine.
     pub fn assign_seam_work(
         members: &[u32],
         left_basin: u64,
