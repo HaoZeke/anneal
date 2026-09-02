@@ -157,12 +157,12 @@ impl LandscapeGraph {
                     best = (imbalance, split);
                 }
             }
-            let left = components[..best.1]
+            let left: Vec<u64> = components[..best.1]
                 .iter()
                 .flatten()
                 .map(|index| self.basins[*index])
                 .collect();
-            let right = components[best.1..]
+            let right: Vec<u64> = components[best.1..]
                 .iter()
                 .flatten()
                 .map(|index| self.basins[*index])
