@@ -28,6 +28,7 @@ use anneal_core::catalog_rpc::{
     CatalogCandidate, CatalogIdentity, CatalogRideOutcome, CatalogRideReport,
 };
 use anneal_core::cooperative_search::ledger::ChargeKind;
+use anneal_core::discovery_roster::DiscoveryRole;
 use anneal_core::methods::cluster_hopping::{
     Config as ClusterConfig, SoapProposalMode, repack_rigid_groups,
 };
@@ -50,6 +51,44 @@ const HYDROGEN_MASS: f64 = 1.008;
 const EXACT_STRUCTURE_RADIUS: f64 = 1e-4;
 const RIDE_DISCOVERY_ARM: usize = 0;
 const SOURCE_ESCAPE_ARM: usize = 1;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum WaterDiscoveryPolicy {
+    Adaptive,
+    RidgeOnly,
+    BasinEscapeOnly,
+}
+
+impl WaterDiscoveryPolicy {
+    fn from_environment() -> Result<Self, io::Error> {
+        match std::env::var("CATALOG_DISCOVERY_POLICY")
+            .unwrap_or_else(|_| "adaptive".into())
+            .as_str()
+        {
+            "adaptive" => Ok(Self::Adaptive),
+            "ridge_only" => Ok(Self::RidgeOnly),
+            "basin_escape_only" => Ok(Self::BasinEscapeOnly),
+            value => Err(io::Error::other(format!(
+                "unknown CATALOG_DISCOVERY_POLICY {value:?}"
+            ))),
+        }
+    }
+
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Adaptive => "adaptive",
+            Self::RidgeOnly => "ridge_only",
+            Self::BasinEscapeOnly => "basin_escape_only",
+        }
+    }
+}
+
+fn discovery_role_name(role: DiscoveryRole) -> &'static str {
+    match role {
+        DiscoveryRole::BasinEscape => "basin_escape",
+        DiscoveryRole::SaddleRide => "saddle_ride",
+    }
+}
 
 struct WaterSurface {
     objective: Mutex<RgpotObjective>,
@@ -239,6 +278,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .transpose()?
         .unwrap_or(1_000)
         .max(1);
+    let discovery_policy = WaterDiscoveryPolicy::from_environment()?;
 
     let campaign = required_environment("CATALOG_CAMPAIGN")?;
     let ensemble = required_environment("CATALOG_ENSEMBLE")?;
@@ -425,10 +465,25 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             break;
         }
         let ride_feasible = ride_available && remaining > receiver_reserve;
-        let mechanism = if ride_feasible {
-            mechanism_allocator.select(&mut rng)
-        } else {
-            SOURCE_ESCAPE_ARM
+        if discovery_policy == WaterDiscoveryPolicy::RidgeOnly && !ride_feasible {
+            termination = "ride_unavailable";
+            break;
+        }
+        let live_descriptor = descriptor.describe(live_coordinates.view(), Some(&species))?;
+        let shared_policy = client.policy_state(
+            next_sequence(&mut event_sequence)?,
+            live_descriptor.values().to_vec(),
+            live_energy,
+        )?;
+        let mechanism = match discovery_policy {
+            WaterDiscoveryPolicy::Adaptive
+                if ride_feasible && shared_policy.discovery_role == DiscoveryRole::SaddleRide =>
+            {
+                RIDE_DISCOVERY_ARM
+            }
+            WaterDiscoveryPolicy::Adaptive => SOURCE_ESCAPE_ARM,
+            WaterDiscoveryPolicy::RidgeOnly => RIDE_DISCOVERY_ARM,
+            WaterDiscoveryPolicy::BasinEscapeOnly => SOURCE_ESCAPE_ARM,
         };
         if mechanism == RIDE_DISCOVERY_ARM {
             let maximum_evaluations = (remaining - receiver_reserve).min(ride_budget_cap);
@@ -438,6 +493,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             )?
             else {
                 ride_available = false;
+                if discovery_policy == WaterDiscoveryPolicy::RidgeOnly {
+                    termination = "ride_claim_unavailable";
+                    break;
+                }
                 continue;
             };
             let execution = CatalogRideExecutionConfig {
@@ -515,6 +574,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     "certified": credit.certified_connection,
                     "novel_saddle": credit.novel_saddle,
                     "novel_edge": credit.novel_edge,
+                    "discovery_policy": discovery_policy.as_str(),
+                    "assigned_role": discovery_role_name(shared_policy.discovery_role),
+                    "discovery_epoch": shared_policy.discovery_epoch,
+                    "basin_unseen_mass_upper": shared_policy.basin_unseen_mass_upper,
+                    "saddle_unseen_mass_upper": shared_policy.saddle_unseen_mass_upper,
+                    "saddle_coverage_saturated": shared_policy.saddle_coverage_saturated,
                     "failure": failure,
                     "saddle_energy": saddle_energy,
                     "saddle_gradient_norm": saddle_gradient_norm,
@@ -578,6 +643,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         "escape_scale": escape_feedback.escape(),
                         "producer_calls": failure.charged_evaluations,
                         "converged": false,
+                        "discovery_policy": discovery_policy.as_str(),
+                        "assigned_role": discovery_role_name(shared_policy.discovery_role),
+                        "discovery_epoch": shared_policy.discovery_epoch,
+                        "basin_unseen_mass_upper": shared_policy.basin_unseen_mass_upper,
+                        "saddle_unseen_mass_upper": shared_policy.saddle_unseen_mass_upper,
+                        "saddle_coverage_saturated": shared_policy.saddle_coverage_saturated,
                         "error": failure.error,
                         "charged": charged,
                     })
@@ -676,6 +747,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         "basin": reached_basin,
                         "visit": visit.map(|value| format!("{value:?}")),
                         "new_basin": discovered,
+                        "discovery_policy": discovery_policy.as_str(),
+                        "assigned_role": discovery_role_name(shared_policy.discovery_role),
+                        "discovery_epoch": shared_policy.discovery_epoch,
+                        "basin_unseen_mass_upper": shared_policy.basin_unseen_mass_upper,
+                        "saddle_unseen_mass_upper": shared_policy.saddle_unseen_mass_upper,
+                        "saddle_coverage_saturated": shared_policy.saddle_coverage_saturated,
                         "adopted": accepted,
                         "catalog_mutation": offer.catalog.as_ref().map(|mutation| mutation.kind.code()),
                         "charged": charged,
@@ -704,6 +781,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "ensemble": ensemble,
             "replica": replica,
             "molecules": molecule_count,
+            "discovery_policy": discovery_policy.as_str(),
             "attempts": attempts,
             "source_attempts": source_attempts,
             "source_discoveries": source_discoveries,
