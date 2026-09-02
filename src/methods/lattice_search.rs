@@ -1,0 +1,390 @@
+//! Dynamic lattice search for pair-potential clusters.
+//!
+//! Shao, Cheng and Cai (*J. Comput. Chem.* **2004**, *25*, 1693,
+//! <https://doi.org/10.1002/jcc.20096>) reach the hard Lennard-Jones sizes at
+//! a few thousand local minimizations per hit by refusing to walk: from a
+//! quenched structure they read the lattice of hollow sites the structure
+//! itself defines, move the worst-bound atom to the best vacant site until
+//! no such move lowers the pair energy, relax once, and restart from a fresh
+//! random cluster when the construction stops improving. The lattice is a
+//! function of the current structure, so nothing here is a template.
+//!
+//! Site energies are single-atom pair sums, one `N`th of a full evaluation,
+//! and are charged to the ledger at that fraction so the reported cost is
+//! comparable with every other method in the crate.
+
+use ndarray::{Array1, ArrayView1};
+use rand::Rng;
+use rand::SeedableRng;
+use rand::rngs::StdRng;
+
+use crate::methods::cluster_hopping::{Ledger, Outcome, Relax, random_cluster};
+use crate::potentials::PairKind;
+
+/// Settings of one dynamic lattice search.
+#[derive(Debug, Clone, Copy)]
+pub struct LatticeSearchConfig {
+    /// Points in the cluster.
+    pub n_points: usize,
+    /// The pair potential the site energies are read from.
+    pub kind: PairKind,
+    /// Separation below which two points are neighbours, in the potential's
+    /// length units.
+    pub neighbour_cutoff: f64,
+    /// Relaxation steps per quench.
+    pub relax_steps: usize,
+    /// Constructions that fail to lower the energy before a restart.
+    pub patience: usize,
+    /// Cap on site moves in one construction.
+    pub max_moves: usize,
+    /// Minimum separation of a fresh random start.
+    pub min_separation: f64,
+}
+
+impl LatticeSearchConfig {
+    /// Settings for a reduced Lennard-Jones cluster of `n` points.
+    pub fn lennard_jones(n: usize) -> Self {
+        Self {
+            n_points: n,
+            kind: PairKind::LennardJones,
+            neighbour_cutoff: 1.35 * PairKind::LennardJones.r_min(),
+            relax_steps: 200,
+            patience: 4,
+            max_moves: 4 * n,
+            min_separation: 0.5,
+        }
+    }
+
+    /// Settings for a Morse cluster at range `rho`.
+    pub fn morse(n: usize, rho: f64) -> Self {
+        let kind = PairKind::Morse { rho };
+        Self {
+            n_points: n,
+            kind,
+            neighbour_cutoff: 1.35 * kind.r_min(),
+            relax_steps: 200,
+            patience: 4,
+            max_moves: 4 * n,
+            min_separation: 0.5,
+        }
+    }
+}
+
+fn dist2(a: [f64; 3], b: [f64; 3]) -> f64 {
+    (a[0] - b[0]) * (a[0] - b[0]) + (a[1] - b[1]) * (a[1] - b[1]) + (a[2] - b[2]) * (a[2] - b[2])
+}
+
+fn point(x: &[f64], i: usize) -> [f64; 3] {
+    [x[3 * i], x[3 * i + 1], x[3 * i + 2]]
+}
+
+/// Pair energy of a point at `p` in the field of every point of `x` except
+/// `skip`.
+fn site_energy(kind: PairKind, x: &[f64], skip: Option<usize>, p: [f64; 3]) -> f64 {
+    let n = x.len() / 3;
+    let mut e = 0.0;
+    for j in 0..n {
+        if Some(j) == skip {
+            continue;
+        }
+        let r2 = dist2(p, point(x, j));
+        if r2 > 1e-12 {
+            e += kind.pair(r2).0;
+        }
+    }
+    e
+}
+
+/// Hollow sites of `x`: apex positions over every triangle of mutual
+/// neighbours, on the side away from the centroid, at the bond length from
+/// all three, that overlap no point and no site already listed.
+pub fn hollow_sites(x: &[f64], neighbour_cutoff: f64) -> Vec<[f64; 3]> {
+    let n = x.len() / 3;
+    let cut2 = neighbour_cutoff * neighbour_cutoff;
+    let mut nb: Vec<Vec<usize>> = vec![Vec::new(); n];
+    let mut nearest = vec![f64::INFINITY; n];
+    for a in 0..n {
+        for b in (a + 1)..n {
+            let d2 = dist2(point(x, a), point(x, b));
+            if d2 < cut2 {
+                nb[a].push(b);
+                nb[b].push(a);
+            }
+            nearest[a] = nearest[a].min(d2);
+            nearest[b] = nearest[b].min(d2);
+        }
+    }
+    let mut nn: Vec<f64> = nearest
+        .iter()
+        .filter(|d| d.is_finite())
+        .map(|d| d.sqrt())
+        .collect();
+    if nn.is_empty() {
+        return Vec::new();
+    }
+    nn.sort_by(|a, b| a.total_cmp(b));
+    let bond = nn[nn.len() / 2];
+    let exclusion2 = (0.85 * bond) * (0.85 * bond);
+    let merge2 = (0.3 * bond) * (0.3 * bond);
+    let mut c = [0.0_f64; 3];
+    for i in 0..n {
+        for k in 0..3 {
+            c[k] += x[3 * i + k] / n as f64;
+        }
+    }
+    let mut sites: Vec<[f64; 3]> = Vec::new();
+    for a in 0..n {
+        for &b in &nb[a] {
+            if b <= a {
+                continue;
+            }
+            for &d in &nb[b] {
+                if d <= b || !nb[a].contains(&d) {
+                    continue;
+                }
+                let (pa, pb, pd) = (point(x, a), point(x, b), point(x, d));
+                let centre = [
+                    (pa[0] + pb[0] + pd[0]) / 3.0,
+                    (pa[1] + pb[1] + pd[1]) / 3.0,
+                    (pa[2] + pb[2] + pd[2]) / 3.0,
+                ];
+                let u = [pb[0] - pa[0], pb[1] - pa[1], pb[2] - pa[2]];
+                let v = [pd[0] - pa[0], pd[1] - pa[1], pd[2] - pa[2]];
+                let normal = [
+                    u[1] * v[2] - u[2] * v[1],
+                    u[2] * v[0] - u[0] * v[2],
+                    u[0] * v[1] - u[1] * v[0],
+                ];
+                let norm =
+                    (normal[0] * normal[0] + normal[1] * normal[1] + normal[2] * normal[2]).sqrt();
+                if norm < 1e-12 {
+                    continue;
+                }
+                let height2 = bond * bond - dist2(centre, pa);
+                if height2 <= 0.0 {
+                    continue;
+                }
+                let height = height2.sqrt();
+                let outward = if (centre[0] - c[0]) * normal[0]
+                    + (centre[1] - c[1]) * normal[1]
+                    + (centre[2] - c[2]) * normal[2]
+                    >= 0.0
+                {
+                    1.0
+                } else {
+                    -1.0
+                };
+                let site = [
+                    centre[0] + outward * height * normal[0] / norm,
+                    centre[1] + outward * height * normal[1] / norm,
+                    centre[2] + outward * height * normal[2] / norm,
+                ];
+                if (0..n).any(|e| dist2(site, point(x, e)) < exclusion2) {
+                    continue;
+                }
+                if sites.iter().any(|s| dist2(*s, site) < merge2) {
+                    continue;
+                }
+                sites.push(site);
+            }
+        }
+    }
+    sites
+}
+
+/// One greedy construction: move the worst-bound point to the best vacant
+/// site while that lowers its energy. Returns the constructed coordinates
+/// and how many moves were made; site energies are charged at their pair
+/// fraction.
+pub fn construct(
+    cfg: &LatticeSearchConfig,
+    ledger: &mut Ledger,
+    x: ArrayView1<f64>,
+) -> (Array1<f64>, usize) {
+    let n = cfg.n_points;
+    let mut cur: Vec<f64> = x.to_vec();
+    let mut sites = hollow_sites(&cur, cfg.neighbour_cutoff);
+    let frac = 2.0 / n.max(1) as f64;
+    let mut moves = 0usize;
+    let mut last_moved: Option<usize> = None;
+    while moves < cfg.max_moves && !sites.is_empty() {
+        // Per-point energies: one full evaluation's worth of pair terms.
+        if !ledger.charge() {
+            break;
+        }
+        let energies: Vec<f64> = (0..n)
+            .map(|i| site_energy(cfg.kind, &cur, Some(i), point(&cur, i)))
+            .collect();
+        let worst = (0..n)
+            .filter(|&i| Some(i) != last_moved)
+            .max_by(|&a, &b| energies[a].total_cmp(&energies[b]))
+            .unwrap_or(0);
+        let mut best: Option<(usize, f64)> = None;
+        for (s, site) in sites.iter().enumerate() {
+            if !ledger.charge_frac(frac) {
+                return (Array1::from(cur), moves);
+            }
+            let e = site_energy(cfg.kind, &cur, Some(worst), *site);
+            if best.is_none_or(|(_, be)| e < be) {
+                best = Some((s, e));
+            }
+        }
+        let Some((s, e)) = best else { break };
+        if e >= energies[worst] - 1e-9 {
+            break;
+        }
+        let vacated = point(&cur, worst);
+        let target = sites.swap_remove(s);
+        for k in 0..3 {
+            cur[3 * worst + k] = target[k];
+        }
+        // The vacated position is a site again; the lattice is otherwise
+        // kept, so a construction is a sequence of occupation swaps.
+        sites.push(vacated);
+        last_moved = Some(worst);
+        moves += 1;
+    }
+    (Array1::from(cur), moves)
+}
+
+/// Run the dynamic lattice search under `ledger`.
+///
+/// `relax` is the caller's charged quench. The search alternates construction
+/// and relaxation from the current best, and restarts from a fresh random
+/// cluster after `patience` constructions that fail to lower the energy.
+pub fn run(cfg: &LatticeSearchConfig, ledger: &mut Ledger, relax: Relax<'_>, seed: u64) -> Outcome {
+    let n = cfg.n_points;
+    let mut rng = StdRng::seed_from_u64(seed);
+    let mut outcome = Outcome::default();
+    let mut restarts = 0usize;
+    let mut constructions = 0usize;
+    let mut improvements = 0usize;
+    let mut charged_at_best = 0usize;
+    let start = random_cluster(n, 0.7, cfg.min_separation, &mut rng);
+    let (mut e, mut x) = relax(ledger, start.view(), cfg.relax_steps);
+    ledger.record(e, x.view());
+    let mut stalls = 0usize;
+    while ledger.remaining() > 0 {
+        let (built, moves) = construct(cfg, ledger, x.view());
+        constructions += 1;
+        if ledger.remaining() == 0 {
+            break;
+        }
+        let (e_new, x_new) = relax(ledger, built.view(), cfg.relax_steps);
+        ledger.record(e_new, x_new.view());
+        if moves > 0 && e_new < e - 1e-9 {
+            e = e_new;
+            x = x_new;
+            stalls = 0;
+            improvements += 1;
+            if e < outcome.best {
+                charged_at_best = ledger.spent();
+            }
+        } else {
+            stalls += 1;
+        }
+        if stalls >= cfg.patience {
+            let fresh = random_cluster(n, 0.7, cfg.min_separation, &mut rng);
+            let (e_fresh, x_fresh) = relax(ledger, fresh.view(), cfg.relax_steps);
+            ledger.record(e_fresh, x_fresh.view());
+            e = e_fresh;
+            x = x_fresh;
+            stalls = 0;
+            restarts += 1;
+        }
+        outcome.best = outcome.best.min(ledger.best);
+    }
+    outcome.best = ledger.best;
+    outcome.best_state = ledger.best_state.clone();
+    outcome.hops = constructions;
+    outcome.charged = ledger.spent();
+    outcome.basins = restarts;
+    outcome.returned = improvements;
+    if charged_at_best > 0 {
+        outcome
+            .improvements
+            .push((constructions, charged_at_best, restarts, outcome.best));
+    }
+    outcome
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::methods::warm_lbfgs::WarmLbfgs;
+    use crate::potentials::PairPotential;
+
+    fn search(n: usize, budget: usize, seed: u64) -> Outcome {
+        let cfg = LatticeSearchConfig::lennard_jones(n);
+        let pot = PairPotential::lennard_jones(n);
+        let mut opt = WarmLbfgs::default();
+        let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, iters: usize| {
+            opt.forget();
+            let (f, xr, _) = opt.minimize(x, iters, |v| {
+                if !led.charge() {
+                    return None;
+                }
+                Some(pot.value_and_gradient(v))
+            });
+            (f, xr)
+        };
+        let mut ledger = Ledger::new(budget);
+        run(&cfg, &mut ledger, &mut relax, seed)
+    }
+
+    #[test]
+    fn a_tetrahedron_offers_sites_and_a_loose_point_takes_the_best() {
+        let h = (2.0_f64 / 3.0).sqrt();
+        let x = vec![
+            0.0,
+            0.0,
+            0.0,
+            1.0,
+            0.0,
+            0.0,
+            0.5,
+            0.75_f64.sqrt(),
+            0.0,
+            0.5,
+            0.75_f64.sqrt() / 3.0,
+            h,
+            5.0,
+            5.0,
+            5.0,
+        ];
+        let sites = hollow_sites(&x, 1.3);
+        assert!(sites.len() >= 3, "{}", sites.len());
+        let cfg = LatticeSearchConfig {
+            n_points: 5,
+            kind: PairKind::LennardJones,
+            neighbour_cutoff: 1.3,
+            relax_steps: 1,
+            patience: 1,
+            max_moves: 4,
+            min_separation: 0.5,
+        };
+        let mut ledger = Ledger::new(1000);
+        let (built, moves) = construct(&cfg, &mut ledger, ArrayView1::from(&x));
+        assert!(moves >= 1);
+        let e_before = site_energy(PairKind::LennardJones, &x, Some(4), point(&x, 4));
+        let e_after = site_energy(
+            PairKind::LennardJones,
+            built.as_slice().unwrap(),
+            Some(4),
+            point(built.as_slice().unwrap(), 4),
+        );
+        assert!(e_after < e_before, "{e_after} against {e_before}");
+        assert!(ledger.spent() > 0, "site energies are charged");
+    }
+
+    #[test]
+    fn the_search_reaches_the_lj13_icosahedron() {
+        let out = search(13, 20_000, 1);
+        assert!(
+            out.best < -44.3268 + 1e-3,
+            "LJ13 stopped at {:.6}",
+            out.best
+        );
+        assert!(out.hops > 0 && out.charged <= 20_000);
+    }
+}
