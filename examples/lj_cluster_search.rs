@@ -1546,6 +1546,14 @@ fn main() {
     cfg.calibrate_radius = opts.contains(&"calib");
     // The walker restarted, the landscape memory kept.
     cfg.restart_on_stall = opts.contains(&"restart");
+    // STALL_PATIENCE sets the hops without improvement before a stall.
+    if let Some(patience) = std::env::var("STALL_PATIENCE")
+        .ok()
+        .and_then(|v| v.parse::<usize>().ok())
+    {
+        cfg.stall_patience = patience.max(1);
+        println!("  stall patience {} hops", cfg.stall_patience);
+    }
     // Wales and Doye's angular move on the worst-bound point.
     cfg.angular_moves = opts.contains(&"angular");
     // The funnel forbidden rather than penalised.
