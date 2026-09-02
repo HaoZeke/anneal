@@ -72,7 +72,11 @@ run_seeds() {
 
 mkdir -p "$OUT"
 {
-  printf 'source=%s\n' "$(git -C "$ROOT" rev-parse HEAD)"
+  source_commit=$(git -C "$ROOT" rev-parse HEAD 2>/dev/null || true)
+  if [[ -z $source_commit && -s $ROOT/SOURCE_COMMIT ]]; then
+    source_commit=$(cat "$ROOT/SOURCE_COMMIT")
+  fi
+  printf 'source=%s\n' "${source_commit:-unknown}"
   printf 'host=%s\n' "$(hostname)"
   printf 'job=%s\n' "$SLURM_JOB_ID"
   printf 'mol_budget=%s\n' "$MOL_BUDGET"
