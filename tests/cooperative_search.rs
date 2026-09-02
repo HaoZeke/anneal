@@ -2357,9 +2357,12 @@ fn population_barrier_enforces_exact_basin_capacity() {
     assert!(
         family_counts
             .values()
-            .all(|count| *count <= plan.max_family_size)
+            .all(|count| *count <= usize::try_from(plan.max_family_size).expect("family cap fits"))
     );
-    let required_families = plan.parents.len().div_ceil(plan.max_family_size.max(1));
+    let required_families = plan
+        .parents
+        .len()
+        .div_ceil(usize::try_from(plan.max_family_size.max(1)).expect("family cap fits"));
     assert!(family_counts.len() >= required_families);
     assert_eq!(plan.selection, PopulationSelection::MinimumInformation);
     for (source, weight) in plan.destinations.iter().zip(&plan.weights) {
