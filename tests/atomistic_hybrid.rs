@@ -6,6 +6,7 @@ use anneal_core::atomistic_hybrid::{
     explore_atomistic_with_policy,
 };
 use anneal_core::descriptor_space::{DescriptorGeometry, universal_descriptor_space};
+use anneal_core::methods::cluster_search::Encounter;
 use anneal_core::pes_exploration::{
     ExactStructureWitness, PesExplorationConfig, PesSurface, RideMethod,
 };
@@ -141,16 +142,43 @@ fn ridge_only_atomistic_search_uses_the_budgeted_rgsaddle_path() {
     assert_eq!(report.network.minimum_count(), 2);
     assert_eq!(report.network.saddle_count(), 1);
     assert_eq!(report.network.saddles()[0].negative_modes, 1);
-    assert!(report
-        .network
-        .minima()
+    assert!(
+        report
+            .best_energy()
+            .is_some_and(|energy| energy.abs() < 1e-8)
+    );
+    let action_calls = report
+        .events
         .iter()
-        .all(|minimum| minimum.context.identity_domain() == Some("radial-pair")));
-    assert!(report
-        .network
-        .saddles()
-        .iter()
-        .all(|saddle| saddle.context.identity_domain() == Some("radial-pair")));
+        .map(|event| event.charged_evaluations)
+        .sum::<u64>();
+    assert_eq!(
+        report.first_encounter(0.0, 1e-8),
+        Encounter::Found {
+            charged: usize::try_from(report.charged_evaluations - action_calls).unwrap(),
+            hops: 0,
+        }
+    );
+    assert_eq!(
+        report.first_encounter(-1.0, 1e-8),
+        Encounter::Censored {
+            charged: usize::try_from(report.charged_evaluations).unwrap(),
+        }
+    );
+    assert!(
+        report
+            .network
+            .minima()
+            .iter()
+            .all(|minimum| minimum.context.identity_domain() == Some("radial-pair"))
+    );
+    assert!(
+        report
+            .network
+            .saddles()
+            .iter()
+            .all(|saddle| saddle.context.identity_domain() == Some("radial-pair"))
+    );
 }
 
 #[test]
