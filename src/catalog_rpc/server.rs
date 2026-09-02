@@ -2408,6 +2408,7 @@ fn apply_request(
                         outcome,
                         observation.basin_id,
                         observation.created,
+                        observation.basin_visits,
                         incumbent,
                     )),
                 )
@@ -3716,6 +3717,7 @@ fn catalog_mutation(
     outcome: AdmissionOutcome,
     offered_basin: BasinId,
     new_basin: bool,
+    basin_visits: u64,
     incumbent_basin: Option<BasinId>,
 ) -> CatalogMutation {
     let (kind, evicted) = match outcome {
@@ -3744,6 +3746,7 @@ fn catalog_mutation(
     CatalogMutation {
         basin_id: offered_basin.as_raw(),
         new_basin,
+        basin_visits,
         kind,
         evicted,
         incumbent_basin: incumbent_basin.map(BasinId::as_raw),

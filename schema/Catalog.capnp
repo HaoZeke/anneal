@@ -161,6 +161,8 @@ struct CatalogMutationReply {
     present @4 :UInt64;
   }
   newBasin @5 :Bool;
+  # Same-PES fixed-census count including this observation.
+  basinVisits @6 :UInt64;
 }
 
 struct PopulationSubmitRequest {
