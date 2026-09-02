@@ -9,17 +9,17 @@ use std::fmt::{Display, Formatter};
 use std::sync::Mutex;
 
 use ndarray::{Array1, Array2, ArrayView1, ArrayView2};
-use rand::{rngs::StdRng, SeedableRng};
+use rand::{SeedableRng, rngs::StdRng};
 use rand_distr::{Distribution, StandardNormal};
 use rgmin::{
-    lowest_mode, ApplyHessian, Control, EigenParams, EigensolverKind, FireKind, GradNorm, Lbfgs,
-    Method, Oracle, Solver,
+    ApplyHessian, Control, EigenParams, EigensolverKind, FireKind, GradNorm, Lbfgs, Method, Oracle,
+    Solver, lowest_mode,
 };
 use rgsaddle::geom::update_trust;
 use rgsaddle::{
-    exact_eigh, prfo_trust_region, update_h, HessUpdate, IrcConfig, IrcDirection, IrcSession,
-    MinModeConfig, MinModeKind, MinModeSession, MinModeStatus, PointSurface, SaddleError,
-    TrustSchedule,
+    HessUpdate, IrcConfig, IrcDirection, IrcSession, MinModeConfig, MinModeKind, MinModeSession,
+    MinModeStatus, PointSurface, SaddleError, TrustSchedule, exact_eigh, prfo_trust_region,
+    update_h,
 };
 
 use crate::curvature::{project_rigid_with, rigid_basis};
@@ -50,11 +50,11 @@ pub trait PesSurface: Sync {
 mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
-    use ndarray::{array, Array1, Array2, ArrayView1};
+    use ndarray::{Array1, Array2, ArrayView1, array};
 
     use super::{
-        activation_basis, deflate_cartesian_mode, finest_irc_step, home_uphill_mode,
-        refine_cartesian_with_prfo, roll_branch, IrcDirection, PesExplorationConfig, PesSurface,
+        IrcDirection, PesExplorationConfig, PesSurface, activation_basis, deflate_cartesian_mode,
+        finest_irc_step, home_uphill_mode, refine_cartesian_with_prfo, roll_branch,
     };
     use crate::curvature::project_rigid_with;
     use crate::descriptor_space::DescriptorGeometry;

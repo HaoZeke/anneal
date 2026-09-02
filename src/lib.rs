@@ -71,8 +71,6 @@ pub mod catalog_policy;
 /// Versioned cooperative catalog protocol.
 #[cfg(feature = "bank-rpc")]
 pub mod catalog_rpc;
-/// Successive-halving population control for a live coordinator roster.
-pub mod scaling;
 /// Versioned objective bridge compatibility descriptors.
 pub mod compatibility;
 /// Collective variables from the spectrum of the visited-basin graph.
@@ -110,8 +108,6 @@ pub mod free_energy;
 pub mod funnel_bo;
 pub mod funnel_spectral;
 pub mod grad;
-/// Action-outcome models for cost-aware global-minimum information.
-pub mod minimum_information;
 /// Exact basin identity by canonical contact-graph labelling (nauty).
 #[cfg(feature = "graphkey")]
 pub mod graphkey;
@@ -140,6 +136,8 @@ pub mod md_engine;
 /// MCMC-style multi-chain SA with Gelman-Rubin termination, Bayesian
 /// pilot adaptation, parallel tempering, etc.
 pub mod methods;
+/// Action-outcome models for cost-aware global-minimum information.
+pub mod minimum_information;
 pub mod model_hessian;
 /// The move-kernel trait: temperature-indexed proposal sampling.
 pub mod movekernel;
@@ -180,6 +178,8 @@ pub mod runner;
 pub mod runtime_distribution;
 /// Stan-style single-step sampler trait: `trait Sampler<T>`.
 pub mod sampler;
+/// Successive-halving population control for a live coordinator roster.
+pub mod scaling;
 pub mod screen;
 /// SOAP power spectrum and Cartesian pullback through `∂p/∂R`.
 pub mod soap;
