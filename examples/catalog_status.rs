@@ -91,7 +91,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!(
             "{{\"snapshot\":{},\"epoch\":{},\"submitted\":{},\"required\":{},\
              \"census_visits\":{},\"catalog_entries\":{},\"charged\":{},\"budget\":{},\
-             \"landscape_basins\":{},\"seam\":{},\"replicas\":[{}]}}",
+             \"landscape_basins\":{},\"unique_saddles\":{},\"unique_edges\":{},\
+             \"unique_degenerate_rearrangements\":{},\"certified_connections\":{},\
+             \"seam\":{},\"replicas\":[{}]}}",
             status.snapshot_version,
             status.open_epoch,
             status.epoch_submitted,
@@ -101,6 +103,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             status.aggregate_charged,
             status.aggregate_budget,
             status.landscape_basins,
+            status.unique_saddles,
+            status.unique_edges,
+            status.unique_degenerate_rearrangements,
+            status.certified_connections,
             seam,
             replicas
         );

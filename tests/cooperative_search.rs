@@ -693,6 +693,7 @@ fn cooperative_run_routes_certified_ride_work_through_the_live_mailbox() {
     assert_eq!(reported.producer_failure, None);
     assert_eq!(reported.receiver_failure, None);
     assert_eq!(reported.novel_saddle, Some(true));
+    assert_eq!(reported.degenerate_rearrangement, Some(false));
     assert_eq!(reported.novel_edge, Some(true));
 
     let trace = run.json_lines(&RunManifest {
@@ -705,6 +706,7 @@ fn cooperative_run_routes_certified_ride_work_through_the_live_mailbox() {
     assert!(trace.contains("\"ride_method\":\"dimer\""));
     assert!(trace.contains("\"ride_receiver_charged\":15"));
     assert!(trace.contains("\"ride_novel_saddle\":true"));
+    assert!(trace.contains("\"ride_degenerate_rearrangement\":false"));
     assert!(trace.contains("\"ride_novel_edge\":true"));
 }
 
