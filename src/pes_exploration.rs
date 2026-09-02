@@ -49,7 +49,7 @@ mod tests {
 
     use super::{
         IrcDirection, PesExplorationConfig, PesSurface, activation_basis, deflate_cartesian_mode,
-        finest_irc_step, refine_cartesian_with_prfo, roll_branch,
+        finest_irc_step, refine_cartesian_with_prfo, roll_branch, roll_nd_branch,
     };
     use crate::curvature::project_rigid_with;
     use crate::descriptor_space::DescriptorGeometry;
@@ -253,6 +253,38 @@ mod tests {
 
         let first = surface.first_evaluation.lock().unwrap();
         let first = first.as_ref().expect("IRC must query the PES");
+        assert!((first[0] - 0.1).abs() < 1e-12);
+    }
+
+    #[test]
+    fn generic_irc_starts_in_five_dimensions_with_the_certified_mode() {
+        let surface = RecordingQuarticSaddle {
+            first_evaluation: Mutex::new(None),
+        };
+        let saddle = Array1::zeros(5);
+        let mut mode = Array1::zeros(5);
+        mode[0] = 1.0;
+        let config = PesExplorationConfig {
+            irc_kind: IrcKind::Morokuma,
+            irc_steps: 40,
+            quench_steps: 200,
+            quench_gradient_tolerance: 1e-7,
+            ..PesExplorationConfig::default()
+        };
+
+        roll_nd_branch(
+            &surface,
+            &saddle,
+            &mode,
+            IrcDirection::Forward,
+            0.1,
+            &config,
+        )
+        .unwrap();
+
+        let first = surface.first_evaluation.lock().unwrap();
+        let first = first.as_ref().expect("IRC must query the N-D PES");
+        assert_eq!(first.len(), 5);
         assert!((first[0] - 0.1).abs() < 1e-12);
     }
 }
