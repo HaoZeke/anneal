@@ -1181,13 +1181,19 @@ fn apply_request(
                     ProtocolRejection::ValidationRejected,
                 );
             }
-            let Ok(local_basin) = scientific.census.basin_for(descriptor) else {
+            if scientific.census.validate_descriptor(descriptor).is_err() {
                 return rejected(
                     state,
                     request.event_sequence,
                     ProtocolRejection::ValidationRejected,
                 );
-            };
+            }
+            let local_basin = scientific
+                .last_candidate_by_replica
+                .get(&request.identity.replica)
+                .and_then(|candidate| candidate.census_basin)
+                .map(BasinId::from_raw)
+                .filter(|basin| scientific.census.entry(*basin).is_some());
             let packing = replica_packing(scientific, request.identity.replica);
             let local_basin_visits = packing
                 .as_ref()
