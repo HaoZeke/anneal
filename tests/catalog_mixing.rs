@@ -1,7 +1,7 @@
 use anneal_core::catalog::{
-    AttractorStrength, MIXED_RHAT, OccupancyCertificate, certified_global_minimum,
     explore_collapsed, explore_must_leave, invert_mixing, mixed, occupancy_complete_at,
-    occupant_rhat, rhat_series, stronger,
+    occupant_rhat, rhat_series, sampled_minimum_is_dominant, stronger, AttractorStrength,
+    OccupancyCertificate, MIXED_RHAT,
 };
 
 fn constant(value: f64, len: usize) -> Vec<f64> {
@@ -48,33 +48,33 @@ fn constant_traces_at_different_floors_are_not_mixed() {
 }
 
 #[test]
-fn a_lone_mixed_floor_is_the_sampled_mode_certificate() {
+fn a_lone_mixed_floor_is_dominant_in_the_sample() {
     let ico = ico_floor();
     assert!(ico.mixed());
-    assert!(certified_global_minimum(&ico, &[], true));
+    assert!(sampled_minimum_is_dominant(&ico, &[], true));
 }
 
 #[test]
-fn an_unmixed_lone_floor_is_not_certified() {
+fn an_unmixed_lone_floor_is_not_dominant_in_the_sample() {
     let ico = AttractorStrength {
         energy: -173.252378,
         occupancy: 4,
         occupant_rhat: f64::INFINITY,
     };
-    assert!(!certified_global_minimum(&ico, &[], true));
+    assert!(!sampled_minimum_is_dominant(&ico, &[], true));
 }
 
 #[test]
-fn a_deeper_minority_does_not_certify_against_a_more_occupied_floor() {
+fn a_deeper_minority_is_not_dominant_against_a_more_occupied_floor() {
     let oh = oh_minority();
     let ico = ico_floor();
     assert!(stronger(&ico, &oh));
     assert!(!stronger(&oh, &ico));
-    assert!(!certified_global_minimum(&oh, &[ico], true));
+    assert!(!sampled_minimum_is_dominant(&oh, &[ico], true));
 }
 
 #[test]
-fn a_deeper_majority_that_has_mixed_is_certified() {
+fn a_deeper_majority_that_has_mixed_is_dominant_in_the_sample() {
     let oh = oh_majority();
     let ico = AttractorStrength {
         energy: -173.252378,
@@ -82,11 +82,11 @@ fn a_deeper_majority_that_has_mixed_is_certified() {
         occupant_rhat: 0.0,
     };
     assert!(stronger(&oh, &ico));
-    assert!(certified_global_minimum(&oh, &[ico], true));
+    assert!(sampled_minimum_is_dominant(&oh, &[ico], true));
 }
 
 #[test]
-fn a_mixed_deepest_well_is_not_certified_against_a_flyby() {
+fn a_mixed_deepest_well_is_not_dominant_against_a_flyby() {
     let deep = AttractorStrength {
         energy: -170.294257,
         occupancy: 4,
@@ -98,7 +98,7 @@ fn a_mixed_deepest_well_is_not_certified_against_a_flyby() {
         occupant_rhat: f64::INFINITY,
     };
     assert!(stronger(&deep, &flyby));
-    assert!(!certified_global_minimum(&deep, &[flyby], true));
+    assert!(!sampled_minimum_is_dominant(&deep, &[flyby], true));
 }
 
 #[test]
@@ -114,7 +114,7 @@ fn equal_occupancy_is_not_a_stronger_attractor() {
         occupant_rhat: 0.0,
     };
     assert!(!stronger(&oh, &ico));
-    assert!(!certified_global_minimum(&oh, &[ico], true));
+    assert!(!sampled_minimum_is_dominant(&oh, &[ico], true));
 }
 
 #[test]
