@@ -35,6 +35,7 @@ pub mod nested;
 pub mod neus_bridge;
 /// Cut-and-splice mixing of two quenched clusters.
 pub mod splice;
+pub mod two_phase;
 #[cfg(feature = "graphkey")]
 pub use archive_search::{Archive, ArchiveOutcome, archive_search};
 pub mod additive_independence;
