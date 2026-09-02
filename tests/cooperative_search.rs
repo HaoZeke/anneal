@@ -32,6 +32,7 @@ use anneal_core::descriptor_space::{
     DescriptorBlockKind, DescriptorBlockSpec, DescriptorGeometry, DescriptorSchema,
     DescriptorSpace, universal_descriptor_space,
 };
+use anneal_core::discovery_roster::DiscoveryRole;
 use anneal_core::pes_exploration::ExactStructureWitness;
 use anneal_core::ride_ledger::RideFailure;
 use anneal_core::transition_graph::AttractionRegionConfig;
@@ -214,6 +215,60 @@ fn ride_server() -> CatalogServer {
         .with_exact_structure_witness(SeparationWitness)
         .unwrap();
     CatalogServer::start("127.0.0.1:0", config).unwrap()
+}
+
+#[test]
+fn coordinator_segments_live_replicas_by_shared_pes_coverage() {
+    let server = ride_server();
+    let digest = signature().digest();
+    let query = ride_candidate(0, 1, 1.2);
+    let mut clients = (0..4)
+        .map(|replica| {
+            CatalogClient::connect(
+                server.addr(),
+                identity(replica, digest),
+                ClientConfig::default(),
+            )
+            .unwrap()
+        })
+        .collect::<Vec<_>>();
+    clients[0].offer_candidate(1, query.clone()).unwrap();
+
+    let states = clients
+        .iter_mut()
+        .enumerate()
+        .map(|(replica, client)| {
+            client
+                .policy_state(
+                    if replica == 0 { 2 } else { 1 },
+                    query.descriptor.clone(),
+                    query.energy,
+                )
+                .unwrap()
+        })
+        .collect::<Vec<_>>();
+
+    assert_eq!(
+        states
+            .iter()
+            .filter(|state| state.discovery_role == DiscoveryRole::BasinEscape)
+            .count(),
+        2
+    );
+    assert_eq!(
+        states
+            .iter()
+            .filter(|state| state.discovery_role == DiscoveryRole::SaddleRide)
+            .count(),
+        2
+    );
+    assert!(
+        states
+            .iter()
+            .all(|state| state.discovery_epoch == states[0].discovery_epoch)
+    );
+    assert_eq!(states[0].basin_unseen_mass_upper, 1.0);
+    assert_eq!(states[0].saddle_unseen_mass_upper, 1.0);
 }
 
 #[test]
