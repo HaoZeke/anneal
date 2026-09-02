@@ -33,12 +33,17 @@ use std::sync::{Arc, Mutex};
 
 use anneal_core::bias::BasinBias;
 use anneal_core::methods::cluster_hopping::{
-    ChainCheckpoint, CheckpointAction, ClusterFingerprint, Config, Ledger, Outcome,
-    random_cluster, run_with_bias_at_checkpoints,
+    ChainCheckpoint, CheckpointAction, ClusterFingerprint, Config, Ledger, Outcome, random_cluster,
+    run_with_bias_at_checkpoints,
 };
+use anneal_core::methods::cluster_search::{Encounter, median_encounter};
 use anneal_core::methods::splice::cut_and_splice;
-use anneal_core::methods::two_phase::{largest_pair_distance, penalty};
+use anneal_core::methods::two_phase::{
+    Cutoff, SharedSurfaceAllocator, SurfacePortfolio, TwoPhase, largest_pair_distance, penalty,
+    shared_surface_allocator,
+};
 use anneal_core::methods::warm_lbfgs::WarmLbfgs;
+use anneal_core::potentials::PairPotential;
 use ndarray::{Array1, ArrayView1};
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
@@ -70,6 +75,62 @@ fn lj(x: ArrayView1<f64>) -> (f64, Array1<f64>) {
     (e, g)
 }
 
+/// The pair potential the ensemble walks: reduced Lennard-Jones by default,
+/// or Morse at the range parameter named by `POTENTIAL=morse:RHO`.
+#[derive(Clone)]
+enum Surface {
+    LennardJones,
+    Morse(PairPotential, f64),
+}
+
+impl Surface {
+    fn from_environment(n: usize) -> Self {
+        match std::env::var("POTENTIAL").ok().as_deref() {
+            None | Some("lj") => Self::LennardJones,
+            Some(spec) => {
+                let rho: f64 = spec
+                    .strip_prefix("morse:")
+                    .and_then(|v| v.parse().ok())
+                    .unwrap_or_else(|| panic!("POTENTIAL must be lj or morse:RHO, not {spec:?}"));
+                Self::Morse(PairPotential::morse(n, rho), rho)
+            }
+        }
+    }
+
+    fn energy(&self, x: ArrayView1<f64>) -> (f64, Array1<f64>) {
+        match self {
+            Self::LennardJones => lj(x),
+            Self::Morse(pair, _) => pair.value_and_gradient(x),
+        }
+    }
+
+    fn name(&self) -> String {
+        match self {
+            Self::LennardJones => "LJ".into(),
+            Self::Morse(_, rho) => format!("Morse rho={rho}"),
+        }
+    }
+
+    /// Published global minima, reporting only.
+    fn reference(&self, n: usize) -> Option<f64> {
+        match self {
+            Self::LennardJones => reference(n),
+            Self::Morse(_, rho) => match ((rho * 2.0).round() as i64, n) {
+                (28, 38) => Some(-144.321054),
+                (28, 55) => Some(-220.646208),
+                (28, 75) => Some(-318.407330),
+                (20, 38) => Some(-145.849817),
+                (20, 55) => Some(-225.814286),
+                (20, 75) => Some(-322.643558),
+                (12, 38) => Some(-157.477108),
+                (12, 55) => Some(-250.286609),
+                (12, 75) => Some(-351.472365),
+                _ => None,
+            },
+        }
+    }
+}
+
 fn reference(n: usize) -> Option<f64> {
     Some(match n {
         13 => -44.326801,
@@ -84,8 +145,14 @@ fn reference(n: usize) -> Option<f64> {
 }
 
 /// First-phase surface: the plain energy plus the library's two-phase penalty.
-fn lj_compressed(x: ArrayView1<f64>, mu: f64, diameter: f64, beta: f64) -> (f64, Array1<f64>) {
-    let (e, g) = lj(x);
+fn compressed(
+    surface: &Surface,
+    x: ArrayView1<f64>,
+    mu: f64,
+    diameter: f64,
+    beta: f64,
+) -> (f64, Array1<f64>) {
+    let (e, g) = surface.energy(x);
     let (pe, pg) = penalty(x, diameter, beta, mu);
     (e + pe, g + pg)
 }
@@ -135,7 +202,7 @@ struct ChainReport {
     hit_by_splice: bool,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 struct ExchangeConfig {
     enabled: bool,
     interval: usize,
@@ -152,6 +219,212 @@ struct ExchangeConfig {
     /// Relative cutoff: `kappa` times the largest pair distance of the
     /// structure entering the quench; zero keeps the fixed cutoff.
     diameter_kappa: f64,
+    /// Learned portfolio over surfaces (plain plus these), one arm held
+    /// per block of hops; empty runs the fixed surface above.
+    portfolio: Vec<TwoPhase>,
+    /// Hops an arm is held for.
+    portfolio_block: usize,
+    /// Whether the chains of an ensemble share one portfolio posterior.
+    portfolio_shared: bool,
+    /// Fragment the surfaces across chains instead of learning inside one:
+    /// chain `i` walks arm `i mod (1 + arms)` for its whole budget, the
+    /// plain surface being arm zero.
+    portfolio_split: bool,
+    /// Population basin hopping: at every checkpoint a chain's live minimum
+    /// is offered to the ensemble under the Grosso--Locatelli--Schoen
+    /// replacement rule, and a chain told to move adopts the offered
+    /// structure at its next checkpoint.
+    pbh: bool,
+    /// Replacement radius as a multiple of the ensemble's mean pairwise
+    /// dissimilarity at the first exchange.
+    pbh_dcut_scale: f64,
+}
+
+/// Coordination-shell histogram dissimilarity of Grosso, Locatelli and
+/// Schoen: `H1[n]` counts atoms with exactly `n` neighbours inside the
+/// first shell, `H2[n]` those with exactly `n` in the second shell, and the
+/// distance is `sum_n n (2 |dH1| + |dH2|)`. Shell radii are the published
+/// 1.25 and 1.55 pair-well units in sigma units.
+fn shell_histograms(x: &[f64]) -> ([u32; 32], [u32; 32]) {
+    let n = x.len() / 3;
+    let unit = 2f64.powf(1.0 / 6.0);
+    let (r1, r2) = (1.25 * unit, 1.55 * unit);
+    let (r1sq, r2sq) = (r1 * r1, r2 * r2);
+    let mut first = vec![0usize; n];
+    let mut second = vec![0usize; n];
+    for i in 0..n {
+        for j in (i + 1)..n {
+            let mut d2 = 0.0;
+            for k in 0..3 {
+                let d = x[3 * i + k] - x[3 * j + k];
+                d2 += d * d;
+            }
+            if d2 < r1sq {
+                first[i] += 1;
+                first[j] += 1;
+            } else if d2 < r2sq {
+                second[i] += 1;
+                second[j] += 1;
+            }
+        }
+    }
+    let mut h1 = [0u32; 32];
+    let mut h2 = [0u32; 32];
+    for i in 0..n {
+        h1[first[i].min(31)] += 1;
+        h2[second[i].min(31)] += 1;
+    }
+    (h1, h2)
+}
+
+fn shell_dissimilarity(a: &([u32; 32], [u32; 32]), b: &([u32; 32], [u32; 32])) -> f64 {
+    (0..32)
+        .map(|n| {
+            n as f64
+                * (2.0 * (a.0[n] as f64 - b.0[n] as f64).abs()
+                    + (a.1[n] as f64 - b.1[n] as f64).abs())
+        })
+        .sum()
+}
+
+type Member = (f64, Vec<f64>, ([u32; 32], [u32; 32]));
+
+/// The ensemble's population under the replacement rule: one member per
+/// chain, a pending relocation per chain, and the cutoff once set.
+#[derive(Default)]
+struct Population {
+    members: Vec<Option<Member>>,
+    pending: Vec<Option<(f64, Vec<f64>)>>,
+    dcut: Option<f64>,
+    replacements_near: usize,
+    replacements_far: usize,
+}
+
+impl Population {
+    fn new(chains: usize) -> Self {
+        Self {
+            members: vec![None; chains],
+            pending: vec![None; chains],
+            ..Self::default()
+        }
+    }
+
+    /// Offer chain `p`'s live minimum. Returns whether some chain was told
+    /// to move.
+    fn offer(&mut self, p: usize, energy: f64, state: &[f64], dcut_scale: f64) -> bool {
+        let hist = shell_histograms(state);
+        self.members[p] = Some((energy, state.to_vec(), hist));
+        let filled: Vec<usize> = (0..self.members.len())
+            .filter(|&i| self.members[i].is_some())
+            .collect();
+        if self.dcut.is_none() {
+            if filled.len() < self.members.len() {
+                return false;
+            }
+            // Every chain has reported once: the cutoff is a multiple of
+            // the mean pairwise dissimilarity of that first population.
+            let mut total = 0.0;
+            let mut pairs = 0usize;
+            for (a, &i) in filled.iter().enumerate() {
+                for &j in &filled[a + 1..] {
+                    let (hi, hj) = (
+                        &self.members[i].as_ref().unwrap().2,
+                        &self.members[j].as_ref().unwrap().2,
+                    );
+                    total += shell_dissimilarity(hi, hj);
+                    pairs += 1;
+                }
+            }
+            self.dcut = Some(dcut_scale * total / pairs.max(1) as f64);
+            return false;
+        }
+        let dcut = self.dcut.unwrap();
+        let mut nearest: Option<(usize, f64)> = None;
+        for &q in &filled {
+            if q == p {
+                continue;
+            }
+            let d = shell_dissimilarity(&hist, &self.members[q].as_ref().unwrap().2);
+            if nearest.is_none_or(|(_, best)| d < best) {
+                nearest = Some((q, d));
+            }
+        }
+        let Some((q, d)) = nearest else {
+            return false;
+        };
+        if d < dcut {
+            // Same region as q: only a better child displaces q.
+            let eq = self.members[q].as_ref().unwrap().0;
+            if energy < eq - 1e-9 {
+                self.pending[q] = Some((energy, state.to_vec()));
+                self.replacements_near += 1;
+                return true;
+            }
+            return false;
+        }
+        // A new region: the worst member moves there if the child beats it.
+        let worst = filled.iter().copied().filter(|&i| i != p).max_by(|&a, &b| {
+            self.members[a]
+                .as_ref()
+                .unwrap()
+                .0
+                .total_cmp(&self.members[b].as_ref().unwrap().0)
+        });
+        if let Some(w) = worst
+            && energy < self.members[w].as_ref().unwrap().0 - 1e-9
+        {
+            self.pending[w] = Some((energy, state.to_vec()));
+            self.replacements_far += 1;
+            return true;
+        }
+        false
+    }
+
+    fn take_pending(&mut self, chain: usize) -> Option<(f64, Vec<f64>)> {
+        self.pending[chain].take()
+    }
+}
+
+fn km_median_first_hit(records: &[(Option<usize>, usize)]) -> Option<usize> {
+    let encounters = records
+        .iter()
+        .map(|(first_hit, charged)| match first_hit {
+            Some(charged) => Encounter::Found {
+                charged: *charged,
+                hops: 0,
+            },
+            None => Encounter::Censored { charged: *charged },
+        })
+        .collect::<Vec<_>>();
+    median_encounter(&encounters)
+}
+
+/// `SURFACES` items `mu:5`, `d:3.5` (pair-well units), `kappa:0.7`, with an
+/// optional `:beta` suffix on the diameter forms.
+fn parse_surfaces(spec: &str) -> Vec<TwoPhase> {
+    let unit = 2f64.powf(1.0 / 6.0);
+    spec.split(',')
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(|item| {
+            let parts: Vec<&str> = item.split(':').collect();
+            let value: f64 = parts
+                .get(1)
+                .and_then(|v| v.parse().ok())
+                .unwrap_or_else(|| panic!("SURFACES item {item:?} needs a number"));
+            let beta: f64 = parts.get(2).and_then(|v| v.parse().ok()).unwrap_or(1.0);
+            match parts[0] {
+                "mu" => TwoPhase {
+                    cutoff: Cutoff::Fixed(0.0),
+                    beta: 0.0,
+                    mu: value,
+                },
+                "d" => TwoPhase::diameter(value * unit, beta),
+                "kappa" => TwoPhase::relative(value, beta),
+                other => panic!("SURFACES item {item:?}: unknown kind {other:?}"),
+            }
+        })
+        .collect()
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -164,8 +437,12 @@ fn run_chain(
     exchange: ExchangeConfig,
     target: Option<f64>,
     resume: Option<Array1<f64>>,
+    shared_surfaces: Option<SharedSurfaceAllocator>,
+    population: Option<Arc<Mutex<Population>>>,
 ) -> ChainReport {
     let cfg = Config::recommended(n);
+    let surface_kind = Surface::from_environment(n);
+    let child_surface = surface_kind.clone();
     let mut rng = StdRng::seed_from_u64(seed);
     let mut exchange_rng = StdRng::seed_from_u64(seed ^ 0x5711_ce);
     let start = resume.unwrap_or_else(|| random_cluster(n, 0.7, cfg.min_separation, &mut rng));
@@ -176,21 +453,51 @@ fn run_chain(
     let beta = exchange.diameter_beta;
     let kappa = exchange.diameter_kappa;
     let two_phase = compress_mu > 0.0 || ((diameter > 0.0 || kappa > 0.0) && beta > 0.0);
+    let screen_steps = cfg.screen_steps;
+    let split_surface = (exchange.portfolio_split && !exchange.portfolio.is_empty()).then(|| {
+        let arms = 1 + exchange.portfolio.len();
+        match chain % arms {
+            0 => None,
+            k => Some(exchange.portfolio[k - 1]),
+        }
+    });
+    let mut portfolio = (!exchange.portfolio.is_empty() && !exchange.portfolio_split).then(|| {
+        let mut portfolio =
+            SurfacePortfolio::with_block(&exchange.portfolio, seed, exchange.portfolio_block);
+        if let Some(shared) = shared_surfaces.clone() {
+            portfolio = portfolio.sharing(shared);
+        }
+        portfolio
+    });
     let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, iters: usize| {
         let before = led.spent();
+        let screening = iters <= screen_steps;
         let mut start = x.to_owned();
-        if two_phase {
-            let cutoff = if kappa > 0.0 {
-                kappa * largest_pair_distance(x)
-            } else {
-                diameter
-            };
+        // The learned portfolio names the surface when present; otherwise
+        // the fixed transform from the environment applies to every quench.
+        let surface = match portfolio.as_mut() {
+            Some(portfolio) => portfolio
+                .begin(screening)
+                .map(|two| (two.mu, two.cutoff_for(x), two.beta)),
+            None if split_surface.is_some() => split_surface
+                .flatten()
+                .map(|two| (two.mu, two.cutoff_for(x), two.beta)),
+            None => two_phase.then(|| {
+                let cutoff = if kappa > 0.0 {
+                    kappa * largest_pair_distance(x)
+                } else {
+                    diameter
+                };
+                (compress_mu, cutoff, beta)
+            }),
+        };
+        if let Some((mu, cutoff, beta)) = surface {
             opt.forget();
             let (_, compressed, _) = opt.minimize(x, iters, |v| {
                 if !led.charge() {
                     return None;
                 }
-                Some(lj_compressed(v, compress_mu, cutoff, beta))
+                Some(compressed(&surface_kind, v, mu, cutoff, beta))
             });
             start = compressed;
         }
@@ -199,8 +506,11 @@ fn run_chain(
             if !led.charge() {
                 return None;
             }
-            Some(lj(v))
+            Some(surface_kind.energy(v))
         });
+        if let Some(portfolio) = portfolio.as_mut() {
+            portfolio.observe(screening, f, led.best);
+        }
         led.record_quench_boundary(before, f, xr.clone(), None);
         (f, xr)
     };
@@ -226,6 +536,26 @@ fn run_chain(
             if let Some(best) = snapshot.best_state() {
                 slot.best_state = best.to_vec();
             }
+        }
+        if let Some(population) = population.as_ref() {
+            let mut population = population.lock().expect("population");
+            if let Some((_, state)) = population.take_pending(chain) {
+                tally.adopted += 1;
+                return CheckpointAction::BoundaryProposal {
+                    state: Array1::from(state),
+                    action: "pbh".to_owned(),
+                };
+            }
+            if let Some(current) = snapshot.current_state().as_slice() {
+                tally.attempts += 1;
+                population.offer(
+                    chain,
+                    snapshot.current_energy(),
+                    current,
+                    exchange.pbh_dcut_scale,
+                );
+            }
+            return CheckpointAction::Continue;
         }
         if !exchange.enabled || snapshot.charged() < next_attempt {
             return CheckpointAction::Continue;
@@ -290,7 +620,7 @@ fn run_chain(
             child_opt.forget();
             let (energy, relaxed, _) = child_opt.minimize(child.view(), relax_steps, |v| {
                 external_calls += 1;
-                Some(lj(v))
+                Some(child_surface.energy(v))
             });
             if !energy.is_finite() {
                 continue;
@@ -344,7 +674,7 @@ fn run_chain(
             .iter()
             .filter(|t| t.to_energy < reference + 1e-4)
             .min_by_key(|t| t.hop)
-            .is_some_and(|t| t.action == "splice")
+            .is_some_and(|t| t.action == "splice" || t.action == "pbh")
     });
     ChainReport {
         charged: ledger.spent(),
@@ -364,10 +694,10 @@ fn main() {
     let mode = args.get(5).cloned().unwrap_or_else(|| "indep".to_owned());
     let seed0: u64 = args.get(6).and_then(|v| v.parse().ok()).unwrap_or(0);
     let enabled = match mode.as_str() {
-        "indep" | "halving" => false,
+        "indep" | "halving" | "shared" | "pbh" => false,
         "splice" => true,
         other => {
-            eprintln!("unknown mode {other:?}: expected indep, splice or halving");
+            eprintln!("unknown mode {other:?}: expected indep, splice, halving, shared or pbh");
             std::process::exit(2);
         }
     };
@@ -384,21 +714,44 @@ fn main() {
         diameter: env_f64("DIAMETER_D", 0.0) * 2f64.powf(1.0 / 6.0),
         diameter_beta: env_f64("DIAMETER_BETA", 1.0),
         diameter_kappa: env_f64("DIAMETER_KAPPA", 0.0),
+        portfolio: std::env::var("SURFACES")
+            .map(|spec| parse_surfaces(&spec))
+            .unwrap_or_default(),
+        portfolio_block: env_usize("SURFACE_BLOCK", 100),
+        portfolio_shared: mode == "shared",
+        portfolio_split: env_usize("SURFACES_SPLIT", 0) == 1,
+        pbh: mode == "pbh",
+        pbh_dcut_scale: env_f64("PBH_DCUT", 1.5),
     };
-    let target = reference(n);
+    let surface = Surface::from_environment(n);
+    let target = surface.reference(n);
     println!(
-        "LJ{n}, {chains} chains x {budget} charged, {ensembles} ensembles, mode {mode}, \
-         interval {} images {} partner {} source {} checkpoint {} compress {} diameter {:.3} kappa {} beta {}, reference {}",
+        "{} N={n}, {chains} chains x {budget} charged, {ensembles} ensembles, mode {mode}, \
+         interval {} images {} partner {} source {} checkpoint {} compress {} diameter {:.3} kappa {} beta {} portfolio {:?} block {} shared {}, reference {}",
+        surface.name(),
         exchange.interval,
         exchange.images,
-        if exchange.partner_best { "best" } else { "random" },
-        if exchange.source_best { "best" } else { "current" },
+        if exchange.partner_best {
+            "best"
+        } else {
+            "random"
+        },
+        if exchange.source_best {
+            "best"
+        } else {
+            "current"
+        },
         exchange.checkpoint,
         exchange.compress_mu,
         exchange.diameter,
         exchange.diameter_kappa,
         exchange.diameter_beta,
-        target.map(|r| format!("{r:.6}")).unwrap_or_else(|| "none".into())
+        exchange.portfolio,
+        exchange.portfolio_block,
+        exchange.portfolio_shared,
+        target
+            .map(|r| format!("{r:.6}"))
+            .unwrap_or_else(|| "none".into())
     );
 
     if mode == "halving" {
@@ -409,6 +762,7 @@ fn main() {
     let mut chains_solved = 0usize;
     let mut splice_hits = 0usize;
     let mut first_hits: Vec<usize> = Vec::new();
+    let mut chain_encounters: Vec<(Option<usize>, usize)> = Vec::new();
     let mut tally = ExchangeTally::default();
     let mut total_charged = 0usize;
     for ensemble in seed0..(seed0 + ensembles) {
@@ -420,16 +774,28 @@ fn main() {
             };
             chains
         ]));
+        let shared = exchange
+            .portfolio_shared
+            .then(|| shared_surface_allocator(&exchange.portfolio));
+        let population = exchange
+            .pbh
+            .then(|| Arc::new(Mutex::new(Population::new(chains))));
         let reports: Vec<ChainReport> = std::thread::scope(|scope| {
             let handles: Vec<_> = (0..chains)
                 .map(|chain| {
                     let board = Arc::clone(&board);
+                    let shared = shared.clone();
+                    let population = population.clone();
+                    let exchange = exchange.clone();
                     let seed = ensemble
                         .wrapping_mul(0x9E37_79B9)
                         .wrapping_add(chain as u64)
                         .wrapping_add(7);
                     scope.spawn(move || {
-                        run_chain(n, budget, seed, chain, &board, exchange, target, None)
+                        run_chain(
+                            n, budget, seed, chain, &board, exchange, target, None, shared,
+                            population,
+                        )
                     })
                 })
                 .collect();
@@ -453,6 +819,7 @@ fn main() {
         let charged: usize = reports.iter().map(|r| r.charged).sum();
         total_charged += charged;
         for r in &reports {
+            chain_encounters.push((r.first_hit, r.charged));
             tally.attempts += r.tally.attempts;
             tally.adopted += r.tally.adopted;
             tally.below_current += r.tally.below_current;
@@ -460,6 +827,13 @@ fn main() {
             if r.hit_by_splice {
                 splice_hits += 1;
             }
+        }
+        if let Some(population) = population.as_ref() {
+            let population = population.lock().expect("population");
+            println!(
+                "      pbh: dcut {:?}, {} near replacements, {} far replacements",
+                population.dcut, population.replacements_near, population.replacements_far
+            );
         }
         chains_solved += solved.len();
         if !solved.is_empty() {
@@ -477,15 +851,24 @@ fn main() {
             reports.iter().map(|r| r.tally.attempts).sum::<usize>(),
             reports.iter().map(|r| r.tally.adopted).sum::<usize>(),
             reports.iter().map(|r| r.tally.below_current).sum::<usize>(),
-            reports.iter().map(|r| r.tally.external_calls).sum::<usize>(),
+            reports
+                .iter()
+                .map(|r| r.tally.external_calls)
+                .sum::<usize>(),
         );
     }
     first_hits.sort_unstable();
-    let median = first_hits.get(first_hits.len() / 2).copied();
+    let conditional_parallel_latency = first_hits.get(first_hits.len() / 2).copied();
+    let chain_km_median = km_median_first_hit(&chain_encounters);
     println!(
-        "{ensembles_solved}/{ensembles} ensembles solved, {chains_solved}/{} chains solved, {splice_hits} first hits by splice, median first hit {}, splice attempts {} adopted {} below-current {} external calls {} ({:.2}% of charged)",
+        "{ensembles_solved}/{ensembles} ensembles solved, {chains_solved}/{} chains solved, {splice_hits} first hits by splice, conditional median earliest-chain latency {}, chain KM median first-hit cost {}, splice attempts {} adopted {} below-current {} external calls {} ({:.2}% of charged)",
         chains * ensembles as usize,
-        median.map(|m| m.to_string()).unwrap_or_else(|| "-".into()),
+        conditional_parallel_latency
+            .map(|m| m.to_string())
+            .unwrap_or_else(|| "-".into()),
+        chain_km_median
+            .map(|m| m.to_string())
+            .unwrap_or_else(|| "-".into()),
         tally.attempts,
         tally.adopted,
         tally.below_current,
@@ -540,8 +923,11 @@ fn run_halving(
         let mut launches = 0usize;
         let mut brackets = 0usize;
         let mut next_seed = ensemble.wrapping_mul(0x9E37_79B9).wrapping_add(7);
-        while pool > 0 {
+        // A bracket needs at least one first-rung launch per chain; below
+        // that the remainder is not worth a start and the ensemble is done.
+        while pool >= chains {
             brackets += 1;
+            let pool_before = pool;
             // Live walks of this bracket: (state, best so far, seed).
             let mut live: Vec<(Option<Array1<f64>>, f64, u64)> = (0..chains)
                 .map(|_| {
@@ -576,10 +962,12 @@ fn run_halving(
                         .map(|(chain, (state, _, seed))| {
                             let board = Arc::clone(&board);
                             let resume = state.clone();
+                            let exchange = exchange.clone();
                             let seed = seed.wrapping_add(rung_index as u64 * 0x1000);
                             scope.spawn(move || {
                                 run_chain(
                                     n, per_chain, seed, chain, &board, exchange, target, resume,
+                                    None, None,
                                 )
                             })
                         })
@@ -627,6 +1015,9 @@ fn run_halving(
                     break;
                 }
             }
+            if pool == pool_before {
+                break;
+            }
         }
         let solved = target.is_some_and(|t| deepest < t + 1e-4);
         if solved {
@@ -639,7 +1030,9 @@ fn run_halving(
         launches_total += launches;
         println!(
             "  ensemble {ensemble}: deepest {deepest:.6}  solved {solved}  first hit pool {}  spent {spent}  brackets {brackets}  launches {launches}",
-            first_hit.map(|c| c.to_string()).unwrap_or_else(|| "-".into())
+            first_hit
+                .map(|c| c.to_string())
+                .unwrap_or_else(|| "-".into())
         );
     }
     first_hits.sort_unstable();
@@ -648,4 +1041,16 @@ fn run_halving(
         "{ensembles_solved}/{ensembles} ensembles solved (halving), median first hit pool {}, brackets {brackets_total}, launches {launches_total}",
         median.map(|m| m.to_string()).unwrap_or_else(|| "-".into())
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::km_median_first_hit;
+
+    #[test]
+    fn chain_median_retains_budget_censoring() {
+        let records = [(Some(10), 100), (None, 100), (None, 100)];
+
+        assert_eq!(km_median_first_hit(&records), None);
+    }
 }

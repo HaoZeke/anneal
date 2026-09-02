@@ -606,10 +606,11 @@ impl Fingerprint for SortedPairs {
 }
 
 impl<F: Fingerprint> BasinBias<F> {
-    /// Requires `gamma > 1`, `w0 > 0` and `merge_radius > 0`.
+    /// Requires `gamma > 1`, `w0 >= 0` and `merge_radius > 0`.
+    /// A zero height retains basin identity while leaving the energy unbiased.
     pub fn new(fingerprint: F, merge_radius: f64, w0: f64, gamma: f64) -> Self {
         assert!(gamma > 1.0, "gamma must be > 1");
-        assert!(w0 > 0.0, "w0 must be > 0");
+        assert!(w0.is_finite() && w0 >= 0.0, "w0 must be finite and >= 0");
         Self {
             index: BasinIndex::new(fingerprint, merge_radius),
             w0,
@@ -910,6 +911,20 @@ mod basin_bias_tests {
         for k in 0..da.len() {
             assert!((da[k] - db[k]).abs() < 1e-12, "component {k} differs");
         }
+    }
+
+    #[test]
+    fn zero_height_bias_tracks_basin_identity_without_changing_the_energy() {
+        let fingerprint = SortedPairs { n_points: 4 };
+        let point = tetra(1.0);
+        let mut bias = BasinBias::new(fingerprint, 1e-6, 0.0, 5.0);
+        let descriptor = bias.cv(point.view());
+
+        bias.deposit(descriptor.view(), 1.0);
+        bias.deposit(descriptor.view(), 1.0);
+
+        assert_eq!(bias.n_basins(), 1);
+        assert_eq!(bias.potential(descriptor.view()), 0.0);
     }
 
     #[test]

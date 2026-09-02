@@ -23,7 +23,7 @@ pub mod mailbox;
 pub mod server;
 
 /// Wire protocol version accepted by this release.
-pub const PROTOCOL_VERSION: u16 = 27;
+pub const PROTOCOL_VERSION: u16 = 28;
 /// `Sample` draw that returns the active-catalog incumbent.
 pub const INCUMBENT_SAMPLE_DRAW: u64 = u64::MAX;
 
@@ -363,6 +363,23 @@ pub enum CatalogOperation {
         /// Work identity, cost, and scientific outcome.
         report: CatalogRideReport,
     },
+    /// Admit a replica that is not yet on the live roster.
+    Attach,
+    /// Retire a live replica and record why.
+    Detach {
+        /// Human-readable retirement reason.
+        reason: String,
+    },
+    /// Advance the coordinator clock by one tick of the given period.
+    Tick {
+        /// Tick period in milliseconds.
+        millis: u64,
+    },
+    /// Request a manual live-population target.
+    Scale {
+        /// Desired number of live replicas.
+        live_target: u32,
+    },
 }
 
 /// Complete catalog request.
@@ -534,6 +551,8 @@ pub struct PolicyState {
     pub saddle_discovery_charged: u64,
     /// Whether exact-saddle reobservations meet the declared coverage rule.
     pub saddle_coverage_saturated: bool,
+    /// Successive-halving retire decision for this replica's next checkpoint.
+    pub retired: bool,
 }
 
 /// Which selection produced a barrier's parent map.
@@ -705,6 +724,27 @@ pub struct CoordinatorStatus {
     pub certified_connections: u64,
     /// The referee's seam, when at least two basins have been linked.
     pub seam: Option<LandscapeSeam>,
+    /// Monotone live-roster version.
+    pub roster_version: u64,
+    /// Replica identities currently live on the coordinator roster.
+    pub live_replicas: Vec<u32>,
+    /// Coordinator clock ticks delivered so far.
+    pub ticks: u64,
+    /// Spawn count still outstanding from the scaling policy.
+    pub spawn_requested: u32,
+}
+
+/// Versioned live roster returned by attach, detach, tick, and scale.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RosterReply {
+    /// Monotone roster version after the operation.
+    pub version: u64,
+    /// Replica identities currently live.
+    pub live: Vec<u32>,
+    /// Replica identities retired from the live set.
+    pub retired: Vec<u32>,
+    /// Spawn count still outstanding from the scaling policy.
+    pub spawn_requested: u32,
 }
 
 /// Scientific record an accepted reply carries alongside the snapshot.
@@ -734,6 +774,8 @@ pub enum AcceptedPayload {
     RideWork(CatalogRideWork),
     /// Coordinator-computed novelty credit for a transition report.
     RideCredit(RideCredit),
+    /// Versioned live roster after attach, detach, tick, or scale.
+    Roster(RosterReply),
 }
 
 /// Accepted coordinator response.
@@ -763,19 +805,6 @@ pub enum CatalogReply {
         /// Stable rejection reason.
         reason: ProtocolRejection,
     },
-}
-
-/// Live, retired, and spawn view returned by attach and scale.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RosterReply {
-    /// Monotone roster version.
-    pub version: u64,
-    /// Replicas that currently hold a session.
-    pub live: Vec<u32>,
-    /// Replicas that have detached or been retired.
-    pub retired: Vec<u32>,
-    /// Additional replicas the coordinator asked to start.
-    pub spawn_requested: u32,
 }
 
 /// Event pushed to every attached subscriber.
@@ -1020,6 +1049,12 @@ pub(crate) fn fill_request(
                 CatalogRideOutcome::Failed(failure) => outcome.set_failed((*failure).into()),
             }
         }
+        CatalogOperation::Attach => operation.set_attach(()),
+        CatalogOperation::Detach { reason } => {
+            operation.set_detach(reason.as_str());
+        }
+        CatalogOperation::Tick { millis } => operation.set_tick(*millis),
+        CatalogOperation::Scale { live_target } => operation.set_scale(*live_target),
     }
     Ok(())
 }
@@ -1209,6 +1244,12 @@ pub(crate) fn decode_request_reader(
                 },
             }
         }
+        catalog_request::operation::Attach(()) => CatalogOperation::Attach,
+        catalog_request::operation::Detach(reason) => CatalogOperation::Detach {
+            reason: text_value(reason.map_err(wire_error)?)?,
+        },
+        catalog_request::operation::Tick(millis) => CatalogOperation::Tick { millis },
+        catalog_request::operation::Scale(live_target) => CatalogOperation::Scale { live_target },
     };
     Ok(CatalogRequest {
         protocol_version,
@@ -1294,6 +1335,15 @@ pub(crate) fn fill_reply(
                         status.unique_degenerate_rearrangements,
                     );
                     output.set_certified_connections(status.certified_connections);
+                    output.set_roster_version(status.roster_version);
+                    output.set_ticks(status.ticks);
+                    output.set_spawn_requested(status.spawn_requested);
+                    fill_u32(
+                        output
+                            .reborrow()
+                            .init_live_replicas(status.live_replicas.len() as u32),
+                        &status.live_replicas,
+                    );
                     if let Some(seam) = &status.seam {
                         output.set_algebraic_connectivity(seam.algebraic_connectivity);
                         output.set_seam_conductance(seam.conductance);
@@ -1416,6 +1466,7 @@ pub(crate) fn fill_reply(
                     output.set_saddle_discovery_attempts(state.saddle_discovery_attempts);
                     output.set_saddle_discovery_charged(state.saddle_discovery_charged);
                     output.set_saddle_coverage_saturated(state.saddle_coverage_saturated);
+                    output.set_retired(state.retired);
                 }
                 AcceptedPayload::PopulationEpoch(state) => {
                     let mut output = payload.init_population_epoch();
@@ -1463,6 +1514,19 @@ pub(crate) fn fill_reply(
                     } else {
                         result.set_pending(());
                     }
+                }
+                AcceptedPayload::Roster(roster) => {
+                    let mut output = payload.init_roster();
+                    output.set_version(roster.version);
+                    fill_u32(
+                        output.reborrow().init_live(roster.live.len() as u32),
+                        &roster.live,
+                    );
+                    fill_u32(
+                        output.reborrow().init_retired(roster.retired.len() as u32),
+                        &roster.retired,
+                    );
+                    output.set_spawn_requested(roster.spawn_requested);
                 }
                 AcceptedPayload::CatalogMutation(mutation) => {
                     let mut output = payload.init_catalog_mutation();
@@ -1565,6 +1629,10 @@ pub(crate) fn decode_reply_reader(
                             .get_unique_degenerate_rearrangements(),
                         certified_connections: status.get_certified_connections(),
                         seam,
+                        roster_version: status.get_roster_version(),
+                        live_replicas: list_u32(status.get_live_replicas().map_err(wire_error)?),
+                        ticks: status.get_ticks(),
+                        spawn_requested: status.get_spawn_requested(),
                     })
                 }
                 accepted_reply::payload::FrontierPost(post) => {
@@ -1680,6 +1748,7 @@ pub(crate) fn decode_reply_reader(
                         saddle_discovery_attempts: state.get_saddle_discovery_attempts(),
                         saddle_discovery_charged: state.get_saddle_discovery_charged(),
                         saddle_coverage_saturated: state.get_saddle_coverage_saturated(),
+                        retired: state.get_retired(),
                     })
                 }
                 accepted_reply::payload::PopulationEpoch(state) => {
@@ -1725,6 +1794,15 @@ pub(crate) fn decode_reply_reader(
                         submitted: state.get_submitted(),
                         required: state.get_required(),
                         plan,
+                    })
+                }
+                accepted_reply::payload::Roster(roster) => {
+                    let roster = roster.map_err(wire_error)?;
+                    AcceptedPayload::Roster(RosterReply {
+                        version: roster.get_version(),
+                        live: list_u32(roster.get_live().map_err(wire_error)?),
+                        retired: list_u32(roster.get_retired().map_err(wire_error)?),
+                        spawn_requested: roster.get_spawn_requested(),
                     })
                 }
                 accepted_reply::payload::CatalogMutation(mutation) => {
@@ -2034,6 +2112,15 @@ pub(crate) fn fill_coordinator_status(
         row.set_charged_work(progress.charged_work);
         row.set_best_energy(progress.best_energy);
     }
+    output.set_roster_version(status.roster_version);
+    fill_u32(
+        output
+            .reborrow()
+            .init_live_replicas(status.live_replicas.len() as u32),
+        &status.live_replicas,
+    );
+    output.set_ticks(status.ticks);
+    output.set_spawn_requested(status.spawn_requested);
 }
 
 pub(crate) fn read_coordinator_status(
@@ -2073,6 +2160,10 @@ pub(crate) fn read_coordinator_status(
         unique_degenerate_rearrangements: status.get_unique_degenerate_rearrangements(),
         certified_connections: status.get_certified_connections(),
         seam,
+        roster_version: status.get_roster_version(),
+        live_replicas: list_u32(status.get_live_replicas().map_err(wire_error)?),
+        ticks: status.get_ticks(),
+        spawn_requested: status.get_spawn_requested(),
     })
 }
 

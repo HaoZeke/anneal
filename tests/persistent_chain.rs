@@ -440,13 +440,19 @@ fn checkpoint_external_adopt_charges_the_work_then_moves_the_live_chain() {
         &mut external_checkpoint,
     );
 
-    assert!(external_offered, "checkpoint did not offer the external candidate");
+    assert!(
+        external_offered,
+        "checkpoint did not offer the external candidate"
+    );
     let adopted = external
         .accepted_transitions
         .iter()
         .find(|transition| transition.action == "fragment")
         .expect("the external candidate is absent from the trajectory");
-    assert!(adopted.adopted, "the external candidate did not become the live chain");
+    assert!(
+        adopted.adopted,
+        "the external candidate did not become the live chain"
+    );
     assert_eq!(
         external_ledger.spent(),
         boundary_ledger.spent() + EXTERNAL_CALLS,

@@ -7,8 +7,8 @@ use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpListener};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
@@ -50,7 +50,7 @@ use crate::cooperative_search::ledger::{
     ChargeKind, ChargeSummary, CooperativeLedger, ReplicaLedgerEvent,
 };
 use crate::descriptor_space::{DescriptorSpace, UNIVERSAL_LOCAL_ENVIRONMENT_RADIUS};
-use crate::discovery_roster::{DiscoveryOpportunity, assign_discovery_roles_with_minimum};
+use crate::discovery_roster::{DiscoveryRole, assign_discovery_batch};
 use crate::methods::feynman_kac::{
     EpochSubmissionOutcome, PopulationEpochPlan, PopulationMember, SelectionCoefficients,
     SynchronousPopulation,
@@ -68,6 +68,7 @@ use crate::ride_ledger::{
     EnvironmentBook, RideArm, RideDirection, RideLedger, RideOutcome, RidePortfolio, RideSource,
     SADDLE_COVERAGE_MINIMUM_OBSERVATIONS,
 };
+use crate::scaling::{ScaleDecision, SuccessiveHalving};
 use crate::soap::local_nu3_z;
 use crate::transition_graph::{AttractionRegionConfig, TransitionGraph, TransitionOutcome};
 use crate::universal_coverage::{CoverageConfig, UniversalCoverage};
@@ -85,6 +86,8 @@ pub struct ServerConfig {
     scientific: Option<ScientificConfig>,
     per_replica_budget: Option<u64>,
     state_directory: Option<PathBuf>,
+    quorum: Option<(f64, u64)>,
+    halving: Option<SuccessiveHalving>,
 }
 
 #[derive(Clone)]
@@ -124,7 +127,35 @@ impl ServerConfig {
             scientific: None,
             per_replica_budget: None,
             state_directory: None,
+            quorum: None,
+            halving: None,
         })
+    }
+
+    /// Close population epochs on `quorum` of the live roster once
+    /// `deadline_ticks` coordinator ticks have passed since the first
+    /// submission of the open epoch.
+    pub fn with_quorum(
+        mut self,
+        quorum: f64,
+        deadline_ticks: u64,
+    ) -> Result<Self, CatalogServerError> {
+        SynchronousPopulation::new(
+            self.replicas.iter().copied(),
+            SelectionCoefficients::default(),
+            1,
+            1,
+        )
+        .and_then(|population| population.with_quorum(quorum, deadline_ticks))
+        .map_err(|_| CatalogServerError::InvalidConfiguration)?;
+        self.quorum = Some((quorum, deadline_ticks));
+        Ok(self)
+    }
+
+    /// Drive live-population size with successive halving.
+    pub fn with_halving(mut self, policy: SuccessiveHalving) -> Self {
+        self.halving = Some(policy);
+        self
     }
 
     /// Attach an equal charged-work budget for every configured replica.
@@ -357,6 +388,7 @@ struct ScientificState {
     ride_environments: EnvironmentBook,
     ride_ledger: RideLedger,
     ride_information_scores: BTreeMap<RideArm, f64>,
+    discovery_ride_assignments: BTreeMap<u32, RideArm>,
     ride_candidates: BTreeMap<u64, CatalogCandidate>,
     ride_saddles: BTreeMap<u64, CertifiedRideSaddle>,
     next_ride_saddle: u64,
@@ -427,6 +459,46 @@ struct ScientificState {
 }
 
 #[derive(Clone)]
+struct CoordinatorRoster {
+    version: u64,
+    live: BTreeSet<u32>,
+    retired: BTreeMap<u32, String>,
+    spawn_requested: u32,
+    ticks: u64,
+    pending_retire: BTreeSet<u32>,
+    replica_charged: BTreeMap<u32, u64>,
+    replica_energy: BTreeMap<u32, f64>,
+}
+
+impl CoordinatorRoster {
+    fn new(replicas: impl IntoIterator<Item = u32>) -> Self {
+        Self {
+            version: 0,
+            live: replicas.into_iter().collect(),
+            retired: BTreeMap::new(),
+            spawn_requested: 0,
+            ticks: 0,
+            pending_retire: BTreeSet::new(),
+            replica_charged: BTreeMap::new(),
+            replica_energy: BTreeMap::new(),
+        }
+    }
+
+    fn known(&self, replica: u32) -> bool {
+        self.live.contains(&replica) || self.retired.contains_key(&replica)
+    }
+
+    fn reply(&self) -> RosterReply {
+        RosterReply {
+            version: self.version,
+            live: self.live.iter().copied().collect(),
+            retired: self.retired.keys().copied().collect(),
+            spawn_requested: self.spawn_requested,
+        }
+    }
+}
+
+#[derive(Clone)]
 struct CoordinatorState {
     snapshot_version: u64,
     census_visits: u64,
@@ -435,6 +507,8 @@ struct CoordinatorState {
     maximum_sequence: BTreeMap<u32, u64>,
     ledger: Option<CooperativeLedger>,
     scientific: Option<ScientificState>,
+    roster: CoordinatorRoster,
+    halving: Option<SuccessiveHalving>,
     /// Raw frontier excursion posts, shared across every replica.
     frontier: std::collections::VecDeque<crate::catalog_rpc::CatalogFrontierPost>,
     /// A journal append failed after the live state had already moved,
@@ -488,17 +562,30 @@ impl CoordinatorState {
                     best_candidate_by_replica: BTreeMap::new(),
                     boundary_crossings: Vec::new(),
                     transition_capacity: scientific.catalog_capacity,
-                    population: SynchronousPopulation::new(
-                        config.replicas.iter().copied(),
-                        SelectionCoefficients::default(),
-                        config.replicas.len().div_ceil(2),
-                        u64::from_le_bytes(
-                            config.signature_digest[..8]
-                                .try_into()
-                                .expect("signature prefix has eight bytes"),
-                        ),
-                    )
-                    .map_err(|_| CatalogServerError::InvalidScientificConfiguration)?,
+                    population: {
+                        let mut population = SynchronousPopulation::new(
+                            config.replicas.iter().copied(),
+                            SelectionCoefficients::default(),
+                            config.replicas.len().div_ceil(2),
+                            u64::from_le_bytes(
+                                config.signature_digest[..8]
+                                    .try_into()
+                                    .expect("signature prefix has eight bytes"),
+                            ),
+                        )
+                        .map_err(|_| CatalogServerError::InvalidScientificConfiguration)?;
+                        if let Some((quorum, deadline_ticks)) = config.quorum {
+                            population = population
+                                .with_quorum(quorum, deadline_ticks)
+                                .map_err(|_| CatalogServerError::InvalidScientificConfiguration)?;
+                        }
+                        for replica in &config.replicas {
+                            population
+                                .mark_live(*replica)
+                                .map_err(|_| CatalogServerError::InvalidScientificConfiguration)?;
+                        }
+                        population
+                    },
                     population_candidates: BTreeMap::new(),
                     population_plans: BTreeMap::new(),
                     packing: PackingBook::default(),
@@ -515,6 +602,7 @@ impl CoordinatorState {
                             .map_err(|_| CatalogServerError::InvalidScientificConfiguration)?,
                     ),
                     ride_information_scores: BTreeMap::new(),
+                    discovery_ride_assignments: BTreeMap::new(),
                     ride_candidates: BTreeMap::new(),
                     ride_saddles: BTreeMap::new(),
                     next_ride_saddle: 0,
@@ -558,6 +646,8 @@ impl CoordinatorState {
             maximum_sequence: BTreeMap::new(),
             ledger,
             scientific,
+            roster: CoordinatorRoster::new(config.replicas.iter().copied()),
+            halving: config.halving.clone(),
             frontier: std::collections::VecDeque::new(),
             journal_broken: false,
         })
@@ -674,6 +764,9 @@ pub struct CatalogServer {
     header: ServerHeader,
     stop: Arc<AtomicBool>,
     thread: Option<JoinHandle<()>>,
+    clock: Option<JoinHandle<()>>,
+    state: Arc<Mutex<CoordinatorState>>,
+    clock_identity: CatalogIdentity,
 }
 
 impl CatalogServer {
@@ -693,6 +786,14 @@ impl CatalogServer {
         };
         let stop = Arc::new(AtomicBool::new(false));
         let thread_stop = Arc::clone(&stop);
+        let state = Arc::new(Mutex::new(initial_state));
+        let accept_state = Arc::clone(&state);
+        let clock_identity = CatalogIdentity {
+            campaign: config.campaign.clone(),
+            ensemble: config.ensemble.clone(),
+            replica: u32::MAX,
+            signature_digest: config.signature_digest,
+        };
         let thread = thread::Builder::new()
             .name("catalog-rpc".to_owned())
             .spawn(move || {
@@ -708,11 +809,7 @@ impl CatalogServer {
                     };
                     let shared = Rc::new(RefCell::new(CoordinatorShared {
                         config,
-                        state: initial_state,
-                        live: BTreeSet::new(),
-                        retired: BTreeSet::new(),
-                        roster_version: 0,
-                        spawn_requested: 0,
+                        state: accept_state,
                         subscribers: Vec::new(),
                     }));
                     while !thread_stop.load(Ordering::Acquire) {
@@ -737,7 +834,69 @@ impl CatalogServer {
             header,
             stop,
             thread: Some(thread),
+            clock: None,
+            state,
+            clock_identity,
         })
+    }
+
+    /// Spawn a thread that journals one [`CatalogOperation::Tick`] every `period`.
+    pub fn with_clock(mut self, period: Duration) -> Self {
+        let stop = Arc::clone(&self.stop);
+        let addr = self.addr;
+        let identity = self.clock_identity.clone();
+        let millis = u64::try_from(period.as_millis()).unwrap_or(u64::MAX);
+        self.clock = Some(thread::spawn(move || {
+            use super::client::{CatalogClient, ClientConfig};
+            let mut client = loop {
+                if stop.load(Ordering::Acquire) {
+                    return;
+                }
+                match CatalogClient::connect(addr, identity.clone(), ClientConfig::default()) {
+                    Ok(client) => break client,
+                    Err(_) => thread::sleep(Duration::from_millis(20)),
+                }
+            };
+            let mut sequence = 1u64;
+            while !stop.load(Ordering::Acquire) {
+                thread::sleep(period);
+                if stop.load(Ordering::Acquire) {
+                    break;
+                }
+                if client.tick(sequence, millis).is_ok() {
+                    sequence = sequence.saturating_add(1);
+                }
+            }
+        }));
+        self
+    }
+
+    /// Apply a quorum close to the live population after start.
+    pub fn with_quorum(self, quorum: f64, deadline_ticks: u64) -> Result<Self, CatalogServerError> {
+        let mut state = match self.state.lock() {
+            Ok(state) => state,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        if let Some(scientific) = state.scientific.as_mut() {
+            scientific.population = scientific
+                .population
+                .clone()
+                .with_quorum(quorum, deadline_ticks)
+                .map_err(|_| CatalogServerError::InvalidConfiguration)?;
+        }
+        drop(state);
+        Ok(self)
+    }
+
+    /// Attach a successive-halving policy after start.
+    pub fn with_halving(self, policy: SuccessiveHalving) -> Self {
+        let mut state = match self.state.lock() {
+            Ok(state) => state,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        state.halving = Some(policy);
+        drop(state);
+        self
     }
 
     /// Bound socket address.
@@ -754,6 +913,9 @@ impl CatalogServer {
 impl Drop for CatalogServer {
     fn drop(&mut self) {
         self.stop.store(true, Ordering::Release);
+        if let Some(thread) = self.clock.take() {
+            let _ = thread.join();
+        }
         if let Some(thread) = self.thread.take() {
             let _ = thread.join();
         }
@@ -762,12 +924,14 @@ impl Drop for CatalogServer {
 
 struct CoordinatorShared {
     config: ServerConfig,
-    state: CoordinatorState,
-    live: BTreeSet<u32>,
-    retired: BTreeSet<u32>,
-    roster_version: u64,
-    spawn_requested: u32,
+    state: Arc<Mutex<CoordinatorState>>,
     subscribers: Vec<AttachedSubscriber>,
+}
+
+fn lock_state(state: &Arc<Mutex<CoordinatorState>>) -> std::sync::MutexGuard<'_, CoordinatorState> {
+    state
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
 struct AttachedSubscriber {
@@ -804,13 +968,8 @@ async fn serve_connection(
     rpc.await.map_err(|error| error.to_string())
 }
 
-fn roster_from(shared: &CoordinatorShared) -> RosterReply {
-    RosterReply {
-        version: shared.roster_version,
-        live: shared.live.iter().copied().collect(),
-        retired: shared.retired.iter().copied().collect(),
-        spawn_requested: shared.spawn_requested,
-    }
+fn roster_from(state: &CoordinatorState) -> RosterReply {
+    state.roster.reply()
 }
 
 fn push_event(
@@ -847,9 +1006,6 @@ impl coordinator::Server for CoordinatorImpl {
         let subscriber = pry!(params.get_subscriber());
         let roster = {
             let mut shared = self.shared.borrow_mut();
-            shared.retired.remove(&identity.replica);
-            shared.live.insert(identity.replica);
-            shared.roster_version = shared.roster_version.saturating_add(1);
             shared
                 .subscribers
                 .retain(|attached| attached.replica != identity.replica);
@@ -857,7 +1013,7 @@ impl coordinator::Server for CoordinatorImpl {
                 replica: identity.replica,
                 client: subscriber,
             });
-            roster_from(&shared)
+            roster_from(&lock_state(&shared.state))
         };
         {
             let mut reply = results.get();
@@ -867,10 +1023,7 @@ impl coordinator::Server for CoordinatorImpl {
             }));
             fill_roster(reply.init_roster(), &roster);
         }
-        push_event(
-            &self.shared,
-            CoordinatorEvent::RosterChanged(roster.version),
-        )
+        Promise::ok(())
     }
 
     fn observe(
@@ -879,7 +1032,8 @@ impl coordinator::Server for CoordinatorImpl {
         mut results: coordinator::ObserveResults,
     ) -> Promise<(), capnp::Error> {
         let shared = self.shared.borrow();
-        let status = coordinator_status(&shared.config, &shared.state);
+        let state = lock_state(&shared.state);
+        let status = coordinator_status(&shared.config, &state);
         fill_coordinator_status(results.get().init_status(), &status);
         Promise::ok(())
     }
@@ -891,11 +1045,20 @@ impl coordinator::Server for CoordinatorImpl {
     ) -> Promise<(), capnp::Error> {
         let live_target = pry!(params.get()).get_live_target();
         let (roster, spawn) = {
-            let mut shared = self.shared.borrow_mut();
-            let live = u32::try_from(shared.live.len()).unwrap_or(u32::MAX);
-            shared.spawn_requested = live_target.saturating_sub(live);
-            shared.roster_version = shared.roster_version.saturating_add(1);
-            (roster_from(&shared), shared.spawn_requested)
+            let shared = self.shared.borrow_mut();
+            let mut state = lock_state(&shared.state);
+            let decisions = state
+                .halving
+                .as_mut()
+                .map(|policy| policy.set_target(live_target))
+                .unwrap_or_default();
+            apply_scale_decisions(&shared.config, &mut state, decisions);
+            if let Some(snapshot_version) = state.snapshot_version.checked_add(1) {
+                state.snapshot_version = snapshot_version;
+            }
+            let roster = roster_from(&state);
+            let spawn = roster.spawn_requested;
+            (roster, spawn)
         };
         fill_roster(results.get().init_roster(), &roster);
         if spawn == 0 {
@@ -922,7 +1085,7 @@ impl session::Server for SessionImpl {
                     .map(|root| root.get_event_sequence())
                     .unwrap_or(0);
                 let reply = rejected(
-                    &self.shared.borrow().state,
+                    &lock_state(&self.shared.borrow().state),
                     event_sequence,
                     rejection_for_protocol_error(&error),
                 );
@@ -935,7 +1098,7 @@ impl session::Server for SessionImpl {
         };
         if request.identity != self.identity {
             let reply = rejected(
-                &self.shared.borrow().state,
+                &lock_state(&self.shared.borrow().state),
                 request.event_sequence,
                 ProtocolRejection::ReplicaMismatch,
             );
@@ -954,21 +1117,53 @@ impl session::Server for SessionImpl {
                 None => None,
             };
             let (reply, events) = {
-                let mut shared = shared.borrow_mut();
-                let epoch_before = open_population_epoch(&shared.state);
+                let shared = shared.borrow_mut();
+                let mut state = lock_state(&shared.state);
+                let epoch_before = open_population_epoch(&state);
                 let config = shared.config.clone();
-                let reply =
-                    process_request(&config, &mut shared.state, request.clone(), precomputed)
-                        .map_err(capnp::Error::failed)?;
+                let reply = process_request(&config, &mut state, request.clone(), precomputed)
+                    .map_err(capnp::Error::failed)?;
                 let mut events = Vec::new();
-                if matches!(
-                    request.operation,
-                    CatalogOperation::PopulationAbstain { .. }
-                ) && matches!(reply, CatalogReply::Accepted(_))
-                {
-                    events.push(CoordinatorEvent::Retire("abstain".into()));
+                if matches!(reply, CatalogReply::Accepted(_)) {
+                    match &request.operation {
+                        CatalogOperation::Attach => {
+                            if let CatalogReply::Accepted(accepted) = &reply
+                                && let crate::catalog_rpc::AcceptedPayload::Roster(roster) =
+                                    &accepted.payload
+                            {
+                                events.push(CoordinatorEvent::RosterChanged(roster.version));
+                            }
+                        }
+                        CatalogOperation::Detach { reason } => {
+                            if let CatalogReply::Accepted(accepted) = &reply
+                                && let crate::catalog_rpc::AcceptedPayload::Roster(roster) =
+                                    &accepted.payload
+                            {
+                                events.push(CoordinatorEvent::RosterChanged(roster.version));
+                            }
+                            events.push(CoordinatorEvent::Retire(reason.clone()));
+                        }
+                        CatalogOperation::Tick { millis } => {
+                            events.push(CoordinatorEvent::Tick(*millis));
+                        }
+                        CatalogOperation::Scale { .. } => {
+                            if let CatalogReply::Accepted(accepted) = &reply
+                                && let crate::catalog_rpc::AcceptedPayload::Roster(roster) =
+                                    &accepted.payload
+                            {
+                                events.push(CoordinatorEvent::RosterChanged(roster.version));
+                                if roster.spawn_requested > 0 {
+                                    events.push(CoordinatorEvent::Spawn(roster.spawn_requested));
+                                }
+                            }
+                        }
+                        CatalogOperation::PopulationAbstain { .. } => {
+                            events.push(CoordinatorEvent::Retire("abstain".into()));
+                        }
+                        _ => {}
+                    }
                 }
-                let epoch_after = open_population_epoch(&shared.state);
+                let epoch_after = open_population_epoch(&state);
                 if let (Some(before), Some(after)) = (epoch_before, epoch_after)
                     && after > before
                 {
@@ -988,25 +1183,23 @@ impl session::Server for SessionImpl {
     fn detach(
         &mut self,
         params: session::DetachParams,
-        _results: session::DetachResults,
+        mut results: session::DetachResults,
     ) -> Promise<(), capnp::Error> {
         let reason = pry!(pry!(params.get()).get_reason())
             .to_string()
             .unwrap_or_default();
-        let version = {
+        let roster = {
             let mut shared = self.shared.borrow_mut();
-            shared.live.remove(&self.identity.replica);
-            shared.retired.insert(self.identity.replica);
-            shared.roster_version = shared.roster_version.saturating_add(1);
-            if let Some(scientific) = shared.state.scientific.as_mut() {
-                let _ = scientific.population.retire(self.identity.replica);
-            }
             shared
                 .subscribers
                 .retain(|attached| attached.replica != self.identity.replica);
-            shared.roster_version
+            let mut state = lock_state(&shared.state);
+            let _ = retire_replica(&shared.config, &mut state, self.identity.replica, &reason);
+            roster_from(&state)
         };
+        fill_roster(results.get().init_roster(), &roster);
         let shared = Rc::clone(&self.shared);
+        let version = roster.version;
         Promise::from_future(async move {
             push_event(&shared, CoordinatorEvent::RosterChanged(version)).await?;
             push_event(&shared, CoordinatorEvent::Retire(reason)).await
@@ -1028,7 +1221,8 @@ async fn precompute_validation_async(
 ) -> Result<ValidatedCandidate, ()> {
     let bits = {
         let shared = shared.borrow();
-        let scientific = shared.state.scientific.as_ref().ok_or(())?;
+        let state = lock_state(&shared.state);
+        let scientific = state.scientific.as_ref().ok_or(())?;
         (
             scientific.signature.clone(),
             scientific.descriptor_space.clone(),
@@ -1094,7 +1288,7 @@ fn process_request(
     // that happens to share a replica id collides with a stored request
     // and is told its sequence replayed rather than that it is talking
     // to the wrong coordinator.
-    if let Some(reason) = identity_rejection(config, &request.identity) {
+    if let Some(reason) = identity_rejection(config, state, &request) {
         return Ok(rejected(state, request.event_sequence, reason));
     }
     let key = (request.identity.replica, request.event_sequence);
@@ -1142,7 +1336,7 @@ fn apply_request(
     request: CatalogRequest,
     mut precomputed: Option<Result<ValidatedCandidate, ()>>,
 ) -> CatalogReply {
-    let rejection = identity_rejection(config, &request.identity).or_else(|| {
+    let rejection = identity_rejection(config, state, &request).or_else(|| {
         (request.snapshot_version > state.snapshot_version)
             .then_some(ProtocolRejection::SnapshotRegression)
     });
@@ -1426,6 +1620,20 @@ fn apply_request(
                 .map_or_else(Default::default, |ledger| {
                     ledger.charge_summary(ChargeKind::SaddleRide)
                 });
+            let retired = state
+                .roster
+                .pending_retire
+                .contains(&request.identity.replica);
+            if energy.is_finite() {
+                let stored = state
+                    .roster
+                    .replica_energy
+                    .entry(request.identity.replica)
+                    .or_insert(f64::INFINITY);
+                if *energy < *stored {
+                    *stored = *energy;
+                }
+            }
             let Some(scientific) = state.scientific.as_mut() else {
                 return rejected(
                     state,
@@ -1504,11 +1712,6 @@ fn apply_request(
                 SADDLE_COVERAGE_MINIMUM_OBSERVATIONS,
                 saddle_coverage.unseen_mass_upper,
             );
-            let minimum_ride_consumers = if saddle_effort.events == 0 {
-                scientific.discovery_replicas.len().div_ceil(2)
-            } else {
-                0
-            };
             let (basin_action_cost, ride_action_cost) =
                 empirical_action_costs(basin_effort, saddle_effort);
             let Some((discovery_role, discovery_epoch)) = minimum_information_role(
@@ -1518,7 +1721,6 @@ fn apply_request(
                 *energy,
                 basin_action_cost,
                 ride_action_cost,
-                minimum_ride_consumers,
             ) else {
                 return rejected(
                     state,
@@ -1538,10 +1740,12 @@ fn apply_request(
             if mixing.pruned {
                 reset_trial(scientific, request.identity.replica);
             }
-            if scientific
-                .population
-                .mark_live(request.identity.replica)
-                .is_err()
+            let skip_mark_live = retired;
+            if !skip_mark_live
+                && scientific
+                    .population
+                    .mark_live(request.identity.replica)
+                    .is_err()
             {
                 return rejected(
                     state,
@@ -1607,6 +1811,7 @@ fn apply_request(
                 saddle_discovery_attempts: saddle_effort.events,
                 saddle_discovery_charged: saddle_effort.charged_calls,
                 saddle_coverage_saturated: saddle_coverage.saturated,
+                retired,
             });
             report_occupancy_gt(scientific);
         }
@@ -2413,11 +2618,19 @@ fn apply_request(
                 );
             };
             let mut ride_ledger = scientific.ride_ledger.clone();
-            if let Some(order) = ride_ledger.claim_ranked(
-                request.identity.replica,
-                *seed,
-                &scientific.ride_information_scores,
-            ) {
+            let assigned_arm = scientific
+                .discovery_ride_assignments
+                .get(&request.identity.replica);
+            let order = assigned_arm
+                .and_then(|arm| ride_ledger.claim_arm(request.identity.replica, *seed, arm))
+                .or_else(|| {
+                    ride_ledger.claim_ranked(
+                        request.identity.replica,
+                        *seed,
+                        &scientific.ride_information_scores,
+                    )
+                });
+            if let Some(order) = order {
                 let Some(source) = scientific
                     .ride_candidates
                     .get(&order.arm.source_basin)
@@ -2443,6 +2656,9 @@ fn apply_request(
                     );
                 };
                 scientific.ride_ledger = ride_ledger;
+                scientific
+                    .discovery_ride_assignments
+                    .remove(&request.identity.replica);
                 payload = AcceptedPayload::RideWork(CatalogRideWork {
                     order,
                     source,
@@ -2661,6 +2877,13 @@ fn apply_request(
                 );
             };
             state.snapshot_version = snapshot_version;
+            feed_halving(
+                config,
+                state,
+                request.identity.replica,
+                *cumulative_charged,
+                None,
+            );
         }
         CatalogOperation::LedgerBatch { events } => {
             let ordered = !events.is_empty()
@@ -2736,6 +2959,90 @@ fn apply_request(
                 scientific.catalog.update_threshold(aggregate_charged);
             }
             state.snapshot_version = snapshot_version;
+            if let Some(last) = events.last() {
+                feed_halving(
+                    config,
+                    state,
+                    request.identity.replica,
+                    last.cumulative_charged,
+                    None,
+                );
+            }
+        }
+        CatalogOperation::Attach => {
+            if admit_replica(state, request.identity.replica).is_err() {
+                return rejected(
+                    state,
+                    request.event_sequence,
+                    ProtocolRejection::ValidationRejected,
+                );
+            }
+            payload = AcceptedPayload::Roster(state.roster.reply());
+        }
+        CatalogOperation::Detach { reason } => {
+            if retire_replica(config, state, request.identity.replica, reason).is_err() {
+                return rejected(
+                    state,
+                    request.event_sequence,
+                    ProtocolRejection::ValidationRejected,
+                );
+            }
+            payload = AcceptedPayload::Roster(state.roster.reply());
+        }
+        CatalogOperation::Tick { .. } => {
+            state.roster.ticks = state.roster.ticks.saturating_add(1);
+            let roster = state.roster.reply();
+            payload = match state.scientific.as_mut() {
+                Some(scientific) => match scientific.population.tick() {
+                    Ok(Some(EpochSubmissionOutcome::Ready(plan))) => {
+                        let participants = u32::try_from(plan.destinations().len())
+                            .expect("participants are bounded by replica count");
+                        realize_population_plan(
+                            scientific,
+                            config,
+                            plan.epoch(),
+                            &plan,
+                            participants,
+                        )
+                    }
+                    Ok(Some(EpochSubmissionOutcome::Pending {
+                        epoch,
+                        submitted,
+                        required,
+                    })) => AcceptedPayload::PopulationEpoch(PopulationEpochState {
+                        epoch,
+                        submitted: u32::try_from(submitted)
+                            .expect("submission count is bounded by replica count"),
+                        required: u32::try_from(required)
+                            .expect("requirement is bounded by replica count"),
+                        plan: None,
+                    }),
+                    Ok(None) => AcceptedPayload::Roster(roster),
+                    Err(_) => {
+                        return rejected(
+                            state,
+                            request.event_sequence,
+                            ProtocolRejection::ValidationRejected,
+                        );
+                    }
+                },
+                None => AcceptedPayload::Roster(roster),
+            };
+            if let Some(snapshot_version) = state.snapshot_version.checked_add(1) {
+                state.snapshot_version = snapshot_version;
+            }
+        }
+        CatalogOperation::Scale { live_target } => {
+            let decisions = state
+                .halving
+                .as_mut()
+                .map(|policy| policy.set_target(*live_target))
+                .unwrap_or_default();
+            apply_scale_decisions(config, state, decisions);
+            payload = AcceptedPayload::Roster(state.roster.reply());
+            if let Some(snapshot_version) = state.snapshot_version.checked_add(1) {
+                state.snapshot_version = snapshot_version;
+            }
         }
     }
     state
@@ -2743,6 +3050,133 @@ fn apply_request(
         .insert(request.identity.replica, request.event_sequence);
     state.requests.insert(key, (request, payload.clone()));
     accepted_with_payload(state, key.1, false, payload)
+}
+
+fn admit_replica(state: &mut CoordinatorState, replica: u32) -> Result<(), CatalogServerError> {
+    if replica == u32::MAX {
+        return Err(CatalogServerError::InvalidConfiguration);
+    }
+    if let Some(ledger) = state.ledger.as_mut() {
+        ledger
+            .attach(replica)
+            .map_err(|_| CatalogServerError::InvalidConfiguration)?;
+    }
+    if let Some(scientific) = state.scientific.as_mut() {
+        match scientific.population.attach(replica) {
+            Ok(()) => {}
+            Err(crate::methods::feynman_kac::ReconfigurationError::DuplicateReplica { .. }) => {
+                scientific
+                    .population
+                    .mark_live(replica)
+                    .map_err(|_| CatalogServerError::InvalidConfiguration)?;
+            }
+            Err(_) => return Err(CatalogServerError::InvalidConfiguration),
+        }
+        if !scientific.discovery_replicas.contains(&replica) {
+            scientific.discovery_replicas.push(replica);
+        }
+    }
+    let newly_live = state.roster.live.insert(replica);
+    state.roster.retired.remove(&replica);
+    state.roster.pending_retire.remove(&replica);
+    if newly_live {
+        state.roster.version = state.roster.version.saturating_add(1);
+        if state.roster.spawn_requested > 0 {
+            state.roster.spawn_requested -= 1;
+        }
+        if let Some(snapshot_version) = state.snapshot_version.checked_add(1) {
+            state.snapshot_version = snapshot_version;
+        }
+    }
+    Ok(())
+}
+
+fn retire_replica(
+    config: &ServerConfig,
+    state: &mut CoordinatorState,
+    replica: u32,
+    reason: &str,
+) -> Result<(), CatalogServerError> {
+    if !state.roster.known(replica) && !state.roster.live.contains(&replica) {
+        return Err(CatalogServerError::InvalidConfiguration);
+    }
+    if let Some(scientific) = state.scientific.as_mut() {
+        let epoch = scientific.population.open_epoch();
+        let _ = scientific.population.retire(replica);
+        if scientific.population.open_epoch() != epoch
+            && let Some(plan) = scientific.population.completed_plan(epoch).cloned()
+        {
+            let participants = u32::try_from(plan.destinations().len())
+                .expect("participants are bounded by replica count");
+            let _ = realize_population_plan(scientific, config, epoch, &plan, participants);
+        }
+    }
+    let was_live = state.roster.live.remove(&replica);
+    state.roster.retired.insert(replica, reason.to_owned());
+    if was_live {
+        state.roster.version = state.roster.version.saturating_add(1);
+        if let Some(snapshot_version) = state.snapshot_version.checked_add(1) {
+            state.snapshot_version = snapshot_version;
+        }
+    }
+    Ok(())
+}
+
+fn feed_halving(
+    config: &ServerConfig,
+    state: &mut CoordinatorState,
+    replica: u32,
+    charged_work: u64,
+    energy: Option<f64>,
+) {
+    state.roster.replica_charged.insert(replica, charged_work);
+    if let Some(value) = energy.filter(|value| value.is_finite()) {
+        let stored = state
+            .roster
+            .replica_energy
+            .entry(replica)
+            .or_insert(f64::INFINITY);
+        if value < *stored {
+            *stored = value;
+        }
+    }
+    let best_energy = state
+        .roster
+        .replica_energy
+        .get(&replica)
+        .copied()
+        .or_else(|| {
+            state
+                .scientific
+                .as_ref()
+                .and_then(|scientific| scientific.best_candidate_by_replica.get(&replica))
+                .map(|candidate| candidate.energy)
+        })
+        .unwrap_or(f64::INFINITY);
+    let decisions = state
+        .halving
+        .as_mut()
+        .map(|policy| policy.observe(replica, charged_work, best_energy))
+        .unwrap_or_default();
+    apply_scale_decisions(config, state, decisions);
+}
+
+fn apply_scale_decisions(
+    config: &ServerConfig,
+    state: &mut CoordinatorState,
+    decisions: Vec<ScaleDecision>,
+) {
+    for decision in decisions {
+        match decision {
+            ScaleDecision::Retire(replica) => {
+                state.roster.pending_retire.insert(replica);
+                let _ = retire_replica(config, state, replica, "halving");
+            }
+            ScaleDecision::Spawn(count) => {
+                state.roster.spawn_requested = state.roster.spawn_requested.saturating_add(count);
+            }
+        }
+    }
 }
 
 fn rejection_for_protocol_error(error: &ProtocolError) -> ProtocolRejection {
@@ -3300,12 +3734,6 @@ struct BridgeServerState {
 
 const MINIMUM_INFORMATION_SAMPLES: usize = 128;
 
-#[derive(Debug, Clone)]
-enum SearchActionKey {
-    Basin(u32),
-    Ride(RideArm),
-}
-
 fn empirical_action_costs(basin: ChargeSummary, ride: ChargeSummary) -> (f64, f64) {
     let basin_observed = (basin.events > 0 && basin.charged_calls > 0)
         .then(|| basin.charged_calls as f64 / basin.events as f64);
@@ -3344,10 +3772,8 @@ fn minimum_information_role(
     query_energy: f64,
     basin_cost: f64,
     ride_cost: f64,
-    minimum_ride_consumers: usize,
-) -> Option<(crate::discovery_roster::DiscoveryRole, u64)> {
-    let mut candidates = Vec::<SearchActionCandidate>::new();
-    let mut keys = Vec::<SearchActionKey>::new();
+) -> Option<(DiscoveryRole, u64)> {
+    let mut basin_actions = Vec::<(u32, SearchActionCandidate)>::new();
     for &replica in &scientific.discovery_replicas {
         let (descriptor, energy) = if replica == query_replica {
             (query_descriptor, query_energy)
@@ -3356,61 +3782,75 @@ fn minimum_information_role(
         } else {
             (query_descriptor, query_energy)
         };
-        candidates.push(SearchActionCandidate {
-            mechanism: SearchMechanism::BasinEscape,
-            feature: descriptor.to_vec(),
-            source_energy: energy,
-            expected_charged_evaluations: basin_cost,
-        });
-        keys.push(SearchActionKey::Basin(replica));
+        basin_actions.push((
+            replica,
+            SearchActionCandidate {
+                mechanism: SearchMechanism::BasinEscape,
+                feature: descriptor.to_vec(),
+                source_energy: energy,
+                expected_charged_evaluations: basin_cost,
+            },
+        ));
     }
     let claimable = scientific.ride_ledger.claimable_arms();
+    let mut ride_actions = Vec::<SearchActionCandidate>::new();
+    let mut ride_arms = Vec::<RideArm>::new();
     for (arm, _) in &claimable {
         let (feature, source_energy) = ride_action_feature(scientific, arm)?;
-        candidates.push(SearchActionCandidate {
+        ride_actions.push(SearchActionCandidate {
             mechanism: SearchMechanism::SaddleRide,
             feature,
             source_energy,
             expected_charged_evaluations: ride_cost,
         });
-        keys.push(SearchActionKey::Ride(arm.clone()));
+        ride_arms.push(arm.clone());
     }
+    let mut candidates = basin_actions
+        .iter()
+        .map(|(_, candidate)| candidate.clone())
+        .collect::<Vec<_>>();
+    candidates.extend_from_slice(&ride_actions);
     let scores = scientific
         .minimum_information
         .score(&candidates, MINIMUM_INFORMATION_SAMPLES)
         .ok()?;
-    let mut basin_rates = BTreeMap::<u32, f64>::new();
     let mut ride_rates = BTreeMap::<RideArm, f64>::new();
-    for (key, score) in keys.into_iter().zip(scores) {
-        match key {
-            SearchActionKey::Basin(replica) => {
-                basin_rates.insert(replica, score.information_per_charged_evaluation);
-            }
-            SearchActionKey::Ride(arm) => {
-                ride_rates.insert(arm, score.information_per_charged_evaluation);
-            }
-        }
-    }
-    let best_ride = ride_rates.values().copied().max_by(f64::total_cmp);
-    scientific.ride_information_scores = ride_rates;
-    let opportunities = scientific
-        .discovery_replicas
+    for (arm, score) in ride_arms
         .iter()
-        .map(|replica| {
-            DiscoveryOpportunity::new(*replica, basin_rates.get(replica).copied()?, best_ride).ok()
-        })
-        .collect::<Option<Vec<_>>>()?;
-    let epoch = scientific.minimum_information.version();
-    assign_discovery_roles_with_minimum(
-        &opportunities,
-        claimable.len(),
-        minimum_ride_consumers,
-        epoch,
+        .cloned()
+        .zip(scores.into_iter().skip(basin_actions.len()))
+    {
+        ride_rates.insert(arm, score.information_per_charged_evaluation);
+    }
+    let assignments = assign_discovery_batch(
+        &mut scientific.minimum_information,
+        &basin_actions,
+        &ride_actions,
+        MINIMUM_INFORMATION_SAMPLES,
     )
-    .ok()?
-    .into_iter()
-    .find(|assignment| assignment.replica == query_replica)
-    .map(|assignment| (assignment.role, assignment.epoch))
+    .ok()?;
+    let selected_rides = assignments
+        .iter()
+        .filter_map(|assignment| assignment.ride_action)
+        .filter_map(|index| ride_arms.get(index).cloned())
+        .collect::<BTreeSet<_>>();
+    let ride_assignments = assignments
+        .iter()
+        .filter_map(|assignment| {
+            let index = assignment.ride_action?;
+            Some((assignment.replica, ride_arms.get(index)?.clone()))
+        })
+        .collect::<BTreeMap<_, _>>();
+    if ride_assignments.len() != selected_rides.len() {
+        return None;
+    }
+    ride_rates.retain(|arm, _| selected_rides.contains(arm));
+    scientific.ride_information_scores = ride_rates;
+    scientific.discovery_ride_assignments = ride_assignments;
+    assignments
+        .into_iter()
+        .find(|assignment| assignment.replica == query_replica)
+        .map(|assignment| (assignment.role, assignment.epoch))
 }
 
 fn diagnostic_unseen_mass_upper(
@@ -3444,9 +3884,14 @@ fn minimum_information_population_assignment(
             })
         })
         .collect::<Option<Vec<_>>>()?;
+    let mut basin_families = BTreeMap::<u64, usize>::new();
     let families = destinations
         .iter()
-        .map(|replica| usize::try_from(*replica).ok())
+        .map(|replica| {
+            let basin = source_candidates.get(replica)?.census_basin?;
+            let next_family = basin_families.len();
+            Some(*basin_families.entry(basin).or_insert(next_family))
+        })
         .collect::<Option<Vec<_>>>()?;
     let selected = minimum_information
         .assign_batch(
@@ -4976,6 +5421,10 @@ fn coordinator_status(config: &ServerConfig, state: &CoordinatorState) -> Coordi
         unique_degenerate_rearrangements,
         certified_connections,
         seam,
+        roster_version: state.roster.version,
+        live_replicas: state.roster.live.iter().copied().collect(),
+        ticks: state.roster.ticks,
+        spawn_requested: state.roster.spawn_requested,
     }
 }
 
@@ -5002,15 +5451,21 @@ fn observer_status_reply(
 
 fn identity_rejection(
     config: &ServerConfig,
-    identity: &CatalogIdentity,
+    state: &CoordinatorState,
+    request: &CatalogRequest,
 ) -> Option<ProtocolRejection> {
-    if let Some(reason) = system_identity_rejection(config, identity) {
+    if let Some(reason) = system_identity_rejection(config, &request.identity) {
         return Some(reason);
     }
-    if !config.replicas.contains(&identity.replica) {
-        Some(ProtocolRejection::ReplicaMismatch)
-    } else {
-        None
+    match &request.operation {
+        CatalogOperation::Attach => None,
+        CatalogOperation::Tick { .. } if request.identity.replica == u32::MAX => None,
+        _ if config.replicas.contains(&request.identity.replica)
+            || state.roster.known(request.identity.replica) =>
+        {
+            None
+        }
+        _ => Some(ProtocolRejection::ReplicaMismatch),
     }
 }
 

@@ -1056,7 +1056,24 @@ fn positive_definite_cholesky(matrix: &Array2<f64>) -> Option<Array2<f64>> {
 }
 
 pub(crate) fn positive_definite_log_determinant(matrix: &Array2<f64>) -> Option<f64> {
-    let cholesky = positive_definite_cholesky(matrix)?;
+    let cholesky = positive_definite_cholesky(matrix).or_else(|| {
+        // Predictive correlation matrices are positive semidefinite. An
+        // observation-noise variance below one ULP can make duplicate rows
+        // numerically exact, so a scale-relative numerical nugget defines the
+        // log determinant without weakening their redundancy penalty.
+        let diagonal_scale = (0..matrix.nrows())
+            .map(|index| matrix[[index, index]].abs())
+            .fold(0.0_f64, f64::max);
+        if !diagonal_scale.is_finite() || diagonal_scale <= 0.0 {
+            return None;
+        }
+        let mut stabilized = matrix.clone();
+        let nugget = diagonal_scale * f64::EPSILON.sqrt();
+        for index in 0..stabilized.nrows() {
+            stabilized[[index, index]] += nugget;
+        }
+        positive_definite_cholesky(&stabilized)
+    })?;
     Some(
         2.0 * (0..cholesky.nrows())
             .map(|i| cholesky[[i, i]].ln())

@@ -197,6 +197,14 @@ impl DifferentiableObjective<f64> for PairPotential {
     }
 }
 
+impl crate::pes_exploration::PesSurface for PairPotential {
+    type Error = std::convert::Infallible;
+
+    fn evaluate(&self, coordinates: ArrayView1<f64>) -> Result<(f64, Array1<f64>), Self::Error> {
+        Ok(self.value_and_gradient(coordinates))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -281,5 +289,15 @@ mod tests {
         assert_eq!(g, p.grad(x.view()));
         assert_eq!(Objective::dim(&p), 12);
         assert_eq!(Gradient::dim(&p), 12);
+    }
+
+    #[test]
+    fn pair_potential_is_the_atomistic_pes_surface() {
+        let p = PairPotential::lennard_jones(3);
+        let x = Array1::from(vec![0.0, 0.0, 0.0, 1.1, 0.0, 0.0, 0.55, 0.95, 0.0]);
+        let expected = p.value_and_gradient(x.view());
+        let observed = crate::pes_exploration::PesSurface::evaluate(&p, x.view()).unwrap();
+
+        assert_eq!(observed, expected);
     }
 }

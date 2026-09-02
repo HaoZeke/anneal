@@ -138,6 +138,8 @@ struct PolicyStateReply {
   basinDiscoveryCharged @30 :UInt64;
   saddleDiscoveryAttempts @31 :UInt64;
   saddleDiscoveryCharged @32 :UInt64;
+  # Successive-halving retire decision for this replica's next checkpoint.
+  retired @33 :Bool;
 }
 
 enum CatalogMutationKind {
@@ -258,6 +260,17 @@ struct CoordinatorStatus {
   uniqueEdges @17 :UInt64;
   uniqueDegenerateRearrangements @18 :UInt64;
   certifiedConnections @19 :UInt64;
+  rosterVersion @20 :UInt64;
+  liveReplicas @21 :List(UInt32);
+  ticks @22 :UInt64;
+  spawnRequested @23 :UInt32;
+}
+
+struct RosterReply {
+  version @0 :UInt64;
+  live @1 :List(UInt32);
+  retired @2 :List(UInt32);
+  spawnRequested @3 :UInt32;
 }
 
 struct TransitionRecord {
@@ -423,6 +436,10 @@ struct CatalogRequest {
     # census basin. This addresses spectral-seam assignments by basin identity
     # instead of relying on the capacity-limited active-catalog slot order.
     sampleBasin @25 :UInt64;
+    attach @26 :Void;
+    detach @27 :Text;
+    tick @28 :UInt64;
+    scale @29 :UInt32;
   }
 }
 
@@ -479,6 +496,7 @@ struct AcceptedReply {
     frontierPost @14 :FrontierPost;
     rideWork @15 :RideWorkOrder;
     rideCredit @16 :RideReportReply;
+    roster @17 :RosterReply;
   }
   aggregateCharged @7 :UInt64;
   aggregateBudget @8 :UInt64;
@@ -495,18 +513,11 @@ interface Coordinator {
 
 interface Session {
   call @0 (request :CatalogRequest) -> (reply :CatalogReply);
-  detach @1 (reason :Text) -> ();
+  detach @1 (reason :Text) -> (roster :RosterReply);
 }
 
 interface Subscriber {
   event @0 (event :CoordinatorEvent) -> ();
-}
-
-struct RosterReply {
-  version @0 :UInt64;
-  live @1 :List(UInt32);
-  retired @2 :List(UInt32);
-  spawnRequested @3 :UInt32;
 }
 
 struct CoordinatorEvent {

@@ -181,3 +181,22 @@ fn batch_assignment_fills_the_population_without_exceeding_family_capacity() {
     assert_eq!(selected.iter().filter(|&&index| index == 0).count(), 2);
     assert_eq!(selected.iter().filter(|&&index| index == 1).count(), 2);
 }
+
+#[test]
+fn batch_assignment_fills_exact_duplicate_actions_at_tight_numeric_tolerance() {
+    let mut search = MinimumInformationSearch::new(1.0, 1.0, 1e-12).unwrap();
+    let actions = (0..4)
+        .map(|_| SearchActionCandidate {
+            mechanism: SearchMechanism::BasinEscape,
+            feature: vec![0.0, 0.0],
+            source_energy: -10.0,
+            expected_charged_evaluations: 20.0,
+        })
+        .collect::<Vec<_>>();
+
+    let selected = search
+        .assign_batch(&actions, &[0, 1, 2, 3], 4, 1, 256)
+        .unwrap();
+
+    assert_eq!(selected, vec![0, 1, 2, 3]);
+}

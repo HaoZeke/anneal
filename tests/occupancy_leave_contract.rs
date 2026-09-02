@@ -435,7 +435,7 @@ fn slice_diagnostics_report_the_validated_local_best() {
         .expect("catalog checkpoint callback must end at the run");
     let compact: String = checkpoint.split_whitespace().collect();
     assert!(
-        compact.contains("energy:Some(snapshot.best_energy())"),
+        compact.contains("energy:finite_trace_energy(snapshot.best_energy())"),
         "slice diagnostics must expose the validated local best"
     );
     assert!(

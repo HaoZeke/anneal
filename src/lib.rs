@@ -63,6 +63,8 @@ pub mod adapter;
 /// Cost-augmenting bias operators (well-tempered metadynamics, etc.).
 /// Proposal allocation and the budget-window temperature law.
 pub mod allocate;
+/// Same-PES atomistic basin and ridge exploration by joint-optimum information.
+pub mod atomistic_hybrid;
 pub mod bias;
 /// Transport proposals from observed attraction-region crossings.
 pub mod boundary_transport;
@@ -85,6 +87,7 @@ pub mod construct;
 pub mod contextual;
 pub mod cool;
 pub mod cooperative_search;
+pub mod corekey;
 pub mod curvature;
 /// Transport for consensus traffic between server brains.
 #[cfg(feature = "bank-rpc")]
@@ -143,6 +146,7 @@ pub mod md_engine;
 /// pilot adaptation, parallel tempering, etc.
 pub mod methods;
 /// Action-outcome models for cost-aware global-minimum information.
+pub mod minima_db;
 pub mod minimum_information;
 pub mod model_hessian;
 /// The move-kernel trait: temperature-indexed proposal sampling.
@@ -184,6 +188,8 @@ pub mod runner;
 pub mod runtime_distribution;
 /// Stan-style single-step sampler trait: `trait Sampler<T>`.
 pub mod sampler;
+/// Successive-halving population control for a live coordinator roster.
+pub mod scaling;
 pub mod screen;
 /// SOAP power spectrum and Cartesian pullback through `∂p/∂R`.
 pub mod soap;

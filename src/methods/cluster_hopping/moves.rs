@@ -10,7 +10,9 @@ use super::*;
 #[derive(Debug, Clone, PartialEq, serde::Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum MoveLibrary {
-    /// Wales-Doye atomic moves.
+    /// Collective Cartesian displacement used by Wales--Doye basin hopping.
+    WalesDoye,
+    /// Anneal's mixed atomic proposal library.
     Atomic,
     /// Productive atomic arms only.
     Lean,
@@ -56,6 +58,11 @@ impl MoveLibrary {
                 cfg.symmetrise_cutoff,
             )
         };
+        let wales_doye = || {
+            vec![ClusterMove::AllPoints {
+                step: LennardJonesPreset::ALL_POINTS_STEP * cfg.length_scale,
+            }]
+        };
         let lean = || {
             ClusterMove::library_lean_scaled(
                 cfg.n_points,
@@ -65,6 +72,7 @@ impl MoveLibrary {
             )
         };
         match self {
+            Self::WalesDoye => wales_doye(),
             Self::Atomic => atomic(),
             Self::Lean => lean(),
             Self::LeanBurst => {
@@ -1381,6 +1389,16 @@ mod move_scaling_tests {
     use super::*;
     use rand::SeedableRng;
     use rand::rngs::StdRng;
+
+    #[test]
+    fn wales_doye_library_is_the_collective_displacement_kernel() {
+        let cfg = Config::for_cluster(13);
+        let kernels = MoveLibrary::WalesDoye.kernels(&cfg);
+
+        assert_eq!(kernels.len(), 1);
+        assert!(matches!(kernels[0], ClusterMove::AllPoints { .. }));
+        assert_eq!(kernels[0].name(), "all");
+    }
 
     /// The escape scale has to reach the step, which is the whole mechanism.
     /// It did not: the amplitude moves ignored the temperature argument, so a

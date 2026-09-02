@@ -857,7 +857,7 @@ mod tests {
 /// distance. 1.35 sits above first-neighbour LJ and below the second shell.
 pub const RING_CUTOFF_SCALE: f64 = 1.35;
 
-fn median_nearest_neighbour(x: ArrayView1<f64>, n: usize) -> f64 {
+pub(crate) fn median_nearest_neighbour(x: ArrayView1<f64>, n: usize) -> f64 {
     if n < 2 {
         return 1.0;
     }
