@@ -122,18 +122,40 @@ fn hybrid_nd_search_shares_escaped_minima_with_budgeted_ridge_rides() {
         .position(|event| event.escape_coverage_saturated)
         .expect("the exact escape census must acquire a finite unseen-mass bound");
     let coverage_window = report.events[saturated + 1..].iter().take(20);
-    let (ridge_after_saturation, observed_after_saturation) =
-        coverage_window.fold((0usize, 0usize), |(ridge, observed), event| {
+    let (ridge_after_saturation, escape_after_saturation, observed_after_saturation) =
+        coverage_window.fold((0usize, 0usize, 0usize), |(ridge, escape, observed), event| {
             (
                 ridge + usize::from(event.mechanism == NdHybridMechanism::Ridge),
+                escape + usize::from(event.mechanism == NdHybridMechanism::BasinEscape),
                 observed + 1,
             )
         });
     assert_eq!(observed_after_saturation, 20);
-    assert!(
-        ridge_after_saturation >= 15,
-        "saturated escape coverage issued only {ridge_after_saturation}/20 ridge events"
-    );
+    assert!(ridge_after_saturation > 0);
+    assert!(escape_after_saturation > 0);
+    let indexed_decisions = report
+        .events
+        .iter()
+        .filter_map(|event| {
+            Some((
+                event,
+                event.ridge_discovery_index?,
+                event.escape_discovery_index?,
+            ))
+        })
+        .collect::<Vec<_>>();
+    assert!(!indexed_decisions.is_empty());
+    for (event, ridge_index, escape_index) in indexed_decisions {
+        match ridge_index.total_cmp(&escape_index) {
+            std::cmp::Ordering::Greater => {
+                assert_eq!(event.mechanism, NdHybridMechanism::Ridge)
+            }
+            std::cmp::Ordering::Less => {
+                assert_eq!(event.mechanism, NdHybridMechanism::BasinEscape)
+            }
+            std::cmp::Ordering::Equal => {}
+        }
+    }
     assert!(report.escape_coverage_saturated);
     assert!(report.escape_unseen_mass_upper.unwrap() < 0.2);
 
