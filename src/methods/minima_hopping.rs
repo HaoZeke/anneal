@@ -456,14 +456,49 @@ impl EscapeFeedback {
     /// to explore them.
     pub fn observe(&mut self, current: Option<usize>, reached: usize) -> Visit {
         let visit = self.classify(current, reached);
+        let prior_visits = self.visits(reached).max(1) as f64;
+        self.apply_escape_feedback(visit, prior_visits);
+        *self.visits.entry(reached).or_insert(0) += 1;
+        visit
+    }
+
+    /// Records a quench using the authoritative same-PES catalog history.
+    ///
+    /// `basin_visits` includes this observation. A basin first found by a
+    /// different replica is therefore known even when this controller's local
+    /// map has not seen it. The global count also drives enhanced feedback.
+    pub fn observe_shared(
+        &mut self,
+        current: Option<usize>,
+        reached: usize,
+        new_basin: bool,
+        basin_visits: u64,
+    ) -> Visit {
+        let visit = if current == Some(reached) {
+            Visit::Same
+        } else if new_basin {
+            Visit::New
+        } else {
+            Visit::Known
+        };
+        let prior_visits = basin_visits.saturating_sub(1).max(1) as f64;
+        self.apply_escape_feedback(visit, prior_visits);
+        let observed = u32::try_from(basin_visits.max(1)).unwrap_or(u32::MAX);
+        self.visits
+            .entry(reached)
+            .and_modify(|visits| *visits = (*visits).max(observed))
+            .or_insert(observed);
+        visit
+    }
+
+    fn apply_escape_feedback(&mut self, visit: Visit, prior_visits: f64) {
         match visit {
             Visit::Same => {
                 self.escape *= self.beta_same;
                 self.n_same += 1;
             }
             Visit::Known => {
-                let visits = self.visits(reached).max(1) as f64;
-                self.escape *= self.beta_known * (1.0 + self.visits_coeff * visits.ln());
+                self.escape *= self.beta_known * (1.0 + self.visits_coeff * prior_visits.ln());
                 self.n_known += 1;
             }
             Visit::New => {
@@ -472,8 +507,6 @@ impl EscapeFeedback {
             }
         }
         self.escape = self.escape.clamp(self.escape_floor, self.escape_ceiling);
-        *self.visits.entry(reached).or_insert(0) += 1;
-        visit
     }
 
     /// Whether to accept a move of energy rise `delta`, updating the threshold.
@@ -746,8 +779,7 @@ mod tests {
         let visit = feedback.observe_shared(Some(3), 9, false, 8);
 
         assert_eq!(visit, Visit::Known);
-        let expected =
-            feedback.beta_known * (1.0 + feedback.visits_coeff * 7.0_f64.ln());
+        let expected = feedback.beta_known * (1.0 + feedback.visits_coeff * 7.0_f64.ln());
         assert!((feedback.escape() / before - expected).abs() < 1e-12);
         assert_eq!(feedback.visits(9), 8);
     }

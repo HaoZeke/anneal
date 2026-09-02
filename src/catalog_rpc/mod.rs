@@ -225,6 +225,8 @@ pub struct CatalogMutation {
     pub basin_id: u64,
     /// Whether the exact witness opened this fixed-census basin.
     pub new_basin: bool,
+    /// Same-PES fixed-census count including this observation.
+    pub basin_visits: u64,
     /// Exact admission or rejection class.
     pub kind: CatalogMutationKind,
     /// Fixed-census basins removed from the active catalog.
@@ -1532,6 +1534,7 @@ pub(crate) fn fill_reply(
                     let mut output = payload.init_catalog_mutation();
                     output.set_basin_id(mutation.basin_id);
                     output.set_new_basin(mutation.new_basin);
+                    output.set_basin_visits(mutation.basin_visits);
                     output.set_kind(mutation.kind.into());
                     fill_u64(
                         output
@@ -1817,6 +1820,7 @@ pub(crate) fn decode_reply_reader(
                     AcceptedPayload::CatalogMutation(CatalogMutation {
                         basin_id: mutation.get_basin_id(),
                         new_basin: mutation.get_new_basin(),
+                        basin_visits: mutation.get_basin_visits(),
                         kind: mutation.get_kind().map_err(wire_error)?.into(),
                         evicted: list_u64(mutation.get_evicted().map_err(wire_error)?),
                         incumbent_basin,
