@@ -317,17 +317,32 @@ pub struct MotifCounts {
     pub contacts: usize,
 }
 
-/// Coarse packing class of a structure from its five-fold pair count per
-/// atom: close packed (no local five-fold axes), decahedral (one axis, a
-/// few pairs) or icosahedral (many).
+/// Coarse class of a structure from its five-fold pair density: none (fcc
+/// and hcp packings), sparse (a single five-fold axis, as in a decahedron),
+/// moderate (several local axes, as in the LJ98 tetrahedron) or dense
+/// (icosahedral packing).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum MotifClass {
-    /// No five-fold pairs: fcc, hcp and the tetrahedral packings.
-    ClosePacked,
-    /// A single five-fold axis or a few.
-    Decahedral,
+    /// No five-fold pairs.
+    None,
+    /// Fewer than [`SPARSE_FIVE_FOLD_PER_ATOM`] five-fold pairs per atom.
+    Sparse,
+    /// Fewer than [`DENSE_FIVE_FOLD_PER_ATOM`] five-fold pairs per atom.
+    Moderate,
     /// Five-fold pairs throughout.
-    Icosahedral,
+    Dense,
+}
+
+impl MotifClass {
+    /// The class as a small integer, for keys.
+    pub fn index(self) -> u8 {
+        match self {
+            Self::None => 0,
+            Self::Sparse => 1,
+            Self::Moderate => 2,
+            Self::Dense => 3,
+        }
+    }
 }
 
 /// Common-neighbour counts of `x` at its contact cutoff.
@@ -381,19 +396,23 @@ pub fn motif_counts(x: ArrayView1<f64>) -> MotifCounts {
     counts
 }
 
-/// Five-fold pairs per atom above which a structure counts as icosahedral.
-pub const ICOSAHEDRAL_FIVE_FOLD_PER_ATOM: f64 = 0.15;
+/// Five-fold pairs per atom below which the class is sparse.
+pub const SPARSE_FIVE_FOLD_PER_ATOM: f64 = 0.1;
+/// Five-fold pairs per atom below which the class is moderate.
+pub const DENSE_FIVE_FOLD_PER_ATOM: f64 = 0.25;
 
-/// The coarse packing class of `x`.
+/// The coarse five-fold class of `x`.
 pub fn motif_class(x: ArrayView1<f64>) -> MotifClass {
     let n = (x.len() / 3).max(1);
-    let counts = motif_counts(x);
-    if counts.five_fold == 0 {
-        MotifClass::ClosePacked
-    } else if (counts.five_fold as f64) / (n as f64) < ICOSAHEDRAL_FIVE_FOLD_PER_ATOM {
-        MotifClass::Decahedral
+    let density = motif_counts(x).five_fold as f64 / n as f64;
+    if density == 0.0 {
+        MotifClass::None
+    } else if density < SPARSE_FIVE_FOLD_PER_ATOM {
+        MotifClass::Sparse
+    } else if density < DENSE_FIVE_FOLD_PER_ATOM {
+        MotifClass::Moderate
     } else {
-        MotifClass::Icosahedral
+        MotifClass::Dense
     }
 }
 
@@ -527,22 +546,15 @@ mod tests {
             let counts = motif_counts(x.view());
             eprintln!("MOTIF {name}: {counts:?} class {:?}", motif_class(x.view()));
         }
-        assert_eq!(
-            motif_class(fixture("lj38_fcc").view()),
-            MotifClass::ClosePacked
-        );
-        assert_eq!(
-            motif_class(fixture("lj38_ico").view()),
-            MotifClass::Icosahedral
-        );
-        assert_eq!(
-            motif_class(fixture("lj75_ico").view()),
-            MotifClass::Icosahedral
-        );
+        assert_eq!(motif_class(fixture("lj38_fcc").view()), MotifClass::None);
+        assert_eq!(motif_class(fixture("lj38_ico").view()), MotifClass::Dense);
+        assert_eq!(motif_class(fixture("lj75_ico").view()), MotifClass::Dense);
         assert_eq!(
             motif_class(fixture("lj75_marks").view()),
-            MotifClass::Decahedral
+            MotifClass::Sparse
         );
+        assert_eq!(motif_class(fixture("lj104_gm").view()), MotifClass::Sparse);
+        assert_eq!(motif_class(fixture("lj98_gm").view()), MotifClass::Moderate);
         assert_eq!(
             motif_class(fixture("lj104_gm").view()),
             MotifClass::Decahedral
