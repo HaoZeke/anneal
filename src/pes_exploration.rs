@@ -15,6 +15,7 @@ use rgmin::{
     ApplyHessian, Control, EigenParams, EigensolverKind, FireKind, GradNorm, Lbfgs, Method, Oracle,
     Solver, lowest_mode,
 };
+pub use rgsaddle::IrcKind;
 use rgsaddle::geom::update_trust;
 use rgsaddle::{
     HessUpdate, IrcConfig, IrcDirection, IrcSession, MinModeConfig, MinModeKind, MinModeSession,
@@ -711,6 +712,8 @@ pub struct PesExplorationConfig {
     pub maximum_move: f64,
     /// IRC mass-weighted outer radius.
     pub irc_step: f64,
+    /// Established rgsaddle IRC integration backend.
+    pub irc_kind: IrcKind,
     /// Resolution levels used to choose the molecular IRC launch radius and
     /// the maximum N-D branch shells used to escape a collapsed quench.
     pub branch_attempts: usize,
@@ -742,6 +745,7 @@ impl Default for PesExplorationConfig {
             hessian_step: 1e-4,
             maximum_move: 0.2,
             irc_step: 0.1,
+            irc_kind: IrcKind::Gs2,
             branch_attempts: 4,
             branch_growth: 2.0,
             irc_force_tolerance: 0.05,
@@ -2345,6 +2349,7 @@ fn irc_config(config: &PesExplorationConfig, branch_step: f64) -> IrcConfig {
         dx: branch_step,
         force_tol: config.irc_force_tolerance,
         max_move: config.maximum_move,
+        kind: config.irc_kind,
         ..IrcConfig::default()
     }
 }
