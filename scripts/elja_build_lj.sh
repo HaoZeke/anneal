@@ -91,6 +91,7 @@ cargo build --offline --locked --release --features featomic,ira,bank-rpc \
   --example lj_cluster_search \
   --example lj_census_calibration \
   --example catalog_server \
+  --example catalog_status \
   --example bank_server \
   --example leave_packing_probe
 ldd "$BIN"
@@ -98,6 +99,7 @@ git rev-parse HEAD >SOURCE_COMMIT
 sha256sum \
   target/release/examples/lj_cluster_search \
   target/release/examples/catalog_server \
+  target/release/examples/catalog_status \
   >BUILD_SHA256SUMS
 echo "SMOKE"
 "$BIN" 13 200 1 rec
