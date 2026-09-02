@@ -1,14 +1,7 @@
 use anneal_core::discovery_roster::{
-    DiscoveryCoverage, DiscoveryEffort, DiscoveryRole, assign_discovery_roles,
-    coverage_allocation_weight,
+    DiscoveryCoverage, DiscoveryRole, assign_discovery_roles, coverage_allocation_weight,
+    good_ucb_missing_mass_index,
 };
-
-fn effort(observations: u64, charged_calls: u64) -> DiscoveryEffort {
-    DiscoveryEffort {
-        observations,
-        charged_calls,
-    }
-}
 
 #[test]
 fn coverage_allocation_keeps_full_uncertainty_before_the_observation_floor() {
@@ -22,10 +15,10 @@ fn unresolved_saddle_coverage_receives_most_replica_seats() {
     let assignments = assign_discovery_roles(
         &[7, 2, 9, 4],
         DiscoveryCoverage {
-            basin_unseen_mass_upper: 0.02,
-            saddle_unseen_mass_upper: 0.80,
-            basin_effort: effort(10, 2_000),
-            saddle_effort: effort(10, 2_000),
+            basin_observations: 10,
+            basin_singletons: 0,
+            saddle_observations: 10,
+            saddle_singletons: 8,
             ride_available: true,
         },
         11,
@@ -52,10 +45,10 @@ fn unresolved_saddle_coverage_receives_most_replica_seats() {
 #[test]
 fn discovery_roles_rotate_without_changing_the_coverage_allocation() {
     let coverage = DiscoveryCoverage {
-        basin_unseen_mass_upper: 0.4,
-        saddle_unseen_mass_upper: 0.6,
-        basin_effort: effort(10, 2_000),
-        saddle_effort: effort(10, 2_000),
+        basin_observations: 10,
+        basin_singletons: 4,
+        saddle_observations: 10,
+        saddle_singletons: 6,
         ride_available: true,
     };
     let first = assign_discovery_roles(&[7, 2, 9, 4], coverage, 11).unwrap();
@@ -85,10 +78,10 @@ fn absent_ride_work_assigns_every_replica_to_basin_discovery() {
     let assignments = assign_discovery_roles(
         &[0, 1, 2],
         DiscoveryCoverage {
-            basin_unseen_mass_upper: 0.01,
-            saddle_unseen_mass_upper: 1.0,
-            basin_effort: effort(10, 2_000),
-            saddle_effort: effort(10, 2_000),
+            basin_observations: 100,
+            basin_singletons: 1,
+            saddle_observations: 0,
+            saddle_singletons: 0,
             ride_available: false,
         },
         3,
@@ -103,14 +96,23 @@ fn absent_ride_work_assigns_every_replica_to_basin_discovery() {
 }
 
 #[test]
-fn equal_missing_mass_prefers_the_cheaper_discovery_mechanism_per_pes_call() {
+fn good_ucb_index_is_the_good_turing_estimate_plus_the_distribution_free_bonus() {
+    let actual = good_ucb_missing_mass_index(3, 10, 40);
+    let expected = 0.3 + (1.0 + 2.0_f64.sqrt()) * (160.0_f64.ln() / 10.0).sqrt();
+
+    assert!((actual - expected).abs() < 1e-12, "actual={actual}, expected={expected}");
+    assert!(good_ucb_missing_mass_index(0, 0, 40).is_infinite());
+}
+
+#[test]
+fn unobserved_mechanisms_split_a_parallel_discovery_batch() {
     let assignments = assign_discovery_roles(
         &[0, 1, 2, 3],
         DiscoveryCoverage {
-            basin_unseen_mass_upper: 1.0,
-            saddle_unseen_mass_upper: 1.0,
-            basin_effort: effort(10, 1_000),
-            saddle_effort: effort(10, 9_000),
+            basin_observations: 0,
+            basin_singletons: 0,
+            saddle_observations: 0,
+            saddle_singletons: 0,
             ride_available: true,
         },
         17,
@@ -122,13 +124,13 @@ fn equal_missing_mass_prefers_the_cheaper_discovery_mechanism_per_pes_call() {
             .iter()
             .filter(|assignment| assignment.role == DiscoveryRole::BasinEscape)
             .count(),
-        3
+        2
     );
     assert_eq!(
         assignments
             .iter()
             .filter(|assignment| assignment.role == DiscoveryRole::SaddleRide)
             .count(),
-        1
+        2
     );
 }
