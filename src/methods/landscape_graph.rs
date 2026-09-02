@@ -419,6 +419,38 @@ mod tests {
     }
 
     #[test]
+    fn conductance_sweep_finds_the_degree_heterogeneous_seam() {
+        // A zero-sign cut of the unnormalized Fiedler vector isolates basin 3
+        // with conductance 1.  The normalized Fiedler ordering contains the
+        // lower-conductance cut {0, 1, 3} | {2, 4, 5}.
+        let weights = [
+            (0, 1, 10.0),
+            (0, 2, 1.0),
+            (0, 3, 1.0),
+            (0, 5, 10.0),
+            (2, 4, 2.0),
+            (2, 5, 1.0),
+            (3, 5, 1.0),
+            (4, 5, 10.0),
+        ];
+        let mut g = LandscapeGraph::new();
+        for (left, right, weight) in weights {
+            g.observe_crossing(left, right, weight);
+        }
+
+        let split = g.spectral_split().unwrap();
+        let mut sides = [split.left.clone(), split.right.clone()];
+        for side in &mut sides {
+            side.sort_unstable();
+        }
+        sides.sort();
+
+        assert_eq!(sides, [vec![0, 1, 3], vec![2, 4, 5]]);
+        assert!((split.conductance - 6.0 / 17.0).abs() < 1e-12);
+        assert!((split.algebraic_connectivity - 0.491_587_437).abs() < 1e-8);
+    }
+
+    #[test]
     fn a_disconnected_landscape_reports_zero_connectivity_and_components() {
         let mut g = LandscapeGraph::new();
         g.observe_crossing(0, 1, 3.0);
