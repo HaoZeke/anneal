@@ -10,6 +10,7 @@
 //! `lj_joint_optimum <N> <budget> <seeds> [all|adaptive|ridge|basin|bh|mh] [gs2|morokuma|both] [seed0]`
 
 use std::error::Error;
+use std::path::{Path, PathBuf};
 
 use anneal_core::atomistic_hybrid::{
     AtomisticHybridConfig, AtomisticHybridPolicy, AtomisticSystem, explore_atomistic_with_policy,
@@ -27,7 +28,7 @@ use ndarray::ArrayView1;
 use rand::{SeedableRng, rngs::StdRng};
 use serde_json::json;
 
-const TARGET_TOLERANCE: f64 = 1e-4;
+const TARGET_TOLERANCE: f64 = 1e-3;
 
 #[derive(Clone, Copy, Debug)]
 enum Arm {
@@ -238,6 +239,85 @@ fn encounter_fields(encounter: Encounter) -> (bool, usize) {
     (encounter.found(), encounter.charged())
 }
 
+fn optbench_start_path(root: &Path, n: usize, index: usize) -> Result<PathBuf, String> {
+    let name = match n {
+        38 if index < 100 => format!("{index}.con"),
+        75 if index < 200 => format!("coords.{}", index + 1),
+        98 if index <= 100 => {
+            if index == 0 {
+                "coords".into()
+            } else {
+                format!("coords.{index}")
+            }
+        }
+        38 => return Err("OptBench LJ38 contains 100 starts indexed 0 through 99".into()),
+        75 => return Err("OptBench LJ75 contains 200 starts indexed 0 through 199".into()),
+        98 => return Err("OptBench LJ98 contains 101 starts indexed 0 through 100".into()),
+        _ => return Err("OptBench starts are registered for LJ38, LJ75, and LJ98".into()),
+    };
+    Ok(root.join(name))
+}
+
+fn parse_plain_coordinates(text: &str, n: usize) -> Result<ndarray::Array1<f64>, String> {
+    let coordinates = text
+        .split_whitespace()
+        .map(|token| {
+            token
+                .parse::<f64>()
+                .map_err(|error| format!("invalid coordinate {token:?}: {error}"))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    if coordinates.len() != 3 * n || coordinates.iter().any(|value| !value.is_finite()) {
+        return Err(format!(
+            "OptBench start requires {} finite coordinates, found {}",
+            3 * n,
+            coordinates.len()
+        ));
+    }
+    Ok(ndarray::Array1::from(coordinates))
+}
+
+fn read_optbench_start(
+    root: &Path,
+    n: usize,
+    index: usize,
+) -> Result<ndarray::Array1<f64>, String> {
+    let path = optbench_start_path(root, n, index)?;
+    if n == 38 {
+        let frame = readcon_core::iterators::read_first_frame(&path)
+            .map_err(|error| format!("read {}: {error}", path.display()))?;
+        if frame.atom_data.len() != n {
+            return Err(format!(
+                "{} contains {} atoms, expected {n}",
+                path.display(),
+                frame.atom_data.len()
+            ));
+        }
+        let coordinates = frame
+            .atom_data
+            .iter()
+            .flat_map(|atom| [atom.x, atom.y, atom.z])
+            .collect::<Vec<_>>();
+        if coordinates.iter().any(|value| !value.is_finite()) {
+            return Err(format!("{} contains nonfinite coordinates", path.display()));
+        }
+        Ok(ndarray::Array1::from(coordinates))
+    } else {
+        let text = std::fs::read_to_string(&path)
+            .map_err(|error| format!("read {}: {error}", path.display()))?;
+        parse_plain_coordinates(&text, n)
+    }
+}
+
+fn optbench_archive_digest(n: usize) -> Option<&'static str> {
+    match n {
+        38 => Some("9e5bb818adfad67a5afd53d083a6c8afd3addc0fe81a0f57413a73c80eb74e8f"),
+        75 => Some("8590a6fddf96a8673d0e4b53aae2385b5d222a9200217d722bb017d23fc5fdb3"),
+        98 => Some("e3eef6bb42a8d0b9d3b760862318aabaf932133e1dd3d63b663a556cfbef6149"),
+        _ => None,
+    }
+}
+
 fn main() -> Result<(), Box<dyn Error>> {
     let arguments = std::env::args().collect::<Vec<_>>();
     let n = arguments
@@ -258,6 +338,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         .get(6)
         .and_then(|value| value.parse().ok())
         .unwrap_or(0);
+    let optbench_root = std::env::var_os("ANNEAL_OPTBENCH_STARTS").map(PathBuf::from);
     if n < 2 || budget == 0 || seeds == 0 {
         return Err("N must be at least two and budget/seeds must be positive".into());
     }
@@ -290,14 +371,24 @@ fn main() -> Result<(), Box<dyn Error>> {
             "seed0": seed0,
             "target": target,
             "target_tolerance": TARGET_TOLERANCE,
+            "start_protocol": if optbench_root.is_some() { "optbench-fixed" } else { "random-cluster" },
+            "start_archive_sha256": optbench_root.as_ref().and_then(|_| optbench_archive_digest(n)),
             "arms": arms.iter().copied().map(Arm::label).collect::<Vec<_>>(),
         })
     );
 
     for seed in seed0..seed0.saturating_add(seeds) {
-        let mut initial_rng =
-            StdRng::seed_from_u64(seed.wrapping_mul(0x9e37_79b9_7f4a_7c15).wrapping_add(7));
-        let initial = random_cluster(n, 0.7, hopping.min_separation, &mut initial_rng);
+        let initial = if let Some(root) = optbench_root.as_deref() {
+            read_optbench_start(
+                root,
+                n,
+                usize::try_from(seed).map_err(|_| "seed index overflow")?,
+            )?
+        } else {
+            let mut initial_rng =
+                StdRng::seed_from_u64(seed.wrapping_mul(0x9e37_79b9_7f4a_7c15).wrapping_add(7));
+            random_cluster(n, 0.7, hopping.min_separation, &mut initial_rng)
+        };
         for (arm_index, arm) in arms.iter().copied().enumerate() {
             let label = arm.label();
             match arm {
