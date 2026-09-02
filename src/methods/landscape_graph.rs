@@ -370,12 +370,14 @@ mod tests {
         // The index-ramp vector used by the iterative implementation is
         // orthogonal to this graph's Fiedler vector [1, -1, -1, 1].  An
         // eigensolve must still recover the weak cut {0, 3} | {1, 2} and
-        // lambda_2 = 2 * 0.1.
+        // lambda_2 = 2.  Integer weights keep the orthogonality exact in the
+        // reflected-Laplacian iteration instead of seeding the missing mode
+        // through decimal roundoff.
         let mut g = LandscapeGraph::new();
-        g.observe_crossing(0, 3, 5.0);
-        g.observe_crossing(1, 2, 5.0);
-        g.observe_crossing(0, 1, 0.1);
-        g.observe_crossing(3, 2, 0.1);
+        g.observe_crossing(0, 3, 4.0);
+        g.observe_crossing(1, 2, 4.0);
+        g.observe_crossing(0, 1, 1.0);
+        g.observe_crossing(3, 2, 1.0);
 
         let split = g.spectral_split().unwrap();
         let mut sides = [split.left.clone(), split.right.clone()];
@@ -384,7 +386,7 @@ mod tests {
         }
         sides.sort();
 
-        assert!((split.algebraic_connectivity - 0.2).abs() < 1e-10);
+        assert!((split.algebraic_connectivity - 2.0).abs() < 1e-10);
         assert_eq!(sides, [vec![0, 3], vec![1, 2]]);
     }
 
