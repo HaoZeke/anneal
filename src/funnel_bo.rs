@@ -374,6 +374,157 @@ impl FunnelModel {
         if n == 0 { 0.0 } else { acc / n as f64 }
     }
 
+    /// GIBBON information about the minimum value from one noisy evaluation.
+    ///
+    /// This is the minimization form of the closed-form lower bound in Moss
+    /// et al. The signal-to-observation variance ratio accounts for the model's
+    /// observation noise; `minima` contains posterior samples of the minimum
+    /// function value over the candidate set.
+    pub fn gibbon_information(&mut self, x: ArrayView1<f64>, minima: &[f64]) -> f64 {
+        if minima.is_empty() {
+            return 0.0;
+        }
+        let (mean, sd) = self.predict(x);
+        if !mean.is_finite() || !sd.is_finite() || sd < 1e-12 {
+            return 0.0;
+        }
+        let latent_variance = sd * sd;
+        let observation_variance = latent_variance + self.noise * self.noise;
+        let rho2 = (latent_variance / observation_variance).clamp(0.0, 1.0);
+        let mut information = 0.0;
+        let mut samples = 0usize;
+        for &minimum in minima {
+            if !minimum.is_finite() {
+                continue;
+            }
+            let gamma = (mean - minimum) / sd;
+            let mills = inverse_mills_lower(gamma);
+            let truncation = (mills * (gamma + mills)).clamp(0.0, 1.0);
+            let retained = (1.0 - rho2 * truncation).max(f64::MIN_POSITIVE);
+            information -= 0.5 * retained.ln();
+            samples += 1;
+        }
+        if samples == 0 {
+            0.0
+        } else {
+            information / samples as f64
+        }
+    }
+
+    /// Posterior correlation between two prospective noisy observations.
+    ///
+    /// Independent observation noise contributes to each marginal variance,
+    /// but not to the covariance between two prospective evaluations.
+    pub fn predictive_observation_correlation(
+        &mut self,
+        left: ArrayView1<f64>,
+        right: ArrayView1<f64>,
+    ) -> f64 {
+        let covariance = self.posterior_latent_covariance(left, right);
+        let left_variance =
+            self.posterior_latent_covariance(left, left).max(0.0) + self.noise * self.noise;
+        let right_variance =
+            self.posterior_latent_covariance(right, right).max(0.0) + self.noise * self.noise;
+        let scale = (left_variance * right_variance).sqrt();
+        if !covariance.is_finite() || !scale.is_finite() || scale <= 0.0 {
+            0.0
+        } else {
+            (covariance / scale).clamp(-1.0, 1.0)
+        }
+    }
+
+    /// Batch GIBBON acquisition for prospective descriptor-space evaluations.
+    ///
+    /// The singleton information terms target the unknown minimum value. The
+    /// half log-determinant of the predictive correlation matrix discounts
+    /// redundant launches without an independently tuned diversity weight.
+    pub fn gibbon_batch(&mut self, batch: &[ArrayView1<f64>], minima: &[f64]) -> f64 {
+        if batch.is_empty() {
+            return 0.0;
+        }
+        let singleton = batch
+            .iter()
+            .map(|point| self.gibbon_information(*point, minima))
+            .sum::<f64>();
+        let mut correlation = Array2::<f64>::eye(batch.len());
+        for row in 0..batch.len() {
+            for column in 0..row {
+                let value = self.predictive_observation_correlation(batch[row], batch[column]);
+                correlation[[row, column]] = value;
+                correlation[[column, row]] = value;
+            }
+        }
+        let Some(log_determinant) = positive_definite_log_determinant(&correlation) else {
+            return f64::NEG_INFINITY;
+        };
+        singleton + 0.5 * log_determinant
+    }
+
+    /// Greedily fill a batch by GIBBON under a hard per-source family cap.
+    ///
+    /// The candidate table is a finite search domain. Posterior minimum samples
+    /// are joint Gaussian draws over that domain, so correlated descriptors are
+    /// not treated as independent opportunities. Greedy filling is the standard
+    /// submodular approximation to the corresponding determinantal MAP problem.
+    pub fn assign_gibbon(
+        &mut self,
+        candidates: &[(usize, Vec<f64>)],
+        q: usize,
+        max_family_size: usize,
+        minimum_samples: usize,
+    ) -> Vec<usize> {
+        if candidates.is_empty() || q == 0 || max_family_size == 0 {
+            return Vec::new();
+        }
+        let candidates = candidates
+            .iter()
+            .filter(|(_, descriptor)| {
+                !descriptor.is_empty() && descriptor.iter().all(|value| value.is_finite())
+            })
+            .map(|(source, descriptor)| (*source, Array1::from(descriptor.clone())))
+            .collect::<Vec<_>>();
+        if candidates.is_empty() {
+            return Vec::new();
+        }
+        let candidate_views = candidates
+            .iter()
+            .map(|(_, descriptor)| descriptor.view())
+            .collect::<Vec<_>>();
+        let minima = self.sample_joint_minima(&candidate_views, minimum_samples);
+        let mut selected_sources = Vec::with_capacity(q);
+        let mut selected_descriptors = Vec::<Array1<f64>>::with_capacity(q);
+        let mut family_sizes = std::collections::BTreeMap::<usize, usize>::new();
+        while selected_sources.len() < q {
+            let mut best: Option<(f64, usize)> = None;
+            for (candidate_index, (source, descriptor)) in candidates.iter().enumerate() {
+                if family_sizes.get(source).copied().unwrap_or(0) >= max_family_size {
+                    continue;
+                }
+                let mut batch = selected_descriptors
+                    .iter()
+                    .map(|point| point.view())
+                    .collect::<Vec<_>>();
+                batch.push(descriptor.view());
+                let score = self.gibbon_batch(&batch, &minima);
+                if score.is_finite()
+                    && best
+                        .as_ref()
+                        .is_none_or(|(held, _)| score.total_cmp(held).is_gt())
+                {
+                    best = Some((score, candidate_index));
+                }
+            }
+            let Some((_, candidate_index)) = best else {
+                break;
+            };
+            let (source, descriptor) = &candidates[candidate_index];
+            selected_sources.push(*source);
+            selected_descriptors.push(descriptor.clone());
+            *family_sizes.entry(*source).or_default() += 1;
+        }
+        selected_sources
+    }
+
     /// Independent-marginal samples of the posterior minimum at the
     /// observed sites plus `extras`. Seeded from the book version so a
     /// ranking is reproducible without a caller rng.
@@ -408,6 +559,101 @@ impl FunnelModel {
             out.push(eta);
         }
         out
+    }
+
+    fn sample_joint_minima(&mut self, extras: &[ArrayView1<f64>], n_samples: usize) -> Vec<f64> {
+        if extras.is_empty() || n_samples == 0 {
+            return Vec::new();
+        }
+        let mut sites = Vec::<Array1<f64>>::new();
+        for extra in extras {
+            if sites.iter().all(|site| {
+                site.len() != extra.len()
+                    || site
+                        .iter()
+                        .zip(extra.iter())
+                        .any(|(left, right)| (left - right).abs() > 1e-12)
+            }) {
+                sites.push(extra.to_owned());
+            }
+        }
+        let means = sites
+            .iter()
+            .map(|site| self.predict(site.view()).0)
+            .collect::<Vec<_>>();
+        let mut covariance = Array2::<f64>::zeros((sites.len(), sites.len()));
+        for row in 0..sites.len() {
+            for column in 0..=row {
+                let value =
+                    self.posterior_latent_covariance(sites[row].view(), sites[column].view());
+                covariance[[row, column]] = value;
+                covariance[[column, row]] = value;
+            }
+        }
+        let jitter = self.amplitude * self.amplitude * 1e-12;
+        for index in 0..sites.len() {
+            covariance[[index, index]] += jitter;
+        }
+        let Some(cholesky) = positive_definite_cholesky(&covariance) else {
+            return Vec::new();
+        };
+        let mut state = 0xD1B5_4A32_D192_ED03u64
+            ^ self.version.wrapping_mul(0x9E37_79B9_7F4A_7C15)
+            ^ (sites.len() as u64).wrapping_mul(0x94D0_49BB_1331_11EB);
+        if state == 0 {
+            state = 1;
+        }
+        let incumbent = self.incumbent();
+        let mut out = Vec::with_capacity(n_samples);
+        for _ in 0..n_samples {
+            let normal = (0..sites.len())
+                .map(|_| unit_normal(&mut state))
+                .collect::<Vec<_>>();
+            let mut minimum = f64::INFINITY;
+            for row in 0..sites.len() {
+                let draw = means[row]
+                    + (0..=row)
+                        .map(|column| cholesky[[row, column]] * normal[column])
+                        .sum::<f64>();
+                minimum = minimum.min(draw);
+            }
+            if let Some(best) = incumbent {
+                minimum = minimum.min(best);
+            }
+            out.push(minimum);
+        }
+        out
+    }
+
+    fn posterior_latent_covariance(
+        &mut self,
+        left: ArrayView1<f64>,
+        right: ArrayView1<f64>,
+    ) -> f64 {
+        if self.chol.is_none() {
+            self.fit();
+        }
+        let Some(cholesky) = &self.chol else {
+            return self.kernel(left, right);
+        };
+        let left_kernel = self
+            .xs
+            .iter()
+            .map(|site| self.kernel(site.view(), left))
+            .collect::<Array1<_>>();
+        let right_kernel = self
+            .xs
+            .iter()
+            .map(|site| self.kernel(site.view(), right))
+            .collect::<Array1<_>>();
+        let left_solved = forward_substitute(cholesky, &left_kernel);
+        let right_solved = forward_substitute(cholesky, &right_kernel);
+        self.kernel(left, right)
+            - left_solved
+                .iter()
+                .zip(right_solved.iter())
+                .map(|(left, right)| left * right)
+                .sum::<f64>()
     }
 
     /// Rank-and-cycle q-EI on a discrete family table.
@@ -484,6 +730,61 @@ fn mes_given_min(mean: f64, sd: f64, eta: f64) -> f64 {
     let gamma = (mean - eta) / sd;
     let cdf = normal_cdf(gamma).clamp(1e-15, 1.0 - 1e-15);
     (gamma * normal_pdf(gamma)) / (2.0 * cdf) - cdf.ln()
+}
+
+fn inverse_mills_lower(value: f64) -> f64 {
+    if value < -5.0 {
+        let magnitude = -value;
+        let inverse = 1.0 / magnitude;
+        magnitude + inverse - 2.0 * inverse.powi(3) + 10.0 * inverse.powi(5)
+    } else {
+        normal_pdf(value) / normal_cdf(value).max(f64::MIN_POSITIVE)
+    }
+}
+
+fn forward_substitute(cholesky: &Array2<f64>, rhs: &Array1<f64>) -> Array1<f64> {
+    let mut solved = Array1::<f64>::zeros(rhs.len());
+    for row in 0..rhs.len() {
+        let mut value = rhs[row];
+        for column in 0..row {
+            value -= cholesky[[row, column]] * solved[column];
+        }
+        solved[row] = value / cholesky[[row, row]];
+    }
+    solved
+}
+
+fn positive_definite_cholesky(matrix: &Array2<f64>) -> Option<Array2<f64>> {
+    if matrix.nrows() != matrix.ncols() {
+        return None;
+    }
+    let mut cholesky = Array2::<f64>::zeros(matrix.raw_dim());
+    for row in 0..matrix.nrows() {
+        for column in 0..=row {
+            let mut value = matrix[[row, column]];
+            for inner in 0..column {
+                value -= cholesky[[row, inner]] * cholesky[[column, inner]];
+            }
+            if row == column {
+                if !value.is_finite() || value <= 0.0 {
+                    return None;
+                }
+                cholesky[[row, column]] = value.sqrt();
+            } else {
+                cholesky[[row, column]] = value / cholesky[[column, column]];
+            }
+        }
+    }
+    Some(cholesky)
+}
+
+fn positive_definite_log_determinant(matrix: &Array2<f64>) -> Option<f64> {
+    let cholesky = positive_definite_cholesky(matrix)?;
+    Some(
+        2.0 * (0..cholesky.nrows())
+            .map(|i| cholesky[[i, i]].ln())
+            .sum::<f64>(),
+    )
 }
 
 fn xorshift64(state: &mut u64) -> u64 {
