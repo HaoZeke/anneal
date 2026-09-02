@@ -472,7 +472,11 @@ impl FunnelModel {
         (mean, var.sqrt())
     }
 
-    fn posterior_joint(&mut self, sites: &[ArrayView1<'_, f64>]) -> (Vec<f64>, Array2<f64>) {
+    /// Latent joint posterior over an ordered set of prospective sites.
+    pub(crate) fn posterior_joint(
+        &mut self,
+        sites: &[ArrayView1<'_, f64>],
+    ) -> (Vec<f64>, Array2<f64>) {
         if self.chol.is_none() {
             self.fit();
         }
@@ -812,60 +816,75 @@ impl FunnelModel {
         if extras.is_empty() || n_samples == 0 {
             return Vec::new();
         }
-        let mut sites = Vec::<(Array1<f64>, f64)>::new();
-        for (extra, offset) in extras {
-            if sites.iter().all(|(site, held_offset)| {
-                held_offset.to_bits() != offset.to_bits()
-                    || site.len() != extra.len()
-                    || site
-                        .iter()
-                        .zip(extra.iter())
-                        .any(|(left, right)| (left - right).abs() > 1e-12)
-            }) {
-                sites.push((extra.to_owned(), *offset));
-            }
+        let (means, covariance, draws) =
+            self.sample_shifted_joint_values(extras, n_samples, draw_salt);
+        debug_assert_eq!(means.len(), covariance.nrows());
+        draws
+            .into_iter()
+            .map(|draw| {
+                let mut minimum = draw
+                    .into_iter()
+                    .min_by(f64::total_cmp)
+                    .unwrap_or(f64::INFINITY);
+                if let Some(best) = incumbent {
+                    minimum = minimum.min(best);
+                }
+                minimum
+            })
+            .collect()
+    }
+
+    /// Correlated terminal-energy draws over an ordered finite action set.
+    ///
+    /// Every returned mean includes its known source-energy offset. The latent
+    /// covariance excludes prospective observation noise, which lets an
+    /// acquisition condition one query on a sampled optimum value without
+    /// treating numerical evaluation noise as a property of the PES.
+    pub(crate) fn sample_shifted_joint_values(
+        &mut self,
+        extras: &[(ArrayView1<'_, f64>, f64)],
+        n_samples: usize,
+        draw_salt: u64,
+    ) -> (Vec<f64>, Array2<f64>, Vec<Vec<f64>>) {
+        if extras.is_empty() || n_samples == 0 {
+            return (Vec::new(), Array2::zeros((0, 0)), Vec::new());
         }
-        let views = sites
-            .iter()
-            .map(|(site, _)| site.view())
-            .collect::<Vec<_>>();
-        let (mut means, mut covariance) = self.posterior_joint(&views);
-        for (mean, (_, offset)) in means.iter_mut().zip(&sites) {
+        let views = extras.iter().map(|(site, _)| *site).collect::<Vec<_>>();
+        let (mut means, covariance) = self.posterior_joint(&views);
+        for (mean, (_, offset)) in means.iter_mut().zip(extras) {
             *mean += offset;
         }
+        let mut stabilized_covariance = covariance.clone();
         let jitter = self.amplitude * self.amplitude * 1e-12;
-        for index in 0..sites.len() {
-            covariance[[index, index]] += jitter;
+        for index in 0..extras.len() {
+            stabilized_covariance[[index, index]] += jitter;
         }
-        let Some(cholesky) = positive_definite_cholesky(&covariance) else {
-            return Vec::new();
+        let Some(cholesky) = positive_definite_cholesky(&stabilized_covariance) else {
+            return (means, covariance, Vec::new());
         };
         let mut state = 0xD1B5_4A32_D192_ED03u64
             ^ self.version.wrapping_mul(0x9E37_79B9_7F4A_7C15)
-            ^ (sites.len() as u64).wrapping_mul(0x94D0_49BB_1331_11EB)
+            ^ (extras.len() as u64).wrapping_mul(0x94D0_49BB_1331_11EB)
             ^ draw_salt;
         if state == 0 {
             state = 1;
         }
         let mut out = Vec::with_capacity(n_samples);
         for _ in 0..n_samples {
-            let normal = (0..sites.len())
+            let normal = (0..extras.len())
                 .map(|_| unit_normal(&mut state))
                 .collect::<Vec<_>>();
-            let mut minimum = f64::INFINITY;
-            for row in 0..sites.len() {
-                let draw = means[row]
+            let mut values = Vec::with_capacity(extras.len());
+            for row in 0..extras.len() {
+                let value = means[row]
                     + (0..=row)
                         .map(|column| cholesky[[row, column]] * normal[column])
                         .sum::<f64>();
-                minimum = minimum.min(draw);
+                values.push(value);
             }
-            if let Some(best) = incumbent {
-                minimum = minimum.min(best);
-            }
-            out.push(minimum);
+            out.push(values);
         }
-        out
+        (means, covariance, out)
     }
 
     fn posterior_latent_covariance(
@@ -975,7 +994,7 @@ fn mes_given_min(mean: f64, sd: f64, eta: f64) -> f64 {
     (gamma * normal_pdf(gamma)) / (2.0 * cdf) - cdf.ln()
 }
 
-fn inverse_mills_lower(value: f64) -> f64 {
+pub(crate) fn inverse_mills_lower(value: f64) -> f64 {
     if value < -5.0 {
         let magnitude = -value;
         let inverse = 1.0 / magnitude;

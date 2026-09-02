@@ -1,20 +1,21 @@
-//! Same-PES allocation by information about the lowest reachable energy.
+//! Same-PES allocation by information about the lowest reachable minimum.
 //!
 //! A search mechanism maps a source structure to a terminal quenched energy.
 //! Separate Gaussian processes model the energy change produced by basin
 //! escape and minimum-mode riding. Their only shared random variable is the
-//! lowest terminal energy on the current finite action set. GIBBON supplies a
-//! lower bound on the mutual information with that minimum; division by the
-//! action's charged PES cost gives the common allocation currency.
+//! identity-and-energy pair of the lowest terminal minimum on the current
+//! finite action set. A moment-matched joint entropy search acquisition
+//! measures information about that pair; division by the action's charged PES
+//! cost gives the common allocation currency.
 //!
 //! Stationary-point counts, graph edges, transition rates, committors, and
 //! network-completeness estimates are deliberately absent. They remain valid
 //! output data for a downstream landscape database, but do not define a
 //! global-minimum search reward.
 
-use ndarray::ArrayView1;
+use ndarray::{Array2, ArrayView1};
 
-use crate::funnel_bo::{FunnelCompression, FunnelModel};
+use crate::funnel_bo::{FunnelCompression, FunnelModel, inverse_mills_lower};
 
 const BASIN_DRAW_SALT: u64 = 0x6a09_e667_f3bc_c909;
 const RIDE_DRAW_SALT: u64 = 0xbb67_ae85_84ca_a73b;
@@ -51,14 +52,14 @@ pub struct SearchActionCandidate {
     pub expected_charged_evaluations: f64,
 }
 
-/// Minimum-value information attached to one input candidate.
+/// Joint minimum information attached to one input candidate.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct SearchActionScore {
     /// Candidate index in the input slice.
     pub candidate: usize,
     /// Proposal operator.
     pub mechanism: SearchMechanism,
-    /// GIBBON lower bound on mutual information with the minimum energy.
+    /// Moment-matched information about the minimum identity and energy.
     pub information: f64,
     /// Information divided by expected charged PES evaluations.
     pub information_per_charged_evaluation: f64,
@@ -88,7 +89,7 @@ pub enum MinimumInformationError {
     },
 }
 
-/// Independent operator models coupled only through the target minimum value.
+/// Independent operator models coupled only through the target minimum pair.
 #[derive(Debug, Clone)]
 pub struct MinimumInformationSearch {
     models: [FunnelModel; 2],
@@ -98,6 +99,21 @@ pub struct MinimumInformationSearch {
     compression: [FunnelCompression; 2],
     incumbent_terminal_energy: Option<f64>,
     version: u64,
+}
+
+#[derive(Debug)]
+struct ActionPosterior {
+    candidate_indices: Vec<usize>,
+    means: Vec<f64>,
+    covariance: Array2<f64>,
+    draws: Vec<Vec<f64>>,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct SampledOptimum {
+    mechanism: Option<SearchMechanism>,
+    local_candidate: Option<usize>,
+    energy: f64,
 }
 
 impl MinimumInformationSearch {
@@ -183,7 +199,7 @@ impl MinimumInformationSearch {
         Ok(())
     }
 
-    /// Score a finite action set by minimum-value information per PES call.
+    /// Score a finite action set by joint minimum information per PES call.
     pub fn score(
         &mut self,
         candidates: &[SearchActionCandidate],
@@ -197,37 +213,72 @@ impl MinimumInformationSearch {
             self.check_dimension(candidate.mechanism, candidate.feature.len())?;
         }
 
-        let mut minima_by_mechanism = [Vec::new(), Vec::new()];
+        let mut posteriors: [Option<ActionPosterior>; 2] = [None, None];
+        let mut local_candidates = vec![0usize; candidates.len()];
         for mechanism in [SearchMechanism::BasinEscape, SearchMechanism::SaddleRide] {
-            let shifted = candidates
+            let candidate_indices = candidates
                 .iter()
-                .filter(|candidate| candidate.mechanism == mechanism)
-                .map(|candidate| {
+                .enumerate()
+                .filter(|(_, candidate)| candidate.mechanism == mechanism)
+                .map(|(index, _)| index)
+                .collect::<Vec<_>>();
+            let shifted = candidate_indices
+                .iter()
+                .map(|index| {
+                    let candidate = &candidates[*index];
                     (
                         ArrayView1::from(candidate.feature.as_slice()),
                         candidate.source_energy,
                     )
                 })
                 .collect::<Vec<_>>();
-            if !shifted.is_empty() {
-                minima_by_mechanism[mechanism.index()] = self.models[mechanism.index()]
-                    .sample_shifted_joint_minima(
-                        &shifted,
-                        minimum_samples,
-                        self.incumbent_terminal_energy,
-                        match mechanism {
-                            SearchMechanism::BasinEscape => BASIN_DRAW_SALT,
-                            SearchMechanism::SaddleRide => RIDE_DRAW_SALT,
-                        },
-                    );
+            for (local, global) in candidate_indices.iter().copied().enumerate() {
+                local_candidates[global] = local;
             }
+            if shifted.is_empty() {
+                continue;
+            }
+            let (means, covariance, draws) = self.models[mechanism.index()]
+                .sample_shifted_joint_values(
+                    &shifted,
+                    minimum_samples,
+                    match mechanism {
+                        SearchMechanism::BasinEscape => BASIN_DRAW_SALT,
+                        SearchMechanism::SaddleRide => RIDE_DRAW_SALT,
+                    },
+                );
+            posteriors[mechanism.index()] = Some(ActionPosterior {
+                candidate_indices,
+                means,
+                covariance,
+                draws,
+            });
         }
-        let global_minima = (0..minimum_samples)
+        let sampled_optima = (0..minimum_samples)
             .filter_map(|sample| {
-                minima_by_mechanism
-                    .iter()
-                    .filter_map(|draws| draws.get(sample).copied())
-                    .min_by(f64::total_cmp)
+                let mut optimum = self.incumbent_terminal_energy.map(|energy| SampledOptimum {
+                    mechanism: None,
+                    local_candidate: None,
+                    energy,
+                });
+                for mechanism in [SearchMechanism::BasinEscape, SearchMechanism::SaddleRide] {
+                    let Some(posterior) = &posteriors[mechanism.index()] else {
+                        continue;
+                    };
+                    let Some(draw) = posterior.draws.get(sample) else {
+                        continue;
+                    };
+                    for (local_candidate, energy) in draw.iter().copied().enumerate() {
+                        if optimum.is_none_or(|held| energy.total_cmp(&held.energy).is_lt()) {
+                            optimum = Some(SampledOptimum {
+                                mechanism: Some(mechanism),
+                                local_candidate: Some(local_candidate),
+                                energy,
+                            });
+                        }
+                    }
+                }
+                optimum
             })
             .collect::<Vec<_>>();
 
@@ -235,12 +286,17 @@ impl MinimumInformationSearch {
             .iter()
             .enumerate()
             .map(|(candidate_index, candidate)| {
-                let information = self.models[candidate.mechanism.index()]
-                    .gibbon_information_with_offset(
-                        ArrayView1::from(candidate.feature.as_slice()),
-                        candidate.source_energy,
-                        &global_minima,
-                    );
+                let mechanism_index = candidate.mechanism.index();
+                let posterior = posteriors[mechanism_index]
+                    .as_ref()
+                    .expect("each validated candidate belongs to one posterior block");
+                let information = joint_optimum_information(
+                    candidate.mechanism,
+                    local_candidates[candidate_index],
+                    posterior,
+                    &sampled_optima,
+                    self.models[mechanism_index].noise,
+                );
                 SearchActionScore {
                     candidate: candidate_index,
                     mechanism: candidate.mechanism,
@@ -317,6 +373,97 @@ fn validate_candidate(candidate: &SearchActionCandidate) -> Result<(), MinimumIn
         return Err(MinimumInformationError::InvalidAction);
     }
     Ok(())
+}
+
+fn joint_optimum_information(
+    mechanism: SearchMechanism,
+    local_candidate: usize,
+    posterior: &ActionPosterior,
+    sampled_optima: &[SampledOptimum],
+    observation_noise: f64,
+) -> f64 {
+    if sampled_optima.is_empty() {
+        return 0.0;
+    }
+    debug_assert_eq!(posterior.candidate_indices.len(), posterior.means.len());
+    let mean = posterior.means[local_candidate];
+    let variance = posterior.covariance[[local_candidate, local_candidate]].max(0.0);
+    let observation_variance = variance + observation_noise * observation_noise;
+    if !mean.is_finite() || !observation_variance.is_finite() || observation_variance <= 0.0 {
+        return 0.0;
+    }
+
+    let mut information = 0.0;
+    let mut accepted_samples = 0usize;
+    for optimum in sampled_optima {
+        if !optimum.energy.is_finite() {
+            continue;
+        }
+        let (conditioned_mean, conditioned_variance) = if optimum.mechanism == Some(mechanism) {
+            let optimum_candidate = optimum
+                .local_candidate
+                .expect("a sampled action optimum has a candidate index");
+            condition_on_noiseless_pair(
+                mean,
+                variance,
+                posterior.means[optimum_candidate],
+                posterior.covariance[[optimum_candidate, optimum_candidate]].max(0.0),
+                posterior.covariance[[local_candidate, optimum_candidate]],
+                optimum.energy,
+            )
+        } else {
+            (mean, variance)
+        };
+        let truncated_variance =
+            lower_truncated_variance(conditioned_mean, conditioned_variance, optimum.energy);
+        let conditional_observation_variance =
+            truncated_variance + observation_noise * observation_noise;
+        if conditional_observation_variance.is_finite() && conditional_observation_variance > 0.0 {
+            information += 0.5 * (observation_variance / conditional_observation_variance).ln();
+            accepted_samples += 1;
+        }
+    }
+    if accepted_samples == 0 {
+        0.0
+    } else {
+        (information / accepted_samples as f64).max(0.0)
+    }
+}
+
+fn condition_on_noiseless_pair(
+    query_mean: f64,
+    query_variance: f64,
+    optimum_mean: f64,
+    optimum_variance: f64,
+    covariance: f64,
+    sampled_optimum: f64,
+) -> (f64, f64) {
+    if !optimum_variance.is_finite() || optimum_variance <= f64::EPSILON {
+        return (query_mean, query_variance.max(0.0));
+    }
+    let coefficient = covariance / optimum_variance;
+    (
+        query_mean + coefficient * (sampled_optimum - optimum_mean),
+        (query_variance - covariance * coefficient).max(0.0),
+    )
+}
+
+fn lower_truncated_variance(mean: f64, variance: f64, lower_bound: f64) -> f64 {
+    if !mean.is_finite()
+        || !variance.is_finite()
+        || !lower_bound.is_finite()
+        || variance <= f64::EPSILON
+    {
+        return variance.max(0.0);
+    }
+    let alpha = (lower_bound - mean) / variance.sqrt();
+    let inverse_mills = if alpha.abs() <= f64::EPSILON {
+        (2.0 / std::f64::consts::PI).sqrt()
+    } else {
+        inverse_mills_lower(-alpha)
+    };
+    let retained = (1.0 + alpha * inverse_mills - inverse_mills * inverse_mills).clamp(0.0, 1.0);
+    variance * retained
 }
 
 #[cfg(test)]
