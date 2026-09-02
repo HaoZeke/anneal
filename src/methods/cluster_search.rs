@@ -101,6 +101,19 @@ impl RelaxStats {
 /// comes back at about 1e-6.
 pub const CONVERGED_GRADIENT: f64 = 1e-3;
 
+fn two_phase_penalty(
+    x: ArrayView1<f64>,
+    groups: Option<&[Vec<usize>]>,
+    cutoff: f64,
+    beta: f64,
+    mu: f64,
+) -> (f64, Array1<f64>) {
+    match groups.filter(|declared| !declared.is_empty()) {
+        Some(groups) => crate::methods::two_phase::penalty_groups(x, groups, cutoff, beta, mu),
+        None => crate::methods::two_phase::penalty(x, cutoff, beta, mu),
+    }
+}
+
 fn gradient_is_converged(gradient: ArrayView1<f64>, threshold: f64) -> bool {
     gradient
         .iter()
@@ -163,7 +176,13 @@ where
                         return None;
                     }
                     let (e, g) = objective.value_and_gradient(v);
-                    let (pe, pg) = crate::methods::two_phase::penalty(v, cutoff, two.beta, two.mu);
+                    let (pe, pg) = two_phase_penalty(
+                        v,
+                        cfg.move_library.declared_groups(),
+                        cutoff,
+                        two.beta,
+                        two.mu,
+                    );
                     Some((e + pe, g + pg))
                 });
                 opt.forget();
@@ -326,7 +345,13 @@ where
                         return None;
                     }
                     let (e, g) = objective.value_and_gradient(v);
-                    let (pe, pg) = crate::methods::two_phase::penalty(v, cutoff, two.beta, two.mu);
+                    let (pe, pg) = two_phase_penalty(
+                        v,
+                        cfg.move_library.declared_groups(),
+                        cutoff,
+                        two.beta,
+                        two.mu,
+                    );
                     Some((e + pe, g + pg))
                 });
                 opt.forget();
@@ -720,7 +745,13 @@ where
                         return None;
                     }
                     let (e, g) = objective.value_and_gradient(v);
-                    let (pe, pg) = crate::methods::two_phase::penalty(v, cutoff, two.beta, two.mu);
+                    let (pe, pg) = two_phase_penalty(
+                        v,
+                        cfg.move_library.declared_groups(),
+                        cutoff,
+                        two.beta,
+                        two.mu,
+                    );
                     Some((e + pe, g + pg))
                 });
                 opt.forget();
