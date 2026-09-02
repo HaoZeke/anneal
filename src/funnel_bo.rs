@@ -66,6 +66,7 @@ pub struct FunnelModel {
     /// unvisited region look catastrophic and expected improvement then never
     /// leaves the data.
     prior_mean: f64,
+    fixed_prior_mean: Option<f64>,
     xs: Vec<Array1<f64>>,
     ys: Vec<f64>,
     /// Bumped whenever an observation changes the data.
@@ -114,6 +115,7 @@ impl FunnelModel {
             noise,
             metric,
             prior_mean: 0.0,
+            fixed_prior_mean: None,
             xs: Vec::new(),
             ys: Vec::new(),
             version: 0,
@@ -130,6 +132,15 @@ impl FunnelModel {
     /// Whether nothing has been observed.
     pub fn is_empty(&self) -> bool {
         self.xs.is_empty()
+    }
+
+    /// Fix the GP prior mean independently of the retained observation subset.
+    pub fn set_prior_mean(&mut self, mean: f64) {
+        assert!(mean.is_finite(), "the GP prior mean must be finite");
+        self.prior_mean = mean;
+        self.fixed_prior_mean = Some(mean);
+        self.chol = None;
+        self.alpha = None;
     }
 
     /// The best value seen, which is what improvement is measured against.
@@ -218,7 +229,9 @@ impl FunnelModel {
         if n == 0 {
             return;
         }
-        self.prior_mean = self.ys.iter().sum::<f64>() / n as f64;
+        self.prior_mean = self
+            .fixed_prior_mean
+            .unwrap_or_else(|| self.ys.iter().sum::<f64>() / n as f64);
         let mut k = Array2::<f64>::zeros((n, n));
         for i in 0..n {
             for j in 0..n {
