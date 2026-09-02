@@ -2105,13 +2105,6 @@ pub(crate) fn fill_coordinator_status(
         output.set_seam_left_basin(seam.left_basin);
         output.set_seam_right_basin(seam.right_basin);
     }
-    let mut replicas = output.init_replicas(status.replicas.len() as u32);
-    for (index, progress) in status.replicas.iter().enumerate() {
-        let mut row = replicas.reborrow().get(index as u32);
-        row.set_replica(progress.replica);
-        row.set_charged_work(progress.charged_work);
-        row.set_best_energy(progress.best_energy);
-    }
     output.set_roster_version(status.roster_version);
     fill_u32(
         output
@@ -2121,6 +2114,13 @@ pub(crate) fn fill_coordinator_status(
     );
     output.set_ticks(status.ticks);
     output.set_spawn_requested(status.spawn_requested);
+    let mut replicas = output.init_replicas(status.replicas.len() as u32);
+    for (index, progress) in status.replicas.iter().enumerate() {
+        let mut row = replicas.reborrow().get(index as u32);
+        row.set_replica(progress.replica);
+        row.set_charged_work(progress.charged_work);
+        row.set_best_energy(progress.best_energy);
+    }
 }
 
 pub(crate) fn read_coordinator_status(
