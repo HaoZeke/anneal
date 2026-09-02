@@ -115,7 +115,7 @@ fn batch_assignment_discounts_correlated_chain_actions() {
         },
         SearchActionCandidate {
             mechanism: SearchMechanism::BasinEscape,
-            feature: vec![1e-6, 0.0],
+            feature: vec![0.0, 0.0],
             source_energy: -10.0,
             expected_charged_evaluations: 20.0,
         },
