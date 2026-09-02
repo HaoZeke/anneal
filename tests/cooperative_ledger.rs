@@ -86,6 +86,8 @@ fn every_work_boundary_has_explicit_charge_semantics() {
         (ChargeKind::Retry, 2),
         (ChargeKind::RpcFallback, 0),
         (ChargeKind::AuxiliaryEvaluation, 2),
+        (ChargeKind::BasinEscape, 5),
+        (ChargeKind::SaddleRide, 7),
     ];
     let mut cumulative = 0;
     for (index, (kind, calls)) in records.into_iter().enumerate() {
@@ -95,8 +97,8 @@ fn every_work_boundary_has_explicit_charge_semantics() {
             .unwrap();
     }
 
-    assert_eq!(ledger.ensemble_total(), 12);
-    assert_eq!(ledger.event_count(), 9);
+    assert_eq!(ledger.ensemble_total(), 24);
+    assert_eq!(ledger.event_count(), 11);
 }
 
 #[test]
@@ -105,6 +107,31 @@ fn auxiliary_evaluations_have_a_stable_charged_wire_code() {
     assert_eq!(
         ChargeKind::from_wire_code(8),
         Some(ChargeKind::AuxiliaryEvaluation)
+    );
+}
+
+#[test]
+fn discovery_mechanism_effort_is_replay_safe_and_queryable() {
+    let mut ledger = CooperativeLedger::new([0, 1], 10_000).unwrap();
+    let basin = event(0, 1, ChargeKind::BasinEscape, 200, 200);
+    let saddle = event(1, 1, ChargeKind::SaddleRide, 1_500, 1_500);
+    ledger.record(basin).unwrap();
+    ledger.record(saddle).unwrap();
+    ledger.record(basin).unwrap();
+
+    assert_eq!(ChargeKind::BasinEscape.wire_code(), 9);
+    assert_eq!(ChargeKind::SaddleRide.wire_code(), 10);
+    assert_eq!(ChargeKind::from_wire_code(9), Some(ChargeKind::BasinEscape));
+    assert_eq!(ChargeKind::from_wire_code(10), Some(ChargeKind::SaddleRide));
+    assert_eq!(ledger.charge_summary(ChargeKind::BasinEscape).events, 1);
+    assert_eq!(
+        ledger.charge_summary(ChargeKind::BasinEscape).charged_calls,
+        200
+    );
+    assert_eq!(ledger.charge_summary(ChargeKind::SaddleRide).events, 1);
+    assert_eq!(
+        ledger.charge_summary(ChargeKind::SaddleRide).charged_calls,
+        1_500
     );
 }
 
