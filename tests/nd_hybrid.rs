@@ -2,7 +2,8 @@ use std::convert::Infallible;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use anneal_core::nd_hybrid::{
-    NdHybridConfig, NdHybridMechanism, NdHybridPolicy, explore_nd_hybrid, explore_nd_with_policy,
+    NdEscapeKernel, NdHybridConfig, NdHybridMechanism, NdHybridPolicy, explore_nd_hybrid,
+    explore_nd_with_policy,
 };
 use anneal_core::pes_exploration::{
     ExactStructureWitness, PesExplorationConfig, PesSurface, RideMethod,
@@ -123,13 +124,16 @@ fn hybrid_nd_search_shares_escaped_minima_with_budgeted_ridge_rides() {
         .expect("the exact escape census must acquire a finite unseen-mass bound");
     let coverage_window = report.events[saturated + 1..].iter().take(20);
     let (ridge_after_saturation, escape_after_saturation, observed_after_saturation) =
-        coverage_window.fold((0usize, 0usize, 0usize), |(ridge, escape, observed), event| {
-            (
-                ridge + usize::from(event.mechanism == NdHybridMechanism::Ridge),
-                escape + usize::from(event.mechanism == NdHybridMechanism::BasinEscape),
-                observed + 1,
-            )
-        });
+        coverage_window.fold(
+            (0usize, 0usize, 0usize),
+            |(ridge, escape, observed), event| {
+                (
+                    ridge + usize::from(event.mechanism == NdHybridMechanism::Ridge),
+                    escape + usize::from(event.mechanism == NdHybridMechanism::BasinEscape),
+                    observed + 1,
+                )
+            },
+        );
     assert_eq!(observed_after_saturation, 20);
     assert!(ridge_after_saturation > 0);
     assert!(escape_after_saturation > 0);
@@ -158,6 +162,47 @@ fn hybrid_nd_search_shares_escaped_minima_with_budgeted_ridge_rides() {
     }
     assert!(report.escape_coverage_saturated);
     assert!(report.escape_unseen_mass_upper.unwrap() < 0.2);
+
+    let mut escape_round = 0usize;
+    let mut reconstructed_pulls = [0usize; 2];
+    let mut reconstructed_discoveries = [0usize; 2];
+    for event in &report.events {
+        if event.mechanism == NdHybridMechanism::BasinEscape {
+            escape_round += 1;
+            let kernel = event
+                .escape_kernel
+                .expect("escape event must name its kernel");
+            let arm = match kernel {
+                NdEscapeKernel::Gaussian => 0,
+                NdEscapeKernel::Tsallis => 1,
+            };
+            reconstructed_pulls[arm] += 1;
+            reconstructed_discoveries[arm] += usize::from(!event.new_minimum_ids.is_empty());
+            let probability = event
+                .kernel_probability
+                .expect("escape event must record its draw probability");
+            let eta = event
+                .kernel_learning_rate
+                .expect("escape event must record eta_t");
+            let gamma = event
+                .kernel_implicit_exploration
+                .expect("escape event must record gamma_t");
+            let expected_eta = (2.0_f64.ln() / (2.0 * escape_round as f64)).sqrt();
+            assert!(probability > 0.0 && probability <= 1.0);
+            assert!((eta - expected_eta).abs() < 1e-15);
+            assert!((gamma - eta / 2.0).abs() < 1e-15);
+        } else {
+            assert_eq!(event.escape_kernel, None);
+            assert_eq!(event.kernel_probability, None);
+            assert_eq!(event.kernel_learning_rate, None);
+            assert_eq!(event.kernel_implicit_exploration, None);
+        }
+    }
+    assert_eq!(report.move_pulls, reconstructed_pulls);
+    for arm in 0..2 {
+        let expected = reconstructed_discoveries[arm] as f64 / reconstructed_pulls[arm] as f64;
+        assert!((report.move_success_rates[arm] - expected).abs() < 1e-15);
+    }
 
     for minimum in report.network.minima() {
         assert!(minimum.max_gradient < 2e-8);
