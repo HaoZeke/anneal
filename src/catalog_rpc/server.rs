@@ -1148,6 +1148,18 @@ fn apply_request(
                 .ledger
                 .as_ref()
                 .map_or(0, CooperativeLedger::aggregate_budget);
+            let basin_effort = state
+                .ledger
+                .as_ref()
+                .map_or_else(Default::default, |ledger| {
+                    ledger.charge_summary(ChargeKind::BasinEscape)
+                });
+            let saddle_effort = state
+                .ledger
+                .as_ref()
+                .map_or_else(Default::default, |ledger| {
+                    ledger.charge_summary(ChargeKind::SaddleRide)
+                });
             let Some(scientific) = state.scientific.as_mut() else {
                 return rejected(
                     state,
@@ -1214,8 +1226,6 @@ fn apply_request(
                 .census
                 .total_visits()
                 .saturating_add(scientific.ride_ledger.completed_attempts());
-            let basin_effort = scientific.ledger.charge_summary(ChargeKind::BasinEscape);
-            let saddle_effort = scientific.ledger.charge_summary(ChargeKind::SaddleRide);
             let discovery_role = assign_discovery_roles(
                 &scientific.discovery_replicas,
                 DiscoveryCoverage {
