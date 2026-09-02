@@ -20,7 +20,11 @@
 //! E* **2000**, *62*, 8753 <https://doi.org/10.1103/PhysRevE.62.8753>.
 
 use ndarray::{Array1, ArrayView1};
+use rand::SeedableRng;
+use rand::rngs::StdRng;
 use serde::Serialize;
+
+use crate::allocate::DepthAllocator;
 
 /// How the diameter cutoff is chosen for one relaxation.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize)]
@@ -148,6 +152,82 @@ pub fn penalty(x: ArrayView1<f64>, cutoff: f64, beta: f64, mu: f64) -> (f64, Arr
     (e, g)
 }
 
+/// A learned choice of relaxation surface per hop.
+///
+/// Which transform helps is a property of the landscape: centroid compression
+/// separates the octahedral and tetrahedral minima at 38 and 98 points, the
+/// diameter penalty separates the Marks decahedron at 75, and neither is
+/// worth its second relaxation on a single-funnel size. Rather than name the
+/// answer per size, the arms are the plain surface and every configured
+/// transform, and a Normal-Gamma Thompson allocator rewarded by the depth the
+/// quench reached picks one per hop, the same reward that allocates move
+/// kernels in [`crate::methods::cluster_hopping`].
+///
+/// A hop is a screening relaxation followed by a full one on the same trial;
+/// the arm is drawn at the screen and held for the full relaxation, whose
+/// reached energy against the run's best is the reward.
+#[derive(Debug, Clone)]
+pub struct SurfacePortfolio {
+    arms: Vec<Option<TwoPhase>>,
+    allocator: DepthAllocator,
+    held: Option<usize>,
+    rng: StdRng,
+}
+
+impl SurfacePortfolio {
+    /// The plain surface plus every transform, uninformative until fed.
+    pub fn new(transforms: &[TwoPhase], seed: u64) -> Self {
+        let mut arms = vec![None];
+        arms.extend(transforms.iter().copied().filter(|two| two.is_active()).map(Some));
+        Self {
+            allocator: DepthAllocator::new(arms.len()),
+            arms,
+            held: None,
+            rng: StdRng::seed_from_u64(seed ^ 0x5a2f_ace5),
+        }
+    }
+
+    /// The surface for the relaxation about to start.
+    ///
+    /// A screening relaxation opens a hop and draws a fresh arm; a full
+    /// relaxation keeps the arm its screen drew, or draws one if it stands
+    /// alone.
+    pub fn begin(&mut self, screening: bool) -> Option<TwoPhase> {
+        if screening || self.held.is_none() {
+            self.held = Some(self.allocator.select(&mut self.rng));
+        }
+        self.held.and_then(|arm| self.arms[arm])
+    }
+
+    /// Credits the held arm with the depth a full relaxation reached.
+    pub fn observe(&mut self, screening: bool, reached: f64, best: f64) {
+        if screening {
+            return;
+        }
+        if let Some(arm) = self.held.take()
+            && reached.is_finite()
+            && best.is_finite()
+        {
+            self.allocator.update(arm, -(reached - best));
+        }
+    }
+
+    /// Draws taken per arm, the plain surface first.
+    pub fn draws(&self) -> &[usize] {
+        &self.allocator.draws
+    }
+
+    /// Posterior mean depth reward per arm, the plain surface first.
+    pub fn means(&self) -> Vec<f64> {
+        self.allocator.means()
+    }
+
+    /// The arms, the plain surface first.
+    pub fn arms(&self) -> &[Option<TwoPhase>] {
+        &self.arms
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -200,5 +280,41 @@ mod tests {
         assert!(two.is_active());
         assert!(!TwoPhase::diameter(0.0, 1.0).is_active());
         assert!(!TwoPhase::relative(0.8, 0.0).is_active());
+    }
+
+    #[test]
+    fn the_portfolio_learns_the_arm_that_reaches_deeper() {
+        let deep = TwoPhase::diameter(2.0, 1.0);
+        let shallow = TwoPhase::relative(0.5, 1.0);
+        let mut portfolio = SurfacePortfolio::new(&[deep, shallow], 7);
+        assert_eq!(portfolio.arms().len(), 3);
+        for _ in 0..400 {
+            let arm = portfolio.begin(true);
+            let reached = match arm {
+                Some(two) if two == deep => -10.0,
+                Some(_) => -2.0,
+                None => -5.0,
+            };
+            assert_eq!(portfolio.begin(false), arm, "the full relaxation changed surface");
+            portfolio.observe(false, reached, -10.0);
+        }
+        let draws = portfolio.draws();
+        assert!(
+            draws[1] > draws[0] + draws[2],
+            "the deeper arm was not preferred: {draws:?}"
+        );
+        let means = portfolio.means();
+        assert!(means[1] > means[0] && means[0] > means[2], "{means:?}");
+    }
+
+    #[test]
+    fn a_screened_out_hop_leaves_no_reward() {
+        let mut portfolio = SurfacePortfolio::new(&[TwoPhase::diameter(2.0, 1.0)], 3);
+        portfolio.begin(true);
+        portfolio.observe(true, -1.0, -3.0);
+        assert!(portfolio.draws().iter().all(|d| *d == 0));
+        portfolio.begin(false);
+        portfolio.observe(false, -1.0, -3.0);
+        assert_eq!(portfolio.draws().iter().sum::<usize>(), 1);
     }
 }
