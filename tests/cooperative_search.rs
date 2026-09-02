@@ -2368,6 +2368,20 @@ fn population_barrier_reports_minimum_information_genealogy() {
 }
 
 #[test]
+fn population_coordinator_uses_joint_optimum_batch_information() {
+    let source = include_str!("../src/catalog_rpc/server.rs");
+
+    assert!(
+        source.contains(".assign_batch("),
+        "the synchronous population must use the shared action-outcome model"
+    );
+    assert!(
+        !source.contains(".assign_minimum_information_values("),
+        "an energy-only coverage model does not encode optimum identity or action outcomes"
+    );
+}
+
+#[test]
 fn cooperative_run_exposes_population_barrier_and_assigned_parent() {
     let server = server();
     let digest = signature().digest();
