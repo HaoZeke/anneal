@@ -89,6 +89,43 @@ impl ExactStructureWitness for PermutationWitness {
     }
 }
 
+struct HandednessWitness;
+
+impl ExactStructureWitness for HandednessWitness {
+    fn equivalent(&self, left: ArrayView1<f64>, right: ArrayView1<f64>) -> bool {
+        let corresponding_edges_match = (0..4).all(|first| {
+            (first + 1..4).all(|second| {
+                let distance_squared = |coordinates: ArrayView1<'_, f64>| {
+                    (0..3)
+                        .map(|axis| {
+                            let delta =
+                                coordinates[3 * second + axis] - coordinates[3 * first + axis];
+                            delta * delta
+                        })
+                        .sum::<f64>()
+                };
+                (distance_squared(left) - distance_squared(right)).abs() < 1e-10
+            })
+        });
+        corresponding_edges_match && handedness(left) * handedness(right) > 0.0
+    }
+}
+
+fn handedness(coordinates: ArrayView1<'_, f64>) -> f64 {
+    let edge = |atom: usize| {
+        [
+            coordinates[3 * atom] - coordinates[0],
+            coordinates[3 * atom + 1] - coordinates[1],
+            coordinates[3 * atom + 2] - coordinates[2],
+        ]
+    };
+    let a = edge(1);
+    let b = edge(2);
+    let c = edge(3);
+    a[0] * (b[1] * c[2] - b[2] * c[1]) - a[1] * (b[0] * c[2] - b[2] * c[0])
+        + a[2] * (b[0] * c[1] - b[1] * c[0])
+}
+
 fn descriptor_space() -> DescriptorSpace {
     DescriptorSpace::new(
         DescriptorSchema::new(
@@ -204,6 +241,124 @@ fn server_with_region_evidence(capacity: usize, minimum_probes: u64) -> CatalogS
             maximum_distance: 0.35,
             minimum_probes,
         })
+        .unwrap();
+    CatalogServer::start("127.0.0.1:0", config).unwrap()
+}
+
+fn chiral_coordinates(mirrored: bool) -> Vec<f64> {
+    vec![
+        0.0,
+        0.0,
+        0.0,
+        1.0,
+        0.0,
+        0.0,
+        0.0,
+        1.0,
+        0.0,
+        0.0,
+        0.0,
+        if mirrored { -1.0 } else { 1.0 },
+    ]
+}
+
+fn chiral_descriptor_space() -> DescriptorSpace {
+    DescriptorSpace::new(
+        DescriptorSchema::new(
+            "chiral-test-soap",
+            1,
+            vec![DescriptorBlockSpec::new(DescriptorBlockKind::SoapMean, 2, 2, 3.5).unwrap()],
+        )
+        .unwrap(),
+    )
+}
+
+fn chiral_signature(descriptor_dim: usize) -> SystemSignature {
+    SystemSignature {
+        atomic_numbers: vec![6, 7, 8, 9],
+        coordinate_dim: 12,
+        group_labels: vec![0, 1, 2, 3],
+        group_schema: "independent-distinct-atoms-v1".into(),
+        frozen_mask: vec![false; 4],
+        cell: None,
+        periodic: [false; 3],
+        length_scale: 1.0,
+        energy_scale: 1.0,
+        engine: EngineSignature {
+            kind: "chiral-fixture".into(),
+            config_digest: [0x43; 32],
+            external_inputs: BTreeMap::new(),
+        },
+        descriptor: DescriptorSignature {
+            schema: "chiral-test-soap".into(),
+            version: 1,
+            hyperparameters: BTreeMap::from([("dimension".into(), descriptor_dim.to_string())]),
+            species_channels: vec![6, 7, 8, 9],
+        },
+        validation_schema_version: 1,
+    }
+}
+
+fn chiral_candidate(replica: u32, sequence: u64, mirrored: bool) -> CatalogCandidate {
+    let coordinates = chiral_coordinates(mirrored);
+    let descriptor = chiral_descriptor_space()
+        .describe(ArrayView1::from(&coordinates), Some(&[6, 7, 8, 9]))
+        .unwrap()
+        .values()
+        .to_vec();
+    CatalogCandidate {
+        producer_replica: replica,
+        coordinates,
+        cell: None,
+        energy: -4.0,
+        forces: vec![0.0; 12],
+        gradient_norm: 0.0,
+        descriptor,
+        descriptor_schema_version: 1,
+        quench_converged: true,
+        charged_work: sequence * 5,
+        event_sequence: sequence,
+        seed: 2000 + u64::from(replica),
+        census_basin: None,
+    }
+}
+
+fn chiral_server() -> CatalogServer {
+    let descriptor_space = chiral_descriptor_space();
+    let reference = chiral_coordinates(false);
+    let descriptor_dim = descriptor_space
+        .describe(ArrayView1::from(&reference), Some(&[6, 7, 8, 9]))
+        .unwrap()
+        .values()
+        .len();
+    let signature = chiral_signature(descriptor_dim);
+    let digest = signature.digest();
+    let config = ServerConfig::new("jcc-2026", "chiral-ensemble", digest, [0])
+        .unwrap()
+        .with_scientific_state(
+            signature,
+            descriptor_space,
+            ValidatorConfig {
+                reference_coordinates: reference,
+                descriptor_dim,
+                min_separation: 0.5,
+                coordinate_tolerance: 1e-10,
+                max_gradient_norm: 1e-8,
+                energy_abs_tolerance: 1e-12,
+                energy_rel_tolerance: 1e-12,
+            },
+            2,
+            0.05,
+            100,
+            |coordinates| {
+                Ok(FreshEvaluation {
+                    energy: -4.0,
+                    forces: vec![0.0; coordinates.len()],
+                })
+            },
+        )
+        .unwrap()
+        .with_exact_structure_witness(HandednessWitness)
         .unwrap();
     CatalogServer::start("127.0.0.1:0", config).unwrap()
 }
@@ -2025,6 +2180,61 @@ fn coordinator_closes_population_epoch_only_after_all_replicas_submit() {
         assert_eq!(plan.parents, vec![0, 1, 2, 3]);
     }
     assert_eq!(clients[0].snapshot(4).unwrap().census_visits, 4);
+}
+
+#[test]
+fn population_submission_uses_exact_handedness_when_descriptors_alias() {
+    let server = chiral_server();
+    let original = chiral_candidate(0, 1, false);
+    let reflected = chiral_candidate(0, 2, true);
+    let separation = original
+        .descriptor
+        .iter()
+        .zip(&reflected.descriptor)
+        .map(|(left, right)| (left - right) * (left - right))
+        .sum::<f64>()
+        .sqrt();
+    assert!(
+        separation < 1e-10,
+        "parity-even SOAP separation {separation}"
+    );
+    let digest = chiral_signature(original.descriptor.len()).digest();
+    let mut client = CatalogClient::connect(
+        server.addr(),
+        CatalogIdentity {
+            campaign: "jcc-2026".into(),
+            ensemble: "chiral-ensemble".into(),
+            replica: 0,
+            signature_digest: digest,
+        },
+        ClientConfig::default(),
+    )
+    .unwrap();
+
+    let original_basin = client
+        .offer_candidate(1, original)
+        .unwrap()
+        .catalog
+        .unwrap()
+        .basin_id;
+    let reflected_basin = client
+        .offer_candidate(2, reflected)
+        .unwrap()
+        .catalog
+        .unwrap()
+        .basin_id;
+    assert_ne!(original_basin, reflected_basin);
+
+    let state = client
+        .submit_population(3, 0, chiral_candidate(0, 3, true))
+        .unwrap();
+    let plan = state.plan.expect("one-member epoch closes on submission");
+
+    assert_eq!(plan.parent_candidates.len(), 1);
+    assert_eq!(
+        plan.parent_candidates[0].census_basin,
+        Some(reflected_basin)
+    );
 }
 
 #[test]
