@@ -141,6 +141,16 @@ fn ridge_only_atomistic_search_uses_the_budgeted_rgsaddle_path() {
     assert_eq!(report.network.minimum_count(), 2);
     assert_eq!(report.network.saddle_count(), 1);
     assert_eq!(report.network.saddles()[0].negative_modes, 1);
+    assert!(report
+        .network
+        .minima()
+        .iter()
+        .all(|minimum| minimum.context.identity_domain() == Some("radial-pair")));
+    assert!(report
+        .network
+        .saddles()
+        .iter()
+        .all(|saddle| saddle.context.identity_domain() == Some("radial-pair")));
 }
 
 #[test]
