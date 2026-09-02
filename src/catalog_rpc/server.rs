@@ -3231,9 +3231,14 @@ fn minimum_information_population_assignment(
             })
         })
         .collect::<Option<Vec<_>>>()?;
+    let mut basin_families = BTreeMap::<u64, usize>::new();
     let families = destinations
         .iter()
-        .map(|replica| usize::try_from(*replica).ok())
+        .map(|replica| {
+            let basin = source_candidates.get(replica)?.census_basin?;
+            let next_family = basin_families.len();
+            Some(*basin_families.entry(basin).or_insert(next_family))
+        })
         .collect::<Option<Vec<_>>>()?;
     let selected = minimum_information
         .assign_batch(
