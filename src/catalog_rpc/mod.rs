@@ -22,7 +22,7 @@ pub mod mailbox;
 pub mod server;
 
 /// Wire protocol version accepted by this release.
-pub const PROTOCOL_VERSION: u16 = 23;
+pub const PROTOCOL_VERSION: u16 = 24;
 /// `Sample` draw that returns the active-catalog incumbent.
 pub const INCUMBENT_SAMPLE_DRAW: u64 = u64::MAX;
 
@@ -222,6 +222,8 @@ impl CatalogMutationKind {
 pub struct CatalogMutation {
     /// Fixed-census basin assigned to the offered candidate.
     pub basin_id: u64,
+    /// Whether the exact witness opened this fixed-census basin.
+    pub new_basin: bool,
     /// Exact admission or rejection class.
     pub kind: CatalogMutationKind,
     /// Fixed-census basins removed from the active catalog.
@@ -1388,6 +1390,7 @@ pub(crate) fn encode_reply(reply: CatalogReply) -> Result<Vec<u8>, ProtocolError
                 AcceptedPayload::CatalogMutation(mutation) => {
                     let mut output = payload.init_catalog_mutation();
                     output.set_basin_id(mutation.basin_id);
+                    output.set_new_basin(mutation.new_basin);
                     output.set_kind(mutation.kind.into());
                     fill_u64(
                         output
@@ -1650,6 +1653,7 @@ pub(crate) fn decode_reply_reader(
                         };
                     AcceptedPayload::CatalogMutation(CatalogMutation {
                         basin_id: mutation.get_basin_id(),
+                        new_basin: mutation.get_new_basin(),
                         kind: mutation.get_kind().map_err(wire_error)?.into(),
                         evicted: list_u64(mutation.get_evicted().map_err(wire_error)?),
                         incumbent_basin,

@@ -1863,7 +1863,12 @@ fn apply_request(
                     observation.total_visits,
                     u32::try_from(scientific.catalog.len())
                         .expect("catalog capacity is checked against u32"),
-                    Some(catalog_mutation(outcome, observation.basin_id, incumbent)),
+                    Some(catalog_mutation(
+                        outcome,
+                        observation.basin_id,
+                        observation.created,
+                        incumbent,
+                    )),
                 )
             } else {
                 let Some(active_entries) = state.active_entries.checked_add(1) else {
@@ -2777,6 +2782,7 @@ fn candidate_from_validated(
 fn catalog_mutation(
     outcome: AdmissionOutcome,
     offered_basin: BasinId,
+    new_basin: bool,
     incumbent_basin: Option<BasinId>,
 ) -> CatalogMutation {
     let (kind, evicted) = match outcome {
@@ -2804,6 +2810,7 @@ fn catalog_mutation(
     };
     CatalogMutation {
         basin_id: offered_basin.as_raw(),
+        new_basin,
         kind,
         evicted,
         incumbent_basin: incumbent_basin.map(BasinId::as_raw),
