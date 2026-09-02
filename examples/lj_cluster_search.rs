@@ -1423,6 +1423,20 @@ fn main() {
         cfg.merge_radius = 0.5;
         println!("  keying on the core ring-graph key, merge radius 0.5");
     }
+    // Reoccupation move on the lattice grown from the interior;
+    // REOCCUPY_INTERVAL sets the charged calls between moves.
+    if opts.contains(&"reocc") {
+        cfg.reoccupy =
+            Some(anneal_core::methods::lattice_search::LatticeSearchConfig::lennard_jones(n));
+        cfg.reoccupy_interval = std::env::var("REOCCUPY_INTERVAL")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(5_000);
+        println!(
+            "  reoccupation move every {} charged calls",
+            cfg.reoccupy_interval
+        );
+    }
     // Two-phase relaxation on the compacted surface (Locatelli and Schoen;
     // Doye). TWO_PHASE_KAPPA sets a relative cutoff, TWO_PHASE_D a fixed
     // one in pair-well units, TWO_PHASE_BETA the penalty strength and
