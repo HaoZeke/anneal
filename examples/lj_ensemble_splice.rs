@@ -18,7 +18,10 @@
 //! attempts (default 5000), `SPLICE_IMAGES` children per attempt (default 4),
 //! `SPLICE_PARTNER` `random` or `best` (default `random`), `SPLICE_SOURCE`
 //! `current` or `best` for the structures spliced (default `current`),
-//! `CHECKPOINT` charged evaluations between board updates (default 500).
+//! `CHECKPOINT` charged evaluations between board updates (default 500),
+//! `COMPRESS_MU` two-phase quench: relax first on the compressed surface
+//! `E + mu * sum |r_i - r_cm|^2`, then on the plain potential from there
+//! (default 0, plain quench). Every evaluation of either phase is charged.
 
 use std::sync::{Arc, Mutex};
 
@@ -73,6 +76,38 @@ fn reference(n: usize) -> Option<f64> {
     })
 }
 
+/// Compressed surface: the plain energy plus `mu` times the squared radius of
+/// gyration sum. The centroid term contributes no gradient because the
+/// displacements from it sum to zero.
+fn lj_compressed(x: ArrayView1<f64>, mu: f64) -> (f64, Array1<f64>) {
+    let (mut e, mut g) = lj(x);
+    let n = x.len() / 3;
+    let mut cm = [0.0_f64; 3];
+    for i in 0..n {
+        for k in 0..3 {
+            cm[k] += x[3 * i + k];
+        }
+    }
+    for value in cm.iter_mut() {
+        *value /= n.max(1) as f64;
+    }
+    for i in 0..n {
+        for k in 0..3 {
+            let d = x[3 * i + k] - cm[k];
+            e += mu * d * d;
+            g[3 * i + k] += 2.0 * mu * d;
+        }
+    }
+    (e, g)
+}
+
+fn env_f64(key: &str, default: f64) -> f64 {
+    std::env::var(key)
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(default)
+}
+
 fn env_usize(key: &str, default: usize) -> usize {
     std::env::var(key)
         .ok()
@@ -119,6 +154,8 @@ struct ExchangeConfig {
     partner_best: bool,
     source_best: bool,
     checkpoint: usize,
+    /// Compression strength of the first quench phase; zero is a plain quench.
+    compress_mu: f64,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -137,10 +174,22 @@ fn run_chain(
     let start = random_cluster(n, 0.7, cfg.min_separation, &mut rng);
     let mut ledger = Ledger::new(budget);
     let mut opt = WarmLbfgs::default();
+    let compress_mu = exchange.compress_mu;
     let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, iters: usize| {
         let before = led.spent();
+        let mut start = x.to_owned();
+        if compress_mu > 0.0 {
+            opt.forget();
+            let (_, compressed, _) = opt.minimize(x, iters, |v| {
+                if !led.charge() {
+                    return None;
+                }
+                Some(lj_compressed(v, compress_mu))
+            });
+            start = compressed;
+        }
         opt.forget();
-        let (f, xr, _) = opt.minimize(x, iters, |v| {
+        let (f, xr, _) = opt.minimize(start.view(), iters, |v| {
             if !led.charge() {
                 return None;
             }
@@ -323,16 +372,18 @@ fn main() {
         partner_best: env_string("SPLICE_PARTNER", "random") == "best",
         source_best: env_string("SPLICE_SOURCE", "current") == "best",
         checkpoint: env_usize("CHECKPOINT", 500),
+        compress_mu: env_f64("COMPRESS_MU", 0.0),
     };
     let target = reference(n);
     println!(
         "LJ{n}, {chains} chains x {budget} charged, {ensembles} ensembles, mode {mode}, \
-         interval {} images {} partner {} source {} checkpoint {}, reference {}",
+         interval {} images {} partner {} source {} checkpoint {} compress {}, reference {}",
         exchange.interval,
         exchange.images,
         if exchange.partner_best { "best" } else { "random" },
         if exchange.source_best { "best" } else { "current" },
         exchange.checkpoint,
+        exchange.compress_mu,
         target.map(|r| format!("{r:.6}")).unwrap_or_else(|| "none".into())
     );
 
