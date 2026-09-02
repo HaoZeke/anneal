@@ -9,8 +9,9 @@ import statistics
 import sys
 
 seed_re = re.compile(
-    r"seed (?P<seed>\d+): best (?P<best>[-+0-9.eE]+) eV\s+hops (?P<hops>\d+)\s+"
-    r"charged (?P<charged>\d+)\s+basins (?P<basins>\d+)"
+    r"seed (?P<seed>\d+): best (?P<best>[-+0-9.eE]+|[-+]?inf|nan) eV\s+hops (?P<hops>\d+)\s+"
+    r"charged (?P<charged>\d+)\s+basins (?P<basins>\d+)",
+    re.IGNORECASE,
 )
 improve_re = re.compile(
     r"improve hops=\d+ charged=(?P<charged>\d+) basins=\d+ e=(?P<energy>[-+0-9.eE]+)"
@@ -30,10 +31,11 @@ def parse_arm(directory: pathlib.Path) -> tuple[list[dict], list[tuple[str, int]
             continue
         best = float(seed_m.group("best"))
         charged_to_best = None
-        for match in improve_re.finditer(text):
-            energy = float(match.group("energy"))
-            if abs(energy - best) <= 1e-6:
-                charged_to_best = int(match.group("charged"))
+        if best == best and abs(best) != float("inf"):
+            for match in improve_re.finditer(text):
+                energy = float(match.group("energy"))
+                if abs(energy - best) <= 1e-6:
+                    charged_to_best = int(match.group("charged"))
         rows.append(
             {
                 "seed": int(seed_m.group("seed")),
@@ -77,9 +79,13 @@ def main() -> int:
                 f"{m}  {row['seed']}  {row['best']:.6f}  {row['charged']}  {row['basins']}"
             )
         if rows:
-            distinct = len({round(row["best"], 5) for row in rows})
+            finite = [row for row in rows if row["best"] == row["best"] and abs(row["best"]) != float("inf")]
+            distinct = len({round(row["best"], 5) for row in finite})
             median_basins = statistics.median(row["basins"] for row in rows)
-            print(f"{m}  distinct_bests {distinct}  median_basins {median_basins:.1f}")
+            print(
+                f"{m}  distinct_finite_bests {distinct}  "
+                f"finite {len(finite)}/{len(rows)}  median_basins {median_basins:.1f}"
+            )
 
     print()
     print("=== two-phase vs plain ===")
@@ -94,17 +100,35 @@ def main() -> int:
             directory = out / name
             if directory.is_dir():
                 parsed[arm], _ = parse_arm(directory)
-        all_bests = [row["best"] for rows in parsed.values() for row in rows]
+        all_bests = [
+            row["best"]
+            for rows in parsed.values()
+            for row in rows
+            if row["best"] == row["best"] and abs(row["best"]) != float("inf")
+        ]
         if not all_bests:
             continue
         global_best = min(all_bests)
         for arm in arms:
             rows = parsed.get(arm, [])
-            hits = [row for row in rows if abs(row["best"] - global_best) <= 1e-3]
+            hits = [
+                row
+                for row in rows
+                if row["best"] == row["best"]
+                and abs(row["best"]) != float("inf")
+                and abs(row["best"] - global_best) <= 1e-3
+            ]
             charges = [row["charged_to_best"] or row["charged"] for row in hits]
             median = statistics.median(charges) if charges else float("nan")
-            arm_best = min((row["best"] for row in rows), default=float("nan"))
-            print(f"{m}  {arm:12}  {len(hits)}/{len(rows)}  {median}  {arm_best:.6f}")
+            finite_bests = [
+                row["best"]
+                for row in rows
+                if row["best"] == row["best"] and abs(row["best"]) != float("inf")
+            ]
+            arm_best = min(finite_bests) if finite_bests else float("nan")
+            print(
+                f"{m}  {arm:12}  {len(hits)}/{len(rows)}  {median}  {arm_best:.6f}"
+            )
         print(f"{m}  global_best {global_best:.6f}")
 
     print()
@@ -115,9 +139,17 @@ def main() -> int:
     for row in rows:
         print(f"{row['seed']}  {row['best']:.6f}  {row['charged']}  {row['basins']}")
     if rows:
-        distinct = len({round(row["best"], 5) for row in rows})
+        finite = [
+            row
+            for row in rows
+            if row["best"] == row["best"] and abs(row["best"]) != float("inf")
+        ]
+        distinct = len({round(row["best"], 5) for row in finite})
         median_basins = statistics.median(row["basins"] for row in rows)
-        print(f"distinct_bests {distinct}  median_basins {median_basins:.1f}")
+        print(
+            f"distinct_finite_bests {distinct}  finite {len(finite)}/{len(rows)}  "
+            f"median_basins {median_basins:.1f}"
+        )
     return 0
 
 
