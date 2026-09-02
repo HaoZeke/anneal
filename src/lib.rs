@@ -71,6 +71,8 @@ pub mod catalog_policy;
 /// Versioned cooperative catalog protocol.
 #[cfg(feature = "bank-rpc")]
 pub mod catalog_rpc;
+/// Successive-halving population control for a live coordinator roster.
+pub mod scaling;
 /// Versioned objective bridge compatibility descriptors.
 pub mod compatibility;
 /// Collective variables from the spectrum of the visited-basin graph.
