@@ -446,6 +446,7 @@ impl RideLedger {
         }
 
         let total = self.completed_attempts;
+        let total_charged = self.charged_evaluations;
         let selected = self
             .arms()
             .filter(|(arm, _)| !self.active_arms.contains(arm))
@@ -457,8 +458,8 @@ impl RideLedger {
                             .total_cmp(&self.mode_acquisition(right, total))
                     })
                     .then_with(|| {
-                        self.acquisition(left, total)
-                            .total_cmp(&self.acquisition(right, total))
+                        self.acquisition(left, total_charged)
+                            .total_cmp(&self.acquisition(right, total_charged))
                     })
                     .then_with(|| {
                         self.source_energy(right.source_basin)
@@ -675,9 +676,14 @@ impl RideLedger {
         }
     }
 
-    fn acquisition(&self, arm: &RideArm, total: u64) -> f64 {
+    fn acquisition(&self, arm: &RideArm, total_charged: u64) -> f64 {
         let method_reliability = match self.method_evidence.get(&arm.method) {
-            Some(row) => upper_probability(row.stationary_saddles, row.completed, total),
+            Some(row) => upper_discovery_rate(
+                row.stationary_saddles,
+                row.charged_evaluations,
+                row.completed,
+                total_charged,
+            ),
             None if !self
                 .active_arms
                 .iter()
@@ -749,6 +755,20 @@ fn upper_probability(successes: u64, trials: u64, total: u64) -> f64 {
     let posterior_mean = (successes as f64 + 0.5) / (trials + 1.0);
     let confidence_radius = (((total as f64) + 2.0).ln() / (2.0 * (trials + 1.0))).sqrt();
     (posterior_mean + confidence_radius).min(1.0)
+}
+
+fn upper_discovery_rate(
+    discoveries: u64,
+    charged_evaluations: u64,
+    attempts: u64,
+    total_charged: u64,
+) -> f64 {
+    let shape = discoveries as f64 + 0.5;
+    let exposure = charged_evaluations.saturating_add(attempts).max(1) as f64;
+    let total_exposure = total_charged.max(charged_evaluations).saturating_add(2) as f64;
+    let posterior_mean = shape / exposure;
+    let confidence_radius = (2.0 * shape * total_exposure.ln()).sqrt() / exposure;
+    posterior_mean + confidence_radius
 }
 
 fn record_evidence(
