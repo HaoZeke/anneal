@@ -102,3 +102,82 @@ fn action_models_bound_kernel_rank_without_losing_observation_counts() {
     assert!((0.0..=1.0).contains(&compression.residual_fraction));
     assert!(compression.rank_limited);
 }
+
+#[test]
+fn batch_assignment_discounts_correlated_chain_actions() {
+    let mut search = MinimumInformationSearch::new(1.0, 4.0, 1e-3).unwrap();
+    let actions = [
+        SearchActionCandidate {
+            mechanism: SearchMechanism::BasinEscape,
+            feature: vec![0.0, 0.0],
+            source_energy: -10.0,
+            expected_charged_evaluations: 20.0,
+        },
+        SearchActionCandidate {
+            mechanism: SearchMechanism::BasinEscape,
+            feature: vec![1e-6, 0.0],
+            source_energy: -10.0,
+            expected_charged_evaluations: 20.0,
+        },
+        SearchActionCandidate {
+            mechanism: SearchMechanism::BasinEscape,
+            feature: vec![4.0, 0.0],
+            source_energy: -10.0,
+            expected_charged_evaluations: 20.0,
+        },
+    ];
+
+    let selected = search
+        .assign_batch(&actions, &[0, 1, 2], 2, 1, 256)
+        .unwrap();
+
+    assert_eq!(selected, vec![0, 2]);
+}
+
+#[test]
+fn batch_assignment_maximizes_marginal_information_per_cost() {
+    let mut search = MinimumInformationSearch::new(1.0, 4.0, 1e-3).unwrap();
+    let actions = [
+        SearchActionCandidate {
+            mechanism: SearchMechanism::BasinEscape,
+            feature: vec![0.0, 0.0],
+            source_energy: -10.0,
+            expected_charged_evaluations: 80.0,
+        },
+        SearchActionCandidate {
+            mechanism: SearchMechanism::BasinEscape,
+            feature: vec![4.0, 0.0],
+            source_energy: -10.0,
+            expected_charged_evaluations: 20.0,
+        },
+    ];
+
+    let selected = search.assign_batch(&actions, &[0, 1], 1, 1, 256).unwrap();
+
+    assert_eq!(selected, vec![1]);
+}
+
+#[test]
+fn batch_assignment_fills_the_population_without_exceeding_family_capacity() {
+    let mut search = MinimumInformationSearch::new(1.0, 4.0, 1e-3).unwrap();
+    let actions = [
+        SearchActionCandidate {
+            mechanism: SearchMechanism::BasinEscape,
+            feature: vec![0.0, 0.0],
+            source_energy: -10.0,
+            expected_charged_evaluations: 20.0,
+        },
+        SearchActionCandidate {
+            mechanism: SearchMechanism::BasinEscape,
+            feature: vec![4.0, 0.0],
+            source_energy: -10.0,
+            expected_charged_evaluations: 20.0,
+        },
+    ];
+
+    let selected = search.assign_batch(&actions, &[7, 11], 4, 2, 256).unwrap();
+
+    assert_eq!(selected.len(), 4);
+    assert_eq!(selected.iter().filter(|&&index| index == 0).count(), 2);
+    assert_eq!(selected.iter().filter(|&&index| index == 1).count(), 2);
+}
