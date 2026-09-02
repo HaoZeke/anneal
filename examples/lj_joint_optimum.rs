@@ -812,8 +812,20 @@ fn main() -> Result<(), Box<dyn Error>> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Arm, optbench_start_path, parse_plain_coordinates, selected_arms};
+    use super::{
+        Arm, ExactStructureWitness, PairPotential, optbench_start_path, parse_plain_coordinates,
+        run_minima_hopping, selected_arms,
+    };
+    use ndarray::{Array1, ArrayView1};
     use std::path::Path;
+
+    struct DistinctWitness;
+
+    impl ExactStructureWitness for DistinctWitness {
+        fn equivalent(&self, _left: ArrayView1<f64>, _right: ArrayView1<f64>) -> bool {
+            false
+        }
+    }
 
     #[test]
     fn optbench_paths_follow_each_published_archive_layout() {
@@ -858,5 +870,18 @@ mod tests {
 
         assert!(matches!(arms.as_slice(), [Arm::MinimaHoppingSoftened]));
         assert_eq!(arms[0].label(), "minima-hopping-softened");
+    }
+
+    #[test]
+    fn exhausted_initial_quench_cannot_report_zero_as_a_minimum() {
+        let potential = PairPotential::lennard_jones(2);
+        let initial = Array1::from(vec![0.0, 0.0, 0.0, 1.2, 0.0, 0.0]);
+
+        let outcome =
+            run_minima_hopping(&potential, initial.view(), 2, 0, 7, &DistinctWitness, false);
+
+        assert_eq!(outcome.best, f64::INFINITY);
+        assert!(outcome.best_state.is_none());
+        assert_eq!(outcome.charged, 0);
     }
 }
