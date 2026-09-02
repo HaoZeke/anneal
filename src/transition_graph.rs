@@ -41,6 +41,44 @@ pub enum TransitionGraphError {
     ZeroMinimumProbes,
 }
 
+/// Posterior squared-error risk for one categorical transition row.
+///
+/// If the row probabilities have a Dirichlet posterior with total
+/// concentration `A`, `covariance_trace` is the Bayes risk of the posterior
+/// mean under squared Euclidean loss. Predictive observations reduce that
+/// risk without an empirical acquisition coefficient.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct DirichletInformation {
+    total_concentration: f64,
+    covariance_trace: f64,
+}
+
+impl DirichletInformation {
+    /// Sum of the posterior Dirichlet parameters.
+    pub fn total_concentration(self) -> f64 {
+        self.total_concentration
+    }
+
+    /// Trace of the posterior covariance matrix.
+    pub fn covariance_trace(self) -> f64 {
+        self.covariance_trace
+    }
+
+    /// Expected covariance trace after `additional_observations` draws.
+    pub fn expected_covariance_trace(self, additional_observations: usize) -> f64 {
+        let additional = additional_observations as f64;
+        self.covariance_trace * self.total_concentration / (self.total_concentration + additional)
+    }
+
+    /// Expected reduction in covariance trace from the next allocated draw.
+    pub fn marginal_risk_reduction(self, observations_already_allocated: usize) -> f64 {
+        let allocated = observations_already_allocated as f64;
+        self.covariance_trace * self.total_concentration
+            / ((self.total_concentration + allocated)
+                * (self.total_concentration + allocated + 1.0))
+    }
+}
+
 /// Target-blind coarse-graining parameters for attraction regions.
 #[derive(Debug, Clone, PartialEq)]
 pub struct AttractionRegionConfig {
@@ -198,6 +236,44 @@ impl TransitionGraph {
         }
         let categories = self.nodes.saturating_add(1) as f64;
         Some(1.0 / (self.observations(action, from) as f64 + concentration * categories))
+    }
+
+    /// Dirichlet Bayes risk and predictive value of information for one row.
+    ///
+    /// The outcome space contains every resolved node plus the unresolved
+    /// outcome. Returns `None` when `from` is not a registered node.
+    pub fn dirichlet_information(
+        &self,
+        action: &str,
+        from: usize,
+        concentration: f64,
+    ) -> Result<Option<DirichletInformation>, TransitionGraphError> {
+        if !concentration.is_finite() || concentration <= 0.0 {
+            return Err(TransitionGraphError::InvalidConcentration);
+        }
+        if from >= self.nodes {
+            return Ok(None);
+        }
+        let categories = self.nodes.saturating_add(1);
+        let mut total_concentration = 0.0;
+        let mut squared_concentration = 0.0;
+        for to in 0..self.nodes {
+            let alpha =
+                self.count(action, from, TransitionOutcome::Resolved(to)) as f64 + concentration;
+            total_concentration += alpha;
+            squared_concentration += alpha * alpha;
+        }
+        let unresolved =
+            self.count(action, from, TransitionOutcome::Unresolved) as f64 + concentration;
+        total_concentration += unresolved;
+        squared_concentration += unresolved * unresolved;
+        debug_assert_eq!(categories, self.nodes + 1);
+        let squared_mean = squared_concentration / (total_concentration * total_concentration);
+        let covariance_trace = ((1.0 - squared_mean) / (total_concentration + 1.0)).max(0.0);
+        Ok(Some(DirichletInformation {
+            total_concentration,
+            covariance_trace,
+        }))
     }
 
     /// Deterministic complete-linkage attraction regions from fixed-probe dynamics.
