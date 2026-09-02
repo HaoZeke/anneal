@@ -1072,7 +1072,7 @@ fn candidate_needing_validation(operation: &CatalogOperation) -> Option<&Catalog
 
 fn process_request(
     config: &ServerConfig,
-    mut state: &mut CoordinatorState,
+    state: &mut CoordinatorState,
     request: CatalogRequest,
     precomputed: Option<Result<ValidatedCandidate, ()>>,
 ) -> Result<CatalogReply, String> {
