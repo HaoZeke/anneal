@@ -271,6 +271,8 @@ pub enum RideOutcome {
 pub struct RideCredit {
     /// Whether receiving-side certification accepted a physical connection.
     pub certified_connection: bool,
+    /// Whether both branches are distinct representatives of one exact basin.
+    pub degenerate_rearrangement: bool,
     /// Typed negative evidence, absent for a certified connection.
     pub failure: Option<RideFailure>,
     /// Whether this report introduced a previously unseen exact saddle.
@@ -342,9 +344,6 @@ pub enum RideLedgerError {
     /// A repeated delivery must carry the same scientific result and cost.
     #[error("ride work order {0} was reported with conflicting content")]
     ConflictingReport(u64),
-    /// Certified IRC endpoints must be distinct.
-    #[error("certified ride endpoints collapse to one basin")]
-    CollapsedCertifiedConnection,
     /// A monotonic counter cannot be represented.
     #[error("ride-ledger counter overflow")]
     CounterOverflow,
@@ -387,6 +386,7 @@ pub struct RideLedger {
     replica_work: BTreeMap<u32, u64>,
     completed_reports: BTreeMap<u64, CompletedReport>,
     saddle_visits: BTreeMap<u64, u64>,
+    degenerate_saddles: BTreeSet<u64>,
     edges: BTreeSet<[u64; 2]>,
     next_work: u64,
     completed_attempts: u64,
@@ -409,6 +409,7 @@ impl RideLedger {
             replica_work: BTreeMap::new(),
             completed_reports: BTreeMap::new(),
             saddle_visits: BTreeMap::new(),
+            degenerate_saddles: BTreeSet::new(),
             edges: BTreeSet::new(),
             next_work: 0,
             completed_attempts: 0,
@@ -555,18 +556,21 @@ impl RideLedger {
         };
         let stationary_saddle = saddle.is_some();
         let certified_connection = failure.is_none();
+        let degenerate_rearrangement = matches!(
+            &outcome,
+            RideOutcome::Certified { endpoints, .. } if endpoints[0] == endpoints[1]
+        );
         let canonical_edge = match &outcome {
-            RideOutcome::Certified { endpoints, .. } => {
-                if endpoints[0] == endpoints[1] {
-                    return Err(RideLedgerError::CollapsedCertifiedConnection);
-                }
+            RideOutcome::Certified { endpoints, .. } if endpoints[0] != endpoints[1] => {
                 Some(if endpoints[0] < endpoints[1] {
                     *endpoints
                 } else {
                     [endpoints[1], endpoints[0]]
                 })
             }
-            RideOutcome::Unresolved { .. } | RideOutcome::Failed(_) => None,
+            RideOutcome::Certified { .. }
+            | RideOutcome::Unresolved { .. }
+            | RideOutcome::Failed(_) => None,
         };
 
         let order = self
@@ -586,6 +590,9 @@ impl RideLedger {
         } else {
             false
         };
+        if degenerate_rearrangement && let Some(saddle) = saddle {
+            self.degenerate_saddles.insert(saddle);
+        }
         let novel_edge = canonical_edge.is_some_and(|edge| self.edges.insert(edge));
         record_evidence(
             self.evidence.entry(order.arm.clone()).or_default(),
@@ -643,6 +650,7 @@ impl RideLedger {
             .ok_or(RideLedgerError::CounterOverflow)?;
         let credit = RideCredit {
             certified_connection,
+            degenerate_rearrangement,
             failure,
             novel_saddle,
             novel_edge,
@@ -681,6 +689,11 @@ impl RideLedger {
     /// Number of unique exact endpoint pairs.
     pub fn unique_edges(&self) -> usize {
         self.edges.len()
+    }
+
+    /// Number of exact saddles returning to a symmetry-equivalent basin.
+    pub fn unique_degenerate_rearrangements(&self) -> usize {
+        self.degenerate_saddles.len()
     }
 
     /// Number of unique exact index-one saddles.
