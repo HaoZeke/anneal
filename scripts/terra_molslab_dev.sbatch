@@ -22,8 +22,14 @@ export CARGO_BUILD_JOBS=${SLURM_CPUS_PER_TASK:-8}
 export LD_LIBRARY_PATH="${IRA_LIB_DIR}:${LD_LIBRARY_PATH:-}"
 echo "=== cargo test --features rgpot-ex,ira --lib ==="
 cargo test --features rgpot-ex,ira --lib
-echo "=== cargo clippy -D warnings (touched) ==="
+echo "=== cargo clippy -D warnings (lib) ==="
 cargo clippy --features rgpot-ex,ira --lib -- -D warnings
+echo "=== cargo clippy -D warnings (examples) ==="
+cargo clippy --features rgpot-ex,ira,featomic,bank-rpc \
+  --example molecular_cluster \
+  --example slab_adsorption \
+  --example water_ride_search \
+  -- -D warnings
 echo "=== cargo fmt --check ==="
 cargo fmt --check -- \
   src/methods/two_phase.rs \
