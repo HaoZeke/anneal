@@ -175,8 +175,47 @@ mod option_tests {
         use anneal_core::discovery_roster::DiscoveryRole;
 
         assert!(!discovery_role_allows_ride(None));
-        assert!(!discovery_role_allows_ride(Some(DiscoveryRole::BasinEscape)));
+        assert!(!discovery_role_allows_ride(Some(
+            DiscoveryRole::BasinEscape
+        )));
         assert!(discovery_role_allows_ride(Some(DiscoveryRole::SaddleRide)));
+    }
+
+    #[cfg(feature = "bank-rpc")]
+    #[test]
+    fn committed_seam_anchor_is_applied_once_per_snapshot() {
+        use anneal_core::raft::wire::ReplicaAssignment;
+
+        let assignment = ReplicaAssignment {
+            replica: 2,
+            right_side: true,
+            histogram_classes: Vec::new(),
+            histogram_masses: Vec::new(),
+            anchor_basin: 29,
+            bridge_duty: false,
+            decree_index: 11,
+        };
+
+        assert_eq!(
+            decree_anchor_action(None, Some(&assignment), Some(7)),
+            DecreeAnchorAction::Fetch {
+                snapshot: 11,
+                basin: 29,
+            }
+        );
+        assert_eq!(
+            decree_anchor_action(None, Some(&assignment), Some(29)),
+            DecreeAnchorAction::MarkApplied { snapshot: 11 }
+        );
+        assert_eq!(
+            decree_anchor_action(Some(11), Some(&assignment), Some(7)),
+            DecreeAnchorAction::Ignore
+        );
+        assert_eq!(
+            decree_anchor_action(Some(12), Some(&assignment), Some(7)),
+            DecreeAnchorAction::Ignore,
+            "a delayed committed decree cannot roll a chain back"
+        );
     }
 
     #[cfg(feature = "bank-rpc")]
