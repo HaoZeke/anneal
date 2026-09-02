@@ -20,6 +20,15 @@ pub enum DiscoveryRole {
     SaddleRide,
 }
 
+/// Replay-safe completed work for one discovery mechanism.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct DiscoveryEffort {
+    /// Completed mechanism attempts.
+    pub observations: u64,
+    /// Potential calls charged to those attempts.
+    pub charged_calls: u64,
+}
+
 /// Global coverage evidence used to divide one system's replicas.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct DiscoveryCoverage {
@@ -27,8 +36,39 @@ pub struct DiscoveryCoverage {
     pub basin_unseen_mass_upper: f64,
     /// One-sided upper bound on unseen exact-saddle probability.
     pub saddle_unseen_mass_upper: f64,
+    /// Basin-escape work observed by this system coordinator.
+    pub basin_effort: DiscoveryEffort,
+    /// Saddle-ride work observed by this system coordinator.
+    pub saddle_effort: DiscoveryEffort,
     /// Whether the coordinator has a source/mode arm that is not claimed.
     pub ride_available: bool,
+}
+
+fn regularized_costs(basin: DiscoveryEffort, saddle: DiscoveryEffort) -> [f64; 2] {
+    let total_observations = basin.observations.saturating_add(saddle.observations);
+    let total_calls = basin.charged_calls.saturating_add(saddle.charged_calls);
+    let pooled_cost = if total_observations == 0 || total_calls == 0 {
+        1.0
+    } else {
+        total_calls as f64 / total_observations as f64
+    };
+    [basin, saddle].map(|effort| {
+        (effort.charged_calls as f64 + pooled_cost) / (effort.observations as f64 + 1.0)
+    })
+}
+
+fn discovery_utilities(coverage: DiscoveryCoverage) -> [f64; 2] {
+    let costs = regularized_costs(coverage.basin_effort, coverage.saddle_effort);
+    let raw = [
+        coverage.basin_unseen_mass_upper / costs[0],
+        coverage.saddle_unseen_mass_upper / costs[1],
+    ];
+    let scale = raw[0].max(raw[1]);
+    if scale <= 0.0 {
+        [1.0, 1.0]
+    } else {
+        [raw[0] / scale, raw[1] / scale]
+    }
 }
 
 /// One replica's deterministic role inside a coverage epoch.
@@ -104,12 +144,9 @@ pub fn assign_discovery_roles(
     }
     let mut members = unique.into_iter().collect::<Vec<_>>();
     let count = members.len();
-    let basin_weight = coverage
-        .basin_unseen_mass_upper
-        .clamp(MINIMUM_ROLE_WEIGHT, 1.0);
-    let saddle_weight = coverage
-        .saddle_unseen_mass_upper
-        .clamp(MINIMUM_ROLE_WEIGHT, 1.0);
+    let utilities = discovery_utilities(coverage);
+    let basin_weight = utilities[0].clamp(MINIMUM_ROLE_WEIGHT, 1.0);
+    let saddle_weight = utilities[1].clamp(MINIMUM_ROLE_WEIGHT, 1.0);
 
     let basin_seats = if !coverage.ride_available {
         count

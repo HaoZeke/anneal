@@ -41,7 +41,7 @@ use crate::catalog_policy::proposal::farthest_hole;
 use crate::cooperative_search::ledger::{ChargeKind, CooperativeLedger, ReplicaLedgerEvent};
 use crate::descriptor_space::{DescriptorSpace, UNIVERSAL_LOCAL_ENVIRONMENT_RADIUS};
 use crate::discovery_roster::{
-    DiscoveryCoverage, assign_discovery_roles, coverage_allocation_weight,
+    DiscoveryCoverage, DiscoveryEffort, assign_discovery_roles, coverage_allocation_weight,
 };
 use crate::methods::feynman_kac::{
     EpochSubmissionOutcome, PackingOccupant, PopulationEpochPlan, PopulationMember,
@@ -1214,11 +1214,21 @@ fn apply_request(
                 .census
                 .total_visits()
                 .saturating_add(scientific.ride_ledger.completed_attempts());
+            let basin_effort = scientific.ledger.charge_summary(ChargeKind::BasinEscape);
+            let saddle_effort = scientific.ledger.charge_summary(ChargeKind::SaddleRide);
             let discovery_role = assign_discovery_roles(
                 &scientific.discovery_replicas,
                 DiscoveryCoverage {
                     basin_unseen_mass_upper,
                     saddle_unseen_mass_upper,
+                    basin_effort: DiscoveryEffort {
+                        observations: basin_effort.events,
+                        charged_calls: basin_effort.charged_calls,
+                    },
+                    saddle_effort: DiscoveryEffort {
+                        observations: saddle_effort.events,
+                        charged_calls: saddle_effort.charged_calls,
+                    },
                     ride_available: scientific.ride_ledger.has_claimable_work(),
                 },
                 discovery_epoch,

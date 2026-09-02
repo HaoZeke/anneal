@@ -536,7 +536,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 &mut event_sequence,
                 &mut charged,
                 budget,
-                ChargeKind::AuxiliaryEvaluation,
+                ChargeKind::SaddleRide,
                 producer_calls,
             )?;
             record_charge(
@@ -629,7 +629,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     &mut event_sequence,
                     &mut charged,
                     budget,
-                    ChargeKind::RejectedQuench,
+                    ChargeKind::BasinEscape,
                     failure.charged_evaluations,
                 )?;
                 mechanism_allocator.update(SOURCE_ESCAPE_ARM, 0, failure.charged_evaluations);
@@ -698,7 +698,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     &mut event_sequence,
                     &mut charged,
                     budget,
-                    ChargeKind::AcceptedQuench,
+                    ChargeKind::BasinEscape,
                     producer_calls,
                 )?;
                 record_charge(
