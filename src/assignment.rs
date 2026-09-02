@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MIT
+// Portions Copyright (c) 2022 Theochem @ Háskóli Íslands
+
 //! Dense minimum-cost bipartite assignment.
 //!
 //! The numerical scheme follows the Kuhn--Munkres implementation used by
