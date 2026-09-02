@@ -11,21 +11,22 @@
 use std::collections::HashSet;
 
 use ndarray::{Array1, ArrayView1};
-use rand::{rngs::StdRng, SeedableRng};
+use rand::{SeedableRng, rngs::StdRng};
 
 use crate::curvature::{project_rigid_with, rigid_basis};
 use crate::descriptor_space::{DescriptorError, DescriptorGeometry, DescriptorSpace};
+use crate::methods::cluster_search::Encounter;
 use crate::minimum_information::{
     MinimumInformationError, MinimumInformationSearch, SearchActionCandidate, SearchMechanism,
 };
 use crate::movekernel::{Gaussian, MoveKernel};
 use crate::nd_hybrid::{ActionFeatureError, ActionFeatureMap, DescriptorActionFeatures};
 use crate::pes_exploration::{
-    discover_cartesian_mode_connection_in_context_with_budget, localized_cartesian_mode,
     ExactStructureWitness, PesExplorationConfig, PesExplorationError, PesNetwork, PesSurface,
-    RideModeDirection, StructureContext,
+    RideModeDirection, StructureContext, discover_cartesian_mode_connection_in_context_with_budget,
+    localized_cartesian_mode,
 };
-use crate::source_escape::{quench_source_escape, SourceEscapeConfig, SourceEscapeOutcome};
+use crate::source_escape::{SourceEscapeConfig, SourceEscapeOutcome, quench_source_escape};
 
 /// Chemical and mechanical identity of one atomistic PES invocation.
 #[derive(Debug, Clone, PartialEq)]
@@ -164,6 +165,59 @@ pub struct AtomisticHybridReport {
     pub expected_mechanism_costs: [f64; 2],
     /// Terminal budget condition.
     pub termination: AtomisticHybridTermination,
+}
+
+impl AtomisticHybridReport {
+    /// Lowest force-certified minimum retained by this same-PES invocation.
+    pub fn best_energy(&self) -> Option<f64> {
+        self.network
+            .minima()
+            .iter()
+            .map(|minimum| minimum.energy)
+            .min_by(f64::total_cmp)
+    }
+
+    /// Charged work at the first encounter with a target energy.
+    ///
+    /// A missing encounter remains censored at the campaign's actual charged
+    /// count, so fixed-budget failures participate in Kaplan--Meier summaries.
+    pub fn first_encounter(&self, target: f64, tolerance: f64) -> Encounter {
+        let total_charged = usize::try_from(self.charged_evaluations).unwrap_or(usize::MAX);
+        if !target.is_finite() || !tolerance.is_finite() || tolerance < 0.0 {
+            return Encounter::Censored {
+                charged: total_charged,
+            };
+        }
+        let action_charged = self
+            .events
+            .iter()
+            .map(|event| event.charged_evaluations)
+            .fold(0u64, u64::saturating_add);
+        let mut charged = self.charged_evaluations.saturating_sub(action_charged);
+        if self
+            .network
+            .minima()
+            .first()
+            .is_some_and(|minimum| minimum.energy < target + tolerance)
+        {
+            return Encounter::Found {
+                charged: usize::try_from(charged).unwrap_or(usize::MAX),
+                hops: 0,
+            };
+        }
+        for (hop, event) in self.events.iter().enumerate() {
+            charged = charged.saturating_add(event.charged_evaluations);
+            if event.terminal_energy < target + tolerance {
+                return Encounter::Found {
+                    charged: usize::try_from(charged).unwrap_or(usize::MAX),
+                    hops: hop + 1,
+                };
+            }
+        }
+        Encounter::Censored {
+            charged: total_charged,
+        }
+    }
 }
 
 /// Invalid system, action model, or initial-source failure.
