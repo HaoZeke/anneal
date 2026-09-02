@@ -10,20 +10,21 @@
 //! read back is the one written.
 
 use std::collections::BTreeMap;
-use std::collections::hash_map::DefaultHasher;
-use std::hash::{Hash, Hasher};
+use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
 
+use crate::catalog::SignatureDigest;
 use ndarray::ArrayView1;
 use readcon_core::helpers::atomic_number_to_symbol;
 use readcon_core::types::{ConFrameBuilder, meta};
 use readcon_db::{ConCorpus, FrameKey};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 
 const METADATA_KEY: &str = "anneal_minima";
 const SCHEMA: &str = "anneal-minima";
-const VERSION: u32 = 1;
+const VERSION: u32 = 2;
 /// A box large enough that no cluster used here touches it; the frames are
 /// nonperiodic and the box is a format requirement, not a cell.
 const OPEN_BOX: f64 = 500.0;
@@ -41,10 +42,21 @@ pub struct MinimaSet {
 
 impl MinimaSet {
     /// The trajectory this set writes to.
-    pub fn trajectory_id(&self) -> u64 {
-        let mut hasher = DefaultHasher::new();
-        (SCHEMA, &self.system, self.temperature.to_bits(), self.seed).hash(&mut hasher);
-        hasher.finish()
+    pub fn trajectory_id(&self, signature_digest: SignatureDigest) -> u64 {
+        let mut hasher = Sha256::new();
+        hasher.update(SCHEMA.as_bytes());
+        hasher.update([0]);
+        hasher.update(signature_digest);
+        hasher.update((self.system.len() as u64).to_be_bytes());
+        hasher.update(self.system.as_bytes());
+        hasher.update(self.temperature.to_bits().to_be_bytes());
+        hasher.update(self.seed.to_be_bytes());
+        let digest = hasher.finalize();
+        u64::from_be_bytes(
+            digest[..8]
+                .try_into()
+                .expect("SHA-256 contains eight bytes"),
+        )
     }
 }
 
@@ -61,6 +73,7 @@ pub struct MinimaUnits {
 struct Envelope {
     schema: String,
     version: u32,
+    signature_digest: SignatureDigest,
     set: MinimaSet,
     units: MinimaUnits,
     energy_bits: u64,
@@ -97,6 +110,7 @@ pub enum MinimaDbError {
 pub struct MinimaCorpus {
     corpus: Arc<ConCorpus>,
     path: PathBuf,
+    signature_digest: SignatureDigest,
 }
 
 /// One open environment per path per process: the store refuses a second
@@ -108,10 +122,14 @@ fn registry() -> &'static Mutex<BTreeMap<PathBuf, Arc<ConCorpus>>> {
 }
 
 impl MinimaCorpus {
-    /// Open or create the corpus at `path`; a second open of the same path in
-    /// one process shares the first environment.
-    pub fn open(path: impl AsRef<Path>) -> Result<Self, MinimaDbError> {
-        let path = path.as_ref().to_path_buf();
+    /// Open or create the corpus below `root`, in the directory named by the
+    /// canonical system-signature digest. A second open of that exact system
+    /// in one process shares the first environment.
+    pub fn open(
+        root: impl AsRef<Path>,
+        signature_digest: SignatureDigest,
+    ) -> Result<Self, MinimaDbError> {
+        let path = root.as_ref().join(digest_directory(signature_digest));
         let canonical = std::fs::canonicalize(&path).unwrap_or_else(|_| path.clone());
         let mut open = registry().lock().expect("minima corpus registry");
         let corpus = match open.get(&canonical) {
@@ -123,12 +141,21 @@ impl MinimaCorpus {
                 shared
             }
         };
-        Ok(Self { corpus, path })
+        Ok(Self {
+            corpus,
+            path,
+            signature_digest,
+        })
     }
 
     /// Where the corpus lives.
     pub fn path(&self) -> &Path {
         &self.path
+    }
+
+    /// Canonical PES identity bound to this corpus environment.
+    pub fn signature_digest(&self) -> SignatureDigest {
+        self.signature_digest
     }
 
     /// Append the distinct minima of one run.
@@ -180,6 +207,7 @@ impl MinimaCorpus {
             let envelope = Envelope {
                 schema: SCHEMA.into(),
                 version: VERSION,
+                signature_digest: self.signature_digest,
                 set: set.clone(),
                 units: units.clone(),
                 energy_bits: energy.to_bits(),
@@ -220,7 +248,7 @@ impl MinimaCorpus {
         }
         let source = serde_json::to_string(set)?;
         let appended = self.corpus.extend_trajectory_frames(
-            set.trajectory_id(),
+            set.trajectory_id(self.signature_digest),
             &frames,
             format!("{SCHEMA} {source}"),
         )?;
@@ -274,7 +302,10 @@ impl MinimaCorpus {
             return Ok(None);
         };
         let envelope: Envelope = serde_json::from_value(value.clone())?;
-        if envelope.schema != SCHEMA {
+        if envelope.schema != SCHEMA
+            || envelope.version != VERSION
+            || envelope.signature_digest != self.signature_digest
+        {
             return Ok(None);
         }
         Ok(Some(StoredMinimum {
@@ -287,4 +318,12 @@ impl MinimaCorpus {
                 .collect(),
         }))
     }
+}
+
+fn digest_directory(digest: SignatureDigest) -> String {
+    let mut encoded = String::with_capacity(2 * digest.len());
+    for byte in digest {
+        write!(&mut encoded, "{byte:02x}").expect("writing to a String cannot fail");
+    }
+    encoded
 }
