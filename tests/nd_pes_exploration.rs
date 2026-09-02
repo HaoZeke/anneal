@@ -197,6 +197,22 @@ fn generic_nd_ride_preserves_a_permutation_certified_self_loop() {
     assert_eq!(network.minimum_count(), 1);
     assert_eq!(network.saddle_count(), 1);
     assert_eq!(connection.negative_modes, 1);
+    assert_eq!(network.saddle_observations(), 1);
+    assert_eq!(network.saddle_singletons(), 1);
+
+    discover_nd_connection(
+        &PermutationDoubleWell,
+        &mut network,
+        Array1::from_vec(vec![-scale, scale]).view(),
+        Array1::from_vec(vec![scale, -scale]).view(),
+        &config,
+        &SwapWitness,
+    )
+    .unwrap();
+
+    assert_eq!(network.saddle_count(), 1);
+    assert_eq!(network.saddle_observations(), 2);
+    assert_eq!(network.saddle_singletons(), 0);
 }
 
 #[test]
