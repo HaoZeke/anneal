@@ -197,10 +197,8 @@ pub struct SurfacePortfolio {
     hops_in_block: usize,
     block_start_best: f64,
     latest_best: f64,
-    /// Sum of the depth each full relaxation of the block reached against
-    /// the run's best at that moment, and how many contributed.
-    block_depth: f64,
-    block_relaxations: usize,
+    /// Lowest plain energy any full relaxation of the block reached.
+    block_lowest: f64,
     rng: StdRng,
 }
 
@@ -226,8 +224,7 @@ impl SurfacePortfolio {
             hops_in_block: 0,
             block_start_best: f64::INFINITY,
             latest_best: f64::INFINITY,
-            block_depth: 0.0,
-            block_relaxations: 0,
+            block_lowest: f64::INFINITY,
             rng: StdRng::seed_from_u64(seed ^ 0x5a2f_ace5),
         }
     }
@@ -290,13 +287,8 @@ impl SurfacePortfolio {
         if screening {
             return;
         }
-        if reached.is_finite() && best.is_finite() {
-            // The depth reward the move allocator uses, per relaxation: how
-            // close this quench came to the best the run knows. Dense, so a
-            // block on a size where nothing improves still says which
-            // surface lands deeper.
-            self.block_depth += -(reached - best.min(reached));
-            self.block_relaxations += 1;
+        if reached.is_finite() {
+            self.block_lowest = self.block_lowest.min(reached);
         }
         let best = best.min(reached);
         if best.is_finite() {
@@ -306,24 +298,22 @@ impl SurfacePortfolio {
 
     fn settle_block(&mut self) {
         if let Some(arm) = self.held.take() {
-            let improvement = if self.block_start_best.is_finite() && self.latest_best.is_finite()
-            {
-                (self.block_start_best - self.latest_best).max(0.0)
+            // The signed gap between the run's best when the block opened
+            // and the lowest structure the block relaxed to: positive by the
+            // improvement when the block beat it, negative by the shortfall
+            // when it did not. Dense, because every block relaxes to
+            // something, and it favours the surface whose blocks reach the
+            // deepest structures rather than the one whose typical hop lands
+            // nearest the incumbent. The first block has no incumbent to
+            // measure against and is neutral.
+            let reward = if self.block_start_best.is_finite() && self.block_lowest.is_finite() {
+                self.block_start_best - self.block_lowest
             } else {
                 0.0
             };
-            let mean_depth = if self.block_relaxations > 0 {
-                self.block_depth / self.block_relaxations as f64
-            } else {
-                0.0
-            };
-            // Improvement is the event that matters and the mean depth is
-            // the dense signal between events; both are energies of the
-            // plain surface, so they add.
-            self.credit_arm(arm, improvement + mean_depth);
+            self.credit_arm(arm, reward);
         }
-        self.block_depth = 0.0;
-        self.block_relaxations = 0;
+        self.block_lowest = f64::INFINITY;
         self.hops_in_block = 0;
     }
 
@@ -462,24 +452,23 @@ mod tests {
     }
 
     #[test]
-    fn a_block_without_improvement_is_credited_by_its_depth() {
+    fn a_block_short_of_the_best_is_credited_by_its_shortfall() {
         let mut portfolio = SurfacePortfolio::with_block(&[TwoPhase::diameter(2.0, 1.0)], 3, 2);
-        for _ in 0..6 {
+        for _ in 0..12 {
             portfolio.begin(true);
             portfolio.begin(false);
-            // Two units above the best every time: the block earns -2.
+            // Two units above the best every time: a settled block earns -2,
+            // and the opening block, with no incumbent yet, earns nothing.
             portfolio.observe(false, -1.0, -3.0);
         }
-        assert!(portfolio.draws().iter().sum::<usize>() >= 2);
-        assert!(
-            portfolio
-                .means()
-                .iter()
-                .zip(portfolio.draws())
-                .filter(|(_, d)| **d > 0)
-                .all(|(m, _)| (m + 2.0).abs() < 1e-9),
-            "{:?}",
-            portfolio.means()
-        );
+        assert!(portfolio.draws().iter().sum::<usize>() >= 4);
+        for (mean, draws) in portfolio.means().iter().zip(portfolio.draws()) {
+            if *draws > 1 {
+                assert!(
+                    (-2.0..=0.0).contains(mean) && *mean < -1.0,
+                    "mean {mean} over {draws} draws"
+                );
+            }
+        }
     }
 }
