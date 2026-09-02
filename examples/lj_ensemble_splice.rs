@@ -24,7 +24,10 @@
 //! (default 0, plain quench), `DIAMETER_D` and `DIAMETER_BETA` add the
 //! Locatelli--Schoen diameter penalty `beta * sum_{i<j} max(0, r_ij^2 - D^2)^2`
 //! to the same first phase (`D` in units of the pair-well minimum distance,
-//! default 0 and 1). Every evaluation of either phase is charged.
+//! default 0 and 1); `DIAMETER_KAPPA` instead sets the cutoff per quench
+//! to `kappa` times the largest pair distance of the structure being
+//! relaxed, a size-free rule that reads only the live structure. Every
+//! evaluation of either phase is charged.
 
 use std::sync::{Arc, Mutex};
 
@@ -185,6 +188,26 @@ struct ExchangeConfig {
     diameter: f64,
     /// Diameter penalty strength.
     diameter_beta: f64,
+    /// Relative cutoff: `kappa` times the largest pair distance of the
+    /// structure entering the quench; zero keeps the fixed cutoff.
+    diameter_kappa: f64,
+}
+
+/// Largest pair distance in a 3N coordinate vector.
+fn largest_pair_distance(x: ArrayView1<f64>) -> f64 {
+    let n = x.len() / 3;
+    let mut best = 0.0_f64;
+    for i in 0..n {
+        for j in (i + 1)..n {
+            let mut r2 = 0.0;
+            for k in 0..3 {
+                let d = x[3 * i + k] - x[3 * j + k];
+                r2 += d * d;
+            }
+            best = best.max(r2);
+        }
+    }
+    best.sqrt()
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -206,17 +229,23 @@ fn run_chain(
     let compress_mu = exchange.compress_mu;
     let diameter = exchange.diameter;
     let beta = exchange.diameter_beta;
-    let two_phase = compress_mu > 0.0 || (diameter > 0.0 && beta > 0.0);
+    let kappa = exchange.diameter_kappa;
+    let two_phase = compress_mu > 0.0 || ((diameter > 0.0 || kappa > 0.0) && beta > 0.0);
     let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, iters: usize| {
         let before = led.spent();
         let mut start = x.to_owned();
         if two_phase {
+            let cutoff = if kappa > 0.0 {
+                kappa * largest_pair_distance(x)
+            } else {
+                diameter
+            };
             opt.forget();
             let (_, compressed, _) = opt.minimize(x, iters, |v| {
                 if !led.charge() {
                     return None;
                 }
-                Some(lj_compressed(v, compress_mu, diameter, beta))
+                Some(lj_compressed(v, compress_mu, cutoff, beta))
             });
             start = compressed;
         }
@@ -409,11 +438,12 @@ fn main() {
         // objective here is in sigma units, so the cutoff scales by 2^(1/6).
         diameter: env_f64("DIAMETER_D", 0.0) * 2f64.powf(1.0 / 6.0),
         diameter_beta: env_f64("DIAMETER_BETA", 1.0),
+        diameter_kappa: env_f64("DIAMETER_KAPPA", 0.0),
     };
     let target = reference(n);
     println!(
         "LJ{n}, {chains} chains x {budget} charged, {ensembles} ensembles, mode {mode}, \
-         interval {} images {} partner {} source {} checkpoint {} compress {} diameter {:.3} beta {}, reference {}",
+         interval {} images {} partner {} source {} checkpoint {} compress {} diameter {:.3} kappa {} beta {}, reference {}",
         exchange.interval,
         exchange.images,
         if exchange.partner_best { "best" } else { "random" },
@@ -421,6 +451,7 @@ fn main() {
         exchange.checkpoint,
         exchange.compress_mu,
         exchange.diameter,
+        exchange.diameter_kappa,
         exchange.diameter_beta,
         target.map(|r| format!("{r:.6}")).unwrap_or_else(|| "none".into())
     );
