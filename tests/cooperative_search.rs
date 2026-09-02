@@ -2315,7 +2315,7 @@ fn population_submission_uses_exact_handedness_when_descriptors_alias() {
 }
 
 #[test]
-fn population_barrier_reports_minimum_information_genealogy() {
+fn population_barrier_enforces_exact_basin_capacity() {
     let server = server();
     let digest = signature().digest();
     let mut clients = (0..4)
@@ -2345,14 +2345,22 @@ fn population_barrier_reports_minimum_information_genealogy() {
         }
     }
     let plan = completed.expect("complete barrier must return a plan");
-    let represented = plan
-        .parent_candidates
-        .iter()
-        .map(|candidate| candidate.census_basin.unwrap())
-        .collect::<std::collections::BTreeSet<_>>();
+    let mut family_counts = std::collections::BTreeMap::new();
+    for candidate in &plan.parent_candidates {
+        *family_counts
+            .entry(candidate.census_basin.unwrap())
+            .or_insert(0usize) += 1;
+    }
 
-    assert_eq!(represented.len(), 3);
+    assert_eq!(plan.parent_candidates.len(), plan.parents.len());
     assert!(plan.max_family_size <= 3);
+    assert!(
+        family_counts
+            .values()
+            .all(|count| *count <= plan.max_family_size)
+    );
+    let required_families = plan.parents.len().div_ceil(plan.max_family_size.max(1));
+    assert!(family_counts.len() >= required_families);
     assert_eq!(plan.selection, PopulationSelection::MinimumInformation);
     for (source, weight) in plan.destinations.iter().zip(&plan.weights) {
         let expected = plan
