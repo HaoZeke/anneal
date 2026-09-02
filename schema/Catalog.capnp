@@ -365,7 +365,7 @@ struct RideReportReply {
 enum PopulationSelection {
   unspecified @0;
   systematicResampling @1;
-  regionCovering @2;
+  minimumInformation @2;
 }
 
 struct PopulationPlan {

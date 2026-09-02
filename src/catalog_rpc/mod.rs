@@ -545,8 +545,8 @@ pub enum PopulationSelection {
     Unspecified,
     /// Systematic resampling of the Feynman-Kac weights.
     SystematicResampling,
-    /// Attraction-region coverage before any source is duplicated.
-    RegionCovering,
+    /// GIBBON information about the same-system minimum energy.
+    MinimumInformation,
 }
 
 impl PopulationSelection {
@@ -555,7 +555,7 @@ impl PopulationSelection {
         match self {
             Self::Unspecified => "unspecified",
             Self::SystematicResampling => "systematic_resampling",
-            Self::RegionCovering => "region_covering",
+            Self::MinimumInformation => "minimum_information",
         }
     }
 }
@@ -1408,8 +1408,8 @@ pub(crate) fn encode_reply(reply: CatalogReply) -> Result<Vec<u8>, ProtocolError
                             PopulationSelection::SystematicResampling => {
                                 crate::Catalog_capnp::PopulationSelection::SystematicResampling
                             }
-                            PopulationSelection::RegionCovering => {
-                                crate::Catalog_capnp::PopulationSelection::RegionCovering
+                            PopulationSelection::MinimumInformation => {
+                                crate::Catalog_capnp::PopulationSelection::MinimumInformation
                             }
                         });
                         let mut candidates = wire
@@ -1673,8 +1673,8 @@ pub(crate) fn decode_reply_reader(
                                     crate::Catalog_capnp::PopulationSelection::SystematicResampling => {
                                         PopulationSelection::SystematicResampling
                                     }
-                                    crate::Catalog_capnp::PopulationSelection::RegionCovering => {
-                                        PopulationSelection::RegionCovering
+                                    crate::Catalog_capnp::PopulationSelection::MinimumInformation => {
+                                        PopulationSelection::MinimumInformation
                                     }
                                 },
                             })

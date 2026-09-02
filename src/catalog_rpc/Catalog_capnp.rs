@@ -11633,7 +11633,7 @@ pub mod ride_report_reply {
 pub enum PopulationSelection {
   Unspecified = 0,
   SystematicResampling = 1,
-  RegionCovering = 2,
+  MinimumInformation = 2,
 }
 
 impl ::capnp::introspect::Introspect for PopulationSelection {
@@ -11648,7 +11648,7 @@ impl ::core::convert::TryFrom<u16> for PopulationSelection {
     match value {
       0 => ::core::result::Result::Ok(Self::Unspecified),
       1 => ::core::result::Result::Ok(Self::SystematicResampling),
-      2 => ::core::result::Result::Ok(Self::RegionCovering),
+      2 => ::core::result::Result::Ok(Self::MinimumInformation),
       n => ::core::result::Result::Err(::capnp::NotInSchema(n)),
     }
   }
@@ -11661,14 +11661,14 @@ impl ::capnp::traits::HasTypeId for PopulationSelection {
   const TYPE_ID: u64 = 0x97bd_4c3a_3868_5d26u64;
 }
 mod population_selection {
-pub static ENCODED_NODE: [::capnp::Word; 36] = [
+pub static ENCODED_NODE: [::capnp::Word; 37] = [
   ::capnp::word(0, 0, 0, 0, 6, 0, 6, 0),
   ::capnp::word(38, 93, 104, 56, 58, 76, 189, 151),
   ::capnp::word(14, 0, 0, 0, 2, 0, 0, 0),
   ::capnp::word(39, 31, 179, 234, 180, 91, 158, 141),
   ::capnp::word(0, 0, 0, 0, 0, 0, 0, 0),
   ::capnp::word(0, 0, 0, 0, 0, 0, 0, 0),
-  ::capnp::word(34, 40, 0, 0, 128, 40, 0, 0),
+  ::capnp::word(34, 40, 0, 0, 132, 40, 0, 0),
   ::capnp::word(21, 0, 0, 0, 18, 1, 0, 0),
   ::capnp::word(37, 0, 0, 0, 7, 0, 0, 0),
   ::capnp::word(0, 0, 0, 0, 0, 0, 0, 0),
@@ -11689,15 +11689,16 @@ pub static ENCODED_NODE: [::capnp::Word; 36] = [
   ::capnp::word(25, 0, 0, 0, 170, 0, 0, 0),
   ::capnp::word(0, 0, 0, 0, 0, 0, 0, 0),
   ::capnp::word(2, 0, 0, 0, 0, 0, 0, 0),
-  ::capnp::word(25, 0, 0, 0, 122, 0, 0, 0),
+  ::capnp::word(25, 0, 0, 0, 154, 0, 0, 0),
   ::capnp::word(0, 0, 0, 0, 0, 0, 0, 0),
   ::capnp::word(117, 110, 115, 112, 101, 99, 105, 102),
   ::capnp::word(105, 101, 100, 0, 0, 0, 0, 0),
   ::capnp::word(115, 121, 115, 116, 101, 109, 97, 116),
   ::capnp::word(105, 99, 82, 101, 115, 97, 109, 112),
   ::capnp::word(108, 105, 110, 103, 0, 0, 0, 0),
-  ::capnp::word(114, 101, 103, 105, 111, 110, 67, 111),
-  ::capnp::word(118, 101, 114, 105, 110, 103, 0, 0),
+  ::capnp::word(109, 105, 110, 105, 109, 117, 109, 73),
+  ::capnp::word(110, 102, 111, 114, 109, 97, 116, 105),
+  ::capnp::word(111, 110, 0, 0, 0, 0, 0, 0),
 ];
 pub fn get_annotation_types(child_index: Option<u16>, index: u32) -> ::capnp::introspect::Type {
   panic!("invalid annotation indices ({:?}, {}) ", child_index, index)
@@ -12005,7 +12006,7 @@ pub mod population_plan {
       ::capnp::word(39, 31, 179, 234, 180, 91, 158, 141),
       ::capnp::word(4, 0, 7, 0, 0, 0, 0, 0),
       ::capnp::word(0, 0, 0, 0, 0, 0, 0, 0),
-      ::capnp::word(130, 40, 0, 0, 216, 41, 0, 0),
+      ::capnp::word(134, 40, 0, 0, 220, 41, 0, 0),
       ::capnp::word(21, 0, 0, 0, 234, 0, 0, 0),
       ::capnp::word(33, 0, 0, 0, 7, 0, 0, 0),
       ::capnp::word(0, 0, 0, 0, 0, 0, 0, 0),
@@ -12412,7 +12413,7 @@ pub mod population_epoch_reply {
       ::capnp::word(39, 31, 179, 234, 180, 91, 158, 141),
       ::capnp::word(1, 0, 7, 0, 0, 0, 0, 0),
       ::capnp::word(0, 0, 0, 0, 0, 0, 0, 0),
-      ::capnp::word(218, 41, 0, 0, 134, 42, 0, 0),
+      ::capnp::word(222, 41, 0, 0, 138, 42, 0, 0),
       ::capnp::word(21, 0, 0, 0, 26, 1, 0, 0),
       ::capnp::word(37, 0, 0, 0, 7, 0, 0, 0),
       ::capnp::word(0, 0, 0, 0, 0, 0, 0, 0),
@@ -12986,7 +12987,7 @@ pub mod catalog_request {
       ::capnp::word(39, 31, 179, 234, 180, 91, 158, 141),
       ::capnp::word(2, 0, 7, 0, 0, 0, 0, 0),
       ::capnp::word(0, 0, 0, 0, 0, 0, 0, 0),
-      ::capnp::word(136, 42, 0, 0, 108, 47, 0, 0),
+      ::capnp::word(140, 42, 0, 0, 112, 47, 0, 0),
       ::capnp::word(21, 0, 0, 0, 234, 0, 0, 0),
       ::capnp::word(33, 0, 0, 0, 7, 0, 0, 0),
       ::capnp::word(0, 0, 0, 0, 0, 0, 0, 0),
@@ -14447,7 +14448,7 @@ pub mod frontier_post {
       ::capnp::word(39, 31, 179, 234, 180, 91, 158, 141),
       ::capnp::word(1, 0, 7, 0, 0, 0, 0, 0),
       ::capnp::word(0, 0, 0, 0, 0, 0, 0, 0),
-      ::capnp::word(114, 48, 0, 0, 14, 49, 0, 0),
+      ::capnp::word(118, 48, 0, 0, 18, 49, 0, 0),
       ::capnp::word(21, 0, 0, 0, 218, 0, 0, 0),
       ::capnp::word(33, 0, 0, 0, 7, 0, 0, 0),
       ::capnp::word(0, 0, 0, 0, 0, 0, 0, 0),
@@ -14623,7 +14624,7 @@ pub static ENCODED_NODE: [::capnp::Word; 76] = [
   ::capnp::word(39, 31, 179, 234, 180, 91, 158, 141),
   ::capnp::word(0, 0, 0, 0, 0, 0, 0, 0),
   ::capnp::word(0, 0, 0, 0, 0, 0, 0, 0),
-  ::capnp::word(16, 49, 0, 0, 11, 50, 0, 0),
+  ::capnp::word(20, 49, 0, 0, 15, 50, 0, 0),
   ::capnp::word(21, 0, 0, 0, 226, 0, 0, 0),
   ::capnp::word(33, 0, 0, 0, 7, 0, 0, 0),
   ::capnp::word(0, 0, 0, 0, 0, 0, 0, 0),
@@ -14886,7 +14887,7 @@ pub mod catalog_reply {
       ::capnp::word(39, 31, 179, 234, 180, 91, 158, 141),
       ::capnp::word(1, 0, 7, 0, 0, 0, 0, 0),
       ::capnp::word(0, 0, 0, 0, 0, 0, 0, 0),
-      ::capnp::word(13, 50, 0, 0, 211, 50, 0, 0),
+      ::capnp::word(17, 50, 0, 0, 215, 50, 0, 0),
       ::capnp::word(21, 0, 0, 0, 218, 0, 0, 0),
       ::capnp::word(33, 0, 0, 0, 7, 0, 0, 0),
       ::capnp::word(0, 0, 0, 0, 0, 0, 0, 0),
@@ -15458,7 +15459,7 @@ pub mod accepted_reply {
       ::capnp::word(39, 31, 179, 234, 180, 91, 158, 141),
       ::capnp::word(1, 0, 7, 0, 0, 0, 0, 0),
       ::capnp::word(0, 0, 0, 0, 0, 0, 0, 0),
-      ::capnp::word(213, 50, 0, 0, 104, 53, 0, 0),
+      ::capnp::word(217, 50, 0, 0, 108, 53, 0, 0),
       ::capnp::word(21, 0, 0, 0, 226, 0, 0, 0),
       ::capnp::word(33, 0, 0, 0, 7, 0, 0, 0),
       ::capnp::word(0, 0, 0, 0, 0, 0, 0, 0),
