@@ -370,3 +370,92 @@ fn occupancy_retire_stops_the_chain() {
         outcome.hops
     );
 }
+
+#[test]
+fn checkpoint_external_adopt_charges_the_work_then_moves_the_live_chain() {
+    let mut cfg = Config::recommended(6);
+    cfg.relax_steps = 1;
+    // Both runs end on the hop count, so the extra charge never shortens
+    // the external run and the two trajectories stay comparable.
+    cfg.max_hops = Some(60);
+    let mut seeding_rng = StdRng::seed_from_u64(0xad_0b_7e);
+    let start = random_cluster(cfg.n_points, 0.7, cfg.min_separation, &mut seeding_rng);
+    let mut boundary_rng = seeding_rng.clone();
+    let mut external_rng = seeding_rng;
+    let mut boundary_ledger = Ledger::new(6_000);
+    let mut external_ledger = Ledger::new(6_000);
+    let mut boundary_bias = fresh_bias(&cfg);
+    let mut external_bias = fresh_bias(&cfg);
+    let mut boundary_relax = toy_relax;
+    let mut external_relax = toy_relax;
+    let proposed = start.mapv(|value| 1.1 * value);
+
+    let mut boundary_offered = false;
+    let mut boundary_checkpoint = |_: ChainCheckpoint<'_>| {
+        if boundary_offered {
+            CheckpointAction::Continue
+        } else {
+            boundary_offered = true;
+            CheckpointAction::BoundaryProposal {
+                state: proposed.clone(),
+                action: "fragment".to_string(),
+            }
+        }
+    };
+    let boundary = run_with_bias_at_checkpoints(
+        &cfg,
+        start.view(),
+        &mut boundary_ledger,
+        &mut boundary_relax,
+        None,
+        &mut boundary_bias,
+        &mut boundary_rng,
+        7,
+        &mut boundary_checkpoint,
+    );
+
+    const EXTERNAL_CALLS: usize = 53;
+    let mut external_offered = false;
+    let mut external_checkpoint = |_: ChainCheckpoint<'_>| {
+        if external_offered {
+            CheckpointAction::Continue
+        } else {
+            external_offered = true;
+            CheckpointAction::ExternalAdopt {
+                state: proposed.clone(),
+                action: "fragment".to_string(),
+                external_calls: EXTERNAL_CALLS,
+            }
+        }
+    };
+    let external = run_with_bias_at_checkpoints(
+        &cfg,
+        start.view(),
+        &mut external_ledger,
+        &mut external_relax,
+        None,
+        &mut external_bias,
+        &mut external_rng,
+        7,
+        &mut external_checkpoint,
+    );
+
+    assert!(external_offered, "checkpoint did not offer the external candidate");
+    let adopted = external
+        .accepted_transitions
+        .iter()
+        .find(|transition| transition.action == "fragment")
+        .expect("the external candidate is absent from the trajectory");
+    assert!(adopted.adopted, "the external candidate did not become the live chain");
+    assert_eq!(
+        external_ledger.spent(),
+        boundary_ledger.spent() + EXTERNAL_CALLS,
+        "external construction work was not charged exactly once"
+    );
+    assert_eq!(
+        external.accepted_transitions, boundary.accepted_transitions,
+        "an adopted external candidate must follow the boundary-proposal path"
+    );
+    assert_eq!(external.final_state, boundary.final_state);
+    assert_eq!(external.best, boundary.best);
+}
