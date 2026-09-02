@@ -2551,13 +2551,12 @@ fn roll_branch<S: PesSurface>(
     config: &PesExplorationConfig,
 ) -> Result<(Quenched, bool), PesExplorationError> {
     let adapter = SaddleSurface(surface);
-    let mut session = IrcSession::from_surface(
+    let mut session = IrcSession::new(
         irc_config(config, branch_step),
         saddle.clone(),
         masses.clone(),
         mode.clone(),
         direction,
-        &adapter,
     )
     .map_err(|error| {
         PesExplorationError::Saddle(format!("IRC {direction:?} initialization: {error}"))
