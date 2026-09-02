@@ -15,6 +15,9 @@
 
 use std::collections::HashMap;
 
+use ndarray::Array2;
+use rgsaddle::exact_eigh;
+
 /// Invalid graph query.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum GraphError {
@@ -27,6 +30,9 @@ pub enum GraphError {
     /// The absorbing set must be nonempty and proper.
     #[error("absorbing set empty or covering the whole graph")]
     BadAbsorbingSet,
+    /// The symmetric Laplacian eigensolve did not return a decomposition.
+    #[error("landscape Laplacian eigensolve failed")]
+    Eigensolver,
 }
 
 /// The two most weakly coupled communities of the explored landscape.
@@ -102,80 +108,99 @@ impl LandscapeGraph {
         self.weights[i].iter().sum()
     }
 
+    fn connected_components(&self) -> Vec<Vec<usize>> {
+        let mut seen = vec![false; self.len()];
+        let mut components = Vec::new();
+        for root in 0..self.len() {
+            if seen[root] {
+                continue;
+            }
+            seen[root] = true;
+            let mut component = Vec::new();
+            let mut frontier = vec![root];
+            while let Some(i) = frontier.pop() {
+                component.push(i);
+                for (j, weight) in self.weights[i].iter().copied().enumerate() {
+                    if weight > 0.0 && !seen[j] {
+                        seen[j] = true;
+                        frontier.push(j);
+                    }
+                }
+            }
+            component.sort_unstable_by_key(|index| self.basins[*index]);
+            components.push(component);
+        }
+        components.sort_by_key(|component| self.basins[component[0]]);
+        components
+    }
+
     /// The spectral split of the landscape, or an error below two basins.
     ///
-    /// The eigenpair comes from power iteration on the reflected
-    /// Laplacian `B = c I - L` restricted to the complement of the
-    /// constant vector, with `c` a Gershgorin bound on the spectrum, so
-    /// the dominant surviving direction is the Fiedler vector and the
-    /// eigenvalue recovers as `c` minus the Rayleigh quotient. On a
-    /// disconnected graph the connectivity comes out at zero and the
-    /// split follows components, which is the right referee answer: the
-    /// seam has never been crossed at all.
+    /// A dense symmetric eigensolve returns the second Laplacian eigenpair.
+    /// Disconnected graphs are partitioned along whole connected components,
+    /// avoiding the arbitrary basis inside a degenerate zero eigenspace.
     pub fn spectral_split(&self) -> Result<SpectralSplit, GraphError> {
         let n = self.len();
         if n < 2 {
             return Err(GraphError::TooSmall);
         }
-        let ceiling = 2.0 * (0..n).map(|i| self.degree(i)).fold(0.0_f64, f64::max) + 1.0;
-        // Deterministic start with a gradient along the index order so
-        // the projection onto the Fiedler direction cannot vanish by
-        // symmetry for the graphs a catalog produces.
-        let mut v: Vec<f64> = (0..n).map(|i| i as f64 + 1.0).collect();
-        let mut rayleigh = 0.0_f64;
-        for _ in 0..2048 {
-            // Project out the constant vector.
-            let mean = v.iter().sum::<f64>() / n as f64;
-            for value in &mut v {
-                *value -= mean;
-            }
-            let norm = v.iter().map(|x| x * x).sum::<f64>().sqrt();
-            if norm <= f64::EPSILON {
-                break;
-            }
-            for value in &mut v {
-                *value /= norm;
-            }
-            // w = (c I - L) v = c v - D v + W v
-            let mut w = vec![0.0_f64; n];
-            for i in 0..n {
-                let mut acc = (ceiling - self.degree(i)) * v[i];
-                for j in 0..n {
-                    acc += self.weights[i][j] * v[j];
+        let components = self.connected_components();
+        let (algebraic_connectivity, mut left, mut right) = if components.len() > 1 {
+            let mut prefix = 0usize;
+            let mut best = (usize::MAX, 1usize);
+            for split in 1..components.len() {
+                prefix += components[split - 1].len();
+                let imbalance = prefix.abs_diff(n - prefix);
+                if imbalance < best.0 {
+                    best = (imbalance, split);
                 }
-                w[i] = acc;
             }
-            let next_rayleigh = v.iter().zip(&w).map(|(a, b)| a * b).sum::<f64>();
-            let settled = (next_rayleigh - rayleigh).abs() <= 1e-13 * ceiling;
-            rayleigh = next_rayleigh;
-            v = w;
-            if settled {
-                break;
+            let left = components[..best.1]
+                .iter()
+                .flatten()
+                .map(|index| self.basins[*index])
+                .collect();
+            let right = components[best.1..]
+                .iter()
+                .flatten()
+                .map(|index| self.basins[*index])
+                .collect();
+            (0.0, left, right)
+        } else {
+            let mut laplacian = Array2::zeros((n, n));
+            for i in 0..n {
+                laplacian[(i, i)] = self.degree(i);
+                for j in 0..n {
+                    if i != j {
+                        laplacian[(i, j)] = -self.weights[i][j];
+                    }
+                }
             }
-        }
-        let mean = v.iter().sum::<f64>() / n as f64;
-        for value in &mut v {
-            *value -= mean;
-        }
-        let algebraic_connectivity = (ceiling - rayleigh).max(0.0);
-
-        let mut left = Vec::new();
-        let mut right = Vec::new();
-        for (i, &basin) in self.basins.iter().enumerate() {
-            if v[i] < 0.0 {
-                left.push(basin);
-            } else {
-                right.push(basin);
+            let (eigenvalues, eigenvectors) =
+                exact_eigh(laplacian.view()).map_err(|_| GraphError::Eigensolver)?;
+            let mut order = (0..n).collect::<Vec<_>>();
+            order.sort_by(|left, right| eigenvalues[*left].total_cmp(&eigenvalues[*right]));
+            let fiedler = order[1];
+            let vector = eigenvectors.column(fiedler);
+            let mut left = Vec::new();
+            let mut right = Vec::new();
+            for (i, &basin) in self.basins.iter().enumerate() {
+                if vector[i] < 0.0 {
+                    left.push(basin);
+                } else {
+                    right.push(basin);
+                }
             }
-        }
-        if left.is_empty() || right.is_empty() {
-            // A degenerate direction: split by the median instead so the
-            // referee always names two sides.
-            let mut order: Vec<usize> = (0..n).collect();
-            order.sort_by(|&a, &b| v[a].total_cmp(&v[b]));
-            left = order[..n / 2].iter().map(|&i| self.basins[i]).collect();
-            right = order[n / 2..].iter().map(|&i| self.basins[i]).collect();
-        }
+            if left.is_empty() || right.is_empty() {
+                let mut order: Vec<usize> = (0..n).collect();
+                order.sort_by(|&a, &b| vector[a].total_cmp(&vector[b]));
+                left = order[..n / 2].iter().map(|&i| self.basins[i]).collect();
+                right = order[n / 2..].iter().map(|&i| self.basins[i]).collect();
+            }
+            (eigenvalues[fiedler].max(0.0), left, right)
+        };
+        left.sort_unstable();
+        right.sort_unstable();
 
         let side = |basin: u64| left.contains(&basin);
         let mut cut = 0.0;
