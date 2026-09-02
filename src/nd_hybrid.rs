@@ -12,13 +12,14 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 
 use ndarray::{Array1, ArrayView1};
-use rand::{SeedableRng, rngs::StdRng};
+use rand::{rngs::StdRng, SeedableRng};
 
 use crate::allocate::DiscoveryAccounting;
 use crate::catalog::{
-    PRODUCTION_MAX_UNSEEN_MASS, PRODUCTION_MINIMUM_VISITS, leftover_esty_stable,
-    leftover_esty_upper,
+    leftover_esty_stable, leftover_esty_upper, PRODUCTION_MAX_UNSEEN_MASS,
+    PRODUCTION_MINIMUM_VISITS,
 };
+use crate::descriptor_space::{DescriptorError, DescriptorSpace};
 use crate::methods::minima_hopping::EscapeFeedback;
 use crate::minimum_information::{
     MinimumInformationError, MinimumInformationSearch, SearchActionCandidate, SearchActionScore,
@@ -26,16 +27,82 @@ use crate::minimum_information::{
 };
 use crate::movekernel::{Gaussian, MoveKernel, TsallisVisit};
 use crate::pes_exploration::{
-    ExactStructureWitness, NdPesNetwork, PesExplorationConfig, PesExplorationError, PesSurface,
-    RideModeDirection, discover_nd_connection_with_budget, orthonormal_nd_mode,
+    discover_nd_connection_with_budget, orthonormal_nd_mode, ExactStructureWitness, NdPesNetwork,
+    PesExplorationConfig, PesExplorationError, PesSurface, RideModeDirection,
 };
-use crate::source_escape::{SourceEscapeConfig, SourceEscapeOutcome, quench_source_escape};
+use crate::source_escape::{quench_source_escape, SourceEscapeConfig, SourceEscapeOutcome};
 
 const RIDGE_ARM: usize = 0;
 const ESCAPE_ARM: usize = 1;
 const GAUSSIAN_MOVE: usize = 0;
 const TSALLIS_MOVE: usize = 1;
 const MINIMUM_INFORMATION_SAMPLES: usize = 128;
+
+/// Failure to construct a stable action coordinate for the outcome model.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum ActionFeatureError {
+    /// Generic action points must contain at least one coordinate.
+    #[error("action point must be nonempty")]
+    EmptyPoint,
+    /// Generic action points cannot contain NaN or infinity.
+    #[error("nonfinite action coordinate at index {index}")]
+    NonFiniteCoordinate {
+        /// Index of the first invalid coordinate.
+        index: usize,
+    },
+    /// An invariant atomistic descriptor rejected the point or species.
+    #[error(transparent)]
+    Descriptor(#[from] DescriptorError),
+}
+
+/// Maps a concrete search point to the stable coordinates of an action GP.
+pub trait ActionFeatureMap {
+    /// Encode one proposed or ridge-displaced point.
+    fn encode(&self, point: ArrayView1<'_, f64>) -> Result<Vec<f64>, ActionFeatureError>;
+}
+
+/// Identity feature map for generic N-dimensional objective functions.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct CoordinateActionFeatures;
+
+impl ActionFeatureMap for CoordinateActionFeatures {
+    fn encode(&self, point: ArrayView1<'_, f64>) -> Result<Vec<f64>, ActionFeatureError> {
+        if point.is_empty() {
+            return Err(ActionFeatureError::EmptyPoint);
+        }
+        if let Some(index) = point.iter().position(|coordinate| !coordinate.is_finite()) {
+            return Err(ActionFeatureError::NonFiniteCoordinate { index });
+        }
+        Ok(point.to_vec())
+    }
+}
+
+/// Rotation-, translation-, and like-species-permutation-invariant atomistic map.
+#[derive(Debug, Clone)]
+pub struct DescriptorActionFeatures {
+    descriptor_space: DescriptorSpace,
+    species: Vec<u32>,
+}
+
+impl DescriptorActionFeatures {
+    /// Bind one immutable descriptor geometry and ordered species vector.
+    pub fn new(descriptor_space: DescriptorSpace, species: Vec<u32>) -> Self {
+        Self {
+            descriptor_space,
+            species,
+        }
+    }
+}
+
+impl ActionFeatureMap for DescriptorActionFeatures {
+    fn encode(&self, point: ArrayView1<'_, f64>) -> Result<Vec<f64>, ActionFeatureError> {
+        Ok(self
+            .descriptor_space
+            .describe(point, Some(&self.species))?
+            .values()
+            .to_vec())
+    }
+}
 
 /// Controls for one system-local generic PES exploration campaign.
 #[derive(Debug, Clone)]
@@ -198,6 +265,9 @@ pub enum NdHybridError {
     /// The action-outcome model rejected an invalid feature or score.
     #[error(transparent)]
     MinimumInformation(#[from] MinimumInformationError),
+    /// The action representation rejected a concrete point.
+    #[error(transparent)]
+    ActionFeature(#[from] ActionFeatureError),
 }
 
 fn validate(config: &NdHybridConfig, dimension: usize) -> Result<(), NdHybridError> {
@@ -324,26 +394,37 @@ impl EscapeCoverage {
     }
 }
 
-fn basin_action_feature(proposal: ArrayView1<'_, f64>, kernel: NdEscapeKernel) -> Vec<f64> {
-    let mut feature = Vec::with_capacity(proposal.len() + 2);
-    feature.extend(proposal.iter().copied());
+fn basin_action_feature<F>(
+    action_features: &F,
+    proposal: ArrayView1<'_, f64>,
+    kernel: NdEscapeKernel,
+) -> Result<Vec<f64>, ActionFeatureError>
+where
+    F: ActionFeatureMap + ?Sized,
+{
+    let mut feature = action_features.encode(proposal)?;
     feature.extend(match kernel {
         NdEscapeKernel::Gaussian => [1.0, 0.0],
         NdEscapeKernel::Tsallis => [0.0, 1.0],
     });
-    feature
+    Ok(feature)
 }
 
-fn ridge_action_feature(
+fn ridge_action_feature<F>(
+    action_features: &F,
     source: ArrayView1<'_, f64>,
     mode: ArrayView1<'_, f64>,
     displacement: f64,
-) -> Vec<f64> {
-    source
+) -> Result<Vec<f64>, ActionFeatureError>
+where
+    F: ActionFeatureMap + ?Sized,
+{
+    let displaced = source
         .iter()
         .zip(mode.iter())
         .map(|(coordinate, component)| coordinate + displacement * component)
-        .collect()
+        .collect::<Array1<_>>();
+    action_features.encode(displaced.view())
 }
 
 fn empirical_cost(charged: u64, pulls: usize) -> Option<f64> {
@@ -465,7 +546,38 @@ where
     S: PesSurface + ?Sized,
     W: ExactStructureWitness + ?Sized,
 {
+    explore_nd_with_policy_and_features(
+        surface,
+        initial,
+        config,
+        witness,
+        seed,
+        policy,
+        &CoordinateActionFeatures,
+    )
+}
+
+/// Explore one PES with an explicit action representation.
+///
+/// Generic objectives use [`CoordinateActionFeatures`]. Atomistic callers use
+/// [`DescriptorActionFeatures`] so the outcome posterior compares physical
+/// structures independently of rigid coordinates and like-species labels.
+pub fn explore_nd_with_policy_and_features<S, W, F>(
+    surface: &S,
+    initial: ArrayView1<'_, f64>,
+    config: &NdHybridConfig,
+    witness: &W,
+    seed: u64,
+    policy: NdHybridPolicy,
+    action_features: &F,
+) -> Result<NdHybridReport, NdHybridError>
+where
+    S: PesSurface + ?Sized,
+    W: ExactStructureWitness + ?Sized,
+    F: ActionFeatureMap + ?Sized,
+{
     validate(config, initial.len())?;
+    action_features.encode(initial)?;
     let dimension = initial.len();
     let norm_tolerance = config
         .exploration
@@ -547,10 +659,11 @@ where
                     seed ^ (source_basin as u64 + 1).wrapping_mul(0x9e37_79b9_7f4a_7c15);
                 let mode = orthonormal_nd_mode(dimension, mode_seed, mode_rank, direction)?;
                 let feature = ridge_action_feature(
+                    action_features,
                     source.view(),
                     mode.view(),
                     config.exploration.saddle_displacement,
-                );
+                )?;
                 plans.push(PlannedAction::Ridge {
                     source_basin,
                     source_energy,
@@ -579,7 +692,7 @@ where
                     source_energy: live_energy,
                     move_index,
                     kernel,
-                    feature: basin_action_feature(proposal.view(), kernel),
+                    feature: basin_action_feature(action_features, proposal.view(), kernel)?,
                     proposal,
                 });
             }
