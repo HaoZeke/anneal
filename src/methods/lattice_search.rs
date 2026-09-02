@@ -247,6 +247,57 @@ pub fn construct(
     (Array1::from(cur), moves)
 }
 
+/// Rebuild the whole cluster on the lattice of occupied positions and hollow
+/// sites of `x`: the site nearest the centroid is placed first, then each
+/// further point takes the vacant lattice site with the lowest energy in the
+/// field of the points already placed. Every site energy is charged at its
+/// pair fraction.
+pub fn reoccupy(cfg: &LatticeSearchConfig, ledger: &mut Ledger, x: ArrayView1<f64>) -> Array1<f64> {
+    let n = cfg.n_points;
+    let xs = x.to_vec();
+    let mut lattice: Vec<[f64; 3]> = (0..n).map(|i| point(&xs, i)).collect();
+    lattice.extend(hollow_sites(&xs, cfg.neighbour_cutoff));
+    let mut c = [0.0_f64; 3];
+    for i in 0..n {
+        for k in 0..3 {
+            c[k] += xs[3 * i + k] / n as f64;
+        }
+    }
+    let first = (0..lattice.len())
+        .min_by(|&a, &b| dist2(lattice[a], c).total_cmp(&dist2(lattice[b], c)))
+        .unwrap_or(0);
+    let mut placed: Vec<f64> = lattice[first].to_vec();
+    let mut vacant: Vec<[f64; 3]> = lattice
+        .iter()
+        .enumerate()
+        .filter(|(i, _)| *i != first)
+        .map(|(_, s)| *s)
+        .collect();
+    let frac = 2.0 / n.max(1) as f64;
+    while placed.len() / 3 < n && !vacant.is_empty() {
+        let mut best: Option<(usize, f64)> = None;
+        for (s, site) in vacant.iter().enumerate() {
+            if !ledger.charge_frac(frac) {
+                break;
+            }
+            let e = site_energy(cfg.kind, &placed, None, *site);
+            if best.is_none_or(|(_, be)| e < be) {
+                best = Some((s, e));
+            }
+        }
+        let Some((s, _)) = best else { break };
+        let site = vacant.swap_remove(s);
+        placed.extend_from_slice(&site);
+    }
+    if placed.len() / 3 < n {
+        // The lattice ran short of sites: keep the original for the rest.
+        for i in placed.len() / 3..n {
+            placed.extend_from_slice(&xs[3 * i..3 * i + 3]);
+        }
+    }
+    Array1::from(placed)
+}
+
 /// Run the dynamic lattice search under `ledger`.
 ///
 /// `relax` is the caller's charged quench. The search alternates construction
@@ -265,7 +316,13 @@ pub fn run(cfg: &LatticeSearchConfig, ledger: &mut Ledger, relax: Relax<'_>, see
     ledger.record(e, x.view());
     let mut stalls = 0usize;
     while ledger.remaining() > 0 {
-        let (built, moves) = construct(cfg, ledger, x.view());
+        // Constructions alternate: reoccupy the whole lattice from the
+        // centre, then repair the worst-bound point.
+        let (built, moves) = if constructions % 2 == 0 {
+            (reoccupy(cfg, ledger, x.view()), 1)
+        } else {
+            construct(cfg, ledger, x.view())
+        };
         constructions += 1;
         if ledger.remaining() == 0 {
             break;
