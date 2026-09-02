@@ -131,5 +131,9 @@ for engine in engines/libxtb_engine.so engines/librgpot_cuh2.so; do
   fi
 done
 
+source_commit=$(git -C "$ROOT" rev-parse HEAD 2>/dev/null || true)
+if [[ -z $source_commit && -s $ROOT/SOURCE_COMMIT ]]; then
+  source_commit=$(cat "$ROOT/SOURCE_COMMIT")
+fi
 printf 'TERRA_MOLSLAB_DEV_BUILD_OK source=%s host=%s job=%s\n' \
-  "$(git -C "$ROOT" rev-parse HEAD)" "$(hostname)" "$SLURM_JOB_ID"
+  "${source_commit:-unknown}" "$(hostname)" "$SLURM_JOB_ID"
