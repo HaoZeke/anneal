@@ -33,8 +33,8 @@ use std::sync::{Arc, Mutex};
 
 use anneal_core::bias::BasinBias;
 use anneal_core::methods::cluster_hopping::{
-    ChainCheckpoint, CheckpointAction, ClusterFingerprint, Config, Ledger, Outcome,
-    random_cluster, run_with_bias_at_checkpoints,
+    ChainCheckpoint, CheckpointAction, ClusterFingerprint, Config, Ledger, Outcome, random_cluster,
+    run_with_bias_at_checkpoints,
 };
 use anneal_core::methods::splice::cut_and_splice;
 use anneal_core::methods::two_phase::{
@@ -458,8 +458,16 @@ fn main() {
          interval {} images {} partner {} source {} checkpoint {} compress {} diameter {:.3} kappa {} beta {} portfolio {:?} block {} shared {}, reference {}",
         exchange.interval,
         exchange.images,
-        if exchange.partner_best { "best" } else { "random" },
-        if exchange.source_best { "best" } else { "current" },
+        if exchange.partner_best {
+            "best"
+        } else {
+            "random"
+        },
+        if exchange.source_best {
+            "best"
+        } else {
+            "current"
+        },
         exchange.checkpoint,
         exchange.compress_mu,
         exchange.diameter,
@@ -468,7 +476,9 @@ fn main() {
         exchange.portfolio,
         exchange.portfolio_block,
         exchange.portfolio_shared,
-        target.map(|r| format!("{r:.6}")).unwrap_or_else(|| "none".into())
+        target
+            .map(|r| format!("{r:.6}"))
+            .unwrap_or_else(|| "none".into())
     );
 
     if mode == "halving" {
@@ -504,7 +514,9 @@ fn main() {
                         .wrapping_add(chain as u64)
                         .wrapping_add(7);
                     scope.spawn(move || {
-                        run_chain(n, budget, seed, chain, &board, exchange, target, None, shared)
+                        run_chain(
+                            n, budget, seed, chain, &board, exchange, target, None, shared,
+                        )
                     })
                 })
                 .collect();
@@ -552,7 +564,10 @@ fn main() {
             reports.iter().map(|r| r.tally.attempts).sum::<usize>(),
             reports.iter().map(|r| r.tally.adopted).sum::<usize>(),
             reports.iter().map(|r| r.tally.below_current).sum::<usize>(),
-            reports.iter().map(|r| r.tally.external_calls).sum::<usize>(),
+            reports
+                .iter()
+                .map(|r| r.tally.external_calls)
+                .sum::<usize>(),
         );
     }
     first_hits.sort_unstable();
@@ -716,7 +731,9 @@ fn run_halving(
         launches_total += launches;
         println!(
             "  ensemble {ensemble}: deepest {deepest:.6}  solved {solved}  first hit pool {}  spent {spent}  brackets {brackets}  launches {launches}",
-            first_hit.map(|c| c.to_string()).unwrap_or_else(|| "-".into())
+            first_hit
+                .map(|c| c.to_string())
+                .unwrap_or_else(|| "-".into())
         );
     }
     first_hits.sort_unstable();
