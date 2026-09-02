@@ -42,6 +42,7 @@ pub trait PesSurface: Sync {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Mutex;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     use ndarray::{Array1, ArrayView1, array};
@@ -70,6 +71,10 @@ mod tests {
         evaluations: AtomicUsize,
     }
 
+    struct RecordingQuarticSaddle {
+        first_evaluation: Mutex<Option<Array1<f64>>>,
+    }
+
     impl PesSurface for CountingQuarticSaddle {
         type Error = &'static str;
 
@@ -86,6 +91,30 @@ mod tests {
                 let stiffness = 1.0 + index as f64 / coordinates.len() as f64;
                 energy += 0.5 * stiffness * coordinates[index] * coordinates[index];
                 gradient[index] = stiffness * coordinates[index];
+            }
+            Ok((energy, gradient))
+        }
+    }
+
+    impl PesSurface for RecordingQuarticSaddle {
+        type Error = &'static str;
+
+        fn evaluate(
+            &self,
+            coordinates: ArrayView1<f64>,
+        ) -> Result<(f64, Array1<f64>), Self::Error> {
+            let mut first = self.first_evaluation.lock().unwrap();
+            if first.is_none() {
+                *first = Some(coordinates.to_owned());
+            }
+            drop(first);
+            let reaction = coordinates[0];
+            let mut energy = (reaction * reaction - 1.0).powi(2);
+            let mut gradient = Array1::zeros(coordinates.len());
+            gradient[0] = 4.0 * reaction * (reaction * reaction - 1.0);
+            for index in 1..coordinates.len() {
+                energy += 0.5 * coordinates[index] * coordinates[index];
+                gradient[index] = coordinates[index];
             }
             Ok((energy, gradient))
         }
@@ -193,6 +222,38 @@ mod tests {
         let refined = finest_irc_step(0.2, &config).unwrap();
 
         assert!((refined - 0.0128).abs() < 1e-15);
+    }
+
+    #[test]
+    fn molecular_irc_starts_with_the_certified_mode_without_reestimating_it() {
+        let surface = RecordingQuarticSaddle {
+            first_evaluation: Mutex::new(None),
+        };
+        let saddle = Array1::zeros(6);
+        let masses = Array1::ones(2);
+        let mode = array![1.0, 0.0, 0.0, 0.0, 0.0, 0.0];
+        let config = PesExplorationConfig {
+            irc_kind: IrcKind::Morokuma,
+            irc_steps: 40,
+            quench_steps: 200,
+            quench_gradient_tolerance: 1e-7,
+            ..PesExplorationConfig::default()
+        };
+
+        roll_branch(
+            &surface,
+            &saddle,
+            &masses,
+            &mode,
+            IrcDirection::Forward,
+            0.1,
+            &config,
+        )
+        .unwrap();
+
+        let first = surface.first_evaluation.lock().unwrap();
+        let first = first.as_ref().expect("IRC must query the PES");
+        assert!((first[0] - 0.1).abs() < 1e-12);
     }
 }
 
