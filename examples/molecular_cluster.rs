@@ -9,7 +9,7 @@ use anneal_core::methods::cluster_hopping::{
     Config, Ledger, MoveLibrary, SoapProposalMode, repack_rigid_groups,
 };
 use anneal_core::methods::cluster_search::{search_from_maybe_bank, verify};
-use common::efficiency::{bank_label, report_trace};
+use common::efficiency::{apply_two_phase, bank_label, report_eval_wall, report_trace};
 use common::rgpot_eindir::{RgpotObjective, emit_engine_manifest};
 use ndarray::Array1;
 use rand::SeedableRng;
@@ -65,6 +65,7 @@ fn main() {
         reactive: false,
     };
     cfg.soap_mode = soap_mode_from_env();
+    apply_two_phase(&mut cfg);
     write_resolved_config(&cfg);
     println!(
         "(H2O){m} through eindir/rgpot xtb, arm {}, budget {budget}, seeds {seed0}..{}",
@@ -82,14 +83,18 @@ fn main() {
             }
         }
         let x0 = repack_rigid_groups(template.view(), &groups, cfg.length_scale, &mut rng);
+        if seed == seed0 {
+            report_eval_wall(&obj, x0.view(), "gfn2");
+        }
         let mut ledger = Ledger::new(budget);
         let (out, stats) = search_from_maybe_bank(&obj, &cfg, &mut ledger, x0.view(), seed);
         let checked = verify(&obj, &out);
         println!(
-            "  seed {seed}: best {:.6} eV  hops {}  charged {}  converged {}/{}  arm {}",
+            "  seed {seed}: best {:.6} eV  hops {}  charged {}  basins {}  converged {}/{}  arm {}",
             out.best,
             out.hops,
             ledger.spent(),
+            out.basins,
             stats.converged,
             stats.total(),
             bank_label()

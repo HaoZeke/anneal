@@ -169,6 +169,116 @@ pub fn penalty(x: ArrayView1<f64>, cutoff: f64, beta: f64, mu: f64) -> (f64, Arr
     (e, g)
 }
 
+fn group_centroid(x: ArrayView1<f64>, atoms: &[usize]) -> [f64; 3] {
+    let mut c = [0.0_f64; 3];
+    if atoms.is_empty() {
+        return c;
+    }
+    let n = x.len() / 3;
+    let mut count = 0.0;
+    for &i in atoms {
+        if i >= n {
+            continue;
+        }
+        for k in 0..3 {
+            c[k] += x[3 * i + k];
+        }
+        count += 1.0;
+    }
+    if count > 0.0 {
+        for value in c.iter_mut() {
+            *value /= count;
+        }
+    }
+    c
+}
+
+fn add_centroid_gradient(g: &mut Array1<f64>, atoms: &[usize], force: [f64; 3]) {
+    let n = g.len() / 3;
+    let members = atoms.iter().filter(|&&i| i < n).count();
+    if members == 0 {
+        return;
+    }
+    let inv = 1.0 / members as f64;
+    for &i in atoms {
+        if i >= n {
+            continue;
+        }
+        for k in 0..3 {
+            g[3 * i + k] += force[k] * inv;
+        }
+    }
+}
+
+/// Penalty energy and gradient on rigid-group centroids.
+///
+/// Same diameter and compression terms as [`penalty`], evaluated between
+/// and on the group centroids. Each centroid's gradient is spread equally
+/// over the group's atoms, so intramolecular bonds feel no relative force.
+pub fn penalty_groups(
+    x: ArrayView1<f64>,
+    groups: &[Vec<usize>],
+    cutoff: f64,
+    beta: f64,
+    mu: f64,
+) -> (f64, Array1<f64>) {
+    let centroids: Vec<[f64; 3]> = groups
+        .iter()
+        .map(|atoms| group_centroid(x, atoms))
+        .collect();
+    let n_groups = centroids.len();
+    let mut e = 0.0;
+    let mut g = Array1::zeros(x.len());
+    if beta > 0.0 && cutoff > 0.0 {
+        let d2 = cutoff * cutoff;
+        for i in 0..n_groups {
+            for j in (i + 1)..n_groups {
+                let d = [
+                    centroids[i][0] - centroids[j][0],
+                    centroids[i][1] - centroids[j][1],
+                    centroids[i][2] - centroids[j][2],
+                ];
+                let excess = d[0] * d[0] + d[1] * d[1] + d[2] * d[2] - d2;
+                if excess > 0.0 {
+                    e += beta * excess * excess;
+                    let coef = 4.0 * beta * excess;
+                    add_centroid_gradient(
+                        &mut g,
+                        &groups[i],
+                        [coef * d[0], coef * d[1], coef * d[2]],
+                    );
+                    add_centroid_gradient(
+                        &mut g,
+                        &groups[j],
+                        [-coef * d[0], -coef * d[1], -coef * d[2]],
+                    );
+                }
+            }
+        }
+    }
+    if mu > 0.0 && n_groups > 0 {
+        let mut cm = [0.0_f64; 3];
+        for c in &centroids {
+            for k in 0..3 {
+                cm[k] += c[k];
+            }
+        }
+        for value in cm.iter_mut() {
+            *value /= n_groups as f64;
+        }
+        for (atoms, c) in groups.iter().zip(centroids.iter()) {
+            let d = [c[0] - cm[0], c[1] - cm[1], c[2] - cm[2]];
+            e += mu * (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]);
+            add_centroid_gradient(
+                &mut g,
+                atoms,
+                [2.0 * mu * d[0], 2.0 * mu * d[1], 2.0 * mu * d[2]],
+            );
+        }
+    }
+    (e, g)
+}
+
 /// A learned choice of relaxation surface per hop.
 ///
 /// Which transform helps is a property of the landscape: centroid compression
@@ -492,6 +602,92 @@ mod tests {
                     (-2.0..=0.0).contains(mean) && *mean < -1.0,
                     "mean {mean} over {draws} draws"
                 );
+            }
+        }
+    }
+
+    fn rigid_water() -> Array1<f64> {
+        Array1::from(vec![
+            0.0, 0.0, 0.0, 0.7572, 0.5865, 0.0, -0.7572, 0.5865, 0.0,
+        ])
+    }
+
+    fn two_rigid_waters() -> (Array1<f64>, Vec<Vec<usize>>) {
+        let mut x = rigid_water().to_vec();
+        x.extend_from_slice(&[3.0, 0.0, 0.0, 3.7572, 0.5865, 0.0, 2.2428, 0.5865, 0.0]);
+        (Array1::from(x), vec![vec![0, 1, 2], vec![3, 4, 5]])
+    }
+
+    #[test]
+    fn a_single_rigid_water_receives_no_penalty_force() {
+        let x = rigid_water();
+        let groups = [vec![0, 1, 2]];
+        let (e, g) = penalty_groups(x.view(), &groups, 1.0, 1.0, 2.5);
+        assert_eq!(e, 0.0);
+        assert!(
+            g.iter().all(|v| *v == 0.0),
+            "internal water geometry felt a penalty force: {g}"
+        );
+    }
+
+    #[test]
+    fn the_group_penalty_gradient_matches_finite_differences() {
+        let (x, groups) = two_rigid_waters();
+        let (cutoff, beta, mu) = (2.0, 0.7, 0.3);
+        let (_, g) = penalty_groups(x.view(), &groups, cutoff, beta, mu);
+        let h = 1e-6;
+        for i in 0..x.len() {
+            let mut plus = x.clone();
+            let mut minus = x.clone();
+            plus[i] += h;
+            minus[i] -= h;
+            let fd = (penalty_groups(plus.view(), &groups, cutoff, beta, mu).0
+                - penalty_groups(minus.view(), &groups, cutoff, beta, mu).0)
+                / (2.0 * h);
+            assert!(
+                (fd - g[i]).abs() < 1e-6,
+                "component {i}: finite difference {fd} against analytic {}",
+                g[i]
+            );
+        }
+    }
+
+    #[test]
+    fn singleton_groups_match_the_atomic_penalty() {
+        let x = cluster();
+        let groups: Vec<Vec<usize>> = (0..x.len() / 3).map(|i| vec![i]).collect();
+        let (cutoff, beta, mu) = (2.0, 0.7, 0.3);
+        let (e_atoms, g_atoms) = penalty(x.view(), cutoff, beta, mu);
+        let (e_groups, g_groups) = penalty_groups(x.view(), &groups, cutoff, beta, mu);
+        assert!(
+            (e_atoms - e_groups).abs() < 1e-12,
+            "{e_atoms} vs {e_groups}"
+        );
+        for i in 0..x.len() {
+            assert!(
+                (g_atoms[i] - g_groups[i]).abs() < 1e-12,
+                "component {i}: atomic {} against group {}",
+                g_atoms[i],
+                g_groups[i]
+            );
+        }
+    }
+
+    #[test]
+    fn atoms_in_a_rigid_group_share_one_penalty_force() {
+        let (x, groups) = two_rigid_waters();
+        let (_, g) = penalty_groups(x.view(), &groups, 2.0, 0.7, 0.3);
+        for atoms in &groups {
+            let shared = [g[3 * atoms[0]], g[3 * atoms[0] + 1], g[3 * atoms[0] + 2]];
+            for &i in atoms {
+                for k in 0..3 {
+                    assert!(
+                        (g[3 * i + k] - shared[k]).abs() < 1e-12,
+                        "atom {i} axis {k}: {} against group force {}",
+                        g[3 * i + k],
+                        shared[k]
+                    );
+                }
             }
         }
     }
