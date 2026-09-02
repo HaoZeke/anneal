@@ -163,11 +163,12 @@ fn run_chain(
     board: &Arc<Mutex<Vec<Slot>>>,
     exchange: ExchangeConfig,
     target: Option<f64>,
+    resume: Option<Array1<f64>>,
 ) -> ChainReport {
     let cfg = Config::recommended(n);
     let mut rng = StdRng::seed_from_u64(seed);
     let mut exchange_rng = StdRng::seed_from_u64(seed ^ 0x5711_ce);
-    let start = random_cluster(n, 0.7, cfg.min_separation, &mut rng);
+    let start = resume.unwrap_or_else(|| random_cluster(n, 0.7, cfg.min_separation, &mut rng));
     let mut ledger = Ledger::new(budget);
     let mut opt = WarmLbfgs::default();
     let compress_mu = exchange.compress_mu;
@@ -363,10 +364,10 @@ fn main() {
     let mode = args.get(5).cloned().unwrap_or_else(|| "indep".to_owned());
     let seed0: u64 = args.get(6).and_then(|v| v.parse().ok()).unwrap_or(0);
     let enabled = match mode.as_str() {
-        "indep" => false,
+        "indep" | "halving" => false,
         "splice" => true,
         other => {
-            eprintln!("unknown mode {other:?}: expected indep or splice");
+            eprintln!("unknown mode {other:?}: expected indep, splice or halving");
             std::process::exit(2);
         }
     };
@@ -400,6 +401,10 @@ fn main() {
         target.map(|r| format!("{r:.6}")).unwrap_or_else(|| "none".into())
     );
 
+    if mode == "halving" {
+        run_halving(n, budget, chains, ensembles, seed0, exchange, target);
+        return;
+    }
     let mut ensembles_solved = 0usize;
     let mut chains_solved = 0usize;
     let mut splice_hits = 0usize;
@@ -423,7 +428,9 @@ fn main() {
                         .wrapping_mul(0x9E37_79B9)
                         .wrapping_add(chain as u64)
                         .wrapping_add(7);
-                    scope.spawn(move || run_chain(n, budget, seed, chain, &board, exchange, target))
+                    scope.spawn(move || {
+                        run_chain(n, budget, seed, chain, &board, exchange, target, None)
+                    })
                 })
                 .collect();
             handles
@@ -484,5 +491,161 @@ fn main() {
         tally.below_current,
         tally.external_calls,
         100.0 * tally.external_calls as f64 / total_charged.max(1) as f64,
+    );
+}
+
+/// Successive halving over chains at the independent arm's total charged
+/// work.
+///
+/// One ensemble owns a pool of `chains * budget` charged evaluations. A
+/// bracket launches `chains` fresh starts at the first rung `r0`, ranks them
+/// by best energy, keeps the top `1/eta`, and continues the survivors from
+/// their live states to the next rung `eta` times longer, until one rung
+/// reaches the per-chain budget of the independent arm. Brackets repeat with
+/// fresh starts until the pool is spent, so every retired walk hands its
+/// unspent share to a new start rather than idling. `HALVING_ETA` (3) and
+/// `HALVING_R0` (budget / eta^2) size the schedule.
+#[allow(clippy::too_many_arguments)]
+fn run_halving(
+    n: usize,
+    budget: usize,
+    chains: usize,
+    ensembles: u64,
+    seed0: u64,
+    exchange: ExchangeConfig,
+    target: Option<f64>,
+) {
+    let eta = env_usize("HALVING_ETA", 3).max(2);
+    let r0 = env_usize("HALVING_R0", (budget / (eta * eta)).max(1000));
+    let mut rungs = Vec::new();
+    let mut r = r0;
+    while r < budget {
+        rungs.push(r);
+        r *= eta;
+    }
+    rungs.push(budget);
+    println!(
+        "  halving: eta {eta}, rungs {rungs:?}, pool {} per ensemble",
+        chains * budget
+    );
+    let mut ensembles_solved = 0usize;
+    let mut first_hits: Vec<usize> = Vec::new();
+    let mut brackets_total = 0usize;
+    let mut launches_total = 0usize;
+    for ensemble in seed0..(seed0 + ensembles) {
+        let mut pool = chains * budget;
+        let mut spent = 0usize;
+        let mut first_hit: Option<usize> = None;
+        let mut deepest = f64::INFINITY;
+        let mut launches = 0usize;
+        let mut brackets = 0usize;
+        let mut next_seed = ensemble.wrapping_mul(0x9E37_79B9).wrapping_add(7);
+        while pool > 0 {
+            brackets += 1;
+            // Live walks of this bracket: (state, best so far, seed).
+            let mut live: Vec<(Option<Array1<f64>>, f64, u64)> = (0..chains)
+                .map(|_| {
+                    next_seed = next_seed.wrapping_add(1);
+                    (None, f64::INFINITY, next_seed)
+                })
+                .collect();
+            let mut cumulative = 0usize;
+            for (rung_index, &rung) in rungs.iter().enumerate() {
+                let slice = rung - cumulative;
+                let count = live.len();
+                if count == 0 || pool == 0 {
+                    break;
+                }
+                // The pool caps the last rung of the last bracket.
+                let per_chain = slice.min(pool / count.max(1));
+                if per_chain == 0 {
+                    break;
+                }
+                let board = Arc::new(Mutex::new(vec![
+                    Slot {
+                        energy: f64::INFINITY,
+                        best_energy: f64::INFINITY,
+                        ..Slot::default()
+                    };
+                    count
+                ]));
+                let reports: Vec<ChainReport> = std::thread::scope(|scope| {
+                    let handles: Vec<_> = live
+                        .iter()
+                        .enumerate()
+                        .map(|(chain, (state, _, seed))| {
+                            let board = Arc::clone(&board);
+                            let resume = state.clone();
+                            let seed = seed.wrapping_add(rung_index as u64 * 0x1000);
+                            scope.spawn(move || {
+                                run_chain(
+                                    n, per_chain, seed, chain, &board, exchange, target, resume,
+                                )
+                            })
+                        })
+                        .collect();
+                    handles
+                        .into_iter()
+                        .map(|h| h.join().expect("chain thread"))
+                        .collect()
+                });
+                launches += count;
+                let rung_charged: usize = reports.iter().map(|r| r.charged).sum();
+                if first_hit.is_none() {
+                    // Rung walks run side by side, so the pool cost of the
+                    // earliest hit is what every walk had spent by then.
+                    if let Some(hit) = reports.iter().filter_map(|r| r.first_hit).min() {
+                        first_hit = Some(spent + hit * count);
+                    }
+                }
+                spent += rung_charged;
+                pool = pool.saturating_sub(rung_charged);
+                cumulative += per_chain;
+                let mut ranked: Vec<(usize, f64)> = reports
+                    .iter()
+                    .enumerate()
+                    .map(|(i, r)| (i, r.outcome.best.min(live[i].1)))
+                    .collect();
+                ranked.sort_by(|a, b| a.1.total_cmp(&b.1));
+                deepest = deepest.min(ranked.first().map_or(f64::INFINITY, |r| r.1));
+                let keep = if rung_index + 1 < rungs.len() {
+                    count.div_ceil(eta)
+                } else {
+                    0
+                };
+                let mut survivors = Vec::with_capacity(keep);
+                for &(i, best) in ranked.iter().take(keep) {
+                    let state = reports[i]
+                        .outcome
+                        .final_state
+                        .clone()
+                        .or_else(|| reports[i].outcome.best_state.clone());
+                    survivors.push((state, best, live[i].2));
+                }
+                live = survivors;
+                if per_chain < slice {
+                    break;
+                }
+            }
+        }
+        let solved = target.is_some_and(|t| deepest < t + 1e-4);
+        if solved {
+            ensembles_solved += 1;
+        }
+        if let Some(hit) = first_hit {
+            first_hits.push(hit);
+        }
+        brackets_total += brackets;
+        launches_total += launches;
+        println!(
+            "  ensemble {ensemble}: deepest {deepest:.6}  solved {solved}  first hit pool {}  spent {spent}  brackets {brackets}  launches {launches}",
+            first_hit.map(|c| c.to_string()).unwrap_or_else(|| "-".into())
+        );
+    }
+    first_hits.sort_unstable();
+    let median = first_hits.get(first_hits.len() / 2).copied();
+    println!(
+        "{ensembles_solved}/{ensembles} ensembles solved (halving), median first hit pool {}, brackets {brackets_total}, launches {launches_total}",
+        median.map(|m| m.to_string()).unwrap_or_else(|| "-".into())
     );
 }
