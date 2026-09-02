@@ -818,4 +818,12 @@ mod tests {
         assert!(matches!(arms.as_slice(), [Arm::MinimaHopping]));
         assert_eq!(arms[0].label(), "minima-hopping");
     }
+
+    #[test]
+    fn softened_selector_is_a_distinct_minima_hopping_arm() {
+        let arms = selected_arms("mh-soft", &[]).unwrap();
+
+        assert!(matches!(arms.as_slice(), [Arm::MinimaHoppingSoftened]));
+        assert_eq!(arms[0].label(), "minima-hopping-softened");
+    }
 }
