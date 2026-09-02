@@ -1117,6 +1117,7 @@ fn catalog_trace_records_admission_eviction_and_incumbent_identity() {
     );
     let added = run.events().last().unwrap().catalog.as_ref().unwrap();
     assert_eq!(added.basin_id, 0);
+    assert!(added.new_basin);
     assert_eq!(added.kind, CatalogMutationKind::Added);
     assert!(added.evicted.is_empty());
     assert_eq!(added.incumbent_basin, Some(0));
@@ -1127,6 +1128,7 @@ fn catalog_trace_records_admission_eviction_and_incumbent_identity() {
     );
     let replacement = run.events().last().unwrap().catalog.as_ref().unwrap();
     assert_eq!(replacement.basin_id, 1);
+    assert!(replacement.new_basin);
     assert_eq!(replacement.kind, CatalogMutationKind::ReplacedCapacity);
     assert_eq!(replacement.evicted, vec![0]);
     assert_eq!(replacement.incumbent_basin, Some(1));
@@ -1143,6 +1145,7 @@ fn catalog_trace_records_admission_eviction_and_incumbent_identity() {
         engine: anneal_core::compatibility::EngineDescriptor::default(),
     });
     assert!(trace.contains("\"catalog_basin\":1"));
+    assert!(trace.contains("\"catalog_new_basin\":true"));
     assert!(trace.contains("\"catalog_mutation\":\"replaced_capacity\""));
     assert!(trace.contains("\"catalog_evicted\":[0]"));
     assert!(trace.contains("\"catalog_incumbent\":1"));
@@ -1602,6 +1605,10 @@ fn cooperative_trace_records_policy_diagnostic_evidence() {
     assert_eq!(evidence.local_basin_distance, 0.0);
     assert!(evidence.novelty.is_finite() && evidence.novelty > 0.0);
     assert!(evidence.transition_uncertainty.is_finite() && evidence.transition_uncertainty > 0.0);
+    assert_eq!(evidence.discovery_role, DiscoveryRole::SaddleRide);
+    assert_eq!(evidence.discovery_epoch, 2);
+    assert_eq!(evidence.basin_unseen_mass_upper, 1.0);
+    assert_eq!(evidence.saddle_unseen_mass_upper, 1.0);
     assert_eq!(evidence.query_energy, -1.2);
 
     let trace = run.json_lines(&RunManifest {
@@ -1614,6 +1621,10 @@ fn cooperative_trace_records_policy_diagnostic_evidence() {
     assert!(trace.contains("\"policy_relation\":\"incumbent\""));
     assert!(trace.contains("\"policy_total_visits\":2"));
     assert!(trace.contains("\"policy_transition_uncertainty\":"));
+    assert!(trace.contains("\"policy_discovery_role\":\"saddle_ride\""));
+    assert!(trace.contains("\"policy_discovery_epoch\":2"));
+    assert!(trace.contains("\"policy_basin_unseen_mass_upper\":1"));
+    assert!(trace.contains("\"policy_saddle_unseen_mass_upper\":1"));
     assert!(trace.contains("\"policy_query_energy\":-1.2"));
 }
 
