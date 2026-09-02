@@ -277,18 +277,6 @@ fn ride_tasks(
     tasks
 }
 
-fn next_ride_segment(
-    tasks: Vec<(usize, u16, RideModeDirection)>,
-) -> Vec<(usize, u16, RideModeDirection)> {
-    let Some(source) = tasks.first().map(|task| task.0) else {
-        return Vec::new();
-    };
-    tasks
-        .into_iter()
-        .take_while(|task| task.0 == source)
-        .collect()
-}
-
 fn new_ids(before: usize, after: usize) -> Vec<usize> {
     (before..after).collect()
 }
@@ -421,6 +409,13 @@ impl PlannedAction {
             },
         }
     }
+
+    fn admissible(&self, active_ride_source: Option<usize>) -> bool {
+        match self {
+            Self::Ridge { source_basin, .. } => Some(*source_basin) == active_ride_source,
+            Self::Escape { .. } => true,
+        }
+    }
 }
 
 /// Explore one arbitrary-dimensional PES with cooperative basin and ridge arms.
@@ -531,7 +526,7 @@ where
         if policy == NdHybridPolicy::RidgeOnly && ride_tasks.is_empty() {
             break NdHybridTermination::RidePortfolioExhausted;
         }
-        let ride_tasks = next_ride_segment(ride_tasks);
+        let active_ride_source = ride_tasks.first().map(|task| task.0);
 
         let mut plans = Vec::<PlannedAction>::new();
         if policy != NdHybridPolicy::BasinEscapeOnly {
@@ -611,6 +606,7 @@ where
         let selected_index = scores
             .iter()
             .enumerate()
+            .filter(|(index, _)| plans[*index].admissible(active_ride_source))
             .max_by(|(left_index, left), (right_index, right)| {
                 left.information_per_charged_evaluation
                     .total_cmp(&right.information_per_charged_evaluation)
@@ -619,7 +615,15 @@ where
             .map(|(index, _)| index)
             .expect("every admissible policy supplies an action");
         let selected_score = scores[selected_index];
-        let ridge_information_rate = best_information_rate(&scores, SearchMechanism::SaddleRide);
+        let ridge_information_rate = scores
+            .iter()
+            .enumerate()
+            .filter(|(index, score)| {
+                score.mechanism == SearchMechanism::SaddleRide
+                    && plans[*index].admissible(active_ride_source)
+            })
+            .map(|(_, score)| score.information_per_charged_evaluation)
+            .max_by(f64::total_cmp);
         let escape_information_rate = best_information_rate(&scores, SearchMechanism::BasinEscape);
         let selected = plans.swap_remove(selected_index);
         attempt += 1;
@@ -900,14 +904,32 @@ mod tests {
     }
 
     #[test]
-    fn dovetail_exposes_one_source_segment_at_a_time() {
+    fn dovetail_marks_one_source_segment_admissible_at_a_time() {
         let tasks = ride_tasks(3, &HashSet::new(), 1, 2);
+        let active_source = tasks.first().map(|task| task.0);
+        let plans = [
+            PlannedAction::Ridge {
+                source_basin: 1,
+                source_energy: 0.0,
+                mode_rank: 0,
+                direction: RideModeDirection::Positive,
+                source: Array1::zeros(2),
+                mode: Array1::zeros(2),
+                feature: vec![0.0, 0.0],
+            },
+            PlannedAction::Ridge {
+                source_basin: 2,
+                source_energy: 0.0,
+                mode_rank: 0,
+                direction: RideModeDirection::Positive,
+                source: Array1::zeros(2),
+                mode: Array1::zeros(2),
+                feature: vec![0.0, 0.0],
+            },
+        ];
 
-        let segment = next_ride_segment(tasks);
-
-        assert_eq!(segment.len(), 4);
-        assert!(segment.iter().all(|(source, _, _)| *source == 1));
-        assert!(segment.contains(&(1, 0, RideModeDirection::Positive)));
-        assert!(segment.contains(&(1, 1, RideModeDirection::Negative)));
+        assert_eq!(active_source, Some(1));
+        assert!(plans[0].admissible(active_source));
+        assert!(!plans[1].admissible(active_source));
     }
 }
