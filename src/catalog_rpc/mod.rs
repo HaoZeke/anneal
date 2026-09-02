@@ -1603,9 +1603,7 @@ pub(crate) fn decode_reply_reader(
                         certified_connections: status.get_certified_connections(),
                         seam,
                         roster_version: status.get_roster_version(),
-                        live_replicas: list_u32(
-                            status.get_live_replicas().map_err(wire_error)?,
-                        ),
+                        live_replicas: list_u32(status.get_live_replicas().map_err(wire_error)?),
                         ticks: status.get_ticks(),
                         spawn_requested: status.get_spawn_requested(),
                     })

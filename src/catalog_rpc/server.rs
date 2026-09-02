@@ -23,7 +23,6 @@ use super::{
     PopulationPlan, PopulationSelection, ProtocolError, ProtocolRejection, RosterReply,
     TransitionDestination, decode_request, decode_request_reader, encode_reply, encode_request,
 };
-use crate::scaling::{ScaleDecision, SuccessiveHalving};
 use crate::Catalog_capnp::catalog_request;
 use crate::catalog::{
     AdmissionOutcome, AdmissionRejection, Archive, AttractorStrength, BasinCatalog, BasinCensus,
@@ -61,6 +60,7 @@ use crate::ride_ledger::{
     EnvironmentBook, RideArm, RideDirection, RideLedger, RideOutcome, RidePortfolio, RideSource,
     SADDLE_COVERAGE_MINIMUM_OBSERVATIONS,
 };
+use crate::scaling::{ScaleDecision, SuccessiveHalving};
 use crate::soap::local_nu3_z;
 use crate::transition_graph::{AttractionRegionConfig, TransitionGraph, TransitionOutcome};
 use crate::universal_coverage::{CoverageConfig, UniversalCoverage};
@@ -571,9 +571,9 @@ impl CoordinatorState {
                                 .map_err(|_| CatalogServerError::InvalidScientificConfiguration)?;
                         }
                         for replica in &config.replicas {
-                            population.mark_live(*replica).map_err(|_| {
-                                CatalogServerError::InvalidScientificConfiguration
-                            })?;
+                            population
+                                .mark_live(*replica)
+                                .map_err(|_| CatalogServerError::InvalidScientificConfiguration)?;
                         }
                         population
                     },
@@ -844,11 +844,7 @@ impl CatalogServer {
     }
 
     /// Apply a quorum close to the live population after start.
-    pub fn with_quorum(
-        self,
-        quorum: f64,
-        deadline_ticks: u64,
-    ) -> Result<Self, CatalogServerError> {
+    pub fn with_quorum(self, quorum: f64, deadline_ticks: u64) -> Result<Self, CatalogServerError> {
         let mut state = match self.state.lock() {
             Ok(state) => state,
             Err(poisoned) => poisoned.into_inner(),
@@ -2621,6 +2617,7 @@ fn apply_request(
             };
             state.snapshot_version = snapshot_version;
             feed_halving(
+                config,
                 state,
                 request.identity.replica,
                 *cumulative_charged,
@@ -2703,6 +2700,7 @@ fn apply_request(
             state.snapshot_version = snapshot_version;
             if let Some(last) = events.last() {
                 feed_halving(
+                    config,
                     state,
                     request.identity.replica,
                     last.cumulative_charged,
@@ -2721,7 +2719,7 @@ fn apply_request(
             payload = AcceptedPayload::Roster(state.roster.reply());
         }
         CatalogOperation::Detach { reason } => {
-            if retire_replica(state, request.identity.replica, reason).is_err() {
+            if retire_replica(config, state, request.identity.replica, reason).is_err() {
                 return rejected(
                     state,
                     request.event_sequence,
@@ -2779,7 +2777,7 @@ fn apply_request(
                 .as_mut()
                 .map(|policy| policy.set_target(*live_target))
                 .unwrap_or_default();
-            apply_scale_decisions(state, decisions);
+            apply_scale_decisions(config, state, decisions);
             payload = AcceptedPayload::Roster(state.roster.reply());
             if let Some(snapshot_version) = state.snapshot_version.checked_add(1) {
                 state.snapshot_version = snapshot_version;
@@ -2833,6 +2831,7 @@ fn admit_replica(state: &mut CoordinatorState, replica: u32) -> Result<(), Catal
 }
 
 fn retire_replica(
+    config: &ServerConfig,
     state: &mut CoordinatorState,
     replica: u32,
     reason: &str,
@@ -2841,7 +2840,15 @@ fn retire_replica(
         return Err(CatalogServerError::InvalidConfiguration);
     }
     if let Some(scientific) = state.scientific.as_mut() {
+        let epoch = scientific.population.open_epoch();
         let _ = scientific.population.retire(replica);
+        if scientific.population.open_epoch() != epoch
+            && let Some(plan) = scientific.population.completed_plan(epoch).cloned()
+        {
+            let participants = u32::try_from(plan.destinations().len())
+                .expect("participants are bounded by replica count");
+            let _ = realize_population_plan(scientific, config, epoch, &plan, participants);
+        }
     }
     let was_live = state.roster.live.remove(&replica);
     state.roster.retired.insert(replica, reason.to_owned());
@@ -2855,6 +2862,7 @@ fn retire_replica(
 }
 
 fn feed_halving(
+    config: &ServerConfig,
     state: &mut CoordinatorState,
     replica: u32,
     charged_work: u64,
@@ -2889,15 +2897,19 @@ fn feed_halving(
         .as_mut()
         .map(|policy| policy.observe(replica, charged_work, best_energy))
         .unwrap_or_default();
-    apply_scale_decisions(state, decisions);
+    apply_scale_decisions(config, state, decisions);
 }
 
-fn apply_scale_decisions(state: &mut CoordinatorState, decisions: Vec<ScaleDecision>) {
+fn apply_scale_decisions(
+    config: &ServerConfig,
+    state: &mut CoordinatorState,
+    decisions: Vec<ScaleDecision>,
+) {
     for decision in decisions {
         match decision {
             ScaleDecision::Retire(replica) => {
                 state.roster.pending_retire.insert(replica);
-                let _ = retire_replica(state, replica, "halving");
+                let _ = retire_replica(config, state, replica, "halving");
             }
             ScaleDecision::Spawn(count) => {
                 state.roster.spawn_requested = state.roster.spawn_requested.saturating_add(count);
