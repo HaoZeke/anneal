@@ -183,3 +183,7 @@ required-features = ["featomic"]
 [[example]]
 name = "lj_census_calibration"
 required-features = ["ira"]
+
+[[example]]
+name = "lj_joint_optimum"
+required-features = ["ira"]

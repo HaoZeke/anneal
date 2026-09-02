@@ -1,0 +1,476 @@
+//! Matched-call LJ global-minimum benchmark for joint-optimum exploration.
+//!
+//! The adaptive arm allocates between finite invariant basin proposals and
+//! projected rgsaddle ridge/IRC actions by information about the identity and
+//! energy of the lowest reachable minimum per expected PES call. Fixed-family
+//! ablations, plain Wales--Doye basin hopping, and Goedecker minima hopping use
+//! the same initial coordinates, seeds, target, and charged-call ceiling.
+//!
+//! Usage:
+//! `lj_joint_optimum <N> <budget> <seeds> [all|adaptive|ridge|basin|bh|mh] [gs2|morokuma|both] [seed0]`
+
+use std::error::Error;
+
+use anneal_core::atomistic_hybrid::{
+    AtomisticHybridConfig, AtomisticHybridPolicy, AtomisticSystem, explore_atomistic_with_policy,
+};
+use anneal_core::catalog::lj;
+use anneal_core::methods::cluster_hopping::{
+    Config as HoppingConfig, Ledger, Outcome, random_cluster, run, run_with_gradient,
+};
+use anneal_core::methods::cluster_search::{Encounter, first_encounter, median_encounter};
+use anneal_core::methods::warm_lbfgs::WarmLbfgs;
+use anneal_core::pes_exploration::{IrcKind, PesExplorationConfig, RideMethod};
+use anneal_core::potentials::{PairKind, PairPotential};
+use anneal_core::shape::IraStructureWitness;
+use ndarray::{Array1, ArrayView1};
+use rand::{SeedableRng, rngs::StdRng};
+use serde_json::json;
+
+const TARGET_TOLERANCE: f64 = 1e-4;
+
+#[derive(Clone, Copy, Debug)]
+enum Arm {
+    Adaptive(IrcKind),
+    Ridge(IrcKind),
+    Basin,
+    BasinHopping,
+    MinimaHopping,
+}
+
+impl Arm {
+    fn label(self) -> String {
+        match self {
+            Self::Adaptive(kind) => format!("adaptive-{}", irc_name(kind)),
+            Self::Ridge(kind) => format!("ridge-{}", irc_name(kind)),
+            Self::Basin => "basin-ablation".into(),
+            Self::BasinHopping => "basin-hopping".into(),
+            Self::MinimaHopping => "minima-hopping".into(),
+        }
+    }
+}
+
+#[derive(Default)]
+struct Summary {
+    encounters: Vec<Encounter>,
+    deepest: f64,
+    charged: u128,
+    minima: u128,
+    saddles: u128,
+    failures: u128,
+}
+
+impl Summary {
+    fn observe(
+        &mut self,
+        encounter: Encounter,
+        best: f64,
+        charged: u64,
+        minima: usize,
+        saddles: usize,
+        failures: usize,
+    ) {
+        if self.encounters.is_empty() {
+            self.deepest = best;
+        } else {
+            self.deepest = self.deepest.min(best);
+        }
+        self.encounters.push(encounter);
+        self.charged += u128::from(charged);
+        self.minima += minima as u128;
+        self.saddles += saddles as u128;
+        self.failures += failures as u128;
+    }
+}
+
+fn reference(n: usize) -> Option<f64> {
+    Some(match n {
+        13 => -44.326_801,
+        38 => -173.928_427,
+        55 => -279.248_470,
+        75 => -397.492_331,
+        98 => -543.665_361,
+        102 => -569.363_652,
+        104 => -582.086_642,
+        _ => return None,
+    })
+}
+
+fn irc_name(kind: IrcKind) -> &'static str {
+    match kind {
+        IrcKind::Gs2 => "gs2",
+        IrcKind::Morokuma => "morokuma",
+    }
+}
+
+fn irc_kinds(selector: &str) -> Result<Vec<IrcKind>, String> {
+    match selector {
+        "gs2" => Ok(vec![IrcKind::Gs2]),
+        "morokuma" => Ok(vec![IrcKind::Morokuma]),
+        "both" => Ok(vec![IrcKind::Gs2, IrcKind::Morokuma]),
+        _ => Err("IRC selector must be gs2, morokuma, or both".into()),
+    }
+}
+
+fn selected_arms(selector: &str, irc: &[IrcKind]) -> Result<Vec<Arm>, String> {
+    let mut arms = Vec::new();
+    match selector {
+        "all" => {
+            arms.extend(irc.iter().copied().map(Arm::Adaptive));
+            arms.extend(irc.iter().copied().map(Arm::Ridge));
+            arms.extend([Arm::Basin, Arm::BasinHopping, Arm::MinimaHopping]);
+        }
+        "adaptive" => arms.extend(irc.iter().copied().map(Arm::Adaptive)),
+        "ridge" => arms.extend(irc.iter().copied().map(Arm::Ridge)),
+        "basin" => arms.push(Arm::Basin),
+        "bh" => arms.push(Arm::BasinHopping),
+        "mh" => arms.push(Arm::MinimaHopping),
+        _ => return Err("arm must be all, adaptive, ridge, basin, bh, or mh".into()),
+    }
+    Ok(arms)
+}
+
+fn hybrid_config(n: usize, budget: u64, irc_kind: IrcKind) -> AtomisticHybridConfig {
+    let dimension = u64::try_from(3 * n).unwrap_or(u64::MAX);
+    let escape_cap = budget.min((20 * dimension).max(800));
+    let ride_cap = budget.min((100 * dimension).max(4_000));
+    let length = PairKind::LennardJones.r_min();
+    let component_tolerance = 1e-5 / (dimension as f64).sqrt();
+    AtomisticHybridConfig {
+        evaluation_budget: budget,
+        ride_evaluation_cap: ride_cap,
+        escape_evaluation_cap: escape_cap,
+        ride_modes_per_atom: 1,
+        localization_radius: 1.5 * length,
+        escape_scales: vec![0.08 * length, 0.16 * length, 0.32 * length, 0.64 * length],
+        minimum_information_samples: 256,
+        information_length_scale: 1.0,
+        information_amplitude: 1.0,
+        information_noise: 1e-6,
+        expected_ride_cost: ride_cap as f64,
+        expected_escape_cost: escape_cap as f64,
+        cost_prior_strength: 1.0,
+        exploration: PesExplorationConfig {
+            ride_method: RideMethod::Lanczos,
+            quench_steps: 1_000,
+            saddle_steps: 1_000,
+            minimum_mode_force_tolerance: 1e-2,
+            irc_steps: 200,
+            prfo_steps: 300,
+            activation_attempts: 6,
+            activation_growth: 1.6,
+            activation_relaxation_steps: 3,
+            quench_gradient_tolerance: component_tolerance,
+            quench_gradient_norm_tolerance: Some(1e-5),
+            saddle_force_tolerance: 1e-3,
+            saddle_displacement: 0.1 * length,
+            negative_curvature_tolerance: 1e-6,
+            hessian_step: 1e-4 * length,
+            maximum_move: 0.2 * length,
+            irc_step: 0.1 * length,
+            irc_kind,
+            branch_attempts: 4,
+            branch_growth: 2.0,
+            irc_force_tolerance: 0.05,
+            refine_with_prfo: true,
+        },
+    }
+}
+
+fn run_hopping(
+    potential: &PairPotential,
+    initial: ArrayView1<'_, f64>,
+    n: usize,
+    budget: usize,
+    seed: u64,
+    minima_hopping: bool,
+) -> Outcome {
+    let mut config = HoppingConfig::for_cluster(n);
+    config.bias_height = 0.0;
+    config.minima_hopping = minima_hopping;
+    let mut ledger = Ledger::new(budget);
+    let mut optimizer = WarmLbfgs::default();
+    let mut relax = |ledger: &mut Ledger, start: ArrayView1<'_, f64>, steps: usize| {
+        let before = ledger.spent();
+        optimizer.forget();
+        let (energy, coordinates, _) = optimizer.minimize(start, steps, |point| {
+            ledger.charge().then(|| potential.value_and_gradient(point))
+        });
+        ledger.record_quench_boundary(before, energy, coordinates.clone(), None);
+        (energy, coordinates)
+    };
+    let mut gradient = |ledger: &mut Ledger, point: ArrayView1<'_, f64>| {
+        ledger
+            .charge()
+            .then(|| potential.value_and_gradient(point).1)
+    };
+    let mut rng = StdRng::seed_from_u64(seed);
+    if minima_hopping {
+        run_with_gradient(
+            &config,
+            initial,
+            &mut ledger,
+            &mut relax,
+            Some(&mut gradient),
+            &mut rng,
+        )
+    } else {
+        run(&config, initial, &mut ledger, &mut relax, &mut rng)
+    }
+}
+
+fn wilson_interval(hits: usize, total: usize) -> (f64, f64) {
+    if total == 0 {
+        return (0.0, 0.0);
+    }
+    let n = total as f64;
+    let probability = hits as f64 / n;
+    let z = 1.959_963_984_540_054_f64;
+    let z2 = z * z;
+    let denominator = 1.0 + z2 / n;
+    let centre = (probability + z2 / (2.0 * n)) / denominator;
+    let half =
+        z * ((probability * (1.0 - probability) / n + z2 / (4.0 * n * n)).sqrt()) / denominator;
+    ((centre - half).max(0.0), (centre + half).min(1.0))
+}
+
+fn encounter_fields(encounter: Encounter) -> (bool, usize) {
+    (encounter.found(), encounter.charged())
+}
+
+fn main() -> Result<(), Box<dyn Error>> {
+    let arguments = std::env::args().collect::<Vec<_>>();
+    let n = arguments
+        .get(1)
+        .and_then(|value| value.parse().ok())
+        .unwrap_or(38);
+    let budget = arguments
+        .get(2)
+        .and_then(|value| value.parse::<u64>().ok())
+        .unwrap_or(100_000);
+    let seeds = arguments
+        .get(3)
+        .and_then(|value| value.parse::<u64>().ok())
+        .unwrap_or(8);
+    let selector = arguments.get(4).map(String::as_str).unwrap_or("all");
+    let irc_selector = arguments.get(5).map(String::as_str).unwrap_or("gs2");
+    let seed0 = arguments
+        .get(6)
+        .and_then(|value| value.parse().ok())
+        .unwrap_or(0);
+    if n < 2 || budget == 0 || seeds == 0 {
+        return Err("N must be at least two and budget/seeds must be positive".into());
+    }
+    let target = reference(n).ok_or("no published LJ target is registered for this size")?;
+    let arms = selected_arms(selector, &irc_kinds(irc_selector)?)?;
+    let descriptor_space = lj::descriptor_space();
+    let potential = PairPotential::lennard_jones(n);
+    let witness = IraStructureWitness {
+        kmax_factor: if n >= 55 { 2.5 } else { 1.8 },
+        radius: lj::CALIBRATION_IRA_TOLERANCE,
+    };
+    let system = AtomisticSystem {
+        species: vec![18; n],
+        masses: vec![1.0; n],
+        frozen_atoms: vec![false; n],
+        identity_domain: format!("lj-reduced-n{n}"),
+    };
+    let hopping = HoppingConfig::for_cluster(n);
+    let mut summaries = (0..arms.len())
+        .map(|_| Summary::default())
+        .collect::<Vec<_>>();
+
+    println!(
+        "{}",
+        json!({
+            "kind": "lj_joint_optimum_config",
+            "n": n,
+            "budget": budget,
+            "seeds": seeds,
+            "seed0": seed0,
+            "target": target,
+            "target_tolerance": TARGET_TOLERANCE,
+            "arms": arms.iter().copied().map(Arm::label).collect::<Vec<_>>(),
+        })
+    );
+
+    for seed in seed0..seed0.saturating_add(seeds) {
+        let mut initial_rng =
+            StdRng::seed_from_u64(seed.wrapping_mul(0x9e37_79b9_7f4a_7c15).wrapping_add(7));
+        let initial = random_cluster(n, 0.7, hopping.min_separation, &mut initial_rng);
+        for (arm_index, arm) in arms.iter().copied().enumerate() {
+            let label = arm.label();
+            match arm {
+                Arm::Adaptive(irc_kind) | Arm::Ridge(irc_kind) => {
+                    let policy = if matches!(arm, Arm::Adaptive(_)) {
+                        AtomisticHybridPolicy::Adaptive
+                    } else {
+                        AtomisticHybridPolicy::RidgeOnly
+                    };
+                    let report = explore_atomistic_with_policy(
+                        &potential,
+                        &descriptor_space,
+                        initial.view(),
+                        &system,
+                        &hybrid_config(n, budget, irc_kind),
+                        &witness,
+                        seed,
+                        policy,
+                    )?;
+                    let best = report.best_energy().unwrap_or(f64::INFINITY);
+                    let encounter = report.first_encounter(target, TARGET_TOLERANCE);
+                    let failures = report
+                        .events
+                        .iter()
+                        .filter(|event| !event.converged)
+                        .count();
+                    let (found, first_charged) = encounter_fields(encounter);
+                    println!(
+                        "{}",
+                        json!({
+                            "kind": "lj_joint_optimum_run",
+                            "arm": label,
+                            "seed": seed,
+                            "best_energy": best,
+                            "gap": best - target,
+                            "target_found": found,
+                            "first_charged": first_charged,
+                            "charged": report.charged_evaluations,
+                            "minima": report.network.minimum_count(),
+                            "saddles": report.network.saddle_count(),
+                            "unresolved_saddles": report.network.unresolved_saddles().len(),
+                            "events": report.events.len(),
+                            "ridge_pulls": report.mechanism_pulls[0],
+                            "basin_pulls": report.mechanism_pulls[1],
+                            "failed_actions": failures,
+                            "termination": format!("{:?}", report.termination),
+                        })
+                    );
+                    summaries[arm_index].observe(
+                        encounter,
+                        best,
+                        report.charged_evaluations,
+                        report.network.minimum_count(),
+                        report.network.saddle_count(),
+                        failures,
+                    );
+                }
+                Arm::Basin => {
+                    let report = explore_atomistic_with_policy(
+                        &potential,
+                        &descriptor_space,
+                        initial.view(),
+                        &system,
+                        &hybrid_config(n, budget, IrcKind::Gs2),
+                        &witness,
+                        seed,
+                        AtomisticHybridPolicy::BasinEscapeOnly,
+                    )?;
+                    let best = report.best_energy().unwrap_or(f64::INFINITY);
+                    let encounter = report.first_encounter(target, TARGET_TOLERANCE);
+                    let failures = report
+                        .events
+                        .iter()
+                        .filter(|event| !event.converged)
+                        .count();
+                    let (found, first_charged) = encounter_fields(encounter);
+                    println!(
+                        "{}",
+                        json!({
+                            "kind": "lj_joint_optimum_run",
+                            "arm": label,
+                            "seed": seed,
+                            "best_energy": best,
+                            "gap": best - target,
+                            "target_found": found,
+                            "first_charged": first_charged,
+                            "charged": report.charged_evaluations,
+                            "minima": report.network.minimum_count(),
+                            "saddles": 0,
+                            "events": report.events.len(),
+                            "ridge_pulls": 0,
+                            "basin_pulls": report.mechanism_pulls[1],
+                            "failed_actions": failures,
+                            "termination": format!("{:?}", report.termination),
+                        })
+                    );
+                    summaries[arm_index].observe(
+                        encounter,
+                        best,
+                        report.charged_evaluations,
+                        report.network.minimum_count(),
+                        0,
+                        failures,
+                    );
+                }
+                Arm::BasinHopping | Arm::MinimaHopping => {
+                    let outcome = run_hopping(
+                        &potential,
+                        initial.view(),
+                        n,
+                        usize::try_from(budget).unwrap_or(usize::MAX),
+                        seed,
+                        matches!(arm, Arm::MinimaHopping),
+                    );
+                    let encounter =
+                        first_encounter(&outcome, target, TARGET_TOLERANCE, outcome.charged);
+                    let (found, first_charged) = encounter_fields(encounter);
+                    println!(
+                        "{}",
+                        json!({
+                            "kind": "lj_joint_optimum_run",
+                            "arm": label,
+                            "seed": seed,
+                            "best_energy": outcome.best,
+                            "gap": outcome.best - target,
+                            "target_found": found,
+                            "first_charged": first_charged,
+                            "charged": outcome.charged,
+                            "minima": outcome.basins,
+                            "saddles": 0,
+                            "hops": outcome.hops,
+                            "failed_actions": 0,
+                        })
+                    );
+                    summaries[arm_index].observe(
+                        encounter,
+                        outcome.best,
+                        outcome.charged as u64,
+                        outcome.basins,
+                        0,
+                        0,
+                    );
+                }
+            }
+        }
+    }
+
+    for (arm, summary) in arms.iter().copied().zip(&summaries) {
+        let total = summary.encounters.len();
+        let hits = summary
+            .encounters
+            .iter()
+            .filter(|encounter| encounter.found())
+            .count();
+        let (hit_low, hit_high) = wilson_interval(hits, total);
+        println!(
+            "{}",
+            json!({
+                "kind": "lj_joint_optimum_summary",
+                "arm": arm.label(),
+                "runs": total,
+                "hits": hits,
+                "hit_probability": hits as f64 / total as f64,
+                "hit_probability_wilson95": [hit_low, hit_high],
+                "km_median_first_charged": median_encounter(&summary.encounters),
+                "deepest_energy": summary.deepest,
+                "deepest_gap": summary.deepest - target,
+                "mean_charged": summary.charged as f64 / total as f64,
+                "mean_minima": summary.minima as f64 / total as f64,
+                "mean_saddles": summary.saddles as f64 / total as f64,
+                "mean_failed_actions": summary.failures as f64 / total as f64,
+            })
+        );
+    }
+    Ok(())
+}
