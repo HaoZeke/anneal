@@ -326,47 +326,28 @@ fn sample_gamma<R: Rng + ?Sized>(shape: f64, rng: &mut R) -> f64 {
 }
 
 #[cfg(test)]
-mod charged_discovery_tests {
-    use super::ChargedDiscoveryAllocator;
-    use rand::SeedableRng;
-    use rand::rngs::StdRng;
+mod discovery_accounting_tests {
+    use super::DiscoveryAccounting;
 
     #[test]
-    fn every_discovery_mechanism_receives_initial_exposure() {
-        let mut allocator = ChargedDiscoveryAllocator::new(3);
-        let mut rng = StdRng::seed_from_u64(7);
+    fn discovery_accounting_retains_exact_exposures() {
+        let mut accounting = DiscoveryAccounting::new(3);
+        accounting.observe(0, 0, 50);
+        accounting.observe(1, 2, 75);
+        accounting.observe(1, 1, 25);
 
-        for expected in 0..3 {
-            let selected = allocator.select(&mut rng);
-            assert_eq!(selected, expected);
-            allocator.update(selected, 0, 50);
-        }
-
-        assert_eq!(allocator.pulls(), &[1, 1, 1]);
+        assert_eq!(accounting.pulls(), &[1, 2, 0]);
+        assert_eq!(accounting.discoveries(), &[0, 3, 0]);
+        assert_eq!(accounting.charged_calls(), &[50, 100, 0]);
     }
 
     #[test]
-    fn posterior_rates_compare_discoveries_per_charged_evaluation() {
-        let mut allocator = ChargedDiscoveryAllocator::new(2);
-        allocator.update(0, 1, 1_000);
-        allocator.update(1, 1, 100);
+    fn discovery_rates_have_no_prior_or_discount() {
+        let mut accounting = DiscoveryAccounting::new(2);
+        accounting.observe(0, 1, 1_000);
+        accounting.observe(1, 1, 100);
 
-        let rates = allocator.rates();
-        assert!(rates[1] > 5.0 * rates[0], "rates={rates:?}");
-    }
-
-    #[test]
-    fn thompson_allocation_prefers_the_measured_discovery_rate() {
-        let mut allocator = ChargedDiscoveryAllocator::new(2);
-        allocator.floor_scale = 0.0;
-        for _ in 0..20 {
-            allocator.update(0, 0, 100);
-            allocator.update(1, 1, 100);
-        }
-        let mut rng = StdRng::seed_from_u64(11);
-        let preferred = (0..200).filter(|_| allocator.select(&mut rng) == 1).count();
-
-        assert!(preferred > 180, "preferred draws={preferred}");
+        assert_eq!(accounting.rates(), vec![0.001, 0.01]);
     }
 }
 
