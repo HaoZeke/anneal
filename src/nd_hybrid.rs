@@ -9,7 +9,7 @@
 use std::collections::{HashMap, HashSet};
 
 use ndarray::{Array1, ArrayView1};
-use rand::{Rng, SeedableRng, rngs::StdRng};
+use rand::{SeedableRng, rngs::StdRng};
 
 use crate::allocate::FlooredThompson;
 use crate::catalog::{
@@ -116,6 +116,10 @@ pub struct NdHybridEvent {
     pub attempt: u64,
     /// Mechanism selected by the declared discovery policy.
     pub mechanism: NdHybridMechanism,
+    /// Good-UCB exact-saddle missing-mass index at this decision.
+    pub ridge_discovery_index: Option<f64>,
+    /// Good-UCB exact-basin missing-mass index at this decision.
+    pub escape_discovery_index: Option<f64>,
     /// Exact source basin for the proposal or ridge.
     pub source_basin: Option<usize>,
     /// Mode rank for ridge events.
@@ -333,18 +337,19 @@ fn good_ucb_mechanism(
     escape: EscapeCoverageEvidence,
     network: &NdPesNetwork,
     pulls: [usize; 2],
-) -> usize {
+) -> (usize, [f64; 2]) {
     let ridge_pulls = u64::try_from(pulls[RIDGE_ARM]).unwrap_or(u64::MAX);
     let escape_pulls = u64::try_from(pulls[ESCAPE_ARM]).unwrap_or(u64::MAX);
     let total = ridge_pulls.saturating_add(escape_pulls);
     let ridge_index = good_ucb_missing_mass_index(network.saddle_singletons(), ridge_pulls, total);
     let escape_index = good_ucb_missing_mass_index(escape.singletons, escape_pulls, total);
-    match ridge_index.total_cmp(&escape_index) {
+    let selected = match ridge_index.total_cmp(&escape_index) {
         std::cmp::Ordering::Greater => RIDGE_ARM,
         std::cmp::Ordering::Less => ESCAPE_ARM,
         std::cmp::Ordering::Equal if ridge_pulls <= escape_pulls => RIDGE_ARM,
         std::cmp::Ordering::Equal => ESCAPE_ARM,
-    }
+    };
+    (selected, [ridge_index, escape_index])
 }
 
 /// Explore one arbitrary-dimensional PES with cooperative basin and ridge arms.
@@ -443,16 +448,18 @@ where
         }
         let ride_task = next_ride_task(&network, &attempted, source_cursor, ranks);
         let coverage = escape_coverage.evidence();
-        let selected = match policy {
+        let (selected, discovery_indices) = match policy {
             NdHybridPolicy::Adaptive if ride_task.is_some() => {
-                good_ucb_mechanism(coverage, &network, mechanism_accounting.pulls)
+                let (selected, indices) =
+                    good_ucb_mechanism(coverage, &network, mechanism_accounting.pulls);
+                (selected, Some(indices))
             }
-            NdHybridPolicy::Adaptive => ESCAPE_ARM,
-            NdHybridPolicy::RidgeOnly if ride_task.is_some() => RIDGE_ARM,
+            NdHybridPolicy::Adaptive => (ESCAPE_ARM, None),
+            NdHybridPolicy::RidgeOnly if ride_task.is_some() => (RIDGE_ARM, None),
             NdHybridPolicy::RidgeOnly => {
                 break NdHybridTermination::RidePortfolioExhausted;
             }
-            NdHybridPolicy::BasinEscapeOnly => ESCAPE_ARM,
+            NdHybridPolicy::BasinEscapeOnly => (ESCAPE_ARM, None),
         };
         attempt += 1;
 
@@ -498,6 +505,8 @@ where
             events.push(NdHybridEvent {
                 attempt,
                 mechanism: NdHybridMechanism::Ridge,
+                ridge_discovery_index: discovery_indices.map(|indices| indices[RIDGE_ARM]),
+                escape_discovery_index: discovery_indices.map(|indices| indices[ESCAPE_ARM]),
                 source_basin: Some(source_basin),
                 mode_rank: Some(mode_rank),
                 direction: Some(direction),
@@ -552,6 +561,8 @@ where
                 events.push(NdHybridEvent {
                     attempt,
                     mechanism: NdHybridMechanism::BasinEscape,
+                    ridge_discovery_index: discovery_indices.map(|indices| indices[RIDGE_ARM]),
+                    escape_discovery_index: discovery_indices.map(|indices| indices[ESCAPE_ARM]),
                     source_basin: Some(source_basin),
                     mode_rank: None,
                     direction: None,
@@ -598,6 +609,8 @@ where
                 events.push(NdHybridEvent {
                     attempt,
                     mechanism: NdHybridMechanism::BasinEscape,
+                    ridge_discovery_index: discovery_indices.map(|indices| indices[RIDGE_ARM]),
+                    escape_discovery_index: discovery_indices.map(|indices| indices[ESCAPE_ARM]),
                     source_basin: Some(source_basin),
                     mode_rank: None,
                     direction: None,
