@@ -182,17 +182,17 @@ impl<'a> DescriptorProviderInput<'a> {
     }
 
     /// Length scale, cell, and periodic axes for this evaluation.
-    pub fn geometry(self) -> DescriptorGeometry {
+    pub fn geometry(&self) -> DescriptorGeometry {
         self.geometry
     }
 
     /// Flat Cartesian coordinates with three entries per atom.
-    pub fn coordinates(self) -> ArrayView1<'a, f64> {
-        self.coordinates
+    pub fn coordinates(&self) -> &ArrayView1<'a, f64> {
+        &self.coordinates
     }
 
     /// Atomic numbers in coordinate order, when supplied.
-    pub fn species(self) -> Option<&'a [u32]> {
+    pub fn species(&self) -> Option<&'a [u32]> {
         self.species
     }
 }
