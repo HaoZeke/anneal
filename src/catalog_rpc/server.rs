@@ -1505,7 +1505,7 @@ fn apply_request(
                 EpochSubmissionOutcome::Ready(plan) => {
                     let participants = u32::try_from(plan.destinations().len())
                         .expect("participants are bounded by replica count");
-                    realize_population_plan(scientific, *epoch, &plan, participants)
+                    realize_population_plan(scientific, config, *epoch, &plan, participants)
                 }
             };
             if inserted {
@@ -1638,7 +1638,7 @@ fn apply_request(
                 EpochSubmissionOutcome::Ready(plan) => {
                     let participants = u32::try_from(plan.destinations().len())
                         .expect("participants are bounded by replica count");
-                    realize_population_plan(scientific, *epoch, &plan, participants)
+                    realize_population_plan(scientific, config, *epoch, &plan, participants)
                 }
             };
         }
@@ -1677,7 +1677,7 @@ fn apply_request(
                 EpochSubmissionOutcome::Ready(plan) => {
                     let participants = u32::try_from(plan.destinations().len())
                         .expect("participants are bounded by replica count");
-                    realize_population_plan(scientific, *epoch, &plan, participants)
+                    realize_population_plan(scientific, config, *epoch, &plan, participants)
                 }
             };
         }
@@ -3361,6 +3361,7 @@ fn transition_uncertainty(scientific: &ScientificState, basin: BasinId) -> f64 {
 /// plan is selected, counted, or retained for later polls.
 fn realize_population_plan(
     scientific: &mut ScientificState,
+    config: &ServerConfig,
     epoch: u64,
     plan: &PopulationEpochPlan,
     required: u32,
