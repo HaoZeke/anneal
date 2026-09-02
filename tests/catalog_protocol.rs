@@ -46,6 +46,7 @@ fn every_catalog_operation_round_trips_all_identity_and_sequence_fields() {
             candidate: candidate(),
         },
         CatalogOperation::Sample { draw: 91 },
+        CatalogOperation::SampleBasin { basin: 17 },
         CatalogOperation::DescriptorHole {
             current: vec![0.1, 0.2, 0.3],
             samples: 4096,
