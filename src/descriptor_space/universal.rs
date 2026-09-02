@@ -170,7 +170,8 @@ pub(super) fn describe(
             DescriptorBlockKind::SoapMean
             | DescriptorBlockKind::SoapVariance
             | DescriptorBlockKind::AceNu3Mean
-            | DescriptorBlockKind::SoapLeftover => {
+            | DescriptorBlockKind::SoapLeftover
+            | DescriptorBlockKind::ProviderFeature => {
                 return Err(DescriptorError::UniversalGeometryRequired);
             }
         };
@@ -246,7 +247,8 @@ pub(super) fn describe_local(
             DescriptorBlockKind::SoapMean
             | DescriptorBlockKind::SoapVariance
             | DescriptorBlockKind::AceNu3Mean
-            | DescriptorBlockKind::SoapLeftover => {
+            | DescriptorBlockKind::SoapLeftover
+            | DescriptorBlockKind::ProviderFeature => {
                 return Err(DescriptorError::UniversalGeometryRequired);
             }
         };
