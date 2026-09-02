@@ -66,9 +66,8 @@ impl PesSurface for ShallowDoubleWell {
     }
 }
 
-/// A shallow barrier satisfies the force gate before the minimum-mode session
-/// reaches the exact saddle. The first signed branch shell therefore lies on
-/// one side of the separatrix even though the Hessian has one negative mode.
+/// A shallow barrier satisfies the force gate while the local
+/// unstable-coordinate error still exceeds the IRC path radius.
 struct OffsetShallowDoubleWell;
 
 impl PesSurface for OffsetShallowDoubleWell {
@@ -362,7 +361,7 @@ fn loose_minimum_mode_handoff_retains_strict_prfo_certification() {
 }
 
 #[test]
-fn adaptive_branch_displacement_separates_a_force_converged_shallow_saddle() {
+fn prfo_centering_separates_a_force_converged_shallow_saddle() {
     let mut network = NdPesNetwork::new();
     let config = PesExplorationConfig {
         ride_method: RideMethod::Lanczos,
@@ -394,7 +393,7 @@ fn adaptive_branch_displacement_separates_a_force_converged_shallow_saddle() {
 }
 
 #[test]
-fn geometric_branch_shells_recover_connectivity_from_an_offset_saddle() {
+fn prfo_centering_recovers_connectivity_from_an_offset_saddle() {
     let mut network = NdPesNetwork::new();
     let config = PesExplorationConfig {
         ride_method: RideMethod::Lanczos,
