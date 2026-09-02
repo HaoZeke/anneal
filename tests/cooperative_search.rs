@@ -272,6 +272,64 @@ fn coordinator_segments_live_replicas_by_shared_pes_coverage() {
 }
 
 #[test]
+fn coordinator_shares_cost_normalized_discovery_assignments() {
+    let server = ride_server();
+    let digest = signature().digest();
+    let query = ride_candidate(0, 1, 1.2);
+    let mut clients = (0..4)
+        .map(|replica| {
+            CatalogClient::connect(
+                server.addr(),
+                identity(replica, digest),
+                ClientConfig::default(),
+            )
+            .unwrap()
+        })
+        .collect::<Vec<_>>();
+    clients[0].offer_candidate(1, query.clone()).unwrap();
+    clients[0]
+        .record_ledger_event(2, ChargeKind::BasinEscape, 80, 80)
+        .unwrap();
+    clients[1]
+        .record_ledger_event(1, ChargeKind::SaddleRide, 320, 320)
+        .unwrap();
+
+    let states = clients
+        .iter_mut()
+        .enumerate()
+        .map(|(replica, client)| {
+            let sequence = match replica {
+                0 => 3,
+                1 => 2,
+                _ => 1,
+            };
+            client
+                .policy_state(sequence, query.descriptor.clone(), query.energy)
+                .unwrap()
+        })
+        .collect::<Vec<_>>();
+
+    assert_eq!(states[0].basin_discovery_attempts, 1);
+    assert_eq!(states[0].basin_discovery_charged, 80);
+    assert_eq!(states[0].saddle_discovery_attempts, 1);
+    assert_eq!(states[0].saddle_discovery_charged, 320);
+    assert_eq!(
+        states
+            .iter()
+            .filter(|state| state.discovery_role == DiscoveryRole::BasinEscape)
+            .count(),
+        3
+    );
+    assert_eq!(
+        states
+            .iter()
+            .filter(|state| state.discovery_role == DiscoveryRole::SaddleRide)
+            .count(),
+        1
+    );
+}
+
+#[test]
 fn discovery_assignment_does_not_retire_a_small_repeated_basin_sample() {
     let server = ride_server();
     let digest = signature().digest();
@@ -1633,6 +1691,10 @@ fn cooperative_trace_records_policy_diagnostic_evidence() {
     assert_eq!(evidence.discovery_epoch, 2);
     assert_eq!(evidence.basin_unseen_mass_upper, 1.0);
     assert_eq!(evidence.saddle_unseen_mass_upper, 1.0);
+    assert_eq!(evidence.basin_discovery_attempts, 0);
+    assert_eq!(evidence.basin_discovery_charged, 0);
+    assert_eq!(evidence.saddle_discovery_attempts, 0);
+    assert_eq!(evidence.saddle_discovery_charged, 0);
     assert_eq!(evidence.query_energy, -1.2);
 
     let trace = run.json_lines(&RunManifest {
@@ -1649,6 +1711,10 @@ fn cooperative_trace_records_policy_diagnostic_evidence() {
     assert!(trace.contains("\"policy_discovery_epoch\":2"));
     assert!(trace.contains("\"policy_basin_unseen_mass_upper\":1"));
     assert!(trace.contains("\"policy_saddle_unseen_mass_upper\":1"));
+    assert!(trace.contains("\"policy_basin_discovery_attempts\":0"));
+    assert!(trace.contains("\"policy_basin_discovery_charged\":0"));
+    assert!(trace.contains("\"policy_saddle_discovery_attempts\":0"));
+    assert!(trace.contains("\"policy_saddle_discovery_charged\":0"));
     assert!(trace.contains("\"policy_query_energy\":-1.2"));
 }
 
