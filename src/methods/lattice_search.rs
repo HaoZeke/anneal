@@ -99,17 +99,19 @@ fn site_energy(kind: PairKind, x: &[f64], skip: Option<usize>, p: [f64; 3]) -> f
 /// neighbours, on the side away from the centroid, at the bond length from
 /// all three, that overlap no point and no site already listed.
 pub fn hollow_sites(x: &[f64], neighbour_cutoff: f64) -> Vec<[f64; 3]> {
+    match median_bond(x) {
+        Some(bond) => hollow_sites_with_bond(x, neighbour_cutoff, bond),
+        None => Vec::new(),
+    }
+}
+
+/// Median nearest-neighbour distance of `x`, if it has two points.
+fn median_bond(x: &[f64]) -> Option<f64> {
     let n = x.len() / 3;
-    let cut2 = neighbour_cutoff * neighbour_cutoff;
-    let mut nb: Vec<Vec<usize>> = vec![Vec::new(); n];
     let mut nearest = vec![f64::INFINITY; n];
     for a in 0..n {
         for b in (a + 1)..n {
             let d2 = dist2(point(x, a), point(x, b));
-            if d2 < cut2 {
-                nb[a].push(b);
-                nb[b].push(a);
-            }
             nearest[a] = nearest[a].min(d2);
             nearest[b] = nearest[b].min(d2);
         }
@@ -120,10 +122,27 @@ pub fn hollow_sites(x: &[f64], neighbour_cutoff: f64) -> Vec<[f64; 3]> {
         .map(|d| d.sqrt())
         .collect();
     if nn.is_empty() {
-        return Vec::new();
+        return None;
     }
     nn.sort_by(|a, b| a.total_cmp(b));
-    let bond = nn[nn.len() / 2];
+    Some(nn[nn.len() / 2])
+}
+
+/// [`hollow_sites`] at a given bond length, for point sets whose own
+/// nearest-neighbour distance is not the bond, such as a layer of
+/// mutually exclusive sites.
+pub fn hollow_sites_with_bond(x: &[f64], neighbour_cutoff: f64, bond: f64) -> Vec<[f64; 3]> {
+    let n = x.len() / 3;
+    let cut2 = neighbour_cutoff * neighbour_cutoff;
+    let mut nb: Vec<Vec<usize>> = vec![Vec::new(); n];
+    for a in 0..n {
+        for b in (a + 1)..n {
+            if dist2(point(x, a), point(x, b)) < cut2 {
+                nb[a].push(b);
+                nb[b].push(a);
+            }
+        }
+    }
     let exclusion2 = (0.85 * bond) * (0.85 * bond);
     let merge2 = (0.3 * bond) * (0.3 * bond);
     let mut c = [0.0_f64; 3];
@@ -372,46 +391,113 @@ pub fn construct(
 /// swaps. Every site energy is charged at its pair fraction.
 pub fn reoccupy(cfg: &LatticeSearchConfig, ledger: &mut Ledger, x: ArrayView1<f64>) -> Array1<f64> {
     let n = cfg.n_points;
-    let xs = x.to_vec();
-    let mut lattice: Vec<[f64; 3]> = (0..n).map(|i| point(&xs, i)).collect();
-    lattice.extend(hollow_sites(&xs, cfg.neighbour_cutoff));
-    let mut c = [0.0_f64; 3];
-    for i in 0..n {
-        for k in 0..3 {
-            c[k] += xs[3 * i + k] / n as f64;
-        }
-    }
-    // The interior stays: points with a full coordination shell seed the
-    // placement, and only the rest of the lattice is reoccupied. A structure
-    // without an interior starts from the site nearest its centroid.
+    let (placed, vacant) = place_successively_on(cfg, ledger, x);
+    // Successive placement is greedy; a Metropolis walk over occupations
+    // of the same lattice moves it off that ordering, and swaps then
+    // finish the occupation.
+    let walked = walk_occupation_on(
+        cfg,
+        ledger,
+        placed.view(),
+        &vacant,
+        OCCUPATION_WALK_STEPS * n,
+        OCCUPATION_WALK_TEMPERATURE,
+        0x0cc_u64 ^ n as u64,
+    );
+    optimise_occupation_over(cfg, ledger, walked.view(), OCCUPATION_FINISH_MOVERS).0
+}
+
+/// Worst-bound points the finishing swap pass of a reoccupation tries.
+pub const OCCUPATION_FINISH_MOVERS: usize = 8;
+
+/// The successive placement alone: the fully coordinated interior of `x`
+/// stays, and every other point takes, in turn, the vacant lattice site
+/// with the lowest energy in the field of the points placed so far.
+pub fn place_successively(
+    cfg: &LatticeSearchConfig,
+    ledger: &mut Ledger,
+    x: ArrayView1<f64>,
+) -> Array1<f64> {
+    place_successively_on(cfg, ledger, x).0
+}
+
+/// The lattice of `x` grown from its interior: the fully coordinated points
+/// stay, the first layer holds every hollow site over them (both stackings
+/// of each facet), the second layer every hollow site over the interior and
+/// that first layer, and the original surface points are kept as sites too.
+/// A structure without an interior uses its own points and hollow sites and
+/// seeds the site nearest its centroid. Returns the seed coordinates and
+/// the vacant sites.
+pub fn core_lattice(cfg: &LatticeSearchConfig, x: &[f64]) -> (Vec<[f64; 3]>, Vec<[f64; 3]>) {
+    let n = x.len() / 3;
     let cut2 = cfg.neighbour_cutoff * cfg.neighbour_cutoff;
     let mut coordination = vec![0usize; n];
     for a in 0..n {
         for b in (a + 1)..n {
-            if dist2(point(&xs, a), point(&xs, b)) < cut2 {
+            if dist2(point(x, a), point(x, b)) < cut2 {
                 coordination[a] += 1;
                 coordination[b] += 1;
             }
         }
     }
-    let mut seeds: Vec<usize> = (0..n).filter(|&i| coordination[i] >= 12).collect();
-    if seeds.is_empty() {
-        seeds.push(
-            (0..lattice.len())
-                .min_by(|&a, &b| dist2(lattice[a], c).total_cmp(&dist2(lattice[b], c)))
-                .unwrap_or(0),
-        );
+    let interior: Vec<usize> = (0..n).filter(|&i| coordination[i] >= 12).collect();
+    let Some(bond) = median_bond(x) else {
+        return ((0..n).map(|i| point(x, i)).collect(), Vec::new());
+    };
+    if interior.is_empty() {
+        let mut c = [0.0_f64; 3];
+        for i in 0..n {
+            for k in 0..3 {
+                c[k] += x[3 * i + k] / n as f64;
+            }
+        }
+        let mut lattice: Vec<[f64; 3]> = (0..n).map(|i| point(x, i)).collect();
+        lattice.extend(hollow_sites_with_bond(x, cfg.neighbour_cutoff, bond));
+        let first = (0..lattice.len())
+            .min_by(|&a, &b| dist2(lattice[a], c).total_cmp(&dist2(lattice[b], c)))
+            .unwrap_or(0);
+        let seed = lattice.swap_remove(first);
+        return (vec![seed], lattice);
     }
+    let mut core: Vec<f64> = Vec::with_capacity(3 * interior.len());
+    for &i in &interior {
+        core.extend_from_slice(&x[3 * i..3 * i + 3]);
+    }
+    let first_layer = hollow_sites_with_bond(&core, cfg.neighbour_cutoff, bond);
+    let mut with_first = core.clone();
+    for site in &first_layer {
+        with_first.extend_from_slice(site);
+    }
+    let second_layer = hollow_sites_with_bond(&with_first, cfg.neighbour_cutoff, bond);
+    let merge2 = (0.3 * bond) * (0.3 * bond);
+    let mut vacant: Vec<[f64; 3]> = first_layer;
+    vacant.extend(second_layer);
+    for i in 0..n {
+        if interior.contains(&i) {
+            continue;
+        }
+        let p = point(x, i);
+        if !vacant.iter().any(|s| dist2(*s, p) < merge2) {
+            vacant.push(p);
+        }
+    }
+    let seeds = interior.iter().map(|&i| point(x, i)).collect();
+    (seeds, vacant)
+}
+
+/// [`place_successively`] returning the sites it left vacant as well.
+pub fn place_successively_on(
+    cfg: &LatticeSearchConfig,
+    ledger: &mut Ledger,
+    x: ArrayView1<f64>,
+) -> (Array1<f64>, Vec<[f64; 3]>) {
+    let n = cfg.n_points;
+    let xs = x.to_vec();
+    let (seeds, mut vacant) = core_lattice(cfg, &xs);
     let mut placed: Vec<f64> = Vec::with_capacity(3 * n);
-    for &i in &seeds {
-        placed.extend_from_slice(&lattice[i]);
+    for seed in &seeds {
+        placed.extend_from_slice(seed);
     }
-    let mut vacant: Vec<[f64; 3]> = lattice
-        .iter()
-        .enumerate()
-        .filter(|(i, _)| !seeds.contains(i))
-        .map(|(_, s)| *s)
-        .collect();
     let frac = 2.0 / n.max(1) as f64;
     while placed.len() / 3 < n && !vacant.is_empty() {
         let mut best: Option<(usize, f64)> = None;
@@ -434,29 +520,21 @@ pub fn reoccupy(cfg: &LatticeSearchConfig, ledger: &mut Ledger, x: ArrayView1<f6
             placed.extend_from_slice(&xs[3 * i..3 * i + 3]);
         }
     }
-    // Successive placement is greedy; a Metropolis walk over occupations
-    // of the same lattice moves it off that ordering, and swaps over every
-    // point then finish the occupation.
-    let placed = Array1::from(placed);
-    let walked = walk_occupation(
-        cfg,
-        ledger,
-        placed.view(),
-        OCCUPATION_WALK_STEPS * n,
-        OCCUPATION_WALK_TEMPERATURE,
-        0x0cc_u64 ^ n as u64,
-    );
-    optimise_occupation_over(cfg, ledger, walked.view(), n).0
+    (Array1::from(placed), vacant)
 }
 
 /// Occupation walk steps per point.
 pub const OCCUPATION_WALK_STEPS: usize = 200;
-/// Occupation walk temperature in pair-well units.
+/// Occupation walk final temperature in pair-well units.
 pub const OCCUPATION_WALK_TEMPERATURE: f64 = 0.4;
+/// The walk starts at this multiple of the final temperature and cools
+/// geometrically.
+pub const OCCUPATION_WALK_START_RATIO: f64 = 2.5;
 
 /// Metropolis walk over occupations of the lattice of `x` (its points and
 /// their hollow sites): each step proposes moving one point to one vacant
-/// site and accepts by the change in its energy at `temperature`. Returns
+/// site and accepts by the change in its energy, cooling geometrically to
+/// `temperature` from [`OCCUPATION_WALK_START_RATIO`] times it. Returns
 /// the lowest-energy occupation seen. Each proposal is charged one pair
 /// fraction, and each acceptance a second for the incremental update.
 pub fn walk_occupation(
@@ -467,10 +545,25 @@ pub fn walk_occupation(
     temperature: f64,
     seed: u64,
 ) -> Array1<f64> {
+    let vacant = hollow_sites(x.as_slice().unwrap_or(&x.to_vec()), cfg.neighbour_cutoff);
+    walk_occupation_on(cfg, ledger, x, &vacant, steps, temperature, seed)
+}
+
+/// [`walk_occupation`] over the points of `x` and the given vacant sites.
+#[allow(clippy::too_many_arguments)]
+pub fn walk_occupation_on(
+    cfg: &LatticeSearchConfig,
+    ledger: &mut Ledger,
+    x: ArrayView1<f64>,
+    vacant_sites: &[[f64; 3]],
+    steps: usize,
+    temperature: f64,
+    seed: u64,
+) -> Array1<f64> {
     let n = cfg.n_points;
     let xs = x.to_vec();
     let mut lattice: Vec<[f64; 3]> = (0..n).map(|i| point(&xs, i)).collect();
-    lattice.extend(hollow_sites(&xs, cfg.neighbour_cutoff));
+    lattice.extend_from_slice(vacant_sites);
     let m = lattice.len();
     if m <= n || !ledger.charge() {
         return x.to_owned();
@@ -487,10 +580,13 @@ pub fn walk_occupation(
     let mut occupied: Vec<usize> = (0..n).collect();
     let mut vacant: Vec<usize> = (n..m).collect();
     let mut rng = StdRng::seed_from_u64(seed);
-    for _ in 0..steps {
+    let t_hi = OCCUPATION_WALK_START_RATIO * temperature;
+    for step in 0..steps {
         if !ledger.charge_frac(frac) {
             break;
         }
+        let progress = step as f64 / steps.max(1) as f64;
+        let temperature = t_hi * (temperature / t_hi).powf(progress);
         let i = rng.random_range(0..n);
         let slot = rng.random_range(0..vacant.len());
         let site = lattice[vacant[slot]];
