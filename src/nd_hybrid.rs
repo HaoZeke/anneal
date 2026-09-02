@@ -277,6 +277,18 @@ fn ride_tasks(
     tasks
 }
 
+fn next_ride_segment(
+    tasks: Vec<(usize, u16, RideModeDirection)>,
+) -> Vec<(usize, u16, RideModeDirection)> {
+    let Some(source) = tasks.first().map(|task| task.0) else {
+        return Vec::new();
+    };
+    tasks
+        .into_iter()
+        .take_while(|task| task.0 == source)
+        .collect()
+}
+
 fn new_ids(before: usize, after: usize) -> Vec<usize> {
     (before..after).collect()
 }
@@ -413,11 +425,12 @@ impl PlannedAction {
 
 /// Explore one arbitrary-dimensional PES with cooperative basin and ridge arms.
 ///
-/// Every discovered minimum enters one exact-witness network immediately. A
-/// ridge candidate can therefore use a basin found by any escape event. The
-/// network is an output record; action selection uses only posterior
-/// information about terminal energy. A new invocation creates new action
-/// models and a new network, so two surfaces cannot share evidence.
+/// Every discovered minimum enters one exact-witness network immediately. The
+/// ridge action domain dovetails over source-minimum segments and uses joint
+/// minimum information to order the signed modes inside each segment. This
+/// makes every admitted source reachable without assigning graph novelty or a
+/// stationary-point reward. A new invocation creates new action models and a
+/// new network, so two surfaces cannot share evidence.
 pub fn explore_nd_hybrid<S, W>(
     surface: &S,
     initial: ArrayView1<'_, f64>,
@@ -518,6 +531,7 @@ where
         if policy == NdHybridPolicy::RidgeOnly && ride_tasks.is_empty() {
             break NdHybridTermination::RidePortfolioExhausted;
         }
+        let ride_tasks = next_ride_segment(ride_tasks);
 
         let mut plans = Vec::<PlannedAction>::new();
         if policy != NdHybridPolicy::BasinEscapeOnly {
@@ -883,5 +897,17 @@ mod tests {
         assert!(tasks.contains(&(0, 0, RideModeDirection::Negative)));
         assert!(tasks.contains(&(1, 2, RideModeDirection::Positive)));
         assert!(tasks.contains(&(1, 2, RideModeDirection::Negative)));
+    }
+
+    #[test]
+    fn dovetail_exposes_one_source_segment_at_a_time() {
+        let tasks = ride_tasks(3, &HashSet::new(), 1, 2);
+
+        let segment = next_ride_segment(tasks);
+
+        assert_eq!(segment.len(), 4);
+        assert!(segment.iter().all(|(source, _, _)| *source == 1));
+        assert!(segment.contains(&(1, 0, RideModeDirection::Positive)));
+        assert!(segment.contains(&(1, 1, RideModeDirection::Negative)));
     }
 }
