@@ -34,8 +34,8 @@ scripts/terra_clippy_touched.sh --features rgpot-ex,ira,featomic,bank-rpc \
   examples/common/efficiency.rs \
   examples/molecular_cluster.rs \
   examples/slab_adsorption.rs
-echo "=== cargo fmt --check (touched) ==="
-cargo fmt --check -- \
+echo "=== rustfmt --check (touched) ==="
+rustfmt --edition 2024 --check \
   src/methods/two_phase.rs \
   src/methods/cluster_search.rs \
   examples/common/efficiency.rs \
