@@ -619,6 +619,17 @@ mod tests {
     }
 
     #[test]
+    fn an_explicit_prior_mean_survives_a_sparse_observation_subset() {
+        let mut m = FunnelModel::new_euclidean(0.2, 20.0, 1e-3);
+        m.set_prior_mean(-75.0);
+        m.observe(pt(&[0.0, 0.0]).view(), -120.0);
+
+        let (mean, _) = m.predict(pt(&[100.0, 100.0]).view());
+
+        assert!((mean + 75.0).abs() < 1e-10, "far-field prior mean {mean}");
+    }
+
+    #[test]
     fn max_ei_at_data_is_finite_after_three_observations() {
         let mut m = FunnelModel::new(0.15, 20.0, 1e-2);
         assert!(m.max_expected_improvement_at_data().is_infinite());
