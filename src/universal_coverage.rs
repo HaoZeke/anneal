@@ -674,6 +674,9 @@ fn compressed_model(
     let (indices, compression) =
         kernel_coreset(&selector, features, energies, config.maximum_model_rank);
     let mut model = FunnelModel::new_euclidean(length_scale, config.amplitude, config.noise);
+    if !energies.is_empty() {
+        model.set_prior_mean(energies.iter().sum::<f64>() / energies.len() as f64);
+    }
     for index in indices {
         model.observe(
             ArrayView1::from(features[index].as_slice()),
