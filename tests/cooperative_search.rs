@@ -1624,8 +1624,17 @@ fn policy_state_exposes_hard_lj_diagnostic_boundaries() {
 
     assert_eq!(state.local_basin, Some(0));
     assert_eq!(state.local_basin_distance, 0.0);
-    assert!(state.novelty.is_finite() && state.novelty > 0.0);
+    assert!(state.novelty.is_finite() && state.novelty >= 0.0);
     assert!(state.transition_uncertainty.is_finite() && state.transition_uncertainty > 0.0);
+
+    let unexplored = candidate(0, 4, 4.0);
+    let unexplored_state = client
+        .policy_state(4, unexplored.descriptor, unexplored.energy)
+        .unwrap();
+    assert!(
+        unexplored_state.novelty > state.novelty,
+        "model-averaged EI must rank descriptor support, not inject a positive floor"
+    );
 }
 
 #[test]
