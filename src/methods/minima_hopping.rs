@@ -456,6 +456,35 @@ mod tests {
     }
 
     #[test]
+    fn nve_escape_requires_sustained_turning_point_and_returns_its_frame() {
+        let start = Array1::zeros(5);
+        let config = MdEscapeConfig {
+            dt: 0.01,
+            potential_minima: 1,
+            maximum_steps: 20,
+            geometry: MdEscapeGeometry::Euclidean,
+            softening: None,
+        };
+        // The first three samples contain a one-step wiggle. The final five
+        // contain two decreases into the minimum and two increases out of it.
+        let energies = [99.0, 3.0, 2.0, 3.0, 2.0, 1.0, 2.0, 3.0];
+        let mut evaluations = 0usize;
+        let mut evaluate = |x: ArrayView1<f64>| {
+            let energy = energies[evaluations];
+            evaluations += 1;
+            Some((energy, Array1::zeros(x.len())))
+        };
+        let mut rng = StdRng::seed_from_u64(17);
+
+        let report = nve_escape(start.view(), 0.5, &config, &mut evaluate, &mut rng).unwrap();
+
+        assert_eq!(report.steps, 7);
+        assert_eq!(report.potential_minima, 1);
+        assert_eq!(report.energy, 1.0);
+        assert!((report.position.dot(&report.position).sqrt() - 0.05).abs() < 1e-12);
+    }
+
+    #[test]
     fn softened_nve_charges_direction_probes_and_suppresses_the_hard_mode() {
         let start = Array1::zeros(2);
         let config = MdEscapeConfig {
