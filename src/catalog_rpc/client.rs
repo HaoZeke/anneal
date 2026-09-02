@@ -183,6 +183,8 @@ impl SyncSchedule {
 /// Persistent client bound to one replica identity.
 pub struct CatalogClient {
     stream: TcpStream,
+    addr: SocketAddr,
+    config: ClientConfig,
     identity: CatalogIdentity,
     snapshot_version: u64,
     requests: BTreeMap<u64, CatalogRequest>,
@@ -195,16 +197,31 @@ impl CatalogClient {
         identity: CatalogIdentity,
         config: ClientConfig,
     ) -> Result<Self, CatalogClientError> {
-        let stream = TcpStream::connect_timeout(&addr, config.connect_timeout)?;
-        stream.set_nodelay(true)?;
-        stream.set_read_timeout(Some(config.io_timeout))?;
-        stream.set_write_timeout(Some(config.io_timeout))?;
+        let stream = Self::open_stream(addr, config)?;
         Ok(Self {
             stream,
+            addr,
+            config,
             identity,
             snapshot_version: 0,
             requests: BTreeMap::new(),
         })
+    }
+
+    fn open_stream(
+        addr: SocketAddr,
+        config: ClientConfig,
+    ) -> Result<TcpStream, CatalogClientError> {
+        let stream = TcpStream::connect_timeout(&addr, config.connect_timeout)?;
+        stream.set_nodelay(true)?;
+        stream.set_read_timeout(Some(config.io_timeout))?;
+        stream.set_write_timeout(Some(config.io_timeout))?;
+        Ok(stream)
+    }
+
+    fn reconnect(&mut self) -> Result<(), CatalogClientError> {
+        self.stream = Self::open_stream(self.addr, self.config)?;
+        Ok(())
     }
 
     /// Read the current coordinator snapshot.
@@ -791,7 +808,16 @@ impl CatalogClient {
                 operation,
             })
             .clone();
-        self.stream.write_all(&encode_request(&request)?)?;
+        match self.exchange(&request) {
+            Ok(reply) => return Ok(reply),
+            Err(error @ CatalogClientError::Rejected(_)) => return Err(error),
+            Err(_) => self.reconnect()?,
+        }
+        self.exchange(&request)
+    }
+
+    fn exchange(&mut self, request: &CatalogRequest) -> Result<AcceptedReply, CatalogClientError> {
+        self.stream.write_all(&encode_request(request)?)?;
         self.stream.flush()?;
         let message = serialize::read_message(&mut self.stream, ReaderOptions::new())
             .map_err(|error| ProtocolError::Malformed(error.to_string()))?;
@@ -799,11 +825,23 @@ impl CatalogClient {
             .get_root::<catalog_reply::Reader>()
             .map_err(|error| ProtocolError::Malformed(error.to_string()))?;
         match decode_reply_reader(root)? {
-            CatalogReply::Accepted(reply) => {
+            CatalogReply::Accepted(reply) if reply.event_sequence == request.event_sequence => {
                 self.snapshot_version = self.snapshot_version.max(reply.snapshot.version);
                 Ok(reply)
             }
-            CatalogReply::Rejected { reason, .. } => Err(CatalogClientError::Rejected(reason)),
+            CatalogReply::Rejected {
+                event_sequence,
+                reason,
+                ..
+            } if event_sequence == request.event_sequence => {
+                Err(CatalogClientError::Rejected(reason))
+            }
+            CatalogReply::Accepted(_) | CatalogReply::Rejected { .. } => {
+                Err(ProtocolError::Malformed(
+                    "catalog reply sequence does not match the request".into(),
+                )
+                .into())
+            }
         }
     }
 }
