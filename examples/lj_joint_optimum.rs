@@ -296,6 +296,7 @@ fn run_minima_hopping(
         potential_minima: 2,
         maximum_steps: 2_000,
         geometry: MdEscapeGeometry::RigidQuotient,
+        softening: None,
     };
     let mut ledger = Ledger::new(budget);
     let mut optimizer = WarmLbfgs::default();

@@ -42,7 +42,9 @@ use ndarray::{Array1, ArrayView1};
 use rand::Rng;
 use rand_distr::{Distribution, StandardNormal};
 use rgmin::{Manifold, ManifoldKind};
-use rgsaddle::{PointSurface, SaddleError, SamdConfig, SamdSession};
+use rgsaddle::{
+    PointSurface, SaddleError, SamdConfig, SamdSession, VelocitySofteningConfig, soften_velocity_on,
+};
 
 /// Geometry on which an MD escape evolves.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -64,6 +66,8 @@ pub struct MdEscapeConfig {
     pub maximum_steps: usize,
     /// Coordinate geometry used for velocity projection and retraction.
     pub geometry: MdEscapeGeometry,
+    /// Published finite modified-dimer softening of the Gaussian direction.
+    pub softening: Option<VelocitySofteningConfig>,
 }
 
 impl Default for MdEscapeConfig {
@@ -73,6 +77,7 @@ impl Default for MdEscapeConfig {
             potential_minima: 2,
             maximum_steps: 2_000,
             geometry: MdEscapeGeometry::Euclidean,
+            softening: None,
         }
     }
 }
@@ -90,6 +95,8 @@ pub struct MdEscapeReport {
     pub energy: f64,
     /// Kinetic energy at the last point.
     pub kinetic: f64,
+    /// Force evaluations used to soften the launch direction.
+    pub softening_evaluations: usize,
 }
 
 struct CallbackSurface<'a, F> {
@@ -154,6 +161,17 @@ where
         draw
     }));
     velocity = manifold.project(&start.to_owned(), &velocity);
+    let surface = CallbackSurface {
+        evaluate: Mutex::new(evaluate),
+    };
+    let softening_evaluations = if let Some(softening) = config.softening {
+        let report = soften_velocity_on(&manifold, start, velocity.view(), &surface, softening)?;
+        velocity = report.direction;
+        report.evaluations
+    } else {
+        0
+    };
+
     let unscaled_kinetic = 0.5 * velocity.dot(&velocity);
     if !unscaled_kinetic.is_finite() || unscaled_kinetic <= 1e-16 {
         return Err(SaddleError::Solver(
@@ -162,9 +180,6 @@ where
     }
     velocity *= (initial_kinetic / unscaled_kinetic).sqrt();
 
-    let surface = CallbackSurface {
-        evaluate: Mutex::new(evaluate),
-    };
     let samd_config = SamdConfig {
         dt: config.dt,
         tau: f64::INFINITY,
@@ -202,6 +217,7 @@ where
                     potential_minima: minima,
                     energy: last_energy,
                     kinetic: last_kinetic,
+                    softening_evaluations,
                 });
             }
         }
@@ -215,6 +231,7 @@ where
         potential_minima: minima,
         energy: last_energy,
         kinetic: last_kinetic,
+        softening_evaluations,
     })
 }
 
@@ -421,6 +438,7 @@ mod tests {
             potential_minima: 1,
             maximum_steps: 200,
             geometry: MdEscapeGeometry::Euclidean,
+            softening: None,
         };
         let mut evaluations = 0usize;
         let mut evaluate = |x: ArrayView1<f64>| {
