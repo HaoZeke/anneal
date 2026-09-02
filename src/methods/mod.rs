@@ -28,12 +28,13 @@ pub mod csa_cluster;
 pub mod ffs;
 /// Spectral referee over the explored landscape's transition graph.
 pub mod landscape_graph;
+/// Cut-and-splice mixing of two quenched clusters.
+pub mod lattice_search;
 pub mod minima_hopping;
 /// Nested search: population under a descending energy ceiling.
 pub mod nested;
 /// Umbrella bridges between two catalog minima in descriptor space.
 pub mod neus_bridge;
-/// Cut-and-splice mixing of two quenched clusters.
 pub mod splice;
 pub mod two_phase;
 #[cfg(feature = "graphkey")]
