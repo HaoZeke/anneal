@@ -42,7 +42,7 @@ use crate::cooperative_search::ledger::{
     ChargeKind, ChargeSummary, CooperativeLedger, ReplicaLedgerEvent,
 };
 use crate::descriptor_space::{DescriptorSpace, UNIVERSAL_LOCAL_ENVIRONMENT_RADIUS};
-use crate::discovery_roster::{DiscoveryOpportunity, assign_discovery_roles_with_minimum};
+use crate::discovery_roster::{DiscoveryRole, assign_discovery_batch};
 use crate::methods::feynman_kac::{
     EpochSubmissionOutcome, PopulationEpochPlan, PopulationMember, SelectionCoefficients,
     SynchronousPopulation,
@@ -1279,11 +1279,6 @@ fn apply_request(
                 SADDLE_COVERAGE_MINIMUM_OBSERVATIONS,
                 saddle_coverage.unseen_mass_upper,
             );
-            let minimum_ride_consumers = if saddle_effort.events == 0 {
-                scientific.discovery_replicas.len().div_ceil(2)
-            } else {
-                0
-            };
             let (basin_action_cost, ride_action_cost) =
                 empirical_action_costs(basin_effort, saddle_effort);
             let Some((discovery_role, discovery_epoch)) = minimum_information_role(
@@ -1293,7 +1288,6 @@ fn apply_request(
                 *energy,
                 basin_action_cost,
                 ride_action_cost,
-                minimum_ride_consumers,
             ) else {
                 return rejected(
                     state,
@@ -3074,12 +3068,6 @@ struct BridgeServerState {
 
 const MINIMUM_INFORMATION_SAMPLES: usize = 128;
 
-#[derive(Debug, Clone)]
-enum SearchActionKey {
-    Basin(u32),
-    Ride(RideArm),
-}
-
 fn empirical_action_costs(basin: ChargeSummary, ride: ChargeSummary) -> (f64, f64) {
     let basin_observed = (basin.events > 0 && basin.charged_calls > 0)
         .then(|| basin.charged_calls as f64 / basin.events as f64);
@@ -3118,10 +3106,8 @@ fn minimum_information_role(
     query_energy: f64,
     basin_cost: f64,
     ride_cost: f64,
-    minimum_ride_consumers: usize,
-) -> Option<(crate::discovery_roster::DiscoveryRole, u64)> {
-    let mut candidates = Vec::<SearchActionCandidate>::new();
-    let mut keys = Vec::<SearchActionKey>::new();
+) -> Option<(DiscoveryRole, u64)> {
+    let mut basin_actions = Vec::<(u32, SearchActionCandidate)>::new();
     for &replica in &scientific.discovery_replicas {
         let (descriptor, energy) = if replica == query_replica {
             (query_descriptor, query_energy)
@@ -3130,61 +3116,64 @@ fn minimum_information_role(
         } else {
             (query_descriptor, query_energy)
         };
-        candidates.push(SearchActionCandidate {
-            mechanism: SearchMechanism::BasinEscape,
-            feature: descriptor.to_vec(),
-            source_energy: energy,
-            expected_charged_evaluations: basin_cost,
-        });
-        keys.push(SearchActionKey::Basin(replica));
+        basin_actions.push((
+            replica,
+            SearchActionCandidate {
+                mechanism: SearchMechanism::BasinEscape,
+                feature: descriptor.to_vec(),
+                source_energy: energy,
+                expected_charged_evaluations: basin_cost,
+            },
+        ));
     }
     let claimable = scientific.ride_ledger.claimable_arms();
+    let mut ride_actions = Vec::<SearchActionCandidate>::new();
+    let mut ride_arms = Vec::<RideArm>::new();
     for (arm, _) in &claimable {
         let (feature, source_energy) = ride_action_feature(scientific, arm)?;
-        candidates.push(SearchActionCandidate {
+        ride_actions.push(SearchActionCandidate {
             mechanism: SearchMechanism::SaddleRide,
             feature,
             source_energy,
             expected_charged_evaluations: ride_cost,
         });
-        keys.push(SearchActionKey::Ride(arm.clone()));
+        ride_arms.push(arm.clone());
     }
+    let mut candidates = basin_actions
+        .iter()
+        .map(|(_, candidate)| candidate.clone())
+        .collect::<Vec<_>>();
+    candidates.extend_from_slice(&ride_actions);
     let scores = scientific
         .minimum_information
         .score(&candidates, MINIMUM_INFORMATION_SAMPLES)
         .ok()?;
-    let mut basin_rates = BTreeMap::<u32, f64>::new();
     let mut ride_rates = BTreeMap::<RideArm, f64>::new();
-    for (key, score) in keys.into_iter().zip(scores) {
-        match key {
-            SearchActionKey::Basin(replica) => {
-                basin_rates.insert(replica, score.information_per_charged_evaluation);
-            }
-            SearchActionKey::Ride(arm) => {
-                ride_rates.insert(arm, score.information_per_charged_evaluation);
-            }
-        }
-    }
-    let best_ride = ride_rates.values().copied().max_by(f64::total_cmp);
-    scientific.ride_information_scores = ride_rates;
-    let opportunities = scientific
-        .discovery_replicas
+    for (arm, score) in ride_arms
         .iter()
-        .map(|replica| {
-            DiscoveryOpportunity::new(*replica, basin_rates.get(replica).copied()?, best_ride).ok()
-        })
-        .collect::<Option<Vec<_>>>()?;
-    let epoch = scientific.minimum_information.version();
-    assign_discovery_roles_with_minimum(
-        &opportunities,
-        claimable.len(),
-        minimum_ride_consumers,
-        epoch,
+        .cloned()
+        .zip(scores.into_iter().skip(basin_actions.len()))
+    {
+        ride_rates.insert(arm, score.information_per_charged_evaluation);
+    }
+    let assignments = assign_discovery_batch(
+        &mut scientific.minimum_information,
+        &basin_actions,
+        &ride_actions,
+        MINIMUM_INFORMATION_SAMPLES,
     )
-    .ok()?
-    .into_iter()
-    .find(|assignment| assignment.replica == query_replica)
-    .map(|assignment| (assignment.role, assignment.epoch))
+    .ok()?;
+    let selected_rides = assignments
+        .iter()
+        .filter_map(|assignment| assignment.ride_action)
+        .filter_map(|index| ride_arms.get(index).cloned())
+        .collect::<BTreeSet<_>>();
+    ride_rates.retain(|arm, _| selected_rides.contains(arm));
+    scientific.ride_information_scores = ride_rates;
+    assignments
+        .into_iter()
+        .find(|assignment| assignment.replica == query_replica)
+        .map(|assignment| (assignment.role, assignment.epoch))
 }
 
 fn diagnostic_unseen_mass_upper(
