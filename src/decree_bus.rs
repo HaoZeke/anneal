@@ -242,6 +242,37 @@ mod tests {
     }
 
     #[test]
+    fn two_brains_exchange_over_job_scoped_ipc_endpoints() {
+        let prefix = format!("/tmp/anneal-decree-ipc-{}", std::process::id());
+        let first = format!("ipc://{prefix}-0.sock");
+        let second = format!("ipc://{prefix}-1.sock");
+        let a = DecreeBus::new(0, &first, &[(1, second.clone())]).unwrap();
+        let b = DecreeBus::new(1, &second, &[(0, first.clone())]).unwrap();
+        settle();
+
+        a.send(
+            1,
+            &RaftMessage::VoteReply {
+                term: 7,
+                granted: true,
+            },
+        )
+        .unwrap();
+        settle();
+
+        let seen = b.poll();
+        assert_eq!(seen.len(), 1);
+        assert_eq!(seen[0].0, 0);
+        assert_eq!(
+            seen[0].1,
+            RaftMessage::VoteReply {
+                term: 7,
+                granted: true,
+            }
+        );
+    }
+
+    #[test]
     fn an_observer_reads_traffic_addressed_to_someone_else() {
         let [eb, epeer, epub] = endpoints::<3>(1);
         let brain = DecreeBus::new(4, &eb, &[(5, epeer)])
