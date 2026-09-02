@@ -606,10 +606,11 @@ impl Fingerprint for SortedPairs {
 }
 
 impl<F: Fingerprint> BasinBias<F> {
-    /// Requires `gamma > 1`, `w0 > 0` and `merge_radius > 0`.
+    /// Requires `gamma > 1`, `w0 >= 0` and `merge_radius > 0`.
+    /// A zero height retains basin identity while leaving the energy unbiased.
     pub fn new(fingerprint: F, merge_radius: f64, w0: f64, gamma: f64) -> Self {
         assert!(gamma > 1.0, "gamma must be > 1");
-        assert!(w0 > 0.0, "w0 must be > 0");
+        assert!(w0.is_finite() && w0 >= 0.0, "w0 must be finite and >= 0");
         Self {
             index: BasinIndex::new(fingerprint, merge_radius),
             w0,
