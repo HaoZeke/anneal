@@ -219,6 +219,33 @@ impl EscapeFeedback {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ndarray::{Array1, ArrayView1};
+    use rand::SeedableRng;
+    use rand::rngs::StdRng;
+
+    #[test]
+    fn nve_escape_stops_after_the_requested_potential_minimum_in_generic_nd() {
+        let start = Array1::zeros(5);
+        let config = MdEscapeConfig {
+            dt: 0.05,
+            potential_minima: 1,
+            maximum_steps: 200,
+            geometry: MdEscapeGeometry::Euclidean,
+        };
+        let mut evaluations = 0usize;
+        let mut evaluate = |x: ArrayView1<f64>| {
+            evaluations += 1;
+            Some((0.5 * x.dot(&x), x.to_owned()))
+        };
+        let mut rng = StdRng::seed_from_u64(17);
+
+        let report = nve_escape(start.view(), 0.5, &config, &mut evaluate, &mut rng).unwrap();
+
+        assert_eq!(report.potential_minima, 1);
+        assert!(report.steps < config.maximum_steps);
+        assert_eq!(evaluations, report.steps + 1);
+        assert_eq!(report.position.len(), 5);
+    }
 
     #[test]
     fn revisiting_the_same_basin_escalates_the_escape() {
