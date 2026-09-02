@@ -154,6 +154,7 @@ struct CatalogMutationReply {
     absent @3 :Void;
     present @4 :UInt64;
   }
+  newBasin @5 :Bool;
 }
 
 struct PopulationSubmitRequest {

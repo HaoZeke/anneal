@@ -710,7 +710,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     1,
                 )?;
                 let reached_basin = offer.catalog.as_ref().map(|mutation| mutation.basin_id);
-                let discovered = reached_basin.is_some_and(|basin| known_basins.insert(basin));
+                if let Some(basin) = reached_basin {
+                    known_basins.insert(basin);
+                }
+                let discovered = offer
+                    .catalog
+                    .as_ref()
+                    .is_some_and(|mutation| mutation.new_basin);
                 source_discoveries += u64::from(discovered);
                 mechanism_allocator.update(
                     SOURCE_ESCAPE_ARM,
