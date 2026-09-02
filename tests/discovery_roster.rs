@@ -43,7 +43,7 @@ fn unresolved_saddle_coverage_receives_the_discovery_batch() {
 }
 
 #[test]
-fn discovery_roles_rotate_without_changing_the_coverage_allocation() {
+fn discovery_roles_stay_stable_when_only_the_evidence_epoch_changes() {
     let coverage = DiscoveryCoverage {
         basin_observations: 10,
         basin_singletons: 5,
@@ -70,7 +70,7 @@ fn discovery_roles_rotate_without_changing_the_coverage_allocation() {
             .filter(|assignment| assignment.role == DiscoveryRole::BasinEscape)
             .count()
     );
-    assert_ne!(roles(&first), roles(&second));
+    assert_eq!(roles(&first), roles(&second));
 }
 
 #[test]
