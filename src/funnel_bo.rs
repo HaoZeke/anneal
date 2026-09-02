@@ -1055,7 +1055,7 @@ fn positive_definite_cholesky(matrix: &Array2<f64>) -> Option<Array2<f64>> {
     Some(cholesky)
 }
 
-fn positive_definite_log_determinant(matrix: &Array2<f64>) -> Option<f64> {
+pub(crate) fn positive_definite_log_determinant(matrix: &Array2<f64>) -> Option<f64> {
     let cholesky = positive_definite_cholesky(matrix)?;
     Some(
         2.0 * (0..cholesky.nrows())
