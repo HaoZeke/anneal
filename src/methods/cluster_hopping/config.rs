@@ -605,6 +605,10 @@ pub struct Config {
     pub quench_confidence: f64,
     /// Relaxation steps in the full pass.
     pub relax_steps: usize,
+    /// First-phase transform of every relaxation: relax on a compacted
+    /// surface first, then on the plain potential from that minimum, judging
+    /// the plain energy. `None` relaxes on the plain potential only.
+    pub two_phase: Option<crate::methods::two_phase::TwoPhase>,
     /// Container half-width, applied when a move is generated.
     pub container: f64,
     /// Closest approach enforced before a trial is relaxed.
@@ -841,6 +845,7 @@ impl Config {
             quench_warmup: 4,
             quench_confidence: 2.0,
             relax_steps: 200,
+            two_phase: None,
             // Calibrated against published minima: the largest atomic distance
             // from the centre of mass divides by N^(1/3) to between 0.46 and
             // 0.63, and the literature's 2.5 N^(1/3) is sized for a method

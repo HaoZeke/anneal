@@ -1375,6 +1375,33 @@ fn main() {
     // superbasin plus AS-KMC height is an intra-packing leftover walk:
     // LJ75 sits on the Mackay shelf and never reaches ico or Marks.
     cfg.anneal_diversity = opts.contains(&"csa");
+    // Two-phase relaxation on the compacted surface (Locatelli and Schoen;
+    // Doye). TWO_PHASE_KAPPA sets a relative cutoff, TWO_PHASE_D a fixed
+    // one in pair-well units, TWO_PHASE_BETA the penalty strength and
+    // TWO_PHASE_MU a centroid compression.
+    if opts.contains(&"twophase") {
+        let envf = |k: &str, d: f64| {
+            std::env::var(k)
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(d)
+        };
+        let beta = envf("TWO_PHASE_BETA", 1.0);
+        let kappa = envf("TWO_PHASE_KAPPA", 0.0);
+        let cutoff = if kappa > 0.0 {
+            anneal_core::methods::two_phase::Cutoff::Relative(kappa)
+        } else {
+            anneal_core::methods::two_phase::Cutoff::Fixed(
+                envf("TWO_PHASE_D", 3.5) * cfg.length_scale * 2f64.powf(1.0 / 6.0),
+            )
+        };
+        cfg.two_phase = Some(anneal_core::methods::two_phase::TwoPhase {
+            cutoff,
+            beta,
+            mu: envf("TWO_PHASE_MU", 0.0),
+        });
+        println!("  two-phase relaxation: {:?}", cfg.two_phase);
+    }
     cfg.path_on_stall = opts.contains(&"path");
     // Stall exits through the recorded basin entry, named so it is
     // measurable against the Lanczos climb rather than replacing it.
@@ -1648,6 +1675,7 @@ fn main() {
         let mut qrng = <rand::rngs::StdRng as rand::SeedableRng>::seed_from_u64(
             seed.wrapping_mul(0x9E3779B97F4A7C15).wrapping_add(17),
         );
+        let two_phase = cfg.two_phase.filter(|two| two.is_active());
         let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, iters: usize| {
             let charged_before = led.spent();
             // Curvature is not carried between relaxations: measured on this
@@ -1687,6 +1715,24 @@ fn main() {
                 led.record_quench_boundary(charged_before, f, cur.clone(), None);
                 return (f, cur);
             }
+            // Phase one, when configured: the compacted-surface relaxation
+            // whose minimum the plain relaxation below starts from.
+            let compacted;
+            let x = match two_phase {
+                Some(two) => {
+                    let cutoff = two.cutoff_for(x);
+                    let (_, phase_one, _) = opt.minimize(x, iters, |v| {
+                        let (e, g) = charged(led, v)?;
+                        let (pe, pg) =
+                            anneal_core::methods::two_phase::penalty(v, cutoff, two.beta, two.mu);
+                        Some((e + pe, g + pg))
+                    });
+                    opt.forget();
+                    compacted = phase_one;
+                    compacted.view()
+                }
+                None => x,
+            };
             let (f, xr, _) = if anneal_core::known_basin::is_armed() {
                 let (f, xr) =
                     anneal_core::known_basin::step_rgmin(&mut opt, x, iters, |v| charged(led, v));
