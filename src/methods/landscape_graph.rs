@@ -393,11 +393,11 @@ mod tests {
     #[test]
     fn the_fiedler_split_does_not_depend_on_start_vector_overlap() {
         // The index-ramp vector used by the iterative implementation is
-        // orthogonal to this graph's Fiedler vector [1, -1, -1, 1].  An
-        // eigensolve must still recover the weak cut {0, 3} | {1, 2} and
-        // lambda_2 = 2.  Integer weights keep the orthogonality exact in the
-        // reflected-Laplacian iteration instead of seeding the missing mode
-        // through decimal roundoff.
+        // orthogonal to this regular graph's Fiedler vector
+        // [1, -1, -1, 1].  An eigensolve must still recover the weak cut
+        // {0, 3} | {1, 2} and normalized lambda_2 = 2 / 5.  Integer weights
+        // keep the orthogonality exact in the reflected-Laplacian iteration
+        // instead of seeding the missing mode through decimal roundoff.
         let mut g = LandscapeGraph::new();
         for basin in 0..4 {
             g.observe_basin(basin);
@@ -414,7 +414,7 @@ mod tests {
         }
         sides.sort();
 
-        assert!((split.algebraic_connectivity - 2.0).abs() < 1e-10);
+        assert!((split.algebraic_connectivity - 0.4).abs() < 1e-10);
         assert_eq!(sides, [vec![0, 3], vec![1, 2]]);
     }
 
