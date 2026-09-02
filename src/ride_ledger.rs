@@ -129,6 +129,13 @@ impl EnvironmentBook {
     pub fn class_count(&self) -> usize {
         self.leaders.len()
     }
+
+    /// Invariant feature vector represented by one coordinator-local class.
+    pub fn feature(&self, class: u32) -> Option<&[f64]> {
+        self.leaders
+            .get(usize::try_from(class).ok()?)
+            .map(Vec::as_slice)
+    }
 }
 
 /// A quenched minimum eligible for transition exploration.
@@ -457,36 +464,46 @@ impl RideLedger {
         Ok(())
     }
 
-    /// Claim the highest-acquisition experiment not held by another replica.
+    /// Claim an experiment using only balanced action-space tie breaking.
     ///
-    /// A retry by the same replica returns its existing order. Solver
-    /// reliability transfers across arms through a same-PES upper-confidence
-    /// estimate. Environment-level exact stationary-object uncertainty provides
-    /// the outer acquisition score, followed by mode-rank uncertainty, so unseen
-    /// local environments and orthogonal seeds precede sign or method
-    /// repetitions. Exact-arm novelty remains local. Raw energy only breaks
-    /// acquisition ties inside this ledger.
+    /// The coordinator uses [`Self::claim_ranked`] for scientific selection.
+    /// This convenience path assigns least-exposed environment, mode, and exact
+    /// arms without interpreting saddle or edge outcomes as rewards.
     pub fn claim(&mut self, replica: u32, seed: u64) -> Option<RideWorkOrder> {
+        self.claim_ranked(replica, seed, &BTreeMap::new())
+    }
+
+    /// Claim the unheld action with the largest minimum-information score.
+    ///
+    /// Scores are supplied by a terminal-energy model outside the network
+    /// ledger. Exposure counts break exact score ties so concurrent chains do
+    /// not repeat one action. Saddle identity, edge novelty, and connectivity
+    /// never enter the ordering.
+    pub fn claim_ranked(
+        &mut self,
+        replica: u32,
+        seed: u64,
+        scores: &BTreeMap<RideArm, f64>,
+    ) -> Option<RideWorkOrder> {
         if let Some(id) = self.replica_work.get(&replica) {
             return self.active.get(id).cloned();
         }
 
-        let total = self.completed_attempts;
-        let total_charged = self.charged_evaluations;
         let selected = self
             .arms()
             .filter(|(arm, _)| !self.active_arms.contains(arm))
             .max_by(|(left, left_atom), (right, right_atom)| {
-                self.environment_acquisition(left, total)
-                    .total_cmp(&self.environment_acquisition(right, total))
+                scores
+                    .get(left)
+                    .copied()
+                    .unwrap_or(0.0)
+                    .total_cmp(&scores.get(right).copied().unwrap_or(0.0))
                     .then_with(|| {
-                        self.mode_acquisition(left, total)
-                            .total_cmp(&self.mode_acquisition(right, total))
+                        self.environment_attempts(right)
+                            .cmp(&self.environment_attempts(left))
                     })
-                    .then_with(|| {
-                        self.acquisition(left, total_charged)
-                            .total_cmp(&self.acquisition(right, total_charged))
-                    })
+                    .then_with(|| self.mode_attempts(right).cmp(&self.mode_attempts(left)))
+                    .then_with(|| self.arm_attempts(right).cmp(&self.arm_attempts(left)))
                     .then_with(|| {
                         self.source_energy(right.source_basin)
                             .total_cmp(&self.source_energy(left.source_basin))
@@ -730,6 +747,13 @@ impl RideLedger {
         self.arms().any(|(arm, _)| !self.active_arms.contains(&arm))
     }
 
+    /// Unheld action portfolio with each representative atom.
+    pub fn claimable_arms(&self) -> Vec<(RideArm, u32)> {
+        self.arms()
+            .filter(|(arm, _)| !self.active_arms.contains(arm))
+            .collect()
+    }
+
     /// PES evaluations charged to completed experiments.
     pub fn charged_evaluations(&self) -> u64 {
         self.charged_evaluations
@@ -751,62 +775,44 @@ impl RideLedger {
             .map_or(f64::INFINITY, |source| source.energy)
     }
 
-    fn environment_acquisition(&self, arm: &RideArm, total: u64) -> f64 {
+    fn environment_attempts(&self, arm: &RideArm) -> u64 {
         let key = (arm.source_basin, arm.environment_class);
-        match self.environment_evidence.get(&key) {
-            Some(row) => upper_probability(row.discoveries, row.completed, total),
-            None if !self.active_arms.iter().any(|active| {
-                active.source_basin == arm.source_basin
-                    && active.environment_class == arm.environment_class
-            }) =>
-            {
-                f64::INFINITY
-            }
-            None => 1.0,
-        }
+        self.environment_evidence
+            .get(&key)
+            .map_or(0, |row| row.completed)
+            .saturating_add(
+                self.active_arms
+                    .iter()
+                    .filter(|active| {
+                        active.source_basin == arm.source_basin
+                            && active.environment_class == arm.environment_class
+                    })
+                    .count() as u64,
+            )
     }
 
-    fn acquisition(&self, arm: &RideArm, total_charged: u64) -> f64 {
-        let method_reliability = match self.method_evidence.get(&arm.method) {
-            Some(row) => upper_discovery_rate(
-                row.stationary_saddles,
-                row.charged_evaluations,
-                row.completed,
-                total_charged,
-            ),
-            None if !self
-                .active_arms
-                .iter()
-                .any(|active| active.method == arm.method) =>
-            {
-                return f64::INFINITY;
-            }
-            None => 1.0,
-        };
-        let local_novel_yield = self.evidence.get(arm).map_or(1.0, |row| {
-            let certification =
-                (row.stationary_saddles as f64 + 0.5) / (row.completed as f64 + 1.0);
-            let novelty_given_certification =
-                (row.discoveries as f64 + 0.5) / (row.stationary_saddles as f64 + 1.0);
-            certification * novelty_given_certification
-        });
-        method_reliability * local_novel_yield
+    fn arm_attempts(&self, arm: &RideArm) -> u64 {
+        self.evidence
+            .get(arm)
+            .map_or(0, |row| row.completed)
+            .saturating_add(u64::from(self.active_arms.contains(arm)))
     }
 
-    fn mode_acquisition(&self, arm: &RideArm, total: u64) -> f64 {
+    fn mode_attempts(&self, arm: &RideArm) -> u64 {
         let key = (arm.source_basin, arm.environment_class, arm.mode_rank);
-        match self.mode_evidence.get(&key) {
-            Some(row) => upper_probability(row.discoveries, row.completed, total),
-            None if !self.active_arms.iter().any(|active| {
-                active.source_basin == arm.source_basin
-                    && active.environment_class == arm.environment_class
-                    && active.mode_rank == arm.mode_rank
-            }) =>
-            {
-                f64::INFINITY
-            }
-            None => 1.0,
-        }
+        self.mode_evidence
+            .get(&key)
+            .map_or(0, |row| row.completed)
+            .saturating_add(
+                self.active_arms
+                    .iter()
+                    .filter(|active| {
+                        active.source_basin == arm.source_basin
+                            && active.environment_class == arm.environment_class
+                            && active.mode_rank == arm.mode_rank
+                    })
+                    .count() as u64,
+            )
     }
 
     fn arms(&self) -> impl Iterator<Item = (RideArm, u32)> + '_ {
@@ -838,27 +844,6 @@ impl RideLedger {
                     })
             })
     }
-}
-
-fn upper_probability(successes: u64, trials: u64, total: u64) -> f64 {
-    let trials = trials as f64;
-    let posterior_mean = (successes as f64 + 0.5) / (trials + 1.0);
-    let confidence_radius = (((total as f64) + 2.0).ln() / (2.0 * (trials + 1.0))).sqrt();
-    (posterior_mean + confidence_radius).min(1.0)
-}
-
-fn upper_discovery_rate(
-    discoveries: u64,
-    charged_evaluations: u64,
-    attempts: u64,
-    total_charged: u64,
-) -> f64 {
-    let shape = discoveries as f64 + 0.5;
-    let exposure = charged_evaluations.saturating_add(attempts).max(1) as f64;
-    let total_exposure = total_charged.max(charged_evaluations).saturating_add(2) as f64;
-    let posterior_mean = shape / exposure;
-    let confidence_radius = (2.0 * shape * total_exposure.ln()).sqrt() / exposure;
-    posterior_mean + confidence_radius
 }
 
 fn record_evidence(
