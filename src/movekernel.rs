@@ -480,27 +480,31 @@ impl HollowRelocate {
         };
         let others: Vec<usize> = (0..n).filter(|&a| a != mover).collect();
         let mut nb: Vec<Vec<usize>> = vec![Vec::new(); n];
-        let mut nn_sum = 0.0;
-        let mut nn_count = 0usize;
+        let mut nearest = vec![f64::INFINITY; n];
         for (u, &a) in others.iter().enumerate() {
-            let mut nearest = f64::INFINITY;
             for &b in &others[u + 1..] {
                 let d2 = dist2(pos(a), pos(b));
                 if d2 < cut2 {
                     nb[a].push(b);
                     nb[b].push(a);
                 }
-                nearest = nearest.min(d2);
-            }
-            if nearest.is_finite() {
-                nn_sum += nearest.sqrt();
-                nn_count += 1;
+                nearest[a] = nearest[a].min(d2);
+                nearest[b] = nearest[b].min(d2);
             }
         }
-        if nn_count == 0 {
+        // The bond length is the median nearest-neighbour distance, which a
+        // stray far point cannot drag the way a mean can.
+        let mut nn: Vec<f64> = others
+            .iter()
+            .map(|&a| nearest[a])
+            .filter(|d2| d2.is_finite())
+            .map(f64::sqrt)
+            .collect();
+        if nn.is_empty() {
             return Vec::new();
         }
-        let bond = nn_sum / nn_count as f64;
+        nn.sort_by(|a, b| a.total_cmp(b));
+        let bond = nn[nn.len() / 2];
         let exclusion2 = (0.85 * bond) * (0.85 * bond);
         let c = centroid(i, n);
         let mut sites = Vec::new();
