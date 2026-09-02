@@ -18,6 +18,7 @@ fn main() {
             "cpu_cell_list.cpp",
             "verlet.cpp",
             "shared_libraries.cpp",
+            "threadpool.cpp",
             "vesin_cuda_stub.cpp",
         ] {
             build.file(format!("{base}/src/{f}"));
