@@ -314,36 +314,36 @@ first three as Boolean witnesses and all four as executable proptest
 sweeps. This is the README's "same five-component algebra (Obj / Cool
 / Neigh / Move / Accept)" (README.md:9), named precisely.
 
-** Transport: no nng, raw TCP with a single-coordinator journal
+** Transport: Cap'n Proto RPC with a single-coordinator journal
 
-There is no nng transport and no raft-style or other distributed
-consensus anywhere in this crate: =grep -rli "nng\|raft\|consensus"
-src/ Cargo.toml= returns nothing. What is actually there:
+There is no nng catalog transport and no raft-style or other
+distributed consensus for the catalog: one coordinator process owns
+the journal. What is actually there:
 
-- Transport: a raw =std::net::TcpStream= carrying length-prefixed,
-  capnp-serialized frames (the handler signature at
-  src/catalog_rpc/server.rs:1962 reads =&mut TcpStream, reply:
-  CatalogReply=; the client dials with =TcpStream::connect_timeout= at
-  src/catalog_rpc/client.rs:184-197).
-- Coordination: one coordinator process, not a cluster of voting
-  peers. =CatalogServer::start= (src/catalog_rpc/server.rs:440) spawns
-  an accept-loop thread that spawns one thread per connection, and
-  every connection reads and writes the same
-  =Arc<Mutex<CoordinatorState>>= (server.rs:455) -- ordinary lock-
-  serialized shared state, not a quorum protocol.
+- Transport: two-party Cap'n Proto RPC on TCP. =Catalog.capnp=
+  defines =Coordinator=, =Session=, and =Subscriber=. A replica
+  =attach=es with its identity and a subscriber capability, then
+  =Session.call= carries the existing =CatalogRequest= /
+  =CatalogReply= payload so journal identity and every operation
+  handler stay unchanged. =Coordinator.observe= needs no identity.
+- Coordination: =CatalogServer::start= binds one socket and runs a
+  single =RpcSystem= accept loop on a dedicated thread with a tokio
+  =LocalSet= that owns coordinator state. Candidate validation that
+  does not depend on that state runs on a rayon pool and is awaited
+  before the request is applied. The coordinator pushes
+  =CoordinatorEvent= values to every attached subscriber when an
+  epoch closes, when the roster changes, and when a replica retires.
 - Durability: a single append-only request journal
-  (=append_journal=/=replay_journal=, server.rs:329-417), replayed at
-  startup and keyed by =(replica, event_sequence)=
-  (=maximum_sequence: BTreeMap<u32, u64>=, server.rs:255) so a
-  restarted coordinator recovers the same state a live one would have,
-  and a resent request after a dropped reply is a no-op rather than a
-  double-charge. This is crash recovery for one process, not agreement
-  among several.
+  (=append_journal=/=replay_journal=), replayed at startup and keyed
+  by =(replica, event_sequence)= so a restarted coordinator recovers
+  the same state a live one would have, and a resent request after a
+  dropped reply is a no-op rather than a double-charge. This is crash
+  recovery for one process, not agreement among several.
 
 Anywhere the narrative above says "the coordinator" it means this: one
-process, one mutex, one journal. A second coordinator process pointed
-at the same journal path would corrupt it; nothing in this crate
-arbitrates between two.
+process, one LocalSet, one journal. A second coordinator process
+pointed at the same journal path would corrupt it; nothing in this
+crate arbitrates between two.
 
 ** neus_bridge: the bridge layer between chains holding different minima
 
