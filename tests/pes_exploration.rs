@@ -1,9 +1,11 @@
 use std::convert::Infallible;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use anneal_core::descriptor_space::{DescriptorGeometry, universal_descriptor_space};
 use anneal_core::pes_exploration::{
     ExactStructureWitness, PesExplorationConfig, PesNetwork, PesSurface, RideMethod,
-    StructureContext, discover_cartesian_mode_connection, discover_mode_connection,
+    StructureContext, discover_cartesian_mode_connection,
+    discover_cartesian_mode_connection_with_budget, discover_mode_connection,
     quench_minimum_with_norm, stationary_index, stationary_index_cartesian,
 };
 use ndarray::{Array1, ArrayView1, array};
@@ -129,6 +131,31 @@ impl PesSurface for RadialPairBarrier {
             gradient[3 + axis] = component;
         }
         Ok((energy, gradient))
+    }
+}
+
+struct CountingRadialPairBarrier {
+    calls: AtomicU64,
+}
+
+impl CountingRadialPairBarrier {
+    fn new() -> Self {
+        Self {
+            calls: AtomicU64::new(0),
+        }
+    }
+
+    fn calls(&self) -> u64 {
+        self.calls.load(Ordering::Relaxed)
+    }
+}
+
+impl PesSurface for CountingRadialPairBarrier {
+    type Error = Infallible;
+
+    fn evaluate(&self, coordinates: ArrayView1<f64>) -> Result<(f64, Array1<f64>), Self::Error> {
+        self.calls.fetch_add(1, Ordering::Relaxed);
+        RadialPairBarrier.evaluate(coordinates)
     }
 }
 
@@ -351,6 +378,94 @@ fn constrained_atomistic_connection_certifies_only_free_modes() {
     )
     .unwrap();
 
+    assert_eq!(connection.negative_modes, 1);
+    assert_eq!(network.minimum_count(), 2);
+    assert_eq!(network.saddle_count(), 1);
+}
+
+#[test]
+fn atomistic_ride_has_a_hard_pes_call_boundary() {
+    let descriptor_space = universal_descriptor_space(DescriptorGeometry::finite(1.0).unwrap());
+    let surface = CountingRadialPairBarrier::new();
+    let mut network = PesNetwork::new();
+    let config = PesExplorationConfig {
+        quench_steps: 300,
+        saddle_steps: 600,
+        irc_steps: 100,
+        quench_gradient_tolerance: 1e-8,
+        saddle_force_tolerance: 1e-5,
+        saddle_displacement: 0.1,
+        negative_curvature_tolerance: 1e-7,
+        hessian_step: 1e-5,
+        maximum_move: 0.1,
+        irc_step: 0.05,
+        refine_with_prfo: false,
+        ..PesExplorationConfig::default()
+    };
+    let start = array![-0.25, 0.0, 0.0, 0.25, 0.0, 0.0];
+    let mode = array![-1.0, 0.0, 0.0, 1.0, 0.0, 0.0];
+
+    let attempt = discover_cartesian_mode_connection_with_budget(
+        &surface,
+        &descriptor_space,
+        &mut network,
+        start.view(),
+        array![1.0, 1.0].view(),
+        &[false, false],
+        mode.view(),
+        Some(&[1, 1]),
+        &config,
+        &CartesianWitness { tolerance: 1e-4 },
+        1,
+    );
+
+    assert!(attempt.connection.is_err());
+    assert!(attempt.budget_exhausted);
+    assert_eq!(attempt.charged_evaluations, 1);
+    assert_eq!(surface.calls(), 1);
+}
+
+#[test]
+fn budgeted_atomistic_ride_preserves_free_mode_index_certification() {
+    let descriptor_space = universal_descriptor_space(DescriptorGeometry::finite(1.0).unwrap());
+    let surface = CountingRadialPairBarrier::new();
+    let mut network = PesNetwork::new();
+    let config = PesExplorationConfig {
+        ride_method: RideMethod::Dimer,
+        quench_steps: 300,
+        saddle_steps: 600,
+        irc_steps: 100,
+        quench_gradient_tolerance: 1e-8,
+        saddle_force_tolerance: 1e-5,
+        saddle_displacement: 0.1,
+        negative_curvature_tolerance: 1e-7,
+        hessian_step: 1e-5,
+        maximum_move: 0.1,
+        irc_step: 0.05,
+        refine_with_prfo: false,
+        ..PesExplorationConfig::default()
+    };
+    let start = array![-0.25, 0.0, 0.0, 0.25, 0.0, 0.0];
+    let mode = array![-1.0, 0.0, 0.0, 1.0, 0.0, 0.0];
+
+    let attempt = discover_cartesian_mode_connection_with_budget(
+        &surface,
+        &descriptor_space,
+        &mut network,
+        start.view(),
+        array![1.0, 1.0].view(),
+        &[false, false],
+        mode.view(),
+        Some(&[1, 1]),
+        &config,
+        &CartesianWitness { tolerance: 1e-4 },
+        10_000,
+    );
+
+    assert!(!attempt.budget_exhausted);
+    assert_eq!(attempt.charged_evaluations, surface.calls());
+    assert!(attempt.charged_evaluations <= 10_000);
+    let connection = attempt.connection.unwrap();
     assert_eq!(connection.negative_modes, 1);
     assert_eq!(network.minimum_count(), 2);
     assert_eq!(network.saddle_count(), 1);
