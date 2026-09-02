@@ -661,6 +661,8 @@ fn coordinator_credits_exact_basin_novelty_only_once_across_replicas() {
     assert!(discovery.new_basin);
     assert!(!revisit.new_basin);
     assert_eq!(discovery.basin_id, revisit.basin_id);
+    assert_eq!(discovery.basin_visits, 1);
+    assert_eq!(revisit.basin_visits, 2);
 }
 
 #[test]
