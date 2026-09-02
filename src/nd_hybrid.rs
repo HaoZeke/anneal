@@ -2,12 +2,14 @@
 //!
 //! Basin escapes generate force-certified sources and minimum-mode rides turn
 //! those sources into index-one connections. Separate action-outcome GPs rank
-//! the next finite experiment by GIBBON information about the lowest reachable
-//! terminal energy per charged PES evaluation. The returned network belongs to
-//! one caller-supplied surface and witness; no identity, energy model, or
-//! evidence crosses between systems.
+//! the next finite experiment by joint information about the identity and
+//! energy of the lowest reachable minimum per charged PES evaluation. Catalog
+//! admission is a producer--consumer barrier: an escape-discovered source is
+//! acknowledged by the ridge segment before escapes resume. The returned
+//! network belongs to one caller-supplied surface and witness; no identity,
+//! energy model, or evidence crosses between systems.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 
 use ndarray::{Array1, ArrayView1};
 use rand::{SeedableRng, rngs::StdRng};
@@ -514,6 +516,7 @@ where
     let tsallis = TsallisVisit::new(config.visiting_q);
     let ranks = dimension * usize::from(config.ride_mode_blocks);
     let mut attempted = HashSet::new();
+    let mut pending_ridge_sources = VecDeque::new();
     let mut source_cursor = 0usize;
     let mut events = Vec::new();
     let mut attempt = 0u64;
@@ -526,11 +529,18 @@ where
         if policy == NdHybridPolicy::RidgeOnly && ride_tasks.is_empty() {
             break NdHybridTermination::RidePortfolioExhausted;
         }
-        let active_ride_source = ride_tasks.first().map(|task| task.0);
+        let required_ride_source = (policy == NdHybridPolicy::Adaptive)
+            .then(|| pending_ridge_sources.front().copied())
+            .flatten();
+        let active_ride_source =
+            required_ride_source.or_else(|| ride_tasks.first().map(|task| task.0));
 
         let mut plans = Vec::<PlannedAction>::new();
         if policy != NdHybridPolicy::BasinEscapeOnly {
             for (source_basin, mode_rank, direction) in ride_tasks {
+                if required_ride_source.is_some_and(|required| source_basin != required) {
+                    continue;
+                }
                 let source = network.minima()[source_basin].coordinates.clone();
                 let source_energy = network.minima()[source_basin].energy;
                 let mode_seed =
@@ -552,7 +562,7 @@ where
                 });
             }
         }
-        if policy != NdHybridPolicy::RidgeOnly {
+        if policy != NdHybridPolicy::RidgeOnly && required_ride_source.is_none() {
             let escape_scale = escape_feedback.escape();
             let gaussian = Gaussian::new(escape_scale).propose(
                 live_coordinates.view(),
@@ -638,6 +648,9 @@ where
             feature,
         } = selected
         {
+            if pending_ridge_sources.front().copied() == Some(source_basin) {
+                pending_ridge_sources.pop_front();
+            }
             source_cursor = (source_basin + 1) % network.minimum_count();
             attempted.insert((source_basin, mode_rank, direction));
             let minima_before = network.minimum_count();
@@ -788,6 +801,9 @@ where
                 let admission = network.admit_minimum(record.minimum, witness);
                 let discovered = admission.is_new;
                 let new_minimum_ids = discovered.then_some(admission.id).into_iter().collect();
+                if discovered && policy == NdHybridPolicy::Adaptive {
+                    pending_ridge_sources.push_back(admission.id);
+                }
                 minimum_information.observe(
                     SearchMechanism::BasinEscape,
                     &feature,
