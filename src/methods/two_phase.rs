@@ -178,7 +178,13 @@ impl SurfacePortfolio {
     /// The plain surface plus every transform, uninformative until fed.
     pub fn new(transforms: &[TwoPhase], seed: u64) -> Self {
         let mut arms = vec![None];
-        arms.extend(transforms.iter().copied().filter(|two| two.is_active()).map(Some));
+        arms.extend(
+            transforms
+                .iter()
+                .copied()
+                .filter(|two| two.is_active())
+                .map(Some),
+        );
         Self {
             allocator: DepthAllocator::new(arms.len()),
             arms,
@@ -295,7 +301,11 @@ mod tests {
                 Some(_) => -2.0,
                 None => -5.0,
             };
-            assert_eq!(portfolio.begin(false), arm, "the full relaxation changed surface");
+            assert_eq!(
+                portfolio.begin(false),
+                arm,
+                "the full relaxation changed surface"
+            );
             portfolio.observe(false, reached, -10.0);
         }
         let draws = portfolio.draws();
@@ -316,5 +326,91 @@ mod tests {
         portfolio.begin(false);
         portfolio.observe(false, -1.0, -3.0);
         assert_eq!(portfolio.draws().iter().sum::<usize>(), 1);
+    }
+
+    fn rigid_water() -> Array1<f64> {
+        Array1::from(vec![
+            0.0, 0.0, 0.0, 0.7572, 0.5865, 0.0, -0.7572, 0.5865, 0.0,
+        ])
+    }
+
+    fn two_rigid_waters() -> (Array1<f64>, Vec<Vec<usize>>) {
+        let mut x = rigid_water().to_vec();
+        x.extend_from_slice(&[3.0, 0.0, 0.0, 3.7572, 0.5865, 0.0, 2.2428, 0.5865, 0.0]);
+        (Array1::from(x), vec![vec![0, 1, 2], vec![3, 4, 5]])
+    }
+
+    #[test]
+    fn a_single_rigid_water_receives_no_penalty_force() {
+        let x = rigid_water();
+        let groups = [vec![0, 1, 2]];
+        let (e, g) = penalty_groups(x.view(), &groups, 1.0, 1.0, 2.5);
+        assert_eq!(e, 0.0);
+        assert!(
+            g.iter().all(|v| *v == 0.0),
+            "internal water geometry felt a penalty force: {g}"
+        );
+    }
+
+    #[test]
+    fn the_group_penalty_gradient_matches_finite_differences() {
+        let (x, groups) = two_rigid_waters();
+        let (cutoff, beta, mu) = (2.0, 0.7, 0.3);
+        let (_, g) = penalty_groups(x.view(), &groups, cutoff, beta, mu);
+        let h = 1e-6;
+        for i in 0..x.len() {
+            let mut plus = x.clone();
+            let mut minus = x.clone();
+            plus[i] += h;
+            minus[i] -= h;
+            let fd = (penalty_groups(plus.view(), &groups, cutoff, beta, mu).0
+                - penalty_groups(minus.view(), &groups, cutoff, beta, mu).0)
+                / (2.0 * h);
+            assert!(
+                (fd - g[i]).abs() < 1e-6,
+                "component {i}: finite difference {fd} against analytic {}",
+                g[i]
+            );
+        }
+    }
+
+    #[test]
+    fn singleton_groups_match_the_atomic_penalty() {
+        let x = cluster();
+        let groups: Vec<Vec<usize>> = (0..x.len() / 3).map(|i| vec![i]).collect();
+        let (cutoff, beta, mu) = (2.0, 0.7, 0.3);
+        let (e_atoms, g_atoms) = penalty(x.view(), cutoff, beta, mu);
+        let (e_groups, g_groups) = penalty_groups(x.view(), &groups, cutoff, beta, mu);
+        assert!(
+            (e_atoms - e_groups).abs() < 1e-12,
+            "{e_atoms} vs {e_groups}"
+        );
+        for i in 0..x.len() {
+            assert!(
+                (g_atoms[i] - g_groups[i]).abs() < 1e-12,
+                "component {i}: atomic {} against group {}",
+                g_atoms[i],
+                g_groups[i]
+            );
+        }
+    }
+
+    #[test]
+    fn atoms_in_a_rigid_group_share_one_penalty_force() {
+        let (x, groups) = two_rigid_waters();
+        let (_, g) = penalty_groups(x.view(), &groups, 2.0, 0.7, 0.3);
+        for atoms in &groups {
+            let shared = [g[3 * atoms[0]], g[3 * atoms[0] + 1], g[3 * atoms[0] + 2]];
+            for &i in atoms {
+                for k in 0..3 {
+                    assert!(
+                        (g[3 * i + k] - shared[k]).abs() < 1e-12,
+                        "atom {i} axis {k}: {} against group force {}",
+                        g[3 * i + k],
+                        shared[k]
+                    );
+                }
+            }
+        }
     }
 }
