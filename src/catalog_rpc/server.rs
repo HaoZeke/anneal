@@ -1466,13 +1466,11 @@ fn apply_request(
                     true
                 }
             };
-            let residual_uncertainty = transition_uncertainty(scientific, basin_id);
-            let Ok(member) = PopulationMember::new_with_uncertainty(
+            let Ok(member) = PopulationMember::new(
                 request.identity.replica,
                 validated.fresh.energy,
                 novelty,
                 basin_visits as f64,
-                residual_uncertainty,
             ) else {
                 return rejected(
                     state,
@@ -1584,13 +1582,11 @@ fn apply_request(
                 },
                 |fp| scientific.packing.novelty(fp),
             );
-            let residual_uncertainty = transition_uncertainty(scientific, basin_id);
-            let Ok(member) = PopulationMember::new_with_uncertainty(
+            let Ok(member) = PopulationMember::new(
                 request.identity.replica,
                 member_candidate.energy,
                 novelty,
                 basin_visits as f64,
-                residual_uncertainty,
             ) else {
                 return rejected(
                     state,
