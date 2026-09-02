@@ -1078,6 +1078,46 @@ fn main() {
         println!("{solved}/{seeds} solved (rss)");
         return;
     }
+    // Dynamic lattice search: construct from the structure's own hollow
+    // sites, relax, restart on stall. The evaluation-matched published
+    // baseline for the hard sizes, run under the same ledger.
+    if std::env::args()
+        .nth(4)
+        .map(|v| v.split(',').any(|t| t == "dls"))
+        .unwrap_or(false)
+    {
+        use anneal_core::methods::lattice_search::{LatticeSearchConfig, run as lattice_run};
+        let lcfg = LatticeSearchConfig::lennard_jones(n);
+        let mut solved = 0usize;
+        for seed in seed0..(seed0 + seeds) {
+            let mut ledger = Ledger::new(budget);
+            let mut opt = WarmLbfgs::default();
+            let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, iters: usize| {
+                opt.forget();
+                let (f, xr, _) = opt.minimize(x, iters, |v| charged(led, v));
+                (f, xr)
+            };
+            let out = lattice_run(&lcfg, &mut ledger, &mut relax, seed);
+            let hit = reference.map(|r| out.best < r + 1e-4).unwrap_or(false);
+            if hit {
+                solved += 1;
+            }
+            println!(
+                "  seed {seed}: best {:.6}  constructions {}  restarts {}  improvements {}  charged {}{}",
+                out.best,
+                out.hops,
+                out.basins,
+                out.returned,
+                out.charged,
+                if hit { "  SOLVED" } else { "" }
+            );
+            if let Some((_, spent, _, e)) = out.improvements.first() {
+                println!("      best {e:.6} reached at charged {spent}");
+            }
+        }
+        println!("{solved}/{seeds} solved (dls)");
+        return;
+    }
     // Archive-ratchet mode: the minima network explored from a permanent
     // keyed archive, launches by discovery posterior.
     #[cfg(feature = "graphkey")]
