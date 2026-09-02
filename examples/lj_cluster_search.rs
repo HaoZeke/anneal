@@ -205,16 +205,50 @@ mod option_tests {
         );
         assert_eq!(
             decree_anchor_action(None, Some(&assignment), Some(29)),
-            DecreeAnchorAction::MarkApplied { snapshot: 11 }
+            DecreeAnchorAction::MarkApplied {
+                snapshot: 11,
+                basin: 29,
+            }
         );
         assert_eq!(
-            decree_anchor_action(Some(11), Some(&assignment), Some(7)),
+            decree_anchor_action(
+                Some(AppliedDecree {
+                    snapshot: 11,
+                    basin: 29,
+                }),
+                Some(&assignment),
+                Some(7),
+            ),
             DecreeAnchorAction::Ignore
         );
         assert_eq!(
-            decree_anchor_action(Some(12), Some(&assignment), Some(7)),
+            decree_anchor_action(
+                Some(AppliedDecree {
+                    snapshot: 12,
+                    basin: 29,
+                }),
+                Some(&assignment),
+                Some(7),
+            ),
             DecreeAnchorAction::Ignore,
             "a delayed committed decree cannot roll a chain back"
+        );
+        let mut unchanged_side = assignment.clone();
+        unchanged_side.decree_index = 13;
+        assert_eq!(
+            decree_anchor_action(
+                Some(AppliedDecree {
+                    snapshot: 12,
+                    basin: 29,
+                }),
+                Some(&unchanged_side),
+                Some(7),
+            ),
+            DecreeAnchorAction::MarkApplied {
+                snapshot: 13,
+                basin: 29,
+            },
+            "new evidence for the same segment cannot restart its chain"
         );
     }
 
