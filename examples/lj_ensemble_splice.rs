@@ -726,3 +726,15 @@ fn run_halving(
         median.map(|m| m.to_string()).unwrap_or_else(|| "-".into())
     );
 }
+
+#[cfg(test)]
+mod tests {
+    use super::km_median_first_hit;
+
+    #[test]
+    fn chain_median_retains_budget_censoring() {
+        let records = [(Some(10), 100), (None, 100), (None, 100)];
+
+        assert_eq!(km_median_first_hit(&records), None);
+    }
+}
