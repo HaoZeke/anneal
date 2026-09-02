@@ -1,4 +1,13 @@
-use anneal_core::discovery_roster::{DiscoveryCoverage, DiscoveryRole, assign_discovery_roles};
+use anneal_core::discovery_roster::{
+    DiscoveryCoverage, DiscoveryRole, assign_discovery_roles, coverage_allocation_weight,
+};
+
+#[test]
+fn coverage_allocation_keeps_full_uncertainty_before_the_observation_floor() {
+    assert_eq!(coverage_allocation_weight(4, 20, Some(0.0)), 1.0);
+    assert_eq!(coverage_allocation_weight(20, 20, Some(0.0)), 0.0);
+    assert_eq!(coverage_allocation_weight(20, 20, None), 1.0);
+}
 
 #[test]
 fn unresolved_saddle_coverage_receives_most_replica_seats() {
