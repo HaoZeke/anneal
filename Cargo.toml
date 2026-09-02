@@ -125,6 +125,10 @@ overflow-checks = true
 name    = "sa_bench"
 harness = false
 
+[[bench]]
+name    = "tensor_id_bench"
+harness = false
+
 [[example]]
 name = "rgpot_minimize"
 required-features = ["capi", "rgpot-ex"]
