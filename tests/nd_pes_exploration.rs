@@ -2,8 +2,8 @@ use std::convert::Infallible;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use anneal_core::pes_exploration::{
-    discover_nd_connection, discover_nd_connection_with_budget, ExactStructureWitness,
-    NdPesNetwork, PesExplorationConfig, PesSurface, QuenchedMinimum, RideMethod,
+    ExactStructureRelation, ExactStructureWitness, NdPesNetwork, PesExplorationConfig, PesSurface,
+    QuenchedMinimum, RideMethod, discover_nd_connection, discover_nd_connection_with_budget,
 };
 use ndarray::{Array1, ArrayView1};
 
@@ -122,6 +122,81 @@ impl ExactStructureWitness for PointWitness {
             .sqrt()
             < 1e-5
     }
+}
+
+struct PermutationDoubleWell;
+
+impl PesSurface for PermutationDoubleWell {
+    type Error = Infallible;
+
+    fn evaluate(&self, point: ArrayView1<f64>) -> Result<(f64, Array1<f64>), Self::Error> {
+        let inverse_sqrt_two = std::f64::consts::FRAC_1_SQRT_2;
+        let reaction = (point[0] - point[1]) * inverse_sqrt_two;
+        let stable = (point[0] + point[1]) * inverse_sqrt_two;
+        let energy = (reaction * reaction - 1.0).powi(2) + stable * stable;
+        let reaction_gradient = 4.0 * reaction * (reaction * reaction - 1.0);
+        let stable_gradient = 2.0 * stable;
+        Ok((
+            energy,
+            Array1::from_vec(vec![
+                (reaction_gradient + stable_gradient) * inverse_sqrt_two,
+                (-reaction_gradient + stable_gradient) * inverse_sqrt_two,
+            ]),
+        ))
+    }
+}
+
+struct SwapWitness;
+
+impl ExactStructureWitness for SwapWitness {
+    fn equivalent(&self, left: ArrayView1<f64>, right: ArrayView1<f64>) -> bool {
+        self.relation(left, right).is_equivalent()
+    }
+
+    fn relation(&self, left: ArrayView1<f64>, right: ArrayView1<f64>) -> ExactStructureRelation {
+        let direct = ((left[0] - right[0]).powi(2) + (left[1] - right[1]).powi(2)).sqrt();
+        if direct < 1e-6 {
+            return ExactStructureRelation::Equivalent;
+        }
+        let swapped = ((left[0] - right[1]).powi(2) + (left[1] - right[0]).powi(2)).sqrt();
+        if swapped < 1e-6 {
+            ExactStructureRelation::NontrivialPermutation(vec![1, 0])
+        } else {
+            ExactStructureRelation::Distinct
+        }
+    }
+}
+
+#[test]
+fn generic_nd_ride_preserves_a_permutation_certified_self_loop() {
+    let mut network = NdPesNetwork::new();
+    let config = PesExplorationConfig {
+        ride_method: RideMethod::Lanczos,
+        quench_steps: 300,
+        saddle_steps: 500,
+        quench_gradient_tolerance: 1e-8,
+        saddle_force_tolerance: 1e-6,
+        saddle_displacement: 0.2,
+        irc_step: 0.08,
+        refine_with_prfo: false,
+        ..PesExplorationConfig::default()
+    };
+    let scale = std::f64::consts::FRAC_1_SQRT_2;
+
+    let connection = discover_nd_connection(
+        &PermutationDoubleWell,
+        &mut network,
+        Array1::from_vec(vec![-scale, scale]).view(),
+        Array1::from_vec(vec![scale, -scale]).view(),
+        &config,
+        &SwapWitness,
+    )
+    .unwrap();
+
+    assert_eq!(connection.endpoints[0], connection.endpoints[1]);
+    assert_eq!(network.minimum_count(), 1);
+    assert_eq!(network.saddle_count(), 1);
+    assert_eq!(connection.negative_modes, 1);
 }
 
 #[test]

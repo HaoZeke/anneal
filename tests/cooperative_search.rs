@@ -33,7 +33,7 @@ use anneal_core::descriptor_space::{
     DescriptorSpace, universal_descriptor_space,
 };
 use anneal_core::discovery_roster::DiscoveryRole;
-use anneal_core::pes_exploration::ExactStructureWitness;
+use anneal_core::pes_exploration::{ExactStructureRelation, ExactStructureWitness};
 use anneal_core::ride_ledger::RideFailure;
 use anneal_core::transition_graph::AttractionRegionConfig;
 use ndarray::ArrayView1;
@@ -49,6 +49,43 @@ impl ExactStructureWitness for SeparationWitness {
                 .sqrt()
         };
         (separation(left) - separation(right)).abs() < 1e-8
+    }
+}
+
+struct PermutationWitness;
+
+impl ExactStructureWitness for PermutationWitness {
+    fn equivalent(&self, left: ArrayView1<f64>, right: ArrayView1<f64>) -> bool {
+        SeparationWitness.equivalent(left, right)
+    }
+
+    fn relation(&self, left: ArrayView1<f64>, right: ArrayView1<f64>) -> ExactStructureRelation {
+        if !self.equivalent(left, right) {
+            return ExactStructureRelation::Distinct;
+        }
+        let direct = left
+            .iter()
+            .zip(right)
+            .map(|(left, right)| (left - right).powi(2))
+            .sum::<f64>()
+            .sqrt();
+        if direct < 1e-8 {
+            return ExactStructureRelation::Equivalent;
+        }
+        let swap_distance = (0..2)
+            .flat_map(|atom| {
+                (0..3).map(move |axis| {
+                    let delta = left[3 * atom + axis] - right[3 * (1 - atom) + axis];
+                    delta * delta
+                })
+            })
+            .sum::<f64>()
+            .sqrt();
+        if swap_distance < 1e-8 {
+            ExactStructureRelation::NontrivialPermutation(vec![1, 0])
+        } else {
+            ExactStructureRelation::Equivalent
+        }
     }
 }
 
@@ -180,6 +217,15 @@ fn ride_candidate(replica: u32, sequence: u64, separation: f64) -> CatalogCandid
     record
 }
 
+fn permuted_ride_candidate(replica: u32, sequence: u64, separation: f64) -> CatalogCandidate {
+    let mut record = ride_candidate(replica, sequence, separation);
+    let first = record.coordinates[..3].to_vec();
+    let second = record.coordinates[3..].to_vec();
+    record.coordinates[..3].copy_from_slice(&second);
+    record.coordinates[3..].copy_from_slice(&first);
+    record
+}
+
 fn ride_server() -> CatalogServer {
     let signature = signature();
     let digest = signature.digest();
@@ -201,10 +247,24 @@ fn ride_server() -> CatalogServer {
             0.05,
             400,
             |coordinates| {
-                let separation = coordinates[3];
+                let displacement = [
+                    coordinates[3] - coordinates[0],
+                    coordinates[4] - coordinates[1],
+                    coordinates[5] - coordinates[2],
+                ];
+                let separation = displacement
+                    .iter()
+                    .map(|component| component * component)
+                    .sum::<f64>()
+                    .sqrt();
                 let reaction = (separation - 1.6) / 0.4;
                 let mut forces = vec![0.0; coordinates.len()];
-                forces[3] = -4.0 * reaction * (reaction * reaction - 1.0) / 0.4;
+                let radial_force = -4.0 * reaction * (reaction * reaction - 1.0) / 0.4;
+                for axis in 0..3 {
+                    let component = radial_force * displacement[axis] / separation;
+                    forces[3 + axis] = component;
+                    forces[axis] = -component;
+                }
                 Ok(FreshEvaluation {
                     energy: (reaction * reaction - 1.0).powi(2),
                     forces,
@@ -212,7 +272,7 @@ fn ride_server() -> CatalogServer {
             },
         )
         .unwrap()
-        .with_exact_structure_witness(SeparationWitness)
+        .with_exact_structure_witness(PermutationWitness)
         .unwrap();
     CatalogServer::start("127.0.0.1:0", config).unwrap()
 }
@@ -498,7 +558,10 @@ fn coordinator_preserves_degenerate_ktn_rearrangements_without_inventing_edges()
                 charged_evaluations: 144,
                 outcome: CatalogRideOutcome::Certified(CatalogRideConnection {
                     saddle: ride_candidate(0, 2, 1.6),
-                    endpoints: [ride_candidate(0, 2, 1.2), ride_candidate(0, 2, 1.2)],
+                    endpoints: [
+                        ride_candidate(0, 2, 1.2),
+                        permuted_ride_candidate(0, 2, 1.2),
+                    ],
                 }),
             },
         )

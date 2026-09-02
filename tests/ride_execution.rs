@@ -404,36 +404,6 @@ fn collapsed_connection_preserves_its_certified_saddle_for_other_chains() {
 }
 
 #[test]
-fn symmetry_reduced_connection_is_a_certified_degenerate_rearrangement() {
-    let surface = RadialDoubleWell::new();
-    let work = work(direction_toward_saddle());
-    let descriptor_space = universal_descriptor_space(DescriptorGeometry::finite(1.0).unwrap());
-    let mut config = execution_config(5_000);
-    config.exploration.certify_degenerate_rearrangements = true;
-    let report = execute_catalog_ride(
-        &surface,
-        &descriptor_space,
-        &work,
-        &[18, 18],
-        array![1.0, 1.0].view(),
-        &[false; 2],
-        &config,
-        &CollapsedWitness,
-    );
-
-    let CatalogRideOutcome::Certified(connection) = &report.outcome else {
-        panic!("a symmetry-reduced index-one path must remain certified KTN evidence")
-    };
-    assert!(CollapsedWitness.equivalent(
-        ArrayView1::from(connection.endpoints[0].coordinates.as_slice()),
-        ArrayView1::from(connection.endpoints[1].coordinates.as_slice())
-    ));
-    assert!(connection.saddle.gradient_norm < 1e-7);
-    assert!(connected_destination(&work, &report, &CollapsedWitness).is_none());
-    assert_eq!(report.charged_evaluations, surface.calls());
-}
-
-#[test]
 fn coordinator_returns_a_collapsed_saddle_as_same_pes_avoidance_evidence() {
     let (_server, mut run) = live_run();
     let RideClaimOutcome::Work(work) = run.claim_ride(7, first_claim_seed_toward_saddle()).unwrap()
