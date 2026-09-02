@@ -102,6 +102,28 @@ fn exact_information_ties_split_without_changing_the_maximum() {
 }
 
 #[test]
+fn available_ride_arms_form_an_exact_consumer_capacity() {
+    let assignments = assign_discovery_roles(
+        &[
+            DiscoveryOpportunity::new(0, 1.0, Some(0.2)).unwrap(),
+            DiscoveryOpportunity::new(1, 0.9, Some(0.3)).unwrap(),
+            DiscoveryOpportunity::new(2, 0.8, Some(0.1)).unwrap(),
+            DiscoveryOpportunity::new(3, 0.7, Some(0.1)).unwrap(),
+        ],
+        2,
+        17,
+    )
+    .unwrap();
+
+    let rides = assignments
+        .iter()
+        .filter(|assignment| assignment.role == DiscoveryRole::SaddleRide)
+        .map(|assignment| assignment.replica)
+        .collect::<Vec<_>>();
+    assert_eq!(rides, vec![1, 3]);
+}
+
+#[test]
 fn invalid_information_rates_are_rejected() {
     assert!(DiscoveryOpportunity::new(0, f64::NAN, None).is_err());
     assert!(DiscoveryOpportunity::new(0, 1.0, Some(-1.0)).is_err());
