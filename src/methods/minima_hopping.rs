@@ -438,6 +438,38 @@ mod tests {
     }
 
     #[test]
+    fn softened_nve_charges_direction_probes_and_suppresses_the_hard_mode() {
+        let start = Array1::zeros(2);
+        let config = MdEscapeConfig {
+            dt: 0.01,
+            potential_minima: 1,
+            maximum_steps: 1,
+            geometry: MdEscapeGeometry::Euclidean,
+            softening: Some(rgsaddle::VelocitySofteningConfig {
+                steps: 20,
+                displacement: 0.1,
+                mixing: 0.15,
+            }),
+        };
+        let mut evaluations = 0usize;
+        let mut evaluate = |x: ArrayView1<f64>| {
+            evaluations += 1;
+            Some((
+                0.5 * (100.0 * x[0] * x[0] + x[1] * x[1]),
+                Array1::from(vec![100.0 * x[0], x[1]]),
+            ))
+        };
+        let mut rng = StdRng::seed_from_u64(17);
+
+        let report = nve_escape(start.view(), 0.5, &config, &mut evaluate, &mut rng).unwrap();
+
+        assert_eq!(report.softening_evaluations, 20);
+        assert_eq!(evaluations, report.softening_evaluations + report.steps + 1);
+        assert!(report.position[0].abs() < 1e-5, "{:?}", report.position);
+        assert!(report.position[1].abs() > 0.009);
+    }
+
+    #[test]
     fn initial_minimum_remains_known_after_the_chain_leaves_it() {
         let mut feedback = EscapeFeedback::new(1.0, 1.0);
         feedback.register_initial(7);
