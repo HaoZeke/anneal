@@ -288,10 +288,10 @@ fn coordinator_shares_cost_normalized_discovery_assignments() {
         .collect::<Vec<_>>();
     clients[0].offer_candidate(1, query.clone()).unwrap();
     clients[0]
-        .record_ledger_event(2, ChargeKind::BasinEscape, 80, 80)
+        .record_ledger_event(2, ChargeKind::BasinEscape, 20, 20)
         .unwrap();
     clients[1]
-        .record_ledger_event(1, ChargeKind::SaddleRide, 320, 320)
+        .record_ledger_event(1, ChargeKind::SaddleRide, 80, 80)
         .unwrap();
 
     let states = clients
@@ -310,9 +310,9 @@ fn coordinator_shares_cost_normalized_discovery_assignments() {
         .collect::<Vec<_>>();
 
     assert_eq!(states[0].basin_discovery_attempts, 1);
-    assert_eq!(states[0].basin_discovery_charged, 80);
+    assert_eq!(states[0].basin_discovery_charged, 20);
     assert_eq!(states[0].saddle_discovery_attempts, 1);
-    assert_eq!(states[0].saddle_discovery_charged, 320);
+    assert_eq!(states[0].saddle_discovery_charged, 80);
     assert_eq!(
         states
             .iter()
