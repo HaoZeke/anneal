@@ -8,7 +8,7 @@
 //! coordinates, seeds, target, and charged-call ceiling.
 //!
 //! Usage:
-//! `lj_joint_optimum <N> <budget> <seeds> [all|adaptive|ridge|basin|bh|mh|feedback] [gs2|morokuma|both] [seed0]`
+//! `lj_joint_optimum <N> <budget> <seeds> [all|adaptive|ridge|basin|bh|mh|mh-soft|feedback] [gs2|morokuma|both] [seed0]`
 
 use std::error::Error;
 use std::path::{Path, PathBuf};
@@ -32,9 +32,13 @@ use anneal_core::potentials::{PairKind, PairPotential};
 use anneal_core::shape::IraStructureWitness;
 use ndarray::ArrayView1;
 use rand::{SeedableRng, rngs::StdRng};
+use rgsaddle::VelocitySofteningConfig;
 use serde_json::json;
 
 const TARGET_TOLERANCE: f64 = 1e-3;
+const MH_SOFTENING_STEPS: usize = 20;
+const MH_SOFTENING_DISPLACEMENT: f64 = 0.1;
+const MH_SOFTENING_MIXING: f64 = 0.15;
 
 #[derive(Clone, Copy, Debug)]
 enum Arm {
@@ -43,6 +47,7 @@ enum Arm {
     Basin,
     BasinHopping,
     MinimaHopping,
+    MinimaHoppingSoftened,
     MinimaFeedback,
 }
 
@@ -54,6 +59,7 @@ impl Arm {
             Self::Basin => "basin-ablation".into(),
             Self::BasinHopping => "basin-hopping".into(),
             Self::MinimaHopping => "minima-hopping".into(),
+            Self::MinimaHoppingSoftened => "minima-hopping-softened".into(),
             Self::MinimaFeedback => "minima-feedback".into(),
         }
     }
@@ -131,6 +137,7 @@ fn selected_arms(selector: &str, irc: &[IrcKind]) -> Result<Vec<Arm>, String> {
                 Arm::Basin,
                 Arm::BasinHopping,
                 Arm::MinimaHopping,
+                Arm::MinimaHoppingSoftened,
                 Arm::MinimaFeedback,
             ]);
         }
@@ -139,9 +146,12 @@ fn selected_arms(selector: &str, irc: &[IrcKind]) -> Result<Vec<Arm>, String> {
         "basin" => arms.push(Arm::Basin),
         "bh" => arms.push(Arm::BasinHopping),
         "mh" => arms.push(Arm::MinimaHopping),
+        "mh-soft" => arms.push(Arm::MinimaHoppingSoftened),
         "feedback" => arms.push(Arm::MinimaFeedback),
         _ => {
-            return Err("arm must be all, adaptive, ridge, basin, bh, mh, or feedback".into());
+            return Err(
+                "arm must be all, adaptive, ridge, basin, bh, mh, mh-soft, or feedback".into(),
+            );
         }
     }
     Ok(arms)
@@ -289,6 +299,7 @@ fn run_minima_hopping(
     budget: usize,
     seed: u64,
     witness: &impl ExactStructureWitness,
+    soften: bool,
 ) -> Outcome {
     let hopping = HoppingConfig::for_cluster(n);
     let escape_config = MdEscapeConfig {
@@ -296,7 +307,11 @@ fn run_minima_hopping(
         potential_minima: 2,
         maximum_steps: 2_000,
         geometry: MdEscapeGeometry::RigidQuotient,
-        softening: None,
+        softening: soften.then_some(VelocitySofteningConfig {
+            steps: MH_SOFTENING_STEPS,
+            displacement: MH_SOFTENING_DISPLACEMENT,
+            mixing: MH_SOFTENING_MIXING,
+        }),
     };
     let mut ledger = Ledger::new(budget);
     let mut optimizer = WarmLbfgs::default();
@@ -574,6 +589,12 @@ fn main() -> Result<(), Box<dyn Error>> {
                 "initial_ediff": 0.5 * hopping.energy_scale,
                 "beta": 1.05,
                 "enhanced_visit_coefficient": 0.1,
+                "softening": {
+                    "arm": "minima-hopping-softened",
+                    "steps": MH_SOFTENING_STEPS,
+                    "displacement": MH_SOFTENING_DISPLACEMENT,
+                    "mixing": MH_SOFTENING_MIXING,
+                },
             },
             "arms": arms.iter().copied().map(Arm::label).collect::<Vec<_>>(),
         })
@@ -696,10 +717,22 @@ fn main() -> Result<(), Box<dyn Error>> {
                         failures,
                     );
                 }
-                Arm::BasinHopping | Arm::MinimaHopping | Arm::MinimaFeedback => {
+                Arm::BasinHopping
+                | Arm::MinimaHopping
+                | Arm::MinimaHoppingSoftened
+                | Arm::MinimaFeedback => {
                     let budget = usize::try_from(budget).unwrap_or(usize::MAX);
-                    let outcome = if matches!(arm, Arm::MinimaHopping) {
-                        run_minima_hopping(&potential, initial.view(), n, budget, seed, &witness)
+                    let outcome = if matches!(arm, Arm::MinimaHopping | Arm::MinimaHoppingSoftened)
+                    {
+                        run_minima_hopping(
+                            &potential,
+                            initial.view(),
+                            n,
+                            budget,
+                            seed,
+                            &witness,
+                            matches!(arm, Arm::MinimaHoppingSoftened),
+                        )
                     } else {
                         run_hopping(
                             &potential,
