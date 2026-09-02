@@ -23,6 +23,10 @@ pub enum ChargeKind {
     RpcFallback,
     /// Potential or gradient calls used by proposal machinery outside a quench.
     AuxiliaryEvaluation,
+    /// Potential calls consumed by one basin-escape attempt.
+    BasinEscape,
+    /// Potential calls consumed by one minimum-mode saddle-ride attempt.
+    SaddleRide,
 }
 
 impl ChargeKind {
@@ -38,6 +42,8 @@ impl ChargeKind {
             Self::Retry => 6,
             Self::RpcFallback => 7,
             Self::AuxiliaryEvaluation => 8,
+            Self::BasinEscape => 9,
+            Self::SaddleRide => 10,
         }
     }
 
@@ -53,6 +59,8 @@ impl ChargeKind {
             6 => Some(Self::Retry),
             7 => Some(Self::RpcFallback),
             8 => Some(Self::AuxiliaryEvaluation),
+            9 => Some(Self::BasinEscape),
+            10 => Some(Self::SaddleRide),
             _ => None,
         }
     }
@@ -65,8 +73,19 @@ impl ChargeKind {
                 | Self::FreshValidation
                 | Self::Retry
                 | Self::AuxiliaryEvaluation
+                | Self::BasinEscape
+                | Self::SaddleRide
         )
     }
+}
+
+/// Replay-safe work attributed to one charged mechanism.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct ChargeSummary {
+    /// Number of unique operation-boundary events.
+    pub events: u64,
+    /// Potential calls retained by those events.
+    pub charged_calls: u64,
 }
 
 /// One immutable replica event with its monotone charged counter.
@@ -307,6 +326,24 @@ impl CooperativeLedger {
             .values()
             .map(|ledger| ledger.events.len())
             .sum()
+    }
+
+    /// Aggregate unique events and calls for one work mechanism.
+    pub fn charge_summary(&self, kind: ChargeKind) -> ChargeSummary {
+        self.replicas
+            .values()
+            .flat_map(|ledger| ledger.events.values())
+            .filter(|event| event.kind == kind)
+            .fold(ChargeSummary::default(), |summary, event| ChargeSummary {
+                events: summary
+                    .events
+                    .checked_add(1)
+                    .expect("ledger event count must fit u64"),
+                charged_calls: summary
+                    .charged_calls
+                    .checked_add(event.charged_calls)
+                    .expect("charged mechanism total is bounded by the aggregate budget"),
+            })
     }
 
     /// Freeze and return the complete counter vector at first target encounter.
