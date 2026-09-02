@@ -905,6 +905,7 @@ fn block_kind_name(kind: DescriptorBlockKind) -> &'static str {
         DescriptorBlockKind::InvariantSoapMean => "invariant_soap_mean",
         DescriptorBlockKind::InvariantAceNu3Mean => "invariant_ace_nu3_mean",
         DescriptorBlockKind::ChiralMoment => "chiral_moment",
+        DescriptorBlockKind::ProviderFeature => "provider_feature",
     }
 }
 
