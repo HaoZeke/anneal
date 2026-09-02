@@ -23,7 +23,7 @@ use anneal_core::methods::cluster_hopping::{
 };
 use anneal_core::methods::cluster_search::{Encounter, first_encounter, median_encounter};
 use anneal_core::methods::minima_hopping::{
-    EscapeFeedback, MdEscapeConfig, MdEscapeGeometry, Visit, nve_escape,
+    EscapeFeedback, MdEscapeConfig, MdEscapeGeometry, MdTimeStepFeedback, Visit, nve_escape,
 };
 use anneal_core::methods::warm_lbfgs::WarmLbfgs;
 use anneal_core::pes_exploration::{
@@ -106,6 +106,15 @@ impl Summary {
         self.saddles += saddles as u128;
         self.failures += failures as u128;
     }
+}
+
+struct MinimaHoppingRun {
+    outcome: Outcome,
+    initial_quench_calls: usize,
+    dynamics_calls: usize,
+    dynamics_steps: usize,
+    proposal_quench_calls: usize,
+    final_time_step: f64,
 }
 
 fn reference(n: usize) -> Option<f64> {
@@ -324,7 +333,7 @@ fn run_minima_hopping(
     witness: &impl ExactStructureWitness,
     soften: bool,
     bound_escape: bool,
-) -> Outcome {
+) -> MinimaHoppingRun {
     let hopping = HoppingConfig::for_cluster(n);
     let escape_config = MdEscapeConfig {
         dt: 0.005,
@@ -339,31 +348,48 @@ fn run_minima_hopping(
     };
     let mut ledger = Ledger::new(budget);
     let mut optimizer = WarmLbfgs::default();
-    let Some((mut energy, mut state, initial_valid)) = quench_minimum(
+    let initial_quench_start = ledger.spent();
+    let initial = quench_minimum(
         potential,
         &mut optimizer,
         &mut ledger,
         initial,
         hopping.relax_steps,
         hopping.record_gradient,
-    ) else {
-        return Outcome {
-            best: ledger.best,
-            best_state: ledger.best_state.clone(),
-            final_energy: f64::INFINITY,
-            charged: ledger.spent(),
-            ..Outcome::default()
+    );
+    let initial_quench_calls = ledger.spent().saturating_sub(initial_quench_start);
+    let Some((mut energy, mut state, initial_valid)) = initial else {
+        return MinimaHoppingRun {
+            outcome: Outcome {
+                best: ledger.best,
+                best_state: ledger.best_state.clone(),
+                final_energy: f64::INFINITY,
+                charged: ledger.spent(),
+                ..Outcome::default()
+            },
+            initial_quench_calls,
+            dynamics_calls: 0,
+            dynamics_steps: 0,
+            proposal_quench_calls: 0,
+            final_time_step: escape_config.dt,
         };
     };
     if !initial_valid {
-        return Outcome {
-            best: ledger.best,
-            best_state: ledger.best_state.clone(),
-            final_state: Some(state),
-            final_energy: energy,
-            charged: ledger.spent(),
-            unconverged_records: 1,
-            ..Outcome::default()
+        return MinimaHoppingRun {
+            outcome: Outcome {
+                best: ledger.best,
+                best_state: ledger.best_state.clone(),
+                final_state: Some(state),
+                final_energy: energy,
+                charged: ledger.spent(),
+                unconverged_records: 1,
+                ..Outcome::default()
+            },
+            initial_quench_calls,
+            dynamics_calls: 0,
+            dynamics_steps: 0,
+            proposal_quench_calls: 0,
+            final_time_step: escape_config.dt,
         };
     }
 
@@ -376,23 +402,31 @@ fn run_minima_hopping(
         feedback.escape_ceiling = f64::MAX;
     }
     feedback.register_initial(current_basin);
+    let mut time_step = MdTimeStepFeedback::new(escape_config.dt, escape_config.dt / 100.0);
     let mut rng = StdRng::seed_from_u64(seed);
     let mut hops = 0usize;
     let mut accepted = 0usize;
     let mut unconverged = 0usize;
+    let mut dynamics_calls = 0usize;
+    let mut dynamics_steps = 0usize;
+    let mut proposal_quench_calls = 0usize;
     let mut improvements = vec![(0, ledger.spent(), minima.len(), energy)];
 
     while ledger.remaining() > 0 {
+        let mut attempt_config = escape_config;
+        attempt_config.dt = time_step.time_step();
+        let dynamics_start = ledger.spent();
         let mut evaluate =
             |point: ArrayView1<f64>| ledger.charge().then(|| potential.value_and_gradient(point));
         let escape = nve_escape(
             state.view(),
             feedback.escape(),
-            &escape_config,
+            &attempt_config,
             &mut evaluate,
             &mut rng,
         );
         drop(evaluate);
+        dynamics_calls += ledger.spent().saturating_sub(dynamics_start);
         hops += 1;
         let Ok(escape) = escape else {
             unconverged += 1;
@@ -402,18 +436,23 @@ fn run_minima_hopping(
             feedback.observe(Some(current_basin), current_basin);
             continue;
         };
+        dynamics_steps += escape.steps;
+        time_step.observe(&escape);
         if escape.potential_minima < escape_config.potential_minima {
             feedback.observe(Some(current_basin), current_basin);
             continue;
         }
-        let Some((candidate_energy, candidate, validated)) = quench_minimum(
+        let proposal_quench_start = ledger.spent();
+        let quenched = quench_minimum(
             potential,
             &mut optimizer,
             &mut ledger,
             escape.position.view(),
             hopping.relax_steps,
             hopping.record_gradient,
-        ) else {
+        );
+        proposal_quench_calls += ledger.spent().saturating_sub(proposal_quench_start);
+        let Some((candidate_energy, candidate, validated)) = quenched else {
             break;
         };
         if !validated {
@@ -444,21 +483,28 @@ fn run_minima_hopping(
         }
     }
 
-    Outcome {
-        best: ledger.best,
-        best_state: ledger.best_state.clone(),
-        final_state: Some(state),
-        final_energy: energy,
-        hops,
-        basins: minima.len(),
-        charged: ledger.spent(),
-        escape_scale: feedback.escape(),
-        escape_threshold: feedback.threshold(),
-        visit_counts: (feedback.n_same, feedback.n_known, feedback.n_new),
-        improvements,
-        accepted,
-        unconverged_records: unconverged,
-        ..Outcome::default()
+    MinimaHoppingRun {
+        outcome: Outcome {
+            best: ledger.best,
+            best_state: ledger.best_state.clone(),
+            final_state: Some(state),
+            final_energy: energy,
+            hops,
+            basins: minima.len(),
+            charged: ledger.spent(),
+            escape_scale: feedback.escape(),
+            escape_threshold: feedback.threshold(),
+            visit_counts: (feedback.n_same, feedback.n_known, feedback.n_new),
+            improvements,
+            accepted,
+            unconverged_records: unconverged,
+            ..Outcome::default()
+        },
+        initial_quench_calls,
+        dynamics_calls,
+        dynamics_steps,
+        proposal_quench_calls,
+        final_time_step: time_step.time_step(),
     }
 }
 
@@ -783,8 +829,8 @@ fn main() -> Result<(), Box<dyn Error>> {
                         arm,
                         Arm::MinimaHoppingBounded | Arm::MinimaHoppingBoundedSoftened
                     );
-                    let outcome = if minima_hopping {
-                        run_minima_hopping(
+                    let (outcome, minima_hopping_work) = if minima_hopping {
+                        let run = run_minima_hopping(
                             &potential,
                             initial.view(),
                             n,
@@ -793,23 +839,34 @@ fn main() -> Result<(), Box<dyn Error>> {
                             &witness,
                             softened,
                             bound_escape,
-                        )
+                        );
+                        let work = json!({
+                            "initial_quench_calls": run.initial_quench_calls,
+                            "dynamics_calls": run.dynamics_calls,
+                            "dynamics_steps": run.dynamics_steps,
+                            "proposal_quench_calls": run.proposal_quench_calls,
+                            "final_time_step": run.final_time_step,
+                        });
+                        (run.outcome, Some(work))
                     } else {
-                        run_hopping(
-                            &potential,
-                            initial.view(),
-                            n,
-                            budget,
-                            seed,
-                            matches!(arm, Arm::MinimaFeedback),
-                            matches!(arm, Arm::BasinHoppingSymmetry),
-                            if matches!(arm, Arm::BasinHoppingCsmCi) {
-                                ContinuousSymmetry::Inversion {
-                                    interval: CSM_INTERVAL,
-                                }
-                            } else {
-                                ContinuousSymmetry::Off
-                            },
+                        (
+                            run_hopping(
+                                &potential,
+                                initial.view(),
+                                n,
+                                budget,
+                                seed,
+                                matches!(arm, Arm::MinimaFeedback),
+                                matches!(arm, Arm::BasinHoppingSymmetry),
+                                if matches!(arm, Arm::BasinHoppingCsmCi) {
+                                    ContinuousSymmetry::Inversion {
+                                        interval: CSM_INTERVAL,
+                                    }
+                                } else {
+                                    ContinuousSymmetry::Off
+                                },
+                            ),
+                            None,
                         )
                     };
                     let encounter =
@@ -835,6 +892,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                             "velocity_softened": softened,
                             "acceptance_threshold": outcome.escape_threshold,
                             "visit_counts": outcome.visit_counts,
+                            "minima_hopping_work": minima_hopping_work,
                             "symmetrised_attempts": outcome.symmetrised.0,
                             "symmetry_energy_gain": outcome.symmetrised.1,
                             "continuous_symmetry_attempts": outcome.continuous_symmetry.0,
