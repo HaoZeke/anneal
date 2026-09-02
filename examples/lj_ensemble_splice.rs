@@ -226,6 +226,10 @@ struct ExchangeConfig {
     portfolio_block: usize,
     /// Whether the chains of an ensemble share one portfolio posterior.
     portfolio_shared: bool,
+    /// Fragment the surfaces across chains instead of learning inside one:
+    /// chain `i` walks arm `i mod (1 + arms)` for its whole budget, the
+    /// plain surface being arm zero.
+    portfolio_split: bool,
     /// Population basin hopping: at every checkpoint a chain's live minimum
     /// is offered to the ensemble under the Grosso--Locatelli--Schoen
     /// replacement rule, and a chain told to move adopts the offered
@@ -454,7 +458,14 @@ fn run_chain(
     let kappa = exchange.diameter_kappa;
     let two_phase = compress_mu > 0.0 || ((diameter > 0.0 || kappa > 0.0) && beta > 0.0);
     let screen_steps = cfg.screen_steps;
-    let mut portfolio = (!exchange.portfolio.is_empty()).then(|| {
+    let split_surface = (exchange.portfolio_split && !exchange.portfolio.is_empty()).then(|| {
+        let arms = 1 + exchange.portfolio.len();
+        match chain % arms {
+            0 => None,
+            k => Some(exchange.portfolio[k - 1]),
+        }
+    });
+    let mut portfolio = (!exchange.portfolio.is_empty() && !exchange.portfolio_split).then(|| {
         let mut portfolio =
             SurfacePortfolio::with_block(&exchange.portfolio, seed, exchange.portfolio_block);
         if let Some(shared) = shared_surfaces.clone() {
@@ -471,6 +482,9 @@ fn run_chain(
         let surface = match portfolio.as_mut() {
             Some(portfolio) => portfolio
                 .begin(screening)
+                .map(|two| (two.mu, two.cutoff_for(x), two.beta)),
+            None if split_surface.is_some() => split_surface
+                .flatten()
                 .map(|two| (two.mu, two.cutoff_for(x), two.beta)),
             None => two_phase.then(|| {
                 let cutoff = if kappa > 0.0 {
@@ -709,6 +723,7 @@ fn main() {
             .unwrap_or_default(),
         portfolio_block: env_usize("SURFACE_BLOCK", 100),
         portfolio_shared: mode == "shared",
+        portfolio_split: env_usize("SURFACES_SPLIT", 0) == 1,
         pbh: mode == "pbh",
         pbh_dcut_scale: env_f64("PBH_DCUT", 1.5),
     };
