@@ -104,3 +104,40 @@ fn featomic_configuration_digest_separates_descriptor_metrics() {
         Err(DescriptorError::IncompatibleDescriptorVectors)
     );
 }
+
+#[test]
+fn catalog_presets_bind_distinct_featomic_provider_configurations() {
+    let lj_space = anneal_core::catalog::lj::descriptor_space();
+    let water_species = anneal_core::catalog::molecular::water_species(2).unwrap();
+    let water_space = anneal_core::catalog::molecular::descriptor_space(&water_species).unwrap();
+    let lj_contract = lj_space.provider_contract().unwrap();
+    let water_contract = water_space.provider_contract().unwrap();
+
+    assert_eq!(lj_contract.schema_name(), "featomic-soap-invariant");
+    assert_eq!(water_contract.schema_name(), "featomic-soap-invariant");
+    assert_ne!(lj_contract.model_digest(), water_contract.model_digest());
+    assert_ne!(
+        lj_contract.system_output().dimension(),
+        water_contract.system_output().dimension()
+    );
+
+    let lj_signature = anneal_core::catalog::lj::system_signature(38).unwrap();
+    let water_signature = anneal_core::catalog::molecular::system_signature(2, [0x51; 32]).unwrap();
+    assert_eq!(
+        lj_signature
+            .descriptor
+            .hyperparameters
+            .get("model_sha256")
+            .map(String::as_str),
+        Some(lj_contract.model_digest_hex().as_str())
+    );
+    assert_eq!(
+        water_signature
+            .descriptor
+            .hyperparameters
+            .get("model_sha256")
+            .map(String::as_str),
+        Some(water_contract.model_digest_hex().as_str())
+    );
+    assert_ne!(lj_signature.digest(), water_signature.digest());
+}
