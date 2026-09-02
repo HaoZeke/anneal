@@ -269,6 +269,14 @@ mod run {
         pub basin_unseen_mass_upper: f64,
         /// One-sided upper bound on unseen exact-saddle mass.
         pub saddle_unseen_mass_upper: f64,
+        /// Same-system basin-escape attempts retained by the shared ledger.
+        pub basin_discovery_attempts: u64,
+        /// Potential calls charged to same-system basin-escape attempts.
+        pub basin_discovery_charged: u64,
+        /// Same-system saddle-ride attempts retained by the shared ledger.
+        pub saddle_discovery_attempts: u64,
+        /// Potential calls charged to same-system saddle-ride attempts.
+        pub saddle_discovery_charged: u64,
         /// Whether exact-saddle reobservations meet the coverage rule.
         pub saddle_coverage_saturated: bool,
         /// Energy used to classify the query against the active catalog.
@@ -2141,11 +2149,19 @@ mod run {
                     policy_discovery_epoch,
                     policy_basin_unseen_mass_upper,
                     policy_saddle_unseen_mass_upper,
+                    policy_basin_discovery_attempts,
+                    policy_basin_discovery_charged,
+                    policy_saddle_discovery_attempts,
+                    policy_saddle_discovery_charged,
                     policy_saddle_coverage_saturated,
                     policy_query_energy,
                 ) = event.policy.map_or_else(
                     || {
                         (
+                            "null".to_owned(),
+                            "null".to_owned(),
+                            "null".to_owned(),
+                            "null".to_owned(),
                             "null".to_owned(),
                             "null".to_owned(),
                             "null".to_owned(),
@@ -2180,6 +2196,10 @@ mod run {
                             policy.discovery_epoch.to_string(),
                             policy.basin_unseen_mass_upper.to_string(),
                             policy.saddle_unseen_mass_upper.to_string(),
+                            policy.basin_discovery_attempts.to_string(),
+                            policy.basin_discovery_charged.to_string(),
+                            policy.saddle_discovery_attempts.to_string(),
+                            policy.saddle_discovery_charged.to_string(),
                             policy.saddle_coverage_saturated.to_string(),
                             policy.query_energy.to_string(),
                         )
@@ -2340,7 +2360,7 @@ mod run {
                     .try_into()
                     .expect("ride JSON field count is fixed");
                 output.push_str(&format!(
-                "{{\"kind\":\"{}\",\"replica\":{},\"sequence\":{},\"aggregate_charged\":{},\"catalog_version\":{},\"reason\":{},\"population_epoch\":{},\"population_parent\":{},\"population_family_ordinal\":{},\"population_family_size\":{},\"population_effective_sample_size\":{},\"population_selection\":{},\"policy_local_basin\":{},\"policy_relation\":{},\"policy_total_visits\":{},\"policy_singleton_basins\":{},\"policy_local_basin_visits\":{},\"policy_globally_saturated\":{},\"policy_local_basin_distance\":{},\"policy_novelty\":{},\"policy_transition_uncertainty\":{},\"policy_discovery_role\":{},\"policy_discovery_epoch\":{},\"policy_basin_unseen_mass_upper\":{},\"policy_saddle_unseen_mass_upper\":{},\"policy_saddle_coverage_saturated\":{},\"policy_query_energy\":{},\"slice\":{},\"slice_current_basin\":{},\"slice_active_relation\":{},\"slice_policy_role\":{},\"slice_policy_reason\":{},\"slice_proposal_family\":{},\"slice_sampled_basin\":{},\"slice_descriptor_step_norm\":{},\"slice_cartesian_step_norm\":{},\"slice_validation\":{},\"slice_quench\":{},\"slice_adoption\":{},\"slice_novelty\":{},\"slice_energy\":{},\"slice_charged_work\":{},\"catalog_basin\":{},\"catalog_new_basin\":{},\"catalog_mutation\":{},\"catalog_evicted\":{},\"catalog_incumbent\":{},\"transition_action\":{},\"transition_hop\":{},\"transition_from_energy\":{},\"transition_to_energy\":{},\"transition_resolved\":{},\"transition_adopted\":{},\"ride_work\":{},\"ride_source_basin\":{},\"ride_environment_class\":{},\"ride_mode_rank\":{},\"ride_direction\":{},\"ride_method\":{},\"ride_representative_atom\":{},\"ride_attempt\":{},\"ride_seed\":{},\"ride_producer_charged\":{},\"ride_producer_certified\":{},\"ride_producer_failure\":{},\"ride_receiver_charged\":{},\"ride_receiver_certified\":{},\"ride_receiver_failure\":{},\"ride_novel_saddle\":{},\"ride_novel_edge\":{},\"ride_total_charged\":{}}}\n",
+                "{{\"kind\":\"{}\",\"replica\":{},\"sequence\":{},\"aggregate_charged\":{},\"catalog_version\":{},\"reason\":{},\"population_epoch\":{},\"population_parent\":{},\"population_family_ordinal\":{},\"population_family_size\":{},\"population_effective_sample_size\":{},\"population_selection\":{},\"policy_local_basin\":{},\"policy_relation\":{},\"policy_total_visits\":{},\"policy_singleton_basins\":{},\"policy_local_basin_visits\":{},\"policy_globally_saturated\":{},\"policy_local_basin_distance\":{},\"policy_novelty\":{},\"policy_transition_uncertainty\":{},\"policy_discovery_role\":{},\"policy_discovery_epoch\":{},\"policy_basin_unseen_mass_upper\":{},\"policy_saddle_unseen_mass_upper\":{},\"policy_basin_discovery_attempts\":{},\"policy_basin_discovery_charged\":{},\"policy_saddle_discovery_attempts\":{},\"policy_saddle_discovery_charged\":{},\"policy_saddle_coverage_saturated\":{},\"policy_query_energy\":{},\"slice\":{},\"slice_current_basin\":{},\"slice_active_relation\":{},\"slice_policy_role\":{},\"slice_policy_reason\":{},\"slice_proposal_family\":{},\"slice_sampled_basin\":{},\"slice_descriptor_step_norm\":{},\"slice_cartesian_step_norm\":{},\"slice_validation\":{},\"slice_quench\":{},\"slice_adoption\":{},\"slice_novelty\":{},\"slice_energy\":{},\"slice_charged_work\":{},\"catalog_basin\":{},\"catalog_new_basin\":{},\"catalog_mutation\":{},\"catalog_evicted\":{},\"catalog_incumbent\":{},\"transition_action\":{},\"transition_hop\":{},\"transition_from_energy\":{},\"transition_to_energy\":{},\"transition_resolved\":{},\"transition_adopted\":{},\"ride_work\":{},\"ride_source_basin\":{},\"ride_environment_class\":{},\"ride_mode_rank\":{},\"ride_direction\":{},\"ride_method\":{},\"ride_representative_atom\":{},\"ride_attempt\":{},\"ride_seed\":{},\"ride_producer_charged\":{},\"ride_producer_certified\":{},\"ride_producer_failure\":{},\"ride_receiver_charged\":{},\"ride_receiver_certified\":{},\"ride_receiver_failure\":{},\"ride_novel_saddle\":{},\"ride_novel_edge\":{},\"ride_total_charged\":{}}}\n",
                 event.kind.code(),
                 event.replica,
                 event.sequence,
@@ -2366,6 +2386,10 @@ mod run {
                 policy_discovery_epoch,
                 policy_basin_unseen_mass_upper,
                 policy_saddle_unseen_mass_upper,
+                policy_basin_discovery_attempts,
+                policy_basin_discovery_charged,
+                policy_saddle_discovery_attempts,
+                policy_saddle_discovery_charged,
                 policy_saddle_coverage_saturated,
                 policy_query_energy,
                 slice,
@@ -2902,6 +2926,10 @@ mod run {
             discovery_epoch: state.discovery_epoch,
             basin_unseen_mass_upper: state.basin_unseen_mass_upper,
             saddle_unseen_mass_upper: state.saddle_unseen_mass_upper,
+            basin_discovery_attempts: state.basin_discovery_attempts,
+            basin_discovery_charged: state.basin_discovery_charged,
+            saddle_discovery_attempts: state.saddle_discovery_attempts,
+            saddle_discovery_charged: state.saddle_discovery_charged,
             saddle_coverage_saturated: state.saddle_coverage_saturated,
             query_energy,
         }
