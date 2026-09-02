@@ -1387,13 +1387,15 @@ fn main() {
                 .unwrap_or(d)
         };
         let beta = envf("TWO_PHASE_BETA", 1.0);
-        let kappa = envf("TWO_PHASE_KAPPA", 0.0);
-        let cutoff = if kappa > 0.0 {
-            anneal_core::methods::two_phase::Cutoff::Relative(kappa)
-        } else {
+        let fixed = envf("TWO_PHASE_D", 0.0);
+        let cutoff = if fixed > 0.0 {
             anneal_core::methods::two_phase::Cutoff::Fixed(
-                envf("TWO_PHASE_D", 3.5) * cfg.length_scale * 2f64.powf(1.0 / 6.0),
+                fixed * cfg.length_scale * 2f64.powf(1.0 / 6.0),
             )
+        } else {
+            // Measured on 38 and 75 points: every fraction from 0.7 to 0.85
+            // of the entering diameter crosses, 0.7 fastest.
+            anneal_core::methods::two_phase::Cutoff::Relative(envf("TWO_PHASE_KAPPA", 0.7))
         };
         cfg.two_phase = Some(anneal_core::methods::two_phase::TwoPhase {
             cutoff,
@@ -1407,7 +1409,7 @@ fn main() {
     // units) or `kappa:0.75`, with an optional `:beta` suffix on the two
     // diameter forms. The depth-rewarded allocator picks one per hop.
     if opts.contains(&"surfaces") {
-        let spec = std::env::var("SURFACES").unwrap_or_else(|_| "mu:5,mu:2.5,d:3.5".into());
+        let spec = std::env::var("SURFACES").unwrap_or_else(|_| "kappa:0.7,mu:5".into());
         let unit = cfg.length_scale * 2f64.powf(1.0 / 6.0);
         let mut arms = Vec::new();
         for item in spec.split(',').map(str::trim).filter(|s| !s.is_empty()) {
