@@ -913,6 +913,20 @@ mod basin_bias_tests {
     }
 
     #[test]
+    fn zero_height_bias_tracks_basin_identity_without_changing_the_energy() {
+        let fingerprint = SortedPairs { n_points: 4 };
+        let point = tetra(1.0);
+        let mut bias = BasinBias::new(fingerprint, 1e-6, 0.0, 5.0);
+        let descriptor = bias.cv(point.view());
+
+        bias.deposit(descriptor.view(), 1.0);
+        bias.deposit(descriptor.view(), 1.0);
+
+        assert_eq!(bias.n_basins(), 1);
+        assert_eq!(bias.potential(descriptor.view()), 0.0);
+    }
+
+    #[test]
     fn site_energies_are_permutation_invariant() {
         let f = SiteEnergies { n_points: 4 };
         let a = tetra(1.1);
