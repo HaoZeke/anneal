@@ -508,6 +508,23 @@ mod tests {
     }
 
     #[test]
+    fn enhanced_feedback_is_logarithmic_in_the_visit_count() {
+        let mut feedback = EscapeFeedback::new(1.0, 1.0);
+        feedback.register_initial(7);
+
+        let before_first = feedback.escape();
+        feedback.observe(Some(8), 7);
+        let first_ratio = feedback.escape() / before_first;
+        let before_second = feedback.escape();
+        feedback.observe(Some(8), 7);
+        let second_ratio = feedback.escape() / before_second;
+
+        assert!((first_ratio - feedback.beta_known).abs() < 1e-12);
+        let expected = feedback.beta_known * (1.0 + feedback.visits_coeff * 2.0_f64.ln());
+        assert!((second_ratio - expected).abs() < 1e-12);
+    }
+
+    #[test]
     fn the_threshold_settles_near_half_acceptance() {
         let mut f = EscapeFeedback::new(1.0, 1.0);
         // A stream of rises drawn from a fixed distribution; the threshold
