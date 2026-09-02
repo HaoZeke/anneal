@@ -748,4 +748,37 @@ mod tests {
             "near-ico kernel {k_near} must beat ico-Marks {k_marks}"
         );
     }
+
+    #[test]
+    fn gibbon_batch_reproduces_the_two_point_log_determinant() {
+        let mut model = FunnelModel::new_euclidean(0.8, 2.0, 0.1);
+        model.observe(pt(&[-1.0, 0.0]).view(), -2.0);
+        model.observe(pt(&[1.0, 0.0]).view(), -1.0);
+        let left = pt(&[-0.4, 0.7]);
+        let right = pt(&[0.6, 0.8]);
+        let minimum_samples = [-2.2, -2.0, -1.9];
+
+        let left_information = model.gibbon_information(left.view(), &minimum_samples);
+        let right_information = model.gibbon_information(right.view(), &minimum_samples);
+        let correlation = model.predictive_observation_correlation(left.view(), right.view());
+        let expected =
+            left_information + right_information + 0.5 * (1.0 - correlation * correlation).ln();
+        let batch = model.gibbon_batch(&[left.view(), right.view()], &minimum_samples);
+
+        assert!((batch - expected).abs() < 1e-10);
+    }
+
+    #[test]
+    fn greedy_gibbon_batch_repels_a_redundant_launch() {
+        let mut model = FunnelModel::new_euclidean(0.2, 1.0, 1e-3);
+        let candidates = [
+            (0, vec![0.0, 0.0]),
+            (1, vec![0.01, 0.0]),
+            (2, vec![2.0, 0.0]),
+        ];
+
+        let selected = model.assign_gibbon(&candidates, 2, 1, 64);
+
+        assert_eq!(selected, vec![0, 2]);
+    }
 }
