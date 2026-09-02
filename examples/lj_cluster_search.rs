@@ -254,6 +254,42 @@ mod option_tests {
 
     #[cfg(feature = "bank-rpc")]
     #[test]
+    fn committed_decree_audit_names_the_local_assignment() {
+        use anneal_core::raft::wire::{ExplorationDecree, ReplicaAssignment};
+
+        let decree = ExplorationDecree {
+            algebraic_connectivity: 0.03125,
+            seam_conductance: 0.0625,
+            left_basin: 11,
+            right_basin: 29,
+            assignments: vec![ReplicaAssignment {
+                replica: 2,
+                right_side: true,
+                histogram_classes: Vec::new(),
+                histogram_masses: Vec::new(),
+                anchor_basin: 29,
+                bridge_duty: true,
+                decree_index: 17,
+            }],
+        };
+
+        let line = committed_decree_audit_line(2, &decree).expect("local assignment");
+        let value: serde_json::Value = serde_json::from_str(&line).expect("audit JSON");
+        assert_eq!(value["kind"], "brain_commit");
+        assert_eq!(value["replica"], 2);
+        assert_eq!(value["snapshot"], 17);
+        assert_eq!(value["anchor_basin"], 29);
+        assert_eq!(value["right_side"], true);
+        assert_eq!(value["bridge_duty"], true);
+        assert_eq!(value["left_basin"], 11);
+        assert_eq!(value["right_basin"], 29);
+        assert_eq!(value["normalized_lambda2"], 0.03125);
+        assert_eq!(value["conductance"], 0.0625);
+        assert!(committed_decree_audit_line(9, &decree).is_none());
+    }
+
+    #[cfg(feature = "bank-rpc")]
+    #[test]
     fn external_mechanism_charge_is_bounded_by_live_ledger_room() {
         assert_eq!(settled_external_calls(140, 200), 140);
         assert_eq!(settled_external_calls(140, 97), 97);
