@@ -3,9 +3,9 @@
 //! The adaptive arm allocates between finite invariant basin proposals and
 //! projected rgsaddle ridge/IRC actions by information about the identity and
 //! energy of the lowest reachable minimum per expected PES call. Fixed-family
-//! ablations, plain Wales--Doye basin hopping, and a history-conditioned escape
-//! feedback ablation use the same initial coordinates, seeds, target, and
-//! charged-call ceiling.
+//! ablations, plain Wales--Doye basin hopping, rgsaddle NVE minima hopping, and
+//! a history-conditioned displacement-feedback ablation use the same initial
+//! coordinates, seeds, target, and charged-call ceiling.
 //!
 //! Usage:
 //! `lj_joint_optimum <N> <budget> <seeds> [all|adaptive|ridge|basin|bh|mh] [gs2|morokuma|both] [seed0]`
@@ -21,8 +21,13 @@ use anneal_core::methods::cluster_hopping::{
     Config as HoppingConfig, Ledger, MoveLibrary, Outcome, random_cluster, run, run_with_gradient,
 };
 use anneal_core::methods::cluster_search::{Encounter, first_encounter, median_encounter};
+use anneal_core::methods::minima_hopping::{
+    EscapeFeedback, MdEscapeConfig, MdEscapeGeometry, Visit, nve_escape,
+};
 use anneal_core::methods::warm_lbfgs::WarmLbfgs;
-use anneal_core::pes_exploration::{IrcKind, PesExplorationConfig, RideMethod};
+use anneal_core::pes_exploration::{
+    ExactStructureWitness, IrcKind, PesExplorationConfig, RideMethod,
+};
 use anneal_core::potentials::{PairKind, PairPotential};
 use anneal_core::shape::IraStructureWitness;
 use ndarray::ArrayView1;
@@ -37,6 +42,7 @@ enum Arm {
     Ridge(IrcKind),
     Basin,
     BasinHopping,
+    MinimaHopping,
     MinimaFeedback,
 }
 
@@ -47,6 +53,7 @@ impl Arm {
             Self::Ridge(kind) => format!("ridge-{}", irc_name(kind)),
             Self::Basin => "basin-ablation".into(),
             Self::BasinHopping => "basin-hopping".into(),
+            Self::MinimaHopping => "minima-hopping".into(),
             Self::MinimaFeedback => "minima-feedback".into(),
         }
     }
@@ -120,14 +127,22 @@ fn selected_arms(selector: &str, irc: &[IrcKind]) -> Result<Vec<Arm>, String> {
         "all" => {
             arms.extend(irc.iter().copied().map(Arm::Adaptive));
             arms.extend(irc.iter().copied().map(Arm::Ridge));
-            arms.extend([Arm::Basin, Arm::BasinHopping, Arm::MinimaFeedback]);
+            arms.extend([
+                Arm::Basin,
+                Arm::BasinHopping,
+                Arm::MinimaHopping,
+                Arm::MinimaFeedback,
+            ]);
         }
         "adaptive" => arms.extend(irc.iter().copied().map(Arm::Adaptive)),
         "ridge" => arms.extend(irc.iter().copied().map(Arm::Ridge)),
         "basin" => arms.push(Arm::Basin),
         "bh" => arms.push(Arm::BasinHopping),
-        "mh" => arms.push(Arm::MinimaFeedback),
-        _ => return Err("arm must be all, adaptive, ridge, basin, bh, or mh".into()),
+        "mh" => arms.push(Arm::MinimaHopping),
+        "feedback" => arms.push(Arm::MinimaFeedback),
+        _ => {
+            return Err("arm must be all, adaptive, ridge, basin, bh, mh, or feedback".into());
+        }
     }
     Ok(arms)
 }
@@ -219,6 +234,179 @@ fn run_hopping(
         )
     } else {
         run(&config, initial, &mut ledger, &mut relax, &mut rng)
+    }
+}
+
+fn quench_minimum(
+    potential: &PairPotential,
+    optimizer: &mut WarmLbfgs,
+    ledger: &mut Ledger,
+    start: ArrayView1<'_, f64>,
+    steps: usize,
+    gradient_tolerance: f64,
+) -> Option<(f64, ndarray::Array1<f64>, bool)> {
+    if ledger.remaining() == 0 {
+        return None;
+    }
+    let before = ledger.spent();
+    optimizer.forget();
+    let (energy, state, _) = optimizer.minimize(start, steps, |point| {
+        ledger.charge().then(|| potential.value_and_gradient(point))
+    });
+    let gradient = ledger.charge().then(|| {
+        let (_, gradient) = potential.value_and_gradient(state.view());
+        gradient
+    });
+    let validated = energy.is_finite()
+        && gradient.as_ref().is_some_and(|values| {
+            values
+                .iter()
+                .all(|value| value.is_finite() && value.abs() < gradient_tolerance)
+        });
+    ledger.record_quench_boundary(
+        before,
+        energy,
+        state.clone(),
+        validated.then_some(gradient).flatten(),
+    );
+    Some((energy, state, validated))
+}
+
+fn exact_basin(
+    witness: &impl ExactStructureWitness,
+    minima: &[ndarray::Array1<f64>],
+    candidate: ArrayView1<'_, f64>,
+) -> Option<usize> {
+    minima
+        .iter()
+        .position(|minimum| witness.equivalent(minimum.view(), candidate))
+}
+
+fn run_minima_hopping(
+    potential: &PairPotential,
+    initial: ArrayView1<'_, f64>,
+    n: usize,
+    budget: usize,
+    seed: u64,
+    witness: &impl ExactStructureWitness,
+) -> Outcome {
+    let hopping = HoppingConfig::for_cluster(n);
+    let escape_config = MdEscapeConfig {
+        dt: 0.005,
+        potential_minima: 2,
+        maximum_steps: 2_000,
+        geometry: MdEscapeGeometry::RigidQuotient,
+    };
+    let mut ledger = Ledger::new(budget);
+    let mut optimizer = WarmLbfgs::default();
+    let Some((mut energy, mut state, initial_valid)) = quench_minimum(
+        potential,
+        &mut optimizer,
+        &mut ledger,
+        initial,
+        hopping.relax_steps,
+        hopping.record_gradient,
+    ) else {
+        return Outcome::default();
+    };
+    if !initial_valid {
+        return Outcome {
+            final_state: Some(state),
+            final_energy: energy,
+            charged: ledger.spent(),
+            unconverged_records: 1,
+            ..Outcome::default()
+        };
+    }
+
+    ledger.record(energy, state.view());
+    let mut minima = vec![state.clone()];
+    let mut current_basin = 0usize;
+    let mut feedback = EscapeFeedback::new(hopping.energy_scale, 0.5 * hopping.energy_scale);
+    feedback.register_initial(current_basin);
+    let mut rng = StdRng::seed_from_u64(seed);
+    let mut hops = 0usize;
+    let mut accepted = 0usize;
+    let mut unconverged = 0usize;
+    let mut improvements = vec![(0, ledger.spent(), minima.len(), energy)];
+
+    while ledger.remaining() > 0 {
+        let mut evaluate =
+            |point: ArrayView1<f64>| ledger.charge().then(|| potential.value_and_gradient(point));
+        let escape = nve_escape(
+            state.view(),
+            feedback.escape(),
+            &escape_config,
+            &mut evaluate,
+            &mut rng,
+        );
+        drop(evaluate);
+        hops += 1;
+        let Ok(escape) = escape else {
+            unconverged += 1;
+            if ledger.remaining() == 0 {
+                break;
+            }
+            feedback.observe(Some(current_basin), current_basin);
+            continue;
+        };
+        if escape.potential_minima < escape_config.potential_minima {
+            feedback.observe(Some(current_basin), current_basin);
+            continue;
+        }
+        let Some((candidate_energy, candidate, validated)) = quench_minimum(
+            potential,
+            &mut optimizer,
+            &mut ledger,
+            escape.position.view(),
+            hopping.relax_steps,
+            hopping.record_gradient,
+        ) else {
+            break;
+        };
+        if !validated {
+            unconverged += 1;
+            feedback.observe(Some(current_basin), current_basin);
+            continue;
+        }
+
+        if let Some(reached) = exact_basin(witness, &minima, candidate.view()) {
+            feedback.observe(Some(current_basin), reached);
+            continue;
+        }
+
+        let reached = minima.len();
+        minima.push(candidate.clone());
+        let visit = feedback.observe(Some(current_basin), reached);
+        debug_assert_eq!(visit, Visit::New);
+        let improved = candidate_energy < ledger.best;
+        ledger.record(candidate_energy, candidate.view());
+        if improved {
+            improvements.push((hops, ledger.spent(), minima.len(), candidate_energy));
+        }
+        if feedback.accept(candidate_energy - energy) {
+            current_basin = reached;
+            energy = candidate_energy;
+            state = candidate;
+            accepted += 1;
+        }
+    }
+
+    Outcome {
+        best: ledger.best,
+        best_state: ledger.best_state.clone(),
+        final_state: Some(state),
+        final_energy: energy,
+        hops,
+        basins: minima.len(),
+        charged: ledger.spent(),
+        escape_scale: feedback.escape(),
+        escape_threshold: feedback.threshold(),
+        visit_counts: (feedback.n_same, feedback.n_known, feedback.n_new),
+        improvements,
+        accepted,
+        unconverged_records: unconverged,
+        ..Outcome::default()
     }
 }
 
@@ -496,15 +684,20 @@ fn main() -> Result<(), Box<dyn Error>> {
                         failures,
                     );
                 }
-                Arm::BasinHopping | Arm::MinimaFeedback => {
-                    let outcome = run_hopping(
-                        &potential,
-                        initial.view(),
-                        n,
-                        usize::try_from(budget).unwrap_or(usize::MAX),
-                        seed,
-                        matches!(arm, Arm::MinimaFeedback),
-                    );
+                Arm::BasinHopping | Arm::MinimaHopping | Arm::MinimaFeedback => {
+                    let budget = usize::try_from(budget).unwrap_or(usize::MAX);
+                    let outcome = if matches!(arm, Arm::MinimaHopping) {
+                        run_minima_hopping(&potential, initial.view(), n, budget, seed, &witness)
+                    } else {
+                        run_hopping(
+                            &potential,
+                            initial.view(),
+                            n,
+                            budget,
+                            seed,
+                            matches!(arm, Arm::MinimaFeedback),
+                        )
+                    };
                     let encounter =
                         first_encounter(&outcome, target, TARGET_TOLERANCE, outcome.charged);
                     let (found, first_charged) = encounter_fields(encounter);
@@ -522,7 +715,11 @@ fn main() -> Result<(), Box<dyn Error>> {
                             "minima": outcome.basins,
                             "saddles": 0,
                             "hops": outcome.hops,
-                            "failed_actions": 0,
+                            "accepted": outcome.accepted,
+                            "escape_kinetic_or_scale": outcome.escape_scale,
+                            "acceptance_threshold": outcome.escape_threshold,
+                            "visit_counts": outcome.visit_counts,
+                            "failed_actions": outcome.unconverged_records,
                         })
                     );
                     summaries[arm_index].observe(
@@ -531,7 +728,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                         outcome.charged as u64,
                         outcome.basins,
                         0,
-                        0,
+                        outcome.unconverged_records,
                     );
                 }
             }
