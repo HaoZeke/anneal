@@ -2,11 +2,12 @@
 //!
 //! A search epoch supplies one validated representative per chain. The
 //! selection potential combines within-epoch energy rank, descriptor novelty,
-//! census scarcity, and latent-Gaussian transition uncertainty. Systematic
-//! resampling keeps the chain population fixed, while a family cap prevents a
-//! single observed funnel from occupying every slot. This is a
-//! population-management operator, not a Green-function approximation and not
-//! an electronic-structure convergence claim.
+//! and census scarcity. Systematic resampling keeps the chain population fixed,
+//! while a family cap prevents a single observed funnel from occupying every
+//! slot. Transition-network inference is diagnostic output rather than
+//! population evidence. This is a population-management operator, not a
+//! Green-function approximation and not an electronic-structure convergence
+//! claim.
 
 use std::collections::{BTreeMap, BTreeSet};
 use thiserror::Error;
@@ -69,7 +70,6 @@ pub struct BasinEvidence {
     energy_rank: f64,
     novelty_rank: f64,
     scarcity_rank: f64,
-    uncertainty_rank: f64,
 }
 
 impl BasinEvidence {
@@ -90,18 +90,7 @@ impl BasinEvidence {
             energy_rank,
             novelty_rank,
             scarcity_rank,
-            uncertainty_rank: 0.0,
         })
-    }
-
-    /// Attach a latent-Gaussian transition-field uncertainty rank.
-    pub fn with_uncertainty_rank(
-        mut self,
-        uncertainty_rank: f64,
-    ) -> Result<Self, ReconfigurationError> {
-        validate_rank("uncertainty", uncertainty_rank)?;
-        self.uncertainty_rank = uncertainty_rank;
-        Ok(self)
     }
 
     /// Within-epoch energy rank, where zero is best.
@@ -118,11 +107,6 @@ impl BasinEvidence {
     pub fn scarcity_rank(self) -> f64 {
         self.scarcity_rank
     }
-
-    /// GMRF posterior-uncertainty rank, where one is least certain.
-    pub fn uncertainty_rank(self) -> f64 {
-        self.uncertainty_rank
-    }
 }
 
 /// Raw coordinator evidence for one replica at a synchronization epoch.
@@ -132,7 +116,6 @@ pub struct PopulationMember {
     energy: f64,
     novelty: f64,
     basin_visits: f64,
-    residual_uncertainty: f64,
 }
 
 impl PopulationMember {
@@ -167,27 +150,7 @@ impl PopulationMember {
             energy,
             novelty,
             basin_visits,
-            residual_uncertainty: 0.0,
         })
-    }
-
-    /// Construct one member with a latent-Gaussian transition-field score.
-    pub fn new_with_uncertainty(
-        replica: u32,
-        energy: f64,
-        novelty: f64,
-        basin_visits: f64,
-        residual_uncertainty: f64,
-    ) -> Result<Self, ReconfigurationError> {
-        if !residual_uncertainty.is_finite() || residual_uncertainty < 0.0 {
-            return Err(ReconfigurationError::InvalidParameter {
-                field: "member_residual_uncertainty",
-                value: residual_uncertainty,
-            });
-        }
-        let mut member = Self::new(replica, energy, novelty, basin_visits)?;
-        member.residual_uncertainty = residual_uncertainty;
-        Ok(member)
     }
 
     /// Replica identity within the isolated ensemble.
@@ -245,14 +208,9 @@ pub fn rank_population(
         .iter()
         .map(|member| 1.0 / member.basin_visits)
         .collect::<Vec<_>>();
-    let uncertainty = members
-        .iter()
-        .map(|member| member.residual_uncertainty)
-        .collect::<Vec<_>>();
     let energy_ranks = ascending_fractional_ranks(&energy)?;
     let novelty_ranks = ascending_fractional_ranks(&novelty)?;
     let scarcity_ranks = ascending_fractional_ranks(&scarcity)?;
-    let uncertainty_ranks = ascending_fractional_ranks(&uncertainty)?;
 
     members
         .iter()
@@ -264,8 +222,7 @@ pub fn rank_population(
                     energy_ranks[index],
                     novelty_ranks[index],
                     scarcity_ranks[index],
-                )?
-                .with_uncertainty_rank(uncertainty_ranks[index])?,
+                )?,
             })
         })
         .collect()
@@ -288,8 +245,6 @@ pub struct SelectionCoefficients {
     pub novelty: f64,
     /// Pressure toward census scarcity.
     pub scarcity: f64,
-    /// Pressure toward latent-Gaussian transition-field uncertainty.
-    pub uncertainty: f64,
     /// Maximum log-weight difference retained before exponentiation.
     pub log_weight_clip: f64,
 }
@@ -300,7 +255,6 @@ impl Default for SelectionCoefficients {
             energy: 1.0,
             novelty: 0.8,
             scarcity: 0.6,
-            uncertainty: 0.4,
             log_weight_clip: 4.0,
         }
     }
@@ -312,7 +266,6 @@ impl SelectionCoefficients {
             ("energy", self.energy),
             ("novelty", self.novelty),
             ("scarcity", self.scarcity),
-            ("uncertainty", self.uncertainty),
         ] {
             if !value.is_finite() || value < 0.0 {
                 return Err(ReconfigurationError::InvalidParameter { field, value });
@@ -916,7 +869,6 @@ pub fn reconfiguration_plan(
             -coefficients.energy * item.energy_rank
                 + coefficients.novelty * item.novelty_rank
                 + coefficients.scarcity * item.scarcity_rank
-                + coefficients.uncertainty * item.uncertainty_rank
         })
         .collect();
     let maximum = log_weights
