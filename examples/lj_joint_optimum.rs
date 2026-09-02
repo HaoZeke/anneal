@@ -3,8 +3,9 @@
 //! The adaptive arm allocates between finite invariant basin proposals and
 //! projected rgsaddle ridge/IRC actions by information about the identity and
 //! energy of the lowest reachable minimum per expected PES call. Fixed-family
-//! ablations, plain Wales--Doye basin hopping, and Goedecker minima hopping use
-//! the same initial coordinates, seeds, target, and charged-call ceiling.
+//! ablations, plain Wales--Doye basin hopping, and a history-conditioned escape
+//! feedback ablation use the same initial coordinates, seeds, target, and
+//! charged-call ceiling.
 //!
 //! Usage:
 //! `lj_joint_optimum <N> <budget> <seeds> [all|adaptive|ridge|basin|bh|mh] [gs2|morokuma|both] [seed0]`
@@ -17,7 +18,7 @@ use anneal_core::atomistic_hybrid::{
 };
 use anneal_core::catalog::lj;
 use anneal_core::methods::cluster_hopping::{
-    Config as HoppingConfig, Ledger, Outcome, random_cluster, run, run_with_gradient,
+    Config as HoppingConfig, Ledger, MoveLibrary, Outcome, random_cluster, run, run_with_gradient,
 };
 use anneal_core::methods::cluster_search::{Encounter, first_encounter, median_encounter};
 use anneal_core::methods::warm_lbfgs::WarmLbfgs;
@@ -36,7 +37,7 @@ enum Arm {
     Ridge(IrcKind),
     Basin,
     BasinHopping,
-    MinimaHopping,
+    MinimaFeedback,
 }
 
 impl Arm {
@@ -46,7 +47,7 @@ impl Arm {
             Self::Ridge(kind) => format!("ridge-{}", irc_name(kind)),
             Self::Basin => "basin-ablation".into(),
             Self::BasinHopping => "basin-hopping".into(),
-            Self::MinimaHopping => "minima-hopping".into(),
+            Self::MinimaFeedback => "minima-feedback".into(),
         }
     }
 }
@@ -119,13 +120,13 @@ fn selected_arms(selector: &str, irc: &[IrcKind]) -> Result<Vec<Arm>, String> {
         "all" => {
             arms.extend(irc.iter().copied().map(Arm::Adaptive));
             arms.extend(irc.iter().copied().map(Arm::Ridge));
-            arms.extend([Arm::Basin, Arm::BasinHopping, Arm::MinimaHopping]);
+            arms.extend([Arm::Basin, Arm::BasinHopping, Arm::MinimaFeedback]);
         }
         "adaptive" => arms.extend(irc.iter().copied().map(Arm::Adaptive)),
         "ridge" => arms.extend(irc.iter().copied().map(Arm::Ridge)),
         "basin" => arms.push(Arm::Basin),
         "bh" => arms.push(Arm::BasinHopping),
-        "mh" => arms.push(Arm::MinimaHopping),
+        "mh" => arms.push(Arm::MinimaFeedback),
         _ => return Err("arm must be all, adaptive, ridge, basin, bh, or mh".into()),
     }
     Ok(arms)
@@ -188,6 +189,7 @@ fn run_hopping(
 ) -> Outcome {
     let mut config = HoppingConfig::for_cluster(n);
     config.bias_height = 0.0;
+    config.move_library = MoveLibrary::WalesDoye;
     config.minima_hopping = minima_hopping;
     let mut ledger = Ledger::new(budget);
     let mut optimizer = WarmLbfgs::default();
@@ -494,14 +496,14 @@ fn main() -> Result<(), Box<dyn Error>> {
                         failures,
                     );
                 }
-                Arm::BasinHopping | Arm::MinimaHopping => {
+                Arm::BasinHopping | Arm::MinimaFeedback => {
                     let outcome = run_hopping(
                         &potential,
                         initial.view(),
                         n,
                         usize::try_from(budget).unwrap_or(usize::MAX),
                         seed,
-                        matches!(arm, Arm::MinimaHopping),
+                        matches!(arm, Arm::MinimaFeedback),
                     );
                     let encounter =
                         first_encounter(&outcome, target, TARGET_TOLERANCE, outcome.charged);

@@ -10,7 +10,9 @@ use super::*;
 #[derive(Debug, Clone, PartialEq, serde::Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum MoveLibrary {
-    /// Wales-Doye atomic moves.
+    /// Collective Cartesian displacement used by Wales--Doye basin hopping.
+    WalesDoye,
+    /// Anneal's mixed atomic proposal library.
     Atomic,
     /// Productive atomic arms only.
     Lean,
@@ -56,6 +58,11 @@ impl MoveLibrary {
                 cfg.symmetrise_cutoff,
             )
         };
+        let wales_doye = || {
+            vec![ClusterMove::AllPoints {
+                step: LennardJonesPreset::ALL_POINTS_STEP * cfg.length_scale,
+            }]
+        };
         let lean = || {
             ClusterMove::library_lean_scaled(
                 cfg.n_points,
@@ -65,6 +72,7 @@ impl MoveLibrary {
             )
         };
         match self {
+            Self::WalesDoye => wales_doye(),
             Self::Atomic => atomic(),
             Self::Lean => lean(),
             Self::LeanBurst => {
