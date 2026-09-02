@@ -12,12 +12,12 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 
 use ndarray::{Array1, ArrayView1};
-use rand::{rngs::StdRng, SeedableRng};
+use rand::{SeedableRng, rngs::StdRng};
 
 use crate::allocate::DiscoveryAccounting;
 use crate::catalog::{
-    leftover_esty_stable, leftover_esty_upper, PRODUCTION_MAX_UNSEEN_MASS,
-    PRODUCTION_MINIMUM_VISITS,
+    PRODUCTION_MAX_UNSEEN_MASS, PRODUCTION_MINIMUM_VISITS, leftover_esty_stable,
+    leftover_esty_upper,
 };
 use crate::descriptor_space::{DescriptorError, DescriptorSpace};
 use crate::methods::minima_hopping::EscapeFeedback;
@@ -27,10 +27,10 @@ use crate::minimum_information::{
 };
 use crate::movekernel::{Gaussian, MoveKernel, TsallisVisit};
 use crate::pes_exploration::{
-    discover_nd_connection_with_budget, orthonormal_nd_mode, ExactStructureWitness, NdPesNetwork,
-    PesExplorationConfig, PesExplorationError, PesSurface, RideModeDirection,
+    ExactStructureWitness, NdPesNetwork, PesExplorationConfig, PesExplorationError, PesSurface,
+    RideModeDirection, discover_nd_connection_with_budget, orthonormal_nd_mode,
 };
-use crate::source_escape::{quench_source_escape, SourceEscapeConfig, SourceEscapeOutcome};
+use crate::source_escape::{SourceEscapeConfig, SourceEscapeOutcome, quench_source_escape};
 
 const RIDGE_ARM: usize = 0;
 const ESCAPE_ARM: usize = 1;

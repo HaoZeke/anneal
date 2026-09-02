@@ -1,9 +1,9 @@
 use anneal_core::curvature::rigid_basis;
 use anneal_core::descriptor_space::DescriptorGeometry;
 use anneal_core::pes_exploration::{
-    gaussian_nd_mode, localized_cartesian_mode, orthonormal_nd_mode, RideModeDirection,
+    RideModeDirection, gaussian_nd_mode, localized_cartesian_mode, orthonormal_nd_mode,
 };
-use ndarray::{array, ArrayView1};
+use ndarray::{ArrayView1, array};
 
 fn norm(values: ArrayView1<'_, f64>) -> f64 {
     values.iter().map(|value| value * value).sum::<f64>().sqrt()
@@ -18,10 +18,12 @@ fn arbitrary_dimensional_gaussian_modes_are_reproducible_ranked_and_signed() {
 
     assert_eq!(positive, replay);
     assert!((norm(positive.view()) - 1.0).abs() < 1e-12);
-    assert!(positive
-        .iter()
-        .zip(&negative)
-        .all(|(forward, reverse)| (forward + reverse).abs() < 1e-14));
+    assert!(
+        positive
+            .iter()
+            .zip(&negative)
+            .all(|(forward, reverse)| (forward + reverse).abs() < 1e-14)
+    );
     let overlap = positive.dot(&other_rank).abs();
     assert!(overlap < 0.999, "ranked modes must not replay one vector");
 }
@@ -47,9 +49,11 @@ fn arbitrary_dimensional_mode_blocks_cover_orthogonal_directions() {
     }
 
     let reversed = orthonormal_nd_mode(5, 0x5eed, 3, RideModeDirection::Negative).unwrap();
-    assert!((&reversed + &modes[3])
-        .iter()
-        .all(|value| value.abs() < 1e-14));
+    assert!(
+        (&reversed + &modes[3])
+            .iter()
+            .all(|value| value.abs() < 1e-14)
+    );
 
     let second_block = orthonormal_nd_mode(5, 0x5eed, 5, RideModeDirection::Positive).unwrap();
     assert!((norm(second_block.view()) - 1.0).abs() < 1e-12);

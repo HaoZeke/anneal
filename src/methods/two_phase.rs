@@ -214,7 +214,13 @@ impl SurfacePortfolio {
     /// As [`Self::new`], holding each drawn arm for `block` hops.
     pub fn with_block(transforms: &[TwoPhase], seed: u64, block: usize) -> Self {
         let mut arms = vec![None];
-        arms.extend(transforms.iter().copied().filter(|two| two.is_active()).map(Some));
+        arms.extend(
+            transforms
+                .iter()
+                .copied()
+                .filter(|two| two.is_active())
+                .map(Some),
+        );
         Self {
             allocator: DepthAllocator::new(arms.len()),
             arms,

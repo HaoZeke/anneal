@@ -521,7 +521,10 @@ fn deepest_ico_is_the_only_packing_donor() {
 fn an_attached_replica_is_required_by_the_open_barrier() {
     let mut population = SynchronousPopulation::new([0, 1], coefficients(), 1, 3).unwrap();
     population.attach(2).unwrap();
-    assert!(population.attach(2).is_err(), "a second attach of one replica is a duplicate");
+    assert!(
+        population.attach(2).is_err(),
+        "a second attach of one replica is a duplicate"
+    );
     assert_eq!(population.live_replicas(), vec![2]);
 
     let first = population
@@ -553,7 +556,10 @@ fn the_barrier_closes_on_quorum_once_the_deadline_passes() {
         .unwrap()
         .with_quorum(0.5, 3)
         .unwrap();
-    assert!(population.tick().unwrap().is_none(), "nothing submitted, nothing to close");
+    assert!(
+        population.tick().unwrap().is_none(),
+        "nothing submitted, nothing to close"
+    );
     population
         .submit(0, PopulationMember::new(0, -10.0, 0.2, 8.0).unwrap())
         .unwrap();
@@ -593,8 +599,10 @@ fn a_quorum_short_barrier_outlasts_the_deadline() {
         assert!(population.tick().unwrap().is_none());
     }
     assert_eq!(population.open_epoch(), 0);
-    assert!(SynchronousPopulation::new([0, 1], coefficients(), 1, 1)
-        .unwrap()
-        .with_quorum(0.0, 2)
-        .is_err());
+    assert!(
+        SynchronousPopulation::new([0, 1], coefficients(), 1, 1)
+            .unwrap()
+            .with_quorum(0.0, 2)
+            .is_err()
+    );
 }
