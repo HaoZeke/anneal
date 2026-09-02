@@ -203,6 +203,17 @@ pub fn optimise_occupation(
     ledger: &mut Ledger,
     x: ArrayView1<f64>,
 ) -> (Array1<f64>, usize) {
+    optimise_occupation_over(cfg, ledger, x, 3)
+}
+
+/// [`optimise_occupation`] trying the `movers` worst-bound points at each
+/// step; `movers` at the point count is the full swap search.
+pub fn optimise_occupation_over(
+    cfg: &LatticeSearchConfig,
+    ledger: &mut Ledger,
+    x: ArrayView1<f64>,
+    movers: usize,
+) -> (Array1<f64>, usize) {
     let n = cfg.n_points;
     let mut cur: Vec<f64> = x.to_vec();
     let frac = 2.0 / n.max(1) as f64;
@@ -221,7 +232,7 @@ pub fn optimise_occupation(
             break;
         }
         let mut best: Option<(usize, [f64; 3], f64)> = None;
-        for &atom in order.iter().take(3) {
+        for &atom in order.iter().take(movers.max(1)) {
             for site in &sites {
                 if !ledger.charge_frac(frac) {
                     return (Array1::from(cur), moves);
@@ -299,8 +310,8 @@ pub fn construct(
 /// Rebuild the whole cluster on the lattice of occupied positions and hollow
 /// sites of `x`: the site nearest the centroid is placed first, then each
 /// further point takes the vacant lattice site with the lowest energy in the
-/// field of the points already placed. Every site energy is charged at its
-/// pair fraction.
+/// field of the points already placed, and the occupation is then relaxed
+/// by swaps. Every site energy is charged at its pair fraction.
 pub fn reoccupy(cfg: &LatticeSearchConfig, ledger: &mut Ledger, x: ArrayView1<f64>) -> Array1<f64> {
     let n = cfg.n_points;
     let xs = x.to_vec();
@@ -344,7 +355,10 @@ pub fn reoccupy(cfg: &LatticeSearchConfig, ledger: &mut Ledger, x: ArrayView1<f6
             placed.extend_from_slice(&xs[3 * i..3 * i + 3]);
         }
     }
-    Array1::from(placed)
+    // Successive placement is greedy; the occupation it leaves is relaxed
+    // by swaps over every point until none lowers its energy.
+    let placed = Array1::from(placed);
+    optimise_occupation_over(cfg, ledger, placed.view(), n).0
 }
 
 /// Run the dynamic lattice search under `ledger`.
