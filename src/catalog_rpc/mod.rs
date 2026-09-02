@@ -7,12 +7,13 @@ use capnp::serialize;
 
 use crate::Catalog_capnp::{
     CatalogMutationKind as WireCatalogMutationKind, CatalogRelation as WireCatalogRelation,
-    QuenchStatus as WireQuenchStatus, RejectionKind, RideDirection as WireRideDirection,
-    RideFailure as WireRideFailure, RideMethod as WireRideMethod, accepted_reply,
-    bridge_assignment, candidate_record, catalog_mutation_reply, catalog_reply, catalog_request,
-    policy_state_reply, population_epoch_reply, ride_report_reply, ride_report_request,
-    transition_record,
+    DiscoveryRole as WireDiscoveryRole, QuenchStatus as WireQuenchStatus, RejectionKind,
+    RideDirection as WireRideDirection, RideFailure as WireRideFailure,
+    RideMethod as WireRideMethod, accepted_reply, bridge_assignment, candidate_record,
+    catalog_mutation_reply, catalog_reply, catalog_request, policy_state_reply,
+    population_epoch_reply, ride_report_reply, ride_report_request, transition_record,
 };
+use crate::discovery_roster::DiscoveryRole;
 use crate::pes_exploration::RideMethod;
 use crate::ride_ledger::{RideCredit, RideDirection, RideFailure, RideWorkOrder};
 
@@ -21,7 +22,7 @@ pub mod mailbox;
 pub mod server;
 
 /// Wire protocol version accepted by this release.
-pub const PROTOCOL_VERSION: u16 = 22;
+pub const PROTOCOL_VERSION: u16 = 23;
 /// `Sample` draw that returns the active-catalog incumbent.
 pub const INCUMBENT_SAMPLE_DRAW: u64 = u64::MAX;
 
@@ -506,6 +507,16 @@ pub struct PolicyState {
     pub ei_exhausted: bool,
     /// Measured Fiedler-and-DECAF family floor for this hop graph.
     pub min_families: u32,
+    /// Coverage-proportional stationary-object role for this replica.
+    pub discovery_role: DiscoveryRole,
+    /// Exact census-plus-ride observation epoch behind the role assignment.
+    pub discovery_epoch: u64,
+    /// One-sided upper bound on unseen exact-basin mass.
+    pub basin_unseen_mass_upper: f64,
+    /// One-sided upper bound on unseen exact-saddle mass.
+    pub saddle_unseen_mass_upper: f64,
+    /// Whether exact-saddle reobservations meet the declared coverage rule.
+    pub saddle_coverage_saturated: bool,
 }
 
 /// Which selection produced a barrier's parent map.
@@ -1321,6 +1332,11 @@ pub(crate) fn encode_reply(reply: CatalogReply) -> Result<Vec<u8>, ProtocolError
                     output.set_leftover_dwell(state.leftover_dwell);
                     output.set_ei_exhausted(state.ei_exhausted);
                     output.set_min_families(state.min_families);
+                    output.set_discovery_role(state.discovery_role.into());
+                    output.set_discovery_epoch(state.discovery_epoch);
+                    output.set_basin_unseen_mass_upper(state.basin_unseen_mass_upper);
+                    output.set_saddle_unseen_mass_upper(state.saddle_unseen_mass_upper);
+                    output.set_saddle_coverage_saturated(state.saddle_coverage_saturated);
                 }
                 AcceptedPayload::PopulationEpoch(state) => {
                     let mut output = payload.init_population_epoch();
@@ -1571,6 +1587,11 @@ pub(crate) fn decode_reply_reader(
                         leftover_dwell: state.get_leftover_dwell(),
                         ei_exhausted: state.get_ei_exhausted(),
                         min_families: state.get_min_families(),
+                        discovery_role: state.get_discovery_role().map_err(wire_error)?.into(),
+                        discovery_epoch: state.get_discovery_epoch(),
+                        basin_unseen_mass_upper: state.get_basin_unseen_mass_upper(),
+                        saddle_unseen_mass_upper: state.get_saddle_unseen_mass_upper(),
+                        saddle_coverage_saturated: state.get_saddle_coverage_saturated(),
                     })
                 }
                 accepted_reply::payload::PopulationEpoch(state) => {
@@ -1710,6 +1731,24 @@ impl From<WireCatalogRelation> for CatalogRelation {
             WireCatalogRelation::SameBasin => Self::SameBasin,
             WireCatalogRelation::UnrelatedNoAnchor => Self::UnrelatedNoAnchor,
             WireCatalogRelation::UnrelatedLowerAnchor => Self::UnrelatedLowerAnchor,
+        }
+    }
+}
+
+impl From<DiscoveryRole> for WireDiscoveryRole {
+    fn from(value: DiscoveryRole) -> Self {
+        match value {
+            DiscoveryRole::BasinEscape => Self::BasinEscape,
+            DiscoveryRole::SaddleRide => Self::SaddleRide,
+        }
+    }
+}
+
+impl From<WireDiscoveryRole> for DiscoveryRole {
+    fn from(value: WireDiscoveryRole) -> Self {
+        match value {
+            WireDiscoveryRole::BasinEscape => Self::BasinEscape,
+            WireDiscoveryRole::SaddleRide => Self::SaddleRide,
         }
     }
 }
