@@ -10,8 +10,9 @@ use crate::Catalog_capnp::{
     DiscoveryRole as WireDiscoveryRole, QuenchStatus as WireQuenchStatus, RejectionKind,
     RideDirection as WireRideDirection, RideFailure as WireRideFailure,
     RideMethod as WireRideMethod, accepted_reply, bridge_assignment, candidate_record,
-    catalog_mutation_reply, catalog_reply, catalog_request, policy_state_reply,
-    population_epoch_reply, ride_report_reply, ride_report_request, transition_record,
+    catalog_identity, catalog_mutation_reply, catalog_reply, catalog_request, coordinator_event,
+    coordinator_status, policy_state_reply, population_epoch_reply, ride_report_reply,
+    ride_report_request, roster_reply, transition_record,
 };
 use crate::discovery_roster::DiscoveryRole;
 use crate::pes_exploration::RideMethod;
@@ -764,6 +765,34 @@ pub enum CatalogReply {
     },
 }
 
+/// Live, retired, and spawn view returned by attach and scale.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RosterReply {
+    /// Monotone roster version.
+    pub version: u64,
+    /// Replicas that currently hold a session.
+    pub live: Vec<u32>,
+    /// Replicas that have detached or been retired.
+    pub retired: Vec<u32>,
+    /// Additional replicas the coordinator asked to start.
+    pub spawn_requested: u32,
+}
+
+/// Event pushed to every attached subscriber.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CoordinatorEvent {
+    /// A synchronous population epoch closed.
+    EpochClosed(u64),
+    /// The live or retired roster changed.
+    RosterChanged(u64),
+    /// A replica was retired from the live population.
+    Retire(String),
+    /// The coordinator asked for more live replicas.
+    Spawn(u32),
+    /// Periodic liveness tick.
+    Tick(u64),
+}
+
 /// Protocol validation or decoding failure.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum ProtocolError {
@@ -822,17 +851,22 @@ pub fn validate_identity(
 pub fn encode_request(request: &CatalogRequest) -> Result<Vec<u8>, ProtocolError> {
     check_version(request.protocol_version)?;
     let mut message = Builder::new_default();
-    let mut root = message.init_root::<catalog_request::Builder>();
+    let root = message.init_root::<catalog_request::Builder>();
+    fill_request(root, request)?;
+    let mut bytes = Vec::new();
+    serialize::write_message(&mut bytes, &message).map_err(wire_error)?;
+    Ok(bytes)
+}
+
+/// Write one request into an existing builder, including unsupported versions.
+pub(crate) fn fill_request(
+    mut root: catalog_request::Builder<'_>,
+    request: &CatalogRequest,
+) -> Result<(), ProtocolError> {
     root.set_protocol_version(request.protocol_version);
     root.set_event_sequence(request.event_sequence);
     root.set_snapshot_version(request.snapshot_version);
-    {
-        let mut identity = root.reborrow().init_identity();
-        identity.set_campaign(request.identity.campaign.as_str());
-        identity.set_ensemble(request.identity.ensemble.as_str());
-        identity.set_replica(request.identity.replica);
-        identity.set_signature_digest(&request.identity.signature_digest);
-    }
+    fill_identity(root.reborrow().init_identity(), &request.identity);
     let mut operation = root.init_operation();
     match &request.operation {
         CatalogOperation::Snapshot => operation.set_snapshot(()),
@@ -987,9 +1021,7 @@ pub fn encode_request(request: &CatalogRequest) -> Result<Vec<u8>, ProtocolError
             }
         }
     }
-    let mut bytes = Vec::new();
-    serialize::write_message(&mut bytes, &message).map_err(wire_error)?;
-    Ok(bytes)
+    Ok(())
 }
 
 /// Decode one request and enforce its protocol version and digest shape.
@@ -1189,7 +1221,17 @@ pub(crate) fn decode_request_reader(
 
 pub(crate) fn encode_reply(reply: CatalogReply) -> Result<Vec<u8>, ProtocolError> {
     let mut message = Builder::new_default();
-    let mut root = message.init_root::<catalog_reply::Builder>();
+    let root = message.init_root::<catalog_reply::Builder>();
+    fill_reply(root, reply)?;
+    let mut bytes = Vec::new();
+    serialize::write_message(&mut bytes, &message).map_err(wire_error)?;
+    Ok(bytes)
+}
+
+pub(crate) fn fill_reply(
+    mut root: catalog_reply::Builder<'_>,
+    reply: CatalogReply,
+) -> Result<(), ProtocolError> {
     root.set_protocol_version(PROTOCOL_VERSION);
     match reply {
         CatalogReply::Accepted(accepted) => {
@@ -1451,9 +1493,7 @@ pub(crate) fn encode_reply(reply: CatalogReply) -> Result<Vec<u8>, ProtocolError
             root.init_result().set_rejected(reason.into());
         }
     }
-    let mut bytes = Vec::new();
-    serialize::write_message(&mut bytes, &message).map_err(wire_error)?;
-    Ok(bytes)
+    Ok(())
 }
 
 pub(crate) fn decode_reply_reader(
@@ -1934,6 +1974,153 @@ fn fill_u32(mut output: capnp::primitive_list::Builder<'_, u32>, values: &[u32])
 fn fill_u64(mut output: capnp::primitive_list::Builder<'_, u64>, values: &[u64]) {
     for (index, value) in values.iter().copied().enumerate() {
         output.set(index as u32, value);
+    }
+}
+
+fn fill_identity(mut identity: catalog_identity::Builder<'_>, src: &CatalogIdentity) {
+    identity.set_campaign(src.campaign.as_str());
+    identity.set_ensemble(src.ensemble.as_str());
+    identity.set_replica(src.replica);
+    identity.set_signature_digest(&src.signature_digest);
+}
+
+pub(crate) fn read_identity(
+    identity: catalog_identity::Reader<'_>,
+) -> Result<CatalogIdentity, ProtocolError> {
+    let digest = identity.get_signature_digest().map_err(wire_error)?;
+    let signature_digest: [u8; 32] =
+        digest
+            .try_into()
+            .map_err(|_| ProtocolError::SignatureDigestLength {
+                actual: digest.len(),
+            })?;
+    Ok(CatalogIdentity {
+        campaign: text_value(identity.get_campaign().map_err(wire_error)?)?,
+        ensemble: text_value(identity.get_ensemble().map_err(wire_error)?)?,
+        replica: identity.get_replica(),
+        signature_digest,
+    })
+}
+
+pub(crate) fn fill_coordinator_status(
+    mut output: coordinator_status::Builder<'_>,
+    status: &CoordinatorStatus,
+) {
+    output.set_snapshot_version(status.snapshot_version);
+    output.set_open_epoch(status.open_epoch);
+    output.set_epoch_submitted(status.epoch_submitted);
+    output.set_epoch_required(status.epoch_required);
+    output.set_census_visits(status.census_visits);
+    output.set_active_entries(status.active_entries);
+    output.set_aggregate_charged(status.aggregate_charged);
+    output.set_aggregate_budget(status.aggregate_budget);
+    output.set_landscape_basins(status.landscape_basins);
+    output.set_unique_saddles(status.unique_saddles);
+    output.set_unique_edges(status.unique_edges);
+    output.set_unique_degenerate_rearrangements(status.unique_degenerate_rearrangements);
+    output.set_certified_connections(status.certified_connections);
+    if let Some(seam) = &status.seam {
+        output.set_algebraic_connectivity(seam.algebraic_connectivity);
+        output.set_seam_conductance(seam.conductance);
+        output.set_community_left(seam.community_left);
+        output.set_community_right(seam.community_right);
+        output.set_seam_left_basin(seam.left_basin);
+        output.set_seam_right_basin(seam.right_basin);
+    }
+    let mut replicas = output.init_replicas(status.replicas.len() as u32);
+    for (index, progress) in status.replicas.iter().enumerate() {
+        let mut row = replicas.reborrow().get(index as u32);
+        row.set_replica(progress.replica);
+        row.set_charged_work(progress.charged_work);
+        row.set_best_energy(progress.best_energy);
+    }
+}
+
+pub(crate) fn read_coordinator_status(
+    status: coordinator_status::Reader<'_>,
+) -> Result<CoordinatorStatus, ProtocolError> {
+    let mut replicas = Vec::new();
+    for row in status.get_replicas().map_err(wire_error)?.iter() {
+        replicas.push(ReplicaProgress {
+            replica: row.get_replica(),
+            charged_work: row.get_charged_work(),
+            best_energy: row.get_best_energy(),
+        });
+    }
+    let seam = (status.get_community_left() > 0 && status.get_community_right() > 0).then(|| {
+        LandscapeSeam {
+            algebraic_connectivity: status.get_algebraic_connectivity(),
+            conductance: status.get_seam_conductance(),
+            community_left: status.get_community_left(),
+            community_right: status.get_community_right(),
+            left_basin: status.get_seam_left_basin(),
+            right_basin: status.get_seam_right_basin(),
+        }
+    });
+    Ok(CoordinatorStatus {
+        snapshot_version: status.get_snapshot_version(),
+        open_epoch: status.get_open_epoch(),
+        epoch_submitted: status.get_epoch_submitted(),
+        epoch_required: status.get_epoch_required(),
+        census_visits: status.get_census_visits(),
+        active_entries: status.get_active_entries(),
+        aggregate_charged: status.get_aggregate_charged(),
+        aggregate_budget: status.get_aggregate_budget(),
+        replicas,
+        landscape_basins: status.get_landscape_basins(),
+        unique_saddles: status.get_unique_saddles(),
+        unique_edges: status.get_unique_edges(),
+        unique_degenerate_rearrangements: status.get_unique_degenerate_rearrangements(),
+        certified_connections: status.get_certified_connections(),
+        seam,
+    })
+}
+
+pub(crate) fn fill_roster(mut output: roster_reply::Builder<'_>, roster: &RosterReply) {
+    output.set_version(roster.version);
+    fill_u32(
+        output.reborrow().init_live(roster.live.len() as u32),
+        &roster.live,
+    );
+    fill_u32(
+        output.reborrow().init_retired(roster.retired.len() as u32),
+        &roster.retired,
+    );
+    output.set_spawn_requested(roster.spawn_requested);
+}
+
+pub(crate) fn read_roster(
+    roster: roster_reply::Reader<'_>,
+) -> Result<RosterReply, ProtocolError> {
+    Ok(RosterReply {
+        version: roster.get_version(),
+        live: list_u32(roster.get_live().map_err(wire_error)?),
+        retired: list_u32(roster.get_retired().map_err(wire_error)?),
+        spawn_requested: roster.get_spawn_requested(),
+    })
+}
+
+pub(crate) fn fill_event(mut output: coordinator_event::Builder<'_>, event: &CoordinatorEvent) {
+    match event {
+        CoordinatorEvent::EpochClosed(epoch) => output.set_epoch_closed(*epoch),
+        CoordinatorEvent::RosterChanged(version) => output.set_roster_changed(*version),
+        CoordinatorEvent::Retire(reason) => output.set_retire(reason.as_str()),
+        CoordinatorEvent::Spawn(count) => output.set_spawn(*count),
+        CoordinatorEvent::Tick(tick) => output.set_tick(*tick),
+    }
+}
+
+pub(crate) fn read_event(
+    event: coordinator_event::Reader<'_>,
+) -> Result<CoordinatorEvent, ProtocolError> {
+    match event.which().map_err(wire_error)? {
+        coordinator_event::EpochClosed(epoch) => Ok(CoordinatorEvent::EpochClosed(epoch)),
+        coordinator_event::RosterChanged(version) => Ok(CoordinatorEvent::RosterChanged(version)),
+        coordinator_event::Retire(reason) => Ok(CoordinatorEvent::Retire(text_value(
+            reason.map_err(wire_error)?,
+        )?)),
+        coordinator_event::Spawn(count) => Ok(CoordinatorEvent::Spawn(count)),
+        coordinator_event::Tick(tick) => Ok(CoordinatorEvent::Tick(tick)),
     }
 }
 

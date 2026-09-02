@@ -3,27 +3,36 @@
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
-use std::net::{SocketAddr, TcpListener, TcpStream};
+use std::cell::RefCell;
+use std::net::{SocketAddr, TcpListener};
 use std::path::{Path, PathBuf};
+use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
-use capnp::message::ReaderOptions;
-use capnp::serialize;
+use capnp::capability::Promise;
+use capnp_rpc::pry;
+use capnp_rpc::rpc_twoparty_capnp::Side;
+use capnp_rpc::twoparty::VatNetwork;
+use capnp_rpc::RpcSystem;
+use futures::AsyncReadExt;
 use ndarray::{Array1, ArrayView1};
 use rand::SeedableRng;
+use tokio_util::compat::TokioAsyncReadCompatExt;
 
 use super::{
     AcceptedPayload, AcceptedReply, BoundaryCrossingRecord, CatalogCandidate, CatalogIdentity,
     CatalogMutation, CatalogMutationKind, CatalogOperation, CatalogRelation, CatalogReply,
     CatalogRequest, CatalogRideConnection, CatalogRideOutcome, CatalogRideSaddleEvidence,
-    CatalogRideWork, CatalogSnapshot, DescriptorHoleProposal, PolicyState, PopulationEpochState,
-    PopulationPlan, PopulationSelection, ProtocolError, ProtocolRejection, TransitionDestination,
-    decode_request, decode_request_reader, encode_reply, encode_request,
+    CatalogRideWork, CatalogSnapshot, CoordinatorEvent, CoordinatorStatus, DescriptorHoleProposal,
+    PolicyState,
+    PopulationEpochState, PopulationPlan, PopulationSelection, ProtocolError, ProtocolRejection,
+    RosterReply, TransitionDestination, decode_request, decode_request_reader, fill_coordinator_status,
+    fill_event, fill_reply, fill_roster, read_identity,
 };
-use crate::Catalog_capnp::catalog_request;
+use crate::Catalog_capnp::{coordinator, session, subscriber};
 use crate::catalog::{
     AdmissionOutcome, AdmissionRejection, Archive, AttractorStrength, BasinCatalog, BasinCensus,
     BasinId, CHAMPION_RANK, CandidateRecord, CandidateValidator, CensusObservation, Curiosity,
@@ -685,24 +694,45 @@ impl CatalogServer {
         };
         let stop = Arc::new(AtomicBool::new(false));
         let thread_stop = Arc::clone(&stop);
-        let state = Arc::new(Mutex::new(initial_state));
-        let thread = thread::spawn(move || {
-            while !thread_stop.load(Ordering::Acquire) {
-                match listener.accept() {
-                    Ok((stream, _)) => {
-                        let state = Arc::clone(&state);
-                        let config = config.clone();
-                        thread::spawn(move || {
-                            let _ = handle_connection(stream, &config, state);
-                        });
+        let thread = thread::Builder::new()
+            .name("catalog-rpc".to_owned())
+            .spawn(move || {
+                let runtime = tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .expect("catalog RPC runtime starts");
+                let local = tokio::task::LocalSet::new();
+                local.block_on(&runtime, async move {
+                    let listener = match tokio::net::TcpListener::from_std(listener) {
+                        Ok(listener) => listener,
+                        Err(_) => return,
+                    };
+                    let shared = Rc::new(RefCell::new(CoordinatorShared {
+                        config,
+                        state: initial_state,
+                        live: BTreeSet::new(),
+                        retired: BTreeSet::new(),
+                        roster_version: 0,
+                        spawn_requested: 0,
+                        subscribers: Vec::new(),
+                    }));
+                    while !thread_stop.load(Ordering::Acquire) {
+                        match tokio::time::timeout(Duration::from_millis(50), listener.accept())
+                            .await
+                        {
+                            Ok(Ok((stream, _))) => {
+                                let shared = Rc::clone(&shared);
+                                tokio::task::spawn_local(async move {
+                                    let _ = serve_connection(stream, shared).await;
+                                });
+                            }
+                            Ok(Err(_)) => break,
+                            Err(_) => {}
+                        }
                     }
-                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
-                        thread::sleep(Duration::from_millis(2));
-                    }
-                    Err(_) => break,
-                }
-            }
-        });
+                });
+            })
+            .expect("catalog RPC thread starts");
         Ok(Self {
             addr,
             header,
@@ -731,58 +761,295 @@ impl Drop for CatalogServer {
     }
 }
 
-fn handle_connection(
-    mut stream: TcpStream,
-    config: &ServerConfig,
-    state: Arc<Mutex<CoordinatorState>>,
+struct CoordinatorShared {
+    config: ServerConfig,
+    state: CoordinatorState,
+    live: BTreeSet<u32>,
+    retired: BTreeSet<u32>,
+    roster_version: u64,
+    spawn_requested: u32,
+    subscribers: Vec<AttachedSubscriber>,
+}
+
+struct AttachedSubscriber {
+    replica: u32,
+    client: subscriber::Client,
+}
+
+struct CoordinatorImpl {
+    shared: Rc<RefCell<CoordinatorShared>>,
+}
+
+struct SessionImpl {
+    shared: Rc<RefCell<CoordinatorShared>>,
+    identity: CatalogIdentity,
+}
+
+async fn serve_connection(
+    stream: tokio::net::TcpStream,
+    shared: Rc<RefCell<CoordinatorShared>>,
 ) -> Result<(), String> {
-    // Cap'n Proto framing expects a blocking stream. Listener polling remains
-    // nonblocking, while every accepted connection waits for its next frame.
-    stream
-        .set_nonblocking(false)
-        .map_err(|error| error.to_string())?;
     stream
         .set_nodelay(true)
         .map_err(|error| error.to_string())?;
-    loop {
-        let message = match serialize::read_message(&mut stream, ReaderOptions::new()) {
-            Ok(message) => message,
-            Err(_) => return Ok(()),
+    let (reader, writer) = TokioAsyncReadCompatExt::compat(stream).split();
+    let network = VatNetwork::new(
+        futures::io::BufReader::new(reader),
+        futures::io::BufWriter::new(writer),
+        Side::Server,
+        Default::default(),
+    );
+    let coordinator = CoordinatorImpl { shared };
+    let client: coordinator::Client = capnp_rpc::new_client(coordinator);
+    let rpc = RpcSystem::new(Box::new(network), Some(client.client));
+    rpc.await.map_err(|error| error.to_string())
+}
+
+fn roster_from(shared: &CoordinatorShared) -> RosterReply {
+    RosterReply {
+        version: shared.roster_version,
+        live: shared.live.iter().copied().collect(),
+        retired: shared.retired.iter().copied().collect(),
+        spawn_requested: shared.spawn_requested,
+    }
+}
+
+fn push_event(
+    shared: &Rc<RefCell<CoordinatorShared>>,
+    event: CoordinatorEvent,
+) -> Promise<(), capnp::Error> {
+    let clients: Vec<subscriber::Client> = shared
+        .borrow()
+        .subscribers
+        .iter()
+        .map(|attached| attached.client.clone())
+        .collect();
+    Promise::from_future(async move {
+        for client in clients {
+            let mut request = client.event_request();
+            fill_event(request.get().init_event(), &event);
+            let _ = request.send().promise.await;
+        }
+        Ok(())
+    })
+}
+
+impl coordinator::Server for CoordinatorImpl {
+    fn attach(
+        &mut self,
+        params: coordinator::AttachParams,
+        mut results: coordinator::AttachResults,
+    ) -> Promise<(), capnp::Error> {
+        let params = pry!(params.get());
+        let identity = pry!(read_identity(pry!(params.get_identity())).map_err(|error| {
+            capnp::Error::failed(error.to_string())
+        }));
+        let subscriber = pry!(params.get_subscriber());
+        let roster = {
+            let mut shared = self.shared.borrow_mut();
+            shared.retired.remove(&identity.replica);
+            shared.live.insert(identity.replica);
+            shared.roster_version = shared.roster_version.saturating_add(1);
+            shared
+                .subscribers
+                .retain(|attached| attached.replica != identity.replica);
+            shared.subscribers.push(AttachedSubscriber {
+                replica: identity.replica,
+                client: subscriber,
+            });
+            roster_from(&shared)
         };
-        let root = match message.get_root::<catalog_request::Reader>() {
-            Ok(root) => root,
-            Err(_) => return Ok(()),
+        {
+            let mut reply = results.get();
+            reply.set_session(capnp_rpc::new_client(SessionImpl {
+                shared: Rc::clone(&self.shared),
+                identity,
+            }));
+            fill_roster(reply.init_roster(), &roster);
+        }
+        push_event(
+            &self.shared,
+            CoordinatorEvent::RosterChanged(roster.version),
+        )
+    }
+
+    fn observe(
+        &mut self,
+        _params: coordinator::ObserveParams,
+        mut results: coordinator::ObserveResults,
+    ) -> Promise<(), capnp::Error> {
+        let shared = self.shared.borrow();
+        let status = coordinator_status(&shared.config, &shared.state);
+        fill_coordinator_status(results.get().init_status(), &status);
+        Promise::ok(())
+    }
+
+    fn scale(
+        &mut self,
+        params: coordinator::ScaleParams,
+        mut results: coordinator::ScaleResults,
+    ) -> Promise<(), capnp::Error> {
+        let live_target = pry!(params.get()).get_live_target();
+        let (roster, spawn) = {
+            let mut shared = self.shared.borrow_mut();
+            let live = u32::try_from(shared.live.len()).unwrap_or(u32::MAX);
+            shared.spawn_requested = live_target.saturating_sub(live);
+            shared.roster_version = shared.roster_version.saturating_add(1);
+            (roster_from(&shared), shared.spawn_requested)
         };
-        let request = match decode_request_reader(root) {
+        fill_roster(results.get().init_roster(), &roster);
+        if spawn == 0 {
+            return Promise::ok(());
+        }
+        let shared = Rc::clone(&self.shared);
+        Promise::from_future(async move {
+            push_event(&shared, CoordinatorEvent::Spawn(spawn)).await
+        })
+    }
+}
+
+impl session::Server for SessionImpl {
+    fn call(
+        &mut self,
+        params: session::CallParams,
+        mut results: session::CallResults,
+    ) -> Promise<(), capnp::Error> {
+        let request = match decode_request_reader(pry!(pry!(params.get()).get_request())) {
             Ok(request) => request,
             Err(error) => {
-                let event_sequence = root.get_event_sequence();
-                let state = match state.lock() {
-                    Ok(state) => state,
-                    Err(poisoned) => poisoned.into_inner(),
-                };
-                write_reply(
-                    &mut stream,
-                    rejected(&state, event_sequence, rejection_for_protocol_error(&error)),
-                )?;
-                continue;
+                let event_sequence = pry!(params.get())
+                    .get_request()
+                    .map(|root| root.get_event_sequence())
+                    .unwrap_or(0);
+                let reply = rejected(
+                    &self.shared.borrow().state,
+                    event_sequence,
+                    rejection_for_protocol_error(&error),
+                );
+                pry!(fill_reply(results.get().init_reply(), reply)
+                    .map_err(|error| capnp::Error::failed(error.to_string())));
+                return Promise::ok(());
             }
         };
-        // The expensive part of validation -- re-deriving the engine's own
-        // energy and descriptor for the posted coordinates -- has no
-        // dependency on anything CoordinatorState holds mutably: it is a
-        // pure function of the candidate and the run's fixed validator and
-        // evaluate closure. Cloning those two out under a lock this thread
-        // holds only for the clone, then calling the closure with no lock
-        // held at all, is what turns 48 chains serialized behind one core
-        // back into 48 chains actually running concurrently. The commit
-        // that follows still locks and still sees the live, current state;
-        // only the CPU-bound recompute moves off the lock.
-        let precomputed = candidate_needing_validation(&request.operation)
-            .map(|candidate| precompute_validation(&state, &request.identity, candidate));
-        let reply = process_request(config, &state, request, precomputed)?;
-        write_reply(&mut stream, reply)?;
+        if request.identity != self.identity {
+            let reply = rejected(
+                &self.shared.borrow().state,
+                request.event_sequence,
+                ProtocolRejection::ReplicaMismatch,
+            );
+            pry!(fill_reply(results.get().init_reply(), reply)
+                .map_err(|error| capnp::Error::failed(error.to_string())));
+            return Promise::ok(());
+        }
+        let shared = Rc::clone(&self.shared);
+        Promise::from_future(async move {
+            let precomputed = match candidate_needing_validation(&request.operation) {
+                Some(candidate) => {
+                    Some(precompute_validation_async(&shared, &request.identity, candidate).await)
+                }
+                None => None,
+            };
+            let (reply, events) = {
+                let mut shared = shared.borrow_mut();
+                let epoch_before = open_population_epoch(&shared.state);
+                let reply = process_request(
+                    &shared.config,
+                    &mut shared.state,
+                    request.clone(),
+                    precomputed,
+                )
+                .map_err(capnp::Error::failed)?;
+                let mut events = Vec::new();
+                if matches!(
+                    request.operation,
+                    CatalogOperation::PopulationAbstain { .. }
+                ) && matches!(reply, CatalogReply::Accepted(_))
+                {
+                    events.push(CoordinatorEvent::Retire("abstain".into()));
+                }
+                let epoch_after = open_population_epoch(&shared.state);
+                if let (Some(before), Some(after)) = (epoch_before, epoch_after)
+                    && after > before
+                {
+                    events.push(CoordinatorEvent::EpochClosed(before));
+                }
+                (reply, events)
+            };
+            fill_reply(results.get().init_reply(), reply)
+                .map_err(|error| capnp::Error::failed(error.to_string()))?;
+            for event in events {
+                push_event(&shared, event).await?;
+            }
+            Ok(())
+        })
     }
+
+    fn detach(
+        &mut self,
+        params: session::DetachParams,
+        _results: session::DetachResults,
+    ) -> Promise<(), capnp::Error> {
+        let reason = pry!(pry!(params.get()).get_reason())
+            .to_string()
+            .unwrap_or_default();
+        let version = {
+            let mut shared = self.shared.borrow_mut();
+            shared.live.remove(&self.identity.replica);
+            shared.retired.insert(self.identity.replica);
+            shared.roster_version = shared.roster_version.saturating_add(1);
+            if let Some(scientific) = shared.state.scientific.as_mut() {
+                let _ = scientific.population.retire(self.identity.replica);
+            }
+            shared
+                .subscribers
+                .retain(|attached| attached.replica != self.identity.replica);
+            shared.roster_version
+        };
+        let shared = Rc::clone(&self.shared);
+        Promise::from_future(async move {
+            push_event(&shared, CoordinatorEvent::RosterChanged(version)).await?;
+            push_event(&shared, CoordinatorEvent::Retire(reason)).await
+        })
+    }
+}
+
+fn open_population_epoch(state: &CoordinatorState) -> Option<u64> {
+    state
+        .scientific
+        .as_ref()
+        .map(|scientific| scientific.population.open_epoch())
+}
+
+async fn precompute_validation_async(
+    shared: &Rc<RefCell<CoordinatorShared>>,
+    identity: &CatalogIdentity,
+    candidate: &CatalogCandidate,
+) -> Result<ValidatedCandidate, ()> {
+    let bits = {
+        let shared = shared.borrow();
+        let scientific = shared.state.scientific.as_ref().ok_or(())?;
+        (
+            scientific.signature.clone(),
+            scientific.descriptor_space.clone(),
+            scientific.validator.clone(),
+            Arc::clone(&scientific.evaluate),
+        )
+    };
+    let identity = identity.clone();
+    let candidate = candidate.clone();
+    let (tx, rx) = futures::channel::oneshot::channel();
+    rayon::spawn(move || {
+        let result = validate_candidate(
+            &bits.0,
+            &bits.1,
+            &bits.2,
+            bits.3.as_ref(),
+            &identity,
+            &candidate,
+        );
+        let _ = tx.send(result);
+    });
+    rx.await.unwrap_or(Err(()))
 }
 
 /// The candidate one request's operation will send through
@@ -802,51 +1069,12 @@ fn candidate_needing_validation(operation: &CatalogOperation) -> Option<&Catalog
     }
 }
 
-/// Clone what validation needs under a brief lock, then run the
-/// expensive evaluation and the admission math with the lock released.
-/// `CandidateValidator`, the system signature, and the evaluate closure
-/// are all fixed for the run's lifetime, so nothing here can observe a
-/// state change another replica makes while this thread holds no lock,
-/// and the caller's later commit step still reads and writes the
-/// current shared state, not a stale copy of it.
-fn precompute_validation(
-    state: &Arc<Mutex<CoordinatorState>>,
-    identity: &CatalogIdentity,
-    candidate: &CatalogCandidate,
-) -> Result<ValidatedCandidate, ()> {
-    let (signature, descriptor_space, validator, evaluate) = {
-        let locked = match state.lock() {
-            Ok(state) => state,
-            Err(poisoned) => poisoned.into_inner(),
-        };
-        let scientific = locked.scientific.as_ref().ok_or(())?;
-        (
-            scientific.signature.clone(),
-            scientific.descriptor_space.clone(),
-            scientific.validator.clone(),
-            Arc::clone(&scientific.evaluate),
-        )
-    };
-    validate_candidate(
-        &signature,
-        &descriptor_space,
-        &validator,
-        evaluate.as_ref(),
-        identity,
-        candidate,
-    )
-}
-
 fn process_request(
     config: &ServerConfig,
-    state: &Arc<Mutex<CoordinatorState>>,
+    state: &mut CoordinatorState,
     request: CatalogRequest,
     mut precomputed: Option<Result<ValidatedCandidate, ()>>,
 ) -> Result<CatalogReply, String> {
-    let mut state = match state.lock() {
-        Ok(state) => state,
-        Err(poisoned) => poisoned.into_inner(),
-    };
     if state.journal_broken {
         return Err("catalog request journal is behind the coordinator state".to_owned());
     }
@@ -4666,11 +4894,7 @@ fn descriptor_distance(left: &[f64], right: &[f64]) -> f64 {
 }
 
 /// Aggregate read-only status for an observer.
-fn observer_status_reply(
-    config: &ServerConfig,
-    state: &CoordinatorState,
-    event_sequence: u64,
-) -> CatalogReply {
+fn coordinator_status(config: &ServerConfig, state: &CoordinatorState) -> CoordinatorStatus {
     let mut replicas = Vec::new();
     for replica in &config.replicas {
         let charged_work = state
@@ -4730,7 +4954,7 @@ fn observer_status_reply(
             left_basin: split.representatives.0,
             right_basin: split.representatives.1,
         });
-    let status = crate::catalog_rpc::CoordinatorStatus {
+    CoordinatorStatus {
         snapshot_version: state.snapshot_version,
         open_epoch,
         epoch_submitted,
@@ -4752,7 +4976,15 @@ fn observer_status_reply(
         unique_degenerate_rearrangements,
         certified_connections,
         seam,
-    };
+    }
+}
+
+fn observer_status_reply(
+    config: &ServerConfig,
+    state: &CoordinatorState,
+    event_sequence: u64,
+) -> CatalogReply {
+    let status = coordinator_status(config, state);
     let snapshot = CatalogSnapshot {
         version: state.snapshot_version,
         census_visits: state.census_visits,
@@ -4835,10 +5067,4 @@ fn rejected(
     }
 }
 
-fn write_reply(stream: &mut TcpStream, reply: CatalogReply) -> Result<(), String> {
-    let bytes = encode_reply(reply).map_err(|error| error.to_string())?;
-    stream
-        .write_all(&bytes)
-        .map_err(|error| error.to_string())?;
-    stream.flush().map_err(|error| error.to_string())
-}
+
