@@ -2269,7 +2269,7 @@ fn population_submission_uses_exact_handedness_when_descriptors_alias() {
 }
 
 #[test]
-fn population_barrier_covers_distinct_regions_before_duplicate_families() {
+fn population_barrier_reports_minimum_information_genealogy() {
     let server = server();
     let digest = signature().digest();
     let mut clients = (0..4)
@@ -2305,8 +2305,18 @@ fn population_barrier_covers_distinct_regions_before_duplicate_families() {
         .map(|candidate| candidate.census_basin.unwrap())
         .collect::<std::collections::BTreeSet<_>>();
 
-    assert_eq!(represented.len(), 3);
-    assert!(plan.max_family_size <= 2);
+    assert_eq!(represented.len(), 2);
+    assert!(plan.max_family_size <= 3);
+    assert_eq!(plan.selection, PopulationSelection::MinimumInformation);
+    for (source, weight) in plan.destinations.iter().zip(&plan.weights) {
+        let expected = plan
+            .parents
+            .iter()
+            .filter(|parent| *parent == source)
+            .count() as f64
+            / plan.parents.len() as f64;
+        assert!((weight - expected).abs() < 1e-12);
+    }
 }
 
 #[test]
