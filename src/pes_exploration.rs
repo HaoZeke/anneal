@@ -1195,7 +1195,9 @@ pub struct NdConnectionAttempt {
 pub struct NdPesNetwork {
     minima: Vec<NdMinimumRecord>,
     saddles: Vec<NdSaddleConnection>,
+    saddle_visits: Vec<u64>,
     unresolved_saddles: Vec<NdSaddleConnection>,
+    unresolved_saddle_visits: Vec<u64>,
 }
 
 impl NdPesNetwork {
@@ -1212,6 +1214,24 @@ impl NdPesNetwork {
     /// Number of exact-witness saddle identities.
     pub fn saddle_count(&self) -> usize {
         self.saddles.len()
+    }
+
+    /// Exact connected and unresolved saddle observations, including repeats.
+    pub fn saddle_observations(&self) -> u64 {
+        self.saddle_visits
+            .iter()
+            .chain(&self.unresolved_saddle_visits)
+            .copied()
+            .sum()
+    }
+
+    /// Exact saddle identities occurring once in the combined saddle sample.
+    pub fn saddle_singletons(&self) -> u64 {
+        self.saddle_visits
+            .iter()
+            .chain(&self.unresolved_saddle_visits)
+            .filter(|visits| **visits == 1)
+            .count() as u64
     }
 
     /// Stored minima in stable admission order.
@@ -1308,7 +1328,8 @@ impl NdPesNetwork {
         mut candidate: NdSaddleConnection,
         witness: &W,
     ) -> NdSaddleConnection {
-        for existing in &self.saddles {
+        for index in 0..self.saddles.len() {
+            let existing = &self.saddles[index];
             let same_endpoints = existing.endpoints == candidate.endpoints
                 || existing.endpoints == [candidate.endpoints[1], candidate.endpoints[0]];
             if same_endpoints
@@ -1317,17 +1338,34 @@ impl NdPesNetwork {
                     candidate.saddle_coordinates.view(),
                 )
             {
+                self.saddle_visits[index] = self.saddle_visits[index].saturating_add(1);
                 return existing.clone();
             }
         }
         candidate.id = self.saddles.len();
         self.saddles.push(candidate.clone());
+        self.saddle_visits.push(1);
         candidate
     }
 
-    fn retain_unresolved_saddle(&mut self, mut candidate: NdSaddleConnection) {
+    fn retain_unresolved_saddle<W: ExactStructureWitness + ?Sized>(
+        &mut self,
+        mut candidate: NdSaddleConnection,
+        witness: &W,
+    ) {
+        for index in 0..self.unresolved_saddles.len() {
+            if witness.equivalent(
+                self.unresolved_saddles[index].saddle_coordinates.view(),
+                candidate.saddle_coordinates.view(),
+            ) {
+                self.unresolved_saddle_visits[index] =
+                    self.unresolved_saddle_visits[index].saturating_add(1);
+                return;
+            }
+        }
         candidate.id = self.unresolved_saddles.len();
         self.unresolved_saddles.push(candidate);
+        self.unresolved_saddle_visits.push(1);
     }
 }
 
@@ -2894,7 +2932,7 @@ where
         ride_method: config.ride_method,
     };
     if positive_id == negative_id && !endpoint_relation.is_nontrivial_permutation() {
-        network.retain_unresolved_saddle(candidate);
+        network.retain_unresolved_saddle(candidate, witness);
         return Err(PesExplorationError::CollapsedConnection);
     }
 
