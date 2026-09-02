@@ -259,6 +259,7 @@ mod option_tests {
         let action = ride_checkpoint_action(
             RideReportOutcome::Credited(RideCredit {
                 certified_connection: true,
+                degenerate_rearrangement: false,
                 failure: None,
                 novel_saddle: false,
                 novel_edge: false,
@@ -287,6 +288,7 @@ mod option_tests {
         let action = ride_checkpoint_action(
             RideReportOutcome::Credited(RideCredit {
                 certified_connection: false,
+                degenerate_rearrangement: false,
                 failure: Some(anneal_core::ride_ledger::RideFailure::Surface),
                 novel_saddle: false,
                 novel_edge: false,

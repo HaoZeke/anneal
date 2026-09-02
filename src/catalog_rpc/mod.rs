@@ -1547,6 +1547,7 @@ pub(crate) fn decode_reply_reader(
                     };
                     AcceptedPayload::RideCredit(RideCredit {
                         certified_connection: credit.get_certified_connection(),
+                        degenerate_rearrangement: false,
                         failure,
                         novel_saddle: credit.get_novel_saddle(),
                         novel_edge: credit.get_novel_edge(),
