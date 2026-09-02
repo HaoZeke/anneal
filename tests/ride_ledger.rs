@@ -197,6 +197,38 @@ fn duplicate_certified_connections_do_not_masquerade_as_new_pes_edges() {
 }
 
 #[test]
+fn certified_same_basin_saddle_is_counted_as_a_degenerate_rearrangement() {
+    let portfolio = RidePortfolio::new(1, vec![RideMethod::Dimer]).unwrap();
+    let mut ledger = RideLedger::new(portfolio);
+    ledger
+        .register_source(source(17, -104.2, &[(4, 6)]))
+        .unwrap();
+    let work = ledger.claim(2, 101).unwrap();
+
+    let credit = ledger
+        .report(
+            2,
+            work.id,
+            140,
+            RideOutcome::Certified {
+                saddle: 70,
+                endpoints: [17, 17],
+            },
+        )
+        .unwrap();
+
+    assert!(credit.certified_connection);
+    assert!(credit.degenerate_rearrangement);
+    assert!(credit.novel_saddle);
+    assert!(!credit.novel_edge);
+    assert_eq!(credit.failure, None);
+    assert_eq!(ledger.unique_saddles(), 1);
+    assert_eq!(ledger.unique_edges(), 0);
+    assert_eq!(ledger.unique_degenerate_rearrangements(), 1);
+    assert_eq!(ledger.certified_connections(), 1);
+}
+
+#[test]
 fn a_certified_edge_is_useful_even_when_it_misses_the_nominal_source() {
     let portfolio = RidePortfolio::new(1, vec![RideMethod::Dimer]).unwrap();
     let mut ledger = RideLedger::new(portfolio);
