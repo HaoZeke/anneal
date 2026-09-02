@@ -79,6 +79,7 @@ pub mod compatibility;
 pub mod construct;
 /// The cooling-schedule trait: `epoch -> temperature`.
 pub mod contextual;
+pub mod corekey;
 pub mod cool;
 pub mod cooperative_search;
 pub mod curvature;

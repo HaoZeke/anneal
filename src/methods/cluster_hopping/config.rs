@@ -15,6 +15,11 @@ pub enum Keying {
     /// Sorted pairwise distances.
     #[default]
     Distances,
+    /// Prospective superbasin: the Weisfeiler--Lehman key of the coloured
+    /// primitive-ring graph of the structure's core
+    /// ([`crate::corekey::core_key`]). Shelf isomers that differ by surface
+    /// relocations share one key; distinct packings do not.
+    Core,
     /// Coordinates, matched by a shape metric.
     Shape,
     /// Sorted per-point pair energies.
