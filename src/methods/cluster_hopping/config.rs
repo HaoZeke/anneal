@@ -639,6 +639,16 @@ pub struct Config {
     /// surface first, then on the plain potential from that minimum, judging
     /// the plain energy. `None` relaxes on the plain potential only.
     pub two_phase: Option<crate::methods::two_phase::TwoPhase>,
+    /// Reoccupation move: every `reoccupy_interval` charged calls the chain
+    /// rebuilds its surface on the lattice grown from its interior with
+    /// [`crate::methods::lattice_search::reoccupy`], relaxes the result and
+    /// adopts it when it is lower than the current minimum. `None` disables
+    /// the move; the lattice settings name the pair form the site energies
+    /// are read from.
+    #[serde(skip)]
+    pub reoccupy: Option<crate::methods::lattice_search::LatticeSearchConfig>,
+    /// Charged calls between reoccupation moves.
+    pub reoccupy_interval: usize,
     /// Learned portfolio of relaxation surfaces: the plain surface plus every
     /// transform listed, one drawn per hop by depth-rewarded Thompson
     /// sampling. Empty leaves the choice to `two_phase`.
@@ -881,6 +891,8 @@ impl Config {
             quench_confidence: 2.0,
             relax_steps: 200,
             two_phase: None,
+            reoccupy: None,
+            reoccupy_interval: 5_000,
             surfaces: Vec::new(),
             // Calibrated against published minima: the largest atomic distance
             // from the centre of mass divides by N^(1/3) to between 0.46 and

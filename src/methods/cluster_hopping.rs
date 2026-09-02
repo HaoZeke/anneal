@@ -1218,33 +1218,60 @@ where
     let mut checkpoint_quench_start = 0usize;
     let mut checkpoint_transition_start = 0usize;
     let mut next_checkpoint = checkpoint_interval;
+    let mut next_reoccupy = cfg.reoccupy_interval;
 
     loop {
-        if let (Some(interval), Some(threshold)) = (checkpoint_interval, next_checkpoint)
-            && hops > checkpoint_hops
-            && ledger.spent() >= threshold
+        // The reoccupation move runs inside the chain and charges the
+        // ledger directly; its result enters the same adoption path as an
+        // external proposal.
+        let mut internal_action: Option<CheckpointAction> = None;
+        if let Some(lattice) = cfg.reoccupy.as_ref()
+            && hops > 0
+            && ledger.spent() >= next_reoccupy
         {
-            let snapshot = ChainCheckpoint {
-                current_state: x.view(),
-                current_energy: e,
-                current_gradient: current_validation_gradient.as_ref().map(|g| g.view()),
-                best_state: ledger.best_state.as_ref().map(|state| state.view()),
-                best_energy: ledger.best,
-                quench_boundaries: &ledger.quench_boundaries[checkpoint_quench_start..],
-                accepted_transitions: &accepted_transitions[checkpoint_transition_start..],
-                charged: ledger.spent(),
-                remaining: ledger.remaining(),
-                hops,
+            next_reoccupy = ledger.spent().saturating_add(cfg.reoccupy_interval.max(1));
+            let rebuilt = crate::methods::lattice_search::reoccupy(lattice, ledger, x.view());
+            let (energy, relaxed) = relax(ledger, rebuilt.view(), cfg.relax_steps);
+            if energy.is_finite() && energy < e - 1e-9 && relaxed.len() == x.len() {
+                internal_action = Some(CheckpointAction::ExternalAdopt {
+                    state: relaxed,
+                    action: "reoccupy".to_owned(),
+                    external_calls: 0,
+                });
+            }
+        }
+        let checkpoint_due = matches!(
+            (checkpoint_interval, next_checkpoint),
+            (Some(_), Some(threshold)) if hops > checkpoint_hops && ledger.spent() >= threshold
+        );
+        if checkpoint_due || internal_action.is_some() {
+            let checkpoint_action = if let Some(action) = internal_action.take() {
+                action
+            } else {
+                let interval = checkpoint_interval.expect("a due checkpoint has an interval");
+                let snapshot = ChainCheckpoint {
+                    current_state: x.view(),
+                    current_energy: e,
+                    current_gradient: current_validation_gradient.as_ref().map(|g| g.view()),
+                    best_state: ledger.best_state.as_ref().map(|state| state.view()),
+                    best_energy: ledger.best,
+                    quench_boundaries: &ledger.quench_boundaries[checkpoint_quench_start..],
+                    accepted_transitions: &accepted_transitions[checkpoint_transition_start..],
+                    charged: ledger.spent(),
+                    remaining: ledger.remaining(),
+                    hops,
+                };
+                let checkpoint_action = checkpoint(snapshot);
+                checkpoint_hops = hops;
+                checkpoint_quench_start = ledger.quench_boundaries.len();
+                checkpoint_transition_start = accepted_transitions.len();
+                next_checkpoint = ledger
+                    .spent()
+                    .checked_div(interval)
+                    .and_then(|completed| completed.checked_add(1))
+                    .and_then(|next| next.checked_mul(interval));
+                checkpoint_action
             };
-            let checkpoint_action = checkpoint(snapshot);
-            checkpoint_hops = hops;
-            checkpoint_quench_start = ledger.quench_boundaries.len();
-            checkpoint_transition_start = accepted_transitions.len();
-            next_checkpoint = ledger
-                .spent()
-                .checked_div(interval)
-                .and_then(|completed| completed.checked_add(1))
-                .and_then(|next| next.checked_mul(interval));
             if let CheckpointAction::Retire { .. } = checkpoint_action {
                 break;
             }
