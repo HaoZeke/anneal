@@ -44,8 +44,8 @@ use crate::discovery_roster::{
     DiscoveryCoverage, assign_discovery_roles, coverage_allocation_weight,
 };
 use crate::methods::feynman_kac::{
-    EpochSubmissionOutcome, PackingOccupant, PopulationEpochPlan, PopulationMember,
-    SelectionCoefficients, SynchronousPopulation, assign_parents_by_packing,
+    EpochSubmissionOutcome, PopulationEpochPlan, PopulationMember, SelectionCoefficients,
+    SynchronousPopulation,
 };
 use crate::methods::landscape_graph::LandscapeGraph;
 use crate::methods::neus_bridge::{BridgeString, EntryLists, WeightLedger};
@@ -53,7 +53,6 @@ use crate::pes_exploration::{
     ExactStructureRelation, ExactStructureWitness, PesExplorationConfig, PesSurface, RideMethod,
     StationaryIndex, StructureContext, StructureView, stationary_index_cartesian,
 };
-use crate::region_assignment::{RegionCandidate, RegionUtility, diversity_constrained_assignment};
 use crate::ride_ledger::{
     EnvironmentBook, RideLedger, RideOutcome, RidePortfolio, RideSource,
     SADDLE_COVERAGE_MINIMUM_OBSERVATIONS,
@@ -3073,178 +3072,49 @@ fn commission_bridge(scientific: &mut ScientificState, census_radius: f64) {
     );
 }
 
-/// Keep every weakly coupled community of the landscape represented in
-/// the parent map.
-///
-/// Resampling concentrates offspring on the deepest submissions, and on
-/// a landscape whose explored graph splits into two communities that
-/// rarely exchange, that concentration abandons whichever community is
-/// currently shallower, after which nothing ever samples it again. When
-/// the referee sees such a split and the chosen parents all sit on one
-/// side while a submission exists on the other, the plan gives one slot
-/// of the most crowded family to the deepest candidate of the abandoned
-/// side. A well-mixed landscape passes through untouched.
-fn referee_community_coverage(
-    scientific: &ScientificState,
-    mut parents: Vec<u32>,
-    source_candidates: &BTreeMap<u32, CatalogCandidate>,
-) -> Vec<u32> {
-    let Ok(split) = scientific.landscape.spectral_split() else {
-        return parents;
-    };
-    if split.conductance >= 0.1 {
-        return parents;
-    }
-    let side = |replica: &u32| -> Option<bool> {
-        let basin = source_candidates.get(replica)?.census_basin?;
-        if split.left.contains(&basin) {
-            Some(true)
-        } else if split.right.contains(&basin) {
-            Some(false)
-        } else {
-            None
-        }
-    };
-    let mut has_left = false;
-    let mut has_right = false;
-    for parent in &parents {
-        match side(parent) {
-            Some(true) => has_left = true,
-            Some(false) => has_right = true,
-            None => {}
-        }
-    }
-    if has_left == has_right {
-        return parents;
-    }
-    let Some(replacement) = source_candidates
-        .keys()
-        .filter(|replica| side(replica) == Some(!has_left))
-        .min_by(|a, b| {
-            source_candidates[a]
-                .energy
-                .total_cmp(&source_candidates[b].energy)
-        })
-        .copied()
-    else {
-        return parents;
-    };
-    let mut counts = BTreeMap::<u32, usize>::new();
-    for parent in &parents {
-        *counts.entry(*parent).or_default() += 1;
-    }
-    let Some((&crowded, &family)) = counts.iter().max_by_key(|(_, count)| **count) else {
-        return parents;
-    };
-    if family < 2 {
-        return parents;
-    }
-    if let Some(slot) = parents.iter().rposition(|parent| *parent == crowded) {
-        parents[slot] = replacement;
-    }
-    parents
-}
+const MINIMUM_INFORMATION_SAMPLES: usize = 128;
 
-fn region_population_assignment(
-    scientific: &ScientificState,
+fn minimum_information_population_assignment(
+    coverage: &mut UniversalCoverage,
     destinations: &[u32],
     source_candidates: &BTreeMap<u32, CatalogCandidate>,
     max_family_size: usize,
-) -> Option<(Vec<u32>, Vec<f64>)> {
-    let regions = scientific
-        .transition_graph
-        .attraction_regions(&scientific.attraction_regions)
-        .ok()?;
-    let mut node_region = vec![usize::MAX; scientific.transition_graph.node_count()];
-    for (region, nodes) in regions.iter().enumerate() {
-        for node in nodes {
-            node_region[*node] = region;
-        }
-    }
-    let mut fallback_regions = BTreeMap::new();
-    let mut next_region = regions.len();
-    let source_regions = destinations
+) -> Option<Vec<u32>> {
+    let candidates = destinations
         .iter()
         .map(|replica| {
             let candidate = source_candidates.get(replica)?;
-            let basin = BasinId::from_raw(candidate.census_basin?);
-            if let Some(node) = scientific.transition_nodes.get(&basin)
-                && node_region.get(*node).copied().unwrap_or(usize::MAX) != usize::MAX
-            {
-                return Some(node_region[*node]);
-            }
-            Some(*fallback_regions.entry(basin).or_insert_with(|| {
-                let region = next_region;
-                next_region += 1;
-                region
-            }))
+            let source = usize::try_from(*replica).ok()?;
+            Some((source, candidate.descriptor.clone()))
         })
         .collect::<Option<Vec<_>>>()?;
-    let mut occupancy = BTreeMap::<usize, usize>::new();
-    for region in &source_regions {
-        *occupancy.entry(*region).or_default() += 1;
-    }
-    let probe = scientific
-        .transition_graph
-        .posterior_matrix(
-            &scientific.attraction_regions.probe_action,
-            scientific.attraction_regions.concentration,
+    let selected = coverage
+        .assign_minimum_information_values(
+            &candidates,
+            destinations.len(),
+            max_family_size,
+            MINIMUM_INFORMATION_SAMPLES,
         )
         .ok()?;
-    let candidates = destinations
-        .iter()
-        .enumerate()
-        .map(|(index, replica)| {
-            let region = source_regions[index];
-            let basin = BasinId::from_raw(source_candidates.get(replica)?.census_basin?);
-            let node = scientific.transition_nodes.get(&basin).copied();
-            let transition_uncertainty = node
-                .and_then(|node| {
-                    scientific.transition_graph.uncertainty(
-                        &scientific.attraction_regions.probe_action,
-                        node,
-                        scientific.attraction_regions.concentration,
-                    )
-                })
-                .unwrap_or(1.0);
-            let outgoing_frontier = node.map_or(0.0, |source| {
-                (0..scientific.transition_graph.node_count())
-                    .filter(|destination| {
-                        node_region.get(*destination).copied().unwrap_or(usize::MAX) != region
-                    })
-                    .map(|destination| probe[[source, destination]])
-                    .sum::<f64>()
-            });
-            RegionCandidate::new(
-                *replica,
-                region,
-                RegionUtility {
-                    transition_uncertainty,
-                    inverse_occupancy: 1.0 / occupancy[&region] as f64,
-                    outgoing_frontier,
-                    geometry_compatibility: 1.0,
-                    access_cost: 0.0,
-                },
-            )
-            .ok()
-        })
-        .collect::<Option<Vec<_>>>()?;
-    let parents =
-        diversity_constrained_assignment(&candidates, destinations.len(), max_family_size).ok()?;
-    let scores = candidates
-        .iter()
-        .map(|candidate| candidate.score())
-        .collect::<Vec<_>>();
-    let maximum = scores.iter().copied().fold(f64::NEG_INFINITY, f64::max);
-    let mut weights = scores
-        .iter()
-        .map(|score| (score - maximum).clamp(-4.0, 0.0).exp())
-        .collect::<Vec<_>>();
-    let total = weights.iter().sum::<f64>();
-    for weight in &mut weights {
-        *weight /= total;
+    if selected.len() != destinations.len() {
+        return None;
     }
-    Some((parents, weights))
+    selected
+        .into_iter()
+        .map(|source| u32::try_from(source).ok())
+        .collect()
+}
+
+fn realized_parent_weights(destinations: &[u32], parents: &[u32]) -> Vec<f64> {
+    if parents.is_empty() {
+        return Vec::new();
+    }
+    destinations
+        .iter()
+        .map(|source| {
+            parents.iter().filter(|parent| *parent == source).count() as f64 / parents.len() as f64
+        })
+        .collect()
 }
 
 fn sample_boundary_crossing(
@@ -3380,48 +3250,17 @@ fn realize_population_plan(
     let source_candidates = scientific
         .population_candidates
         .get(&epoch)
-        .expect("complete epoch retains every source candidate");
+        .expect("complete epoch retains every source candidate")
+        .clone();
     let family_cap = usize::try_from(REDUCTION_FACTOR).unwrap_or(3);
-    let (fallback_parents, weights, selection) = match region_population_assignment(
-        scientific,
+    let parents = minimum_information_population_assignment(
+        &mut scientific.coverage,
         plan.destinations(),
-        source_candidates,
+        &source_candidates,
         family_cap,
-    ) {
-        Some((parents, weights)) => (parents, weights, PopulationSelection::RegionCovering),
-        None => (
-            plan.parents().to_vec(),
-            plan.weights().to_vec(),
-            PopulationSelection::SystematicResampling,
-        ),
-    };
-    let fallback_parents =
-        referee_community_coverage(scientific, fallback_parents, source_candidates);
-    let occupants = plan
-        .destinations()
-        .iter()
-        .map(|replica| {
-            let candidate = source_candidates.get(replica);
-            PackingOccupant {
-                replica: *replica,
-                family: replica_family_index(scientific, *replica, candidate),
-                energy: candidate
-                    .map(|candidate| candidate.energy)
-                    .or_else(|| {
-                        scientific
-                            .last_candidate_by_replica
-                            .get(replica)
-                            .map(|candidate| candidate.energy)
-                    })
-                    .unwrap_or(f64::INFINITY),
-            }
-        })
-        .collect::<Vec<_>>();
-    let parents = if occupants.iter().any(|occupant| occupant.family.is_some()) {
-        assign_parents_by_packing(&occupants, family_cap)
-    } else {
-        fallback_parents
-    };
+    )
+    .unwrap_or_else(|| plan.destinations().to_vec());
+    let weights = realized_parent_weights(plan.destinations(), &parents);
     let parent_candidates = parents
         .iter()
         .map(|parent| {
@@ -3444,7 +3283,7 @@ fn realize_population_plan(
             .expect("family size is bounded by replica count"),
         offspring_variance: diagnostics.3,
         parent_candidates,
-        selection,
+        selection: PopulationSelection::MinimumInformation,
     };
     scientific.population_plans.insert(epoch, wire_plan.clone());
     AcceptedPayload::PopulationEpoch(PopulationEpochState {
