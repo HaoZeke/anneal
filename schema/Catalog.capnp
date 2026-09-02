@@ -93,6 +93,11 @@ enum CatalogRelation {
   unrelatedLowerAnchor @4;
 }
 
+enum DiscoveryRole {
+  basinEscape @0;
+  saddleRide @1;
+}
+
 struct PolicyStateReply {
   totalVisits @0 :UInt64;
   singletonBasins @1 :UInt64;
@@ -124,6 +129,11 @@ struct PolicyStateReply {
   eiExhausted @22 :Bool;
   # Fiedler split after DECAF labels the sides: 2 only on a packing seam.
   minFamilies @23 :UInt32;
+  discoveryRole @24 :DiscoveryRole;
+  discoveryEpoch @25 :UInt64;
+  basinUnseenMassUpper @26 :Float64;
+  saddleUnseenMassUpper @27 :Float64;
+  saddleCoverageSaturated @28 :Bool;
 }
 
 enum CatalogMutationKind {

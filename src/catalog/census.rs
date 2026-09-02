@@ -266,6 +266,17 @@ impl BasinCensus {
         .unwrap_or(u64::MAX)
     }
 
+    /// Number of basins observed exactly twice.
+    pub fn doubleton_count(&self) -> u64 {
+        u64::try_from(
+            self.entries
+                .iter()
+                .filter(|entry| entry.visits == 2)
+                .count(),
+        )
+        .unwrap_or(u64::MAX)
+    }
+
     /// Good--Turing unseen-mass estimate `N1 / n`, if any visit exists.
     pub fn unseen_mass(&self) -> Option<f64> {
         (self.total_visits != 0).then(|| self.singleton_count() as f64 / self.total_visits as f64)
