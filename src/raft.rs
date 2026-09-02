@@ -542,6 +542,52 @@ mod tests {
     }
 
     #[test]
+    fn node_membership_is_a_set_that_excludes_the_local_identity() {
+        let node = RaftNode::new(7, vec![9, 7, 8, 9], 20, 7);
+
+        assert_eq!(node.peers, vec![8, 9]);
+        assert_eq!(node.quorum(), 2);
+    }
+
+    #[test]
+    fn unknown_senders_cannot_change_term_leadership_or_log() {
+        let mut candidate = RaftNode::new(0, vec![1, 2], 10, 1);
+        candidate.tick(10);
+        assert_eq!(candidate.role(), Role::Candidate);
+
+        let outbound = candidate.receive(
+            99,
+            RaftMessage::VoteReply {
+                term: candidate.term(),
+                granted: true,
+            },
+            11,
+        );
+        assert!(outbound.is_empty());
+        assert_eq!(candidate.role(), Role::Candidate);
+
+        let mut follower = RaftNode::new(0, vec![1, 2], 10, 1);
+        let outbound = follower.receive(
+            99,
+            RaftMessage::AppendEntries {
+                term: 8,
+                prev_log_index: 0,
+                prev_log_term: 0,
+                entries: vec![Decree {
+                    term: 8,
+                    payload: b"foreign".to_vec(),
+                }],
+                leader_commit: 1,
+            },
+            1,
+        );
+        assert!(outbound.is_empty());
+        assert_eq!(follower.term(), 0);
+        assert_eq!(follower.leader_hint(), None);
+        assert!(follower.log.is_empty());
+    }
+
+    #[test]
     fn a_quiet_cluster_elects_exactly_one_leader() {
         let mut cluster = Cluster::new(3);
         cluster.run(60);
