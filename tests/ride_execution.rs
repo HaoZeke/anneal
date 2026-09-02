@@ -119,6 +119,7 @@ fn exploration_config() -> PesExplorationConfig {
         branch_attempts: 4,
         branch_growth: 2.0,
         irc_force_tolerance: 0.05,
+        certify_degenerate_rearrangements: false,
         refine_with_prfo: false,
     }
 }

@@ -189,6 +189,7 @@ fn ride_config(
         maximum_move: 0.2 * length_scale,
         irc_step: 0.1 * length_scale,
         irc_force_tolerance: 0.05,
+        certify_degenerate_rearrangements: true,
         refine_with_prfo: true,
         ..PesExplorationConfig::default()
     })
