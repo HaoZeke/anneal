@@ -19,7 +19,8 @@ fn set(seed: u64) -> MinimaSet {
 #[test]
 fn minima_round_trip_exactly_and_fold_across_seeds() {
     let dir = tempfile::tempdir().unwrap();
-    let corpus = MinimaCorpus::open(dir.path().join("minima")).unwrap();
+    let digest = [0x13; 32];
+    let corpus = MinimaCorpus::open(dir.path().join("minima"), digest).unwrap();
     let a = Array1::from(vec![0.0, 0.0, 0.0, 1.122462048309373, 0.0, 0.0]);
     let b = Array1::from(vec![0.0, 0.0, 0.0, 0.0, 1.122462048309373, 0.1]);
     let c = Array1::from(vec![0.0, 0.0, 0.0, 2.0, 0.0, 0.0]);
@@ -76,14 +77,14 @@ fn minima_round_trip_exactly_and_fold_across_seeds() {
         "another system is another set"
     );
 
-    let reopened = MinimaCorpus::open(dir.path().join("minima")).unwrap();
+    let reopened = MinimaCorpus::open(dir.path().join("minima"), digest).unwrap();
     assert_eq!(reopened.minima("lj13", 0.8).unwrap().len(), 5);
 }
 
 #[test]
 fn a_nonfinite_energy_is_refused() {
     let dir = tempfile::tempdir().unwrap();
-    let corpus = MinimaCorpus::open(dir.path().join("minima")).unwrap();
+    let corpus = MinimaCorpus::open(dir.path().join("minima"), [0x13; 32]).unwrap();
     let a = Array1::from(vec![0.0, 0.0, 0.0]);
     assert!(
         corpus
@@ -97,4 +98,29 @@ fn a_nonfinite_energy_is_refused() {
             )
             .is_err()
     );
+}
+
+#[test]
+fn system_signatures_open_disjoint_corpora_under_one_root() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().join("minima");
+    let first = MinimaCorpus::open(&root, [0x13; 32]).unwrap();
+    let second = MinimaCorpus::open(&root, [0x26; 32]).unwrap();
+    let coordinates = Array1::from(vec![0.0, 0.0, 0.0, 1.0, 0.0, 0.0]);
+
+    first
+        .record(
+            &set(1),
+            &[],
+            &units(),
+            &[(-1.0, coordinates.view())],
+            1e-6,
+            serde_json::json!({}),
+        )
+        .unwrap();
+
+    assert_ne!(first.path(), second.path());
+    assert_eq!(first.signature_digest(), [0x13; 32]);
+    assert_eq!(second.signature_digest(), [0x26; 32]);
+    assert!(second.minima("lj13", 0.8).unwrap().is_empty());
 }
