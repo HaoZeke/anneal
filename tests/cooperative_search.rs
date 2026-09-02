@@ -433,7 +433,7 @@ fn ride_server() -> CatalogServer {
 }
 
 #[test]
-fn coordinator_segments_live_replicas_by_shared_pes_coverage() {
+fn coordinator_segments_live_replicas_by_shared_minimum_information() {
     let server = ride_server();
     let digest = signature().digest();
     let query = ride_candidate(0, 1, 1.2);
@@ -487,7 +487,7 @@ fn coordinator_segments_live_replicas_by_shared_pes_coverage() {
 }
 
 #[test]
-fn coordinator_does_not_replace_exact_species_occupancy_with_charge_ratios() {
+fn coordinator_divides_minimum_information_by_observed_pes_cost() {
     let server = ride_server();
     let digest = signature().digest();
     let query = ride_candidate(0, 1, 1.2);
@@ -533,14 +533,14 @@ fn coordinator_does_not_replace_exact_species_occupancy_with_charge_ratios() {
             .iter()
             .filter(|state| state.discovery_role == DiscoveryRole::BasinEscape)
             .count(),
-        2
+        4
     );
     assert_eq!(
         states
             .iter()
             .filter(|state| state.discovery_role == DiscoveryRole::SaddleRide)
             .count(),
-        2
+        0
     );
 }
 
@@ -2072,7 +2072,7 @@ fn cooperative_trace_records_policy_diagnostic_evidence() {
     assert!(evidence.novelty.is_finite() && evidence.novelty > 0.0);
     assert!(evidence.transition_uncertainty.is_finite() && evidence.transition_uncertainty > 0.0);
     assert_eq!(evidence.discovery_role, DiscoveryRole::SaddleRide);
-    assert_eq!(evidence.discovery_epoch, 2);
+    assert_eq!(evidence.discovery_epoch, 0);
     assert_eq!(evidence.basin_unseen_mass_upper, 1.0);
     assert_eq!(evidence.saddle_unseen_mass_upper, 1.0);
     assert_eq!(evidence.basin_discovery_attempts, 0);
@@ -2092,7 +2092,7 @@ fn cooperative_trace_records_policy_diagnostic_evidence() {
     assert!(trace.contains("\"policy_total_visits\":2"));
     assert!(trace.contains("\"policy_transition_uncertainty\":"));
     assert!(trace.contains("\"policy_discovery_role\":\"saddle_ride\""));
-    assert!(trace.contains("\"policy_discovery_epoch\":2"));
+    assert!(trace.contains("\"policy_discovery_epoch\":0"));
     assert!(trace.contains("\"policy_basin_unseen_mass_upper\":1"));
     assert!(trace.contains("\"policy_saddle_unseen_mass_upper\":1"));
     assert!(trace.contains("\"policy_basin_discovery_attempts\":0"));
