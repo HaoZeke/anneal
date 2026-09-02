@@ -1601,6 +1601,16 @@ fn main() {
         cfg.bias_height = v;
         println!("  bias height {v}");
     }
+    // Revisits a basin takes before the adaptive deposits clear its escape
+    // gap: the AS-KMC filling count, so the absorbing shelf is raised as one
+    // block after that many returns while rarely visited doorway states
+    // keep their depth.
+    if let Ok(h) = std::env::var("HEIGHT_REVISITS")
+        && let Ok(v) = h.parse::<f64>()
+    {
+        cfg.height_revisits = v;
+        println!("  height revisits {v}");
+    }
     if !opts.is_empty() {
         println!("  mechanisms: {}", opts.join(", "));
     }
