@@ -12,7 +12,7 @@ use crate::descriptor_space::{DescriptorError, DescriptorVector};
 use crate::funnel_bo::FunnelModel;
 use crate::residual_field::ResidualField;
 
-/// Relative contributions to the dimensionless exploration acquisition.
+/// Gaussian-process scales for the universal exploration acquisition.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct CoverageConfig {
     /// Full-descriptor GP length scale.
@@ -23,16 +23,6 @@ pub struct CoverageConfig {
     pub amplitude: f64,
     /// GP observation noise in energy units.
     pub noise: f64,
-    /// Weight of continuous nearest-block novelty.
-    pub novelty_weight: f64,
-    /// Weight of posterior standard deviation.
-    pub uncertainty_weight: f64,
-    /// Weight of disagreement between descriptor views.
-    pub disagreement_weight: f64,
-    /// Weight of graph-GMRF residual uncertainty.
-    pub residual_weight: f64,
-    /// Weight of expected improvement.
-    pub improvement_weight: f64,
 }
 
 impl Default for CoverageConfig {
@@ -42,11 +32,6 @@ impl Default for CoverageConfig {
             component_length_scale: 0.5,
             amplitude: 10.0,
             noise: 1e-4,
-            novelty_weight: 1.0,
-            uncertainty_weight: 1.0,
-            disagreement_weight: 1.0,
-            residual_weight: 1.0,
-            improvement_weight: 1.0,
         }
     }
 }
@@ -62,26 +47,6 @@ impl CoverageConfig {
             if !value.is_finite() || value <= 0.0 {
                 return Err(CoverageError::InvalidConfig(name));
             }
-        }
-        let weights = [
-            self.novelty_weight,
-            self.uncertainty_weight,
-            self.disagreement_weight,
-            self.residual_weight,
-            self.improvement_weight,
-        ];
-        if weights
-            .iter()
-            .any(|value| !value.is_finite() || *value < 0.0)
-        {
-            return Err(CoverageError::InvalidConfig(
-                "acquisition weights must be finite and nonnegative",
-            ));
-        }
-        if weights.iter().sum::<f64>() <= 0.0 {
-            return Err(CoverageError::InvalidConfig(
-                "at least one acquisition weight must be positive",
-            ));
         }
         Ok(self)
     }
@@ -208,13 +173,17 @@ pub struct CoverageEvidence {
     pub deep_kernel_mean: Option<f64>,
     /// Optional residual-neural deep-kernel GP posterior standard deviation.
     pub deep_kernel_standard_deviation: Option<f64>,
+    /// Uniform model-average posterior mean across invariant descriptor views.
+    pub ensemble_mean: f64,
+    /// Moment-matched posterior standard deviation, including disagreement.
+    pub ensemble_standard_deviation: f64,
     /// Standard deviation of the posterior means, scaled by the GP amplitude.
     pub model_disagreement: f64,
     /// Effort-adjusted graph-GMRF variance, or the unassigned residual variance.
     pub residual_variance: f64,
-    /// Full-descriptor expected improvement for minimization.
+    /// Moment-matched model-average expected improvement for minimization.
     pub expected_improvement: f64,
-    /// Dimensionless weighted ranking score; no admission threshold is implied.
+    /// Expected improvement divided by the declared system energy scale.
     pub acquisition: f64,
 }
 
@@ -411,7 +380,6 @@ impl UniversalCoverage {
         }
         let values = ArrayView1::from(descriptor);
         let (energy_mean, energy_standard_deviation) = self.energy.predict(values);
-        let expected_improvement = self.energy.expected_improvement(values);
         let mut block_means = Vec::with_capacity(self.blocks.len());
         let mut block_standard_deviations = Vec::with_capacity(self.blocks.len());
         for (model, layout) in self.block_models.iter_mut().zip(&self.blocks) {
@@ -437,28 +405,34 @@ impl UniversalCoverage {
         means.extend(block_means.iter().copied());
         means.extend(deep_kernel_mean);
         let model_disagreement = standard_deviation(&means) / self.config.amplitude;
-        let mut uncertainties = Vec::with_capacity(
+        let mut standard_deviations = Vec::with_capacity(
             1 + block_standard_deviations.len()
                 + usize::from(deep_kernel_standard_deviation.is_some()),
         );
-        uncertainties.push(energy_standard_deviation / self.config.amplitude);
-        uncertainties.extend(
-            block_standard_deviations
-                .iter()
-                .map(|value| value / self.config.amplitude),
-        );
-        uncertainties
-            .extend(deep_kernel_standard_deviation.map(|value| value / self.config.amplitude));
-        let posterior_uncertainty = root_mean_square(&uncertainties);
+        standard_deviations.push(energy_standard_deviation);
+        standard_deviations.extend(block_standard_deviations.iter().copied());
+        standard_deviations.extend(deep_kernel_standard_deviation);
+        let ensemble_mean = means.iter().sum::<f64>() / means.len() as f64;
+        let ensemble_variance = means
+            .iter()
+            .zip(&standard_deviations)
+            .map(|(mean, standard_deviation)| {
+                standard_deviation * standard_deviation
+                    + (mean - ensemble_mean) * (mean - ensemble_mean)
+            })
+            .sum::<f64>()
+            / means.len() as f64;
+        let ensemble_standard_deviation = ensemble_variance.max(0.0).sqrt();
         let residual_variance = assigned_class
             .map(|class| self.residual.score(class))
             .unwrap_or_else(|| self.residual.residual_score());
-        let acquisition = self.config.novelty_weight * block_novelty
-            + self.config.uncertainty_weight * posterior_uncertainty
-            + self.config.disagreement_weight * model_disagreement
-            + self.config.residual_weight * residual_variance
-            + self.config.improvement_weight
-                * squash_nonnegative(expected_improvement, self.config.amplitude);
+        let expected_improvement = gaussian_expected_improvement(
+            self.energy.incumbent(),
+            ensemble_mean,
+            ensemble_standard_deviation,
+            self.config.amplitude,
+        );
+        let acquisition = expected_improvement / self.config.amplitude;
         Ok(CoverageEvidence {
             nearest_block_distances,
             block_novelty,
@@ -468,6 +442,8 @@ impl UniversalCoverage {
             block_standard_deviations,
             deep_kernel_mean,
             deep_kernel_standard_deviation,
+            ensemble_mean,
+            ensemble_standard_deviation,
             model_disagreement,
             residual_variance,
             expected_improvement,
@@ -595,16 +571,6 @@ fn root_mean_square(values: &[f64]) -> f64 {
     (values.iter().map(|value| value * value).sum::<f64>() / values.len() as f64).sqrt()
 }
 
-fn squash_nonnegative(value: f64, scale: f64) -> f64 {
-    if value.is_infinite() && value.is_sign_positive() {
-        1.0
-    } else if !value.is_finite() || value <= 0.0 {
-        0.0
-    } else {
-        value / (scale + value)
-    }
-}
-
 fn euclidean(left: &[f64], right: &[f64]) -> f64 {
     left.iter()
         .zip(right)
@@ -614,6 +580,42 @@ fn euclidean(left: &[f64], right: &[f64]) -> f64 {
         })
         .sum::<f64>()
         .sqrt()
+}
+
+fn gaussian_expected_improvement(
+    incumbent: Option<f64>,
+    mean: f64,
+    standard_deviation: f64,
+    prior_scale: f64,
+) -> f64 {
+    let Some(incumbent) = incumbent else {
+        return prior_scale;
+    };
+    if standard_deviation <= 1e-12 {
+        return (incumbent - mean).max(0.0);
+    }
+    let z = (incumbent - mean) / standard_deviation;
+    ((incumbent - mean) * normal_cdf(z) + standard_deviation * normal_pdf(z)).max(0.0)
+}
+
+fn normal_pdf(value: f64) -> f64 {
+    (-0.5 * value * value).exp() / std::f64::consts::TAU.sqrt()
+}
+
+fn normal_cdf(value: f64) -> f64 {
+    0.5 * (1.0 + erf(value / std::f64::consts::SQRT_2))
+}
+
+fn erf(value: f64) -> f64 {
+    let sign = if value < 0.0 { -1.0 } else { 1.0 };
+    let value = value.abs();
+    let t = 1.0 / (1.0 + 0.327_591_1 * value);
+    let approximation = 1.0
+        - (((((1.061_405_429 * t - 1.453_152_027) * t) + 1.421_413_741) * t - 0.284_496_736) * t
+            + 0.254_829_592)
+            * t
+            * (-value * value).exp();
+    sign * approximation
 }
 
 fn signed_unit(state: &mut u64) -> f64 {
