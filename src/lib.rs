@@ -205,6 +205,8 @@ pub mod spectral;
 pub mod structure;
 /// How a leftover chain uses the shared packing catalog.
 pub mod swarm;
+/// Permutation invariants from a three-body tensor, for basin identity.
+pub mod tensor_id;
 pub mod symmetrise;
 pub mod terminate;
 /// Action-conditioned structural transition evidence.
