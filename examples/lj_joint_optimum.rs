@@ -923,6 +923,14 @@ mod tests {
     }
 
     #[test]
+    fn symmetry_selector_names_the_existing_stall_projection_arm() {
+        let arms = selected_arms("bh-sym", &[]).unwrap();
+
+        assert!(matches!(arms.as_slice(), [Arm::BasinHoppingSymmetry]));
+        assert_eq!(arms[0].label(), "basin-hopping-stall-symmetry");
+    }
+
+    #[test]
     fn exhausted_initial_quench_cannot_report_zero_as_a_minimum() {
         let potential = PairPotential::lennard_jones(2);
         let initial = Array1::from(vec![0.0, 0.0, 0.0, 1.2, 0.0, 0.0]);
