@@ -22,6 +22,7 @@ use anneal_core::descriptor_space::{
 use anneal_core::pes_exploration::ExactStructureWitness;
 use anneal_core::scaling::SuccessiveHalving;
 use anneal_core::transition_graph::AttractionRegionConfig;
+use ndarray::ArrayView1;
 use std::collections::BTreeMap;
 
 fn identity(ensemble: &str, replica: u32) -> CatalogIdentity {
