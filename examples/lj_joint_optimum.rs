@@ -8,7 +8,7 @@
 //! coordinates, seeds, target, and charged-call ceiling.
 //!
 //! Usage:
-//! `lj_joint_optimum <N> <budget> <seeds> [all|adaptive|ridge|basin|bh|mh] [gs2|morokuma|both] [seed0]`
+//! `lj_joint_optimum <N> <budget> <seeds> [all|adaptive|ridge|basin|bh|mh|feedback] [gs2|morokuma|both] [seed0]`
 
 use std::error::Error;
 use std::path::{Path, PathBuf};
@@ -323,6 +323,8 @@ fn run_minima_hopping(
     let mut minima = vec![state.clone()];
     let mut current_basin = 0usize;
     let mut feedback = EscapeFeedback::new(hopping.energy_scale, 0.5 * hopping.energy_scale);
+    feedback.escape_floor = f64::MIN_POSITIVE;
+    feedback.escape_ceiling = f64::MAX;
     feedback.register_initial(current_basin);
     let mut rng = StdRng::seed_from_u64(seed);
     let mut hops = 0usize;
@@ -563,6 +565,15 @@ fn main() -> Result<(), Box<dyn Error>> {
             "target_tolerance": TARGET_TOLERANCE,
             "start_protocol": if optbench_root.is_some() { "optbench-fixed" } else { "random-cluster" },
             "start_archive_sha256": optbench_root.as_ref().and_then(|_| optbench_archive_digest(n)),
+            "minima_hopping": {
+                "integrator": "rgsaddle-samd-nve",
+                "dt": 0.005,
+                "path_minima": 2,
+                "initial_kinetic": hopping.energy_scale,
+                "initial_ediff": 0.5 * hopping.energy_scale,
+                "beta": 1.05,
+                "enhanced_visit_coefficient": 0.1,
+            },
             "arms": arms.iter().copied().map(Arm::label).collect::<Vec<_>>(),
         })
     );
