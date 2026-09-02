@@ -166,17 +166,34 @@ fn duplicate_certified_connections_do_not_masquerade_as_new_pes_edges() {
             },
         )
         .unwrap();
+    let third = ledger.claim(9, 103).unwrap();
+    let repeated_saddle_credit = ledger
+        .report(
+            9,
+            third.id,
+            125,
+            RideOutcome::Certified {
+                saddle: 71,
+                endpoints: [17, 29],
+            },
+        )
+        .unwrap();
 
     assert!(first_credit.certified_connection);
     assert!(duplicate_credit.certified_connection);
     assert_eq!(first_credit.failure, None);
     assert_eq!(duplicate_credit.failure, None);
+    assert!(first_credit.novel_saddle);
+    assert!(duplicate_credit.novel_saddle);
+    assert!(!repeated_saddle_credit.novel_saddle);
     assert!(first_credit.novel_edge);
     assert!(!duplicate_credit.novel_edge);
+    assert!(!repeated_saddle_credit.novel_edge);
     assert_eq!(first_credit.total_charged_evaluations, 140);
     assert_eq!(duplicate_credit.total_charged_evaluations, 131);
+    assert_eq!(ledger.unique_saddles(), 2);
     assert_eq!(ledger.unique_edges(), 1);
-    assert_eq!(ledger.certified_connections(), 2);
+    assert_eq!(ledger.certified_connections(), 3);
 }
 
 #[test]
@@ -246,7 +263,9 @@ fn an_unresolved_saddle_counts_as_method_reliability_not_edge_novelty() {
 
     assert!(!credit.certified_connection);
     assert_eq!(credit.failure, Some(RideFailure::CollapsedConnection));
+    assert!(credit.novel_saddle);
     assert!(!credit.novel_edge);
+    assert_eq!(ledger.unique_saddles(), 1);
     assert_eq!(guided.arm.method, RideMethod::Lanczos);
 }
 
