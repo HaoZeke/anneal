@@ -67,10 +67,12 @@ pub enum ContinuousSymmetry {
     /// No continuous-symmetry proposal.
     #[default]
     Off,
-    /// Project onto the inversion group `C_i` every `interval` hopping
-    /// steps, quench the group average, and adopt it only when it is lower.
+    /// Project onto the inversion group `C_i` at quench indices divisible by
+    /// `interval`, quench the group average, and adopt it only when it is
+    /// lower. The supplied minimum is quench one and each projection quench
+    /// advances the same counter as an ordinary hopping quench.
     Inversion {
-        /// Ordinary hopping steps between continuous-symmetry attempts.
+        /// Divisor of the basin-hopping quench count.
         interval: usize,
     },
 }

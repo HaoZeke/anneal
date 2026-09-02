@@ -1124,6 +1124,7 @@ where
     let mut symmetrised = 0usize;
     let mut symmetry_gain = 0.0_f64;
     let mut continuous_symmetry_attempts = 0usize;
+    let mut continuous_symmetry_quenches = 0usize;
     let mut continuous_symmetry_gain = 0.0_f64;
     let mut quiet = 0usize;
     let mut longest_quiet = 0usize;
@@ -1672,7 +1673,12 @@ where
         }
         let continuous_symmetry_due = match cfg.continuous_symmetry {
             ContinuousSymmetry::Off => false,
-            ContinuousSymmetry::Inversion { interval } => hops % interval == 0,
+            ContinuousSymmetry::Inversion { interval } => {
+                let quench_index = 1usize
+                    .saturating_add(hops)
+                    .saturating_add(continuous_symmetry_quenches);
+                quench_index % interval == 0
+            }
         };
         if continuous_symmetry_due {
             continuous_symmetry_attempts += 1;
@@ -1682,6 +1688,7 @@ where
             if let Some(projection) =
                 crate::continuous_symmetry::project_inversion(x.view(), classes)
             {
+                continuous_symmetry_quenches += 1;
                 let from_energy = e;
                 let from_state = x.clone();
                 let from_gradient = current_validation_gradient.clone();
