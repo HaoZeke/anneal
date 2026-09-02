@@ -37,12 +37,7 @@ fn information_rate_is_information_divided_by_charged_pes_cost() {
 fn observing_one_operator_moves_minimum_information_to_the_unobserved_operator() {
     let mut search = MinimumInformationSearch::new(1.0, 4.0, 1e-3).unwrap();
     search
-        .observe(
-            SearchMechanism::BasinEscape,
-            &[0.25, -0.5],
-            -10.0,
-            -11.0,
-        )
+        .observe(SearchMechanism::BasinEscape, &[0.25, -0.5], -10.0, -11.0)
         .unwrap();
 
     let scores = search
@@ -64,12 +59,7 @@ fn observing_one_operator_moves_minimum_information_to_the_unobserved_operator()
 fn failed_operator_attempt_is_a_finite_no_improvement_observation() {
     let mut search = MinimumInformationSearch::new(1.0, 4.0, 1e-3).unwrap();
     search
-        .observe(
-            SearchMechanism::SaddleRide,
-            &[0.25, -0.5],
-            -10.0,
-            -10.0,
-        )
+        .observe(SearchMechanism::SaddleRide, &[0.25, -0.5], -10.0, -10.0)
         .unwrap();
 
     assert_eq!(search.observations(SearchMechanism::SaddleRide), 1);

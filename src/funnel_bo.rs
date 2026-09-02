@@ -381,10 +381,25 @@ impl FunnelModel {
     /// observation noise; `minima` contains posterior samples of the minimum
     /// function value over the candidate set.
     pub fn gibbon_information(&mut self, x: ArrayView1<f64>, minima: &[f64]) -> f64 {
+        self.gibbon_information_with_offset(x, 0.0, minima)
+    }
+
+    /// GIBBON information when the GP models a change added to a known offset.
+    ///
+    /// Search operators are modelled through their terminal energy change. A
+    /// candidate starting at energy `offset` therefore has terminal prediction
+    /// `offset + f(x)`, while its posterior variance is unchanged.
+    pub(crate) fn gibbon_information_with_offset(
+        &mut self,
+        x: ArrayView1<f64>,
+        offset: f64,
+        minima: &[f64],
+    ) -> f64 {
         if minima.is_empty() {
             return 0.0;
         }
-        let (mean, sd) = self.predict(x);
+        let (delta_mean, sd) = self.predict(x);
+        let mean = offset + delta_mean;
         if !mean.is_finite() || !sd.is_finite() || sd < 1e-12 {
             return 0.0;
         }
@@ -567,30 +582,46 @@ impl FunnelModel {
     }
 
     fn sample_joint_minima(&mut self, extras: &[ArrayView1<f64>], n_samples: usize) -> Vec<f64> {
+        let shifted = extras.iter().map(|point| (*point, 0.0)).collect::<Vec<_>>();
+        self.sample_shifted_joint_minima(&shifted, n_samples, self.incumbent(), 0)
+    }
+
+    /// Correlated posterior samples of the smallest offset GP value.
+    ///
+    /// Each site represents `offset + f(x)`. `incumbent` is an exact terminal
+    /// energy already observed across every operator in the enclosing search.
+    pub(crate) fn sample_shifted_joint_minima(
+        &mut self,
+        extras: &[(ArrayView1<'_, f64>, f64)],
+        n_samples: usize,
+        incumbent: Option<f64>,
+        draw_salt: u64,
+    ) -> Vec<f64> {
         if extras.is_empty() || n_samples == 0 {
             return Vec::new();
         }
-        let mut sites = Vec::<Array1<f64>>::new();
-        for extra in extras {
-            if sites.iter().all(|site| {
-                site.len() != extra.len()
+        let mut sites = Vec::<(Array1<f64>, f64)>::new();
+        for (extra, offset) in extras {
+            if sites.iter().all(|(site, held_offset)| {
+                held_offset.to_bits() != offset.to_bits()
+                    || site.len() != extra.len()
                     || site
                         .iter()
                         .zip(extra.iter())
                         .any(|(left, right)| (left - right).abs() > 1e-12)
             }) {
-                sites.push(extra.to_owned());
+                sites.push((extra.to_owned(), *offset));
             }
         }
         let means = sites
             .iter()
-            .map(|site| self.predict(site.view()).0)
+            .map(|(site, offset)| offset + self.predict(site.view()).0)
             .collect::<Vec<_>>();
         let mut covariance = Array2::<f64>::zeros((sites.len(), sites.len()));
         for row in 0..sites.len() {
             for column in 0..=row {
                 let value =
-                    self.posterior_latent_covariance(sites[row].view(), sites[column].view());
+                    self.posterior_latent_covariance(sites[row].0.view(), sites[column].0.view());
                 covariance[[row, column]] = value;
                 covariance[[column, row]] = value;
             }
@@ -604,11 +635,11 @@ impl FunnelModel {
         };
         let mut state = 0xD1B5_4A32_D192_ED03u64
             ^ self.version.wrapping_mul(0x9E37_79B9_7F4A_7C15)
-            ^ (sites.len() as u64).wrapping_mul(0x94D0_49BB_1331_11EB);
+            ^ (sites.len() as u64).wrapping_mul(0x94D0_49BB_1331_11EB)
+            ^ draw_salt;
         if state == 0 {
             state = 1;
         }
-        let incumbent = self.incumbent();
         let mut out = Vec::with_capacity(n_samples);
         for _ in 0..n_samples {
             let normal = (0..sites.len())
