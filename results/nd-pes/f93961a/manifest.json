@@ -1,0 +1,81 @@
+{
+  "schema": "anneal-nd-pes-evidence-v1",
+  "scope": "matched-policy stationary-network benchmark; no external SOTA comparison",
+  "source_commit": "f93961aa3aa3f8efb1d65d72ea9c868bb2d84687",
+  "source_tracked_clean": true,
+  "binary_sha256": "697648b402078fb339f0f3f13dc43513fe0ccac85363729a70418c30b334088c",
+  "build_command": "cargo build --offline --locked --release --example nd_pes_benchmark",
+  "runs": [
+    {
+      "dimension": 4,
+      "budget": 50000,
+      "seeds": 32,
+      "file": "d4.jsonl",
+      "records": 99,
+      "sha256": "5cb05ab729bc2f8ca34fa0b5afd62d3e7323aa066f121e7876b115a89fdb7f36"
+    },
+    {
+      "dimension": 6,
+      "budget": 100000,
+      "seeds": 32,
+      "file": "d6.jsonl",
+      "records": 99,
+      "sha256": "9a20cece3f66ae3d2a799fd2448b3ecb7379d3c3fcb01044b1218c8b71991053"
+    },
+    {
+      "dimension": 8,
+      "budget": 250000,
+      "seeds": 32,
+      "file": "d8.jsonl",
+      "records": 99,
+      "sha256": "295e2695a5ca2ba2c3a8a29f4319ef4e127dd634a9002d2146fa7375084dcd25"
+    }
+  ],
+  "replay": {
+    "complete_runs": 2,
+    "identical_files": ["d4.jsonl", "d6.jsonl", "d8.jsonl"]
+  },
+  "paired_adaptive_minus_ridge_only": {
+    "ci_method": "paired Student t interval, df=31, t_0.975=2.0395",
+    "dimension_6": {
+      "exact_minima": {
+        "mean": 0.03125,
+        "ci95": [-0.032484375, 0.094984375],
+        "wins_ties_losses": [1, 31, 0],
+        "two_sided_sign_p": 1.0
+      },
+      "certified_edges": {
+        "mean": 0.125,
+        "ci95": [-1.0786269392323211, 1.3286269392323211],
+        "wins_ties_losses": [14, 2, 16],
+        "two_sided_sign_p": 0.855535551905632
+      },
+      "stationary_objects": {
+        "mean": 0.15625,
+        "ci95": [-1.0486282524096469, 1.3611282524096469],
+        "wins_ties_losses": [15, 1, 16],
+        "two_sided_sign_p": 1.0
+      }
+    },
+    "dimension_8": {
+      "exact_minima": {
+        "mean": 7.625,
+        "ci95": [5.9026115851270635, 9.347388414872936],
+        "wins_ties_losses": [30, 1, 1],
+        "two_sided_sign_p": 2.9802322387695312e-8
+      },
+      "certified_edges": {
+        "mean": 3.4375,
+        "ci95": [-2.295303290099227, 9.170303290099227],
+        "wins_ties_losses": [20, 1, 11],
+        "two_sided_sign_p": 0.14961278438568115
+      },
+      "stationary_objects": {
+        "mean": 11.0625,
+        "ci95": [4.398203714357277, 17.726796285642724],
+        "wins_ties_losses": [25, 1, 6],
+        "two_sided_sign_p": 0.0008779102936387062
+      }
+    }
+  }
+}
