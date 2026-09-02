@@ -2353,7 +2353,7 @@ fn population_barrier_reports_minimum_information_genealogy() {
         .map(|candidate| candidate.census_basin.unwrap())
         .collect::<std::collections::BTreeSet<_>>();
 
-    assert_eq!(represented.len(), 2);
+    assert_eq!(represented.len(), 3);
     assert!(plan.max_family_size <= 3);
     assert_eq!(plan.selection, PopulationSelection::MinimumInformation);
     for (source, weight) in plan.destinations.iter().zip(&plan.weights) {
