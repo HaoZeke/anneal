@@ -17,8 +17,8 @@ use anneal_core::catalog_rpc::client::{CatalogClient, CatalogClientError, Client
 use anneal_core::catalog_rpc::server::{CatalogServer, ServerConfig};
 use anneal_core::catalog_rpc::{
     CatalogCandidate, CatalogIdentity, CatalogMutationKind, CatalogRideConnection,
-    CatalogRideOutcome, CatalogRideReport, ProtocolRejection, SPARSE_SAMPLE_DRAW,
-    TransitionDestination,
+    CatalogRideOutcome, CatalogRideReport, PopulationSelection, ProtocolRejection,
+    SPARSE_SAMPLE_DRAW, TransitionDestination,
 };
 use anneal_core::cooperative_search::ledger::ChargeKind;
 use anneal_core::cooperative_search::{
@@ -2197,6 +2197,7 @@ fn coordinator_closes_population_epoch_only_after_all_replicas_submit() {
             assert_eq!(plan.parent_candidates.len(), 4);
             assert_eq!(plan.unique_parents, 4);
             assert_eq!(plan.max_family_size, 1);
+            assert_eq!(plan.selection, PopulationSelection::MinimumInformation);
         }
     }
 
