@@ -1,17 +1,23 @@
 #![cfg(feature = "bank-rpc")]
 
-use std::net::{TcpListener, TcpStream};
+use std::cell::RefCell;
+use std::net::TcpListener;
+use std::rc::Rc;
 use std::thread;
 use std::time::Duration;
 
-use anneal_core::Catalog_capnp::{catalog_reply, catalog_request};
+use anneal_core::Catalog_capnp::{coordinator, session};
 use anneal_core::catalog_rpc::client::{
     CatalogAccess, CatalogClient, CatalogClientEvent, ClientConfig, SyncSchedule,
 };
 use anneal_core::catalog_rpc::server::{CatalogServer, ServerConfig};
 use anneal_core::catalog_rpc::{CatalogCandidate, CatalogIdentity, PROTOCOL_VERSION};
-use capnp::message::{Builder, ReaderOptions};
-use capnp::serialize;
+use capnp::capability::Promise;
+use capnp_rpc::rpc_twoparty_capnp::Side;
+use capnp_rpc::twoparty::VatNetwork;
+use capnp_rpc::RpcSystem;
+use futures::AsyncReadExt;
+use tokio_util::compat::TokioAsyncReadCompatExt;
 
 fn identity() -> CatalogIdentity {
     CatalogIdentity {
@@ -47,28 +53,81 @@ fn short_timeouts() -> ClientConfig {
     }
 }
 
-fn read_request_sequence(stream: &mut TcpStream) -> u64 {
-    let message = serialize::read_message(stream, ReaderOptions::new()).unwrap();
-    message
-        .get_root::<catalog_request::Reader>()
-        .unwrap()
-        .get_event_sequence()
+struct CannedCoordinator {
+    sequences: Rc<RefCell<Vec<u64>>>,
 }
 
-fn write_empty_snapshot(stream: &mut TcpStream, event_sequence: u64, duplicate: bool) {
-    let mut message = Builder::new_default();
-    let mut root = message.init_root::<catalog_reply::Builder>();
-    root.set_protocol_version(PROTOCOL_VERSION);
-    root.set_event_sequence(event_sequence);
-    root.set_snapshot_version(7);
-    let mut accepted = root.init_result().init_accepted();
-    accepted.set_duplicate(duplicate);
-    accepted.set_census_visits(3);
-    accepted.set_active_entries(2);
-    accepted.set_aggregate_charged(11);
-    accepted.set_aggregate_budget(100);
-    accepted.init_payload().set_none(());
-    serialize::write_message(stream, &message).unwrap();
+struct CannedSession {
+    sequences: Rc<RefCell<Vec<u64>>>,
+}
+
+impl coordinator::Server for CannedCoordinator {
+    fn attach(
+        &mut self,
+        _params: coordinator::AttachParams,
+        mut results: coordinator::AttachResults,
+    ) -> Promise<(), capnp::Error> {
+        let mut reply = results.get();
+        reply.set_session(capnp_rpc::new_client(CannedSession {
+            sequences: Rc::clone(&self.sequences),
+        }));
+        let mut roster = reply.init_roster();
+        roster.set_version(1);
+        roster.set_spawn_requested(0);
+        Promise::ok(())
+    }
+}
+
+impl session::Server for CannedSession {
+    fn call(
+        &mut self,
+        params: session::CallParams,
+        mut results: session::CallResults,
+    ) -> Promise<(), capnp::Error> {
+        let sequence = match params.get().and_then(|params| params.get_request()) {
+            Ok(request) => request.get_event_sequence(),
+            Err(_) => 0,
+        };
+        self.sequences.borrow_mut().push(sequence);
+        let mut reply = results.get().init_reply();
+        reply.set_protocol_version(PROTOCOL_VERSION);
+        reply.set_event_sequence(sequence);
+        reply.set_snapshot_version(7);
+        let mut accepted = reply.init_result().init_accepted();
+        accepted.set_duplicate(true);
+        accepted.set_census_visits(3);
+        accepted.set_active_entries(2);
+        accepted.set_aggregate_charged(11);
+        accepted.set_aggregate_budget(100);
+        accepted.init_payload().set_none(());
+        Promise::ok(())
+    }
+}
+
+fn serve_canned_snapshot(
+    stream: std::net::TcpStream,
+    sequences: Rc<RefCell<Vec<u64>>>,
+) {
+    stream.set_nonblocking(true).unwrap();
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    let local = tokio::task::LocalSet::new();
+    local.block_on(&runtime, async move {
+        let stream = tokio::net::TcpStream::from_std(stream).unwrap();
+        let _ = stream.set_nodelay(true);
+        let (reader, writer) = TokioAsyncReadCompatExt::compat(stream).split();
+        let network = VatNetwork::new(
+            futures::io::BufReader::new(reader),
+            futures::io::BufWriter::new(writer),
+            Side::Server,
+            Default::default(),
+        );
+        let client: coordinator::Client = capnp_rpc::new_client(CannedCoordinator { sequences });
+        let rpc = RpcSystem::new(Box::new(network), Some(client.client));
+        let _ = rpc.await;
+    });
 }
 
 #[test]
@@ -112,16 +171,17 @@ fn delayed_reply_times_out_into_the_same_local_fallback() {
 fn timed_out_request_reconnects_and_replays_before_returning() {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let addr = listener.local_addr().unwrap();
+    let sequences = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let peer_sequences = std::sync::Arc::clone(&sequences);
     let peer = thread::spawn(move || {
-        let (mut first, _) = listener.accept().unwrap();
-        let first_sequence = read_request_sequence(&mut first);
+        let (first, _) = listener.accept().unwrap();
         thread::sleep(Duration::from_millis(80));
         drop(first);
 
-        let (mut replay, _) = listener.accept().unwrap();
-        let replay_sequence = read_request_sequence(&mut replay);
-        write_empty_snapshot(&mut replay, replay_sequence, true);
-        [first_sequence, replay_sequence]
+        let (replay, _) = listener.accept().unwrap();
+        let recorded = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+        serve_canned_snapshot(replay, std::rc::Rc::clone(&recorded));
+        *peer_sequences.lock().unwrap() = recorded.borrow().clone();
     });
     let mut client = CatalogClient::connect(
         addr,
@@ -137,7 +197,8 @@ fn timed_out_request_reconnects_and_replays_before_returning() {
 
     assert_eq!(snapshot.version, 7);
     assert_eq!(snapshot.census_visits, 3);
-    assert_eq!(peer.join().unwrap(), [17, 17]);
+    peer.join().unwrap();
+    assert_eq!(*sequences.lock().unwrap(), vec![17]);
 }
 
 #[test]
