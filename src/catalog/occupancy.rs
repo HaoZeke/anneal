@@ -1977,6 +1977,9 @@ pub fn promote_one_sided(seats: &mut [InterfaceSeat]) -> bool {
 /// leftover-SOAP hatches are intra-well and do not block. Live rematch of
 /// last candidates after extras Leave is not that count. A one-community
 /// Fiedler floor with many DECAF packings is not that case.
+/// Leftover-SOAP hatches are the champion isomer walk of a seen
+/// packing. They block retire while leftover has not dwelt and the
+/// book holds more than one family.
 /// `ei_exhausted` is Jones remaining improvement on observed
 /// FunnelModel morphologies, not a far-field GP probe.
 /// `n_occupied_families` is the packing-book occupied-family count
@@ -2439,6 +2442,36 @@ mod tests {
         assert_eq!(hops_per_core_hour(200, 3600.0, 1), Some(200.0));
         assert_eq!(hops_per_core_hour(100, 0.0, 1), None);
         assert_eq!(hops_per_core_hour(100, 10.0, 0), None);
+    }
+
+    #[test]
+    fn leftover_soap_requires_dwell_when_two_families() {
+        assert!(!leftover_sat_dwell(&[false]));
+        assert!(!leftover_sat_dwell(&[true]));
+        assert!(!occupancy_retire_at(
+            OccupancyCertificate::MixingCertified,
+            true,
+            false,
+            true,
+            2,
+            2
+        ));
+        assert!(occupancy_retire_at(
+            OccupancyCertificate::MixingCertified,
+            true,
+            false,
+            true,
+            1,
+            1
+        ));
+        assert!(!occupancy_retire_at(
+            OccupancyCertificate::CatalogSaturated,
+            true,
+            false,
+            true,
+            2,
+            2
+        ));
     }
 
     #[test]
