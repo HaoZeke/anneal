@@ -574,3 +574,314 @@ fn raw_rejection(
         reason,
     )
 }
+
+use anneal_core::catalog::{
+    DescriptorSignature, EngineSignature, FreshEvaluation, SystemSignature, ValidatorConfig,
+};
+use anneal_core::descriptor_space::{
+    DescriptorBlockKind, DescriptorBlockSpec, DescriptorSchema, DescriptorSpace,
+};
+use anneal_core::pes_exploration::ExactStructureWitness;
+use anneal_core::scaling::SuccessiveHalving;
+use ndarray::ArrayView1;
+use std::collections::BTreeMap;
+
+struct SeparationWitness;
+
+impl ExactStructureWitness for SeparationWitness {
+    fn equivalent(&self, left: ArrayView1<f64>, right: ArrayView1<f64>) -> bool {
+        let separation = |point: ArrayView1<'_, f64>| {
+            (0..3)
+                .map(|axis| (point[3 + axis] - point[axis]).powi(2))
+                .sum::<f64>()
+                .sqrt()
+        };
+        (separation(left) - separation(right)).abs() < 1e-8
+    }
+}
+
+fn roster_descriptor_space() -> DescriptorSpace {
+    DescriptorSpace::new(
+        DescriptorSchema::new(
+            "cooperative-test-soap",
+            1,
+            vec![DescriptorBlockSpec::new(DescriptorBlockKind::SoapMean, 2, 2, 3.5).unwrap()],
+        )
+        .unwrap(),
+    )
+}
+
+fn roster_signature() -> SystemSignature {
+    SystemSignature {
+        atomic_numbers: vec![18, 18],
+        coordinate_dim: 6,
+        group_labels: vec![0, 1],
+        group_schema: "independent-atoms-v1".into(),
+        frozen_mask: vec![false, false],
+        cell: None,
+        periodic: [false; 3],
+        length_scale: 1.0,
+        energy_scale: 1.0,
+        engine: EngineSignature {
+            kind: "fixture".into(),
+            config_digest: [0x31; 32],
+            external_inputs: BTreeMap::new(),
+        },
+        descriptor: DescriptorSignature {
+            schema: "cooperative-test-soap".into(),
+            version: 1,
+            hyperparameters: BTreeMap::new(),
+            species_channels: vec![18],
+        },
+        validation_schema_version: 1,
+    }
+}
+
+fn roster_identity(ensemble: &str, replica: u32, digest: [u8; 32]) -> CatalogIdentity {
+    CatalogIdentity {
+        campaign: "jcc-2026".into(),
+        ensemble: ensemble.into(),
+        replica,
+        signature_digest: digest,
+    }
+}
+
+fn roster_candidate(replica: u32, sequence: u64, separation: f64) -> CatalogCandidate {
+    let coordinates = vec![0.0, 0.0, 0.0, separation, 0.0, 0.0];
+    let descriptor = roster_descriptor_space()
+        .describe(ArrayView1::from(&coordinates), Some(&[18, 18]))
+        .unwrap()
+        .values()
+        .to_vec();
+    CatalogCandidate {
+        producer_replica: replica,
+        coordinates,
+        cell: None,
+        energy: -separation,
+        forces: vec![0.0; 6],
+        gradient_norm: 0.0,
+        descriptor,
+        descriptor_schema_version: 1,
+        quench_converged: true,
+        charged_work: sequence * 5,
+        event_sequence: sequence,
+        seed: 1000 + u64::from(replica),
+        census_basin: None,
+    }
+}
+
+fn scientific_config(
+    ensemble: &str,
+    replicas: impl IntoIterator<Item = u32>,
+) -> ServerConfig {
+    let signature = roster_signature();
+    let digest = signature.digest();
+    ServerConfig::new("jcc-2026", ensemble, digest, replicas)
+        .unwrap()
+        .with_scientific_state(
+            signature,
+            roster_descriptor_space(),
+            ValidatorConfig {
+                reference_coordinates: vec![0.0, 0.0, 0.0, 1.2, 0.0, 0.0],
+                descriptor_dim: 9,
+                min_separation: 0.8,
+                coordinate_tolerance: 1e-10,
+                max_gradient_norm: 1e-8,
+                energy_abs_tolerance: 1e-12,
+                energy_rel_tolerance: 1e-12,
+            },
+            2,
+            0.05,
+            400,
+            |coordinates| {
+                Ok(FreshEvaluation {
+                    energy: -coordinates[3],
+                    forces: vec![0.0; coordinates.len()],
+                })
+            },
+        )
+        .unwrap()
+        .with_exact_structure_witness(SeparationWitness)
+        .unwrap()
+}
+
+#[test]
+fn attach_admits_a_new_replica_and_status_lists_it() {
+    let server = CatalogServer::start(
+        "127.0.0.1:0",
+        ServerConfig::new("jcc-2026", "roster-attach", [0x5a; 32], [0]).unwrap(),
+    )
+    .unwrap();
+    let mut walker = CatalogClient::connect(
+        server.addr(),
+        identity("roster-attach", 7),
+        ClientConfig::default(),
+    )
+    .unwrap();
+    let roster = walker.attach(1).unwrap();
+    assert!(roster.live.contains(&7));
+    assert!(roster.version >= 1);
+
+    let mut observer = CatalogClient::connect(
+        server.addr(),
+        CatalogIdentity {
+            campaign: "jcc-2026".into(),
+            ensemble: "roster-attach".into(),
+            replica: u32::MAX,
+            signature_digest: [0x5a; 32],
+        },
+        ClientConfig::default(),
+    )
+    .unwrap();
+    let status = observer.observer_status(1).unwrap();
+    assert!(status.live_replicas.contains(&7));
+}
+
+#[test]
+fn a_non_attached_unknown_replica_is_rejected_on_snapshot() {
+    let server = CatalogServer::start(
+        "127.0.0.1:0",
+        ServerConfig::new("jcc-2026", "roster-unknown", [0x5a; 32], [0]).unwrap(),
+    )
+    .unwrap();
+    let mut stranger = CatalogClient::connect(
+        server.addr(),
+        identity("roster-unknown", 7),
+        ClientConfig::default(),
+    )
+    .unwrap();
+    assert_eq!(
+        stranger.snapshot(1).unwrap_err(),
+        CatalogClientError::Rejected(ProtocolRejection::ReplicaMismatch)
+    );
+}
+
+#[test]
+fn detach_leaves_the_barrier_so_a_two_replica_epoch_closes_on_one_submission() {
+    let ensemble = "roster-detach";
+    let config = scientific_config(ensemble, [0, 1]);
+    let digest = roster_signature().digest();
+    let server = CatalogServer::start("127.0.0.1:0", config).unwrap();
+    let mut lead = CatalogClient::connect(
+        server.addr(),
+        roster_identity(ensemble, 0, digest),
+        ClientConfig::default(),
+    )
+    .unwrap();
+    let mut other = CatalogClient::connect(
+        server.addr(),
+        roster_identity(ensemble, 1, digest),
+        ClientConfig::default(),
+    )
+    .unwrap();
+    let offered = roster_candidate(0, 1, 1.2);
+    lead.record_visit(1, offered.clone()).unwrap();
+    let pending = lead.submit_population(2, 0, offered).unwrap();
+    assert!(pending.plan.is_none());
+    assert_eq!(pending.submitted, 1);
+    other.detach(1, "done").unwrap();
+    let closed = lead.population_plan(3, 0).unwrap();
+    assert!(closed.plan.is_some());
+}
+
+#[test]
+fn ticks_close_a_half_submitted_epoch_and_replay_to_the_same_open_epoch() {
+    let ensemble = "roster-tick";
+    let directory = PathBuf::from(format!(
+        "/tmp/anneal-catalog-tick-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let digest = roster_signature().digest();
+    let config = scientific_config(ensemble, [0, 1])
+        .with_quorum(0.5, 3)
+        .unwrap()
+        .with_state_directory(&directory)
+        .unwrap();
+    let server = CatalogServer::start("127.0.0.1:0", config.clone()).unwrap();
+    let mut lead = CatalogClient::connect(
+        server.addr(),
+        roster_identity(ensemble, 0, digest),
+        ClientConfig::default(),
+    )
+    .unwrap();
+    let mut clock = CatalogClient::connect(
+        server.addr(),
+        roster_identity(ensemble, u32::MAX, digest),
+        ClientConfig::default(),
+    )
+    .unwrap();
+    let offered = roster_candidate(0, 1, 1.2);
+    lead.record_visit(1, offered.clone()).unwrap();
+    let pending = lead.submit_population(2, 0, offered).unwrap();
+    assert!(pending.plan.is_none());
+    for sequence in 1..=3 {
+        clock.tick(sequence, 1000).unwrap();
+    }
+    let closed = lead.population_plan(3, 0).unwrap();
+    assert!(closed.plan.is_some());
+    let mut observer = CatalogClient::connect(
+        server.addr(),
+        roster_identity(ensemble, u32::MAX, digest),
+        ClientConfig::default(),
+    )
+    .unwrap();
+    let open = observer.observer_status(4).unwrap().open_epoch;
+    drop(server);
+
+    let replayed = CatalogServer::start("127.0.0.1:0", config).unwrap();
+    let mut replay_observer = CatalogClient::connect(
+        replayed.addr(),
+        roster_identity(ensemble, u32::MAX, digest),
+        ClientConfig::default(),
+    )
+    .unwrap();
+    assert_eq!(replay_observer.observer_status(1).unwrap().open_epoch, open);
+}
+
+#[test]
+fn halving_retires_the_worst_of_three_replicas_and_requests_one_spawn() {
+    let ensemble = "roster-halving";
+    let digest = roster_signature().digest();
+    let config = scientific_config(ensemble, [0, 1, 2])
+        .with_ledger_budget(100)
+        .unwrap()
+        .with_halving(SuccessiveHalving::new(10, 2.0, 3).unwrap());
+    let server = CatalogServer::start("127.0.0.1:0", config).unwrap();
+    for (replica, separation) in [(0, 1.3), (1, 1.2), (2, 1.1)] {
+        let mut client = CatalogClient::connect(
+            server.addr(),
+            roster_identity(ensemble, replica, digest),
+            ClientConfig::default(),
+        )
+        .unwrap();
+        client
+            .record_visit(1, roster_candidate(replica, 1, separation))
+            .unwrap();
+        client
+            .record_ledger_event(2, ChargeKind::AcceptedQuench, 10, 10)
+            .unwrap();
+    }
+    let mut worst = CatalogClient::connect(
+        server.addr(),
+        roster_identity(ensemble, 2, digest),
+        ClientConfig::default(),
+    )
+    .unwrap();
+    let offered = roster_candidate(2, 3, 1.1);
+    let policy = worst
+        .policy_state(3, offered.descriptor, offered.energy)
+        .unwrap();
+    assert!(policy.retired);
+    let mut observer = CatalogClient::connect(
+        server.addr(),
+        roster_identity(ensemble, u32::MAX, digest),
+        ClientConfig::default(),
+    )
+    .unwrap();
+    let status = observer.observer_status(1).unwrap();
+    assert_eq!(status.spawn_requested, 1);
+}

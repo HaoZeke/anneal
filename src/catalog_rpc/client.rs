@@ -13,7 +13,7 @@ use super::{
     CatalogIdentity, CatalogLedgerEvent, CatalogMutation, CatalogOperation, CatalogReply,
     CatalogRequest, CatalogRideReport, CatalogRideWork, CatalogSnapshot, DescriptorHoleProposal,
     PROTOCOL_VERSION, PolicyState, PopulationEpochState, ProtocolError, ProtocolRejection,
-    TransitionDestination, decode_reply_reader, encode_request,
+    RosterReply, TransitionDestination, decode_reply_reader, encode_request,
 };
 use crate::Catalog_capnp::catalog_reply;
 use crate::cooperative_search::ledger::ChargeKind;
@@ -224,6 +224,11 @@ impl CatalogClient {
         Ok(())
     }
 
+    /// Highest event sequence this client has already sent.
+    pub fn last_event_sequence(&self) -> u64 {
+        self.requests.keys().copied().max().unwrap_or(0)
+    }
+
     /// Read the current coordinator snapshot.
     pub fn snapshot(&mut self, event_sequence: u64) -> Result<CatalogSnapshot, CatalogClientError> {
         Ok(self
@@ -283,7 +288,8 @@ impl CatalogClient {
             | AcceptedPayload::PopulationEpoch(_)
             | AcceptedPayload::FrontierPost(_)
             | AcceptedPayload::RideWork(_)
-            | AcceptedPayload::RideCredit(_) => {
+            | AcceptedPayload::RideCredit(_)
+            | AcceptedPayload::Roster(_) => {
                 return Err(ProtocolError::Malformed(
                     "catalog offer returned an incompatible payload".into(),
                 )
@@ -415,7 +421,8 @@ impl CatalogClient {
             | AcceptedPayload::CatalogMutation(_)
             | AcceptedPayload::FrontierPost(_)
             | AcceptedPayload::RideWork(_)
-            | AcceptedPayload::RideCredit(_) => Err(ProtocolError::Malformed(
+            | AcceptedPayload::RideCredit(_)
+            | AcceptedPayload::Roster(_) => Err(ProtocolError::Malformed(
                 "sample returned an incompatible payload".into(),
             )
             .into()),
@@ -443,7 +450,8 @@ impl CatalogClient {
             | AcceptedPayload::CatalogMutation(_)
             | AcceptedPayload::FrontierPost(_)
             | AcceptedPayload::RideWork(_)
-            | AcceptedPayload::RideCredit(_) => Err(ProtocolError::Malformed(
+            | AcceptedPayload::RideCredit(_)
+            | AcceptedPayload::Roster(_) => Err(ProtocolError::Malformed(
                 "basin sample returned an incompatible payload".into(),
             )
             .into()),
@@ -517,7 +525,8 @@ impl CatalogClient {
             | AcceptedPayload::CatalogMutation(_)
             | AcceptedPayload::FrontierPost(_)
             | AcceptedPayload::RideWork(_)
-            | AcceptedPayload::RideCredit(_) => Err(ProtocolError::Malformed(
+            | AcceptedPayload::RideCredit(_)
+            | AcceptedPayload::Roster(_) => Err(ProtocolError::Malformed(
                 "descriptor-hole request returned an incompatible payload".into(),
             )
             .into()),
@@ -549,7 +558,8 @@ impl CatalogClient {
             | AcceptedPayload::CatalogMutation(_)
             | AcceptedPayload::FrontierPost(_)
             | AcceptedPayload::RideWork(_)
-            | AcceptedPayload::RideCredit(_) => Err(ProtocolError::Malformed(
+            | AcceptedPayload::RideCredit(_)
+            | AcceptedPayload::Roster(_) => Err(ProtocolError::Malformed(
                 "boundary-crossing request returned an incompatible payload".into(),
             )
             .into()),
@@ -609,7 +619,8 @@ impl CatalogClient {
             | AcceptedPayload::CatalogMutation(_)
             | AcceptedPayload::FrontierPost(_)
             | AcceptedPayload::RideWork(_)
-            | AcceptedPayload::RideCredit(_) => Err(ProtocolError::Malformed(
+            | AcceptedPayload::RideCredit(_)
+            | AcceptedPayload::Roster(_) => Err(ProtocolError::Malformed(
                 "policy-state request returned an incompatible payload".into(),
             )
             .into()),
@@ -705,6 +716,59 @@ impl CatalogClient {
             state: population_epoch_payload(reply.payload, "population plan")?,
             snapshot: reply.snapshot,
         })
+    }
+
+    /// Admit this client's replica onto the live roster.
+    pub fn attach(&mut self, event_sequence: u64) -> Result<RosterReply, CatalogClientError> {
+        roster_payload(
+            self.call(event_sequence, CatalogOperation::Attach)?.payload,
+            "attach",
+        )
+    }
+
+    /// Retire this client's replica from the live roster.
+    pub fn detach(
+        &mut self,
+        event_sequence: u64,
+        reason: impl Into<String>,
+    ) -> Result<RosterReply, CatalogClientError> {
+        roster_payload(
+            self.call(
+                event_sequence,
+                CatalogOperation::Detach {
+                    reason: reason.into(),
+                },
+            )?
+            .payload,
+            "detach",
+        )
+    }
+
+    /// Advance the coordinator clock by one tick of `millis` milliseconds.
+    pub fn tick(
+        &mut self,
+        event_sequence: u64,
+        millis: u64,
+    ) -> Result<AcceptedPayload, CatalogClientError> {
+        Ok(self
+            .call(event_sequence, CatalogOperation::Tick { millis })?
+            .payload)
+    }
+
+    /// Request a manual live-population target.
+    pub fn scale(
+        &mut self,
+        event_sequence: u64,
+        live_target: u32,
+    ) -> Result<RosterReply, CatalogClientError> {
+        roster_payload(
+            self.call(
+                event_sequence,
+                CatalogOperation::Scale { live_target },
+            )?
+            .payload,
+            "scale",
+        )
     }
 
     /// Read-only aggregate status for an observer bound to the coordinator's
@@ -862,7 +926,21 @@ fn population_epoch_payload(
         | AcceptedPayload::CatalogMutation(_)
         | AcceptedPayload::FrontierPost(_)
         | AcceptedPayload::RideWork(_)
-        | AcceptedPayload::RideCredit(_) => Err(ProtocolError::Malformed(format!(
+        | AcceptedPayload::RideCredit(_)
+            | AcceptedPayload::Roster(_) => Err(ProtocolError::Malformed(format!(
+            "{operation} returned an incompatible payload"
+        ))
+        .into()),
+    }
+}
+
+fn roster_payload(
+    payload: AcceptedPayload,
+    operation: &str,
+) -> Result<RosterReply, CatalogClientError> {
+    match payload {
+        AcceptedPayload::Roster(roster) => Ok(roster),
+        _ => Err(ProtocolError::Malformed(format!(
             "{operation} returned an incompatible payload"
         ))
         .into()),
