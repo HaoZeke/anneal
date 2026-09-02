@@ -320,6 +320,15 @@ impl EscapeFeedback {
         self.visits.get(&basin).copied().unwrap_or(0)
     }
 
+    /// Register the starting minimum without applying escape feedback.
+    ///
+    /// The first minimum is part of the history even though no escape has
+    /// reached it. Recording it leaves both adaptive controls at their stated
+    /// initial values and makes a later return classify as known.
+    pub fn register_initial(&mut self, basin: usize) {
+        self.visits.entry(basin).or_insert(1);
+    }
+
     /// Classifies a quench without recording it.
     pub fn classify(&self, current: Option<usize>, reached: usize) -> Visit {
         if current == Some(reached) {
