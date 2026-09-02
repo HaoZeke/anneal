@@ -197,6 +197,14 @@ impl DifferentiableObjective<f64> for PairPotential {
     }
 }
 
+impl crate::pes_exploration::PesSurface for PairPotential {
+    type Error = std::convert::Infallible;
+
+    fn evaluate(&self, coordinates: ArrayView1<f64>) -> Result<(f64, Array1<f64>), Self::Error> {
+        Ok(self.value_and_gradient(coordinates))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
