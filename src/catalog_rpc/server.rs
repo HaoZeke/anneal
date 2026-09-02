@@ -337,7 +337,6 @@ struct ScientificState {
     transition_nodes: BTreeMap<BasinId, usize>,
     landscape: LandscapeGraph,
     bridges: BTreeMap<u64, BridgeServerState>,
-    next_bridge: u64,
     last_basin_by_replica: BTreeMap<u32, BasinId>,
     last_candidate_by_replica: BTreeMap<u32, CatalogCandidate>,
     best_candidate_by_replica: BTreeMap<u32, CatalogCandidate>,
@@ -476,7 +475,6 @@ impl CoordinatorState {
                     transition_nodes: BTreeMap::new(),
                     landscape: LandscapeGraph::new(),
                     bridges: BTreeMap::new(),
-                    next_bridge: 0,
                     last_basin_by_replica: BTreeMap::new(),
                     last_candidate_by_replica: BTreeMap::new(),
                     best_candidate_by_replica: BTreeMap::new(),
@@ -1507,7 +1505,7 @@ fn apply_request(
                 EpochSubmissionOutcome::Ready(plan) => {
                     let participants = u32::try_from(plan.destinations().len())
                         .expect("participants are bounded by replica count");
-                    realize_population_plan(scientific, config, *epoch, &plan, participants)
+                    realize_population_plan(scientific, *epoch, &plan, participants)
                 }
             };
             if inserted {
@@ -1640,7 +1638,7 @@ fn apply_request(
                 EpochSubmissionOutcome::Ready(plan) => {
                     let participants = u32::try_from(plan.destinations().len())
                         .expect("participants are bounded by replica count");
-                    realize_population_plan(scientific, config, *epoch, &plan, participants)
+                    realize_population_plan(scientific, *epoch, &plan, participants)
                 }
             };
         }
@@ -1679,7 +1677,7 @@ fn apply_request(
                 EpochSubmissionOutcome::Ready(plan) => {
                     let participants = u32::try_from(plan.destinations().len())
                         .expect("participants are bounded by replica count");
-                    realize_population_plan(scientific, config, *epoch, &plan, participants)
+                    realize_population_plan(scientific, *epoch, &plan, participants)
                 }
             };
         }
@@ -3074,70 +3072,6 @@ struct BridgeServerState {
     assignments: BTreeMap<u32, usize>,
 }
 
-/// Interior images of a commissioned bridge string.
-const BRIDGE_IMAGES: usize = 12;
-/// Weight fraction transferred per attempted exit.
-const BRIDGE_TRANSFER: f64 = 0.1;
-/// Stored entry states per region.
-const BRIDGE_ENTRY_CAPACITY: usize = 8;
-/// Bridge tube radius, in census radii.
-const BRIDGE_TUBE_RADII: f64 = 4.0;
-
-/// Commission a bridge across the referee's seam when none is active.
-///
-/// The seam names the two most weakly coupled communities; the bridge
-/// connects their best-anchored catalog entries through descriptor
-/// space, so the crossing evidence the confined segments produce is
-/// exactly the flux the landscape graph is missing. One bridge at a
-/// time: the machinery prices one seam, and a second seam only becomes
-/// visible after the first is crossed.
-fn commission_bridge(scientific: &mut ScientificState, census_radius: f64) {
-    if !scientific.bridges.is_empty() {
-        return;
-    }
-    let Ok(split) = scientific.landscape.spectral_split() else {
-        return;
-    };
-    if split.conductance >= 0.1 {
-        return;
-    }
-    let descriptor_of = |basin: u64| {
-        scientific
-            .catalog
-            .entries()
-            .iter()
-            .find(|entry| entry.census_id().as_raw() == basin)
-            .map(|entry| Array1::from(entry.descriptor().to_vec()))
-    };
-    let (Some(from), Some(to)) = (
-        descriptor_of(split.representatives.0),
-        descriptor_of(split.representatives.1),
-    ) else {
-        return;
-    };
-    let Ok(string) = BridgeString::chord(&from, &to, BRIDGE_IMAGES) else {
-        return;
-    };
-    let regions = string.regions();
-    let Ok(ledger) = WeightLedger::new(regions, BRIDGE_TRANSFER) else {
-        return;
-    };
-    let bridge = scientific.next_bridge;
-    scientific.next_bridge += 1;
-    scientific.bridges.insert(
-        bridge,
-        BridgeServerState {
-            string,
-            ledger,
-            entries: EntryLists::new(regions, BRIDGE_ENTRY_CAPACITY),
-            from_basin: split.representatives.0,
-            to_basin: split.representatives.1,
-            tube_radius: BRIDGE_TUBE_RADII * census_radius,
-            assignments: BTreeMap::new(),
-        },
-    );
-}
-
 const MINIMUM_INFORMATION_SAMPLES: usize = 128;
 
 #[derive(Debug, Clone)]
@@ -3427,18 +3361,10 @@ fn transition_uncertainty(scientific: &ScientificState, basin: BasinId) -> f64 {
 /// plan is selected, counted, or retained for later polls.
 fn realize_population_plan(
     scientific: &mut ScientificState,
-    config: &ServerConfig,
     epoch: u64,
     plan: &PopulationEpochPlan,
     required: u32,
 ) -> AcceptedPayload {
-    if let Some(census_radius) = config
-        .scientific
-        .as_ref()
-        .map(|scientific| scientific.census_radius)
-    {
-        commission_bridge(scientific, census_radius);
-    }
     let source_candidates = scientific
         .population_candidates
         .get(&epoch)
