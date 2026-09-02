@@ -446,6 +446,182 @@ impl MoveKernel<f64> for SurfaceRelocate {
     }
 }
 
+/// Moves the least-coordinated point into the best hollow site the set
+/// itself offers.
+///
+/// The dynamic lattice of Shao, Cheng and Cai: every triangle of mutually
+/// neighbouring points defines an apex site at the neighbour distance from
+/// all three, on the side facing away from the centroid. Sites that overlap
+/// a point are discarded, the rest are scored by how many neighbours the
+/// moved point would gain there, and the best site wins. Nothing is a
+/// template: the lattice is read off the structure being moved, and no
+/// energy is evaluated to choose the site.
+///
+/// Shao, X.; Cheng, L.; Cai, W. *J. Comput. Chem.* **2004**, *25*, 1693
+/// <https://doi.org/10.1002/jcc.20096>.
+pub struct HollowRelocate {
+    /// Points in the state; the state length must be `3 * n_points`.
+    pub n_points: usize,
+    /// Separation below which two points count as neighbours.
+    pub neighbour_cutoff: f64,
+}
+
+impl HollowRelocate {
+    /// Candidate hollow sites of `i`, ignoring point `mover`, as positions
+    /// with the coordination the mover would gain there.
+    pub fn sites(&self, i: ArrayView1<f64>, mover: usize) -> Vec<([f64; 3], usize)> {
+        let n = self.n_points;
+        let cut2 = self.neighbour_cutoff * self.neighbour_cutoff;
+        let pos = |a: usize| [i[3 * a], i[3 * a + 1], i[3 * a + 2]];
+        let dist2 = |p: [f64; 3], q: [f64; 3]| {
+            (p[0] - q[0]) * (p[0] - q[0])
+                + (p[1] - q[1]) * (p[1] - q[1])
+                + (p[2] - q[2]) * (p[2] - q[2])
+        };
+        let others: Vec<usize> = (0..n).filter(|&a| a != mover).collect();
+        let mut nb: Vec<Vec<usize>> = vec![Vec::new(); n];
+        let mut nn_sum = 0.0;
+        let mut nn_count = 0usize;
+        for (u, &a) in others.iter().enumerate() {
+            let mut nearest = f64::INFINITY;
+            for &b in &others[u + 1..] {
+                let d2 = dist2(pos(a), pos(b));
+                if d2 < cut2 {
+                    nb[a].push(b);
+                    nb[b].push(a);
+                }
+                nearest = nearest.min(d2);
+            }
+            if nearest.is_finite() {
+                nn_sum += nearest.sqrt();
+                nn_count += 1;
+            }
+        }
+        if nn_count == 0 {
+            return Vec::new();
+        }
+        let bond = nn_sum / nn_count as f64;
+        let exclusion2 = (0.85 * bond) * (0.85 * bond);
+        let c = centroid(i, n);
+        let mut sites = Vec::new();
+        for &a in &others {
+            for &b in &nb[a] {
+                if b <= a {
+                    continue;
+                }
+                for &d in &nb[b] {
+                    if d <= b || !nb[a].contains(&d) {
+                        continue;
+                    }
+                    let (pa, pb, pd) = (pos(a), pos(b), pos(d));
+                    let centre = [
+                        (pa[0] + pb[0] + pd[0]) / 3.0,
+                        (pa[1] + pb[1] + pd[1]) / 3.0,
+                        (pa[2] + pb[2] + pd[2]) / 3.0,
+                    ];
+                    let u = [pb[0] - pa[0], pb[1] - pa[1], pb[2] - pa[2]];
+                    let v = [pd[0] - pa[0], pd[1] - pa[1], pd[2] - pa[2]];
+                    let normal = [
+                        u[1] * v[2] - u[2] * v[1],
+                        u[2] * v[0] - u[0] * v[2],
+                        u[0] * v[1] - u[1] * v[0],
+                    ];
+                    let norm =
+                        (normal[0] * normal[0] + normal[1] * normal[1] + normal[2] * normal[2])
+                            .sqrt();
+                    if norm < 1e-12 {
+                        continue;
+                    }
+                    // Apex height from the circumradius of the triangle at
+                    // the bond length; a triangle wider than a bond spans has
+                    // no apex at that distance.
+                    let radius2 = dist2(centre, pa);
+                    let height2 = bond * bond - radius2;
+                    if height2 <= 0.0 {
+                        continue;
+                    }
+                    let height = height2.sqrt();
+                    let outward = if (centre[0] - c[0]) * normal[0]
+                        + (centre[1] - c[1]) * normal[1]
+                        + (centre[2] - c[2]) * normal[2]
+                        >= 0.0
+                    {
+                        1.0
+                    } else {
+                        -1.0
+                    };
+                    let site = [
+                        centre[0] + outward * height * normal[0] / norm,
+                        centre[1] + outward * height * normal[1] / norm,
+                        centre[2] + outward * height * normal[2] / norm,
+                    ];
+                    let mut overlap = false;
+                    let mut coordination = 0usize;
+                    for &e in &others {
+                        let d2 = dist2(site, pos(e));
+                        if d2 < exclusion2 {
+                            overlap = true;
+                            break;
+                        }
+                        if d2 < cut2 {
+                            coordination += 1;
+                        }
+                    }
+                    if !overlap {
+                        sites.push((site, coordination));
+                    }
+                }
+            }
+        }
+        sites
+    }
+}
+
+impl MoveKernel<f64> for HollowRelocate {
+    fn propose<R: Rng + ?Sized>(&self, i: ArrayView1<f64>, t: f64, rng: &mut R) -> Array1<f64> {
+        let n = self.n_points;
+        if n < 4 {
+            return SurfaceRelocate {
+                n_points: n,
+                neighbour_cutoff: self.neighbour_cutoff,
+            }
+            .propose(i, t, rng);
+        }
+        let mut coord = vec![0usize; n];
+        let cut2 = self.neighbour_cutoff * self.neighbour_cutoff;
+        for a in 0..n {
+            for b in (a + 1)..n {
+                let mut d2 = 0.0;
+                for k in 0..3 {
+                    let d = i[3 * a + k] - i[3 * b + k];
+                    d2 += d * d;
+                }
+                if d2 < cut2 {
+                    coord[a] += 1;
+                    coord[b] += 1;
+                }
+            }
+        }
+        let worst = (0..n).min_by_key(|&a| coord[a]).unwrap_or(0);
+        let sites = self.sites(i, worst);
+        let Some(best) = sites.iter().map(|(_, c)| *c).max() else {
+            return SurfaceRelocate {
+                n_points: n,
+                neighbour_cutoff: self.neighbour_cutoff,
+            }
+            .propose(i, t, rng);
+        };
+        let candidates: Vec<&([f64; 3], usize)> =
+            sites.iter().filter(|(_, c)| *c == best).collect();
+        let pick = candidates[rng.random_range(0..candidates.len())].0;
+        let mut out = i.to_owned();
+        for k in 0..3 {
+            out[3 * worst + k] = pick[k];
+        }
+        out
+    }
+}
+
 /// Rotates the outer half of the set against its core.
 ///
 /// Packings that share a core differ in how the surface sits on it, so twisting
@@ -710,6 +886,60 @@ mod cluster_move_tests {
         ];
         for k in kernels {
             assert_eq!(k(&mut rng).len(), x.len());
+        }
+    }
+
+    #[test]
+    fn a_loose_point_moves_into_the_best_hollow_site() {
+        use rand::SeedableRng;
+        // A tetrahedron of four mutual neighbours and a fifth point far away.
+        let h = (2.0_f64 / 3.0).sqrt();
+        let x = ndarray::Array1::from(vec![
+            0.0,
+            0.0,
+            0.0,
+            1.0,
+            0.0,
+            0.0,
+            0.5,
+            0.75_f64.sqrt(),
+            0.0,
+            0.5,
+            0.75_f64.sqrt() / 3.0,
+            h,
+            6.0,
+            6.0,
+            6.0,
+        ]);
+        let kernel = HollowRelocate {
+            n_points: 5,
+            neighbour_cutoff: 1.3,
+        };
+        let sites = kernel.sites(x.view(), 4);
+        assert!(!sites.is_empty(), "a tetrahedron offers hollow sites");
+        assert!(
+            sites.iter().all(|(_, c)| *c == 3),
+            "every face site touches three points: {sites:?}"
+        );
+        let mut rng = rand::rngs::StdRng::seed_from_u64(3);
+        let out = kernel.propose(x.view(), 1.0, &mut rng);
+        let moved = [out[12], out[13], out[14]];
+        let mut touching = 0;
+        for a in 0..4 {
+            let d = ((moved[0] - x[3 * a]).powi(2)
+                + (moved[1] - x[3 * a + 1]).powi(2)
+                + (moved[2] - x[3 * a + 2]).powi(2))
+            .sqrt();
+            assert!(d > 0.85, "the moved point overlaps point {a}: {d}");
+            if d < 1.3 {
+                touching += 1;
+            }
+        }
+        assert_eq!(touching, 3);
+        for a in 0..4 {
+            for k in 0..3 {
+                assert_eq!(out[3 * a + k], x[3 * a + k], "only the loose point moves");
+            }
         }
     }
 }

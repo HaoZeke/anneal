@@ -18,6 +18,9 @@ pub enum MoveLibrary {
     Lean,
     /// Productive atomic arms plus composed surface relocation.
     LeanBurst,
+    /// The lean burst library with the hollow-site relocation as one more
+    /// arm for the allocator.
+    LeanBurstHollow,
     /// Atomic moves plus the heavy-tailed visiting kernel.
     Visit,
     /// Atomic moves plus twinning.
@@ -75,7 +78,7 @@ impl MoveLibrary {
             Self::WalesDoye => wales_doye(),
             Self::Atomic => atomic(),
             Self::Lean => lean(),
-            Self::LeanBurst => {
+            Self::LeanBurst | Self::LeanBurstHollow => {
                 let mut kernels = lean();
                 kernels.push(ClusterMove::Burst {
                     n_points: cfg.n_points,
@@ -83,6 +86,12 @@ impl MoveLibrary {
                 });
                 if cfg.soap_mode != SoapProposalMode::Off {
                     kernels.push(soap_arm(cfg, None, None));
+                }
+                if matches!(self, Self::LeanBurstHollow) {
+                    kernels.push(ClusterMove::HollowRelocate(HollowRelocate {
+                        n_points: cfg.n_points,
+                        neighbour_cutoff: cfg.neighbour_cutoff,
+                    }));
                 }
                 kernels
             }
@@ -272,6 +281,9 @@ pub enum ClusterMove {
     },
     /// Relocate the least-coordinated point onto the surface.
     SurfaceRelocate(SurfaceRelocate),
+    /// Relocate the least-coordinated point into the structure's best hollow
+    /// site, the dynamic-lattice move.
+    HollowRelocate(HollowRelocate),
     /// Rotate the outer shell against the core.
     ShellRotate(ShellRotate),
     /// Enforce an approximate rotational symmetry.
@@ -1054,6 +1066,7 @@ impl ClusterMove {
             ClusterMove::AllPoints { .. } => "all".into(),
             ClusterMove::SinglePoint { .. } => "single".into(),
             ClusterMove::SurfaceRelocate(_) => "surface".into(),
+            ClusterMove::HollowRelocate(_) => "hollow".into(),
             ClusterMove::GroupRelocate { .. } => "gsurface".into(),
             ClusterMove::GroupShake { .. } => "gshake".into(),
             ClusterMove::GroupBurst { .. } => "gburst".into(),
@@ -1252,6 +1265,7 @@ impl ClusterMove {
                 cur
             }
             ClusterMove::SurfaceRelocate(k) => k.propose(x, t, rng),
+            ClusterMove::HollowRelocate(k) => k.propose(x, t, rng),
             ClusterMove::ShellRotate(k) => k.propose(x, t, rng),
             ClusterMove::Symmetrise(k) => k.propose(x, t, rng),
             ClusterMove::Soap {
