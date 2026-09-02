@@ -7,7 +7,7 @@ mod common;
 
 use anneal_core::methods::cluster_hopping::{Config, Ledger, SoapProposalMode, covalent_radius};
 use anneal_core::methods::cluster_search::{search_from_maybe_bank, verify};
-use common::efficiency::{bank_label, report_trace};
+use common::efficiency::{apply_two_phase, bank_label, report_eval_wall, report_trace};
 use common::rgpot_eindir::{RgpotObjective, emit_engine_manifest};
 use eindir_core::Objective;
 use eindir_core::bounds::Bounds;
@@ -196,6 +196,7 @@ fn main() {
         cfg.frozen = Some(frozen);
     }
     cfg.soap_mode = soap_mode_from_env();
+    apply_two_phase(&mut cfg);
     write_resolved_config(&cfg);
     let pot = RgpotObjective::cuh2(&atmnrs, box_);
     emit_engine_manifest("cuh2");
@@ -216,14 +217,18 @@ fn main() {
     );
     for seed in seed0..seed0 + seeds {
         let x0 = displace_adsorbate(&base_x, &species, &free_seeds, box_, seed);
+        if seed == seed0 {
+            report_eval_wall(&obj, x0.view(), "cuh2");
+        }
         let mut ledger = Ledger::new(budget);
         let (out, stats) = search_from_maybe_bank(&obj, &cfg, &mut ledger, x0.view(), seed);
         let checked = verify(&obj, &out);
         println!(
-            "  seed {seed}: best {:.6} eV  hops {}  charged {}  converged {}/{}  arm {}",
+            "  seed {seed}: best {:.6} eV  hops {}  charged {}  basins {}  converged {}/{}  arm {}",
             out.best,
             out.hops,
             ledger.spent(),
+            out.basins,
             stats.converged,
             stats.total(),
             bank_label()
