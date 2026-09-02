@@ -2234,14 +2234,26 @@ fn population_epoch_does_not_commission_a_kinetic_graph_bridge() {
             .record_visit(1, candidate(replica as u32, 1, separations[replica]))
             .unwrap();
     }
+    let status = clients[0].observer_status(2).unwrap();
+    assert_eq!(status.active_entries, 2);
+    assert_eq!(status.landscape_basins, 2);
+    let seam = status
+        .seam
+        .expect("the fixture must expose a disconnected graph seam");
+    assert_eq!(seam.conductance, 0.0);
     for (replica, client) in clients.iter_mut().enumerate() {
+        let sequence = if replica == 0 { 3 } else { 2 };
         client
-            .submit_population(2, 0, candidate(replica as u32, 2, separations[replica]))
+            .submit_population(
+                sequence,
+                0,
+                candidate(replica as u32, sequence, separations[replica]),
+            )
             .unwrap();
     }
 
     assert!(
-        clients[0].bridge_assignment(3, 17).unwrap().is_none(),
+        clients[0].bridge_assignment(4, 17).unwrap().is_none(),
         "structural population selection must not schedule a graph-seam probe"
     );
 }
