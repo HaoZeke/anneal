@@ -762,11 +762,8 @@ impl CatalogClient {
         live_target: u32,
     ) -> Result<RosterReply, CatalogClientError> {
         roster_payload(
-            self.call(
-                event_sequence,
-                CatalogOperation::Scale { live_target },
-            )?
-            .payload,
+            self.call(event_sequence, CatalogOperation::Scale { live_target })?
+                .payload,
             "scale",
         )
     }
@@ -927,7 +924,7 @@ fn population_epoch_payload(
         | AcceptedPayload::FrontierPost(_)
         | AcceptedPayload::RideWork(_)
         | AcceptedPayload::RideCredit(_)
-            | AcceptedPayload::Roster(_) => Err(ProtocolError::Malformed(format!(
+        | AcceptedPayload::Roster(_) => Err(ProtocolError::Malformed(format!(
             "{operation} returned an incompatible payload"
         ))
         .into()),
@@ -940,9 +937,9 @@ fn roster_payload(
 ) -> Result<RosterReply, CatalogClientError> {
     match payload {
         AcceptedPayload::Roster(roster) => Ok(roster),
-        _ => Err(ProtocolError::Malformed(format!(
-            "{operation} returned an incompatible payload"
-        ))
-        .into()),
+        _ => Err(
+            ProtocolError::Malformed(format!("{operation} returned an incompatible payload"))
+                .into(),
+        ),
     }
 }

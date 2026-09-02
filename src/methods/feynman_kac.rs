@@ -641,6 +641,11 @@ impl SynchronousPopulation {
         Ok(())
     }
 
+    /// Immutable plan for a completed epoch, if that epoch closed.
+    pub fn completed_plan(&self, epoch: u64) -> Option<&PopulationEpochPlan> {
+        self.completed.get(&epoch).map(|completed| &completed.plan)
+    }
+
     /// Replicas whose submission forms the open epoch, in configured order.
     fn participants(&self) -> Vec<u32> {
         self.replicas

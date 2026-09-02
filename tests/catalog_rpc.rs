@@ -583,6 +583,7 @@ use anneal_core::descriptor_space::{
 };
 use anneal_core::pes_exploration::ExactStructureWitness;
 use anneal_core::scaling::SuccessiveHalving;
+use anneal_core::transition_graph::AttractionRegionConfig;
 use ndarray::ArrayView1;
 use std::collections::BTreeMap;
 
@@ -670,27 +671,34 @@ fn roster_candidate(replica: u32, sequence: u64, separation: f64) -> CatalogCand
     }
 }
 
-fn scientific_config(
-    ensemble: &str,
-    replicas: impl IntoIterator<Item = u32>,
-) -> ServerConfig {
+fn scientific_config(ensemble: &str, replicas: impl IntoIterator<Item = u32>) -> ServerConfig {
     let signature = roster_signature();
     let digest = signature.digest();
-    ServerConfig::new("jcc-2026", ensemble, digest, replicas)
+    let space = roster_descriptor_space();
+    let reference = vec![0.0, 0.0, 0.0, 1.2, 0.0, 0.0];
+    let descriptor_dim = space
+        .describe(
+            ArrayView1::from(&reference),
+            Some(&signature.atomic_numbers),
+        )
         .unwrap()
+        .values()
+        .len();
+    ServerConfig::new("jcc-2026", ensemble, digest, replicas)
+        .expect("roster server identity must be complete")
         .with_scientific_state(
             signature,
-            roster_descriptor_space(),
+            space,
             ValidatorConfig {
-                reference_coordinates: vec![0.0, 0.0, 0.0, 1.2, 0.0, 0.0],
-                descriptor_dim: 9,
+                reference_coordinates: reference,
+                descriptor_dim,
                 min_separation: 0.8,
                 coordinate_tolerance: 1e-10,
                 max_gradient_norm: 1e-8,
                 energy_abs_tolerance: 1e-12,
                 energy_rel_tolerance: 1e-12,
             },
-            2,
+            4,
             0.05,
             400,
             |coordinates| {
@@ -700,9 +708,17 @@ fn scientific_config(
                 })
             },
         )
-        .unwrap()
+        .expect("roster scientific state must be consistent")
         .with_exact_structure_witness(SeparationWitness)
-        .unwrap()
+        .expect("roster witness must attach")
+        .with_attraction_region_config(AttractionRegionConfig {
+            probe_action: "probe".into(),
+            concentration: 0.5,
+            diffusion_steps: 2,
+            maximum_distance: 0.35,
+            minimum_probes: 8,
+        })
+        .expect("roster attraction regions must be valid")
 }
 
 #[test]
