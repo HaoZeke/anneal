@@ -493,6 +493,49 @@ mod tests {
     }
 
     #[test]
+    fn nve_escape_reports_the_energy_spans_needed_for_step_control() {
+        let start = Array1::zeros(5);
+        let config = MdEscapeConfig {
+            dt: 0.01,
+            potential_minima: 1,
+            maximum_steps: 200,
+            geometry: MdEscapeGeometry::Euclidean,
+            softening: None,
+        };
+        let mut evaluate = |x: ArrayView1<f64>| Some((0.5 * x.dot(&x), x.to_owned()));
+        let mut rng = StdRng::seed_from_u64(17);
+
+        let report = nve_escape(start.view(), 0.5, &config, &mut evaluate, &mut rng).unwrap();
+
+        assert!(report.potential_energy_span > 0.0);
+        assert!(report.total_energy_span >= 0.0);
+        assert!(report.energy_conservation_ratio() < 0.01);
+    }
+
+    #[test]
+    fn time_step_feedback_tracks_relative_nve_energy_conservation() {
+        let mut feedback = MdTimeStepFeedback::new(0.08, 0.001);
+        let mut report = MdEscapeReport {
+            position: Array1::zeros(3),
+            steps: 5,
+            potential_minima: 1,
+            energy: 0.0,
+            kinetic: 1.0,
+            softening_evaluations: 0,
+            potential_energy_span: 2.0,
+            total_energy_span: 0.01,
+        };
+
+        assert!((feedback.observe(&report) - 0.084).abs() < 1e-12);
+        report.total_energy_span = 0.04;
+        assert!((feedback.observe(&report) - 0.08).abs() < 1e-12);
+        for _ in 0..200 {
+            feedback.observe(&report);
+        }
+        assert!(feedback.time_step() >= 0.001);
+    }
+
+    #[test]
     fn softened_nve_charges_direction_probes_and_suppresses_the_hard_mode() {
         let start = Array1::zeros(2);
         let config = MdEscapeConfig {
