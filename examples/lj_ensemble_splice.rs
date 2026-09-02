@@ -43,6 +43,7 @@ use anneal_core::methods::two_phase::{
     shared_surface_allocator,
 };
 use anneal_core::methods::warm_lbfgs::WarmLbfgs;
+use anneal_core::potentials::PairPotential;
 use ndarray::{Array1, ArrayView1};
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
@@ -74,6 +75,62 @@ fn lj(x: ArrayView1<f64>) -> (f64, Array1<f64>) {
     (e, g)
 }
 
+/// The pair potential the ensemble walks: reduced Lennard-Jones by default,
+/// or Morse at the range parameter named by `POTENTIAL=morse:RHO`.
+#[derive(Clone)]
+enum Surface {
+    LennardJones,
+    Morse(PairPotential, f64),
+}
+
+impl Surface {
+    fn from_environment(n: usize) -> Self {
+        match std::env::var("POTENTIAL").ok().as_deref() {
+            None | Some("lj") => Self::LennardJones,
+            Some(spec) => {
+                let rho: f64 = spec
+                    .strip_prefix("morse:")
+                    .and_then(|v| v.parse().ok())
+                    .unwrap_or_else(|| panic!("POTENTIAL must be lj or morse:RHO, not {spec:?}"));
+                Self::Morse(PairPotential::morse(n, rho), rho)
+            }
+        }
+    }
+
+    fn energy(&self, x: ArrayView1<f64>) -> (f64, Array1<f64>) {
+        match self {
+            Self::LennardJones => lj(x),
+            Self::Morse(pair, _) => pair.value_and_gradient(x),
+        }
+    }
+
+    fn name(&self) -> String {
+        match self {
+            Self::LennardJones => "LJ".into(),
+            Self::Morse(_, rho) => format!("Morse rho={rho}"),
+        }
+    }
+
+    /// Published global minima, reporting only.
+    fn reference(&self, n: usize) -> Option<f64> {
+        match self {
+            Self::LennardJones => reference(n),
+            Self::Morse(_, rho) => match ((rho * 2.0).round() as i64, n) {
+                (28, 38) => Some(-144.321054),
+                (28, 55) => Some(-220.646208),
+                (28, 75) => Some(-318.407330),
+                (20, 38) => Some(-145.849817),
+                (20, 55) => Some(-225.814286),
+                (20, 75) => Some(-322.643558),
+                (12, 38) => Some(-157.477108),
+                (12, 55) => Some(-250.286609),
+                (12, 75) => Some(-351.472365),
+                _ => None,
+            },
+        }
+    }
+}
+
 fn reference(n: usize) -> Option<f64> {
     Some(match n {
         13 => -44.326801,
@@ -88,8 +145,14 @@ fn reference(n: usize) -> Option<f64> {
 }
 
 /// First-phase surface: the plain energy plus the library's two-phase penalty.
-fn lj_compressed(x: ArrayView1<f64>, mu: f64, diameter: f64, beta: f64) -> (f64, Array1<f64>) {
-    let (e, g) = lj(x);
+fn compressed(
+    surface: &Surface,
+    x: ArrayView1<f64>,
+    mu: f64,
+    diameter: f64,
+    beta: f64,
+) -> (f64, Array1<f64>) {
+    let (e, g) = surface.energy(x);
     let (pe, pg) = penalty(x, diameter, beta, mu);
     (e + pe, g + pg)
 }
@@ -378,6 +441,8 @@ fn run_chain(
     population: Option<Arc<Mutex<Population>>>,
 ) -> ChainReport {
     let cfg = Config::recommended(n);
+    let surface_kind = Surface::from_environment(n);
+    let child_surface = surface_kind.clone();
     let mut rng = StdRng::seed_from_u64(seed);
     let mut exchange_rng = StdRng::seed_from_u64(seed ^ 0x5711_ce);
     let start = resume.unwrap_or_else(|| random_cluster(n, 0.7, cfg.min_separation, &mut rng));
@@ -422,7 +487,7 @@ fn run_chain(
                 if !led.charge() {
                     return None;
                 }
-                Some(lj_compressed(v, mu, cutoff, beta))
+                Some(compressed(&surface_kind, v, mu, cutoff, beta))
             });
             start = compressed;
         }
@@ -431,7 +496,7 @@ fn run_chain(
             if !led.charge() {
                 return None;
             }
-            Some(lj(v))
+            Some(surface_kind.energy(v))
         });
         if let Some(portfolio) = portfolio.as_mut() {
             portfolio.observe(screening, f, led.best);
@@ -545,7 +610,7 @@ fn run_chain(
             child_opt.forget();
             let (energy, relaxed, _) = child_opt.minimize(child.view(), relax_steps, |v| {
                 external_calls += 1;
-                Some(lj(v))
+                Some(child_surface.energy(v))
             });
             if !energy.is_finite() {
                 continue;
@@ -647,10 +712,12 @@ fn main() {
         pbh: mode == "pbh",
         pbh_dcut_scale: env_f64("PBH_DCUT", 1.5),
     };
-    let target = reference(n);
+    let surface = Surface::from_environment(n);
+    let target = surface.reference(n);
     println!(
-        "LJ{n}, {chains} chains x {budget} charged, {ensembles} ensembles, mode {mode}, \
+        "{} N={n}, {chains} chains x {budget} charged, {ensembles} ensembles, mode {mode}, \
          interval {} images {} partner {} source {} checkpoint {} compress {} diameter {:.3} kappa {} beta {} portfolio {:?} block {} shared {}, reference {}",
+        surface.name(),
         exchange.interval,
         exchange.images,
         if exchange.partner_best {
