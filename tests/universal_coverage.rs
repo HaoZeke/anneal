@@ -149,6 +149,41 @@ fn stable_deep_kernel_preserves_invariance_and_raw_separation() {
 }
 
 #[test]
+fn coverage_uncertainty_obeys_total_variance_across_descriptor_views() {
+    let first = tetrahedron();
+    let second = chain();
+    let config = CoverageConfig::default();
+    let mut coverage = UniversalCoverage::new(&first, config).unwrap();
+    coverage.observe(0, &first, -12.0).unwrap();
+    coverage.observe(1, &second, -8.0).unwrap();
+
+    let evidence = coverage.evidence(&second, Some(1)).unwrap();
+    let mut means = vec![evidence.energy_mean];
+    means.extend(evidence.block_means.iter().copied());
+    let mut variances = vec![evidence.energy_standard_deviation.powi(2)];
+    variances.extend(
+        evidence
+            .block_standard_deviations
+            .iter()
+            .map(|standard_deviation| standard_deviation.powi(2)),
+    );
+    let expected_mean = means.iter().sum::<f64>() / means.len() as f64;
+    let expected_variance = means
+        .iter()
+        .zip(&variances)
+        .map(|(mean, variance)| variance + mean * mean)
+        .sum::<f64>()
+        / means.len() as f64
+        - expected_mean * expected_mean;
+
+    assert!((evidence.ensemble_mean - expected_mean).abs() < 1e-10);
+    assert!((evidence.ensemble_standard_deviation.powi(2) - expected_variance).abs() < 1e-8);
+    assert!(
+        (evidence.acquisition - evidence.expected_improvement / config.amplitude).abs() < 1e-10
+    );
+}
+
+#[test]
 fn coverage_rejects_an_incompatible_descriptor_schema() {
     let reference = tetrahedron();
     let other_space = DescriptorSpace::new(
