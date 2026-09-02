@@ -1,12 +1,12 @@
 //! Batch assignment of same-PES global-minimum search operators.
 //!
 //! Every replica contributes one basin-escape opportunity and may contribute a
-//! ridge opportunity. The coordinator maximizes summed minimum-value
-//! information per charged PES evaluation under the exact number of unclaimed
-//! ridge arms. This is a two-choice cardinality-constrained assignment: start
-//! with every basin action, sort the ride-minus-basin gains, and take the
-//! positive gains up to capacity. Exact ties are interchangeable maximizers and
-//! are split deterministically so neither unobserved operator is hidden.
+//! ridge opportunity. Unclaimed ride arms define an exact consumer capacity;
+//! the coordinator fills that capacity while maximizing summed joint-minimum
+//! information per charged PES evaluation. This is a two-choice
+//! cardinality-constrained assignment: start with every basin action, sort the
+//! ride-minus-basin gains, and take the largest gains up to capacity. Stable
+//! replica ordering resolves interchangeable maximizers.
 
 use std::collections::BTreeSet;
 
@@ -24,7 +24,7 @@ pub enum DiscoveryRole {
 pub struct DiscoveryOpportunity {
     /// Replica identifier from the isolated ensemble roster.
     pub replica: u32,
-    /// GIBBON information per charged evaluation for basin escape.
+    /// Joint-minimum information per charged evaluation for basin escape.
     pub basin_information_rate: f64,
     /// Best unclaimed ride-arm information rate, if a ride is feasible.
     pub ride_information_rate: Option<f64>,
@@ -75,7 +75,7 @@ pub enum DiscoveryRosterError {
     InvalidInformationRate,
 }
 
-/// Maximize total information rate under an exclusive ride-arm capacity.
+/// Maximize total information rate while filling exclusive ride-arm capacity.
 pub fn assign_discovery_roles(
     opportunities: &[DiscoveryOpportunity],
     ride_capacity: usize,
@@ -114,23 +114,9 @@ pub fn assign_discovery_roles(
             .then_with(|| left.1.cmp(&right.1))
     });
 
-    let positive = ride_gains
-        .iter()
-        .take_while(|(gain, _)| *gain > 0.0)
-        .count();
-    let zero = ride_gains
-        .iter()
-        .skip(positive)
-        .take_while(|(gain, _)| *gain == 0.0)
-        .count();
-    let positive_selected = positive.min(ride_capacity);
-    let tied_rides = ride_capacity
-        .saturating_sub(positive_selected)
-        .min(zero.div_ceil(2));
     let selected = ride_gains
         .iter()
-        .take(positive_selected)
-        .chain(ride_gains.iter().skip(positive).take(tied_rides))
+        .take(ride_capacity)
         .map(|(_, replica)| *replica)
         .collect::<BTreeSet<_>>();
 

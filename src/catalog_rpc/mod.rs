@@ -515,9 +515,9 @@ pub struct PolicyState {
     pub ei_exhausted: bool,
     /// Measured Fiedler-and-DECAF family floor for this hop graph.
     pub min_families: u32,
-    /// Good-UCB stationary-object role for this same-system replica.
+    /// Joint-minimum-information role for this same-system replica.
     pub discovery_role: DiscoveryRole,
-    /// Exact census-plus-ride observation epoch behind the role assignment.
+    /// Exact terminal-outcome observation epoch behind the role assignment.
     pub discovery_epoch: u64,
     /// One-sided upper bound on unseen exact-basin mass.
     pub basin_unseen_mass_upper: f64,
