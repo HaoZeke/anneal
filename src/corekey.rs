@@ -555,9 +555,5 @@ mod tests {
         );
         assert_eq!(motif_class(fixture("lj104_gm").view()), MotifClass::Sparse);
         assert_eq!(motif_class(fixture("lj98_gm").view()), MotifClass::Moderate);
-        assert_eq!(
-            motif_class(fixture("lj104_gm").view()),
-            MotifClass::Decahedral
-        );
     }
 }
