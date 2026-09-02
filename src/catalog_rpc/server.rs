@@ -1209,12 +1209,8 @@ fn apply_request(
                     ProtocolRejection::ValidationRejected,
                 );
             }
-            let local_basin = scientific
-                .last_candidate_by_replica
-                .get(&request.identity.replica)
-                .and_then(|candidate| candidate.census_basin)
-                .map(BasinId::from_raw)
-                .filter(|basin| scientific.census.entry(*basin).is_some());
+            let local_basin =
+                query_basin_for_descriptor(scientific, request.identity.replica, descriptor);
             let packing = replica_packing(scientific, request.identity.replica);
             let local_basin_visits = packing
                 .as_ref()
@@ -1887,7 +1883,21 @@ fn apply_request(
                         ProtocolRejection::ValidationRejected,
                     );
                 }
-                remember_candidate(scientific, request.identity.replica, canonical);
+                // Catalog offers are search evidence, not adoption events.
+                // An uninitialized replica may bootstrap from an offer, but
+                // an offer never changes an established live-chain identity.
+                let has_live_candidate = scientific
+                    .last_candidate_by_replica
+                    .contains_key(&request.identity.replica);
+                let has_live_basin = scientific
+                    .last_basin_by_replica
+                    .contains_key(&request.identity.replica);
+                if !has_live_candidate || !has_live_basin {
+                    scientific
+                        .last_basin_by_replica
+                        .insert(request.identity.replica, observation.basin_id);
+                    remember_candidate(scientific, request.identity.replica, canonical.clone());
+                }
                 let arrival = scientific
                     .arrival_basin_by_replica
                     .insert(request.identity.replica, observation.basin_id)
@@ -2899,6 +2909,33 @@ fn exact_basin_for(
     })
 }
 
+fn query_basin_for_descriptor(
+    scientific: &ScientificState,
+    replica: u32,
+    descriptor: &[f64],
+) -> Option<BasinId> {
+    if let Some(basin) = scientific
+        .last_basin_by_replica
+        .get(&replica)
+        .copied()
+        .filter(|basin| scientific.census.entry(*basin).is_some())
+    {
+        return Some(basin);
+    }
+
+    // A descriptor is only an admissible identity fallback when its complete
+    // stored fiber contains one exact structural class. This supports a
+    // reader that has not registered a live state without merging descriptor
+    // aliases such as parity-even representations of opposite handedness.
+    let mut matches = scientific
+        .ride_candidates
+        .iter()
+        .filter(|(_, candidate)| candidate.descriptor == descriptor)
+        .map(|(&basin, _)| BasinId::from_raw(basin));
+    let basin = matches.next()?;
+    matches.next().is_none().then_some(basin)
+}
+
 fn candidate_from_validated(
     validated: &ValidatedCandidate,
     census_basin: Option<BasinId>,
@@ -3216,12 +3253,7 @@ fn sample_boundary_crossing(
     draw: u64,
 ) -> Option<BoundaryCrossingRecord> {
     scientific.census.validate_descriptor(current).ok()?;
-    let query_basin = scientific
-        .last_candidate_by_replica
-        .get(&replica)?
-        .census_basin
-        .map(BasinId::from_raw)
-        .filter(|basin| scientific.census.entry(*basin).is_some())?;
+    let query_basin = query_basin_for_descriptor(scientific, replica, current)?;
     let query_node = *scientific.transition_nodes.get(&query_basin)?;
     let regions = scientific
         .transition_graph
