@@ -99,17 +99,19 @@ fn site_energy(kind: PairKind, x: &[f64], skip: Option<usize>, p: [f64; 3]) -> f
 /// neighbours, on the side away from the centroid, at the bond length from
 /// all three, that overlap no point and no site already listed.
 pub fn hollow_sites(x: &[f64], neighbour_cutoff: f64) -> Vec<[f64; 3]> {
+    match median_bond(x) {
+        Some(bond) => hollow_sites_with_bond(x, neighbour_cutoff, bond),
+        None => Vec::new(),
+    }
+}
+
+/// Median nearest-neighbour distance of `x`, if it has two points.
+fn median_bond(x: &[f64]) -> Option<f64> {
     let n = x.len() / 3;
-    let cut2 = neighbour_cutoff * neighbour_cutoff;
-    let mut nb: Vec<Vec<usize>> = vec![Vec::new(); n];
     let mut nearest = vec![f64::INFINITY; n];
     for a in 0..n {
         for b in (a + 1)..n {
             let d2 = dist2(point(x, a), point(x, b));
-            if d2 < cut2 {
-                nb[a].push(b);
-                nb[b].push(a);
-            }
             nearest[a] = nearest[a].min(d2);
             nearest[b] = nearest[b].min(d2);
         }
@@ -120,10 +122,27 @@ pub fn hollow_sites(x: &[f64], neighbour_cutoff: f64) -> Vec<[f64; 3]> {
         .map(|d| d.sqrt())
         .collect();
     if nn.is_empty() {
-        return Vec::new();
+        return None;
     }
     nn.sort_by(|a, b| a.total_cmp(b));
-    let bond = nn[nn.len() / 2];
+    Some(nn[nn.len() / 2])
+}
+
+/// [`hollow_sites`] at a given bond length, for point sets whose own
+/// nearest-neighbour distance is not the bond, such as a layer of
+/// mutually exclusive sites.
+pub fn hollow_sites_with_bond(x: &[f64], neighbour_cutoff: f64, bond: f64) -> Vec<[f64; 3]> {
+    let n = x.len() / 3;
+    let cut2 = neighbour_cutoff * neighbour_cutoff;
+    let mut nb: Vec<Vec<usize>> = vec![Vec::new(); n];
+    for a in 0..n {
+        for b in (a + 1)..n {
+            if dist2(point(x, a), point(x, b)) < cut2 {
+                nb[a].push(b);
+                nb[b].push(a);
+            }
+        }
+    }
     let exclusion2 = (0.85 * bond) * (0.85 * bond);
     let merge2 = (0.3 * bond) * (0.3 * bond);
     let mut c = [0.0_f64; 3];
@@ -155,41 +174,99 @@ pub fn hollow_sites(x: &[f64], neighbour_cutoff: f64) -> Vec<[f64; 3]> {
                     u[2] * v[0] - u[0] * v[2],
                     u[0] * v[1] - u[1] * v[0],
                 ];
-                let norm =
-                    (normal[0] * normal[0] + normal[1] * normal[1] + normal[2] * normal[2]).sqrt();
-                if norm < 1e-12 {
-                    continue;
-                }
                 let height2 = bond * bond - dist2(centre, pa);
-                if height2 <= 0.0 {
-                    continue;
+                push_site(
+                    x, c, centre, normal, height2, exclusion2, merge2, &mut sites,
+                );
+            }
+        }
+    }
+    // Four-fold sites over squares: two second neighbours at about the
+    // square diagonal that share two first neighbours which are themselves
+    // a diagonal apart, as on a (100) facet.
+    let diag_lo = 1.3 * bond;
+    let diag_hi = 1.5 * bond;
+    for a in 0..n {
+        for b in (a + 1)..n {
+            let dab = dist2(point(x, a), point(x, b)).sqrt();
+            if !(diag_lo..diag_hi).contains(&dab) {
+                continue;
+            }
+            let common: Vec<usize> = nb[a]
+                .iter()
+                .copied()
+                .filter(|e| nb[b].contains(e))
+                .collect();
+            for (i, &p) in common.iter().enumerate() {
+                for &q in &common[i + 1..] {
+                    let dpq = dist2(point(x, p), point(x, q)).sqrt();
+                    if !(diag_lo..diag_hi).contains(&dpq) {
+                        continue;
+                    }
+                    let (pa, pb, pp, pq) = (point(x, a), point(x, b), point(x, p), point(x, q));
+                    let centre = [
+                        (pa[0] + pb[0] + pp[0] + pq[0]) / 4.0,
+                        (pa[1] + pb[1] + pp[1] + pq[1]) / 4.0,
+                        (pa[2] + pb[2] + pp[2] + pq[2]) / 4.0,
+                    ];
+                    let u = [pb[0] - pa[0], pb[1] - pa[1], pb[2] - pa[2]];
+                    let v = [pq[0] - pp[0], pq[1] - pp[1], pq[2] - pp[2]];
+                    let normal = [
+                        u[1] * v[2] - u[2] * v[1],
+                        u[2] * v[0] - u[0] * v[2],
+                        u[0] * v[1] - u[1] * v[0],
+                    ];
+                    let height2 = bond * bond - dist2(centre, pa);
+                    push_site(
+                        x, c, centre, normal, height2, exclusion2, merge2, &mut sites,
+                    );
                 }
-                let height = height2.sqrt();
-                let outward = if (centre[0] - c[0]) * normal[0]
-                    + (centre[1] - c[1]) * normal[1]
-                    + (centre[2] - c[2]) * normal[2]
-                    >= 0.0
-                {
-                    1.0
-                } else {
-                    -1.0
-                };
-                let site = [
-                    centre[0] + outward * height * normal[0] / norm,
-                    centre[1] + outward * height * normal[1] / norm,
-                    centre[2] + outward * height * normal[2] / norm,
-                ];
-                if (0..n).any(|e| dist2(site, point(x, e)) < exclusion2) {
-                    continue;
-                }
-                if sites.iter().any(|s| dist2(*s, site) < merge2) {
-                    continue;
-                }
-                sites.push(site);
             }
         }
     }
     sites
+}
+
+/// Place a site at `height2.sqrt()` above `centre` along `normal`, on the
+/// side away from the centroid `c`, unless it overlaps a point or a site.
+#[allow(clippy::too_many_arguments)]
+fn push_site(
+    x: &[f64],
+    c: [f64; 3],
+    centre: [f64; 3],
+    normal: [f64; 3],
+    height2: f64,
+    exclusion2: f64,
+    merge2: f64,
+    sites: &mut Vec<[f64; 3]>,
+) {
+    let n = x.len() / 3;
+    let norm = (normal[0] * normal[0] + normal[1] * normal[1] + normal[2] * normal[2]).sqrt();
+    if norm < 1e-12 || height2 <= 0.0 {
+        return;
+    }
+    let height = height2.sqrt();
+    let outward = if (centre[0] - c[0]) * normal[0]
+        + (centre[1] - c[1]) * normal[1]
+        + (centre[2] - c[2]) * normal[2]
+        >= 0.0
+    {
+        1.0
+    } else {
+        -1.0
+    };
+    let site = [
+        centre[0] + outward * height * normal[0] / norm,
+        centre[1] + outward * height * normal[1] / norm,
+        centre[2] + outward * height * normal[2] / norm,
+    ];
+    if (0..n).any(|e| dist2(site, point(x, e)) < exclusion2) {
+        return;
+    }
+    if sites.iter().any(|s| dist2(*s, site) < merge2) {
+        return;
+    }
+    sites.push(site);
 }
 
 /// Occupation optimisation: at every step the lattice is rebuilt from the
@@ -202,6 +279,17 @@ pub fn optimise_occupation(
     cfg: &LatticeSearchConfig,
     ledger: &mut Ledger,
     x: ArrayView1<f64>,
+) -> (Array1<f64>, usize) {
+    optimise_occupation_over(cfg, ledger, x, 3)
+}
+
+/// [`optimise_occupation`] trying the `movers` worst-bound points at each
+/// step; `movers` at the point count is the full swap search.
+pub fn optimise_occupation_over(
+    cfg: &LatticeSearchConfig,
+    ledger: &mut Ledger,
+    x: ArrayView1<f64>,
+    movers: usize,
 ) -> (Array1<f64>, usize) {
     let n = cfg.n_points;
     let mut cur: Vec<f64> = x.to_vec();
@@ -221,7 +309,7 @@ pub fn optimise_occupation(
             break;
         }
         let mut best: Option<(usize, [f64; 3], f64)> = None;
-        for &atom in order.iter().take(3) {
+        for &atom in order.iter().take(movers.max(1)) {
             for site in &sites {
                 if !ledger.charge_frac(frac) {
                     return (Array1::from(cur), moves);
@@ -297,31 +385,119 @@ pub fn construct(
 }
 
 /// Rebuild the whole cluster on the lattice of occupied positions and hollow
-/// sites of `x`: the site nearest the centroid is placed first, then each
-/// further point takes the vacant lattice site with the lowest energy in the
-/// field of the points already placed. Every site energy is charged at its
-/// pair fraction.
+/// sites of `x`: the fully coordinated interior stays, then each further
+/// point takes the vacant lattice site with the lowest energy in the field
+/// of the points already placed, and the occupation is then relaxed by
+/// swaps. Every site energy is charged at its pair fraction.
 pub fn reoccupy(cfg: &LatticeSearchConfig, ledger: &mut Ledger, x: ArrayView1<f64>) -> Array1<f64> {
     let n = cfg.n_points;
-    let xs = x.to_vec();
-    let mut lattice: Vec<[f64; 3]> = (0..n).map(|i| point(&xs, i)).collect();
-    lattice.extend(hollow_sites(&xs, cfg.neighbour_cutoff));
-    let mut c = [0.0_f64; 3];
-    for i in 0..n {
-        for k in 0..3 {
-            c[k] += xs[3 * i + k] / n as f64;
+    let (placed, vacant) = place_successively_on(cfg, ledger, x);
+    // Successive placement is greedy; a Metropolis walk over occupations
+    // of the same lattice moves it off that ordering, and swaps then
+    // finish the occupation.
+    let walked = walk_occupation_on(
+        cfg,
+        ledger,
+        placed.view(),
+        &vacant,
+        OCCUPATION_WALK_STEPS * n,
+        OCCUPATION_WALK_TEMPERATURE,
+        0x0cc_u64 ^ n as u64,
+    );
+    optimise_occupation_over(cfg, ledger, walked.view(), OCCUPATION_FINISH_MOVERS).0
+}
+
+/// Worst-bound points the finishing swap pass of a reoccupation tries.
+pub const OCCUPATION_FINISH_MOVERS: usize = 8;
+
+/// The successive placement alone: the fully coordinated interior of `x`
+/// stays, and every other point takes, in turn, the vacant lattice site
+/// with the lowest energy in the field of the points placed so far.
+pub fn place_successively(
+    cfg: &LatticeSearchConfig,
+    ledger: &mut Ledger,
+    x: ArrayView1<f64>,
+) -> Array1<f64> {
+    place_successively_on(cfg, ledger, x).0
+}
+
+/// The lattice of `x` grown from its interior: the fully coordinated points
+/// stay, the first layer holds every hollow site over them (both stackings
+/// of each facet), the second layer every hollow site over the interior and
+/// that first layer, and the original surface points are kept as sites too.
+/// A structure without an interior uses its own points and hollow sites and
+/// seeds the site nearest its centroid. Returns the seed coordinates and
+/// the vacant sites.
+pub fn core_lattice(cfg: &LatticeSearchConfig, x: &[f64]) -> (Vec<[f64; 3]>, Vec<[f64; 3]>) {
+    let n = x.len() / 3;
+    let cut2 = cfg.neighbour_cutoff * cfg.neighbour_cutoff;
+    let mut coordination = vec![0usize; n];
+    for a in 0..n {
+        for b in (a + 1)..n {
+            if dist2(point(x, a), point(x, b)) < cut2 {
+                coordination[a] += 1;
+                coordination[b] += 1;
+            }
         }
     }
-    let first = (0..lattice.len())
-        .min_by(|&a, &b| dist2(lattice[a], c).total_cmp(&dist2(lattice[b], c)))
-        .unwrap_or(0);
-    let mut placed: Vec<f64> = lattice[first].to_vec();
-    let mut vacant: Vec<[f64; 3]> = lattice
-        .iter()
-        .enumerate()
-        .filter(|(i, _)| *i != first)
-        .map(|(_, s)| *s)
-        .collect();
+    let interior: Vec<usize> = (0..n).filter(|&i| coordination[i] >= 12).collect();
+    let Some(bond) = median_bond(x) else {
+        return ((0..n).map(|i| point(x, i)).collect(), Vec::new());
+    };
+    if interior.is_empty() {
+        let mut c = [0.0_f64; 3];
+        for i in 0..n {
+            for k in 0..3 {
+                c[k] += x[3 * i + k] / n as f64;
+            }
+        }
+        let mut lattice: Vec<[f64; 3]> = (0..n).map(|i| point(x, i)).collect();
+        lattice.extend(hollow_sites_with_bond(x, cfg.neighbour_cutoff, bond));
+        let first = (0..lattice.len())
+            .min_by(|&a, &b| dist2(lattice[a], c).total_cmp(&dist2(lattice[b], c)))
+            .unwrap_or(0);
+        let seed = lattice.swap_remove(first);
+        return (vec![seed], lattice);
+    }
+    let mut core: Vec<f64> = Vec::with_capacity(3 * interior.len());
+    for &i in &interior {
+        core.extend_from_slice(&x[3 * i..3 * i + 3]);
+    }
+    let first_layer = hollow_sites_with_bond(&core, cfg.neighbour_cutoff, bond);
+    let mut with_first = core.clone();
+    for site in &first_layer {
+        with_first.extend_from_slice(site);
+    }
+    let second_layer = hollow_sites_with_bond(&with_first, cfg.neighbour_cutoff, bond);
+    let merge2 = (0.3 * bond) * (0.3 * bond);
+    let mut vacant: Vec<[f64; 3]> = first_layer;
+    vacant.extend(second_layer);
+    for i in 0..n {
+        if interior.contains(&i) {
+            continue;
+        }
+        let p = point(x, i);
+        if !vacant.iter().any(|s| dist2(*s, p) < merge2) {
+            vacant.push(p);
+        }
+    }
+    let seeds = interior.iter().map(|&i| point(x, i)).collect();
+    (seeds, vacant)
+}
+
+/// [`place_successively`] returning the sites it left vacant as well.
+pub fn place_successively_on(
+    cfg: &LatticeSearchConfig,
+    ledger: &mut Ledger,
+    x: ArrayView1<f64>,
+) -> (Array1<f64>, Vec<[f64; 3]>) {
+    let n = cfg.n_points;
+    let xs = x.to_vec();
+    let (seeds, mut vacant) = core_lattice(cfg, &xs);
+    let mut placed: Vec<f64> = Vec::with_capacity(3 * n);
+    for seed in &seeds {
+        placed.extend_from_slice(seed);
+    }
     let frac = 2.0 / n.max(1) as f64;
     while placed.len() / 3 < n && !vacant.is_empty() {
         let mut best: Option<(usize, f64)> = None;
@@ -344,7 +520,112 @@ pub fn reoccupy(cfg: &LatticeSearchConfig, ledger: &mut Ledger, x: ArrayView1<f6
             placed.extend_from_slice(&xs[3 * i..3 * i + 3]);
         }
     }
-    Array1::from(placed)
+    (Array1::from(placed), vacant)
+}
+
+/// Occupation walk steps per point.
+pub const OCCUPATION_WALK_STEPS: usize = 200;
+/// Occupation walk final temperature in pair-well units.
+pub const OCCUPATION_WALK_TEMPERATURE: f64 = 0.4;
+/// The walk starts at this multiple of the final temperature and cools
+/// geometrically.
+pub const OCCUPATION_WALK_START_RATIO: f64 = 2.5;
+
+/// Metropolis walk over occupations of the lattice of `x` (its points and
+/// their hollow sites): each step proposes moving one point to one vacant
+/// site and accepts by the change in its energy, cooling geometrically to
+/// `temperature` from [`OCCUPATION_WALK_START_RATIO`] times it. Returns
+/// the lowest-energy occupation seen. Each proposal is charged one pair
+/// fraction, and each acceptance a second for the incremental update.
+pub fn walk_occupation(
+    cfg: &LatticeSearchConfig,
+    ledger: &mut Ledger,
+    x: ArrayView1<f64>,
+    steps: usize,
+    temperature: f64,
+    seed: u64,
+) -> Array1<f64> {
+    let vacant = hollow_sites(x.as_slice().unwrap_or(&x.to_vec()), cfg.neighbour_cutoff);
+    walk_occupation_on(cfg, ledger, x, &vacant, steps, temperature, seed)
+}
+
+/// [`walk_occupation`] over the points of `x` and the given vacant sites.
+#[allow(clippy::too_many_arguments)]
+pub fn walk_occupation_on(
+    cfg: &LatticeSearchConfig,
+    ledger: &mut Ledger,
+    x: ArrayView1<f64>,
+    vacant_sites: &[[f64; 3]],
+    steps: usize,
+    temperature: f64,
+    seed: u64,
+) -> Array1<f64> {
+    let n = cfg.n_points;
+    let xs = x.to_vec();
+    let mut lattice: Vec<[f64; 3]> = (0..n).map(|i| point(&xs, i)).collect();
+    lattice.extend_from_slice(vacant_sites);
+    let m = lattice.len();
+    if m <= n || !ledger.charge() {
+        return x.to_owned();
+    }
+    let kind = cfg.kind;
+    let frac = 2.0 / n.max(1) as f64;
+    let mut cur = xs;
+    let mut energies: Vec<f64> = (0..n)
+        .map(|i| site_energy(kind, &cur, Some(i), point(&cur, i)))
+        .collect();
+    let mut total: f64 = energies.iter().sum::<f64>() / 2.0;
+    let mut best_total = total;
+    let mut best = cur.clone();
+    let mut occupied: Vec<usize> = (0..n).collect();
+    let mut vacant: Vec<usize> = (n..m).collect();
+    let mut rng = StdRng::seed_from_u64(seed);
+    let t_hi = OCCUPATION_WALK_START_RATIO * temperature;
+    for step in 0..steps {
+        if !ledger.charge_frac(frac) {
+            break;
+        }
+        let progress = step as f64 / steps.max(1) as f64;
+        let temperature = t_hi * (temperature / t_hi).powf(progress);
+        let i = rng.random_range(0..n);
+        let slot = rng.random_range(0..vacant.len());
+        let site = lattice[vacant[slot]];
+        let e_new = site_energy(kind, &cur, Some(i), site);
+        let delta = e_new - energies[i];
+        if delta > 0.0 && rng.random::<f64>() >= (-delta / temperature).exp() {
+            continue;
+        }
+        if !ledger.charge_frac(frac) {
+            break;
+        }
+        let old = point(&cur, i);
+        for j in 0..n {
+            if j == i {
+                continue;
+            }
+            let pj = point(&cur, j);
+            let (r2_old, r2_new) = (dist2(old, pj), dist2(site, pj));
+            if r2_old > 1e-12 {
+                energies[j] -= kind.pair(r2_old).0;
+            }
+            if r2_new > 1e-12 {
+                energies[j] += kind.pair(r2_new).0;
+            }
+        }
+        energies[i] = e_new;
+        for k in 0..3 {
+            cur[3 * i + k] = site[k];
+        }
+        let freed = occupied[i];
+        occupied[i] = vacant[slot];
+        vacant[slot] = freed;
+        total += delta;
+        if total < best_total - 1e-9 {
+            best_total = total;
+            best.clone_from(&cur);
+        }
+    }
+    Array1::from(best)
 }
 
 /// Run the dynamic lattice search under `ledger`.
@@ -419,6 +700,7 @@ mod tests {
     use super::*;
     use crate::methods::warm_lbfgs::WarmLbfgs;
     use crate::potentials::PairPotential;
+    use ndarray::Array1;
 
     fn search(n: usize, budget: usize, seed: u64) -> Outcome {
         let cfg = LatticeSearchConfig::lennard_jones(n);
@@ -436,6 +718,102 @@ mod tests {
         };
         let mut ledger = Ledger::new(budget);
         run(&cfg, &mut ledger, &mut relax, seed)
+    }
+
+    fn fixture(name: &str) -> Array1<f64> {
+        let path = format!("{}/tests/fixtures/{name}.xyz", env!("CARGO_MANIFEST_DIR"));
+        let text = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{path}: {e}"));
+        let mut coords = Vec::new();
+        for line in text.lines().skip(2) {
+            let f: Vec<f64> = line
+                .split_whitespace()
+                .skip(1)
+                .map(|v| v.parse().expect("coordinate"))
+                .collect();
+            if f.len() == 3 {
+                coords.extend(f);
+            }
+        }
+        Array1::from(coords)
+    }
+
+    fn quench(n: usize, x: ArrayView1<f64>) -> f64 {
+        let pot = PairPotential::lennard_jones(n);
+        let mut opt = WarmLbfgs::default();
+        let (f, _, _) = opt.minimize(x, 5000, |v| Some(pot.value_and_gradient(v)));
+        f
+    }
+
+    /// The eight least coordinated points scattered onto a sphere outside
+    /// the cluster.
+    fn displace_surface(x: &Array1<f64>, cutoff: f64, seed: u64) -> Array1<f64> {
+        use rand::{Rng, SeedableRng};
+        let n = x.len() / 3;
+        let xs = x.to_vec();
+        let cut2 = cutoff * cutoff;
+        let mut coordination = vec![0usize; n];
+        let mut rmax: f64 = 0.0;
+        for a in 0..n {
+            rmax = rmax.max(dist2([0.0; 3], point(&xs, a)).sqrt());
+            for b in (a + 1)..n {
+                if dist2(point(&xs, a), point(&xs, b)) < cut2 {
+                    coordination[a] += 1;
+                    coordination[b] += 1;
+                }
+            }
+        }
+        let mut order: Vec<usize> = (0..n).collect();
+        order.sort_by_key(|&i| coordination[i]);
+        let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
+        let mut out = xs;
+        for &atom in order.iter().take(8) {
+            let u: f64 = rng.random_range(-1.0..1.0);
+            let phi: f64 = rng.random_range(0.0..std::f64::consts::TAU);
+            let r = 1.15 * rmax;
+            let s = (1.0 - u * u).sqrt();
+            out[3 * atom] = r * s * phi.cos();
+            out[3 * atom + 1] = r * s * phi.sin();
+            out[3 * atom + 2] = r * u;
+        }
+        Array1::from(out)
+    }
+
+    fn restores(name: &str, n: usize, reference: f64, seed: u64) -> (f64, f64) {
+        let gm = fixture(name);
+        assert_eq!(gm.len(), 3 * n);
+        let cfg = LatticeSearchConfig::lennard_jones(n);
+        let start = displace_surface(&gm, cfg.neighbour_cutoff, seed);
+        let mut ledger = Ledger::new(400_000);
+        let (built, _) = optimise_occupation(&cfg, &mut ledger, start.view());
+        let occupied = quench(n, built.view());
+        let mut ledger = Ledger::new(400_000);
+        let rebuilt = reoccupy(&cfg, &mut ledger, gm.view());
+        let reoccupied = quench(n, rebuilt.view());
+        assert!(
+            quench(n, gm.view()) < reference + 1e-3,
+            "fixture {name} does not quench to {reference}"
+        );
+        (occupied, reoccupied)
+    }
+
+    #[test]
+    fn occupation_optimisation_restores_displaced_surface_atoms_of_lj98() {
+        let (occupied, reoccupied) = restores("lj98_gm", 98, -543.665361, 1);
+        assert!(occupied < -543.665361 + 1e-3, "occupation gave {occupied}");
+        assert!(
+            reoccupied < -543.665361 + 1e-3,
+            "reoccupation gave {reoccupied}"
+        );
+    }
+
+    #[test]
+    fn occupation_optimisation_restores_displaced_surface_atoms_of_lj104() {
+        let (occupied, reoccupied) = restores("lj104_gm", 104, -582.086642, 1);
+        assert!(occupied < -582.086642 + 1e-3, "occupation gave {occupied}");
+        assert!(
+            reoccupied < -582.086642 + 1e-3,
+            "reoccupation gave {reoccupied}"
+        );
     }
 
     #[test]
