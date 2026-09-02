@@ -84,9 +84,7 @@ fn rigid_transform(coordinates: &Array1<f64>) -> Array1<f64> {
 
 #[test]
 fn provider_values_keep_the_declared_invariant_metric() {
-    let coordinates = Array1::from_vec(vec![
-        0.0, 0.0, 0.0, 1.2, 0.1, -0.2, -0.4, 1.1, 0.7,
-    ]);
+    let coordinates = Array1::from_vec(vec![0.0, 0.0, 0.0, 1.2, 0.1, -0.2, -0.4, 1.1, 0.7]);
     let moved = rigid_transform(&coordinates);
     let permuted = Array1::from_vec(vec![
         coordinates[6],
@@ -105,9 +103,7 @@ fn provider_values_keep_the_declared_invariant_metric() {
         .describe(coordinates.view(), Some(&[6, 6, 6]))
         .unwrap();
     let transformed = space.describe(moved.view(), Some(&[6, 6, 6])).unwrap();
-    let reordered = space
-        .describe(permuted.view(), Some(&[6, 6, 6]))
-        .unwrap();
+    let reordered = space.describe(permuted.view(), Some(&[6, 6, 6])).unwrap();
 
     assert_eq!(reference.values().len(), 3);
     assert!(reference.distance(&transformed).unwrap() < 1e-12);
@@ -117,9 +113,7 @@ fn provider_values_keep_the_declared_invariant_metric() {
 
 #[test]
 fn provider_digest_is_part_of_descriptor_identity() {
-    let coordinates = Array1::from_vec(vec![
-        0.0, 0.0, 0.0, 1.2, 0.1, -0.2, -0.4, 1.1, 0.7,
-    ]);
+    let coordinates = Array1::from_vec(vec![0.0, 0.0, 0.0, 1.2, 0.1, -0.2, -0.4, 1.1, 0.7]);
     let first = descriptor([3; 32], 3)
         .describe(coordinates.view(), Some(&[6, 6, 6]))
         .unwrap();
@@ -135,9 +129,7 @@ fn provider_digest_is_part_of_descriptor_identity() {
 
 #[test]
 fn provider_output_shape_is_checked_at_the_boundary() {
-    let coordinates = Array1::from_vec(vec![
-        0.0, 0.0, 0.0, 1.2, 0.1, -0.2, -0.4, 1.1, 0.7,
-    ]);
+    let coordinates = Array1::from_vec(vec![0.0, 0.0, 0.0, 1.2, 0.1, -0.2, -0.4, 1.1, 0.7]);
     let error = descriptor([9; 32], 2)
         .describe(coordinates.view(), Some(&[6, 6, 6]))
         .unwrap_err();
