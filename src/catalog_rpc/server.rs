@@ -60,6 +60,7 @@ use crate::ride_ledger::{
 };
 use crate::soap::local_nu3_z;
 use crate::transition_graph::{AttractionRegionConfig, TransitionGraph, TransitionOutcome};
+use crate::universal_coverage::{CoverageConfig, UniversalCoverage};
 
 type FreshEvaluator = dyn Fn(&[f64]) -> Result<FreshEvaluation, String> + Send + Sync;
 type StructuralWitness = dyn ExactStructureWitness + Send + Sync;
@@ -85,6 +86,7 @@ struct ScientificConfig {
     census_radius: f64,
     total_charged_work: u64,
     attraction_regions: AttractionRegionConfig,
+    coverage: UniversalCoverage,
     evaluate: Arc<FreshEvaluator>,
     exact_witness: Option<Arc<StructuralWitness>>,
 }
@@ -171,6 +173,20 @@ impl ServerConfig {
         if descriptor.values().len() != validator.descriptor_dim {
             return Err(CatalogServerError::InvalidScientificConfiguration);
         }
+        let energy_scale = signature.energy_scale.abs().max(1e-12);
+        let coverage_noise = validator
+            .energy_abs_tolerance
+            .max(validator.energy_rel_tolerance * energy_scale)
+            .max(1e-12);
+        let coverage = UniversalCoverage::new(
+            &descriptor,
+            CoverageConfig {
+                amplitude: energy_scale,
+                noise: coverage_noise,
+                ..CoverageConfig::default()
+            },
+        )
+        .map_err(|_| CatalogServerError::InvalidScientificConfiguration)?;
         BasinCensus::new(validator.descriptor_dim, census_radius)
             .map_err(|_| CatalogServerError::InvalidScientificConfiguration)?;
         BasinCatalog::new(catalog_capacity, census_radius, total_charged_work)
@@ -197,6 +213,7 @@ impl ServerConfig {
                 maximum_distance: 0.35,
                 minimum_probes: 8,
             },
+            coverage,
             evaluate: Arc::new(evaluate),
             exact_witness: None,
         });
@@ -303,6 +320,7 @@ struct ScientificState {
     census: BasinCensus,
     catalog: BasinCatalog,
     transition_graph: TransitionGraph,
+    coverage: UniversalCoverage,
     attraction_regions: AttractionRegionConfig,
     transition_nodes: BTreeMap<BasinId, usize>,
     landscape: LandscapeGraph,
@@ -439,6 +457,7 @@ impl CoordinatorState {
                     )
                     .map_err(|_| CatalogServerError::InvalidScientificConfiguration)?,
                     transition_graph: TransitionGraph::new(),
+                    coverage: scientific.coverage.clone(),
                     attraction_regions: scientific.attraction_regions.clone(),
                     transition_nodes: BTreeMap::new(),
                     landscape: LandscapeGraph::new(),
@@ -1211,15 +1230,29 @@ fn apply_request(
             let local_basin_distance = local_basin
                 .and_then(|id| scientific.census.entry(id))
                 .map_or(0.0, |entry| descriptor_distance(descriptor, entry.medoid()));
-            let novelty = packing.as_ref().map_or_else(
-                || {
-                    local_basin.map_or_else(
-                        || nearest_census_distance(&scientific.census, descriptor).unwrap_or(0.0),
-                        |id| nearest_other_census_distance(&scientific.census, id, descriptor),
-                    )
-                },
-                |fp| scientific.packing.novelty(fp),
-            );
+            let assigned_class = local_basin
+                .map(|basin| usize::try_from(basin.as_raw()))
+                .transpose()
+                .ok()
+                .flatten();
+            if local_basin.is_some() && assigned_class.is_none() {
+                return rejected(
+                    state,
+                    request.event_sequence,
+                    ProtocolRejection::ValidationRejected,
+                );
+            }
+            let Ok(coverage) = scientific
+                .coverage
+                .evidence_values(descriptor, assigned_class)
+            else {
+                return rejected(
+                    state,
+                    request.event_sequence,
+                    ProtocolRejection::ValidationRejected,
+                );
+            };
+            let novelty = coverage.acquisition;
             let transition_uncertainty =
                 local_basin.map_or_else(|| 1.0, |id| transition_uncertainty(scientific, id));
             let basin_unseen_mass_upper = coverage_allocation_weight(
@@ -1737,6 +1770,14 @@ fn apply_request(
                         observation.basin_id.as_raw(),
                         1.0,
                     );
+                    if connect_coverage_classes(scientific, previous, observation.basin_id).is_err()
+                    {
+                        return rejected(
+                            state,
+                            request.event_sequence,
+                            ProtocolRejection::ValidationRejected,
+                        );
+                    }
                 }
                 let canonical = candidate_from_validated(&validated, Some(observation.basin_id));
                 let deeper = scientific
@@ -2068,6 +2109,16 @@ fn apply_request(
                         }
                     }
                     state.census_visits = observation.total_visits;
+                    if source_basin != observation.basin_id
+                        && connect_coverage_classes(scientific, source_basin, observation.basin_id)
+                            .is_err()
+                    {
+                        return rejected(
+                            state,
+                            request.event_sequence,
+                            ProtocolRejection::ValidationRejected,
+                        );
+                    }
                     TransitionOutcome::Resolved(destination_node)
                 }
             };
@@ -2240,6 +2291,13 @@ fn apply_request(
                 next_scientific
                     .landscape
                     .observe_crossing(endpoints[0], endpoints[1], 1.0);
+                if connect_coverage_classes(&mut next_scientific, left, right).is_err() {
+                    return rejected(
+                        state,
+                        request.event_sequence,
+                        ProtocolRejection::ValidationRejected,
+                    );
+                }
             }
             let Some(snapshot_version) = state.snapshot_version.checked_add(1) else {
                 return rejected(
@@ -2783,10 +2841,20 @@ fn observe_exact_basin(
     validated: &ValidatedCandidate,
 ) -> Result<CensusObservation, ()> {
     let assigned = exact_basin_for(scientific, validated);
-    scientific
+    let observation = scientific
         .census
         .observe_assigned(&validated.candidate.descriptor, assigned)
-        .map_err(|_| ())
+        .map_err(|_| ())?;
+    let class = usize::try_from(observation.basin_id.as_raw()).map_err(|_| ())?;
+    scientific
+        .coverage
+        .observe_values(
+            class,
+            &validated.candidate.descriptor,
+            validated.fresh.energy,
+        )
+        .map_err(|_| ())?;
+    Ok(observation)
 }
 
 fn exact_basin_for(
@@ -3233,6 +3301,16 @@ fn transition_node(scientific: &mut ScientificState, basin: BasinId) -> Option<u
     scientific.transition_graph.register_node(node).ok()?;
     scientific.transition_nodes.insert(basin, node);
     Some(node)
+}
+
+fn connect_coverage_classes(
+    scientific: &mut ScientificState,
+    left: BasinId,
+    right: BasinId,
+) -> Result<(), ()> {
+    let left = usize::try_from(left.as_raw()).map_err(|_| ())?;
+    let right = usize::try_from(right.as_raw()).map_err(|_| ())?;
+    scientific.coverage.connect(left, right).map_err(|_| ())
 }
 
 fn transition_uncertainty(scientific: &ScientificState, basin: BasinId) -> f64 {

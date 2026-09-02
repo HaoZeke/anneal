@@ -481,7 +481,8 @@ pub struct PolicyState {
     pub local_basin: Option<u64>,
     /// Distance from the query descriptor to its assigned immutable medoid.
     pub local_basin_distance: f64,
-    /// Distance to the nearest distinct census medoid.
+    /// Universal descriptor acquisition from novelty, GP uncertainty, model
+    /// disagreement, expected improvement, and graph residual uncertainty.
     pub novelty: f64,
     /// Posterior uncertainty of the latent Gaussian basin-transition field.
     pub transition_uncertainty: f64,

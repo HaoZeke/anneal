@@ -261,7 +261,7 @@ mod run {
         pub globally_saturated: bool,
         /// Distance from the query descriptor to its immutable census medoid.
         pub local_basin_distance: f64,
-        /// Distance from the query to the nearest distinct census medoid.
+        /// Universal descriptor acquisition from novelty and model uncertainty.
         pub novelty: f64,
         /// Posterior uncertainty of the latent Gaussian transition field.
         pub transition_uncertainty: f64,
