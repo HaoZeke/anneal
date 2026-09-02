@@ -119,7 +119,29 @@ POPULATION_INTERVAL=${CATALOG_POPULATION_INTERVAL:-50000}
 TOTAL_BUDGET=$((PER_REPLICA_BUDGET * REPLICAS))
 SEED_BASE=$((${SEED_OFFSET_BASE:-400000} + ENSEMBLE_INDEX * REPLICAS))
 REPLICA_LIST=$(seq -s, 0 $((REPLICAS - 1)))
-BRAIN_PORT_BASE=${CATALOG_BRAIN_PORT_BASE:-$((27000 + SLURM_JOB_ID % 2000))}
+if [[ -n ${CATALOG_BRAIN_PORT_BASE:-} ]]; then
+  if [[ ! $CATALOG_BRAIN_PORT_BASE =~ ^[0-9]+$ ]] \
+    || ((CATALOG_BRAIN_PORT_BASE < 1024 \
+      || CATALOG_BRAIN_PORT_BASE + REPLICAS - 1 > 65535)); then
+    echo "CATALOG_BRAIN_PORT_BASE does not reserve a valid replica port block" >&2
+    exit 2
+  fi
+  brain_transport=tcp
+else
+  BRAIN_NAMESPACE="${SLURM_ARRAY_JOB_ID:-$SLURM_JOB_ID}-${SLURM_ARRAY_TASK_ID:-0}-${SLURM_JOB_ID}"
+  BRAIN_IPC_PREFIX="/tmp/anneal-brain-${BRAIN_NAMESPACE}"
+  brain_transport=ipc
+fi
+
+brain_endpoint() {
+  local replica=$1
+  if [[ $brain_transport == tcp ]]; then
+    local endpoint="tcp://127.0.0.1:$((CATALOG_BRAIN_PORT_BASE + replica))"
+    printf '%s' "$endpoint"
+  else
+    printf 'ipc://%s-%s.sock' "$BRAIN_IPC_PREFIX" "$replica"
+  fi
+}
 
 brain_peers() {
   local me=$1
@@ -129,7 +151,7 @@ brain_peers() {
   local replica
   for replica in $(seq "$lo" $((hi - 1))); do
     if ((replica != me)); then
-      parts+=("${replica}=tcp://127.0.0.1:$((BRAIN_PORT_BASE + replica))")
+      parts+=("${replica}=$(brain_endpoint "$replica")")
     fi
   done
   local IFS=,
@@ -334,7 +356,7 @@ while ((replica < REPLICAS)); do
       export ANNEAL_RESOLVED_CONFIG=$worker/resolved-config.json
       export SEED_OFFSET="$seed"
       export CATALOG_RPC="$worker_endpoint"
-      export CATALOG_BRAIN_LISTEN="tcp://127.0.0.1:$((BRAIN_PORT_BASE + replica))"
+      export CATALOG_BRAIN_LISTEN=$(brain_endpoint "$replica")
       CATALOG_BRAIN_PEERS=$worker_brain_peers
       export CATALOG_BRAIN_PEERS
       exec "$BIN" "$N" "$PER_REPLICA_BUDGET" 1 rec
@@ -428,6 +450,7 @@ calibration_sha256=$(sha256sum "$CALIBRATION" | awk '{print $1}')
   printf 'ensemble=%s\n' "$ENSEMBLE"
   printf 'catalog_topology=%s\n' "$catalog_topology"
   printf 'brain_topology=%s\n' "$brain_topology"
+  printf 'brain_transport=%s\n' "$brain_transport"
   printf 'replicas=%s\n' "$REPLICAS"
   printf 'wave=%s\n' "$WAVE"
   printf 'per_replica_budget=%s\n' "$PER_REPLICA_BUDGET"
