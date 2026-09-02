@@ -1008,6 +1008,27 @@ fn policy_query_keeps_the_last_exact_basin_when_its_descriptor_reaches_another_m
 }
 
 #[test]
+fn policy_novelty_rises_off_the_observed_descriptor_support_without_a_second_medoid() {
+    let server = server();
+    let digest = signature().digest();
+    let mut client =
+        CatalogClient::connect(server.addr(), identity(0, digest), ClientConfig::default())
+            .unwrap();
+    let observed = candidate(0, 1, 1.2);
+    let observed_descriptor = observed.descriptor.clone();
+    client.offer_candidate(1, observed).unwrap();
+
+    let known = client.policy_state(2, observed_descriptor, -1.2).unwrap();
+    let unseen = candidate(0, 3, 2.0);
+    let novel = client
+        .policy_state(3, unseen.descriptor, unseen.energy)
+        .unwrap();
+
+    assert!(novel.novelty > known.novelty);
+    assert_eq!(known.local_basin, novel.local_basin);
+}
+
+#[test]
 fn try_policy_input_does_not_block_the_hop() {
     let server = server();
     let digest = signature().digest();
