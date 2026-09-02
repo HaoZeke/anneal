@@ -2957,10 +2957,10 @@ fn run_capnp_catalog(
     };
     use anneal_core::cooperative_search::ledger::ChargeKind;
     use anneal_core::cooperative_search::{
-        CatalogBoundaryOutcome, CatalogBridgeOutcome, CatalogHoleOutcome, CatalogSampleOutcome,
-        CatalogSamplesOutcome, CooperativeRun, PolicyEvidenceOutcome, PolicyRole,
-        PopulationSynchronizationOutcome, ProposalFamily, RunManifest, SliceAdoption, SliceQuench,
-        SliceTrace, SliceValidation, TransitionRecordOutcome,
+        CatalogBridgeOutcome, CatalogHoleOutcome, CatalogSampleOutcome, CatalogSamplesOutcome,
+        CooperativeRun, PolicyEvidenceOutcome, PolicyRole, PopulationSynchronizationOutcome,
+        ProposalFamily, RunManifest, SliceAdoption, SliceQuench, SliceTrace, SliceValidation,
+        TransitionRecordOutcome,
     };
     #[cfg(feature = "ira")]
     use anneal_core::cooperative_search::{RideClaimOutcome, RideReportOutcome};
@@ -4075,63 +4075,6 @@ fn run_capnp_catalog(
                     }
                 }
             }
-            let crossing = match cooperative
-                .try_boundary_crossing(replica, parent.descriptor, draw)
-                .expect("population frontier access must preserve local execution")
-            {
-                CatalogBoundaryOutcome::Crossing(crossing) => {
-                    cooperative
-                        .record_work(replica, ChargeKind::RemoteProposal, 0)
-                        .expect("population frontier proposal must enter the ledger");
-                    Some(crossing)
-                }
-                _ => None,
-            };
-            if let Some(crossing) = crossing {
-                let state = population_region_trial(
-                    snapshot.current_state(),
-                    Some(&crossing),
-                    transport_noise,
-                    transport_radius,
-                    draw,
-                );
-                if state != snapshot.current_state() {
-                    slice_sequence = slice_sequence
-                        .checked_add(1)
-                        .expect("slice sequence must fit u64");
-                    let reconfiguration = SliceTrace {
-                        slice: slice_sequence,
-                        current_basin: None,
-                        active_relation: None,
-                        policy_role: PolicyRole::Explore,
-                        policy_reason: "population_assignment",
-                        proposal_family: ProposalFamily::PopulationReconfiguration,
-                        sampled_basin: Some(crossing.destination_basin),
-                        descriptor_step_norm: None,
-                        cartesian_step_norm: Some(vector_distance(
-                            snapshot
-                                .current_state()
-                                .as_slice()
-                                .expect("LJ state is contiguous"),
-                            state.as_slice().expect("LJ proposal is contiguous"),
-                        )),
-                        validation: SliceValidation::Accepted,
-                        quench: SliceQuench::Converged,
-                        adoption: SliceAdoption::Adopted,
-                        novelty: None,
-                        energy: finite_trace_energy(snapshot.best_energy()),
-                        charged_work: u64::try_from(checkpoint_charged)
-                            .expect("checkpoint charge must fit u64"),
-                    };
-                    cooperative
-                        .record_slice(replica, reconfiguration)
-                        .expect("population checkpoint trace must remain complete");
-                    return CheckpointAction::BoundaryProposal {
-                        state,
-                        action: "population_boundary".to_owned(),
-                    };
-                }
-            }
             if foreign_parent {
                 let live = snapshot.current_state();
                 let left = {
@@ -4990,73 +4933,8 @@ fn run_capnp_catalog(
             }
             PolicyAction::Explore => {
                 trace.policy_role = PolicyRole::Explore;
-                trace.proposal_family = ProposalFamily::BoundaryTransport;
-                if let CatalogBoundaryOutcome::Crossing(crossing) = cooperative
-                    .try_boundary_crossing(replica, descriptor.clone(), transport_rng.random())
-                    .expect("boundary-crossing access must preserve local execution")
-                {
-                    // A boundary crossing carries another chain's structure
-                    // too, so the invert learns the packing it sits in.
-                    anneal_core::catalog::include_packing_reference(&crossing.to);
-                    if shared_bias_enabled {
-                        pending_deposits.push(Array1::from(crossing.to.clone()));
-                    }
-                    if coop_wells_enabled {
-                        #[cfg(feature = "featomic")]
-                        {
-                            let well = anneal_core::featomic_hop::soap_cloud_mean(
-                                ndarray::ArrayView1::from(crossing.to.as_slice()),
-                                coop_rcut,
-                                coop_species.as_deref(),
-                                None,
-                            );
-                            let known = shared_wells.iter().any(|w| {
-                                w.iter()
-                                    .zip(well.iter())
-                                    .map(|(a, b)| (a - b) * (a - b))
-                                    .sum::<f64>()
-                                    .sqrt()
-                                    < anneal_core::featomic_hop::SOAP_PACK_MERGE
-                            });
-                            if !known {
-                                shared_wells.push(well);
-                                if shared_wells.len() > 30 {
-                                    shared_wells.remove(0);
-                                }
-                                anneal_core::featomic_hop::set_packing_archive(
-                                    shared_wells.clone(),
-                                );
-                            }
-                        }
-                    }
-                    trace.sampled_basin = Some(crossing.destination_basin);
-                    cooperative
-                        .record_work(replica, ChargeKind::RemoteProposal, 0)
-                        .expect("remote proposal work must enter the cooperative ledger");
-                    if let Some(state) = boundary_crossing_trial(
-                        snapshot.current_state(),
-                        &crossing,
-                        transport_noise,
-                        transport_radius,
-                        &mut transport_rng,
-                    ) {
-                        trace.cartesian_step_norm = Some(vector_distance(
-                            snapshot
-                                .current_state()
-                                .as_slice()
-                                .expect("LJ state is contiguous"),
-                            state.as_slice().expect("LJ proposal is contiguous"),
-                        ));
-                        trace.adoption = SliceAdoption::Adopted;
-                        cooperative
-                            .record_slice(replica, trace)
-                            .expect("checkpoint trace must remain complete");
-                        return CheckpointAction::BoundaryProposal {
-                            state,
-                            action: "boundary_transport".to_owned(),
-                        };
-                    }
-                } else if let CatalogHoleOutcome::Proposal(_) = cooperative
+                trace.proposal_family = ProposalFamily::DescriptorHole;
+                if let CatalogHoleOutcome::Proposal(_) = cooperative
                     .descriptor_hole(replica, descriptor.clone(), 128, transport_rng.random())
                     .expect("descriptor-hole access must preserve local execution")
                 {
