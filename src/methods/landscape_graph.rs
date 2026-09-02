@@ -1,14 +1,14 @@
 //! Spectral referee over the explored landscape.
 //!
 //! The catalog and census name basins; observed transitions between them
-//! form a weighted graph. The second Laplacian eigenvalue measures how
-//! metastable the explored landscape is, the sign structure of its
-//! eigenvector splits the basins into the two most weakly coupled
-//! communities, and an absorbing-chain solve prices the expected number
-//! of transitions to reach a chosen set of basins. Together these answer
-//! the questions a coordinator faces at an epoch boundary: is the
-//! ensemble confined, where is the seam, which pair of basins deserves a
-//! bridge, and is local work still worth its price.
+//! form a weighted graph. The second normalized-Laplacian eigenvalue
+//! measures how metastable the explored landscape is, and a Cheeger sweep
+//! over its eigenvector selects the lowest-conductance cut in that spectral
+//! ordering. An absorbing-chain solve prices the expected number of
+//! transitions to reach a chosen set of basins. Together these answer the
+//! questions a coordinator faces at an epoch boundary: is the ensemble
+//! confined, where is the seam, which pair of basins deserves a bridge, and
+//! is local work still worth its price.
 //!
 //! Everything is dense arithmetic on a graph no larger than the catalog
 //! capacity, so no external eigensolver or sparse machinery appears.
@@ -38,18 +38,18 @@ pub enum GraphError {
 /// The two most weakly coupled communities of the explored landscape.
 #[derive(Debug, Clone)]
 pub struct SpectralSplit {
-    /// Second-smallest Laplacian eigenvalue: the algebraic connectivity.
+    /// Second-smallest normalized-Laplacian eigenvalue.
     pub algebraic_connectivity: f64,
-    /// Basins on the negative side of the eigenvector.
+    /// Basins in the selected Fiedler-sweep prefix.
     pub left: Vec<u64>,
-    /// Basins on the non-negative side.
+    /// Basins in the complementary suffix.
     pub right: Vec<u64>,
     /// Cut weight over the smaller side's volume: the conductance of the
     /// split, small when the two communities rarely exchange.
     pub conductance: f64,
     /// The best-anchored representative on each side: the basin with the
-    /// largest internal weight in its community. Bridges commission
-    /// between representatives, not between arbitrary members.
+    /// largest observed incident weight. Bridges commission between
+    /// representatives, not between arbitrary members.
     pub representatives: (u64, u64),
 }
 
@@ -136,7 +136,9 @@ impl LandscapeGraph {
 
     /// The spectral split of the landscape, or an error below two basins.
     ///
-    /// A dense symmetric eigensolve returns the second Laplacian eigenpair.
+    /// A dense symmetric eigensolve returns the second normalized-Laplacian
+    /// eigenpair. Every prefix in the degree-corrected Fiedler ordering is
+    /// evaluated, and the minimum-conductance prefix defines the split.
     /// Disconnected graphs are partitioned along whole connected components,
     /// avoiding the arbitrary basis inside a degenerate zero eigenspace.
     pub fn spectral_split(&self) -> Result<SpectralSplit, GraphError> {
@@ -167,12 +169,13 @@ impl LandscapeGraph {
                 .collect();
             (0.0, left, right)
         } else {
+            let degrees = (0..n).map(|i| self.degree(i)).collect::<Vec<_>>();
             let mut laplacian = Array2::zeros((n, n));
             for i in 0..n {
-                laplacian[(i, i)] = self.degree(i);
+                laplacian[(i, i)] = 1.0;
                 for j in 0..n {
                     if i != j {
-                        laplacian[(i, j)] = -self.weights[i][j];
+                        laplacian[(i, j)] = -self.weights[i][j] / (degrees[i] * degrees[j]).sqrt();
                     }
                 }
             }
@@ -182,21 +185,56 @@ impl LandscapeGraph {
             order.sort_by(|left, right| eigenvalues[*left].total_cmp(&eigenvalues[*right]));
             let fiedler = order[1];
             let vector = eigenvectors.column(fiedler);
-            let mut left = Vec::new();
-            let mut right = Vec::new();
-            for (i, &basin) in self.basins.iter().enumerate() {
-                if vector[i] < 0.0 {
-                    left.push(basin);
-                } else {
-                    right.push(basin);
+            let mut sweep = (0..n).collect::<Vec<_>>();
+            sweep.sort_by(|&left, &right| {
+                let left_score = vector[left] / degrees[left].sqrt();
+                let right_score = vector[right] / degrees[right].sqrt();
+                left_score
+                    .total_cmp(&right_score)
+                    .then_with(|| self.basins[left].cmp(&self.basins[right]))
+            });
+
+            let total_volume = degrees.iter().sum::<f64>();
+            let mut in_prefix = vec![false; n];
+            let mut prefix_volume = 0.0;
+            let mut cut = 0.0;
+            let mut best = None::<(f64, f64, usize)>;
+            for prefix_len in 1..n {
+                let added = sweep[prefix_len - 1];
+                for (other, &weight) in self.weights[added].iter().enumerate() {
+                    if in_prefix[other] {
+                        cut -= weight;
+                    } else {
+                        cut += weight;
+                    }
+                }
+                in_prefix[added] = true;
+                prefix_volume += degrees[added];
+                let complement_volume = total_volume - prefix_volume;
+                let conductance = cut.max(0.0) / prefix_volume.min(complement_volume);
+                let imbalance = (prefix_volume - complement_volume).abs();
+                let candidate = (conductance, imbalance, prefix_len);
+                let improves = best.is_none_or(|incumbent| {
+                    candidate
+                        .0
+                        .total_cmp(&incumbent.0)
+                        .then_with(|| candidate.1.total_cmp(&incumbent.1))
+                        .then_with(|| candidate.2.cmp(&incumbent.2))
+                        .is_lt()
+                });
+                if improves {
+                    best = Some(candidate);
                 }
             }
-            if left.is_empty() || right.is_empty() {
-                let mut order: Vec<usize> = (0..n).collect();
-                order.sort_by(|&a, &b| vector[a].total_cmp(&vector[b]));
-                left = order[..n / 2].iter().map(|&i| self.basins[i]).collect();
-                right = order[n / 2..].iter().map(|&i| self.basins[i]).collect();
-            }
+            let split = best.expect("a connected graph has a proper sweep prefix").2;
+            let left = sweep[..split]
+                .iter()
+                .map(|&index| self.basins[index])
+                .collect();
+            let right = sweep[split..]
+                .iter()
+                .map(|&index| self.basins[index])
+                .collect();
             (eigenvalues[fiedler].max(0.0), left, right)
         };
         left.sort_unstable();
