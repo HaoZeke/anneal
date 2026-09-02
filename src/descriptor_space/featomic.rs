@@ -13,9 +13,12 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 
 const CALCULATOR: &str = "soap_power_spectrum";
-const PROVIDER_SCHEMA: &str = "featomic-soap-invariant";
-const PROVIDER_VERSION: u32 = 1;
-const NORMALIZATION: &str = "per-scale-local-contractive-l2-mean-v1";
+/// Stable schema name for featomic-backed multiscale SOAP features.
+pub const FEATOMIC_SOAP_SCHEMA: &str = "featomic-soap-invariant";
+/// Schema version of [`FEATOMIC_SOAP_SCHEMA`].
+pub const FEATOMIC_SOAP_VERSION: u32 = 1;
+/// Metric preprocessing applied to each featomic SOAP scale.
+pub const FEATOMIC_SOAP_NORMALIZATION: &str = "per-scale-local-contractive-l2-mean-v1";
 const CONFIG_PREFIX: &[u8] = b"ANNEAL\0FEATOMIC_SOAP_PROVIDER\0featomic=0.6.0\0";
 
 thread_local! {
@@ -198,13 +201,13 @@ impl FeatomicSoapProvider {
         let output = DescriptorOutputSpec::new("feature", dimension)?;
         let interaction_range = scales.iter().map(|scale| scale.cutoff).fold(0.0, f64::max);
         let contract = DescriptorProviderContract::new(
-            PROVIDER_SCHEMA,
-            PROVIDER_VERSION,
+            FEATOMIC_SOAP_SCHEMA,
+            FEATOMIC_SOAP_VERSION,
             model_digest,
             output.clone(),
             Some(output),
             interaction_range,
-            NORMALIZATION,
+            FEATOMIC_SOAP_NORMALIZATION,
         )?;
         Ok(Self {
             species_channels,
@@ -440,6 +443,6 @@ fn configuration_digest(species_channels: &[u32], scales: &[FeatomicSoapScale]) 
         hasher.update(scale.density_width.to_bits().to_be_bytes());
         hasher.update(scale.smoothing_width.to_bits().to_be_bytes());
     }
-    hasher.update(NORMALIZATION.as_bytes());
+    hasher.update(FEATOMIC_SOAP_NORMALIZATION.as_bytes());
     hasher.finalize().into()
 }

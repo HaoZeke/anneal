@@ -10,7 +10,11 @@ use sha2::{Digest, Sha256};
 use super::{
     DescriptorSignature, EngineSignature, FreshEvaluation, SystemSignature, ValidatorConfig,
 };
-use crate::descriptor_space::{DescriptorGeometry, DescriptorSpace, universal_descriptor_space};
+#[cfg(not(feature = "featomic"))]
+use crate::descriptor_space::universal_descriptor_space;
+use crate::descriptor_space::{DescriptorGeometry, DescriptorSpace};
+#[cfg(feature = "featomic")]
+use crate::descriptor_space::{FeatomicSoapProvider, FeatomicSoapScale};
 use crate::potentials::PairPotential;
 
 /// Invalid Lennard-Jones catalog preset input.
@@ -134,9 +138,25 @@ pub fn discovered_minimum_id(n_points: usize, source_seed: u64, energy: f64) -> 
 
 /// Fixed-dimensional universal invariant space used by every LJ catalog size.
 pub fn descriptor_space() -> DescriptorSpace {
-    universal_descriptor_space(
-        DescriptorGeometry::finite(1.0).expect("LJ reduced-unit descriptor geometry is valid"),
-    )
+    let geometry =
+        DescriptorGeometry::finite(1.0).expect("LJ reduced-unit descriptor geometry is valid");
+    #[cfg(feature = "featomic")]
+    {
+        let provider = FeatomicSoapProvider::new(
+            vec![18],
+            vec![
+                FeatomicSoapScale::new(3.0, 3, 4).expect("the short-range LJ SOAP scale is valid"),
+                FeatomicSoapScale::new(6.0, 3, 6).expect("the medium-range LJ SOAP scale is valid"),
+            ],
+        )
+        .expect("the fixed LJ featomic provider is valid");
+        return DescriptorSpace::from_provider(geometry, provider)
+            .expect("the fixed LJ descriptor contract is valid");
+    }
+    #[cfg(not(feature = "featomic"))]
+    {
+        universal_descriptor_space(geometry)
+    }
 }
 
 /// Canonical system signature for one reduced-unit LJ cluster size.
@@ -150,14 +170,38 @@ pub fn system_signature(n_points: usize) -> Result<SystemSignature, LjCatalogPre
         .ok_or(LjCatalogPresetError::CoordinateDimension)?;
     let descriptor = descriptor_space();
     let mut hyperparameters = BTreeMap::new();
-    hyperparameters.insert(
-        "blocks".into(),
-        "pair-radial@2.5,6;three-body-angular@3,6;graph-topology@6;\
-         invariant-soap@3,6;invariant-ace-nu3@3,6;chiral-moment@3,6"
-            .into(),
-    );
-    hyperparameters.insert("normalization".into(), "contractive-l2-unit-v2".into());
     hyperparameters.insert("geometry".into(), "finite;length-scale=1".into());
+    if let Some(contract) = descriptor.provider_contract() {
+        hyperparameters.insert("provider".into(), contract.schema_name().into());
+        hyperparameters.insert("model_sha256".into(), contract.model_digest_hex());
+        hyperparameters.insert(
+            "system_output".into(),
+            format!(
+                "{};dimension={}",
+                contract.system_output().name(),
+                contract.system_output().dimension()
+            ),
+        );
+        if let Some(output) = contract.atomic_output() {
+            hyperparameters.insert(
+                "atomic_output".into(),
+                format!("{};dimension={}", output.name(), output.dimension()),
+            );
+        }
+        hyperparameters.insert(
+            "interaction_range".into(),
+            contract.interaction_range().to_string(),
+        );
+        hyperparameters.insert("normalization".into(), contract.normalization().into());
+    } else {
+        hyperparameters.insert(
+            "blocks".into(),
+            "pair-radial@2.5,6;three-body-angular@3,6;graph-topology@6;\
+             invariant-soap@3,6;invariant-ace-nu3@3,6;chiral-moment@3,6"
+                .into(),
+        );
+        hyperparameters.insert("normalization".into(), "contractive-l2-unit-v2".into());
+    }
     let mut engine_hasher = Sha256::new();
     engine_hasher.update(b"lennard-jones-reduced-v1;epsilon=1;sigma=1;cutoff=none");
     Ok(SystemSignature {

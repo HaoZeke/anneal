@@ -7,7 +7,10 @@ pub mod pullback;
 mod universal;
 
 #[cfg(feature = "featomic")]
-pub use featomic::{FeatomicSoapProvider, FeatomicSoapProviderError, FeatomicSoapScale};
+pub use featomic::{
+    FEATOMIC_SOAP_NORMALIZATION, FEATOMIC_SOAP_SCHEMA, FEATOMIC_SOAP_VERSION, FeatomicSoapProvider,
+    FeatomicSoapProviderError, FeatomicSoapScale,
+};
 pub use provider::{
     DescriptorOutputSpec, DescriptorProviderContract, DescriptorProviderError,
     DescriptorProviderInput, InvariantDescriptorProvider,
