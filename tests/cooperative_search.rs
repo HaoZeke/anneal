@@ -1195,6 +1195,47 @@ fn try_sample_candidate_keeps_sample_roles_separate() {
 }
 
 #[test]
+fn try_sample_basin_discards_a_superseded_seam_assignment() {
+    let server = server_with_capacity(2);
+    let digest = signature().digest();
+    let mut run = CooperativeRun::new([0], 400).unwrap();
+    run.attach_client(
+        0,
+        CatalogClient::connect(server.addr(), identity(0, digest), ClientConfig::default())
+            .unwrap(),
+    )
+    .unwrap();
+    for admitted in [candidate(0, 1, 1.2), candidate(0, 2, 2.0)] {
+        assert_eq!(
+            run.offer_candidate(0, admitted).unwrap(),
+            CatalogOfferOutcome::Admitted
+        );
+    }
+
+    assert_eq!(
+        run.try_sample_basin(0, 0).unwrap(),
+        CatalogSampleOutcome::LocalFallback
+    );
+    assert!(matches!(
+        run.synchronize(0).unwrap(),
+        SynchronizationOutcome::Refreshed(_)
+    ));
+    assert_eq!(
+        run.try_sample_basin(0, 1).unwrap(),
+        CatalogSampleOutcome::LocalFallback,
+        "a completed anchor from a superseded decree must be discarded"
+    );
+    assert!(matches!(
+        run.synchronize(0).unwrap(),
+        SynchronizationOutcome::Refreshed(_)
+    ));
+    let CatalogSampleOutcome::Candidate(sampled) = run.try_sample_basin(0, 1).unwrap() else {
+        panic!("the current seam assignment must receive its exact anchor")
+    };
+    assert_eq!(sampled.census_basin, Some(1));
+}
+
+#[test]
 fn try_sample_candidates_pipelines_every_reference_draw() {
     let server = server_with_capacity(2);
     let digest = signature().digest();
