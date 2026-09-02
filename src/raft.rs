@@ -131,8 +131,12 @@ impl RaftNode {
     /// A follower with a deterministic, identity-staggered election
     /// timeout: `base + id * stagger` ticks of silence start an
     /// election, so no two quiet nodes fire together and the same
-    /// configuration elects the same first leader on every replay.
-    pub fn new(id: NodeId, peers: Vec<NodeId>, base_timeout: u64, stagger: u64) -> Self {
+    /// configuration elects the same first leader on every replay. The
+    /// supplied peer roster is normalized as a set excluding `id`.
+    pub fn new(id: NodeId, mut peers: Vec<NodeId>, base_timeout: u64, stagger: u64) -> Self {
+        peers.retain(|peer| *peer != id);
+        peers.sort_unstable();
+        peers.dedup();
         let election_timeout = base_timeout + u64::from(id) * stagger.max(1);
         Self {
             id,
@@ -321,12 +325,18 @@ impl RaftNode {
     }
 
     /// Deliver one message; returns messages to send.
+    ///
+    /// Senders outside the immutable peer roster are ignored before their term,
+    /// vote, or log contents can affect the replicated state machine.
     pub fn receive(
         &mut self,
         from: NodeId,
         message: RaftMessage,
         now: u64,
     ) -> Vec<(NodeId, RaftMessage)> {
+        if self.peers.binary_search(&from).is_err() {
+            return Vec::new();
+        }
         match message {
             RaftMessage::RequestVote {
                 term,
