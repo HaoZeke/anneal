@@ -57,11 +57,24 @@ fn minima_round_trip_exactly_and_fold_across_seeds() {
     let stored = corpus.minima("lj13", 0.8).unwrap();
     assert_eq!(stored.len(), 5);
     assert_eq!(stored[0].energy, -1.0);
-    assert_eq!(stored[0].coordinates, a.to_vec(), "coordinates come back bit for bit");
+    assert_eq!(
+        stored[0].coordinates,
+        a.to_vec(),
+        "coordinates come back bit for bit"
+    );
     assert!(stored.iter().any(|m| m.set.seed == 2 && m.energy == -0.5));
-    assert_eq!(corpus.distinct_energies("lj13", 0.8, 1e-6).unwrap(), vec![-1.0, -0.75, -0.5]);
-    assert!(corpus.minima("lj13", 0.9).unwrap().is_empty(), "another temperature is another set");
-    assert!(corpus.minima("lj38", 0.8).unwrap().is_empty(), "another system is another set");
+    assert_eq!(
+        corpus.distinct_energies("lj13", 0.8, 1e-6).unwrap(),
+        vec![-1.0, -0.75, -0.5]
+    );
+    assert!(
+        corpus.minima("lj13", 0.9).unwrap().is_empty(),
+        "another temperature is another set"
+    );
+    assert!(
+        corpus.minima("lj38", 0.8).unwrap().is_empty(),
+        "another system is another set"
+    );
 
     let reopened = MinimaCorpus::open(dir.path().join("minima")).unwrap();
     assert_eq!(reopened.minima("lj13", 0.8).unwrap().len(), 5);
@@ -74,7 +87,14 @@ fn a_nonfinite_energy_is_refused() {
     let a = Array1::from(vec![0.0, 0.0, 0.0]);
     assert!(
         corpus
-            .record(&set(1), &[], &units(), &[(f64::NAN, a.view())], 1e-6, serde_json::json!({}))
+            .record(
+                &set(1),
+                &[],
+                &units(),
+                &[(f64::NAN, a.view())],
+                1e-6,
+                serde_json::json!({})
+            )
             .is_err()
     );
 }

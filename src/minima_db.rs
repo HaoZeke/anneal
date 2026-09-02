@@ -226,7 +226,11 @@ impl MinimaCorpus {
 
     /// Every stored minimum of one system at one temperature, across seeds,
     /// sorted by energy.
-    pub fn minima(&self, system: &str, temperature: f64) -> Result<Vec<StoredMinimum>, MinimaDbError> {
+    pub fn minima(
+        &self,
+        system: &str,
+        temperature: f64,
+    ) -> Result<Vec<StoredMinimum>, MinimaDbError> {
         let mut found = Vec::new();
         for key in self.corpus.list_frame_keys()? {
             if let Some(minimum) = self.decode(key)?
