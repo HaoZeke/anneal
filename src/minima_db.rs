@@ -133,9 +133,9 @@ impl MinimaCorpus {
 
     /// Append the distinct minima of one run.
     ///
-    /// Entries closer than `energy_tolerance` in energy to an earlier entry
-    /// of the same call are one minimum and stored once. Returns how many
-    /// frames were appended.
+    /// Exact repeated coordinates whose energies differ by at most
+    /// `energy_tolerance` are stored once within a call. Equal energy alone is
+    /// not a structure identity test. Returns how many frames were appended.
     pub fn record(
         &self,
         set: &MinimaSet,
@@ -158,10 +158,14 @@ impl MinimaCorpus {
                     coordinates.len()
                 )));
             }
-            if kept
-                .iter()
-                .any(|(seen, _)| (seen - energy).abs() <= energy_tolerance)
-            {
+            if kept.iter().any(|(seen_energy, seen_coordinates)| {
+                (seen_energy - energy).abs() <= energy_tolerance
+                    && seen_coordinates.len() == coordinates.len()
+                    && seen_coordinates
+                        .iter()
+                        .zip(coordinates.iter())
+                        .all(|(seen, value)| seen.to_bits() == value.to_bits())
+            }) {
                 continue;
             }
             kept.push((energy, coordinates));
