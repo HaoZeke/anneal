@@ -2698,27 +2698,37 @@ fn discovery_role_allows_ride(role: Option<anneal_core::discovery_roster::Discov
 
 #[cfg(feature = "bank-rpc")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct AppliedDecree {
+    snapshot: u64,
+    basin: u64,
+}
+
+#[cfg(feature = "bank-rpc")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum DecreeAnchorAction {
     Ignore,
-    MarkApplied { snapshot: u64 },
+    MarkApplied { snapshot: u64, basin: u64 },
     Fetch { snapshot: u64, basin: u64 },
 }
 
 #[cfg(feature = "bank-rpc")]
 fn decree_anchor_action(
-    applied_snapshot: Option<u64>,
+    applied: Option<AppliedDecree>,
     assignment: Option<&anneal_core::raft::wire::ReplicaAssignment>,
     current_basin: Option<u64>,
 ) -> DecreeAnchorAction {
     let Some(assignment) = assignment else {
         return DecreeAnchorAction::Ignore;
     };
-    if applied_snapshot.is_some_and(|applied| assignment.decree_index <= applied) {
+    if applied.is_some_and(|applied| assignment.decree_index <= applied.snapshot) {
         return DecreeAnchorAction::Ignore;
     }
-    if current_basin == Some(assignment.anchor_basin) {
+    if current_basin == Some(assignment.anchor_basin)
+        || applied.is_some_and(|applied| applied.basin == assignment.anchor_basin)
+    {
         DecreeAnchorAction::MarkApplied {
             snapshot: assignment.decree_index,
+            basin: assignment.anchor_basin,
         }
     } else {
         DecreeAnchorAction::Fetch {
@@ -3400,7 +3410,7 @@ fn run_capnp_catalog(
     let mut last_charged = 0usize;
     #[cfg(feature = "ira")]
     let mut assigned_discovery_role = None;
-    let mut applied_decree_snapshot = None;
+    let mut applied_decree = None;
     let mut best_at_checkpoint = f64::INFINITY;
     let mut announced_score = false;
     let mut announced_personal = None;
@@ -4381,13 +4391,13 @@ fn run_capnp_catalog(
             return CheckpointAction::Continue;
         }
         match decree_anchor_action(
-            applied_decree_snapshot,
+            applied_decree,
             decree_assignment.as_ref(),
             policy_trace.local_basin,
         ) {
             DecreeAnchorAction::Ignore => {}
-            DecreeAnchorAction::MarkApplied { snapshot } => {
-                applied_decree_snapshot = Some(snapshot);
+            DecreeAnchorAction::MarkApplied { snapshot, basin } => {
+                applied_decree = Some(AppliedDecree { snapshot, basin });
             }
             DecreeAnchorAction::Fetch {
                 snapshot: decree_snapshot,
@@ -4407,7 +4417,10 @@ fn run_capnp_catalog(
                         candidate.energy,
                         &candidate.coordinates,
                     );
-                    applied_decree_snapshot = Some(decree_snapshot);
+                    applied_decree = Some(AppliedDecree {
+                        snapshot: decree_snapshot,
+                        basin,
+                    });
                     trace.policy_role = PolicyRole::Explore;
                     trace.policy_reason = "spectral_anchor";
                     trace.proposal_family = ProposalFamily::CatalogSample;
