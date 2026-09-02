@@ -11,7 +11,7 @@ use std::collections::{HashMap, HashSet};
 use ndarray::{Array1, ArrayView1};
 use rand::{SeedableRng, rngs::StdRng};
 
-use crate::allocate::{DiscoveryAccounting, FlooredThompson};
+use crate::allocate::{DiscoveryAccounting, Exp3Ix};
 use crate::catalog::{
     PRODUCTION_MAX_UNSEEN_MASS, PRODUCTION_MINIMUM_VISITS, leftover_esty_stable,
     leftover_esty_upper,
@@ -60,6 +60,15 @@ pub enum NdHybridMechanism {
     BasinEscape,
 }
 
+/// Proposal kernel drawn for a generic basin-escape event.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NdEscapeKernel {
+    /// Finite-variance local displacement.
+    Gaussian,
+    /// Heavy-tailed generalized-simulated-annealing displacement.
+    Tsallis,
+}
+
 /// Mechanism policy used for matched-budget comparisons.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NdHybridPolicy {
@@ -88,6 +97,14 @@ pub struct NdHybridEvent {
     pub mode_rank: Option<u16>,
     /// Signed initialization for ridge events.
     pub direction: Option<RideModeDirection>,
+    /// Proposal kernel for basin-escape events.
+    pub escape_kernel: Option<NdEscapeKernel>,
+    /// EXP3-IX draw probability for the selected proposal kernel.
+    pub kernel_probability: Option<f64>,
+    /// EXP3-IX anytime learning rate `eta_t`.
+    pub kernel_learning_rate: Option<f64>,
+    /// EXP3-IX implicit-exploration term `gamma_t`.
+    pub kernel_implicit_exploration: Option<f64>,
     /// Exact minimum identities introduced by this event.
     pub new_minimum_ids: Vec<usize>,
     /// Certified saddle identities introduced by this event.
@@ -138,7 +155,7 @@ pub struct NdHybridReport {
     pub mechanism_discovery_rates: Vec<f64>,
     /// Gaussian then Tsallis proposal exposure counts.
     pub move_pulls: Vec<usize>,
-    /// Posterior exact-basin discovery rates for the escape proposals.
+    /// Empirical exact-basin discovery rates for the escape proposals.
     pub move_success_rates: Vec<f64>,
     /// Successful source quenches included in the exact-basin census.
     pub escape_observations: u64,
@@ -389,7 +406,7 @@ where
     let mut rng = StdRng::seed_from_u64(seed);
     let mut mechanism_accounting = DiscoveryAccounting::new(2);
     mechanism_accounting.observe(ESCAPE_ARM, 1, initial_record.charged_evaluations);
-    let mut move_allocator = FlooredThompson::new(2);
+    let mut move_allocator = Exp3Ix::new(2);
     let mut escape_feedback = EscapeFeedback::new(
         config.initial_escape_scale,
         config.initial_acceptance_threshold,
@@ -473,6 +490,10 @@ where
                 source_basin: Some(source_basin),
                 mode_rank: Some(mode_rank),
                 direction: Some(direction),
+                escape_kernel: None,
+                kernel_probability: None,
+                kernel_learning_rate: None,
+                kernel_implicit_exploration: None,
                 new_minimum_ids,
                 new_saddle_ids,
                 new_unresolved_saddle_ids,
@@ -490,11 +511,13 @@ where
             continue;
         }
 
-        let move_index = move_allocator
-            .pulls()
-            .iter()
-            .position(|pulls| *pulls == 0)
-            .unwrap_or_else(|| move_allocator.select(&mut rng));
+        let kernel_selection = move_allocator.select(&mut rng);
+        let move_index = kernel_selection.arm();
+        let escape_kernel = match move_index {
+            GAUSSIAN_MOVE => NdEscapeKernel::Gaussian,
+            TSALLIS_MOVE => NdEscapeKernel::Tsallis,
+            _ => unreachable!("the escape portfolio has exactly two moves"),
+        };
         let escape_scale = escape_feedback.escape();
         let proposal: Array1<f64> = match move_index {
             GAUSSIAN_MOVE => {
@@ -514,7 +537,7 @@ where
         match escape {
             SourceEscapeOutcome::Failed(failure) => {
                 mechanism_accounting.observe(ESCAPE_ARM, 0, failure.charged_evaluations);
-                move_allocator.update(move_index, false);
+                move_allocator.update(1.0);
                 charged_evaluations = charged_evaluations
                     .saturating_add(failure.charged_evaluations)
                     .min(config.evaluation_budget);
@@ -529,6 +552,10 @@ where
                     source_basin: Some(source_basin),
                     mode_rank: None,
                     direction: None,
+                    escape_kernel: Some(escape_kernel),
+                    kernel_probability: Some(kernel_selection.probability()),
+                    kernel_learning_rate: Some(kernel_selection.learning_rate()),
+                    kernel_implicit_exploration: Some(kernel_selection.implicit_exploration()),
                     new_minimum_ids: Vec::new(),
                     new_saddle_ids: Vec::new(),
                     new_unresolved_saddle_ids: Vec::new(),
@@ -563,7 +590,7 @@ where
                     u64::from(discovered),
                     record.charged_evaluations,
                 );
-                move_allocator.update(move_index, discovered);
+                move_allocator.update(if discovered { 0.0 } else { 1.0 });
                 charged_evaluations = charged_evaluations
                     .saturating_add(record.charged_evaluations)
                     .min(config.evaluation_budget);
@@ -577,6 +604,10 @@ where
                     source_basin: Some(source_basin),
                     mode_rank: None,
                     direction: None,
+                    escape_kernel: Some(escape_kernel),
+                    kernel_probability: Some(kernel_selection.probability()),
+                    kernel_learning_rate: Some(kernel_selection.learning_rate()),
+                    kernel_implicit_exploration: Some(kernel_selection.implicit_exploration()),
                     new_minimum_ids,
                     new_saddle_ids: Vec::new(),
                     new_unresolved_saddle_ids: Vec::new(),
@@ -604,7 +635,7 @@ where
         mechanism_pulls: mechanism_accounting.pulls().to_vec(),
         mechanism_discovery_rates: mechanism_accounting.rates(),
         move_pulls: move_allocator.pulls().to_vec(),
-        move_success_rates: move_allocator.rates(),
+        move_success_rates: move_allocator.success_rates(),
         escape_observations: coverage.observations,
         escape_singletons: coverage.singletons,
         escape_unseen_mass_upper: coverage.unseen_mass_upper,
