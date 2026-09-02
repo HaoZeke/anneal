@@ -183,6 +183,7 @@ impl ServerConfig {
             CoverageConfig {
                 amplitude: energy_scale,
                 noise: coverage_noise,
+                maximum_model_rank: catalog_capacity.max(1),
                 ..CoverageConfig::default()
             },
         )

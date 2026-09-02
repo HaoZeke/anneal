@@ -23,6 +23,8 @@ pub struct CoverageConfig {
     pub amplitude: f64,
     /// GP observation noise in energy units.
     pub noise: f64,
+    /// Hard rank ceiling for every kernel coreset.
+    pub maximum_model_rank: usize,
 }
 
 impl Default for CoverageConfig {
@@ -32,6 +34,7 @@ impl Default for CoverageConfig {
             component_length_scale: 0.5,
             amplitude: 10.0,
             noise: 1e-4,
+            maximum_model_rank: 256,
         }
     }
 }
@@ -47,6 +50,11 @@ impl CoverageConfig {
             if !value.is_finite() || value <= 0.0 {
                 return Err(CoverageError::InvalidConfig(name));
             }
+        }
+        if self.maximum_model_rank == 0 {
+            return Err(CoverageError::InvalidConfig(
+                "maximum model rank must be positive",
+            ));
         }
         Ok(self)
     }
@@ -187,6 +195,32 @@ pub struct CoverageEvidence {
     pub acquisition: f64,
 }
 
+/// Auditable size and covariance loss of the invariant kernel coresets.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CoverageCompression {
+    /// Exact structural classes retained outside the continuous surrogates.
+    pub exact_classes: usize,
+    /// Hard rank ceiling applied independently to every descriptor view.
+    pub maximum_rank: usize,
+    /// Inducing rank of the full universal descriptor GP.
+    pub full_rank: usize,
+    /// Inducing rank of every ordered descriptor-block GP.
+    pub block_ranks: Vec<usize>,
+    /// Inducing rank of the optional residual-neural GP.
+    pub deep_rank: Option<usize>,
+    /// Largest remaining conditional-covariance trace fraction across views.
+    pub maximum_residual_fraction: f64,
+    /// Whether any view reached the hard ceiling above its covariance floor.
+    pub rank_limited: bool,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct KernelCompression {
+    rank: usize,
+    residual_fraction: f64,
+    rank_limited: bool,
+}
+
 #[derive(Debug, Clone, Copy)]
 struct BlockLayout {
     offset: usize,
@@ -200,6 +234,7 @@ pub struct UniversalCoverage {
     config: CoverageConfig,
     blocks: Vec<BlockLayout>,
     class_representatives: Vec<Option<Vec<f64>>>,
+    class_energies: Vec<Option<f64>>,
     observed_classes: Vec<bool>,
     observation_count: usize,
     energy: FunnelModel,
@@ -207,6 +242,8 @@ pub struct UniversalCoverage {
     deep_kernel: Option<StableDeepKernel>,
     deep_model: Option<FunnelModel>,
     residual: ResidualField,
+    models_dirty: bool,
+    compression: CoverageCompression,
 }
 
 impl UniversalCoverage {
@@ -276,6 +313,7 @@ impl UniversalCoverage {
             config,
             blocks,
             class_representatives: Vec::new(),
+            class_energies: Vec::new(),
             observed_classes: Vec::new(),
             observation_count: 0,
             energy: FunnelModel::new_euclidean(
@@ -287,6 +325,16 @@ impl UniversalCoverage {
             deep_kernel,
             deep_model,
             residual: ResidualField::new(),
+            models_dirty: false,
+            compression: CoverageCompression {
+                exact_classes: 0,
+                maximum_rank: config.maximum_model_rank,
+                full_rank: 0,
+                block_ranks: vec![0; reference.blocks().len()],
+                deep_rank: None,
+                maximum_residual_fraction: 0.0,
+                rank_limited: false,
+            },
         })
     }
 
@@ -315,27 +363,18 @@ impl UniversalCoverage {
         if class >= self.observed_classes.len() {
             self.observed_classes.resize(class + 1, false);
             self.class_representatives.resize(class + 1, None);
+            self.class_energies.resize(class + 1, None);
         }
         if !self.observed_classes[class] {
             self.observed_classes[class] = true;
             self.class_representatives[class] = Some(descriptor.to_vec());
+            self.class_energies[class] = Some(energy);
+            self.models_dirty = true;
+        } else if self.class_energies[class].is_none_or(|held| energy < held) {
+            self.class_energies[class] = Some(energy);
+            self.models_dirty = true;
         }
-        let representative = self.class_representatives[class]
-            .as_deref()
-            .expect("an observed exact class has a representative");
         self.residual.observe(class, energy);
-        self.energy
-            .observe(ArrayView1::from(representative), energy);
-        for (model, layout) in self.block_models.iter_mut().zip(&self.blocks) {
-            model.observe(
-                ArrayView1::from(block_values(representative, *layout)),
-                energy,
-            );
-        }
-        if let (Some(kernel), Some(model)) = (&self.deep_kernel, &mut self.deep_model) {
-            let embedded = kernel.embed(representative)?;
-            model.observe(ArrayView1::from(embedded.as_slice()), energy);
-        }
         self.observation_count = self.observation_count.saturating_add(1);
         Ok(())
     }
@@ -358,6 +397,12 @@ impl UniversalCoverage {
         self.observation_count
     }
 
+    /// Kernel ranks and residual covariance retained by the cached coresets.
+    pub fn compression(&mut self) -> CoverageCompression {
+        self.rebuild_models();
+        self.compression.clone()
+    }
+
     /// Assemble novelty, posterior uncertainty, disagreement, and graph evidence.
     pub fn evidence(
         &mut self,
@@ -378,6 +423,7 @@ impl UniversalCoverage {
         if let Some(class) = assigned_class {
             self.ensure_class(class)?;
         }
+        self.rebuild_models();
         let values = ArrayView1::from(descriptor);
         let (energy_mean, energy_standard_deviation) = self.energy.predict(values);
         let mut block_means = Vec::with_capacity(self.blocks.len());
@@ -449,6 +495,91 @@ impl UniversalCoverage {
             expected_improvement,
             acquisition,
         })
+    }
+
+    fn rebuild_models(&mut self) {
+        if !self.models_dirty {
+            return;
+        }
+        let samples = self
+            .class_representatives
+            .iter()
+            .zip(&self.class_energies)
+            .filter_map(|(descriptor, energy)| Some((descriptor.as_ref()?.clone(), (*energy)?)))
+            .collect::<Vec<_>>();
+        let energies = samples
+            .iter()
+            .map(|(_, energy)| *energy)
+            .collect::<Vec<_>>();
+        let full_features = samples
+            .iter()
+            .map(|(descriptor, _)| descriptor.clone())
+            .collect::<Vec<_>>();
+        let (energy, full_compression) = compressed_model(
+            &full_features,
+            &energies,
+            self.config.energy_length_scale,
+            self.config,
+        );
+
+        let mut block_models = Vec::with_capacity(self.blocks.len());
+        let mut block_compressions = Vec::with_capacity(self.blocks.len());
+        for &layout in &self.blocks {
+            let features = samples
+                .iter()
+                .map(|(descriptor, _)| block_values(descriptor, layout).to_vec())
+                .collect::<Vec<_>>();
+            let (model, compression) = compressed_model(
+                &features,
+                &energies,
+                self.config.component_length_scale,
+                self.config,
+            );
+            block_models.push(model);
+            block_compressions.push(compression);
+        }
+
+        let (deep_model, deep_compression) =
+            self.deep_kernel.as_ref().map_or((None, None), |kernel| {
+                let features = samples
+                    .iter()
+                    .map(|(descriptor, _)| {
+                        kernel
+                            .embed(descriptor)
+                            .expect("stored descriptors satisfy the deep-kernel input contract")
+                    })
+                    .collect::<Vec<_>>();
+                let (model, compression) = compressed_model(
+                    &features,
+                    &energies,
+                    self.config.component_length_scale,
+                    self.config,
+                );
+                (Some(model), Some(compression))
+            });
+
+        let mut compressions = Vec::with_capacity(
+            1 + block_compressions.len() + usize::from(deep_compression.is_some()),
+        );
+        compressions.push(full_compression);
+        compressions.extend(block_compressions.iter().copied());
+        compressions.extend(deep_compression);
+        self.energy = energy;
+        self.block_models = block_models;
+        self.deep_model = deep_model;
+        self.compression = CoverageCompression {
+            exact_classes: samples.len(),
+            maximum_rank: self.config.maximum_model_rank,
+            full_rank: full_compression.rank,
+            block_ranks: block_compressions.iter().map(|item| item.rank).collect(),
+            deep_rank: deep_compression.map(|item| item.rank),
+            maximum_residual_fraction: compressions
+                .iter()
+                .map(|item| item.residual_fraction)
+                .fold(0.0, f64::max),
+            rank_limited: compressions.iter().any(|item| item.rank_limited),
+        };
+        self.models_dirty = false;
     }
 
     fn nearest_block_distances(&self, descriptor: &[f64]) -> Vec<Option<f64>> {
@@ -531,6 +662,156 @@ pub enum CoverageError {
     /// Descriptor schema or value compatibility failure.
     #[error(transparent)]
     Descriptor(#[from] DescriptorError),
+}
+
+fn compressed_model(
+    features: &[Vec<f64>],
+    energies: &[f64],
+    length_scale: f64,
+    config: CoverageConfig,
+) -> (FunnelModel, KernelCompression) {
+    let selector = FunnelModel::new_euclidean(length_scale, config.amplitude, config.noise);
+    let (indices, compression) =
+        kernel_coreset(&selector, features, energies, config.maximum_model_rank);
+    let mut model = FunnelModel::new_euclidean(length_scale, config.amplitude, config.noise);
+    for index in indices {
+        model.observe(
+            ArrayView1::from(features[index].as_slice()),
+            energies[index],
+        );
+    }
+    (model, compression)
+}
+
+fn kernel_coreset(
+    model: &FunnelModel,
+    features: &[Vec<f64>],
+    energies: &[f64],
+    maximum_rank: usize,
+) -> (Vec<usize>, KernelCompression) {
+    debug_assert_eq!(features.len(), energies.len());
+    if features.is_empty() {
+        return (
+            Vec::new(),
+            KernelCompression {
+                rank: 0,
+                residual_fraction: 0.0,
+                rank_limited: false,
+            },
+        );
+    }
+
+    let count = features.len();
+    let diagonal = model.amplitude * model.amplitude;
+    let covariance_floor = (model.noise * model.noise)
+        .max(diagonal * f64::EPSILON.sqrt())
+        .min(diagonal);
+    let target_trace = covariance_floor * count as f64;
+    let mut residual = vec![diagonal; count];
+    let mut columns = Vec::<Vec<f64>>::new();
+    let mut selected = vec![false; count];
+    let mut indices = Vec::with_capacity(maximum_rank.min(count));
+
+    let incumbent = energies
+        .iter()
+        .enumerate()
+        .min_by(|(left_index, left), (right_index, right)| {
+            left.total_cmp(right)
+                .then_with(|| left_index.cmp(right_index))
+        })
+        .map(|(index, _)| index)
+        .expect("a nonempty energy table has an incumbent");
+    append_kernel_pivot(
+        model,
+        features,
+        incumbent,
+        &mut residual,
+        &mut columns,
+        &mut selected,
+    );
+    indices.push(incumbent);
+
+    while indices.len() < maximum_rank.min(count) {
+        let residual_trace = residual.iter().sum::<f64>();
+        if residual_trace <= target_trace {
+            break;
+        }
+        let mut pivot = None;
+        for index in 0..count {
+            if selected[index] {
+                continue;
+            }
+            if pivot.is_none_or(|held| {
+                residual[index] > residual[held]
+                    || (residual[index] == residual[held] && index < held)
+            }) {
+                pivot = Some(index);
+            }
+        }
+        let Some(pivot) = pivot else {
+            break;
+        };
+        if residual[pivot] <= covariance_floor {
+            break;
+        }
+        append_kernel_pivot(
+            model,
+            features,
+            pivot,
+            &mut residual,
+            &mut columns,
+            &mut selected,
+        );
+        indices.push(pivot);
+    }
+
+    let residual_trace = residual.iter().sum::<f64>();
+    let residual_fraction = (residual_trace / (diagonal * count as f64)).clamp(0.0, 1.0);
+    let rank_limited = indices.len() == maximum_rank.min(count)
+        && indices.len() < count
+        && residual_trace > target_trace;
+    let rank = indices.len();
+    (
+        indices,
+        KernelCompression {
+            rank,
+            residual_fraction,
+            rank_limited,
+        },
+    )
+}
+
+fn append_kernel_pivot(
+    model: &FunnelModel,
+    features: &[Vec<f64>],
+    pivot: usize,
+    residual: &mut [f64],
+    columns: &mut Vec<Vec<f64>>,
+    selected: &mut [bool],
+) {
+    let diagonal = model.amplitude * model.amplitude;
+    let denominator = residual[pivot].max(diagonal * f64::EPSILON).sqrt();
+    let mut column = vec![0.0; features.len()];
+    for index in 0..features.len() {
+        let projection = columns
+            .iter()
+            .map(|held| held[index] * held[pivot])
+            .sum::<f64>();
+        let covariance = model.similarity(
+            ArrayView1::from(features[index].as_slice()),
+            ArrayView1::from(features[pivot].as_slice()),
+        );
+        column[index] = (covariance - projection) / denominator;
+    }
+    selected[pivot] = true;
+    for index in 0..residual.len() {
+        residual[index] = if selected[index] {
+            0.0
+        } else {
+            (residual[index] - column[index] * column[index]).max(0.0)
+        };
+    }
+    columns.push(column);
 }
 
 fn block_values(descriptor: &[f64], layout: BlockLayout) -> &[f64] {
