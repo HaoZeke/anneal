@@ -303,6 +303,23 @@ impl CooperativeLedger {
         }
     }
 
+    /// Admit a replica that is not yet in the ledger.
+    ///
+    /// A replica already present is accepted again so a journaled attach
+    /// replays without becoming a duplicate error.
+    pub fn attach(&mut self, replica: u32) -> Result<(), LedgerError> {
+        if self.replicas.contains_key(&replica) {
+            return Ok(());
+        }
+        let replica_count = u64::try_from(self.replicas.len().saturating_add(1))
+            .map_err(|_| LedgerError::AggregateBudgetOverflow)?;
+        self.per_replica_budget
+            .checked_mul(replica_count)
+            .ok_or(LedgerError::AggregateBudgetOverflow)?;
+        self.replicas.insert(replica, ReplicaLedger::default());
+        Ok(())
+    }
+
     /// Latest charged counter for one ensemble replica.
     pub fn replica_total(&self, replica: u32) -> Option<u64> {
         self.replicas.get(&replica).map(ReplicaLedger::total)
