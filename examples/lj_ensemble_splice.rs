@@ -418,6 +418,7 @@ fn parse_surfaces(spec: &str) -> Vec<TwoPhase> {
                     cutoff: Cutoff::Fixed(0.0),
                     beta: 0.0,
                     mu: value,
+                    anisotropic: false,
                 },
                 "d" => TwoPhase::diameter(value * unit, beta),
                 "kappa" => TwoPhase::relative(value, beta),
