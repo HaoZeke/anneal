@@ -101,7 +101,20 @@ fn run_lj_coordinator() -> Result<(), Box<dyn std::error::Error>> {
     if let Some(directory) = args.get(9) {
         config = config.with_state_directory(directory)?;
     }
-    park_coordinator(CatalogServer::start(addr, config)?)
+    park_coordinator(start_coordinator(addr, config)?)
+}
+
+fn start_coordinator(
+    addr: &str,
+    config: ServerConfig,
+) -> Result<CatalogServer, Box<dyn std::error::Error>> {
+    let server = CatalogServer::start(addr, config)?;
+    match std::env::var("CATALOG_CLOCK_MS") {
+        Ok(value) if !value.is_empty() => Ok(server.with_clock(std::time::Duration::from_millis(
+            value.parse()?,
+        ))),
+        _ => Ok(server),
+    }
 }
 
 /// GFN2-xTB universal-descriptor coordinator. `n` is the molecule count.
@@ -209,7 +222,7 @@ fn run_gfn2_water_coordinator() -> Result<(), Box<dyn std::error::Error>> {
     if let Some(directory) = args.get(9) {
         config = config.with_state_directory(directory)?;
     }
-    park_coordinator(CatalogServer::start(addr, config)?)
+    park_coordinator(start_coordinator(addr, config)?)
 }
 
 fn park_coordinator(server: CatalogServer) -> Result<(), Box<dyn std::error::Error>> {
