@@ -1,15 +1,15 @@
-//! Coverage-proportional division of same-PES discovery work.
+//! Good-UCB division of same-PES stationary-object discovery work.
 //!
 //! A roster receives only evidence owned by one system-signature coordinator.
-//! It allocates live replicas between minimum discovery and index-one saddle
-//! discovery, retaining at least one seat for each available mechanism. Stable
-//! roster rotation changes which replica owns each role without introducing a
-//! separate random stream into matched campaigns.
+//! Exact minima and exact index-one saddles are distinct species, so basin
+//! escape and saddle riding form the non-intersecting expert supports required
+//! by the Good-UCB analysis. Stable roster rotation changes which replica owns
+//! each role without introducing a separate random stream into matched
+//! campaigns.
 
 use std::collections::BTreeSet;
 
-const MINIMUM_ROLE_WEIGHT: f64 = 0.02;
-const GOLDEN_EPOCH_MULTIPLIER: u64 = 0x9e37_79b9_7f4a_7c15;
+const GOOD_UCB_CONFIDENCE_FACTOR: f64 = 2.414_213_562_373_095;
 
 /// One same-system stationary-object discovery role.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -20,55 +20,63 @@ pub enum DiscoveryRole {
     SaddleRide,
 }
 
-/// Replay-safe completed work for one discovery mechanism.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub struct DiscoveryEffort {
-    /// Completed mechanism attempts.
-    pub observations: u64,
-    /// Potential calls charged to those attempts.
-    pub charged_calls: u64,
-}
-
 /// Global coverage evidence used to divide one system's replicas.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct DiscoveryCoverage {
-    /// One-sided upper bound on unseen exact-basin probability.
-    pub basin_unseen_mass_upper: f64,
-    /// One-sided upper bound on unseen exact-saddle probability.
-    pub saddle_unseen_mass_upper: f64,
-    /// Basin-escape work observed by this system coordinator.
-    pub basin_effort: DiscoveryEffort,
-    /// Saddle-ride work observed by this system coordinator.
-    pub saddle_effort: DiscoveryEffort,
+    /// Exact basin observations made by this system coordinator.
+    pub basin_observations: u64,
+    /// Exact basin identities occurring once in the basin sample.
+    pub basin_singletons: u64,
+    /// Exact saddle observations made by this system coordinator.
+    pub saddle_observations: u64,
+    /// Exact saddle identities occurring once in the saddle sample.
+    pub saddle_singletons: u64,
     /// Whether the coordinator has a source/mode arm that is not claimed.
     pub ride_available: bool,
 }
 
-fn regularized_costs(basin: DiscoveryEffort, saddle: DiscoveryEffort) -> [f64; 2] {
-    let total_observations = basin.observations.saturating_add(saddle.observations);
-    let total_calls = basin.charged_calls.saturating_add(saddle.charged_calls);
-    let pooled_cost = if total_observations == 0 || total_calls == 0 {
-        1.0
-    } else {
-        total_calls as f64 / total_observations as f64
-    };
-    [basin, saddle].map(|effort| {
-        (effort.charged_calls as f64 + pooled_cost) / (effort.observations as f64 + 1.0)
-    })
+/// Good-UCB index for one exact-species discovery mechanism.
+///
+/// The Good--Turing term `singletons / observations` estimates the probability
+/// that the next draw exposes an unseen interesting species. The second term
+/// is the distribution-free upper-confidence correction from Proposition 1
+/// and Algorithm 1 of Bubeck, Ernst, and Garivier (JMLR 14, 2013), evaluated
+/// with `delta = 1 / total_observations`.
+pub fn good_ucb_missing_mass_index(
+    singletons: u64,
+    observations: u64,
+    total_observations: u64,
+) -> f64 {
+    if observations == 0 {
+        return f64::INFINITY;
+    }
+    if singletons > observations || total_observations < observations {
+        return f64::NAN;
+    }
+    let observations = observations as f64;
+    let total = total_observations.max(1) as f64;
+    singletons as f64 / observations
+        + GOOD_UCB_CONFIDENCE_FACTOR * ((4.0 * total).ln() / observations).sqrt()
 }
 
-fn discovery_utilities(coverage: DiscoveryCoverage) -> [f64; 2] {
-    let costs = regularized_costs(coverage.basin_effort, coverage.saddle_effort);
-    let raw = [
-        coverage.basin_unseen_mass_upper / costs[0],
-        coverage.saddle_unseen_mass_upper / costs[1],
-    ];
-    let scale = raw[0].max(raw[1]);
-    if scale <= 0.0 {
-        [1.0, 1.0]
-    } else {
-        [raw[0] / scale, raw[1] / scale]
+fn batched_good_ucb_index(
+    singletons: u64,
+    observations: u64,
+    provisional_observations: u64,
+    total_observations: u64,
+) -> f64 {
+    if observations == 0 && provisional_observations == 0 {
+        return f64::INFINITY;
     }
+    let effective_observations = observations.saturating_add(provisional_observations);
+    let estimate = if observations == 0 {
+        0.0
+    } else {
+        singletons as f64 / observations as f64
+    };
+    let total = total_observations.max(1) as f64;
+    estimate
+        + GOOD_UCB_CONFIDENCE_FACTOR * ((4.0 * total).ln() / effective_observations as f64).sqrt()
 }
 
 /// One replica's deterministic role inside a coverage epoch.
@@ -91,8 +99,8 @@ pub enum DiscoveryRosterError {
     /// Each replica may occupy only one roster seat.
     #[error("replica {0} occurs more than once in the discovery roster")]
     DuplicateReplica(u32),
-    /// Missing-mass upper bounds must be finite and nonnegative.
-    #[error("discovery coverage contains an invalid missing-mass bound")]
+    /// Singleton counts cannot exceed their exact observation counts.
+    #[error("discovery coverage contains impossible occupancy counts")]
     InvalidCoverage,
 }
 
@@ -116,10 +124,11 @@ pub fn coverage_allocation_weight(
 
 /// Assign one isolated ensemble between basin escapes and saddle rides.
 ///
-/// Esty upper bounds act as unresolved-coverage weights. With two or more
-/// replicas, both available mechanisms retain a seat and the remaining seats
-/// are proportional to their bounds. A single replica follows the same ratio
-/// through a deterministic low-discrepancy epoch sequence.
+/// Each parallel seat is one delayed Good-UCB decision. Provisional pulls
+/// reduce only the confidence term, preventing a batch from cloning one stale
+/// decision while leaving the Good--Turing estimate unchanged until results
+/// arrive. No minimum seat, proportional split, or random exploration floor is
+/// imposed.
 pub fn assign_discovery_roles(
     members: &[u32],
     coverage: DiscoveryCoverage,
@@ -128,10 +137,8 @@ pub fn assign_discovery_roles(
     if members.is_empty() {
         return Err(DiscoveryRosterError::EmptyRoster);
     }
-    if !coverage.basin_unseen_mass_upper.is_finite()
-        || coverage.basin_unseen_mass_upper < 0.0
-        || !coverage.saddle_unseen_mass_upper.is_finite()
-        || coverage.saddle_unseen_mass_upper < 0.0
+    if coverage.basin_singletons > coverage.basin_observations
+        || coverage.saddle_singletons > coverage.saddle_observations
     {
         return Err(DiscoveryRosterError::InvalidCoverage);
     }
@@ -144,19 +151,41 @@ pub fn assign_discovery_roles(
     }
     let mut members = unique.into_iter().collect::<Vec<_>>();
     let count = members.len();
-    let utilities = discovery_utilities(coverage);
-    let basin_weight = utilities[0].clamp(MINIMUM_ROLE_WEIGHT, 1.0);
-    let saddle_weight = utilities[1].clamp(MINIMUM_ROLE_WEIGHT, 1.0);
-
-    let basin_seats = if !coverage.ride_available {
-        count
-    } else if count == 1 {
-        let basin_fraction = basin_weight / (basin_weight + saddle_weight);
-        usize::from(epoch_phase(epoch) < basin_fraction)
-    } else {
-        (((count as f64) * basin_weight / (basin_weight + saddle_weight)).round() as usize)
-            .clamp(1, count - 1)
-    };
+    let base_total = coverage
+        .basin_observations
+        .saturating_add(coverage.saddle_observations);
+    let mut provisional = [0_u64; 2];
+    let mut basin_seats = 0_usize;
+    for seat in 0..count {
+        if !coverage.ride_available {
+            basin_seats += 1;
+            provisional[0] = provisional[0].saturating_add(1);
+            continue;
+        }
+        let total = base_total
+            .saturating_add(provisional[0])
+            .saturating_add(provisional[1]);
+        let basin_index = batched_good_ucb_index(
+            coverage.basin_singletons,
+            coverage.basin_observations,
+            provisional[0],
+            total,
+        );
+        let saddle_index = batched_good_ucb_index(
+            coverage.saddle_singletons,
+            coverage.saddle_observations,
+            provisional[1],
+            total,
+        );
+        let choose_basin = match basin_index.total_cmp(&saddle_index) {
+            std::cmp::Ordering::Greater => true,
+            std::cmp::Ordering::Less => false,
+            std::cmp::Ordering::Equal => epoch.saturating_add(seat as u64).is_multiple_of(2),
+        };
+        let arm = usize::from(!choose_basin);
+        provisional[arm] = provisional[arm].saturating_add(1);
+        basin_seats += usize::from(choose_basin);
+    }
     let rotation = usize::try_from(epoch % count as u64)
         .expect("discovery-roster rotation is bounded by membership");
     members.rotate_left(rotation);
@@ -174,9 +203,4 @@ pub fn assign_discovery_roles(
             epoch,
         })
         .collect())
-}
-
-fn epoch_phase(epoch: u64) -> f64 {
-    let scrambled = epoch.wrapping_mul(GOLDEN_EPOCH_MULTIPLIER);
-    (scrambled as f64) / ((u64::MAX as f64) + 1.0)
 }
