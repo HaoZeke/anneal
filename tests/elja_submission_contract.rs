@@ -658,6 +658,32 @@ fn occupancy_many_chains_starts_one_brain_per_replica() {
 }
 
 #[test]
+fn causal_lj_array_brains_use_job_scoped_ipc_endpoints() {
+    let script = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("scripts")
+        .join("elja_jcc_lj_causal_pair.sh");
+    let source = fs::read_to_string(&script)
+        .unwrap_or_else(|error| panic!("failed to read {}: {error}", script.display()));
+
+    for required in [
+        r#"BRAIN_NAMESPACE="${SLURM_ARRAY_JOB_ID:-$SLURM_JOB_ID}-${SLURM_ARRAY_TASK_ID:-0}-${SLURM_JOB_ID}""#,
+        r#"BRAIN_IPC_PREFIX="/tmp/anneal-brain-${BRAIN_NAMESPACE}""#,
+        r#"printf 'ipc://%s-%s.sock' "$BRAIN_IPC_PREFIX" "$replica""#,
+        r#"export CATALOG_BRAIN_LISTEN=$(brain_endpoint "$replica")"#,
+        r#"printf 'brain_transport=%s\n' "$brain_transport""#,
+    ] {
+        assert!(
+            source.contains(required),
+            "causal LJ runner is missing collision-free brain endpoint contract {required}"
+        );
+    }
+    assert!(
+        source.contains(r#"tcp://127.0.0.1:$((CATALOG_BRAIN_PORT_BASE + replica))"#),
+        "an explicit TCP base must remain available for externally reserved ports"
+    );
+}
+
+#[test]
 fn occupancy_driver_compiles_brains_into_the_bank_rpc_build() {
     let driver = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("examples")
