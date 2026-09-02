@@ -945,6 +945,17 @@ pub struct SaddleConnection {
     pub irc_at_minimum: [bool; 2],
 }
 
+/// Result and exact potential charge of one budgeted atomistic ridge ride.
+#[derive(Debug)]
+pub struct CartesianConnectionAttempt {
+    /// Certified connection or the scientific failure returned by the ride.
+    pub connection: Result<SaddleConnection, PesExplorationError>,
+    /// PES evaluations accepted by the hard counter.
+    pub charged_evaluations: u64,
+    /// Whether the ride attempted an evaluation beyond its assigned slice.
+    pub budget_exhausted: bool,
+}
+
 /// Exact stationary-point graph accumulated across ride attempts.
 #[derive(Debug, Clone, Default)]
 pub struct PesNetwork {
@@ -3042,6 +3053,51 @@ where
         Some((frozen_atoms, periodic)),
         witness,
     )
+}
+
+/// Run one atomistic ridge ride under a hard PES-evaluation boundary.
+///
+/// This preserves the Cartesian free-mode projection, receiving-side index
+/// certification, mass-weighted IRC, invariant descriptors, and exact identity
+/// witness of [`discover_cartesian_mode_connection`]. Calls refused at the
+/// boundary are not charged.
+#[allow(clippy::too_many_arguments)]
+pub fn discover_cartesian_mode_connection_with_budget<S, W>(
+    surface: &S,
+    descriptor_space: &DescriptorSpace,
+    network: &mut PesNetwork,
+    start: ArrayView1<f64>,
+    masses: ArrayView1<f64>,
+    frozen_atoms: &[bool],
+    mode: ArrayView1<f64>,
+    species: Option<&[u32]>,
+    config: &PesExplorationConfig,
+    witness: &W,
+    maximum_evaluations: u64,
+) -> CartesianConnectionAttempt
+where
+    S: PesSurface + ?Sized,
+    W: ExactStructureWitness + ?Sized,
+{
+    let budgeted = EvaluationBudgetSurface::new(surface, maximum_evaluations);
+    let connection = discover_cartesian_mode_connection(
+        &budgeted,
+        descriptor_space,
+        network,
+        start,
+        masses,
+        frozen_atoms,
+        mode,
+        species,
+        config,
+        witness,
+    );
+    let (charged_evaluations, budget_exhausted) = budgeted.state();
+    CartesianConnectionAttempt {
+        connection,
+        charged_evaluations,
+        budget_exhausted,
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
