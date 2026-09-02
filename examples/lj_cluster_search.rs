@@ -171,6 +171,23 @@ mod option_tests {
 
     #[cfg(feature = "bank-rpc")]
     #[test]
+    fn only_the_coordinator_saddle_role_runs_a_ride() {
+        use anneal_core::discovery_roster::DiscoveryRole;
+
+        assert!(!discovery_role_allows_ride(None));
+        assert!(!discovery_role_allows_ride(Some(DiscoveryRole::BasinEscape)));
+        assert!(discovery_role_allows_ride(Some(DiscoveryRole::SaddleRide)));
+    }
+
+    #[cfg(feature = "bank-rpc")]
+    #[test]
+    fn external_mechanism_charge_is_bounded_by_live_ledger_room() {
+        assert_eq!(settled_external_calls(140, 200), 140);
+        assert_eq!(settled_external_calls(140, 97), 97);
+    }
+
+    #[cfg(feature = "bank-rpc")]
+    #[test]
     fn local_checkpoint_early_return_emits_one_analyzer_slice() {
         use anneal_core::cooperative_search::CooperativeRun;
         use anneal_core::cooperative_search::ledger::ChargeKind;
