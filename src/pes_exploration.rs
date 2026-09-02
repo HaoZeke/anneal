@@ -146,12 +146,12 @@ mod tests {
     }
 
     #[test]
-    fn cartesian_prfo_reuses_secant_hessian_between_exact_refreshes() {
+    fn cartesian_prfo_refines_the_selected_unstable_mode_without_dense_refreshes() {
         let surface = CountingQuarticSaddle {
             evaluations: AtomicUsize::new(0),
         };
         let mut start = Array1::from_elem(18, 0.08);
-        start[0] = 0.6;
+        start[0] = 0.4;
         let mut mode = Array1::zeros(18);
         mode[0] = 1.0;
         let config = PesExplorationConfig {
@@ -163,8 +163,16 @@ mod tests {
             ..PesExplorationConfig::default()
         };
 
-        let saddle =
-            refine_cartesian_with_prfo(&surface, start.view(), mode.view(), None, &config).unwrap();
+        let saddle = refine_cartesian_with_prfo(
+            &surface,
+            start.view(),
+            Array1::ones(6).view(),
+            mode.view(),
+            -2.08,
+            None,
+            &config,
+        )
+        .unwrap();
 
         assert!(saddle.iter().all(|coordinate| coordinate.abs() < 1e-7));
         assert!(surface.evaluations.load(Ordering::Relaxed) < 100);
