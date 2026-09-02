@@ -1707,8 +1707,17 @@ fn main() {
             seed.wrapping_mul(0x9E3779B97F4A7C15).wrapping_add(17),
         );
         let two_phase = cfg.two_phase.filter(|two| two.is_active());
-        let mut surfaces = (!cfg.surfaces.is_empty())
-            .then(|| anneal_core::methods::two_phase::SurfacePortfolio::new(&cfg.surfaces, seed));
+        let surface_block = std::env::var("SURFACE_BLOCK")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(anneal_core::methods::two_phase::DEFAULT_SURFACE_BLOCK);
+        let mut surfaces = (!cfg.surfaces.is_empty()).then(|| {
+            anneal_core::methods::two_phase::SurfacePortfolio::with_block(
+                &cfg.surfaces,
+                seed,
+                surface_block,
+            )
+        });
         let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, iters: usize| {
             let charged_before = led.spent();
             // Curvature is not carried between relaxations: measured on this
