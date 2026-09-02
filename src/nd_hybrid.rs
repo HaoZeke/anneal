@@ -1,22 +1,26 @@
 //! Same-surface hybrid exploration for arbitrary-dimensional energy landscapes.
 //!
 //! Basin escapes generate force-certified sources and minimum-mode rides turn
-//! those sources into index-one connections. Good-UCB assigns each successive
-//! experiment from exact basin and saddle singleton occupancy. The returned
-//! network belongs to one caller-supplied surface and witness; no identity,
-//! energy model, or evidence crosses between systems.
+//! those sources into index-one connections. Separate action-outcome GPs rank
+//! the next finite experiment by GIBBON information about the lowest reachable
+//! terminal energy per charged PES evaluation. The returned network belongs to
+//! one caller-supplied surface and witness; no identity, energy model, or
+//! evidence crosses between systems.
 
 use std::collections::{HashMap, HashSet};
 
 use ndarray::{Array1, ArrayView1};
 use rand::{SeedableRng, rngs::StdRng};
 
-use crate::allocate::{DiscoveryAccounting, Exp3Ix};
+use crate::allocate::DiscoveryAccounting;
 use crate::catalog::{
     PRODUCTION_MAX_UNSEEN_MASS, PRODUCTION_MINIMUM_VISITS, leftover_esty_stable,
     leftover_esty_upper,
 };
-use crate::discovery_roster::good_ucb_missing_mass_index;
+use crate::minimum_information::{
+    MinimumInformationError, MinimumInformationSearch, SearchActionCandidate, SearchActionScore,
+    SearchMechanism,
+};
 use crate::methods::minima_hopping::EscapeFeedback;
 use crate::movekernel::{Gaussian, MoveKernel, TsallisVisit};
 use crate::pes_exploration::{
@@ -29,6 +33,7 @@ const RIDGE_ARM: usize = 0;
 const ESCAPE_ARM: usize = 1;
 const GAUSSIAN_MOVE: usize = 0;
 const TSALLIS_MOVE: usize = 1;
+const MINIMUM_INFORMATION_SAMPLES: usize = 128;
 
 /// Controls for one system-local generic PES exploration campaign.
 #[derive(Debug, Clone)]
@@ -72,7 +77,7 @@ pub enum NdEscapeKernel {
 /// Mechanism policy used for matched-budget comparisons.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NdHybridPolicy {
-    /// Allocate between ridge and escape by exact-species Good-UCB.
+    /// Allocate every concrete action by minimum-energy information per cost.
     Adaptive,
     /// Explore only the finite signed mode portfolio of discovered sources.
     RidgeOnly,
@@ -87,24 +92,26 @@ pub struct NdHybridEvent {
     pub attempt: u64,
     /// Mechanism selected by the declared discovery policy.
     pub mechanism: NdHybridMechanism,
-    /// Good-UCB exact-saddle missing-mass index at this decision.
-    pub ridge_discovery_index: Option<f64>,
-    /// Good-UCB exact-basin missing-mass index at this decision.
-    pub escape_discovery_index: Option<f64>,
+    /// Best ridge-action minimum-information rate at this decision.
+    pub ridge_information_rate: Option<f64>,
+    /// Best basin-action minimum-information rate at this decision.
+    pub escape_information_rate: Option<f64>,
+    /// GIBBON information of the concrete action that was evaluated.
+    pub selected_information: f64,
+    /// Selected information divided by its expected charged PES cost.
+    pub selected_information_rate: f64,
     /// Exact source basin for the proposal or ridge.
     pub source_basin: Option<usize>,
+    /// Exact energy of the source minimum used by the action model.
+    pub source_energy: f64,
+    /// Lowest terminal minimum energy returned by this action.
+    pub terminal_energy: f64,
     /// Mode rank for ridge events.
     pub mode_rank: Option<u16>,
     /// Signed initialization for ridge events.
     pub direction: Option<RideModeDirection>,
     /// Proposal kernel for basin-escape events.
     pub escape_kernel: Option<NdEscapeKernel>,
-    /// EXP3-IX draw probability for the selected proposal kernel.
-    pub kernel_probability: Option<f64>,
-    /// EXP3-IX anytime learning rate `eta_t`.
-    pub kernel_learning_rate: Option<f64>,
-    /// EXP3-IX implicit-exploration term `gamma_t`.
-    pub kernel_implicit_exploration: Option<f64>,
     /// Exact minimum identities introduced by this event.
     pub new_minimum_ids: Vec<usize>,
     /// Certified saddle identities introduced by this event.
@@ -155,7 +162,7 @@ pub struct NdHybridReport {
     pub mechanism_discovery_rates: Vec<f64>,
     /// Gaussian then Tsallis proposal exposure counts.
     pub move_pulls: Vec<usize>,
-    /// Empirical exact-basin discovery rates for the escape proposals.
+    /// Empirical probability that each escape proposal lowers source energy.
     pub move_success_rates: Vec<f64>,
     /// Successful source quenches included in the exact-basin census.
     pub escape_observations: u64,
@@ -186,6 +193,9 @@ pub enum NdHybridError {
     /// A deterministic mode could not be constructed.
     #[error(transparent)]
     Mode(#[from] PesExplorationError),
+    /// The action-outcome model rejected an invalid feature or score.
+    #[error(transparent)]
+    MinimumInformation(#[from] MinimumInformationError),
 }
 
 fn validate(config: &NdHybridConfig, dimension: usize) -> Result<(), NdHybridError> {
@@ -312,32 +322,102 @@ impl EscapeCoverage {
     }
 }
 
-fn good_ucb_mechanism(
-    escape: EscapeCoverageEvidence,
-    network: &NdPesNetwork,
-    pulls: [usize; 2],
-) -> (usize, [f64; 2]) {
-    let ridge_pulls = u64::try_from(pulls[RIDGE_ARM]).unwrap_or(u64::MAX);
-    let escape_pulls = u64::try_from(pulls[ESCAPE_ARM]).unwrap_or(u64::MAX);
-    let total = ridge_pulls.saturating_add(escape_pulls);
-    let ridge_index = good_ucb_missing_mass_index(network.saddle_singletons(), ridge_pulls, total);
-    let escape_index = good_ucb_missing_mass_index(escape.singletons, escape_pulls, total);
-    let selected = match ridge_index.total_cmp(&escape_index) {
-        std::cmp::Ordering::Greater => RIDGE_ARM,
-        std::cmp::Ordering::Less => ESCAPE_ARM,
-        std::cmp::Ordering::Equal if ridge_pulls <= escape_pulls => RIDGE_ARM,
-        std::cmp::Ordering::Equal => ESCAPE_ARM,
-    };
-    (selected, [ridge_index, escape_index])
+fn basin_action_feature(proposal: ArrayView1<'_, f64>, kernel: NdEscapeKernel) -> Vec<f64> {
+    let mut feature = Vec::with_capacity(proposal.len() + 2);
+    feature.extend(proposal.iter().copied());
+    feature.extend(match kernel {
+        NdEscapeKernel::Gaussian => [1.0, 0.0],
+        NdEscapeKernel::Tsallis => [0.0, 1.0],
+    });
+    feature
+}
+
+fn ridge_action_feature(
+    source: ArrayView1<'_, f64>,
+    mode: ArrayView1<'_, f64>,
+    displacement: f64,
+) -> Vec<f64> {
+    source
+        .iter()
+        .zip(mode.iter())
+        .map(|(coordinate, component)| coordinate + displacement * component)
+        .collect()
+}
+
+fn expected_cost(charged: u64, pulls: usize, maximum: u64) -> f64 {
+    if pulls == 0 || charged == 0 {
+        maximum.max(1) as f64
+    } else {
+        charged as f64 / pulls as f64
+    }
+}
+
+fn best_information_rate(
+    scores: &[SearchActionScore],
+    mechanism: SearchMechanism,
+) -> Option<f64> {
+    scores
+        .iter()
+        .filter(|score| score.mechanism == mechanism)
+        .map(|score| score.information_per_charged_evaluation)
+        .max_by(f64::total_cmp)
+}
+
+#[derive(Debug)]
+enum PlannedAction {
+    Ridge {
+        source_basin: usize,
+        source_energy: f64,
+        mode_rank: u16,
+        direction: RideModeDirection,
+        source: Array1<f64>,
+        mode: Array1<f64>,
+        feature: Vec<f64>,
+    },
+    Escape {
+        source_basin: usize,
+        source_energy: f64,
+        move_index: usize,
+        kernel: NdEscapeKernel,
+        proposal: Array1<f64>,
+        feature: Vec<f64>,
+    },
+}
+
+impl PlannedAction {
+    fn candidate(&self, expected_charged_evaluations: f64) -> SearchActionCandidate {
+        match self {
+            Self::Ridge {
+                source_energy,
+                feature,
+                ..
+            } => SearchActionCandidate {
+                mechanism: SearchMechanism::SaddleRide,
+                feature: feature.clone(),
+                source_energy: *source_energy,
+                expected_charged_evaluations,
+            },
+            Self::Escape {
+                source_energy,
+                feature,
+                ..
+            } => SearchActionCandidate {
+                mechanism: SearchMechanism::BasinEscape,
+                feature: feature.clone(),
+                source_energy: *source_energy,
+                expected_charged_evaluations,
+            },
+        }
+    }
 }
 
 /// Explore one arbitrary-dimensional PES with cooperative basin and ridge arms.
 ///
-/// Every discovered minimum enters one exact-witness network immediately. The
-/// round-robin ridge scheduler can therefore consume a basin found by any
-/// escape event, while exact basin and saddle occupancy determines the next
-/// Good-UCB mechanism. A new invocation creates a new network, so two different
-/// surfaces cannot share basins, saddles, energies, or calibration.
+/// Every discovered minimum enters one exact-witness network immediately. A
+/// ridge candidate can therefore use a basin found by any escape event. The
+/// network is an output record; action selection uses only posterior
+/// information about terminal energy. A new invocation creates new action
+/// models and a new network, so two surfaces cannot share evidence.
 pub fn explore_nd_hybrid<S, W>(
     surface: &S,
     initial: ArrayView1<'_, f64>,
@@ -406,7 +486,16 @@ where
     let mut rng = StdRng::seed_from_u64(seed);
     let mut mechanism_accounting = DiscoveryAccounting::new(2);
     mechanism_accounting.observe(ESCAPE_ARM, 1, initial_record.charged_evaluations);
-    let mut move_allocator = Exp3Ix::new(2);
+    let information_amplitude = config.initial_acceptance_threshold;
+    let information_noise = (information_amplitude * f64::EPSILON.sqrt()).max(f64::MIN_POSITIVE);
+    let mut minimum_information = MinimumInformationSearch::new(
+        config.initial_escape_scale * (dimension as f64).sqrt(),
+        information_amplitude,
+        information_noise,
+    )?;
+    let mut move_pulls = [0usize; 2];
+    let mut move_improvements = [0u64; 2];
+    let mut move_charged = [0u64; 2];
     let mut escape_feedback = EscapeFeedback::new(
         config.initial_escape_scale,
         config.initial_acceptance_threshold,
@@ -426,30 +515,102 @@ where
             break NdHybridTermination::BudgetConsumed;
         }
         let ride_task = next_ride_task(&network, &attempted, source_cursor, ranks);
-        let coverage = escape_coverage.evidence();
-        let (selected, discovery_indices) = match policy {
-            NdHybridPolicy::Adaptive if ride_task.is_some() => {
-                let pulls = mechanism_accounting.pulls();
-                let (selected, indices) =
-                    good_ucb_mechanism(coverage, &network, [pulls[RIDGE_ARM], pulls[ESCAPE_ARM]]);
-                (selected, Some(indices))
-            }
-            NdHybridPolicy::Adaptive => (ESCAPE_ARM, None),
-            NdHybridPolicy::RidgeOnly if ride_task.is_some() => (RIDGE_ARM, None),
-            NdHybridPolicy::RidgeOnly => {
-                break NdHybridTermination::RidePortfolioExhausted;
-            }
-            NdHybridPolicy::BasinEscapeOnly => (ESCAPE_ARM, None),
-        };
-        attempt += 1;
+        if policy == NdHybridPolicy::RidgeOnly && ride_task.is_none() {
+            break NdHybridTermination::RidePortfolioExhausted;
+        }
 
-        if selected == RIDGE_ARM {
-            let (source_basin, mode_rank, direction) = ride_task.expect("ride task is available");
-            source_cursor = (source_basin + 1) % network.minimum_count();
-            attempted.insert((source_basin, mode_rank, direction));
+        let mut plans = Vec::<PlannedAction>::new();
+        if policy != NdHybridPolicy::BasinEscapeOnly
+            && let Some((source_basin, mode_rank, direction)) = ride_task
+        {
             let source = network.minima()[source_basin].coordinates.clone();
+            let source_energy = network.minima()[source_basin].energy;
             let mode_seed = seed ^ (source_basin as u64 + 1).wrapping_mul(0x9e37_79b9_7f4a_7c15);
             let mode = orthonormal_nd_mode(dimension, mode_seed, mode_rank, direction)?;
+            let feature = ridge_action_feature(
+                source.view(),
+                mode.view(),
+                config.exploration.saddle_displacement,
+            );
+            plans.push(PlannedAction::Ridge {
+                source_basin,
+                source_energy,
+                mode_rank,
+                direction,
+                source,
+                mode,
+                feature,
+            });
+        }
+        if policy != NdHybridPolicy::RidgeOnly {
+            let escape_scale = escape_feedback.escape();
+            let gaussian = Gaussian::new(escape_scale).propose(
+                live_coordinates.view(),
+                escape_scale,
+                &mut rng,
+            );
+            let tsallis_proposal =
+                tsallis.propose(live_coordinates.view(), escape_scale, &mut rng);
+            for (move_index, kernel, proposal) in [
+                (GAUSSIAN_MOVE, NdEscapeKernel::Gaussian, gaussian),
+                (TSALLIS_MOVE, NdEscapeKernel::Tsallis, tsallis_proposal),
+            ] {
+                plans.push(PlannedAction::Escape {
+                    source_basin: live_basin,
+                    source_energy: live_energy,
+                    move_index,
+                    kernel,
+                    feature: basin_action_feature(proposal.view(), kernel),
+                    proposal,
+                });
+            }
+        }
+        let candidates = plans
+            .iter()
+            .map(|plan| match plan {
+                PlannedAction::Ridge { .. } => plan.candidate(expected_cost(
+                    mechanism_accounting.charged_calls()[RIDGE_ARM],
+                    mechanism_accounting.pulls()[RIDGE_ARM],
+                    remaining.min(config.ride_evaluation_cap),
+                )),
+                PlannedAction::Escape { move_index, .. } => plan.candidate(expected_cost(
+                    move_charged[*move_index],
+                    move_pulls[*move_index],
+                    remaining.min(config.escape_evaluation_cap),
+                )),
+            })
+            .collect::<Vec<_>>();
+        let scores = minimum_information.score(&candidates, MINIMUM_INFORMATION_SAMPLES)?;
+        let selected_index = scores
+            .iter()
+            .enumerate()
+            .max_by(|(left_index, left), (right_index, right)| {
+                left.information_per_charged_evaluation
+                    .total_cmp(&right.information_per_charged_evaluation)
+                    .then_with(|| right_index.cmp(left_index))
+            })
+            .map(|(index, _)| index)
+            .expect("every admissible policy supplies an action");
+        let selected_score = scores[selected_index];
+        let ridge_information_rate =
+            best_information_rate(&scores, SearchMechanism::SaddleRide);
+        let escape_information_rate =
+            best_information_rate(&scores, SearchMechanism::BasinEscape);
+        let selected = plans.swap_remove(selected_index);
+        attempt += 1;
+
+        if let PlannedAction::Ridge {
+            source_basin,
+            source_energy,
+            mode_rank,
+            direction,
+            source,
+            mode,
+            feature,
+        } = selected
+        {
+            source_cursor = (source_basin + 1) % network.minimum_count();
+            attempted.insert((source_basin, mode_rank, direction));
             let minima_before = network.minimum_count();
             let saddles_before = network.saddle_count();
             let unresolved_before = network.unresolved_saddles().len();
@@ -466,6 +627,21 @@ where
             let new_saddle_ids = new_ids(saddles_before, network.saddle_count());
             let new_unresolved_saddle_ids =
                 new_ids(unresolved_before, network.unresolved_saddles().len());
+            let terminal_energy = ridge
+                .connection
+                .as_ref()
+                .ok()
+                .into_iter()
+                .flat_map(|connection| connection.endpoints)
+                .chain(new_minimum_ids.iter().copied())
+                .map(|id| network.minima()[id].energy)
+                .fold(source_energy, f64::min);
+            minimum_information.observe(
+                SearchMechanism::SaddleRide,
+                &feature,
+                source_energy,
+                terminal_energy,
+            )?;
             let stationary_discoveries = new_minimum_ids
                 .len()
                 .saturating_add(new_saddle_ids.len())
@@ -485,15 +661,16 @@ where
             events.push(NdHybridEvent {
                 attempt,
                 mechanism: NdHybridMechanism::Ridge,
-                ridge_discovery_index: discovery_indices.map(|indices| indices[RIDGE_ARM]),
-                escape_discovery_index: discovery_indices.map(|indices| indices[ESCAPE_ARM]),
+                ridge_information_rate,
+                escape_information_rate,
+                selected_information: selected_score.information,
+                selected_information_rate: selected_score.information_per_charged_evaluation,
                 source_basin: Some(source_basin),
+                source_energy,
+                terminal_energy,
                 mode_rank: Some(mode_rank),
                 direction: Some(direction),
                 escape_kernel: None,
-                kernel_probability: None,
-                kernel_learning_rate: None,
-                kernel_implicit_exploration: None,
                 new_minimum_ids,
                 new_saddle_ids,
                 new_unresolved_saddle_ids,
@@ -510,21 +687,16 @@ where
             }
             continue;
         }
-
-        let kernel_selection = move_allocator.select(&mut rng);
-        let move_index = kernel_selection.arm();
-        let escape_kernel = match move_index {
-            GAUSSIAN_MOVE => NdEscapeKernel::Gaussian,
-            TSALLIS_MOVE => NdEscapeKernel::Tsallis,
-            _ => unreachable!("the escape portfolio has exactly two moves"),
-        };
-        let escape_scale = escape_feedback.escape();
-        let proposal: Array1<f64> = match move_index {
-            GAUSSIAN_MOVE => {
-                Gaussian::new(escape_scale).propose(live_coordinates.view(), escape_scale, &mut rng)
-            }
-            TSALLIS_MOVE => tsallis.propose(live_coordinates.view(), escape_scale, &mut rng),
-            _ => unreachable!("the escape portfolio has exactly two moves"),
+        let PlannedAction::Escape {
+            source_basin,
+            source_energy,
+            move_index,
+            kernel: escape_kernel,
+            proposal,
+            feature,
+        } = selected
+        else {
+            unreachable!("the ridge action returns from its branch")
         };
         let escape_config = SourceEscapeConfig {
             maximum_evaluations: remaining.min(config.escape_evaluation_cap),
@@ -532,12 +704,21 @@ where
             gradient_tolerance: config.exploration.quench_gradient_tolerance,
             gradient_norm_tolerance: norm_tolerance,
         };
-        let source_basin = live_basin;
         let escape = quench_source_escape(surface, proposal.view(), &escape_config);
         match escape {
             SourceEscapeOutcome::Failed(failure) => {
                 mechanism_accounting.observe(ESCAPE_ARM, 0, failure.charged_evaluations);
-                move_allocator.update(1.0);
+                if failure.charged_evaluations > 0 {
+                    minimum_information.observe(
+                        SearchMechanism::BasinEscape,
+                        &feature,
+                        source_energy,
+                        source_energy,
+                    )?;
+                }
+                move_pulls[move_index] = move_pulls[move_index].saturating_add(1);
+                move_charged[move_index] =
+                    move_charged[move_index].saturating_add(failure.charged_evaluations);
                 charged_evaluations = charged_evaluations
                     .saturating_add(failure.charged_evaluations)
                     .min(config.evaluation_budget);
@@ -547,15 +728,16 @@ where
                 events.push(NdHybridEvent {
                     attempt,
                     mechanism: NdHybridMechanism::BasinEscape,
-                    ridge_discovery_index: discovery_indices.map(|indices| indices[RIDGE_ARM]),
-                    escape_discovery_index: discovery_indices.map(|indices| indices[ESCAPE_ARM]),
+                    ridge_information_rate,
+                    escape_information_rate,
+                    selected_information: selected_score.information,
+                    selected_information_rate: selected_score.information_per_charged_evaluation,
                     source_basin: Some(source_basin),
+                    source_energy,
+                    terminal_energy: source_energy,
                     mode_rank: None,
                     direction: None,
                     escape_kernel: Some(escape_kernel),
-                    kernel_probability: Some(kernel_selection.probability()),
-                    kernel_learning_rate: Some(kernel_selection.learning_rate()),
-                    kernel_implicit_exploration: Some(kernel_selection.implicit_exploration()),
                     new_minimum_ids: Vec::new(),
                     new_saddle_ids: Vec::new(),
                     new_unresolved_saddle_ids: Vec::new(),
@@ -577,6 +759,12 @@ where
                 let admission = network.admit_minimum(record.minimum, witness);
                 let discovered = admission.is_new;
                 let new_minimum_ids = discovered.then_some(admission.id).into_iter().collect();
+                minimum_information.observe(
+                    SearchMechanism::BasinEscape,
+                    &feature,
+                    source_energy,
+                    candidate_energy,
+                )?;
                 escape_feedback.observe(Some(live_basin), admission.id);
                 escape_coverage.observe(admission.id);
                 let accepted = escape_feedback.accept(candidate_energy - live_energy);
@@ -590,7 +778,13 @@ where
                     u64::from(discovered),
                     record.charged_evaluations,
                 );
-                move_allocator.update(if discovered { 0.0 } else { 1.0 });
+                move_pulls[move_index] = move_pulls[move_index].saturating_add(1);
+                move_charged[move_index] =
+                    move_charged[move_index].saturating_add(record.charged_evaluations);
+                if candidate_energy < source_energy {
+                    move_improvements[move_index] =
+                        move_improvements[move_index].saturating_add(1);
+                }
                 charged_evaluations = charged_evaluations
                     .saturating_add(record.charged_evaluations)
                     .min(config.evaluation_budget);
@@ -599,15 +793,16 @@ where
                 events.push(NdHybridEvent {
                     attempt,
                     mechanism: NdHybridMechanism::BasinEscape,
-                    ridge_discovery_index: discovery_indices.map(|indices| indices[RIDGE_ARM]),
-                    escape_discovery_index: discovery_indices.map(|indices| indices[ESCAPE_ARM]),
+                    ridge_information_rate,
+                    escape_information_rate,
+                    selected_information: selected_score.information,
+                    selected_information_rate: selected_score.information_per_charged_evaluation,
                     source_basin: Some(source_basin),
+                    source_energy,
+                    terminal_energy: candidate_energy,
                     mode_rank: None,
                     direction: None,
                     escape_kernel: Some(escape_kernel),
-                    kernel_probability: Some(kernel_selection.probability()),
-                    kernel_learning_rate: Some(kernel_selection.learning_rate()),
-                    kernel_implicit_exploration: Some(kernel_selection.implicit_exploration()),
                     new_minimum_ids,
                     new_saddle_ids: Vec::new(),
                     new_unresolved_saddle_ids: Vec::new(),
@@ -634,8 +829,18 @@ where
         events,
         mechanism_pulls: mechanism_accounting.pulls().to_vec(),
         mechanism_discovery_rates: mechanism_accounting.rates(),
-        move_pulls: move_allocator.pulls().to_vec(),
-        move_success_rates: move_allocator.success_rates(),
+        move_pulls: move_pulls.to_vec(),
+        move_success_rates: move_improvements
+            .iter()
+            .zip(move_pulls)
+            .map(|(improvements, pulls)| {
+                if pulls == 0 {
+                    0.0
+                } else {
+                    *improvements as f64 / pulls as f64
+                }
+            })
+            .collect(),
         escape_observations: coverage.observations,
         escape_singletons: coverage.singletons,
         escape_unseen_mass_upper: coverage.unseen_mass_upper,

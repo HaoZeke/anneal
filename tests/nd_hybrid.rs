@@ -117,58 +117,32 @@ fn hybrid_nd_search_shares_escaped_minima_with_budgeted_ridge_rides() {
         event.mechanism == NdHybridMechanism::Ridge && event.source_basin == Some(escaped.1)
     }));
 
-    let saturated = report
-        .events
-        .iter()
-        .position(|event| event.escape_coverage_saturated)
-        .expect("the exact escape census must acquire a finite unseen-mass bound");
-    let coverage_window = report.events[saturated + 1..].iter().take(20);
-    let (ridge_after_saturation, escape_after_saturation, observed_after_saturation) =
-        coverage_window.fold(
-            (0usize, 0usize, 0usize),
-            |(ridge, escape, observed), event| {
-                (
-                    ridge + usize::from(event.mechanism == NdHybridMechanism::Ridge),
-                    escape + usize::from(event.mechanism == NdHybridMechanism::BasinEscape),
-                    observed + 1,
-                )
-            },
-        );
-    assert_eq!(observed_after_saturation, 20);
-    assert!(ridge_after_saturation > 0);
-    assert!(escape_after_saturation > 0);
-    let indexed_decisions = report
-        .events
-        .iter()
-        .filter_map(|event| {
-            Some((
-                event,
-                event.ridge_discovery_index?,
-                event.escape_discovery_index?,
-            ))
-        })
-        .collect::<Vec<_>>();
-    assert!(!indexed_decisions.is_empty());
-    for (event, ridge_index, escape_index) in indexed_decisions {
-        match ridge_index.total_cmp(&escape_index) {
-            std::cmp::Ordering::Greater => {
-                assert_eq!(event.mechanism, NdHybridMechanism::Ridge)
-            }
-            std::cmp::Ordering::Less => {
-                assert_eq!(event.mechanism, NdHybridMechanism::BasinEscape)
-            }
-            std::cmp::Ordering::Equal => {}
-        }
-    }
-    assert!(report.escape_coverage_saturated);
-    assert!(report.escape_unseen_mass_upper.unwrap() < 0.2);
-
-    let mut escape_round = 0usize;
     let mut reconstructed_pulls = [0usize; 2];
-    let mut reconstructed_discoveries = [0usize; 2];
+    let mut reconstructed_improvements = [0usize; 2];
+    let mut compared_mechanisms = 0usize;
     for event in &report.events {
+        assert!(event.selected_information.is_finite() && event.selected_information >= 0.0);
+        assert!(
+            event.selected_information_rate.is_finite()
+                && event.selected_information_rate >= 0.0
+        );
+        assert!(event.source_energy.is_finite());
+        assert!(event.terminal_energy.is_finite());
+        let selected_role_rate = match event.mechanism {
+            NdHybridMechanism::Ridge => event.ridge_information_rate,
+            NdHybridMechanism::BasinEscape => event.escape_information_rate,
+        }
+        .expect("the selected mechanism must retain its information rate");
+        assert!((selected_role_rate - event.selected_information_rate).abs() < 1e-14);
+        if let (Some(ridge), Some(escape)) = (
+            event.ridge_information_rate,
+            event.escape_information_rate,
+        ) {
+            compared_mechanisms += 1;
+            assert!(event.selected_information_rate >= ridge.min(escape));
+            assert!(event.selected_information_rate >= ridge.max(escape) - 1e-14);
+        }
         if event.mechanism == NdHybridMechanism::BasinEscape {
-            escape_round += 1;
             let kernel = event
                 .escape_kernel
                 .expect("escape event must name its kernel");
@@ -177,30 +151,16 @@ fn hybrid_nd_search_shares_escaped_minima_with_budgeted_ridge_rides() {
                 NdEscapeKernel::Tsallis => 1,
             };
             reconstructed_pulls[arm] += 1;
-            reconstructed_discoveries[arm] += usize::from(!event.new_minimum_ids.is_empty());
-            let probability = event
-                .kernel_probability
-                .expect("escape event must record its draw probability");
-            let eta = event
-                .kernel_learning_rate
-                .expect("escape event must record eta_t");
-            let gamma = event
-                .kernel_implicit_exploration
-                .expect("escape event must record gamma_t");
-            let expected_eta = (2.0_f64.ln() / (2.0 * escape_round as f64)).sqrt();
-            assert!(probability > 0.0 && probability <= 1.0);
-            assert!((eta - expected_eta).abs() < 1e-15);
-            assert!((gamma - eta / 2.0).abs() < 1e-15);
+            reconstructed_improvements[arm] +=
+                usize::from(event.terminal_energy < event.source_energy);
         } else {
             assert_eq!(event.escape_kernel, None);
-            assert_eq!(event.kernel_probability, None);
-            assert_eq!(event.kernel_learning_rate, None);
-            assert_eq!(event.kernel_implicit_exploration, None);
         }
     }
+    assert!(compared_mechanisms > 0);
     assert_eq!(report.move_pulls, reconstructed_pulls);
     for arm in 0..2 {
-        let expected = reconstructed_discoveries[arm] as f64 / reconstructed_pulls[arm] as f64;
+        let expected = reconstructed_improvements[arm] as f64 / reconstructed_pulls[arm] as f64;
         assert!((report.move_success_rates[arm] - expected).abs() < 1e-15);
     }
 
