@@ -8,7 +8,7 @@
 //! coordinates, seeds, target, and charged-call ceiling.
 //!
 //! Usage:
-//! `lj_joint_optimum <N> <budget> <seeds> [all|adaptive|ridge|basin|bh|mh|mh-soft|feedback] [gs2|morokuma|both] [seed0]`
+//! `lj_joint_optimum <N> <budget> <seeds> [all|adaptive|ridge|basin|bh|mh|mh-soft|mh-bounded|mh-bounded-soft|feedback] [gs2|morokuma|both] [seed0]`
 
 use std::error::Error;
 use std::path::{Path, PathBuf};
@@ -48,6 +48,8 @@ enum Arm {
     BasinHopping,
     MinimaHopping,
     MinimaHoppingSoftened,
+    MinimaHoppingBounded,
+    MinimaHoppingBoundedSoftened,
     MinimaFeedback,
 }
 
@@ -60,6 +62,8 @@ impl Arm {
             Self::BasinHopping => "basin-hopping".into(),
             Self::MinimaHopping => "minima-hopping".into(),
             Self::MinimaHoppingSoftened => "minima-hopping-softened".into(),
+            Self::MinimaHoppingBounded => "minima-hopping-bounded".into(),
+            Self::MinimaHoppingBoundedSoftened => "minima-hopping-bounded-softened".into(),
             Self::MinimaFeedback => "minima-feedback".into(),
         }
     }
@@ -138,6 +142,8 @@ fn selected_arms(selector: &str, irc: &[IrcKind]) -> Result<Vec<Arm>, String> {
                 Arm::BasinHopping,
                 Arm::MinimaHopping,
                 Arm::MinimaHoppingSoftened,
+                Arm::MinimaHoppingBounded,
+                Arm::MinimaHoppingBoundedSoftened,
                 Arm::MinimaFeedback,
             ]);
         }
@@ -147,10 +153,13 @@ fn selected_arms(selector: &str, irc: &[IrcKind]) -> Result<Vec<Arm>, String> {
         "bh" => arms.push(Arm::BasinHopping),
         "mh" => arms.push(Arm::MinimaHopping),
         "mh-soft" => arms.push(Arm::MinimaHoppingSoftened),
+        "mh-bounded" => arms.push(Arm::MinimaHoppingBounded),
+        "mh-bounded-soft" => arms.push(Arm::MinimaHoppingBoundedSoftened),
         "feedback" => arms.push(Arm::MinimaFeedback),
         _ => {
             return Err(
-                "arm must be all, adaptive, ridge, basin, bh, mh, mh-soft, or feedback".into(),
+                "arm must be all, adaptive, ridge, basin, bh, mh, mh-soft, mh-bounded, mh-bounded-soft, or feedback"
+                    .into(),
             );
         }
     }
@@ -300,6 +309,7 @@ fn run_minima_hopping(
     seed: u64,
     witness: &impl ExactStructureWitness,
     soften: bool,
+    bound_escape: bool,
 ) -> Outcome {
     let hopping = HoppingConfig::for_cluster(n);
     let escape_config = MdEscapeConfig {
@@ -347,8 +357,10 @@ fn run_minima_hopping(
     let mut minima = vec![state.clone()];
     let mut current_basin = 0usize;
     let mut feedback = EscapeFeedback::new(hopping.energy_scale, 0.5 * hopping.energy_scale);
-    feedback.escape_floor = f64::MIN_POSITIVE;
-    feedback.escape_ceiling = f64::MAX;
+    if !bound_escape {
+        feedback.escape_floor = f64::MIN_POSITIVE;
+        feedback.escape_ceiling = f64::MAX;
+    }
     feedback.register_initial(current_basin);
     let mut rng = StdRng::seed_from_u64(seed);
     let mut hops = 0usize;
@@ -728,10 +740,26 @@ fn main() -> Result<(), Box<dyn Error>> {
                 Arm::BasinHopping
                 | Arm::MinimaHopping
                 | Arm::MinimaHoppingSoftened
+                | Arm::MinimaHoppingBounded
+                | Arm::MinimaHoppingBoundedSoftened
                 | Arm::MinimaFeedback => {
                     let budget = usize::try_from(budget).unwrap_or(usize::MAX);
-                    let outcome = if matches!(arm, Arm::MinimaHopping | Arm::MinimaHoppingSoftened)
-                    {
+                    let minima_hopping = matches!(
+                        arm,
+                        Arm::MinimaHopping
+                            | Arm::MinimaHoppingSoftened
+                            | Arm::MinimaHoppingBounded
+                            | Arm::MinimaHoppingBoundedSoftened
+                    );
+                    let softened = matches!(
+                        arm,
+                        Arm::MinimaHoppingSoftened | Arm::MinimaHoppingBoundedSoftened
+                    );
+                    let bound_escape = matches!(
+                        arm,
+                        Arm::MinimaHoppingBounded | Arm::MinimaHoppingBoundedSoftened
+                    );
+                    let outcome = if minima_hopping {
                         run_minima_hopping(
                             &potential,
                             initial.view(),
@@ -739,7 +767,8 @@ fn main() -> Result<(), Box<dyn Error>> {
                             budget,
                             seed,
                             &witness,
-                            matches!(arm, Arm::MinimaHoppingSoftened),
+                            softened,
+                            bound_escape,
                         )
                     } else {
                         run_hopping(
@@ -770,6 +799,8 @@ fn main() -> Result<(), Box<dyn Error>> {
                             "hops": outcome.hops,
                             "accepted": outcome.accepted,
                             "escape_kinetic_or_scale": outcome.escape_scale,
+                            "escape_bounded": bound_escape,
+                            "velocity_softened": softened,
                             "acceptance_threshold": outcome.escape_threshold,
                             "visit_counts": outcome.visit_counts,
                             "failed_actions": outcome.unconverged_records,
@@ -888,10 +919,7 @@ mod tests {
             arms.as_slice(),
             [Arm::MinimaHoppingBoundedSoftened]
         ));
-        assert_eq!(
-            arms[0].label(),
-            "minima-hopping-bounded-softened"
-        );
+        assert_eq!(arms[0].label(), "minima-hopping-bounded-softened");
     }
 
     #[test]
@@ -899,8 +927,16 @@ mod tests {
         let potential = PairPotential::lennard_jones(2);
         let initial = Array1::from(vec![0.0, 0.0, 0.0, 1.2, 0.0, 0.0]);
 
-        let outcome =
-            run_minima_hopping(&potential, initial.view(), 2, 0, 7, &DistinctWitness, false);
+        let outcome = run_minima_hopping(
+            &potential,
+            initial.view(),
+            2,
+            0,
+            7,
+            &DistinctWitness,
+            false,
+            false,
+        );
 
         assert_eq!(outcome.best, f64::INFINITY);
         assert!(outcome.best_state.is_none());
