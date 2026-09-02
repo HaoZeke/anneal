@@ -40,9 +40,9 @@ fi
 
 pattern=$(printf '%s|' "${files[@]}")
 pattern=${pattern%|}
-if rg -n -- "$pattern" "$log" | rg -q "error:|warning:"; then
+if rg -n -- "--> (${pattern})" "$log" | rg -q .; then
   echo "clippy diagnostics in touched files:" >&2
-  rg -n -- "$pattern" "$log" >&2 || true
+  rg -n -C 3 -- "--> (${pattern})" "$log" >&2 || true
   exit 1
 fi
 echo "CLIPPY_TOUCHED_CLEAN files=${files[*]} (crate had unrelated diagnostics)"
