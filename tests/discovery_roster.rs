@@ -11,7 +11,7 @@ fn coverage_allocation_keeps_full_uncertainty_before_the_observation_floor() {
 }
 
 #[test]
-fn unresolved_saddle_coverage_receives_most_replica_seats() {
+fn unresolved_saddle_coverage_receives_the_discovery_batch() {
     let assignments = assign_discovery_roles(
         &[7, 2, 9, 4],
         DiscoveryCoverage {
@@ -30,14 +30,14 @@ fn unresolved_saddle_coverage_receives_most_replica_seats() {
             .iter()
             .filter(|assignment| assignment.role == DiscoveryRole::BasinEscape)
             .count(),
-        1
+        0
     );
     assert_eq!(
         assignments
             .iter()
             .filter(|assignment| assignment.role == DiscoveryRole::SaddleRide)
             .count(),
-        3
+        4
     );
     assert!(assignments.iter().all(|assignment| assignment.epoch == 11));
 }
@@ -46,9 +46,9 @@ fn unresolved_saddle_coverage_receives_most_replica_seats() {
 fn discovery_roles_rotate_without_changing_the_coverage_allocation() {
     let coverage = DiscoveryCoverage {
         basin_observations: 10,
-        basin_singletons: 4,
+        basin_singletons: 5,
         saddle_observations: 10,
-        saddle_singletons: 6,
+        saddle_singletons: 5,
         ride_available: true,
     };
     let first = assign_discovery_roles(&[7, 2, 9, 4], coverage, 11).unwrap();
