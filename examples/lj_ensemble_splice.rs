@@ -579,6 +579,29 @@ fn run_chain(
                 slot.best_state = best.to_vec();
             }
         }
+        if exchange.reoccupy && snapshot.charged() >= next_reoccupy {
+            next_reoccupy = snapshot.charged() + exchange.reoccupy_interval;
+            let mut private = Ledger::new(usize::MAX / 2);
+            let rebuilt = reoccupy(&lattice_cfg, &mut private, snapshot.current_state());
+            let mut external_calls = private.spent();
+            child_opt.forget();
+            let (energy, relaxed, _) = child_opt.minimize(rebuilt.view(), relax_steps, |v| {
+                external_calls += 1;
+                Some(child_surface.energy(v))
+            });
+            tally.attempts += 1;
+            tally.external_calls += external_calls;
+            if energy.is_finite() && energy < snapshot.current_energy() - 1e-6 {
+                tally.adopted += 1;
+                tally.below_current += 1;
+                return CheckpointAction::ExternalAdopt {
+                    state: relaxed,
+                    action: "reoccupy".to_owned(),
+                    external_calls,
+                };
+            }
+            return CheckpointAction::ExternalWork { external_calls };
+        }
         if let Some(cores) = cores.as_ref() {
             let key = core_key_nn(
                 snapshot.current_state(),
@@ -632,29 +655,6 @@ fn run_chain(
                 );
             }
             return CheckpointAction::Continue;
-        }
-        if exchange.reoccupy && snapshot.charged() >= next_reoccupy {
-            next_reoccupy = snapshot.charged() + exchange.reoccupy_interval;
-            let mut private = Ledger::new(usize::MAX / 2);
-            let rebuilt = reoccupy(&lattice_cfg, &mut private, snapshot.current_state());
-            let mut external_calls = private.spent();
-            child_opt.forget();
-            let (energy, relaxed, _) = child_opt.minimize(rebuilt.view(), relax_steps, |v| {
-                external_calls += 1;
-                Some(child_surface.energy(v))
-            });
-            tally.attempts += 1;
-            tally.external_calls += external_calls;
-            if energy.is_finite() && energy < snapshot.current_energy() - 1e-6 {
-                tally.adopted += 1;
-                tally.below_current += 1;
-                return CheckpointAction::ExternalAdopt {
-                    state: relaxed,
-                    action: "reoccupy".to_owned(),
-                    external_calls,
-                };
-            }
-            return CheckpointAction::ExternalWork { external_calls };
         }
         if !exchange.enabled || snapshot.charged() < next_attempt {
             return CheckpointAction::Continue;
