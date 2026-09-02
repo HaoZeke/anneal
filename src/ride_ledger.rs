@@ -462,6 +462,25 @@ impl RideLedger {
         self.claim_ranked(replica, seed, &BTreeMap::new())
     }
 
+    /// Claim one exact action chosen by an external joint-batch allocator.
+    ///
+    /// An active arm remains exclusive, while retrying from the replica that
+    /// already holds work returns its existing order unchanged.
+    pub fn claim_arm(
+        &mut self,
+        replica: u32,
+        seed: u64,
+        selected: &RideArm,
+    ) -> Option<RideWorkOrder> {
+        if let Some(id) = self.replica_work.get(&replica) {
+            return self.active.get(id).cloned();
+        }
+        let (arm, representative_atom) = self
+            .arms()
+            .find(|(arm, _)| arm == selected && !self.active_arms.contains(arm))?;
+        self.issue_claim(replica, seed, arm, representative_atom)
+    }
+
     /// Claim the unheld action with the largest minimum-information score.
     ///
     /// Scores are supplied by a terminal-energy model outside the network
@@ -500,8 +519,16 @@ impl RideLedger {
                     .then_with(|| right.cmp(left))
                     .then_with(|| right_atom.cmp(left_atom))
             })?;
-        let arm = selected.0;
-        let representative_atom = selected.1;
+        self.issue_claim(replica, seed, selected.0, selected.1)
+    }
+
+    fn issue_claim(
+        &mut self,
+        replica: u32,
+        seed: u64,
+        arm: RideArm,
+        representative_atom: u32,
+    ) -> Option<RideWorkOrder> {
         let attempt = self
             .arm_completions
             .get(&arm)
