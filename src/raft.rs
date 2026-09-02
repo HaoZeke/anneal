@@ -1040,16 +1040,20 @@ pub mod wire {
         }
 
         #[test]
-        fn seam_work_covers_both_communities_and_rotates_replica_roles() {
+        fn seam_work_balances_both_sides_and_rotates_replica_roles() {
             let members = [7, 2, 9, 4, 1];
-            let first = assign_seam_work(&members, 11, 29, 12, 3, 4);
-            let second = assign_seam_work(&members, 11, 29, 12, 3, 5);
+            let first = assign_seam_work(&members, 11, 29, 4);
+            let second = assign_seam_work(&members, 11, 29, 5);
 
             assert_eq!(first.len(), members.len());
-            assert_eq!(first.iter().filter(|row| row.right_side).count(), 4);
-            assert_eq!(first.iter().filter(|row| !row.right_side).count(), 1);
+            assert_eq!(first.iter().filter(|row| row.right_side).count(), 2);
+            assert_eq!(first.iter().filter(|row| !row.right_side).count(), 3);
+            assert_eq!(second.iter().filter(|row| row.right_side).count(), 3);
+            assert_eq!(second.iter().filter(|row| !row.right_side).count(), 2);
             assert!(first.iter().all(|row| {
-                row.anchor_basin == if row.right_side { 29 } else { 11 } && row.decree_index == 4
+                row.anchor_basin == if row.right_side { 29 } else { 11 }
+                    && row.bridge_duty
+                    && row.decree_index == 4
             }));
             let mut assigned = first.iter().map(|row| row.replica).collect::<Vec<_>>();
             assigned.sort_unstable();
@@ -1064,6 +1068,18 @@ pub mod wire {
                     .map(|row| (row.replica, row.right_side))
                     .collect::<Vec<_>>()
             );
+        }
+
+        #[test]
+        fn a_single_replica_alternates_seam_sides() {
+            let even = assign_seam_work(&[6], 11, 29, 8);
+            let odd = assign_seam_work(&[6], 11, 29, 9);
+
+            assert_eq!(even.len(), 1);
+            assert_eq!(odd.len(), 1);
+            assert_ne!(even[0].right_side, odd[0].right_side);
+            assert!(even[0].bridge_duty);
+            assert!(odd[0].bridge_duty);
         }
     }
 }
