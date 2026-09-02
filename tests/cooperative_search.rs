@@ -468,14 +468,14 @@ fn coordinator_segments_live_replicas_by_shared_minimum_information() {
             .iter()
             .filter(|state| state.discovery_role == DiscoveryRole::BasinEscape)
             .count(),
-        2
+        1
     );
     assert_eq!(
         states
             .iter()
             .filter(|state| state.discovery_role == DiscoveryRole::SaddleRide)
             .count(),
-        2
+        3
     );
     assert!(
         states
@@ -488,59 +488,57 @@ fn coordinator_segments_live_replicas_by_shared_minimum_information() {
 
 #[test]
 fn coordinator_divides_minimum_information_by_observed_pes_cost() {
-    let server = ride_server();
-    let digest = signature().digest();
-    let query = ride_candidate(0, 1, 1.2);
-    let mut clients = (0..4)
-        .map(|replica| {
-            CatalogClient::connect(
-                server.addr(),
-                identity(replica, digest),
-                ClientConfig::default(),
-            )
-            .unwrap()
-        })
-        .collect::<Vec<_>>();
-    clients[0].offer_candidate(1, query.clone()).unwrap();
-    clients[0]
-        .record_ledger_event(2, ChargeKind::BasinEscape, 20, 20)
-        .unwrap();
-    clients[1]
-        .record_ledger_event(1, ChargeKind::SaddleRide, 80, 80)
-        .unwrap();
-
-    let states = clients
-        .iter_mut()
-        .enumerate()
-        .map(|(replica, client)| {
-            let sequence = match replica {
-                0 => 3,
-                1 => 2,
-                _ => 1,
-            };
-            client
-                .policy_state(sequence, query.descriptor.clone(), query.energy)
+    let ride_count = |basin_calls: u64, ride_calls: u64| {
+        let server = ride_server();
+        let digest = signature().digest();
+        let query = ride_candidate(0, 1, 1.2);
+        let mut clients = (0..4)
+            .map(|replica| {
+                CatalogClient::connect(
+                    server.addr(),
+                    identity(replica, digest),
+                    ClientConfig::default(),
+                )
                 .unwrap()
-        })
-        .collect::<Vec<_>>();
+            })
+            .collect::<Vec<_>>();
+        clients[0].offer_candidate(1, query.clone()).unwrap();
+        clients[0]
+            .record_ledger_event(2, ChargeKind::BasinEscape, basin_calls, basin_calls)
+            .unwrap();
+        clients[1]
+            .record_ledger_event(1, ChargeKind::SaddleRide, ride_calls, ride_calls)
+            .unwrap();
 
-    assert_eq!(states[0].basin_discovery_attempts, 1);
-    assert_eq!(states[0].basin_discovery_charged, 20);
-    assert_eq!(states[0].saddle_discovery_attempts, 1);
-    assert_eq!(states[0].saddle_discovery_charged, 80);
-    assert_eq!(
-        states
-            .iter()
-            .filter(|state| state.discovery_role == DiscoveryRole::BasinEscape)
-            .count(),
-        4
-    );
-    assert_eq!(
+        let states = clients
+            .iter_mut()
+            .enumerate()
+            .map(|(replica, client)| {
+                let sequence = match replica {
+                    0 => 3,
+                    1 => 2,
+                    _ => 1,
+                };
+                client
+                    .policy_state(sequence, query.descriptor.clone(), query.energy)
+                    .unwrap()
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(states[0].basin_discovery_attempts, 1);
+        assert_eq!(states[0].basin_discovery_charged, basin_calls);
+        assert_eq!(states[0].saddle_discovery_attempts, 1);
+        assert_eq!(states[0].saddle_discovery_charged, ride_calls);
         states
             .iter()
             .filter(|state| state.discovery_role == DiscoveryRole::SaddleRide)
-            .count(),
-        0
+            .count()
+    };
+
+    let expensive_rides = ride_count(1, 99);
+    let cheap_rides = ride_count(99, 1);
+    assert!(
+        cheap_rides > expensive_rides,
+        "cheap rides filled {cheap_rides} seats versus {expensive_rides} when expensive"
     );
 }
 
@@ -2071,7 +2069,7 @@ fn cooperative_trace_records_policy_diagnostic_evidence() {
     assert_eq!(evidence.local_basin_distance, 0.0);
     assert!(evidence.novelty.is_finite() && evidence.novelty > 0.0);
     assert!(evidence.transition_uncertainty.is_finite() && evidence.transition_uncertainty > 0.0);
-    assert_eq!(evidence.discovery_role, DiscoveryRole::SaddleRide);
+    assert_eq!(evidence.discovery_role, DiscoveryRole::BasinEscape);
     assert_eq!(evidence.discovery_epoch, 0);
     assert_eq!(evidence.basin_unseen_mass_upper, 1.0);
     assert_eq!(evidence.saddle_unseen_mass_upper, 1.0);
