@@ -192,6 +192,55 @@ pub fn hollow_sites(x: &[f64], neighbour_cutoff: f64) -> Vec<[f64; 3]> {
     sites
 }
 
+/// Occupation optimisation: at every step the lattice is rebuilt from the
+/// current structure, the three worst-bound points are each tried against
+/// every vacant site, and the single relocation with the largest drop in
+/// that point's energy is taken; the sweep ends when no relocation lowers
+/// any of them. Site energies are charged at their pair fraction and the
+/// per-point energies at one evaluation per step.
+pub fn optimise_occupation(
+    cfg: &LatticeSearchConfig,
+    ledger: &mut Ledger,
+    x: ArrayView1<f64>,
+) -> (Array1<f64>, usize) {
+    let n = cfg.n_points;
+    let mut cur: Vec<f64> = x.to_vec();
+    let frac = 2.0 / n.max(1) as f64;
+    let mut moves = 0usize;
+    while moves < cfg.max_moves {
+        if !ledger.charge() {
+            break;
+        }
+        let energies: Vec<f64> = (0..n)
+            .map(|i| site_energy(cfg.kind, &cur, Some(i), point(&cur, i)))
+            .collect();
+        let mut order: Vec<usize> = (0..n).collect();
+        order.sort_by(|&a, &b| energies[b].total_cmp(&energies[a]));
+        let sites = hollow_sites(&cur, cfg.neighbour_cutoff);
+        if sites.is_empty() {
+            break;
+        }
+        let mut best: Option<(usize, [f64; 3], f64)> = None;
+        for &atom in order.iter().take(3) {
+            for site in &sites {
+                if !ledger.charge_frac(frac) {
+                    return (Array1::from(cur), moves);
+                }
+                let gain = energies[atom] - site_energy(cfg.kind, &cur, Some(atom), *site);
+                if gain > 1e-9 && best.is_none_or(|(_, _, g)| gain > g) {
+                    best = Some((atom, *site, gain));
+                }
+            }
+        }
+        let Some((atom, site, _)) = best else { break };
+        for k in 0..3 {
+            cur[3 * atom + k] = site[k];
+        }
+        moves += 1;
+    }
+    (Array1::from(cur), moves)
+}
+
 /// One greedy construction: move the worst-bound point to the best vacant
 /// site while that lowers its energy. Returns the constructed coordinates
 /// and how many moves were made; site energies are charged at their pair
@@ -318,10 +367,10 @@ pub fn run(cfg: &LatticeSearchConfig, ledger: &mut Ledger, relax: Relax<'_>, see
     while ledger.remaining() > 0 {
         // Constructions alternate: reoccupy the whole lattice from the
         // centre, then repair the worst-bound point.
-        let (built, moves) = if constructions % 2 == 0 {
-            (reoccupy(cfg, ledger, x.view()), 1)
-        } else {
-            construct(cfg, ledger, x.view())
+        let (built, moves) = match constructions % 3 {
+            0 => optimise_occupation(cfg, ledger, x.view()),
+            1 => (reoccupy(cfg, ledger, x.view()), 1),
+            _ => construct(cfg, ledger, x.view()),
         };
         constructions += 1;
         if ledger.remaining() == 0 {
