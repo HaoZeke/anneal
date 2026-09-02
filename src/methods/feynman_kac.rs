@@ -614,6 +614,7 @@ impl SynchronousPopulation {
             return Err(ReconfigurationError::UnknownReplica { replica });
         }
         self.live.insert(replica);
+        self.abstained.remove(&replica);
         Ok(())
     }
 
