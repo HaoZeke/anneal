@@ -1,14 +1,17 @@
 #![cfg(feature = "bank-rpc")]
 
-use std::net::TcpListener;
+use std::net::{TcpListener, TcpStream};
 use std::thread;
 use std::time::Duration;
 
+use anneal_core::Catalog_capnp::{catalog_reply, catalog_request};
 use anneal_core::catalog_rpc::client::{
     CatalogAccess, CatalogClient, CatalogClientEvent, ClientConfig, SyncSchedule,
 };
 use anneal_core::catalog_rpc::server::{CatalogServer, ServerConfig};
-use anneal_core::catalog_rpc::{CatalogCandidate, CatalogIdentity};
+use anneal_core::catalog_rpc::{CatalogCandidate, CatalogIdentity, PROTOCOL_VERSION};
+use capnp::message::{Builder, ReaderOptions};
+use capnp::serialize;
 
 fn identity() -> CatalogIdentity {
     CatalogIdentity {
@@ -42,6 +45,30 @@ fn short_timeouts() -> ClientConfig {
         connect_timeout: Duration::from_millis(50),
         io_timeout: Duration::from_millis(20),
     }
+}
+
+fn read_request_sequence(stream: &mut TcpStream) -> u64 {
+    let message = serialize::read_message(stream, ReaderOptions::new()).unwrap();
+    message
+        .get_root::<catalog_request::Reader>()
+        .unwrap()
+        .get_event_sequence()
+}
+
+fn write_empty_snapshot(stream: &mut TcpStream, event_sequence: u64, duplicate: bool) {
+    let mut message = Builder::new_default();
+    let mut root = message.init_root::<catalog_reply::Builder>();
+    root.set_protocol_version(PROTOCOL_VERSION);
+    root.set_event_sequence(event_sequence);
+    root.set_snapshot_version(7);
+    let mut accepted = root.init_result().init_accepted();
+    accepted.set_duplicate(duplicate);
+    accepted.set_census_visits(3);
+    accepted.set_active_entries(2);
+    accepted.set_aggregate_charged(11);
+    accepted.set_aggregate_budget(100);
+    accepted.init_payload().set_none(());
+    serialize::write_message(stream, &message).unwrap();
 }
 
 #[test]
@@ -79,6 +106,38 @@ fn delayed_reply_times_out_into_the_same_local_fallback() {
     );
     assert_eq!(events.len(), 1);
     peer.join().unwrap();
+}
+
+#[test]
+fn timed_out_request_reconnects_and_replays_before_returning() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+    let peer = thread::spawn(move || {
+        let (mut first, _) = listener.accept().unwrap();
+        let first_sequence = read_request_sequence(&mut first);
+        thread::sleep(Duration::from_millis(80));
+        drop(first);
+
+        let (mut replay, _) = listener.accept().unwrap();
+        let replay_sequence = read_request_sequence(&mut replay);
+        write_empty_snapshot(&mut replay, replay_sequence, true);
+        [first_sequence, replay_sequence]
+    });
+    let mut client = CatalogClient::connect(
+        addr,
+        identity(),
+        ClientConfig {
+            connect_timeout: Duration::from_millis(100),
+            io_timeout: Duration::from_millis(60),
+        },
+    )
+    .unwrap();
+
+    let snapshot = client.snapshot(17).unwrap();
+
+    assert_eq!(snapshot.version, 7);
+    assert_eq!(snapshot.census_visits, 3);
+    assert_eq!(peer.join().unwrap(), [17, 17]);
 }
 
 #[test]
