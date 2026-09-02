@@ -298,6 +298,33 @@ fn coordinator_validates_before_census_and_catalog_mutation() {
 }
 
 #[test]
+fn coordinator_credits_exact_basin_novelty_only_once_across_replicas() {
+    let server = server();
+    let digest = signature().digest();
+    let mut first =
+        CatalogClient::connect(server.addr(), identity(0, digest), ClientConfig::default())
+            .unwrap();
+    let mut second =
+        CatalogClient::connect(server.addr(), identity(1, digest), ClientConfig::default())
+            .unwrap();
+
+    let discovery = first
+        .offer_candidate(1, candidate(0, 1, 1.2))
+        .unwrap()
+        .catalog
+        .unwrap();
+    let revisit = second
+        .offer_candidate(1, candidate(1, 1, 1.2))
+        .unwrap()
+        .catalog
+        .unwrap();
+
+    assert!(discovery.new_basin);
+    assert!(!revisit.new_basin);
+    assert_eq!(discovery.basin_id, revisit.basin_id);
+}
+
+#[test]
 fn replicas_share_exclusive_ride_arms_and_coordinator_computes_edge_novelty() {
     let server = ride_server();
     let digest = signature().digest();
