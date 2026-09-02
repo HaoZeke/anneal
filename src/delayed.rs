@@ -99,11 +99,25 @@
 //! basin the depth goes as `|g|^2 / 2 lambda`, so it is the feature the model
 //! is missing and the one that costs nothing to add.
 
+use crate::model_hessian;
 use crate::screen::Screen;
 use ndarray::{Array1, ArrayView1};
 
-/// Features the surrogate regresses on.
-pub const FEATURES: usize = 10;
+/// Features the surrogate regresses on, including the model-Hessian depth.
+pub const FEATURES: usize = 11;
+
+/// Iterations of the model-Hessian depth solve. The depth is the quantity the
+/// first stage is deciding about, so the count is set by where the depth stops
+/// moving and not by what it costs.
+pub const DEPTH_ITERS: usize = 12;
+
+/// Bounded image of a column that is not bounded on the sampled distribution.
+///
+/// `sign(v) ln(1 + |v|)`, which is odd, monotone, smooth at zero and agrees
+/// with the identity to first order there.
+pub fn squash(v: f64) -> f64 {
+    v.signum() * v.abs().ln_1p()
+}
 
 /// Cheap structural summary of an unrelaxed structure.
 ///
@@ -161,6 +175,19 @@ pub fn features_orthogonal(
     out
 }
 
+/// As [`features_orthogonal`], with the depth a model Hessian predicts.
+pub fn features_with_depth(
+    x: ArrayView1<f64>,
+    n: usize,
+    raw: f64,
+    gradient: ArrayView1<f64>,
+    from: ArrayView1<f64>,
+) -> Array1<f64> {
+    let mut out = features_orthogonal(x, n, raw, gradient, from);
+    out[10] = squash(model_hessian::depth(x, n, gradient, DEPTH_ITERS));
+    out
+}
+
 /// As [`features`], with the gradient norm at the unrelaxed point.
 ///
 /// The feature the first version was missing, and a free one: the evaluation
@@ -173,9 +200,9 @@ pub fn features_with_gradient(x: ArrayView1<f64>, n: usize, raw: f64, gnorm: f64
     if n < 2 {
         let mut v = Array1::zeros(FEATURES);
         v[0] = 1.0;
-        v[1] = raw;
-        v[5] = gnorm;
-        v[6] = gnorm * gnorm;
+        v[1] = squash(raw);
+        v[5] = squash(gnorm);
+        v[6] = squash(gnorm * gnorm);
         return v;
     }
     let mut nearest = vec![f64::INFINITY; n];
@@ -225,12 +252,12 @@ pub fn features_with_gradient(x: ArrayView1<f64>, n: usize, raw: f64, gnorm: f64
     // structure has to fall.
     let mut v = Array1::zeros(FEATURES);
     v[0] = 1.0;
-    v[1] = raw;
+    v[1] = squash(raw);
     v[2] = mean_coord;
     v[3] = closest / scale.max(1e-12);
     v[4] = scale;
-    v[5] = gnorm;
-    v[6] = gnorm * gnorm;
+    v[5] = squash(gnorm);
+    v[6] = squash(gnorm * gnorm);
     v
 }
 
@@ -614,11 +641,11 @@ mod tests {
         let lo = features_with_gradient(x.view(), n, raw, 0.5);
         let hi = features_with_gradient(x.view(), n, raw, 2.0);
         assert!(
-            (lo[5] - 0.5).abs() < 1e-15 && (lo[6] - 0.25).abs() < 1e-15,
+            (lo[5] - squash(0.5)).abs() < 1e-15 && (lo[6] - squash(0.25)).abs() < 1e-15,
             "gnorm 0.5 did not land in the design: {lo:?}"
         );
         assert!(
-            (hi[5] - 2.0).abs() < 1e-15 && (hi[6] - 4.0).abs() < 1e-15,
+            (hi[5] - squash(2.0)).abs() < 1e-15 && (hi[6] - squash(4.0)).abs() < 1e-15,
             "gnorm 2 did not land in the design: {hi:?}"
         );
         for i in 0..5 {
@@ -651,6 +678,36 @@ mod tests {
         assert!(
             p_hi < p_lo,
             "larger |g| should predict a deeper quench, got {p_hi} against {p_lo}"
+        );
+    }
+
+    #[test]
+    fn the_design_stays_bounded_over_twenty_four_decades() {
+        let n = 8;
+        let mut x = Array1::zeros(3 * n);
+        for i in 0..n {
+            x[3 * i] = (i % 2) as f64 * 1.1;
+            x[3 * i + 1] = (i / 2) as f64 * 1.1;
+        }
+        let mut worst_squashed: f64 = 0.0;
+        let mut worst_plain: f64 = 0.0;
+        for p in 0..25 {
+            let raw = 10f64.powi(p);
+            let gnorm = 10f64.powi(p + 2);
+            let f = features_with_gradient(x.view(), n, raw, gnorm);
+            for v in f.iter() {
+                assert!(v.is_finite(), "column ran to {v} at raw {raw:e}");
+                worst_squashed = worst_squashed.max(v.abs());
+            }
+            worst_plain = worst_plain.max(gnorm * gnorm);
+        }
+        assert!(
+            worst_plain > 1e50,
+            "the test did not reach the range that breaks the design: {worst_plain:e}"
+        );
+        assert!(
+            worst_squashed < 200.0,
+            "largest design entry {worst_squashed} over 24 decades of energy"
         );
     }
 }
