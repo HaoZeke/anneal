@@ -17,11 +17,11 @@ use crate::catalog::{
     PRODUCTION_MAX_UNSEEN_MASS, PRODUCTION_MINIMUM_VISITS, leftover_esty_stable,
     leftover_esty_upper,
 };
+use crate::methods::minima_hopping::EscapeFeedback;
 use crate::minimum_information::{
     MinimumInformationError, MinimumInformationSearch, SearchActionCandidate, SearchActionScore,
     SearchMechanism,
 };
-use crate::methods::minima_hopping::EscapeFeedback;
 use crate::movekernel::{Gaussian, MoveKernel, TsallisVisit};
 use crate::pes_exploration::{
     ExactStructureWitness, NdPesNetwork, PesExplorationConfig, PesExplorationError, PesSurface,
@@ -352,10 +352,7 @@ fn expected_cost(charged: u64, pulls: usize, maximum: u64) -> f64 {
     }
 }
 
-fn best_information_rate(
-    scores: &[SearchActionScore],
-    mechanism: SearchMechanism,
-) -> Option<f64> {
+fn best_information_rate(scores: &[SearchActionScore], mechanism: SearchMechanism) -> Option<f64> {
     scores
         .iter()
         .filter(|score| score.mechanism == mechanism)
@@ -549,8 +546,7 @@ where
                 escape_scale,
                 &mut rng,
             );
-            let tsallis_proposal =
-                tsallis.propose(live_coordinates.view(), escape_scale, &mut rng);
+            let tsallis_proposal = tsallis.propose(live_coordinates.view(), escape_scale, &mut rng);
             for (move_index, kernel, proposal) in [
                 (GAUSSIAN_MOVE, NdEscapeKernel::Gaussian, gaussian),
                 (TSALLIS_MOVE, NdEscapeKernel::Tsallis, tsallis_proposal),
@@ -592,10 +588,8 @@ where
             .map(|(index, _)| index)
             .expect("every admissible policy supplies an action");
         let selected_score = scores[selected_index];
-        let ridge_information_rate =
-            best_information_rate(&scores, SearchMechanism::SaddleRide);
-        let escape_information_rate =
-            best_information_rate(&scores, SearchMechanism::BasinEscape);
+        let ridge_information_rate = best_information_rate(&scores, SearchMechanism::SaddleRide);
+        let escape_information_rate = best_information_rate(&scores, SearchMechanism::BasinEscape);
         let selected = plans.swap_remove(selected_index);
         attempt += 1;
 
@@ -782,8 +776,7 @@ where
                 move_charged[move_index] =
                     move_charged[move_index].saturating_add(record.charged_evaluations);
                 if candidate_energy < source_energy {
-                    move_improvements[move_index] =
-                        move_improvements[move_index].saturating_add(1);
+                    move_improvements[move_index] = move_improvements[move_index].saturating_add(1);
                 }
                 charged_evaluations = charged_evaluations
                     .saturating_add(record.charged_evaluations)
@@ -847,4 +840,31 @@ where
         escape_coverage_saturated: coverage.saturated,
         termination,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_unmeasured_action_inherits_observed_same_pes_cost() {
+        assert_eq!(expected_cost(0, 0, Some(37.0), 3_000), 37.0);
+        assert_eq!(expected_cost(900, 3, Some(37.0), 3_000), 300.0);
+        assert_eq!(expected_cost(0, 0, None, 3_000), 3_000.0);
+        assert_eq!(expected_cost(9_000, 2, Some(37.0), 3_000), 3_000.0);
+    }
+
+    #[test]
+    fn the_finite_ridge_domain_contains_every_unattempted_signed_mode() {
+        let attempted = HashSet::from([(0, 0, RideModeDirection::Positive)]);
+
+        let tasks = ride_tasks(2, &attempted, 1, 3);
+
+        assert_eq!(tasks.len(), 2 * 3 * 2 - 1);
+        assert_eq!(tasks[0], (1, 0, RideModeDirection::Positive));
+        assert!(!tasks.contains(&(0, 0, RideModeDirection::Positive)));
+        assert!(tasks.contains(&(0, 0, RideModeDirection::Negative)));
+        assert!(tasks.contains(&(1, 2, RideModeDirection::Positive)));
+        assert!(tasks.contains(&(1, 2, RideModeDirection::Negative)));
+    }
 }
