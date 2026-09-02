@@ -344,7 +344,7 @@ impl CatalogClient {
         T: Send + 'static,
         F: FnOnce(std::sync::mpsc::Sender<Result<T, CatalogClientError>>) -> ClientJob,
     {
-        let (tx, rx) = std::sync::mpsc::sync_channel(1);
+        let (tx, rx) = std::sync::mpsc::channel();
         let Some(jobs) = self.jobs.as_ref() else {
             return Err(CatalogClientError::Transport(std::io::Error::new(
                 std::io::ErrorKind::NotConnected,

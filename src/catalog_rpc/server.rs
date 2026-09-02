@@ -29,8 +29,8 @@ use super::{
     CatalogRideWork, CatalogSnapshot, CoordinatorEvent, CoordinatorStatus, DescriptorHoleProposal,
     PolicyState,
     PopulationEpochState, PopulationPlan, PopulationSelection, ProtocolError, ProtocolRejection,
-    RosterReply, TransitionDestination, decode_request, decode_request_reader, fill_coordinator_status,
-    fill_event, fill_reply, fill_roster, read_identity,
+    RosterReply, TransitionDestination, decode_request, decode_request_reader, encode_request,
+    fill_coordinator_status, fill_event, fill_reply, fill_roster, read_identity,
 };
 use crate::Catalog_capnp::{coordinator, session, subscriber};
 use crate::catalog::{
@@ -952,8 +952,9 @@ impl session::Server for SessionImpl {
             let (reply, events) = {
                 let mut shared = shared.borrow_mut();
                 let epoch_before = open_population_epoch(&shared.state);
+                let config = shared.config.clone();
                 let reply = process_request(
-                    &shared.config,
+                    &config,
                     &mut shared.state,
                     request.clone(),
                     precomputed,
@@ -1071,9 +1072,9 @@ fn candidate_needing_validation(operation: &CatalogOperation) -> Option<&Catalog
 
 fn process_request(
     config: &ServerConfig,
-    state: &mut CoordinatorState,
+    mut state: &mut CoordinatorState,
     request: CatalogRequest,
-    mut precomputed: Option<Result<ValidatedCandidate, ()>>,
+    precomputed: Option<Result<ValidatedCandidate, ()>>,
 ) -> Result<CatalogReply, String> {
     if state.journal_broken {
         return Err("catalog request journal is behind the coordinator state".to_owned());
