@@ -42,7 +42,7 @@ use crate::cooperative_search::ledger::{
     ChargeKind, ChargeSummary, CooperativeLedger, ReplicaLedgerEvent,
 };
 use crate::descriptor_space::{DescriptorSpace, UNIVERSAL_LOCAL_ENVIRONMENT_RADIUS};
-use crate::discovery_roster::{DiscoveryOpportunity, assign_discovery_roles};
+use crate::discovery_roster::{DiscoveryOpportunity, assign_discovery_roles_with_minimum};
 use crate::methods::feynman_kac::{
     EpochSubmissionOutcome, PopulationEpochPlan, PopulationMember, SelectionCoefficients,
     SynchronousPopulation,
@@ -1281,6 +1281,11 @@ fn apply_request(
                 SADDLE_COVERAGE_MINIMUM_OBSERVATIONS,
                 saddle_coverage.unseen_mass_upper,
             );
+            let minimum_ride_consumers = if saddle_effort.events == 0 {
+                scientific.discovery_replicas.len().div_ceil(2)
+            } else {
+                0
+            };
             let (basin_action_cost, ride_action_cost) =
                 empirical_action_costs(basin_effort, saddle_effort);
             let Some((discovery_role, discovery_epoch)) = minimum_information_role(
@@ -1290,6 +1295,7 @@ fn apply_request(
                 *energy,
                 basin_action_cost,
                 ride_action_cost,
+                minimum_ride_consumers,
             ) else {
                 return rejected(
                     state,
@@ -3178,6 +3184,7 @@ fn minimum_information_role(
     query_energy: f64,
     basin_cost: f64,
     ride_cost: f64,
+    minimum_ride_consumers: usize,
 ) -> Option<(crate::discovery_roster::DiscoveryRole, u64)> {
     let mut candidates = Vec::<SearchActionCandidate>::new();
     let mut keys = Vec::<SearchActionKey>::new();
@@ -3234,11 +3241,16 @@ fn minimum_information_role(
         })
         .collect::<Option<Vec<_>>>()?;
     let epoch = scientific.minimum_information.version();
-    assign_discovery_roles(&opportunities, claimable.len(), epoch)
-        .ok()?
-        .into_iter()
-        .find(|assignment| assignment.replica == query_replica)
-        .map(|assignment| (assignment.role, assignment.epoch))
+    assign_discovery_roles_with_minimum(
+        &opportunities,
+        claimable.len(),
+        minimum_ride_consumers,
+        epoch,
+    )
+    .ok()?
+    .into_iter()
+    .find(|assignment| assignment.replica == query_replica)
+    .map(|assignment| (assignment.role, assignment.epoch))
 }
 
 fn diagnostic_unseen_mass_upper(

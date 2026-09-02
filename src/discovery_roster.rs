@@ -1,12 +1,13 @@
 //! Batch assignment of same-PES global-minimum search operators.
 //!
 //! Every replica contributes one basin-escape opportunity and may contribute a
-//! ridge opportunity. Unclaimed ride arms define an exact consumer capacity;
-//! the coordinator fills that capacity while maximizing summed joint-minimum
-//! information per charged PES evaluation. This is a two-choice
-//! cardinality-constrained assignment: start with every basin action, sort the
-//! ride-minus-basin gains, and take the largest gains up to capacity. Stable
-//! replica ordering resolves interchangeable maximizers.
+//! ridge opportunity. The coordinator maximizes summed joint-minimum
+//! information per charged PES evaluation under the exclusive ride-arm
+//! capacity. An unmeasured consumer mechanism can impose a minimum ride count
+//! for identifiability. This is a two-choice cardinality-constrained
+//! assignment: start with every basin action, sort the ride-minus-basin gains,
+//! and take the largest gains within the cardinality bounds. Stable replica
+//! ordering resolves interchangeable maximizers.
 
 use std::collections::BTreeSet;
 
@@ -75,10 +76,25 @@ pub enum DiscoveryRosterError {
     InvalidInformationRate,
 }
 
-/// Maximize total information rate while filling exclusive ride-arm capacity.
+/// Maximize total information rate under an exclusive ride-arm capacity.
 pub fn assign_discovery_roles(
     opportunities: &[DiscoveryOpportunity],
     ride_capacity: usize,
+    epoch: u64,
+) -> Result<Vec<DiscoveryAssignment>, DiscoveryRosterError> {
+    assign_discovery_roles_with_minimum(opportunities, ride_capacity, 0, epoch)
+}
+
+/// Maximize information subject to a minimum available ride-consumer count.
+///
+/// `minimum_rides` is clipped by both the exclusive arm capacity and the number
+/// of replicas that actually have a ride alternative. This supports a bounded
+/// initialization barrier without changing steady-state information-per-cost
+/// allocation.
+pub fn assign_discovery_roles_with_minimum(
+    opportunities: &[DiscoveryOpportunity],
+    ride_capacity: usize,
+    minimum_rides: usize,
     epoch: u64,
 ) -> Result<Vec<DiscoveryAssignment>, DiscoveryRosterError> {
     if opportunities.is_empty() {
@@ -114,9 +130,25 @@ pub fn assign_discovery_roles(
             .then_with(|| left.1.cmp(&right.1))
     });
 
+    let positive = ride_gains
+        .iter()
+        .take_while(|(gain, _)| *gain > 0.0)
+        .count();
+    let zero = ride_gains
+        .iter()
+        .skip(positive)
+        .take_while(|(gain, _)| *gain == 0.0)
+        .count();
+    let positive_selected = positive.min(ride_capacity);
+    let tied_rides = ride_capacity
+        .saturating_sub(positive_selected)
+        .min(zero.div_ceil(2));
+    let selected_count = positive_selected
+        .saturating_add(tied_rides)
+        .max(minimum_rides.min(ride_capacity).min(ride_gains.len()));
     let selected = ride_gains
         .iter()
-        .take(ride_capacity)
+        .take(selected_count)
         .map(|(_, replica)| *replica)
         .collect::<BTreeSet<_>>();
 
