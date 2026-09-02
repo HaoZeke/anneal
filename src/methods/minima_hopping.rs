@@ -738,6 +738,21 @@ mod tests {
     }
 
     #[test]
+    fn shared_history_marks_another_replicas_basin_as_known() {
+        let mut feedback = EscapeFeedback::new(1.0, 1.0);
+        feedback.register_initial(3);
+
+        let before = feedback.escape();
+        let visit = feedback.observe_shared(Some(3), 9, false, 8);
+
+        assert_eq!(visit, Visit::Known);
+        let expected =
+            feedback.beta_known * (1.0 + feedback.visits_coeff * 7.0_f64.ln());
+        assert!((feedback.escape() / before - expected).abs() < 1e-12);
+        assert_eq!(feedback.visits(9), 8);
+    }
+
+    #[test]
     fn the_threshold_settles_near_half_acceptance() {
         let mut f = EscapeFeedback::new(1.0, 1.0);
         // A stream of rises drawn from a fixed distribution; the threshold
