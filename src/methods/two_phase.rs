@@ -197,6 +197,10 @@ pub struct SurfacePortfolio {
     hops_in_block: usize,
     block_start_best: f64,
     latest_best: f64,
+    /// Sum of the depth each full relaxation of the block reached against
+    /// the run's best at that moment, and how many contributed.
+    block_depth: f64,
+    block_relaxations: usize,
     rng: StdRng,
 }
 
@@ -222,6 +226,8 @@ impl SurfacePortfolio {
             hops_in_block: 0,
             block_start_best: f64::INFINITY,
             latest_best: f64::INFINITY,
+            block_depth: 0.0,
+            block_relaxations: 0,
             rng: StdRng::seed_from_u64(seed ^ 0x5a2f_ace5),
         }
     }
@@ -278,10 +284,19 @@ impl SurfacePortfolio {
         self.held.and_then(|arm| self.arms[arm])
     }
 
-    /// Records the run's best after a full relaxation on the held arm.
+    /// Records what a full relaxation on the held arm reached against the
+    /// run's best.
     pub fn observe(&mut self, screening: bool, reached: f64, best: f64) {
         if screening {
             return;
+        }
+        if reached.is_finite() && best.is_finite() {
+            // The depth reward the move allocator uses, per relaxation: how
+            // close this quench came to the best the run knows. Dense, so a
+            // block on a size where nothing improves still says which
+            // surface lands deeper.
+            self.block_depth += -(reached - best.min(reached));
+            self.block_relaxations += 1;
         }
         let best = best.min(reached);
         if best.is_finite() {
@@ -291,17 +306,24 @@ impl SurfacePortfolio {
 
     fn settle_block(&mut self) {
         if let Some(arm) = self.held.take() {
-            let reward = if self.block_start_best.is_finite() && self.latest_best.is_finite() {
+            let improvement = if self.block_start_best.is_finite() && self.latest_best.is_finite()
+            {
                 (self.block_start_best - self.latest_best).max(0.0)
-            } else if self.latest_best.is_finite() {
-                // The first block has no earlier best to improve on; its
-                // reward is neutral rather than infinite.
-                0.0
             } else {
                 0.0
             };
-            self.credit_arm(arm, reward);
+            let mean_depth = if self.block_relaxations > 0 {
+                self.block_depth / self.block_relaxations as f64
+            } else {
+                0.0
+            };
+            // Improvement is the event that matters and the mean depth is
+            // the dense signal between events; both are energies of the
+            // plain surface, so they add.
+            self.credit_arm(arm, improvement + mean_depth);
         }
+        self.block_depth = 0.0;
+        self.block_relaxations = 0;
         self.hops_in_block = 0;
     }
 
@@ -440,14 +462,24 @@ mod tests {
     }
 
     #[test]
-    fn a_block_without_improvement_is_credited_zero_not_negative() {
+    fn a_block_without_improvement_is_credited_by_its_depth() {
         let mut portfolio = SurfacePortfolio::with_block(&[TwoPhase::diameter(2.0, 1.0)], 3, 2);
         for _ in 0..6 {
             portfolio.begin(true);
             portfolio.begin(false);
+            // Two units above the best every time: the block earns -2.
             portfolio.observe(false, -1.0, -3.0);
         }
-        assert!(portfolio.means().iter().all(|m| *m >= 0.0));
         assert!(portfolio.draws().iter().sum::<usize>() >= 2);
+        assert!(
+            portfolio
+                .means()
+                .iter()
+                .zip(portfolio.draws())
+                .filter(|(_, d)| **d > 0)
+                .all(|(m, _)| (m + 2.0).abs() < 1e-9),
+            "{:?}",
+            portfolio.means()
+        );
     }
 }
