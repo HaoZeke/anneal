@@ -474,3 +474,38 @@ fn main() -> Result<(), Box<dyn Error>> {
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{optbench_start_path, parse_plain_coordinates};
+    use std::path::Path;
+
+    #[test]
+    fn optbench_paths_follow_each_published_archive_layout() {
+        let root = Path::new("/corpus");
+        assert_eq!(
+            optbench_start_path(root, 38, 7).unwrap(),
+            root.join("7.con")
+        );
+        assert_eq!(
+            optbench_start_path(root, 75, 0).unwrap(),
+            root.join("coords.1")
+        );
+        assert_eq!(
+            optbench_start_path(root, 98, 0).unwrap(),
+            root.join("coords")
+        );
+        assert_eq!(
+            optbench_start_path(root, 98, 100).unwrap(),
+            root.join("coords.100")
+        );
+    }
+
+    #[test]
+    fn plain_optbench_coordinates_require_one_finite_triplet_per_atom() {
+        let parsed = parse_plain_coordinates("0 1 2\n3 4 5\n", 2).unwrap();
+        assert_eq!(parsed.as_slice().unwrap(), &[0.0, 1.0, 2.0, 3.0, 4.0, 5.0]);
+        assert!(parse_plain_coordinates("0 1 2", 2).is_err());
+        assert!(parse_plain_coordinates("0 1 NaN\n3 4 5", 2).is_err());
+    }
+}
