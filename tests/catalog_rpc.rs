@@ -20,6 +20,8 @@ use anneal_core::descriptor_space::{
     DescriptorBlockKind, DescriptorBlockSpec, DescriptorSchema, DescriptorSpace,
 };
 use anneal_core::pes_exploration::ExactStructureWitness;
+use anneal_core::scaling::SuccessiveHalving;
+use anneal_core::transition_graph::AttractionRegionConfig;
 use std::collections::BTreeMap;
 
 fn identity(ensemble: &str, replica: u32) -> CatalogIdentity {
@@ -812,32 +814,6 @@ fn wait_for_epoch_closed(client: &mut CatalogClient) -> Vec<CoordinatorEvent> {
         .into_iter()
         .filter(|event| matches!(event, CoordinatorEvent::EpochClosed(_)))
         .collect()
-}
-
-use anneal_core::catalog::{
-    DescriptorSignature, EngineSignature, FreshEvaluation, SystemSignature, ValidatorConfig,
-};
-use anneal_core::descriptor_space::{
-    DescriptorBlockKind, DescriptorBlockSpec, DescriptorSchema, DescriptorSpace,
-};
-use anneal_core::pes_exploration::ExactStructureWitness;
-use anneal_core::scaling::SuccessiveHalving;
-use anneal_core::transition_graph::AttractionRegionConfig;
-use ndarray::ArrayView1;
-use std::collections::BTreeMap;
-
-struct SeparationWitness;
-
-impl ExactStructureWitness for SeparationWitness {
-    fn equivalent(&self, left: ArrayView1<f64>, right: ArrayView1<f64>) -> bool {
-        let separation = |point: ArrayView1<'_, f64>| {
-            (0..3)
-                .map(|axis| (point[3 + axis] - point[axis]).powi(2))
-                .sum::<f64>()
-                .sqrt()
-        };
-        (separation(left) - separation(right)).abs() < 1e-8
-    }
 }
 
 fn roster_descriptor_space() -> DescriptorSpace {
