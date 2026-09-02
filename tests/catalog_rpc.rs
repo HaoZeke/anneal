@@ -700,7 +700,7 @@ fn scientific_config(ensemble: &str, replicas: impl IntoIterator<Item = u32>) ->
             },
             4,
             0.05,
-            400,
+            300,
             |coordinates| {
                 Ok(FreshEvaluation {
                     energy: -coordinates[3],
