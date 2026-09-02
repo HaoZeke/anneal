@@ -38,6 +38,7 @@ fn observations_use_immutable_medoids_and_exact_counts() {
     assert_eq!(census.entry(second.basin_id).unwrap().medoid(), &[1.0, 0.0]);
     assert_eq!(census.entry(second.basin_id).unwrap().visits(), 2);
     assert_eq!(census.total_visits(), 4);
+    assert_eq!(census.doubleton_count(), 2);
     assert_eq!(
         census
             .entries()
