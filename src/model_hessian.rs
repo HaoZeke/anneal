@@ -8,10 +8,12 @@
 //! E(x) - E(Q(x)) ~ 1/2 g^T H^-1 g
 //! ```
 //!
-//! with `g` the gradient at `x` and `H` the Hessian. Regressing a scalar proxy
-//! for that, which is what the surrogate did with `|g|^2 / 2 lambda`, collapses
-//! an anisotropic quantity onto one curvature and was measured to leave the
-//! second stage rejecting 65 per cent of what the first passed.
+//! with `g` the gradient at `x` and `H` the Hessian. A scalar proxy for that,
+//! which is what the surrogate regresses with `|g|^2 / 2 lambda`, collapses an
+//! anisotropic quantity onto one curvature, and the second stage it feeds
+//! rejects 65 per cent of what the first passes. Whether the anisotropy is what
+//! that costs is the question the depth here answers, and the answer is under
+//! "Where the model breaks".
 //!
 //! The true `H` costs second derivatives. A *model* Hessian costs nothing: the
 //! empirical pairwise force constants that quantum chemistry codes use to start
@@ -43,6 +45,25 @@
 //! It is the same object used differently. A preconditioner uses `H^-1 g` as a
 //! direction; this uses `g^T H^-1 g` as a number, the depth, and hands it to a
 //! decision about whether the real relaxation is worth paying for.
+//!
+//! # Where the model breaks, measured
+//!
+//! A force constant that decays with separation is a near-equilibrium
+//! statement, and a basin-hopping proposal is not near equilibrium. Against
+//! 4676 quenches of a Lennard-Jones cluster of 38 points, the depth here
+//! overshoots the depth the relaxation found by a median factor of 1.7e5, and
+//! the overshoot tracks the closest contact in the structure with a correlation
+//! of -0.95: at a closest pair inside 0.4 of the mean spacing the median
+//! overshoot is 1e9, and at 0.8 and beyond it is 1e1. The mechanism is the
+//! ceiling on `k`. The constant saturates at `K0` as a pair closes, while the
+//! curvature of a repulsive wall diverges, so the operator is softest exactly
+//! where the surface is stiffest and `H^-1 g` runs away.
+//!
+//! What survives is the ordering rather than the value. The fitted relation is
+//! a power law, `depth_true ~ 0.61 depth_model^0.447`, with a residual of 0.245
+//! decades. An exponent of one half is what a linear model cannot represent,
+//! and [`crate::delayed`] carries what that does to a delayed-acceptance second
+//! stage.
 
 use ndarray::{Array1, ArrayView1};
 
