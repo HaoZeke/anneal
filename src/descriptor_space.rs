@@ -12,7 +12,7 @@ use crate::soap::{SoapSpec, jacobian_ace, jacobian_z, local_nu3_z, local_spectra
 use ndarray::{Array2, ArrayView1};
 
 const L2_NORMALIZATION_SCHEMA: &str = "l2-v1";
-pub(super) const SOFT_L2_NORMALIZATION_SCHEMA: &str = "soft-l2-eps-v1";
+pub(super) const CONTRACTIVE_L2_NORMALIZATION_SCHEMA: &str = "contractive-l2-unit-v2";
 
 /// Invariant aggregation used by one descriptor block.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -468,8 +468,8 @@ impl DescriptorSpace {
     /// Evaluate one fixed-dimensional invariant row for every atomic centre.
     ///
     /// Universal local rows use the same geometry, species sketch, ordered
-    /// blocks, and soft normalization as the global descriptor. Their final
-    /// norm is at most one, so one schema-bound Euclidean radius has stable
+    /// blocks and contractive normalization as the global descriptor. Their
+    /// final norm is below one, so one schema-bound Euclidean radius has stable
     /// meaning for clusters, molecules, and surfaces.
     pub fn describe_local(
         &self,
