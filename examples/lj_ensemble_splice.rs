@@ -163,6 +163,163 @@ struct ExchangeConfig {
     portfolio_block: usize,
     /// Whether the chains of an ensemble share one portfolio posterior.
     portfolio_shared: bool,
+    /// Population basin hopping: at every checkpoint a chain's live minimum
+    /// is offered to the ensemble under the Grosso--Locatelli--Schoen
+    /// replacement rule, and a chain told to move adopts the offered
+    /// structure at its next checkpoint.
+    pbh: bool,
+    /// Replacement radius as a multiple of the ensemble's mean pairwise
+    /// dissimilarity at the first exchange.
+    pbh_dcut_scale: f64,
+}
+
+/// Coordination-shell histogram dissimilarity of Grosso, Locatelli and
+/// Schoen: `H1[n]` counts atoms with exactly `n` neighbours inside the
+/// first shell, `H2[n]` those with exactly `n` in the second shell, and the
+/// distance is `sum_n n (2 |dH1| + |dH2|)`. Shell radii are the published
+/// 1.25 and 1.55 pair-well units in sigma units.
+fn shell_histograms(x: &[f64]) -> ([u32; 32], [u32; 32]) {
+    let n = x.len() / 3;
+    let unit = 2f64.powf(1.0 / 6.0);
+    let (r1, r2) = (1.25 * unit, 1.55 * unit);
+    let (r1sq, r2sq) = (r1 * r1, r2 * r2);
+    let mut first = vec![0usize; n];
+    let mut second = vec![0usize; n];
+    for i in 0..n {
+        for j in (i + 1)..n {
+            let mut d2 = 0.0;
+            for k in 0..3 {
+                let d = x[3 * i + k] - x[3 * j + k];
+                d2 += d * d;
+            }
+            if d2 < r1sq {
+                first[i] += 1;
+                first[j] += 1;
+            } else if d2 < r2sq {
+                second[i] += 1;
+                second[j] += 1;
+            }
+        }
+    }
+    let mut h1 = [0u32; 32];
+    let mut h2 = [0u32; 32];
+    for i in 0..n {
+        h1[first[i].min(31)] += 1;
+        h2[second[i].min(31)] += 1;
+    }
+    (h1, h2)
+}
+
+fn shell_dissimilarity(a: &([u32; 32], [u32; 32]), b: &([u32; 32], [u32; 32])) -> f64 {
+    (0..32)
+        .map(|n| {
+            n as f64
+                * (2.0 * (a.0[n] as f64 - b.0[n] as f64).abs()
+                    + (a.1[n] as f64 - b.1[n] as f64).abs())
+        })
+        .sum()
+}
+
+type Member = (f64, Vec<f64>, ([u32; 32], [u32; 32]));
+
+/// The ensemble's population under the replacement rule: one member per
+/// chain, a pending relocation per chain, and the cutoff once set.
+#[derive(Default)]
+struct Population {
+    members: Vec<Option<Member>>,
+    pending: Vec<Option<(f64, Vec<f64>)>>,
+    dcut: Option<f64>,
+    replacements_near: usize,
+    replacements_far: usize,
+}
+
+impl Population {
+    fn new(chains: usize) -> Self {
+        Self {
+            members: vec![None; chains],
+            pending: vec![None; chains],
+            ..Self::default()
+        }
+    }
+
+    /// Offer chain `p`'s live minimum. Returns whether some chain was told
+    /// to move.
+    fn offer(&mut self, p: usize, energy: f64, state: &[f64], dcut_scale: f64) -> bool {
+        let hist = shell_histograms(state);
+        self.members[p] = Some((energy, state.to_vec(), hist));
+        let filled: Vec<usize> = (0..self.members.len())
+            .filter(|&i| self.members[i].is_some())
+            .collect();
+        if self.dcut.is_none() {
+            if filled.len() < self.members.len() {
+                return false;
+            }
+            // Every chain has reported once: the cutoff is a multiple of
+            // the mean pairwise dissimilarity of that first population.
+            let mut total = 0.0;
+            let mut pairs = 0usize;
+            for (a, &i) in filled.iter().enumerate() {
+                for &j in &filled[a + 1..] {
+                    let (hi, hj) = (
+                        &self.members[i].as_ref().unwrap().2,
+                        &self.members[j].as_ref().unwrap().2,
+                    );
+                    total += shell_dissimilarity(hi, hj);
+                    pairs += 1;
+                }
+            }
+            self.dcut = Some(dcut_scale * total / pairs.max(1) as f64);
+            return false;
+        }
+        let dcut = self.dcut.unwrap();
+        let mut nearest: Option<(usize, f64)> = None;
+        for &q in &filled {
+            if q == p {
+                continue;
+            }
+            let d = shell_dissimilarity(&hist, &self.members[q].as_ref().unwrap().2);
+            if nearest.is_none_or(|(_, best)| d < best) {
+                nearest = Some((q, d));
+            }
+        }
+        let Some((q, d)) = nearest else {
+            return false;
+        };
+        if d < dcut {
+            // Same region as q: only a better child displaces q.
+            let eq = self.members[q].as_ref().unwrap().0;
+            if energy < eq - 1e-9 {
+                self.pending[q] = Some((energy, state.to_vec()));
+                self.replacements_near += 1;
+                return true;
+            }
+            return false;
+        }
+        // A new region: the worst member moves there if the child beats it.
+        let worst = filled
+            .iter()
+            .copied()
+            .filter(|&i| i != p)
+            .max_by(|&a, &b| {
+                self.members[a]
+                    .as_ref()
+                    .unwrap()
+                    .0
+                    .total_cmp(&self.members[b].as_ref().unwrap().0)
+            });
+        if let Some(w) = worst
+            && energy < self.members[w].as_ref().unwrap().0 - 1e-9
+        {
+            self.pending[w] = Some((energy, state.to_vec()));
+            self.replacements_far += 1;
+            return true;
+        }
+        false
+    }
+
+    fn take_pending(&mut self, chain: usize) -> Option<(f64, Vec<f64>)> {
+        self.pending[chain].take()
+    }
 }
 
 fn km_median_first_hit(records: &[(Option<usize>, usize)]) -> Option<usize> {
@@ -218,6 +375,7 @@ fn run_chain(
     target: Option<f64>,
     resume: Option<Array1<f64>>,
     shared_surfaces: Option<SharedSurfaceAllocator>,
+    population: Option<Arc<Mutex<Population>>>,
 ) -> ChainReport {
     let cfg = Config::recommended(n);
     let mut rng = StdRng::seed_from_u64(seed);
@@ -303,6 +461,26 @@ fn run_chain(
             if let Some(best) = snapshot.best_state() {
                 slot.best_state = best.to_vec();
             }
+        }
+        if let Some(population) = population.as_ref() {
+            let mut population = population.lock().expect("population");
+            if let Some((_, state)) = population.take_pending(chain) {
+                tally.adopted += 1;
+                return CheckpointAction::BoundaryProposal {
+                    state: Array1::from(state),
+                    action: "pbh".to_owned(),
+                };
+            }
+            if let Some(current) = snapshot.current_state().as_slice() {
+                tally.attempts += 1;
+                population.offer(
+                    chain,
+                    snapshot.current_energy(),
+                    current,
+                    exchange.pbh_dcut_scale,
+                );
+            }
+            return CheckpointAction::Continue;
         }
         if !exchange.enabled || snapshot.charged() < next_attempt {
             return CheckpointAction::Continue;
@@ -421,7 +599,7 @@ fn run_chain(
             .iter()
             .filter(|t| t.to_energy < reference + 1e-4)
             .min_by_key(|t| t.hop)
-            .is_some_and(|t| t.action == "splice")
+            .is_some_and(|t| t.action == "splice" || t.action == "pbh")
     });
     ChainReport {
         charged: ledger.spent(),
@@ -441,10 +619,10 @@ fn main() {
     let mode = args.get(5).cloned().unwrap_or_else(|| "indep".to_owned());
     let seed0: u64 = args.get(6).and_then(|v| v.parse().ok()).unwrap_or(0);
     let enabled = match mode.as_str() {
-        "indep" | "halving" | "shared" => false,
+        "indep" | "halving" | "shared" | "pbh" => false,
         "splice" => true,
         other => {
-            eprintln!("unknown mode {other:?}: expected indep, splice, halving or shared");
+            eprintln!("unknown mode {other:?}: expected indep, splice, halving, shared or pbh");
             std::process::exit(2);
         }
     };
@@ -466,6 +644,8 @@ fn main() {
             .unwrap_or_default(),
         portfolio_block: env_usize("SURFACE_BLOCK", 100),
         portfolio_shared: mode == "shared",
+        pbh: mode == "pbh",
+        pbh_dcut_scale: env_f64("PBH_DCUT", 1.5),
     };
     let target = reference(n);
     println!(
@@ -519,11 +699,15 @@ fn main() {
         let shared = exchange
             .portfolio_shared
             .then(|| shared_surface_allocator(&exchange.portfolio));
+        let population = exchange
+            .pbh
+            .then(|| Arc::new(Mutex::new(Population::new(chains))));
         let reports: Vec<ChainReport> = std::thread::scope(|scope| {
             let handles: Vec<_> = (0..chains)
                 .map(|chain| {
                     let board = Arc::clone(&board);
                     let shared = shared.clone();
+                    let population = population.clone();
                     let exchange = exchange.clone();
                     let seed = ensemble
                         .wrapping_mul(0x9E37_79B9)
@@ -532,6 +716,7 @@ fn main() {
                     scope.spawn(move || {
                         run_chain(
                             n, budget, seed, chain, &board, exchange, target, None, shared,
+                            population,
                         )
                     })
                 })
@@ -564,6 +749,13 @@ fn main() {
             if r.hit_by_splice {
                 splice_hits += 1;
             }
+        }
+        if let Some(population) = population.as_ref() {
+            let population = population.lock().expect("population");
+            println!(
+                "      pbh: dcut {:?}, {} near replacements, {} far replacements",
+                population.dcut, population.replacements_near, population.replacements_far
+            );
         }
         chains_solved += solved.len();
         if !solved.is_empty() {
@@ -697,7 +889,7 @@ fn run_halving(
                             scope.spawn(move || {
                                 run_chain(
                                     n, per_chain, seed, chain, &board, exchange, target, resume,
-                                    None,
+                                    None, None,
                                 )
                             })
                         })
