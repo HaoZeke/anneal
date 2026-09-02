@@ -13,9 +13,9 @@ use anneal_core::catalog_rpc::client::{
 use anneal_core::catalog_rpc::server::{CatalogServer, ServerConfig};
 use anneal_core::catalog_rpc::{CatalogCandidate, CatalogIdentity, PROTOCOL_VERSION};
 use capnp::capability::Promise;
+use capnp_rpc::RpcSystem;
 use capnp_rpc::rpc_twoparty_capnp::Side;
 use capnp_rpc::twoparty::VatNetwork;
-use capnp_rpc::RpcSystem;
 use futures::AsyncReadExt;
 use tokio_util::compat::TokioAsyncReadCompatExt;
 
@@ -110,10 +110,7 @@ impl session::Server for CannedSession {
     }
 }
 
-fn serve_canned_snapshot(
-    stream: std::net::TcpStream,
-    sequences: Rc<RefCell<Vec<u64>>>,
-) {
+fn serve_canned_snapshot(stream: std::net::TcpStream, sequences: Rc<RefCell<Vec<u64>>>) {
     stream.set_nonblocking(true).unwrap();
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
