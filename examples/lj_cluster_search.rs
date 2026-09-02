@@ -34,7 +34,7 @@ use std::io::{self, Write};
 use std::time::Instant;
 
 #[cfg(feature = "ira")]
-use anneal_core::shape::IraMetric;
+use anneal_core::shape::{IraMetric, IraStructureWitness};
 
 fn apply_boolean_options(cfg: &mut Config, opts: &[&str]) {
     let height = opts.contains(&"height");
@@ -106,19 +106,6 @@ impl anneal_core::pes_exploration::PesSurface for LjRideSurface {
         coordinates: ArrayView1<'_, f64>,
     ) -> Result<(f64, Array1<f64>), Self::Error> {
         Ok(lj(coordinates))
-    }
-}
-
-#[cfg(all(feature = "bank-rpc", feature = "ira"))]
-struct LjRideWitness {
-    metric: IraMetric,
-    radius: f64,
-}
-
-#[cfg(all(feature = "bank-rpc", feature = "ira"))]
-impl anneal_core::pes_exploration::ExactStructureWitness for LjRideWitness {
-    fn equivalent(&self, left: ArrayView1<f64>, right: ArrayView1<f64>) -> bool {
-        left.len() == right.len() && self.metric.distance(left, right) <= self.radius
     }
 }
 
@@ -388,8 +375,8 @@ mod option_tests {
         }
         let mut distorted = equivalent.clone();
         distorted[0] += 0.05;
-        let witness = LjRideWitness {
-            metric: IraMetric::default(),
+        let witness = IraStructureWitness {
+            kmax_factor: IraMetric::default().kmax_factor,
             radius: 1e-4,
         };
 
@@ -3190,14 +3177,11 @@ fn run_capnp_catalog(
         ride_exploration.maximum_move = 0.2 * run_cfg.length_scale;
         ride_exploration.irc_step = 0.1 * run_cfg.length_scale;
         ride_exploration.irc_force_tolerance = 0.05;
-        ride_exploration.certify_degenerate_rearrangements = true;
         ride_exploration.refine_with_prfo = true;
     }
     #[cfg(feature = "ira")]
-    let ride_witness = LjRideWitness {
-        metric: IraMetric {
-            kmax_factor: if run_cfg.n_points >= 55 { 2.5 } else { 1.8 },
-        },
+    let ride_witness = IraStructureWitness {
+        kmax_factor: if run_cfg.n_points >= 55 { 2.5 } else { 1.8 },
         radius: ride_identity_radius,
     };
     #[cfg(feature = "ira")]

@@ -50,8 +50,8 @@ use crate::methods::feynman_kac::{
 use crate::methods::landscape_graph::LandscapeGraph;
 use crate::methods::neus_bridge::{BridgeString, EntryLists, WeightLedger};
 use crate::pes_exploration::{
-    ExactStructureWitness, PesExplorationConfig, PesSurface, RideMethod, StationaryIndex,
-    StructureContext, StructureView, stationary_index_cartesian,
+    ExactStructureRelation, ExactStructureWitness, PesExplorationConfig, PesSurface, RideMethod,
+    StationaryIndex, StructureContext, StructureView, stationary_index_cartesian,
 };
 use crate::region_assignment::{RegionCandidate, RegionUtility, diversity_constrained_assignment};
 use crate::ride_ledger::{
@@ -2561,6 +2561,16 @@ fn certify_ride_connection(
             )
             .map_err(|_| crate::ride_ledger::RideFailure::Surface)?,
         ];
+        let endpoint_relation = scientific.exact_witness.relation_structures(
+            StructureView {
+                coordinates: ArrayView1::from(&endpoints[0].candidate.coordinates),
+                context: &scientific.structure_context,
+            },
+            StructureView {
+                coordinates: ArrayView1::from(&endpoints[1].candidate.coordinates),
+                context: &scientific.structure_context,
+            },
+        );
 
         let mut staged = scientific.clone();
         let saddle_id = observe_certified_ride_saddle(&mut staged, source_basin, &saddle, &index)?;
@@ -2579,6 +2589,18 @@ fn certify_ride_connection(
         }
         if let Some(stored) = staged.ride_saddles.get_mut(&saddle_id) {
             stored.source_basins.extend(endpoint_ids);
+        }
+        if endpoint_ids[0] == endpoint_ids[1]
+            && !matches!(
+                endpoint_relation,
+                ExactStructureRelation::NontrivialPermutation(_)
+            )
+        {
+            *scientific = staged;
+            return Ok(RideOutcome::Unresolved {
+                saddle: saddle_id,
+                failure: crate::ride_ledger::RideFailure::CollapsedConnection,
+            });
         }
         *scientific = staged;
         Ok(RideOutcome::Certified {
