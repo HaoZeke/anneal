@@ -286,6 +286,13 @@ mod option_tests {
         assert_eq!(value["normalized_lambda2"], 0.03125);
         assert_eq!(value["conductance"], 0.0625);
         assert!(committed_decree_audit_line(9, &decree).is_none());
+
+        let applied: serde_json::Value =
+            serde_json::from_str(&applied_decree_audit_line(2, 17, 29)).expect("application JSON");
+        assert_eq!(applied["kind"], "spectral_anchor");
+        assert_eq!(applied["replica"], 2);
+        assert_eq!(applied["snapshot"], 17);
+        assert_eq!(applied["anchor_basin"], 29);
     }
 
     #[cfg(feature = "bank-rpc")]
