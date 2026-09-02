@@ -41,7 +41,13 @@ pub mod Raft_capnp {
 }
 /// Generated Cap'n Proto schema for [`catalog_rpc`].
 #[cfg(feature = "bank-rpc")]
-#[allow(missing_docs, dead_code, clippy::all, non_camel_case_types)]
+#[allow(
+    missing_docs,
+    dead_code,
+    unused_parens,
+    clippy::all,
+    non_camel_case_types
+)]
 #[rustfmt::skip]
 #[allow(non_snake_case)]
 pub mod Catalog_capnp {
@@ -108,8 +114,6 @@ pub mod free_energy;
 pub mod funnel_bo;
 pub mod funnel_spectral;
 pub mod grad;
-/// Action-outcome models for cost-aware global-minimum information.
-pub mod minimum_information;
 /// Exact basin identity by canonical contact-graph labelling (nauty).
 #[cfg(feature = "graphkey")]
 pub mod graphkey;
@@ -138,6 +142,8 @@ pub mod md_engine;
 /// MCMC-style multi-chain SA with Gelman-Rubin termination, Bayesian
 /// pilot adaptation, parallel tempering, etc.
 pub mod methods;
+/// Action-outcome models for cost-aware global-minimum information.
+pub mod minimum_information;
 pub mod model_hessian;
 /// The move-kernel trait: temperature-indexed proposal sampling.
 pub mod movekernel;
