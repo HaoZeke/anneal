@@ -31,9 +31,9 @@
 //! The escape scale grows geometrically while a chain revisits, which is the
 //! guarantee that no funnel is permanent: a chain that keeps returning keeps
 //! escalating until it leaves. Schoenborn, Goedecker, Roy and Oganov,
-//! J. Chem. Phys. 130, 144108 (2009), add feedback proportional to the visit
-//! count and report that this finds the LJ75 Marks decahedron where a
-//! cut-and-splice evolutionary algorithm does not.
+//! J. Chem. Phys. 130, 144108 (2009), multiply the known-minimum update by
+//! `1 + c ln(N)` for visit count `N`, and report that this finds the LJ75 Marks
+//! decahedron where a cut-and-splice evolutionary algorithm does not.
 
 use std::collections::HashMap;
 use std::sync::Mutex;
