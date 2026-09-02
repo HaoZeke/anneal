@@ -63,6 +63,8 @@ pub mod adapter;
 /// Cost-augmenting bias operators (well-tempered metadynamics, etc.).
 /// Proposal allocation and the budget-window temperature law.
 pub mod allocate;
+/// Dense minimum-cost bipartite assignment.
+pub mod assignment;
 /// Same-PES atomistic basin and ridge exploration by joint-optimum information.
 pub mod atomistic_hybrid;
 pub mod bias;
@@ -85,6 +87,8 @@ pub mod compatibility;
 pub mod construct;
 /// The cooling-schedule trait: `epoch -> temperature`.
 pub mod contextual;
+/// Continuous-symmetry projections for non-periodic atomic clusters.
+pub mod continuous_symmetry;
 pub mod cool;
 pub mod cooperative_search;
 pub mod corekey;

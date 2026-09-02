@@ -47,7 +47,7 @@ mod config;
 mod moves;
 mod preset;
 
-pub use config::{Config, Keying, SoapProposalMode};
+pub use config::{Config, ContinuousSymmetry, Keying, SoapProposalMode};
 pub use moves::*;
 
 #[cfg(test)]
@@ -505,6 +505,8 @@ pub struct Outcome {
     pub funnel: Option<(usize, usize, f64)>,
     /// Symmetrisations attempted, and the energy they gained.
     pub symmetrised: (usize, f64),
+    /// Continuous-symmetry quenches attempted, and downhill energy gained.
+    pub continuous_symmetry: (usize, f64),
     /// Restarts triggered by a stall.
     pub restarts: usize,
     /// Climbs triggered by a stall.
@@ -853,6 +855,26 @@ where
     H: for<'a> FnMut(ChainCheckpoint<'a>) -> CheckpointAction,
 {
     let n = cfg.n_points;
+    let continuous_symmetry_classes = match cfg.continuous_symmetry {
+        ContinuousSymmetry::Off => None,
+        ContinuousSymmetry::Inversion { interval } => {
+            assert!(
+                interval > 0,
+                "continuous-symmetry interval must be positive"
+            );
+            assert!(
+                cfg.active_region.is_none() && cfg.frozen.is_none(),
+                "continuous-symmetry projection requires a free non-periodic point set"
+            );
+            let classes = cfg.species.clone().unwrap_or_else(|| vec![0; n]);
+            assert_eq!(
+                classes.len(),
+                n,
+                "continuous-symmetry classes must match n_points"
+            );
+            Some(classes)
+        }
+    };
     // The descriptor and the metric have to agree. A shape distance is
     // computed from coordinates, so keying on it means passing coordinates
     // through rather than reducing them to a sorted distance spectrum first;
@@ -1101,6 +1123,8 @@ where
     let mut restarts = 0usize;
     let mut symmetrised = 0usize;
     let mut symmetry_gain = 0.0_f64;
+    let mut continuous_symmetry_attempts = 0usize;
+    let mut continuous_symmetry_gain = 0.0_f64;
     let mut quiet = 0usize;
     let mut longest_quiet = 0usize;
     let mut stall_escapes = 0usize;
@@ -1645,6 +1669,85 @@ where
         }
         if ledger.remaining() == 0 {
             break;
+        }
+        let continuous_symmetry_due = match cfg.continuous_symmetry {
+            ContinuousSymmetry::Off => false,
+            ContinuousSymmetry::Inversion { interval } => hops % interval == 0,
+        };
+        if continuous_symmetry_due {
+            continuous_symmetry_attempts += 1;
+            let classes = continuous_symmetry_classes
+                .as_deref()
+                .expect("enabled continuous symmetry has equivalence classes");
+            if let Some(projection) =
+                crate::continuous_symmetry::project_inversion(x.view(), classes)
+            {
+                let from_energy = e;
+                let from_state = x.clone();
+                let from_gradient = current_validation_gradient.clone();
+                let (candidate_energy, candidate) =
+                    relax(ledger, projection.coordinates.view(), cfg.relax_steps);
+                let candidate_sane = quench_is_sane(cfg, candidate_energy, candidate.view());
+                let gradient_required = grad.is_some();
+                let candidate_gradient = candidate_sane.then(|| {
+                    grad.as_deref_mut().and_then(|gradient| {
+                        gradient(ledger, candidate.view()).filter(|values| {
+                            values
+                                .iter()
+                                .fold(0.0_f64, |largest, value| largest.max(value.abs()))
+                                < cfg.record_gradient
+                        })
+                    })
+                });
+                let candidate_gradient = candidate_gradient.flatten();
+                let recordable =
+                    candidate_sane && (!gradient_required || candidate_gradient.is_some());
+                let improved = recordable && candidate_energy < ledger.best - 1e-10;
+                if recordable {
+                    ledger.record(candidate_energy, candidate.view());
+                } else {
+                    unconverged_records += 1;
+                }
+                let adopted = recordable && candidate_energy < e - 1e-10;
+                if adopted {
+                    continuous_symmetry_gain += e - candidate_energy;
+                    let from_basin = here.unwrap_or_else(|| identity.basin_of(x.view()));
+                    let reached = identity.basin_of(candidate.view());
+                    feedback.observe(Some(from_basin), reached);
+                    here = Some(reached);
+                    e = candidate_energy;
+                    x = candidate.clone();
+                    current_validation_gradient = candidate_gradient.clone();
+                    soft_cache = None;
+                    basin_entry = None;
+                    quiet = 0;
+                    if improved && improvements.len() < 512 {
+                        improvements.push((
+                            hops,
+                            ledger.spent(),
+                            bias.n_basins(),
+                            candidate_energy,
+                        ));
+                    }
+                }
+                if recordable {
+                    accepted_transitions.push(AcceptedTransition {
+                        hop: hops,
+                        action: "continuous-symmetry-ci".to_owned(),
+                        from_energy,
+                        to_energy: candidate_energy,
+                        from_state,
+                        from_gradient,
+                        to_state: candidate,
+                        to_gradient: candidate_gradient,
+                        validated: true,
+                        adopted,
+                    });
+                }
+            }
+            if ledger.remaining() == 0 {
+                break;
+            }
         }
         // Gap to the incumbent, which is what the law scales the window by.
         let gap = (e - ledger.best).abs().max(1e-12);
@@ -3374,6 +3477,7 @@ where
             (a, b, p.connectivity)
         }),
         symmetrised: (symmetrised, symmetry_gain),
+        continuous_symmetry: (continuous_symmetry_attempts, continuous_symmetry_gain),
         restarts,
         merge_radius: final_radius,
         mean_step: radius.mean_step(),
