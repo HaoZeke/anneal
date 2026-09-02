@@ -3201,22 +3201,31 @@ fn diagnostic_unseen_mass_upper(
 }
 
 fn minimum_information_population_assignment(
-    coverage: &mut UniversalCoverage,
+    minimum_information: &mut MinimumInformationSearch,
     destinations: &[u32],
     source_candidates: &BTreeMap<u32, CatalogCandidate>,
     max_family_size: usize,
 ) -> Option<Vec<u32>> {
-    let candidates = destinations
+    let actions = destinations
         .iter()
         .map(|replica| {
             let candidate = source_candidates.get(replica)?;
-            let source = usize::try_from(*replica).ok()?;
-            Some((source, candidate.descriptor.clone()))
+            Some(SearchActionCandidate {
+                mechanism: SearchMechanism::BasinEscape,
+                feature: candidate.descriptor.clone(),
+                source_energy: candidate.energy,
+                expected_charged_evaluations: 1.0,
+            })
         })
         .collect::<Option<Vec<_>>>()?;
-    let selected = coverage
-        .assign_minimum_information_values(
-            &candidates,
+    let families = destinations
+        .iter()
+        .map(|replica| usize::try_from(*replica).ok())
+        .collect::<Option<Vec<_>>>()?;
+    let selected = minimum_information
+        .assign_batch(
+            &actions,
+            &families,
             destinations.len(),
             max_family_size,
             MINIMUM_INFORMATION_SAMPLES,
@@ -3227,7 +3236,7 @@ fn minimum_information_population_assignment(
     }
     selected
         .into_iter()
-        .map(|source| u32::try_from(source).ok())
+        .map(|candidate| destinations.get(candidate).copied())
         .collect()
 }
 
@@ -3373,7 +3382,7 @@ fn realize_population_plan(
         .clone();
     let family_cap = usize::try_from(REDUCTION_FACTOR).unwrap_or(3);
     let parents = minimum_information_population_assignment(
-        &mut scientific.coverage,
+        &mut scientific.minimum_information,
         plan.destinations(),
         &source_candidates,
         family_cap,
