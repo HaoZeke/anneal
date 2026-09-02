@@ -2130,6 +2130,47 @@ fn main() {
         // Where the run got its answer. Printed for the last few improvements
         // only: the early ones are a descent from a random start and say
         // nothing.
+        // Every validated minimum of this seed goes to the readcon-db corpus
+        // named by ANNEAL_MINIMA_DB, under this system and temperature, so
+        // a campaign's minima outlive its logs and fold across seeds.
+        if let Ok(path) = std::env::var("ANNEAL_MINIMA_DB") {
+            let set = anneal_core::minima_db::MinimaSet {
+                system: format!("lj{n}"),
+                temperature: cfg.temperature,
+                seed,
+            };
+            let mut entries: Vec<(f64, ArrayView1<f64>)> = ledger
+                .quench_boundaries()
+                .iter()
+                .filter(|b| b.status() == QuenchStatus::Validated)
+                .map(|b| (b.energy(), b.state()))
+                .collect();
+            if let Some(best) = out.best_state.as_ref() {
+                entries.push((out.best, best.view()));
+            }
+            let provenance = serde_json::json!({
+                "driver": "lj_cluster_search",
+                "mechanisms": opts.join(","),
+                "budget": budget,
+                "config_digest": cfg.resolved_sha256().unwrap_or_default(),
+            });
+            match anneal_core::minima_db::MinimaCorpus::open(&path).and_then(|corpus| {
+                corpus.record(
+                    &set,
+                    &[],
+                    &anneal_core::minima_db::MinimaUnits {
+                        length: "sigma".into(),
+                        energy: "epsilon".into(),
+                    },
+                    &entries,
+                    1e-6,
+                    provenance,
+                )
+            }) {
+                Ok(stored) => println!("      minima corpus {path}: {stored} minima recorded"),
+                Err(error) => eprintln!("minima corpus {path}: {error}"),
+            }
+        }
         if std::env::var("DUMP_IMPROVEMENTS").is_ok() {
             for (h, sp, b, en) in out.improvements.iter() {
                 println!("IMP hop {h} spend {sp} basins {b} energy {en:.6}");

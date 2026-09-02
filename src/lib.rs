@@ -112,6 +112,7 @@ pub mod funnel_bo;
 pub mod funnel_spectral;
 pub mod grad;
 /// Action-outcome models for cost-aware global-minimum information.
+pub mod minima_db;
 pub mod minimum_information;
 /// Exact basin identity by canonical contact-graph labelling (nauty).
 #[cfg(feature = "graphkey")]
