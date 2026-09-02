@@ -100,7 +100,10 @@ fn good_ucb_index_is_the_good_turing_estimate_plus_the_distribution_free_bonus()
     let actual = good_ucb_missing_mass_index(3, 10, 40);
     let expected = 0.3 + (1.0 + 2.0_f64.sqrt()) * (160.0_f64.ln() / 10.0).sqrt();
 
-    assert!((actual - expected).abs() < 1e-12, "actual={actual}, expected={expected}");
+    assert!(
+        (actual - expected).abs() < 1e-12,
+        "actual={actual}, expected={expected}"
+    );
     assert!(good_ucb_missing_mass_index(0, 0, 40).is_infinite());
 }
 
