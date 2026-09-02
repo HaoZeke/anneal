@@ -262,16 +262,14 @@ impl CatalogClient {
                 run_client_executor(addr, config, thread_identity, thread_events, thread_snapshots, rx);
             })
             .expect("catalog RPC client thread starts");
-        let mut client = Self {
+        Ok(Self {
             jobs: Some(jobs),
             thread: Some(thread),
             identity,
             snapshot_version,
             requests: BTreeMap::new(),
             events,
-        };
-        let _ = client.attach();
-        Ok(client)
+        })
     }
 
     /// Attach this replica and subscribe to coordinator events.

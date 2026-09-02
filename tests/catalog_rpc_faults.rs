@@ -55,10 +55,12 @@ fn short_timeouts() -> ClientConfig {
 
 struct CannedCoordinator {
     sequences: Rc<RefCell<Vec<u64>>>,
+    done: Rc<RefCell<Option<futures::channel::oneshot::Sender<()>>>>,
 }
 
 struct CannedSession {
     sequences: Rc<RefCell<Vec<u64>>>,
+    done: Rc<RefCell<Option<futures::channel::oneshot::Sender<()>>>>,
 }
 
 impl coordinator::Server for CannedCoordinator {
@@ -70,6 +72,7 @@ impl coordinator::Server for CannedCoordinator {
         let mut reply = results.get();
         reply.set_session(capnp_rpc::new_client(CannedSession {
             sequences: Rc::clone(&self.sequences),
+            done: Rc::clone(&self.done),
         }));
         let mut roster = reply.init_roster();
         roster.set_version(1);
@@ -100,6 +103,9 @@ impl session::Server for CannedSession {
         accepted.set_aggregate_charged(11);
         accepted.set_aggregate_budget(100);
         accepted.init_payload().set_none(());
+        if let Some(done) = self.done.borrow_mut().take() {
+            let _ = done.send(());
+        }
         Promise::ok(())
     }
 }
@@ -124,9 +130,14 @@ fn serve_canned_snapshot(
             Side::Server,
             Default::default(),
         );
-        let client: coordinator::Client = capnp_rpc::new_client(CannedCoordinator { sequences });
+        let (done_tx, done_rx) = futures::channel::oneshot::channel();
+        let client: coordinator::Client = capnp_rpc::new_client(CannedCoordinator {
+            sequences,
+            done: Rc::new(RefCell::new(Some(done_tx))),
+        });
         let rpc = RpcSystem::new(Box::new(network), Some(client.client));
-        let _ = rpc.await;
+        tokio::task::spawn_local(rpc);
+        let _ = done_rx.await;
     });
 }
 
@@ -175,7 +186,6 @@ fn timed_out_request_reconnects_and_replays_before_returning() {
     let peer_sequences = std::sync::Arc::clone(&sequences);
     let peer = thread::spawn(move || {
         let (first, _) = listener.accept().unwrap();
-        thread::sleep(Duration::from_millis(80));
         drop(first);
 
         let (replay, _) = listener.accept().unwrap();
