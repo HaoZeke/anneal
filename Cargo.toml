@@ -173,6 +173,10 @@ name = "catalog_status"
 required-features = ["bank-rpc"]
 
 [[example]]
+name = "catalog_supervisor"
+required-features = ["bank-rpc"]
+
+[[example]]
 name = "decaf_local_classes"
 required-features = ["bank-rpc"]
 

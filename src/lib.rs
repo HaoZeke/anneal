@@ -182,6 +182,8 @@ pub mod runner;
 pub mod runtime_distribution;
 /// Stan-style single-step sampler trait: `trait Sampler<T>`.
 pub mod sampler;
+/// Successive-halving population control for a live coordinator roster.
+pub mod scaling;
 pub mod screen;
 /// SOAP power spectrum and Cartesian pullback through `∂p/∂R`.
 pub mod soap;

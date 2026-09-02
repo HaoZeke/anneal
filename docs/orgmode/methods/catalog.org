@@ -1062,12 +1062,48 @@ uncertainty; produces the =PopulationEpochPlan= a replica reads via
 draw, then requests a =boundary_crossing= from that parent's descriptor
 (see composition doc).
 
+** Live roster, coordinator clock, and successive halving
+
+What it is: a versioned live replica set on the coordinator, a
+journaled Tick identity (=u32::MAX=) that advances
+=SynchronousPopulation::tick=, and a pure successive-halving policy
+that retires the worst \(1-1/\eta\) of a rung and requests that many
+spawns. Attach admits an unknown replica through identity validation
+that otherwise rejects every other operation from one; Detach retires
+it from the barrier. A =retired= field on the policy reply tells the
+worker to return =CheckpointAction::Retire { reason: "halving" }=.
+=examples/catalog_supervisor.rs= polls observer status once a second
+and launches one worker per pending spawn.
+
+Key types and functions: =RosterReply= (src/catalog_rpc/mod.rs);
+=CatalogOperation::Attach=/=Detach=/=Tick=/=Scale=; =SuccessiveHalving=
+(src/scaling.rs) with =observe= and =set_target=; =ServerConfig::with_quorum=
+and =with_halving=; =CatalogServer::with_clock=; =CooperativeLedger::attach=
+(src/cooperative_search/ledger.rs). Schema fields:
+=CoordinatorStatus.rosterVersion=/=liveReplicas=/=ticks=/=spawnRequested=,
+=PolicyStateReply.retired=, =AcceptedReply.payload.roster=.
+
+Constants and defaults: Tick identity is replica =u32::MAX= with its
+own sequence counter, journaled so replay reproduces epoch closes.
+Halving rungs are \(r_0 \eta^i\). The supervisor sets =CATALOG_REPLICA=
+to the next free id and =SEED_OFFSET= to a fresh offset; it does not
+Attach.
+
+Feeds/consumes: builds on =SynchronousPopulation::attach=,
+=with_quorum=, =live_replicas=, and =tick= (src/methods/feynman_kac.rs).
+Ledger events update charged work and feed =observe=. Spawn counts
+accumulate on the roster reply and observer status.
+=examples/lj_cluster_search.rs= Attaches after connect and honours
+=retired=. =CATALOG_CLOCK_MS= turns on the coordinator clock in
+=examples/catalog_server.rs=.
+
 ** Cap'n Proto catalog protocol
 
 What it is: the versioned wire protocol and coordinator/client
 implementation carrying every mechanism above between processes:
 candidate offers, descriptor-hole and boundary-crossing requests,
-policy-state reads, population submit/poll/abstain/join, and a
+policy-state reads, population submit/poll/abstain/join, live-roster
+attach/detach/tick/scale, and a
 read-only observer status op that requires no replica identity.
 
 Key types and functions: =PROTOCOL_VERSION = 10= (src/catalog_rpc/mod.rs:19);

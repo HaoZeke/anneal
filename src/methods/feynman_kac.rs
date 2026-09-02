@@ -539,7 +539,6 @@ impl SynchronousPopulation {
         }
         self.replicas.push(replica);
         self.live.insert(replica);
-        self.live_roster = true;
         Ok(())
     }
 
@@ -638,6 +637,11 @@ impl SynchronousPopulation {
         let epoch = self.open_epoch;
         self.close_if_ready(epoch)?;
         Ok(())
+    }
+
+    /// Immutable plan for a completed epoch, if that epoch closed.
+    pub fn completed_plan(&self, epoch: u64) -> Option<&PopulationEpochPlan> {
+        self.completed.get(&epoch).map(|completed| &completed.plan)
     }
 
     /// Replicas whose submission forms the open epoch, in configured order.
@@ -753,18 +757,21 @@ impl SynchronousPopulation {
         }
         if epoch < self.open_epoch {
             let Some(completed) = self.completed.get(&epoch) else {
-                return Err(ReconfigurationError::EpochMismatch {
-                    expected: self.open_epoch,
-                    received: epoch,
+                return Ok(EpochSubmissionOutcome::Pending {
+                    epoch,
+                    submitted: 0,
+                    required: 0,
                 });
             };
-            return if completed.submissions.get(&member.replica) == Some(&member) {
-                Ok(EpochSubmissionOutcome::Ready(completed.plan.clone()))
-            } else {
-                Err(ReconfigurationError::ConflictingSubmission {
+            return match completed.submissions.get(&member.replica) {
+                Some(stored) if stored == &member => {
+                    Ok(EpochSubmissionOutcome::Ready(completed.plan.clone()))
+                }
+                Some(_) => Err(ReconfigurationError::ConflictingSubmission {
                     epoch,
                     replica: member.replica,
-                })
+                }),
+                None => Ok(EpochSubmissionOutcome::Ready(completed.plan.clone())),
             };
         }
         if epoch > self.open_epoch {

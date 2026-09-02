@@ -20,8 +20,8 @@ use super::{
     CatalogMutation, CatalogMutationKind, CatalogOperation, CatalogRelation, CatalogReply,
     CatalogRequest, CatalogRideConnection, CatalogRideOutcome, CatalogRideSaddleEvidence,
     CatalogRideWork, CatalogSnapshot, DescriptorHoleProposal, PolicyState, PopulationEpochState,
-    PopulationPlan, PopulationSelection, ProtocolError, ProtocolRejection, TransitionDestination,
-    decode_request, decode_request_reader, encode_reply, encode_request,
+    PopulationPlan, PopulationSelection, ProtocolError, ProtocolRejection, RosterReply,
+    TransitionDestination, decode_request, decode_request_reader, encode_reply, encode_request,
 };
 use crate::Catalog_capnp::catalog_request;
 use crate::catalog::{
@@ -60,6 +60,7 @@ use crate::ride_ledger::{
     EnvironmentBook, RideArm, RideDirection, RideLedger, RideOutcome, RidePortfolio, RideSource,
     SADDLE_COVERAGE_MINIMUM_OBSERVATIONS,
 };
+use crate::scaling::{ScaleDecision, SuccessiveHalving};
 use crate::soap::local_nu3_z;
 use crate::transition_graph::{AttractionRegionConfig, TransitionGraph, TransitionOutcome};
 use crate::universal_coverage::{CoverageConfig, UniversalCoverage};
@@ -77,6 +78,8 @@ pub struct ServerConfig {
     scientific: Option<ScientificConfig>,
     per_replica_budget: Option<u64>,
     state_directory: Option<PathBuf>,
+    quorum: Option<(f64, u64)>,
+    halving: Option<SuccessiveHalving>,
 }
 
 #[derive(Clone)]
@@ -116,7 +119,35 @@ impl ServerConfig {
             scientific: None,
             per_replica_budget: None,
             state_directory: None,
+            quorum: None,
+            halving: None,
         })
+    }
+
+    /// Close population epochs on `quorum` of the live roster once
+    /// `deadline_ticks` coordinator ticks have passed since the first
+    /// submission of the open epoch.
+    pub fn with_quorum(
+        mut self,
+        quorum: f64,
+        deadline_ticks: u64,
+    ) -> Result<Self, CatalogServerError> {
+        SynchronousPopulation::new(
+            self.replicas.iter().copied(),
+            SelectionCoefficients::default(),
+            1,
+            1,
+        )
+        .and_then(|population| population.with_quorum(quorum, deadline_ticks))
+        .map_err(|_| CatalogServerError::InvalidConfiguration)?;
+        self.quorum = Some((quorum, deadline_ticks));
+        Ok(self)
+    }
+
+    /// Drive live-population size with successive halving.
+    pub fn with_halving(mut self, policy: SuccessiveHalving) -> Self {
+        self.halving = Some(policy);
+        self
     }
 
     /// Attach an equal charged-work budget for every configured replica.
@@ -420,6 +451,46 @@ struct ScientificState {
 }
 
 #[derive(Clone)]
+struct CoordinatorRoster {
+    version: u64,
+    live: BTreeSet<u32>,
+    retired: BTreeMap<u32, String>,
+    spawn_requested: u32,
+    ticks: u64,
+    pending_retire: BTreeSet<u32>,
+    replica_charged: BTreeMap<u32, u64>,
+    replica_energy: BTreeMap<u32, f64>,
+}
+
+impl CoordinatorRoster {
+    fn new(replicas: impl IntoIterator<Item = u32>) -> Self {
+        Self {
+            version: 0,
+            live: replicas.into_iter().collect(),
+            retired: BTreeMap::new(),
+            spawn_requested: 0,
+            ticks: 0,
+            pending_retire: BTreeSet::new(),
+            replica_charged: BTreeMap::new(),
+            replica_energy: BTreeMap::new(),
+        }
+    }
+
+    fn known(&self, replica: u32) -> bool {
+        self.live.contains(&replica) || self.retired.contains_key(&replica)
+    }
+
+    fn reply(&self) -> RosterReply {
+        RosterReply {
+            version: self.version,
+            live: self.live.iter().copied().collect(),
+            retired: self.retired.keys().copied().collect(),
+            spawn_requested: self.spawn_requested,
+        }
+    }
+}
+
+#[derive(Clone)]
 struct CoordinatorState {
     snapshot_version: u64,
     census_visits: u64,
@@ -428,6 +499,8 @@ struct CoordinatorState {
     maximum_sequence: BTreeMap<u32, u64>,
     ledger: Option<CooperativeLedger>,
     scientific: Option<ScientificState>,
+    roster: CoordinatorRoster,
+    halving: Option<SuccessiveHalving>,
     /// Raw frontier excursion posts, shared across every replica.
     frontier: std::collections::VecDeque<crate::catalog_rpc::CatalogFrontierPost>,
     /// A journal append failed after the live state had already moved,
@@ -481,17 +554,30 @@ impl CoordinatorState {
                     best_candidate_by_replica: BTreeMap::new(),
                     boundary_crossings: Vec::new(),
                     transition_capacity: scientific.catalog_capacity,
-                    population: SynchronousPopulation::new(
-                        config.replicas.iter().copied(),
-                        SelectionCoefficients::default(),
-                        config.replicas.len().div_ceil(2),
-                        u64::from_le_bytes(
-                            config.signature_digest[..8]
-                                .try_into()
-                                .expect("signature prefix has eight bytes"),
-                        ),
-                    )
-                    .map_err(|_| CatalogServerError::InvalidScientificConfiguration)?,
+                    population: {
+                        let mut population = SynchronousPopulation::new(
+                            config.replicas.iter().copied(),
+                            SelectionCoefficients::default(),
+                            config.replicas.len().div_ceil(2),
+                            u64::from_le_bytes(
+                                config.signature_digest[..8]
+                                    .try_into()
+                                    .expect("signature prefix has eight bytes"),
+                            ),
+                        )
+                        .map_err(|_| CatalogServerError::InvalidScientificConfiguration)?;
+                        if let Some((quorum, deadline_ticks)) = config.quorum {
+                            population = population
+                                .with_quorum(quorum, deadline_ticks)
+                                .map_err(|_| CatalogServerError::InvalidScientificConfiguration)?;
+                        }
+                        for replica in &config.replicas {
+                            population
+                                .mark_live(*replica)
+                                .map_err(|_| CatalogServerError::InvalidScientificConfiguration)?;
+                        }
+                        population
+                    },
                     population_candidates: BTreeMap::new(),
                     population_plans: BTreeMap::new(),
                     packing: PackingBook::default(),
@@ -552,6 +638,8 @@ impl CoordinatorState {
             maximum_sequence: BTreeMap::new(),
             ledger,
             scientific,
+            roster: CoordinatorRoster::new(config.replicas.iter().copied()),
+            halving: config.halving.clone(),
             frontier: std::collections::VecDeque::new(),
             journal_broken: false,
         })
@@ -668,6 +756,9 @@ pub struct CatalogServer {
     header: ServerHeader,
     stop: Arc<AtomicBool>,
     thread: Option<JoinHandle<()>>,
+    clock: Option<JoinHandle<()>>,
+    state: Arc<Mutex<CoordinatorState>>,
+    clock_identity: CatalogIdentity,
 }
 
 impl CatalogServer {
@@ -688,11 +779,18 @@ impl CatalogServer {
         let stop = Arc::new(AtomicBool::new(false));
         let thread_stop = Arc::clone(&stop);
         let state = Arc::new(Mutex::new(initial_state));
+        let accept_state = Arc::clone(&state);
+        let clock_identity = CatalogIdentity {
+            campaign: config.campaign.clone(),
+            ensemble: config.ensemble.clone(),
+            replica: u32::MAX,
+            signature_digest: config.signature_digest,
+        };
         let thread = thread::spawn(move || {
             while !thread_stop.load(Ordering::Acquire) {
                 match listener.accept() {
                     Ok((stream, _)) => {
-                        let state = Arc::clone(&state);
+                        let state = Arc::clone(&accept_state);
                         let config = config.clone();
                         thread::spawn(move || {
                             let _ = handle_connection(stream, &config, state);
@@ -710,7 +808,69 @@ impl CatalogServer {
             header,
             stop,
             thread: Some(thread),
+            clock: None,
+            state,
+            clock_identity,
         })
+    }
+
+    /// Spawn a thread that journals one [`CatalogOperation::Tick`] every `period`.
+    pub fn with_clock(mut self, period: Duration) -> Self {
+        let stop = Arc::clone(&self.stop);
+        let addr = self.addr;
+        let identity = self.clock_identity.clone();
+        let millis = u64::try_from(period.as_millis()).unwrap_or(u64::MAX);
+        self.clock = Some(thread::spawn(move || {
+            use super::client::{CatalogClient, ClientConfig};
+            let mut client = loop {
+                if stop.load(Ordering::Acquire) {
+                    return;
+                }
+                match CatalogClient::connect(addr, identity.clone(), ClientConfig::default()) {
+                    Ok(client) => break client,
+                    Err(_) => thread::sleep(Duration::from_millis(20)),
+                }
+            };
+            let mut sequence = 1u64;
+            while !stop.load(Ordering::Acquire) {
+                thread::sleep(period);
+                if stop.load(Ordering::Acquire) {
+                    break;
+                }
+                if client.tick(sequence, millis).is_ok() {
+                    sequence = sequence.saturating_add(1);
+                }
+            }
+        }));
+        self
+    }
+
+    /// Apply a quorum close to the live population after start.
+    pub fn with_quorum(self, quorum: f64, deadline_ticks: u64) -> Result<Self, CatalogServerError> {
+        let mut state = match self.state.lock() {
+            Ok(state) => state,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        if let Some(scientific) = state.scientific.as_mut() {
+            scientific.population = scientific
+                .population
+                .clone()
+                .with_quorum(quorum, deadline_ticks)
+                .map_err(|_| CatalogServerError::InvalidConfiguration)?;
+        }
+        drop(state);
+        Ok(self)
+    }
+
+    /// Attach a successive-halving policy after start.
+    pub fn with_halving(self, policy: SuccessiveHalving) -> Self {
+        let mut state = match self.state.lock() {
+            Ok(state) => state,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        state.halving = Some(policy);
+        drop(state);
+        self
     }
 
     /// Bound socket address.
@@ -727,6 +887,9 @@ impl CatalogServer {
 impl Drop for CatalogServer {
     fn drop(&mut self) {
         self.stop.store(true, Ordering::Release);
+        if let Some(thread) = self.clock.take() {
+            let _ = thread.join();
+        }
         if let Some(thread) = self.thread.take() {
             let _ = thread.join();
         }
@@ -871,7 +1034,7 @@ fn process_request(
     // that happens to share a replica id collides with a stored request
     // and is told its sequence replayed rather than that it is talking
     // to the wrong coordinator.
-    if let Some(reason) = identity_rejection(config, &request.identity) {
+    if let Some(reason) = identity_rejection(config, &state, &request) {
         return Ok(rejected(&state, request.event_sequence, reason));
     }
     let key = (request.identity.replica, request.event_sequence);
@@ -919,7 +1082,7 @@ fn apply_request(
     request: CatalogRequest,
     mut precomputed: Option<Result<ValidatedCandidate, ()>>,
 ) -> CatalogReply {
-    let rejection = identity_rejection(config, &request.identity).or_else(|| {
+    let rejection = identity_rejection(config, state, &request).or_else(|| {
         (request.snapshot_version > state.snapshot_version)
             .then_some(ProtocolRejection::SnapshotRegression)
     });
@@ -1203,6 +1366,20 @@ fn apply_request(
                 .map_or_else(Default::default, |ledger| {
                     ledger.charge_summary(ChargeKind::SaddleRide)
                 });
+            let retired = state
+                .roster
+                .pending_retire
+                .contains(&request.identity.replica);
+            if energy.is_finite() {
+                let stored = state
+                    .roster
+                    .replica_energy
+                    .entry(request.identity.replica)
+                    .or_insert(f64::INFINITY);
+                if *energy < *stored {
+                    *stored = *energy;
+                }
+            }
             let Some(scientific) = state.scientific.as_mut() else {
                 return rejected(
                     state,
@@ -1309,10 +1486,12 @@ fn apply_request(
             if mixing.pruned {
                 reset_trial(scientific, request.identity.replica);
             }
-            if scientific
-                .population
-                .mark_live(request.identity.replica)
-                .is_err()
+            let skip_mark_live = retired;
+            if !skip_mark_live
+                && scientific
+                    .population
+                    .mark_live(request.identity.replica)
+                    .is_err()
             {
                 return rejected(
                     state,
@@ -1378,6 +1557,7 @@ fn apply_request(
                 saddle_discovery_attempts: saddle_effort.events,
                 saddle_discovery_charged: saddle_effort.charged_calls,
                 saddle_coverage_saturated: saddle_coverage.saturated,
+                retired,
             });
             report_occupancy_gt(scientific);
         }
@@ -2443,6 +2623,13 @@ fn apply_request(
                 );
             };
             state.snapshot_version = snapshot_version;
+            feed_halving(
+                config,
+                state,
+                request.identity.replica,
+                *cumulative_charged,
+                None,
+            );
         }
         CatalogOperation::LedgerBatch { events } => {
             let ordered = !events.is_empty()
@@ -2518,6 +2705,90 @@ fn apply_request(
                 scientific.catalog.update_threshold(aggregate_charged);
             }
             state.snapshot_version = snapshot_version;
+            if let Some(last) = events.last() {
+                feed_halving(
+                    config,
+                    state,
+                    request.identity.replica,
+                    last.cumulative_charged,
+                    None,
+                );
+            }
+        }
+        CatalogOperation::Attach => {
+            if admit_replica(state, request.identity.replica).is_err() {
+                return rejected(
+                    state,
+                    request.event_sequence,
+                    ProtocolRejection::ValidationRejected,
+                );
+            }
+            payload = AcceptedPayload::Roster(state.roster.reply());
+        }
+        CatalogOperation::Detach { reason } => {
+            if retire_replica(config, state, request.identity.replica, reason).is_err() {
+                return rejected(
+                    state,
+                    request.event_sequence,
+                    ProtocolRejection::ValidationRejected,
+                );
+            }
+            payload = AcceptedPayload::Roster(state.roster.reply());
+        }
+        CatalogOperation::Tick { .. } => {
+            state.roster.ticks = state.roster.ticks.saturating_add(1);
+            let roster = state.roster.reply();
+            payload = match state.scientific.as_mut() {
+                Some(scientific) => match scientific.population.tick() {
+                    Ok(Some(EpochSubmissionOutcome::Ready(plan))) => {
+                        let participants = u32::try_from(plan.destinations().len())
+                            .expect("participants are bounded by replica count");
+                        realize_population_plan(
+                            scientific,
+                            config,
+                            plan.epoch(),
+                            &plan,
+                            participants,
+                        )
+                    }
+                    Ok(Some(EpochSubmissionOutcome::Pending {
+                        epoch,
+                        submitted,
+                        required,
+                    })) => AcceptedPayload::PopulationEpoch(PopulationEpochState {
+                        epoch,
+                        submitted: u32::try_from(submitted)
+                            .expect("submission count is bounded by replica count"),
+                        required: u32::try_from(required)
+                            .expect("requirement is bounded by replica count"),
+                        plan: None,
+                    }),
+                    Ok(None) => AcceptedPayload::Roster(roster),
+                    Err(_) => {
+                        return rejected(
+                            state,
+                            request.event_sequence,
+                            ProtocolRejection::ValidationRejected,
+                        );
+                    }
+                },
+                None => AcceptedPayload::Roster(roster),
+            };
+            if let Some(snapshot_version) = state.snapshot_version.checked_add(1) {
+                state.snapshot_version = snapshot_version;
+            }
+        }
+        CatalogOperation::Scale { live_target } => {
+            let decisions = state
+                .halving
+                .as_mut()
+                .map(|policy| policy.set_target(*live_target))
+                .unwrap_or_default();
+            apply_scale_decisions(config, state, decisions);
+            payload = AcceptedPayload::Roster(state.roster.reply());
+            if let Some(snapshot_version) = state.snapshot_version.checked_add(1) {
+                state.snapshot_version = snapshot_version;
+            }
         }
     }
     state
@@ -2525,6 +2796,133 @@ fn apply_request(
         .insert(request.identity.replica, request.event_sequence);
     state.requests.insert(key, (request, payload.clone()));
     accepted_with_payload(state, key.1, false, payload)
+}
+
+fn admit_replica(state: &mut CoordinatorState, replica: u32) -> Result<(), CatalogServerError> {
+    if replica == u32::MAX {
+        return Err(CatalogServerError::InvalidConfiguration);
+    }
+    if let Some(ledger) = state.ledger.as_mut() {
+        ledger
+            .attach(replica)
+            .map_err(|_| CatalogServerError::InvalidConfiguration)?;
+    }
+    if let Some(scientific) = state.scientific.as_mut() {
+        match scientific.population.attach(replica) {
+            Ok(()) => {}
+            Err(crate::methods::feynman_kac::ReconfigurationError::DuplicateReplica { .. }) => {
+                scientific
+                    .population
+                    .mark_live(replica)
+                    .map_err(|_| CatalogServerError::InvalidConfiguration)?;
+            }
+            Err(_) => return Err(CatalogServerError::InvalidConfiguration),
+        }
+        if !scientific.discovery_replicas.contains(&replica) {
+            scientific.discovery_replicas.push(replica);
+        }
+    }
+    let newly_live = state.roster.live.insert(replica);
+    state.roster.retired.remove(&replica);
+    state.roster.pending_retire.remove(&replica);
+    if newly_live {
+        state.roster.version = state.roster.version.saturating_add(1);
+        if state.roster.spawn_requested > 0 {
+            state.roster.spawn_requested -= 1;
+        }
+        if let Some(snapshot_version) = state.snapshot_version.checked_add(1) {
+            state.snapshot_version = snapshot_version;
+        }
+    }
+    Ok(())
+}
+
+fn retire_replica(
+    config: &ServerConfig,
+    state: &mut CoordinatorState,
+    replica: u32,
+    reason: &str,
+) -> Result<(), CatalogServerError> {
+    if !state.roster.known(replica) && !state.roster.live.contains(&replica) {
+        return Err(CatalogServerError::InvalidConfiguration);
+    }
+    if let Some(scientific) = state.scientific.as_mut() {
+        let epoch = scientific.population.open_epoch();
+        let _ = scientific.population.retire(replica);
+        if scientific.population.open_epoch() != epoch
+            && let Some(plan) = scientific.population.completed_plan(epoch).cloned()
+        {
+            let participants = u32::try_from(plan.destinations().len())
+                .expect("participants are bounded by replica count");
+            let _ = realize_population_plan(scientific, config, epoch, &plan, participants);
+        }
+    }
+    let was_live = state.roster.live.remove(&replica);
+    state.roster.retired.insert(replica, reason.to_owned());
+    if was_live {
+        state.roster.version = state.roster.version.saturating_add(1);
+        if let Some(snapshot_version) = state.snapshot_version.checked_add(1) {
+            state.snapshot_version = snapshot_version;
+        }
+    }
+    Ok(())
+}
+
+fn feed_halving(
+    config: &ServerConfig,
+    state: &mut CoordinatorState,
+    replica: u32,
+    charged_work: u64,
+    energy: Option<f64>,
+) {
+    state.roster.replica_charged.insert(replica, charged_work);
+    if let Some(value) = energy.filter(|value| value.is_finite()) {
+        let stored = state
+            .roster
+            .replica_energy
+            .entry(replica)
+            .or_insert(f64::INFINITY);
+        if value < *stored {
+            *stored = value;
+        }
+    }
+    let best_energy = state
+        .roster
+        .replica_energy
+        .get(&replica)
+        .copied()
+        .or_else(|| {
+            state
+                .scientific
+                .as_ref()
+                .and_then(|scientific| scientific.best_candidate_by_replica.get(&replica))
+                .map(|candidate| candidate.energy)
+        })
+        .unwrap_or(f64::INFINITY);
+    let decisions = state
+        .halving
+        .as_mut()
+        .map(|policy| policy.observe(replica, charged_work, best_energy))
+        .unwrap_or_default();
+    apply_scale_decisions(config, state, decisions);
+}
+
+fn apply_scale_decisions(
+    config: &ServerConfig,
+    state: &mut CoordinatorState,
+    decisions: Vec<ScaleDecision>,
+) {
+    for decision in decisions {
+        match decision {
+            ScaleDecision::Retire(replica) => {
+                state.roster.pending_retire.insert(replica);
+                let _ = retire_replica(config, state, replica, "halving");
+            }
+            ScaleDecision::Spawn(count) => {
+                state.roster.spawn_requested = state.roster.spawn_requested.saturating_add(count);
+            }
+        }
+    }
 }
 
 fn rejection_for_protocol_error(error: &ProtocolError) -> ProtocolRejection {
@@ -4770,6 +5168,10 @@ fn observer_status_reply(
         unique_degenerate_rearrangements,
         certified_connections,
         seam,
+        roster_version: state.roster.version,
+        live_replicas: state.roster.live.iter().copied().collect(),
+        ticks: state.roster.ticks,
+        spawn_requested: state.roster.spawn_requested,
     };
     let snapshot = CatalogSnapshot {
         version: state.snapshot_version,
@@ -4788,15 +5190,21 @@ fn observer_status_reply(
 
 fn identity_rejection(
     config: &ServerConfig,
-    identity: &CatalogIdentity,
+    state: &CoordinatorState,
+    request: &CatalogRequest,
 ) -> Option<ProtocolRejection> {
-    if let Some(reason) = system_identity_rejection(config, identity) {
+    if let Some(reason) = system_identity_rejection(config, &request.identity) {
         return Some(reason);
     }
-    if !config.replicas.contains(&identity.replica) {
-        Some(ProtocolRejection::ReplicaMismatch)
-    } else {
-        None
+    match &request.operation {
+        CatalogOperation::Attach => None,
+        CatalogOperation::Tick { .. } if request.identity.replica == u32::MAX => None,
+        _ if config.replicas.contains(&request.identity.replica)
+            || state.roster.known(request.identity.replica) =>
+        {
+            None
+        }
+        _ => Some(ProtocolRejection::ReplicaMismatch),
     }
 }
 

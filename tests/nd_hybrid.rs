@@ -1,15 +1,15 @@
 use std::convert::Infallible;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use anneal_core::descriptor_space::{universal_descriptor_space, DescriptorGeometry};
+use anneal_core::descriptor_space::{DescriptorGeometry, universal_descriptor_space};
 use anneal_core::nd_hybrid::{
-    explore_nd_hybrid, explore_nd_with_policy, ActionFeatureMap, CoordinateActionFeatures,
-    DescriptorActionFeatures, NdEscapeKernel, NdHybridConfig, NdHybridMechanism, NdHybridPolicy,
+    ActionFeatureMap, CoordinateActionFeatures, DescriptorActionFeatures, NdEscapeKernel,
+    NdHybridConfig, NdHybridMechanism, NdHybridPolicy, explore_nd_hybrid, explore_nd_with_policy,
 };
 use anneal_core::pes_exploration::{
     ExactStructureWitness, PesExplorationConfig, PesSurface, RideMethod,
 };
-use ndarray::{array, Array1, ArrayView1};
+use ndarray::{Array1, ArrayView1, array};
 
 struct ProductDoubleWell {
     calls: AtomicU64,
@@ -63,7 +63,9 @@ fn coordinate_action_features_preserve_generic_nd_points() {
 
 #[test]
 fn descriptor_action_features_ignore_rigid_like_species_permutations() {
-    let source = array![1.0, 1.0, 1.0, -1.0, -1.0, 1.0, -1.0, 1.0, -1.0, 1.0, -1.0, -1.0,];
+    let source = array![
+        1.0, 1.0, 1.0, -1.0, -1.0, 1.0, -1.0, 1.0, -1.0, 1.0, -1.0, -1.0,
+    ];
     let permutation = [2usize, 0, 3, 1];
     let mut equivalent = Array1::zeros(source.len());
     for (destination, source_atom) in permutation.into_iter().enumerate() {
@@ -204,18 +206,22 @@ fn hybrid_nd_search_shares_escaped_minima_with_budgeted_ridge_rides() {
 
     for minimum in report.network.minima() {
         assert!(minimum.max_gradient < 2e-8);
-        assert!(minimum
-            .coordinates
-            .iter()
-            .all(|coordinate| (coordinate.abs() - 1.0).abs() < 1e-6));
+        assert!(
+            minimum
+                .coordinates
+                .iter()
+                .all(|coordinate| (coordinate.abs() - 1.0).abs() < 1e-6)
+        );
     }
     for saddle in report.network.saddles() {
         assert_eq!(saddle.negative_modes, 1);
         assert!(saddle.saddle_max_gradient < config.exploration.saddle_force_tolerance);
-        assert!(saddle
-            .endpoints
-            .iter()
-            .all(|endpoint| *endpoint < report.network.minimum_count()));
+        assert!(
+            saddle
+                .endpoints
+                .iter()
+                .all(|endpoint| *endpoint < report.network.minimum_count())
+        );
     }
 }
 
@@ -263,10 +269,12 @@ fn fixed_nd_policies_issue_only_the_named_mechanism() {
         .unwrap();
 
         assert!(!report.events.is_empty());
-        assert!(report
-            .events
-            .iter()
-            .all(|event| event.mechanism == expected));
+        assert!(
+            report
+                .events
+                .iter()
+                .all(|event| event.mechanism == expected)
+        );
         assert_eq!(report.charged_evaluations, surface.calls());
         assert!(report.charged_evaluations <= config.evaluation_budget);
     }

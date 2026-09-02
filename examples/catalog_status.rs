@@ -93,7 +93,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
              \"census_visits\":{},\"catalog_entries\":{},\"charged\":{},\"budget\":{},\
              \"landscape_basins\":{},\"unique_saddles\":{},\"unique_edges\":{},\
              \"unique_degenerate_rearrangements\":{},\"certified_connections\":{},\
-             \"seam\":{},\"replicas\":[{}]}}",
+             \"roster_version\":{},\"ticks\":{},\"spawn_requested\":{},\
+             \"live_replicas\":[{}],\"seam\":{},\"replicas\":[{}]}}",
             status.snapshot_version,
             status.open_epoch,
             status.epoch_submitted,
@@ -107,6 +108,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             status.unique_edges,
             status.unique_degenerate_rearrangements,
             status.certified_connections,
+            status.roster_version,
+            status.ticks,
+            status.spawn_requested,
+            status
+                .live_replicas
+                .iter()
+                .map(u32::to_string)
+                .collect::<Vec<_>>()
+                .join(","),
             seam,
             replicas
         );
