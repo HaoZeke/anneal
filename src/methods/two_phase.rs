@@ -413,14 +413,25 @@ mod tests {
                 Some(two) if two == deep => best - 1.0,
                 _ => best + 3.0,
             };
-            assert_eq!(portfolio.begin(false), arm, "the full relaxation changed surface");
+            assert_eq!(
+                portfolio.begin(false),
+                arm,
+                "the full relaxation changed surface"
+            );
             best = best.min(reached);
             portfolio.observe(false, reached, best);
             if hop % 5 != 4 {
-                assert_eq!(portfolio.begin(false), arm, "the arm changed inside a block");
+                assert_eq!(
+                    portfolio.begin(false),
+                    arm,
+                    "the arm changed inside a block"
+                );
             }
         }
-        assert!(switches < 2000 / 5, "the arm is redrawn more often than once per block");
+        assert!(
+            switches < 2000 / 5,
+            "the arm is redrawn more often than once per block"
+        );
         let draws = portfolio.draws();
         assert!(
             draws[1] > draws[0] + draws[2],
@@ -438,7 +449,11 @@ mod tests {
         let mut best = 0.0_f64;
         for _ in 0..200 {
             let arm = teacher.begin(true);
-            let reached = if arm == Some(deep) { best - 1.0 } else { best + 1.0 };
+            let reached = if arm == Some(deep) {
+                best - 1.0
+            } else {
+                best + 1.0
+            };
             best = best.min(reached);
             teacher.observe(false, reached, best);
         }
@@ -454,7 +469,10 @@ mod tests {
             deep_draws >= 30,
             "a fresh chain on the shared posterior drew the learned arm {deep_draws} of 40 times"
         );
-        assert!(student.draws().iter().sum::<usize>() > 0, "the private mirror records draws");
+        assert!(
+            student.draws().iter().sum::<usize>() > 0,
+            "the private mirror records draws"
+        );
     }
 
     #[test]
