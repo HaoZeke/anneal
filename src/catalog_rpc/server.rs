@@ -380,7 +380,10 @@ struct ScientificState {
     ride_environments: EnvironmentBook,
     ride_ledger: RideLedger,
     ride_information_scores: BTreeMap<RideArm, f64>,
+    discovery_roles: BTreeMap<u32, DiscoveryRole>,
     discovery_ride_assignments: BTreeMap<u32, RideArm>,
+    discovery_plan_model_version: Option<u64>,
+    discovery_assignment_epoch: u64,
     ride_candidates: BTreeMap<u64, CatalogCandidate>,
     ride_saddles: BTreeMap<u64, CertifiedRideSaddle>,
     next_ride_saddle: u64,
@@ -594,7 +597,10 @@ impl CoordinatorState {
                             .map_err(|_| CatalogServerError::InvalidScientificConfiguration)?,
                     ),
                     ride_information_scores: BTreeMap::new(),
+                    discovery_roles: BTreeMap::new(),
                     discovery_ride_assignments: BTreeMap::new(),
+                    discovery_plan_model_version: None,
+                    discovery_assignment_epoch: 0,
                     ride_candidates: BTreeMap::new(),
                     ride_saddles: BTreeMap::new(),
                     next_ride_saddle: 0,
@@ -2364,18 +2370,20 @@ fn apply_request(
                 );
             };
             let mut ride_ledger = scientific.ride_ledger.clone();
-            let assigned_arm = scientific
-                .discovery_ride_assignments
-                .get(&request.identity.replica);
-            let order = assigned_arm
-                .and_then(|arm| ride_ledger.claim_arm(request.identity.replica, *seed, arm))
-                .or_else(|| {
-                    ride_ledger.claim_ranked(
-                        request.identity.replica,
-                        *seed,
-                        &scientific.ride_information_scores,
-                    )
-                });
+            let order = match scientific.discovery_roles.get(&request.identity.replica) {
+                Some(DiscoveryRole::BasinEscape) => None,
+                Some(DiscoveryRole::SaddleRide) => scientific
+                    .discovery_ride_assignments
+                    .get(&request.identity.replica)
+                    .and_then(|arm| {
+                        ride_ledger.claim_arm(request.identity.replica, *seed, arm)
+                    }),
+                None => ride_ledger.claim_ranked(
+                    request.identity.replica,
+                    *seed,
+                    &scientific.ride_information_scores,
+                ),
+            };
             if let Some(order) = order {
                 let Some(source) = scientific
                     .ride_candidates
@@ -2614,6 +2622,9 @@ fn apply_request(
             let aggregate_charged = ledger.ensemble_total();
             if let Some(scientific) = state.scientific.as_mut() {
                 scientific.catalog.update_threshold(aggregate_charged);
+                if matches!(kind, ChargeKind::BasinEscape | ChargeKind::SaddleRide) {
+                    invalidate_discovery_plan(scientific);
+                }
             }
             let Some(snapshot_version) = state.snapshot_version.checked_add(1) else {
                 return rejected(
@@ -2660,6 +2671,7 @@ fn apply_request(
                 );
             };
             let mut staged = ledger.clone();
+            let mut discovery_cost_changed = false;
             for event in events {
                 let Some(kind) = ChargeKind::from_wire_code(event.kind) else {
                     return rejected(
@@ -2668,6 +2680,8 @@ fn apply_request(
                         ProtocolRejection::ValidationRejected,
                     );
                 };
+                discovery_cost_changed |=
+                    matches!(kind, ChargeKind::BasinEscape | ChargeKind::SaddleRide);
                 if staged
                     .record(ReplicaLedgerEvent {
                         replica: request.identity.replica,
@@ -2703,6 +2717,9 @@ fn apply_request(
             state.ledger = Some(staged);
             if let Some(scientific) = state.scientific.as_mut() {
                 scientific.catalog.update_threshold(aggregate_charged);
+                if discovery_cost_changed {
+                    invalidate_discovery_plan(scientific);
+                }
             }
             state.snapshot_version = snapshot_version;
             if let Some(last) = events.last() {
@@ -2820,6 +2837,7 @@ fn admit_replica(state: &mut CoordinatorState, replica: u32) -> Result<(), Catal
         }
         if !scientific.discovery_replicas.contains(&replica) {
             scientific.discovery_replicas.push(replica);
+            invalidate_discovery_plan(scientific);
         }
     }
     let newly_live = state.roster.live.insert(replica);
@@ -2855,6 +2873,13 @@ fn retire_replica(
             let participants = u32::try_from(plan.destinations().len())
                 .expect("participants are bounded by replica count");
             let _ = realize_population_plan(scientific, config, epoch, &plan, participants);
+        }
+        let original_len = scientific.discovery_replicas.len();
+        scientific
+            .discovery_replicas
+            .retain(|candidate| *candidate != replica);
+        if scientific.discovery_replicas.len() != original_len {
+            invalidate_discovery_plan(scientific);
         }
     }
     let was_live = state.roster.live.remove(&replica);
@@ -3510,6 +3535,17 @@ fn ride_action_feature(scientific: &ScientificState, arm: &RideArm) -> Option<(V
     Some((feature, source.energy))
 }
 
+fn invalidate_discovery_plan(scientific: &mut ScientificState) {
+    let held_plan = scientific.discovery_plan_model_version.take().is_some();
+    scientific.discovery_roles.clear();
+    scientific.discovery_ride_assignments.clear();
+    scientific.ride_information_scores.clear();
+    if held_plan {
+        scientific.discovery_assignment_epoch =
+            scientific.discovery_assignment_epoch.saturating_add(1);
+    }
+}
+
 fn minimum_information_role(
     scientific: &mut ScientificState,
     query_replica: u32,
@@ -3518,6 +3554,17 @@ fn minimum_information_role(
     basin_cost: f64,
     ride_cost: f64,
 ) -> Option<(DiscoveryRole, u64)> {
+    let model_version = scientific.minimum_information.version();
+    if scientific.discovery_plan_model_version == Some(model_version) {
+        return scientific
+            .discovery_roles
+            .get(&query_replica)
+            .copied()
+            .map(|role| (role, scientific.discovery_assignment_epoch));
+    }
+    if scientific.discovery_plan_model_version.is_some() {
+        invalidate_discovery_plan(scientific);
+    }
     let mut basin_actions = Vec::<(u32, SearchActionCandidate)>::new();
     for &replica in &scientific.discovery_replicas {
         let (descriptor, energy) = if replica == query_replica {
@@ -3590,12 +3637,18 @@ fn minimum_information_role(
         return None;
     }
     ride_rates.retain(|arm, _| selected_rides.contains(arm));
+    scientific.discovery_roles = assignments
+        .iter()
+        .map(|assignment| (assignment.replica, assignment.role))
+        .collect();
     scientific.ride_information_scores = ride_rates;
     scientific.discovery_ride_assignments = ride_assignments;
-    assignments
-        .into_iter()
-        .find(|assignment| assignment.replica == query_replica)
-        .map(|assignment| (assignment.role, assignment.epoch))
+    scientific.discovery_plan_model_version = Some(model_version);
+    scientific
+        .discovery_roles
+        .get(&query_replica)
+        .copied()
+        .map(|role| (role, scientific.discovery_assignment_epoch))
 }
 
 fn diagnostic_unseen_mass_upper(
@@ -3877,8 +3930,12 @@ fn observe_ride_source(
 ) -> Result<(), ()> {
     let basin = candidate.census_basin.ok_or(())?;
     if let Some(stored) = scientific.ride_candidates.get_mut(&basin) {
+        let changed = candidate.energy < stored.energy;
         if candidate.energy < stored.energy {
             *stored = candidate.clone();
+        }
+        if changed {
+            invalidate_discovery_plan(scientific);
         }
         return Ok(());
     }
@@ -3916,6 +3973,7 @@ fn observe_ride_source(
     if replace {
         scientific.ride_candidates.insert(basin, candidate.clone());
     }
+    invalidate_discovery_plan(scientific);
     Ok(())
 }
 
