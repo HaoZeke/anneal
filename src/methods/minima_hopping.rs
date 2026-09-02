@@ -35,8 +35,8 @@
 //! count and report that this finds the LJ75 Marks decahedron where a
 //! cut-and-splice evolutionary algorithm does not.
 
-use std::cell::RefCell;
 use std::collections::HashMap;
+use std::sync::Mutex;
 
 use ndarray::{Array1, ArrayView1};
 use rand::Rng;
@@ -93,16 +93,19 @@ pub struct MdEscapeReport {
 }
 
 struct CallbackSurface<'a, F> {
-    evaluate: RefCell<&'a mut F>,
+    evaluate: Mutex<&'a mut F>,
 }
 
 impl<F> PointSurface for CallbackSurface<'_, F>
 where
-    F: for<'a> FnMut(ArrayView1<'a, f64>) -> Option<(f64, Array1<f64>)>,
+    F: for<'a> FnMut(ArrayView1<'a, f64>) -> Option<(f64, Array1<f64>)> + Send,
 {
     fn eval(&self, x: ArrayView1<f64>) -> Result<(f64, Array1<f64>), SaddleError> {
-        (self.evaluate.borrow_mut())(x)
-            .ok_or_else(|| SaddleError::Surface("evaluation budget exhausted".into()))
+        let mut evaluate = self
+            .evaluate
+            .lock()
+            .map_err(|_| SaddleError::Surface("NVE evaluator lock poisoned".into()))?;
+        (*evaluate)(x).ok_or_else(|| SaddleError::Surface("evaluation budget exhausted".into()))
     }
 }
 
@@ -121,7 +124,7 @@ pub fn nve_escape<F, R>(
     rng: &mut R,
 ) -> Result<MdEscapeReport, SaddleError>
 where
-    F: for<'a> FnMut(ArrayView1<'a, f64>) -> Option<(f64, Array1<f64>)>,
+    F: for<'a> FnMut(ArrayView1<'a, f64>) -> Option<(f64, Array1<f64>)> + Send,
     R: Rng + ?Sized,
 {
     if start.is_empty()
@@ -160,7 +163,7 @@ where
     velocity *= (initial_kinetic / unscaled_kinetic).sqrt();
 
     let surface = CallbackSurface {
-        evaluate: RefCell::new(evaluate),
+        evaluate: Mutex::new(evaluate),
     };
     let samd_config = SamdConfig {
         dt: config.dt,
