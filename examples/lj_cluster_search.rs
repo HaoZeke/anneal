@@ -1375,6 +1375,14 @@ fn main() {
     // superbasin plus AS-KMC height is an intra-packing leftover walk:
     // LJ75 sits on the Mackay shelf and never reaches ico or Marks.
     cfg.anneal_diversity = opts.contains(&"csa");
+    // Key the basin bias on the prospective superbasin: the coloured core
+    // ring-graph key, so every shelf isomer deposits into one well and the
+    // filling raises the whole family at once.
+    if opts.contains(&"corekey") {
+        cfg.keying = anneal_core::methods::cluster_hopping::Keying::Core;
+        cfg.merge_radius = 0.5;
+        println!("  keying on the core ring-graph key, merge radius 0.5");
+    }
     // Two-phase relaxation on the compacted surface (Locatelli and Schoen;
     // Doye). TWO_PHASE_KAPPA sets a relative cutoff, TWO_PHASE_D a fixed
     // one in pair-well units, TWO_PHASE_BETA the penalty strength and
@@ -1601,6 +1609,16 @@ fn main() {
         cfg.bias_height = v;
         println!("  bias height {v}");
     }
+    // Revisits a basin takes before the adaptive deposits clear its escape
+    // gap: the AS-KMC filling count, so the absorbing shelf is raised as one
+    // block after that many returns while rarely visited doorway states
+    // keep their depth.
+    if let Ok(h) = std::env::var("HEIGHT_REVISITS")
+        && let Ok(v) = h.parse::<f64>()
+    {
+        cfg.height_revisits = v;
+        println!("  height revisits {v}");
+    }
     if !opts.is_empty() {
         println!("  mechanisms: {}", opts.join(", "));
     }
@@ -1707,8 +1725,17 @@ fn main() {
             seed.wrapping_mul(0x9E3779B97F4A7C15).wrapping_add(17),
         );
         let two_phase = cfg.two_phase.filter(|two| two.is_active());
-        let mut surfaces = (!cfg.surfaces.is_empty())
-            .then(|| anneal_core::methods::two_phase::SurfacePortfolio::new(&cfg.surfaces, seed));
+        let surface_block = std::env::var("SURFACE_BLOCK")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(anneal_core::methods::two_phase::DEFAULT_SURFACE_BLOCK);
+        let mut surfaces = (!cfg.surfaces.is_empty()).then(|| {
+            anneal_core::methods::two_phase::SurfacePortfolio::with_block(
+                &cfg.surfaces,
+                seed,
+                surface_block,
+            )
+        });
         let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, iters: usize| {
             let charged_before = led.spent();
             // Curvature is not carried between relaxations: measured on this
@@ -2103,6 +2130,52 @@ fn main() {
         // Where the run got its answer. Printed for the last few improvements
         // only: the early ones are a descent from a random start and say
         // nothing.
+        // Every validated minimum of this seed goes to the readcon-db corpus
+        // rooted at ANNEAL_MINIMA_DB and isolated by the complete LJ system
+        // signature. Temperature and seed identify trajectories within it.
+        if let Ok(path) = std::env::var("ANNEAL_MINIMA_DB") {
+            let signature_digest = anneal_core::catalog::lj::system_signature(n)
+                .expect("LJ minima corpus requires a valid system signature")
+                .digest();
+            let set = anneal_core::minima_db::MinimaSet {
+                system: format!("lj{n}"),
+                temperature: cfg.temperature,
+                seed,
+            };
+            let mut entries: Vec<(f64, ArrayView1<f64>)> = ledger
+                .quench_boundaries()
+                .iter()
+                .filter(|b| b.status() == QuenchStatus::Validated)
+                .map(|b| (b.energy(), b.state()))
+                .collect();
+            if let Some(best) = out.best_state.as_ref() {
+                entries.push((out.best, best.view()));
+            }
+            let provenance = serde_json::json!({
+                "driver": "lj_cluster_search",
+                "mechanisms": opts.join(","),
+                "budget": budget,
+                "config_digest": cfg.resolved_sha256().unwrap_or_default(),
+            });
+            match anneal_core::minima_db::MinimaCorpus::open(&path, signature_digest).and_then(
+                |corpus| {
+                    corpus.record(
+                        &set,
+                        &[],
+                        &anneal_core::minima_db::MinimaUnits {
+                            length: "sigma".into(),
+                            energy: "epsilon".into(),
+                        },
+                        &entries,
+                        1e-6,
+                        provenance,
+                    )
+                },
+            ) {
+                Ok(stored) => println!("      minima corpus {path}: {stored} minima recorded"),
+                Err(error) => eprintln!("minima corpus {path}: {error}"),
+            }
+        }
         if std::env::var("DUMP_IMPROVEMENTS").is_ok() {
             for (h, sp, b, en) in out.improvements.iter() {
                 println!("IMP hop {h} spend {sp} basins {b} energy {en:.6}");
@@ -3092,9 +3165,14 @@ fn run_capnp_catalog(
             signature_digest,
         };
         match CatalogClient::connect(address, identity, ClientConfig::default()) {
-            Ok(client) => cooperative
-                .attach_client(replica, client)
-                .expect("configured replica must accept its catalog client"),
+            Ok(mut client) => {
+                if let Err(error) = client.attach(1) {
+                    eprintln!("catalog attach rejected ({error}); local execution remains active");
+                }
+                cooperative
+                    .attach_client(replica, client)
+                    .expect("configured replica must accept its catalog client");
+            }
             Err(error) => eprintln!(
                 "catalog {endpoint} unavailable ({error}); local execution remains active"
             ),
@@ -4365,7 +4443,26 @@ fn run_capnp_catalog(
             )
             .expect("coordinator policy evidence must preserve local invariants")
         {
-            PolicyEvidenceOutcome::Remote(input) => input,
+            PolicyEvidenceOutcome::Remote(input) => {
+                if cooperative
+                    .events()
+                    .last()
+                    .and_then(|event| event.policy)
+                    .is_some_and(|policy| policy.retired)
+                {
+                    return complete_checkpoint_trace(
+                        &mut cooperative,
+                        replica,
+                        &mut slice_sequence,
+                        checkpoint_charged,
+                        snapshot.best_energy(),
+                        |_cooperative, _slice_sequence| CheckpointAction::Retire {
+                            reason: "halving".to_owned(),
+                        },
+                    );
+                }
+                input
+            }
             PolicyEvidenceOutcome::Rejected
             | PolicyEvidenceOutcome::LocalFallback
             | PolicyEvidenceOutcome::SharingDisabled => {

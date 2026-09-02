@@ -31,11 +31,209 @@
 //! The escape scale grows geometrically while a chain revisits, which is the
 //! guarantee that no funnel is permanent: a chain that keeps returning keeps
 //! escalating until it leaves. Schoenborn, Goedecker, Roy and Oganov,
-//! J. Chem. Phys. 130, 144108 (2009), add feedback proportional to the visit
-//! count and report that this finds the LJ75 Marks decahedron where a
-//! cut-and-splice evolutionary algorithm does not.
+//! J. Chem. Phys. 130, 144108 (2009), multiply the known-minimum update by
+//! `1 + c ln(N)` for visit count `N`, and report that this finds the LJ75 Marks
+//! decahedron where a cut-and-splice evolutionary algorithm does not.
 
 use std::collections::HashMap;
+use std::sync::Mutex;
+
+use ndarray::{Array1, ArrayView1};
+use rand::Rng;
+use rand_distr::{Distribution, StandardNormal};
+use rgmin::{Manifold, ManifoldKind};
+use rgsaddle::{
+    PointSurface, SaddleError, SamdConfig, SamdSession, VelocitySofteningConfig, soften_velocity_on,
+};
+
+/// Geometry on which an MD escape evolves.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MdEscapeGeometry {
+    /// Unconstrained Euclidean coordinates of any dimension.
+    Euclidean,
+    /// Cartesian coordinates modulo rigid translation and rotation.
+    RigidQuotient,
+}
+
+/// Short NVE escape controls for minima hopping.
+#[derive(Debug, Clone, Copy)]
+pub struct MdEscapeConfig {
+    /// Velocity-Verlet step in the surface's reduced time units.
+    pub dt: f64,
+    /// Potential-energy minima crossed before stopping the trajectory.
+    pub potential_minima: usize,
+    /// Hard cap on Verlet steps when the requested crossings are not reached.
+    pub maximum_steps: usize,
+    /// Coordinate geometry used for velocity projection and retraction.
+    pub geometry: MdEscapeGeometry,
+    /// Published finite modified-dimer softening of the Gaussian direction.
+    pub softening: Option<VelocitySofteningConfig>,
+}
+
+impl Default for MdEscapeConfig {
+    fn default() -> Self {
+        Self {
+            dt: 0.01,
+            potential_minima: 2,
+            maximum_steps: 2_000,
+            geometry: MdEscapeGeometry::Euclidean,
+            softening: None,
+        }
+    }
+}
+
+/// Endpoint and accounting evidence from one MD escape.
+#[derive(Debug, Clone)]
+pub struct MdEscapeReport {
+    /// Last point on the MD trajectory.
+    pub position: Array1<f64>,
+    /// Verlet steps completed.
+    pub steps: usize,
+    /// Potential-energy minima detected along the trajectory.
+    pub potential_minima: usize,
+    /// Potential energy at the last point.
+    pub energy: f64,
+    /// Kinetic energy at the last point.
+    pub kinetic: f64,
+    /// Force evaluations used to soften the launch direction.
+    pub softening_evaluations: usize,
+}
+
+struct CallbackSurface<'a, F> {
+    evaluate: Mutex<&'a mut F>,
+}
+
+impl<F> PointSurface for CallbackSurface<'_, F>
+where
+    F: for<'a> FnMut(ArrayView1<'a, f64>) -> Option<(f64, Array1<f64>)> + Send,
+{
+    fn eval(&self, x: ArrayView1<f64>) -> Result<(f64, Array1<f64>), SaddleError> {
+        let mut evaluate = self
+            .evaluate
+            .lock()
+            .map_err(|_| SaddleError::Surface("NVE evaluator lock poisoned".into()))?;
+        (*evaluate)(x).ok_or_else(|| SaddleError::Surface("evaluation budget exhausted".into()))
+    }
+}
+
+/// Run the NVE escape of minima hopping through `rgsaddle::SamdSession`.
+///
+/// The Gaussian initial velocity is projected onto `geometry` and rescaled to
+/// exactly `initial_kinetic`. With an infinite SAMD thermostat time, the BDP
+/// rescale is the identity and the delegated velocity-Verlet trajectory is
+/// microcanonical. The host loop stops after `potential_minima` local minima
+/// in the potential-energy trace, as in the Goedecker algorithm.
+pub fn nve_escape<F, R>(
+    start: ArrayView1<f64>,
+    initial_kinetic: f64,
+    config: &MdEscapeConfig,
+    evaluate: &mut F,
+    rng: &mut R,
+) -> Result<MdEscapeReport, SaddleError>
+where
+    F: for<'a> FnMut(ArrayView1<'a, f64>) -> Option<(f64, Array1<f64>)> + Send,
+    R: Rng + ?Sized,
+{
+    if start.is_empty()
+        || !config.dt.is_finite()
+        || config.dt <= 0.0
+        || config.potential_minima == 0
+        || config.maximum_steps == 0
+        || !initial_kinetic.is_finite()
+        || initial_kinetic <= 0.0
+    {
+        return Err(SaddleError::Shape(
+            "NVE escape needs a nonempty state and positive finite controls".into(),
+        ));
+    }
+    if config.geometry == MdEscapeGeometry::RigidQuotient && !start.len().is_multiple_of(3) {
+        return Err(SaddleError::Shape(
+            "rigid-quotient NVE escape needs a 3N Cartesian state".into(),
+        ));
+    }
+
+    let manifold = match config.geometry {
+        MdEscapeGeometry::Euclidean => ManifoldKind::Euclidean,
+        MdEscapeGeometry::RigidQuotient => ManifoldKind::RigidQuotient,
+    };
+    let mut velocity = Array1::from_iter(start.iter().map(|_| {
+        let draw: f64 = StandardNormal.sample(rng);
+        draw
+    }));
+    velocity = manifold.project(&start.to_owned(), &velocity);
+    let surface = CallbackSurface {
+        evaluate: Mutex::new(evaluate),
+    };
+    let softening_evaluations = if let Some(softening) = config.softening {
+        let report = soften_velocity_on(&manifold, start, velocity.view(), &surface, softening)?;
+        velocity = report.direction;
+        report.evaluations
+    } else {
+        0
+    };
+
+    let unscaled_kinetic = 0.5 * velocity.dot(&velocity);
+    if !unscaled_kinetic.is_finite() || unscaled_kinetic <= 1e-16 {
+        return Err(SaddleError::Solver(
+            "NVE velocity has no component in the free coordinates".into(),
+        ));
+    }
+    velocity *= (initial_kinetic / unscaled_kinetic).sqrt();
+
+    let samd_config = SamdConfig {
+        dt: config.dt,
+        tau: f64::INFINITY,
+        t0: 1.0,
+        tf: 1.0,
+        ngen: config.maximum_steps,
+        exponential: false,
+    };
+    let mut session = SamdSession::new(samd_config, start.to_owned(), velocity, &surface)?;
+    let noise = Array1::zeros(start.len());
+    let mut older_energy = None;
+    let mut previous_energy = None;
+    let mut minima = 0usize;
+    let mut last_energy = f64::NAN;
+    let mut last_kinetic = initial_kinetic;
+
+    for steps in 1..=config.maximum_steps {
+        let report = match config.geometry {
+            MdEscapeGeometry::Euclidean => session.step(&surface, noise.view())?,
+            MdEscapeGeometry::RigidQuotient => {
+                session.step_on(&manifold, &surface, noise.view())?
+            }
+        };
+        last_energy = report.energy;
+        last_kinetic = report.kinetic;
+        if let (Some(older), Some(previous)) = (older_energy, previous_energy)
+            && previous < older
+            && previous <= report.energy
+        {
+            minima += 1;
+            if minima >= config.potential_minima {
+                return Ok(MdEscapeReport {
+                    position: session.position().to_owned(),
+                    steps,
+                    potential_minima: minima,
+                    energy: last_energy,
+                    kinetic: last_kinetic,
+                    softening_evaluations,
+                });
+            }
+        }
+        older_energy = previous_energy;
+        previous_energy = Some(report.energy);
+    }
+
+    Ok(MdEscapeReport {
+        position: session.position().to_owned(),
+        steps: config.maximum_steps,
+        potential_minima: minima,
+        energy: last_energy,
+        kinetic: last_kinetic,
+        softening_evaluations,
+    })
+}
 
 /// What a quench was, relative to the history.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -67,8 +265,8 @@ pub struct EscapeFeedback {
     /// Shrink on reaching a new basin.
     pub beta_new: f64,
     /// Enhanced feedback: the known-basin growth is multiplied by
-    /// `1 + visits_coeff * visits`, so a repeatedly seen basin is escaped
-    /// harder than one seen once (Schoenborn et al.).
+    /// `1 + visits_coeff * ln(visits)`, so a repeatedly seen basin is escaped
+    /// harder than one seen once (Schönborn et al.).
     pub visits_coeff: f64,
     /// Threshold multiplier on acceptance; below one.
     pub alpha_accept: f64,
@@ -142,6 +340,15 @@ impl EscapeFeedback {
         self.visits.get(&basin).copied().unwrap_or(0)
     }
 
+    /// Register the starting minimum without applying escape feedback.
+    ///
+    /// The first minimum is part of the history even though no escape has
+    /// reached it. Recording it leaves both adaptive controls at their stated
+    /// initial values and makes a later return classify as known.
+    pub fn register_initial(&mut self, basin: usize) {
+        self.visits.entry(basin).or_insert(1);
+    }
+
     /// Classifies a quench without recording it.
     pub fn classify(&self, current: Option<usize>, reached: usize) -> Visit {
         if current == Some(reached) {
@@ -167,8 +374,8 @@ impl EscapeFeedback {
                 self.n_same += 1;
             }
             Visit::Known => {
-                let v = self.visits(reached) as f64;
-                self.escape *= self.beta_known * (1.0 + self.visits_coeff * v);
+                let visits = self.visits(reached).max(1) as f64;
+                self.escape *= self.beta_known * (1.0 + self.visits_coeff * visits.ln());
                 self.n_known += 1;
             }
             Visit::New => {
@@ -219,6 +426,76 @@ impl EscapeFeedback {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ndarray::{Array1, ArrayView1};
+    use rand::SeedableRng;
+    use rand::rngs::StdRng;
+
+    #[test]
+    fn nve_escape_stops_after_the_requested_potential_minimum_in_generic_nd() {
+        let start = Array1::zeros(5);
+        let config = MdEscapeConfig {
+            dt: 0.05,
+            potential_minima: 1,
+            maximum_steps: 200,
+            geometry: MdEscapeGeometry::Euclidean,
+            softening: None,
+        };
+        let mut evaluations = 0usize;
+        let mut evaluate = |x: ArrayView1<f64>| {
+            evaluations += 1;
+            Some((0.5 * x.dot(&x), x.to_owned()))
+        };
+        let mut rng = StdRng::seed_from_u64(17);
+
+        let report = nve_escape(start.view(), 0.5, &config, &mut evaluate, &mut rng).unwrap();
+
+        assert_eq!(report.potential_minima, 1);
+        assert!(report.steps < config.maximum_steps);
+        assert_eq!(evaluations, report.steps + 1);
+        assert_eq!(report.position.len(), 5);
+    }
+
+    #[test]
+    fn softened_nve_charges_direction_probes_and_suppresses_the_hard_mode() {
+        let start = Array1::zeros(2);
+        let config = MdEscapeConfig {
+            dt: 0.01,
+            potential_minima: 1,
+            maximum_steps: 1,
+            geometry: MdEscapeGeometry::Euclidean,
+            softening: Some(rgsaddle::VelocitySofteningConfig {
+                steps: 20,
+                displacement: 0.1,
+                mixing: 0.15,
+            }),
+        };
+        let mut evaluations = 0usize;
+        let mut evaluate = |x: ArrayView1<f64>| {
+            evaluations += 1;
+            Some((
+                0.5 * (100.0 * x[0] * x[0] + x[1] * x[1]),
+                Array1::from(vec![100.0 * x[0], x[1]]),
+            ))
+        };
+        let mut rng = StdRng::seed_from_u64(17);
+
+        let report = nve_escape(start.view(), 0.5, &config, &mut evaluate, &mut rng).unwrap();
+
+        assert_eq!(report.softening_evaluations, 20);
+        assert_eq!(evaluations, report.softening_evaluations + report.steps + 1);
+        assert!(report.position[0].abs() < 1e-5, "{:?}", report.position);
+        assert!(report.position[1].abs() > 0.009);
+    }
+
+    #[test]
+    fn initial_minimum_remains_known_after_the_chain_leaves_it() {
+        let mut feedback = EscapeFeedback::new(1.0, 1.0);
+        feedback.register_initial(7);
+
+        assert_eq!(feedback.classify(Some(8), 7), Visit::Known);
+        assert_eq!(feedback.visits(7), 1);
+        assert_eq!(feedback.escape(), 1.0);
+    }
 
     #[test]
     fn revisiting_the_same_basin_escalates_the_escape() {
@@ -281,6 +558,23 @@ mod tests {
             "enhanced feedback should push harder on a familiar basin: \
              {jump_known} against {jump_first}"
         );
+    }
+
+    #[test]
+    fn enhanced_feedback_is_logarithmic_in_the_visit_count() {
+        let mut feedback = EscapeFeedback::new(1.0, 1.0);
+        feedback.register_initial(7);
+
+        let before_first = feedback.escape();
+        feedback.observe(Some(8), 7);
+        let first_ratio = feedback.escape() / before_first;
+        let before_second = feedback.escape();
+        feedback.observe(Some(8), 7);
+        let second_ratio = feedback.escape() / before_second;
+
+        assert!((first_ratio - feedback.beta_known).abs() < 1e-12);
+        let expected = feedback.beta_known * (1.0 + feedback.visits_coeff * 2.0_f64.ln());
+        assert!((second_ratio - expected).abs() < 1e-12);
     }
 
     #[test]

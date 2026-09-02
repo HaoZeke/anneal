@@ -188,14 +188,6 @@ impl SyncSchedule {
 }
 
 enum ClientJob {
-    Attach {
-        identity: CatalogIdentity,
-        reply: std::sync::mpsc::Sender<Result<RosterReply, CatalogClientError>>,
-    },
-    Detach {
-        reason: String,
-        reply: std::sync::mpsc::Sender<Result<(), CatalogClientError>>,
-    },
     Observe {
         reply: std::sync::mpsc::Sender<Result<CoordinatorStatus, CatalogClientError>>,
     },
@@ -281,22 +273,6 @@ impl CatalogClient {
         })
     }
 
-    /// Attach this replica and subscribe to coordinator events.
-    pub fn attach(&mut self) -> Result<RosterReply, CatalogClientError> {
-        self.post(|reply| ClientJob::Attach {
-            identity: self.identity.clone(),
-            reply,
-        })
-    }
-
-    /// Detach this replica from the live roster.
-    pub fn detach(&mut self, reason: impl Into<String>) -> Result<(), CatalogClientError> {
-        self.post(|reply| ClientJob::Detach {
-            reason: reason.into(),
-            reply,
-        })
-    }
-
     /// Read coordinator status without presenting an identity.
     pub fn observe(&mut self) -> Result<CoordinatorStatus, CatalogClientError> {
         self.post(|reply| ClientJob::Observe { reply })
@@ -372,6 +348,11 @@ impl CatalogClient {
         })?
     }
 
+    /// Highest event sequence this client has already sent.
+    pub fn last_event_sequence(&self) -> u64 {
+        self.requests.keys().copied().max().unwrap_or(0)
+    }
+
     /// Read the current coordinator snapshot.
     pub fn snapshot(&mut self, event_sequence: u64) -> Result<CatalogSnapshot, CatalogClientError> {
         Ok(self
@@ -431,7 +412,8 @@ impl CatalogClient {
             | AcceptedPayload::PopulationEpoch(_)
             | AcceptedPayload::FrontierPost(_)
             | AcceptedPayload::RideWork(_)
-            | AcceptedPayload::RideCredit(_) => {
+            | AcceptedPayload::RideCredit(_)
+            | AcceptedPayload::Roster(_) => {
                 return Err(ProtocolError::Malformed(
                     "catalog offer returned an incompatible payload".into(),
                 )
@@ -563,7 +545,8 @@ impl CatalogClient {
             | AcceptedPayload::CatalogMutation(_)
             | AcceptedPayload::FrontierPost(_)
             | AcceptedPayload::RideWork(_)
-            | AcceptedPayload::RideCredit(_) => Err(ProtocolError::Malformed(
+            | AcceptedPayload::RideCredit(_)
+            | AcceptedPayload::Roster(_) => Err(ProtocolError::Malformed(
                 "sample returned an incompatible payload".into(),
             )
             .into()),
@@ -591,7 +574,8 @@ impl CatalogClient {
             | AcceptedPayload::CatalogMutation(_)
             | AcceptedPayload::FrontierPost(_)
             | AcceptedPayload::RideWork(_)
-            | AcceptedPayload::RideCredit(_) => Err(ProtocolError::Malformed(
+            | AcceptedPayload::RideCredit(_)
+            | AcceptedPayload::Roster(_) => Err(ProtocolError::Malformed(
                 "basin sample returned an incompatible payload".into(),
             )
             .into()),
@@ -665,7 +649,8 @@ impl CatalogClient {
             | AcceptedPayload::CatalogMutation(_)
             | AcceptedPayload::FrontierPost(_)
             | AcceptedPayload::RideWork(_)
-            | AcceptedPayload::RideCredit(_) => Err(ProtocolError::Malformed(
+            | AcceptedPayload::RideCredit(_)
+            | AcceptedPayload::Roster(_) => Err(ProtocolError::Malformed(
                 "descriptor-hole request returned an incompatible payload".into(),
             )
             .into()),
@@ -697,7 +682,8 @@ impl CatalogClient {
             | AcceptedPayload::CatalogMutation(_)
             | AcceptedPayload::FrontierPost(_)
             | AcceptedPayload::RideWork(_)
-            | AcceptedPayload::RideCredit(_) => Err(ProtocolError::Malformed(
+            | AcceptedPayload::RideCredit(_)
+            | AcceptedPayload::Roster(_) => Err(ProtocolError::Malformed(
                 "boundary-crossing request returned an incompatible payload".into(),
             )
             .into()),
@@ -757,7 +743,8 @@ impl CatalogClient {
             | AcceptedPayload::CatalogMutation(_)
             | AcceptedPayload::FrontierPost(_)
             | AcceptedPayload::RideWork(_)
-            | AcceptedPayload::RideCredit(_) => Err(ProtocolError::Malformed(
+            | AcceptedPayload::RideCredit(_)
+            | AcceptedPayload::Roster(_) => Err(ProtocolError::Malformed(
                 "policy-state request returned an incompatible payload".into(),
             )
             .into()),
@@ -853,6 +840,56 @@ impl CatalogClient {
             state: population_epoch_payload(reply.payload, "population plan")?,
             snapshot: reply.snapshot,
         })
+    }
+
+    /// Admit this client's replica onto the live roster.
+    pub fn attach(&mut self, event_sequence: u64) -> Result<RosterReply, CatalogClientError> {
+        roster_payload(
+            self.call(event_sequence, CatalogOperation::Attach)?.payload,
+            "attach",
+        )
+    }
+
+    /// Retire this client's replica from the live roster.
+    pub fn detach(
+        &mut self,
+        event_sequence: u64,
+        reason: impl Into<String>,
+    ) -> Result<RosterReply, CatalogClientError> {
+        roster_payload(
+            self.call(
+                event_sequence,
+                CatalogOperation::Detach {
+                    reason: reason.into(),
+                },
+            )?
+            .payload,
+            "detach",
+        )
+    }
+
+    /// Advance the coordinator clock by one tick of `millis` milliseconds.
+    pub fn tick(
+        &mut self,
+        event_sequence: u64,
+        millis: u64,
+    ) -> Result<AcceptedPayload, CatalogClientError> {
+        Ok(self
+            .call(event_sequence, CatalogOperation::Tick { millis })?
+            .payload)
+    }
+
+    /// Request a manual live-population target.
+    pub fn scale(
+        &mut self,
+        event_sequence: u64,
+        live_target: u32,
+    ) -> Result<RosterReply, CatalogClientError> {
+        roster_payload(
+            self.call(event_sequence, CatalogOperation::Scale { live_target })?
+                .payload,
+            "scale",
+        )
     }
 
     /// Read-only aggregate status for an observer bound to the coordinator's
@@ -1017,12 +1054,6 @@ impl coordinator::Server for UnreachableCoordinator {}
 
 async fn handle_job(session: &mut ClientSession, job: ClientJob) {
     match job {
-        ClientJob::Attach { identity, reply } => {
-            let _ = reply.send(attach_session(session, identity).await);
-        }
-        ClientJob::Detach { reason, reply } => {
-            let _ = reply.send(detach_session(session, reason).await);
-        }
         ClientJob::Observe { reply } => {
             let _ = reply.send(observe_status(session).await);
         }
@@ -1152,29 +1183,6 @@ async fn ensure_coordinator(session: &mut ClientSession) -> Result<(), CatalogCl
     session.connected = true;
     session.snapshot_version = snapshot_version;
     session.attached = attached;
-    Ok(())
-}
-
-async fn detach_session(
-    session: &mut ClientSession,
-    reason: String,
-) -> Result<(), CatalogClientError> {
-    let Some(bound) = session.session.clone() else {
-        return Ok(());
-    };
-    let mut request = bound.detach_request();
-    request.get().set_reason(reason.as_str());
-    tokio::time::timeout(session.config.io_timeout, request.send().promise)
-        .await
-        .map_err(|_| {
-            CatalogClientError::Transport(std::io::Error::new(
-                std::io::ErrorKind::TimedOut,
-                "catalog detach timed out",
-            ))
-        })?
-        .map_err(|error| ProtocolError::Malformed(error.to_string()))?;
-    session.session = None;
-    session.attached = None;
     Ok(())
 }
 
@@ -1342,9 +1350,23 @@ fn population_epoch_payload(
         | AcceptedPayload::CatalogMutation(_)
         | AcceptedPayload::FrontierPost(_)
         | AcceptedPayload::RideWork(_)
-        | AcceptedPayload::RideCredit(_) => Err(ProtocolError::Malformed(format!(
+        | AcceptedPayload::RideCredit(_)
+        | AcceptedPayload::Roster(_) => Err(ProtocolError::Malformed(format!(
             "{operation} returned an incompatible payload"
         ))
         .into()),
+    }
+}
+
+fn roster_payload(
+    payload: AcceptedPayload,
+    operation: &str,
+) -> Result<RosterReply, CatalogClientError> {
+    match payload {
+        AcceptedPayload::Roster(roster) => Ok(roster),
+        _ => Err(
+            ProtocolError::Malformed(format!("{operation} returned an incompatible payload"))
+                .into(),
+        ),
     }
 }

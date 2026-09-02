@@ -49,7 +49,7 @@ linkcell    = { version = "0.3.3", git = "https://github.com/d-SEAMS/linkcell", 
 # are the reproducible source selected when this crate is consumed elsewhere.
 eindir-core = { git = "https://github.com/HaoZeke/eindir.git", rev = "f3c42130bb389ba6cd6e4cfdc8b2e182f4a764e9", version = "0.6.0", features = ["capi"] }
 rgmin = { git = "https://github.com/HaoZeke/rgmin.git", rev = "20832fd169932a1cd0d47ac84dc77fa9b435f940", version = "0.2.0" }
-rgsaddle = { git = "https://github.com/OmniPotentRPC/rgsaddle.git", rev = "3015f68b12ebac9b7950469efa86d0f1ecfa001d", version = "0.1.0" }
+rgsaddle = { git = "https://github.com/OmniPotentRPC/rgsaddle.git", rev = "65b1f51dc329af15e332a4bb46d80d61d63df37a", version = "0.1.0" }
 readcon-core = "=0.14.8"
 readcon-db = "=0.1.5"
 num-traits  = "0.2"
@@ -182,6 +182,10 @@ name = "catalog_status"
 required-features = ["bank-rpc"]
 
 [[example]]
+name = "catalog_supervisor"
+required-features = ["bank-rpc"]
+
+[[example]]
 name = "decaf_local_classes"
 required-features = ["bank-rpc"]
 
@@ -191,4 +195,8 @@ required-features = ["featomic"]
 
 [[example]]
 name = "lj_census_calibration"
+required-features = ["ira"]
+
+[[example]]
+name = "lj_joint_optimum"
 required-features = ["ira"]

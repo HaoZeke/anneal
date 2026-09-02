@@ -9,7 +9,11 @@
 //! and take the largest gains within the cardinality bounds. Stable replica
 //! ordering resolves interchangeable maximizers.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
+
+use crate::minimum_information::{
+    MinimumInformationError, MinimumInformationSearch, SearchActionCandidate, SearchMechanism,
+};
 
 /// One same-system global-minimum search role.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -62,6 +66,19 @@ pub struct DiscoveryAssignment {
     pub epoch: u64,
 }
 
+/// One live-chain seat in a redundancy-aware joint-information batch.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DiscoveryBatchAssignment {
+    /// Replica receiving exactly one action family.
+    pub replica: u32,
+    /// Search operator assigned to the replica.
+    pub role: DiscoveryRole,
+    /// Index in the supplied shared ride-action slice, when assigned.
+    pub ride_action: Option<usize>,
+    /// Minimum-information evidence version behind the assignment.
+    pub epoch: u64,
+}
+
 /// Invalid roster or action values.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum DiscoveryRosterError {
@@ -74,6 +91,104 @@ pub enum DiscoveryRosterError {
     /// Information per charged evaluation must be finite and nonnegative.
     #[error("discovery opportunity contains an invalid information rate")]
     InvalidInformationRate,
+}
+
+/// Invalid candidates or incomplete batch allocation.
+#[derive(Debug, Clone, PartialEq, thiserror::Error)]
+pub enum DiscoveryBatchError {
+    /// At least one live chain must offer a basin action.
+    #[error("discovery batch has no live-chain basin actions")]
+    EmptyRoster,
+    /// Every live replica owns exactly one basin alternative.
+    #[error("replica {0} occurs more than once in the discovery batch")]
+    DuplicateReplica(u32),
+    /// Basin and ridge slices must carry their declared mechanisms.
+    #[error("discovery batch contains an action in the wrong mechanism slice")]
+    WrongMechanism,
+    /// The conditional joint-information model rejected an action.
+    #[error(transparent)]
+    MinimumInformation(#[from] MinimumInformationError),
+    /// Feasible candidates did not fill every live-chain seat.
+    #[error("joint-information assignment did not fill the live-chain batch")]
+    IncompleteBatch,
+}
+
+/// Allocate a simultaneous same-PES action batch across live chains.
+///
+/// Each replica contributes its own basin action while ridge actions form a
+/// shared exclusive pool. Unique family capacities prevent duplicate actions;
+/// [`MinimumInformationSearch::assign_batch`] discounts correlated outcomes by
+/// the predictive log determinant and prices every marginal bit by PES calls.
+/// A selected basin stays with its owner. Selected rides occupy the replicas
+/// whose redundant basin actions were omitted, in stable replica order.
+pub fn assign_discovery_batch(
+    search: &mut MinimumInformationSearch,
+    basin_actions: &[(u32, SearchActionCandidate)],
+    ride_actions: &[SearchActionCandidate],
+    minimum_samples: usize,
+) -> Result<Vec<DiscoveryBatchAssignment>, DiscoveryBatchError> {
+    if basin_actions.is_empty() {
+        return Err(DiscoveryBatchError::EmptyRoster);
+    }
+    let mut basins = basin_actions.to_vec();
+    basins.sort_by_key(|(replica, _)| *replica);
+    let mut replicas = BTreeSet::new();
+    for (replica, candidate) in &basins {
+        if !replicas.insert(*replica) {
+            return Err(DiscoveryBatchError::DuplicateReplica(*replica));
+        }
+        if candidate.mechanism != SearchMechanism::BasinEscape {
+            return Err(DiscoveryBatchError::WrongMechanism);
+        }
+    }
+    if ride_actions
+        .iter()
+        .any(|candidate| candidate.mechanism != SearchMechanism::SaddleRide)
+    {
+        return Err(DiscoveryBatchError::WrongMechanism);
+    }
+
+    let mut candidates = basins
+        .iter()
+        .map(|(_, candidate)| candidate.clone())
+        .collect::<Vec<_>>();
+    candidates.extend_from_slice(ride_actions);
+    let families = (0..candidates.len()).collect::<Vec<_>>();
+    let selected = search.assign_batch(&candidates, &families, basins.len(), 1, minimum_samples)?;
+    if selected.len() != basins.len() {
+        return Err(DiscoveryBatchError::IncompleteBatch);
+    }
+    let selected = selected.into_iter().collect::<BTreeSet<_>>();
+    let selected_rides = selected
+        .iter()
+        .filter_map(|index| index.checked_sub(basins.len()))
+        .collect::<Vec<_>>();
+    let unselected_replicas = basins
+        .iter()
+        .enumerate()
+        .filter_map(|(index, (replica, _))| (!selected.contains(&index)).then_some(*replica))
+        .collect::<Vec<_>>();
+    if selected_rides.len() != unselected_replicas.len() {
+        return Err(DiscoveryBatchError::IncompleteBatch);
+    }
+    let rides_by_replica = unselected_replicas
+        .into_iter()
+        .zip(selected_rides)
+        .collect::<BTreeMap<_, _>>();
+    let epoch = search.version();
+    Ok(basins
+        .into_iter()
+        .map(|(replica, _)| DiscoveryBatchAssignment {
+            replica,
+            role: if rides_by_replica.contains_key(&replica) {
+                DiscoveryRole::SaddleRide
+            } else {
+                DiscoveryRole::BasinEscape
+            },
+            ride_action: rides_by_replica.get(&replica).copied(),
+            epoch,
+        })
+        .collect())
 }
 
 /// Maximize total information rate under an exclusive ride-arm capacity.

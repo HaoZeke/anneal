@@ -212,10 +212,13 @@ printf '{"qualified":true}\n' >"$output"
             .env("CATALOG_SLICE", "1")
             .env("CATALOG_MAX_HOPS", "3")
             .env("CATALOG_POPULATION_INTERVAL", "10")
-            .env("CATALOG_BRAIN_PORT_BASE", "29000")
             .env("SEED_OFFSET_BASE", "1200")
             .env("FAKE_SERVER_LOG", &server_log)
             .env_remove("CATALOG_CONFIG")
+            .env_remove("CATALOG_BRAIN_PORT_BASE")
+            .env_remove("CATALOG_BRAIN_LISTEN")
+            .env_remove("CATALOG_BRAIN_PEERS")
+            .env_remove("CATALOG_BRAIN_PUBLISH")
             .output()
             .unwrap_or_else(|error| panic!("failed to run {}: {error}", runner.display()));
         assert!(
@@ -276,8 +279,8 @@ printf '{"qualified":true}\n' >"$output"
                 value(&worker0, "catalog_rpc"),
                 value(&worker1, "catalog_rpc")
             );
-            assert!(!value(&worker0, "brain_peers").is_empty());
-            assert!(!value(&worker1, "brain_peers").is_empty());
+            assert_eq!(value(&worker0, "brain_peers"), "");
+            assert_eq!(value(&worker1, "brain_peers"), "");
             assert_eq!(value(&worker0, "ensemble"), value(&worker1, "ensemble"));
         } else {
             assert_eq!(value(&manifest, "catalog_topology"), "private_per_replica");
@@ -318,11 +321,14 @@ printf '{"qualified":true}\n' >"$output"
         .env("CATALOG_SLICE", "1")
         .env("CATALOG_MAX_HOPS", "3")
         .env("CATALOG_POPULATION_INTERVAL", "10")
-        .env("CATALOG_BRAIN_PORT_BASE", "29100")
         .env("SEED_OFFSET_BASE", "1200")
         .env("FAKE_SERVER_LOG", &incomplete_server_log)
         .env("FAKE_OMIT_SLICE", "1")
         .env_remove("CATALOG_CONFIG")
+        .env_remove("CATALOG_BRAIN_PORT_BASE")
+        .env_remove("CATALOG_BRAIN_LISTEN")
+        .env_remove("CATALOG_BRAIN_PEERS")
+        .env_remove("CATALOG_BRAIN_PUBLISH")
         .output()
         .unwrap_or_else(|error| panic!("failed to run {}: {error}", runner.display()));
     assert!(
@@ -351,11 +357,14 @@ printf '{"qualified":true}\n' >"$output"
         .env("CATALOG_SLICE", "1")
         .env("CATALOG_MAX_HOPS", "3")
         .env("CATALOG_POPULATION_INTERVAL", "10")
-        .env("CATALOG_BRAIN_PORT_BASE", "29200")
         .env("SEED_OFFSET_BASE", "1200")
         .env("FAKE_SERVER_LOG", &missing_config_server_log)
         .env("FAKE_OMIT_CONFIG", "1")
         .env_remove("CATALOG_CONFIG")
+        .env_remove("CATALOG_BRAIN_PORT_BASE")
+        .env_remove("CATALOG_BRAIN_LISTEN")
+        .env_remove("CATALOG_BRAIN_PEERS")
+        .env_remove("CATALOG_BRAIN_PUBLISH")
         .output()
         .unwrap_or_else(|error| panic!("failed to run {}: {error}", runner.display()));
     assert!(
@@ -384,11 +393,14 @@ printf '{"qualified":true}\n' >"$output"
         .env("CATALOG_SLICE", "1")
         .env("CATALOG_MAX_HOPS", "3")
         .env("CATALOG_POPULATION_INTERVAL", "10")
-        .env("CATALOG_BRAIN_PORT_BASE", "29300")
         .env("SEED_OFFSET_BASE", "1200")
         .env("FAKE_SERVER_LOG", &fallback_server_log)
         .env("FAKE_RPC_FALLBACK", "1")
         .env_remove("CATALOG_CONFIG")
+        .env_remove("CATALOG_BRAIN_PORT_BASE")
+        .env_remove("CATALOG_BRAIN_LISTEN")
+        .env_remove("CATALOG_BRAIN_PEERS")
+        .env_remove("CATALOG_BRAIN_PUBLISH")
         .output()
         .unwrap_or_else(|error| panic!("failed to run {}: {error}", runner.display()));
     assert!(

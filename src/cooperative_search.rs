@@ -285,6 +285,8 @@ mod run {
         pub saddle_coverage_saturated: bool,
         /// Energy used to classify the query against the active catalog.
         pub query_energy: f64,
+        /// Successive-halving retire decision for this replica.
+        pub retired: bool,
     }
 
     /// Cooperative role selected for one local slice.
@@ -827,7 +829,9 @@ mod run {
             replica: u32,
             client: CatalogClient,
         ) -> Result<(), CooperativeRunError> {
+            let used_sequence = client.last_event_sequence();
             let state = self.replica_mut(replica)?;
+            state.rpc_sequence = state.rpc_sequence.max(used_sequence);
             state.client = Some(CatalogMailbox::spawn(client));
             state.policy_pending = false;
             state.policy_request = None;
@@ -3001,6 +3005,7 @@ mod run {
             saddle_discovery_charged: state.saddle_discovery_charged,
             saddle_coverage_saturated: state.saddle_coverage_saturated,
             query_energy,
+            retired: state.retired,
         }
     }
 

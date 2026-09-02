@@ -1,7 +1,55 @@
 use anneal_core::discovery_roster::{
-    DiscoveryOpportunity, DiscoveryRole, assign_discovery_roles,
+    DiscoveryOpportunity, DiscoveryRole, assign_discovery_batch, assign_discovery_roles,
     assign_discovery_roles_with_minimum,
 };
+use anneal_core::minimum_information::{
+    MinimumInformationSearch, SearchActionCandidate, SearchMechanism,
+};
+
+fn action(mechanism: SearchMechanism, feature: f64) -> SearchActionCandidate {
+    SearchActionCandidate {
+        mechanism,
+        feature: vec![feature],
+        source_energy: -10.0,
+        expected_charged_evaluations: 20.0,
+    }
+}
+
+#[test]
+fn batch_roles_discount_duplicate_live_chain_actions() {
+    let mut search = MinimumInformationSearch::new(1.0, 4.0, 1e-3).unwrap();
+    let basin_actions = [
+        (7, action(SearchMechanism::BasinEscape, 0.0)),
+        (2, action(SearchMechanism::BasinEscape, 0.0)),
+    ];
+    let ride_actions = [action(SearchMechanism::SaddleRide, 0.0)];
+
+    let assignments =
+        assign_discovery_batch(&mut search, &basin_actions, &ride_actions, 256).unwrap();
+
+    assert_eq!(assignments.len(), 2);
+    assert_eq!(
+        assignments
+            .iter()
+            .filter(|assignment| assignment.role == DiscoveryRole::SaddleRide)
+            .count(),
+        1
+    );
+    assert_eq!(
+        assignments
+            .iter()
+            .filter_map(|assignment| assignment.ride_action)
+            .collect::<Vec<_>>(),
+        vec![0]
+    );
+    assert_eq!(
+        assignments
+            .iter()
+            .map(|assignment| assignment.replica)
+            .collect::<Vec<_>>(),
+        vec![2, 7]
+    );
+}
 
 #[test]
 fn roster_maximizes_total_minimum_information_under_ride_capacity() {

@@ -197,6 +197,12 @@ fn every_catalog_operation_round_trips_all_identity_and_sequence_fields() {
                 outcome: CatalogRideOutcome::Failed(RideFailure::SaddleForceNotConverged),
             },
         },
+        CatalogOperation::Attach,
+        CatalogOperation::Detach {
+            reason: "halving".into(),
+        },
+        CatalogOperation::Tick { millis: 1000 },
+        CatalogOperation::Scale { live_target: 4 },
     ];
     for operation in operations {
         let request = CatalogRequest {
