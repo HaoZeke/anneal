@@ -1333,6 +1333,10 @@ fn apply_request(
                 discovery_epoch,
                 basin_unseen_mass_upper,
                 saddle_unseen_mass_upper,
+                basin_discovery_attempts: basin_effort.events,
+                basin_discovery_charged: basin_effort.charged_calls,
+                saddle_discovery_attempts: saddle_effort.events,
+                saddle_discovery_charged: saddle_effort.charged_calls,
                 saddle_coverage_saturated: saddle_coverage.saturated,
             });
             report_occupancy_gt(scientific);

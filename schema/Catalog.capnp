@@ -134,6 +134,10 @@ struct PolicyStateReply {
   basinUnseenMassUpper @26 :Float64;
   saddleUnseenMassUpper @27 :Float64;
   saddleCoverageSaturated @28 :Bool;
+  basinDiscoveryAttempts @29 :UInt64;
+  basinDiscoveryCharged @30 :UInt64;
+  saddleDiscoveryAttempts @31 :UInt64;
+  saddleDiscoveryCharged @32 :UInt64;
 }
 
 enum CatalogMutationKind {

@@ -22,7 +22,7 @@ pub mod mailbox;
 pub mod server;
 
 /// Wire protocol version accepted by this release.
-pub const PROTOCOL_VERSION: u16 = 24;
+pub const PROTOCOL_VERSION: u16 = 25;
 /// `Sample` draw that returns the active-catalog incumbent.
 pub const INCUMBENT_SAMPLE_DRAW: u64 = u64::MAX;
 
@@ -517,6 +517,14 @@ pub struct PolicyState {
     pub basin_unseen_mass_upper: f64,
     /// One-sided upper bound on unseen exact-saddle mass.
     pub saddle_unseen_mass_upper: f64,
+    /// Same-system basin-escape attempts retained by the replay-safe ledger.
+    pub basin_discovery_attempts: u64,
+    /// Potential calls charged to same-system basin-escape attempts.
+    pub basin_discovery_charged: u64,
+    /// Same-system saddle-ride attempts retained by the replay-safe ledger.
+    pub saddle_discovery_attempts: u64,
+    /// Potential calls charged to same-system saddle-ride attempts.
+    pub saddle_discovery_charged: u64,
     /// Whether exact-saddle reobservations meet the declared coverage rule.
     pub saddle_coverage_saturated: bool,
 }
@@ -1338,6 +1346,10 @@ pub(crate) fn encode_reply(reply: CatalogReply) -> Result<Vec<u8>, ProtocolError
                     output.set_discovery_epoch(state.discovery_epoch);
                     output.set_basin_unseen_mass_upper(state.basin_unseen_mass_upper);
                     output.set_saddle_unseen_mass_upper(state.saddle_unseen_mass_upper);
+                    output.set_basin_discovery_attempts(state.basin_discovery_attempts);
+                    output.set_basin_discovery_charged(state.basin_discovery_charged);
+                    output.set_saddle_discovery_attempts(state.saddle_discovery_attempts);
+                    output.set_saddle_discovery_charged(state.saddle_discovery_charged);
                     output.set_saddle_coverage_saturated(state.saddle_coverage_saturated);
                 }
                 AcceptedPayload::PopulationEpoch(state) => {
@@ -1594,6 +1606,10 @@ pub(crate) fn decode_reply_reader(
                         discovery_epoch: state.get_discovery_epoch(),
                         basin_unseen_mass_upper: state.get_basin_unseen_mass_upper(),
                         saddle_unseen_mass_upper: state.get_saddle_unseen_mass_upper(),
+                        basin_discovery_attempts: state.get_basin_discovery_attempts(),
+                        basin_discovery_charged: state.get_basin_discovery_charged(),
+                        saddle_discovery_attempts: state.get_saddle_discovery_attempts(),
+                        saddle_discovery_charged: state.get_saddle_discovery_charged(),
                         saddle_coverage_saturated: state.get_saddle_coverage_saturated(),
                     })
                 }
