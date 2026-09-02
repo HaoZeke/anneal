@@ -456,6 +456,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut source_discoveries = 0_u64;
     let mut certified = 0_u64;
     let mut novel_saddles = 0_u64;
+    let mut degenerate_rearrangements = 0_u64;
     let mut novel_edges = 0_u64;
     let mut reported_producer_calls = 0_u64;
     let termination;
@@ -556,6 +557,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             attempts += 1;
             certified += u64::from(credit.certified_connection);
             novel_saddles += u64::from(credit.novel_saddle);
+            degenerate_rearrangements += u64::from(credit.degenerate_rearrangement);
             novel_edges += u64::from(credit.novel_edge);
             println!(
                 "{}",
@@ -574,6 +576,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     "total_calls": credit.total_charged_evaluations,
                     "certified": credit.certified_connection,
                     "novel_saddle": credit.novel_saddle,
+                    "degenerate_rearrangement": credit.degenerate_rearrangement,
                     "novel_edge": credit.novel_edge,
                     "discovery_policy": discovery_policy.as_str(),
                     "assigned_role": discovery_role_name(shared_policy.discovery_role),
@@ -806,6 +809,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "source_discoveries": source_discoveries,
             "certified": certified,
             "novel_saddles": novel_saddles,
+            "degenerate_rearrangements": degenerate_rearrangements,
             "novel_edges": novel_edges,
             "mechanism_pulls": mechanism_allocator.pulls(),
             "mechanism_discovery_rates": mechanism_allocator.rates(),

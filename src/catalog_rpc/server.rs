@@ -2184,7 +2184,9 @@ fn apply_request(
                     ProtocolRejection::ValidationRejected,
                 );
             };
-            if let RideOutcome::Certified { endpoints, .. } = &outcome {
+            if let RideOutcome::Certified { endpoints, .. } = &outcome
+                && endpoints[0] != endpoints[1]
+            {
                 let left = BasinId::from_raw(endpoints[0]);
                 let right = BasinId::from_raw(endpoints[1]);
                 let Some(left_node) = transition_node(&mut next_scientific, left) else {
@@ -4580,6 +4582,19 @@ fn observer_status_reply(
     let landscape_basins = state.scientific.as_ref().map_or(0, |scientific| {
         u32::try_from(scientific.landscape.len()).unwrap_or(u32::MAX)
     });
+    let (unique_saddles, unique_edges, unique_degenerate_rearrangements, certified_connections) =
+        state
+            .scientific
+            .as_ref()
+            .map_or((0, 0, 0, 0), |scientific| {
+                (
+                    u64::try_from(scientific.ride_ledger.unique_saddles()).unwrap_or(u64::MAX),
+                    u64::try_from(scientific.ride_ledger.unique_edges()).unwrap_or(u64::MAX),
+                    u64::try_from(scientific.ride_ledger.unique_degenerate_rearrangements())
+                        .unwrap_or(u64::MAX),
+                    scientific.ride_ledger.certified_connections(),
+                )
+            });
     let seam = state
         .scientific
         .as_ref()
@@ -4609,6 +4624,10 @@ fn observer_status_reply(
             .map_or(0, CooperativeLedger::aggregate_budget),
         replicas,
         landscape_basins,
+        unique_saddles,
+        unique_edges,
+        unique_degenerate_rearrangements,
+        certified_connections,
         seam,
     };
     let snapshot = CatalogSnapshot {

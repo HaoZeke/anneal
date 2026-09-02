@@ -3520,6 +3520,13 @@ fn run_capnp_catalog(
                         }),
                     )
                 }
+                RideReportOutcome::Credited(credit) if credit.degenerate_rearrangement => (
+                    "ride_degenerate_rearrangement",
+                    SliceValidation::Accepted,
+                    SliceQuench::Converged,
+                    SliceAdoption::NotAttempted,
+                    Some(if credit.novel_saddle { 1.0 } else { 0.0 }),
+                ),
                 RideReportOutcome::Credited(credit) => {
                     let reason = credit
                         .failure

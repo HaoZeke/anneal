@@ -688,6 +688,14 @@ pub struct CoordinatorStatus {
     pub replicas: Vec<ReplicaProgress>,
     /// Basins the transition stream has linked into the referee's graph.
     pub landscape_basins: u32,
+    /// Unique exact index-one saddles certified by the coordinator.
+    pub unique_saddles: u64,
+    /// Unique unordered pairs of distinct exact basins.
+    pub unique_edges: u64,
+    /// Unique saddles connecting symmetry-equivalent basin representatives.
+    pub unique_degenerate_rearrangements: u64,
+    /// Accepted index-one reports, including exact reobservations.
+    pub certified_connections: u64,
     /// The referee's seam, when at least two basins have been linked.
     pub seam: Option<LandscapeSeam>,
 }
@@ -1230,6 +1238,12 @@ pub(crate) fn encode_reply(reply: CatalogReply) -> Result<Vec<u8>, ProtocolError
                     output.set_aggregate_charged(status.aggregate_charged);
                     output.set_aggregate_budget(status.aggregate_budget);
                     output.set_landscape_basins(status.landscape_basins);
+                    output.set_unique_saddles(status.unique_saddles);
+                    output.set_unique_edges(status.unique_edges);
+                    output.set_unique_degenerate_rearrangements(
+                        status.unique_degenerate_rearrangements,
+                    );
+                    output.set_certified_connections(status.certified_connections);
                     if let Some(seam) = &status.seam {
                         output.set_algebraic_connectivity(seam.algebraic_connectivity);
                         output.set_seam_conductance(seam.conductance);
@@ -1303,6 +1317,7 @@ pub(crate) fn encode_reply(reply: CatalogReply) -> Result<Vec<u8>, ProtocolError
                     let mut output = payload.init_ride_credit();
                     output.set_novel_saddle(credit.novel_saddle);
                     output.set_novel_edge(credit.novel_edge);
+                    output.set_degenerate_rearrangement(credit.degenerate_rearrangement);
                     output.set_total_charged_evaluations(credit.total_charged_evaluations);
                     output.set_certified_connection(credit.certified_connection);
                     let mut result = output.init_result();
@@ -1496,6 +1511,11 @@ pub(crate) fn decode_reply_reader(
                         aggregate_budget: status.get_aggregate_budget(),
                         replicas,
                         landscape_basins: status.get_landscape_basins(),
+                        unique_saddles: status.get_unique_saddles(),
+                        unique_edges: status.get_unique_edges(),
+                        unique_degenerate_rearrangements: status
+                            .get_unique_degenerate_rearrangements(),
+                        certified_connections: status.get_certified_connections(),
                         seam,
                     })
                 }
@@ -1547,7 +1567,7 @@ pub(crate) fn decode_reply_reader(
                     };
                     AcceptedPayload::RideCredit(RideCredit {
                         certified_connection: credit.get_certified_connection(),
-                        degenerate_rearrangement: false,
+                        degenerate_rearrangement: credit.get_degenerate_rearrangement(),
                         failure,
                         novel_saddle: credit.get_novel_saddle(),
                         novel_edge: credit.get_novel_edge(),
