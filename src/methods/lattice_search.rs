@@ -434,10 +434,102 @@ pub fn reoccupy(cfg: &LatticeSearchConfig, ledger: &mut Ledger, x: ArrayView1<f6
             placed.extend_from_slice(&xs[3 * i..3 * i + 3]);
         }
     }
-    // Successive placement is greedy; the occupation it leaves is relaxed
-    // by swaps over every point until none lowers its energy.
+    // Successive placement is greedy; a Metropolis walk over occupations
+    // of the same lattice moves it off that ordering, and swaps over every
+    // point then finish the occupation.
     let placed = Array1::from(placed);
-    optimise_occupation_over(cfg, ledger, placed.view(), n).0
+    let walked = walk_occupation(
+        cfg,
+        ledger,
+        placed.view(),
+        OCCUPATION_WALK_STEPS * n,
+        OCCUPATION_WALK_TEMPERATURE,
+        0x0cc_u64 ^ n as u64,
+    );
+    optimise_occupation_over(cfg, ledger, walked.view(), n).0
+}
+
+/// Occupation walk steps per point.
+pub const OCCUPATION_WALK_STEPS: usize = 200;
+/// Occupation walk temperature in pair-well units.
+pub const OCCUPATION_WALK_TEMPERATURE: f64 = 0.4;
+
+/// Metropolis walk over occupations of the lattice of `x` (its points and
+/// their hollow sites): each step proposes moving one point to one vacant
+/// site and accepts by the change in its energy at `temperature`. Returns
+/// the lowest-energy occupation seen. Each proposal is charged one pair
+/// fraction, and each acceptance a second for the incremental update.
+pub fn walk_occupation(
+    cfg: &LatticeSearchConfig,
+    ledger: &mut Ledger,
+    x: ArrayView1<f64>,
+    steps: usize,
+    temperature: f64,
+    seed: u64,
+) -> Array1<f64> {
+    let n = cfg.n_points;
+    let xs = x.to_vec();
+    let mut lattice: Vec<[f64; 3]> = (0..n).map(|i| point(&xs, i)).collect();
+    lattice.extend(hollow_sites(&xs, cfg.neighbour_cutoff));
+    let m = lattice.len();
+    if m <= n || !ledger.charge() {
+        return x.to_owned();
+    }
+    let kind = cfg.kind;
+    let frac = 2.0 / n.max(1) as f64;
+    let mut cur = xs;
+    let mut energies: Vec<f64> = (0..n)
+        .map(|i| site_energy(kind, &cur, Some(i), point(&cur, i)))
+        .collect();
+    let mut total: f64 = energies.iter().sum::<f64>() / 2.0;
+    let mut best_total = total;
+    let mut best = cur.clone();
+    let mut occupied: Vec<usize> = (0..n).collect();
+    let mut vacant: Vec<usize> = (n..m).collect();
+    let mut rng = StdRng::seed_from_u64(seed);
+    for _ in 0..steps {
+        if !ledger.charge_frac(frac) {
+            break;
+        }
+        let i = rng.random_range(0..n);
+        let slot = rng.random_range(0..vacant.len());
+        let site = lattice[vacant[slot]];
+        let e_new = site_energy(kind, &cur, Some(i), site);
+        let delta = e_new - energies[i];
+        if delta > 0.0 && rng.random::<f64>() >= (-delta / temperature).exp() {
+            continue;
+        }
+        if !ledger.charge_frac(frac) {
+            break;
+        }
+        let old = point(&cur, i);
+        for j in 0..n {
+            if j == i {
+                continue;
+            }
+            let pj = point(&cur, j);
+            let (r2_old, r2_new) = (dist2(old, pj), dist2(site, pj));
+            if r2_old > 1e-12 {
+                energies[j] -= kind.pair(r2_old).0;
+            }
+            if r2_new > 1e-12 {
+                energies[j] += kind.pair(r2_new).0;
+            }
+        }
+        energies[i] = e_new;
+        for k in 0..3 {
+            cur[3 * i + k] = site[k];
+        }
+        let freed = occupied[i];
+        occupied[i] = vacant[slot];
+        vacant[slot] = freed;
+        total += delta;
+        if total < best_total - 1e-9 {
+            best_total = total;
+            best.clone_from(&cur);
+        }
+    }
+    Array1::from(best)
 }
 
 /// Run the dynamic lattice search under `ledger`.
