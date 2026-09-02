@@ -3098,9 +3098,27 @@ mod run {
             assert_eq!(value["engine"]["engine_id"], "rgpot");
             assert_eq!(value["engine"]["protocol"]["major"], 1);
             assert_eq!(value["engine"]["protocol"]["minor"], 2);
-            assert_eq!(value["engine"]["abi"]["abi_major"], 1);
-            assert_eq!(value["engine"]["abi"]["abi_minor"], 1);
-            assert_eq!(value["engine"]["abi"]["layout_revision"], 3);
+            let native = eindir_core::ffi::eindir_core_abi_stamp();
+            assert_eq!(
+                value["engine"]["abi"]["abi_major"],
+                serde_json::Value::from(native.abi_major)
+            );
+            assert_eq!(
+                value["engine"]["abi"]["abi_minor"],
+                serde_json::Value::from(native.abi_minor)
+            );
+            assert_eq!(
+                value["engine"]["abi"]["layout_revision"],
+                serde_json::Value::from(native.objective_layout)
+            );
+            assert_eq!(
+                value["engine"]["abi"]["objective_size"],
+                serde_json::Value::from(native.objective_size)
+            );
+            assert_eq!(
+                value["engine"]["abi"]["objective_align"],
+                serde_json::Value::from(native.objective_align)
+            );
         }
     }
 }

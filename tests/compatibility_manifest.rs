@@ -2,7 +2,7 @@ use anneal_core::compatibility::{
     AbiStamp, CompatibilityError, EngineDescriptor, ProtocolVersion, validate_eindir_objective,
 };
 use anneal_core::run_manifest::{ArtifactDigest, RunManifest};
-use eindir_core::ffi::{EindirEvalFn, eindir_objective_t, eindir_status_t};
+use eindir_core::ffi::{EindirEvalFn, eindir_core_abi_stamp, eindir_objective_t, eindir_status_t};
 
 unsafe extern "C" fn constant_objective(
     _user_data: *mut std::ffi::c_void,
@@ -22,16 +22,21 @@ fn test_objective(low: *mut f64, high: *mut f64) -> eindir_objective_t {
         grad_fn: None,
         user_data: std::ptr::null_mut(),
         free_fn: None,
-        descriptor: std::ptr::null(),
     }
 }
 
 #[test]
 fn accepts_additive_protocols_and_rejects_incompatible_bridges() {
     let expected = AbiStamp::anneal_default();
-    assert_eq!(expected.abi_major, 1);
-    assert_eq!(expected.abi_minor, 1);
-    assert_eq!(expected.layout_revision, 3);
+    let native = eindir_core_abi_stamp();
+    assert_eq!(u32::from(expected.abi_major), native.abi_major);
+    assert_eq!(u32::from(expected.abi_minor), native.abi_minor);
+    assert_eq!(expected.layout_revision, native.objective_layout);
+    assert_eq!(expected.objective_size, native.objective_size);
+    assert_eq!(expected.objective_align, native.objective_align);
+    assert_eq!(u32::from(expected.dlpack_major), native.dlpack_major);
+    assert_eq!(u32::from(expected.dlpack_minor), native.dlpack_minor);
+    assert_eq!(expected.features, native.features);
     let compatible = EngineDescriptor::new("rgpot", ProtocolVersion::new(1, 0), expected);
     assert!(
         compatible

@@ -46,6 +46,8 @@ mod tests {
         assert_eq!(descriptor.protocol_family, "rgpot.potentials");
         assert_eq!(descriptor.protocol, ProtocolVersion::new(1, 0));
         assert_eq!(descriptor.abi.layout_revision, 3);
+        assert_eq!(descriptor.abi.objective_size, 64);
+        assert_eq!(descriptor.abi.objective_align, 8);
         assert_eq!(descriptor.abi.dlpack_minor, 4);
         assert_eq!(descriptor.abi.features, 0b101);
         assert_eq!(descriptor.build_identity.as_deref(), Some("rgpot@abc123"));
@@ -111,18 +113,7 @@ fn descriptor_from_stamp(
         format!("rgpot.{backend}"),
         "rgpot.potentials",
         ProtocolVersion::new(1, 0),
-        AbiStamp {
-            abi_major: u16::try_from(stamp.abi_major)
-                .expect("eindir ABI major fits the manifest type"),
-            abi_minor: u16::try_from(stamp.abi_minor)
-                .expect("eindir ABI minor fits the manifest type"),
-            layout_revision: stamp.objective_layout,
-            dlpack_major: u16::try_from(stamp.dlpack_major)
-                .expect("eindir DLPack major fits the manifest type"),
-            dlpack_minor: u16::try_from(stamp.dlpack_minor)
-                .expect("eindir DLPack minor fits the manifest type"),
-            features: stamp.features,
-        },
+        AbiStamp::from_eindir_stamp(stamp),
     );
     descriptor.build_identity = build_identity
         .filter(|identity| !identity.is_empty())
