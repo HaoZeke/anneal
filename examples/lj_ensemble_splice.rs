@@ -36,6 +36,7 @@ use anneal_core::methods::cluster_hopping::{
     ChainCheckpoint, CheckpointAction, ClusterFingerprint, Config, Ledger, Outcome, random_cluster,
     run_with_bias_at_checkpoints,
 };
+use anneal_core::methods::cluster_search::{Encounter, median_encounter};
 use anneal_core::methods::splice::cut_and_splice;
 use anneal_core::methods::two_phase::{
     Cutoff, SharedSurfaceAllocator, SurfacePortfolio, TwoPhase, largest_pair_distance, penalty,
@@ -162,6 +163,20 @@ struct ExchangeConfig {
     portfolio_block: usize,
     /// Whether the chains of an ensemble share one portfolio posterior.
     portfolio_shared: bool,
+}
+
+fn km_median_first_hit(records: &[(Option<usize>, usize)]) -> Option<usize> {
+    let encounters = records
+        .iter()
+        .map(|(first_hit, charged)| match first_hit {
+            Some(charged) => Encounter::Found {
+                charged: *charged,
+                hops: 0,
+            },
+            None => Encounter::Censored { charged: *charged },
+        })
+        .collect::<Vec<_>>();
+    median_encounter(&encounters)
 }
 
 /// `SURFACES` items `mu:5`, `d:3.5` (pair-well units), `kappa:0.7`, with an
@@ -489,6 +504,7 @@ fn main() {
     let mut chains_solved = 0usize;
     let mut splice_hits = 0usize;
     let mut first_hits: Vec<usize> = Vec::new();
+    let mut chain_encounters: Vec<(Option<usize>, usize)> = Vec::new();
     let mut tally = ExchangeTally::default();
     let mut total_charged = 0usize;
     for ensemble in seed0..(seed0 + ensembles) {
@@ -540,6 +556,7 @@ fn main() {
         let charged: usize = reports.iter().map(|r| r.charged).sum();
         total_charged += charged;
         for r in &reports {
+            chain_encounters.push((r.first_hit, r.charged));
             tally.attempts += r.tally.attempts;
             tally.adopted += r.tally.adopted;
             tally.below_current += r.tally.below_current;
@@ -571,11 +588,17 @@ fn main() {
         );
     }
     first_hits.sort_unstable();
-    let median = first_hits.get(first_hits.len() / 2).copied();
+    let conditional_parallel_latency = first_hits.get(first_hits.len() / 2).copied();
+    let chain_km_median = km_median_first_hit(&chain_encounters);
     println!(
-        "{ensembles_solved}/{ensembles} ensembles solved, {chains_solved}/{} chains solved, {splice_hits} first hits by splice, median first hit {}, splice attempts {} adopted {} below-current {} external calls {} ({:.2}% of charged)",
+        "{ensembles_solved}/{ensembles} ensembles solved, {chains_solved}/{} chains solved, {splice_hits} first hits by splice, conditional median earliest-chain latency {}, chain KM median first-hit cost {}, splice attempts {} adopted {} below-current {} external calls {} ({:.2}% of charged)",
         chains * ensembles as usize,
-        median.map(|m| m.to_string()).unwrap_or_else(|| "-".into()),
+        conditional_parallel_latency
+            .map(|m| m.to_string())
+            .unwrap_or_else(|| "-".into()),
+        chain_km_median
+            .map(|m| m.to_string())
+            .unwrap_or_else(|| "-".into()),
         tally.attempts,
         tally.adopted,
         tally.below_current,
