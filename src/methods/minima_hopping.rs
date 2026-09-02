@@ -35,7 +35,185 @@
 //! count and report that this finds the LJ75 Marks decahedron where a
 //! cut-and-splice evolutionary algorithm does not.
 
+use std::cell::RefCell;
 use std::collections::HashMap;
+
+use ndarray::{Array1, ArrayView1};
+use rand::Rng;
+use rand_distr::{Distribution, StandardNormal};
+use rgmin::{Manifold, ManifoldKind};
+use rgsaddle::{PointSurface, SaddleError, SamdConfig, SamdSession};
+
+/// Geometry on which an MD escape evolves.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MdEscapeGeometry {
+    /// Unconstrained Euclidean coordinates of any dimension.
+    Euclidean,
+    /// Cartesian coordinates modulo rigid translation and rotation.
+    RigidQuotient,
+}
+
+/// Short NVE escape controls for minima hopping.
+#[derive(Debug, Clone, Copy)]
+pub struct MdEscapeConfig {
+    /// Velocity-Verlet step in the surface's reduced time units.
+    pub dt: f64,
+    /// Potential-energy minima crossed before stopping the trajectory.
+    pub potential_minima: usize,
+    /// Hard cap on Verlet steps when the requested crossings are not reached.
+    pub maximum_steps: usize,
+    /// Coordinate geometry used for velocity projection and retraction.
+    pub geometry: MdEscapeGeometry,
+}
+
+impl Default for MdEscapeConfig {
+    fn default() -> Self {
+        Self {
+            dt: 0.01,
+            potential_minima: 2,
+            maximum_steps: 2_000,
+            geometry: MdEscapeGeometry::Euclidean,
+        }
+    }
+}
+
+/// Endpoint and accounting evidence from one MD escape.
+#[derive(Debug, Clone)]
+pub struct MdEscapeReport {
+    /// Last point on the MD trajectory.
+    pub position: Array1<f64>,
+    /// Verlet steps completed.
+    pub steps: usize,
+    /// Potential-energy minima detected along the trajectory.
+    pub potential_minima: usize,
+    /// Potential energy at the last point.
+    pub energy: f64,
+    /// Kinetic energy at the last point.
+    pub kinetic: f64,
+}
+
+struct CallbackSurface<'a, F> {
+    evaluate: RefCell<&'a mut F>,
+}
+
+impl<F> PointSurface for CallbackSurface<'_, F>
+where
+    F: for<'a> FnMut(ArrayView1<'a, f64>) -> Option<(f64, Array1<f64>)>,
+{
+    fn eval(&self, x: ArrayView1<f64>) -> Result<(f64, Array1<f64>), SaddleError> {
+        (self.evaluate.borrow_mut())(x)
+            .ok_or_else(|| SaddleError::Surface("evaluation budget exhausted".into()))
+    }
+}
+
+/// Run the NVE escape of minima hopping through `rgsaddle::SamdSession`.
+///
+/// The Gaussian initial velocity is projected onto `geometry` and rescaled to
+/// exactly `initial_kinetic`. With an infinite SAMD thermostat time, the BDP
+/// rescale is the identity and the delegated velocity-Verlet trajectory is
+/// microcanonical. The host loop stops after `potential_minima` local minima
+/// in the potential-energy trace, as in the Goedecker algorithm.
+pub fn nve_escape<F, R>(
+    start: ArrayView1<f64>,
+    initial_kinetic: f64,
+    config: &MdEscapeConfig,
+    evaluate: &mut F,
+    rng: &mut R,
+) -> Result<MdEscapeReport, SaddleError>
+where
+    F: for<'a> FnMut(ArrayView1<'a, f64>) -> Option<(f64, Array1<f64>)>,
+    R: Rng + ?Sized,
+{
+    if start.is_empty()
+        || !config.dt.is_finite()
+        || config.dt <= 0.0
+        || config.potential_minima == 0
+        || config.maximum_steps == 0
+        || !initial_kinetic.is_finite()
+        || initial_kinetic <= 0.0
+    {
+        return Err(SaddleError::Shape(
+            "NVE escape needs a nonempty state and positive finite controls".into(),
+        ));
+    }
+    if config.geometry == MdEscapeGeometry::RigidQuotient && !start.len().is_multiple_of(3) {
+        return Err(SaddleError::Shape(
+            "rigid-quotient NVE escape needs a 3N Cartesian state".into(),
+        ));
+    }
+
+    let manifold = match config.geometry {
+        MdEscapeGeometry::Euclidean => ManifoldKind::Euclidean,
+        MdEscapeGeometry::RigidQuotient => ManifoldKind::RigidQuotient,
+    };
+    let mut velocity = Array1::from_iter(start.iter().map(|_| {
+        let draw: f64 = StandardNormal.sample(rng);
+        draw
+    }));
+    velocity = manifold.project(&start.to_owned(), &velocity);
+    let unscaled_kinetic = 0.5 * velocity.dot(&velocity);
+    if !unscaled_kinetic.is_finite() || unscaled_kinetic <= 1e-16 {
+        return Err(SaddleError::Solver(
+            "NVE velocity has no component in the free coordinates".into(),
+        ));
+    }
+    velocity *= (initial_kinetic / unscaled_kinetic).sqrt();
+
+    let surface = CallbackSurface {
+        evaluate: RefCell::new(evaluate),
+    };
+    let samd_config = SamdConfig {
+        dt: config.dt,
+        tau: f64::INFINITY,
+        t0: 1.0,
+        tf: 1.0,
+        ngen: config.maximum_steps,
+        exponential: false,
+    };
+    let mut session = SamdSession::new(samd_config, start.to_owned(), velocity, &surface)?;
+    let noise = Array1::zeros(start.len());
+    let mut older_energy = None;
+    let mut previous_energy = None;
+    let mut minima = 0usize;
+    let mut last_energy = f64::NAN;
+    let mut last_kinetic = initial_kinetic;
+
+    for steps in 1..=config.maximum_steps {
+        let report = match config.geometry {
+            MdEscapeGeometry::Euclidean => session.step(&surface, noise.view())?,
+            MdEscapeGeometry::RigidQuotient => {
+                session.step_on(&manifold, &surface, noise.view())?
+            }
+        };
+        last_energy = report.energy;
+        last_kinetic = report.kinetic;
+        if let (Some(older), Some(previous)) = (older_energy, previous_energy)
+            && previous < older
+            && previous <= report.energy
+        {
+            minima += 1;
+            if minima >= config.potential_minima {
+                return Ok(MdEscapeReport {
+                    position: session.position().to_owned(),
+                    steps,
+                    potential_minima: minima,
+                    energy: last_energy,
+                    kinetic: last_kinetic,
+                });
+            }
+        }
+        older_energy = previous_energy;
+        previous_energy = Some(report.energy);
+    }
+
+    Ok(MdEscapeReport {
+        position: session.position().to_owned(),
+        steps: config.maximum_steps,
+        potential_minima: minima,
+        energy: last_energy,
+        kinetic: last_kinetic,
+    })
+}
 
 /// What a quench was, relative to the history.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
