@@ -479,6 +479,43 @@ fn replicas_share_exclusive_ride_arms_and_coordinator_computes_edge_novelty() {
 }
 
 #[test]
+fn coordinator_preserves_degenerate_ktn_rearrangements_without_inventing_edges() {
+    let server = ride_server();
+    let digest = signature().digest();
+    let mut client =
+        CatalogClient::connect(server.addr(), identity(0, digest), ClientConfig::default())
+            .unwrap();
+    client
+        .offer_candidate(1, ride_candidate(0, 1, 1.2))
+        .unwrap();
+    let work = client.claim_ride(2, 8001).unwrap().unwrap();
+
+    let credit = client
+        .report_ride(
+            3,
+            CatalogRideReport {
+                work: work.order.id,
+                charged_evaluations: 144,
+                outcome: CatalogRideOutcome::Certified(CatalogRideConnection {
+                    saddle: ride_candidate(0, 2, 1.6),
+                    endpoints: [ride_candidate(0, 2, 1.2), ride_candidate(0, 2, 1.2)],
+                }),
+            },
+        )
+        .unwrap();
+
+    assert!(credit.certified_connection);
+    assert!(credit.degenerate_rearrangement);
+    assert!(credit.novel_saddle);
+    assert!(!credit.novel_edge);
+    let status = client.observer_status(4).unwrap();
+    assert_eq!(status.unique_saddles, 1);
+    assert_eq!(status.unique_edges, 0);
+    assert_eq!(status.unique_degenerate_rearrangements, 1);
+    assert_eq!(status.certified_connections, 1);
+}
+
+#[test]
 fn coordinator_schedules_each_universal_water_environment() {
     let coordinates = vec![0.0, 0.0, 0.0, 0.7572, 0.5865, 0.0, -0.7572, 0.5865, 0.0];
     let species = vec![8, 1, 1];
