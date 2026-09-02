@@ -251,6 +251,10 @@ struct ExchangeConfig {
     /// Calls a core class is allowed without any chain improving on it
     /// before chains in it that do not hold its best restart.
     core_tabu_calls: usize,
+    /// Calls a chain spends in a fresh core before its best there is ranked
+    /// against the trials of other chains in the same core class; below the
+    /// median it continues, above it restarts. Zero disables the trial.
+    core_trial: usize,
     /// Whether the chain rebuilds its surface from its interior on the
     /// lattice grown from that interior at every `reoccupy_interval` calls,
     /// quenches the rebuilt structure and adopts it when it is lower.
@@ -268,6 +272,8 @@ struct CoreStat {
     calls_since_improvement: usize,
     /// Checkpoints at which some chain sat in this core.
     visits: usize,
+    /// Best energies of chains at the end of their trial in this core.
+    trials: Vec<f64>,
 }
 
 /// Cores visited by an ensemble, keyed by the coloured ring-graph hash.
@@ -578,6 +584,8 @@ fn run_chain(
     let mut own_key: Option<u64> = None;
     let mut own_best = f64::INFINITY;
     let mut own_best_at = 0usize;
+    let mut own_entered_at = 0usize;
+    let mut own_tried = false;
     let mut child_opt = WarmLbfgs::default();
     let mut checkpoint = |snapshot: ChainCheckpoint<'_>| {
         {
@@ -630,6 +638,7 @@ fn run_chain(
                 best: f64::INFINITY,
                 calls_since_improvement: 0,
                 visits: 0,
+                trials: Vec::new(),
             });
             stat.visits += 1;
             stat.calls_since_improvement += exchange.checkpoint;
@@ -641,6 +650,8 @@ fn run_chain(
                 own_key = Some(key);
                 own_best = f64::INFINITY;
                 own_best_at = snapshot.charged();
+                own_entered_at = snapshot.charged();
+                own_tried = false;
             }
             if energy < own_best - 1e-6 {
                 own_best = energy;
@@ -650,7 +661,19 @@ fn run_chain(
                 snapshot.charged().saturating_sub(own_best_at) >= exchange.core_patience;
             let class_tabu = stat.calls_since_improvement >= exchange.core_tabu_calls
                 && energy > stat.best + 1e-6;
-            if !own_stalled && !class_tabu {
+            let mut trial_lost = false;
+            if exchange.core_trial > 0
+                && !own_tried
+                && snapshot.charged().saturating_sub(own_entered_at) >= exchange.core_trial
+            {
+                own_tried = true;
+                stat.trials.push(own_best);
+                let mut sorted = stat.trials.clone();
+                sorted.sort_by(|a, b| a.total_cmp(b));
+                let median = sorted[sorted.len() / 2];
+                trial_lost = sorted.len() >= 4 && own_best > median + 1e-6;
+            }
+            if !own_stalled && !class_tabu && !trial_lost {
                 return CheckpointAction::Continue;
             }
             own_key = None;
@@ -854,6 +877,7 @@ fn main() {
         core_tabu: mode == "coretabu",
         core_patience: env_usize("CORE_PATIENCE", 20_000),
         core_tabu_calls: env_usize("CORE_TABU", 50_000),
+        core_trial: env_usize("CORE_TRIAL", 0),
         reoccupy: env_usize("REOCCUPY", 0) == 1,
         reoccupy_interval: env_usize("REOCCUPY_INTERVAL", 5_000),
     };
