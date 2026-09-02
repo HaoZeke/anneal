@@ -141,3 +141,29 @@ fn ci_interval_counts_the_initial_quench_as_quench_one() {
     assert_eq!(outcome.hops, 1);
     assert_eq!(outcome.continuous_symmetry.0, 0);
 }
+
+#[test]
+fn ci_quench_itself_advances_the_csm_quench_counter() {
+    let start = Array1::from(vec![1.4, 0.1, 0.0, -0.4, 1.2, 0.2, -0.2, -0.3, 0.0]);
+    let mut config = Config::for_cluster(3);
+    config.relax_steps = 1;
+    config.screen_steps = 1;
+    config.return_screen = false;
+    config.max_hops = Some(3);
+    config.continuous_symmetry = ContinuousSymmetry::Inversion { interval: 2 };
+    let mut ledger = Ledger::new(12);
+    let mut relax =
+        |ledger: &mut Ledger, state: ArrayView1<'_, f64>, _steps: usize| -> (f64, Array1<f64>) {
+            if !ledger.charge() {
+                return (f64::INFINITY, state.to_owned());
+            }
+            let energy = state.iter().map(|value| value * value).sum();
+            (energy, state.to_owned())
+        };
+    let mut rng = StdRng::seed_from_u64(7);
+
+    let outcome = run(&config, start.view(), &mut ledger, &mut relax, &mut rng);
+
+    assert_eq!(outcome.hops, 3);
+    assert_eq!(outcome.continuous_symmetry.0, 2);
+}
