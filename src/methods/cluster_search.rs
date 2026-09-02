@@ -146,6 +146,26 @@ where
         let mut early = false;
         let mut probe_at: Option<(usize, f64)> = None;
         let target = led.best;
+        // Phase one, when configured: relax on the compacted surface and hand
+        // that minimum to the plain relaxation below. Both phases charge.
+        let compacted;
+        let x = match cfg.two_phase.filter(|two| two.is_active()) {
+            Some(two) => {
+                let cutoff = two.cutoff_for(x);
+                let (_, phase_one, _) = opt.minimize(x, iters, |v| {
+                    if !led.charge() {
+                        return None;
+                    }
+                    let (e, g) = objective.value_and_gradient(v);
+                    let (pe, pg) = crate::methods::two_phase::penalty(v, cutoff, two.beta, two.mu);
+                    Some((e + pe, g + pg))
+                });
+                opt.forget();
+                compacted = phase_one;
+                compacted.view()
+            }
+            None => x,
+        };
         let (f, xr, _) = opt.minimize_watched(
             x,
             iters,
@@ -280,6 +300,26 @@ where
         let mut early = false;
         let mut probe_at: Option<(usize, f64)> = None;
         let target = led.best;
+        // Phase one, when configured: relax on the compacted surface and hand
+        // that minimum to the plain relaxation below. Both phases charge.
+        let compacted;
+        let x = match cfg.two_phase.filter(|two| two.is_active()) {
+            Some(two) => {
+                let cutoff = two.cutoff_for(x);
+                let (_, phase_one, _) = opt.minimize(x, iters, |v| {
+                    if !led.charge() {
+                        return None;
+                    }
+                    let (e, g) = objective.value_and_gradient(v);
+                    let (pe, pg) = crate::methods::two_phase::penalty(v, cutoff, two.beta, two.mu);
+                    Some((e + pe, g + pg))
+                });
+                opt.forget();
+                compacted = phase_one;
+                compacted.view()
+            }
+            None => x,
+        };
         let (f, xr, _) = opt.minimize_watched(
             x,
             iters,
@@ -645,6 +685,26 @@ where
         let mut early = false;
         let mut probe_at: Option<(usize, f64)> = None;
         let target = led.best;
+        // Phase one, when configured: relax on the compacted surface and hand
+        // that minimum to the plain relaxation below. Both phases charge.
+        let compacted;
+        let x = match cfg.two_phase.filter(|two| two.is_active()) {
+            Some(two) => {
+                let cutoff = two.cutoff_for(x);
+                let (_, phase_one, _) = opt.minimize(x, iters, |v| {
+                    if !led.charge() {
+                        return None;
+                    }
+                    let (e, g) = objective.value_and_gradient(v);
+                    let (pe, pg) = crate::methods::two_phase::penalty(v, cutoff, two.beta, two.mu);
+                    Some((e + pe, g + pg))
+                });
+                opt.forget();
+                compacted = phase_one;
+                compacted.view()
+            }
+            None => x,
+        };
         let (f, xr, _) = opt.minimize_watched(
             x,
             iters,
