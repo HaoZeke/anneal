@@ -414,6 +414,10 @@ pub fn reoccupy(cfg: &LatticeSearchConfig, ledger: &mut Ledger, x: ArrayView1<f6
 /// Worst-bound points the finishing swap pass of a reoccupation tries.
 pub const OCCUPATION_FINISH_MOVERS: usize = 8;
 
+/// Placed points a vacant site must touch at the bond length before its
+/// energy is read during successive placement.
+pub const PLACEMENT_MIN_COORDINATION: usize = 3;
+
 /// Vacant sites whose energies are read per mover or per placement: the
 /// sites with the most points within the bond length, ranked without any
 /// energy call, so the charged site energies go to the candidates that can
@@ -531,10 +535,21 @@ pub fn place_successively_on(
     let frac = 2.0 / n.max(1) as f64;
     while placed.len() / 3 < n && !vacant.is_empty() {
         let mut best: Option<(usize, f64)> = None;
-        // Every vacant site is read here: a coordination cut misses the
-        // facet sites a decahedral surface needs, and the placement is a
-        // small share of the construction's charge.
+        // A site with fewer than three placed points at the bond length is
+        // not a hollow yet (it sits over sites still vacant), so only the
+        // sites with three or more are read; a rank cut among those misses
+        // the facet sites a decahedral surface needs.
+        let bond = median_bond(&placed).unwrap_or(1.0);
+        let r2 = (1.2 * bond) * (1.2 * bond);
+        let placed_points = placed.len() / 3;
         for (s, site) in vacant.iter().enumerate() {
+            let touching = (0..placed_points)
+                .filter(|&i| dist2(*site, point(&placed, i)) < r2)
+                .count();
+            if touching < PLACEMENT_MIN_COORDINATION && placed_points >= PLACEMENT_MIN_COORDINATION
+            {
+                continue;
+            }
             if !ledger.charge_frac(frac) {
                 break;
             }
