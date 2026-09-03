@@ -84,6 +84,367 @@ fn reference(p: PairKind, n: usize) -> Option<f64> {
     }
 }
 
+/// Is the archive made of minima, and do its basins hold distinct structures.
+///
+/// Three merges are built and the deciding statistic recomputed under each.
+/// The point is not the merge but the number after it: expected visits per
+/// state, where one means the chain enters each state once on the way through
+/// and above one means it is returning.
+#[allow(clippy::too_many_arguments)]
+fn archive_analysis(
+    pot: &PairPotential,
+    n: usize,
+    counts: &anneal_core::superbasin::HopCounts,
+    archive: &[(usize, f64, ndarray::Array1<f64>)],
+    shape_sample: usize,
+    seed: u64,
+) {
+    use anneal_core::superbasin::{LumpParams, profile, regroup};
+    use std::collections::BTreeMap;
+
+    let params = LumpParams::default();
+    let base = profile(counts, &params, 16, 4096, 384, 4096);
+    println!(
+        "    archive analysis: {} basins in the graph, {} structures stored",
+        base.states,
+        archive.len()
+    );
+
+    // 0. Are these minima at all. The chain carries accepted states, and under
+    //    the return screen an accepted state can be a partial quench, so this
+    //    has to be established before any statement about the landscape rests
+    //    on it. Re-quenched hard, off the ledger, and the drop is the answer.
+    let mut opt = anneal_core::methods::warm_lbfgs::WarmLbfgs::default();
+    let mut polished: Vec<(usize, f64, ndarray::Array1<f64>)> = Vec::with_capacity(archive.len());
+    let mut drops: Vec<f64> = Vec::with_capacity(archive.len());
+    let mut grads: Vec<f64> = Vec::with_capacity(archive.len());
+    for (b, e, x) in archive {
+        opt.forget();
+        let (f, xr, _) = opt.minimize(x.view(), 4000, |v| Some(pot.value_and_gradient(v)));
+        let g = pot.value_and_gradient(xr.view()).1;
+        grads.push(g.iter().fold(0.0_f64, |a, q| a.max(q.abs())));
+        drops.push(e - f);
+        polished.push((*b, f, xr));
+    }
+    let quantile = |v: &mut Vec<f64>, q: f64| -> f64 {
+        if v.is_empty() {
+            return f64::NAN;
+        }
+        v.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        v[((v.len() - 1) as f64 * q) as usize]
+    };
+    let mut d = drops.clone();
+    let mut g = grads.clone();
+    println!(
+        "      stored states re-quenched: energy fell by {:.4} median, {:.4} at the ninth \
+         decile, {:.4} worst; final gradient {:.1e} median, {:.1e} worst",
+        quantile(&mut d.clone(), 0.5),
+        quantile(&mut d.clone(), 0.9),
+        quantile(&mut d, 1.0),
+        quantile(&mut g.clone(), 0.5),
+        quantile(&mut g, 1.0)
+    );
+
+    // 1. Shape distance on all pairs, no energy precondition. The distribution
+    //    rather than a threshold count, because the question is whether the
+    //    basins are near duplicates and that is a property of the distribution.
+    #[cfg(feature = "ira")]
+    {
+        use rand::SeedableRng;
+        use rand::seq::SliceRandom;
+        let metric = anneal_core::shape::IraMetric::default();
+        let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
+        let mut idx: Vec<usize> = (0..polished.len()).collect();
+        idx.shuffle(&mut rng);
+        idx.truncate(shape_sample);
+        idx.sort_unstable();
+        let mut dists: Vec<f64> = Vec::new();
+        let mut close: Vec<(usize, usize)> = Vec::new();
+        for a in 0..idx.len() {
+            for b in (a + 1)..idx.len() {
+                let (i, j) = (idx[a], idx[b]);
+                let dd = metric.distance(polished[i].2.view(), polished[j].2.view());
+                dists.push(dd);
+                if dd < 0.1 {
+                    close.push((polished[i].0, polished[j].0));
+                }
+            }
+        }
+        let under = |v: &[f64], t: f64| v.iter().filter(|x| **x < t).count();
+        let n_pairs = dists.len();
+        let mut sorted = dists.clone();
+        println!(
+            "      shape distance over {} structures, {} pairs, no energy filter: \
+             median {:.3}, lower decile {:.3}, minimum {:.3}; {} pairs below 0.7 ({:.4}), \
+             {} below 0.1 ({:.5})",
+            idx.len(),
+            n_pairs,
+            quantile(&mut sorted.clone(), 0.5),
+            quantile(&mut sorted.clone(), 0.1),
+            quantile(&mut sorted, 0.0),
+            under(&dists, 0.7),
+            under(&dists, 0.7) as f64 / n_pairs.max(1) as f64,
+            under(&dists, 0.1),
+            under(&dists, 0.1) as f64 / n_pairs.max(1) as f64
+        );
+        // Merge by shape and recompute the deciding statistic.
+        let mut parent: BTreeMap<usize, usize> =
+            polished.iter().map(|(b, _, _)| (*b, *b)).collect();
+        fn find(p: &mut BTreeMap<usize, usize>, x: usize) -> usize {
+            let mut r = x;
+            while p[&r] != r {
+                r = p[&r];
+            }
+            r
+        }
+        for (i, j) in &close {
+            let (ri, rj) = (find(&mut parent, *i), find(&mut parent, *j));
+            if ri != rj {
+                let (lo, hi) = (ri.min(rj), ri.max(rj));
+                parent.insert(hi, lo);
+            }
+        }
+        let map: BTreeMap<usize, usize> = polished
+            .iter()
+            .map(|(b, _, _)| (*b, find(&mut parent, *b)))
+            .collect();
+        let merged = profile(&regroup(counts, &map), &params, 16, 4096, 384, 4096);
+        println!(
+            "      merging shape-identical basins: {} -> {} states, expected visits \
+             {:.2} median {:.2} max (unmerged {:.2} / {:.2}), lumped share {:.3} -> {:.3}",
+            base.states,
+            merged.states,
+            merged.revisits_median,
+            merged.revisits_max,
+            base.revisits_median,
+            base.revisits_max,
+            base.lumped_fraction,
+            merged.lumped_fraction
+        );
+    }
+    #[cfg(not(feature = "ira"))]
+    let _ = (shape_sample, seed);
+
+    // 2. Structural type. If many basins carry one type, the graph's states are
+    //    distinguishing distortions rather than structures.
+    let cut = 1.39 * pot.kind().r_min() / 2.0_f64.powf(1.0 / 6.0);
+    let label_of = |x: ndarray::ArrayView1<f64>| -> (Vec<i64>, Vec<i64>) {
+        let f = ptm_fractions(x, n, 0.12);
+        let c = cna(x, n, cut);
+        (
+            f.iter().map(|v| (v * 20.0).round() as i64).collect(),
+            [(5, 5, 5), (4, 2, 1), (4, 2, 2), (5, 4, 4), (4, 4, 4)]
+                .iter()
+                .map(|k| (c.fraction(*k) * 20.0).round() as i64)
+                .collect(),
+        )
+    };
+    let mut classes: BTreeMap<(Vec<i64>, Vec<i64>), Vec<(usize, f64)>> = BTreeMap::new();
+    for (b, e, x) in &polished {
+        classes
+            .entry(label_of(x.view()))
+            .or_default()
+            .push((*b, *e));
+    }
+    let mut sizes: Vec<usize> = classes.values().map(|v| v.len()).collect();
+    sizes.sort_unstable_by(|a, b| b.cmp(a));
+    println!(
+        "      structural types: {} distinct labels over {} structures, largest class {}, \
+         top five {:?}",
+        classes.len(),
+        polished.len(),
+        sizes.first().copied().unwrap_or(0),
+        &sizes[..sizes.len().min(5)]
+    );
+
+    // 3. Energy spread inside a structural class. A class holding many basins
+    //    over a narrow range is the near-distortion case.
+    let mut spreads: Vec<(usize, f64)> = classes
+        .values()
+        .filter(|v| v.len() > 1)
+        .map(|v| {
+            let lo = v.iter().map(|(_, e)| *e).fold(f64::INFINITY, f64::min);
+            let hi = v.iter().map(|(_, e)| *e).fold(f64::NEG_INFINITY, f64::max);
+            (v.len(), hi - lo)
+        })
+        .collect();
+    spreads.sort_by(|a, b| b.0.cmp(&a.0));
+    println!(
+        "      energy spread inside a class: {:?}",
+        &spreads[..spreads.len().min(6)]
+    );
+
+    // And the statistic under the structural merge, which is the coarsest of
+    // the three and therefore the most favourable to the trap reading.
+    let mut map: BTreeMap<usize, usize> = BTreeMap::new();
+    let mut class_info: BTreeMap<usize, (usize, f64, [f64; 3], [f64; 3])> = BTreeMap::new();
+    for (label, v) in &classes {
+        let rep = v.iter().map(|(b, _)| *b).min().unwrap_or(0);
+        for (b, _) in v {
+            map.insert(*b, rep);
+        }
+        // Template and common-neighbour fractions of the class, recovered from
+        // the quantised label, and the deepest structure it holds. This is the
+        // correspondence test: an icosahedral funnel shows in the 555 bond
+        // count, a decahedral one in 421 and 422 together.
+        let deepest = v.iter().map(|(_, e)| *e).fold(f64::INFINITY, f64::min);
+        let p = &label.0;
+        let c = &label.1;
+        class_info.insert(
+            rep,
+            (
+                v.len(),
+                deepest,
+                [
+                    p.first().copied().unwrap_or(0) as f64 / 20.0,
+                    p.get(1).copied().unwrap_or(0) as f64 / 20.0,
+                    p.get(2).copied().unwrap_or(0) as f64 / 20.0,
+                ],
+                [
+                    c.first().copied().unwrap_or(0) as f64 / 20.0,
+                    c.get(1).copied().unwrap_or(0) as f64 / 20.0,
+                    c.get(2).copied().unwrap_or(0) as f64 / 20.0,
+                ],
+            ),
+        );
+    }
+    confinement(counts, &map, &class_info);
+    let merged = profile(&regroup(counts, &map), &params, 16, 4096, 384, 4096);
+    println!(
+        "      merging by structural type: {} -> {} states, expected visits {:.2} median \
+         {:.2} max (unmerged {:.2} / {:.2}), depth {} -> {}, lumped share {:.3} -> {:.3}",
+        base.states,
+        merged.states,
+        merged.revisits_median,
+        merged.revisits_max,
+        base.revisits_median,
+        base.revisits_max,
+        base.depth,
+        merged.depth,
+        base.lumped_fraction,
+        merged.lumped_fraction
+    );
+}
+
+/// Confinement rather than recurrence.
+///
+/// Expected visits per state cannot see a superbasin whose interior is larger
+/// than the sample: a funnel holding order exp(alpha N) minima, entered eleven
+/// thousand times, gives about one visit per state whether the chain is free or
+/// completely confined. Confinement is the property that separates those, and
+/// it is visible without any state being revisited: how much of the recorded
+/// transition mass stays inside a morphological class against how much leaves
+/// it, and how the chain's time is distributed over classes.
+fn confinement(
+    counts: &anneal_core::superbasin::HopCounts,
+    labels: &std::collections::BTreeMap<usize, usize>,
+    class_info: &std::collections::BTreeMap<usize, (usize, f64, [f64; 3], [f64; 3])>,
+) {
+    use std::collections::BTreeMap;
+    let cls = |b: usize| labels.get(&b).copied().unwrap_or(usize::MAX);
+
+    let mut internal: BTreeMap<usize, f64> = BTreeMap::new();
+    let mut escaping: BTreeMap<usize, f64> = BTreeMap::new();
+    let mut entries: BTreeMap<usize, f64> = BTreeMap::new();
+    let mut time_in: BTreeMap<usize, f64> = BTreeMap::new();
+    for (i, j, w) in counts.edges() {
+        let (a, b) = (cls(i), cls(j));
+        if a == usize::MAX {
+            continue;
+        }
+        if a == b {
+            *internal.entry(a).or_insert(0.0) += w;
+        } else {
+            *escaping.entry(a).or_insert(0.0) += w;
+            if b != usize::MAX {
+                *entries.entry(b).or_insert(0.0) += w;
+            }
+        }
+    }
+    for b in counts.nodes() {
+        let c = cls(b);
+        if c != usize::MAX {
+            *time_in.entry(c).or_insert(0.0) += counts.time_of(b);
+            *escaping.entry(c).or_insert(0.0) += counts.leak_of(b);
+        }
+    }
+    let total_time: f64 = time_in.values().sum();
+
+    // Occupancy concentration: does the run happen inside a few classes.
+    let mut by_time: Vec<(usize, f64)> = time_in.iter().map(|(c, t)| (*c, *t)).collect();
+    by_time.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
+    let share = |k: usize| -> f64 {
+        by_time.iter().take(k).map(|(_, t)| *t).sum::<f64>() / total_time.max(1.0)
+    };
+    println!(
+        "      confinement: {} classes carry the run, top 1 holds {:.3} of the hops, \
+         top 3 {:.3}, top 5 {:.3}, top 10 {:.3}",
+        by_time.len(),
+        share(1),
+        share(3),
+        share(5),
+        share(10)
+    );
+
+    // Timescale separation without recurrence: mass that stays against mass
+    // that leaves, and the hops between class changes.
+    let mut ratios: Vec<f64> = Vec::new();
+    for (c, i) in &internal {
+        let e = escaping.get(c).copied().unwrap_or(0.0);
+        if e > 0.0 {
+            ratios.push(i / e);
+        }
+    }
+    ratios.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    let q = |v: &Vec<f64>, f: f64| -> f64 {
+        if v.is_empty() {
+            f64::NAN
+        } else {
+            v[((v.len() - 1) as f64 * f) as usize]
+        }
+    };
+    println!(
+        "      internal mass over escaping mass, per class: {:.2} median, {:.2} at the \
+         ninth decile, {:.2} max, over {} classes with an exit",
+        q(&ratios, 0.5),
+        q(&ratios, 0.9),
+        q(&ratios, 1.0),
+        ratios.len()
+    );
+
+    println!(
+        "      largest classes by occupancy: {}",
+        by_time
+            .iter()
+            .take(6)
+            .map(|(c, t)| {
+                let e = escaping.get(c).copied().unwrap_or(0.0);
+                let dwell = if e > 0.0 { t / e } else { f64::INFINITY };
+                let (n_b, e_min, ptm, cna) =
+                    class_info
+                        .get(c)
+                        .copied()
+                        .unwrap_or((0, f64::NAN, [0.0; 3], [0.0; 3]));
+                format!(
+                    "[{} basins, {:.3} of hops, dwell {:.0} hops, deepest {:.4}, \
+                     ptm fcc/hcp/ico {:.2}/{:.2}/{:.2}, cna 555/421/422 {:.2}/{:.2}/{:.2}]",
+                    n_b,
+                    t / total_time.max(1.0),
+                    dwell,
+                    e_min,
+                    ptm[0],
+                    ptm[1],
+                    ptm[2],
+                    cna[0],
+                    cna[1],
+                    cna[2]
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(" ")
+    );
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     let spec = args.get(1).cloned().unwrap_or_else(|| "lj".into());
@@ -130,6 +491,22 @@ fn main() {
     cfg.adaptive_screen = opts.contains(&"aq");
     cfg.probe_screen = opts.contains(&"probe");
     cfg.track_funnels = opts.contains(&"funnel");
+    // The hierarchy is reported whenever it is recorded, escape or not, so a
+    // run says what funnel structure its own transitions imply.
+    cfg.superbasin_report = opts.contains(&"sbreport");
+    cfg.superbasin_escape = opts.contains(&"sbasin");
+    if cfg.superbasin_escape {
+        cfg.superbasin_report = true;
+    }
+    cfg.superbasin_quotient = opts.contains(&"sbquot");
+    if cfg.superbasin_quotient {
+        cfg.superbasin_report = true;
+    }
+    cfg.energy_trace = opts.contains(&"trace");
+    cfg.superbasin_features = opts.contains(&"sbfeat");
+    if cfg.superbasin_features {
+        cfg.superbasin_report = true;
+    }
     cfg.delayed_acceptance = opts.contains(&"da");
     let selected: Vec<MoveLibrary> = [
         ("reseed", MoveLibrary::Reseed),
@@ -370,6 +747,30 @@ fn main() {
             )
         });
         let hit = reference.map(|r| out.best < r + 1e-4).unwrap_or(false);
+        if let Some(tr) = &out.energy_trace {
+            // One file per seed, one quenched energy per line, in order. The
+            // name carries the outcome because which region a run sat in is the
+            // thing a reader has to condition on.
+            let dir = std::env::var("TRACE_DIR").unwrap_or_else(|_| ".".into());
+            let tag = if hit { "solved" } else { "failed" };
+            let path = format!("{dir}/trace_lj{n}_s{seed}_{tag}.txt");
+            let body: String = tr
+                .iter()
+                .map(|v| format!("{v:.6}\n"))
+                .collect::<Vec<_>>()
+                .concat();
+            if let Err(e) = std::fs::write(&path, body) {
+                eprintln!("could not write {path}: {e}");
+            } else {
+                println!(
+                    "    energy trace: {} full quenches written to {path}, \
+                     lowest {:.6}, highest {:.6}",
+                    tr.len(),
+                    tr.iter().copied().fold(f64::INFINITY, f64::min),
+                    tr.iter().copied().fold(f64::NEG_INFINITY, f64::max)
+                );
+            }
+        }
         if hit {
             solved += 1;
         }
@@ -388,6 +789,91 @@ fn main() {
                 s1r as f64 / s1.max(1) as f64,
                 s2r as f64 / s2.max(1) as f64
             );
+        }
+        if let (Some(counts), Some(archive)) = (&out.superbasin_counts, &out.superbasin_archive) {
+            archive_analysis(&pot, n, counts, archive, 320, seed);
+        }
+        if let Some(sb) = &out.superbasin {
+            println!(
+                "    superbasin: {} basins {} transitions, {} archived, bias distortion {:.3}",
+                sb.nodes, sb.edges, sb.archived, sb.distortion
+            );
+            for (k, (states, largest, separation)) in sb.levels.iter().enumerate() {
+                println!(
+                    "      level {}: {states} coarse states, largest lump {largest}, \
+                     separation {separation:.1}",
+                    k + 1
+                );
+            }
+            let refusals: Vec<String> = anneal_core::superbasin::Refusal::KINDS
+                .iter()
+                .zip(sb.refusals_by_kind.iter())
+                .filter(|(_, n)| **n > 0)
+                .map(|(k, n)| format!("{k} {n}"))
+                .collect();
+            println!(
+                "      top partition {:?}   jumps {} refused {} [{}] worst revisits {:.2}   \
+                 condition max {:.3e} mean {:.3e} residual {:.1e}   \
+                 solve residual {:.1e} exact {}   \
+                 hops replaced {:.0}   improved {} by {:.4}",
+                sb.top,
+                sb.jumps,
+                sb.refusals,
+                refusals.join(", "),
+                sb.mixed_ratio_max,
+                sb.condition_max,
+                sb.condition_mean,
+                sb.condition_residual_max,
+                sb.solve_residual_max,
+                sb.exact_solves,
+                sb.hops_saved,
+                sb.improvements.0,
+                sb.improvements.1
+            );
+            if let Some(q) = &sb.quotient {
+                println!(
+                    "      orbit quotient: {} basins -> {} ({:.2}x), {} classes above one, \
+                     largest {}, from {} archived over {} energy buckets and {} comparisons \
+                     (matched <= {:.2e}, rejected >= {:.3})",
+                    q.basins_raw,
+                    q.basins_quotiented,
+                    q.basins_raw as f64 / q.basins_quotiented.max(1) as f64,
+                    q.orbits_nontrivial,
+                    q.largest_orbit,
+                    q.archived,
+                    q.energy_buckets,
+                    q.comparisons,
+                    q.matched_max,
+                    q.rejected_min
+                );
+                println!(
+                    "      expected visits per state over {} sources: raw {:.2} median \
+                     {:.2} max, quotiented {:.2} median {:.2} max   |   \
+                     hierarchy depth {} -> {}, lumped share {:.3} -> {:.3}",
+                    q.sources,
+                    q.revisits_raw.0,
+                    q.revisits_raw.1,
+                    q.revisits_quotiented.0,
+                    q.revisits_quotiented.1,
+                    q.depth.0,
+                    q.depth.1,
+                    q.lumped_fraction.0,
+                    q.lumped_fraction.1
+                );
+            }
+            if let Some(sep) = &sb.separability {
+                println!(
+                    "      structure separates the coarse states: F {:.2} over {} states, \
+                     {} structures, per template {:?}",
+                    sep.f,
+                    sep.groups,
+                    sep.points,
+                    sep.per_dimension
+                        .iter()
+                        .map(|v| format!("{v:.2}"))
+                        .collect::<Vec<_>>()
+                );
+            }
         }
         for (name, draws, accepts, best) in &out.arms {
             if *draws > 0 {

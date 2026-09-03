@@ -508,6 +508,16 @@ pub struct Outcome {
     /// little above the minimum it was heading for rather than somewhere else
     /// entirely.
     pub quenched: Vec<(usize, usize, f64, bool)>,
+    /// The superbasin hierarchy the transitions imply, and what the escape
+    /// did with it; present whenever the graph was recorded.
+    pub superbasin: Option<crate::superbasin::SuperbasinReport>,
+    /// The recorded transition counts, when the quotient analysis is asked
+    /// for.
+    pub superbasin_counts: Option<crate::superbasin::HopCounts>,
+    /// The archived structures, as `(basin, energy, state)`.
+    pub superbasin_archive: Option<Vec<(usize, f64, Array1<f64>)>>,
+    /// Every fully quenched energy the run produced, in the order produced.
+    pub energy_trace: Option<Vec<f64>>,
     /// Merge radius at the end of the run, calibrated or as configured.
     pub merge_radius: f64,
     /// Mean accepted-hop step length, which the radius is a quantile of.
@@ -1076,6 +1086,20 @@ where
     let mut diversity =
         DiversityAnnealer::from_initial(cfg.merge_radius).with_final_fraction(cfg.diversity_floor);
     let mut stall = StallDetector::new(cfg.stall_patience);
+    let mut quenched: Vec<(usize, usize, f64, bool)> = Vec::new();
+    // The transition graph the absorbing-chain escape solves, and the archive
+    // it lands on; allocated only when asked for.
+    let mut superbasin = if cfg.superbasin_report || cfg.superbasin_escape {
+        Some(crate::superbasin::SuperbasinEscape::new())
+    } else {
+        None
+    };
+    let mut sb_last_jump = 0usize;
+    let mut trace: Option<Vec<f64>> = if cfg.energy_trace {
+        Some(Vec::new())
+    } else {
+        None
+    };
     let mut improvements: Vec<(usize, usize, usize, f64)> = Vec::new();
     if initial_recordable {
         improvements.push((0, ledger.spent(), 0, e));
@@ -2459,6 +2483,11 @@ where
             unconverged_records += 1;
         }
         hops += 1;
+        // Only where a full relaxation actually ran: a screened or returning
+        // trial carries the energy of a partial descent.
+        if cfg.trace_quenched && !unquenched && !screened_this && !returning {
+            quenched.push((ledger.spent(), bias.n_basins(), e_new, recordable));
+        }
         if recordable && improved && improvements.len() < 512 {
             improvements.push((hops, ledger.spent(), bias.n_basins(), e_new));
             // The anatomy of the draw that produced a new best, for the
@@ -2547,7 +2576,7 @@ where
         // Where the chain stands before the acceptance test, so an accepted
         // hop can be recorded as an edge from here to there. Taken only when
         // the tracker is on, since it costs a descriptor and a lookup.
-        let here_before = if cfg.track_funnels {
+        let here_before = if cfg.track_funnels || superbasin.is_some() {
             Some(*here.get_or_insert_with(|| identity.basin_of(x.view())))
         } else {
             None
@@ -2589,6 +2618,27 @@ where
         };
         let s_old = bias.cv(x.view());
         let s_new = bias.cv(x_new.view());
+        // A draw from the region's density of states, recorded before the
+        // acceptance rule reweights it towards the low tail.
+        if let (Some(t), false) = (trace.as_mut(), unquenched) {
+            t.push(e_new);
+        }
+        // The transition this proposal represents for the unbiased chain,
+        // weighted by the acceptance it would have had with no deposits: the
+        // move kernel never sees the deposits, so only the acceptance is
+        // bias-dependent, and this replaces it rather than corrects it.
+        if let (Some(sb), Some(from)) = (superbasin.as_mut(), here_before) {
+            if unquenched {
+                sb.observe(from, Some(from), 0.0);
+            } else {
+                let a = if e_new <= e {
+                    1.0
+                } else {
+                    (-(e_new - e) / temperature.max(1e-12)).exp()
+                };
+                sb.observe(from, identity.lookup(x_new.view()), a);
+            }
+        }
         // Biased rise. The bias is part of the landscape the chain walks; a
         // threshold or Metropolis on raw energy alone ignores the deposits and
         // re-enters filled basins freely. Measured: MH accepting on raw delta
@@ -3097,14 +3147,29 @@ where
             >= cfg
                 .escape_stall_patience
                 .max((cfg.escape_stall_factor * longest_quiet as f64) as usize);
+        // Where the chain stands after the acceptance test, computed once for
+        // every consumer that wants it.
+        let landed = if accept && here_before.is_some() {
+            let now = identity.basin_of(x.view());
+            here = Some(now);
+            Some(now)
+        } else {
+            None
+        };
+        if let (Some(sb), Some(from), Some(now)) = (superbasin.as_mut(), here_before, landed) {
+            sb.observe_accepted(from, now);
+            // Every accepted state is a landing point: the chain is standing
+            // on it and continuing from it.
+            if !unquenched {
+                sb.keep(now, e, x.view());
+            }
+        }
         if cfg.track_funnels {
             // Accepted hops only. A rejected proposal says the chain declined
             // to move, which is a statement about the acceptance rule rather
             // than about reachability.
-            if accept && let Some(prev) = here_before {
-                let now = identity.basin_of(x.view());
+            if let (Some(prev), Some(now)) = (here_before, landed) {
                 funnels.record(prev, now);
-                here = Some(now);
             }
             if funnels.pending() >= cfg.funnel_period && funnels.len() >= 8 {
                 funnel_split = funnels.split().ok();
@@ -3398,6 +3463,42 @@ where
             }
         }
 
+        // Offered on a period rather than behind the energy stall the other
+        // escapes use, because this mechanism carries its own trapping test and
+        // that test is sharper. A stall detector says the chain has stopped
+        // improving; the absorbing chain says the chain revisits its own states
+        // ten times more than crossing them would need, which is the condition
+        // being escaped. Stacking the two makes the move rare for a reason
+        // unrelated to whether it applies, and this crate has one mechanism
+        // already catalogued as inert rather than ineffective for that shape of
+        // reason.
+        if cfg.superbasin_escape && hops >= sb_last_jump + cfg.superbasin_period {
+            sb_last_jump = hops;
+            let from = *here.get_or_insert_with(|| identity.basin_of(x.view()));
+            if let Some(sb) = superbasin.as_mut() {
+                // Refusal is the normal outcome and is not a failure: the
+                // algebra declines when the graph is too small, too well mixed,
+                // or has no exit with a structure stored, and each of those is
+                // a case where jumping would push the chain out of a region it
+                // has not finished.
+                if let Ok(j) = sb.propose(from, rng) {
+                    quiet = 0;
+                    longest_quiet = 0;
+                    // No charged evaluations and no hop. The structure was
+                    // quenched and recorded when the run first reached it, so
+                    // the ledger has already paid for it, and counting a hop
+                    // here would make the charged-per-hop figure describe a
+                    // move that costs nothing.
+                    if j.energy < e {
+                        sb.observe_gain(e - j.energy);
+                    }
+                    e = j.energy;
+                    x = j.state;
+                    here = Some(j.basin);
+                }
+            }
+        }
+
         if n_rep > 1 {
             since_swap += 1;
             if since_swap >= cfg.swap_period {
@@ -3670,6 +3771,57 @@ where
         path_escapes,
         path_improvements,
         path_gain,
+        energy_trace: trace,
+        superbasin_counts: superbasin
+            .as_ref()
+            .filter(|_| cfg.superbasin_quotient)
+            .map(|sb| sb.counts.clone()),
+        superbasin_archive: superbasin
+            .as_ref()
+            .filter(|_| cfg.superbasin_quotient)
+            .map(|sb| sb.archive_entries()),
+        superbasin: superbasin.as_ref().map(|sb| {
+            let mut r = sb.report();
+            if cfg.superbasin_quotient {
+                #[cfg(feature = "ira")]
+                {
+                    // Zero for a structure against its own relabelling and
+                    // rotation, order one between different minima: measured
+                    // 2.7e-16 for a relabelled copy at 13 points and 2.9e-16 at
+                    // 38, against 1.58 for a different basin. The threshold sits
+                    // in a gap of fifteen orders of magnitude, and the report
+                    // carries the largest accepted and smallest rejected
+                    // distance so it can be checked rather than trusted.
+                    let metric = crate::shape::IraMetric::default();
+                    // The energy filter is wide on purpose. An orbit is a
+                    // level set of the energy for exact minima, but the archive
+                    // holds accepted chain states and 181 of 12287 relaxations
+                    // reach a gradient of 1e-3 within the step cap, so two
+                    // members of one orbit can sit further apart in energy than
+                    // a converged pair would. 1e-2 is fifty times below the
+                    // 0.5 spacing between distinct minima on this landscape, so
+                    // it cannot miss a true pair, and the shape distance does
+                    // the discriminating.
+                    r.quotient = Some(sb.quotient(|a, b| metric.distance(a, b), 1e-3, 1e-2, 16));
+                }
+                #[cfg(not(feature = "ira"))]
+                {
+                    // Without a shape distance the only usable test is exact
+                    // energy degeneracy, which merges accidental degeneracies
+                    // along with real orbits. Refused rather than reported as
+                    // if it were the same measurement.
+                    r.quotient = None;
+                }
+            }
+            if cfg.superbasin_features {
+                // Polyhedral template fractions, the same descriptor the
+                // benchmark reports a run's morphology with, so a separability
+                // measured here and a morphology quoted there mean the same
+                // thing.
+                r.separability = sb.separability(|st| crate::structure::ptm_fractions(st, n, 0.12));
+            }
+            r
+        }),
     }
 }
 

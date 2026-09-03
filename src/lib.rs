@@ -205,6 +205,7 @@ pub mod soap;
 pub mod source_escape;
 pub mod spectral;
 pub mod structure;
+pub mod superbasin;
 /// How a leftover chain uses the shared packing catalog.
 pub mod swarm;
 pub mod sym_hessian;
