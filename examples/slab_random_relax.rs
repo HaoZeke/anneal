@@ -12,11 +12,14 @@ use anneal_core::methods::cluster_hopping::Ledger;
 use anneal_core::methods::warm_lbfgs::WarmLbfgs;
 use common::rgpot_eindir::{RgpotObjective, emit_engine_manifest};
 use common::slab::{Mobile, place_hydrogens, read_system};
-use eindir_core::gradient::DifferentiableObjective;
+use eindir_core::gradient::{DifferentiableObjective, Gradient};
 use ndarray::ArrayView1;
 
 const ENERGY_TOL: f64 = 1e-4;
 const RELAX_STEPS: usize = 150;
+const CONVERGED_GRADIENT: f64 = 1e-3;
+/// Below any real CuH2 slab energy (64 Cu EAM is about -220 eV).
+const ENERGY_FLOOR: f64 = -1000.0;
 
 fn cluster_energies(energies: &[f64]) -> Vec<(f64, usize)> {
     let mut sorted: Vec<f64> = energies
@@ -85,18 +88,30 @@ fn main() {
         let x0 = place_hydrogens(&base_x, &species, &free, box_, seed);
         opt.forget();
         let before = ledger.spent();
-        let (energy, _xmin, _evals) = opt.minimize(x0.view(), relax_steps, |v: ArrayView1<f64>| {
+        let (energy, xmin, _evals) = opt.minimize(x0.view(), relax_steps, |v: ArrayView1<f64>| {
             if !ledger.charge() {
                 return None;
             }
             Some(obj.value_and_gradient(v))
         });
+        let ginf = if ledger.charge() {
+            obj.grad(xmin.view())
+                .iter()
+                .fold(0.0_f64, |acc, value| acc.max(value.abs()))
+        } else {
+            f64::INFINITY
+        };
         let charged = ledger.spent() - before;
-        if energy.is_finite() {
+        let accepted = energy.is_finite()
+            && ginf.is_finite()
+            && ginf < CONVERGED_GRADIENT
+            && energy > ENERGY_FLOOR;
+        if accepted {
             energies.push(energy);
         }
         println!(
-            "  relax {start}: e={energy:.6} charged={charged} remaining={}",
+            "  relax {start}: e={energy:.6} charged={charged} |g|={ginf:.3e} {} remaining={}",
+            if accepted { "accepted" } else { "rejected" },
             ledger.remaining()
         );
         start += 1;
@@ -108,7 +123,7 @@ fn main() {
     let lowest = clusters.first().map(|(e, _)| *e);
     let hits = clusters.first().map(|(_, n)| *n).unwrap_or(0);
     println!(
-        "distinct_minima {} (tol={ENERGY_TOL} eV)  starts {}  charged {}",
+        "distinct_minima {} (tol={ENERGY_TOL} eV)  accepted {}  charged {}",
         clusters.len(),
         energies.len(),
         ledger.spent()
