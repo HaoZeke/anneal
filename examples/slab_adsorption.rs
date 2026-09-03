@@ -10,7 +10,7 @@ use anneal_core::methods::cluster_search::{search_from_maybe_bank, verify};
 use common::efficiency::{apply_two_phase, bank_label, report_eval_wall, report_trace};
 use common::rgpot_eindir::{RgpotObjective, emit_engine_manifest};
 use common::slab::{
-    Mobile, adsorbate_groups, displace_adsorbate, hop_adsorbate, read_system, search_arm, symbol,
+    Mobile, adsorbate_groups, hop_atoms, place_adsorbates, read_system, search_arm, symbol,
 };
 use std::io::Write;
 
@@ -60,8 +60,8 @@ fn main() {
     let (base_x, species, free_seeds, box_) = read_system(&con);
     let n = species.len();
     let atmnrs: Vec<i32> = species.iter().map(|&z| z as i32).collect();
-    let hop = hop_adsorbate(&species, &free_seeds);
-    let groups = adsorbate_groups(&species, &hop);
+    let hop = hop_atoms(&free_seeds);
+    let groups = adsorbate_groups(&base_x, &species, &hop);
     let mut cfg = if search == "plain" {
         Config::for_molecular(species.clone(), groups, 1.0)
     } else {
@@ -108,7 +108,7 @@ fn main() {
         seed0 + seeds
     );
     for seed in seed0..seed0 + seeds {
-        let x0 = displace_adsorbate(&base_x, &species, &free_seeds, box_, seed);
+        let x0 = place_adsorbates(&base_x, &species, &free_seeds, box_, seed);
         if seed == seed0 {
             report_eval_wall(&obj, x0.view(), "cuh2");
         }

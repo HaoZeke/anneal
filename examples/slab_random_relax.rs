@@ -11,7 +11,7 @@ mod common;
 use anneal_core::methods::cluster_hopping::Ledger;
 use anneal_core::methods::warm_lbfgs::WarmLbfgs;
 use common::rgpot_eindir::{RgpotObjective, emit_engine_manifest};
-use common::slab::{Mobile, place_hydrogens, read_system};
+use common::slab::{Mobile, place_adsorbates, read_system};
 use eindir_core::gradient::{DifferentiableObjective, Gradient};
 use ndarray::ArrayView1;
 
@@ -85,7 +85,7 @@ fn main() {
     let mut start = 0u64;
     while ledger.remaining() > 0 {
         let seed = seed0.wrapping_add(start);
-        let x0 = place_hydrogens(&base_x, &species, &free, box_, seed);
+        let x0 = place_adsorbates(&base_x, &species, &free, box_, seed);
         opt.forget();
         let before = ledger.spent();
         let (energy, xmin, _evals) = opt.minimize(x0.view(), relax_steps, |v: ArrayView1<f64>| {
