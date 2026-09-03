@@ -157,11 +157,7 @@ impl RigidModes {
         for a in 0..3 {
             let mut r = Array1::<f64>::zeros(dim);
             for i in 0..n {
-                let d = [
-                    x[3 * i] - c[0],
-                    x[3 * i + 1] - c[1],
-                    x[3 * i + 2] - c[2],
-                ];
+                let d = [x[3 * i] - c[0], x[3 * i + 1] - c[1], x[3 * i + 2] - c[2]];
                 let b = (a + 1) % 3;
                 let g = (a + 2) % 3;
                 r[3 * i + b] = -d[g];
@@ -247,8 +243,7 @@ impl Metric {
     /// uses `p = D^1/2 z + sqrt(c) Z w`, whose covariance is `D + c Z Z^T` by
     /// independence of `z` and `w`.
     pub fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> Array1<f64> {
-        let z: Array1<f64> =
-            Array1::from_iter((0..self.dim).map(|_| StandardNormal.sample(rng)));
+        let z: Array1<f64> = Array1::from_iter((0..self.dim).map(|_| StandardNormal.sample(rng)));
         match &self.chol {
             Some(l) => {
                 let mut p = Array1::<f64>::zeros(self.dim);
@@ -370,7 +365,11 @@ impl Metric {
                 }
             }
         }
-        if lo.is_finite() && lo > 0.0 { hi / lo } else { 1.0 }
+        if lo.is_finite() && lo > 0.0 {
+            hi / lo
+        } else {
+            1.0
+        }
     }
 }
 
@@ -470,7 +469,11 @@ impl MetricAdaptation {
                 hi = hi.max(*v);
             }
         }
-        if lo.is_finite() && lo > 0.0 { hi / lo } else { 1.0 }
+        if lo.is_finite() && lo > 0.0 {
+            hi / lo
+        } else {
+            1.0
+        }
     }
 
     /// Builds the metric this chain will integrate with, frozen at `x`.
@@ -504,8 +507,7 @@ impl MetricAdaptation {
             MetricKind::ModelHessian => {
                 let scale = crate::model_hessian::spacing(x, n);
                 let mut h = crate::model_hessian::dense(x, n, scale);
-                let mean_mass =
-                    (0..dim).map(|i| h[[i, i]]).sum::<f64>() / dim.max(1) as f64;
+                let mean_mass = (0..dim).map(|i| h[[i, i]]).sum::<f64>() / dim.max(1) as f64;
                 let c = RIGID_MASS * mean_mass;
                 for q in &rigid.z {
                     for i in 0..dim {
@@ -698,7 +700,10 @@ mod tests {
         for i in 0..n {
             t[3 * i + 1] = 0.7;
         }
-        assert!((r.share(t.view()) - 1.0).abs() < 1e-12, "translation escaped");
+        assert!(
+            (r.share(t.view()) - 1.0).abs() < 1e-12,
+            "translation escaped"
+        );
         // A rotation about z, taken about the centroid.
         let mut c = [0.0f64; 3];
         for i in 0..n {
@@ -768,8 +773,7 @@ mod tests {
             }
         }
         let mut rng = StdRng::seed_from_u64(3);
-        let p: Array1<f64> =
-            Array1::from_iter((0..dim).map(|_| StandardNormal.sample(&mut rng)));
+        let p: Array1<f64> = Array1::from_iter((0..dim).map(|_| StandardNormal.sample(&mut rng)));
         let v = m.velocity(p.view());
         let back = dense.dot(&v);
         for i in 0..dim {
