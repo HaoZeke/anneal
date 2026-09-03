@@ -606,6 +606,11 @@ pub struct Config {
     /// comes back near 1e-6, and tight enough to bar a partial quench, which
     /// comes back near 1e-1 or worse.
     pub record_gradient: f64,
+    /// Whether every quenched energy is kept, not only the improving ones:
+    /// the sample [`crate::tail`] fits an endpoint to. Truncated by
+    /// [`Config::screen_margin`], since the full relaxation runs only where
+    /// the partial energy sits within the margin of the incumbent.
+    pub trace_quenched: bool,
     /// Extra relaxation steps spent polishing a new best to share tolerance.
     ///
     /// Screened hopping's economy is that almost no hop is fully relaxed, so
@@ -903,6 +908,7 @@ impl Config {
             screen_steps: 25,
             adaptive_screen: false,
             record_gradient: LennardJonesPreset::RECORD_GRADIENT * energy_scale / length_scale,
+            trace_quenched: false,
             polish_records: 0,
             surrogate_tolerance: 0.5,
             delayed_acceptance: false,

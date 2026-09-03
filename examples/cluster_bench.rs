@@ -158,6 +158,12 @@ fn main() {
     if let Ok(v) = std::env::var("SURROGATE_TOL") {
         cfg.surrogate_tolerance = v.parse().unwrap_or(0.5);
     }
+    // Above the energy range the screen never refuses, so every hop pays a
+    // full relaxation and the quenched sample is untruncated. The comparator
+    // for what the screen's own truncation does to a tail fit.
+    if let Ok(v) = std::env::var("SCREEN_MARGIN") {
+        cfg.screen_margin = v.parse().unwrap_or(2.0);
+    }
     cfg.contextual_moves = opts.contains(&"ctx");
     cfg.bayes_screen = opts.contains(&"bayes");
     cfg.angular_moves = opts.contains(&"angular");
@@ -171,6 +177,11 @@ fn main() {
         cfg.keying = Keying::Canonical;
         cfg.merge_radius = 0.3;
     }
+    // Every quenched energy, to a file, when the caller asks for one. The
+    // charged count travels with each so a prefix of the file is what the run
+    // had seen at that point in its budget.
+    let trace_dir = std::env::var("QUENCH_TRACE").ok();
+    cfg.trace_quenched = trace_dir.is_some();
     if opts.contains(&"triplet") {
         cfg.keying = Keying::Triplet;
         // The descriptor appends two kernel spectra to the distance spectrum,
@@ -367,6 +378,27 @@ fn main() {
         );
         if let Some(m) = morphology {
             println!("      {m}");
+        }
+        if let Some(dir) = trace_dir.as_deref() {
+            let path = format!("{dir}/{}_{n}_s{seed}.trace", spec.replace(':', ""));
+            let mut body = format!(
+                "# charged basins energy converged\n# budget {budget} solved {} \
+                 first_encounter {} screen_margin {}\n",
+                hit as u8,
+                encounters
+                    .last()
+                    .filter(|e| e.found())
+                    .map(|e| e.charged().to_string())
+                    .unwrap_or_else(|| "censored".into()),
+                cfg.screen_margin
+            );
+            for (c, b, e, k) in &out.quenched {
+                body.push_str(&format!("{c} {b} {e:.9} {}\n", *k as u8));
+            }
+            match std::fs::write(&path, body) {
+                Ok(()) => println!("      trace {} rows -> {path}", out.quenched.len()),
+                Err(e) => eprintln!("      trace write failed: {e}"),
+            }
         }
     }
     println!(
