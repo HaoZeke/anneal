@@ -42,6 +42,18 @@ pub fn free_hydrogen(species: &[u32], free: &[usize]) -> Vec<usize> {
     free.iter().copied().filter(|&i| species[i] == 1).collect()
 }
 
+/// Atoms the hop is allowed to propose on: the free hydrogen, or the
+/// full free set when the con has no H. The quench may still relax
+/// free substrate atoms; the move library must not relocate them.
+pub fn hop_adsorbate(species: &[u32], free: &[usize]) -> Vec<usize> {
+    let hydrogen = free_hydrogen(species, free);
+    if hydrogen.is_empty() {
+        free.to_vec()
+    } else {
+        hydrogen
+    }
+}
+
 /// One rigid group for an H2 (or single-H) adsorbate; otherwise each free
 /// atom is its own group so multi-site hydrogen can hop independently.
 pub fn adsorbate_groups(species: &[u32], free: &[usize]) -> Vec<Vec<usize>> {
@@ -231,5 +243,12 @@ mod tests {
             adsorbate_groups(&species, &free),
             vec![vec![1], vec![2], vec![3], vec![4]]
         );
+    }
+
+    #[test]
+    fn hops_only_the_hydrogen() {
+        let species = vec![29, 29, 29, 1, 1, 1];
+        let free = vec![1, 2, 3, 4, 5];
+        assert_eq!(super::hop_adsorbate(&species, &free), vec![3, 4, 5]);
     }
 }
