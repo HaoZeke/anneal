@@ -212,6 +212,9 @@ pub mod sym_hessian;
 pub mod symmetrise;
 /// Endpoint of the quenched-energy distribution, by peaks over threshold.
 pub mod tail;
+/// Replica exchange: the bias-aware swap ratio, the non-reversible sweep, and
+/// a ladder placed by the communication barrier the run measures.
+pub mod tempering;
 /// Permutation invariants from a three-body tensor, for basin identity.
 pub mod tensor_id;
 pub mod terminate;
@@ -276,5 +279,9 @@ pub use runner::{
     qmc_skip_from_seed, run_rs, run_rs_qmc_variant, run_rs_variant, run_rs_variant_resumed,
 };
 pub use sampler::Sampler;
+pub use tempering::{
+    IndexProcess, Ladder, ReplicaMove, ReplicaTarget, SwapScheme, TARGET_SWAP_ACCEPT,
+    beta_step_for_acceptance, biased_swap_log_ratio, swap_log_ratio, swap_probability,
+};
 pub use variant::SaVariant;
 pub use version::ANNEAL_VERSION;
