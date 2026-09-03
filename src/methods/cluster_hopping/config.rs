@@ -685,6 +685,26 @@ pub struct Config {
     /// library also carries moves that change a packing rather than displace
     /// it.
     pub displacement_only: bool,
+    /// Report the superbasin hierarchy the run's own transitions imply: one
+    /// basin lookup per hop and no evaluations. See [`crate::superbasin`].
+    pub superbasin_report: bool,
+    /// Jump out of a superbasin by solving the absorbing chain over the
+    /// visited basins, on a period; turns the report on. The exit
+    /// distribution is supported on basins already visited, so it changes
+    /// the speed of reaching them and not what the search can reach.
+    pub superbasin_escape: bool,
+    /// Hops between superbasin escapes.
+    pub superbasin_period: usize,
+    /// Record every fully quenched energy the run produces, in order, as a
+    /// sample from the density of states of the region the chain is in.
+    pub energy_trace: bool,
+    /// Rebuild the transition graph with basin identity taken modulo the
+    /// symmetry orbit at the end of the run (needs `ira`), and report the
+    /// difference.
+    pub superbasin_quotient: bool,
+    /// Measure whether the coarse states the transitions imply are separable
+    /// by structure, at the end of the run and off the ledger.
+    pub superbasin_features: bool,
     /// Propose by a Hamiltonian trajectory instead of a displacement. The
     /// trajectory runs on the underlying potential and its endpoint is
     /// quenched, so the acceptance test is unchanged. Needs value and
@@ -941,6 +961,12 @@ impl Config {
                 * (n_points as f64).cbrt(),
             min_separation: LennardJonesPreset::MIN_SEPARATION * length_scale,
             displacement_only: false,
+            superbasin_report: false,
+            superbasin_escape: false,
+            superbasin_period: 2_000,
+            energy_trace: false,
+            superbasin_quotient: false,
+            superbasin_features: false,
             hmc: None,
         }
     }
