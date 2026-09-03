@@ -41,19 +41,22 @@
 //!
 //! ## Leave start
 //!
-//! Leave is not a map of the occupied structure. A min-mode climb, a
-//! covering pullback of the packing mean, a one-atom kick, and a named
-//! lattice rewrite are all functions of the live tangent or of a
-//! morphology the search is not allowed to know. The quench of any of
-//! those lands in the funnel it left: that is what a funnel is.
+//! Occupancy searches a descriptor (DECAF histograms, the landfold
+//! plane). A raw quench is the identity projector onto the occupied
+//! funnel, so a step in that descriptor plus a raw quench is random: it
+//! returns home. The compacted first phase (Locatelli--Schoen diameter
+//! penalty, Doye compression) reweights catchment toward compact
+//! packings. Landfold names whether the raw polish left the occupied
+//! community. That pair is the mint: aim in the book, quench on a
+//! surface whose catchment is not the occupied blob.
 //!
 //! Another *packing community* already on file: take a catalog
 //! representative of an under-occupied community and quench it. That
-//! draw does not consult the live coordinates. Cells of one packing are
-//! a superbasin; they are not OtherFamily. A one-community book has
-//! nothing to draw, so the extra Walks. The hop library of this PES is
-//! the mint. Occupancy extras do not invent a packing by pushing off
-//! the structure they stand on, and they do not draw a random cluster.
+//! draw does not consult the live coordinates. A one-community book
+//! with remaining improvement still aims: ArchiveHole is a landfold
+//! covering start, compacted then raw-polished. Exhausted EI Walks.
+//! Occupancy extras do not climb a min-mode and do not draw a random
+//! cluster.
 //!
 //! ## Modes
 //!
@@ -128,17 +131,18 @@ pub enum OccupancyLeaveAdopt {
 /// only clears the cell grain is an isomer of the packing the extra is
 /// leaving.
 ///
-/// Walk is the one-community answer and the answer whenever there is
-/// nothing to draw. The mint is the hop library of this PES, not a
-/// special Leave operator. ArchiveHole remains a policy tag for a
-/// covering of the occupied tangent; the leave rule does not select it.
+/// Walk is the answer when leftover is still hatching or EI on the
+/// seen book is exhausted. ArchiveHole is a landfold-away start whose
+/// quench is compacted, then polished on the plain potential; landfold
+/// names the landing. OtherFamily is a draw from a community already
+/// on file.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OccupancyLeaveTarget {
     /// Coordinator has a representative of a different packing community.
     OtherFamily,
-    /// Covering of the occupied packing tangent. Not a Leave.
+    /// Landfold covering start, compacted quench, landfold identity.
     ArchiveHole,
-    /// Nothing to draw: keep walking.
+    /// Keep walking on the hop library.
     Walk,
 }
 
@@ -252,10 +256,9 @@ pub fn leftover_birth_probability(n: u64, k: u64) -> f64 {
 }
 
 /// Leave destination. OtherFamily is a draw from another packing
-/// community on the sparsified book (`communities >= 2` and a
-/// representative on file). A one-community book Walks: there is
-/// nothing to draw, and a covering of the occupied tangent is not a
-/// Leave. Exhausted EI Walks. Unsaturated leftover Walks.
+/// community on the sparsified book. A one-community book with open
+/// EI aims in landfold and quenches compacted (ArchiveHole). Exhausted
+/// EI Walks. Unsaturated leftover Walks.
 pub fn occupancy_leave_target(
     other_family_in_catalog: bool,
     packing_saturated: bool,
@@ -272,8 +275,9 @@ pub fn occupancy_leave_target(
 
 /// [`occupancy_leave_target`] with the FunnelModel EI bit.
 ///
-/// Leave is a draw or a walk. A covering, a min-mode climb, and a
-/// named morphology are not destinations.
+/// Descriptor aim plus a compacted quench is the mint while EI says
+/// the seen book still has remaining improvement. A min-mode climb
+/// and a named morphology are not destinations.
 pub fn occupancy_leave_by_ei(
     other_family_in_catalog: bool,
     packing_saturated: bool,
@@ -282,8 +286,11 @@ pub fn occupancy_leave_by_ei(
     leftover_dwell: bool,
 ) -> OccupancyLeaveTarget {
     let _ = packing_saturated;
-    if !leftover_dwell || ei_exhausted || packing_communities < 2 {
+    if !leftover_dwell || ei_exhausted {
         return OccupancyLeaveTarget::Walk;
+    }
+    if packing_communities < 2 {
+        return OccupancyLeaveTarget::ArchiveHole;
     }
     if other_family_in_catalog {
         OccupancyLeaveTarget::OtherFamily
@@ -2131,10 +2138,10 @@ mod tests {
     }
 
     #[test]
-    fn a_one_packing_book_walks_even_with_open_ei() {
+    fn a_one_packing_book_aims_while_ei_is_open() {
         assert_eq!(
             occupancy_leave_by_ei(false, false, 1, false, true),
-            OccupancyLeaveTarget::Walk
+            OccupancyLeaveTarget::ArchiveHole
         );
         assert_eq!(
             occupancy_leave_by_ei(true, false, 1, true, true),

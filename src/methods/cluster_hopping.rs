@@ -1515,11 +1515,12 @@ where
                 } else {
                     Vec::new()
                 };
-                // Leave is not a map of the occupied structure. A
-                // min-mode climb, a covering pullback, and a one-atom
-                // kick are functions of the live tangent; their quench
-                // lands in the funnel they left. The boundary proposal
-                // is the destination the checkpoint already chose.
+                // The boundary proposal is the destination: another
+                // packing, or a landfold-away start. The caller's
+                // relax applies the compacted first phase when a
+                // surface portfolio is configured, then polishes on
+                // the plain potential. A min-mode climb of the live
+                // tangent is not this path.
                 let quenched = relax(ledger, state.view(), cfg.relax_steps);
                 let (candidate_energy, candidate) = quenched;
                 let left_packing = |trial: &Array1<f64>| {
