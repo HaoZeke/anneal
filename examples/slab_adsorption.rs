@@ -9,7 +9,9 @@ use anneal_core::methods::cluster_hopping::{Config, Ledger, SoapProposalMode, co
 use anneal_core::methods::cluster_search::{search_from_maybe_bank, verify};
 use common::efficiency::{apply_two_phase, bank_label, report_eval_wall, report_trace};
 use common::rgpot_eindir::{RgpotObjective, emit_engine_manifest};
-use common::slab::{Mobile, adsorbate_groups, displace_adsorbate, read_system, search_arm, symbol};
+use common::slab::{
+    Mobile, adsorbate_groups, displace_adsorbate, hop_adsorbate, read_system, search_arm, symbol,
+};
 use std::io::Write;
 
 fn soap_mode_from_env() -> SoapProposalMode {
@@ -58,15 +60,19 @@ fn main() {
     let (base_x, species, free_seeds, box_) = read_system(&con);
     let n = species.len();
     let atmnrs: Vec<i32> = species.iter().map(|&z| z as i32).collect();
-    let groups = adsorbate_groups(&species, &free_seeds);
+    let hop = hop_adsorbate(&species, &free_seeds);
+    let groups = adsorbate_groups(&species, &hop);
     let mut cfg = if search == "plain" {
         Config::for_molecular(species.clone(), groups, 1.0)
     } else {
         Config::recommended_molecular(species.clone(), groups, 1.0)
     };
-    cfg.active_region = Some((free_seeds.clone(), 1));
-    if !free_seeds.is_empty() && free_seeds.len() < n {
-        let adsorbate = free_seeds
+    // Hop the adsorbate only. shells=0 so the first Cu shell is not
+    // added to the move mask; the quench still relaxes free substrate
+    // through Mobile.
+    cfg.active_region = Some((hop.clone(), 0));
+    if !hop.is_empty() && hop.len() < n {
+        let adsorbate = hop
             .iter()
             .map(|&i| covalent_radius(species[i]))
             .fold(0.0_f64, f64::max);
