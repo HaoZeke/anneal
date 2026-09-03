@@ -5197,6 +5197,14 @@ pub enum ClusterFingerprint {
     /// Sorted distances with the two-body and three-body kernel spectra
     /// appended, compared by Euclidean distance.
     Triplet(Box<crate::tensor_id::TripletSpectrum>),
+    /// Per-site coordination numbers, smoothed into a kernel density estimate.
+    Coordination(Box<crate::morphology::CoordinationKde>),
+    /// Steinhardt bond-order parameters of the whole cluster.
+    #[cfg(feature = "featomic")]
+    Steinhardt(Box<crate::morphology::SteinhardtQ>),
+    /// Leading principal component of the SOAP power spectrum, fitted online.
+    #[cfg(feature = "featomic")]
+    SoapProjection(Box<crate::morphology::SoapProjection>),
     /// Coordinates put in a canonical order against a fixed reference, so
     /// Euclidean distance between two of them is a shape distance.
     #[cfg(feature = "ira")]
@@ -5258,9 +5266,69 @@ impl ClusterFingerprint {
     /// width `sigma` for [`Keying::Triplet`]. `sigma` carries the length units
     /// of the coordinates.
     pub fn of_tuned(n_points: usize, keying: Keying, reference: &Array1<f64>, sigma: f64) -> Self {
+        Self::of_full(n_points, keying, reference, sigma, 1.0)
+    }
+
+    /// The descriptor for a named keying at a length scale of `scale`, the
+    /// potential's `r_min` over `2^(1/6)`, which moves the neighbour shells
+    /// the morphology descriptors cut between.
+    pub fn of_scaled(n_points: usize, keying: Keying, reference: &Array1<f64>, scale: f64) -> Self {
+        Self::of_full(n_points, keying, reference, 2.5, scale)
+    }
+
+    /// Every named keying, with the triplet kernel width and the length scale.
+    pub fn of_full(
+        n_points: usize,
+        keying: Keying,
+        reference: &Array1<f64>,
+        sigma: f64,
+        scale: f64,
+    ) -> Self {
         #[cfg(not(feature = "ira"))]
         let _ = reference;
+        #[cfg(not(feature = "featomic"))]
+        let _ = scale;
         match keying {
+            Keying::Coordination => {
+                let mut kde = crate::morphology::CoordinationKde::for_lj(n_points, scale);
+                // The bin centres are a measurement; COORD_BINS and
+                // COORD_SIGMA override them without a rebuild.
+                if let Ok(v) = std::env::var("COORD_BINS") {
+                    let bins: Vec<f64> = v
+                        .split(',')
+                        .filter_map(|t| t.trim().parse::<f64>().ok())
+                        .collect();
+                    if !bins.is_empty() {
+                        kde.bins = bins;
+                    }
+                }
+                if let Ok(v) = std::env::var("COORD_SIGMA")
+                    && let Ok(sg) = v.parse::<f64>()
+                    && sg > 0.0
+                {
+                    kde.sigma = sg;
+                }
+                ClusterFingerprint::Coordination(Box::new(kde))
+            }
+            #[cfg(feature = "featomic")]
+            Keying::Q4 => ClusterFingerprint::Steinhardt(Box::new(
+                crate::morphology::SteinhardtQ::q4(n_points, scale),
+            )),
+            #[cfg(feature = "featomic")]
+            Keying::Q4Q6 => ClusterFingerprint::Steinhardt(Box::new(
+                crate::morphology::SteinhardtQ::q4q6(n_points, scale),
+            )),
+            #[cfg(feature = "featomic")]
+            Keying::Soap => ClusterFingerprint::SoapProjection(Box::new(
+                crate::morphology::SoapProjection::new(n_points, scale),
+            )),
+            // Without featomic there is no spherical expansion; falling back
+            // to the distance spectrum would run an arm that reports itself as
+            // a Q4 bias and is not one.
+            #[cfg(not(feature = "featomic"))]
+            Keying::Q4 | Keying::Q4Q6 | Keying::Soap => {
+                panic!("keying {keying:?} needs the `featomic` feature")
+            }
             Keying::Shape => ClusterFingerprint::Coordinates,
             Keying::Core => ClusterFingerprint::Core { species: None },
             Keying::Distances => ClusterFingerprint::Spectrum(SortedPairs { n_points }),
@@ -5307,7 +5375,13 @@ impl ClusterFingerprint {
                     })
                 }
             }
-            other => Self::of_tuned(cfg.n_points, other, reference, cfg.keying_sigma),
+            other => Self::of_full(
+                cfg.n_points,
+                other,
+                reference,
+                cfg.keying_sigma,
+                cfg.morphology_scale,
+            ),
         }
     }
 }
@@ -5327,6 +5401,11 @@ impl Fingerprint for ClusterFingerprint {
             }
             ClusterFingerprint::Sites(s) => s.describe(x),
             ClusterFingerprint::Triplet(t) => t.describe(x),
+            ClusterFingerprint::Coordination(c) => c.describe(x),
+            #[cfg(feature = "featomic")]
+            ClusterFingerprint::Steinhardt(s) => s.describe(x),
+            #[cfg(feature = "featomic")]
+            ClusterFingerprint::SoapProjection(s) => s.describe(x),
             #[cfg(feature = "ira")]
             ClusterFingerprint::Canonical(c) => c.describe(x),
             #[cfg(feature = "featomic")]
