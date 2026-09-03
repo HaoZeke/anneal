@@ -111,6 +111,41 @@ pub enum Keying {
     /// coordinate. Its merge radius is a different number from the distance
     /// keying's, larger by the length of the appended block.
     Triplet,
+    /// Steinhardt Q4 of the whole cluster: a morphology coordinate, so a
+    /// bias on it deposits on shape rather than on basin identity. Its merge
+    /// radius is a deposition width in bond-order units; global Q4 separates
+    /// the icosahedral and fcc funnels of LJ38 by about 0.15.
+    Q4,
+    /// Steinhardt Q4 and Q6 as a two-component coordinate.
+    Q4Q6,
+    /// Leading principal component of the SOAP power spectrum, fitted online
+    /// from the structures the run has visited.
+    Soap,
+    /// Kernel density estimate over per-site coordination numbers.
+    Coordination,
+}
+
+impl Keying {
+    /// Whether this keying deposits on morphology rather than on basin
+    /// identity.
+    pub fn is_morphology(self) -> bool {
+        matches!(
+            self,
+            Keying::Q4 | Keying::Q4Q6 | Keying::Soap | Keying::Coordination
+        )
+    }
+
+    /// The deposition width these coordinates want, in their own units; a
+    /// merge radius carried over from the distance spectrum would put a
+    /// whole run into one bin of a coordinate that lives in `[0, 1]`.
+    pub fn default_merge_radius(self) -> Option<f64> {
+        match self {
+            Keying::Q4 | Keying::Q4Q6 => Some(0.01),
+            Keying::Soap => Some(0.25),
+            Keying::Coordination => Some(0.5),
+            _ => None,
+        }
+    }
 }
 
 /// Constraint applied to SOAP proposals on grouped systems.
@@ -178,6 +213,10 @@ pub struct Config {
     /// potential with a different pair minimum needs it scaled the way
     /// `container` and `min_separation` are.
     pub keying_sigma: f64,
+    /// Length scale of the potential, as `r_min / 2^(1/6)`: 1 for
+    /// Lennard-Jones. Only the morphology keyings read it, since their
+    /// cutoffs sit between the first and second neighbour shells.
+    pub morphology_scale: f64,
     /// Design point for the budget-window temperature, as a fraction of the
     /// sphere-model descent boundary. Must lie strictly below two.
     pub theta: f64,
@@ -931,6 +970,7 @@ impl Config {
             // minimum while remaining proportional to the declared scale.
             merge_radius: LennardJonesPreset::MERGE_RADIUS * length_scale,
             keying_sigma: 2.5 * length_scale,
+            morphology_scale: length_scale,
             shape_keyed: false,
             theta: 0.5,
             budget_window: false,

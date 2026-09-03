@@ -601,6 +601,41 @@ fn main() {
             if let Ok(w) = v.parse::<usize>() {
                 h.warmup_hops = w;
             }
+    // Morphology coordinates. Unlike every keying above, these do not answer
+    // "have I been here before" but "what shape is this", so the well-tempered
+    // bias deposits on a structural coordinate rather than on basin identity.
+    //
+    // Each carries its own deposition width. A merge radius of 0.7 taken from
+    // the distance spectrum would put a whole run into one bin on a coordinate
+    // that lives in [0, 1], and the arm would then read as a control that
+    // happened to cost more.
+    cfg.morphology_scale = scale;
+    for (flag, keying) in [
+        ("q4", Keying::Q4),
+        ("q4q6", Keying::Q4Q6),
+        ("soap", Keying::Soap),
+        ("coord", Keying::Coordination),
+    ] {
+        if opts.contains(&flag) {
+            cfg.keying = keying;
+            if let Some(r) = keying.default_merge_radius() {
+                cfg.merge_radius = r;
+            }
+        }
+    }
+    if cfg.keying.is_morphology() && cfg.keying != Keying::Coordination && !cfg!(feature = "featomic")
+    {
+        // Refusing rather than falling back to the distance spectrum: a run
+        // that reports itself as a Q4 arm and is not one is worse than no run.
+        eprintln!(
+            "keying {:?} needs the `featomic` feature; rebuild with --features featomic",
+            cfg.keying
+        );
+        std::process::exit(2);
+    }
+    if let Ok(v) = std::env::var("MERGE_RADIUS") {
+        if let Ok(r) = v.parse::<f64>() {
+            cfg.merge_radius = r;
         }
         if let Ok(v) = std::env::var("HMC_MAX_DEPTH") {
             if let Ok(d) = v.parse::<u32>() {
