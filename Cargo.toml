@@ -142,6 +142,10 @@ name = "slab_adsorption"
 required-features = ["rgpot-ex", "featomic", "bank-rpc"]
 
 [[example]]
+name = "slab_random_relax"
+required-features = ["rgpot-ex"]
+
+[[example]]
 name = "bank_server"
 required-features = ["bank-rpc"]
 
