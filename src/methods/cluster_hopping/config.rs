@@ -9,8 +9,6 @@ use super::*;
 /// the lever: at 75 points the merge radius on a distance spectrum is sharply
 /// sensitive, 13 seeds in 24 at 0.7 against 0 in 8 at 0.95, and a descriptor
 /// that separates distinct structures more cleanly is what would widen that.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize)]
-#[serde(rename_all = "snake_case")]
 /// How the replica ladder offers swaps and where its rungs sit. The swap
 /// ratio is the bias-aware form of [`crate::tempering`] under every mode;
 /// what changes is which pairs are offered per sweep, whether the rungs
@@ -69,6 +67,8 @@ impl LadderMode {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum Keying {
     /// Sorted pairwise distances.
     #[default]
