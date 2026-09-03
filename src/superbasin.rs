@@ -330,6 +330,31 @@ impl HopCounts {
     }
 }
 
+
+impl HopCounts {
+    /// Recorded transitions as `(from, to, reweighted mass)`.
+    pub fn edges(&self) -> impl Iterator<Item = (usize, usize, f64)> + '_ {
+        self.out
+            .iter()
+            .flat_map(|(i, tos)| tos.iter().map(move |(j, w)| (*i, *j, *w)))
+    }
+
+    /// Hops the chain spent in a basin.
+    pub fn time_of(&self, basin: usize) -> f64 {
+        self.time.get(&basin).copied().unwrap_or(0.0)
+    }
+
+    /// Mass that left a basin towards a destination never registered.
+    pub fn leak_of(&self, basin: usize) -> f64 {
+        self.leak.get(&basin).copied().unwrap_or(0.0)
+    }
+
+    /// Total hops recorded.
+    pub fn total_time(&self) -> f64 {
+        self.time.values().sum()
+    }
+}
+
 // ---------------------------------------------------------------------------
 // The jump chain
 // ---------------------------------------------------------------------------

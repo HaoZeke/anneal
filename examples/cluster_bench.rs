@@ -272,12 +272,38 @@ fn archive_analysis(
     // And the statistic under the structural merge, which is the coarsest of
     // the three and therefore the most favourable to the trap reading.
     let mut map: BTreeMap<usize, usize> = BTreeMap::new();
-    for v in classes.values() {
+    let mut class_info: BTreeMap<usize, (usize, f64, [f64; 3], [f64; 3])> = BTreeMap::new();
+    for (label, v) in &classes {
         let rep = v.iter().map(|(b, _)| *b).min().unwrap_or(0);
         for (b, _) in v {
             map.insert(*b, rep);
         }
+        // Template and common-neighbour fractions of the class, recovered from
+        // the quantised label, and the deepest structure it holds. This is the
+        // correspondence test: an icosahedral funnel shows in the 555 bond
+        // count, a decahedral one in 421 and 422 together.
+        let deepest = v.iter().map(|(_, e)| *e).fold(f64::INFINITY, f64::min);
+        let p = &label.0;
+        let c = &label.1;
+        class_info.insert(
+            rep,
+            (
+                v.len(),
+                deepest,
+                [
+                    p.first().copied().unwrap_or(0) as f64 / 20.0,
+                    p.get(1).copied().unwrap_or(0) as f64 / 20.0,
+                    p.get(2).copied().unwrap_or(0) as f64 / 20.0,
+                ],
+                [
+                    c.first().copied().unwrap_or(0) as f64 / 20.0,
+                    c.get(1).copied().unwrap_or(0) as f64 / 20.0,
+                    c.get(2).copied().unwrap_or(0) as f64 / 20.0,
+                ],
+            ),
+        );
     }
+    confinement(counts, &map, &class_info);
     let merged = profile(&regroup(counts, &map), &params, 16, 4096, 384, 4096);
     println!(
         "      merging by structural type: {} -> {} states, expected visits {:.2} median \
@@ -292,6 +318,125 @@ fn archive_analysis(
         merged.depth,
         base.lumped_fraction,
         merged.lumped_fraction
+    );
+}
+
+
+/// Confinement rather than recurrence.
+///
+/// Expected visits per state cannot see a superbasin whose interior is larger
+/// than the sample: a funnel holding order exp(alpha N) minima, entered eleven
+/// thousand times, gives about one visit per state whether the chain is free or
+/// completely confined. Confinement is the property that separates those, and
+/// it is visible without any state being revisited: how much of the recorded
+/// transition mass stays inside a morphological class against how much leaves
+/// it, and how the chain's time is distributed over classes.
+fn confinement(
+    counts: &anneal_core::superbasin::HopCounts,
+    labels: &std::collections::BTreeMap<usize, usize>,
+    class_info: &std::collections::BTreeMap<usize, (usize, f64, [f64; 3], [f64; 3])>,
+) {
+    use std::collections::BTreeMap;
+    let cls = |b: usize| labels.get(&b).copied().unwrap_or(usize::MAX);
+
+    let mut internal: BTreeMap<usize, f64> = BTreeMap::new();
+    let mut escaping: BTreeMap<usize, f64> = BTreeMap::new();
+    let mut entries: BTreeMap<usize, f64> = BTreeMap::new();
+    let mut time_in: BTreeMap<usize, f64> = BTreeMap::new();
+    for (i, j, w) in counts.edges() {
+        let (a, b) = (cls(i), cls(j));
+        if a == usize::MAX {
+            continue;
+        }
+        if a == b {
+            *internal.entry(a).or_insert(0.0) += w;
+        } else {
+            *escaping.entry(a).or_insert(0.0) += w;
+            if b != usize::MAX {
+                *entries.entry(b).or_insert(0.0) += w;
+            }
+        }
+    }
+    for b in counts.nodes() {
+        let c = cls(b);
+        if c != usize::MAX {
+            *time_in.entry(c).or_insert(0.0) += counts.time_of(b);
+            *escaping.entry(c).or_insert(0.0) += counts.leak_of(b);
+        }
+    }
+    let total_time: f64 = time_in.values().sum();
+
+    // Occupancy concentration: does the run happen inside a few classes.
+    let mut by_time: Vec<(usize, f64)> = time_in.iter().map(|(c, t)| (*c, *t)).collect();
+    by_time.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
+    let share = |k: usize| -> f64 {
+        by_time.iter().take(k).map(|(_, t)| *t).sum::<f64>() / total_time.max(1.0)
+    };
+    println!(
+        "      confinement: {} classes carry the run, top 1 holds {:.3} of the hops, \
+         top 3 {:.3}, top 5 {:.3}, top 10 {:.3}",
+        by_time.len(),
+        share(1),
+        share(3),
+        share(5),
+        share(10)
+    );
+
+    // Timescale separation without recurrence: mass that stays against mass
+    // that leaves, and the hops between class changes.
+    let mut ratios: Vec<f64> = Vec::new();
+    for (c, i) in &internal {
+        let e = escaping.get(c).copied().unwrap_or(0.0);
+        if e > 0.0 {
+            ratios.push(i / e);
+        }
+    }
+    ratios.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    let q = |v: &Vec<f64>, f: f64| -> f64 {
+        if v.is_empty() {
+            f64::NAN
+        } else {
+            v[((v.len() - 1) as f64 * f) as usize]
+        }
+    };
+    println!(
+        "      internal mass over escaping mass, per class: {:.2} median, {:.2} at the \
+         ninth decile, {:.2} max, over {} classes with an exit",
+        q(&ratios, 0.5),
+        q(&ratios, 0.9),
+        q(&ratios, 1.0),
+        ratios.len()
+    );
+
+    println!(
+        "      largest classes by occupancy: {}",
+        by_time
+            .iter()
+            .take(6)
+            .map(|(c, t)| {
+                let e = escaping.get(c).copied().unwrap_or(0.0);
+                let dwell = if e > 0.0 { t / e } else { f64::INFINITY };
+                let (n_b, e_min, ptm, cna) = class_info
+                    .get(c)
+                    .copied()
+                    .unwrap_or((0, f64::NAN, [0.0; 3], [0.0; 3]));
+                format!(
+                    "[{} basins, {:.3} of hops, dwell {:.0} hops, deepest {:.4}, \
+                     ptm fcc/hcp/ico {:.2}/{:.2}/{:.2}, cna 555/421/422 {:.2}/{:.2}/{:.2}]",
+                    n_b,
+                    t / total_time.max(1.0),
+                    dwell,
+                    e_min,
+                    ptm[0],
+                    ptm[1],
+                    ptm[2],
+                    cna[0],
+                    cna[1],
+                    cna[2]
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(" ")
     );
 }
 
@@ -349,6 +494,7 @@ fn main() {
     if cfg.superbasin_quotient {
         cfg.superbasin_report = true;
     }
+    cfg.energy_trace = opts.contains(&"trace");
     cfg.superbasin_features = opts.contains(&"sbfeat");
     if cfg.superbasin_features {
         cfg.superbasin_report = true;
@@ -512,6 +658,30 @@ fn main() {
             )
         });
         let hit = reference.map(|r| out.best < r + 1e-4).unwrap_or(false);
+        if let Some(tr) = &out.energy_trace {
+            // One file per seed, one quenched energy per line, in order. The
+            // name carries the outcome because which region a run sat in is the
+            // thing a reader has to condition on.
+            let dir = std::env::var("TRACE_DIR").unwrap_or_else(|_| ".".into());
+            let tag = if hit { "solved" } else { "failed" };
+            let path = format!("{dir}/trace_lj{n}_s{seed}_{tag}.txt");
+            let body: String = tr
+                .iter()
+                .map(|v| format!("{v:.6}\n"))
+                .collect::<Vec<_>>()
+                .concat();
+            if let Err(e) = std::fs::write(&path, body) {
+                eprintln!("could not write {path}: {e}");
+            } else {
+                println!(
+                    "    energy trace: {} full quenches written to {path}, \
+                     lowest {:.6}, highest {:.6}",
+                    tr.len(),
+                    tr.iter().copied().fold(f64::INFINITY, f64::min),
+                    tr.iter().copied().fold(f64::NEG_INFINITY, f64::max)
+                );
+            }
+        }
         if hit {
             solved += 1;
         }
