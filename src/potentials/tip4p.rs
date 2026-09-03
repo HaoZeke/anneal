@@ -246,8 +246,8 @@ impl crate::pes_exploration::PesSurface for Tip4pCluster {
 /// Random compact cluster: centres of mass at liquid-like density, random
 /// orientations in the principal rotation ball.
 pub fn random_cluster<R: rand::Rng + ?Sized>(n_molecules: usize, rng: &mut R) -> Array1<f64> {
-    let radius = 1.15 * SIGMA * (n_molecules as f64).cbrt();
-    let min_sep = 2.35;
+    let radius = 1.35 * 2.75 * (n_molecules as f64).cbrt();
+    let min_sep = 2.70;
     let mut coms: Vec<[f64; 3]> = Vec::with_capacity(n_molecules);
     let mut tries = 0;
     while coms.len() < n_molecules && tries < 40_000 {
@@ -277,18 +277,67 @@ pub fn random_cluster<R: rand::Rng + ?Sized>(n_molecules: usize, rng: &mut R) ->
         n_molecules,
         "could not place {n_molecules} waters without overlap"
     );
+    let pot = Tip4pCluster::new(n_molecules.max(2));
     let mut x = Array1::zeros(6 * n_molecules);
     for (i, p) in coms.iter().enumerate() {
         for k in 0..3 {
             x[3 * i + k] = p[k];
         }
+        let outward = {
+            let nrm = (p[0] * p[0] + p[1] * p[1] + p[2] * p[2]).sqrt();
+            if nrm > 1e-8 {
+                [p[0] / nrm, p[1] / nrm, p[2] / nrm]
+            } else {
+                [0.0, 0.0, 1.0]
+            }
+        };
+        let body = body_sites();
+        let bisector = [body[3][0], body[3][1], body[3][2]];
+        let aligned = rotation_taking(bisector, outward);
+        let mut best_w = rotation_vector(aligned);
+        let mut best_sep = 0.0_f64;
+        for trial in 0..8 {
+            let w = if trial == 0 {
+                best_w
+            } else {
+                [
+                    rng.random_range(-std::f64::consts::PI..std::f64::consts::PI),
+                    rng.random_range(-std::f64::consts::PI..std::f64::consts::PI),
+                    rng.random_range(-std::f64::consts::PI..std::f64::consts::PI),
+                ]
+            };
+            for k in 0..3 {
+                x[3 * n_molecules + 3 * i + k] = w[k];
+            }
+            let sep = min_new_site_separation(&pot, x.view(), i);
+            if sep > best_sep {
+                best_sep = sep;
+                best_w = w;
+            }
+        }
         for k in 0..3 {
-            x[3 * n_molecules + 3 * i + k] =
-                rng.random_range(-std::f64::consts::PI..std::f64::consts::PI);
+            x[3 * n_molecules + 3 * i + k] = best_w[k];
         }
     }
     fold_rotation_vectors(n_molecules, x.as_slice_mut().expect("contiguous state"));
     x
+}
+
+fn min_new_site_separation(pot: &Tip4pCluster, x: ArrayView1<f64>, i: usize) -> f64 {
+    let sites_i = pot.molecule_sites(x, i);
+    let mut best = f64::INFINITY;
+    for j in 0..i {
+        let sites_j = pot.molecule_sites(x, j);
+        for a in 0..4 {
+            for b in 0..4 {
+                let d0 = sites_i[a][0] - sites_j[b][0];
+                let d1 = sites_i[a][1] - sites_j[b][1];
+                let d2 = sites_i[a][2] - sites_j[b][2];
+                best = best.min((d0 * d0 + d1 * d1 + d2 * d2).sqrt());
+            }
+        }
+    }
+    if best.is_infinite() { 1.0 } else { best }
 }
 
 /// Fold each exponential-map rotation vector into the ball of radius `π`.
@@ -593,6 +642,7 @@ mod tests {
         let cfg = Config::for_tip4p(6);
         let target = wales_hodges_minimum(6).expect("hexamer table");
         let mut hits = 0usize;
+        let mut bests = [f64::INFINITY; 4];
         for seed in 0u64..4 {
             let mut rng = StdRng::seed_from_u64(seed.wrapping_mul(0x9E3779B97F4A7C15) + 3);
             let start = random_cluster(6, &mut rng);
@@ -624,13 +674,14 @@ mod tests {
                 &mut bias,
                 &mut rng,
             );
+            bests[seed as usize] = out.best;
             if out.best < target + 0.01 {
                 hits += 1;
             }
         }
         assert!(
             hits >= 3,
-            "hexamer search reached {target} on {hits}/4 seeds"
+            "hexamer search reached {target} on {hits}/4 seeds, bests {bests:?}"
         );
     }
 }
