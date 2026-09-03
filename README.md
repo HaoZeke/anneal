@@ -71,6 +71,18 @@ two consumers are
 [`examples/molecular_cluster.rs`](examples/molecular_cluster.rs) and
 [`examples/slab_adsorption.rs`](examples/slab_adsorption.rs).
 
+Rigid TIP4P water is a first-class objective, not an example-local potential.
+Each molecule is a rigid body (centre of mass plus an exponential-map
+rotation vector) with Jorgensen parameters, no cutoff, and an analytic
+gradient assembled from site forces and torques. Basin hopping uses a
+Wales--Hodges translation/rotation kernel rather than the atomic Cartesian
+moves. Compare putative global minima against Wales and Hodges,
+*Chem. Phys. Lett.* **286**, 65 (1998):
+
+```bash
+cargo run --locked --release --example water_tip4p -- 6 20000 4
+```
+
 The `vesin-nl` feature compiles vesin's own cell-list sources into the
 neighbour list instead of the crate's reimplementation. Its build script
 reads `VESIN_SRC`, a checkout of [vesin](https://github.com/Luthaf/vesin),
