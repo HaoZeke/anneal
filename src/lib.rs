@@ -91,6 +91,8 @@ pub mod contextual;
 pub mod continuous_symmetry;
 pub mod cool;
 pub mod cooperative_search;
+/// Shared core-class table for cooperative cluster chains.
+pub mod coreclass;
 pub mod corekey;
 pub mod curvature;
 /// Transport for consensus traffic between server brains.

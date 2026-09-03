@@ -95,6 +95,9 @@ pub use validator::{
     CandidateRecord, CandidateValidator, FreshEvaluation, GradientSource, NumericField,
     QuenchStatus, ValidatedCandidate, ValidationFailure, ValidatorConfig, euclidean_gradient_norm,
 };
+pub use crate::coreclass::{
+    CooperativeCatalog, CoreClassStat, CoreClassTable, CoreVerdict,
+};
 
 /// Compatibility name for the local-topology event catalog.
 #[deprecated(since = "0.9.0", note = "use EventCatalog")]
