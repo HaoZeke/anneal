@@ -43,6 +43,18 @@ pub enum MoveLibrary {
         /// Keep atomic moves reachable for bond breaking and formation.
         reactive: bool,
     },
+    /// Separate centre-of-mass translation and rotation, Wales--Hodges style.
+    ///
+    /// The state is `6 n` rigid-body coordinates, not `3 n` Cartesian atoms.
+    /// Atomic kernels would treat the rotation vectors as positions.
+    RigidBody {
+        /// Waters (or other rigid bodies) in the state.
+        n_molecules: usize,
+        /// Half-width of a uniform centre-of-mass displacement, in length units.
+        translate_step: f64,
+        /// Half-width of a uniform rotation-vector displacement, in radians.
+        rotate_step: f64,
+    },
 }
 
 impl MoveLibrary {
@@ -167,6 +179,20 @@ impl MoveLibrary {
                 }
                 kernels
             }
+            Self::RigidBody {
+                n_molecules,
+                translate_step,
+                rotate_step,
+            } => vec![
+                ClusterMove::RigidTranslate {
+                    n_molecules: *n_molecules,
+                    step: *translate_step,
+                },
+                ClusterMove::RigidRotate {
+                    n_molecules: *n_molecules,
+                    step: *rotate_step,
+                },
+            ],
         }
     }
 
@@ -178,6 +204,11 @@ impl MoveLibrary {
     /// Whether the library contains rigid molecular proposal arms.
     pub fn is_molecular(&self) -> bool {
         matches!(self, Self::Molecular { .. })
+    }
+
+    /// Whether the library operates on centre-of-mass plus rotation coordinates.
+    pub fn is_rigid_body(&self) -> bool {
+        matches!(self, Self::RigidBody { .. })
     }
 
     /// Reactive setting carried by a molecular library.
@@ -361,6 +392,20 @@ pub enum ClusterMove {
         length_scale: f64,
         /// Lennard-Jones energy scale used by the binding criterion.
         energy_scale: f64,
+    },
+    /// Translate every rigid-body centre of mass, leaving orientations fixed.
+    RigidTranslate {
+        /// Rigid bodies in the state.
+        n_molecules: usize,
+        /// Half-width of the per-coordinate displacement.
+        step: f64,
+    },
+    /// Add a rotation-vector increment to every rigid body.
+    RigidRotate {
+        /// Rigid bodies in the state.
+        n_molecules: usize,
+        /// Half-width of the per-component rotation-vector increment, radians.
+        step: f64,
     },
     /// Step in the SOAP power spectrum and pull back through \(J = \partial p/\partial R\).
     ///
@@ -1166,6 +1211,8 @@ impl ClusterMove {
             ClusterMove::Twin { .. } => "twin".into(),
             ClusterMove::Soap { .. } => "soap".into(),
             ClusterMove::Reseed { source, .. } => format!("grow:{}", source.name()),
+            ClusterMove::RigidTranslate { .. } => "rtrans".into(),
+            ClusterMove::RigidRotate { .. } => "rrot".into(),
         }
     }
 
@@ -1357,6 +1404,31 @@ impl ClusterMove {
             ClusterMove::HollowFill(k) => k.propose(x, t, rng),
             ClusterMove::ShellRotate(k) => k.propose(x, t, rng),
             ClusterMove::Symmetrise(k) => k.propose(x, t, rng),
+            ClusterMove::RigidTranslate { n_molecules, step } => {
+                let mut y = x.to_owned();
+                let h = step * scale;
+                for i in 0..*n_molecules {
+                    for k in 0..3 {
+                        y[3 * i + k] += rng.random_range(-h..h);
+                    }
+                }
+                y
+            }
+            ClusterMove::RigidRotate { n_molecules, step } => {
+                let mut y = x.to_owned();
+                let h = step * scale;
+                let n = *n_molecules;
+                for i in 0..n {
+                    let base = 3 * n + 3 * i;
+                    for k in 0..3 {
+                        y[base + k] += rng.random_range(-h..h);
+                    }
+                }
+                if let Some(slice) = y.as_slice_mut() {
+                    crate::potentials::fold_rotation_vectors(n, slice);
+                }
+                y
+            }
             ClusterMove::Soap {
                 rmsd,
                 cutoff,
@@ -1501,6 +1573,20 @@ mod move_scaling_tests {
         assert_eq!(kernels.len(), 1);
         assert!(matches!(kernels[0], ClusterMove::AllPoints { .. }));
         assert_eq!(kernels[0].name(), "all");
+    }
+
+    #[test]
+    fn tip4p_library_is_separate_translation_and_rotation() {
+        let cfg = Config::for_tip4p(6);
+        let names: Vec<String> = cfg
+            .move_library
+            .kernels(&cfg)
+            .iter()
+            .map(|k| k.name())
+            .collect();
+        assert_eq!(names, ["rtrans", "rrot"]);
+        assert!(cfg.move_library.is_rigid_body());
+        assert_eq!(cfg.n_points, 6);
     }
 
     /// The escape scale has to reach the step, which is the whole mechanism.
