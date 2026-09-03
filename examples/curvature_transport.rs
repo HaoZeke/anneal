@@ -43,7 +43,7 @@ use anneal_core::methods::warm_lbfgs::WarmLbfgs;
 use anneal_core::model_hessian;
 use anneal_core::potentials::{PairKind, PairPotential};
 use anneal_core::shape::match_shapes;
-use anneal_core::sym_hessian::{dense_model, pair_hessian, Transport, TransportedCurvature};
+use anneal_core::sym_hessian::{Transport, TransportedCurvature, dense_model, pair_hessian};
 use ndarray::{Array1, ArrayView1};
 use std::time::Instant;
 
@@ -229,7 +229,9 @@ fn main() {
         .1
         .iter()
         .fold(0.0f64, |a, z| a.max(z.abs()));
-    println!("reference minimum: E = {e_ref:.6}, |g|_inf = {ref_grad_norm:.2e}, {ref_evals} evaluations to reach it");
+    println!(
+        "reference minimum: E = {e_ref:.6}, |g|_inf = {ref_grad_norm:.2e}, {ref_evals} evaluations to reach it"
+    );
 
     let t0 = Instant::now();
     let h_ref = pair_hessian(reference.view(), n, kind);
