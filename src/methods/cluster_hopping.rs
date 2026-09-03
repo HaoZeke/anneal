@@ -574,6 +574,15 @@ pub struct Outcome {
     pub path_improvements: usize,
     /// Total depth gained from paths, in energy units.
     pub path_gain: f64,
+    /// Sampler diagnostics per rung, when the Hamiltonian proposal is used.
+    ///
+    /// One entry per replica, because each rung adapts its own step size and
+    /// its own metric. The counters are the result rather than an error path:
+    /// a divergence rate says which configurations the sampler cannot traverse,
+    /// a cap rate near one says the no-U-turn criterion is being truncated, and
+    /// a metric condition near one says an adapted metric is carrying no
+    /// anisotropy at all.
+    pub hmc: Vec<crate::hmc::hop::HopDiagnostics>,
 }
 
 /// Relaxes `x`, charging every evaluation, and stopping when the budget ends.
@@ -596,6 +605,16 @@ pub type Settle<'a> =
 /// Optional because only the soft-mode escape needs it: everything else in this
 /// driver works from relaxations alone.
 pub type GradFn<'g> = dyn FnMut(&mut Ledger, ArrayView1<f64>) -> Option<Array1<f64>> + 'g;
+
+/// Value and gradient together, charged to the ledger by the caller.
+///
+/// Separate from [`GradFn`] because the Hamiltonian proposal needs both at
+/// every leapfrog leaf and, on a pairwise potential, both come out of one pass
+/// over the pairs. Charging twice for one pass would make the arm look half as
+/// efficient as it is, which is exactly the kind of miscalibrated comparison
+/// this campaign has already made once.
+pub type EnergyGradFn<'g> =
+    dyn FnMut(&mut Ledger, ArrayView1<f64>) -> Option<(f64, Array1<f64>)> + 'g;
 
 /// A borrow of one, for a caller that has a gradient to lend.
 ///
@@ -974,6 +993,21 @@ where
         None => (biases.remove(0), None),
     };
     let mut chains: Vec<(f64, Array1<f64>)> = Vec::new();
+    // One sampler per rung, parked and taken alongside the bias.
+    //
+    // Per chain and not global. A hot rung crosses barriers a cold rung cannot
+    // and its trajectories see a differently conditioned region, so the two
+    // converge to different step sizes and different metric estimates. A swap
+    // moves configurations between rungs; the adaptation stays with the
+    // temperature it was learned at, which is why this is parked with the bias
+    // rather than carried with the state.
+    let mut hop_parked: Vec<crate::hmc::hop::HopChain> = Vec::new();
+    let mut hop = cfg.hmc.as_ref().map(crate::hmc::hop::HopChain::new);
+    if cfg.hmc.is_some() {
+        for _ in 1..n_rep {
+            hop_parked.push(crate::hmc::hop::HopChain::new(cfg.hmc.as_ref().unwrap()));
+        }
+    }
     #[cfg(feature = "ira")]
     if cfg.shape_keyed {
         bias = bias.with_metric(Box::new(crate::shape::IraMetric::default()));
@@ -3429,6 +3463,9 @@ where
                 e = ne;
                 x = nx;
                 bias = biases.remove(rep);
+                if cfg.hmc.is_some() && rep < hop_parked.len() {
+                    hop = Some(hop_parked.remove(rep));
+                }
             }
         }
 
@@ -3530,6 +3567,16 @@ where
     }
 
     let n_basins = bias.n_basins();
+    // Per-rung sampler diagnostics, with the active rung put back at its own
+    // index so the report reads in ladder order.
+    let hmc_diag: Vec<crate::hmc::hop::HopDiagnostics> = match hop {
+        Some(active) => {
+            let mut v: Vec<_> = hop_parked.iter().map(|h| h.diag.clone()).collect();
+            v.insert(rep.min(v.len()), active.diag.clone());
+            v
+        }
+        None => Vec::new(),
+    };
     let final_radius = bias.merge_radius();
     if let Some(slot) = carried {
         // Handed back so the next chain inherits what this one learned.
@@ -3564,6 +3611,7 @@ where
             screen.explored,
             screen.observations(),
         ),
+        hmc: hmc_diag,
         tabu: (tabu.len(), tabu_hits),
         funnel: funnel_split.as_ref().map(|p| {
             let (a, b) = p.sizes();

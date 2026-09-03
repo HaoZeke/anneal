@@ -680,6 +680,18 @@ pub struct Config {
     pub container: f64,
     /// Closest approach enforced before a trial is relaxed.
     pub min_separation: f64,
+    /// Cut the move library down to the uniform displacement alone: the
+    /// control a Hamiltonian proposal is measured against, since the default
+    /// library also carries moves that change a packing rather than displace
+    /// it.
+    pub displacement_only: bool,
+    /// Propose by a Hamiltonian trajectory instead of a displacement. The
+    /// trajectory runs on the underlying potential and its endpoint is
+    /// quenched, so the acceptance test is unchanged. Needs value and
+    /// gradient together through `run_with_energy_gradient`, one charge per
+    /// leapfrog leaf; every parameter is adapted, see [`crate::hmc::hop`].
+    #[serde(skip)]
+    pub hmc: Option<crate::hmc::hop::HopConfig>,
 }
 
 impl Config {
@@ -928,6 +940,8 @@ impl Config {
                 * length_scale
                 * (n_points as f64).cbrt(),
             min_separation: LennardJonesPreset::MIN_SEPARATION * length_scale,
+            displacement_only: false,
+            hmc: None,
         }
     }
 

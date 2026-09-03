@@ -14,10 +14,13 @@
 //! `cargo run --release --example cluster_bench -- <potential> <n> <budget> <seeds> [mechanisms]`
 //! where `<potential>` is `lj`, or `morse:RHO` such as `morse:6`.
 
+use anneal_core::hmc::hop::HopConfig;
+use anneal_core::hmc::metric::MetricKind;
 use anneal_core::methods::cluster_hopping::{Config, Keying, Ledger, MoveLibrary};
 use anneal_core::methods::cluster_search::{
     Encounter, first_encounter, median_encounter, search, verify,
 };
+use anneal_core::methods::csa_cluster::{self, BankConfig};
 use anneal_core::methods::csa_cluster::{self, BankConfig};
 use anneal_core::potentials::{PairKind, PairPotential};
 use anneal_core::structure::{cna, ptm, ptm_fractions};
@@ -170,6 +173,9 @@ fn main() {
     // Symmetrise onto the structure's own approximate symmetry when stuck.
     cfg.symmetrise_on_stall = opts.contains(&"sym");
     cfg.budget_window = opts.contains(&"bfwt");
+    // The like-for-like control for the Hamiltonian arms: the kick alone,
+    // without the three packing-changing kernels the default library carries.
+    cfg.displacement_only = opts.contains(&"kick");
     if opts.contains(&"sites") {
         cfg.keying = Keying::Sites;
     }
@@ -194,6 +200,46 @@ fn main() {
         && let Ok(r) = v.parse::<f64>()
     {
         cfg.merge_radius = r;
+    }
+    // The Hamiltonian proposal, and which mass matrix it runs. Three arms and a
+    // control: the metric is the thing being measured, so it is named on the
+    // command line rather than chosen here.
+    let hmc_metric = if opts.contains(&"hmc-hess") {
+        Some(MetricKind::ModelHessian)
+    } else if opts.contains(&"hmc-diag") {
+        Some(MetricKind::Diagonal)
+    } else if opts.contains(&"hmc") {
+        Some(MetricKind::Identity)
+    } else {
+        None
+    };
+    if let Some(kind) = hmc_metric {
+        let mut h = HopConfig::new(n, kind);
+        // Warmup and the depth cap are budget decisions and are reported as
+        // such: the cap rate says how often the no-U-turn criterion was
+        // truncated, and a run whose cap rate is near one is running
+        // fixed-length HMC under the name of NUTS.
+        if let Ok(v) = std::env::var("HMC_WARMUP") {
+            if let Ok(w) = v.parse::<usize>() {
+                h.warmup_hops = w;
+            }
+        }
+        if let Ok(v) = std::env::var("HMC_MAX_DEPTH") {
+            if let Ok(d) = v.parse::<u32>() {
+                h.max_depth = d;
+            }
+        }
+        println!(
+            "  hamiltonian proposal: metric {}, warmup {} hops, depth cap {} \
+             ({} leaves), target accept {}, reach {:.3}",
+            kind.name(),
+            h.warmup_hops,
+            h.max_depth,
+            (1usize << h.max_depth) - 1,
+            h.target_accept,
+            h.reach(),
+        );
+        cfg.hmc = Some(h);
     }
     if !opts.is_empty() {
         println!("  mechanisms: {}", opts.join(", "));
@@ -398,6 +444,16 @@ fn main() {
             match std::fs::write(&path, body) {
                 Ok(()) => println!("      trace {} rows -> {path}", out.quenched.len()),
                 Err(e) => eprintln!("      trace write failed: {e}"),
+            }
+        }
+        // The sampler's own diagnostics, one line per rung. Reported for every
+        // run rather than only when something looks wrong: a divergence rate
+        // says which configurations the integrator cannot traverse, and a
+        // mechanism that runs without acting is invisible to a solve count.
+        for (k, d) in out.hmc.iter().enumerate() {
+            if d.proposals > 0 {
+                println!("      rung {k} {}", d.report(""));
+                println!("      rung {k} {}", d.depth_report());
             }
         }
     }

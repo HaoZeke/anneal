@@ -65,7 +65,7 @@
 //! and [`crate::delayed`] carries what that does to a delayed-acceptance second
 //! stage.
 
-use ndarray::{Array1, ArrayView1};
+use ndarray::{Array1, Array2, ArrayView1};
 
 /// Force-constant scale, in the units the structure's own spacing sets.
 ///
@@ -220,6 +220,56 @@ pub fn apply_with(
         out[k] += p.floor * p.k0 * v[k];
     }
     out
+}
+
+/// Assembles the same operator as a dense matrix.
+///
+/// [`apply`] is the right shape when the operator is used a handful of times
+/// per structure, which is what the depth predictor does. A mass matrix is used
+/// differently: one structure supplies the metric for a whole Hamiltonian
+/// trajectory, so the operator is applied and inverted tens of times at the
+/// same geometry. Assembling once and factorising beats a matrix-free solve per
+/// step by an order of magnitude at cluster sizes, and the factorisation is
+/// exact where a truncated solve is not. See [`crate::hmc::metric`] for the
+/// flop count and the size at which the ordering reverses.
+///
+/// The matrix is symmetric and, with [`FLOOR`] on the diagonal, positive
+/// definite.
+pub fn dense(x: ArrayView1<f64>, n: usize, scale: f64) -> Array2<f64> {
+    let dim = 3 * n;
+    let mut h = Array2::<f64>::zeros((dim, dim));
+    for i in 0..n {
+        for j in (i + 1)..n {
+            let mut u = [0.0f64; 3];
+            let mut r2 = 0.0;
+            for k in 0..3 {
+                u[k] = x[3 * i + k] - x[3 * j + k];
+                r2 += u[k] * u[k];
+            }
+            let r = r2.sqrt();
+            if r < 1e-12 {
+                continue;
+            }
+            for c in u.iter_mut() {
+                *c /= r;
+            }
+            let k_ij = K0 * (-ALPHA * (r / scale - 1.0)).exp();
+            // The pair block is k u u^T tensored with [[1, -1], [-1, 1]].
+            for a in 0..3 {
+                for b in 0..3 {
+                    let v = k_ij * u[a] * u[b];
+                    h[[3 * i + a, 3 * i + b]] += v;
+                    h[[3 * j + a, 3 * j + b]] += v;
+                    h[[3 * i + a, 3 * j + b]] -= v;
+                    h[[3 * j + a, 3 * i + b]] -= v;
+                }
+            }
+        }
+    }
+    for k in 0..dim {
+        h[[k, k]] += FLOOR * K0;
+    }
+    h
 }
 
 /// Removes the translational component, which the operator annihilates.
