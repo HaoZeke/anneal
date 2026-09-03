@@ -420,8 +420,8 @@ pub const OCCUPATION_FINISH_MOVERS: usize = 8;
 /// bind.
 pub const OCCUPATION_CANDIDATE_SITES: usize = 40;
 
-/// The `keep` sites of `sites` with the most points of `x` within
-/// `1.2 * bond`, most first; ties keep their order.
+/// The sites of `sites` with the most points of `x` within `1.2 * bond`,
+/// most first: the `keep` best and every site tied with the last of them.
 fn best_coordinated(x: &[f64], sites: &[[f64; 3]], bond: f64, keep: usize) -> Vec<[f64; 3]> {
     let n = x.len() / 3;
     let r2 = (1.2 * bond) * (1.2 * bond);
@@ -430,7 +430,14 @@ fn best_coordinated(x: &[f64], sites: &[[f64; 3]], bond: f64, keep: usize) -> Ve
         .map(|s| ((0..n).filter(|&i| dist2(*s, point(x, i)) < r2).count(), *s))
         .collect();
     ranked.sort_by(|a, b| b.0.cmp(&a.0));
-    ranked.into_iter().take(keep).map(|(_, s)| s).collect()
+    // Every site tied with the last kept one stays: the cut is by
+    // coordination, never by the arbitrary order of equals.
+    let floor = ranked.get(keep.saturating_sub(1)).map_or(0, |(c, _)| *c);
+    ranked
+        .into_iter()
+        .take_while(|(c, _)| *c >= floor)
+        .map(|(_, s)| s)
+        .collect()
 }
 
 /// The successive placement alone: the fully coordinated interior of `x`
