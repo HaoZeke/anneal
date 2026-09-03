@@ -778,6 +778,7 @@ pub fn run_with_gradient_settle<'g, R: Rng + ?Sized>(
         relax,
         grad,
         None,
+        None,
         settle,
         None,
         &mut checkpoint,
@@ -801,6 +802,34 @@ pub fn run_with_gradient<'g, R: Rng + ?Sized>(
         ledger,
         relax,
         grad,
+        None,
+        None,
+        None,
+        None,
+        &mut checkpoint,
+        rng,
+    )
+}
+
+/// As [`run_with_gradient`], with value and gradient together, which is
+/// what [`Config::hmc`] needs: one charge per leapfrog leaf.
+pub fn run_with_energy_gradient<'g, R: Rng + ?Sized>(
+    cfg: &Config,
+    start: ArrayView1<f64>,
+    ledger: &mut Ledger,
+    relax: Relax<'_>,
+    grad: Option<&mut GradFn<'g>>,
+    energy_grad: Option<&mut EnergyGradFn<'g>>,
+    rng: &mut R,
+) -> Outcome {
+    let mut checkpoint = continue_without_checkpoint;
+    run_full(
+        cfg,
+        start,
+        ledger,
+        relax,
+        grad,
+        energy_grad,
         None,
         None,
         None,
@@ -843,6 +872,7 @@ pub fn run_with_bias<'g, R: Rng + ?Sized>(
         ledger,
         relax,
         grad,
+        None,
         Some(bias),
         None,
         None,
@@ -883,6 +913,7 @@ where
         ledger,
         relax,
         grad,
+        None,
         Some(bias),
         None,
         Some(checkpoint_interval),
@@ -897,6 +928,7 @@ fn run_full<'g, R, H>(
     ledger: &mut Ledger,
     relax: Relax<'_>,
     mut grad: Option<&mut GradFn<'g>>,
+    mut energy_grad: Option<&mut EnergyGradFn<'g>>,
     external_bias: Option<&mut BasinBias<ClusterFingerprint>>,
     mut settle: Option<Settle<'_>>,
     checkpoint_interval: Option<usize>,
@@ -1030,6 +1062,9 @@ where
     );
 
     let mut kernels = cfg.move_library.kernels(cfg);
+    if cfg.displacement_only {
+        kernels = vec![ClusterMove::AllPoints { step: 0.38 }];
+    }
     // Which kernel to propose from is learned rather than drawn uniformly. The
     // useful move changes as the search moves through the landscape, so the
     // evidence is discounted and a decaying floor keeps every kernel reachable.
@@ -2037,7 +2072,29 @@ where
         // mode climbs live under `escape_on_stall` below; they are a few per
         // cent of the budget when the chain has stopped improving, not the
         // default proposal.
-        let mut trial = if cov_fire {
+        // The Hamiltonian proposal replaces the displacement rather than
+        // competing with it as one arm among many: the comparison is between
+        // a trajectory and a kick at equal charge.
+        let hamiltonian = cfg.hmc.is_some() && energy_grad.is_some() && !angular;
+        let mut hmc_trial: Option<Array1<f64>> = None;
+        if hamiltonian {
+            let hc = cfg.hmc.as_ref().expect("hamiltonian implies a config");
+            let chain = hop.as_mut().expect("hamiltonian implies a sampler");
+            let eg = energy_grad
+                .as_deref_mut()
+                .expect("hamiltonian implies energies");
+            let mut eg_ref: crate::hmc::hop::Energy<'_> = eg;
+            hmc_trial = chain
+                .propose(hc, ledger, x.view(), e, &mut eg_ref, rng)
+                .map(|p| p.x);
+            if hmc_trial.is_none() {
+                // The ledger ran out inside the trajectory.
+                break;
+            }
+        }
+        let mut trial = if let Some(t) = hmc_trial {
+            t
+        } else if cov_fire {
             let dim = x.len();
             let m = cov_buf.len();
             // Evidence weight: nothing at a cold start, most of the draw once
@@ -3522,6 +3579,12 @@ where
                         ),
                     ),
                 );
+                if let (Some(h), Some(hc)) = (hop.take(), cfg.hmc.as_ref()) {
+                    // The adaptation stays with the rung, not the state; the
+                    // destination rung's own sampler is taken below.
+                    hop_parked.insert(rep.min(hop_parked.len()), h);
+                    hop = Some(crate::hmc::hop::HopChain::new(hc));
+                }
                 let k = rep;
                 let j = (rep + 1) % n_rep;
                 if k != j {
@@ -3982,6 +4045,29 @@ pub fn optimize_with_gradient<'g>(
         &mut rng,
     );
     run_with_gradient(cfg, start.view(), ledger, relax, grad, &mut rng)
+}
+
+/// As [`optimize_with_gradient`], with value and gradient together for
+/// [`Config::hmc`].
+pub fn optimize_with_energy_gradient<'g>(
+    cfg: &Config,
+    ledger: &mut Ledger,
+    relax: Relax<'_>,
+    grad: Option<&mut GradFn<'g>>,
+    energy_grad: Option<&mut EnergyGradFn<'g>>,
+    seed: u64,
+) -> Outcome {
+    let mut rng = StdRng::seed_from_u64(seed);
+    let start = random_cluster(cfg.n_points, 0.7, cfg.min_separation, &mut rng);
+    run_with_energy_gradient(
+        cfg,
+        start.view(),
+        ledger,
+        relax,
+        grad,
+        energy_grad,
+        &mut rng,
+    )
 }
 
 #[cfg(test)]
@@ -4637,6 +4723,59 @@ mod tests {
                 .all(|(_, _, _, energy)| *energy >= 0.0),
             "unconverged trial entered the encounter trace: {:?}",
             out.improvements
+        );
+    }
+
+    /// Each rung adapts its own step size and metric, and a swap moves
+    /// configurations without moving the adaptation.
+    #[test]
+    fn every_rung_adapts_its_own_sampler() {
+        let mut cfg = Config::for_cluster(6);
+        cfg.replicas = 3;
+        cfg.swap_period = 5;
+        let mut h = crate::hmc::hop::HopConfig::new(6, crate::hmc::metric::MetricKind::Identity);
+        h.warmup_hops = 20;
+        h.max_depth = 2;
+        cfg.hmc = Some(h);
+        let mut ledger = Ledger::new(40_000);
+        let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, n: usize| toy_relax(led, x, n);
+        let mut eg = |led: &mut Ledger, x: ArrayView1<f64>| -> Option<(f64, Array1<f64>)> {
+            if !led.charge() {
+                return None;
+            }
+            let e = x.iter().map(|v| v * v).sum::<f64>();
+            Some((e, x.mapv(|v| 2.0 * v)))
+        };
+        let mut rng = StdRng::seed_from_u64(11);
+        let start = random_cluster(6, 0.7, cfg.min_separation, &mut rng);
+        let out = run_with_energy_gradient(
+            &cfg,
+            start.view(),
+            &mut ledger,
+            &mut relax,
+            None,
+            Some(&mut eg),
+            &mut rng,
+        );
+        assert_eq!(
+            out.hmc.len(),
+            3,
+            "a three-rung ladder reported {} samplers",
+            out.hmc.len()
+        );
+        for (k, d) in out.hmc.iter().enumerate() {
+            assert!(d.proposals > 0, "rung {k} made no proposals");
+            assert!(
+                d.epsilon_final > 0.0 && d.epsilon_final.is_finite(),
+                "rung {k} froze at a step size of {}",
+                d.epsilon_final
+            );
+        }
+        let eps: Vec<f64> = out.hmc.iter().map(|d| d.epsilon_final).collect();
+        assert!(
+            eps.iter().any(|v| (v - eps[0]).abs() > 0.0),
+            "all three rungs froze at exactly {}",
+            eps[0]
         );
     }
 
