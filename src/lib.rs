@@ -122,6 +122,9 @@ pub mod free_energy;
 /// First-derivative interface for HMC-style samplers.
 pub mod funnel_bo;
 pub mod funnel_spectral;
+/// The gradient-enhanced Gaussian process of gpr_optim, over its C API.
+#[cfg(feature = "gpr")]
+pub mod gpr;
 pub mod grad;
 /// Exact basin identity by canonical contact-graph labelling (nauty).
 #[cfg(feature = "graphkey")]
@@ -157,6 +160,9 @@ pub mod methods;
 pub mod minima_db;
 pub mod minimum_information;
 pub mod model_hessian;
+/// Morphology collective variables: Steinhardt bond order, a SOAP projection
+/// and a coordination kernel density estimate, on featomic's descriptors.
+pub mod morphology;
 /// The move-kernel trait: temperature-indexed proposal sampling.
 pub mod movekernel;
 /// Cooperative basin and ridge exploration on one arbitrary-dimensional PES.
@@ -201,6 +207,8 @@ pub mod scaling;
 pub mod screen;
 /// SOAP power spectrum and Cartesian pullback through `∂p/∂R`.
 pub mod soap;
+/// Gradient-enhanced Gaussian process over structures, with a SOAP kernel.
+pub mod soap_gp;
 /// Budgeted perturb--quench source generation for hybrid PES exploration.
 pub mod source_escape;
 pub mod spectral;

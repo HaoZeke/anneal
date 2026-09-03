@@ -30,6 +30,9 @@ featomic = ["dep:featomic", "dep:metatensor"]
 vesin-nl = []
 # Cap'n Proto shared bank. Chains are separate processes.
 bank-rpc = ["dep:capnp", "dep:capnp-rpc", "dep:futures", "dep:nng", "dep:tokio", "dep:tokio-util"]
+# The gradient-enhanced Gaussian process of gpr_optim, over its C API. Needs
+# libgpr_optim on the link path; set GPR_OPTIM_LIB_DIR when building.
+gpr = []
 capi = ["eindir-core/capi"]
 python = ["dep:pyo3", "dep:numpy", "dlpk/pyo3", "eindir-core/py-objective"]
 # Examples using an in-process rgpot eindir handle (xtb / CuH2 via
