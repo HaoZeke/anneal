@@ -5229,11 +5229,10 @@ fn run_capnp_catalog(
                     }
                 }
                 // Funnel exchange first when Fiedler F>=2: a
-                // representative of another packing community. F=1
-                // leftover wells are the champion walk. Extra
-                // ArchiveHole is leftover-orthogonal to the occupied
-                // packing and archive. Occupancy extras do not draw a
-                // random cluster.
+                // representative of another packing community. A
+                // one-community book Walks. Leave is a draw or a walk,
+                // not a covering of the occupied tangent. Occupancy
+                // extras do not draw a random cluster.
                 let other_family = {
                     if let CatalogSampleOutcome::Candidate(sparse) = cooperative
                         .try_sample_candidate(replica, SPARSE_SAMPLE_DRAW)
@@ -5327,12 +5326,9 @@ fn run_capnp_catalog(
                         let live = snapshot.current_state();
                         let live_slice = live.as_slice().unwrap_or(&[]);
                         let shoot_coords = leave_path.shoot_coordinates().unwrap_or(live_slice);
-                        // Leftover holes of the occupied packing are the
-                        // champion walk. Extra ArchiveHole is the first rung
-                        // of the packing ladder: a covering direction of the
-                        // DECAF feature pointed away from the packings on
-                        // file. The hop loop walks the rest of the ladder
-                        // when the quench lands back in the same packing.
+                        // Policy does not select ArchiveHole: a covering
+                        // of the occupied tangent is not a Leave. The
+                        // arm stays so the match is exhaustive.
                         let index = archive_cover_index(replica, archive_hole_count);
                         archive_hole_count += 1;
                         let left = leave_packing_state(
