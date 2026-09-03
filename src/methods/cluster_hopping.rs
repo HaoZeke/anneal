@@ -38,7 +38,6 @@ use crate::bias::{
     AdaptiveHeight, Bias, BasinBias, BasinIndex, Fingerprint, SiteEnergies, SortedPairs,
 };
 use crate::diversity::DiversityAnnealer;
-use crate::exchange::{Exchange, MetropolisExchange};
 use crate::methods::minima_hopping::EscapeFeedback;
 use crate::path::{interpolate_path, StallDetector};
 use crate::movekernel::{MoveKernel, ShellRotate, SurfaceRelocate, Symmetrise};
@@ -1389,7 +1388,6 @@ fn run_full<'g, R: Rng + ?Sized>(
     // Geometric ladder, so swap acceptance is spaced evenly rather than
     // bunched at one end.
     let temps: Vec<f64> = (0..n_rep).map(rung_temp).collect();
-    let exchange = MetropolisExchange;
     let mut swaps_tried = 0usize;
     let mut swaps_accepted = 0usize;
     let mut rep = 0usize;
