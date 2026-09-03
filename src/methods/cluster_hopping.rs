@@ -1546,24 +1546,56 @@ where
                     let n_cover = crate::catalog::cover_arm_count();
                     let depth =
                         from_energy.abs() / (from_state.len() / 3).max(1) as f64;
-                    for _ in 1..crate::known_basin::LEAVE_AV_SEARCHES {
+                    let barrier = crate::known_basin::rung_barrier(depth, 0);
+                    let mut starts = crate::known_basin::shs_av_starts(
+                        from_state.view(),
+                        &mobile,
+                        crate::known_basin::LEAVE_WALK_STEP,
+                        16,
+                        4,
+                        |trial| Some(relax(ledger, trial, 0).0),
+                    );
+                    let fps = crate::known_basin::farthest_packing_cover(
+                        from_state.view(),
+                        &references,
+                        n_cover,
+                    );
+                    starts.push(crate::known_basin::leave_packing_rung_to(
+                        from_state.view(),
+                        fps,
+                        barrier,
+                        &references,
+                        cfg.species.as_deref(),
+                        Some(mobile.as_slice()),
+                        |trial| Some(relax(ledger, trial, 0).0),
+                    ));
+                    while starts.len() < crate::known_basin::LEAVE_AV_SEARCHES {
                         let cover = crate::catalog::pick_leave_cover(n_cover, rng);
-                        let start = crate::known_basin::leave_packing_rung_to(
+                        starts.push(crate::known_basin::leave_packing_rung_to(
                             from_state.view(),
                             cover,
-                            crate::known_basin::rung_barrier(depth, 0),
+                            barrier,
                             &references,
                             cfg.species.as_deref(),
                             Some(mobile.as_slice()),
                             |trial| Some(relax(ledger, trial, 0).0),
-                        );
+                        ));
+                    }
+                    let mut best_leave: Option<(f64, Array1<f64>)> = None;
+                    for start in starts {
                         let (energy, landed) =
                             relax(ledger, start.view(), cfg.relax_steps);
-                        if left_packing(&landed) {
-                            candidate_energy = energy;
-                            candidate = landed;
-                            break;
+                        if left_packing(&landed)
+                            && best_leave
+                                .as_ref()
+                                .is_none_or(|(held, _)| energy < *held)
+                        {
+                            best_leave = Some((energy, landed));
                         }
+                    }
+                    if let Some((energy, landed)) = best_leave {
+                        candidate_energy = energy;
+                        candidate = landed;
                     }
                 }
                 let walked_off = leave_action && left_packing(&candidate);
