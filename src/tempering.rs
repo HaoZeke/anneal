@@ -244,8 +244,13 @@ pub trait ReplicaTarget {
     type Chain;
 
     /// `ln pi_k(x)`, evaluated with rung `k`'s own chain.
-    fn log_density(&self, rung: usize, temperature: f64, point: &Self::Point, chain: &Self::Chain)
-    -> f64;
+    fn log_density(
+        &self,
+        rung: usize,
+        temperature: f64,
+        point: &Self::Point,
+        chain: &Self::Chain,
+    ) -> f64;
 }
 
 /// The log Metropolis-Hastings ratio for exchanging the occupants of two rungs.
@@ -919,7 +924,13 @@ impl ReplicaTarget for DiscreteSystem {
     type Point = usize;
     type Chain = BiasVector;
 
-    fn log_density(&self, _rung: usize, temperature: f64, point: &usize, chain: &BiasVector) -> f64 {
+    fn log_density(
+        &self,
+        _rung: usize,
+        temperature: f64,
+        point: &usize,
+        chain: &BiasVector,
+    ) -> f64 {
         -(self.energy[*point] + chain.at(*point)) / temperature
     }
 }
@@ -1032,7 +1043,10 @@ mod tests {
         // different number on the same pair: (1/0.5 - 1/2)(-3 - -1) = -3.
         let raw = (1.0 / 0.5 - 1.0 / 2.0) * (sys.energy[0] - sys.energy[1]);
         assert!((raw - -3.0).abs() < 1e-12);
-        assert!((raw - got).abs() > 1.0, "the two rules must not coincide here");
+        assert!(
+            (raw - got).abs() > 1.0,
+            "the two rules must not coincide here"
+        );
     }
 
     /// The four-number form the driver calls and the target form the tests
@@ -1107,7 +1121,9 @@ mod tests {
         let mut rng = StdRng::seed_from_u64(20260806);
         let mut ladder = Ladder::from_temperatures(&temps, SwapScheme::RandomPair);
         let mut points = [0usize, 0usize];
-        let mut walk = MetropolisWalk { system: sys.clone() };
+        let mut walk = MetropolisWalk {
+            system: sys.clone(),
+        };
         let sweeps = 300_000;
         for _ in 0..sweeps {
             for k in 0..2 {
@@ -1145,7 +1161,9 @@ mod tests {
         let mut rng = StdRng::seed_from_u64(4242);
         let mut ladder = Ladder::from_temperatures(temps, scheme);
         let mut points: Vec<usize> = vec![0; n_rungs];
-        let mut walk = MetropolisWalk { system: sys.clone() };
+        let mut walk = MetropolisWalk {
+            system: sys.clone(),
+        };
         let mut chains: Vec<BiasVector> = biases.to_vec();
         let mut count = vec![vec![0usize; n_states]; n_rungs];
         for _ in 0..sweeps {
@@ -1158,8 +1176,7 @@ mod tests {
                 let e = sys.energy.clone();
                 let pts = points.clone();
                 let taken = ladder.offer(&mut rng, |k| {
-                    let l = (1.0 / temps[k] - 1.0 / temps[k + 1])
-                        * (e[pts[k]] - e[pts[k + 1]]);
+                    let l = (1.0 / temps[k] - 1.0 / temps[k + 1]) * (e[pts[k]] - e[pts[k + 1]]);
                     if l >= 0.0 { 1.0 } else { l.exp() }
                 });
                 for k in taken {
@@ -1424,7 +1441,11 @@ mod tests {
         assert!(cluster.clamped_at_construction());
         let t = cluster.temperatures();
         assert!((t[0] - 0.8).abs() < 1e-12);
-        assert!((t[3] - 0.8 / MIN_HOT_BETA_FRACTION).abs() < 1e-9, "top {}", t[3]);
+        assert!(
+            (t[3] - 0.8 / MIN_HOT_BETA_FRACTION).abs() < 1e-9,
+            "top {}",
+            t[3]
+        );
     }
 
     /// Barrier equalisation on a ladder whose rejections are deliberately
