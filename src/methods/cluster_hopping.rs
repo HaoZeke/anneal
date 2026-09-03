@@ -673,6 +673,19 @@ pub struct Config {
     pub superbasin_escape: bool,
     /// Hops between escapes, on top of the stall condition.
     pub superbasin_period: usize,
+    /// Record every fully quenched energy the run produces, in order.
+    ///
+    /// A region of this landscape holds order `exp(alpha N)` minima and cannot
+    /// be enumerated, so what a search knows about it is a sample of quenched
+    /// energies drawn from its density of states. That sample is the input to
+    /// any statement about what the region contains, and it is the one thing
+    /// this instrumentation has that a success count does not.
+    ///
+    /// Only full relaxations are recorded. A screened trial carries a partial
+    /// quench, which is not a point on the landscape being sampled, and mixing
+    /// the two would contaminate the low tail with structures that simply had
+    /// not finished descending.
+    pub energy_trace: bool,
     /// Rebuild the transition graph with basin identity taken modulo the
     /// symmetry orbit, and report what changes.
     ///
@@ -1036,6 +1049,7 @@ impl Config {
             superbasin_escape: false,
             superbasin_period: 2_000,
             superbasin_quotient: false,
+            energy_trace: false,
             superbasin_features: false,
             symmetrise_on_stall: false,
             symmetry_tolerance: 0.35,
@@ -1212,6 +1226,12 @@ pub struct Outcome {
     pub superbasin_counts: Option<crate::superbasin::HopCounts>,
     /// The archived structures, as `(basin, energy, state)`.
     pub superbasin_archive: Option<Vec<(usize, f64, Array1<f64>)>>,
+    /// Every fully quenched energy the run produced, in the order produced.
+    ///
+    /// Full relaxations only, so this is a sample from the density of states of
+    /// whatever region the chain was in rather than a mixture of that and
+    /// unfinished descents.
+    pub energy_trace: Option<Vec<f64>>,
 }
 
 /// Relaxes `x`, charging every evaluation, and stopping when the budget ends.
@@ -1568,6 +1588,11 @@ fn run_full<'g, R: Rng + ?Sized>(
         None
     };
     let mut sb_last_jump = 0usize;
+    let mut trace: Option<Vec<f64>> = if cfg.energy_trace {
+        Some(Vec::new())
+    } else {
+        None
+    };
     let mut restarts = 0usize;
     let mut symmetrised = 0usize;
     let mut symmetry_gain = 0.0_f64;
@@ -1829,6 +1854,13 @@ fn run_full<'g, R: Rng + ?Sized>(
             if cfg.bayes_screen {
                 // The answer to the question the posterior was asked.
                 screen.observe(feats.view(), out.0);
+            }
+            // A genuine draw from the region's density of states, recorded
+            // before acceptance touches it: the Metropolis rule would reweight
+            // the sample towards the low tail, and what a tail estimate needs
+            // is the distribution the region actually presents.
+            if let Some(t) = trace.as_mut() {
+                t.push(out.0);
             }
             out
         };
@@ -2582,6 +2614,7 @@ fn run_full<'g, R: Rng + ?Sized>(
         path_escapes,
         path_improvements,
         path_gain,
+        energy_trace: trace,
         superbasin_counts: superbasin
             .as_ref()
             .filter(|_| cfg.superbasin_quotient)
