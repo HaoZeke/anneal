@@ -1063,6 +1063,71 @@ pub fn packing_mean_nu3(
     mu
 }
 
+/// Fraction of packing leftover the active volume must hold.
+///
+/// Xu, Osetsky and Stoller (*Phys. Rev. B* **84**, 132103 (2011);
+/// <https://doi.org/10.1103/PhysRevB.84.132103>) restrict saddle
+/// search to an active volume around the defect. Full-system searches
+/// fail or find high-barrier junk. The leftover \(\|h_i-\mu\|\) is
+/// that defect: centres unlike the occupied packing.
+pub const ACTIVE_VOLUME_MASS: f64 = 0.80;
+
+/// Smallest active volume, in atoms.
+pub const ACTIVE_VOLUME_MIN: usize = 8;
+
+/// Atoms that carry the packing leftover: the SEAKMC active volume.
+///
+/// Ranked by per-centre \(\|h_i-\mu\|\). The volume is the smallest
+/// prefix that holds [`ACTIVE_VOLUME_MASS`] of that leftover, at least
+/// [`ACTIVE_VOLUME_MIN`] and at most half the cluster. Outside it the
+/// packing increment is frozen. Béland, Osetsky, Stoller and Xu
+/// (arXiv:1409.1253) launch several searches in that volume and flush
+/// the catalog after one event; occupancy is not kMC, so the extra
+/// starts of one Leave are discarded after the adopt.
+pub fn packing_active_volume(
+    x: ArrayView1<f64>,
+    spec: SoapSpec,
+    species: Option<&[u32]>,
+) -> Vec<usize> {
+    let loc = local_nu3_z(x, spec, species);
+    let n_at = loc.nrows();
+    if n_at == 0 {
+        return Vec::new();
+    }
+    let mu = packing_mean_nu3(x, spec, species, None);
+    if mu.is_empty() {
+        return (0..n_at).collect();
+    }
+    let mut weight = vec![0.0; n_at];
+    let mut total = 0.0;
+    for i in 0..n_at {
+        let mut s = 0.0;
+        for t in 0..mu.len() {
+            let d = loc[[i, t]] - mu[t];
+            s += d * d;
+        }
+        weight[i] = s;
+        total += s;
+    }
+    let mut order: Vec<usize> = (0..n_at).collect();
+    order.sort_by(|a, b| weight[*b].partial_cmp(&weight[*a]).unwrap_or(std::cmp::Ordering::Equal));
+    if !(total.is_finite() && total > 0.0) {
+        return order.into_iter().take(n_at.min(ACTIVE_VOLUME_MIN.max(1))).collect();
+    }
+    let cap = n_at.max(1) / 2;
+    let floor = ACTIVE_VOLUME_MIN.min(n_at);
+    let mut kept = Vec::with_capacity(floor);
+    let mut mass = 0.0;
+    for i in order {
+        kept.push(i);
+        mass += weight[i];
+        if kept.len() >= floor && (mass >= ACTIVE_VOLUME_MASS * total || kept.len() >= cap) {
+            break;
+        }
+    }
+    kept
+}
+
 fn soap_dist2(a: ArrayView1<f64>, b: &[f64]) -> f64 {
     let mut s = 0.0;
     for t in 0..a.len() {
@@ -3127,6 +3192,20 @@ mod tests {
             "O and H cloud means must differ, rms {}",
             d2.sqrt()
         );
+    }
+
+    #[test]
+    fn packing_active_volume_is_a_proper_subset_of_ico13() {
+        let x = ico13();
+        let spec = SoapSpec {
+            n_max: 3,
+            l_max: 6,
+            rcut_nn: 1.4,
+        };
+        let mobile = packing_active_volume(x.view(), spec, None);
+        assert!(!mobile.is_empty());
+        assert!(mobile.len() < 13, "active volume must freeze the core, got {}", mobile.len());
+        assert!(mobile.iter().all(|&i| i < 13));
     }
 
     #[test]
