@@ -929,19 +929,19 @@ impl Config {
             translate_step: 0.35,
             rotate_step: 0.40,
         };
-        cfg.temperature = 2.5;
+        cfg.temperature = 2.0;
         cfg.bias_height = 2.0;
-        cfg.screen_margin = 15.0;
+        cfg.screen_margin = 25.0;
         cfg.merge_radius = 0.6;
         cfg.record_gradient = 1.0e-3;
         cfg.neighbour_cutoff = 3.5;
-        cfg.min_separation = 2.35;
-        cfg.container = 3.0 * 2.75 * (n_molecules as f64).cbrt();
+        cfg.min_separation = 2.70;
+        cfg.container = 3.5 * 2.75 * (n_molecules as f64).cbrt();
         cfg.soap_mode = SoapProposalMode::Off;
         cfg.angular_moves = false;
         cfg.allocate_moves = true;
-        cfg.relax_steps = 120;
-        cfg.screen_steps = 25;
+        cfg.relax_steps = 80;
+        cfg.screen_steps = 15;
         cfg
     }
 
