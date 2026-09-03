@@ -551,11 +551,7 @@ pub fn fit(
     for n in &mut nodes {
         n.weight /= norm;
     }
-    let p_unbounded = nodes
-        .iter()
-        .filter(|n| n.xi >= 0.0)
-        .map(|n| n.weight)
-        .sum();
+    let p_unbounded = nodes.iter().filter(|n| n.xi >= 0.0).map(|n| n.weight).sum();
     let floor_xi = lerp(bx_lo, bx_hi, 0, grid.n_xi);
     let p_xi_floor = if (floor_xi - xi_lo).abs() < 1.5 * dxi {
         nodes

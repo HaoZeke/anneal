@@ -12,8 +12,8 @@
 //! sum of the blocks.
 
 use anneal_core::sym_hessian::{
-    block_depth, conditioning, isotypic_bases, restricted_condition, dense_model, site_symmetries,
-    split_depth, SiteSymmetry,
+    SiteSymmetry, block_depth, conditioning, dense_model, isotypic_bases, restricted_condition,
+    site_symmetries, split_depth,
 };
 use anneal_core::symmetrise::{detect_all, generate_group};
 use ndarray::{Array1, ArrayView1};

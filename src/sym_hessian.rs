@@ -169,12 +169,7 @@ pub struct SiteSymmetry {
 /// `sigma_R sigma_S`, so the average over what survives the filter still
 /// satisfies the rearrangement theorem. That is what lets this be used on the
 /// output of an approximate detector without checking closure again.
-pub fn site_symmetries(
-    x: ArrayView1<f64>,
-    n: usize,
-    group: &[Rot],
-    tol: f64,
-) -> Vec<SiteSymmetry> {
+pub fn site_symmetries(x: ArrayView1<f64>, n: usize, group: &[Rot], tol: f64) -> Vec<SiteSymmetry> {
     let mut out = Vec::new();
     if n == 0 {
         return out;
@@ -282,9 +277,8 @@ impl SiteSymmetry {
     /// Whether two elements are the same operation.
     pub fn matches(&self, other: &Self) -> bool {
         self.image == other.image
-            && (0..3).all(|i| {
-                (0..3).all(|j| (self.rotation[i][j] - other.rotation[i][j]).abs() < 1e-6)
-            })
+            && (0..3)
+                .all(|i| (0..3).all(|j| (self.rotation[i][j] - other.rotation[i][j]).abs() < 1e-6))
     }
 }
 
@@ -1223,11 +1217,7 @@ mod tests {
             let dv = project_symmetric(&one, v.view());
             let hdv = model_hessian::apply(x.view(), n, dv.view(), scale);
             let dhv = project_symmetric(&one, hv.view());
-            worst = worst.max(
-                (&hdv - &dhv)
-                    .iter()
-                    .fold(0.0f64, |a, z| a.max(z.abs())),
-            );
+            worst = worst.max((&hdv - &dhv).iter().fold(0.0f64, |a, z| a.max(z.abs())));
         }
         let magnitude = hv.iter().fold(0.0f64, |a, z| a.max(z.abs()));
         assert!(
@@ -1393,7 +1383,12 @@ mod tests {
         let x = asymmetric(n);
         let sym = group_of(x.view(), n);
         let bases = isotypic_bases(&sym, n, 0x5EED);
-        assert_eq!(bases.len(), 1, "a random blob decomposed into {} blocks", bases.len());
+        assert_eq!(
+            bases.len(),
+            1,
+            "a random blob decomposed into {} blocks",
+            bases.len()
+        );
         assert_eq!(bases[0].ncols(), 3 * n);
     }
 
@@ -1514,10 +1509,7 @@ mod tests {
 
         // Zero correction, so the operator being compared is the model Hessian
         // itself carried across the correspondence.
-        let carried = TransportedCurvature::from_hessian(
-            a.view(),
-            dense_model(a.view(), n).view(),
-        );
+        let carried = TransportedCurvature::from_hessian(a.view(), dense_model(a.view(), n).view());
         assert!(
             carried.correction_norm() < 1e-10,
             "a correction against the model itself came out at {}",

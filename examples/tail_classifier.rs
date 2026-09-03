@@ -146,8 +146,7 @@ fn beta_cdf(x: f64, a: f64, b: f64) -> f64 {
     if x >= 1.0 {
         return 1.0;
     }
-    let lbeta =
-        |p: f64, q: f64| libm_lgamma(p) + libm_lgamma(q) - libm_lgamma(p + q);
+    let lbeta = |p: f64, q: f64| libm_lgamma(p) + libm_lgamma(q) - libm_lgamma(p + q);
     let front = (a * x.ln() + b * (1.0 - x).ln() - lbeta(a, b)).exp() / a;
     let cf = |a: f64, b: f64, x: f64| {
         let (mut c, mut d) = (1.0f64, 1.0f64 - (a + b) * x / (a + 1.0));
@@ -209,7 +208,8 @@ fn libm_lgamma(x: f64) -> f64 {
         1.505_632_735_149_311_6e-7,
     ];
     if x < 0.5 {
-        return (std::f64::consts::PI / (std::f64::consts::PI * x).sin()).ln() - libm_lgamma(1.0 - x);
+        return (std::f64::consts::PI / (std::f64::consts::PI * x).sin()).ln()
+            - libm_lgamma(1.0 - x);
     }
     let x = x - 1.0;
     let mut a = C[0];
@@ -395,7 +395,9 @@ fn main() {
             // located by the tail's shape, and the decision statistic is then a
             // restatement of the running minimum.
             if (f - 1.0).abs() < 1e-12 {
-                pinning.push(p.endpoint_quantile(0.975) - e.iter().copied().fold(f64::INFINITY, f64::min));
+                pinning.push(
+                    p.endpoint_quantile(0.975) - e.iter().copied().fold(f64::INFINITY, f64::min),
+                );
             }
             if (f - 0.5).abs() < 1e-12 {
                 shape_report.push((
@@ -410,7 +412,11 @@ fn main() {
                     p.n_exceedances,
                 ));
             }
-            stats[fi].push((t.solved, pe, e.iter().copied().fold(f64::INFINITY, f64::min)));
+            stats[fi].push((
+                t.solved,
+                pe,
+                e.iter().copied().fold(f64::INFINITY, f64::min),
+            ));
             if t.solved {
                 tally[fi].3 += 1;
                 if !excludes {
@@ -438,11 +444,7 @@ fn main() {
     }
     if !slopes.is_empty() {
         let summarise = |sel: bool| {
-            let mut v: Vec<f64> = slopes
-                .iter()
-                .filter(|r| r.0 == sel)
-                .map(|r| r.2)
-                .collect();
+            let mut v: Vec<f64> = slopes.iter().filter(|r| r.0 == sel).map(|r| r.2).collect();
             v.sort_by(|a, b| a.partial_cmp(b).unwrap());
             if v.is_empty() {
                 return (f64::NAN, f64::NAN, f64::NAN, 0usize);
@@ -496,7 +498,8 @@ fn main() {
 
     if !pinning.is_empty() {
         pinning.sort_by(|a, b| a.partial_cmp(b).unwrap());
-        let q = |p: f64| pinning[((p * (pinning.len() - 1) as f64) as usize).min(pinning.len() - 1)];
+        let q =
+            |p: f64| pinning[((p * (pinning.len() - 1) as f64) as usize).min(pinning.len() - 1)];
         println!(
             "  endpoint 97.5 per cent quantile below the deepest sampled energy: \
              median {:.4}, 5th to 95th [{:.4}, {:.4}] over {} whole-trace fits",
