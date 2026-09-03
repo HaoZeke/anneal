@@ -46,6 +46,13 @@ pub enum Keying {
     /// Chatterjee-Voter move under a force ledger: many recrossings
     /// of the occupied packing, then an exit. No clock, no FPTA.
     SoapPacking,
+    /// Sorted distances with the kernel spectra of
+    /// [`crate::tensor_id::TripletSpectrum`] appended: strictly richer than
+    /// [`Keying::Distances`], adding the weighted triangle sum a multiset of
+    /// distances cannot hold, with no reference structure and no chosen
+    /// coordinate. Its merge radius is a different number from the distance
+    /// keying's, larger by the length of the appended block.
+    Triplet,
 }
 
 /// Constraint applied to SOAP proposals on grouped systems.
@@ -107,6 +114,12 @@ pub struct Config {
     /// descriptor space with no physical meaning; against a shape distance it
     /// is a length.
     pub merge_radius: f64,
+    /// Kernel width for [`Keying::Triplet`], in the units of the coordinates.
+    ///
+    /// Ignored by every other keying. Defaults to the Lennard-Jones value; a
+    /// potential with a different pair minimum needs it scaled the way
+    /// `container` and `min_separation` are.
+    pub keying_sigma: f64,
     /// Design point for the budget-window temperature, as a fraction of the
     /// sphere-model descent boundary. Must lie strictly below two.
     pub theta: f64,
@@ -813,6 +826,7 @@ impl Config {
             // The multiplier separates a return from a genuinely different
             // minimum while remaining proportional to the declared scale.
             merge_radius: LennardJonesPreset::MERGE_RADIUS * length_scale,
+            keying_sigma: 2.5 * length_scale,
             shape_keyed: false,
             theta: 0.5,
             budget_window: false,
