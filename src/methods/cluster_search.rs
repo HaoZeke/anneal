@@ -15,7 +15,7 @@
 //! there arrives at the cluster driver by the same route as one written here
 //! and neither the driver nor this function can tell them apart.
 
-use crate::methods::cluster_hopping::{optimize_with_gradient, Config, Ledger, Outcome};
+use crate::methods::cluster_hopping::{optimize_with_energy_gradient, Config, Ledger, Outcome};
 use crate::quench::{QuenchPredictor, Verdict};
 use crate::methods::warm_lbfgs::WarmLbfgs;
 use eindir_core::gradient::DifferentiableObjective;
@@ -238,7 +238,7 @@ where
         Some(objective.value_and_gradient(x))
     };
 
-    let out = crate::methods::cluster_hopping::optimize_with_energy_gradient(
+    let out = optimize_with_energy_gradient(
         cfg,
         ledger,
         &mut relax,
