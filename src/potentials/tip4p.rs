@@ -14,8 +14,8 @@
 //! Impey and Klein, *J. Chem. Phys.* **79**, 926 (1983). There is no cutoff:
 //! every intermolecular pair contributes. Energy is in kJ/mol. The analytic
 //! gradient is assembled from site forces and torques: the centre-of-mass
-//! block is the total force, and `∂E/∂ω = J_r(ω)ᵀ Σ (R s) × (∂E/∂r)` with
-//! the right Jacobian of the exponential map.
+//! block is the total force, and `∂E/∂ω = J_l(ω)ᵀ Σ (R s) × (∂E/∂r)` with
+//! the left Jacobian of the exponential map (spatial angular velocity).
 
 use eindir_core::Objective;
 use eindir_core::bounds::Bounds;
@@ -195,8 +195,8 @@ impl Tip4pCluster {
                 }
             }
             let w = [x[3 * n + 3 * i], x[3 * n + 3 * i + 1], x[3 * n + 3 * i + 2]];
-            let jr_t = right_jacobian_t(w);
-            let gw = mat_vec(jr_t, torque);
+            let jl_t = left_jacobian_t(w);
+            let gw = mat_vec(jl_t, torque);
             for k in 0..3 {
                 g[3 * n + 3 * i + k] = gw[k];
             }
@@ -297,7 +297,8 @@ pub fn fold_rotation_vectors(n_molecules: usize, x: &mut [f64]) {
 }
 
 /// Jorgensen linear dimer: donor O at the origin, acceptor O on `+z` at
-/// 2.75 Å, acceptor bisector tilted 46° from the O–O axis.
+/// 2.75 Å, acceptor plane perpendicular to the donor plane, bisector
+/// tilted 46° from the O-O axis (Cs, Jorgensen Table II).
 pub fn jorgensen_dimer() -> Array1<f64> {
     let body = body_sites();
     let oh = [
@@ -311,7 +312,10 @@ pub fn jorgensen_dimer() -> Array1<f64> {
     let donor_com = [-donor_o[0], -donor_o[1], -donor_o[2]];
 
     let tilt = 46.0_f64.to_radians();
-    let acc_r = rotation_matrix([0.0, tilt, 0.0]);
+    let acc_r = mat_mul(
+        rotation_matrix([0.0, 0.0, std::f64::consts::FRAC_PI_2]),
+        rotation_matrix([tilt, 0.0, 0.0]),
+    );
     let acc_o = mat_vec(acc_r, body[0]);
     let acc_com = [-acc_o[0], -acc_o[1], 2.75 - acc_o[2]];
     let acc_w = rotation_vector(acc_r);
@@ -443,9 +447,11 @@ fn rotation_matrix(w: [f64; 3]) -> [[f64; 3]; 3] {
     mat_add(IDENTITY, mat_add(mat_scale(a, k), mat_scale(b, k2)))
 }
 
-/// Right Jacobian transpose of the exponential map, so `∂E/∂ω = J_rᵀ τ`
-/// when `τ` is the body-to-space torque assembled from site forces.
-fn right_jacobian_t(w: [f64; 3]) -> [[f64; 3]; 3] {
+/// Left Jacobian transpose of the exponential map.
+///
+/// `dR = [J_l(ω) dω]× R`, so the spatial torque `τ = Σ (R s) × (∂E/∂r)`
+/// pulls back as `∂E/∂ω = J_lᵀ τ`.
+fn left_jacobian_t(w: [f64; 3]) -> [[f64; 3]; 3] {
     let theta2 = w[0] * w[0] + w[1] * w[1] + w[2] * w[2];
     if theta2 < 1e-16 {
         return IDENTITY;
@@ -464,9 +470,9 @@ fn right_jacobian_t(w: [f64; 3]) -> [[f64; 3]; 3] {
     } else {
         (theta - sin) / (theta2 * theta)
     };
-    // J_r = I − α [ω]× + β [ω]×²
-    let jr = mat_add(IDENTITY, mat_add(mat_scale(-alpha, k), mat_scale(beta, k2)));
-    mat_transpose(jr)
+    // J_l = I + α [ω]× + β [ω]×²
+    let jl = mat_add(IDENTITY, mat_add(mat_scale(alpha, k), mat_scale(beta, k2)));
+    mat_transpose(jl)
 }
 
 fn rotation_taking(from: [f64; 3], to: [f64; 3]) -> [[f64; 3]; 3] {
@@ -534,8 +540,8 @@ mod tests {
         let x = jorgensen_dimer();
         let e = pot.eval(x.view());
         assert!(
-            (e + 26.0).abs() < 1.5,
-            "TIP4P dimer at the linear Jorgensen geometry is {e} kJ/mol"
+            (e + 26.07).abs() < 0.15,
+            "TIP4P dimer at the linear Jorgensen geometry is {e} kJ/mol, expected near -26.08"
         );
     }
 
