@@ -29,11 +29,11 @@
 //! relaxed, a size-free rule that reads only the live structure. Every
 //! evaluation of either phase is charged.
 
-use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use anneal_core::bias::BasinBias;
-use anneal_core::corekey::{CoreRule, core_key_nn, motif_class};
+use anneal_core::coreclass::{CoreClassTable, CoreVerdict};
+use anneal_core::corekey::motif_class;
 use anneal_core::methods::cluster_hopping::{
     ChainCheckpoint, CheckpointAction, ClusterFingerprint, Config, Ledger, Outcome, random_cluster,
     run_with_bias_at_checkpoints,
@@ -263,26 +263,6 @@ struct ExchangeConfig {
     reoccupy_interval: usize,
 }
 
-/// One core superbasin shared by the chains of an ensemble.
-#[derive(Debug, Clone)]
-struct CoreStat {
-    /// Lowest energy any chain has seen with this core.
-    best: f64,
-    /// Calls spent in this core since it last improved.
-    calls_since_improvement: usize,
-    /// Checkpoints at which some chain sat in this core.
-    visits: usize,
-    /// Best energies of chains at the end of their trial in this core.
-    trials: Vec<f64>,
-}
-
-/// Cores visited by an ensemble, keyed by the coloured ring-graph hash.
-#[derive(Debug, Default)]
-struct CoreTable {
-    stats: HashMap<u64, CoreStat>,
-    restarts: usize,
-}
-
 /// Coordination-shell histogram dissimilarity of Grosso, Locatelli and
 /// Schoen: `H1[n]` counts atoms with exactly `n` neighbours inside the
 /// first shell, `H2[n]` those with exactly `n` in the second shell, and the
@@ -483,7 +463,7 @@ fn run_chain(
     resume: Option<Array1<f64>>,
     shared_surfaces: Option<SharedSurfaceAllocator>,
     population: Option<Arc<Mutex<Population>>>,
-    cores: Option<Arc<Mutex<CoreTable>>>,
+    cores: Option<Arc<Mutex<CoreClassTable>>>,
 ) -> ChainReport {
     let cfg = Config::recommended(n);
     let surface_kind = Surface::from_environment(n);
@@ -575,17 +555,6 @@ fn run_chain(
     let relax_steps = cfg.relax_steps;
     let temperature = cfg.temperature;
     let min_separation = cfg.min_separation;
-    let species = vec![1u32; n];
-    // CORE_KEY=motif keys the core table on the coarse five-fold class
-    // instead of the per-minimum ring-graph hash.
-    let motif_key = env_string("CORE_KEY", "ring") == "motif";
-    // The chain's own progress inside its current core: the key it sits in,
-    // its best energy there and the charged calls at that best.
-    let mut own_key: Option<u64> = None;
-    let mut own_best = f64::INFINITY;
-    let mut own_best_at = 0usize;
-    let mut own_entered_at = 0usize;
-    let mut own_tried = false;
     let mut child_opt = WarmLbfgs::default();
     let mut checkpoint = |snapshot: ChainCheckpoint<'_>| {
         {
@@ -622,62 +591,12 @@ fn run_chain(
             return CheckpointAction::ExternalWork { external_calls };
         }
         if let Some(cores) = cores.as_ref() {
-            let key = if motif_key {
-                u64::from(motif_class(snapshot.current_state()).index())
-            } else {
-                core_key_nn(
-                    snapshot.current_state(),
-                    &species,
-                    CoreRule::NearMaximum { slack: 1 },
-                )
-                .key
-            };
-            let energy = snapshot.current_energy();
+            let class = motif_class(snapshot.current_state()).index();
             let mut table = cores.lock().expect("core table");
-            let stat = table.stats.entry(key).or_insert(CoreStat {
-                best: f64::INFINITY,
-                calls_since_improvement: 0,
-                visits: 0,
-                trials: Vec::new(),
-            });
-            stat.visits += 1;
-            stat.calls_since_improvement += exchange.checkpoint;
-            if energy < stat.best - 1e-6 {
-                stat.best = energy;
-                stat.calls_since_improvement = 0;
-            }
-            if own_key != Some(key) {
-                own_key = Some(key);
-                own_best = f64::INFINITY;
-                own_best_at = snapshot.charged();
-                own_entered_at = snapshot.charged();
-                own_tried = false;
-            }
-            if energy < own_best - 1e-6 {
-                own_best = energy;
-                own_best_at = snapshot.charged();
-            }
-            let own_stalled =
-                snapshot.charged().saturating_sub(own_best_at) >= exchange.core_patience;
-            let class_tabu = stat.calls_since_improvement >= exchange.core_tabu_calls
-                && energy > stat.best + 1e-6;
-            let mut trial_lost = false;
-            if exchange.core_trial > 0
-                && !own_tried
-                && snapshot.charged().saturating_sub(own_entered_at) >= exchange.core_trial
-            {
-                own_tried = true;
-                stat.trials.push(own_best);
-                let mut sorted = stat.trials.clone();
-                sorted.sort_by(|a, b| a.total_cmp(b));
-                let median = sorted[sorted.len() / 2];
-                trial_lost = sorted.len() >= 4 && own_best > median + 1e-6;
-            }
-            if !own_stalled && !class_tabu && !trial_lost {
+            let verdict = table.report(chain, class, snapshot.current_energy(), snapshot.charged());
+            if verdict == CoreVerdict::Continue {
                 return CheckpointAction::Continue;
             }
-            own_key = None;
-            table.restarts += 1;
             drop(table);
             tally.adopted += 1;
             let fresh = random_cluster(n, 0.7, min_separation, &mut exchange_rng);
@@ -938,9 +857,13 @@ fn main() {
         let population = exchange
             .pbh
             .then(|| Arc::new(Mutex::new(Population::new(chains))));
-        let cores = exchange
-            .core_tabu
-            .then(|| Arc::new(Mutex::new(CoreTable::default())));
+        let cores = exchange.core_tabu.then(|| {
+            Arc::new(Mutex::new(
+                CoreClassTable::new(exchange.core_patience, exchange.core_trial)
+                    .with_class_tabu(exchange.core_tabu_calls)
+                    .with_visit_charge(exchange.checkpoint),
+            ))
+        });
         let reports: Vec<ChainReport> = std::thread::scope(|scope| {
             let handles: Vec<_> = (0..chains)
                 .map(|chain| {
@@ -993,15 +916,14 @@ fn main() {
         if let Some(cores) = cores.as_ref() {
             let table = cores.lock().expect("core table");
             let mut deepest: Vec<(f64, usize)> = table
-                .stats
-                .values()
-                .map(|stat| (stat.best, stat.visits))
+                .stats()
+                .map(|(_, stat)| (stat.best, stat.visits))
                 .collect();
             deepest.sort_by(|a, b| a.0.total_cmp(&b.0));
             println!(
                 "      coretabu: {} cores seen, {} restarts, deepest cores {:?}",
-                table.stats.len(),
-                table.restarts,
+                table.class_count(),
+                table.restarts(),
                 deepest
                     .iter()
                     .take(5)

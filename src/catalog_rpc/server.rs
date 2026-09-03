@@ -49,6 +49,7 @@ use crate::catalog_policy::proposal::farthest_hole;
 use crate::cooperative_search::ledger::{
     ChargeKind, ChargeSummary, CooperativeLedger, ReplicaLedgerEvent,
 };
+use crate::coreclass::CoreClassTable;
 use crate::descriptor_space::{DescriptorSpace, UNIVERSAL_LOCAL_ENVIRONMENT_RADIUS};
 use crate::discovery_roster::{DiscoveryRole, assign_discovery_batch};
 use crate::methods::feynman_kac::{
@@ -88,6 +89,8 @@ pub struct ServerConfig {
     state_directory: Option<PathBuf>,
     quorum: Option<(f64, u64)>,
     halving: Option<SuccessiveHalving>,
+    core_patience: usize,
+    core_trial: usize,
 }
 
 #[derive(Clone)]
@@ -129,7 +132,17 @@ impl ServerConfig {
             state_directory: None,
             quorum: None,
             halving: None,
+            core_patience: 10_000,
+            core_trial: 2_000,
         })
+    }
+
+    /// Shared motif-class stall and trial budgets used by
+    /// [`CatalogOperation::ReportCoreClass`].
+    pub fn with_core_class(mut self, patience: usize, trial: usize) -> Self {
+        self.core_patience = patience;
+        self.core_trial = trial;
+        self
     }
 
     /// Close population epochs on `quorum` of the live roster once
@@ -514,6 +527,8 @@ struct CoordinatorState {
     halving: Option<SuccessiveHalving>,
     /// Raw frontier excursion posts, shared across every replica.
     frontier: std::collections::VecDeque<crate::catalog_rpc::CatalogFrontierPost>,
+    /// Shared motif-class table for cooperative restarts.
+    core_class: CoreClassTable,
     /// A journal append failed after the live state had already moved,
     /// so a replay of the log no longer reproduces this coordinator.
     journal_broken: bool,
@@ -655,6 +670,7 @@ impl CoordinatorState {
             roster: CoordinatorRoster::new(config.replicas.iter().copied()),
             halving: config.halving.clone(),
             frontier: std::collections::VecDeque::new(),
+            core_class: CoreClassTable::new(config.core_patience, config.core_trial),
             journal_broken: false,
         })
     }
@@ -3067,6 +3083,34 @@ fn apply_request(
             if let Some(snapshot_version) = state.snapshot_version.checked_add(1) {
                 state.snapshot_version = snapshot_version;
             }
+        }
+        CatalogOperation::ReportCoreClass {
+            class,
+            energy,
+            charged,
+        } => {
+            let Ok(charged) = usize::try_from(*charged) else {
+                return rejected(
+                    state,
+                    request.event_sequence,
+                    ProtocolRejection::ValidationRejected,
+                );
+            };
+            let verdict = state.core_class.report(
+                request.identity.replica as usize,
+                *class,
+                *energy,
+                charged,
+            );
+            payload = AcceptedPayload::CoreVerdict(verdict);
+            let Some(snapshot_version) = state.snapshot_version.checked_add(1) else {
+                return rejected(
+                    state,
+                    request.event_sequence,
+                    ProtocolRejection::ValidationRejected,
+                );
+            };
+            state.snapshot_version = snapshot_version;
         }
     }
     state
