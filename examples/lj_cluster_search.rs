@@ -2345,15 +2345,21 @@ fn main() {
             }
         }
         if let Some(r) = reference {
-            if let Some((h, _, b, e)) = out.improvements.iter().find(|(_, _, _, e)| *e < r + 1e-4) {
+            // A record carries the hop, the evaluations charged by then, the
+            // basins open and the energy. The spend is what the budget is
+            // denominated in, so it is printed alongside the hop rather than
+            // dropped.
+            if let Some((h, spent, b, e)) =
+                out.improvements.iter().find(|(_, _, _, e)| *e < r + 1e-4)
+            {
                 println!(
-                    "      crossed at hop {h} of {} ({:.1}% in), {b} basins, {e:.6}",
+                    "      crossed at hop {h} of {} ({:.1}% in), {spent} charged, {b} basins, {e:.6}",
                     out.hops,
                     100.0 * *h as f64 / out.hops.max(1) as f64
                 );
-            } else if let Some((h, _, b, e)) = out.improvements.last() {
+            } else if let Some((h, spent, b, e)) = out.improvements.last() {
                 println!(
-                    "      last improvement at hop {h} of {} ({:.1}% in), {b} basins, {e:.6}",
+                    "      last improvement at hop {h} of {} ({:.1}% in), {spent} charged, {b} basins, {e:.6}",
                     out.hops,
                     100.0 * *h as f64 / out.hops.max(1) as f64
                 );

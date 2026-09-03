@@ -4729,7 +4729,7 @@ impl ClusterFingerprint {
                     })
                 }
             }
-            other => Self::of_with(cfg.n_points, other, reference),
+            other => Self::of_tuned(cfg.n_points, other, reference, cfg.keying_sigma),
         }
     }
 }

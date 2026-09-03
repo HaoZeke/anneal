@@ -171,6 +171,14 @@ fn main() {
         cfg.keying = Keying::Canonical;
         cfg.merge_radius = 0.3;
     }
+    if opts.contains(&"triplet") {
+        cfg.keying = Keying::Triplet;
+        // The descriptor appends two kernel spectra to the distance spectrum,
+        // so its distances run larger than the default keying's; 0.95 is the
+        // response to a quench-scale displacement, and MERGE_RADIUS overrides.
+        cfg.merge_radius = 0.95;
+        cfg.keying_sigma *= scale;
+    }
     if let Ok(v) = std::env::var("MERGE_RADIUS")
         && let Ok(r) = v.parse::<f64>()
     {
