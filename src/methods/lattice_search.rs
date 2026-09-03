@@ -531,18 +531,13 @@ pub fn place_successively_on(
     let frac = 2.0 / n.max(1) as f64;
     while placed.len() / 3 < n && !vacant.is_empty() {
         let mut best: Option<(usize, f64)> = None;
-        // Rank the vacant sites by how many placed points they touch, then
-        // read energies for the best candidates only.
-        let bond = median_bond(&placed).unwrap_or(1.0);
-        let candidates = best_coordinated(&placed, &vacant, bond, OCCUPATION_CANDIDATE_SITES);
-        for site in &candidates {
+        // Every vacant site is read here: a coordination cut misses the
+        // facet sites a decahedral surface needs, and the placement is a
+        // small share of the construction's charge.
+        for (s, site) in vacant.iter().enumerate() {
             if !ledger.charge_frac(frac) {
                 break;
             }
-            let s = vacant
-                .iter()
-                .position(|v| v == site)
-                .expect("candidate comes from the vacant list");
             let e = site_energy(cfg.kind, &placed, None, *site);
             if best.is_none_or(|(_, be)| e < be) {
                 best = Some((s, e));
