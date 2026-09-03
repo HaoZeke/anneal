@@ -1206,6 +1206,125 @@ where
     leave_packing_rung_to_dir(x, &direction, barrier, species, mobile, energy)
 }
 
+/// Cover index whose packing-mean increment is farthest from every
+/// occupied packing mean.
+///
+/// Anelli, Engel, Pickard and Ceriotti (*Phys. Rev. Materials* **2**,
+/// 103804 (2018), <https://doi.org/10.1103/PhysRevMaterials.2.103804>):
+/// farthest-point sampling in a learned descriptor, not a random
+/// cover. Occupancy already has [`crate::catalog_policy::proposal::farthest_hole`]
+/// on the unit sphere; this is the same rule on the packing-mean
+/// sphere the Leave actually walks.
+pub fn farthest_packing_cover(
+    x: ArrayView1<f64>,
+    references: &[Vec<f64>],
+    n_cover: usize,
+) -> usize {
+    let Some(mu) = packing_mean(x) else {
+        return 0;
+    };
+    let occupied: Vec<Array1<f64>> = references
+        .iter()
+        .filter_map(|reference| packing_mean(ArrayView1::from(reference.as_slice())))
+        .filter(|mean| mean.len() == mu.len())
+        .collect();
+    let mut best_i = 0usize;
+    let mut best_d = f64::NEG_INFINITY;
+    for index in 0..n_cover.max(1) {
+        let Some(direction) = packing_cover_direction(x, index, references) else {
+            continue;
+        };
+        if direction.len() != mu.len() {
+            continue;
+        }
+        let dmin = if occupied.is_empty() {
+            direction.iter().map(|v| v * v).sum::<f64>().sqrt()
+        } else {
+            occupied
+                .iter()
+                .map(|occ| {
+                    direction
+                        .iter()
+                        .zip(mu.iter().zip(occ.iter()))
+                        .map(|(d, (m, o))| {
+                            let t = m + d - o;
+                            t * t
+                        })
+                        .sum::<f64>()
+                        .sqrt()
+                })
+                .fold(f64::INFINITY, f64::min)
+        };
+        if dmin > best_d {
+            best_d = dmin;
+            best_i = index;
+        }
+    }
+    best_i
+}
+
+/// Energy minima on a sphere supported on the active volume.
+///
+/// Ohno and Maeda (*Chem. Phys. Lett.* **384**, 277 (2004),
+/// <https://doi.org/10.1016/j.cplett.2003.12.130>): reaction
+/// channels are anharmonic downward distortions, found as energy
+/// minima on the scaled hypersphere around the equilibrium. A
+/// uniform covering is not that. This scan evaluates the potential
+/// on a sphere of radius `radius` in the mobile coordinates and
+/// returns the `keep` lowest-energy points. Later SEAKMC builds
+/// used the same SHS start (Xu *et al.*, *Comput. Mater. Sci.*
+/// **194**, 110390 (2021)).
+pub fn shs_av_starts<E>(
+    x: ArrayView1<f64>,
+    mobile: &[usize],
+    radius: f64,
+    samples: usize,
+    keep: usize,
+    mut energy: E,
+) -> Vec<Array1<f64>>
+where
+    E: FnMut(ArrayView1<f64>) -> Option<f64>,
+{
+    let n_at = x.len() / 3;
+    if n_at == 0 || mobile.is_empty() || !(radius.is_finite() && radius > 0.0) || samples == 0 {
+        return Vec::new();
+    }
+    let dim = 3 * mobile.len();
+    let mut scored: Vec<(f64, Array1<f64>)> = Vec::with_capacity(samples);
+    for index in 0..samples {
+        let direction = crate::hypersphere::cover_direction(samples, dim, index);
+        if direction.len() != dim {
+            continue;
+        }
+        let norm = direction.iter().map(|v| v * v).sum::<f64>().sqrt();
+        if !(norm.is_finite() && norm > 0.0) {
+            continue;
+        }
+        let scale = radius / norm;
+        let mut trial = x.to_owned();
+        for (slot, &atom) in mobile.iter().enumerate() {
+            if atom >= n_at {
+                continue;
+            }
+            for k in 0..3 {
+                trial[3 * atom + k] += scale * direction[3 * slot + k];
+            }
+        }
+        let Some(e) = energy(trial.view()) else {
+            continue;
+        };
+        if e.is_finite() {
+            scored.push((e, trial));
+        }
+    }
+    scored.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+    scored
+        .into_iter()
+        .take(keep.max(1))
+        .map(|(_, state)| state)
+        .collect()
+}
+
 /// [`leave_packing_rung_to`] along a packed feature direction already in hand.
 pub fn leave_packing_rung_to_dir<E>(
     x: ArrayView1<f64>,
@@ -1618,6 +1737,25 @@ mod tests {
         let (e, gt) = effective(x.view(), 3.0, g.clone());
         assert_eq!(e, 3.0);
         assert_eq!(gt, g);
+    }
+
+    #[test]
+    fn shs_av_starts_pick_the_downward_distortion() {
+        let x = Array1::zeros(6);
+        let starts = shs_av_starts(x.view(), &[0], 0.2, 8, 1, |trial| Some(trial[0]));
+        assert_eq!(starts.len(), 1);
+        assert!(
+            starts[0][0] < -0.05,
+            "ADD channel must lower the coordinate that carries the energy, got {}",
+            starts[0][0]
+        );
+    }
+
+    #[test]
+    fn farthest_packing_cover_is_in_range() {
+        let x = Array1::from(vec![0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0]);
+        let index = farthest_packing_cover(x.view(), &[], 7);
+        assert!(index < 7);
     }
 
     #[test]

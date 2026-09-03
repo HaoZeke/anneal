@@ -279,7 +279,11 @@ pub fn occupancy_leave_target(
 /// the seen book still has remaining improvement. The hop then launches
 /// several more starts in the packing active volume (Xu, Osetsky and
 /// Stoller, *Phys. Rev. B* **84**, 132103 (2011); Béland et al.
-/// arXiv:1409.1253) and discards the unused ones. A min-mode climb
+/// arXiv:1409.1253). Those starts are energy minima on the active-volume
+/// sphere (Ohno and Maeda, *Chem. Phys. Lett.* **384**, 277 (2004))
+/// and farthest-point covers in the packing mean (Anelli, Engel,
+/// Pickard and Ceriotti, *Phys. Rev. Materials* **2**, 103804 (2018)),
+/// not a random cover. Unused starts are discarded. A min-mode climb
 /// and a named morphology are not destinations. Xu \(C=1-1/N_r\) is
 /// not a campaign stop.
 pub fn occupancy_leave_by_ei(

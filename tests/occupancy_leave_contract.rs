@@ -309,6 +309,10 @@ fn leave_quench_keeps_the_walk_off_mu_k() {
         body.contains("packing_active_volume") && body.contains("LEAVE_AV_SEARCHES"),
         "Leave catalogs several active-volume starts and discards the unused ones"
     );
+    assert!(
+        body.contains("shs_av_starts") && body.contains("farthest_packing_cover"),
+        "Leave ranks SHS downward distortions and FPS covers, not a random cover"
+    );
 }
 
 #[test]
