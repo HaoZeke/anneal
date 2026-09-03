@@ -464,8 +464,7 @@ impl HopDiagnostics {
 /// One closure returns both because on a pairwise potential they share the pair
 /// loop, and splitting them doubles the charge for arithmetic already done.
 /// `None` means the ledger is spent.
-pub type Energy<'a> =
-    &'a mut dyn FnMut(&mut Ledger, ArrayView1<f64>) -> Option<(f64, Array1<f64>)>;
+pub type Energy<'a> = &'a mut dyn FnMut(&mut Ledger, ArrayView1<f64>) -> Option<(f64, Array1<f64>)>;
 
 /// One chain's adaptation state.
 ///
@@ -596,7 +595,15 @@ impl HopChain {
 
         let eps = self.step.epsilon();
         let out = nuts(
-            ledger, x, energy, temp, eps, &metric, cfg.max_depth, eval, rng,
+            ledger,
+            x,
+            energy,
+            temp,
+            eps,
+            &metric,
+            cfg.max_depth,
+            eval,
+            rng,
         )?;
 
         // How far the proposal actually moved the structure, with rigid motion
@@ -716,8 +723,7 @@ fn reasonable_epsilon<R: Rng + ?Sized>(
     let mut eps = 1.0f64;
     let mut direction = 0i32;
     for _ in 0..40 {
-        let (_, p1, _, e1) =
-            leapfrog(ledger, x, g0.view(), p0.view(), eps, temp, metric, eval)?;
+        let (_, p1, _, e1) = leapfrog(ledger, x, g0.view(), p0.view(), eps, temp, metric, eval)?;
         let h1 = e1 / temp + metric.kinetic(p1.view());
         let log_ratio = h0 - h1;
         let d = if log_ratio > -(2.0f64).ln() { 1 } else { -1 };
@@ -813,7 +819,11 @@ fn min_separation(x: ArrayView1<f64>, n: usize) -> f64 {
         }
     }
     let scale = crate::model_hessian::spacing(x, n);
-    if scale > 0.0 { lo.sqrt() / scale } else { lo.sqrt() }
+    if scale > 0.0 {
+        lo.sqrt() / scale
+    } else {
+        lo.sqrt()
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1042,9 +1052,8 @@ mod tests {
 
     impl Quad {
         fn spread(dim: usize, ratio: f64) -> Self {
-            let k = Array1::from_iter((0..dim).map(|i| {
-                ratio.powf(i as f64 / (dim.max(2) - 1) as f64)
-            }));
+            let k =
+                Array1::from_iter((0..dim).map(|i| ratio.powf(i as f64 / (dim.max(2) - 1) as f64)));
             Self { k }
         }
         fn value(&self, x: ArrayView1<f64>) -> f64 {
@@ -1110,9 +1119,17 @@ mod tests {
         };
         let mut e: Energy<'_> = &mut ev;
         for _ in 0..steps {
-            let (x1, p1, g1, _) =
-                leapfrog(&mut led, x.view(), g.view(), p.view(), eps, 1.0, metric, &mut e)
-                    .unwrap();
+            let (x1, p1, g1, _) = leapfrog(
+                &mut led,
+                x.view(),
+                g.view(),
+                p.view(),
+                eps,
+                1.0,
+                metric,
+                &mut e,
+            )
+            .unwrap();
             x = x1;
             p = p1;
             g = g1;
@@ -1344,8 +1361,7 @@ mod tests {
         for kind in [MetricKind::Identity, MetricKind::ModelHessian] {
             let metric = MetricAdaptation::new(kind, n).freeze(x0.view());
             let eps = eps_for_drift(&x0, &metric, &rigid, steps, target);
-            let (dist, drift) =
-                distance_and_drift(&x0, &metric, &rigid, eps, steps, 64, 777);
+            let (dist, drift) = distance_and_drift(&x0, &metric, &rigid, eps, steps, 64, 777);
             reach.push((kind, eps, dist, drift));
         }
         for (kind, eps, dist, drift) in &reach {
@@ -1369,7 +1385,6 @@ mod tests {
         );
     }
 
-
     /// A trajectory driven into the repulsive wall has to be reported as
     /// divergent rather than returned as an ordinary proposal, and the
     /// structural coordinate has to come back with it.
@@ -1391,7 +1406,15 @@ mod tests {
         let mut rng = StdRng::seed_from_u64(31);
         // A step far past any stability limit for this potential.
         let out = nuts(
-            &mut led, x0.view(), e0, 0.05, 5.0, &metric, 4, &mut e, &mut rng,
+            &mut led,
+            x0.view(),
+            e0,
+            0.05,
+            5.0,
+            &metric,
+            4,
+            &mut e,
+            &mut rng,
         )
         .unwrap();
         assert!(out.diverged, "a step of 5 did not diverge on LJ");
