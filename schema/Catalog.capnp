@@ -442,7 +442,22 @@ struct CatalogRequest {
     detach @27 :Text;
     tick @28 :UInt64;
     scale @29 :UInt32;
+    # Shared motif-class table: one chain reports its class, energy, and
+    # charged work, and the coordinator answers Continue or Restart.
+    reportCoreClass @30 :CoreClassReport;
   }
+}
+
+# One checkpoint against the shared motif-class table.
+struct CoreClassReport {
+  class @0 :UInt8;
+  energy @1 :Float64;
+  charged @2 :UInt64;
+}
+
+enum CoreVerdict {
+  continue @0;
+  restart @1;
 }
 
 # A raw, unquenched excursion state on the road out of the occupied
@@ -499,6 +514,7 @@ struct AcceptedReply {
     rideWork @15 :RideWorkOrder;
     rideCredit @16 :RideReportReply;
     roster @17 :RosterReply;
+    coreVerdict @18 :CoreVerdict;
   }
   aggregateCharged @7 :UInt64;
   aggregateBudget @8 :UInt64;
