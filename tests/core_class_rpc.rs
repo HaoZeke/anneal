@@ -41,9 +41,7 @@ fn coordinator_core_class_report_round_trips_the_table_rule() {
     let enter = [1.0, 2.0, 3.0, 4.0];
     for (replica, energy) in enter.iter().enumerate() {
         assert_eq!(
-            chains[replica]
-                .report_core_class(1, 0, *energy, 0)
-                .unwrap(),
+            chains[replica].report_core_class(1, 0, *energy, 0).unwrap(),
             CoreVerdict::Continue
         );
     }

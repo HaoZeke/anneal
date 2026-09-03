@@ -432,10 +432,7 @@ mod tests {
             g[3 * i + 2] = 0.03 * ((i % 3) as f64 - 1.0);
         }
         let unit = ModelParams::unit_scale(1.7, 0.02);
-        let scaled = ModelParams {
-            k0: 8.0,
-            ..unit
-        };
+        let scaled = ModelParams { k0: 8.0, ..unit };
         let a = depth_with(x.view(), n, g.view(), 40, unit);
         let b = depth_with(x.view(), n, g.view(), 40, scaled);
         assert!(
