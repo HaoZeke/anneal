@@ -308,6 +308,10 @@ pub fn optimise_occupation_over(
         if sites.is_empty() {
             break;
         }
+        let sites = match median_bond(&cur) {
+            Some(bond) => best_coordinated(&cur, &sites, bond, OCCUPATION_CANDIDATE_SITES),
+            None => sites,
+        };
         let mut best: Option<(usize, [f64; 3], f64)> = None;
         for &atom in order.iter().take(movers.max(1)) {
             for site in &sites {
@@ -410,6 +414,25 @@ pub fn reoccupy(cfg: &LatticeSearchConfig, ledger: &mut Ledger, x: ArrayView1<f6
 /// Worst-bound points the finishing swap pass of a reoccupation tries.
 pub const OCCUPATION_FINISH_MOVERS: usize = 8;
 
+/// Vacant sites whose energies are read per mover or per placement: the
+/// sites with the most points within the bond length, ranked without any
+/// energy call, so the charged site energies go to the candidates that can
+/// bind.
+pub const OCCUPATION_CANDIDATE_SITES: usize = 40;
+
+/// The `keep` sites of `sites` with the most points of `x` within
+/// `1.2 * bond`, most first; ties keep their order.
+fn best_coordinated(x: &[f64], sites: &[[f64; 3]], bond: f64, keep: usize) -> Vec<[f64; 3]> {
+    let n = x.len() / 3;
+    let r2 = (1.2 * bond) * (1.2 * bond);
+    let mut ranked: Vec<(usize, [f64; 3])> = sites
+        .iter()
+        .map(|s| ((0..n).filter(|&i| dist2(*s, point(x, i)) < r2).count(), *s))
+        .collect();
+    ranked.sort_by(|a, b| b.0.cmp(&a.0));
+    ranked.into_iter().take(keep).map(|(_, s)| s).collect()
+}
+
 /// The successive placement alone: the fully coordinated interior of `x`
 /// stays, and every other point takes, in turn, the vacant lattice site
 /// with the lowest energy in the field of the points placed so far.
@@ -501,10 +524,18 @@ pub fn place_successively_on(
     let frac = 2.0 / n.max(1) as f64;
     while placed.len() / 3 < n && !vacant.is_empty() {
         let mut best: Option<(usize, f64)> = None;
-        for (s, site) in vacant.iter().enumerate() {
+        // Rank the vacant sites by how many placed points they touch, then
+        // read energies for the best candidates only.
+        let bond = median_bond(&placed).unwrap_or(1.0);
+        let candidates = best_coordinated(&placed, &vacant, bond, OCCUPATION_CANDIDATE_SITES);
+        for site in &candidates {
             if !ledger.charge_frac(frac) {
                 break;
             }
+            let s = vacant
+                .iter()
+                .position(|v| v == site)
+                .expect("candidate comes from the vacant list");
             let e = site_energy(cfg.kind, &placed, None, *site);
             if best.is_none_or(|(_, be)| e < be) {
                 best = Some((s, e));
