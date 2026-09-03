@@ -4616,6 +4616,9 @@ pub enum ClusterFingerprint {
     /// Sorted per-point pair energies, keying on how well each point is bound
     /// rather than on how far apart the points are.
     Sites(SiteEnergies),
+    /// Sorted distances with the two-body and three-body kernel spectra
+    /// appended, compared by Euclidean distance.
+    Triplet(Box<crate::tensor_id::TripletSpectrum>),
     /// Coordinates put in a canonical order against a fixed reference, so
     /// Euclidean distance between two of them is a shape distance.
     #[cfg(feature = "ira")]
@@ -4667,8 +4670,16 @@ impl ClusterFingerprint {
         Self::of_with(n_points, keying, &Array1::zeros(0))
     }
 
-    /// The descriptor for a named keying, against `reference`.
+    /// The descriptor for a named keying, against `reference`, with the
+    /// [`Keying::Triplet`] kernel width at its Lennard-Jones default.
     pub fn of_with(n_points: usize, keying: Keying, reference: &Array1<f64>) -> Self {
+        Self::of_tuned(n_points, keying, reference, 2.5)
+    }
+
+    /// The descriptor for a named keying, against `reference`, with the kernel
+    /// width `sigma` for [`Keying::Triplet`]. `sigma` carries the length units
+    /// of the coordinates.
+    pub fn of_tuned(n_points: usize, keying: Keying, reference: &Array1<f64>, sigma: f64) -> Self {
         #[cfg(not(feature = "ira"))]
         let _ = reference;
         match keying {
@@ -4676,6 +4687,9 @@ impl ClusterFingerprint {
             Keying::Core => ClusterFingerprint::Core { species: None },
             Keying::Distances => ClusterFingerprint::Spectrum(SortedPairs { n_points }),
             Keying::Sites => ClusterFingerprint::Sites(SiteEnergies { n_points }),
+            Keying::Triplet => ClusterFingerprint::Triplet(Box::new(
+                crate::tensor_id::TripletSpectrum::new(n_points).with_sigma(sigma),
+            )),
             Keying::SoapPacking => ClusterFingerprint::Spectrum(SortedPairs { n_points }),
             #[cfg(feature = "ira")]
             Keying::Canonical => {
@@ -4734,6 +4748,7 @@ impl Fingerprint for ClusterFingerprint {
                 Array1::from(key.coordinates().to_vec())
             }
             ClusterFingerprint::Sites(s) => s.describe(x),
+            ClusterFingerprint::Triplet(t) => t.describe(x),
             #[cfg(feature = "ira")]
             ClusterFingerprint::Canonical(c) => c.describe(x),
             #[cfg(feature = "featomic")]
