@@ -197,6 +197,12 @@ impl DifferentiableObjective<f64> for PairPotential {
     }
 }
 
+mod tip4p;
+pub use tip4p::{
+    COULOMB, EPSILON, HOH_DEG, Q_H, Q_M, R_OH, R_OM, SIGMA, Tip4pCluster, fold_rotation_vectors,
+    jorgensen_dimer, random_cluster as random_tip4p_cluster, wales_hodges_minimum,
+};
+
 impl crate::pes_exploration::PesSurface for PairPotential {
     type Error = std::convert::Infallible;
 

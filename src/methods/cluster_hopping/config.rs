@@ -80,7 +80,9 @@ pub enum ContinuousSymmetry {
 /// Driver settings.
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct Config {
-    /// Points in a state; the state length must be `3 * n_points`.
+    /// Points in a state. Cartesian libraries use length `3 * n_points`.
+    /// [`MoveLibrary::RigidBody`] appends a rotation vector per point, so
+    /// the objective dimension is `6 * n_points`.
     pub n_points: usize,
     /// Declared coordinate length scale.
     pub length_scale: f64,
@@ -756,6 +758,7 @@ impl Config {
             && self.active_region.is_none()
             && self.frozen.is_none()
             && !self.move_library.is_molecular()
+            && !self.move_library.is_rigid_body()
     }
 
     /// Recommended flags, with the two hand-set scalars replaced by
@@ -906,6 +909,40 @@ impl Config {
                 * (n_points as f64).cbrt(),
             min_separation: LennardJonesPreset::MIN_SEPARATION * length_scale,
         }
+    }
+
+    /// Basin-hopping settings for a rigid TIP4P water cluster.
+    ///
+    /// `n_molecules` is the number of waters. The state is six coordinates
+    /// per molecule (centre of mass plus an exponential-map rotation). The
+    /// move library is Wales--Hodges translation and rotation, each with
+    /// its own step, not the atomic Cartesian kernels.
+    pub fn for_tip4p(n_molecules: usize) -> Self {
+        assert!(
+            n_molecules >= 2,
+            "a TIP4P cluster needs at least two waters"
+        );
+        let length_scale = crate::potentials::SIGMA;
+        let mut cfg = Self::with_scales(n_molecules, length_scale, 1.0);
+        cfg.move_library = MoveLibrary::RigidBody {
+            n_molecules,
+            translate_step: 0.35,
+            rotate_step: 0.40,
+        };
+        cfg.temperature = 2.5;
+        cfg.bias_height = 2.0;
+        cfg.screen_margin = 15.0;
+        cfg.merge_radius = 0.6;
+        cfg.record_gradient = 1.0e-3;
+        cfg.neighbour_cutoff = 3.5;
+        cfg.min_separation = 2.35;
+        cfg.container = 3.0 * 2.75 * (n_molecules as f64).cbrt();
+        cfg.soap_mode = SoapProposalMode::Off;
+        cfg.angular_moves = false;
+        cfg.allocate_moves = true;
+        cfg.relax_steps = 120;
+        cfg.screen_steps = 25;
+        cfg
     }
 
     /// Species-aware molecular preset with rigid groups.
