@@ -2153,13 +2153,8 @@ where
             };
             let gnorm = gvec.iter().fold(0.0_f64, |a, q| a + q * q).sqrt();
             pending_raw = Some((raw_y, gnorm));
-            let design = crate::delayed::features_with_depth(
-                trial.view(),
-                n,
-                raw_y,
-                gvec.view(),
-                x.view(),
-            );
+            let design =
+                crate::delayed::features_with_depth(trial.view(), n, raw_y, gvec.view(), x.view());
             pending_design = Some(design.clone());
             // The first stage speaks only where the posterior is sharp against
             // the temperature that scales the acceptance ratio.
@@ -3877,6 +3872,52 @@ mod group_move_tests {
             }
         }
         assert_eq!(moved_groups, 1, "moved {moved_groups} groups, wanted 1");
+    }
+
+    /// A majority-ungrouped frame is a slab: the adsorbate is placed
+    /// above the substrate, not on a sphere about the all-atom centroid
+    /// (which sits inside the metal).
+    #[test]
+    fn group_relocate_on_a_slab_stays_above_the_substrate() {
+        let n_cu = 8usize;
+        let n_h = 2usize;
+        let n = n_cu + n_h;
+        let mut x = Array1::zeros(3 * n);
+        for i in 0..n_cu {
+            x[3 * i] = (i % 4) as f64;
+            x[3 * i + 1] = (i / 4) as f64;
+            x[3 * i + 2] = 0.0;
+        }
+        x[3 * n_cu] = 0.5;
+        x[3 * n_cu + 1] = 0.5;
+        x[3 * n_cu + 2] = 2.3;
+        x[3 * (n_cu + 1)] = 2.5;
+        x[3 * (n_cu + 1) + 1] = 0.5;
+        x[3 * (n_cu + 1) + 2] = 2.3;
+        let groups = vec![vec![n_cu], vec![n_cu + 1]];
+        let mut rng = StdRng::seed_from_u64(3);
+        let y = group_relocate(x.view(), &groups, 1.6, &mut rng);
+        for i in 0..n_cu {
+            for k in 0..3 {
+                assert_eq!(y[3 * i + k], x[3 * i + k], "substrate atom {i} moved");
+            }
+        }
+        let z_top = (0..n_cu)
+            .map(|i| x[3 * i + 2])
+            .fold(f64::NEG_INFINITY, f64::max);
+        let mut moved_h = 0;
+        for i in n_cu..n {
+            let dz = y[3 * i + 2] - z_top;
+            assert!(
+                dz >= 1.5,
+                "hydrogen {i} at z={} is not above the substrate (z_top={z_top})",
+                y[3 * i + 2]
+            );
+            if (0..3).any(|k| (y[3 * i + k] - x[3 * i + k]).abs() > 1e-9) {
+                moved_h += 1;
+            }
+        }
+        assert_eq!(moved_h, 1, "moved {moved_h} hydrogens, wanted 1");
     }
 }
 

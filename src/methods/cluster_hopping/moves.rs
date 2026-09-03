@@ -500,13 +500,84 @@ pub fn worst_bound_scaled(
     }
 }
 
+fn substrate_indices(n: usize, groups: &[Vec<usize>]) -> Vec<usize> {
+    let mut grouped = vec![false; n];
+    for atoms in groups {
+        for &a in atoms {
+            if a < n {
+                grouped[a] = true;
+            }
+        }
+    }
+    (0..n).filter(|&i| !grouped[i]).collect()
+}
+
+fn group_relocate_on_slab<R: Rng + ?Sized>(
+    x: ArrayView1<f64>,
+    groups: &[Vec<usize>],
+    substrate: &[usize],
+    contacts: &[usize],
+    rng: &mut R,
+) -> Array1<f64> {
+    let mut out = x.to_owned();
+    let n = x.len() / 3;
+    let z_top = substrate
+        .iter()
+        .map(|&i| x[3 * i + 2])
+        .fold(f64::NEG_INFINITY, f64::max);
+    let mut lo = [f64::INFINITY; 2];
+    let mut hi = [f64::NEG_INFINITY; 2];
+    for &i in substrate {
+        for k in 0..2 {
+            lo[k] = lo[k].min(x[3 * i + k]);
+            hi[k] = hi[k].max(x[3 * i + k]);
+        }
+    }
+    if !z_top.is_finite() || !lo[0].is_finite() || hi[0] <= lo[0] || hi[1] <= lo[1] {
+        return out;
+    }
+    let worst = (0..groups.len()).min_by_key(|&g| contacts[g]).unwrap_or(0);
+    let atoms = &groups[worst];
+    let gc = group_centroid(x, atoms);
+    let mut target = [0.0; 3];
+    for _ in 0..256 {
+        target = [
+            lo[0] + rng.random::<f64>() * (hi[0] - lo[0]),
+            lo[1] + rng.random::<f64>() * (hi[1] - lo[1]),
+            z_top + 2.0 + rng.random::<f64>() * 1.5,
+        ];
+        let ok = groups.iter().enumerate().all(|(g, other)| {
+            if g == worst {
+                return true;
+            }
+            let oc = group_centroid(x, other);
+            let dx = target[0] - oc[0];
+            let dy = target[1] - oc[1];
+            dx * dx + dy * dy >= 1.5 * 1.5
+        });
+        if ok {
+            break;
+        }
+    }
+    for &a in atoms {
+        if a >= n {
+            continue;
+        }
+        for k in 0..3 {
+            out[3 * a + k] = x[3 * a + k] - gc[k] + target[k];
+        }
+    }
+    out
+}
+
 /// Rigidly relocates the least-bound group of a molecular cluster.
 ///
 /// Contacts are counted between atoms of different groups only, so a tightly
-/// bonded molecule does not read as well-bound by its own bonds. The chosen
-/// group is translated so its centroid lands on a random direction at the
-/// cluster's surface radius and rotated rigidly about its centroid by a
-/// uniform random rotation, preserving intra-group geometry exactly.
+/// bonded molecule does not read as well-bound by its own bonds. On a free
+/// cluster the chosen group lands on a random direction at the surface
+/// radius. When ungrouped atoms are a majority they are the substrate:
+/// the group is placed above that face instead of on a sphere about the
+/// all-atom centroid, which sits inside the metal.
 pub(super) fn group_relocate<R: Rng + ?Sized>(
     x: ArrayView1<f64>,
     groups: &[Vec<usize>],
@@ -545,6 +616,10 @@ pub(super) fn group_relocate<R: Rng + ?Sized>(
                 contacts[owner[j]] += 1;
             }
         }
+    }
+    let substrate = substrate_indices(n, groups);
+    if substrate.len() * 2 >= n {
+        return group_relocate_on_slab(x, groups, &substrate, &contacts, rng);
     }
     let worst = (0..groups.len()).min_by_key(|&g| contacts[g]).unwrap_or(0);
     // Cluster centroid and surface radius from group centroids.
