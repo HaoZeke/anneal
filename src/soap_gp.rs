@@ -185,7 +185,9 @@ impl SoapGp {
         self.obs
             .iter()
             .map(|o| o.y)
-            .fold(None, |acc: Option<f64>, v| Some(acc.map_or(v, |a| a.min(v))))
+            .fold(None, |acc: Option<f64>, v| {
+                Some(acc.map_or(v, |a| a.min(v)))
+            })
     }
 
     /// Records a structure, its energy, and optionally the Cartesian gradient

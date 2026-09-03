@@ -144,7 +144,11 @@ fn main() {
         if a < 1e-6 && b < 1e-6 {
             continue;
         }
-        println!("{:>12.1}   {a:>9.4}   {b:>9.4}   {:>+10.4}", slot as f64 / 2.0, a - b);
+        println!(
+            "{:>12.1}   {a:>9.4}   {b:>9.4}   {:>+10.4}",
+            slot as f64 / 2.0,
+            a - b
+        );
         gaps.push((slot as f64 / 2.0, (a - b).abs()));
     }
     gaps.sort_by(|x, y| y.1.partial_cmp(&x.1).unwrap());

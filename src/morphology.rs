@@ -320,11 +320,7 @@ mod featomic_cv {
 
     /// Runs `f` on the calculator for `(name, json)`, building it once per
     /// thread.
-    fn with_calculator<T>(
-        name: &str,
-        json: &str,
-        f: impl FnOnce(&mut Calculator) -> T,
-    ) -> T {
+    fn with_calculator<T>(name: &str, json: &str, f: impl FnOnce(&mut Calculator) -> T) -> T {
         CALCULATORS.with(|cache| {
             let mut cache = cache.borrow_mut();
             let calc = cache.entry(json.to_string()).or_insert_with(|| {
@@ -1077,8 +1073,7 @@ mod tests {
         let h = (2.0_f64 / 3.0).sqrt();
         let rr = 1.0 / 3.0_f64.sqrt();
         for k in 0..3 {
-            let t = std::f64::consts::PI / 2.0
-                + 2.0 * std::f64::consts::PI / 3.0 * f64::from(k);
+            let t = std::f64::consts::PI / 2.0 + 2.0 * std::f64::consts::PI / 3.0 * f64::from(k);
             v.extend_from_slice(&[rr * t.cos(), rr * t.sin(), h]);
             v.extend_from_slice(&[rr * t.cos(), rr * t.sin(), -h]);
         }
@@ -1188,7 +1183,7 @@ mod featomic_tests {
     use super::tests::{
         fcc_shell, hcp_shell, icosahedron, jitter, permute, rotate, simple_cubic_shell,
     };
-    use super::{ideal, SoapFeatures, SoapProjection, SteinhardtQ};
+    use super::{SoapFeatures, SoapProjection, SteinhardtQ, ideal};
     use crate::bias::Fingerprint;
     use ndarray::Array1;
 
@@ -1358,5 +1353,4 @@ mod featomic_tests {
             "only {distinct} of 11 structures got a non-zero coordinate"
         );
     }
-
 }

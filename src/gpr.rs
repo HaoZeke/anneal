@@ -710,11 +710,7 @@ impl GpSurrogate {
         if !self.trained || candidates.is_empty() {
             return None;
         }
-        let best = self
-            .energies
-            .iter()
-            .copied()
-            .fold(f64::INFINITY, f64::min);
+        let best = self.energies.iter().copied().fold(f64::INFINITY, f64::min);
         let mut pick = None;
         for (i, c) in candidates.iter().enumerate() {
             let Some((mean, _, var)) = self.predict(c) else {
@@ -814,7 +810,11 @@ mod tests {
         let mut train_e = Vec::new();
         for k in 0..12u64 {
             let x: Vec<f64> = cluster(n, 0.06, 100 + k * 17);
-            let x: Vec<f64> = base.iter().zip(x.iter()).map(|(a, b)| a + 0.3 * b).collect();
+            let x: Vec<f64> = base
+                .iter()
+                .zip(x.iter())
+                .map(|(a, b)| a + 0.3 * b)
+                .collect();
             let (e, g) = lj(&x, n);
             gp.record(&x, e, &g);
             train_e.push(e);
@@ -836,7 +836,11 @@ mod tests {
         let mut worst: f64 = 0.0;
         for k in 0..6u64 {
             let x: Vec<f64> = cluster(n, 0.06, 9000 + k * 31);
-            let x: Vec<f64> = base.iter().zip(x.iter()).map(|(a, b)| a + 0.3 * b).collect();
+            let x: Vec<f64> = base
+                .iter()
+                .zip(x.iter())
+                .map(|(a, b)| a + 0.3 * b)
+                .collect();
             let (e_true, _) = lj(&x, n);
             let (e, _, var) = gp.predict(&x).expect("prediction failed after training");
             assert!(var >= 0.0, "negative variance {var}");
@@ -912,7 +916,11 @@ mod tests {
             assert_eq!(gp.set_solve(solve), 0);
             for k in 0..10u64 {
                 let j = cluster(n, 0.06, 500 + k * 13);
-                let x: Vec<f64> = base.iter().zip(j.iter()).map(|(a, b)| a + 0.3 * b).collect();
+                let x: Vec<f64> = base
+                    .iter()
+                    .zip(j.iter())
+                    .map(|(a, b)| a + 0.3 * b)
+                    .collect();
                 let (e, g) = lj(&x, n);
                 gp.record(&x, e, &g);
             }
@@ -920,7 +928,11 @@ mod tests {
             assert_eq!(rc, 0, "{solve:?} training returned {rc}");
             assert_eq!(gp.solve(), Some(solve), "the library changed arms");
             let j = cluster(n, 0.06, 77_777);
-            let x: Vec<f64> = base.iter().zip(j.iter()).map(|(a, b)| a + 0.3 * b).collect();
+            let x: Vec<f64> = base
+                .iter()
+                .zip(j.iter())
+                .map(|(a, b)| a + 0.3 * b)
+                .collect();
             let (e, _, var) = gp.predict(&x).expect("prediction failed");
             assert!(e.is_finite() && var.is_finite(), "{solve:?} gave {e} {var}");
             out.push((solve, e, var));
@@ -945,7 +957,11 @@ mod tests {
         let mut gp = GpSurrogate::new(n, 32, &cfg).expect("model creation failed");
         for k in 0..10u64 {
             let j = cluster(n, 0.05, 4000 + k * 7);
-            let x: Vec<f64> = base.iter().zip(j.iter()).map(|(a, b)| a + 0.2 * b).collect();
+            let x: Vec<f64> = base
+                .iter()
+                .zip(j.iter())
+                .map(|(a, b)| a + 0.2 * b)
+                .collect();
             let (e, g) = lj(&x, n);
             gp.record(&x, e, &g);
         }
@@ -954,7 +970,12 @@ mod tests {
         let mut cands: Vec<Vec<f64>> = Vec::new();
         for k in 0..6u64 {
             let j = cluster(n, 0.05, 6000 + k * 7);
-            cands.push(base.iter().zip(j.iter()).map(|(a, b)| a + 0.2 * b).collect());
+            cands.push(
+                base.iter()
+                    .zip(j.iter())
+                    .map(|(a, b)| a + 0.2 * b)
+                    .collect(),
+            );
         }
         // The far candidate, where the model has nothing to say.
         let j = cluster(n, 0.9, 12_345);
@@ -962,7 +983,11 @@ mod tests {
 
         for (i, c) in cands.iter().enumerate() {
             let (m, _, v) = gp.predict(c).expect("prediction failed");
-            println!("  cand {i}: mean {m:.6} sd {:.3e} true {:.6}", v.sqrt(), lj(c, n).0);
+            println!(
+                "  cand {i}: mean {m:.6} sd {:.3e} true {:.6}",
+                v.sqrt(),
+                lj(c, n).0
+            );
         }
         let mut zero = || 0.0;
         let (ei_pick, _) = gp
@@ -1007,14 +1032,22 @@ mod tests {
         let mut gp = GpSurrogate::new(n, 32, &cfg).expect("model creation failed");
         for k in 0..10u64 {
             let j = cluster(n, 0.05, 4000 + k * 7);
-            let x: Vec<f64> = base.iter().zip(j.iter()).map(|(a, b)| a + 0.2 * b).collect();
+            let x: Vec<f64> = base
+                .iter()
+                .zip(j.iter())
+                .map(|(a, b)| a + 0.2 * b)
+                .collect();
             let (e, g) = lj(&x, n);
             gp.record(&x, e, &g);
         }
         assert_eq!(gp.train(), 0);
 
         let j = cluster(n, 0.05, 6100);
-        let near: Vec<f64> = base.iter().zip(j.iter()).map(|(a, b)| a + 0.2 * b).collect();
+        let near: Vec<f64> = base
+            .iter()
+            .zip(j.iter())
+            .map(|(a, b)| a + 0.2 * b)
+            .collect();
         let (mn, _, vn) = gp.predict(&near).expect("prediction failed");
         let near_z = (mn - lj(&near, n).0).abs() / vn.sqrt().max(1e-300);
 
@@ -1058,7 +1091,11 @@ mod tests {
         let mut gp = GpSurrogate::new(n, 32, &cfg).expect("model creation failed");
         for k in 0..8u64 {
             let j = cluster(n, 0.05, 200 + k * 11);
-            let x: Vec<f64> = base.iter().zip(j.iter()).map(|(a, b)| a + 0.2 * b).collect();
+            let x: Vec<f64> = base
+                .iter()
+                .zip(j.iter())
+                .map(|(a, b)| a + 0.2 * b)
+                .collect();
             let (e, g) = lj(&x, n);
             gp.record(&x, e, &g);
         }
@@ -1073,7 +1110,10 @@ mod tests {
         let mut cands: Vec<Vec<f64>> = (0..4u64)
             .map(|k| {
                 let j = cluster(n, 0.05, 700 + k * 5);
-                base.iter().zip(j.iter()).map(|(a, b)| a + 0.2 * b).collect()
+                base.iter()
+                    .zip(j.iter())
+                    .map(|(a, b)| a + 0.2 * b)
+                    .collect()
             })
             .collect();
         for k in 0..4u64 {
@@ -1086,13 +1126,13 @@ mod tests {
             state ^= state >> 12;
             state ^= state << 25;
             state ^= state >> 27;
-            let u1 = ((state.wrapping_mul(0x2545_F491_4F6C_DD1D) >> 11) as f64)
-                / (1u64 << 53) as f64;
+            let u1 =
+                ((state.wrapping_mul(0x2545_F491_4F6C_DD1D) >> 11) as f64) / (1u64 << 53) as f64;
             state ^= state >> 12;
             state ^= state << 25;
             state ^= state >> 27;
-            let u2 = ((state.wrapping_mul(0x2545_F491_4F6C_DD1D) >> 11) as f64)
-                / (1u64 << 53) as f64;
+            let u2 =
+                ((state.wrapping_mul(0x2545_F491_4F6C_DD1D) >> 11) as f64) / (1u64 << 53) as f64;
             (-2.0 * u1.max(1e-12).ln()).sqrt() * (std::f64::consts::TAU * u2).cos()
         };
         let mut seen = std::collections::BTreeSet::new();
@@ -1110,7 +1150,11 @@ mod tests {
         let a = gp.select(&cands, Acquisition::ConfidenceBound, 2.0, &mut zero);
         let mut noisy = draw;
         let b = gp.select(&cands, Acquisition::ConfidenceBound, 2.0, &mut noisy);
-        assert_eq!(a.map(|v| v.0), b.map(|v| v.0), "the bound consumed randomness");
+        assert_eq!(
+            a.map(|v| v.0),
+            b.map(|v| v.0),
+            "the bound consumed randomness"
+        );
     }
 
     #[test]
@@ -1118,7 +1162,10 @@ mod tests {
         for var in [0.0, 1e-9, 4.0, 100.0] {
             for mean in [-500.0, -400.0, -300.0] {
                 let ei = expected_improvement(mean, var, -400.0);
-                assert!(ei >= 0.0 && ei.is_finite(), "EI {ei} at mean {mean} var {var}");
+                assert!(
+                    ei >= 0.0 && ei.is_finite(),
+                    "EI {ei} at mean {mean} var {var}"
+                );
             }
         }
         // A candidate the model is certain is worse than the incumbent offers
@@ -1169,14 +1216,22 @@ mod tests {
         let mut gp = GpSurrogate::new(n, 32, &cfg).expect("model creation failed");
         for k in 0..12u64 {
             let j = cluster(n, 0.05, 800 + k * 13);
-            let x: Vec<f64> = base.iter().zip(j.iter()).map(|(a, b)| a + 0.2 * b).collect();
+            let x: Vec<f64> = base
+                .iter()
+                .zip(j.iter())
+                .map(|(a, b)| a + 0.2 * b)
+                .collect();
             let (e, g) = lj(&x, n);
             gp.record(&x, e, &g);
         }
         assert_eq!(gp.train(), 0);
 
         let j = cluster(n, 0.05, 999_331);
-        let x: Vec<f64> = base.iter().zip(j.iter()).map(|(a, b)| a + 0.2 * b).collect();
+        let x: Vec<f64> = base
+            .iter()
+            .zip(j.iter())
+            .map(|(a, b)| a + 0.2 * b)
+            .collect();
         let perm = derangement(n);
         let xp = relabel(&x, &perm);
 
@@ -1227,7 +1282,11 @@ mod tests {
             let mut gp = GpSurrogate::new(n, obs, &cfg).expect("model creation failed");
             for k in 0..obs as u64 {
                 let j = cluster(n, 0.05, 60_000 + k * 17);
-                let x: Vec<f64> = base.iter().zip(j.iter()).map(|(a, b)| a + 0.2 * b).collect();
+                let x: Vec<f64> = base
+                    .iter()
+                    .zip(j.iter())
+                    .map(|(a, b)| a + 0.2 * b)
+                    .collect();
                 let (e, g) = lj(&x, n);
                 gp.record(&x, e, &g);
             }
@@ -1237,7 +1296,11 @@ mod tests {
             assert_eq!(rc, 0, "training returned {rc} at {obs} observations");
 
             let j = cluster(n, 0.05, 424_242);
-            let q: Vec<f64> = base.iter().zip(j.iter()).map(|(a, b)| a + 0.2 * b).collect();
+            let q: Vec<f64> = base
+                .iter()
+                .zip(j.iter())
+                .map(|(a, b)| a + 0.2 * b)
+                .collect();
             let _ = gp.predict(&q);
             let reps = 20;
             let t1 = std::time::Instant::now();
