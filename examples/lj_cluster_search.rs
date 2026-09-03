@@ -31,6 +31,7 @@ use anneal_core::methods::warm_lbfgs::WarmLbfgs;
 use anneal_core::terminate::Terminator;
 use ndarray::{Array1, ArrayView1};
 use std::io::{self, Write};
+use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 #[cfg(feature = "ira")]
@@ -1437,6 +1438,18 @@ fn main() {
             cfg.reoccupy_interval
         );
     }
+    let coreclass = opts.contains(&"coreclass");
+    let core_patience = std::env::var("CORE_PATIENCE")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(10_000);
+    let core_trial = std::env::var("CORE_TRIAL")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(2_000);
+    if coreclass {
+        println!("  core-class table: patience {core_patience}, trial {core_trial}");
+    }
     // Two-phase relaxation on the compacted surface (Locatelli and Schoen;
     // Doye). TWO_PHASE_KAPPA sets a relative cutoff, TWO_PHASE_D a fixed
     // one in pair-well units, TWO_PHASE_BETA the penalty strength and
@@ -1774,6 +1787,12 @@ fn main() {
         );
     }
 
+    let core_table = coreclass.then(|| {
+        Arc::new(Mutex::new(anneal_core::coreclass::CoreClassTable::new(
+            core_patience,
+            core_trial,
+        )))
+    });
     let mut solved = 0usize;
     let mut deepest = f64::INFINITY;
     let mut total_hops = 0usize;
@@ -2008,6 +2027,7 @@ fn main() {
                     &mut grad,
                     seed,
                     catalog_rpc.as_deref(),
+                    coreclass.then_some((core_patience, core_trial)),
                 )
             }
             #[cfg(not(feature = "bank-rpc"))]
@@ -2099,6 +2119,60 @@ fn main() {
                     ..Outcome::default()
                 }
             }
+        } else if let Some(table) = core_table.as_ref() {
+            use anneal_core::coreclass::CoreVerdict;
+            use anneal_core::corekey::motif_class;
+            use rand::{Rng, SeedableRng};
+            let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
+            let start = random_cluster(n, 0.7, cfg.min_separation, &mut rng);
+            let mut bias = BasinBias::new(
+                ClusterFingerprint::for_keying(n, cfg.shape_keyed),
+                cfg.merge_radius,
+                cfg.bias_height,
+                cfg.bias_gamma,
+            );
+            let table = Arc::clone(table);
+            let mut adopt_rng = rand::rngs::StdRng::seed_from_u64(seed ^ 0xC0A1);
+            let interval = std::env::var("CHECKPOINT")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(500)
+                .max(1);
+            let mut checkpoint = |snapshot: ChainCheckpoint<'_>| {
+                let class = motif_class(snapshot.current_state()).index();
+                let mut table = table.lock().expect("core-class table");
+                match table.report(
+                    seed as usize,
+                    class,
+                    snapshot.current_energy(),
+                    snapshot.charged(),
+                ) {
+                    CoreVerdict::Restart => {
+                        let fresh = random_cluster(n, 0.7, cfg.min_separation, &mut adopt_rng);
+                        CheckpointAction::ExternalAdopt {
+                            state: fresh,
+                            action: "coreclass".to_owned(),
+                            external_calls: 0,
+                        }
+                    }
+                    CoreVerdict::Continue => CheckpointAction::Continue,
+                }
+            };
+            run_with_bias_at_checkpoints(
+                &cfg,
+                start.view(),
+                &mut ledger,
+                &mut relax,
+                if cfg.minima_hopping || cfg.escape_on_stall || cfg.soft_perturb {
+                    Some(&mut grad)
+                } else {
+                    None
+                },
+                &mut bias,
+                &mut rng,
+                interval,
+                &mut checkpoint,
+            )
         } else {
             {
                 // The settle stage: steepest descent of the moved atoms in the
@@ -3196,6 +3270,7 @@ fn run_capnp_catalog(
     grad: &mut dyn FnMut(&mut Ledger, ArrayView1<f64>) -> Option<Array1<f64>>,
     seed: u64,
     endpoint: Option<&str>,
+    core_class: Option<(usize, usize)>,
 ) -> Outcome {
     use anneal_core::catalog::lj::{descriptor_space, system_signature};
     use anneal_core::catalog_policy::{ActiveCatalogRelation, PolicyAction, PolicyReason};
@@ -3243,6 +3318,9 @@ fn run_capnp_catalog(
         u64::try_from(ledger.budget()).expect("LJ budget must fit the cooperative ledger"),
     )
     .expect("single-replica local ledger must be valid");
+    if let Some((patience, trial)) = core_class {
+        cooperative.enable_core_class(patience, trial);
+    }
     if let Some(endpoint) = endpoint {
         let address = endpoint
             .parse()
@@ -3796,6 +3874,29 @@ fn run_capnp_catalog(
     let mut count_hole = 0usize;
     let mut last_policy_action = ACTION_LOCAL;
     let mut checkpoint = |snapshot: ChainCheckpoint<'_>| {
+        if core_class.is_some() {
+            let class = anneal_core::corekey::motif_class(snapshot.current_state()).index();
+            let verdict = cooperative
+                .report_core_class(
+                    replica,
+                    class,
+                    snapshot.current_energy(),
+                    snapshot.charged(),
+                )
+                .expect("core-class report must stay on the cooperative ledger");
+            if verdict == anneal_core::coreclass::CoreVerdict::Restart {
+                let mut adopt_rng = rand::rngs::StdRng::seed_from_u64(
+                    seed.wrapping_add(u64::from(replica))
+                        .wrapping_add(snapshot.charged() as u64),
+                );
+                let fresh = random_cluster(cfg.n_points, 0.7, cfg.min_separation, &mut adopt_rng);
+                return CheckpointAction::ExternalAdopt {
+                    state: fresh,
+                    action: "coreclass".to_owned(),
+                    external_calls: 0,
+                };
+            }
+        }
         checkpoint_sequence = checkpoint_sequence
             .checked_add(1)
             .expect("checkpoint sequence must fit u64");

@@ -24,6 +24,7 @@ use super::{
 };
 use crate::Catalog_capnp::{coordinator, session, subscriber};
 use crate::cooperative_search::ledger::ChargeKind;
+use crate::coreclass::CoreVerdict;
 
 /// Connection and I/O deadlines for a catalog client.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -413,7 +414,8 @@ impl CatalogClient {
             | AcceptedPayload::FrontierPost(_)
             | AcceptedPayload::RideWork(_)
             | AcceptedPayload::RideCredit(_)
-            | AcceptedPayload::Roster(_) => {
+            | AcceptedPayload::Roster(_)
+            | AcceptedPayload::CoreVerdict(_) => {
                 return Err(ProtocolError::Malformed(
                     "catalog offer returned an incompatible payload".into(),
                 )
@@ -485,6 +487,33 @@ impl CatalogClient {
         }
     }
 
+    /// Report one chain's motif class and energy to the shared table.
+    pub fn report_core_class(
+        &mut self,
+        event_sequence: u64,
+        class: u8,
+        energy: f64,
+        charged: u64,
+    ) -> Result<CoreVerdict, CatalogClientError> {
+        match self
+            .call(
+                event_sequence,
+                CatalogOperation::ReportCoreClass {
+                    class,
+                    energy,
+                    charged,
+                },
+            )?
+            .payload
+        {
+            AcceptedPayload::CoreVerdict(verdict) => Ok(verdict),
+            _ => Err(ProtocolError::Malformed(
+                "core-class report returned an incompatible payload".into(),
+            )
+            .into()),
+        }
+    }
+
     /// Submit one exact replay-safe charged-work boundary.
     pub fn record_ledger_event(
         &mut self,
@@ -546,7 +575,8 @@ impl CatalogClient {
             | AcceptedPayload::FrontierPost(_)
             | AcceptedPayload::RideWork(_)
             | AcceptedPayload::RideCredit(_)
-            | AcceptedPayload::Roster(_) => Err(ProtocolError::Malformed(
+            | AcceptedPayload::Roster(_)
+            | AcceptedPayload::CoreVerdict(_) => Err(ProtocolError::Malformed(
                 "sample returned an incompatible payload".into(),
             )
             .into()),
@@ -575,7 +605,8 @@ impl CatalogClient {
             | AcceptedPayload::FrontierPost(_)
             | AcceptedPayload::RideWork(_)
             | AcceptedPayload::RideCredit(_)
-            | AcceptedPayload::Roster(_) => Err(ProtocolError::Malformed(
+            | AcceptedPayload::Roster(_)
+            | AcceptedPayload::CoreVerdict(_) => Err(ProtocolError::Malformed(
                 "basin sample returned an incompatible payload".into(),
             )
             .into()),
@@ -650,7 +681,8 @@ impl CatalogClient {
             | AcceptedPayload::FrontierPost(_)
             | AcceptedPayload::RideWork(_)
             | AcceptedPayload::RideCredit(_)
-            | AcceptedPayload::Roster(_) => Err(ProtocolError::Malformed(
+            | AcceptedPayload::Roster(_)
+            | AcceptedPayload::CoreVerdict(_) => Err(ProtocolError::Malformed(
                 "descriptor-hole request returned an incompatible payload".into(),
             )
             .into()),
@@ -683,7 +715,8 @@ impl CatalogClient {
             | AcceptedPayload::FrontierPost(_)
             | AcceptedPayload::RideWork(_)
             | AcceptedPayload::RideCredit(_)
-            | AcceptedPayload::Roster(_) => Err(ProtocolError::Malformed(
+            | AcceptedPayload::Roster(_)
+            | AcceptedPayload::CoreVerdict(_) => Err(ProtocolError::Malformed(
                 "boundary-crossing request returned an incompatible payload".into(),
             )
             .into()),
@@ -744,7 +777,8 @@ impl CatalogClient {
             | AcceptedPayload::FrontierPost(_)
             | AcceptedPayload::RideWork(_)
             | AcceptedPayload::RideCredit(_)
-            | AcceptedPayload::Roster(_) => Err(ProtocolError::Malformed(
+            | AcceptedPayload::Roster(_)
+            | AcceptedPayload::CoreVerdict(_) => Err(ProtocolError::Malformed(
                 "policy-state request returned an incompatible payload".into(),
             )
             .into()),
@@ -1351,7 +1385,8 @@ fn population_epoch_payload(
         | AcceptedPayload::FrontierPost(_)
         | AcceptedPayload::RideWork(_)
         | AcceptedPayload::RideCredit(_)
-        | AcceptedPayload::Roster(_) => Err(ProtocolError::Malformed(format!(
+        | AcceptedPayload::Roster(_)
+        | AcceptedPayload::CoreVerdict(_) => Err(ProtocolError::Malformed(format!(
             "{operation} returned an incompatible payload"
         ))
         .into()),

@@ -23,6 +23,7 @@ mod run {
         TransitionDestination,
     };
     use crate::compatibility::EngineDescriptor;
+    use crate::coreclass::{CoreClassTable, CoreVerdict};
     use crate::discovery_roster::DiscoveryRole;
     use crate::methods::feynman_kac::population_family_position;
     use crate::pes_exploration::RideMethod;
@@ -759,6 +760,7 @@ mod run {
         replicas: BTreeMap<u32, ReplicaState>,
         events: Vec<TraceEvent>,
         on_published_prize: bool,
+        core_class: CoreClassTable,
     }
 
     impl CooperativeRun {
@@ -811,6 +813,7 @@ mod run {
                 replicas,
                 events: Vec::new(),
                 on_published_prize: false,
+                core_class: CoreClassTable::default(),
             })
         }
 
@@ -851,6 +854,44 @@ mod run {
             state.crossing_request = None;
             *state.crossing_slot.lock().expect("crossing slot") = None;
             Ok(())
+        }
+
+        /// Configure the in-process motif-class table.
+        pub fn enable_core_class(&mut self, patience: usize, trial: usize) {
+            self.core_class = CoreClassTable::new(patience, trial);
+        }
+
+        /// Report one replica's motif class and energy.
+        ///
+        /// A connected coordinator holds the shared table. Without a
+        /// client the in-process table answers, so a single chain still
+        /// applies the stall and trial rules.
+        pub fn report_core_class(
+            &mut self,
+            replica: u32,
+            class: u8,
+            energy: f64,
+            charged: usize,
+        ) -> Result<CoreVerdict, CooperativeRunError> {
+            let rpc_sequence = self.next_rpc_sequence(replica)?;
+            let charged_u64 =
+                u64::try_from(charged).map_err(|_| CooperativeRunError::CounterOverflow)?;
+            let remote = {
+                let state = self.replica_mut(replica)?;
+                state.client.as_ref().map(|mailbox| {
+                    mailbox.exec(move |client| {
+                        client.report_core_class(rpc_sequence, class, energy, charged_u64)
+                    })
+                })
+            };
+            match remote {
+                Some(Ok(verdict)) => Ok(verdict),
+                Some(Err(_)) | None => {
+                    Ok(self
+                        .core_class
+                        .report(replica as usize, class, energy, charged))
+                }
+            }
         }
 
         /// Record one exact local work boundary in the aggregate ledger.
