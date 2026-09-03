@@ -208,3 +208,7 @@ required-features = ["ira"]
 [[example]]
 name = "lj_joint_optimum"
 required-features = ["ira"]
+
+[[example]]
+name = "curvature_transport"
+required-features = ["ira"]
