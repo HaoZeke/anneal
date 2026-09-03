@@ -20,6 +20,7 @@ improve_re = re.compile(
 )
 relax_re = re.compile(
     r"relax (?P<idx>\d+): e=(?P<energy>[-+0-9.eE]+) charged=(?P<charged>\d+)"
+    r"(?: \|g\|=(?P<ginf>\S+) (?P<status>accepted|rejected))?"
 )
 summary_re = re.compile(
     r"SUMMARY distinct=(?P<distinct>\d+) lowest=(?P<lowest>\S+) "
@@ -69,6 +70,9 @@ def parse_relax(directory: pathlib.Path) -> dict:
     charges: list[int] = []
     for match in relax_re.finditer(text):
         energy = float(match.group("energy"))
+        status = match.group("status")
+        if status == "rejected":
+            continue
         if finite(energy):
             energies.append(energy)
             charges.append(int(match.group("charged")))
