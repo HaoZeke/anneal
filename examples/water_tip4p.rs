@@ -70,7 +70,7 @@ fn main() {
             if !led.charge() {
                 return None;
             }
-            Some(pot.grad(x))
+            Some(pot.value_and_gradient(x).1)
         };
         let mut bias = BasinBias::new(
             ClusterFingerprint::of_config(&cfg, &start),
@@ -91,7 +91,7 @@ fn main() {
             &mut checkpoint,
         );
         if let Some(state) = out.best_state.as_ref() {
-            let e = pot.eval(state.view());
+            let e = pot.value_and_gradient(state.view()).0;
             out.best = e;
         }
         let hit = reference.map(|r| out.best < r + 0.01).unwrap_or(false);
