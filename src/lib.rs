@@ -209,6 +209,8 @@ pub mod structure;
 pub mod swarm;
 pub mod sym_hessian;
 pub mod symmetrise;
+/// Endpoint of the quenched-energy distribution, by peaks over threshold.
+pub mod tail;
 /// Permutation invariants from a three-body tensor, for basin identity.
 pub mod tensor_id;
 pub mod terminate;

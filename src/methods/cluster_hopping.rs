@@ -486,6 +486,28 @@ pub struct Outcome {
     /// improves ten thousand times is descending, and the tail of that is not
     /// what anyone is asking about.
     pub improvements: Vec<(usize, usize, usize, f64)>,
+    /// Charged count, basin count, energy and convergence flag at every hop
+    /// that ran a full relaxation.
+    ///
+    /// Empty unless [`Config::trace_quenched`] is set. Ordered by hop, so a
+    /// prefix of it is what the run had seen at a given point in its budget,
+    /// which is what makes a call read off it a prediction rather than a
+    /// summary.
+    ///
+    /// Hops the screen or the return test stopped are absent, because their
+    /// energy comes off a 25-step partial descent and is not a draw from the
+    /// distribution of minima at all; no threshold keeps such a value out of
+    /// the exceedances, since it lands wherever the descent stopped. That
+    /// exclusion is itself a selection on energy, since the screen refuses
+    /// exactly the trials whose partial energy sits above `best +
+    /// screen_margin`, and the note on [`Config::trace_quenched`] says what
+    /// that costs.
+    ///
+    /// The flag is the gradient guard the ledger records under. False means
+    /// the relaxation stopped at its iteration cap, which leaves the energy a
+    /// little above the minimum it was heading for rather than somewhere else
+    /// entirely.
+    pub quenched: Vec<(usize, usize, f64, bool)>,
     /// Merge radius at the end of the run, calibrated or as configured.
     pub merge_radius: f64,
     /// Mean accepted-hop step length, which the radius is a quantile of.
@@ -3533,6 +3555,7 @@ where
         soft_escapes,
         soft_crossed,
         improvements,
+        quenched,
         angular: (angular_tried, angular_accepted, angular_ratio),
         contextual: (contextual.picks.clone(), contextual.forced),
         screen: (
