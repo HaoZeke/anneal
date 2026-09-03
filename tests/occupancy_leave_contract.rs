@@ -305,6 +305,10 @@ fn leave_quench_keeps_the_walk_off_mu_k() {
         body.contains("relax(ledger, state.view()"),
         "Leave quenches the offered destination"
     );
+    assert!(
+        body.contains("packing_active_volume") && body.contains("LEAVE_AV_SEARCHES"),
+        "Leave catalogs several active-volume starts and discards the unused ones"
+    );
 }
 
 #[test]

@@ -982,6 +982,16 @@ pub fn rung_barrier(depth_per_atom: f64, rung: usize) -> f64 {
 /// Rungs a single Leave walks before it reports a refusal.
 pub const LEAVE_RUNGS: usize = 6;
 
+/// Independent covering starts launched in the packing active volume
+/// on one Leave.
+///
+/// Xu, Osetsky and Stoller (*Phys. Rev. B* **84**, 132103 (2011))
+/// run several dimer searches per active volume. Béland, Osetsky,
+/// Stoller and Xu (arXiv:1409.1253): SEAKMC samples tens of events
+/// then flushes the catalog after one is executed. Occupancy is not
+/// kMC and does not keep the unused starts.
+pub const LEAVE_AV_SEARCHES: usize = 8;
+
 /// Rungs walked past the first escape before the best of them is taken.
 ///
 /// The first rung that leaves is not the best one to leave by. Measured from

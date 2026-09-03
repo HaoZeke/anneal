@@ -1522,7 +1522,7 @@ where
                 // the plain potential. A min-mode climb of the live
                 // tangent is not this path.
                 let quenched = relax(ledger, state.view(), cfg.relax_steps);
-                let (candidate_energy, candidate) = quenched;
+                let (mut candidate_energy, mut candidate) = quenched;
                 let left_packing = |trial: &Array1<f64>| {
                     from_state
                         .as_slice()
@@ -1531,6 +1531,41 @@ where
                             crate::catalog::leaves_packing(origin, trial, &references)
                         })
                 };
+                // SEAKMC: several searches in the active volume, then
+                // flush. The first quench is the offered start. Further
+                // starts are packing leftovers restricted to the atoms
+                // that carry \(\|h_i-\mu\|\), compacted then polished.
+                // Unused starts are discarded. This is not Xu confidence
+                // and not a campaign stop.
+                if leave_action && !left_packing(&candidate) {
+                    let mobile = crate::soap::packing_active_volume(
+                        from_state.view(),
+                        crate::catalog::PACKING_SPEC,
+                        cfg.species.as_deref(),
+                    );
+                    let n_cover = crate::catalog::cover_arm_count();
+                    let depth =
+                        from_energy.abs() / (from_state.len() / 3).max(1) as f64;
+                    for _ in 1..crate::known_basin::LEAVE_AV_SEARCHES {
+                        let cover = crate::catalog::pick_leave_cover(n_cover, rng);
+                        let start = crate::known_basin::leave_packing_rung_to(
+                            from_state.view(),
+                            cover,
+                            crate::known_basin::rung_barrier(depth, 0),
+                            &references,
+                            cfg.species.as_deref(),
+                            Some(mobile.as_slice()),
+                            |trial| Some(relax(ledger, trial, 0).0),
+                        );
+                        let (energy, landed) =
+                            relax(ledger, start.view(), cfg.relax_steps);
+                        if left_packing(&landed) {
+                            candidate_energy = energy;
+                            candidate = landed;
+                            break;
+                        }
+                    }
+                }
                 let walked_off = leave_action && left_packing(&candidate);
                 if leave_action {
                     if let Some(trial) = candidate.as_slice() {

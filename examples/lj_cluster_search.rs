@@ -2671,13 +2671,18 @@ fn leave_packing_state<R: rand::Rng + ?Sized>(
     // They are not charged, because the checkpoint path holds no ledger, and
     // they are the price of a step sized by the structure instead of by a
     // length that suits one cluster and melts another.
+    let mobile = anneal_core::soap::packing_active_volume(
+        x,
+        anneal_core::catalog::PACKING_SPEC,
+        species,
+    );
     anneal_core::known_basin::leave_packing_rung_to(
         x,
         cover_index,
         anneal_core::known_basin::rung_barrier(depth, 0),
         &anneal_core::catalog::packing_references(),
         species,
-        None,
+        Some(mobile.as_slice()),
         |v: ArrayView1<f64>| Some(lj(v).0),
     )
 }

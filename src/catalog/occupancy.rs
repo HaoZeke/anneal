@@ -276,8 +276,12 @@ pub fn occupancy_leave_target(
 /// [`occupancy_leave_target`] with the FunnelModel EI bit.
 ///
 /// Descriptor aim plus a compacted quench is the mint while EI says
-/// the seen book still has remaining improvement. A min-mode climb
-/// and a named morphology are not destinations.
+/// the seen book still has remaining improvement. The hop then launches
+/// several more starts in the packing active volume (Xu, Osetsky and
+/// Stoller, *Phys. Rev. B* **84**, 132103 (2011); Béland et al.
+/// arXiv:1409.1253) and discards the unused ones. A min-mode climb
+/// and a named morphology are not destinations. Xu \(C=1-1/N_r\) is
+/// not a campaign stop.
 pub fn occupancy_leave_by_ei(
     other_family_in_catalog: bool,
     packing_saturated: bool,
