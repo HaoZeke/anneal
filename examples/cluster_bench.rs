@@ -21,8 +21,6 @@ use anneal_core::methods::cluster_search::{
     Encounter, first_encounter, median_encounter, search, verify,
 };
 use anneal_core::methods::csa_cluster::{self, BankConfig};
-use anneal_core::methods::csa_cluster::{self, BankConfig};
-use anneal_core::methods::csa_cluster::{self, BankConfig};
 use anneal_core::potentials::{PairKind, PairPotential};
 use anneal_core::structure::{cna, ptm, ptm_fractions};
 
