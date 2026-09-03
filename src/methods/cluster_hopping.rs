@@ -49,7 +49,7 @@ mod config;
 mod moves;
 mod preset;
 
-pub use config::{Config, ContinuousSymmetry, Keying, SoapProposalMode};
+pub use config::{Config, ContinuousSymmetry, Keying, LadderMode, SoapProposalMode};
 pub use moves::*;
 
 #[cfg(test)]
@@ -560,6 +560,15 @@ pub struct Outcome {
     pub rungs: Vec<(f64, usize, f64)>,
     /// Swap attempts between adjacent replicas.
     pub swaps_tried: usize,
+    /// What the ladder transported: round trips, sweeps, and the communication
+    /// barrier at the end of the run. `None` for a single chain.
+    ///
+    /// A round trip is one tagged configuration reaching the hottest rung from
+    /// the coldest and returning, counted across every tag. Swap counts do not
+    /// say this: a ladder can accept swaps at any rate and still shuffle the
+    /// same two rungs forever, which is a different failure from a ladder that
+    /// never swaps and looks the same in the solve count.
+    pub transport: Option<(usize, usize, f64)>,
     /// Hops the acceptance rule took, before any veto.
     pub accepted: usize,
     /// Structures barred from the ledger for not being minima.
@@ -1019,7 +1028,22 @@ where
         .collect();
     // Geometric ladder, so swap acceptance is spaced evenly rather than
     // bunched at one end.
-    let temps: Vec<f64> = (0..n_rep).map(rung_temp).collect();
+    let mut temps: Vec<f64> = (0..n_rep).map(rung_temp).collect();
+    // Under `LadderMode::NonReversible` the geometric schedule is a
+    // placeholder that the pilot replaces with a ladder built from the
+    // measured energy fluctuation, and the barrier estimator moves afterwards.
+    let mut ladder = (n_rep > 1 && cfg.ladder_mode.sweeps())
+        .then(|| crate::tempering::Ladder::from_temperatures(&temps, cfg.ladder_mode.scheme()));
+    // The index process runs under every mode, so the arms are compared on
+    // transport and not only on swap counts.
+    let mut transport = (n_rep > 1).then(|| crate::tempering::IndexProcess::new(n_rep));
+    let mut sweeps = 0usize;
+    let mut cyclic_offers = 0usize;
+    let mut adaptations = 0usize;
+    // Welford accumulator over the cold rung's energies, which the first
+    // ladder is built from.
+    let mut pilot: (u64, f64, f64) = (0, 0.0, 0.0);
+    let mut ladder_built = !cfg.ladder_mode.adapts();
     let _exchange = MetropolisExchange;
     let mut swaps_tried = 0usize;
     let mut swaps_accepted = 0usize;
@@ -1933,6 +1957,12 @@ where
         } else {
             cfg.temperature
         };
+        // The rung's temperature is the rung's and has to reach the
+        // acceptance rule, or the ladder is a ladder in name only. Under the
+        // budget-window law the rung scales the law's temperature.
+        if n_rep > 1 && cfg.ladder_mode.tempers() {
+            temperature *= temps[rep] / cfg.temperature.max(1e-12);
+        }
         // The entropy's slope where the chain stands, clamped to a band around
         // the configured value so a slope estimated from few counts cannot
         // freeze the chain or boil it. The band is wide enough that the
@@ -3557,8 +3587,23 @@ where
         }
 
         if n_rep > 1 {
+            if !ladder_built && rep == 0 {
+                // Welford over the cold rung's energies. This is the whole
+                // input to the first ladder: a spread in the units of the
+                // objective, rather than a multiple of the cold temperature
+                // that means something different for every potential.
+                pilot.0 += 1;
+                let d = e - pilot.1;
+                pilot.1 += d / pilot.0 as f64;
+                pilot.2 += d * (e - pilot.1);
+            }
             since_swap += 1;
-            if since_swap >= cfg.swap_period {
+            let slice = if ladder_built {
+                cfg.swap_period
+            } else {
+                cfg.ladder_pilot.max(cfg.swap_period)
+            };
+            if since_swap >= slice {
                 since_swap = 0;
                 // Park the active rung, offer a swap with the next, then make
                 // that one active. Each rung keeps its own bias and its own
@@ -3585,44 +3630,130 @@ where
                     hop_parked.insert(rep.min(hop_parked.len()), h);
                     hop = Some(crate::hmc::hop::HopChain::new(hc));
                 }
-                let k = rep;
-                let j = (rep + 1) % n_rep;
-                if k != j {
-                    swaps_tried += 1;
-                    // Bias exchange, not plain parallel tempering.
-                    //
-                    // Each rung carries its own accumulating bias, so each
-                    // samples exp(-(E + V_k)/T_k) rather than exp(-E/T_k), and
-                    // a swap acceptance built from raw energies is exchanging
-                    // between distributions neither chain is sampling. The
-                    // measured symptom was a ladder that never stratified:
-                    // four rungs with 141 to 179 basins each and energies not
-                    // ordered by temperature at all.
-                    //
-                    // The correct factor evaluates each rung's bias at both
-                    // states (Piana and Laio):
-                    //
-                    //   ln a = (1/T_k)[U_k(x_k) - U_k(x_j)]
-                    //        + (1/T_j)[U_j(x_j) - U_j(x_k)]
-                    //
-                    // with U_k(x) = E(x) + V_k(x). It reduces to the plain
-                    // Metropolis swap when the biases are equal, which is what
-                    // Exchange supplies and what this generalises.
-                    let (ek, xk) = (chains[k].0, chains[k].1.clone());
-                    let (ej, xj) = (chains[j].0, chains[j].1.clone());
-                    let vk_xk = biases[k].potential(biases[k].cv(xk.view()).view());
-                    let vk_xj = biases[k].potential(biases[k].cv(xj.view()).view());
-                    let vj_xj = biases[j].potential(biases[j].cv(xj.view()).view());
-                    let vj_xk = biases[j].potential(biases[j].cv(xk.view()).view());
-                    let log_a = ((ek + vk_xk) - (ej + vk_xj)) / temps[k].max(1e-12)
-                        + ((ej + vj_xj) - (ek + vj_xk)) / temps[j].max(1e-12);
-                    let p = if log_a >= 0.0 { 1.0 } else { log_a.exp() };
-                    if rng.random::<f64>() < p {
-                        swaps_accepted += 1;
-                        chains.swap(k, j);
+                if !ladder_built {
+                    // The ladder the run's own energy scale implies, from the
+                    // spread of the energies the cold chain visits.
+                    let sigma = if pilot.0 > 1 {
+                        (pilot.2 / (pilot.0 - 1) as f64).sqrt()
+                    } else {
+                        0.0
+                    };
+                    let built = crate::tempering::Ladder::from_fluctuation(
+                        cfg.temperature,
+                        sigma,
+                        n_rep,
+                        cfg.ladder_target_accept,
+                        cfg.ladder_mode.scheme(),
+                    );
+                    temps = built.temperatures();
+                    if cfg.bias_by_rung {
+                        let top = temps[n_rep - 1];
+                        for (k, b) in biases.iter_mut().enumerate() {
+                            b.set_height(cfg.bias_height * temps[k] / top);
+                        }
                     }
+                    ladder = Some(built);
+                    ladder_built = true;
                 }
-                rep = j;
+                if cfg.ladder_mode.sweeps() {
+                    // Every rung is advanced by one slice before any pair is
+                    // offered, so a sweep is a sweep.
+                    rep += 1;
+                    if rep >= n_rep {
+                        rep = 0;
+                        let l = ladder.as_mut().expect("a sweep mode builds a ladder");
+                        let before = l.swap_counts();
+                        let taken = {
+                            let ch = &chains;
+                            let bi = &biases;
+                            let tp = &temps;
+                            l.offer(&mut *rng, |k| {
+                                let (ek, xk) = (ch[k].0, ch[k].1.view());
+                                let (ej, xj) = (ch[k + 1].0, ch[k + 1].1.view());
+                                let vk_xk = bi[k].potential(bi[k].cv(xk).view());
+                                let vk_xj = bi[k].potential(bi[k].cv(xj).view());
+                                let vj_xj = bi[k + 1].potential(bi[k + 1].cv(xj).view());
+                                let vj_xk = bi[k + 1].potential(bi[k + 1].cv(xk).view());
+                                let log_a = crate::tempering::biased_swap_log_ratio(
+                                    tp[k],
+                                    tp[k + 1],
+                                    ek + vk_xk,
+                                    ej + vk_xj,
+                                    ej + vj_xj,
+                                    ek + vj_xk,
+                                );
+                                if log_a >= 0.0 { 1.0 } else { log_a.exp() }
+                            })
+                        };
+                        for k in taken {
+                            chains.swap(k, k + 1);
+                        }
+                        let after = l.swap_counts();
+                        swaps_tried += (after.0 - before.0) as usize;
+                        swaps_accepted += (after.1 - before.1) as usize;
+                        sweeps += 1;
+                        if cfg.ladder_mode.adapts() && sweeps % cfg.ladder_window.max(1) == 0 {
+                            adaptations += 1;
+                            // The interior is moved by the barrier estimator;
+                            // every third adaptation the endpoint controller
+                            // gets a turn.
+                            if adaptations % 3 == 0 {
+                                l.retune_top(1.0 - cfg.ladder_target_accept, 0.5);
+                            } else {
+                                l.equalise();
+                            }
+                            temps = l.temperatures();
+                            if cfg.bias_by_rung {
+                                let top = temps[n_rep - 1];
+                                for (k, b) in biases.iter_mut().enumerate() {
+                                    b.set_height(cfg.bias_height * temps[k] / top);
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    let k = rep;
+                    let j = (rep + 1) % n_rep;
+                    if k != j && cfg.ladder_mode.exchanges() {
+                        swaps_tried += 1;
+                        // Bias exchange, not plain parallel tempering: each
+                        // rung samples exp(-(E + V_k)/T_k), so the factor
+                        // evaluates each rung's bias at both states (Piana and
+                        // Laio), which is what biased_swap_log_ratio does.
+                        let (ek, xk) = (chains[k].0, chains[k].1.clone());
+                        let (ej, xj) = (chains[j].0, chains[j].1.clone());
+                        let vk_xk = biases[k].potential(biases[k].cv(xk.view()).view());
+                        let vk_xj = biases[k].potential(biases[k].cv(xj.view()).view());
+                        let vj_xj = biases[j].potential(biases[j].cv(xj.view()).view());
+                        let vj_xk = biases[j].potential(biases[j].cv(xk.view()).view());
+                        let log_a = crate::tempering::biased_swap_log_ratio(
+                            temps[k],
+                            temps[j],
+                            ek + vk_xk,
+                            ej + vk_xj,
+                            ej + vj_xj,
+                            ek + vj_xk,
+                        );
+                        let p = if log_a >= 0.0 { 1.0 } else { log_a.exp() };
+                        if rng.random::<f64>() < p {
+                            swaps_accepted += 1;
+                            chains.swap(k, j);
+                            if let Some(t) = transport.as_mut() {
+                                t.swap(k, j);
+                            }
+                        }
+                        if let Some(t) = transport.as_mut() {
+                            t.observe_ends();
+                        }
+                        // A sweep under this scheme is n_rep offers, one per
+                        // rung, so round trips per sweep compare across schemes.
+                        cyclic_offers += 1;
+                        if cyclic_offers % n_rep == 0 {
+                            sweeps += 1;
+                        }
+                    }
+                    rep = j;
+                }
                 let (ne, nx) = chains.remove(rep);
                 e = ne;
                 x = nx;
@@ -3814,6 +3945,17 @@ where
             all
         },
         swaps_tried,
+        transport: match (&ladder, &transport) {
+            (Some(l), _) => Some((l.index().round_trips(), l.sweeps(), l.barrier())),
+            (None, Some(t)) => Some((
+                t.round_trips(),
+                sweeps,
+                // The barrier a cyclic ladder implies from its one acceptance
+                // rate; it does not resolve the profile per pair.
+                (n_rep - 1) as f64 * (1.0 - swaps_accepted as f64 / swaps_tried.max(1) as f64),
+            )),
+            _ => None,
+        },
         accepted,
         unconverged_records,
         delayed: surrogate.as_ref().map(|s| {
@@ -4913,6 +5055,80 @@ mod tests {
         let mut relax = toy_relax;
         let out = optimize(&cfg, &mut ledger, &mut relax, 2);
         assert!(out.basins >= 1, "at least the starting basin must register");
+    }
+
+    /// A single chain has no ladder, so there is nothing to report about
+    /// transport and the field says so rather than reporting a zero that reads
+    /// like a ladder that failed.
+    #[test]
+    fn a_single_chain_reports_no_transport() {
+        let cfg = Config::for_cluster(6);
+        let mut ledger = Ledger::new(4000);
+        let mut relax = toy_relax;
+        let out = optimize(&cfg, &mut ledger, &mut relax, 3);
+        assert!(out.transport.is_none());
+    }
+
+    /// The instrument that says whether the ladder does its job. A swap count
+    /// cannot: a ladder that shuffles one pair for the whole run and a ladder
+    /// that carries configurations from the hottest rung to the coldest report
+    /// the same swaps and the same solve count.
+    #[test]
+    fn the_ladder_reports_what_it_transported() {
+        let mut cfg = Config::for_cluster(6);
+        cfg.replicas = 4;
+        cfg.ladder_mode = LadderMode::NonReversible;
+        cfg.swap_period = 2;
+        cfg.ladder_pilot = 20;
+        let mut ledger = Ledger::new(60_000);
+        let mut relax = toy_relax;
+        let out = optimize(&cfg, &mut ledger, &mut relax, 5);
+        let (trips, sweeps, barrier) = out.transport.expect("a ladder reports transport");
+        assert!(sweeps > 20, "only {sweeps} sweeps; the ladder never ran");
+        assert!(trips > 0, "no round trip in {sweeps} sweeps");
+        assert!(
+            (0.0..=3.0).contains(&barrier),
+            "barrier {barrier} outside [0, rungs - 1]"
+        );
+        assert_eq!(out.rungs.len(), 4);
+    }
+
+    /// The adapted ladder is placed by the run and not by the schedule, so its
+    /// rungs have to differ from the geometric ones it started at.
+    #[test]
+    fn the_adapted_ladder_leaves_the_geometric_schedule() {
+        let mut base = Config::for_cluster(6);
+        base.replicas = 4;
+        base.swap_period = 2;
+        base.ladder_pilot = 20;
+        let run = |mode: LadderMode| {
+            let mut c = base.clone();
+            c.ladder_mode = mode;
+            let mut ledger = Ledger::new(60_000);
+            let mut relax = toy_relax;
+            let out = optimize(&c, &mut ledger, &mut relax, 5);
+            out.rungs.iter().map(|(t, _, _)| *t).collect::<Vec<f64>>()
+        };
+        let geometric = run(LadderMode::Reversible);
+        let adapted = run(LadderMode::NonReversible);
+        assert!(
+            (geometric[0] - base.temperature).abs() < 1e-12
+                && (adapted[0] - base.temperature).abs() < 1e-12,
+            "the cold rung is the configured temperature under both"
+        );
+        let moved = geometric
+            .iter()
+            .zip(&adapted)
+            .any(|(g, a)| (g - a).abs() > 1e-6 * g.abs().max(1.0));
+        assert!(
+            moved,
+            "adapted ladder {adapted:?} is the geometric one {geometric:?}; \
+             nothing was derived from the run"
+        );
+        assert!(
+            adapted.windows(2).all(|w| w[1] > w[0]),
+            "adapted ladder {adapted:?} is not ordered by temperature"
+        );
     }
 
     #[test]

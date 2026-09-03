@@ -23,7 +23,7 @@ use anneal_core::catalog::{
 };
 use anneal_core::methods::cluster_hopping::{
     AcceptedTransition, ChainCheckpoint, CheckpointAction, ClusterFingerprint, Config, Keying,
-    Ledger, MoveLibrary, Outcome, QuenchStatus, random_cluster, run_with_bias,
+    LadderMode, Ledger, MoveLibrary, Outcome, QuenchStatus, random_cluster, run_with_bias,
     run_with_bias_at_checkpoints,
 };
 use anneal_core::methods::csa_cluster::{self, BankConfig};
@@ -1658,10 +1658,46 @@ fn main() {
             cfg.merge_radius
         );
     }
-    if opts.contains(&"pt") {
-        // A ladder sharing one budget, not four budgets. The comparison is
-        // against a single chain at the same total cost.
-        cfg.replicas = 4;
+    // A ladder sharing one budget, not four budgets. The comparison is against
+    // a single chain at the same total cost. The four names are the four arms:
+    // the ladder as it ran, the same ladder with each rung actually at its own
+    // temperature, whole parity classes with a coin-flipped parity, and the
+    // non-reversible sweep on a ladder placed by the measured barrier.
+    let ladder_mode = if opts.contains(&"indep") {
+        Some(LadderMode::Independent)
+    } else if opts.contains(&"nrpt") {
+        Some(LadderMode::NonReversible)
+    } else if opts.contains(&"rpt") {
+        Some(LadderMode::Reversible)
+    } else if opts.contains(&"ptt") {
+        Some(LadderMode::Cyclic)
+    } else if opts.contains(&"pt") {
+        Some(LadderMode::Shipped)
+    } else {
+        None
+    };
+    if let Some(mode) = ladder_mode {
+        cfg.replicas = std::env::var("REPLICAS")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(4);
+        cfg.ladder_mode = mode;
+        // The swap period is the ladder's unit of time and the budget decides
+        // how many units there are: at LJ38 with 4e5 charged evaluations a run
+        // takes about six thousand hops, so a period of 50 over four rungs
+        // buys thirty sweeps and a period of 10 buys a hundred and fifty. A
+        // ladder cannot transport anything in thirty sweeps, which is why the
+        // period is on the command line rather than fixed.
+        if let Ok(p) = std::env::var("SWAP_PERIOD") {
+            if let Ok(v) = p.parse::<usize>() {
+                cfg.swap_period = v.max(1);
+            }
+        }
+        if let Ok(a) = std::env::var("LADDER_ACCEPT") {
+            if let Ok(v) = a.parse::<f64>() {
+                cfg.ladder_target_accept = v.clamp(0.01, 0.95);
+            }
+        }
         cfg.bias_by_rung = opts.contains(&"rungbias");
         // The top is a knob with a ceiling, not a free win: the ladder
         // pays exactly while the hot rung still crosses more often than
@@ -2370,6 +2406,22 @@ fn main() {
             for (t, b, en) in &out.rungs {
                 println!("      rung T={t:.3}  basins {b:>5}  energy {en:>11.4}");
             }
+        }
+        // Transport, on every seed, because it is the quantity the ladder is
+        // supposed to change and a solve count cannot report it. A scheme can
+        // move configurations across the ladder far better and still not find
+        // the minimum, and both halves belong in the record.
+        if let Some((trips, sw, barrier)) = out.transport {
+            let per_tag = if trips > 0 {
+                out.rungs.len() as f64 * sw as f64 / trips as f64
+            } else {
+                f64::INFINITY
+            };
+            println!(
+                "      seed {seed}: round trips {trips} in {sw} sweeps \
+                 (rate {:.4}/sweep, {per_tag:.0} sweeps per tag), barrier {barrier:.2}",
+                trips as f64 / sw.max(1) as f64
+            );
         }
         total_hops += out.hops;
         total_charged += ledger.spent();

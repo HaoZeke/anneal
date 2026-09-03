@@ -11,6 +11,64 @@ use super::*;
 /// that separates distinct structures more cleanly is what would widen that.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize)]
 #[serde(rename_all = "snake_case")]
+/// How the replica ladder offers swaps and where its rungs sit. The swap
+/// ratio is the bias-aware form of [`crate::tempering`] under every mode;
+/// what changes is which pairs are offered per sweep, whether the rungs
+/// move, and whether a rung's own temperature reaches its acceptance rule.
+/// Measured at LJ38 (4e5 charged, 96 seeds, four rungs) no mode beats a
+/// single chain at the same budget; the table is in the vault survey.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize)]
+pub enum LadderMode {
+    /// One cyclic adjacent pair per swap period, every rung running the
+    /// Metropolis rule at [`Config::temperature`] rather than its own.
+    #[default]
+    Shipped,
+    /// One cyclic adjacent pair per swap period, each rung at its own
+    /// temperature on the geometric schedule.
+    Cyclic,
+    /// Rungs at their own temperatures, sharing the budget, never exchanging:
+    /// the ladder with the exchange removed and nothing else changed.
+    Independent,
+    /// Whole parity classes offered per sweep with the parity drawn from a
+    /// coin, each rung at its own temperature, geometric schedule.
+    Reversible,
+    /// Whole parity classes with the parity alternating deterministically,
+    /// the rungs placed from the cold chain's measured energy fluctuation and
+    /// moved afterwards to equalise the communication barrier.
+    NonReversible,
+}
+
+impl LadderMode {
+    /// Whether a rung's own temperature reaches its acceptance rule.
+    pub fn tempers(&self) -> bool {
+        !matches!(self, LadderMode::Shipped)
+    }
+
+    /// The sweep scheme, for the modes that offer parity classes.
+    pub fn scheme(&self) -> crate::tempering::SwapScheme {
+        match self {
+            LadderMode::NonReversible => crate::tempering::SwapScheme::DeterministicEvenOdd,
+            _ => crate::tempering::SwapScheme::StochasticEvenOdd,
+        }
+    }
+
+    /// Whether the ladder is placed and moved by the barrier estimator.
+    pub fn adapts(&self) -> bool {
+        matches!(self, LadderMode::NonReversible)
+    }
+
+    /// Whether swaps go through the sweep machinery rather than the cyclic
+    /// pair.
+    pub fn sweeps(&self) -> bool {
+        matches!(self, LadderMode::Reversible | LadderMode::NonReversible)
+    }
+
+    /// Whether any exchange is offered at all.
+    pub fn exchanges(&self) -> bool {
+        !matches!(self, LadderMode::Independent)
+    }
+}
+
 pub enum Keying {
     /// Sorted pairwise distances.
     #[default]
@@ -494,6 +552,15 @@ pub struct Config {
     pub bias_by_rung: bool,
     /// Hottest temperature on the ladder, as a multiple of `temperature`.
     pub ladder_top: f64,
+    /// Which pairs a swap offers, and where the rungs sit; see [`LadderMode`].
+    pub ladder_mode: LadderMode,
+    /// Sweeps between ladder adaptations under [`LadderMode::NonReversible`].
+    pub ladder_window: usize,
+    /// Hops the cold rung runs before the ladder is built from its energy
+    /// fluctuation, under [`LadderMode::NonReversible`].
+    pub ladder_pilot: usize,
+    /// Swap acceptance the adapted ladder is placed and held at.
+    pub ladder_target_accept: f64,
     /// Abandon a trial whose short relaxation is heading back to the current
     /// basin, before paying for the full one.
     ///
@@ -925,6 +992,10 @@ impl Config {
             escape_stall_patience: 5_000,
             escape_stall_factor: 2.0,
             ladder_top: 4.0,
+            ladder_mode: LadderMode::Shipped,
+            ladder_window: 10,
+            ladder_pilot: 200,
+            ladder_target_accept: crate::tempering::TARGET_SWAP_ACCEPT,
             return_screen: false,
             soap_class_residual: false,
             soap_mode: SoapProposalMode::Flexible,
