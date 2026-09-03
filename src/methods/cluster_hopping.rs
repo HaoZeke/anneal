@@ -1452,10 +1452,9 @@ where
                     None
                 }
                 CheckpointAction::BoundaryProposal { state, action } => {
-                    // The boundary start is taken as offered. Occupancy
-                    // Leave already walked the leftover-SOAP hole, and
-                    // re-walking it from the live well throws that shoot
-                    // away and quenches back onto the occupied family.
+                    // The boundary start is the Leave. Re-walking from
+                    // the live well is a function of the occupied
+                    // tangent and quenches back onto the occupied family.
                     Some((state, action, true))
                 }
                 CheckpointAction::ProbeProposal { state, action } => Some((state, action, false)),
@@ -1516,196 +1515,13 @@ where
                 } else {
                     Vec::new()
                 };
-                // The hill the invert raises has the width of the step the
-                // first rung takes, which is the step that reaches the first
-                // barrier at the softest curvature of this well. Goedecker's
-                // argument is the same one: an isotropic displacement has no
-                // preference for low barriers, and a length that suits one
-                // structure melts another.
-                let leave_depth = from_energy.abs() / (x.len() / 3).max(1) as f64;
-                let leave_sigma = if leave_action {
-                    grad.as_deref_mut()
-                        .and_then(|g| {
-                            crate::curvature::curvature_features(
-                                from_state.view(),
-                                |y| g(ledger, y),
-                                cfg.escape_lanczos_steps,
-                                cfg.escape_epsilon,
-                            )
-                        })
-                        .and_then(|features| {
-                            crate::known_basin::rung_rmsd(
-                                features.lambda_min,
-                                x.len() / 3,
-                                crate::known_basin::rung_barrier(leave_depth, 0),
-                            )
-                        })
-                        .unwrap_or(crate::known_basin::LEAVE_RUNG_RMSD)
-                } else {
-                    crate::known_basin::LEAVE_RUNG_RMSD
-                };
-                if leave_action {
-                    // Free energy, not depth. The cloud carries how often
-                    // this run has arrived on each packing, and the log of
-                    // that count times the temperature is the entropic half
-                    // of what holds a chain in a funnel. On LJ75 it is the
-                    // half that decides: the icosahedral shelf outnumbers
-                    // the decahedral well by orders of magnitude, so the
-                    // 1.21 eps the Marks structure wins on potential energy
-                    // is already lost at T = 0.8.
-                    //
-                    // The tempering scale is the temperature itself, which
-                    // makes the converged pile half the free energy and
-                    // leaves no knob that is not a temperature.
-                    let book = crate::catalog::packing_reference_book();
-                    crate::known_basin::arm_leave_free(
-                        from_state.view(),
-                        leave_sigma,
-                        &book,
-                        cfg.temperature,
-                        cfg.temperature,
-                    );
-                }
-                // Cover by FunnelModel EI of unquenched packing
-                // histograms, Thompson until the funnel has two
-                // landings. The fivefold residual is the last arm.
-                let leave_cover = if leave_action {
-                    let n = crate::catalog::cover_arm_count();
-                    let probes = crate::known_basin::propose_leave_covers(
-                        from_state.view(),
-                        &references,
-                        leave_depth,
-                        cfg.species.as_deref(),
-                        crate::catalog::LEAVE_EI_PROBES,
-                        rng,
-                        |trial| Some(relax(ledger, trial, 0).0),
-                    );
-                    crate::catalog::pick_leave_cover_ei(&probes, n, rng)
-                } else {
-                    hops
-                };
-                // The barrier ladder is the Leave that leaves. Measured
-                // from the sealed LJ75 icosahedral minimum: 32 of 32
-                // covering starts quenched to novel packings between
-                // -371 and -391. A Hessian min-mode climb from the same
-                // well is a surface rumple and returns to ico. The
-                // accumulated ridge is the second try when the ladder
-                // refuses; its ceiling is LEAVE_WALK_CLIMB times the
-                // depth per atom.
-                let quenched = if leave_action && leave_cover == crate::catalog::fivefold_arm() {
-                    let start =
-                        crate::soap::step_away_fivefold_measured(from_state.view(), leave_sigma);
-                    relax(ledger, start.view(), cfg.relax_steps)
-                } else if leave_action {
-                    // The climb on E+V is the Leave that leaves.
-                    //
-                    // Measured from the sealed LJ75 icosahedral minimum,
-                    // sixteen trials each: displacement along a packing
-                    // cover direction leaves 0 of 16 at any deposit from
-                    // 0.029 to 50.35 eps and any width up to the grain,
-                    // and twenty-four raw quenches dropped along one such
-                    // trajectory, which reaches 1.87 in DECAF distance
-                    // against a Marks separation of 0.4267, all returned
-                    // to the floor. The min-mode climb on the same biased
-                    // surface leaves 3 of 16, reaching 0.5333, past both
-                    // the grain and the road to Marks.
-                    //
-                    // A climb on the *raw* surface is the surface rumple:
-                    // it reports curvatures of -1e13 and calls the ridge
-                    // behind after one step, because a closed shell has no
-                    // soft mode to follow. On E+V the shell is not closed,
-                    // the deposit having put fifty eps into it, and the
-                    // curvature at the end of the climb measures 0.5218.
-                    // The Householder is suppressed for the duration: it
-                    // inverts the force along a direction guessed before
-                    // the climb starts, and a min-mode search finds its
-                    // own.
-                    let climbed = crate::known_basin::with_hill_only(|| {
-                        let mut activation = crate::methods::activation::Activation::default();
-                        activation.step = crate::known_basin::LEAVE_WALK_STEP;
-                        grad.as_deref_mut().and_then(|g| {
-                            crate::methods::activation::activate_from_origin(
-                                from_state.view(),
-                                from_state.view(),
-                                |v| {
-                                    let raw = g(ledger, v)?;
-                                    let energy = relax(ledger, v, 0).0;
-                                    Some(crate::known_basin::effective(v, energy, raw).1)
-                                },
-                                &activation,
-                            )
-                        })
-                    });
-                    let climbed = climbed.and_then(|outcome| {
-                        let (energy, landed) = crate::known_basin::with_disarmed(|| {
-                            relax(ledger, outcome.state.view(), cfg.relax_steps)
-                        });
-                        let left = from_state.as_slice().zip(landed.as_slice()).is_some_and(
-                            |(origin, trial)| {
-                                crate::catalog::leaves_packing(origin, trial, &references)
-                            },
-                        );
-                        left.then_some((energy, landed))
-                    });
-                    if let Some(found) = climbed {
-                        found
-                    } else {
-                        let ladder = {
-                            let mut starts = Vec::with_capacity(crate::known_basin::LEAVE_RUNGS);
-                            for rung in 0..crate::known_basin::LEAVE_RUNGS {
-                                starts.push(crate::known_basin::leave_packing_rung_to(
-                                    from_state.view(),
-                                    leave_cover,
-                                    crate::known_basin::rung_barrier(leave_depth, rung),
-                                    &references,
-                                    cfg.species.as_deref(),
-                                    None,
-                                    |trial| Some(relax(ledger, trial, 0).0),
-                                ));
-                            }
-                            let mut quench =
-                                |trial: ArrayView1<f64>| relax(ledger, trial, cfg.relax_steps);
-                            crate::known_basin::leave_packing_starts(
-                                from_state.view(),
-                                &starts,
-                                &references,
-                                &mut quench,
-                            )
-                        };
-                        if let Some((energy, landed, _)) = ladder {
-                            (energy, landed)
-                        } else if let Some((energy, landed, _)) =
-                            crate::known_basin::leave_packing_ridge(
-                                from_state.view(),
-                                leave_cover,
-                                &references,
-                                cfg.species.as_deref(),
-                                None,
-                                leave_depth,
-                                cfg.relax_steps,
-                                |trial, steps| relax(ledger, trial, steps),
-                            )
-                        {
-                            (energy, landed)
-                        } else {
-                            relax(ledger, state.view(), cfg.relax_steps)
-                        }
-                    }
-                } else {
-                    relax(ledger, state.view(), cfg.relax_steps)
-                };
-                // The armed walk ends on a ridge, not in a well. What names
-                // the packing, and what the chain may move onto, is the raw
-                // minimum below it: a minimum of \(E+V\) is not a minimum
-                // of the potential, and a hill this Leave put there is not
-                // part of the landscape.
-                let (mut candidate_energy, mut candidate) = if leave_action {
-                    crate::known_basin::with_disarmed(|| {
-                        relax(ledger, quenched.1.view(), cfg.relax_steps)
-                    })
-                } else {
-                    quenched
-                };
+                // Leave is not a map of the occupied structure. A
+                // min-mode climb, a covering pullback, and a one-atom
+                // kick are functions of the live tangent; their quench
+                // lands in the funnel they left. The boundary proposal
+                // is the destination the checkpoint already chose.
+                let quenched = relax(ledger, state.view(), cfg.relax_steps);
+                let (candidate_energy, candidate) = quenched;
                 let left_packing = |trial: &Array1<f64>| {
                     from_state
                         .as_slice()
@@ -1725,7 +1541,7 @@ where
                             crate::catalog::observe_leave(
                                 &histogram,
                                 candidate_energy,
-                                Some(leave_cover),
+                                None,
                                 walked_off,
                             );
                         }
@@ -1734,17 +1550,6 @@ where
                         crate::catalog::ACTION_LEAVE,
                         walked_off || candidate_energy < from_energy - 1e-6,
                     );
-                    // What this Leave actually left standing on the packing
-                    // it started from. The amplitude is set on the first
-                    // transformed evaluation, not at arm time, so it can
-                    // only be read once the walk has happened. The next
-                    // Leave from the same well scales its hill by it.
-                    if let Some((amplitude, _)) = crate::known_basin::lift()
-                        && let Some(here) = from_state.as_slice()
-                    {
-                        crate::catalog::credit_packing_deposit(here, amplitude);
-                    }
-                    crate::known_basin::disarm();
                 }
                 let (proposal_energy, proposal_state) = (candidate_energy, candidate);
                 #[cfg(not(feature = "featomic"))]

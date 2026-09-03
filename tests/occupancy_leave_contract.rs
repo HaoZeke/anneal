@@ -1,5 +1,6 @@
-//! Occupancy extras Leave OtherFamily or ArchiveHole. A same-family
-//! quench is Refuse, then a packing hole; it is not a box start.
+//! Occupancy extras Leave by drawing another packing or they Walk.
+//! A same-family quench is Refuse. Leave is not a covering of the
+//! occupied tangent and it is not a box start.
 
 #[test]
 fn catalog_min_families_override_requires_a_parsed_floor() {
@@ -249,32 +250,24 @@ fn occupancy_leave_action_does_not_fall_back_to_a_random_cluster() {
         .expect("Leave arm must end at Explore");
     assert!(
         !arm.contains("random_cluster"),
-        "occupancy extras Leave OtherFamily or ArchiveHole, not a random cluster"
-    );
-    assert!(
-        arm.contains("packing_saturated") || arm.contains("policy.packing_saturated"),
-        "after packing sat Leave must see packing_saturated and choose ArchiveHole"
+        "occupancy extras Leave OtherFamily or Walk, not a random cluster"
     );
     assert!(
         arm.contains("occupied_family_count"),
         "OtherFamily is landfold communities on the sparsified book, not DECAF isomer bins"
     );
     assert!(
-        arm.contains("leave_archive_hole") || arm.contains("leave_packing_state"),
-        "ArchiveHole is leftover-orthogonal, not a leftover hole"
+        arm.contains("OccupancyLeaveTarget::Walk"),
+        "a book with nothing to draw Walks"
+    );
+    assert!(
+        !arm.contains("step_away_fivefold"),
+        "Leave is not a named morphology hop"
     );
     let server = include_str!("../src/catalog_rpc/server.rs");
     assert!(
         server.contains("q_ei_family_entry"),
         "WAVE OtherFamily draws cycle q-EI, not a single highest-EI family"
-    );
-    assert!(
-        arm.contains("archive_cover_index") || arm.contains("cover_index"),
-        "ArchiveHole is a SoftSaddle covering direction, not a random nu3 kick"
-    );
-    assert!(
-        !arm.contains("step_away_fivefold"),
-        "ArchiveHole is not the serial fivefold morphology hop"
     );
 }
 
@@ -301,46 +294,16 @@ fn leave_quench_keeps_the_walk_off_mu_k() {
         "leftover-SOAP requench is a projector onto the occupied packing"
     );
     assert!(
-        body.contains("leave_packing_starts") || body.contains("leave_packing_ladder"),
-        "a Leave that quenched back into its packing widens the ladder"
+        !body.contains("activate_from_origin"),
+        "Leave does not climb a min-mode of the occupied structure"
     );
     assert!(
-        body.contains("leave_packing_rung_to"),
-        "a rung is sized by the barrier it must clear, measured on the potential"
+        !body.contains("leave_packing_ridge") && !body.contains("leave_packing_starts"),
+        "Leave does not cover the occupied packing tangent"
     );
     assert!(
-        body.contains("leave_packing_ridge"),
-        "a Leave that the ladder refuses accumulates the packing increment"
-    );
-    // A min-mode climb on the raw surface is the surface rumple: a closed
-    // shell has no soft mode, the climb reports curvatures of -1e13 and
-    // calls the ridge behind after one step. On E+V the shell is not
-    // closed, the deposit having put fifty eps into it, and the same climb
-    // measures a curvature of 0.5218 and leaves the packing 3 times in 16
-    // where every displacement along a cover direction leaves 0 in 16. So
-    // the bar is not that no climb appears, it is that no climb runs on
-    // the raw surface.
-    if body.contains("activate_from_origin") {
-        let climb = body
-            .split("activate_from_origin")
-            .next()
-            .expect("text precedes the climb");
-        assert!(
-            climb.contains("with_hill_only"),
-            "a Leave climb runs on E+V; the min mode of a closed shell is a surface rumple"
-        );
-    }
-    assert!(
-        !body.contains("with_hill_only") || body.contains("with_disarmed"),
-        "a climb on E+V still needs the raw minimum below it to name the packing"
-    );
-    assert!(
-        body.contains("LEAVE_WALK_CLIMB"),
-        "a crossing above the climb ceiling is a crushed cluster, not a saddle"
-    );
-    assert!(
-        body.contains("with_disarmed"),
-        "the walk stops on a ridge, so the chain takes the raw minimum below it"
+        body.contains("relax(ledger, state.view()"),
+        "Leave quenches the offered destination"
     );
 }
 
@@ -358,7 +321,7 @@ fn a_one_packing_book_walks_rather_than_drawing_a_hole() {
         .expect("Leave arm must end at Explore");
     assert!(
         arm.contains("occupancy_leave_by_birth"),
-        "Walk vs ArchiveHole follows FunnelModel EI plus leftover birth, not only the community count"
+        "Walk vs OtherFamily follows the leave rule, not a covering of the occupied tangent"
     );
     assert!(
         arm.contains("OccupancyLeaveTarget::Walk"),
