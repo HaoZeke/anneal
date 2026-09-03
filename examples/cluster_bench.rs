@@ -601,6 +601,24 @@ fn main() {
             if let Ok(w) = v.parse::<usize>() {
                 h.warmup_hops = w;
             }
+        }
+        if let Ok(v) = std::env::var("HMC_MAX_DEPTH") {
+            if let Ok(d) = v.parse::<u32>() {
+                h.max_depth = d;
+            }
+        }
+        println!(
+            "  hamiltonian proposal: metric {}, warmup {} hops, depth cap {} \
+             ({} leaves), target accept {}, reach {:.3}",
+            kind.name(),
+            h.warmup_hops,
+            h.max_depth,
+            (1usize << h.max_depth) - 1,
+            h.target_accept,
+            h.reach(),
+        );
+        cfg.hmc = Some(h);
+    }
     // Morphology coordinates. Unlike every keying above, these do not answer
     // "have I been here before" but "what shape is this", so the well-tempered
     // bias deposits on a structural coordinate rather than on basin identity.
@@ -623,7 +641,9 @@ fn main() {
             }
         }
     }
-    if cfg.keying.is_morphology() && cfg.keying != Keying::Coordination && !cfg!(feature = "featomic")
+    if cfg.keying.is_morphology()
+        && cfg.keying != Keying::Coordination
+        && !cfg!(feature = "featomic")
     {
         // Refusing rather than falling back to the distance spectrum: a run
         // that reports itself as a Q4 arm and is not one is worse than no run.
@@ -637,22 +657,6 @@ fn main() {
         if let Ok(r) = v.parse::<f64>() {
             cfg.merge_radius = r;
         }
-        if let Ok(v) = std::env::var("HMC_MAX_DEPTH") {
-            if let Ok(d) = v.parse::<u32>() {
-                h.max_depth = d;
-            }
-        }
-        println!(
-            "  hamiltonian proposal: metric {}, warmup {} hops, depth cap {} \
-             ({} leaves), target accept {}, reach {:.3}",
-            kind.name(),
-            h.warmup_hops,
-            h.max_depth,
-            (1usize << h.max_depth) - 1,
-            h.target_accept,
-            h.reach(),
-        );
-        cfg.hmc = Some(h);
     }
     // The replica ladder, one budget shared across the rungs rather than one
     // budget each. The four names are the four arms: the ladder as it ran,
