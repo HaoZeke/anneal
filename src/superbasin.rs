@@ -330,7 +330,6 @@ impl HopCounts {
     }
 }
 
-
 impl HopCounts {
     /// Recorded transitions as `(from, to, reweighted mass)`.
     pub fn edges(&self) -> impl Iterator<Item = (usize, usize, f64)> + '_ {
@@ -713,8 +712,7 @@ impl Canonical {
             return Err(CanonicalError::TooSmall(set.len()));
         }
         let inside: BTreeSet<usize> = set.iter().copied().collect();
-        let local: BTreeMap<usize, usize> =
-            set.iter().enumerate().map(|(i, s)| (*s, i)).collect();
+        let local: BTreeMap<usize, usize> = set.iter().enumerate().map(|(i, s)| (*s, i)).collect();
         let mut boundary: BTreeSet<usize> = BTreeSet::new();
         let mut leaks = false;
         for s in set {
@@ -1333,7 +1331,11 @@ fn threshold_ladder(chain: &JumpChain, params: &LumpParams, min_mass: f64) -> Ve
         // the coarser set that contains it and the hierarchy loses a level.
         let idx = (q * (probs.len() - 1)) / (k - 1).max(1);
         let t = probs[probs.len() - 1 - idx];
-        if out.last().map(|l: &f64| (*l - t).abs() > 1e-15).unwrap_or(true) {
+        if out
+            .last()
+            .map(|l: &f64| (*l - t).abs() > 1e-15)
+            .unwrap_or(true)
+        {
             out.push(t);
         }
     }
@@ -1508,7 +1510,11 @@ impl Hierarchy {
         let mut current = base.clone();
         for level in 0..params.max_levels {
             // The execution-count criterion applies to observed counts only.
-            let min_mass = if level == 0 { params.min_executions } else { 0.0 };
+            let min_mass = if level == 0 {
+                params.min_executions
+            } else {
+                0.0
+            };
             match lump_once(&current, params, min_mass) {
                 Some(level) => {
                     current = level.chain.clone();
@@ -1917,8 +1923,7 @@ impl SuperbasinEscape {
             }
         }
         let (basin, energy, p) = targets[chosen];
-        let (condition, condition_residual) =
-            canonical.condition_inf(self.condition_sweeps, 1e-10);
+        let (condition, condition_residual) = canonical.condition_inf(self.condition_sweeps, 1e-10);
         let state = self.store[&basin].1.clone();
         self.stats.jumps += 1;
         self.stats.condition_sum += condition;
@@ -2021,12 +2026,8 @@ impl SuperbasinEscape {
                 Some(s) => s,
                 None => continue,
             };
-            let absorption = canonical.absorb_at_scale(
-                source,
-                self.elimination_cap,
-                self.solve_sweeps,
-                1e-10,
-            );
+            let absorption =
+                canonical.absorb_at_scale(source, self.elimination_cap, self.solve_sweeps, 1e-10);
             return Ok((level - 1, canonical, absorption));
         }
         // Flat fallback: the trapping component the chain stands in, on the
@@ -2217,7 +2218,6 @@ pub struct SuperbasinReport {
     pub quotient: Option<QuotientReport>,
 }
 
-
 /// How well a set of features separates the coarse states the transitions
 /// imply.
 ///
@@ -2302,7 +2302,11 @@ impl SuperbasinEscape {
             };
             per_dimension.push(f);
         }
-        let finite: Vec<f64> = per_dimension.iter().copied().filter(|v| v.is_finite()).collect();
+        let finite: Vec<f64> = per_dimension
+            .iter()
+            .copied()
+            .filter(|v| v.is_finite())
+            .collect();
         let f = if finite.is_empty() {
             f64::NAN
         } else {
@@ -2316,7 +2320,6 @@ impl SuperbasinEscape {
         })
     }
 }
-
 
 // ---------------------------------------------------------------------------
 // Quotienting the graph by the symmetry orbit
@@ -2420,7 +2423,10 @@ fn revisit_profile(
         return (f64::NAN, f64::NAN);
     }
     best.sort_by(|a, b| a.partial_cmp(b).expect("ratios are finite"));
-    (best[best.len() / 2], *best.last().expect("best is non-empty"))
+    (
+        best[best.len() / 2],
+        *best.last().expect("best is non-empty"),
+    )
 }
 
 /// Depth of the hierarchy and the share of states that joined a lump.
@@ -2477,8 +2483,7 @@ impl SuperbasinEscape {
             self.store.iter().map(|(b, (e, _))| (*b, *e)).collect();
         by_energy.sort_by(|a, b| a.1.partial_cmp(&b.1).expect("energies are finite"));
 
-        let mut parent: BTreeMap<usize, usize> =
-            by_energy.iter().map(|(b, _)| (*b, *b)).collect();
+        let mut parent: BTreeMap<usize, usize> = by_energy.iter().map(|(b, _)| (*b, *b)).collect();
         let mut comparisons = 0usize;
         let mut buckets = 0usize;
         let mut matched_max = 0.0_f64;
@@ -2602,7 +2607,6 @@ impl SuperbasinEscape {
         }
     }
 }
-
 
 /// The graph rebuilt with basins merged according to `map`.
 ///
@@ -2737,8 +2741,7 @@ mod tests {
         let m = 6;
         let p = 2.0 / 3.0;
         let (chain, set) = birth_death(m, p);
-        let canonical =
-            Canonical::new(&chain, &positions(&chain, &set)).expect("boundary exists");
+        let canonical = Canonical::new(&chain, &positions(&chain, &set)).expect("boundary exists");
         let ratio = (1.0 - p) / p;
         let top = canonical
             .absorbing
@@ -2763,8 +2766,7 @@ mod tests {
         // walk, and one jump is one hop in this construction.
         let m = 7;
         let (chain, set) = birth_death(m, 0.5);
-        let canonical =
-            Canonical::new(&chain, &positions(&chain, &set)).expect("boundary exists");
+        let canonical = Canonical::new(&chain, &positions(&chain, &set)).expect("boundary exists");
         for (k, i) in (1..m).enumerate() {
             let a = canonical.absorb(k);
             let closed = (i * (m - i)) as f64;
@@ -2773,7 +2775,11 @@ mod tests {
                 "start {i}: got {}, closed form {closed}",
                 a.jumps
             );
-            assert!((a.hops - closed).abs() < 1e-9, "hops {} at start {i}", a.hops);
+            assert!(
+                (a.hops - closed).abs() < 1e-9,
+                "hops {} at start {i}",
+                a.hops
+            );
         }
     }
 
@@ -2827,8 +2833,7 @@ mod tests {
         // sparse one has to report a residual that bounds its own error.
         let m = 9;
         let (chain, set) = birth_death(m, 0.55);
-        let canonical =
-            Canonical::new(&chain, &positions(&chain, &set)).expect("boundary exists");
+        let canonical = Canonical::new(&chain, &positions(&chain, &set)).expect("boundary exists");
         for k in 0..canonical.n_transient() {
             let exact = canonical.absorb(k);
             let sparse = canonical.absorb_sparse(k, 500_000, 1e-14);
@@ -2870,7 +2875,10 @@ mod tests {
                     0usize,
                     vec![(1, 0.5 - eps / 2.0), (2, 0.5 - eps / 2.0), (100, eps)],
                 ),
-                (1, vec![(0, 0.5 - eps / 2.0), (2, 0.5 - eps / 2.0), (101, eps)]),
+                (
+                    1,
+                    vec![(0, 0.5 - eps / 2.0), (2, 0.5 - eps / 2.0), (101, eps)],
+                ),
                 (2, vec![(0, 0.5), (1, 0.5)]),
             ];
             let chain = chain_from(&rows);
@@ -2886,7 +2894,10 @@ mod tests {
                 "eps {eps}: kappa {kappa:.4e} against 2 * {longest:.4e}"
             );
             assert!(kappa > 0.5 / eps, "eps {eps} gave kappa {kappa:.3e}");
-            assert!(kappa > previous, "the conditioning must worsen with the trap");
+            assert!(
+                kappa > previous,
+                "the conditioning must worsen with the trap"
+            );
             previous = kappa;
         }
     }
@@ -3264,7 +3275,6 @@ mod tests {
         );
     }
 
-
     #[test]
     fn the_default_basin_descriptor_is_already_orbit_invariant() {
         // The premise behind quotienting the graph by the symmetry orbit is
@@ -3318,8 +3328,7 @@ mod tests {
                 // The reflection is the sign on the first component, applied
                 // before the rotation, so the image is improper.
                 let q = [-p[0], p[1], p[2]];
-                y[3 * new + d] =
-                    rot[d][0] * q[0] + rot[d][1] * q[1] + rot[d][2] * q[2] + shift[d];
+                y[3 * new + d] = rot[d][0] * q[0] + rot[d][1] * q[1] + rot[d][2] * q[2] + shift[d];
             }
         }
         let image = fp.describe(y.view());
@@ -3351,7 +3360,10 @@ mod tests {
             .map(|(p, q)| (p - q) * (p - q))
             .sum::<f64>()
             .sqrt();
-        assert!(far > 0.1, "the descriptor separates different structures: {far:.3e}");
+        assert!(
+            far > 0.1,
+            "the descriptor separates different structures: {far:.3e}"
+        );
     }
 
     #[test]
