@@ -26,6 +26,7 @@ pub mod packing;
 pub mod signature;
 pub mod validator;
 
+pub use crate::coreclass::{CooperativeCatalog, CoreClassStat, CoreClassTable, CoreVerdict};
 pub use archive::{Archive, Curiosity, novelty};
 pub use basin::{
     ActiveBasinEntry, AdmissionOutcome, AdmissionRejection, BasinCatalog, BasinCatalogError,
@@ -94,9 +95,6 @@ pub use signature::{DescriptorSignature, EngineSignature, SignatureDigest, Syste
 pub use validator::{
     CandidateRecord, CandidateValidator, FreshEvaluation, GradientSource, NumericField,
     QuenchStatus, ValidatedCandidate, ValidationFailure, ValidatorConfig, euclidean_gradient_norm,
-};
-pub use crate::coreclass::{
-    CooperativeCatalog, CoreClassStat, CoreClassTable, CoreVerdict,
 };
 
 /// Compatibility name for the local-topology event catalog.

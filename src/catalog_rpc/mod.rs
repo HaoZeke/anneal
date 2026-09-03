@@ -7,13 +7,15 @@ use capnp::serialize;
 
 use crate::Catalog_capnp::{
     CatalogMutationKind as WireCatalogMutationKind, CatalogRelation as WireCatalogRelation,
-    DiscoveryRole as WireDiscoveryRole, QuenchStatus as WireQuenchStatus, RejectionKind,
-    RideDirection as WireRideDirection, RideFailure as WireRideFailure,
-    RideMethod as WireRideMethod, accepted_reply, bridge_assignment, candidate_record,
-    catalog_identity, catalog_mutation_reply, catalog_reply, catalog_request, coordinator_event,
-    coordinator_status, policy_state_reply, population_epoch_reply, ride_report_reply,
-    ride_report_request, roster_reply, transition_record,
+    CoreVerdict as WireCoreVerdict, DiscoveryRole as WireDiscoveryRole,
+    QuenchStatus as WireQuenchStatus, RejectionKind, RideDirection as WireRideDirection,
+    RideFailure as WireRideFailure, RideMethod as WireRideMethod, accepted_reply,
+    bridge_assignment, candidate_record, catalog_identity, catalog_mutation_reply, catalog_reply,
+    catalog_request, coordinator_event, coordinator_status, policy_state_reply,
+    population_epoch_reply, ride_report_reply, ride_report_request, roster_reply,
+    transition_record,
 };
+use crate::coreclass::CoreVerdict;
 use crate::discovery_roster::DiscoveryRole;
 use crate::pes_exploration::RideMethod;
 use crate::ride_ledger::{RideCredit, RideDirection, RideFailure, RideWorkOrder};
@@ -23,7 +25,7 @@ pub mod mailbox;
 pub mod server;
 
 /// Wire protocol version accepted by this release.
-pub const PROTOCOL_VERSION: u16 = 28;
+pub const PROTOCOL_VERSION: u16 = 29;
 /// `Sample` draw that returns the active-catalog incumbent.
 pub const INCUMBENT_SAMPLE_DRAW: u64 = u64::MAX;
 
@@ -381,6 +383,15 @@ pub enum CatalogOperation {
     Scale {
         /// Desired number of live replicas.
         live_target: u32,
+    },
+    /// Report one chain's motif class and energy to the shared table.
+    ReportCoreClass {
+        /// [`crate::corekey::MotifClass::index`] of the live state.
+        class: u8,
+        /// Current energy of the reporting chain.
+        energy: f64,
+        /// Charged calls on the reporting chain.
+        charged: u64,
     },
 }
 
@@ -778,6 +789,8 @@ pub enum AcceptedPayload {
     RideCredit(RideCredit),
     /// Versioned live roster after attach, detach, tick, or scale.
     Roster(RosterReply),
+    /// Shared core-class table verdict for the reporting chain.
+    CoreVerdict(CoreVerdict),
 }
 
 /// Accepted coordinator response.
@@ -1057,6 +1070,16 @@ pub(crate) fn fill_request(
         }
         CatalogOperation::Tick { millis } => operation.set_tick(*millis),
         CatalogOperation::Scale { live_target } => operation.set_scale(*live_target),
+        CatalogOperation::ReportCoreClass {
+            class,
+            energy,
+            charged,
+        } => {
+            let mut report = operation.init_report_core_class();
+            report.set_class(*class);
+            report.set_energy(*energy);
+            report.set_charged(*charged);
+        }
     }
     Ok(())
 }
@@ -1252,6 +1275,14 @@ pub(crate) fn decode_request_reader(
         },
         catalog_request::operation::Tick(millis) => CatalogOperation::Tick { millis },
         catalog_request::operation::Scale(live_target) => CatalogOperation::Scale { live_target },
+        catalog_request::operation::ReportCoreClass(report) => {
+            let report = report.map_err(wire_error)?;
+            CatalogOperation::ReportCoreClass {
+                class: report.get_class(),
+                energy: report.get_energy(),
+                charged: report.get_charged(),
+            }
+        }
     };
     Ok(CatalogRequest {
         protocol_version,
@@ -1548,6 +1579,9 @@ pub(crate) fn fill_reply(
                         None => incumbent.set_absent(()),
                     }
                 }
+                AcceptedPayload::CoreVerdict(verdict) => {
+                    payload.set_core_verdict(WireCoreVerdict::from(*verdict));
+                }
             }
         }
         CatalogReply::Rejected {
@@ -1826,6 +1860,9 @@ pub(crate) fn decode_reply_reader(
                         incumbent_basin,
                     })
                 }
+                accepted_reply::payload::CoreVerdict(verdict) => {
+                    AcceptedPayload::CoreVerdict(verdict.map_err(wire_error)?.into())
+                }
             };
             Ok(CatalogReply::Accepted(AcceptedReply {
                 event_sequence,
@@ -1878,6 +1915,24 @@ impl From<RejectionKind> for ProtocolRejection {
             RejectionKind::SequenceRegression => Self::SequenceRegression,
             RejectionKind::SnapshotRegression => Self::SnapshotRegression,
             RejectionKind::ValidationRejected => Self::ValidationRejected,
+        }
+    }
+}
+
+impl From<CoreVerdict> for WireCoreVerdict {
+    fn from(value: CoreVerdict) -> Self {
+        match value {
+            CoreVerdict::Continue => Self::Continue,
+            CoreVerdict::Restart => Self::Restart,
+        }
+    }
+}
+
+impl From<WireCoreVerdict> for CoreVerdict {
+    fn from(value: WireCoreVerdict) -> Self {
+        match value {
+            WireCoreVerdict::Continue => Self::Continue,
+            WireCoreVerdict::Restart => Self::Restart,
         }
     }
 }
