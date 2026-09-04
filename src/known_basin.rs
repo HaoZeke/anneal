@@ -1428,7 +1428,7 @@ pub fn afir_term(
             grad[3 * j + k] -= component;
         }
     }
-    if grad.iter().any(|g| !g.is_finite()) {
+    if grad.iter().any(|g: &f64| !g.is_finite()) {
         return None;
     }
     Some((value, grad))
@@ -1504,13 +1504,13 @@ where
             let (bias, bias_g) = afir_term(trial, &fragment_a, &fragment_b, rho, alpha, &radii)?;
             let total_e = energy + bias;
             let total_g = gradient + bias_g;
-            if total_e.is_finite() && total_g.iter().all(|g| g.is_finite()) {
+            if total_e.is_finite() && total_g.iter().all(|g: &f64| g.is_finite()) {
                 Some((total_e, total_g))
             } else {
                 None
             }
         });
-        if trial.len() == x.len() && trial.iter().all(|v| v.is_finite()) {
+        if trial.len() == x.len() && trial.iter().all(|v: &f64| v.is_finite()) {
             starts.push(trial);
         }
     }
