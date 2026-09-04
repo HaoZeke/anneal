@@ -3683,6 +3683,19 @@ fn exact_basin_for(
     scientific: &ScientificState,
     validated: &ValidatedCandidate,
 ) -> Option<BasinId> {
+    let query = scientific
+        .packing
+        .histogram(&validated.candidate.coordinates);
+    if let Some(query) = query.as_ref() {
+        for (&basin, stored) in &scientific.ride_candidates {
+            let Some(stored) = scientific.packing.histogram(&stored.coordinates) else {
+                continue;
+            };
+            if same_packing(&stored, query) {
+                return Some(BasinId::from_raw(basin));
+            }
+        }
+    }
     let mut representatives = scientific
         .ride_candidates
         .iter()
