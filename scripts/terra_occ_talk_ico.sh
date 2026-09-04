@@ -56,7 +56,7 @@ if [[ -z $endpoint ]]; then
   echo "coordinator published no address" >&2
   exit 1
 fi
-echo "catalog_rpc=${endpoint} replicas=${REPLICAS} shared_bias=1 start=marks0+ico"
+echo "catalog_rpc=${endpoint} replicas=${REPLICAS} shared_bias=1 start=ico"
 
 pids=
 for replica in $(seq 0 $((REPLICAS - 1))); do
@@ -70,14 +70,7 @@ for replica in $(seq 0 $((REPLICAS - 1))); do
     export CATALOG_SLICE=5000
     export CATALOG_POPULATION_INTERVAL=50000
     export CATALOG_MAX_HOPS=60000
-    # Replica 0 publishes the sealed Marks well. The others start on
-    # ico and must hear it. Replaying the 37k-hop mute walk is not
-    # a communication test.
-    if [[ "${replica}" -eq 0 ]]; then
-      export CATALOG_START_FILE="${ROOT}/tests/fixtures/lj75_marks.xyz"
-    else
-      export CATALOG_START_FILE="${ROOT}/tests/fixtures/lj75_ico.xyz"
-    fi
+    export CATALOG_START_FILE="${ROOT}/tests/fixtures/lj75_ico.xyz"
     export CATALOG_START_REPLICA=all
     export SEED_OFFSET=$((1800000 + replica))
     exec "$BIN" "$N" "$BUDGET" 1 rec

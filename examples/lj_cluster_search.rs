@@ -4742,25 +4742,6 @@ fn run_capnp_catalog(
                 },
             );
         }
-        // Extras climb without Remote policy. Even replicas fill.
-        if replica % 2 == 1
-            && checkpoint_sequence.is_multiple_of(2)
-            && !leave_defers(leave_quiet, leave_patience, leave_crossing)
-        {
-            count_leave += 1;
-            count_hole += 1;
-            return complete_checkpoint_trace(
-                &mut cooperative,
-                replica,
-                &mut slice_sequence,
-                checkpoint_charged,
-                snapshot.best_energy(),
-                |_cooperative, _slice_sequence| CheckpointAction::BoundaryProposal {
-                    state: snapshot.current_state().to_owned(),
-                    action: "catalog_ridge".to_owned(),
-                },
-            );
-        }
         if leave_defers(leave_quiet, leave_patience, leave_crossing) {
             // Still inside the recovered quiet stretch or the
             // measured crossing floor (LEAVE_CROSSING_HOPS). Policy

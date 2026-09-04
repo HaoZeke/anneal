@@ -465,10 +465,6 @@ fn checkpoint_hears_the_book_before_leave_defers() {
         "catalog_leave refuses a Marks landing the throwaway book chains to ico"
     );
     assert!(
-        hear.contains("catalog_ridge"),
-        "extras climb the ridge without waiting for Remote policy"
-    );
-    assert!(
         hear.contains("best_energy()") && hear.contains("1e-3"),
         "hear compares the published prize to the replica floor, not the mid-hop energy"
     );
