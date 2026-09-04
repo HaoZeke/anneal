@@ -85,7 +85,7 @@ for pid in ${pids}; do
 done
 kill "$server_pid" 2>/dev/null || true
 wait "$server_pid" 2>/dev/null || true
-if rg -n 'Marks |-397.492' "$OUT"/replica-*.out; then
+if /usr/bin/grep -qE '^  Marks -397\.492331' "$OUT"/replica-*.out; then
   echo "MARKS_HIT"
 else
   echo "MARKS_MISS"
