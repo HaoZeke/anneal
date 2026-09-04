@@ -416,6 +416,11 @@ fn a_one_packing_book_climbs_the_ridge() {
         hop.contains("catalog_ridge") && hop.contains("activate("),
         "catalog_ridge climbs until the mode force flips, then quenches"
     );
+    assert!(
+        hop.contains("action == \"soap_push\"")
+            && hop.contains("relax(ledger, state.view(), 0)"),
+        "a SOAP push keeps the pulled-back geometry"
+    );
 }
 
 #[test]
@@ -465,8 +470,12 @@ fn checkpoint_hears_the_book_before_leave_defers() {
         "catalog_leave refuses a Marks landing the throwaway book chains to ico"
     );
     assert!(
-        hear.contains("nearby_packing") && hear.contains("arm_leave_free"),
-        "nearby chains invert at checkpoint cadence, not every hop"
+        hear.contains("nearby_packing") && hear.contains("push_away_clouds"),
+        "nearby chains take a SOAP pullback step at checkpoint cadence"
+    );
+    assert!(
+        hear.contains("soap_push"),
+        "the SOAP step is adopted without a packing quench"
     );
     assert!(
         hear.contains("best_energy()") && hear.contains("1e-3"),
