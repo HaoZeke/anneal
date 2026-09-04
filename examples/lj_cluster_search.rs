@@ -4282,6 +4282,19 @@ fn run_capnp_catalog(
         } else {
             stall = stall.saturating_add(1);
         }
+        if snapshot.hops() > 0 && snapshot.hops().is_multiple_of(500) {
+            println!(
+                "  occupancy hops {} best {:.6} refs {} leaves {} other {} walk {} hole {}",
+                snapshot.hops(),
+                snapshot.best_energy(),
+                anneal_core::catalog::packing_references().len(),
+                count_leave,
+                count_other_family,
+                count_walk,
+                count_hole
+            );
+            let _ = std::io::stdout().flush();
+        }
         if !announced_score
             && published_energy_score(snapshot.best_energy(), reference(cfg.n_points))
         {
