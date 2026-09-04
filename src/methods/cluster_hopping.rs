@@ -1538,28 +1538,14 @@ where
                 // Unused starts are discarded. This is not Xu confidence
                 // and not a campaign stop.
                 if leave_action && !left_packing(&candidate) {
-                    let mobile = crate::soap::packing_active_volume(
+                    if let Some((energy, landed, _)) = crate::known_basin::leave_av_walk(
                         from_state.view(),
-                        crate::catalog::PACKING_SPEC,
-                        cfg.species.as_deref(),
-                    );
-                    let starts = crate::known_basin::leave_av_packing_starts(
-                        from_state.view(),
-                        &mobile,
                         cfg.neighbour_cutoff,
-                        crate::known_basin::LEAVE_AV_SEARCHES,
+                        crate::known_basin::LEAVE_WALK_HOPS,
+                        from_energy,
                         rng,
-                    );
-                    let mut best_leave: Option<(f64, Array1<f64>)> = None;
-                    for start in starts {
-                        let (energy, landed) = relax(ledger, start.view(), cfg.relax_steps);
-                        if left_packing(&landed)
-                            && best_leave.as_ref().is_none_or(|(held, _)| energy < *held)
-                        {
-                            best_leave = Some((energy, landed));
-                        }
-                    }
-                    if let Some((energy, landed)) = best_leave {
+                        |trial| relax(ledger, trial, cfg.relax_steps),
+                    ) {
                         candidate_energy = energy;
                         candidate = landed;
                     }
