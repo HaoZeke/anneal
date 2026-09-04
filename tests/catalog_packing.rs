@@ -526,10 +526,13 @@ fn a_second_look_at_the_same_ico_does_not_open_a_family() {
     let ico = load_xyz(include_str!("fixtures/lj75_ico.xyz"));
     let mut book = PackingBook::default();
     let first = book.observe(ico.as_slice().unwrap()).unwrap();
+    let version = book.version();
     let second = book.observe(ico.as_slice().unwrap()).unwrap();
     assert_eq!(first, second);
     assert_eq!(book.visits(first), 2);
+    assert_eq!(book.version(), version);
     assert_eq!(book.occupied_family_count(), 1);
+    assert_eq!(book.occupied_packing_count(), 1);
     assert_eq!(
         book.novelty(&book.histogram(ico.as_slice().unwrap()).unwrap()),
         0.0
@@ -578,6 +581,7 @@ fn a_query_histogram_does_not_change_what_the_book_learns() {
     );
     assert_eq!(queried.visits(direct_family), direct.visits(direct_family));
     assert_eq!(queried.occupied_family_count(), 2);
+    assert_eq!(queried.occupied_packing_count(), 2);
 }
 
 #[test]

@@ -270,8 +270,8 @@ fn occupancy_leave_action_does_not_fall_back_to_a_random_cluster() {
     );
     let server = include_str!("../src/catalog_rpc/server.rs");
     assert!(
-        server.contains("scientific.packing.occupied_family_count()"),
-        "PolicyState occupied_family_count is occupied DECAF families, not worthwhile EI"
+        server.contains("scientific.packing.occupied_packing_count()"),
+        "PolicyState occupied_family_count is occupied packing communities, not DECAF cells"
     );
     let policy_state = server
         .split("CatalogOperation::PolicyState")
@@ -295,7 +295,9 @@ fn occupancy_leave_action_does_not_fall_back_to_a_random_cluster() {
         .nth(1)
         .and_then(|chunk| chunk.split("fn query_basin_for_descriptor(").next())
         .expect("exact_basin_for must exist");
-    let packing = basin.find("same_packing").expect("packing short-circuit");
+    let packing = basin
+        .find("basin_for_packing_community")
+        .expect("packing-community short-circuit");
     let ira = basin
         .find("equivalent_structures")
         .expect("IRA remains the novel-packing witness");
@@ -306,6 +308,15 @@ fn occupancy_leave_action_does_not_fall_back_to_a_random_cluster() {
     assert!(
         server.contains("q_ei_family_entry"),
         "WAVE OtherFamily draws cycle q-EI, not a single highest-EI family"
+    );
+    let offer = server
+        .split("Catalog offers are search evidence")
+        .nth(1)
+        .and_then(|chunk| chunk.split("CatalogOperation::RecordTransition").next())
+        .expect("OfferCandidate arm must exist");
+    assert!(
+        offer.contains("packing.version()") && offer.contains("refresh_occupancy_diagnostics"),
+        "OfferCandidate folds only when the packing book moves"
     );
 }
 

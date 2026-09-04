@@ -42,8 +42,8 @@ use crate::catalog::{
     leftover_dwell_from_census, leftover_esty_stable, leftover_esty_upper, leftover_lambda,
     occupancy_ei_exhausted, occupancy_family_floor, occupancy_fes_delta, occupancy_landfold_split,
     occupancy_min_families, occupancy_ring_profile, occupancy_ring_split,
-    occupancy_sparsify_packing, occupant_rhat, packing_role, promote_one_sided, prune,
-    retis_exchange_adjacent, same_packing, seat_extras,
+    occupancy_sparsify_packing, occupant_rhat, packing_communities, packing_role,
+    promote_one_sided, prune, retis_exchange_adjacent, same_packing, seat_extras,
 };
 use crate::catalog_policy::proposal::farthest_hole;
 use crate::cooperative_search::ledger::{
@@ -1793,13 +1793,13 @@ fn apply_request(
                     ProtocolRejection::ValidationRejected,
                 );
             }
-            // Occupied DECAF families on the book, not landfold
-            // communities and not the FunnelModel EI subset. Landfold
-            // splits icosahedral cells before they chain; EI drops to
-            // zero on a just-observed Marks packing. Either gate keeps
-            // extras walking one family while the shared book already
-            // holds another.
-            let occupied_packing_communities = scientific.packing.occupied_family_count();
+            // Occupied packing communities on the book, not landfold
+            // cells and not the FunnelModel EI subset. Landfold splits
+            // icosahedral cells before they chain; cell count on the
+            // LJ75 ico shelf is tens of wells of one funnel. Either
+            // gate keeps extras walking one packing while the shared
+            // book already holds another.
+            let occupied_packing_communities = scientific.packing.occupied_packing_count();
             let (seat, frame_lambda) = assign_leftover_interfaces(
                 scientific,
                 request.identity.replica,
@@ -1842,7 +1842,10 @@ fn apply_request(
                     .as_ref()
                     .is_some_and(|(_, map)| !map.holes),
                 leftover_dwell: leftover_census_dwell(scientific),
-                ei_exhausted: scientific.ei_hold.map(|(_, verdict)| verdict).unwrap_or(false),
+                ei_exhausted: scientific
+                    .ei_hold
+                    .map(|(_, verdict)| verdict)
+                    .unwrap_or(false),
                 min_families: scientific.floor_hold.map(|(_, floor)| floor).unwrap_or(1) as u32,
                 discovery_role,
                 discovery_epoch,
@@ -2375,6 +2378,7 @@ fn apply_request(
                     .arrival_basin_by_replica
                     .insert(request.identity.replica, observation.basin_id)
                     != Some(observation.basin_id);
+                let book_before = scientific.packing.version();
                 observe_packing(
                     scientific,
                     request.identity.replica,
@@ -2423,7 +2427,9 @@ fn apply_request(
                         scientific.archive.reward(family);
                     }
                 }
-                refresh_occupancy_diagnostics(scientific);
+                if scientific.packing.version() != book_before {
+                    refresh_occupancy_diagnostics(scientific);
+                }
                 let incumbent = scientific
                     .catalog
                     .incumbent()
@@ -3687,6 +3693,9 @@ fn exact_basin_for(
         .packing
         .histogram(&validated.candidate.coordinates);
     if let Some(query) = query.as_ref() {
+        if let Some(basin) = basin_for_packing_community(scientific, query) {
+            return Some(basin);
+        }
         for (&basin, stored) in &scientific.ride_candidates {
             let Some(stored) = scientific.packing.histogram(&stored.coordinates) else {
                 continue;
@@ -3759,6 +3768,46 @@ fn query_basin_for_descriptor(
         .map(|(&basin, _)| BasinId::from_raw(basin));
     let basin = matches.next()?;
     matches.next().is_none().then_some(basin)
+}
+
+/// Census basin of a structure that already sits in an occupied packing.
+///
+/// Cell grain (`same_packing`) splits the LJ75 icosahedral shelf into
+/// tens of wells. IRA then compares the new isomer to every stored
+/// minimum. Packing community is the identity the hop path may reuse;
+/// IRA remains the witness only when the book has no community for the
+/// query.
+fn basin_for_packing_community(scientific: &ScientificState, query: &[f64]) -> Option<BasinId> {
+    let occupied = scientific.packing.occupied_histograms();
+    if occupied.is_empty() {
+        return None;
+    }
+    let mut histograms: Vec<Vec<f64>> = occupied
+        .iter()
+        .map(|(_, histogram)| histogram.clone())
+        .collect();
+    histograms.push(query.to_vec());
+    let labels = packing_communities(&histograms);
+    let query_label = *labels.last()?;
+    let same: BTreeSet<usize> = occupied
+        .iter()
+        .zip(labels.iter())
+        .filter(|(_, &label)| label == query_label)
+        .map(|((index, _), _)| *index)
+        .collect();
+    if same.is_empty() {
+        return None;
+    }
+    for (replica, history) in &scientific.family_history {
+        if history
+            .back()
+            .is_some_and(|cell| same.contains(&(*cell as usize)))
+            && let Some(basin) = scientific.last_basin_by_replica.get(replica)
+        {
+            return Some(*basin);
+        }
+    }
+    None
 }
 
 fn candidate_from_validated(

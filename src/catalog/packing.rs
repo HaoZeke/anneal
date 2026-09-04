@@ -105,7 +105,6 @@ impl PackingBook {
             && let Some(index) = self.family_of(&histogram)
         {
             self.visits[index] = self.visits[index].saturating_add(1);
-            self.version = self.version.wrapping_add(1);
             return Some(index);
         }
         let histogram = self.assign_growing(coordinates)?;
@@ -204,10 +203,27 @@ impl PackingBook {
         self.visits.get(family).copied().unwrap_or(0)
     }
 
-    /// Occupied DECAF families on file. Visit count, not leftover-SOAP
+    /// Occupied DECAF cells on file. Visit count, not leftover-SOAP
     /// basin count. Empty until `observe` records a histogram.
+    ///
+    /// A live LJ75 icosahedral shelf holds tens of these. Packing
+    /// identity is [`Self::occupied_packing_count`].
     pub fn occupied_family_count(&self) -> usize {
         self.visits.iter().filter(|&&visits| visits > 0).count()
+    }
+
+    /// Occupied packing communities on file, at [`PACKING_LINK`].
+    ///
+    /// Cell count is not this: isomers of one packing open many cells,
+    /// and treating each as a family sends extras between icosahedral
+    /// wells that are not a second funnel.
+    pub fn occupied_packing_count(&self) -> usize {
+        let histograms: Vec<Vec<f64>> = self
+            .occupied_histograms()
+            .into_iter()
+            .map(|(_, histogram)| histogram)
+            .collect();
+        packing_community_count(&histograms)
     }
 
     /// Histogram of each occupied packing family, in family-index order.
