@@ -3,9 +3,10 @@
 //!     leave_packing_probe [LEAVES] [RELAX_STEPS] [MODE]
 //!
 //! `MODE=av` runs leftover sphere and AFIR starts (they quench back to
-//! the icosahedral floor). `MODE=pack` runs the hop's packing-changing
-//! moves on that leftover: hollow-site relocate, a hollow fill, a
-//! surface relocate, and a shell twist, each raw-quenched.
+//! the icosahedral floor). `MODE=pack` runs one-shot hollow / fill /
+//! surface / shell from the floor. `MODE=walk` twists the shell and
+//! compacts, then walks packing hops from each landing, installing
+//! only a quench that leaves and is at or below the icosahedral floor.
 //!
 //! Without `MODE`, the older generators are run from the same icosahedral
 //! minimum, each `LEAVES` times, and each result is classified against
@@ -455,6 +456,108 @@ fn main() {
         report("av_fill", &av_fill, leaves);
         report("av_surf", &av_surf, leaves);
         report("av_shell", &av_shell, leaves);
+        return;
+    }
+
+    if std::env::args().nth(3).as_deref() == Some("walk") {
+        let mobile = anneal_core::soap::packing_active_volume(
+            ico.view(),
+            anneal_core::catalog::PACKING_SPEC,
+            None,
+        );
+        println!(
+            "{{\"kind\":\"leave_probe_av\",\"mobile\":{},\"n\":{}}}",
+            mobile.len(),
+            ico.len() / 3
+        );
+        let two = anneal_core::methods::two_phase::TwoPhase::relative(0.7, 1.0);
+        let quench_two = |start: ArrayView1<f64>| {
+            let cutoff = two.cutoff_for(start);
+            let mut opt = WarmLbfgs::default();
+            let (_, phase_one, _) = opt.minimize(start, steps, |v| {
+                let (energy, gradient) = potential.value_and_gradient(v);
+                let (pe, pg) = anneal_core::methods::two_phase::penalty_shaped(
+                    v, cutoff, two.beta, two.mu, None,
+                );
+                Some((energy + pe, gradient + pg))
+            });
+            quench(&potential, phase_one.view(), steps)
+        };
+        let mut shell_2p = Tally {
+            best: ico_energy,
+            ..Tally::default()
+        };
+        let mut walk_raw = Tally {
+            best: ico_energy,
+            ..Tally::default()
+        };
+        let mut walk_2p = Tally {
+            best: ico_energy,
+            ..Tally::default()
+        };
+        let mut rng = rand::rngs::StdRng::seed_from_u64(1);
+        let cutoff = known_basin::LEAVE_NEIGHBOUR_CUTOFF;
+        for index in 0..leaves {
+            let start = anneal_core::movekernel::ShellRotate {
+                n_points: ico.len() / 3,
+            }
+            .propose(ico.view(), 0.0, &mut rng);
+            let trial = quench_two(start.view());
+            classify("shell_2p", index, &mut shell_2p, &trial, None);
+            let _ = std::io::Write::flush(&mut std::io::stdout());
+        }
+        for index in 0..leaves {
+            let walked = known_basin::leave_av_walk(
+                ico.view(),
+                cutoff,
+                known_basin::LEAVE_WALK_HOPS,
+                ico_energy,
+                &mut rng,
+                |start| {
+                    let trial = quench(&potential, start, steps);
+                    let energy = potential.value_and_gradient(trial.view()).0;
+                    (energy, trial)
+                },
+            );
+            match walked {
+                Some((energy, trial, hop)) => {
+                    classify("walk_raw", index, &mut walk_raw, &trial, Some(hop));
+                    println!(
+                        "{{\"kind\":\"walk_hit\",\"generator\":\"walk_raw\",\"index\":{index},\"energy\":{energy:.6},\"hop\":{hop}}}"
+                    );
+                }
+                None => println!(
+                    "{{\"kind\":\"leave\",\"generator\":\"walk_raw\",\"index\":{index},\"rung\":null,\"refused\":true}}"
+                ),
+            }
+            let walked = known_basin::leave_av_walk(
+                ico.view(),
+                cutoff,
+                known_basin::LEAVE_WALK_HOPS,
+                ico_energy,
+                &mut rng,
+                |start| {
+                    let trial = quench_two(start);
+                    let energy = potential.value_and_gradient(trial.view()).0;
+                    (energy, trial)
+                },
+            );
+            match walked {
+                Some((energy, trial, hop)) => {
+                    classify("walk_2p", index, &mut walk_2p, &trial, Some(hop));
+                    println!(
+                        "{{\"kind\":\"walk_hit\",\"generator\":\"walk_2p\",\"index\":{index},\"energy\":{energy:.6},\"hop\":{hop}}}"
+                    );
+                }
+                None => println!(
+                    "{{\"kind\":\"leave\",\"generator\":\"walk_2p\",\"index\":{index},\"rung\":null,\"refused\":true}}"
+                ),
+            }
+            let _ = std::io::Write::flush(&mut std::io::stdout());
+        }
+        report("shell_2p", &shell_2p, leaves);
+        report("walk_raw", &walk_raw, leaves);
+        report("walk_2p", &walk_2p, leaves);
         return;
     }
 
