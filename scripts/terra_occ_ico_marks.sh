@@ -16,8 +16,8 @@ export CATALOG_ENSEMBLE=solo
 export CATALOG_REPLICA=0
 export CATALOG_START_FILE="${ROOT}/tests/fixtures/lj75_ico.xyz"
 export CATALOG_START_REPLICA=0
-export CATALOG_MAX_HOPS=12000
+export CATALOG_MAX_HOPS=60000
 export CATALOG_SLICE=500
 export CATALOG_POPULATION_INTERVAL=50000
-./target/release/examples/lj_cluster_search 75 400000 1 rec,catalog
+./target/release/examples/lj_cluster_search 75 4000000 8 rec,catalog
 echo "EXIT:$?"
