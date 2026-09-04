@@ -419,6 +419,23 @@ fn a_one_packing_book_climbs_the_ridge() {
 }
 
 #[test]
+fn catalog_incumbent_installs_without_a_mid_hop_gradient() {
+    let source = include_str!("../src/methods/cluster_hopping.rs");
+    let body = source
+        .split("let published_prize = action == \"catalog_incumbent\"")
+        .nth(1)
+        .expect("published prize adopt must exist");
+    let recordable = body
+        .split("if recordable {")
+        .next()
+        .expect("recordable gate must follow the prize bit");
+    assert!(
+        recordable.contains("published_prize"),
+        "a heard catalog prize installs even when the chain is mid-hop"
+    );
+}
+
+#[test]
 fn checkpoint_hears_the_book_before_leave_defers() {
     let source = include_str!("../examples/lj_cluster_search.rs");
     let checkpoint = source

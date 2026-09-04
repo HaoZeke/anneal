@@ -1496,7 +1496,8 @@ where
                 let from_energy = e;
                 let from_state = x.clone();
                 let mut from_gradient = current_validation_gradient.clone();
-                if !adopt && from_gradient.is_none() {
+                let published_prize = action == "catalog_incumbent";
+                if from_gradient.is_none() && (published_prize || !adopt) {
                     from_gradient = grad.as_deref_mut().and_then(|g| {
                         g(ledger, from_state.view()).filter(|values| {
                             values.iter().fold(0.0_f64, |a, q| a.max(q.abs())) < cfg.record_gradient
@@ -1665,9 +1666,16 @@ where
                 } else {
                     None
                 };
+                // A published catalog prize is already a validated
+                // minimum. Mid-hop from_gradient is often missing, and
+                // that gate left every hear of Marks on the ico chain.
                 let recordable = proposal_sane
-                    && (!gradient_required || from_gradient.is_some())
-                    && (!gradient_required || validation_gradient.is_some());
+                    && (published_prize
+                        || !gradient_required
+                        || from_gradient.is_some())
+                    && (published_prize
+                        || !gradient_required
+                        || validation_gradient.is_some());
                 if recordable {
                     if adopt {
                         hops += 1;
