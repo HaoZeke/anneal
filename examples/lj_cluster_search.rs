@@ -3857,11 +3857,11 @@ fn run_capnp_catalog(
     // file holds an xyz body: a count line, a comment line, then one
     // element and three coordinates per line.
     let seeded_start = std::env::var("CATALOG_START_FILE").ok().filter(|_| {
-        std::env::var("CATALOG_START_REPLICA")
-            .ok()
-            .and_then(|value| value.parse::<u32>().ok())
-            .unwrap_or(0)
-            == replica
+        match std::env::var("CATALOG_START_REPLICA").as_deref() {
+            Ok("all") | Ok("*") => true,
+            Ok(value) => value.parse::<u32>().ok() == Some(replica),
+            Err(_) => replica == 0,
+        }
     });
     let start = match seeded_start {
         Some(path) => {
