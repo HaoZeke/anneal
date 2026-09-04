@@ -254,7 +254,11 @@ fn occupancy_leave_action_does_not_fall_back_to_a_random_cluster() {
     );
     assert!(
         arm.contains("occupied_family_count"),
-        "OtherFamily is landfold communities on the sparsified book, not DECAF isomer bins"
+        "OtherFamily draws another occupied DECAF family, not an isomer bin"
+    );
+    assert!(
+        arm.contains("current_energy"),
+        "OtherFamily adopts a deeper packing, not an amorphous cell above the live well"
     );
     assert!(
         arm.contains("OccupancyLeaveTarget::Walk"),
@@ -265,6 +269,10 @@ fn occupancy_leave_action_does_not_fall_back_to_a_random_cluster() {
         "Leave is not a named morphology hop"
     );
     let server = include_str!("../src/catalog_rpc/server.rs");
+    assert!(
+        server.contains("scientific.packing.occupied_family_count()"),
+        "PolicyState occupied_family_count is occupied DECAF families, not worthwhile EI"
+    );
     assert!(
         server.contains("q_ei_family_entry"),
         "WAVE OtherFamily draws cycle q-EI, not a single highest-EI family"
