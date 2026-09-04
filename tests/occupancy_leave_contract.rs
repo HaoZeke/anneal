@@ -327,6 +327,24 @@ fn occupancy_leave_action_does_not_fall_back_to_a_random_cluster() {
         offer.contains("packing.version()") && offer.contains("refresh_occupancy_diagnostics"),
         "OfferCandidate folds only when the packing book moves"
     );
+    let refresh = server
+        .split("fn refresh_occupancy_diagnostics(")
+        .nth(1)
+        .and_then(|chunk| chunk.split("fn report_occupancy_gt_throttled(").next())
+        .expect("refresh_occupancy_diagnostics must exist");
+    assert!(
+        refresh.contains("fold_hold") && refresh.contains("return"),
+        "a live fold hold must not start another occupancy fold on admission"
+    );
+    let community = server
+        .split("fn basin_for_packing_community(")
+        .nth(1)
+        .and_then(|chunk| chunk.split("fn candidate_from_validated(").next())
+        .expect("basin_for_packing_community must exist");
+    assert!(
+        community.contains("families_sharing_community"),
+        "visit identity uses the cached book fold, not a fresh single-linkage"
+    );
 }
 
 #[test]

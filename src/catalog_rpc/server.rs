@@ -42,7 +42,7 @@ use crate::catalog::{
     leftover_dwell_from_census, leftover_esty_stable, leftover_esty_upper, leftover_lambda,
     occupancy_ei_exhausted, occupancy_family_floor, occupancy_fes_delta, occupancy_landfold_split,
     occupancy_min_families, occupancy_ring_profile, occupancy_ring_split,
-    occupancy_sparsify_packing, occupant_rhat, packing_communities, packing_role,
+    occupancy_sparsify_packing, occupant_rhat, packing_role,
     promote_one_sided, prune, retis_exchange_adjacent, same_packing, seat_extras,
 };
 use crate::catalog_policy::proposal::farthest_hole;
@@ -3793,23 +3793,11 @@ fn query_basin_for_descriptor(
 /// IRA remains the witness only when the book has no community for the
 /// query.
 fn basin_for_packing_community(scientific: &ScientificState, query: &[f64]) -> Option<BasinId> {
-    let occupied = scientific.packing.occupied_histograms();
-    if occupied.is_empty() {
-        return None;
-    }
-    let mut histograms: Vec<Vec<f64>> = occupied
-        .iter()
-        .map(|(_, histogram)| histogram.clone())
+    let same: BTreeSet<usize> = scientific
+        .packing
+        .families_sharing_community(query)
+        .into_iter()
         .collect();
-    histograms.push(query.to_vec());
-    let labels = packing_communities(&histograms);
-    let query_label = *labels.last()?;
-    let mut same = BTreeSet::new();
-    for (slot, (index, _)) in occupied.iter().enumerate() {
-        if labels.get(slot).copied() == Some(query_label) {
-            same.insert(*index);
-        }
-    }
     if same.is_empty() {
         return None;
     }
@@ -4971,6 +4959,12 @@ fn leftover_census_dwell(scientific: &mut ScientificState) -> bool {
 }
 
 fn refresh_occupancy_diagnostics(scientific: &mut ScientificState) {
+    if scientific
+        .fold_hold
+        .is_some_and(|at| at.elapsed() < Duration::from_secs(5))
+    {
+        return;
+    }
     let _ = occupancy_floor(scientific);
     let _ = occupancy_funnel_ei_exhausted(scientific);
     let _ = packing_census_saturated(scientific);

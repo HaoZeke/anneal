@@ -78,6 +78,10 @@ pub struct PackingBook {
     /// draw.
     well_visits: Vec<u64>,
     histogram_cache: RefCell<Vec<CachedHistogram>>,
+    /// Single-linkage labels of [`Self::occupied_histograms`], keyed by
+    /// [`Self::version`]. PolicyState and every visit ask for the fold;
+    /// recomputing it on an unchanged book is the hop-path park.
+    community_cache: RefCell<Option<(u64, Vec<usize>)>>,
 }
 
 /// One remembered histogram and the path that built it.
@@ -218,12 +222,52 @@ impl PackingBook {
     /// and treating each as a family sends extras between icosahedral
     /// wells that are not a second funnel.
     pub fn occupied_packing_count(&self) -> usize {
-        let histograms: Vec<Vec<f64>> = self
-            .occupied_histograms()
+        self.occupied_community_labels()
+            .1
             .into_iter()
-            .map(|(_, histogram)| histogram)
+            .max()
+            .map_or(0, |last| last + 1)
+    }
+
+    /// Occupied cells and their cached packing-community labels.
+    fn occupied_community_labels(&self) -> (Vec<(usize, Vec<f64>)>, Vec<usize>) {
+        let occupied = self.occupied_histograms();
+        {
+            let cache = self.community_cache.borrow();
+            if let Some((version, labels)) = cache.as_ref()
+                && *version == self.version
+                && labels.len() == occupied.len()
+            {
+                return (occupied, labels.clone());
+            }
+        }
+        let histograms: Vec<Vec<f64>> = occupied
+            .iter()
+            .map(|(_, histogram)| histogram.clone())
             .collect();
-        packing_community_count(&histograms)
+        let labels = packing_communities(&histograms);
+        *self.community_cache.borrow_mut() = Some((self.version, labels.clone()));
+        (occupied, labels)
+    }
+
+    /// Family indices in the same packing community as `query`.
+    ///
+    /// The book fold is cached. The query is assigned by one single-linkage
+    /// step onto that fold: a cell at or below [`PACKING_LINK`] inherits
+    /// its community. A query that does not chain is not a new fold.
+    pub fn families_sharing_community(&self, query: &[f64]) -> Vec<usize> {
+        let (occupied, labels) = self.occupied_community_labels();
+        let Some(label) = occupied.iter().enumerate().find_map(|(i, (_, histogram))| {
+            (packing_distance(query, histogram) <= PACKING_LINK).then_some(labels[i])
+        }) else {
+            return Vec::new();
+        };
+        occupied
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| labels[*i] == label)
+            .map(|(_, (index, _))| *index)
+            .collect()
     }
 
     /// Histogram of each occupied packing family, in family-index order.
