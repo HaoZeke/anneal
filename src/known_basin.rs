@@ -1266,7 +1266,7 @@ pub fn farthest_packing_cover(
 /// Energy minima on a sphere supported on the active volume.
 ///
 /// Ohno and Maeda (*Chem. Phys. Lett.* **384**, 277 (2004),
-/// <https://doi.org/10.1016/j.cplett.2003.12.130>): reaction
+/// <https://doi.org/10.1016/j.cplett.2003.12.030>): reaction
 /// channels are anharmonic downward distortions, found as energy
 /// minima on the scaled hypersphere around the equilibrium. A
 /// uniform covering is not that. This scan evaluates the potential
