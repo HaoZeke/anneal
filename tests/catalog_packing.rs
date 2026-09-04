@@ -585,6 +585,32 @@ fn a_query_histogram_does_not_change_what_the_book_learns() {
 }
 
 #[test]
+fn a_query_inherits_the_cached_packing_community() {
+    let ico = load_xyz(include_str!("fixtures/lj75_ico.xyz"));
+    let marks = load_xyz(include_str!("fixtures/lj75_marks.xyz"));
+    let ico = ico.as_slice().unwrap();
+    let marks = marks.as_slice().unwrap();
+    let mut book = PackingBook::default();
+    let family = book.observe(ico).expect("LJ75 ico has a class histogram");
+    let histogram = book.histogram(ico).expect("ico histogram");
+    assert_eq!(book.families_sharing_community(&histogram), vec![family]);
+    assert_eq!(
+        book.occupied_packing_count(),
+        book.occupied_packing_count(),
+        "the community fold is stable for an unchanged book"
+    );
+    let marks_family = book.observe(marks).expect("Marks opens a family");
+    assert_ne!(family, marks_family);
+    assert_eq!(book.occupied_packing_count(), 2);
+    let marks_histogram = book.histogram(marks).expect("Marks histogram");
+    assert_eq!(
+        book.families_sharing_community(&marks_histogram),
+        vec![marks_family],
+        "Marks stays in its own packing community"
+    );
+}
+
+#[test]
 fn switch_saturates_far_l1_asinh_does_not() {
     let a = vec![1.0, 0.0, 0.0, 0.0];
     let b = vec![0.0, 1.0, 0.0, 0.0];
