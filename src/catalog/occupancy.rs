@@ -796,11 +796,25 @@ pub fn occupancy_sparsify_book(
             wells: wells[i],
         });
     }
-    let weights: Vec<f64> = wells.iter().map(|&count| count.max(1) as f64).collect();
-    let fes = occupancy_fes(&xy, Some(&weights)).unwrap_or(OccupancyFes {
-        minima: 1,
-        delta: None,
-    });
+    // Leftover-well density, not hop re-observes. The ico shelf opens
+    // hundreds of cells with well_visits 0; mean-shift from every cell
+    // is quadratic in that count and parks the coordinator.
+    let fes = {
+        let credited: Vec<usize> = (0..n).filter(|&i| wells[i] > 0).collect();
+        if credited.is_empty() {
+            OccupancyFes {
+                minima: 1,
+                delta: None,
+            }
+        } else {
+            let fes_xy: Vec<[f64; 2]> = credited.iter().map(|&i| xy[i]).collect();
+            let fes_w: Vec<f64> = credited.iter().map(|&i| wells[i] as f64).collect();
+            occupancy_fes(&fes_xy, Some(&fes_w)).unwrap_or(OccupancyFes {
+                minima: 1,
+                delta: None,
+            })
+        }
+    };
     let occupied_communities = community_wells.iter().filter(|&&wells| wells > 0).count();
     OccupancyBookMap {
         points,
@@ -2703,6 +2717,19 @@ mod tests {
         let ico = vec![1.0, 0.0];
         let oh = vec![0.0, 1.0];
         assert_eq!(occupancy_landfold_floor(&[ico, oh], &[0, 1]), 2);
+    }
+
+    #[test]
+    fn occupancy_fes_ignores_zero_well_hop_cells() {
+        let ico = vec![1.0, 0.0];
+        let histograms = vec![ico; 64];
+        let family: Vec<usize> = (0..64).collect();
+        let mut wells = vec![0u64; 64];
+        wells[0] = 20;
+        let map = occupancy_sparsify_book(&histograms, &family, &wells);
+        assert_eq!(map.communities, 1);
+        assert_eq!(map.fes_minima, 1);
+        assert_eq!(map.community_wells, vec![20]);
     }
 
     #[test]
