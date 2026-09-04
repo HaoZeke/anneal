@@ -1,10 +1,17 @@
 //! Does an occupancy Leave actually install a packing from the LJ75 ico well?
 //!
-//!     leave_packing_probe [LEAVES] [RELAX_STEPS]
+//!     leave_packing_probe [LEAVES] [RELAX_STEPS] [MODE]
 //!
-//! Three generators are run from the same icosahedral minimum, each `LEAVES`
-//! times, and each result is classified against the two sealed fixtures by
-//! single linkage at [`anneal_core::catalog::PACKING_LINK`]:
+//! `MODE=av` runs the occupancy-general starts on the packing leftover:
+//! SHS energy minima on that sphere, a farthest-point packing cover,
+//! SC-AFIR push and peel of leftover versus core, and AV-restricted
+//! covering rungs. Each start is quenched raw and with the Locatelli–
+//! Schoen first phase.
+//!
+//! Without `MODE`, the older generators are run from the same icosahedral
+//! minimum, each `LEAVES` times, and each result is classified against
+//! the two sealed fixtures by single linkage at
+//! [`anneal_core::catalog::PACKING_LINK`]:
 //!
 //! * `cartesian`, the old Leave: a SoftSaddle covering direction placed at
 //!   Cartesian RMSD 0.35, quenched raw.
@@ -255,6 +262,146 @@ fn main() {
             rung.map_or_else(|| "null".to_owned(), |value| value.to_string())
         );
     };
+
+    if std::env::args().nth(3).as_deref() == Some("av") {
+        let mobile = anneal_core::soap::packing_active_volume(
+            ico.view(),
+            anneal_core::catalog::PACKING_SPEC,
+            None,
+        );
+        println!(
+            "{{\"kind\":\"leave_probe_av\",\"mobile\":{},\"n\":{}}}",
+            mobile.len(),
+            ico.len() / 3
+        );
+        let two = anneal_core::methods::two_phase::TwoPhase::relative(0.7, 1.0);
+        let quench_two = |start: ArrayView1<f64>| {
+            let cutoff = two.cutoff_for(start);
+            let mut opt = WarmLbfgs::default();
+            let (_, phase_one, _) = opt.minimize(start, steps, |v| {
+                let (energy, gradient) = potential.value_and_gradient(v);
+                let (pe, pg) = anneal_core::methods::two_phase::penalty_shaped(
+                    v, cutoff, two.beta, two.mu, None,
+                );
+                Some((energy + pe, gradient + pg))
+            });
+            quench(&potential, phase_one.view(), steps)
+        };
+        let mut av_shs = Tally {
+            best: ico_energy,
+            ..Tally::default()
+        };
+        let mut av_shs_2p = Tally {
+            best: ico_energy,
+            ..Tally::default()
+        };
+        let mut av_fps = Tally {
+            best: ico_energy,
+            ..Tally::default()
+        };
+        let mut av_fps_2p = Tally {
+            best: ico_energy,
+            ..Tally::default()
+        };
+        let n_cover = anneal_core::catalog::cover_arm_count();
+        let starts = known_basin::shs_av_starts(
+            ico.view(),
+            &mobile,
+            known_basin::LEAVE_WALK_STEP,
+            16,
+            4,
+            |v| Some(potential.value_and_gradient(v).0),
+        );
+        for (slot, start) in starts.iter().enumerate() {
+            let trial = quench(&potential, start.view(), steps);
+            classify("av_shs", slot, &mut av_shs, &trial, None);
+            let trial = quench_two(start.view());
+            classify("av_shs_2p", slot, &mut av_shs_2p, &trial, None);
+            let _ = std::io::Write::flush(&mut std::io::stdout());
+        }
+        let fps = known_basin::farthest_packing_cover(ico.view(), &references, n_cover);
+        let start = known_basin::leave_packing_rung_to(
+            ico.view(),
+            fps,
+            known_basin::rung_barrier(depth, 0),
+            &references,
+            None,
+            Some(mobile.as_slice()),
+            |v| Some(potential.value_and_gradient(v).0),
+        );
+        let trial = quench(&potential, start.view(), steps);
+        classify("av_fps", 0, &mut av_fps, &trial, None);
+        let trial = quench_two(start.view());
+        classify("av_fps_2p", 0, &mut av_fps_2p, &trial, None);
+        let mut av_afir = Tally {
+            best: ico_energy,
+            ..Tally::default()
+        };
+        let mut av_afir_2p = Tally {
+            best: ico_energy,
+            ..Tally::default()
+        };
+        let mut in_a = vec![false; ico.len() / 3];
+        for &atom in &mobile {
+            if atom < in_a.len() {
+                in_a[atom] = true;
+            }
+        }
+        let fragment_a: Vec<usize> = (0..in_a.len()).filter(|&i| in_a[i]).collect();
+        let fragment_b: Vec<usize> = (0..in_a.len()).filter(|&i| !in_a[i]).collect();
+        let radii = known_basin::afir_radii(ico.len() / 3, None);
+        let alpha = known_basin::afir_alpha_for_barrier(
+            ico.view(),
+            &fragment_a,
+            &fragment_b,
+            known_basin::rung_barrier(depth, 0),
+            &radii,
+        );
+        println!(
+            "{{\"kind\":\"leave_probe_afir\",\"alpha\":{},\"a\":{},\"b\":{}}}",
+            alpha.map_or_else(|| "null".to_owned(), |value| format!("{value:.6}")),
+            fragment_a.len(),
+            fragment_b.len()
+        );
+        let afir_starts = known_basin::afir_av_starts(
+            ico.view(),
+            &mobile,
+            known_basin::rung_barrier(depth, 0),
+            steps,
+            None,
+            |v| Some(potential.value_and_gradient(v)),
+        );
+        for (slot, start) in afir_starts.iter().enumerate() {
+            let trial = quench(&potential, start.view(), steps);
+            classify("av_afir", slot, &mut av_afir, &trial, None);
+            let trial = quench_two(start.view());
+            classify("av_afir_2p", slot, &mut av_afir_2p, &trial, None);
+            let _ = std::io::Write::flush(&mut std::io::stdout());
+        }
+        for index in 0..leaves {
+            let start = known_basin::leave_packing_rung_to(
+                ico.view(),
+                index,
+                known_basin::rung_barrier(depth, 0),
+                &references,
+                None,
+                Some(mobile.as_slice()),
+                |v| Some(potential.value_and_gradient(v).0),
+            );
+            let trial = quench(&potential, start.view(), steps);
+            classify("av_cover", index, &mut av_fps, &trial, None);
+            let trial = quench_two(start.view());
+            classify("av_cover_2p", index, &mut av_fps_2p, &trial, None);
+            let _ = std::io::Write::flush(&mut std::io::stdout());
+        }
+        report("av_shs", &av_shs, starts.len());
+        report("av_shs_2p", &av_shs_2p, starts.len());
+        report("av_fps", &av_fps, leaves + 1);
+        report("av_fps_2p", &av_fps_2p, leaves + 1);
+        report("av_afir", &av_afir, afir_starts.len());
+        report("av_afir_2p", &av_afir_2p, afir_starts.len());
+        return;
+    }
 
     if only_ridge {
         // Directed packing-map walk: 96 covering points on the packing
