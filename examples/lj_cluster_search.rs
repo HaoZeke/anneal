@@ -5287,7 +5287,8 @@ fn run_capnp_catalog(
                                 &sparse.coordinates,
                             )
                         });
-                        elsewhere.then_some(sparse)
+                        let deeper = sparse.energy < snapshot.current_energy() - 1e-3;
+                        (elsewhere && deeper).then_some(sparse)
                     } else {
                         None
                     }

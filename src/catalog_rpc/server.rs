@@ -469,6 +469,7 @@ struct ScientificState {
     /// cadence parks the workers on the coordinator.
     fold_hold: Option<Instant>,
     floor_hold: Option<(Instant, usize)>,
+    ei_hold: Option<(Instant, bool)>,
     last_gt_report: Option<OccupancyGtKey>,
     /// Leftover occupancy sample whose saturation state has been counted
     /// toward the retirement dwell.
@@ -652,6 +653,7 @@ impl CoordinatorState {
                     landfold: None,
                     fold_hold: None,
                     floor_hold: None,
+                    ei_hold: None,
                     last_gt_report: None,
                     last_leftover_dwell_sample: None,
                     leftover_sat_streak: 0,
@@ -1351,7 +1353,8 @@ fn process_request(
             duplicate: false,
             ..
         })
-    ) && let Err(error) = append_journal(config, &request)
+    ) && !matches!(request.operation, CatalogOperation::PolicyState { .. })
+        && let Err(error) = append_journal(config, &request)
     {
         state.journal_broken = true;
         return Err(error.to_string());
@@ -1790,14 +1793,13 @@ fn apply_request(
                     ProtocolRejection::ValidationRejected,
                 );
             }
-            // Fold the book once for this response; the four consumers
-            // below would otherwise each pay for it.
-            // Packings an extra can actually be sent to: communities a walk
-            // has arrived in. The raw community count reaches two at the
-            // second cell, which is single linkage on a pair rather than on
-            // a cloud, and it sends extras between icosahedral cells that
-            // have simply not chained yet.
-            let occupied_packing_communities = worthwhile_communities(scientific);
+            // Occupied DECAF families on the book, not landfold
+            // communities and not the FunnelModel EI subset. Landfold
+            // splits icosahedral cells before they chain; EI drops to
+            // zero on a just-observed Marks packing. Either gate keeps
+            // extras walking one family while the shared book already
+            // holds another.
+            let occupied_packing_communities = scientific.packing.occupied_family_count();
             let (seat, frame_lambda) = assign_leftover_interfaces(
                 scientific,
                 request.identity.replica,
@@ -4610,6 +4612,11 @@ fn worthwhile_communities(scientific: &mut ScientificState) -> usize {
 }
 
 fn occupancy_funnel_ei_exhausted(scientific: &mut ScientificState) -> bool {
+    if let Some((at, verdict)) = scientific.ei_hold
+        && at.elapsed() < Duration::from_secs(5)
+    {
+        return verdict;
+    }
     let sizes = (
         scientific.last_candidate_by_replica.len(),
         scientific.best_candidate_by_replica.len(),
@@ -4619,6 +4626,7 @@ fn occupancy_funnel_ei_exhausted(scientific: &mut ScientificState) -> bool {
         && let Some((held, verdict)) = scientific.ei_verdict
         && held == scientific.funnel.version()
     {
+        scientific.ei_hold = Some((Instant::now(), verdict));
         return verdict;
     }
     scientific.fed_from = Some(sizes);
@@ -4661,11 +4669,13 @@ fn occupancy_funnel_ei_exhausted(scientific: &mut ScientificState) -> bool {
     if let Some((held, verdict)) = scientific.ei_verdict
         && held == version
     {
+        scientific.ei_hold = Some((Instant::now(), verdict));
         return verdict;
     }
     let max_ei = scientific.funnel.max_expected_improvement_at_data();
     let verdict = occupancy_ei_exhausted(max_ei, scientific.funnel.len(), scientific.funnel.noise);
     scientific.ei_verdict = Some((version, verdict));
+    scientific.ei_hold = Some((Instant::now(), verdict));
     verdict
 }
 

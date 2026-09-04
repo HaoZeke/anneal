@@ -2,7 +2,7 @@
 
 pub mod proposal;
 
-use crate::catalog::{BasinCensus, BasinId, MixingEvidence, in_interface_ensemble};
+use crate::catalog::{in_interface_ensemble, BasinCensus, BasinId, MixingEvidence};
 
 /// Exact local visit count that classifies one occupied basin as exhausted.
 pub const LOCAL_CENSUS_LEAVE: u64 = 8;
@@ -296,16 +296,15 @@ impl CatalogPolicy {
     /// incumbent of a known well leaves once it stalls, so the ensemble
     /// does not keep relaxing one funnel for the rest of the budget.
     ///
-    /// While leftover SOAP is unsaturated every replica Walks: Marks
-    /// is a long hop, not a census Leave or a remote yank. After
-    /// leftover dwell, a FamilyExtra of a crowded packing Leaves it.
-    /// The champion stays and walks isomers. Collapse also forces
-    /// extras of the occupied packing to Leave. A walk rematched to a different
-    /// DECAF family is not collapse: yanking it would abandon the
-    /// second funnel. Surplus extras are pruned at occupancy rungs
-    /// and reseed. A better isomer of the occupied packing may be
-    /// taken when the ensemble is not collapsed. A certified
-    /// incumbent stays.
+    /// While leftover SOAP is unsaturated and the book has one packing,
+    /// every replica Walks: Marks is a long hop, not a census Leave.
+    /// A second occupied DECAF family on the shared book is talking:
+    /// extras Leave and draw it. The champion stays and walks isomers.
+    /// A novel-family walk is not Explore: yanking it would abandon the
+    /// mint. After leftover dwell, extras of a crowded packing Leave.
+    /// Collapse also forces extras of the occupied packing to Leave.
+    /// Surplus extras are pruned at occupancy rungs and reseed. A
+    /// certified incumbent stays.
     pub fn decide(input: CatalogPolicyInput) -> PolicyDecision {
         if input.validation == ValidationState::Rejected {
             return decision(
@@ -326,6 +325,8 @@ impl CatalogPolicy {
                 )
             }
             _ if !input.leftover_dwell
+                && !(input.occupied_family_count >= 2
+                    && matches!(input.relation, ActiveCatalogRelation::SameBasin))
                 && !(input.census.local_basin_visits() >= LOCAL_CENSUS_LEAVE
                     && matches!(
                         input.relation,

@@ -118,6 +118,53 @@ fn leftover_unsaturated_pruned_extra_still_walks() {
 }
 
 #[test]
+fn leftover_unsaturated_extra_leaves_when_another_family_is_on_file() {
+    let (census, basin_id) = census_with_repeated_visits(1);
+    let mut extra = input(
+        ActiveCatalogRelation::SameBasin,
+        CensusEvidence::from_census(&census, Some(basin_id)),
+        AggregateProgress::new(20, 100).unwrap(),
+    );
+    extra.leftover_dwell = false;
+    extra.occupied_family_count = 2;
+    let decision = CatalogPolicy::decide(extra);
+    assert_eq!(decision.action, PolicyAction::Leave);
+    assert_eq!(decision.reason, PolicyReason::OccupiedPackingLeave);
+}
+
+#[test]
+fn leftover_unsaturated_incumbent_walks_when_another_family_is_on_file() {
+    let (census, basin_id) = census_with_repeated_visits(1);
+    let mut incumbent = input(
+        ActiveCatalogRelation::Incumbent,
+        CensusEvidence::from_census(&census, Some(basin_id)),
+        AggregateProgress::new(20, 100).unwrap(),
+    );
+    incumbent.leftover_dwell = false;
+    incumbent.occupied_family_count = 2;
+    let decision = CatalogPolicy::decide(incumbent);
+    assert_eq!(decision.action, PolicyAction::ContinueLocal);
+    assert_eq!(decision.reason, PolicyReason::IsomerWalk);
+}
+
+#[test]
+fn leftover_unsaturated_novel_family_still_walks() {
+    let (census, basin_id) = census_with_repeated_visits(1);
+    let mut novel = input(
+        ActiveCatalogRelation::Unrelated {
+            lower_energy_anchor: false,
+        },
+        CensusEvidence::from_census(&census, Some(basin_id)),
+        AggregateProgress::new(20, 100).unwrap(),
+    );
+    novel.leftover_dwell = false;
+    novel.occupied_family_count = 2;
+    let decision = CatalogPolicy::decide(novel);
+    assert_eq!(decision.action, PolicyAction::ContinueLocal);
+    assert_eq!(decision.reason, PolicyReason::IsomerWalk);
+}
+
+#[test]
 fn extras_on_a_published_prize_keep() {
     let (census, basin_id) = census_with_repeated_visits(4);
     let mut extra = input(
