@@ -4034,38 +4034,20 @@ fn run_capnp_catalog(
             snapshot.charged(),
             snapshot.accepted_transitions(),
         );
-        let mut path_active = false;
-        for operation in operations {
+        // The hop path reports the slice endpoint. Posting every accepted
+        // hop is a RecordVisit/DECAF flood; the coordinator then holds
+        // PolicyState and the ensemble stops.
+        let last_register = operations.into_iter().rev().find_map(|operation| {
             match operation {
-                AdaptiveCatalogOperation::RegisterCurrent(candidate) => {
-                    cooperative
-                        .record_work(replica, ChargeKind::DescriptorEvaluation, 0)
-                        .expect("source descriptor work must enter the cooperative ledger");
-                    path_active = cooperative
-                        .post_record_current(replica, candidate)
-                        .map(|outcome| outcome != TransitionRecordOutcome::Rejected)
-                        .unwrap_or(false);
-                }
-                AdaptiveCatalogOperation::Adopt {
-                    action,
-                    destination,
-                    adopted,
-                } if path_active => {
-                    cooperative
-                        .record_work(replica, ChargeKind::DescriptorEvaluation, 0)
-                        .expect("destination descriptor work must enter the cooperative ledger");
-                    path_active = cooperative
-                        .post_record_transition(
-                            replica,
-                            action,
-                            TransitionDestination::Resolved(destination),
-                            adopted,
-                        )
-                        .map(|outcome| outcome != TransitionRecordOutcome::Rejected)
-                        .unwrap_or(false);
-                }
-                AdaptiveCatalogOperation::Adopt { .. } => {}
+                AdaptiveCatalogOperation::RegisterCurrent(candidate) => Some(candidate),
+                AdaptiveCatalogOperation::Adopt { .. } => None,
             }
+        });
+        if let Some(candidate) = last_register {
+            cooperative
+                .record_work(replica, ChargeKind::DescriptorEvaluation, 0)
+                .expect("source descriptor work must enter the cooperative ledger");
+            let _ = cooperative.post_record_current(replica, candidate);
         }
 
         let mut boundary_candidates = Vec::new();
