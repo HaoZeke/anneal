@@ -290,6 +290,19 @@ fn occupancy_leave_action_does_not_fall_back_to_a_random_cluster() {
         !policy_state.contains("occupancy_funnel_ei_exhausted("),
         "PolicyState must not feed the funnel"
     );
+    let basin = server
+        .split("fn exact_basin_for(")
+        .nth(1)
+        .and_then(|chunk| chunk.split("fn query_basin_for_descriptor(").next())
+        .expect("exact_basin_for must exist");
+    let packing = basin.find("same_packing").expect("packing short-circuit");
+    let ira = basin
+        .find("equivalent_structures")
+        .expect("IRA remains the novel-packing witness");
+    assert!(
+        packing < ira,
+        "same packing reuses the basin; IRA is only for a new family"
+    );
     assert!(
         server.contains("q_ei_family_entry"),
         "WAVE OtherFamily draws cycle q-EI, not a single highest-EI family"
