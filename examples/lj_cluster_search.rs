@@ -4099,10 +4099,15 @@ fn run_capnp_catalog(
         cooperative
             .record_work_batch(replica, descriptor_work)
             .expect("quench descriptor batch must enter the cooperative ledger");
-        let mut freshest_boundary = None;
-        for candidate in boundary_candidates {
+        // One offer per checkpoint. A slice can hold hundreds of validated
+        // quenches; each offer runs coordinator DECAF and parks the ensemble.
+        let mut freshest_boundary = boundary_candidates.into_iter().min_by(|left, right| {
+            left.energy
+                .total_cmp(&right.energy)
+                .then_with(|| left.event_sequence.cmp(&right.event_sequence))
+        });
+        if let Some(candidate) = freshest_boundary.as_ref() {
             let _ = cooperative.post_offer_candidate(replica, candidate.clone());
-            freshest_boundary = Some(candidate);
         }
 
         #[cfg(feature = "ira")]
