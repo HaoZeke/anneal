@@ -963,6 +963,38 @@ pub fn different_packing_family(origin: &[f64], trial: &[f64]) -> bool {
     leaves_packing(origin, trial, &packing_references())
 }
 
+/// Catalog slots drawn at a checkpoint to find nearby chains.
+///
+/// The invert is not a per-hop all-to-all. A checkpoint already talks
+/// to the catalog; these draws are the only extra mail, and only a
+/// neighbour in the map is armed.
+pub const INVERT_NEIGHBOR_DRAWS: usize = 4;
+
+/// Whether two structures sit on the same side of the packing map.
+///
+/// Pairwise L1 at [`PACKING_LINK`], no chaining through a third well.
+/// Far packings are a hear, not an invert neighbour.
+pub fn nearby_packing(here: &[f64], other: &[f64]) -> bool {
+    if here.len() != other.len() || here.is_empty() {
+        return false;
+    }
+    let mut book = PackingBook::default();
+    book.observe(here);
+    book.observe(other);
+    match (book.histogram(here), book.histogram(other)) {
+        (Some(a), Some(b)) => packing_distance(&a, &b) <= PACKING_LINK,
+        _ => false,
+    }
+}
+
+/// Reference-cloud entries that are invert neighbours of `here`.
+pub fn nearby_packing_book(here: &[f64]) -> Vec<PackingReference> {
+    packing_reference_book()
+        .into_iter()
+        .filter(|reference| nearby_packing(here, &reference.coordinates))
+        .collect()
+}
+
 /// Paving pile kept per packing community rather than per basin.
 ///
 /// The hop acceptance already walks a biased landscape, but the pile it

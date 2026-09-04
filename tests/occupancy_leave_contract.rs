@@ -465,6 +465,10 @@ fn checkpoint_hears_the_book_before_leave_defers() {
         "catalog_leave refuses a Marks landing the throwaway book chains to ico"
     );
     assert!(
+        hear.contains("nearby_packing") && hear.contains("arm_leave_free"),
+        "nearby chains invert at checkpoint cadence, not every hop"
+    );
+    assert!(
         hear.contains("best_energy()") && hear.contains("1e-3"),
         "hear compares the published prize to the replica floor, not the mid-hop energy"
     );
