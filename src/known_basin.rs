@@ -59,6 +59,11 @@ struct Armed {
     /// \(\Delta T\) of the well-tempered scaling. Zero disables it and
     /// leaves every hill at full height.
     delta_t: f64,
+    /// Neighbour invert lifted at arm. Hops apply this \(P\) until the
+    /// next arm; they do not rebuild \(J\).
+    frozen: bool,
+    /// \((k,\hat P,r_\varphi,\|P\|)\) at arm, used when [`Self::frozen`].
+    frozen_modes: Vec<(usize, Array1<f64>, f64, f64)>,
 }
 
 thread_local! {
@@ -173,6 +178,7 @@ pub fn arm_leave_free(
             first.deposit = own.deposit.max(0.0);
         }
     }
+    let frozen_modes = freeze_packing_modes(origin, &wells);
     ARMED.with(|slot| {
         *slot.borrow_mut() = Some(Armed {
             wells,
@@ -180,9 +186,14 @@ pub fn arm_leave_free(
             sigma_rmsd: sigma_rmsd.max(1e-6),
             lift: None,
             sigma_phi: None,
-            mode_x: None,
-            modes: Vec::new(),
+            mode_x: Some(origin.to_owned()),
+            modes: frozen_modes
+                .iter()
+                .map(|(index, p, _, p_norm)| (*index, p.clone(), *p_norm))
+                .collect(),
             delta_t: delta_t.max(0.0),
+            frozen: !frozen_modes.is_empty(),
+            frozen_modes,
         });
     });
 }
@@ -195,6 +206,11 @@ pub fn disarm() {
 /// Whether a Leave quench is currently transformed.
 pub fn is_armed() -> bool {
     ARMED.with(|slot| slot.borrow().is_some())
+}
+
+/// Whether hops apply the \(P\) lifted at arm, without rebuilding \(J\).
+pub fn invert_is_frozen() -> bool {
+    ARMED.with(|slot| slot.borrow().as_ref().is_some_and(|armed| armed.frozen))
 }
 
 /// Hill amplitude \(A\) and width \(\sigma_\varphi\) of the armed
@@ -451,10 +467,94 @@ fn transform(
     energy: f64,
     grad: Array1<f64>,
 ) -> (f64, Array1<f64>) {
+    if armed.frozen && !armed.frozen_modes.is_empty() {
+        return apply_packing_modes(armed, energy, grad);
+    }
     if armed.wells.iter().any(|well| well.packing_mean.is_some()) {
         return transform_packing(armed, x, energy, grad);
     }
     transform_cartesian(armed, x, energy, grad)
+}
+
+/// Lift neighbour modes once, at arm. The hop applies this \(P\).
+fn freeze_packing_modes(
+    origin: ArrayView1<f64>,
+    wells: &[Well],
+) -> Vec<(usize, Array1<f64>, f64, f64)> {
+    let Some(mu) = packing_mean(origin) else {
+        return Vec::new();
+    };
+    let j = jacobian_nu3(origin, PACKING_SPEC, None);
+    wells
+        .iter()
+        .enumerate()
+        .filter_map(|(index, well)| {
+            let mu_k = well.packing_mean.as_ref()?;
+            let (p, r_phi, p_norm) = lift_packing_mode(origin, mu.view(), mu_k.view(), &j)?;
+            Some((index, p, r_phi, p_norm))
+        })
+        .collect()
+}
+
+fn apply_packing_modes(
+    armed: &mut Armed,
+    energy: f64,
+    grad: Array1<f64>,
+) -> (f64, Array1<f64>) {
+    if armed.lift.is_none() {
+        let grain = crate::catalog::PACKING_LINK;
+        let mut amplitude = 0.0;
+        for (_, p, r_phi, p_norm) in &armed.frozen_modes {
+            if *r_phi < 1e-12 || *p_norm < 1e-15 {
+                continue;
+            }
+            let slope = dot(&grad, p) / p_norm;
+            if slope > 0.0 {
+                let curvature = slope / r_phi;
+                let trial = 0.5 * curvature * grain * grain;
+                if trial > amplitude {
+                    amplitude = trial;
+                }
+            }
+        }
+        armed.lift = Some(amplitude);
+        armed.sigma_phi = Some(grain);
+    }
+    let amplitude = armed.lift.unwrap_or(0.0);
+    let sigma_phi = armed.sigma_phi.unwrap_or(0.0);
+    let delta_t = armed.delta_t;
+    let mut grad = if householder_suppressed() {
+        grad
+    } else {
+        householder_packing(&armed.frozen_modes, sigma_phi, grad)
+    };
+    if sigma_phi <= 1e-12 {
+        return (energy, grad);
+    }
+    let mut potential = 0.0;
+    for (well, p, r_phi, p_norm) in &armed.frozen_modes {
+        if *r_phi < 1e-12 {
+            continue;
+        }
+        let entropy = armed.wells.get(*well).map_or(0.0, |held| held.entropy);
+        let free = amplitude + entropy;
+        if free <= 0.0 {
+            continue;
+        }
+        let standing = armed.wells.get(*well).map_or(0.0, |held| held.deposit);
+        let tempered = if delta_t > 1e-12 {
+            free * (-standing / delta_t).exp()
+        } else {
+            free
+        };
+        let gauss = (-0.5 * (r_phi / sigma_phi) * (r_phi / sigma_phi)).exp();
+        potential += tempered * gauss;
+        let scale = -tempered * gauss * r_phi / (sigma_phi * sigma_phi) * p_norm;
+        for (g, pk) in grad.iter_mut().zip(p.iter()) {
+            *g += scale * *pk;
+        }
+    }
+    (energy + potential, grad)
 }
 
 fn transform_packing(
@@ -2504,6 +2604,30 @@ mod tests {
         let proj = gt.iter().zip(p.iter()).map(|(a, b)| a * b).sum::<f64>();
         disarm();
         assert!(proj < 0.0, "packing Householder must flip g·P, got {proj}");
+    }
+
+    #[test]
+    fn neighbour_invert_freezes_p_at_arm() {
+        let origin = ico13();
+        let mut other = origin.clone();
+        other[0] += 0.2;
+        arm_leave_free(
+            origin.view(),
+            0.35,
+            &[crate::catalog::PackingReference {
+                coordinates: other.to_vec(),
+                visits: 1,
+                deposit: 0.0,
+            }],
+            0.8,
+            0.8,
+        );
+        assert!(is_armed());
+        assert!(
+            invert_is_frozen(),
+            "neighbour invert must lift P once at arm"
+        );
+        disarm();
     }
 
     #[test]

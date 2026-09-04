@@ -973,7 +973,8 @@ pub const INVERT_NEIGHBOR_DRAWS: usize = 4;
 /// Whether two structures sit on the same side of the packing map.
 ///
 /// Pairwise L1 at [`PACKING_LINK`], no chaining through a third well.
-/// Far packings are a hear, not an invert neighbour.
+/// A far packing is a hear, not an invert neighbour. The predicate
+/// names no morphology.
 pub fn nearby_packing(here: &[f64], other: &[f64]) -> bool {
     if here.len() != other.len() || here.is_empty() {
         return false;

@@ -76,7 +76,7 @@ fn invert_neighbours_are_nearby_in_the_packing_map() {
     assert!(nearby_packing(ico, ico));
     assert!(
         !nearby_packing(ico, marks),
-        "ico-Marks is a hear, not an invert neighbour"
+        "a far packing pair is a hear, not an invert neighbour"
     );
 }
 
