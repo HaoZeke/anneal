@@ -1837,10 +1837,13 @@ fn apply_request(
                     .filter(|seat| seat.rank != CHAMPION_RANK)
                     .count() as u32,
                 occupied_family_count: occupied_packing_communities as u32,
-                packing_saturated: packing_census_saturated(scientific),
+                packing_saturated: scientific
+                    .sparsified
+                    .as_ref()
+                    .is_some_and(|(_, map)| !map.holes),
                 leftover_dwell: leftover_census_dwell(scientific),
-                ei_exhausted: occupancy_funnel_ei_exhausted(scientific),
-                min_families: occupancy_floor(scientific) as u32,
+                ei_exhausted: scientific.ei_hold.map(|(_, verdict)| verdict).unwrap_or(false),
+                min_families: scientific.floor_hold.map(|(_, floor)| floor).unwrap_or(1) as u32,
                 discovery_role,
                 discovery_epoch,
                 basin_unseen_mass_upper,
@@ -1852,7 +1855,6 @@ fn apply_request(
                 saddle_coverage_saturated: saddle_coverage.saturated,
                 retired,
             });
-            report_occupancy_gt_throttled(scientific);
         }
         CatalogOperation::PopulationSubmit { epoch, candidate } => {
             let Some(scientific) = state.scientific.as_mut() else {
@@ -2421,6 +2423,7 @@ fn apply_request(
                         scientific.archive.reward(family);
                     }
                 }
+                refresh_occupancy_diagnostics(scientific);
                 let incumbent = scientific
                     .catalog
                     .incumbent()
@@ -4864,6 +4867,13 @@ fn leftover_census_dwell(scientific: &mut ScientificState) -> bool {
         scientific.leftover_sat_streak,
     );
     scientific.leftover_dwell
+}
+
+fn refresh_occupancy_diagnostics(scientific: &mut ScientificState) {
+    let _ = occupancy_floor(scientific);
+    let _ = occupancy_funnel_ei_exhausted(scientific);
+    let _ = packing_census_saturated(scientific);
+    report_occupancy_gt_throttled(scientific);
 }
 
 fn report_occupancy_gt_throttled(scientific: &mut ScientificState) {
