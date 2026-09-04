@@ -4687,6 +4687,78 @@ fn run_capnp_catalog(
             snapshot.best_energy(),
             reference(cfg.n_points),
         ));
+        // Hear a packing another replica published. Hops stay silent;
+        // this is the message that moves a chain onto a deeper well
+        // the ensemble already holds. PolicyState Leave is not that
+        // channel, and catalog_leave would refuse Marks if the
+        // throwaway book chained it to ico. catalog_incumbent adopts
+        // on energy. post_offer_candidate above is the publish.
+        let current_energy = snapshot.current_energy();
+        let current_len = snapshot.current_state().len();
+        let mut heard = None;
+        for draw in [INCUMBENT_SAMPLE_DRAW, SPARSE_SAMPLE_DRAW] {
+            let outcome = cooperative.try_sample_candidate(replica, draw);
+            let _ = cooperative.try_sample_candidate(replica, draw);
+            if let Ok(CatalogSampleOutcome::Candidate(held)) = outcome {
+                if held.coordinates.len() != current_len {
+                    continue;
+                }
+                anneal_core::catalog::include_packing_reference(&held.coordinates);
+                anneal_core::catalog::offer_known_minimum(held.energy, &held.coordinates);
+                let deeper = held.energy < current_energy - 1e-3;
+                if !deeper {
+                    continue;
+                }
+                let elsewhere = snapshot.current_state().as_slice().is_none_or(|here| {
+                    anneal_core::catalog::different_packing_family(here, &held.coordinates)
+                });
+                if draw == INCUMBENT_SAMPLE_DRAW || elsewhere {
+                    heard = Some(held);
+                    break;
+                }
+            }
+        }
+        if let Some(held) = heard {
+            count_other_family += 1;
+            println!(
+                "  hear {:.6}  hops {}  refs {}  other {}",
+                held.energy,
+                snapshot.hops(),
+                anneal_core::catalog::packing_references().len(),
+                count_other_family
+            );
+            let _ = std::io::stdout().flush();
+            return complete_checkpoint_trace(
+                &mut cooperative,
+                replica,
+                &mut slice_sequence,
+                checkpoint_charged,
+                snapshot.best_energy(),
+                |_cooperative, _slice_sequence| CheckpointAction::BoundaryProposal {
+                    state: Array1::from(held.coordinates),
+                    action: "catalog_incumbent".to_owned(),
+                },
+            );
+        }
+        // Extras climb without Remote policy. Even replicas fill.
+        if replica % 2 == 1
+            && checkpoint_sequence.is_multiple_of(2)
+            && !leave_defers(leave_quiet, leave_patience, leave_crossing)
+        {
+            count_leave += 1;
+            count_hole += 1;
+            return complete_checkpoint_trace(
+                &mut cooperative,
+                replica,
+                &mut slice_sequence,
+                checkpoint_charged,
+                snapshot.best_energy(),
+                |_cooperative, _slice_sequence| CheckpointAction::BoundaryProposal {
+                    state: snapshot.current_state().to_owned(),
+                    action: "catalog_ridge".to_owned(),
+                },
+            );
+        }
         if leave_defers(leave_quiet, leave_patience, leave_crossing) {
             // Still inside the recovered quiet stretch or the
             // measured crossing floor (LEAVE_CROSSING_HOPS). Policy
