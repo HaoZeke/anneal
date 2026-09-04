@@ -10,7 +10,7 @@ use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use capnp::capability::Promise;
 use capnp_rpc::RpcSystem;
@@ -1843,7 +1843,7 @@ fn apply_request(
                 saddle_coverage_saturated: saddle_coverage.saturated,
                 retired,
             });
-            report_occupancy_gt(scientific);
+            report_occupancy_gt_throttled(scientific);
         }
         CatalogOperation::PopulationSubmit { epoch, candidate } => {
             let Some(scientific) = state.scientific.as_mut() else {
@@ -4831,6 +4831,18 @@ fn leftover_census_dwell(scientific: &mut ScientificState) -> bool {
         scientific.leftover_sat_streak,
     );
     scientific.leftover_dwell
+}
+
+fn report_occupancy_gt_throttled(scientific: &mut ScientificState) {
+    static LAST: Mutex<Option<Instant>> = Mutex::new(None);
+    let Ok(mut last) = LAST.lock() else {
+        return;
+    };
+    if last.is_some_and(|at| at.elapsed() < Duration::from_secs(5)) {
+        return;
+    }
+    *last = Some(Instant::now());
+    report_occupancy_gt(scientific);
 }
 
 fn report_occupancy_gt(scientific: &mut ScientificState) {

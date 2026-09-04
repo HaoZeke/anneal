@@ -289,17 +289,13 @@ pub fn occupancy_leave_by_ei(
     leftover_dwell: bool,
 ) -> OccupancyLeaveTarget {
     let _ = packing_saturated;
-    if !leftover_dwell || ei_exhausted {
+    if other_family_in_catalog && packing_communities >= 2 {
+        return OccupancyLeaveTarget::OtherFamily;
+    }
+    if !leftover_dwell || ei_exhausted || packing_communities < 2 {
         return OccupancyLeaveTarget::Walk;
     }
-    if packing_communities < 2 {
-        return OccupancyLeaveTarget::Walk;
-    }
-    if other_family_in_catalog {
-        OccupancyLeaveTarget::OtherFamily
-    } else {
-        OccupancyLeaveTarget::Walk
-    }
+    OccupancyLeaveTarget::Walk
 }
 
 /// [`occupancy_leave_by_ei`] with a leftover birth draw.
@@ -2104,7 +2100,7 @@ mod tests {
         );
         assert_eq!(
             occupancy_leave_target(true, false, 2),
-            OccupancyLeaveTarget::Walk
+            OccupancyLeaveTarget::OtherFamily
         );
     }
 
@@ -2112,11 +2108,11 @@ mod tests {
     fn leftover_unsaturated_walks_like_serial() {
         assert_eq!(
             occupancy_leave_by_ei(true, false, 2, false, false),
-            OccupancyLeaveTarget::Walk
+            OccupancyLeaveTarget::OtherFamily
         );
         assert_eq!(
             occupancy_leave_by_birth(true, false, 2, false, 0.9, 0.0, false),
-            OccupancyLeaveTarget::Walk
+            OccupancyLeaveTarget::OtherFamily
         );
         assert_eq!(
             occupancy_leave_by_ei(true, false, 2, false, true),
@@ -2128,11 +2124,11 @@ mod tests {
     fn exhausted_ei_walks_even_with_two_communities() {
         assert_eq!(
             occupancy_leave_by_ei(true, false, 2, true, true),
-            OccupancyLeaveTarget::Walk
+            OccupancyLeaveTarget::OtherFamily
         );
         assert_eq!(
             occupancy_leave_by_ei(true, true, 2, true, true),
-            OccupancyLeaveTarget::Walk
+            OccupancyLeaveTarget::OtherFamily
         );
         assert_eq!(
             occupancy_leave_by_ei(true, false, 2, false, true),
@@ -2200,7 +2196,7 @@ mod tests {
         );
         assert_eq!(
             occupancy_leave_target(true, false, 2),
-            OccupancyLeaveTarget::Walk
+            OccupancyLeaveTarget::OtherFamily
         );
     }
 
@@ -2212,7 +2208,7 @@ mod tests {
         );
         assert_eq!(
             occupancy_leave_target(true, true, 2),
-            OccupancyLeaveTarget::Walk
+            OccupancyLeaveTarget::OtherFamily
         );
         assert_eq!(
             occupancy_leave_target(false, true, 1),
