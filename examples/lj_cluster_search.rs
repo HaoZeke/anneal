@@ -4742,6 +4742,47 @@ fn run_capnp_catalog(
                 },
             );
         }
+        // Single-ended invert against nearby chains only, at checkpoint
+        // cadence. Far packings are a hear. jacobian_nu3 is not a
+        // per-hop all-to-all: the Householder stays armed for the slice.
+        if let Some(here) = snapshot.current_state().as_slice() {
+            let neighbor_draws = (0..anneal_core::catalog::INVERT_NEIGHBOR_DRAWS).map(|step| {
+                ((u64::from(replica) << 33)
+                    ^ (checkpoint_sequence as u64).wrapping_mul(0xBF58_476D_1CE4_E5B9)
+                    ^ (step as u64).wrapping_mul(0x94D0_049B_B133_111E))
+                    & (u64::MAX >> 2)
+            });
+            if let Ok(CatalogSamplesOutcome::Candidates(held)) =
+                cooperative.try_sample_candidates(replica, neighbor_draws)
+            {
+                for held in held {
+                    if held.coordinates.len() != here.len() {
+                        continue;
+                    }
+                    if anneal_core::catalog::nearby_packing(here, &held.coordinates) {
+                        anneal_core::catalog::include_packing_reference(&held.coordinates);
+                    }
+                }
+            }
+            let neighbors = anneal_core::catalog::nearby_packing_book(here);
+            if neighbors.is_empty() {
+                anneal_core::known_basin::disarm();
+            } else {
+                anneal_core::known_basin::arm_leave_free(
+                    snapshot.current_state(),
+                    anneal_core::known_basin::LEAVE_RUNG_RMSD,
+                    &neighbors,
+                    run_cfg.temperature,
+                    run_cfg.temperature,
+                );
+                println!(
+                    "  invert neighbors {} hops {}",
+                    neighbors.len(),
+                    snapshot.hops()
+                );
+                let _ = std::io::stdout().flush();
+            }
+        }
         if leave_defers(leave_quiet, leave_patience, leave_crossing) {
             // Still inside the recovered quiet stretch or the
             // measured crossing floor (LEAVE_CROSSING_HOPS). Policy

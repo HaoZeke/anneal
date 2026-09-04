@@ -80,11 +80,13 @@ pub use occupancy::{
     ring_novelty, seat_extras,
 };
 pub use packing::{
-    ENVIRONMENT_RADIUS, GoodTuringSample, PACKING_LINK, PACKING_MERGE, PACKING_MOVE_EPS,
-    PACKING_REFERENCE_DRAWS, PACKING_SPEC, PackingBook, PackingPave, PackingReference,
+    ENVIRONMENT_RADIUS, GoodTuringSample, INVERT_NEIGHBOR_DRAWS, PACKING_LINK, PACKING_MERGE,
+    PACKING_MOVE_EPS, PACKING_REFERENCE_DRAWS, PACKING_SPEC, PackingBook, PackingPave,
+    PackingReference,
     SEAM_BIN_WIDTH, SEAM_BINS, SEAM_BURST_SHOTS, SEAM_DOORWAY_GAP, SEAM_DOORWAY_WINDOW,
     SEAM_WINDOW, SeamBank, credit_packing_deposit, deliver_frontier_post, different_decaf_family,
     different_packing_family, drain_frontier_arrivals, include_packing_reference, leaves_packing,
+    nearby_packing, nearby_packing_book,
     leftover_arrivals_saturated, offer_frontier_post, offer_known_minimum, packing_communities,
     packing_community_count, packing_distance, packing_fingerprint, packing_link_labels,
     packing_reference_book, packing_references, packing_seam_gap, packing_vector,

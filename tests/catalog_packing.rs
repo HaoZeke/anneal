@@ -1,6 +1,7 @@
 use anneal_core::catalog::{
     OccupancyCertificate, OccupancyFold, PACKING_LINK, PACKING_MERGE, PACKING_MOVE_EPS,
     PackingBook, different_decaf_family, include_packing_reference, leaves_packing,
+    nearby_packing,
     lens_ring_displacement, occupancy_fes_delta, occupancy_fes_from_histograms,
     occupancy_landfold_floor, occupancy_leave_new_class, occupancy_leave_new_packing,
     occupancy_map_fold, occupancy_retire_at, occupancy_ring_census, occupancy_ring_floor,
@@ -64,6 +65,19 @@ fn different_decaf_family_is_ico_versus_marks_not_an_ico_isomer() {
     let marks = marks.as_slice().unwrap();
     assert!(different_decaf_family(ico, marks));
     assert!(!different_decaf_family(ico, ico));
+}
+
+#[test]
+fn invert_neighbours_are_nearby_in_the_packing_map() {
+    let ico = load_xyz(include_str!("fixtures/lj75_ico.xyz"));
+    let marks = load_xyz(include_str!("fixtures/lj75_marks.xyz"));
+    let ico = ico.as_slice().unwrap();
+    let marks = marks.as_slice().unwrap();
+    assert!(nearby_packing(ico, ico));
+    assert!(
+        !nearby_packing(ico, marks),
+        "ico-Marks is a hear, not an invert neighbour"
+    );
 }
 
 #[test]
