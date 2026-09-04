@@ -306,6 +306,10 @@ fn occupancy_leave_action_does_not_fall_back_to_a_random_cluster() {
         "same packing reuses the basin; IRA is only for a new family"
     );
     assert!(
+        basin.contains("occupied_packing_count() <= 1"),
+        "a one-packing book does not IRA every icosahedral isomer"
+    );
+    assert!(
         server.contains("q_ei_family_entry"),
         "WAVE OtherFamily draws cycle q-EI, not a single highest-EI family"
     );

@@ -2231,9 +2231,11 @@ fn apply_request(
                 // The census-visit stream is the referee's evidence: one
                 // replica occupying basin A and then basin B is one
                 // observed transition across their seam.
-                scientific
-                    .landscape
-                    .observe_basin(observation.basin_id.as_raw());
+                if previous != Some(observation.basin_id) {
+                    scientific
+                        .landscape
+                        .observe_basin(observation.basin_id.as_raw());
+                }
                 if let Some(previous) = previous
                     && previous != observation.basin_id
                 {
@@ -3696,6 +3698,14 @@ fn exact_basin_for(
     if let Some(query) = query.as_ref() {
         if let Some(basin) = basin_for_packing_community(scientific, query) {
             return Some(basin);
+        }
+        if scientific.packing.occupied_packing_count() <= 1 {
+            if let Some((&basin, _)) = scientific.ride_candidates.iter().next() {
+                return Some(BasinId::from_raw(basin));
+            }
+            if let Some(basin) = scientific.last_basin_by_replica.values().next() {
+                return Some(*basin);
+            }
         }
         for (&basin, stored) in &scientific.ride_candidates {
             let Some(stored) = scientific.packing.histogram(&stored.coordinates) else {
