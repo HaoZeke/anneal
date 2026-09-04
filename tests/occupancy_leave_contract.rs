@@ -309,6 +309,15 @@ fn occupancy_leave_action_does_not_fall_back_to_a_random_cluster() {
         server.contains("q_ei_family_entry"),
         "WAVE OtherFamily draws cycle q-EI, not a single highest-EI family"
     );
+    let visit = server
+        .split("CatalogOperation::RecordVisit")
+        .nth(1)
+        .and_then(|chunk| chunk.split("CatalogOperation::OfferCandidate").next())
+        .expect("RecordVisit arm must exist");
+    assert!(
+        visit.contains("same_basin") && visit.contains("observe_ride_source"),
+        "a repeat visit of the same basin must not rebuild the ride source"
+    );
     let offer = server
         .split("Catalog offers are search evidence")
         .nth(1)
