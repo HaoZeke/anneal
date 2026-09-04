@@ -1325,6 +1325,198 @@ where
         .collect()
 }
 
+/// Inverse-power in Maeda's pair weight \(\omega_{ij}=[(R_i+R_j)/r_{ij}]^p\).
+pub const AFIR_P: i32 = 6;
+
+/// Collision radius when no species table applies: one Lennard-Jones
+/// \(\sigma\). Occupancy Leave is run in reduced units.
+pub const AFIR_DEFAULT_RADIUS: f64 = 1.0;
+
+/// Pair radii for the AFIR weight. Occupancy Leave is in reduced units,
+/// so every centre is one \(\sigma\) whether or not a species list is
+/// supplied.
+pub fn afir_radii(n_at: usize, _species: Option<&[u32]>) -> Vec<f64> {
+    vec![AFIR_DEFAULT_RADIUS; n_at]
+}
+
+/// Maeda AFIR term and Cartesian gradient.
+///
+/// Maeda, Taketsugu and Morokuma (*J. Comput. Chem.* **35**, 166 (2014),
+/// <https://doi.org/10.1002/jcc.23481>):
+/// \(F_{\mathrm{AFIR}}=E+\rho\alpha\sum_{i\in A}\sum_{j\in B}\omega_{ij}r_{ij}/\sum\omega_{ij}\)
+/// with \(\omega_{ij}=[(R_i+R_j)/r_{ij}]^6\). \(\rho=+1\) pushes the
+/// fragments together; \(\rho=-1\) peels them. Occupancy takes
+/// \(A\) as the packing active volume and \(B\) as its complement, so
+/// the fragments are leftover versus core, not a named morphology.
+pub fn afir_term(
+    x: ArrayView1<f64>,
+    fragment_a: &[usize],
+    fragment_b: &[usize],
+    rho: f64,
+    alpha: f64,
+    radii: &[f64],
+) -> Option<(f64, Array1<f64>)> {
+    let n_at = x.len() / 3;
+    if n_at == 0
+        || fragment_a.is_empty()
+        || fragment_b.is_empty()
+        || radii.len() < n_at
+        || !rho.is_finite()
+        || !alpha.is_finite()
+    {
+        return None;
+    }
+    let p = f64::from(AFIR_P);
+    let mut num = 0.0;
+    let mut den = 0.0;
+    let mut pairs: Vec<(usize, usize, f64, f64, [f64; 3])> = Vec::new();
+    for &i in fragment_a {
+        if i >= n_at {
+            continue;
+        }
+        for &j in fragment_b {
+            if j >= n_at || i == j {
+                continue;
+            }
+            let mut u = [0.0; 3];
+            let mut r2 = 0.0;
+            for k in 0..3 {
+                let d = x[3 * i + k] - x[3 * j + k];
+                u[k] = d;
+                r2 += d * d;
+            }
+            if !(r2.is_finite() && r2 > 1e-16) {
+                continue;
+            }
+            let r = r2.sqrt();
+            let rij = radii[i] + radii[j];
+            if !(rij.is_finite() && rij > 0.0) {
+                continue;
+            }
+            let ratio = rij / r;
+            let omega = ratio.powi(AFIR_P);
+            if !omega.is_finite() {
+                continue;
+            }
+            num += omega * r;
+            den += omega;
+            pairs.push((i, j, r, omega, u));
+        }
+    }
+    if !(den.is_finite() && den > 0.0 && num.is_finite()) {
+        return None;
+    }
+    let mean = num / den;
+    let value = rho * alpha * mean;
+    if !value.is_finite() {
+        return None;
+    }
+    let mut grad = Array1::zeros(x.len());
+    let scale = rho * alpha / (den * den);
+    for (i, j, r, omega, u) in pairs {
+        // ω = (R/r)^p, ωr = R^p r^{1-p}
+        // d(ωr)/dr = (1-p) ω, dω/dr = -p ω / r
+        let dnum = (1.0 - p) * omega;
+        let dden = -p * omega / r;
+        let dmean = scale * (dnum * den - num * dden);
+        if !dmean.is_finite() {
+            continue;
+        }
+        for k in 0..3 {
+            let component = dmean * u[k] / r;
+            grad[3 * i + k] += component;
+            grad[3 * j + k] -= component;
+        }
+    }
+    if grad.iter().any(|g| !g.is_finite()) {
+        return None;
+    }
+    Some((value, grad))
+}
+
+/// \(\alpha\) that puts \(|V_{\mathrm{AFIR}}|\) on `barrier` at `x`.
+///
+/// Maeda sizes \(\alpha\) from an Ar–Ar collision energy. Occupancy
+/// works in reduced units and sizes \(\alpha\) so the artificial term
+/// at the live well equals one Leave rung, which keeps the start on
+/// the landscape instead of crushing the pair wall.
+pub fn afir_alpha_for_barrier(
+    x: ArrayView1<f64>,
+    fragment_a: &[usize],
+    fragment_b: &[usize],
+    barrier: f64,
+    radii: &[f64],
+) -> Option<f64> {
+    if !(barrier.is_finite() && barrier > 0.0) {
+        return None;
+    }
+    let (mean, _) = afir_term(x, fragment_a, fragment_b, 1.0, 1.0, radii)?;
+    let width = mean.abs();
+    if !(width.is_finite() && width > 1e-12) {
+        return None;
+    }
+    Some(barrier / width)
+}
+
+/// SC-AFIR starts on the packing active volume.
+///
+/// Minimize \(E+\rho\alpha\langle r\rangle_{A,B}\) from the live well
+/// for \(\rho=\pm 1\), then drop the force. The two geometries are
+/// starts; the real PES decides the path (Maeda *et al.*,
+/// <https://doi.org/10.1002/jcc.23481>; GRRM17,
+/// <https://doi.org/10.1002/jcc.25106>). \(A\) is `mobile`, \(B\) is
+/// the complement.
+pub fn afir_av_starts<F>(
+    x: ArrayView1<f64>,
+    mobile: &[usize],
+    barrier: f64,
+    steps: usize,
+    species: Option<&[u32]>,
+    mut energy_grad: F,
+) -> Vec<Array1<f64>>
+where
+    F: FnMut(ArrayView1<f64>) -> Option<(f64, Array1<f64>)>,
+{
+    let n_at = x.len() / 3;
+    if n_at == 0 || mobile.is_empty() || steps == 0 {
+        return Vec::new();
+    }
+    let mut in_a = vec![false; n_at];
+    for &i in mobile {
+        if i < n_at {
+            in_a[i] = true;
+        }
+    }
+    let fragment_a: Vec<usize> = (0..n_at).filter(|&i| in_a[i]).collect();
+    let fragment_b: Vec<usize> = (0..n_at).filter(|&i| !in_a[i]).collect();
+    if fragment_a.is_empty() || fragment_b.is_empty() {
+        return Vec::new();
+    }
+    let radii = afir_radii(n_at, species);
+    let Some(alpha) = afir_alpha_for_barrier(x, &fragment_a, &fragment_b, barrier, &radii) else {
+        return Vec::new();
+    };
+    let mut starts = Vec::with_capacity(2);
+    for rho in [1.0_f64, -1.0] {
+        let mut opt = crate::methods::warm_lbfgs::WarmLbfgs::default();
+        let (_, trial, _) = opt.minimize(x, steps, |trial| {
+            let (energy, gradient) = energy_grad(trial)?;
+            let (bias, bias_g) = afir_term(trial, &fragment_a, &fragment_b, rho, alpha, &radii)?;
+            let total_e = energy + bias;
+            let total_g = gradient + bias_g;
+            if total_e.is_finite() && total_g.iter().all(|g| g.is_finite()) {
+                Some((total_e, total_g))
+            } else {
+                None
+            }
+        });
+        if trial.len() == x.len() && trial.iter().all(|v| v.is_finite()) {
+            starts.push(trial);
+        }
+    }
+    starts
+}
+
 /// [`leave_packing_rung_to`] along a packed feature direction already in hand.
 pub fn leave_packing_rung_to_dir<E>(
     x: ArrayView1<f64>,
@@ -1756,6 +1948,52 @@ mod tests {
         let x = Array1::from(vec![0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0]);
         let index = farthest_packing_cover(x.view(), &[], 7);
         assert!(index < 7);
+    }
+
+    #[test]
+    fn afir_term_is_the_weighted_mean_distance() {
+        let x = Array1::from(vec![0.0, 0.0, 0.0, 2.0, 0.0, 0.0]);
+        let (value, grad) = afir_term(x.view(), &[0], &[1], 1.0, 1.0, &[1.0, 1.0])
+            .expect("two-atom AFIR is defined");
+        assert!(
+            (value - 2.0).abs() < 1e-12,
+            "ω cancels for one pair, V must be r, got {value}"
+        );
+        assert!(
+            grad[0] < 0.0 && grad[3] > 0.0,
+            "push gradient must point the atoms together, g0={} g1x={}",
+            grad[0],
+            grad[3]
+        );
+    }
+
+    #[test]
+    fn afir_push_and_peel_move_opposite_ways() {
+        let x = Array1::from(vec![0.0, 0.0, 0.0, 2.0, 0.0, 0.0]);
+        let origin = x.clone();
+        let starts = afir_av_starts(x.view(), &[0], 0.2, 16, None, |trial| {
+            let mut g = Array1::zeros(trial.len());
+            let mut e = 0.0;
+            for i in 0..trial.len() {
+                let d = trial[i] - origin[i];
+                e += 0.5 * d * d;
+                g[i] = d;
+            }
+            Some((e, g))
+        });
+        assert_eq!(starts.len(), 2);
+        let pair = |state: &Array1<f64>| {
+            let dx = state[0] - state[3];
+            let dy = state[1] - state[4];
+            let dz = state[2] - state[5];
+            (dx * dx + dy * dy + dz * dz).sqrt()
+        };
+        let push = pair(&starts[0]);
+        let peel = pair(&starts[1]);
+        assert!(
+            push < 2.0 && peel > 2.0,
+            "push must compress and peel must open, push={push} peel={peel}"
+        );
     }
 
     #[test]
