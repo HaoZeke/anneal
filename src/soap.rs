@@ -1032,6 +1032,59 @@ pub fn packing_step_nu3(
     scale_to_cap(x, dr, rmsd)
 }
 
+/// Single-ended SOAP step away from neighbouring clouds.
+///
+/// \(\Delta s = \sum_k(s-s_k)\), pulled back with \(J^\top\). No spring,
+/// no second endpoint, no quench. The chain keeps that geometry.
+pub fn push_away_clouds(
+    x: ArrayView1<f64>,
+    neighbors: &[Vec<f64>],
+    spec: SoapSpec,
+    rmsd: f64,
+) -> Option<Array1<f64>> {
+    let loc = local_nu3_z(x, spec, None);
+    let n_at = loc.nrows();
+    let dim = loc.ncols();
+    if n_at == 0 || dim == 0 {
+        return None;
+    }
+    let mut target = Array1::<f64>::zeros(n_at * dim);
+    let mut used = 0usize;
+    for i in 0..n_at {
+        for t in 0..dim {
+            target[i * dim + t] = loc[[i, t]];
+        }
+    }
+    for neighbor in neighbors {
+        if neighbor.len() != x.len() {
+            continue;
+        }
+        let held = local_nu3_z(ArrayView1::from(neighbor.as_slice()), spec, None);
+        if held.nrows() != n_at || held.ncols() != dim {
+            continue;
+        }
+        for i in 0..n_at {
+            for t in 0..dim {
+                target[i * dim + t] += loc[[i, t]] - held[[i, t]];
+            }
+        }
+        used += 1;
+    }
+    if used == 0 {
+        return None;
+    }
+    let dr = pullback_nu3(x, target.view(), spec, None, None);
+    let stepped = scale_to_cap(x, dr, rmsd);
+    if stepped
+        .iter()
+        .zip(x.iter())
+        .all(|(a, b)| (a - b).abs() < 1e-12)
+    {
+        return None;
+    }
+    Some(stepped)
+}
+
 /// Mean per-centre \(\nu=3\) row: the DECAF packing mean \(\mu\).
 pub fn packing_mean_nu3(
     x: ArrayView1<f64>,

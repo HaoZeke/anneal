@@ -4775,6 +4775,35 @@ fn run_capnp_catalog(
                     run_cfg.temperature,
                     run_cfg.temperature,
                 );
+                let neighbor_coords: Vec<Vec<f64>> = neighbors
+                    .iter()
+                    .map(|reference| reference.coordinates.clone())
+                    .collect();
+                if let Some(stepped) = anneal_core::soap::push_away_clouds(
+                    snapshot.current_state(),
+                    &neighbor_coords,
+                    anneal_core::catalog::PACKING_SPEC,
+                    anneal_core::known_basin::LEAVE_RUNG_RMSD,
+                ) {
+                    println!(
+                        "  soap push neighbors {} frozen {} hops {}",
+                        neighbors.len(),
+                        anneal_core::known_basin::invert_frozen_count(),
+                        snapshot.hops()
+                    );
+                    let _ = std::io::stdout().flush();
+                    return complete_checkpoint_trace(
+                        &mut cooperative,
+                        replica,
+                        &mut slice_sequence,
+                        checkpoint_charged,
+                        snapshot.best_energy(),
+                        |_cooperative, _slice_sequence| CheckpointAction::BoundaryProposal {
+                            state: stepped,
+                            action: "soap_push".to_owned(),
+                        },
+                    );
+                }
                 println!(
                     "  invert neighbors {} frozen {} hops {}",
                     neighbors.len(),

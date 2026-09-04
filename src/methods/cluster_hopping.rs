@@ -1497,7 +1497,8 @@ where
                 let from_state = x.clone();
                 let mut from_gradient = current_validation_gradient.clone();
                 let published_prize = action == "catalog_incumbent";
-                if from_gradient.is_none() && (published_prize || !adopt) {
+                let soap_push = action == "soap_push";
+                if from_gradient.is_none() && (published_prize || soap_push || !adopt) {
                     from_gradient = grad.as_deref_mut().and_then(|g| {
                         g(ledger, from_state.view()).filter(|values| {
                             values.iter().fold(0.0_f64, |a, q| a.max(q.abs())) < cfg.record_gradient
@@ -1542,6 +1543,10 @@ where
                         None
                     }
                     .unwrap_or_else(|| relax(ledger, from_state.view(), 0))
+                } else if action == "soap_push" {
+                    // The SOAP step is the move. A quench is the
+                    // projector onto the occupied packing.
+                    relax(ledger, state.view(), 0)
                 } else {
                     relax(ledger, state.view(), cfg.relax_steps)
                 };
@@ -1671,9 +1676,11 @@ where
                 // that gate left every hear of Marks on the ico chain.
                 let recordable = proposal_sane
                     && (published_prize
+                        || soap_push
                         || !gradient_required
                         || from_gradient.is_some())
                     && (published_prize
+                        || soap_push
                         || !gradient_required
                         || validation_gradient.is_some());
                 if recordable {
