@@ -422,6 +422,9 @@ fn a_one_packing_book_climbs_the_ridge() {
 fn checkpoint_hears_the_book_before_leave_defers() {
     let source = include_str!("../examples/lj_cluster_search.rs");
     let checkpoint = source
+        .split("fn run_capnp_catalog(")
+        .nth(1)
+        .expect("catalog replica driver must exist")
         .split("let mut checkpoint = |snapshot: ChainCheckpoint<'_>| {")
         .nth(1)
         .expect("catalog checkpoint callback must exist")
@@ -496,6 +499,9 @@ fn putative_saturated_does_not_latch_the_done_line() {
 fn slice_diagnostics_report_the_validated_local_best() {
     let source = include_str!("../examples/lj_cluster_search.rs");
     let checkpoint = source
+        .split("fn run_capnp_catalog(")
+        .nth(1)
+        .expect("catalog replica driver must exist")
         .split("let mut checkpoint = |snapshot: ChainCheckpoint<'_>| {")
         .nth(1)
         .expect("catalog checkpoint callback must exist")
