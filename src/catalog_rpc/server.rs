@@ -464,6 +464,10 @@ struct ScientificState {
     /// split clones every occupied histogram and runs a Torgerson MDS,
     /// and occupancy_floor asks for it once per policy request.
     landfold: Option<(u64, (usize, usize, usize))>,
+    /// Last time the folded book, landfold, and worthwhile count were
+    /// rebuilt. The book version moves on every arrival; folding on that
+    /// cadence parks the workers on the coordinator.
+    fold_hold: Option<Instant>,
     last_gt_report: Option<OccupancyGtKey>,
     /// Leftover occupancy sample whose saturation state has been counted
     /// toward the retirement dwell.
@@ -645,6 +649,7 @@ impl CoordinatorState {
                     worthwhile: None,
                     fed_from: None,
                     landfold: None,
+                    fold_hold: None,
                     last_gt_report: None,
                     last_leftover_dwell_sample: None,
                     leftover_sat_streak: 0,
@@ -4519,13 +4524,17 @@ fn q_ei_family_entry(scientific: &mut ScientificState, replica: u32) -> Option<(
 /// The folded book, recomputed only when the book has changed.
 fn sparsified_book(scientific: &mut ScientificState) -> &crate::catalog::OccupancyBookMap {
     let version = scientific.packing.version();
+    let held = scientific
+        .fold_hold
+        .is_some_and(|at| at.elapsed() < Duration::from_secs(5));
     let stale = scientific
         .sparsified
         .as_ref()
-        .is_none_or(|(held, _)| *held != version);
+        .is_none_or(|(seen, _)| *seen != version && !held);
     if stale {
         let folded = occupancy_sparsify_packing(&scientific.packing);
         scientific.sparsified = Some((version, folded));
+        scientific.fold_hold = Some(Instant::now());
     }
     &scientific
         .sparsified
@@ -4563,9 +4572,11 @@ fn packing_census_saturated(scientific: &mut ScientificState) -> bool {
 fn worthwhile_communities(scientific: &mut ScientificState) -> usize {
     let book = scientific.packing.version();
     let funnel = scientific.funnel.version();
+    let held = scientific
+        .fold_hold
+        .is_some_and(|at| at.elapsed() < Duration::from_secs(5));
     if let Some((held_book, held_funnel, count)) = scientific.worthwhile
-        && held_book == book
-        && held_funnel == funnel
+        && ((held_book == book && held_funnel == funnel) || held)
     {
         return count;
     }
@@ -4724,8 +4735,11 @@ fn occupancy_seam_floor(
 
 fn occupancy_landfold_from_book(scientific: &mut ScientificState) -> (usize, usize, usize) {
     let version = scientific.packing.version();
-    if let Some((held, split)) = scientific.landfold
-        && held == version
+    let held = scientific
+        .fold_hold
+        .is_some_and(|at| at.elapsed() < Duration::from_secs(5));
+    if let Some((seen, split)) = scientific.landfold
+        && (seen == version || held)
     {
         return split;
     }
