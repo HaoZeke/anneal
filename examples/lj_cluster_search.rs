@@ -4767,7 +4767,9 @@ fn run_capnp_catalog(
             let neighbors = anneal_core::catalog::nearby_packing_book(here);
             if neighbors.is_empty() {
                 anneal_core::known_basin::disarm();
-            } else {
+            } else if replica % 2 == 1 {
+                // Crowded extras leave the occupied packing mean and
+                // follow that ridge. The champion (even) keeps walking.
                 anneal_core::known_basin::arm_leave_free(
                     snapshot.current_state(),
                     anneal_core::known_basin::LEAVE_RUNG_RMSD,
@@ -4786,7 +4788,7 @@ fn run_capnp_catalog(
                     anneal_core::known_basin::LEAVE_RUNG_RMSD,
                 ) {
                     println!(
-                        "  soap push neighbors {} frozen {} hops {}",
+                        "  soap ridge neighbors {} frozen {} hops {}",
                         neighbors.len(),
                         anneal_core::known_basin::invert_frozen_count(),
                         snapshot.hops()
@@ -4811,6 +4813,17 @@ fn run_capnp_catalog(
                     snapshot.hops()
                 );
                 let _ = std::io::stdout().flush();
+                return complete_checkpoint_trace(
+                    &mut cooperative,
+                    replica,
+                    &mut slice_sequence,
+                    checkpoint_charged,
+                    snapshot.best_energy(),
+                    |_cooperative, _slice_sequence| CheckpointAction::BoundaryProposal {
+                        state: snapshot.current_state().to_owned(),
+                        action: "catalog_ridge".to_owned(),
+                    },
+                );
             }
         }
         if leave_defers(leave_quiet, leave_patience, leave_crossing) {

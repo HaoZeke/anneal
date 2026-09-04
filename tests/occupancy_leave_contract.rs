@@ -417,9 +417,8 @@ fn a_one_packing_book_climbs_the_ridge() {
         "catalog_ridge climbs until the mode force flips, then quenches"
     );
     assert!(
-        hop.contains("action == \"soap_push\"")
-            && hop.contains("relax(ledger, state.view(), 0)"),
-        "a SOAP push keeps the pulled-back geometry"
+        hop.contains("action == \"soap_push\"") && hop.contains("activate("),
+        "a SOAP push follows the ridge from the pulled-back geometry"
     );
 }
 
