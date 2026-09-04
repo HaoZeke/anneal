@@ -40,7 +40,7 @@ use crate::catalog::{
     QuenchStatus, REDUCTION_FACTOR, SystemSignature, ValidatedCandidate, ValidatorConfig,
     WalkRecord, euclidean_gradient_norm, explore_must_leave, invert_mixing,
     leftover_dwell_from_census, leftover_esty_stable, leftover_esty_upper, leftover_lambda,
-    occupancy_ei_exhausted, occupancy_family_floor, occupancy_fes_delta, occupancy_landfold_split,
+    occupancy_ei_exhausted, occupancy_family_floor, occupancy_fes_delta,
     occupancy_min_families, occupancy_ring_profile, occupancy_ring_split,
     occupancy_sparsify_packing, occupant_rhat, packing_role,
     promote_one_sided, prune, retis_exchange_adjacent, same_packing, seat_extras,
@@ -4853,13 +4853,8 @@ fn occupancy_landfold_from_book(scientific: &mut ScientificState) -> (usize, usi
 }
 
 fn occupancy_landfold_uncached(scientific: &ScientificState) -> (usize, usize, usize) {
-    let occupied = scientific.packing.occupied_histograms();
-    let histograms: Vec<Vec<f64>> = occupied
-        .iter()
-        .map(|(_, histogram)| histogram.clone())
-        .collect();
-    let families: Vec<usize> = occupied.iter().map(|(index, _)| *index).collect();
-    occupancy_landfold_split(&histograms, &families)
+    let map = occupancy_sparsify_packing(&scientific.packing);
+    (map.floor, map.left, map.right)
 }
 
 fn occupancy_ring_from_book(scientific: &ScientificState) -> (usize, usize, usize) {
