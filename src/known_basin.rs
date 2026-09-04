@@ -1687,6 +1687,24 @@ pub fn leave_av_fill<R: rand::Rng + ?Sized>(
     }
 }
 
+/// One packing-changing step on the leftover. `kind` cycles hollow,
+/// fill, surface, shell.
+pub fn leave_av_step<R: rand::Rng + ?Sized>(
+    x: ArrayView1<f64>,
+    mobile: &[usize],
+    neighbour_cutoff: f64,
+    kind: usize,
+    rng: &mut R,
+) -> Array1<f64> {
+    let n = x.len() / 3;
+    match kind % 4 {
+        0 => leave_av_hollow(x, mobile, neighbour_cutoff, rng),
+        1 => leave_av_fill(x, mobile, neighbour_cutoff, 12, rng),
+        2 => leave_av_surface(x, mobile, neighbour_cutoff, rng),
+        _ => crate::movekernel::ShellRotate { n_points: n }.propose(x, 0.0, rng),
+    }
+}
+
 /// Packing-changing Leave starts on the leftover: hollow, fill, surface,
 /// then a shell twist. Sphere covers and AFIR stay available; they do
 /// not leave this funnel under a raw quench.
@@ -1697,18 +1715,67 @@ pub fn leave_av_packing_starts<R: rand::Rng + ?Sized>(
     count: usize,
     rng: &mut R,
 ) -> Vec<Array1<f64>> {
-    let n = x.len() / 3;
-    let mut starts = Vec::with_capacity(count);
-    for k in 0..count {
-        let start = match k % 4 {
-            0 => leave_av_hollow(x, mobile, neighbour_cutoff, rng),
-            1 => leave_av_fill(x, mobile, neighbour_cutoff, 12, rng),
-            2 => leave_av_surface(x, mobile, neighbour_cutoff, rng),
-            _ => crate::movekernel::ShellRotate { n_points: n }.propose(x, 0.0, rng),
-        };
-        starts.push(start);
+    (0..count)
+        .map(|k| leave_av_step(x, mobile, neighbour_cutoff, k, rng))
+        .collect()
+}
+
+/// Hops one Leave walks, adopting ico-isomers so the next move is not
+/// from the same geometry. Serial finds Marks on this library after
+/// thousands of accepted hops; eight independent starts from the floor
+/// do not.
+pub const LEAVE_WALK_HOPS: usize = 32;
+
+/// Hop temperature used for the walk accept. Same number as the LJ
+/// cluster search preset.
+pub const LEAVE_WALK_TEMPERATURE: f64 = 0.8;
+
+/// Walk packing-changing hops from `origin`. Each hop rebuilds the
+/// leftover on the *current* landing, proposes, quenches, and Metropolis-
+/// accepts at [`LEAVE_WALK_TEMPERATURE`]. The return is the lowest-energy
+/// quench that leaves the origin packing and is at or below the origin
+/// energy. High-energy packings are walked through, not installed.
+pub fn leave_av_walk<Q, R>(
+    origin: ArrayView1<f64>,
+    neighbour_cutoff: f64,
+    hops: usize,
+    origin_energy: f64,
+    rng: &mut R,
+    mut quench: Q,
+) -> Option<(f64, Array1<f64>, usize)>
+where
+    Q: FnMut(ArrayView1<f64>) -> (f64, Array1<f64>),
+    R: rand::Rng + ?Sized,
+{
+    let Some(origin_slice) = origin.as_slice() else {
+        return None;
+    };
+    let mut current = origin.to_owned();
+    let mut current_energy = origin_energy;
+    let mut best: Option<(f64, Array1<f64>, usize)> = None;
+    for hop in 0..hops.max(1) {
+        let mobile = crate::soap::packing_active_volume(current.view(), PACKING_SPEC, None);
+        let start = leave_av_step(current.view(), &mobile, neighbour_cutoff, hop, rng);
+        let (energy, landed) = quench(start.view());
+        if !energy.is_finite() || landed.len() != origin.len() {
+            continue;
+        }
+        let left = landed
+            .as_slice()
+            .is_some_and(|trial| crate::catalog::leaves_packing(origin_slice, trial, &[]));
+        if left && energy <= origin_energy + 1e-6 {
+            if best.as_ref().is_none_or(|(held, _, _)| energy < *held) {
+                best = Some((energy, landed.clone(), hop));
+            }
+        }
+        let delta = energy - current_energy;
+        let take = delta <= 0.0 || rng.random::<f64>() < (-delta / LEAVE_WALK_TEMPERATURE).exp();
+        if take {
+            current = landed;
+            current_energy = energy;
+        }
     }
-    starts
+    best
 }
 
 /// [`leave_packing_rung_to`] along a packed feature direction already in hand.
@@ -2143,6 +2210,20 @@ mod tests {
         let x = Array1::from(vec![0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0]);
         let index = farthest_packing_cover(x.view(), &[], 7);
         assert!(index < 7);
+    }
+
+    #[test]
+    fn leave_av_walk_refuses_a_high_energy_leave() {
+        let origin = Array1::from(vec![0.0, 0.0, 0.0, 1.0, 0.0, 0.0]);
+        let mut rng = rand::rngs::StdRng::seed_from_u64(2);
+        let found = leave_av_walk(origin.view(), 1.6, 4, 0.0, &mut rng, |trial| {
+            let e = trial.iter().map(|v| v * v).sum::<f64>();
+            (e + 10.0, trial.to_owned())
+        });
+        assert!(
+            found.is_none(),
+            "a landing above the origin energy must not be installed"
+        );
     }
 
     #[test]
