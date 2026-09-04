@@ -4776,8 +4776,9 @@ fn run_capnp_catalog(
                     run_cfg.temperature,
                 );
                 println!(
-                    "  invert neighbors {} hops {}",
+                    "  invert neighbors {} frozen {} hops {}",
                     neighbors.len(),
+                    anneal_core::known_basin::invert_frozen_count(),
                     snapshot.hops()
                 );
                 let _ = std::io::stdout().flush();

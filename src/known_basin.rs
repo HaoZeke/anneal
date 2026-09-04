@@ -213,6 +213,15 @@ pub fn invert_is_frozen() -> bool {
     ARMED.with(|slot| slot.borrow().as_ref().is_some_and(|armed| armed.frozen))
 }
 
+/// How many neighbour SOAP modes the hop Householder actually holds.
+pub fn invert_frozen_count() -> usize {
+    ARMED.with(|slot| {
+        slot.borrow()
+            .as_ref()
+            .map_or(0, |armed| armed.frozen_modes.len())
+    })
+}
+
 /// Hill amplitude \(A\) and width \(\sigma_\varphi\) of the armed
 /// transform, once the first transformed evaluation has set them.
 ///
@@ -477,23 +486,83 @@ fn transform(
 }
 
 /// Lift neighbour modes once, at arm. The hop applies this \(P\).
+///
+/// The packing mean is silent when two wells share a funnel. The
+/// stacked local SOAP+\(\nu=3\) residual is not: that is the region
+/// another chain occupies, pulled back with \(J^\top\).
 fn freeze_packing_modes(
     origin: ArrayView1<f64>,
     wells: &[Well],
 ) -> Vec<(usize, Array1<f64>, f64, f64)> {
-    let Some(mu) = packing_mean(origin) else {
-        return Vec::new();
-    };
     let j = jacobian_nu3(origin, PACKING_SPEC, None);
+    let mu = packing_mean(origin);
     wells
         .iter()
         .enumerate()
         .filter_map(|(index, well)| {
-            let mu_k = well.packing_mean.as_ref()?;
-            let (p, r_phi, p_norm) = lift_packing_mode(origin, mu.view(), mu_k.view(), &j)?;
+            if well.coords.len() != origin.len() {
+                return None;
+            }
+            if same_point(well.coords.view(), origin) {
+                return None;
+            }
+            if let (Some(mu), Some(mu_k)) = (mu.as_ref(), well.packing_mean.as_ref()) {
+                if let Some(lifted) = lift_packing_mode(origin, mu.view(), mu_k.view(), &j) {
+                    return Some((index, lifted.0, lifted.1, lifted.2));
+                }
+            }
+            let (p, r_phi, p_norm) = lift_local_residual(origin, well.coords.view(), &j)?;
             Some((index, p, r_phi, p_norm))
         })
         .collect()
+}
+
+/// \(P=J^\top(s-s_k)\) from stacked local SOAP+\(\nu=3\), not the means.
+fn lift_local_residual(
+    origin: ArrayView1<f64>,
+    other: ArrayView1<f64>,
+    j: &Array2<f64>,
+) -> Option<(Array1<f64>, f64, f64)> {
+    let loc_a = local_nu3_z(origin, PACKING_SPEC, None);
+    let loc_b = local_nu3_z(other, PACKING_SPEC, None);
+    if loc_a.nrows() != loc_b.nrows() || loc_a.ncols() != loc_b.ncols() {
+        return None;
+    }
+    let n_at = loc_a.nrows();
+    let dim = loc_a.ncols();
+    if n_at == 0 || dim == 0 || j.nrows() != n_at * dim || j.ncols() != origin.len() {
+        return None;
+    }
+    let mut dp = Array1::<f64>::zeros(n_at * dim);
+    for i in 0..n_at {
+        for t in 0..dim {
+            dp[i * dim + t] = loc_a[[i, t]] - loc_b[[i, t]];
+        }
+    }
+    let r_phi = dp.iter().map(|v| v * v).sum::<f64>().sqrt();
+    if r_phi < 1e-15 {
+        return None;
+    }
+    for item in dp.iter_mut() {
+        *item /= r_phi;
+    }
+    let mut p = Array1::<f64>::zeros(origin.len());
+    for k in 0..origin.len() {
+        let mut s = 0.0;
+        for row in 0..n_at * dim {
+            s += j[[row, k]] * dp[row];
+        }
+        p[k] = s;
+    }
+    strip_com(&mut p);
+    let p_norm = p.iter().map(|v| v * v).sum::<f64>().sqrt();
+    if p_norm < 1e-15 {
+        return None;
+    }
+    for item in p.iter_mut() {
+        *item /= p_norm;
+    }
+    Some((p, r_phi, p_norm))
 }
 
 fn apply_packing_modes(
@@ -2626,6 +2695,10 @@ mod tests {
         assert!(
             invert_is_frozen(),
             "neighbour invert must lift P once at arm"
+        );
+        assert!(
+            invert_frozen_count() >= 1,
+            "a displaced neighbour must give a SOAP mode, not an empty freeze"
         );
         disarm();
     }
