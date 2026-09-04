@@ -65,7 +65,7 @@ fn leftover_unsaturated_walks_through_census_exhaustion() {
 
     let decision = CatalogPolicy::decide(state);
     assert_eq!(decision.action, PolicyAction::Leave);
-    assert_eq!(decision.reason, PolicyReason::OccupiedPackingLeave);
+    assert_eq!(decision.reason, PolicyReason::LocalCensusExhausted);
 }
 
 #[test]
