@@ -7,10 +7,13 @@ export IRA_LIB_DIR="${IRA_LIB_DIR:-${HOME}/ira/lib}"
 export LD_LIBRARY_PATH="${IRA_LIB_DIR}:${LD_LIBRARY_PATH:-}"
 ROOT="${1:-${HOME}/Git/Github/Rust/anneal}"
 cd "$ROOT"
-mkdir -p "${ROOT}/logs/occ-talk" "${ROOT}/logs/occ-talk/state" "${ROOT}/logs/occ-talk/traces"
-LOG="${ROOT}/logs/occ-talk/wrapper.log"
+STAMP=$(date -u +%Y%m%dT%H%M%SZ)
+OUT="${ROOT}/logs/occ-talk-${STAMP}"
+mkdir -p "${OUT}/state" "${OUT}/traces"
+LOG="${OUT}/wrapper.log"
 exec > >(tee -a "${LOG}") 2>&1
 echo "commit=$(git rev-parse HEAD)"
+echo "out=${OUT}"
 cargo build --release --example lj_cluster_search --example catalog_server --features bank-rpc,ira
 BIN=./target/release/examples/lj_cluster_search
 SERVER=./target/release/examples/catalog_server
@@ -21,13 +24,8 @@ RADIUS=4.80132341502328e-07
 BUDGET=4000000
 TOTAL=$((BUDGET * REPLICAS))
 CAMPAIGN=lj75-ico-talk
-ENSEMBLE=talk
+ENSEMBLE="talk-${STAMP}"
 REPLICA_LIST=$(seq -s, 0 $((REPLICAS - 1)))
-OUT="${ROOT}/logs/occ-talk"
-
-pkill -f "$BIN 75 ${BUDGET}" 2>/dev/null || true
-pkill -f "catalog_server 127.0.0.1" 2>/dev/null || true
-sleep 1
 
 "$SERVER" \
   127.0.0.1:0 \
@@ -42,7 +40,7 @@ sleep 1
   >"$OUT/coordinator.jsonl" 2>"$OUT/coordinator.err" &
 server_pid=$!
 endpoint=
-for _ in $(seq 1 200); do
+for _ in $(seq 1 600); do
   endpoint=$(grep -o '"addr":"[^"]*"' "$OUT/coordinator.jsonl" 2>/dev/null \
     | awk -F '"' 'NR == 1 { print $4 }' || true)
   if [[ -n $endpoint ]]; then
