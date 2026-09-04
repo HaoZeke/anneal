@@ -4693,7 +4693,7 @@ fn run_capnp_catalog(
         // channel, and catalog_leave would refuse Marks if the
         // throwaway book chained it to ico. catalog_incumbent adopts
         // on energy. post_offer_candidate above is the publish.
-        let current_energy = snapshot.current_energy();
+        let floor_energy = snapshot.best_energy();
         let current_len = snapshot.current_state().len();
         let mut heard = None;
         for draw in [INCUMBENT_SAMPLE_DRAW, SPARSE_SAMPLE_DRAW] {
@@ -4705,7 +4705,9 @@ fn run_capnp_catalog(
                 }
                 anneal_core::catalog::include_packing_reference(&held.coordinates);
                 anneal_core::catalog::offer_known_minimum(held.energy, &held.coordinates);
-                let deeper = held.energy < current_energy - 1e-3;
+                // Mid-hop current energy sits above the ico floor.
+                // Comparing against it yanks every walk back onto ico.
+                let deeper = held.energy < floor_energy - 1e-3;
                 if !deeper {
                     continue;
                 }
