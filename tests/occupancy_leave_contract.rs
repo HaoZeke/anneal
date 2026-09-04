@@ -451,6 +451,16 @@ fn checkpoint_hears_the_book_before_leave_defers() {
         hear.contains("catalog_ridge"),
         "extras climb the ridge without waiting for Remote policy"
     );
+    assert!(
+        hear.contains("best_energy()") && hear.contains("1e-3"),
+        "hear compares the published prize to the replica floor, not the mid-hop energy"
+    );
+    let compact: String = hear.split_whitespace().collect();
+    assert!(
+        !compact.contains("current_energy()-1e-3")
+            && !compact.contains("current_energy()- 1e-3"),
+        "mid-hop current energy sits above the ico floor and would yank every walk back"
+    );
 }
 
 #[test]
