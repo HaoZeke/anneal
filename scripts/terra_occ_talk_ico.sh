@@ -67,7 +67,7 @@ for replica in $(seq 0 $((REPLICAS - 1))); do
     export CATALOG_RPC="$endpoint"
     export CATALOG_SHARED_BIAS=1
     export CATALOG_SHARING=shared
-    export CATALOG_SLICE=500
+    export CATALOG_SLICE=5000
     export CATALOG_POPULATION_INTERVAL=50000
     export CATALOG_MAX_HOPS=60000
     export CATALOG_START_FILE="${ROOT}/tests/fixtures/lj75_ico.xyz"
