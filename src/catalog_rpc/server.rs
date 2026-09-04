@@ -2261,7 +2261,8 @@ fn apply_request(
                         .best_candidate_by_replica
                         .insert(request.identity.replica, canonical.clone());
                 }
-                if observe_ride_source(scientific, &canonical).is_err() {
+                let same_basin = previous == Some(observation.basin_id);
+                if !same_basin && observe_ride_source(scientific, &canonical).is_err() {
                     return rejected(
                         state,
                         request.event_sequence,
@@ -3805,6 +3806,30 @@ fn basin_for_packing_community(scientific: &ScientificState, query: &[f64]) -> O
             && let Some(basin) = scientific.last_basin_by_replica.get(replica)
         {
             return Some(*basin);
+        }
+    }
+    for (replica, candidate) in &scientific.last_candidate_by_replica {
+        let Some(histogram) = scientific.packing.histogram(&candidate.coordinates) else {
+            continue;
+        };
+        let Some(family) = scientific.packing.family_of(&histogram) else {
+            continue;
+        };
+        if same.contains(&family)
+            && let Some(basin) = scientific.last_basin_by_replica.get(replica)
+        {
+            return Some(*basin);
+        }
+    }
+    for (&basin, stored) in &scientific.ride_candidates {
+        let Some(histogram) = scientific.packing.histogram(&stored.coordinates) else {
+            continue;
+        };
+        let Some(family) = scientific.packing.family_of(&histogram) else {
+            continue;
+        };
+        if same.contains(&family) {
+            return Some(BasinId::from_raw(basin));
         }
     }
     None
