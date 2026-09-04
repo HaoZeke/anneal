@@ -108,7 +108,7 @@
 pub fn is_occupancy_leave_action(action: &str) -> bool {
     matches!(
         action,
-        "hyperband_reseed" | "catalog_leave" | "population_reseed"
+        "hyperband_reseed" | "catalog_leave" | "catalog_ridge" | "population_reseed"
     )
 }
 
@@ -131,10 +131,10 @@ pub enum OccupancyLeaveAdopt {
 /// only clears the cell grain is an isomer of the packing the extra is
 /// leaving.
 ///
-/// Walk is the answer when leftover is still hatching or EI on the
-/// seen book is exhausted. ArchiveHole is a landfold-away start whose
-/// quench is compacted, then polished on the plain potential; landfold
-/// names the landing. OtherFamily is a draw from a community already
+/// Walk is the champion filling the occupied packing. Ridge is the
+/// extra climbing the local mode until the force flips, then quenching
+/// the overshoot: that is the barrier between fills. ArchiveHole is a
+/// landfold-away start. OtherFamily is a draw from a community already
 /// on file.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OccupancyLeaveTarget {
@@ -142,6 +142,8 @@ pub enum OccupancyLeaveTarget {
     OtherFamily,
     /// Landfold covering start, compacted quench, landfold identity.
     ArchiveHole,
+    /// Climb the local ridge (ART / dimer / Quapp) and quench the far side.
+    Ridge,
     /// Keep walking on the hop library.
     Walk,
 }
@@ -276,11 +278,10 @@ pub fn occupancy_leave_target(
 
 /// [`occupancy_leave_target`] with the FunnelModel EI bit.
 ///
-/// The hop library is the mint while the book has one packing.
-/// One-shot leftover starts, a shell twist, and landfold-and-compact
-/// from the occupied well do not install a deeper family. A second
-/// community already on file is drawn. A min-mode climb and a named
-/// morphology are not destinations.
+/// A second community already on file is communicated. One packing
+/// on the book is a fill without a barrier: extras climb the ridge
+/// rather than walk another ico isomer. A named morphology is not a
+/// destination.
 pub fn occupancy_leave_by_ei(
     other_family_in_catalog: bool,
     packing_saturated: bool,
@@ -288,14 +289,11 @@ pub fn occupancy_leave_by_ei(
     ei_exhausted: bool,
     leftover_dwell: bool,
 ) -> OccupancyLeaveTarget {
-    let _ = packing_saturated;
+    let _ = (packing_saturated, ei_exhausted, leftover_dwell);
     if other_family_in_catalog && packing_communities >= 2 {
         return OccupancyLeaveTarget::OtherFamily;
     }
-    if !leftover_dwell || ei_exhausted || packing_communities < 2 {
-        return OccupancyLeaveTarget::Walk;
-    }
-    OccupancyLeaveTarget::Walk
+    OccupancyLeaveTarget::Ridge
 }
 
 /// [`occupancy_leave_by_ei`] with a leftover birth draw.
@@ -370,7 +368,7 @@ pub fn occupancy_leave_adopt(action: &str, walked_off: bool) -> Option<Occupancy
     if !is_occupancy_leave_action(action) {
         return None;
     }
-    if action == "catalog_leave" && !walked_off {
+    if matches!(action, "catalog_leave" | "catalog_ridge") && !walked_off {
         Some(OccupancyLeaveAdopt::Refuse)
     } else {
         Some(OccupancyLeaveAdopt::Quench)
@@ -2116,6 +2114,7 @@ mod tests {
         assert!(is_occupancy_leave_action("population_reseed"));
         assert!(is_occupancy_leave_action("hyperband_reseed"));
         assert!(is_occupancy_leave_action("catalog_leave"));
+        assert!(is_occupancy_leave_action("catalog_ridge"));
         assert!(!is_occupancy_leave_action("catalog_incumbent"));
         assert!(!is_occupancy_leave_action("bridge"));
     }
@@ -2128,7 +2127,7 @@ mod tests {
         );
         assert_eq!(
             occupancy_leave_by_ei(false, false, 2, false, true),
-            OccupancyLeaveTarget::Walk
+            OccupancyLeaveTarget::Ridge
         );
         assert_eq!(
             occupancy_leave_target(true, false, 2),
@@ -2169,14 +2168,14 @@ mod tests {
     }
 
     #[test]
-    fn a_one_packing_book_walks_on_the_hop_library() {
+    fn a_one_packing_book_climbs_the_ridge() {
         assert_eq!(
             occupancy_leave_by_ei(false, false, 1, false, true),
-            OccupancyLeaveTarget::Walk
+            OccupancyLeaveTarget::Ridge
         );
         assert_eq!(
             occupancy_leave_by_ei(true, false, 1, true, true),
-            OccupancyLeaveTarget::Walk
+            OccupancyLeaveTarget::Ridge
         );
         assert_eq!(
             occupancy_leave_by_ei(true, false, 2, false, true),
@@ -2197,11 +2196,11 @@ mod tests {
     fn leftover_birth_does_not_reopen_a_covering() {
         assert_eq!(
             occupancy_leave_by_birth(false, true, 1, true, 0.8, 0.1, true),
-            OccupancyLeaveTarget::Walk
+            OccupancyLeaveTarget::Ridge
         );
         assert_eq!(
             occupancy_leave_by_birth(false, true, 1, true, 0.8, 0.9, true),
-            OccupancyLeaveTarget::Walk
+            OccupancyLeaveTarget::Ridge
         );
         assert_eq!(
             occupancy_leave_by_birth(true, false, 2, false, 0.9, 0.0, true),
@@ -2216,15 +2215,15 @@ mod tests {
         // drawn has no measured yield on LJ75, so the trade is a loss.
         assert_eq!(
             occupancy_leave_target(true, false, 1),
-            OccupancyLeaveTarget::Walk
+            OccupancyLeaveTarget::Ridge
         );
         assert_eq!(
             occupancy_leave_target(false, false, 1),
-            OccupancyLeaveTarget::Walk
+            OccupancyLeaveTarget::Ridge
         );
         assert_eq!(
             occupancy_leave_target(true, false, 0),
-            OccupancyLeaveTarget::Walk
+            OccupancyLeaveTarget::Ridge
         );
         assert_eq!(
             occupancy_leave_target(true, false, 2),
@@ -2244,11 +2243,11 @@ mod tests {
         );
         assert_eq!(
             occupancy_leave_target(false, true, 1),
-            OccupancyLeaveTarget::Walk
+            OccupancyLeaveTarget::Ridge
         );
         assert_eq!(
             occupancy_leave_by_ei(false, false, 2, false, true),
-            OccupancyLeaveTarget::Walk
+            OccupancyLeaveTarget::Ridge
         );
     }
 
@@ -2256,6 +2255,10 @@ mod tests {
     fn catalog_leave_refuses_a_same_family_hole() {
         assert_eq!(
             occupancy_leave_adopt("catalog_leave", false),
+            Some(OccupancyLeaveAdopt::Refuse)
+        );
+        assert_eq!(
+            occupancy_leave_adopt("catalog_ridge", false),
             Some(OccupancyLeaveAdopt::Refuse)
         );
         assert_eq!(

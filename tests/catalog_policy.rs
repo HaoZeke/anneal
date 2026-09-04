@@ -49,8 +49,8 @@ fn leftover_unsaturated_extra_walks_like_serial() {
     );
     extra.leftover_dwell = false;
     let decision = CatalogPolicy::decide(extra);
-    assert_eq!(decision.action, PolicyAction::ContinueLocal);
-    assert_eq!(decision.reason, PolicyReason::IsomerWalk);
+    assert_eq!(decision.action, PolicyAction::Leave);
+    assert_eq!(decision.reason, PolicyReason::OccupiedPackingLeave);
 }
 
 #[test]
@@ -64,8 +64,8 @@ fn leftover_unsaturated_walks_through_census_exhaustion() {
     state.leftover_dwell = false;
 
     let decision = CatalogPolicy::decide(state);
-    assert_eq!(decision.action, PolicyAction::ContinueLocal);
-    assert_eq!(decision.reason, PolicyReason::IsomerWalk);
+    assert_eq!(decision.action, PolicyAction::Leave);
+    assert_eq!(decision.reason, PolicyReason::OccupiedPackingLeave);
 }
 
 #[test]
@@ -113,8 +113,8 @@ fn leftover_unsaturated_pruned_extra_still_walks() {
     extra.leftover_dwell = false;
     extra.mixing.pruned = true;
     let decision = CatalogPolicy::decide(extra);
-    assert_eq!(decision.action, PolicyAction::ContinueLocal);
-    assert_eq!(decision.reason, PolicyReason::IsomerWalk);
+    assert_eq!(decision.action, PolicyAction::Leave);
+    assert_eq!(decision.reason, PolicyReason::HyperbandPruned);
 }
 
 #[test]

@@ -261,8 +261,8 @@ fn occupancy_leave_action_does_not_fall_back_to_a_random_cluster() {
         "OtherFamily adopts a deeper packing, not an amorphous cell above the live well"
     );
     assert!(
-        arm.contains("OccupancyLeaveTarget::Walk"),
-        "a book with nothing to draw Walks"
+        arm.contains("OccupancyLeaveTarget::Ridge"),
+        "a book with one packing climbs the ridge"
     );
     assert!(
         !arm.contains("step_away_fivefold"),
@@ -392,7 +392,7 @@ fn leave_quench_keeps_the_walk_off_mu_k() {
 }
 
 #[test]
-fn a_one_packing_book_walks_rather_than_drawing_a_hole() {
+fn a_one_packing_book_climbs_the_ridge() {
     let source = include_str!("../examples/lj_cluster_search.rs");
     let leave = source
         .split("PolicyAction::Leave =>")
@@ -404,27 +404,17 @@ fn a_one_packing_book_walks_rather_than_drawing_a_hole() {
         .next()
         .expect("Leave arm must end at Explore");
     assert!(
-        arm.contains("occupancy_leave_by_birth"),
-        "Walk vs OtherFamily follows the leave rule, not a covering of the occupied tangent"
+        arm.contains("OccupancyLeaveTarget::Ridge"),
+        "a one-packing book sends extras up the ridge, not around the ico shelf"
     );
     assert!(
-        arm.contains("OccupancyLeaveTarget::Walk"),
-        "a book with one packing has nothing to divide, so the extra keeps walking"
+        arm.contains("catalog_ridge"),
+        "the hop loop must see a ridge action"
     );
-    let walk = arm
-        .split("OccupancyLeaveTarget::Walk =>")
-        .nth(1)
-        .expect("Walk arm must exist")
-        .split("OccupancyLeaveTarget::OtherFamily =>")
-        .next()
-        .expect("Walk arm ends at OtherFamily");
+    let hop = include_str!("../src/methods/cluster_hopping.rs");
     assert!(
-        walk.contains("CheckpointAction::Continue"),
-        "Walk keeps the replica on its own trajectory"
-    );
-    assert!(
-        !walk.contains("leave_packing_state"),
-        "Walk does not draw a hole: measured on LJ75, no rung from 1.32 to 42.3 eps leaves the packing"
+        hop.contains("catalog_ridge") && hop.contains("activate("),
+        "catalog_ridge climbs until the mode force flips, then quenches"
     );
 }
 
