@@ -296,10 +296,9 @@ impl CatalogPolicy {
     /// incumbent of a known well leaves once it stalls, so the ensemble
     /// does not keep relaxing one funnel for the rest of the budget.
     ///
-    /// While leftover SOAP is unsaturated and the book has one packing,
-    /// every replica Walks: Marks is a long hop, not a census Leave.
-    /// A second occupied DECAF family on the shared book is talking:
-    /// extras Leave and draw it. The champion stays and walks isomers.
+    /// The champion fills the occupied packing. Extras Leave: they
+    /// climb the ridge when the book has one packing, and they draw
+    /// another family when the book already holds two.
     /// A novel-family walk is not Explore: yanking it would abandon the
     /// mint. After leftover dwell, extras of a crowded packing Leave.
     /// Collapse also forces extras of the occupied packing to Leave.
@@ -325,8 +324,7 @@ impl CatalogPolicy {
                 )
             }
             _ if !input.leftover_dwell
-                && !(input.occupied_family_count >= 2
-                    && matches!(input.relation, ActiveCatalogRelation::SameBasin))
+                && !matches!(input.relation, ActiveCatalogRelation::SameBasin)
                 && !(input.census.local_basin_visits() >= LOCAL_CENSUS_LEAVE
                     && matches!(
                         input.relation,

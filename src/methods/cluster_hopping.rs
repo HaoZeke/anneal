@@ -1515,13 +1515,35 @@ where
                 } else {
                     Vec::new()
                 };
-                // The boundary proposal is the destination: another
-                // packing, or a landfold-away start. The caller's
-                // relax applies the compacted first phase when a
-                // surface portfolio is configured, then polishes on
-                // the plain potential. A min-mode climb of the live
-                // tangent is not this path.
-                let quenched = relax(ledger, state.view(), cfg.relax_steps);
+                // OtherFamily is a catalog draw. Ridge is the barrier:
+                // climb until the mode force flips, then quench the
+                // overshoot. A map kick plus a quench stays in the well.
+                let quenched = if action == "catalog_ridge" {
+                    if let Some(g) = grad.as_deref_mut() {
+                        let act = crate::methods::activation::Activation {
+                            step: cfg.escape_amplitude.max(0.15),
+                            max_steps: cfg.escape_max_climb.max(16),
+                            overshoot: cfg.escape_overshoot.max(1.0),
+                            ..crate::methods::activation::Activation::default()
+                        };
+                        let sign = if rng.random::<bool>() { 1.0 } else { -1.0 };
+                        crate::methods::activation::activate(
+                            from_state.view(),
+                            |y| g(ledger, y),
+                            &act,
+                            sign,
+                        )
+                        .and_then(|o| {
+                            o.crossed
+                                .then(|| relax(ledger, o.state.view(), cfg.relax_steps))
+                        })
+                    } else {
+                        None
+                    }
+                    .unwrap_or_else(|| relax(ledger, from_state.view(), 0))
+                } else {
+                    relax(ledger, state.view(), cfg.relax_steps)
+                };
                 let (mut candidate_energy, mut candidate) = quenched;
                 let left_packing = |trial: &Array1<f64>| {
                     from_state

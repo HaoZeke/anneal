@@ -5308,16 +5308,24 @@ fn run_capnp_catalog(
                 ) {
                     OccupancyLeaveTarget::Walk => {
                         count_walk += 1;
-                        // Nothing on the book to divide. The extra keeps
-                        // walking and the shared bias, deposited above,
-                        // holds it off the basins the others are on. That
-                        // is what coordination buys here; standing still
-                        // against one funnel is not.
                         trace.adoption = SliceAdoption::Rejected;
                         cooperative
                             .record_slice(replica, trace)
                             .expect("checkpoint trace must remain complete");
                         return CheckpointAction::Continue;
+                    }
+                    OccupancyLeaveTarget::Ridge => {
+                        count_hole += 1;
+                        trace.proposal_family = ProposalFamily::DescriptorHole;
+                        trace.adoption = SliceAdoption::Adopted;
+                        leave_path.clear();
+                        cooperative
+                            .record_slice(replica, trace)
+                            .expect("checkpoint trace must remain complete");
+                        return CheckpointAction::BoundaryProposal {
+                            state: snapshot.current_state().to_owned(),
+                            action: "catalog_ridge".to_owned(),
+                        };
                     }
                     OccupancyLeaveTarget::OtherFamily => {
                         count_other_family += 1;
