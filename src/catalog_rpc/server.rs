@@ -3789,12 +3789,12 @@ fn basin_for_packing_community(scientific: &ScientificState, query: &[f64]) -> O
     histograms.push(query.to_vec());
     let labels = packing_communities(&histograms);
     let query_label = *labels.last()?;
-    let same: BTreeSet<usize> = occupied
-        .iter()
-        .zip(labels.iter())
-        .filter(|(_, &label)| label == query_label)
-        .map(|((index, _), _)| *index)
-        .collect();
+    let mut same = BTreeSet::new();
+    for (slot, (index, _)) in occupied.iter().enumerate() {
+        if labels.get(slot).copied() == Some(query_label) {
+            same.insert(*index);
+        }
+    }
     if same.is_empty() {
         return None;
     }
