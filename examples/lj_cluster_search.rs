@@ -66,6 +66,14 @@ fn apply_occupancy_superbasin(cfg: &mut Config, n: usize) {
     cfg.height_revisits = sb.height_revisits;
     cfg.keying = sb.keying;
     cfg.merge_radius = sb.merge_radius;
+    // Landfold aims in the packing book. A raw quench is the identity
+    // projector onto the occupied funnel, so the aim is undone. The
+    // diameter first phase reweights catchment; the portfolio keeps
+    // the plain surface as an arm. Kappa 0.7 is the measured fastest
+    // relative cutoff that still crosses on 38 and 75.
+    if cfg.surfaces.is_empty() && cfg.two_phase.is_none() {
+        cfg.surfaces = vec![anneal_core::methods::two_phase::TwoPhase::relative(0.7, 1.0)];
+    }
 }
 
 /// Lennard-Jones value and gradient in reduced units, no cutoff.
@@ -146,6 +154,8 @@ mod option_tests {
         apply_occupancy_superbasin(&mut cfg, 75);
         assert!(cfg.adaptive_height);
         assert_eq!(cfg.height_revisits, 20.0);
+        assert_eq!(cfg.surfaces.len(), 1);
+        assert!(cfg.surfaces[0].is_active());
         #[cfg(feature = "featomic")]
         assert_eq!(cfg.keying, Keying::SoapPacking);
     }
@@ -2661,13 +2671,18 @@ fn leave_packing_state<R: rand::Rng + ?Sized>(
     // They are not charged, because the checkpoint path holds no ledger, and
     // they are the price of a step sized by the structure instead of by a
     // length that suits one cluster and melts another.
+    let mobile = anneal_core::soap::packing_active_volume(
+        x,
+        anneal_core::catalog::PACKING_SPEC,
+        species,
+    );
     anneal_core::known_basin::leave_packing_rung_to(
         x,
         cover_index,
         anneal_core::known_basin::rung_barrier(depth, 0),
         &anneal_core::catalog::packing_references(),
         species,
-        None,
+        Some(mobile.as_slice()),
         |v: ArrayView1<f64>| Some(lj(v).0),
     )
 }
@@ -5229,11 +5244,10 @@ fn run_capnp_catalog(
                     }
                 }
                 // Funnel exchange first when Fiedler F>=2: a
-                // representative of another packing community. F=1
-                // leftover wells are the champion walk. Extra
-                // ArchiveHole is leftover-orthogonal to the occupied
-                // packing and archive. Occupancy extras do not draw a
-                // random cluster.
+                // representative of another packing community. A
+                // one-community book with open EI aims in landfold
+                // (ArchiveHole) and the hop quench is compacted.
+                // Occupancy extras do not draw a random cluster.
                 let other_family = {
                     if let CatalogSampleOutcome::Candidate(sparse) = cooperative
                         .try_sample_candidate(replica, SPARSE_SAMPLE_DRAW)
@@ -5327,12 +5341,9 @@ fn run_capnp_catalog(
                         let live = snapshot.current_state();
                         let live_slice = live.as_slice().unwrap_or(&[]);
                         let shoot_coords = leave_path.shoot_coordinates().unwrap_or(live_slice);
-                        // Leftover holes of the occupied packing are the
-                        // champion walk. Extra ArchiveHole is the first rung
-                        // of the packing ladder: a covering direction of the
-                        // DECAF feature pointed away from the packings on
-                        // file. The hop loop walks the rest of the ladder
-                        // when the quench lands back in the same packing.
+                        // Landfold covering start. The hop quench applies
+                        // the compacted first phase, then polishes on the
+                        // plain potential; landfold names the landing.
                         let index = archive_cover_index(replica, archive_hole_count);
                         archive_hole_count += 1;
                         let left = leave_packing_state(
