@@ -468,6 +468,7 @@ struct ScientificState {
     /// rebuilt. The book version moves on every arrival; folding on that
     /// cadence parks the workers on the coordinator.
     fold_hold: Option<Instant>,
+    floor_hold: Option<(Instant, usize)>,
     last_gt_report: Option<OccupancyGtKey>,
     /// Leftover occupancy sample whose saturation state has been counted
     /// toward the retirement dwell.
@@ -650,6 +651,7 @@ impl CoordinatorState {
                     fed_from: None,
                     landfold: None,
                     fold_hold: None,
+                    floor_hold: None,
                     last_gt_report: None,
                     last_leftover_dwell_sample: None,
                     leftover_sat_streak: 0,
@@ -4812,6 +4814,11 @@ fn occupancy_floor(scientific: &mut ScientificState) -> usize {
     {
         return occupancy_min_families();
     }
+    if let Some((at, held)) = scientific.floor_hold
+        && at.elapsed() < Duration::from_secs(5)
+    {
+        return held;
+    }
     let fiedler = occupancy_seam_floor(scientific).0;
     let landfold = occupancy_landfold_from_book(scientific).0;
     // The book's community count is a hurdle, not a quota. Every other
@@ -4820,7 +4827,9 @@ fn occupancy_floor(scientific: &mut ScientificState) -> usize {
     // ensemble to occupy every packing the book has ever recorded is a floor
     // no run can meet.
     let peeled = sparsified_book(scientific).communities.clamp(1, 2);
-    fiedler.max(landfold).max(peeled)
+    let floor = fiedler.max(landfold).max(peeled);
+    scientific.floor_hold = Some((Instant::now(), floor));
+    floor
 }
 
 fn leftover_census_dwell(scientific: &mut ScientificState) -> bool {
