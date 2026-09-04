@@ -1589,7 +1589,7 @@ pub fn leave_av_surface<R: rand::Rng + ?Sized>(
     for k in 0..3 {
         c[k] *= inv;
     }
-    let mut shell = 0.0;
+    let mut shell: f64 = 0.0;
     for a in 0..n {
         if a == mover {
             continue;
