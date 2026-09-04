@@ -1032,49 +1032,46 @@ pub fn packing_step_nu3(
     scale_to_cap(x, dr, rmsd)
 }
 
-/// Single-ended SOAP step away from neighbouring clouds.
+/// Single-ended SOAP step off the occupied packing mean.
 ///
-/// \(\Delta s = \sum_k(s-s_k)\), pulled back with \(J^\top\). No spring,
-/// no second endpoint, no quench. The chain keeps that geometry.
+/// Nearby chains only decide that this region is crowded. The
+/// direction is \(-\hat\mu\) of the occupied cloud (self plus those
+/// neighbours), pulled back with \(J^\top\). Isomer-minus-isomer is
+/// a tangent of the occupied packing and is not this step.
 pub fn push_away_clouds(
     x: ArrayView1<f64>,
     neighbors: &[Vec<f64>],
     spec: SoapSpec,
     rmsd: f64,
 ) -> Option<Array1<f64>> {
-    let loc = local_nu3_z(x, spec, None);
-    let n_at = loc.nrows();
-    let dim = loc.ncols();
-    if n_at == 0 || dim == 0 {
+    let mut mu = packing_mean_nu3(x, spec, None, None);
+    if mu.is_empty() {
         return None;
     }
-    let mut target = Array1::<f64>::zeros(n_at * dim);
-    let mut used = 0usize;
-    for i in 0..n_at {
-        for t in 0..dim {
-            target[i * dim + t] = loc[[i, t]];
-        }
-    }
+    let mut count = 1.0;
     for neighbor in neighbors {
         if neighbor.len() != x.len() {
             continue;
         }
-        let held = local_nu3_z(ArrayView1::from(neighbor.as_slice()), spec, None);
-        if held.nrows() != n_at || held.ncols() != dim {
+        let held = packing_mean_nu3(ArrayView1::from(neighbor.as_slice()), spec, None, None);
+        if held.len() != mu.len() {
             continue;
         }
-        for i in 0..n_at {
-            for t in 0..dim {
-                target[i * dim + t] += loc[[i, t]] - held[[i, t]];
-            }
+        for (a, b) in mu.iter_mut().zip(held.iter()) {
+            *a += *b;
         }
-        used += 1;
+        count += 1.0;
     }
-    if used == 0 {
+    if count < 2.0 {
         return None;
     }
-    let dr = pullback_nu3(x, target.view(), spec, None, None);
-    let stepped = scale_to_cap(x, dr, rmsd);
+    mu /= count;
+    let nrm = mu.iter().map(|v| v * v).sum::<f64>().sqrt();
+    if nrm < 1e-15 {
+        return None;
+    }
+    let direction: Vec<f64> = mu.iter().map(|v| -v / nrm).collect();
+    let stepped = packing_step_nu3(x, spec, &direction, rmsd, None, None);
     if stepped
         .iter()
         .zip(x.iter())

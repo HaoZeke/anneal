@@ -1544,9 +1544,30 @@ where
                     }
                     .unwrap_or_else(|| relax(ledger, from_state.view(), 0))
                 } else if action == "soap_push" {
-                    // The SOAP step is the move. A quench is the
-                    // projector onto the occupied packing.
-                    relax(ledger, state.view(), 0)
+                    // Off the occupied packing mean, then follow the
+                    // ridge until the mode force flips. A quench of the
+                    // SOAP step alone is the occupied packing projector.
+                    if let Some(g) = grad.as_deref_mut() {
+                        let act = crate::methods::activation::Activation {
+                            step: cfg.escape_amplitude.max(0.15),
+                            max_steps: cfg.escape_max_climb.max(16),
+                            overshoot: cfg.escape_overshoot.max(1.0),
+                            ..crate::methods::activation::Activation::default()
+                        };
+                        crate::methods::activation::activate(
+                            state.view(),
+                            |y| g(ledger, y),
+                            &act,
+                            1.0,
+                        )
+                        .and_then(|o| {
+                            o.crossed
+                                .then(|| relax(ledger, o.state.view(), cfg.relax_steps))
+                        })
+                    } else {
+                        None
+                    }
+                    .unwrap_or_else(|| relax(ledger, state.view(), 0))
                 } else {
                     relax(ledger, state.view(), cfg.relax_steps)
                 };
