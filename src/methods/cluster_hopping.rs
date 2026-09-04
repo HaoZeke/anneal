@@ -1543,64 +1543,13 @@ where
                         crate::catalog::PACKING_SPEC,
                         cfg.species.as_deref(),
                     );
-                    let n_cover = crate::catalog::cover_arm_count();
-                    let depth = from_energy.abs() / (from_state.len() / 3).max(1) as f64;
-                    let barrier = crate::known_basin::rung_barrier(depth, 0);
-                    let mut starts = crate::known_basin::shs_av_starts(
+                    let starts = crate::known_basin::leave_av_packing_starts(
                         from_state.view(),
                         &mobile,
-                        crate::known_basin::LEAVE_WALK_STEP,
-                        16,
-                        4,
-                        |trial| Some(relax(ledger, trial, 0).0),
+                        cfg.neighbour_cutoff,
+                        crate::known_basin::LEAVE_AV_SEARCHES,
+                        rng,
                     );
-                    let fps = crate::known_basin::farthest_packing_cover(
-                        from_state.view(),
-                        &references,
-                        n_cover,
-                    );
-                    starts.push(crate::known_basin::leave_packing_rung_to(
-                        from_state.view(),
-                        fps,
-                        barrier,
-                        &references,
-                        cfg.species.as_deref(),
-                        Some(mobile.as_slice()),
-                        |trial| Some(relax(ledger, trial, 0).0),
-                    ));
-                    // SC-AFIR: leftover versus core, push and peel.
-                    // Maeda, Taketsugu and Morokuma
-                    // (https://doi.org/10.1002/jcc.23481).
-                    if energy_grad.is_some() || grad.is_some() {
-                        let mut afir_fg = |trial: ArrayView1<f64>| {
-                            if let Some(eg) = energy_grad.as_deref_mut() {
-                                return eg(ledger, trial);
-                            }
-                            let (energy, _) = relax(ledger, trial, 0);
-                            let gradient = grad.as_deref_mut().and_then(|g| g(ledger, trial))?;
-                            energy.is_finite().then_some((energy, gradient))
-                        };
-                        starts.extend(crate::known_basin::afir_av_starts(
-                            from_state.view(),
-                            &mobile,
-                            barrier,
-                            cfg.relax_steps,
-                            cfg.species.as_deref(),
-                            &mut afir_fg,
-                        ));
-                    }
-                    while starts.len() < crate::known_basin::LEAVE_AV_SEARCHES {
-                        let cover = crate::catalog::pick_leave_cover(n_cover, rng);
-                        starts.push(crate::known_basin::leave_packing_rung_to(
-                            from_state.view(),
-                            cover,
-                            barrier,
-                            &references,
-                            cfg.species.as_deref(),
-                            Some(mobile.as_slice()),
-                            |trial| Some(relax(ledger, trial, 0).0),
-                        ));
-                    }
                     let mut best_leave: Option<(f64, Array1<f64>)> = None;
                     for start in starts {
                         let (energy, landed) = relax(ledger, start.view(), cfg.relax_steps);

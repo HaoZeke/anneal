@@ -31,6 +31,7 @@ use std::cell::RefCell;
 use ndarray::{Array1, Array2, ArrayView1};
 
 use crate::catalog::packing::{MINIMUM_PACKING_ATOMS, PACKING_SPEC};
+use crate::movekernel::MoveKernel;
 use crate::soap::{jacobian_nu3, local_nu3_z};
 
 struct Well {
@@ -1517,6 +1518,199 @@ where
     starts
 }
 
+/// Neighbour cutoff the hop uses in reduced Lennard-Jones units.
+pub const LEAVE_NEIGHBOUR_CUTOFF: f64 = 1.6;
+
+fn coordination(x: ArrayView1<f64>, cutoff: f64) -> Vec<usize> {
+    let n = x.len() / 3;
+    let cut2 = cutoff * cutoff;
+    let mut coord = vec![0usize; n];
+    for a in 0..n {
+        for b in (a + 1)..n {
+            let mut d2 = 0.0;
+            for k in 0..3 {
+                let d = x[3 * a + k] - x[3 * b + k];
+                d2 += d * d;
+            }
+            if d2 < cut2 {
+                coord[a] += 1;
+                coord[b] += 1;
+            }
+        }
+    }
+    coord
+}
+
+fn worst_mobile(mobile: &[usize], coord: &[usize]) -> Option<usize> {
+    mobile
+        .iter()
+        .copied()
+        .filter(|&a| a < coord.len())
+        .min_by_key(|&a| coord[a])
+}
+
+fn unit3<R: rand::Rng + ?Sized>(rng: &mut R) -> [f64; 3] {
+    loop {
+        let x = rng.random::<f64>() * 2.0 - 1.0;
+        let y = rng.random::<f64>() * 2.0 - 1.0;
+        let z = rng.random::<f64>() * 2.0 - 1.0;
+        let n2 = x * x + y * y + z * z;
+        if n2 > 1e-12 {
+            let n = n2.sqrt();
+            return [x / n, y / n, z / n];
+        }
+    }
+}
+
+/// Least-coordinated leftover atom placed on the outer shell.
+///
+/// This is [`crate::movekernel::SurfaceRelocate`] with the mover taken
+/// from the packing active volume, not from the whole cluster.
+pub fn leave_av_surface<R: rand::Rng + ?Sized>(
+    x: ArrayView1<f64>,
+    mobile: &[usize],
+    neighbour_cutoff: f64,
+    rng: &mut R,
+) -> Array1<f64> {
+    let n = x.len() / 3;
+    let Some(mover) = worst_mobile(mobile, &coordination(x, neighbour_cutoff)) else {
+        return x.to_owned();
+    };
+    if n < 2 || mover >= n {
+        return x.to_owned();
+    }
+    let mut c = [0.0; 3];
+    for a in 0..n {
+        for k in 0..3 {
+            c[k] += x[3 * a + k];
+        }
+    }
+    let inv = 1.0 / n as f64;
+    for k in 0..3 {
+        c[k] *= inv;
+    }
+    let mut shell = 0.0;
+    for a in 0..n {
+        if a == mover {
+            continue;
+        }
+        let mut d2 = 0.0;
+        for k in 0..3 {
+            let d = x[3 * a + k] - c[k];
+            d2 += d * d;
+        }
+        shell = shell.max(d2.sqrt());
+    }
+    let dir = unit3(rng);
+    let r = shell * (0.85 + 0.20 * rng.random::<f64>());
+    let mut out = x.to_owned();
+    for k in 0..3 {
+        out[3 * mover + k] = c[k] + dir[k] * r;
+    }
+    out
+}
+
+/// Least-coordinated leftover atom moved onto the best hollow site.
+///
+/// Shao, Cheng and Cai (*J. Comput. Chem.* **25**, 1693 (2004),
+/// <https://doi.org/10.1002/jcc.20096>): the lattice is read off the
+/// live structure. Occupancy only restricts which atom may move.
+pub fn leave_av_hollow<R: rand::Rng + ?Sized>(
+    x: ArrayView1<f64>,
+    mobile: &[usize],
+    neighbour_cutoff: f64,
+    rng: &mut R,
+) -> Array1<f64> {
+    let n = x.len() / 3;
+    let Some(mover) = worst_mobile(mobile, &coordination(x, neighbour_cutoff)) else {
+        return x.to_owned();
+    };
+    let kernel = crate::movekernel::HollowRelocate {
+        n_points: n,
+        neighbour_cutoff,
+    };
+    let sites = kernel.sites(x, mover);
+    let Some(best) = sites.iter().map(|(_, c)| *c).max() else {
+        return leave_av_surface(x, mobile, neighbour_cutoff, rng);
+    };
+    let candidates: Vec<&([f64; 3], usize)> = sites.iter().filter(|(_, c)| *c == best).collect();
+    let pick = candidates[rng.random_range(0..candidates.len())].0;
+    let mut out = x.to_owned();
+    for k in 0..3 {
+        out[3 * mover + k] = pick[k];
+    }
+    out
+}
+
+/// Repeated hollow moves of leftover atoms until the surface saturates.
+pub fn leave_av_fill<R: rand::Rng + ?Sized>(
+    x: ArrayView1<f64>,
+    mobile: &[usize],
+    neighbour_cutoff: f64,
+    max_moves: usize,
+    rng: &mut R,
+) -> Array1<f64> {
+    let n = x.len() / 3;
+    if n < 4 || mobile.is_empty() {
+        return leave_av_hollow(x, mobile, neighbour_cutoff, rng);
+    }
+    let kernel = crate::movekernel::HollowRelocate {
+        n_points: n,
+        neighbour_cutoff,
+    };
+    let mut cur = x.to_owned();
+    let mut moved = false;
+    for _ in 0..max_moves.max(1) {
+        let coord = coordination(cur.view(), neighbour_cutoff);
+        let Some(mover) = worst_mobile(mobile, &coord) else {
+            break;
+        };
+        let sites = kernel.sites(cur.view(), mover);
+        let Some(best) = sites.iter().map(|(_, c)| *c).max() else {
+            break;
+        };
+        if best <= coord[mover] {
+            break;
+        }
+        let candidates: Vec<&([f64; 3], usize)> =
+            sites.iter().filter(|(_, c)| *c == best).collect();
+        let pick = candidates[rng.random_range(0..candidates.len())].0;
+        for k in 0..3 {
+            cur[3 * mover + k] = pick[k];
+        }
+        moved = true;
+    }
+    if moved {
+        cur
+    } else {
+        leave_av_hollow(x, mobile, neighbour_cutoff, rng)
+    }
+}
+
+/// Packing-changing Leave starts on the leftover: hollow, fill, surface,
+/// then a shell twist. Sphere covers and AFIR stay available; they do
+/// not leave this funnel under a raw quench.
+pub fn leave_av_packing_starts<R: rand::Rng + ?Sized>(
+    x: ArrayView1<f64>,
+    mobile: &[usize],
+    neighbour_cutoff: f64,
+    count: usize,
+    rng: &mut R,
+) -> Vec<Array1<f64>> {
+    let n = x.len() / 3;
+    let mut starts = Vec::with_capacity(count);
+    for k in 0..count {
+        let start = match k % 4 {
+            0 => leave_av_hollow(x, mobile, neighbour_cutoff, rng),
+            1 => leave_av_fill(x, mobile, neighbour_cutoff, 12, rng),
+            2 => leave_av_surface(x, mobile, neighbour_cutoff, rng),
+            _ => crate::movekernel::ShellRotate { n_points: n }.propose(x, 0.0, rng),
+        };
+        starts.push(start);
+    }
+    starts
+}
+
 /// [`leave_packing_rung_to`] along a packed feature direction already in hand.
 pub fn leave_packing_rung_to_dir<E>(
     x: ArrayView1<f64>,
@@ -1921,6 +2115,7 @@ where
 mod tests {
     use super::*;
     use ndarray::Array1;
+    use rand::SeedableRng;
 
     #[test]
     fn unarmed_effective_is_the_raw_surface() {
@@ -1948,6 +2143,26 @@ mod tests {
         let x = Array1::from(vec![0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0]);
         let index = farthest_packing_cover(x.view(), &[], 7);
         assert!(index < 7);
+    }
+
+    #[test]
+    fn leave_av_surface_moves_the_leftover_atom() {
+        let x = Array1::from(vec![
+            0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.5, 0.87, 0.0, 0.5, 0.29, 0.82, 4.0, 0.0, 0.0,
+        ]);
+        let mut rng = rand::rngs::StdRng::seed_from_u64(1);
+        let start = leave_av_surface(x.view(), &[4], 1.6, &mut rng);
+        let moved = (0..3)
+            .map(|k| {
+                let d = start[12 + k] - x[12 + k];
+                d * d
+            })
+            .sum::<f64>()
+            .sqrt();
+        assert!(
+            moved > 0.1,
+            "leftover atom must be relocated, moved={moved}"
+        );
     }
 
     #[test]
