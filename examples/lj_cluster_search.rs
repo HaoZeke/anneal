@@ -72,7 +72,9 @@ fn apply_occupancy_superbasin(cfg: &mut Config, n: usize) {
     // the plain surface as an arm. Kappa 0.7 is the measured fastest
     // relative cutoff that still crosses on 38 and 75.
     if cfg.surfaces.is_empty() && cfg.two_phase.is_none() {
-        cfg.surfaces = vec![anneal_core::methods::two_phase::TwoPhase::relative(0.7, 1.0)];
+        cfg.surfaces = vec![anneal_core::methods::two_phase::TwoPhase::relative(
+            0.7, 1.0,
+        )];
     }
 }
 
@@ -2671,11 +2673,8 @@ fn leave_packing_state<R: rand::Rng + ?Sized>(
     // They are not charged, because the checkpoint path holds no ledger, and
     // they are the price of a step sized by the structure instead of by a
     // length that suits one cluster and melts another.
-    let mobile = anneal_core::soap::packing_active_volume(
-        x,
-        anneal_core::catalog::PACKING_SPEC,
-        species,
-    );
+    let mobile =
+        anneal_core::soap::packing_active_volume(x, anneal_core::catalog::PACKING_SPEC, species);
     anneal_core::known_basin::leave_packing_rung_to(
         x,
         cover_index,
@@ -4291,6 +4290,13 @@ fn run_capnp_catalog(
                 snapshot.best_energy(),
                 snapshot.hops()
             );
+            if cfg.n_points == 75 {
+                println!(
+                    "  Marks {:.6}  hops {}",
+                    snapshot.best_energy(),
+                    snapshot.hops()
+                );
+            }
             let _ = std::io::stdout().flush();
             announced_score = true;
         }
