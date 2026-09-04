@@ -419,6 +419,38 @@ fn a_one_packing_book_climbs_the_ridge() {
 }
 
 #[test]
+fn checkpoint_hears_the_book_before_leave_defers() {
+    let source = include_str!("../examples/lj_cluster_search.rs");
+    let checkpoint = source
+        .split("let mut checkpoint = |snapshot: ChainCheckpoint<'_>| {")
+        .nth(1)
+        .expect("catalog checkpoint callback must exist")
+        .split("let outcome = run_with_bias_at_checkpoints")
+        .next()
+        .expect("catalog checkpoint callback must end at the run");
+    let hear = checkpoint
+        .split("if leave_defers(leave_quiet, leave_patience, leave_crossing)")
+        .next()
+        .expect("leave_defers must exist");
+    assert!(
+        hear.contains("INCUMBENT_SAMPLE_DRAW") && hear.contains("SPARSE_SAMPLE_DRAW"),
+        "a replica hears the catalog prize and a sparse packing before Leave is allowed"
+    );
+    assert!(
+        hear.contains("catalog_incumbent"),
+        "a deeper heard packing is adopted without PolicyState Leave"
+    );
+    assert!(
+        !hear.contains("\"catalog_leave\""),
+        "catalog_leave refuses a Marks landing the throwaway book chains to ico"
+    );
+    assert!(
+        hear.contains("catalog_ridge"),
+        "extras climb the ridge without waiting for Remote policy"
+    );
+}
+
+#[test]
 fn occupied_packing_extras_do_not_reseed_a_random_cluster() {
     let source = include_str!("../examples/lj_cluster_search.rs");
     let extra = source
