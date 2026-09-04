@@ -273,6 +273,23 @@ fn occupancy_leave_action_does_not_fall_back_to_a_random_cluster() {
         server.contains("scientific.packing.occupied_family_count()"),
         "PolicyState occupied_family_count is occupied DECAF families, not worthwhile EI"
     );
+    let policy_state = server
+        .split("CatalogOperation::PolicyState")
+        .nth(1)
+        .and_then(|chunk| chunk.split("CatalogOperation::PopulationSubmit").next())
+        .expect("PolicyState arm must exist");
+    assert!(
+        !policy_state.contains("report_occupancy_gt"),
+        "PolicyState must not fold, floor, or report GT on the hop path"
+    );
+    assert!(
+        !policy_state.contains("occupancy_floor("),
+        "PolicyState must not recompute the occupancy floor"
+    );
+    assert!(
+        !policy_state.contains("occupancy_funnel_ei_exhausted("),
+        "PolicyState must not feed the funnel"
+    );
     assert!(
         server.contains("q_ei_family_entry"),
         "WAVE OtherFamily draws cycle q-EI, not a single highest-EI family"
