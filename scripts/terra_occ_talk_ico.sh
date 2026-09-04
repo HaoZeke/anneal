@@ -9,7 +9,7 @@ ROOT="${1:-${HOME}/Git/Github/Rust/anneal}"
 cd "$ROOT"
 STAMP=$(date -u +%Y%m%dT%H%M%SZ)
 OUT="${ROOT}/logs/occ-talk-${STAMP}"
-mkdir -p "${OUT}/state" "${OUT}/traces"
+mkdir -p "${OUT}/traces"
 LOG="${OUT}/wrapper.log"
 exec > >(tee -a "${LOG}") 2>&1
 echo "commit=$(git rev-parse HEAD)"
@@ -36,7 +36,6 @@ REPLICA_LIST=$(seq -s, 0 $((REPLICAS - 1)))
   "$CAMPAIGN" \
   "$ENSEMBLE" \
   "$REPLICA_LIST" \
-  "$OUT/state" \
   >"$OUT/coordinator.jsonl" 2>"$OUT/coordinator.err" &
 server_pid=$!
 endpoint=
@@ -73,7 +72,6 @@ for replica in $(seq 0 $((REPLICAS - 1))); do
     export CATALOG_MAX_HOPS=60000
     export CATALOG_START_FILE="${ROOT}/tests/fixtures/lj75_ico.xyz"
     export CATALOG_START_REPLICA=all
-    export CATALOG_TRACE="$OUT/traces/replica-${replica}.jsonl"
     export SEED_OFFSET=$((1800000 + replica))
     exec "$BIN" "$N" "$BUDGET" 1 rec
   ) >"$OUT/replica-${replica}.out" 2>"$OUT/replica-${replica}.err" &
