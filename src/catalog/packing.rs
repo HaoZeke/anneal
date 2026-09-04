@@ -78,10 +78,10 @@ pub struct PackingBook {
     /// draw.
     well_visits: Vec<u64>,
     histogram_cache: RefCell<Vec<CachedHistogram>>,
-    /// Single-linkage labels of [`Self::occupied_histograms`], keyed by
-    /// [`Self::version`]. PolicyState and every visit ask for the fold;
-    /// recomputing it on an unchanged book is the hop-path park.
-    community_cache: RefCell<Option<(u64, Vec<usize>)>>,
+    /// Incremental single-linkage parents of [`Self::families`] at
+    /// [`PACKING_LINK`]. A new cell unions against the book once; visits
+    /// do not rebuild the whole fold.
+    community_parent: Vec<usize>,
 }
 
 /// One remembered histogram and the path that built it.
@@ -121,8 +121,11 @@ impl PackingBook {
         self.families.push(histogram);
         self.visits.push(1);
         self.well_visits.push(0);
+        let index = self.families.len() - 1;
+        self.community_parent.push(index);
+        self.union_new_cell(index);
         self.version = self.version.wrapping_add(1);
-        Some(self.families.len() - 1)
+        Some(index)
     }
 
     /// Credit one leftover-SOAP well arrival to this packing family.
@@ -229,24 +232,48 @@ impl PackingBook {
             .map_or(0, |last| last + 1)
     }
 
-    /// Occupied cells and their cached packing-community labels.
-    fn occupied_community_labels(&self) -> (Vec<(usize, Vec<f64>)>, Vec<usize>) {
-        let occupied = self.occupied_histograms();
-        {
-            let cache = self.community_cache.borrow();
-            if let Some((version, labels)) = cache.as_ref()
-                && *version == self.version
-                && labels.len() == occupied.len()
-            {
-                return (occupied, labels.clone());
+    fn find_community(&self, mut node: usize) -> usize {
+        let n = self.community_parent.len();
+        if n == 0 || node >= n {
+            return node;
+        }
+        while self.community_parent[node] != node {
+            node = self.community_parent[node];
+        }
+        node
+    }
+
+    fn union_new_cell(&mut self, index: usize) {
+        for other in 0..index {
+            if self.visits.get(other).copied().unwrap_or(0) == 0 {
+                continue;
+            }
+            if packing_distance(&self.families[index], &self.families[other]) > PACKING_LINK {
+                continue;
+            }
+            let a = self.find_community(index);
+            let b = self.find_community(other);
+            if a != b {
+                self.community_parent[a] = b;
             }
         }
-        let histograms: Vec<Vec<f64>> = occupied
+    }
+
+    /// Occupied cells and their incremental packing-community labels.
+    pub fn occupied_community_labels(&self) -> (Vec<(usize, Vec<f64>)>, Vec<usize>) {
+        let occupied = self.occupied_histograms();
+        let raw: Vec<usize> = occupied
             .iter()
-            .map(|(_, histogram)| histogram.clone())
+            .map(|(index, _)| self.find_community(*index))
             .collect();
-        let labels = packing_communities(&histograms);
-        *self.community_cache.borrow_mut() = Some((self.version, labels.clone()));
+        let mut seen: BTreeMap<usize, usize> = BTreeMap::new();
+        let labels = raw
+            .into_iter()
+            .map(|root| {
+                let next = seen.len();
+                *seen.entry(root).or_insert(next)
+            })
+            .collect();
         (occupied, labels)
     }
 

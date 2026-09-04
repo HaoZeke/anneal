@@ -833,7 +833,7 @@ pub fn occupancy_sparsify_book(
 
 /// Landfold-sparsify the occupied packing book.
 pub fn occupancy_sparsify_packing(book: &super::packing::PackingBook) -> OccupancyBookMap {
-    let occupied = book.occupied_histograms();
+    let (occupied, labels) = book.occupied_community_labels();
     let histograms: Vec<Vec<f64>> = occupied
         .iter()
         .map(|(_, histogram)| histogram.clone())
@@ -843,6 +843,24 @@ pub fn occupancy_sparsify_packing(book: &super::packing::PackingBook) -> Occupan
         .iter()
         .map(|&index| book.well_visits_of(index))
         .collect();
+    // Well-credited cells plus one empty representative per community.
+    // The ico shelf opens hundreds of uncredited cells; folding all of
+    // them is the hop-path park.
+    let mut keep: Vec<usize> = Vec::new();
+    let mut empty_rep = std::collections::BTreeSet::new();
+    for (i, well) in wells.iter().copied().enumerate() {
+        if well > 0 {
+            keep.push(i);
+        } else if empty_rep.insert(labels.get(i).copied().unwrap_or(i)) {
+            keep.push(i);
+        }
+    }
+    if keep.len() == occupied.len() {
+        return occupancy_sparsify_book(&histograms, &family, &wells);
+    }
+    let histograms: Vec<Vec<f64>> = keep.iter().map(|&i| histograms[i].clone()).collect();
+    let family: Vec<usize> = keep.iter().map(|&i| family[i]).collect();
+    let wells: Vec<u64> = keep.iter().map(|&i| wells[i]).collect();
     occupancy_sparsify_book(&histograms, &family, &wells)
 }
 
