@@ -2,11 +2,10 @@
 //!
 //!     leave_packing_probe [LEAVES] [RELAX_STEPS] [MODE]
 //!
-//! `MODE=av` runs the occupancy-general starts on the packing leftover:
-//! SHS energy minima on that sphere, a farthest-point packing cover,
-//! SC-AFIR push and peel of leftover versus core, and AV-restricted
-//! covering rungs. Each start is quenched raw and with the Locatelli–
-//! Schoen first phase.
+//! `MODE=av` runs leftover sphere and AFIR starts (they quench back to
+//! the icosahedral floor). `MODE=pack` runs the hop's packing-changing
+//! moves on that leftover: hollow-site relocate, a hollow fill, a
+//! surface relocate, and a shell twist, each raw-quenched.
 //!
 //! Without `MODE`, the older generators are run from the same icosahedral
 //! minimum, each `LEAVES` times, and each result is classified against
@@ -31,8 +30,10 @@ use anneal_core::catalog::{PACKING_LINK, PackingBook, leaves_packing, packing_li
 use anneal_core::known_basin;
 use anneal_core::methods::activation::{Activation, activate_from_origin};
 use anneal_core::methods::warm_lbfgs::WarmLbfgs;
+use anneal_core::movekernel::MoveKernel;
 use anneal_core::potentials::{PairKind, PairPotential};
 use ndarray::{Array1, ArrayView1};
+use rand::SeedableRng;
 
 fn load_xyz(text: &str) -> Array1<f64> {
     let coordinates = text
@@ -400,6 +401,60 @@ fn main() {
         report("av_fps_2p", &av_fps_2p, leaves + 1);
         report("av_afir", &av_afir, afir_starts.len());
         report("av_afir_2p", &av_afir_2p, afir_starts.len());
+        return;
+    }
+
+    if std::env::args().nth(3).as_deref() == Some("pack") {
+        let mobile = anneal_core::soap::packing_active_volume(
+            ico.view(),
+            anneal_core::catalog::PACKING_SPEC,
+            None,
+        );
+        println!(
+            "{{\"kind\":\"leave_probe_av\",\"mobile\":{},\"n\":{}}}",
+            mobile.len(),
+            ico.len() / 3
+        );
+        let mut av_hollow = Tally {
+            best: ico_energy,
+            ..Tally::default()
+        };
+        let mut av_fill = Tally {
+            best: ico_energy,
+            ..Tally::default()
+        };
+        let mut av_surf = Tally {
+            best: ico_energy,
+            ..Tally::default()
+        };
+        let mut av_shell = Tally {
+            best: ico_energy,
+            ..Tally::default()
+        };
+        let mut rng = rand::rngs::StdRng::seed_from_u64(1);
+        let cutoff = known_basin::LEAVE_NEIGHBOUR_CUTOFF;
+        for index in 0..leaves {
+            let start = known_basin::leave_av_hollow(ico.view(), &mobile, cutoff, &mut rng);
+            let trial = quench(&potential, start.view(), steps);
+            classify("av_hollow", index, &mut av_hollow, &trial, None);
+            let start = known_basin::leave_av_fill(ico.view(), &mobile, cutoff, 12, &mut rng);
+            let trial = quench(&potential, start.view(), steps);
+            classify("av_fill", index, &mut av_fill, &trial, None);
+            let start = known_basin::leave_av_surface(ico.view(), &mobile, cutoff, &mut rng);
+            let trial = quench(&potential, start.view(), steps);
+            classify("av_surf", index, &mut av_surf, &trial, None);
+            let start = anneal_core::movekernel::ShellRotate {
+                n_points: ico.len() / 3,
+            }
+            .propose(ico.view(), 0.0, &mut rng);
+            let trial = quench(&potential, start.view(), steps);
+            classify("av_shell", index, &mut av_shell, &trial, None);
+            let _ = std::io::Write::flush(&mut std::io::stdout());
+        }
+        report("av_hollow", &av_hollow, leaves);
+        report("av_fill", &av_fill, leaves);
+        report("av_surf", &av_surf, leaves);
+        report("av_shell", &av_shell, leaves);
         return;
     }
 
