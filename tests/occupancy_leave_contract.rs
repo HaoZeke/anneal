@@ -306,12 +306,12 @@ fn leave_quench_keeps_the_walk_off_mu_k() {
         "Leave quenches the offered destination"
     );
     assert!(
-        body.contains("packing_active_volume") && body.contains("LEAVE_AV_SEARCHES"),
-        "Leave catalogs several active-volume starts and discards the unused ones"
+        body.contains("leave_av_walk"),
+        "Leave walks packing hops from the live well, not a cover of the occupied tangent"
     );
     assert!(
-        body.contains("shs_av_starts") && body.contains("farthest_packing_cover"),
-        "Leave ranks SHS downward distortions and FPS covers, not a random cover"
+        !body.contains("shs_av_starts") && !body.contains("farthest_packing_cover"),
+        "sphere covers quench back into the occupied funnel"
     );
 }
 
