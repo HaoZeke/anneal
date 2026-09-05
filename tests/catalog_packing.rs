@@ -1,6 +1,7 @@
 use anneal_core::catalog::{
     OccupancyCertificate, OccupancyFold, PACKING_LINK, PACKING_MERGE, PACKING_MOVE_EPS,
     PackingBook, ape_highlight_queue, ape_local_seed, different_decaf_family,
+    occupied_unseen_share,
     include_packing_reference, leaves_packing,
     nearby_packing,
     lens_ring_displacement, occupancy_fes_delta, occupancy_fes_from_histograms,
@@ -87,6 +88,13 @@ fn ape_queue_highlights_ico_atoms_by_decaf_class() {
         .sum::<f64>()
         .sqrt();
     assert!((moved - 0.2).abs() < 1e-9, "APE seed moves only the highlighted atom");
+    set_packing_references(Vec::new());
+    remember_packing_reference(ico);
+    assert_eq!(
+        occupied_unseen_share(ico),
+        0.0,
+        "the occupied structure has no unseen local classes against itself"
+    );
 }
 
 #[test]
