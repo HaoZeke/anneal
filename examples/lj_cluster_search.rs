@@ -3947,6 +3947,7 @@ fn run_capnp_catalog(
     let mut count_other_family = 0usize;
     let mut count_walk = 0usize;
     let mut count_hole = 0usize;
+    let mut extra_cover = 0usize;
     let mut last_policy_action = ACTION_LOCAL;
     let mut checkpoint = |snapshot: ChainCheckpoint<'_>| {
         if core_class.is_some() {
@@ -4771,24 +4772,44 @@ fn run_capnp_catalog(
             if neighbors.is_empty() {
                 anneal_core::known_basin::disarm();
             } else if replica % 2 == 1 {
-                // Same occupied packing as another chain. The catalog
-                // already holds this superbasin. Retire the extra.
-                // Do not quench it home.
+                // DECAF says this packing is occupied. APE
+                // (Anelli, Engel, Pickard, Ceriotti, Phys. Rev.
+                // Materials 2, 103804 (2018)) walks the farthest
+                // unused cover on the packing-mean sphere, not a
+                // quench back onto ico and not a roster retire.
+                let references = anneal_core::catalog::packing_references();
+                let n_cover = anneal_core::catalog::cover_arm_count().max(1);
+                let cover = (anneal_core::known_basin::farthest_packing_cover(
+                    snapshot.current_state(),
+                    &references,
+                    n_cover,
+                ) + extra_cover)
+                    % n_cover;
+                extra_cover = extra_cover.saturating_add(1);
+                anneal_core::known_basin::arm_leave_cover(cover);
+                anneal_core::known_basin::arm_leave_free(
+                    snapshot.current_state(),
+                    anneal_core::known_basin::LEAVE_RUNG_RMSD,
+                    &neighbors,
+                    run_cfg.temperature,
+                    run_cfg.temperature,
+                );
                 println!(
-                    "  retire occupied_superbasin hops {} neighbors {}",
+                    "  ape ridge cover {} hops {} neighbors {}",
+                    cover,
                     snapshot.hops(),
                     neighbors.len()
                 );
                 let _ = std::io::stdout().flush();
-                let _ = cooperative.detach(replica, "occupied_superbasin");
                 return complete_checkpoint_trace(
                     &mut cooperative,
                     replica,
                     &mut slice_sequence,
                     checkpoint_charged,
                     snapshot.best_energy(),
-                    |_cooperative, _slice_sequence| CheckpointAction::Retire {
-                        reason: "occupied_superbasin".to_owned(),
+                    |_cooperative, _slice_sequence| CheckpointAction::BoundaryProposal {
+                        state: snapshot.current_state().to_owned(),
+                        action: "catalog_ridge".to_owned(),
                     },
                 );
             }
@@ -5421,6 +5442,14 @@ fn run_capnp_catalog(
                         return CheckpointAction::Continue;
                     }
                     OccupancyLeaveTarget::Ridge => {
+                        if replica % 2 == 0 {
+                            count_walk += 1;
+                            trace.adoption = SliceAdoption::Rejected;
+                            cooperative
+                                .record_slice(replica, trace)
+                                .expect("checkpoint trace must remain complete");
+                            return CheckpointAction::Continue;
+                        }
                         count_hole += 1;
                         trace.proposal_family = ProposalFamily::DescriptorHole;
                         trace.adoption = SliceAdoption::Adopted;

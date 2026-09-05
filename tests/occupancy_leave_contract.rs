@@ -413,8 +413,8 @@ fn a_one_packing_book_climbs_the_ridge() {
     );
     let hop = include_str!("../src/methods/cluster_hopping.rs");
     assert!(
-        hop.contains("catalog_ridge") && hop.contains("activate("),
-        "catalog_ridge climbs until the mode force flips, then quenches"
+        hop.contains("catalog_ridge") && hop.contains("leave_packing_ridge"),
+        "catalog_ridge walks the APE cover in the DECAF packing map"
     );
     assert!(
         hop.contains("action == \"soap_push\"") && hop.contains("activate("),
@@ -469,16 +469,16 @@ fn checkpoint_hears_the_book_before_leave_defers() {
         "catalog_leave refuses a Marks landing the throwaway book chains to ico"
     );
     assert!(
-        hear.contains("nearby_packing") && hear.contains("occupied_superbasin"),
-        "an extra still in the occupied packing is retired, not quenched home"
+        hear.contains("nearby_packing") && hear.contains("farthest_packing_cover"),
+        "an extra in an occupied DECAF packing takes the APE farthest cover"
     );
     assert!(
-        hear.contains("detach"),
-        "the occupied extra tells the catalog it is leaving the roster"
+        hear.contains("ape ridge") && hear.contains("catalog_ridge"),
+        "the extra walks that cover instead of retiring or quenching home"
     );
     assert!(
-        !hear.contains("soap_push") && !hear.contains("catalog_ridge"),
-        "an occupied extra does not ridge or quench back onto the packing"
+        !hear.contains("occupied_superbasin") && !hear.contains("detach"),
+        "an occupied extra is the Leave, not a roster retire"
     );
     assert!(
         hear.contains("best_energy()") && hear.contains("1e-3"),
