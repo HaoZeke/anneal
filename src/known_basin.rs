@@ -26,7 +26,7 @@
 //! DECAF family, a raw-\(E\) polish sits on a true minimum of that
 //! well.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 
 use ndarray::{Array1, Array2, ArrayView1};
 
@@ -68,6 +68,17 @@ struct Armed {
 
 thread_local! {
     static ARMED: RefCell<Option<Armed>> = const { RefCell::new(None) };
+    static LEAVE_COVER: Cell<Option<usize>> = const { Cell::new(None) };
+}
+
+/// Arm the covering index the next `catalog_ridge` hop walks.
+pub fn arm_leave_cover(index: usize) {
+    LEAVE_COVER.with(|slot| slot.set(Some(index)));
+}
+
+/// Take the covering index armed for this Leave, if any.
+pub fn take_leave_cover() -> Option<usize> {
+    LEAVE_COVER.with(|slot| slot.take())
 }
 
 /// Arm the transformed quench for one occupancy Leave.

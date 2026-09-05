@@ -1517,48 +1517,34 @@ where
                 } else {
                     Vec::new()
                 };
-                // OtherFamily is a catalog draw. Ridge is the barrier:
-                // climb until the mode force flips, then quench the
-                // overshoot. A map kick plus a quench stays in the well.
+                // OtherFamily is a catalog draw. Ridge is APE in the
+                // DECAF packing map: farthest unused cover, barrier-sized
+                // rungs, quench only after the walk has spent the
+                // barrier, keep the landing only if it leaves the packing.
+                // A 16-step min-mode climb from the ico floor melts or
+                // projects home.
                 let quenched = if action == "catalog_ridge" {
-                    if let Some(g) = grad.as_deref_mut() {
-                        let act = crate::methods::activation::Activation {
-                            step: cfg.escape_amplitude.max(0.15),
-                            max_steps: cfg.escape_max_climb.max(16),
-                            overshoot: cfg.escape_overshoot.max(1.0),
-                            ..crate::methods::activation::Activation::default()
-                        };
-                        let sign = if rng.random::<bool>() { 1.0 } else { -1.0 };
-                        crate::methods::activation::activate(
+                    let atoms = from_state.len() / 3;
+                    let depth = from_energy.abs() / atoms.max(1) as f64;
+                    let n_cover = crate::catalog::cover_arm_count().max(1);
+                    let cover = crate::known_basin::take_leave_cover().unwrap_or_else(|| {
+                        crate::known_basin::farthest_packing_cover(
                             from_state.view(),
-                            |y| g(ledger, y),
-                            &act,
-                            sign,
+                            &references,
+                            n_cover,
                         )
-                        .and_then(|o| {
-                            if !o.crossed {
-                                return None;
-                            }
-                            let quenched =
-                                relax(ledger, o.state.view(), cfg.relax_steps);
-                            let home = from_state.as_slice().zip(quenched.1.as_slice()).is_some_and(
-                                |(origin, trial)| {
-                                    !crate::catalog::leaves_packing(
-                                        origin,
-                                        trial,
-                                        &crate::catalog::packing_references(),
-                                    )
-                                },
-                            );
-                            if home {
-                                Some(relax(ledger, o.state.view(), 0))
-                            } else {
-                                Some(quenched)
-                            }
-                        })
-                    } else {
-                        None
-                    }
+                    });
+                    crate::known_basin::leave_packing_ridge(
+                        from_state.view(),
+                        cover,
+                        &references,
+                        None,
+                        None,
+                        depth,
+                        cfg.relax_steps,
+                        |trial, steps| relax(ledger, trial, steps),
+                    )
+                    .map(|(energy, state, _rung)| (energy, state))
                     .unwrap_or_else(|| relax(ledger, from_state.view(), 0))
                 } else if action == "soap_push" {
                     // Off the occupied packing mean, then follow the
