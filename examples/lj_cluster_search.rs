@@ -4772,11 +4772,11 @@ fn run_capnp_catalog(
             if neighbors.is_empty() {
                 anneal_core::known_basin::disarm();
             } else if replica % 2 == 1 {
-                // Occupied packing. The library hop that mints a
-                // family is the fivefold residual (descriptor_hop):
-                // C5 length of this structure, not a destination
-                // packing. APE then dimers from that seed. Class-atom
-                // kicks on ico stay in ico.
+                // Occupied local environments. APE queues a dimer on
+                // one classified atom. The destination family is not
+                // a target. A residual that exists on this structure
+                // (fivefold or otherwise) is an offered seed, not a
+                // named morphology.
                 anneal_core::known_basin::arm_leave_free(
                     snapshot.current_state(),
                     anneal_core::known_basin::LEAVE_RUNG_RMSD,
@@ -4784,47 +4784,31 @@ fn run_capnp_catalog(
                     run_cfg.temperature,
                     run_cfg.temperature,
                 );
-                let mut fivefold_rng = rand::rngs::StdRng::seed_from_u64(
-                    (u64::from(replica) << 17)
-                        ^ (checkpoint_sequence as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15)
-                        ^ extra_cover as u64,
-                );
                 extra_cover = extra_cover.saturating_add(1);
-                let stepped = anneal_core::soap::step_away_fivefold(
-                    snapshot.current_state(),
-                    anneal_core::known_basin::LEAVE_RUNG_RMSD,
-                    &mut fivefold_rng,
-                );
-                let moved = stepped
-                    .iter()
-                    .zip(snapshot.current_state().iter())
-                    .any(|(a, b)| (a - b).abs() > 1e-12);
-                if moved {
-                    println!(
-                        "  fivefold seed hops {} d5 {:.4} neighbors {}",
-                        snapshot.hops(),
-                        anneal_core::soap::fivefold_length(stepped.view()),
-                        neighbors.len()
-                    );
-                    let _ = std::io::stdout().flush();
-                    return complete_checkpoint_trace(
-                        &mut cooperative,
-                        replica,
-                        &mut slice_sequence,
-                        checkpoint_charged,
-                        snapshot.best_energy(),
-                        |_cooperative, _slice_sequence| CheckpointAction::BoundaryProposal {
-                            state: stepped,
-                            action: "catalog_ridge".to_owned(),
-                        },
-                    );
-                }
                 let queue = anneal_core::catalog::ape_highlight_queue(here);
                 if queue.is_empty() {
                     anneal_core::known_basin::disarm();
                 } else {
-                    let (atom, class) = queue[extra_cover % queue.len()];
+                    let (atom, class) = queue[(extra_cover - 1) % queue.len()];
                     anneal_core::known_basin::arm_leave_cover(atom);
+                    let offered = if anneal_core::soap::fivefold_axis_count(
+                        snapshot.current_state(),
+                    ) >= 2
+                    {
+                        let mut residual_rng = rand::rngs::StdRng::seed_from_u64(
+                            (u64::from(replica) << 17)
+                                ^ (checkpoint_sequence as u64)
+                                    .wrapping_mul(0x9E37_79B9_7F4A_7C15)
+                                ^ extra_cover as u64,
+                        );
+                        anneal_core::soap::step_away_fivefold(
+                            snapshot.current_state(),
+                            anneal_core::known_basin::LEAVE_RUNG_RMSD,
+                            &mut residual_rng,
+                        )
+                    } else {
+                        snapshot.current_state().to_owned()
+                    };
                     println!(
                         "  ape seed atom {} class {} hops {} neighbors {}",
                         atom,
@@ -4840,7 +4824,7 @@ fn run_capnp_catalog(
                         checkpoint_charged,
                         snapshot.best_energy(),
                         |_cooperative, _slice_sequence| CheckpointAction::BoundaryProposal {
-                            state: snapshot.current_state().to_owned(),
+                            state: offered,
                             action: "catalog_ridge".to_owned(),
                         },
                     );
