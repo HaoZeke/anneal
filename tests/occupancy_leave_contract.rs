@@ -474,12 +474,12 @@ fn checkpoint_hears_the_book_before_leave_defers() {
         "catalog_leave refuses a Marks landing the throwaway book chains to ico"
     );
     assert!(
-        hear.contains("nearby_packing") && hear.contains("ape_highlight_queue"),
-        "an extra in an occupied DECAF packing queues local environment classes"
+        hear.contains("nearby_packing") && hear.contains("step_away_fivefold"),
+        "an extra in an occupied packing takes the fivefold residual, not a destination packing"
     );
     assert!(
-        hear.contains("ape seed atom") && hear.contains("catalog_ridge"),
-        "the extra seeds a dimer on a highlighted atom, not a packing-mean cover"
+        hear.contains("fivefold seed") && hear.contains("catalog_ridge"),
+        "the extra offers that residual as the APE dimer seed"
     );
     assert!(
         !hear.contains("occupied_superbasin") && !hear.contains("detach"),

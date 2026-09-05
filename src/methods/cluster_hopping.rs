@@ -1526,27 +1526,35 @@ where
                     let atoms = from_state.len() / 3;
                     let depth = from_energy.abs() / atoms.max(1) as f64;
                     let ceiling = from_energy + crate::known_basin::LEAVE_WALK_CLIMB * depth;
-                    let queue = from_state
-                        .as_slice()
-                        .map(crate::catalog::ape_highlight_queue)
-                        .unwrap_or_default();
-                    let atom = crate::known_basin::take_leave_cover().unwrap_or(0);
-                    let atom = if queue.iter().any(|(held, _)| *held == atom) {
-                        atom
+                    let offered = state
+                        .iter()
+                        .zip(from_state.iter())
+                        .any(|(a, b)| (a - b).abs() > 1e-12);
+                    let seed = if offered {
+                        state.clone()
                     } else {
-                        queue.first().map(|(held, _)| *held).unwrap_or(0)
+                        let queue = from_state
+                            .as_slice()
+                            .map(crate::catalog::ape_highlight_queue)
+                            .unwrap_or_default();
+                        let atom = crate::known_basin::take_leave_cover().unwrap_or(0);
+                        let atom = if queue.iter().any(|(held, _)| *held == atom) {
+                            atom
+                        } else {
+                            queue.first().map(|(held, _)| *held).unwrap_or(0)
+                        };
+                        from_state.as_slice().map_or_else(
+                            || from_state.to_owned(),
+                            |here| {
+                                Array1::from(crate::catalog::ape_local_seed(
+                                    here,
+                                    atom,
+                                    cfg.escape_amplitude.max(0.2),
+                                    hops,
+                                ))
+                            },
+                        )
                     };
-                    let seed = from_state.as_slice().map_or_else(
-                        || from_state.to_owned(),
-                        |here| {
-                            Array1::from(crate::catalog::ape_local_seed(
-                                here,
-                                atom,
-                                cfg.escape_amplitude.max(0.2),
-                                hops,
-                            ))
-                        },
-                    );
                     if let Some(g) = grad.as_deref_mut() {
                         let act = crate::methods::activation::Activation {
                             step: cfg.escape_amplitude.max(0.15),
