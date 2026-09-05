@@ -1536,8 +1536,25 @@ where
                             sign,
                         )
                         .and_then(|o| {
-                            o.crossed
-                                .then(|| relax(ledger, o.state.view(), cfg.relax_steps))
+                            if !o.crossed {
+                                return None;
+                            }
+                            let quenched =
+                                relax(ledger, o.state.view(), cfg.relax_steps);
+                            let home = from_state.as_slice().zip(quenched.1.as_slice()).is_some_and(
+                                |(origin, trial)| {
+                                    !crate::catalog::leaves_packing(
+                                        origin,
+                                        trial,
+                                        &crate::catalog::packing_references(),
+                                    )
+                                },
+                            );
+                            if home {
+                                Some(relax(ledger, o.state.view(), 0))
+                            } else {
+                                Some(quenched)
+                            }
                         })
                     } else {
                         None
@@ -1561,8 +1578,25 @@ where
                             1.0,
                         )
                         .and_then(|o| {
-                            o.crossed
-                                .then(|| relax(ledger, o.state.view(), cfg.relax_steps))
+                            if !o.crossed {
+                                return None;
+                            }
+                            let quenched =
+                                relax(ledger, o.state.view(), cfg.relax_steps);
+                            let home = from_state.as_slice().zip(quenched.1.as_slice()).is_some_and(
+                                |(origin, trial)| {
+                                    !crate::catalog::leaves_packing(
+                                        origin,
+                                        trial,
+                                        &crate::catalog::packing_references(),
+                                    )
+                                },
+                            );
+                            if home {
+                                Some(relax(ledger, o.state.view(), 0))
+                            } else {
+                                Some(quenched)
+                            }
                         })
                     } else {
                         None

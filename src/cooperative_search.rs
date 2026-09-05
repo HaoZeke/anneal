@@ -68,6 +68,8 @@ mod run {
         RideClaim,
         /// One charged transition-search result accepted by the coordinator.
         RideReport,
+        /// This replica left the live roster and told the coordinator why.
+        Retire,
     }
 
     impl TraceKind {
@@ -90,6 +92,7 @@ mod run {
                 Self::TransitionExecution => "transition_execution",
                 Self::RideClaim => "ride_claim",
                 Self::RideReport => "ride_report",
+                Self::Retire => "retire",
             }
         }
     }
@@ -2094,6 +2097,44 @@ mod run {
                 })
             };
             self.handle_population_result(replica, epoch, result)
+        }
+
+        /// Remove this replica from the live roster and record why.
+        pub fn detach(
+            &mut self,
+            replica: u32,
+            reason: &'static str,
+        ) -> Result<(), CooperativeRunError> {
+            let rpc_sequence = self.next_rpc_sequence(replica)?;
+            let result = {
+                let state = self.replica_mut(replica)?;
+                state.client.as_ref().map(|mailbox| {
+                    mailbox.exec(move |client| client.detach(rpc_sequence, reason))
+                })
+            };
+            match result {
+                None => {
+                    self.push_event(replica, TraceKind::SharingDisabled, None, None)?;
+                    Ok(())
+                }
+                Some(Ok(_)) => {
+                    self.push_event(replica, TraceKind::Retire, None, Some(reason))?;
+                    Ok(())
+                }
+                Some(Err(CatalogClientError::Rejected(rej))) => {
+                    self.push_event(
+                        replica,
+                        TraceKind::Rejection,
+                        None,
+                        Some(rejection_code(rej)),
+                    )?;
+                    Ok(())
+                }
+                Some(Err(_)) => {
+                    self.push_event(replica, TraceKind::RpcFallback, None, None)?;
+                    Ok(())
+                }
+            }
         }
 
         /// Decline this epoch so the replicas waiting on it are released.

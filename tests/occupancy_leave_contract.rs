@@ -469,12 +469,16 @@ fn checkpoint_hears_the_book_before_leave_defers() {
         "catalog_leave refuses a Marks landing the throwaway book chains to ico"
     );
     assert!(
-        hear.contains("nearby_packing") && hear.contains("push_away_clouds"),
-        "nearby chains take a SOAP pullback step at checkpoint cadence"
+        hear.contains("nearby_packing") && hear.contains("occupied_superbasin"),
+        "an extra still in the occupied packing is retired, not quenched home"
     );
     assert!(
-        hear.contains("soap_push"),
-        "the SOAP step is adopted without a packing quench"
+        hear.contains("detach"),
+        "the occupied extra tells the catalog it is leaving the roster"
+    );
+    assert!(
+        !hear.contains("soap_push") && !hear.contains("catalog_ridge"),
+        "an occupied extra does not ridge or quench back onto the packing"
     );
     assert!(
         hear.contains("best_energy()") && hear.contains("1e-3"),
