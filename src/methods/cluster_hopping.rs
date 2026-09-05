@@ -1576,15 +1576,27 @@ where
                                 return None;
                             }
                             let quenched = relax(ledger, o.state.view(), cfg.relax_steps);
-                            let home = from_state.as_slice().zip(quenched.1.as_slice()).is_some_and(
+                            let left = from_state.as_slice().zip(quenched.1.as_slice()).is_some_and(
                                 |(origin, trial)| {
-                                    !crate::catalog::leaves_packing(origin, trial, &references)
+                                    crate::catalog::leaves_packing(origin, trial, &references)
                                 },
                             );
-                            if home {
-                                None
-                            } else {
+                            if left {
                                 Some(quenched)
+                            } else if o
+                                .state
+                                .as_slice()
+                                .is_some_and(|overshoot| {
+                                    crate::catalog::occupied_unseen_share(overshoot) > 0.0
+                                })
+                            {
+                                // Quench is the occupied packing projector.
+                                // Unseen local classes on the overshoot are
+                                // the Leave. The destination packing is not
+                                // a target.
+                                Some(relax(ledger, o.state.view(), 0))
+                            } else {
+                                None
                             }
                         })
                     } else {
@@ -1664,7 +1676,10 @@ where
                         candidate = landed;
                     }
                 }
-                let walked_off = leave_action && left_packing(&candidate);
+                let novel = candidate
+                    .as_slice()
+                    .is_some_and(|trial| crate::catalog::occupied_unseen_share(trial) > 0.0);
+                let walked_off = leave_action && (left_packing(&candidate) || novel);
                 if leave_action {
                     if let Some(trial) = candidate.as_slice() {
                         let mut book = crate::catalog::PackingBook::default();

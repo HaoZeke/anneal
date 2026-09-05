@@ -692,6 +692,19 @@ pub fn ape_local_seed(coordinates: &[f64], atom: usize, amplitude: f64, draw: us
     out
 }
 
+/// Fraction of atoms whose local DECAF class is absent from the occupied book.
+///
+/// APE reclassifies the search endpoint against environments already on
+/// file. A positive share is a new local environment. The other packing
+/// is not a target and is not named.
+pub fn occupied_unseen_share(trial: &[f64]) -> f64 {
+    let mut book = PackingBook::default();
+    for reference in packing_references() {
+        book.observe(&reference);
+    }
+    book.unseen_share(trial).unwrap_or(0.0)
+}
+
 fn nearest_leader(leaders: &[Vec<f64>], row: &[f64]) -> Option<usize> {
     let mut best = None;
     for (index, leader) in leaders.iter().enumerate() {

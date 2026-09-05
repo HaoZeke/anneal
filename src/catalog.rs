@@ -87,7 +87,7 @@ pub use packing::{
     SEAM_WINDOW, SeamBank, credit_packing_deposit, deliver_frontier_post, different_decaf_family,
     different_packing_family, drain_frontier_arrivals, include_packing_reference, leaves_packing,
     nearby_packing, nearby_packing_book, atom_decaf_classes, ape_highlight_queue,
-    ape_local_seed,
+    ape_local_seed, occupied_unseen_share,
     leftover_arrivals_saturated, offer_frontier_post, offer_known_minimum, packing_communities,
     packing_community_count, packing_distance, packing_fingerprint, packing_link_labels,
     packing_reference_book, packing_references, packing_seam_gap, packing_vector,
