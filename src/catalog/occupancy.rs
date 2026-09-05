@@ -108,7 +108,11 @@
 pub fn is_occupancy_leave_action(action: &str) -> bool {
     matches!(
         action,
-        "hyperband_reseed" | "catalog_leave" | "catalog_ridge" | "population_reseed"
+        "hyperband_reseed"
+            | "catalog_leave"
+            | "catalog_ridge"
+            | "soap_push"
+            | "population_reseed"
     )
 }
 
@@ -368,7 +372,7 @@ pub fn occupancy_leave_adopt(action: &str, walked_off: bool) -> Option<Occupancy
     if !is_occupancy_leave_action(action) {
         return None;
     }
-    if matches!(action, "catalog_leave" | "catalog_ridge") && !walked_off {
+    if matches!(action, "catalog_leave" | "catalog_ridge" | "soap_push") && !walked_off {
         Some(OccupancyLeaveAdopt::Refuse)
     } else {
         Some(OccupancyLeaveAdopt::Quench)
@@ -2115,6 +2119,7 @@ mod tests {
         assert!(is_occupancy_leave_action("hyperband_reseed"));
         assert!(is_occupancy_leave_action("catalog_leave"));
         assert!(is_occupancy_leave_action("catalog_ridge"));
+        assert!(is_occupancy_leave_action("soap_push"));
         assert!(!is_occupancy_leave_action("catalog_incumbent"));
         assert!(!is_occupancy_leave_action("bridge"));
     }
@@ -2259,6 +2264,10 @@ mod tests {
         );
         assert_eq!(
             occupancy_leave_adopt("catalog_ridge", false),
+            Some(OccupancyLeaveAdopt::Refuse)
+        );
+        assert_eq!(
+            occupancy_leave_adopt("soap_push", false),
             Some(OccupancyLeaveAdopt::Refuse)
         );
         assert_eq!(

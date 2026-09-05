@@ -3890,6 +3890,9 @@ fn run_capnp_catalog(
             &mut local_rng,
         ),
     };
+    if let Some(coordinates) = start.as_slice() {
+        anneal_core::catalog::remember_packing_reference(coordinates);
+    }
     let mut candidate_sequence = 0u64;
     let mut checkpoint_sequence = 0u64;
     let mut slice_sequence = 0u64;
@@ -4768,60 +4771,24 @@ fn run_capnp_catalog(
             if neighbors.is_empty() {
                 anneal_core::known_basin::disarm();
             } else if replica % 2 == 1 {
-                // Crowded extras leave the occupied packing mean and
-                // follow that ridge. The champion (even) keeps walking.
-                anneal_core::known_basin::arm_leave_free(
-                    snapshot.current_state(),
-                    anneal_core::known_basin::LEAVE_RUNG_RMSD,
-                    &neighbors,
-                    run_cfg.temperature,
-                    run_cfg.temperature,
-                );
-                let neighbor_coords: Vec<Vec<f64>> = neighbors
-                    .iter()
-                    .map(|reference| reference.coordinates.clone())
-                    .collect();
-                if let Some(stepped) = anneal_core::soap::push_away_clouds(
-                    snapshot.current_state(),
-                    &neighbor_coords,
-                    anneal_core::catalog::PACKING_SPEC,
-                    anneal_core::known_basin::LEAVE_RUNG_RMSD,
-                ) {
-                    println!(
-                        "  soap ridge neighbors {} frozen {} hops {}",
-                        neighbors.len(),
-                        anneal_core::known_basin::invert_frozen_count(),
-                        snapshot.hops()
-                    );
-                    let _ = std::io::stdout().flush();
-                    return complete_checkpoint_trace(
-                        &mut cooperative,
-                        replica,
-                        &mut slice_sequence,
-                        checkpoint_charged,
-                        snapshot.best_energy(),
-                        |_cooperative, _slice_sequence| CheckpointAction::BoundaryProposal {
-                            state: stepped,
-                            action: "soap_push".to_owned(),
-                        },
-                    );
-                }
+                // Same occupied packing as another chain. The catalog
+                // already holds this superbasin. Retire the extra.
+                // Do not quench it home.
                 println!(
-                    "  invert neighbors {} frozen {} hops {}",
-                    neighbors.len(),
-                    anneal_core::known_basin::invert_frozen_count(),
-                    snapshot.hops()
+                    "  retire occupied_superbasin hops {} neighbors {}",
+                    snapshot.hops(),
+                    neighbors.len()
                 );
                 let _ = std::io::stdout().flush();
+                let _ = cooperative.detach(replica, "occupied_superbasin");
                 return complete_checkpoint_trace(
                     &mut cooperative,
                     replica,
                     &mut slice_sequence,
                     checkpoint_charged,
                     snapshot.best_energy(),
-                    |_cooperative, _slice_sequence| CheckpointAction::BoundaryProposal {
-                        state: snapshot.current_state().to_owned(),
-                        action: "catalog_ridge".to_owned(),
+                    |_cooperative, _slice_sequence| CheckpointAction::Retire {
+                        reason: "occupied_superbasin".to_owned(),
                     },
                 );
             }
