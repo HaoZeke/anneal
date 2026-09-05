@@ -634,13 +634,11 @@ pub fn atom_decaf_classes(coordinates: &[f64]) -> Vec<usize> {
     let mut leaders: Vec<Vec<f64>> = Vec::new();
     let mut classes = vec![0usize; n_at];
     for i in 0..n_at {
-        let Some(row) = loc.row(i).as_slice() else {
-            continue;
-        };
-        match nearest_leader(&leaders, row) {
+        let row = loc.row(i).to_vec();
+        match nearest_leader(&leaders, &row) {
             Some(class) => classes[i] = class,
             None => {
-                leaders.push(row.to_vec());
+                leaders.push(row);
                 classes[i] = leaders.len() - 1;
             }
         }
