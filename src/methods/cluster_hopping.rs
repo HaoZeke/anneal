@@ -1517,11 +1517,10 @@ where
                 } else {
                     Vec::new()
                 };
-                // OtherFamily is a catalog draw. Ridge is APE: DECAF
-                // highlights a local environment, the seed perturbs that
-                // atom, the dimer climbs with an energy ceiling so a
-                // melt is not a crossing. A packing-mean cover is not
-                // this Leave.
+                // OtherFamily is a catalog draw. Ridge is APE: classify
+                // local environments, seed a dimer on a highlighted
+                // atom, climb under an energy ceiling. An offered
+                // residual is the seed when the checkpoint moved.
                 let quenched = if action == "catalog_ridge" {
                     let atoms = from_state.len() / 3;
                     let depth = from_energy.abs() / atoms.max(1) as f64;
