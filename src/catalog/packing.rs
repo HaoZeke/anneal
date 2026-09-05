@@ -617,6 +617,83 @@ pub fn packing_fingerprint(coordinates: &[f64]) -> Option<Vec<f64>> {
     book.assign_growing(coordinates)
 }
 
+/// Per-atom DECAF class under a throwaway leader book of this structure.
+///
+/// Lai, Poths, Matera, Scheurer and Reuter (*Phys. Rev. Lett.* **134**,
+/// 096201 (2025)): APE classifies local environments and queues dimer
+/// searches on a highlighted atom, not a global packing-mean cover.
+pub fn atom_decaf_classes(coordinates: &[f64]) -> Vec<usize> {
+    if !coordinates.len().is_multiple_of(3) {
+        return Vec::new();
+    }
+    let loc = local_nu3_z(ArrayView1::from(coordinates), PACKING_SPEC, None);
+    let n_at = loc.nrows();
+    if n_at == 0 {
+        return Vec::new();
+    }
+    let mut leaders: Vec<Vec<f64>> = Vec::new();
+    let mut classes = vec![0usize; n_at];
+    for i in 0..n_at {
+        let Some(row) = loc.row(i).as_slice() else {
+            continue;
+        };
+        match nearest_leader(&leaders, row) {
+            Some(class) => classes[i] = class,
+            None => {
+                leaders.push(row.to_vec());
+                classes[i] = leaders.len() - 1;
+            }
+        }
+    }
+    classes
+}
+
+/// APE to-do list: atoms grouped by DECAF class, most occupied class first.
+///
+/// One queue entry per local environment class. The extra walks this
+/// list; each Leave highlights one atom and seeds a dimer there.
+pub fn ape_highlight_queue(coordinates: &[f64]) -> Vec<(usize, usize)> {
+    let classes = atom_decaf_classes(coordinates);
+    if classes.is_empty() {
+        return Vec::new();
+    }
+    let mut buckets: BTreeMap<usize, Vec<usize>> = BTreeMap::new();
+    for (atom, class) in classes.iter().copied().enumerate() {
+        buckets.entry(class).or_default().push(atom);
+    }
+    let mut order: Vec<(usize, Vec<usize>)> = buckets.into_iter().collect();
+    order.sort_by(|left, right| {
+        right
+            .1
+            .len()
+            .cmp(&left.1.len())
+            .then_with(|| left.0.cmp(&right.0))
+    });
+    order
+        .into_iter()
+        .flat_map(|(class, atoms)| atoms.into_iter().map(move |atom| (atom, class)))
+        .collect()
+}
+
+/// APE seed: displace the highlighted atom along a 3-space cover.
+pub fn ape_local_seed(coordinates: &[f64], atom: usize, amplitude: f64, draw: usize) -> Vec<f64> {
+    let mut out = coordinates.to_vec();
+    let n_at = out.len() / 3;
+    if atom >= n_at || !(amplitude.is_finite() && amplitude > 0.0) {
+        return out;
+    }
+    let direction = crate::hypersphere::cover_direction(8, 3, draw % 8);
+    let norm = direction.iter().map(|v| v * v).sum::<f64>().sqrt();
+    if !(norm.is_finite() && norm > 0.0) {
+        return out;
+    }
+    let scale = amplitude / norm;
+    for k in 0..3 {
+        out[3 * atom + k] += scale * direction[k];
+    }
+    out
+}
+
 fn nearest_leader(leaders: &[Vec<f64>], row: &[f64]) -> Option<usize> {
     let mut best = None;
     for (index, leader) in leaders.iter().enumerate() {
