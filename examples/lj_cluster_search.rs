@@ -4772,25 +4772,59 @@ fn run_capnp_catalog(
             if neighbors.is_empty() {
                 anneal_core::known_basin::disarm();
             } else if replica % 2 == 1 {
-                // DECAF classifies local environments. APE (Lai,
-                // Poths, Matera, Scheurer, Reuter, Phys. Rev. Lett.
-                // 134, 096201 (2025)) is a to-do list over those
-                // classes: highlight one atom, seed a dimer there.
-                // A global packing-mean cover is not that Leave.
+                // Occupied packing. The library hop that mints a
+                // family is the fivefold residual (descriptor_hop):
+                // C5 length of this structure, not a destination
+                // packing. APE then dimers from that seed. Class-atom
+                // kicks on ico stay in ico.
+                anneal_core::known_basin::arm_leave_free(
+                    snapshot.current_state(),
+                    anneal_core::known_basin::LEAVE_RUNG_RMSD,
+                    &neighbors,
+                    run_cfg.temperature,
+                    run_cfg.temperature,
+                );
+                let mut fivefold_rng = rand::rngs::StdRng::seed_from_u64(
+                    (u64::from(replica) << 17)
+                        ^ (checkpoint_sequence as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15)
+                        ^ extra_cover as u64,
+                );
+                extra_cover = extra_cover.saturating_add(1);
+                let stepped = anneal_core::soap::step_away_fivefold(
+                    snapshot.current_state(),
+                    anneal_core::known_basin::LEAVE_RUNG_RMSD,
+                    &mut fivefold_rng,
+                );
+                let moved = stepped
+                    .iter()
+                    .zip(snapshot.current_state().iter())
+                    .any(|(a, b)| (a - b).abs() > 1e-12);
+                if moved {
+                    println!(
+                        "  fivefold seed hops {} d5 {:.4} neighbors {}",
+                        snapshot.hops(),
+                        anneal_core::soap::fivefold_length(stepped.view()),
+                        neighbors.len()
+                    );
+                    let _ = std::io::stdout().flush();
+                    return complete_checkpoint_trace(
+                        &mut cooperative,
+                        replica,
+                        &mut slice_sequence,
+                        checkpoint_charged,
+                        snapshot.best_energy(),
+                        |_cooperative, _slice_sequence| CheckpointAction::BoundaryProposal {
+                            state: stepped,
+                            action: "catalog_ridge".to_owned(),
+                        },
+                    );
+                }
                 let queue = anneal_core::catalog::ape_highlight_queue(here);
                 if queue.is_empty() {
                     anneal_core::known_basin::disarm();
                 } else {
                     let (atom, class) = queue[extra_cover % queue.len()];
-                    extra_cover = extra_cover.saturating_add(1);
                     anneal_core::known_basin::arm_leave_cover(atom);
-                    anneal_core::known_basin::arm_leave_free(
-                        snapshot.current_state(),
-                        anneal_core::known_basin::LEAVE_RUNG_RMSD,
-                        &neighbors,
-                        run_cfg.temperature,
-                        run_cfg.temperature,
-                    );
                     println!(
                         "  ape seed atom {} class {} hops {} neighbors {}",
                         atom,
