@@ -1517,34 +1517,79 @@ where
                 } else {
                     Vec::new()
                 };
-                // OtherFamily is a catalog draw. Ridge is APE in the
-                // DECAF packing map: farthest unused cover, barrier-sized
-                // rungs, quench only after the walk has spent the
-                // barrier, keep the landing only if it leaves the packing.
-                // A 16-step min-mode climb from the ico floor melts or
-                // projects home.
+                // OtherFamily is a catalog draw. Ridge is APE: DECAF
+                // highlights a local environment, the seed perturbs that
+                // atom, the dimer climbs with an energy ceiling so a
+                // melt is not a crossing. A packing-mean cover is not
+                // this Leave.
                 let quenched = if action == "catalog_ridge" {
                     let atoms = from_state.len() / 3;
                     let depth = from_energy.abs() / atoms.max(1) as f64;
-                    let n_cover = crate::catalog::cover_arm_count().max(1);
-                    let cover = crate::known_basin::take_leave_cover().unwrap_or_else(|| {
-                        crate::known_basin::farthest_packing_cover(
+                    let ceiling = from_energy + crate::known_basin::LEAVE_WALK_CLIMB * depth;
+                    let queue = from_state
+                        .as_slice()
+                        .map(crate::catalog::ape_highlight_queue)
+                        .unwrap_or_default();
+                    let atom = crate::known_basin::take_leave_cover().unwrap_or(0);
+                    let atom = if queue.iter().any(|(held, _)| *held == atom) {
+                        atom
+                    } else {
+                        queue.first().map(|(held, _)| *held).unwrap_or(0)
+                    };
+                    let seed = from_state.as_slice().map_or_else(
+                        || from_state.to_owned(),
+                        |here| {
+                            Array1::from(crate::catalog::ape_local_seed(
+                                here,
+                                atom,
+                                cfg.escape_amplitude.max(0.2),
+                                hops,
+                            ))
+                        },
+                    );
+                    if let Some(g) = grad.as_deref_mut() {
+                        let act = crate::methods::activation::Activation {
+                            step: cfg.escape_amplitude.max(0.15),
+                            max_steps: cfg.escape_max_climb.max(48),
+                            overshoot: cfg.escape_overshoot.max(1.0),
+                            ..crate::methods::activation::Activation::default()
+                        };
+                        crate::methods::activation::activate_from_origin(
+                            seed.view(),
                             from_state.view(),
-                            &references,
-                            n_cover,
+                            |y| {
+                                let (energy, _) = relax(ledger, y, 0);
+                                if energy.is_finite() && energy <= ceiling {
+                                    g(ledger, y)
+                                } else {
+                                    None
+                                }
+                            },
+                            &act,
                         )
-                    });
-                    crate::known_basin::leave_packing_ridge(
-                        from_state.view(),
-                        cover,
-                        &references,
-                        None,
-                        None,
-                        depth,
-                        cfg.relax_steps,
-                        |trial, steps| relax(ledger, trial, steps),
-                    )
-                    .map(|(energy, state, _rung)| (energy, state))
+                        .and_then(|o| {
+                            if !o.crossed {
+                                return None;
+                            }
+                            let (rise, _) = relax(ledger, o.state.view(), 0);
+                            if !(rise.is_finite() && rise <= ceiling) {
+                                return None;
+                            }
+                            let quenched = relax(ledger, o.state.view(), cfg.relax_steps);
+                            let home = from_state.as_slice().zip(quenched.1.as_slice()).is_some_and(
+                                |(origin, trial)| {
+                                    !crate::catalog::leaves_packing(origin, trial, &references)
+                                },
+                            );
+                            if home {
+                                None
+                            } else {
+                                Some(quenched)
+                            }
+                        })
+                    } else {
+                        None
+                    }
                     .unwrap_or_else(|| relax(ledger, from_state.view(), 0))
                 } else if action == "soap_push" {
                     // Off the occupied packing mean, then follow the

@@ -4772,46 +4772,45 @@ fn run_capnp_catalog(
             if neighbors.is_empty() {
                 anneal_core::known_basin::disarm();
             } else if replica % 2 == 1 {
-                // DECAF says this packing is occupied. APE
-                // (Anelli, Engel, Pickard, Ceriotti, Phys. Rev.
-                // Materials 2, 103804 (2018)) walks the farthest
-                // unused cover on the packing-mean sphere, not a
-                // quench back onto ico and not a roster retire.
-                let references = anneal_core::catalog::packing_references();
-                let n_cover = anneal_core::catalog::cover_arm_count().max(1);
-                let cover = (anneal_core::known_basin::farthest_packing_cover(
-                    snapshot.current_state(),
-                    &references,
-                    n_cover,
-                ) + extra_cover)
-                    % n_cover;
-                extra_cover = extra_cover.saturating_add(1);
-                anneal_core::known_basin::arm_leave_cover(cover);
-                anneal_core::known_basin::arm_leave_free(
-                    snapshot.current_state(),
-                    anneal_core::known_basin::LEAVE_RUNG_RMSD,
-                    &neighbors,
-                    run_cfg.temperature,
-                    run_cfg.temperature,
-                );
-                println!(
-                    "  ape ridge cover {} hops {} neighbors {}",
-                    cover,
-                    snapshot.hops(),
-                    neighbors.len()
-                );
-                let _ = std::io::stdout().flush();
-                return complete_checkpoint_trace(
-                    &mut cooperative,
-                    replica,
-                    &mut slice_sequence,
-                    checkpoint_charged,
-                    snapshot.best_energy(),
-                    |_cooperative, _slice_sequence| CheckpointAction::BoundaryProposal {
-                        state: snapshot.current_state().to_owned(),
-                        action: "catalog_ridge".to_owned(),
-                    },
-                );
+                // DECAF classifies local environments. APE (Lai,
+                // Poths, Matera, Scheurer, Reuter, Phys. Rev. Lett.
+                // 134, 096201 (2025)) is a to-do list over those
+                // classes: highlight one atom, seed a dimer there.
+                // A global packing-mean cover is not that Leave.
+                let queue = anneal_core::catalog::ape_highlight_queue(here);
+                if queue.is_empty() {
+                    anneal_core::known_basin::disarm();
+                } else {
+                    let (atom, class) = queue[extra_cover % queue.len()];
+                    extra_cover = extra_cover.saturating_add(1);
+                    anneal_core::known_basin::arm_leave_cover(atom);
+                    anneal_core::known_basin::arm_leave_free(
+                        snapshot.current_state(),
+                        anneal_core::known_basin::LEAVE_RUNG_RMSD,
+                        &neighbors,
+                        run_cfg.temperature,
+                        run_cfg.temperature,
+                    );
+                    println!(
+                        "  ape seed atom {} class {} hops {} neighbors {}",
+                        atom,
+                        class,
+                        snapshot.hops(),
+                        neighbors.len()
+                    );
+                    let _ = std::io::stdout().flush();
+                    return complete_checkpoint_trace(
+                        &mut cooperative,
+                        replica,
+                        &mut slice_sequence,
+                        checkpoint_charged,
+                        snapshot.best_energy(),
+                        |_cooperative, _slice_sequence| CheckpointAction::BoundaryProposal {
+                            state: snapshot.current_state().to_owned(),
+                            action: "catalog_ridge".to_owned(),
+                        },
+                    );
+                }
             }
         }
         if leave_defers(leave_quiet, leave_patience, leave_crossing) {

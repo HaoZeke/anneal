@@ -1,6 +1,7 @@
 use anneal_core::catalog::{
     OccupancyCertificate, OccupancyFold, PACKING_LINK, PACKING_MERGE, PACKING_MOVE_EPS,
-    PackingBook, different_decaf_family, include_packing_reference, leaves_packing,
+    PackingBook, ape_highlight_queue, ape_local_seed, different_decaf_family,
+    include_packing_reference, leaves_packing,
     nearby_packing,
     lens_ring_displacement, occupancy_fes_delta, occupancy_fes_from_histograms,
     occupancy_landfold_floor, occupancy_leave_new_class, occupancy_leave_new_packing,
@@ -65,6 +66,27 @@ fn different_decaf_family_is_ico_versus_marks_not_an_ico_isomer() {
     let marks = marks.as_slice().unwrap();
     assert!(different_decaf_family(ico, marks));
     assert!(!different_decaf_family(ico, ico));
+}
+
+#[test]
+fn ape_queue_highlights_ico_atoms_by_decaf_class() {
+    let ico = load_xyz(include_str!("fixtures/lj75_ico.xyz"));
+    let ico = ico.as_slice().unwrap();
+    let queue = ape_highlight_queue(ico);
+    assert!(
+        !queue.is_empty(),
+        "APE must queue local environment classes on the sealed ico minimum"
+    );
+    assert_eq!(queue.len(), 75);
+    let seed = ape_local_seed(ico, queue[0].0, 0.2, 0);
+    let moved = (0..3)
+        .map(|k| {
+            let d = seed[3 * queue[0].0 + k] - ico[3 * queue[0].0 + k];
+            d * d
+        })
+        .sum::<f64>()
+        .sqrt();
+    assert!((moved - 0.2).abs() < 1e-9, "APE seed moves only the highlighted atom");
 }
 
 #[test]
