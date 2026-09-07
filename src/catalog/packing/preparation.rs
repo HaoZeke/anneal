@@ -7,28 +7,47 @@
 
 #[cfg(test)]
 use std::cell::Cell;
-use std::cell::RefCell;
 use std::collections::VecDeque;
-use std::rc::Rc;
+use std::sync::{Arc, Mutex};
 
 use ndarray::{Array2, ArrayView1};
 
 const MAX_RETAINED_BYTES: usize = 8 * 1024 * 1024;
 
+/// Process-wide cache of prepared rows. It was thread-local, which kept
+/// the coordinator's request thread from ever seeing rows the validation
+/// pool had prepared for the same candidate: every offer and visit paid
+/// the SOAP preparation again under the state lock (perf: atom_expand,
+/// ace::from_c and the allocator at a third of the request thread).
+/// Preparation runs outside the lock; a miss computes and then inserts.
+static ROWS: Mutex<RowCache> = Mutex::new(RowCache::new(MAX_RETAINED_BYTES));
+
+#[cfg(test)]
 thread_local! {
-    static ROWS: RefCell<RowCache> = const { RefCell::new(RowCache::new(MAX_RETAINED_BYTES)) };
-    #[cfg(test)]
     static PREPARATIONS: Cell<usize> = const { Cell::new(0) };
 }
 
-pub(super) fn packing_rows(coordinates: &[f64]) -> Rc<Array2<f64>> {
-    ROWS.with(|cache| {
-        cache.borrow_mut().get_or_prepare(coordinates, || {
-            #[cfg(test)]
-            PREPARATIONS.with(|count| count.set(count.get() + 1));
-            crate::soap::local_nu3_z(ArrayView1::from(coordinates), super::PACKING_SPEC, None)
-        })
-    })
+fn rows_cache() -> std::sync::MutexGuard<'static, RowCache> {
+    ROWS.lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+pub(super) fn packing_rows(coordinates: &[f64]) -> Arc<Array2<f64>> {
+    if let Some(rows) = rows_cache().lookup(coordinates) {
+        return rows;
+    }
+    #[cfg(test)]
+    PREPARATIONS.with(|count| count.set(count.get() + 1));
+    let rows = crate::soap::local_nu3_z(ArrayView1::from(coordinates), super::PACKING_SPEC, None);
+    rows_cache().insert(coordinates, rows)
+}
+
+/// Prepare and cache the rows of a structure so a later
+/// [`packing_rows`] on any thread is a lookup. The coordinator's
+/// validation pool calls this for every validated candidate before the
+/// request takes the state lock.
+pub fn prepare_rows(coordinates: &[f64]) {
+    let _ = packing_rows(coordinates);
 }
 
 struct RowCache {
@@ -39,7 +58,7 @@ struct RowCache {
 
 struct CachedRows {
     key: Box<[u64]>,
-    rows: Rc<Array2<f64>>,
+    rows: Arc<Array2<f64>>,
     payload_bytes: usize,
 }
 
@@ -52,29 +71,51 @@ impl RowCache {
         }
     }
 
+    fn retainable(coordinates: &[f64]) -> bool {
+        !coordinates.is_empty()
+            && coordinates.len().is_multiple_of(3)
+            && coordinates.iter().all(|value| value.is_finite())
+    }
+
+    fn lookup(&self, coordinates: &[f64]) -> Option<Arc<Array2<f64>>> {
+        if !Self::retainable(coordinates) {
+            return None;
+        }
+        self.entries
+            .iter()
+            .find(|entry| {
+                entry.key.len() == coordinates.len()
+                    && entry
+                        .key
+                        .iter()
+                        .zip(coordinates)
+                        .all(|(&bits, value)| bits == value.to_bits())
+            })
+            .map(|entry| Arc::clone(&entry.rows))
+    }
+
+    /// Rows for `coordinates`, preparing and retaining them on a miss.
     fn get_or_prepare(
         &mut self,
         coordinates: &[f64],
         prepare: impl FnOnce() -> Array2<f64>,
-    ) -> Rc<Array2<f64>> {
-        if coordinates.is_empty()
-            || !coordinates.len().is_multiple_of(3)
-            || coordinates.iter().any(|value| !value.is_finite())
-        {
-            return Rc::new(prepare());
+    ) -> Arc<Array2<f64>> {
+        if let Some(rows) = self.lookup(coordinates) {
+            return rows;
         }
-        if let Some(entry) = self.entries.iter().find(|entry| {
-            entry.key.len() == coordinates.len()
-                && entry
-                    .key
-                    .iter()
-                    .zip(coordinates)
-                    .all(|(&bits, value)| bits == value.to_bits())
-        }) {
-            return Rc::clone(&entry.rows);
-        }
+        self.insert(coordinates, prepare())
+    }
 
-        let rows = Rc::new(prepare());
+    /// Retain freshly prepared rows, or hand back the rows another thread
+    /// retained for the same coordinates in the meantime.
+    fn insert(&mut self, coordinates: &[f64], rows: Array2<f64>) -> Arc<Array2<f64>> {
+        if !Self::retainable(coordinates) {
+            return Arc::new(rows);
+        }
+        if let Some(held) = self.lookup(coordinates) {
+            return held;
+        }
+        let rows = Arc::new(rows);
         let payload_bytes = coordinates
             .len()
             .checked_mul(std::mem::size_of::<u64>())
@@ -99,7 +140,7 @@ impl RowCache {
         self.retained_bytes += payload_bytes;
         self.entries.push_back(CachedRows {
             key,
-            rows: Rc::clone(&rows),
+            rows: Arc::clone(&rows),
             payload_bytes,
         });
         rows
@@ -114,10 +155,14 @@ impl RowCache {
 #[cfg(test)]
 mod tests {
     use super::super::{PACKING_MOVE_EPS, PackingBook, nearby_packing};
-    use super::{MAX_RETAINED_BYTES, PREPARATIONS, ROWS, RowCache, packing_rows};
+    use super::{MAX_RETAINED_BYTES, PREPARATIONS, RowCache, packing_rows};
     use ndarray::{Array2, ArrayView1};
     use std::cell::Cell;
-    use std::rc::Rc;
+    use std::sync::{Arc, Mutex, MutexGuard};
+
+    /// The row cache is process-wide, so tests that count preparations or
+    /// inspect retention take turns.
+    static SERIAL: Mutex<()> = Mutex::new(());
 
     fn prepare_counted(calls: &Cell<usize>, shape: (usize, usize)) -> Array2<f64> {
         calls.set(calls.get() + 1);
@@ -127,13 +172,19 @@ mod tests {
     struct ScopedRows {
         previous: Option<RowCache>,
         previous_preparations: usize,
+        _serial: MutexGuard<'static, ()>,
     }
 
     impl ScopedRows {
         fn new(capacity: usize) -> Self {
+            let serial = SERIAL
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            let previous = std::mem::replace(&mut *super::rows_cache(), RowCache::new(capacity));
             Self {
-                previous: Some(ROWS.with(|cache| cache.replace(RowCache::new(capacity)))),
+                previous: Some(previous),
                 previous_preparations: PREPARATIONS.with(|count| count.replace(0)),
+                _serial: serial,
             }
         }
     }
@@ -141,7 +192,7 @@ mod tests {
     impl Drop for ScopedRows {
         fn drop(&mut self) {
             if let Some(previous) = self.previous.take() {
-                ROWS.with(|cache| cache.replace(previous));
+                *super::rows_cache() = previous;
             }
             PREPARATIONS.with(|count| count.set(self.previous_preparations));
         }
@@ -289,7 +340,7 @@ mod tests {
             1,
             "equal coordinate content has one preparation"
         );
-        assert!(Rc::ptr_eq(&first, &second));
+        assert!(Arc::ptr_eq(&first, &second));
         assert_eq!(first.as_ref(), &Array2::from_elem((2, 3), 1.0));
     }
 
@@ -313,7 +364,7 @@ mod tests {
         assert_eq!(calls.get(), inputs.len());
         for (coordinates, expected) in inputs.iter().zip(&prepared) {
             let repeated = cache.get_or_prepare(coordinates, || prepare_counted(&calls, (1, 1)));
-            assert!(Rc::ptr_eq(&repeated, expected));
+            assert!(Arc::ptr_eq(&repeated, expected));
         }
         assert_eq!(calls.get(), inputs.len());
     }
@@ -332,19 +383,19 @@ mod tests {
         let first_b = cache.get_or_prepare(&b, || prepare_counted(&calls, (2, 2)));
         assert_eq!(cache.retained_bytes(), 2 * entry_bytes);
         let hit_a = cache.get_or_prepare(&a, || prepare_counted(&calls, (2, 2)));
-        assert!(Rc::ptr_eq(&hit_a, &first_a));
+        assert!(Arc::ptr_eq(&hit_a, &first_a));
         assert_eq!(calls.get(), 2);
 
         cache.get_or_prepare(&c, || prepare_counted(&calls, (2, 2)));
         assert_eq!(cache.retained_bytes(), 2 * entry_bytes);
         let hit_b = cache.get_or_prepare(&b, || prepare_counted(&calls, (2, 2)));
         assert!(
-            Rc::ptr_eq(&hit_b, &first_b),
+            Arc::ptr_eq(&hit_b, &first_b),
             "a cache hit must not reorder FIFO entries"
         );
         assert_eq!(calls.get(), 3);
         let replacement_a = cache.get_or_prepare(&a, || prepare_counted(&calls, (2, 2)));
-        assert!(!Rc::ptr_eq(&replacement_a, &first_a));
+        assert!(!Arc::ptr_eq(&replacement_a, &first_a));
         assert_eq!(calls.get(), 4);
         assert_eq!(cache.retained_bytes(), 2 * entry_bytes);
     }
@@ -363,7 +414,7 @@ mod tests {
 
         let large = cache.get_or_prepare(&oversized, || prepare_counted(&calls, (4, 4)));
         let repeated_large = cache.get_or_prepare(&oversized, || prepare_counted(&calls, (4, 4)));
-        assert!(!Rc::ptr_eq(&large, &repeated_large));
+        assert!(!Arc::ptr_eq(&large, &repeated_large));
         assert_eq!(
             calls.get(),
             4,
@@ -372,8 +423,8 @@ mod tests {
         assert_eq!(cache.retained_bytes(), 2 * entry_bytes);
         let hit_a = cache.get_or_prepare(&a, || prepare_counted(&calls, (2, 2)));
         let hit_b = cache.get_or_prepare(&b, || prepare_counted(&calls, (2, 2)));
-        assert!(Rc::ptr_eq(&hit_a, &first_a));
-        assert!(Rc::ptr_eq(&hit_b, &first_b));
+        assert!(Arc::ptr_eq(&hit_a, &first_a));
+        assert!(Arc::ptr_eq(&hit_b, &first_b));
         assert_eq!(
             calls.get(),
             4,
@@ -411,11 +462,11 @@ mod tests {
         for coordinates in &invalid {
             let first = cache.get_or_prepare(coordinates, || prepare_counted(&calls, (1, 1)));
             let second = cache.get_or_prepare(coordinates, || prepare_counted(&calls, (1, 1)));
-            assert!(!Rc::ptr_eq(&first, &second));
+            assert!(!Arc::ptr_eq(&first, &second));
             assert_eq!(cache.retained_bytes(), retained_bytes);
         }
         let hit = cache.get_or_prepare(&valid, || prepare_counted(&calls, (1, 1)));
-        assert!(Rc::ptr_eq(&retained, &hit));
+        assert!(Arc::ptr_eq(&retained, &hit));
         assert_eq!(calls.get(), 1 + 2 * invalid.len());
     }
 
