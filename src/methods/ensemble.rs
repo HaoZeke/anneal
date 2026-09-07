@@ -775,5 +775,64 @@ mod tests {
                 .iter()
                 .all(|r| r.history_cost == (0, 0, 0.0))
         );
+        // No channel means the same seed reproduces the same chains: the
+        // determinism the private controls of every comparison rest on.
+        let again =
+            run_ensemble(&cfg, &ensemble(HistoryMode::None, None, None), 3, &problem).unwrap();
+        for (a, b) in private.replicas.iter().zip(&again.replicas) {
+            assert_eq!(a.outcome.best.to_bits(), b.outcome.best.to_bits());
+            assert_eq!(a.outcome.hops, b.outcome.hops);
+            assert_eq!(a.charged, b.charged);
+        }
+    }
+
+    /// With every peer in the same family and a short stall, the two-choice
+    /// rule restarts; with no family anywhere it never does.
+    #[test]
+    fn the_two_choice_restart_fires_only_when_two_samples_are_crowded() {
+        let cfg = chain_config();
+        let descriptor = universal_descriptor_space(DescriptorGeometry::finite(1.0).unwrap());
+        let context = StructureContext::new(Some(vec![18; 4]), None, Some("two-well".into()));
+        let witness = SerializedWitness(Mutex::new(|l: ArrayView1<f64>, r: ArrayView1<f64>| {
+            l.iter()
+                .zip(r.iter())
+                .map(|(a, b)| (a - b) * (a - b))
+                .sum::<f64>()
+                .sqrt()
+                < 0.5
+        }));
+        let objective: ObjectiveFactory<'_> = &|_| Box::new(two_well);
+        let start: StartFactory<'_> =
+            &|_, rng| random_cluster_in_radius(4, cfg.start_radius(), cfg.min_separation, rng);
+        let crowded = |_: &[f64], _: &[f64]| true;
+        let alone = |_: &[f64], _: &[f64]| false;
+        let mut ens = ensemble(HistoryMode::None, None, None);
+        ens.two_choice_stall = Some(1_500);
+        ens.target = None;
+        let run = |same_family: SameFamily<'_>| {
+            run_ensemble(
+                &cfg,
+                &ens,
+                5,
+                &EnsembleProblem {
+                    objective,
+                    start,
+                    descriptor: &descriptor,
+                    context: &context,
+                    witness: &witness,
+                    same_family,
+                    certificate: 1e-5,
+                    polish_below: 1e-3,
+                },
+            )
+            .unwrap()
+        };
+        let restarted = run(&crowded);
+        assert!(
+            restarted.replicas.iter().any(|r| r.two_choice_restarts > 0),
+            "no replica restarted although every sample was crowded"
+        );
+        let kept = run(&alone);
+        assert!(kept.replicas.iter().all(|r| r.two_choice_restarts == 0));
     }
 }
