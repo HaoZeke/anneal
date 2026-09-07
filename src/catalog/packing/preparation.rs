@@ -1,4 +1,14 @@
+//! Exact descriptor rows for the fixed packing specification and no species.
+//!
+//! Each thread retains at most 8 MiB of complete coordinate keys and row scalar
+//! payloads. The bound excludes queue and reference-count metadata, and callers
+//! can keep evicted rows alive through their own `Rc` handles. Codebooks and
+//! histograms remain properties of each individual packing book.
+
+#[cfg(test)]
+use std::cell::Cell;
 use std::cell::RefCell;
+use std::collections::VecDeque;
 use std::rc::Rc;
 
 use ndarray::{Array2, ArrayView1};
@@ -7,11 +17,15 @@ const MAX_RETAINED_BYTES: usize = 8 * 1024 * 1024;
 
 thread_local! {
     static ROWS: RefCell<RowCache> = const { RefCell::new(RowCache::new(MAX_RETAINED_BYTES)) };
+    #[cfg(test)]
+    static PREPARATIONS: Cell<usize> = const { Cell::new(0) };
 }
 
 pub(super) fn packing_rows(coordinates: &[f64]) -> Rc<Array2<f64>> {
     ROWS.with(|cache| {
         cache.borrow_mut().get_or_prepare(coordinates, || {
+            #[cfg(test)]
+            PREPARATIONS.with(|count| count.set(count.get() + 1));
             crate::soap::local_nu3_z(ArrayView1::from(coordinates), super::PACKING_SPEC, None)
         })
     })
@@ -19,11 +33,23 @@ pub(super) fn packing_rows(coordinates: &[f64]) -> Rc<Array2<f64>> {
 
 struct RowCache {
     max_retained_bytes: usize,
+    retained_bytes: usize,
+    entries: VecDeque<CachedRows>,
+}
+
+struct CachedRows {
+    key: Box<[u64]>,
+    rows: Rc<Array2<f64>>,
+    payload_bytes: usize,
 }
 
 impl RowCache {
     const fn new(max_retained_bytes: usize) -> Self {
-        Self { max_retained_bytes }
+        Self {
+            max_retained_bytes,
+            retained_bytes: 0,
+            entries: VecDeque::new(),
+        }
     }
 
     fn get_or_prepare(
@@ -31,19 +57,64 @@ impl RowCache {
         coordinates: &[f64],
         prepare: impl FnOnce() -> Array2<f64>,
     ) -> Rc<Array2<f64>> {
-        let _ = (self.max_retained_bytes, coordinates);
-        Rc::new(prepare())
+        if coordinates.is_empty()
+            || !coordinates.len().is_multiple_of(3)
+            || coordinates.iter().any(|value| !value.is_finite())
+        {
+            return Rc::new(prepare());
+        }
+        if let Some(entry) = self.entries.iter().find(|entry| {
+            entry.key.len() == coordinates.len()
+                && entry
+                    .key
+                    .iter()
+                    .zip(coordinates)
+                    .all(|(&bits, value)| bits == value.to_bits())
+        }) {
+            return Rc::clone(&entry.rows);
+        }
+
+        let rows = Rc::new(prepare());
+        let payload_bytes = coordinates
+            .len()
+            .checked_mul(std::mem::size_of::<u64>())
+            .and_then(|key_bytes| {
+                rows.len()
+                    .checked_mul(std::mem::size_of::<f64>())
+                    .and_then(|row_bytes| key_bytes.checked_add(row_bytes))
+            });
+        let Some(payload_bytes) = payload_bytes.filter(|&bytes| bytes <= self.max_retained_bytes)
+        else {
+            return rows;
+        };
+
+        let key = coordinates.iter().map(|value| value.to_bits()).collect();
+        while self.retained_bytes > self.max_retained_bytes - payload_bytes {
+            let oldest = self
+                .entries
+                .pop_front()
+                .expect("retained payload has an entry");
+            self.retained_bytes -= oldest.payload_bytes;
+        }
+        self.retained_bytes += payload_bytes;
+        self.entries.push_back(CachedRows {
+            key,
+            rows: Rc::clone(&rows),
+            payload_bytes,
+        });
+        rows
     }
 
     #[cfg(test)]
     fn retained_bytes(&self) -> usize {
-        0
+        self.retained_bytes
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{RowCache, packing_rows};
+    use super::super::{PACKING_MOVE_EPS, PackingBook, nearby_packing};
+    use super::{MAX_RETAINED_BYTES, PREPARATIONS, ROWS, RowCache, packing_rows};
     use ndarray::{Array2, ArrayView1};
     use std::cell::Cell;
     use std::rc::Rc;
@@ -51,6 +122,157 @@ mod tests {
     fn prepare_counted(calls: &Cell<usize>, shape: (usize, usize)) -> Array2<f64> {
         calls.set(calls.get() + 1);
         Array2::from_elem(shape, calls.get() as f64)
+    }
+
+    struct ScopedRows {
+        previous: Option<RowCache>,
+        previous_preparations: usize,
+    }
+
+    impl ScopedRows {
+        fn new(capacity: usize) -> Self {
+            Self {
+                previous: Some(ROWS.with(|cache| cache.replace(RowCache::new(capacity)))),
+                previous_preparations: PREPARATIONS.with(|count| count.replace(0)),
+            }
+        }
+    }
+
+    impl Drop for ScopedRows {
+        fn drop(&mut self) {
+            if let Some(previous) = self.previous.take() {
+                ROWS.with(|cache| cache.replace(previous));
+            }
+            PREPARATIONS.with(|count| count.set(self.previous_preparations));
+        }
+    }
+
+    fn preparation_count() -> usize {
+        PREPARATIONS.with(Cell::get)
+    }
+
+    fn load_xyz(text: &str) -> Vec<f64> {
+        text.lines()
+            .skip(2)
+            .filter(|line| !line.trim().is_empty())
+            .flat_map(|line| line.split_whitespace().skip(1).take(3))
+            .map(|coordinate| coordinate.parse().unwrap())
+            .collect()
+    }
+
+    fn fixture_pairs() -> [(Vec<f64>, Vec<f64>); 2] {
+        [
+            (
+                load_xyz(include_str!("../../../tests/fixtures/lj38_ico.xyz")),
+                load_xyz(include_str!("../../../tests/fixtures/lj38_fcc.xyz")),
+            ),
+            (
+                load_xyz(include_str!("../../../tests/fixtures/lj75_ico.xyz")),
+                load_xyz(include_str!("../../../tests/fixtures/lj75_marks.xyz")),
+            ),
+        ]
+    }
+
+    fn translated(coordinates: &[f64]) -> Vec<f64> {
+        coordinates
+            .iter()
+            .enumerate()
+            .map(|(index, value)| value + [0.31, -0.2, 0.17][index % 3])
+            .collect()
+    }
+
+    fn permuted(coordinates: &[f64]) -> Vec<f64> {
+        coordinates
+            .chunks_exact(3)
+            .rev()
+            .flatten()
+            .copied()
+            .collect()
+    }
+
+    fn perturbed(coordinates: &[f64]) -> Vec<f64> {
+        let mut changed = coordinates.to_vec();
+        changed[0] += 0.08;
+        changed[4] -= 0.07;
+        changed
+    }
+
+    #[derive(Debug, PartialEq)]
+    struct PairState {
+        leaders: Vec<Vec<f64>>,
+        families: Vec<Vec<f64>>,
+        visits: Vec<u64>,
+        well_visits: Vec<u64>,
+        version: u64,
+        community_parent: Vec<usize>,
+        remembered: Vec<(Vec<f64>, Vec<f64>, bool)>,
+        histograms: [Vec<f64>; 2],
+        assigned_histograms: [Vec<f64>; 2],
+        nearby: bool,
+    }
+
+    fn pair_state(here: &[f64], other: &[f64]) -> PairState {
+        let mut book = PackingBook::default();
+        book.observe(here).unwrap();
+        book.observe(other).unwrap();
+        let histograms = [
+            book.histogram(here).unwrap(),
+            book.histogram(other).unwrap(),
+        ];
+        let assigned_histograms = [
+            book.assign_histogram(here).unwrap(),
+            book.assign_histogram(other).unwrap(),
+        ];
+        PairState {
+            leaders: book.env_leaders.clone(),
+            families: book.families.clone(),
+            visits: book.visits.clone(),
+            well_visits: book.well_visits.clone(),
+            version: book.version,
+            community_parent: book.community_parent.clone(),
+            remembered: book
+                .histogram_cache
+                .borrow()
+                .iter()
+                .map(|entry| {
+                    (
+                        entry.coordinates.clone(),
+                        entry.histogram.clone(),
+                        entry.grown,
+                    )
+                })
+                .collect(),
+            histograms,
+            assigned_histograms,
+            nearby: nearby_packing(here, other),
+        }
+    }
+
+    fn pair_scenarios(capacity: usize) -> Vec<PairState> {
+        let _scope = ScopedRows::new(capacity);
+        let mut states = Vec::new();
+        for (here, other) in fixture_pairs() {
+            let variants = [
+                (here.clone(), other.clone()),
+                (translated(&here), translated(&other)),
+                (permuted(&here), permuted(&other)),
+                (perturbed(&here), perturbed(&other)),
+            ];
+            let mut third = here.clone();
+            third[0] += 0.12;
+            for (left, right) in variants {
+                for (a, b) in [(&left[..], &right[..]), (&right[..], &left[..])] {
+                    let first = pair_state(a, b);
+                    states.push(pair_state(a, &third));
+                    states.push(pair_state(&third, b));
+                    let repeated = pair_state(a, b);
+                    assert_eq!(first, repeated, "a third peer cannot alter a pair book");
+                    states.push(first);
+                    states.push(repeated);
+                }
+            }
+        }
+        states
     }
 
     #[test]
@@ -170,5 +392,78 @@ mod tests {
         );
         let actual = packing_rows(&coordinates);
         assert_eq!(actual.as_ref(), &expected);
+    }
+
+    #[test]
+    fn invalid_coordinates_compute_without_retention_or_eviction() {
+        let mut cache = RowCache::new(128);
+        let calls = Cell::new(0);
+        let valid = [1.0, 0.0, 0.0];
+        let retained = cache.get_or_prepare(&valid, || prepare_counted(&calls, (1, 1)));
+        let retained_bytes = cache.retained_bytes();
+        let invalid = [
+            vec![],
+            vec![1.0, 0.0],
+            vec![f64::NAN, 0.0, 0.0],
+            vec![f64::INFINITY, 0.0, 0.0],
+            vec![f64::NEG_INFINITY, 0.0, 0.0],
+        ];
+        for coordinates in &invalid {
+            let first = cache.get_or_prepare(coordinates, || prepare_counted(&calls, (1, 1)));
+            let second = cache.get_or_prepare(coordinates, || prepare_counted(&calls, (1, 1)));
+            assert!(!Rc::ptr_eq(&first, &second));
+            assert_eq!(cache.retained_bytes(), retained_bytes);
+        }
+        let hit = cache.get_or_prepare(&valid, || prepare_counted(&calls, (1, 1)));
+        assert!(Rc::ptr_eq(&retained, &hit));
+        assert_eq!(calls.get(), 1 + 2 * invalid.len());
+    }
+
+    #[test]
+    fn exact_rows_preserve_pair_books_and_nearby_decisions_across_peer_interleaving() {
+        let uncached = pair_scenarios(0);
+        let cached = pair_scenarios(MAX_RETAINED_BYTES);
+        assert_eq!(cached, uncached);
+    }
+
+    #[test]
+    fn resident_peer_batches_prepare_each_geometry_once_and_keep_the_pair_local_shortcut() {
+        for (here, other) in fixture_pairs() {
+            let _scope = ScopedRows::new(MAX_RETAINED_BYTES);
+            let peers = [other.clone(), translated(&other), permuted(&other)];
+            let cold: Vec<_> = peers
+                .iter()
+                .map(|peer| nearby_packing(&here, peer))
+                .collect();
+            assert_eq!(preparation_count(), peers.len() + 1);
+
+            let repeated: Vec<_> = peers
+                .iter()
+                .map(|peer| nearby_packing(&here, peer))
+                .collect();
+            assert_eq!(cold, repeated);
+            assert_eq!(preparation_count(), peers.len() + 1);
+
+            let mut changed_here = here.clone();
+            changed_here[0] += PACKING_MOVE_EPS * 0.25;
+            for peer in &peers {
+                nearby_packing(&changed_here, peer);
+            }
+            assert_eq!(
+                preparation_count(),
+                peers.len() + 2,
+                "an exact coordinate change prepares only the changed resident geometry"
+            );
+
+            let mut book = PackingBook::default();
+            let family = book.observe(&here).unwrap();
+            let histogram = book.histogram(&here).unwrap();
+            let before_shortcut = preparation_count();
+            let mut nearby_here = here.clone();
+            nearby_here[0] += PACKING_MOVE_EPS * 0.5;
+            assert_eq!(book.observe(&nearby_here), Some(family));
+            assert_eq!(book.histogram(&nearby_here), Some(histogram));
+            assert_eq!(preparation_count(), before_shortcut);
+        }
     }
 }
