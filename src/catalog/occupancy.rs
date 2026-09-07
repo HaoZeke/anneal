@@ -2433,7 +2433,10 @@ mod tests {
     #[test]
     fn leave_defers_through_the_measured_crossing() {
         const {
-            assert!(LEAVE_CROSSING_HOPS >= 6226, "floor expires before the latest named Marks crossing");
+            assert!(
+                LEAVE_CROSSING_HOPS >= 6226,
+                "floor expires before the latest named Marks crossing"
+            );
         }
         assert_eq!(leave_crossing_slices(500), 22);
         assert!(leave_defers(1, 0, 22));
