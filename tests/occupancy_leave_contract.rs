@@ -420,7 +420,6 @@ fn a_one_packing_book_climbs_the_ridge() {
         hop.contains("occupied_unseen_share"),
         "an overshoot with unseen local classes is kept; the other packing is not a target"
     );
-    );
     assert!(
         hop.contains("action == \"soap_push\"") && hop.contains("activate("),
         "a SOAP push follows the ridge from the pulled-back geometry"
