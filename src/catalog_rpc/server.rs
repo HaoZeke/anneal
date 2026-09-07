@@ -1148,19 +1148,28 @@ impl session::Server for SessionImpl {
         }
         let shared = Rc::clone(&self.shared);
         Promise::from_future(async move {
+            let label = operation_label(&request.operation);
+            let validation_started = std::time::Instant::now();
             let precomputed = match candidate_needing_validation(&request.operation) {
                 Some(candidate) => {
                     Some(precompute_validation_async(&shared, &request.identity, candidate).await)
                 }
                 None => None,
             };
+            let validation_seconds = validation_started.elapsed().as_secs_f64();
             let (reply, events) = {
                 let shared = shared.borrow_mut();
                 let mut state = lock_state(&shared.state);
                 let epoch_before = open_population_epoch(&state);
                 let config = shared.config.clone();
+                let apply_started = std::time::Instant::now();
                 let reply = process_request(&config, &mut state, request.clone(), precomputed)
                     .map_err(capnp::Error::failed)?;
+                profile_request(
+                    label,
+                    validation_seconds,
+                    apply_started.elapsed().as_secs_f64(),
+                );
                 let mut events = Vec::new();
                 if matches!(reply, CatalogReply::Accepted(_)) {
                     match &request.operation {
@@ -1283,6 +1292,63 @@ async fn precompute_validation_async(
         let _ = tx.send(result);
     });
     rx.await.unwrap_or(Err(()))
+}
+
+/// Short label of an operation for the coordinator's cost profile.
+fn operation_label(operation: &CatalogOperation) -> &'static str {
+    match operation {
+        CatalogOperation::Snapshot => "snapshot",
+        CatalogOperation::RecordVisit { .. } => "record_visit",
+        CatalogOperation::OfferCandidate { .. } => "offer",
+        CatalogOperation::Sample { .. } => "sample",
+        CatalogOperation::SampleBasin { .. } => "sample_basin",
+        CatalogOperation::DescriptorHole { .. } => "hole",
+        CatalogOperation::BoundaryCrossing { .. } => "boundary",
+        CatalogOperation::PolicyState { .. } => "policy",
+        CatalogOperation::LedgerEvent { .. } | CatalogOperation::LedgerBatch { .. } => "ledger",
+        CatalogOperation::PopulationSubmit { .. }
+        | CatalogOperation::PopulationPlan { .. }
+        | CatalogOperation::PopulationAbstain { .. }
+        | CatalogOperation::PopulationJoin { .. } => "population",
+        CatalogOperation::ObserverStatus => "status",
+        CatalogOperation::RecordTransition { .. } => "transition",
+        _ => "other",
+    }
+}
+
+/// Per-operation cost of the coordinator: validation off-thread and the
+/// serialised apply under the state lock.
+///
+/// Printed to stderr every 2000 requests under `CATALOG_SERVER_PROFILE=1`.
+/// The apply column is the serialised clock of the whole ensemble: with
+/// 48 replicas checkpointing every 500 charged calls, whatever dominates
+/// it is what every chain waits on.
+fn profile_request(label: &'static str, validation_seconds: f64, apply_seconds: f64) {
+    use std::collections::BTreeMap;
+    use std::sync::{Mutex, OnceLock};
+    static ENABLED: OnceLock<bool> = OnceLock::new();
+    static PROFILE: Mutex<Option<(u64, BTreeMap<&'static str, (u64, f64, f64)>)>> =
+        Mutex::new(None);
+    if !*ENABLED.get_or_init(|| std::env::var("CATALOG_SERVER_PROFILE").is_ok_and(|v| v == "1")) {
+        return;
+    }
+    let mut guard = PROFILE.lock().expect("coordinator profile");
+    let (total, table) = guard.get_or_insert_with(|| (0, BTreeMap::new()));
+    *total += 1;
+    let entry = table.entry(label).or_insert((0, 0.0, 0.0));
+    entry.0 += 1;
+    entry.1 += validation_seconds;
+    entry.2 += apply_seconds;
+    if total.is_multiple_of(2000) {
+        let line = table
+            .iter()
+            .map(|(name, (count, validate, apply))| {
+                format!("{name}:{count}/{validate:.1}s/{apply:.1}s")
+            })
+            .collect::<Vec<_>>()
+            .join(" ");
+        eprintln!("coordinator profile requests {total} (kind:count/validate/apply) {line}");
+    }
 }
 
 /// The candidate one request's operation will send through
