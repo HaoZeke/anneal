@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Summarise an ensemble campaign directory written by elja_hist_campaign.sh.
 
-Usage: hist_summarize.py <campaign-dir> [--org]
+Usage: hist_summarize.py <campaign-dir> [--org] [<control-arm> <treatment-arm>]
 
 For every arm (the prefix before `_<seed>.out`) prints tasks, finished,
 solved, first-target aggregate calls (median), mean wall per seed, mean
@@ -111,6 +111,28 @@ def main():
             print("  ".join(str(v).ljust(w) for v, w in zip(row, widths)))
     for arm, r in sorted(arms.items()):
         print(f"{arm} solved seeds: {' '.join(str(s) for s in sorted(r['solved']))}")
+    pair = [a for a in sys.argv[2:] if not a.startswith("--")]
+    if len(pair) == 2:
+        compare(arms, pair[0], pair[1])
+
+
+def compare(arms, control, treatment):
+    """Paired comparison on the seeds both arms finished: gained, lost, sign test."""
+    a, b = arms.get(control), arms.get(treatment)
+    if a is None or b is None:
+        sys.exit(f"unknown arm in comparison: {control} / {treatment}")
+    sa, sb = set(a["solved"]), set(b["solved"])
+    gained, lost = sorted(sb - sa), sorted(sa - sb)
+    n = len(gained) + len(lost)
+    # Two-sided exact sign test on the discordant seeds.
+    from math import comb
+    k = min(len(gained), len(lost))
+    p = min(1.0, 2 * sum(comb(n, i) for i in range(k + 1)) / 2 ** n) if n else 1.0
+    print(
+        f"{treatment} vs {control}: {len(sb)} vs {len(sa)} solved; "
+        f"gained {len(gained)} {gained}; lost {len(lost)} {lost}; "
+        f"discordant {n}, sign test p={p:.3f}"
+    )
 
 
 if __name__ == "__main__":
