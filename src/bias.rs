@@ -559,39 +559,54 @@ impl SortedPairs {
         left: ArrayView1<f64>,
         right: ArrayView1<f64>,
     ) -> Option<f64> {
+        self.prepare(left)?.bottleneck_lower_bound(&self.prepare(right)?)
+    }
+
+    pub(crate) fn prepare(&self, coordinates: ArrayView1<f64>) -> Option<PreparedPairSpectrum> {
         let dimension = self.n_points.checked_mul(3)?;
         if self.n_points == 0
-            || left.len() != dimension
-            || right.len() != dimension
-            || left
-                .iter()
-                .chain(right.iter())
-                .any(|value| !value.is_finite())
+            || coordinates.len() != dimension
+            || coordinates.iter().any(|value| !value.is_finite())
         {
             return None;
         }
-        let left_pairs = self.describe(left);
-        let right_pairs = self.describe(right);
-        if left_pairs
-            .iter()
-            .chain(right_pairs.iter())
-            .any(|value| !value.is_finite())
-        {
+        let distances = self.describe(coordinates);
+        if distances.iter().any(|value| !value.is_finite()) {
             return None;
         }
-        let discrepancy = left_pairs
+        Some(PreparedPairSpectrum {
+            n_points: self.n_points,
+            distances,
+            coordinate_scale: coordinates.iter().map(|value| value.abs()).fold(1.0, f64::max),
+        })
+    }
+}
+
+/// Validated immutable geometry for a conservative rigid-match rejection.
+pub(crate) struct PreparedPairSpectrum {
+    n_points: usize,
+    distances: Array1<f64>,
+    coordinate_scale: f64,
+}
+
+impl PreparedPairSpectrum {
+    #[cfg(feature = "ira")]
+    pub(crate) fn payload_bytes(&self) -> usize {
+        self.distances.len() * std::mem::size_of::<f64>()
+    }
+
+    pub(crate) fn bottleneck_lower_bound(&self, right: &Self) -> Option<f64> {
+        if self.n_points != right.n_points {
+            return None;
+        }
+        let discrepancy = self.distances
             .iter()
-            .zip(&right_pairs)
+            .zip(&right.distances)
             .map(|(left, right)| (left - right).abs())
             .fold(0.0, f64::max);
-        let coordinate_scale = left
-            .iter()
-            .chain(right.iter())
-            .map(|value| value.abs())
-            .fold(1.0, f64::max);
         // Subtraction, three-dimensional norms, and the final difference all
         // contribute roundoff. The allowance weakens rejection near the radius.
-        let roundoff = 64.0 * f64::EPSILON * coordinate_scale;
+        let roundoff = 64.0 * f64::EPSILON * self.coordinate_scale.max(right.coordinate_scale);
         Some((0.5 * discrepancy - roundoff).max(0.0))
     }
 }

@@ -23,6 +23,9 @@ use ndarray::{Array1, ArrayView1};
 
 use crate::bias::{BasinMetric, Fingerprint, SortedPairs};
 
+mod pair_cache;
+pub use pair_cache::{CachedIraStructureWitness, PairCacheStats};
+
 unsafe extern "C" {
     /// `libira_try_mat` from `src/library_sofi.f90`.
     ///
