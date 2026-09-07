@@ -21,7 +21,6 @@ use anneal_core::methods::warm_lbfgs::WarmLbfgs;
 use anneal_core::morphology::CoordinationKde;
 use anneal_core::potentials::PairPotential;
 use anneal_core::structure::cna;
-use ndarray::Array1;
 use rand::SeedableRng;
 use rand::rngs::StdRng;
 
