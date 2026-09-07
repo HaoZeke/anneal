@@ -209,6 +209,16 @@ mod option_tests {
         assert_eq!(run.events().last().unwrap().aggregate_charged, 1_000);
     }
 
+    #[cfg(feature = "bank-rpc")]
+    #[test]
+    fn settled_objective_work_has_no_duplicate_terminal_charge() {
+        assert_eq!(unsettled_objective_calls(509, 0), Some(509));
+        assert_eq!(unsettled_objective_calls(1_000, 509), Some(491));
+        assert_eq!(unsettled_objective_calls(1_000, 1_000), None);
+        assert_eq!(unsettled_objective_calls(0, 0), None);
+        assert!(std::panic::catch_unwind(|| unsettled_objective_calls(508, 509)).is_err());
+    }
+
     #[test]
     fn zero_step_queries_preserve_geometry_and_charge_one_objective() {
         let state = Array1::from_vec(vec![0.0, 0.0, 0.0, 1.3, 0.0, 0.0]);
