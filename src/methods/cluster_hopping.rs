@@ -807,7 +807,9 @@ fn quench_is_sane(cfg: &Config, energy: f64, x: ArrayView1<f64>) -> bool {
 fn gradient_is_converged(gradient: ArrayView1<f64>, dimensions: usize, tolerance: f64) -> bool {
     dimensions > 0
         && gradient.len() == dimensions
-        && gradient.iter().all(|v| v.is_finite() && v.abs() < tolerance)
+        && gradient
+            .iter()
+            .all(|v| v.is_finite() && v.abs() < tolerance)
 }
 
 /// Runs the driver until the ledger is spent.
@@ -1055,9 +1057,8 @@ where
     let gradient_required = grad.is_some();
     let initial_validation_gradient = initial_sane.then(|| {
         grad.as_deref_mut().and_then(|g| {
-            g(ledger, x.view()).filter(|values| {
-                gradient_is_converged(values.view(), x.len(), cfg.record_gradient)
-            })
+            g(ledger, x.view())
+                .filter(|values| gradient_is_converged(values.view(), x.len(), cfg.record_gradient))
         })
     });
     let initial_validation_gradient = initial_validation_gradient.flatten();
@@ -1562,7 +1563,11 @@ where
                 if from_gradient.is_none() && (published_prize || soap_push || !adopt) {
                     from_gradient = grad.as_deref_mut().and_then(|g| {
                         g(ledger, from_state.view()).filter(|values| {
-                            gradient_is_converged(values.view(), from_state.len(), cfg.record_gradient)
+                            gradient_is_converged(
+                                values.view(),
+                                from_state.len(),
+                                cfg.record_gradient,
+                            )
                         })
                     });
                 }
@@ -1835,7 +1840,11 @@ where
                 let validation_gradient = if proposal_sane {
                     grad.as_deref_mut().and_then(|g| {
                         g(ledger, proposal_state.view()).filter(|values| {
-                            gradient_is_converged(values.view(), proposal_state.len(), cfg.record_gradient)
+                            gradient_is_converged(
+                                values.view(),
+                                proposal_state.len(),
+                                cfg.record_gradient,
+                            )
                         })
                     })
                 } else {
@@ -1959,7 +1968,11 @@ where
                 let candidate_gradient = candidate_sane.then(|| {
                     grad.as_deref_mut().and_then(|gradient| {
                         gradient(ledger, candidate.view()).filter(|values| {
-                            gradient_is_converged(values.view(), candidate.len(), cfg.record_gradient)
+                            gradient_is_converged(
+                                values.view(),
+                                candidate.len(),
+                                cfg.record_gradient,
+                            )
                         })
                     })
                 });
