@@ -51,7 +51,8 @@ impl CensusBus {
     /// Binds this replica's publisher at `base_port + replica` and dials
     /// every other replica in `0..replicas`.
     pub fn new(replica: u32, base_port: u16, replicas: u32) -> Result<Self, CensusBusError> {
-        let publisher = Socket::new(Protocol::Pub0).map_err(|e| CensusBusError(format!("pub: {e}")))?;
+        let publisher =
+            Socket::new(Protocol::Pub0).map_err(|e| CensusBusError(format!("pub: {e}")))?;
         publisher
             .listen(&url(base_port, replica))
             .map_err(|e| CensusBusError(format!("listen {}: {e}", url(base_port, replica))))?;
@@ -150,4 +151,100 @@ fn decode(bytes: &[u8]) -> Option<PeerMinimum> {
         energy,
         coordinates,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::decode;
+
+    const COORDINATES: [f64; 6] = [0.0, 0.0, 0.0, 1.2, 0.0, 0.0];
+
+    fn frame(energy: f64, coordinates: &[f64]) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&1_u32.to_le_bytes());
+        bytes.extend_from_slice(&7_u64.to_le_bytes());
+        bytes.extend_from_slice(&energy.to_le_bytes());
+        bytes.extend_from_slice(&u32::try_from(coordinates.len()).unwrap().to_le_bytes());
+        for coordinate in coordinates {
+            bytes.extend_from_slice(&coordinate.to_le_bytes());
+        }
+        bytes
+    }
+
+    #[test]
+    fn finite_cartesian_minimum_round_trips_without_a_socket() {
+        let minimum = decode(&frame(-1.0, &COORDINATES)).unwrap();
+        assert_eq!(minimum.replica, 1);
+        assert_eq!(minimum.hops, 7);
+        assert_eq!(minimum.energy, -1.0);
+        assert_eq!(minimum.coordinates, COORDINATES);
+    }
+
+    #[test]
+    fn nonfinite_energy_is_not_a_peer_minimum() {
+        for energy in [f64::NAN, f64::NEG_INFINITY, f64::INFINITY] {
+            assert!(
+                decode(&frame(energy, &COORDINATES)).is_none(),
+                "nonfinite energy {energy:?} must not enter the census"
+            );
+        }
+    }
+
+    #[test]
+    fn nonfinite_coordinates_are_not_a_peer_minimum() {
+        for value in [f64::NAN, f64::NEG_INFINITY, f64::INFINITY] {
+            for index in 0..COORDINATES.len() {
+                let mut coordinates = COORDINATES;
+                coordinates[index] = value;
+                assert!(
+                    decode(&frame(-1.0, &coordinates)).is_none(),
+                    "nonfinite coordinate {index}={value:?} must not enter the census"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn empty_geometry_is_not_a_peer_minimum() {
+        assert!(decode(&frame(-1.0, &[])).is_none());
+    }
+
+    #[test]
+    fn incomplete_cartesian_triplets_are_not_a_peer_minimum() {
+        for length in [1, 2, 4, 5] {
+            assert!(
+                decode(&frame(-1.0, &COORDINATES[..length])).is_none(),
+                "{length} coordinates do not describe complete Cartesian atoms"
+            );
+        }
+    }
+
+    #[test]
+    fn trailing_bytes_are_not_part_of_a_census_frame() {
+        for trailing in [&[0_u8][..], &[0_u8; 8][..]] {
+            let mut bytes = frame(-1.0, &COORDINATES);
+            bytes.extend_from_slice(trailing);
+            assert!(decode(&bytes).is_none());
+        }
+    }
+
+    #[test]
+    fn every_truncated_frame_is_rejected() {
+        let bytes = frame(-1.0, &COORDINATES);
+        for end in 0..bytes.len() {
+            assert!(decode(&bytes[..end]).is_none(), "truncated at byte {end}");
+        }
+    }
+
+    #[test]
+    fn coordinate_count_must_match_the_payload_exactly() {
+        for declared in [0_u32, 3, 7, 12, 1024] {
+            let mut bytes = frame(-1.0, &COORDINATES);
+            bytes[20..24].copy_from_slice(&declared.to_le_bytes());
+            assert!(
+                decode(&bytes).is_none(),
+                "{declared} declared coordinates do not match the six-coordinate payload"
+            );
+        }
+    }
 }
