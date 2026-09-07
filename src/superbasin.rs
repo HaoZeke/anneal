@@ -1586,6 +1586,9 @@ pub enum Refusal {
     /// The exits are all to basins with no stored structure, so there is
     /// nothing to land on.
     NoArchivedExit,
+    /// The sampled exit has no usable landing structure. Its probability
+    /// remains assigned to local exploration rather than to a known exit.
+    UnresolvedExit(f64),
     /// The transient set is larger than the exact elimination is allowed to be.
     TooLarge(usize),
     /// The canonical form could not be built.
@@ -1603,11 +1606,12 @@ impl Refusal {
             Refusal::NoArchivedExit => 4,
             Refusal::TooLarge(_) => 5,
             Refusal::Closed(_) => 6,
+            Refusal::UnresolvedExit(_) => 7,
         }
     }
 
     /// Names of the refusal kinds, in breakdown order.
-    pub const KINDS: [&'static str; 7] = [
+    pub const KINDS: [&'static str; 8] = [
         "small",
         "unseen",
         "mixed",
@@ -1615,6 +1619,7 @@ impl Refusal {
         "no-exit",
         "too-large",
         "closed",
+        "unresolved-exit",
     ];
 }
 
@@ -1626,6 +1631,7 @@ impl std::fmt::Display for Refusal {
             Refusal::WellMixed(r) => write!(f, "no trapping set: {r:.2} revisits per state"),
             Refusal::NoBoundary => write!(f, "the superbasin has no observed boundary"),
             Refusal::NoArchivedExit => write!(f, "no exit basin has a stored structure"),
+            Refusal::UnresolvedExit(p) => write!(f, "exit mass {p:.6} requires local exploration"),
             Refusal::TooLarge(n) => write!(f, "{n} transient states exceeds the elimination cap"),
             Refusal::Closed(e) => write!(f, "{e}"),
         }
@@ -1643,8 +1649,7 @@ pub struct Jump {
     pub state: Array1<f64>,
     /// Hierarchy level the exit was computed at; zero is the basin graph.
     pub level: usize,
-    /// Probability the absorbing chain gives this exit, after conditioning on
-    /// exits that have a stored structure.
+    /// Unconditional probability the absorbing chain gives this exit.
     pub probability: f64,
     /// Expected hops the chain would have spent leaving by diffusion.
     pub expected_hops: f64,
@@ -1661,8 +1666,8 @@ pub struct Jump {
     pub solve_residual: f64,
     /// Whether the exit came from the exact elimination.
     pub exact: bool,
-    /// Exit mass with no named destination or no stored structure, which the
-    /// sampled distribution is conditioned on excluding.
+    /// Legacy diagnostic: mass discarded by conditioning. Sampling retains
+    /// unresolved mass as a refusal, so this value is zero.
     pub conditioned_away: f64,
 }
 
@@ -1674,7 +1679,7 @@ pub struct EscapeStats {
     /// Escapes refused.
     pub refusals: usize,
     /// Refusals by kind, indexed by [`Refusal::kind`].
-    pub refusals_by_kind: [usize; 7],
+    pub refusals_by_kind: [usize; 8],
     /// Largest revisits-per-state ratio a well-mixed refusal reported.
     ///
     /// The scientific content of a negative result: if the observed graph never
@@ -1896,8 +1901,9 @@ impl SuperbasinEscape {
             Err(e) => return Err(self.refuse(e)),
         };
 
-        // Exits that name a basin the archive holds. Everything else, the
-        // unnamed column included, is conditioned away and reported.
+        // Only archived exits can provide coordinates. Unnamed exits,
+        // evicted structures, and unconverged sparse-solve mass remain a
+        // probability of continuing local exploration.
         let mut targets: Vec<(usize, f64, f64)> = Vec::new();
         let mut kept = 0.0;
         for (c, id) in canonical.absorbing.iter().enumerate() {
@@ -1913,7 +1919,10 @@ impl SuperbasinEscape {
         if targets.is_empty() || !(kept > 0.0) {
             return Err(self.refuse(Refusal::NoArchivedExit));
         }
-        let mut u = rng.random::<f64>() * kept;
+        let mut u = rng.random::<f64>();
+        if u >= kept {
+            return Err(self.refuse(Refusal::UnresolvedExit((1.0 - kept).max(0.0))));
+        }
         let mut chosen = targets.len() - 1;
         for (k, t) in targets.iter().enumerate() {
             u -= t.2;
@@ -1940,7 +1949,7 @@ impl SuperbasinEscape {
             energy,
             state,
             level,
-            probability: p / kept,
+            probability: p,
             expected_hops: absorption.hops,
             transient: canonical.n_transient(),
             absorbing: canonical.n_absorbing(),
@@ -1948,7 +1957,7 @@ impl SuperbasinEscape {
             condition_residual,
             solve_residual: absorption.residual,
             exact: absorption.exact,
-            conditioned_away: 1.0 - kept,
+            conditioned_away: 0.0,
         })
     }
 
