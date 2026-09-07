@@ -1829,29 +1829,49 @@ mod tests {
         let history = Mutex::new(super::MinimumHistory::new(1e-3).unwrap());
         let barrier = Barrier::new(2);
         let accepted = std::thread::scope(|scope| {
-            let handles = (0..2).map(|_| scope.spawn(|| {
-                let point = ndarray::array![0.0, 0.0, 0.0, 1.2, 0.0, 0.0];
-                let mut ledger = super::Ledger::new(1);
-                assert!(ledger.charge());
-                assert!(ledger.record_quench_boundary(0, -1.0, point, Some(Array1::zeros(6))));
-                let descriptor = super::lj::descriptor_space();
-                let context = super::StructureContext::new(Some(vec![18; 2]), None, None);
-                let mut feedback = super::EscapeFeedback::new(1.0, 0.8);
-                barrier.wait();
-                super::observe_history(&history, &ledger, &descriptor, &context, &SameCoordinates,
-                    |history, observation| {
-                        let reached = observation.minimum.id;
-                        let visits = history.accepted_visits(reached).unwrap();
-                        let visit = feedback.observe_shared(None, reached, visits == 0, visits);
-                        let accept = visit == super::Visit::New && feedback.accept(-1.0);
-                        if accept {
-                            history.mark_accepted(reached).unwrap();
-                        }
-                        Ok(accept)
-                    }).unwrap().1
-            })).collect::<Vec<_>>();
-            handles.into_iter()
-                .map(|handle| usize::from(handle.join().unwrap())).sum::<usize>()
+            let handles = (0..2)
+                .map(|_| {
+                    scope.spawn(|| {
+                        let point = ndarray::array![0.0, 0.0, 0.0, 1.2, 0.0, 0.0];
+                        let mut ledger = super::Ledger::new(1);
+                        assert!(ledger.charge());
+                        assert!(ledger.record_quench_boundary(
+                            0,
+                            -1.0,
+                            point,
+                            Some(Array1::zeros(6))
+                        ));
+                        let descriptor = super::lj::descriptor_space();
+                        let context = super::StructureContext::new(Some(vec![18; 2]), None, None);
+                        let mut feedback = super::EscapeFeedback::new(1.0, 0.8);
+                        barrier.wait();
+                        super::observe_history(
+                            &history,
+                            &ledger,
+                            &descriptor,
+                            &context,
+                            &SameCoordinates,
+                            |history, observation| {
+                                let reached = observation.minimum.id;
+                                let visits = history.accepted_visits(reached).unwrap();
+                                let visit =
+                                    feedback.observe_shared(None, reached, visits == 0, visits);
+                                let accept = visit == super::Visit::New && feedback.accept(-1.0);
+                                if accept {
+                                    history.mark_accepted(reached).unwrap();
+                                }
+                                Ok(accept)
+                            },
+                        )
+                        .unwrap()
+                        .1
+                    })
+                })
+                .collect::<Vec<_>>();
+            handles
+                .into_iter()
+                .map(|handle| usize::from(handle.join().unwrap()))
+                .sum::<usize>()
         });
         assert_eq!(accepted, 1);
         let history = history.lock().unwrap();
