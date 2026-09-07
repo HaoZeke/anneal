@@ -22,10 +22,14 @@ cp "$ARMS" "$DIR/arms.tsv"
 cp "$(dirname "$0")/elja_hist_one.sh" "$DIR/hist_one.sh"
 chmod +x "$DIR/hist_one.sh"
 sha256sum "$BIN" | tee "$DIR/EXE_SHA"
+staging=$(dirname "$(dirname "$BIN")")
+staging=$(dirname "$(dirname "$staging")")
 {
   echo "campaign $(basename "$DIR") n=$N seeds=$SEEDS mechanisms=$MECH"
   echo "submitted $(date -u +%FT%TZ)"
-  echo "${SOURCE_NOTE:-source: see git log of the staging tree}"
+  echo "executable $(awk '{print $1}' "$DIR/EXE_SHA") $BIN"
+  echo "source_commit $(cat "$staging/SOURCE_COMMIT" 2>/dev/null || echo unknown)"
+  echo "${SOURCE_NOTE:-}"
 } > "$DIR/SOURCE_NOTE"
 last=$((SEEDS - 1))
 while read -r name budget cpus rest; do
