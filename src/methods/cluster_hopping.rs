@@ -651,6 +651,8 @@ pub struct Outcome {
     pub funnel: Option<(usize, usize, f64)>,
     /// Symmetrisations attempted, and the energy they gained.
     pub symmetrised: (usize, f64),
+    /// Orbit completions attempted, and the energy they gained.
+    pub orbits: (usize, f64),
     /// Continuous-symmetry quenches attempted, and downhill energy gained.
     pub continuous_symmetry: (usize, f64),
     /// Restarts triggered by a stall.
@@ -1580,6 +1582,8 @@ where
     let mut md_attempts = 0usize;
     let mut md_steps = 0usize;
     let mut md_failed = 0usize;
+    let mut orbits_completed = 0usize;
+    let mut orbit_gain = 0.0_f64;
     if let (Some(h), Some(g)) = (history.as_deref_mut(), current_validation_gradient.as_ref()) {
         // The start is part of the history even though no hop reached it,
         // exactly as the controller registers it: a later return to it must
@@ -3681,6 +3685,46 @@ where
                 }
             }
         }
+        // Orbit completion of a newly entered basin: the core's point group
+        // applied to the whole cluster, so surface atoms move onto the empty
+        // orbit positions the core implies. Same terms as the core
+        // symmetrisation above: once per new basin, quenched, offered.
+        if cfg.orbit_complete_on_new
+            && accept
+            && (moved_basin || cfg.point_symmetrise_every_accept)
+            && let Some(y) = crate::symmetrise::orbit_complete_core(
+                x.view(),
+                n,
+                cfg.symmetry_tolerance,
+                cfg.symmetry_merge_radius,
+                cfg.symmetrise_core_fraction,
+                cfg.min_separation,
+            )
+        {
+            let (es, xs) = relax(ledger, y.view(), cfg.relax_steps);
+            if es.is_finite() && xs.len() == x.len() {
+                let sym_gradient = record_quenched_answer(
+                    cfg,
+                    ledger,
+                    &mut grad,
+                    es,
+                    xs.view(),
+                    &mut unconverged_records,
+                );
+                hops += 1;
+                orbits_completed += 1;
+                let d = (es - e) / temperature.max(1e-12);
+                if d < 0.0 || rng.random::<f64>() < (-d).exp() {
+                    if es < e {
+                        orbit_gain += e - es;
+                    }
+                    e = es;
+                    x = xs;
+                    here = None;
+                    current_validation_gradient = sym_gradient;
+                }
+            }
+        }
         // Graph edge + Fiedler deposit at the chain's current basin. Called
         // every hop (accepted or not) so the coordinate tracks occupation;
         // only accepted moves grow the graph (visit records last→current).
@@ -4496,6 +4540,7 @@ where
             (a, b, p.connectivity)
         }),
         symmetrised: (symmetrised, symmetry_gain),
+        orbits: (orbits_completed, orbit_gain),
         continuous_symmetry: (continuous_symmetry_attempts, continuous_symmetry_gain),
         restarts,
         exchanges_refused,

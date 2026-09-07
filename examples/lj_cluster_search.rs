@@ -91,6 +91,7 @@ fn apply_boolean_options(cfg: &mut Config, opts: &[&str]) {
                     | "soapmean"
                     | "mh"
                     | "mhmd"
+                    | "orbit"
                     | "calib"
                     | "restart"
                     | "angular"
@@ -1804,6 +1805,7 @@ fn main() {
     // Goedecker's MD escape under the controller; MD_DT and MD_KINETIC
     // set the time step and the kinetic energy per unit escape scale.
     cfg.md_escape = opts.contains(&"mhmd");
+    cfg.orbit_complete_on_new = opts.contains(&"orbit");
     if let Some(dt) = std::env::var("MD_DT").ok().and_then(|v| v.parse().ok()) {
         cfg.md_escape_dt = dt;
     }

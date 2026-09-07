@@ -629,6 +629,182 @@ pub fn symmetrise_core(
 
 /// Detects and applies in one step, or returns `None` when there is no
 /// approximate symmetry worth using.
+/// Orbit completion under a point group: every atom is moved onto the
+/// symmetry-equivalent site set of the group, so partial orbits close.
+///
+/// Oakley, Johnston and Wales (Phys. Chem. Chem. Phys. 15, 3965, 2013)
+/// symmetrise a cluster with the point group of its core: the images of
+/// every atom under every operation are collected into sites, the sites
+/// with the most images are the ones the structure already nearly has,
+/// and the atoms are placed on the `n` best-supported sites, nearest
+/// first. Surface atoms that sat off any orbit move onto empty orbit
+/// positions; a structure already symmetric is unchanged. Sites closer
+/// than `min_separation` to a chosen site are skipped so the result has
+/// no overlapping atoms; the caller quenches and applies its acceptance
+/// rule. Returns `None` when nothing moves.
+pub fn complete_orbits(
+    x: ArrayView1<f64>,
+    n: usize,
+    group: &[Rot],
+    pair_cutoff: f64,
+    min_separation: f64,
+) -> Option<Array1<f64>> {
+    if n == 0 || group.len() < 2 {
+        return None;
+    }
+    let c = centroid(x, n);
+    let rel =
+        |a: usize| -> [f64; 3] { [x[3 * a] - c[0], x[3 * a + 1] - c[1], x[3 * a + 2] - c[2]] };
+    // Sites: merged images, with their support (images landing on them).
+    let mut sites: Vec<([f64; 3], usize, usize)> = Vec::new();
+    for a in 0..n {
+        let r = rel(a);
+        for g in group {
+            let w = act(g, r);
+            let mut hit = None;
+            for (i, (p, _, _)) in sites.iter().enumerate() {
+                let d =
+                    ((w[0] - p[0]).powi(2) + (w[1] - p[1]).powi(2) + (w[2] - p[2]).powi(2)).sqrt();
+                if d <= pair_cutoff {
+                    hit = Some(i);
+                    break;
+                }
+            }
+            match hit {
+                Some(i) => {
+                    let (p, count, _) = &mut sites[i];
+                    let m = *count as f64;
+                    for k in 0..3 {
+                        p[k] = (p[k] * m + w[k]) / (m + 1.0);
+                    }
+                    *count += 1;
+                }
+                None => sites.push((w, 1, a)),
+            }
+        }
+    }
+    // Best-supported sites first; ties by distance from the centre so the
+    // core is filled before the surface, as the cluster is.
+    sites.sort_by(|p, q| {
+        q.1.cmp(&p.1).then_with(|| {
+            let rp = p.0.iter().map(|v| v * v).sum::<f64>();
+            let rq = q.0.iter().map(|v| v * v).sum::<f64>();
+            rp.partial_cmp(&rq).unwrap_or(std::cmp::Ordering::Equal)
+        })
+    });
+    let mut chosen: Vec<[f64; 3]> = Vec::with_capacity(n);
+    for (p, _, _) in &sites {
+        if chosen.len() == n {
+            break;
+        }
+        let clear = chosen.iter().all(|q| {
+            ((p[0] - q[0]).powi(2) + (p[1] - q[1]).powi(2) + (p[2] - q[2]).powi(2)).sqrt()
+                >= min_separation
+        });
+        if clear {
+            chosen.push(*p);
+        }
+    }
+    if chosen.len() < n {
+        return None;
+    }
+    // Assign atoms to sites nearest first, so the move is the smallest
+    // permutation-free displacement onto the symmetric site set.
+    let mut pairs: Vec<(f64, usize, usize)> = Vec::with_capacity(n * n);
+    for a in 0..n {
+        let r = rel(a);
+        for (i, p) in chosen.iter().enumerate() {
+            let d = ((r[0] - p[0]).powi(2) + (r[1] - p[1]).powi(2) + (r[2] - p[2]).powi(2)).sqrt();
+            pairs.push((d, a, i));
+        }
+    }
+    pairs.sort_by(|p, q| p.0.partial_cmp(&q.0).unwrap_or(std::cmp::Ordering::Equal));
+    let mut atom_done = vec![false; n];
+    let mut site_done = vec![false; n];
+    let mut out = x.to_owned();
+    let mut moved = false;
+    let mut assigned = 0;
+    for (d, a, i) in pairs {
+        if atom_done[a] || site_done[i] {
+            continue;
+        }
+        atom_done[a] = true;
+        site_done[i] = true;
+        assigned += 1;
+        for k in 0..3 {
+            out[3 * a + k] = c[k] + chosen[i][k];
+        }
+        if d > 1e-9 {
+            moved = true;
+        }
+        if assigned == n {
+            break;
+        }
+    }
+    moved.then_some(out)
+}
+
+/// Orbit completion with the point group detected on the core.
+///
+/// The core's group (as in [`symmetrise_core`]) is applied to every atom
+/// through [`complete_orbits`]; this is the whole-cluster symmetrisation
+/// that Oakley, Johnston and Wales report as the productive scheme on
+/// the 98-point cluster, where the tetrahedral core is found long before
+/// its surface completes.
+pub fn orbit_complete_core(
+    x: ArrayView1<f64>,
+    n: usize,
+    tolerance: f64,
+    pair_cutoff: f64,
+    core_fraction: f64,
+    min_separation: f64,
+) -> Option<Array1<f64>> {
+    if n < 4 {
+        return None;
+    }
+    let c = centroid(x, n);
+    let mut radii: Vec<(f64, usize)> = (0..n)
+        .map(|a| {
+            let v = [x[3 * a] - c[0], x[3 * a + 1] - c[1], x[3 * a + 2] - c[2]];
+            ((v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt(), a)
+        })
+        .collect();
+    radii.sort_by(|p, q| p.0.partial_cmp(&q.0).unwrap_or(std::cmp::Ordering::Equal));
+    let m = ((n as f64) * core_fraction.clamp(0.1, 1.0))
+        .round()
+        .max(4.0) as usize;
+    let m = m.min(n);
+    let mut core = Array1::<f64>::zeros(3 * m);
+    for (k, &(_, a)) in radii[..m].iter().enumerate() {
+        for d in 0..3 {
+            core[3 * k + d] = x[3 * a + d];
+        }
+    }
+    let cands = detect_all(core.view(), m, &[2, 3, 4, 5, 6], tolerance);
+    if cands.is_empty() {
+        return None;
+    }
+    let mut gens: Vec<Candidate> = Vec::new();
+    for cand in &cands {
+        let seen = gens.iter().any(|g| {
+            let dot =
+                g.axis[0] * cand.axis[0] + g.axis[1] * cand.axis[1] + g.axis[2] * cand.axis[2];
+            dot.abs() > 0.995 && g.improper == cand.improper
+        });
+        if !seen {
+            gens.push(*cand);
+        }
+        if gens.len() >= 3 {
+            break;
+        }
+    }
+    let group = generate_group(&gens, 48);
+    if group.len() < 2 {
+        return None;
+    }
+    complete_orbits(x, n, &group, pair_cutoff, min_separation)
+}
+
 pub fn symmetrise_detected(
     x: ArrayView1<f64>,
     n: usize,
@@ -1040,6 +1216,49 @@ mod tests {
         let cy = centroid(y.view(), 6);
         for k in 0..3 {
             assert!((cx[k] - cy[k]).abs() < 1e-9, "centroid moved on axis {k}");
+        }
+    }
+}
+
+#[cfg(test)]
+mod orbit_tests {
+    use super::*;
+    use ndarray::Array1;
+
+    /// A regular octahedron with one vertex pushed off its site is put back
+    /// on it by orbit completion under the octahedron's own C4 axes, and a
+    /// structure already on its orbits is left alone.
+    #[test]
+    fn orbit_completion_returns_a_displaced_vertex_to_its_site() {
+        let mut x = Array1::from(vec![
+            1.0, 0.0, 0.0, -1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, -1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0,
+            -1.0,
+        ]);
+        let axes = [
+            Candidate {
+                axis: [1.0, 0.0, 0.0],
+                order: 4,
+                improper: false,
+            },
+            Candidate {
+                axis: [0.0, 1.0, 0.0],
+                order: 4,
+                improper: false,
+            },
+        ];
+        let group = generate_group(&axes, 48);
+        assert!(group.len() >= 8);
+        assert!(complete_orbits(x.view(), 6, &group, 0.2, 0.5).is_none());
+        x[15] = 0.15;
+        x[17] = -0.9;
+        let y = complete_orbits(x.view(), 6, &group, 0.3, 0.5).expect("a vertex moved");
+        let target = [0.0, 0.0, -1.0];
+        let c = centroid(y.view(), 6);
+        for k in 0..3 {
+            assert!(
+                (y[15 + k] - c[k] - target[k]).abs() < 0.05,
+                "vertex not on its site"
+            );
         }
     }
 }
