@@ -1137,6 +1137,9 @@ impl Config {
         };
         cfg.rigid_body_geometry =
             Some(crate::potentials::Tip4pCluster::new(n_molecules).rigid_geometry());
+        // Accepted returns to the same well do not explore the landscape.
+        // Basin-return feedback expands the rigid displacement until it exits.
+        cfg.minima_hopping = true;
         cfg.temperature = 2.0;
         cfg.bias_height = 2.0;
         cfg.screen_margin = 25.0;
