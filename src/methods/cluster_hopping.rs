@@ -1840,21 +1840,13 @@ where
                         || soap_push
                         || !gradient_required
                         || validation_gradient.is_some());
-                // A heard structure is a configuration exchange between two
-                // chains, and a chain that adopts it unconditionally stops
-                // being a sampler of its own biased ensemble. Bennett's
-                // potential-switching identity, M(U1-U0) exp(-U0) =
-                // M(U0-U1) exp(-U1) (J. Comput. Phys. 22, 245 (1976), Eq. 2),
-                // fixes the acceptance: the Metropolis function of the
-                // difference of the *biased* energies under this chain's own
-                // bias field, which is also the swap rule of bias-exchange
-                // metadynamics (Piana and Laio, J. Phys. Chem. B 111, 4553
-                // (2007)) and of multiple-walker / parallel-bias
-                // metadynamics. Under shared bias the two walkers' fields
-                // agree to the deposits in flight, so the cross terms cancel
-                // and this is the exact exchange rule. Measured without it
-                // on LJ75, adoption on energy moved every replica onto the
-                // icosahedral shelf inside a thousand hops.
+                // Catalog hearing relocates one chain; it does not swap a
+                // pair of replica states. This receiving-field Metropolis
+                // filter is a global-search heuristic, not an equilibrium
+                // witness: catalog selection need not be symmetric, and the
+                // rule has neither proposal-density nor sender-field terms.
+                // Its utility is measured by ensemble discovery and retained
+                // search diversity, not by the number of copied minima.
                 let exchange_accept = if published_prize && cfg.exchange_metropolis && proposal_sane
                 {
                     let v_here = bias.potential(bias.cv(from_state.view()).view());
