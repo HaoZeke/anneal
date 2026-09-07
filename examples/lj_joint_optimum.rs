@@ -583,13 +583,12 @@ fn run_minima_hopping_with_history(
             if ledger.remaining() == 0 {
                 break;
             }
-            feedback.observe(Some(current_basin), current_basin);
             continue;
         };
         dynamics_steps += escape.steps;
         time_step.observe(&escape);
         if escape.potential_minima < escape_config.potential_minima {
-            feedback.observe(Some(current_basin), current_basin);
+            unconverged += 1;
             continue;
         }
         let proposal_quench_start = ledger.spent();
@@ -608,7 +607,8 @@ fn run_minima_hopping_with_history(
         };
         if !validated {
             unconverged += 1;
-            feedback.observe(Some(current_basin), current_basin);
+            // An unresolved quench provides no minimum identity. Escape
+            // feedback responds only to certified basin observations.
             continue;
         }
 
@@ -1103,8 +1103,12 @@ fn main() -> Result<(), Box<dyn Error>> {
                                 "minima": run.outcome.basins, "accepted": run.outcome.accepted,
                                 "visit_counts": run.outcome.visit_counts,
                                 "failed_actions": run.outcome.unconverged_records,
+                                "escape_kinetic": run.outcome.escape_scale,
+                                "acceptance_threshold": run.outcome.escape_threshold,
+                                "final_time_step": run.final_time_step,
                                 "initial_quench_calls": run.initial_quench_calls,
                                 "dynamics_calls": run.dynamics_calls,
+                                "dynamics_steps": run.dynamics_steps,
                                 "proposal_quench_calls": run.proposal_quench_calls,
                                 "history_seconds": run.history_seconds,
                                 "aggregate_improvements": run.aggregate_improvements,
