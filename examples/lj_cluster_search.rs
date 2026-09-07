@@ -1783,8 +1783,8 @@ fn main() {
     cfg.point_symmetrise_on_new = opts.contains(&"psymnew");
     // Population repulsion in SOAP space, pulled back through the Jacobian.
     cfg.soap_repel = opts.contains(&"repel");
-    // Heard structures face Bennett's exchange acceptance unless the
-    // unconditional adoption is asked for by name.
+    // Heard structures face the receiving chain's biased-energy filter
+    // unless unconditional adoption is requested explicitly.
     cfg.exchange_metropolis = !std::env::var("CATALOG_HEAR_UNCONDITIONAL").is_ok_and(|v| v == "1");
     if let Some(g) = std::env::var("BIAS_GAMMA")
         .ok()

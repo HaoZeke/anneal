@@ -371,9 +371,9 @@ pub struct Config {
     /// Add the population-repulsion SOAP step ([`ClusterMove::SoapRepel`])
     /// as a proposal arm.
     pub soap_repel: bool,
-    /// Accept a heard (exchanged) structure with the Metropolis function of
-    /// the biased energy difference under this chain's bias field, after
-    /// Bennett's potential-switching identity, instead of unconditionally.
+    /// Filter a heard structure by this chain's biased energy difference.
+    /// This unilateral relocation heuristic does not certify equilibrium
+    /// sampling or the product-ensemble balance of a paired replica swap.
     pub exchange_metropolis: bool,
     /// Fraction of points, by distance from the centroid, that count as the
     /// core for [`Config::point_symmetrise_on_new`].
