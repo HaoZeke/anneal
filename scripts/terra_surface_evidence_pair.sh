@@ -46,7 +46,8 @@ for ((ensemble_index=0; ensemble_index<ensembles; ensemble_index++)); do
     endpoint=
     if [[ "$mode" == shared ]]; then
       server_log="$ANNEAL_PAIR_OUTPUT/server-$ensemble_index.log"
-      "$pair_bin/catalog_server" 127.0.0.1:0 "$n" 64 0.1 "$((budget * replicas))" \
+      env -i PATH="$PATH" LD_LIBRARY_PATH="${LD_LIBRARY_PATH:-}" \
+        "$pair_bin/catalog_server" 127.0.0.1:0 "$n" 64 0.1 "$((budget * replicas))" \
         surface-evidence "$ensemble" "$roster" >"$server_log" 2>&1 &
       server_pid=$!
       for ((attempt=0; attempt<200; attempt++)); do
@@ -59,9 +60,11 @@ for ((ensemble_index=0; ensemble_index<ensembles; ensemble_index++)); do
     fi
     worker_pids=()
     for ((replica=0; replica<replicas; replica++)); do
-      env CATALOG_CAMPAIGN=surface-evidence CATALOG_ENSEMBLE="$ensemble" \
+      env -i PATH="$PATH" LD_LIBRARY_PATH="${LD_LIBRARY_PATH:-}" \
+        CATALOG_CAMPAIGN=surface-evidence CATALOG_ENSEMBLE="$ensemble" \
         CATALOG_REPLICA="$replica" CATALOG_SHARING="$mode" CATALOG_RPC="$endpoint" \
-        CATALOG_EVIDENCE_ONLY=1 SURFACE_BLOCK="$block" SEED_OFFSET="$((ensemble_index * replicas + replica))" \
+        CATALOG_EVIDENCE_ONLY=1 SURFACES=kappa:0.7,mu:5 CATALOG_SLICE=500 \
+        SURFACE_BLOCK="$block" SEED_OFFSET="$((ensemble_index * replicas + replica))" \
         "$pair_bin/lj_cluster_search" "$n" "$budget" 1 catalog,surfaces,noclimb \
         >"$ANNEAL_PAIR_OUTPUT/$mode-$ensemble_index-$replica.log" 2>&1 &
       worker_pids+=("$!")
