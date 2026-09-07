@@ -269,6 +269,53 @@ fn checkpoint_probe_is_recorded_without_becoming_the_live_chain() {
 }
 
 #[test]
+fn failed_checkpoint_probe_remains_an_unresolved_observation() {
+    let mut cfg = Config::recommended(6);
+    cfg.relax_steps = 200;
+    let mut rng = StdRng::seed_from_u64(0xfeed_600d);
+    let start = random_cluster(cfg.n_points, 0.7, cfg.min_separation, &mut rng);
+    let mut ledger = Ledger::new(260);
+    let mut bias = fresh_bias(&cfg);
+    let mut relax = |ledger: &mut Ledger, state: ArrayView1<f64>, steps| {
+        if state.iter().any(|value| *value > 100.0) {
+            ledger.charge();
+            (f64::INFINITY, state.to_owned())
+        } else {
+            toy_relax(ledger, state, steps)
+        }
+    };
+    let mut offered = false;
+    let mut checkpoint = |_: ChainCheckpoint<'_>| {
+        if !offered {
+            offered = true;
+            CheckpointAction::ProbeProposal {
+                state: Array1::from_elem(start.len(), 101.0),
+                action: "probe".into(),
+            }
+        } else {
+            CheckpointAction::Continue
+        }
+    };
+    let outcome = run_with_bias_at_checkpoints(
+        &cfg,
+        start.view(),
+        &mut ledger,
+        &mut relax,
+        None,
+        &mut bias,
+        &mut rng,
+        40,
+        &mut checkpoint,
+    );
+    let probes = outcome.accepted_transitions.iter()
+        .filter(|transition| transition.action == "probe").collect::<Vec<_>>();
+    assert_eq!(probes.len(), 1, "failure must not disappear from the denominator");
+    assert!(!probes[0].validated);
+    assert!(!probes[0].adopted);
+    assert_ne!(outcome.final_state.as_ref(), Some(&probes[0].to_state));
+}
+
+#[test]
 fn unvalidated_screen_result_never_becomes_the_live_chain_state() {
     let mut cfg = Config::for_cluster(2);
     cfg.max_hops = Some(1);
