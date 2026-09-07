@@ -82,10 +82,17 @@ fi
   exit 1
 }
 # Registry is on NFS from the login fetch. Compute may have no outbound net.
-if ! git diff --quiet HEAD --; then
-  echo "refusing build: tracked source differs from HEAD" >&2
+# A staging tree synced by scripts/elja_sync_staging.sh is not at any
+# commit; its SOURCE_COMMIT file names the revision (suffixed -dirty when
+# the synced sources had uncommitted changes). LJ_ALLOW_DIRTY=1 accepts
+# that tree and records the file instead of refusing.
+if [[ -z ${LJ_ALLOW_DIRTY:-} ]] && ! git diff --quiet HEAD --; then
+  echo "refusing build: tracked source differs from HEAD (set LJ_ALLOW_DIRTY=1 for a staging tree)" >&2
   git status --short >&2
   exit 2
+fi
+if [[ -n ${LJ_ALLOW_DIRTY:-} ]]; then
+  echo "staging tree: source $(cat SOURCE_COMMIT 2>/dev/null || echo unknown)"
 fi
 cargo build --offline --locked --release --features featomic,ira,bank-rpc \
   --example lj_cluster_search \
