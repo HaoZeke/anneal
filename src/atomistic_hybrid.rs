@@ -352,7 +352,7 @@ fn validate(
             "species, masses, and frozen mask must match the atom count",
         ));
     }
-    if system.species.iter().any(|species| *species == 0)
+    if system.species.contains(&0)
         || system
             .masses
             .iter()

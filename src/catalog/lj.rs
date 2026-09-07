@@ -150,8 +150,8 @@ pub fn descriptor_space() -> DescriptorSpace {
             ],
         )
         .expect("the fixed LJ featomic provider is valid");
-        return DescriptorSpace::from_provider(geometry, provider)
-            .expect("the fixed LJ descriptor contract is valid");
+        DescriptorSpace::from_provider(geometry, provider)
+            .expect("the fixed LJ descriptor contract is valid")
     }
     #[cfg(not(feature = "featomic"))]
     {

@@ -1719,8 +1719,8 @@ where
                 // that carry \(\|h_i-\mu\|\), compacted then polished.
                 // Unused starts are discarded. This is not Xu confidence
                 // and not a campaign stop.
-                if leave_action && !left_packing(&candidate) {
-                    if let Some((energy, landed, _)) = crate::known_basin::leave_av_walk(
+                if leave_action && !left_packing(&candidate)
+                    && let Some((energy, landed, _)) = crate::known_basin::leave_av_walk(
                         from_state.view(),
                         cfg.neighbour_cutoff,
                         crate::known_basin::LEAVE_WALK_HOPS,
@@ -1731,7 +1731,6 @@ where
                         candidate_energy = energy;
                         candidate = landed;
                     }
-                }
                 let novel = candidate
                     .as_slice()
                     .is_some_and(|trial| crate::catalog::occupied_unseen_share(trial) > 0.0);
@@ -1924,7 +1923,7 @@ where
                 let quench_index = 1usize
                     .saturating_add(hops)
                     .saturating_add(continuous_symmetry_quenches);
-                quench_index % interval == 0
+                quench_index.is_multiple_of(interval)
             }
         };
         if continuous_symmetry_due {
@@ -3795,12 +3794,12 @@ where
                         swaps_tried += (after.0 - before.0) as usize;
                         swaps_accepted += (after.1 - before.1) as usize;
                         sweeps += 1;
-                        if cfg.ladder_mode.adapts() && sweeps % cfg.ladder_window.max(1) == 0 {
+                        if cfg.ladder_mode.adapts() && sweeps.is_multiple_of(cfg.ladder_window.max(1)) {
                             adaptations += 1;
                             // The interior is moved by the barrier estimator;
                             // every third adaptation the endpoint controller
                             // gets a turn.
-                            if adaptations % 3 == 0 {
+                            if adaptations.is_multiple_of(3) {
                                 l.retune_top(1.0 - cfg.ladder_target_accept, 0.5);
                             } else {
                                 l.equalise();
@@ -3851,7 +3850,7 @@ where
                         // A sweep under this scheme is n_rep offers, one per
                         // rung, so round trips per sweep compare across schemes.
                         cyclic_offers += 1;
-                        if cyclic_offers % n_rep == 0 {
+                        if cyclic_offers.is_multiple_of(n_rep) {
                             sweeps += 1;
                         }
                     }
