@@ -4111,7 +4111,7 @@ fn run_capnp_catalog(
                     u64::try_from(transition.hop).expect("transition hop must fit u64"),
                     transition.action.clone(),
                     transition.from_energy,
-                    transition.to_energy,
+                    if transition.validated { transition.to_energy } else { f64::NAN },
                     transition.adopted,
                 )
                 .expect("validated local transition execution must remain traceable");
