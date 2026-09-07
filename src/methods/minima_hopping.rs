@@ -49,7 +49,10 @@ use rgsaddle::{
 };
 
 mod history;
-pub use history::{HistoryObservation, MinimumHistory, MinimumHistoryError};
+pub use history::{
+    HistoryHook, HistoryMembership, HistoryObservation, HistoryReport, MinimumHistory,
+    MinimumHistoryError, SerializedWitness, SharedMinimumHistory, history_feedback_membership,
+};
 
 /// Geometry on which an MD escape evolves.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
