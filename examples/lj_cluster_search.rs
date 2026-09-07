@@ -1086,10 +1086,7 @@ mod option_tests {
 
 /// Value and gradient, charged to the ledger, or `None` when it is spent.
 fn charged(led: &mut Ledger, x: ArrayView1<f64>) -> Option<(f64, Array1<f64>)> {
-    if !led.charge() {
-        return None;
-    }
-    let (energy, grad) = lj(x);
+    let (energy, grad) = charged_physical(led, x)?;
     Some(if led.is_diagnostic_quench() {
         (energy, grad)
     } else {
@@ -1097,9 +1094,14 @@ fn charged(led: &mut Ledger, x: ArrayView1<f64>) -> Option<(f64, Array1<f64>)> {
     })
 }
 
+/// Physical value and gradient, independent of every adaptive search field.
+fn charged_physical(led: &mut Ledger, x: ArrayView1<f64>) -> Option<(f64, Array1<f64>)> {
+    led.charge().then(|| lj(x))
+}
+
 /// One physical-objective query, without optimization or quench evidence.
 fn evaluate_without_quenching(led: &mut Ledger, x: ArrayView1<f64>) -> (f64, Array1<f64>) {
-    let energy = if led.charge() { lj(x).0 } else { f64::INFINITY };
+    let energy = charged_physical(led, x).map_or(f64::INFINITY, |(energy, _)| energy);
     (energy, x.to_owned())
 }
 
@@ -2153,6 +2155,7 @@ fn main() {
                     }
                 }
                 capped += 1;
+                let (f, cur) = evaluate_without_quenching(led, cur.view());
                 led.record_quench_boundary(charged_before, f, cur.clone(), None);
                 return (f, cur);
             }
@@ -2192,7 +2195,7 @@ fn main() {
                 }
                 None => x,
             };
-            let (f, xr, _) = if !diagnostic && anneal_core::known_basin::is_armed() {
+            let (_, xr, _) = if !diagnostic && anneal_core::known_basin::is_armed() {
                 let (f, xr) =
                     anneal_core::known_basin::step_rgmin(&mut opt, x, iters, |v| charged(led, v));
                 (f, xr, 0)
@@ -2201,13 +2204,7 @@ fn main() {
             } else {
                 opt.minimize(x, iters, |v| charged(led, v))
             };
-            if !diagnostic && let Some(portfolio) = surfaces.as_ref() {
-                portfolio
-                    .lock()
-                    .expect("surface portfolio")
-                    .observe(screening_pass, f, led.best);
-            }
-            let mut boundary_energy = f;
+            let mut boundary_energy = f64::INFINITY;
             let mut validated_gradient = None;
             let mut xr = xr;
             if led.charge() {
@@ -2231,8 +2228,8 @@ fn main() {
                     // still, which is the difference between the plateau a
                     // whisker above the bound and crossing it.
                     opt.forget();
-                    let (fc, xc, _) = opt.minimize(xr.view(), 500, |v| charged(led, v));
-                    boundary_energy = fc;
+                    let (_, xc, _) = opt.minimize(xr.view(), 500, |v| charged_physical(led, v));
+                    boundary_energy = f64::INFINITY;
                     xr = xc;
                     if !led.charge() {
                         break;
@@ -2277,13 +2274,19 @@ fn main() {
             } else {
                 capped += 1;
             }
+            if !diagnostic && let Some(portfolio) = surfaces.as_ref() {
+                portfolio
+                    .lock()
+                    .expect("surface portfolio")
+                    .observe(screening_pass, boundary_energy, led.best);
+            }
             led.record_quench_boundary(
                 charged_before,
                 boundary_energy,
                 xr.clone(),
                 validated_gradient,
             );
-            (f, xr)
+            (boundary_energy, xr)
         };
         // The gradient the soft-mode escape needs, charged like everything
         // else: a Lanczos pass is two evaluations per step and the escape
