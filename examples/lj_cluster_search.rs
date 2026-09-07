@@ -3750,6 +3750,73 @@ impl PhaseTally {
     }
 }
 
+/// State of the census restart phase across checkpoints.
+#[derive(Default)]
+struct RestartState {
+    /// Hop of the last restart, for the quiet cooldown.
+    last_hop: usize,
+    /// Restarts taken.
+    restarts: usize,
+}
+
+/// Population stopping rule (=CATALOG_RESTART_VISITS=k=,
+/// =CATALOG_RESTART_QUIET=q=): a region `k` other replicas have reached
+/// that this replica has not deepened from for `q` hops is dead by the
+/// ensemble's count, and the replica hands its remaining budget to a
+/// fresh random start. Measured on LJ75 a shelf-absorbed chain crosses at
+/// about 8.5e-7 per hop and a fresh chain at about 5e-6, so the exchange
+/// pays six to one once the region is known dead. Returns the fresh
+/// start; `hear` is told the best-hop clock restarted.
+#[cfg(feature = "bank-rpc")]
+#[allow(clippy::too_many_arguments)]
+fn census_restart_phase(
+    state: &mut RestartState,
+    hear: &mut HearState,
+    replica: u32,
+    snapshot: &ChainCheckpoint<'_>,
+    checkpoint_sequence: u64,
+    crowd: u64,
+    quiet_now: usize,
+    run_cfg: &Config,
+) -> Option<Array1<f64>> {
+    use rand::SeedableRng;
+    let visits: u64 = std::env::var("CATALOG_RESTART_VISITS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(0);
+    let quiet: usize = std::env::var("CATALOG_RESTART_QUIET")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(20_000);
+    if visits == 0
+        || crowd < visits
+        || quiet_now < quiet
+        || snapshot.hops().saturating_sub(state.last_hop) < quiet
+    {
+        return None;
+    }
+    let mut restart_rng = rand::rngs::StdRng::seed_from_u64(
+        (u64::from(replica) << 41) ^ checkpoint_sequence.wrapping_mul(0xD6E8_FEB8_6659_FD93),
+    );
+    let fresh = random_cluster(
+        run_cfg.n_points,
+        0.7,
+        run_cfg.min_separation,
+        &mut restart_rng,
+    );
+    state.last_hop = snapshot.hops();
+    hear.last_best_hop = snapshot.hops();
+    state.restarts += 1;
+    println!(
+        "  census restart hops {}  crowd {}  restarts {}",
+        snapshot.hops(),
+        crowd,
+        state.restarts
+    );
+    let _ = std::io::stdout().flush();
+    Some(fresh)
+}
+
 /// State of the census jump phase across checkpoints.
 #[derive(Default)]
 struct JumpState {
@@ -4579,8 +4646,7 @@ fn run_capnp_catalog(
     // Census jumps: the population's visit count of this replica's basin,
     // not this replica's own stall, triggers an occasional jump.
     let mut jump_state = JumpState::default();
-    let mut census_restarts = 0usize;
-    let mut census_restart_last_hop = 0usize;
+    let mut restart_state = RestartState::default();
     let mut count_walk = 0usize;
     let mut count_hole = 0usize;
     let mut extra_cover = 0usize;
@@ -5624,41 +5690,16 @@ fn run_capnp_catalog(
                             snapshot.current_energy()
                         );
                     }
-                    let census_restart_visits: u64 = std::env::var("CATALOG_RESTART_VISITS")
-                        .ok()
-                        .and_then(|v| v.parse().ok())
-                        .unwrap_or(0);
-                    let census_restart_quiet: usize = std::env::var("CATALOG_RESTART_QUIET")
-                        .ok()
-                        .and_then(|v| v.parse().ok())
-                        .unwrap_or(20_000);
-                    if census_restart_visits > 0
-                        && crowd >= census_restart_visits
-                        && quiet_now >= census_restart_quiet
-                        && snapshot.hops().saturating_sub(census_restart_last_hop)
-                            >= census_restart_quiet
-                    {
-                        use rand::SeedableRng;
-                        let mut restart_rng = rand::rngs::StdRng::seed_from_u64(
-                            (u64::from(replica) << 41)
-                                ^ checkpoint_sequence.wrapping_mul(0xD6E8_FEB8_6659_FD93),
-                        );
-                        let fresh = random_cluster(
-                            run_cfg.n_points,
-                            0.7,
-                            run_cfg.min_separation,
-                            &mut restart_rng,
-                        );
-                        census_restart_last_hop = snapshot.hops();
-                        hear_state.last_best_hop = snapshot.hops();
-                        census_restarts += 1;
-                        println!(
-                            "  census restart hops {}  crowd {}  restarts {}",
-                            snapshot.hops(),
-                            crowd,
-                            census_restarts
-                        );
-                        let _ = std::io::stdout().flush();
+                    if let Some(fresh) = census_restart_phase(
+                        &mut restart_state,
+                        &mut hear_state,
+                        replica,
+                        &snapshot,
+                        checkpoint_sequence,
+                        crowd,
+                        quiet_now,
+                        &run_cfg,
+                    ) {
                         phases.fire("census_restart");
                         return complete_checkpoint_trace(
                             &mut cooperative,
