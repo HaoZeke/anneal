@@ -40,17 +40,71 @@ use anneal_core::shape::{IraMetric, IraStructureWitness};
 fn apply_boolean_options(cfg: &mut Config, opts: &[&str]) {
     for option in opts {
         assert!(
-            matches!(*option,
-                "rec" | "askmc" | "shape" | "bfwt" | "thompson" |
-                "height" | "noheight" | "climb" | "noclimb" | "sym" | "nosym" |
-                "csa" | "corekey" | "reocc" | "coreclass" | "twophase" | "aniso" |
-                "surfaces" | "path" | "trail" | "rscreen" | "soapclass" | "soapmean" |
-                "mh" | "calib" | "restart" | "angular" | "psym" | "psymnew" | "novel" |
-                "sbkey" | "tabu" | "bayes" | "flat" | "stemp" | "ebias" | "visit" |
-                "reseed" | "selfseed" | "learncon" | "lean" | "burst" | "hollow" |
-                "fill" | "twin" | "gtwin" | "depth" | "softsub" | "covper" | "staged" |
-                "ctx" | "sites" | "canon" | "indep" | "nrpt" | "rpt" | "ptt" | "pt" |
-                "rungbias" | "bank" | "acq" | "early" | "catalog"
+            matches!(
+                *option,
+                "rec"
+                    | "askmc"
+                    | "shape"
+                    | "bfwt"
+                    | "thompson"
+                    | "height"
+                    | "noheight"
+                    | "climb"
+                    | "noclimb"
+                    | "sym"
+                    | "nosym"
+                    | "csa"
+                    | "corekey"
+                    | "reocc"
+                    | "coreclass"
+                    | "twophase"
+                    | "aniso"
+                    | "surfaces"
+                    | "path"
+                    | "trail"
+                    | "rscreen"
+                    | "soapclass"
+                    | "soapmean"
+                    | "mh"
+                    | "calib"
+                    | "restart"
+                    | "angular"
+                    | "psym"
+                    | "psymnew"
+                    | "novel"
+                    | "sbkey"
+                    | "tabu"
+                    | "bayes"
+                    | "flat"
+                    | "stemp"
+                    | "ebias"
+                    | "visit"
+                    | "reseed"
+                    | "selfseed"
+                    | "learncon"
+                    | "lean"
+                    | "burst"
+                    | "hollow"
+                    | "fill"
+                    | "twin"
+                    | "gtwin"
+                    | "depth"
+                    | "softsub"
+                    | "covper"
+                    | "staged"
+                    | "ctx"
+                    | "sites"
+                    | "canon"
+                    | "indep"
+                    | "nrpt"
+                    | "rpt"
+                    | "ptt"
+                    | "pt"
+                    | "rungbias"
+                    | "bank"
+                    | "acq"
+                    | "early"
+                    | "catalog"
             ),
             "unknown search mechanism: {option}"
         );
@@ -638,16 +692,36 @@ mod option_tests {
         let source = Array1::from(vec![0.0, 0.0, 0.0, separation, 0.0, 0.0]);
         let (energy, gradient) = lj(source.view());
         let transition = AcceptedTransition {
-            hop: 3, action: "probe".into(), from_energy: energy,
-            to_energy: f64::INFINITY, from_state: source.clone(),
-            from_gradient: Some(gradient), to_state: source,
-            to_gradient: None, validated: false, adopted: false,
+            hop: 3,
+            action: "probe".into(),
+            from_energy: energy,
+            to_energy: f64::INFINITY,
+            from_state: source.clone(),
+            from_gradient: Some(gradient),
+            to_state: source,
+            to_gradient: None,
+            validated: false,
+            adopted: false,
         };
         let mut sequence = 20;
-        let operations = adaptive_catalog_operations(&descriptor_space,
-            &signature.atomic_numbers, 0, &mut sequence, 71, 400, &[transition]);
-        assert_eq!(operations.len(), 2, "failed probe must retain its source and outcome");
-        assert!(matches!(operations[0], AdaptiveCatalogOperation::RegisterCurrent(_)));
+        let operations = adaptive_catalog_operations(
+            &descriptor_space,
+            &signature.atomic_numbers,
+            0,
+            &mut sequence,
+            71,
+            400,
+            &[transition],
+        );
+        assert_eq!(
+            operations.len(),
+            2,
+            "failed probe must retain its source and outcome"
+        );
+        assert!(matches!(
+            operations[0],
+            AdaptiveCatalogOperation::RegisterCurrent(_)
+        ));
     }
 
     #[cfg(feature = "bank-rpc")]
@@ -1641,7 +1715,10 @@ fn main() {
     cfg.point_symmetrise = opts.contains(&"psym");
     // Core symmetrisation once per new basin (Oakley-Johnston-Wales), quenched.
     cfg.point_symmetrise_on_new = opts.contains(&"psymnew");
-    if let Some(frac) = std::env::var("PSYM_CORE").ok().and_then(|v| v.parse::<f64>().ok()) {
+    if let Some(frac) = std::env::var("PSYM_CORE")
+        .ok()
+        .and_then(|v| v.parse::<f64>().ok())
+    {
         cfg.symmetrise_core_fraction = frac;
         println!("  symmetrise core fraction {frac}");
     }
@@ -1825,7 +1902,10 @@ fn main() {
         println!("  merge radius {r}");
     }
     // Acceptance temperature in energy units; Wales--Doye's 0.8 is the preset.
-    if let Some(t) = std::env::var("TEMPERATURE").ok().and_then(|v| v.parse::<f64>().ok()) {
+    if let Some(t) = std::env::var("TEMPERATURE")
+        .ok()
+        .and_then(|v| v.parse::<f64>().ok())
+    {
         cfg.temperature = t * cfg.energy_scale;
         println!("  acceptance temperature {t} E0");
     }
@@ -4111,7 +4191,11 @@ fn run_capnp_catalog(
                     u64::try_from(transition.hop).expect("transition hop must fit u64"),
                     transition.action.clone(),
                     transition.from_energy,
-                    if transition.validated { transition.to_energy } else { f64::NAN },
+                    if transition.validated {
+                        transition.to_energy
+                    } else {
+                        f64::NAN
+                    },
                     transition.adopted,
                 )
                 .expect("validated local transition execution must remain traceable");
@@ -4119,9 +4203,12 @@ fn run_capnp_catalog(
 
         // Diagnostic probes define comparable return evidence. Adaptive
         // accepted hops remain discovery records, not samples of this kernel.
-        let probes = snapshot.accepted_transitions().iter()
+        let probes = snapshot
+            .accepted_transitions()
+            .iter()
             .filter(|transition| transition.action == "probe" && !transition.adopted)
-            .cloned().collect::<Vec<_>>();
+            .cloned()
+            .collect::<Vec<_>>();
         let operations = adaptive_catalog_operations(
             &descriptor_space,
             &signature.atomic_numbers,
@@ -4138,13 +4225,25 @@ fn run_capnp_catalog(
                 AdaptiveCatalogOperation::RegisterCurrent(candidate) => {
                     let _ = cooperative.post_record_current(replica, candidate);
                 }
-                AdaptiveCatalogOperation::Adopt { action, destination, adopted } => {
-                    let _ = cooperative.post_record_transition(replica, action,
-                        anneal_core::catalog_rpc::TransitionDestination::Resolved(destination), adopted);
+                AdaptiveCatalogOperation::Adopt {
+                    action,
+                    destination,
+                    adopted,
+                } => {
+                    let _ = cooperative.post_record_transition(
+                        replica,
+                        action,
+                        anneal_core::catalog_rpc::TransitionDestination::Resolved(destination),
+                        adopted,
+                    );
                 }
                 AdaptiveCatalogOperation::Unresolved { action } => {
-                    let _ = cooperative.post_record_transition(replica, action,
-                        anneal_core::catalog_rpc::TransitionDestination::Unresolved, false);
+                    let _ = cooperative.post_record_transition(
+                        replica,
+                        action,
+                        anneal_core::catalog_rpc::TransitionDestination::Unresolved,
+                        false,
+                    );
                 }
             }
         }
@@ -4152,13 +4251,21 @@ fn run_capnp_catalog(
         // sampled trajectory segment. Registration does not invent an edge.
         if let Some(gradient) = snapshot.current_gradient() {
             candidate_sequence += 1;
-            if let Some(candidate) = lj_catalog_candidate(&descriptor_space,
-                &signature.atomic_numbers, replica, candidate_sequence, seed,
-                snapshot.charged(), snapshot.current_energy(), snapshot.current_state(), gradient) {
-            cooperative
-                .record_work(replica, ChargeKind::DescriptorEvaluation, 0)
-                .expect("source descriptor work must enter the cooperative ledger");
-            let _ = cooperative.post_record_current(replica, candidate);
+            if let Some(candidate) = lj_catalog_candidate(
+                &descriptor_space,
+                &signature.atomic_numbers,
+                replica,
+                candidate_sequence,
+                seed,
+                snapshot.charged(),
+                snapshot.current_energy(),
+                snapshot.current_state(),
+                gradient,
+            ) {
+                cooperative
+                    .record_work(replica, ChargeKind::DescriptorEvaluation, 0)
+                    .expect("source descriptor work must enter the cooperative ledger");
+                let _ = cooperative.post_record_current(replica, candidate);
             }
         }
 
@@ -4903,24 +5010,22 @@ fn run_capnp_catalog(
                 } else {
                     let (atom, class) = queue[(extra_cover - 1) % queue.len()];
                     anneal_core::known_basin::arm_leave_cover(atom);
-                    let offered = if anneal_core::soap::fivefold_axis_count(
-                        snapshot.current_state(),
-                    ) >= 2
-                    {
-                        let mut residual_rng = rand::rngs::StdRng::seed_from_u64(
-                            (u64::from(replica) << 17)
-                                ^ (checkpoint_sequence as u64)
-                                    .wrapping_mul(0x9E37_79B9_7F4A_7C15)
-                                ^ extra_cover as u64,
-                        );
-                        anneal_core::soap::step_away_fivefold(
-                            snapshot.current_state(),
-                            anneal_core::known_basin::LEAVE_RUNG_RMSD,
-                            &mut residual_rng,
-                        )
-                    } else {
-                        snapshot.current_state().to_owned()
-                    };
+                    let offered =
+                        if anneal_core::soap::fivefold_axis_count(snapshot.current_state()) >= 2 {
+                            let mut residual_rng = rand::rngs::StdRng::seed_from_u64(
+                                (u64::from(replica) << 17)
+                                    ^ (checkpoint_sequence as u64)
+                                        .wrapping_mul(0x9E37_79B9_7F4A_7C15)
+                                    ^ extra_cover as u64,
+                            );
+                            anneal_core::soap::step_away_fivefold(
+                                snapshot.current_state(),
+                                anneal_core::known_basin::LEAVE_RUNG_RMSD,
+                                &mut residual_rng,
+                            )
+                        } else {
+                            snapshot.current_state().to_owned()
+                        };
                     println!(
                         "  ape seed atom {} class {} hops {} neighbors {}",
                         atom,
@@ -5324,11 +5429,8 @@ fn run_capnp_catalog(
         }
         if checkpoint_sequence.is_multiple_of(probe_interval)
             && snapshot.remaining() > run_cfg.relax_steps.saturating_add(2)
-            && let Some(state) = fixed_probe_trial(
-                snapshot.current_state(),
-                probe_scale,
-                &mut probe_rng,
-            )
+            && let Some(state) =
+                fixed_probe_trial(snapshot.current_state(), probe_scale, &mut probe_rng)
         {
             cooperative
                 .record_slice(replica, trace)

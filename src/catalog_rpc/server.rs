@@ -40,10 +40,9 @@ use crate::catalog::{
     QuenchStatus, REDUCTION_FACTOR, SystemSignature, ValidatedCandidate, ValidatorConfig,
     WalkRecord, euclidean_gradient_norm, explore_must_leave, invert_mixing,
     leftover_dwell_from_census, leftover_esty_stable, leftover_esty_upper, leftover_lambda,
-    occupancy_ei_exhausted, occupancy_family_floor, occupancy_fes_delta,
-    occupancy_min_families, occupancy_ring_profile, occupancy_ring_split,
-    occupancy_sparsify_packing, occupant_rhat, packing_role,
-    promote_one_sided, prune, retis_exchange_adjacent, same_packing, seat_extras,
+    occupancy_ei_exhausted, occupancy_family_floor, occupancy_fes_delta, occupancy_min_families,
+    occupancy_ring_profile, occupancy_ring_split, occupancy_sparsify_packing, occupant_rhat,
+    packing_role, promote_one_sided, prune, retis_exchange_adjacent, same_packing, seat_extras,
 };
 use crate::catalog_policy::proposal::farthest_hole;
 use crate::cooperative_search::ledger::{
@@ -2234,7 +2233,9 @@ fn apply_request(
                     .insert(request.identity.replica, observation.basin_id);
                 // Registration establishes occupancy, not reachability.
                 // Only an explicit transition can connect two minima.
-                scientific.landscape.observe_basin(observation.basin_id.as_raw());
+                scientific
+                    .landscape
+                    .observe_basin(observation.basin_id.as_raw());
                 let canonical = candidate_from_validated(&validated, Some(observation.basin_id));
                 let deeper = scientific
                     .best_candidate_by_replica
