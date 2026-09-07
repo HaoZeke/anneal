@@ -4000,8 +4000,8 @@ fn run_capnp_catalog(
     // every replica's live minimum, no coordinator in the loop.
     let configured_census_base = std::env::var("CENSUS_BUS_BASE").ok();
     let mut census_bus: Option<anneal_core::census_bus::CensusBus> =
-        census_bus_base(sharing, evidence_only, configured_census_base.as_deref())
-            .and_then(|base| {
+        census_bus_base(sharing, evidence_only, configured_census_base.as_deref()).and_then(
+            |base| {
                 let n: u32 = std::env::var("CATALOG_REPLICAS")
                     .ok()
                     .and_then(|v| v.parse().ok())
@@ -4019,7 +4019,8 @@ fn run_capnp_catalog(
                         None
                     }
                 }
-            });
+            },
+        );
     let mut peer_crowd: usize = 0;
     let mut bus_received: usize = 0;
     let mut shared_wells: Vec<Array1<f64>> = Vec::new();
@@ -4303,7 +4304,9 @@ fn run_capnp_catalog(
                 snapshot.current_energy(),
                 snapshot.current_state(),
                 snapshot.current_gradient(),
-            ).is_some() {
+            )
+            .is_some()
+            {
                 bus.publish(snapshot.hops() as u64, snapshot.current_energy(), here);
             }
             let fresh = bus.poll();
