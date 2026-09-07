@@ -40,6 +40,22 @@ fn input(
 }
 
 #[test]
+fn published_reference_does_not_change_a_stalled_chains_work() {
+    let (census, basin_id) = census_with_repeated_visits(4);
+    let mut state = input(
+        ActiveCatalogRelation::Incumbent,
+        CensusEvidence::from_census(&census, Some(basin_id)),
+        AggregateProgress::new(90, 100).unwrap(),
+    );
+    state.interface_rank = 1;
+    state.local_stall_slices = anneal_core::catalog_policy::LOCAL_STALL_LEAVE;
+    let without_reference = CatalogPolicy::decide(state);
+    assert_eq!(without_reference.action, PolicyAction::Leave);
+    state.on_published_prize = true;
+    assert_eq!(CatalogPolicy::decide(state), without_reference);
+}
+
+#[test]
 fn leftover_unsaturated_extra_walks_like_serial() {
     let (census, basin_id) = census_with_repeated_visits(1);
     let mut extra = input(
