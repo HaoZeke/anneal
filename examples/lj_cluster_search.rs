@@ -18,12 +18,14 @@ use anneal_core::catalog::{
     OccupancyLeaveTarget, credit_action, leftover_birth_probability, occupancy_complete_at,
     occupancy_is_cluster, occupancy_leave_by_birth, occupancy_retire_at, published_energy_score,
 };
-use anneal_core::catalog::{
-    euclidean_gradient_norm, hops_per_core_hour, leave_crossing_slices, leave_defers,
-};
+use anneal_core::catalog::euclidean_gradient_norm;
+#[cfg(feature = "bank-rpc")]
+use anneal_core::catalog::{hops_per_core_hour, leave_crossing_slices, leave_defers};
+#[cfg(feature = "bank-rpc")]
+use anneal_core::methods::cluster_hopping::{AcceptedTransition, run_with_bias};
 use anneal_core::methods::cluster_hopping::{
-    AcceptedTransition, ChainCheckpoint, CheckpointAction, ClusterFingerprint, Config, Keying,
-    LadderMode, Ledger, MoveLibrary, Outcome, QuenchStatus, random_cluster, run_with_bias,
+    ChainCheckpoint, CheckpointAction, ClusterFingerprint, Config, Keying,
+    LadderMode, Ledger, MoveLibrary, Outcome, QuenchStatus, random_cluster,
     run_with_bias_at_checkpoints,
 };
 use anneal_core::methods::csa_cluster::{self, BankConfig};
@@ -32,6 +34,7 @@ use anneal_core::terminate::Terminator;
 use ndarray::{Array1, ArrayView1};
 use std::io::{self, Write};
 use std::sync::{Arc, Mutex};
+#[cfg(feature = "bank-rpc")]
 use std::time::Instant;
 
 #[cfg(feature = "bank-rpc")]
@@ -3002,6 +3005,7 @@ fn remember_packing_well(
 /// structure, not a length. When the quench still lands in the same packing
 /// the hop loop walks the rest of the ladder rather than drawing another
 /// hole of the same size.
+#[cfg(feature = "bank-rpc")]
 fn leave_packing_state<R: rand::Rng + ?Sized>(
     x: ArrayView1<f64>,
     energy: f64,
@@ -3035,6 +3039,7 @@ fn leave_packing_state<R: rand::Rng + ?Sized>(
 /// same extra. Plasencia Gutiérrez, Argáez, Jónsson, *J. Chem. Theory
 /// Comput.* **2017**, *13* (1), 125-134.
 /// <https://doi.org/10.1021/acs.jctc.5b01216>
+#[cfg(feature = "bank-rpc")]
 fn archive_cover_index(replica: u32, leave: usize) -> usize {
     use anneal_core::catalog::{cover_arm_count, pick_leave_cover};
     use rand::SeedableRng;
@@ -3046,6 +3051,7 @@ fn archive_cover_index(replica: u32, leave: usize) -> usize {
     pick_leave_cover(n, &mut rng)
 }
 
+#[cfg(feature = "bank-rpc")]
 fn packing_of(x: ArrayView1<f64>, cfg: &Config) -> Array1<f64> {
     #[cfg(feature = "featomic")]
     {
@@ -3116,6 +3122,7 @@ fn class_histogram(
 }
 
 /// Normalized L1 distance between two class histograms.
+#[cfg(feature = "bank-rpc")]
 fn histogram_l1(
     a: &std::collections::BTreeMap<usize, usize>,
     b: &std::collections::BTreeMap<usize, usize>,
@@ -3133,6 +3140,7 @@ fn histogram_l1(
         .sum()
 }
 
+#[cfg(feature = "bank-rpc")]
 fn fixed_probe_trial<R: rand::Rng + ?Sized>(
     current: ArrayView1<f64>,
     scale: f64,

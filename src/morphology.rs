@@ -1048,6 +1048,7 @@ mod tests {
 
     /// The twelve nearest neighbours of a face-centred cubic site, plus the
     /// site.
+    #[cfg(feature = "featomic")]
     pub(crate) fn fcc_shell() -> Vec<f64> {
         let r = 2.0_f64.sqrt();
         let mut v = vec![0.0, 0.0, 0.0];
@@ -1064,6 +1065,7 @@ mod tests {
     /// The twelve nearest neighbours of a hexagonal close-packed site, plus the
     /// site. The two triangles are mirror images across the basal plane, which
     /// is what separates hcp from fcc.
+    #[cfg(feature = "featomic")]
     pub(crate) fn hcp_shell() -> Vec<f64> {
         let mut v = vec![0.0, 0.0, 0.0];
         for k in 0..6 {
@@ -1081,6 +1083,7 @@ mod tests {
     }
 
     /// Six neighbours along the cubic axes, plus the site.
+    #[cfg(feature = "featomic")]
     pub(crate) fn simple_cubic_shell() -> Vec<f64> {
         vec![
             0.0, 0.0, 0.0, 1.0, 0.0, 0.0, -1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, -1.0, 0.0, 0.0, 0.0,
@@ -1170,6 +1173,7 @@ mod tests {
     }
 
     /// Displaces every coordinate by a fixed pattern of the given size.
+    #[cfg(feature = "featomic")]
     pub(crate) fn jitter(v: &[f64], amp: f64) -> Vec<f64> {
         v.iter()
             .enumerate()
