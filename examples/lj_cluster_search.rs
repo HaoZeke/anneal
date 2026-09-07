@@ -5326,7 +5326,7 @@ fn run_capnp_catalog(
             && snapshot.remaining() > run_cfg.relax_steps.saturating_add(2)
             && let Some(state) = fixed_probe_trial(
                 snapshot.current_state(),
-                probe_scale * difficulty_gain,
+                probe_scale,
                 &mut probe_rng,
             )
         {
