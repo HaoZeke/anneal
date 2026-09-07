@@ -17,7 +17,7 @@
 //! `ANNEAL_START_COORDINATES` supplies one fixed plain Cartesian input for
 //! escape probes; its coordinates are embedded in the configuration record.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::error::Error;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, atomic::AtomicUsize, atomic::Ordering};
@@ -398,13 +398,14 @@ struct HistoryRunOptions<'a> {
     charged: Option<&'a AtomicUsize>,
 }
 
-fn observe_history(
+fn observe_history<T>(
     history: &Mutex<MinimumHistory>,
     ledger: &Ledger,
     descriptor: &DescriptorSpace,
     context: &StructureContext,
     witness: &impl ExactStructureWitness,
-) -> Result<HistoryObservation, String> {
+    decide: impl FnOnce(&mut MinimumHistory, HistoryObservation) -> Result<T, String>,
+) -> Result<(HistoryObservation, T), String> {
     let minimum = ledger
         .quench_boundaries()
         .last()
@@ -412,11 +413,14 @@ fn observe_history(
     let description = descriptor
         .describe(minimum.state(), context.species())
         .map_err(|error| error.to_string())?;
-    history
+    let mut history = history
         .lock()
-        .map_err(|_| "minimum history lock poisoned".to_string())?
+        .map_err(|_| "minimum history lock poisoned".to_string())?;
+    let observation = history
         .observe(minimum, description, context.clone(), witness)
-        .map_err(|error| error.to_string())
+        .map_err(|error| error.to_string())?;
+    let decision = decide(&mut history, observation)?;
+    Ok((observation, decision))
 }
 
 fn run_minima_hopping(
@@ -533,7 +537,10 @@ fn run_minima_hopping_with_history(
     let descriptor = history.map(|_| lj::descriptor_space());
     let context = StructureContext::new(Some(vec![18; n]), None, Some(format!("lj-reduced-n{n}")));
     let mut current_basin = if let (Some(history), Some(descriptor)) = (history, &descriptor) {
-        observe_history(history, &ledger, descriptor, &context, witness)?
+        observe_history(history, &ledger, descriptor, &context, witness, |history, observation| {
+            history.mark_accepted(observation.minimum.id).map_err(|error| error.to_string())
+        })?
+            .0
             .minimum
             .id
     } else {
@@ -541,6 +548,7 @@ fn run_minima_hopping_with_history(
     };
     let mut history_seconds = history_start.elapsed().as_secs_f64();
     let mut local_basins = HashSet::from([current_basin]);
+    let mut accepted_visits = HashMap::from([(current_basin, 1_u64)]);
     let mut feedback = EscapeFeedback::new(hopping.energy_scale, 0.5 * hopping.energy_scale);
     if !options.bound_escape {
         feedback.escape_floor = f64::MIN_POSITIVE;
@@ -613,28 +621,41 @@ fn run_minima_hopping_with_history(
         }
 
         let history_start = Instant::now();
-        let (reached, visit) = if let (Some(history), Some(descriptor)) = (history, &descriptor) {
-            let observation = observe_history(history, &ledger, descriptor, &context, witness)?;
+        let (reached, adopt) = if let (Some(history), Some(descriptor)) = (history, &descriptor) {
+            let (observation, adopt) = observe_history(
+                history, &ledger, descriptor, &context, witness,
+                |history, observation| {
+                    let reached = observation.minimum.id;
+                    let visits = history.accepted_visits(reached).ok_or("missing admitted minimum")?;
+                    let visit = feedback.observe_shared(Some(current_basin), reached, visits == 0, visits);
+                    let adopt = visit == Visit::New && feedback.accept(candidate_energy - energy);
+                    if adopt {
+                        history.mark_accepted(reached).map_err(|error| error.to_string())?;
+                    }
+                    Ok(adopt)
+                },
+            )?;
             let reached = observation.minimum.id;
             if local_basins.insert(reached) {
                 minima.push(candidate.clone());
             }
-            let visit = feedback.observe_shared(
-                Some(current_basin),
-                reached,
-                observation.minimum.is_new,
-                observation.visits,
-            );
-            (reached, visit)
+            (reached, adopt)
         } else {
-            if let Some(reached) = exact_basin(witness, &minima, candidate.view()) {
-                history_seconds += history_start.elapsed().as_secs_f64();
-                feedback.observe(Some(current_basin), reached);
-                continue;
+            let reached = exact_basin(witness, &minima, candidate.view()).unwrap_or_else(|| {
+                let reached = minima.len();
+                minima.push(candidate.clone());
+                reached
+            });
+            let visits = accepted_visits.get_mut(&reached).map_or(0, |visits| {
+                *visits = visits.saturating_add(1);
+                *visits
+            });
+            let visit = feedback.observe_shared(Some(current_basin), reached, visits == 0, visits);
+            let adopt = visit == Visit::New && feedback.accept(candidate_energy - energy);
+            if adopt {
+                accepted_visits.insert(reached, 1);
             }
-            let reached = minima.len();
-            minima.push(candidate.clone());
-            (reached, feedback.observe(Some(current_basin), reached))
+            (reached, adopt)
         };
         history_seconds += history_start.elapsed().as_secs_f64();
         let improved = candidate_energy < ledger.best;
@@ -646,10 +667,7 @@ fn run_minima_hopping_with_history(
                 candidate_energy,
             ));
         }
-        if visit != Visit::New {
-            continue;
-        }
-        if feedback.accept(candidate_energy - energy) {
+        if adopt {
             current_basin = reached;
             energy = candidate_energy;
             state = candidate;
