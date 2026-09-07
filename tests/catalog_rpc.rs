@@ -95,7 +95,7 @@ fn independent_clients_exchange_surface_rewards_without_replay_or_self_credit() 
         ServerConfig::new("jcc-2026", "surface-evidence", [0x5a; 32], [0, 1]).unwrap(),
     ).unwrap();
     let connect = |replica| CatalogClient::connect(
-        server.local_addr(), identity("surface-evidence", replica), ClientConfig::default()
+        server.addr(), identity("surface-evidence", replica), ClientConfig::default()
     ).unwrap();
     let mut teacher = connect(0);
     let mut learner = connect(1);
@@ -112,7 +112,6 @@ fn independent_clients_exchange_surface_rewards_without_replay_or_self_credit() 
     assert_eq!(snapshot.census_visits, 0);
     assert_eq!(snapshot.active_entries, 0);
     assert_eq!(snapshot.aggregate_charged, 0);
-    server.shutdown().unwrap();
 }
 
 #[test]
