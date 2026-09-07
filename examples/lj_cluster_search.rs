@@ -3998,10 +3998,9 @@ fn run_capnp_catalog(
     let mut pending_deposits: Vec<Array1<f64>> = Vec::new();
     // Peer-to-peer census over nng (CENSUS_BUS_BASE=port, CATALOG_REPLICAS=n):
     // every replica's live minimum, no coordinator in the loop.
+    let configured_census_base = std::env::var("CENSUS_BUS_BASE").ok();
     let mut census_bus: Option<anneal_core::census_bus::CensusBus> =
-        std::env::var("CENSUS_BUS_BASE")
-            .ok()
-            .and_then(|v| v.parse::<u16>().ok())
+        census_bus_base(sharing, evidence_only, configured_census_base.as_deref())
             .and_then(|base| {
                 let n: u32 = std::env::var("CATALOG_REPLICAS")
                     .ok()
@@ -4300,7 +4299,13 @@ fn run_capnp_catalog(
         if let Some(bus) = census_bus.as_mut()
             && let Some(here) = snapshot.current_state().as_slice()
         {
-            bus.publish(snapshot.hops() as u64, snapshot.current_energy(), here);
+            if lj_catalog_gradient_norm(
+                snapshot.current_energy(),
+                snapshot.current_state(),
+                snapshot.current_gradient(),
+            ).is_some() {
+                bus.publish(snapshot.hops() as u64, snapshot.current_energy(), here);
+            }
             let fresh = bus.poll();
             bus_received += fresh.len();
             if shared_bias_enabled {
@@ -6318,17 +6323,30 @@ fn required_catalog_env(name: &str) -> String {
 }
 
 #[cfg(feature = "bank-rpc")]
-fn census_bus_base(_sharing: bool, _evidence_only: bool, _configured: Option<&str>) -> Option<u16> {
-    unimplemented!("census activation policy")
+fn census_bus_base(sharing: bool, evidence_only: bool, configured: Option<&str>) -> Option<u16> {
+    if !sharing || evidence_only {
+        return None;
+    }
+    configured?.parse().ok()
 }
 
 #[cfg(feature = "bank-rpc")]
 fn lj_catalog_gradient_norm(
-    _energy: f64,
-    _coordinates: ArrayView1<f64>,
-    _gradient: Option<ArrayView1<f64>>,
+    energy: f64,
+    coordinates: ArrayView1<f64>,
+    gradient: Option<ArrayView1<f64>>,
 ) -> Option<f64> {
-    unimplemented!("catalog stationarity evidence")
+    let gradient = gradient?;
+    if !energy.is_finite()
+        || coordinates.is_empty()
+        || !coordinates.len().is_multiple_of(3)
+        || gradient.len() != coordinates.len()
+        || coordinates.iter().any(|value| !value.is_finite())
+    {
+        return None;
+    }
+    let norm = euclidean_gradient_norm(gradient.as_slice()?);
+    (norm.is_finite() && norm <= 1e-5).then_some(norm)
 }
 
 #[cfg(all(test, feature = "bank-rpc"))]
@@ -6417,14 +6435,7 @@ fn lj_catalog_candidate(
     coordinates: ArrayView1<f64>,
     gradient: ArrayView1<f64>,
 ) -> Option<anneal_core::catalog_rpc::CatalogCandidate> {
-    let gradient_norm = euclidean_gradient_norm(
-        gradient
-            .as_slice()
-            .expect("validated LJ gradient is contiguous"),
-    );
-    if !energy.is_finite() || !gradient_norm.is_finite() || gradient_norm > 1e-5 {
-        return None;
-    }
+    let gradient_norm = lj_catalog_gradient_norm(energy, coordinates, Some(gradient))?;
     let descriptor = descriptor_space.describe(coordinates, Some(species)).ok()?;
     Some(anneal_core::catalog_rpc::CatalogCandidate {
         producer_replica: replica,
