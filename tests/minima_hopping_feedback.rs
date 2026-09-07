@@ -52,6 +52,7 @@ fn returning_to_the_initial_basin_after_departure_is_a_known_visit() {
     config.screen_margin = f64::INFINITY;
     config.bias_height = 0.0;
     config.min_separation = 0.0;
+    config.merge_radius = 0.1;
     let initial = array![-0.6, 0.0, 0.0, 0.6, 0.0, 0.0];
     let other = array![-0.9, 0.0, 0.0, 0.9, 0.0, 0.0];
     let mut ledger = Ledger::new(1_000);
