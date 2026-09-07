@@ -52,6 +52,27 @@ let mut ledger = Ledger::new(400_000);
 // supply `relax` closing over your objective; see examples/lj_cluster_search.rs
 ```
 
+The `lj_joint_optimum` release example also provides a controlled NVE
+minima-hopping communication comparison. With the `ira` feature enabled,
+`mh-communication` runs both private-history and shared-history ensembles:
+
+```bash
+ANNEAL_MH_REPLICAS=4 ./target/release/examples/lj_joint_optimum \
+  75 200000 2 mh-communication
+```
+
+Here 200,000 is the total objective-call budget for each ensemble, divided
+among four replicas; two seeds give two paired comparisons. Both arms use
+matched starting coordinates, replica seeds, and escape controls. Shared
+history changes escape effort on rediscovery without copying coordinates
+or pooling acceptance thresholds. Descriptors order exact minimum-identity
+checks, and only freshly validated quenches enter the history. Trajectory
+integration constructs optimization proposals, not kinetic rates or physical
+residence times. JSON reports include aggregate first-discovery work,
+per-replica work by stage, history overhead, and ensemble wall time. Private
+minimum counts sum replica-local identities; shared counts describe one
+common history. These counts are not interchangeable measures of coverage.
+
 External potentials use the same optimizer driver. The molecular-cluster and
 slab examples share one persistent in-process profile adapter; selecting
 `nwchemc` loads `libnwchemc` once and serves the complete hop loop without an
