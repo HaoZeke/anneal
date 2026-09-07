@@ -650,6 +650,54 @@ mod tests {
     }
 }
 
+/// Mergeable sufficient statistics for finite depth rewards.
+#[derive(Debug, Default, Clone, Copy, PartialEq)]
+pub struct RewardMoments {
+    /// Number of independently credited observations.
+    pub count: u64,
+    /// Arithmetic mean reward.
+    pub mean: f64,
+    /// Sum of squared deviations from the mean.
+    pub m2: f64,
+}
+
+impl RewardMoments {
+    /// Reject invalid moments and counts that lose integer precision in a posterior.
+    pub fn validate(self) -> Result<(), &'static str> {
+        if self.count > (1_u64 << 53) || !self.mean.is_finite() || !self.m2.is_finite() || self.m2 < 0.0 {
+            return Err("invalid reward moments");
+        }
+        if (self.count == 0 && (self.mean != 0.0 || self.m2 != 0.0)) || (self.count == 1 && self.m2 != 0.0) {
+            return Err("inconsistent reward moments");
+        }
+        Ok(())
+    }
+
+    /// Add one observation without changing the record on invalid input.
+    pub fn observe(&mut self, reward: f64) -> Result<(), &'static str> {
+        *self = self.merge(Self { count: 1, mean: reward, m2: 0.0 })?;
+        Ok(())
+    }
+
+    /// Combine disjoint observations using the parallel variance identity.
+    pub fn merge(self, other: Self) -> Result<Self, &'static str> {
+        self.validate()?;
+        other.validate()?;
+        if self.count == 0 { return Ok(other); }
+        if other.count == 0 { return Ok(self); }
+        let count = self.count.checked_add(other.count).ok_or("reward count overflow")?;
+        let delta = other.mean - self.mean;
+        let weight = other.count as f64 / count as f64;
+        let combined = Self {
+            count,
+            mean: self.mean + weight * delta,
+            m2: self.m2 + other.m2 + delta * delta * self.count as f64 * weight,
+        };
+        combined.validate()?;
+        Ok(combined)
+    }
+}
+
 /// Thompson sampling over arms by the depth they reach, not by whether they are
 /// accepted.
 ///
@@ -684,6 +732,24 @@ pub struct DepthAllocator {
 }
 
 impl DepthAllocator {
+    /// Reconstruct the same Normal-Gamma posterior as sequential observations.
+    pub fn from_moments(moments: &[RewardMoments]) -> Result<Self, &'static str> {
+        if moments.is_empty() { return Err("an allocator needs at least one arm"); }
+        let mut allocator = Self::new(moments.len());
+        for (arm, moment) in moments.iter().copied().enumerate() {
+            moment.validate()?;
+            let n = moment.count as f64;
+            let kappa = 1e-6 + n;
+            allocator.mu[arm] = n / kappa * moment.mean;
+            allocator.kappa[arm] = kappa;
+            allocator.alpha[arm] = 1.0 + 0.5 * n;
+            allocator.beta[arm] = 1.0 + 0.5 * moment.m2 + 0.5 * (1e-6 * n / kappa) * moment.mean * moment.mean;
+            allocator.draws[arm] = usize::try_from(moment.count).map_err(|_| "reward count overflow")?;
+            if !allocator.beta[arm].is_finite() { return Err("reward posterior overflow"); }
+        }
+        Ok(allocator)
+    }
+
     /// An allocator over `n_arms`, uninformative until fed.
     pub fn new(n_arms: usize) -> Self {
         Self {
