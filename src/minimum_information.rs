@@ -346,6 +346,14 @@ impl MinimumInformationSearch {
             return Ok(Vec::new());
         }
         let singleton_scores = self.score(candidates, minimum_samples)?;
+        // Every predictive-observation correlation the greedy loop can ask
+        // for, once. The loop below asks for a k-by-k block per candidate
+        // per pick, and each block entry used to cost three posterior
+        // covariances of O(n^2) in the model's sites; on a 48-replica
+        // coordinator that was 35 to 99 s per policy request under the
+        // state lock (watchdog-measured), now one joint posterior per
+        // mechanism.
+        let correlations = self.candidate_correlations(candidates);
         let mut selected = Vec::<usize>::with_capacity(batch_size);
         let mut family_sizes = std::collections::BTreeMap::<usize, usize>::new();
         let mut batch_information = 0.0;
@@ -360,9 +368,11 @@ impl MinimumInformationSearch {
                 }
                 let mut enlarged = selected.clone();
                 enlarged.push(candidate_index);
-                let Some(enlarged_information) =
-                    self.batch_information(candidates, &singleton_scores, enlarged.as_slice())
-                else {
+                let Some(enlarged_information) = selected_batch_information(
+                    &correlations,
+                    &singleton_scores,
+                    enlarged.as_slice(),
+                ) else {
                     continue;
                 };
                 let marginal_rate = (enlarged_information - batch_information)
@@ -447,39 +457,75 @@ impl MinimumInformationSearch {
         Ok(())
     }
 
-    fn batch_information(
-        &mut self,
-        candidates: &[SearchActionCandidate],
-        singleton_scores: &[SearchActionScore],
-        selected: &[usize],
-    ) -> Option<f64> {
-        if selected.is_empty() {
-            return Some(0.0);
-        }
-        let singleton_information = selected
-            .iter()
-            .map(|index| singleton_scores[*index].information)
-            .sum::<f64>();
-        let mut correlation = Array2::<f64>::eye(selected.len());
-        for row in 0..selected.len() {
-            let left = &candidates[selected[row]];
-            for column in 0..row {
-                let right = &candidates[selected[column]];
-                let value = if left.mechanism == right.mechanism {
-                    self.models[left.mechanism.index()].predictive_observation_correlation(
-                        ArrayView1::from(left.feature.as_slice()),
-                        ArrayView1::from(right.feature.as_slice()),
-                    )
-                } else {
-                    0.0
-                };
-                correlation[[row, column]] = value;
-                correlation[[column, row]] = value;
+    /// Predictive-observation correlation between every pair of candidates:
+    /// the posterior latent covariance over each mechanism's candidates,
+    /// normalised by the predictive variances (latent plus observation
+    /// noise); candidates of different mechanisms are uncorrelated.
+    fn candidate_correlations(&mut self, candidates: &[SearchActionCandidate]) -> Array2<f64> {
+        let count = candidates.len();
+        let mut correlations = Array2::<f64>::eye(count);
+        for mechanism in [SearchMechanism::BasinEscape, SearchMechanism::SaddleRide] {
+            let indices = candidates
+                .iter()
+                .enumerate()
+                .filter(|(_, candidate)| candidate.mechanism == mechanism)
+                .map(|(index, _)| index)
+                .collect::<Vec<_>>();
+            if indices.len() < 2 {
+                continue;
+            }
+            let views = indices
+                .iter()
+                .map(|index| ArrayView1::from(candidates[*index].feature.as_slice()))
+                .collect::<Vec<_>>();
+            let model = &mut self.models[mechanism.index()];
+            let noise2 = model.noise * model.noise;
+            let (_, covariance) = model.posterior_joint(&views);
+            for (row, &global_row) in indices.iter().enumerate() {
+                let left_variance = covariance[[row, row]].max(0.0) + noise2;
+                for (column, &global_column) in indices.iter().enumerate().take(row) {
+                    let right_variance = covariance[[column, column]].max(0.0) + noise2;
+                    let scale = (left_variance * right_variance).sqrt();
+                    let value = covariance[[row, column]];
+                    let correlation = if !value.is_finite() || !scale.is_finite() || scale <= 0.0 {
+                        0.0
+                    } else {
+                        (value / scale).clamp(-1.0, 1.0)
+                    };
+                    correlations[[global_row, global_column]] = correlation;
+                    correlations[[global_column, global_row]] = correlation;
+                }
             }
         }
-        let log_determinant = positive_definite_log_determinant(&correlation)?;
-        Some(singleton_information + 0.5 * log_determinant)
+        correlations
     }
+}
+
+/// Joint information of a selected batch: the singleton terms plus half
+/// the log determinant of the batch's predictive-observation correlation
+/// block, read from the precomputed candidate matrix.
+fn selected_batch_information(
+    correlations: &Array2<f64>,
+    singleton_scores: &[SearchActionScore],
+    selected: &[usize],
+) -> Option<f64> {
+    if selected.is_empty() {
+        return Some(0.0);
+    }
+    let singleton_information = selected
+        .iter()
+        .map(|index| singleton_scores[*index].information)
+        .sum::<f64>();
+    let mut correlation = Array2::<f64>::eye(selected.len());
+    for row in 0..selected.len() {
+        for column in 0..row {
+            let value = correlations[[selected[row], selected[column]]];
+            correlation[[row, column]] = value;
+            correlation[[column, row]] = value;
+        }
+    }
+    let log_determinant = positive_definite_log_determinant(&correlation)?;
+    Some(singleton_information + 0.5 * log_determinant)
 }
 
 fn validate_feature(feature: &[f64]) -> Result<(), MinimumInformationError> {
