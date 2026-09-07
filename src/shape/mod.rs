@@ -561,6 +561,12 @@ fn pair_distance_bound(left: ArrayView1<f64>, right: ArrayView1<f64>) -> Option<
     .bottleneck_lower_bound(left, right)
 }
 
+fn pair_distance_exceeds(left: ArrayView1<f64>, right: ArrayView1<f64>, radius: f64) -> bool {
+    SortedPairs { n_points: left.len() / 3 }
+        .bottleneck_exceeds(left, right, radius)
+        .unwrap_or(false)
+}
+
 fn exact_relation_from_match(
     left: ArrayView1<f64>,
     right: ArrayView1<f64>,
@@ -607,19 +613,12 @@ fn exact_relation_from_match(
     }
 }
 
-impl crate::pes_exploration::ExactStructureWitness for IraStructureWitness {
-    fn equivalent(&self, left: ArrayView1<f64>, right: ArrayView1<f64>) -> bool {
-        self.relation(left, right).is_equivalent()
-    }
-
-    fn relation(
+impl IraStructureWitness {
+    fn native_relation(
         &self,
         left: ArrayView1<f64>,
         right: ArrayView1<f64>,
     ) -> crate::pes_exploration::ExactStructureRelation {
-        if pair_distance_bound(left, right).is_some_and(|lower| lower > self.radius) {
-            return crate::pes_exploration::ExactStructureRelation::Distinct;
-        }
         exact_relation_from_match(
             left,
             right,
@@ -628,25 +627,14 @@ impl crate::pes_exploration::ExactStructureWitness for IraStructureWitness {
         )
     }
 
-    fn equivalent_structures(
-        &self,
-        left: crate::pes_exploration::StructureView<'_>,
-        right: crate::pes_exploration::StructureView<'_>,
-    ) -> bool {
-        self.relation_structures(left, right).is_equivalent()
-    }
-
-    fn relation_structures(
+    fn native_relation_structures(
         &self,
         left: crate::pes_exploration::StructureView<'_>,
         right: crate::pes_exploration::StructureView<'_>,
     ) -> crate::pes_exploration::ExactStructureRelation {
         use crate::pes_exploration::ExactStructureRelation;
 
-        if left.context != right.context
-            || pair_distance_bound(left.coordinates, right.coordinates)
-                .is_some_and(|lower| lower > self.radius)
-        {
+        if left.context != right.context {
             return ExactStructureRelation::Distinct;
         }
         match (left.context.species(), right.context.species()) {
@@ -662,9 +650,47 @@ impl crate::pes_exploration::ExactStructureWitness for IraStructureWitness {
                 ),
                 self.radius,
             ),
-            (None, None) => self.relation(left.coordinates, right.coordinates),
+            (None, None) => self.native_relation(left.coordinates, right.coordinates),
             _ => ExactStructureRelation::Distinct,
         }
+    }
+}
+
+impl crate::pes_exploration::ExactStructureWitness for IraStructureWitness {
+    fn equivalent(&self, left: ArrayView1<f64>, right: ArrayView1<f64>) -> bool {
+        self.relation(left, right).is_equivalent()
+    }
+
+    fn relation(
+        &self,
+        left: ArrayView1<f64>,
+        right: ArrayView1<f64>,
+    ) -> crate::pes_exploration::ExactStructureRelation {
+        if pair_distance_exceeds(left, right, self.radius) {
+            return crate::pes_exploration::ExactStructureRelation::Distinct;
+        }
+        self.native_relation(left, right)
+    }
+
+    fn equivalent_structures(
+        &self,
+        left: crate::pes_exploration::StructureView<'_>,
+        right: crate::pes_exploration::StructureView<'_>,
+    ) -> bool {
+        self.relation_structures(left, right).is_equivalent()
+    }
+
+    fn relation_structures(
+        &self,
+        left: crate::pes_exploration::StructureView<'_>,
+        right: crate::pes_exploration::StructureView<'_>,
+    ) -> crate::pes_exploration::ExactStructureRelation {
+        if left.context != right.context
+            || pair_distance_exceeds(left.coordinates, right.coordinates, self.radius)
+        {
+            return crate::pes_exploration::ExactStructureRelation::Distinct;
+        }
+        self.native_relation_structures(left, right)
     }
 }
 
