@@ -1731,6 +1731,8 @@ mod tests {
 
     #[test]
     fn unresolved_nve_actions_do_not_count_as_verified_basin_visits() {
+        use rand::SeedableRng;
+
         struct OneBasin;
         impl ExactStructureWitness for OneBasin {
             fn equivalent(&self, _: ArrayView1<f64>, _: ArrayView1<f64>) -> bool {
