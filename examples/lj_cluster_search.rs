@@ -2163,17 +2163,15 @@ fn main() {
             if !diagnostic && early_stop && iters <= screen_steps {
                 let mut term = Terminator::default();
                 let mut cur = x.to_owned();
-                let mut f = f64::INFINITY;
                 let mut done = 0usize;
                 // Four at a time: enough for the ratio estimate to move, small
                 // enough that the saving is not given back.
                 while done < iters {
                     let take = 4.min(iters - done);
                     let (fi, xi, _) = opt.minimize(cur.view(), take, |v| charged(led, v));
-                    f = fi;
                     cur = xi;
                     done += take;
-                    term.observe(f);
+                    term.observe(fi);
                     if term.settled_above(led.best) {
                         early_stopped += 1;
                         early_saved += iters - done;
