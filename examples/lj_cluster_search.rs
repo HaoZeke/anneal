@@ -34,6 +34,10 @@ use std::io::{self, Write};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
+#[cfg(feature = "bank-rpc")]
+const EVIDENCE_ONLY_WORK_KIND: anneal_core::cooperative_search::ChargeKind =
+    anneal_core::cooperative_search::ChargeKind::LocalProposal;
+
 #[cfg(feature = "ira")]
 use anneal_core::shape::{IraMetric, IraStructureWitness};
 
@@ -195,6 +199,15 @@ impl anneal_core::pes_exploration::PesSurface for LjRideSurface {
 #[cfg(test)]
 mod option_tests {
     use super::*;
+
+    #[cfg(feature = "bank-rpc")]
+    #[test]
+    fn evidence_only_work_kind_accepts_charged_objective_calls() {
+        let mut run = anneal_core::cooperative_search::CooperativeRun::new([0], 1_000).unwrap();
+        run.record_work(0, EVIDENCE_ONLY_WORK_KIND, 509).unwrap();
+        run.record_work(0, EVIDENCE_ONLY_WORK_KIND, 491).unwrap();
+        assert_eq!(run.events().last().unwrap().aggregate_charged, 1_000);
+    }
 
     #[test]
     fn zero_step_queries_preserve_geometry_and_charge_one_objective() {
@@ -4248,7 +4261,7 @@ fn run_capnp_catalog(
             cooperative
                 .record_work(
                     replica,
-                    ChargeKind::LocalProposal,
+                    EVIDENCE_ONLY_WORK_KIND,
                     u64::try_from(snapshot.charged().saturating_sub(last_charged))
                         .expect("local objective charge must fit u64"),
                 )
@@ -6021,7 +6034,7 @@ fn run_capnp_catalog(
         cooperative
             .record_work(
                 replica,
-                ChargeKind::LocalProposal,
+                EVIDENCE_ONLY_WORK_KIND,
                 u64::try_from(ledger.spent().saturating_sub(last_charged))
                     .expect("terminal objective charge must fit u64"),
             )
