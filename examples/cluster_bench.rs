@@ -238,7 +238,8 @@ fn archive_analysis(
                 .collect(),
         )
     };
-    let mut classes: BTreeMap<(Vec<i64>, Vec<i64>), Vec<(usize, f64)>> = BTreeMap::new();
+    type MorphologyLabel = (Vec<i64>, Vec<i64>);
+    let mut classes: BTreeMap<MorphologyLabel, Vec<(usize, f64)>> = BTreeMap::new();
     for (b, e, x) in &polished {
         classes
             .entry(label_of(x.view()))
@@ -267,7 +268,7 @@ fn archive_analysis(
             (v.len(), hi - lo)
         })
         .collect();
-    spreads.sort_by(|a, b| b.0.cmp(&a.0));
+    spreads.sort_by_key(|entry| std::cmp::Reverse(entry.0));
     println!(
         "      energy spread inside a class: {:?}",
         &spreads[..spreads.len().min(6)]
@@ -334,10 +335,12 @@ fn archive_analysis(
 /// it is visible without any state being revisited: how much of the recorded
 /// transition mass stays inside a morphological class against how much leaves
 /// it, and how the chain's time is distributed over classes.
+type ClassSummary = (usize, f64, [f64; 3], [f64; 3]);
+
 fn confinement(
     counts: &anneal_core::superbasin::HopCounts,
     labels: &std::collections::BTreeMap<usize, usize>,
-    class_info: &std::collections::BTreeMap<usize, (usize, f64, [f64; 3], [f64; 3])>,
+    class_info: &std::collections::BTreeMap<usize, ClassSummary>,
 ) {
     use std::collections::BTreeMap;
     let cls = |b: usize| labels.get(&b).copied().unwrap_or(usize::MAX);
@@ -595,15 +598,15 @@ fn main() {
         // such: the cap rate says how often the no-U-turn criterion was
         // truncated, and a run whose cap rate is near one is running
         // fixed-length HMC under the name of NUTS.
-        if let Ok(v) = std::env::var("HMC_WARMUP") {
-            if let Ok(w) = v.parse::<usize>() {
-                h.warmup_hops = w;
-            }
+        if let Ok(v) = std::env::var("HMC_WARMUP")
+            && let Ok(w) = v.parse::<usize>()
+        {
+            h.warmup_hops = w;
         }
-        if let Ok(v) = std::env::var("HMC_MAX_DEPTH") {
-            if let Ok(d) = v.parse::<u32>() {
-                h.max_depth = d;
-            }
+        if let Ok(v) = std::env::var("HMC_MAX_DEPTH")
+            && let Ok(d) = v.parse::<u32>()
+        {
+            h.max_depth = d;
         }
         println!(
             "  hamiltonian proposal: metric {}, warmup {} hops, depth cap {} \
@@ -651,10 +654,10 @@ fn main() {
         );
         std::process::exit(2);
     }
-    if let Ok(v) = std::env::var("MERGE_RADIUS") {
-        if let Ok(r) = v.parse::<f64>() {
-            cfg.merge_radius = r;
-        }
+    if let Ok(v) = std::env::var("MERGE_RADIUS")
+        && let Ok(r) = v.parse::<f64>()
+    {
+        cfg.merge_radius = r;
     }
     // The replica ladder, one budget shared across the rungs rather than one
     // budget each. The four names are the four arms: the ladder as it ran,
@@ -684,15 +687,15 @@ fn main() {
         // how many units there are. At LJ38 with 4e5 charged evaluations a run
         // takes about 12700 hops, so a period of 50 over four rungs buys 60
         // sweeps, and a ladder transports nothing in 60 sweeps.
-        if let Ok(v) = std::env::var("SWAP_PERIOD") {
-            if let Ok(p) = v.parse::<usize>() {
-                cfg.swap_period = p.max(1);
-            }
+        if let Ok(v) = std::env::var("SWAP_PERIOD")
+            && let Ok(p) = v.parse::<usize>()
+        {
+            cfg.swap_period = p.max(1);
         }
-        if let Ok(v) = std::env::var("LADDER_ACCEPT") {
-            if let Ok(a) = v.parse::<f64>() {
-                cfg.ladder_target_accept = a.clamp(0.01, 0.95);
-            }
+        if let Ok(v) = std::env::var("LADDER_ACCEPT")
+            && let Ok(a) = v.parse::<f64>()
+        {
+            cfg.ladder_target_accept = a.clamp(0.01, 0.95);
         }
         cfg.bias_by_rung = opts.contains(&"rungbias");
         println!(

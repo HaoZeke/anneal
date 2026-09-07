@@ -63,9 +63,9 @@ fn components(distance: &[Vec<f64>], radius: f64) -> Vec<usize> {
         }
         i
     };
-    for i in 0..n {
-        for j in (i + 1)..n {
-            if distance[i][j] <= radius {
+    for (i, row) in distance.iter().enumerate() {
+        for (j, &separation) in row.iter().enumerate().skip(i + 1) {
+            if separation <= radius {
                 let a = find(&mut label, i);
                 let b = find(&mut label, j);
                 if a != b {
@@ -157,8 +157,8 @@ fn main() {
 
     // Nearest-reference assignment: every shelf isomer should sit nearer ico.
     let mut misassigned = 0usize;
-    for i in 2..n {
-        if distance[i][1] < distance[i][0] {
+    for row in distance.iter().skip(2) {
+        if row[1] < row[0] {
             misassigned += 1;
         }
     }
