@@ -1963,7 +1963,10 @@ mod tests {
     #[test]
     fn an_expected_archive_digest_is_not_a_verified_input_digest() {
         let declared = super::start_archive_provenance(75, true);
-        assert_eq!(declared.expected, Some("8590a6fddf96a8673d0e4b53aae2385b5d222a9200217d722bb017d23fc5fdb3"));
+        assert_eq!(
+            declared.expected,
+            Some("8590a6fddf96a8673d0e4b53aae2385b5d222a9200217d722bb017d23fc5fdb3")
+        );
         assert_eq!(declared.verified, None);
         let diagnostic = super::start_archive_provenance(75, false);
         assert_eq!(diagnostic.expected, None);
