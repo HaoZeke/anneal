@@ -2430,6 +2430,8 @@ where
         {
             let md_config = crate::methods::minima_hopping::MdEscapeConfig {
                 dt: cfg.md_escape_dt,
+                potential_minima: cfg.md_escape_minima.max(1),
+                maximum_steps: cfg.md_escape_max_steps.max(1),
                 ..Default::default()
             };
             let kinetic = (cfg.md_escape_kinetic * feedback.escape()).max(f64::MIN_POSITIVE);
