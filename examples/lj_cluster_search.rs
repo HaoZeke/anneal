@@ -4279,6 +4279,10 @@ fn run_capnp_catalog(
     // can be reported: whether the replica is still in the adopted packing
     // family or has slid back to where it was.
     let mut heard_structure: Option<Vec<f64>> = None;
+    // Census jumps: the population's visit count of this replica's basin,
+    // not this replica's own stall, triggers an occasional jump.
+    let mut census_jump_last_hop = 0usize;
+    let mut census_jumps = 0usize;
     let mut count_walk = 0usize;
     let mut count_hole = 0usize;
     let mut extra_cover = 0usize;
@@ -5450,6 +5454,68 @@ fn run_capnp_catalog(
                 *ema = 0.9 * *ema + 0.1 * rate;
             }
             governor_last = Some((charged, singles));
+        }
+        // CATALOG_JUMP_VISITS=k: when the ensemble census has visited this
+        // replica's basin at least k times, the replica takes an
+        // Iwamatsu-Okabe jump (a short unquenched walk, then a quench) with
+        // a cooldown of CATALOG_JUMP_COOLDOWN hops. The shared visit history
+        // is what Goedecker's minima hopping keeps per chain to escalate its
+        // escapes; here it is the population's, so a region many replicas
+        // have exhausted is left by all of them without any of them being
+        // handed a structure.
+        let census_jump_visits: u64 = std::env::var("CATALOG_JUMP_VISITS")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(0);
+        let census_jump_cooldown: usize = std::env::var("CATALOG_JUMP_COOLDOWN")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(2000);
+        if census_jump_visits > 0
+            && policy.census.local_basin_visits() >= census_jump_visits
+            && snapshot.hops().saturating_sub(census_jump_last_hop) >= census_jump_cooldown
+            && let Some(here) = snapshot.current_state().as_slice()
+        {
+            use rand::{Rng, SeedableRng};
+            let mut jump_rng = rand::rngs::StdRng::seed_from_u64(
+                (u64::from(replica) << 40)
+                    ^ checkpoint_sequence.wrapping_mul(0x9E37_79B9_7F4A_7C15),
+            );
+            let steps: usize = std::env::var("JUMP_STEPS")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(10);
+            let half: f64 = std::env::var("JUMP_STEP")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(0.38)
+                * run_cfg.length_scale;
+            let mut jumped = here.to_vec();
+            for _ in 0..steps.max(1) {
+                for v in jumped.iter_mut() {
+                    *v += jump_rng.random_range(-half..half);
+                }
+            }
+            census_jump_last_hop = snapshot.hops();
+            census_jumps += 1;
+            println!(
+                "  census jump hops {}  visits {}  jumps {}",
+                snapshot.hops(),
+                policy.census.local_basin_visits(),
+                census_jumps
+            );
+            let _ = std::io::stdout().flush();
+            return complete_checkpoint_trace(
+                &mut cooperative,
+                replica,
+                &mut slice_sequence,
+                checkpoint_charged,
+                snapshot.best_energy(),
+                |_cooperative, _slice_sequence| CheckpointAction::BoundaryProposal {
+                    state: Array1::from(jumped),
+                    action: "census_jump".to_owned(),
+                },
+            );
         }
         let decision = cooperative
             .decide(replica, policy)

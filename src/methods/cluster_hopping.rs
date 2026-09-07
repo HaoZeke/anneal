@@ -3293,7 +3293,7 @@ where
         // accepted return is still an accept.
         if cfg.point_symmetrise_on_new
             && accept
-            && moved_basin
+            && (moved_basin || cfg.point_symmetrise_every_accept)
             && let Some(y) = crate::symmetrise::symmetrise_core(
                 x.view(),
                 n,
