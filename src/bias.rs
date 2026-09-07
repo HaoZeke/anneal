@@ -12,6 +12,21 @@
 
 use ndarray::{Array1, Array2, ArrayView1};
 
+#[cfg(test)]
+mod pair_threshold_tests;
+
+#[cfg(test)]
+std::thread_local! {
+    static PAIR_SPECTRUM_PREPARATIONS: std::cell::Cell<usize> = const {
+        std::cell::Cell::new(0)
+    };
+}
+
+#[cfg(test)]
+pub(crate) fn pair_spectrum_preparation_count() -> usize {
+    PAIR_SPECTRUM_PREPARATIONS.with(std::cell::Cell::get)
+}
+
 /// Cost-augmenting bias on a low-dimensional collective variable `s = phi(x)`.
 /// Implementors maintain internal state that is updated by `deposit`
 /// and read by `potential`.
@@ -563,7 +578,18 @@ impl SortedPairs {
             .bottleneck_lower_bound(&self.prepare(right)?)
     }
 
+    pub(crate) fn bottleneck_exceeds(
+        &self,
+        _left: ArrayView1<f64>,
+        _right: ArrayView1<f64>,
+        _radius: f64,
+    ) -> Option<bool> {
+        unimplemented!("pair-spectrum threshold predicate")
+    }
+
     pub(crate) fn prepare(&self, coordinates: ArrayView1<f64>) -> Option<PreparedPairSpectrum> {
+        #[cfg(test)]
+        PAIR_SPECTRUM_PREPARATIONS.with(|count| count.set(count.get() + 1));
         let dimension = self.n_points.checked_mul(3)?;
         if self.n_points == 0
             || coordinates.len() != dimension
@@ -594,6 +620,10 @@ pub(crate) struct PreparedPairSpectrum {
 }
 
 impl PreparedPairSpectrum {
+    pub(crate) fn bottleneck_exceeds(&self, _right: &Self, _radius: f64) -> Option<bool> {
+        unimplemented!("prepared pair-spectrum threshold predicate")
+    }
+
     #[cfg(feature = "ira")]
     pub(crate) fn payload_bytes(&self) -> usize {
         self.distances.len() * std::mem::size_of::<f64>()
