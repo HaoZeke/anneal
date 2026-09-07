@@ -3092,11 +3092,24 @@ fn apply_request(
         }
         CatalogOperation::ExchangeSurfaceEvidence { report } => {
             let Some(version) = state.snapshot_version.checked_add(1) else {
-                return rejected(state, request.event_sequence, ProtocolRejection::ValidationRejected);
+                return rejected(
+                    state,
+                    request.event_sequence,
+                    ProtocolRejection::ValidationRejected,
+                );
             };
-            match state.surface_evidence.exchange(request.identity.replica, report.clone()) {
+            match state
+                .surface_evidence
+                .exchange(request.identity.replica, report.clone())
+            {
                 Ok(peers) => payload = AcceptedPayload::SurfaceEvidence(peers),
-                Err(_) => return rejected(state, request.event_sequence, ProtocolRejection::ValidationRejected),
+                Err(_) => {
+                    return rejected(
+                        state,
+                        request.event_sequence,
+                        ProtocolRejection::ValidationRejected,
+                    );
+                }
             }
             state.snapshot_version = version;
         }

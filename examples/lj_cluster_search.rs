@@ -2042,11 +2042,13 @@ fn main() {
             .and_then(|v| v.parse().ok())
             .unwrap_or(anneal_core::methods::two_phase::DEFAULT_SURFACE_BLOCK);
         let surfaces = (!cfg.surfaces.is_empty()).then(|| {
-            Arc::new(Mutex::new(anneal_core::methods::two_phase::SurfacePortfolio::with_block(
-                &cfg.surfaces,
-                seed,
-                surface_block,
-            )))
+            Arc::new(Mutex::new(
+                anneal_core::methods::two_phase::SurfacePortfolio::with_block(
+                    &cfg.surfaces,
+                    seed,
+                    surface_block,
+                ),
+            ))
         });
         let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, iters: usize| {
             let charged_before = led.spent();
@@ -2092,7 +2094,10 @@ fn main() {
             let compacted;
             let screening_pass = iters <= screen_steps;
             let surface = match surfaces.as_ref() {
-                Some(portfolio) => portfolio.lock().expect("surface portfolio").begin(screening_pass),
+                Some(portfolio) => portfolio
+                    .lock()
+                    .expect("surface portfolio")
+                    .begin(screening_pass),
                 None => two_phase,
             };
             let x = match surface {
@@ -2126,7 +2131,10 @@ fn main() {
                 opt.minimize(x, iters, |v| charged(led, v))
             };
             if let Some(portfolio) = surfaces.as_ref() {
-                portfolio.lock().expect("surface portfolio").observe(screening_pass, f, led.best);
+                portfolio
+                    .lock()
+                    .expect("surface portfolio")
+                    .observe(screening_pass, f, led.best);
             }
             let mut boundary_energy = f;
             let mut validated_gradient = None;
@@ -2608,8 +2616,13 @@ fn main() {
         total_charged += ledger.spent();
         if let Some(portfolio) = surfaces.as_ref() {
             let portfolio = portfolio.lock().expect("surface portfolio");
-            println!("SURFACE_EVIDENCE seed {seed} local_blocks {} peer_blocks {} local_draws {:?} local_means {:?}",
-                portfolio.draws().iter().sum::<usize>(), portfolio.peer_observations(), portfolio.draws(), portfolio.means());
+            println!(
+                "SURFACE_EVIDENCE seed {seed} local_blocks {} peer_blocks {} local_draws {:?} local_means {:?}",
+                portfolio.draws().iter().sum::<usize>(),
+                portfolio.peer_observations(),
+                portfolio.draws(),
+                portfolio.means()
+            );
         }
         println!(
             "  seed {seed}: best {:.6}  hops {}  screened {}  charged {}  \
@@ -4131,7 +4144,8 @@ fn run_capnp_catalog(
     let mut last_policy_action = ACTION_LOCAL;
     let mut checkpoint = |snapshot: ChainCheckpoint<'_>| {
         if sharing && let Some(portfolio) = surfaces.as_ref() {
-            cooperative.post_surface_evidence(replica, Arc::clone(portfolio))
+            cooperative
+                .post_surface_evidence(replica, Arc::clone(portfolio))
                 .expect("surface exchange must name the live replica");
         }
         if core_class.is_some() {
