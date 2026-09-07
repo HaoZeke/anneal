@@ -14,6 +14,8 @@
 //! budget, divided among `ANNEAL_MH_REPLICAS` replicas (default four). History
 //! changes escape effort, never coordinates. `mh-private`, `mh-shared`,
 //! `mh-private-soft`, and `mh-shared-soft` select individual ensemble arms.
+//! `ANNEAL_START_COORDINATES` supplies one fixed plain Cartesian input for
+//! escape probes; its coordinates are embedded in the configuration record.
 
 use std::collections::HashSet;
 use std::error::Error;
@@ -908,6 +910,15 @@ fn optbench_archive_digest(n: usize) -> Option<&'static str> {
     }
 }
 
+fn start_protocol_name(optbench: bool, fixed: bool) -> Result<&'static str, String> {
+    match (optbench, fixed) {
+        (false, false) => Ok("random-cluster"),
+        (true, false) => Ok("optbench-fixed"),
+        (false, true) => Ok("fixed-coordinate-file"),
+        (true, true) => Err("OptBench and fixed-coordinate starts are mutually exclusive".into()),
+    }
+}
+
 fn main() -> Result<(), Box<dyn Error>> {
     let arguments = std::env::args().collect::<Vec<_>>();
     let n = arguments
@@ -929,9 +940,16 @@ fn main() -> Result<(), Box<dyn Error>> {
         .and_then(|value| value.parse().ok())
         .unwrap_or(0);
     let optbench_root = std::env::var_os("ANNEAL_OPTBENCH_STARTS").map(PathBuf::from);
+    let fixed_path = std::env::var_os("ANNEAL_START_COORDINATES").map(PathBuf::from);
     if n < 2 || budget == 0 || seeds == 0 {
         return Err("N must be at least two and budget/seeds must be positive".into());
     }
+    let start_protocol = start_protocol_name(optbench_root.is_some(), fixed_path.is_some())?;
+    let fixed_initial = fixed_path.as_ref().map(|path| {
+        let contents = std::fs::read_to_string(path)
+            .map_err(|error| format!("read {}: {error}", path.display()))?;
+        parse_plain_coordinates(&contents, n)
+    }).transpose()?;
     let target = reference(n).ok_or("no published LJ target is registered for this size")?;
     let arms = selected_arms(selector, &irc_kinds(irc_selector)?)?;
     let replicas =
@@ -963,7 +981,8 @@ fn main() -> Result<(), Box<dyn Error>> {
             "seed0": seed0,
             "target": target,
             "target_tolerance": TARGET_TOLERANCE,
-            "start_protocol": if optbench_root.is_some() { "optbench-fixed" } else { "random-cluster" },
+            "start_protocol": start_protocol,
+            "fixed_coordinates": fixed_initial.as_ref().map(|state| state.to_vec()),
             "start_archive_sha256": optbench_root.as_ref().and_then(|_| optbench_archive_digest(n)),
             "nve_ensemble": {
                 "replicas": replicas,
@@ -1000,7 +1019,9 @@ fn main() -> Result<(), Box<dyn Error>> {
     );
 
     for seed in seed0..seed0.saturating_add(seeds) {
-        let initial = if let Some(root) = optbench_root.as_deref() {
+        let initial = if let Some(fixed) = &fixed_initial {
+            fixed.clone()
+        } else if let Some(root) = optbench_root.as_deref() {
             read_optbench_start(
                 root,
                 n,
