@@ -84,3 +84,54 @@ fn bounded_ira_matching_returns_the_rejection_certificate() {
     assert!(bounded > 2.8);
     assert!(bounded <= 2.0 * 2.0_f64.sqrt());
 }
+
+#[test]
+fn pair_bound_preserves_radius_boundary_and_extreme_scales() {
+    let radius = 0.125;
+    let left = array![-1.0, 0.0, 0.0, 1.0, 0.0, 0.0];
+    let right = array![-1.125, 0.0, 0.0, 1.125, 0.0, 0.0];
+    let pairs = SortedPairs { n_points: 2 };
+    let lower = pairs.bottleneck_lower_bound(left.view(), right.view()).unwrap();
+    assert!(lower > 0.99 * radius);
+    assert!(lower <= radius);
+    for scale in [1e-100, 1e-10, 1.0, 1e10, 1e100] {
+        let scaled_left = &left * scale;
+        let scaled_right = &right * scale;
+        let lower = pairs
+            .bottleneck_lower_bound(scaled_left.view(), scaled_right.view())
+            .unwrap();
+        assert!(lower >= 0.0);
+        assert!(lower <= radius * scale);
+    }
+}
+
+#[test]
+fn pair_bound_overflow_returns_no_certificate() {
+    let left = array![-1e308, 0.0, 0.0, 1e308, 0.0, 0.0];
+    assert!(
+        SortedPairs { n_points: 2 }
+            .bottleneck_lower_bound(left.view(), left.view())
+            .is_none()
+    );
+}
+
+#[cfg(feature = "ira")]
+#[test]
+fn bounded_ira_preserves_a_valid_rigid_permutation_match() {
+    use anneal_core::bias::BasinMetric;
+    use anneal_core::shape::IraMetric;
+
+    let left = array![0.0, 0.0, 0.0, 1.3, 0.1, 0.0, 0.2, 1.7, 0.3, 0.1, 0.3, 2.1];
+    let mut right = Array1::zeros(12);
+    for atom in 0..4 {
+        let source = 3 - atom;
+        right[3 * atom] = -left[3 * source + 1] + 3.0;
+        right[3 * atom + 1] = left[3 * source] - 2.0;
+        right[3 * atom + 2] = left[3 * source + 2] + 1.0;
+    }
+    let metric = IraMetric::default();
+    let full = metric.distance(left.view(), right.view());
+    let bounded = metric.distance_bounded(left.view(), right.view(), 0.1);
+    assert!(full < 1e-10, "the rigid permutation is witnessed: {full}");
+    assert!((bounded - full).abs() < 1e-10);
+}
