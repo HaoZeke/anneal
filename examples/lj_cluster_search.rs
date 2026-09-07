@@ -1817,13 +1817,22 @@ fn main() {
     cfg.soap_repel = opts.contains(&"repel");
     // Occasional jumping on stagnation (Iwamatsu-Okabe).
     cfg.jump_on_stall = opts.contains(&"jump");
-    if let Some(p) = std::env::var("JUMP_PATIENCE").ok().and_then(|v| v.parse::<usize>().ok()) {
+    if let Some(p) = std::env::var("JUMP_PATIENCE")
+        .ok()
+        .and_then(|v| v.parse::<usize>().ok())
+    {
         cfg.jump_patience = p;
     }
-    if let Some(k) = std::env::var("JUMP_STEPS").ok().and_then(|v| v.parse::<usize>().ok()) {
+    if let Some(k) = std::env::var("JUMP_STEPS")
+        .ok()
+        .and_then(|v| v.parse::<usize>().ok())
+    {
         cfg.jump_steps = k;
     }
-    if let Some(h) = std::env::var("JUMP_STEP").ok().and_then(|v| v.parse::<f64>().ok()) {
+    if let Some(h) = std::env::var("JUMP_STEP")
+        .ok()
+        .and_then(|v| v.parse::<f64>().ok())
+    {
         cfg.jump_step = h * cfg.length_scale;
     }
     if cfg.jump_on_stall {
