@@ -627,8 +627,6 @@ pub fn symmetrise_core(
     Some(out)
 }
 
-/// Detects and applies in one step, or returns `None` when there is no
-/// approximate symmetry worth using.
 /// Orbit completion under a point group: every atom is moved onto the
 /// symmetry-equivalent site set of the group, so partial orbits close.
 ///
@@ -805,6 +803,8 @@ pub fn orbit_complete_core(
     complete_orbits(x, n, &group, pair_cutoff, min_separation)
 }
 
+/// Detects and applies in one step, or returns `None` when there is no
+/// approximate symmetry worth using.
 pub fn symmetrise_detected(
     x: ArrayView1<f64>,
     n: usize,
