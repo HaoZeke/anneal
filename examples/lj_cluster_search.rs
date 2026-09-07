@@ -4088,6 +4088,7 @@ fn run_capnp_catalog(
     }
     let mut candidate_sequence = 0u64;
     let mut checkpoint_sequence = 0u64;
+    let mut probe_due = false;
     let mut slice_sequence = 0u64;
     let mut last_charged = 0usize;
     #[cfg(feature = "ira")]
@@ -4153,32 +4154,10 @@ fn run_capnp_catalog(
                 .post_surface_evidence(replica, Arc::clone(portfolio))
                 .expect("surface exchange must name the live replica");
         }
-        if core_class.is_some() {
-            let class = anneal_core::corekey::motif_class(snapshot.current_state()).index();
-            let verdict = cooperative
-                .report_core_class(
-                    replica,
-                    class,
-                    snapshot.current_energy(),
-                    snapshot.charged(),
-                )
-                .expect("core-class report must stay on the cooperative ledger");
-            if verdict == anneal_core::coreclass::CoreVerdict::Restart {
-                let mut adopt_rng = rand::rngs::StdRng::seed_from_u64(
-                    seed.wrapping_add(u64::from(replica))
-                        .wrapping_add(snapshot.charged() as u64),
-                );
-                let fresh = random_cluster(cfg.n_points, 0.7, cfg.min_separation, &mut adopt_rng);
-                return CheckpointAction::ExternalAdopt {
-                    state: fresh,
-                    action: "coreclass".to_owned(),
-                    external_calls: 0,
-                };
-            }
-        }
         checkpoint_sequence = checkpoint_sequence
             .checked_add(1)
             .expect("checkpoint sequence must fit u64");
+        probe_due |= checkpoint_sequence.is_multiple_of(probe_interval);
         // Quiet-stretch bookkeeping for the Leave gate: an improvement ends
         // the stretch and records how long the replica took to come back.
         if snapshot.best_energy() < leave_best - 1e-10 {
@@ -4344,6 +4323,54 @@ fn run_capnp_catalog(
         });
         if let Some(candidate) = freshest_boundary.as_ref() {
             let _ = cooperative.post_offer_candidate(replica, candidate.clone());
+        }
+
+        // Due probes wait for a validated origin and precede adaptive
+        // checkpoint actions. Their unresolved outcomes remain observations,
+        // not reasons to change the declared perturb-quench kernel.
+        if probe_due
+            && snapshot.current_gradient().is_some()
+            && snapshot.remaining() > run_cfg.relax_steps.saturating_add(2)
+            && let Some(state) =
+                fixed_probe_trial(snapshot.current_state(), probe_scale, &mut probe_rng)
+        {
+            probe_due = false;
+            return complete_checkpoint_trace(
+                &mut cooperative, replica, &mut slice_sequence,
+                snapshot.charged(), snapshot.best_energy(),
+                |_, _| CheckpointAction::ProbeProposal {
+                    state,
+                    action: "probe".to_owned(),
+                },
+            );
+        }
+
+        if core_class.is_some() {
+            let class = anneal_core::corekey::motif_class(snapshot.current_state()).index();
+            let verdict = cooperative
+                .report_core_class(
+                    replica,
+                    class,
+                    snapshot.current_energy(),
+                    snapshot.charged(),
+                )
+                .expect("core-class report must stay on the cooperative ledger");
+            if verdict == anneal_core::coreclass::CoreVerdict::Restart {
+                let mut adopt_rng = rand::rngs::StdRng::seed_from_u64(
+                    seed.wrapping_add(u64::from(replica))
+                        .wrapping_add(snapshot.charged() as u64),
+                );
+                let fresh = random_cluster(cfg.n_points, 0.7, cfg.min_separation, &mut adopt_rng);
+                return complete_checkpoint_trace(
+                    &mut cooperative, replica, &mut slice_sequence,
+                    snapshot.charged(), snapshot.best_energy(),
+                    |_, _| CheckpointAction::ExternalAdopt {
+                        state: fresh,
+                        action: "coreclass".to_owned(),
+                        external_calls: 0,
+                    },
+                );
+            }
         }
 
         #[cfg(feature = "ira")]
@@ -5461,19 +5488,6 @@ fn run_capnp_catalog(
                     post.coordinates,
                 );
             }
-        }
-        if checkpoint_sequence.is_multiple_of(probe_interval)
-            && snapshot.remaining() > run_cfg.relax_steps.saturating_add(2)
-            && let Some(state) =
-                fixed_probe_trial(snapshot.current_state(), probe_scale, &mut probe_rng)
-        {
-            cooperative
-                .record_slice(replica, trace)
-                .expect("probe checkpoint trace must remain complete");
-            return CheckpointAction::ProbeProposal {
-                state,
-                action: "probe".to_owned(),
-            };
         }
         match decision.action {
             PolicyAction::ContinueLocal => {}
