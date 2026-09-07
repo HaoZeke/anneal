@@ -7172,7 +7172,10 @@ fn run_history_ensembles(
     replicas: usize,
     opts: &[&str],
 ) {
-    use anneal_core::methods::ensemble::run_ensemble;
+    use anneal_core::methods::cluster_hopping::random_cluster_in_radius;
+    use anneal_core::methods::ensemble::{
+        EnsembleProblem, ObjectiveFactory, StartFactory, run_ensemble,
+    };
     use anneal_core::methods::minima_hopping::SerializedWitness;
     use anneal_core::pes_exploration::StructureContext;
 
@@ -7226,8 +7229,22 @@ fn run_history_ensembles(
         "sorted-pairs-fallback"
     };
     let context = StructureContext::new(Some(vec![18; n]), None, Some(format!("lj-reduced-n{n}")));
-    let objective = |x: ArrayView1<f64>| lj(x);
+    let objective: ObjectiveFactory<'_> = &|_| Box::new(|x: ArrayView1<f64>| lj(x));
+    let start: StartFactory<'_> =
+        &|_, rng| random_cluster_in_radius(n, cfg.start_radius(), cfg.min_separation, rng);
     let same_family = |a: &[f64], b: &[f64]| !anneal_core::catalog::different_packing_family(a, b);
+    let problem = EnsembleProblem {
+        objective,
+        start,
+        descriptor: &descriptor,
+        context: &context,
+        witness: &witness,
+        same_family: &same_family,
+        // The share bound and the answer bound of the LJ campaign, in
+        // reduced units.
+        certificate: 1e-5,
+        polish_below: 1e-3,
+    };
     println!(
         "  history ensembles: {} replicas, {} history, {} membership, shared bias {:?}, gossip {:?}, \
          two-choice stall {:?}, budgets {:?}, checkpoint {}, witness {witness_name}, \
@@ -7248,17 +7265,8 @@ fn run_history_ensembles(
     let mut deepest = f64::INFINITY;
     let mut first_target: Vec<usize> = Vec::new();
     for seed in seed0..(seed0 + seeds) {
-        let report = run_ensemble(
-            &cfg,
-            &ens,
-            seed,
-            &objective,
-            &descriptor,
-            &context,
-            &witness,
-            &same_family,
-        )
-        .unwrap_or_else(|error| panic!("seed {seed}: {error}"));
+        let report = run_ensemble(&cfg, &ens, seed, &problem)
+            .unwrap_or_else(|error| panic!("seed {seed}: {error}"));
         for run in &report.replicas {
             // A read-only audit of the returned coordinates and objective.
             let verified = run.outcome.best_state.as_ref().map(|x| {

@@ -22,8 +22,7 @@ use rand::rngs::StdRng;
 use crate::catalog::euclidean_gradient_norm;
 use crate::descriptor_space::DescriptorSpace;
 use crate::methods::cluster_hopping::{
-    ChainCheckpoint, CheckpointAction, Config, Ledger, Outcome, random_cluster_in_radius,
-    run_with_history_at_checkpoints,
+    ChainCheckpoint, CheckpointAction, Config, Ledger, Outcome, run_with_history_at_checkpoints,
 };
 use crate::methods::minima_hopping::{
     HistoryHook, HistoryMembership, MinimumHistory, SharedMinimumHistory,
@@ -157,11 +156,43 @@ impl EnsembleConfig {
     }
 }
 
-/// Value and gradient of the objective at a point.
-pub type Objective<'a> = &'a (dyn Fn(ArrayView1<f64>) -> (f64, Array1<f64>) + Sync);
+/// Value and gradient of the objective at a point, owned by one replica.
+pub type Objective<'a> = &'a dyn Fn(ArrayView1<f64>) -> (f64, Array1<f64>);
+
+/// Builds a replica's objective inside the replica's own thread.
+///
+/// A potential handle that is `Send` but not `Sync` (an xtb or EAM engine
+/// behind FFI) is constructed once per replica here and never shared.
+pub type ObjectiveFactory<'a> =
+    &'a (dyn Fn(usize) -> Box<dyn Fn(ArrayView1<f64>) -> (f64, Array1<f64>) + 'a> + Sync);
+
+/// A replica's start structure from its own stream, also used for restarts.
+pub type StartFactory<'a> = &'a (dyn Fn(usize, &mut StdRng) -> Array1<f64> + Sync);
 
 /// Whether two occupied states stand in the same packing family.
 pub type SameFamily<'a> = &'a (dyn Fn(&[f64], &[f64]) -> bool + Sync);
+
+/// The problem an ensemble runs: objective, starts, identity and families.
+pub struct EnsembleProblem<'a, W: ExactStructureWitness + Sync + ?Sized> {
+    /// Objective per replica.
+    pub objective: ObjectiveFactory<'a>,
+    /// Start structure per replica.
+    pub start: StartFactory<'a>,
+    /// Descriptor ordering the exact witness checks.
+    pub descriptor: &'a DescriptorSpace,
+    /// Species and identity domain of the structures.
+    pub context: &'a StructureContext,
+    /// Exact identity, called from every replica thread.
+    pub witness: &'a W,
+    /// Packing-family predicate for the two-choice restart; `false`
+    /// everywhere disables it where families are not defined.
+    pub same_family: SameFamily<'a>,
+    /// Gradient norm below which a relaxation certifies a minimum.
+    pub certificate: f64,
+    /// Gradient norm below which a stalled relaxation is polished on
+    /// toward the certificate rather than abandoned.
+    pub polish_below: f64,
+}
 
 /// What one replica reports.
 pub struct ReplicaReport {
@@ -216,17 +247,20 @@ impl EnsembleReport {
 /// the ledger.
 ///
 /// Zero steps is one charged evaluation. Otherwise the relaxation runs
-/// `iters` steps, then one fresh evaluation; a gradient norm between 1e-5
-/// and 1e-3 continues in bounded chunks of 500 steps with plain descent
-/// on the last few per cent, so a fixed step count that satisfies one size
-/// does not stall a whisker above the share bound on another. Only a
-/// norm below 1e-5 is a certificate.
+/// `iters` steps, then one fresh evaluation; a gradient norm between
+/// `certificate` and `polish_below` continues in bounded chunks of 500
+/// steps with plain descent on the last few per cent, so a fixed step
+/// count that satisfies one size does not stall a whisker above the bound
+/// on another. Only a norm below `certificate` is a certificate. The LJ
+/// campaign values are 1e-5 and 1e-3 in reduced units.
 pub fn validated_relax(
     objective: Objective<'_>,
     opt: &mut WarmLbfgs,
     led: &mut Ledger,
     x: ArrayView1<f64>,
     iters: usize,
+    certificate: f64,
+    polish_below: f64,
 ) -> (f64, Array1<f64>) {
     if iters == 0 {
         let energy = if led.charge() {
@@ -246,7 +280,7 @@ pub fn validated_relax(
         boundary_energy = fresh_energy;
         let mut gnorm = euclidean_gradient_norm(g.as_slice().expect("gradient is contiguous"));
         let mut chunks = 0;
-        while (1e-5..1e-3).contains(&gnorm) && chunks < 10 && led.remaining() > 0 {
+        while (certificate..polish_below).contains(&gnorm) && chunks < 10 && led.remaining() > 0 {
             opt.forget();
             let (_, xc, _) = opt.minimize(xr.view(), 500, |v| led.charge().then(|| objective(v)));
             boundary_energy = f64::INFINITY;
@@ -260,7 +294,10 @@ pub fn validated_relax(
             g = ge;
             chunks += 1;
             let mut descents = 0;
-            while (1e-5..3e-5).contains(&gnorm) && descents < 200 && led.charge() {
+            while (certificate..3.0 * certificate).contains(&gnorm)
+                && descents < 200
+                && led.charge()
+            {
                 for (value, gradient) in xr.iter_mut().zip(g.iter()) {
                     *value -= 0.01 * gradient;
                 }
@@ -271,7 +308,7 @@ pub fn validated_relax(
                 descents += 1;
             }
         }
-        if gnorm < 1e-5 {
+        if gnorm < certificate {
             validated_gradient = Some(g);
         }
     }
@@ -294,25 +331,25 @@ fn lcg(state: &mut u64) -> u64 {
 
 /// Runs one ensemble seed.
 ///
-/// `objective` is the physical value and gradient; `descriptor`, `context`
-/// and `witness` serve the exact history; `same_family` is the packing
-/// predicate for the two-choice restart. The witness is called from every
-/// replica thread, so a non-reentrant matcher goes behind
-/// [`crate::methods::minima_hopping::SerializedWitness`].
-#[allow(clippy::too_many_arguments)]
+/// The witness is called from every replica thread, so a non-reentrant
+/// matcher goes behind [`crate::methods::minima_hopping::SerializedWitness`].
 pub fn run_ensemble<W: ExactStructureWitness + Sync + ?Sized>(
     cfg: &Config,
     ens: &EnsembleConfig,
     seed: u64,
-    objective: Objective<'_>,
-    descriptor: &DescriptorSpace,
-    context: &StructureContext,
-    witness: &W,
-    same_family: SameFamily<'_>,
+    problem: &EnsembleProblem<'_, W>,
 ) -> Result<EnsembleReport, String> {
     ens.validate(cfg)?;
+    if !(problem.certificate > 0.0 && problem.polish_below >= problem.certificate) {
+        return Err("the certificate must be positive and below the polish bound".into());
+    }
+    let (descriptor, context, witness, same_family) = (
+        problem.descriptor,
+        problem.context,
+        problem.witness,
+        problem.same_family,
+    );
     let started = Instant::now();
-    let n = cfg.n_points;
     let replicas = ens.replicas;
     let budgets = ens.budgets();
     let replica_seeds = ens.replica_seeds(seed);
@@ -351,11 +388,21 @@ pub fn run_ensemble<W: ExactStructureWitness + Sync + ?Sized>(
                 let context = context.clone();
                 scope.spawn(move || -> Result<ReplicaReport, String> {
                     let replica_started = Instant::now();
+                    let objective = (problem.objective)(replica);
+                    let objective: Objective<'_> = &*objective;
                     let mut ledger = Ledger::new(replica_budget);
                     let mut opt = WarmLbfgs::default();
                     let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, iters: usize| {
                         let before = led.spent();
-                        let out = validated_relax(objective, &mut opt, led, x, iters);
+                        let out = validated_relax(
+                            objective,
+                            &mut opt,
+                            led,
+                            x,
+                            iters,
+                            problem.certificate,
+                            problem.polish_below,
+                        );
                         charged_total.fetch_add(led.spent() - before, Ordering::SeqCst);
                         out
                     };
@@ -427,12 +474,7 @@ pub fn run_ensemble<W: ExactStructureWitness + Sync + ?Sized>(
                                 if crowded == 2 {
                                     two_choice_restarts += 1;
                                     charged_at_best = snapshot.charged();
-                                    let fresh = random_cluster_in_radius(
-                                        n,
-                                        cfg.start_radius(),
-                                        cfg.min_separation,
-                                        &mut restart_rng,
-                                    );
+                                    let fresh = (problem.start)(replica, &mut restart_rng);
                                     return CheckpointAction::ExternalAdopt {
                                         state: fresh,
                                         action: "two-choice-restart".to_owned(),
@@ -511,12 +553,7 @@ pub fn run_ensemble<W: ExactStructureWitness + Sync + ?Sized>(
                         }
                     };
                     let mut rng = StdRng::seed_from_u64(replica_seed);
-                    let start = random_cluster_in_radius(
-                        n,
-                        cfg.start_radius(),
-                        cfg.min_separation,
-                        &mut rng,
-                    );
+                    let start = (problem.start)(replica, &mut rng);
                     let outcome = run_with_history_at_checkpoints(
                         cfg,
                         start.view(),
@@ -595,6 +632,7 @@ pub fn run_ensemble<W: ExactStructureWitness + Sync + ?Sized>(
 mod tests {
     use super::*;
     use crate::descriptor_space::{DescriptorGeometry, universal_descriptor_space};
+    use crate::methods::cluster_hopping::random_cluster_in_radius;
     use crate::methods::minima_hopping::SerializedWitness;
 
     /// Two wells: a tetrahedron and its mirror scaled by 1.7, so chains have
@@ -681,7 +719,19 @@ mod tests {
             // Same well when the first coordinate has the same sign.
             (a[0] > 0.0) == (b[0] > 0.0)
         };
-        let objective = two_well;
+        let objective: ObjectiveFactory<'_> = &|_| Box::new(two_well);
+        let start: StartFactory<'_> =
+            &|_, rng| random_cluster_in_radius(4, cfg.start_radius(), cfg.min_separation, rng);
+        let problem = EnsembleProblem {
+            objective,
+            start,
+            descriptor: &descriptor,
+            context: &context,
+            witness: &witness,
+            same_family: &same_family,
+            certificate: 1e-5,
+            polish_below: 1e-3,
+        };
         let gossip = GossipConfig {
             topology: GossipTopology::Ring,
             interval: 1_000,
@@ -693,11 +743,7 @@ mod tests {
             &cfg,
             &ensemble(HistoryMode::Shared, Some(0.5), Some(gossip)),
             3,
-            &objective,
-            &descriptor,
-            &context,
-            &witness,
-            &same_family,
+            &problem,
         )
         .unwrap();
         assert_eq!(shared.replicas.len(), 3);
@@ -707,17 +753,8 @@ mod tests {
         assert_eq!(shared.histories.len(), 1);
         assert!(shared.histories[0].2 > 0);
         assert!(shared.solved(Some(-0.4)));
-        let private = run_ensemble(
-            &cfg,
-            &ensemble(HistoryMode::None, None, None),
-            3,
-            &objective,
-            &descriptor,
-            &context,
-            &witness,
-            &same_family,
-        )
-        .unwrap();
+        let private =
+            run_ensemble(&cfg, &ensemble(HistoryMode::None, None, None), 3, &problem).unwrap();
         assert!(private.histories.is_empty());
         assert_eq!(private.exchange, (0, 0));
         assert!(
