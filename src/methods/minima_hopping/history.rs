@@ -30,6 +30,9 @@ pub enum MinimumHistoryError {
     /// The observation count cannot be represented.
     #[error("minimum history visit counter overflow")]
     CounterOverflow,
+    /// Accepted membership requires an admitted minimum identity.
+    #[error("minimum history has no identity {0}")]
+    UnknownMinimum(usize),
 }
 
 /// Shared search memory without state adoption or an acceptance policy.
@@ -41,6 +44,7 @@ pub enum MinimumHistoryError {
 pub struct MinimumHistory {
     network: PesNetwork,
     visits: Vec<u64>,
+    accepted_visits: Vec<u64>,
     total_visits: u64,
     gradient_tolerance: f64,
 }
@@ -54,6 +58,7 @@ impl MinimumHistory {
         Ok(Self {
             network: PesNetwork::new(),
             visits: Vec::new(),
+            accepted_visits: Vec::new(),
             total_visits: 0,
             gradient_tolerance,
         })
@@ -67,6 +72,30 @@ impl MinimumHistory {
     /// Number of validated observations, including replica initializations.
     pub fn total_visits(&self) -> u64 {
         self.total_visits
+    }
+
+    /// Number of exact identities adopted by at least one chain.
+    pub fn accepted_count(&self) -> usize {
+        self.accepted_visits.iter().filter(|visits| **visits > 0).count()
+    }
+
+    /// Observations since first adoption, including that accepted visit.
+    ///
+    /// Zero denotes an archived proposal that no chain has accepted. Such a
+    /// proposal remains eligible for an adaptive energy-threshold trial.
+    pub fn accepted_visits(&self, minimum: usize) -> Option<u64> {
+        self.accepted_visits.get(minimum).copied()
+    }
+
+    /// Publishes adoption without treating rejected proposals as visited states.
+    ///
+    /// Registration is idempotent. A shared caller holds its history lock
+    /// across observation, threshold decision, and this publication.
+    pub fn mark_accepted(&mut self, minimum: usize) -> Result<(), MinimumHistoryError> {
+        let visits = self.accepted_visits.get_mut(minimum)
+            .ok_or(MinimumHistoryError::UnknownMinimum(minimum))?;
+        *visits = (*visits).max(1);
+        Ok(())
     }
 
     /// Admit one charged minimum certificate and return only search history.
@@ -98,9 +127,13 @@ impl MinimumHistory {
         )?;
         if minimum.is_new {
             self.visits.push(0);
+            self.accepted_visits.push(0);
         }
         // Every basin count is bounded by the checked total observation count.
         self.visits[minimum.id] += 1;
+        if self.accepted_visits[minimum.id] > 0 {
+            self.accepted_visits[minimum.id] += 1;
+        }
         self.total_visits = total_visits;
         Ok(HistoryObservation {
             minimum,
