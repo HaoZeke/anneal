@@ -5354,16 +5354,17 @@ fn run_capnp_catalog(
                     let _ = std::io::stdout().flush();
                     announced_done = true;
                 }
-                return complete_checkpoint_trace(
+                complete_checkpoint_trace(
                     &mut cooperative,
                     replica,
                     &mut slice_sequence,
                     checkpoint_charged,
                     snapshot.best_energy(),
-                    |_cooperative, _slice_sequence| CheckpointAction::Retire {
-                        reason: certificate.as_str().to_owned(),
-                    },
+                    |_cooperative, _slice_sequence| (),
                 );
+                return CheckpointAction::Retire {
+                    reason: certificate.as_str().to_owned(),
+                };
             }
             if !announced_putative {
                 println!(
