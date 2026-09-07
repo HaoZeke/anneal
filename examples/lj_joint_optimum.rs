@@ -1123,9 +1123,15 @@ mod tests {
             },
         );
 
-        assert!(run.outcome.best.is_finite(), "bootstrap must establish a minimum");
+        assert!(
+            run.outcome.best.is_finite(),
+            "bootstrap must establish a minimum"
+        );
         assert!(run.initial_quench_calls > config.relax_steps);
-        assert!(run.dynamics_calls > 0, "available work must reach the escape operator");
+        assert!(
+            run.dynamics_calls > 0,
+            "available work must reach the escape operator"
+        );
         assert!(run.outcome.charged <= budget);
         assert_eq!(
             run.initial_quench_calls + run.dynamics_calls + run.proposal_quench_calls,
