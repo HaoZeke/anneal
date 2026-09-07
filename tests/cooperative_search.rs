@@ -1811,6 +1811,27 @@ fn attraction_region_evidence_threshold_is_explicit() {
 }
 
 #[test]
+fn rejected_posted_source_does_not_attach_an_edge_to_the_occupied_basin() {
+    let server = server();
+    let digest = signature().digest();
+    let mut run = CooperativeRun::new([0], 100).unwrap();
+    run.attach_client(0, CatalogClient::connect(
+        server.addr(), identity(0, digest), ClientConfig::default(),
+    ).unwrap()).unwrap();
+    let source = candidate(0, 1, 1.2);
+    run.record_current(0, source.clone()).unwrap();
+    let mut invalid = candidate(0, 2, 2.0);
+    invalid.energy = 1.0e9;
+    run.post_record_current(0, invalid).unwrap();
+    run.post_record_transition(0, "probe",
+        TransitionDestination::Resolved(candidate(0, 3, 4.0)), true).unwrap();
+    run.flush(0).unwrap();
+    assert_eq!(run.boundary_crossing(0, source.descriptor, 71).unwrap(),
+        CatalogBoundaryOutcome::Empty,
+        "a rejected source must not turn the last occupied basin into the probe origin");
+}
+
+#[test]
 fn observed_adopted_crossing_is_available_to_another_replica() {
     let server = server();
     let digest = signature().digest();
