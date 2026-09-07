@@ -1168,4 +1168,71 @@ mod tests {
             run.outcome.charged
         );
     }
+
+    #[test]
+    fn a_private_history_preserves_the_nve_trajectory_and_counts_every_call() {
+        use std::sync::{Mutex, atomic::AtomicUsize, atomic::Ordering};
+
+        let potential = PairPotential::lennard_jones(2);
+        let initial = Array1::from(vec![0.0, 0.0, 0.0, 1.2, 0.0, 0.0]);
+        let local = run_minima_hopping(
+            &potential,
+            initial.view(),
+            2,
+            2_000,
+            7,
+            &DistinctWitness,
+            MinimaHoppingOptions { soften: false, bound_escape: false },
+        );
+        let history = Mutex::new(super::MinimumHistory::new(1e-3).unwrap());
+        let charged = AtomicUsize::new(0);
+        let observed = super::run_minima_hopping_with_history(
+            &potential,
+            initial.view(),
+            2,
+            2_000,
+            7,
+            &DistinctWitness,
+            super::HistoryRunOptions {
+                moves: MinimaHoppingOptions { soften: false, bound_escape: false },
+                history: Some(&history),
+                charged: Some(&charged),
+            },
+        ).unwrap();
+
+        assert_eq!(observed.outcome.best, local.outcome.best);
+        assert_eq!(observed.outcome.final_state, local.outcome.final_state);
+        assert_eq!(observed.outcome.accepted, local.outcome.accepted);
+        assert_eq!(observed.outcome.visit_counts, local.outcome.visit_counts);
+        assert_eq!(observed.dynamics_steps, local.dynamics_steps);
+        assert_eq!(observed.outcome.charged, local.outcome.charged);
+        assert_eq!(charged.load(Ordering::SeqCst), observed.outcome.charged);
+        assert!(history.lock().unwrap().total_visits() > 0);
+    }
+
+    #[test]
+    fn an_unconverged_bootstrap_does_not_publish_shared_history() {
+        use std::sync::Mutex;
+
+        let potential = PairPotential::lennard_jones(2);
+        let initial = Array1::from(vec![0.0, 0.0, 0.0, 1.2, 0.0, 0.0]);
+        let history = Mutex::new(super::MinimumHistory::new(1e-3).unwrap());
+        let run = super::run_minima_hopping_with_history(
+            &potential,
+            initial.view(),
+            2,
+            1,
+            7,
+            &DistinctWitness,
+            super::HistoryRunOptions {
+                moves: MinimaHoppingOptions { soften: false, bound_escape: false },
+                history: Some(&history),
+                charged: None,
+            },
+        ).unwrap();
+
+        assert_eq!(run.outcome.best, f64::INFINITY);
+        assert_eq!(run.outcome.charged, 1);
+        assert_eq!(history.lock().unwrap().total_visits(), 0);
+    }
 }
