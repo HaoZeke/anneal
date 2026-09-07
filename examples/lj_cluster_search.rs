@@ -4514,6 +4514,10 @@ fn run_capnp_catalog(
     // can be reported: whether the replica is still in the adopted packing
     // family or has slid back to where it was.
     let mut hear_state = HearState::default();
+    // Last minimum registered and last candidate offered, so an unchanged
+    // occupied state does not cost the coordinator another validation.
+    let mut last_registered: Option<(f64, Vec<f64>)> = None;
+    let mut last_offered: Option<(f64, Vec<f64>)> = None;
     // Census jumps: the population's visit count of this replica's basin,
     // not this replica's own stall, triggers an occasional jump.
     let mut jump_state = JumpState::default();
@@ -4775,7 +4779,20 @@ fn run_capnp_catalog(
                 }
                 // A checkpoint registers its occupied minimum, not the origin of a
                 // sampled trajectory segment. Registration does not invent an edge.
-                if let Some(gradient) = snapshot.current_gradient() {
+                // Coalesced: a chain sits in one minimum for hundreds of checkpoints,
+                // and every registration costs the coordinator a validation (0.28 s
+                // on LJ75, measured); re-sending an unchanged minimum is what
+                // saturated it with 48 replicas. Only a changed minimum is sent.
+                let occupied_changed = snapshot.current_gradient().is_some()
+                    && last_registered.as_ref().is_none_or(|(energy, state)| {
+                        (energy - snapshot.current_energy()).abs() > 1e-9
+                            || Some(state.as_slice()) != snapshot.current_state().as_slice()
+                    });
+                if let Some(gradient) = snapshot.current_gradient()
+                    && occupied_changed
+                {
+                    last_registered =
+                        Some((snapshot.current_energy(), snapshot.current_state().to_vec()));
                     candidate_sequence += 1;
                     if let Some(candidate) = lj_catalog_candidate(
                         &descriptor_space,
@@ -4833,7 +4850,15 @@ fn run_capnp_catalog(
                         .total_cmp(&right.energy)
                         .then_with(|| left.event_sequence.cmp(&right.event_sequence))
                 });
-                if let Some(candidate) = freshest_boundary.as_ref() {
+                // One offer per checkpoint, and only for a minimum not offered
+                // before: the offer is the other validated request kind.
+                if let Some(candidate) = freshest_boundary.as_ref()
+                    && last_offered.as_ref().is_none_or(|(energy, coordinates)| {
+                        (energy - candidate.energy).abs() > 1e-9
+                            || coordinates != &candidate.coordinates
+                    })
+                {
+                    last_offered = Some((candidate.energy, candidate.coordinates.clone()));
                     let _ = cooperative.post_offer_candidate(replica, candidate.clone());
                 }
 
