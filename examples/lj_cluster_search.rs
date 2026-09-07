@@ -2275,10 +2275,11 @@ fn main() {
                 capped += 1;
             }
             if !diagnostic && let Some(portfolio) = surfaces.as_ref() {
-                portfolio
-                    .lock()
-                    .expect("surface portfolio")
-                    .observe(screening_pass, boundary_energy, led.best);
+                portfolio.lock().expect("surface portfolio").observe(
+                    screening_pass,
+                    boundary_energy,
+                    led.best,
+                );
             }
             led.record_quench_boundary(
                 charged_before,
