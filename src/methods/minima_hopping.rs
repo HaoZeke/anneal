@@ -629,7 +629,10 @@ mod tests {
             };
             let mut rng = StdRng::seed_from_u64(17);
             let report = nve_escape(start.view(), 0.5, &config, &mut evaluate, &mut rng).unwrap();
-            assert_eq!(report.potential_minima, 0, "slope {slope} has no turning point");
+            assert_eq!(
+                report.potential_minima, 0,
+                "slope {slope} has no turning point"
+            );
             assert_eq!(report.steps, config.maximum_steps);
             assert_eq!(evaluations, report.steps + 1);
         }
