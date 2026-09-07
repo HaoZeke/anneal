@@ -3998,28 +3998,29 @@ fn run_capnp_catalog(
     let mut pending_deposits: Vec<Array1<f64>> = Vec::new();
     // Peer-to-peer census over nng (CENSUS_BUS_BASE=port, CATALOG_REPLICAS=n):
     // every replica's live minimum, no coordinator in the loop.
-    let mut census_bus: Option<anneal_core::census_bus::CensusBus> = std::env::var("CENSUS_BUS_BASE")
-        .ok()
-        .and_then(|v| v.parse::<u16>().ok())
-        .and_then(|base| {
-            let n: u32 = std::env::var("CATALOG_REPLICAS")
-                .ok()
-                .and_then(|v| v.parse().ok())
-                .unwrap_or(0);
-            if n == 0 {
-                return None;
-            }
-            match anneal_core::census_bus::CensusBus::new(replica, base, n) {
-                Ok(bus) => {
-                    println!("  census bus: nng pub/sub, base port {base}, {n} replicas");
-                    Some(bus)
+    let mut census_bus: Option<anneal_core::census_bus::CensusBus> =
+        std::env::var("CENSUS_BUS_BASE")
+            .ok()
+            .and_then(|v| v.parse::<u16>().ok())
+            .and_then(|base| {
+                let n: u32 = std::env::var("CATALOG_REPLICAS")
+                    .ok()
+                    .and_then(|v| v.parse().ok())
+                    .unwrap_or(0);
+                if n == 0 {
+                    return None;
                 }
-                Err(error) => {
-                    println!("  census bus unavailable: {error}");
-                    None
+                match anneal_core::census_bus::CensusBus::new(replica, base, n) {
+                    Ok(bus) => {
+                        println!("  census bus: nng pub/sub, base port {base}, {n} replicas");
+                        Some(bus)
+                    }
+                    Err(error) => {
+                        println!("  census bus unavailable: {error}");
+                        None
+                    }
                 }
-            }
-        });
+            });
     let mut peer_crowd: usize = 0;
     let mut bus_received: usize = 0;
     let mut shared_wells: Vec<Array1<f64>> = Vec::new();
@@ -6357,24 +6358,50 @@ mod census_policy_tests {
     #[test]
     fn publication_requires_matching_finite_gradient_evidence() {
         let coordinates = array![0.0, 0.0, 0.0, 1.0, 0.0, 0.0];
-        assert_eq!(lj_catalog_gradient_norm(-1.0, coordinates.view(), None), None);
-        for gradient in [array![], array![0.0; 3], array![f64::NAN; 6], array![f64::INFINITY; 6]] {
-            assert_eq!(lj_catalog_gradient_norm(-1.0, coordinates.view(), Some(gradient.view())), None);
+        assert_eq!(
+            lj_catalog_gradient_norm(-1.0, coordinates.view(), None),
+            None
+        );
+        for gradient in [
+            array![],
+            array![0.0; 3],
+            array![f64::NAN; 6],
+            array![f64::INFINITY; 6],
+        ] {
+            assert_eq!(
+                lj_catalog_gradient_norm(-1.0, coordinates.view(), Some(gradient.view())),
+                None
+            );
         }
         let gradient = array![0.0; 6];
-        assert_eq!(lj_catalog_gradient_norm(-1.0, coordinates.view(), Some(gradient.view())), Some(0.0));
-        assert_eq!(lj_catalog_gradient_norm(f64::NAN, coordinates.view(), Some(gradient.view())), None);
+        assert_eq!(
+            lj_catalog_gradient_norm(-1.0, coordinates.view(), Some(gradient.view())),
+            Some(0.0)
+        );
+        assert_eq!(
+            lj_catalog_gradient_norm(f64::NAN, coordinates.view(), Some(gradient.view())),
+            None
+        );
         let invalid = array![f64::NAN; 6];
-        assert_eq!(lj_catalog_gradient_norm(-1.0, invalid.view(), Some(gradient.view())), None);
+        assert_eq!(
+            lj_catalog_gradient_norm(-1.0, invalid.view(), Some(gradient.view())),
+            None
+        );
     }
 
     #[test]
     fn census_stationarity_uses_the_catalog_norm_not_the_answer_component_limit() {
         let coordinates = array![0.0, 0.0, 0.0, 1.0, 0.0, 0.0];
         let too_large = array![8e-6, 8e-6, 0.0, 0.0, 0.0, 0.0];
-        assert_eq!(lj_catalog_gradient_norm(-1.0, coordinates.view(), Some(too_large.view())), None);
+        assert_eq!(
+            lj_catalog_gradient_norm(-1.0, coordinates.view(), Some(too_large.view())),
+            None
+        );
         let boundary = array![1e-5, 0.0, 0.0, 0.0, 0.0, 0.0];
-        assert_eq!(lj_catalog_gradient_norm(-1.0, coordinates.view(), Some(boundary.view())), Some(1e-5));
+        assert_eq!(
+            lj_catalog_gradient_norm(-1.0, coordinates.view(), Some(boundary.view())),
+            Some(1e-5)
+        );
     }
 }
 
