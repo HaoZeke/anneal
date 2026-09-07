@@ -403,6 +403,8 @@ struct ScientificState {
     discovery_roles: BTreeMap<u32, DiscoveryRole>,
     discovery_ride_assignments: BTreeMap<u32, RideArm>,
     discovery_plan_model_version: Option<u64>,
+    /// Request clock at which the discovery plan was last rebuilt.
+    discovery_plan_hold: Option<u64>,
     discovery_assignment_epoch: u64,
     ride_candidates: BTreeMap<u64, CatalogCandidate>,
     ride_saddles: BTreeMap<u64, CertifiedRideSaddle>,
@@ -640,6 +642,7 @@ impl CoordinatorState {
                     discovery_roles: BTreeMap::new(),
                     discovery_ride_assignments: BTreeMap::new(),
                     discovery_plan_model_version: None,
+                    discovery_plan_hold: None,
                     discovery_assignment_epoch: 0,
                     ride_candidates: BTreeMap::new(),
                     ride_saddles: BTreeMap::new(),
@@ -4208,7 +4211,14 @@ fn minimum_information_role(
     ride_cost: f64,
 ) -> Option<(DiscoveryRole, u64)> {
     let model_version = scientific.minimum_information.version();
-    if scientific.discovery_plan_model_version == Some(model_version) {
+    // The model version moves on every visit and offer, so with 48
+    // replicas the plan was rebuilt on nearly every policy request. It is
+    // held for HOLD_REQUESTS like the other book-derived summaries and the
+    // held roles served meanwhile.
+    if scientific.discovery_plan_model_version == Some(model_version)
+        || (scientific.discovery_plan_model_version.is_some()
+            && hold_active(scientific, scientific.discovery_plan_hold))
+    {
         return scientific
             .discovery_roles
             .get(&query_replica)
@@ -4297,6 +4307,7 @@ fn minimum_information_role(
     scientific.ride_information_scores = ride_rates;
     scientific.discovery_ride_assignments = ride_assignments;
     scientific.discovery_plan_model_version = Some(model_version);
+    scientific.discovery_plan_hold = Some(scientific.hold_clock);
     scientific
         .discovery_roles
         .get(&query_replica)
