@@ -8,7 +8,12 @@
 //! coordinates, seeds, target, and charged-call ceiling.
 //!
 //! Usage:
-//! `lj_joint_optimum <N> <budget> <seeds> [all|adaptive|ridge|basin|bh|bh-sym|bh-csm-ci|mh|mh-soft|mh-bounded|mh-bounded-soft|feedback] [gs2|morokuma|both] [seed0]`
+//! `lj_joint_optimum <N> <budget> <seeds> [all|adaptive|ridge|basin|bh|bh-sym|bh-csm-ci|mh|mh-soft|mh-bounded|mh-bounded-soft|mh-communication|feedback] [gs2|morokuma|both] [seed0]`
+//!
+//! `mh-communication` pairs private and shared minimum histories at one total
+//! budget, divided among `ANNEAL_MH_REPLICAS` replicas (default four). History
+//! changes escape effort, never coordinates. `mh-private`, `mh-shared`,
+//! `mh-private-soft`, and `mh-shared-soft` select individual ensemble arms.
 
 use std::collections::HashSet;
 use std::error::Error;
@@ -32,7 +37,7 @@ use anneal_core::methods::minima_hopping::{
 };
 use anneal_core::methods::warm_lbfgs::WarmLbfgs;
 use anneal_core::pes_exploration::{
-    ExactStructureWitness, IrcKind, PesExplorationConfig, RideMethod, StructureContext,
+    ExactStructureWitness, IrcKind, PesExplorationConfig, RideMethod, StructureContext, StructureView,
 };
 use anneal_core::potentials::{PairKind, PairPotential};
 use anneal_core::shape::IraStructureWitness;
@@ -59,6 +64,7 @@ enum Arm {
     MinimaHoppingSoftened,
     MinimaHoppingBounded,
     MinimaHoppingBoundedSoftened,
+    MinimaHoppingEnsemble { shared: bool, soften: bool },
     MinimaFeedback,
 }
 
@@ -75,6 +81,11 @@ impl Arm {
             Self::MinimaHoppingSoftened => "minima-hopping-softened".into(),
             Self::MinimaHoppingBounded => "minima-hopping-bounded".into(),
             Self::MinimaHoppingBoundedSoftened => "minima-hopping-bounded-softened".into(),
+            Self::MinimaHoppingEnsemble { shared, soften } => format!(
+                "minima-hopping-{}-history{}",
+                if shared { "shared" } else { "private" },
+                if soften { "-softened" } else { "" },
+            ),
             Self::MinimaFeedback => "minima-feedback".into(),
         }
     }
@@ -181,10 +192,20 @@ fn selected_arms(selector: &str, irc: &[IrcKind]) -> Result<Vec<Arm>, String> {
         "mh-soft" => arms.push(Arm::MinimaHoppingSoftened),
         "mh-bounded" => arms.push(Arm::MinimaHoppingBounded),
         "mh-bounded-soft" => arms.push(Arm::MinimaHoppingBoundedSoftened),
+        "mh-private" | "mh-shared" | "mh-private-soft" | "mh-shared-soft" => {
+            arms.push(Arm::MinimaHoppingEnsemble {
+                shared: selector.contains("shared"),
+                soften: selector.ends_with("-soft"),
+            });
+        }
+        "mh-communication" => arms.extend([
+            Arm::MinimaHoppingEnsemble { shared: false, soften: false },
+            Arm::MinimaHoppingEnsemble { shared: true, soften: false },
+        ]),
         "feedback" => arms.push(Arm::MinimaFeedback),
         _ => {
             return Err(
-                "arm must be all, adaptive, ridge, basin, bh, bh-sym, bh-csm-ci, mh, mh-soft, mh-bounded, mh-bounded-soft, or feedback"
+                "arm must be all, adaptive, ridge, basin, bh, bh-sym, bh-csm-ci, mh, mh-soft, mh-bounded, mh-bounded-soft, mh-communication, mh-private[-soft], mh-shared[-soft], or feedback"
                     .into(),
             );
         }
@@ -654,6 +675,94 @@ fn run_minima_hopping_with_history(
     })
 }
 
+struct SerializedWitness<W>(Mutex<W>);
+
+impl<W: ExactStructureWitness> ExactStructureWitness for SerializedWitness<W> {
+    fn equivalent(&self, left: ArrayView1<f64>, right: ArrayView1<f64>) -> bool {
+        self.0.lock().expect("exact witness lock poisoned").equivalent(left, right)
+    }
+
+    fn equivalent_structures(&self, left: StructureView<'_>, right: StructureView<'_>) -> bool {
+        self.0.lock().expect("exact witness lock poisoned").equivalent_structures(left, right)
+    }
+}
+
+#[derive(Clone, Copy)]
+struct EnsembleOptions {
+    replicas: usize,
+    shared: bool,
+    soften: bool,
+}
+
+struct MinimaHoppingEnsemble {
+    runs: Vec<MinimaHoppingRun>,
+    budgets: Vec<usize>,
+    seeds: Vec<u64>,
+    charged: usize,
+    minimum_count: usize,
+    wall_seconds: f64,
+}
+
+fn run_minima_hopping_ensemble<W: ExactStructureWitness + Send>(
+    potential: &PairPotential,
+    initial: ArrayView1<'_, f64>,
+    n: usize,
+    budget: usize,
+    seed: u64,
+    witness: W,
+    options: EnsembleOptions,
+) -> Result<MinimaHoppingEnsemble, String> {
+    if options.replicas == 0 || budget < options.replicas {
+        return Err("ensemble needs positive replicas and at least one call per replica".into());
+    }
+    let started = Instant::now();
+    let budgets = (0..options.replicas)
+        .map(|replica| budget / options.replicas + usize::from(replica < budget % options.replicas))
+        .collect::<Vec<_>>();
+    let seeds = (0..options.replicas)
+        .map(|replica| seed.wrapping_add((replica as u64).wrapping_mul(0x9e37_79b9_7f4a_7c15)))
+        .collect::<Vec<_>>();
+    let history_count = if options.shared { 1 } else { options.replicas };
+    let tolerance = HoppingConfig::for_cluster(n).record_gradient;
+    let histories = (0..history_count)
+        .map(|_| MinimumHistory::new(tolerance).map(Mutex::new).map_err(|error| error.to_string()))
+        .collect::<Result<Vec<_>, _>>()?;
+    let charged = AtomicUsize::new(0);
+    // Both arms serialize foreign exact matching without serializing their PES work.
+    let witness = SerializedWitness(Mutex::new(witness));
+    let runs = std::thread::scope(|scope| {
+        let handles = budgets.iter().zip(&seeds).enumerate().map(|(replica, (&budget, &seed))| {
+            let history = &histories[if options.shared { 0 } else { replica }];
+            let charged = &charged;
+            let witness = &witness;
+            scope.spawn(move || {
+                run_minima_hopping_with_history(
+                    potential, initial, n, budget, seed, witness,
+                    HistoryRunOptions {
+                        moves: MinimaHoppingOptions { soften: options.soften, bound_escape: false },
+                        history: Some(history),
+                        charged: Some(charged),
+                    },
+                )
+            })
+        }).collect::<Vec<_>>();
+        handles.into_iter().map(|handle| {
+            handle.join().map_err(|_| "NVE replica panicked".to_string())?
+        }).collect::<Result<Vec<_>, String>>()
+    })?;
+    let charged = charged.load(Ordering::SeqCst);
+    if charged != runs.iter().map(|run| run.outcome.charged).sum::<usize>() {
+        return Err("ensemble and per-replica charged counters disagree".into());
+    }
+    let minimum_count = histories.iter().map(|history| {
+        history.lock().map(|history| history.minimum_count())
+            .map_err(|_| "minimum history lock poisoned".to_string())
+    }).collect::<Result<Vec<_>, _>>()?.into_iter().sum();
+    Ok(MinimaHoppingEnsemble {
+        runs, budgets, seeds, charged, minimum_count, wall_seconds: started.elapsed().as_secs_f64(),
+    })
+}
+
 fn wilson_interval(hits: usize, total: usize) -> (f64, f64) {
     if total == 0 {
         return (0.0, 0.0);
@@ -778,6 +887,8 @@ fn main() -> Result<(), Box<dyn Error>> {
     }
     let target = reference(n).ok_or("no published LJ target is registered for this size")?;
     let arms = selected_arms(selector, &irc_kinds(irc_selector)?)?;
+    let replicas = std::env::var("ANNEAL_MH_REPLICAS")
+        .map_or(Ok(4), |value| value.parse::<usize>())?;
     let descriptor_space = lj::descriptor_space();
     let potential = PairPotential::lennard_jones(n);
     let witness = IraStructureWitness {
@@ -807,6 +918,13 @@ fn main() -> Result<(), Box<dyn Error>> {
             "target_tolerance": TARGET_TOLERANCE,
             "start_protocol": if optbench_root.is_some() { "optbench-fixed" } else { "random-cluster" },
             "start_archive_sha256": optbench_root.as_ref().and_then(|_| optbench_archive_digest(n)),
+            "nve_ensemble": {
+                "replicas": replicas,
+                "budget_semantics": "aggregate-per-ensemble",
+                "start_semantics": "common-matched-coordinates",
+                "exchange": "validated-minimum-history-only",
+                "exact_witness": "serialized-in-both-arms",
+            },
             "minima_hopping": {
                 "integrator": "rgsaddle-samd-nve",
                 "dt": 0.005,
@@ -849,6 +967,53 @@ fn main() -> Result<(), Box<dyn Error>> {
         for (arm_index, arm) in arms.iter().copied().enumerate() {
             let label = arm.label();
             match arm {
+                Arm::MinimaHoppingEnsemble { shared, soften } => {
+                    let ensemble = run_minima_hopping_ensemble(
+                        &potential, initial.view(), n,
+                        usize::try_from(budget).map_err(|_| "ensemble budget overflow")?,
+                        seed,
+                        IraStructureWitness {
+                            kmax_factor: witness.kmax_factor, radius: witness.radius,
+                        },
+                        EnsembleOptions { replicas, shared, soften },
+                    )?;
+                    let first = ensemble.runs.iter()
+                        .flat_map(|run| &run.aggregate_improvements)
+                        .filter(|(_, energy)| *energy <= target + TARGET_TOLERANCE)
+                        .map(|(charged, _)| *charged).min();
+                    let encounter = first.map_or(
+                        Encounter::Censored { charged: ensemble.charged },
+                        |charged| Encounter::Found { charged, hops: 0 },
+                    );
+                    let best = ensemble.runs.iter().map(|run| run.outcome.best)
+                        .fold(f64::INFINITY, f64::min);
+                    let failures = ensemble.runs.iter().map(|run| run.outcome.unconverged_records).sum();
+                    println!("{}", json!({
+                        "kind": "lj_joint_optimum_ensemble",
+                        "arm": label, "seed": seed, "target_found": first.is_some(),
+                        "first_aggregate_charged": first, "charged": ensemble.charged,
+                        "best_energy": best, "gap": best - target,
+                        "minimum_count": ensemble.minimum_count,
+                        "minimum_count_semantics": if shared { "shared-exact-identities" } else { "sum-private-identities" },
+                        "wall_seconds": ensemble.wall_seconds,
+                        "replicas": ensemble.runs.iter().enumerate().map(|(replica, run)| json!({
+                            "replica": replica, "seed": ensemble.seeds[replica],
+                            "budget": ensemble.budgets[replica], "charged": run.outcome.charged,
+                            "best_energy": run.outcome.best, "hops": run.outcome.hops,
+                            "minima": run.outcome.basins, "accepted": run.outcome.accepted,
+                            "visit_counts": run.outcome.visit_counts,
+                            "failed_actions": run.outcome.unconverged_records,
+                            "initial_quench_calls": run.initial_quench_calls,
+                            "dynamics_calls": run.dynamics_calls,
+                            "proposal_quench_calls": run.proposal_quench_calls,
+                            "history_seconds": run.history_seconds,
+                            "aggregate_improvements": run.aggregate_improvements,
+                        })).collect::<Vec<_>>(),
+                    }));
+                    summaries[arm_index].observe(
+                        encounter, best, ensemble.charged as u64, ensemble.minimum_count, 0, failures,
+                    );
+                }
                 Arm::Adaptive(irc_kind) | Arm::Ridge(irc_kind) => {
                     let policy = if matches!(arm, Arm::Adaptive(_)) {
                         AtomisticHybridPolicy::Adaptive
