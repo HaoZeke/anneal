@@ -290,11 +290,13 @@ where
         if turning_window.len() > 5 {
             turning_window.pop_front();
         }
+        // A sustained turning point requires actual descent and ascent;
+        // a flat trajectory does not certify passage through a potential well.
         let passed_minimum = turning_window.len() == 5
-            && turning_window[0].0 >= turning_window[1].0
-            && turning_window[1].0 >= turning_window[2].0
-            && turning_window[2].0 <= turning_window[3].0
-            && turning_window[3].0 <= turning_window[4].0;
+            && turning_window[0].0 > turning_window[1].0
+            && turning_window[1].0 > turning_window[2].0
+            && turning_window[2].0 < turning_window[3].0
+            && turning_window[3].0 < turning_window[4].0;
         if passed_minimum {
             minima += 1;
             if minima >= config.potential_minima {
