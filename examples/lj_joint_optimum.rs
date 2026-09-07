@@ -10,24 +10,29 @@
 //! Usage:
 //! `lj_joint_optimum <N> <budget> <seeds> [all|adaptive|ridge|basin|bh|bh-sym|bh-csm-ci|mh|mh-soft|mh-bounded|mh-bounded-soft|feedback] [gs2|morokuma|both] [seed0]`
 
+use std::collections::HashSet;
 use std::error::Error;
 use std::path::{Path, PathBuf};
+use std::sync::{Mutex, atomic::AtomicUsize, atomic::Ordering};
+use std::time::Instant;
 
 use anneal_core::atomistic_hybrid::{
     AtomisticHybridConfig, AtomisticHybridPolicy, AtomisticSystem, explore_atomistic_with_policy,
 };
 use anneal_core::catalog::lj;
+use anneal_core::descriptor_space::DescriptorSpace;
 use anneal_core::methods::cluster_hopping::{
     Config as HoppingConfig, ContinuousSymmetry, Ledger, MoveLibrary, Outcome, random_cluster, run,
     run_with_gradient,
 };
 use anneal_core::methods::cluster_search::{Encounter, first_encounter, median_encounter};
 use anneal_core::methods::minima_hopping::{
-    EscapeFeedback, MdEscapeConfig, MdEscapeGeometry, MdTimeStepFeedback, Visit, nve_escape,
+    EscapeFeedback, HistoryObservation, MdEscapeConfig, MdEscapeGeometry, MdTimeStepFeedback,
+    MinimumHistory, Visit, nve_escape,
 };
 use anneal_core::methods::warm_lbfgs::WarmLbfgs;
 use anneal_core::pes_exploration::{
-    ExactStructureWitness, IrcKind, PesExplorationConfig, RideMethod,
+    ExactStructureWitness, IrcKind, PesExplorationConfig, RideMethod, StructureContext,
 };
 use anneal_core::potentials::{PairKind, PairPotential};
 use anneal_core::shape::IraStructureWitness;
@@ -115,6 +120,8 @@ struct MinimaHoppingRun {
     dynamics_steps: usize,
     proposal_quench_calls: usize,
     final_time_step: f64,
+    history_seconds: f64,
+    aggregate_improvements: Vec<(usize, f64)>,
 }
 
 fn reference(n: usize) -> Option<f64> {
@@ -283,6 +290,21 @@ fn run_hopping(
     }
 }
 
+fn charged_evaluate(
+    potential: &PairPotential,
+    ledger: &mut Ledger,
+    point: ArrayView1<'_, f64>,
+    charged: Option<&AtomicUsize>,
+) -> Option<(f64, ndarray::Array1<f64>)> {
+    if !ledger.charge() {
+        return None;
+    }
+    if let Some(charged) = charged {
+        charged.fetch_add(1, Ordering::SeqCst);
+    }
+    Some(potential.value_and_gradient(point))
+}
+
 fn quench_minimum(
     potential: &PairPotential,
     optimizer: &mut WarmLbfgs,
@@ -290,6 +312,7 @@ fn quench_minimum(
     start: ArrayView1<'_, f64>,
     steps: usize,
     gradient_tolerance: f64,
+    charged: Option<&AtomicUsize>,
 ) -> Option<(f64, ndarray::Array1<f64>, bool)> {
     if ledger.remaining() == 0 {
         return None;
@@ -298,11 +321,13 @@ fn quench_minimum(
     optimizer.forget();
     let (_, state, _) = optimizer.minimize(start, steps, |point| {
         // A line search cannot consume the final minimum-certificate call.
-        (ledger.remaining() > 1 && ledger.charge()).then(|| potential.value_and_gradient(point))
+        if ledger.remaining() > 1 {
+            charged_evaluate(potential, ledger, point, charged)
+        } else {
+            None
+        }
     });
-    let final_evaluation = ledger
-        .charge()
-        .then(|| potential.value_and_gradient(state.view()));
+    let final_evaluation = charged_evaluate(potential, ledger, state.view(), charged);
     let (energy, gradient) = final_evaluation
         .map_or((f64::INFINITY, None), |(energy, gradient)| {
             (energy, Some(gradient))
@@ -337,6 +362,28 @@ struct MinimaHoppingOptions {
     bound_escape: bool,
 }
 
+struct HistoryRunOptions<'a> {
+    moves: MinimaHoppingOptions,
+    history: Option<&'a Mutex<MinimumHistory>>,
+    charged: Option<&'a AtomicUsize>,
+}
+
+fn observe_history(
+    history: &Mutex<MinimumHistory>,
+    ledger: &Ledger,
+    descriptor: &DescriptorSpace,
+    context: &StructureContext,
+    witness: &impl ExactStructureWitness,
+) -> Result<HistoryObservation, String> {
+    let minimum = ledger.quench_boundaries().last().ok_or("missing quench certificate")?;
+    let description = descriptor
+        .describe(minimum.state(), context.species())
+        .map_err(|error| error.to_string())?;
+    history.lock().map_err(|_| "minimum history lock poisoned".to_string())?
+        .observe(minimum, description, context.clone(), witness)
+        .map_err(|error| error.to_string())
+}
+
 fn run_minima_hopping(
     potential: &PairPotential,
     initial: ArrayView1<'_, f64>,
@@ -346,6 +393,22 @@ fn run_minima_hopping(
     witness: &impl ExactStructureWitness,
     options: MinimaHoppingOptions,
 ) -> MinimaHoppingRun {
+    run_minima_hopping_with_history(
+        potential, initial, n, budget, seed, witness,
+        HistoryRunOptions { moves: options, history: None, charged: None },
+    ).expect("private minima hopping has no fallible history service")
+}
+
+fn run_minima_hopping_with_history(
+    potential: &PairPotential,
+    initial: ArrayView1<'_, f64>,
+    n: usize,
+    budget: usize,
+    seed: u64,
+    witness: &impl ExactStructureWitness,
+    options: HistoryRunOptions<'_>,
+) -> Result<MinimaHoppingRun, String> {
+    let HistoryRunOptions { moves: options, history, charged } = options;
     let hopping = HoppingConfig::for_cluster(n);
     let escape_config = MdEscapeConfig {
         dt: 0.005,
@@ -373,10 +436,11 @@ fn run_minima_hopping(
         initial,
         initial_quench_steps,
         hopping.record_gradient,
+        charged,
     );
     let initial_quench_calls = ledger.spent().saturating_sub(initial_quench_start);
     let Some((mut energy, mut state, initial_valid)) = initial else {
-        return MinimaHoppingRun {
+        return Ok(MinimaHoppingRun {
             outcome: Outcome {
                 best: ledger.best,
                 best_state: ledger.best_state.clone(),
@@ -389,10 +453,12 @@ fn run_minima_hopping(
             dynamics_steps: 0,
             proposal_quench_calls: 0,
             final_time_step: escape_config.dt,
-        };
+            history_seconds: 0.0,
+            aggregate_improvements: Vec::new(),
+        });
     };
     if !initial_valid {
-        return MinimaHoppingRun {
+        return Ok(MinimaHoppingRun {
             outcome: Outcome {
                 best: ledger.best,
                 best_state: ledger.best_state.clone(),
@@ -407,12 +473,25 @@ fn run_minima_hopping(
             dynamics_steps: 0,
             proposal_quench_calls: 0,
             final_time_step: escape_config.dt,
-        };
+            history_seconds: 0.0,
+            aggregate_improvements: Vec::new(),
+        });
     }
 
     ledger.record(energy, state.view());
     let mut minima = vec![state.clone()];
-    let mut current_basin = 0usize;
+    let history_start = Instant::now();
+    let descriptor = history.map(|_| lj::descriptor_space());
+    let context = StructureContext::new(
+        Some(vec![18; n]), None, Some(format!("lj-reduced-n{n}")),
+    );
+    let mut current_basin = if let (Some(history), Some(descriptor)) = (history, &descriptor) {
+        observe_history(history, &ledger, descriptor, &context, witness)?.minimum.id
+    } else {
+        0
+    };
+    let mut history_seconds = history_start.elapsed().as_secs_f64();
+    let mut local_basins = HashSet::from([current_basin]);
     let mut feedback = EscapeFeedback::new(hopping.energy_scale, 0.5 * hopping.energy_scale);
     if !options.bound_escape {
         feedback.escape_floor = f64::MIN_POSITIVE;
@@ -428,6 +507,9 @@ fn run_minima_hopping(
     let mut dynamics_steps = 0usize;
     let mut proposal_quench_calls = 0usize;
     let mut improvements = vec![(0, ledger.spent(), minima.len(), energy)];
+    let mut aggregate_improvements = vec![(
+        charged.map_or(ledger.spent(), |counter| counter.load(Ordering::SeqCst)), energy,
+    )];
 
     while ledger.remaining() > 0 {
         let mut attempt_config = escape_config;
@@ -435,7 +517,7 @@ fn run_minima_hopping(
         let dynamics_start = ledger.spent();
         let escape = {
             let mut evaluate = |point: ArrayView1<f64>| {
-                ledger.charge().then(|| potential.value_and_gradient(point))
+                charged_evaluate(potential, &mut ledger, point, charged)
             };
             nve_escape(
                 state.view(),
@@ -469,6 +551,7 @@ fn run_minima_hopping(
             escape.position.view(),
             hopping.relax_steps,
             hopping.record_gradient,
+            charged,
         );
         proposal_quench_calls += ledger.spent().saturating_sub(proposal_quench_start);
         let Some((candidate_energy, candidate, validated)) = quenched else {
@@ -480,19 +563,39 @@ fn run_minima_hopping(
             continue;
         }
 
-        if let Some(reached) = exact_basin(witness, &minima, candidate.view()) {
-            feedback.observe(Some(current_basin), reached);
-            continue;
-        }
-
-        let reached = minima.len();
-        minima.push(candidate.clone());
-        let visit = feedback.observe(Some(current_basin), reached);
-        debug_assert_eq!(visit, Visit::New);
+        let history_start = Instant::now();
+        let (reached, visit) = if let (Some(history), Some(descriptor)) = (history, &descriptor) {
+            let observation = observe_history(history, &ledger, descriptor, &context, witness)?;
+            let reached = observation.minimum.id;
+            if local_basins.insert(reached) {
+                minima.push(candidate.clone());
+            }
+            let visit = feedback.observe_shared(
+                Some(current_basin), reached, observation.minimum.is_new, observation.visits,
+            );
+            (reached, visit)
+        } else {
+            if let Some(reached) = exact_basin(witness, &minima, candidate.view()) {
+                history_seconds += history_start.elapsed().as_secs_f64();
+                feedback.observe(Some(current_basin), reached);
+                continue;
+            }
+            let reached = minima.len();
+            minima.push(candidate.clone());
+            (reached, feedback.observe(Some(current_basin), reached))
+        };
+        history_seconds += history_start.elapsed().as_secs_f64();
         let improved = candidate_energy < ledger.best;
         ledger.record(candidate_energy, candidate.view());
         if improved {
             improvements.push((hops, ledger.spent(), minima.len(), candidate_energy));
+            aggregate_improvements.push((
+                charged.map_or(ledger.spent(), |counter| counter.load(Ordering::SeqCst)),
+                candidate_energy,
+            ));
+        }
+        if visit != Visit::New {
+            continue;
         }
         if feedback.accept(candidate_energy - energy) {
             current_basin = reached;
@@ -502,7 +605,7 @@ fn run_minima_hopping(
         }
     }
 
-    MinimaHoppingRun {
+    Ok(MinimaHoppingRun {
         outcome: Outcome {
             best: ledger.best,
             best_state: ledger.best_state.clone(),
@@ -524,7 +627,9 @@ fn run_minima_hopping(
         dynamics_steps,
         proposal_quench_calls,
         final_time_step: time_step.time_step(),
-    }
+        history_seconds,
+        aggregate_improvements,
+    })
 }
 
 fn wilson_interval(hits: usize, total: usize) -> (f64, f64) {
@@ -867,6 +972,8 @@ fn main() -> Result<(), Box<dyn Error>> {
                             "dynamics_steps": run.dynamics_steps,
                             "proposal_quench_calls": run.proposal_quench_calls,
                             "final_time_step": run.final_time_step,
+                            "history_seconds": run.history_seconds,
+                            "aggregate_improvements": run.aggregate_improvements,
                         });
                         (run.outcome, Some(work))
                     } else {
