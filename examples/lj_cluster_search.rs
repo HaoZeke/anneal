@@ -2052,6 +2052,7 @@ fn main() {
         });
         let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, iters: usize| {
             let charged_before = led.spent();
+            let diagnostic = led.is_diagnostic_quench();
             // Curvature is not carried between relaxations: measured on this
             // problem, retaining it across a structural change costs more than
             // it saves.
@@ -2065,7 +2066,7 @@ fn main() {
             // the escape controller, where 94 relaxations in 3148 reached a
             // minimum and the curvature it steered by came back negative at a
             // point being treated as one.
-            if early_stop && iters <= screen_steps {
+            if !diagnostic && early_stop && iters <= screen_steps {
                 let mut term = Terminator::default();
                 let mut cur = x.to_owned();
                 let mut f = f64::INFINITY;
@@ -2093,12 +2094,16 @@ fn main() {
             // whose minimum the plain relaxation below starts from.
             let compacted;
             let screening_pass = iters <= screen_steps;
-            let surface = match surfaces.as_ref() {
-                Some(portfolio) => portfolio
-                    .lock()
-                    .expect("surface portfolio")
-                    .begin(screening_pass),
-                None => two_phase,
+            let surface = if diagnostic {
+                None
+            } else {
+                match surfaces.as_ref() {
+                    Some(portfolio) => portfolio
+                        .lock()
+                        .expect("surface portfolio")
+                        .begin(screening_pass),
+                    None => two_phase,
+                }
             };
             let x = match surface {
                 Some(two) => {
@@ -2121,16 +2126,16 @@ fn main() {
                 }
                 None => x,
             };
-            let (f, xr, _) = if anneal_core::known_basin::is_armed() {
+            let (f, xr, _) = if !diagnostic && anneal_core::known_basin::is_armed() {
                 let (f, xr) =
                     anneal_core::known_basin::step_rgmin(&mut opt, x, iters, |v| charged(led, v));
                 (f, xr, 0)
-            } else if noise_eta > 0.0 && iters <= screen_steps {
+            } else if !diagnostic && noise_eta > 0.0 && iters <= screen_steps {
                 opt.minimize(x, iters, |v| charged_noisy(led, v, noise_eta, &mut qrng))
             } else {
                 opt.minimize(x, iters, |v| charged(led, v))
             };
-            if let Some(portfolio) = surfaces.as_ref() {
+            if !diagnostic && let Some(portfolio) = surfaces.as_ref() {
                 portfolio
                     .lock()
                     .expect("surface portfolio")
