@@ -26,15 +26,15 @@ use rand::SeedableRng;
 use rand::rngs::StdRng;
 use serde::Serialize;
 
-use crate::allocate::DepthAllocator;
+use crate::allocate::{DepthAllocator, RewardMoments};
+use crate::surface_evidence::SurfaceReport;
 
 /// A surface allocator posterior several chains update together.
 ///
 /// Pooled evidence is the cooperative channel that never touches a walk:
 /// every chain draws its arm from the same Normal-Gamma posterior and
-/// credits its block back to it, so an ensemble of `n` chains learns which
-/// surface pays `n` times faster than one chain does, and no chain is
-/// steered, relocated or interrupted to get that.
+/// credits its block back to it. Independent draws preserve distinct walks;
+/// sharing evidence does not relocate a chain or guarantee a discovery gain.
 pub type SharedSurfaceAllocator = Arc<Mutex<DepthAllocator>>;
 
 /// A fresh shared posterior over the plain surface plus `transforms`.
@@ -452,11 +452,15 @@ pub fn penalty_groups(
 /// surface and a walk on the plain one visit different minima, and
 /// alternating them every hop is a walk on neither. A screening relaxation
 /// opens a hop; every `block` hops the arm is redrawn, and the block's reward
-/// is the energy its walk took off the run's best, zero when it took none.
+/// is the signed gap between the entering incumbent and the block's lowest
+/// energy. A block that cannot reach the incumbent receives negative credit.
 #[derive(Debug, Clone)]
 pub struct SurfacePortfolio {
     arms: Vec<Option<TwoPhase>>,
     allocator: DepthAllocator,
+    own_moments: Vec<RewardMoments>,
+    peer_moments: Option<Vec<RewardMoments>>,
+    evidence_schema: String,
     /// When set, draws and credits go through this posterior instead of
     /// the private one, which then only mirrors this chain's own draws.
     shared: Option<SharedSurfaceAllocator>,
@@ -489,12 +493,26 @@ impl SurfacePortfolio {
                 .filter(|two| two.is_active())
                 .map(Some),
         );
+        let block = block.max(1);
+        // Bit patterns keep every transform parameter distinct, including
+        // invalid floating-point inputs that a text serializer maps to null.
+        let parameters = arms.iter().map(|arm| arm.map(|two| {
+            let cutoff = match two.cutoff {
+                Cutoff::Fixed(value) => (0, value.to_bits()),
+                Cutoff::Relative(value) => (1, value.to_bits()),
+            };
+            (cutoff, two.beta.to_bits(), two.mu.to_bits(), two.anisotropic)
+        })).collect::<Vec<_>>();
+        let evidence_schema = format!("surface-depth-v1/{block}/{parameters:?}");
         Self {
             allocator: DepthAllocator::new(arms.len()),
+            own_moments: vec![RewardMoments::default(); arms.len()],
+            peer_moments: None,
+            evidence_schema,
             arms,
             shared: None,
             held: None,
-            block: block.max(1),
+            block,
             hops_in_block: 0,
             block_start_best: f64::INFINITY,
             latest_best: f64::INFINITY,
@@ -505,6 +523,7 @@ impl SurfacePortfolio {
 
     /// Draw from and credit a posterior shared with other chains.
     pub fn sharing(mut self, shared: SharedSurfaceAllocator) -> Self {
+        assert!(self.peer_moments.is_none(), "surface evidence has one sharing transport");
         let arms = shared.lock().expect("shared surface allocator").arms();
         assert_eq!(
             arms,
@@ -516,6 +535,12 @@ impl SurfacePortfolio {
     }
 
     fn select_arm(&mut self) -> usize {
+        if let Some(peers) = self.peer_moments.as_ref() {
+            let moments = self.own_moments.iter().zip(peers).map(|(own, peer)| own.merge(*peer)).collect::<Result<Vec<_>, _>>();
+            if let Ok(allocator) = moments.and_then(|moments| DepthAllocator::from_moments(&moments)) {
+                return allocator.select(&mut self.rng);
+            }
+        }
         match self.shared.as_ref() {
             Some(shared) => shared
                 .lock()
@@ -526,6 +551,9 @@ impl SurfacePortfolio {
     }
 
     fn credit_arm(&mut self, arm: usize, reward: f64) {
+        if self.own_moments[arm].observe(reward).is_err() {
+            return;
+        }
         if let Some(shared) = self.shared.as_ref() {
             shared
                 .lock()
@@ -533,6 +561,23 @@ impl SurfacePortfolio {
                 .update(arm, reward);
         }
         self.allocator.update(arm, reward);
+    }
+
+    /// Cumulative observations produced by this chain, excluding every import.
+    pub fn report(&self) -> SurfaceReport {
+        SurfaceReport { schema: self.evidence_schema.clone(), arms: self.own_moments.clone() }
+    }
+
+    /// Replace peer evidence without changing the held arm, local history, or RNG.
+    pub fn import_peers(&mut self, report: SurfaceReport) -> Result<(), &'static str> {
+        report.validate()?;
+        if self.shared.is_some() || report.schema != self.evidence_schema || report.arms.len() != self.arms.len() {
+            return Err("incompatible surface evidence");
+        }
+        let aggregate = self.own_moments.iter().zip(&report.arms).map(|(own, peer)| own.merge(*peer)).collect::<Result<Vec<_>, _>>()?;
+        DepthAllocator::from_moments(&aggregate)?;
+        self.peer_moments = Some(report.arms);
+        Ok(())
     }
 
     /// The surface for the relaxation about to start.
