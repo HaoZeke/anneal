@@ -79,7 +79,7 @@ pub struct QuenchBoundary {
     gradient: Option<Array1<f64>>,
 }
 
-/// One state-changing perturb--quench step taken by the live chain.
+/// One perturb--quench outcome from the live chain or a diagnostic probe.
 ///
 /// The record is deliberately separate from the best-minimum ledger. Funnel
 /// entry commonly requires accepted uphill motion, so a history containing
@@ -93,7 +93,7 @@ pub struct AcceptedTransition {
     pub action: String,
     /// Quenched energy at the source occupied by the chain.
     pub from_energy: f64,
-    /// Quenched energy adopted by the chain.
+    /// Trial energy; non-finite when a diagnostic quench fails.
     pub to_energy: f64,
     /// Quenched source coordinates.
     pub from_state: Array1<f64>,
@@ -1829,6 +1829,22 @@ where
                 } else if adopt {
                     unconverged_records += 1;
                     bias.deposit(x.view(), cfg.temperature);
+                } else {
+                    // Failed diagnostics are part of the probe denominator.
+                    // They carry no validated destination and cannot move the
+                    // live chain or certify that its region is exhausted.
+                    accepted_transitions.push(AcceptedTransition {
+                        hop: hops,
+                        action,
+                        from_energy,
+                        to_energy: proposal_energy,
+                        from_state,
+                        from_gradient,
+                        to_state: proposal_state,
+                        to_gradient: validation_gradient,
+                        validated: false,
+                        adopted: false,
+                    });
                 }
             }
         }
