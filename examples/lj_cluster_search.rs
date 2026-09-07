@@ -3662,6 +3662,33 @@ fn complete_checkpoint_trace<T>(
 
 /// One independently budgeted LJ replica against an isolated descriptor catalog.
 #[cfg(feature = "bank-rpc")]
+/// Counts which phase of the cooperative checkpoint took each checkpoint.
+///
+/// The closure returns from a dozen places (probe, core-class restart,
+/// ride, population barrier, hear, invert, leave gate, policy, jump, the
+/// decision itself); a phase with zero firings over a run is inert, which
+/// is what every mechanism that "did nothing" turned out to be. The tally
+/// is printed on the seed record; a smoke run that expects a mechanism
+/// asserts its count is positive.
+#[derive(Default)]
+struct PhaseTally {
+    counts: std::collections::BTreeMap<&'static str, usize>,
+}
+
+impl PhaseTally {
+    fn fire(&mut self, phase: &'static str) {
+        *self.counts.entry(phase).or_insert(0) += 1;
+    }
+
+    fn report(&self) -> String {
+        self.counts
+            .iter()
+            .map(|(phase, count)| format!("{phase}={count}"))
+            .collect::<Vec<_>>()
+            .join(" ")
+    }
+}
+
 fn run_capnp_catalog(
     cfg: &Config,
     ledger: &mut Ledger,
@@ -4344,6 +4371,9 @@ fn run_capnp_catalog(
     let mut gossip_published = 0usize;
     let mut gossip_merged = 0usize;
     let mut gossip_merge: Option<CheckpointAction> = None;
+    // Which phase took each checkpoint; printed on the seed record so a
+    // mechanism that never fires is visible as zero rather than assumed.
+    let mut phases = PhaseTally::default();
     let mut checkpoint = |snapshot: ChainCheckpoint<'_>| {
         let action = with_pending_deposits(
             &mut pending_deposits,
@@ -4363,6 +4393,7 @@ fn run_capnp_catalog(
                             .expect("evidence-only work must enter the cooperative ledger");
                     }
                     last_charged = snapshot.charged();
+                    phases.fire("continue");
                     return CheckpointAction::Continue;
                 }
                 checkpoint_sequence = checkpoint_sequence
@@ -4628,6 +4659,107 @@ fn run_capnp_catalog(
                     let _ = cooperative.post_offer_candidate(replica, candidate.clone());
                 }
 
+                // Bookkeeping and the position report run on every checkpoint,
+                // before any phase that can take the checkpoint: a probe, a ride or
+                // a hear must not silence the stall clock or the census position.
+                let local_deepened = snapshot.best_energy() < best_at_checkpoint - 1e-10;
+                if local_deepened {
+                    best_at_checkpoint = snapshot.best_energy();
+                    stall = 0;
+                    let jump = announced_personal
+                        .is_none_or(|previous| snapshot.best_energy() < previous - 1e-3);
+                    if jump {
+                        println!(
+                            "  personal best {:.6}  hops {}  refs {}  leaves {} other {} walk {} hole {}",
+                            snapshot.best_energy(),
+                            snapshot.hops(),
+                            // Packings this chain's quench is repelled from. Own
+                            // history plus every structure the coordinator has
+                            // handed over, which is the interaction at the
+                            // minimisation level and the thing chain count is
+                            // supposed to scale.
+                            anneal_core::catalog::packing_references().len(),
+                            count_leave,
+                            count_other_family,
+                            count_walk,
+                            count_hole
+                        );
+                        let _ = std::io::stdout().flush();
+                        announced_personal = Some(snapshot.best_energy());
+                    }
+                } else {
+                    stall = stall.saturating_add(1);
+                }
+                if snapshot.hops() > 0 && snapshot.hops().is_multiple_of(500) {
+                    println!(
+                        "  occupancy hops {} best {:.6} refs {} leaves {} other {} walk {} hole {}",
+                        snapshot.hops(),
+                        snapshot.best_energy(),
+                        anneal_core::catalog::packing_references().len(),
+                        count_leave,
+                        count_other_family,
+                        count_walk,
+                        count_hole
+                    );
+                    let _ = std::io::stdout().flush();
+                }
+                if !announced_score
+                    && published_energy_score(snapshot.best_energy(), reference(cfg.n_points))
+                {
+                    println!(
+                        "  score {:.6}  hops {}",
+                        snapshot.best_energy(),
+                        snapshot.hops()
+                    );
+                    if cfg.n_points == 75 {
+                        println!(
+                            "  Marks {:.6}  hops {}",
+                            snapshot.best_energy(),
+                            snapshot.hops()
+                        );
+                    }
+                    let _ = std::io::stdout().flush();
+                    announced_score = true;
+                }
+                // Conversation is not identity. A position report every checkpoint
+                // is how the chains talk: the descriptor of wherever the chain
+                // stands, mid-hop or not, asked against the census the validated
+                // registrations have built, with no purity gate, because reporting
+                // a position claims nothing about minimality. The identity tier,
+                // the census and catalog entries themselves, stays fed exclusively
+                // by share-grade validated states through the offer loop above.
+                let _ = freshest_boundary;
+                candidate_sequence = candidate_sequence
+                    .checked_add(1)
+                    .expect("candidate sequence must fit u64");
+                cooperative
+                    .record_work(replica, ChargeKind::DescriptorEvaluation, 0)
+                    .expect("current descriptor work must enter the cooperative ledger");
+                let Ok(position) = descriptor_space
+                    .describe(snapshot.current_state(), Some(&signature.atomic_numbers))
+                else {
+                    phases.fire("continue");
+                    return complete_checkpoint_trace(
+                        &mut cooperative,
+                        replica,
+                        &mut slice_sequence,
+                        checkpoint_charged,
+                        snapshot.best_energy(),
+                        |_cooperative, _slice_sequence| CheckpointAction::Continue,
+                    );
+                };
+                let descriptor = position.values().to_vec();
+                #[cfg(feature = "bank-rpc")]
+                let decree_assignment = decree_slot
+                    .try_lock()
+                    .ok()
+                    .and_then(|held| held.clone())
+                    .and_then(|decree| {
+                        decree
+                            .assignments
+                            .into_iter()
+                            .find(|assignment| assignment.replica == replica)
+                    });
                 // Due probes wait for a validated origin and precede adaptive
                 // checkpoint actions. Their unresolved outcomes remain observations,
                 // not reasons to change the declared perturb-quench kernel.
@@ -4638,6 +4770,7 @@ fn run_capnp_catalog(
                         fixed_probe_trial(snapshot.current_state(), probe_scale, &mut probe_rng)
                 {
                     probe_due = false;
+                    phases.fire("probe");
                     return complete_checkpoint_trace(
                         &mut cooperative,
                         replica,
@@ -4668,6 +4801,7 @@ fn run_capnp_catalog(
                         );
                         let fresh =
                             random_cluster(cfg.n_points, 0.7, cfg.min_separation, &mut adopt_rng);
+                        phases.fire("coreclass");
                         return complete_checkpoint_trace(
                             &mut cooperative,
                             replica,
@@ -4835,68 +4969,10 @@ fn run_capnp_catalog(
                             },
                         )
                         .expect("ride checkpoint trace must remain complete");
+                    phases.fire("ride");
                     return ride_checkpoint_action(report_outcome, destination, producer_calls);
                 }
 
-                let local_deepened = snapshot.best_energy() < best_at_checkpoint - 1e-10;
-                if local_deepened {
-                    best_at_checkpoint = snapshot.best_energy();
-                    stall = 0;
-                    let jump = announced_personal
-                        .is_none_or(|previous| snapshot.best_energy() < previous - 1e-3);
-                    if jump {
-                        println!(
-                            "  personal best {:.6}  hops {}  refs {}  leaves {} other {} walk {} hole {}",
-                            snapshot.best_energy(),
-                            snapshot.hops(),
-                            // Packings this chain's quench is repelled from. Own
-                            // history plus every structure the coordinator has
-                            // handed over, which is the interaction at the
-                            // minimisation level and the thing chain count is
-                            // supposed to scale.
-                            anneal_core::catalog::packing_references().len(),
-                            count_leave,
-                            count_other_family,
-                            count_walk,
-                            count_hole
-                        );
-                        let _ = std::io::stdout().flush();
-                        announced_personal = Some(snapshot.best_energy());
-                    }
-                } else {
-                    stall = stall.saturating_add(1);
-                }
-                if snapshot.hops() > 0 && snapshot.hops().is_multiple_of(500) {
-                    println!(
-                        "  occupancy hops {} best {:.6} refs {} leaves {} other {} walk {} hole {}",
-                        snapshot.hops(),
-                        snapshot.best_energy(),
-                        anneal_core::catalog::packing_references().len(),
-                        count_leave,
-                        count_other_family,
-                        count_walk,
-                        count_hole
-                    );
-                    let _ = std::io::stdout().flush();
-                }
-                if !announced_score
-                    && published_energy_score(snapshot.best_energy(), reference(cfg.n_points))
-                {
-                    println!(
-                        "  score {:.6}  hops {}",
-                        snapshot.best_energy(),
-                        snapshot.hops()
-                    );
-                    if cfg.n_points == 75 {
-                        println!(
-                            "  Marks {:.6}  hops {}",
-                            snapshot.best_energy(),
-                            snapshot.hops()
-                        );
-                    }
-                    let _ = std::io::stdout().flush();
-                    announced_score = true;
-                }
                 // The population barrier is serviced before any local gate. A
                 // checkpoint often finds the chain mid-hop with nothing that passes
                 // candidate validation; that must not silence its participation and
@@ -5045,6 +5121,7 @@ fn run_capnp_catalog(
                             cooperative
                                 .record_slice(replica, reconfiguration)
                                 .expect("population checkpoint trace must remain complete");
+                            phases.fire("population_reseed");
                             return CheckpointAction::BoundaryProposal {
                                 state: left,
                                 action: "population_reseed".to_owned(),
@@ -5108,6 +5185,7 @@ fn run_capnp_catalog(
                                 cooperative
                                     .record_slice(replica, reconfiguration)
                                     .expect("population checkpoint trace must remain complete");
+                                phases.fire("population_parent");
                                 return CheckpointAction::BoundaryProposal {
                                     state,
                                     action: "population_parent".to_owned(),
@@ -5162,6 +5240,7 @@ fn run_capnp_catalog(
                             .zip(live.iter())
                             .all(|(a, b)| (a - b).abs() <= 1e-12)
                         {
+                            phases.fire("continue");
                             return complete_checkpoint_trace(
                                 &mut cooperative,
                                 replica,
@@ -5201,50 +5280,13 @@ fn run_capnp_catalog(
                         cooperative
                             .record_slice(replica, reconfiguration)
                             .expect("population checkpoint trace must remain complete");
+                        phases.fire("population_reseed");
                         return CheckpointAction::BoundaryProposal {
                             state: left,
                             action: "population_reseed".to_owned(),
                         };
                     }
                 }
-                // Conversation is not identity. A position report every checkpoint
-                // is how the chains talk: the descriptor of wherever the chain
-                // stands, mid-hop or not, asked against the census the validated
-                // registrations have built, with no purity gate, because reporting
-                // a position claims nothing about minimality. The identity tier,
-                // the census and catalog entries themselves, stays fed exclusively
-                // by share-grade validated states through the offer loop above.
-                let _ = freshest_boundary;
-                candidate_sequence = candidate_sequence
-                    .checked_add(1)
-                    .expect("candidate sequence must fit u64");
-                cooperative
-                    .record_work(replica, ChargeKind::DescriptorEvaluation, 0)
-                    .expect("current descriptor work must enter the cooperative ledger");
-                let Ok(position) = descriptor_space
-                    .describe(snapshot.current_state(), Some(&signature.atomic_numbers))
-                else {
-                    return complete_checkpoint_trace(
-                        &mut cooperative,
-                        replica,
-                        &mut slice_sequence,
-                        checkpoint_charged,
-                        snapshot.best_energy(),
-                        |_cooperative, _slice_sequence| CheckpointAction::Continue,
-                    );
-                };
-                let descriptor = position.values().to_vec();
-                #[cfg(feature = "bank-rpc")]
-                let decree_assignment = decree_slot
-                    .try_lock()
-                    .ok()
-                    .and_then(|held| held.clone())
-                    .and_then(|decree| {
-                        decree
-                            .assignments
-                            .into_iter()
-                            .find(|assignment| assignment.replica == replica)
-                    });
                 // The decree steers without touching any chain-local law: a
                 // replica under decree screens escapes more aggressively (the
                 // leader has seen a seam this chain cannot see locally), and
@@ -5382,6 +5424,7 @@ fn run_capnp_catalog(
                         count_other_family
                     );
                     let _ = std::io::stdout().flush();
+                    phases.fire("catalog_incumbent");
                     return complete_checkpoint_trace(
                         &mut cooperative,
                         replica,
@@ -5485,6 +5528,7 @@ fn run_capnp_catalog(
                             census_restarts
                         );
                         let _ = std::io::stdout().flush();
+                        phases.fire("census_restart");
                         return complete_checkpoint_trace(
                             &mut cooperative,
                             replica,
@@ -5545,6 +5589,7 @@ fn run_capnp_catalog(
                                 neighbors.len()
                             );
                             let _ = std::io::stdout().flush();
+                            phases.fire("catalog_ridge");
                             return complete_checkpoint_trace(
                                 &mut cooperative,
                                 replica,
@@ -5566,6 +5611,7 @@ fn run_capnp_catalog(
                     // measured crossing floor (LEAVE_CROSSING_HOPS). Policy
                     // RPC is the measured hop-cost gap; census still sees
                     // posted minima.
+                    phases.fire("continue");
                     return complete_checkpoint_trace(
                         &mut cooperative,
                         replica,
@@ -5609,6 +5655,7 @@ fn run_capnp_catalog(
                             .and_then(|event| event.policy)
                             .is_some_and(|policy| policy.retired)
                         {
+                            phases.fire("retire");
                             return complete_checkpoint_trace(
                                 &mut cooperative,
                                 replica,
@@ -5625,6 +5672,7 @@ fn run_capnp_catalog(
                     PolicyEvidenceOutcome::Rejected
                     | PolicyEvidenceOutcome::LocalFallback
                     | PolicyEvidenceOutcome::SharingDisabled => {
+                        phases.fire("continue");
                         return complete_checkpoint_trace(
                             &mut cooperative,
                             replica,
@@ -5680,6 +5728,7 @@ fn run_capnp_catalog(
                             snapshot.best_energy(),
                             |_cooperative, _slice_sequence| (),
                         );
+                        phases.fire("retire");
                         return CheckpointAction::Retire {
                             reason: certificate.as_str().to_owned(),
                         };
@@ -5772,6 +5821,7 @@ fn run_capnp_catalog(
                         census_jumps
                     );
                     let _ = std::io::stdout().flush();
+                    phases.fire("census_jump");
                     return complete_checkpoint_trace(
                         &mut cooperative,
                         replica,
@@ -5817,6 +5867,7 @@ fn run_capnp_catalog(
                     cooperative
                         .record_slice(replica, trace)
                         .expect("terminal checkpoint trace must remain complete");
+                    phases.fire("continue");
                     return CheckpointAction::Continue;
                 }
                 match decree_anchor_action(
@@ -5863,6 +5914,7 @@ fn run_capnp_catalog(
                             cooperative
                                 .record_slice(replica, trace)
                                 .expect("seam-anchor checkpoint trace must remain complete");
+                            phases.fire("spectral_anchor");
                             return CheckpointAction::BoundaryProposal {
                                 state: Array1::from(candidate.coordinates),
                                 action: "spectral_anchor".to_owned(),
@@ -5928,6 +5980,7 @@ fn run_capnp_catalog(
                             // and no exploration, which the paired smokes
                             // measured as bit-identical endpoints at every
                             // gate setting.
+                            phases.fire("histo");
                             return CheckpointAction::BoundaryProposal {
                                 state: candidate,
                                 action: "histo".to_owned(),
@@ -5959,6 +6012,7 @@ fn run_capnp_catalog(
                             cooperative
                                 .record_slice(replica, trace)
                                 .expect("md checkpoint trace must remain complete");
+                            phases.fire("externalproposal");
                             return CheckpointAction::ExternalProposal {
                                 state,
                                 action: format!("md_{}", engine.name()),
@@ -5988,6 +6042,7 @@ fn run_capnp_catalog(
                         cooperative
                             .record_slice(replica, trace)
                             .expect("bridge checkpoint trace must remain complete");
+                        phases.fire("bridge");
                         return CheckpointAction::ProbeProposal {
                             state: Array1::from(state),
                             action: "bridge".to_owned(),
@@ -6050,6 +6105,7 @@ fn run_capnp_catalog(
                                 cooperative
                                     .record_slice(replica, trace)
                                     .expect("checkpoint trace must remain complete");
+                                phases.fire("catalog_incumbent");
                                 return CheckpointAction::BoundaryProposal {
                                     state: Array1::from(candidate.coordinates),
                                     action: "catalog_incumbent".to_owned(),
@@ -6073,6 +6129,7 @@ fn run_capnp_catalog(
                             cooperative
                                 .record_slice(replica, trace)
                                 .expect("checkpoint trace must remain complete");
+                            phases.fire("continue");
                             return CheckpointAction::Continue;
                         }
                         // Did the last Leave install anything? The anchor is the
@@ -6102,6 +6159,7 @@ fn run_capnp_catalog(
                             cooperative
                                 .record_slice(replica, trace)
                                 .expect("checkpoint trace must remain complete");
+                            phases.fire("continue");
                             return CheckpointAction::Continue;
                         }
                         // Chains interact during minimisation only through the
@@ -6187,6 +6245,7 @@ fn run_capnp_catalog(
                                 cooperative
                                     .record_slice(replica, trace)
                                     .expect("checkpoint trace must remain complete");
+                                phases.fire("hyperband_reseed");
                                 return CheckpointAction::BoundaryProposal {
                                     state,
                                     action: "hyperband_reseed".to_owned(),
@@ -6259,6 +6318,7 @@ fn run_capnp_catalog(
                                 cooperative
                                     .record_slice(replica, trace)
                                     .expect("checkpoint trace must remain complete");
+                                phases.fire("continue");
                                 return CheckpointAction::Continue;
                             }
                             OccupancyLeaveTarget::Ridge => {
@@ -6268,6 +6328,7 @@ fn run_capnp_catalog(
                                     cooperative
                                         .record_slice(replica, trace)
                                         .expect("checkpoint trace must remain complete");
+                                    phases.fire("catalog_ridge");
                                     return CheckpointAction::Continue;
                                 }
                                 count_hole += 1;
@@ -6277,6 +6338,7 @@ fn run_capnp_catalog(
                                 cooperative
                                     .record_slice(replica, trace)
                                     .expect("checkpoint trace must remain complete");
+                                phases.fire("catalog_ridge");
                                 return CheckpointAction::BoundaryProposal {
                                     state: snapshot.current_state().to_owned(),
                                     action: "catalog_ridge".to_owned(),
@@ -6294,6 +6356,7 @@ fn run_capnp_catalog(
                                 cooperative
                                     .record_slice(replica, trace)
                                     .expect("checkpoint trace must remain complete");
+                                phases.fire("catalog_leave");
                                 return CheckpointAction::BoundaryProposal {
                                     state: Array1::from(sparse.coordinates.clone()),
                                     action: "catalog_leave".to_owned(),
@@ -6338,6 +6401,7 @@ fn run_capnp_catalog(
                                     cooperative
                                         .record_slice(replica, trace)
                                         .expect("checkpoint trace must remain complete");
+                                    phases.fire("catalog_leave");
                                     return CheckpointAction::BoundaryProposal {
                                         state: left,
                                         action: "catalog_leave".to_owned(),
@@ -6382,6 +6446,7 @@ fn run_capnp_catalog(
                                 cooperative
                                     .record_slice(replica, trace)
                                     .expect("checkpoint trace must remain complete");
+                                phases.fire("catalog_explore");
                                 return CheckpointAction::BoundaryProposal {
                                     state: left,
                                     action: "catalog_explore".to_owned(),
@@ -6415,6 +6480,7 @@ fn run_capnp_catalog(
         checkpoint_interval,
         &mut checkpoint,
     );
+    println!("  checkpoint phases {}", phases.report());
     if evidence_only && let Some(charged) = unsettled_objective_calls(ledger.spent(), last_charged)
     {
         cooperative
