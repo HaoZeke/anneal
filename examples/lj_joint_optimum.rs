@@ -1141,6 +1141,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                                 "replica": replica, "seed": ensemble.seeds[replica],
                                 "budget": ensemble.budgets[replica], "charged": run.outcome.charged,
                                 "best_energy": run.outcome.best, "hops": run.outcome.hops,
+                                "best_coordinates": run.outcome.best_state.as_ref().map(|state| state.to_vec()),
                                 "minima": run.outcome.basins, "accepted": run.outcome.accepted,
                                 "visit_counts": run.outcome.visit_counts,
                                 "failed_actions": run.outcome.unconverged_records,
