@@ -72,6 +72,14 @@ enum Arm {
 }
 
 impl Arm {
+    fn label_with_history(self, policy: HistoryExclusion) -> String {
+        if matches!(self, Self::MinimaHoppingEnsemble { .. }) && policy == HistoryExclusion::Observed {
+            format!("{}-observed-exclusion", self.label())
+        } else {
+            self.label()
+        }
+    }
+
     fn label(self) -> String {
         match self {
             Self::Adaptive(kind) => format!("adaptive-{}", irc_name(kind)),
@@ -398,6 +406,52 @@ struct HistoryRunOptions<'a> {
     charged: Option<&'a AtomicUsize>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum HistoryExclusion {
+    Accepted,
+    Observed,
+}
+
+impl HistoryExclusion {
+    fn name(self) -> &'static str {
+        match self {
+            Self::Accepted => "accepted",
+            Self::Observed => "observed-exclusion",
+        }
+    }
+}
+
+fn parse_history_exclusion(value: Option<&str>) -> Result<HistoryExclusion, String> {
+    match value {
+        None | Some("accepted") => Ok(HistoryExclusion::Accepted),
+        Some("observed-exclusion") => Ok(HistoryExclusion::Observed),
+        Some(other) => Err(format!("invalid NVE history policy {other:?}; expected accepted or observed-exclusion")),
+    }
+}
+
+struct HistoryPolicy<T> {
+    options: T,
+    exclusion: HistoryExclusion,
+}
+
+impl<T> From<T> for HistoryPolicy<T> {
+    fn from(options: T) -> Self {
+        Self { options, exclusion: HistoryExclusion::Accepted }
+    }
+}
+
+fn history_feedback_membership(
+    policy: HistoryExclusion,
+    first_observation: bool,
+    observed_visits: u64,
+    accepted_visits: u64,
+) -> (bool, u64) {
+    match policy {
+        HistoryExclusion::Accepted => (accepted_visits == 0, accepted_visits),
+        HistoryExclusion::Observed => (first_observation, observed_visits),
+    }
+}
+
 fn observe_history<T>(
     history: &Mutex<MinimumHistory>,
     ledger: &Ledger,
@@ -448,15 +502,16 @@ fn run_minima_hopping(
     .expect("private minima hopping has no fallible history service")
 }
 
-fn run_minima_hopping_with_history(
+fn run_minima_hopping_with_history<'a>(
     potential: &PairPotential,
     initial: ArrayView1<'_, f64>,
     n: usize,
     budget: usize,
     seed: u64,
     witness: &impl ExactStructureWitness,
-    options: HistoryRunOptions<'_>,
+    options: impl Into<HistoryPolicy<HistoryRunOptions<'a>>>,
 ) -> Result<MinimaHoppingRun, String> {
+    let HistoryPolicy { options, exclusion } = options.into();
     let HistoryRunOptions {
         moves: options,
         history,
@@ -558,6 +613,7 @@ fn run_minima_hopping_with_history(
     let mut history_seconds = history_start.elapsed().as_secs_f64();
     let mut local_basins = HashSet::from([current_basin]);
     let mut accepted_visits = HashMap::from([(current_basin, 1_u64)]);
+    let mut observed_visits = HashMap::from([(current_basin, 1_u64)]);
     let mut feedback = EscapeFeedback::new(hopping.energy_scale, 0.5 * hopping.energy_scale);
     if !options.bound_escape {
         feedback.escape_floor = f64::MIN_POSITIVE;
@@ -642,8 +698,10 @@ fn run_minima_hopping_with_history(
                     let visits = history
                         .accepted_visits(reached)
                         .ok_or("missing admitted minimum")?;
-                    let visit =
-                        feedback.observe_shared(Some(current_basin), reached, visits == 0, visits);
+                    let (is_new, visits) = history_feedback_membership(
+                        exclusion, observation.minimum.is_new, observation.visits, visits,
+                    );
+                    let visit = feedback.observe_shared(Some(current_basin), reached, is_new, visits);
                     let adopt = visit == Visit::New && feedback.accept(candidate_energy - energy);
                     if adopt {
                         history
@@ -668,7 +726,10 @@ fn run_minima_hopping_with_history(
                 *visits = visits.saturating_add(1);
                 *visits
             });
-            let visit = feedback.observe_shared(Some(current_basin), reached, visits == 0, visits);
+            let observed = observed_visits.entry(reached).or_insert(0);
+            *observed = observed.saturating_add(1);
+            let (is_new, visits) = history_feedback_membership(exclusion, *observed == 1, *observed, visits);
+            let visit = feedback.observe_shared(Some(current_basin), reached, is_new, visits);
             let adopt = visit == Visit::New && feedback.accept(candidate_energy - energy);
             if adopt {
                 accepted_visits.insert(reached, 1);
@@ -761,8 +822,9 @@ fn run_minima_hopping_ensemble<W: ExactStructureWitness + Send>(
     budget: usize,
     seed: u64,
     witness: W,
-    options: EnsembleOptions,
+    options: impl Into<HistoryPolicy<EnsembleOptions>>,
 ) -> Result<MinimaHoppingEnsemble, String> {
+    let HistoryPolicy { options, exclusion } = options.into();
     if options.replicas == 0 || budget < options.replicas {
         return Err("ensemble needs positive replicas and at least one call per replica".into());
     }
@@ -802,14 +864,14 @@ fn run_minima_hopping_ensemble<W: ExactStructureWitness + Send>(
                         budget,
                         seed,
                         witness,
-                        HistoryRunOptions {
+                        HistoryPolicy { options: HistoryRunOptions {
                             moves: MinimaHoppingOptions {
                                 soften: options.soften,
                                 bound_escape: false,
                             },
                             history: Some(history),
                             charged: Some(charged),
-                        },
+                        }, exclusion },
                     )
                 })
             })
@@ -995,6 +1057,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         std::env::var("ANNEAL_MH_REPLICAS").map_or(Ok(4), |value| value.parse::<usize>())?;
     let pair_cache_bytes = std::env::var("ANNEAL_MH_PAIR_CACHE_BYTES")
         .map_or(Ok(128 * 1024 * 1024), |value| value.parse::<usize>())?;
+    let history_exclusion = parse_history_exclusion(std::env::var("ANNEAL_MH_HISTORY_POLICY").ok().as_deref())?;
     let descriptor_space = lj::descriptor_space();
     let potential = PairPotential::lennard_jones(n);
     let witness = IraStructureWitness {
@@ -1033,6 +1096,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                 "exact_witness": "serialized-in-both-arms",
                 "pair_cache_payload_bytes": pair_cache_bytes,
                 "pair_cache_scope": "per-ensemble-coordinate-content",
+                "history_policy": history_exclusion.name(),
             },
             "minima_hopping": {
                 "integrator": "rgsaddle-samd-nve",
@@ -1057,7 +1121,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                 "orientation": "rotation-independent",
                 "adoption": "downhill",
             },
-            "arms": arms.iter().copied().map(Arm::label).collect::<Vec<_>>(),
+            "arms": arms.iter().copied().map(|arm| arm.label_with_history(history_exclusion)).collect::<Vec<_>>(),
         })
     );
 
@@ -1076,7 +1140,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             random_cluster(n, 0.7, hopping.min_separation, &mut initial_rng)
         };
         for (arm_index, arm) in arms.iter().copied().enumerate() {
-            let label = arm.label();
+            let label = arm.label_with_history(history_exclusion);
             match arm {
                 Arm::MinimaHoppingEnsemble { shared, soften } => {
                     let ensemble = run_minima_hopping_ensemble(
@@ -1090,11 +1154,11 @@ fn main() -> Result<(), Box<dyn Error>> {
                             radius: witness.radius,
                         }
                         .with_pair_cache(pair_cache_bytes),
-                        EnsembleOptions {
+                        HistoryPolicy { options: EnsembleOptions {
                             replicas,
                             shared,
                             soften,
-                        },
+                        }, exclusion: history_exclusion },
                     )?;
                     let first = ensemble
                         .runs
@@ -1130,6 +1194,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                         json!({
                             "kind": "lj_joint_optimum_ensemble",
                             "arm": label, "seed": seed, "target_found": first.is_some(),
+                            "history_policy": history_exclusion.name(),
                             "first_aggregate_charged": first.map(|(charged, _, _)| charged),
                             "first_replica_hop": first.map(|(_, _, hops)| hops),
                             "charged": ensemble.charged,
@@ -1394,7 +1459,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             "{}",
             json!({
                 "kind": "lj_joint_optimum_summary",
-                "arm": arm.label(),
+                "arm": arm.label_with_history(history_exclusion),
                 "runs": total,
                 "hits": hits,
                 "hit_probability": hits as f64 / total as f64,
