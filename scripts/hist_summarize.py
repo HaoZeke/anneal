@@ -82,7 +82,7 @@ def summarise(directory):
 
 
 def mean(values, fmt="{:.0f}"):
-    return fmt.format(statistics.fmean(values)) if values else "-"
+    return fmt.format(statistics.mean(values)) if values else "-"
 
 
 def main():
