@@ -363,7 +363,8 @@ mod tests {
     #[test]
     fn a_well_table_round_trips_and_a_truncated_one_is_refused() {
         use ndarray::array;
-        let wells = vec![(array![1.0, 2.0, 3.0], 0.5), (array![4.0, 5.0, 6.0], 0.25)];
+        let wells: Vec<(ndarray::Array1<f64>, f64)> =
+            vec![(array![1.0, 2.0, 3.0], 0.5), (array![4.0, 5.0, 6.0], 0.25)];
         let mut frame = b"wells/001\n".to_vec();
         frame.extend_from_slice(&1u32.to_le_bytes());
         frame.extend_from_slice(&2u32.to_le_bytes());
