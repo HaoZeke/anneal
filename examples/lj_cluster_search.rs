@@ -38,6 +38,23 @@ use std::time::Instant;
 use anneal_core::shape::{IraMetric, IraStructureWitness};
 
 fn apply_boolean_options(cfg: &mut Config, opts: &[&str]) {
+    for option in opts {
+        assert!(
+            matches!(*option,
+                "rec" | "askmc" | "shape" | "bfwt" | "thompson" |
+                "height" | "noheight" | "climb" | "noclimb" | "sym" | "nosym" |
+                "csa" | "corekey" | "reocc" | "coreclass" | "twophase" | "aniso" |
+                "surfaces" | "path" | "trail" | "rscreen" | "soapclass" | "soapmean" |
+                "mh" | "calib" | "restart" | "angular" | "psym" | "psymnew" | "novel" |
+                "sbkey" | "tabu" | "bayes" | "flat" | "stemp" | "ebias" | "visit" |
+                "reseed" | "selfseed" | "learncon" | "lean" | "burst" | "hollow" |
+                "fill" | "twin" | "gtwin" | "depth" | "softsub" | "covper" | "staged" |
+                "ctx" | "sites" | "canon" | "indep" | "nrpt" | "rpt" | "ptt" | "pt" |
+                "rungbias" | "bank" | "acq" | "early" | "catalog"
+            ),
+            "unknown search mechanism: {option}"
+        );
+    }
     let height = opts.contains(&"height");
     let noheight = opts.contains(&"noheight");
     assert!(
