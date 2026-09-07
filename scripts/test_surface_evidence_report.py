@@ -55,6 +55,25 @@ class SurfaceEvidenceReportTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             summarize(self.root)
 
+    def test_catalog_snapshots_use_the_ensemble_budget(self):
+        self.replace(
+            "shared", 0,
+            '{"kind":"local_work","aggregate_charged":1000}',
+            '{"kind":"population_pending","aggregate_charged":2000}\n'
+            '{"kind":"local_work","aggregate_charged":1000}',
+        )
+        self.assertEqual(summarize(self.root)["ensemble_budget"], 2000)
+
+    def test_rejects_catalog_work_above_the_ensemble_budget(self):
+        self.replace(
+            "shared", 0,
+            '{"kind":"local_work","aggregate_charged":1000}',
+            '{"kind":"population_pending","aggregate_charged":2001}\n'
+            '{"kind":"local_work","aggregate_charged":1000}',
+        )
+        with self.assertRaises(ValueError):
+            summarize(self.root)
+
     def test_rejects_geometry_policy_actions(self):
         self.replace("shared", 0, "leaves 0", "leaves 1")
         with self.assertRaises(ValueError):
