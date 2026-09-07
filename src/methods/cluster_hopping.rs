@@ -1150,7 +1150,13 @@ where
         }
         None => (biases.remove(0), None),
     };
-    let mut chains: Vec<(f64, Array1<f64>)> = Vec::new();
+    // Gradient evidence travels with the coordinates through every rung swap.
+    struct ParkedMinimum {
+        energy: f64,
+        coordinates: Array1<f64>,
+        gradient: Option<Array1<f64>>,
+    }
+    let mut chains: Vec<ParkedMinimum> = Vec::new();
     // One sampler per rung, parked and taken alongside the bias.
     //
     // Per chain and not global. A hot rung crosses barriers a cold rung cannot
@@ -1451,7 +1457,7 @@ where
     for _ in 1..n_rep {
         let s0 = random_cluster_in_radius(n, cfg.start_radius(), cfg.min_separation, rng);
         let (e0, x0) = relax(ledger, s0.view(), cfg.relax_steps);
-        record_quenched_answer(
+        let gradient = record_quenched_answer(
             cfg,
             ledger,
             &mut grad,
@@ -1459,7 +1465,7 @@ where
             x0.view(),
             &mut unconverged_records,
         );
-        chains.push((e0, x0));
+        chains.push(ParkedMinimum { energy: e0, coordinates: x0, gradient });
     }
     let mut screened_out = 0usize;
     let mut returned = 0usize;
@@ -3843,6 +3849,7 @@ where
                     }
                     e = j.energy;
                     x = j.state;
+                    current_validation_gradient = None;
                     here = Some(j.basin);
                 }
             }
@@ -3871,7 +3878,11 @@ where
                 // that one active. Each rung keeps its own bias and its own
                 // temperature; only the states move, so a hot rung's crossing
                 // lands in a cold rung that can polish it.
-                chains.insert(rep, (e, x.clone()));
+                chains.insert(rep, ParkedMinimum {
+                    energy: e,
+                    coordinates: x.clone(),
+                    gradient: current_validation_gradient.take(),
+                });
                 // A placeholder only; the destination rung's own bias is taken
                 // below, so this is never deposited into.
                 biases.insert(
@@ -3930,8 +3941,8 @@ where
                             let bi = &biases;
                             let tp = &temps;
                             l.offer(&mut *rng, |k| {
-                                let (ek, xk) = (ch[k].0, ch[k].1.view());
-                                let (ej, xj) = (ch[k + 1].0, ch[k + 1].1.view());
+                                let (ek, xk) = (ch[k].energy, ch[k].coordinates.view());
+                                let (ej, xj) = (ch[k + 1].energy, ch[k + 1].coordinates.view());
                                 let vk_xk = bi[k].potential(bi[k].cv(xk).view());
                                 let vk_xj = bi[k].potential(bi[k].cv(xj).view());
                                 let vj_xj = bi[k + 1].potential(bi[k + 1].cv(xj).view());
@@ -3984,8 +3995,8 @@ where
                         // rung samples exp(-(E + V_k)/T_k), so the factor
                         // evaluates each rung's bias at both states (Piana and
                         // Laio), which is what biased_swap_log_ratio does.
-                        let (ek, xk) = (chains[k].0, chains[k].1.clone());
-                        let (ej, xj) = (chains[j].0, chains[j].1.clone());
+                        let (ek, xk) = (chains[k].energy, chains[k].coordinates.clone());
+                        let (ej, xj) = (chains[j].energy, chains[j].coordinates.clone());
                         let vk_xk = biases[k].potential(biases[k].cv(xk.view()).view());
                         let vk_xj = biases[k].potential(biases[k].cv(xj.view()).view());
                         let vj_xj = biases[j].potential(biases[j].cv(xj.view()).view());
@@ -4018,9 +4029,10 @@ where
                     }
                     rep = j;
                 }
-                let (ne, nx) = chains.remove(rep);
-                e = ne;
-                x = nx;
+                let next = chains.remove(rep);
+                e = next.energy;
+                x = next.coordinates;
+                current_validation_gradient = next.gradient;
                 bias = biases.remove(rep);
                 if cfg.hmc.is_some() && rep < hop_parked.len() {
                     hop = Some(hop_parked.remove(rep));
@@ -4109,6 +4121,7 @@ where
                             path_gain += e - esc.energy;
                             e = esc.energy;
                             x = esc.state.clone();
+                            current_validation_gradient = None;
                         }
                     }
                 }
@@ -4203,7 +4216,7 @@ where
             // back in place before reporting.
             let mut all: Vec<(f64, usize, f64)> = Vec::with_capacity(n_rep);
             let mut parked = biases.iter().map(|b| b.n_basins());
-            let mut energies = chains.iter().map(|(en, _)| *en);
+            let mut energies = chains.iter().map(|minimum| minimum.energy);
             for k in 0..n_rep {
                 if k == rep {
                     all.push((temps[k], n_basins, e));
