@@ -220,6 +220,21 @@ mod option_tests {
     }
 
     #[test]
+    fn production_reports_and_learns_the_validated_objective_not_the_search_transform() {
+        let source = include_str!("lj_cluster_search.rs");
+        let callback = source.split("let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, iters: usize| {").nth(1).unwrap();
+        let callback = &callback[..callback.find("// The gradient the soft-mode escape needs").unwrap()];
+        assert!(callback.contains(".observe(screening_pass, boundary_energy, led.best)"));
+        assert!(callback.contains("(boundary_energy, xr)"));
+        assert!(callback.contains("let mut boundary_energy = f64::INFINITY"),
+            "an exhausted ledger cannot certify a transformed energy as an objective value");
+        let charged = &source[source.find("fn charged(led:").unwrap()..];
+        let charged = &charged[..charged.find("fn charged_noisy").unwrap()];
+        assert!(charged.contains("led.is_diagnostic_quench()"),
+            "diagnostic objectives must bypass the armed adaptive transform");
+    }
+
+    #[test]
     fn unknown_mechanism_is_rejected_before_search() {
         let result = std::panic::catch_unwind(|| {
             let mut cfg = Config::recommended(75);
