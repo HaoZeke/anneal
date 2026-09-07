@@ -7086,70 +7086,6 @@ fn run_capnp_bank(
     }
 }
 
-/// One replica's plain quench: warm L-BFGS, the fresh certificate with the
-/// bounded polish chunks, and the boundary on the ledger.
-///
-/// The default seed loop's relaxation carries the optional screening noise,
-/// two-phase surfaces and early termination; the ensembles run without
-/// them, so this is that closure with the options removed, not a different
-/// relaxation. Aggregate work is settled by the caller from the ledger.
-fn validated_relax(
-    opt: &mut WarmLbfgs,
-    led: &mut Ledger,
-    x: ArrayView1<f64>,
-    iters: usize,
-) -> (f64, Array1<f64>) {
-    if iters == 0 {
-        return evaluate_without_quenching(led, x);
-    }
-    let charged_before = led.spent();
-    opt.forget();
-    let (_, mut xr, _) = opt.minimize(x, iters, |v| charged(led, v));
-    let mut boundary_energy = f64::INFINITY;
-    let mut validated_gradient = None;
-    if led.charge() {
-        let (fresh_energy, mut g) = lj(xr.view());
-        boundary_energy = fresh_energy;
-        let mut gnorm = euclidean_gradient_norm(g.as_slice().expect("LJ gradient is contiguous"));
-        let mut chunks = 0;
-        while (1e-5..1e-3).contains(&gnorm) && chunks < 10 && led.remaining() > 0 {
-            opt.forget();
-            let (_, xc, _) = opt.minimize(xr.view(), 500, |v| charged_physical(led, v));
-            boundary_energy = f64::INFINITY;
-            xr = xc;
-            if !led.charge() {
-                break;
-            }
-            let (fe, ge) = lj(xr.view());
-            boundary_energy = fe;
-            gnorm = euclidean_gradient_norm(ge.as_slice().expect("LJ gradient is contiguous"));
-            g = ge;
-            chunks += 1;
-            let mut descents = 0;
-            while (1e-5..3e-5).contains(&gnorm) && descents < 200 && led.charge() {
-                for (value, gradient) in xr.iter_mut().zip(g.iter()) {
-                    *value -= 0.01 * gradient;
-                }
-                let (fe, ge) = lj(xr.view());
-                boundary_energy = fe;
-                gnorm = euclidean_gradient_norm(ge.as_slice().expect("LJ gradient is contiguous"));
-                g = ge;
-                descents += 1;
-            }
-        }
-        if gnorm < 1e-5 {
-            validated_gradient = Some(g);
-        }
-    }
-    led.record_quench_boundary(
-        charged_before,
-        boundary_energy,
-        xr.clone(),
-        validated_gradient,
-    );
-    (boundary_energy, xr)
-}
-
 /// SHA-256 of the running executable, so a record names what produced it.
 fn executable_sha256() -> String {
     use sha2::{Digest, Sha256};
@@ -7159,43 +7095,68 @@ fn executable_sha256() -> String {
         .unwrap_or_else(|_| "unavailable".into())
 }
 
-/// Graph a gossip round draws its peer from.
-#[derive(Debug, Clone, Copy)]
-enum Gossip {
-    /// The two ring neighbours, alternating.
-    Ring,
-    /// A uniform peer: randomised gossip on the complete graph.
-    Random,
-}
-
-/// What one replica of a history ensemble reports.
-struct HistoryReplicaRun {
-    replica: usize,
-    seed: u64,
-    out: Outcome,
-    charged: usize,
-    first_target_calls: Option<usize>,
-    wall_seconds: f64,
-    history_cost: (usize, usize, f64),
-    /// Own hop visits published to the shared bias exchange.
-    bias_published: u64,
-    /// Restarts taken by the two-choice rule.
-    two_choice_restarts: usize,
-}
-
-/// Thread replicas of the production hop loop over a shared or private
-/// exact minimum history.
+/// Reads the ensemble's channels from the environment.
 ///
-/// `HISTORY=shared` puts every replica of a seed behind one history;
-/// `private` (default) gives each its own, which is the isolated control
-/// with the same starts, seeds, budgets and lookups. `HISTORY_POLICY`
-/// selects accepted (default) or observed-exclusion membership.
-/// `HISTORY_CHECKPOINT` sets the charged interval at which a replica reads
-/// the aggregate counter for its first-discovery record. The aggregate
-/// budget is `budget` per seed, divided among the replicas with the
-/// remainder to the low replicas, so a four-replica ensemble runs on
-/// exactly the force budget of one production chain.
-#[allow(clippy::too_many_arguments)]
+/// `HISTORY` shared, private or none (default private) with
+/// `HISTORY_POLICY` accepted or observed-exclusion; `SHARED_BIAS=1` with
+/// `SHARED_BIAS_WEIGHT`; `GOSSIP` ring or random with `GOSSIP_INTERVAL`,
+/// `GOSSIP_WEIGHT` and `GOSSIP_ADAPTIVE=1`; `TWO_CHOICE_STALL` in charged
+/// calls; `HISTORY_CHECKPOINT` for the exchange lag.
+fn ensemble_config_from_env(
+    replicas: usize,
+    budget: usize,
+    reference: Option<f64>,
+) -> anneal_core::methods::ensemble::EnsembleConfig {
+    use anneal_core::methods::ensemble::{
+        EnsembleConfig, GossipConfig, GossipTopology, HistoryMode,
+    };
+    use anneal_core::methods::minima_hopping::HistoryMembership;
+    fn parsed<T: std::str::FromStr>(name: &str) -> Option<T> {
+        std::env::var(name).ok().and_then(|v| v.parse().ok())
+    }
+    let history = match std::env::var("HISTORY").as_deref() {
+        Ok("shared") => HistoryMode::Shared,
+        Ok("private") | Err(_) => HistoryMode::Private,
+        Ok("none") => HistoryMode::None,
+        Ok(other) => panic!("HISTORY={other:?}; expected shared, private or none"),
+    };
+    let membership = HistoryMembership::parse(std::env::var("HISTORY_POLICY").ok().as_deref())
+        .unwrap_or_else(|error| panic!("{error}"));
+    let shared_bias = std::env::var("SHARED_BIAS")
+        .is_ok_and(|v| v == "1")
+        .then(|| parsed::<f64>("SHARED_BIAS_WEIGHT").unwrap_or(1.0));
+    let gossip = match std::env::var("GOSSIP").as_deref() {
+        Ok("ring") => Some(GossipTopology::Ring),
+        Ok("random") => Some(GossipTopology::Random),
+        Ok("") | Err(_) => None,
+        Ok(other) => panic!("GOSSIP={other:?}; expected ring or random"),
+    }
+    .map(|topology| GossipConfig {
+        topology,
+        interval: parsed::<usize>("GOSSIP_INTERVAL").unwrap_or(20_000).max(1),
+        weight: parsed::<f64>("GOSSIP_WEIGHT").unwrap_or(0.5),
+        adaptive: std::env::var("GOSSIP_ADAPTIVE").is_ok_and(|v| v == "1"),
+    });
+    EnsembleConfig {
+        replicas,
+        budget,
+        history,
+        membership,
+        shared_bias,
+        gossip,
+        two_choice_stall: parsed::<usize>("TWO_CHOICE_STALL").filter(|v| *v > 0),
+        checkpoint_interval: parsed::<usize>("HISTORY_CHECKPOINT")
+            .unwrap_or(1_000)
+            .max(1),
+        target: reference.map(|r| r + 1e-4),
+    }
+}
+
+/// Thread replicas of the production hop loop over the channels the
+/// environment names, under the comparison contract: identical replica
+/// seeds and starts in every arm, one aggregate budget per seed equal to
+/// `budget`, the first-discovery aggregate call count on the record and
+/// the executable digest on the header.
 fn run_history_ensembles(
     cfg: &Config,
     n: usize,
@@ -7206,79 +7167,11 @@ fn run_history_ensembles(
     replicas: usize,
     opts: &[&str],
 ) {
-    use anneal_core::methods::cluster_hopping::run_with_history_at_checkpoints;
-    use anneal_core::methods::minima_hopping::{
-        HistoryHook, HistoryMembership, MinimumHistory, SerializedWitness, SharedMinimumHistory,
-    };
+    use anneal_core::methods::ensemble::run_ensemble;
+    use anneal_core::methods::minima_hopping::SerializedWitness;
     use anneal_core::pes_exploration::StructureContext;
-    use rand::SeedableRng;
-    use std::sync::atomic::{AtomicUsize, Ordering};
-    use std::time::Instant;
 
-    assert!(replicas > 0, "HISTORY_REPLICAS must be positive");
-    assert!(
-        budget >= replicas,
-        "the aggregate budget must give every replica at least one call"
-    );
-    assert!(
-        cfg.replicas <= 1,
-        "a history ensemble runs single-rung chains; a ladder owns its own bias"
-    );
-    let (shared, use_history) = match std::env::var("HISTORY").as_deref() {
-        Ok("shared") => (true, true),
-        Ok("private") | Err(_) => (false, true),
-        Ok("none") => (false, false),
-        Ok(other) => panic!("HISTORY={other:?}; expected shared, private or none"),
-    };
-    // Multiple-walker sharing of the bias itself: every chain's hop visits
-    // reach every other chain at the next checkpoint.
-    let shared_bias = std::env::var("SHARED_BIAS").is_ok_and(|v| v == "1");
-    // Height of a foreign deposit relative to an own one; 1/N keeps the
-    // total deposition rate at one walker's (Laio et al. 2005).
-    let shared_bias_weight: f64 = std::env::var("SHARED_BIAS_WEIGHT")
-        .ok()
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(1.0);
-    // Gossip averaging of the bias over a graph: `ring` alternates the two
-    // ring neighbours, `random` draws a uniform peer (randomised gossip on
-    // the complete graph). Off when unset.
-    let gossip = match std::env::var("GOSSIP").as_deref() {
-        Ok("ring") => Some(Gossip::Ring),
-        Ok("random") => Some(Gossip::Random),
-        Ok("") | Err(_) => None,
-        Ok(other) => panic!("GOSSIP={other:?}; expected ring or random"),
-    };
-    let gossip_interval: usize = std::env::var("GOSSIP_INTERVAL")
-        .ok()
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(20_000)
-        .max(1);
-    let gossip_weight: f64 = std::env::var("GOSSIP_WEIGHT")
-        .ok()
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(0.5);
-    // Two-choice restart (Azar, Broder, Karlin, Upfal 1999): a chain that
-    // has not improved for this many charged calls samples two peers, and
-    // if both stand in its own packing family it restarts from a fresh
-    // random cluster. One sample is the census restart that lost; two
-    // samples is the load-balancing rule with the exponential gain.
-    let two_choice_stall: Option<usize> = std::env::var("TWO_CHOICE_STALL")
-        .ok()
-        .and_then(|v| v.parse().ok())
-        .filter(|v| *v > 0);
-    let policy = HistoryMembership::parse(std::env::var("HISTORY_POLICY").ok().as_deref())
-        .unwrap_or_else(|error| panic!("{error}"));
-    let checkpoint_interval: usize = std::env::var("HISTORY_CHECKPOINT")
-        .ok()
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(1_000)
-        .max(1);
-    let pair_cache_bytes: usize = std::env::var("HISTORY_PAIR_CACHE_BYTES")
-        .ok()
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(128 * 1024 * 1024);
-    // The per-look cap on deposits paid for other chains' visits; the
-    // configured default otherwise.
+    let ens = ensemble_config_from_env(replicas, budget, reference);
     let mut cfg = cfg.clone();
     if let Some(cap) = std::env::var("SHARED_DEPOSITS")
         .ok()
@@ -7286,7 +7179,11 @@ fn run_history_ensembles(
     {
         cfg.shared_deposits = cap;
     }
-    let cfg = &cfg;
+    ens.validate(&cfg).unwrap_or_else(|error| panic!("{error}"));
+    let pair_cache_bytes: usize = std::env::var("HISTORY_PAIR_CACHE_BYTES")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(128 * 1024 * 1024);
     let descriptor = anneal_core::catalog::lj::descriptor_space();
     let ira_radius = anneal_core::catalog::lj::CALIBRATION_IRA_TOLERANCE;
     #[cfg(feature = "ira")]
@@ -7324,274 +7221,49 @@ fn run_history_ensembles(
         "sorted-pairs-fallback"
     };
     let context = StructureContext::new(Some(vec![18; n]), None, Some(format!("lj-reduced-n{n}")));
-    let budgets: Vec<usize> = (0..replicas)
-        .map(|replica| budget / replicas + usize::from(replica < budget % replicas))
-        .collect();
+    let objective = |x: ArrayView1<f64>| lj(x);
+    let same_family = |a: &[f64], b: &[f64]| !anneal_core::catalog::different_packing_family(a, b);
     println!(
-        "  history ensembles: {} replicas, {} history, {} membership, shared bias {} weight {}, gossip {:?} interval {} weight {}, two-choice stall {:?}, budgets {:?}, \
-         checkpoint {checkpoint_interval}, witness {witness_name}, shared deposits {}, \
-         mechanisms {}, executable sha256 {}",
-        replicas,
-        if !use_history {
-            "no"
-        } else if shared {
-            "shared"
-        } else {
-            "private"
-        },
-        policy.name(),
-        shared_bias,
-        shared_bias_weight,
-        gossip,
-        gossip_interval,
-        gossip_weight,
-        two_choice_stall,
-        budgets,
+        "  history ensembles: {} replicas, {} history, {} membership, shared bias {:?}, gossip {:?}, \
+         two-choice stall {:?}, budgets {:?}, checkpoint {}, witness {witness_name}, \
+         shared deposits {}, mechanisms {}, executable sha256 {}",
+        ens.replicas,
+        ens.history.name(),
+        ens.membership.name(),
+        ens.shared_bias,
+        ens.gossip,
+        ens.two_choice_stall,
+        ens.budgets(),
+        ens.checkpoint_interval,
         cfg.shared_deposits,
         opts.join(","),
         executable_sha256()
     );
-    let target = reference.map(|r| r + 1e-4);
     let mut solved = 0usize;
     let mut deepest = f64::INFINITY;
     let mut first_target: Vec<usize> = Vec::new();
     for seed in seed0..(seed0 + seeds) {
-        let started = Instant::now();
-        let replica_seeds: Vec<u64> = (0..replicas)
-            .map(|replica| seed.wrapping_add((replica as u64).wrapping_mul(0x9e37_79b9_7f4a_7c15)))
-            .collect();
-        let history_count = if shared { 1 } else { replicas };
-        let histories: Vec<Mutex<MinimumHistory>> = (0..history_count)
-            .map(|_| {
-                Mutex::new(
-                    MinimumHistory::new(cfg.record_gradient.max(1e-5))
-                        .expect("the record gradient is a valid history tolerance"),
-                )
-            })
-            .collect();
-        let charged_total = AtomicUsize::new(0);
-        let exchange = Mutex::new(anneal_core::shared_bias::SharedDeposits::new(replicas));
-        // Latest wells posted by each replica, read by its gossip peers.
-        let mailboxes: Vec<Mutex<Option<Vec<(Array1<f64>, f64)>>>> =
-            (0..replicas).map(|_| Mutex::new(None)).collect();
-        // Each replica's occupied state, for the two-choice family sample.
-        let occupied: Vec<Mutex<Option<Vec<f64>>>> =
-            (0..replicas).map(|_| Mutex::new(None)).collect();
-        let runs: Vec<HistoryReplicaRun> = std::thread::scope(|scope| {
-            let handles: Vec<_> = budgets
-                .iter()
-                .zip(&replica_seeds)
-                .enumerate()
-                .map(|(replica, (&replica_budget, &replica_seed))| {
-                    let history = &histories[if shared { 0 } else { replica }];
-                    let exchange = &exchange;
-                    let mailboxes = &mailboxes;
-                    let occupied = &occupied;
-                    let charged_total = &charged_total;
-                    let witness = &witness;
-                    let descriptor = &descriptor;
-                    let context = context.clone();
-                    scope.spawn(move || {
-                        let replica_started = Instant::now();
-                        let mut ledger = Ledger::new(replica_budget);
-                        let mut opt = WarmLbfgs::default();
-                        let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, iters: usize| {
-                            let before = led.spent();
-                            let out = validated_relax(&mut opt, led, x, iters);
-                            charged_total.fetch_add(led.spent() - before, Ordering::SeqCst);
-                            out
-                        };
-                        let mut grad =
-                            |led: &mut Ledger, x: ArrayView1<f64>| -> Option<Array1<f64>> {
-                                if !led.charge() {
-                                    return None;
-                                }
-                                charged_total.fetch_add(1, Ordering::SeqCst);
-                                Some(lj(x).1)
-                            };
-                        let mut hook = SharedMinimumHistory::new(
-                            history, descriptor, context, witness, policy,
-                        );
-                        let mut first_target_calls: Option<usize> = None;
-                        let mut seen_visits: Vec<u64> = Vec::new();
-                        let mut published = 0u64;
-                        let mut next_gossip = gossip_interval;
-                        let mut gossip_side = replica % 2;
-                        // Peer draws for randomised gossip; a small LCG keeps
-                        // the chain's own stream untouched.
-                        let mut gossip_draw = replica_seed ^ 0x5DEE_CE66_D1CE_B00Cu64;
-                        let mut best_seen = f64::INFINITY;
-                        let mut charged_at_best = 0usize;
-                        let mut restart_rng =
-                            rand::rngs::StdRng::seed_from_u64(replica_seed ^ 0x7C0A_1CE5);
-                        let mut two_choice_restarts = 0usize;
-                        let mut checkpoint = |snapshot: ChainCheckpoint<'_>| {
-                            if first_target_calls.is_none()
-                                && target.is_some_and(|t| snapshot.best_energy() < t)
-                            {
-                                first_target_calls = Some(charged_total.load(Ordering::SeqCst));
-                            }
-                            if snapshot.best_energy() < best_seen - 1e-9 {
-                                best_seen = snapshot.best_energy();
-                                charged_at_best = snapshot.charged();
-                            }
-                            if let Some(stall) = two_choice_stall
-                                && replicas > 1
-                            {
-                                if let Some(mine) = snapshot.current_state().as_slice() {
-                                    *occupied[replica].lock().expect("occupied mailbox") =
-                                        Some(mine.to_vec());
-                                }
-                                if snapshot.charged().saturating_sub(charged_at_best) >= stall
-                                    && let Some(mine) = snapshot.current_state().as_slice()
-                                {
-                                    let mut crowded = 0usize;
-                                    for _ in 0..2 {
-                                        gossip_draw = gossip_draw
-                                            .wrapping_mul(6364136223846793005)
-                                            .wrapping_add(1442695040888963407);
-                                        let k = ((gossip_draw >> 33) % (replicas as u64 - 1)) as usize;
-                                        let peer = (replica + 1 + k) % replicas;
-                                        let theirs = occupied[peer].lock().expect("occupied mailbox").clone();
-                                        if let Some(theirs) = theirs
-                                            && theirs.len() == mine.len()
-                                            && !anneal_core::catalog::different_packing_family(mine, &theirs)
-                                        {
-                                            crowded += 1;
-                                        }
-                                    }
-                                    if crowded == 2 {
-                                        two_choice_restarts += 1;
-                                        // The stall clock restarts with the chain.
-                                        charged_at_best = snapshot.charged();
-                                        let fresh = anneal_core::methods::cluster_hopping::random_cluster_in_radius(
-                                            n,
-                                            cfg.start_radius(),
-                                            cfg.min_separation,
-                                            &mut restart_rng,
-                                        );
-                                        return CheckpointAction::ExternalAdopt {
-                                            state: fresh,
-                                            action: "two-choice-restart".to_owned(),
-                                            external_calls: 0,
-                                        };
-                                    }
-                                }
-                            }
-                            if let Some(topology) = gossip
-                                && replicas > 1
-                                && snapshot.charged() >= next_gossip
-                                && let Some(bias) = snapshot.bias()
-                            {
-                                next_gossip = snapshot.charged() + gossip_interval;
-                                *mailboxes[replica].lock().expect("gossip mailbox") =
-                                    Some(bias.wells());
-                                let peer = match topology {
-                                    Gossip::Ring => {
-                                        gossip_side ^= 1;
-                                        if gossip_side == 0 {
-                                            (replica + 1) % replicas
-                                        } else {
-                                            (replica + replicas - 1) % replicas
-                                        }
-                                    }
-                                    Gossip::Random => {
-                                        gossip_draw = gossip_draw
-                                            .wrapping_mul(6364136223846793005)
-                                            .wrapping_add(1442695040888963407);
-                                        let k =
-                                            ((gossip_draw >> 33) % (replicas as u64 - 1)) as usize;
-                                        (replica + 1 + k) % replicas
-                                    }
-                                };
-                                let wells = mailboxes[peer].lock().expect("gossip mailbox").clone();
-                                if let Some(wells) = wells {
-                                    return CheckpointAction::MergeBias {
-                                        wells,
-                                        weight: gossip_weight,
-                                    };
-                                }
-                            }
-                            if !shared_bias {
-                                return CheckpointAction::Continue;
-                            }
-                            let Some(bias) = snapshot.bias() else {
-                                return CheckpointAction::Continue;
-                            };
-                            let index = bias.index();
-                            let mine = anneal_core::shared_bias::visit_deltas(
-                                |i| index.centre(i),
-                                |i| index.visits(i),
-                                bias.n_basins(),
-                                &mut seen_visits,
-                            );
-                            published += mine.iter().map(|(_, n)| *n).sum::<u64>();
-                            let mut exchange = exchange.lock().expect("shared deposit exchange");
-                            exchange.publish(replica, mine);
-                            let deposits = exchange.drain(replica);
-                            drop(exchange);
-                            if deposits.is_empty() {
-                                CheckpointAction::Continue
-                            } else {
-                                CheckpointAction::DepositDescriptors {
-                                    deposits,
-                                    weight: shared_bias_weight,
-                                }
-                            }
-                        };
-                        let mut rng = rand::rngs::StdRng::seed_from_u64(replica_seed);
-                        let start = anneal_core::methods::cluster_hopping::random_cluster_in_radius(
-                            n,
-                            cfg.start_radius(),
-                            cfg.min_separation,
-                            &mut rng,
-                        );
-                        let out = run_with_history_at_checkpoints(
-                            cfg,
-                            start.view(),
-                            &mut ledger,
-                            &mut relax,
-                            Some(&mut grad),
-                            None,
-                            use_history.then_some(&mut hook as &mut dyn HistoryHook),
-                            &mut rng,
-                            checkpoint_interval,
-                            &mut checkpoint,
-                        );
-                        if first_target_calls.is_none() && target.is_some_and(|t| out.best < t) {
-                            first_target_calls = Some(charged_total.load(Ordering::SeqCst));
-                        }
-                        HistoryReplicaRun {
-                            replica,
-                            seed: replica_seed,
-                            out,
-                            charged: ledger.spent(),
-                            first_target_calls,
-                            wall_seconds: replica_started.elapsed().as_secs_f64(),
-                            history_cost: hook.cost(),
-                            bias_published: published,
-                            two_choice_restarts,
-                        }
-                    })
-                })
-                .collect();
-            handles
-                .into_iter()
-                .map(|handle| handle.join().expect("history replica panicked"))
-                .collect()
-        });
-        let wall = started.elapsed().as_secs_f64();
-        let mut ensemble_best = f64::INFINITY;
-        let mut ensemble_first: Option<usize> = None;
-        for run in &runs {
-            let verified = run.out.best_state.as_ref().map(|x| {
+        let report = run_ensemble(
+            &cfg,
+            &ens,
+            seed,
+            &objective,
+            &descriptor,
+            &context,
+            &witness,
+            &same_family,
+        )
+        .unwrap_or_else(|error| panic!("seed {seed}: {error}"));
+        for run in &report.replicas {
+            // A read-only audit of the returned coordinates and objective.
+            let verified = run.outcome.best_state.as_ref().map(|x| {
                 let (e, g) = lj(x.view());
                 let gmax = g.iter().fold(0.0_f64, |a, v| a.max(v.abs()));
                 assert!(
-                    e.is_finite() && (e - run.out.best).abs() < 1e-6,
+                    e.is_finite() && (e - run.outcome.best).abs() < 1e-6,
                     "seed {seed} replica {} reports {} but its coordinates have energy {e}",
                     run.replica,
-                    run.out.best
+                    run.outcome.best
                 );
                 assert!(
                     g.iter().all(|v| v.is_finite()) && gmax < 1e-3,
@@ -7600,30 +7272,32 @@ fn run_history_ensembles(
                 );
                 (e, gmax)
             });
-            let hit = target.is_some_and(|t| run.out.best < t);
+            let hit = ens.target.is_some_and(|t| run.outcome.best < t);
             println!(
                 "    seed {seed} replica {} (seed {}): best {:.6}  hops {}  charged {}  basins {}  \
-                 history obs {} new {} refused {} secs {:.1}  shared_deposits {}  bias_published {}  gossip {}  two_choice_restarts {}  \
+                 history obs {} new {} refused {} secs {:.1}  shared_deposits {}  bias_published {}  \
+                 gossip {}  gossip_interval {}  two_choice_restarts {}  \
                  escape {:.3} thr {:.4} same/known/new {}/{}/{}  first_target {}  wall {:.1}s  verified {}{}",
                 run.replica,
                 run.seed,
-                run.out.best,
-                run.out.hops,
+                run.outcome.best,
+                run.outcome.hops,
                 run.charged,
-                run.out.basins,
-                run.out.history_visits.0,
-                run.out.history_visits.1,
+                run.outcome.basins,
+                run.outcome.history_visits.0,
+                run.outcome.history_visits.1,
                 run.history_cost.1,
                 run.history_cost.2,
-                run.out.shared_deposits,
+                run.outcome.shared_deposits,
                 run.bias_published,
-                run.out.gossip_rounds,
+                run.outcome.gossip_rounds,
+                run.gossip_interval,
                 run.two_choice_restarts,
-                run.out.escape_scale,
-                run.out.escape_threshold,
-                run.out.visit_counts.0,
-                run.out.visit_counts.1,
-                run.out.visit_counts.2,
+                run.outcome.escape_scale,
+                run.outcome.escape_threshold,
+                run.outcome.visit_counts.0,
+                run.outcome.visit_counts.1,
+                run.outcome.visit_counts.2,
                 run.first_target_calls
                     .map(|v| v.to_string())
                     .unwrap_or_else(|| "-".into()),
@@ -7633,37 +7307,28 @@ fn run_history_ensembles(
                     .unwrap_or_else(|| "NO STATE".into()),
                 if hit { "  SOLVED" } else { "" }
             );
-            ensemble_best = ensemble_best.min(run.out.best);
-            if let Some(calls) = run.first_target_calls {
-                ensemble_first = Some(ensemble_first.map_or(calls, |c: usize| c.min(calls)));
-            }
         }
-        let hit = target.is_some_and(|t| ensemble_best < t);
+        let hit = report.solved(ens.target);
         if hit {
             solved += 1;
         }
-        if let Some(calls) = ensemble_first {
+        if let Some(calls) = report.first_target_calls {
             first_target.push(calls);
         }
-        deepest = deepest.min(ensemble_best);
-        let (bias_published, bias_delivered) =
-            exchange.lock().map(|x| x.counts()).unwrap_or((0, 0));
-        let minima = histories
-            .iter()
-            .map(|h| {
-                let h = h.lock().expect("minimum history");
-                (h.minimum_count(), h.accepted_count(), h.total_visits())
-            })
-            .collect::<Vec<_>>();
+        deepest = deepest.min(report.best);
         println!(
             "  seed {seed} ensemble: best {:.6}  aggregate charged {}  first_target_calls {}  \
-             history minima/accepted/visits {:?}  bias exchange published {bias_published} delivered {bias_delivered}  wall {wall:.1}s{}",
-            ensemble_best,
-            charged_total.load(Ordering::SeqCst),
-            ensemble_first
+             history minima/accepted/visits {:?}  bias exchange published {} delivered {}  wall {:.1}s{}",
+            report.best,
+            report.aggregate_charged,
+            report
+                .first_target_calls
                 .map(|v| v.to_string())
                 .unwrap_or_else(|| "-".into()),
-            minima,
+            report.histories,
+            report.exchange.0,
+            report.exchange.1,
+            report.wall_seconds,
             if hit { "  SOLVED" } else { "" }
         );
         let _ = io::stdout().flush();
@@ -7671,8 +7336,8 @@ fn run_history_ensembles(
     println!(
         "{solved}/{seeds} solved ({} history, {} membership, {replicas} replicas), deepest {deepest:.6}, \
          first_target_calls {:?}",
-        if shared { "shared" } else { "private" },
-        policy.name(),
+        ens.history.name(),
+        ens.membership.name(),
         first_target
     );
     if let Some(r) = reference {

@@ -23,6 +23,7 @@ pub mod cluster_search;
 /// Population resampled by estimated probability of improvement.
 pub mod committor_pop;
 pub mod csa_cluster;
+pub mod ensemble;
 /// Archive-ratcheted exploration of the minima network.
 #[cfg(feature = "graphkey")]
 pub mod ffs;
