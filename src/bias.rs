@@ -560,20 +560,35 @@ impl SortedPairs {
         right: ArrayView1<f64>,
     ) -> Option<f64> {
         let dimension = self.n_points.checked_mul(3)?;
-        if self.n_points == 0 || left.len() != dimension || right.len() != dimension
-            || left.iter().chain(right.iter()).any(|value| !value.is_finite())
+        if self.n_points == 0
+            || left.len() != dimension
+            || right.len() != dimension
+            || left
+                .iter()
+                .chain(right.iter())
+                .any(|value| !value.is_finite())
         {
             return None;
         }
         let left_pairs = self.describe(left);
         let right_pairs = self.describe(right);
-        if left_pairs.iter().chain(right_pairs.iter()).any(|value| !value.is_finite()) {
+        if left_pairs
+            .iter()
+            .chain(right_pairs.iter())
+            .any(|value| !value.is_finite())
+        {
             return None;
         }
-        let discrepancy = left_pairs.iter().zip(&right_pairs)
-            .map(|(left, right)| (left - right).abs()).fold(0.0, f64::max);
-        let coordinate_scale = left.iter().chain(right.iter())
-            .map(|value| value.abs()).fold(1.0, f64::max);
+        let discrepancy = left_pairs
+            .iter()
+            .zip(&right_pairs)
+            .map(|(left, right)| (left - right).abs())
+            .fold(0.0, f64::max);
+        let coordinate_scale = left
+            .iter()
+            .chain(right.iter())
+            .map(|value| value.abs())
+            .fold(1.0, f64::max);
         // Subtraction, three-dimensional norms, and the final difference all
         // contribute roundoff. The allowance weakens rejection near the radius.
         let roundoff = 64.0 * f64::EPSILON * coordinate_scale;
