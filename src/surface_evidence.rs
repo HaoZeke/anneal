@@ -1,8 +1,13 @@
-//! Replay-safe sharing of relaxation-surface rewards between independent chains.
+//! Replay-safe sharing of relaxation-surface rewards between search chains.
 //!
 //! Reports contain a producer's cumulative observations, never imported evidence.
 //! A reply excludes the requesting producer so local observations can continue
 //! during communication without being lost or counted twice.
+//!
+//! Sharing couples the chains' adaptive choices. Distinct producers and replay
+//! safety do not make their rewards independent or identically distributed.
+//! Pooling moments is a search-allocation heuristic, not evidence of a common
+//! transition law across descriptor regions.
 
 use std::collections::BTreeMap;
 
@@ -13,7 +18,7 @@ use crate::allocate::{DepthAllocator, RewardMoments};
 pub struct SurfaceReport {
     /// Versioned reward definition, ordered transforms, and block length.
     pub schema: String,
-    /// Independent reward moments for each arm, with the plain surface first.
+    /// Locally produced reward moments per arm, with the plain surface first.
     pub arms: Vec<RewardMoments>,
 }
 

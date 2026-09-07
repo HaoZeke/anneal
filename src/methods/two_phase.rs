@@ -591,7 +591,7 @@ impl SurfacePortfolio {
         }
     }
 
-    /// Independent peer blocks informing the portfolio's choices.
+    /// Peer-produced blocks informing the portfolio's choices.
     pub fn peer_observations(&self) -> u64 {
         self.peer_moments
             .as_ref()
