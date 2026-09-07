@@ -22,6 +22,13 @@ case "${1:-full}" in
     cargo test --locked --lib superbasin::tests
     cargo test --locked --test transition_graph
     ;;
+  probes)
+    status=0
+    cargo test --locked --features bank-rpc --test persistent_chain || status=1
+    cargo test --locked --features bank-rpc --test cooperative_search || status=1
+    cargo test --locked --features bank-rpc --example lj_cluster_search || status=1
+    exit "$status"
+    ;;
   full)
     cargo fmt --all -- --check
     cargo test --locked
