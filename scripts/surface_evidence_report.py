@@ -87,7 +87,10 @@ def worker(path, seed, budget, ensemble_budget, n, mode):
                     f"{path}: invalid ledger charge",
                 )
                 if event.get("kind") == "local_work":
-                    require(charge <= budget, f"{path}: worker exceeded its objective budget")
+                    require(
+                        charge <= budget,
+                        f"{path}: worker exceeded its objective budget",
+                    )
                     charges.append(charge)
     require(
         charges and charges == sorted(charges) and charges[-1] == budget,
