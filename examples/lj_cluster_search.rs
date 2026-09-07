@@ -5288,9 +5288,7 @@ fn run_capnp_catalog(
                         let elsewhere = snapshot.current_state().as_slice().is_none_or(|here| {
                             anneal_core::catalog::different_packing_family(here, &held.coordinates)
                         });
-                        if (family_mode && elsewhere)
-                            || (!family_mode && (draw == INCUMBENT_SAMPLE_DRAW || elsewhere))
-                        {
+                        if elsewhere || (!family_mode && draw == INCUMBENT_SAMPLE_DRAW) {
                             heard = Some(held);
                             break;
                         }
