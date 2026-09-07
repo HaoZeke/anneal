@@ -277,6 +277,11 @@ pub struct Config {
     pub md_escape_dt: f64,
     /// Kinetic energy per unit escape scale, in the objective's units.
     pub md_escape_kinetic: f64,
+    /// Potential-energy minima along the trajectory before it stops
+    /// (Goedecker's mdmin); two is his default, more travels further.
+    pub md_escape_minima: usize,
+    /// Cap on integration steps per escape.
+    pub md_escape_max_steps: usize,
     /// Lanczos steps for the soft-mode escape.
     ///
     /// Each costs two gradient evaluations, charged. Eight resolves the softest
@@ -1084,6 +1089,8 @@ impl Config {
             md_escape: false,
             md_escape_dt: 0.005,
             md_escape_kinetic: 1.0,
+            md_escape_minima: 2,
+            md_escape_max_steps: 2_000,
             shared_deposits: 8,
             jump_on_stall: false,
             jump_patience: 5_000,
