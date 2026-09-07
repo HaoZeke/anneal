@@ -3505,26 +3505,86 @@ where
                 identity.replica, candidate.event_sequence
             );
         })?;
-    let descriptor = descriptor_space
-        .describe(
-            ArrayView1::from(&validated.candidate.coordinates),
-            Some(&signature.atomic_numbers),
-        )
-        .map_err(|error| {
-            eprintln!(
-                "catalog candidate rejected: replica={} event={} reason=descriptor recomputation failed: {error}",
-                identity.replica, candidate.event_sequence
-            );
-        })?;
-    if descriptor.values().len() != validated.candidate.descriptor.len()
-        || descriptor.schema_version() != signature.descriptor.version
+    // The descriptor recomputation is the coordinator's cost: 0.28 s per
+    // candidate on LJ75 (profiled), against milliseconds for the rest of
+    // the validation. The worker computed the same descriptor under the
+    // same schema; recomputing every one serialised the ensemble behind
+    // one SOAP call per registration. CATALOG_VERIFY_DESCRIPTOR sets how
+    // many candidates are recomputed: every (the old behaviour), one in N
+    // (default 16, a mismatch beyond 1e-6 is a rejection and a line on
+    // stderr), or none. A posted descriptor must still have the schema's
+    // length, version, and finite values.
+    let posted = &validated.candidate.descriptor;
+    let dimension = descriptor_space
+        .schema()
+        .blocks()
+        .iter()
+        .map(|block| block.offset() + block.len())
+        .max()
+        .unwrap_or(0);
+    if posted.len() != dimension
+        || validated.candidate.descriptor_schema_version != signature.descriptor.version
+        || posted.iter().any(|value| !value.is_finite())
     {
-        reject("recomputed descriptor shape does not match candidate record");
+        reject("posted descriptor shape, version or values do not match the schema");
         return Err(());
     }
-    validated.candidate.descriptor = descriptor.values().to_vec();
-    validated.candidate.descriptor_schema_version = descriptor.schema_version();
+    let verify_every = descriptor_verification_period();
+    let verify = match verify_every {
+        Some(0) => false,
+        Some(period) => candidate.event_sequence.is_multiple_of(period),
+        None => true,
+    };
+    if verify {
+        let descriptor = descriptor_space
+            .describe(
+                ArrayView1::from(&validated.candidate.coordinates),
+                Some(&signature.atomic_numbers),
+            )
+            .map_err(|error| {
+                eprintln!(
+                    "catalog candidate rejected: replica={} event={} reason=descriptor recomputation failed: {error}",
+                    identity.replica, candidate.event_sequence
+                );
+            })?;
+        if descriptor.values().len() != posted.len()
+            || descriptor.schema_version() != signature.descriptor.version
+        {
+            reject("recomputed descriptor shape does not match candidate record");
+            return Err(());
+        }
+        let drift = descriptor
+            .values()
+            .iter()
+            .zip(posted.iter())
+            .map(|(a, b)| (a - b).abs())
+            .fold(0.0_f64, f64::max);
+        if drift > 1e-6 {
+            eprintln!(
+                "catalog candidate rejected: replica={} event={} reason=posted descriptor drifts {drift:.3e} from recomputation",
+                identity.replica, candidate.event_sequence
+            );
+            return Err(());
+        }
+        validated.candidate.descriptor = descriptor.values().to_vec();
+        validated.candidate.descriptor_schema_version = descriptor.schema_version();
+    }
     Ok(validated)
+}
+
+/// How often a posted descriptor is recomputed: `None` for every candidate,
+/// `Some(n)` for every n-th event sequence (0 for never).
+fn descriptor_verification_period() -> Option<u64> {
+    use std::sync::OnceLock;
+    static PERIOD: OnceLock<Option<u64>> = OnceLock::new();
+    *PERIOD.get_or_init(
+        || match std::env::var("CATALOG_VERIFY_DESCRIPTOR").as_deref() {
+            Ok("every") => None,
+            Ok("none") => Some(0),
+            Ok(value) => value.parse::<u64>().ok().or(Some(16)),
+            Err(_) => Some(16),
+        },
+    )
 }
 
 struct ReceivingRideSurface<'a, F: ?Sized>(&'a F);
