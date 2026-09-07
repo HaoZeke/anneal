@@ -736,6 +736,7 @@ mod run {
         rpc_sequence: u64,
         cumulative_charged: u64,
         client: Option<CatalogMailbox>,
+        posted_source_valid: Arc<Mutex<bool>>,
         snapshot: Option<CatalogSnapshot>,
         last_slice: u64,
         policy_slot: Arc<Mutex<Option<Result<PolicyStateReceipt, CatalogClientError>>>>,
@@ -785,6 +786,7 @@ mod run {
                             rpc_sequence: 0,
                             cumulative_charged: 0,
                             client: None,
+                            posted_source_valid: Arc::new(Mutex::new(true)),
                             snapshot: None,
                             last_slice: 0,
                             policy_slot: Arc::new(Mutex::new(None)),
@@ -1065,6 +1067,8 @@ mod run {
                     mailbox.exec(move |client| client.record_visit(rpc_sequence, candidate))
                 })
             };
+            *self.replica_mut(replica)?.posted_source_valid.lock().expect("posted source status") =
+                matches!(result, Some(Ok(_)));
             self.handle_transition_record(
                 replica,
                 "register_current".to_owned(),
@@ -1107,9 +1111,11 @@ mod run {
                 return Ok(TransitionRecordOutcome::SharingDisabled);
             }
             let rpc_sequence = self.next_rpc_sequence(replica)?;
+            let source_valid = Arc::clone(&self.replica_mut(replica)?.posted_source_valid);
             if let Some(mailbox) = self.replica_mut(replica)?.client.as_ref() {
                 mailbox.post(move |client| {
-                    let _ = client.record_visit(rpc_sequence, candidate);
+                    let accepted = client.record_visit(rpc_sequence, candidate).is_ok();
+                    *source_valid.lock().expect("posted source status") = accepted;
                 });
             }
             Ok(TransitionRecordOutcome::LocalFallback)
@@ -1128,9 +1134,18 @@ mod run {
             }
             let rpc_sequence = self.next_rpc_sequence(replica)?;
             let action = action.into();
+            let source_valid = Arc::clone(&self.replica_mut(replica)?.posted_source_valid);
             if let Some(mailbox) = self.replica_mut(replica)?.client.as_ref() {
                 mailbox.post(move |client| {
-                    let _ = client.record_transition(rpc_sequence, action, destination, adopted);
+                    // A failed source registration leaves the coordinator on
+                    // another minimum. It cannot anchor this observation.
+                    if !*source_valid.lock().expect("posted source status") {
+                        return;
+                    }
+                    if client.record_transition(rpc_sequence, action, destination, adopted).is_err()
+                        && adopted {
+                        *source_valid.lock().expect("posted source status") = false;
+                    }
                 });
             }
             Ok(TransitionRecordOutcome::LocalFallback)
