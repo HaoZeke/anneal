@@ -24,6 +24,9 @@ SURFACE = re.compile(
 POLICY = re.compile(
     r"^  policy: leaves (\d+) other (\d+) walk (\d+) hole (\d+) refused (\d+)$", re.M
 )
+ANSWER_AUDIT = re.compile(
+    r"^ANSWER_AUDIT seed (\d+) objective_calls 1 read_only true$", re.M
+)
 
 
 def require(condition, message):
@@ -36,8 +39,12 @@ def worker(path, seed, budget, ensemble_budget, n, mode):
     rows = SUMMARY.findall(text)
     surfaces = SURFACE.findall(text)
     policies = POLICY.findall(text)
+    audits = ANSWER_AUDIT.findall(text)
     require(
         len(rows) == len(surfaces) == len(policies) == 1, f"{path}: incomplete worker"
+    )
+    require(
+        audits == [str(seed)], f"{path}: missing or mismatched read-only answer audit"
     )
     require(
         "catalog channels: surface evidence only; geometry policy disabled" in text,
@@ -156,6 +163,7 @@ def summarize(root):
         "features": manifest["features"],
         **parameters,
         "ensemble_budget": budget * replicas,
+        "ensemble_verification_calls": replicas,
         "ensemble_best": best,
         "ensemble_hits": {mode: sum(values) for mode, values in hits.items()},
         "shared_peer_blocks": sum(row["peer_blocks"] for row in workers["shared"]),
