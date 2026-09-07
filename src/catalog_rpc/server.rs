@@ -2385,6 +2385,60 @@ fn apply_request(
                         ProtocolRejection::ValidationRejected,
                     );
                 }
+                // CATALOG_FAMILY_ARCHIVE=1: keep the catalog family-diverse.
+                // Admission is by energy, so on a landscape with one deep
+                // wide funnel a full catalog is thirty isomers of that funnel
+                // and the sparsest-family draw has nothing else to hand out
+                // (measured on LJ75: one hear in 48 replicas). When the
+                // catalog is full and the candidate's packing family is not
+                // represented, evict the highest-energy non-incumbent entry
+                // of the most crowded family first.
+                if std::env::var("CATALOG_FAMILY_ARCHIVE").is_ok_and(|v| v == "1")
+                    && scientific.catalog.len() >= scientific.catalog.capacity()
+                    && let Some(new_hist) = scientific
+                        .packing
+                        .histogram(&validated.candidate.coordinates)
+                    && let Some(new_family) = scientific.packing.family_of(&new_hist)
+                {
+                    let families: Vec<Option<usize>> = scientific
+                        .catalog
+                        .entries()
+                        .iter()
+                        .map(|entry| {
+                            scientific
+                                .packing
+                                .histogram(entry.coordinates())
+                                .and_then(|h| scientific.packing.family_of(&h))
+                        })
+                        .collect();
+                    let represented = families.iter().any(|f| *f == Some(new_family));
+                    if !represented {
+                        let mut counts: std::collections::BTreeMap<usize, usize> =
+                            std::collections::BTreeMap::new();
+                        for f in families.iter().flatten() {
+                            *counts.entry(*f).or_insert(0) += 1;
+                        }
+                        if let Some((&crowded, &n_crowd)) = counts.iter().max_by_key(|(_, n)| **n)
+                            && n_crowd >= 2
+                        {
+                            let incumbent_id =
+                                scientific.catalog.incumbent().map(|e| e.census_id());
+                            let victim = scientific
+                                .catalog
+                                .entries()
+                                .iter()
+                                .zip(families.iter())
+                                .filter(|(entry, f)| {
+                                    **f == Some(crowded) && Some(entry.census_id()) != incumbent_id
+                                })
+                                .max_by(|(a, _), (b, _)| a.energy().total_cmp(&b.energy()))
+                                .map(|(entry, _)| entry.census_id());
+                            if let Some(victim) = victim {
+                                scientific.catalog.evict(victim);
+                            }
+                        }
+                    }
+                }
                 let outcome = scientific.catalog.admit(
                     observation.basin_id,
                     observation.basin_visits,

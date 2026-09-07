@@ -194,6 +194,12 @@ impl MoveLibrary {
                 },
             ],
         };
+        if cfg.soap_repel {
+            kernels.push(ClusterMove::SoapRepel {
+                rmsd: LennardJonesPreset::SOAP_RMSD * cfg.length_scale,
+                cutoff: LennardJonesPreset::SOAP_CUTOFF * cfg.length_scale,
+            });
+        }
         if cfg.point_symmetrise {
             kernels.push(ClusterMove::PointSymmetrise {
                 n_points: cfg.n_points,
@@ -359,6 +365,23 @@ pub enum ClusterMove {
         pair_cutoff: f64,
         /// Half-width of the fallback single-point displacement.
         fallback_step: f64,
+    },
+    /// Step away, in descriptor space, from the packings the population
+    /// occupies, pulled back to Cartesian displacements through the SOAP
+    /// Jacobian.
+    ///
+    /// The occupied cloud is this structure plus every reference the
+    /// cooperative layer has handed the chain (other replicas' nearby
+    /// minima, [`crate::catalog::packing_references`]); the direction is
+    /// minus the cloud's mean packing descriptor, so the proposal leaves the
+    /// region the population is crowding rather than the region this chain
+    /// alone has visited. With no references on file it falls back to the
+    /// single-chain leftover hop, so the arm is defined for a lone chain too.
+    SoapRepel {
+        /// Cap on the Cartesian RMSD of one step.
+        rmsd: f64,
+        /// SOAP neighbour cutoff.
+        cutoff: f64,
     },
     /// Twin the structure across one of its dense planes.
     ///
@@ -1236,6 +1259,7 @@ impl ClusterMove {
             ClusterMove::ShellRotate(_) => "shell".into(),
             ClusterMove::Symmetrise(_) => "sym".into(),
             ClusterMove::PointSymmetrise { .. } => "psym".into(),
+            ClusterMove::SoapRepel { .. } => "repel".into(),
             ClusterMove::Visit { .. } => "visit".into(),
             ClusterMove::Angular { .. } => "angular".into(),
             ClusterMove::Twin { .. } => "twin".into(),
@@ -1283,6 +1307,19 @@ impl ClusterMove {
                 y
             }
             ClusterMove::Twin { n_points } => crate::twin::propose(x, *n_points, rng),
+            ClusterMove::SoapRepel { rmsd, cutoff } => {
+                let spec = crate::soap::SoapSpec {
+                    rcut_nn: *cutoff,
+                    ..Default::default()
+                };
+                let refs = crate::catalog::packing_references();
+                if !refs.is_empty()
+                    && let Some(y) = crate::soap::push_away_clouds(x, &refs, spec, *rmsd)
+                {
+                    return y;
+                }
+                crate::soap::step_away_cloud(x, spec, *rmsd, None, None, None, rng)
+            }
             ClusterMove::Reseed { n_points, source } => {
                 // Both the order and the length scale are read off the current
                 // structure, so the move carries no knowledge of the potential

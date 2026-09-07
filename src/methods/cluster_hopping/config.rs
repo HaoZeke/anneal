@@ -368,6 +368,13 @@ pub struct Config {
     /// quenched, and the quench is offered to the acceptance rule. One
     /// attempt per new basin, so a chain sitting still never pays twice.
     pub point_symmetrise_on_new: bool,
+    /// Add the population-repulsion SOAP step ([`ClusterMove::SoapRepel`])
+    /// as a proposal arm.
+    pub soap_repel: bool,
+    /// Accept a heard (exchanged) structure with the Metropolis function of
+    /// the biased energy difference under this chain's bias field, after
+    /// Bennett's potential-switching identity, instead of unconditionally.
+    pub exchange_metropolis: bool,
     /// Fraction of points, by distance from the centroid, that count as the
     /// core for [`Config::point_symmetrise_on_new`].
     pub symmetrise_core_fraction: f64,
@@ -1042,6 +1049,8 @@ impl Config {
             symmetrise_on_stall: false,
             point_symmetrise: false,
             point_symmetrise_on_new: false,
+            soap_repel: false,
+            exchange_metropolis: false,
             symmetrise_core_fraction: 0.6,
             continuous_symmetry: ContinuousSymmetry::Off,
             symmetry_tolerance: LennardJonesPreset::SYMMETRY_TOLERANCE * length_scale,

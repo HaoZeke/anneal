@@ -73,6 +73,7 @@ fn apply_boolean_options(cfg: &mut Config, opts: &[&str]) {
                     | "psymnew"
                     | "novel"
                     | "sbkey"
+                    | "repel"
                     | "tabu"
                     | "bayes"
                     | "flat"
@@ -1780,6 +1781,18 @@ fn main() {
     cfg.point_symmetrise = opts.contains(&"psym");
     // Core symmetrisation once per new basin (Oakley-Johnston-Wales), quenched.
     cfg.point_symmetrise_on_new = opts.contains(&"psymnew");
+    // Population repulsion in SOAP space, pulled back through the Jacobian.
+    cfg.soap_repel = opts.contains(&"repel");
+    // Heard structures face Bennett's exchange acceptance unless the
+    // unconditional adoption is asked for by name.
+    cfg.exchange_metropolis = !std::env::var("CATALOG_HEAR_UNCONDITIONAL").is_ok_and(|v| v == "1");
+    if let Some(g) = std::env::var("BIAS_GAMMA")
+        .ok()
+        .and_then(|v| v.parse::<f64>().ok())
+    {
+        cfg.bias_gamma = g;
+        println!("  bias gamma {g}");
+    }
     if let Some(frac) = std::env::var("PSYM_CORE")
         .ok()
         .and_then(|v| v.parse::<f64>().ok())
@@ -2703,7 +2716,7 @@ fn main() {
             "  seed {seed}: best {:.6}  hops {}  screened {}  charged {}  \
              basins {} ({:.1} hops each)  returned {}  \
              swaps {}/{}  paths {} improved {} gain {:.3}  \
-             escape {:.3} thr {:.4} same/known/new {}/{}/{} soft {}/{} sub {}/{} lmin {:.4} climbs {} gain {:.2} radius {:.3} step {:.3} restarts {} angular {}/{} R {:.3} tabu {} vetoed {} screen {}/{} expl {} obs {} ctx {:?}  \
+             escape {:.3} thr {:.4} same/known/new {}/{}/{} soft {}/{} sub {}/{} lmin {:.4} climbs {} gain {:.2} radius {:.3} step {:.3} restarts {} xrefused {} angular {}/{} R {:.3} tabu {} vetoed {} screen {}/{} expl {} obs {} ctx {:?}  \
              relaxed {converged}/{} converged  early {early_stopped} saved {early_saved}  \
              verified {}{}",
             out.best,
@@ -2733,6 +2746,7 @@ fn main() {
             out.merge_radius,
             out.mean_step,
             out.restarts,
+            out.exchanges_refused,
             out.angular.1,
             out.angular.0,
             out.angular.2,
@@ -4214,6 +4228,10 @@ fn run_capnp_catalog(
     // CATALOG_HEAR_STALL hops is stalled in its packing.
     let mut hear_last_best = f64::INFINITY;
     let mut hear_last_best_hop = 0usize;
+    // The structure last adopted by hearing, kept so the walk after a hear
+    // can be reported: whether the replica is still in the adopted packing
+    // family or has slid back to where it was.
+    let mut heard_structure: Option<Vec<f64>> = None;
     let mut count_walk = 0usize;
     let mut count_hole = 0usize;
     let mut extra_cover = 0usize;
@@ -5054,9 +5072,45 @@ fn run_capnp_catalog(
         // structure. Measured on LJ75, adoption on energy moves the whole
         // ensemble onto the icosahedral shelf within a thousand hops.
         let hear_enabled = !std::env::var("CATALOG_NO_HEAR").is_ok_and(|v| v == "1");
+        // CATALOG_HEAR=family: hearing is steering by the census, not by
+        // energy. A replica that has not deepened its own best for
+        // CATALOG_HEAR_STALL hops adopts the coordinator's sparsest-family
+        // entry when that entry sits in a packing family other than the one
+        // the replica stands in, whatever its energy. The incumbent draw is
+        // never taken in this mode: adopting the deepest known structure was
+        // measured to move the whole ensemble onto the icosahedral shelf.
+        let family_mode = std::env::var("CATALOG_HEAR").is_ok_and(|v| v == "family");
+        let hear_stall: usize = std::env::var("CATALOG_HEAR_STALL")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(5000);
+        if snapshot.best_energy() < hear_last_best - 1e-9 {
+            hear_last_best = snapshot.best_energy();
+            hear_last_best_hop = snapshot.hops();
+        }
+        let stalled = snapshot.hops().saturating_sub(hear_last_best_hop) >= hear_stall;
+        // After a hear, one line every ten checkpoints: where the walk is.
+        if let Some(adopted) = heard_structure.as_ref()
+            && checkpoint_sequence.is_multiple_of(10)
+        {
+            let same_family = snapshot
+                .current_state()
+                .as_slice()
+                .is_some_and(|here| !anneal_core::catalog::different_packing_family(here, adopted));
+            println!(
+                "  walk hops {}  energy {:.6}  best {:.6}  in-adopted-family {}",
+                snapshot.hops(),
+                snapshot.current_energy(),
+                snapshot.best_energy(),
+                same_family
+            );
+        }
         for draw in [INCUMBENT_SAMPLE_DRAW, SPARSE_SAMPLE_DRAW] {
             if !hear_enabled {
                 break;
+            }
+            if family_mode && draw == INCUMBENT_SAMPLE_DRAW {
+                continue;
             }
             let outcome = cooperative.try_sample_candidate(replica, draw);
             let _ = cooperative.try_sample_candidate(replica, draw);
@@ -5069,13 +5123,19 @@ fn run_capnp_catalog(
                 // Mid-hop current energy sits above the ico floor.
                 // Comparing against it yanks every walk back onto ico.
                 let deeper = held.energy < floor_energy - 1e-3;
-                if !deeper {
+                if family_mode {
+                    if !stalled {
+                        continue;
+                    }
+                } else if !deeper {
                     continue;
                 }
                 let elsewhere = snapshot.current_state().as_slice().is_none_or(|here| {
                     anneal_core::catalog::different_packing_family(here, &held.coordinates)
                 });
-                if draw == INCUMBENT_SAMPLE_DRAW || elsewhere {
+                if (family_mode && elsewhere)
+                    || (!family_mode && (draw == INCUMBENT_SAMPLE_DRAW || elsewhere))
+                {
                     heard = Some(held);
                     break;
                 }
@@ -5083,6 +5143,9 @@ fn run_capnp_catalog(
         }
         if let Some(held) = heard {
             count_other_family += 1;
+            // The new packing gets a full stall window before the next hear.
+            hear_last_best_hop = snapshot.hops();
+            heard_structure = Some(held.coordinates.clone());
             println!(
                 "  hear {:.6}  hops {}  refs {}  other {}",
                 held.energy,
