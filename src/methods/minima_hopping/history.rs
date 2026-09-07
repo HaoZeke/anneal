@@ -76,7 +76,10 @@ impl MinimumHistory {
 
     /// Number of exact identities adopted by at least one chain.
     pub fn accepted_count(&self) -> usize {
-        self.accepted_visits.iter().filter(|visits| **visits > 0).count()
+        self.accepted_visits
+            .iter()
+            .filter(|visits| **visits > 0)
+            .count()
     }
 
     /// Observations since first adoption, including that accepted visit.
@@ -92,7 +95,9 @@ impl MinimumHistory {
     /// Registration is idempotent. A shared caller holds its history lock
     /// across observation, threshold decision, and this publication.
     pub fn mark_accepted(&mut self, minimum: usize) -> Result<(), MinimumHistoryError> {
-        let visits = self.accepted_visits.get_mut(minimum)
+        let visits = self
+            .accepted_visits
+            .get_mut(minimum)
             .ok_or(MinimumHistoryError::UnknownMinimum(minimum))?;
         *visits = (*visits).max(1);
         Ok(())
