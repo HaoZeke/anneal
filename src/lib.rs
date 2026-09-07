@@ -98,6 +98,9 @@ pub mod curvature;
 /// Transport for consensus traffic between server brains.
 #[cfg(feature = "bank-rpc")]
 pub mod decree_bus;
+/// nng pub/sub census bus between the replicas of one cooperative run.
+#[cfg(feature = "bank-rpc")]
+pub mod census_bus;
 pub mod delayed;
 /// Versioned multiscale invariant coordinates for basin catalogs.
 pub mod descriptor_space;
