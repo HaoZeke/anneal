@@ -73,6 +73,15 @@ per-replica work by stage, history overhead, and ensemble wall time. Private
 minimum counts sum replica-local identities; shared counts describe one
 common history. These counts are not interchangeable measures of coverage.
 
+For a controlled escape probe, `ANNEAL_START_COORDINATES` selects a plain
+coordinate file containing one finite `x y z` triplet per atom, without an
+XYZ header or element labels. Every replica starts from that structure;
+the seed still controls its proposals. The configuration record reports
+`start_protocol: "fixed-coordinate-file"` and embeds the input coordinates.
+This input cannot be combined with `ANNEAL_OPTBENCH_STARTS`: a diagnostic
+shelf structure is not a published random-start archive. The `mh-private-soft`
+and `mh-shared-soft` selectors add velocity softening to the same comparison.
+
 External potentials use the same optimizer driver. The molecular-cluster and
 slab examples share one persistent in-process profile adapter; selecting
 `nwchemc` loads `libnwchemc` once and serves the complete hop loop without an
