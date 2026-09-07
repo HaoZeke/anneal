@@ -433,7 +433,7 @@ fn best_coordinated(x: &[f64], sites: &[[f64; 3]], bond: f64, keep: usize) -> Ve
         .iter()
         .map(|s| ((0..n).filter(|&i| dist2(*s, point(x, i)) < r2).count(), *s))
         .collect();
-    ranked.sort_by(|a, b| b.0.cmp(&a.0));
+    ranked.sort_by_key(|site| std::cmp::Reverse(site.0));
     // Every site tied with the last kept one stays: the cut is by
     // coordination, never by the arbitrary order of equals.
     let floor = ranked.get(keep.saturating_sub(1)).map_or(0, |(c, _)| *c);

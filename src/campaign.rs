@@ -158,22 +158,17 @@ impl CampaignConfig {
     /// how every existing read site tests them; the banner still names
     /// the off channels explicitly.
     pub fn env_pairs(&self) -> Vec<(String, String)> {
-        let mut pairs: Vec<(String, String)> = Vec::new();
-        pairs.push(("CATALOG_CAMPAIGN".into(), self.campaign.clone()));
-        pairs.push((
-            "CATALOG_REPLICAS".into(),
-            self.ensemble.replicas.to_string(),
-        ));
-        pairs.push(("CATALOG_WAVE".into(), self.ensemble.wave.to_string()));
-        pairs.push(("CATALOG_SLICE".into(), self.ensemble.slice.to_string()));
-        pairs.push((
-            "CATALOG_MAX_HOPS".into(),
-            self.ensemble.max_hops.to_string(),
-        ));
-        pairs.push((
-            "CATALOG_POPULATION_INTERVAL".into(),
-            self.ensemble.population_interval.to_string(),
-        ));
+        let mut pairs = vec![
+            ("CATALOG_CAMPAIGN".into(), self.campaign.clone()),
+            ("CATALOG_REPLICAS".into(), self.ensemble.replicas.to_string()),
+            ("CATALOG_WAVE".into(), self.ensemble.wave.to_string()),
+            ("CATALOG_SLICE".into(), self.ensemble.slice.to_string()),
+            ("CATALOG_MAX_HOPS".into(), self.ensemble.max_hops.to_string()),
+            (
+                "CATALOG_POPULATION_INTERVAL".into(),
+                self.ensemble.population_interval.to_string(),
+            ),
+        ];
         for (name, on) in self.channel_states() {
             if on {
                 pairs.push((name.to_string(), "1".into()));

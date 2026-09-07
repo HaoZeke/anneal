@@ -1012,7 +1012,7 @@ pub fn contact_cutoff_from_gr(x: ArrayView1<f64>, n: usize) -> f64 {
     if span <= 0.0 || distances.is_empty() {
         return RING_CUTOFF_SCALE * nn;
     }
-    let bins = distances.len().min(48).max(8);
+    let bins = distances.len().clamp(8, 48);
     let mut hist = vec![0usize; bins];
     for &d in &distances {
         let index = ((d / span) * bins as f64).floor() as usize;

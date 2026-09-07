@@ -1115,9 +1115,9 @@ where
     // rather than carried with the state.
     let mut hop_parked: Vec<crate::hmc::hop::HopChain> = Vec::new();
     let mut hop = cfg.hmc.as_ref().map(crate::hmc::hop::HopChain::new);
-    if cfg.hmc.is_some() {
+    if let Some(hmc) = cfg.hmc.as_ref() {
         for _ in 1..n_rep {
-            hop_parked.push(crate::hmc::hop::HopChain::new(cfg.hmc.as_ref().unwrap()));
+            hop_parked.push(crate::hmc::hop::HopChain::new(hmc));
         }
     }
     #[cfg(feature = "ira")]
@@ -1303,7 +1303,6 @@ where
     let frontier_exchange =
         std::env::var("CATALOG_FRONTIER_EXCHANGE").is_ok_and(|value| value == "1");
     let mut screen_bank: Vec<(Array1<f64>, f64, Array1<f64>)> = Vec::new();
-    let mut known_hits = 0usize;
     // The run's own environment codebook, grown from every accepted
     // recordable structure, so the trace can report each arrival's
     // unseen-environment share before the arrival is added.
@@ -2470,9 +2469,6 @@ where
         } else {
             None
         };
-        if known_stand_in.is_some() {
-            known_hits += 1;
-        }
         let returning = cfg.return_screen && {
             let ds = bias.cv(x_screen.view());
             let dc = bias.cv(x.view());
