@@ -25,6 +25,7 @@ class SurfaceEvidenceReportTests(unittest.TestCase):
                     "  catalog channels: surface evidence only; geometry policy disabled\n"
                     "  policy: leaves 0 other 0 walk 0 hole 0 refused 0\n"
                     '{"kind":"local_work","aggregate_charged":1000}\n'
+                    f"ANSWER_AUDIT seed {replica} objective_calls 1 read_only true\n"
                     f"SURFACE_EVIDENCE seed {replica} local_blocks 2 peer_blocks {peer} "
                     "local_draws [1, 1] local_means [0.0, -0.1]\n"
                     f"  seed {replica}: best {-40 - replica:.6f}  hops 10  charged 1000\n"
@@ -47,6 +48,11 @@ class SurfaceEvidenceReportTests(unittest.TestCase):
 
     def test_rejects_incomplete_worker(self):
         self.replace("shared", 1, "  seed 1: best", "  interrupted 1: best")
+        with self.assertRaises(ValueError):
+            summarize(self.root)
+
+    def test_rejects_missing_read_only_answer_audit(self):
+        self.replace("shared", 0, "read_only true", "read_only false")
         with self.assertRaises(ValueError):
             summarize(self.root)
 
