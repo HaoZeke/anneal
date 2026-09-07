@@ -1076,7 +1076,17 @@ fn charged(led: &mut Ledger, x: ArrayView1<f64>) -> Option<(f64, Array1<f64>)> {
         return None;
     }
     let (energy, grad) = lj(x);
-    Some(anneal_core::known_basin::effective(x, energy, grad))
+    Some(if led.is_diagnostic_quench() {
+        (energy, grad)
+    } else {
+        anneal_core::known_basin::effective(x, energy, grad)
+    })
+}
+
+/// One physical-objective query, without optimization or quench evidence.
+fn evaluate_without_quenching(led: &mut Ledger, x: ArrayView1<f64>) -> (f64, Array1<f64>) {
+    let energy = if led.charge() { lj(x).0 } else { f64::INFINITY };
+    (energy, x.to_owned())
 }
 
 /// The objective with isotropic noise on the gradient, for the screening pass.
@@ -2090,6 +2100,9 @@ fn main() {
             ))
         });
         let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, iters: usize| {
+            if iters == 0 {
+                return evaluate_without_quenching(led, x);
+            }
             let charged_before = led.spent();
             let diagnostic = led.is_diagnostic_quench();
             // Curvature is not carried between relaxations: measured on this
