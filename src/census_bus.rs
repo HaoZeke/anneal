@@ -130,6 +130,10 @@ impl CensusBus {
     }
 }
 
+fn decode_frame(_bytes: &[u8], _replicas: u32) -> Option<PeerMinimum> {
+    unimplemented!("census sender admission")
+}
+
 fn decode(bytes: &[u8]) -> Option<PeerMinimum> {
     let header = bytes.get(..24)?;
     let replica = u32::from_le_bytes(header[..4].try_into().ok()?);
@@ -254,6 +258,50 @@ mod tests {
             assert!(
                 decode(&bytes).is_none(),
                 "{declared} declared coordinates do not match the six-coordinate payload"
+            );
+        }
+    }
+
+    fn framed_minimum(topic_replica: u32, payload_replica: u32) -> Vec<u8> {
+        let mut bytes = format!("census/{topic_replica:03}\n").into_bytes();
+        let mut payload = frame(-1.0, &COORDINATES);
+        payload[..4].copy_from_slice(&payload_replica.to_le_bytes());
+        bytes.extend_from_slice(&payload);
+        bytes
+    }
+
+    #[test]
+    fn sender_admission_preserves_known_topic_and_payload_identity() {
+        for replica in [0, 1, 999, 1000] {
+            let minimum = super::decode_frame(&framed_minimum(replica, replica), 1001).unwrap();
+            assert_eq!(minimum.replica, replica);
+            assert_eq!(minimum.hops, 7);
+            assert_eq!(minimum.energy, -1.0);
+            assert_eq!(minimum.coordinates, COORDINATES);
+        }
+    }
+
+    #[test]
+    fn sender_admission_rejects_ids_outside_the_configured_cohort() {
+        for replica in [4, 17, u32::MAX] {
+            assert!(
+                super::decode_frame(&framed_minimum(replica, replica), 4).is_none(),
+                "replica {replica} does not belong to a four-replica census"
+            );
+        }
+    }
+
+    #[test]
+    fn sender_admission_rejects_an_empty_cohort() {
+        assert!(super::decode_frame(&framed_minimum(0, 0), 0).is_none());
+    }
+
+    #[test]
+    fn sender_admission_rejects_topic_and_payload_identity_mismatch() {
+        for (topic_replica, payload_replica) in [(1, 2), (2, 1)] {
+            assert!(
+                super::decode_frame(&framed_minimum(topic_replica, payload_replica), 4).is_none(),
+                "topic {topic_replica} cannot identify payload replica {payload_replica}"
             );
         }
     }
