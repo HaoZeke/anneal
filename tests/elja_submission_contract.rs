@@ -742,11 +742,19 @@ fn diagnostic_probes_precede_adaptive_checkpoint_actions_and_require_a_minimum()
 fn evidence_only_ablation_bypasses_catalog_geometry_policy() {
     let source = include_str!("../examples/lj_cluster_search.rs");
     assert!(source.contains("CATALOG_EVIDENCE_ONLY"));
-    let checkpoint = source.rsplit_once("let mut checkpoint = |snapshot: ChainCheckpoint<'_>|").unwrap().1;
+    let checkpoint = source
+        .rsplit_once("let mut checkpoint = |snapshot: ChainCheckpoint<'_>|")
+        .unwrap()
+        .1;
     let evidence = checkpoint.find("if evidence_only {").unwrap();
-    let ordinary = checkpoint.find("checkpoint_sequence = checkpoint_sequence").unwrap();
+    let ordinary = checkpoint
+        .find("checkpoint_sequence = checkpoint_sequence")
+        .unwrap();
     let body = &checkpoint[evidence..ordinary];
-    assert!(body.contains(".record_work("), "ablation must charge every local objective call");
+    assert!(
+        body.contains(".record_work("),
+        "ablation must charge every local objective call"
+    );
     assert!(body.contains("last_charged = snapshot.charged()"));
     assert!(body.contains("return CheckpointAction::Continue"));
     assert!(checkpoint[..evidence].contains(".post_surface_evidence("));
