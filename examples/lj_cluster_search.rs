@@ -3710,10 +3710,11 @@ fn run_capnp_catalog(
     #[cfg(feature = "bank-rpc")]
     let brain_stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
     #[cfg(feature = "bank-rpc")]
-    let brain_handle = if !evidence_only && let (Ok(listen), Ok(peers_raw)) = (
-        std::env::var("CATALOG_BRAIN_LISTEN"),
-        std::env::var("CATALOG_BRAIN_PEERS"),
-    ) {
+    let brain_handle = if !evidence_only
+        && let (Ok(listen), Ok(peers_raw)) = (
+            std::env::var("CATALOG_BRAIN_LISTEN"),
+            std::env::var("CATALOG_BRAIN_PEERS"),
+        ) {
         use anneal_core::raft::wire::{
             ExplorationDecree, assign_seam_work, decode_decree, encode_decree,
         };
