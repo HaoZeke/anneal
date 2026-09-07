@@ -2197,7 +2197,7 @@ pub struct SuperbasinReport {
     /// Escapes refused.
     pub refusals: usize,
     /// Refusals by kind, indexed by [`Refusal::kind`].
-    pub refusals_by_kind: [usize; 7],
+    pub refusals_by_kind: [usize; 8],
     /// Largest revisits-per-state ratio a well-mixed refusal reported.
     ///
     /// The scientific content of a negative result: if the observed graph never
