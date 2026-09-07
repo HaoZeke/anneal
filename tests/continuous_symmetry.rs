@@ -71,8 +71,8 @@ fn ci_projection_commutes_with_translation() {
     let shift = [4.0, -3.0, 1.5];
     let mut shifted = x.clone();
     for atom in 0..classes.len() {
-        for axis in 0..3 {
-            shifted[3 * atom + axis] += shift[axis];
+        for (axis, &offset) in shift.iter().enumerate() {
+            shifted[3 * atom + axis] += offset;
         }
     }
 
@@ -81,8 +81,8 @@ fn ci_projection_commutes_with_translation() {
 
     assert_eq!(base.assignment, translated.assignment);
     for atom in 0..classes.len() {
-        for axis in 0..3 {
-            let expected = base.coordinates[3 * atom + axis] + shift[axis];
+        for (axis, &offset) in shift.iter().enumerate() {
+            let expected = base.coordinates[3 * atom + axis] + offset;
             assert!((translated.coordinates[3 * atom + axis] - expected).abs() < 1e-12);
         }
     }
