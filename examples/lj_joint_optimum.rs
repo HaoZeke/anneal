@@ -298,15 +298,15 @@ fn quench_minimum(
     optimizer.forget();
     let (_, state, _) = optimizer.minimize(start, steps, |point| {
         // A line search cannot consume the final minimum-certificate call.
-        (ledger.remaining() > 1 && ledger.charge())
-            .then(|| potential.value_and_gradient(point))
+        (ledger.remaining() > 1 && ledger.charge()).then(|| potential.value_and_gradient(point))
     });
     let final_evaluation = ledger
         .charge()
         .then(|| potential.value_and_gradient(state.view()));
-    let (energy, gradient) = final_evaluation.map_or((f64::INFINITY, None), |(energy, gradient)| {
-        (energy, Some(gradient))
-    });
+    let (energy, gradient) = final_evaluation
+        .map_or((f64::INFINITY, None), |(energy, gradient)| {
+            (energy, Some(gradient))
+        });
     let validated = energy.is_finite()
         && gradient.as_ref().is_some_and(|values| {
             values
