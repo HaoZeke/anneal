@@ -195,6 +195,7 @@ pub mod residual_field;
 pub mod ride_execution;
 /// Shared same-system scheduling evidence for minimum-mode transition searches.
 pub mod ride_ledger;
+pub mod rigid_body;
 /// Deterministic provenance records for engine-backed runs.
 pub mod run_manifest;
 pub mod runner;

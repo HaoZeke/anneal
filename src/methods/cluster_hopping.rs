@@ -5204,6 +5204,13 @@ mod tests {
 /// A shape metric quotients out those symmetries itself and needs the
 /// coordinates, so the two cannot be mixed.
 pub enum ClusterFingerprint {
+    /// Actual rigid-body site distances, separated by chemical species.
+    RigidBodies {
+        /// Number of centers and rotation vectors in the state.
+        molecules: usize,
+        /// Body-frame geometry used by the objective.
+        geometry: crate::rigid_body::RigidBodyGeometry,
+    },
     /// Sorted pairwise distances, compared by Euclidean distance.
     Spectrum(SortedPairs),
     /// Coordinates, for a metric that does its own matching.
@@ -5373,6 +5380,10 @@ impl ClusterFingerprint {
     /// Descriptor from the live config, so SOAP packing carries cutoff
     /// and species.
     pub fn of_config(cfg: &Config, reference: &Array1<f64>) -> Self {
+        if cfg.move_library.is_rigid_body() && effective_keying(cfg) == Keying::Distances
+            && let Some(geometry) = cfg.rigid_body_geometry.as_ref() {
+            return Self::RigidBodies { molecules: cfg.n_points, geometry: geometry.clone() };
+        }
         match effective_keying(cfg) {
             Keying::Core => ClusterFingerprint::Core {
                 species: cfg.species.clone(),
@@ -5406,6 +5417,7 @@ impl ClusterFingerprint {
 impl Fingerprint for ClusterFingerprint {
     fn describe(&self, x: ArrayView1<f64>) -> Array1<f64> {
         match self {
+            ClusterFingerprint::RigidBodies { molecules, geometry } => geometry.describe(*molecules, x),
             ClusterFingerprint::Spectrum(s) => s.describe(x),
             ClusterFingerprint::Coordinates => x.to_owned(),
             ClusterFingerprint::Core { species } => {
