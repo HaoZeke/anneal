@@ -6409,7 +6409,7 @@ fn census_bus_base(sharing: bool, evidence_only: bool, configured: Option<&str>)
 #[cfg(feature = "bank-rpc")]
 fn census_nearby_updates(
     last_minimum: &mut Option<(f64, Vec<f64>)>,
-    checkpoint_sequence: u64,
+    _checkpoint_sequence: u64,
     energy: f64,
     here: &[f64],
     peers: &[&anneal_core::census_bus::PeerMinimum],
@@ -6417,15 +6417,9 @@ fn census_nearby_updates(
     nearby: &std::collections::HashMap<u32, bool>,
 ) -> (Vec<(u32, bool)>, usize) {
     // Packing classification depends on coordinates, not objective values.
-    // A full recomputation (own minimum moved) is throttled to every fourth
-    // checkpoint: about 2600 hops, ten times finer than the stopping rule's
-    // window, and it removes 47 packing comparisons from three checkpoints
-    // in four. Measured before the throttle: 95k to 170k hops an hour
-    // against 780k for the coordinator-only cadence.
     let own_moved = last_minimum
         .as_ref()
-        .is_none_or(|(_, coordinates)| coordinates != here)
-        && checkpoint_sequence.is_multiple_of(4);
+        .is_none_or(|(_, coordinates)| coordinates != here);
     if own_moved || last_minimum.is_none() {
         *last_minimum = Some((energy, here.to_vec()));
     }
