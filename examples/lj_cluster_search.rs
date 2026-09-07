@@ -2602,6 +2602,7 @@ fn main() {
                     "seed {seed} returned a structure with gradient {gmax:.2e}, \
                      which is not a minimum"
                 );
+                println!("ANSWER_AUDIT seed {seed} objective_calls 1 read_only true");
                 Some((e, gmax))
             }
             None => None,
