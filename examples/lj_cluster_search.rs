@@ -6043,7 +6043,8 @@ fn run_capnp_catalog(
         checkpoint_interval,
         &mut checkpoint,
     );
-    if evidence_only && let Some(charged) = unsettled_objective_calls(ledger.spent(), last_charged) {
+    if evidence_only && let Some(charged) = unsettled_objective_calls(ledger.spent(), last_charged)
+    {
         cooperative
             .record_work(replica, EVIDENCE_ONLY_WORK_KIND, charged)
             .expect("terminal evidence-only work must enter the cooperative ledger");
