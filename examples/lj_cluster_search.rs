@@ -86,6 +86,7 @@ fn apply_boolean_options(cfg: &mut Config, opts: &[&str]) {
                     | "novel"
                     | "sbkey"
                     | "repel"
+                    | "jump"
                     | "tabu"
                     | "bayes"
                     | "flat"
@@ -1814,6 +1815,23 @@ fn main() {
     cfg.point_symmetrise_on_new = opts.contains(&"psymnew");
     // Population repulsion in SOAP space, pulled back through the Jacobian.
     cfg.soap_repel = opts.contains(&"repel");
+    // Occasional jumping on stagnation (Iwamatsu-Okabe).
+    cfg.jump_on_stall = opts.contains(&"jump");
+    if let Some(p) = std::env::var("JUMP_PATIENCE").ok().and_then(|v| v.parse::<usize>().ok()) {
+        cfg.jump_patience = p;
+    }
+    if let Some(k) = std::env::var("JUMP_STEPS").ok().and_then(|v| v.parse::<usize>().ok()) {
+        cfg.jump_steps = k;
+    }
+    if let Some(h) = std::env::var("JUMP_STEP").ok().and_then(|v| v.parse::<f64>().ok()) {
+        cfg.jump_step = h * cfg.length_scale;
+    }
+    if cfg.jump_on_stall {
+        println!(
+            "  occasional jumping: patience {} hops, {} steps of half-width {}",
+            cfg.jump_patience, cfg.jump_steps, cfg.jump_step
+        );
+    }
     // Heard structures face the receiving chain's biased-energy filter
     // unless unconditional adoption is requested explicitly.
     cfg.exchange_metropolis = !std::env::var("CATALOG_HEAR_UNCONDITIONAL").is_ok_and(|v| v == "1");
@@ -2730,7 +2748,7 @@ fn main() {
             "  seed {seed}: best {:.6}  hops {}  screened {}  charged {}  \
              basins {} ({:.1} hops each)  returned {}  \
              swaps {}/{}  paths {} improved {} gain {:.3}  \
-             escape {:.3} thr {:.4} same/known/new {}/{}/{} soft {}/{} sub {}/{} lmin {:.4} climbs {} gain {:.2} radius {:.3} step {:.3} restarts {} xrefused {} angular {}/{} R {:.3} tabu {} vetoed {} screen {}/{} expl {} obs {} ctx {:?}  \
+             escape {:.3} thr {:.4} same/known/new {}/{}/{} soft {}/{} sub {}/{} lmin {:.4} climbs {} gain {:.2} radius {:.3} step {:.3} restarts {} xrefused {} jumps {} angular {}/{} R {:.3} tabu {} vetoed {} screen {}/{} expl {} obs {} ctx {:?}  \
              relaxed {converged}/{} converged  early {early_stopped} saved {early_saved}  \
              verified {}{}",
             out.best,
@@ -2761,6 +2779,7 @@ fn main() {
             out.mean_step,
             out.restarts,
             out.exchanges_refused,
+            out.jumps,
             out.angular.1,
             out.angular.0,
             out.angular.2,

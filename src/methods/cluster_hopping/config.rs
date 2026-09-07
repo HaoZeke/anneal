@@ -376,6 +376,16 @@ pub struct Config {
     /// This unilateral relocation heuristic does not certify equilibrium
     /// sampling or the product-ensemble balance of a paired replica swap.
     pub exchange_metropolis: bool,
+    /// Basin hopping with occasional jumping: on stagnation, a short walk of
+    /// unquenched, unconditionally accepted collective displacements, then a
+    /// quench.
+    pub jump_on_stall: bool,
+    /// Hops without improvement before a jump (and between jumps).
+    pub jump_patience: usize,
+    /// Displacements in one jump.
+    pub jump_steps: usize,
+    /// Half-width of each displacement, in length units.
+    pub jump_step: f64,
     /// Fraction of points, by distance from the centroid, that count as the
     /// core for [`Config::point_symmetrise_on_new`].
     pub symmetrise_core_fraction: f64,
@@ -1052,6 +1062,10 @@ impl Config {
             point_symmetrise_on_new: false,
             soap_repel: false,
             exchange_metropolis: false,
+            jump_on_stall: false,
+            jump_patience: 5_000,
+            jump_steps: 10,
+            jump_step: LennardJonesPreset::ALL_POINTS_STEP * length_scale,
             symmetrise_core_fraction: 0.6,
             continuous_symmetry: ContinuousSymmetry::Off,
             symmetry_tolerance: LennardJonesPreset::SYMMETRY_TOLERANCE * length_scale,
