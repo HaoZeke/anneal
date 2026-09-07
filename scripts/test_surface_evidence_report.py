@@ -40,7 +40,9 @@ class SurfaceEvidenceReportTests(unittest.TestCase):
     def test_reports_independent_ensemble_minima_at_aggregate_work(self):
         result = summarize(self.root)
         self.assertEqual(result["ensemble_budget"], 2000)
-        self.assertEqual(result["ensemble_best"], {"private": [-41.0], "shared": [-41.0]})
+        self.assertEqual(
+            result["ensemble_best"], {"private": [-41.0], "shared": [-41.0]}
+        )
         self.assertEqual(result["shared_peer_blocks"], 4)
 
     def test_rejects_incomplete_worker(self):
