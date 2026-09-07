@@ -1394,9 +1394,8 @@ where
         // with the stall arm in, a chain restarted 9 to 16 times a run
         // whatever RESTART_PATIENCE said, every 5 to 8k hops, shorter than
         // the descent to the shelf.
-        (cfg.restart_on_stall
-            && !std::env::var("RESTART_STALL_ARM").is_ok_and(|v| v == "0"))
-        .then_some("restart"),
+        (cfg.restart_on_stall && !std::env::var("RESTART_STALL_ARM").is_ok_and(|v| v == "0"))
+            .then_some("restart"),
     ]
     .into_iter()
     .flatten()
@@ -1465,7 +1464,11 @@ where
             x0.view(),
             &mut unconverged_records,
         );
-        chains.push(ParkedMinimum { energy: e0, coordinates: x0, gradient });
+        chains.push(ParkedMinimum {
+            energy: e0,
+            coordinates: x0,
+            gradient,
+        });
     }
     let mut screened_out = 0usize;
     let mut returned = 0usize;
@@ -3878,11 +3881,14 @@ where
                 // that one active. Each rung keeps its own bias and its own
                 // temperature; only the states move, so a hot rung's crossing
                 // lands in a cold rung that can polish it.
-                chains.insert(rep, ParkedMinimum {
-                    energy: e,
-                    coordinates: x.clone(),
-                    gradient: current_validation_gradient.take(),
-                });
+                chains.insert(
+                    rep,
+                    ParkedMinimum {
+                        energy: e,
+                        coordinates: x.clone(),
+                        gradient: current_validation_gradient.take(),
+                    },
+                );
                 // A placeholder only; the destination rung's own bias is taken
                 // below, so this is never deposited into.
                 biases.insert(
