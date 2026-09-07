@@ -257,6 +257,33 @@ where
         project(&mut w);
         let beta: f64 = w.iter().map(|z| z * z).sum::<f64>().sqrt();
         if beta <= 1e-10 {
+            // An invariant Krylov block is resolved, not invalid. Continue
+            // in its orthogonal complement so an exact starting eigenvector
+            // cannot hide softer modes or discard a degenerate spectrum.
+            let restart = (basis.len() < steps)
+                .then(|| {
+                    (0..dim).find_map(|axis| {
+                        let mut candidate = Array1::zeros(dim);
+                        candidate[axis] = 1.0;
+                        project(&mut candidate);
+                        for _ in 0..2 {
+                            for vector in &basis {
+                                let component = candidate.dot(vector);
+                                candidate.scaled_add(-component, vector);
+                            }
+                            project(&mut candidate);
+                        }
+                        let norm = candidate.dot(&candidate).sqrt();
+                        (norm > 1e-10).then(|| candidate / norm)
+                    })
+                })
+                .flatten();
+            if let Some(restart) = restart {
+                betas.push(0.0);
+                q_prev = None;
+                q = restart;
+                continue;
+            }
             break;
         }
         betas.push(beta);
