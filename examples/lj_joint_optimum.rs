@@ -1182,7 +1182,10 @@ mod tests {
             2_000,
             7,
             &DistinctWitness,
-            MinimaHoppingOptions { soften: false, bound_escape: false },
+            MinimaHoppingOptions {
+                soften: false,
+                bound_escape: false,
+            },
         );
         let history = Mutex::new(super::MinimumHistory::new(1e-3).unwrap());
         let charged = AtomicUsize::new(0);
@@ -1194,11 +1197,15 @@ mod tests {
             7,
             &DistinctWitness,
             super::HistoryRunOptions {
-                moves: MinimaHoppingOptions { soften: false, bound_escape: false },
+                moves: MinimaHoppingOptions {
+                    soften: false,
+                    bound_escape: false,
+                },
                 history: Some(&history),
                 charged: Some(&charged),
             },
-        ).unwrap();
+        )
+        .unwrap();
 
         assert_eq!(observed.outcome.best, local.outcome.best);
         assert_eq!(observed.outcome.final_state, local.outcome.final_state);
@@ -1225,11 +1232,15 @@ mod tests {
             7,
             &DistinctWitness,
             super::HistoryRunOptions {
-                moves: MinimaHoppingOptions { soften: false, bound_escape: false },
+                moves: MinimaHoppingOptions {
+                    soften: false,
+                    bound_escape: false,
+                },
                 history: Some(&history),
                 charged: None,
             },
-        ).unwrap();
+        )
+        .unwrap();
 
         assert_eq!(run.outcome.best, f64::INFINITY);
         assert_eq!(run.outcome.charged, 1);
