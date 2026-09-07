@@ -445,7 +445,20 @@ struct CatalogRequest {
     # Shared motif-class table: one chain reports its class, energy, and
     # charged work, and the coordinator answers Continue or Restart.
     reportCoreClass @30 :CoreClassReport;
+    exchangeSurfaceEvidence @31 :SurfaceReport;
   }
+}
+
+# Cumulative observations from one producer; replies contain only its peers.
+struct SurfaceReport {
+  schema @0 :Text;
+  arms @1 :List(RewardMoments);
+}
+
+struct RewardMoments {
+  count @0 :UInt64;
+  mean @1 :Float64;
+  m2 @2 :Float64;
 }
 
 # One checkpoint against the shared motif-class table.
@@ -515,6 +528,7 @@ struct AcceptedReply {
     rideCredit @16 :RideReportReply;
     roster @17 :RosterReply;
     coreVerdict @18 :CoreVerdict;
+    surfaceEvidence @19 :SurfaceReport;
   }
   aggregateCharged @7 :UInt64;
   aggregateBudget @8 :UInt64;
