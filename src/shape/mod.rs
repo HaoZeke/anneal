@@ -562,9 +562,11 @@ fn pair_distance_bound(left: ArrayView1<f64>, right: ArrayView1<f64>) -> Option<
 }
 
 fn pair_distance_exceeds(left: ArrayView1<f64>, right: ArrayView1<f64>, radius: f64) -> bool {
-    SortedPairs { n_points: left.len() / 3 }
-        .bottleneck_exceeds(left, right, radius)
-        .unwrap_or(false)
+    SortedPairs {
+        n_points: left.len() / 3,
+    }
+    .bottleneck_exceeds(left, right, radius)
+    .unwrap_or(false)
 }
 
 fn exact_relation_from_match(
