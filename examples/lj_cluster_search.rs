@@ -4334,30 +4334,17 @@ fn run_capnp_catalog(
             // changed, or for all peers when this replica's own minimum
             // changed; otherwise reuse them. This keeps the bus at the cost
             // of the messages, not of 47 packing comparisons a checkpoint.
-            let own_moved = bus_last_energy
-                .is_none_or(|last: f64| (last - snapshot.current_energy()).abs() > 1e-9);
-            bus_last_energy = Some(snapshot.current_energy());
-            let fresh_ids: Vec<u32> = fresh.iter().map(|p| p.replica).collect();
-            let mut updates: Vec<(u32, bool)> = Vec::new();
-            for peer in bus.peers() {
-                if peer.coordinates.len() != here.len() {
-                    continue;
-                }
-                let stale = own_moved
-                    || fresh_ids.contains(&peer.replica)
-                    || !bus.nearby.contains_key(&peer.replica);
-                if stale {
-                    let near = anneal_core::catalog::nearby_packing(here, &peer.coordinates);
-                    if near {
-                        anneal_core::catalog::include_packing_reference(&peer.coordinates);
-                    }
-                    updates.push((peer.replica, near));
-                }
-            }
-            for (id, near) in updates {
-                bus.nearby.insert(id, near);
-            }
-            peer_crowd = bus.nearby.values().filter(|near| **near).count();
+            let peers: Vec<_> = bus.peers().collect();
+            let (updates, crowd) = census_nearby_updates(
+                &mut bus_last_energy,
+                snapshot.current_energy(),
+                here,
+                &peers,
+                &fresh,
+                &bus.nearby,
+            );
+            bus.nearby.extend(updates);
+            peer_crowd = crowd;
             if std::env::var("CATALOG_CENSUS_TRACE").is_ok_and(|v| v == "1")
                 && checkpoint_sequence.is_multiple_of(7)
             {
@@ -6363,6 +6350,41 @@ fn census_bus_base(sharing: bool, evidence_only: bool, configured: Option<&str>)
 }
 
 #[cfg(feature = "bank-rpc")]
+fn census_nearby_updates(
+    last_energy: &mut Option<f64>,
+    energy: f64,
+    here: &[f64],
+    peers: &[&anneal_core::census_bus::PeerMinimum],
+    fresh: &[anneal_core::census_bus::PeerMinimum],
+    nearby: &std::collections::HashMap<u32, bool>,
+) -> (Vec<(u32, bool)>, usize) {
+    let own_moved = last_energy.is_none_or(|last| (last - energy).abs() > 1e-9);
+    *last_energy = Some(energy);
+    let fresh_ids: Vec<u32> = fresh.iter().map(|peer| peer.replica).collect();
+    let mut updates = Vec::new();
+    for peer in peers {
+        if peer.coordinates.len() != here.len() {
+            continue;
+        }
+        let stale =
+            own_moved || fresh_ids.contains(&peer.replica) || !nearby.contains_key(&peer.replica);
+        if stale {
+            let near = anneal_core::catalog::nearby_packing(here, &peer.coordinates);
+            if near {
+                anneal_core::catalog::include_packing_reference(&peer.coordinates);
+            }
+            updates.push((peer.replica, near));
+        }
+    }
+    let crowd = nearby
+        .iter()
+        .filter(|(id, near)| **near && !updates.iter().any(|(updated, _)| updated == *id))
+        .count()
+        + updates.iter().filter(|(_, near)| *near).count();
+    (updates, crowd)
+}
+
+#[cfg(feature = "bank-rpc")]
 fn lj_catalog_gradient_norm(
     energy: f64,
     coordinates: ArrayView1<f64>,
@@ -6383,8 +6405,71 @@ fn lj_catalog_gradient_norm(
 
 #[cfg(all(test, feature = "bank-rpc"))]
 mod census_policy_tests {
-    use super::{census_bus_base, lj_catalog_gradient_norm};
+    use super::{census_bus_base, census_nearby_updates, lj_catalog_gradient_norm};
+    use anneal_core::census_bus::PeerMinimum;
     use ndarray::{arr1, array};
+
+    fn packing_coordinates(text: &str) -> Vec<f64> {
+        text.lines()
+            .skip(2)
+            .filter(|line| !line.trim().is_empty())
+            .flat_map(|line| line.split_whitespace().skip(1).take(3))
+            .map(|value| value.parse().unwrap())
+            .collect()
+    }
+
+    #[test]
+    fn crowd_cache_tracks_own_geometry_even_at_equal_energy() {
+        let ico = packing_coordinates(include_str!("../tests/fixtures/lj75_ico.xyz"));
+        let marks = packing_coordinates(include_str!("../tests/fixtures/lj75_marks.xyz"));
+        let peer = PeerMinimum {
+            replica: 1,
+            hops: 7,
+            energy: -396.0,
+            coordinates: ico.clone(),
+        };
+        let mut anchor = None;
+        let mut nearby = std::collections::HashMap::new();
+        let (updates, crowd) =
+            census_nearby_updates(&mut anchor, -396.0, &ico, &[&peer], &[], &nearby);
+        nearby.extend(updates);
+        assert_eq!(crowd, 1);
+        let (updates, crowd) =
+            census_nearby_updates(&mut anchor, -396.0, &marks, &[&peer], &[], &nearby);
+        assert_eq!(
+            crowd, 0,
+            "changed local geometry invalidates the crowd cache"
+        );
+        assert_eq!(updates, vec![(1, false)]);
+    }
+
+    #[test]
+    fn incompatible_peer_geometry_cannot_remain_in_the_crowd() {
+        let ico = packing_coordinates(include_str!("../tests/fixtures/lj75_ico.xyz"));
+        let mut peer = PeerMinimum {
+            replica: 1,
+            hops: 7,
+            energy: -396.0,
+            coordinates: ico.clone(),
+        };
+        let mut anchor = None;
+        let mut nearby = std::collections::HashMap::new();
+        let (updates, crowd) =
+            census_nearby_updates(&mut anchor, -396.0, &ico, &[&peer], &[], &nearby);
+        nearby.extend(updates);
+        assert_eq!(crowd, 1);
+        peer.coordinates.truncate(6);
+        let (updates, crowd) = census_nearby_updates(
+            &mut anchor,
+            -396.0,
+            &ico,
+            &[&peer],
+            std::slice::from_ref(&peer),
+            &nearby,
+        );
+        assert_eq!(crowd, 0, "an incompatible peer cannot be a nearby packing");
+        assert_eq!(updates, vec![(1, false)]);
+    }
 
     #[test]
     fn private_controls_cannot_activate_an_inherited_census_port() {

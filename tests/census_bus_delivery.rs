@@ -127,6 +127,68 @@ fn equal_energy_changed_geometry_is_fresh_after_actual_delivery() {
 }
 
 #[test]
+fn equal_energy_changed_geometry_is_published_without_waiting_for_refresh() {
+    let deadline = deadline();
+    let (mut publisher, base, _unused_peer_port) = {
+        let _setup = SOCKET_SETUP.lock().unwrap();
+        let (base, publisher_port, unused_peer_port) = adjacent_ports(deadline);
+        drop(publisher_port);
+        (CensusBus::new(0, base, 2).unwrap(), base, unused_peer_port)
+    };
+    let subscriber = Socket::new(Protocol::Sub0).unwrap();
+    subscriber
+        .set_opt::<Subscribe>(b"census/".to_vec())
+        .unwrap();
+    let connected = Arc::new(AtomicBool::new(false));
+    let connection = Arc::clone(&connected);
+    subscriber
+        .pipe_notify(move |_, event| {
+            if matches!(event, PipeEvent::AddPost) {
+                connection.store(true, Ordering::SeqCst);
+            }
+        })
+        .unwrap();
+    subscriber
+        .dial_async(&format!("tcp://127.0.0.1:{base}"))
+        .unwrap();
+    wait_until(deadline, "subscriber must establish its pipe", || {
+        connected.load(Ordering::SeqCst)
+    });
+
+    publisher.publish(7, ENERGY, &COORDINATES);
+    wait_until(
+        deadline,
+        "subscriber must receive the initial state",
+        || match subscriber.try_recv() {
+            Ok(message) => {
+                let bytes: &[u8] = &message;
+                assert_eq!(bytes, raw_frame(0, 7, &COORDINATES));
+                true
+            }
+            Err(nng::Error::TryAgain) => false,
+            Err(error) => panic!("subscriber failed: {error}"),
+        },
+    );
+    assert!(matches!(subscriber.try_recv(), Err(nng::Error::TryAgain)));
+
+    let changed = [0.0, 0.0, 0.0, 0.0, 1.3, 0.0];
+    publisher.publish(8, ENERGY, &changed);
+    wait_until(
+        deadline,
+        "a single equal-energy geometry change must publish without refresh calls",
+        || match subscriber.try_recv() {
+            Ok(message) => {
+                let bytes: &[u8] = &message;
+                assert_eq!(bytes, raw_frame(0, 8, &changed));
+                true
+            }
+            Err(nng::Error::TryAgain) => false,
+            Err(error) => panic!("subscriber failed: {error}"),
+        },
+    );
+}
+
+#[test]
 fn unchanged_publication_refreshes_a_subscriber_that_joins_late() {
     let deadline = deadline();
     let (mut publisher, base, _unused_peer_port) = {
