@@ -1082,6 +1082,50 @@ pub fn push_away_clouds(
     Some(stepped)
 }
 
+/// [`push_away_clouds`] with the neighbours' packing means already
+/// computed. The means of the population's reference structures change
+/// only when a peer's minimum changes, so a caller caches them and pays
+/// one mean (its own) per proposal instead of one per reference.
+pub fn push_away_means(
+    x: ArrayView1<f64>,
+    neighbor_means: &[Vec<f64>],
+    spec: SoapSpec,
+    rmsd: f64,
+) -> Option<Array1<f64>> {
+    let mut mu = packing_mean_nu3(x, spec, None, None);
+    if mu.is_empty() {
+        return None;
+    }
+    let mut count = 1.0;
+    for held in neighbor_means {
+        if held.len() != mu.len() {
+            continue;
+        }
+        for (a, b) in mu.iter_mut().zip(held.iter()) {
+            *a += *b;
+        }
+        count += 1.0;
+    }
+    if count < 2.0 {
+        return None;
+    }
+    mu /= count;
+    let nrm = mu.iter().map(|v| v * v).sum::<f64>().sqrt();
+    if nrm < 1e-15 {
+        return None;
+    }
+    let direction: Vec<f64> = mu.iter().map(|v| -v / nrm).collect();
+    let stepped = packing_step_nu3(x, spec, &direction, rmsd, None, None);
+    if stepped
+        .iter()
+        .zip(x.iter())
+        .all(|(a, b)| (a - b).abs() < 1e-12)
+    {
+        return None;
+    }
+    Some(stepped)
+}
+
 /// Mean per-centre \(\nu=3\) row: the DECAF packing mean \(\mu\).
 pub fn packing_mean_nu3(
     x: ArrayView1<f64>,
