@@ -520,6 +520,33 @@ where
 mod tests {
     use super::*;
 
+    #[test]
+    fn lanczos_restarts_orthogonally_after_an_exact_eigenvector() {
+        let start = Array1::from(vec![1.0, 0.0, 0.0]);
+        let diagonal = Array1::from(vec![9.0, 1.0, 4.0]);
+        let mut evaluations = 0;
+        let (alpha, beta, basis) = lanczos_tridiag(
+            &start,
+            3,
+            &mut |point| {
+                evaluations += 1;
+                Some(point * &diagonal)
+            },
+            &|_| {},
+        )
+        .expect("an invariant Krylov block is a valid eigenspace");
+        let (values, _) = ritz(&alpha, &beta).unwrap();
+        assert_eq!(values, vec![1.0, 4.0, 9.0]);
+        assert_eq!(evaluations, 3);
+        assert_eq!(basis.len(), 3);
+        for (i, left) in basis.iter().enumerate() {
+            for (j, right) in basis.iter().enumerate() {
+                let expected = f64::from(i == j);
+                assert!((left.dot(right) - expected).abs() < 1e-12);
+            }
+        }
+    }
+
     /// A three-dimensional arrangement of `n` points, not collinear.
     ///
     /// Geometry matters here: a collinear set has five rigid modes rather than
