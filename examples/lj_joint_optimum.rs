@@ -73,7 +73,9 @@ enum Arm {
 
 impl Arm {
     fn label_with_history(self, policy: HistoryExclusion) -> String {
-        if matches!(self, Self::MinimaHoppingEnsemble { .. }) && policy == HistoryExclusion::Observed {
+        if matches!(self, Self::MinimaHoppingEnsemble { .. })
+            && policy == HistoryExclusion::Observed
+        {
             format!("{}-observed-exclusion", self.label())
         } else {
             self.label()
@@ -425,7 +427,9 @@ fn parse_history_exclusion(value: Option<&str>) -> Result<HistoryExclusion, Stri
     match value {
         None | Some("accepted") => Ok(HistoryExclusion::Accepted),
         Some("observed-exclusion") => Ok(HistoryExclusion::Observed),
-        Some(other) => Err(format!("invalid NVE history policy {other:?}; expected accepted or observed-exclusion")),
+        Some(other) => Err(format!(
+            "invalid NVE history policy {other:?}; expected accepted or observed-exclusion"
+        )),
     }
 }
 
@@ -436,7 +440,10 @@ struct HistoryPolicy<T> {
 
 impl<T> From<T> for HistoryPolicy<T> {
     fn from(options: T) -> Self {
-        Self { options, exclusion: HistoryExclusion::Accepted }
+        Self {
+            options,
+            exclusion: HistoryExclusion::Accepted,
+        }
     }
 }
 
@@ -699,9 +706,13 @@ fn run_minima_hopping_with_history<'a>(
                         .accepted_visits(reached)
                         .ok_or("missing admitted minimum")?;
                     let (is_new, visits) = history_feedback_membership(
-                        exclusion, observation.minimum.is_new, observation.visits, visits,
+                        exclusion,
+                        observation.minimum.is_new,
+                        observation.visits,
+                        visits,
                     );
-                    let visit = feedback.observe_shared(Some(current_basin), reached, is_new, visits);
+                    let visit =
+                        feedback.observe_shared(Some(current_basin), reached, is_new, visits);
                     let adopt = visit == Visit::New && feedback.accept(candidate_energy - energy);
                     if adopt {
                         history
@@ -728,7 +739,8 @@ fn run_minima_hopping_with_history<'a>(
             });
             let observed = observed_visits.entry(reached).or_insert(0);
             *observed = observed.saturating_add(1);
-            let (is_new, visits) = history_feedback_membership(exclusion, *observed == 1, *observed, visits);
+            let (is_new, visits) =
+                history_feedback_membership(exclusion, *observed == 1, *observed, visits);
             let visit = feedback.observe_shared(Some(current_basin), reached, is_new, visits);
             let adopt = visit == Visit::New && feedback.accept(candidate_energy - energy);
             if adopt {
@@ -864,14 +876,17 @@ fn run_minima_hopping_ensemble<W: ExactStructureWitness + Send>(
                         budget,
                         seed,
                         witness,
-                        HistoryPolicy { options: HistoryRunOptions {
-                            moves: MinimaHoppingOptions {
-                                soften: options.soften,
-                                bound_escape: false,
+                        HistoryPolicy {
+                            options: HistoryRunOptions {
+                                moves: MinimaHoppingOptions {
+                                    soften: options.soften,
+                                    bound_escape: false,
+                                },
+                                history: Some(history),
+                                charged: Some(charged),
                             },
-                            history: Some(history),
-                            charged: Some(charged),
-                        }, exclusion },
+                            exclusion,
+                        },
                     )
                 })
             })
@@ -1057,7 +1072,8 @@ fn main() -> Result<(), Box<dyn Error>> {
         std::env::var("ANNEAL_MH_REPLICAS").map_or(Ok(4), |value| value.parse::<usize>())?;
     let pair_cache_bytes = std::env::var("ANNEAL_MH_PAIR_CACHE_BYTES")
         .map_or(Ok(128 * 1024 * 1024), |value| value.parse::<usize>())?;
-    let history_exclusion = parse_history_exclusion(std::env::var("ANNEAL_MH_HISTORY_POLICY").ok().as_deref())?;
+    let history_exclusion =
+        parse_history_exclusion(std::env::var("ANNEAL_MH_HISTORY_POLICY").ok().as_deref())?;
     let descriptor_space = lj::descriptor_space();
     let potential = PairPotential::lennard_jones(n);
     let witness = IraStructureWitness {
@@ -1154,11 +1170,14 @@ fn main() -> Result<(), Box<dyn Error>> {
                             radius: witness.radius,
                         }
                         .with_pair_cache(pair_cache_bytes),
-                        HistoryPolicy { options: EnsembleOptions {
-                            replicas,
-                            shared,
-                            soften,
-                        }, exclusion: history_exclusion },
+                        HistoryPolicy {
+                            options: EnsembleOptions {
+                                replicas,
+                                shared,
+                                soften,
+                            },
+                            exclusion: history_exclusion,
+                        },
                     )?;
                     let first = ensemble
                         .runs
