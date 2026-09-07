@@ -786,10 +786,8 @@ mod tests {
         }
     }
 
-    /// With every peer in the same family and a short stall, the two-choice
-    /// rule restarts; with no family anywhere it never does.
-    #[test]
-    fn the_two_choice_restart_fires_only_when_two_samples_are_crowded() {
+    /// One two-choice run on the two-well toy with the given family rule.
+    fn two_choice_run(same_family: SameFamily<'_>) -> EnsembleReport {
         let cfg = chain_config();
         let descriptor = universal_descriptor_space(DescriptorGeometry::finite(1.0).unwrap());
         let context = StructureContext::new(Some(vec![18; 4]), None, Some("two-well".into()));
@@ -804,35 +802,37 @@ mod tests {
         let objective: ObjectiveFactory<'_> = &|_| Box::new(two_well);
         let start: StartFactory<'_> =
             &|_, rng| random_cluster_in_radius(4, cfg.start_radius(), cfg.min_separation, rng);
-        let crowded = |_: &[f64], _: &[f64]| true;
-        let alone = |_: &[f64], _: &[f64]| false;
         let mut ens = ensemble(HistoryMode::None, None, None);
         ens.two_choice_stall = Some(1_500);
         ens.target = None;
-        let run = |same_family: SameFamily<'_>| {
-            run_ensemble(
-                &cfg,
-                &ens,
-                5,
-                &EnsembleProblem {
-                    objective,
-                    start,
-                    descriptor: &descriptor,
-                    context: &context,
-                    witness: &witness,
-                    same_family,
-                    certificate: 1e-5,
-                    polish_below: 1e-3,
-                },
-            )
-            .unwrap()
-        };
-        let restarted = run(&crowded);
+        run_ensemble(
+            &cfg,
+            &ens,
+            5,
+            &EnsembleProblem {
+                objective,
+                start,
+                descriptor: &descriptor,
+                context: &context,
+                witness: &witness,
+                same_family,
+                certificate: 1e-5,
+                polish_below: 1e-3,
+            },
+        )
+        .unwrap()
+    }
+
+    /// With every peer in the same family and a short stall, the two-choice
+    /// rule restarts; with no family anywhere it never does.
+    #[test]
+    fn the_two_choice_restart_fires_only_when_two_samples_are_crowded() {
+        let restarted = two_choice_run(&|_: &[f64], _: &[f64]| true);
         assert!(
             restarted.replicas.iter().any(|r| r.two_choice_restarts > 0),
             "no replica restarted although every sample was crowded"
         );
-        let kept = run(&alone);
+        let kept = two_choice_run(&|_: &[f64], _: &[f64]| false);
         assert!(kept.replicas.iter().all(|r| r.two_choice_restarts == 0));
     }
 }
