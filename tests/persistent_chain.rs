@@ -269,6 +269,69 @@ fn checkpoint_probe_is_recorded_without_becoming_the_live_chain() {
 }
 
 #[test]
+fn diagnostic_discovery_improves_the_answer_without_relocating_the_chain() {
+    let cfg = Config::for_cluster(2);
+    let start = Array1::from(vec![-0.6, 0.0, 0.0, 0.6, 0.0, 0.0]);
+    let discovered = Array1::from(vec![-1.0, 0.0, 0.0, 1.0, 0.0, 0.0]);
+    let mut ledger = Ledger::new(100);
+    let mut rng = StdRng::seed_from_u64(0xd15c);
+    let mut bias = fresh_bias(&cfg);
+    let mut relax = |ledger: &mut Ledger, _: ArrayView1<f64>, _: usize| {
+        if ledger.is_diagnostic_quench() {
+            // Reserve the final evaluation for gradient validation.
+            assert!(ledger.charge_many(ledger.remaining() - 1));
+            (-0.5, discovered.clone())
+        } else {
+            assert!(ledger.charge());
+            (0.0, start.clone())
+        }
+    };
+    let mut gradient = |ledger: &mut Ledger, state: ArrayView1<f64>| {
+        assert!(ledger.charge());
+        Some(Array1::zeros(state.len()))
+    };
+    let mut offered = false;
+    let mut checkpoint = |_: ChainCheckpoint<'_>| {
+        if offered {
+            CheckpointAction::Continue
+        } else {
+            offered = true;
+            CheckpointAction::ProbeProposal {
+                state: discovered.clone(),
+                action: "diagnostic-discovery".into(),
+            }
+        }
+    };
+    let outcome = run_with_bias_at_checkpoints(
+        &cfg,
+        start.view(),
+        &mut ledger,
+        &mut relax,
+        Some(&mut gradient),
+        &mut bias,
+        &mut rng,
+        1,
+        &mut checkpoint,
+    );
+    let probe = outcome
+        .accepted_transitions
+        .iter()
+        .find(|transition| transition.action == "diagnostic-discovery")
+        .expect("the paid diagnostic must retain its trajectory evidence");
+    assert!(probe.validated);
+    assert!(!probe.adopted);
+    assert_eq!(outcome.final_state.as_ref(), Some(&start));
+    assert_eq!(outcome.final_energy, Some(0.0));
+    assert_eq!(outcome.best, -0.5);
+    assert_eq!(outcome.best_state.as_ref(), Some(&discovered));
+    let improvement = outcome.improvements.last().unwrap();
+    assert_eq!(improvement.0, outcome.hops);
+    assert_eq!(improvement.1, ledger.budget());
+    assert_eq!(improvement.3, -0.5);
+    assert_eq!(ledger.spent(), ledger.budget());
+}
+
+#[test]
 fn diagnostic_quench_context_is_scoped_to_the_probe_callback() {
     let mut cfg = Config::recommended(6);
     cfg.relax_steps = 40;
