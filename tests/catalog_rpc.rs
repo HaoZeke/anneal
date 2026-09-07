@@ -93,21 +93,57 @@ fn independent_clients_exchange_surface_rewards_without_replay_or_self_credit() 
     let server = CatalogServer::start(
         "127.0.0.1:0",
         ServerConfig::new("jcc-2026", "surface-evidence", [0x5a; 32], [0, 1]).unwrap(),
-    ).unwrap();
-    let connect = |replica| CatalogClient::connect(
-        server.addr(), identity("surface-evidence", replica), ClientConfig::default()
-    ).unwrap();
+    )
+    .unwrap();
+    let connect = |replica| {
+        CatalogClient::connect(
+            server.addr(),
+            identity("surface-evidence", replica),
+            ClientConfig::default(),
+        )
+        .unwrap()
+    };
     let mut teacher = connect(0);
     let mut learner = connect(1);
     let informed = SurfaceReport {
         schema: "depth-v1/plain+compact/block=100".into(),
-        arms: vec![RewardMoments { count: 2, mean: -3.0, m2: 2.0 }, RewardMoments { count: 1, mean: 2.0, m2: 0.0 }],
+        arms: vec![
+            RewardMoments {
+                count: 2,
+                mean: -3.0,
+                m2: 2.0,
+            },
+            RewardMoments {
+                count: 1,
+                mean: 2.0,
+                m2: 0.0,
+            },
+        ],
     };
-    let empty = SurfaceReport { schema: informed.schema.clone(), arms: vec![RewardMoments::default(); 2] };
-    assert_eq!(teacher.exchange_surface_evidence(1, informed.clone()).unwrap(), empty);
-    assert_eq!(teacher.exchange_surface_evidence(1, informed.clone()).unwrap(), empty);
-    assert_eq!(learner.exchange_surface_evidence(1, empty.clone()).unwrap(), informed);
-    assert_eq!(learner.exchange_surface_evidence(2, empty).unwrap(), informed);
+    let empty = SurfaceReport {
+        schema: informed.schema.clone(),
+        arms: vec![RewardMoments::default(); 2],
+    };
+    assert_eq!(
+        teacher
+            .exchange_surface_evidence(1, informed.clone())
+            .unwrap(),
+        empty
+    );
+    assert_eq!(
+        teacher
+            .exchange_surface_evidence(1, informed.clone())
+            .unwrap(),
+        empty
+    );
+    assert_eq!(
+        learner.exchange_surface_evidence(1, empty.clone()).unwrap(),
+        informed
+    );
+    assert_eq!(
+        learner.exchange_surface_evidence(2, empty).unwrap(),
+        informed
+    );
     let snapshot = learner.snapshot(3).unwrap();
     assert_eq!(snapshot.census_visits, 0);
     assert_eq!(snapshot.active_entries, 0);

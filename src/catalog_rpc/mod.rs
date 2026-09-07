@@ -1883,7 +1883,9 @@ pub(crate) fn decode_reply_reader(
                     AcceptedPayload::CoreVerdict(verdict.map_err(wire_error)?.into())
                 }
                 accepted_reply::payload::SurfaceEvidence(report) => {
-                    AcceptedPayload::SurfaceEvidence(read_surface_report(report.map_err(wire_error)?)?)
+                    AcceptedPayload::SurfaceEvidence(read_surface_report(
+                        report.map_err(wire_error)?,
+                    )?)
                 }
             };
             Ok(CatalogReply::Accepted(AcceptedReply {
@@ -1941,7 +1943,10 @@ impl From<RejectionKind> for ProtocolRejection {
     }
 }
 
-fn fill_surface_report(mut output: crate::Catalog_capnp::surface_report::Builder<'_>, report: &SurfaceReport) {
+fn fill_surface_report(
+    mut output: crate::Catalog_capnp::surface_report::Builder<'_>,
+    report: &SurfaceReport,
+) {
     output.set_schema(report.schema.as_str());
     let mut arms = output.init_arms(report.arms.len() as u32);
     for (index, moment) in report.arms.iter().enumerate() {
@@ -1952,18 +1957,27 @@ fn fill_surface_report(mut output: crate::Catalog_capnp::surface_report::Builder
     }
 }
 
-fn read_surface_report(input: crate::Catalog_capnp::surface_report::Reader<'_>) -> Result<SurfaceReport, ProtocolError> {
+fn read_surface_report(
+    input: crate::Catalog_capnp::surface_report::Reader<'_>,
+) -> Result<SurfaceReport, ProtocolError> {
     let arms = input.get_arms().map_err(wire_error)?;
     if arms.is_empty() || arms.len() > 64 {
         return Err(ProtocolError::Malformed("invalid surface arm count".into()));
     }
     let report = SurfaceReport {
         schema: text_value(input.get_schema().map_err(wire_error)?)?,
-        arms: arms.iter().map(|arm| crate::allocate::RewardMoments {
-            count: arm.get_count(), mean: arm.get_mean(), m2: arm.get_m2(),
-        }).collect(),
+        arms: arms
+            .iter()
+            .map(|arm| crate::allocate::RewardMoments {
+                count: arm.get_count(),
+                mean: arm.get_mean(),
+                m2: arm.get_m2(),
+            })
+            .collect(),
     };
-    report.validate().map_err(|error| ProtocolError::Malformed(error.into()))?;
+    report
+        .validate()
+        .map_err(|error| ProtocolError::Malformed(error.into()))?;
     Ok(report)
 }
 

@@ -494,9 +494,18 @@ impl CatalogClient {
         event_sequence: u64,
         report: crate::surface_evidence::SurfaceReport,
     ) -> Result<crate::surface_evidence::SurfaceReport, CatalogClientError> {
-        match self.call(event_sequence, CatalogOperation::ExchangeSurfaceEvidence { report })?.payload {
+        match self
+            .call(
+                event_sequence,
+                CatalogOperation::ExchangeSurfaceEvidence { report },
+            )?
+            .payload
+        {
             AcceptedPayload::SurfaceEvidence(report) => Ok(report),
-            _ => Err(ProtocolError::Malformed("surface exchange returned an incompatible payload".into()).into()),
+            _ => Err(ProtocolError::Malformed(
+                "surface exchange returned an incompatible payload".into(),
+            )
+            .into()),
         }
     }
 

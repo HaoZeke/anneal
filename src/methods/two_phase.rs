@@ -496,13 +496,23 @@ impl SurfacePortfolio {
         let block = block.max(1);
         // Bit patterns keep every transform parameter distinct, including
         // invalid floating-point inputs that a text serializer maps to null.
-        let parameters = arms.iter().map(|arm| arm.map(|two| {
-            let cutoff = match two.cutoff {
-                Cutoff::Fixed(value) => (0, value.to_bits()),
-                Cutoff::Relative(value) => (1, value.to_bits()),
-            };
-            (cutoff, two.beta.to_bits(), two.mu.to_bits(), two.anisotropic)
-        })).collect::<Vec<_>>();
+        let parameters = arms
+            .iter()
+            .map(|arm| {
+                arm.map(|two| {
+                    let cutoff = match two.cutoff {
+                        Cutoff::Fixed(value) => (0, value.to_bits()),
+                        Cutoff::Relative(value) => (1, value.to_bits()),
+                    };
+                    (
+                        cutoff,
+                        two.beta.to_bits(),
+                        two.mu.to_bits(),
+                        two.anisotropic,
+                    )
+                })
+            })
+            .collect::<Vec<_>>();
         let evidence_schema = format!("surface-depth-v1/{block}/{parameters:?}");
         Self {
             allocator: DepthAllocator::new(arms.len()),
@@ -523,7 +533,10 @@ impl SurfacePortfolio {
 
     /// Draw from and credit a posterior shared with other chains.
     pub fn sharing(mut self, shared: SharedSurfaceAllocator) -> Self {
-        assert!(self.peer_moments.is_none(), "surface evidence has one sharing transport");
+        assert!(
+            self.peer_moments.is_none(),
+            "surface evidence has one sharing transport"
+        );
         let arms = shared.lock().expect("shared surface allocator").arms();
         assert_eq!(
             arms,
@@ -536,8 +549,15 @@ impl SurfacePortfolio {
 
     fn select_arm(&mut self) -> usize {
         if let Some(peers) = self.peer_moments.as_ref() {
-            let moments = self.own_moments.iter().zip(peers).map(|(own, peer)| own.merge(*peer)).collect::<Result<Vec<_>, _>>();
-            if let Ok(allocator) = moments.and_then(|moments| DepthAllocator::from_moments(&moments)) {
+            let moments = self
+                .own_moments
+                .iter()
+                .zip(peers)
+                .map(|(own, peer)| own.merge(*peer))
+                .collect::<Result<Vec<_>, _>>();
+            if let Ok(allocator) =
+                moments.and_then(|moments| DepthAllocator::from_moments(&moments))
+            {
                 return allocator.select(&mut self.rng);
             }
         }
@@ -565,23 +585,40 @@ impl SurfacePortfolio {
 
     /// Cumulative observations produced by this chain, excluding every import.
     pub fn report(&self) -> SurfaceReport {
-        SurfaceReport { schema: self.evidence_schema.clone(), arms: self.own_moments.clone() }
+        SurfaceReport {
+            schema: self.evidence_schema.clone(),
+            arms: self.own_moments.clone(),
+        }
     }
 
     /// Independent peer blocks informing the portfolio's choices.
     pub fn peer_observations(&self) -> u64 {
-        self.peer_moments.as_ref().map_or(0, |arms| arms.iter().map(|arm| arm.count).sum())
+        self.peer_moments
+            .as_ref()
+            .map_or(0, |arms| arms.iter().map(|arm| arm.count).sum())
     }
 
     /// Replace peer evidence without changing the held arm, local history, or RNG.
     pub fn import_peers(&mut self, report: SurfaceReport) -> Result<(), &'static str> {
         report.validate()?;
-        if self.shared.is_some() || report.schema != self.evidence_schema || report.arms.len() != self.arms.len() {
+        if self.shared.is_some()
+            || report.schema != self.evidence_schema
+            || report.arms.len() != self.arms.len()
+        {
             return Err("incompatible surface evidence");
         }
-        let aggregate = self.own_moments.iter().zip(&report.arms).map(|(own, peer)| own.merge(*peer)).collect::<Result<Vec<_>, _>>()?;
+        let aggregate = self
+            .own_moments
+            .iter()
+            .zip(&report.arms)
+            .map(|(own, peer)| own.merge(*peer))
+            .collect::<Result<Vec<_>, _>>()?;
         DepthAllocator::from_moments(&aggregate)?;
-        self.peer_moments = report.arms.iter().any(|arm| arm.count > 0).then_some(report.arms);
+        self.peer_moments = report
+            .arms
+            .iter()
+            .any(|arm| arm.count > 0)
+            .then_some(report.arms);
         Ok(())
     }
 

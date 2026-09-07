@@ -31,7 +31,8 @@ fn cumulative_reports_share_peer_evidence_without_echo_or_replay_credit() {
 #[test]
 fn incremental_reports_replace_cumulative_evidence_instead_of_adding_it() {
     let mut book = SurfaceEvidenceBook::default();
-    book.exchange(0, report("schema", &[&[1.0], &[-2.0]])).unwrap();
+    book.exchange(0, report("schema", &[&[1.0], &[-2.0]]))
+        .unwrap();
     let updated = report("schema", &[&[1.0, 3.0], &[-2.0, -4.0]]);
     book.exchange(0, updated.clone()).unwrap();
     let peer = book.exchange(1, report("schema", &[&[], &[]])).unwrap();
@@ -54,8 +55,22 @@ fn invalid_or_regressing_reports_leave_the_shared_evidence_unchanged() {
     for invalid in [
         report("schema", &[&[1.0]]),
         report("schema", &[&[2.0, 3.0]]),
-        SurfaceReport { schema: "schema".into(), arms: vec![RewardMoments { count: 3, mean: f64::NAN, m2: 0.0 }] },
-        SurfaceReport { schema: "schema".into(), arms: vec![RewardMoments { count: 3, mean: 0.0, m2: -1.0 }] },
+        SurfaceReport {
+            schema: "schema".into(),
+            arms: vec![RewardMoments {
+                count: 3,
+                mean: f64::NAN,
+                m2: 0.0,
+            }],
+        },
+        SurfaceReport {
+            schema: "schema".into(),
+            arms: vec![RewardMoments {
+                count: 3,
+                mean: 0.0,
+                m2: -1.0,
+            }],
+        },
     ] {
         assert!(book.exchange(0, invalid).is_err());
         assert_eq!(book.exchange(1, report("schema", &[&[]])).unwrap(), valid);
@@ -65,21 +80,28 @@ fn invalid_or_regressing_reports_leave_the_shared_evidence_unchanged() {
 #[test]
 fn merged_moments_reproduce_sequential_normal_gamma_updates() {
     let observations = [-4.0, 2.0, 1.0, -3.0, 8.0];
-    let pooled = moments(&observations[..2]).merge(moments(&observations[2..])).unwrap();
+    let pooled = moments(&observations[..2])
+        .merge(moments(&observations[2..]))
+        .unwrap();
     let direct = moments(&observations);
     assert_eq!(pooled.count, direct.count);
     assert!((pooled.mean - direct.mean).abs() < 1e-12);
     assert!((pooled.m2 - direct.m2).abs() < 1e-12);
     let reconstructed = DepthAllocator::from_moments(&[pooled]).unwrap();
     let mut sequential = DepthAllocator::new(1);
-    for reward in observations { sequential.update(0, reward); }
+    for reward in observations {
+        sequential.update(0, reward);
+    }
     assert_eq!(reconstructed.draws, sequential.draws);
     assert!((reconstructed.means()[0] - sequential.means()[0]).abs() < 1e-12);
     use rand::{SeedableRng, rngs::StdRng};
     let mut left = StdRng::seed_from_u64(79);
     let mut right = left.clone();
     for _ in 0..64 {
-        assert_eq!(reconstructed.select(&mut left), sequential.select(&mut right));
+        assert_eq!(
+            reconstructed.select(&mut left),
+            sequential.select(&mut right)
+        );
     }
 }
 
@@ -101,8 +123,19 @@ fn imported_rewards_inform_choices_but_never_become_local_observations() {
         learned += usize::from(learner.begin(true) == Some(transform));
         learner.observe(false, -1.0, -1.0);
     }
-    assert!(learned >= 35, "imported depth evidence chose the deeper surface {learned}/40 times");
-    assert_eq!(learner.report().arms.iter().map(|arm| arm.count).sum::<u64>(), 39);
+    assert!(
+        learned >= 35,
+        "imported depth evidence chose the deeper surface {learned}/40 times"
+    );
+    assert_eq!(
+        learner
+            .report()
+            .arms
+            .iter()
+            .map(|arm| arm.count)
+            .sum::<u64>(),
+        39
+    );
     assert_eq!(learner.draws().iter().sum::<usize>(), 39);
     let incompatible = SurfacePortfolio::with_block(&[transform], 79, 100).report();
     assert!(learner.import_peers(incompatible).is_err());
