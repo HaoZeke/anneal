@@ -1749,15 +1749,25 @@ mod tests {
             50_000,
             0,
             &OneBasin,
-            MinimaHoppingOptions { soften: false, bound_escape: false },
+            MinimaHoppingOptions {
+                soften: false,
+                bound_escape: false,
+            },
         );
         let outcome = run.outcome;
         let (same, known, new) = outcome.visit_counts;
-        assert!(outcome.unconverged_records > 1, "the fixture exercises failed proposals");
+        assert!(
+            outcome.unconverged_records > 1,
+            "the fixture exercises failed proposals"
+        );
         assert!(
             same + known + new + outcome.unconverged_records <= outcome.hops,
             "failed proposals cannot simultaneously be verified visits: {:?}",
-            (outcome.visit_counts, outcome.unconverged_records, outcome.hops)
+            (
+                outcome.visit_counts,
+                outcome.unconverged_records,
+                outcome.hops
+            )
         );
         assert_eq!(known, 0);
         assert_eq!(new, 0);
