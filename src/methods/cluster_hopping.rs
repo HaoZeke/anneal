@@ -1862,10 +1862,12 @@ where
                 }
                 let adopt = adopt && exchange_accept;
                 if recordable {
+                    // A validated discovery belongs to the answer even when
+                    // the live chain does not adopt the diagnostic endpoint.
+                    let improved = proposal_energy < ledger.best - 1e-10;
+                    ledger.record(proposal_energy, proposal_state.view());
                     if adopt {
                         hops += 1;
-                        let improved = proposal_energy < ledger.best - 1e-10;
-                        ledger.record(proposal_energy, proposal_state.view());
                         let reached = identity.basin_of(proposal_state.view());
                         let from = here.unwrap_or_else(|| identity.basin_of(from_state.view()));
                         feedback.observe(Some(from), reached);
@@ -1875,14 +1877,14 @@ where
                         current_validation_gradient = validation_gradient.clone();
                         accepted += 1;
                         bias.deposit(x.view(), cfg.temperature);
-                        if improved && improvements.len() < 512 {
-                            improvements.push((
-                                hops,
-                                ledger.spent(),
-                                bias.n_basins(),
-                                proposal_energy,
-                            ));
-                        }
+                    }
+                    if improved && improvements.len() < 512 {
+                        improvements.push((
+                            hops,
+                            ledger.spent(),
+                            bias.n_basins(),
+                            proposal_energy,
+                        ));
                     }
                     accepted_transitions.push(AcceptedTransition {
                         hop: hops,
