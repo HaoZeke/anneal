@@ -982,6 +982,7 @@ fn packing_mean(x: ArrayView1<f64>) -> Option<Array1<f64>> {
 ///
 /// Returns \((\hat P, \|\mu-\mu_k\|, \|P\|)\) so the hill gradient
 /// can reconstruct \(\nabla_x r_\varphi=\|P\|\hat P\).
+#[cfg(test)]
 fn packing_pullback(x: ArrayView1<f64>, mu_k: ArrayView1<f64>) -> Option<(Array1<f64>, f64, f64)> {
     let mu = packing_mean(x)?;
     let j = jacobian_nu3(x, PACKING_SPEC, None);
@@ -1923,9 +1924,7 @@ where
     Q: FnMut(ArrayView1<f64>) -> (f64, Array1<f64>),
     R: rand::Rng + ?Sized,
 {
-    let Some(origin_slice) = origin.as_slice() else {
-        return None;
-    };
+    let origin_slice = origin.as_slice()?;
     let mut current = origin.to_owned();
     let mut current_energy = origin_energy;
     let mut best: Option<(f64, Array1<f64>, usize)> = None;
@@ -2203,9 +2202,7 @@ where
     R: FnMut(ArrayView1<f64>, usize) -> (f64, Array1<f64>),
     S: FnMut(ArrayView1<f64>, &mut dyn FnMut(ArrayView1<f64>) -> Option<f64>) -> Array1<f64>,
 {
-    let Some(origin_slice) = origin.as_slice() else {
-        return None;
-    };
+    let origin_slice = origin.as_slice()?;
     let (base, _) = eval(origin, 0);
     if !base.is_finite() {
         return None;

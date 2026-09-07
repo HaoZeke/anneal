@@ -751,7 +751,6 @@ struct Leaf {
     x: Array1<f64>,
     p: Array1<f64>,
     g: Array1<f64>,
-    h: f64,
 }
 
 /// A doubling's worth of trajectory.
@@ -858,7 +857,6 @@ fn build_tree<R: Rng + ?Sized>(
             x: x1,
             p: p1,
             g: g1,
-            h,
         };
         let rho = leaf.p.clone();
         let sep = if diverged {
@@ -965,7 +963,6 @@ fn nuts<R: Rng + ?Sized>(
         x: x.to_owned(),
         p: p0,
         g: g0,
-        h: h0,
     };
     let mut left = root.clone();
     let mut right = root.clone();

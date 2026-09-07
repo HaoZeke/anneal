@@ -448,7 +448,7 @@ pub fn occupancy_family_floor(
         return DEFAULT_MIN_OCCUPIED_FAMILIES;
     }
     match (conductance, algebraic_connectivity) {
-        (Some(c), _) if c == 0.0 => 2,
+        (Some(0.0), _) => 2,
         (Some(c), Some(lambda)) if lambda.is_finite() && c < lambda => 2,
         _ => DEFAULT_MIN_OCCUPIED_FAMILIES,
     }
@@ -847,9 +847,7 @@ pub fn occupancy_sparsify_packing(book: &super::packing::PackingBook) -> Occupan
     let mut keep: Vec<usize> = Vec::new();
     let mut empty_rep = std::collections::BTreeSet::new();
     for (i, well) in wells.iter().copied().enumerate() {
-        if well > 0 {
-            keep.push(i);
-        } else if empty_rep.insert(labels.get(i).copied().unwrap_or(i)) {
+        if well > 0 || empty_rep.insert(labels.get(i).copied().unwrap_or(i)) {
             keep.push(i);
         }
     }
