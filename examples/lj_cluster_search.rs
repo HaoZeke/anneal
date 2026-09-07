@@ -6334,7 +6334,7 @@ fn lj_catalog_gradient_norm(
 #[cfg(all(test, feature = "bank-rpc"))]
 mod census_policy_tests {
     use super::{census_bus_base, lj_catalog_gradient_norm};
-    use ndarray::array;
+    use ndarray::{arr1, array};
 
     #[test]
     fn private_controls_cannot_activate_an_inherited_census_port() {
@@ -6364,16 +6364,16 @@ mod census_policy_tests {
         );
         for gradient in [
             array![],
-            array![0.0; 3],
-            array![f64::NAN; 6],
-            array![f64::INFINITY; 6],
+            arr1(&[0.0; 3]),
+            arr1(&[f64::NAN; 6]),
+            arr1(&[f64::INFINITY; 6]),
         ] {
             assert_eq!(
                 lj_catalog_gradient_norm(-1.0, coordinates.view(), Some(gradient.view())),
                 None
             );
         }
-        let gradient = array![0.0; 6];
+        let gradient = arr1(&[0.0; 6]);
         assert_eq!(
             lj_catalog_gradient_norm(-1.0, coordinates.view(), Some(gradient.view())),
             Some(0.0)
@@ -6382,7 +6382,7 @@ mod census_policy_tests {
             lj_catalog_gradient_norm(f64::NAN, coordinates.view(), Some(gradient.view())),
             None
         );
-        let invalid = array![f64::NAN; 6];
+        let invalid = arr1(&[f64::NAN; 6]);
         assert_eq!(
             lj_catalog_gradient_norm(-1.0, invalid.view(), Some(gradient.view())),
             None
