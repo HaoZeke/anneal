@@ -14,6 +14,7 @@
 //! Wire format: topic `census/NNN\n` then little-endian `u32 replica`,
 //! `u64 hops`, `f64 energy`, `u32 n_coords`, `f64 * n_coords`.
 
+use ndarray::Array1;
 use nng::options::Options;
 use nng::options::protocol::pubsub::Subscribe;
 use nng::{Protocol, Socket};
@@ -48,6 +49,8 @@ pub struct CensusBus {
     latest: HashMap<u32, PeerMinimum>,
     last_published: Option<PeerMinimum>,
     checkpoints_since_publication: u8,
+    /// Peer well tables received since the last [`CensusBus::poll_wells`].
+    pending_wells: Vec<(u32, Vec<(Array1<f64>, f64)>)>,
     /// Whether each peer's latest minimum lies on this replica's side of
     /// the packing map, recomputed only when the peer's minimum or this
     /// replica's own minimum changes.
@@ -89,6 +92,9 @@ impl CensusBus {
         subscriber
             .set_opt::<Subscribe>(b"census/".to_vec())
             .map_err(|e| CensusBusError(format!("subscribe: {e}")))?;
+        subscriber
+            .set_opt::<Subscribe>(b"wells/".to_vec())
+            .map_err(|e| CensusBusError(format!("subscribe wells: {e}")))?;
         let neighbors: u32 = std::env::var("CENSUS_BUS_NEIGHBORS")
             .ok()
             .and_then(|v| v.parse().ok())
@@ -112,8 +118,79 @@ impl CensusBus {
             latest: HashMap::new(),
             last_published: None,
             checkpoints_since_publication: 0,
+            pending_wells: Vec::new(),
             nearby: HashMap::new(),
         })
+    }
+
+    /// Publishes a well table for gossip: `(centre, depth)` pairs, deepest
+    /// first as [`crate::bias::BasinBias::deepest_wells`] returns them.
+    ///
+    /// Anti-entropy over the bus: the table is the state, a late subscriber
+    /// gets the whole of it on the next round, and nothing is forwarded.
+    /// Never blocks; a failed send is retried by the next round.
+    pub fn publish_wells(&mut self, wells: &[(Array1<f64>, f64)]) -> bool {
+        let Some(dim) = wells.first().map(|(centre, _)| centre.len()) else {
+            return false;
+        };
+        if wells
+            .iter()
+            .any(|(centre, depth)| centre.len() != dim || !depth.is_finite())
+        {
+            return false;
+        }
+        let mut frame = format!("wells/{:03}\n", self.replica).into_bytes();
+        frame.extend_from_slice(&self.replica.to_le_bytes());
+        frame.extend_from_slice(&(wells.len() as u32).to_le_bytes());
+        frame.extend_from_slice(&(dim as u32).to_le_bytes());
+        for (centre, depth) in wells {
+            frame.extend_from_slice(&depth.to_le_bytes());
+            for v in centre {
+                frame.extend_from_slice(&v.to_le_bytes());
+            }
+        }
+        let mut message = nng::Message::new();
+        message.push_back(&frame);
+        self.publisher.try_send(message).is_ok()
+    }
+
+    /// Peer well tables that arrived since the last call, oldest first.
+    pub fn poll_wells(&mut self) -> Vec<(u32, Vec<(Array1<f64>, f64)>)> {
+        self.drain();
+        std::mem::take(&mut self.pending_wells)
+    }
+
+    /// Reads every waiting message into the census or the wells queue.
+    fn drain(&mut self) -> Vec<PeerMinimum> {
+        let mut changed = Vec::new();
+        while let Ok(message) = self.subscriber.try_recv() {
+            let bytes: &[u8] = &message;
+            if bytes.starts_with(b"wells/") {
+                if let Some((peer, wells)) = decode_wells_frame(bytes, self.replicas)
+                    && peer != self.replica
+                {
+                    self.pending_wells.push((peer, wells));
+                }
+                continue;
+            }
+            let Some(peer) = decode_frame(bytes, self.replicas) else {
+                continue;
+            };
+            if peer.replica == self.replica {
+                continue;
+            }
+            // Fresh means the minimum changed, not that the peer hopped: a
+            // replica sitting on the shelf refreshes the same structure
+            // without costing its peers a packing-map comparison each time.
+            let fresh = self.latest.get(&peer.replica).is_none_or(|held| {
+                held.energy != peer.energy || held.coordinates != peer.coordinates
+            });
+            if fresh {
+                changed.push(peer.clone());
+            }
+            self.latest.insert(peer.replica, peer);
+        }
+        changed
     }
 
     /// Publishes changed minima immediately and refreshes unchanged minima
@@ -152,29 +229,10 @@ impl CensusBus {
     }
 
     /// Drains every waiting publication and returns the peers whose latest
-    /// minimum changed in this poll. Never blocks.
+    /// minimum changed in this poll. Never blocks. Well tables read in the
+    /// same drain wait for [`CensusBus::poll_wells`].
     pub fn poll(&mut self) -> Vec<PeerMinimum> {
-        let mut changed = Vec::new();
-        while let Ok(message) = self.subscriber.try_recv() {
-            let bytes: &[u8] = &message;
-            let Some(peer) = decode_frame(bytes, self.replicas) else {
-                continue;
-            };
-            if peer.replica == self.replica {
-                continue;
-            }
-            // Fresh means the minimum changed, not that the peer hopped: a
-            // replica sitting on the shelf refreshes the same structure
-            // without costing its peers a packing-map comparison each time.
-            let fresh = self.latest.get(&peer.replica).is_none_or(|held| {
-                held.energy != peer.energy || held.coordinates != peer.coordinates
-            });
-            if fresh {
-                changed.push(peer.clone());
-            }
-            self.latest.insert(peer.replica, peer);
-        }
-        changed
+        self.drain()
     }
 
     /// Latest minimum of every peer heard so far.
@@ -202,6 +260,49 @@ fn decode_frame(bytes: &[u8], replicas: u32) -> Option<PeerMinimum> {
         return None;
     }
     decode(payload)
+}
+
+fn decode_wells_frame(bytes: &[u8], replicas: u32) -> Option<(u32, Vec<(Array1<f64>, f64)>)> {
+    let end = bytes.iter().position(|byte| *byte == b'\n')?;
+    let payload = bytes.get(end + 1..)?;
+    let replica = u32::from_le_bytes(payload.get(..4)?.try_into().ok()?);
+    if replica >= replicas || &bytes[..end] != format!("wells/{replica:03}").as_bytes() {
+        return None;
+    }
+    decode_wells(payload).map(|wells| (replica, wells))
+}
+
+/// Decodes a well table: replica, count, dimension, then depth and centre
+/// per well; exact length and finite values or nothing.
+fn decode_wells(bytes: &[u8]) -> Option<Vec<(Array1<f64>, f64)>> {
+    let header = bytes.get(..12)?;
+    let count = usize::try_from(u32::from_le_bytes(header[4..8].try_into().ok()?)).ok()?;
+    let dim = usize::try_from(u32::from_le_bytes(header[8..12].try_into().ok()?)).ok()?;
+    if count == 0 || dim == 0 {
+        return None;
+    }
+    let per_well = dim
+        .checked_add(1)?
+        .checked_mul(std::mem::size_of::<f64>())?;
+    let expected = 12_usize.checked_add(count.checked_mul(per_well)?)?;
+    if bytes.len() != expected {
+        return None;
+    }
+    let values: Vec<f64> = bytes[12..]
+        .as_chunks::<8>()
+        .0
+        .iter()
+        .map(|chunk| f64::from_le_bytes(*chunk))
+        .collect();
+    if values.iter().any(|v| !v.is_finite()) {
+        return None;
+    }
+    Some(
+        values
+            .chunks_exact(dim + 1)
+            .map(|well| (Array1::from(well[1..].to_vec()), well[0]))
+            .collect(),
+    )
 }
 
 fn decode(bytes: &[u8]) -> Option<PeerMinimum> {
@@ -254,8 +355,36 @@ mod tests {
             latest: HashMap::new(),
             last_published: None,
             checkpoints_since_publication: 0,
+            pending_wells: Vec::new(),
             nearby: HashMap::new(),
         }
+    }
+
+    #[test]
+    fn a_well_table_round_trips_and_a_truncated_one_is_refused() {
+        use ndarray::array;
+        let wells = vec![(array![1.0, 2.0, 3.0], 0.5), (array![4.0, 5.0, 6.0], 0.25)];
+        let mut frame = b"wells/001\n".to_vec();
+        frame.extend_from_slice(&1u32.to_le_bytes());
+        frame.extend_from_slice(&2u32.to_le_bytes());
+        frame.extend_from_slice(&3u32.to_le_bytes());
+        for (centre, depth) in &wells {
+            frame.extend_from_slice(&depth.to_le_bytes());
+            for v in centre {
+                frame.extend_from_slice(&v.to_le_bytes());
+            }
+        }
+        let (peer, decoded) = super::decode_wells_frame(&frame, 4).unwrap();
+        assert_eq!(peer, 1);
+        assert_eq!(decoded, wells);
+        assert!(super::decode_wells_frame(&frame[..frame.len() - 1], 4).is_none());
+        assert!(
+            super::decode_wells_frame(&frame, 1).is_none(),
+            "replica out of range"
+        );
+        let mut bus = unconnected_bus();
+        assert!(!bus.publish_wells(&[]), "an empty table is not published");
+        assert!(bus.poll_wells().is_empty());
     }
 
     #[test]

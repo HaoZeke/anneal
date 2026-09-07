@@ -4294,8 +4294,33 @@ fn run_capnp_catalog(
     let mut count_hole = 0usize;
     let mut extra_cover = 0usize;
     let mut last_policy_action = ACTION_LOCAL;
+    // Gossip over the census bus: at every GOSSIP_INTERVAL charged calls
+    // publish the GOSSIP_TOP deepest wells (0 for the whole table) and step
+    // toward the latest peer table by GOSSIP_WEIGHT. The peer set is the
+    // bus subscription, so CENSUS_BUS_NEIGHBORS=k is the ring topology.
+    let coop_gossip: Option<(usize, f64, Option<usize>)> = std::env::var("GOSSIP")
+        .ok()
+        .filter(|v| !v.is_empty())
+        .map(|_| {
+            let parsed = |name: &str| std::env::var(name).ok().and_then(|v| v.parse::<f64>().ok());
+            (
+                parsed("GOSSIP_INTERVAL")
+                    .map_or(20_000, |v| v as usize)
+                    .max(1),
+                parsed("GOSSIP_WEIGHT").unwrap_or(0.5),
+                match parsed("GOSSIP_TOP").map(|v| v as usize) {
+                    Some(0) => None,
+                    Some(k) => Some(k),
+                    None => Some(64),
+                },
+            )
+        });
+    let mut next_gossip = coop_gossip.map_or(usize::MAX, |(interval, _, _)| interval);
+    let mut gossip_published = 0usize;
+    let mut gossip_merged = 0usize;
+    let mut gossip_merge: Option<CheckpointAction> = None;
     let mut checkpoint = |snapshot: ChainCheckpoint<'_>| {
-        with_pending_deposits(
+        let action = with_pending_deposits(
             &mut pending_deposits,
             shared_bias_enabled,
             |pending_deposits| {
@@ -4337,6 +4362,27 @@ fn run_capnp_catalog(
                     }
                     let fresh = bus.poll();
                     bus_received += fresh.len();
+                    if let Some((interval, weight, top)) = coop_gossip
+                        && snapshot.charged() >= next_gossip
+                        && let Some(bias) = snapshot.bias()
+                    {
+                        next_gossip = snapshot.charged() + interval;
+                        let table = match top {
+                            Some(count) => bias.deepest_wells(count),
+                            None => bias.wells(),
+                        };
+                        if bus.publish_wells(&table) {
+                            gossip_published += 1;
+                        }
+                        if let Some((_, wells)) = bus.poll_wells().into_iter().last() {
+                            gossip_merged += 1;
+                            gossip_merge = Some(CheckpointAction::MergeBias {
+                                wells,
+                                weight,
+                                complete: top.is_none(),
+                            });
+                        }
+                    }
                     // Locality-limited repulsive history: admit bus deposits from
                     // nearby packings. This does not average coordinates or guarantee
                     // one cluster per funnel. CENSUS_BUS_UNBOUNDED=1 admits distant
@@ -4376,11 +4422,13 @@ fn run_capnp_catalog(
                         && checkpoint_sequence.is_multiple_of(7)
                     {
                         println!(
-                            "  bus hops {}  peers {}  crowd {}  received {}",
+                            "  bus hops {}  peers {}  crowd {}  received {}  gossip published {} merged {}",
                             snapshot.hops(),
                             bus.peer_count(),
                             peer_crowd,
-                            bus_received
+                            bus_received,
+                            gossip_published,
+                            gossip_merged
                         );
                     }
                 }
@@ -6307,7 +6355,13 @@ fn run_capnp_catalog(
                     .expect("checkpoint trace must remain complete");
                 CheckpointAction::Continue
             },
-        )
+        );
+        // A gossip step takes the checkpoint only when nothing else did;
+        // deposits and proposals keep their precedence.
+        match (action, gossip_merge.take()) {
+            (CheckpointAction::Continue, Some(merge)) => merge,
+            (action, _) => action,
+        }
     };
     let outcome = run_with_bias_at_checkpoints(
         &run_cfg,
