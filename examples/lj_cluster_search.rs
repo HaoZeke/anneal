@@ -2041,12 +2041,12 @@ fn main() {
             .ok()
             .and_then(|v| v.parse().ok())
             .unwrap_or(anneal_core::methods::two_phase::DEFAULT_SURFACE_BLOCK);
-        let mut surfaces = (!cfg.surfaces.is_empty()).then(|| {
-            anneal_core::methods::two_phase::SurfacePortfolio::with_block(
+        let surfaces = (!cfg.surfaces.is_empty()).then(|| {
+            Arc::new(Mutex::new(anneal_core::methods::two_phase::SurfacePortfolio::with_block(
                 &cfg.surfaces,
                 seed,
                 surface_block,
-            )
+            )))
         });
         let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, iters: usize| {
             let charged_before = led.spent();
@@ -2091,8 +2091,8 @@ fn main() {
             // whose minimum the plain relaxation below starts from.
             let compacted;
             let screening_pass = iters <= screen_steps;
-            let surface = match surfaces.as_mut() {
-                Some(portfolio) => portfolio.begin(screening_pass),
+            let surface = match surfaces.as_ref() {
+                Some(portfolio) => portfolio.lock().expect("surface portfolio").begin(screening_pass),
                 None => two_phase,
             };
             let x = match surface {
@@ -2125,8 +2125,8 @@ fn main() {
             } else {
                 opt.minimize(x, iters, |v| charged(led, v))
             };
-            if let Some(portfolio) = surfaces.as_mut() {
-                portfolio.observe(screening_pass, f, led.best);
+            if let Some(portfolio) = surfaces.as_ref() {
+                portfolio.lock().expect("surface portfolio").observe(screening_pass, f, led.best);
             }
             let mut boundary_energy = f;
             let mut validated_gradient = None;
@@ -2238,6 +2238,7 @@ fn main() {
                     seed,
                     catalog_rpc.as_deref(),
                     coreclass.then_some((core_patience, core_trial)),
+                    surfaces.as_ref().map(Arc::clone),
                 )
             }
             #[cfg(not(feature = "bank-rpc"))]
@@ -2605,6 +2606,11 @@ fn main() {
         }
         total_hops += out.hops;
         total_charged += ledger.spent();
+        if let Some(portfolio) = surfaces.as_ref() {
+            let portfolio = portfolio.lock().expect("surface portfolio");
+            println!("SURFACE_EVIDENCE seed {seed} local_blocks {} peer_blocks {} local_draws {:?} local_means {:?}",
+                portfolio.draws().iter().sum::<usize>(), portfolio.peer_observations(), portfolio.draws(), portfolio.means());
+        }
         println!(
             "  seed {seed}: best {:.6}  hops {}  screened {}  charged {}  \
              basins {} ({:.1} hops each)  returned {}  \
@@ -3511,6 +3517,7 @@ fn run_capnp_catalog(
     seed: u64,
     endpoint: Option<&str>,
     core_class: Option<(usize, usize)>,
+    surfaces: Option<Arc<Mutex<anneal_core::methods::two_phase::SurfacePortfolio>>>,
 ) -> Outcome {
     use anneal_core::catalog::lj::{descriptor_space, system_signature};
     use anneal_core::catalog_policy::{ActiveCatalogRelation, PolicyAction, PolicyReason};
@@ -4113,11 +4120,20 @@ fn run_capnp_catalog(
     // Leaves decided, exchanges adopted, walks kept, holes drawn.
     let mut count_leave = 0usize;
     let mut count_other_family = 0usize;
+    // Own-progress clock for family hearing: the hop at which this replica
+    // last deepened its own best. A replica that has not deepened for
+    // CATALOG_HEAR_STALL hops is stalled in its packing.
+    let mut hear_last_best = f64::INFINITY;
+    let mut hear_last_best_hop = 0usize;
     let mut count_walk = 0usize;
     let mut count_hole = 0usize;
     let mut extra_cover = 0usize;
     let mut last_policy_action = ACTION_LOCAL;
     let mut checkpoint = |snapshot: ChainCheckpoint<'_>| {
+        if sharing && let Some(portfolio) = surfaces.as_ref() {
+            cooperative.post_surface_evidence(replica, Arc::clone(portfolio))
+                .expect("surface exchange must name the live replica");
+        }
         if core_class.is_some() {
             let class = anneal_core::corekey::motif_class(snapshot.current_state()).index();
             let verdict = cooperative
