@@ -463,6 +463,12 @@ struct ScientificState {
     /// split clones every occupied histogram and runs a Torgerson MDS,
     /// and occupancy_floor asks for it once per policy request.
     landfold: Option<(u64, (usize, usize, usize))>,
+    /// A landfold being folded off the lock for the named book version.
+    /// The fold is a Torgerson MDS over every occupied histogram; measured
+    /// at 304 s under the lock on a 48-replica LJ75 run, which froze the
+    /// ensemble. It now runs on the rayon pool from a clone of the book
+    /// and the last finished split is served until it lands.
+    landfold_pending: Option<(u64, Arc<std::sync::Mutex<Option<(usize, usize, usize)>>>)>,
     /// Last time the folded book, landfold, and worthwhile count were
     /// rebuilt. The book version moves on every arrival; folding on that
     /// cadence parks the workers on the coordinator.
@@ -656,6 +662,7 @@ impl CoordinatorState {
                     worthwhile: None,
                     fed_from: None,
                     landfold: None,
+                    landfold_pending: None,
                     fold_hold: None,
                     floor_hold: None,
                     ei_hold: None,
@@ -5034,15 +5041,41 @@ fn occupancy_seam_floor(
 
 fn occupancy_landfold_from_book(scientific: &mut ScientificState) -> (usize, usize, usize) {
     let version = scientific.packing.version();
+    // Collect a finished fold first, whatever version asked for it.
+    if let Some((folded_version, slot)) = scientific.landfold_pending.as_ref()
+        && let Some(split) = slot.lock().ok().and_then(|held| *held)
+    {
+        let folded_version = *folded_version;
+        scientific.landfold = Some((folded_version, split));
+        scientific.landfold_pending = None;
+    }
     let held = hold_active(scientific, scientific.fold_hold);
     if let Some((seen, split)) = scientific.landfold
         && (seen == version || held)
     {
         return split;
     }
-    let split = occupancy_landfold_uncached(scientific);
-    scientific.landfold = Some((version, split));
-    split
+    // Fold the current book off the lock unless one is already folding;
+    // serve the last finished split meanwhile, or the empty split before
+    // the first one lands. Nothing waits on the coordinator for it.
+    if scientific
+        .landfold_pending
+        .as_ref()
+        .is_none_or(|(pending_version, _)| *pending_version != version)
+        && scientific.landfold_pending.is_none()
+    {
+        let book = scientific.packing.clone();
+        let slot = Arc::new(std::sync::Mutex::new(None));
+        let writer = Arc::clone(&slot);
+        rayon::spawn(move || {
+            let map = occupancy_sparsify_packing(&book);
+            if let Ok(mut held) = writer.lock() {
+                *held = Some((map.floor, map.left, map.right));
+            }
+        });
+        scientific.landfold_pending = Some((version, slot));
+    }
+    scientific.landfold.map_or((0, 0, 0), |(_, split)| split)
 }
 
 fn occupancy_landfold_uncached(scientific: &ScientificState) -> (usize, usize, usize) {
