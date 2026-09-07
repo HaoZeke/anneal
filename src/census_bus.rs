@@ -160,15 +160,15 @@ fn decode(bytes: &[u8]) -> Option<PeerMinimum> {
     if bytes.len() != expected_len {
         return None;
     }
-    for chunk in bytes[24..].chunks_exact(8) {
-        let coordinate = f64::from_le_bytes(chunk.try_into().ok()?);
+    for chunk in bytes[24..].as_chunks::<8>().0 {
+        let coordinate = f64::from_le_bytes(*chunk);
         if !coordinate.is_finite() {
             return None;
         }
     }
     let mut coordinates = Vec::with_capacity(n);
-    for chunk in bytes[24..].chunks_exact(8) {
-        coordinates.push(f64::from_le_bytes(chunk.try_into().ok()?));
+    for chunk in bytes[24..].as_chunks::<8>().0 {
+        coordinates.push(f64::from_le_bytes(*chunk));
     }
     Some(PeerMinimum {
         replica,
