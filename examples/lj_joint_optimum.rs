@@ -945,11 +945,14 @@ fn main() -> Result<(), Box<dyn Error>> {
         return Err("N must be at least two and budget/seeds must be positive".into());
     }
     let start_protocol = start_protocol_name(optbench_root.is_some(), fixed_path.is_some())?;
-    let fixed_initial = fixed_path.as_ref().map(|path| {
-        let contents = std::fs::read_to_string(path)
-            .map_err(|error| format!("read {}: {error}", path.display()))?;
-        parse_plain_coordinates(&contents, n)
-    }).transpose()?;
+    let fixed_initial = fixed_path
+        .as_ref()
+        .map(|path| {
+            let contents = std::fs::read_to_string(path)
+                .map_err(|error| format!("read {}: {error}", path.display()))?;
+            parse_plain_coordinates(&contents, n)
+        })
+        .transpose()?;
     let target = reference(n).ok_or("no published LJ target is registered for this size")?;
     let arms = selected_arms(selector, &irc_kinds(irc_selector)?)?;
     let replicas =
