@@ -3236,6 +3236,27 @@ mod tests {
     }
 
     #[test]
+    fn unresolved_exit_mass_preserves_the_probability_of_continuing_exploration() {
+        let mut esc = trap_with_one_exit(true);
+        esc.observe(7, None, 1.0);
+        esc.observe(7, None, 0.5);
+        let mut rng = StdRng::seed_from_u64(79);
+        let mut reference_rng = rng.clone();
+        let expected_jumps = (0..256)
+            .filter(|_| reference_rng.random::<f64>() < 0.25)
+            .count();
+        let mut jumps = 0;
+        for _ in 0..256 {
+            if let Ok(jump) = esc.propose(0, &mut rng) {
+                jumps += 1;
+                assert_eq!(jump.basin, 500);
+            }
+        }
+        assert_eq!(jumps, expected_jumps);
+        assert_eq!(esc.stats.jumps + esc.stats.refusals, 256);
+    }
+
+    #[test]
     fn reweighting_removes_the_deposited_bias() {
         // Two basins, the second higher by one temperature unit. A bias sitting
         // on the first makes the chain accept the uphill hop far more often
