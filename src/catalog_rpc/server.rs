@@ -3515,26 +3515,29 @@ where
     // stderr), or none. A posted descriptor must still have the schema's
     // length, version, and finite values.
     let posted = &validated.candidate.descriptor;
-    let dimension = descriptor_space
-        .schema()
-        .blocks()
-        .iter()
-        .map(|block| block.offset() + block.len())
-        .max()
-        .unwrap_or(0);
-    if posted.len() != dimension
-        || validated.candidate.descriptor_schema_version != signature.descriptor.version
+    if validated.candidate.descriptor_schema_version != signature.descriptor.version
+        || posted.is_empty()
         || posted.iter().any(|value| !value.is_finite())
     {
-        reject("posted descriptor shape, version or values do not match the schema");
+        reject("posted descriptor version or values do not match the schema");
+        return Err(());
+    }
+    // The schema's dimension is learned from the first recomputation and
+    // every posted descriptor is held to it afterwards.
+    static DIMENSION: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
+    if let Some(dimension) = DIMENSION.get()
+        && posted.len() != *dimension
+    {
+        reject("posted descriptor length does not match the schema");
         return Err(());
     }
     let verify_every = descriptor_verification_period();
-    let verify = match verify_every {
-        Some(0) => false,
-        Some(period) => candidate.event_sequence.is_multiple_of(period),
-        None => true,
-    };
+    let verify = DIMENSION.get().is_none()
+        || match verify_every {
+            Some(0) => false,
+            Some(period) => candidate.event_sequence.is_multiple_of(period),
+            None => true,
+        };
     if verify {
         let descriptor = descriptor_space
             .describe(
@@ -3566,6 +3569,7 @@ where
             );
             return Err(());
         }
+        let _ = DIMENSION.set(descriptor.values().len());
         validated.candidate.descriptor = descriptor.values().to_vec();
         validated.candidate.descriptor_schema_version = descriptor.schema_version();
     }
