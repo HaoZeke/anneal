@@ -2470,11 +2470,7 @@ fn main() {
                     &bank_cfg,
                     &mut ledger,
                     &mut relax,
-                    if cfg.minima_hopping || cfg.escape_on_stall || cfg.soft_perturb {
-                        Some(&mut grad)
-                    } else {
-                        None
-                    },
+                    Some(&mut grad),
                     &mut dist,
                     seed,
                 );
@@ -2552,11 +2548,7 @@ fn main() {
                 start.view(),
                 &mut ledger,
                 &mut relax,
-                if cfg.minima_hopping || cfg.escape_on_stall || cfg.soft_perturb {
-                    Some(&mut grad)
-                } else {
-                    None
-                },
+                Some(&mut grad),
                 &mut bias,
                 &mut rng,
                 interval,
@@ -2621,11 +2613,7 @@ fn main() {
                     &cfg,
                     &mut ledger,
                     &mut relax,
-                    if cfg.minima_hopping || cfg.escape_on_stall || cfg.soft_perturb {
-                        Some(&mut grad)
-                    } else {
-                        None
-                    },
+                    Some(&mut grad),
                     if cfg.staged_quench {
                         Some(&mut settle)
                     } else {
