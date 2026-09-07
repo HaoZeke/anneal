@@ -39,14 +39,26 @@ impl PairCache {
             return Some(Arc::clone(prepared));
         }
         self.preparations += 1;
-        let prepared = Arc::new(SortedPairs { n_points: coordinates.len() / 3 }.prepare(coordinates)?);
+        let prepared = Arc::new(
+            SortedPairs {
+                n_points: coordinates.len() / 3,
+            }
+            .prepare(coordinates)?,
+        );
         let bytes = key.len() * std::mem::size_of::<u64>() + prepared.payload_bytes();
         // Oversized spectra bypass storage without evicting reusable entries.
         if bytes <= self.max_payload_bytes {
             while self.payload_bytes > self.max_payload_bytes - bytes {
-                let oldest = self.order.pop_front().expect("resident payload has a FIFO entry");
-                let removed = self.entries.remove(&oldest).expect("FIFO keys are resident");
-                self.payload_bytes -= oldest.len() * std::mem::size_of::<u64>() + removed.payload_bytes();
+                let oldest = self
+                    .order
+                    .pop_front()
+                    .expect("resident payload has a FIFO entry");
+                let removed = self
+                    .entries
+                    .remove(&oldest)
+                    .expect("FIFO keys are resident");
+                self.payload_bytes -=
+                    oldest.len() * std::mem::size_of::<u64>() + removed.payload_bytes();
             }
             let key: Arc<[u64]> = key.into();
             self.order.push_back(Arc::clone(&key));
@@ -92,7 +104,10 @@ impl IraStructureWitness {
 impl CachedIraStructureWitness {
     /// Snapshot of rejection-prefilter work and resident payload.
     pub fn cache_stats(&self) -> PairCacheStats {
-        let cache = self.cache.lock().expect("pair-spectrum cache lock poisoned");
+        let cache = self
+            .cache
+            .lock()
+            .expect("pair-spectrum cache lock poisoned");
         PairCacheStats {
             hits: cache.hits,
             preparations: cache.preparations,
@@ -103,7 +118,10 @@ impl CachedIraStructureWitness {
 
     fn lower_bound(&self, left: ArrayView1<f64>, right: ArrayView1<f64>) -> Option<f64> {
         let (left, right) = {
-            let mut cache = self.cache.lock().expect("pair-spectrum cache lock poisoned");
+            let mut cache = self
+                .cache
+                .lock()
+                .expect("pair-spectrum cache lock poisoned");
             (cache.prepare(left)?, cache.prepare(right)?)
         };
         left.bottleneck_lower_bound(&right)
@@ -116,7 +134,10 @@ impl ExactStructureWitness for CachedIraStructureWitness {
     }
 
     fn relation(&self, left: ArrayView1<f64>, right: ArrayView1<f64>) -> ExactStructureRelation {
-        if self.lower_bound(left, right).is_some_and(|lower| lower > self.witness.radius) {
+        if self
+            .lower_bound(left, right)
+            .is_some_and(|lower| lower > self.witness.radius)
+        {
             ExactStructureRelation::Distinct
         } else {
             self.witness.relation(left, right)
@@ -127,9 +148,14 @@ impl ExactStructureWitness for CachedIraStructureWitness {
         self.relation_structures(left, right).is_equivalent()
     }
 
-    fn relation_structures(&self, left: StructureView<'_>, right: StructureView<'_>) -> ExactStructureRelation {
+    fn relation_structures(
+        &self,
+        left: StructureView<'_>,
+        right: StructureView<'_>,
+    ) -> ExactStructureRelation {
         if left.context != right.context
-            || self.lower_bound(left.coordinates, right.coordinates)
+            || self
+                .lower_bound(left.coordinates, right.coordinates)
                 .is_some_and(|lower| lower > self.witness.radius)
         {
             ExactStructureRelation::Distinct
