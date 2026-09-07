@@ -125,6 +125,15 @@ mod option_tests {
     use super::*;
 
     #[test]
+    fn unknown_mechanism_is_rejected_before_search() {
+        let result = std::panic::catch_unwind(|| {
+            let mut cfg = Config::recommended(75);
+            apply_boolean_options(&mut cfg, &["rec", "unknown_mechanism"]);
+        });
+        assert!(result.is_err(), "an unknown mechanism must not label a run");
+    }
+
+    #[test]
     fn unrelated_recommended_options_preserve_default_true_mechanisms() {
         let mut cfg = Config::recommended(75);
         apply_boolean_options(&mut cfg, &["rec", "catalog"]);
