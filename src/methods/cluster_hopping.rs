@@ -678,8 +678,8 @@ pub type Settle<'a> =
 
 /// Gradient of the objective, charged to the ledger by the caller.
 ///
-/// Optional because only the soft-mode escape needs it: everything else in this
-/// driver works from relaxations alone.
+/// A supplied callback certifies candidate answers and supports soft-mode
+/// escape. Gradient-free callers own their relaxation convergence contract.
 pub type GradFn<'g> = dyn FnMut(&mut Ledger, ArrayView1<f64>) -> Option<Array1<f64>> + 'g;
 
 /// Value and gradient together, charged to the ledger by the caller.
@@ -814,6 +814,34 @@ fn gradient_is_converged(gradient: ArrayView1<f64>, dimensions: usize, tolerance
         && gradient
             .iter()
             .all(|v| v.is_finite() && v.abs() < tolerance)
+}
+
+/// Records an auxiliary quench without restricting exploratory adoption.
+fn record_quenched_answer(
+    cfg: &Config,
+    ledger: &mut Ledger,
+    grad: &mut Option<&mut GradFn<'_>>,
+    energy: f64,
+    state: ArrayView1<f64>,
+    unresolved: &mut usize,
+) -> Option<Array1<f64>> {
+    let sane = !state.is_empty() && quench_is_sane(cfg, energy, state);
+    let required = grad.is_some();
+    let gradient = if sane {
+        grad.as_deref_mut().and_then(|evaluate| {
+            evaluate(ledger, state).filter(|values| {
+                gradient_is_converged(values.view(), state.len(), cfg.record_gradient)
+            })
+        })
+    } else {
+        None
+    };
+    if sane && (!required || gradient.is_some()) {
+        ledger.record(energy, state);
+    } else {
+        *unresolved += 1;
+    }
+    gradient
 }
 
 /// Runs the driver until the ledger is spent.
@@ -1411,7 +1439,7 @@ where
     for _ in 1..n_rep {
         let s0 = random_cluster_in_radius(n, cfg.start_radius(), cfg.min_separation, rng);
         let (e0, x0) = relax(ledger, s0.view(), cfg.relax_steps);
-        ledger.record(e0, x0.view());
+        record_quenched_answer(cfg, ledger, &mut grad, e0, x0.view(), &mut unconverged_records);
         chains.push((e0, x0));
     }
     let mut screened_out = 0usize;
@@ -1806,7 +1834,7 @@ where
                         continue;
                     }
                     hops += 1;
-                    ledger.record(hole_energy, hole_state.view());
+                    record_quenched_answer(cfg, ledger, &mut grad, hole_energy, hole_state.view(), &mut unconverged_records);
                     let reached = identity.basin_of(hole_state.view());
                     let from = here.unwrap_or_else(|| identity.basin_of(from_state.view()));
                     feedback.observe(Some(from), reached);
@@ -3304,7 +3332,7 @@ where
         {
             let (es, xs) = relax(ledger, y.view(), cfg.relax_steps);
             if es.is_finite() && xs.len() == x.len() {
-                ledger.record(es, xs.view());
+                let sym_gradient = record_quenched_answer(cfg, ledger, &mut grad, es, xs.view(), &mut unconverged_records);
                 hops += 1;
                 symmetrised += 1;
                 let d = (es - e) / temperature.max(1e-12);
@@ -3315,7 +3343,7 @@ where
                     e = es;
                     x = xs;
                     here = None;
-                    current_validation_gradient = None;
+                    current_validation_gradient = sym_gradient;
                 }
             }
         }
@@ -3370,13 +3398,13 @@ where
             }
             let (ej, xj) = relax(ledger, y.view(), cfg.relax_steps);
             if ej.is_finite() && xj.len() == x.len() && quench_is_sane(cfg, ej, xj.view()) {
-                ledger.record(ej, xj.view());
+                let jump_gradient = record_quenched_answer(cfg, ledger, &mut grad, ej, xj.view(), &mut unconverged_records);
                 hops += 1;
                 jumps += 1;
                 e = ej;
                 x = xj;
                 here = None;
-                current_validation_gradient = None;
+                current_validation_gradient = jump_gradient;
                 longest_quiet = longest_quiet.max(quiet);
                 quiet = 0;
             }
@@ -3496,7 +3524,7 @@ where
                 };
                 if let Some(y) = symmetrised_state {
                     let (es, xs) = relax(ledger, y.view(), cfg.relax_steps);
-                    ledger.record(es, xs.view());
+                    let sym_gradient = record_quenched_answer(cfg, ledger, &mut grad, es, xs.view(), &mut unconverged_records);
                     hops += 1;
                     symmetrised += 1;
                     if es < e {
@@ -3504,6 +3532,7 @@ where
                         e = es;
                         x = xs;
                         here = None;
+                        current_validation_gradient = sym_gradient;
                     }
                 }
             }
@@ -3554,12 +3583,13 @@ where
                 random_cluster_in_radius(n, cfg.start_radius(), cfg.min_separation, rng)
             };
             let (ef, xf) = relax(ledger, fresh.view(), cfg.relax_steps);
-            ledger.record(ef, xf.view());
+            let restart_gradient = record_quenched_answer(cfg, ledger, &mut grad, ef, xf.view(), &mut unconverged_records);
             hops += 1;
             restarts += 1;
             e = ef;
             x = xf;
             here = None;
+            current_validation_gradient = restart_gradient;
             stall_outcome = Some(stalled_from - e);
         }
         if stall_response.map(|arm| stall_arms[arm] == "trail") == Some(true)
@@ -3586,7 +3616,7 @@ where
                 *value += cfg.escape_amplitude * (0.5 * along + rng.random::<f64>() - 0.5);
             }
             let (ee, xe) = relax(ledger, exit.view(), cfg.relax_steps);
-            ledger.record(ee, xe.view());
+            let trail_gradient = record_quenched_answer(cfg, ledger, &mut grad, ee, xe.view(), &mut unconverged_records);
             hops += 1;
             stall_escapes += 1;
             trail_escapes += 1;
@@ -3598,6 +3628,7 @@ where
             e = ee;
             x = xe;
             here = None;
+            current_validation_gradient = trail_gradient;
             stall_outcome = Some(stalled_from - e);
         }
         if stall_response.map(|arm| stall_arms[arm] == "climb") == Some(true) {
@@ -3625,7 +3656,7 @@ where
                     }
                     soft_lambda += o.lambda;
                     let (ee, xe) = relax(ledger, o.state.view(), cfg.relax_steps);
-                    ledger.record(ee, xe.view());
+                    let escape_gradient = record_quenched_answer(cfg, ledger, &mut grad, ee, xe.view(), &mut unconverged_records);
                     hops += 1;
                     stall_escapes += 1;
                     if ee < e {
@@ -3642,6 +3673,7 @@ where
                     }
                     e = ee;
                     x = xe;
+                    current_validation_gradient = escape_gradient;
                     if !cfg.minima_hopping {
                         here = None;
                     }
@@ -3980,7 +4012,7 @@ where
                                 return None;
                             }
                             let (ev, xv) = relax(ledger, img, cfg.relax_steps);
-                            ledger.record(ev, xv.view());
+                            record_quenched_answer(cfg, ledger, &mut grad, ev, xv.view(), &mut unconverged_records);
                             Some((ev, xv))
                         },
                         |st| {
