@@ -35,8 +35,8 @@ use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 #[cfg(feature = "bank-rpc")]
-const EVIDENCE_ONLY_WORK_KIND: anneal_core::cooperative_search::ChargeKind =
-    anneal_core::cooperative_search::ChargeKind::LocalProposal;
+const EVIDENCE_ONLY_WORK_KIND: anneal_core::cooperative_search::ledger::ChargeKind =
+    anneal_core::cooperative_search::ledger::ChargeKind::LocalProposal;
 
 #[cfg(feature = "ira")]
 use anneal_core::shape::{IraMetric, IraStructureWitness};
