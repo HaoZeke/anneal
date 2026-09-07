@@ -2832,10 +2832,11 @@ where
                 false
             } else {
                 // Threshold on the *biased* rise. Adapts like Goedecker's E_diff
-                // while still feeling the per-basin deposits.
+                // while still feeling the per-basin deposits. A self-return
+                // updates escape strength but is not an acceptance trial.
                 let reached = identity.basin_of(x_new.view());
                 feedback.observe(Some(from), reached);
-                let ok = feedback.accept(delta);
+                let ok = reached != from && feedback.accept(delta);
                 if ok {
                     here = Some(reached);
                 }
