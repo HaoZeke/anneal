@@ -598,6 +598,8 @@ pub struct Outcome {
     pub restarts: usize,
     /// Heard structures refused by the exchange acceptance.
     pub exchanges_refused: usize,
+    /// Occasional jumps taken on stagnation.
+    pub jumps: usize,
     /// Climbs triggered by a stall.
     pub stall_escapes: usize,
     /// Stall exits taken through the recorded basin entry.
@@ -1325,6 +1327,7 @@ where
     let mut trace_book = seam_trace.then(crate::catalog::PackingBook::default);
     let mut restarts = 0usize;
     let mut exchanges_refused = 0usize;
+    let mut jumps = 0usize;
     let mut symmetrised = 0usize;
     let mut symmetry_gain = 0.0_f64;
     let mut continuous_symmetry_attempts = 0usize;
@@ -3344,6 +3347,40 @@ where
             >= cfg
                 .escape_stall_patience
                 .max((cfg.escape_stall_factor * longest_quiet as f64) as usize);
+        // Basin hopping with occasional jumping (Iwamatsu and Okabe, Chem.
+        // Phys. Lett. 399, 396 (2004)): after `jump_patience` hops without
+        // improvement, take `jump_steps` collective displacements with no
+        // quench and no acceptance test, then quench and continue from
+        // wherever that lands. The walk keeps most of the structure, so the
+        // landing is a neighbouring region rather than a random start,
+        // which is what the measured shelf needs: the control at ten times
+        // the budget left the icosahedral shelf about once per several
+        // hundred thousand hops, and a fresh random start pays the descent
+        // again and lands on the shelf with the same odds.
+        if cfg.jump_on_stall
+            && cfg.jump_patience > 0
+            && quiet >= cfg.jump_patience
+            && quiet.is_multiple_of(cfg.jump_patience)
+        {
+            let mut y = x.clone();
+            for _ in 0..cfg.jump_steps.max(1) {
+                for v in y.iter_mut() {
+                    *v += rng.random_range(-cfg.jump_step..cfg.jump_step);
+                }
+            }
+            let (ej, xj) = relax(ledger, y.view(), cfg.relax_steps);
+            if ej.is_finite() && xj.len() == x.len() && quench_is_sane(cfg, ej, xj.view()) {
+                ledger.record(ej, xj.view());
+                hops += 1;
+                jumps += 1;
+                e = ej;
+                x = xj;
+                here = None;
+                current_validation_gradient = None;
+                longest_quiet = longest_quiet.max(quiet);
+                quiet = 0;
+            }
+        }
         // Where the chain stands after the acceptance test, computed once for
         // every consumer that wants it.
         let landed = if accept && here_before.is_some() {
@@ -4043,6 +4080,7 @@ where
         continuous_symmetry: (continuous_symmetry_attempts, continuous_symmetry_gain),
         restarts,
         exchanges_refused,
+        jumps,
         merge_radius: final_radius,
         mean_step: radius.mean_step(),
         stall_escapes,
