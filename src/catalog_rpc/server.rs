@@ -466,9 +466,14 @@ struct ScientificState {
     /// Last time the folded book, landfold, and worthwhile count were
     /// rebuilt. The book version moves on every arrival; folding on that
     /// cadence parks the workers on the coordinator.
-    fold_hold: Option<Instant>,
-    floor_hold: Option<(Instant, usize)>,
-    ei_hold: Option<(Instant, bool)>,
+    fold_hold: Option<u64>,
+    floor_hold: Option<(u64, usize)>,
+    ei_hold: Option<(u64, bool)>,
+    /// Request counter the holds are measured against. Holds were wall-clock
+    /// (five seconds), which made an ensemble's decisions depend on machine
+    /// speed and load; a count of requests is the same throttle and is
+    /// reproducible.
+    hold_clock: u64,
     last_gt_report: Option<OccupancyGtKey>,
     /// Leftover occupancy sample whose saturation state has been counted
     /// toward the retirement dwell.
@@ -654,6 +659,7 @@ impl CoordinatorState {
                     fold_hold: None,
                     floor_hold: None,
                     ei_hold: None,
+                    hold_clock: 0,
                     last_gt_report: None,
                     last_leftover_dwell_sample: None,
                     leftover_sat_streak: 0,
@@ -1368,6 +1374,9 @@ fn apply_request(
     request: CatalogRequest,
     mut precomputed: Option<Result<ValidatedCandidate, ()>>,
 ) -> CatalogReply {
+    if let Some(scientific) = state.scientific.as_mut() {
+        scientific.hold_clock = scientific.hold_clock.saturating_add(1);
+    }
     let rejection = identity_rejection(config, state, &request).or_else(|| {
         (request.snapshot_version > state.snapshot_version)
             .then_some(ProtocolRejection::SnapshotRegression)
@@ -4671,11 +4680,16 @@ fn q_ei_family_entry(scientific: &mut ScientificState, replica: u32) -> Option<(
 }
 
 /// The folded book, recomputed only when the book has changed.
+/// Requests a cached occupancy diagnostic is held for before recomputation.
+const HOLD_REQUESTS: u64 = 128;
+
+fn hold_active(scientific: &ScientificState, at: Option<u64>) -> bool {
+    at.is_some_and(|at| scientific.hold_clock.saturating_sub(at) < HOLD_REQUESTS)
+}
+
 fn sparsified_book(scientific: &mut ScientificState) -> &crate::catalog::OccupancyBookMap {
     let version = scientific.packing.version();
-    let held = scientific
-        .fold_hold
-        .is_some_and(|at| at.elapsed() < Duration::from_secs(5));
+    let held = hold_active(scientific, scientific.fold_hold);
     let stale = scientific
         .sparsified
         .as_ref()
@@ -4683,7 +4697,7 @@ fn sparsified_book(scientific: &mut ScientificState) -> &crate::catalog::Occupan
     if stale {
         let folded = occupancy_sparsify_packing(&scientific.packing);
         scientific.sparsified = Some((version, folded));
-        scientific.fold_hold = Some(Instant::now());
+        scientific.fold_hold = Some(scientific.hold_clock);
     }
     &scientific
         .sparsified
@@ -4721,9 +4735,7 @@ fn packing_census_saturated(scientific: &mut ScientificState) -> bool {
 fn worthwhile_communities(scientific: &mut ScientificState) -> usize {
     let book = scientific.packing.version();
     let funnel = scientific.funnel.version();
-    let held = scientific
-        .fold_hold
-        .is_some_and(|at| at.elapsed() < Duration::from_secs(5));
+    let held = hold_active(scientific, scientific.fold_hold);
     if let Some((held_book, held_funnel, count)) = scientific.worthwhile
         && ((held_book == book && held_funnel == funnel) || held)
     {
@@ -4758,7 +4770,7 @@ fn worthwhile_communities(scientific: &mut ScientificState) -> usize {
 
 fn occupancy_funnel_ei_exhausted(scientific: &mut ScientificState) -> bool {
     if let Some((at, verdict)) = scientific.ei_hold
-        && at.elapsed() < Duration::from_secs(5)
+        && hold_active(scientific, Some(at))
     {
         return verdict;
     }
@@ -4771,7 +4783,7 @@ fn occupancy_funnel_ei_exhausted(scientific: &mut ScientificState) -> bool {
         && let Some((held, verdict)) = scientific.ei_verdict
         && held == scientific.funnel.version()
     {
-        scientific.ei_hold = Some((Instant::now(), verdict));
+        scientific.ei_hold = Some((scientific.hold_clock, verdict));
         return verdict;
     }
     scientific.fed_from = Some(sizes);
@@ -4814,13 +4826,13 @@ fn occupancy_funnel_ei_exhausted(scientific: &mut ScientificState) -> bool {
     if let Some((held, verdict)) = scientific.ei_verdict
         && held == version
     {
-        scientific.ei_hold = Some((Instant::now(), verdict));
+        scientific.ei_hold = Some((scientific.hold_clock, verdict));
         return verdict;
     }
     let max_ei = scientific.funnel.max_expected_improvement_at_data();
     let verdict = occupancy_ei_exhausted(max_ei, scientific.funnel.len(), scientific.funnel.noise);
     scientific.ei_verdict = Some((version, verdict));
-    scientific.ei_hold = Some((Instant::now(), verdict));
+    scientific.ei_hold = Some((scientific.hold_clock, verdict));
     verdict
 }
 
@@ -4892,9 +4904,7 @@ fn occupancy_seam_floor(
 
 fn occupancy_landfold_from_book(scientific: &mut ScientificState) -> (usize, usize, usize) {
     let version = scientific.packing.version();
-    let held = scientific
-        .fold_hold
-        .is_some_and(|at| at.elapsed() < Duration::from_secs(5));
+    let held = hold_active(scientific, scientific.fold_hold);
     if let Some((seen, split)) = scientific.landfold
         && (seen == version || held)
     {
@@ -4965,7 +4975,7 @@ fn occupancy_floor(scientific: &mut ScientificState) -> usize {
         return occupancy_min_families();
     }
     if let Some((at, held)) = scientific.floor_hold
-        && at.elapsed() < Duration::from_secs(5)
+        && hold_active(scientific, Some(at))
     {
         return held;
     }
@@ -4978,7 +4988,7 @@ fn occupancy_floor(scientific: &mut ScientificState) -> usize {
     // no run can meet.
     let peeled = sparsified_book(scientific).communities.clamp(1, 2);
     let floor = fiedler.max(landfold).max(peeled);
-    scientific.floor_hold = Some((Instant::now(), floor));
+    scientific.floor_hold = Some((scientific.hold_clock, floor));
     floor
 }
 
@@ -5007,10 +5017,7 @@ fn leftover_census_dwell(scientific: &mut ScientificState) -> bool {
 }
 
 fn refresh_occupancy_diagnostics(scientific: &mut ScientificState) {
-    if scientific
-        .fold_hold
-        .is_some_and(|at| at.elapsed() < Duration::from_secs(5))
-    {
+    if hold_active(scientific, scientific.fold_hold) {
         return;
     }
     let _ = occupancy_floor(scientific);
