@@ -415,6 +415,7 @@ impl CatalogClient {
             | AcceptedPayload::RideWork(_)
             | AcceptedPayload::RideCredit(_)
             | AcceptedPayload::Roster(_)
+            | AcceptedPayload::SurfaceEvidence(_)
             | AcceptedPayload::CoreVerdict(_) => {
                 return Err(ProtocolError::Malformed(
                     "catalog offer returned an incompatible payload".into(),
@@ -484,6 +485,18 @@ impl CatalogClient {
                 "ride report returned an incompatible payload".into(),
             )
             .into()),
+        }
+    }
+
+    /// Exchange cumulative local surface rewards for peer-only evidence.
+    pub fn exchange_surface_evidence(
+        &mut self,
+        event_sequence: u64,
+        report: crate::surface_evidence::SurfaceReport,
+    ) -> Result<crate::surface_evidence::SurfaceReport, CatalogClientError> {
+        match self.call(event_sequence, CatalogOperation::ExchangeSurfaceEvidence { report })?.payload {
+            AcceptedPayload::SurfaceEvidence(report) => Ok(report),
+            _ => Err(ProtocolError::Malformed("surface exchange returned an incompatible payload".into()).into()),
         }
     }
 
@@ -576,6 +589,7 @@ impl CatalogClient {
             | AcceptedPayload::RideWork(_)
             | AcceptedPayload::RideCredit(_)
             | AcceptedPayload::Roster(_)
+            | AcceptedPayload::SurfaceEvidence(_)
             | AcceptedPayload::CoreVerdict(_) => Err(ProtocolError::Malformed(
                 "sample returned an incompatible payload".into(),
             )
@@ -606,6 +620,7 @@ impl CatalogClient {
             | AcceptedPayload::RideWork(_)
             | AcceptedPayload::RideCredit(_)
             | AcceptedPayload::Roster(_)
+            | AcceptedPayload::SurfaceEvidence(_)
             | AcceptedPayload::CoreVerdict(_) => Err(ProtocolError::Malformed(
                 "basin sample returned an incompatible payload".into(),
             )
@@ -682,6 +697,7 @@ impl CatalogClient {
             | AcceptedPayload::RideWork(_)
             | AcceptedPayload::RideCredit(_)
             | AcceptedPayload::Roster(_)
+            | AcceptedPayload::SurfaceEvidence(_)
             | AcceptedPayload::CoreVerdict(_) => Err(ProtocolError::Malformed(
                 "descriptor-hole request returned an incompatible payload".into(),
             )
@@ -716,6 +732,7 @@ impl CatalogClient {
             | AcceptedPayload::RideWork(_)
             | AcceptedPayload::RideCredit(_)
             | AcceptedPayload::Roster(_)
+            | AcceptedPayload::SurfaceEvidence(_)
             | AcceptedPayload::CoreVerdict(_) => Err(ProtocolError::Malformed(
                 "boundary-crossing request returned an incompatible payload".into(),
             )
@@ -778,6 +795,7 @@ impl CatalogClient {
             | AcceptedPayload::RideWork(_)
             | AcceptedPayload::RideCredit(_)
             | AcceptedPayload::Roster(_)
+            | AcceptedPayload::SurfaceEvidence(_)
             | AcceptedPayload::CoreVerdict(_) => Err(ProtocolError::Malformed(
                 "policy-state request returned an incompatible payload".into(),
             )
@@ -1386,6 +1404,7 @@ fn population_epoch_payload(
         | AcceptedPayload::RideWork(_)
         | AcceptedPayload::RideCredit(_)
         | AcceptedPayload::Roster(_)
+        | AcceptedPayload::SurfaceEvidence(_)
         | AcceptedPayload::CoreVerdict(_) => Err(ProtocolError::Malformed(format!(
             "{operation} returned an incompatible payload"
         ))

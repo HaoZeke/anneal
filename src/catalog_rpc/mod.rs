@@ -19,6 +19,7 @@ use crate::coreclass::CoreVerdict;
 use crate::discovery_roster::DiscoveryRole;
 use crate::pes_exploration::RideMethod;
 use crate::ride_ledger::{RideCredit, RideDirection, RideFailure, RideWorkOrder};
+use crate::surface_evidence::SurfaceReport;
 
 pub mod client;
 pub mod mailbox;
@@ -392,6 +393,11 @@ pub enum CatalogOperation {
         energy: f64,
         /// Charged calls on the reporting chain.
         charged: u64,
+    },
+    /// Publish cumulative local surface rewards and retrieve peer evidence.
+    ExchangeSurfaceEvidence {
+        /// Observations produced by the requesting replica only.
+        report: SurfaceReport,
     },
 }
 
@@ -791,6 +797,8 @@ pub enum AcceptedPayload {
     Roster(RosterReply),
     /// Shared core-class table verdict for the reporting chain.
     CoreVerdict(CoreVerdict),
+    /// Cumulative surface evidence excluding the requesting replica.
+    SurfaceEvidence(SurfaceReport),
 }
 
 /// Accepted coordinator response.
@@ -1080,6 +1088,9 @@ pub(crate) fn fill_request(
             report.set_energy(*energy);
             report.set_charged(*charged);
         }
+        CatalogOperation::ExchangeSurfaceEvidence { report } => {
+            fill_surface_report(operation.init_exchange_surface_evidence(), report);
+        }
     }
     Ok(())
 }
@@ -1281,6 +1292,11 @@ pub(crate) fn decode_request_reader(
                 class: report.get_class(),
                 energy: report.get_energy(),
                 charged: report.get_charged(),
+            }
+        }
+        catalog_request::operation::ExchangeSurfaceEvidence(report) => {
+            CatalogOperation::ExchangeSurfaceEvidence {
+                report: read_surface_report(report.map_err(wire_error)?)?,
             }
         }
     };
@@ -1582,6 +1598,9 @@ pub(crate) fn fill_reply(
                 AcceptedPayload::CoreVerdict(verdict) => {
                     payload.set_core_verdict(WireCoreVerdict::from(*verdict));
                 }
+                AcceptedPayload::SurfaceEvidence(report) => {
+                    fill_surface_report(payload.init_surface_evidence(), report);
+                }
             }
         }
         CatalogReply::Rejected {
@@ -1863,6 +1882,9 @@ pub(crate) fn decode_reply_reader(
                 accepted_reply::payload::CoreVerdict(verdict) => {
                     AcceptedPayload::CoreVerdict(verdict.map_err(wire_error)?.into())
                 }
+                accepted_reply::payload::SurfaceEvidence(report) => {
+                    AcceptedPayload::SurfaceEvidence(read_surface_report(report.map_err(wire_error)?)?)
+                }
             };
             Ok(CatalogReply::Accepted(AcceptedReply {
                 event_sequence,
@@ -1917,6 +1939,32 @@ impl From<RejectionKind> for ProtocolRejection {
             RejectionKind::ValidationRejected => Self::ValidationRejected,
         }
     }
+}
+
+fn fill_surface_report(mut output: crate::Catalog_capnp::surface_report::Builder<'_>, report: &SurfaceReport) {
+    output.set_schema(report.schema.as_str());
+    let mut arms = output.init_arms(report.arms.len() as u32);
+    for (index, moment) in report.arms.iter().enumerate() {
+        let mut arm = arms.reborrow().get(index as u32);
+        arm.set_count(moment.count);
+        arm.set_mean(moment.mean);
+        arm.set_m2(moment.m2);
+    }
+}
+
+fn read_surface_report(input: crate::Catalog_capnp::surface_report::Reader<'_>) -> Result<SurfaceReport, ProtocolError> {
+    let arms = input.get_arms().map_err(wire_error)?;
+    if arms.is_empty() || arms.len() > 64 {
+        return Err(ProtocolError::Malformed("invalid surface arm count".into()));
+    }
+    let report = SurfaceReport {
+        schema: text_value(input.get_schema().map_err(wire_error)?)?,
+        arms: arms.iter().map(|arm| crate::allocate::RewardMoments {
+            count: arm.get_count(), mean: arm.get_mean(), m2: arm.get_m2(),
+        }).collect(),
+    };
+    report.validate().map_err(|error| ProtocolError::Malformed(error.into()))?;
+    Ok(report)
 }
 
 impl From<CoreVerdict> for WireCoreVerdict {

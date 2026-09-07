@@ -534,6 +534,7 @@ struct CoordinatorState {
     frontier: std::collections::VecDeque<crate::catalog_rpc::CatalogFrontierPost>,
     /// Shared motif-class table for cooperative restarts.
     core_class: CoreClassTable,
+    surface_evidence: crate::surface_evidence::SurfaceEvidenceBook,
     /// A journal append failed after the live state had already moved,
     /// so a replay of the log no longer reproduces this coordinator.
     journal_broken: bool,
@@ -679,6 +680,7 @@ impl CoordinatorState {
             halving: config.halving.clone(),
             frontier: std::collections::VecDeque::new(),
             core_class: CoreClassTable::new(config.core_patience, config.core_trial),
+            surface_evidence: crate::surface_evidence::SurfaceEvidenceBook::default(),
             journal_broken: false,
         })
     }
@@ -3087,6 +3089,16 @@ fn apply_request(
             if let Some(snapshot_version) = state.snapshot_version.checked_add(1) {
                 state.snapshot_version = snapshot_version;
             }
+        }
+        CatalogOperation::ExchangeSurfaceEvidence { report } => {
+            let Some(version) = state.snapshot_version.checked_add(1) else {
+                return rejected(state, request.event_sequence, ProtocolRejection::ValidationRejected);
+            };
+            match state.surface_evidence.exchange(request.identity.replica, report.clone()) {
+                Ok(peers) => payload = AcceptedPayload::SurfaceEvidence(peers),
+                Err(_) => return rejected(state, request.event_sequence, ProtocolRejection::ValidationRejected),
+            }
+            state.snapshot_version = version;
         }
         CatalogOperation::ReportCoreClass {
             class,
