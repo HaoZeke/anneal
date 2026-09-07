@@ -38,6 +38,7 @@ pub struct PeerMinimum {
 /// Nonblocking peer publications and the locally retained census.
 pub struct CensusBus {
     replica: u32,
+    replicas: u32,
     publisher: Socket,
     subscriber: Socket,
     latest: HashMap<u32, PeerMinimum>,
@@ -71,6 +72,7 @@ impl CensusBus {
         }
         Ok(Self {
             replica,
+            replicas,
             publisher,
             subscriber,
             latest: HashMap::new(),
@@ -98,10 +100,7 @@ impl CensusBus {
         let mut changed = Vec::new();
         while let Ok(message) = self.subscriber.try_recv() {
             let bytes: &[u8] = &message;
-            let Some(end) = bytes.iter().position(|b| *b == b'\n') else {
-                continue;
-            };
-            let Some(peer) = decode(&bytes[end + 1..]) else {
+            let Some(peer) = decode_frame(bytes, self.replicas) else {
                 continue;
             };
             if peer.replica == self.replica {
@@ -130,8 +129,20 @@ impl CensusBus {
     }
 }
 
-fn decode_frame(_bytes: &[u8], _replicas: u32) -> Option<PeerMinimum> {
-    unimplemented!("census sender admission")
+fn decode_frame(bytes: &[u8], replicas: u32) -> Option<PeerMinimum> {
+    let end = bytes.iter().position(|byte| *byte == b'\n')?;
+    let payload = bytes.get(end + 1..)?;
+    let replica = u32::from_le_bytes(payload.get(..4)?.try_into().ok()?);
+    if replica >= replicas {
+        return None;
+    }
+    // The publication topic must identify the same configured sender as
+    // its body before any coordinate payload is admitted.
+    let topic = format!("census/{replica:03}");
+    if &bytes[..end] != topic.as_bytes() {
+        return None;
+    }
+    decode(payload)
 }
 
 fn decode(bytes: &[u8]) -> Option<PeerMinimum> {
