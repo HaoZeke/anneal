@@ -375,11 +375,16 @@ fn observe_history(
     context: &StructureContext,
     witness: &impl ExactStructureWitness,
 ) -> Result<HistoryObservation, String> {
-    let minimum = ledger.quench_boundaries().last().ok_or("missing quench certificate")?;
+    let minimum = ledger
+        .quench_boundaries()
+        .last()
+        .ok_or("missing quench certificate")?;
     let description = descriptor
         .describe(minimum.state(), context.species())
         .map_err(|error| error.to_string())?;
-    history.lock().map_err(|_| "minimum history lock poisoned".to_string())?
+    history
+        .lock()
+        .map_err(|_| "minimum history lock poisoned".to_string())?
         .observe(minimum, description, context.clone(), witness)
         .map_err(|error| error.to_string())
 }
@@ -394,9 +399,19 @@ fn run_minima_hopping(
     options: MinimaHoppingOptions,
 ) -> MinimaHoppingRun {
     run_minima_hopping_with_history(
-        potential, initial, n, budget, seed, witness,
-        HistoryRunOptions { moves: options, history: None, charged: None },
-    ).expect("private minima hopping has no fallible history service")
+        potential,
+        initial,
+        n,
+        budget,
+        seed,
+        witness,
+        HistoryRunOptions {
+            moves: options,
+            history: None,
+            charged: None,
+        },
+    )
+    .expect("private minima hopping has no fallible history service")
 }
 
 fn run_minima_hopping_with_history(
@@ -408,7 +423,11 @@ fn run_minima_hopping_with_history(
     witness: &impl ExactStructureWitness,
     options: HistoryRunOptions<'_>,
 ) -> Result<MinimaHoppingRun, String> {
-    let HistoryRunOptions { moves: options, history, charged } = options;
+    let HistoryRunOptions {
+        moves: options,
+        history,
+        charged,
+    } = options;
     let hopping = HoppingConfig::for_cluster(n);
     let escape_config = MdEscapeConfig {
         dt: 0.005,
@@ -482,11 +501,11 @@ fn run_minima_hopping_with_history(
     let mut minima = vec![state.clone()];
     let history_start = Instant::now();
     let descriptor = history.map(|_| lj::descriptor_space());
-    let context = StructureContext::new(
-        Some(vec![18; n]), None, Some(format!("lj-reduced-n{n}")),
-    );
+    let context = StructureContext::new(Some(vec![18; n]), None, Some(format!("lj-reduced-n{n}")));
     let mut current_basin = if let (Some(history), Some(descriptor)) = (history, &descriptor) {
-        observe_history(history, &ledger, descriptor, &context, witness)?.minimum.id
+        observe_history(history, &ledger, descriptor, &context, witness)?
+            .minimum
+            .id
     } else {
         0
     };
@@ -508,7 +527,8 @@ fn run_minima_hopping_with_history(
     let mut proposal_quench_calls = 0usize;
     let mut improvements = vec![(0, ledger.spent(), minima.len(), energy)];
     let mut aggregate_improvements = vec![(
-        charged.map_or(ledger.spent(), |counter| counter.load(Ordering::SeqCst)), energy,
+        charged.map_or(ledger.spent(), |counter| counter.load(Ordering::SeqCst)),
+        energy,
     )];
 
     while ledger.remaining() > 0 {
@@ -516,9 +536,8 @@ fn run_minima_hopping_with_history(
         attempt_config.dt = time_step.time_step();
         let dynamics_start = ledger.spent();
         let escape = {
-            let mut evaluate = |point: ArrayView1<f64>| {
-                charged_evaluate(potential, &mut ledger, point, charged)
-            };
+            let mut evaluate =
+                |point: ArrayView1<f64>| charged_evaluate(potential, &mut ledger, point, charged);
             nve_escape(
                 state.view(),
                 feedback.escape(),
@@ -571,7 +590,10 @@ fn run_minima_hopping_with_history(
                 minima.push(candidate.clone());
             }
             let visit = feedback.observe_shared(
-                Some(current_basin), reached, observation.minimum.is_new, observation.visits,
+                Some(current_basin),
+                reached,
+                observation.minimum.is_new,
+                observation.visits,
             );
             (reached, visit)
         } else {
