@@ -73,10 +73,24 @@ per-replica work by stage, history overhead, and ensemble wall time. Private
 minimum counts sum replica-local identities; shared counts describe one
 common history. These counts are not interchangeable measures of coverage.
 
-The structural archive retains rejected proposals, but the exclusion history
-contains only accepted minima. An energy-rejected proposal remains eligible
+The structural archive retains rejected proposals, but the default exclusion
+history contains only accepted minima. An energy-rejected proposal remains eligible
 for another threshold trial. Shared classification and acceptance publication
 are atomic; an unresolved quench contributes charged work, not a basin visit.
+
+For an alternative exploration policy, set
+`ANNEAL_MH_HISTORY_POLICY=observed-exclusion` on an ensemble run. Every certified
+observation then enters exclusion history, including energy-rejected proposals,
+and rediscovery feedback uses total observation counts. This policy is distinct
+from accepted-minimum history; its output arm names carry `-observed-exclusion`.
+`accepted` is the default, and unrecognized policy names are rejected.
+
+Exact matching uses a per-ensemble cache of immutable pair-distance spectra,
+keyed by complete coordinates. It only prunes impossible matches; survivors
+retain native matching and identity-context checks. The default coordinate-key
+and spectrum payload limit is 128 MiB, with map metadata additional. Set
+`ANNEAL_MH_PAIR_CACHE_BYTES=0` to disable storage for a controlled comparison.
+Ensemble records retain each replica's best coordinates for independent audits.
 
 For a controlled escape probe, `ANNEAL_START_COORDINATES` selects a plain
 coordinate file containing one finite `x y z` triplet per atom, without an
