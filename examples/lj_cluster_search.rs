@@ -36,7 +36,7 @@ use std::time::Instant;
 
 #[cfg(feature = "bank-rpc")]
 const EVIDENCE_ONLY_WORK_KIND: anneal_core::cooperative_search::ledger::ChargeKind =
-    anneal_core::cooperative_search::ledger::ChargeKind::LocalProposal;
+    anneal_core::cooperative_search::ledger::ChargeKind::BasinEscape;
 
 #[cfg(feature = "ira")]
 use anneal_core::shape::{IraMetric, IraStructureWitness};
