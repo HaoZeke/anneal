@@ -2450,6 +2450,18 @@ where
             ) {
                 Ok(report) if report.potential_minima >= md_config.potential_minima => {
                     md_steps += report.steps;
+                    if md_attempts <= 8 && std::env::var("MD_TRACE").is_ok_and(|v| v == "1") {
+                        let displacement = (&report.position - &x).mapv(|d| d * d).sum().sqrt();
+                        eprintln!(
+                            "md_escape attempt {md_attempts}: kinetic {kinetic:.3} steps {} minima {} \
+                             endpoint energy {:.4} from {e:.4} span {:.4} conservation {:.3} displacement {displacement:.3}",
+                            report.steps,
+                            report.potential_minima,
+                            report.energy,
+                            report.potential_energy_span,
+                            report.energy_conservation_ratio()
+                        );
+                    }
                     hmc_trial = Some(report.position);
                 }
                 Ok(report) => {
