@@ -4265,6 +4265,19 @@ fn invalidate_discovery_plan(scientific: &mut ScientificState) {
     }
 }
 
+/// Ride arms a discovery plan scores: `CATALOG_RIDE_CANDIDATES`, or four
+/// per discovery replica (at least 16).
+fn ride_candidate_limit(replicas: usize) -> usize {
+    static LIMIT: std::sync::OnceLock<Option<usize>> = std::sync::OnceLock::new();
+    LIMIT
+        .get_or_init(|| {
+            std::env::var("CATALOG_RIDE_CANDIDATES")
+                .ok()
+                .and_then(|value| value.parse().ok())
+        })
+        .unwrap_or_else(|| (4 * replicas).max(16))
+}
+
 fn minimum_information_role(
     scientific: &mut ScientificState,
     query_replica: u32,
@@ -4310,7 +4323,13 @@ fn minimum_information_role(
             },
         ));
     }
-    let claimable = scientific.ride_ledger.claimable_arms();
+    // The joint posterior behind the plan is quadratic in the candidate
+    // count and each entry is a kernel over the SOAP feature; every
+    // claimable arm (thousands) made one plan 42 to 78 s under the lock
+    // (phase clock). At most CATALOG_RIDE_CANDIDATES arms (default four
+    // per replica) enter, least attempted and deepest first.
+    let limit = ride_candidate_limit(scientific.discovery_replicas.len());
+    let claimable = scientific.ride_ledger.claimable_arms_ranked(limit);
     let mut ride_actions = Vec::<SearchActionCandidate>::new();
     let mut ride_arms = Vec::<RideArm>::new();
     for (arm, _) in &claimable {

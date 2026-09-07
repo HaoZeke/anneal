@@ -742,6 +742,31 @@ impl RideLedger {
             .collect()
     }
 
+    /// At most `limit` claimable arms, least attempted first and, among
+    /// equally attempted arms, from the deepest source. The arm count is
+    /// sources times environment classes times modes times directions
+    /// times methods, thousands on a live LJ75 book; a plan that scores
+    /// every one builds a joint posterior quadratic in that count.
+    pub fn claimable_arms_ranked(&self, limit: usize) -> Vec<(RideArm, u32)> {
+        let mut arms = self.claimable_arms();
+        arms.sort_by(|(left, left_atom), (right, right_atom)| {
+            self.arm_attempts(left)
+                .cmp(&self.arm_attempts(right))
+                .then_with(|| {
+                    self.environment_attempts(left)
+                        .cmp(&self.environment_attempts(right))
+                })
+                .then_with(|| {
+                    self.source_energy(left.source_basin)
+                        .total_cmp(&self.source_energy(right.source_basin))
+                })
+                .then_with(|| left.cmp(right))
+                .then_with(|| left_atom.cmp(right_atom))
+        });
+        arms.truncate(limit);
+        arms
+    }
+
     /// PES evaluations charged to completed experiments.
     pub fn charged_evaluations(&self) -> u64 {
         self.charged_evaluations

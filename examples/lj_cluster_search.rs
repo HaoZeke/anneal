@@ -3815,6 +3815,18 @@ fn occupancy_retire_phase(
     None
 }
 
+/// Whether odd replicas take the APE ridge-seed path at checkpoints
+/// (`CATALOG_APE_SEEDS`, default on; `0` turns it off). The armed leave
+/// quench needs the SOAP Jacobian at every force evaluation and runs at
+/// about ten seconds a hop on LJ75, so a cooperative ensemble's wall is
+/// the odd half's; turning the seeds off gives a coordinator-only
+/// comparison against private chains at equal wall.
+#[cfg(feature = "bank-rpc")]
+fn ape_seeds_enabled() -> bool {
+    static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ENABLED.get_or_init(|| !std::env::var("CATALOG_APE_SEEDS").is_ok_and(|v| v == "0"))
+}
+
 /// State of the census restart phase across checkpoints.
 #[derive(Default)]
 struct RestartState {
@@ -5777,7 +5789,7 @@ fn run_capnp_catalog(
                             },
                         );
                     }
-                    if neighbors.is_empty() {
+                    if neighbors.is_empty() || !ape_seeds_enabled() {
                         anneal_core::known_basin::disarm();
                     } else if replica % 2 == 1 {
                         // Occupied local environments. APE queues a dimer on
