@@ -73,3 +73,36 @@ fn returning_to_the_initial_basin_after_departure_is_a_known_visit() {
     assert_eq!(outcome.visit_counts, (0, 1, 1));
     assert_eq!(outcome.final_state.as_ref(), Some(&initial));
 }
+
+#[test]
+fn a_first_departure_preserves_the_resolved_starting_identity() {
+    let mut config = Config::for_cluster(2);
+    config.minima_hopping = true;
+    config.max_hops = Some(2);
+    config.angular_moves = false;
+    config.return_screen = false;
+    config.screen_steps = 1;
+    config.relax_steps = 2;
+    config.screen_margin = f64::INFINITY;
+    config.bias_height = 0.0;
+    config.min_separation = 0.0;
+    let initial = array![-0.6, 0.0, 0.0, 0.6, 0.0, 0.0];
+    let other = array![-1.2, 0.0, 0.0, 1.2, 0.0, 0.0];
+    assert!(1.2 > config.merge_radius, "the two pair spectra are resolved");
+    let mut ledger = Ledger::new(1_000);
+    let mut rng = StdRng::seed_from_u64(37);
+    let mut proposals = 0;
+    let mut relax = |ledger: &mut Ledger, _: ArrayView1<f64>, steps: usize| {
+        assert!(ledger.charge());
+        if steps == config.screen_steps {
+            proposals += 1;
+        }
+        let state = if proposals == 1 { &other } else { &initial };
+        (-1.0, state.clone())
+    };
+    let outcome = run(&config, initial.view(), &mut ledger, &mut relax, &mut rng);
+    assert_eq!(outcome.hops, 2);
+    assert_eq!(outcome.accepted, 2);
+    assert_eq!(outcome.visit_counts, (0, 1, 1));
+    assert_eq!(outcome.final_state.as_ref(), Some(&initial));
+}
