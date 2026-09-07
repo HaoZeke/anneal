@@ -90,6 +90,9 @@ keyed by complete coordinates. It only prunes impossible matches; survivors
 retain native matching and identity-context checks. The default coordinate-key
 and spectrum payload limit is 128 MiB, with map metadata additional. Set
 `ANNEAL_MH_PAIR_CACHE_BYTES=0` to disable storage for a controlled comparison.
+Each relation applies its pair screen once; rejection stops at the first
+sufficient distance discrepancy, and survivors reuse the prepared screening
+work without changing the native identity decision.
 Ensemble records retain each replica's best coordinates for independent audits.
 
 For a controlled escape probe, `ANNEAL_START_COORDINATES` selects a plain
