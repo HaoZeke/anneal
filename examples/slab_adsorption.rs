@@ -263,8 +263,11 @@ fn run_slab_ensembles(
         context: &context,
         witness: &witness,
         same_family: &same_family,
-        certificate: cfg.record_gradient * 1e-2,
-        polish_below: cfg.record_gradient,
+        // The engine's gradient noise (GFN2 at accuracy 0.01) sits far
+        // above the LJ share bound, so the record criterion itself is the
+        // certificate here and the polish window runs one decade above it.
+        certificate: cfg.record_gradient,
+        polish_below: 10.0 * cfg.record_gradient,
     };
     print_header(
         &ens,
