@@ -865,7 +865,19 @@ mod depth_allocator_tests {
             }
         }
         let restored = DepthAllocator::from_moments(&moments).unwrap();
-        for (actual, expected) in [&restored.mu, &restored.kappa, &restored.alpha, &restored.beta].into_iter().zip([&sequential.mu, &sequential.kappa, &sequential.alpha, &sequential.beta]) {
+        for (actual, expected) in [
+            &restored.mu,
+            &restored.kappa,
+            &restored.alpha,
+            &restored.beta,
+        ]
+        .into_iter()
+        .zip([
+            &sequential.mu,
+            &sequential.kappa,
+            &sequential.alpha,
+            &sequential.beta,
+        ]) {
             for (actual, expected) in actual.iter().zip(expected) {
                 assert!((actual - expected).abs() < 1e-12);
             }
@@ -873,7 +885,9 @@ mod depth_allocator_tests {
         assert_eq!(restored.draws, sequential.draws);
         let mut left = StdRng::seed_from_u64(79);
         let mut right = left.clone();
-        for _ in 0..256 { assert_eq!(restored.select(&mut left), sequential.select(&mut right)); }
+        for _ in 0..256 {
+            assert_eq!(restored.select(&mut left), sequential.select(&mut right));
+        }
     }
 
     /// The allocator has to find the arm that reaches deeper, which is the

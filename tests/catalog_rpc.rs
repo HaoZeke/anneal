@@ -154,20 +154,65 @@ fn independent_clients_exchange_surface_rewards_without_replay_or_self_credit() 
 fn surface_evidence_survives_coordinator_restart_without_duplicate_credit() {
     use anneal_core::allocate::RewardMoments;
     use anneal_core::surface_evidence::SurfaceReport;
-    let directory = std::env::temp_dir().join(format!("anneal-surface-journal-{}-{}", std::process::id(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
-    let config = ServerConfig::new("jcc-2026", "surface-journal", [0x5a; 32], [0, 1]).unwrap().with_state_directory(&directory).unwrap();
-    let evidence = SurfaceReport { schema: "depth-v1/block=100".into(), arms: vec![RewardMoments { count: 3, mean: 1.0, m2: 2.0 }] };
-    let empty = SurfaceReport { schema: evidence.schema.clone(), arms: vec![RewardMoments::default()] };
+    let directory = std::env::temp_dir().join(format!(
+        "anneal-surface-journal-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let config = ServerConfig::new("jcc-2026", "surface-journal", [0x5a; 32], [0, 1])
+        .unwrap()
+        .with_state_directory(&directory)
+        .unwrap();
+    let evidence = SurfaceReport {
+        schema: "depth-v1/block=100".into(),
+        arms: vec![RewardMoments {
+            count: 3,
+            mean: 1.0,
+            m2: 2.0,
+        }],
+    };
+    let empty = SurfaceReport {
+        schema: evidence.schema.clone(),
+        arms: vec![RewardMoments::default()],
+    };
     {
         let server = CatalogServer::start("127.0.0.1:0", config.clone()).unwrap();
-        let mut producer = CatalogClient::connect(server.addr(), identity("surface-journal", 0), ClientConfig::default()).unwrap();
-        assert_eq!(producer.exchange_surface_evidence(1, evidence.clone()).unwrap(), empty);
+        let mut producer = CatalogClient::connect(
+            server.addr(),
+            identity("surface-journal", 0),
+            ClientConfig::default(),
+        )
+        .unwrap();
+        assert_eq!(
+            producer
+                .exchange_surface_evidence(1, evidence.clone())
+                .unwrap(),
+            empty
+        );
     }
     {
         let server = CatalogServer::start("127.0.0.1:0", config).unwrap();
-        let mut producer = CatalogClient::connect(server.addr(), identity("surface-journal", 0), ClientConfig::default()).unwrap();
-        assert_eq!(producer.exchange_surface_evidence(1, evidence.clone()).unwrap(), empty);
-        let mut peer = CatalogClient::connect(server.addr(), identity("surface-journal", 1), ClientConfig::default()).unwrap();
+        let mut producer = CatalogClient::connect(
+            server.addr(),
+            identity("surface-journal", 0),
+            ClientConfig::default(),
+        )
+        .unwrap();
+        assert_eq!(
+            producer
+                .exchange_surface_evidence(1, evidence.clone())
+                .unwrap(),
+            empty
+        );
+        let mut peer = CatalogClient::connect(
+            server.addr(),
+            identity("surface-journal", 1),
+            ClientConfig::default(),
+        )
+        .unwrap();
         assert_eq!(peer.exchange_surface_evidence(1, empty).unwrap(), evidence);
     }
     std::fs::remove_dir_all(directory).unwrap();
