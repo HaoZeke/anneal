@@ -2432,6 +2432,12 @@ where
                 dt: cfg.md_escape_dt,
                 potential_minima: cfg.md_escape_minima.max(1),
                 maximum_steps: cfg.md_escape_max_steps.max(1),
+                softening: (cfg.md_escape_soften > 0).then_some(
+                    rgsaddle::VelocitySofteningConfig {
+                        steps: cfg.md_escape_soften,
+                        ..Default::default()
+                    },
+                ),
                 ..Default::default()
             };
             let kinetic = (cfg.md_escape_kinetic * feedback.escape()).max(f64::MIN_POSITIVE);
