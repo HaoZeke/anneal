@@ -48,6 +48,9 @@ use rgsaddle::{
     PointSurface, SaddleError, SamdConfig, SamdSession, VelocitySofteningConfig, soften_velocity_on,
 };
 
+mod history;
+pub use history::{HistoryObservation, MinimumHistory, MinimumHistoryError};
+
 /// Geometry on which an MD escape evolves.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MdEscapeGeometry {
