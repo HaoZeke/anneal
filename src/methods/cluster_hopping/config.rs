@@ -390,6 +390,13 @@ pub struct Config {
     /// quenched, and the quench is offered to the acceptance rule. One
     /// attempt per new basin, so a chain sitting still never pays twice.
     pub point_symmetrise_on_new: bool,
+    /// Whole-cluster orbit completion under the core's point group on
+    /// entering a new basin (Oakley, Johnston and Wales 2013, the scheme
+    /// they report as productive on 98 points): every atom is placed on
+    /// the group's site set, surface atoms onto empty orbit positions, then
+    /// quenched and offered to the acceptance rule. With
+    /// [`Config::point_symmetrise_on_new`] both are attempted, core first.
+    pub orbit_complete_on_new: bool,
     /// Add the population-repulsion SOAP step ([`ClusterMove::SoapRepel`])
     /// as a proposal arm.
     pub soap_repel: bool,
@@ -1089,6 +1096,7 @@ impl Config {
             symmetrise_on_stall: false,
             point_symmetrise: false,
             point_symmetrise_on_new: false,
+            orbit_complete_on_new: false,
             soap_repel: false,
             exchange_metropolis: false,
             md_escape: false,
