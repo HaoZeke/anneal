@@ -269,6 +269,47 @@ fn checkpoint_probe_is_recorded_without_becoming_the_live_chain() {
 }
 
 #[test]
+fn diagnostic_quench_context_is_scoped_to_the_probe_callback() {
+    let mut cfg = Config::recommended(6);
+    cfg.relax_steps = 40;
+    let mut rng = StdRng::seed_from_u64(0x600d);
+    let start = random_cluster(cfg.n_points, 0.7, cfg.min_separation, &mut rng);
+    let proposed = Array1::from_elem(start.len(), 4.0);
+    let mut ledger = Ledger::new(1_000);
+    let mut bias = fresh_bias(&cfg);
+    let mut contexts = Vec::new();
+    let mut relax = |ledger: &mut Ledger, state: ArrayView1<f64>, steps| {
+        let is_probe_seed = state == proposed.view();
+        contexts.push((ledger.is_diagnostic_quench(), is_probe_seed));
+        toy_relax(ledger, state, steps)
+    };
+    let mut offered = false;
+    let mut checkpoint = |_: ChainCheckpoint<'_>| {
+        if !offered {
+            offered = true;
+            CheckpointAction::ProbeProposal {
+                state: proposed.clone(),
+                action: "custom-diagnostic".into(),
+            }
+        } else {
+            CheckpointAction::Continue
+        }
+    };
+    assert!(!ledger.is_diagnostic_quench());
+    run_with_bias_at_checkpoints(
+        &cfg, start.view(), &mut ledger, &mut relax, None, &mut bias,
+        &mut rng, 40, &mut checkpoint,
+    );
+    assert_eq!(contexts.iter().filter(|(diagnostic, _)| *diagnostic).count(), 1);
+    assert!(contexts.iter().all(|(diagnostic, probe_seed)| diagnostic == probe_seed));
+    let probe_index = contexts.iter().position(|(diagnostic, _)| *diagnostic).unwrap();
+    assert!(probe_index > 0, "initial relaxation must use the search context");
+    assert!(probe_index + 1 < contexts.len(), "ordinary search must resume");
+    assert!(!ledger.is_diagnostic_quench(), "probe context escaped its callback");
+    assert_eq!(ledger.spent(), ledger.budget(), "probe work remains charged");
+}
+
+#[test]
 fn failed_checkpoint_probe_remains_an_unresolved_observation() {
     let mut cfg = Config::recommended(6);
     cfg.relax_steps = 200;
