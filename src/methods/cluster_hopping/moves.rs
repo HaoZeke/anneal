@@ -57,6 +57,23 @@ pub enum MoveLibrary {
     },
 }
 
+thread_local! {
+    static REPEL_MEAN_CACHE: std::cell::RefCell<std::collections::HashMap<u64, Vec<f64>>> =
+        std::cell::RefCell::new(std::collections::HashMap::new());
+}
+
+/// Hash of a structure's coordinate bytes, the key the repulsion cache
+/// uses for a reference's packing mean.
+fn coordinate_key(coordinates: &[f64]) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    coordinates.len().hash(&mut hasher);
+    for v in coordinates {
+        v.to_bits().hash(&mut hasher);
+    }
+    hasher.finish()
+}
+
 impl MoveLibrary {
     /// Declared rigid groups for a molecular library.
     pub fn declared_groups(&self) -> Option<&[Vec<usize>]> {
@@ -1324,10 +1341,37 @@ impl ClusterMove {
                     .and_then(|v| v.parse().ok())
                     .unwrap_or(3);
                 let refs = crate::catalog::packing_references();
-                if refs.len() >= min_refs
-                    && let Some(y) = crate::soap::push_away_clouds(x, &refs, spec, *rmsd)
-                {
-                    return y;
+                if refs.len() >= min_refs {
+                    // Reference packing means, cached by the structure's
+                    // bytes: a reference changes only when a peer's minimum
+                    // changes, and recomputing every mean per proposal was
+                    // the cost that made the coupled runs ten times slower.
+                    let means: Vec<Vec<f64>> = REPEL_MEAN_CACHE.with(|cache| {
+                        let mut cache = cache.borrow_mut();
+                        if cache.len() > 4096 {
+                            cache.clear();
+                        }
+                        refs.iter()
+                            .map(|r| {
+                                let key = coordinate_key(r);
+                                cache
+                                    .entry(key)
+                                    .or_insert_with(|| {
+                                        crate::soap::packing_mean_nu3(
+                                            ArrayView1::from(r.as_slice()),
+                                            spec,
+                                            None,
+                                            None,
+                                        )
+                                        .to_vec()
+                                    })
+                                    .clone()
+                            })
+                            .collect()
+                    });
+                    if let Some(y) = crate::soap::push_away_means(x, &means, spec, *rmsd) {
+                        return y;
+                    }
                 }
                 crate::soap::step_away_cloud(x, spec, *rmsd, None, None, None, rng)
             }
