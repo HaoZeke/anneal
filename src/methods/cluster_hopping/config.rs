@@ -389,6 +389,8 @@ pub struct Config {
     /// Fraction of points, by distance from the centroid, that count as the
     /// core for [`Config::point_symmetrise_on_new`].
     pub symmetrise_core_fraction: f64,
+    /// Symmetrise after every accepted hop, not only on entering a new basin.
+    pub point_symmetrise_every_accept: bool,
     /// Published continuous-symmetry move, independent of stall detection.
     ///
     /// This is distinct from [`Config::symmetrise_on_stall`]. The
@@ -1067,6 +1069,7 @@ impl Config {
             jump_steps: 10,
             jump_step: LennardJonesPreset::ALL_POINTS_STEP * length_scale,
             symmetrise_core_fraction: 0.6,
+            point_symmetrise_every_accept: false,
             continuous_symmetry: ContinuousSymmetry::Off,
             symmetry_tolerance: LennardJonesPreset::SYMMETRY_TOLERANCE * length_scale,
             symmetry_merge_radius: LennardJonesPreset::SYMMETRY_MERGE_RADIUS * length_scale,
