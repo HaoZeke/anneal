@@ -3632,8 +3632,28 @@ where
                     spent = ledger.spent(),
                 );
             }
-            if polished_energy <= ledger.best {
-                ledger.record(polished_energy, polished_state.view());
+            if polished_energy < ledger.best
+                && quench_is_sane(cfg, polished_energy, polished_state.view())
+            {
+                let validated = match grad.as_deref_mut() {
+                    Some(gradient) => gradient(ledger, polished_state.view()).is_some_and(|g| {
+                        g.iter().all(|v| v.is_finite() && v.abs() < cfg.record_gradient)
+                    }),
+                    None => true,
+                };
+                if validated {
+                    ledger.record(polished_energy, polished_state.view());
+                    if improvements.len() < 512 {
+                        improvements.push((
+                            hops,
+                            ledger.spent(),
+                            bias.n_basins(),
+                            polished_energy,
+                        ));
+                    }
+                } else {
+                    unconverged_records += 1;
+                }
             }
         }
 
