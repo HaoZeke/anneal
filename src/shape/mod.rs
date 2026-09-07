@@ -552,7 +552,10 @@ pub struct IraStructureWitness {
 }
 
 fn pair_distance_bound(left: ArrayView1<f64>, right: ArrayView1<f64>) -> Option<f64> {
-    SortedPairs { n_points: left.len() / 3 }.bottleneck_lower_bound(left, right)
+    SortedPairs {
+        n_points: left.len() / 3,
+    }
+    .bottleneck_lower_bound(left, right)
 }
 
 fn exact_relation_from_match(
