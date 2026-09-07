@@ -23,6 +23,7 @@ REPLICA = re.compile(
     r"^    seed (\d+) replica (\d+).*?hops (\d+)\s+charged (\d+)\s+basins (\d+)"
     r".*?history obs (\d+) new (\d+) refused (\d+) secs ([0-9.]+)\s+shared_deposits (\d+)"
     r"(?:\s+bias_published (\d+))?(?:\s+gossip (\d+))?(?:\s+gossip_interval (\d+))?(?:\s+two_choice_restarts (\d+))?"
+    r"(?:\s+md (\d+)/(\d+)/(\d+))?"
 )
 SINGLE = re.compile(r"^  seed (\d+): best (\S+)\s+hops (\d+).*?(SOLVED)?$")
 CROSSED = re.compile(r"crossed at hop \d+ of \d+ .*?, (\d+) charged")
@@ -39,6 +40,7 @@ def summarise(directory):
     arms = defaultdict(lambda: {
         "tasks": 0, "done": 0, "solved": [], "first": [], "wall": [],
         "hsecs": [], "deposits": [], "gossip": [], "restarts": [], "hops": [],
+        "md": [],
     })
     for path in sorted(Path(directory).glob("*_*.out")):
         match = re.match(r"(.*)_(\d+)\.out$", path.name)
@@ -69,6 +71,8 @@ def summarise(directory):
                     record["gossip"].append(int(m.group(12)))
                 if m.group(14):
                     record["restarts"].append(int(m.group(14)))
+                if m.group(15):
+                    record["md"].append(int(m.group(15)))
                 continue
             m = SINGLE.match(line)
             if m and "replica" not in line:
@@ -91,14 +95,15 @@ def main():
     org = "--org" in sys.argv
     arms = summarise(sys.argv[1])
     header = ["arm", "tasks", "done", "solved", "first-target median",
-              "wall s", "history s", "deposits", "gossip", "restarts", "hops"]
+              "wall s", "history s", "deposits", "gossip", "restarts", "md", "hops"]
     rows = []
     for arm, r in sorted(arms.items()):
         rows.append([
             arm, r["tasks"], r["done"], len(r["solved"]),
             f"{statistics.median(r['first']):.3g}" if r["first"] else "-",
             mean(r["wall"]), mean(r["hsecs"], "{:.1f}"), mean(r["deposits"]),
-            mean(r["gossip"]), mean(r["restarts"], "{:.2f}"), mean(r["hops"]),
+            mean(r["gossip"]), mean(r["restarts"], "{:.2f}"), mean(r["md"]),
+            mean(r["hops"]),
         ])
     if org:
         print("| " + " | ".join(header) + " |")
