@@ -1380,7 +1380,11 @@ mod tests {
     fn communicating_replicas_share_identity_without_copying_states_or_multiplying_budget() {
         struct EqualWitness;
         impl super::ExactStructureWitness for EqualWitness {
-            fn equivalent(&self, left: ndarray::ArrayView1<f64>, right: ndarray::ArrayView1<f64>) -> bool {
+            fn equivalent(
+                &self,
+                left: ndarray::ArrayView1<f64>,
+                right: ndarray::ArrayView1<f64>,
+            ) -> bool {
                 left == right
             }
         }
@@ -1390,15 +1394,32 @@ mod tests {
         let initial = Array1::from(vec![0.0, 0.0, 0.0, distance, 0.0, 0.0]);
         for shared in [false, true] {
             let ensemble = super::run_minima_hopping_ensemble(
-                &potential, initial.view(), 2, 3, 7, EqualWitness,
-                super::EnsembleOptions { replicas: 2, shared, soften: false },
-            ).unwrap();
+                &potential,
+                initial.view(),
+                2,
+                3,
+                7,
+                EqualWitness,
+                super::EnsembleOptions {
+                    replicas: 2,
+                    shared,
+                    soften: false,
+                },
+            )
+            .unwrap();
 
             assert_eq!(ensemble.charged, 3);
             assert_eq!(ensemble.budgets, vec![2, 1]);
             assert_eq!(ensemble.runs.len(), 2);
             assert_eq!(ensemble.minimum_count, if shared { 1 } else { 2 });
-            assert_eq!(ensemble.runs.iter().map(|run| run.outcome.charged).sum::<usize>(), 3);
+            assert_eq!(
+                ensemble
+                    .runs
+                    .iter()
+                    .map(|run| run.outcome.charged)
+                    .sum::<usize>(),
+                3
+            );
             for run in ensemble.runs {
                 assert_eq!(run.outcome.final_state.as_ref(), Some(&initial));
                 assert_eq!(run.outcome.accepted, 0);
@@ -1411,6 +1432,12 @@ mod tests {
     fn communication_selector_pairs_shared_and_private_history() {
         let arms = selected_arms("mh-communication", &[]).unwrap();
         let labels = arms.into_iter().map(|arm| arm.label()).collect::<Vec<_>>();
-        assert_eq!(labels, vec!["minima-hopping-private-history", "minima-hopping-shared-history"]);
+        assert_eq!(
+            labels,
+            vec![
+                "minima-hopping-private-history",
+                "minima-hopping-shared-history"
+            ]
+        );
     }
 }
