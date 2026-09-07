@@ -881,7 +881,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                                         }
                                     } else {
                                         ContinuousSymmetry::Off
-                                    }
+                                    },
                                 },
                             ),
                             None,

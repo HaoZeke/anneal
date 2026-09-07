@@ -46,10 +46,10 @@ fn unsettled_objective_calls(charged: usize, recorded: usize) -> Option<u64> {
     (remainder > 0).then(|| u64::try_from(remainder).expect("objective charge must fit u64"))
 }
 
-#[cfg(feature = "ira")]
-use anneal_core::shape::IraStructureWitness;
 #[cfg(all(feature = "ira", any(test, not(feature = "bank-rpc"))))]
 use anneal_core::shape::IraMetric;
+#[cfg(feature = "ira")]
+use anneal_core::shape::IraStructureWitness;
 
 fn apply_boolean_options(cfg: &mut Config, opts: &[&str]) {
     for option in opts {
@@ -3626,9 +3626,7 @@ fn run_capnp_catalog(
     use anneal_core::catalog_policy::{ActiveCatalogRelation, PolicyAction, PolicyReason};
     use anneal_core::catalog_rpc::client::{CatalogClient, ClientConfig};
     use anneal_core::catalog_rpc::{BridgeAssignmentRecord, BridgeCrossingRecord};
-    use anneal_core::catalog_rpc::{
-        CatalogIdentity, INCUMBENT_SAMPLE_DRAW, SPARSE_SAMPLE_DRAW,
-    };
+    use anneal_core::catalog_rpc::{CatalogIdentity, INCUMBENT_SAMPLE_DRAW, SPARSE_SAMPLE_DRAW};
     use anneal_core::cooperative_search::ledger::ChargeKind;
     use anneal_core::cooperative_search::{
         CatalogBridgeOutcome, CatalogHoleOutcome, CatalogSampleOutcome, CatalogSamplesOutcome,
@@ -5362,10 +5360,8 @@ fn run_capnp_catalog(
                     &mut slice_sequence,
                     checkpoint_charged,
                     snapshot.best_energy(),
-                    |_cooperative, _slice_sequence| {
-                        CheckpointAction::Retire {
-                            reason: certificate.as_str().to_owned(),
-                        }
+                    |_cooperative, _slice_sequence| CheckpointAction::Retire {
+                        reason: certificate.as_str().to_owned(),
                     },
                 );
             }
