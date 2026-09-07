@@ -7168,6 +7168,8 @@ struct HistoryReplicaRun {
     first_target_calls: Option<usize>,
     wall_seconds: f64,
     history_cost: (usize, usize, f64),
+    /// Own hop visits published to the shared bias exchange.
+    bias_published: u64,
 }
 
 /// Thread replicas of the production hop loop over a shared or private
@@ -7211,11 +7213,15 @@ fn run_history_ensembles(
         cfg.replicas <= 1,
         "a history ensemble runs single-rung chains; a ladder owns its own bias"
     );
-    let shared = match std::env::var("HISTORY").as_deref() {
-        Ok("shared") => true,
-        Ok("private") | Err(_) => false,
-        Ok(other) => panic!("HISTORY={other:?}; expected shared or private"),
+    let (shared, use_history) = match std::env::var("HISTORY").as_deref() {
+        Ok("shared") => (true, true),
+        Ok("private") | Err(_) => (false, true),
+        Ok("none") => (false, false),
+        Ok(other) => panic!("HISTORY={other:?}; expected shared, private or none"),
     };
+    // Multiple-walker sharing of the bias itself: every chain's hop visits
+    // reach every other chain at the next checkpoint.
+    let shared_bias = std::env::var("SHARED_BIAS").is_ok_and(|v| v == "1");
     let policy = HistoryMembership::parse(std::env::var("HISTORY_POLICY").ok().as_deref())
         .unwrap_or_else(|error| panic!("{error}"));
     let checkpoint_interval: usize = std::env::var("HISTORY_CHECKPOINT")
@@ -7278,12 +7284,19 @@ fn run_history_ensembles(
         .map(|replica| budget / replicas + usize::from(replica < budget % replicas))
         .collect();
     println!(
-        "  history ensembles: {} replicas, {} history, {} membership, budgets {:?}, \
+        "  history ensembles: {} replicas, {} history, {} membership, shared bias {}, budgets {:?}, \
          checkpoint {checkpoint_interval}, witness {witness_name}, shared deposits {}, \
          mechanisms {}, executable sha256 {}",
         replicas,
-        if shared { "shared" } else { "private" },
+        if !use_history {
+            "no"
+        } else if shared {
+            "shared"
+        } else {
+            "private"
+        },
         policy.name(),
+        shared_bias,
         budgets,
         cfg.shared_deposits,
         opts.join(","),
@@ -7308,6 +7321,7 @@ fn run_history_ensembles(
             })
             .collect();
         let charged_total = AtomicUsize::new(0);
+        let exchange = Mutex::new(anneal_core::shared_bias::SharedDeposits::new(replicas));
         let runs: Vec<HistoryReplicaRun> = std::thread::scope(|scope| {
             let handles: Vec<_> = budgets
                 .iter()
@@ -7315,6 +7329,7 @@ fn run_history_ensembles(
                 .enumerate()
                 .map(|(replica, (&replica_budget, &replica_seed))| {
                     let history = &histories[if shared { 0 } else { replica }];
+                    let exchange = &exchange;
                     let charged_total = &charged_total;
                     let witness = &witness;
                     let descriptor = &descriptor;
@@ -7341,13 +7356,37 @@ fn run_history_ensembles(
                             history, descriptor, context, witness, policy,
                         );
                         let mut first_target_calls: Option<usize> = None;
+                        let mut seen_visits: Vec<u64> = Vec::new();
+                        let mut published = 0u64;
                         let mut checkpoint = |snapshot: ChainCheckpoint<'_>| {
                             if first_target_calls.is_none()
                                 && target.is_some_and(|t| snapshot.best_energy() < t)
                             {
                                 first_target_calls = Some(charged_total.load(Ordering::SeqCst));
                             }
-                            CheckpointAction::Continue
+                            if !shared_bias {
+                                return CheckpointAction::Continue;
+                            }
+                            let Some(bias) = snapshot.bias() else {
+                                return CheckpointAction::Continue;
+                            };
+                            let index = bias.index();
+                            let mine = anneal_core::shared_bias::visit_deltas(
+                                |i| index.centre(i),
+                                |i| index.visits(i),
+                                bias.n_basins(),
+                                &mut seen_visits,
+                            );
+                            published += mine.iter().map(|(_, n)| *n).sum::<u64>();
+                            let mut exchange = exchange.lock().expect("shared deposit exchange");
+                            exchange.publish(replica, mine);
+                            let deposits = exchange.drain(replica);
+                            drop(exchange);
+                            if deposits.is_empty() {
+                                CheckpointAction::Continue
+                            } else {
+                                CheckpointAction::DepositDescriptors { deposits }
+                            }
                         };
                         let mut rng = rand::rngs::StdRng::seed_from_u64(replica_seed);
                         let start = anneal_core::methods::cluster_hopping::random_cluster_in_radius(
@@ -7363,7 +7402,7 @@ fn run_history_ensembles(
                             &mut relax,
                             Some(&mut grad),
                             None,
-                            &mut hook,
+                            use_history.then_some(&mut hook as &mut dyn HistoryHook),
                             &mut rng,
                             checkpoint_interval,
                             &mut checkpoint,
@@ -7379,6 +7418,7 @@ fn run_history_ensembles(
                             first_target_calls,
                             wall_seconds: replica_started.elapsed().as_secs_f64(),
                             history_cost: hook.cost(),
+                            bias_published: published,
                         }
                     })
                 })
@@ -7411,7 +7451,7 @@ fn run_history_ensembles(
             let hit = target.is_some_and(|t| run.out.best < t);
             println!(
                 "    seed {seed} replica {} (seed {}): best {:.6}  hops {}  charged {}  basins {}  \
-                 history obs {} new {} refused {} secs {:.1}  shared_deposits {}  \
+                 history obs {} new {} refused {} secs {:.1}  shared_deposits {}  bias_published {}  \
                  escape {:.3} thr {:.4} same/known/new {}/{}/{}  first_target {}  wall {:.1}s  verified {}{}",
                 run.replica,
                 run.seed,
@@ -7424,6 +7464,7 @@ fn run_history_ensembles(
                 run.history_cost.1,
                 run.history_cost.2,
                 run.out.shared_deposits,
+                run.bias_published,
                 run.out.escape_scale,
                 run.out.escape_threshold,
                 run.out.visit_counts.0,
@@ -7451,6 +7492,8 @@ fn run_history_ensembles(
             first_target.push(calls);
         }
         deepest = deepest.min(ensemble_best);
+        let (bias_published, bias_delivered) =
+            exchange.lock().map(|x| x.counts()).unwrap_or((0, 0));
         let minima = histories
             .iter()
             .map(|h| {
@@ -7460,7 +7503,7 @@ fn run_history_ensembles(
             .collect::<Vec<_>>();
         println!(
             "  seed {seed} ensemble: best {:.6}  aggregate charged {}  first_target_calls {}  \
-             history minima/accepted/visits {:?}  wall {wall:.1}s{}",
+             history minima/accepted/visits {:?}  bias exchange published {bias_published} delivered {bias_delivered}  wall {wall:.1}s{}",
             ensemble_best,
             charged_total.load(Ordering::SeqCst),
             ensemble_first

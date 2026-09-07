@@ -124,9 +124,19 @@ pub struct ChainCheckpoint<'a> {
     charged: usize,
     remaining: usize,
     hops: usize,
+    bias: Option<&'a BasinBias<ClusterFingerprint>>,
 }
 
 impl<'a> ChainCheckpoint<'a> {
+    /// The live chain's per-basin bias, for a caller that shares deposits.
+    ///
+    /// Read-only: centres and visit counts are what a multiple-walker
+    /// scheme exports. Foreign deposits come back through
+    /// [`CheckpointAction::DepositDescriptors`], never by writing here.
+    pub fn bias(&self) -> Option<&'a BasinBias<ClusterFingerprint>> {
+        self.bias
+    }
+
     /// Quenched state occupied by the live chain.
     pub fn current_state(&self) -> ArrayView1<'a, f64> {
         self.current_state
@@ -254,6 +264,16 @@ pub enum CheckpointAction {
     DepositRemote {
         /// Cartesian minima received from the ensemble.
         states: Vec<Array1<f64>>,
+    },
+    /// Deposit other walkers' visits, by descriptor centre and count.
+    ///
+    /// Multiple-walker sharing of one bias (Raiteri et al. 2006), with the
+    /// synchronisation lag of the checkpoint interval: every walker
+    /// deposits its own hops as it makes them and the others' at the next
+    /// checkpoint, under the same well-tempered weight and merge radius.
+    DepositDescriptors {
+        /// Descriptor centres with the number of visits to deposit at each.
+        deposits: Vec<(Array1<f64>, u64)>,
     },
     /// Occupancy certificate: stop this replica.
     ///
@@ -1074,7 +1094,7 @@ pub fn run_with_history_at_checkpoints<'g, R, H>(
     relax: Relax<'_>,
     grad: Option<&mut GradFn<'g>>,
     settle: Option<Settle<'_>>,
-    history: &mut dyn HistoryHook,
+    history: Option<&mut dyn HistoryHook>,
     rng: &mut R,
     checkpoint_interval: usize,
     checkpoint: &mut H,
@@ -1096,7 +1116,7 @@ where
         None,
         None,
         settle,
-        Some(history),
+        history,
         Some(checkpoint_interval),
         checkpoint,
         rng,
@@ -1648,6 +1668,7 @@ where
                     charged: ledger.spent(),
                     remaining: ledger.remaining(),
                     hops,
+                    bias: Some(&bias),
                 };
                 let checkpoint_action = checkpoint(snapshot);
                 checkpoint_hops = hops;
@@ -1673,6 +1694,15 @@ where
                         if remote.len() == x.len() {
                             bias.deposit(bias.cv(remote.view()).view(), cfg.temperature);
                         }
+                    }
+                    None
+                }
+                CheckpointAction::DepositDescriptors { deposits } => {
+                    for (centre, count) in &deposits {
+                        for _ in 0..*count {
+                            bias.deposit(centre.view(), cfg.temperature);
+                        }
+                        shared_deposits += usize::try_from(*count).unwrap_or(usize::MAX);
                     }
                     None
                 }
@@ -4310,6 +4340,7 @@ where
             charged: ledger.spent(),
             remaining: ledger.remaining(),
             hops,
+            bias: Some(&bias),
         };
         let _ = checkpoint(snapshot);
     }
@@ -5264,7 +5295,7 @@ mod tests {
                 &mut relax,
                 Some(&mut grad),
                 None,
-                hook,
+                Some(hook),
                 &mut rng,
                 500,
                 &mut checkpoint,
