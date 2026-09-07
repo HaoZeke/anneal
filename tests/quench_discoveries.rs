@@ -1,4 +1,6 @@
-use anneal_core::methods::cluster_hopping::{Config, Ledger, Outcome, run_with_gradient};
+use anneal_core::methods::cluster_hopping::{
+    Config, Ledger, Outcome, QuenchStatus, run_with_gradient,
+};
 use ndarray::{Array1, ArrayView1};
 use rand::{SeedableRng, rngs::StdRng};
 
@@ -98,6 +100,28 @@ fn malformed_gradients_cannot_certify_the_initial_minimum() {
         );
         assert_eq!(outcome.best, f64::INFINITY);
         assert!(outcome.improvements.is_empty());
+    }
+}
+
+#[test]
+fn malformed_quench_boundaries_remain_paid_unresolved_observations() {
+    let state = Array1::from(vec![-0.6, 0.0, 0.0, 0.6, 0.0, 0.0]);
+    for (energy, coordinates, gradient) in [
+        (-0.25, state.clone(), Array1::from_elem(state.len(), f64::NAN)),
+        (-0.25, state.clone(), Array1::zeros(state.len() - 1)),
+        (f64::NAN, state.clone(), Array1::zeros(state.len())),
+        (-0.25, Array1::from_elem(state.len(), f64::NAN), Array1::zeros(state.len())),
+        (-0.25, Array1::zeros(0), Array1::zeros(0)),
+    ] {
+        let mut ledger = Ledger::new(1);
+        assert!(ledger.charge());
+        assert!(ledger.record_quench_boundary(0, energy, coordinates, Some(gradient)));
+        let [boundary] = ledger.quench_boundaries() else {
+            panic!("a failed quench remains in the observation denominator");
+        };
+        assert_eq!(boundary.status(), QuenchStatus::Rejected);
+        assert!(boundary.gradient().is_none());
+        assert_eq!(boundary.charged_calls(), 1);
     }
 }
 
