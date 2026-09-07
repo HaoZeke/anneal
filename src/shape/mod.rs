@@ -21,7 +21,7 @@ use std::os::raw::{c_double, c_int};
 
 use ndarray::{Array1, ArrayView1};
 
-use crate::bias::{BasinMetric, Fingerprint};
+use crate::bias::{BasinMetric, Fingerprint, SortedPairs};
 
 unsafe extern "C" {
     /// `libira_try_mat` from `src/library_sofi.f90`.
@@ -551,6 +551,10 @@ pub struct IraStructureWitness {
     pub radius: f64,
 }
 
+fn pair_distance_bound(left: ArrayView1<f64>, right: ArrayView1<f64>) -> Option<f64> {
+    SortedPairs { n_points: left.len() / 3 }.bottleneck_lower_bound(left, right)
+}
+
 fn exact_relation_from_match(
     left: ArrayView1<f64>,
     right: ArrayView1<f64>,
@@ -607,6 +611,9 @@ impl crate::pes_exploration::ExactStructureWitness for IraStructureWitness {
         left: ArrayView1<f64>,
         right: ArrayView1<f64>,
     ) -> crate::pes_exploration::ExactStructureRelation {
+        if pair_distance_bound(left, right).is_some_and(|lower| lower > self.radius) {
+            return crate::pes_exploration::ExactStructureRelation::Distinct;
+        }
         exact_relation_from_match(
             left,
             right,
@@ -630,7 +637,10 @@ impl crate::pes_exploration::ExactStructureWitness for IraStructureWitness {
     ) -> crate::pes_exploration::ExactStructureRelation {
         use crate::pes_exploration::ExactStructureRelation;
 
-        if left.context != right.context {
+        if left.context != right.context
+            || pair_distance_bound(left.coordinates, right.coordinates)
+                .is_some_and(|lower| lower > self.radius)
+        {
             return ExactStructureRelation::Distinct;
         }
         match (left.context.species(), right.context.species()) {
@@ -1288,6 +1298,15 @@ impl BasinMetric for IraMetric {
     /// basins. That is the safe direction: merging on a distance that was never
     /// computed empties the bias that separating them exists for.
     fn distance(&self, a: ArrayView1<f64>, b: ArrayView1<f64>) -> f64 {
+        IraMetric::distance(self, a, b)
+    }
+
+    fn distance_bounded(&self, a: ArrayView1<f64>, b: ArrayView1<f64>, bound: f64) -> f64 {
+        if let Some(lower) = pair_distance_bound(a, b)
+            && lower > bound
+        {
+            return lower;
+        }
         IraMetric::distance(self, a, b)
     }
 }
