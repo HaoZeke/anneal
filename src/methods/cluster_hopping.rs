@@ -1439,7 +1439,14 @@ where
     for _ in 1..n_rep {
         let s0 = random_cluster_in_radius(n, cfg.start_radius(), cfg.min_separation, rng);
         let (e0, x0) = relax(ledger, s0.view(), cfg.relax_steps);
-        record_quenched_answer(cfg, ledger, &mut grad, e0, x0.view(), &mut unconverged_records);
+        record_quenched_answer(
+            cfg,
+            ledger,
+            &mut grad,
+            e0,
+            x0.view(),
+            &mut unconverged_records,
+        );
         chains.push((e0, x0));
     }
     let mut screened_out = 0usize;
@@ -1834,7 +1841,14 @@ where
                         continue;
                     }
                     hops += 1;
-                    record_quenched_answer(cfg, ledger, &mut grad, hole_energy, hole_state.view(), &mut unconverged_records);
+                    record_quenched_answer(
+                        cfg,
+                        ledger,
+                        &mut grad,
+                        hole_energy,
+                        hole_state.view(),
+                        &mut unconverged_records,
+                    );
                     let reached = identity.basin_of(hole_state.view());
                     let from = here.unwrap_or_else(|| identity.basin_of(from_state.view()));
                     feedback.observe(Some(from), reached);
@@ -3332,7 +3346,14 @@ where
         {
             let (es, xs) = relax(ledger, y.view(), cfg.relax_steps);
             if es.is_finite() && xs.len() == x.len() {
-                let sym_gradient = record_quenched_answer(cfg, ledger, &mut grad, es, xs.view(), &mut unconverged_records);
+                let sym_gradient = record_quenched_answer(
+                    cfg,
+                    ledger,
+                    &mut grad,
+                    es,
+                    xs.view(),
+                    &mut unconverged_records,
+                );
                 hops += 1;
                 symmetrised += 1;
                 let d = (es - e) / temperature.max(1e-12);
@@ -3398,7 +3419,14 @@ where
             }
             let (ej, xj) = relax(ledger, y.view(), cfg.relax_steps);
             if ej.is_finite() && xj.len() == x.len() && quench_is_sane(cfg, ej, xj.view()) {
-                let jump_gradient = record_quenched_answer(cfg, ledger, &mut grad, ej, xj.view(), &mut unconverged_records);
+                let jump_gradient = record_quenched_answer(
+                    cfg,
+                    ledger,
+                    &mut grad,
+                    ej,
+                    xj.view(),
+                    &mut unconverged_records,
+                );
                 hops += 1;
                 jumps += 1;
                 e = ej;
@@ -3524,7 +3552,14 @@ where
                 };
                 if let Some(y) = symmetrised_state {
                     let (es, xs) = relax(ledger, y.view(), cfg.relax_steps);
-                    let sym_gradient = record_quenched_answer(cfg, ledger, &mut grad, es, xs.view(), &mut unconverged_records);
+                    let sym_gradient = record_quenched_answer(
+                        cfg,
+                        ledger,
+                        &mut grad,
+                        es,
+                        xs.view(),
+                        &mut unconverged_records,
+                    );
                     hops += 1;
                     symmetrised += 1;
                     if es < e {
@@ -3583,7 +3618,14 @@ where
                 random_cluster_in_radius(n, cfg.start_radius(), cfg.min_separation, rng)
             };
             let (ef, xf) = relax(ledger, fresh.view(), cfg.relax_steps);
-            let restart_gradient = record_quenched_answer(cfg, ledger, &mut grad, ef, xf.view(), &mut unconverged_records);
+            let restart_gradient = record_quenched_answer(
+                cfg,
+                ledger,
+                &mut grad,
+                ef,
+                xf.view(),
+                &mut unconverged_records,
+            );
             hops += 1;
             restarts += 1;
             e = ef;
@@ -3616,7 +3658,14 @@ where
                 *value += cfg.escape_amplitude * (0.5 * along + rng.random::<f64>() - 0.5);
             }
             let (ee, xe) = relax(ledger, exit.view(), cfg.relax_steps);
-            let trail_gradient = record_quenched_answer(cfg, ledger, &mut grad, ee, xe.view(), &mut unconverged_records);
+            let trail_gradient = record_quenched_answer(
+                cfg,
+                ledger,
+                &mut grad,
+                ee,
+                xe.view(),
+                &mut unconverged_records,
+            );
             hops += 1;
             stall_escapes += 1;
             trail_escapes += 1;
@@ -3656,7 +3705,14 @@ where
                     }
                     soft_lambda += o.lambda;
                     let (ee, xe) = relax(ledger, o.state.view(), cfg.relax_steps);
-                    let escape_gradient = record_quenched_answer(cfg, ledger, &mut grad, ee, xe.view(), &mut unconverged_records);
+                    let escape_gradient = record_quenched_answer(
+                        cfg,
+                        ledger,
+                        &mut grad,
+                        ee,
+                        xe.view(),
+                        &mut unconverged_records,
+                    );
                     hops += 1;
                     stall_escapes += 1;
                     if ee < e {
@@ -4012,7 +4068,14 @@ where
                                 return None;
                             }
                             let (ev, xv) = relax(ledger, img, cfg.relax_steps);
-                            record_quenched_answer(cfg, ledger, &mut grad, ev, xv.view(), &mut unconverged_records);
+                            record_quenched_answer(
+                                cfg,
+                                ledger,
+                                &mut grad,
+                                ev,
+                                xv.view(),
+                                &mut unconverged_records,
+                            );
                             Some((ev, xv))
                         },
                         |st| {
