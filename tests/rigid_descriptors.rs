@@ -52,3 +52,13 @@ fn equivalent_rigid_rotation_charts_have_the_same_descriptor() {
     let delta = fingerprint.describe(x.view()) - original;
     assert!(delta.dot(&delta) < 1e-20);
 }
+
+#[test]
+fn exchanging_equivalent_hydrogen_sites_does_not_change_the_basin_descriptor() {
+    let mut x = dimer();
+    let fingerprint = ClusterFingerprint::of_config(&Config::for_tip4p(2), &x);
+    let original = fingerprint.describe(x.view());
+    x[8] = std::f64::consts::PI;
+    let delta = fingerprint.describe(x.view()) - original;
+    assert!(delta.dot(&delta) < 1e-20);
+}
