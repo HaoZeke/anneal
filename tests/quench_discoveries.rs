@@ -92,7 +92,10 @@ fn malformed_gradients_cannot_certify_the_initial_minimum() {
             Some(&mut gradient),
             &mut rng,
         );
-        assert!(outcome.best_state.is_none(), "accepted gradient {bad_gradient:?}");
+        assert!(
+            outcome.best_state.is_none(),
+            "accepted gradient {bad_gradient:?}"
+        );
         assert_eq!(outcome.best, f64::INFINITY);
         assert!(outcome.improvements.is_empty());
     }
