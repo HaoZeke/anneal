@@ -666,6 +666,9 @@ pub struct Outcome {
     pub shared_deposits: usize,
     /// Gossip averaging steps applied to the bias.
     pub gossip_rounds: usize,
+    /// MD escapes attempted, integration steps taken, and attempts that
+    /// found no second potential minimum or ran out of budget.
+    pub md_escape: (usize, usize, usize),
     /// Seconds the chain spent inside the history, lock waits included.
     pub history_seconds: f64,
     /// Climbs triggered by a stall.
@@ -734,7 +737,8 @@ pub struct Outcome {
 /// The relaxation is supplied by the caller because the objective, its
 /// gradient and the minimiser are the caller's: this module owns the search,
 /// not the numerics under it.
-pub type Relax<'a> = &'a mut dyn FnMut(&mut Ledger, ArrayView1<f64>, usize) -> (f64, Array1<f64>);
+pub type Relax<'a> =
+    &'a mut (dyn FnMut(&mut Ledger, ArrayView1<f64>, usize) -> (f64, Array1<f64>) + Send);
 
 /// Partial relaxation of the listed atoms in the frozen environment.
 ///
@@ -748,7 +752,7 @@ pub type Settle<'a> =
 ///
 /// A supplied callback certifies candidate answers and supports soft-mode
 /// escape. Gradient-free callers own their relaxation convergence contract.
-pub type GradFn<'g> = dyn FnMut(&mut Ledger, ArrayView1<f64>) -> Option<Array1<f64>> + 'g;
+pub type GradFn<'g> = dyn FnMut(&mut Ledger, ArrayView1<f64>) -> Option<Array1<f64>> + Send + 'g;
 
 /// Value and gradient together, charged to the ledger by the caller.
 ///
@@ -1573,6 +1577,9 @@ where
     let mut history_new = 0usize;
     let mut shared_deposits = 0usize;
     let mut gossip_rounds = 0usize;
+    let mut md_attempts = 0usize;
+    let mut md_steps = 0usize;
+    let mut md_failed = 0usize;
     if let (Some(h), Some(g)) = (history.as_deref_mut(), current_validation_gradient.as_ref()) {
         // The start is part of the history even though no hop reached it,
         // exactly as the controller registers it: a later return to it must
@@ -2410,6 +2417,51 @@ where
         // a trajectory and a kick at equal charge.
         let hamiltonian = cfg.hmc.is_some() && energy_grad.is_some() && !angular;
         let mut hmc_trial: Option<Array1<f64>> = None;
+        // Goedecker's escape: an NVE trajectory from the occupied minimum,
+        // launched with the controller's escape scale as kinetic energy and
+        // stopped after two potential minima, replaces the kick. Its end
+        // point enters the same screen and quench as any trial, so the
+        // comparison is trajectory against kick at equal charge.
+        if cfg.minima_hopping
+            && cfg.md_escape
+            && !angular
+            && hmc_trial.is_none()
+            && let Some(g) = grad.as_deref_mut()
+        {
+            let md_config = crate::methods::minima_hopping::MdEscapeConfig {
+                dt: cfg.md_escape_dt,
+                ..Default::default()
+            };
+            let kinetic = (cfg.md_escape_kinetic * feedback.escape()).max(f64::MIN_POSITIVE);
+            let mut evaluate = |p: ArrayView1<f64>| -> Option<(f64, Array1<f64>)> {
+                let (energy, _) = relax(ledger, p, 0);
+                let gradient = g(ledger, p)?;
+                energy.is_finite().then_some((energy, gradient))
+            };
+            md_attempts += 1;
+            match crate::methods::minima_hopping::nve_escape(
+                x.view(),
+                kinetic,
+                &md_config,
+                &mut evaluate,
+                rng,
+            ) {
+                Ok(report) if report.potential_minima >= md_config.potential_minima => {
+                    md_steps += report.steps;
+                    hmc_trial = Some(report.position);
+                }
+                Ok(report) => {
+                    md_steps += report.steps;
+                    md_failed += 1;
+                }
+                Err(_) => {
+                    md_failed += 1;
+                }
+            }
+            if ledger.remaining() == 0 {
+                break;
+            }
+        }
         if hamiltonian {
             let hc = cfg.hmc.as_ref().expect("hamiltonian implies a config");
             let chain = hop.as_mut().expect("hamiltonian implies a sampler");
@@ -4431,6 +4483,7 @@ where
         history_visits: (history_observations, history_new),
         shared_deposits,
         gossip_rounds,
+        md_escape: (md_attempts, md_steps, md_failed),
         history_seconds: history.as_deref().map_or(0.0, |h| h.cost().2),
         merge_radius: final_radius,
         mean_step: radius.mean_step(),

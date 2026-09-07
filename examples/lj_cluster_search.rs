@@ -90,6 +90,7 @@ fn apply_boolean_options(cfg: &mut Config, opts: &[&str]) {
                     | "soapclass"
                     | "soapmean"
                     | "mh"
+                    | "mhmd"
                     | "calib"
                     | "restart"
                     | "angular"
@@ -1799,7 +1800,19 @@ fn main() {
         #[cfg(not(feature = "featomic"))]
         println!("  SOAP hop: in-crate leftover (rebuild with --features featomic)");
     }
-    cfg.minima_hopping = opts.contains(&"mh");
+    cfg.minima_hopping = opts.contains(&"mh") || opts.contains(&"mhmd");
+    // Goedecker's MD escape under the controller; MD_DT and MD_KINETIC
+    // set the time step and the kinetic energy per unit escape scale.
+    cfg.md_escape = opts.contains(&"mhmd");
+    if let Some(dt) = std::env::var("MD_DT").ok().and_then(|v| v.parse().ok()) {
+        cfg.md_escape_dt = dt;
+    }
+    if let Some(k) = std::env::var("MD_KINETIC")
+        .ok()
+        .and_then(|v| v.parse().ok())
+    {
+        cfg.md_escape_kinetic = k;
+    }
     // The radius read off the search's own step length rather than swept.
     cfg.calibrate_radius = opts.contains(&"calib");
     // The walker restarted, the landscape memory kept.
@@ -2920,7 +2933,7 @@ fn leave_known_packing<R: rand::Rng + ?Sized>(
     cfg: &Config,
     wells: &[Array1<f64>],
     ledger: &mut Ledger,
-    relax: &mut dyn FnMut(&mut Ledger, ArrayView1<f64>, usize) -> (f64, Array1<f64>),
+    relax: &mut (dyn FnMut(&mut Ledger, ArrayView1<f64>, usize) -> (f64, Array1<f64>) + Send),
     rng: &mut R,
 ) -> Array1<f64> {
     #[cfg(feature = "featomic")]
@@ -3641,8 +3654,8 @@ fn complete_checkpoint_trace<T>(
 fn run_capnp_catalog(
     cfg: &Config,
     ledger: &mut Ledger,
-    relax: &mut dyn FnMut(&mut Ledger, ArrayView1<f64>, usize) -> (f64, Array1<f64>),
-    grad: &mut dyn FnMut(&mut Ledger, ArrayView1<f64>) -> Option<Array1<f64>>,
+    relax: &mut (dyn FnMut(&mut Ledger, ArrayView1<f64>, usize) -> (f64, Array1<f64>) + Send),
+    grad: &mut (dyn FnMut(&mut Ledger, ArrayView1<f64>) -> Option<Array1<f64>> + Send),
     seed: u64,
     endpoint: Option<&str>,
     core_class: Option<(usize, usize)>,
@@ -6921,8 +6934,8 @@ fn adaptive_catalog_operations(
 fn run_capnp_bank(
     cfg: &Config,
     ledger: &mut Ledger,
-    relax: &mut dyn FnMut(&mut Ledger, ArrayView1<f64>, usize) -> (f64, Array1<f64>),
-    grad: &mut dyn FnMut(&mut Ledger, ArrayView1<f64>) -> Option<Array1<f64>>,
+    relax: &mut (dyn FnMut(&mut Ledger, ArrayView1<f64>, usize) -> (f64, Array1<f64>) + Send),
+    grad: &mut (dyn FnMut(&mut Ledger, ArrayView1<f64>) -> Option<Array1<f64>> + Send),
     seed: u64,
     sock: &str,
 ) -> Outcome {

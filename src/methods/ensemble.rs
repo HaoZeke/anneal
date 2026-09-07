@@ -157,14 +157,16 @@ impl EnsembleConfig {
 }
 
 /// Value and gradient of the objective at a point, owned by one replica.
-pub type Objective<'a> = &'a dyn Fn(ArrayView1<f64>) -> (f64, Array1<f64>);
+pub type Objective<'a> = &'a mut (dyn FnMut(ArrayView1<f64>) -> (f64, Array1<f64>) + Send);
 
 /// Builds a replica's objective inside the replica's own thread.
 ///
 /// A potential handle that is `Send` but not `Sync` (an xtb or EAM engine
-/// behind FFI) is constructed once per replica here and never shared.
+/// behind FFI) is constructed once per replica here and never shared; the
+/// runner serialises the replica's own calls behind a lock so the hop
+/// loop's relaxation and gradient closures can both reach it.
 pub type ObjectiveFactory<'a> =
-    &'a (dyn Fn(usize) -> Box<dyn Fn(ArrayView1<f64>) -> (f64, Array1<f64>) + 'a> + Sync);
+    &'a (dyn Fn(usize) -> Box<dyn FnMut(ArrayView1<f64>) -> (f64, Array1<f64>) + Send + 'a> + Sync);
 
 /// A replica's start structure from its own stream, also used for restarts.
 pub type StartFactory<'a> = &'a (dyn Fn(usize, &mut StdRng) -> Array1<f64> + Sync);
@@ -388,14 +390,14 @@ pub fn run_ensemble<W: ExactStructureWitness + Sync + ?Sized>(
                 let context = context.clone();
                 scope.spawn(move || -> Result<ReplicaReport, String> {
                     let replica_started = Instant::now();
-                    let objective = (problem.objective)(replica);
-                    let objective: Objective<'_> = &*objective;
+                    let objective = Mutex::new((problem.objective)(replica));
                     let mut ledger = Ledger::new(replica_budget);
                     let mut opt = WarmLbfgs::default();
                     let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, iters: usize| {
                         let before = led.spent();
+                        let mut objective = objective.lock().expect("replica objective");
                         let out = validated_relax(
-                            objective,
+                            &mut **objective,
                             &mut opt,
                             led,
                             x,
@@ -411,7 +413,7 @@ pub fn run_ensemble<W: ExactStructureWitness + Sync + ?Sized>(
                             return None;
                         }
                         charged_total.fetch_add(1, Ordering::SeqCst);
-                        Some(objective(x).1)
+                        Some((objective.lock().expect("replica objective"))(x).1)
                     };
                     let mut hook = history.map(|history| {
                         SharedMinimumHistory::new(
