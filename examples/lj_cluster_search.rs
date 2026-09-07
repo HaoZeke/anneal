@@ -38,6 +38,14 @@ use std::time::Instant;
 const EVIDENCE_ONLY_WORK_KIND: anneal_core::cooperative_search::ledger::ChargeKind =
     anneal_core::cooperative_search::ledger::ChargeKind::BasinEscape;
 
+#[cfg(feature = "bank-rpc")]
+fn unsettled_objective_calls(charged: usize, recorded: usize) -> Option<u64> {
+    let remainder = charged
+        .checked_sub(recorded)
+        .expect("cumulative objective work cannot decrease");
+    (remainder > 0).then(|| u64::try_from(remainder).expect("objective charge must fit u64"))
+}
+
 #[cfg(feature = "ira")]
 use anneal_core::shape::{IraMetric, IraStructureWitness};
 
@@ -4266,14 +4274,11 @@ fn run_capnp_catalog(
                 .expect("surface exchange must name the live replica");
         }
         if evidence_only {
-            cooperative
-                .record_work(
-                    replica,
-                    EVIDENCE_ONLY_WORK_KIND,
-                    u64::try_from(snapshot.charged().saturating_sub(last_charged))
-                        .expect("local objective charge must fit u64"),
-                )
-                .expect("evidence-only work must enter the cooperative ledger");
+            if let Some(charged) = unsettled_objective_calls(snapshot.charged(), last_charged) {
+                cooperative
+                    .record_work(replica, EVIDENCE_ONLY_WORK_KIND, charged)
+                    .expect("evidence-only work must enter the cooperative ledger");
+            }
             last_charged = snapshot.charged();
             return CheckpointAction::Continue;
         }
@@ -6038,14 +6043,9 @@ fn run_capnp_catalog(
         checkpoint_interval,
         &mut checkpoint,
     );
-    if evidence_only {
+    if evidence_only && let Some(charged) = unsettled_objective_calls(ledger.spent(), last_charged) {
         cooperative
-            .record_work(
-                replica,
-                EVIDENCE_ONLY_WORK_KIND,
-                u64::try_from(ledger.spent().saturating_sub(last_charged))
-                    .expect("terminal objective charge must fit u64"),
-            )
+            .record_work(replica, EVIDENCE_ONLY_WORK_KIND, charged)
             .expect("terminal evidence-only work must enter the cooperative ledger");
     }
     // The policy layer's own tally, printed where the run ends rather
