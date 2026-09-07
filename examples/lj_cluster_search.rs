@@ -3996,6 +3996,32 @@ fn run_capnp_catalog(
         .unwrap_or(1.2);
     let mut active_bridge: Option<BridgeAssignmentRecord> = None;
     let mut pending_deposits: Vec<Array1<f64>> = Vec::new();
+    // Peer-to-peer census over nng (CENSUS_BUS_BASE=port, CATALOG_REPLICAS=n):
+    // every replica's live minimum, no coordinator in the loop.
+    let mut census_bus: Option<anneal_core::census_bus::CensusBus> = std::env::var("CENSUS_BUS_BASE")
+        .ok()
+        .and_then(|v| v.parse::<u16>().ok())
+        .and_then(|base| {
+            let n: u32 = std::env::var("CATALOG_REPLICAS")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(0);
+            if n == 0 {
+                return None;
+            }
+            match anneal_core::census_bus::CensusBus::new(replica, base, n) {
+                Ok(bus) => {
+                    println!("  census bus: nng pub/sub, base port {base}, {n} replicas");
+                    Some(bus)
+                }
+                Err(error) => {
+                    println!("  census bus unavailable: {error}");
+                    None
+                }
+            }
+        });
+    let mut peer_crowd: usize = 0;
+    let mut bus_received: usize = 0;
     let mut shared_wells: Vec<Array1<f64>> = Vec::new();
     let coop_rcut = 3.5 * run_cfg.length_scale;
     let coop_species = run_cfg.species.clone();
@@ -4266,6 +4292,46 @@ fn run_capnp_catalog(
             .checked_add(1)
             .expect("checkpoint sequence must fit u64");
         probe_due |= checkpoint_sequence.is_multiple_of(probe_interval);
+        // Census bus: publish this replica's minimum, read every peer's.
+        // Peers on this side of the packing map become repulsion
+        // references and the crowd the stopping rule reads; every fresh
+        // peer minimum is a shared-bias deposit when shared bias is on.
+        if let Some(bus) = census_bus.as_mut()
+            && let Some(here) = snapshot.current_state().as_slice()
+        {
+            bus.publish(snapshot.hops() as u64, snapshot.current_energy(), here);
+            let fresh = bus.poll();
+            bus_received += fresh.len();
+            if shared_bias_enabled {
+                for peer in &fresh {
+                    if peer.coordinates.len() == here.len() {
+                        pending_deposits.push(Array1::from(peer.coordinates.clone()));
+                    }
+                }
+            }
+            let mut crowd = 0usize;
+            for peer in bus.peers() {
+                if peer.coordinates.len() != here.len() {
+                    continue;
+                }
+                if anneal_core::catalog::nearby_packing(here, &peer.coordinates) {
+                    crowd += 1;
+                    anneal_core::catalog::include_packing_reference(&peer.coordinates);
+                }
+            }
+            peer_crowd = crowd;
+            if std::env::var("CATALOG_CENSUS_TRACE").is_ok_and(|v| v == "1")
+                && checkpoint_sequence.is_multiple_of(7)
+            {
+                println!(
+                    "  bus hops {}  peers {}  crowd {}  received {}",
+                    snapshot.hops(),
+                    bus.peer_count(),
+                    crowd,
+                    bus_received
+                );
+            }
+        }
         // Quiet-stretch bookkeeping for the Leave gate: an improvement ends
         // the stretch and records how long the replica took to come back.
         if snapshot.best_energy() < leave_best - 1e-10 {
@@ -5220,7 +5286,11 @@ fn run_capnp_catalog(
             // chain at about 5e-6, so the exchange pays six to one once the
             // region is known dead. This runs before the coordinator-gated
             // policy section so it fires on every checkpoint.
-            let crowd = neighbors.len() as u64;
+            let crowd = if census_bus.is_some() {
+                peer_crowd as u64
+            } else {
+                neighbors.len() as u64
+            };
             if snapshot.best_energy() < hear_last_best - 1e-9 {
                 hear_last_best = snapshot.best_energy();
                 hear_last_best_hop = snapshot.hops();
