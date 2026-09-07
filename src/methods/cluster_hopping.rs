@@ -1383,7 +1383,14 @@ where
     let stall_arms: Vec<&'static str> = [
         cfg.trail_on_stall.then_some("trail"),
         cfg.escape_on_stall.then_some("climb"),
-        cfg.restart_on_stall.then_some("restart"),
+        // RESTART_STALL_ARM=0 keeps the restart out of the stall allocator,
+        // so a restart happens only on the charged-patience rule. Measured:
+        // with the stall arm in, a chain restarted 9 to 16 times a run
+        // whatever RESTART_PATIENCE said, every 5 to 8k hops, shorter than
+        // the descent to the shelf.
+        (cfg.restart_on_stall
+            && !std::env::var("RESTART_STALL_ARM").is_ok_and(|v| v == "0"))
+        .then_some("restart"),
     ]
     .into_iter()
     .flatten()
