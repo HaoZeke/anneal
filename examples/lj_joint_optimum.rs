@@ -232,22 +232,26 @@ fn hybrid_config(n: usize, budget: u64, irc_kind: IrcKind) -> AtomisticHybridCon
     }
 }
 
+struct HoppingMoves {
+    minima_hopping: bool,
+    symmetrise_on_stall: bool,
+    continuous_symmetry: ContinuousSymmetry,
+}
+
 fn run_hopping(
     potential: &PairPotential,
     initial: ArrayView1<'_, f64>,
     n: usize,
     budget: usize,
     seed: u64,
-    minima_hopping: bool,
-    symmetrise_on_stall: bool,
-    continuous_symmetry: ContinuousSymmetry,
+    moves: HoppingMoves,
 ) -> Outcome {
     let mut config = HoppingConfig::for_cluster(n);
     config.bias_height = 0.0;
     config.move_library = MoveLibrary::WalesDoye;
-    config.minima_hopping = minima_hopping;
-    config.symmetrise_on_stall = symmetrise_on_stall;
-    config.continuous_symmetry = continuous_symmetry;
+    config.minima_hopping = moves.minima_hopping;
+    config.symmetrise_on_stall = moves.symmetrise_on_stall;
+    config.continuous_symmetry = moves.continuous_symmetry;
     let mut ledger = Ledger::new(budget);
     let mut optimizer = WarmLbfgs::default();
     let mut relax = |ledger: &mut Ledger, start: ArrayView1<'_, f64>, steps: usize| {
@@ -265,7 +269,7 @@ fn run_hopping(
             .then(|| potential.value_and_gradient(point).1)
     };
     let mut rng = StdRng::seed_from_u64(seed);
-    if minima_hopping || !matches!(continuous_symmetry, ContinuousSymmetry::Off) {
+    if moves.minima_hopping || !matches!(moves.continuous_symmetry, ContinuousSymmetry::Off) {
         run_with_gradient(
             &config,
             initial,
@@ -324,6 +328,11 @@ fn exact_basin(
         .position(|minimum| witness.equivalent(minimum.view(), candidate))
 }
 
+struct MinimaHoppingOptions {
+    soften: bool,
+    bound_escape: bool,
+}
+
 fn run_minima_hopping(
     potential: &PairPotential,
     initial: ArrayView1<'_, f64>,
@@ -331,8 +340,7 @@ fn run_minima_hopping(
     budget: usize,
     seed: u64,
     witness: &impl ExactStructureWitness,
-    soften: bool,
-    bound_escape: bool,
+    options: MinimaHoppingOptions,
 ) -> MinimaHoppingRun {
     let hopping = HoppingConfig::for_cluster(n);
     let escape_config = MdEscapeConfig {
@@ -344,7 +352,7 @@ fn run_minima_hopping(
         } else {
             MdEscapeGeometry::Euclidean
         },
-        softening: soften.then_some(VelocitySofteningConfig {
+        softening: options.soften.then_some(VelocitySofteningConfig {
             steps: MH_SOFTENING_STEPS,
             displacement: MH_SOFTENING_DISPLACEMENT,
             mixing: MH_SOFTENING_MIXING,
@@ -401,7 +409,7 @@ fn run_minima_hopping(
     let mut minima = vec![state.clone()];
     let mut current_basin = 0usize;
     let mut feedback = EscapeFeedback::new(hopping.energy_scale, 0.5 * hopping.energy_scale);
-    if !bound_escape {
+    if !options.bound_escape {
         feedback.escape_floor = f64::MIN_POSITIVE;
         feedback.escape_ceiling = f64::MAX;
     }
@@ -420,16 +428,18 @@ fn run_minima_hopping(
         let mut attempt_config = escape_config;
         attempt_config.dt = time_step.time_step();
         let dynamics_start = ledger.spent();
-        let mut evaluate =
-            |point: ArrayView1<f64>| ledger.charge().then(|| potential.value_and_gradient(point));
-        let escape = nve_escape(
-            state.view(),
-            feedback.escape(),
-            &attempt_config,
-            &mut evaluate,
-            &mut rng,
-        );
-        drop(evaluate);
+        let escape = {
+            let mut evaluate = |point: ArrayView1<f64>| {
+                ledger.charge().then(|| potential.value_and_gradient(point))
+            };
+            nve_escape(
+                state.view(),
+                feedback.escape(),
+                &attempt_config,
+                &mut evaluate,
+                &mut rng,
+            )
+        };
         dynamics_calls += ledger.spent().saturating_sub(dynamics_start);
         hops += 1;
         let Ok(escape) = escape else {
@@ -841,8 +851,10 @@ fn main() -> Result<(), Box<dyn Error>> {
                             budget,
                             seed,
                             &witness,
-                            softened,
-                            bound_escape,
+                            MinimaHoppingOptions {
+                                soften: softened,
+                                bound_escape,
+                            },
                         );
                         let work = json!({
                             "initial_quench_calls": run.initial_quench_calls,
@@ -860,14 +872,16 @@ fn main() -> Result<(), Box<dyn Error>> {
                                 n,
                                 budget,
                                 seed,
-                                matches!(arm, Arm::MinimaFeedback),
-                                matches!(arm, Arm::BasinHoppingSymmetry),
-                                if matches!(arm, Arm::BasinHoppingCsmCi) {
-                                    ContinuousSymmetry::Inversion {
-                                        interval: CSM_INTERVAL,
+                                HoppingMoves {
+                                    minima_hopping: matches!(arm, Arm::MinimaFeedback),
+                                    symmetrise_on_stall: matches!(arm, Arm::BasinHoppingSymmetry),
+                                    continuous_symmetry: if matches!(arm, Arm::BasinHoppingCsmCi) {
+                                        ContinuousSymmetry::Inversion {
+                                            interval: CSM_INTERVAL,
+                                        }
+                                    } else {
+                                        ContinuousSymmetry::Off
                                     }
-                                } else {
-                                    ContinuousSymmetry::Off
                                 },
                             ),
                             None,
@@ -950,8 +964,8 @@ fn main() -> Result<(), Box<dyn Error>> {
 #[cfg(test)]
 mod tests {
     use super::{
-        Arm, ExactStructureWitness, PairPotential, optbench_start_path, parse_plain_coordinates,
-        run_minima_hopping, selected_arms,
+        Arm, ExactStructureWitness, MinimaHoppingOptions, PairPotential, optbench_start_path,
+        parse_plain_coordinates, run_minima_hopping, selected_arms,
     };
     use ndarray::{Array1, ArrayView1};
     use std::path::Path;
@@ -1048,8 +1062,10 @@ mod tests {
             0,
             7,
             &DistinctWitness,
-            false,
-            false,
+            MinimaHoppingOptions {
+                soften: false,
+                bound_escape: false,
+            },
         );
 
         assert_eq!(run.outcome.best, f64::INFINITY);
@@ -1069,8 +1085,10 @@ mod tests {
             2_000,
             7,
             &DistinctWitness,
-            false,
-            false,
+            MinimaHoppingOptions {
+                soften: false,
+                bound_escape: false,
+            },
         );
 
         assert_eq!(
