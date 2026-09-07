@@ -888,7 +888,10 @@ mod run {
             if let Some(mailbox) = self.replica_mut(replica)?.client.as_ref() {
                 mailbox.post(move |client| {
                     if let Ok(peers) = client.exchange_surface_evidence(sequence, report) {
-                        let _ = portfolio.lock().expect("surface portfolio").import_peers(peers);
+                        let _ = portfolio
+                            .lock()
+                            .expect("surface portfolio")
+                            .import_peers(peers);
                     }
                     pending.store(false, Ordering::Release);
                 });

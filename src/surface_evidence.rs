@@ -20,7 +20,11 @@ pub struct SurfaceReport {
 impl SurfaceReport {
     /// Validate a bounded report before using it to influence search.
     pub fn validate(&self) -> Result<(), &'static str> {
-        if self.schema.is_empty() || self.schema.len() > 8192 || self.arms.is_empty() || self.arms.len() > 64 {
+        if self.schema.is_empty()
+            || self.schema.len() > 8192
+            || self.arms.is_empty()
+            || self.arms.len() > 64
+        {
             return Err("invalid surface evidence schema");
         }
         DepthAllocator::from_moments(&self.arms).map(|_| ())
@@ -38,7 +42,11 @@ impl SurfaceEvidenceBook {
     ///
     /// Identical reports are idempotent. Regressing counters, changed moments at
     /// an unchanged counter, and incompatible arm counts cannot mutate the book.
-    pub fn exchange(&mut self, producer: u32, report: SurfaceReport) -> Result<SurfaceReport, &'static str> {
+    pub fn exchange(
+        &mut self,
+        producer: u32,
+        report: SurfaceReport,
+    ) -> Result<SurfaceReport, &'static str> {
         report.validate()?;
         if !self.reports.contains_key(&report.schema) && self.reports.len() >= 128 {
             return Err("surface experiment capacity exhausted");
@@ -46,7 +54,9 @@ impl SurfaceEvidenceBook {
         let mut peers = vec![RewardMoments::default(); report.arms.len()];
         if let Some(experiment) = self.reports.get(&report.schema) {
             for (&replica, arms) in experiment {
-                if arms.len() != report.arms.len() { return Err("surface arm count mismatch"); }
+                if arms.len() != report.arms.len() {
+                    return Err("surface arm count mismatch");
+                }
                 if replica == producer {
                     for (old, new) in arms.iter().zip(&report.arms) {
                         if new.count < old.count || (new.count == old.count && new != old) {
@@ -54,15 +64,28 @@ impl SurfaceEvidenceBook {
                         }
                     }
                 } else {
-                    for (peer, arm) in peers.iter_mut().zip(arms) { *peer = peer.merge(*arm)?; }
+                    for (peer, arm) in peers.iter_mut().zip(arms) {
+                        *peer = peer.merge(*arm)?;
+                    }
                 }
             }
         }
-        let reply = SurfaceReport { schema: report.schema.clone(), arms: peers };
+        let reply = SurfaceReport {
+            schema: report.schema.clone(),
+            arms: peers,
+        };
         reply.validate()?;
-        let aggregate = reply.arms.iter().zip(&report.arms).map(|(peer, own)| peer.merge(*own)).collect::<Result<Vec<_>, _>>()?;
+        let aggregate = reply
+            .arms
+            .iter()
+            .zip(&report.arms)
+            .map(|(peer, own)| peer.merge(*own))
+            .collect::<Result<Vec<_>, _>>()?;
         DepthAllocator::from_moments(&aggregate)?;
-        self.reports.entry(report.schema).or_default().insert(producer, report.arms);
+        self.reports
+            .entry(report.schema)
+            .or_default()
+            .insert(producer, report.arms);
         Ok(reply)
     }
 }
