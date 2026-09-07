@@ -4,8 +4,8 @@ use rand::{SeedableRng, rngs::StdRng};
 
 fn symmetrised_run(endpoint_gradient: f64) -> Outcome {
     let start = array![
-        1.0, 0.0, 0.0, -1.0, 0.0, 0.0, 0.0, 1.0, 0.0,
-        0.0, -1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, -1.0,
+        1.0, 0.0, 0.0, -1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, -1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0,
+        -1.0,
     ];
     let mut candidate = start.clone();
     for (i, value) in candidate.iter_mut().enumerate() {
@@ -25,10 +25,16 @@ fn symmetrised_run(endpoint_gradient: f64) -> Outcome {
     cfg.point_symmetrise_every_accept = true;
     cfg.symmetrise_core_fraction = 1.0;
     cfg.symmetry_tolerance = 0.5;
-    assert!(anneal_core::symmetrise::symmetrise_core(
-        candidate.view(), 6, cfg.symmetry_tolerance,
-        cfg.symmetry_merge_radius, cfg.symmetrise_core_fraction,
-    ).is_some());
+    assert!(
+        anneal_core::symmetrise::symmetrise_core(
+            candidate.view(),
+            6,
+            cfg.symmetry_tolerance,
+            cfg.symmetry_merge_radius,
+            cfg.symmetrise_core_fraction,
+        )
+        .is_some()
+    );
 
     let mut full_quenches = 0;
     let mut relax = |ledger: &mut Ledger, _: ArrayView1<f64>, steps: usize| {
@@ -51,19 +57,32 @@ fn symmetrised_run(endpoint_gradient: f64) -> Outcome {
     };
     let mut gradient = |ledger: &mut Ledger, point: ArrayView1<f64>| {
         assert!(ledger.charge());
-        Some(Array1::from_elem(point.len(), if point == endpoint.view() {
-            endpoint_gradient
-        } else { 0.0 }))
+        Some(Array1::from_elem(
+            point.len(),
+            if point == endpoint.view() {
+                endpoint_gradient
+            } else {
+                0.0
+            },
+        ))
     };
     let mut ledger = Ledger::new(100);
     let mut rng = StdRng::seed_from_u64(37);
     let outcome = run_with_gradient(
-        &cfg, start.view(), &mut ledger, &mut relax, Some(&mut gradient), &mut rng,
+        &cfg,
+        start.view(),
+        &mut ledger,
+        &mut relax,
+        Some(&mut gradient),
+        &mut rng,
     );
     assert_eq!(full_quenches, 3);
     assert_eq!(outcome.symmetrised.0, 1);
     assert_eq!(outcome.final_state.as_ref(), Some(&endpoint));
-    assert_eq!(outcome.final_energy, -2.0, "search adoption is not answer certification");
+    assert_eq!(
+        outcome.final_energy, -2.0,
+        "search adoption is not answer certification"
+    );
     outcome
 }
 
@@ -91,8 +110,13 @@ fn nonfinite_symmetrisation_gradient_cannot_certify_an_answer() {
 #[test]
 fn ordinary_lj_driver_supplies_charged_answer_validation_without_escape_flags() {
     let source = include_str!("../examples/lj_cluster_search.rs");
-    let invocation = source.split_once("anneal_core::methods::cluster_hopping::optimize_with_settle(")
-        .unwrap().1.split_once("if cfg.staged_quench").unwrap().0;
+    let invocation = source
+        .split_once("anneal_core::methods::cluster_hopping::optimize_with_settle(")
+        .unwrap()
+        .1
+        .split_once("if cfg.staged_quench")
+        .unwrap()
+        .0;
     assert!(invocation.contains("Some(&mut grad)"));
     assert!(!invocation.contains("cfg.minima_hopping"));
     assert!(!invocation.contains("None"));
