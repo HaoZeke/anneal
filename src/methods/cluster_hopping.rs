@@ -361,7 +361,10 @@ impl Ledger {
 
     fn diagnostic_scope(&mut self) -> DiagnosticQuench<'_> {
         let previous = std::mem::replace(&mut self.diagnostic_quench, true);
-        DiagnosticQuench { ledger: self, previous }
+        DiagnosticQuench {
+            ledger: self,
+            previous,
+        }
     }
 
     /// Charges one unit, returning `false` when the budget is gone.
@@ -1481,7 +1484,8 @@ where
             if let CheckpointAction::Retire { .. } = checkpoint_action {
                 break;
             }
-            let diagnostic_quench = matches!(&checkpoint_action, CheckpointAction::ProbeProposal { .. });
+            let diagnostic_quench =
+                matches!(&checkpoint_action, CheckpointAction::ProbeProposal { .. });
             let proposal = match checkpoint_action {
                 CheckpointAction::Continue => None,
                 CheckpointAction::Retire { .. } => unreachable!("retire breaks before this match"),

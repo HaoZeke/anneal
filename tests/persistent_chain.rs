@@ -297,16 +297,49 @@ fn diagnostic_quench_context_is_scoped_to_the_probe_callback() {
     };
     assert!(!ledger.is_diagnostic_quench());
     run_with_bias_at_checkpoints(
-        &cfg, start.view(), &mut ledger, &mut relax, None, &mut bias,
-        &mut rng, 40, &mut checkpoint,
+        &cfg,
+        start.view(),
+        &mut ledger,
+        &mut relax,
+        None,
+        &mut bias,
+        &mut rng,
+        40,
+        &mut checkpoint,
     );
-    assert_eq!(contexts.iter().filter(|(diagnostic, _)| *diagnostic).count(), 1);
-    assert!(contexts.iter().all(|(diagnostic, probe_seed)| diagnostic == probe_seed));
-    let probe_index = contexts.iter().position(|(diagnostic, _)| *diagnostic).unwrap();
-    assert!(probe_index > 0, "initial relaxation must use the search context");
-    assert!(probe_index + 1 < contexts.len(), "ordinary search must resume");
-    assert!(!ledger.is_diagnostic_quench(), "probe context escaped its callback");
-    assert_eq!(ledger.spent(), ledger.budget(), "probe work remains charged");
+    assert_eq!(
+        contexts
+            .iter()
+            .filter(|(diagnostic, _)| *diagnostic)
+            .count(),
+        1
+    );
+    assert!(
+        contexts
+            .iter()
+            .all(|(diagnostic, probe_seed)| diagnostic == probe_seed)
+    );
+    let probe_index = contexts
+        .iter()
+        .position(|(diagnostic, _)| *diagnostic)
+        .unwrap();
+    assert!(
+        probe_index > 0,
+        "initial relaxation must use the search context"
+    );
+    assert!(
+        probe_index + 1 < contexts.len(),
+        "ordinary search must resume"
+    );
+    assert!(
+        !ledger.is_diagnostic_quench(),
+        "probe context escaped its callback"
+    );
+    assert_eq!(
+        ledger.spent(),
+        ledger.budget(),
+        "probe work remains charged"
+    );
 }
 
 #[test]
