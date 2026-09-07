@@ -657,4 +657,54 @@ mod tests {
         assert!((correlated_variance - 0.68).abs() < 1e-12);
         assert!((independent_variance - 1.0).abs() < 1e-12);
     }
+
+    #[test]
+    fn the_candidate_correlation_matrix_matches_the_pairwise_correlations() {
+        let mut search = MinimumInformationSearch::new(0.5, 2.0, 0.1).expect("valid scales");
+        let sites = [[0.0, 0.0], [0.4, 0.1], [0.9, 0.7], [0.2, 0.8]];
+        for (index, site) in sites.iter().enumerate() {
+            search
+                .observe(SearchMechanism::BasinEscape, site, 0.0, -(index as f64))
+                .expect("basin observation");
+        }
+        search
+            .observe(SearchMechanism::SaddleRide, &[0.5, 0.5], 0.0, -0.5)
+            .expect("ride observation");
+        let candidate = |mechanism, feature: [f64; 2]| SearchActionCandidate {
+            mechanism,
+            feature: feature.to_vec(),
+            source_energy: 0.0,
+            expected_charged_evaluations: 100.0,
+        };
+        let candidates = vec![
+            candidate(SearchMechanism::BasinEscape, [0.1, 0.05]),
+            candidate(SearchMechanism::SaddleRide, [0.6, 0.4]),
+            candidate(SearchMechanism::BasinEscape, [0.5, 0.5]),
+            candidate(SearchMechanism::BasinEscape, [0.85, 0.75]),
+            candidate(SearchMechanism::SaddleRide, [0.1, 0.9]),
+        ];
+        let matrix = search.candidate_correlations(&candidates);
+        for row in 0..candidates.len() {
+            assert!((matrix[[row, row]] - 1.0).abs() < 1e-12);
+            for column in 0..row {
+                let (left, right) = (&candidates[row], &candidates[column]);
+                let expected = if left.mechanism == right.mechanism {
+                    search.models[left.mechanism.index()].predictive_observation_correlation(
+                        ArrayView1::from(left.feature.as_slice()),
+                        ArrayView1::from(right.feature.as_slice()),
+                    )
+                } else {
+                    0.0
+                };
+                assert!(
+                    (matrix[[row, column]] - expected).abs() < 1e-9,
+                    "pair ({row}, {column}): matrix {} pairwise {expected}",
+                    matrix[[row, column]]
+                );
+                assert_eq!(matrix[[row, column]], matrix[[column, row]]);
+            }
+        }
+        // Same-mechanism neighbours are strongly correlated, distant ones less.
+        assert!(matrix[[2, 0]] < matrix[[3, 2]]);
+    }
 }
