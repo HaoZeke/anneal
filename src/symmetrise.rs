@@ -1239,11 +1239,13 @@ mod orbit_tests {
                 axis: [1.0, 0.0, 0.0],
                 order: 4,
                 improper: false,
+                deviation: 0.0,
             },
             Candidate {
                 axis: [0.0, 1.0, 0.0],
                 order: 4,
                 improper: false,
+                deviation: 0.0,
             },
         ];
         let group = generate_group(&axes, 48);
