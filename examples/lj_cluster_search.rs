@@ -1951,6 +1951,18 @@ fn main() {
         cfg.screen_steps = k;
         println!("  screen steps {k}");
     }
+    if let Ok(v) = std::env::var("RELAX_STEPS")
+        && let Ok(k) = v.parse::<usize>()
+    {
+        cfg.relax_steps = k;
+        println!("  relax steps {k}");
+    }
+    if let Ok(v) = std::env::var("SCREEN_MARGIN")
+        && let Ok(m) = v.parse::<f64>()
+    {
+        cfg.screen_margin = m * cfg.energy_scale;
+        println!("  screen margin {m}");
+    }
     if let Ok(v) = std::env::var("FLAT_QUANTILE")
         && let Ok(q) = v.parse::<f64>()
     {
