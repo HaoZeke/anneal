@@ -631,6 +631,27 @@ mod option_tests {
 
     #[cfg(feature = "bank-rpc")]
     #[test]
+    fn failed_probe_builds_a_source_and_an_unresolved_record() {
+        let signature = anneal_core::catalog::lj::system_signature(2).unwrap();
+        let descriptor_space = anneal_core::catalog::lj::descriptor_space();
+        let separation = 2.0_f64.powf(1.0 / 6.0);
+        let source = Array1::from(vec![0.0, 0.0, 0.0, separation, 0.0, 0.0]);
+        let (energy, gradient) = lj(source.view());
+        let transition = AcceptedTransition {
+            hop: 3, action: "probe".into(), from_energy: energy,
+            to_energy: f64::INFINITY, from_state: source.clone(),
+            from_gradient: Some(gradient), to_state: source,
+            to_gradient: None, validated: false, adopted: false,
+        };
+        let mut sequence = 20;
+        let operations = adaptive_catalog_operations(&descriptor_space,
+            &signature.atomic_numbers, 0, &mut sequence, 71, 400, &[transition]);
+        assert_eq!(operations.len(), 2, "failed probe must retain its source and outcome");
+        assert!(matches!(operations[0], AdaptiveCatalogOperation::RegisterCurrent(_)));
+    }
+
+    #[cfg(feature = "bank-rpc")]
+    #[test]
     fn contiguous_adaptive_path_registers_one_source_then_adopts_each_edge() {
         let signature = anneal_core::catalog::lj::system_signature(2).unwrap();
         let descriptor_space = anneal_core::catalog::lj::descriptor_space();
