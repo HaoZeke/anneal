@@ -57,7 +57,8 @@ class SurfaceEvidenceReportTests(unittest.TestCase):
 
     def test_catalog_snapshots_use_the_ensemble_budget(self):
         self.replace(
-            "shared", 0,
+            "shared",
+            0,
             '{"kind":"local_work","aggregate_charged":1000}',
             '{"kind":"population_pending","aggregate_charged":2000}\n'
             '{"kind":"local_work","aggregate_charged":1000}',
@@ -66,7 +67,8 @@ class SurfaceEvidenceReportTests(unittest.TestCase):
 
     def test_rejects_catalog_work_above_the_ensemble_budget(self):
         self.replace(
-            "shared", 0,
+            "shared",
+            0,
             '{"kind":"local_work","aggregate_charged":1000}',
             '{"kind":"population_pending","aggregate_charged":2001}\n'
             '{"kind":"local_work","aggregate_charged":1000}',
