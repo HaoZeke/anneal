@@ -73,6 +73,11 @@ per-replica work by stage, history overhead, and ensemble wall time. Private
 minimum counts sum replica-local identities; shared counts describe one
 common history. These counts are not interchangeable measures of coverage.
 
+The structural archive retains rejected proposals, but the exclusion history
+contains only accepted minima. An energy-rejected proposal remains eligible
+for another threshold trial. Shared classification and acceptance publication
+are atomic; an unresolved quench contributes charged work, not a basin visit.
+
 For a controlled escape probe, `ANNEAL_START_COORDINATES` selects a plain
 coordinate file containing one finite `x y z` triplet per atom, without an
 XYZ header or element labels. Every replica starts from that structure;
