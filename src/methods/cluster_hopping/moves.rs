@@ -89,7 +89,7 @@ impl MoveLibrary {
                 cfg.symmetrise_cutoff,
             )
         };
-        match self {
+        let mut kernels = match self {
             Self::WalesDoye => wales_doye(),
             Self::Atomic => atomic(),
             Self::Lean => lean(),
@@ -193,7 +193,16 @@ impl MoveLibrary {
                     step: *rotate_step,
                 },
             ],
+        };
+        if cfg.point_symmetrise {
+            kernels.push(ClusterMove::PointSymmetrise {
+                n_points: cfg.n_points,
+                tolerance: cfg.symmetry_tolerance,
+                pair_cutoff: cfg.symmetry_merge_radius,
+                fallback_step: LennardJonesPreset::SINGLE_POINT_STEP * cfg.length_scale,
+            });
         }
+        kernels
     }
 
     /// Whether the library asks the construction posterior to select growth.
@@ -331,6 +340,26 @@ pub enum ClusterMove {
     ShellRotate(ShellRotate),
     /// Enforce an approximate rotational symmetry.
     Symmetrise(Symmetrise),
+    /// Push the structure onto the point group it nearly has, as a proposal.
+    ///
+    /// Oakley, Johnston and Wales, Phys. Chem. Chem. Phys. 15, 3965 (2013):
+    /// the approximate symmetries of the current minimum are measured, closed
+    /// into a group, and the structure is made exactly symmetric under that
+    /// group before the quench. Unlike [`ClusterMove::Symmetrise`] nothing is
+    /// random about the axis, and unlike the stall-gated symmetrisation this
+    /// is an ordinary arm drawn every hop the allocator chooses it, on any
+    /// packing. A structure with no approximate symmetry falls back to a
+    /// single-point displacement so the arm is never a no-op.
+    PointSymmetrise {
+        /// Points in a state.
+        n_points: usize,
+        /// Largest RMS deviation at which an operation counts as approximate.
+        tolerance: f64,
+        /// Largest separation at which a point and an image are partners.
+        pair_cutoff: f64,
+        /// Half-width of the fallback single-point displacement.
+        fallback_step: f64,
+    },
     /// Twin the structure across one of its dense planes.
     ///
     /// The move between a displacement, which never leaves the funnel, and a
@@ -1206,6 +1235,7 @@ impl ClusterMove {
             ClusterMove::Burst { .. } => "burst".into(),
             ClusterMove::ShellRotate(_) => "shell".into(),
             ClusterMove::Symmetrise(_) => "sym".into(),
+            ClusterMove::PointSymmetrise { .. } => "psym".into(),
             ClusterMove::Visit { .. } => "visit".into(),
             ClusterMove::Angular { .. } => "angular".into(),
             ClusterMove::Twin { .. } => "twin".into(),
@@ -1404,6 +1434,61 @@ impl ClusterMove {
             ClusterMove::HollowFill(k) => k.propose(x, t, rng),
             ClusterMove::ShellRotate(k) => k.propose(x, t, rng),
             ClusterMove::Symmetrise(k) => k.propose(x, t, rng),
+            ClusterMove::PointSymmetrise {
+                n_points,
+                tolerance,
+                pair_cutoff,
+                fallback_step,
+            } => {
+                let n = *n_points;
+                if n >= 3 {
+                    let cands = crate::symmetrise::detect_all(x, n, &[2, 3, 4, 5, 6], *tolerance);
+                    if !cands.is_empty() {
+                        // One generator per distinct axis, lowest deviation
+                        // first, at most three: two generate every axial and
+                        // cubic group the hard minima carry, and more only
+                        // manufactures a spurious closure the pair cutoff then
+                        // has to reject.
+                        let mut gens: Vec<crate::symmetrise::Candidate> = Vec::new();
+                        for c in &cands {
+                            let seen = gens.iter().any(|g| {
+                                let dot = g.axis[0] * c.axis[0]
+                                    + g.axis[1] * c.axis[1]
+                                    + g.axis[2] * c.axis[2];
+                                dot.abs() > 0.995 && g.improper == c.improper
+                            });
+                            if !seen {
+                                gens.push(*c);
+                            }
+                            if gens.len() >= 3 {
+                                break;
+                            }
+                        }
+                        let group = crate::symmetrise::generate_group(&gens, 48);
+                        let y = if group.len() > 1 {
+                            crate::symmetrise::symmetrise_group(x, n, &group, *pair_cutoff)
+                        } else {
+                            crate::symmetrise::symmetrise(x, n, &cands[0], *pair_cutoff)
+                        };
+                        // An exactly symmetric structure comes back as itself;
+                        // proposing the incumbent wastes a quench, so fall
+                        // through to the displacement.
+                        let moved = y.iter().zip(x.iter()).any(|(a, b)| (a - b).abs() > 1e-9);
+                        if moved {
+                            return y;
+                        }
+                    }
+                }
+                let mut y = x.to_owned();
+                if n > 0 {
+                    let i = rng.random_range(0..n);
+                    let h = fallback_step * scale;
+                    for k in 0..3 {
+                        y[3 * i + k] += rng.random_range(-h..h);
+                    }
+                }
+                y
+            }
             ClusterMove::RigidTranslate { n_molecules, step } => {
                 let mut y = x.to_owned();
                 let h = step * scale;

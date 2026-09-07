@@ -548,6 +548,82 @@ pub fn symmetrise_group(
     out
 }
 
+/// Core symmetrisation after Oakley, Johnston and Wales: detect the
+/// approximate point group of the innermost `core_fraction` of the points,
+/// close it into a group, and make the core exactly symmetric under it.
+/// Surface points are left where they are; the quench that follows places
+/// them. Returns `None` when the core carries no approximate symmetry or the
+/// symmetrised core is the input.
+///
+/// Detecting on the core is what makes the scheme fire on a realistic
+/// minimum: a 75-point decahedral or icosahedral core with a disordered
+/// surface fails a whole-cluster tolerance that its core passes easily.
+pub fn symmetrise_core(
+    x: ArrayView1<f64>,
+    n: usize,
+    tolerance: f64,
+    pair_cutoff: f64,
+    core_fraction: f64,
+) -> Option<Array1<f64>> {
+    if n < 4 {
+        return None;
+    }
+    let c = centroid(x, n);
+    let mut radii: Vec<(f64, usize)> = (0..n)
+        .map(|a| {
+            let v = [x[3 * a] - c[0], x[3 * a + 1] - c[1], x[3 * a + 2] - c[2]];
+            ((v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt(), a)
+        })
+        .collect();
+    radii.sort_by(|p, q| p.0.partial_cmp(&q.0).unwrap_or(std::cmp::Ordering::Equal));
+    let m = ((n as f64) * core_fraction.clamp(0.1, 1.0)).round().max(4.0) as usize;
+    let m = m.min(n);
+    let core_idx: Vec<usize> = radii[..m].iter().map(|p| p.1).collect();
+    let mut core = Array1::<f64>::zeros(3 * m);
+    for (k, &a) in core_idx.iter().enumerate() {
+        for d in 0..3 {
+            core[3 * k + d] = x[3 * a + d];
+        }
+    }
+    let cands = detect_all(core.view(), m, &[2, 3, 4, 5, 6], tolerance);
+    if cands.is_empty() {
+        return None;
+    }
+    let mut gens: Vec<Candidate> = Vec::new();
+    for cand in &cands {
+        let seen = gens.iter().any(|g| {
+            let dot = g.axis[0] * cand.axis[0] + g.axis[1] * cand.axis[1] + g.axis[2] * cand.axis[2];
+            dot.abs() > 0.995 && g.improper == cand.improper
+        });
+        if !seen {
+            gens.push(*cand);
+        }
+        if gens.len() >= 3 {
+            break;
+        }
+    }
+    let group = generate_group(&gens, 48);
+    let sym_core = if group.len() > 1 {
+        symmetrise_group(core.view(), m, &group, pair_cutoff)
+    } else {
+        symmetrise(core.view(), m, &cands[0], pair_cutoff)
+    };
+    let moved = sym_core
+        .iter()
+        .zip(core.iter())
+        .any(|(a, b)| (a - b).abs() > 1e-9);
+    if !moved {
+        return None;
+    }
+    let mut out = x.to_owned();
+    for (k, &a) in core_idx.iter().enumerate() {
+        for d in 0..3 {
+            out[3 * a + d] = sym_core[3 * k + d];
+        }
+    }
+    Some(out)
+}
+
 /// Detects and applies in one step, or returns `None` when there is no
 /// approximate symmetry worth using.
 pub fn symmetrise_detected(

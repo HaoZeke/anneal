@@ -247,21 +247,29 @@ impl FeatomicSoapProvider {
                 DescriptorProviderError::new("featomic SOAP property dimension overflow")
             })?;
             let hyperparameters = scale.hyperparameters();
-            let descriptor = CALCULATORS.with(|calculators| {
-                let mut calculators = calculators.borrow_mut();
-                let calculator = calculators
-                    .entry(hyperparameters.clone())
-                    .or_insert_with(|| {
-                        Calculator::new(CALCULATOR, hyperparameters.clone())
-                            .expect("validated featomic SOAP hyperparameters")
-                    });
-                calculator.compute(
-                    &mut systems,
-                    CalculationOptions {
-                        selected_keys: Some(&labels),
-                        ..Default::default()
-                    },
-                )
+            // Take the calculator out of the thread-local cache for the
+            // duration of the call. featomic computes on its own rayon pool,
+            // and a work-stealing thread can re-enter this function on the
+            // same OS thread while the borrow is live: measured as a
+            // "RefCell already borrowed" abort of the coordinator on the
+            // first LJ38 cooperative smoke. Nothing borrows across `compute`.
+            let mut calculator = CALCULATORS
+                .with(|calculators| calculators.borrow_mut().remove(&hyperparameters))
+                .unwrap_or_else(|| {
+                    Calculator::new(CALCULATOR, hyperparameters.clone())
+                        .expect("validated featomic SOAP hyperparameters")
+                });
+            let descriptor = calculator.compute(
+                &mut systems,
+                CalculationOptions {
+                    selected_keys: Some(&labels),
+                    ..Default::default()
+                },
+            );
+            CALCULATORS.with(|calculators| {
+                calculators
+                    .borrow_mut()
+                    .insert(hyperparameters.clone(), calculator);
             });
             let descriptor = descriptor.map_err(|error| {
                 DescriptorProviderError::new(format!("featomic SOAP evaluation failed: {error}"))

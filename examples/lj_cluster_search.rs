@@ -1590,6 +1590,36 @@ fn main() {
     }
     // Wales and Doye's angular move on the worst-bound point.
     cfg.angular_moves = opts.contains(&"angular");
+    // Oakley-Johnston-Wales point-group symmetrisation as a proposal arm.
+    cfg.point_symmetrise = opts.contains(&"psym");
+    // Core symmetrisation once per new basin (Oakley-Johnston-Wales), quenched.
+    cfg.point_symmetrise_on_new = opts.contains(&"psymnew");
+    if let Some(frac) = std::env::var("PSYM_CORE").ok().and_then(|v| v.parse::<f64>().ok()) {
+        cfg.symmetrise_core_fraction = frac;
+        println!("  symmetrise core fraction {frac}");
+    }
+    // Allocator rewarded by accepted new basins rather than by acceptance.
+    cfg.novel_reward = opts.contains(&"novel");
+    // Key the per-basin bias on the SOAP packing family instead of the
+    // pair spectrum, with adaptive height: every shelf isomer deposits into
+    // one well, so a chain absorbed on a family is pushed off the family
+    // rather than off one minimum. Nothing else of the occupancy stack.
+    if opts.contains(&"sbkey") {
+        #[cfg(feature = "featomic")]
+        {
+            cfg.keying = Keying::SoapPacking;
+            cfg.merge_radius = anneal_core::featomic_hop::SOAP_PACK_MERGE;
+        }
+        cfg.adaptive_height = true;
+        cfg.height_revisits = std::env::var("HEIGHT_REVISITS")
+            .ok()
+            .and_then(|v| v.parse::<f64>().ok())
+            .unwrap_or(20.0);
+        println!(
+            "  packing-family keyed bias, merge {}, adaptive height N_f={}",
+            cfg.merge_radius, cfg.height_revisits
+        );
+    }
     // The funnel forbidden rather than penalised.
     cfg.tabu_on_stall = cfg.tabu_on_stall || opts.contains(&"tabu");
     // The relaxation decision taken under a posterior.
@@ -1746,6 +1776,11 @@ fn main() {
     {
         cfg.merge_radius = r;
         println!("  merge radius {r}");
+    }
+    // Acceptance temperature in energy units; Wales--Doye's 0.8 is the preset.
+    if let Some(t) = std::env::var("TEMPERATURE").ok().and_then(|v| v.parse::<f64>().ok()) {
+        cfg.temperature = t * cfg.energy_scale;
+        println!("  acceptance temperature {t} E0");
     }
     if let Ok(h) = std::env::var("BIAS_HEIGHT")
         && let Ok(v) = h.parse::<f64>()
@@ -2434,6 +2469,12 @@ fn main() {
                  (rate {:.4}/sweep, {per_tag:.0} sweeps per tag), barrier {barrier:.2}",
                 trips as f64 / sw.max(1) as f64
             );
+        }
+        // Per-arm draws, accepts and deepest quench, so whether an arm fires
+        // and whether it ever deepens is on the seed record rather than
+        // inferred from a solve count.
+        for (name, draws, accepts, best) in &out.arms {
+            println!("    arm {name:<10} draws {draws:>7}  accepts {accepts:>7}  best {best:.6}");
         }
         total_hops += out.hops;
         total_charged += ledger.spent();
@@ -4700,7 +4741,15 @@ fn run_capnp_catalog(
         let floor_energy = snapshot.best_energy();
         let current_len = snapshot.current_state().len();
         let mut heard = None;
+        // CATALOG_NO_HEAR=1 keeps every replica on its own walk: the shared
+        // bias and census still flow, but no replica adopts another's deeper
+        // structure. Measured on LJ75, adoption on energy moves the whole
+        // ensemble onto the icosahedral shelf within a thousand hops.
+        let hear_enabled = !std::env::var("CATALOG_NO_HEAR").is_ok_and(|v| v == "1");
         for draw in [INCUMBENT_SAMPLE_DRAW, SPARSE_SAMPLE_DRAW] {
+            if !hear_enabled {
+                break;
+            }
             let outcome = cooperative.try_sample_candidate(replica, draw);
             let _ = cooperative.try_sample_candidate(replica, draw);
             if let Ok(CatalogSampleOutcome::Candidate(held)) = outcome {
