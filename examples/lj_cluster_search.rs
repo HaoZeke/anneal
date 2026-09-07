@@ -7179,6 +7179,8 @@ struct HistoryReplicaRun {
     history_cost: (usize, usize, f64),
     /// Own hop visits published to the shared bias exchange.
     bias_published: u64,
+    /// Restarts taken by the two-choice rule.
+    two_choice_restarts: usize,
 }
 
 /// Thread replicas of the production hop loop over a shared or private
@@ -7255,6 +7257,15 @@ fn run_history_ensembles(
         .ok()
         .and_then(|v| v.parse().ok())
         .unwrap_or(0.5);
+    // Two-choice restart (Azar, Broder, Karlin, Upfal 1999): a chain that
+    // has not improved for this many charged calls samples two peers, and
+    // if both stand in its own packing family it restarts from a fresh
+    // random cluster. One sample is the census restart that lost; two
+    // samples is the load-balancing rule with the exponential gain.
+    let two_choice_stall: Option<usize> = std::env::var("TWO_CHOICE_STALL")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .filter(|v| *v > 0);
     let policy = HistoryMembership::parse(std::env::var("HISTORY_POLICY").ok().as_deref())
         .unwrap_or_else(|error| panic!("{error}"));
     let checkpoint_interval: usize = std::env::var("HISTORY_CHECKPOINT")
@@ -7317,7 +7328,7 @@ fn run_history_ensembles(
         .map(|replica| budget / replicas + usize::from(replica < budget % replicas))
         .collect();
     println!(
-        "  history ensembles: {} replicas, {} history, {} membership, shared bias {} weight {}, gossip {:?} interval {} weight {}, budgets {:?}, \
+        "  history ensembles: {} replicas, {} history, {} membership, shared bias {} weight {}, gossip {:?} interval {} weight {}, two-choice stall {:?}, budgets {:?}, \
          checkpoint {checkpoint_interval}, witness {witness_name}, shared deposits {}, \
          mechanisms {}, executable sha256 {}",
         replicas,
@@ -7334,6 +7345,7 @@ fn run_history_ensembles(
         gossip,
         gossip_interval,
         gossip_weight,
+        two_choice_stall,
         budgets,
         cfg.shared_deposits,
         opts.join(","),
@@ -7362,6 +7374,9 @@ fn run_history_ensembles(
         // Latest wells posted by each replica, read by its gossip peers.
         let mailboxes: Vec<Mutex<Option<Vec<(Array1<f64>, f64)>>>> =
             (0..replicas).map(|_| Mutex::new(None)).collect();
+        // Each replica's occupied state, for the two-choice family sample.
+        let occupied: Vec<Mutex<Option<Vec<f64>>>> =
+            (0..replicas).map(|_| Mutex::new(None)).collect();
         let runs: Vec<HistoryReplicaRun> = std::thread::scope(|scope| {
             let handles: Vec<_> = budgets
                 .iter()
@@ -7371,6 +7386,7 @@ fn run_history_ensembles(
                     let history = &histories[if shared { 0 } else { replica }];
                     let exchange = &exchange;
                     let mailboxes = &mailboxes;
+                    let occupied = &occupied;
                     let charged_total = &charged_total;
                     let witness = &witness;
                     let descriptor = &descriptor;
@@ -7404,11 +7420,63 @@ fn run_history_ensembles(
                         // Peer draws for randomised gossip; a small LCG keeps
                         // the chain's own stream untouched.
                         let mut gossip_draw = replica_seed ^ 0x5DEE_CE66_D1CE_B00Cu64;
+                        let mut best_seen = f64::INFINITY;
+                        let mut charged_at_best = 0usize;
+                        let mut restart_rng =
+                            rand::rngs::StdRng::seed_from_u64(replica_seed ^ 0x7C0A_1CE5);
+                        let mut two_choice_restarts = 0usize;
                         let mut checkpoint = |snapshot: ChainCheckpoint<'_>| {
                             if first_target_calls.is_none()
                                 && target.is_some_and(|t| snapshot.best_energy() < t)
                             {
                                 first_target_calls = Some(charged_total.load(Ordering::SeqCst));
+                            }
+                            if snapshot.best_energy() < best_seen - 1e-9 {
+                                best_seen = snapshot.best_energy();
+                                charged_at_best = snapshot.charged();
+                            }
+                            if let Some(stall) = two_choice_stall
+                                && replicas > 1
+                            {
+                                if let Some(mine) = snapshot.current_state().as_slice() {
+                                    *occupied[replica].lock().expect("occupied mailbox") =
+                                        Some(mine.to_vec());
+                                }
+                                if snapshot.charged().saturating_sub(charged_at_best) >= stall
+                                    && let Some(mine) = snapshot.current_state().as_slice()
+                                {
+                                    let mut crowded = 0usize;
+                                    for _ in 0..2 {
+                                        gossip_draw = gossip_draw
+                                            .wrapping_mul(6364136223846793005)
+                                            .wrapping_add(1442695040888963407);
+                                        let k = ((gossip_draw >> 33) % (replicas as u64 - 1)) as usize;
+                                        let peer = (replica + 1 + k) % replicas;
+                                        let theirs = occupied[peer].lock().expect("occupied mailbox").clone();
+                                        if let Some(theirs) = theirs
+                                            && theirs.len() == mine.len()
+                                            && !anneal_core::catalog::different_packing_family(mine, &theirs)
+                                        {
+                                            crowded += 1;
+                                        }
+                                    }
+                                    if crowded == 2 {
+                                        two_choice_restarts += 1;
+                                        // The stall clock restarts with the chain.
+                                        charged_at_best = snapshot.charged();
+                                        let fresh = anneal_core::methods::cluster_hopping::random_cluster_in_radius(
+                                            n,
+                                            cfg.start_radius(),
+                                            cfg.min_separation,
+                                            &mut restart_rng,
+                                        );
+                                        return CheckpointAction::ExternalAdopt {
+                                            state: fresh,
+                                            action: "two-choice-restart".to_owned(),
+                                            external_calls: 0,
+                                        };
+                                    }
+                                }
                             }
                             if let Some(topology) = gossip
                                 && replicas > 1
@@ -7502,6 +7570,7 @@ fn run_history_ensembles(
                             wall_seconds: replica_started.elapsed().as_secs_f64(),
                             history_cost: hook.cost(),
                             bias_published: published,
+                            two_choice_restarts,
                         }
                     })
                 })
@@ -7534,7 +7603,7 @@ fn run_history_ensembles(
             let hit = target.is_some_and(|t| run.out.best < t);
             println!(
                 "    seed {seed} replica {} (seed {}): best {:.6}  hops {}  charged {}  basins {}  \
-                 history obs {} new {} refused {} secs {:.1}  shared_deposits {}  bias_published {}  gossip {}  \
+                 history obs {} new {} refused {} secs {:.1}  shared_deposits {}  bias_published {}  gossip {}  two_choice_restarts {}  \
                  escape {:.3} thr {:.4} same/known/new {}/{}/{}  first_target {}  wall {:.1}s  verified {}{}",
                 run.replica,
                 run.seed,
@@ -7549,6 +7618,7 @@ fn run_history_ensembles(
                 run.out.shared_deposits,
                 run.bias_published,
                 run.out.gossip_rounds,
+                run.two_choice_restarts,
                 run.out.escape_scale,
                 run.out.escape_threshold,
                 run.out.visit_counts.0,
