@@ -7136,6 +7136,11 @@ fn ensemble_config_from_env(
         interval: parsed::<usize>("GOSSIP_INTERVAL").unwrap_or(20_000).max(1),
         weight: parsed::<f64>("GOSSIP_WEIGHT").unwrap_or(0.5),
         adaptive: std::env::var("GOSSIP_ADAPTIVE").is_ok_and(|v| v == "1"),
+        top: match parsed::<usize>("GOSSIP_TOP") {
+            Some(0) => None,
+            Some(count) => Some(count),
+            None => Some(64),
+        },
     });
     EnsembleConfig {
         replicas,

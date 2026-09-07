@@ -77,6 +77,9 @@ pub struct GossipConfig {
     /// that follows no improvement doubles the interval, an improvement
     /// resets it. Mambrini and Sudholt's rule, TCP's shape.
     pub adaptive: bool,
+    /// Wells sent per round, deepest first; `None` sends the whole table,
+    /// which makes every receiver's index the union of all walkers' basins.
+    pub top: Option<usize>,
 }
 
 /// What an ensemble runs and how its chains communicate.
@@ -454,7 +457,10 @@ pub fn run_ensemble<W: ExactStructureWitness + Sync + ?Sized>(
                             }
                             next_gossip = snapshot.charged() + gossip_interval;
                             *mailboxes[replica].lock().expect("gossip mailbox") =
-                                Some(bias.wells());
+                                Some(match gossip.top {
+                                    Some(count) => bias.deepest_wells(count),
+                                    None => bias.wells(),
+                                });
                             let peer = match gossip.topology {
                                 GossipTopology::Ring => {
                                     gossip_side ^= 1;
@@ -474,6 +480,7 @@ pub fn run_ensemble<W: ExactStructureWitness + Sync + ?Sized>(
                                 return CheckpointAction::MergeBias {
                                     wells,
                                     weight: gossip.weight,
+                                    complete: gossip.top.is_none(),
                                 };
                             }
                         }
@@ -652,6 +659,7 @@ mod tests {
             interval: 10,
             weight: 1.5,
             adaptive: false,
+            top: None,
         });
         assert!(bad.validate(&chain_config()).is_err());
     }
@@ -679,6 +687,7 @@ mod tests {
             interval: 1_000,
             weight: 0.5,
             adaptive: true,
+            top: Some(8),
         };
         let shared = run_ensemble(
             &cfg,

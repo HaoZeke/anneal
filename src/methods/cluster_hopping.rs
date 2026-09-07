@@ -288,6 +288,9 @@ pub enum CheckpointAction {
         wells: Vec<(Array1<f64>, f64)>,
         /// Step toward the peer, one half for a pairwise average.
         weight: f64,
+        /// Whether `wells` is the peer's whole table; see
+        /// [`BasinBias::merge_wells`].
+        complete: bool,
     },
     /// Occupancy certificate: stop this replica.
     ///
@@ -1714,8 +1717,12 @@ where
                     }
                     None
                 }
-                CheckpointAction::MergeBias { wells, weight } => {
-                    bias.merge_wells(&wells, weight);
+                CheckpointAction::MergeBias {
+                    wells,
+                    weight,
+                    complete,
+                } => {
+                    bias.merge_wells(&wells, weight, complete);
                     gossip_rounds += 1;
                     None
                 }
