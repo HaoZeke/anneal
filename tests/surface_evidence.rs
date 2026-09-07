@@ -82,3 +82,28 @@ fn merged_moments_reproduce_sequential_normal_gamma_updates() {
         assert_eq!(reconstructed.select(&mut left), sequential.select(&mut right));
     }
 }
+
+#[test]
+fn imported_rewards_inform_choices_but_never_become_local_observations() {
+    use anneal_core::methods::two_phase::{SurfacePortfolio, TwoPhase};
+    let transform = TwoPhase::diameter(2.0, 1.0);
+    let mut learner = SurfacePortfolio::with_block(&[transform], 79, 1);
+    let local_before = learner.report();
+    let peer = SurfaceReport {
+        schema: local_before.schema.clone(),
+        arms: vec![moments(&[-10.0; 100]), moments(&[10.0; 100])],
+    };
+    learner.import_peers(peer.clone()).unwrap();
+    learner.import_peers(peer).unwrap();
+    assert_eq!(learner.report(), local_before);
+    let mut learned = 0;
+    for _ in 0..40 {
+        learned += usize::from(learner.begin(true) == Some(transform));
+        learner.observe(false, -1.0, -1.0);
+    }
+    assert!(learned >= 35, "imported depth evidence chose the deeper surface {learned}/40 times");
+    assert_eq!(learner.report().arms.iter().map(|arm| arm.count).sum::<u64>(), 39);
+    assert_eq!(learner.draws().iter().sum::<usize>(), 39);
+    let incompatible = SurfacePortfolio::with_block(&[transform], 79, 100).report();
+    assert!(learner.import_peers(incompatible).is_err());
+}
