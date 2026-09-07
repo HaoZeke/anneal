@@ -173,7 +173,10 @@ mod tests {
     use ndarray::{Array1, array};
 
     fn witness() -> IraStructureWitness {
-        IraStructureWitness { kmax_factor: 1.8, radius: 0.1 }
+        IraStructureWitness {
+            kmax_factor: 1.8,
+            radius: 0.1,
+        }
     }
 
     #[test]
@@ -191,7 +194,10 @@ mod tests {
         let coordinates = array![0.0, 0.0, 0.0, 1.3, 0.1, 0.0, 0.2, 1.7, 0.3, 0.1, 0.3, 2.1];
         for species in [None, Some(vec![1; 4])] {
             let context = StructureContext::new(species, None, Some("cache-cost".into()));
-            let structure = StructureView { coordinates: coordinates.view(), context: &context };
+            let structure = StructureView {
+                coordinates: coordinates.view(),
+                context: &context,
+            };
             let cached = witness().with_pair_cache(8192);
             assert!(cached.equivalent_structures(structure, structure));
             let preparations = pair_spectrum_preparation_count();
@@ -205,7 +211,10 @@ mod tests {
         let line = |points: &[f64]| Array1::from_iter(points.iter().flat_map(|&x| [x, 0.0, 0.0]));
         let left = line(&[0.0, 1.0, 4.0, 10.0, 12.0, 17.0]);
         let right = line(&[0.0, 1.0, 8.0, 11.0, 13.0, 17.0]);
-        assert_eq!(SortedPairs { n_points: 6 }.bottleneck_lower_bound(left.view(), right.view()), Some(0.0));
+        assert_eq!(
+            SortedPairs { n_points: 6 }.bottleneck_lower_bound(left.view(), right.view()),
+            Some(0.0)
+        );
         let cached = witness().with_pair_cache(8192);
         assert!(!cached.equivalent(left.view(), right.view()));
         let preparations = pair_spectrum_preparation_count();
