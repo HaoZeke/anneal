@@ -51,7 +51,7 @@ pub fn print_report(
         println!(
             "    seed {seed} replica {} (seed {}): best {:.6}{unit}  hops {}  charged {}  basins {}  \
              history obs {} new {} refused {} secs {:.1}  shared_deposits {}  bias_published {}  \
-             gossip {}  gossip_interval {}  two_choice_restarts {}  \
+             gossip {}  gossip_interval {}  two_choice_restarts {}  md {}/{}/{}  \
              escape {:.3} thr {:.4} same/known/new {}/{}/{}  first_target {}  wall {:.1}s  verified {}{}",
             run.replica,
             run.seed,
@@ -68,6 +68,9 @@ pub fn print_report(
             run.outcome.gossip_rounds,
             run.gossip_interval,
             run.two_choice_restarts,
+            run.outcome.md_escape.0,
+            run.outcome.md_escape.1,
+            run.outcome.md_escape.2,
             run.outcome.escape_scale,
             run.outcome.escape_threshold,
             run.outcome.visit_counts.0,

@@ -266,6 +266,17 @@ pub struct Config {
     /// hops from 200k, which is not a search. The controller and the climb are
     /// complementary and must stay separable.
     pub minima_hopping: bool,
+    /// Under [`Config::minima_hopping`], propose by Goedecker's escape: a
+    /// short NVE trajectory launched with kinetic energy
+    /// [`Config::md_escape_kinetic`] times the controller's escape scale,
+    /// stopped after two potential-energy minima along the path, then
+    /// quenched like any trial. Every MD step charges an energy and a
+    /// gradient. Off, the controller scales the ordinary kick instead.
+    pub md_escape: bool,
+    /// Time step of the escape trajectory in the run's reduced units.
+    pub md_escape_dt: f64,
+    /// Kinetic energy per unit escape scale, in the objective's units.
+    pub md_escape_kinetic: f64,
     /// Lanczos steps for the soft-mode escape.
     ///
     /// Each costs two gradient evaluations, charged. Eight resolves the softest
@@ -1070,6 +1081,9 @@ impl Config {
             point_symmetrise_on_new: false,
             soap_repel: false,
             exchange_metropolis: false,
+            md_escape: false,
+            md_escape_dt: 0.005,
+            md_escape_kinetic: 1.0,
             shared_deposits: 8,
             jump_on_stall: false,
             jump_patience: 5_000,
