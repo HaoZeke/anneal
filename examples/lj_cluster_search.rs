@@ -87,6 +87,7 @@ fn apply_boolean_options(cfg: &mut Config, opts: &[&str]) {
                     | "sbkey"
                     | "repel"
                     | "jump"
+                    | "psymall"
                     | "tabu"
                     | "bayes"
                     | "flat"
@@ -1856,7 +1857,18 @@ fn main() {
         .and_then(|v| v.parse::<f64>().ok())
     {
         cfg.symmetrise_core_fraction = frac;
-        println!("  symmetrise core fraction {frac}");
+        println!("  symmetrise core fraction {frac}
+    if let Some(tol) = std::env::var("SYM_TOL")
+        .ok()
+        .and_then(|v| v.parse::<f64>().ok())
+    {
+        cfg.symmetry_tolerance = tol * cfg.length_scale;
+        println!("  symmetry tolerance {tol}");
+    }
+    cfg.point_symmetrise_every_accept = opts.contains(&"psymall");
+    if cfg.point_symmetrise_every_accept {
+        cfg.point_symmetrise_on_new = true;
+    }");
     }
     // Allocator rewarded by accepted new basins rather than by acceptance.
     cfg.novel_reward = opts.contains(&"novel");
