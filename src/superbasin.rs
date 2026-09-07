@@ -1971,9 +1971,10 @@ impl SuperbasinEscape {
         self.stats.refusals += 1;
         self.stats.refusals_by_kind[why.kind()] += 1;
         if let Refusal::WellMixed(r) = why
-            && r.is_finite() {
-                self.stats.mixed_ratio_max = self.stats.mixed_ratio_max.max(r);
-            }
+            && r.is_finite()
+        {
+            self.stats.mixed_ratio_max = self.stats.mixed_ratio_max.max(r);
+        }
         why
     }
 
@@ -2410,13 +2411,14 @@ fn revisit_profile(
             let mut set: Vec<usize> = order[..take].to_vec();
             set.sort_unstable();
             if let Ok(c) = Canonical::new(chain, &set)
-                && let Some(local) = c.transient.iter().position(|t| *t == id) {
-                    let a = c.absorb_at_scale(local, elimination_cap, sweeps, 1e-10);
-                    let ratio = a.jumps / take as f64;
-                    if top.is_nan() || ratio > top {
-                        top = ratio;
-                    }
+                && let Some(local) = c.transient.iter().position(|t| *t == id)
+            {
+                let a = c.absorb_at_scale(local, elimination_cap, sweeps, 1e-10);
+                let ratio = a.jumps / take as f64;
+                if top.is_nan() || ratio > top {
+                    top = ratio;
                 }
+            }
             if take >= order.len() {
                 break;
             }

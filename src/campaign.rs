@@ -229,22 +229,24 @@ impl CampaignConfig {
         let mut out = Vec::new();
         for (k, v) in self.env_pairs() {
             if let Ok(existing) = std::env::var(&k)
-                && existing != v {
-                    out.push(format!(
-                        "{k} is {existing:?} in the environment but {v:?} in the campaign file"
-                    ));
-                }
+                && existing != v
+            {
+                out.push(format!(
+                    "{k} is {existing:?} in the environment but {v:?} in the campaign file"
+                ));
+            }
         }
         // A channel the file turns OFF that the environment turns on
         // is also a collision, even though off exports nothing.
         for (name, on) in self.channel_states() {
             if !on
                 && let Ok(existing) = std::env::var(name)
-                    && existing == "1" {
-                        out.push(format!(
-                            "{name} is on in the environment but off in the campaign file"
-                        ));
-                    }
+                && existing == "1"
+            {
+                out.push(format!(
+                    "{name} is on in the environment but off in the campaign file"
+                ));
+            }
         }
         out
     }

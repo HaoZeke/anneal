@@ -1719,7 +1719,8 @@ where
                 // that carry \(\|h_i-\mu\|\), compacted then polished.
                 // Unused starts are discarded. This is not Xu confidence
                 // and not a campaign stop.
-                if leave_action && !left_packing(&candidate)
+                if leave_action
+                    && !left_packing(&candidate)
                     && let Some((energy, landed, _)) = crate::known_basin::leave_av_walk(
                         from_state.view(),
                         cfg.neighbour_cutoff,
@@ -1727,10 +1728,11 @@ where
                         from_energy,
                         rng,
                         |trial| relax(ledger, trial, cfg.relax_steps),
-                    ) {
-                        candidate_energy = energy;
-                        candidate = landed;
-                    }
+                    )
+                {
+                    candidate_energy = energy;
+                    candidate = landed;
+                }
                 let novel = candidate
                     .as_slice()
                     .is_some_and(|trial| crate::catalog::occupied_unseen_share(trial) > 0.0);
@@ -3794,7 +3796,9 @@ where
                         swaps_tried += (after.0 - before.0) as usize;
                         swaps_accepted += (after.1 - before.1) as usize;
                         sweeps += 1;
-                        if cfg.ladder_mode.adapts() && sweeps.is_multiple_of(cfg.ladder_window.max(1)) {
+                        if cfg.ladder_mode.adapts()
+                            && sweeps.is_multiple_of(cfg.ladder_window.max(1))
+                        {
                             adaptations += 1;
                             // The interior is moved by the barrier estimator;
                             // every third adaptation the endpoint controller
