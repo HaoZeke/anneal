@@ -125,7 +125,11 @@ def compare(arms, control, treatment):
     gained, lost = sorted(sb - sa), sorted(sa - sb)
     n = len(gained) + len(lost)
     # Two-sided exact sign test on the discordant seeds.
-    from math import comb
+    def comb(n, r):
+        out = 1
+        for i in range(r):
+            out = out * (n - i) // (i + 1)
+        return out
     k = min(len(gained), len(lost))
     p = min(1.0, 2 * sum(comb(n, i) for i in range(k + 1)) / 2 ** n) if n else 1.0
     print(
