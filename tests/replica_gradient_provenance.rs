@@ -47,7 +47,7 @@ fn independently_initialized_rung_retains_its_own_gradient_on_activation() {
         Some(harmonic_evaluation(state).1)
     };
     let mut ledger = Ledger::new(100);
-    let mut rng = StdRng::seed_from_u64(0x6a_72_61_64);
+    let mut rng = StdRng::seed_from_u64(0x6a72_6164);
     let outcome = run_with_gradient(
         &cfg,
         start.view(),
@@ -75,7 +75,7 @@ fn independently_initialized_rung_retains_its_own_gradient_on_activation() {
     );
     let activated = transitions
         .iter()
-        .find(|transition| &transition.from_state == initialized_rung)
+        .find(|transition| transition.from_state == initialized_rung)
         .expect("a transition must execute from the separately initialized rung");
     let (expected_energy, expected_gradient) = harmonic_evaluation(activated.from_state.view());
     assert_eq!(activated.from_energy, expected_energy);
