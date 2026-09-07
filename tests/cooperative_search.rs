@@ -200,6 +200,34 @@ fn server() -> CatalogServer {
     server_with_capacity(2)
 }
 
+#[test]
+fn asynchronous_surface_exchange_preserves_private_history_and_work() {
+    use std::sync::{Arc, Mutex};
+    use anneal_core::methods::two_phase::{SurfacePortfolio, TwoPhase};
+    let server = server();
+    let mut run = CooperativeRun::new([0, 1], 400).unwrap();
+    for replica in [0, 1] {
+        run.attach_client(replica, CatalogClient::connect(server.addr(), identity(replica, signature().digest()), ClientConfig::default()).unwrap()).unwrap();
+    }
+    let transform = TwoPhase::diameter(2.0, 1.0);
+    let teacher = Arc::new(Mutex::new(SurfacePortfolio::with_block(&[transform], 7, 1)));
+    for _ in 0..20 {
+        let mut portfolio = teacher.lock().unwrap();
+        portfolio.begin(true);
+        portfolio.observe(false, -1.0, -1.0);
+    }
+    let learner = Arc::new(Mutex::new(SurfacePortfolio::with_block(&[transform], 79, 1)));
+    let private = learner.lock().unwrap().report();
+    run.post_surface_evidence(0, teacher).unwrap();
+    run.flush(0).unwrap();
+    run.post_surface_evidence(1, Arc::clone(&learner)).unwrap();
+    run.flush(1).unwrap();
+    let learner = learner.lock().unwrap();
+    assert_eq!(learner.report(), private);
+    assert_eq!(learner.peer_observations(), 19);
+    assert_eq!(run.ledger().ensemble_total(), 0);
+}
+
 fn server_with_capacity(capacity: usize) -> CatalogServer {
     server_with_region_evidence(capacity, 8)
 }
