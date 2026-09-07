@@ -88,7 +88,10 @@ fn a_first_departure_preserves_the_resolved_starting_identity() {
     config.min_separation = 0.0;
     let initial = array![-0.6, 0.0, 0.0, 0.6, 0.0, 0.0];
     let other = array![-1.2, 0.0, 0.0, 1.2, 0.0, 0.0];
-    assert!(1.2 > config.merge_radius, "the two pair spectra are resolved");
+    assert!(
+        1.2 > config.merge_radius,
+        "the two pair spectra are resolved"
+    );
     let mut ledger = Ledger::new(1_000);
     let mut rng = StdRng::seed_from_u64(37);
     let mut proposals = 0;
