@@ -3023,7 +3023,7 @@ where
                 // because its size says how deep rather than merely whether.
                 depth_allocator.update(k, -(e_new - ledger.best));
             }
-            allocator.update(k, improved || accept);
+            allocator.update(k, improved || (accept && !(cfg.novel_reward && returning)));
             arm_draws[k] += 1;
             if accept {
                 arm_accepts[k] += 1;
@@ -3176,6 +3176,40 @@ where
             law.observe_rejection(delta);
         }
         bias.deposit(bias.cv(x.view()).view(), temperature);
+        // Core symmetrisation of a newly entered basin (Oakley, Johnston,
+        // Wales 2013), quenched and offered to the same acceptance rule as a
+        // hop. Once per new basin: the arm form of this move was measured to
+        // take half of all draws at 83 per cent acceptance on 75 points,
+        // because a symmetric minimum re-symmetrises to itself and an
+        // accepted return is still an accept.
+        if cfg.point_symmetrise_on_new
+            && accept
+            && moved_basin
+            && let Some(y) = crate::symmetrise::symmetrise_core(
+                x.view(),
+                n,
+                cfg.symmetry_tolerance,
+                cfg.symmetry_merge_radius,
+                cfg.symmetrise_core_fraction,
+            )
+        {
+            let (es, xs) = relax(ledger, y.view(), cfg.relax_steps);
+            if es.is_finite() && xs.len() == x.len() {
+                ledger.record(es, xs.view());
+                hops += 1;
+                symmetrised += 1;
+                let d = (es - e) / temperature.max(1e-12);
+                if d < 0.0 || rng.random::<f64>() < (-d).exp() {
+                    if es < e {
+                        symmetry_gain += e - es;
+                    }
+                    e = es;
+                    x = xs;
+                    here = None;
+                    current_validation_gradient = None;
+                }
+            }
+        }
         // Graph edge + Fiedler deposit at the chain's current basin. Called
         // every hop (accepted or not) so the coordinate tracks occupation;
         // only accepted moves grow the graph (visit records last→current).

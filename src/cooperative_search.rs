@@ -3138,7 +3138,13 @@ mod run {
             interface_threshold: state.interface_threshold,
             occupied_family_count: state.occupied_family_count as usize,
             packing_saturated: state.packing_saturated,
-            leftover_dwell: state.leftover_dwell,
+            // CATALOG_FORCE_DWELL=1 treats the leftover census as settled, so
+            // the Leave arms of the policy are reachable on a landscape where
+            // leftover SOAP never saturates inside the budget (LJ75: 0 Leave
+            // in 48 replicas of ensemble 0021). A measurement switch, not a
+            // default.
+            leftover_dwell: state.leftover_dwell
+                || std::env::var("CATALOG_FORCE_DWELL").is_ok_and(|v| v == "1"),
             ei_exhausted: state.ei_exhausted,
             min_families: state.min_families as usize,
             on_published_prize,

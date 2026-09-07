@@ -351,6 +351,24 @@ pub struct Config {
     /// approximate symmetry and lands the structure on it, or finds none and
     /// leaves the chain alone. See [`crate::symmetrise`].
     pub symmetrise_on_stall: bool,
+    /// Add the detected point-group symmetrisation as an ordinary proposal
+    /// arm ([`ClusterMove::PointSymmetrise`]) to whatever move library is
+    /// selected.
+    ///
+    /// The published scheme runs on every step, not on a stall: a nearly
+    /// symmetric minimum met anywhere in the walk is pushed onto its symmetry
+    /// and quenched while the chain is still there.
+    pub point_symmetrise: bool,
+    /// Core symmetrisation once per newly entered basin, after Oakley,
+    /// Johnston and Wales: when an accepted hop lands in a basin the chain
+    /// was not in, the innermost [`Config::symmetrise_core_fraction`] of the
+    /// points is pushed onto its approximate point group, the result is
+    /// quenched, and the quench is offered to the acceptance rule. One
+    /// attempt per new basin, so a chain sitting still never pays twice.
+    pub point_symmetrise_on_new: bool,
+    /// Fraction of points, by distance from the centroid, that count as the
+    /// core for [`Config::point_symmetrise_on_new`].
+    pub symmetrise_core_fraction: f64,
     /// Published continuous-symmetry move, independent of stall detection.
     ///
     /// This is distinct from [`Config::symmetrise_on_stall`]. The
@@ -450,6 +468,16 @@ pub struct Config {
     ///
     /// See [`crate::allocate::DepthAllocator`].
     pub depth_reward: bool,
+    /// Reward the move allocator only for accepted hops that land in a new
+    /// basin, not for accepted returns.
+    ///
+    /// With acceptance as the reward, an arm whose proposals quench back
+    /// into the incumbent is rewarded every time: measured on 75 points,
+    /// symmetrisation arms took over half the draws at 60 to 77 per cent
+    /// acceptance while contributing no crossing. Novelty is the quantity a
+    /// search wants from a proposal arm and it is free: the return screen
+    /// already says whether a trial came home.
+    pub novel_reward: bool,
     /// Perturb in the soft subspace of the incumbent's own curvature.
     ///
     /// An isotropic step in `3n` dimensions puts nearly all of its norm on
@@ -990,6 +1018,7 @@ impl Config {
             statistical_temperature: false,
             energy_bias: false,
             depth_reward: false,
+            novel_reward: false,
             soft_perturb: false,
             soft_modes: 6,
             soft_steps: 30,
@@ -1008,6 +1037,9 @@ impl Config {
             track_funnels: false,
             funnel_period: 20_000,
             symmetrise_on_stall: false,
+            point_symmetrise: false,
+            point_symmetrise_on_new: false,
+            symmetrise_core_fraction: 0.6,
             continuous_symmetry: ContinuousSymmetry::Off,
             symmetry_tolerance: LennardJonesPreset::SYMMETRY_TOLERANCE * length_scale,
             symmetry_merge_radius: LennardJonesPreset::SYMMETRY_MERGE_RADIUS * length_scale,
