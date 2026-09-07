@@ -196,6 +196,30 @@ mod option_tests {
     use super::*;
 
     #[test]
+    fn zero_step_queries_preserve_geometry_and_charge_one_objective() {
+        let state = Array1::from_vec(vec![0.0, 0.0, 0.0, 1.3, 0.0, 0.0]);
+        let mut ledger = Ledger::new(1);
+        let (energy, returned) = evaluate_without_quenching(&mut ledger, state.view());
+        assert_eq!(energy, lj(state.view()).0);
+        assert_eq!(returned, state);
+        assert_eq!(ledger.spent(), 1);
+        assert!(ledger.quench_boundaries().is_empty());
+        let (exhausted, returned) = evaluate_without_quenching(&mut ledger, state.view());
+        assert_eq!(exhausted, f64::INFINITY);
+        assert_eq!(returned, state);
+        assert_eq!(ledger.spent(), 1);
+    }
+
+    #[test]
+    fn production_zero_step_queries_bypass_surface_learning() {
+        let source = include_str!("lj_cluster_search.rs");
+        let callback = source.split("let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, iters: usize| {").nth(1).unwrap();
+        let query = callback.find("return evaluate_without_quenching(led, x)").unwrap();
+        assert!(query < callback.find("opt.forget()").unwrap());
+        assert!(callback[..query].contains("if iters == 0"));
+    }
+
+    #[test]
     fn unknown_mechanism_is_rejected_before_search() {
         let result = std::panic::catch_unwind(|| {
             let mut cfg = Config::recommended(75);
