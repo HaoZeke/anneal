@@ -1,9 +1,9 @@
 use anneal_core::catalog::{
-    OccupancyCertificate, OccupancyFold, PACKING_LINK, PACKING_MERGE, PACKING_MOVE_EPS,
+    OccupancyCertificate, PACKING_LINK, PACKING_MERGE, PACKING_MOVE_EPS,
     PackingBook, ape_highlight_queue, ape_local_seed, different_decaf_family,
     include_packing_reference, leaves_packing, lens_ring_displacement, nearby_packing,
     occupancy_fes_delta, occupancy_fes_from_histograms, occupancy_landfold_floor,
-    occupancy_leave_new_class, occupancy_leave_new_packing, occupancy_map_fold,
+    occupancy_leave_new_class, occupancy_leave_new_packing,
     occupancy_retire_at, occupancy_ring_census, occupancy_ring_floor, occupancy_ring_profile,
     occupancy_sparsify_packing, occupied_unseen_share, packing_community_count, packing_distance,
     packing_fingerprint, packing_link_labels, packing_reference_book, remember_packing_reference,
@@ -668,7 +668,7 @@ fn switch_saturates_far_l1_asinh_does_not() {
     let d_far = packing_distance(&a, &far) + packing_distance(&b, &c);
     assert!(d_far > d_near);
     let sigma = d_near;
-    let sw_near = 1.0 - 1.0 / (1.0 + (d_near / sigma).powi(2));
+    let _sw_near = 1.0 - 1.0 / (1.0 + (d_near / sigma).powi(2));
     let sw_far = 1.0 - 1.0 / (1.0 + ((10.0 * d_near) / sigma).powi(2));
     let sw_farer = 1.0 - 1.0 / (1.0 + ((20.0 * d_near) / sigma).powi(2));
     assert!(

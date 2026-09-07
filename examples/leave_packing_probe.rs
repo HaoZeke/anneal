@@ -228,7 +228,7 @@ fn main() {
         ..Tally::default()
     };
 
-    let mut classify = |label: &str,
+    let classify = |label: &str,
                         index: usize,
                         tally: &mut Tally,
                         trial: &Array1<f64>,

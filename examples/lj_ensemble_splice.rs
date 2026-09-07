@@ -469,7 +469,7 @@ fn run_chain(
     let surface_kind = Surface::from_environment(n);
     let child_surface = surface_kind.clone();
     let mut rng = StdRng::seed_from_u64(seed);
-    let mut exchange_rng = StdRng::seed_from_u64(seed ^ 0x5711_ce);
+    let mut exchange_rng = StdRng::seed_from_u64(seed ^ 0x0057_11ce);
     let start = resume.unwrap_or_else(|| random_cluster(n, 0.7, cfg.min_separation, &mut rng));
     let mut ledger = Ledger::new(budget);
     let mut opt = WarmLbfgs::default();

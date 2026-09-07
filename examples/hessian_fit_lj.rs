@@ -184,7 +184,9 @@ fn main() {
         let (_, g_end) = lj(x_end.view());
         // An unconverged descent has not finished recovering, so its depth is a
         // lower bound rather than an observation.
-        if gmax(g_end.view()) > 1e-4 || !(e_start - e_end > 0.0) {
+        if gmax(g_end.view()) > 1e-4
+            || (e_start - e_end).partial_cmp(&0.0) != Some(std::cmp::Ordering::Greater)
+        {
             refused += 1;
             continue;
         }
