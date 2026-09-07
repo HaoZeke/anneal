@@ -3693,6 +3693,113 @@ impl PhaseTally {
     }
 }
 
+/// State of the hear phase across checkpoints.
+struct HearState {
+    /// Best energy at the last hear clock reset.
+    last_best: f64,
+    /// Hop of the last own improvement or adoption.
+    last_best_hop: usize,
+    /// The structure last adopted, for the post-hear walk trace.
+    heard_structure: Option<Vec<f64>>,
+    /// Adoptions of another family's structure.
+    other_family: usize,
+}
+
+impl Default for HearState {
+    fn default() -> Self {
+        Self {
+            last_best: f64::INFINITY,
+            last_best_hop: 0,
+            heard_structure: None,
+            other_family: 0,
+        }
+    }
+}
+
+/// Hear phase: whether a structure another replica published should be
+/// adopted at this checkpoint.
+///
+/// `CATALOG_NO_HEAR=1` disables adoption; `CATALOG_HEAR=family` adopts the
+/// coordinator's sparsest-family entry only after `CATALOG_HEAR_STALL` hops
+/// without an own improvement, whatever its energy, and never the incumbent
+/// draw; the default adopts an incumbent deeper than the own best by 1e-3.
+/// Sampled candidates are registered as packing references either way.
+/// Returns the candidate to adopt; the caller records the trace and fires
+/// the phase.
+fn hear_phase(
+    state: &mut HearState,
+    cooperative: &mut anneal_core::cooperative_search::CooperativeRun,
+    replica: u32,
+    snapshot: &ChainCheckpoint<'_>,
+    checkpoint_sequence: u64,
+) -> Option<anneal_core::catalog_rpc::CatalogCandidate> {
+    use anneal_core::catalog_rpc::{INCUMBENT_SAMPLE_DRAW, SPARSE_SAMPLE_DRAW};
+    use anneal_core::cooperative_search::CatalogSampleOutcome;
+    let floor_energy = snapshot.best_energy();
+    let current_len = snapshot.current_state().len();
+    let hear_enabled = !std::env::var("CATALOG_NO_HEAR").is_ok_and(|v| v == "1");
+    let family_mode = std::env::var("CATALOG_HEAR").is_ok_and(|v| v == "family");
+    let hear_stall: usize = std::env::var("CATALOG_HEAR_STALL")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(5000);
+    if snapshot.best_energy() < state.last_best - 1e-9 {
+        state.last_best = snapshot.best_energy();
+        state.last_best_hop = snapshot.hops();
+    }
+    let stalled = snapshot.hops().saturating_sub(state.last_best_hop) >= hear_stall;
+    // After a hear, one line every ten checkpoints: where the walk is.
+    if let Some(adopted) = state.heard_structure.as_ref()
+        && checkpoint_sequence.is_multiple_of(10)
+    {
+        let same_family = snapshot
+            .current_state()
+            .as_slice()
+            .is_some_and(|here| !anneal_core::catalog::different_packing_family(here, adopted));
+        println!(
+            "  walk hops {}  energy {:.6}  best {:.6}  in-adopted-family {}",
+            snapshot.hops(),
+            snapshot.current_energy(),
+            snapshot.best_energy(),
+            same_family
+        );
+    }
+    if !hear_enabled {
+        return None;
+    }
+    for draw in [INCUMBENT_SAMPLE_DRAW, SPARSE_SAMPLE_DRAW] {
+        if family_mode && draw == INCUMBENT_SAMPLE_DRAW {
+            continue;
+        }
+        let outcome = cooperative.try_sample_candidate(replica, draw);
+        let _ = cooperative.try_sample_candidate(replica, draw);
+        if let Ok(CatalogSampleOutcome::Candidate(held)) = outcome {
+            if held.coordinates.len() != current_len {
+                continue;
+            }
+            anneal_core::catalog::include_packing_reference(&held.coordinates);
+            anneal_core::catalog::offer_known_minimum(held.energy, &held.coordinates);
+            // Mid-hop current energy sits above the ico floor. Comparing
+            // against it yanks every walk back onto ico.
+            let deeper = held.energy < floor_energy - 1e-3;
+            if family_mode {
+                if !stalled {
+                    continue;
+                }
+            } else if !deeper {
+                continue;
+            }
+            let elsewhere = snapshot.current_state().as_slice().is_none_or(|here| {
+                anneal_core::catalog::different_packing_family(here, &held.coordinates)
+            });
+            if elsewhere || (!family_mode && draw == INCUMBENT_SAMPLE_DRAW) {
+                return Some(held);
+            }
+        }
+    }
+    None
+}
+
 fn run_capnp_catalog(
     cfg: &Config,
     ledger: &mut Ledger,
@@ -4329,16 +4436,13 @@ fn run_capnp_catalog(
     // measurable from a worker log instead of inferred from silence:
     // Leaves decided, exchanges adopted, walks kept, holes drawn.
     let mut count_leave = 0usize;
-    let mut count_other_family = 0usize;
     // Own-progress clock for family hearing: the hop at which this replica
     // last deepened its own best. A replica that has not deepened for
     // CATALOG_HEAR_STALL hops is stalled in its packing.
-    let mut hear_last_best = f64::INFINITY;
-    let mut hear_last_best_hop = 0usize;
     // The structure last adopted by hearing, kept so the walk after a hear
     // can be reported: whether the replica is still in the adopted packing
     // family or has slid back to where it was.
-    let mut heard_structure: Option<Vec<f64>> = None;
+    let mut hear_state = HearState::default();
     // Census jumps: the population's visit count of this replica's basin,
     // not this replica's own stall, triggers an occasional jump.
     let mut census_jump_last_hop = 0usize;
@@ -4684,7 +4788,7 @@ fn run_capnp_catalog(
                             // supposed to scale.
                             anneal_core::catalog::packing_references().len(),
                             count_leave,
-                            count_other_family,
+                            hear_state.other_family,
                             count_walk,
                             count_hole
                         );
@@ -4701,7 +4805,7 @@ fn run_capnp_catalog(
                         snapshot.best_energy(),
                         anneal_core::catalog::packing_references().len(),
                         count_leave,
-                        count_other_family,
+                        hear_state.other_family,
                         count_walk,
                         count_hole
                     );
@@ -5341,91 +5445,24 @@ fn run_capnp_catalog(
                 // channel, and catalog_leave would refuse Marks if the
                 // throwaway book chained it to ico. catalog_incumbent adopts
                 // on energy. post_offer_candidate above is the publish.
-                let floor_energy = snapshot.best_energy();
-                let current_len = snapshot.current_state().len();
-                let mut heard = None;
-                // CATALOG_NO_HEAR=1 keeps every replica on its own walk: the shared
-                // bias and census still flow, but no replica adopts another's deeper
-                // structure. Measured on LJ75, adoption on energy moves the whole
-                // ensemble onto the icosahedral shelf within a thousand hops.
-                let hear_enabled = !std::env::var("CATALOG_NO_HEAR").is_ok_and(|v| v == "1");
-                // CATALOG_HEAR=family: hearing is steering by the census, not by
-                // energy. A replica that has not deepened its own best for
-                // CATALOG_HEAR_STALL hops adopts the coordinator's sparsest-family
-                // entry when that entry sits in a packing family other than the one
-                // the replica stands in, whatever its energy. The incumbent draw is
-                // never taken in this mode: adopting the deepest known structure was
-                // measured to move the whole ensemble onto the icosahedral shelf.
-                let family_mode = std::env::var("CATALOG_HEAR").is_ok_and(|v| v == "family");
-                let hear_stall: usize = std::env::var("CATALOG_HEAR_STALL")
-                    .ok()
-                    .and_then(|v| v.parse().ok())
-                    .unwrap_or(5000);
-                if snapshot.best_energy() < hear_last_best - 1e-9 {
-                    hear_last_best = snapshot.best_energy();
-                    hear_last_best_hop = snapshot.hops();
-                }
-                let stalled = snapshot.hops().saturating_sub(hear_last_best_hop) >= hear_stall;
-                // After a hear, one line every ten checkpoints: where the walk is.
-                if let Some(adopted) = heard_structure.as_ref()
-                    && checkpoint_sequence.is_multiple_of(10)
-                {
-                    let same_family = snapshot.current_state().as_slice().is_some_and(|here| {
-                        !anneal_core::catalog::different_packing_family(here, adopted)
-                    });
-                    println!(
-                        "  walk hops {}  energy {:.6}  best {:.6}  in-adopted-family {}",
-                        snapshot.hops(),
-                        snapshot.current_energy(),
-                        snapshot.best_energy(),
-                        same_family
-                    );
-                }
-                for draw in [INCUMBENT_SAMPLE_DRAW, SPARSE_SAMPLE_DRAW] {
-                    if !hear_enabled {
-                        break;
-                    }
-                    if family_mode && draw == INCUMBENT_SAMPLE_DRAW {
-                        continue;
-                    }
-                    let outcome = cooperative.try_sample_candidate(replica, draw);
-                    let _ = cooperative.try_sample_candidate(replica, draw);
-                    if let Ok(CatalogSampleOutcome::Candidate(held)) = outcome {
-                        if held.coordinates.len() != current_len {
-                            continue;
-                        }
-                        anneal_core::catalog::include_packing_reference(&held.coordinates);
-                        anneal_core::catalog::offer_known_minimum(held.energy, &held.coordinates);
-                        // Mid-hop current energy sits above the ico floor.
-                        // Comparing against it yanks every walk back onto ico.
-                        let deeper = held.energy < floor_energy - 1e-3;
-                        if family_mode {
-                            if !stalled {
-                                continue;
-                            }
-                        } else if !deeper {
-                            continue;
-                        }
-                        let elsewhere = snapshot.current_state().as_slice().is_none_or(|here| {
-                            anneal_core::catalog::different_packing_family(here, &held.coordinates)
-                        });
-                        if elsewhere || (!family_mode && draw == INCUMBENT_SAMPLE_DRAW) {
-                            heard = Some(held);
-                            break;
-                        }
-                    }
-                }
+                let heard = hear_phase(
+                    &mut hear_state,
+                    &mut cooperative,
+                    replica,
+                    &snapshot,
+                    checkpoint_sequence,
+                );
                 if let Some(held) = heard {
-                    count_other_family += 1;
+                    hear_state.other_family += 1;
                     // The new packing gets a full stall window before the next hear.
-                    hear_last_best_hop = snapshot.hops();
-                    heard_structure = Some(held.coordinates.clone());
+                    hear_state.last_best_hop = snapshot.hops();
+                    hear_state.heard_structure = Some(held.coordinates.clone());
                     println!(
                         "  hear {:.6}  hops {}  refs {}  other {}",
                         held.energy,
                         snapshot.hops(),
                         anneal_core::catalog::packing_references().len(),
-                        count_other_family
+                        hear_state.other_family
                     );
                     let _ = std::io::stdout().flush();
                     phases.fire("catalog_incumbent");
@@ -5481,11 +5518,11 @@ fn run_capnp_catalog(
                     } else {
                         neighbors.len() as u64
                     };
-                    if snapshot.best_energy() < hear_last_best - 1e-9 {
-                        hear_last_best = snapshot.best_energy();
-                        hear_last_best_hop = snapshot.hops();
+                    if snapshot.best_energy() < hear_state.last_best - 1e-9 {
+                        hear_state.last_best = snapshot.best_energy();
+                        hear_state.last_best_hop = snapshot.hops();
                     }
-                    let quiet_now = snapshot.hops().saturating_sub(hear_last_best_hop);
+                    let quiet_now = snapshot.hops().saturating_sub(hear_state.last_best_hop);
                     if std::env::var("CATALOG_CENSUS_TRACE").is_ok_and(|v| v == "1")
                         && checkpoint_sequence.is_multiple_of(7)
                     {
@@ -5523,7 +5560,7 @@ fn run_capnp_catalog(
                             &mut restart_rng,
                         );
                         census_restart_last_hop = snapshot.hops();
-                        hear_last_best_hop = snapshot.hops();
+                        hear_state.last_best_hop = snapshot.hops();
                         census_restarts += 1;
                         println!(
                             "  census restart hops {}  crowd {}  restarts {}",
@@ -6349,7 +6386,7 @@ fn run_capnp_catalog(
                                 };
                             }
                             OccupancyLeaveTarget::OtherFamily => {
-                                count_other_family += 1;
+                                hear_state.other_family += 1;
                                 let sparse = other_family.expect("other family is on file");
                                 anneal_core::catalog::include_packing_reference(
                                     &sparse.coordinates,
@@ -6496,7 +6533,8 @@ fn run_capnp_catalog(
     // stretches after the last improvement, so a count carried on the
     // personal-best line systematically misses the tail.
     println!(
-        "  policy: leaves {count_leave} other {count_other_family} walk {count_walk} hole {count_hole} refused {leave_refused}"
+        "  policy: leaves {count_leave} other {} walk {count_walk} hole {count_hole} refused {leave_refused}",
+        hear_state.other_family
     );
     let wall = occupancy_started.elapsed().as_secs_f64();
     if let Some(rate) = hops_per_core_hour(outcome.hops as u64, wall, 1) {
