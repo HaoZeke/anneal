@@ -296,12 +296,16 @@ fn quench_minimum(
     }
     let before = ledger.spent();
     optimizer.forget();
-    let (energy, state, _) = optimizer.minimize(start, steps, |point| {
-        ledger.charge().then(|| potential.value_and_gradient(point))
+    let (_, state, _) = optimizer.minimize(start, steps, |point| {
+        // A line search cannot consume the final minimum-certificate call.
+        (ledger.remaining() > 1 && ledger.charge())
+            .then(|| potential.value_and_gradient(point))
     });
-    let gradient = ledger.charge().then(|| {
-        let (_, gradient) = potential.value_and_gradient(state.view());
-        gradient
+    let final_evaluation = ledger
+        .charge()
+        .then(|| potential.value_and_gradient(state.view()));
+    let (energy, gradient) = final_evaluation.map_or((f64::INFINITY, None), |(energy, gradient)| {
+        (energy, Some(gradient))
     });
     let validated = energy.is_finite()
         && gradient.as_ref().is_some_and(|values| {
@@ -361,12 +365,13 @@ fn run_minima_hopping(
     let mut ledger = Ledger::new(budget);
     let mut optimizer = WarmLbfgs::default();
     let initial_quench_start = ledger.spent();
+    let initial_quench_steps = ledger.remaining().saturating_sub(1);
     let initial = quench_minimum(
         potential,
         &mut optimizer,
         &mut ledger,
         initial,
-        hopping.relax_steps,
+        initial_quench_steps,
         hopping.record_gradient,
     );
     let initial_quench_calls = ledger.spent().saturating_sub(initial_quench_start);
