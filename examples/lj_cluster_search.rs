@@ -4023,6 +4023,7 @@ fn run_capnp_catalog(
         );
     let mut peer_crowd: usize = 0;
     let mut bus_received: usize = 0;
+    let mut bus_last_energy: Option<f64> = None;
     let mut shared_wells: Vec<Array1<f64>> = Vec::new();
     let coop_rcut = 3.5 * run_cfg.length_scale;
     let coop_species = run_cfg.species.clone();
@@ -4329,17 +4330,34 @@ fn run_capnp_catalog(
                     }
                 }
             }
-            let mut crowd = 0usize;
+            // Recompute the nearby flags only for peers whose minimum
+            // changed, or for all peers when this replica's own minimum
+            // changed; otherwise reuse them. This keeps the bus at the cost
+            // of the messages, not of 47 packing comparisons a checkpoint.
+            let own_moved = bus_last_energy
+                .is_none_or(|last: f64| (last - snapshot.current_energy()).abs() > 1e-9);
+            bus_last_energy = Some(snapshot.current_energy());
+            let fresh_ids: Vec<u32> = fresh.iter().map(|p| p.replica).collect();
+            let mut updates: Vec<(u32, bool)> = Vec::new();
             for peer in bus.peers() {
                 if peer.coordinates.len() != here.len() {
                     continue;
                 }
-                if anneal_core::catalog::nearby_packing(here, &peer.coordinates) {
-                    crowd += 1;
-                    anneal_core::catalog::include_packing_reference(&peer.coordinates);
+                let stale = own_moved
+                    || fresh_ids.contains(&peer.replica)
+                    || !bus.nearby.contains_key(&peer.replica);
+                if stale {
+                    let near = anneal_core::catalog::nearby_packing(here, &peer.coordinates);
+                    if near {
+                        anneal_core::catalog::include_packing_reference(&peer.coordinates);
+                    }
+                    updates.push((peer.replica, near));
                 }
             }
-            peer_crowd = crowd;
+            for (id, near) in updates {
+                bus.nearby.insert(id, near);
+            }
+            peer_crowd = bus.nearby.values().filter(|near| **near).count();
             if std::env::var("CATALOG_CENSUS_TRACE").is_ok_and(|v| v == "1")
                 && checkpoint_sequence.is_multiple_of(7)
             {
@@ -4347,7 +4365,7 @@ fn run_capnp_catalog(
                     "  bus hops {}  peers {}  crowd {}  received {}",
                     snapshot.hops(),
                     bus.peer_count(),
-                    crowd,
+                    peer_crowd,
                     bus_received
                 );
             }
