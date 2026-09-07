@@ -39,7 +39,7 @@ fn main() {
                 if replica < last_policy_e.len() {
                     last_policy_e[replica] = Some(*energy);
                 }
-                if n_policy <= 8 || n_policy % 50 == 0 {
+                if n_policy <= 8 || n_policy.is_multiple_of(50) {
                     println!(
                         "policy replica={replica} energy={energy:.6} lambda={leftover_lambda:.4}"
                     );
