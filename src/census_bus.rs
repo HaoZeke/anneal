@@ -1,13 +1,15 @@
 //! nng pub/sub census bus between replicas of one cooperative run.
 //!
 //! Each replica publishes its current minimum (replica id, hop count,
-//! energy, Cartesian coordinates) on a `Pub0` socket at every checkpoint and
-//! reads every peer's latest publication from one `Sub0` socket dialled to
-//! all peers. Nothing here goes through the coordinator: the population's
+//! energy, Cartesian coordinates) on a `Pub0` socket when it changes, with
+//! an unchanged-state refresh every eight eligible checkpoints. One `Sub0`
+//! socket reads direct neighbours selected by the configured topology.
+//! Nothing here goes through the coordinator: the neighbourhood's
 //! live positions, which are what the crowd count, the repulsion references
 //! and the shared-bias deposits need, arrive peer to peer with no round
-//! trip and no barrier. Receives never block; a slow peer costs nothing and
-//! a lost message is replaced by the next publication.
+//! trip and no barrier. Receives never block; periodic best-effort refreshes
+//! let late subscribers and receivers of lost messages recover current state.
+//! Peer records are not forwarded, so this is not a global gossip aggregate.
 //!
 //! Wire format: topic `census/NNN\n` then little-endian `u32 replica`,
 //! `u64 hops`, `f64 energy`, `u32 n_coords`, `f64 * n_coords`.
@@ -16,6 +18,8 @@ use nng::options::Options;
 use nng::options::protocol::pubsub::Subscribe;
 use nng::{Protocol, Socket};
 use std::collections::HashMap;
+
+const REFRESH_CHECKPOINTS: u8 = 8;
 
 /// Transport failure; the search continues uncoupled.
 #[derive(Debug, thiserror::Error)]
@@ -42,7 +46,8 @@ pub struct CensusBus {
     publisher: Socket,
     subscriber: Socket,
     latest: HashMap<u32, PeerMinimum>,
-    last_published: Option<f64>,
+    last_published: Option<PeerMinimum>,
+    checkpoints_since_publication: u8,
     /// Whether each peer's latest minimum lies on this replica's side of
     /// the packing map, recomputed only when the peer's minimum or this
     /// replica's own minimum changes.
@@ -61,12 +66,10 @@ fn url(base_port: u16, replica: u32) -> String {
     }
 }
 
-/// Migration topology. Island-model results (Cantu-Paz, 2001; Alba and
-/// Tomassini, 2002) say that all-to-all migration at a high rate collapses
-/// diversity, which is the herd measured on LJ75, and that a sparse
-/// topology keeps islands distinct while an aggregate still mixes in
-/// O(log N) gossip rounds. `CENSUS_BUS_NEIGHBORS=k` subscribes a replica
+/// Direct-neighbour topology. `CENSUS_BUS_NEIGHBORS=k` subscribes a replica
 /// to ring neighbours within distance `k` only; 0 (default) is all-to-all.
+/// This restricts census traffic, not coordinator-mediated adoption. A ring
+/// has a growing diameter and supplies no logarithmic mixing guarantee.
 fn ring_distance(a: u32, b: u32, n: u32) -> u32 {
     let d = a.abs_diff(b);
     d.min(n - d)
@@ -74,7 +77,7 @@ fn ring_distance(a: u32, b: u32, n: u32) -> u32 {
 
 impl CensusBus {
     /// Binds this replica's publisher at `base_port + replica` and dials
-    /// every other replica in `0..replicas`.
+    /// the configured neighbours in `0..replicas`.
     pub fn new(replica: u32, base_port: u16, replicas: u32) -> Result<Self, CensusBusError> {
         let publisher =
             Socket::new(Protocol::Pub0).map_err(|e| CensusBusError(format!("pub: {e}")))?;
@@ -108,21 +111,25 @@ impl CensusBus {
             subscriber,
             latest: HashMap::new(),
             last_published: None,
+            checkpoints_since_publication: 0,
             nearby: HashMap::new(),
         })
     }
 
-    /// Publishes this replica's current minimum. Never blocks.
+    /// Publishes changed minima immediately and refreshes unchanged minima
+    /// every eight calls. Failed sends remain eligible for retry. Never blocks.
     pub fn publish(&mut self, hops: u64, energy: f64, coordinates: &[f64]) {
-        // Publish only when this replica's minimum changed; peers keep the
-        // last message, and a repeat costs every subscriber a receive.
+        self.checkpoints_since_publication = self.checkpoints_since_publication.saturating_add(1);
+        // Energy is not a geometry key. Refreshes repair best-effort delivery
+        // without making every checkpoint perform descriptor comparisons.
         if self
             .last_published
-            .is_some_and(|last| (last - energy).abs() <= 1e-9)
+            .as_ref()
+            .is_some_and(|last| last.energy == energy && last.coordinates == coordinates)
+            && self.checkpoints_since_publication < REFRESH_CHECKPOINTS
         {
             return;
         }
-        self.last_published = Some(energy);
         let mut frame = format!("census/{:03}\n", self.replica).into_bytes();
         frame.extend_from_slice(&self.replica.to_le_bytes());
         frame.extend_from_slice(&hops.to_le_bytes());
@@ -133,7 +140,15 @@ impl CensusBus {
         }
         let mut message = nng::Message::new();
         message.push_back(&frame);
-        let _ = self.publisher.try_send(message);
+        if self.publisher.try_send(message).is_ok() {
+            self.last_published = Some(PeerMinimum {
+                replica: self.replica,
+                hops,
+                energy,
+                coordinates: coordinates.to_vec(),
+            });
+            self.checkpoints_since_publication = 0;
+        }
     }
 
     /// Drains every waiting publication and returns the peers whose latest
@@ -149,12 +164,10 @@ impl CensusBus {
                 continue;
             }
             // Fresh means the minimum changed, not that the peer hopped: a
-            // replica sitting on the shelf republishes the same structure
-            // every checkpoint and must not cost its peers a packing-map
-            // comparison each time.
+            // replica sitting on the shelf refreshes the same structure
+            // without costing its peers a packing-map comparison each time.
             let fresh = self.latest.get(&peer.replica).is_none_or(|held| {
-                (held.energy - peer.energy).abs() > 1e-9
-                    || held.coordinates.len() != peer.coordinates.len()
+                held.energy != peer.energy || held.coordinates != peer.coordinates
             });
             if fresh {
                 changed.push(peer.clone());
