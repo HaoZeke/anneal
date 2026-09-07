@@ -587,6 +587,8 @@ pub struct Outcome {
     pub continuous_symmetry: (usize, f64),
     /// Restarts triggered by a stall.
     pub restarts: usize,
+    /// Heard structures refused by the exchange acceptance.
+    pub exchanges_refused: usize,
     /// Climbs triggered by a stall.
     pub stall_escapes: usize,
     /// Stall exits taken through the recorded basin entry.
@@ -1307,6 +1309,7 @@ where
     // unseen-environment share before the arrival is added.
     let mut trace_book = seam_trace.then(crate::catalog::PackingBook::default);
     let mut restarts = 0usize;
+    let mut exchanges_refused = 0usize;
     let mut symmetrised = 0usize;
     let mut symmetry_gain = 0.0_f64;
     let mut continuous_symmetry_attempts = 0usize;
@@ -1837,6 +1840,35 @@ where
                         || soap_push
                         || !gradient_required
                         || validation_gradient.is_some());
+                // A heard structure is a configuration exchange between two
+                // chains, and a chain that adopts it unconditionally stops
+                // being a sampler of its own biased ensemble. Bennett's
+                // potential-switching identity, M(U1-U0) exp(-U0) =
+                // M(U0-U1) exp(-U1) (J. Comput. Phys. 22, 245 (1976), Eq. 2),
+                // fixes the acceptance: the Metropolis function of the
+                // difference of the *biased* energies under this chain's own
+                // bias field, which is also the swap rule of bias-exchange
+                // metadynamics (Piana and Laio, J. Phys. Chem. B 111, 4553
+                // (2007)) and of multiple-walker / parallel-bias
+                // metadynamics. Under shared bias the two walkers' fields
+                // agree to the deposits in flight, so the cross terms cancel
+                // and this is the exact exchange rule. Measured without it
+                // on LJ75, adoption on energy moved every replica onto the
+                // icosahedral shelf inside a thousand hops.
+                let exchange_accept = if published_prize && cfg.exchange_metropolis && proposal_sane
+                {
+                    let v_here = bias.potential(bias.cv(from_state.view()).view());
+                    let v_there = bias.potential(bias.cv(proposal_state.view()).view());
+                    let d = ((proposal_energy + v_there) - (from_energy + v_here))
+                        / cfg.temperature.max(1e-12);
+                    d <= 0.0 || rng.random::<f64>() < (-d).exp()
+                } else {
+                    true
+                };
+                if published_prize && !exchange_accept {
+                    exchanges_refused += 1;
+                }
+                let adopt = adopt && exchange_accept;
                 if recordable {
                     if adopt {
                         hops += 1;
@@ -3981,6 +4013,7 @@ where
         symmetrised: (symmetrised, symmetry_gain),
         continuous_symmetry: (continuous_symmetry_attempts, continuous_symmetry_gain),
         restarts,
+        exchanges_refused,
         merge_radius: final_radius,
         mean_step: radius.mean_step(),
         stall_escapes,
