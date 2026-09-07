@@ -1687,4 +1687,12 @@ mod tests {
             ]
         );
     }
+
+    #[test]
+    fn fixed_coordinates_have_explicit_provenance_and_cannot_impersonate_optbench() {
+        assert_eq!(super::start_protocol_name(false, false).unwrap(), "random-cluster");
+        assert_eq!(super::start_protocol_name(true, false).unwrap(), "optbench-fixed");
+        assert_eq!(super::start_protocol_name(false, true).unwrap(), "fixed-coordinate-file");
+        assert!(super::start_protocol_name(true, true).is_err());
+    }
 }
