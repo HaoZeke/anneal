@@ -18,6 +18,10 @@ case "${1:-full}" in
     cargo test --locked --test transition_graph unresolved_probes_do_not_certify_shared_return_dynamics || status=1
     exit "$status"
     ;;
+  markov)
+    cargo test --locked --lib superbasin::tests
+    cargo test --locked --test transition_graph
+    ;;
   full)
     cargo fmt --all -- --check
     cargo test --locked
