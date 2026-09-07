@@ -4253,6 +4253,8 @@ fn run_capnp_catalog(
     // not this replica's own stall, triggers an occasional jump.
     let mut census_jump_last_hop = 0usize;
     let mut census_jumps = 0usize;
+    let mut census_restarts = 0usize;
+    let mut census_restart_last_hop = 0usize;
     let mut count_walk = 0usize;
     let mut count_hole = 0usize;
     let mut extra_cover = 0usize;
@@ -5422,6 +5424,60 @@ fn run_capnp_catalog(
                 *ema = 0.9 * *ema + 0.1 * rate;
             }
             governor_last = Some((charged, singles));
+        }
+        // CATALOG_RESTART_VISITS=k, CATALOG_RESTART_QUIET=q: the population
+        // stopping rule. A basin the ensemble has visited k times and that
+        // this replica has not deepened from for q hops is a dead region by
+        // the ensemble's own count; the replica hands its remaining budget
+        // to a fresh random start rather than to that region. Measured on
+        // LJ75, a shelf-absorbed chain crosses at about 8.5e-7 per hop and a
+        // fresh chain at about 5e-6, so the exchange rate of the two is
+        // known and the decision is a stopping problem, not a steering one.
+        let census_restart_visits: u64 = std::env::var("CATALOG_RESTART_VISITS")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(0);
+        let census_restart_quiet: usize = std::env::var("CATALOG_RESTART_QUIET")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(20_000);
+        if census_restart_visits > 0
+            && policy.census.local_basin_visits() >= census_restart_visits
+            && snapshot.hops().saturating_sub(hear_last_best_hop) >= census_restart_quiet
+            && snapshot.hops().saturating_sub(census_restart_last_hop) >= census_restart_quiet
+        {
+            use rand::SeedableRng;
+            let mut restart_rng = rand::rngs::StdRng::seed_from_u64(
+                (u64::from(replica) << 41)
+                    ^ checkpoint_sequence.wrapping_mul(0xD6E8_FEB8_6659_FD93),
+            );
+            let fresh = random_cluster(
+                run_cfg.n_points,
+                0.7,
+                run_cfg.min_separation,
+                &mut restart_rng,
+            );
+            census_restart_last_hop = snapshot.hops();
+            hear_last_best_hop = snapshot.hops();
+            census_restarts += 1;
+            println!(
+                "  census restart hops {}  visits {}  restarts {}",
+                snapshot.hops(),
+                policy.census.local_basin_visits(),
+                census_restarts
+            );
+            let _ = std::io::stdout().flush();
+            return complete_checkpoint_trace(
+                &mut cooperative,
+                replica,
+                &mut slice_sequence,
+                checkpoint_charged,
+                snapshot.best_energy(),
+                |_cooperative, _slice_sequence| CheckpointAction::BoundaryProposal {
+                    state: fresh,
+                    action: "census_restart".to_owned(),
+                },
+            );
         }
         // CATALOG_JUMP_VISITS=k: when the ensemble census has visited this
         // replica's basin at least k times, the replica takes an
