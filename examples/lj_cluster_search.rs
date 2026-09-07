@@ -4023,7 +4023,7 @@ fn run_capnp_catalog(
         );
     let mut peer_crowd: usize = 0;
     let mut bus_received: usize = 0;
-    let mut bus_last_energy: Option<f64> = None;
+    let mut bus_last_minimum: Option<(f64, Vec<f64>)> = None;
     let mut shared_wells: Vec<Array1<f64>> = Vec::new();
     let coop_rcut = 3.5 * run_cfg.length_scale;
     let coop_species = run_cfg.species.clone();
@@ -4312,13 +4312,11 @@ fn run_capnp_catalog(
             }
             let fresh = bus.poll();
             bus_received += fresh.len();
-            // Bounded confidence (Deffuant; Hegselmann-Krause): a peer's
-            // minimum is deposited into this chain's bias only when it lies
-            // within the confidence bound, here the same side of the packing
-            // map. Unbounded deposits are DeGroot averaging toward the
-            // population and collapse it to one cluster; bounded ones keep
-            // one cluster per funnel. CENSUS_BUS_UNBOUNDED=1 restores the
-            // global deposit for comparison.
+            // Locality-limited repulsive history: admit bus deposits from
+            // nearby packings. This does not average coordinates or guarantee
+            // one cluster per funnel. CENSUS_BUS_UNBOUNDED=1 admits distant
+            // bus observations for a controlled comparison. Population-parent
+            // and own-visit deposits retain their separate admission rules.
             let unbounded = std::env::var("CENSUS_BUS_UNBOUNDED").is_ok_and(|v| v == "1");
             if shared_bias_enabled {
                 for peer in &fresh {
@@ -4336,7 +4334,7 @@ fn run_capnp_catalog(
             // of the messages, not of 47 packing comparisons a checkpoint.
             let peers: Vec<_> = bus.peers().collect();
             let (updates, crowd) = census_nearby_updates(
-                &mut bus_last_energy,
+                &mut bus_last_minimum,
                 snapshot.current_energy(),
                 here,
                 &peers,
@@ -6351,36 +6349,40 @@ fn census_bus_base(sharing: bool, evidence_only: bool, configured: Option<&str>)
 
 #[cfg(feature = "bank-rpc")]
 fn census_nearby_updates(
-    last_energy: &mut Option<f64>,
+    last_minimum: &mut Option<(f64, Vec<f64>)>,
     energy: f64,
     here: &[f64],
     peers: &[&anneal_core::census_bus::PeerMinimum],
     fresh: &[anneal_core::census_bus::PeerMinimum],
     nearby: &std::collections::HashMap<u32, bool>,
 ) -> (Vec<(u32, bool)>, usize) {
-    let own_moved = last_energy.is_none_or(|last| (last - energy).abs() > 1e-9);
-    *last_energy = Some(energy);
+    // Packing classification depends on coordinates, not objective values.
+    let own_moved = last_minimum
+        .as_ref()
+        .is_none_or(|(_, coordinates)| coordinates != here);
+    *last_minimum = Some((energy, here.to_vec()));
     let fresh_ids: Vec<u32> = fresh.iter().map(|peer| peer.replica).collect();
     let mut updates = Vec::new();
+    let mut crowd = 0;
     for peer in peers {
         if peer.coordinates.len() != here.len() {
+            updates.push((peer.replica, false));
             continue;
         }
         let stale =
             own_moved || fresh_ids.contains(&peer.replica) || !nearby.contains_key(&peer.replica);
-        if stale {
+        let near = if stale {
             let near = anneal_core::catalog::nearby_packing(here, &peer.coordinates);
             if near {
                 anneal_core::catalog::include_packing_reference(&peer.coordinates);
             }
             updates.push((peer.replica, near));
-        }
+            near
+        } else {
+            nearby[&peer.replica]
+        };
+        crowd += usize::from(near);
     }
-    let crowd = nearby
-        .iter()
-        .filter(|(id, near)| **near && !updates.iter().any(|(updated, _)| updated == *id))
-        .count()
-        + updates.iter().filter(|(_, near)| *near).count();
     (updates, crowd)
 }
 
