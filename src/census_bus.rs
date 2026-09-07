@@ -42,6 +42,11 @@ pub struct CensusBus {
     publisher: Socket,
     subscriber: Socket,
     latest: HashMap<u32, PeerMinimum>,
+    last_published: Option<f64>,
+    /// Whether each peer's latest minimum lies on this replica's side of
+    /// the packing map, recomputed only when the peer's minimum or this
+    /// replica's own minimum changes.
+    pub nearby: HashMap<u32, bool>,
 }
 
 /// Transport for the bus: TCP loopback, or ipc (Unix domain sockets) when
@@ -102,11 +107,22 @@ impl CensusBus {
             publisher,
             subscriber,
             latest: HashMap::new(),
+            last_published: None,
+            nearby: HashMap::new(),
         })
     }
 
     /// Publishes this replica's current minimum. Never blocks.
-    pub fn publish(&self, hops: u64, energy: f64, coordinates: &[f64]) {
+    pub fn publish(&mut self, hops: u64, energy: f64, coordinates: &[f64]) {
+        // Publish only when this replica's minimum changed; peers keep the
+        // last message, and a repeat costs every subscriber a receive.
+        if self
+            .last_published
+            .is_some_and(|last| (last - energy).abs() <= 1e-9)
+        {
+            return;
+        }
+        self.last_published = Some(energy);
         let mut frame = format!("census/{:03}\n", self.replica).into_bytes();
         frame.extend_from_slice(&self.replica.to_le_bytes());
         frame.extend_from_slice(&hops.to_le_bytes());
@@ -132,10 +148,14 @@ impl CensusBus {
             if peer.replica == self.replica {
                 continue;
             }
-            let fresh = self
-                .latest
-                .get(&peer.replica)
-                .is_none_or(|held| held.hops != peer.hops || held.energy != peer.energy);
+            // Fresh means the minimum changed, not that the peer hopped: a
+            // replica sitting on the shelf republishes the same structure
+            // every checkpoint and must not cost its peers a packing-map
+            // comparison each time.
+            let fresh = self.latest.get(&peer.replica).is_none_or(|held| {
+                (held.energy - peer.energy).abs() > 1e-9
+                    || held.coordinates.len() != peer.coordinates.len()
+            });
             if fresh {
                 changed.push(peer.clone());
             }
