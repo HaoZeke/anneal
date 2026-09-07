@@ -325,8 +325,8 @@ impl CatalogPolicy {
             }
             _ if !input.leftover_dwell
                 && !matches!(input.relation, ActiveCatalogRelation::SameBasin)
-                && !(input.census.local_basin_visits() >= LOCAL_CENSUS_LEAVE
-                    && matches!(
+                && (input.census.local_basin_visits() < LOCAL_CENSUS_LEAVE
+                    || !matches!(
                         input.relation,
                         ActiveCatalogRelation::Unrelated {
                             lower_energy_anchor: true

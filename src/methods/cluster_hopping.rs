@@ -38,7 +38,7 @@ use crate::contextual::ContextualAllocator;
 use crate::diversity::DiversityAnnealer;
 use crate::exchange::MetropolisExchange;
 use crate::methods::activation::{Activation, activate};
-use crate::methods::minima_hopping::EscapeFeedback;
+use crate::methods::minima_hopping::{EscapeFeedback, HistoryHook, Visit};
 use crate::movekernel::{
     HollowFill, HollowRelocate, MoveKernel, ShellRotate, SurfaceRelocate, Symmetrise,
 };
@@ -293,6 +293,28 @@ impl QuenchBoundary {
     /// Fresh gradient evidence, present only for a validated minimum.
     pub fn gradient(&self) -> Option<ArrayView1<'_, f64>> {
         self.gradient.as_ref().map(|gradient| gradient.view())
+    }
+
+    /// A validated boundary assembled from fresh evidence the caller holds.
+    ///
+    /// For a history that receives energy, state and validation gradient
+    /// directly from the live chain rather than reading the ledger. The same
+    /// finiteness and dimension rules as [`Ledger::record_quench_boundary`]
+    /// apply; anything failing them is not a certificate and returns `None`.
+    /// No charged work is attributed to it.
+    pub fn validated(energy: f64, state: Array1<f64>, gradient: Array1<f64>) -> Option<Self> {
+        let certified = energy.is_finite()
+            && !state.is_empty()
+            && state.iter().all(|v| v.is_finite())
+            && gradient.len() == state.len()
+            && gradient.iter().all(|v| v.is_finite());
+        certified.then_some(Self {
+            status: QuenchStatus::Validated,
+            charged_calls: 0,
+            energy,
+            state,
+            gradient: Some(gradient),
+        })
     }
 }
 
@@ -600,6 +622,13 @@ pub struct Outcome {
     pub exchanges_refused: usize,
     /// Occasional jumps taken on stagnation.
     pub jumps: usize,
+    /// Certified quenches reported to the minimum history, and how many of
+    /// them the history called new under its membership policy.
+    pub history_visits: (usize, usize),
+    /// Bias deposits made on behalf of other chains' visits.
+    pub shared_deposits: usize,
+    /// Seconds the chain spent inside the history, lock waits included.
+    pub history_seconds: f64,
     /// Climbs triggered by a stall.
     pub stall_escapes: usize,
     /// Stall exits taken through the recorded basin entry.
@@ -883,6 +912,7 @@ pub fn run_with_gradient_settle<'g, R: Rng + ?Sized>(
         None,
         settle,
         None,
+        None,
         &mut checkpoint,
         rng,
     )
@@ -904,6 +934,7 @@ pub fn run_with_gradient<'g, R: Rng + ?Sized>(
         ledger,
         relax,
         grad,
+        None,
         None,
         None,
         None,
@@ -932,6 +963,7 @@ pub fn run_with_energy_gradient<'g, R: Rng + ?Sized>(
         relax,
         grad,
         energy_grad,
+        None,
         None,
         None,
         None,
@@ -978,6 +1010,7 @@ pub fn run_with_bias<'g, R: Rng + ?Sized>(
         Some(bias),
         None,
         None,
+        None,
         &mut checkpoint,
         rng,
     )
@@ -1018,6 +1051,52 @@ where
         None,
         Some(bias),
         None,
+        None,
+        Some(checkpoint_interval),
+        checkpoint,
+        rng,
+    )
+}
+
+/// As [`run_with_gradient_settle`], reporting every certified quench and
+/// every adoption to a minimum history, with periodic observations.
+///
+/// The history is the communication channel of a cooperating ensemble: a
+/// private one is the isolated control, and one shared behind a lock is the
+/// communicating arm. The chain keeps its coordinates, random stream,
+/// allocator and bias; what it receives is exact identity and visit counts,
+/// which feed the escape controller under [`Config::minima_hopping`] and the
+/// per-basin deposits otherwise ([`Config::shared_deposits`]).
+pub fn run_with_history_at_checkpoints<'g, R, H>(
+    cfg: &Config,
+    start: ArrayView1<f64>,
+    ledger: &mut Ledger,
+    relax: Relax<'_>,
+    grad: Option<&mut GradFn<'g>>,
+    settle: Option<Settle<'_>>,
+    history: &mut dyn HistoryHook,
+    rng: &mut R,
+    checkpoint_interval: usize,
+    checkpoint: &mut H,
+) -> Outcome
+where
+    R: Rng + ?Sized,
+    H: for<'a> FnMut(ChainCheckpoint<'a>) -> CheckpointAction,
+{
+    assert!(
+        checkpoint_interval > 0,
+        "checkpoint interval must be positive"
+    );
+    run_full(
+        cfg,
+        start,
+        ledger,
+        relax,
+        grad,
+        None,
+        None,
+        settle,
+        Some(history),
         Some(checkpoint_interval),
         checkpoint,
         rng,
@@ -1033,6 +1112,7 @@ fn run_full<'g, R, H>(
     mut energy_grad: Option<&mut EnergyGradFn<'g>>,
     external_bias: Option<&mut BasinBias<ClusterFingerprint>>,
     mut settle: Option<Settle<'_>>,
+    mut history: Option<&mut dyn HistoryHook>,
     checkpoint_interval: Option<usize>,
     checkpoint: &mut H,
     rng: &mut R,
@@ -1442,6 +1522,28 @@ where
         let initial_basin = identity.basin_of(x.view());
         feedback.register_initial(initial_basin);
         here = Some(initial_basin);
+    }
+    // The history's identity of the occupied minimum, numbered by the history
+    // and not by `identity`: under a shared history the numbering is the
+    // population's, and this chain's local index means nothing to it.
+    let mut history_here: Option<usize> = None;
+    // Global visit count of each history minimum at this chain's last look,
+    // so a later look deposits only what other chains added in between.
+    let mut history_seen: std::collections::HashMap<usize, u64> = std::collections::HashMap::new();
+    let mut history_observations = 0usize;
+    let mut history_new = 0usize;
+    let mut shared_deposits = 0usize;
+    if let (Some(h), Some(g)) = (history.as_deref_mut(), current_validation_gradient.as_ref()) {
+        // The start is part of the history even though no hop reached it,
+        // exactly as the controller registers it: a later return to it must
+        // classify as known.
+        if let Some(report) = h.observe(e, x.view(), g.view()) {
+            h.mark_accepted(report.minimum);
+            history_here = Some(report.minimum);
+            // Own start visit is seen; every other chain's visit to this
+            // minimum is owed and paid at the first look that reaches it.
+            history_seen.insert(report.minimum, 1);
+        }
     }
     // Structures kept for path endpoints. Only ones far from every member are
     // added, because interpolating between two structures in one funnel lands
@@ -2705,6 +2807,21 @@ where
             })
         };
         let recordable = !unquenched && (!gradient_required || validation_gradient.is_some());
+        // Every certified quench is reported, adopted or not: the history's
+        // membership policy decides what counts, not the chain.
+        let history_report = match (history.as_deref_mut(), validation_gradient.as_ref()) {
+            (Some(h), Some(g)) if recordable => h.observe(e_new, x_new.view(), g.view()),
+            _ => None,
+        };
+        // The reached minimum's bias key, taken before an acceptance moves
+        // the coordinates into the chain.
+        let history_cv = history_report.map(|_| bias.cv(x_new.view()));
+        if let Some(report) = history_report {
+            history_observations += 1;
+            if report.is_new {
+                history_new += 1;
+            }
+        }
         if recordable {
             ledger.record(e_new, x_new.view());
         } else {
@@ -2901,8 +3018,22 @@ where
                 // while still feeling the per-basin deposits. A self-return
                 // updates escape strength but is not an acceptance trial.
                 let reached = identity.basin_of(x_new.view());
-                feedback.observe(Some(from), reached);
-                let ok = reached != from && feedback.accept(delta);
+                let ok = if let Some(report) = history_report {
+                    // The population's identity and counts drive the
+                    // controller: a minimum first found by another chain is
+                    // known here too, and only a minimum new under the
+                    // membership policy is offered to the threshold.
+                    let visit = feedback.observe_shared(
+                        history_here,
+                        report.minimum,
+                        report.is_new,
+                        report.visits,
+                    );
+                    visit == Visit::New && feedback.accept(delta)
+                } else {
+                    feedback.observe(Some(from), reached);
+                    reached != from && feedback.accept(delta)
+                };
                 if ok {
                     here = Some(reached);
                 }
@@ -3337,6 +3468,10 @@ where
                 basin_entry = Some(snapshot);
             }
             moved_basin = !returning;
+            if let (Some(h), Some(report)) = (history.as_deref_mut(), history_report) {
+                h.mark_accepted(report.minimum);
+                history_here = Some(report.minimum);
+            }
             e = e_new;
             x = x_new;
             current_validation_gradient = validation_gradient;
@@ -3348,6 +3483,34 @@ where
             law.observe_rejection(delta);
         }
         bias.deposit(bias.cv(x.view()).view(), temperature);
+        // Visits other chains made to the minimum this quench reached, paid
+        // into this chain's bias as if it had made them. The count is under
+        // the history's membership policy, so with accepted membership only
+        // minima some chain stood in are filled. Capped per look, because a
+        // shelf the population has sat on for a hundred thousand hops is
+        // filled well before the cap and an uncapped loop is pure cost.
+        if !cfg.minima_hopping
+            && cfg.shared_deposits > 0
+            && let (Some(report), Some(cv)) = (history_report, history_cv.as_ref())
+        {
+            let seen = history_seen.entry(report.minimum).or_insert(0);
+            // This chain's own observation is already in its hop deposits.
+            let foreign = report
+                .visits
+                .saturating_sub(*seen)
+                .saturating_sub(1)
+                .min(cfg.shared_deposits as u64);
+            for _ in 0..foreign {
+                bias.deposit(cv.view(), temperature);
+                shared_deposits += 1;
+            }
+            *seen = report.visits;
+            // Under accepted membership this chain's own adoption raises the
+            // count from zero to one after the look; that visit is its own.
+            if accept && report.visits == 0 {
+                *seen = 1;
+            }
+        }
         // Core symmetrisation of a newly entered basin (Oakley, Johnston,
         // Wales 2013), quenched and offered to the same acceptance rule as a
         // hop. Once per new basin: the arm form of this move was measured to
@@ -4207,6 +4370,9 @@ where
         restarts,
         exchanges_refused,
         jumps,
+        history_visits: (history_observations, history_new),
+        shared_deposits,
+        history_seconds: history.as_deref().map_or(0.0, |h| h.cost().2),
         merge_radius: final_radius,
         mean_step: radius.mean_step(),
         stall_escapes,
@@ -5017,6 +5183,132 @@ mod tests {
         }
         let e = cur.iter().map(|v| v * v).sum::<f64>();
         (e, cur)
+    }
+
+    /// One well at a fixed tetrahedron; every relaxation converges onto it
+    /// and certifies the result with the analytic gradient.
+    fn well_relax(
+        target: &Array1<f64>,
+        ledger: &mut Ledger,
+        x: ArrayView1<f64>,
+        steps: usize,
+    ) -> (f64, Array1<f64>) {
+        let before = ledger.spent();
+        let mut cur = x.to_owned();
+        for _ in 0..steps {
+            if !ledger.charge() {
+                break;
+            }
+            cur = target + &((&cur - target) * 0.85);
+        }
+        let d = &cur - target;
+        let e = d.iter().map(|v| v * v).sum::<f64>();
+        if steps > 1 {
+            ledger.record_quench_boundary(before, e, cur.clone(), Some(2.0 * d));
+        }
+        (e, cur)
+    }
+
+    /// Two chains over one history: the second pays deposits for the visits
+    /// the first made, and both report their observations. A chain alone
+    /// pays nothing on anyone's behalf, and one well is one identity.
+    #[test]
+    fn a_shared_history_pays_deposits_for_the_other_chains_visits() {
+        use crate::descriptor_space::{DescriptorGeometry, universal_descriptor_space};
+        use crate::methods::minima_hopping::{
+            HistoryHook, HistoryMembership, MinimumHistory, SerializedWitness, SharedMinimumHistory,
+        };
+        use crate::pes_exploration::StructureContext;
+        use std::sync::Mutex;
+
+        let n = 4;
+        let mut cfg = Config::for_cluster(n);
+        cfg.max_hops = Some(40);
+        cfg.screen_steps = 1;
+        // Enough contraction that the certified gradient meets the record
+        // tolerance, which is what makes a quench observable.
+        cfg.relax_steps = 120;
+        cfg.screen_margin = f64::INFINITY;
+        cfg.return_screen = false;
+        cfg.shared_deposits = 8;
+        let target = Array1::from(vec![
+            1.0, 1.0, 1.0, 1.0, -1.0, -1.0, -1.0, 1.0, -1.0, -1.0, -1.0, 1.0,
+        ]);
+        let descriptor = universal_descriptor_space(DescriptorGeometry::finite(1.0).unwrap());
+        let context = StructureContext::new(Some(vec![18; n]), None, Some("well".into()));
+        let witness = SerializedWitness(Mutex::new(|l: ArrayView1<f64>, r: ArrayView1<f64>| {
+            l.iter()
+                .zip(r.iter())
+                .map(|(a, b)| (a - b) * (a - b))
+                .sum::<f64>()
+                .sqrt()
+                < 0.5
+        }));
+        let history = Mutex::new(MinimumHistory::new(10.0).unwrap());
+        let mut rng = StdRng::seed_from_u64(7);
+        let start = random_cluster(n, 0.7, cfg.min_separation, &mut rng);
+        let run = |seed: u64, hook: &mut dyn HistoryHook| {
+            let mut ledger = Ledger::new(12_000);
+            let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, steps: usize| {
+                well_relax(&target, led, x, steps)
+            };
+            let mut grad = |led: &mut Ledger, x: ArrayView1<f64>| -> Option<Array1<f64>> {
+                led.charge().then(|| 2.0 * (&x - &target))
+            };
+            let mut rng = StdRng::seed_from_u64(seed);
+            let mut checkpoint = |_: ChainCheckpoint<'_>| CheckpointAction::Continue;
+            run_with_history_at_checkpoints(
+                &cfg,
+                start.view(),
+                &mut ledger,
+                &mut relax,
+                Some(&mut grad),
+                None,
+                hook,
+                &mut rng,
+                500,
+                &mut checkpoint,
+            )
+        };
+        let mut first = SharedMinimumHistory::new(
+            &history,
+            &descriptor,
+            context.clone(),
+            &witness,
+            HistoryMembership::Accepted,
+        );
+        let out1 = run(1, &mut first);
+        assert!(
+            out1.history_visits.0 > 0,
+            "the first chain reported nothing"
+        );
+        assert_eq!(
+            out1.shared_deposits, 0,
+            "alone, nothing is paid on another chain's behalf"
+        );
+        let prior = history.lock().unwrap().total_visits();
+        let mut second = SharedMinimumHistory::new(
+            &history,
+            &descriptor,
+            context,
+            &witness,
+            HistoryMembership::Accepted,
+        );
+        let out2 = run(2, &mut second);
+        assert!(
+            out2.history_visits.0 > 0,
+            "the second chain reported nothing"
+        );
+        assert!(
+            out2.shared_deposits > 0,
+            "the second chain paid nothing for {prior} prior visits"
+        );
+        assert_eq!(
+            history.lock().unwrap().minimum_count(),
+            1,
+            "one well is one identity"
+        );
+        assert_eq!(second.cost().1, 0, "no certified quench was refused");
     }
 
     #[test]

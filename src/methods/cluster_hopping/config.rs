@@ -376,6 +376,12 @@ pub struct Config {
     /// This unilateral relocation heuristic does not certify equilibrium
     /// sampling or the product-ensemble balance of a paired replica swap.
     pub exchange_metropolis: bool,
+    /// Most bias deposits paid per certified quench on behalf of other
+    /// chains' visits to the reached minimum, when the run has a minimum
+    /// history. Zero leaves the history informational. Only the default
+    /// acceptance rule uses it; [`Config::minima_hopping`] feeds the same
+    /// counts to its escape controller instead.
+    pub shared_deposits: usize,
     /// Basin hopping with occasional jumping: on stagnation, a short walk of
     /// unquenched, unconditionally accepted collective displacements, then a
     /// quench.
@@ -1064,6 +1070,7 @@ impl Config {
             point_symmetrise_on_new: false,
             soap_repel: false,
             exchange_metropolis: false,
+            shared_deposits: 8,
             jump_on_stall: false,
             jump_patience: 5_000,
             jump_steps: 10,

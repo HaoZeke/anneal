@@ -2168,6 +2168,17 @@ fn main() {
         );
     }
 
+    // Thread-replica ensembles sharing one exact minimum history, under the
+    // contract of the NVE escape-history comparison: identical replica seeds
+    // and starts in both arms, one aggregate budget, first-discovery
+    // aggregate calls on the record.
+    if let Some(replicas) = std::env::var("HISTORY_REPLICAS")
+        .ok()
+        .and_then(|v| v.parse::<usize>().ok())
+    {
+        run_history_ensembles(&cfg, n, budget, seed0, seeds, reference, replicas, &opts);
+        return;
+    }
     let core_table = coreclass.then(|| {
         Arc::new(Mutex::new(anneal_core::coreclass::CoreClassTable::new(
             core_patience,
@@ -7074,5 +7085,392 @@ fn run_capnp_bank(
         screened_out,
         returned,
         ..Outcome::default()
+    }
+}
+
+/// One replica's plain quench: warm L-BFGS, the fresh certificate with the
+/// bounded polish chunks, and the boundary on the ledger.
+///
+/// The default seed loop's relaxation carries the optional screening noise,
+/// two-phase surfaces and early termination; the ensembles run without
+/// them, so this is that closure with the options removed, not a different
+/// relaxation. Aggregate work is settled by the caller from the ledger.
+fn validated_relax(
+    opt: &mut WarmLbfgs,
+    led: &mut Ledger,
+    x: ArrayView1<f64>,
+    iters: usize,
+) -> (f64, Array1<f64>) {
+    if iters == 0 {
+        return evaluate_without_quenching(led, x);
+    }
+    let charged_before = led.spent();
+    opt.forget();
+    let (_, mut xr, _) = opt.minimize(x, iters, |v| charged(led, v));
+    let mut boundary_energy = f64::INFINITY;
+    let mut validated_gradient = None;
+    if led.charge() {
+        let (fresh_energy, mut g) = lj(xr.view());
+        boundary_energy = fresh_energy;
+        let mut gnorm = euclidean_gradient_norm(g.as_slice().expect("LJ gradient is contiguous"));
+        let mut chunks = 0;
+        while (1e-5..1e-3).contains(&gnorm) && chunks < 10 && led.remaining() > 0 {
+            opt.forget();
+            let (_, xc, _) = opt.minimize(xr.view(), 500, |v| charged_physical(led, v));
+            boundary_energy = f64::INFINITY;
+            xr = xc;
+            if !led.charge() {
+                break;
+            }
+            let (fe, ge) = lj(xr.view());
+            boundary_energy = fe;
+            gnorm = euclidean_gradient_norm(ge.as_slice().expect("LJ gradient is contiguous"));
+            g = ge;
+            chunks += 1;
+            let mut descents = 0;
+            while (1e-5..3e-5).contains(&gnorm) && descents < 200 && led.charge() {
+                for (value, gradient) in xr.iter_mut().zip(g.iter()) {
+                    *value -= 0.01 * gradient;
+                }
+                let (fe, ge) = lj(xr.view());
+                boundary_energy = fe;
+                gnorm = euclidean_gradient_norm(ge.as_slice().expect("LJ gradient is contiguous"));
+                g = ge;
+                descents += 1;
+            }
+        }
+        if gnorm < 1e-5 {
+            validated_gradient = Some(g);
+        }
+    }
+    led.record_quench_boundary(
+        charged_before,
+        boundary_energy,
+        xr.clone(),
+        validated_gradient,
+    );
+    (boundary_energy, xr)
+}
+
+/// SHA-256 of the running executable, so a record names what produced it.
+fn executable_sha256() -> String {
+    use sha2::{Digest, Sha256};
+    std::env::current_exe()
+        .and_then(std::fs::read)
+        .map(|bytes| format!("{:x}", Sha256::digest(&bytes)))
+        .unwrap_or_else(|_| "unavailable".into())
+}
+
+/// What one replica of a history ensemble reports.
+struct HistoryReplicaRun {
+    replica: usize,
+    seed: u64,
+    out: Outcome,
+    charged: usize,
+    first_target_calls: Option<usize>,
+    wall_seconds: f64,
+    history_cost: (usize, usize, f64),
+}
+
+/// Thread replicas of the production hop loop over a shared or private
+/// exact minimum history.
+///
+/// `HISTORY=shared` puts every replica of a seed behind one history;
+/// `private` (default) gives each its own, which is the isolated control
+/// with the same starts, seeds, budgets and lookups. `HISTORY_POLICY`
+/// selects accepted (default) or observed-exclusion membership.
+/// `HISTORY_CHECKPOINT` sets the charged interval at which a replica reads
+/// the aggregate counter for its first-discovery record. The aggregate
+/// budget is `budget` per seed, divided among the replicas with the
+/// remainder to the low replicas, so a four-replica ensemble runs on
+/// exactly the force budget of one production chain.
+#[allow(clippy::too_many_arguments)]
+fn run_history_ensembles(
+    cfg: &Config,
+    n: usize,
+    budget: usize,
+    seed0: u64,
+    seeds: u64,
+    reference: Option<f64>,
+    replicas: usize,
+    opts: &[&str],
+) {
+    use anneal_core::methods::cluster_hopping::run_with_history_at_checkpoints;
+    use anneal_core::methods::minima_hopping::{
+        HistoryHook, HistoryMembership, MinimumHistory, SerializedWitness, SharedMinimumHistory,
+    };
+    use anneal_core::pes_exploration::StructureContext;
+    use rand::SeedableRng;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::time::Instant;
+
+    assert!(replicas > 0, "HISTORY_REPLICAS must be positive");
+    assert!(
+        budget >= replicas,
+        "the aggregate budget must give every replica at least one call"
+    );
+    assert!(
+        cfg.replicas <= 1,
+        "a history ensemble runs single-rung chains; a ladder owns its own bias"
+    );
+    let shared = match std::env::var("HISTORY").as_deref() {
+        Ok("shared") => true,
+        Ok("private") | Err(_) => false,
+        Ok(other) => panic!("HISTORY={other:?}; expected shared or private"),
+    };
+    let policy = HistoryMembership::parse(std::env::var("HISTORY_POLICY").ok().as_deref())
+        .unwrap_or_else(|error| panic!("{error}"));
+    let checkpoint_interval: usize = std::env::var("HISTORY_CHECKPOINT")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(1_000)
+        .max(1);
+    let pair_cache_bytes: usize = std::env::var("HISTORY_PAIR_CACHE_BYTES")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(128 * 1024 * 1024);
+    let descriptor = anneal_core::catalog::lj::descriptor_space();
+    let ira_radius = anneal_core::catalog::lj::CALIBRATION_IRA_TOLERANCE;
+    #[cfg(feature = "ira")]
+    let witness = SerializedWitness(Mutex::new(
+        IraStructureWitness {
+            kmax_factor: if n >= 55 { 2.5 } else { 1.8 },
+            radius: ira_radius,
+        }
+        .with_pair_cache(pair_cache_bytes),
+    ));
+    #[cfg(not(feature = "ira"))]
+    let witness = {
+        // Without the exact matcher the witness is the sorted-pair spectrum
+        // within the calibration radius: it over-merges homometric pairs
+        // and is for smoke runs only, which the record says.
+        let _ = pair_cache_bytes;
+        use anneal_core::bias::{Fingerprint, SortedPairs};
+        let fingerprint = SortedPairs { n_points: n };
+        SerializedWitness(Mutex::new(
+            move |left: ArrayView1<f64>, right: ArrayView1<f64>| {
+                let l = fingerprint.describe(left);
+                let r = fingerprint.describe(right);
+                l.iter()
+                    .zip(r.iter())
+                    .map(|(a, b)| (a - b) * (a - b))
+                    .sum::<f64>()
+                    .sqrt()
+                    < ira_radius
+            },
+        ))
+    };
+    let witness_name = if cfg!(feature = "ira") {
+        "ira-cached"
+    } else {
+        "sorted-pairs-fallback"
+    };
+    let context = StructureContext::new(Some(vec![18; n]), None, Some(format!("lj-reduced-n{n}")));
+    let budgets: Vec<usize> = (0..replicas)
+        .map(|replica| budget / replicas + usize::from(replica < budget % replicas))
+        .collect();
+    println!(
+        "  history ensembles: {} replicas, {} history, {} membership, budgets {:?}, \
+         checkpoint {checkpoint_interval}, witness {witness_name}, shared deposits {}, \
+         mechanisms {}, executable sha256 {}",
+        replicas,
+        if shared { "shared" } else { "private" },
+        policy.name(),
+        budgets,
+        cfg.shared_deposits,
+        opts.join(","),
+        executable_sha256()
+    );
+    let target = reference.map(|r| r + 1e-4);
+    let mut solved = 0usize;
+    let mut deepest = f64::INFINITY;
+    let mut first_target: Vec<usize> = Vec::new();
+    for seed in seed0..(seed0 + seeds) {
+        let started = Instant::now();
+        let replica_seeds: Vec<u64> = (0..replicas)
+            .map(|replica| seed.wrapping_add((replica as u64).wrapping_mul(0x9e37_79b9_7f4a_7c15)))
+            .collect();
+        let history_count = if shared { 1 } else { replicas };
+        let histories: Vec<Mutex<MinimumHistory>> = (0..history_count)
+            .map(|_| {
+                Mutex::new(
+                    MinimumHistory::new(cfg.record_gradient.max(1e-5))
+                        .expect("the record gradient is a valid history tolerance"),
+                )
+            })
+            .collect();
+        let charged_total = AtomicUsize::new(0);
+        let runs: Vec<HistoryReplicaRun> = std::thread::scope(|scope| {
+            let handles: Vec<_> = budgets
+                .iter()
+                .zip(&replica_seeds)
+                .enumerate()
+                .map(|(replica, (&replica_budget, &replica_seed))| {
+                    let history = &histories[if shared { 0 } else { replica }];
+                    let charged_total = &charged_total;
+                    let witness = &witness;
+                    let descriptor = &descriptor;
+                    let context = context.clone();
+                    scope.spawn(move || {
+                        let replica_started = Instant::now();
+                        let mut ledger = Ledger::new(replica_budget);
+                        let mut opt = WarmLbfgs::default();
+                        let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, iters: usize| {
+                            let before = led.spent();
+                            let out = validated_relax(&mut opt, led, x, iters);
+                            charged_total.fetch_add(led.spent() - before, Ordering::SeqCst);
+                            out
+                        };
+                        let mut grad =
+                            |led: &mut Ledger, x: ArrayView1<f64>| -> Option<Array1<f64>> {
+                                if !led.charge() {
+                                    return None;
+                                }
+                                charged_total.fetch_add(1, Ordering::SeqCst);
+                                Some(lj(x).1)
+                            };
+                        let mut hook = SharedMinimumHistory::new(
+                            history, descriptor, context, witness, policy,
+                        );
+                        let mut first_target_calls: Option<usize> = None;
+                        let mut checkpoint = |snapshot: ChainCheckpoint<'_>| {
+                            if first_target_calls.is_none()
+                                && target.is_some_and(|t| snapshot.best_energy() < t)
+                            {
+                                first_target_calls = Some(charged_total.load(Ordering::SeqCst));
+                            }
+                            CheckpointAction::Continue
+                        };
+                        let mut rng = rand::rngs::StdRng::seed_from_u64(replica_seed);
+                        let start = anneal_core::methods::cluster_hopping::random_cluster_in_radius(
+                            n,
+                            cfg.start_radius(),
+                            cfg.min_separation,
+                            &mut rng,
+                        );
+                        let out = run_with_history_at_checkpoints(
+                            cfg,
+                            start.view(),
+                            &mut ledger,
+                            &mut relax,
+                            Some(&mut grad),
+                            None,
+                            &mut hook,
+                            &mut rng,
+                            checkpoint_interval,
+                            &mut checkpoint,
+                        );
+                        if first_target_calls.is_none() && target.is_some_and(|t| out.best < t) {
+                            first_target_calls = Some(charged_total.load(Ordering::SeqCst));
+                        }
+                        HistoryReplicaRun {
+                            replica,
+                            seed: replica_seed,
+                            out,
+                            charged: ledger.spent(),
+                            first_target_calls,
+                            wall_seconds: replica_started.elapsed().as_secs_f64(),
+                            history_cost: hook.cost(),
+                        }
+                    })
+                })
+                .collect();
+            handles
+                .into_iter()
+                .map(|handle| handle.join().expect("history replica panicked"))
+                .collect()
+        });
+        let wall = started.elapsed().as_secs_f64();
+        let mut ensemble_best = f64::INFINITY;
+        let mut ensemble_first: Option<usize> = None;
+        for run in &runs {
+            let verified = run.out.best_state.as_ref().map(|x| {
+                let (e, g) = lj(x.view());
+                let gmax = g.iter().fold(0.0_f64, |a, v| a.max(v.abs()));
+                assert!(
+                    e.is_finite() && (e - run.out.best).abs() < 1e-6,
+                    "seed {seed} replica {} reports {} but its coordinates have energy {e}",
+                    run.replica,
+                    run.out.best
+                );
+                assert!(
+                    g.iter().all(|v| v.is_finite()) && gmax < 1e-3,
+                    "seed {seed} replica {} returned a structure with gradient {gmax:.2e}",
+                    run.replica
+                );
+                (e, gmax)
+            });
+            let hit = target.is_some_and(|t| run.out.best < t);
+            println!(
+                "    seed {seed} replica {} (seed {}): best {:.6}  hops {}  charged {}  basins {}  \
+                 history obs {} new {} refused {} secs {:.1}  shared_deposits {}  \
+                 escape {:.3} thr {:.4} same/known/new {}/{}/{}  first_target {}  wall {:.1}s  verified {}{}",
+                run.replica,
+                run.seed,
+                run.out.best,
+                run.out.hops,
+                run.charged,
+                run.out.basins,
+                run.out.history_visits.0,
+                run.out.history_visits.1,
+                run.history_cost.1,
+                run.history_cost.2,
+                run.out.shared_deposits,
+                run.out.escape_scale,
+                run.out.escape_threshold,
+                run.out.visit_counts.0,
+                run.out.visit_counts.1,
+                run.out.visit_counts.2,
+                run.first_target_calls
+                    .map(|v| v.to_string())
+                    .unwrap_or_else(|| "-".into()),
+                run.wall_seconds,
+                verified
+                    .map(|(e, gmax)| format!("{e:.6} |g| {gmax:.1e}"))
+                    .unwrap_or_else(|| "NO STATE".into()),
+                if hit { "  SOLVED" } else { "" }
+            );
+            ensemble_best = ensemble_best.min(run.out.best);
+            if let Some(calls) = run.first_target_calls {
+                ensemble_first = Some(ensemble_first.map_or(calls, |c: usize| c.min(calls)));
+            }
+        }
+        let hit = target.is_some_and(|t| ensemble_best < t);
+        if hit {
+            solved += 1;
+        }
+        if let Some(calls) = ensemble_first {
+            first_target.push(calls);
+        }
+        deepest = deepest.min(ensemble_best);
+        let minima = histories
+            .iter()
+            .map(|h| {
+                let h = h.lock().expect("minimum history");
+                (h.minimum_count(), h.accepted_count(), h.total_visits())
+            })
+            .collect::<Vec<_>>();
+        println!(
+            "  seed {seed} ensemble: best {:.6}  aggregate charged {}  first_target_calls {}  \
+             history minima/accepted/visits {:?}  wall {wall:.1}s{}",
+            ensemble_best,
+            charged_total.load(Ordering::SeqCst),
+            ensemble_first
+                .map(|v| v.to_string())
+                .unwrap_or_else(|| "-".into()),
+            minima,
+            if hit { "  SOLVED" } else { "" }
+        );
+        let _ = io::stdout().flush();
+    }
+    println!(
+        "{solved}/{seeds} solved ({} history, {} membership, {replicas} replicas), deepest {deepest:.6}, \
+         first_target_calls {:?}",
+        if shared { "shared" } else { "private" },
+        policy.name(),
+        first_target
+    );
+    if let Some(r) = reference {
+        println!("gap to reference {:+.6}", deepest - r);
     }
 }
