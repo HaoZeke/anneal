@@ -274,6 +274,9 @@ pub enum CheckpointAction {
     DepositDescriptors {
         /// Descriptor centres with the number of visits to deposit at each.
         deposits: Vec<(Array1<f64>, u64)>,
+        /// Height of each foreign deposit relative to the chain's own; 1/N
+        /// holds the total deposition rate of N walkers at one walker's.
+        weight: f64,
     },
     /// Occupancy certificate: stop this replica.
     ///
@@ -1697,10 +1700,10 @@ where
                     }
                     None
                 }
-                CheckpointAction::DepositDescriptors { deposits } => {
+                CheckpointAction::DepositDescriptors { deposits, weight } => {
                     for (centre, count) in &deposits {
                         for _ in 0..*count {
-                            bias.deposit(centre.view(), cfg.temperature);
+                            bias.deposit_scaled(centre.view(), cfg.temperature, weight);
                         }
                         shared_deposits += usize::try_from(*count).unwrap_or(usize::MAX);
                     }

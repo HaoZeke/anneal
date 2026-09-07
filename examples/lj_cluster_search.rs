@@ -7222,6 +7222,12 @@ fn run_history_ensembles(
     // Multiple-walker sharing of the bias itself: every chain's hop visits
     // reach every other chain at the next checkpoint.
     let shared_bias = std::env::var("SHARED_BIAS").is_ok_and(|v| v == "1");
+    // Height of a foreign deposit relative to an own one; 1/N keeps the
+    // total deposition rate at one walker's (Laio et al. 2005).
+    let shared_bias_weight: f64 = std::env::var("SHARED_BIAS_WEIGHT")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(1.0);
     let policy = HistoryMembership::parse(std::env::var("HISTORY_POLICY").ok().as_deref())
         .unwrap_or_else(|error| panic!("{error}"));
     let checkpoint_interval: usize = std::env::var("HISTORY_CHECKPOINT")
@@ -7284,7 +7290,7 @@ fn run_history_ensembles(
         .map(|replica| budget / replicas + usize::from(replica < budget % replicas))
         .collect();
     println!(
-        "  history ensembles: {} replicas, {} history, {} membership, shared bias {}, budgets {:?}, \
+        "  history ensembles: {} replicas, {} history, {} membership, shared bias {} weight {}, budgets {:?}, \
          checkpoint {checkpoint_interval}, witness {witness_name}, shared deposits {}, \
          mechanisms {}, executable sha256 {}",
         replicas,
@@ -7297,6 +7303,7 @@ fn run_history_ensembles(
         },
         policy.name(),
         shared_bias,
+        shared_bias_weight,
         budgets,
         cfg.shared_deposits,
         opts.join(","),
@@ -7385,7 +7392,10 @@ fn run_history_ensembles(
                             if deposits.is_empty() {
                                 CheckpointAction::Continue
                             } else {
-                                CheckpointAction::DepositDescriptors { deposits }
+                                CheckpointAction::DepositDescriptors {
+                                    deposits,
+                                    weight: shared_bias_weight,
+                                }
                             }
                         };
                         let mut rng = rand::rngs::StdRng::seed_from_u64(replica_seed);

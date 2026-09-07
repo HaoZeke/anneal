@@ -880,6 +880,20 @@ impl<F: Fingerprint> Bias for BasinBias<F> {
     }
 
     fn deposit(&mut self, s: ArrayView1<f64>, temp: f64) {
+        self.deposit_scaled(s, temp, 1.0);
+    }
+}
+
+impl<F: Fingerprint> BasinBias<F> {
+    /// A deposit at `scale` times the configured height.
+    ///
+    /// For visits made by other walkers into a shared bias: with N walkers
+    /// the deposition rate is N-fold, and the reconstruction error grows
+    /// with that rate (Laio et al. 2005), so foreign hills are scaled by
+    /// 1/N to hold the rate at one walker's. The well-tempered factor and
+    /// the merge radius apply unchanged; a new basin opens at the scaled
+    /// height.
+    pub fn deposit_scaled(&mut self, s: ArrayView1<f64>, temp: f64, scale: f64) {
         let denom = (self.gamma - 1.0) * temp;
         match self.lookup(s) {
             Some(i) => {
@@ -905,13 +919,13 @@ impl<F: Fingerprint> Bias for BasinBias<F> {
                 } else {
                     0.0
                 };
-                let w = (self.w0 + entropy) * (-self.v[i] / denom).exp();
+                let w = scale * (self.w0 + entropy) * (-self.v[i] / denom).exp();
                 self.v[i] += w;
                 self.index.bump(i);
             }
             None => {
                 self.index.push(s.to_owned());
-                self.v.push(self.w0);
+                self.v.push(scale * self.w0);
                 let i = self.index.n_basins() - 1;
                 self.index.bump(i);
             }
