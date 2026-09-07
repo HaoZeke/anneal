@@ -47,7 +47,9 @@ fn unsettled_objective_calls(charged: usize, recorded: usize) -> Option<u64> {
 }
 
 #[cfg(feature = "ira")]
-use anneal_core::shape::{IraMetric, IraStructureWitness};
+use anneal_core::shape::IraStructureWitness;
+#[cfg(all(feature = "ira", any(test, not(feature = "bank-rpc"))))]
+use anneal_core::shape::IraMetric;
 
 fn apply_boolean_options(cfg: &mut Config, opts: &[&str]) {
     for option in opts {
@@ -146,6 +148,7 @@ fn apply_boolean_options(cfg: &mut Config, opts: &[&str]) {
 /// Occupancy catalog: leftover-SOAP packing key plus AS-KMC height
 /// on the occupied well. Not the paper-budget recommended hop, and
 /// not applied on CATALOG_RPC startup.
+#[cfg(test)]
 fn apply_occupancy_superbasin(cfg: &mut Config, n: usize) {
     let sb = Config::packing_superbasin(n);
     cfg.adaptive_height = sb.adaptive_height;
@@ -2002,15 +2005,15 @@ fn main() {
         // buys thirty sweeps and a period of 10 buys a hundred and fifty. A
         // ladder cannot transport anything in thirty sweeps, which is why the
         // period is on the command line rather than fixed.
-        if let Ok(p) = std::env::var("SWAP_PERIOD") {
-            if let Ok(v) = p.parse::<usize>() {
-                cfg.swap_period = v.max(1);
-            }
+        if let Ok(p) = std::env::var("SWAP_PERIOD")
+            && let Ok(v) = p.parse::<usize>()
+        {
+            cfg.swap_period = v.max(1);
         }
-        if let Ok(a) = std::env::var("LADDER_ACCEPT") {
-            if let Ok(v) = a.parse::<f64>() {
-                cfg.ladder_target_accept = v.clamp(0.01, 0.95);
-            }
+        if let Ok(a) = std::env::var("LADDER_ACCEPT")
+            && let Ok(v) = a.parse::<f64>()
+        {
+            cfg.ladder_target_accept = v.clamp(0.01, 0.95);
         }
         cfg.bias_by_rung = opts.contains(&"rungbias");
         // The top is a knob with a ceiling, not a free win: the ladder
@@ -2494,7 +2497,7 @@ fn main() {
         } else if let Some(table) = core_table.as_ref() {
             use anneal_core::coreclass::CoreVerdict;
             use anneal_core::corekey::motif_class;
-            use rand::{Rng, SeedableRng};
+            use rand::SeedableRng;
             let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
             let start = random_cluster(n, 0.7, cfg.min_separation, &mut rng);
             let mut bias = BasinBias::new(
@@ -3031,62 +3034,6 @@ fn archive_cover_index(replica: u32, leave: usize) -> usize {
     pick_leave_cover(n, &mut rng)
 }
 
-/// Walk coordinates so leftover-SOAP / ACE follows the coordinator hole
-/// in the shared occupied cloud. That hole is the ensemble superbasin
-/// list, not this replica's private well trail.
-#[cfg(feature = "bank-rpc")]
-fn step_toward_catalog_hole(
-    x: ArrayView1<f64>,
-    target: &[f64],
-    space: &anneal_core::descriptor_space::DescriptorSpace,
-    species: Option<&[u32]>,
-    length_scale: f64,
-) -> Option<Array1<f64>> {
-    use anneal_core::catalog_policy::proposal::pullback_increment;
-    use anneal_core::descriptor_space::pullback::{PullbackConfig, PullbackConstraints};
-    if target.is_empty() || !length_scale.is_finite() || length_scale <= 0.0 {
-        return None;
-    }
-    let mut cur = x.to_owned();
-    let constraints = PullbackConstraints {
-        frozen_coordinates: vec![false; cur.len()],
-        rigid_group_labels: Vec::new(),
-        remove_translation: true,
-    };
-    let config = PullbackConfig {
-        damping: 1e-3,
-        trust_radius: 2.0,
-        length_scale,
-    };
-    let weights = Array1::ones(target.len());
-    let target = Array1::from(target.to_vec());
-    let mut moved = false;
-    for _ in 0..8 {
-        let desc = space.describe(cur.view(), species).ok()?;
-        if desc.values().len() != target.len() {
-            return None;
-        }
-        let increment = &target - &Array1::from(desc.values().to_vec());
-        let inc_norm = increment.iter().map(|z| z * z).sum::<f64>().sqrt();
-        if inc_norm < 1e-8 {
-            break;
-        }
-        let jacobian = space.jacobian_analytic(cur.view(), species).ok()?;
-        let pulled = pullback_increment(
-            jacobian.view(),
-            increment.view(),
-            weights.view(),
-            Some(cur.view()),
-            &constraints,
-            config,
-        )
-        .ok()?;
-        cur = &cur + pulled.step();
-        moved = true;
-    }
-    moved.then_some(cur)
-}
-
 fn packing_of(x: ArrayView1<f64>, cfg: &Config) -> Array1<f64> {
     #[cfg(feature = "featomic")]
     {
@@ -3227,7 +3174,7 @@ fn bridge_region_of(images: &[f64], dim: usize, descriptor: &[f64], tube: f64) -
     (best_distance <= tube).then_some(best)
 }
 
-#[cfg(feature = "bank-rpc")]
+#[cfg(all(test, feature = "bank-rpc"))]
 fn boundary_crossing_trial<R: rand::Rng + ?Sized>(
     current: ArrayView1<f64>,
     crossing: &anneal_core::catalog_rpc::BoundaryCrossingRecord,
@@ -3260,7 +3207,7 @@ fn boundary_crossing_trial<R: rand::Rng + ?Sized>(
     .ok()
 }
 
-#[cfg(feature = "bank-rpc")]
+#[cfg(all(test, feature = "bank-rpc"))]
 fn population_boundary_trial(
     current: ArrayView1<f64>,
     crossing: &anneal_core::catalog_rpc::BoundaryCrossingRecord,
@@ -3272,7 +3219,7 @@ fn population_boundary_trial(
     boundary_crossing_trial(current, crossing, noise_scale, trust_radius, &mut rng)
 }
 
-#[cfg(feature = "bank-rpc")]
+#[cfg(all(test, feature = "bank-rpc"))]
 fn population_region_trial(
     current: ArrayView1<f64>,
     crossing: Option<&anneal_core::catalog_rpc::BoundaryCrossingRecord>,
@@ -3680,14 +3627,13 @@ fn run_capnp_catalog(
     use anneal_core::catalog_rpc::client::{CatalogClient, ClientConfig};
     use anneal_core::catalog_rpc::{BridgeAssignmentRecord, BridgeCrossingRecord};
     use anneal_core::catalog_rpc::{
-        CatalogIdentity, INCUMBENT_SAMPLE_DRAW, SPARSE_SAMPLE_DRAW, TransitionDestination,
+        CatalogIdentity, INCUMBENT_SAMPLE_DRAW, SPARSE_SAMPLE_DRAW,
     };
     use anneal_core::cooperative_search::ledger::ChargeKind;
     use anneal_core::cooperative_search::{
         CatalogBridgeOutcome, CatalogHoleOutcome, CatalogSampleOutcome, CatalogSamplesOutcome,
         CooperativeRun, PolicyEvidenceOutcome, PolicyRole, PopulationSynchronizationOutcome,
         ProposalFamily, RunManifest, SliceAdoption, SliceQuench, SliceTrace, SliceValidation,
-        TransitionRecordOutcome,
     };
     #[cfg(feature = "ira")]
     use anneal_core::cooperative_search::{RideClaimOutcome, RideReportOutcome};
@@ -4076,11 +4022,6 @@ fn run_capnp_catalog(
         .and_then(|value| value.parse::<f64>().ok())
         .filter(|value| value.is_finite() && *value >= 0.0)
         .unwrap_or(0.05 * run_cfg.length_scale);
-    let transport_radius = std::env::var("CATALOG_TRANSPORT_RADIUS")
-        .ok()
-        .and_then(|value| value.parse::<f64>().ok())
-        .filter(|value| value.is_finite() && *value > 0.0)
-        .unwrap_or(run_cfg.length_scale * (run_cfg.n_points as f64).sqrt());
     let minimum_population_interval = checkpoint_interval
         .checked_mul(2)
         .and_then(|value| value.checked_add(2))
@@ -4476,7 +4417,7 @@ fn run_capnp_catalog(
             .expect("quench descriptor batch must enter the cooperative ledger");
         // One offer per checkpoint. A slice can hold hundreds of validated
         // quenches; each offer runs coordinator DECAF and parks the ensemble.
-        let mut freshest_boundary = boundary_candidates.into_iter().min_by(|left, right| {
+        let freshest_boundary = boundary_candidates.into_iter().min_by(|left, right| {
             left.energy
                 .total_cmp(&right.energy)
                 .then_with(|| left.event_sequence.cmp(&right.event_sequence))
@@ -5244,7 +5185,7 @@ fn run_capnp_catalog(
         if let Some(here) = snapshot.current_state().as_slice() {
             let neighbor_draws = (0..anneal_core::catalog::INVERT_NEIGHBOR_DRAWS).map(|step| {
                 ((u64::from(replica) << 33)
-                    ^ (checkpoint_sequence as u64).wrapping_mul(0xBF58_476D_1CE4_E5B9)
+                    ^ checkpoint_sequence.wrapping_mul(0xBF58_476D_1CE4_E5B9)
                     ^ (step as u64).wrapping_mul(0x94D0_049B_B133_111E))
                     & (u64::MAX >> 2)
             });
@@ -5287,8 +5228,7 @@ fn run_capnp_catalog(
                         if anneal_core::soap::fivefold_axis_count(snapshot.current_state()) >= 2 {
                             let mut residual_rng = rand::rngs::StdRng::seed_from_u64(
                                 (u64::from(replica) << 17)
-                                    ^ (checkpoint_sequence as u64)
-                                        .wrapping_mul(0x9E37_79B9_7F4A_7C15)
+                                    ^ checkpoint_sequence.wrapping_mul(0x9E37_79B9_7F4A_7C15)
                                     ^ extra_cover as u64,
                             );
                             anneal_core::soap::step_away_fivefold(
@@ -5423,9 +5363,9 @@ fn run_capnp_catalog(
                     checkpoint_charged,
                     snapshot.best_energy(),
                     |_cooperative, _slice_sequence| {
-                        return CheckpointAction::Retire {
+                        CheckpointAction::Retire {
                             reason: certificate.as_str().to_owned(),
-                        };
+                        }
                     },
                 );
             }
@@ -5863,7 +5803,7 @@ fn run_capnp_catalog(
                         // SPARSE_SAMPLE_DRAW, which mean a policy rather than
                         // a slot.
                         ((u64::from(replica) << 40)
-                            ^ (checkpoint_sequence as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15)
+                            ^ checkpoint_sequence.wrapping_mul(0x9E37_79B9_7F4A_7C15)
                             ^ (step as u64).wrapping_mul(0x85EB_CA6B))
                             & (u64::MAX >> 2)
                     });
@@ -5972,7 +5912,7 @@ fn run_capnp_catalog(
                     // that varies between consecutive Leaves from one
                     // replica rather than only between replicas.
                     let bits = (u64::from(replica) << 17)
-                        ^ (checkpoint_sequence as u64).wrapping_mul(0xBF58_476D_1CE4_E5B9)
+                        ^ checkpoint_sequence.wrapping_mul(0xBF58_476D_1CE4_E5B9)
                         ^ (leave_quiet as u64).wrapping_mul(0x94D0_49BB_1331_11EB);
                     (bits as f64) / (u64::MAX as f64)
                 };
@@ -5980,7 +5920,7 @@ fn run_capnp_catalog(
                 match occupancy_leave_by_birth(
                     other_family.is_some(),
                     policy.packing_saturated,
-                    policy.occupied_family_count as usize,
+                    policy.occupied_family_count,
                     policy.ei_exhausted,
                     p_new,
                     birth_draw,
