@@ -3750,6 +3750,71 @@ impl PhaseTally {
     }
 }
 
+/// Which occupancy certificates this replica has already printed.
+#[derive(Default)]
+struct RetireAnnouncements {
+    putative: bool,
+    done: bool,
+}
+
+/// Occupancy retire phase: when the coordinator's policy evidence certifies
+/// the ensemble's coverage (certified attractor, saturated packing census,
+/// leftover dwell, occupied families at the measured floor) and the
+/// retire rule accepts it for a cluster-shaped putative structure, the
+/// replica retires with the certificate as its reason. A certificate
+/// that is complete but not yet retirable is announced once as putative.
+#[cfg(feature = "bank-rpc")]
+fn occupancy_retire_phase(
+    announced: &mut RetireAnnouncements,
+    policy: &anneal_core::catalog_policy::CatalogPolicyInput,
+    snapshot: &ChainCheckpoint<'_>,
+) -> Option<String> {
+    let n_occupied_families = policy.occupied_family_count;
+    let certificate = occupancy_complete_at(
+        policy.mixing.certified_attractor,
+        policy.packing_saturated,
+        policy.leftover_dwell,
+        n_occupied_families,
+        policy.min_families,
+    )?;
+    let putative = snapshot
+        .best_state()
+        .map(|state| state.to_vec())
+        .unwrap_or_else(|| snapshot.current_state().to_vec());
+    if occupancy_retire_at(
+        certificate,
+        policy.packing_saturated,
+        policy.leftover_dwell,
+        policy.ei_exhausted,
+        n_occupied_families,
+        policy.min_families,
+    ) && occupancy_is_cluster(&putative)
+    {
+        if !announced.done {
+            println!(
+                "  done {}  hops {}  best {:.6}",
+                certificate.as_str(),
+                snapshot.hops(),
+                snapshot.best_energy()
+            );
+            let _ = std::io::stdout().flush();
+            announced.done = true;
+        }
+        return Some(certificate.as_str().to_owned());
+    }
+    if !announced.putative {
+        println!(
+            "  putative {}  hops {}  best {:.6}",
+            certificate.as_str(),
+            snapshot.hops(),
+            snapshot.best_energy()
+        );
+        let _ = std::io::stdout().flush();
+        announced.putative = true;
+    }
+    None
+}
+
 /// State of the census restart phase across checkpoints.
 #[derive(Default)]
 struct RestartState {
@@ -4591,8 +4656,7 @@ fn run_capnp_catalog(
     let mut best_at_checkpoint = f64::INFINITY;
     let mut announced_score = false;
     let mut announced_personal = None;
-    let mut announced_putative = false;
-    let mut announced_done = false;
+    let mut announced = RetireAnnouncements::default();
     let mut population_progress = PopulationEpochProgress::default();
     let mut stall = 0u32;
     #[cfg(feature = "bank-rpc")]
@@ -5860,61 +5924,17 @@ fn run_capnp_catalog(
                     descriptor.clone(),
                     policy.leftover_lambda,
                 );
-                let n_occupied_families = policy.occupied_family_count;
-                if let Some(certificate) = occupancy_complete_at(
-                    policy.mixing.certified_attractor,
-                    policy.packing_saturated,
-                    policy.leftover_dwell,
-                    n_occupied_families,
-                    policy.min_families,
-                ) {
-                    let saturated = policy.packing_saturated;
-                    let putative = snapshot
-                        .best_state()
-                        .map(|state| state.to_vec())
-                        .unwrap_or_else(|| snapshot.current_state().to_vec());
-                    if occupancy_retire_at(
-                        certificate,
-                        saturated,
-                        policy.leftover_dwell,
-                        policy.ei_exhausted,
-                        n_occupied_families,
-                        policy.min_families,
-                    ) && occupancy_is_cluster(&putative)
-                    {
-                        if !announced_done {
-                            println!(
-                                "  done {}  hops {}  best {:.6}",
-                                certificate.as_str(),
-                                snapshot.hops(),
-                                snapshot.best_energy()
-                            );
-                            let _ = std::io::stdout().flush();
-                            announced_done = true;
-                        }
-                        complete_checkpoint_trace(
-                            &mut cooperative,
-                            replica,
-                            &mut slice_sequence,
-                            checkpoint_charged,
-                            snapshot.best_energy(),
-                            |_cooperative, _slice_sequence| (),
-                        );
-                        phases.fire("retire");
-                        return CheckpointAction::Retire {
-                            reason: certificate.as_str().to_owned(),
-                        };
-                    }
-                    if !announced_putative {
-                        println!(
-                            "  putative {}  hops {}  best {:.6}",
-                            certificate.as_str(),
-                            snapshot.hops(),
-                            snapshot.best_energy()
-                        );
-                        let _ = std::io::stdout().flush();
-                        announced_putative = true;
-                    }
+                if let Some(reason) = occupancy_retire_phase(&mut announced, &policy, &snapshot) {
+                    complete_checkpoint_trace(
+                        &mut cooperative,
+                        replica,
+                        &mut slice_sequence,
+                        checkpoint_charged,
+                        snapshot.best_energy(),
+                        |_cooperative, _slice_sequence| (),
+                    );
+                    phases.fire("retire");
+                    return CheckpointAction::Retire { reason };
                 }
                 let policy_trace = cooperative
                     .events()
