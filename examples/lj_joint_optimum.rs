@@ -1034,15 +1034,17 @@ fn main() -> Result<(), Box<dyn Error>> {
                     let first = ensemble
                         .runs
                         .iter()
-                        .flat_map(|run| &run.aggregate_improvements)
-                        .filter(|(_, energy)| *energy <= target + TARGET_TOLERANCE)
-                        .map(|(charged, _)| *charged)
-                        .min();
+                        .flat_map(|run| {
+                            run.aggregate_improvements.iter().zip(&run.outcome.improvements)
+                                .map(|((charged, energy), (hops, _, _, _))| (*charged, *energy, *hops))
+                        })
+                        .filter(|(_, energy, _)| *energy <= target + TARGET_TOLERANCE)
+                        .min_by_key(|(charged, _, _)| *charged);
                     let encounter = first.map_or(
                         Encounter::Censored {
                             charged: ensemble.charged,
                         },
-                        |charged| Encounter::Found { charged, hops: 0 },
+                        |(charged, _, hops)| Encounter::Found { charged, hops },
                     );
                     let best = ensemble
                         .runs
@@ -1059,7 +1061,9 @@ fn main() -> Result<(), Box<dyn Error>> {
                         json!({
                             "kind": "lj_joint_optimum_ensemble",
                             "arm": label, "seed": seed, "target_found": first.is_some(),
-                            "first_aggregate_charged": first, "charged": ensemble.charged,
+                            "first_aggregate_charged": first.map(|(charged, _, _)| charged),
+                            "first_replica_hop": first.map(|(_, _, hops)| hops),
+                            "charged": ensemble.charged,
                             "best_energy": best, "gap": best - target,
                             "minimum_count": ensemble.minimum_count,
                             "minimum_count_semantics": if shared { "shared-exact-identities" } else { "sum-private-identities" },
