@@ -4737,10 +4737,6 @@ fn run_capnp_catalog(
                 }
             }
         }
-        cooperative.set_on_published_prize(published_energy_score(
-            snapshot.best_energy(),
-            reference(cfg.n_points),
-        ));
         // Hear a packing another replica published. Hops stay silent;
         // this is the message that moves a chain onto a deeper well
         // the ensemble already holds. PolicyState Leave is not that
