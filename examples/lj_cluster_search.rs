@@ -4350,7 +4350,7 @@ fn run_capnp_catalog(
                     let peers: Vec<_> = bus.peers().collect();
                     let (updates, crowd) = census_nearby_updates(
                         &mut bus_last_minimum,
-                checkpoint_sequence,
+                        checkpoint_sequence,
                         snapshot.current_energy(),
                         here,
                         &peers,
@@ -6514,6 +6514,40 @@ mod census_policy_tests {
     }
 
     #[test]
+    fn every_checkpoint_phase_classifies_the_occupied_geometry() {
+        let ico = packing_coordinates(include_str!("../tests/fixtures/lj75_ico.xyz"));
+        let marks = packing_coordinates(include_str!("../tests/fixtures/lj75_marks.xyz"));
+        let peer = PeerMinimum {
+            replica: 1,
+            hops: 7,
+            energy: -396.0,
+            coordinates: ico.clone(),
+        };
+        for checkpoint_sequence in 1..=8 {
+            let mut anchor = None;
+            let mut nearby = std::collections::HashMap::new();
+            let (updates, crowd) =
+                census_nearby_updates(&mut anchor, 0, -396.0, &ico, &[&peer], &[], &nearby);
+            nearby.extend(updates);
+            assert_eq!(crowd, 1);
+            let (updates, crowd) = census_nearby_updates(
+                &mut anchor,
+                checkpoint_sequence,
+                -396.0,
+                &marks,
+                &[&peer],
+                &[],
+                &nearby,
+            );
+            assert_eq!(
+                crowd, 0,
+                "checkpoint {checkpoint_sequence} cannot reuse another occupied geometry's crowd"
+            );
+            assert_eq!(updates, vec![(1, false)]);
+        }
+    }
+
+    #[test]
     fn incompatible_peer_geometry_cannot_remain_in_the_crowd() {
         let ico = packing_coordinates(include_str!("../tests/fixtures/lj75_ico.xyz"));
         let mut peer = PeerMinimum {
@@ -6530,7 +6564,8 @@ mod census_policy_tests {
         assert_eq!(crowd, 1);
         peer.coordinates.truncate(6);
         let (updates, crowd) = census_nearby_updates(
-            &mut anchor, 4,
+            &mut anchor,
+            4,
             -396.0,
             &ico,
             &[&peer],

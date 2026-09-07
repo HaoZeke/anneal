@@ -14,7 +14,10 @@ use std::collections::BTreeMap;
 
 use ndarray::{Array1, ArrayView1};
 
-use crate::soap::{SoapSpec, local_nu3_z};
+use crate::soap::SoapSpec;
+
+mod preparation;
+use preparation::packing_rows;
 
 /// Leader-clustering radius on per-center `local_nu3_z` rows. Same number
 /// as `examples/decaf_local_classes.rs` and `rewrite_2026/data/decaf/decaf_r14.txt`.
@@ -443,7 +446,7 @@ impl PackingBook {
         if atoms < MINIMUM_PACKING_ATOMS {
             return None;
         }
-        let loc = local_nu3_z(ArrayView1::from(coordinates), PACKING_SPEC, None);
+        let loc = packing_rows(coordinates);
         if loc.nrows() == 0 || loc.ncols() == 0 {
             return None;
         }
@@ -467,7 +470,7 @@ impl PackingBook {
         if atoms < MINIMUM_PACKING_ATOMS {
             return None;
         }
-        let loc = local_nu3_z(ArrayView1::from(coordinates), PACKING_SPEC, None);
+        let loc = packing_rows(coordinates);
         if loc.nrows() == 0 || loc.ncols() == 0 {
             return None;
         }
@@ -626,7 +629,7 @@ pub fn atom_decaf_classes(coordinates: &[f64]) -> Vec<usize> {
     if !coordinates.len().is_multiple_of(3) {
         return Vec::new();
     }
-    let loc = local_nu3_z(ArrayView1::from(coordinates), PACKING_SPEC, None);
+    let loc = packing_rows(coordinates);
     let n_at = loc.nrows();
     if n_at == 0 {
         return Vec::new();
