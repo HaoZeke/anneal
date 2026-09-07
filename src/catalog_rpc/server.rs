@@ -1354,11 +1354,6 @@ fn process_request(
             duplicate: false,
             ..
         })
-    ) && !matches!(
-        request.operation,
-        CatalogOperation::PolicyState { .. }
-            | CatalogOperation::RecordVisit { .. }
-            | CatalogOperation::RecordTransition { .. }
     ) && let Err(error) = append_journal(config, &request)
     {
         state.journal_broken = true;
