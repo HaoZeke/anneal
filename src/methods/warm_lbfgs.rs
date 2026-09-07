@@ -134,18 +134,6 @@ impl WarmLbfgs {
         self.minimize_watched(x0, max_iter, fg, |_, _| true)
     }
 
-    /// Relaxes `x0`, offering each accepted iterate to `watch`.
-    ///
-    /// `watch` receives the iteration index and the value at that iterate, and
-    /// returning `false` ends the relaxation there. The point is a caller that
-    /// stops on a decision rather than on an iteration count: a screening pass
-    /// exists to answer one question, and the trajectory it produces says when
-    /// the answer is settled.
-    ///
-    /// The hook sits at the top of the iteration, not inside the line search,
-    /// so what it sees is always an accepted point with its value and gradient
-    /// consistent. Stopping mid-search would return a trial step the optimizer
-    /// had not adopted.
     /// Relaxes `x0`, consulting `recognise` at each accepted iterate.
     ///
     /// The warm layer's face of [`rgmin::Lbfgs::minimize_recognized`]:
@@ -170,6 +158,12 @@ impl WarmLbfgs {
         self.inner.minimize_recognized(x0, max_iter, fg, recognise)
     }
 
+    /// Relaxes `x0`, offering each accepted iterate to `watch`.
+    ///
+    /// `watch` receives the iteration index and the value at that iterate;
+    /// returning `false` ends the relaxation at that accepted point. The hook
+    /// does not interrupt a line search, so the returned coordinates and value
+    /// remain consistent. `fg` returns `None` when its budget is exhausted.
     pub fn minimize_watched<F, W>(
         &mut self,
         x0: ArrayView1<f64>,
