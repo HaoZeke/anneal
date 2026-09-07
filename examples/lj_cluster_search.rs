@@ -4329,6 +4329,7 @@ fn run_capnp_catalog(
             )
         });
     let mut next_gossip = coop_gossip.map_or(usize::MAX, |(interval, _, _)| interval);
+    let sync_policy = std::env::var("CATALOG_SYNC_POLICY").is_ok_and(|v| v == "1");
     let mut gossip_published = 0usize;
     let mut gossip_merged = 0usize;
     let mut gossip_merge: Option<CheckpointAction> = None;
@@ -5563,8 +5564,13 @@ fn run_capnp_catalog(
                         |_cooperative, _slice_sequence| CheckpointAction::Continue,
                     );
                 }
-                let policy = match cooperative
-                    .try_policy_input_with_lambda(
+                // The asynchronous request returns LocalFallback until the
+                // next checkpoint, so a decision acts on a slice-old snapshot
+                // and half the checkpoints skip the policy. CATALOG_SYNC_POLICY=1
+                // waits for the reply under the client's io timeout instead,
+                // which is the measured hop-cost gap paid for a current decision.
+                let policy_outcome = if sync_policy {
+                    cooperative.policy_input_with_lambda(
                         replica,
                         descriptor.clone(),
                         snapshot.current_energy(),
@@ -5572,6 +5578,17 @@ fn run_capnp_catalog(
                         stall,
                         local_deepened,
                     )
+                } else {
+                    cooperative.try_policy_input_with_lambda(
+                        replica,
+                        descriptor.clone(),
+                        snapshot.current_energy(),
+                        leave_path.max_lambda(),
+                        stall,
+                        local_deepened,
+                    )
+                };
+                let policy = match policy_outcome
                     .expect("coordinator policy evidence must preserve local invariants")
                 {
                     PolicyEvidenceOutcome::Remote(input) => {
