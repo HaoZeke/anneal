@@ -5441,6 +5441,17 @@ fn run_capnp_catalog(
             .ok()
             .and_then(|v| v.parse().ok())
             .unwrap_or(20_000);
+        if std::env::var("CATALOG_CENSUS_TRACE").is_ok_and(|v| v == "1")
+            && checkpoint_sequence.is_multiple_of(10)
+        {
+            println!(
+                "  census hops {}  visits {}  quiet {}  energy {:.6}",
+                snapshot.hops(),
+                policy.census.local_basin_visits(),
+                snapshot.hops().saturating_sub(hear_last_best_hop),
+                snapshot.current_energy()
+            );
+        }
         if census_restart_visits > 0
             && policy.census.local_basin_visits() >= census_restart_visits
             && snapshot.hops().saturating_sub(hear_last_best_hop) >= census_restart_quiet
