@@ -82,8 +82,22 @@ pub struct FunnelModel {
     fixed_prior_mean: Option<f64>,
     xs: Vec<Array1<f64>>,
     ys: Vec<f64>,
+    /// Square roots of the simplex weights of each observation, when the
+    /// observation is on the simplex; the kernel between two embedded
+    /// points is then one pass with no allocation, where it was two
+    /// normalisations and a vector of square roots per pair.
+    roots: Vec<Option<Vec<f64>>>,
     /// Bumped whenever an observation changes the data.
     version: u64,
+    /// Data version whose factorisation failed, so a prediction does not
+    /// refit the model until the data moves. A failed fit that was
+    /// retried on every prediction cost one O(n^3) fit per predicted
+    /// site, and the max-EI sweep predicts at every site: measured with
+    /// perf as the coordinator's request thread spending 88 percent of
+    /// its cycles in the kernel and the ensemble frozen.
+    fit_failed_at: Option<u64>,
+    /// Fits attempted; tests pin the count.
+    fits: u64,
     /// Cholesky factor of the kernel matrix plus noise, lower triangular.
     chol: Option<Array2<f64>>,
     /// `K^-1 (y - prior)`, precomputed for the mean.
@@ -131,7 +145,10 @@ impl FunnelModel {
             fixed_prior_mean: None,
             xs: Vec::new(),
             ys: Vec::new(),
+            roots: Vec::new(),
             version: 0,
+            fit_failed_at: None,
+            fits: 0,
             chol: None,
             alpha: None,
         }
@@ -169,21 +186,66 @@ impl FunnelModel {
     }
 
     fn kernel(&self, a: ArrayView1<f64>, b: ArrayView1<f64>) -> f64 {
+        let (ra, rb) = (self.embed(a), self.embed(b));
+        self.kernel_embedded(a, ra.as_deref(), b, rb.as_deref())
+    }
+
+    /// Fits attempted so far.
+    pub fn fit_count(&self) -> u64 {
+        self.fits
+    }
+
+    /// The simplex embedding of a point: square roots of its weights when
+    /// the metric is the simplex one and the point is on the simplex.
+    fn embed(&self, x: ArrayView1<f64>) -> Option<Vec<f64>> {
+        match self.metric {
+            DescriptorMetric::AutoSimplex => {
+                simplex_weights(x).map(|p| p.iter().map(|w| w.sqrt()).collect())
+            }
+            DescriptorMetric::Euclidean => None,
+        }
+    }
+
+    /// Kernel between two points given their embeddings: the Hellinger
+    /// kernel when both embed, the squared-exponential on the raw
+    /// coordinates otherwise.
+    fn kernel_embedded(
+        &self,
+        a: ArrayView1<f64>,
+        a_root: Option<&[f64]>,
+        b: ArrayView1<f64>,
+        b_root: Option<&[f64]>,
+    ) -> f64 {
         let amp2 = self.amplitude * self.amplitude;
         let ell2 = self.length_scale * self.length_scale;
-        match self.metric {
-            DescriptorMetric::AutoSimplex => match (simplex_weights(a), simplex_weights(b)) {
-                (Some(p), Some(q)) => amp2 * (-hellinger2(&p, &q) / ell2).exp(),
-                _ => {
-                    let d2: f64 = a.iter().zip(b.iter()).map(|(u, v)| (u - v) * (u - v)).sum();
-                    amp2 * (-0.5 * d2 / ell2).exp()
-                }
-            },
-            DescriptorMetric::Euclidean => {
+        match (a_root, b_root) {
+            (Some(p), Some(q)) => amp2 * (-hellinger2_roots(p, q) / ell2).exp(),
+            _ => {
                 let d2: f64 = a.iter().zip(b.iter()).map(|(u, v)| (u - v) * (u - v)).sum();
                 amp2 * (-0.5 * d2 / ell2).exp()
             }
         }
+    }
+
+    /// Kernel between observation `i` and an embedded point.
+    fn kernel_site(&self, i: usize, x: ArrayView1<f64>, x_root: Option<&[f64]>) -> f64 {
+        self.kernel_embedded(self.xs[i].view(), self.roots[i].as_deref(), x, x_root)
+    }
+
+    /// Kernel between two observations.
+    fn kernel_pair(&self, i: usize, j: usize) -> f64 {
+        self.kernel_embedded(
+            self.xs[i].view(),
+            self.roots[i].as_deref(),
+            self.xs[j].view(),
+            self.roots[j].as_deref(),
+        )
+    }
+
+    /// Whether the model needs a fit before it can predict: no factor
+    /// held, and the last fit did not fail on this same data.
+    fn needs_fit(&self) -> bool {
+        self.chol.is_none() && self.fit_failed_at != Some(self.version)
     }
 
     /// Changes to the observed data since this model was created.
@@ -238,6 +300,7 @@ impl FunnelModel {
         let extended_cholesky = self
             .fixed_prior_mean
             .and_then(|_| self.extended_cholesky(x));
+        self.roots.push(self.embed(x));
         self.xs.push(x.to_owned());
         self.ys.push(y);
         if let Some(cholesky) = extended_cholesky {
@@ -322,9 +385,14 @@ impl FunnelModel {
             .iter()
             .map(|index| self.xs[*index].clone())
             .collect();
+        self.roots = indices
+            .iter()
+            .map(|index| self.roots[*index].clone())
+            .collect();
         self.ys = indices.iter().map(|index| self.ys[*index]).collect();
         self.chol = None;
         self.alpha = None;
+        self.version = self.version.wrapping_add(1);
         FunnelCompression {
             input_count,
             retained_rank,
@@ -348,7 +416,7 @@ impl FunnelModel {
                 .iter()
                 .map(|held| held[index] * held[pivot])
                 .sum::<f64>();
-            let covariance = self.kernel(self.xs[index].view(), self.xs[pivot].view());
+            let covariance = self.kernel_pair(index, pivot);
             column[index] = (covariance - projection) / denominator;
         }
         selected[pivot] = true;
@@ -368,10 +436,9 @@ impl FunnelModel {
         if held.nrows() != count || held.ncols() != count {
             return None;
         }
-        let covariance = self
-            .xs
-            .iter()
-            .map(|site| self.kernel(site.view(), x))
+        let x_root = self.embed(x);
+        let covariance = (0..count)
+            .map(|i| self.kernel_site(i, x, x_root.as_deref()))
             .collect::<Array1<_>>();
         let projection = forward_substitute(held, &covariance);
         let conditional = self.kernel(x, x) + self.noise * self.noise
@@ -399,54 +466,54 @@ impl FunnelModel {
             .map(|cholesky| alpha_from_cholesky(cholesky, &self.ys, self.prior_mean));
     }
 
-    /// Refits the factorisation. Called automatically when needed.
+    /// Factorise the kernel matrix. When the plain Cholesky meets a
+    /// non-positive pivot (near-duplicate sites, which packing histograms
+    /// produce freely) the diagonal is jittered upward by decades, from the
+    /// larger of the noise and the amplitude's rounding floor up to one
+    /// millionth of the signal variance; a matrix that still fails is
+    /// remembered as failed for this data version.
     fn fit(&mut self) {
         let n = self.xs.len();
         if n == 0 {
             return;
         }
+        self.fits += 1;
         self.prior_mean = self
             .fixed_prior_mean
             .unwrap_or_else(|| self.ys.iter().sum::<f64>() / n as f64);
         let mut k = Array2::<f64>::zeros((n, n));
         for i in 0..n {
-            for j in 0..n {
-                k[[i, j]] = self.kernel(self.xs[i].view(), self.xs[j].view());
-            }
-            k[[i, i]] += self.noise * self.noise;
-        }
-        // Cholesky, lower triangular.
-        let mut l = Array2::<f64>::zeros((n, n));
-        for i in 0..n {
             for j in 0..=i {
-                let mut s = k[[i, j]];
-                for m in 0..j {
-                    s -= l[[i, m]] * l[[j, m]];
-                }
-                if i == j {
-                    if s <= 0.0 {
-                        // Not positive definite, which happens only if the
-                        // noise was set to zero; refuse rather than return a
-                        // mean built from a broken factorisation.
-                        self.chol = None;
-                        self.alpha = None;
-                        return;
-                    }
-                    l[[i, j]] = s.sqrt();
-                } else {
-                    l[[i, j]] = s / l[[j, j]];
-                }
+                let value = self.kernel_pair(i, j);
+                k[[i, j]] = value;
+                k[[j, i]] = value;
             }
         }
-        // alpha = K^-1 (y - prior), by forward then back substitution.
-        let a = alpha_from_cholesky(&l, &self.ys, self.prior_mean);
-        self.chol = Some(l);
-        self.alpha = Some(a);
+        let amp2 = self.amplitude * self.amplitude;
+        let mut jitter = self.noise * self.noise;
+        let ceiling = amp2 * 1e-6;
+        loop {
+            if let Some(l) = cholesky_with_jitter(&k, jitter) {
+                let a = alpha_from_cholesky(&l, &self.ys, self.prior_mean);
+                self.chol = Some(l);
+                self.alpha = Some(a);
+                self.fit_failed_at = None;
+                return;
+            }
+            let next = (jitter * 10.0).max(amp2 * 1e-12);
+            if next > ceiling {
+                break;
+            }
+            jitter = next;
+        }
+        self.chol = None;
+        self.alpha = None;
+        self.fit_failed_at = Some(self.version);
     }
 
     /// Posterior mean and standard deviation at a morphology.
     pub fn predict(&mut self, x: ArrayView1<f64>) -> (f64, f64) {
-        if self.chol.is_none() {
+        if self.needs_fit() {
             self.fit();
         }
         let n = self.xs.len();
@@ -457,7 +524,10 @@ impl FunnelModel {
             (Some(l), Some(a)) => (l, a),
             _ => return (self.prior_mean, self.amplitude),
         };
-        let ks: Array1<f64> = (0..n).map(|i| self.kernel(self.xs[i].view(), x)).collect();
+        let x_root = self.embed(x);
+        let ks: Array1<f64> = (0..n)
+            .map(|i| self.kernel_site(i, x, x_root.as_deref()))
+            .collect();
         let mean = self.prior_mean + ks.iter().zip(a.iter()).map(|(p, q)| p * q).sum::<f64>();
         // v = L^-1 ks, and the variance is k(x,x) - v'v.
         let mut v = Array1::<f64>::zeros(n);
@@ -477,7 +547,7 @@ impl FunnelModel {
         &mut self,
         sites: &[ArrayView1<'_, f64>],
     ) -> (Vec<f64>, Array2<f64>) {
-        if self.chol.is_none() {
+        if self.needs_fit() {
             self.fit();
         }
         let count = sites.len();
@@ -496,10 +566,9 @@ impl FunnelModel {
         let mut projections = Vec::with_capacity(count);
         let mut means = Vec::with_capacity(count);
         for site in sites {
-            let kernel = self
-                .xs
-                .iter()
-                .map(|observed| self.kernel(observed.view(), *site))
+            let site_root = self.embed(*site);
+            let kernel = (0..self.xs.len())
+                .map(|i| self.kernel_site(i, *site, site_root.as_deref()))
                 .collect::<Array1<_>>();
             means.push(
                 self.prior_mean
@@ -892,21 +961,18 @@ impl FunnelModel {
         left: ArrayView1<f64>,
         right: ArrayView1<f64>,
     ) -> f64 {
-        if self.chol.is_none() {
+        if self.needs_fit() {
             self.fit();
         }
         let Some(cholesky) = &self.chol else {
             return self.kernel(left, right);
         };
-        let left_kernel = self
-            .xs
-            .iter()
-            .map(|site| self.kernel(site.view(), left))
+        let (left_root, right_root) = (self.embed(left), self.embed(right));
+        let left_kernel = (0..self.xs.len())
+            .map(|i| self.kernel_site(i, left, left_root.as_deref()))
             .collect::<Array1<_>>();
-        let right_kernel = self
-            .xs
-            .iter()
-            .map(|site| self.kernel(site.view(), right))
+        let right_kernel = (0..self.xs.len())
+            .map(|i| self.kernel_site(i, right, right_root.as_deref()))
             .collect::<Array1<_>>();
         let left_solved = forward_substitute(cholesky, &left_kernel);
         let right_solved = forward_substitute(cholesky, &right_kernel);
@@ -974,6 +1040,44 @@ fn simplex_weights(x: ArrayView1<f64>) -> Option<Vec<f64>> {
     Some(x.iter().map(|v| v.max(0.0) / sum).collect())
 }
 
+/// Squared Hellinger distance from the square roots of two weight vectors.
+fn hellinger2_roots(u: &[f64], v: &[f64]) -> f64 {
+    let n = u.len().max(v.len());
+    let mut acc = 0.0;
+    for i in 0..n {
+        let d = u.get(i).copied().unwrap_or(0.0) - v.get(i).copied().unwrap_or(0.0);
+        acc += d * d;
+    }
+    0.5 * acc
+}
+
+/// Lower Cholesky factor of `k + jitter I`, or `None` at a non-positive pivot.
+fn cholesky_with_jitter(k: &Array2<f64>, jitter: f64) -> Option<Array2<f64>> {
+    let n = k.nrows();
+    let mut l = Array2::<f64>::zeros((n, n));
+    for i in 0..n {
+        for j in 0..=i {
+            let mut s = k[[i, j]];
+            if i == j {
+                s += jitter;
+            }
+            for m in 0..j {
+                s -= l[[i, m]] * l[[j, m]];
+            }
+            if i == j {
+                if s <= 0.0 {
+                    return None;
+                }
+                l[[i, j]] = s.sqrt();
+            } else {
+                l[[i, j]] = s / l[[j, j]];
+            }
+        }
+    }
+    Some(l)
+}
+
+#[cfg(test)]
 fn hellinger2(p: &[f64], q: &[f64]) -> f64 {
     let n = p.len().max(q.len());
     let mut acc = 0.0;
@@ -1122,6 +1226,44 @@ fn erf(x: f64) -> f64 {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_sweep_over_near_duplicate_sites_fits_once() {
+        use super::*;
+        // Packing histograms that differ in the tenth digit: a plain
+        // Cholesky with a noise far below the rounding floor of the
+        // amplitude fails, and the failed fit used to be retried by every
+        // prediction of the sweep.
+        let mut m = FunnelModel::new(0.15, 20.0, 1e-9);
+        for i in 0..40 {
+            let bump = 1e-8 * i as f64;
+            let x = ndarray::array![0.5 + bump, 0.3 - bump, 0.2];
+            m.observe(x.view(), -100.0 - i as f64);
+        }
+        let ei = m.max_expected_improvement_at_data();
+        assert!(ei.is_finite(), "the jittered fit predicts");
+        assert_eq!(m.fit_count(), 1, "one fit per data version");
+        let _ = m.expected_improvement(ndarray::array![0.2, 0.3, 0.5].view());
+        assert_eq!(m.fit_count(), 1, "later predictions reuse the factor");
+        m.observe(ndarray::array![0.1, 0.1, 0.8].view(), -90.0);
+        let _ = m.predict(ndarray::array![0.2, 0.3, 0.5].view());
+        assert_eq!(m.fit_count(), 2, "new data refits once");
+    }
+
+    #[test]
+    fn embedded_kernel_matches_the_direct_one() {
+        use super::*;
+        let mut m = FunnelModel::new(0.3, 5.0, 1e-3);
+        let a = ndarray::array![0.6, 0.3, 0.1];
+        let b = ndarray::array![0.2, 0.5, 0.3];
+        m.observe(a.view(), -1.0);
+        let direct = m.kernel(a.view(), b.view());
+        let root = m.embed(b.view());
+        let embedded = m.kernel_site(0, b.view(), root.as_deref());
+        assert!((direct - embedded).abs() < 1e-12);
+        let expected = 25.0 * (-hellinger2(&[0.6, 0.3, 0.1], &[0.2, 0.5, 0.3]) / 0.09).exp();
+        assert!((direct - expected).abs() < 1e-12);
+    }
+
     use super::*;
     use ndarray::{Array1, ArrayView1};
 
