@@ -321,7 +321,7 @@ fn diagnostic_discovery_improves_the_answer_without_relocating_the_chain() {
     assert!(probe.validated);
     assert!(!probe.adopted);
     assert_eq!(outcome.final_state.as_ref(), Some(&start));
-    assert_eq!(outcome.final_energy, Some(0.0));
+    assert_eq!(outcome.final_energy, 0.0);
     assert_eq!(outcome.best, -0.5);
     assert_eq!(outcome.best_state.as_ref(), Some(&discovered));
     let improvement = outcome.improvements.last().unwrap();
