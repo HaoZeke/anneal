@@ -208,16 +208,28 @@ pub struct TwoSampleCensusRadius {
     pub census_radius: f64,
 }
 
+/// Reasons the two distance samples cannot define a census radius.
 #[derive(Debug, thiserror::Error, PartialEq)]
 pub enum TwoSampleCalibrationError {
+    /// At least one sample contains fewer than the required number of distances.
     #[error("need at least {minimum} distances in each sample, got {same} same and {distinct} distinct")]
     InsufficientSamples {
+        /// Minimum number of distances required in each sample.
         minimum: usize,
+        /// Number of same-minimum distances supplied.
         same: usize,
+        /// Number of distinct-minimum distances supplied.
         distinct: usize,
     },
+    /// The upper same-minimum tail is not below the lower distinct-minimum tail.
     #[error("same-minimum tail {same_tail} is not below the distinct-minimum tail {distinct_tail}")]
-    TailsOverlap { same_tail: f64, distinct_tail: f64 },
+    TailsOverlap {
+        /// Upper quantile of the same-minimum sample.
+        same_tail: f64,
+        /// Lower quantile of the distinct-minimum sample.
+        distinct_tail: f64,
+    },
+    /// A sample contains a nonfinite or negative distance.
     #[error("non-finite or negative distance in the samples")]
     BadDistance,
 }
@@ -227,6 +239,11 @@ fn nearest_rank_quantile(sorted: &[f64], q: f64) -> f64 {
     sorted[rank - 1]
 }
 
+/// Estimate a census radius between same-minimum and distinct-minimum tails.
+///
+/// Each sample must contain at least 20 finite, nonnegative distances. The
+/// nearest-rank 0.99 same-minimum quantile must lie below the nearest-rank 0.01
+/// distinct-minimum quantile; their geometric mean defines the radius.
 pub fn calibrate_census_radius_two_sample(
     same_minimum: &[f64],
     distinct_minima: &[f64],
