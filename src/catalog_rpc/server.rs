@@ -5078,11 +5078,6 @@ fn occupancy_landfold_from_book(scientific: &mut ScientificState) -> (usize, usi
     scientific.landfold.map_or((0, 0, 0), |(_, split)| split)
 }
 
-fn occupancy_landfold_uncached(scientific: &ScientificState) -> (usize, usize, usize) {
-    let map = occupancy_sparsify_packing(&scientific.packing);
-    (map.floor, map.left, map.right)
-}
-
 fn occupancy_ring_from_book(scientific: &ScientificState) -> (usize, usize, usize) {
     let occupied: BTreeSet<usize> = scientific
         .packing
