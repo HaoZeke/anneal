@@ -2229,7 +2229,7 @@ fn apply_request(
                         ProtocolRejection::ValidationRejected,
                     );
                 };
-                scientific
+                let previous = scientific
                     .last_basin_by_replica
                     .insert(request.identity.replica, observation.basin_id);
                 // Registration establishes occupancy, not reachability.
