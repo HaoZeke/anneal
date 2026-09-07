@@ -31,7 +31,7 @@ def require(condition, message):
         raise ValueError(message)
 
 
-def worker(path, seed, budget, n, mode):
+def worker(path, seed, budget, ensemble_budget, n, mode):
     text = path.read_text()
     rows = SUMMARY.findall(text)
     surfaces = SURFACE.findall(text)
@@ -83,10 +83,12 @@ def worker(path, seed, budget, n, mode):
             charge = event.get("aggregate_charged")
             if charge is not None:
                 require(
-                    type(charge) is int and 0 <= charge <= budget,
+                    type(charge) is int and 0 <= charge <= ensemble_budget,
                     f"{path}: invalid ledger charge",
                 )
-                charges.append(charge)
+                if event.get("kind") == "local_work":
+                    require(charge <= budget, f"{path}: worker exceeded its objective budget")
+                    charges.append(charge)
     require(
         charges and charges == sorted(charges) and charges[-1] == budget,
         f"{path}: incomplete or nonmonotonic cooperative ledger",
@@ -132,6 +134,7 @@ def summarize(root):
                     root / f"{mode}-{ensemble}-{replica}.log",
                     ensemble * replicas + replica,
                     budget,
+                    budget * replicas,
                     parameters["n"],
                     mode,
                 )
