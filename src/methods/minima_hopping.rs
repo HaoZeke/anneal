@@ -611,6 +611,55 @@ mod tests {
     }
 
     #[test]
+    fn flat_and_monotonic_paths_do_not_count_as_potential_minima() {
+        let start = Array1::zeros(5);
+        let config = MdEscapeConfig {
+            dt: 0.01,
+            potential_minima: 2,
+            maximum_steps: 12,
+            geometry: MdEscapeGeometry::Euclidean,
+            softening: None,
+        };
+        for slope in [0.0, -1.0, 1.0] {
+            let mut evaluations = 0;
+            let mut evaluate = |x: ArrayView1<f64>| {
+                let energy = slope * evaluations as f64;
+                evaluations += 1;
+                Some((energy, Array1::zeros(x.len())))
+            };
+            let mut rng = StdRng::seed_from_u64(17);
+            let report = nve_escape(start.view(), 0.5, &config, &mut evaluate, &mut rng).unwrap();
+            assert_eq!(report.potential_minima, 0, "slope {slope} has no turning point");
+            assert_eq!(report.steps, config.maximum_steps);
+            assert_eq!(evaluations, report.steps + 1);
+        }
+    }
+
+    #[test]
+    fn separated_sustained_valleys_count_once_each() {
+        let start = Array1::zeros(5);
+        let config = MdEscapeConfig {
+            dt: 0.01,
+            potential_minima: 2,
+            maximum_steps: 20,
+            geometry: MdEscapeGeometry::Euclidean,
+            softening: None,
+        };
+        let energies = [99.0, 3.0, 2.0, 1.0, 2.0, 3.0, 2.0, 1.0, 2.0, 3.0];
+        let mut evaluations = 0;
+        let mut evaluate = |x: ArrayView1<f64>| {
+            let energy = energies[evaluations];
+            evaluations += 1;
+            Some((energy, Array1::zeros(x.len())))
+        };
+        let mut rng = StdRng::seed_from_u64(17);
+        let report = nve_escape(start.view(), 0.5, &config, &mut evaluate, &mut rng).unwrap();
+        assert_eq!(report.potential_minima, 2);
+        assert_eq!(report.steps, 9);
+        assert_eq!(report.energy, 1.0);
+    }
+
+    #[test]
     fn nve_escape_reports_the_energy_spans_needed_for_step_control() {
         let start = Array1::zeros(5);
         let config = MdEscapeConfig {
