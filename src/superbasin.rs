@@ -3335,9 +3335,9 @@ mod tests {
         // A random rotation from a QR-like construction, a reflection, a
         // translation, and a random relabelling of the points.
         let (a, b, c) = (
-            rng.random::<f64>() * 6.283,
-            rng.random::<f64>() * 6.283,
-            rng.random::<f64>() * 6.283,
+            rng.random::<f64>() * std::f64::consts::TAU,
+            rng.random::<f64>() * std::f64::consts::TAU,
+            rng.random::<f64>() * std::f64::consts::TAU,
         );
         let (ca, sa) = (a.cos(), a.sin());
         let (cb, sb) = (b.cos(), b.sin());

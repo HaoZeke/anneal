@@ -370,10 +370,6 @@ fn leave_quench_keeps_the_walk_off_mu_k() {
         "leftover-SOAP requench is a projector onto the occupied packing"
     );
     assert!(
-        !body.contains("activate_from_origin"),
-        "Leave does not climb a min-mode of the occupied structure"
-    );
-    assert!(
         !body.contains("leave_packing_ridge") && !body.contains("leave_packing_starts"),
         "Leave does not cover the occupied packing tangent"
     );
@@ -389,6 +385,44 @@ fn leave_quench_keeps_the_walk_off_mu_k() {
         !body.contains("shs_av_starts") && !body.contains("farthest_packing_cover"),
         "sphere covers quench back into the occupied funnel"
     );
+}
+
+#[test]
+fn leave_climb_evaluates_curvature_at_the_offered_seed() {
+    use anneal_core::methods::activation::{Activation, activate_from_origin};
+    use ndarray::array;
+
+    let origin = array![
+        -0.4, -0.4, -0.4, 0.4, 0.4, -0.4, 0.4, -0.4, 0.4, -0.4, 0.4, 0.4
+    ];
+    let seed = &origin * 1.3;
+    let config = Activation {
+        max_steps: 0,
+        ..Activation::default()
+    };
+    let mut evaluated = Vec::new();
+    let result = activate_from_origin(
+        seed.view(),
+        origin.view(),
+        |point| {
+            evaluated.push(point.to_owned());
+            Some(point.mapv(|value| 3.0 * value))
+        },
+        &config,
+    )
+    .expect("the offered seed has non-rigid curvature modes");
+
+    assert!(!evaluated.is_empty());
+    assert_eq!(result.evaluations, evaluated.len());
+    assert_eq!(result.state, seed);
+    assert_eq!(result.steps, 0);
+    assert!((result.lambda - 3.0).abs() < 1e-7);
+    for point in evaluated {
+        let from_seed = (&point - &seed).mapv(|value| value * value).sum().sqrt();
+        let from_origin = (&point - &origin).mapv(|value| value * value).sum().sqrt();
+        assert!(from_seed <= config.epsilon * 1.01);
+        assert!(from_origin > 0.4);
+    }
 }
 
 #[test]

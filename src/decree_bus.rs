@@ -279,7 +279,7 @@ mod tests {
             .unwrap()
             .publishing(&epub)
             .unwrap();
-        let watcher = DecreeObserver::new(&[epub.clone()], "raft/004/").unwrap();
+        let watcher = DecreeObserver::new(std::slice::from_ref(&epub), "raft/004/").unwrap();
         settle();
 
         brain
@@ -306,7 +306,7 @@ mod tests {
             .unwrap()
             .publishing(&epub)
             .unwrap();
-        let elsewhere = DecreeObserver::new(&[epub.clone()], "raft/009/").unwrap();
+        let elsewhere = DecreeObserver::new(std::slice::from_ref(&epub), "raft/009/").unwrap();
         settle();
 
         brain

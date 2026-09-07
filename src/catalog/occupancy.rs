@@ -2051,7 +2051,7 @@ mod tests {
             cells: crate::catalog::GoodTuringSample::from_counts(counts.iter().copied()),
             fes_minima: 0,
             fes_delta: None,
-            holes: counts.iter().any(|count| *count == 0),
+            holes: counts.contains(&0),
         }
     }
 
@@ -2432,10 +2432,9 @@ mod tests {
 
     #[test]
     fn leave_defers_through_the_measured_crossing() {
-        assert!(
-            LEAVE_CROSSING_HOPS >= 6226,
-            "floor {LEAVE_CROSSING_HOPS} expires before the latest named Marks crossing"
-        );
+        const {
+            assert!(LEAVE_CROSSING_HOPS >= 6226, "floor expires before the latest named Marks crossing");
+        }
         assert_eq!(leave_crossing_slices(500), 22);
         assert!(leave_defers(1, 0, 22));
         assert!(leave_defers(22, 0, 22));
