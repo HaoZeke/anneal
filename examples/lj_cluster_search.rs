@@ -6317,6 +6317,68 @@ fn required_catalog_env(name: &str) -> String {
 }
 
 #[cfg(feature = "bank-rpc")]
+fn census_bus_base(_sharing: bool, _evidence_only: bool, _configured: Option<&str>) -> Option<u16> {
+    unimplemented!("census activation policy")
+}
+
+#[cfg(feature = "bank-rpc")]
+fn lj_catalog_gradient_norm(
+    _energy: f64,
+    _coordinates: ArrayView1<f64>,
+    _gradient: Option<ArrayView1<f64>>,
+) -> Option<f64> {
+    unimplemented!("catalog stationarity evidence")
+}
+
+#[cfg(all(test, feature = "bank-rpc"))]
+mod census_policy_tests {
+    use super::{census_bus_base, lj_catalog_gradient_norm};
+    use ndarray::array;
+
+    #[test]
+    fn private_controls_cannot_activate_an_inherited_census_port() {
+        assert_eq!(census_bus_base(false, false, Some("32000")), None);
+        assert_eq!(census_bus_base(false, true, Some("32000")), None);
+    }
+
+    #[test]
+    fn evidence_only_exchange_cannot_activate_geometry_census() {
+        assert_eq!(census_bus_base(true, true, Some("32000")), None);
+    }
+
+    #[test]
+    fn shared_geometry_exchange_requires_a_valid_configured_port() {
+        assert_eq!(census_bus_base(true, false, Some("32000")), Some(32000));
+        for configured in [None, Some(""), Some("invalid"), Some("65536")] {
+            assert_eq!(census_bus_base(true, false, configured), None);
+        }
+    }
+
+    #[test]
+    fn publication_requires_matching_finite_gradient_evidence() {
+        let coordinates = array![0.0, 0.0, 0.0, 1.0, 0.0, 0.0];
+        assert_eq!(lj_catalog_gradient_norm(-1.0, coordinates.view(), None), None);
+        for gradient in [array![], array![0.0; 3], array![f64::NAN; 6], array![f64::INFINITY; 6]] {
+            assert_eq!(lj_catalog_gradient_norm(-1.0, coordinates.view(), Some(gradient.view())), None);
+        }
+        let gradient = array![0.0; 6];
+        assert_eq!(lj_catalog_gradient_norm(-1.0, coordinates.view(), Some(gradient.view())), Some(0.0));
+        assert_eq!(lj_catalog_gradient_norm(f64::NAN, coordinates.view(), Some(gradient.view())), None);
+        let invalid = array![f64::NAN; 6];
+        assert_eq!(lj_catalog_gradient_norm(-1.0, invalid.view(), Some(gradient.view())), None);
+    }
+
+    #[test]
+    fn census_stationarity_uses_the_catalog_norm_not_the_answer_component_limit() {
+        let coordinates = array![0.0, 0.0, 0.0, 1.0, 0.0, 0.0];
+        let too_large = array![8e-6, 8e-6, 0.0, 0.0, 0.0, 0.0];
+        assert_eq!(lj_catalog_gradient_norm(-1.0, coordinates.view(), Some(too_large.view())), None);
+        let boundary = array![1e-5, 0.0, 0.0, 0.0, 0.0, 0.0];
+        assert_eq!(lj_catalog_gradient_norm(-1.0, coordinates.view(), Some(boundary.view())), Some(1e-5));
+    }
+}
+
+#[cfg(feature = "bank-rpc")]
 fn lj_catalog_candidate(
     descriptor_space: &anneal_core::descriptor_space::DescriptorSpace,
     species: &[u32],
