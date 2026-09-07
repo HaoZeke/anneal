@@ -1433,6 +1433,11 @@ where
         ClusterFingerprint::of_config(cfg, &canonical_reference),
         cfg.merge_radius,
     );
+    if cfg.minima_hopping {
+        let initial_basin = identity.basin_of(x.view());
+        feedback.register_initial(initial_basin);
+        here = Some(initial_basin);
+    }
     // Structures kept for path endpoints. Only ones far from every member are
     // added, because interpolating between two structures in one funnel lands
     // back in it, which is what archive-based escape moves holding a single
