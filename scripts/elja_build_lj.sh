@@ -102,7 +102,11 @@ cargo build --offline --locked --release --features featomic,ira,bank-rpc \
   --example bank_server \
   --example leave_packing_probe
 ldd "$BIN"
-git rev-parse HEAD >SOURCE_COMMIT
+# A staging tree's SOURCE_COMMIT names the synced revision; the tree's own
+# HEAD is whatever commit it was cloned at and would misattribute the build.
+if [[ -z ${LJ_ALLOW_DIRTY:-} ]]; then
+  git rev-parse HEAD >SOURCE_COMMIT
+fi
 sha256sum \
   target/release/examples/lj_cluster_search \
   target/release/examples/catalog_server \
