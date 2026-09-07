@@ -433,12 +433,12 @@ impl<F: Fingerprint> BasinIndex<F> {
         self.centres.len()
     }
 
-    /// Times basin `i` has been recorded.
     /// Descriptor centre of basin `i`.
     pub fn centre(&self, i: usize) -> ArrayView1<'_, f64> {
         self.centres[i].view()
     }
 
+    /// Times basin `i` has been recorded.
     pub fn visits(&self, i: usize) -> u64 {
         self.visits.get(i).copied().unwrap_or(0)
     }
