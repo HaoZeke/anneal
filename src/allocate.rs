@@ -853,6 +853,29 @@ mod depth_allocator_tests {
     use rand::SeedableRng;
     use rand::rngs::StdRng;
 
+    #[test]
+    fn sufficient_statistics_reconstruct_every_posterior_parameter() {
+        let values = [[-4.0, 2.0, 1.0, -3.0, 8.0], [0.5, 0.25, 0.75, -1.0, 2.0]];
+        let mut sequential = DepthAllocator::new(2);
+        let mut moments = [RewardMoments::default(); 2];
+        for (arm, values) in values.iter().enumerate() {
+            for &value in values {
+                sequential.update(arm, value);
+                moments[arm].observe(value).unwrap();
+            }
+        }
+        let restored = DepthAllocator::from_moments(&moments).unwrap();
+        for (actual, expected) in [&restored.mu, &restored.kappa, &restored.alpha, &restored.beta].into_iter().zip([&sequential.mu, &sequential.kappa, &sequential.alpha, &sequential.beta]) {
+            for (actual, expected) in actual.iter().zip(expected) {
+                assert!((actual - expected).abs() < 1e-12);
+            }
+        }
+        assert_eq!(restored.draws, sequential.draws);
+        let mut left = StdRng::seed_from_u64(79);
+        let mut right = left.clone();
+        for _ in 0..256 { assert_eq!(restored.select(&mut left), sequential.select(&mut right)); }
+    }
+
     /// The allocator has to find the arm that reaches deeper, which is the
     /// whole point of rewarding depth instead of acceptance.
     #[test]
