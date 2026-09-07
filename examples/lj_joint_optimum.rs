@@ -1834,14 +1834,23 @@ mod tests {
         for visit_number in 1..=6 {
             let first_observation = visit_number == 1;
             let (is_new, visits) = history_feedback_membership(
-                HistoryExclusion::Accepted, first_observation, visit_number, 0,
+                HistoryExclusion::Accepted,
+                first_observation,
+                visit_number,
+                0,
             );
-            assert_eq!(accepted.observe_shared(Some(0), 1, is_new, visits), super::Visit::New);
+            assert_eq!(
+                accepted.observe_shared(Some(0), 1, is_new, visits),
+                super::Visit::New
+            );
             accepted_trials += 1;
             assert_eq!(accepted.accept(1.0), visit_number == 6);
 
             let (is_new, visits) = history_feedback_membership(
-                HistoryExclusion::Observed, first_observation, visit_number, 0,
+                HistoryExclusion::Observed,
+                first_observation,
+                visit_number,
+                0,
             );
             let before = observed.threshold();
             let classification = observed.observe_shared(Some(0), 1, is_new, visits);
@@ -1856,21 +1865,45 @@ mod tests {
         }
         assert_eq!(accepted_trials, 6);
         assert_eq!(observed_trials, 1);
-        assert_eq!(history_feedback_membership(HistoryExclusion::Accepted, false, 9, 2), (false, 2));
-        assert_eq!(history_feedback_membership(HistoryExclusion::Observed, false, 9, 2), (false, 9));
+        assert_eq!(
+            history_feedback_membership(HistoryExclusion::Accepted, false, 9, 2),
+            (false, 2)
+        );
+        assert_eq!(
+            history_feedback_membership(HistoryExclusion::Observed, false, 9, 2),
+            (false, 9)
+        );
     }
 
     #[test]
     fn history_policy_names_are_strict_and_alternative_labels_are_distinct() {
         use super::{HistoryExclusion, parse_history_exclusion};
 
-        assert_eq!(parse_history_exclusion(None).unwrap(), HistoryExclusion::Accepted);
-        assert_eq!(parse_history_exclusion(Some("accepted")).unwrap(), HistoryExclusion::Accepted);
-        assert_eq!(parse_history_exclusion(Some("observed-exclusion")).unwrap(), HistoryExclusion::Observed);
+        assert_eq!(
+            parse_history_exclusion(None).unwrap(),
+            HistoryExclusion::Accepted
+        );
+        assert_eq!(
+            parse_history_exclusion(Some("accepted")).unwrap(),
+            HistoryExclusion::Accepted
+        );
+        assert_eq!(
+            parse_history_exclusion(Some("observed-exclusion")).unwrap(),
+            HistoryExclusion::Observed
+        );
         assert!(parse_history_exclusion(Some("observed")).is_err());
-        let arm = Arm::MinimaHoppingEnsemble { shared: true, soften: true };
-        assert_eq!(arm.label_with_history(HistoryExclusion::Accepted), arm.label());
-        assert_eq!(arm.label_with_history(HistoryExclusion::Observed), "minima-hopping-shared-history-softened-observed-exclusion");
+        let arm = Arm::MinimaHoppingEnsemble {
+            shared: true,
+            soften: true,
+        };
+        assert_eq!(
+            arm.label_with_history(HistoryExclusion::Accepted),
+            arm.label()
+        );
+        assert_eq!(
+            arm.label_with_history(HistoryExclusion::Observed),
+            "minima-hopping-shared-history-softened-observed-exclusion"
+        );
     }
 
     #[test]
