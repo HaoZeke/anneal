@@ -2059,6 +2059,16 @@ fn cooperative_run_traces_explicit_transition_records() {
 }
 
 #[test]
+fn failed_probe_trace_is_unresolved_and_has_no_terminal_energy() {
+    let mut run = CooperativeRun::new([0], 100).unwrap();
+    run.record_executed_transition(0, 1, "probe", -1.0, f64::NAN, false).unwrap();
+    let transition = run.events().last().unwrap().transition.as_ref().unwrap();
+    assert!(!transition.resolved);
+    assert_eq!(transition.to_energy, None);
+    assert!(!transition.adopted);
+}
+
+#[test]
 fn cooperative_run_traces_local_execution_without_a_coordinator() {
     let mut run = CooperativeRun::new([0], 100).unwrap();
 
