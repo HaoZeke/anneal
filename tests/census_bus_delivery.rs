@@ -284,3 +284,37 @@ fn repeated_geometry_updates_latest_hops_without_duplicate_fresh_events() {
         assert_eq!(receiver.peer_count(), 1);
     }
 }
+
+/// A well table above nng's default 1 MB receive limit must arrive: 64
+/// sorted-pair centres for 75 points are 1.4 MB, and a silently dropped
+/// table is a gossip round that never happened.
+#[test]
+fn a_well_table_above_one_megabyte_is_delivered() {
+    use ndarray::Array1;
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let _setup = SOCKET_SETUP.lock().unwrap();
+    let (base, port_a, port_b) = adjacent_ports(deadline);
+    drop(port_a);
+    drop(port_b);
+    let mut sender = CensusBus::new(1, base, 2).unwrap();
+    let mut receiver = CensusBus::new(0, base, 2).unwrap();
+    let dim = 2775;
+    let wells: Vec<(Array1<f64>, f64)> = (0..64)
+        .map(|i| (Array1::from_elem(dim, i as f64), 0.5 + i as f64))
+        .collect();
+    assert!(
+        wells.len() * (dim + 1) * 8 > 1 << 20,
+        "the fixture must exceed 1 MB"
+    );
+    let mut received = Vec::new();
+    wait_until(deadline, "oversize well table must be delivered", || {
+        sender.publish_wells(&wells);
+        received.extend(receiver.poll_wells());
+        !received.is_empty()
+    });
+    let (peer, table) = &received[0];
+    assert_eq!(*peer, 1);
+    assert_eq!(table.len(), 64);
+    assert_eq!(table[63].1, 63.5);
+    assert_eq!(table[63].0[dim - 1], 63.0);
+}
