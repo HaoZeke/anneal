@@ -1088,7 +1088,8 @@ fn main() -> Result<(), Box<dyn Error>> {
                         IraStructureWitness {
                             kmax_factor: witness.kmax_factor,
                             radius: witness.radius,
-                        }.with_pair_cache(pair_cache_bytes),
+                        }
+                        .with_pair_cache(pair_cache_bytes),
                         EnsembleOptions {
                             replicas,
                             shared,
