@@ -544,6 +544,43 @@ pub struct SortedPairs {
     pub n_points: usize,
 }
 
+impl SortedPairs {
+    /// Lower bound on maximum atomic displacement under any rigid permutation.
+    ///
+    /// A match moving each atom by at most `r` changes each corresponding
+    /// pair distance by at most `2r`. Sorting minimizes the bottleneck error
+    /// over pair assignments, so half the largest sorted-pair discrepancy is
+    /// a necessary lower bound. A zero bound does not establish identity:
+    /// homometric structures still require an exact witness.
+    ///
+    /// Invalid dimensions or nonfinite arithmetic return no certificate.
+    pub fn bottleneck_lower_bound(
+        &self,
+        left: ArrayView1<f64>,
+        right: ArrayView1<f64>,
+    ) -> Option<f64> {
+        let dimension = self.n_points.checked_mul(3)?;
+        if self.n_points == 0 || left.len() != dimension || right.len() != dimension
+            || left.iter().chain(right.iter()).any(|value| !value.is_finite())
+        {
+            return None;
+        }
+        let left_pairs = self.describe(left);
+        let right_pairs = self.describe(right);
+        if left_pairs.iter().chain(right_pairs.iter()).any(|value| !value.is_finite()) {
+            return None;
+        }
+        let discrepancy = left_pairs.iter().zip(&right_pairs)
+            .map(|(left, right)| (left - right).abs()).fold(0.0, f64::max);
+        let coordinate_scale = left.iter().chain(right.iter())
+            .map(|value| value.abs()).fold(1.0, f64::max);
+        // Subtraction, three-dimensional norms, and the final difference all
+        // contribute roundoff. The allowance weakens rejection near the radius.
+        let roundoff = 64.0 * f64::EPSILON * coordinate_scale;
+        Some((0.5 * discrepancy - roundoff).max(0.0))
+    }
+}
+
 /// Sorted per-point pair energies of a flattened `(n, 3)` point set.
 ///
 /// `E(i) = sum_{j != i} 4 [ (1/r_ij)^12 - (1/r_ij)^6 ]`, sorted. Invariant to
