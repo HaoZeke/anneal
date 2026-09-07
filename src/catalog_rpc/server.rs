@@ -2229,34 +2229,12 @@ fn apply_request(
                         ProtocolRejection::ValidationRejected,
                     );
                 };
-                let previous = scientific
+                scientific
                     .last_basin_by_replica
                     .insert(request.identity.replica, observation.basin_id);
-                // The census-visit stream is the referee's evidence: one
-                // replica occupying basin A and then basin B is one
-                // observed transition across their seam.
-                if previous != Some(observation.basin_id) {
-                    scientific
-                        .landscape
-                        .observe_basin(observation.basin_id.as_raw());
-                }
-                if let Some(previous) = previous
-                    && previous != observation.basin_id
-                {
-                    scientific.landscape.observe_crossing(
-                        previous.as_raw(),
-                        observation.basin_id.as_raw(),
-                        1.0,
-                    );
-                    if connect_coverage_classes(scientific, previous, observation.basin_id).is_err()
-                    {
-                        return rejected(
-                            state,
-                            request.event_sequence,
-                            ProtocolRejection::ValidationRejected,
-                        );
-                    }
-                }
+                // Registration establishes occupancy, not reachability.
+                // Only an explicit transition can connect two minima.
+                scientific.landscape.observe_basin(observation.basin_id.as_raw());
                 let canonical = candidate_from_validated(&validated, Some(observation.basin_id));
                 let deeper = scientific
                     .best_candidate_by_replica
