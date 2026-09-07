@@ -248,6 +248,35 @@ mod tests {
     }
 
     #[test]
+    fn a_gossip_step_moves_two_biases_toward_their_average() {
+        let f = SortedPairs { n_points: 2 };
+        let mut a = BasinBias::new(f, 0.05, 1.0, 10.0);
+        let mut b = BasinBias::new(SortedPairs { n_points: 2 }, 0.05, 1.0, 10.0);
+        let p = ndarray::array![0.0, 0.0, 0.0, 1.0, 0.0, 0.0];
+        let q = ndarray::array![0.0, 0.0, 0.0, 2.0, 0.0, 0.0];
+        for _ in 0..4 {
+            a.deposit(a.cv(p.view()).view(), 1.0);
+        }
+        b.deposit(b.cv(p.view()).view(), 1.0);
+        b.deposit(b.cv(q.view()).view(), 1.0);
+        let va = a.well_depth(0);
+        let vb = b.well_depth(0);
+        let vq = b.well_depth(1);
+        let theirs = b.wells();
+        a.merge_wells(&theirs, 0.5);
+        assert!((a.well_depth(0) - 0.5 * (va + vb)).abs() < 1e-12);
+        assert_eq!(a.n_basins(), 2, "the well only b held opens in a");
+        assert!((a.well_depth(1) - 0.5 * vq).abs() < 1e-12);
+        // A stubborn step keeps most of the own view.
+        let before = a.well_depth(0);
+        a.merge_wells(&[(a.cv(p.view()), 0.0)], 0.1);
+        assert!((a.well_depth(0) - 0.9 * before).abs() < 1e-12);
+        // Out-of-range weights are refused, not clamped.
+        a.merge_wells(&theirs, 1.5);
+        assert!((a.well_depth(0) - 0.9 * before).abs() < 1e-12);
+    }
+
+    #[test]
     fn deposit_increases_potential_at_centre() {
         let mut b = identity_projector_2d();
         let s = array![1.0, 1.0];
@@ -843,6 +872,63 @@ impl<F: Fingerprint> BasinBias<F> {
     /// Deepest accumulated bias over all basins.
     pub fn deepest(&self) -> f64 {
         self.v.iter().copied().fold(0.0, f64::max)
+    }
+
+    /// Accumulated well-tempered depth of basin `i`.
+    pub fn well_depth(&self, i: usize) -> f64 {
+        self.v[i]
+    }
+
+    /// Every well as `(centre, depth)`, the state a gossip round exchanges.
+    pub fn wells(&self) -> Vec<(Array1<f64>, f64)> {
+        (0..self.n_basins())
+            .map(|i| (self.index.centre(i).to_owned(), self.v[i]))
+            .collect()
+    }
+
+    /// DeGroot step toward another walker's wells.
+    ///
+    /// Every depth becomes `(1 - weight) * own + weight * theirs`, with a
+    /// missing well counted as zero on either side, so the two walkers'
+    /// biases move toward their average; a well only they hold opens here
+    /// at `weight` times their depth. Repeated over a connected graph this
+    /// converges to the population average at the rate of the weight
+    /// matrix's spectral gap (Xiao and Boyd 2004); at `weight` below one
+    /// half a walker keeps part of its own view, the stubborn agent of
+    /// Friedkin and Johnsen, and disagreement between walkers persists.
+    /// Visit counts are not merged: they are this walker's own arrivals.
+    pub fn merge_wells(&mut self, theirs: &[(Array1<f64>, f64)], weight: f64) {
+        if !(0.0..=1.0).contains(&weight) || weight == 0.0 {
+            return;
+        }
+        let mut matched = vec![false; self.v.len()];
+        let mut opened = Vec::new();
+        for (centre, depth) in theirs {
+            if !depth.is_finite() || *depth < 0.0 || centre.is_empty() {
+                continue;
+            }
+            match self.lookup(centre.view()) {
+                Some(i) => {
+                    if i < matched.len() {
+                        matched[i] = true;
+                    }
+                    self.v[i] = (1.0 - weight) * self.v[i] + weight * depth;
+                }
+                None => opened.push((centre.clone(), weight * depth)),
+            }
+        }
+        for (i, was_matched) in matched.iter().enumerate() {
+            if !was_matched {
+                self.v[i] *= 1.0 - weight;
+            }
+        }
+        for (centre, depth) in opened {
+            // Opened after the scan so a foreign well cannot match itself.
+            if self.lookup(centre.view()).is_none() {
+                self.index.push(centre);
+                self.v.push(depth);
+            }
+        }
     }
 
     /// Merge a packing well found by another chain.

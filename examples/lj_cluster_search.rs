@@ -7159,6 +7159,15 @@ fn executable_sha256() -> String {
         .unwrap_or_else(|_| "unavailable".into())
 }
 
+/// Graph a gossip round draws its peer from.
+#[derive(Debug, Clone, Copy)]
+enum Gossip {
+    /// The two ring neighbours, alternating.
+    Ring,
+    /// A uniform peer: randomised gossip on the complete graph.
+    Random,
+}
+
 /// What one replica of a history ensemble reports.
 struct HistoryReplicaRun {
     replica: usize,
@@ -7228,6 +7237,24 @@ fn run_history_ensembles(
         .ok()
         .and_then(|v| v.parse().ok())
         .unwrap_or(1.0);
+    // Gossip averaging of the bias over a graph: `ring` alternates the two
+    // ring neighbours, `random` draws a uniform peer (randomised gossip on
+    // the complete graph). Off when unset.
+    let gossip = match std::env::var("GOSSIP").as_deref() {
+        Ok("ring") => Some(Gossip::Ring),
+        Ok("random") => Some(Gossip::Random),
+        Ok("") | Err(_) => None,
+        Ok(other) => panic!("GOSSIP={other:?}; expected ring or random"),
+    };
+    let gossip_interval: usize = std::env::var("GOSSIP_INTERVAL")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(20_000)
+        .max(1);
+    let gossip_weight: f64 = std::env::var("GOSSIP_WEIGHT")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(0.5);
     let policy = HistoryMembership::parse(std::env::var("HISTORY_POLICY").ok().as_deref())
         .unwrap_or_else(|error| panic!("{error}"));
     let checkpoint_interval: usize = std::env::var("HISTORY_CHECKPOINT")
@@ -7290,7 +7317,7 @@ fn run_history_ensembles(
         .map(|replica| budget / replicas + usize::from(replica < budget % replicas))
         .collect();
     println!(
-        "  history ensembles: {} replicas, {} history, {} membership, shared bias {} weight {}, budgets {:?}, \
+        "  history ensembles: {} replicas, {} history, {} membership, shared bias {} weight {}, gossip {:?} interval {} weight {}, budgets {:?}, \
          checkpoint {checkpoint_interval}, witness {witness_name}, shared deposits {}, \
          mechanisms {}, executable sha256 {}",
         replicas,
@@ -7304,6 +7331,9 @@ fn run_history_ensembles(
         policy.name(),
         shared_bias,
         shared_bias_weight,
+        gossip,
+        gossip_interval,
+        gossip_weight,
         budgets,
         cfg.shared_deposits,
         opts.join(","),
@@ -7329,6 +7359,9 @@ fn run_history_ensembles(
             .collect();
         let charged_total = AtomicUsize::new(0);
         let exchange = Mutex::new(anneal_core::shared_bias::SharedDeposits::new(replicas));
+        // Latest wells posted by each replica, read by its gossip peers.
+        let mailboxes: Vec<Mutex<Option<Vec<(Array1<f64>, f64)>>>> =
+            (0..replicas).map(|_| Mutex::new(None)).collect();
         let runs: Vec<HistoryReplicaRun> = std::thread::scope(|scope| {
             let handles: Vec<_> = budgets
                 .iter()
@@ -7337,6 +7370,7 @@ fn run_history_ensembles(
                 .map(|(replica, (&replica_budget, &replica_seed))| {
                     let history = &histories[if shared { 0 } else { replica }];
                     let exchange = &exchange;
+                    let mailboxes = &mailboxes;
                     let charged_total = &charged_total;
                     let witness = &witness;
                     let descriptor = &descriptor;
@@ -7365,11 +7399,50 @@ fn run_history_ensembles(
                         let mut first_target_calls: Option<usize> = None;
                         let mut seen_visits: Vec<u64> = Vec::new();
                         let mut published = 0u64;
+                        let mut next_gossip = gossip_interval;
+                        let mut gossip_side = replica % 2;
+                        // Peer draws for randomised gossip; a small LCG keeps
+                        // the chain's own stream untouched.
+                        let mut gossip_draw = replica_seed ^ 0x5DEE_CE66_D1CE_B00Cu64;
                         let mut checkpoint = |snapshot: ChainCheckpoint<'_>| {
                             if first_target_calls.is_none()
                                 && target.is_some_and(|t| snapshot.best_energy() < t)
                             {
                                 first_target_calls = Some(charged_total.load(Ordering::SeqCst));
+                            }
+                            if let Some(topology) = gossip
+                                && replicas > 1
+                                && snapshot.charged() >= next_gossip
+                                && let Some(bias) = snapshot.bias()
+                            {
+                                next_gossip = snapshot.charged() + gossip_interval;
+                                *mailboxes[replica].lock().expect("gossip mailbox") =
+                                    Some(bias.wells());
+                                let peer = match topology {
+                                    Gossip::Ring => {
+                                        gossip_side ^= 1;
+                                        if gossip_side == 0 {
+                                            (replica + 1) % replicas
+                                        } else {
+                                            (replica + replicas - 1) % replicas
+                                        }
+                                    }
+                                    Gossip::Random => {
+                                        gossip_draw = gossip_draw
+                                            .wrapping_mul(6364136223846793005)
+                                            .wrapping_add(1442695040888963407);
+                                        let k =
+                                            ((gossip_draw >> 33) % (replicas as u64 - 1)) as usize;
+                                        (replica + 1 + k) % replicas
+                                    }
+                                };
+                                let wells = mailboxes[peer].lock().expect("gossip mailbox").clone();
+                                if let Some(wells) = wells {
+                                    return CheckpointAction::MergeBias {
+                                        wells,
+                                        weight: gossip_weight,
+                                    };
+                                }
                             }
                             if !shared_bias {
                                 return CheckpointAction::Continue;
@@ -7461,7 +7534,7 @@ fn run_history_ensembles(
             let hit = target.is_some_and(|t| run.out.best < t);
             println!(
                 "    seed {seed} replica {} (seed {}): best {:.6}  hops {}  charged {}  basins {}  \
-                 history obs {} new {} refused {} secs {:.1}  shared_deposits {}  bias_published {}  \
+                 history obs {} new {} refused {} secs {:.1}  shared_deposits {}  bias_published {}  gossip {}  \
                  escape {:.3} thr {:.4} same/known/new {}/{}/{}  first_target {}  wall {:.1}s  verified {}{}",
                 run.replica,
                 run.seed,
@@ -7475,6 +7548,7 @@ fn run_history_ensembles(
                 run.history_cost.2,
                 run.out.shared_deposits,
                 run.bias_published,
+                run.out.gossip_rounds,
                 run.out.escape_scale,
                 run.out.escape_threshold,
                 run.out.visit_counts.0,
