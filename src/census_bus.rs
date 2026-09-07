@@ -131,19 +131,29 @@ impl CensusBus {
 }
 
 fn decode(bytes: &[u8]) -> Option<PeerMinimum> {
-    let mut at = 0usize;
-    let mut take = |n: usize| -> Option<&[u8]> {
-        let slice = bytes.get(at..at + n)?;
-        at += n;
-        Some(slice)
-    };
-    let replica = u32::from_le_bytes(take(4)?.try_into().ok()?);
-    let hops = u64::from_le_bytes(take(8)?.try_into().ok()?);
-    let energy = f64::from_le_bytes(take(8)?.try_into().ok()?);
-    let n = u32::from_le_bytes(take(4)?.try_into().ok()?) as usize;
+    let header = bytes.get(..24)?;
+    let replica = u32::from_le_bytes(header[..4].try_into().ok()?);
+    let hops = u64::from_le_bytes(header[4..12].try_into().ok()?);
+    let energy = f64::from_le_bytes(header[12..20].try_into().ok()?);
+    let n = usize::try_from(u32::from_le_bytes(header[20..24].try_into().ok()?)).ok()?;
+    if !energy.is_finite() || n == 0 || !n.is_multiple_of(3) {
+        return None;
+    }
+    // The complete Cartesian payload must exist before its declared count
+    // can reserve memory. Exact length also excludes trailing frame bytes.
+    let expected_len = 24_usize.checked_add(n.checked_mul(std::mem::size_of::<f64>())?)?;
+    if bytes.len() != expected_len {
+        return None;
+    }
+    for chunk in bytes[24..].chunks_exact(8) {
+        let coordinate = f64::from_le_bytes(chunk.try_into().ok()?);
+        if !coordinate.is_finite() {
+            return None;
+        }
+    }
     let mut coordinates = Vec::with_capacity(n);
-    for _ in 0..n {
-        coordinates.push(f64::from_le_bytes(take(8)?.try_into().ok()?));
+    for chunk in bytes[24..].chunks_exact(8) {
+        coordinates.push(f64::from_le_bytes(chunk.try_into().ok()?));
     }
     Some(PeerMinimum {
         replica,
