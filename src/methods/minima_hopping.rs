@@ -28,9 +28,11 @@
 //! a revisit should be a harder push rather than a higher potential where the
 //! chain needs to pass.
 //!
-//! The escape scale grows geometrically while a chain revisits, which is the
-//! guarantee that no funnel is permanent: a chain that keeps returning keeps
-//! escalating until it leaves. Schoenborn, Goedecker, Roy and Oganov,
+//! Revisits increase the escape scale up to the configured ceiling; this
+//! bounded feedback does not guarantee departure from every funnel. Shared
+//! history can increase the penalty for rediscovering another chain's minimum
+//! without replacing the receiving chain's state or random stream.
+//! Schoenborn, Goedecker, Roy and Oganov,
 //! J. Chem. Phys. 130, 144108 (2009), multiply the known-minimum update by
 //! `1 + c ln(N)` for visit count `N`, and report that this finds the LJ75 Marks
 //! decahedron where a cut-and-splice evolutionary algorithm does not.
@@ -451,9 +453,9 @@ impl EscapeFeedback {
     /// Records a quench and updates the escape scale.
     ///
     /// Returns what the quench was. The scale rises on a revisit and falls on a
-    /// discovery, which is the feedback: a chain that keeps returning escalates
-    /// until it leaves, and one that keeps finding new structures settles down
-    /// to explore them.
+    /// discovery, subject to the configured scale bounds. A chain that keeps
+    /// returning escalates toward its ceiling, and one that keeps finding new
+    /// structures settles down to explore them.
     pub fn observe(&mut self, current: Option<usize>, reached: usize) -> Visit {
         let visit = self.classify(current, reached);
         let prior_visits = self.visits(reached).max(1) as f64;
