@@ -107,10 +107,18 @@ fn malformed_gradients_cannot_certify_the_initial_minimum() {
 fn malformed_quench_boundaries_remain_paid_unresolved_observations() {
     let state = Array1::from(vec![-0.6, 0.0, 0.0, 0.6, 0.0, 0.0]);
     for (energy, coordinates, gradient) in [
-        (-0.25, state.clone(), Array1::from_elem(state.len(), f64::NAN)),
+        (
+            -0.25,
+            state.clone(),
+            Array1::from_elem(state.len(), f64::NAN),
+        ),
         (-0.25, state.clone(), Array1::zeros(state.len() - 1)),
         (f64::NAN, state.clone(), Array1::zeros(state.len())),
-        (-0.25, Array1::from_elem(state.len(), f64::NAN), Array1::zeros(state.len())),
+        (
+            -0.25,
+            Array1::from_elem(state.len(), f64::NAN),
+            Array1::zeros(state.len()),
+        ),
         (-0.25, Array1::zeros(0), Array1::zeros(0)),
     ] {
         let mut ledger = Ledger::new(1);
