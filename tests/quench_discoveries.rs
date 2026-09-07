@@ -29,7 +29,11 @@ fn polishing_run(valid: bool) -> Outcome {
         assert!(ledger.charge());
         Some(Array1::from_elem(
             state.len(),
-            if state == polished.view() && !valid { 1.0 } else { 0.0 },
+            if state == polished.view() && !valid {
+                1.0
+            } else {
+                0.0
+            },
         ))
     };
     run_with_gradient(
@@ -70,6 +74,12 @@ fn result_verification_cannot_optimize_or_replace_the_search_answer() {
         .split_once("let hit =")
         .unwrap()
         .0;
-    assert!(!verification.contains(".minimize("), "reporting performs an uncharged search");
-    assert!(!verification.contains("out.best ="), "reporting replaces the scored objective");
+    assert!(
+        !verification.contains(".minimize("),
+        "reporting performs an uncharged search"
+    );
+    assert!(
+        !verification.contains("out.best ="),
+        "reporting replaces the scored objective"
+    );
 }
