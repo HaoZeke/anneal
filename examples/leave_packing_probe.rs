@@ -229,10 +229,10 @@ fn main() {
     };
 
     let classify = |label: &str,
-                        index: usize,
-                        tally: &mut Tally,
-                        trial: &Array1<f64>,
-                        rung: Option<usize>| {
+                    index: usize,
+                    tally: &mut Tally,
+                    trial: &Array1<f64>,
+                    rung: Option<usize>| {
         let Some(slice) = trial.as_slice() else {
             return;
         };
