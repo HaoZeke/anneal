@@ -537,12 +537,21 @@ fn run_minima_hopping_with_history(
     let descriptor = history.map(|_| lj::descriptor_space());
     let context = StructureContext::new(Some(vec![18; n]), None, Some(format!("lj-reduced-n{n}")));
     let mut current_basin = if let (Some(history), Some(descriptor)) = (history, &descriptor) {
-        observe_history(history, &ledger, descriptor, &context, witness, |history, observation| {
-            history.mark_accepted(observation.minimum.id).map_err(|error| error.to_string())
-        })?
-            .0
-            .minimum
-            .id
+        observe_history(
+            history,
+            &ledger,
+            descriptor,
+            &context,
+            witness,
+            |history, observation| {
+                history
+                    .mark_accepted(observation.minimum.id)
+                    .map_err(|error| error.to_string())
+            },
+        )?
+        .0
+        .minimum
+        .id
     } else {
         0
     };
@@ -623,14 +632,23 @@ fn run_minima_hopping_with_history(
         let history_start = Instant::now();
         let (reached, adopt) = if let (Some(history), Some(descriptor)) = (history, &descriptor) {
             let (observation, adopt) = observe_history(
-                history, &ledger, descriptor, &context, witness,
+                history,
+                &ledger,
+                descriptor,
+                &context,
+                witness,
                 |history, observation| {
                     let reached = observation.minimum.id;
-                    let visits = history.accepted_visits(reached).ok_or("missing admitted minimum")?;
-                    let visit = feedback.observe_shared(Some(current_basin), reached, visits == 0, visits);
+                    let visits = history
+                        .accepted_visits(reached)
+                        .ok_or("missing admitted minimum")?;
+                    let visit =
+                        feedback.observe_shared(Some(current_basin), reached, visits == 0, visits);
                     let adopt = visit == Visit::New && feedback.accept(candidate_energy - energy);
                     if adopt {
-                        history.mark_accepted(reached).map_err(|error| error.to_string())?;
+                        history
+                            .mark_accepted(reached)
+                            .map_err(|error| error.to_string())?;
                     }
                     Ok(adopt)
                 },
