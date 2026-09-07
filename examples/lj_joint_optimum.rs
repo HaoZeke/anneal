@@ -1815,4 +1815,49 @@ mod tests {
         assert_eq!(new, 0);
         assert_eq!(outcome.charged, 50_000);
     }
+
+    #[test]
+    fn shared_first_acceptance_is_atomic_with_history_classification() {
+        use std::sync::{Barrier, Mutex};
+
+        struct SameCoordinates;
+        impl ExactStructureWitness for SameCoordinates {
+            fn equivalent(&self, left: ArrayView1<f64>, right: ArrayView1<f64>) -> bool {
+                left == right
+            }
+        }
+        let history = Mutex::new(super::MinimumHistory::new(1e-3).unwrap());
+        let barrier = Barrier::new(2);
+        let accepted = std::thread::scope(|scope| {
+            let handles = (0..2).map(|_| scope.spawn(|| {
+                let point = ndarray::array![0.0, 0.0, 0.0, 1.2, 0.0, 0.0];
+                let mut ledger = super::Ledger::new(1);
+                assert!(ledger.charge());
+                assert!(ledger.record_quench_boundary(0, -1.0, point, Some(Array1::zeros(6))));
+                let descriptor = super::lj::descriptor_space();
+                let context = super::StructureContext::new(Some(vec![18; 2]), None, None);
+                let mut feedback = super::EscapeFeedback::new(1.0, 0.8);
+                barrier.wait();
+                super::observe_history(&history, &ledger, &descriptor, &context, &SameCoordinates,
+                    |history, observation| {
+                        let reached = observation.minimum.id;
+                        let visits = history.accepted_visits(reached).unwrap();
+                        let visit = feedback.observe_shared(None, reached, visits == 0, visits);
+                        let accept = visit == super::Visit::New && feedback.accept(-1.0);
+                        if accept {
+                            history.mark_accepted(reached).unwrap();
+                        }
+                        Ok(accept)
+                    }).unwrap().1
+            })).collect::<Vec<_>>();
+            handles.into_iter()
+                .map(|handle| usize::from(handle.join().unwrap())).sum::<usize>()
+        });
+        assert_eq!(accepted, 1);
+        let history = history.lock().unwrap();
+        assert_eq!(history.minimum_count(), 1);
+        assert_eq!(history.accepted_count(), 1);
+        assert_eq!(history.accepted_visits(0), Some(2));
+        assert_eq!(history.total_visits(), 2);
+    }
 }
