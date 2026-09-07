@@ -308,6 +308,32 @@ pub struct Ledger {
     /// State attaining [`Ledger::best`].
     pub best_state: Option<Array1<f64>>,
     quench_boundaries: Vec<QuenchBoundary>,
+    diagnostic_quench: bool,
+}
+
+struct DiagnosticQuench<'a> {
+    ledger: &'a mut Ledger,
+    previous: bool,
+}
+
+impl std::ops::Deref for DiagnosticQuench<'_> {
+    type Target = Ledger;
+
+    fn deref(&self) -> &Self::Target {
+        self.ledger
+    }
+}
+
+impl std::ops::DerefMut for DiagnosticQuench<'_> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        self.ledger
+    }
+}
+
+impl Drop for DiagnosticQuench<'_> {
+    fn drop(&mut self) {
+        self.ledger.diagnostic_quench = self.previous;
+    }
 }
 
 impl Ledger {
@@ -320,7 +346,22 @@ impl Ledger {
             best: f64::INFINITY,
             best_state: None,
             quench_boundaries: Vec::new(),
+            diagnostic_quench: false,
         }
+    }
+
+    /// Whether the relaxation serves a non-adopting diagnostic probe.
+    ///
+    /// Diagnostic callbacks must use the declared, fixed relaxation kernel:
+    /// no adaptive surface, search bias, noise, or portfolio reward credit.
+    /// Objective work and discovered values still belong to this ledger.
+    pub fn is_diagnostic_quench(&self) -> bool {
+        self.diagnostic_quench
+    }
+
+    fn diagnostic_scope(&mut self) -> DiagnosticQuench<'_> {
+        let previous = std::mem::replace(&mut self.diagnostic_quench, true);
+        DiagnosticQuench { ledger: self, previous }
     }
 
     /// Charges one unit, returning `false` when the budget is gone.
@@ -1440,6 +1481,7 @@ where
             if let CheckpointAction::Retire { .. } = checkpoint_action {
                 break;
             }
+            let diagnostic_quench = matches!(&checkpoint_action, CheckpointAction::ProbeProposal { .. });
             let proposal = match checkpoint_action {
                 CheckpointAction::Continue => None,
                 CheckpointAction::Retire { .. } => unreachable!("retire breaks before this match"),
@@ -1521,7 +1563,10 @@ where
                 // local environments, seed a dimer on a highlighted
                 // atom, climb under an energy ceiling. An offered
                 // residual is the seed when the checkpoint moved.
-                let quenched = if action == "catalog_ridge" {
+                let quenched = if diagnostic_quench {
+                    let mut scope = ledger.diagnostic_scope();
+                    relax(&mut scope, state.view(), cfg.relax_steps)
+                } else if action == "catalog_ridge" {
                     let atoms = from_state.len() / 3;
                     let depth = from_energy.abs() / atoms.max(1) as f64;
                     let ceiling = from_energy + crate::known_basin::LEAVE_WALK_CLIMB * depth;
