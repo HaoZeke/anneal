@@ -2411,7 +2411,7 @@ fn apply_request(
                                 .and_then(|h| scientific.packing.family_of(&h))
                         })
                         .collect();
-                    let represented = families.iter().any(|f| *f == Some(new_family));
+                    let represented = families.contains(&Some(new_family));
                     if !represented {
                         let mut counts: std::collections::BTreeMap<usize, usize> =
                             std::collections::BTreeMap::new();

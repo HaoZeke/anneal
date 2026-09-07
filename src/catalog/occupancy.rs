@@ -1159,7 +1159,7 @@ impl OccupancyCompact {
 
     /// One component, a forest, no primitive ring: a path or a tree.
     pub fn is_pathlike(&self) -> bool {
-        self.components == 1 && self.rings == 0 && self.edges + 1 <= self.n
+        self.components == 1 && self.rings == 0 && self.edges < self.n
     }
 }
 

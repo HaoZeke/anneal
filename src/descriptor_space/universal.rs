@@ -47,11 +47,10 @@ impl DescriptorGeometry {
         if periodic.iter().any(|&axis| axis) && cell.is_none() {
             return Err(DescriptorError::PeriodicCellRequired);
         }
-        if let Some(cell) = cell {
-            if cell.iter().any(|value| !value.is_finite()) || determinant(cell).abs() <= 1e-12 {
+        if let Some(cell) = cell
+            && (cell.iter().any(|value| !value.is_finite()) || determinant(cell).abs() <= 1e-12) {
                 return Err(DescriptorError::InvalidCell);
             }
-        }
         Ok(Self {
             length_scale,
             cell,

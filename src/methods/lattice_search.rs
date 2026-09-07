@@ -664,9 +664,7 @@ pub fn walk_occupation_on(
         for k in 0..3 {
             cur[3 * i + k] = site[k];
         }
-        let freed = occupied[i];
-        occupied[i] = vacant[slot];
-        vacant[slot] = freed;
+        std::mem::swap(&mut occupied[i], &mut vacant[slot]);
         total += delta;
         if total < best_total - 1e-9 {
             best_total = total;

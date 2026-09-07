@@ -517,11 +517,10 @@ fn freeze_packing_modes(
             if same_point(well.coords.view(), origin) {
                 return None;
             }
-            if let (Some(mu), Some(mu_k)) = (mu.as_ref(), well.packing_mean.as_ref()) {
-                if let Some(lifted) = lift_packing_mode(origin, mu.view(), mu_k.view(), &j) {
+            if let (Some(mu), Some(mu_k)) = (mu.as_ref(), well.packing_mean.as_ref())
+                && let Some(lifted) = lift_packing_mode(origin, mu.view(), mu_k.view(), &j) {
                     return Some((index, lifted.0, lifted.1, lifted.2));
                 }
-            }
             let (p, r_phi, p_norm) = lift_local_residual(origin, well.coords.view(), &j)?;
             Some((index, p, r_phi, p_norm))
         })
@@ -1939,11 +1938,10 @@ where
         let left = landed
             .as_slice()
             .is_some_and(|trial| crate::catalog::leaves_packing(origin_slice, trial, &[]));
-        if left && energy <= origin_energy + 1e-6 {
-            if best.as_ref().is_none_or(|(held, _, _)| energy < *held) {
+        if left && energy <= origin_energy + 1e-6
+            && best.as_ref().is_none_or(|(held, _, _)| energy < *held) {
                 best = Some((energy, landed.clone(), hop));
             }
-        }
         let delta = energy - current_energy;
         let take = delta <= 0.0 || rng.random::<f64>() < (-delta / LEAVE_WALK_TEMPERATURE).exp();
         if take {
@@ -1970,7 +1968,7 @@ where
         return x.to_owned();
     };
     let atoms = x.len() / 3;
-    let mut rise = |rmsd: f64, energy: &mut E| -> Option<(f64, Array1<f64>)> {
+    let rise = |rmsd: f64, energy: &mut E| -> Option<(f64, Array1<f64>)> {
         let trial =
             crate::soap::packing_step_nu3(x, PACKING_SPEC, direction, rmsd, species, mobile);
         let value = energy(trial.view())?;
