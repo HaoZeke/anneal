@@ -9,6 +9,11 @@ cd "${ANNEAL_VERIFY_ROOT:?set ANNEAL_VERIFY_ROOT to the source snapshot}"
 export PATH="$HOME/.cargo/bin:$PATH"
 export CARGO_BUILD_JOBS="${ANNEAL_VERIFY_JOBS:-${SLURM_CPUS_PER_TASK:-2}}"
 unset CARGO_TARGET_DIR
+isolation_toolchain="$PWD/scripts/cargo_target_isolation.cmake"
+if [[ -n "${CMAKE_TOOLCHAIN_FILE:-}" && "$CMAKE_TOOLCHAIN_FILE" != "$isolation_toolchain" ]]; then
+  export ANNEAL_CMAKE_BASE_TOOLCHAIN="$CMAKE_TOOLCHAIN_FILE"
+fi
+export CMAKE_TOOLCHAIN_FILE="$isolation_toolchain"
 : "${ANNEAL_VERIFY_TARGET:?set ANNEAL_VERIFY_TARGET}"
 # Native dependency builds launch their own Cargo process. Its target
 # directory must not share the outer process's locked build directory.
