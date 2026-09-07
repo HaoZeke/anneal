@@ -6435,7 +6435,12 @@ fn census_nearby_updates(
             own_moved || fresh_ids.contains(&peer.replica) || !nearby.contains_key(&peer.replica);
         let near = if stale {
             let near = anneal_core::catalog::nearby_packing(here, &peer.coordinates);
-            if near {
+            // Register the peer's structure as a repulsion reference only
+            // when it becomes nearby or its minimum changed; the registry
+            // rebuilds its packing book over every held reference on each
+            // call, which at forty references was the remaining cost.
+            let was_near = nearby.get(&peer.replica).copied().unwrap_or(false);
+            if near && (!was_near || fresh_ids.contains(&peer.replica)) {
                 anneal_core::catalog::include_packing_reference(&peer.coordinates);
             }
             updates.push((peer.replica, near));
