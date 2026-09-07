@@ -2817,7 +2817,7 @@ fn main() {
             "  seed {seed}: best {:.6}  hops {}  screened {}  charged {}  \
              basins {} ({:.1} hops each)  returned {}  \
              swaps {}/{}  paths {} improved {} gain {:.3}  \
-             escape {:.3} thr {:.4} same/known/new {}/{}/{} soft {}/{} sub {}/{} lmin {:.4} climbs {} gain {:.2} radius {:.3} step {:.3} restarts {} xrefused {} jumps {} angular {}/{} R {:.3} tabu {} vetoed {} screen {}/{} expl {} obs {} ctx {:?}  \
+             escape {:.3} thr {:.4} same/known/new {}/{}/{} soft {}/{} sub {}/{} lmin {:.4} climbs {} gain {:.2} radius {:.3} step {:.3} restarts {} xrefused {} jumps {} angular {}/{} R {:.3} tabu {} vetoed {} screen {}/{} expl {} obs {} ctx {:?} sym {}/{:.2} orbits {}/{:.2}  \
              relaxed {converged}/{} converged  early {early_stopped} saved {early_saved}  \
              verified {}{}",
             out.best,
@@ -2859,6 +2859,10 @@ fn main() {
             out.screen.2,
             out.screen.3,
             out.contextual.0,
+            out.symmetrised.0,
+            out.symmetrised.1,
+            out.orbits.0,
+            out.orbits.1,
             converged + capped,
             verified
                 .map(|(e, gmax)| format!("{e:.6} |g| {gmax:.1e}"))
