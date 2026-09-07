@@ -14,6 +14,8 @@
 #[cfg(feature = "bank-rpc")]
 #[path = "common/checkpoint_deposits.rs"]
 mod checkpoint_deposits;
+#[path = "common/ensemble_report.rs"]
+mod ensemble_report;
 #[cfg(feature = "bank-rpc")]
 use checkpoint_deposits::with_pending_deposits;
 
@@ -7086,77 +7088,6 @@ fn run_capnp_bank(
     }
 }
 
-/// SHA-256 of the running executable, so a record names what produced it.
-fn executable_sha256() -> String {
-    use sha2::{Digest, Sha256};
-    std::env::current_exe()
-        .and_then(std::fs::read)
-        .map(|bytes| format!("{:x}", Sha256::digest(&bytes)))
-        .unwrap_or_else(|_| "unavailable".into())
-}
-
-/// Reads the ensemble's channels from the environment.
-///
-/// `HISTORY` shared, private or none (default private) with
-/// `HISTORY_POLICY` accepted or observed-exclusion; `SHARED_BIAS=1` with
-/// `SHARED_BIAS_WEIGHT`; `GOSSIP` ring or random with `GOSSIP_INTERVAL`,
-/// `GOSSIP_WEIGHT` and `GOSSIP_ADAPTIVE=1`; `TWO_CHOICE_STALL` in charged
-/// calls; `HISTORY_CHECKPOINT` for the exchange lag.
-fn ensemble_config_from_env(
-    replicas: usize,
-    budget: usize,
-    reference: Option<f64>,
-) -> anneal_core::methods::ensemble::EnsembleConfig {
-    use anneal_core::methods::ensemble::{
-        EnsembleConfig, GossipConfig, GossipTopology, HistoryMode,
-    };
-    use anneal_core::methods::minima_hopping::HistoryMembership;
-    fn parsed<T: std::str::FromStr>(name: &str) -> Option<T> {
-        std::env::var(name).ok().and_then(|v| v.parse().ok())
-    }
-    let history = match std::env::var("HISTORY").as_deref() {
-        Ok("shared") => HistoryMode::Shared,
-        Ok("private") | Err(_) => HistoryMode::Private,
-        Ok("none") => HistoryMode::None,
-        Ok(other) => panic!("HISTORY={other:?}; expected shared, private or none"),
-    };
-    let membership = HistoryMembership::parse(std::env::var("HISTORY_POLICY").ok().as_deref())
-        .unwrap_or_else(|error| panic!("{error}"));
-    let shared_bias = std::env::var("SHARED_BIAS")
-        .is_ok_and(|v| v == "1")
-        .then(|| parsed::<f64>("SHARED_BIAS_WEIGHT").unwrap_or(1.0));
-    let gossip = match std::env::var("GOSSIP").as_deref() {
-        Ok("ring") => Some(GossipTopology::Ring),
-        Ok("random") => Some(GossipTopology::Random),
-        Ok("") | Err(_) => None,
-        Ok(other) => panic!("GOSSIP={other:?}; expected ring or random"),
-    }
-    .map(|topology| GossipConfig {
-        topology,
-        interval: parsed::<usize>("GOSSIP_INTERVAL").unwrap_or(20_000).max(1),
-        weight: parsed::<f64>("GOSSIP_WEIGHT").unwrap_or(0.5),
-        adaptive: std::env::var("GOSSIP_ADAPTIVE").is_ok_and(|v| v == "1"),
-        top: match parsed::<usize>("GOSSIP_TOP") {
-            Some(0) => None,
-            Some(count) => Some(count),
-            None => Some(64),
-        },
-    });
-    EnsembleConfig {
-        replicas,
-        budget,
-        history,
-        membership,
-        shared_bias,
-        gossip,
-        two_choice_stall: parsed::<usize>("TWO_CHOICE_STALL").filter(|v| *v > 0),
-        checkpoint_interval: parsed::<usize>("HISTORY_CHECKPOINT")
-            .unwrap_or(1_000)
-            .max(1),
-        target: reference.map(|r| r + 1e-4),
-    }
-}
-
 /// Thread replicas of the production hop loop over the channels the
 /// environment names, under the comparison contract: identical replica
 /// seeds and starts in every arm, one aggregate budget per seed equal to
@@ -7178,8 +7109,9 @@ fn run_history_ensembles(
     };
     use anneal_core::methods::minima_hopping::SerializedWitness;
     use anneal_core::pes_exploration::StructureContext;
+    use ensemble_report::{Tally, config_from_env, print_header, print_report, print_tally};
 
-    let ens = ensemble_config_from_env(replicas, budget, reference);
+    let ens = config_from_env(replicas, budget, reference.map(|r| r + 1e-4));
     let mut cfg = cfg.clone();
     if let Some(cap) = std::env::var("SHARED_DEPOSITS")
         .ok()
@@ -7245,115 +7177,37 @@ fn run_history_ensembles(
         certificate: 1e-5,
         polish_below: 1e-3,
     };
-    println!(
-        "  history ensembles: {} replicas, {} history, {} membership, shared bias {:?}, gossip {:?}, \
-         two-choice stall {:?}, budgets {:?}, checkpoint {}, witness {witness_name}, \
-         shared deposits {}, mechanisms {}, executable sha256 {}",
-        ens.replicas,
-        ens.history.name(),
-        ens.membership.name(),
-        ens.shared_bias,
-        ens.gossip,
-        ens.two_choice_stall,
-        ens.budgets(),
-        ens.checkpoint_interval,
-        cfg.shared_deposits,
-        opts.join(","),
-        executable_sha256()
+    print_header(
+        &ens,
+        witness_name,
+        &opts.join(","),
+        &format!("shared deposits {},", cfg.shared_deposits),
     );
-    let mut solved = 0usize;
-    let mut deepest = f64::INFINITY;
-    let mut first_target: Vec<usize> = Vec::new();
+    // The read-only answer audit of the seed loop, per replica.
+    let verify = |replica: usize, x: &Array1<f64>, reported: f64| {
+        assert_eq!(
+            x.len(),
+            3 * n,
+            "replica {replica} returned {} coordinates",
+            x.len()
+        );
+        let (e, g) = lj(x.view());
+        let gmax = g.iter().fold(0.0_f64, |a, v| a.max(v.abs()));
+        assert!(
+            e.is_finite() && (e - reported).abs() < 1e-6,
+            "replica {replica} reports {reported} but its coordinates have energy {e}"
+        );
+        assert!(
+            g.iter().all(|v| v.is_finite()) && gmax < 1e-3,
+            "replica {replica} returned a structure with gradient {gmax:.2e}"
+        );
+        (e, gmax)
+    };
+    let mut tally = Tally::new();
     for seed in seed0..(seed0 + seeds) {
         let report = run_ensemble(&cfg, &ens, seed, &problem)
             .unwrap_or_else(|error| panic!("seed {seed}: {error}"));
-        for run in &report.replicas {
-            // A read-only audit of the returned coordinates and objective.
-            let verified = run.outcome.best_state.as_ref().map(|x| {
-                let (e, g) = lj(x.view());
-                let gmax = g.iter().fold(0.0_f64, |a, v| a.max(v.abs()));
-                assert!(
-                    e.is_finite() && (e - run.outcome.best).abs() < 1e-6,
-                    "seed {seed} replica {} reports {} but its coordinates have energy {e}",
-                    run.replica,
-                    run.outcome.best
-                );
-                assert!(
-                    g.iter().all(|v| v.is_finite()) && gmax < 1e-3,
-                    "seed {seed} replica {} returned a structure with gradient {gmax:.2e}",
-                    run.replica
-                );
-                (e, gmax)
-            });
-            let hit = ens.target.is_some_and(|t| run.outcome.best < t);
-            println!(
-                "    seed {seed} replica {} (seed {}): best {:.6}  hops {}  charged {}  basins {}  \
-                 history obs {} new {} refused {} secs {:.1}  shared_deposits {}  bias_published {}  \
-                 gossip {}  gossip_interval {}  two_choice_restarts {}  \
-                 escape {:.3} thr {:.4} same/known/new {}/{}/{}  first_target {}  wall {:.1}s  verified {}{}",
-                run.replica,
-                run.seed,
-                run.outcome.best,
-                run.outcome.hops,
-                run.charged,
-                run.outcome.basins,
-                run.outcome.history_visits.0,
-                run.outcome.history_visits.1,
-                run.history_cost.1,
-                run.history_cost.2,
-                run.outcome.shared_deposits,
-                run.bias_published,
-                run.outcome.gossip_rounds,
-                run.gossip_interval,
-                run.two_choice_restarts,
-                run.outcome.escape_scale,
-                run.outcome.escape_threshold,
-                run.outcome.visit_counts.0,
-                run.outcome.visit_counts.1,
-                run.outcome.visit_counts.2,
-                run.first_target_calls
-                    .map(|v| v.to_string())
-                    .unwrap_or_else(|| "-".into()),
-                run.wall_seconds,
-                verified
-                    .map(|(e, gmax)| format!("{e:.6} |g| {gmax:.1e}"))
-                    .unwrap_or_else(|| "NO STATE".into()),
-                if hit { "  SOLVED" } else { "" }
-            );
-        }
-        let hit = report.solved(ens.target);
-        if hit {
-            solved += 1;
-        }
-        if let Some(calls) = report.first_target_calls {
-            first_target.push(calls);
-        }
-        deepest = deepest.min(report.best);
-        println!(
-            "  seed {seed} ensemble: best {:.6}  aggregate charged {}  first_target_calls {}  \
-             history minima/accepted/visits {:?}  bias exchange published {} delivered {}  wall {:.1}s{}",
-            report.best,
-            report.aggregate_charged,
-            report
-                .first_target_calls
-                .map(|v| v.to_string())
-                .unwrap_or_else(|| "-".into()),
-            report.histories,
-            report.exchange.0,
-            report.exchange.1,
-            report.wall_seconds,
-            if hit { "  SOLVED" } else { "" }
-        );
-        let _ = io::stdout().flush();
+        print_report(seed, &ens, &report, "", &verify, &mut tally);
     }
-    println!(
-        "{solved}/{seeds} solved ({} history, {} membership, {replicas} replicas), deepest {deepest:.6}, \
-         first_target_calls {:?}",
-        ens.history.name(),
-        ens.membership.name(),
-        first_target
-    );
-    if let Some(r) = reference {
-        println!("gap to reference {:+.6}", deepest - r);
-    }
+    print_tally(&ens, &tally, reference);
 }
