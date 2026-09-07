@@ -278,6 +278,17 @@ pub enum CheckpointAction {
         /// holds the total deposition rate of N walkers at one walker's.
         weight: f64,
     },
+    /// One gossip step: move this chain's wells toward another walker's.
+    ///
+    /// DeGroot averaging over whatever graph the caller draws peers from;
+    /// see [`BasinBias::merge_wells`]. Conserves the population's bias
+    /// mass where [`CheckpointAction::DepositDescriptors`] multiplies it.
+    MergeBias {
+        /// The peer's wells as `(centre, depth)`.
+        wells: Vec<(Array1<f64>, f64)>,
+        /// Step toward the peer, one half for a pairwise average.
+        weight: f64,
+    },
     /// Occupancy certificate: stop this replica.
     ///
     /// Occupancy MixingCertified conjuncts. CatalogSaturated is
@@ -650,6 +661,8 @@ pub struct Outcome {
     pub history_visits: (usize, usize),
     /// Bias deposits made on behalf of other chains' visits.
     pub shared_deposits: usize,
+    /// Gossip averaging steps applied to the bias.
+    pub gossip_rounds: usize,
     /// Seconds the chain spent inside the history, lock waits included.
     pub history_seconds: f64,
     /// Climbs triggered by a stall.
@@ -1556,6 +1569,7 @@ where
     let mut history_observations = 0usize;
     let mut history_new = 0usize;
     let mut shared_deposits = 0usize;
+    let mut gossip_rounds = 0usize;
     if let (Some(h), Some(g)) = (history.as_deref_mut(), current_validation_gradient.as_ref()) {
         // The start is part of the history even though no hop reached it,
         // exactly as the controller registers it: a later return to it must
@@ -1698,6 +1712,11 @@ where
                             bias.deposit(bias.cv(remote.view()).view(), cfg.temperature);
                         }
                     }
+                    None
+                }
+                CheckpointAction::MergeBias { wells, weight } => {
+                    bias.merge_wells(&wells, weight);
+                    gossip_rounds += 1;
                     None
                 }
                 CheckpointAction::DepositDescriptors { deposits, weight } => {
@@ -4404,6 +4423,7 @@ where
         jumps,
         history_visits: (history_observations, history_new),
         shared_deposits,
+        gossip_rounds,
         history_seconds: history.as_deref().map_or(0.0, |h| h.cost().2),
         merge_radius: final_radius,
         mean_step: radius.mean_step(),
