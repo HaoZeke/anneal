@@ -6249,11 +6249,6 @@ fn run_capnp_catalog(
             cooperative
                 .record_slice(replica, trace)
                 .expect("checkpoint trace must remain complete");
-            if shared_bias_enabled && !pending_deposits.is_empty() {
-                return CheckpointAction::DepositRemote {
-                    states: std::mem::take(pending_deposits),
-                };
-            }
             CheckpointAction::Continue
         };
     let mut checkpoint = |snapshot: ChainCheckpoint<'_>| {
