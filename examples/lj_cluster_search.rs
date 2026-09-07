@@ -7227,6 +7227,16 @@ fn run_history_ensembles(
         .ok()
         .and_then(|v| v.parse().ok())
         .unwrap_or(128 * 1024 * 1024);
+    // The per-look cap on deposits paid for other chains' visits; the
+    // configured default otherwise.
+    let mut cfg = cfg.clone();
+    if let Some(cap) = std::env::var("SHARED_DEPOSITS")
+        .ok()
+        .and_then(|v| v.parse::<usize>().ok())
+    {
+        cfg.shared_deposits = cap;
+    }
+    let cfg = &cfg;
     let descriptor = anneal_core::catalog::lj::descriptor_space();
     let ira_radius = anneal_core::catalog::lj::CALIBRATION_IRA_TOLERANCE;
     #[cfg(feature = "ira")]
