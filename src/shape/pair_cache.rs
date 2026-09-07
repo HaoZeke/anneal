@@ -116,7 +116,7 @@ impl CachedIraStructureWitness {
         }
     }
 
-    fn lower_bound(&self, left: ArrayView1<f64>, right: ArrayView1<f64>) -> Option<f64> {
+    fn exceeds_radius(&self, left: ArrayView1<f64>, right: ArrayView1<f64>) -> Option<bool> {
         let (left, right) = {
             let mut cache = self
                 .cache
@@ -124,7 +124,7 @@ impl CachedIraStructureWitness {
                 .expect("pair-spectrum cache lock poisoned");
             (cache.prepare(left)?, cache.prepare(right)?)
         };
-        left.bottleneck_lower_bound(&right)
+        left.bottleneck_exceeds(&right, self.witness.radius)
     }
 }
 
@@ -134,13 +134,10 @@ impl ExactStructureWitness for CachedIraStructureWitness {
     }
 
     fn relation(&self, left: ArrayView1<f64>, right: ArrayView1<f64>) -> ExactStructureRelation {
-        if self
-            .lower_bound(left, right)
-            .is_some_and(|lower| lower > self.witness.radius)
-        {
+        if self.exceeds_radius(left, right).unwrap_or(false) {
             ExactStructureRelation::Distinct
         } else {
-            self.witness.relation(left, right)
+            self.witness.native_relation(left, right)
         }
     }
 
@@ -155,12 +152,12 @@ impl ExactStructureWitness for CachedIraStructureWitness {
     ) -> ExactStructureRelation {
         if left.context != right.context
             || self
-                .lower_bound(left.coordinates, right.coordinates)
-                .is_some_and(|lower| lower > self.witness.radius)
+                .exceeds_radius(left.coordinates, right.coordinates)
+                .unwrap_or(false)
         {
             ExactStructureRelation::Distinct
         } else {
-            self.witness.relation_structures(left, right)
+            self.witness.native_relation_structures(left, right)
         }
     }
 }
