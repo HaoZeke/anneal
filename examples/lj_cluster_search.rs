@@ -3693,6 +3693,77 @@ impl PhaseTally {
     }
 }
 
+/// State of the census jump phase across checkpoints.
+#[derive(Default)]
+struct JumpState {
+    /// Hop of the last jump, for the cooldown.
+    last_hop: usize,
+    /// Jumps taken.
+    jumps: usize,
+}
+
+/// Census jump phase (Iwamatsu and Okabe): when the ensemble census has
+/// visited this replica's basin at least `CATALOG_JUMP_VISITS` times and
+/// the cooldown of `CATALOG_JUMP_COOLDOWN` hops has passed, a short
+/// unquenched walk of `JUMP_STEPS` steps of half-width `JUMP_STEP` times
+/// the length scale leaves the region. The shared visit count is the
+/// population's, so a region many replicas exhausted is left by all of
+/// them without any being handed a structure. Returns the walked state.
+fn census_jump_phase(
+    state: &mut JumpState,
+    replica: u32,
+    snapshot: &ChainCheckpoint<'_>,
+    checkpoint_sequence: u64,
+    local_basin_visits: u64,
+    length_scale: f64,
+) -> Option<Vec<f64>> {
+    use rand::{Rng, SeedableRng};
+    let census_jump_visits: u64 = std::env::var("CATALOG_JUMP_VISITS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(0);
+    let census_jump_cooldown: usize = std::env::var("CATALOG_JUMP_COOLDOWN")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(2000);
+    if census_jump_visits == 0
+        || local_basin_visits < census_jump_visits
+        || snapshot.hops().saturating_sub(state.last_hop) < census_jump_cooldown
+    {
+        return None;
+    }
+    let state_view = snapshot.current_state();
+    let here = state_view.as_slice()?;
+    let mut jump_rng = rand::rngs::StdRng::seed_from_u64(
+        (u64::from(replica) << 40) ^ checkpoint_sequence.wrapping_mul(0x9E37_79B9_7F4A_7C15),
+    );
+    let steps: usize = std::env::var("JUMP_STEPS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(10);
+    let half: f64 = std::env::var("JUMP_STEP")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(0.38)
+        * length_scale;
+    let mut jumped = here.to_vec();
+    for _ in 0..steps.max(1) {
+        for v in jumped.iter_mut() {
+            *v += jump_rng.random_range(-half..half);
+        }
+    }
+    state.last_hop = snapshot.hops();
+    state.jumps += 1;
+    println!(
+        "  census jump hops {}  visits {}  jumps {}",
+        snapshot.hops(),
+        local_basin_visits,
+        state.jumps
+    );
+    let _ = std::io::stdout().flush();
+    Some(jumped)
+}
+
 /// State of the hear phase across checkpoints.
 struct HearState {
     /// Best energy at the last hear clock reset.
@@ -4445,8 +4516,7 @@ fn run_capnp_catalog(
     let mut hear_state = HearState::default();
     // Census jumps: the population's visit count of this replica's basin,
     // not this replica's own stall, triggers an occasional jump.
-    let mut census_jump_last_hop = 0usize;
-    let mut census_jumps = 0usize;
+    let mut jump_state = JumpState::default();
     let mut census_restarts = 0usize;
     let mut census_restart_last_hop = 0usize;
     let mut count_walk = 0usize;
@@ -5820,48 +5890,14 @@ fn run_capnp_catalog(
                 // escapes; here it is the population's, so a region many replicas
                 // have exhausted is left by all of them without any of them being
                 // handed a structure.
-                let census_jump_visits: u64 = std::env::var("CATALOG_JUMP_VISITS")
-                    .ok()
-                    .and_then(|v| v.parse().ok())
-                    .unwrap_or(0);
-                let census_jump_cooldown: usize = std::env::var("CATALOG_JUMP_COOLDOWN")
-                    .ok()
-                    .and_then(|v| v.parse().ok())
-                    .unwrap_or(2000);
-                if census_jump_visits > 0
-                    && policy.census.local_basin_visits() >= census_jump_visits
-                    && snapshot.hops().saturating_sub(census_jump_last_hop) >= census_jump_cooldown
-                    && let Some(here) = snapshot.current_state().as_slice()
-                {
-                    use rand::{Rng, SeedableRng};
-                    let mut jump_rng = rand::rngs::StdRng::seed_from_u64(
-                        (u64::from(replica) << 40)
-                            ^ checkpoint_sequence.wrapping_mul(0x9E37_79B9_7F4A_7C15),
-                    );
-                    let steps: usize = std::env::var("JUMP_STEPS")
-                        .ok()
-                        .and_then(|v| v.parse().ok())
-                        .unwrap_or(10);
-                    let half: f64 = std::env::var("JUMP_STEP")
-                        .ok()
-                        .and_then(|v| v.parse().ok())
-                        .unwrap_or(0.38)
-                        * run_cfg.length_scale;
-                    let mut jumped = here.to_vec();
-                    for _ in 0..steps.max(1) {
-                        for v in jumped.iter_mut() {
-                            *v += jump_rng.random_range(-half..half);
-                        }
-                    }
-                    census_jump_last_hop = snapshot.hops();
-                    census_jumps += 1;
-                    println!(
-                        "  census jump hops {}  visits {}  jumps {}",
-                        snapshot.hops(),
-                        policy.census.local_basin_visits(),
-                        census_jumps
-                    );
-                    let _ = std::io::stdout().flush();
+                if let Some(jumped) = census_jump_phase(
+                    &mut jump_state,
+                    replica,
+                    &snapshot,
+                    checkpoint_sequence,
+                    policy.census.local_basin_visits(),
+                    run_cfg.length_scale,
+                ) {
                     phases.fire("census_jump");
                     return complete_checkpoint_trace(
                         &mut cooperative,
