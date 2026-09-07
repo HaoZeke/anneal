@@ -51,7 +51,7 @@ for ((ensemble_index=0; ensemble_index<ensembles; ensemble_index++)); do
         surface-evidence "$ensemble" "$roster" >"$server_log" 2>&1 &
       server_pid=$!
       for ((attempt=0; attempt<200; attempt++)); do
-        endpoint=$(sed -n 's/.*"addr":"\([^"]*\)".*/\1/p' "$server_log" | head -n 1)
+        endpoint=$(sed -n 's/.*"addr":"\([^"]*\)".*/\1/p' "$server_log" | sed -n '1p')
         [[ -n "$endpoint" ]] && break
         kill -0 "$server_pid" || { printf 'coordinator failed\n' >&2; exit 1; }
         sleep 0.1
