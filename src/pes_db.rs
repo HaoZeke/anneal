@@ -767,11 +767,12 @@ fn validate_context(context: &StructureContext, coordinate_len: usize) -> Result
         ));
     }
     if let Some(masses) = context.masses()
-        && (masses.len() != atoms || masses.iter().any(|mass| !mass.is_finite() || *mass <= 0.0)) {
-            return Err(PesDbError::InvalidRecord(
-                "masses must be finite, positive, and one per atom".into(),
-            ));
-        }
+        && (masses.len() != atoms || masses.iter().any(|mass| !mass.is_finite() || *mass <= 0.0))
+    {
+        return Err(PesDbError::InvalidRecord(
+            "masses must be finite, positive, and one per atom".into(),
+        ));
+    }
     Ok(())
 }
 

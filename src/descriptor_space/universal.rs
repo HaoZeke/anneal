@@ -48,9 +48,10 @@ impl DescriptorGeometry {
             return Err(DescriptorError::PeriodicCellRequired);
         }
         if let Some(cell) = cell
-            && (cell.iter().any(|value| !value.is_finite()) || determinant(cell).abs() <= 1e-12) {
-                return Err(DescriptorError::InvalidCell);
-            }
+            && (cell.iter().any(|value| !value.is_finite()) || determinant(cell).abs() <= 1e-12)
+        {
+            return Err(DescriptorError::InvalidCell);
+        }
         Ok(Self {
             length_scale,
             cell,
