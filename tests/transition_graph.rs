@@ -124,3 +124,25 @@ fn insufficient_probe_evidence_stays_singleton_unresolved() {
     assert_eq!(regions, vec![vec![0, 1], vec![2]]);
     assert_eq!(graph.observations("probe", 2), 0);
 }
+
+#[test]
+fn unresolved_probes_do_not_certify_shared_return_dynamics() {
+    let mut graph = TransitionGraph::new();
+    for source in [0, 1] {
+        for _ in 0..16 {
+            graph
+                .observe("probe", source, TransitionOutcome::Unresolved)
+                .unwrap();
+        }
+    }
+    let regions = graph
+        .attraction_regions(&AttractionRegionConfig {
+            probe_action: "probe".into(),
+            concentration: 0.1,
+            diffusion_steps: 2,
+            maximum_distance: 0.1,
+            minimum_probes: 8,
+        })
+        .unwrap();
+    assert_eq!(regions, vec![vec![0], vec![1]]);
+}
