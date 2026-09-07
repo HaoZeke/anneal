@@ -5,7 +5,10 @@ use anneal_core::shape::IraStructureWitness;
 use ndarray::{Array1, array, s};
 
 fn witness() -> IraStructureWitness {
-    IraStructureWitness { kmax_factor: 1.8, radius: 0.1 }
+    IraStructureWitness {
+        kmax_factor: 1.8,
+        radius: 0.1,
+    }
 }
 
 fn tetrahedron() -> Array1<f64> {
@@ -47,7 +50,10 @@ fn cache_eviction_changes_cost_but_not_exact_relations() {
     let left = tetrahedron();
     for scale in [1.0, 1.01, 3.0, 1.0, 1.01] {
         let right = &left * scale;
-        assert_eq!(cached.relation(left.view(), right.view()), witness().relation(left.view(), right.view()));
+        assert_eq!(
+            cached.relation(left.view(), right.view()),
+            witness().relation(left.view(), right.view())
+        );
         assert!(cached.cache_stats().payload_bytes <= 256);
     }
     assert!(cached.cache_stats().preparations > 3);
@@ -79,7 +85,10 @@ fn cached_spectra_preserve_strided_coordinates_and_rigid_permutations() {
     }
     let right = interleaved.slice(s![..;2]);
     assert!(cached.equivalent(left.view(), right));
-    assert_eq!(cached.relation(left.view(), right), witness().relation(left.view(), right));
+    assert_eq!(
+        cached.relation(left.view(), right),
+        witness().relation(left.view(), right)
+    );
     assert_eq!(cached.cache_stats().preparations, 2);
 }
 
@@ -90,9 +99,18 @@ fn cached_geometry_cannot_bypass_identity_context() {
     assert!(cached.equivalent(coords.view(), coords.view()));
     let left_context = StructureContext::new(Some(vec![1; 4]), None, Some("left".into()));
     let right_context = StructureContext::new(Some(vec![1; 4]), None, Some("right".into()));
-    let left = StructureView { coordinates: coords.view(), context: &left_context };
-    let right = StructureView { coordinates: coords.view(), context: &right_context };
-    assert_eq!(cached.relation_structures(left, right), witness().relation_structures(left, right));
+    let left = StructureView {
+        coordinates: coords.view(),
+        context: &left_context,
+    };
+    let right = StructureView {
+        coordinates: coords.view(),
+        context: &right_context,
+    };
+    assert_eq!(
+        cached.relation_structures(left, right),
+        witness().relation_structures(left, right)
+    );
     assert!(!cached.equivalent_structures(left, right));
     assert!(cached.equivalent_structures(left, left));
 }
@@ -104,5 +122,8 @@ fn matching_pair_spectra_do_not_certify_homometric_identity() {
     let right = line(&[0.0, 1.0, 8.0, 11.0, 13.0, 17.0]);
     let cached = witness().with_pair_cache(8192);
     assert!(!cached.equivalent(left.view(), right.view()));
-    assert_eq!(cached.relation(left.view(), right.view()), witness().relation(left.view(), right.view()));
+    assert_eq!(
+        cached.relation(left.view(), right.view()),
+        witness().relation(left.view(), right.view())
+    );
 }
