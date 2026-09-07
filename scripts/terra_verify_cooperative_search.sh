@@ -7,7 +7,7 @@ if [[ -z "${SLURM_JOB_ID:-}" && -z "${INVOCATION_ID:-}" ]]; then
 fi
 cd "${ANNEAL_VERIFY_ROOT:?set ANNEAL_VERIFY_ROOT to the source snapshot}"
 export PATH="$HOME/.cargo/bin:$PATH"
-export CARGO_BUILD_JOBS="${SLURM_CPUS_PER_TASK:-4}"
+export CARGO_BUILD_JOBS="${ANNEAL_VERIFY_JOBS:-${SLURM_CPUS_PER_TASK:-2}}"
 export CARGO_TARGET_DIR="${ANNEAL_VERIFY_TARGET:?set ANNEAL_VERIFY_TARGET}"
 printf 'source=%s allocation=%s rustc=%s\n' "${ANNEAL_SOURCE_REV:?set ANNEAL_SOURCE_REV}" "${SLURM_JOB_ID:-$INVOCATION_ID}" "$(rustc --version)"
 case "${1:-full}" in
@@ -31,9 +31,11 @@ case "${1:-full}" in
     ;;
   full)
     cargo fmt --all -- --check
-    cargo test --locked
-    cargo test --locked --features bank-rpc,ira,featomic
-    cargo clippy --locked --features bank-rpc,ira,featomic --all-targets -- -D warnings
+    status=0
+    cargo test --locked --no-fail-fast || status=1
+    cargo test --locked --no-fail-fast --features bank-rpc,ira,featomic || status=1
+    cargo clippy --locked --features bank-rpc,ira,featomic --all-targets -- -D warnings || status=1
+    exit "$status"
     ;;
   *)
     printf 'unknown verification mode: %s\n' "$1" >&2
