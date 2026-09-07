@@ -203,8 +203,9 @@ impl TransitionGraph {
     /// Deterministic complete-linkage attraction regions from fixed-probe dynamics.
     ///
     /// The unresolved posterior column is retained as an evidence diagnostic.
-    /// Diffusion propagates on the resolved conditional operator; nodes below
-    /// `minimum_probes` remain singleton unresolved regions and cannot merge.
+    /// Diffusion propagates on the resolved conditional operator; nodes with
+    /// fewer than `minimum_probes` resolved observations remain singleton
+    /// unresolved regions and cannot merge.
     pub fn attraction_regions(
         &self,
         config: &AttractionRegionConfig,
@@ -249,7 +250,12 @@ impl TransitionGraph {
             }
         }
         let eligible = (0..n)
-            .map(|node| self.observations(&config.probe_action, node) >= config.minimum_probes)
+            .map(|node| {
+                let total = self.observations(&config.probe_action, node);
+                let unresolved =
+                    self.count(&config.probe_action, node, TransitionOutcome::Unresolved);
+                total.saturating_sub(unresolved) >= config.minimum_probes
+            })
             .collect::<Vec<_>>();
         Ok(complete_linkage_regions(
             &distances,
