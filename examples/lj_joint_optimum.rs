@@ -993,6 +993,8 @@ fn main() -> Result<(), Box<dyn Error>> {
     let arms = selected_arms(selector, &irc_kinds(irc_selector)?)?;
     let replicas =
         std::env::var("ANNEAL_MH_REPLICAS").map_or(Ok(4), |value| value.parse::<usize>())?;
+    let pair_cache_bytes = std::env::var("ANNEAL_MH_PAIR_CACHE_BYTES")
+        .map_or(Ok(128 * 1024 * 1024), |value| value.parse::<usize>())?;
     let descriptor_space = lj::descriptor_space();
     let potential = PairPotential::lennard_jones(n);
     let witness = IraStructureWitness {
@@ -1029,6 +1031,8 @@ fn main() -> Result<(), Box<dyn Error>> {
                 "start_semantics": "common-matched-coordinates",
                 "exchange": "validated-minimum-history-only",
                 "exact_witness": "serialized-in-both-arms",
+                "pair_cache_payload_bytes": pair_cache_bytes,
+                "pair_cache_scope": "per-ensemble-coordinate-content",
             },
             "minima_hopping": {
                 "integrator": "rgsaddle-samd-nve",
@@ -1084,7 +1088,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                         IraStructureWitness {
                             kmax_factor: witness.kmax_factor,
                             radius: witness.radius,
-                        },
+                        }.with_pair_cache(pair_cache_bytes),
                         EnsembleOptions {
                             replicas,
                             shared,
