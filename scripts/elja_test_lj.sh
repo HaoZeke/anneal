@@ -94,6 +94,11 @@ fi
 if [[ -n ${LJ_ALLOW_DIRTY:-} ]]; then
   echo "staging tree: source $(cat SOURCE_COMMIT 2>/dev/null || echo unknown)"
 fi
-# Tests of the library under the same toolchain and sysroot as the build;
-# every argument is passed to the test harness (a name filter, --nocapture).
-cargo test --offline --locked --release --features featomic,ira,bank-rpc --lib -- "$@"
+# Tests under the same toolchain and sysroot as the build. Arguments go to
+# cargo test: "--lib -- funnel_bo" runs library tests matching a name,
+# "--test catalog_rpc --test catalog_rpc_faults" runs integration tests.
+# With no arguments the library tests run.
+if (( $# == 0 )); then
+  set -- --lib
+fi
+cargo test --offline --locked --release --features featomic,ira,bank-rpc "$@"
