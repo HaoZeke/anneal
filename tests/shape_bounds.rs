@@ -91,7 +91,9 @@ fn pair_bound_preserves_radius_boundary_and_extreme_scales() {
     let left = array![-1.0, 0.0, 0.0, 1.0, 0.0, 0.0];
     let right = array![-1.125, 0.0, 0.0, 1.125, 0.0, 0.0];
     let pairs = SortedPairs { n_points: 2 };
-    let lower = pairs.bottleneck_lower_bound(left.view(), right.view()).unwrap();
+    let lower = pairs
+        .bottleneck_lower_bound(left.view(), right.view())
+        .unwrap();
     assert!(lower > 0.99 * radius);
     assert!(lower <= radius);
     for scale in [1e-100, 1e-10, 1.0, 1e10, 1e100] {
