@@ -213,8 +213,13 @@ mod option_tests {
     #[test]
     fn production_zero_step_queries_bypass_surface_learning() {
         let source = include_str!("lj_cluster_search.rs");
-        let callback = source.rsplit_once("let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, iters: usize| {").unwrap().1;
-        let query = callback.find("return evaluate_without_quenching(led, x)").unwrap();
+        let callback = source
+            .rsplit_once("let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, iters: usize| {")
+            .unwrap()
+            .1;
+        let query = callback
+            .find("return evaluate_without_quenching(led, x)")
+            .unwrap();
         assert!(query < callback.find("opt.forget()").unwrap());
         assert!(callback[..query].contains("if iters == 0"));
     }
@@ -222,16 +227,25 @@ mod option_tests {
     #[test]
     fn production_reports_and_learns_the_validated_objective_not_the_search_transform() {
         let source = include_str!("lj_cluster_search.rs");
-        let callback = source.rsplit_once("let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, iters: usize| {").unwrap().1;
-        let callback = &callback[..callback.find("// The gradient the soft-mode escape needs").unwrap()];
+        let callback = source
+            .rsplit_once("let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, iters: usize| {")
+            .unwrap()
+            .1;
+        let callback = &callback[..callback
+            .find("// The gradient the soft-mode escape needs")
+            .unwrap()];
         assert!(callback.contains(".observe(screening_pass, boundary_energy, led.best)"));
         assert!(callback.contains("(boundary_energy, xr)"));
-        assert!(callback.contains("let mut boundary_energy = f64::INFINITY"),
-            "an exhausted ledger cannot certify a transformed energy as an objective value");
+        assert!(
+            callback.contains("let mut boundary_energy = f64::INFINITY"),
+            "an exhausted ledger cannot certify a transformed energy as an objective value"
+        );
         let charged = source.rsplit_once("fn charged(led:").unwrap().1;
         let charged = &charged[..charged.find("fn charged_noisy").unwrap()];
-        assert!(charged.contains("led.is_diagnostic_quench()"),
-            "diagnostic objectives must bypass the armed adaptive transform");
+        assert!(
+            charged.contains("led.is_diagnostic_quench()"),
+            "diagnostic objectives must bypass the armed adaptive transform"
+        );
     }
 
     #[test]
@@ -4388,8 +4402,11 @@ fn run_capnp_catalog(
         {
             probe_due = false;
             return complete_checkpoint_trace(
-                &mut cooperative, replica, &mut slice_sequence,
-                snapshot.charged(), snapshot.best_energy(),
+                &mut cooperative,
+                replica,
+                &mut slice_sequence,
+                snapshot.charged(),
+                snapshot.best_energy(),
                 |_, _| CheckpointAction::ProbeProposal {
                     state,
                     action: "probe".to_owned(),
@@ -4414,8 +4431,11 @@ fn run_capnp_catalog(
                 );
                 let fresh = random_cluster(cfg.n_points, 0.7, cfg.min_separation, &mut adopt_rng);
                 return complete_checkpoint_trace(
-                    &mut cooperative, replica, &mut slice_sequence,
-                    snapshot.charged(), snapshot.best_energy(),
+                    &mut cooperative,
+                    replica,
+                    &mut slice_sequence,
+                    snapshot.charged(),
+                    snapshot.best_energy(),
                     |_, _| CheckpointAction::ExternalAdopt {
                         state: fresh,
                         action: "coreclass".to_owned(),

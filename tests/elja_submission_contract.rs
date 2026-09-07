@@ -706,19 +706,36 @@ fn diagnostic_probe_scale_is_independent_of_adaptive_search_difficulty() {
 #[test]
 fn diagnostic_probes_precede_adaptive_checkpoint_actions_and_require_a_minimum() {
     let source = include_str!("../examples/lj_cluster_search.rs");
-    let checkpoint = &source[source.find("let mut checkpoint = |snapshot: ChainCheckpoint<'_>|").unwrap()..];
+    let checkpoint = &source[source
+        .find("let mut checkpoint = |snapshot: ChainCheckpoint<'_>|")
+        .unwrap()..];
     let action = checkpoint.find("action: \"probe\".to_owned(),").unwrap();
-    for competing_action in ["if core_class.is_some()", "if rides_enabled", "let hear_enabled"] {
-        assert!(action < checkpoint.find(competing_action).unwrap(),
-            "a due diagnostic must not be starved by {competing_action}");
+    for competing_action in [
+        "if core_class.is_some()",
+        "if rides_enabled",
+        "let hear_enabled",
+    ] {
+        assert!(
+            action < checkpoint.find(competing_action).unwrap(),
+            "a due diagnostic must not be starved by {competing_action}"
+        );
     }
     let scheduling = &checkpoint[..action];
-    let due = &scheduling[scheduling.rfind("if probe_due").expect("retain a due probe until it can execute")..];
-    assert!(due.contains("snapshot.current_gradient().is_some()"),
-        "return evidence needs a validated source minimum");
-    assert!(due.contains("probe_due = false"), "execution must clear the pending probe");
-    assert!(checkpoint.contains("probe_due |= checkpoint_sequence.is_multiple_of(probe_interval)"),
-        "an invalid source must not lose the due diagnostic");
+    let due = &scheduling[scheduling
+        .rfind("if probe_due")
+        .expect("retain a due probe until it can execute")..];
+    assert!(
+        due.contains("snapshot.current_gradient().is_some()"),
+        "return evidence needs a validated source minimum"
+    );
+    assert!(
+        due.contains("probe_due = false"),
+        "execution must clear the pending probe"
+    );
+    assert!(
+        checkpoint.contains("probe_due |= checkpoint_sequence.is_multiple_of(probe_interval)"),
+        "an invalid source must not lose the due diagnostic"
+    );
 }
 
 #[test]
