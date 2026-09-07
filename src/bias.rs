@@ -578,13 +578,17 @@ impl SortedPairs {
             .bottleneck_lower_bound(&self.prepare(right)?)
     }
 
+    /// Whether the conservative displacement bound strictly exceeds `radius`.
+    /// Invalid inputs provide no certificate, regardless of the radius.
+    #[cfg(any(feature = "ira", test))]
     pub(crate) fn bottleneck_exceeds(
         &self,
-        _left: ArrayView1<f64>,
-        _right: ArrayView1<f64>,
-        _radius: f64,
+        left: ArrayView1<f64>,
+        right: ArrayView1<f64>,
+        radius: f64,
     ) -> Option<bool> {
-        unimplemented!("pair-spectrum threshold predicate")
+        self.prepare(left)?
+            .bottleneck_exceeds(&self.prepare(right)?, radius)
     }
 
     pub(crate) fn prepare(&self, coordinates: ArrayView1<f64>) -> Option<PreparedPairSpectrum> {
@@ -620,8 +624,23 @@ pub(crate) struct PreparedPairSpectrum {
 }
 
 impl PreparedPairSpectrum {
-    pub(crate) fn bottleneck_exceeds(&self, _right: &Self, _radius: f64) -> Option<bool> {
-        unimplemented!("prepared pair-spectrum threshold predicate")
+    /// Reject as soon as one sorted-pair discrepancy proves the radius exceeded.
+    #[cfg(any(feature = "ira", test))]
+    pub(crate) fn bottleneck_exceeds(&self, right: &Self, radius: f64) -> Option<bool> {
+        if self.n_points != right.n_points {
+            return None;
+        }
+        let roundoff = 64.0 * f64::EPSILON * self.coordinate_scale.max(right.coordinate_scale);
+        // The zero clamp also applies to a one-atom spectrum with no pairs.
+        // Preserve the bound's rounded expression at every radius boundary.
+        Some(
+            0.0 > radius
+                || self
+                    .distances
+                    .iter()
+                    .zip(&right.distances)
+                    .any(|(left, right)| (0.5 * (left - right).abs() - roundoff).max(0.0) > radius),
+        )
     }
 
     #[cfg(feature = "ira")]
