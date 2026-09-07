@@ -239,9 +239,80 @@ fn decode(bytes: &[u8]) -> Option<PeerMinimum> {
 
 #[cfg(test)]
 mod tests {
-    use super::decode;
+    use super::{CensusBus, REFRESH_CHECKPOINTS, decode};
+    use nng::{Protocol, Socket};
+    use std::collections::HashMap;
 
     const COORDINATES: [f64; 6] = [0.0, 0.0, 0.0, 1.2, 0.0, 0.0];
+
+    fn unconnected_bus() -> CensusBus {
+        CensusBus {
+            replica: 0,
+            replicas: 2,
+            publisher: Socket::new(Protocol::Pub0).unwrap(),
+            subscriber: Socket::new(Protocol::Sub0).unwrap(),
+            latest: HashMap::new(),
+            last_published: None,
+            checkpoints_since_publication: 0,
+            nearby: HashMap::new(),
+        }
+    }
+
+    #[test]
+    fn failed_initial_publication_preserves_retry_eligibility() {
+        let mut bus = unconnected_bus();
+        bus.publisher.close();
+        assert!(matches!(
+            bus.publisher.try_send(&b"probe"[..]),
+            Err((_, nng::Error::Closed))
+        ));
+
+        bus.publish(7, -1.0, &COORDINATES);
+        assert!(bus.last_published.is_none());
+        assert_eq!(bus.checkpoints_since_publication, 1);
+
+        bus.publisher = Socket::new(Protocol::Pub0).unwrap();
+        bus.publish(8, -1.0, &COORDINATES);
+        let published = bus.last_published.as_ref().unwrap();
+        assert_eq!(published.replica, 0);
+        assert_eq!(published.hops, 8);
+        assert_eq!(published.energy, -1.0);
+        assert_eq!(published.coordinates, COORDINATES);
+        assert_eq!(bus.checkpoints_since_publication, 0);
+    }
+
+    #[test]
+    fn failed_unchanged_refresh_preserves_successful_state_and_retries_next_call() {
+        let mut bus = unconnected_bus();
+        bus.publish(7, -1.0, &COORDINATES);
+        assert_eq!(bus.last_published.as_ref().unwrap().hops, 7);
+        assert_eq!(bus.checkpoints_since_publication, 0);
+
+        bus.publisher.close();
+        assert!(matches!(
+            bus.publisher.try_send(&b"probe"[..]),
+            Err((_, nng::Error::Closed))
+        ));
+        for checkpoint in 1..=REFRESH_CHECKPOINTS {
+            bus.publish(7 + u64::from(checkpoint), -1.0, &COORDINATES);
+            let published = bus.last_published.as_ref().unwrap();
+            assert_eq!(published.replica, 0);
+            assert_eq!(published.hops, 7);
+            assert_eq!(published.energy, -1.0);
+            assert_eq!(published.coordinates, COORDINATES);
+            assert_eq!(bus.checkpoints_since_publication, checkpoint);
+        }
+
+        bus.publisher = Socket::new(Protocol::Pub0).unwrap();
+        let retry_hops = 8 + u64::from(REFRESH_CHECKPOINTS);
+        bus.publish(retry_hops, -1.0, &COORDINATES);
+        let published = bus.last_published.as_ref().unwrap();
+        assert_eq!(published.replica, 0);
+        assert_eq!(published.hops, retry_hops);
+        assert_eq!(published.energy, -1.0);
+        assert_eq!(published.coordinates, COORDINATES);
+        assert_eq!(bus.checkpoints_since_publication, 0);
+    }
 
     fn frame(energy: f64, coordinates: &[f64]) -> Vec<u8> {
         let mut bytes = Vec::new();
