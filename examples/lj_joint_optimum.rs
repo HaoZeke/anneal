@@ -1822,6 +1822,58 @@ mod tests {
     }
 
     #[test]
+    fn observed_exclusion_retains_the_all_observation_feedback_policy() {
+        use super::{HistoryExclusion, history_feedback_membership};
+
+        let mut accepted = super::EscapeFeedback::new(1.0, 0.8);
+        let mut observed = super::EscapeFeedback::new(1.0, 0.8);
+        accepted.register_initial(0);
+        observed.register_initial(0);
+        let mut accepted_trials = 0;
+        let mut observed_trials = 0;
+        for visit_number in 1..=6 {
+            let first_observation = visit_number == 1;
+            let (is_new, visits) = history_feedback_membership(
+                HistoryExclusion::Accepted, first_observation, visit_number, 0,
+            );
+            assert_eq!(accepted.observe_shared(Some(0), 1, is_new, visits), super::Visit::New);
+            accepted_trials += 1;
+            assert_eq!(accepted.accept(1.0), visit_number == 6);
+
+            let (is_new, visits) = history_feedback_membership(
+                HistoryExclusion::Observed, first_observation, visit_number, 0,
+            );
+            let before = observed.threshold();
+            let classification = observed.observe_shared(Some(0), 1, is_new, visits);
+            if first_observation {
+                assert_eq!(classification, super::Visit::New);
+                observed_trials += 1;
+                assert!(!observed.accept(1.0));
+            } else {
+                assert_eq!(classification, super::Visit::Known);
+                assert_eq!(observed.threshold(), before);
+            }
+        }
+        assert_eq!(accepted_trials, 6);
+        assert_eq!(observed_trials, 1);
+        assert_eq!(history_feedback_membership(HistoryExclusion::Accepted, false, 9, 2), (false, 2));
+        assert_eq!(history_feedback_membership(HistoryExclusion::Observed, false, 9, 2), (false, 9));
+    }
+
+    #[test]
+    fn history_policy_names_are_strict_and_alternative_labels_are_distinct() {
+        use super::{HistoryExclusion, parse_history_exclusion};
+
+        assert_eq!(parse_history_exclusion(None).unwrap(), HistoryExclusion::Accepted);
+        assert_eq!(parse_history_exclusion(Some("accepted")).unwrap(), HistoryExclusion::Accepted);
+        assert_eq!(parse_history_exclusion(Some("observed-exclusion")).unwrap(), HistoryExclusion::Observed);
+        assert!(parse_history_exclusion(Some("observed")).is_err());
+        let arm = Arm::MinimaHoppingEnsemble { shared: true, soften: true };
+        assert_eq!(arm.label_with_history(HistoryExclusion::Accepted), arm.label());
+        assert_eq!(arm.label_with_history(HistoryExclusion::Observed), "minima-hopping-shared-history-softened-observed-exclusion");
+    }
+
+    #[test]
     fn shared_first_acceptance_is_atomic_with_history_classification() {
         use std::sync::{Barrier, Mutex};
 
