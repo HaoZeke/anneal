@@ -263,17 +263,25 @@ mod tests {
         let vb = b.well_depth(0);
         let vq = b.well_depth(1);
         let theirs = b.wells();
-        a.merge_wells(&theirs, 0.5);
+        a.merge_wells(&theirs, 0.5, true);
         assert!((a.well_depth(0) - 0.5 * (va + vb)).abs() < 1e-12);
         assert_eq!(a.n_basins(), 2, "the well only b held opens in a");
         assert!((a.well_depth(1) - 0.5 * vq).abs() < 1e-12);
         // A stubborn step keeps most of the own view.
         let before = a.well_depth(0);
-        a.merge_wells(&[(a.cv(p.view()), 0.0)], 0.1);
+        a.merge_wells(&[(a.cv(p.view()), 0.0)], 0.1, true);
         assert!((a.well_depth(0) - 0.9 * before).abs() < 1e-12);
         // Out-of-range weights are refused, not clamped.
-        a.merge_wells(&theirs, 1.5);
+        a.merge_wells(&theirs, 1.5, true);
         assert!((a.well_depth(0) - 0.9 * before).abs() < 1e-12);
+        // A sparsified table leaves unmatched local wells alone and comes
+        // deepest first.
+        let top = b.deepest_wells(1);
+        assert_eq!(top.len(), 1);
+        assert!((top[0].1 - b.well_depth(0).max(b.well_depth(1))).abs() < 1e-12);
+        let untouched = a.well_depth(1);
+        a.merge_wells(&[(a.cv(p.view()), a.well_depth(0))], 0.5, false);
+        assert!((a.well_depth(1) - untouched).abs() < 1e-12);
     }
 
     #[test]
@@ -886,6 +894,22 @@ impl<F: Fingerprint> BasinBias<F> {
             .collect()
     }
 
+    /// The `count` deepest wells, deepest first.
+    ///
+    /// Sparsified gossip: what another walker needs to know is where the
+    /// bias has accumulated, which is a few wells out of hundreds. Sending
+    /// the whole table makes every receiver's index the union of every
+    /// walker's basins and slows each of its own lookups by that factor.
+    pub fn deepest_wells(&self, count: usize) -> Vec<(Array1<f64>, f64)> {
+        let mut order: Vec<usize> = (0..self.n_basins()).collect();
+        order.sort_by(|a, b| self.v[*b].total_cmp(&self.v[*a]));
+        order
+            .into_iter()
+            .take(count)
+            .map(|i| (self.index.centre(i).to_owned(), self.v[i]))
+            .collect()
+    }
+
     /// DeGroot step toward another walker's wells.
     ///
     /// Every depth becomes `(1 - weight) * own + weight * theirs`, with a
@@ -897,7 +921,12 @@ impl<F: Fingerprint> BasinBias<F> {
     /// half a walker keeps part of its own view, the stubborn agent of
     /// Friedkin and Johnsen, and disagreement between walkers persists.
     /// Visit counts are not merged: they are this walker's own arrivals.
-    pub fn merge_wells(&mut self, theirs: &[(Array1<f64>, f64)], weight: f64) {
+    ///
+    /// `complete` says `theirs` is the peer's whole table, so a local well
+    /// absent from it is one the peer holds at zero and decays toward it.
+    /// A sparsified table ([`BasinBias::deepest_wells`]) is not complete:
+    /// absence says nothing, and only the wells sent are averaged.
+    pub fn merge_wells(&mut self, theirs: &[(Array1<f64>, f64)], weight: f64, complete: bool) {
         if !(0.0..=1.0).contains(&weight) || weight == 0.0 {
             return;
         }
@@ -917,9 +946,11 @@ impl<F: Fingerprint> BasinBias<F> {
                 None => opened.push((centre.clone(), weight * depth)),
             }
         }
-        for (i, was_matched) in matched.iter().enumerate() {
-            if !was_matched {
-                self.v[i] *= 1.0 - weight;
+        if complete {
+            for (i, was_matched) in matched.iter().enumerate() {
+                if !was_matched {
+                    self.v[i] *= 1.0 - weight;
+                }
             }
         }
         for (centre, depth) in opened {
