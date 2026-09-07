@@ -568,6 +568,11 @@ impl SurfacePortfolio {
         SurfaceReport { schema: self.evidence_schema.clone(), arms: self.own_moments.clone() }
     }
 
+    /// Independent peer blocks informing the portfolio's choices.
+    pub fn peer_observations(&self) -> u64 {
+        self.peer_moments.as_ref().map_or(0, |arms| arms.iter().map(|arm| arm.count).sum())
+    }
+
     /// Replace peer evidence without changing the held arm, local history, or RNG.
     pub fn import_peers(&mut self, report: SurfaceReport) -> Result<(), &'static str> {
         report.validate()?;
@@ -576,7 +581,7 @@ impl SurfacePortfolio {
         }
         let aggregate = self.own_moments.iter().zip(&report.arms).map(|(own, peer)| own.merge(*peer)).collect::<Result<Vec<_>, _>>()?;
         DepthAllocator::from_moments(&aggregate)?;
-        self.peer_moments = Some(report.arms);
+        self.peer_moments = report.arms.iter().any(|arm| arm.count > 0).then_some(report.arms);
         Ok(())
     }
 

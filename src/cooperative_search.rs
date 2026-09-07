@@ -5,6 +5,7 @@ pub mod ledger;
 #[cfg(feature = "bank-rpc")]
 mod run {
     use std::collections::BTreeMap;
+    use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::{Arc, Mutex};
 
     use crate::catalog::MixingEvidence;
@@ -737,6 +738,7 @@ mod run {
         cumulative_charged: u64,
         client: Option<CatalogMailbox>,
         posted_source_valid: Arc<Mutex<bool>>,
+        surface_pending: Arc<AtomicBool>,
         snapshot: Option<CatalogSnapshot>,
         last_slice: u64,
         policy_slot: Arc<Mutex<Option<Result<PolicyStateReceipt, CatalogClientError>>>>,
@@ -787,6 +789,7 @@ mod run {
                             cumulative_charged: 0,
                             client: None,
                             posted_source_valid: Arc::new(Mutex::new(true)),
+                            surface_pending: Arc::new(AtomicBool::new(false)),
                             snapshot: None,
                             last_slice: 0,
                             policy_slot: Arc::new(Mutex::new(None)),
@@ -841,6 +844,7 @@ mod run {
             let state = self.replica_mut(replica)?;
             state.rpc_sequence = state.rpc_sequence.max(used_sequence);
             state.client = Some(CatalogMailbox::spawn(client));
+            state.surface_pending = Arc::new(AtomicBool::new(false));
             state.policy_pending = false;
             state.policy_request = None;
             *state.policy_slot.lock().expect("policy slot") = None;
@@ -858,6 +862,37 @@ mod run {
             state.crossing_pending = false;
             state.crossing_request = None;
             *state.crossing_slot.lock().expect("crossing slot") = None;
+            Ok(())
+        }
+
+        /// Exchange surface rewards on the catalog I/O thread without moving a chain.
+        ///
+        /// At most one exchange is pending per replica. Only peer observations
+        /// are imported; local block rewards can accumulate while I/O proceeds.
+        /// An unavailable coordinator leaves local learning authoritative.
+        pub fn post_surface_evidence(
+            &mut self,
+            replica: u32,
+            portfolio: Arc<Mutex<crate::methods::two_phase::SurfacePortfolio>>,
+        ) -> Result<(), CooperativeRunError> {
+            let pending = {
+                let state = self.replica_mut(replica)?;
+                if state.client.is_none() || state.surface_pending.load(Ordering::Acquire) {
+                    return Ok(());
+                }
+                Arc::clone(&state.surface_pending)
+            };
+            let sequence = self.next_rpc_sequence(replica)?;
+            let report = portfolio.lock().expect("surface portfolio").report();
+            pending.store(true, Ordering::Release);
+            if let Some(mailbox) = self.replica_mut(replica)?.client.as_ref() {
+                mailbox.post(move |client| {
+                    if let Ok(peers) = client.exchange_surface_evidence(sequence, report) {
+                        let _ = portfolio.lock().expect("surface portfolio").import_peers(peers);
+                    }
+                    pending.store(false, Ordering::Release);
+                });
+            }
             Ok(())
         }
 
