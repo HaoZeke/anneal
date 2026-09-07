@@ -127,9 +127,14 @@ fn rejected_candidates_remain_eligible_until_the_energy_threshold_accepts() {
     let mut history = MinimumHistory::new(1e-3).unwrap();
     let observe = |history: &mut MinimumHistory, ledger: &Ledger| {
         let boundary = &ledger.quench_boundaries()[0];
-        history.observe(boundary,
-            space.describe(boundary.state(), Some(&[1])).unwrap(),
-            StructureContext::default(), &CartesianWitness).unwrap()
+        history
+            .observe(
+                boundary,
+                space.describe(boundary.state(), Some(&[1])).unwrap(),
+                StructureContext::default(),
+                &CartesianWitness,
+            )
+            .unwrap()
     };
     let source_id = observe(&mut history, &source_certificate).minimum.id;
     history.mark_accepted(source_id).unwrap();
@@ -142,7 +147,10 @@ fn rejected_candidates_remain_eligible_until_the_energy_threshold_accepts() {
         let id = observed.minimum.id;
         let visits = history.accepted_visits(id).unwrap();
         assert_eq!(visits, 0, "a rejected proposal is not an accepted visit");
-        assert_eq!(feedback.observe_shared(Some(source_id), id, visits == 0, visits), Visit::New);
+        assert_eq!(
+            feedback.observe_shared(Some(source_id), id, visits == 0, visits),
+            Visit::New
+        );
         if feedback.accept(1.0) {
             history.mark_accepted(id).unwrap();
             accepted_id = Some(id);
@@ -157,11 +165,17 @@ fn rejected_candidates_remain_eligible_until_the_energy_threshold_accepts() {
     let accepted_id = accepted_id.expect("adaptive threshold must reconsider the uphill minimum");
     assert_eq!(history.accepted_visits(accepted_id), Some(1));
     let peer = observe(&mut history, &candidate_certificate);
-    assert_eq!(peer.visits, 7, "the structural observation archive retains every proposal");
+    assert_eq!(
+        peer.visits, 7,
+        "the structural observation archive retains every proposal"
+    );
     let visits = history.accepted_visits(peer.minimum.id).unwrap();
     assert_eq!(visits, 2);
     let threshold = feedback.threshold();
-    assert_eq!(feedback.observe_shared(Some(source_id), peer.minimum.id, visits == 0, visits), Visit::Known);
+    assert_eq!(
+        feedback.observe_shared(Some(source_id), peer.minimum.id, visits == 0, visits),
+        Visit::Known
+    );
     assert_eq!(feedback.threshold(), threshold);
 }
 
