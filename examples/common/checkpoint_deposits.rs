@@ -1,13 +1,21 @@
 use anneal_core::methods::cluster_hopping::CheckpointAction;
 use ndarray::Array1;
 
+/// Flush enabled repulsive history when the decision continues local work.
+/// Other actions retain their payloads and the queue's arrival multiplicity.
 pub(crate) fn with_pending_deposits(
     pending: &mut Vec<Array1<f64>>,
     enabled: bool,
     decide: impl FnOnce(&mut Vec<Array1<f64>>) -> CheckpointAction,
 ) -> CheckpointAction {
-    let _ = enabled;
-    decide(pending)
+    match decide(pending) {
+        CheckpointAction::Continue if enabled && !pending.is_empty() => {
+            CheckpointAction::DepositRemote {
+                states: std::mem::take(pending),
+            }
+        }
+        action => action,
+    }
 }
 
 #[cfg(test)]
