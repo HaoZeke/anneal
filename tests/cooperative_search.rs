@@ -2279,6 +2279,20 @@ fn coordinator_closes_population_epoch_only_after_all_replicas_submit() {
 }
 
 #[test]
+fn registering_minima_does_not_invent_a_transition_between_them() {
+    let server = server();
+    let digest = signature().digest();
+    let mut client = CatalogClient::connect(server.addr(), identity(0, digest),
+        ClientConfig::default()).unwrap();
+    client.record_visit(1, candidate(0, 1, 1.2)).unwrap();
+    client.record_visit(2, candidate(0, 2, 4.0)).unwrap();
+    let status = client.observer_status(3).unwrap();
+    assert_eq!(status.landscape_basins, 2);
+    assert_eq!(status.seam.unwrap().conductance, 0.0,
+        "registration contains no perturb-quench transition evidence");
+}
+
+#[test]
 fn population_epoch_does_not_commission_a_kinetic_graph_bridge() {
     let server = server();
     let digest = signature().digest();
