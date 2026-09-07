@@ -36,10 +36,23 @@ pub struct ClientConfig {
 }
 
 impl Default for ClientConfig {
+    /// Deadlines from `CATALOG_CONNECT_TIMEOUT_SECS` (default 2) and
+    /// `CATALOG_IO_TIMEOUT_SECS` (default 30). The I/O deadline was five
+    /// seconds, under which every request queued behind one slow
+    /// coordinator request timed out, reconnected and retried, so a
+    /// 14-second policy hold cost 47 reconnects and 47 duplicate requests
+    /// on top of itself.
     fn default() -> Self {
+        let seconds = |name: &str, fallback: u64| {
+            std::env::var(name)
+                .ok()
+                .and_then(|value| value.parse::<u64>().ok())
+                .filter(|value| *value > 0)
+                .unwrap_or(fallback)
+        };
         Self {
-            connect_timeout: Duration::from_secs(2),
-            io_timeout: Duration::from_secs(5),
+            connect_timeout: Duration::from_secs(seconds("CATALOG_CONNECT_TIMEOUT_SECS", 2)),
+            io_timeout: Duration::from_secs(seconds("CATALOG_IO_TIMEOUT_SECS", 30)),
         }
     }
 }
@@ -1068,6 +1081,14 @@ struct ClientSession {
     snapshot_version: Arc<Mutex<u64>>,
     addr: SocketAddr,
     config: ClientConfig,
+    /// The connection's RPC pump. Dropping the handle would leave the
+    /// task, and the TCP connection, alive after a reconnect: a
+    /// 48-replica coordinator under a slow policy request accumulated
+    /// 900 open connections from the clients' timeout-and-reconnect
+    /// cycles. Reconnect aborts it.
+    rpc_task: Option<tokio::task::JoinHandle<Result<(), capnp::Error>>>,
+    /// Consecutive reconnects, for the backoff.
+    reconnects: u32,
 }
 
 fn run_client_executor(
@@ -1098,6 +1119,8 @@ fn run_client_executor(
                 snapshot_version,
                 addr,
                 config,
+                rpc_task: None,
+                reconnects: 0,
             },
         };
         while let Some(job) = jobs.recv().await {
@@ -1161,7 +1184,7 @@ async fn open_rpc(
     );
     let mut rpc = RpcSystem::new(Box::new(network), None);
     let coordinator: coordinator::Client = rpc.bootstrap(Side::Server);
-    tokio::task::spawn_local(rpc);
+    let rpc_task = tokio::task::spawn_local(rpc);
     Ok(ClientSession {
         coordinator,
         session: None,
@@ -1171,19 +1194,34 @@ async fn open_rpc(
         snapshot_version: Arc::new(Mutex::new(0)),
         addr,
         config,
+        rpc_task: Some(rpc_task),
+        reconnects: 0,
     })
 }
 
+/// Replace the connection. The old RPC pump is aborted so its connection
+/// closes; consecutive reconnects back off exponentially (50 ms doubling
+/// to 2 s, jittered by the address) so 48 clients that all timed out on
+/// one slow request do not reconnect as one herd against the listener's
+/// accept queue.
 async fn reconnect(session: &mut ClientSession) -> Result<(), CatalogClientError> {
     let events = Arc::clone(&session.events);
     let snapshot_version = Arc::clone(&session.snapshot_version);
     let addr = session.addr;
     let config = session.config;
     let attached = session.attached.clone();
+    let reconnects = session.reconnects.saturating_add(1);
+    if let Some(task) = session.rpc_task.take() {
+        task.abort();
+    }
+    let base = 50u64.saturating_mul(1u64 << reconnects.min(6));
+    let jitter = u64::from(addr.port()) % 37;
+    tokio::time::sleep(Duration::from_millis(base.min(2_000) + jitter)).await;
     *session = open_rpc(addr, config, events).await?;
     session.snapshot_version = snapshot_version;
     session.attached = attached;
     session.connected = true;
+    session.reconnects = reconnects;
     Ok(())
 }
 
@@ -1279,7 +1317,10 @@ async fn call_session(
     request: CatalogRequest,
 ) -> Result<AcceptedReply, CatalogClientError> {
     match call_session_once(session, &request).await {
-        Ok(reply) => Ok(reply),
+        Ok(reply) => {
+            session.reconnects = 0;
+            Ok(reply)
+        }
         Err(error @ CatalogClientError::Rejected(_)) => Err(error),
         Err(_) => {
             reconnect(session).await?;
