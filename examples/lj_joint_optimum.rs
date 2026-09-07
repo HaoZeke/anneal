@@ -1074,6 +1074,31 @@ mod tests {
     }
 
     #[test]
+    fn a_single_call_certifies_an_already_minimized_start() {
+        let potential = PairPotential::lennard_jones(2);
+        let distance = 2.0_f64.powf(1.0 / 6.0);
+        let initial = Array1::from(vec![0.0, 0.0, 0.0, distance, 0.0, 0.0]);
+        let run = run_minima_hopping(
+            &potential,
+            initial.view(),
+            2,
+            1,
+            7,
+            &DistinctWitness,
+            MinimaHoppingOptions {
+                soften: false,
+                bound_escape: false,
+            },
+        );
+
+        assert!((run.outcome.best + 1.0).abs() < 1e-12);
+        assert_eq!(run.outcome.charged, 1);
+        assert_eq!(run.initial_quench_calls, 1);
+        assert_eq!(run.dynamics_calls, 0);
+        assert_eq!(run.outcome.best_state.as_ref(), Some(&initial));
+    }
+
+    #[test]
     fn minima_hopping_accounts_for_adaptive_escape_work_by_stage() {
         let potential = PairPotential::lennard_jones(2);
         let initial = Array1::from(vec![0.0, 0.0, 0.0, 1.2, 0.0, 0.0]);
