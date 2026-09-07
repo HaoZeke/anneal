@@ -12,21 +12,20 @@
 #![allow(clippy::type_complexity, clippy::too_many_arguments)]
 
 use anneal_core::bias::BasinBias;
+use anneal_core::catalog::euclidean_gradient_norm;
 #[cfg(feature = "bank-rpc")]
 use anneal_core::catalog::{
     ACTION_EXPLORE, ACTION_LEAVE, ACTION_LOCAL, LEAVE_REFUSAL_DWELL, LeavePath,
     OccupancyLeaveTarget, credit_action, leftover_birth_probability, occupancy_complete_at,
     occupancy_is_cluster, occupancy_leave_by_birth, occupancy_retire_at, published_energy_score,
 };
-use anneal_core::catalog::euclidean_gradient_norm;
 #[cfg(feature = "bank-rpc")]
 use anneal_core::catalog::{hops_per_core_hour, leave_crossing_slices, leave_defers};
 #[cfg(feature = "bank-rpc")]
 use anneal_core::methods::cluster_hopping::{AcceptedTransition, run_with_bias};
 use anneal_core::methods::cluster_hopping::{
-    ChainCheckpoint, CheckpointAction, ClusterFingerprint, Config, Keying,
-    LadderMode, Ledger, MoveLibrary, Outcome, QuenchStatus, random_cluster,
-    run_with_bias_at_checkpoints,
+    ChainCheckpoint, CheckpointAction, ClusterFingerprint, Config, Keying, LadderMode, Ledger,
+    MoveLibrary, Outcome, QuenchStatus, random_cluster, run_with_bias_at_checkpoints,
 };
 use anneal_core::methods::csa_cluster::{self, BankConfig};
 use anneal_core::methods::warm_lbfgs::WarmLbfgs;
