@@ -160,10 +160,16 @@ impl CampaignConfig {
     pub fn env_pairs(&self) -> Vec<(String, String)> {
         let mut pairs = vec![
             ("CATALOG_CAMPAIGN".into(), self.campaign.clone()),
-            ("CATALOG_REPLICAS".into(), self.ensemble.replicas.to_string()),
+            (
+                "CATALOG_REPLICAS".into(),
+                self.ensemble.replicas.to_string(),
+            ),
             ("CATALOG_WAVE".into(), self.ensemble.wave.to_string()),
             ("CATALOG_SLICE".into(), self.ensemble.slice.to_string()),
-            ("CATALOG_MAX_HOPS".into(), self.ensemble.max_hops.to_string()),
+            (
+                "CATALOG_MAX_HOPS".into(),
+                self.ensemble.max_hops.to_string(),
+            ),
             (
                 "CATALOG_POPULATION_INTERVAL".into(),
                 self.ensemble.population_interval.to_string(),
