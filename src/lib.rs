@@ -81,6 +81,9 @@ pub mod catalog_policy;
 /// Versioned cooperative catalog protocol.
 #[cfg(feature = "bank-rpc")]
 pub mod catalog_rpc;
+/// nng pub/sub census bus between the replicas of one cooperative run.
+#[cfg(feature = "bank-rpc")]
+pub mod census_bus;
 /// Versioned objective bridge compatibility descriptors.
 pub mod compatibility;
 /// Collective variables from the spectrum of the visited-basin graph.
@@ -98,9 +101,6 @@ pub mod curvature;
 /// Transport for consensus traffic between server brains.
 #[cfg(feature = "bank-rpc")]
 pub mod decree_bus;
-/// nng pub/sub census bus between the replicas of one cooperative run.
-#[cfg(feature = "bank-rpc")]
-pub mod census_bus;
 pub mod delayed;
 /// Versioned multiscale invariant coordinates for basin catalogs.
 pub mod descriptor_space;

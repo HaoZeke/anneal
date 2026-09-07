@@ -212,7 +212,9 @@ pub struct TwoSampleCensusRadius {
 #[derive(Debug, thiserror::Error, PartialEq)]
 pub enum TwoSampleCalibrationError {
     /// At least one sample contains fewer than the required number of distances.
-    #[error("need at least {minimum} distances in each sample, got {same} same and {distinct} distinct")]
+    #[error(
+        "need at least {minimum} distances in each sample, got {same} same and {distinct} distinct"
+    )]
     InsufficientSamples {
         /// Minimum number of distances required in each sample.
         minimum: usize,
