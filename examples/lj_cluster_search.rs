@@ -4117,6 +4117,11 @@ fn run_capnp_catalog(
                 .expect("validated local transition execution must remain traceable");
         }
 
+        // Diagnostic probes define comparable return evidence. Adaptive
+        // accepted hops remain discovery records, not samples of this kernel.
+        let probes = snapshot.accepted_transitions().iter()
+            .filter(|transition| transition.action == "probe" && !transition.adopted)
+            .cloned().collect::<Vec<_>>();
         let operations = adaptive_catalog_operations(
             &descriptor_space,
             &signature.atomic_numbers,
@@ -4124,22 +4129,37 @@ fn run_capnp_catalog(
             &mut candidate_sequence,
             seed,
             snapshot.charged(),
-            snapshot.accepted_transitions(),
+            &probes,
         );
-        // The hop path reports the slice endpoint. Posting every accepted
-        // hop is a RecordVisit/DECAF flood; the coordinator then holds
-        // PolicyState and the ensemble stops.
-        let last_register = operations.into_iter().rev().find_map(|operation| {
+        // The mailbox preserves source/outcome ordering without blocking the
+        // hop. Publication is bounded by the diagnostic probe cadence.
+        for operation in operations {
             match operation {
-                AdaptiveCatalogOperation::RegisterCurrent(candidate) => Some(candidate),
-                AdaptiveCatalogOperation::Adopt { .. } => None,
+                AdaptiveCatalogOperation::RegisterCurrent(candidate) => {
+                    let _ = cooperative.post_record_current(replica, candidate);
+                }
+                AdaptiveCatalogOperation::Adopt { action, destination, adopted } => {
+                    let _ = cooperative.post_record_transition(replica, action,
+                        anneal_core::catalog_rpc::TransitionDestination::Resolved(destination), adopted);
+                }
+                AdaptiveCatalogOperation::Unresolved { action } => {
+                    let _ = cooperative.post_record_transition(replica, action,
+                        anneal_core::catalog_rpc::TransitionDestination::Unresolved, false);
+                }
             }
-        });
-        if let Some(candidate) = last_register {
+        }
+        // A checkpoint registers its occupied minimum, not the origin of a
+        // sampled trajectory segment. Registration does not invent an edge.
+        if let Some(gradient) = snapshot.current_gradient() {
+            candidate_sequence += 1;
+            if let Some(candidate) = lj_catalog_candidate(&descriptor_space,
+                &signature.atomic_numbers, replica, candidate_sequence, seed,
+                snapshot.charged(), snapshot.current_energy(), snapshot.current_state(), gradient) {
             cooperative
                 .record_work(replica, ChargeKind::DescriptorEvaluation, 0)
                 .expect("source descriptor work must enter the cooperative ledger");
             let _ = cooperative.post_record_current(replica, candidate);
+            }
         }
 
         let mut boundary_candidates = Vec::new();
@@ -5894,6 +5914,9 @@ enum AdaptiveCatalogOperation {
         destination: anneal_core::catalog_rpc::CatalogCandidate,
         adopted: bool,
     },
+    Unresolved {
+        action: String,
+    },
 }
 
 #[cfg(feature = "bank-rpc")]
@@ -5910,9 +5933,8 @@ fn adaptive_catalog_operations(
     let mut operations = Vec::new();
     let mut registered_state: Option<Array1<f64>> = None;
     for transition in transitions {
-        if !transition.validated
-            || transition.from_gradient.is_none()
-            || transition.to_gradient.is_none()
+        if transition.from_gradient.is_none()
+            || (transition.adopted && (!transition.validated || transition.to_gradient.is_none()))
         {
             registered_state = None;
             continue;
@@ -5944,6 +5966,13 @@ fn adaptive_catalog_operations(
             };
             *candidate_sequence = source_sequence;
             operations.push(AdaptiveCatalogOperation::RegisterCurrent(source));
+        }
+        if !transition.validated || transition.to_gradient.is_none() {
+            operations.push(AdaptiveCatalogOperation::Unresolved {
+                action: transition.action.clone(),
+            });
+            registered_state = Some(transition.from_state.clone());
+            continue;
         }
         let destination_sequence = candidate_sequence
             .checked_add(1)
