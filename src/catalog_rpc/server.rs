@@ -1336,6 +1336,52 @@ fn operation_label(operation: &CatalogOperation) -> &'static str {
 /// The apply column is the serialised clock of the whole ensemble: with
 /// 48 replicas checkpointing every 500 charged calls, whatever dominates
 /// it is what every chain waits on.
+/// Laps of one request's phases, printed on drop when the request was
+/// slow and profiling is on: "coordinator policy phases total 14.2s:
+/// discovery 13.9 coverage 0.2 ...". Names the step behind a watchdog
+/// line without a perf session on the node.
+struct PhaseClock {
+    started: Instant,
+    last: Instant,
+    laps: Vec<(&'static str, f64)>,
+}
+
+impl PhaseClock {
+    fn new() -> Self {
+        let now = Instant::now();
+        Self {
+            started: now,
+            last: now,
+            laps: Vec::new(),
+        }
+    }
+
+    fn lap(&mut self, name: &'static str) {
+        let now = Instant::now();
+        self.laps
+            .push((name, now.duration_since(self.last).as_secs_f64()));
+        self.last = now;
+    }
+}
+
+impl Drop for PhaseClock {
+    fn drop(&mut self) {
+        let total = self.started.elapsed().as_secs_f64();
+        if total < 2.0 || !std::env::var("CATALOG_SERVER_PROFILE").is_ok_and(|v| v == "1") {
+            return;
+        }
+        let mut laps = self.laps.clone();
+        laps.sort_by(|a, b| b.1.total_cmp(&a.1));
+        let line = laps
+            .iter()
+            .take(6)
+            .map(|(name, seconds)| format!("{name} {seconds:.1}"))
+            .collect::<Vec<_>>()
+            .join(" ");
+        eprintln!("coordinator policy phases total {total:.1}s: {line}");
+    }
+}
+
 /// The request the coordinator's thread is applying right now, for the
 /// watchdog. A coordinator that freezes shows its replicas parked and its
 /// one thread at full CPU with nothing on stderr; the watchdog names the
@@ -1817,9 +1863,12 @@ fn apply_request(
                     ProtocolRejection::ValidationRejected,
                 );
             }
+            let mut clock = PhaseClock::new();
             let local_basin =
                 query_basin_for_descriptor(scientific, request.identity.replica, descriptor);
+            clock.lap("basin");
             let packing = replica_packing(scientific, request.identity.replica);
+            clock.lap("packing");
             let local_basin_visits = packing
                 .as_ref()
                 .and_then(|fp| scientific.packing.family_of(fp))
@@ -1856,9 +1905,11 @@ fn apply_request(
                     ProtocolRejection::ValidationRejected,
                 );
             };
+            clock.lap("coverage");
             let novelty = coverage.acquisition;
             let transition_uncertainty =
                 local_basin.map_or_else(|| 1.0, |id| transition_uncertainty(scientific, id));
+            clock.lap("transition");
             let basin_unseen_mass_upper = diagnostic_unseen_mass_upper(
                 scientific.census.total_visits(),
                 PRODUCTION_MINIMUM_VISITS,
@@ -1898,8 +1949,11 @@ fn apply_request(
                 };
                 assignment
             };
+            clock.lap("discovery");
             let mut mixing = mixing_from_state(scientific);
+            clock.lap("mixing");
             mixing.pruned = hyperband_prune(scientific, request.identity.replica);
+            clock.lap("hyperband");
             let relation = packing_or_region_relation(
                 scientific,
                 request.identity.replica,
@@ -1929,6 +1983,7 @@ fn apply_request(
             // LJ75 ico shelf is tens of wells of one funnel. Either
             // gate keeps extras walking one packing while the shared
             // book already holds another.
+            clock.lap("relation");
             let occupied_packing_communities = scientific.packing.occupied_packing_count();
             let (seat, frame_lambda) = assign_leftover_interfaces(
                 scientific,
@@ -1971,7 +2026,12 @@ fn apply_request(
                     .sparsified
                     .as_ref()
                     .is_some_and(|(_, map)| !map.holes),
-                leftover_dwell: leftover_census_dwell(scientific),
+                leftover_dwell: {
+                    clock.lap("interfaces");
+                    let dwell = leftover_census_dwell(scientific);
+                    clock.lap("dwell");
+                    dwell
+                },
                 ei_exhausted: scientific
                     .ei_hold
                     .map(|(_, verdict)| verdict)
@@ -3628,6 +3688,9 @@ where
         validated.candidate.descriptor = descriptor.values().to_vec();
         validated.candidate.descriptor_schema_version = descriptor.schema_version();
     }
+    // Prepare the packing rows here, on the validation pool, so the
+    // packing book's observe under the state lock is a cache hit.
+    crate::catalog::packing::prepare_rows(&validated.candidate.coordinates);
     Ok(validated)
 }
 
@@ -5194,11 +5257,36 @@ fn occupancy_ring_from_book(scientific: &ScientificState) -> (usize, usize, usiz
     }
     let mut profiles = Vec::new();
     for (coordinates, _) in best.values() {
-        if let Some(profile) = occupancy_ring_profile(coordinates) {
+        if let Some(profile) = ring_profile_memo(coordinates) {
             profiles.push(profile);
         }
     }
     occupancy_ring_split(&profiles)
+}
+
+/// The Franzblau ring profile of a structure, memoised on its coordinate
+/// bits. The occupancy report asks for the profile of the best structure
+/// of every occupied family on every refresh, and those structures change
+/// rarely; the census itself was 13 percent of the request thread (perf,
+/// 48 replicas).
+fn ring_profile_memo(coordinates: &[f64]) -> Option<(usize, usize, usize)> {
+    const CAPACITY: usize = 256;
+    static MEMO: Mutex<std::collections::VecDeque<(Box<[u64]>, Option<(usize, usize, usize)>)>> =
+        Mutex::new(std::collections::VecDeque::new());
+    let key: Box<[u64]> = coordinates.iter().map(|value| value.to_bits()).collect();
+    if let Ok(memo) = MEMO.lock()
+        && let Some((_, profile)) = memo.iter().find(|(held, _)| *held == key)
+    {
+        return *profile;
+    }
+    let profile = occupancy_ring_profile(coordinates);
+    if let Ok(mut memo) = MEMO.lock() {
+        if memo.len() >= CAPACITY {
+            memo.pop_front();
+        }
+        memo.push_back((key, profile));
+    }
+    profile
 }
 
 fn occupancy_floor(scientific: &mut ScientificState) -> usize {
