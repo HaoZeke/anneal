@@ -44,6 +44,31 @@ their own evidence, while nested sampling remains a matched-budget comparison
 with separate live-point weights. Shared-catalogue and one-private-catalogue-
 per-replica ensembles form the causal communication comparison.
 
+The optional census bus exchanges current validated minima directly between
+same-node replicas, independently of coordinator-mediated adoption:
+
+| Setting | Effect |
+| --- | --- |
+| `CENSUS_BUS_BASE` | Enables the bus and selects its endpoint namespace. Use a distinct value for each concurrent ensemble. |
+| `CENSUS_BUS_NEIGHBORS=0` | Subscribes to every peer; the default. |
+| `CENSUS_BUS_NEIGHBORS=k` | Subscribes only to cyclic neighbours within positive ring distance `k`. |
+| `CENSUS_BUS_IPC=1` | Uses Unix-domain IPC; the default transport is loopback TCP. |
+| `CATALOG_SHARED_BIAS=1` | Enables shared repulsive bias deposits. |
+| `CENSUS_BUS_UNBOUNDED=1` | Admits distant bus minima into that bias; the default admits only nearby packings. |
+
+Changed minima publish immediately at eligible checkpoints; unchanged minima
+refresh every eight eligible checkpoints. Hop-only refreshes update retained
+state without duplicating deposits. Checkpoint spacing is controlled by
+`CATALOG_SLICE`, in charged objective calls, not physical time.
+
+The bus retains direct neighbours without forwarding their messages. A ring
+therefore supplies a local census, not a globally mixed gossip aggregate, and
+does not restrict the coordinator's parent selection or hearing. The packing
+gate uses `nearby_packing` with histogram L1 distance at most `PACKING_LINK`
+(0.35); it is distinct from exact-basin merge radii and supplies no guarantee
+of one population cluster per energy funnel. The bounded/unbounded switch
+applies to bus observations, not population-parent or own-visit history.
+
 ```rust
 use anneal_core::methods::cluster_hopping::{optimize, Config, Ledger};
 
