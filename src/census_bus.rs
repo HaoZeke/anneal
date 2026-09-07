@@ -95,6 +95,13 @@ impl CensusBus {
         subscriber
             .set_opt::<Subscribe>(b"wells/".to_vec())
             .map_err(|e| CensusBusError(format!("subscribe wells: {e}")))?;
+        // A well table of 64 sorted-pair centres for 75 points is 1.4 MB,
+        // above nng's default receive limit of 1 MB, which drops oversize
+        // messages silently. Zero lifts the limit; peers are configured
+        // processes on one node, not the open network.
+        subscriber
+            .set_opt::<nng::options::RecvMaxSize>(0)
+            .map_err(|e| CensusBusError(format!("receive limit: {e}")))?;
         let neighbors: u32 = std::env::var("CENSUS_BUS_NEIGHBORS")
             .ok()
             .and_then(|v| v.parse().ok())
