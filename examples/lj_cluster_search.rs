@@ -4311,9 +4311,20 @@ fn run_capnp_catalog(
             }
             let fresh = bus.poll();
             bus_received += fresh.len();
+            // Bounded confidence (Deffuant; Hegselmann-Krause): a peer's
+            // minimum is deposited into this chain's bias only when it lies
+            // within the confidence bound, here the same side of the packing
+            // map. Unbounded deposits are DeGroot averaging toward the
+            // population and collapse it to one cluster; bounded ones keep
+            // one cluster per funnel. CENSUS_BUS_UNBOUNDED=1 restores the
+            // global deposit for comparison.
+            let unbounded = std::env::var("CENSUS_BUS_UNBOUNDED").is_ok_and(|v| v == "1");
             if shared_bias_enabled {
                 for peer in &fresh {
-                    if peer.coordinates.len() == here.len() {
+                    if peer.coordinates.len() == here.len()
+                        && (unbounded
+                            || anneal_core::catalog::nearby_packing(here, &peer.coordinates))
+                    {
                         pending_deposits.push(Array1::from(peer.coordinates.clone()));
                     }
                 }

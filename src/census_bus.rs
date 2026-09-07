@@ -44,8 +44,27 @@ pub struct CensusBus {
     latest: HashMap<u32, PeerMinimum>,
 }
 
+/// Transport for the bus: TCP loopback, or ipc (Unix domain sockets) when
+/// every replica of the run lives on one node, which is the HyperQueue
+/// and Slurm layout used here. ipc avoids the loopback TCP stack and the
+/// port range; `CENSUS_BUS_IPC=1` selects it.
 fn url(base_port: u16, replica: u32) -> String {
-    format!("tcp://127.0.0.1:{}", u32::from(base_port) + replica)
+    if std::env::var("CENSUS_BUS_IPC").is_ok_and(|v| v == "1") {
+        format!("ipc:///tmp/anneal-census-{}-{:03}", base_port, replica)
+    } else {
+        format!("tcp://127.0.0.1:{}", u32::from(base_port) + replica)
+    }
+}
+
+/// Migration topology. Island-model results (Cantu-Paz, 2001; Alba and
+/// Tomassini, 2002) say that all-to-all migration at a high rate collapses
+/// diversity, which is the herd measured on LJ75, and that a sparse
+/// topology keeps islands distinct while an aggregate still mixes in
+/// O(log N) gossip rounds. `CENSUS_BUS_NEIGHBORS=k` subscribes a replica
+/// to ring neighbours within distance `k` only; 0 (default) is all-to-all.
+fn ring_distance(a: u32, b: u32, n: u32) -> u32 {
+    let d = a.abs_diff(b);
+    d.min(n - d)
 }
 
 impl CensusBus {
@@ -62,8 +81,15 @@ impl CensusBus {
         subscriber
             .set_opt::<Subscribe>(b"census/".to_vec())
             .map_err(|e| CensusBusError(format!("subscribe: {e}")))?;
+        let neighbors: u32 = std::env::var("CENSUS_BUS_NEIGHBORS")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(0);
         for peer in 0..replicas {
             if peer == replica {
+                continue;
+            }
+            if neighbors > 0 && ring_distance(peer, replica, replicas) > neighbors {
                 continue;
             }
             // Non-blocking dial: peers that have not bound yet are retried
