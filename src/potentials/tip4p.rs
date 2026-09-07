@@ -96,6 +96,12 @@ impl Tip4pCluster {
         6 * self.n_molecules
     }
 
+    /// O-H-H geometry in the objective's center-of-mass rotation chart.
+    pub fn rigid_geometry(&self) -> crate::rigid_body::RigidBodyGeometry {
+        crate::rigid_body::RigidBodyGeometry::new(self.body[..3].to_vec(), vec![8, 1, 1])
+            .expect("water has finite O-H-H geometry")
+    }
+
     /// Fold every rotation vector into the ball of radius `π`.
     ///
     /// `R(ω)` is `2π`-periodic along a ray. Keeping the chart in the

@@ -190,6 +190,8 @@ pub struct Config {
     pub energy_scale: f64,
     /// Proposal library hosted by this configuration.
     pub move_library: MoveLibrary,
+    /// Actual site geometry for descriptors of center-and-rotation states.
+    pub rigid_body_geometry: Option<crate::rigid_body::RigidBodyGeometry>,
     /// Separation below which two points count as neighbours.
     pub neighbour_cutoff: f64,
     /// Pair cutoff used by the symmetry proposal.
@@ -985,6 +987,7 @@ impl Config {
             length_scale,
             energy_scale,
             move_library: MoveLibrary::Atomic,
+            rigid_body_geometry: None,
             neighbour_cutoff: LennardJonesPreset::NEIGHBOUR_CUTOFF * length_scale,
             symmetrise_cutoff: LennardJonesPreset::SYMMETRISE_CUTOFF * length_scale,
             temperature: LennardJonesPreset::TEMPERATURE * energy_scale,
@@ -1132,6 +1135,7 @@ impl Config {
             translate_step: 0.35,
             rotate_step: 0.40,
         };
+        cfg.rigid_body_geometry = Some(crate::potentials::Tip4pCluster::new(n_molecules).rigid_geometry());
         cfg.temperature = 2.0;
         cfg.bias_height = 2.0;
         cfg.screen_margin = 25.0;
