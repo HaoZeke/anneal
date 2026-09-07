@@ -25,12 +25,17 @@ pub struct CensusBusError(String);
 /// A peer's latest published minimum.
 #[derive(Debug, Clone)]
 pub struct PeerMinimum {
+    /// Replica identifier carried by the publication.
     pub replica: u32,
+    /// Search hop count at publication.
     pub hops: u64,
+    /// Published objective value at the minimum.
     pub energy: f64,
+    /// Flattened Cartesian coordinates of the minimum.
     pub coordinates: Vec<f64>,
 }
 
+/// Nonblocking peer publications and the locally retained census.
 pub struct CensusBus {
     replica: u32,
     publisher: Socket,
@@ -118,6 +123,7 @@ impl CensusBus {
         self.latest.values()
     }
 
+    /// Number of distinct peer identifiers retained in the local census.
     pub fn peer_count(&self) -> usize {
         self.latest.len()
     }
