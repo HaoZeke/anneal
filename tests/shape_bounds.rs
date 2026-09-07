@@ -51,3 +51,16 @@ fn invalid_pair_bound_inputs_return_no_certificate() {
     assert!(pairs.bottleneck_lower_bound(valid.view(), invalid.view()).is_none());
     assert!(SortedPairs { n_points: 0 }.bottleneck_lower_bound(array![].view(), array![].view()).is_none());
 }
+
+#[cfg(feature = "ira")]
+#[test]
+fn bounded_ira_matching_returns_the_rejection_certificate() {
+    use anneal_core::bias::BasinMetric;
+    use anneal_core::shape::IraMetric;
+
+    let left = array![0.0, 0.0, 0.0, 2.0, 0.0, 0.0, 0.0, 2.0, 0.0, 0.0, 0.0, 2.0];
+    let right = &left * 3.0;
+    let bounded = IraMetric::default().distance_bounded(left.view(), right.view(), 0.1);
+    assert!(bounded > 2.8);
+    assert!(bounded <= 2.0 * 2.0_f64.sqrt());
+}
