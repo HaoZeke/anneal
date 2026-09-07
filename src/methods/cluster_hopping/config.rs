@@ -1135,7 +1135,8 @@ impl Config {
             translate_step: 0.35,
             rotate_step: 0.40,
         };
-        cfg.rigid_body_geometry = Some(crate::potentials::Tip4pCluster::new(n_molecules).rigid_geometry());
+        cfg.rigid_body_geometry =
+            Some(crate::potentials::Tip4pCluster::new(n_molecules).rigid_geometry());
         cfg.temperature = 2.0;
         cfg.bias_height = 2.0;
         cfg.screen_margin = 25.0;
