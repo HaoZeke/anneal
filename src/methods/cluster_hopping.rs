@@ -1879,12 +1879,7 @@ where
                         bias.deposit(x.view(), cfg.temperature);
                     }
                     if improved && improvements.len() < 512 {
-                        improvements.push((
-                            hops,
-                            ledger.spent(),
-                            bias.n_basins(),
-                            proposal_energy,
-                        ));
+                        improvements.push((hops, ledger.spent(), bias.n_basins(), proposal_energy));
                     }
                     accepted_transitions.push(AcceptedTransition {
                         hop: hops,
