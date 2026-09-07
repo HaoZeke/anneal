@@ -894,42 +894,51 @@ impl<F: Fingerprint> BasinBias<F> {
     /// the merge radius apply unchanged; a new basin opens at the scaled
     /// height.
     pub fn deposit_scaled(&mut self, s: ArrayView1<f64>, temp: f64, scale: f64) {
+        self.deposit_scaled_n(s, temp, scale, 1);
+    }
+
+    /// `count` scaled deposits at `s` with one basin lookup.
+    ///
+    /// A batch of foreign visits lands on one centre; looking the centre
+    /// up once and applying the well-tempered increment `count` times is
+    /// the same sequence of deposits at a fraction of the metric work.
+    pub fn deposit_scaled_n(&mut self, s: ArrayView1<f64>, temp: f64, scale: f64, count: u64) {
+        if count == 0 {
+            return;
+        }
         let denom = (self.gamma - 1.0) * temp;
-        match self.lookup(s) {
-            Some(i) => {
-                // Barducci well-tempered weight: deposition slows where the
-                // bias is already deep, so a basin fills to a finite depth.
-                //
-                // The entropic term prices the basin by how many ways the
-                // run has reached it. A fixed height treats a cell arrived
-                // at once and a cell arrived at a thousand times as equally
-                // expensive to sit in, and what holds a chain on the LJ75
-                // icosahedral shelf is that there are so many ways to be
-                // there: F = E - TS, and only E is in a fixed height.
-                //
-                // It is added here, at the cell grain, rather than on the
-                // packing community. Paving the whole community is measured
-                // to lose Marks that plain hopping finds, because the
-                // icosahedral funnel is the ground the search crosses to
-                // reach the decahedron rather than only a trap to be made
-                // expensive.
-                let arrivals = self.index.visits(i).max(1);
-                let entropy = if self.entropic && temp > 0.0 {
-                    temp * (arrivals as f64).ln()
-                } else {
-                    0.0
-                };
-                let w = scale * (self.w0 + entropy) * (-self.v[i] / denom).exp();
-                self.v[i] += w;
-                self.index.bump(i);
-            }
+        let i = match self.lookup(s) {
+            Some(i) => i,
             None => {
                 self.index.push(s.to_owned());
                 self.v.push(scale * self.w0);
                 let i = self.index.n_basins() - 1;
                 self.index.bump(i);
+                if count == 1 {
+                    return;
+                }
+                for _ in 1..count {
+                    self.increment(i, denom, temp, scale);
+                }
+                return;
             }
+        };
+        for _ in 0..count {
+            self.increment(i, denom, temp, scale);
         }
+    }
+
+    /// One well-tempered increment on basin `i`.
+    fn increment(&mut self, i: usize, denom: f64, temp: f64, scale: f64) {
+        let arrivals = self.index.visits(i).max(1);
+        let entropy = if self.entropic && temp > 0.0 {
+            temp * (arrivals as f64).ln()
+        } else {
+            0.0
+        };
+        let w = scale * (self.w0 + entropy) * (-self.v[i] / denom).exp();
+        self.v[i] += w;
+        self.index.bump(i);
     }
 }
 

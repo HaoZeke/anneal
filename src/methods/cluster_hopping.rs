@@ -1702,9 +1702,7 @@ where
                 }
                 CheckpointAction::DepositDescriptors { deposits, weight } => {
                     for (centre, count) in &deposits {
-                        for _ in 0..*count {
-                            bias.deposit_scaled(centre.view(), cfg.temperature, weight);
-                        }
+                        bias.deposit_scaled_n(centre.view(), cfg.temperature, weight, *count);
                         shared_deposits += usize::try_from(*count).unwrap_or(usize::MAX);
                     }
                     None
