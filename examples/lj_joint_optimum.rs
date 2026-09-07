@@ -1035,8 +1035,12 @@ fn main() -> Result<(), Box<dyn Error>> {
                         .runs
                         .iter()
                         .flat_map(|run| {
-                            run.aggregate_improvements.iter().zip(&run.outcome.improvements)
-                                .map(|((charged, energy), (hops, _, _, _))| (*charged, *energy, *hops))
+                            run.aggregate_improvements
+                                .iter()
+                                .zip(&run.outcome.improvements)
+                                .map(|((charged, energy), (hops, _, _, _))| {
+                                    (*charged, *energy, *hops)
+                                })
                         })
                         .filter(|(_, energy, _)| *energy <= target + TARGET_TOLERANCE)
                         .min_by_key(|(charged, _, _)| *charged);
