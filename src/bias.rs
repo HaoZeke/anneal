@@ -559,7 +559,8 @@ impl SortedPairs {
         left: ArrayView1<f64>,
         right: ArrayView1<f64>,
     ) -> Option<f64> {
-        self.prepare(left)?.bottleneck_lower_bound(&self.prepare(right)?)
+        self.prepare(left)?
+            .bottleneck_lower_bound(&self.prepare(right)?)
     }
 
     pub(crate) fn prepare(&self, coordinates: ArrayView1<f64>) -> Option<PreparedPairSpectrum> {
@@ -577,7 +578,10 @@ impl SortedPairs {
         Some(PreparedPairSpectrum {
             n_points: self.n_points,
             distances,
-            coordinate_scale: coordinates.iter().map(|value| value.abs()).fold(1.0, f64::max),
+            coordinate_scale: coordinates
+                .iter()
+                .map(|value| value.abs())
+                .fold(1.0, f64::max),
         })
     }
 }
@@ -599,7 +603,8 @@ impl PreparedPairSpectrum {
         if self.n_points != right.n_points {
             return None;
         }
-        let discrepancy = self.distances
+        let discrepancy = self
+            .distances
             .iter()
             .zip(&right.distances)
             .map(|(left, right)| (left - right).abs())
