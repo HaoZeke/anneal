@@ -2,7 +2,7 @@
 
 pub mod proposal;
 
-use crate::catalog::{in_interface_ensemble, BasinCensus, BasinId, MixingEvidence};
+use crate::catalog::{BasinCensus, BasinId, MixingEvidence, in_interface_ensemble};
 
 /// Exact local visit count that classifies one occupied basin as exhausted.
 pub const LOCAL_CENSUS_LEAVE: u64 = 8;

@@ -82,17 +82,15 @@ pub use occupancy::{
 pub use packing::{
     ENVIRONMENT_RADIUS, GoodTuringSample, INVERT_NEIGHBOR_DRAWS, PACKING_LINK, PACKING_MERGE,
     PACKING_MOVE_EPS, PACKING_REFERENCE_DRAWS, PACKING_SPEC, PackingBook, PackingPave,
-    PackingReference,
-    SEAM_BIN_WIDTH, SEAM_BINS, SEAM_BURST_SHOTS, SEAM_DOORWAY_GAP, SEAM_DOORWAY_WINDOW,
-    SEAM_WINDOW, SeamBank, credit_packing_deposit, deliver_frontier_post, different_decaf_family,
+    PackingReference, SEAM_BIN_WIDTH, SEAM_BINS, SEAM_BURST_SHOTS, SEAM_DOORWAY_GAP,
+    SEAM_DOORWAY_WINDOW, SEAM_WINDOW, SeamBank, ape_highlight_queue, ape_local_seed,
+    atom_decaf_classes, credit_packing_deposit, deliver_frontier_post, different_decaf_family,
     different_packing_family, drain_frontier_arrivals, include_packing_reference, leaves_packing,
-    nearby_packing, nearby_packing_book, atom_decaf_classes, ape_highlight_queue,
-    ape_local_seed, occupied_unseen_share,
-    leftover_arrivals_saturated, offer_frontier_post, offer_known_minimum, packing_communities,
-    packing_community_count, packing_distance, packing_fingerprint, packing_link_labels,
-    packing_reference_book, packing_references, packing_seam_gap, packing_vector,
-    remember_packing_reference, same_packing, set_packing_references, take_frontier_posts,
-    take_known_minima,
+    leftover_arrivals_saturated, nearby_packing, nearby_packing_book, occupied_unseen_share,
+    offer_frontier_post, offer_known_minimum, packing_communities, packing_community_count,
+    packing_distance, packing_fingerprint, packing_link_labels, packing_reference_book,
+    packing_references, packing_seam_gap, packing_vector, remember_packing_reference, same_packing,
+    set_packing_references, take_frontier_posts, take_known_minima,
 };
 pub use signature::{DescriptorSignature, EngineSignature, SignatureDigest, SystemSignature};
 pub use validator::{

@@ -576,11 +576,7 @@ fn lift_local_residual(
     Some((p, r_phi, p_norm))
 }
 
-fn apply_packing_modes(
-    armed: &mut Armed,
-    energy: f64,
-    grad: Array1<f64>,
-) -> (f64, Array1<f64>) {
+fn apply_packing_modes(armed: &mut Armed, energy: f64, grad: Array1<f64>) -> (f64, Array1<f64>) {
     if armed.lift.is_none() {
         let grain = crate::catalog::PACKING_LINK;
         let mut amplitude = 0.0;

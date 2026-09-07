@@ -1815,23 +1815,36 @@ fn rejected_posted_source_does_not_attach_an_edge_to_the_occupied_basin() {
     let server = server();
     let digest = signature().digest();
     let mut run = CooperativeRun::new([0, 1], 100).unwrap();
-    run.attach_client(0, CatalogClient::connect(
-        server.addr(), identity(0, digest), ClientConfig::default(),
-    ).unwrap()).unwrap();
-    run.attach_client(1, CatalogClient::connect(
-        server.addr(), identity(1, digest), ClientConfig::default(),
-    ).unwrap()).unwrap();
+    run.attach_client(
+        0,
+        CatalogClient::connect(server.addr(), identity(0, digest), ClientConfig::default())
+            .unwrap(),
+    )
+    .unwrap();
+    run.attach_client(
+        1,
+        CatalogClient::connect(server.addr(), identity(1, digest), ClientConfig::default())
+            .unwrap(),
+    )
+    .unwrap();
     let source = candidate(0, 1, 1.2);
     run.record_current(0, source.clone()).unwrap();
     let mut invalid = candidate(0, 2, 2.0);
     invalid.energy = 1.0e9;
     run.post_record_current(0, invalid).unwrap();
-    run.post_record_transition(0, "probe",
-        TransitionDestination::Resolved(candidate(0, 3, 4.0)), true).unwrap();
+    run.post_record_transition(
+        0,
+        "probe",
+        TransitionDestination::Resolved(candidate(0, 3, 4.0)),
+        true,
+    )
+    .unwrap();
     run.flush(0).unwrap();
-    assert_eq!(run.boundary_crossing(1, source.descriptor, 71).unwrap(),
+    assert_eq!(
+        run.boundary_crossing(1, source.descriptor, 71).unwrap(),
         CatalogBoundaryOutcome::Empty,
-        "a rejected source must not turn the last occupied basin into the probe origin");
+        "a rejected source must not turn the last occupied basin into the probe origin"
+    );
 }
 
 #[test]
@@ -2064,7 +2077,8 @@ fn cooperative_run_traces_explicit_transition_records() {
 #[test]
 fn failed_probe_trace_is_unresolved_and_has_no_terminal_energy() {
     let mut run = CooperativeRun::new([0], 100).unwrap();
-    run.record_executed_transition(0, 1, "probe", -1.0, f64::NAN, false).unwrap();
+    run.record_executed_transition(0, 1, "probe", -1.0, f64::NAN, false)
+        .unwrap();
     let transition = run.events().last().unwrap().transition.as_ref().unwrap();
     assert!(!transition.resolved);
     assert_eq!(transition.to_energy, None);
@@ -2295,14 +2309,18 @@ fn coordinator_closes_population_epoch_only_after_all_replicas_submit() {
 fn registering_minima_does_not_invent_a_transition_between_them() {
     let server = server();
     let digest = signature().digest();
-    let mut client = CatalogClient::connect(server.addr(), identity(0, digest),
-        ClientConfig::default()).unwrap();
+    let mut client =
+        CatalogClient::connect(server.addr(), identity(0, digest), ClientConfig::default())
+            .unwrap();
     client.record_visit(1, candidate(0, 1, 1.2)).unwrap();
     client.record_visit(2, candidate(0, 2, 4.0)).unwrap();
     let status = client.observer_status(3).unwrap();
     assert_eq!(status.landscape_basins, 2);
-    assert_eq!(status.seam.unwrap().conductance, 0.0,
-        "registration contains no perturb-quench transition evidence");
+    assert_eq!(
+        status.seam.unwrap().conductance,
+        0.0,
+        "registration contains no perturb-quench transition evidence"
+    );
 }
 
 #[test]

@@ -1583,20 +1583,17 @@ where
                                 return None;
                             }
                             let quenched = relax(ledger, o.state.view(), cfg.relax_steps);
-                            let left = from_state.as_slice().zip(quenched.1.as_slice()).is_some_and(
-                                |(origin, trial)| {
+                            let left = from_state
+                                .as_slice()
+                                .zip(quenched.1.as_slice())
+                                .is_some_and(|(origin, trial)| {
                                     crate::catalog::leaves_packing(origin, trial, &references)
-                                },
-                            );
+                                });
                             if left {
                                 Some(quenched)
-                            } else if o
-                                .state
-                                .as_slice()
-                                .is_some_and(|overshoot| {
-                                    crate::catalog::occupied_unseen_share(overshoot) > 0.0
-                                })
-                            {
+                            } else if o.state.as_slice().is_some_and(|overshoot| {
+                                crate::catalog::occupied_unseen_share(overshoot) > 0.0
+                            }) {
                                 // Quench is the occupied packing projector.
                                 // Unseen local classes on the overshoot are
                                 // the Leave. The destination packing is not
@@ -1631,17 +1628,17 @@ where
                             if !o.crossed {
                                 return None;
                             }
-                            let quenched =
-                                relax(ledger, o.state.view(), cfg.relax_steps);
-                            let home = from_state.as_slice().zip(quenched.1.as_slice()).is_some_and(
-                                |(origin, trial)| {
+                            let quenched = relax(ledger, o.state.view(), cfg.relax_steps);
+                            let home = from_state
+                                .as_slice()
+                                .zip(quenched.1.as_slice())
+                                .is_some_and(|(origin, trial)| {
                                     !crate::catalog::leaves_packing(
                                         origin,
                                         trial,
                                         &crate::catalog::packing_references(),
                                     )
-                                },
-                            );
+                                });
                             if home {
                                 Some(relax(ledger, o.state.view(), 0))
                             } else {
