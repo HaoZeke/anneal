@@ -754,3 +754,28 @@ fn exact_saddle_reobservations_produce_coverage_evidence() {
     assert_eq!(reopened.singletons, 1);
     assert!(!reopened.saturated);
 }
+
+#[test]
+fn ranked_claimable_arms_are_capped_deepest_source_first() {
+    let portfolio = RidePortfolio::new(2, vec![RideMethod::Dimer, RideMethod::Lanczos]).unwrap();
+    let mut ledger = RideLedger::new(portfolio);
+    ledger
+        .register_source(source(17, -104.2, &[(4, 6), (9, 11)]))
+        .unwrap();
+    ledger
+        .register_source(source(23, -109.7, &[(4, 2)]))
+        .unwrap();
+    // Two sources, three environment classes, two modes, two directions,
+    // two methods: 24 arms in all.
+    let every = ledger.claimable_arms();
+    assert_eq!(every.len(), 24);
+    let ranked = ledger.claimable_arms_ranked(5);
+    assert_eq!(ranked.len(), 5);
+    // Nothing has been attempted, so the deepest source (basin 23) ranks
+    // first and fills the cap before any arm of basin 17.
+    assert!(ranked.iter().all(|(arm, _)| arm.source_basin == 23));
+    // A cap above the count returns everything, in a deterministic order.
+    let all = ledger.claimable_arms_ranked(100);
+    assert_eq!(all.len(), 24);
+    assert_eq!(all, ledger.claimable_arms_ranked(100));
+}
