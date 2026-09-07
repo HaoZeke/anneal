@@ -3653,6 +3653,10 @@ fn run_capnp_catalog(
         endpoint.is_some(),
     )
     .unwrap_or_else(|error| panic!("{error}"));
+    let evidence_only = std::env::var("CATALOG_EVIDENCE_ONLY").is_ok_and(|value| value == "1");
+    if evidence_only {
+        println!("  catalog channels: surface evidence only; geometry policy disabled");
+    }
     let replica = required_catalog_env("CATALOG_REPLICA")
         .parse::<u32>()
         .expect("CATALOG_REPLICA must be an unsigned integer");
@@ -3706,7 +3710,7 @@ fn run_capnp_catalog(
     #[cfg(feature = "bank-rpc")]
     let brain_stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
     #[cfg(feature = "bank-rpc")]
-    let brain_handle = if let (Ok(listen), Ok(peers_raw)) = (
+    let brain_handle = if !evidence_only && let (Ok(listen), Ok(peers_raw)) = (
         std::env::var("CATALOG_BRAIN_LISTEN"),
         std::env::var("CATALOG_BRAIN_PEERS"),
     ) {
@@ -4238,6 +4242,18 @@ fn run_capnp_catalog(
             cooperative
                 .post_surface_evidence(replica, Arc::clone(portfolio))
                 .expect("surface exchange must name the live replica");
+        }
+        if evidence_only {
+            cooperative
+                .record_work(
+                    replica,
+                    ChargeKind::LocalProposal,
+                    u64::try_from(snapshot.charged().saturating_sub(last_charged))
+                        .expect("local objective charge must fit u64"),
+                )
+                .expect("evidence-only work must enter the cooperative ledger");
+            last_charged = snapshot.charged();
+            return CheckpointAction::Continue;
         }
         checkpoint_sequence = checkpoint_sequence
             .checked_add(1)
@@ -6000,6 +6016,16 @@ fn run_capnp_catalog(
         checkpoint_interval,
         &mut checkpoint,
     );
+    if evidence_only {
+        cooperative
+            .record_work(
+                replica,
+                ChargeKind::LocalProposal,
+                u64::try_from(ledger.spent().saturating_sub(last_charged))
+                    .expect("terminal objective charge must fit u64"),
+            )
+            .expect("terminal evidence-only work must enter the cooperative ledger");
+    }
     // The policy layer's own tally, printed where the run ends rather
     // than only on improvement lines: Leaves fire mostly in the quiet
     // stretches after the last improvement, so a count carried on the
