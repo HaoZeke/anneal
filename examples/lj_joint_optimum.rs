@@ -1728,4 +1728,39 @@ mod tests {
         );
         assert!(super::start_protocol_name(true, true).is_err());
     }
+
+    #[test]
+    fn unresolved_nve_actions_do_not_count_as_verified_basin_visits() {
+        struct OneBasin;
+        impl ExactStructureWitness for OneBasin {
+            fn equivalent(&self, _: ArrayView1<f64>, _: ArrayView1<f64>) -> bool {
+                true
+            }
+        }
+        let n = 75;
+        let potential = PairPotential::lennard_jones(n);
+        let mut rng = rand::rngs::StdRng::seed_from_u64(7);
+        let hopping = super::HoppingConfig::for_cluster(n);
+        let start = super::random_cluster(n, 0.7, hopping.min_separation, &mut rng);
+        let run = super::run_minima_hopping(
+            &potential,
+            start.view(),
+            n,
+            50_000,
+            0,
+            &OneBasin,
+            MinimaHoppingOptions { soften: false, bound_escape: false },
+        );
+        let outcome = run.outcome;
+        let (same, known, new) = outcome.visit_counts;
+        assert!(outcome.unconverged_records > 1, "the fixture exercises failed proposals");
+        assert!(
+            same + known + new + outcome.unconverged_records <= outcome.hops,
+            "failed proposals cannot simultaneously be verified visits: {:?}",
+            (outcome.visit_counts, outcome.unconverged_records, outcome.hops)
+        );
+        assert_eq!(known, 0);
+        assert_eq!(new, 0);
+        assert_eq!(outcome.charged, 50_000);
+    }
 }
