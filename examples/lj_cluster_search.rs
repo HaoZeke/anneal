@@ -1819,6 +1819,9 @@ fn main() {
     if let Some(m) = std::env::var("MD_STEPS").ok().and_then(|v| v.parse().ok()) {
         cfg.md_escape_max_steps = m;
     }
+    if let Some(m) = std::env::var("MD_SOFTEN").ok().and_then(|v| v.parse().ok()) {
+        cfg.md_escape_soften = m;
+    }
     // The radius read off the search's own step length rather than swept.
     cfg.calibrate_radius = opts.contains(&"calib");
     // The walker restarted, the landscape memory kept.

@@ -282,6 +282,11 @@ pub struct Config {
     pub md_escape_minima: usize,
     /// Cap on integration steps per escape.
     pub md_escape_max_steps: usize,
+    /// Velocity-softening probes before the escape (Goedecker's softening):
+    /// each probe costs one evaluation and turns the initial velocity toward
+    /// the soft modes, which is what carries the trajectory out of the well
+    /// instead of into hard vibrations. Zero is no softening.
+    pub md_escape_soften: usize,
     /// Lanczos steps for the soft-mode escape.
     ///
     /// Each costs two gradient evaluations, charged. Eight resolves the softest
@@ -1091,6 +1096,7 @@ impl Config {
             md_escape_kinetic: 1.0,
             md_escape_minima: 2,
             md_escape_max_steps: 2_000,
+            md_escape_soften: 0,
             shared_deposits: 8,
             jump_on_stall: false,
             jump_patience: 5_000,
