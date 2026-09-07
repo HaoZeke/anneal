@@ -65,6 +65,40 @@ fn validated_polishing_discoveries_enter_the_charged_improvement_curve() {
 }
 
 #[test]
+fn malformed_gradients_cannot_certify_the_initial_minimum() {
+    let mut cfg = Config::for_cluster(2);
+    cfg.max_hops = Some(0);
+    let start = Array1::from(vec![-0.6, 0.0, 0.0, 0.6, 0.0, 0.0]);
+    for bad_gradient in [
+        Array1::from_elem(start.len(), f64::NAN),
+        Array1::zeros(0),
+        Array1::zeros(start.len() - 1),
+    ] {
+        let mut ledger = Ledger::new(100);
+        let mut rng = StdRng::seed_from_u64(0xbad);
+        let mut relax = |ledger: &mut Ledger, _: ArrayView1<f64>, _: usize| {
+            assert!(ledger.charge());
+            (-0.25, start.clone())
+        };
+        let mut gradient = |ledger: &mut Ledger, _: ArrayView1<f64>| {
+            assert!(ledger.charge());
+            Some(bad_gradient.clone())
+        };
+        let outcome = run_with_gradient(
+            &cfg,
+            start.view(),
+            &mut ledger,
+            &mut relax,
+            Some(&mut gradient),
+            &mut rng,
+        );
+        assert!(outcome.best_state.is_none(), "accepted gradient {bad_gradient:?}");
+        assert_eq!(outcome.best, f64::INFINITY);
+        assert!(outcome.improvements.is_empty());
+    }
+}
+
+#[test]
 fn result_verification_cannot_optimize_or_replace_the_search_answer() {
     let source = include_str!("../examples/lj_cluster_search.rs");
     let verification = source
