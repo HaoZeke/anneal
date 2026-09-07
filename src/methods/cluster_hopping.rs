@@ -437,8 +437,10 @@ impl Ledger {
     /// Record one charged relaxation after its caller-owned convergence check.
     ///
     /// `gradient` is fresh validated evidence. Its absence classifies the
-    /// boundary as rejected. An invocation that consumed no potential calls is
-    /// not a quench boundary and returns `false`.
+    /// boundary as rejected. Nonfinite energy, coordinates, or gradient and a
+    /// mismatched gradient dimension also produce a rejected boundary while
+    /// retaining its charged work. An invocation that consumed no potential
+    /// calls is not a quench boundary and returns `false`.
     pub fn record_quench_boundary(
         &mut self,
         charged_before: usize,
