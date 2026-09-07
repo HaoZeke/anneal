@@ -12,7 +12,7 @@
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 
-use ndarray::{Array1, ArrayView1};
+use ndarray::Array1;
 
 use crate::soap::SoapSpec;
 
