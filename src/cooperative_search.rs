@@ -1136,7 +1136,8 @@ mod run {
             Ok(TransitionRecordOutcome::LocalFallback)
         }
 
-        /// Record one validated local perturb--quench independently of RPC registration.
+        /// Record a local perturb--quench independently of RPC registration.
+        /// A non-finite terminal energy denotes an unresolved outcome.
         pub fn record_executed_transition(
             &mut self,
             replica: u32,
@@ -1153,9 +1154,9 @@ mod run {
                 .transition = Some(TransitionTrace {
                 action: action.into(),
                 hop: Some(hop),
-                from_energy: Some(from_energy),
-                to_energy: Some(to_energy),
-                resolved: true,
+                from_energy: from_energy.is_finite().then_some(from_energy),
+                to_energy: to_energy.is_finite().then_some(to_energy),
+                resolved: from_energy.is_finite() && to_energy.is_finite(),
                 adopted,
             });
             Ok(())
