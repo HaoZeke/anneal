@@ -1170,8 +1170,11 @@ impl session::Server for SessionImpl {
                 let epoch_before = open_population_epoch(&state);
                 let config = shared.config.clone();
                 let apply_started = std::time::Instant::now();
+                in_flight_begin(label);
                 let reply = process_request(&config, &mut state, request.clone(), precomputed)
-                    .map_err(capnp::Error::failed)?;
+                    .map_err(capnp::Error::failed);
+                in_flight_end();
+                let reply = reply?;
                 profile_request(
                     label,
                     validation_seconds,
@@ -1330,6 +1333,48 @@ fn operation_label(operation: &CatalogOperation) -> &'static str {
 /// The apply column is the serialised clock of the whole ensemble: with
 /// 48 replicas checkpointing every 500 charged calls, whatever dominates
 /// it is what every chain waits on.
+/// The request the coordinator's thread is applying right now, for the
+/// watchdog. A coordinator that freezes shows its replicas parked and its
+/// one thread at full CPU with nothing on stderr; the watchdog names the
+/// operation and how long it has held the state, every minute, so the
+/// stall is diagnosed from the log rather than with perf on the node.
+static IN_FLIGHT: Mutex<Option<(&'static str, Instant)>> = Mutex::new(None);
+
+fn in_flight_begin(label: &'static str) {
+    static WATCHDOG: std::sync::OnceLock<()> = std::sync::OnceLock::new();
+    WATCHDOG.get_or_init(|| {
+        let _ = thread::Builder::new()
+            .name("catalog-watchdog".to_owned())
+            .spawn(|| {
+                let mut reported = 0u64;
+                loop {
+                    thread::sleep(Duration::from_secs(10));
+                    let held = IN_FLIGHT.lock().ok().and_then(|guard| *guard);
+                    let Some((label, since)) = held else {
+                        reported = 0;
+                        continue;
+                    };
+                    let seconds = since.elapsed().as_secs();
+                    if seconds >= 30 && (reported == 0 || seconds >= reported + 60) {
+                        eprintln!(
+                            "coordinator slow request: {label} held the state for {seconds}s"
+                        );
+                        reported = seconds.max(1);
+                    }
+                }
+            });
+    });
+    if let Ok(mut guard) = IN_FLIGHT.lock() {
+        *guard = Some((label, Instant::now()));
+    }
+}
+
+fn in_flight_end() {
+    if let Ok(mut guard) = IN_FLIGHT.lock() {
+        *guard = None;
+    }
+}
+
 fn profile_request(label: &'static str, validation_seconds: f64, apply_seconds: f64) {
     use std::collections::BTreeMap;
     use std::sync::{Mutex, OnceLock};
@@ -4905,6 +4950,19 @@ fn worthwhile_communities(scientific: &mut ScientificState) -> usize {
     count
 }
 
+/// Largest number of sites the funnel model keeps, `CATALOG_FUNNEL_RANK`
+/// (default 512).
+fn funnel_rank() -> usize {
+    static RANK: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
+    *RANK.get_or_init(|| {
+        std::env::var("CATALOG_FUNNEL_RANK")
+            .ok()
+            .and_then(|value| value.parse().ok())
+            .filter(|rank: &usize| *rank >= 8)
+            .unwrap_or(512)
+    })
+}
+
 fn occupancy_funnel_ei_exhausted(scientific: &mut ScientificState) -> bool {
     if let Some((at, verdict)) = scientific.ei_hold
         && hold_active(scientific, Some(at))
@@ -4958,6 +5016,14 @@ fn occupancy_funnel_ei_exhausted(scientific: &mut ScientificState) -> bool {
         scientific
             .funnel
             .observe(ndarray::Array1::from(histogram.clone()).view(), *energy);
+    }
+    // Bound the model: every fit is cubic and every prediction quadratic
+    // in the sites held, and the sites are the packing families the book
+    // has named, which grow for the life of the run. Pivoted Cholesky
+    // keeps the incumbent and the most informative of the rest.
+    let rank = funnel_rank();
+    if scientific.funnel.len() > rank {
+        let _ = scientific.funnel.compress(rank);
     }
     let version = scientific.funnel.version();
     if let Some((held, verdict)) = scientific.ei_verdict
