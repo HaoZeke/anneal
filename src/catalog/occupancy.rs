@@ -108,11 +108,7 @@
 pub fn is_occupancy_leave_action(action: &str) -> bool {
     matches!(
         action,
-        "hyperband_reseed"
-            | "catalog_leave"
-            | "catalog_ridge"
-            | "soap_push"
-            | "population_reseed"
+        "hyperband_reseed" | "catalog_leave" | "catalog_ridge" | "soap_push" | "population_reseed"
     )
 }
 

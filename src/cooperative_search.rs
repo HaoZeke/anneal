@@ -1067,8 +1067,11 @@ mod run {
                     mailbox.exec(move |client| client.record_visit(rpc_sequence, candidate))
                 })
             };
-            *self.replica_mut(replica)?.posted_source_valid.lock().expect("posted source status") =
-                matches!(result, Some(Ok(_)));
+            *self
+                .replica_mut(replica)?
+                .posted_source_valid
+                .lock()
+                .expect("posted source status") = matches!(result, Some(Ok(_)));
             self.handle_transition_record(
                 replica,
                 "register_current".to_owned(),
@@ -1142,8 +1145,11 @@ mod run {
                     if !*source_valid.lock().expect("posted source status") {
                         return;
                     }
-                    if client.record_transition(rpc_sequence, action, destination, adopted).is_err()
-                        && adopted {
+                    if client
+                        .record_transition(rpc_sequence, action, destination, adopted)
+                        .is_err()
+                        && adopted
+                    {
                         *source_valid.lock().expect("posted source status") = false;
                     }
                 });
@@ -2124,9 +2130,10 @@ mod run {
             let rpc_sequence = self.next_rpc_sequence(replica)?;
             let result = {
                 let state = self.replica_mut(replica)?;
-                state.client.as_ref().map(|mailbox| {
-                    mailbox.exec(move |client| client.detach(rpc_sequence, reason))
-                })
+                state
+                    .client
+                    .as_ref()
+                    .map(|mailbox| mailbox.exec(move |client| client.detach(rpc_sequence, reason)))
             };
             match result {
                 None => {

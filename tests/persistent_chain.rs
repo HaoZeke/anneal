@@ -307,9 +307,16 @@ fn failed_checkpoint_probe_remains_an_unresolved_observation() {
         40,
         &mut checkpoint,
     );
-    let probes = outcome.accepted_transitions.iter()
-        .filter(|transition| transition.action == "probe").collect::<Vec<_>>();
-    assert_eq!(probes.len(), 1, "failure must not disappear from the denominator");
+    let probes = outcome
+        .accepted_transitions
+        .iter()
+        .filter(|transition| transition.action == "probe")
+        .collect::<Vec<_>>();
+    assert_eq!(
+        probes.len(),
+        1,
+        "failure must not disappear from the denominator"
+    );
     assert!(!probes[0].validated);
     assert!(!probes[0].adopted);
     assert_ne!(outcome.final_state.as_ref(), Some(&probes[0].to_state));

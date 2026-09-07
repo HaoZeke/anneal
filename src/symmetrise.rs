@@ -576,7 +576,9 @@ pub fn symmetrise_core(
         })
         .collect();
     radii.sort_by(|p, q| p.0.partial_cmp(&q.0).unwrap_or(std::cmp::Ordering::Equal));
-    let m = ((n as f64) * core_fraction.clamp(0.1, 1.0)).round().max(4.0) as usize;
+    let m = ((n as f64) * core_fraction.clamp(0.1, 1.0))
+        .round()
+        .max(4.0) as usize;
     let m = m.min(n);
     let core_idx: Vec<usize> = radii[..m].iter().map(|p| p.1).collect();
     let mut core = Array1::<f64>::zeros(3 * m);
@@ -592,7 +594,8 @@ pub fn symmetrise_core(
     let mut gens: Vec<Candidate> = Vec::new();
     for cand in &cands {
         let seen = gens.iter().any(|g| {
-            let dot = g.axis[0] * cand.axis[0] + g.axis[1] * cand.axis[1] + g.axis[2] * cand.axis[2];
+            let dot =
+                g.axis[0] * cand.axis[0] + g.axis[1] * cand.axis[1] + g.axis[2] * cand.axis[2];
             dot.abs() > 0.995 && g.improper == cand.improper
         });
         if !seen {

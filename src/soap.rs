@@ -1160,9 +1160,16 @@ pub fn packing_active_volume(
         total += s;
     }
     let mut order: Vec<usize> = (0..n_at).collect();
-    order.sort_by(|a, b| weight[*b].partial_cmp(&weight[*a]).unwrap_or(std::cmp::Ordering::Equal));
+    order.sort_by(|a, b| {
+        weight[*b]
+            .partial_cmp(&weight[*a])
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
     if !(total.is_finite() && total > 0.0) {
-        return order.into_iter().take(n_at.min(ACTIVE_VOLUME_MIN.max(1))).collect();
+        return order
+            .into_iter()
+            .take(n_at.min(ACTIVE_VOLUME_MIN.max(1)))
+            .collect();
     }
     let cap = n_at.max(1) / 2;
     let floor = ACTIVE_VOLUME_MIN.min(n_at);
@@ -3254,7 +3261,11 @@ mod tests {
         };
         let mobile = packing_active_volume(x.view(), spec, None);
         assert!(!mobile.is_empty());
-        assert!(mobile.len() < 13, "active volume must freeze the core, got {}", mobile.len());
+        assert!(
+            mobile.len() < 13,
+            "active volume must freeze the core, got {}",
+            mobile.len()
+        );
         assert!(mobile.iter().all(|&i| i < 13));
     }
 

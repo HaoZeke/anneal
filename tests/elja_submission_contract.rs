@@ -692,12 +692,15 @@ fn occupancy_driver_compiles_brains_into_the_bank_rpc_build() {
 #[test]
 fn diagnostic_probe_scale_is_independent_of_adaptive_search_difficulty() {
     let source = include_str!("../examples/lj_cluster_search.rs");
-    let probe_action = source.find("action: \"probe\".to_owned(),")
+    let probe_action = source
+        .find("action: \"probe\".to_owned(),")
         .expect("production must schedule diagnostic probes");
     let proposal = &source[..probe_action];
     let arguments = &proposal[proposal.rfind("fixed_probe_trial(").unwrap()..];
-    assert!(!arguments.contains("difficulty_gain"),
-        "fixed-probe return counts require one proposal distribution");
+    assert!(
+        !arguments.contains("difficulty_gain"),
+        "fixed-probe return counts require one proposal distribution"
+    );
 }
 
 #[test]

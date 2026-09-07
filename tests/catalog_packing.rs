@@ -1,13 +1,11 @@
 use anneal_core::catalog::{
     OccupancyCertificate, OccupancyFold, PACKING_LINK, PACKING_MERGE, PACKING_MOVE_EPS,
     PackingBook, ape_highlight_queue, ape_local_seed, different_decaf_family,
-    occupied_unseen_share,
-    include_packing_reference, leaves_packing,
-    nearby_packing,
-    lens_ring_displacement, occupancy_fes_delta, occupancy_fes_from_histograms,
-    occupancy_landfold_floor, occupancy_leave_new_class, occupancy_leave_new_packing,
-    occupancy_map_fold, occupancy_retire_at, occupancy_ring_census, occupancy_ring_floor,
-    occupancy_ring_profile, occupancy_sparsify_packing, packing_community_count, packing_distance,
+    include_packing_reference, leaves_packing, lens_ring_displacement, nearby_packing,
+    occupancy_fes_delta, occupancy_fes_from_histograms, occupancy_landfold_floor,
+    occupancy_leave_new_class, occupancy_leave_new_packing, occupancy_map_fold,
+    occupancy_retire_at, occupancy_ring_census, occupancy_ring_floor, occupancy_ring_profile,
+    occupancy_sparsify_packing, occupied_unseen_share, packing_community_count, packing_distance,
     packing_fingerprint, packing_link_labels, packing_reference_book, remember_packing_reference,
     ring_leave_weight, same_packing, set_packing_references,
 };
@@ -87,7 +85,10 @@ fn ape_queue_highlights_ico_atoms_by_decaf_class() {
         })
         .sum::<f64>()
         .sqrt();
-    assert!((moved - 0.2).abs() < 1e-9, "APE seed moves only the highlighted atom");
+    assert!(
+        (moved - 0.2).abs() < 1e-9,
+        "APE seed moves only the highlighted atom"
+    );
     set_packing_references(Vec::new());
     remember_packing_reference(ico);
     assert_eq!(
