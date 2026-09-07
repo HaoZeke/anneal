@@ -2344,7 +2344,7 @@ fn main() {
             .ok()
             .filter(|value| !value.is_empty());
         let catalog_control = opts.contains(&"catalog");
-        let mut out = if catalog_rpc.is_some() || catalog_control {
+        let out = if catalog_rpc.is_some() || catalog_control {
             #[cfg(feature = "bank-rpc")]
             {
                 if let Some(endpoint) = catalog_rpc.as_deref() {
@@ -2580,10 +2580,8 @@ fn main() {
             }
         };
 
-        // The reported value is checked against a fresh evaluation of the
-        // structure it claims to come from, off the ledger and outside the
-        // driver. A search that reports a number its own answer does not have
-        // is the failure worth catching, and nothing else here would catch it.
+        // A read-only audit checks the returned coordinates and objective.
+        // It cannot optimize coordinates or change the charged search answer.
         let verified = match out.best_state.as_ref() {
             Some(x) => {
                 assert_eq!(
@@ -2594,21 +2592,13 @@ fn main() {
                 );
                 let (e, g) = lj(x.view());
                 let gmax = g.iter().fold(0.0_f64, |a, v| a.max(v.abs()));
-                // A hop quench can stop short of a minimum and still be
-                // recorded when the driver did not pass a gradient to the
-                // recordable guard. Finish the relaxation off the ledger
-                // and report the minimum that structure actually is.
-                let (e, gmax) = if gmax >= 1e-3 {
-                    let mut opt = WarmLbfgs::default();
-                    let (er, xr, _) = opt.minimize(x.view(), 2000, |v| Some(lj(v)));
-                    let (_, gr) = lj(xr.view());
-                    let gm = gr.iter().fold(0.0_f64, |a, v| a.max(v.abs()));
-                    (er, gm)
-                } else {
-                    (e, gmax)
-                };
                 assert!(
-                    gmax < 1e-3,
+                    e.is_finite() && (e - out.best).abs() < 1e-6,
+                    "seed {seed} reports {} but its returned coordinates have energy {e}",
+                    out.best
+                );
+                assert!(
+                    g.iter().all(|v| v.is_finite()) && gmax < 1e-3,
                     "seed {seed} returned a structure with gradient {gmax:.2e}, \
                      which is not a minimum"
                 );
@@ -2616,9 +2606,6 @@ fn main() {
             }
             None => None,
         };
-        if let Some((e, _)) = verified {
-            out.best = e;
-        }
         let hit = reference.map(|r| out.best < r + 1e-4).unwrap_or(false);
         if hit {
             solved += 1;
