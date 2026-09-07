@@ -1098,4 +1098,38 @@ mod tests {
         assert!(run.dynamics_steps > 0);
         assert_ne!(run.final_time_step, 0.005);
     }
+
+    #[test]
+    fn minima_hopping_bootstrap_establishes_a_minimum_within_the_available_budget() {
+        use rand::{SeedableRng, rngs::StdRng};
+
+        let n = 75;
+        let config = super::HoppingConfig::for_cluster(n);
+        let mut initial_rng = StdRng::seed_from_u64(7);
+        let initial = super::random_cluster(n, 0.7, config.min_separation, &mut initial_rng);
+        let potential = PairPotential::lennard_jones(n);
+        let budget = 4_000;
+
+        let run = run_minima_hopping(
+            &potential,
+            initial.view(),
+            n,
+            budget,
+            0,
+            &DistinctWitness,
+            MinimaHoppingOptions {
+                soften: false,
+                bound_escape: false,
+            },
+        );
+
+        assert!(run.outcome.best.is_finite(), "bootstrap must establish a minimum");
+        assert!(run.initial_quench_calls > config.relax_steps);
+        assert!(run.dynamics_calls > 0, "available work must reach the escape operator");
+        assert!(run.outcome.charged <= budget);
+        assert_eq!(
+            run.initial_quench_calls + run.dynamics_calls + run.proposal_quench_calls,
+            run.outcome.charged
+        );
+    }
 }
