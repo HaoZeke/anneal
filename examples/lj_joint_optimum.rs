@@ -1023,6 +1023,19 @@ fn optbench_archive_digest(n: usize) -> Option<&'static str> {
     }
 }
 
+struct StartArchiveProvenance {
+    expected: Option<&'static str>,
+    verified: Option<&'static str>,
+}
+
+fn start_archive_provenance(n: usize, optbench: bool) -> StartArchiveProvenance {
+    // A directory layout identifies an input format, not an archive's contents.
+    StartArchiveProvenance {
+        expected: optbench.then(|| optbench_archive_digest(n)).flatten(),
+        verified: None,
+    }
+}
+
 fn start_protocol_name(optbench: bool, fixed: bool) -> Result<&'static str, String> {
     match (optbench, fixed) {
         (false, false) => Ok("random-cluster"),
@@ -1058,6 +1071,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         return Err("N must be at least two and budget/seeds must be positive".into());
     }
     let start_protocol = start_protocol_name(optbench_root.is_some(), fixed_path.is_some())?;
+    let archive_provenance = start_archive_provenance(n, optbench_root.is_some());
     let fixed_initial = fixed_path
         .as_ref()
         .map(|path| {
@@ -1103,7 +1117,9 @@ fn main() -> Result<(), Box<dyn Error>> {
             "target_tolerance": TARGET_TOLERANCE,
             "start_protocol": start_protocol,
             "fixed_coordinates": fixed_initial.as_ref().map(|state| state.to_vec()),
-            "start_archive_sha256": optbench_root.as_ref().and_then(|_| optbench_archive_digest(n)),
+            "start_archive_sha256": archive_provenance.verified,
+            "expected_start_archive_sha256": archive_provenance.expected,
+            "start_archive_verified": archive_provenance.verified.is_some(),
             "nve_ensemble": {
                 "replicas": replicas,
                 "budget_semantics": "aggregate-per-ensemble",
