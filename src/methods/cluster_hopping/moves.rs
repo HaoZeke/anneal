@@ -1312,8 +1312,19 @@ impl ClusterMove {
                     rcut_nn: *cutoff,
                     ..Default::default()
                 };
+                // Repel only when the region is crowded: the references on
+                // file are the population's minima on this side of the
+                // packing map, so their count is the crowding of this chain's
+                // own family. A chain alone in its family (a replica that has
+                // reached the narrow funnel) must not be pushed out of it;
+                // measured, an unconditional push cost the coupled champions
+                // half their rate against the same worker uncoupled.
+                let min_refs: usize = std::env::var("REPEL_MIN_REFS")
+                    .ok()
+                    .and_then(|v| v.parse().ok())
+                    .unwrap_or(3);
                 let refs = crate::catalog::packing_references();
-                if !refs.is_empty()
+                if refs.len() >= min_refs
                     && let Some(y) = crate::soap::push_away_clouds(x, &refs, spec, *rmsd)
                 {
                     return y;
