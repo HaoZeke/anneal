@@ -37,7 +37,8 @@ use anneal_core::methods::minima_hopping::{
 };
 use anneal_core::methods::warm_lbfgs::WarmLbfgs;
 use anneal_core::pes_exploration::{
-    ExactStructureWitness, IrcKind, PesExplorationConfig, RideMethod, StructureContext, StructureView,
+    ExactStructureWitness, IrcKind, PesExplorationConfig, RideMethod, StructureContext,
+    StructureView,
 };
 use anneal_core::potentials::{PairKind, PairPotential};
 use anneal_core::shape::IraStructureWitness;
@@ -199,8 +200,14 @@ fn selected_arms(selector: &str, irc: &[IrcKind]) -> Result<Vec<Arm>, String> {
             });
         }
         "mh-communication" => arms.extend([
-            Arm::MinimaHoppingEnsemble { shared: false, soften: false },
-            Arm::MinimaHoppingEnsemble { shared: true, soften: false },
+            Arm::MinimaHoppingEnsemble {
+                shared: false,
+                soften: false,
+            },
+            Arm::MinimaHoppingEnsemble {
+                shared: true,
+                soften: false,
+            },
         ]),
         "feedback" => arms.push(Arm::MinimaFeedback),
         _ => {
@@ -679,11 +686,17 @@ struct SerializedWitness<W>(Mutex<W>);
 
 impl<W: ExactStructureWitness> ExactStructureWitness for SerializedWitness<W> {
     fn equivalent(&self, left: ArrayView1<f64>, right: ArrayView1<f64>) -> bool {
-        self.0.lock().expect("exact witness lock poisoned").equivalent(left, right)
+        self.0
+            .lock()
+            .expect("exact witness lock poisoned")
+            .equivalent(left, right)
     }
 
     fn equivalent_structures(&self, left: StructureView<'_>, right: StructureView<'_>) -> bool {
-        self.0.lock().expect("exact witness lock poisoned").equivalent_structures(left, right)
+        self.0
+            .lock()
+            .expect("exact witness lock poisoned")
+            .equivalent_structures(left, right)
     }
 }
 
@@ -725,41 +738,75 @@ fn run_minima_hopping_ensemble<W: ExactStructureWitness + Send>(
     let history_count = if options.shared { 1 } else { options.replicas };
     let tolerance = HoppingConfig::for_cluster(n).record_gradient;
     let histories = (0..history_count)
-        .map(|_| MinimumHistory::new(tolerance).map(Mutex::new).map_err(|error| error.to_string()))
+        .map(|_| {
+            MinimumHistory::new(tolerance)
+                .map(Mutex::new)
+                .map_err(|error| error.to_string())
+        })
         .collect::<Result<Vec<_>, _>>()?;
     let charged = AtomicUsize::new(0);
     // Both arms serialize foreign exact matching without serializing their PES work.
     let witness = SerializedWitness(Mutex::new(witness));
     let runs = std::thread::scope(|scope| {
-        let handles = budgets.iter().zip(&seeds).enumerate().map(|(replica, (&budget, &seed))| {
-            let history = &histories[if options.shared { 0 } else { replica }];
-            let charged = &charged;
-            let witness = &witness;
-            scope.spawn(move || {
-                run_minima_hopping_with_history(
-                    potential, initial, n, budget, seed, witness,
-                    HistoryRunOptions {
-                        moves: MinimaHoppingOptions { soften: options.soften, bound_escape: false },
-                        history: Some(history),
-                        charged: Some(charged),
-                    },
-                )
+        let handles = budgets
+            .iter()
+            .zip(&seeds)
+            .enumerate()
+            .map(|(replica, (&budget, &seed))| {
+                let history = &histories[if options.shared { 0 } else { replica }];
+                let charged = &charged;
+                let witness = &witness;
+                scope.spawn(move || {
+                    run_minima_hopping_with_history(
+                        potential,
+                        initial,
+                        n,
+                        budget,
+                        seed,
+                        witness,
+                        HistoryRunOptions {
+                            moves: MinimaHoppingOptions {
+                                soften: options.soften,
+                                bound_escape: false,
+                            },
+                            history: Some(history),
+                            charged: Some(charged),
+                        },
+                    )
+                })
             })
-        }).collect::<Vec<_>>();
-        handles.into_iter().map(|handle| {
-            handle.join().map_err(|_| "NVE replica panicked".to_string())?
-        }).collect::<Result<Vec<_>, String>>()
+            .collect::<Vec<_>>();
+        handles
+            .into_iter()
+            .map(|handle| {
+                handle
+                    .join()
+                    .map_err(|_| "NVE replica panicked".to_string())?
+            })
+            .collect::<Result<Vec<_>, String>>()
     })?;
     let charged = charged.load(Ordering::SeqCst);
     if charged != runs.iter().map(|run| run.outcome.charged).sum::<usize>() {
         return Err("ensemble and per-replica charged counters disagree".into());
     }
-    let minimum_count = histories.iter().map(|history| {
-        history.lock().map(|history| history.minimum_count())
-            .map_err(|_| "minimum history lock poisoned".to_string())
-    }).collect::<Result<Vec<_>, _>>()?.into_iter().sum();
+    let minimum_count = histories
+        .iter()
+        .map(|history| {
+            history
+                .lock()
+                .map(|history| history.minimum_count())
+                .map_err(|_| "minimum history lock poisoned".to_string())
+        })
+        .collect::<Result<Vec<_>, _>>()?
+        .into_iter()
+        .sum();
     Ok(MinimaHoppingEnsemble {
-        runs, budgets, seeds, charged, minimum_count, wall_seconds: started.elapsed().as_secs_f64(),
+        runs,
+        budgets,
+        seeds,
+        charged,
+        minimum_count,
+        wall_seconds: started.elapsed().as_secs_f64(),
     })
 }
 
@@ -887,8 +934,8 @@ fn main() -> Result<(), Box<dyn Error>> {
     }
     let target = reference(n).ok_or("no published LJ target is registered for this size")?;
     let arms = selected_arms(selector, &irc_kinds(irc_selector)?)?;
-    let replicas = std::env::var("ANNEAL_MH_REPLICAS")
-        .map_or(Ok(4), |value| value.parse::<usize>())?;
+    let replicas =
+        std::env::var("ANNEAL_MH_REPLICAS").map_or(Ok(4), |value| value.parse::<usize>())?;
     let descriptor_space = lj::descriptor_space();
     let potential = PairPotential::lennard_jones(n);
     let witness = IraStructureWitness {
@@ -969,49 +1016,76 @@ fn main() -> Result<(), Box<dyn Error>> {
             match arm {
                 Arm::MinimaHoppingEnsemble { shared, soften } => {
                     let ensemble = run_minima_hopping_ensemble(
-                        &potential, initial.view(), n,
+                        &potential,
+                        initial.view(),
+                        n,
                         usize::try_from(budget).map_err(|_| "ensemble budget overflow")?,
                         seed,
                         IraStructureWitness {
-                            kmax_factor: witness.kmax_factor, radius: witness.radius,
+                            kmax_factor: witness.kmax_factor,
+                            radius: witness.radius,
                         },
-                        EnsembleOptions { replicas, shared, soften },
+                        EnsembleOptions {
+                            replicas,
+                            shared,
+                            soften,
+                        },
                     )?;
-                    let first = ensemble.runs.iter()
+                    let first = ensemble
+                        .runs
+                        .iter()
                         .flat_map(|run| &run.aggregate_improvements)
                         .filter(|(_, energy)| *energy <= target + TARGET_TOLERANCE)
-                        .map(|(charged, _)| *charged).min();
+                        .map(|(charged, _)| *charged)
+                        .min();
                     let encounter = first.map_or(
-                        Encounter::Censored { charged: ensemble.charged },
+                        Encounter::Censored {
+                            charged: ensemble.charged,
+                        },
                         |charged| Encounter::Found { charged, hops: 0 },
                     );
-                    let best = ensemble.runs.iter().map(|run| run.outcome.best)
+                    let best = ensemble
+                        .runs
+                        .iter()
+                        .map(|run| run.outcome.best)
                         .fold(f64::INFINITY, f64::min);
-                    let failures = ensemble.runs.iter().map(|run| run.outcome.unconverged_records).sum();
-                    println!("{}", json!({
-                        "kind": "lj_joint_optimum_ensemble",
-                        "arm": label, "seed": seed, "target_found": first.is_some(),
-                        "first_aggregate_charged": first, "charged": ensemble.charged,
-                        "best_energy": best, "gap": best - target,
-                        "minimum_count": ensemble.minimum_count,
-                        "minimum_count_semantics": if shared { "shared-exact-identities" } else { "sum-private-identities" },
-                        "wall_seconds": ensemble.wall_seconds,
-                        "replicas": ensemble.runs.iter().enumerate().map(|(replica, run)| json!({
-                            "replica": replica, "seed": ensemble.seeds[replica],
-                            "budget": ensemble.budgets[replica], "charged": run.outcome.charged,
-                            "best_energy": run.outcome.best, "hops": run.outcome.hops,
-                            "minima": run.outcome.basins, "accepted": run.outcome.accepted,
-                            "visit_counts": run.outcome.visit_counts,
-                            "failed_actions": run.outcome.unconverged_records,
-                            "initial_quench_calls": run.initial_quench_calls,
-                            "dynamics_calls": run.dynamics_calls,
-                            "proposal_quench_calls": run.proposal_quench_calls,
-                            "history_seconds": run.history_seconds,
-                            "aggregate_improvements": run.aggregate_improvements,
-                        })).collect::<Vec<_>>(),
-                    }));
+                    let failures = ensemble
+                        .runs
+                        .iter()
+                        .map(|run| run.outcome.unconverged_records)
+                        .sum();
+                    println!(
+                        "{}",
+                        json!({
+                            "kind": "lj_joint_optimum_ensemble",
+                            "arm": label, "seed": seed, "target_found": first.is_some(),
+                            "first_aggregate_charged": first, "charged": ensemble.charged,
+                            "best_energy": best, "gap": best - target,
+                            "minimum_count": ensemble.minimum_count,
+                            "minimum_count_semantics": if shared { "shared-exact-identities" } else { "sum-private-identities" },
+                            "wall_seconds": ensemble.wall_seconds,
+                            "replicas": ensemble.runs.iter().enumerate().map(|(replica, run)| json!({
+                                "replica": replica, "seed": ensemble.seeds[replica],
+                                "budget": ensemble.budgets[replica], "charged": run.outcome.charged,
+                                "best_energy": run.outcome.best, "hops": run.outcome.hops,
+                                "minima": run.outcome.basins, "accepted": run.outcome.accepted,
+                                "visit_counts": run.outcome.visit_counts,
+                                "failed_actions": run.outcome.unconverged_records,
+                                "initial_quench_calls": run.initial_quench_calls,
+                                "dynamics_calls": run.dynamics_calls,
+                                "proposal_quench_calls": run.proposal_quench_calls,
+                                "history_seconds": run.history_seconds,
+                                "aggregate_improvements": run.aggregate_improvements,
+                            })).collect::<Vec<_>>(),
+                        })
+                    );
                     summaries[arm_index].observe(
-                        encounter, best, ensemble.charged as u64, ensemble.minimum_count, 0, failures,
+                        encounter,
+                        best,
+                        ensemble.charged as u64,
+                        ensemble.minimum_count,
+                        0,
+                        failures,
                     );
                 }
                 Arm::Adaptive(irc_kind) | Arm::Ridge(irc_kind) => {
