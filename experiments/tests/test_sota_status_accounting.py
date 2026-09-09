@@ -6,6 +6,11 @@ from experiments.scripts import sota_cutest
 from experiments.scripts.summarize_sota import failure_aware_mean_ranks, summarize_rows
 
 
+def test_comm_hop_is_a_registered_sota_method():
+    assert "comm_hop" in sota_cutest.METHODS
+    assert sota_cutest.METHODS["comm_hop"] is sota_cutest.comm_hop
+
+
 def test_unexpected_method_error_is_not_scored_as_partial_success():
     counter = sota_cutest.Counter(lambda x: float(np.dot(x, x)), budget=8)
 

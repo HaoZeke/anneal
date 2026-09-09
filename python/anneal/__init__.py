@@ -52,6 +52,8 @@ from anneal._core import (
     dmc_population_optimize as _core_dmc_population_optimize,
     gpmd_optimize as _core_gpmd_optimize,
     amsa_optimize as _core_amsa_optimize,
+    box_ensemble_optimize as _core_box_ensemble_optimize,
+    ensemble_optimize as _core_ensemble_optimize,
     bfwt_optimize as _core_bfwt_optimize,
     run,
     run_hmc,
@@ -616,6 +618,82 @@ def amsa_optimize(
     )
 
 
+def box_ensemble_optimize(
+    obj_fn,
+    low,
+    high,
+    budget: int,
+    seed: int = 0,
+    grad_fn=None,
+    x0=None,
+    replicas: int = 4,
+    history: str = "shared",
+    membership: str = "accepted",
+):
+    """Communicating box hops that share a Euclidean minimum history.
+
+    Each replica is a Gaussian kick reflected into the box, then a charged
+    quench. Replicas keep their coordinates and streams. Shared history
+    returns identity and visit counts only and scales the next escape.
+    This is not cluster hopping.
+    """
+    low_arr = np.asarray(low, dtype=np.float64)
+    high_arr = np.asarray(high, dtype=np.float64)
+    x0_arr = None if x0 is None else np.asarray(x0, dtype=np.float64)
+    out = _core_box_ensemble_optimize(
+        obj_fn,
+        low_arr,
+        high_arr,
+        int(budget),
+        int(seed),
+        grad_fn,
+        x0_arr,
+        int(replicas),
+        str(history),
+        str(membership),
+    )
+    out["best_pos"] = np.asarray(out["best_pos"], dtype=np.float64)
+    return out
+
+
+def ensemble_optimize(
+    obj_fn,
+    low,
+    high,
+    budget: int,
+    seed: int = 0,
+    grad_fn=None,
+    x0=None,
+    replicas: int = 4,
+    history: str = "shared",
+    membership: str = "accepted",
+):
+    """Production hop ensemble: recommended cluster hop plus shared history.
+
+    This is ``run_ensemble`` from the LJ communicating-chain driver, not
+    a Gaussian box hop. The design vector is padded to 3N so the Cartesian
+    move library can run. Replicas are OS threads that call ``obj_fn``;
+    the binding drops the GIL before they start.
+    """
+    low_arr = np.asarray(low, dtype=np.float64)
+    high_arr = np.asarray(high, dtype=np.float64)
+    x0_arr = None if x0 is None else np.asarray(x0, dtype=np.float64)
+    out = _core_ensemble_optimize(
+        obj_fn,
+        low_arr,
+        high_arr,
+        int(budget),
+        int(seed),
+        grad_fn,
+        x0_arr,
+        int(replicas),
+        str(history),
+        str(membership),
+    )
+    out["best_pos"] = np.asarray(out["best_pos"], dtype=np.float64)
+    return out
+
+
 def bfwt_optimize(
     obj_fn,
     low,
@@ -798,6 +876,8 @@ __all__ = [
     "dmc_population_optimize",
     "gpmd_optimize",
     "amsa_optimize",
+    "box_ensemble_optimize",
+    "ensemble_optimize",
     "bfwt_optimize",
     "global_optimize",
     "global_optimize_objective",

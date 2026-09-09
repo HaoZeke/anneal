@@ -7,6 +7,14 @@
 //! adapter that re-acquires the GIL per `eval`. This is acceptable when
 //! evaluation cost dominates the per-call GIL overhead (~hundreds of ns),
 //! which is true for any non-toy objective.
+//!
+//! `run_ensemble` spawns one OS thread per replica. Those threads call
+//! `Python::attach` inside [`CallableObjective::eval`]. A pyfunction that
+//! reaches `run_ensemble` (today: [`ensemble_optimize`]) must
+//! [`with_replica_threads`] so this frame is not still holding the GIL
+//! when the workers attach. Holding it deadlocks: workers wait for the
+//! GIL, this frame waits for `thread::scope` to join. The native
+//! `Sphere` unit test does not see that path.
 
 // Python-callable signatures mirror stable keyword APIs.
 #![allow(clippy::too_many_arguments)]
@@ -23,6 +31,20 @@ use eindir_core::{Bounds, Objective};
 
 use crate::history::History;
 use crate::variant::{boltzmann, fast, gsa};
+
+/// Drop the GIL before `run_ensemble` (or any other `thread::scope`
+/// that calls back into Python).
+///
+/// [`CallableObjective::eval`] attaches the GIL on the replica thread.
+/// If the pyfunction that spawned those threads still holds it, every
+/// replica blocks in `attach` and the caller blocks in `join`.
+fn with_replica_threads<F, T>(py: Python<'_>, f: F) -> T
+where
+    F: FnOnce() -> T + Send,
+    T: Send,
+{
+    py.detach(f)
+}
 
 /// Reject empty, non-finite, or inverted box bounds before `Bounds::new`.
 ///
@@ -1678,6 +1700,202 @@ fn amsa_optimize(
     Ok(out.into())
 }
 
+/// Communicating box hops: Gaussian kick, quench, shared Euclidean history.
+///
+/// Four (or `replicas`) algebraic hops divide one work-unit budget. They
+/// share a Euclidean minimum history and Goedecker escape feedback. This is
+/// not cluster hopping: the move is a reflected Gaussian on the box.
+#[pyfunction]
+#[pyo3(signature = (obj_fn, low, high, budget, seed = 0, grad_fn = None, x0 = None,
+                    replicas = 4, history = "shared", membership = "accepted"))]
+#[allow(clippy::too_many_arguments)]
+fn box_ensemble_optimize(
+    py: Python<'_>,
+    obj_fn: Py<PyAny>,
+    low: PyReadonlyArray1<'_, f64>,
+    high: PyReadonlyArray1<'_, f64>,
+    budget: usize,
+    seed: u64,
+    grad_fn: Option<Py<PyAny>>,
+    x0: Option<PyReadonlyArray1<'_, f64>>,
+    replicas: usize,
+    history: &str,
+    membership: &str,
+) -> PyResult<Py<PyDict>> {
+    let low_vec = low.as_slice()?.to_vec();
+    let high_vec = high.as_slice()?.to_vec();
+    validate_box_bounds(&low_vec, &high_vec)?;
+    if budget == 0 {
+        return Err(PyValueError::new_err("budget must be positive"));
+    }
+    if replicas == 0 {
+        return Err(PyValueError::new_err("replicas must be positive"));
+    }
+    let dim = low_vec.len();
+    let bounds = Bounds::new(Array1::from_vec(low_vec), Array1::from_vec(high_vec), 1e-9);
+    let seed_arr = if let Some(x0) = x0 {
+        let sl = x0.as_slice()?;
+        if sl.len() != dim {
+            return Err(PyValueError::new_err(format!(
+                "x0 length {} does not match dimension {}",
+                sl.len(),
+                dim
+            )));
+        }
+        Some(Array1::from_vec(sl.to_vec()))
+    } else {
+        None
+    };
+    let seed_view = seed_arr.as_ref().map(|a| a.view());
+    let history_mode = match history {
+        "none" | "no" => crate::methods::ensemble::HistoryMode::None,
+        "private" => crate::methods::ensemble::HistoryMode::Private,
+        "shared" => crate::methods::ensemble::HistoryMode::Shared,
+        other => {
+            return Err(PyValueError::new_err(format!(
+                "history must be none, private, or shared, got {other:?}"
+            )));
+        }
+    };
+    let membership = crate::methods::minima_hopping::HistoryMembership::parse(Some(membership))
+        .map_err(PyValueError::new_err)?;
+    let config = crate::methods::box_hopping::BoxEnsembleConfig {
+        replicas,
+        budget,
+        history: history_mode,
+        membership,
+        identity_tol: crate::methods::box_hopping::IDENTITY_TOL,
+    };
+    let obj = CallableObjective {
+        fn_: obj_fn,
+        bounds,
+    };
+    let result = match grad_fn {
+        Some(grad_fn) => {
+            let grad = CallablePyGradient { fn_: grad_fn, dim };
+            crate::methods::box_hopping::box_ensemble_optimize(
+                &obj,
+                Some(&grad),
+                seed,
+                seed_view,
+                &config,
+            )
+        }
+        None => crate::methods::box_hopping::box_ensemble_optimize::<_, CallablePyGradient>(
+            &obj, None, seed, seed_view, &config,
+        ),
+    };
+    let out = PyDict::new(py);
+    out.set_item("best_val", result.best_val)?;
+    out.set_item(
+        "best_pos",
+        PyArray1::from_slice(py, result.best_pos.as_slice().unwrap()),
+    )?;
+    out.set_item("n_evals", result.n_evals)?;
+    out.set_item("n_grads", result.n_grads)?;
+    out.set_item("hops", result.hops)?;
+    out.set_item("history_observations", result.history_observations)?;
+    out.set_item("history_minima", result.history_minima)?;
+    Ok(out.into())
+}
+
+/// Production hop ensemble (`run_ensemble`) on a box: recommended cluster
+/// hop, four replicas, shared exact `MinimumHistory`.
+#[pyfunction]
+#[pyo3(signature = (obj_fn, low, high, budget, seed = 0, grad_fn = None, x0 = None,
+                    replicas = 4, history = "shared", membership = "accepted"))]
+#[allow(clippy::too_many_arguments)]
+fn ensemble_optimize(
+    py: Python<'_>,
+    obj_fn: Py<PyAny>,
+    low: PyReadonlyArray1<'_, f64>,
+    high: PyReadonlyArray1<'_, f64>,
+    budget: usize,
+    seed: u64,
+    grad_fn: Option<Py<PyAny>>,
+    x0: Option<PyReadonlyArray1<'_, f64>>,
+    replicas: usize,
+    history: &str,
+    membership: &str,
+) -> PyResult<Py<PyDict>> {
+    let low_vec = low.as_slice()?.to_vec();
+    let high_vec = high.as_slice()?.to_vec();
+    validate_box_bounds(&low_vec, &high_vec)?;
+    if budget == 0 {
+        return Err(PyValueError::new_err("budget must be positive"));
+    }
+    if replicas == 0 {
+        return Err(PyValueError::new_err("replicas must be positive"));
+    }
+    let dim = low_vec.len();
+    let bounds = Bounds::new(Array1::from_vec(low_vec), Array1::from_vec(high_vec), 1e-9);
+    let seed_arr = if let Some(x0) = x0 {
+        let sl = x0.as_slice()?;
+        if sl.len() != dim {
+            return Err(PyValueError::new_err(format!(
+                "x0 length {} does not match dimension {}",
+                sl.len(),
+                dim
+            )));
+        }
+        Some(Array1::from_vec(sl.to_vec()))
+    } else {
+        None
+    };
+    let seed_view = seed_arr.as_ref().map(|a| a.view());
+    let history_mode = match history {
+        "none" | "no" => crate::methods::ensemble::HistoryMode::None,
+        "private" => crate::methods::ensemble::HistoryMode::Private,
+        "shared" => crate::methods::ensemble::HistoryMode::Shared,
+        other => {
+            return Err(PyValueError::new_err(format!(
+                "history must be none, private, or shared, got {other:?}"
+            )));
+        }
+    };
+    let membership = crate::methods::minima_hopping::HistoryMembership::parse(Some(membership))
+        .map_err(PyValueError::new_err)?;
+    let obj = CallableObjective {
+        fn_: obj_fn,
+        bounds,
+    };
+    let result = with_replica_threads(py, || match grad_fn {
+            Some(grad_fn) => {
+                let grad = CallablePyGradient { fn_: grad_fn, dim };
+                crate::methods::cutest_ensemble::ensemble_hop_optimize(
+                    &obj,
+                    Some(&grad),
+                    seed,
+                    seed_view,
+                    budget,
+                    replicas,
+                    history_mode,
+                    membership,
+                )
+            }
+            None => crate::methods::cutest_ensemble::ensemble_hop_optimize::<_, CallablePyGradient>(
+                &obj,
+                None,
+                seed,
+                seed_view,
+                budget,
+                replicas,
+                history_mode,
+                membership,
+            ),
+        })
+        .map_err(PyValueError::new_err)?;
+    let out = PyDict::new(py);
+    out.set_item("best_val", result.best_val)?;
+    out.set_item(
+        "best_pos",
+        PyArray1::from_slice(py, result.best_pos.as_slice().unwrap()),
+    )?;
+    out.set_item("charged", result.charged)?;
+    out.set_item("history_minima", result.history_minima)?;
+    Ok(out.into())
+}
+
 /// Budget-Feasible Window Temperature (BFWT / D11).
 ///
 /// Clamps design temperature T_des = (1/2)·gap/d into the D6∩D7 window
@@ -2590,6 +2808,8 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(dmc_population_optimize, m)?)?;
     m.add_function(wrap_pyfunction!(gpmd_optimize, m)?)?;
     m.add_function(wrap_pyfunction!(amsa_optimize, m)?)?;
+    m.add_function(wrap_pyfunction!(box_ensemble_optimize, m)?)?;
+    m.add_function(wrap_pyfunction!(ensemble_optimize, m)?)?;
     m.add_function(wrap_pyfunction!(bfwt_optimize, m)?)?;
     m.add_function(wrap_pyfunction!(global_optimize, m)?)?;
     m.add_function(wrap_pyfunction!(global_optimize_objective, m)?)?;

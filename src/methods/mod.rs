@@ -17,12 +17,16 @@ pub mod activation;
 #[cfg(feature = "graphkey")]
 pub mod archive_search;
 pub mod bank;
+/// Box-constrained hop with a Euclidean minimum history.
+pub mod box_hopping;
 /// Basin hopping over quenched minima with a basin-keyed bias.
 pub mod cluster_hopping;
 pub mod cluster_search;
 /// Population resampled by estimated probability of improvement.
 pub mod committor_pop;
 pub mod csa_cluster;
+/// Production hop ensemble on a bound-constrained algebraic box.
+pub mod cutest_ensemble;
 pub mod ensemble;
 /// Archive-ratcheted exploration of the minima network.
 #[cfg(feature = "graphkey")]
@@ -76,6 +80,8 @@ pub use bfwt::{
     BfwtMode, BfwtResult, EULER_E, THETA_STAR as BFWT_THETA_STAR, bfwt_optimize,
     budget_feasible_temp, t_des, t_hi, t_lo, window_nonempty,
 };
+pub use box_hopping::{BoxEnsembleConfig, BoxEnsembleResult, box_ensemble_optimize};
+pub use cutest_ensemble::{EnsembleHopResult, ensemble_hop_optimize};
 pub use dmc_population::{
     DEFAULT_BETA0, DEFAULT_STEPS_PER_CONTROL, DEFAULT_TARGET_WALKERS, DmcPopulationResult,
     Population, Walker, default_sigma, diffusion_displace, dmc_population_optimize,

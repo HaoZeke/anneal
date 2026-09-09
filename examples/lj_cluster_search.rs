@@ -7508,6 +7508,7 @@ fn run_history_ensembles(
         // reduced units.
         certificate: 1e-5,
         polish_below: 1e-3,
+        callbacks_per_objective: 1,
     };
     print_header(
         &ens,
