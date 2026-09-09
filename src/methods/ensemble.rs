@@ -194,6 +194,9 @@ pub struct EnsembleProblem<'a, W: ExactStructureWitness + Sync + ?Sized> {
     /// Gradient norm below which a stalled relaxation is polished on
     /// toward the certificate rather than abandoned.
     pub polish_below: f64,
+    /// Ledger units spent per `objective()` call. A Python eval+grad pair
+    /// is two callbacks and two units; a combined analytic PES is one.
+    pub callbacks_per_objective: usize,
 }
 
 /// What one replica reports.
@@ -245,16 +248,32 @@ impl EnsembleReport {
     }
 }
 
+/// Spend `n` ledger units before one `objective()` call.
+///
+/// `n` is the number of PES callbacks that call makes. A failed later
+/// unit still keeps earlier units of this request; the caller must not
+/// invoke the objective when this returns false.
+fn charge_callbacks(led: &mut Ledger, n: usize) -> bool {
+    let n = n.max(1);
+    for _ in 0..n {
+        if !led.charge() {
+            return false;
+        }
+    }
+    true
+}
+
 /// Warm L-BFGS relaxation with the fresh certificate and the boundary on
 /// the ledger.
 ///
-/// Zero steps is one charged evaluation. Otherwise the relaxation runs
-/// `iters` steps, then one fresh evaluation; a gradient norm between
-/// `certificate` and `polish_below` continues in bounded chunks of 500
-/// steps with plain descent on the last few per cent, so a fixed step
-/// count that satisfies one size does not stall a whisker above the bound
-/// on another. Only a norm below `certificate` is a certificate. The LJ
-/// campaign values are 1e-5 and 1e-3 in reduced units.
+/// Zero steps is one charged `objective()` call (`callbacks` ledger
+/// units). Otherwise the relaxation runs `iters` steps, then one fresh
+/// evaluation; a gradient norm between `certificate` and `polish_below`
+/// continues in bounded chunks of 500 steps with plain descent on the
+/// last few per cent, so a fixed step count that satisfies one size does
+/// not stall a whisker above the bound on another. Only a norm below
+/// `certificate` is a certificate. The LJ campaign values are 1e-5 and
+/// 1e-3 in reduced units.
 pub fn validated_relax(
     objective: Objective<'_>,
     opt: &mut WarmLbfgs,
@@ -263,9 +282,11 @@ pub fn validated_relax(
     iters: usize,
     certificate: f64,
     polish_below: f64,
+    callbacks: usize,
 ) -> (f64, Array1<f64>) {
+    let callbacks = callbacks.max(1);
     if iters == 0 {
-        let energy = if led.charge() {
+        let energy = if charge_callbacks(led, callbacks) {
             objective(x).0
         } else {
             f64::INFINITY
@@ -274,20 +295,24 @@ pub fn validated_relax(
     }
     let charged_before = led.spent();
     opt.forget();
-    let (_, mut xr, _) = opt.minimize(x, iters, |v| led.charge().then(|| objective(v)));
+    let (_, mut xr, _) = opt.minimize(x, iters, |v| {
+        charge_callbacks(led, callbacks).then(|| objective(v))
+    });
     let mut boundary_energy = f64::INFINITY;
     let mut validated_gradient = None;
-    if led.charge() {
+    if charge_callbacks(led, callbacks) {
         let (fresh_energy, mut g) = objective(xr.view());
         boundary_energy = fresh_energy;
         let mut gnorm = euclidean_gradient_norm(g.as_slice().expect("gradient is contiguous"));
         let mut chunks = 0;
         while (certificate..polish_below).contains(&gnorm) && chunks < 10 && led.remaining() > 0 {
             opt.forget();
-            let (_, xc, _) = opt.minimize(xr.view(), 500, |v| led.charge().then(|| objective(v)));
+            let (_, xc, _) = opt.minimize(xr.view(), 500, |v| {
+                charge_callbacks(led, callbacks).then(|| objective(v))
+            });
             boundary_energy = f64::INFINITY;
             xr = xc;
-            if !led.charge() {
+            if !charge_callbacks(led, callbacks) {
                 break;
             }
             let (fe, ge) = objective(xr.view());
@@ -298,7 +323,7 @@ pub fn validated_relax(
             let mut descents = 0;
             while (certificate..3.0 * certificate).contains(&gnorm)
                 && descents < 200
-                && led.charge()
+                && charge_callbacks(led, callbacks)
             {
                 for (value, gradient) in xr.iter_mut().zip(g.iter()) {
                     *value -= 0.01 * gradient;
@@ -335,6 +360,10 @@ fn lcg(state: &mut u64) -> u64 {
 ///
 /// The witness is called from every replica thread, so a non-reentrant
 /// matcher goes behind [`crate::methods::minima_hopping::SerializedWitness`].
+///
+/// Replica threads call the objective. A Python `Objective` attaches the
+/// GIL on each eval. The Python binding must drop the GIL before this
+/// function (`with_replica_threads` in `python.rs`). Holding it deadlocks.
 pub fn run_ensemble<W: ExactStructureWitness + Sync + ?Sized>(
     cfg: &Config,
     ens: &EnsembleConfig,
@@ -393,6 +422,7 @@ pub fn run_ensemble<W: ExactStructureWitness + Sync + ?Sized>(
                     let objective = Mutex::new((problem.objective)(replica));
                     let mut ledger = Ledger::new(replica_budget);
                     let mut opt = WarmLbfgs::default();
+                    let callbacks = problem.callbacks_per_objective.max(1);
                     let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, iters: usize| {
                         let before = led.spent();
                         let mut objective = objective.lock().expect("replica objective");
@@ -404,15 +434,16 @@ pub fn run_ensemble<W: ExactStructureWitness + Sync + ?Sized>(
                             iters,
                             problem.certificate,
                             problem.polish_below,
+                            callbacks,
                         );
                         charged_total.fetch_add(led.spent() - before, Ordering::SeqCst);
                         out
                     };
                     let mut grad = |led: &mut Ledger, x: ArrayView1<f64>| -> Option<Array1<f64>> {
-                        if !led.charge() {
+                        if !charge_callbacks(led, callbacks) {
                             return None;
                         }
-                        charged_total.fetch_add(1, Ordering::SeqCst);
+                        charged_total.fetch_add(callbacks, Ordering::SeqCst);
                         Some((objective.lock().expect("replica objective"))(x).1)
                     };
                     let mut hook = history.map(|history| {
@@ -733,6 +764,7 @@ mod tests {
             same_family: &same_family,
             certificate: 1e-5,
             polish_below: 1e-3,
+            callbacks_per_objective: 1,
         };
         let gossip = GossipConfig {
             topology: GossipTopology::Ring,
@@ -820,6 +852,7 @@ mod tests {
                 same_family,
                 certificate: 1e-5,
                 polish_below: 1e-3,
+                callbacks_per_objective: 1,
             },
         )
         .unwrap()

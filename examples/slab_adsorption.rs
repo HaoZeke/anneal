@@ -268,6 +268,7 @@ fn run_slab_ensembles(
         // certificate here and the polish window runs one decade above it.
         certificate: cfg.record_gradient,
         polish_below: 10.0 * cfg.record_gradient,
+        callbacks_per_objective: 1,
     };
     print_header(
         &ens,
