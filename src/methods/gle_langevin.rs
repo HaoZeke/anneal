@@ -47,7 +47,7 @@ pub struct GleLangevinResult {
     pub dt: f64,
     /// Diagonal entries of the position-space preconditioning matrix.
     pub preconditioner_diag: Vec<f64>,
-    /// Gradient probes spent estimating the preconditioner.
+    /// Gradient probes spent calibrating the frequency or diagonal preconditioner.
     pub n_preconditioner_grads: usize,
 }
 
@@ -226,10 +226,22 @@ where
     O: Objective<f64>,
     G: Gradient<f64>,
 {
+    estimate_gle_omega0_with_probe_budget(obj, grad, obj.bounds().dims).0
+}
+
+fn estimate_gle_omega0_with_probe_budget<O, G>(
+    obj: &O,
+    grad: &G,
+    max_probe_pairs: usize,
+) -> (f64, usize)
+where
+    O: Objective<f64>,
+    G: Gradient<f64>,
+{
     let bounds = obj.bounds();
     let dim = bounds.dims;
     if dim == 0 {
-        return DEFAULT_GLE_OMEGA0;
+        return (DEFAULT_GLE_OMEGA0, 0);
     }
     let low = &bounds.low;
     let high = &bounds.high;
@@ -237,7 +249,11 @@ where
     let rel_step = f64::EPSILON.cbrt();
     let min_step = f64::EPSILON.sqrt();
     let mut frequencies = Vec::with_capacity(dim);
+    let mut n_grads = 0;
     for axis in 0..dim {
+        if n_grads / 2 >= max_probe_pairs {
+            break;
+        }
         let width = high[axis] - low[axis];
         if !width.is_finite() || width <= 0.0 {
             continue;
@@ -253,6 +269,7 @@ where
         }
         let gp = grad.grad(xp.view());
         let gm = grad.grad(xm.view());
+        n_grads += 2;
         if gp.len() != dim
             || gm.len() != dim
             || gp.iter().any(|v| !v.is_finite())
@@ -266,10 +283,11 @@ where
         }
     }
     frequencies.sort_by(|left, right| left.total_cmp(right));
-    frequencies
+    let omega0 = frequencies
         .into_iter()
         .find(|omega| omega.is_finite() && *omega > 0.0)
-        .unwrap_or_else(|| fallback_gle_omega0(low, high))
+        .unwrap_or_else(|| fallback_gle_omega0(low, high));
+    (omega0, n_grads)
 }
 
 /// Run GLE-thermostatted Langevin annealing on `obj` with gradient `grad`.
@@ -485,8 +503,25 @@ where
     O: Objective<f64>,
     G: Gradient<f64>,
 {
-    let omega0 = estimate_gle_omega0(obj, grad);
-    gle_langevin_sa(obj, grad, seed, max_fevals, omega0, dt, n_epochs, x0)
+    assert!(max_fevals > 0, "max_fevals must be positive");
+    let dim = obj.bounds().dims;
+    // Complete probe pairs share the gradient allowance with initialization.
+    let max_probe_pairs = ((max_fevals - 1) / 2).min(dim);
+    let (omega0, n_probe_grads) = estimate_gle_omega0_with_probe_budget(obj, grad, max_probe_pairs);
+    let scale = Array1::from_elem(dim, 1.0);
+    run_gle_langevin_scaled_sa(
+        obj,
+        grad,
+        seed,
+        max_fevals,
+        omega0,
+        dt,
+        n_epochs,
+        x0,
+        &scale,
+        Array1::from_elem(dim, 1.0),
+        n_probe_grads,
+    )
 }
 
 #[cfg(test)]
