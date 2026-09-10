@@ -49,6 +49,7 @@ dependencies = [
  "eindir-core",
  "featomic",
  "futures",
+ "libc",
  "libloading",
  "linkcell",
  "metatensor",
