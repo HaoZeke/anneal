@@ -1,0 +1,298 @@
+#+TITLE: Communication and search-state contracts
+#+OPTIONS: toc:2 num:nil author:nil
+
+Communication changes what a search knows, what it penalizes, or where it
+searches. These are separate operations. Sharing a minimum's identity does not
+copy its coordinates into another chain; averaging a bias table does not
+average structures; selecting a population parent can change a chain's
+coordinates. A comparison must name the operation and the driver that consumes
+it.
+
+This document describes the implementation paths and the invariants their
+regressions check. It does not define another solver or benchmark. Numerical
+certification, message delivery, and comparison outcomes are distinct claims;
+source code and test definitions alone do not establish a passing run or a
+performance advantage.
+
+* Entry points and channels
+
+The [[file:../../../src/methods/ensemble.rs][atomic ensemble runner]], the
+[[file:../../../src/methods/box_hopping.rs][box ensemble runner]], and the
+[[file:../../../examples/lj_cluster_search.rs][cooperative LJ driver]] do not
+have interchangeable communication configurations.
+
+| Path | Information exchanged | Consumer and direct effect |
+|------+-----------------------+----------------------------|
+| =methods::ensemble::run_ensemble= | Exact-history reports, descriptor visit deltas, optional well tables and occupied structures | History feedback and local bias updates; optional two-choice restart constructs a fresh start |
+| =box_ensemble_optimize= | Certified design points sent to =HistoryHook=; identity and visit counts returned | Escape feedback and capped visit-based bias deposits; local kick and gradient polish generate coordinates |
+| =box_values_ensemble_optimize= | Same history interface with a finite-difference certificate | Local kick and pattern search generate coordinates; history feedback and visit-based bias affect acceptance |
+| =CensusBus= live-minimum messages | Replica, hop count, energy, Cartesian coordinates | Nearby-peer count, packing references and optionally remote bias deposits; no direct coordinate adoption |
+| Census-bus well messages | Descriptor centres and accumulated well depths | A =MergeBias= checkpoint action updates local well depths |
+| Catalog coordinator | Validated candidates, policy state, population plans and work records | Hearing, population and other boundary policies can construct or adopt coordinates |
+
+The [[file:../../../src/python.rs][Python binding]] dispatches
+=ensemble_optimize= through =ensemble_hop_optimize=. With a gradient it uses
+the box-gradient path. Without a gradient, two or more replicas use the
+values-only box path; one replica uses the portfolio and has no minimum-history
+table. Box replicas are stepped by the box runner's loops, not by the atomic
+runner's scoped threads. The atomic runner constructs an objective per thread,
+so an external potential handle need not be shared between replicas.
+
+* Certification, identity and packing families
+
+Three different questions require three different checks.
+
+1. /Is this an admissible observation?/ A
+   [[file:../../../src/methods/cluster_hopping.rs][=QuenchBoundary=]] carries
+   the energy, coordinates and fresh validation gradient. =MinimumHistory=
+   requires a valid boundary and a maximum absolute gradient component below
+   its configured tolerance. The atomic runner also has its own relaxation
+   certificate. The box paths use a history tolerance of =1e-3=; the
+   values-only path pays for a base objective and one clipped forward
+   difference per coordinate. These are numerical admission rules, not a
+   proof of global optimality or a positive-definite Hessian.
+2. /Is this the same minimum?/ The
+   [[file:../../../src/methods/minima_hopping/history.rs][minimum history]]
+   delegates identity to =PesNetwork= and the configured
+   [[file:../../../src/pes_exploration.rs][=ExactStructureWitness=]]. A
+   descriptor orders comparisons; descriptor proximity alone does not
+   identify a minimum. The box witness compares each coordinate difference
+   against =identity_tol * max(box_width, 1e-12)=, with default
+   =identity_tol=1e-3=. Here "exact history" means witness-based identity
+   under this declared numerical rule, not exact real arithmetic.
+3. /Are the structures nearby packings?/ The
+   [[file:../../../src/catalog/packing.rs][packing map]] uses leader-clustered
+   local environments and normalized class histograms. =nearby_packing=
+   constructs a pairwise book and tests histogram L1 distance against
+   =PACKING_LINK=0.35=. Community calculations can connect structures through
+   other references; that is distinct from this pairwise test and from the
+   =PACKING_MERGE=0.20= book-cell grain. None of these radii guarantees one
+   population group per energy funnel.
+
+Catalog admission is another boundary. A
+[[file:../../../src/catalog/validator.rs][=CandidateRecord=]] includes the
+[[file:../../../src/catalog/signature.rs][system signature]], producer
+forces and convergence status, descriptor schema, coordinates and provenance.
+The validator checks compatibility and a fresh receiving-side potential
+evaluation. This signature-checked catalog protocol must not be attributed to
+the live-minimum bus: its frame does not carry that certificate or signature.
+The LJ producer checks its local gradient before publishing; the receiver
+decodes the frame and relies on the configured peer namespace.
+
+* Exact history returns information, not an adoption command
+
+=HistoryHook::observe= returns a =HistoryReport= containing an identity,
+membership-relative novelty and visit counts. It returns no proposed
+coordinates. =mark_accepted= publishes a separate fact: a chain adopted that
+identity. An observation refused by the hook is no history information; it is
+not, by itself, a command to reject a finite trial.
+
+=HistoryMembership::Accepted= distinguishes archived certified proposals from
+minima accepted by a chain. An unaccepted archived identity can still be new
+for exclusion purposes. =Observed= counts every certified observation and is
+reported as =observed-exclusion=. Their visit counts are not interchangeable.
+
+The [[file:../../../src/methods/minima_hopping.rs][escape controller]]
+distinguishes =Same=, =Known= and =New=. =Same= requires that the reached
+identity be the identity of the occupied coordinates. A minimum known only
+through another replica is =Known=, even if the local controller has never
+visited it. Therefore adopting coordinates without a certified history report
+must clear the occupied identity; retaining the identity of the structure
+left behind changes subsequent escape feedback.
+
+=SharedMinimumHistory= and =SharedDesignHistory= serialize observation and the
+membership read under a mutex. =mark_accepted= acquires the lock separately:
+this hook interface does not make observation, local acceptance and acceptance
+publication one atomic transaction.
+
+The hand-written NVE comparison in
+[[file:../../../examples/lj_joint_optimum.rs][=lj_joint_optimum=]] uses a
+different path: =observe_history= holds the history guard while its callback
+classifies the visit, decides threshold acceptance and calls =mark_accepted=.
+That broader transaction must not be inferred for the generic hook wrappers.
+
+With the =history-nng= feature, box shared history can use
+[[file:../../../src/history_nng.rs][=HistoryNngClient=]] and its request/reply
+server instead of the in-process mutex table. =HISTORY_NNG= selects the
+endpoint and =HISTORY_NNG_SERVE=1= requests a local server. The client sends
+energy, design coordinates, gradient and box widths, and receives identity
+and counts. Observation and acceptance publication are separate requests, not
+one atomic adoption transaction. It does not receive a coordinate proposal.
+These messages are neither census pub/sub nor catalog RPC. A configured
+endpoint alone does not prove successful sharing: the box hook can fall back
+to =Off= on dial failure,
+and the client reports zero history-cost counters. Received observations and
+an actual shared table need independent evidence.
+
+* Live minima, well tables and deposits
+
+** Live-minimum census
+
+[[file:../../../src/census_bus.rs][=CensusBus=]] stores the latest record for
+each directly heard peer. Changed coordinates or energy make a fresh
+observation; hop-only refreshes update retained state without another fresh
+event. A changed minimum publishes at an eligible checkpoint, and an unchanged
+minimum refreshes every eight eligible checkpoints. Send and receive are
+best-effort and nonblocking. Retained peers are the latest heard states, not a
+synchronized population snapshot.
+
+=CENSUS_BUS_BASE= identifies the endpoint namespace. =CENSUS_BUS_NEIGHBORS=0=
+subscribes to every peer; a positive value restricts subscriptions to cyclic
+neighbors within that distance. =CENSUS_BUS_IPC=1= selects local IPC rather
+than loopback TCP. Peers do not forward live-minimum records. A ring supplies
+a local census, not a globally mixed aggregate, and does not restrict the
+coordinator's hearing or parent selection. In the LJ driver, private sharing
+and =CATALOG_EVIDENCE_ONLY= disable the bus.
+
+The LJ helper =census_nearby_updates= invalidates packing classification when
+the occupied coordinates change, including equal-energy changes, or a peer
+has fresh geometry. A cached nearby flag is not a certificate that the peer's
+coordinates remain in the reference cloud. That cloud is capped at 64;
+=include_packing_reference= avoids another arrival credit for a matching well,
+and over-cap admission evicts the oldest member of the largest community.
+Reference residency and nearby classification therefore need separate
+consideration.
+
+** Well-table gossip
+
+A well table contains descriptor centres and bias depths, not live structures
+to adopt. [[file:../../../src/bias.rs][=BasinBias::merge_wells=]] applies
+=(1-weight)*local_depth + weight*peer_depth= to matching wells and opens
+unmatched peer wells at =weight*peer_depth=. A complete table treats absent
+local wells as zero on the peer and attenuates them; a top-k table does not.
+The operation does not merge arrival counts.
+
+The atomic runner reads a ring neighbor or a randomly selected peer mailbox
+at its configured gossip interval. The LJ coordinator path uses the census
+transport's =wells/= messages, enabled by a nonempty =GOSSIP= setting and
+controlled by =GOSSIP_INTERVAL=, =GOSSIP_WEIGHT= and =GOSSIP_TOP=. These are
+different dispatch paths. A receive-side merge changes only the receiver;
+it does not simultaneously update both peers. Dynamic well tables, ongoing
+deposits, truncation and asynchronous checkpoint selection prevent treating
+this implementation as a fixed, symmetric average-consensus algorithm with
+automatic conservation or convergence guarantees.
+
+** Shared deposits
+
+The atomic runner's [[file:../../../src/shared_bias.rs][=SharedDeposits=]]
+exchanges descriptor-centre visit deltas. Each reader has a cursor, excludes
+its own publications and drains each retained foreign batch once; pruning
+waits for all readers. =DepositDescriptors= applies the counts to the local
+bias with a configured weight. This exchange does not transport candidate
+energies or prescribe coordinate adoption.
+
+Box ensembles instead derive capped additional deposits from history visit
+counts at a reported identity, using =BoxEnsembleConfig::shared_deposits=.
+They do not use the atomic runner's deposit queue. Their bias fingerprint is
+the raw design point, and its distance rule is distinct from the history
+witness's width-scaled max norm.
+
+The LJ catalog path uses =CATALOG_SHARED_BIAS=1= and =DepositRemote=. Fresh bus
+minima are admitted only when =nearby_packing= holds unless
+=CENSUS_BUS_UNBOUNDED=1=. The switch covers those bus observations only:
+population-parent and own-visit deposits have separate admission paths.
+Depositing history changes subsequent biased acceptance and repulsion; it is
+not attractive coordinate consensus.
+
+* Coordinate-changing actions and checkpoint arbitration
+
+Local kicks, quenches and acceptance continue to generate and select states
+in both box paths. In the atomic runner, two-choice family crowding can return
+=ExternalAdopt= with a fresh start from =StartFactory=. This is a
+coordinate-changing restart, even though the information that triggers it is
+an occupied-family observation rather than a transmitted parent structure.
+
+The [[file:../../../src/catalog_rpc/server.rs][catalog coordinator]] and the
+[[file:../../../examples/lj_cluster_search.rs][LJ checkpoint handler]] also
+support hearing, population assignments and catalog-derived boundary
+proposals. Population synchronization can return a parent and rejuvenation
+plan; the receiving driver constructs a proposal and routes it through a
+typed checkpoint action. =BoundaryProposal=, =ExternalProposal= and
+=ExternalAdopt= are not equivalent to a history report or a bias deposit.
+Coordinate changes must maintain energy, validation-gradient and occupied-ID
+consistency regardless of which action produces them.
+
+Each checkpoint returns one action. In the atomic runner, a two-choice restart
+can return before gossip, and a gossip merge can return before visit-delta
+exchange. In the LJ path, deposit/proposal selection has precedence over a
+pending gossip merge. Thus a configured channel or a received table does not
+establish that its update was applied. Count publication, receipt and
+application separately when interpreting a trace.
+
+* Work accounting
+
+=EnsembleConfig::budget= and =BoxEnsembleConfig::budget= are aggregate budgets
+divided among replicas, with the remainder assigned to low replica indices.
+Adding replicas does not multiply them. A process campaign can instead accept
+a per-replica budget and multiply it explicitly; that convention must appear
+in its manifest.
+
+The atomic =EnsembleProblem::callbacks_per_objective= distinguishes a combined
+analytic energy/gradient call from two Python callbacks. The box-gradient
+runner reports objective and gradient work separately. Values-only pattern
+search and finite-difference certification consume objective calls; the
+absence of a user gradient does not make certification free.
+
+The [[file:../../../src/cooperative_search/ledger.rs][cooperative ledger]]
+charges quench work, fresh validation, retries, auxiliary potential calls,
+basin escapes and saddle rides. Descriptor evaluation, Cartesian proposal
+construction and communication fallback markers carry no potential calls.
+This is an objective-work convention, not a claim that descriptors, history
+matching, networking or synchronization have zero elapsed cost. External
+proposal work must enter the ledger even when the proposal is not adopted.
+
+Atomic first-target reporting samples aggregate work at checkpoints, with a
+terminal check. Its checkpoint resolution is not an exact physical discovery
+time. Trajectory integration creates optimization proposals; these records
+do not establish kinetic rates or residence times.
+
+* Failure boundaries and regression checks
+
+The following invariants are under regression, not a claim of passing
+execution. Test definitions identify the observable contract; benchmark
+results remain a separate requirement.
+
+- Polling one message class must preserve unread notifications of the other.
+  The census =poll_wells= path shares =drain= with live-minimum polling, so
+  updating =latest= is insufficient if the fresh-event return is discarded.
+  [[file:../../../tests/census_bus_delivery.rs][Census delivery regressions]]
+  include =polling_wells_preserves_a_fresh_minimum_until_it_is_polled_once=
+  and =interleaved_wells_and_minima_retain_each_notification_once=.
+- Accepted coordinates without a history report must not retain the occupied
+  ID of another structure. The
+  [[file:../../../src/methods/box_hopping.rs][box adoption regressions]] include
+  =accepted_uncertified_trial_clears_the_occupied_history_identity= and
+  =return_after_uncertified_adoption_uses_population_known_feedback=, with
+  companion certified-adoption and rejected-trial checks. The same invariant
+  applies to atomic adoption and restart paths; box coverage does not prove
+  those paths correct.
+- Pending bias updates require explicit arbitration. The LJ handler consumes
+  =gossip_merge.take()= even when another action wins. A received-table counter
+  therefore cannot be interpreted as an applied-merge counter. This
+  source-level arbitration limitation has no runtime regression result
+  established here.
+- Bounded reference eviction can remove a still-near peer. The LJ helper's
+  =was_near= suppression does not query reference residency. Crowd-count
+  correctness alone cannot establish retained repulsion coverage. A full
+  admission/eviction reproducer, rather than a substituted eviction hook, is
+  required to measure this source-level risk.
+
+* Evidence required for a performance claim
+
+Shared versus private history, bus topology, bounded deposits, gossip,
+coordinator adoption and restart rules are separate experimental factors.
+Changing several together measures their combination, not the causal effect
+of one channel. An efficacy comparison can retain adoption, but must say so;
+a topology-only diagnostic must identify other paths by which information or
+coordinates cross replica boundaries.
+
+Use a system-specific, matched-start comparison with declared aggregate
+objective work, solver and potential identities, seeds, validation rules,
+resolved channel settings, failure statuses and the actual competitor.
+Report optimization outcomes separately from descriptor coverage, network
+discovery and communication overhead. A ring, a consensus analogy or a
+bounded-confidence radius supplies no performance guarantee. The
+[[file:../methods/catalog.org][method catalog]] and
+[[file:../methods/composition.org][composition guide]] describe mechanisms;
+system-specific matched benchmark artifacts must establish whether those
+mechanisms help.
