@@ -75,6 +75,11 @@ payloads; bookkeeping and caller-held references are additional. Pairwise
 codebooks and histograms remain separate, so reuse does not introduce a shared
 classification map or delay census invalidation when an occupied minimum moves.
 
+The [communication contracts](docs/orgmode/explanation/communication.org)
+map the atomic, box-gradient and values-only entry points to their history,
+bias, census and coordinate-adoption channels, including certificate and
+charged-work boundaries.
+
 ```rust
 use anneal_core::methods::cluster_hopping::{optimize, Config, Ledger};
 
