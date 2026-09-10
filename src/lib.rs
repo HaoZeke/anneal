@@ -81,6 +81,9 @@ pub mod catalog_policy;
 /// Versioned cooperative catalog protocol.
 #[cfg(feature = "bank-rpc")]
 pub mod catalog_rpc;
+/// nng carrier for Cap'n catalog and bank sockets.
+#[cfg(feature = "bank-rpc")]
+pub mod nng_rpc;
 /// nng pub/sub census bus between the replicas of one cooperative run.
 #[cfg(feature = "bank-rpc")]
 pub mod census_bus;
