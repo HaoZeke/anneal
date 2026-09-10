@@ -947,4 +947,201 @@ mod tests {
         assert_eq!(f.classify(Some(1), 2), Visit::Known);
         assert_eq!(f.classify(Some(2), 2), Visit::Same);
     }
+
+    mod geometry_controls {
+        use super::super::{
+            MdEscapeConfig, MdEscapeGeometry, MdEscapeReport, nve_escape, nve_escape_with_frozen,
+        };
+        use ndarray::{Array1, ArrayView1, array};
+        use rand::rngs::StdRng;
+        use rand::{Rng, SeedableRng};
+        use rgsaddle::{SaddleError, VelocitySofteningConfig};
+
+        fn config(geometry: MdEscapeGeometry, softening_steps: usize) -> MdEscapeConfig {
+            MdEscapeConfig {
+                dt: 0.01,
+                potential_minima: 1,
+                maximum_steps: 6,
+                geometry,
+                softening: (softening_steps > 0).then_some(VelocitySofteningConfig {
+                    steps: softening_steps,
+                    ..Default::default()
+                }),
+            }
+        }
+
+        fn reaction_surface(x: ArrayView1<f64>, reference: ArrayView1<f64>) -> (f64, Array1<f64>) {
+            let delta = &x - &reference;
+            let reaction = [2.0, -3.0, 4.0];
+            let mut gradient = delta.clone();
+            let mut energy = 0.5 * delta.iter().skip(3).map(|value| value * value).sum::<f64>();
+            for coordinate in 0..3 {
+                energy += reaction[coordinate] * delta[coordinate];
+                gradient[coordinate] = reaction[coordinate];
+            }
+            (energy, gradient)
+        }
+
+        #[test]
+        fn frozen_frames_constrain_softening_and_md_with_nonzero_reaction_forces() {
+            let start = array![0.3, -0.7, 1.2, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0];
+            for softening_steps in [0, 4] {
+                let config = config(MdEscapeGeometry::Euclidean, softening_steps);
+                let mut frames = Vec::new();
+                let mut evaluate = |x: ArrayView1<f64>| {
+                    frames.push(x.to_owned());
+                    Some(reaction_surface(x, start.view()))
+                };
+                let mut rng = StdRng::seed_from_u64(17);
+                let report = nve_escape_with_frozen(
+                    start.view(),
+                    0.05,
+                    &config,
+                    &mut evaluate,
+                    &mut rng,
+                    Some(&[true, false, false]),
+                )
+                .unwrap();
+
+                assert_eq!(report.steps, config.maximum_steps);
+                assert_eq!(report.softening_evaluations, softening_steps);
+                assert_eq!(frames.len(), report.steps + 1 + softening_steps);
+                assert!(frames.iter().any(|x| {
+                    x.iter()
+                        .zip(start.iter())
+                        .skip(3)
+                        .any(|(actual, initial)| actual.to_bits() != initial.to_bits())
+                }));
+                for frame in &frames {
+                    for coordinate in 0..3 {
+                        assert_eq!(
+                            frame[coordinate].to_bits(),
+                            start[coordinate].to_bits(),
+                            "fixed coordinate {coordinate} moved with {softening_steps} softening probes"
+                        );
+                    }
+                }
+                assert_eq!(
+                    report.energy.to_bits(),
+                    reaction_surface(report.position.view(), start.view())
+                        .0
+                        .to_bits()
+                );
+            }
+        }
+
+        #[test]
+        fn all_frozen_frames_fail_without_evaluating_the_surface() {
+            let start = array![-1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0];
+            for geometry in [MdEscapeGeometry::Euclidean, MdEscapeGeometry::RigidQuotient] {
+                for softening_steps in [0, 4] {
+                    let config = config(geometry, softening_steps);
+                    let mut evaluations = 0;
+                    let mut evaluate = |x: ArrayView1<f64>| {
+                        evaluations += 1;
+                        Some((0.0, Array1::<f64>::zeros(x.len())))
+                    };
+                    let mut rng = StdRng::seed_from_u64(17);
+                    let result = nve_escape_with_frozen(
+                        start.view(),
+                        0.05,
+                        &config,
+                        &mut evaluate,
+                        &mut rng,
+                        Some(&[true; 3]),
+                    );
+
+                    assert!(matches!(result, Err(SaddleError::Solver(_))));
+                    assert_eq!(evaluations, 0);
+                }
+            }
+        }
+
+        fn pair_surface(x: ArrayView1<f64>) -> (f64, Array1<f64>) {
+            let reference = array![-1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0];
+            let mut energy = 0.0;
+            let mut gradient = Array1::<f64>::zeros(x.len());
+            for i in 0..3 {
+                for j in i + 1..3 {
+                    let mut residual = 0.0;
+                    for axis in 0..3 {
+                        let delta = x[3 * i + axis] - x[3 * j + axis];
+                        let target = reference[3 * i + axis] - reference[3 * j + axis];
+                        residual += delta * delta - target * target;
+                    }
+                    energy += 0.25 * residual * residual;
+                    for axis in 0..3 {
+                        let force = residual * (x[3 * i + axis] - x[3 * j + axis]);
+                        gradient[3 * i + axis] += force;
+                        gradient[3 * j + axis] -= force;
+                    }
+                }
+            }
+            (energy, gradient)
+        }
+
+        fn report_bits(report: &MdEscapeReport) -> Vec<u64> {
+            report
+                .position
+                .iter()
+                .copied()
+                .chain([
+                    report.energy,
+                    report.kinetic,
+                    report.potential_energy_span,
+                    report.total_energy_span,
+                ])
+                .map(f64::to_bits)
+                .collect()
+        }
+
+        #[test]
+        fn all_mobile_masks_preserve_unconstrained_traces_reports_and_rng() {
+            let start = array![-1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0];
+            for geometry in [MdEscapeGeometry::Euclidean, MdEscapeGeometry::RigidQuotient] {
+                for softening_steps in [0, 4] {
+                    let config = config(geometry, softening_steps);
+                    let mut direct_frames = Vec::new();
+                    let mut direct_surface = |x: ArrayView1<f64>| {
+                        direct_frames
+                            .push(x.iter().map(|value| value.to_bits()).collect::<Vec<_>>());
+                        Some(pair_surface(x))
+                    };
+                    let mut direct_rng = StdRng::seed_from_u64(17);
+                    let direct = nve_escape(
+                        start.view(),
+                        0.05,
+                        &config,
+                        &mut direct_surface,
+                        &mut direct_rng,
+                    )
+                    .unwrap();
+                    let mut masked_frames = Vec::new();
+                    let mut masked_surface = |x: ArrayView1<f64>| {
+                        masked_frames
+                            .push(x.iter().map(|value| value.to_bits()).collect::<Vec<_>>());
+                        Some(pair_surface(x))
+                    };
+                    let mut masked_rng = StdRng::seed_from_u64(17);
+                    let masked = nve_escape_with_frozen(
+                        start.view(),
+                        0.05,
+                        &config,
+                        &mut masked_surface,
+                        &mut masked_rng,
+                        Some(&[false; 3]),
+                    )
+                    .unwrap();
+
+                    assert_eq!(direct_frames, masked_frames);
+                    assert_eq!(report_bits(&direct), report_bits(&masked));
+                    assert_eq!(direct.steps, masked.steps);
+                    assert_eq!(direct.potential_minima, masked.potential_minima);
+                    assert_eq!(direct.softening_evaluations, masked.softening_evaluations);
+                    assert_eq!(direct_frames.len(), direct.steps + 1 + softening_steps);
+                    assert_eq!(direct_rng.random::<u64>(), masked_rng.random::<u64>());
+                }
+            }
+        }
+    }
 }
