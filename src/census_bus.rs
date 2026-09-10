@@ -49,6 +49,8 @@ pub struct CensusBus {
     latest: HashMap<u32, PeerMinimum>,
     last_published: Option<PeerMinimum>,
     checkpoints_since_publication: u8,
+    /// Minimum changes received since the last [`CensusBus::poll`].
+    pending_minima: Vec<PeerMinimum>,
     /// Peer well tables received since the last [`CensusBus::poll_wells`].
     pending_wells: Vec<(u32, Vec<(Array1<f64>, f64)>)>,
     /// Whether each peer's latest minimum lies on this replica's side of
@@ -125,6 +127,7 @@ impl CensusBus {
             latest: HashMap::new(),
             last_published: None,
             checkpoints_since_publication: 0,
+            pending_minima: Vec::new(),
             pending_wells: Vec::new(),
             nearby: HashMap::new(),
         })
@@ -167,9 +170,8 @@ impl CensusBus {
         std::mem::take(&mut self.pending_wells)
     }
 
-    /// Reads every waiting message into the census or the wells queue.
-    fn drain(&mut self) -> Vec<PeerMinimum> {
-        let mut changed = Vec::new();
+    /// Reads waiting messages into independent minimum and well-table queues.
+    fn drain(&mut self) {
         while let Ok(message) = self.subscriber.try_recv() {
             let bytes: &[u8] = &message;
             if bytes.starts_with(b"wells/") {
@@ -193,11 +195,10 @@ impl CensusBus {
                 held.energy != peer.energy || held.coordinates != peer.coordinates
             });
             if fresh {
-                changed.push(peer.clone());
+                self.pending_minima.push(peer.clone());
             }
             self.latest.insert(peer.replica, peer);
         }
-        changed
     }
 
     /// Publishes changed minima immediately and refreshes unchanged minima
@@ -235,11 +236,12 @@ impl CensusBus {
         }
     }
 
-    /// Drains every waiting publication and returns the peers whose latest
-    /// minimum changed in this poll. Never blocks. Well tables read in the
-    /// same drain wait for [`CensusBus::poll_wells`].
+    /// Returns unread minimum changes, including those received while polling
+    /// well tables. Never blocks. Each notification is returned once; well
+    /// tables read in the same drain wait for [`CensusBus::poll_wells`].
     pub fn poll(&mut self) -> Vec<PeerMinimum> {
-        self.drain()
+        self.drain();
+        std::mem::take(&mut self.pending_minima)
     }
 
     /// Latest minimum of every peer heard so far.
@@ -362,6 +364,7 @@ mod tests {
             latest: HashMap::new(),
             last_published: None,
             checkpoints_since_publication: 0,
+            pending_minima: Vec::new(),
             pending_wells: Vec::new(),
             nearby: HashMap::new(),
         }
