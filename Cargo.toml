@@ -30,6 +30,8 @@ featomic = ["dep:featomic", "dep:metatensor"]
 vesin-nl = []
 # Cap'n Proto shared bank. Chains are separate processes.
 bank-rpc = ["dep:capnp", "dep:capnp-rpc", "dep:futures", "dep:nng", "dep:tokio", "dep:tokio-util"]
+# REQ/REP transport for MinimumHistory. Independent of catalog/census.
+history-nng = ["dep:nng"]
 # The gradient-enhanced Gaussian process of gpr_optim, over its C API. Needs
 # libgpr_optim on the link path; set GPR_OPTIM_LIB_DIR when building.
 gpr = []

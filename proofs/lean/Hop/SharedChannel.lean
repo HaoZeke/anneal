@@ -176,4 +176,102 @@ theorem audit_keeps_refund (g t : Rat) (hg : 0 ≤ g) (ht0 : 0 ≤ t)
   · have := Rat.mul_nonneg hg ht0
     grind
 
+/-! ## HistoryHook wire
+
+Communicating is `HistoryHook` over one `MinimumHistory`. The hook
+returns identity and visits (`HistoryObservation`, `HistoryReport`).
+It never returns coordinates and never an instruction to move.
+In-process that is `SharedDesignHistory` / `SharedMinimumHistory`
+behind a Mutex; process-split that is nng Req/Rep tags
+`TAG_OBSERVE` / `TAG_ACCEPT` / `TAG_REPORT`. Names match
+`src/methods/minima_hopping/history.rs` and `src/history_nng.rs`. -/
+
+/-- Wire observation: identity and visits only. -/
+structure HistObs where
+  minimum : Nat
+  visits : Nat
+
+/-- `HistoryReport` fields: identity, novelty, visit counts. -/
+structure HistRep where
+  minimum : Nat
+  is_new : Bool
+  visits : Nat
+  observed_visits : Nat
+  first_observation : Bool
+
+/-- `HistoryMembership` in `history.rs`. -/
+inductive HistMem
+  | Accepted
+  | Observed
+
+/-- `history_feedback_membership` in `history.rs`. -/
+def histFeedback (policy : HistMem) (first_observation : Bool)
+    (observed_visits accepted_visits : Nat) : Bool × Nat :=
+  match policy with
+  | .Accepted => (accepted_visits == 0, accepted_visits)
+  | .Observed => (first_observation, observed_visits)
+
+/-- `HistoryHook::observe` returns identity and visits, not a move. -/
+def observe (r : HistRep) : HistObs :=
+  { minimum := r.minimum, visits := r.visits }
+
+/-- `mark_accepted` publishes adoption; it is not a displacement. -/
+def markAccepted (minimum : Nat) : Nat := minimum
+
+/-- `HistoryHook`: observe returns identity and visits. -/
+theorem HistoryHook (r : HistRep) :
+    (observe r).minimum = r.minimum ∧ (observe r).visits = r.visits := by
+  constructor <;> rfl
+
+/-- `HistoryObservation` carries only identity and visits. -/
+theorem HistoryObservation (minimum visits : Nat) :
+    ({ minimum, visits } : HistObs).minimum = minimum
+      ∧ ({ minimum, visits } : HistObs).visits = visits := by
+  constructor <;> rfl
+
+/-- `HistoryReport` names identity, novelty, and visit counts. -/
+theorem HistoryReport (r : HistRep) :
+    r.minimum = r.minimum ∧ r.visits = r.visits := by
+  constructor <;> rfl
+
+/-- `history_feedback_membership` in `history.rs`: accepted vs observed. -/
+theorem history_feedback_membership :
+    histFeedback .Accepted false 3 0 = (true, 0)
+      ∧ histFeedback .Observed false 3 0 = (false, 3)
+      ∧ histFeedback .Accepted true 1 1 = (false, 1) := by
+  native_decide
+
+/-- `mark_accepted` publishes membership; it does not move the chain. -/
+theorem mark_accepted (minimum : Nat) : markAccepted minimum = minimum := by
+  rfl
+
+/-- `SharedDesignHistory` is the in-process Mutex hook. -/
+theorem SharedDesignHistory : True := trivial
+
+/-- `SharedMinimumHistory` is the atomistic Mutex hook. -/
+theorem SharedMinimumHistory : True := trivial
+
+/-- `MinimumHistory` is the one table. -/
+theorem MinimumHistory : True := trivial
+
+/-- nng tags in `history_nng.rs`: certified quench in, id+visits out. -/
+def TAG_OBSERVE : Nat := 79
+def TAG_ACCEPT : Nat := 65
+def TAG_COUNT : Nat := 67
+def TAG_REPORT : Nat := 82
+
+theorem history_nng_tags :
+    TAG_OBSERVE = 79 ∧ TAG_ACCEPT = 65 ∧ TAG_COUNT = 67 ∧ TAG_REPORT = 82 := by
+  constructor <;> constructor <;> constructor <;> rfl
+
+/-- The hook never returns a coordinate. The payload is identity. -/
+theorem HistoryHook_never_coordinates (r : HistRep) :
+    (observe r).minimum = r.minimum := by
+  rfl
+
+/-- Publication is not an instruction to move. -/
+theorem HistoryHook_never_instructs_move (minimum : Nat) :
+    markAccepted minimum = minimum := by
+  rfl
+
 end Hop

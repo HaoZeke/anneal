@@ -84,6 +84,9 @@ pub mod catalog_rpc;
 /// nng pub/sub census bus between the replicas of one cooperative run.
 #[cfg(feature = "bank-rpc")]
 pub mod census_bus;
+/// nng REQ/REP for [`MinimumHistory`] observe / mark_accepted.
+#[cfg(feature = "history-nng")]
+pub mod history_nng;
 /// Versioned objective bridge compatibility descriptors.
 pub mod compatibility;
 /// Collective variables from the spectrum of the visited-basin graph.

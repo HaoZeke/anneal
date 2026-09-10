@@ -240,6 +240,37 @@ pub struct DescriptorVector {
 }
 
 impl DescriptorVector {
+    /// Design-space coordinates as a one-block descriptor.
+    ///
+    /// Orders exact-witness checks on a PES that is not a 3N point set.
+    /// Identity is still the witness, never this vector's distance.
+    pub fn from_design(values: Vec<f64>) -> Result<Self, DescriptorError> {
+        if values.is_empty() {
+            return Err(DescriptorError::CoordinateDimension { actual: 0 });
+        }
+        if let Some(index) = values.iter().position(|value| !value.is_finite()) {
+            return Err(DescriptorError::NonFiniteCoordinate { index });
+        }
+        let len = values.len();
+        let raw_norm = values.iter().map(|value| value * value).sum::<f64>().sqrt();
+        Ok(Self {
+            schema_name: "anneal-design-space".into(),
+            schema_version: 1,
+            values,
+            blocks: vec![DescriptorBlockMetadata {
+                kind: DescriptorBlockKind::ProviderFeature,
+                n_max: len,
+                l_max: 0,
+                cutoff: 1.0,
+                offset: 0,
+                len,
+                raw_norm,
+                normalization: "none".into(),
+            }],
+            provider_identity: None,
+        })
+    }
+
     /// Stable schema name.
     pub fn schema_name(&self) -> &str {
         &self.schema_name
