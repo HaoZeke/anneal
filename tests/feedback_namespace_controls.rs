@@ -138,7 +138,7 @@ fn run_trace(
         &mut relax,
         Some(&mut gradient),
         None,
-        history,
+        history.map(|hook| hook as &mut dyn HistoryHook),
         &mut rng,
         1,
         &mut checkpoint,
