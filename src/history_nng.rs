@@ -14,7 +14,7 @@ use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
 use ndarray::{Array1, ArrayView1};
-use nng::options::{Options, RecvTimeout};
+use nng::options::{Options, RecvTimeout, SendTimeout};
 use nng::{Message, Protocol, Socket};
 
 use crate::descriptor_space::DescriptorVector;
@@ -281,15 +281,39 @@ pub struct HistoryNngClient {
 }
 
 impl HistoryNngClient {
-    /// Dial `url` and send box side-lengths with every observe.
+    /// Dial `url` with five-second send and reply limits.
+    ///
+    /// Box side-lengths accompany every observation. Use
+    /// [`Self::dial_with_timeout`] to select another positive I/O timeout.
     pub fn dial(
         url: &str,
         widths: Array1<f64>,
         policy: HistoryMembership,
     ) -> Result<Self, HistoryNngError> {
+        Self::dial_with_timeout(url, widths, policy, Duration::from_secs(5))
+    }
+
+    /// Dial with a finite positive limit for each request send and reply wait.
+    ///
+    /// The limit covers socket I/O, not synchronous endpoint resolution.
+    pub fn dial_with_timeout(
+        url: &str,
+        widths: Array1<f64>,
+        policy: HistoryMembership,
+        timeout: Duration,
+    ) -> Result<Self, HistoryNngError> {
         admit_url(url)?;
+        if timeout.is_zero() {
+            return Err(HistoryNngError("request timeout must be positive".into()));
+        }
         let socket = Socket::new(Protocol::Req0)
             .map_err(|error| HistoryNngError(format!("req: {error}")))?;
+        socket
+            .set_opt::<SendTimeout>(Some(timeout))
+            .map_err(|error| HistoryNngError(format!("send timeout: {error}")))?;
+        socket
+            .set_opt::<RecvTimeout>(Some(timeout))
+            .map_err(|error| HistoryNngError(format!("reply timeout: {error}")))?;
         socket
             .dial(url)
             .map_err(|error| HistoryNngError(format!("dial {url}: {error}")))?;
