@@ -100,6 +100,10 @@ pub struct BoxEnsembleResult {
     pub history_observations: usize,
     /// Distinct exact identities in the shared history, or the largest private table.
     pub history_minima: usize,
+    /// History attempts, refusals and summed operation seconds across replicas.
+    ///
+    /// Includes validation and waiting, not connection setup or PES calls.
+    pub history_cost: (usize, usize, f64),
     /// Bias deposits made on behalf of other chains' visits.
     pub shared_deposits: usize,
 }
@@ -119,6 +123,9 @@ pub struct EnsembleHopResult {
     /// history. Two or more values-only replicas share this table when
     /// a finite-difference certificate is flat.
     pub history_minima: usize,
+    /// History attempts, refusals and summed operation seconds across replicas.
+    /// Zero when the selected search does not use history.
+    pub history_cost: (usize, usize, f64),
 }
 
 /// Search on `obj`: hop and quench when `grad` is present.
@@ -160,6 +167,7 @@ where
             best_val: out.best_val,
             charged: out.n_evals + out.n_grads,
             history_minima: 0,
+            history_cost: (0, 0, 0.0),
         };
     }
     let config = BoxEnsembleConfig {
@@ -179,6 +187,7 @@ impl From<BoxEnsembleResult> for EnsembleHopResult {
             best_val: out.best_val,
             charged: out.n_evals + out.n_grads,
             history_minima: out.history_minima,
+            history_cost: out.history_cost,
         }
     }
 }
@@ -433,6 +442,7 @@ where
         hops,
         history_observations,
         history_minima,
+        history_cost: total_history_cost(&hooks),
         shared_deposits,
     }
 }
@@ -887,6 +897,7 @@ where
         hops,
         history_observations,
         history_minima,
+        history_cost: total_history_cost(&hooks),
         shared_deposits,
     }
 }
@@ -981,6 +992,13 @@ impl HistoryHook for ReplicaHook<'_> {
             Self::Nng(hook) => hook.cost(),
         }
     }
+}
+
+fn total_history_cost(hooks: &[ReplicaHook<'_>]) -> (usize, usize, f64) {
+    hooks.iter().fold((0, 0, 0.0), |total, hook| {
+        let cost = hook.cost();
+        (total.0 + cost.0, total.1 + cost.1, total.2 + cost.2)
+    })
 }
 
 fn shared_nng_url(config: &BoxEnsembleConfig) -> Option<String> {
