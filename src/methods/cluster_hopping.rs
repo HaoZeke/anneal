@@ -1623,14 +1623,14 @@ where
     // Ordinary hops supply their paid history report; auxiliary adoptions
     // observe their paid certificate once without issuing another PES call.
     macro_rules! adopt_minimum {
-        ($energy:expr, $state:expr, $gradient:expr, $evidence:expr,
+        ($energy:expr, $state:expr, $gradient:expr, $local_minimum:expr, $evidence:expr,
          $local_feedback:expr, $action:expr, $hop:expr) => {{
             let mut destination = OccupiedMinimum {
                 energy: $energy,
                 coordinates: $state,
                 gradient: $gradient,
                 history_minimum: None,
-                local_minimum: here,
+                local_minimum: $local_minimum,
                 generation: occupancy_generation
                     .checked_add(1)
                     .expect("occupancy generation"),
@@ -2168,11 +2168,11 @@ where
                     );
                     let reached = identity.basin_of(hole_state.view());
                     let from = here.unwrap_or_else(|| identity.basin_of(from_state.view()));
-                    here = Some(reached);
                     adopt_minimum!(
                         hole_energy,
                         hole_state,
                         hole_gradient,
+                        Some(reached),
                         AdoptionHistory::Fresh,
                         Some((Some(from), reached)),
                         None,
@@ -2261,11 +2261,11 @@ where
                         hops += 1;
                         let reached = identity.basin_of(proposal_state.view());
                         let from = here.unwrap_or_else(|| identity.basin_of(from_state.view()));
-                        here = Some(reached);
                         adopt_minimum!(
                             proposal_energy,
                             proposal_state.clone(),
                             validation_gradient.clone(),
+                            Some(reached),
                             AdoptionHistory::Fresh,
                             Some((Some(from), reached)),
                             None,
@@ -2364,11 +2364,11 @@ where
                     continuous_symmetry_gain += e - candidate_energy;
                     let from_basin = here.unwrap_or_else(|| identity.basin_of(x.view()));
                     let reached = identity.basin_of(candidate.view());
-                    here = Some(reached);
                     adopt_minimum!(
                         candidate_energy,
                         candidate.clone(),
                         candidate_gradient.clone(),
+                        Some(reached),
                         AdoptionHistory::Fresh,
                         Some((Some(from_basin), reached)),
                         None,
@@ -3283,6 +3283,7 @@ where
         // which is how the measured LJ38 run discovers basins from a
         // 25-step screen. Gating accept on recordable froze that path
         // at fifteen basins.
+        let mut trial_local_minimum = here;
         let accept = if cfg.minima_hopping {
             let from = *here.get_or_insert_with(|| identity.basin_of(x.view()));
             if unquenched {
@@ -3310,7 +3311,7 @@ where
                     reached != from && feedback.accept(delta)
                 };
                 if ok {
-                    here = Some(reached);
+                    trial_local_minimum = Some(reached);
                 }
                 ok
             }
@@ -3747,6 +3748,7 @@ where
                 e_new,
                 x_new,
                 validation_gradient,
+                trial_local_minimum,
                 AdoptionHistory::Observed(history_report),
                 None,
                 None,
@@ -3826,12 +3828,12 @@ where
                         es,
                         xs,
                         sym_gradient,
+                        None,
                         AdoptionHistory::Fresh,
                         None,
                         Some("point-symmetrise"),
                         hops
                     );
-                    here = None;
                 }
             }
         }
@@ -3872,12 +3874,12 @@ where
                         es,
                         xs,
                         sym_gradient,
+                        None,
                         AdoptionHistory::Fresh,
                         None,
                         Some("orbit-completion"),
                         hops
                     );
-                    here = None;
                 }
             }
         }
@@ -3946,12 +3948,12 @@ where
                     ej,
                     xj,
                     jump_gradient,
+                    None,
                     AdoptionHistory::Fresh,
                     None,
                     Some("stall-jump"),
                     hops
                 );
-                here = None;
                 longest_quiet = longest_quiet.max(quiet);
                 quiet = 0;
             }
@@ -4002,12 +4004,12 @@ where
                 frontier_energy,
                 Array1::from(frontier_state.to_vec()),
                 None,
+                None,
                 AdoptionHistory::Fresh,
                 None,
                 Some("seam-frontier"),
                 hops
             );
-            here = None;
             quiet = 0;
             longest_quiet = 0;
             restarts += 1;
@@ -4093,12 +4095,12 @@ where
                             es,
                             xs,
                             sym_gradient,
+                            None,
                             AdoptionHistory::Fresh,
                             None,
                             Some("stall-symmetrise"),
                             hops
                         );
-                        here = None;
                     }
                 }
             }
@@ -4163,12 +4165,12 @@ where
                 ef,
                 xf,
                 restart_gradient,
+                None,
                 AdoptionHistory::Fresh,
                 None,
                 Some("stall-restart"),
                 hops
             );
-            here = None;
             stall_outcome = Some(stalled_from - e);
         }
         if stall_response.map(|arm| stall_arms[arm] == "trail") == Some(true)
@@ -4215,12 +4217,12 @@ where
                 ee,
                 xe,
                 trail_gradient,
+                None,
                 AdoptionHistory::Fresh,
                 None,
                 Some("stall-trail"),
                 hops
             );
-            here = None;
             stall_outcome = Some(stalled_from - e);
         }
         if stall_response.map(|arm| stall_arms[arm] == "climb") == Some(true) {
@@ -4265,9 +4267,8 @@ where
                     // cannot improve from where it is, so the value of the new
                     // structure is that it is somewhere else.
                     let local_feedback = if cfg.minima_hopping {
-                        let from = *here.get_or_insert_with(|| identity.basin_of(x.view()));
+                        let from = here.unwrap_or_else(|| identity.basin_of(x.view()));
                         let reached = identity.basin_of(xe.view());
-                        here = Some(reached);
                         Some((Some(from), reached))
                     } else {
                         None
@@ -4276,14 +4277,12 @@ where
                         ee,
                         xe,
                         escape_gradient,
+                        local_feedback.map(|(_, reached)| reached),
                         AdoptionHistory::Fresh,
                         local_feedback,
                         Some("stall-climb"),
                         hops
                     );
-                    if !cfg.minima_hopping {
-                        here = None;
-                    }
                     stall_outcome = Some(stalled_from - e);
                 }
             }
@@ -4384,12 +4383,12 @@ where
                         j.energy,
                         j.state,
                         None,
+                        Some(j.basin),
                         AdoptionHistory::Fresh,
                         None,
                         Some("superbasin-exit"),
                         hops
                     );
-                    here = Some(j.basin);
                 }
             }
         }
@@ -4695,12 +4694,12 @@ where
                                 esc.energy,
                                 esc.state.clone(),
                                 certificate,
+                                None,
                                 AdoptionHistory::Fresh,
                                 None,
                                 Some("path-escape"),
                                 hops
                             );
-                            here = None;
                         }
                     }
                 }
