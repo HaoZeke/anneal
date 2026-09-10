@@ -62,6 +62,18 @@ fn raw_frame(replica: u32, hops: u64, coordinates: &[f64]) -> Vec<u8> {
     bytes
 }
 
+fn raw_well_frame(replica: u32, centre: &[f64], depth: f64) -> Vec<u8> {
+    let mut bytes = format!("wells/{replica:03}\n").into_bytes();
+    bytes.extend_from_slice(&replica.to_le_bytes());
+    bytes.extend_from_slice(&1_u32.to_le_bytes());
+    bytes.extend_from_slice(&u32::try_from(centre.len()).unwrap().to_le_bytes());
+    bytes.extend_from_slice(&depth.to_le_bytes());
+    for value in centre {
+        bytes.extend_from_slice(&value.to_le_bytes());
+    }
+    bytes
+}
+
 fn raw_publisher_and_receiver(deadline: Instant) -> (Socket, CensusBus) {
     let _setup = SOCKET_SETUP.lock().unwrap();
     let (base, receiver_port, publisher_port) = adjacent_ports(deadline);
@@ -283,6 +295,104 @@ fn repeated_geometry_updates_latest_hops_without_duplicate_fresh_events() {
         assert_eq!(latest.coordinates, COORDINATES);
         assert_eq!(receiver.peer_count(), 1);
     }
+}
+
+#[test]
+fn polling_wells_preserves_a_fresh_minimum_until_it_is_polled_once() {
+    let deadline = deadline();
+    let (publisher, mut receiver) = raw_publisher_and_receiver(deadline);
+    let frame = raw_frame(1, 7, &COORDINATES);
+    wait_until(
+        deadline,
+        "well-table polling must retain the delivered minimum",
+        || {
+            match publisher.try_send(frame.as_slice()) {
+                Ok(()) | Err((_, nng::Error::TryAgain)) => {}
+                Err((_, error)) => panic!("raw publisher failed: {error}"),
+            }
+            assert!(receiver.poll_wells().is_empty());
+            receiver.peers().any(|peer| {
+                peer.replica == 1
+                    && peer.hops == 7
+                    && peer.energy == ENERGY
+                    && peer.coordinates == COORDINATES
+            })
+        },
+    );
+    assert_eq!(receiver.peer_count(), 1);
+
+    let fresh = receiver.poll();
+    assert_eq!(
+        fresh.len(),
+        1,
+        "polling well tables must not consume a fresh minimum notification"
+    );
+    assert_eq!(fresh[0].replica, 1);
+    assert_eq!(fresh[0].hops, 7);
+    assert_eq!(fresh[0].energy, ENERGY);
+    assert_eq!(fresh[0].coordinates, COORDINATES);
+    assert!(receiver.poll_wells().is_empty());
+    assert!(receiver.poll().is_empty());
+}
+
+#[test]
+fn interleaved_wells_and_minima_retain_each_notification_once() {
+    use ndarray::Array1;
+
+    let deadline = deadline();
+    let (publisher, mut receiver) = raw_publisher_and_receiver(deadline);
+    let initial = deliver_to_latest(&publisher, &mut receiver, 7, &COORDINATES, deadline);
+    assert_eq!(initial.len(), 1);
+    assert_eq!(initial[0].coordinates, COORDINATES);
+
+    let first_change = [0.0, 0.0, 0.0, 1.3, 0.0, 0.0];
+    let second_change = [0.0, 0.0, 0.0, 1.4, 0.0, 0.0];
+    let first_centre = [1.0, 2.0, 3.0];
+    let second_centre = [4.0, 5.0, 6.0];
+    for frame in [
+        raw_well_frame(1, &first_centre, 0.5),
+        raw_frame(1, 8, &first_change),
+        raw_well_frame(1, &second_centre, 1.5),
+        raw_frame(1, 9, &second_change),
+    ] {
+        publisher.try_send(frame.as_slice()).unwrap();
+    }
+
+    let mut wells = Vec::new();
+    wait_until(
+        deadline,
+        "well-table polling must drain both interleaved message kinds",
+        || {
+            wells.extend(receiver.poll_wells());
+            wells.len() >= 2
+                && receiver.peers().any(|peer| {
+                    peer.replica == 1 && peer.hops == 9 && peer.coordinates == second_change
+                })
+        },
+    );
+    assert_eq!(
+        wells,
+        vec![
+            (1, vec![(Array1::from_vec(first_centre.to_vec()), 0.5)]),
+            (1, vec![(Array1::from_vec(second_centre.to_vec()), 1.5)]),
+        ]
+    );
+
+    let fresh = receiver.poll();
+    assert_eq!(
+        fresh.len(),
+        2,
+        "both geometry changes must survive intervening well-table drains"
+    );
+    for (peer, hops, coordinates) in [(&fresh[0], 8, first_change), (&fresh[1], 9, second_change)] {
+        assert_eq!(peer.replica, 1);
+        assert_eq!(peer.hops, hops);
+        assert_eq!(peer.energy, ENERGY);
+        assert_eq!(peer.coordinates, coordinates);
+    }
+    assert_eq!(receiver.peer_count(), 1);
+    assert!(receiver.poll().is_empty());
+    assert!(receiver.poll_wells().is_empty());
 }
 
 /// A well table above nng's default 1 MB receive limit must arrive: 64
