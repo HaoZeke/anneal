@@ -104,3 +104,77 @@ fn requested_shared_transport_cannot_silently_disable_history() {
         }
     }
 }
+
+#[cfg(feature = "history-nng")]
+#[test]
+fn box_driver_admissions_reach_an_independent_nng_client() {
+    use anneal_core::history_nng::{HistoryNngClient, HistoryNngServer};
+    use anneal_core::methods::minima_hopping::{HistoryHook, HistoryMembership};
+
+    const DRIVER_CASE: &str = "ANNEAL_BOX_HISTORY_POSITIVE_CHILD";
+    const NAME: &str = "box_driver_admissions_reach_an_independent_nng_client";
+    if let Ok(driver) = std::env::var(DRIVER_CASE) {
+        let url = std::env::var("HISTORY_NNG").unwrap();
+        let _server = HistoryNngServer::bind(&url, 1e-3, 1e-3).unwrap();
+        let objective = CountedQuadratic {
+            bounds: Bounds::new(array![-1.0], array![1.0], 0.0),
+            evaluations: AtomicUsize::new(0),
+            gradients: AtomicUsize::new(0),
+        };
+        let config = BoxEnsembleConfig {
+            replicas: 1,
+            budget: if driver == "gradient" { 2 } else { 3 },
+            history: HistoryMode::Shared,
+            membership: HistoryMembership::Accepted,
+            ..BoxEnsembleConfig::default()
+        };
+        let anchor = array![0.0];
+        let result = match driver.as_str() {
+            "gradient" => {
+                box_ensemble_optimize(&objective, &objective, 7, Some(anchor.view()), &config)
+            }
+            "values" => box_values_ensemble_optimize(&objective, 7, Some(anchor.view()), &config),
+            _ => panic!("unknown driver"),
+        };
+        let expected_calls = if driver == "gradient" { (1, 1) } else { (3, 0) };
+        assert_eq!((result.n_evals, result.n_grads), expected_calls);
+        assert_eq!(
+            (
+                objective.evaluations.load(Ordering::Relaxed),
+                objective.gradients.load(Ordering::Relaxed)
+            ),
+            expected_calls,
+        );
+        assert_eq!((result.history_minima, result.history_observations), (1, 1));
+        assert_eq!(result.best_pos, anchor);
+        let mut observer =
+            HistoryNngClient::dial(&url, array![2.0], HistoryMembership::Accepted).unwrap();
+        assert_eq!(observer.minimum_count(), Some(1));
+        let shared = observer
+            .observe(0.0, anchor.view(), array![0.0].view())
+            .unwrap();
+        assert!(!shared.is_new && !shared.first_observation);
+        assert_eq!((shared.visits, shared.observed_visits), (2, 2));
+        return;
+    }
+
+    for driver in ["gradient", "values"] {
+        let url = format!(
+            "ipc:///tmp/anneal-box-history-{}-{driver}",
+            std::process::id()
+        );
+        let output = Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", NAME, "--nocapture"])
+            .env(DRIVER_CASE, driver)
+            .env("HISTORY_NNG", url)
+            .env_remove("HISTORY_NNG_SERVE")
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{driver} failed:\n{}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr),
+        );
+    }
+}
