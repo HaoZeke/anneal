@@ -29,7 +29,7 @@ use crate::methods::minima_hopping::{
     EscapeFeedback, HistoryHook, HistoryMembership, HistoryReport, MinimumHistory,
     SharedDesignHistory,
 };
-use crate::methods::portfolio::portfolio_optimize;
+use crate::methods::portfolio::{PortfolioPolicy, portfolio_optimize_seeded};
 use crate::movekernel::reflect_into_box;
 use crate::pes_exploration::{ExactStructureWitness, StructureContext};
 
@@ -161,7 +161,9 @@ where
         return EnsembleHopResult::from(out);
     }
     if replicas <= 1 {
-        let out = portfolio_optimize(obj, grad, budget, seed, None);
+        let out = portfolio_optimize_seeded(
+            obj, grad, budget, seed, None, PortfolioPolicy::Auto, x0,
+        );
         return EnsembleHopResult {
             best_pos: Array1::from(out.best_pos),
             best_val: out.best_val,

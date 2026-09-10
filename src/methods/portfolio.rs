@@ -3080,6 +3080,23 @@ where
     O: Objective<f64>,
     G: Gradient<f64>,
 {
+    portfolio_optimize_seeded(obj, grad, budget, seed, noise_sigma, policy, None)
+}
+
+/// The optional starting point enters the paid archive under the same budget.
+pub(crate) fn portfolio_optimize_seeded<O, G>(
+    obj: &O,
+    grad: Option<&G>,
+    budget: usize,
+    seed: u64,
+    noise_sigma: Option<f64>,
+    policy: PortfolioPolicy,
+    x0: Option<ArrayView1<f64>>,
+) -> PortfolioResult
+where
+    O: Objective<f64>,
+    G: Gradient<f64>,
+{
     assert!(budget > 0, "budget must be positive");
     if let Some(sigma) = noise_sigma {
         assert!(
@@ -3130,6 +3147,12 @@ where
         inner: g,
         ledger: &ledger,
     });
+    if let Some(x0) = x0 {
+        assert_eq!(x0.len(), dim, "starting point must match the objective dimension");
+        assert!(x0.iter().all(|value| value.is_finite()), "starting point must be finite");
+        let start = bounds.clip(x0);
+        budgeted_obj.eval(start.view());
+    }
 
     // Probe-based demotion for mid-width MultimodalGlobal boxes. Width alone
     // cannot separate a Styblinski-class multi-basin box from a least-squares
