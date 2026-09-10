@@ -70,8 +70,9 @@ of one population cluster per energy funnel. The bounded/unbounded switch
 applies to bus observations, not population-parent or own-visit history.
 
 Packing comparisons reuse descriptor rows only when every ordered coordinate
-bit matches. Each thread retains at most 8 MiB of coordinate-key and descriptor
-payloads; bookkeeping and caller-held references are additional. Pairwise
+bit matches. A process-wide cache shared by validation and request threads
+retains at most 8 MiB of coordinate-key and descriptor payloads; bookkeeping
+and caller-held references are additional. Pairwise
 codebooks and histograms remain separate, so reuse does not introduce a shared
 classification map or delay census invalidation when an occupied minimum moves.
 
