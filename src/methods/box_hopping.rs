@@ -1129,6 +1129,121 @@ mod tests {
         }
     }
 
+    struct BoundaryLinear {
+        bounds: Bounds<f64>,
+        slope: f64,
+        evals: AtomicUsize,
+        grads: AtomicUsize,
+    }
+
+    impl BoundaryLinear {
+        fn new(slope: f64) -> Self {
+            Self {
+                bounds: Bounds::new(array![0.0], array![1.0], 1e-9),
+                slope,
+                evals: AtomicUsize::new(0),
+                grads: AtomicUsize::new(0),
+            }
+        }
+    }
+
+    impl Objective<f64> for BoundaryLinear {
+        fn dim(&self) -> usize {
+            1
+        }
+
+        fn bounds(&self) -> &Bounds<f64> {
+            &self.bounds
+        }
+
+        fn eval(&self, x: ArrayView1<f64>) -> f64 {
+            self.evals.fetch_add(1, Ordering::SeqCst);
+            assert_eq!(x.len(), 1);
+            assert!(self.bounds.contains(x));
+            self.slope * x[0]
+        }
+    }
+
+    impl Gradient<f64> for BoundaryLinear {
+        fn dim(&self) -> usize {
+            1
+        }
+
+        fn grad(&self, x: ArrayView1<f64>) -> Array1<f64> {
+            self.grads.fetch_add(1, Ordering::SeqCst);
+            assert_eq!(x.len(), 1);
+            assert!(self.bounds.contains(x));
+            array![self.slope]
+        }
+    }
+
+    #[test]
+    fn values_certificate_distinguishes_an_upper_bound_minimum_from_inward_descent() {
+        for (slope, expected_projected_gradient) in [(-1.0, 0.0), (1.0, 1.0)] {
+            let objective = BoundaryLinear::new(slope);
+            let position = array![1.0];
+            let mut work = 0;
+            let certificate = values_certificate(&objective, position.view(), &mut work, 2)
+                .expect("two objective calls certify one box coordinate");
+
+            assert_eq!(work, 2);
+            assert_eq!(objective.evals.load(Ordering::SeqCst), work);
+            assert_eq!(objective.grads.load(Ordering::SeqCst), 0);
+            assert_eq!(certificate.len(), 1);
+            assert!(
+                (certificate[0] - expected_projected_gradient).abs() < 1e-8,
+                "f(x)={slope}x at x=1 requires projected gradient \
+                 {expected_projected_gradient}, received {}",
+                certificate[0]
+            );
+        }
+    }
+
+    #[test]
+    fn analytic_boundary_minimum_enters_history_when_projected_polish_is_stationary() {
+        let position = array![1.0];
+        let polish_objective = BoundaryLinear::new(-1.0);
+        let polished = projected_gradient_polish(
+            &polish_objective,
+            &polish_objective,
+            position.clone(),
+            1,
+            1.0,
+            1e-8,
+        );
+        assert!(polished.projected_stationary);
+        assert_eq!(polished.projected_grad_norm, 0.0);
+        assert_eq!(polished.best_grad, Some(array![-1.0]));
+        assert_eq!(polished.best_pos, position);
+        assert_eq!(polished.best_val, -1.0);
+        assert_eq!(polished.n_evals, 1);
+        assert_eq!(polished.n_grads, 1);
+        assert_eq!(polish_objective.evals.load(Ordering::SeqCst), 1);
+        assert_eq!(polish_objective.grads.load(Ordering::SeqCst), 1);
+
+        let objective = BoundaryLinear::new(-1.0);
+        let config = BoxEnsembleConfig {
+            replicas: 1,
+            budget: 4,
+            history: HistoryMode::Private,
+            ..BoxEnsembleConfig::default()
+        };
+        let result =
+            box_ensemble_optimize(&objective, &objective, 7, Some(position.view()), &config);
+        assert_eq!(result.best_pos, position);
+        assert_eq!(result.best_val, -1.0);
+        assert_eq!(result.n_evals, 1);
+        assert_eq!(result.n_grads, 1);
+        assert_eq!(objective.evals.load(Ordering::SeqCst), result.n_evals);
+        assert_eq!(objective.grads.load(Ordering::SeqCst), result.n_grads);
+        assert_eq!(result.hops, 0);
+        assert_eq!(
+            result.history_observations, 1,
+            "a box-KKT minimum must not be rejected for its outward raw gradient"
+        );
+        assert_eq!(result.history_minima, 1);
+    }
+
     struct TwoWell {
         bounds: Bounds<f64>,
         evals: AtomicUsize,
