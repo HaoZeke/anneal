@@ -3757,6 +3757,12 @@ where
         states.last_exploratory_ok = false;
     }
 
+    // A budget too small for a scheduler slice still funds a candidate value.
+    // The budgeted objective records and charges the returned incumbent.
+    if ledger.n_evals.load(Ordering::Relaxed) == 0 {
+        let candidate = ledger.incumbent(&bounds);
+        budgeted_obj.eval(candidate.view());
+    }
     let best_pos_arr = ledger.incumbent(&bounds);
     // Final safety: never return OOB coordinates from the public API.
     let best_pos = bounds.clip(best_pos_arr.view()).to_vec();
