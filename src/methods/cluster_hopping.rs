@@ -38,7 +38,7 @@ use crate::contextual::ContextualAllocator;
 use crate::diversity::DiversityAnnealer;
 use crate::exchange::MetropolisExchange;
 use crate::methods::activation::{Activation, activate};
-use crate::methods::minima_hopping::{EscapeFeedback, HistoryHook, Visit};
+use crate::methods::minima_hopping::{EscapeFeedback, HistoryHook, HistoryReport, Visit};
 use crate::movekernel::{
     HollowFill, HollowRelocate, MoveKernel, ShellRotate, SurfaceRelocate, Symmetrise,
 };
@@ -107,6 +107,45 @@ pub struct AcceptedTransition {
     pub validated: bool,
     /// Whether the destination became the state occupied by the live chain.
     pub adopted: bool,
+}
+
+/// Coordinates and their paid evidence travel together through adoption and
+/// ladder scheduling. A shared identity belongs only to this exact occupancy.
+struct OccupiedMinimum {
+    energy: f64,
+    coordinates: Array1<f64>,
+    gradient: Option<Array1<f64>>,
+    history_minimum: Option<usize>,
+    local_minimum: Option<usize>,
+    generation: u64,
+    pending_initial: bool,
+}
+
+impl OccupiedMinimum {
+    fn into_live(
+        self,
+    ) -> (
+        f64,
+        Array1<f64>,
+        Option<Array1<f64>>,
+        Option<usize>,
+        u64,
+        Option<usize>,
+    ) {
+        (
+            self.energy,
+            self.coordinates,
+            self.gradient,
+            self.history_minimum,
+            self.generation,
+            self.local_minimum,
+        )
+    }
+}
+
+enum AdoptionHistory {
+    Fresh,
+    Observed(Option<HistoryReport>),
 }
 
 /// Read-only scientific state exposed at a charged-work checkpoint.
@@ -1275,13 +1314,7 @@ where
         }
         None => (biases.remove(0), None),
     };
-    // Gradient evidence travels with the coordinates through every rung swap.
-    struct ParkedMinimum {
-        energy: f64,
-        coordinates: Array1<f64>,
-        gradient: Option<Array1<f64>>,
-    }
-    let mut chains: Vec<ParkedMinimum> = Vec::new();
+    let mut chains: Vec<OccupiedMinimum> = Vec::new();
     // One sampler per rung, parked and taken alongside the bias.
     //
     // Per chain and not global. A hot rung crosses barriers a cold rung cannot
@@ -1572,6 +1605,7 @@ where
     // and not by `identity`: under a shared history the numbering is the
     // population's, and this chain's local index means nothing to it.
     let mut history_here: Option<usize> = None;
+    let mut occupancy_generation = 0u64;
     // Global visit count of each history minimum at this chain's last look,
     // so a later look deposits only what other chains added in between.
     let mut history_seen: std::collections::HashMap<usize, u64> = std::collections::HashMap::new();
@@ -1584,6 +1618,95 @@ where
     let mut md_failed = 0usize;
     let mut orbits_completed = 0usize;
     let mut orbit_gain = 0.0_f64;
+    let mut accepted_transitions = Vec::new();
+    // All live-state replacement consumes one complete destination record.
+    // Ordinary hops supply their paid history report; auxiliary adoptions
+    // observe their paid certificate once without issuing another PES call.
+    macro_rules! adopt_minimum {
+        ($energy:expr, $state:expr, $gradient:expr, $evidence:expr,
+         $local_feedback:expr, $action:expr, $hop:expr) => {{
+            let mut destination = OccupiedMinimum {
+                energy: $energy,
+                coordinates: $state,
+                gradient: $gradient,
+                history_minimum: None,
+                local_minimum: here,
+                generation: occupancy_generation
+                    .checked_add(1)
+                    .expect("occupancy generation"),
+                pending_initial: false,
+            };
+            let evidence = $evidence;
+            let local_feedback: Option<(Option<usize>, usize)> = $local_feedback;
+            let action: Option<&str> = $action;
+            let fresh = matches!(&evidence, AdoptionHistory::Fresh);
+            let report = match evidence {
+                AdoptionHistory::Fresh => {
+                    match (history.as_deref_mut(), destination.gradient.as_ref()) {
+                        (Some(h), Some(g)) => {
+                            h.observe(destination.energy, destination.coordinates.view(), g.view())
+                        }
+                        _ => None,
+                    }
+                }
+                AdoptionHistory::Observed(report) => report,
+            };
+            if fresh {
+                if let Some(report) = report {
+                    history_observations += 1;
+                    history_new += usize::from(report.is_new);
+                    if cfg.minima_hopping {
+                        feedback.observe_shared(
+                            history_here,
+                            report.minimum,
+                            report.is_new,
+                            report.visits,
+                        );
+                    } else if let Some((from, reached)) = local_feedback {
+                        feedback.observe(from, reached);
+                    }
+                } else if let Some((from, reached)) = local_feedback {
+                    feedback.observe(from, reached);
+                }
+            }
+            if let (Some(h), Some(report)) = (history.as_deref_mut(), report) {
+                h.mark_accepted(report.minimum);
+                destination.history_minimum = Some(report.minimum);
+                if fresh {
+                    let seen = history_seen.entry(report.minimum).or_insert(0);
+                    *seen = seen.saturating_add(1).min(report.visits.max(1));
+                } else if report.visits == 0 {
+                    history_seen.insert(report.minimum, 1);
+                }
+            }
+            if let Some(action) = action {
+                accepted_transitions.push(AcceptedTransition {
+                    hop: $hop,
+                    action: String::from(action),
+                    from_energy: e,
+                    from_state: x.clone(),
+                    from_gradient: current_validation_gradient.clone(),
+                    to_energy: destination.energy,
+                    to_state: destination.coordinates.clone(),
+                    to_gradient: destination.gradient.clone(),
+                    validated: quench_is_sane(
+                        cfg,
+                        destination.energy,
+                        destination.coordinates.view(),
+                    ) && (!gradient_required || destination.gradient.is_some()),
+                    adopted: true,
+                });
+            }
+            (
+                e,
+                x,
+                current_validation_gradient,
+                history_here,
+                occupancy_generation,
+                here,
+            ) = destination.into_live();
+        }};
+    }
     if let (Some(h), Some(g)) = (history.as_deref_mut(), current_validation_gradient.as_ref()) {
         // The start is part of the history even though no hop reached it,
         // exactly as the controller registers it: a later return to it must
@@ -1617,16 +1740,19 @@ where
             x0.view(),
             &mut unconverged_records,
         );
-        chains.push(ParkedMinimum {
+        chains.push(OccupiedMinimum {
             energy: e0,
             coordinates: x0,
             gradient,
+            history_minimum: None,
+            local_minimum: None,
+            generation: 0,
+            pending_initial: true,
         });
     }
     let mut screened_out = 0usize;
     let mut returned = 0usize;
     let mut accepted = 0usize;
-    let mut accepted_transitions = Vec::new();
     let mut hops = 0usize;
     let mut checkpoint_hops = 0usize;
     let mut checkpoint_quench_start = 0usize;
@@ -2032,7 +2158,7 @@ where
                         continue;
                     }
                     hops += 1;
-                    record_quenched_answer(
+                    let hole_gradient = record_quenched_answer(
                         cfg,
                         ledger,
                         &mut grad,
@@ -2042,12 +2168,17 @@ where
                     );
                     let reached = identity.basin_of(hole_state.view());
                     let from = here.unwrap_or_else(|| identity.basin_of(from_state.view()));
-                    feedback.observe(Some(from), reached);
                     here = Some(reached);
-                    e = hole_energy;
-                    x = hole_state;
+                    adopt_minimum!(
+                        hole_energy,
+                        hole_state,
+                        hole_gradient,
+                        AdoptionHistory::Fresh,
+                        Some((Some(from), reached)),
+                        None,
+                        hops
+                    );
                     accepted += 1;
-                    current_validation_gradient = None;
                     bias.deposit(x.view(), cfg.temperature);
                     accepted_transitions.push(AcceptedTransition {
                         hop: hops,
@@ -2057,8 +2188,8 @@ where
                         from_state,
                         from_gradient,
                         to_state: x.clone(),
-                        to_gradient: None,
-                        validated: false,
+                        to_gradient: current_validation_gradient.clone(),
+                        validated: current_validation_gradient.is_some(),
                         adopted: true,
                     });
                     continue;
@@ -2130,11 +2261,16 @@ where
                         hops += 1;
                         let reached = identity.basin_of(proposal_state.view());
                         let from = here.unwrap_or_else(|| identity.basin_of(from_state.view()));
-                        feedback.observe(Some(from), reached);
                         here = Some(reached);
-                        e = proposal_energy;
-                        x = proposal_state.clone();
-                        current_validation_gradient = validation_gradient.clone();
+                        adopt_minimum!(
+                            proposal_energy,
+                            proposal_state.clone(),
+                            validation_gradient.clone(),
+                            AdoptionHistory::Fresh,
+                            Some((Some(from), reached)),
+                            None,
+                            hops
+                        );
                         accepted += 1;
                         bias.deposit(x.view(), cfg.temperature);
                     }
@@ -2228,11 +2364,16 @@ where
                     continuous_symmetry_gain += e - candidate_energy;
                     let from_basin = here.unwrap_or_else(|| identity.basin_of(x.view()));
                     let reached = identity.basin_of(candidate.view());
-                    feedback.observe(Some(from_basin), reached);
                     here = Some(reached);
-                    e = candidate_energy;
-                    x = candidate.clone();
-                    current_validation_gradient = candidate_gradient.clone();
+                    adopt_minimum!(
+                        candidate_energy,
+                        candidate.clone(),
+                        candidate_gradient.clone(),
+                        AdoptionHistory::Fresh,
+                        Some((Some(from_basin), reached)),
+                        None,
+                        hops
+                    );
                     soft_cache = None;
                     basin_entry = None;
                     quiet = 0;
@@ -3602,13 +3743,15 @@ where
                 basin_entry = Some(snapshot);
             }
             moved_basin = !returning;
-            if let (Some(h), Some(report)) = (history.as_deref_mut(), history_report) {
-                h.mark_accepted(report.minimum);
-                history_here = Some(report.minimum);
-            }
-            e = e_new;
-            x = x_new;
-            current_validation_gradient = validation_gradient;
+            adopt_minimum!(
+                e_new,
+                x_new,
+                validation_gradient,
+                AdoptionHistory::Observed(history_report),
+                None,
+                None,
+                hops
+            );
         } else if cfg.budget_window {
             // The biased delta, which is what the chain actually declined, not
             // the raw energy difference. The bias is part of the barrier the
@@ -3679,10 +3822,16 @@ where
                     if es < e {
                         symmetry_gain += e - es;
                     }
-                    e = es;
-                    x = xs;
+                    adopt_minimum!(
+                        es,
+                        xs,
+                        sym_gradient,
+                        AdoptionHistory::Fresh,
+                        None,
+                        Some("point-symmetrise"),
+                        hops
+                    );
                     here = None;
-                    current_validation_gradient = sym_gradient;
                 }
             }
         }
@@ -3719,10 +3868,16 @@ where
                     if es < e {
                         orbit_gain += e - es;
                     }
-                    e = es;
-                    x = xs;
+                    adopt_minimum!(
+                        es,
+                        xs,
+                        sym_gradient,
+                        AdoptionHistory::Fresh,
+                        None,
+                        Some("orbit-completion"),
+                        hops
+                    );
                     here = None;
-                    current_validation_gradient = sym_gradient;
                 }
             }
         }
@@ -3787,10 +3942,16 @@ where
                 );
                 hops += 1;
                 jumps += 1;
-                e = ej;
-                x = xj;
+                adopt_minimum!(
+                    ej,
+                    xj,
+                    jump_gradient,
+                    AdoptionHistory::Fresh,
+                    None,
+                    Some("stall-jump"),
+                    hops
+                );
                 here = None;
-                current_validation_gradient = jump_gradient;
                 longest_quiet = longest_quiet.max(quiet);
                 quiet = 0;
             }
@@ -3837,10 +3998,16 @@ where
                 bank.restart(0.25, rng.random::<f64>())
             && frontier_state.len() == x.len()
         {
-            x = Array1::from(frontier_state.to_vec());
-            e = frontier_energy;
+            adopt_minimum!(
+                frontier_energy,
+                Array1::from(frontier_state.to_vec()),
+                None,
+                AdoptionHistory::Fresh,
+                None,
+                Some("seam-frontier"),
+                hops
+            );
             here = None;
-            current_validation_gradient = None;
             quiet = 0;
             longest_quiet = 0;
             restarts += 1;
@@ -3922,10 +4089,16 @@ where
                     symmetrised += 1;
                     if es < e {
                         symmetry_gain += e - es;
-                        e = es;
-                        x = xs;
+                        adopt_minimum!(
+                            es,
+                            xs,
+                            sym_gradient,
+                            AdoptionHistory::Fresh,
+                            None,
+                            Some("stall-symmetrise"),
+                            hops
+                        );
                         here = None;
-                        current_validation_gradient = sym_gradient;
                     }
                 }
             }
@@ -3986,10 +4159,16 @@ where
             );
             hops += 1;
             restarts += 1;
-            e = ef;
-            x = xf;
+            adopt_minimum!(
+                ef,
+                xf,
+                restart_gradient,
+                AdoptionHistory::Fresh,
+                None,
+                Some("stall-restart"),
+                hops
+            );
             here = None;
-            current_validation_gradient = restart_gradient;
             stall_outcome = Some(stalled_from - e);
         }
         if stall_response.map(|arm| stall_arms[arm] == "trail") == Some(true)
@@ -4032,10 +4211,16 @@ where
             }
             // Taken whatever its energy, exactly as the climb below: the
             // chain has shown it cannot improve from where it stands.
-            e = ee;
-            x = xe;
+            adopt_minimum!(
+                ee,
+                xe,
+                trail_gradient,
+                AdoptionHistory::Fresh,
+                None,
+                Some("stall-trail"),
+                hops
+            );
             here = None;
-            current_validation_gradient = trail_gradient;
             stall_outcome = Some(stalled_from - e);
         }
         if stall_response.map(|arm| stall_arms[arm] == "climb") == Some(true) {
@@ -4079,15 +4264,23 @@ where
                     // Taken whatever its energy. The chain has already shown it
                     // cannot improve from where it is, so the value of the new
                     // structure is that it is somewhere else.
-                    if cfg.minima_hopping {
+                    let local_feedback = if cfg.minima_hopping {
                         let from = *here.get_or_insert_with(|| identity.basin_of(x.view()));
                         let reached = identity.basin_of(xe.view());
-                        feedback.observe(Some(from), reached);
                         here = Some(reached);
-                    }
-                    e = ee;
-                    x = xe;
-                    current_validation_gradient = escape_gradient;
+                        Some((Some(from), reached))
+                    } else {
+                        None
+                    };
+                    adopt_minimum!(
+                        ee,
+                        xe,
+                        escape_gradient,
+                        AdoptionHistory::Fresh,
+                        local_feedback,
+                        Some("stall-climb"),
+                        hops
+                    );
                     if !cfg.minima_hopping {
                         here = None;
                     }
@@ -4187,9 +4380,15 @@ where
                     if j.energy < e {
                         sb.observe_gain(e - j.energy);
                     }
-                    e = j.energy;
-                    x = j.state;
-                    current_validation_gradient = None;
+                    adopt_minimum!(
+                        j.energy,
+                        j.state,
+                        None,
+                        AdoptionHistory::Fresh,
+                        None,
+                        Some("superbasin-exit"),
+                        hops
+                    );
                     here = Some(j.basin);
                 }
             }
@@ -4220,10 +4419,14 @@ where
                 // lands in a cold rung that can polish it.
                 chains.insert(
                     rep,
-                    ParkedMinimum {
+                    OccupiedMinimum {
                         energy: e,
                         coordinates: x.clone(),
                         gradient: current_validation_gradient.take(),
+                        history_minimum: history_here,
+                        local_minimum: here,
+                        generation: occupancy_generation,
+                        pending_initial: false,
                     },
                 );
                 // A placeholder only; the destination rung's own bias is taken
@@ -4372,10 +4575,27 @@ where
                     }
                     rep = j;
                 }
-                let next = chains.remove(rep);
-                e = next.energy;
-                x = next.coordinates;
-                current_validation_gradient = next.gradient;
+                let mut next = chains.remove(rep);
+                if next.pending_initial {
+                    if let (Some(h), Some(g)) = (history.as_deref_mut(), next.gradient.as_ref()) {
+                        if let Some(report) =
+                            h.observe(next.energy, next.coordinates.view(), g.view())
+                        {
+                            h.mark_accepted(report.minimum);
+                            next.history_minimum = Some(report.minimum);
+                            history_seen.insert(report.minimum, 1);
+                        }
+                    }
+                    next.pending_initial = false;
+                }
+                (
+                    e,
+                    x,
+                    current_validation_gradient,
+                    history_here,
+                    occupancy_generation,
+                    here,
+                ) = next.into_live();
                 bias = biases.remove(rep);
                 if cfg.hmc.is_some() && rep < hop_parked.len() {
                     hop = Some(hop_parked.remove(rep));
@@ -4426,6 +4646,7 @@ where
                 if let Some(t) = target {
                     paths_run += 1;
                     let start_cv = bias.cv(x.view());
+                    let mut path_certificates = Vec::new();
                     let out = interpolate_path(
                         x.view(),
                         t.view(),
@@ -4435,7 +4656,7 @@ where
                                 return None;
                             }
                             let (ev, xv) = relax(ledger, img, cfg.relax_steps);
-                            record_quenched_answer(
+                            let certificate = record_quenched_answer(
                                 cfg,
                                 ledger,
                                 &mut grad,
@@ -4443,6 +4664,7 @@ where
                                 xv.view(),
                                 &mut unconverged_records,
                             );
+                            path_certificates.push((ev, xv.clone(), certificate));
                             Some((ev, xv))
                         },
                         |st| {
@@ -4462,9 +4684,23 @@ where
                         if esc.energy < e {
                             path_improvements += 1;
                             path_gain += e - esc.energy;
-                            e = esc.energy;
-                            x = esc.state.clone();
-                            current_validation_gradient = None;
+                            let certificate = path_certificates.iter().rev().find_map(
+                                |(energy, state, gradient)| {
+                                    (*energy == esc.energy && *state == esc.state)
+                                        .then(|| gradient.clone())
+                                        .flatten()
+                                },
+                            );
+                            adopt_minimum!(
+                                esc.energy,
+                                esc.state.clone(),
+                                certificate,
+                                AdoptionHistory::Fresh,
+                                None,
+                                Some("path-escape"),
+                                hops
+                            );
+                            here = None;
                         }
                     }
                 }
