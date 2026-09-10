@@ -48,8 +48,9 @@ Three different questions require three different checks.
    requires a valid boundary and a maximum absolute gradient component below
    its configured tolerance. The atomic runner also has its own relaxation
    certificate. The box paths use a history tolerance of =1e-3=; the
-   values-only path pays for a base objective and one clipped forward
-   difference per coordinate. These are numerical admission rules, not a
+   values-only path pays for a base objective and a distinct feasible
+   one-sided probe on each nonfixed coordinate. Both box paths project the
+   certificate onto feasible bound directions. These are numerical admission rules, not a
    proof of global optimality or a positive-definite Hessian.
 2. /Is this the same minimum?/ The
    [[file:../../../src/methods/minima_hopping/history.rs][minimum history]]
@@ -118,11 +119,13 @@ endpoint and =HISTORY_NNG_SERVE=1= requests a local server. The client sends
 energy, design coordinates, gradient and box widths, and receives identity
 and counts. Observation and acceptance publication are separate requests, not
 one atomic adoption transaction. It does not receive a coordinate proposal.
-These messages are neither census pub/sub nor catalog RPC. A configured
-endpoint alone does not prove successful sharing: the box hook can fall back
-to =Off= on dial failure,
-and the client reports zero history-cost counters. Received observations and
-an actual shared table need independent evidence.
+These messages are neither census pub/sub nor catalog RPC. Requested transport
+setup failures are fatal to the infallible box entry points; a build without
+=history-nng= rejects an explicit =HISTORY_NNG= request in shared mode. Private
+and disabled history do not request that transport. The client still reports
+zero history-cost counters and collapses request failures into absent reports
+or acknowledgments. Received observations and an actual shared table need
+independent evidence.
 
 * Live minima, well tables and deposits
 
@@ -210,13 +213,17 @@ select a manifold for the host's search. The production call paths are:
 |-------------+-----------------------+------------------------|
 | Atomic quench | =WarmLbfgs= delegates to =rgmin::Lbfgs= | Ambient coordinates; the objective adapter supplies frozen-force handling |
 | Box quench | =local_polish::projected_gradient_polish= | In-tree bounded L-BFGS, clipping and active-bound stationarity |
-| NVE escape | =rgsaddle::SamdSession= | Explicit Euclidean or rigid-quotient selection; =step_on= projects, retracts and transports |
+| NVE escape | =rgsaddle::SamdSession= | Euclidean, rigid quotient, or the hopping loop's frozen-atom constraint chart; =step_on= projects, retracts and transports |
 | Saddle refinement | =rgsaddle::SellaSaddleSession= | Euclidean or Cartesian constraint chart selected by the PES adapter |
 | Rigid SOAP proposal | Groupwise Kabsch retraction | Preserves declared intragroup distances for that proposal, not every subsequent quench |
 
-The ordinary atomic hop constructs its NVE controls with Euclidean geometry.
-The =lj_joint_optimum= comparison selects the rigid quotient explicitly for
-its cluster arm. General box search does not expose the rgmin manifold setter.
+The ordinary atomic hop constructs Euclidean NVE controls and passes its
+frozen-atom mask. A nonempty frozen set supplies rgsaddle Cartesian translation
+constraints for launch projection, optional softening and every trajectory
+step. Those fixed atoms define the frame; this chart is not combined with a
+rigid-quotient projector. Without fixed atoms, the configured geometry retains
+its stepping path. The =lj_joint_optimum= comparison selects the rigid quotient
+explicitly for its cluster arm. General box search does not expose the rgmin manifold setter.
 Its quadratic tests named =Sphere= are objectives inside a box, not searches
 constrained to a unit sphere.
 
@@ -240,6 +247,24 @@ contextual dispatch, not fall back to a coordinate-only comparison. Cell
 metadata alone does not turn a finite-cluster matcher into a periodic
 fixed-substrate matcher; both descriptor construction and exact identity
 must implement the declared periodic and frozen-coordinate equivalences.
+
+* Colored-noise state and search ownership
+
+The [[file:../../../src/methods/gle_langevin.rs][GLE driver]] is a standalone
+annealing method and an arm of the gradient-enabled portfolio. It is not a
+move in the communicating atomic or box-hop loops. The thermostat's physical
+momentum and auxiliary rows form one correlated state. Temperature changes
+rescale that entire state by =sqrt(T_new/T_old)= without drawing a new state;
+discarding the auxiliaries removes information required by subsequent steps.
+Independent driver calls initialize independent thermostat states, including
+separate portfolio arm invocations.
+
+Scalar frequency-calibration probes share the driver's gradient allowance.
+=n_evals= counts gradients here, while =n_preconditioner_grads= identifies
+gradient-only calibration work; neither counter is the box driver's combined
+objective-plus-gradient charge. Correct thermostat state and accounting do not
+establish improved global-minimum discovery. That requires measured starts,
+seeds, objectives and charged work for the compared search configurations.
 
 * Coordinate-changing actions and checkpoint arbitration
 
