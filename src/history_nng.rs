@@ -14,6 +14,7 @@ use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
 use ndarray::{Array1, ArrayView1};
+use nng::options::protocol::reqrep::ResendTime;
 use nng::options::{Options, RecvTimeout, SendTimeout};
 use nng::{Message, Protocol, Socket};
 
@@ -314,6 +315,11 @@ impl HistoryNngClient {
         socket
             .set_opt::<RecvTimeout>(Some(timeout))
             .map_err(|error| HistoryNngError(format!("reply timeout: {error}")))?;
+        // Observe and accept increment counts. A lost acknowledgment leaves
+        // their outcome unknown, so the transport must not replay them.
+        socket
+            .set_opt::<ResendTime>(None)
+            .map_err(|error| HistoryNngError(format!("disable request replay: {error}")))?;
         socket
             .dial(url)
             .map_err(|error| HistoryNngError(format!("dial {url}: {error}")))?;
