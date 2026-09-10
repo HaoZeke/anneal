@@ -131,9 +131,12 @@ cannot receive acceptance acknowledgments. The hook reports observation and
 refusal counts plus request elapsed time, but the box result does not expose
 that elapsed cost. Client sends and reply waits each have a five-second limit;
 =HistoryNngClient::dial_with_timeout= accepts another positive duration. Those
-limits do not cover synchronous endpoint resolution. There is no
-application-level deduplication, so retransmitted mutations have no
-exactly-once guarantee.
+limits do not cover synchronous endpoint resolution. Automatic request replay
+is disabled because observing or accepting a minimum increments counters. A
+lost acknowledgment leaves the mutation's outcome unknown; the caller must
+not interpret that error as proof that the server did nothing or blindly
+repeat it. There is no application-level deduplication or exactly-once
+guarantee.
 
 * Live minima, well tables and deposits
 
