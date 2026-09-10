@@ -213,8 +213,7 @@ where
             HistoryMode::Private => (0..replica_count)
                 .map(|_| {
                     Mutex::new(
-                        MinimumHistory::new(gradient_tolerance)
-                            .expect("finite gradient tolerance"),
+                        MinimumHistory::new(gradient_tolerance).expect("finite gradient tolerance"),
                     )
                 })
                 .collect(),
@@ -236,8 +235,9 @@ where
     let mut biases: Vec<BasinBias<RawCoordinates>> = (0..replica_count)
         .map(|_| BasinBias::new(RawCoordinates, merge, 0.1, 5.0))
         .collect();
-    let mut history_seen: Vec<std::collections::HashMap<usize, u64>> =
-        (0..replica_count).map(|_| std::collections::HashMap::new()).collect();
+    let mut history_seen: Vec<std::collections::HashMap<usize, u64>> = (0..replica_count)
+        .map(|_| std::collections::HashMap::new())
+        .collect();
     let mut hooks: Vec<ReplicaHook<'_>> = (0..replica_count)
         .map(|index| {
             replica_hook(
@@ -307,8 +307,7 @@ where
             values_certificate(obj, replica.x.view(), &mut replica.work, replica.budget);
         n_evals += replica.work - before;
         if let Some(gradient) = certified {
-            if let Some(report) =
-                hooks[index].observe(replica.f, replica.x.view(), gradient.view())
+            if let Some(report) = hooks[index].observe(replica.f, replica.x.view(), gradient.view())
             {
                 history_observations += 1;
                 hooks[index].mark_accepted(report.minimum);
@@ -620,8 +619,7 @@ where
             HistoryMode::Private => (0..replica_count)
                 .map(|_| {
                     Mutex::new(
-                        MinimumHistory::new(gradient_tolerance)
-                            .expect("finite gradient tolerance"),
+                        MinimumHistory::new(gradient_tolerance).expect("finite gradient tolerance"),
                     )
                 })
                 .collect(),
@@ -643,8 +641,9 @@ where
     let mut biases: Vec<BasinBias<RawCoordinates>> = (0..replica_count)
         .map(|_| BasinBias::new(RawCoordinates, merge, 0.1, 5.0))
         .collect();
-    let mut history_seen: Vec<std::collections::HashMap<usize, u64>> =
-        (0..replica_count).map(|_| std::collections::HashMap::new()).collect();
+    let mut history_seen: Vec<std::collections::HashMap<usize, u64>> = (0..replica_count)
+        .map(|_| std::collections::HashMap::new())
+        .collect();
     let mut hooks: Vec<ReplicaHook<'_>> = (0..replica_count)
         .map(|index| {
             replica_hook(
@@ -727,11 +726,8 @@ where
             replica.budget,
             &mut n_grads,
         ) {
-            if let Some(report) = hooks[index].observe(
-                replica.f,
-                replica.x.view(),
-                gradient.view(),
-            ) {
+            if let Some(report) = hooks[index].observe(replica.f, replica.x.view(), gradient.view())
+            {
                 history_observations += 1;
                 hooks[index].mark_accepted(report.minimum);
                 replica.feedback.register_initial(report.minimum);
@@ -758,14 +754,8 @@ where
                 replica.trial[j] += STEP0 * escape * widths[j] * noise;
             }
             replica.trial = reflect_into_box(replica.trial.view(), &bounds);
-            let polish = projected_gradient_polish(
-                obj,
-                grad,
-                replica.trial.clone(),
-                depth,
-                1.0,
-                1e-8,
-            );
+            let polish =
+                projected_gradient_polish(obj, grad, replica.trial.clone(), depth, 1.0, 1e-8);
             let used_evals = polish.n_evals;
             let mut used_grads = polish.n_grads;
             replica.work += used_evals + used_grads;
@@ -1103,12 +1093,8 @@ mod tests {
             &witness,
             HistoryMembership::Accepted,
         );
-        let mut second = SharedDesignHistory::new(
-            &history,
-            context,
-            &witness,
-            HistoryMembership::Accepted,
-        );
+        let mut second =
+            SharedDesignHistory::new(&history, context, &witness, HistoryMembership::Accepted);
         let zero = array![0.0, 0.0];
         let a = first
             .observe(-1.0, array![2.0, 2.0].view(), zero.view())
@@ -1133,12 +1119,8 @@ mod tests {
             &witness,
             HistoryMembership::Accepted,
         );
-        let mut second = SharedDesignHistory::new(
-            &right,
-            context,
-            &witness,
-            HistoryMembership::Accepted,
-        );
+        let mut second =
+            SharedDesignHistory::new(&right, context, &witness, HistoryMembership::Accepted);
         let zero = array![0.0, 0.0];
         first
             .observe(-1.0, array![2.0, 2.0].view(), zero.view())
