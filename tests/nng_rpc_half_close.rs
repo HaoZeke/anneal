@@ -2,6 +2,7 @@
 
 use anneal_core::nng_rpc::{NngIo, accept_pair, dial_pair, listen};
 use nng::Protocol;
+use nng::options::{Options, RecvTimeout, SendTimeout};
 use std::future::poll_fn;
 use std::pin::Pin;
 use std::process::{Command, Stdio};
@@ -232,4 +233,71 @@ fn flush_waits_for_peer_pump_but_not_application_read() {
         permit_read.send(()).unwrap();
     });
     server.join().unwrap();
+}
+
+#[test]
+fn peer_disconnect_during_pair_handoff_fails_an_idle_read() {
+    if !in_bounded_child("peer_disconnect_during_pair_handoff_fails_an_idle_read") {
+        return;
+    }
+
+    const PING: &[u8] = b"handoff ping";
+    const PONG: &[u8] = b"handoff pong";
+    for delay_ms in [10, 50, 100, 200] {
+        let accept = listen(Protocol::Rep0, "127.0.0.1:0").unwrap();
+        let advertised = accept.url.clone();
+        let (permit_drop, wait_for_drop) = mpsc::channel();
+        let (dropped, peer_dropped) = mpsc::channel();
+        let server = std::thread::spawn(move || {
+            let pair = accept_pair(&accept.socket).unwrap();
+            pair.socket
+                .set_opt::<RecvTimeout>(Some(IO_DEADLINE))
+                .unwrap();
+            pair.socket
+                .set_opt::<SendTimeout>(Some(IO_DEADLINE))
+                .unwrap();
+            let request = pair.socket.recv().unwrap();
+            assert_eq!(&request[..], PING);
+            pair.socket.send(PONG).unwrap();
+            wait_for_drop
+                .recv_timeout(IO_DEADLINE)
+                .expect("the client must consume the raw reply before peer closure");
+            drop(pair);
+            dropped.send(()).unwrap();
+        });
+
+        let pair = dial_pair(&advertised, IO_DEADLINE).unwrap();
+        pair.socket
+            .set_opt::<RecvTimeout>(Some(IO_DEADLINE))
+            .unwrap();
+        pair.socket
+            .set_opt::<SendTimeout>(Some(IO_DEADLINE))
+            .unwrap();
+        pair.socket.send(PING).unwrap();
+        let response = pair.socket.recv().unwrap();
+        assert_eq!(&response[..], PONG);
+        permit_drop.send(()).unwrap();
+        peer_dropped
+            .recv_timeout(IO_DEADLINE)
+            .expect("the peer must drop its established pair");
+        server.join().unwrap();
+
+        // Raw ping/pong is consumed without a carrier, so no FIN exists.
+        // Handoff delays exercise removal before carrier construction; they
+        // do not establish when the transport callback runs.
+        std::thread::sleep(Duration::from_millis(delay_ms));
+        runtime().block_on(async move {
+            let mut io = NngIo::new(pair).unwrap();
+            let mut byte = [0u8; 1];
+            let result = tokio::time::timeout(IO_DEADLINE, io.read(&mut byte))
+                .await
+                .unwrap_or_else(|_| {
+                    panic!("an idle read must report peer removal across a {delay_ms}ms handoff")
+                });
+            assert!(
+                result.is_err(),
+                "peer removal without FIN must be an error, not EOF or data: {result:?}"
+            );
+        });
+    }
 }
