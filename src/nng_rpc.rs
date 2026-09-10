@@ -864,6 +864,169 @@ fn format_bound(requested: &str, local: nng::SocketAddr) -> (String, Option<Sock
 }
 
 #[cfg(test)]
+mod lifecycle_tests {
+    use super::*;
+    use std::process::{Command, Stdio};
+    use std::sync::mpsc;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    const CHILD: &str = "ANNEAL_NNG_DEADLINE_CHILD";
+    const LIMIT: Duration = Duration::from_millis(500);
+    const TEST_LIMIT: Duration = Duration::from_secs(3);
+
+    fn in_bounded_child(name: &str) -> bool {
+        if std::env::var(CHILD).as_deref() == Ok(name) {
+            return true;
+        }
+        let mut child = Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", name, "--nocapture"])
+            .env(CHILD, name)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let started = Instant::now();
+        let terminated = loop {
+            if child.try_wait().unwrap().is_some() {
+                break true;
+            }
+            if started.elapsed() >= Duration::from_secs(30) {
+                child.kill().unwrap();
+                break false;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        };
+        let output = child.wait_with_output().unwrap();
+        assert!(
+            terminated && output.status.success(),
+            "{name} must satisfy its carrier deadline contract; terminated={terminated}:\n{}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr),
+        );
+        false
+    }
+
+    fn runtime() -> tokio::runtime::Runtime {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+    }
+
+    fn unacknowledged_operation_times_out(shutdown: bool) {
+        let accept = listen(Protocol::Rep0, "127.0.0.1:0").unwrap();
+        let advertised = accept.url.clone();
+        let (received, wait_for_received) = mpsc::channel();
+        let (finish, wait_for_finish) = mpsc::channel();
+        let server = std::thread::spawn(move || {
+            let pair = accept_pair(&accept.socket).unwrap();
+            pair.socket
+                .set_opt::<RecvTimeout>(Some(TEST_LIMIT))
+                .unwrap();
+            let frame = pair.socket.recv().unwrap();
+            assert_eq!(&frame[FRAME_HEADER..], b"pending");
+            received.send(()).unwrap();
+            // Transport receipt without a carrier ACK cannot satisfy flush or
+            // shutdown. Keep the peer connected throughout the operation.
+            wait_for_finish.recv_timeout(TEST_LIMIT).unwrap();
+            drop(pair);
+        });
+
+        runtime().block_on(async move {
+            let pair = dial_pair(&advertised, TEST_LIMIT).unwrap();
+            let mut io = NngIo::with_timeout(pair, LIMIT).unwrap();
+            io.write_all(b"pending").await.unwrap();
+            wait_for_received.recv_timeout(TEST_LIMIT).unwrap();
+            let result = tokio::time::timeout(TEST_LIMIT, async {
+                if shutdown {
+                    io.shutdown().await
+                } else {
+                    io.flush().await
+                }
+            })
+            .await
+            .expect("an outstanding carrier acknowledgement must have a finite deadline");
+            assert_eq!(result.unwrap_err().kind(), io::ErrorKind::TimedOut);
+            let mut byte = [0];
+            let read_error = tokio::time::timeout(TEST_LIMIT, io.read(&mut byte))
+                .await
+                .expect("a failed carrier must wake its reader")
+                .unwrap_err();
+            assert_eq!(read_error.kind(), io::ErrorKind::TimedOut);
+            finish.send(()).unwrap();
+        });
+        server.join().unwrap();
+    }
+
+    #[test]
+    fn flush_without_peer_acknowledgement_has_a_finite_deadline() {
+        if in_bounded_child(
+            "nng_rpc::lifecycle_tests::flush_without_peer_acknowledgement_has_a_finite_deadline",
+        ) {
+            unacknowledged_operation_times_out(false);
+        }
+    }
+
+    #[test]
+    fn shutdown_without_peer_acknowledgement_has_a_finite_deadline() {
+        if in_bounded_child(
+            "nng_rpc::lifecycle_tests::shutdown_without_peer_acknowledgement_has_a_finite_deadline",
+        ) {
+            unacknowledged_operation_times_out(true);
+        }
+    }
+
+    #[test]
+    fn idle_reads_outlive_the_operation_deadline_and_receive_data() {
+        if !in_bounded_child(
+            "nng_rpc::lifecycle_tests::idle_reads_outlive_the_operation_deadline_and_receive_data",
+        ) {
+            return;
+        }
+        const PAYLOAD: &[u8] = b"result after quiet computation";
+        let accept = listen(Protocol::Rep0, "127.0.0.1:0").unwrap();
+        let advertised = accept.url.clone();
+        let (constructed, wait_for_constructed) = mpsc::channel();
+        let (write, wait_for_write) = mpsc::channel();
+        let server = std::thread::spawn(move || {
+            let pair = accept_pair(&accept.socket).unwrap();
+            runtime().block_on(async move {
+                let mut io = NngIo::with_timeout(pair, LIMIT).unwrap();
+                constructed.send(()).unwrap();
+                wait_for_write.recv_timeout(TEST_LIMIT).unwrap();
+                tokio::time::timeout(TEST_LIMIT, async {
+                    io.write_all(PAYLOAD).await.unwrap();
+                    io.flush().await.unwrap();
+                    io.shutdown().await.unwrap();
+                })
+                .await
+                .expect("the peer must remain usable across its idle interval");
+            });
+        });
+
+        runtime().block_on(async move {
+            let pair = dial_pair(&advertised, TEST_LIMIT).unwrap();
+            let mut io = NngIo::with_timeout(pair, LIMIT).unwrap();
+            wait_for_constructed.recv_timeout(TEST_LIMIT).unwrap();
+            let mut byte = [0];
+            let quiet = tokio::time::timeout(LIMIT * 3, io.read(&mut byte)).await;
+            assert!(
+                quiet.is_err(),
+                "an idle read must remain pending, not fail or report EOF"
+            );
+            write.send(()).unwrap();
+            let mut received = Vec::new();
+            tokio::time::timeout(TEST_LIMIT, io.read_to_end(&mut received))
+                .await
+                .expect("the idle carrier must receive the response and FIN")
+                .unwrap();
+            assert_eq!(received, PAYLOAD);
+        });
+        server.join().unwrap();
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use tokio_util::compat::TokioAsyncReadCompatExt;
