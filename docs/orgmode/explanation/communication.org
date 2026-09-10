@@ -129,9 +129,11 @@ panic on transport or protocol failure; an absent report means scientific
 refusal, not a successful fallback to private history. Unknown identities
 cannot receive acceptance acknowledgments. The hook reports observation and
 refusal counts plus request elapsed time, but the box result does not expose
-that elapsed cost. Client requests have no deadline or application-level
-deduplication, so a missing reply can stall a search and retransmitted
-mutations have no exactly-once guarantee.
+that elapsed cost. Client sends and reply waits each have a five-second limit;
+=HistoryNngClient::dial_with_timeout= accepts another positive duration. Those
+limits do not cover synchronous endpoint resolution. There is no
+application-level deduplication, so retransmitted mutations have no
+exactly-once guarantee.
 
 * Live minima, well tables and deposits
 
