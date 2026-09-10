@@ -509,7 +509,7 @@ fn pump_pair(
     let mut prefer_data = false;
     let mut wake_bytes = [0; 256];
     loop {
-        loop {
+        for _ in 0..PUMP_BATCH {
             match notified.read(&mut wake_bytes) {
                 Ok(0) => return Err(io::ErrorKind::BrokenPipe.into()),
                 Ok(_) => {}
@@ -532,7 +532,10 @@ fn pump_pair(
         }
         // A readiness descriptor is not a transport-disconnect descriptor.
         // Pipe removal terminates this stream instead of replaying on reconnect.
-        if shared.disconnected.load(Ordering::Acquire) && received < PUMP_BATCH {
+        if shared.disconnected.load(Ordering::Acquire) {
+            if received == PUMP_BATCH {
+                continue;
+            }
             return Err(io::Error::new(
                 io::ErrorKind::ConnectionAborted,
                 "nng stream peer disconnected",
@@ -541,6 +544,9 @@ fn pump_pair(
 
         let mut sent = 0;
         for _ in 0..PUMP_BATCH {
+            if shared.disconnected.load(Ordering::Acquire) {
+                break;
+            }
             let outgoing = match pending
                 .take()
                 .or_else(|| next_frame(shared, &mut prefer_data))
