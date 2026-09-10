@@ -190,7 +190,10 @@ where
     }
 
     if used == 0 {
-        return unit_gle_preconditioner(dim, fallback);
+        return GlePreconditioner {
+            n_grads,
+            ..unit_gle_preconditioner(dim, fallback)
+        };
     }
     let curvature = curvature_sum.mapv(|value| (value / used as f64).abs());
 
@@ -200,7 +203,10 @@ where
         .filter(|value| value.is_finite() && *value > GLE_FREQUENCY_FLOOR)
         .collect();
     if positive.is_empty() {
-        return unit_gle_preconditioner(dim, fallback);
+        return GlePreconditioner {
+            n_grads,
+            ..unit_gle_preconditioner(dim, fallback)
+        };
     }
     positive.sort_by(|left, right| left.total_cmp(right));
     let reference = positive[positive.len() / 2].max(GLE_FREQUENCY_FLOOR);
