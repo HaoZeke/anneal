@@ -936,4 +936,154 @@ mod tests {
             );
         }
     }
+
+    struct FlatGleTrace {
+        bounds: Bounds<f64>,
+        gradient_value: f64,
+        objective_points: std::sync::Mutex<Vec<Array1<f64>>>,
+        gradient_points: std::sync::Mutex<Vec<Array1<f64>>>,
+    }
+
+    impl FlatGleTrace {
+        fn new(dim: usize, gradient_value: f64) -> Self {
+            Self {
+                bounds: Bounds::new(
+                    Array1::from_elem(dim, -1e6),
+                    Array1::from_elem(dim, 1e6),
+                    0.0,
+                ),
+                gradient_value,
+                objective_points: std::sync::Mutex::new(Vec::new()),
+                gradient_points: std::sync::Mutex::new(Vec::new()),
+            }
+        }
+    }
+
+    impl Objective<f64> for FlatGleTrace {
+        fn eval(&self, x: ArrayView1<f64>) -> f64 {
+            self.objective_points.lock().unwrap().push(x.to_owned());
+            0.0
+        }
+
+        fn bounds(&self) -> &Bounds<f64> {
+            &self.bounds
+        }
+
+        fn dim(&self) -> usize {
+            self.bounds.dims
+        }
+    }
+
+    impl Gradient<f64> for FlatGleTrace {
+        fn grad(&self, x: ArrayView1<f64>) -> Array1<f64> {
+            self.gradient_points.lock().unwrap().push(x.to_owned());
+            Array1::from_elem(x.len(), self.gradient_value)
+        }
+
+        fn dim(&self) -> usize {
+            self.bounds.dims
+        }
+    }
+
+    #[test]
+    fn preconditioner_fallback_counts_every_consumed_gradient_probe() {
+        let mut probe_counts = Vec::new();
+        for gradient_value in [0.0, f64::NAN] {
+            let surface = FlatGleTrace::new(3, gradient_value);
+            let preconditioner = estimate_gle_preconditioner(&surface, &surface, 19, 2);
+            let actual = surface.gradient_points.lock().unwrap().len();
+            assert_eq!(preconditioner.scale, Array1::from_elem(3, 1.0));
+            assert_eq!(preconditioner.diag, Array1::from_elem(3, 1.0));
+            probe_counts.push((gradient_value.is_nan(), actual, preconditioner.n_grads));
+        }
+
+        let surface = FlatGleTrace::new(3, 0.0);
+        let result = gle_langevin_preconditioned_sa(
+            &surface,
+            &surface,
+            19,
+            5,
+            0.2,
+            2,
+            Some(Array1::from_vec(vec![0.25, -0.5, 0.75])),
+            Some(2),
+        );
+        let actual = surface.gradient_points.lock().unwrap().len();
+
+        assert_eq!(
+            probe_counts,
+            vec![(false, 4, 4), (true, 4, 4)],
+            "flat and rejected curvature probes remain charged when the metric falls back"
+        );
+        assert!(
+            actual <= 5,
+            "five gradient units cannot pay for {actual} calls"
+        );
+        assert_eq!(result.n_evals, actual);
+        assert_eq!(result.n_preconditioner_grads, 4);
+    }
+
+    #[test]
+    fn gle_temperature_changes_retain_auxiliary_rows() {
+        let dim = 2;
+        let seed = 0x617578;
+        let dt = 0.01;
+        let drift = optimal_sampling_drift(0.2);
+        let hot = GleThermostat::canonical(&drift, dt, 1.0, 1.0);
+        let cold = GleThermostat::canonical(&drift, dt, 1e-3, 1.0);
+        let covariance = Array2::<f64>::eye(drift.nrows());
+        let mut oracle_rng = StdRng::seed_from_u64(seed);
+        let mut retained = hot.sample_stationary(&covariance, dim, 1.0, &mut oracle_rng);
+        let mut position = Array1::zeros(dim);
+        let mut expected = vec![position.clone()];
+        for _ in 0..2 {
+            position = &position + &(retained.row(0).to_owned() * dt);
+            expected.push(position.clone());
+            hot.step(&mut retained.view_mut(), &mut oracle_rng);
+        }
+
+        let temperature_scale = 1e-3_f64.sqrt();
+        let mut physical_only = Array2::<f64>::zeros(retained.raw_dim());
+        physical_only
+            .row_mut(0)
+            .assign(&(retained.row(0).to_owned() * temperature_scale));
+        let mut physical_only_rng = oracle_rng.clone();
+        let mut physical_only_position = position.clone();
+        retained *= temperature_scale;
+        for step in 0..2 {
+            position = &position + &(retained.row(0).to_owned() * dt);
+            expected.push(position.clone());
+            physical_only_position =
+                &physical_only_position + &(physical_only.row(0).to_owned() * dt);
+            if step == 0 {
+                assert_eq!(physical_only_position, position);
+            }
+            cold.step(&mut retained.view_mut(), &mut oracle_rng);
+            cold.step(&mut physical_only.view_mut(), &mut physical_only_rng);
+        }
+        assert_ne!(
+            physical_only_position, position,
+            "the trajectory distinguishes full auxiliary memory from physical momentum alone"
+        );
+
+        let surface = FlatGleTrace::new(dim, 0.0);
+        let result = gle_langevin_sa(
+            &surface,
+            &surface,
+            seed,
+            5,
+            0.2,
+            0.2,
+            2,
+            Some(Array1::zeros(dim)),
+        );
+        let objectives = surface.objective_points.lock().unwrap();
+        let gradients = surface.gradient_points.lock().unwrap();
+        assert_eq!(result.n_evals, 5);
+        assert_eq!(result.dt, dt);
+        assert_eq!(objectives.len(), 5);
+        assert_eq!(gradients.len(), 5);
+        assert_eq!(*objectives, expected);
+        assert_eq!(*gradients, expected);
+    }
 }
