@@ -750,4 +750,92 @@ mod tests {
         assert_eq!(res.preconditioner_diag.len(), dim);
         assert!(res.n_evals <= 300);
     }
+
+    #[test]
+    fn gle_short_temperature_epochs_preserve_colored_memory() {
+        use std::sync::Mutex;
+
+        struct FlatTrace {
+            bounds: Bounds<f64>,
+            objective_points: Mutex<Vec<Array1<f64>>>,
+            gradient_points: Mutex<Vec<Array1<f64>>>,
+        }
+
+        impl Objective<f64> for FlatTrace {
+            fn eval(&self, x: ArrayView1<f64>) -> f64 {
+                self.objective_points.lock().unwrap().push(x.to_owned());
+                0.0
+            }
+
+            fn bounds(&self) -> &Bounds<f64> {
+                &self.bounds
+            }
+
+            fn dim(&self) -> usize {
+                self.bounds.dims
+            }
+        }
+
+        impl Gradient<f64> for FlatTrace {
+            fn grad(&self, x: ArrayView1<f64>) -> Array1<f64> {
+                self.gradient_points.lock().unwrap().push(x.to_owned());
+                Array1::zeros(x.len())
+            }
+
+            fn dim(&self) -> usize {
+                self.bounds.dims
+            }
+        }
+
+        let dim = 2;
+        let seed = 0x6c65;
+        let omega0 = 0.2;
+        let dt = 0.01;
+        let hot_temperature = 1.0;
+        let cold_temperature = 1e-3;
+        let start = Array1::zeros(dim);
+        let drift = optimal_sampling_drift(omega0);
+        let hot = GleThermostat::canonical(&drift, dt, hot_temperature, 1.0);
+        let covariance = Array2::<f64>::eye(drift.nrows()) * hot_temperature;
+        let mut oracle_rng = StdRng::seed_from_u64(seed);
+        let mut retained = hot.sample_stationary(&covariance, dim, 1.0, &mut oracle_rng);
+        let first = &start + &(retained.row(0).to_owned() * dt);
+        hot.step(&mut retained.view_mut(), &mut oracle_rng);
+        retained *= (cold_temperature / hot_temperature).sqrt();
+        let second = &first + &(retained.row(0).to_owned() * dt);
+        let surface = FlatTrace {
+            bounds: Bounds::new(
+                Array1::from_elem(dim, -1e6),
+                Array1::from_elem(dim, 1e6),
+                0.0,
+            ),
+            objective_points: Mutex::new(Vec::new()),
+            gradient_points: Mutex::new(Vec::new()),
+        };
+
+        let result = gle_langevin_sa(
+            &surface,
+            &surface,
+            seed,
+            3,
+            omega0,
+            0.2,
+            2,
+            Some(start.clone()),
+        );
+
+        let objectives = surface.objective_points.lock().unwrap();
+        let gradients = surface.gradient_points.lock().unwrap();
+        assert_eq!(result.n_evals, 3);
+        assert_eq!(result.dt, dt);
+        assert_eq!(objectives.len(), 3);
+        assert_eq!(gradients.len(), 3);
+        assert_eq!(*gradients, *objectives);
+        assert_eq!(objectives[0], start);
+        assert_eq!(objectives[1], first);
+        assert_eq!(
+            objectives[2], second,
+            "temperature changes retain and rescale the thermostat-updated state"
+        );
+    }
 }
