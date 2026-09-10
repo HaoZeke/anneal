@@ -3148,8 +3148,15 @@ where
         ledger: &ledger,
     });
     if let Some(x0) = x0 {
-        assert_eq!(x0.len(), dim, "starting point must match the objective dimension");
-        assert!(x0.iter().all(|value| value.is_finite()), "starting point must be finite");
+        assert_eq!(
+            x0.len(),
+            dim,
+            "starting point must match the objective dimension"
+        );
+        assert!(
+            x0.iter().all(|value| value.is_finite()),
+            "starting point must be finite"
+        );
         let start = bounds.clip(x0);
         budgeted_obj.eval(start.view());
     }
