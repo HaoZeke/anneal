@@ -1,15 +1,16 @@
-//! Box-constrained hop with the production communicating-chain history.
+//! Box-constrained search, split on whether a gradient exists.
 //!
-//! The move is a Gaussian kick reflected into the box, then a charged
-//! quench. Communication is one [`HistoryHook`] per replica over one
-//! [`MinimumHistory`]: in-process [`SharedDesignHistory`] behind a
-//! `Mutex`, or process-split nng Req/Rep (`HistoryNngClient`). Never
-//! both, never a third table. A certified quench, an exact witness,
-//! Goedecker escape from `observe_shared`, and other chains' visits
-//! paid into the well-tempered bias (`shared_deposits`). That is
-//! commit 225282aa, not a parallel Euclidean side table. The witness
-//! is scaled max-norm in the box; descriptors are the design
-//! coordinates and never decide identity.
+//! * [`box_ensemble_optimize`] requires a gradient: kick, quench, one
+//!   [`HistoryHook`] per replica over one [`MinimumHistory`].
+//! * [`box_values_ensemble_optimize`] is the same replica/history object
+//!   without a user gradient: kick, pattern-search, finite-difference
+//!   certificate. [`MinimumHistory`] only admits a point when that
+//!   certificate is flat. One replica and no gradient still uses
+//!   [`crate::methods::portfolio::portfolio_optimize`].
+//!
+//! A box is not a point set. Cluster
+//! [`crate::methods::cluster_hopping::Config::recommended`] does not apply.
+//! Never a third history table.
 
 use std::sync::Mutex;
 
@@ -28,6 +29,7 @@ use crate::methods::minima_hopping::{
     EscapeFeedback, HistoryHook, HistoryMembership, HistoryReport, MinimumHistory,
     SharedDesignHistory,
 };
+use crate::methods::portfolio::portfolio_optimize;
 use crate::movekernel::reflect_into_box;
 use crate::pes_exploration::{ExactStructureWitness, StructureContext};
 
@@ -96,10 +98,467 @@ pub struct BoxEnsembleResult {
     pub hops: usize,
     /// Certified observations reported to a history.
     pub history_observations: usize,
-    /// Distinct exact identities in the shared or union of private histories.
+    /// Distinct exact identities in the shared history, or the largest private table.
     pub history_minima: usize,
     /// Bias deposits made on behalf of other chains' visits.
     pub shared_deposits: usize,
+}
+
+/// Outcome of [`ensemble_hop_optimize`]: hop ledger plus history size.
+#[derive(Clone, Debug)]
+pub struct EnsembleHopResult {
+    /// Best design-space point.
+    pub best_pos: Array1<f64>,
+    /// Objective at [`EnsembleHopResult::best_pos`].
+    pub best_val: f64,
+    /// Charged hop-ledger calls (evals plus grads).
+    pub charged: usize,
+    /// Distinct exact identities in the shared or largest private history.
+    ///
+    /// Zero on the one-replica values-only portfolio, which has no hop
+    /// history. Two or more values-only replicas share this table when
+    /// a finite-difference certificate is flat.
+    pub history_minima: usize,
+}
+
+/// Search on `obj`: hop and quench when `grad` is present.
+///
+/// Without a gradient, one replica is the values-only portfolio. Two or
+/// more replicas are communicating values-only hop chains: they divide
+/// the budget, kick, pattern-search, and share [`MinimumHistory`] when
+/// a finite-difference certificate is flat. `replicas` is not ignored.
+pub fn ensemble_hop_optimize<O, G>(
+    obj: &O,
+    grad: Option<&G>,
+    seed: u64,
+    x0: Option<ArrayView1<f64>>,
+    budget: usize,
+    replicas: usize,
+    history: HistoryMode,
+    membership: HistoryMembership,
+) -> EnsembleHopResult
+where
+    O: Objective<f64>,
+    G: Gradient<f64>,
+{
+    let budget = budget.max(1);
+    if let Some(grad) = grad {
+        let config = BoxEnsembleConfig {
+            replicas: replicas.max(1),
+            budget,
+            history,
+            membership,
+            ..BoxEnsembleConfig::default()
+        };
+        let out = box_ensemble_optimize(obj, grad, seed, x0, &config);
+        return EnsembleHopResult::from(out);
+    }
+    if replicas <= 1 {
+        let out = portfolio_optimize(obj, grad, budget, seed, None);
+        return EnsembleHopResult {
+            best_pos: Array1::from(out.best_pos),
+            best_val: out.best_val,
+            charged: out.n_evals + out.n_grads,
+            history_minima: 0,
+        };
+    }
+    let config = BoxEnsembleConfig {
+        replicas,
+        budget,
+        history,
+        membership,
+        ..BoxEnsembleConfig::default()
+    };
+    EnsembleHopResult::from(box_values_ensemble_optimize(obj, seed, x0, &config))
+}
+
+impl From<BoxEnsembleResult> for EnsembleHopResult {
+    fn from(out: BoxEnsembleResult) -> Self {
+        Self {
+            best_pos: out.best_pos,
+            best_val: out.best_val,
+            charged: out.n_evals + out.n_grads,
+            history_minima: out.history_minima,
+        }
+    }
+}
+
+/// Communicating values-only hop chains. Same history object as the
+/// gradient ensemble. A point is admitted only when a one-sided
+/// finite-difference certificate is flatter than `1e-3`.
+pub fn box_values_ensemble_optimize<O>(
+    obj: &O,
+    seed: u64,
+    x0: Option<ArrayView1<f64>>,
+    config: &BoxEnsembleConfig,
+) -> BoxEnsembleResult
+where
+    O: Objective<f64>,
+{
+    let bounds = obj.bounds().clone();
+    let dim = bounds.dims.max(1);
+    let widths = &bounds.high - &bounds.low;
+    let mean_width = widths.iter().copied().sum::<f64>() / dim as f64;
+    let replica_count = config.replicas.max(1);
+    let budgets = config.budgets();
+    let gradient_tolerance = 1e-3;
+    let nng_url = shared_nng_url(config);
+    #[cfg(feature = "history-nng")]
+    let _nng_server = bind_shared_nng(config, nng_url.as_deref());
+    let histories: Vec<Mutex<MinimumHistory>> = if nng_url.is_some() {
+        Vec::new()
+    } else {
+        match config.history {
+            HistoryMode::None => Vec::new(),
+            HistoryMode::Private => (0..replica_count)
+                .map(|_| {
+                    Mutex::new(
+                        MinimumHistory::new(gradient_tolerance)
+                            .expect("finite gradient tolerance"),
+                    )
+                })
+                .collect(),
+            HistoryMode::Shared => vec![Mutex::new(
+                MinimumHistory::new(gradient_tolerance).expect("finite gradient tolerance"),
+            )],
+        }
+    };
+    let witness = WidthWitness {
+        widths: widths.clone(),
+        identity_tol: config.identity_tol,
+    };
+    let context = StructureContext::new(
+        None,
+        DescriptorGeometry::finite(mean_width.max(1e-6)).ok(),
+        Some("design-box".into()),
+    );
+    let merge = (config.identity_tol * mean_width.max(1e-12)).max(1e-12);
+    let mut biases: Vec<BasinBias<RawCoordinates>> = (0..replica_count)
+        .map(|_| BasinBias::new(RawCoordinates, merge, 0.1, 5.0))
+        .collect();
+    let mut history_seen: Vec<std::collections::HashMap<usize, u64>> =
+        (0..replica_count).map(|_| std::collections::HashMap::new()).collect();
+    let mut hooks: Vec<ReplicaHook<'_>> = (0..replica_count)
+        .map(|index| {
+            replica_hook(
+                config,
+                nng_url.as_deref(),
+                &histories,
+                &witness,
+                &context,
+                &widths,
+                index,
+            )
+        })
+        .collect();
+
+    let mut replicas: Vec<Replica> = (0..replica_count)
+        .map(|index| {
+            let mut rng = StdRng::seed_from_u64(seed ^ (index as u64).wrapping_mul(0x9E37_79B9));
+            let start = if index == 0 {
+                if let Some(x0) = x0 {
+                    bounds.clip(x0)
+                } else {
+                    bounds.clip(((&bounds.low + &bounds.high) * 0.5).view())
+                }
+            } else {
+                let mut draw = Array1::zeros(dim);
+                for j in 0..dim {
+                    draw[j] = bounds.low[j] + widths[j] * rng.random::<f64>();
+                }
+                bounds.clip(draw.view())
+            };
+            Replica {
+                trial: start.clone(),
+                cv: start.clone(),
+                rng,
+                x: start,
+                f: f64::INFINITY,
+                work: 0,
+                budget: budgets[index],
+                hops: 0,
+                here: None,
+                feedback: EscapeFeedback::new(1.0, 0.1),
+                generation: 0,
+            }
+        })
+        .collect();
+
+    let mut n_evals = 0usize;
+    let n_grads = 0usize;
+    let mut history_observations = 0usize;
+    let mut shared_deposits = 0usize;
+
+    for (index, replica) in replicas.iter_mut().enumerate() {
+        if replica.budget == 0 {
+            continue;
+        }
+        let start_depth = values_search_depth(dim, replica.budget);
+        let polish = pattern_search_polish(obj, replica.x.clone(), start_depth.max(1));
+        replica.work += polish.n_evals;
+        n_evals += polish.n_evals;
+        if polish.best_val.is_finite() {
+            replica.x = polish.best_pos;
+            replica.f = polish.best_val;
+            replica.cv = replica.x.clone();
+        }
+        let before = replica.work;
+        let certified =
+            values_certificate(obj, replica.x.view(), &mut replica.work, replica.budget);
+        n_evals += replica.work - before;
+        if let Some(gradient) = certified {
+            if let Some(report) =
+                hooks[index].observe(replica.f, replica.x.view(), gradient.view())
+            {
+                history_observations += 1;
+                hooks[index].mark_accepted(report.minimum);
+                replica.feedback.register_initial(report.minimum);
+                replica.here = Some(report.minimum);
+            }
+        }
+    }
+
+    loop {
+        let mut progressed = false;
+        for (index, replica) in replicas.iter_mut().enumerate() {
+            let remaining = replica.budget.saturating_sub(replica.work);
+            let depth = values_search_depth(dim, remaining);
+            if remaining < 4 || depth == 0 {
+                continue;
+            }
+            progressed = true;
+            replica.generation += 1;
+            replica.hops += 1;
+            let escape = replica.feedback.escape();
+            replica.trial.assign(&replica.x);
+            for j in 0..dim {
+                let noise: f64 = StandardNormal.sample(&mut replica.rng);
+                replica.trial[j] += STEP0 * escape * widths[j] * noise;
+            }
+            replica.trial = reflect_into_box(replica.trial.view(), &bounds);
+            let polish = pattern_search_polish(obj, replica.trial.clone(), depth);
+            replica.work += polish.n_evals;
+            n_evals += polish.n_evals;
+            let mut report = None;
+            if polish.best_val.is_finite() {
+                let before = replica.work;
+                let certified = values_certificate(
+                    obj,
+                    polish.best_pos.view(),
+                    &mut replica.work,
+                    replica.budget,
+                );
+                n_evals += replica.work - before;
+                if let Some(gradient) = certified {
+                    report = hooks[index].observe(
+                        polish.best_val,
+                        polish.best_pos.view(),
+                        gradient.view(),
+                    );
+                }
+            }
+            let trial_x = polish.best_pos;
+            let trial_f = polish.best_val;
+            if let Some(report) = report {
+                history_observations += 1;
+                replica.feedback.observe_shared(
+                    replica.here,
+                    report.minimum,
+                    report.is_new,
+                    report.visits.max(1),
+                );
+                if config.shared_deposits > 0 {
+                    let seen = history_seen[index].entry(report.minimum).or_insert(0);
+                    let foreign = report
+                        .visits
+                        .saturating_sub(*seen)
+                        .saturating_sub(1)
+                        .min(config.shared_deposits as u64);
+                    let cv = biases[index].cv(trial_x.view());
+                    for _ in 0..foreign {
+                        biases[index].deposit(cv.view(), temp_of(replica.generation, replica.f));
+                        shared_deposits += 1;
+                    }
+                    *seen = report.visits;
+                }
+            }
+            if !trial_f.is_finite() {
+                continue;
+            }
+            let temp = temp_of(replica.generation, replica.f);
+            let trial_cv = biases[index].cv(trial_x.view());
+            let v_here = biases[index].potential(replica.cv.view());
+            let v_trial = biases[index].potential(trial_cv.view());
+            let delta = (trial_f + v_trial) - (replica.f + v_here);
+            let accept =
+                delta <= 0.0 || replica.rng.random::<f64>() < (-delta / temp.max(1e-300)).exp();
+            if accept {
+                replica.x = trial_x;
+                replica.f = trial_f;
+                replica.cv = trial_cv;
+                biases[index].deposit(replica.cv.view(), temp);
+                if let Some(report) = report {
+                    hooks[index].mark_accepted(report.minimum);
+                    replica.here = Some(report.minimum);
+                    if report.visits == 0 {
+                        history_seen[index].insert(report.minimum, 1);
+                    }
+                }
+            }
+        }
+        if !progressed {
+            break;
+        }
+    }
+
+    let mut best_pos = replicas[0].x.clone();
+    let mut best_val = replicas[0].f;
+    let mut hops = 0usize;
+    for replica in &replicas {
+        hops += replica.hops;
+        if replica.f.is_finite() && replica.f < best_val {
+            best_val = replica.f;
+            best_pos = replica.x.clone();
+        }
+    }
+    let history_minima = nng_minimum_count(hooks.first()).unwrap_or_else(|| {
+        histories
+            .iter()
+            .map(|history| history.lock().map(|h| h.minimum_count()).unwrap_or(0))
+            .max()
+            .unwrap_or(0)
+    });
+
+    BoxEnsembleResult {
+        best_pos,
+        best_val,
+        n_evals,
+        n_grads,
+        hops,
+        history_observations,
+        history_minima,
+        shared_deposits,
+    }
+}
+
+struct ValuesPolish {
+    best_pos: Array1<f64>,
+    best_val: f64,
+    n_evals: usize,
+}
+
+fn pattern_search_polish<O: Objective<f64>>(
+    obj: &O,
+    mut x: Array1<f64>,
+    max_evals: usize,
+) -> ValuesPolish {
+    let bounds = obj.bounds();
+    let mut f = obj.eval(x.view());
+    let mut n = 1usize;
+    if !f.is_finite() || max_evals <= 1 {
+        return ValuesPolish {
+            best_pos: x,
+            best_val: f,
+            n_evals: n,
+        };
+    }
+    let widths = &bounds.high - &bounds.low;
+    let mut step = 0.1;
+    while n + x.len() < max_evals && step > 1e-8 {
+        let mut improved = false;
+        for i in 0..x.len() {
+            for sgn in [-1.0, 1.0] {
+                if n >= max_evals {
+                    return ValuesPolish {
+                        best_pos: x,
+                        best_val: f,
+                        n_evals: n,
+                    };
+                }
+                let mut trial = x.clone();
+                trial[i] += sgn * step * widths[i].max(1e-12);
+                trial = bounds.clip(trial.view());
+                let ft = obj.eval(trial.view());
+                n += 1;
+                if ft.is_finite() && ft < f {
+                    x = trial;
+                    f = ft;
+                    improved = true;
+                }
+            }
+        }
+        if !improved {
+            step *= 0.5;
+        }
+    }
+    ValuesPolish {
+        best_pos: x,
+        best_val: f,
+        n_evals: n,
+    }
+}
+
+fn values_search_depth(dim: usize, remaining: usize) -> usize {
+    let certificate = dim + 1;
+    let room = remaining.saturating_sub(certificate + 2);
+    if room < dim + 2 {
+        return 0;
+    }
+    room.min((4 * dim + 16).max(MIN_QUENCH))
+}
+
+fn values_certificate<O: Objective<f64>>(
+    obj: &O,
+    x: ArrayView1<f64>,
+    work: &mut usize,
+    budget: usize,
+) -> Option<Array1<f64>> {
+    let dim = x.len();
+    if *work + dim + 1 > budget {
+        return None;
+    }
+    let f0 = obj.eval(x);
+    *work += 1;
+    if !f0.is_finite() {
+        return None;
+    }
+    let mut grad = Array1::zeros(dim);
+    let step = 1e-6;
+    for i in 0..dim {
+        if *work >= budget {
+            return None;
+        }
+        let mut bumped = x.to_owned();
+        bumped[i] += step;
+        bumped = obj.bounds().clip(bumped.view());
+        let fi = obj.eval(bumped.view());
+        *work += 1;
+        if !fi.is_finite() {
+            return None;
+        }
+        let denom = (bumped[i] - x[i]).abs().max(step);
+        grad[i] = (fi - f0) / denom;
+    }
+    Some(grad)
+}
+
+fn certificate_gradient<G: Gradient<f64>>(
+    paid: Option<Array1<f64>>,
+    pos: ArrayView1<f64>,
+    grad: &G,
+    work: &mut usize,
+    budget: usize,
+    n_grads: &mut usize,
+) -> Option<Array1<f64>> {
+    if let Some(g) = paid.filter(|g| g.len() == pos.len()) {
+        return Some(g);
+    }
+    if *work >= budget {
+        return None;
+    }
+    *work += 1;
+    *n_grads += 1;
+    Some(grad.grad(pos))
 }
 
 /// Scaled max-norm witness on a box. Not IRA; not SOAP.
@@ -133,7 +592,7 @@ impl Fingerprint for RawCoordinates {
 /// one [`HistoryHook`] per replica.
 pub fn box_ensemble_optimize<O, G>(
     obj: &O,
-    grad: Option<&G>,
+    grad: &G,
     seed: u64,
     x0: Option<ArrayView1<f64>>,
     config: &BoxEnsembleConfig,
@@ -217,6 +676,8 @@ where
                 bounds.clip(draw.view())
             };
             Replica {
+                trial: start.clone(),
+                cv: start.clone(),
                 rng,
                 x: start,
                 f: f64::INFINITY,
@@ -239,13 +700,9 @@ where
         if replica.budget == 0 {
             continue;
         }
-        replica.f = obj.eval(replica.x.view());
-        replica.work += 1;
-        n_evals += 1;
-        let start_depth = quench_depth(dim, replica.budget.saturating_sub(replica.work));
-        if let Some(grad) = grad
-            && start_depth > 0
-        {
+        let start_depth = quench_depth(dim, replica.budget);
+        let mut start_grad = None;
+        if start_depth > 0 {
             let quench =
                 projected_gradient_polish(obj, grad, replica.x.clone(), start_depth, 1.0, 1e-8);
             replica.work += quench.n_evals + quench.n_grads;
@@ -254,14 +711,22 @@ where
             if quench.best_val.is_finite() {
                 replica.x = quench.best_pos;
                 replica.f = quench.best_val;
+                replica.cv = replica.x.clone();
             }
-        }
-        if let Some(grad) = grad
-            && replica.work < replica.budget
-        {
-            let gradient = grad.grad(replica.x.view());
+            start_grad = quench.best_grad;
+        } else {
+            replica.f = obj.eval(replica.x.view());
             replica.work += 1;
-            n_grads += 1;
+            n_evals += 1;
+        }
+        if let Some(gradient) = certificate_gradient(
+            start_grad,
+            replica.x.view(),
+            grad,
+            &mut replica.work,
+            replica.budget,
+            &mut n_grads,
+        ) {
             if let Some(report) = hooks[index].observe(
                 replica.f,
                 replica.x.view(),
@@ -280,50 +745,49 @@ where
         for (index, replica) in replicas.iter_mut().enumerate() {
             let remaining = replica.budget.saturating_sub(replica.work);
             let depth = quench_depth(dim, remaining);
-            if remaining < 4 || (grad.is_some() && depth == 0) {
+            if remaining < 4 || depth == 0 {
                 continue;
             }
             progressed = true;
             replica.generation += 1;
             replica.hops += 1;
             let escape = replica.feedback.escape();
-            let mut trial = replica.x.clone();
+            replica.trial.assign(&replica.x);
             for j in 0..dim {
                 let noise: f64 = StandardNormal.sample(&mut replica.rng);
-                trial[j] += STEP0 * escape * widths[j] * noise;
+                replica.trial[j] += STEP0 * escape * widths[j] * noise;
             }
-            trial = reflect_into_box(trial.view(), &bounds);
-            let (trial_x, trial_f, used_evals, used_grads, report) = match grad {
-                Some(grad) => {
-                    let polish = projected_gradient_polish(obj, grad, trial, depth, 1.0, 1e-8);
-                    let used_evals = polish.n_evals;
-                    let mut used_grads = polish.n_grads;
-                    replica.work += used_evals + used_grads;
-                    let mut report = None;
-                    if polish.best_val.is_finite() && replica.work < replica.budget {
-                        let gradient = grad.grad(polish.best_pos.view());
-                        replica.work += 1;
-                        used_grads += 1;
-                        report = hooks[index].observe(
-                            polish.best_val,
-                            polish.best_pos.view(),
-                            gradient.view(),
-                        );
-                    }
-                    (
-                        polish.best_pos,
+            replica.trial = reflect_into_box(replica.trial.view(), &bounds);
+            let polish = projected_gradient_polish(
+                obj,
+                grad,
+                replica.trial.clone(),
+                depth,
+                1.0,
+                1e-8,
+            );
+            let used_evals = polish.n_evals;
+            let mut used_grads = polish.n_grads;
+            replica.work += used_evals + used_grads;
+            let mut report = None;
+            if polish.best_val.is_finite() {
+                if let Some(gradient) = certificate_gradient(
+                    polish.best_grad,
+                    polish.best_pos.view(),
+                    grad,
+                    &mut replica.work,
+                    replica.budget,
+                    &mut used_grads,
+                ) {
+                    report = hooks[index].observe(
                         polish.best_val,
-                        used_evals,
-                        used_grads,
-                        report,
-                    )
+                        polish.best_pos.view(),
+                        gradient.view(),
+                    );
                 }
-                None => {
-                    let value = obj.eval(trial.view());
-                    replica.work += 1;
-                    (trial, value, 1, 0, None)
-                }
-            };
+            }
+            let trial_x = polish.best_pos;
+            let trial_f = polish.best_val;
             n_evals += used_evals;
             n_grads += used_grads;
             if let Some(report) = report {
@@ -353,16 +817,17 @@ where
                 continue;
             }
             let temp = temp_of(replica.generation, replica.f);
-            let v_here = biases[index].potential(biases[index].cv(replica.x.view()).view());
-            let v_trial = biases[index].potential(biases[index].cv(trial_x.view()).view());
+            let trial_cv = biases[index].cv(trial_x.view());
+            let v_here = biases[index].potential(replica.cv.view());
+            let v_trial = biases[index].potential(trial_cv.view());
             let delta = (trial_f + v_trial) - (replica.f + v_here);
             let accept =
                 delta <= 0.0 || replica.rng.random::<f64>() < (-delta / temp.max(1e-300)).exp();
             if accept {
                 replica.x = trial_x;
                 replica.f = trial_f;
-                let accepted_cv = biases[index].cv(replica.x.view());
-                biases[index].deposit(accepted_cv.view(), temp);
+                replica.cv = trial_cv;
+                biases[index].deposit(replica.cv.view(), temp);
                 if let Some(report) = report {
                     hooks[index].mark_accepted(report.minimum);
                     replica.here = Some(report.minimum);
@@ -410,6 +875,8 @@ where
 struct Replica {
     rng: StdRng,
     x: Array1<f64>,
+    trial: Array1<f64>,
+    cv: Array1<f64>,
     f: f64,
     work: usize,
     budget: usize,
@@ -694,7 +1161,7 @@ mod tests {
             identity_tol: IDENTITY_TOL,
             shared_deposits: 8,
         };
-        let out = box_ensemble_optimize(&obj, Some(&obj), 7, None, &config);
+        let out = box_ensemble_optimize(&obj, &obj, 7, None, &config);
         assert!(out.n_evals + out.n_grads <= 200);
         assert!(obj.evals.load(Ordering::Relaxed) + obj.grads.load(Ordering::Relaxed) <= 200);
         assert!(out.best_val.is_finite());
@@ -721,7 +1188,7 @@ mod tests {
             identity_tol: IDENTITY_TOL,
             shared_deposits: 8,
         };
-        let out = box_ensemble_optimize(&obj, Some(&obj), 11, Some(start.view()), &config);
+        let out = box_ensemble_optimize(&obj, &obj, 11, Some(start.view()), &config);
         assert!(out.best_val.is_finite());
         assert!(
             out.history_minima >= 1,
@@ -729,5 +1196,223 @@ mod tests {
             out.history_minima
         );
         assert!(out.history_observations >= out.history_minima);
+    }
+
+    struct Sphere {
+        bounds: Bounds<f64>,
+    }
+
+    impl Sphere {
+        fn new() -> Self {
+            Self {
+                bounds: Bounds::new(array![-2.0, -2.0, -2.0], array![2.0, 2.0, 2.0], 1e-9),
+            }
+        }
+    }
+
+    impl Objective<f64> for Sphere {
+        fn dim(&self) -> usize {
+            3
+        }
+        fn bounds(&self) -> &Bounds<f64> {
+            &self.bounds
+        }
+        fn eval(&self, x: ArrayView1<f64>) -> f64 {
+            x.dot(&x)
+        }
+    }
+
+    impl Gradient<f64> for Sphere {
+        fn dim(&self) -> usize {
+            3
+        }
+        fn grad(&self, x: ArrayView1<f64>) -> Array1<f64> {
+            2.0 * &x
+        }
+    }
+
+    #[test]
+    fn production_ensemble_runs_on_a_three_coordinate_box() {
+        let obj = Sphere::new();
+        let start = array![1.0, 1.0, 1.0];
+        let out = ensemble_hop_optimize(
+            &obj,
+            Some(&obj),
+            3,
+            Some(start.view()),
+            400,
+            2,
+            HistoryMode::Shared,
+            HistoryMembership::Accepted,
+        );
+        assert!(out.best_val.is_finite());
+        assert!(out.best_val <= 3.0);
+        assert!(out.charged > 0);
+        assert!(out.best_pos.iter().all(|v| v.abs() <= 2.0 + 1e-8));
+    }
+
+    struct FiveSphere {
+        bounds: Bounds<f64>,
+    }
+
+    impl FiveSphere {
+        fn new() -> Self {
+            Self {
+                bounds: Bounds::new(Array1::from_elem(5, -2.0), Array1::from_elem(5, 2.0), 1e-9),
+            }
+        }
+    }
+
+    impl Objective<f64> for FiveSphere {
+        fn dim(&self) -> usize {
+            5
+        }
+        fn bounds(&self) -> &Bounds<f64> {
+            &self.bounds
+        }
+        fn eval(&self, x: ArrayView1<f64>) -> f64 {
+            x.dot(&x)
+        }
+    }
+
+    impl Gradient<f64> for FiveSphere {
+        fn dim(&self) -> usize {
+            5
+        }
+        fn grad(&self, x: ArrayView1<f64>) -> Array1<f64> {
+            2.0 * &x
+        }
+    }
+
+    #[test]
+    fn a_five_coordinate_box_stays_five_coordinates() {
+        let obj = FiveSphere::new();
+        let start = Array1::from_elem(5, 1.0);
+        let out = ensemble_hop_optimize(
+            &obj,
+            Some(&obj),
+            3,
+            Some(start.view()),
+            64,
+            2,
+            HistoryMode::Shared,
+            HistoryMembership::Accepted,
+        );
+        assert_eq!(out.best_pos.len(), 5);
+        assert!(out.best_pos.iter().all(|v| v.abs() <= 2.0 + 1e-8));
+    }
+
+    #[test]
+    fn values_only_one_replica_uses_the_portfolio() {
+        let obj = Sphere::new();
+        let start = array![1.0, 1.0, 1.0];
+        let out = ensemble_hop_optimize::<_, Sphere>(
+            &obj,
+            None,
+            3,
+            Some(start.view()),
+            64,
+            1,
+            HistoryMode::Shared,
+            HistoryMembership::Accepted,
+        );
+        assert!(out.best_val.is_finite());
+        assert!(out.charged > 0);
+        assert!(out.charged <= 64);
+        assert_eq!(out.history_minima, 0);
+        assert_eq!(out.best_pos.len(), 3);
+    }
+
+    #[test]
+    fn values_only_replicas_share_a_history() {
+        let obj = Sphere::new();
+        let start = array![1.0, 1.0, 1.0];
+        let out = ensemble_hop_optimize::<_, Sphere>(
+            &obj,
+            None,
+            3,
+            Some(start.view()),
+            400,
+            2,
+            HistoryMode::Shared,
+            HistoryMembership::Accepted,
+        );
+        assert!(out.best_val.is_finite());
+        assert!(out.charged > 0);
+        assert!(out.charged <= 400);
+        assert_eq!(out.best_pos.len(), 3);
+        assert!(
+            out.history_minima >= 1,
+            "values-only replicas left history empty: minima={} best={}",
+            out.history_minima,
+            out.best_val
+        );
+        assert!(
+            out.best_val < 3.0,
+            "values-only replicas did not descend: best={}",
+            out.best_val
+        );
+    }
+
+    struct CountingSphere {
+        bounds: Bounds<f64>,
+        calls: AtomicUsize,
+    }
+
+    impl CountingSphere {
+        fn new() -> Self {
+            Self {
+                bounds: Bounds::new(Array1::from_elem(6, -2.0), Array1::from_elem(6, 2.0), 1e-9),
+                calls: AtomicUsize::new(0),
+            }
+        }
+    }
+
+    impl Objective<f64> for CountingSphere {
+        fn dim(&self) -> usize {
+            6
+        }
+        fn bounds(&self) -> &Bounds<f64> {
+            &self.bounds
+        }
+        fn eval(&self, x: ArrayView1<f64>) -> f64 {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            x.dot(&x)
+        }
+    }
+
+    impl Gradient<f64> for CountingSphere {
+        fn dim(&self) -> usize {
+            6
+        }
+        fn grad(&self, x: ArrayView1<f64>) -> Array1<f64> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            2.0 * &x
+        }
+    }
+
+    #[test]
+    fn every_box_callback_charges_the_ledger() {
+        let obj = CountingSphere::new();
+        let start = Array1::from_elem(6, 1.0);
+        let out = ensemble_hop_optimize(
+            &obj,
+            Some(&obj),
+            3,
+            Some(start.view()),
+            32,
+            2,
+            HistoryMode::Shared,
+            HistoryMembership::Accepted,
+        );
+        let n = obj.calls.load(Ordering::SeqCst);
+        assert!(n > 0);
+        assert!(out.charged > 0);
+        assert!(out.charged <= 32);
+        assert!(
+            n <= out.charged,
+            "uncharged callback: n={n} charged={}",
+            out.charged
+        );
     }
 }
