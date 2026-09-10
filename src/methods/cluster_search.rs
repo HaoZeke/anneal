@@ -499,7 +499,7 @@ where
 }
 
 /// Keep adsorbate atoms above the frozen slab after a SOAP hole step.
-#[cfg(feature = "bank-rpc")]
+#[cfg(all(feature = "bank-rpc", feature = "featomic"))]
 fn pin_adsorbate_above_slab(x: &mut Array1<f64>, cfg: &Config) {
     let Some((seeds, _)) = cfg.active_region.as_ref() else {
         return;
@@ -534,7 +534,7 @@ fn sane_sep(_cfg: &Config) -> f64 {
 }
 
 /// Mobile atom indices: the active region, or the complement of `frozen`.
-#[cfg(feature = "bank-rpc")]
+#[cfg(all(feature = "bank-rpc", feature = "featomic"))]
 fn mobile_of(cfg: &Config) -> Option<Vec<usize>> {
     if let Some((seeds, _)) = cfg.active_region.as_ref() {
         return Some(seeds.clone());
