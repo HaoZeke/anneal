@@ -1609,6 +1609,11 @@ where
     // Global visit count of each history minimum at this chain's last look,
     // so a later look deposits only what other chains added in between.
     let mut history_seen: std::collections::HashMap<usize, u64> = std::collections::HashMap::new();
+    // Deposit cursors belong to bias owners, not to the coordinates that
+    // exchange between rungs. Parked maps have the same ordering as biases.
+    let mut parked_history_seen: Vec<std::collections::HashMap<usize, u64>> = (1..n_rep)
+        .map(|_| std::collections::HashMap::new())
+        .collect();
     let mut history_observations = 0usize;
     let mut history_new = 0usize;
     let mut shared_deposits = 0usize;
@@ -4442,6 +4447,7 @@ where
                         ),
                     ),
                 );
+                parked_history_seen.insert(rep, std::mem::take(&mut history_seen));
                 if let (Some(h), Some(hc)) = (hop.take(), cfg.hmc.as_ref()) {
                     // The adaptation stays with the rung, not the state; the
                     // destination rung's own sampler is taken below.
@@ -4574,6 +4580,7 @@ where
                     }
                     rep = j;
                 }
+                history_seen = parked_history_seen.remove(rep);
                 let mut next = chains.remove(rep);
                 if next.pending_initial {
                     if let (Some(h), Some(g)) = (history.as_deref_mut(), next.gradient.as_ref()) {
@@ -4582,7 +4589,8 @@ where
                         {
                             h.mark_accepted(report.minimum);
                             next.history_minimum = Some(report.minimum);
-                            history_seen.insert(report.minimum, 1);
+                            let seen = history_seen.entry(report.minimum).or_insert(0);
+                            *seen = seen.saturating_add(1);
                         }
                     }
                     next.pending_initial = false;
