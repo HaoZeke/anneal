@@ -9,6 +9,7 @@ use crate::descriptor_space::{DescriptorError, DescriptorSpace, DescriptorVector
 use crate::methods::cluster_hopping::QuenchBoundary;
 use crate::pes_exploration::{
     ExactStructureRelation, ExactStructureWitness, MinimumAdmission, PesNetwork, StructureContext,
+    StructureView,
 };
 
 /// Exact identity and accumulated visits returned to an escape controller.
@@ -264,6 +265,24 @@ impl<W: ExactStructureWitness> ExactStructureWitness for SerializedWitness<W> {
             .lock()
             .expect("exact witness lock poisoned")
             .relation(left, right)
+    }
+
+    fn equivalent_structures(&self, left: StructureView<'_>, right: StructureView<'_>) -> bool {
+        self.0
+            .lock()
+            .expect("exact witness lock poisoned")
+            .equivalent_structures(left, right)
+    }
+
+    fn relation_structures(
+        &self,
+        left: StructureView<'_>,
+        right: StructureView<'_>,
+    ) -> ExactStructureRelation {
+        self.0
+            .lock()
+            .expect("exact witness lock poisoned")
+            .relation_structures(left, right)
     }
 }
 
