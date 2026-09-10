@@ -11,20 +11,22 @@
 //!
 //! Census and decree already speak nng. This module does not replace them.
 
-use std::io::{self, IoSlice};
+use std::collections::VecDeque;
+use std::io::{self, IoSlice, Read, Write};
 use std::net::SocketAddr;
 use std::os::unix::io::{AsRawFd, RawFd};
 use std::pin::Pin;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::task::{Context, Poll};
-use std::time::Duration;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
+use std::task::{Context, Poll, Waker};
+use std::time::{Duration, Instant};
 
 use nng::options::protocol::reqrep::ResendTime;
 use nng::options::transport::tcp::{BoundPort, NoDelay};
-use nng::options::{LocalAddr, Options, RecvFd, RecvMaxSize, RecvTimeout, SendTimeout};
-use nng::{Listener, ListenerBuilder, Protocol, Socket};
-use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
+use nng::options::{LocalAddr, Options, RecvFd, RecvMaxSize, RecvTimeout, SendFd, SendTimeout};
+use nng::{Listener, ListenerBuilder, PipeEvent, Protocol, Socket};
 use tokio::io::unix::AsyncFd;
+use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 
 const HELLO: &[u8] = b"ANNEAL-PAIR";
 static PAIR_SEQ: AtomicU64 = AtomicU64::new(1);
@@ -62,7 +64,13 @@ pub fn url(spec: &str) -> String {
 pub fn listen(protocol: Protocol, spec: &str) -> io::Result<BoundListen> {
     let requested = url(spec);
     let socket = Socket::new(protocol).map_err(nng_io)?;
-    let _ = socket.set_opt::<RecvMaxSize>(0);
+    socket
+        .set_opt::<RecvMaxSize>(if matches!(protocol, Protocol::Pair0) {
+            FRAME_HEADER + FRAME_PAYLOAD
+        } else {
+            0
+        })
+        .map_err(nng_io)?;
     let builder = ListenerBuilder::new(&socket, &requested).map_err(nng_io)?;
     let _ = builder.set_opt::<NoDelay>(true);
     let listener = match builder.start() {
@@ -140,14 +148,12 @@ pub fn dial_pair(advertised: &str, timeout: Duration) -> io::Result<PairSession>
         io::Error::new(io::ErrorKind::InvalidData, format!("pair url: {error}"))
     })?;
     if bound.is_empty() {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "empty pair url",
-        ));
+        return Err(io::Error::new(io::ErrorKind::InvalidData, "empty pair url"));
     }
     let pair_url = rewrite_pair_url(advertised, bound);
     let pair = Socket::new(Protocol::Pair0).map_err(nng_io)?;
-    let _ = pair.set_opt::<RecvMaxSize>(0);
+    pair.set_opt::<RecvMaxSize>(FRAME_HEADER + FRAME_PAYLOAD)
+        .map_err(nng_io)?;
     let _ = pair.set_opt::<SendTimeout>(Some(timeout));
     let _ = pair.set_opt::<RecvTimeout>(Some(timeout));
     pair.dial(&pair_url).map_err(nng_io)?;
@@ -159,24 +165,165 @@ pub fn dial_pair(advertised: &str, timeout: Duration) -> io::Result<PairSession>
     })
 }
 
-/// Tokio byte stream. A pump thread copies nng messages onto a Unix
-/// pair so Cap'n vat code keeps stream semantics and nng keeps frames.
+const FRAME_MAGIC: &[u8; 4] = b"ANIO";
+const FRAME_VERSION: u8 = 1;
+const FRAME_HEADER: usize = 24;
+const FRAME_PAYLOAD: usize = 64 * 1024;
+const STREAM_WINDOW: usize = 1024 * 1024;
+const PUMP_BATCH: usize = 16;
+const OPERATION_TIMEOUT: Duration = Duration::from_secs(30);
+const DATA: u8 = 1;
+const FIN: u8 = 2;
+const ACK: u8 = 3;
+const ACK_FIN: u8 = 1;
+const ACK_FIN_RECEIPT: u8 = 2;
+
+/// Tokio byte stream with bounded queues and versioned nng framing.
+///
+/// Flush acknowledges acceptance by the peer's carrier queue, not consumption
+/// by its application. Shutdown closes only the write half. Pending writes,
+/// flushes and shutdowns fail after 30 seconds without their required progress;
+/// an idle read has no deadline. Drop drains accepted writes and closes the
+/// write half through a detached pump, subject to the same finite close limit.
+/// Both endpoints must use this carrier protocol and exclusively own their
+/// pair sockets; successful nng sends alone are not delivery acknowledgements.
 pub struct NngIo {
-    stream: tokio::net::UnixStream,
+    shared: Arc<StreamShared>,
 }
 
 impl NngIo {
-    /// Wrap a pair (or any bidirectional) socket.
+    /// Wrap an exclusively owned pair socket.
     pub fn new(session: PairSession) -> io::Result<Self> {
-        let (local, remote) = std::os::unix::net::UnixStream::pair()?;
-        local.set_nonblocking(true)?;
-        remote.set_nonblocking(false)?;
-        let stream = tokio::net::UnixStream::from_std(local)?;
+        Self::with_timeout(session, OPERATION_TIMEOUT)
+    }
+
+    fn with_timeout(session: PairSession, timeout: Duration) -> io::Result<Self> {
+        let recv = session.socket.get_opt::<RecvFd>().map_err(nng_io)?;
+        let send = session.socket.get_opt::<SendFd>().map_err(nng_io)?;
+        let (wake, notified) = std::os::unix::net::UnixStream::pair()?;
+        wake.set_nonblocking(true)?;
+        notified.set_nonblocking(true)?;
+        let shared = Arc::new(StreamShared {
+            state: Mutex::new(StreamState::default()),
+            wake,
+            disconnected: AtomicBool::new(false),
+            timeout,
+        });
+        let weak = Arc::downgrade(&shared);
+        session
+            .socket
+            .pipe_notify(move |_, event| {
+                if matches!(event, PipeEvent::RemovePost)
+                    && let Some(shared) = weak.upgrade()
+                {
+                    // Socket callbacks only signal; the pump drains received
+                    // frames before resolving disconnect against stream EOF.
+                    shared.disconnected.store(true, Ordering::Release);
+                    shared.notify();
+                }
+            })
+            .map_err(nng_io)?;
+        let pump_shared = Arc::clone(&shared);
         std::thread::Builder::new()
             .name("anneal-nng-pump".into())
-            .spawn(move || pump_pair(session, remote))
-            .map_err(|error| io::Error::new(io::ErrorKind::Other, error))?;
-        Ok(Self { stream })
+            .spawn(move || {
+                if let Err(error) = pump_pair(&session, &pump_shared, notified, recv, send) {
+                    pump_shared.fail(error);
+                }
+            })?;
+        Ok(Self { shared })
+    }
+}
+
+#[derive(Default)]
+struct StreamState {
+    read_queue: VecDeque<u8>,
+    write_queue: VecDeque<u8>,
+    written: u64,
+    sent: u64,
+    peer_accepted: u64,
+    peer_consumed: u64,
+    received: u64,
+    consumed: u64,
+    write_closed: bool,
+    fin_sent: bool,
+    fin_acked: bool,
+    read_fin: bool,
+    fin_receipted: bool,
+    receipt_sent: bool,
+    dropped: bool,
+    ack_dirty: bool,
+    flush_goal: Option<(u64, Instant)>,
+    write_deadline: Option<Instant>,
+    close_deadline: Option<Instant>,
+    error: Option<(io::ErrorKind, String)>,
+    read_waker: Option<Waker>,
+    write_waker: Option<Waker>,
+    flush_waker: Option<Waker>,
+    close_waker: Option<Waker>,
+}
+
+impl StreamState {
+    fn error(&self) -> Option<io::Error> {
+        self.error
+            .as_ref()
+            .map(|(kind, message)| io::Error::new(*kind, message.clone()))
+    }
+
+    fn deadline(&self) -> Option<Instant> {
+        [
+            self.flush_goal.map(|(_, deadline)| deadline),
+            self.write_deadline,
+            self.close_deadline,
+        ]
+        .into_iter()
+        .flatten()
+        .min()
+    }
+
+    fn take_wakers(&mut self) -> [Option<Waker>; 4] {
+        [
+            self.read_waker.take(),
+            self.write_waker.take(),
+            self.flush_waker.take(),
+            self.close_waker.take(),
+        ]
+    }
+}
+
+struct StreamShared {
+    state: Mutex<StreamState>,
+    // This Unix pair carries wake bytes only, never application payload.
+    wake: std::os::unix::net::UnixStream,
+    disconnected: AtomicBool,
+    timeout: Duration,
+}
+
+impl StreamShared {
+    fn notify(&self) {
+        loop {
+            match (&self.wake).write(&[1]) {
+                Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
+                // WouldBlock means the pollable wake queue is already nonempty.
+                _ => break,
+            }
+        }
+    }
+
+    fn wake_waiters(&self) {
+        let wakers = self.state.lock().unwrap().take_wakers();
+        for waker in wakers.into_iter().flatten() {
+            waker.wake();
+        }
+    }
+
+    fn fail(&self, error: io::Error) {
+        let mut state = self.state.lock().unwrap();
+        if state.error.is_none() {
+            state.error = Some((error.kind(), error.to_string()));
+        }
+        drop(state);
+        self.wake_waiters();
     }
 }
 
@@ -189,95 +336,433 @@ impl AsRawFd for PollFd {
     }
 }
 
-fn pump_pair(session: PairSession, unix: std::os::unix::net::UnixStream) {
-    let nng_fd = match session.socket.get_opt::<RecvFd>() {
-        Ok(fd) => fd,
-        Err(_) => return,
-    };
-    let unix_fd = unix.as_raw_fd();
-    let mut buf = [0u8; 65536];
+enum SentFrame {
+    Data(usize),
+    Fin,
+    Ack { receipt: bool },
+}
+
+struct Outgoing {
+    message: nng::Message,
+    kind: SentFrame,
+}
+
+fn encode_frame(kind: u8, flags: u8, offset: u64, consumed: u64, body: &[u8]) -> nng::Message {
+    let mut frame = Vec::with_capacity(FRAME_HEADER + body.len());
+    frame.extend_from_slice(FRAME_MAGIC);
+    frame.extend_from_slice(&[FRAME_VERSION, kind, flags, 0]);
+    frame.extend_from_slice(&offset.to_le_bytes());
+    frame.extend_from_slice(&consumed.to_le_bytes());
+    frame.extend_from_slice(body);
+    nng::Message::from(frame.as_slice())
+}
+
+fn invalid_frame(reason: &str) -> io::Error {
+    io::Error::new(io::ErrorKind::InvalidData, reason)
+}
+
+fn receive_frame(shared: &StreamShared, frame: &[u8]) -> io::Result<()> {
+    if frame.len() < FRAME_HEADER
+        || frame.len() > FRAME_HEADER + FRAME_PAYLOAD
+        || &frame[..4] != FRAME_MAGIC
+        || frame[4] != FRAME_VERSION
+        || frame[7] != 0
+    {
+        return Err(invalid_frame("invalid nng stream frame header"));
+    }
+    let kind = frame[5];
+    let flags = frame[6];
+    let offset = u64::from_le_bytes(frame[8..16].try_into().unwrap());
+    let consumed = u64::from_le_bytes(frame[16..24].try_into().unwrap());
+    let body = &frame[FRAME_HEADER..];
+    let mut state = shared.state.lock().unwrap();
+    match kind {
+        DATA => {
+            let end = offset
+                .checked_add(body.len() as u64)
+                .ok_or_else(|| invalid_frame("nng stream offset overflow"))?;
+            if flags != 0
+                || consumed != 0
+                || body.is_empty()
+                || state.read_fin
+                || offset != state.received
+                || end - state.consumed > STREAM_WINDOW as u64
+            {
+                return Err(invalid_frame("unordered or over-window nng stream data"));
+            }
+            state.read_queue.extend(body);
+            state.received = end;
+            state.ack_dirty = true;
+        }
+        FIN => {
+            if flags != 0
+                || consumed != 0
+                || !body.is_empty()
+                || state.read_fin
+                || offset != state.received
+            {
+                return Err(invalid_frame("invalid nng stream final offset"));
+            }
+            state.read_fin = true;
+            state.ack_dirty = true;
+        }
+        ACK => {
+            if !body.is_empty()
+                || flags & !(ACK_FIN | ACK_FIN_RECEIPT) != 0
+                || offset < state.peer_accepted
+                || offset > state.sent
+                || consumed < state.peer_consumed
+                || consumed > offset
+                || (flags & ACK_FIN != 0 && (!state.fin_sent || offset != state.written))
+                || (flags & ACK_FIN_RECEIPT != 0 && !state.read_fin)
+            {
+                return Err(invalid_frame("invalid nng stream acknowledgement"));
+            }
+            state.peer_accepted = offset;
+            state.peer_consumed = consumed;
+            if flags & ACK_FIN != 0 && !state.fin_acked {
+                state.fin_acked = true;
+                state.ack_dirty = true;
+                // A live owner retains the read half without a close timer.
+                if !state.dropped {
+                    state.close_deadline = None;
+                }
+            }
+            if flags & ACK_FIN_RECEIPT != 0 {
+                state.fin_receipted = true;
+            }
+            if state.flush_goal.is_some_and(|(target, _)| offset >= target) {
+                state.flush_goal = None;
+            }
+        }
+        _ => return Err(invalid_frame("unknown nng stream frame kind")),
+    }
+    drop(state);
+    shared.wake_waiters();
+    Ok(())
+}
+
+fn next_frame(shared: &StreamShared, prefer_data: &mut bool) -> Option<Outgoing> {
+    let mut state = shared.state.lock().unwrap();
+    // ACKs have their own coalesced slot and do not consume byte-window credit.
+    // Alternation keeps control and payload progress independent under load.
+    let credit = (STREAM_WINDOW as u64).saturating_sub(state.sent - state.peer_consumed);
+    let data_available = !state.write_queue.is_empty() && credit > 0;
+    let fin_available = state.write_closed && state.sent == state.written && !state.fin_sent;
+    if state.ack_dirty && (!*prefer_data || (!data_available && !fin_available)) {
+        let flags =
+            u8::from(state.read_fin) * ACK_FIN | u8::from(state.fin_acked) * ACK_FIN_RECEIPT;
+        let message = encode_frame(ACK, flags, state.received, state.consumed, &[]);
+        state.ack_dirty = false;
+        *prefer_data = true;
+        return Some(Outgoing {
+            message,
+            kind: SentFrame::Ack {
+                receipt: state.fin_acked,
+            },
+        });
+    }
+    *prefer_data = false;
+    if data_available {
+        let count = state
+            .write_queue
+            .len()
+            .min(FRAME_PAYLOAD)
+            .min(credit as usize);
+        let body: Vec<u8> = state.write_queue.drain(..count).collect();
+        Some(Outgoing {
+            message: encode_frame(DATA, 0, state.sent, 0, &body),
+            kind: SentFrame::Data(count),
+        })
+    } else if fin_available {
+        Some(Outgoing {
+            message: encode_frame(FIN, 0, state.written, 0, &[]),
+            kind: SentFrame::Fin,
+        })
+    } else {
+        None
+    }
+}
+
+fn frame_sent(shared: &StreamShared, kind: SentFrame) {
+    let mut state = shared.state.lock().unwrap();
+    match kind {
+        SentFrame::Data(count) => {
+            state.sent += count as u64;
+            state.write_deadline = None;
+        }
+        SentFrame::Fin => state.fin_sent = true,
+        SentFrame::Ack { receipt } => state.receipt_sent |= receipt,
+    }
+    drop(state);
+    shared.wake_waiters();
+}
+
+fn pump_pair(
+    session: &PairSession,
+    shared: &StreamShared,
+    mut notified: std::os::unix::net::UnixStream,
+    recv_fd: RawFd,
+    send_fd: RawFd,
+) -> io::Result<()> {
+    let mut pending: Option<Outgoing> = None;
+    let mut prefer_data = false;
+    let mut wake_bytes = [0; 256];
     loop {
+        loop {
+            match notified.read(&mut wake_bytes) {
+                Ok(0) => return Err(io::ErrorKind::BrokenPipe.into()),
+                Ok(_) => {}
+                Err(error) if error.kind() == io::ErrorKind::WouldBlock => break,
+                Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
+                Err(error) => return Err(error),
+            }
+        }
+
+        let mut received = 0;
+        for _ in 0..PUMP_BATCH {
+            match session.socket.try_recv() {
+                Ok(message) => {
+                    receive_frame(shared, &message)?;
+                    received += 1;
+                }
+                Err(nng::Error::TryAgain) => break,
+                Err(error) => return Err(nng_io(error)),
+            }
+        }
+        // A readiness descriptor is not a transport-disconnect descriptor.
+        // Pipe removal terminates this stream instead of replaying on reconnect.
+        if shared.disconnected.load(Ordering::Acquire) && received < PUMP_BATCH {
+            return Err(io::Error::new(
+                io::ErrorKind::ConnectionAborted,
+                "nng stream peer disconnected",
+            ));
+        }
+
+        let mut sent = 0;
+        for _ in 0..PUMP_BATCH {
+            let outgoing = match pending
+                .take()
+                .or_else(|| next_frame(shared, &mut prefer_data))
+            {
+                Some(outgoing) => outgoing,
+                None => break,
+            };
+            let Outgoing { message, kind } = outgoing;
+            match session.socket.try_send(message) {
+                Ok(()) => {
+                    frame_sent(shared, kind);
+                    sent += 1;
+                }
+                Err((message, nng::Error::TryAgain)) => {
+                    pending = Some(Outgoing { message, kind });
+                    break;
+                }
+                Err((_, error)) => return Err(nng_io(error)),
+            }
+        }
+
+        let state = shared.state.lock().unwrap();
+        // FIN acceptance proves all preceding bytes reached the peer pump.
+        // A receipt proves our ACK of the peer's FIN reached that pump too.
+        if state.dropped
+            && state.fin_acked
+            && state.receipt_sent
+            && (!state.read_fin || state.fin_receipted)
+            && pending.is_none()
+            && !state.ack_dirty
+        {
+            return Ok(());
+        }
+        let deadline = state.deadline();
+        drop(state);
+        let timeout = if let Some(deadline) = deadline {
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                return Err(io::Error::new(
+                    io::ErrorKind::TimedOut,
+                    "nng stream write, flush or close acknowledgement timed out",
+                ));
+            }
+            remaining
+                .as_millis()
+                .saturating_add(1)
+                .min(i32::MAX as u128) as i32
+        } else {
+            -1
+        };
+        if received == PUMP_BATCH || sent == PUMP_BATCH {
+            continue;
+        }
         let mut fds = [
             libc::pollfd {
-                fd: unix_fd,
+                fd: notified.as_raw_fd(),
                 events: libc::POLLIN,
                 revents: 0,
             },
             libc::pollfd {
-                fd: nng_fd,
+                fd: recv_fd,
+                events: libc::POLLIN,
+                revents: 0,
+            },
+            libc::pollfd {
+                // Both nng readiness descriptors signal with readability.
+                fd: if pending.is_some() { send_fd } else { -1 },
                 events: libc::POLLIN,
                 revents: 0,
             },
         ];
-        let ready = unsafe { libc::poll(fds.as_mut_ptr(), 2, 100) };
+        // The descriptors remain owned by the live session and wake pair.
+        let ready = unsafe { libc::poll(fds.as_mut_ptr(), fds.len() as libc::nfds_t, timeout) };
         if ready < 0 {
-            break;
-        }
-        if fds[0].revents & (libc::POLLHUP | libc::POLLERR) != 0 {
-            break;
-        }
-        if fds[0].revents & libc::POLLIN != 0 {
-            match std::io::Read::read(&mut &unix, &mut buf) {
-                Ok(0) => break,
-                Ok(n) => {
-                    if session.socket.send(&buf[..n]).is_err() {
-                        break;
-                    }
-                }
-                Err(error) if error.kind() == io::ErrorKind::WouldBlock => {}
-                Err(_) => break,
+            let error = io::Error::last_os_error();
+            if error.kind() != io::ErrorKind::Interrupted {
+                return Err(error);
             }
         }
-        if fds[1].revents & libc::POLLIN != 0 {
-            match session.socket.try_recv() {
-                Ok(message) => {
-                    if std::io::Write::write_all(&mut &unix, &message).is_err() {
-                        break;
-                    }
-                }
-                Err(nng::Error::TryAgain) => {}
-                Err(_) => break,
-            }
-        }
-        if fds[1].revents & (libc::POLLHUP | libc::POLLERR) != 0 {
-            break;
+        if fds
+            .iter()
+            .any(|fd| fd.revents & (libc::POLLERR | libc::POLLNVAL) != 0)
+        {
+            return Err(io::Error::other("nng stream poll descriptor failed"));
         }
     }
 }
 
 impl AsyncRead for NngIo {
     fn poll_read(
-        mut self: Pin<&mut Self>,
+        self: Pin<&mut Self>,
         cx: &mut Context<'_>,
         buf: &mut ReadBuf<'_>,
     ) -> Poll<io::Result<()>> {
-        Pin::new(&mut self.stream).poll_read(cx, buf)
+        if buf.remaining() == 0 {
+            return Poll::Ready(Ok(()));
+        }
+        let mut state = self.shared.state.lock().unwrap();
+        if !state.read_queue.is_empty() {
+            let (first, second) = state.read_queue.as_slices();
+            let count = buf.remaining().min(first.len() + second.len());
+            let first_count = count.min(first.len());
+            buf.put_slice(&first[..first_count]);
+            buf.put_slice(&second[..count - first_count]);
+            state.read_queue.drain(..count);
+            state.consumed += count as u64;
+            state.ack_dirty = true;
+            drop(state);
+            self.shared.notify();
+            return Poll::Ready(Ok(()));
+        }
+        if state.read_fin {
+            return Poll::Ready(Ok(()));
+        }
+        if let Some(error) = state.error() {
+            return Poll::Ready(Err(error));
+        }
+        state.read_waker = Some(cx.waker().clone());
+        Poll::Pending
     }
 }
 
 impl AsyncWrite for NngIo {
     fn poll_write(
-        mut self: Pin<&mut Self>,
+        self: Pin<&mut Self>,
         cx: &mut Context<'_>,
         buf: &[u8],
     ) -> Poll<io::Result<usize>> {
-        Pin::new(&mut self.stream).poll_write(cx, buf)
+        let mut state = self.shared.state.lock().unwrap();
+        if let Some(error) = state.error() {
+            return Poll::Ready(Err(error));
+        }
+        if state.write_closed {
+            return Poll::Ready(Err(io::ErrorKind::BrokenPipe.into()));
+        }
+        if buf.is_empty() {
+            return Poll::Ready(Ok(0));
+        }
+        let capacity = STREAM_WINDOW - (state.written - state.sent) as usize;
+        let count = capacity.min(buf.len());
+        if count == 0 {
+            state.write_waker = Some(cx.waker().clone());
+            state
+                .write_deadline
+                .get_or_insert_with(|| Instant::now() + self.shared.timeout);
+            drop(state);
+            self.shared.notify();
+            return Poll::Pending;
+        }
+        let Some(written) = state.written.checked_add(count as u64) else {
+            return Poll::Ready(Err(invalid_frame("nng stream write offset overflow")));
+        };
+        state.write_queue.extend(&buf[..count]);
+        state.written = written;
+        state.write_deadline = None;
+        drop(state);
+        self.shared.notify();
+        Poll::Ready(Ok(count))
     }
 
-    fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
-        Pin::new(&mut self.stream).poll_flush(cx)
+    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+        let mut state = self.shared.state.lock().unwrap();
+        if state.peer_accepted == state.written {
+            state.flush_goal = None;
+            return Poll::Ready(Ok(()));
+        }
+        if let Some(error) = state.error() {
+            return Poll::Ready(Err(error));
+        }
+        let written = state.written;
+        let goal = state
+            .flush_goal
+            .get_or_insert_with(|| (written, Instant::now() + self.shared.timeout));
+        goal.0 = written;
+        state.flush_waker = Some(cx.waker().clone());
+        drop(state);
+        self.shared.notify();
+        Poll::Pending
     }
 
-    fn poll_shutdown(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
-        Pin::new(&mut self.stream).poll_shutdown(cx)
+    fn poll_shutdown(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+        let mut state = self.shared.state.lock().unwrap();
+        if state.fin_acked {
+            return Poll::Ready(Ok(()));
+        }
+        if let Some(error) = state.error() {
+            return Poll::Ready(Err(error));
+        }
+        state.write_closed = true;
+        state
+            .close_deadline
+            .get_or_insert_with(|| Instant::now() + self.shared.timeout);
+        state.close_waker = Some(cx.waker().clone());
+        drop(state);
+        self.shared.notify();
+        Poll::Pending
     }
 
     fn poll_write_vectored(
-        mut self: Pin<&mut Self>,
+        self: Pin<&mut Self>,
         cx: &mut Context<'_>,
         bufs: &[IoSlice<'_>],
     ) -> Poll<io::Result<usize>> {
-        Pin::new(&mut self.stream).poll_write_vectored(cx, bufs)
+        self.poll_write(
+            cx,
+            bufs.iter()
+                .find(|buf| !buf.is_empty())
+                .map_or(&[], |buf| &buf[..]),
+        )
+    }
+}
+
+impl Drop for NngIo {
+    fn drop(&mut self) {
+        let mut state = self.shared.state.lock().unwrap();
+        state.dropped = true;
+        state.write_closed = true;
+        state
+            .close_deadline
+            .get_or_insert_with(|| Instant::now() + self.shared.timeout);
+        drop(state);
+        self.shared.notify();
     }
 }
 
@@ -300,7 +785,10 @@ fn pair_bind_spec() -> String {
     format!("ipc:///tmp/anneal-pair-{}-{seq}", std::process::id())
 }
 
-fn bound_endpoint(requested: &str, listener: &Listener) -> io::Result<(String, Option<SocketAddr>)> {
+fn bound_endpoint(
+    requested: &str,
+    listener: &Listener,
+) -> io::Result<(String, Option<SocketAddr>)> {
     if let Ok(port) = listener.get_opt::<BoundPort>()
         && port != 0
     {
