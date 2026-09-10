@@ -1079,6 +1079,7 @@ where
     println!(
         "      capnp bank: {slices} slices, {null_starts} archive-null starts, best {best:.6}"
     );
+    drop(relax);
     stats.check_charged += bank_validation_charged;
     let out = Outcome {
         best,
