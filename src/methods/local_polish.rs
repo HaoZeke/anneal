@@ -79,7 +79,7 @@ fn sample_two_indices_excluding<R: Rng + ?Sized>(
     (first, second)
 }
 
-fn projected_gradient(
+pub(super) fn projected_gradient(
     x: &Array1<f64>,
     grad: &Array1<f64>,
     low: &Array1<f64>,

@@ -24,7 +24,7 @@ use rand_distr::{Distribution, StandardNormal};
 use crate::bias::{BasinBias, Bias, Fingerprint};
 use crate::descriptor_space::DescriptorGeometry;
 use crate::methods::ensemble::HistoryMode;
-use crate::methods::local_polish::projected_gradient_polish;
+use crate::methods::local_polish::{projected_gradient, projected_gradient_polish};
 use crate::methods::minima_hopping::{
     EscapeFeedback, HistoryHook, HistoryMembership, HistoryReport, MinimumHistory,
     SharedDesignHistory,
@@ -518,43 +518,76 @@ fn values_certificate<O: Objective<f64>>(
     if !f0.is_finite() {
         return None;
     }
+    let bounds = obj.bounds();
     let mut grad = Array1::zeros(dim);
-    let step = 1e-6;
     for i in 0..dim {
+        if bounds.low[i] == bounds.high[i] && x[i] == bounds.low[i] {
+            continue;
+        }
         if *work >= budget {
             return None;
         }
+        // A certificate needs a distinct feasible point, including when an
+        // absolute step rounds away at the coordinate's floating-point scale.
+        let step = 1e-6_f64.max(f64::EPSILON * x[i].abs());
+        let forward = (x[i] + step).min(bounds.high[i]);
+        let backward = (x[i] - step).max(bounds.low[i]);
+        let probe = if forward.is_finite() && forward > x[i] {
+            forward
+        } else if backward.is_finite() && backward < x[i] {
+            backward
+        } else {
+            return None;
+        };
         let mut bumped = x.to_owned();
-        bumped[i] += step;
-        bumped = obj.bounds().clip(bumped.view());
+        bumped[i] = probe;
         let fi = obj.eval(bumped.view());
         *work += 1;
         if !fi.is_finite() {
             return None;
         }
-        let denom = (bumped[i] - x[i]).abs().max(step);
-        grad[i] = (fi - f0) / denom;
+        grad[i] = (fi - f0) / (probe - x[i]);
+        if !grad[i].is_finite() {
+            return None;
+        }
     }
-    Some(grad)
+    Some(projected_gradient(
+        &x.to_owned(),
+        &grad,
+        &bounds.low,
+        &bounds.high,
+    ))
 }
 
-fn certificate_gradient<G: Gradient<f64>>(
+fn certificate_gradient<O: Objective<f64>, G: Gradient<f64>>(
     paid: Option<Array1<f64>>,
     pos: ArrayView1<f64>,
+    obj: &O,
     grad: &G,
     work: &mut usize,
     budget: usize,
     n_grads: &mut usize,
 ) -> Option<Array1<f64>> {
-    if let Some(g) = paid.filter(|g| g.len() == pos.len()) {
-        return Some(g);
-    }
-    if *work >= budget {
+    let g = if let Some(g) = paid.filter(|g| g.len() == pos.len()) {
+        g
+    } else {
+        if *work >= budget {
+            return None;
+        }
+        *work += 1;
+        *n_grads += 1;
+        grad.grad(pos)
+    };
+    if g.len() != pos.len() || g.iter().any(|value| !value.is_finite()) {
         return None;
     }
-    *work += 1;
-    *n_grads += 1;
-    Some(grad.grad(pos))
+    let bounds = obj.bounds();
+    Some(projected_gradient(
+        &pos.to_owned(),
+        &g,
+        &bounds.low,
+        &bounds.high,
+    ))
 }
 
 /// Scaled max-norm witness on a box. Not IRA; not SOAP.
@@ -718,6 +751,7 @@ where
         if let Some(gradient) = certificate_gradient(
             start_grad,
             replica.x.view(),
+            obj,
             grad,
             &mut replica.work,
             replica.budget,
@@ -761,6 +795,7 @@ where
                 if let Some(gradient) = certificate_gradient(
                     polish.best_grad,
                     polish.best_pos.view(),
+                    obj,
                     grad,
                     &mut replica.work,
                     replica.budget,
