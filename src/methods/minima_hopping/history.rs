@@ -369,6 +369,94 @@ impl<W: ExactStructureWitness + ?Sized> HistoryHook for SharedMinimumHistory<'_,
     }
 }
 
+/// [`HistoryHook`] for a design-space PES: the descriptor is the
+/// coordinates, the witness decides identity.
+///
+/// Same lock and membership rules as [`SharedMinimumHistory`]. Use this
+/// when the state is not a 3N point set, so [`DescriptorSpace::describe`]
+/// would refuse the coordinates.
+pub struct SharedDesignHistory<'a, W: ExactStructureWitness + ?Sized> {
+    history: &'a Mutex<MinimumHistory>,
+    context: StructureContext,
+    witness: &'a W,
+    policy: HistoryMembership,
+    observations: usize,
+    refusals: usize,
+    seconds: f64,
+}
+
+impl<'a, W: ExactStructureWitness + ?Sized> SharedDesignHistory<'a, W> {
+    /// A hook over `history` with the given membership policy.
+    pub fn new(
+        history: &'a Mutex<MinimumHistory>,
+        context: StructureContext,
+        witness: &'a W,
+        policy: HistoryMembership,
+    ) -> Self {
+        Self {
+            history,
+            context,
+            witness,
+            policy,
+            observations: 0,
+            refusals: 0,
+            seconds: 0.0,
+        }
+    }
+}
+
+impl<W: ExactStructureWitness + ?Sized> HistoryHook for SharedDesignHistory<'_, W> {
+    fn observe(
+        &mut self,
+        energy: f64,
+        state: ArrayView1<f64>,
+        gradient: ArrayView1<f64>,
+    ) -> Option<HistoryReport> {
+        let started = Instant::now();
+        let report = (|| {
+            let quench = QuenchBoundary::validated(energy, state.to_owned(), gradient.to_owned())?;
+            let description = DescriptorVector::from_design(state.to_vec()).ok()?;
+            let mut history = self.history.lock().ok()?;
+            let observation = history
+                .observe(&quench, description, self.context.clone(), self.witness)
+                .ok()?;
+            let accepted = history.accepted_visits(observation.minimum.id)?;
+            let (is_new, visits) = history_feedback_membership(
+                self.policy,
+                observation.minimum.is_new,
+                observation.visits,
+                accepted,
+            );
+            Some(HistoryReport {
+                minimum: observation.minimum.id,
+                is_new,
+                visits,
+                observed_visits: observation.visits,
+                first_observation: observation.minimum.is_new,
+            })
+        })();
+        self.seconds += started.elapsed().as_secs_f64();
+        if report.is_some() {
+            self.observations += 1;
+        } else {
+            self.refusals += 1;
+        }
+        report
+    }
+
+    fn mark_accepted(&mut self, minimum: usize) {
+        let started = Instant::now();
+        if let Ok(mut history) = self.history.lock() {
+            let _ = history.mark_accepted(minimum);
+        }
+        self.seconds += started.elapsed().as_secs_f64();
+    }
+
+    fn cost(&self) -> (usize, usize, f64) {
+        (self.observations, self.refusals, self.seconds)
+    }
+}
+
 #[cfg(test)]
 mod hook_tests {
     use super::*;

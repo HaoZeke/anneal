@@ -51,7 +51,8 @@ use rgsaddle::{
 mod history;
 pub use history::{
     HistoryHook, HistoryMembership, HistoryObservation, HistoryReport, MinimumHistory,
-    MinimumHistoryError, SerializedWitness, SharedMinimumHistory, history_feedback_membership,
+    MinimumHistoryError, SerializedWitness, SharedDesignHistory, SharedMinimumHistory,
+    history_feedback_membership,
 };
 
 /// Geometry on which an MD escape evolves.
