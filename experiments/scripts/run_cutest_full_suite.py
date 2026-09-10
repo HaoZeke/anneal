@@ -41,7 +41,7 @@ from experiments.scripts.run_cutest_benchmarks import (
     _bgsa_run,
     _cutest_gradient,
     _run_cutest_additive_independence,
-    _run_cutest_gle_langevin,
+    _run_cutest_standalone_gle_langevin as _run_cutest_gle_langevin,
     bayesian_mixing_sa,
     classical_sa,
     mcmc_sa,
