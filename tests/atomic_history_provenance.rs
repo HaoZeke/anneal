@@ -5,7 +5,7 @@ use anneal_core::methods::minima_hopping::{HistoryHook, HistoryReport};
 use ndarray::{Array1, ArrayView1, array};
 use rand::SeedableRng;
 use rand::rngs::StdRng;
-use std::cell::Cell;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 fn energy_gradient(state: ArrayView1<f64>, a: &Array1<f64>, b: &Array1<f64>) -> (f64, Array1<f64>) {
     let da = &state - a;
@@ -99,14 +99,14 @@ fn external_adoption_replaces_the_occupied_shared_identity_before_a_return() {
     cfg.orbit_complete_on_new = false;
     cfg.superbasin_escape = false;
 
-    let external_pending = Cell::new(false);
-    let relax_calls = Cell::new(0);
-    let gradient_calls = Cell::new(0);
+    let external_pending = AtomicBool::new(false);
+    let relax_calls = AtomicUsize::new(0);
+    let gradient_calls = AtomicUsize::new(0);
     let mut relax = |ledger: &mut Ledger, _state: ArrayView1<f64>, steps: usize| {
         assert_eq!(steps, 1, "the fixture permits only one-step quenches");
         assert!(ledger.charge());
-        relax_calls.set(relax_calls.get() + 1);
-        let destination = if external_pending.replace(false) {
+        relax_calls.fetch_add(1, Ordering::Relaxed);
+        let destination = if external_pending.swap(false, Ordering::Relaxed) {
             &b
         } else {
             &a
@@ -118,7 +118,7 @@ fn external_adoption_replaces_the_occupied_shared_identity_before_a_return() {
     };
     let mut gradient = |ledger: &mut Ledger, state: ArrayView1<f64>| {
         assert!(ledger.charge());
-        gradient_calls.set(gradient_calls.get() + 1);
+        gradient_calls.fetch_add(1, Ordering::Relaxed);
         Some(energy_gradient(state, &a, &b).1)
     };
     let mut offered = false;
@@ -129,7 +129,7 @@ fn external_adoption_replaces_the_occupied_shared_identity_before_a_return() {
         assert_eq!(snapshot.hops(), 1);
         assert_eq!(snapshot.current_state(), a.view());
         offered = true;
-        external_pending.set(true);
+        external_pending.store(true, Ordering::Relaxed);
         CheckpointAction::ExternalAdopt {
             state: b.clone(),
             action: "history-identity-adoption".to_owned(),
@@ -159,7 +159,7 @@ fn external_adoption_replaces_the_occupied_shared_identity_before_a_return() {
     );
 
     assert!(offered);
-    assert!(!external_pending.get());
+    assert!(!external_pending.load(Ordering::Relaxed));
     assert_eq!(out.hops, 3);
     let adoption = out
         .accepted_transitions
@@ -173,8 +173,17 @@ fn external_adoption_replaces_the_occupied_shared_identity_before_a_return() {
     assert_eq!(out.final_state.as_ref(), Some(&b));
     assert_eq!(history.a_observations, 3);
     assert_eq!(history.accepted.first(), Some(&7));
-    assert_eq!((relax_calls.get(), gradient_calls.get()), (6, 4));
-    assert_eq!(ledger.spent(), relax_calls.get() + gradient_calls.get());
+    assert_eq!(
+        (
+            relax_calls.load(Ordering::Relaxed),
+            gradient_calls.load(Ordering::Relaxed)
+        ),
+        (6, 4)
+    );
+    assert_eq!(
+        ledger.spent(),
+        relax_calls.load(Ordering::Relaxed) + gradient_calls.load(Ordering::Relaxed)
+    );
     assert_eq!(out.charged, ledger.spent());
     assert!(ledger.spent() <= ledger.budget());
 
