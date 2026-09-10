@@ -838,4 +838,64 @@ mod tests {
             "temperature changes retain and rescale the thermostat-updated state"
         );
     }
+
+    #[test]
+    fn adaptive_gle_counts_frequency_probes_inside_the_gradient_budget() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        struct CountedGradient {
+            inner: IllGrad,
+            calls: AtomicUsize,
+        }
+
+        impl Gradient<f64> for CountedGradient {
+            fn grad(&self, x: ArrayView1<f64>) -> Array1<f64> {
+                self.calls.fetch_add(1, Ordering::Relaxed);
+                self.inner.grad(x)
+            }
+
+            fn dim(&self) -> usize {
+                self.inner.dim()
+            }
+        }
+
+        let a = Array1::from_vec(vec![1.0, 3.0, 9.0]);
+        let objective = IllConditioned {
+            bounds: Bounds::new(Array1::from_elem(3, -5.0), Array1::from_elem(3, 5.0), 0.0),
+            a: a.clone(),
+        };
+        let anchor = Array1::from_vec(vec![1.0, -0.5, 0.25]);
+        let mut observations = Vec::new();
+        for budget in [1, 4, 13] {
+            let gradient = CountedGradient {
+                inner: IllGrad { a: a.clone() },
+                calls: AtomicUsize::new(0),
+            };
+            let result = gle_langevin_adaptive_sa(
+                &objective,
+                &gradient,
+                17,
+                budget,
+                0.2,
+                2,
+                Some(anchor.clone()),
+            );
+            observations.push((
+                budget,
+                gradient.calls.load(Ordering::Relaxed),
+                result.n_evals,
+            ));
+        }
+
+        for (budget, actual_calls, reported_calls) in observations {
+            assert!(
+                actual_calls <= budget,
+                "gradient budget {budget} permits no uncharged frequency probes: actual {actual_calls}"
+            );
+            assert_eq!(
+                reported_calls, actual_calls,
+                "gradient accounting must include frequency probes at budget {budget}"
+            );
+        }
+    }
 }
