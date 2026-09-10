@@ -1034,7 +1034,7 @@ mod tests {
         let covariance = Array2::<f64>::eye(drift.nrows());
         let mut oracle_rng = StdRng::seed_from_u64(seed);
         let mut retained = hot.sample_stationary(&covariance, dim, 1.0, &mut oracle_rng);
-        let mut position = Array1::zeros(dim);
+        let mut position = Array1::<f64>::zeros(dim);
         let mut expected = vec![position.clone()];
         for _ in 0..2 {
             position = &position + &(retained.row(0).to_owned() * dt);
