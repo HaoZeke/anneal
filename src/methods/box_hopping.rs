@@ -391,14 +391,11 @@ where
             let delta = (trial_f + v_trial) - (replica.f + v_here);
             let accept =
                 delta <= 0.0 || replica.rng.random::<f64>() < (-delta / temp.max(1e-300)).exp();
+            replica.adopt_trial(accept, trial_x, trial_f, trial_cv, report);
             if accept {
-                replica.x = trial_x;
-                replica.f = trial_f;
-                replica.cv = trial_cv;
                 biases[index].deposit(replica.cv.view(), temp);
                 if let Some(report) = report {
                     hooks[index].mark_accepted(report.minimum);
-                    replica.here = Some(report.minimum);
                     if report.visits == 0 {
                         history_seen[index].insert(report.minimum, 1);
                     }
@@ -813,14 +810,11 @@ where
             let delta = (trial_f + v_trial) - (replica.f + v_here);
             let accept =
                 delta <= 0.0 || replica.rng.random::<f64>() < (-delta / temp.max(1e-300)).exp();
+            replica.adopt_trial(accept, trial_x, trial_f, trial_cv, report);
             if accept {
-                replica.x = trial_x;
-                replica.f = trial_f;
-                replica.cv = trial_cv;
                 biases[index].deposit(replica.cv.view(), temp);
                 if let Some(report) = report {
                     hooks[index].mark_accepted(report.minimum);
-                    replica.here = Some(report.minimum);
                     if report.visits == 0 {
                         history_seen[index].insert(report.minimum, 1);
                     }
@@ -874,6 +868,27 @@ struct Replica {
     here: Option<usize>,
     feedback: EscapeFeedback,
     generation: usize,
+}
+
+impl Replica {
+    fn adopt_trial(
+        &mut self,
+        accepted: bool,
+        position: Array1<f64>,
+        energy: f64,
+        descriptor: Array1<f64>,
+        report: Option<HistoryReport>,
+    ) {
+        if !accepted {
+            return;
+        }
+        self.x = position;
+        self.f = energy;
+        self.cv = descriptor;
+        if let Some(report) = report {
+            self.here = Some(report.minimum);
+        }
+    }
 }
 
 fn temp_of(generation: usize, energy: f64) -> f64 {
@@ -1014,6 +1029,105 @@ mod tests {
     use eindir_core::Bounds;
     use ndarray::{Array1, ArrayView1, array};
     use std::sync::atomic::{AtomicUsize, Ordering};
+
+    fn occupied_replica() -> Replica {
+        let occupied = array![2.0, 2.0];
+        let mut feedback = EscapeFeedback::new(1.0, 0.1);
+        feedback.register_initial(7);
+        Replica {
+            rng: StdRng::seed_from_u64(19),
+            x: occupied.clone(),
+            trial: occupied.clone(),
+            cv: occupied,
+            f: -1.0,
+            work: 13,
+            budget: 100,
+            hops: 2,
+            here: Some(7),
+            feedback,
+            generation: 2,
+        }
+    }
+
+    #[test]
+    fn accepted_uncertified_trial_clears_the_occupied_history_identity() {
+        let mut replica = occupied_replica();
+        let destination = array![-2.0, -2.0];
+        replica.adopt_trial(true, destination.clone(), -1.5, destination.clone(), None);
+
+        assert_eq!(replica.x, destination);
+        assert_eq!(replica.cv, destination);
+        assert_eq!(replica.f, -1.5);
+        assert_eq!(replica.here, None);
+        assert_eq!((replica.work, replica.hops, replica.generation), (13, 2, 2));
+    }
+
+    #[test]
+    fn return_after_uncertified_adoption_uses_population_known_feedback() {
+        let mut replica = occupied_replica();
+        replica.adopt_trial(true, array![-2.0, -2.0], -1.5, array![-2.0, -2.0], None);
+        let before = replica.feedback.escape();
+        let visit = replica.feedback.observe_shared(replica.here, 7, false, 8);
+
+        assert_eq!(visit, crate::methods::minima_hopping::Visit::Known);
+        let expected = 1.05 * (1.0 + 0.1 * 7.0_f64.ln());
+        assert!((replica.feedback.escape() / before - expected).abs() < 1e-12);
+    }
+
+    #[test]
+    fn accepted_certified_trial_keeps_its_own_history_identity() {
+        let mut replica = occupied_replica();
+        let destination = array![-2.0, -2.0];
+        let report = HistoryReport {
+            minimum: 9,
+            is_new: true,
+            visits: 0,
+            observed_visits: 1,
+            first_observation: true,
+        };
+        replica.adopt_trial(
+            true,
+            destination.clone(),
+            -1.5,
+            destination.clone(),
+            Some(report),
+        );
+
+        assert_eq!(replica.x, destination);
+        assert_eq!(replica.cv, destination);
+        assert_eq!(replica.f, -1.5);
+        assert_eq!(replica.here, Some(9));
+        assert_eq!(replica.feedback.escape(), 1.0);
+        assert_eq!((replica.work, replica.hops, replica.generation), (13, 2, 2));
+    }
+
+    #[test]
+    fn rejected_trials_preserve_the_occupied_state_and_history_identity() {
+        let report = HistoryReport {
+            minimum: 9,
+            is_new: true,
+            visits: 0,
+            observed_visits: 1,
+            first_observation: true,
+        };
+        for certification in [None, Some(report)] {
+            let mut replica = occupied_replica();
+            replica.adopt_trial(
+                false,
+                array![-2.0, -2.0],
+                -1.5,
+                array![-2.0, -2.0],
+                certification,
+            );
+
+            assert_eq!(replica.x, array![2.0, 2.0]);
+            assert_eq!(replica.cv, array![2.0, 2.0]);
+            assert_eq!(replica.f, -1.0);
+            assert_eq!(replica.here, Some(7));
+            assert_eq!(replica.feedback.escape(), 1.0);
+            assert_eq!((replica.work, replica.hops, replica.generation), (13, 2, 2));
+        }
+    }
 
     struct TwoWell {
         bounds: Bounds<f64>,
