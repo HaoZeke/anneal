@@ -29,7 +29,7 @@ featomic = ["dep:featomic", "dep:metatensor"]
 # Neighbour construction through the vesin cell lists.
 vesin-nl = []
 # Cap'n Proto shared bank. Chains are separate processes.
-bank-rpc = ["dep:capnp", "dep:capnp-rpc", "dep:futures", "dep:nng", "dep:tokio", "dep:tokio-util"]
+bank-rpc = ["dep:capnp", "dep:capnp-rpc", "dep:futures", "dep:nng", "dep:tokio", "dep:tokio-util", "dep:libc"]
 # REQ/REP transport for MinimumHistory. Independent of catalog/census.
 history-nng = ["dep:nng"]
 # The gradient-enhanced Gaussian process of gpr_optim, over its C API. Needs
@@ -73,9 +73,10 @@ libloading = { version = "0.8", optional = true }
 capnp = { version = "0.21", optional = true }
 capnp-rpc = { version = "0.21", optional = true }
 futures = { version = "0.3", optional = true }
-tokio = { version = "1", optional = true, features = ["macros", "net", "rt", "sync", "time"] }
+tokio = { version = "1", optional = true, features = ["macros", "net", "rt", "sync", "time", "io-util"] }
 tokio-util = { version = "0.7", optional = true, features = ["compat"] }
 nng = { version = "1.0", optional = true }
+libc = { version = "0.2", optional = true }
 # SOAP power spectrum leftover. featomic 0.6 carries ndarray 0.16;
 # descriptor data crosses as f64 slices. metatensor-static embeds the
 # C core so SLURM tasks do not need LD_LIBRARY_PATH.
