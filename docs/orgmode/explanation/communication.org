@@ -143,6 +143,28 @@ not interpret that error as proof that the server did nothing or blindly
 repeat it. There is no application-level deduplication or exactly-once
 guarantee.
 
+** Catalog byte-stream carrier
+
+The [[file:../../../src/nng_rpc.rs][catalog carrier]] transports the Cap'n Proto
+conversation over an NNG Pair socket. Its =ANIO= version-one framing is
+separate from the catalog schema, the history request/reply protocol and
+census pub/sub. Both stream endpoints must speak that framing version.
+
+DATA frames carry ordered offsets and at most 64 KiB of payload. Each stream
+direction has a one-MiB queue bound. Peer-accepted offsets satisfy flush;
+peer-consumed offsets release receive-window credit. A slow application
+therefore cannot make acknowledgment enqueue an unbounded byte stream. FIN
+and its acknowledgments close the write half while retaining the opposite
+read direction. Dropping the owner leaves a bounded-lifetime pump to drain
+accepted writes and negotiate close. A successful NNG send alone does not
+establish peer acceptance.
+
+Pending writes, flushes and close operations have a 30-second carrier limit;
+an idle read does not time out merely because a peer is computing. Catalog
+request deadlines are a separate client contract. The pair-hello endpoint
+can be TCP, but the pair binding is IPC: this carrier path is same-node and
+does not establish cross-host catalog transport.
+
 * Live minima, well tables and deposits
 
 ** Live-minimum census
