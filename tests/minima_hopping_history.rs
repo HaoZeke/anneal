@@ -1,8 +1,15 @@
 use anneal_core::descriptor_space::{DescriptorGeometry, universal_descriptor_space};
 use anneal_core::methods::cluster_hopping::Ledger;
-use anneal_core::methods::minima_hopping::{EscapeFeedback, MinimumHistory, Visit};
-use anneal_core::pes_exploration::{ExactStructureWitness, StructureContext};
+use anneal_core::methods::minima_hopping::{
+    EscapeFeedback, HistoryHook, HistoryMembership, MinimumHistory, SerializedWitness,
+    SharedMinimumHistory, Visit,
+};
+use anneal_core::pes_exploration::{
+    ExactStructureRelation, ExactStructureWitness, StructureContext, StructureView,
+};
 use ndarray::{Array1, ArrayView1, array};
+use std::cell::Cell;
+use std::sync::Mutex;
 
 struct CartesianWitness;
 
@@ -187,4 +194,168 @@ fn an_unknown_minimum_cannot_enter_accepted_history() {
     assert_eq!(history.accepted_count(), 0);
     assert_eq!(history.minimum_count(), 0);
     assert_eq!(history.total_visits(), 0);
+}
+
+struct ContextualWitness {
+    context: StructureContext,
+    left: Array1<f64>,
+    right: Array1<f64>,
+    raw_calls: Cell<usize>,
+    contextual_calls: Cell<usize>,
+}
+
+impl ContextualWitness {
+    fn slab_images() -> Self {
+        let geometry = DescriptorGeometry::new(
+            1.0,
+            Some([6.0, 0.0, 0.0, 1.0, 5.0, 0.0, 0.0, 0.0, 12.0]),
+            [true, true, false],
+        )
+        .unwrap();
+        Self {
+            context: StructureContext::new(
+                Some(vec![29, 1]),
+                Some(geometry),
+                Some("fixed-substrate-history".into()),
+            )
+            .with_masses(Some(vec![63.546, 1.008])),
+            left: array![0.0, 0.0, 0.0, 1.25, 0.5, 1.0],
+            right: array![0.0, 0.0, 0.0, 7.25, 0.5, 1.0],
+            raw_calls: Cell::new(0),
+            contextual_calls: Cell::new(0),
+        }
+    }
+}
+
+impl ExactStructureWitness for ContextualWitness {
+    fn equivalent(&self, left: ArrayView1<f64>, right: ArrayView1<f64>) -> bool {
+        self.relation(left, right).is_equivalent()
+    }
+
+    fn relation(&self, left: ArrayView1<f64>, right: ArrayView1<f64>) -> ExactStructureRelation {
+        assert_eq!(left, self.left.view());
+        assert_eq!(right, self.right.view());
+        self.raw_calls.set(self.raw_calls.get() + 1);
+        ExactStructureRelation::Distinct
+    }
+
+    fn equivalent_structures(&self, left: StructureView<'_>, right: StructureView<'_>) -> bool {
+        self.relation_structures(left, right).is_equivalent()
+    }
+
+    fn relation_structures(
+        &self,
+        left: StructureView<'_>,
+        right: StructureView<'_>,
+    ) -> ExactStructureRelation {
+        assert_eq!(left.coordinates, self.left.view());
+        assert_eq!(right.coordinates, self.right.view());
+        assert_eq!(left.context, &self.context);
+        assert_eq!(right.context, &self.context);
+        self.contextual_calls.set(self.contextual_calls.get() + 1);
+        ExactStructureRelation::Equivalent
+    }
+}
+
+#[test]
+fn serialized_witness_preserves_raw_coordinate_dispatch() {
+    let inner = ContextualWitness::slab_images();
+    let left = inner.left.clone();
+    let right = inner.right.clone();
+    let witness = SerializedWitness(Mutex::new(inner));
+
+    assert_eq!(
+        witness.relation(left.view(), right.view()),
+        ExactStructureRelation::Distinct
+    );
+    assert!(!witness.equivalent(left.view(), right.view()));
+    let inner = witness.0.lock().unwrap();
+    assert_eq!(inner.raw_calls.get(), 2);
+    assert_eq!(inner.contextual_calls.get(), 0);
+}
+
+#[test]
+fn serialized_witness_preserves_contextual_relation_dispatch() {
+    let inner = ContextualWitness::slab_images();
+    let left = inner.left.clone();
+    let right = inner.right.clone();
+    let context = inner.context.clone();
+    let witness = SerializedWitness(Mutex::new(inner));
+
+    assert_eq!(
+        witness.relation_structures(
+            StructureView {
+                coordinates: left.view(),
+                context: &context,
+            },
+            StructureView {
+                coordinates: right.view(),
+                context: &context,
+            },
+        ),
+        ExactStructureRelation::Equivalent
+    );
+    let inner = witness.0.lock().unwrap();
+    assert_eq!(inner.raw_calls.get(), 0);
+    assert_eq!(inner.contextual_calls.get(), 1);
+}
+
+#[test]
+fn serialized_witness_preserves_contextual_equivalence_dispatch() {
+    let inner = ContextualWitness::slab_images();
+    let left = inner.left.clone();
+    let right = inner.right.clone();
+    let context = inner.context.clone();
+    let witness = SerializedWitness(Mutex::new(inner));
+
+    assert!(witness.equivalent_structures(
+        StructureView {
+            coordinates: left.view(),
+            context: &context,
+        },
+        StructureView {
+            coordinates: right.view(),
+            context: &context,
+        },
+    ));
+    let inner = witness.0.lock().unwrap();
+    assert_eq!(inner.raw_calls.get(), 0);
+    assert_eq!(inner.contextual_calls.get(), 1);
+}
+
+#[test]
+fn serialized_witness_preserves_contextual_shared_history_admission() {
+    let inner = ContextualWitness::slab_images();
+    let left = inner.left.clone();
+    let right = inner.right.clone();
+    let context = inner.context.clone();
+    let space = universal_descriptor_space(context.geometry().unwrap());
+    let witness = SerializedWitness(Mutex::new(inner));
+    let history = Mutex::new(MinimumHistory::new(1e-3).unwrap());
+    let mut hook = SharedMinimumHistory::new(
+        &history,
+        &space,
+        context,
+        &witness,
+        HistoryMembership::Accepted,
+    );
+    let gradient = Array1::zeros(left.len());
+
+    let first = hook.observe(-1.0, left.view(), gradient.view()).unwrap();
+    assert!(first.first_observation);
+    hook.mark_accepted(first.minimum);
+    let repeated = hook.observe(-1.0, right.view(), gradient.view()).unwrap();
+
+    assert_eq!(repeated.minimum, first.minimum);
+    assert!(!repeated.first_observation);
+    assert!(!repeated.is_new);
+    assert_eq!(repeated.observed_visits, 2);
+    assert_eq!(repeated.visits, 2);
+    let history = history.lock().unwrap();
+    assert_eq!(history.minimum_count(), 1);
+    assert_eq!(history.total_visits(), 2);
+    assert_eq!(history.accepted_count(), 1);
+    let inner = witness.0.lock().unwrap();
+    assert_eq!(inner.raw_calls.get(), 0);
+    assert_eq!(inner.contextual_calls.get(), 1);
 }
