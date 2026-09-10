@@ -2451,12 +2451,13 @@ where
                 energy.is_finite().then_some((energy, gradient))
             };
             md_attempts += 1;
-            match crate::methods::minima_hopping::nve_escape(
+            match crate::methods::minima_hopping::nve_escape_with_frozen(
                 x.view(),
                 kinetic,
                 &md_config,
                 &mut evaluate,
                 rng,
+                hop_frozen.as_deref(),
             ) {
                 Ok(report) if report.potential_minima >= md_config.potential_minima => {
                     md_steps += report.steps;
