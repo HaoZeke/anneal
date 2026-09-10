@@ -1,8 +1,8 @@
 //! Exact descriptor rows for the fixed packing specification and no species.
 //!
-//! Each thread retains at most 8 MiB of complete coordinate keys and row scalar
+//! The process retains at most 8 MiB of complete coordinate keys and row scalar
 //! payloads. The bound excludes queue and reference-count metadata, and callers
-//! can keep evicted rows alive through their own `Rc` handles. Codebooks and
+//! can keep evicted rows alive through their own `Arc` handles. Codebooks and
 //! histograms remain properties of each individual packing book.
 
 #[cfg(test)]
@@ -14,11 +14,7 @@ use ndarray::{Array2, ArrayView1};
 
 const MAX_RETAINED_BYTES: usize = 8 * 1024 * 1024;
 
-/// Process-wide cache of prepared rows. It was thread-local, which kept
-/// the coordinator's request thread from ever seeing rows the validation
-/// pool had prepared for the same candidate: every offer and visit paid
-/// the SOAP preparation again under the state lock (perf: atom_expand,
-/// ace::from_c and the allocator at a third of the request thread).
+/// Process-wide cache shared by request threads and the validation pool.
 /// Preparation runs outside the lock; a miss computes and then inserts.
 static ROWS: Mutex<RowCache> = Mutex::new(RowCache::new(MAX_RETAINED_BYTES));
 
@@ -95,6 +91,7 @@ impl RowCache {
     }
 
     /// Rows for `coordinates`, preparing and retaining them on a miss.
+    #[cfg(test)]
     fn get_or_prepare(
         &mut self,
         coordinates: &[f64],

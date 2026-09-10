@@ -13,6 +13,7 @@ use crate::funnel_bo::FunnelModel;
 use crate::methods::bank::{Admission, Bank};
 
 /// Hausdorff length below which two members are the same geometry.
+#[cfg(feature = "ira")]
 const IRA_SAME: f64 = 0.05;
 /// AS-KMC / MCAMC: well height at which the packing is a raised
 /// superbasin (N_f = 20 deposits of 0.25). Intra-well hops are then
