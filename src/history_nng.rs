@@ -8,10 +8,10 @@
 //! UDP: admit is not best-effort. Use `ipc://` on one node and `tcp://`
 //! when the table is off-node.
 
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use ndarray::{Array1, ArrayView1};
 use nng::options::{Options, RecvTimeout};
@@ -105,12 +105,7 @@ impl Drop for HistoryNngServer {
     }
 }
 
-fn serve_loop(
-    rep: Socket,
-    mut history: MinimumHistory,
-    identity_tol: f64,
-    stop: Arc<AtomicBool>,
-) {
+fn serve_loop(rep: Socket, mut history: MinimumHistory, identity_tol: f64, stop: Arc<AtomicBool>) {
     let context = StructureContext::new(None, None, Some("design-box".into()));
     while !stop.load(Ordering::Acquire) {
         let frame = match rep.recv() {
@@ -169,12 +164,15 @@ fn handle(
             }
         },
         TAG_ACCEPT => {
-            if frame.len() < 5 {
+            if frame.len() != 5 {
                 return vec![TAG_FAIL];
             }
             let id = u32::from_le_bytes(frame[1..5].try_into().unwrap()) as usize;
-            let _ = history.mark_accepted(id);
-            vec![TAG_OK]
+            if history.mark_accepted(id).is_ok() {
+                vec![TAG_OK]
+            } else {
+                vec![TAG_FAIL]
+            }
         }
         TAG_COUNT => {
             let n = history.minimum_count() as u32;
@@ -279,6 +277,7 @@ pub struct HistoryNngClient {
     socket: Socket,
     widths: Array1<f64>,
     policy: HistoryMembership,
+    cost: Mutex<(usize, usize, f64)>,
 }
 
 impl HistoryNngClient {
@@ -289,8 +288,8 @@ impl HistoryNngClient {
         policy: HistoryMembership,
     ) -> Result<Self, HistoryNngError> {
         admit_url(url)?;
-        let socket =
-            Socket::new(Protocol::Req0).map_err(|error| HistoryNngError(format!("req: {error}")))?;
+        let socket = Socket::new(Protocol::Req0)
+            .map_err(|error| HistoryNngError(format!("req: {error}")))?;
         socket
             .dial(url)
             .map_err(|error| HistoryNngError(format!("dial {url}: {error}")))?;
@@ -298,19 +297,107 @@ impl HistoryNngClient {
             socket,
             widths,
             policy,
+            cost: Mutex::new((0, 0, 0.0)),
         })
     }
 
-    /// Distinct exact identities currently held by the server.
-    pub fn minimum_count(&self) -> Option<usize> {
-        let mut message = Message::new();
-        message.push_back(&[TAG_COUNT]);
-        self.socket.send(message).ok()?;
-        let reply = self.socket.recv().ok()?;
-        if reply.len() < 5 || reply.first().copied() != Some(TAG_OK) {
-            return None;
+    fn request(&self, frame: &[u8]) -> Result<Message, HistoryNngError> {
+        let started = Instant::now();
+        let result = (|| {
+            let mut message = Message::new();
+            message.push_back(frame);
+            self.socket
+                .send(message)
+                .map_err(|(_, error)| HistoryNngError(format!("send: {error}")))?;
+            self.socket
+                .recv()
+                .map_err(|error| HistoryNngError(format!("receive: {error}")))
+        })();
+        self.cost
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .2 += started.elapsed().as_secs_f64();
+        result
+    }
+
+    /// Read the table size, distinguishing transport failure from an empty table.
+    pub fn try_minimum_count(&self) -> Result<usize, HistoryNngError> {
+        let reply = self.request(&[TAG_COUNT])?;
+        if reply.len() != 5 || reply[0] != TAG_OK {
+            return Err(HistoryNngError("invalid count reply".into()));
         }
-        Some(u32::from_le_bytes(reply[1..5].try_into().ok()?) as usize)
+        Ok(u32::from_le_bytes(reply[1..5].try_into().expect("checked count length")) as usize)
+    }
+
+    /// Distinct exact identities currently held by the server.
+    ///
+    /// Panics on transport or protocol failure. Use [`Self::try_minimum_count`]
+    /// to handle failures without mistaking them for an empty table.
+    pub fn minimum_count(&self) -> Option<usize> {
+        Some(
+            self.try_minimum_count()
+                .expect("shared history count failed"),
+        )
+    }
+
+    /// Observe a certificate; only a scientific refusal is `Ok(None)`.
+    pub fn try_observe(
+        &mut self,
+        energy: f64,
+        state: ArrayView1<f64>,
+        gradient: ArrayView1<f64>,
+    ) -> Result<Option<HistoryReport>, HistoryNngError> {
+        let result = (|| {
+            let Some(frame) = encode_observe(energy, state, gradient, self.widths.view()) else {
+                return Ok(None);
+            };
+            let reply = self.request(&frame)?;
+            if &reply[..] == [TAG_NONE] {
+                return Ok(None);
+            }
+            if reply.len() != 22 {
+                return Err(HistoryNngError("invalid observation reply length".into()));
+            }
+            let (minimum, first_observation, observed_visits, accepted_visits) =
+                decode_raw_report(&reply)
+                    .ok_or_else(|| HistoryNngError("invalid observation reply".into()))?;
+            let (is_new, visits) = history_feedback_membership(
+                self.policy,
+                first_observation,
+                observed_visits,
+                accepted_visits,
+            );
+            Ok(Some(HistoryReport {
+                minimum,
+                is_new,
+                visits,
+                observed_visits,
+                first_observation,
+            }))
+        })();
+        let mut cost = self
+            .cost
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        match &result {
+            Ok(Some(_)) => cost.0 += 1,
+            Ok(None) => cost.1 += 1,
+            Err(_) => {}
+        }
+        result
+    }
+
+    /// Publish adoption only when the server acknowledges a known identity.
+    pub fn try_mark_accepted(&mut self, minimum: usize) -> Result<(), HistoryNngError> {
+        let minimum = u32::try_from(minimum)
+            .map_err(|_| HistoryNngError("minimum identity exceeds the wire range".into()))?;
+        let mut frame = vec![TAG_ACCEPT];
+        frame.extend_from_slice(&minimum.to_le_bytes());
+        let reply = self.request(&frame)?;
+        if &reply[..] != [TAG_OK] {
+            return Err(HistoryNngError("acceptance was not acknowledged".into()));
+        }
+        Ok(())
     }
 }
 
@@ -340,44 +427,20 @@ impl HistoryHook for HistoryNngClient {
         state: ArrayView1<f64>,
         gradient: ArrayView1<f64>,
     ) -> Option<HistoryReport> {
-        let _ = self.policy;
-        let frame = encode_observe(energy, state, gradient, self.widths.view())?;
-        let mut message = Message::new();
-        message.push_back(&frame);
-        self.socket.send(message).ok()?;
-        let reply = self.socket.recv().ok()?;
-        if reply.first().copied() == Some(TAG_NONE) {
-            return None;
-        }
-        let (minimum, first_observation, observed_visits, accepted_visits) =
-            decode_raw_report(&reply)?;
-        let (is_new, visits) = history_feedback_membership(
-            self.policy,
-            first_observation,
-            observed_visits,
-            accepted_visits,
-        );
-        Some(HistoryReport {
-            minimum,
-            is_new,
-            visits,
-            observed_visits,
-            first_observation,
-        })
+        self.try_observe(energy, state, gradient)
+            .expect("shared history observation failed")
     }
 
     fn mark_accepted(&mut self, minimum: usize) {
-        let mut frame = vec![TAG_ACCEPT];
-        frame.extend_from_slice(&(minimum as u32).to_le_bytes());
-        let mut message = Message::new();
-        message.push_back(&frame);
-        if self.socket.send(message).is_ok() {
-            let _ = self.socket.recv();
-        }
+        self.try_mark_accepted(minimum)
+            .expect("shared history acceptance failed");
     }
 
     fn cost(&self) -> (usize, usize, f64) {
-        (0, 0, 0.0)
+        *self
+            .cost
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 }
 
@@ -388,10 +451,7 @@ mod tests {
 
     #[test]
     fn two_clients_share_one_nng_history() {
-        let url = format!(
-            "ipc:///tmp/anneal-hist-nng-{}",
-            std::process::id()
-        );
+        let url = format!("ipc:///tmp/anneal-hist-nng-{}", std::process::id());
         let _server = HistoryNngServer::bind(&url, 1e-3, 1e-3).expect("bind");
         let widths = array![10.0, 10.0];
         let mut first =
