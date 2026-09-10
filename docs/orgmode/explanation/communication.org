@@ -194,6 +194,53 @@ population-parent and own-visit deposits have separate admission paths.
 Depositing history changes subsequent biased acceptance and repulsion; it is
 not attractive coordinate consensus.
 
+* Configuration geometry and solver ownership
+
+Three different contracts govern a communicating search. The communication
+graph selects which replicas exchange information. The configuration geometry
+defines valid states, tangent directions, retractions and vector transport.
+The identity geometry defines which feasible stationary structures represent
+the same minimum. A ring subscription changes only the first contract.
+
+The pinned rgmin dependency contains the Manopt-derived =Manifold= contract
+and the =Solver::set_manifold= interface. Linking that dependency does not
+select a manifold for the host's search. The production call paths are:
+
+| Search path | Numerical integration | Configuration contract |
+|-------------+-----------------------+------------------------|
+| Atomic quench | =WarmLbfgs= delegates to =rgmin::Lbfgs= | Ambient coordinates; the objective adapter supplies frozen-force handling |
+| Box quench | =local_polish::projected_gradient_polish= | In-tree bounded L-BFGS, clipping and active-bound stationarity |
+| NVE escape | =rgsaddle::SamdSession= | Explicit Euclidean or rigid-quotient selection; =step_on= projects, retracts and transports |
+| Saddle refinement | =rgsaddle::SellaSaddleSession= | Euclidean or Cartesian constraint chart selected by the PES adapter |
+| Rigid SOAP proposal | Groupwise Kabsch retraction | Preserves declared intragroup distances for that proposal, not every subsequent quench |
+
+The ordinary atomic hop constructs its NVE controls with Euclidean geometry.
+The =lj_joint_optimum= comparison selects the rigid quotient explicitly for
+its cluster arm. General box search does not expose the rgmin manifold setter.
+Its quadratic tests named =Sphere= are objectives inside a box, not searches
+constrained to a unit sphere.
+
+An isolated flexible cluster's =RigidQuotient= removes whole-system rigid
+motion; it does not freeze molecular bonds. A product of rigid molecular
+bodies is a different configuration space. The SO(3) and SE(3) ports consume
+rotation-matrix packings, not arbitrary 3N Cartesian arrays. Selecting one
+of those tokens for Cartesian atoms is not a valid integration. Flexible
+water must retain its internal degrees of freedom.
+
+Stationarity must use the declared feasible directions. A valid box-boundary
+minimum may have a nonzero raw gradient, so its history certificate must
+agree with the local solver's active-bound projection. Similarly, zeroing
+a frozen atom's force does not remove its initial MD velocity. Frozen
+coordinates must be preserved throughout proposal evaluation, not merely
+restored after a trajectory has evaluated a different surface.
+
+=StructureContext= carries species, masses, descriptor cell/PBC and a caller
+identity domain. A wrapper around an exact witness must preserve its
+contextual dispatch, not fall back to a coordinate-only comparison. Cell
+metadata alone does not turn a finite-cluster matcher into a periodic
+fixed-substrate matcher; both descriptor construction and exact identity
+must implement the declared periodic and frozen-coordinate equivalences.
+
 * Coordinate-changing actions and checkpoint arbitration
 
 Local kicks, quenches and acceptance continue to generate and select states
