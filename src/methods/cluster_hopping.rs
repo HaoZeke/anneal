@@ -1598,7 +1598,7 @@ where
     );
     if cfg.minima_hopping {
         let initial_basin = identity.basin_of(x.view());
-        feedback.register_initial(initial_basin);
+        feedback.register_driver_local_initial(initial_basin);
         here = Some(initial_basin);
     }
     // The history's identity of the occupied minimum, numbered by the history
@@ -1661,6 +1661,12 @@ where
                     history_observations += 1;
                     history_new += usize::from(report.is_new);
                     if cfg.minima_hopping {
+                        let reached = match destination.local_minimum {
+                            Some(reached) => reached,
+                            None => identity.basin_of(destination.coordinates.view()),
+                        };
+                        destination.local_minimum = Some(reached);
+                        feedback.remember_driver_local(reached);
                         feedback.observe_shared(
                             history_here,
                             report.minimum,
@@ -1668,10 +1674,10 @@ where
                             report.visits,
                         );
                     } else if let Some((from, reached)) = local_feedback {
-                        feedback.observe(from, reached);
+                        feedback.observe_driver_local(from, reached);
                     }
                 } else if let Some((from, reached)) = local_feedback {
-                    feedback.observe(from, reached);
+                    feedback.observe_driver_local(from, reached);
                 }
             }
             if let (Some(h), Some(report)) = (history.as_deref_mut(), report) {
@@ -3292,7 +3298,7 @@ where
         let accept = if cfg.minima_hopping {
             let from = *here.get_or_insert_with(|| identity.basin_of(x.view()));
             if unquenched {
-                feedback.observe(Some(from), from);
+                feedback.observe_driver_local(Some(from), from);
                 false
             } else {
                 // Threshold on the *biased* rise. Adapts like Goedecker's E_diff
@@ -3304,6 +3310,7 @@ where
                     // controller: a minimum first found by another chain is
                     // known here too, and only a minimum new under the
                     // membership policy is offered to the threshold.
+                    feedback.remember_driver_local(reached);
                     let visit = feedback.observe_shared(
                         history_here,
                         report.minimum,
@@ -3312,7 +3319,7 @@ where
                     );
                     visit == Visit::New && feedback.accept(delta)
                 } else {
-                    feedback.observe(Some(from), reached);
+                    feedback.observe_driver_local(Some(from), reached);
                     reached != from && feedback.accept(delta)
                 };
                 if ok {
