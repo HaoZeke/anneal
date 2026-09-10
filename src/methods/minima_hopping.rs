@@ -44,8 +44,10 @@ use ndarray::{Array1, ArrayView1};
 use rand::Rng;
 use rand_distr::{Distribution, StandardNormal};
 use rgmin::{Manifold, ManifoldKind};
+use rgsaddle::internal::{CartAxis, Translation};
 use rgsaddle::{
-    PointSurface, SaddleError, SamdConfig, SamdSession, VelocitySofteningConfig, soften_velocity_on,
+    Constraints, PointSurface, SaddleError, SamdConfig, SamdSession, VelocitySofteningConfig,
+    soften_velocity_on,
 };
 
 mod history;
@@ -207,6 +209,25 @@ where
     F: for<'a> FnMut(ArrayView1<'a, f64>) -> Option<(f64, Array1<f64>)> + Send,
     R: Rng + ?Sized,
 {
+    nve_escape_with_frozen(start, initial_kinetic, config, evaluate, rng, None)
+}
+
+/// Escape with the hopping loop's frozen Cartesian frame.
+///
+/// Fixed atoms define the frame instead of the rigid quotient. An absent or
+/// all-mobile mask keeps the configured geometry and its stepping path.
+pub(crate) fn nve_escape_with_frozen<F, R>(
+    start: ArrayView1<f64>,
+    initial_kinetic: f64,
+    config: &MdEscapeConfig,
+    evaluate: &mut F,
+    rng: &mut R,
+    frozen_atoms: Option<&[bool]>,
+) -> Result<MdEscapeReport, SaddleError>
+where
+    F: for<'a> FnMut(ArrayView1<'a, f64>) -> Option<(f64, Array1<f64>)> + Send,
+    R: Rng + ?Sized,
+{
     if start.is_empty()
         || !config.dt.is_finite()
         || config.dt <= 0.0
@@ -225,9 +246,40 @@ where
         ));
     }
 
-    let manifold = match config.geometry {
+    let frozen_chart = match frozen_atoms {
+        Some(frozen) => {
+            if !start.len().is_multiple_of(3) || frozen.len() != start.len() / 3 {
+                return Err(SaddleError::Shape(
+                    "frozen NVE escape needs one mask entry per Cartesian atom".into(),
+                ));
+            }
+            if frozen.iter().any(|fixed| *fixed) {
+                let mut chart = Constraints::new(frozen.len())?;
+                for (atom, fixed) in frozen.iter().copied().enumerate() {
+                    if fixed {
+                        for axis in CartAxis::ALL {
+                            chart.fix_translation(
+                                Translation::new(vec![atom], axis)?,
+                                start,
+                                None,
+                            )?;
+                        }
+                    }
+                }
+                Some(chart)
+            } else {
+                None
+            }
+        }
+        None => None,
+    };
+    let configured_manifold = match config.geometry {
         MdEscapeGeometry::Euclidean => ManifoldKind::Euclidean,
         MdEscapeGeometry::RigidQuotient => ManifoldKind::RigidQuotient,
+    };
+    let manifold: &dyn Manifold = match frozen_chart.as_ref() {
+        Some(chart) => chart,
+        None => &configured_manifold,
     };
     let mut velocity = Array1::from_iter(start.iter().map(|_| {
         let draw: f64 = StandardNormal.sample(rng);
@@ -238,7 +290,7 @@ where
         evaluate: Mutex::new(evaluate),
     };
     let softening_evaluations = if let Some(softening) = config.softening {
-        let report = soften_velocity_on(&manifold, start, velocity.view(), &surface, softening)?;
+        let report = soften_velocity_on(manifold, start, velocity.view(), &surface, softening)?;
         velocity = report.direction;
         report.evaluations
     } else {
@@ -273,11 +325,14 @@ where
     let mut maximum_total = f64::NEG_INFINITY;
 
     for steps in 1..=config.maximum_steps {
-        let report = match config.geometry {
-            MdEscapeGeometry::Euclidean => session.step(&surface, noise.view())?,
-            MdEscapeGeometry::RigidQuotient => {
-                session.step_on(&manifold, &surface, noise.view())?
-            }
+        let report = match frozen_chart.as_ref() {
+            Some(chart) => session.step_on(chart, &surface, noise.view())?,
+            None => match config.geometry {
+                MdEscapeGeometry::Euclidean => session.step(&surface, noise.view())?,
+                MdEscapeGeometry::RigidQuotient => {
+                    session.step_on(&configured_manifold, &surface, noise.view())?
+                }
+            },
         };
         last_energy = report.energy;
         last_kinetic = report.kinetic;
