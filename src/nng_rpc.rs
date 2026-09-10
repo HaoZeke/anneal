@@ -17,7 +17,7 @@ use std::net::SocketAddr;
 use std::os::unix::io::{AsRawFd, RawFd};
 use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, Weak};
 use std::task::{Context, Poll, Waker};
 use std::time::{Duration, Instant};
 
@@ -48,6 +48,46 @@ pub struct PairSession {
     /// Pair socket.
     pub socket: Socket,
     _listener: Option<Listener>,
+    lifecycle: Arc<PairLifecycle>,
+}
+
+#[derive(Default)]
+struct PairLifecycle {
+    admitted: AtomicBool,
+    disconnected: AtomicBool,
+    wake: Mutex<Weak<StreamShared>>,
+}
+
+impl PairLifecycle {
+    fn watch(self: &Arc<Self>, socket: &Socket) -> io::Result<()> {
+        let lifecycle = Arc::clone(self);
+        socket
+            .pipe_notify(move |pipe, event| match event {
+                PipeEvent::AddPre => {
+                    // Closing in AddPre prevents socket admission and further
+                    // events for that pipe. A stream admits one connection for
+                    // its entire lifetime, so queued bytes cannot cross peers.
+                    if lifecycle.admitted.swap(true, Ordering::AcqRel) {
+                        pipe.close();
+                    }
+                }
+                PipeEvent::RemovePost => {
+                    lifecycle.disconnected.store(true, Ordering::Release);
+                    let shared = lifecycle
+                        .wake
+                        .lock()
+                        .unwrap_or_else(|poisoned| poisoned.into_inner())
+                        .upgrade();
+                    if let Some(shared) = shared {
+                        // Callbacks hold the socket lock: only notify the pump,
+                        // which drains received frames before resolving EOF.
+                        shared.notify();
+                    }
+                }
+                _ => {}
+            })
+            .map_err(nng_io)
+    }
 }
 
 /// Turn `host:port` into `tcp://host:port`. Pass through nng URLs.
@@ -62,8 +102,19 @@ pub fn url(spec: &str) -> String {
 
 /// Listen with `protocol` on `spec` (`host:port` or an nng URL).
 pub fn listen(protocol: Protocol, spec: &str) -> io::Result<BoundListen> {
+    listen_tracked(protocol, spec, None)
+}
+
+fn listen_tracked(
+    protocol: Protocol,
+    spec: &str,
+    lifecycle: Option<&Arc<PairLifecycle>>,
+) -> io::Result<BoundListen> {
     let requested = url(spec);
     let socket = Socket::new(protocol).map_err(nng_io)?;
+    if let Some(lifecycle) = lifecycle {
+        lifecycle.watch(&socket)?;
+    }
     socket
         .set_opt::<RecvMaxSize>(if matches!(protocol, Protocol::Pair0) {
             FRAME_HEADER + FRAME_PAYLOAD
@@ -121,11 +172,13 @@ fn finish_pair(accept: &Socket, hello: nng::Message) -> io::Result<PairSession> 
             "catalog pair hello mismatch",
         ));
     }
-    let bound = listen(Protocol::Pair0, &pair_bind_spec())?;
+    let lifecycle = Arc::new(PairLifecycle::default());
+    let bound = listen_tracked(Protocol::Pair0, &pair_bind_spec(), Some(&lifecycle))?;
     match accept.send(bound.url.as_bytes()) {
         Ok(()) => Ok(PairSession {
             socket: bound.socket,
             _listener: Some(bound.listener),
+            lifecycle,
         }),
         Err((_, error)) => Err(nng_io(error)),
     }
@@ -152,6 +205,8 @@ pub fn dial_pair(advertised: &str, timeout: Duration) -> io::Result<PairSession>
     }
     let pair_url = rewrite_pair_url(advertised, bound);
     let pair = Socket::new(Protocol::Pair0).map_err(nng_io)?;
+    let lifecycle = Arc::new(PairLifecycle::default());
+    lifecycle.watch(&pair)?;
     pair.set_opt::<RecvMaxSize>(FRAME_HEADER + FRAME_PAYLOAD)
         .map_err(nng_io)?;
     let _ = pair.set_opt::<SendTimeout>(Some(timeout));
@@ -162,6 +217,7 @@ pub fn dial_pair(advertised: &str, timeout: Duration) -> io::Result<PairSession>
     Ok(PairSession {
         socket: pair,
         _listener: None,
+        lifecycle,
     })
 }
 
@@ -206,23 +262,16 @@ impl NngIo {
         let shared = Arc::new(StreamShared {
             state: Mutex::new(StreamState::default()),
             wake,
-            disconnected: AtomicBool::new(false),
+            lifecycle: Arc::clone(&session.lifecycle),
             timeout,
         });
-        let weak = Arc::downgrade(&shared);
-        session
-            .socket
-            .pipe_notify(move |_, event| {
-                if matches!(event, PipeEvent::RemovePost)
-                    && let Some(shared) = weak.upgrade()
-                {
-                    // Socket callbacks only signal; the pump drains received
-                    // frames before resolving disconnect against stream EOF.
-                    shared.disconnected.store(true, Ordering::Release);
-                    shared.notify();
-                }
-            })
-            .map_err(nng_io)?;
+        // The callback predates connection establishment. Its removal flag is
+        // retained even when no stream wake target exists during the handoff.
+        *session
+            .lifecycle
+            .wake
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = Arc::downgrade(&shared);
         let pump_shared = Arc::clone(&shared);
         std::thread::Builder::new()
             .name("anneal-nng-pump".into())
@@ -295,7 +344,7 @@ struct StreamShared {
     state: Mutex<StreamState>,
     // This Unix pair carries wake bytes only, never application payload.
     wake: std::os::unix::net::UnixStream,
-    disconnected: AtomicBool,
+    lifecycle: Arc<PairLifecycle>,
     timeout: Duration,
 }
 
@@ -532,7 +581,7 @@ fn pump_pair(
         }
         // A readiness descriptor is not a transport-disconnect descriptor.
         // Pipe removal terminates this stream instead of replaying on reconnect.
-        if shared.disconnected.load(Ordering::Acquire) {
+        if shared.lifecycle.disconnected.load(Ordering::Acquire) {
             if received == PUMP_BATCH {
                 continue;
             }
@@ -544,7 +593,7 @@ fn pump_pair(
 
         let mut sent = 0;
         for _ in 0..PUMP_BATCH {
-            if shared.disconnected.load(Ordering::Acquire) {
+            if shared.lifecycle.disconnected.load(Ordering::Acquire) {
                 break;
             }
             let outgoing = match pending
