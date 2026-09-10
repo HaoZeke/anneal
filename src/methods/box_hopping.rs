@@ -987,15 +987,17 @@ fn shared_nng_url(config: &BoxEnsembleConfig) -> Option<String> {
     if !matches!(config.history, HistoryMode::Shared) {
         return None;
     }
+    let url = match std::env::var("HISTORY_NNG") {
+        Ok(url) if !url.is_empty() => url,
+        Ok(_) | Err(std::env::VarError::NotPresent) => return None,
+        Err(error) => panic!("HISTORY_NNG configuration: {error}"),
+    };
     #[cfg(feature = "history-nng")]
     {
-        match std::env::var("HISTORY_NNG") {
-            Ok(url) if !url.is_empty() => Some(url),
-            _ => None,
-        }
+        Some(url)
     }
     #[cfg(not(feature = "history-nng"))]
-    None
+    panic!("HISTORY_NNG={url:?} requires the history-nng feature")
 }
 
 #[cfg(feature = "history-nng")]
@@ -1003,8 +1005,10 @@ fn bind_shared_nng(config: &BoxEnsembleConfig, url: Option<&str>) -> Option<Hist
     let url = url?;
     std::env::var("HISTORY_NNG_SERVE")
         .is_ok_and(|value| value == "1")
-        .then(|| HistoryNngServer::bind(url, config.identity_tol, 1e-3).ok())
-        .flatten()
+        .then(|| {
+            HistoryNngServer::bind(url, config.identity_tol, 1e-3)
+                .unwrap_or_else(|error| panic!("HISTORY_NNG server setup: {error}"))
+        })
 }
 
 fn replica_hook<'a>(
@@ -1021,7 +1025,7 @@ fn replica_hook<'a>(
         {
             return HistoryNngClient::dial(url, widths.clone(), config.membership)
                 .map(ReplicaHook::Nng)
-                .unwrap_or(ReplicaHook::Off);
+                .unwrap_or_else(|error| panic!("HISTORY_NNG client setup: {error}"));
         }
         #[cfg(not(feature = "history-nng"))]
         {
