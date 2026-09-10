@@ -443,6 +443,8 @@ pub struct EscapeFeedback {
     /// zero and freeze the search.
     pub escape_floor: f64,
     visits: HashMap<usize, u32>,
+    /// Driver-local basin IDs are independent of the catalog's numeric IDs.
+    driver_local_visits: HashMap<usize, u32>,
     /// Counts of each outcome, for reporting.
     pub n_same: usize,
     /// Quenches that landed in a known other basin.
@@ -468,6 +470,7 @@ impl EscapeFeedback {
             escape_ceiling: escape * 4.0,
             escape_floor: escape / 4.0,
             visits: HashMap::new(),
+            driver_local_visits: HashMap::new(),
             n_same: 0,
             n_known: 0,
             n_new: 0,
@@ -524,6 +527,33 @@ impl EscapeFeedback {
         let visit = self.classify(current, reached);
         let prior_visits = self.visits(reached).max(1) as f64;
         self.apply_escape_feedback(visit, prior_visits);
+        *self.visits.entry(reached).or_insert(0) += 1;
+        visit
+    }
+
+    /// Register an occupied driver-local basin without applying feedback.
+    pub(crate) fn register_driver_local_initial(&mut self, basin: usize) {
+        self.register_initial(basin);
+        self.driver_local_visits.entry(basin).or_insert(1);
+    }
+
+    /// Retain a local observation whose feedback uses an authoritative report.
+    pub(crate) fn remember_driver_local(&mut self, basin: usize) {
+        *self.driver_local_visits.entry(basin).or_insert(0) += 1;
+    }
+
+    /// Apply local feedback without treating catalog IDs as local evidence.
+    pub(crate) fn observe_driver_local(&mut self, current: Option<usize>, reached: usize) -> Visit {
+        let prior_visits = self.driver_local_visits.get(&reached).copied();
+        let visit = if current == Some(reached) {
+            Visit::Same
+        } else if prior_visits.is_some() {
+            Visit::Known
+        } else {
+            Visit::New
+        };
+        self.apply_escape_feedback(visit, prior_visits.unwrap_or(0).max(1) as f64);
+        self.remember_driver_local(reached);
         *self.visits.entry(reached).or_insert(0) += 1;
         visit
     }
