@@ -365,9 +365,6 @@ where
     let n_epochs = n_epochs.clamp(1, dynamics_budget);
     let steps = (dynamics_budget / n_epochs).max(1);
 
-    // Auxiliary GLE state: (ns+1) x dim, row 0 is the physical momentum; the
-    // per-epoch loop reseeds it at the current temperature.
-    let mut s: Array2<f64>;
     let mut g = grad.grad(x.view());
     let mut n_evals = n_preconditioner_grads + 1;
     if n_evals >= max_fevals {
@@ -382,15 +379,21 @@ where
         };
     }
 
+    // Physical momentum and auxiliary rows retain their shared noise history;
+    // temperature changes rescale the complete state without a fresh draw.
+    let mut s = Array2::<f64>::zeros((ns + 1, dim));
+    let mut previous_temperature = t_hi;
     'outer: for epoch in 0..n_epochs {
         let frac = epoch as f64 / (n_epochs.max(2) - 1) as f64;
         let temperature = t_hi * (t_lo / t_hi).powf(frac);
         let gle = GleThermostat::canonical(&drift, dt, temperature, 1.0);
-        // reseed the physical momentum at this temperature
-        {
+        if epoch == 0 {
             let c = Array2::<f64>::eye(ns + 1) * temperature;
             s = gle.sample_stationary(&c, dim, 1.0, &mut rng);
+        } else {
+            s *= (temperature / previous_temperature).sqrt();
         }
+        previous_temperature = temperature;
         for _ in 0..steps {
             // B: half momentum kick from the force (mass = 1)
             let mut p: Array1<f64> = s.row(0).to_owned();
