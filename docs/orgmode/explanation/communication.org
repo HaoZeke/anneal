@@ -122,10 +122,16 @@ one atomic adoption transaction. It does not receive a coordinate proposal.
 These messages are neither census pub/sub nor catalog RPC. Requested transport
 setup failures are fatal to the infallible box entry points; a build without
 =history-nng= rejects an explicit =HISTORY_NNG= request in shared mode. Private
-and disabled history do not request that transport. The client still reports
-zero history-cost counters and collapses request failures into absent reports
-or acknowledgments. Received observations and an actual shared table need
-independent evidence.
+and disabled history do not request that transport. The client distinguishes
+scientific refusals from request failures through =try_observe=,
+=try_mark_accepted= and =try_minimum_count=. Its generic =HistoryHook= methods
+panic on transport or protocol failure; an absent report means scientific
+refusal, not a successful fallback to private history. Unknown identities
+cannot receive acceptance acknowledgments. The hook reports observation and
+refusal counts plus request elapsed time, but the box result does not expose
+that elapsed cost. Client requests have no deadline or application-level
+deduplication, so a missing reply can stall a search and retransmitted
+mutations have no exactly-once guarantee.
 
 * Live minima, well tables and deposits
 
