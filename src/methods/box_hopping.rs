@@ -161,9 +161,8 @@ where
         return EnsembleHopResult::from(out);
     }
     if replicas <= 1 {
-        let out = portfolio_optimize_seeded(
-            obj, grad, budget, seed, None, PortfolioPolicy::Auto, x0,
-        );
+        let out =
+            portfolio_optimize_seeded(obj, grad, budget, seed, None, PortfolioPolicy::Auto, x0);
         return EnsembleHopResult {
             best_pos: Array1::from(out.best_pos),
             best_val: out.best_val,
