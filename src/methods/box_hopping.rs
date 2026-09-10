@@ -885,9 +885,7 @@ impl Replica {
         self.x = position;
         self.f = energy;
         self.cv = descriptor;
-        if let Some(report) = report {
-            self.here = Some(report.minimum);
-        }
+        self.here = report.map(|report| report.minimum);
     }
 }
 
