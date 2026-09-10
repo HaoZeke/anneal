@@ -70,7 +70,7 @@ fn hopping_nve_keeps_frozen_coordinates_fixed_at_every_force_evaluation() {
         }
         let (energy, gradient) = mobile_harmonic(result.view(), minimum.view());
         if steps > 0 {
-            assert_eq!(gradient, Array1::zeros(result.len()));
+            assert_eq!(gradient, Array1::<f64>::zeros(result.len()));
             relaxed_states.push((energy, result.clone()));
         }
         (energy, result)
