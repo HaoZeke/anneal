@@ -256,6 +256,11 @@ fn main() {
                             "coverage_escape_updates": result.coverage.escape_updates,
                             "coverage_novel_arrivals": result.coverage.novel_arrivals,
                             "coverage_novelty_updates": result.coverage.novelty_updates,
+                            "coverage_published_samples": result.coverage.published_samples,
+                            "coverage_applied_foreign_samples": result.coverage.applied_foreign_samples,
+                            "coverage_sample_overlaps": result.coverage.sample_overlaps,
+                            "coverage_repelled_proposals": result.coverage.repelled_proposals,
+                            "coverage_constrained_repulsions": result.coverage.constrained_repulsions,
                             "coverage_decisions": result.coverage_decisions,
                         })
                     );
