@@ -252,14 +252,20 @@ impl Peer {
                 .wait(state)
                 .expect("portfolio exchange lock");
         }
-        self.local.lock().expect("local peer geometry lock").geometry =
-            state.coverage.repulsion_snapshot(self.replica);
+        self.local
+            .lock()
+            .expect("local peer geometry lock")
+            .geometry = state.coverage.repulsion_snapshot(self.replica);
     }
 
     pub(super) fn prepare(&self, anchor: ArrayView1<f64>, proposal: &mut Array1<f64>) -> bool {
         let original = proposal.clone();
         let mut local = self.local.lock().expect("local peer geometry lock");
-        let LocalPeer { rng, geometry, prepared } = &mut *local;
+        let LocalPeer {
+            rng,
+            geometry,
+            prepared,
+        } = &mut *local;
         geometry.repel(anchor, proposal, rng);
         let changed = *proposal != original;
         prepared.push_back(proposal.clone());
