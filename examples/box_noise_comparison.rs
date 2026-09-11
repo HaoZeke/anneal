@@ -239,7 +239,7 @@ fn values_controller_records(
         assert_eq!(best.best_val, verified_value);
         records.push(json!({
             "record": "result", "comparison": "values-controllers", "arm": arm,
-            "controller": if portfolio { "portfolio" } else { "pattern-search-hopping" },
+            "controller": if portfolio { "portfolio" } else { "values-quasi-newton-hopping" },
             "landscape": format!("{landscape:?}"), "dimension": dim, "seed": seed,
             "transformation": if matches!(landscape, Landscape::ConditionedQuadratic) {
                 "shifted-householder"
