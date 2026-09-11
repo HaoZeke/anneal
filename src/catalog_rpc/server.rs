@@ -1221,7 +1221,13 @@ impl session::Server for SessionImpl {
                     apply_started.elapsed().as_secs_f64(),
                 );
                 let mut events = Vec::new();
-                if matches!(reply, CatalogReply::Accepted(_)) {
+                if matches!(
+                    reply,
+                    CatalogReply::Accepted(AcceptedReply {
+                        duplicate: false,
+                        ..
+                    })
+                ) {
                     match &request.operation {
                         CatalogOperation::Attach => {
                             if let CatalogReply::Accepted(accepted) = &reply
