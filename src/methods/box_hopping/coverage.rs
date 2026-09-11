@@ -209,6 +209,13 @@ impl NormalizedCoordinates {
                 .zip(self.low.iter().zip(self.high.iter()))
                 .all(|(x, (low, high))| x.is_finite() && x >= low && x <= high)
     }
+
+    fn position(&self, descriptor: ArrayView1<f64>) -> Array1<f64> {
+        Array1::from_iter((0..self.widths.len()).map(|j| {
+            (self.low[j] + self.widths[j] * (descriptor[j] / self.free_scale))
+                .clamp(self.low[j], self.high[j])
+        }))
+    }
 }
 
 impl Fingerprint for NormalizedCoordinates {
@@ -334,15 +341,13 @@ impl Coverage {
                 self.stats.constrained_repulsions += 1;
             }
             Separation::Moved(descriptor) => {
-                let mut moved = proposal.clone();
-                for j in 0..moved.len() {
-                    moved[j] = (self.coordinates.low[j]
-                        + self.coordinates.widths[j]
-                            * (descriptor[j] / self.coordinates.free_scale))
-                        .clamp(self.coordinates.low[j], self.coordinates.high[j]);
-                }
                 self.stats.sample_overlaps += 1;
-                if moved != *proposal {
+                if let Some(moved) = self.physical_repulsion(
+                    replica,
+                    proposal.view(),
+                    point.view(),
+                    descriptor.view(),
+                ) {
                     *proposal = moved;
                     self.stats.repelled_proposals += 1;
                 } else {
@@ -350,6 +355,59 @@ impl Coverage {
                 }
             }
         }
+    }
+
+    /// Require separation and its displacement cap in the representable
+    /// parameter coordinates that the objective actually receives.
+    fn physical_repulsion(
+        &self,
+        replica: usize,
+        proposal: ArrayView1<f64>,
+        point: ArrayView1<f64>,
+        descriptor: ArrayView1<f64>,
+    ) -> Option<Array1<f64>> {
+        let peers = &self.peer_samples[replica];
+        let distance = peers.clearance(point)?;
+        let increment = (self.biases[replica].index().merge_radius() - distance)
+            * self.peer_weight.min(1.0);
+        let cap = increment + 16.0 * f64::EPSILON;
+        let admissible = |candidate: ArrayView1<f64>| {
+            let actual = self.coordinates.describe(candidate);
+            EuclideanMetric.distance(actual.view(), point) <= cap
+                && peers.clearance(actual.view()).is_some_and(|d| d > distance)
+        };
+        let mut candidate = self.coordinates.position(descriptor);
+        if admissible(candidate.view()) {
+            return Some(candidate);
+        }
+
+        // Normalized corrections can round onto a different physical lattice
+        // site. Poll physical coordinates without spending another callback or
+        // changing the random stream, and validate against the entire cloud.
+        candidate.assign(&proposal);
+        for (j, &width) in self.coordinates.widths.iter().enumerate() {
+            if width <= 0.0 {
+                continue;
+            }
+            let step = (increment / self.coordinates.free_scale) * width;
+            for sign in [-1.0, 1.0] {
+                candidate[j] = (proposal[j] + sign * step)
+                    .clamp(self.coordinates.low[j], self.coordinates.high[j]);
+                let actual = self.coordinates.describe(candidate.view());
+                if EuclideanMetric.distance(actual.view(), point) > cap {
+                    candidate[j] = if candidate[j] > proposal[j] {
+                        candidate[j].next_down().max(proposal[j])
+                    } else {
+                        candidate[j].next_up().min(proposal[j])
+                    };
+                }
+                if admissible(candidate.view()) {
+                    return Some(candidate);
+                }
+            }
+            candidate[j] = proposal[j];
+        }
+        None
     }
 
     fn heights(&self, replica: usize, descriptor: ArrayView1<f64>) -> (f64, ForeignWell) {
