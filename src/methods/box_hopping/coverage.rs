@@ -12,7 +12,11 @@ use crate::methods::minima_hopping::EscapeFeedback;
 use crate::shared_bias::SharedDeposits;
 
 use super::BoxEnsembleConfig;
-use super::repulsion::{PeerSamples, Separation};
+use super::repulsion::PeerSamples;
+
+#[path = "coverage/field.rs"]
+mod field;
+pub(crate) use field::{RepulsionSnapshot, RepulsionStats};
 
 /// Repulsion over the evaluated regions of a finite box.
 ///
@@ -310,104 +314,33 @@ impl Coverage {
         proposal: &mut Array1<f64>,
         rng: &mut R,
     ) {
-        if self.exchange.is_none()
-            || self.biases[replica].height() == 0.0
-            || !self.coordinates.feasible(proposal.view())
-            || !self.coordinates.feasible(anchor)
-        {
-            return;
-        }
-        let point = self.coordinates.describe(proposal.view());
-        let anchor = self.coordinates.describe(anchor);
-        let Some((separation, anchor_overlaps)) = self.peer_samples[replica].separate(
-            point.view(),
-            anchor.view(),
-            self.coordinates.widths.view(),
-            self.coordinates.free_scale,
-            self.biases[replica].index().merge_radius(),
-            self.peer_weight,
-            rng,
-        ) else {
-            return;
-        };
-        self.stats.sample_peer_checks += 1;
-        self.stats.sample_anchor_overlaps += usize::from(anchor_overlaps);
-        match separation {
-            Separation::Distant => {
-                self.stats.sample_anchor_only_overlaps += usize::from(anchor_overlaps);
-            }
-            Separation::Constrained => {
-                self.stats.sample_overlaps += 1;
-                self.stats.constrained_repulsions += 1;
-            }
-            Separation::Moved(descriptor) => {
-                self.stats.sample_overlaps += 1;
-                if let Some(moved) = self.physical_repulsion(
-                    replica,
-                    proposal.view(),
-                    point.view(),
-                    descriptor.view(),
-                ) {
-                    *proposal = moved;
-                    self.stats.repelled_proposals += 1;
-                } else {
-                    self.stats.constrained_repulsions += 1;
-                }
-            }
+        let mut stats = RepulsionStats::default();
+        self.repulsion_field(replica).repel(anchor, proposal, rng, &mut stats);
+        self.record_repulsion(stats);
+    }
+
+    fn repulsion_field(&self, replica: usize) -> field::Field<'_> {
+        field::Field {
+            coordinates: &self.coordinates,
+            peers: &self.peer_samples[replica],
+            radius: self.biases[replica].index().merge_radius(),
+            weight: self.peer_weight,
+            enabled: self.exchange.is_some() && self.biases[replica].height() != 0.0,
         }
     }
 
-    /// Require separation and its displacement cap in the representable
-    /// parameter coordinates that the objective actually receives.
-    fn physical_repulsion(
-        &self,
-        replica: usize,
-        proposal: ArrayView1<f64>,
-        point: ArrayView1<f64>,
-        descriptor: ArrayView1<f64>,
-    ) -> Option<Array1<f64>> {
-        let peers = &self.peer_samples[replica];
-        let distance = peers.clearance(point)?;
-        let increment =
-            (self.biases[replica].index().merge_radius() - distance) * self.peer_weight.min(1.0);
-        let cap = increment + 16.0 * f64::EPSILON;
-        let admissible = |candidate: ArrayView1<f64>| {
-            let actual = self.coordinates.describe(candidate);
-            EuclideanMetric.distance(actual.view(), point) <= cap
-                && peers.clearance(actual.view()).is_some_and(|d| d > distance)
-        };
-        let mut candidate = self.coordinates.position(descriptor);
-        if admissible(candidate.view()) {
-            return Some(candidate);
-        }
+    /// Freeze one recipient's geometry independently of ongoing publication.
+    pub(crate) fn repulsion_snapshot(&self, replica: usize) -> RepulsionSnapshot {
+        self.repulsion_field(replica).snapshot()
+    }
 
-        // Normalized corrections can round onto a different physical lattice
-        // site. Poll physical coordinates without spending another callback or
-        // changing the random stream, and validate against the entire cloud.
-        candidate.assign(&proposal);
-        for (j, &width) in self.coordinates.widths.iter().enumerate() {
-            if width <= 0.0 {
-                continue;
-            }
-            let step = (increment / self.coordinates.free_scale) * width;
-            for sign in [-1.0, 1.0] {
-                candidate[j] = (proposal[j] + sign * step)
-                    .clamp(self.coordinates.low[j], self.coordinates.high[j]);
-                let actual = self.coordinates.describe(candidate.view());
-                if EuclideanMetric.distance(actual.view(), point) > cap {
-                    candidate[j] = if candidate[j] > proposal[j] {
-                        candidate[j].next_down().max(proposal[j])
-                    } else {
-                        candidate[j].next_up().min(proposal[j])
-                    };
-                }
-                if admissible(candidate.view()) {
-                    return Some(candidate);
-                }
-            }
-            candidate[j] = proposal[j];
-        }
-        None
+    pub(crate) fn record_repulsion(&mut self, stats: RepulsionStats) {
+        self.stats.sample_peer_checks += stats.sample_peer_checks;
+        self.stats.sample_anchor_overlaps += stats.sample_anchor_overlaps;
+        self.stats.sample_anchor_only_overlaps += stats.sample_anchor_only_overlaps;
+        self.stats.sample_overlaps += stats.sample_overlaps;
+        self.stats.repelled_proposals += stats.repelled_proposals;
+        self.stats.constrained_repulsions += stats.constrained_repulsions;
     }
 
     fn heights(&self, replica: usize, descriptor: ArrayView1<f64>) -> (f64, ForeignWell) {
