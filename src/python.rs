@@ -1922,6 +1922,11 @@ fn box_ensemble_optimize(
     out.set_item("coverage_escape_updates", result.coverage.escape_updates)?;
     out.set_item("coverage_novel_arrivals", result.coverage.novel_arrivals)?;
     out.set_item("coverage_novelty_updates", result.coverage.novelty_updates)?;
+    out.set_item("coverage_published_samples", result.coverage.published_samples)?;
+    out.set_item("coverage_applied_foreign_samples", result.coverage.applied_foreign_samples)?;
+    out.set_item("coverage_sample_overlaps", result.coverage.sample_overlaps)?;
+    out.set_item("coverage_repelled_proposals", result.coverage.repelled_proposals)?;
+    out.set_item("coverage_constrained_repulsions", result.coverage.constrained_repulsions)?;
     out.set_item(
         "coverage_decisions",
         coverage_decisions_dict(py, &result.coverage_decisions)?,
@@ -2021,6 +2026,11 @@ fn ensemble_optimize(
     out.set_item("coverage_escape_updates", result.coverage.escape_updates)?;
     out.set_item("coverage_novel_arrivals", result.coverage.novel_arrivals)?;
     out.set_item("coverage_novelty_updates", result.coverage.novelty_updates)?;
+    out.set_item("coverage_published_samples", result.coverage.published_samples)?;
+    out.set_item("coverage_applied_foreign_samples", result.coverage.applied_foreign_samples)?;
+    out.set_item("coverage_sample_overlaps", result.coverage.sample_overlaps)?;
+    out.set_item("coverage_repelled_proposals", result.coverage.repelled_proposals)?;
+    out.set_item("coverage_constrained_repulsions", result.coverage.constrained_repulsions)?;
     out.set_item(
         "coverage_decisions",
         coverage_decisions_dict(py, &result.coverage_decisions)?,
