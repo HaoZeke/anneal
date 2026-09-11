@@ -239,9 +239,16 @@ fn novel_coverage_balances_escape_without_a_minimum_report() {
     );
     assert_eq!(active.len(), result.hops + 1);
     for (index, point) in active.iter().enumerate() {
-        assert!(active[..index].iter().all(|known| (point[0] - known[0]).abs() / 2.0 > radius));
+        assert!(
+            active[..index]
+                .iter()
+                .all(|known| (point[0] - known[0]).abs() / 2.0 > radius)
+        );
     }
-    assert_eq!(active[1], inactive[1], "initial coverage does not update escape");
+    assert_eq!(
+        active[1], inactive[1],
+        "initial coverage does not update escape"
+    );
     assert_ne!(
         active[2], inactive[2],
         "the controller must consume novel coverage as well as repeated returns"
