@@ -50,6 +50,7 @@ use rgsaddle::{
     soften_velocity_on,
 };
 
+#[path = "minima_hopping/history.rs"]
 mod history;
 pub use history::{
     HistoryHook, HistoryMembership, HistoryObservation, HistoryReport, MinimumHistory,
