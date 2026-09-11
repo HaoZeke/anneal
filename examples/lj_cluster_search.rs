@@ -5461,7 +5461,7 @@ fn run_capnp_catalog(
                     }
                     if foreign_parent {
                         let live = snapshot.current_state();
-                        let left = {
+                        let reseed = {
                             #[cfg(feature = "featomic")]
                             {
                                 anneal_core::featomic_hop::surplus_reseed(
@@ -5472,35 +5472,25 @@ fn run_capnp_catalog(
                                     None,
                                     &mut transport_rng,
                                 )
-                                .unwrap_or_else(|| {
-                                    let index = archive_cover_index(replica, archive_hole_count);
-                                    archive_hole_count += 1;
-                                    leave_packing_state(
-                                        live,
-                                        snapshot.current_energy(),
-                                        &shared_wells,
-                                        coop_rcut,
-                                        coop_species.as_deref(),
-                                        index,
-                                        &mut transport_rng,
-                                    )
-                                })
                             }
                             #[cfg(not(feature = "featomic"))]
                             {
-                                let index = archive_cover_index(replica, archive_hole_count);
-                                archive_hole_count += 1;
-                                leave_packing_state(
-                                    live,
-                                    snapshot.current_energy(),
-                                    &shared_wells,
-                                    coop_rcut,
-                                    coop_species.as_deref(),
-                                    index,
-                                    &mut transport_rng,
-                                )
+                                None::<Array1<f64>>
                             }
                         };
+                        let left = reseed.unwrap_or_else(|| {
+                            let index = archive_cover_index(replica, archive_hole_count);
+                            archive_hole_count += 1;
+                            leave_packing_state(
+                                live,
+                                snapshot.current_energy(),
+                                &shared_wells,
+                                coop_rcut,
+                                coop_species.as_deref(),
+                                index,
+                                &mut transport_rng,
+                            )
+                        });
                         if left
                             .iter()
                             .zip(live.iter())
