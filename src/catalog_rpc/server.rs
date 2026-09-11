@@ -4,7 +4,7 @@ use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
-use std::net::{SocketAddr, TcpListener};
+use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -18,6 +18,7 @@ use capnp_rpc::pry;
 use capnp_rpc::rpc_twoparty_capnp::Side;
 use capnp_rpc::twoparty::VatNetwork;
 use futures::AsyncReadExt;
+use nng::options::Options;
 use ndarray::{Array1, ArrayView1};
 use rand::SeedableRng;
 use tokio_util::compat::TokioAsyncReadCompatExt;
@@ -32,6 +33,7 @@ use super::{
     encode_request, fill_coordinator_status, fill_event, fill_reply, fill_roster, read_identity,
 };
 use crate::Catalog_capnp::{coordinator, session, subscriber};
+use crate::nng_rpc::{self, NngIo};
 use crate::catalog::{
     AdmissionOutcome, AdmissionRejection, Archive, AttractorStrength, BasinCatalog, BasinCensus,
     BasinId, CHAMPION_RANK, CandidateRecord, CandidateValidator, CensusObservation, Curiosity,
@@ -822,9 +824,13 @@ impl CatalogServer {
     pub fn start(addr: &str, config: ServerConfig) -> Result<Self, CatalogServerError> {
         let mut initial_state = CoordinatorState::new(&config)?;
         replay_journal(&config, &mut initial_state)?;
-        let listener = TcpListener::bind(addr)?;
-        listener.set_nonblocking(true)?;
-        let addr = listener.local_addr()?;
+        let bound = nng_rpc::listen(nng::Protocol::Rep0, addr)?;
+        let addr = bound.addr.ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::AddrNotAvailable,
+                "catalog nng bind must be tcp:// so addr() stays a SocketAddr",
+            )
+        })?;
         let header = ServerHeader {
             campaign: config.campaign.clone(),
             ensemble: config.ensemble.clone(),
@@ -850,27 +856,46 @@ impl CatalogServer {
                     .build()
                     .expect("catalog RPC runtime starts");
                 let local = tokio::task::LocalSet::new();
+                let (incoming, mut accepted) = tokio::sync::mpsc::unbounded_channel();
+                let accept_stop = Arc::clone(&thread_stop);
+                std::thread::Builder::new()
+                    .name("catalog-nng-accept".to_owned())
+                    .spawn(move || {
+                        let _listener = bound.listener;
+                        let accept = bound.socket;
+                        let _ = accept.set_opt::<nng::options::RecvTimeout>(Some(
+                            Duration::from_millis(50),
+                        ));
+                        while !accept_stop.load(Ordering::Acquire) {
+                            match nng_rpc::accept_pair(&accept) {
+                                Ok(pair) => {
+                                    if incoming.send(pair).is_err() {
+                                        break;
+                                    }
+                                }
+                                Err(error) if error.kind() == std::io::ErrorKind::TimedOut => {}
+                                Err(_) => break,
+                            }
+                        }
+                    })
+                    .expect("catalog nng accept starts");
                 local.block_on(&runtime, async move {
-                    let listener = match tokio::net::TcpListener::from_std(listener) {
-                        Ok(listener) => listener,
-                        Err(_) => return,
-                    };
                     let shared = Rc::new(RefCell::new(CoordinatorShared {
                         config,
                         state: accept_state,
                         subscribers: Vec::new(),
                     }));
                     while !thread_stop.load(Ordering::Acquire) {
-                        match tokio::time::timeout(Duration::from_millis(50), listener.accept())
+                        match tokio::time::timeout(Duration::from_millis(50), accepted.recv())
                             .await
                         {
-                            Ok(Ok((stream, _))) => {
+                            Ok(Some(pair)) => {
                                 let shared = Rc::clone(&shared);
                                 tokio::task::spawn_local(async move {
-                                    let _ = serve_connection(stream, shared).await;
+                                    let _ = serve_connection(pair, shared).await;
                                 });
                             }
-                            Ok(Err(_)) => break,
+                            Ok(None) => break,
                             Err(_) => {}
                         }
                     }
@@ -997,12 +1022,10 @@ struct SessionImpl {
 }
 
 async fn serve_connection(
-    stream: tokio::net::TcpStream,
+    pair: nng_rpc::PairSession,
     shared: Rc<RefCell<CoordinatorShared>>,
 ) -> Result<(), String> {
-    stream
-        .set_nodelay(true)
-        .map_err(|error| error.to_string())?;
+    let stream = NngIo::new(pair).map_err(|error| error.to_string())?;
     let (reader, writer) = TokioAsyncReadCompatExt::compat(stream).split();
     let network = VatNetwork::new(
         futures::io::BufReader::new(reader),
