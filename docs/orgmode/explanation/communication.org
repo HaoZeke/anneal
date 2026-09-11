@@ -73,6 +73,7 @@ have interchangeable communication configurations.
 | =methods::ensemble::run_ensemble= | Exact-history reports, descriptor visit deltas, optional well tables and occupied structures | History feedback and local bias updates; optional two-choice restart constructs a fresh start |
 | =box_ensemble_optimize= | Evaluated-region descriptor/count events, bounded paid-sample descriptors; optional certified minimum reports | Nearby samples repel Gaussian/Langevin proposals; coverage changes acceptance and escape scale; gradient polish uses the raw objective |
 | =box_values_ensemble_optimize= | Same coverage and sample streams; optional finite-difference minimum reports | Nearby samples repel kicks; coverage changes acceptance and escape scale; budgeted quasi-Newton refinement uses scalar values without a user gradient |
+| =portfolio_ensemble_optimize= | Bounded paid global-proposal samples and checkpoint incumbents | Frozen peer geometry separates global proposals; full controller state and raw-objective refinement remain private |
 | =CensusBus= live-minimum messages | Replica, hop count, energy, Cartesian coordinates | Nearby-peer count, packing references and optionally remote bias deposits; no direct coordinate adoption |
 | Census-bus well messages | Descriptor centres and accumulated well depths | A =MergeBias= checkpoint action updates local well depths |
 | Catalog coordinator | Validated candidates, policy state, population plans and work records | Hearing, population and other boundary policies can construct or adopt coordinates |
@@ -84,6 +85,70 @@ values-only box path; one replica uses the portfolio and has no minimum-history
 table. Box replicas are stepped by the box runner's loops, not by the atomic
 runner's scoped threads. The atomic runner constructs an objective per thread,
 so an external potential handle need not be shared between replicas.
+
+** Persistent portfolio replicas
+
+The [[file:../../../src/methods/portfolio/ensemble.rs][portfolio ensemble]]
+keeps one uninterrupted multi-arm controller per replica. Its bandit,
+populations, occupied states, local archive and random stream remain private.
+Replica count splits one aggregate objective-plus-gradient allowance; it does
+not restart the controller at every exchange. =coverage.shared=false= is the
+communication-off control with the same starts, seeds and per-replica budgets.
+
+The Python =global_optimize= wrapper selects this driver when =replicas > 1=.
+For example, a parameter loss can expose only values:
+
+#+begin_src python
+import anneal
+import numpy as np
+
+result = anneal.global_optimize(
+    lambda x: float(np.sum((x - 0.371) ** 2)),
+    low=[-2.0] * 5,
+    high=[2.0] * 5,
+    budget=2003,
+    seed=17,
+    replicas=4,
+    coverage_shared=True,
+)
+assert result["n_grads"] == 0
+assert result["n_evals"] == result["charged"] <= 2003
+assert len(result["replicas"]) == 4
+#+end_src
+
+The portfolio requires finite positive-width intervals. Fixed-axis box search
+uses the separate convenience domain mapping described below. A caller-owned
+native objective handle passed to =global_optimize_objective= retains its
+single-portfolio interface. ChemFit's =fit_anneal(jac=False)= calls =minimize=;
+it does not implicitly select the portfolio ensemble shown here.
+
+At arm checkpoints, replicas publish paid feasible positions and receive peers'
+bounded sample clouds. Each chain freezes its received cloud for a slice and
+performs distance calculations under its own lock, not the exchange lock.
+Proposal counters merge at checkpoints and retirement. Unfunded replicas do
+not join the barrier; completed or unwinding replicas release their reader
+obligation. Objective callbacks execute outside exchange locks.
+
+The consumers are QMC exploration starts and steps, gradient-hop launches,
+surrogate candidates, differential-evolution initialization and mutations,
+persistent GSA steps and reseeds, and local-search restart seeds. Local
+derivative stencils and line searches evaluate the raw objective without
+geometric displacement. A prepared proposal is publishable only when a real
+callback evaluates its finite feasible value. Other portfolio arm internals
+do not acquire peer steering merely by being present in the library.
+
+The values-only controller protects a refinement reserve across search slices,
+including enlarged warmup slices. A scalar refinement start needs its base
+value, a complete central stencil and a trial: =2 * dimension + 2= callbacks.
+Restart count respects that cost; every numerical probe counts as an objective
+call, not a caller-gradient call. This is allocation of optimization work, not
+physical-time integration or a certificate that the objective is smooth.
+
+This exchange is all-to-all and in-process. It does not use =CensusBus= ring
+settings or the NNG minimum-history transport. It changes proposals, not
+acceptance energies or occupied states by peer adoption. Coverage height gates
+sample separation but supplies no well-depth bias to this driver. A radius is
+an explicit geometric setting, not a universal diversity or quality guarantee.
 
 ** Common Python result and domain
 
