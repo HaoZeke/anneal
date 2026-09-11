@@ -3,19 +3,18 @@
 
 * GLE Colored-Noise Langevin
 
-GLE-Langevin replaces the white-noise Langevin move with a generalized Langevin equation thermostat.
-An optimal-sampling drift matrix fitted once from the characteristic frequency flattens the noise spectrum.
-The same fitted matrix accelerates every gradient-capable driver.
+GLE-Langevin combines gradient-driven motion with a generalized Langevin
+equation thermostat. Auxiliary momenta give its friction frequency dependence.
+The fitted drift matrix is used by the standalone GLE driver and its portfolio
+arm; it is not an escape operator in the communicating box or atomic chains.
 
 #+begin_export rst
 .. admonition:: Reference
 
-   The BAB propagator, stationary reseed per epoch, matrix_exp + ldl_sqrt
-   construction of the drift, and the reduction to the canonical
-   form appear in src/methods/gle_langevin.rs and the corresponding
-   eindir GleThermostat / optimal_sampling_drift code. The "one drift
-   serves all gradient drivers" claim is a direct consequence of the
-   algebra (the GLE object occupies exactly the Move slot).
+   src/methods/gle_langevin.rs owns the BAB stepping loop and retained
+   thermostat state. eindir's GleThermostat and optimal_sampling_drift
+   provide the thermostat construction and update. Reusable primitives
+   do not establish that every search driver calls them.
 #+end_export
 
 * Prerequisites
@@ -41,6 +40,7 @@ def grad_rastrigin(x):
 
 low = np.full(5, -5.0)
 high = np.full(5, 5.0)
+x0 = np.full(5, 2.5)
 #+end_src
 
 * Step 2: Call =gle_langevin= (the exposed driver)
@@ -48,28 +48,47 @@ high = np.full(5, 5.0)
 #+begin_src python
 res = gle_langevin(rastrigin, grad_rastrigin, low, high,
                    max_fevals=4000, seed=11,
-                   omega0=0.2, dt=0.2, n_epochs=40)
+                   omega0=0.2, dt=0.2, n_epochs=40, x0=x0)
+print("Initial value:", rastrigin(x0))
 print("GLE best pos:", res["best_pos"])
 print("GLE best val:", res["best_val"])
-print("GLE evals:", res["n_evals"])
+print("Gradient calls:", res["n_evals"])
+print("Combined work:", 2 * res["n_evals"] - res["n_preconditioner_grads"])
+print("Effective timestep:", res["dt"])
 #+end_src
 
-Expected on this separable ill-conditioned problem: the colored-noise version reaches lower values in the same budget than plain white-noise Langevin would, because the single fitted drift matrix equalizes efficiency across a decade of frequencies.
+The initial value is 131.25. The result retains its best observed point, so its
+reported value cannot exceed that finite initial value. Starting at the box
+centre would start Rastrigin at its global minimum and would not test descent.
+This example does not compare white and colored noise or establish a search
+advantage. =max_fevals= is a gradient-call allowance for this driver, not the
+combined objective-plus-gradient budget used by the box ensemble. With a
+supplied frequency, each gradient has a paired objective call. Automatic
+calibration adds gradient-only probes, counted in =n_preconditioner_grads=.
+The returned timestep includes the driver's frequency-resolution limit.
 
 * Step 3: The thermostat inside (what the algebra buys)
 
 - =eindir= builds the =optimal_sampling_drift= matrix A for the chosen =omega0=.
 - The GLE move kernel (B-A-B splitting + exact matrix exponential; the propagator from the GLE literature) occupies the Move slot.
-- The same A works for any inner sampler that supplies a gradient (HMC variants, plain Langevin, custom methods).
-- No per-preset GLE code exists; the factoring guarantees it.
+- The standalone driver retains physical and auxiliary momenta between epochs.
+- A separate driver invocation initializes a separate thermostat state,
+  including separate invocations of the portfolio arm.
 
-Stationary reseed per epoch keeps the auxiliary momenta consistent with the invariant measure even when the outer temperature schedule changes.
+Initialization samples the augmented state once. A temperature change rescales
+every row by =sqrt(T_new/T_old)= without drawing a replacement. Keeping the
+auxiliary rows preserves their correlated history across the annealing epochs.
 
-* Why this works
+* What the example establishes
 
-White-noise Langevin critically damps only one frequency.
-Real objectives have spectra spanning orders of magnitude (the classic "ill-conditioned" case).
-The GLE drift matrix is the exact continuous-time solution that makes the integrated autocorrelation time flat from =omega0= to ~100*=omega0=.
-Because Move is the only slot that knows the proposal shape, swapping the white-noise proposal for the GLE proposal gives gradient drivers the same thermostat path.
+The example exercises a bounded, gradient-enabled GLE search from a nonoptimal
+point. Its position update clips to the box; that boundary rule is not a
+general manifold retraction or a proof of proposal symmetry. A white/colored
+comparison needs matched starts, actual callback budgets, timesteps,
+temperature schedules, constraints and polishing rules. Communication needs
+its own private/shared comparison with those search settings held fixed.
+
+See [[file:../explanation/communication.org][communication contracts]] for
+driver ownership, geometry and history boundaries.
 
 See [[file:../explanation/gle-mechanics.org][gle-mechanics]] (T4) for the matrix construction and the canonical-form derivation.

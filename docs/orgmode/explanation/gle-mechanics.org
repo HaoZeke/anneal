@@ -3,8 +3,18 @@
 
 * GLE Mechanics
 
-See the dedicated tutorial [[file:../tutorials/gle-colored-noise.org][gle-colored-noise]] for the call site and the "one drift serves all" claim.
+See [[file:../tutorials/gle-colored-noise.org][gle-colored-noise]] for a
+bounded optimization call from a nonoptimal start and its work accounting.
 
-The construction (white-noise critically damps one frequency; GLE uses number of auxiliary (=N_s=) momenta + =optimal_sampling_drift= matrix A so the spectrum is flat on [omega0, 100*omega0], BAB propagator, stationary reseed, exact =matrix_exp= + =ldl_sqrt=) lives in =eindir= (=GleThermostat=) and is consumed verbatim by =src/methods/gle_langevin.rs=.
+The =eindir= primitives =optimal_sampling_drift= and =GleThermostat= construct
+the fitted drift and its discrete thermostat update. The anneal driver in
+=src/methods/gle_langevin.rs= owns the BAB position/force steps and temperature
+schedule. Its augmented momentum matrix contains one physical row and =N_s=
+auxiliary rows. All rows persist across epochs and scale together when the
+temperature changes; independent driver invocations initialize separate state.
 
-Because the GLE object is a pure filling of the Move slot, thermostat variants (different canonical form, a-la-carte correctness vs acceleration, new drift fitting) can be reused by gradient drivers without touching the classical presets or the orchestrator.
+The standalone driver and gradient portfolio arm call this implementation.
+The communicating box and atomic hop drivers do not call it as an escape
+operator. Reusing the thermostat in another driver requires explicit ownership
+of its retained state, coordinate-boundary handling and charged callbacks;
+the component algebra alone does not supply those connections.
