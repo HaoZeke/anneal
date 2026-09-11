@@ -76,6 +76,94 @@ fn validate_box_bounds(low: &[f64], high: &[f64]) -> PyResult<()> {
     Ok(())
 }
 
+fn py_view1<'py>(py: Python<'py>, x: ArrayView1<f64>) -> Bound<'py, PyArray1<f64>> {
+    match x.as_slice() {
+        Some(sl) => PyArray1::from_slice(py, sl),
+        None => PyArray1::from_vec(py, x.iter().copied().collect()),
+    }
+}
+
+fn require_positive_budget(budget: usize) -> PyResult<()> {
+    if budget == 0 {
+        Err(PyValueError::new_err("budget must be positive"))
+    } else {
+        Ok(())
+    }
+}
+
+/// Shared box parse: finite ordered bounds and an optional start.
+fn parse_box(
+    low: PyReadonlyArray1<'_, f64>,
+    high: PyReadonlyArray1<'_, f64>,
+    x0: Option<PyReadonlyArray1<'_, f64>>,
+) -> PyResult<(Bounds<f64>, usize, Option<Array1<f64>>)> {
+    let low_vec = low.as_slice()?.to_vec();
+    let high_vec = high.as_slice()?.to_vec();
+    validate_box_bounds(&low_vec, &high_vec)?;
+    let dim = low_vec.len();
+    let x0 = if let Some(x0) = x0 {
+        let sl = x0.as_slice()?;
+        if sl.len() != dim {
+            return Err(PyValueError::new_err(format!(
+                "x0 length {} does not match dimension {}",
+                sl.len(),
+                dim
+            )));
+        }
+        Some(Array1::from_vec(sl.to_vec()))
+    } else {
+        None
+    };
+    Ok((
+        Bounds::new(Array1::from_vec(low_vec), Array1::from_vec(high_vec), 1e-9),
+        dim,
+        x0,
+    ))
+}
+
+struct ParsedBoxSearch {
+    bounds: Bounds<f64>,
+    dim: usize,
+    x0: Option<Array1<f64>>,
+    history: crate::methods::ensemble::HistoryMode,
+    membership: crate::methods::minima_hopping::HistoryMembership,
+}
+
+fn parse_box_search(
+    low: PyReadonlyArray1<'_, f64>,
+    high: PyReadonlyArray1<'_, f64>,
+    budget: usize,
+    replicas: usize,
+    x0: Option<PyReadonlyArray1<'_, f64>>,
+    history: &str,
+    membership: &str,
+) -> PyResult<ParsedBoxSearch> {
+    require_positive_budget(budget)?;
+    if replicas == 0 {
+        return Err(PyValueError::new_err("replicas must be positive"));
+    }
+    let (bounds, dim, x0) = parse_box(low, high, x0)?;
+    let history = match history {
+        "none" | "no" => crate::methods::ensemble::HistoryMode::None,
+        "private" => crate::methods::ensemble::HistoryMode::Private,
+        "shared" => crate::methods::ensemble::HistoryMode::Shared,
+        other => {
+            return Err(PyValueError::new_err(format!(
+                "history must be none, private, or shared, got {other:?}"
+            )));
+        }
+    };
+    let membership = crate::methods::minima_hopping::HistoryMembership::parse(Some(membership))
+        .map_err(PyValueError::new_err)?;
+    Ok(ParsedBoxSearch {
+        bounds,
+        dim,
+        x0,
+        history,
+        membership,
+    })
+}
+
 // ---------------------------------------------------------------------------
 // Preset parameter holders.
 // ---------------------------------------------------------------------------
@@ -1722,75 +1810,42 @@ fn box_ensemble_optimize(
     history: &str,
     membership: &str,
 ) -> PyResult<Py<PyDict>> {
-    let low_vec = low.as_slice()?.to_vec();
-    let high_vec = high.as_slice()?.to_vec();
-    validate_box_bounds(&low_vec, &high_vec)?;
-    if budget == 0 {
-        return Err(PyValueError::new_err("budget must be positive"));
-    }
-    if replicas == 0 {
-        return Err(PyValueError::new_err("replicas must be positive"));
-    }
-    let dim = low_vec.len();
-    let bounds = Bounds::new(Array1::from_vec(low_vec), Array1::from_vec(high_vec), 1e-9);
-    let seed_arr = if let Some(x0) = x0 {
-        let sl = x0.as_slice()?;
-        if sl.len() != dim {
-            return Err(PyValueError::new_err(format!(
-                "x0 length {} does not match dimension {}",
-                sl.len(),
-                dim
-            )));
-        }
-        Some(Array1::from_vec(sl.to_vec()))
-    } else {
-        None
-    };
-    let seed_view = seed_arr.as_ref().map(|a| a.view());
-    let history_mode = match history {
-        "none" | "no" => crate::methods::ensemble::HistoryMode::None,
-        "private" => crate::methods::ensemble::HistoryMode::Private,
-        "shared" => crate::methods::ensemble::HistoryMode::Shared,
-        other => {
-            return Err(PyValueError::new_err(format!(
-                "history must be none, private, or shared, got {other:?}"
-            )));
-        }
-    };
-    let membership = crate::methods::minima_hopping::HistoryMembership::parse(Some(membership))
-        .map_err(PyValueError::new_err)?;
+    let parsed = parse_box_search(low, high, budget, replicas, x0, history, membership)?;
+    let seed_view = parsed.x0.as_ref().map(|a| a.view());
     let config = crate::methods::box_hopping::BoxEnsembleConfig {
         replicas,
         budget,
-        history: history_mode,
-        membership,
+        history: parsed.history,
+        membership: parsed.membership,
         identity_tol: crate::methods::box_hopping::IDENTITY_TOL,
+        shared_deposits: 8,
         ..crate::methods::box_hopping::BoxEnsembleConfig::default()
+    };
+    let Some(grad_fn) = grad_fn else {
+        return Err(PyValueError::new_err(
+            "box_ensemble_optimize requires grad_fn; use ensemble_optimize without a gradient",
+        ));
     };
     let obj = CallableObjective {
         fn_: obj_fn,
-        bounds,
+        bounds: parsed.bounds,
     };
-    let result = match grad_fn {
-        Some(grad_fn) => {
-            let grad = CallablePyGradient { fn_: grad_fn, dim };
-            crate::methods::box_hopping::box_ensemble_optimize(
-                &obj,
-                Some(&grad),
-                seed,
-                seed_view,
-                &config,
-            )
-        }
-        None => crate::methods::box_hopping::box_ensemble_optimize::<_, CallablePyGradient>(
-            &obj, None, seed, seed_view, &config,
-        ),
-    };
+    let dim = parsed.dim;
+    let grad = CallablePyGradient { fn_: grad_fn, dim };
+    let result = with_replica_threads(py, || {
+        crate::methods::box_hopping::box_ensemble_optimize(
+            &obj,
+            &grad,
+            seed,
+            seed_view,
+            &config,
+        )
+    });
     let out = PyDict::new(py);
     out.set_item("best_val", result.best_val)?;
     out.set_item(
         "best_pos",
-        PyArray1::from_slice(py, result.best_pos.as_slice().unwrap()),
+        py_view1(py, result.best_pos.view()),
     )?;
     out.set_item("n_evals", result.n_evals)?;
     out.set_item("n_grads", result.n_grads)?;
@@ -1799,11 +1854,16 @@ fn box_ensemble_optimize(
     out.set_item("history_minima", result.history_minima)?;
     out.set_item("history_refusals", result.history_cost.1)?;
     out.set_item("history_seconds", result.history_cost.2)?;
+    out.set_item("shared_deposits", result.shared_deposits)?;
+    out.set_item("coverage_observations", result.coverage.local_observations)?;
+    out.set_item("coverage_published", result.coverage.published_visits)?;
+    out.set_item("coverage_applied_foreign", result.coverage.applied_foreign_visits)?;
+    out.set_item("coverage_capped_foreign", result.coverage.capped_foreign_visits)?;
+    out.set_item("coverage_regions_per_chain", result.coverage.per_chain_regions)?;
     Ok(out.into())
 }
 
-/// Production hop ensemble (`run_ensemble`) on a box: recommended cluster
-/// hop, four replicas, shared exact `MinimumHistory`.
+/// Box search split on gradient: hop-and-quench, or the values-only portfolio.
 #[pyfunction]
 #[pyo3(signature = (obj_fn, low, high, budget, seed = 0, grad_fn = None, x0 = None,
                     replicas = 4, history = "shared", membership = "accepted"))]
@@ -1821,83 +1881,55 @@ fn ensemble_optimize(
     history: &str,
     membership: &str,
 ) -> PyResult<Py<PyDict>> {
-    let low_vec = low.as_slice()?.to_vec();
-    let high_vec = high.as_slice()?.to_vec();
-    validate_box_bounds(&low_vec, &high_vec)?;
-    if budget == 0 {
-        return Err(PyValueError::new_err("budget must be positive"));
-    }
-    if replicas == 0 {
-        return Err(PyValueError::new_err("replicas must be positive"));
-    }
-    let dim = low_vec.len();
-    let bounds = Bounds::new(Array1::from_vec(low_vec), Array1::from_vec(high_vec), 1e-9);
-    let seed_arr = if let Some(x0) = x0 {
-        let sl = x0.as_slice()?;
-        if sl.len() != dim {
-            return Err(PyValueError::new_err(format!(
-                "x0 length {} does not match dimension {}",
-                sl.len(),
-                dim
-            )));
-        }
-        Some(Array1::from_vec(sl.to_vec()))
-    } else {
-        None
-    };
-    let seed_view = seed_arr.as_ref().map(|a| a.view());
-    let history_mode = match history {
-        "none" | "no" => crate::methods::ensemble::HistoryMode::None,
-        "private" => crate::methods::ensemble::HistoryMode::Private,
-        "shared" => crate::methods::ensemble::HistoryMode::Shared,
-        other => {
-            return Err(PyValueError::new_err(format!(
-                "history must be none, private, or shared, got {other:?}"
-            )));
-        }
-    };
-    let membership = crate::methods::minima_hopping::HistoryMembership::parse(Some(membership))
-        .map_err(PyValueError::new_err)?;
+    let parsed = parse_box_search(low, high, budget, replicas, x0, history, membership)?;
+    let seed_view = parsed.x0.as_ref().map(|a| a.view());
     let obj = CallableObjective {
         fn_: obj_fn,
-        bounds,
+        bounds: parsed.bounds,
     };
+    let dim = parsed.dim;
+    let history_mode = parsed.history;
+    let membership = parsed.membership;
     let result = with_replica_threads(py, || match grad_fn {
-            Some(grad_fn) => {
-                let grad = CallablePyGradient { fn_: grad_fn, dim };
-                crate::methods::cutest_ensemble::ensemble_hop_optimize(
-                    &obj,
-                    Some(&grad),
-                    seed,
-                    seed_view,
-                    budget,
-                    replicas,
-                    history_mode,
-                    membership,
-                )
-            }
-            None => crate::methods::cutest_ensemble::ensemble_hop_optimize::<_, CallablePyGradient>(
+        Some(grad_fn) => {
+            let grad = CallablePyGradient { fn_: grad_fn, dim };
+            crate::methods::box_hopping::ensemble_hop_optimize(
                 &obj,
-                None,
+                Some(&grad),
                 seed,
                 seed_view,
                 budget,
                 replicas,
                 history_mode,
                 membership,
-            ),
-        })
-        .map_err(PyValueError::new_err)?;
+            )
+        }
+        None => crate::methods::box_hopping::ensemble_hop_optimize::<_, CallablePyGradient>(
+            &obj,
+            None,
+            seed,
+            seed_view,
+            budget,
+            replicas,
+            history_mode,
+            membership,
+        ),
+    });
     let out = PyDict::new(py);
     out.set_item("best_val", result.best_val)?;
     out.set_item(
         "best_pos",
-        PyArray1::from_slice(py, result.best_pos.as_slice().unwrap()),
+        py_view1(py, result.best_pos.view()),
     )?;
     out.set_item("charged", result.charged)?;
     out.set_item("history_minima", result.history_minima)?;
     out.set_item("history_refusals", result.history_cost.1)?;
     out.set_item("history_seconds", result.history_cost.2)?;
+    out.set_item("coverage_observations", result.coverage.local_observations)?;
+    out.set_item("coverage_published", result.coverage.published_visits)?;
+    out.set_item("coverage_applied_foreign", result.coverage.applied_foreign_visits)?;
+    out.set_item("coverage_capped_foreign", result.coverage.capped_foreign_visits)?;
+    out.set_item("coverage_regions_per_chain", result.coverage.per_chain_regions)?;
     Ok(out.into())
 }
 
