@@ -105,9 +105,28 @@ impl PeerSamples {
             .nearest(candidate.view())
             .is_some_and(|(clearance, _)| clearance > distance)
         {
-            Some((Separation::Moved(candidate), anchor_overlaps))
-        } else {
-            Some((Separation::Constrained, anchor_overlaps))
+            return Some((Separation::Moved(candidate), anchor_overlaps));
         }
+        // A clipped radial direction can leave feasible sideways motion.
+        // Coordinate polls retain the displacement cap and require increased
+        // clearance from the entire cloud, without objective evaluations.
+        let mut candidate = point.to_owned();
+        for (j, &width) in widths.iter().enumerate() {
+            if width <= 0.0 {
+                continue;
+            }
+            for sign in [-1.0, 1.0] {
+                candidate[j] = (point[j] + sign * increment).clamp(0.0, upper);
+                if candidate[j] != point[j]
+                    && self
+                        .nearest(candidate.view())
+                        .is_some_and(|(clearance, _)| clearance > distance)
+                {
+                    return Some((Separation::Moved(candidate), anchor_overlaps));
+                }
+            }
+            candidate[j] = point[j];
+        }
+        Some((Separation::Constrained, anchor_overlaps))
     }
 }
