@@ -2123,25 +2123,7 @@ fn apply_request(
             let Ok(outcome) = scientific.population.submit(*epoch, member) else {
                 return validation_rejected(state, &request);
             };
-            payload = match outcome {
-                EpochSubmissionOutcome::Pending {
-                    submitted,
-                    required,
-                    ..
-                } => AcceptedPayload::PopulationEpoch(PopulationEpochState {
-                    epoch: *epoch,
-                    submitted: u32::try_from(submitted)
-                        .expect("submission count is bounded by replica count"),
-                    required: u32::try_from(required)
-                        .expect("requirement is bounded by replica count"),
-                    plan: None,
-                }),
-                EpochSubmissionOutcome::Ready(plan) => {
-                    let participants = u32::try_from(plan.destinations().len())
-                        .expect("participants are bounded by replica count");
-                    realize_population_plan(scientific, config, *epoch, &plan, participants)
-                }
-            };
+            payload = population_epoch_payload(scientific, config, *epoch, outcome);
             if inserted {
                 let Some(snapshot_version) = state.snapshot_version.checked_add(1) else {
                     return validation_rejected(state, &request);
@@ -2228,25 +2210,7 @@ fn apply_request(
             let Ok(outcome) = scientific.population.submit(*epoch, member) else {
                 return validation_rejected(state, &request);
             };
-            payload = match outcome {
-                EpochSubmissionOutcome::Pending {
-                    submitted,
-                    required,
-                    ..
-                } => AcceptedPayload::PopulationEpoch(PopulationEpochState {
-                    epoch: *epoch,
-                    submitted: u32::try_from(submitted)
-                        .expect("submission count is bounded by replica count"),
-                    required: u32::try_from(required)
-                        .expect("requirement is bounded by replica count"),
-                    plan: None,
-                }),
-                EpochSubmissionOutcome::Ready(plan) => {
-                    let participants = u32::try_from(plan.destinations().len())
-                        .expect("participants are bounded by replica count");
-                    realize_population_plan(scientific, config, *epoch, &plan, participants)
-                }
-            };
+            payload = population_epoch_payload(scientific, config, *epoch, outcome);
         }
         CatalogOperation::PopulationAbstain { epoch } => {
             let Some(scientific) = state.scientific.as_mut() else {
@@ -2259,25 +2223,7 @@ fn apply_request(
                 return validation_rejected(state, &request);
             };
             let _ = scientific.population.retire(request.identity.replica);
-            payload = match outcome {
-                EpochSubmissionOutcome::Pending {
-                    submitted,
-                    required,
-                    ..
-                } => AcceptedPayload::PopulationEpoch(PopulationEpochState {
-                    epoch: *epoch,
-                    submitted: u32::try_from(submitted)
-                        .expect("submission count is bounded by replica count"),
-                    required: u32::try_from(required)
-                        .expect("requirement is bounded by replica count"),
-                    plan: None,
-                }),
-                EpochSubmissionOutcome::Ready(plan) => {
-                    let participants = u32::try_from(plan.destinations().len())
-                        .expect("participants are bounded by replica count");
-                    realize_population_plan(scientific, config, *epoch, &plan, participants)
-                }
-            };
+            payload = population_epoch_payload(scientific, config, *epoch, outcome);
         }
         CatalogOperation::PopulationPlan { epoch } => {
             let Some(scientific) = state.scientific.as_ref() else {
@@ -5852,6 +5798,35 @@ fn accepted_with_payload(
         },
         payload,
     })
+}
+
+/// The reply payload after a barrier submission: the epoch's progress
+/// while members are still arriving, or the realised plan once the epoch
+/// is complete. Submit, join and abstain all end here.
+fn population_epoch_payload(
+    scientific: &mut ScientificState,
+    config: &ServerConfig,
+    epoch: u64,
+    outcome: EpochSubmissionOutcome,
+) -> AcceptedPayload {
+    match outcome {
+        EpochSubmissionOutcome::Pending {
+            submitted,
+            required,
+            ..
+        } => AcceptedPayload::PopulationEpoch(PopulationEpochState {
+            epoch,
+            submitted: u32::try_from(submitted)
+                .expect("submission count is bounded by replica count"),
+            required: u32::try_from(required).expect("requirement is bounded by replica count"),
+            plan: None,
+        }),
+        EpochSubmissionOutcome::Ready(plan) => {
+            let participants = u32::try_from(plan.destinations().len())
+                .expect("participants are bounded by replica count");
+            realize_population_plan(scientific, config, epoch, &plan, participants)
+        }
+    }
 }
 
 /// The reply to a request the coordinator will not apply: the commonest
