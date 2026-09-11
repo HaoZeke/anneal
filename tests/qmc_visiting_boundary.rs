@@ -39,9 +39,8 @@ fn check_reflected_visits(bounds: Bounds<f64>) {
     let mut crossed_boundary = false;
 
     for seed in 0..8 {
-        let starts = shifted_low_discrepancy_points(
-            &bounds, chain_count, qmc_skip_from_seed(seed), seed,
-        );
+        let starts =
+            shifted_low_discrepancy_points(&bounds, chain_count, qmc_skip_from_seed(seed), seed);
         let initial_unit = Array1::from_iter((0..bounds.dims).map(|axis| {
             let width = bounds.high[axis] - bounds.low[axis];
             if width > 0.0 {
@@ -78,11 +77,16 @@ fn check_reflected_visits(bounds: Bounds<f64>) {
             assert!(
                 (positions[chain_count][axis] - expected[axis]).abs() <= tolerance,
                 "seed={seed}, axis={axis}: paid visit {} must equal reflected visit {}, raw unit visit {}",
-                positions[chain_count][axis], expected[axis], raw[axis],
+                positions[chain_count][axis],
+                expected[axis],
+                raw[axis],
             );
         }
     }
-    assert!(crossed_boundary, "the replay must exercise a heavy-tailed boundary crossing");
+    assert!(
+        crossed_boundary,
+        "the replay must exercise a heavy-tailed boundary crossing"
+    );
 }
 
 #[test]
@@ -92,5 +96,9 @@ fn qmc_gsa_reflects_scalar_only_heavy_tailed_visits() {
 
 #[test]
 fn qmc_gsa_reflection_preserves_anisotropic_and_fixed_coordinates() {
-    check_reflected_visits(Bounds::new(array![2.0, 7.0, -4.0], array![10.0, 7.0, 0.0], 0.0));
+    check_reflected_visits(Bounds::new(
+        array![2.0, 7.0, -4.0],
+        array![10.0, 7.0, 0.0],
+        0.0,
+    ));
 }
