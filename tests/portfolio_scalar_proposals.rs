@@ -15,7 +15,11 @@ struct ScalarSamples {
 impl ScalarSamples {
     fn new(dim: usize) -> Self {
         Self {
-            bounds: Bounds::new(Array1::from_elem(dim, -2.0), Array1::from_elem(dim, 2.0), 0.0),
+            bounds: Bounds::new(
+                Array1::from_elem(dim, -2.0),
+                Array1::from_elem(dim, 2.0),
+                0.0,
+            ),
             positions: Mutex::new(Vec::new()),
         }
     }
@@ -38,7 +42,10 @@ impl Objective<f64> for ScalarSamples {
 
     fn eval(&self, x: ArrayView1<f64>) -> f64 {
         assert!(self.bounds.contains(x));
-        self.positions.lock().unwrap().push(x.iter().map(|v| v.to_bits()).collect());
+        self.positions
+            .lock()
+            .unwrap()
+            .push(x.iter().map(|v| v.to_bits()).collect());
         1.0
     }
 }
@@ -58,7 +65,12 @@ fn sub_stencil_allowances_exchange_and_prepare_their_global_candidates() {
         assert_eq!(result.n_evals, budget);
         assert_eq!(result.n_grads, 0);
         assert_eq!(result.best_val, 1.0);
-        assert!(result.replicas.iter().all(|replica| replica.arm_stats.iter().all(|arm| arm.pulls == 0)));
+        assert!(
+            result
+                .replicas
+                .iter()
+                .all(|replica| replica.arm_stats.iter().all(|arm| arm.pulls == 0))
+        );
         // One initial paid position per chain, followed entirely by global draws.
         assert_eq!(result.coverage.published_samples, budget as u64);
         assert_eq!(result.coverage.sample_peer_checks, budget - replicas);
@@ -123,7 +135,13 @@ fn gsa_initial_population_uses_peer_corrected_measured_positions() {
             gsa_seed,
         );
         let start: Vec<u64> = starts.row(0).iter().map(|v| v.to_bits()).collect();
-        assert!(private_positions.contains(&start), "GSA initialization must be exercised");
-        assert!(!shared_positions.contains(&start), "GSA must evaluate its corrected start");
+        assert!(
+            private_positions.contains(&start),
+            "GSA initialization must be exercised"
+        );
+        assert!(
+            !shared_positions.contains(&start),
+            "GSA must evaluate its corrected start"
+        );
     }
 }
