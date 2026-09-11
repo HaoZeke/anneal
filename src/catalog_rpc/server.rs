@@ -18,8 +18,8 @@ use capnp_rpc::pry;
 use capnp_rpc::rpc_twoparty_capnp::Side;
 use capnp_rpc::twoparty::VatNetwork;
 use futures::AsyncReadExt;
-use nng::options::Options;
 use ndarray::{Array1, ArrayView1};
+use nng::options::Options;
 use rand::SeedableRng;
 use tokio_util::compat::TokioAsyncReadCompatExt;
 
@@ -33,7 +33,6 @@ use super::{
     encode_request, fill_coordinator_status, fill_event, fill_reply, fill_roster, read_identity,
 };
 use crate::Catalog_capnp::{coordinator, session, subscriber};
-use crate::nng_rpc::{self, NngIo};
 use crate::catalog::{
     AdmissionOutcome, AdmissionRejection, Archive, AttractorStrength, BasinCatalog, BasinCensus,
     BasinId, CHAMPION_RANK, CandidateRecord, CandidateValidator, CensusObservation, Curiosity,
@@ -62,6 +61,7 @@ use crate::methods::neus_bridge::{BridgeString, EntryLists, WeightLedger};
 use crate::minimum_information::{
     MinimumInformationSearch, SearchActionCandidate, SearchMechanism,
 };
+use crate::nng_rpc::{self, NngIo};
 use crate::pes_exploration::{
     ExactStructureRelation, ExactStructureWitness, PesExplorationConfig, PesSurface, RideMethod,
     StationaryIndex, StructureContext, StructureView, stationary_index_cartesian,
@@ -863,9 +863,8 @@ impl CatalogServer {
                     .spawn(move || {
                         let _listener = bound.listener;
                         let accept = bound.socket;
-                        let _ = accept.set_opt::<nng::options::RecvTimeout>(Some(
-                            Duration::from_millis(50),
-                        ));
+                        let _ = accept
+                            .set_opt::<nng::options::RecvTimeout>(Some(Duration::from_millis(50)));
                         while !accept_stop.load(Ordering::Acquire) {
                             match nng_rpc::accept_pair(&accept) {
                                 Ok(pair) => {
@@ -892,8 +891,7 @@ impl CatalogServer {
                         subscribers: Vec::new(),
                     }));
                     while !thread_stop.load(Ordering::Acquire) {
-                        match tokio::time::timeout(Duration::from_millis(50), accepted.recv())
-                            .await
+                        match tokio::time::timeout(Duration::from_millis(50), accepted.recv()).await
                         {
                             Ok(Some(pair)) => {
                                 let shared = Rc::clone(&shared);
