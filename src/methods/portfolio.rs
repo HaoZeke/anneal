@@ -417,6 +417,12 @@ pub struct PortfolioResult {
     pub n_grads: usize,
     /// Per-arm allocation statistics.
     pub arm_stats: Vec<ArmStat>,
+    /// Terminal occupied pair of the gradient-enabled hop arm.
+    ///
+    /// This diagnostic is distinct from the best-seen incumbent and is not
+    /// a resumable checkpoint. It is absent when the hop arm has no state,
+    /// including values-only runs. Reading it performs no objective calls.
+    pub hop_state: Option<eindir_core::FPair<f64>>,
 }
 
 // ---------------------------------------------------------------------------
@@ -3871,6 +3877,12 @@ where
                 successes: posterior.successes,
             })
             .collect(),
+        hop_state: states.hop.as_ref().and_then(|state| {
+            state.x_cur.as_ref().map(|pos| eindir_core::FPair {
+                pos: pos.clone(),
+                val: state.f_cur,
+            })
+        }),
     }
 }
 
