@@ -27,7 +27,10 @@ fn silent_receivers_do_not_make_the_sample_exchange_unbounded() {
     let received = exchange.drain_samples(2);
     assert_eq!(received.len(), SAMPLE_WINDOW + 1);
     assert_eq!(received[0], (0, array![(SAMPLE_WINDOW * 3) as f64]));
-    assert_eq!(received[SAMPLE_WINDOW - 1], (0, array![(SAMPLE_WINDOW * 4 - 1) as f64]));
+    assert_eq!(
+        received[SAMPLE_WINDOW - 1],
+        (0, array![(SAMPLE_WINDOW * 4 - 1) as f64])
+    );
     assert_eq!(received[SAMPLE_WINDOW], (1, array![-0.5]));
     assert!(exchange.drain_samples(2).is_empty());
     assert_eq!(exchange.counts(), (0, 0));

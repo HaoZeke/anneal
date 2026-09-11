@@ -529,7 +529,12 @@ where
                 replica.trial[j] += STEP0 * escape * widths[j] * noise;
             }
             replica.trial = reflect_into_box(replica.trial.view(), &bounds);
-            coverage.repel(index, replica.x.view(), &mut replica.trial, &mut replica.rng);
+            coverage.repel(
+                index,
+                replica.x.view(),
+                &mut replica.trial,
+                &mut replica.rng,
+            );
             let launch = FirstEvaluation::new(obj);
             let polish = pattern_search_polish(&launch, replica.trial.clone(), depth);
             if let Some(energy) = launch.energy() {
@@ -1066,7 +1071,12 @@ where
                         replica.trial[j] += STEP0 * escape * widths[j] * noise;
                     }
                     replica.trial = reflect_into_box(replica.trial.view(), &bounds);
-                    coverage.repel(index, replica.x.view(), &mut replica.trial, &mut replica.rng);
+                    coverage.repel(
+                        index,
+                        replica.x.view(),
+                        &mut replica.trial,
+                        &mut replica.rng,
+                    );
                 }
                 BoxEscape::Langevin(settings) => {
                     let temperature = temp * escape * escape;
@@ -1087,9 +1097,15 @@ where
                     replica.work += 1;
                     n_grads += 1;
                     for _ in 0..escape_steps {
-                        let energy = stepper.step_with_proposal(obj, grad, &mut replica.trial, &mut force, |point| {
-                            coverage.repel(index, replica.x.view(), point, &mut replica.rng);
-                        });
+                        let energy = stepper.step_with_proposal(
+                            obj,
+                            grad,
+                            &mut replica.trial,
+                            &mut force,
+                            |point| {
+                                coverage.repel(index, replica.x.view(), point, &mut replica.rng);
+                            },
+                        );
                         if energy.is_finite() {
                             excursion_peak =
                                 Some(excursion_peak.map_or(energy, |peak| peak.max(energy)));
