@@ -1411,17 +1411,32 @@ impl<O: Objective<f64>> Gradient<f64> for BudgetedFiniteDiffGradient<'_, O> {
         let bounds = self.obj.bounds();
         let mut g = Array1::zeros(dim);
         for i in 0..dim {
-            let w = (bounds.high[i] - bounds.low[i]).abs().max(1e-12);
+            if bounds.low[i] == bounds.high[i] {
+                continue;
+            }
+            if self.obj.ledger.exhausted() {
+                return Array1::from_elem(dim, f64::NAN);
+            }
+            let w = bounds.high[i] - bounds.low[i];
             let h = (self.h_frac * w).max(1e-8).min(0.05 * w);
             let mut xp = x.to_owned();
             let mut xm = x.to_owned();
-            xp[i] = (x[i] + h).clamp(bounds.low[i], bounds.high[i]);
-            xm[i] = (x[i] - h).clamp(bounds.low[i], bounds.high[i]);
+            // A positive-width axis needs a distinct feasible stencil,
+            // even when the requested displacement rounds to its centre.
+            xp[i] = (x[i] + h).max(x[i].next_up()).min(bounds.high[i]);
+            xm[i] = (x[i] - h).min(x[i].next_down()).max(bounds.low[i]);
+            let den = xp[i] - xm[i];
+            if !den.is_finite() || den <= 0.0 {
+                return Array1::from_elem(dim, f64::NAN);
+            }
             let fp = self.obj.eval(xp.view());
             let fm = self.obj.eval(xm.view());
-            let den = (xp[i] - xm[i]).abs().max(1e-16);
-            if fp.is_finite() && fm.is_finite() {
-                g[i] = (fp - fm) / den;
+            if !fp.is_finite() || !fm.is_finite() {
+                return Array1::from_elem(dim, f64::NAN);
+            }
+            g[i] = (fp - fm) / den;
+            if !g[i].is_finite() {
+                return Array1::from_elem(dim, f64::NAN);
             }
         }
         g
