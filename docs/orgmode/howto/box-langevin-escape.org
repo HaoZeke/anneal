@@ -53,6 +53,16 @@ escape scale; a temperature change rescales every momentum row together.
 A fresh raw gradient is paid at each occupied launch point. A quench's
 projected stationarity certificate cannot substitute for that force.
 
+Shared paid-sample history supplies a direction as well as coverage's scalar
+feedback. A position update that overlaps a peer's sampled region is pushed
+away in normalized free-coordinate space before its objective and raw
+gradient are evaluated. The correction must increase clearance from the
+held peer cloud and remain inside the box. It adds no callbacks, leaves
+the persistent noise state attached to its chain, and vanishes for distant
+samples or disabled sharing. The coverage radius sets its finite reach.
+The sample stream includes pre-polish launches, so it does not reduce every
+excursion to a minimum. It is separate from counted coverage visits.
+
 Coverage feedback needs no minimum report. A quench returning from outside
 a known descriptor region increases the existing escape scale; a trial
 arriving outside every held region supplies its novelty contraction.
@@ -117,7 +127,7 @@ targets cover objective-origin invariance, coverage influence and sustained
 Langevin exploration:
 
 #+begin_src sh
-cargo test --locked --test box_configured_dispatch --test box_search_contract --test box_langevin_exploration --test box_coverage_escape --test box_optional_certificate
+cargo test --locked --test box_configured_dispatch --test box_search_contract --test box_langevin_exploration --test box_coverage_escape --test box_optional_certificate --test box_sample_repulsion --test shared_sample_ownership
 #+end_src
 
 The dispatch target checks exact native entry-versus-engine callback traces,
@@ -159,6 +169,9 @@ seconds. The configuration record names the comparison, coverage metric,
 radius, height, well-tempering, peer weight and objective capability.
 Recrossing, peer-region, novelty and bounded-scale counters separate
 coverage-to-proposal actions from its conditional acceptance influence.
+Sample publication, delivery, overlap, actual displacement and constrained
+correction counts expose direct geometric separation independently of those
+scalar feedback and acceptance measurements.
 Private history size
 is the largest replica-local table; shared size is one ensemble-wide table.
 Those sizes are not interchangeable coverage measurements. The example
