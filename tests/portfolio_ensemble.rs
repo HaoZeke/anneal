@@ -111,13 +111,8 @@ fn one_replica_preserves_the_full_portfolio_trace() {
             budget: 2_000,
             ..PortfolioEnsembleConfig::default()
         };
-        let result = portfolio_ensemble_optimize(
-            &actual,
-            analytic.then_some(&actual),
-            13,
-            None,
-            &config,
-        );
+        let result =
+            portfolio_ensemble_optimize(&actual, analytic.then_some(&actual), 13, None, &config);
         assert_eq!(actual.trajectories(), reference.trajectories());
         assert_eq!(result.best_val, expected.best_val);
         assert_eq!(result.best_pos, expected.best_pos);
@@ -136,7 +131,12 @@ fn private_replicas_preserve_independent_portfolio_traces() {
         let loss = Loss::new();
         let seed = 7 ^ (replica as u64).wrapping_mul(0x9E37_79B9);
         let result = portfolio_optimize_with_policy::<_, NoGradient>(
-            &loss, None, 1_000, seed, None, PortfolioPolicy::Auto,
+            &loss,
+            None,
+            1_000,
+            seed,
+            None,
+            PortfolioPolicy::Auto,
         );
         expected_best = expected_best.min(result.best_val);
         expected.extend(loss.trajectories());
@@ -166,9 +166,7 @@ fn check_shared(analytic: bool) -> Vec<Vec<Vec<u64>>> {
         ..PortfolioEnsembleConfig::default()
     };
     config.coverage.radius = 0.8;
-    let result = portfolio_ensemble_optimize(
-        &loss, analytic.then_some(&loss), 17, None, &config,
-    );
+    let result = portfolio_ensemble_optimize(&loss, analytic.then_some(&loss), 17, None, &config);
     let traces = loss.trajectories();
     let evals = traces.iter().flatten().filter(|e| e[0] == 0).count();
     let grads = traces.iter().flatten().filter(|e| e[0] == 1).count();
@@ -181,7 +179,10 @@ fn check_shared(analytic: bool) -> Vec<Vec<Vec<u64>>> {
         assert_eq!(grads, 0);
         assert_eq!(evals, config.budget);
     }
-    assert_eq!(result.best_val, loss.value(ArrayView1::from(&result.best_pos)));
+    assert_eq!(
+        result.best_val,
+        loss.value(ArrayView1::from(&result.best_pos))
+    );
     let measured_best = traces
         .iter()
         .flatten()
