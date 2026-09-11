@@ -105,6 +105,18 @@ pub enum BoxEscape {
     Langevin(GleEscapeConfig),
 }
 
+impl BoxEscape {
+    fn feedback(self) -> EscapeFeedback {
+        let mut feedback = EscapeFeedback::new(1.0, 0.1);
+        if matches!(self, Self::Langevin(_)) {
+            // Langevin's base temperature is calibrated from raw excursions.
+            // Novelty relaxes a return boost without undercutting that scale.
+            feedback.escape_floor = 1.0;
+        }
+        feedback
+    }
+}
+
 /// Configuration for one communicating-chain box ensemble.
 #[derive(Debug, Clone, PartialEq)]
 pub struct BoxEnsembleConfig {
@@ -436,7 +448,7 @@ where
                 budget: budgets[index],
                 hops: 0,
                 here: None,
-                feedback: EscapeFeedback::new(1.0, 0.1),
+                feedback: config.escape.feedback(),
                 generation: 0,
             }
         })
@@ -935,7 +947,7 @@ where
                 budget: budgets[index],
                 hops: 0,
                 here: None,
-                feedback: EscapeFeedback::new(1.0, 0.1),
+                feedback: config.escape.feedback(),
                 generation: 0,
             }
         })
