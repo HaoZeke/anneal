@@ -186,6 +186,13 @@ the quench can use half that budget instead of being limited to a short
 coordinate-scaled burst. The local refiner stops on its own convergence or
 unavailable-derivative checks, leaving unspent work for subsequent hops.
 
+The values-only portfolio also keeps a local solver's unused allowance
+available to the global search. It repeats scalar refinement batches while
+they consume work, then evaluates feasible global candidates under any
+residual allowance too small for local refinement. Every added evaluation
+uses the same ledger and can improve the raw incumbent. A fully fixed
+one-replica domain retains its single-evaluation shortcut.
+
 The common Python entries expose this distinction directly. For a supplied
 scalar =loss=, parameter vector =x0= and finite =bounds=:
 
