@@ -124,9 +124,19 @@ impl LangevinStepper {
 
     /// One BAB step and thermostat update: exactly one gradient and objective.
     /// The boundary operation is box clipping, not a manifold retraction.
-    /// The proposal correction runs before raw force evaluation, so cached
+    pub(crate) fn step<O: Objective<f64>, G: Gradient<f64>>(
+        &mut self,
+        obj: &O,
+        grad: &G,
+        x: &mut Array1<f64>,
+        raw_gradient: &mut Array1<f64>,
+    ) -> f64 {
+        self.step_with_proposal(obj, grad, x, raw_gradient, |_| {})
+    }
+
+    /// Correct a feasible position before raw force evaluation, so cached
     /// forces always belong to the positions the objective actually samples.
-    pub(crate) fn step<O: Objective<f64>, G: Gradient<f64>, P: FnMut(&mut Array1<f64>)>(
+    pub(crate) fn step_with_proposal<O: Objective<f64>, G: Gradient<f64>, P: FnMut(&mut Array1<f64>)>(
         &mut self,
         obj: &O,
         grad: &G,
