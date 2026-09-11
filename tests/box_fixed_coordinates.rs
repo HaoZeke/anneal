@@ -140,8 +140,12 @@ fn all_fixed_values_box_rejects_nonfinite_bounds_before_evaluation() {
         calls: AtomicUsize,
     }
     impl Objective<f64> for InvalidBox {
-        fn dim(&self) -> usize { 1 }
-        fn bounds(&self) -> &Bounds<f64> { &self.bounds }
+        fn dim(&self) -> usize {
+            1
+        }
+        fn bounds(&self) -> &Bounds<f64> {
+            &self.bounds
+        }
         fn eval(&self, _x: ArrayView1<f64>) -> f64 {
             self.calls.fetch_add(1, Ordering::Relaxed);
             0.0
@@ -153,7 +157,14 @@ fn all_fixed_values_box_rejects_nonfinite_bounds_before_evaluation() {
     };
     let result = std::panic::catch_unwind(|| {
         ensemble_hop_optimize::<_, LoggedBox>(
-            &objective, None, 0, None, 10, 1, HistoryMode::None, HistoryMembership::Accepted,
+            &objective,
+            None,
+            0,
+            None,
+            10,
+            1,
+            HistoryMode::None,
+            HistoryMembership::Accepted,
         )
     });
     assert!(result.is_err(), "nonfinite box bounds must be rejected");
