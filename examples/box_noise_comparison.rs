@@ -319,6 +319,17 @@ mod controller_tests {
     use super::*;
 
     #[test]
+    fn controller_surfaces_have_noncentral_optima() {
+        for landscape in [Landscape::Rastrigin, Landscape::ConditionedQuadratic] {
+            let surface = ControllerSurface::new(landscape, 8);
+            assert_eq!(surface.value(surface.optimum.view()), 0.0);
+            assert!(surface.value(Array1::zeros(8).view()) > 1.0);
+            assert!(surface.optimum.iter().all(|x| (0.4..=1.0).contains(x)));
+            assert_eq!(surface.surface.evaluations.load(Ordering::Relaxed), 0);
+        }
+    }
+
+    #[test]
     fn controller_records_separate_policy_splitting_and_sharing() {
         let records = values_controller_records(Landscape::ConditionedQuadratic, 2, 256, 7);
         let names: Vec<_> = records
