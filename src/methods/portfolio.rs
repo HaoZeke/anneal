@@ -1426,7 +1426,8 @@ where
         if obj.ledger.exhausted() {
             break;
         }
-        let pos = bounds.clip(start);
+        let mut pos = bounds.clip(start);
+        obj.prepare_proposal(None, &mut pos);
         let value = obj.eval(pos.view());
         xs.push(pos);
         vals.push(value);
@@ -3966,13 +3967,17 @@ where
         }
         // Even an allowance smaller than a stencil funds feasible global
         // candidates. Convex interpolation avoids overflowing the box width.
+        if !ledger.exhausted() {
+            ledger.checkpoint(&bounds);
+        }
         while !ledger.exhausted() {
-            let candidate = Array1::from_iter(bounds.low.iter().zip(bounds.high.iter()).map(
+            let mut candidate = Array1::from_iter(bounds.low.iter().zip(bounds.high.iter()).map(
                 |(&low, &high)| {
                     let fraction = rng.random::<f64>();
                     ((1.0 - fraction) * low + fraction * high).clamp(low, high)
                 },
             ));
+            budgeted_obj.prepare_proposal(None, &mut candidate);
             budgeted_obj.eval(candidate.view());
         }
     }
