@@ -58,20 +58,26 @@ pub enum MoveLibrary {
 }
 
 thread_local! {
-    static REPEL_MEAN_CACHE: std::cell::RefCell<std::collections::HashMap<u64, Vec<f64>>> =
+    static REPEL_MEAN_CACHE: std::cell::RefCell<std::collections::HashMap<RepelMeanKey, Vec<f64>>> =
         std::cell::RefCell::new(std::collections::HashMap::new());
 }
 
-/// Hash of a structure's coordinate bytes, the key the repulsion cache
-/// uses for a reference's packing mean.
-fn coordinate_key(coordinates: &[f64]) -> u64 {
-    use std::hash::{Hash, Hasher};
-    let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    coordinates.len().hash(&mut hasher);
-    for v in coordinates {
-        v.to_bits().hash(&mut hasher);
+/// A cached mean belongs to both the coordinates and the descriptor map.
+#[derive(PartialEq, Eq, Hash)]
+struct RepelMeanKey {
+    coordinates: Vec<u64>,
+    n_max: usize,
+    l_max: usize,
+    cutoff: u64,
+}
+
+fn repel_mean_key(coordinates: &[f64], spec: crate::soap::SoapSpec) -> RepelMeanKey {
+    RepelMeanKey {
+        coordinates: coordinates.iter().map(|value| value.to_bits()).collect(),
+        n_max: spec.n_max,
+        l_max: spec.l_max,
+        cutoff: spec.rcut_nn.to_bits(),
     }
-    hasher.finish()
 }
 
 impl MoveLibrary {
@@ -1342,10 +1348,8 @@ impl ClusterMove {
                     .unwrap_or(3);
                 let refs = crate::catalog::packing_references();
                 if refs.len() >= min_refs {
-                    // Reference packing means, cached by the structure's
-                    // bytes: a reference changes only when a peer's minimum
-                    // changes, and recomputing every mean per proposal was
-                    // the cost that made the coupled runs ten times slower.
+                    // Coordinate and map keys keep retained reference means
+                    // valid when chains use different physical cutoffs.
                     let means: Vec<Vec<f64>> = REPEL_MEAN_CACHE.with(|cache| {
                         let mut cache = cache.borrow_mut();
                         if cache.len() > 4096 {
@@ -1353,7 +1357,7 @@ impl ClusterMove {
                         }
                         refs.iter()
                             .map(|r| {
-                                let key = coordinate_key(r);
+                                let key = repel_mean_key(r, spec);
                                 cache
                                     .entry(key)
                                     .or_insert_with(|| {
