@@ -254,3 +254,28 @@ fn novel_coverage_balances_escape_without_a_minimum_report() {
         "the controller must consume novel coverage as well as repeated returns"
     );
 }
+
+#[test]
+fn novel_arrivals_match_boundaries_and_respect_the_escape_floor() {
+    for values in [false, true] {
+        let (result, _) = run(
+            values,
+            true,
+            BoxEscape::Gaussian,
+            HistoryMode::None,
+            1e-12,
+            0.1,
+        );
+        let mut updates = 0;
+        let mut scale = 1.0_f64;
+        for _ in 0..result.hops {
+            let reduced = (scale / 1.05).max(0.25);
+            updates += usize::from(reduced != scale);
+            scale = reduced;
+        }
+        assert_eq!(result.coverage.novel_arrivals, result.hops);
+        assert_eq!(result.coverage.novelty_updates, updates);
+        assert_eq!(result.coverage.recrossings, 0);
+        assert_eq!(result.coverage.escape_updates, 0);
+    }
+}
