@@ -24,6 +24,7 @@ use rand_distr::{Distribution, StandardNormal};
 use crate::bias::{BasinBias, Bias, Fingerprint};
 use crate::descriptor_space::DescriptorGeometry;
 use crate::methods::ensemble::HistoryMode;
+use crate::methods::gle_langevin::{GleNoise, LangevinStepper};
 use crate::methods::local_polish::{projected_gradient, projected_gradient_polish};
 use crate::methods::minima_hopping::{
     EscapeFeedback, HistoryHook, HistoryMembership, HistoryReport, MinimumHistory,
@@ -43,6 +44,44 @@ const STEP0: f64 = 0.25;
 /// Floor on the per-hop quench so a hop is more than a single evaluation.
 const MIN_QUENCH: usize = 8;
 
+/// Gradient-driven escape segment within an existing box hop chain.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct GleEscapeConfig {
+    /// Maximum integration steps per escape, shortened to reserve quench work.
+    pub steps: usize,
+    /// Lower frequency of the colored-noise fit; also sets the common timestep cap.
+    pub omega0: f64,
+    /// Requested integration timestep, not physical elapsed time.
+    pub dt: f64,
+    /// Colored extended-state noise or a scalar-white control.
+    pub noise: GleNoise,
+}
+
+impl Default for GleEscapeConfig {
+    fn default() -> Self {
+        Self { steps: 16, omega0: 0.2, dt: 0.01, noise: GleNoise::Colored }
+    }
+}
+
+impl GleEscapeConfig {
+    fn validate(self) {
+        assert!(self.steps > 0, "Langevin escape steps must be positive");
+        assert!(self.omega0.is_finite() && self.omega0 > 0.0, "omega0 must be finite and positive");
+        assert!(self.dt.is_finite() && self.dt > 0.0, "dt must be finite and positive");
+        self.noise.validate();
+    }
+}
+
+/// Proposal mechanism; all choices retain the same quench and history path.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub enum BoxEscape {
+    /// Reflected Gaussian kick, without force work in the proposal.
+    #[default]
+    Gaussian,
+    /// Persistent Langevin noise with caller-owned positions and fresh launch forces.
+    Langevin(GleEscapeConfig),
+}
+
 /// Configuration for one communicating-chain box ensemble.
 #[derive(Debug, Clone, PartialEq)]
 pub struct BoxEnsembleConfig {
@@ -58,6 +97,8 @@ pub struct BoxEnsembleConfig {
     pub identity_tol: f64,
     /// Foreign visits paid into this chain's bias, capped per look.
     pub shared_deposits: usize,
+    /// Per-chain escape mechanism. Langevin segments require an analytic gradient.
+    pub escape: BoxEscape,
 }
 
 impl Default for BoxEnsembleConfig {
@@ -69,6 +110,7 @@ impl Default for BoxEnsembleConfig {
             membership: HistoryMembership::Accepted,
             identity_tol: IDENTITY_TOL,
             shared_deposits: 8,
+            escape: BoxEscape::Gaussian,
         }
     }
 }
@@ -205,6 +247,7 @@ pub fn box_values_ensemble_optimize<O>(
 where
     O: Objective<f64>,
 {
+    assert!(matches!(config.escape, BoxEscape::Gaussian), "Langevin escape requires a gradient");
     let observed = ObservedObjective {
         inner: obj,
         incumbent: Mutex::new(None),
@@ -650,6 +693,9 @@ where
     O: Objective<f64>,
     G: Gradient<f64>,
 {
+    if let BoxEscape::Langevin(escape) = config.escape {
+        escape.validate();
+    }
     let observed = ObservedObjective {
         inner: obj,
         incumbent: Mutex::new(None),
@@ -792,24 +838,64 @@ where
         }
     }
 
+    let mut noise_states: Vec<Option<LangevinStepper>> =
+        (0..replica_count).map(|_| None).collect();
     loop {
         let mut progressed = false;
         for (index, replica) in replicas.iter_mut().enumerate() {
             let remaining = replica.budget.saturating_sub(replica.work);
-            let depth = quench_depth(dim, remaining);
+            let mut depth = quench_depth(dim, remaining);
             if remaining < 4 || depth == 0 {
                 continue;
             }
+            let escape_steps = match config.escape {
+                BoxEscape::Gaussian => 0,
+                BoxEscape::Langevin(escape) => {
+                    // Reserve four combined work units for a bounded quench,
+                    // then one launch gradient and two callbacks per step.
+                    let steps = escape.steps.min(remaining.saturating_sub(5) / 2);
+                    if steps == 0 {
+                        continue;
+                    }
+                    steps
+                }
+            };
             progressed = true;
             replica.generation += 1;
             replica.hops += 1;
             let escape = replica.feedback.escape();
             replica.trial.assign(&replica.x);
-            for j in 0..dim {
-                let noise: f64 = StandardNormal.sample(&mut replica.rng);
-                replica.trial[j] += STEP0 * escape * widths[j] * noise;
+            match config.escape {
+                BoxEscape::Gaussian => {
+                    for j in 0..dim {
+                        let noise: f64 = StandardNormal.sample(&mut replica.rng);
+                        replica.trial[j] += STEP0 * escape * widths[j] * noise;
+                    }
+                    replica.trial = reflect_into_box(replica.trial.view(), &bounds);
+                }
+                BoxEscape::Langevin(settings) => {
+                    let temperature = temp_of(replica.generation, replica.f) * escape * escape;
+                    let stepper = noise_states[index].get_or_insert_with(|| {
+                        LangevinStepper::new(
+                            settings.noise, settings.omega0, settings.dt, temperature,
+                            Array1::ones(dim), seed ^ (index as u64).wrapping_mul(0x9E37_79B9),
+                        )
+                    });
+                    stepper.set_temperature(temperature);
+                    // Quench and acceptance can change the anchor. A fresh raw
+                    // force avoids confusing projected stationarity with dynamics.
+                    let mut force = grad.grad(replica.trial.view());
+                    replica.work += 1;
+                    n_grads += 1;
+                    for _ in 0..escape_steps {
+                        stepper.step(obj, grad, &mut replica.trial, &mut force);
+                        replica.work += 2;
+                        n_evals += 1;
+                        n_grads += 1;
+                    }
+                    depth = quench_depth(dim, replica.budget.saturating_sub(replica.work));
+                }
             }
-            replica.trial = reflect_into_box(replica.trial.view(), &bounds);
             let polish =
                 projected_gradient_polish(obj, grad, replica.trial.clone(), depth, 1.0, 1e-8);
             let used_evals = polish.n_evals;
