@@ -145,6 +145,10 @@ fn funded_values_quenches_can_learn_cross_coordinate_curvature() {
         let best = observed.iter().min_by(|a, b| a.1.total_cmp(&b.1)).unwrap();
         assert_eq!(result.best_val, best.1);
         assert_eq!(result.best_pos.to_vec(), best.0);
-        assert!(result.best_val < 1e-4, "replicas={replicas}: {}", result.best_val);
+        assert!(
+            result.best_val < 1e-4,
+            "replicas={replicas}: {}",
+            result.best_val
+        );
     }
 }
