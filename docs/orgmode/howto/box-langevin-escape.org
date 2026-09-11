@@ -53,6 +53,16 @@ escape scale; a temperature change rescales every momentum row together.
 A fresh raw gradient is paid at each occupied launch point. A quench's
 projected stationarity certificate cannot substitute for that force.
 
+Coverage feedback needs no minimum report. A quench returning from outside
+a known descriptor region increases the existing escape scale; a trial
+arriving outside every held region supplies its novelty contraction.
+The Gaussian multiplier is bounded to [0.25, 4]. The Langevin multiplier
+is bounded to [1, 4], so novelty relaxes a revisit boost without cooling
+below the calibrated base temperature. Minimum reports supply an
+authoritative update instead of a second coverage update. Initial
+observations do not change the scale; zero coverage height disables these
+coverage-driven changes.
+
 The temperature scale comes from paid raw energy excursions, not the
 absolute objective value. Each chain initializes its scale from the energy
 drop of its initial relaxation, when positive. A Langevin escape contributes
@@ -72,8 +82,8 @@ are retained from existing callbacks; calibration adds no evaluations.
 * Account for the complete search
 
 A segment consumes one launch gradient and one gradient plus one objective
-per integration step. Its length shortens to reserve four combined work
-units for a bounded quench. Quench depth uses the actual residual allowance.
+per integration step. Its length shortens to reserve two combined work
+units for a terminal evaluation/gradient quench. Quench depth uses the actual residual allowance.
 A replica without a funded step and quench stops; it does not silently switch
 to the Gaussian control. Values-only search rejects this gradient-dependent
 selection before evaluating the objective.
@@ -107,7 +117,7 @@ targets cover objective-origin invariance, coverage influence and sustained
 Langevin exploration:
 
 #+begin_src sh
-cargo test --locked --test box_configured_dispatch --test box_search_contract --test box_langevin_exploration
+cargo test --locked --test box_configured_dispatch --test box_search_contract --test box_langevin_exploration --test box_coverage_escape --test box_optional_certificate
 #+end_src
 
 The dispatch target checks exact native entry-versus-engine callback traces,
@@ -133,16 +143,23 @@ nonzero values at the recorded starts.
 #+begin_src sh
 cargo run --locked --example box_noise_comparison -- 32 8000 4 16
 cargo run --locked --example box_noise_comparison -- 32 8000 4 16 coverage 0.05 0.1
+cargo run --locked --example box_noise_comparison -- 32 8000 4 16 coverage 0.05 0.1 values
 #+end_src
 
 The arguments are dimension, aggregate work budget, number of seeds and
-maximum Langevin steps. The =coverage= mode additionally accepts radius and
-deposit height. Each JSON result reports the objective and gradient
+maximum Langevin steps. The =coverage= mode additionally accepts radius,
+deposit height and an optional =values= or =gradient= capability; =gradient=
+is the default. Values-only mode uses the existing Gaussian/pattern-search
+engine and does not spend funded search work on unused minimum certificates.
+Each JSON result reports the objective and gradient
 counts, best value, hop count, history observations/refusals, shared deposits,
 coverage observations/publications/applied and capped foreign visits,
 per-chain coverage-region counts, summed history operation seconds and elapsed
 seconds. The configuration record names the comparison, coverage metric,
-radius, height, well-tempering and peer weight. Private history size
+radius, height, well-tempering, peer weight and objective capability.
+Recrossing, peer-region, novelty and bounded-scale counters separate
+coverage-to-proposal actions from its conditional acceptance influence.
+Private history size
 is the largest replica-local table; shared size is one ensemble-wide table.
 Those sizes are not interchangeable coverage measurements. The example
 rejects =HISTORY_NNG= so its communication comparison cannot be mislabeled
