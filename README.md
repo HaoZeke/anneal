@@ -35,8 +35,8 @@ coverage from optional minimum certification and coordinate adoption.
 For a scalar objective on a finite box, the configurable Rust entry is
 `ensemble_hop_optimize_with_config`. It selects the existing engine from the
 gradient capability and retains the requested escape and coverage settings.
-Here `objective` supplies `eindir::Objective<f64>` and `gradient` supplies
-`eindir::Gradient<f64>` on the same declared box:
+Here `objective` supplies `eindir_core::Objective<f64>` and `gradient` supplies
+`eindir_core::Gradient<f64>` on the same declared box:
 
 ```rust
 use anneal_core::methods::{
