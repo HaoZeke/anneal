@@ -552,6 +552,20 @@ where
                 }
                 continue;
             };
+            if report.is_none() {
+                if let Some(launch_cv) = launch
+                    .energy()
+                    .and_then(|energy| coverage.describe(replica.trial.view(), energy))
+                {
+                    coverage.feedback_from_return(
+                        index,
+                        replica.cv.view(),
+                        launch_cv.view(),
+                        trial_cv.view(),
+                        &mut replica.feedback,
+                    );
+                }
+            }
             let accept = coverage.accepts(
                 index,
                 replica.cv.view(),
@@ -1116,6 +1130,20 @@ where
                 }
                 continue;
             };
+            if report.is_none() {
+                if let Some(launch_cv) = launch
+                    .energy()
+                    .and_then(|energy| coverage.describe(replica.trial.view(), energy))
+                {
+                    coverage.feedback_from_return(
+                        index,
+                        replica.cv.view(),
+                        launch_cv.view(),
+                        trial_cv.view(),
+                        &mut replica.feedback,
+                    );
+                }
+            }
             let accept = coverage.accepts(
                 index,
                 replica.cv.view(),
