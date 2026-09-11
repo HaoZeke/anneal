@@ -16,6 +16,49 @@ Simulated-annealing components on the [eindir](https://github.com/HaoZeke/eindir
 | Paper reproducibility | https://github.com/HaoZeke/anneal_repro — Zenodo [10.5281/zenodo.20672620](https://doi.org/10.5281/zenodo.20672620) |
 | History | Continuous development since **2023-02** (see git log); multi-author `CITATION.cff` |
 
+## Generic global minimization
+
+For a scalar objective on a finite box, `minimize` is the common Python entry.
+Every callback receives the declared design dimension, including fixed
+coordinates. A vector length divisible by three does not select atomic geometry.
+
+```python
+import anneal
+
+result = anneal.minimize(
+    lambda x: float(x @ x),
+    x0=[1.0, 0.0, 1.0, 1.0, 1.0],
+    bounds=[(-2.0, 2.0), (0.0, 0.0), (-2.0, 2.0), (-2.0, 2.0), (-2.0, 2.0)],
+    jac=lambda x: 2.0 * x,
+    budget=256,
+    replicas=4,
+    seed=7,
+)
+assert result.charged == result.nfev + result.njev <= 256
+assert result.x[1] == 0.0
+coverage = result.diagnostics["coverage_regions_per_chain"]
+```
+
+With a gradient, replicas propose and locally improve candidates. Without a
+gradient, multiple replicas use values-only hop chains; one replica uses the
+values-only portfolio. Shared coverage records explored regions without
+requiring stationary points. Certified-minimum history is separate information,
+not the definition of exploration. The returned incumbent uses the original
+objective, independently of the exploration penalty and occupied chain state.
+
+`nfev` and `njev` count actual objective and gradient calls; `charged` is their
+sum. `diagnostics` preserves the underlying work, history, and coverage fields.
+`success` means a finite feasible candidate was returned, not that global
+optimality was certified. An optional parameter store archives results and
+supplies a starting candidate; it does not serialize chain or coverage state.
+
+The [communication contract](docs/orgmode/explanation/communication.org) maps
+these interfaces to their actual channels. The Rust box configuration also
+selects [persistent white or colored-noise escape](docs/orgmode/howto/box-langevin-escape.org)
+through the same box search. Atomic symmetry-aware proposals and constrained
+geometry use explicit specialized entry points; box clipping does not provide
+a manifold retraction.
+
 ## Cluster search and cooperative production
 
 `Config::recommended(n)` composes surface relocations that pay one acceptance
