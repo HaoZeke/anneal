@@ -312,11 +312,17 @@ fn nonzero_peer_coverage_can_change_the_search_path() {
         let private_result = private.run(
             gradient,
             &config(),
-            &BoxCoverageConfig { shared: false, ..coverage },
+            &BoxCoverageConfig {
+                shared: false,
+                ..coverage
+            },
         );
         assert!(shared_result.coverage.applied_foreign_visits > 0);
         assert_eq!(private_result.coverage.applied_foreign_visits, 0);
-        assert_ne!(*shared.trace.lock().unwrap(), *private.trace.lock().unwrap(),
-            "peer repulsion must influence the path when evaluated regions overlap");
+        assert_ne!(
+            *shared.trace.lock().unwrap(),
+            *private.trace.lock().unwrap(),
+            "peer repulsion must influence the path when evaluated regions overlap"
+        );
     }
 }
