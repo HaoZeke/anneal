@@ -449,7 +449,12 @@ where
                         .min(config.shared_deposits as u64);
                     let cv = biases[index].cv(trial_x.view());
                     for _ in 0..foreign {
-                        biases[index].deposit(cv.view(), temp_of(replica.generation, replica.f));
+                        biases[index].deposit_scaled_n(
+                            cv.view(),
+                            temp_of(replica.generation, replica.f),
+                            1.0,
+                            1,
+                        );
                         shared_deposits += 1;
                     }
                     *seen = report.visits;
@@ -977,7 +982,12 @@ where
                         .min(config.shared_deposits as u64);
                     let cv = biases[index].cv(trial_x.view());
                     for _ in 0..foreign {
-                        biases[index].deposit(cv.view(), temp_of(replica.generation, replica.f));
+                        biases[index].deposit_scaled_n(
+                            cv.view(),
+                            temp_of(replica.generation, replica.f),
+                            1.0,
+                            1,
+                        );
                         shared_deposits += 1;
                     }
                     *seen = report.visits;

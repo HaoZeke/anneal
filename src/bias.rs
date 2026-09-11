@@ -346,6 +346,9 @@ pub struct BasinBias<F: Fingerprint> {
     w0: f64,
     gamma: f64,
     v: Vec<f64>,
+    /// Local and imported deposits, used by the visit-dependent height.
+    /// The index counts only this bias owner's actual search arrivals.
+    deposit_counts: Vec<u64>,
     /// Whether each deposit carries the configurational entropy of the
     /// basin it lands on, \(T\ln n\) for a basin reached \(n\) ways.
     pub entropic: bool,
@@ -785,6 +788,7 @@ impl<F: Fingerprint> BasinBias<F> {
             w0,
             gamma,
             v: Vec::new(),
+            deposit_counts: Vec::new(),
             // Off by default: a fixed height is what every measurement in
             // this crate was taken against, and the entropic term changes
             // the deposit on every basin.
@@ -807,8 +811,10 @@ impl<F: Fingerprint> BasinBias<F> {
         self.index.merge_radius()
     }
 
-    /// The identity half, for a mechanism that keys on basins without
-    /// depositing.
+    /// The descriptor index and this owner's local arrival counts.
+    ///
+    /// Imported wells participate in lookup, but imported deposits do not
+    /// increment these counts or become publishable local search effort.
     pub fn index(&self) -> &BasinIndex<F> {
         &self.index
     }
@@ -958,6 +964,7 @@ impl<F: Fingerprint> BasinBias<F> {
             if self.lookup(centre.view()).is_none() {
                 self.index.push(centre);
                 self.v.push(depth);
+                self.deposit_counts.push(0);
             }
         }
     }
@@ -980,6 +987,7 @@ impl<F: Fingerprint> BasinBias<F> {
             None => {
                 self.index.push(descriptor);
                 self.v.push(height);
+                self.deposit_counts.push(0);
             }
         }
     }
@@ -1002,16 +1010,13 @@ impl<F: Fingerprint> Bias for BasinBias<F> {
 }
 
 impl<F: Fingerprint> BasinBias<F> {
-    /// A deposit at `scale` times the configured height.
+    /// One local arrival at `scale` times the configured height.
     ///
-    /// For visits made by other walkers into a shared bias: with N walkers
-    /// the deposition rate is N-fold, and the reconstruction error grows
-    /// with that rate (Laio et al. 2005), so foreign hills are scaled by
-    /// 1/N to hold the rate at one walker's. The well-tempered factor and
-    /// the merge radius apply unchanged; a new basin opens at the scaled
-    /// height.
+    /// This visit enters the owner's publishable history. Imported visits
+    /// use [`Self::deposit_scaled_n`] so communication cannot echo them as
+    /// fresh local exploration.
     pub fn deposit_scaled(&mut self, s: ArrayView1<f64>, temp: f64, scale: f64) {
-        self.deposit_scaled_n(s, temp, scale, 1);
+        self.deposit_counted(s, temp, scale, 1, true);
     }
 
     /// `count` scaled deposits at `s` with one basin lookup.
@@ -1019,7 +1024,20 @@ impl<F: Fingerprint> BasinBias<F> {
     /// A batch of foreign visits lands on one centre; looking the centre
     /// up once and applying the well-tempered increment `count` times is
     /// the same sequence of deposits at a fraction of the metric work.
+    /// The visits raise repulsion, including the visit-dependent height,
+    /// without incrementing this owner's local arrival counts.
     pub fn deposit_scaled_n(&mut self, s: ArrayView1<f64>, temp: f64, scale: f64, count: u64) {
+        self.deposit_counted(s, temp, scale, count, false);
+    }
+
+    fn deposit_counted(
+        &mut self,
+        s: ArrayView1<f64>,
+        temp: f64,
+        scale: f64,
+        count: u64,
+        local: bool,
+    ) {
         if count == 0 {
             return;
         }
@@ -1029,25 +1047,28 @@ impl<F: Fingerprint> BasinBias<F> {
             None => {
                 self.index.push(s.to_owned());
                 self.v.push(scale * self.w0);
+                self.deposit_counts.push(1);
                 let i = self.index.n_basins() - 1;
-                self.index.bump(i);
+                if local {
+                    self.index.bump(i);
+                }
                 if count == 1 {
                     return;
                 }
                 for _ in 1..count {
-                    self.increment(i, denom, temp, scale);
+                    self.increment(i, denom, temp, scale, local);
                 }
                 return;
             }
         };
         for _ in 0..count {
-            self.increment(i, denom, temp, scale);
+            self.increment(i, denom, temp, scale, local);
         }
     }
 
     /// One well-tempered increment on basin `i`.
-    fn increment(&mut self, i: usize, denom: f64, temp: f64, scale: f64) {
-        let arrivals = self.index.visits(i).max(1);
+    fn increment(&mut self, i: usize, denom: f64, temp: f64, scale: f64, local: bool) {
+        let arrivals = self.deposit_counts[i].max(1);
         let entropy = if self.entropic && temp > 0.0 {
             temp * (arrivals as f64).ln()
         } else {
@@ -1055,7 +1076,10 @@ impl<F: Fingerprint> BasinBias<F> {
         };
         let w = scale * (self.w0 + entropy) * (-self.v[i] / denom).exp();
         self.v[i] += w;
-        self.index.bump(i);
+        self.deposit_counts[i] += 1;
+        if local {
+            self.index.bump(i);
+        }
     }
 }
 
