@@ -2,29 +2,43 @@
 
 * Select the escape mechanism
 
-The gradient box ensemble accepts =BoxEscape::Langevin= in its configuration.
+The native =ensemble_hop_optimize_with_config= entry accepts the existing box
+and coverage configurations, selecting the engine from the supplied gradient
+capability. The gradient box ensemble accepts =BoxEscape::Langevin=.
 This replaces the proposal segment while retaining the bounded quench,
 minimum certificate, history, escape feedback and acceptance rule. It is a
 global-minimisation proposal mechanism, not a physical-time simulation.
 The default is =BoxEscape::Gaussian=, the reflected Gaussian kick.
 
 #+begin_src rust
-use anneal_core::methods::box_hopping::{
-    BoxEnsembleConfig, BoxEscape, GleEscapeConfig, box_ensemble_optimize,
+use anneal_core::methods::{
+    BoxCoverageConfig, BoxEnsembleConfig, BoxEscape, GleEscapeConfig,
+    ensemble_hop_optimize_with_config,
 };
 use anneal_core::methods::ensemble::HistoryMode;
 
 let config = BoxEnsembleConfig {
     replicas: 4,
     budget: 8_000,
-    history: HistoryMode::Shared,
+    history: HistoryMode::None,
     escape: BoxEscape::Langevin(GleEscapeConfig::default()),
     ..BoxEnsembleConfig::default()
 };
+let coverage = BoxCoverageConfig::default();
 // objective supplies Objective<f64>; gradient supplies Gradient<f64>.
-let result = box_ensemble_optimize(&objective, &gradient, 7, Some(start.view()), &config);
-assert!(result.n_evals + result.n_grads <= config.budget);
+let result = ensemble_hop_optimize_with_config(
+    &objective, Some(&gradient), 7, Some(start.view()), &config, &coverage,
+);
+assert_eq!(result.charged, result.n_evals + result.n_grads);
+assert!(result.charged <= config.budget);
 #+end_src
+
+Coverage sharing in this configuration is independent of the disabled
+minimum ledger. The native entry forwards both configurations without a
+separate policy loop. Without a gradient, select Gaussian escape to run the
+values-only chains. An explicit one-replica configuration retains its hop
+and coverage semantics; the scalar-argument =ensemble_hop_optimize=
+convenience entry selects the values-only portfolio for that case.
 
 =GleEscapeConfig= contains the maximum number of steps per escape, the lower
 frequency =omega0= of the fitted band, the requested =dt=, and the noise law.
@@ -93,11 +107,14 @@ targets cover objective-origin invariance, coverage influence and sustained
 Langevin exploration:
 
 #+begin_src sh
-cargo test --locked --test box_search_contract --test box_langevin_exploration
+cargo test --locked --test box_configured_dispatch --test box_search_contract --test box_langevin_exploration
 #+end_src
 
-The first target compares full callback traces for shifted flat objectives
-under Gaussian, values-only, white and colored search. The second checks an
+The dispatch target checks exact native entry-versus-engine callback traces,
+configuration propagation, fixed coordinates and capability rejection.
+The search-contract target compares full callback traces for shifted flat
+objectives under Gaussian, values-only, white and colored search. The
+exploration target checks an
 evaluation-matched Rastrigin exploration bound. These test the native engine
 without Python bindings; Python checks cover binding conformance separately.
 

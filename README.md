@@ -32,7 +32,40 @@ invariance, effective coverage and sustained exploration. The
 [communication contract](docs/orgmode/explanation/communication.org) separates
 coverage from optional minimum certification and coordinate adoption.
 
-For a scalar objective on a finite box, `minimize` is the common Python entry.
+For a scalar objective on a finite box, the configurable Rust entry is
+`ensemble_hop_optimize_with_config`. It selects the existing engine from the
+gradient capability and retains the requested escape and coverage settings.
+Here `objective` supplies `eindir::Objective<f64>` and `gradient` supplies
+`eindir::Gradient<f64>` on the same declared box:
+
+```rust
+use anneal_core::methods::{
+    BoxCoverageConfig, BoxEnsembleConfig, BoxEscape, GleEscapeConfig,
+    ensemble_hop_optimize_with_config,
+};
+use anneal_core::methods::ensemble::HistoryMode;
+
+let config = BoxEnsembleConfig {
+    budget: 8_000,
+    replicas: 4,
+    history: HistoryMode::None,
+    escape: BoxEscape::Langevin(GleEscapeConfig::default()),
+    ..BoxEnsembleConfig::default()
+};
+let coverage = BoxCoverageConfig::default();
+let result = ensemble_hop_optimize_with_config(
+    &objective, Some(&gradient), 7, None, &config, &coverage,
+);
+assert_eq!(result.charged, result.n_evals + result.n_grads);
+assert!(result.charged <= config.budget);
+```
+
+Coverage sharing in this example requires no minimum ledger. The native
+`box_configured_dispatch` tests compare complete callback traces and results
+against the directly selected engines, including white/colored noise and
+values-only chains.
+
+Python exposes the default policy through the optional `minimize` binding.
 Every callback receives the declared design dimension, including fixed
 coordinates. A vector length divisible by three does not select atomic geometry.
 
