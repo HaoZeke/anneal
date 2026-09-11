@@ -450,12 +450,38 @@ and =CATALOG_EVIDENCE_ONLY= disable the bus.
 
 The LJ helper =census_nearby_updates= invalidates packing classification when
 the occupied coordinates change, including equal-energy changes, or a peer
-has fresh geometry. A cached nearby flag is not a certificate that the peer's
-coordinates remain in the reference cloud. That cloud is capped at 64;
-=include_packing_reference= avoids another arrival credit for a matching well,
-and over-cap admission evicts the oldest member of the largest community.
-Reference residency and nearby classification therefore need separate
-consideration.
+has fresh geometry. It also replaces a separate live-peer view, retaining one
+entry per admitted peer even when several peers occupy identical coordinates.
+The =PackingPeerScope= restores the caller's view when that chain exits.
+
+The archive remains capped at 64; =include_packing_reference= avoids another
+arrival credit for a matching well, and over-cap admission evicts the oldest
+member of the largest community. Replacing live occupancy does not erase that
+history. The archive's entry count is not a live crowd count.
+
+** Directional packing separation
+
+=ClusterMove::SoapRepel= selects the nearest reference mean and requests the
+normalized difference =mean(current) - mean(peer)=. The native analytic
+pullback maps this difference to Cartesian coordinates. A bounded halving
+search reuses that displacement until nearest-reference descriptor clearance
+increases, subject to the requested Cartesian RMSD cap. It makes no objective
+or gradient calls; descriptor preparation still contributes wall cost.
+
+With a live view installed, the proposal rechecks =nearby_packing= against its
+actual occupied geometry. Distant peers and archived positions cannot supply
+live crowding. =REPEL_MIN_REFS= defaults to one; an explicitly larger value
+requires that many nearby peers. An empty live neighborhood, coincident means
+or an unusable pullback selects the independent escape. Without an installed
+live view the arm can use archived references for history-directed search.
+Reference means are cached by complete coordinate bits and the descriptor
+parameters, including the physical cutoff.
+
+The packing-neighborhood classifier requires at least 13 atoms. That
+chemistry-specific classification is distinct from generic box proximity and
+from the SOAP pullback's mathematical domain. Repulsion changes exploration;
+it neither changes the raw incumbent criterion nor proves a global-search
+advantage over independent chains.
 
 ** Well-table gossip
 
