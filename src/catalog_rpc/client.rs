@@ -23,13 +23,14 @@ use super::{
     encode_reply, fill_identity, fill_request, read_coordinator_status, read_event, read_roster,
 };
 use crate::Catalog_capnp::{coordinator, session, subscriber};
+use crate::nng_rpc::{self, NngIo};
 use crate::cooperative_search::ledger::ChargeKind;
 use crate::coreclass::CoreVerdict;
 
 /// Connection and I/O deadlines for a catalog client.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ClientConfig {
-    /// TCP connection deadline.
+    /// nng dial / pair-hello deadline.
     pub connect_timeout: Duration,
     /// Read and write deadline.
     pub io_timeout: Duration,
@@ -60,7 +61,7 @@ impl Default for ClientConfig {
 /// Transport, wire, or typed coordinator rejection.
 #[derive(Debug, thiserror::Error)]
 pub enum CatalogClientError {
-    /// TCP or stream I/O failed.
+    /// nng or stream I/O failed.
     #[error("catalog transport failed: {0}")]
     Transport(#[from] std::io::Error),
     /// Cap'n Proto encoding or decoding failed.
@@ -1163,18 +1164,9 @@ async fn open_rpc(
     config: ClientConfig,
     events: Arc<Mutex<Vec<CoordinatorEvent>>>,
 ) -> Result<ClientSession, CatalogClientError> {
-    let stream = tokio::time::timeout(config.connect_timeout, tokio::net::TcpStream::connect(addr))
-        .await
-        .map_err(|_| {
-            CatalogClientError::Transport(std::io::Error::new(
-                std::io::ErrorKind::TimedOut,
-                "catalog connect timed out",
-            ))
-        })?
+    let pair = nng_rpc::dial_pair(&addr.to_string(), config.connect_timeout)
         .map_err(CatalogClientError::Transport)?;
-    stream
-        .set_nodelay(true)
-        .map_err(CatalogClientError::Transport)?;
+    let stream = NngIo::new(pair).map_err(CatalogClientError::Transport)?;
     let (reader, writer) = TokioAsyncReadCompatExt::compat(stream).split();
     let network = VatNetwork::new(
         futures::io::BufReader::new(reader),
