@@ -393,13 +393,10 @@ pub enum ClusterMove {
     /// occupies, pulled back to Cartesian displacements through the SOAP
     /// Jacobian.
     ///
-    /// The occupied cloud is this structure plus every reference the
-    /// cooperative layer has handed the chain (other replicas' nearby
-    /// minima, [`crate::catalog::packing_references`]); the direction is
-    /// minus the cloud's mean packing descriptor, so the proposal leaves the
-    /// region the population is crowding rather than the region this chain
-    /// alone has visited. With no references on file it falls back to the
-    /// single-chain leftover hop, so the arm is defined for a lone chain too.
+    /// The direction is this structure's packing mean minus its nearest
+    /// reference mean. An installed live-peer view supplies nearby peers;
+    /// otherwise [`crate::catalog::packing_references`] supplies history.
+    /// With no usable separation direction the independent escape applies.
     SoapRepel {
         /// Cap on the Cartesian RMSD of one step.
         rmsd: f64,
@@ -1335,18 +1332,17 @@ impl ClusterMove {
                     rcut_nn: *cutoff,
                     ..Default::default()
                 };
-                // Repel only when the region is crowded: the references on
-                // file are the population's minima on this side of the
-                // packing map, so their count is the crowding of this chain's
-                // own family. A chain alone in its family (a replica that has
-                // reached the narrow funnel) must not be pushed out of it;
-                // measured, an unconditional push cost the coupled champions
-                // half their rate against the same worker uncoupled.
+                // Live occupancy overrides archived history, including an
+                // empty neighborhood. One nearby peer supplies a difference;
+                // a larger threshold is an explicit crowding policy.
                 let min_refs: usize = std::env::var("REPEL_MIN_REFS")
                     .ok()
                     .and_then(|v| v.parse().ok())
-                    .unwrap_or(3);
-                let refs = crate::catalog::packing_references();
+                    .unwrap_or(1);
+                let refs = x
+                    .as_slice()
+                    .and_then(crate::catalog::packing::nearby_packing_peers)
+                    .unwrap_or_else(crate::catalog::packing_references);
                 if refs.len() >= min_refs {
                     // Coordinate and map keys keep retained reference means
                     // valid when chains use different physical cutoffs.
