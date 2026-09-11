@@ -2022,16 +2022,6 @@ fn ensemble_optimize(
                 membership,
             )
         }
-        None => crate::methods::box_hopping::ensemble_hop_optimize::<_, CallablePyGradient>(
-            &obj,
-            None,
-            seed,
-            seed_view,
-            budget,
-            replicas,
-            history_mode,
-            membership,
-        ),
     });
     let out = PyDict::new(py);
     out.set_item("best_val", result.best_val)?;
