@@ -1898,12 +1898,27 @@ fn box_ensemble_optimize(
     out.set_item("shared_deposits", result.shared_deposits)?;
     out.set_item("coverage_observations", result.coverage.local_observations)?;
     out.set_item("coverage_published", result.coverage.published_visits)?;
-    out.set_item("coverage_applied_foreign", result.coverage.applied_foreign_visits)?;
-    out.set_item("coverage_capped_foreign", result.coverage.capped_foreign_visits)?;
-    out.set_item("coverage_regions_per_chain", result.coverage.per_chain_regions)?;
+    out.set_item(
+        "coverage_applied_foreign",
+        result.coverage.applied_foreign_visits,
+    )?;
+    out.set_item(
+        "coverage_capped_foreign",
+        result.coverage.capped_foreign_visits,
+    )?;
+    out.set_item(
+        "coverage_regions_per_chain",
+        result.coverage.per_chain_regions,
+    )?;
     out.set_item("coverage_recrossings", result.coverage.recrossings)?;
-    out.set_item("coverage_peer_recrossings", result.coverage.peer_recrossings)?;
-    out.set_item("coverage_peer_only_recrossings", result.coverage.peer_only_recrossings)?;
+    out.set_item(
+        "coverage_peer_recrossings",
+        result.coverage.peer_recrossings,
+    )?;
+    out.set_item(
+        "coverage_peer_only_recrossings",
+        result.coverage.peer_only_recrossings,
+    )?;
     out.set_item("coverage_escape_updates", result.coverage.escape_updates)?;
     out.set_item(
         "coverage_decisions",
@@ -1980,12 +1995,27 @@ fn ensemble_optimize(
     out.set_item("history_seconds", result.history_cost.2)?;
     out.set_item("coverage_observations", result.coverage.local_observations)?;
     out.set_item("coverage_published", result.coverage.published_visits)?;
-    out.set_item("coverage_applied_foreign", result.coverage.applied_foreign_visits)?;
-    out.set_item("coverage_capped_foreign", result.coverage.capped_foreign_visits)?;
-    out.set_item("coverage_regions_per_chain", result.coverage.per_chain_regions)?;
+    out.set_item(
+        "coverage_applied_foreign",
+        result.coverage.applied_foreign_visits,
+    )?;
+    out.set_item(
+        "coverage_capped_foreign",
+        result.coverage.capped_foreign_visits,
+    )?;
+    out.set_item(
+        "coverage_regions_per_chain",
+        result.coverage.per_chain_regions,
+    )?;
     out.set_item("coverage_recrossings", result.coverage.recrossings)?;
-    out.set_item("coverage_peer_recrossings", result.coverage.peer_recrossings)?;
-    out.set_item("coverage_peer_only_recrossings", result.coverage.peer_only_recrossings)?;
+    out.set_item(
+        "coverage_peer_recrossings",
+        result.coverage.peer_recrossings,
+    )?;
+    out.set_item(
+        "coverage_peer_only_recrossings",
+        result.coverage.peer_only_recrossings,
+    )?;
     out.set_item("coverage_escape_updates", result.coverage.escape_updates)?;
     out.set_item(
         "coverage_decisions",
