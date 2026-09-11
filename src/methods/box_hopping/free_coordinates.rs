@@ -17,6 +17,12 @@ where
     G: Gradient<f64>,
 {
     let bounds = obj.bounds();
+    for (i, (&low, &high)) in bounds.low.iter().zip(bounds.high.iter()).enumerate() {
+        assert!(
+            low.is_finite() && high.is_finite(),
+            "bounds must be finite at dimension {i}"
+        );
+    }
     let free: Vec<usize> = (0..bounds.dims)
         .filter(|&i| bounds.low[i] != bounds.high[i])
         .collect();
