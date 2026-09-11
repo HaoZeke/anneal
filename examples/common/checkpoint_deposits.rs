@@ -23,24 +23,12 @@ pub(crate) fn with_pending_bias_update(
     action: CheckpointAction,
     pending: &mut Option<BiasUpdate>,
 ) -> CheckpointAction {
-    match (action, pending.take()) {
-        (
-            CheckpointAction::Continue,
-            Some(BiasUpdate::MergeWells {
-                wells,
-                weight,
-                complete,
-            }),
-        ) => CheckpointAction::MergeBias {
-            wells,
-            weight,
-            complete,
+    match pending.take() {
+        Some(update) => CheckpointAction::WithBiasUpdates {
+            updates: vec![update],
+            action: Box::new(action),
         },
-        (
-            CheckpointAction::Continue,
-            Some(BiasUpdate::DepositDescriptors { deposits, weight }),
-        ) => CheckpointAction::DepositDescriptors { deposits, weight },
-        (action, _) => action,
+        None => action,
     }
 }
 
