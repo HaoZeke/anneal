@@ -303,7 +303,7 @@ impl Coverage {
 
     /// Shape a funded proposal before any callback evaluates it. All distances
     /// and corrections use the same normalized free-coordinate box geometry.
-    pub(super) fn repel<R: Rng + ?Sized>(
+    pub(crate) fn repel<R: Rng + ?Sized>(
         &mut self,
         replica: usize,
         anchor: ArrayView1<f64>,
