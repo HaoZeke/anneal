@@ -70,7 +70,11 @@ fn validate_box_domain(low: &[f64], high: &[f64], allow_fixed: bool) -> PyResult
             )));
         }
         if lo > hi || (!allow_fixed && lo == hi) {
-            let relation = if allow_fixed { "less than or equal to" } else { "strictly less than" };
+            let relation = if allow_fixed {
+                "less than or equal to"
+            } else {
+                "strictly less than"
+            };
             return Err(PyValueError::new_err(format!(
                 "low[{i}] must be {relation} high[{i}] (got {lo}, {hi})"
             )));
