@@ -14,6 +14,36 @@ certification, message delivery, and comparison outcomes are distinct claims;
 source code and test definitions alone do not establish a passing run or a
 performance advantage.
 
+* Coverage history is not minimum identity
+
+The generic global-minimization mechanism is repulsion from explored regions.
+A descriptor maps a search state into a geometry in which nearby observations
+can share a bias. A feasible evaluated state can contribute coverage without
+being stationary. The search evaluates its exploration penalty in descriptor
+space while retaining its incumbent according to the original objective,
+not the objective plus that penalty.
+
+=BasinBias= and =SharedDeposits= implement this descriptor/count path without
+requesting a gradient or a minimum certificate. Despite the =BasinBias= name,
+its fingerprint and distance rule can describe regions around general search
+states. The coverage radius controls the reach of repulsion; it is not a
+claim that all states inside that radius quench to the same minimum.
+
+Minimum identity is a separate, optional statement. A basin-hopping worker
+can use certified quenches to distinguish a return to its own minimum from
+a minimum found by another worker. Requiring such a certificate for that
+statement does not justify requiring stationarity for every coverage deposit.
+The box entry points derive peer deposits from minimum reports, so their
+coverage sharing is restricted by certification; the atomic shared-deposit
+channel does not have that restriction. The entry-point table names those
+implementation differences explicitly.
+
+Imported visits change what a chain knows, not how much local exploration it
+has performed. The bias tracks total local-plus-imported deposits for its
+visit-dependent height, while the descriptor index counts only local
+arrivals. Only those local arrival deltas are publishable. Repeated exchanges
+therefore cannot manufacture coverage by circulating the same observations.
+
 * Entry points and channels
 
 The [[file:../../../src/methods/ensemble.rs][atomic ensemble runner]], the
@@ -42,7 +72,7 @@ so an external potential handle need not be shared between replicas.
 
 Three different questions require three different checks.
 
-1. /Is this an admissible observation?/ A
+1. /Is this an admissible minimum report?/ A
    [[file:../../../src/methods/cluster_hopping.rs][=QuenchBoundary=]] carries
    the energy, coordinates and fresh validation gradient. =MinimumHistory=
    requires a valid boundary and a maximum absolute gradient component below
