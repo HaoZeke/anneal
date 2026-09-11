@@ -19,9 +19,11 @@ Simulated-annealing components on the [eindir](https://github.com/HaoZeke/eindir
 ## Generic global minimization
 
 The optimizer is implemented in Rust. Objective and gradient capabilities
-come from `eindir`; local improvement uses `rgmin`. Box chains reuse the
-native Langevin stepper, descriptor coverage and shared-deposit exchange.
-Python and C expose the native implementation rather than separate solvers.
+come from `eindir`. Box chains compose bounded local polishing, the native
+Langevin stepper, descriptor coverage and shared-deposit exchange. Their
+projected polisher has its own L-BFGS memory; `rgmin` backs the separate
+`WarmLbfgs` integration, not every local-improvement path. Python and C expose
+the native implementation rather than separate solvers.
 
 The Rust [box search and noise guide](docs/orgmode/howto/box-langevin-escape.org)
 shows the typed configuration and its common work contract. Native regression
