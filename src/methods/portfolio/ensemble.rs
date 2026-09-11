@@ -58,6 +58,33 @@ pub struct PortfolioEnsembleResult {
     pub coverage: CoverageStats,
 }
 
+struct UnavailableGradient;
+
+impl Gradient<f64> for UnavailableGradient {
+    fn dim(&self) -> usize {
+        unreachable!("scalar portfolios have no native gradient capability")
+    }
+
+    fn grad(&self, _: ArrayView1<f64>) -> Array1<f64> {
+        unreachable!("scalar portfolios have no native gradient capability")
+    }
+}
+
+/// Run the same portfolio ensemble with only an objective capability.
+///
+/// Callers need no gradient implementation or placeholder type. Numerical
+/// local-refinement probes are charged objective calls; `n_grads` is zero.
+/// All configuration, domain and sharing rules of [`portfolio_ensemble_optimize`]
+/// apply, including the single-replica case.
+pub fn portfolio_values_ensemble_optimize<O: Objective<f64>>(
+    obj: &O,
+    seed: u64,
+    x0: Option<ArrayView1<f64>>,
+    config: &PortfolioEnsembleConfig,
+) -> PortfolioEnsembleResult {
+    portfolio_ensemble_optimize::<_, UnavailableGradient>(obj, None, seed, x0, config)
+}
+
 /// Run persistent portfolios on the same finite, positive-width box.
 ///
 /// Sharing does not reset a controller or install a peer's incumbent. The

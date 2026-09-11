@@ -34,7 +34,10 @@ use rand_distr::{Beta, Distribution};
 use eindir_core::{AdditiveSurrogate, Bounds, FPair, Gradient, Objective, ReducedObjective};
 
 mod ensemble;
-pub use ensemble::{PortfolioEnsembleConfig, PortfolioEnsembleResult, portfolio_ensemble_optimize};
+pub use ensemble::{
+    PortfolioEnsembleConfig, PortfolioEnsembleResult, portfolio_ensemble_optimize,
+    portfolio_values_ensemble_optimize,
+};
 
 use crate::bias::Bias;
 use crate::cool::{Cooling, LogCool, TsallisCool};
