@@ -48,7 +48,7 @@ use crate::methods::bayesian_pilot::{
 use crate::methods::gle_langevin::gle_langevin_preconditioned_sa;
 use crate::methods::local_polish::{
     QmcPolishResult, projected_gradient_polish, qmc_gsa_global_search,
-    qmc_projected_gradient_polish, qmc_trust_region_poll, shifted_qmc_projected_gradient_polish,
+    qmc_trust_region_poll, shifted_qmc_projected_gradient_polish,
 };
 use crate::methods::parallel_tempering::{ParallelTemperingSampler, geometric_ladder};
 use crate::movekernel::{MoveKernel, TsallisVisit};
@@ -2054,7 +2054,7 @@ fn run_arm<O, G>(
                 let n_starts = (slice / 3).max(4);
                 let per_start = slice.saturating_sub(n_starts) / 2;
                 if per_start >= 2 {
-                    let prepare = |anchor, proposal: &mut Array1<f64>| {
+                    let prepare = |anchor: ArrayView1<f64>, proposal: &mut Array1<f64>| {
                         obj.prepare_proposal(Some(anchor), proposal)
                     };
                     let res =
@@ -2079,7 +2079,7 @@ fn run_arm<O, G>(
             }
             if slice >= 8 {
                 let chains = (slice / 8).clamp(2, 4 * dim.max(1));
-                let prepare = |anchor, proposal: &mut Array1<f64>| {
+                let prepare = |anchor: ArrayView1<f64>, proposal: &mut Array1<f64>| {
                     obj.prepare_proposal(Some(anchor), proposal)
                 };
                 let res = crate::methods::local_polish::qmc_gsa_global_search_with_proposals(
