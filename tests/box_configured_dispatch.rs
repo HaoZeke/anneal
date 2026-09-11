@@ -81,11 +81,20 @@ fn matches_engine(gradient: bool, escape: BoxEscape, replicas: usize) {
         let start = array![0.5, 3.0, -0.25];
         let expected = if gradient {
             box_ensemble_optimize_with_coverage(
-                &direct, &direct, 71, Some(start.view()), &config, &coverage,
+                &direct,
+                &direct,
+                71,
+                Some(start.view()),
+                &config,
+                &coverage,
             )
         } else {
             box_values_ensemble_optimize_with_coverage(
-                &direct, 71, Some(start.view()), &config, &coverage,
+                &direct,
+                71,
+                Some(start.view()),
+                &config,
+                &coverage,
             )
         };
         let actual = ensemble_hop_optimize_with_config(
@@ -96,13 +105,22 @@ fn matches_engine(gradient: bool, escape: BoxEscape, replicas: usize) {
             &config,
             &coverage,
         );
-        assert_eq!(*configured.values.lock().unwrap(), *direct.values.lock().unwrap());
-        assert_eq!(*configured.gradients.lock().unwrap(), *direct.gradients.lock().unwrap());
+        assert_eq!(
+            *configured.values.lock().unwrap(),
+            *direct.values.lock().unwrap()
+        );
+        assert_eq!(
+            *configured.gradients.lock().unwrap(),
+            *direct.gradients.lock().unwrap()
+        );
         assert_eq!(actual.best_pos, expected.best_pos);
         assert_eq!(actual.best_val, expected.best_val);
         assert_eq!(actual.n_evals, configured.values.lock().unwrap().len());
         assert_eq!(actual.n_grads, configured.gradients.lock().unwrap().len());
-        assert_eq!((actual.n_evals, actual.n_grads), (expected.n_evals, expected.n_grads));
+        assert_eq!(
+            (actual.n_evals, actual.n_grads),
+            (expected.n_evals, expected.n_grads)
+        );
         assert_eq!(actual.charged, actual.n_evals + actual.n_grads);
         assert!(actual.charged <= config.budget);
         assert_eq!(actual.hops, expected.hops);
