@@ -681,7 +681,10 @@ fn values_search_depth(dim: usize, remaining: usize, needs_certificate: bool) ->
     if room < dim + 2 {
         return 0;
     }
-    room.min((4 * dim + 16).max(MIN_QUENCH))
+    // Contiguous local work lets scalar stencils supply useful curvature.
+    // Keep exploration work and the certificate reservation outside its cap.
+    let minimum_quench = (4 * dim + 16).max(MIN_QUENCH);
+    room.min(minimum_quench.max(remaining / 2))
 }
 
 fn values_certificate<O: Objective<f64>>(
