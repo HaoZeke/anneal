@@ -54,10 +54,22 @@ impl BoxCoverageConfig {
     }
 
     fn validate(&self) {
-        assert!(self.radius.is_finite() && self.radius > 0.0, "coverage radius must be finite and positive");
-        assert!(self.height.is_finite() && self.height >= 0.0, "coverage height must be finite and nonnegative");
-        assert!(self.well_tempering.is_finite() && self.well_tempering > 1.0, "coverage well-tempering must be finite and greater than one");
-        assert!(self.peer_weight.is_finite() && self.peer_weight >= 0.0, "coverage peer weight must be finite and nonnegative");
+        assert!(
+            self.radius.is_finite() && self.radius > 0.0,
+            "coverage radius must be finite and positive"
+        );
+        assert!(
+            self.height.is_finite() && self.height >= 0.0,
+            "coverage height must be finite and nonnegative"
+        );
+        assert!(
+            self.well_tempering.is_finite() && self.well_tempering > 1.0,
+            "coverage well-tempering must be finite and greater than one"
+        );
+        assert!(
+            self.peer_weight.is_finite() && self.peer_weight >= 0.0,
+            "coverage peer weight must be finite and nonnegative"
+        );
     }
 }
 
@@ -89,8 +101,18 @@ struct NormalizedCoordinates {
 impl NormalizedCoordinates {
     fn new(bounds: &Bounds<f64>) -> Self {
         let widths = &bounds.high - &bounds.low;
-        assert!(bounds.low.iter().chain(bounds.high.iter()).all(|x| x.is_finite()), "coverage requires finite box bounds");
-        assert!(widths.iter().all(|w| w.is_finite() && *w >= 0.0), "coverage requires finite nonnegative box widths");
+        assert!(
+            bounds
+                .low
+                .iter()
+                .chain(bounds.high.iter())
+                .all(|x| x.is_finite()),
+            "coverage requires finite box bounds"
+        );
+        assert!(
+            widths.iter().all(|w| w.is_finite() && *w >= 0.0),
+            "coverage requires finite nonnegative box widths"
+        );
         let free = widths.iter().filter(|w| **w > 0.0).count();
         Self {
             low: bounds.low.clone(),
@@ -102,15 +124,23 @@ impl NormalizedCoordinates {
 
     fn feasible(&self, x: ArrayView1<f64>) -> bool {
         x.len() == self.widths.len()
-            && x.iter().zip(self.low.iter().zip(self.high.iter())).all(|(x, (low, high))| x.is_finite() && x >= low && x <= high)
+            && x.iter()
+                .zip(self.low.iter().zip(self.high.iter()))
+                .all(|(x, (low, high))| x.is_finite() && x >= low && x <= high)
     }
 }
 
 impl Fingerprint for NormalizedCoordinates {
     fn describe(&self, x: ArrayView1<f64>) -> Array1<f64> {
-        Array1::from_iter(x.iter().zip(self.low.iter().zip(self.widths.iter())).map(|(x, (low, width))| {
-            if *width > 0.0 { ((x - low) / width) * self.free_scale } else { 0.0 }
-        }))
+        Array1::from_iter(x.iter().zip(self.low.iter().zip(self.widths.iter())).map(
+            |(x, (low, width))| {
+                if *width > 0.0 {
+                    ((x - low) / width) * self.free_scale
+                } else {
+                    0.0
+                }
+            },
+        ))
     }
 }
 
@@ -124,12 +154,35 @@ pub(super) struct Coverage {
 }
 
 impl Coverage {
-    pub(super) fn new(bounds: &Bounds<f64>, replicas: usize, config: &BoxCoverageConfig, foreign_cap: usize) -> Self {
+    pub(super) fn new(
+        bounds: &Bounds<f64>,
+        replicas: usize,
+        config: &BoxCoverageConfig,
+        foreign_cap: usize,
+    ) -> Self {
         config.validate();
         let coordinates = NormalizedCoordinates::new(bounds);
-        let biases = (0..replicas).map(|_| BasinBias::new(coordinates.clone(), config.radius, config.height, config.well_tempering)).collect();
-        let exchange = (config.shared && config.peer_weight > 0.0 && foreign_cap > 0 && replicas > 1).then(|| SharedDeposits::new(replicas));
-        Self { coordinates, biases, exchange, peer_weight: config.peer_weight, foreign_cap: foreign_cap as u64, stats: CoverageStats::default() }
+        let biases = (0..replicas)
+            .map(|_| {
+                BasinBias::new(
+                    coordinates.clone(),
+                    config.radius,
+                    config.height,
+                    config.well_tempering,
+                )
+            })
+            .collect();
+        let exchange =
+            (config.shared && config.peer_weight > 0.0 && foreign_cap > 0 && replicas > 1)
+                .then(|| SharedDeposits::new(replicas));
+        Self {
+            coordinates,
+            biases,
+            exchange,
+            peer_weight: config.peer_weight,
+            foreign_cap: foreign_cap as u64,
+            stats: CoverageStats::default(),
+        }
     }
 
     pub(super) fn describe(&self, x: ArrayView1<f64>, value: f64) -> Option<Array1<f64>> {
@@ -142,11 +195,16 @@ impl Coverage {
 
     /// Read once at a funded hop boundary, before its acceptance decision.
     pub(super) fn hear(&mut self, replica: usize, temperature: f64) {
-        let Some(exchange) = &mut self.exchange else { return; };
+        let Some(exchange) = &mut self.exchange else {
+            return;
+        };
         let mut applied = HashMap::<usize, u64>::new();
         let bias = &mut self.biases[replica];
         for (descriptor, count) in exchange.drain(replica) {
-            let region = bias.index().lookup(descriptor.view()).unwrap_or_else(|| bias.index().n_basins());
+            let region = bias
+                .index()
+                .lookup(descriptor.view())
+                .unwrap_or_else(|| bias.index().n_basins());
             let region_count = applied.entry(region).or_default();
             let admitted = count.min(self.foreign_cap.saturating_sub(*region_count));
             bias.deposit_scaled_n(descriptor.view(), temperature, self.peer_weight, admitted);
@@ -157,7 +215,12 @@ impl Coverage {
     }
 
     /// Record only a local search observation, after deciding trial acceptance.
-    pub(super) fn observe(&mut self, replica: usize, descriptor: ArrayView1<f64>, temperature: f64) {
+    pub(super) fn observe(
+        &mut self,
+        replica: usize,
+        descriptor: ArrayView1<f64>,
+        temperature: f64,
+    ) {
         self.biases[replica].deposit(descriptor, temperature);
         self.stats.local_observations += 1;
         if let Some(exchange) = &mut self.exchange {
@@ -166,8 +229,15 @@ impl Coverage {
     }
 
     pub(super) fn finish(mut self) -> CoverageStats {
-        self.stats.published_visits = self.exchange.as_ref().map_or(0, |exchange| exchange.counts().0);
-        self.stats.per_chain_regions = self.biases.iter().map(|bias| bias.index().n_basins()).collect();
+        self.stats.published_visits = self
+            .exchange
+            .as_ref()
+            .map_or(0, |exchange| exchange.counts().0);
+        self.stats.per_chain_regions = self
+            .biases
+            .iter()
+            .map(|bias| bias.index().n_basins())
+            .collect();
         self.stats
     }
 }

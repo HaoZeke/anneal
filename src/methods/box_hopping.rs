@@ -36,8 +36,8 @@ use crate::movekernel::reflect_into_box;
 use crate::pes_exploration::{ExactStructureWitness, StructureContext};
 
 mod coverage;
-pub use coverage::{BoxCoverageConfig, CoverageStats};
 use coverage::Coverage;
+pub use coverage::{BoxCoverageConfig, CoverageStats};
 
 #[cfg(feature = "history-nng")]
 use crate::history_nng::{HistoryNngClient, HistoryNngServer};
@@ -270,7 +270,13 @@ pub fn box_values_ensemble_optimize<O>(
 where
     O: Objective<f64>,
 {
-    box_values_ensemble_optimize_with_coverage(obj, seed, x0, config, &BoxCoverageConfig::for_ensemble(config))
+    box_values_ensemble_optimize_with_coverage(
+        obj,
+        seed,
+        x0,
+        config,
+        &BoxCoverageConfig::for_ensemble(config),
+    )
 }
 
 /// Values-only box chains with coverage settings independent of minimum history.
@@ -333,7 +339,12 @@ where
         DescriptorGeometry::finite(mean_width.max(1e-6)).ok(),
         Some("design-box".into()),
     );
-    let mut coverage = Coverage::new(&bounds, replica_count, coverage_config, config.shared_deposits);
+    let mut coverage = Coverage::new(
+        &bounds,
+        replica_count,
+        coverage_config,
+        config.shared_deposits,
+    );
     let mut hooks: Vec<ReplicaHook<'_>> = (0..replica_count)
         .map(|index| {
             replica_hook(
@@ -397,7 +408,11 @@ where
         }
         if let Some(descriptor) = coverage.describe(replica.x.view(), replica.f) {
             replica.cv = descriptor;
-            coverage.observe(index, replica.cv.view(), temp_of(replica.generation, replica.f));
+            coverage.observe(
+                index,
+                replica.cv.view(),
+                temp_of(replica.generation, replica.f),
+            );
         }
         let before = replica.work;
         let certified =
@@ -465,7 +480,9 @@ where
                     report.visits.max(1),
                 );
             }
-            let Some(trial_cv) = coverage.describe(trial_x.view(), trial_f) else { continue; };
+            let Some(trial_cv) = coverage.describe(trial_x.view(), trial_f) else {
+                continue;
+            };
             let temp = temp_of(replica.generation, replica.f);
             let v_here = coverage.potential(index, replica.cv.view());
             let v_trial = coverage.potential(index, trial_cv.view());
@@ -706,7 +723,14 @@ where
     O: Objective<f64>,
     G: Gradient<f64>,
 {
-    box_ensemble_optimize_with_coverage(obj, grad, seed, x0, config, &BoxCoverageConfig::for_ensemble(config))
+    box_ensemble_optimize_with_coverage(
+        obj,
+        grad,
+        seed,
+        x0,
+        config,
+        &BoxCoverageConfig::for_ensemble(config),
+    )
 }
 
 /// Gradient box chains with coverage settings independent of minimum history.
@@ -771,7 +795,12 @@ where
         DescriptorGeometry::finite(mean_width.max(1e-6)).ok(),
         Some("design-box".into()),
     );
-    let mut coverage = Coverage::new(&bounds, replica_count, coverage_config, config.shared_deposits);
+    let mut coverage = Coverage::new(
+        &bounds,
+        replica_count,
+        coverage_config,
+        config.shared_deposits,
+    );
     let mut hooks: Vec<ReplicaHook<'_>> = (0..replica_count)
         .map(|index| {
             replica_hook(
@@ -853,7 +882,11 @@ where
         }
         if let Some(descriptor) = coverage.describe(replica.x.view(), replica.f) {
             replica.cv = descriptor;
-            coverage.observe(index, replica.cv.view(), temp_of(replica.generation, replica.f));
+            coverage.observe(
+                index,
+                replica.cv.view(),
+                temp_of(replica.generation, replica.f),
+            );
         }
         if let Some(gradient) = certificate_gradient(
             start_grad,
@@ -982,7 +1015,9 @@ where
                     report.visits.max(1),
                 );
             }
-            let Some(trial_cv) = coverage.describe(trial_x.view(), trial_f) else { continue; };
+            let Some(trial_cv) = coverage.describe(trial_x.view(), trial_f) else {
+                continue;
+            };
             let temp = temp_of(replica.generation, replica.f);
             let v_here = coverage.potential(index, replica.cv.view());
             let v_trial = coverage.potential(index, trial_cv.view());
