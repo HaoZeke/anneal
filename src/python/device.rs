@@ -409,11 +409,19 @@ fn run_native<'py>(
 
             let delta = arrays.binary("subtract", &candidate_val, &current_val)?;
             let probability = policy.probability(&delta, temp, &arrays)?;
-            let accepted = arrays.binary(
+            // A finite trial repairs undefined occupancy. Nonfinite trials
+            // cannot replace a valid state, regardless of their signed energy.
+            let probability = arrays.select(
+                &arrays.unary("isfinite", &current_val)?,
+                &probability,
+                &arrays.constant(1.0)?,
+            )?;
+            let selected = arrays.binary(
                 "less",
                 &random.call_method1("uniform", (&accept_shape,))?,
                 &probability,
             )?;
+            let accepted = arrays.binary("logical_and", &finite, &selected)?;
             accepted_epoch = arrays.binary("add", &accepted_epoch, &arrays.count(&accepted)?)?;
             rejected_epoch = arrays.binary(
                 "add",
