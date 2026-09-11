@@ -33,18 +33,26 @@ def test_device_facade_preserves_native_controller_trace(preset, batched):
             kwargs["n_chains"] = 4
         else:
             kwargs["start"] = np.asarray([0.5, 0.25, -0.5])
-        entry = native if direct else (anneal.run_ensemble if batched else anneal.run_device)
+        entry = (
+            native
+            if direct
+            else (anneal.run_ensemble if batched else anneal.run_device)
+        )
         result = entry(objective, low, high, preset, **kwargs)
         assert len(trace) == 22
         assert result.n_evals == len(trace)
         assert result.evaluated_points == len(trace) * (4 if batched else 1)
-        np.testing.assert_array_equal(result.best_val, np.sum(result.best_pos**2, axis=-1))
+        np.testing.assert_array_equal(
+            result.best_val, np.sum(result.best_pos**2, axis=-1)
+        )
         traces.append(trace)
         results.append(result)
 
     np.testing.assert_array_equal(traces[0], traces[1])
     for field in ["best_pos", "best_val", "accepted", "rejected"]:
-        np.testing.assert_array_equal(getattr(results[0], field), getattr(results[1], field))
+        np.testing.assert_array_equal(
+            getattr(results[0], field), getattr(results[1], field)
+        )
 
 
 def test_device_result_retains_finite_probes_from_an_undefined_start():
