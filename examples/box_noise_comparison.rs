@@ -8,6 +8,7 @@ use anneal_core::methods::box_hopping::{
 };
 use anneal_core::methods::ensemble::HistoryMode;
 use anneal_core::methods::gle_langevin::GleNoise;
+use anneal_core::methods::local_polish::{projected_gradient, projected_gradient_polish};
 use eindir_core::{Bounds, Gradient, Objective};
 use ndarray::{Array1, ArrayView1};
 use rand::Rng;
@@ -102,6 +103,11 @@ fn main() {
         std::env::var_os("HISTORY_NNG").is_none(),
         "this control measures in-process shared history"
     );
+    if let Some(mode) = args.get(5) {
+        assert_eq!(mode, "quench", "the optional control mode is quench");
+        quench_controls(dim, budget, seeds);
+        return;
+    }
     let settings = GleEscapeConfig {
         steps,
         ..GleEscapeConfig::default()
@@ -190,6 +196,38 @@ fn main() {
                     );
                 }
             }
+        }
+    }
+}
+
+/// Resolve whether the dimension-only quench allowance supplies a certificate.
+fn quench_controls(dim: usize, ensemble_budget: usize, seeds: usize) {
+    for seed in 0..seeds as u64 {
+        for multiplier in [1, 2, 4, 8] {
+            let surface = Surface {
+                landscape: Landscape::ConditionedQuadratic,
+                bounds: Bounds::new(Array1::from_elem(dim, -5.12), Array1::from_elem(dim, 5.12), 0.0),
+                evaluations: AtomicUsize::new(0),
+                gradients: AtomicUsize::new(0),
+            };
+            let mut rng = StdRng::seed_from_u64(seed ^ 0x5354_4152_545f_424f);
+            let start = Array1::from_shape_fn(dim, |_| -5.12 + 10.24 * rng.random::<f64>());
+            let allowance = (2 * dim + 8) * multiplier;
+            let result = projected_gradient_polish(&surface, &surface, start, allowance, 1.0, 1e-8);
+            let counts = (surface.evaluations.load(Ordering::Relaxed), surface.gradients.load(Ordering::Relaxed));
+            assert_eq!((result.n_evals, result.n_grads), counts);
+            let certificate = result.best_grad.as_ref().map(|gradient| {
+                projected_gradient(&result.best_pos, gradient, &surface.bounds.low, &surface.bounds.high)
+                    .iter().map(|g| g.abs()).fold(0.0, f64::max)
+            });
+            println!("{}", json!({
+                "record": "quench-control", "dimension": dim, "seed": seed,
+                "allowance": allowance, "multiplier": multiplier,
+                "best_value": result.best_val, "max_projected_gradient": certificate,
+                "history_admissible": certificate.is_some_and(|g| g < 1e-3),
+                "n_evals": counts.0, "n_grads": counts.1,
+                "within_replica_budget": counts.0 + counts.1 <= ensemble_budget / 4,
+            }));
         }
     }
 }
