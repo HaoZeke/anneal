@@ -557,7 +557,7 @@ where
                     .energy()
                     .and_then(|energy| coverage.describe(replica.trial.view(), energy))
                 {
-                    coverage.feedback_from_return(
+                    coverage.feedback_from_arrival(
                         index,
                         replica.cv.view(),
                         launch_cv.view(),
@@ -1135,7 +1135,7 @@ where
                     .energy()
                     .and_then(|energy| coverage.describe(replica.trial.view(), energy))
                 {
-                    coverage.feedback_from_return(
+                    coverage.feedback_from_arrival(
                         index,
                         replica.cv.view(),
                         launch_cv.view(),
