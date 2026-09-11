@@ -1,0 +1,2 @@
+# SOTA guard arms for LJ98: two orbit chains at the paper's aggregate budget.
+guard98-2x2e6 4000000 2 HISTORY_REPLICAS=2 HISTORY=none SYM_TOL=0.5

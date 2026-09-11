@@ -1,0 +1,3 @@
+# SOTA guard arms for LJ75: one orbit chain at the paper budget.
+# name budget cpus [KEY=VALUE ...]
+guard75-1x4e6 4000000 1 HISTORY_REPLICAS=1 HISTORY=none
