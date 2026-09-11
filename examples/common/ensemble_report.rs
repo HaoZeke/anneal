@@ -1,9 +1,15 @@
 //! Record lines for thread-replica ensembles, shared by the LJ, water and
 //! surface drivers so one summariser reads every campaign.
 
-use anneal_core::methods::ensemble::{EnsembleConfig, EnsembleReport};
-use ndarray::Array1;
+use anneal_core::methods::cluster_hopping::Config;
+use anneal_core::methods::ensemble::{
+    EnsembleConfig, EnsembleProblem, EnsembleReport, run_ensemble,
+};
+use anneal_core::methods::minima_hopping::SerializedWitness;
+use anneal_core::pes_exploration::ExactStructureWitness;
+use ndarray::{Array1, ArrayView1};
 use std::io::{self, Write};
+use std::sync::Mutex;
 
 /// Running totals over the seeds of one campaign arm.
 #[derive(Default)]
@@ -211,4 +217,60 @@ pub fn config_from_env(replicas: usize, budget: usize, target: Option<f64>) -> E
             .max(1),
         target,
     }
+}
+
+/// The witness used when the exact matcher is not built in: two structures
+/// are the same when their sorted pair spectra lie within `radius`. It
+/// over-merges homometric pairs and is for smoke runs only, which the
+/// header line says.
+pub fn sorted_pairs_witness(
+    n: usize,
+    radius: f64,
+) -> SerializedWitness<impl Fn(ArrayView1<'_, f64>, ArrayView1<'_, f64>) -> bool + Send> {
+    use anneal_core::bias::{Fingerprint, SortedPairs};
+    let fingerprint = SortedPairs { n_points: n };
+    SerializedWitness(Mutex::new(
+        move |left: ArrayView1<'_, f64>, right: ArrayView1<'_, f64>| {
+            let l = fingerprint.describe(left);
+            let r = fingerprint.describe(right);
+            l.iter()
+                .zip(r.iter())
+                .map(|(a, b)| (a - b) * (a - b))
+                .sum::<f64>()
+                .sqrt()
+                < radius
+        },
+    ))
+}
+
+/// Name of the witness in the header line.
+pub fn witness_name() -> &'static str {
+    if cfg!(feature = "ira") {
+        "ira-cached"
+    } else {
+        "sorted-pairs-fallback"
+    }
+}
+
+/// Runs seeds `seed0..seed0 + seeds` of the ensemble, prints each report
+/// and the tally. `verify` re-evaluates a returned structure read-only.
+#[allow(clippy::too_many_arguments)]
+pub fn run_seeds<W: ExactStructureWitness + Sync + ?Sized>(
+    cfg: &Config,
+    ens: &EnsembleConfig,
+    seed0: u64,
+    seeds: u64,
+    problem: &EnsembleProblem<'_, W>,
+    unit: &str,
+    verify: &dyn Fn(usize, &Array1<f64>, f64) -> (f64, f64),
+    reference: Option<f64>,
+) -> Tally {
+    let mut tally = Tally::new();
+    for seed in seed0..seed0 + seeds {
+        let report = run_ensemble(cfg, ens, seed, problem)
+            .unwrap_or_else(|error| panic!("seed {seed}: {error}"));
+        print_report(seed, ens, &report, unit, verify, &mut tally);
+    }
+    print_tally(ens, &tally, reference);
+    tally
 }
