@@ -178,8 +178,14 @@ fn seeded_private_replicas_match_the_convenience_portfolio_starts() {
         };
         let loss = Loss::new();
         ensemble_hop_optimize::<_, NoGradient>(
-            &loss, None, seed, Some(start.view()), 500, 1,
-            HistoryMode::None, HistoryMembership::Accepted,
+            &loss,
+            None,
+            seed,
+            Some(start.view()),
+            500,
+            1,
+            HistoryMode::None,
+            HistoryMembership::Accepted,
         );
         expected.extend(loss.trajectories());
     }
@@ -190,9 +196,7 @@ fn seeded_private_replicas_match_the_convenience_portfolio_starts() {
         ..PortfolioEnsembleConfig::default()
     };
     config.coverage.shared = false;
-    portfolio_ensemble_optimize::<_, NoGradient>(
-        &loss, None, 13, Some(initial.view()), &config,
-    );
+    portfolio_ensemble_optimize::<_, NoGradient>(&loss, None, 13, Some(initial.view()), &config);
     assert_eq!(loss.trajectories(), expected);
 }
 
