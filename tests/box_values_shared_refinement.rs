@@ -33,8 +33,12 @@ impl Objective<f64> for CorrelatedLoss {
         value
     }
 
-    fn dim(&self) -> usize { 2 }
-    fn bounds(&self) -> &Bounds<f64> { &self.bounds }
+    fn dim(&self) -> usize {
+        2
+    }
+    fn bounds(&self) -> &Bounds<f64> {
+        &self.bounds
+    }
 }
 
 #[test]
@@ -52,9 +56,16 @@ fn communicating_values_chains_use_the_common_scalar_refiner() {
         history: HistoryMode::None,
         ..BoxEnsembleConfig::default()
     };
-    let coverage = BoxCoverageConfig { shared: true, ..BoxCoverageConfig::default() };
+    let coverage = BoxCoverageConfig {
+        shared: true,
+        ..BoxCoverageConfig::default()
+    };
     let result = box_values_ensemble_optimize_with_coverage(
-        &ensemble, 7, Some(start.view()), &config, &coverage,
+        &ensemble,
+        7,
+        Some(start.view()),
+        &config,
+        &coverage,
     );
     let observed = ensemble.observed.lock().unwrap();
     assert_eq!(&observed[..local_trace.len()], local_trace.as_slice());
