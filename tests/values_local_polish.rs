@@ -10,7 +10,7 @@ struct ScalarObjective<F> {
     observed: Mutex<Vec<(Vec<f64>, f64)>>,
 }
 
-impl<F: Fn(ArrayView1<f64>) -> f64> Objective<f64> for ScalarObjective<F> {
+impl<F: Fn(ArrayView1<f64>) -> f64 + Send + Sync> Objective<f64> for ScalarObjective<F> {
     fn eval(&self, x: ArrayView1<f64>) -> f64 {
         assert_eq!(x.len(), self.bounds.dims);
         assert!(self.bounds.contains(x));
