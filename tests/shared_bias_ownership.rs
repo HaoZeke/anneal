@@ -16,10 +16,7 @@ fn bias() -> BasinBias<Coordinates> {
     bias
 }
 
-fn publishable(
-    bias: &BasinBias<Coordinates>,
-    seen: &mut Vec<u64>,
-) -> Vec<(Array1<f64>, u64)> {
+fn publishable(bias: &BasinBias<Coordinates>, seen: &mut Vec<u64>) -> Vec<(Array1<f64>, u64)> {
     visit_deltas(
         |i| bias.index().centre(i),
         |i| bias.index().visits(i),
