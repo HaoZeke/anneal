@@ -943,11 +943,11 @@ impl<O: Objective<f64>> Objective<f64> for ObservedObjective<'_, O> {
         let bounds = self.bounds();
         if value.is_finite()
             && x.len() == bounds.dims
-            && x.iter()
-                .zip(bounds.low.iter().zip(bounds.high.iter()))
-                .all(|(coordinate, (low, high))| {
+            && x.iter().zip(bounds.low.iter().zip(bounds.high.iter())).all(
+                |(coordinate, (low, high))| {
                     coordinate.is_finite() && coordinate >= low && coordinate <= high
-                })
+                },
+            )
         {
             let mut incumbent = self.incumbent.lock().expect("incumbent lock");
             if incumbent.as_ref().is_none_or(|(_, best)| value < *best) {
