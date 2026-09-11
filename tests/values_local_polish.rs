@@ -123,3 +123,53 @@ fn scalar_refinement_resolves_a_correlated_quadratic() {
             .fold(f64::INFINITY, f64::min)
     );
 }
+
+#[test]
+fn fixed_coordinates_do_not_consume_stencil_work() {
+    let surface = ScalarObjective {
+        bounds: Bounds::new(array![5.0, -2.0], array![5.0, 2.0], 0.0),
+        value: |x: ArrayView1<f64>| x[1] * x[1],
+        observed: Mutex::new(Vec::new()),
+    };
+    let result = values_local_polish(&surface, array![5.0, 0.0], 16, 0.1, 1e-12);
+    assert_eq!(result.n_evals, 3);
+    assert_eq!(surface.observed.lock().unwrap().len(), 3);
+    assert_eq!(result.n_grads, 0);
+    assert_eq!(result.best_pos, array![5.0, 0.0]);
+    assert!(result.projected_stationary);
+    assert_eq!(result.best_grad.unwrap(), array![0.0, 0.0]);
+}
+
+#[test]
+fn small_stencil_widths_do_not_rescale_a_valid_derivative() {
+    let surface = ScalarObjective {
+        bounds: Bounds::new(array![0.0], array![1e-18], 0.0),
+        value: |x: ArrayView1<f64>| x[0],
+        observed: Mutex::new(Vec::new()),
+    };
+    let result = values_local_polish(&surface, array![0.0], 16, 0.1, 1e-12);
+    assert_eq!(result.best_val, 0.0);
+    assert_eq!(result.n_grads, 0);
+    assert_eq!(result.n_evals, surface.observed.lock().unwrap().len());
+    assert!(result.projected_stationary);
+    assert!((result.best_grad.unwrap()[0] - 1.0).abs() < 1e-12);
+}
+
+#[test]
+fn rounded_stencil_steps_use_distinct_representable_points() {
+    let low = 1e10;
+    let high = low + 1e-3;
+    let surface = ScalarObjective {
+        bounds: Bounds::new(array![low], array![high], 0.0),
+        value: |x: ArrayView1<f64>| x[0] - low,
+        observed: Mutex::new(Vec::new()),
+    };
+    let result = values_local_polish(&surface, array![(low + high) * 0.5], 128, 0.1, 1e-12);
+    assert_eq!(result.best_pos, array![low]);
+    assert_eq!(result.best_val, 0.0);
+    assert_eq!(result.n_grads, 0);
+    assert_eq!(result.n_evals, surface.observed.lock().unwrap().len());
+    assert!(result.n_evals <= 128);
+    assert!(result.projected_stationary);
+    assert!((result.best_grad.unwrap()[0] - 1.0).abs() < 1e-12);
+}
