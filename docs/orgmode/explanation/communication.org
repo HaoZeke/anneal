@@ -180,6 +180,12 @@ incumbent. Fixed coordinates need no stencil probes; incomplete or nonfinite
 stencils do not certify stationarity. Minimum certificates are a separate
 optional consumer, not a prerequisite for sharing evaluated regions.
 
+A values-only hop reserves terminal exploration and optional certificate
+work before setting its local allowance. When the remaining budget permits,
+the quench can use half that budget instead of being limited to a short
+coordinate-scaled burst. The local refiner stops on its own convergence or
+unavailable-derivative checks, leaving unspent work for subsequent hops.
+
 The common Python entries expose this distinction directly. For a supplied
 scalar =loss=, parameter vector =x0= and finite =bounds=:
 
