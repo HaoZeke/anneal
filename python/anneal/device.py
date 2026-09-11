@@ -248,7 +248,7 @@ def run_ensemble(
     steps_per_epoch: int = 200,
     seed: int = 42,
 ) -> EnsembleHistory:
-    """Run ``n_chains`` independent SA chains as one batched device kernel.
+    """Run ``n_chains`` independent SA chains as a batch of device arrays.
 
     The state is ``(n_chains, dim)`` and ``obj_fn`` is called on the whole
     batch, returning ``(n_chains,)``; every proposal, acceptance, and update is

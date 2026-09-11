@@ -24,8 +24,17 @@ Langevin stepper, descriptor coverage and shared-deposit exchange. Their
 projected polisher has its own L-BFGS memory; `rgmin` backs the separate
 `WarmLbfgs` integration, not every local-improvement path. The Python
 `minimize` binding and C interfaces call Rust. The optional Array API backend
-in `python/anneal/device.py` owns a separate preset loop; it does not share
-the box coverage or configured ensemble controller.
+uses one Rust controller for single and batched preset runs. Cooling,
+acceptance and GSA visiting parameters come from the native components;
+Python supplies array/device adapters and result containers. Arrays remain
+in their backend namespace. These batched preset chains are independent:
+they do not consume box coverage or census messages.
+
+Device results distinguish `n_evals` (objective callbacks) from
+`evaluated_points` (callbacks times the batch size), and retain the best finite
+evaluated candidate even when its transition is rejected. Device proposals
+are clipped to the declared box; this is not a manifold retraction or the
+unconstrained domain of the classical scalar presets.
 
 The Rust [box search and noise guide](docs/orgmode/howto/box-langevin-escape.org)
 shows the typed configuration and its common work contract. Native regression
