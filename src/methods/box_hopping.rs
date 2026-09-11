@@ -3,8 +3,8 @@
 //! * [`box_ensemble_optimize`] requires a gradient: propose, quench, and
 //!   update descriptor-space coverage independently of minimum certificates.
 //! * [`box_values_ensemble_optimize`] is the same replica/coverage path
-//!   without a user gradient: kick, pattern-search, finite-difference
-//!   certificate. [`MinimumHistory`] only admits a point when that
+//!   without a user gradient: kick, budgeted scalar quasi-Newton refinement,
+//!   optional finite-difference certificate. [`MinimumHistory`] only admits a point when that
 //!   certificate is flat; coverage does not require one.
 //! * The explicit `*_with_coverage` entry points separate coverage sharing
 //!   from the optional [`HistoryHook`] and certified-minimum ledger.
@@ -466,7 +466,7 @@ where
         let needs_certificate = hooks[index].enabled();
         let start_depth = values_search_depth(dim, replica.budget, needs_certificate);
         let launch = FirstEvaluation::new(obj);
-        let polish = pattern_search_polish(&launch, replica.x.clone(), start_depth.max(1));
+        let polish = values_quench_polish(&launch, replica.x.clone(), start_depth.max(1));
         if let Some(energy) = launch.energy() {
             coverage.sample(index, replica.x.view(), energy);
         }
@@ -487,7 +487,7 @@ where
                 temperatures.at(index, replica.generation),
             );
         }
-        // An unfunded pattern sweep can still spend its terminal allowance on
+        // An unfunded local quench can still spend its terminal allowance on
         // finite-difference probes. Their raw values enter the incumbent even
         // without a history consumer; funded search needs no such certificate.
         if needs_certificate || start_depth == 0 {
@@ -538,7 +538,7 @@ where
                 &mut replica.rng,
             );
             let launch = FirstEvaluation::new(obj);
-            let polish = pattern_search_polish(&launch, replica.trial.clone(), depth);
+            let polish = values_quench_polish(&launch, replica.trial.clone(), depth);
             if let Some(energy) = launch.energy() {
                 coverage.sample(index, replica.trial.view(), energy);
             }
@@ -662,54 +662,16 @@ struct ValuesPolish {
     n_evals: usize,
 }
 
-fn pattern_search_polish<O: Objective<f64>>(
+fn values_quench_polish<O: Objective<f64>>(
     obj: &O,
-    mut x: Array1<f64>,
+    x: Array1<f64>,
     max_evals: usize,
 ) -> ValuesPolish {
-    let bounds = obj.bounds();
-    let mut f = obj.eval(x.view());
-    let mut n = 1usize;
-    if !f.is_finite() || max_evals <= 1 {
-        return ValuesPolish {
-            best_pos: x,
-            best_val: f,
-            n_evals: n,
-        };
-    }
-    let widths = &bounds.high - &bounds.low;
-    let mut step = 0.1;
-    while n + x.len() < max_evals && step > 1e-8 {
-        let mut improved = false;
-        for i in 0..x.len() {
-            for sgn in [-1.0, 1.0] {
-                if n >= max_evals {
-                    return ValuesPolish {
-                        best_pos: x,
-                        best_val: f,
-                        n_evals: n,
-                    };
-                }
-                let mut trial = x.clone();
-                trial[i] += sgn * step * widths[i].max(1e-12);
-                trial = bounds.clip(trial.view());
-                let ft = obj.eval(trial.view());
-                n += 1;
-                if ft.is_finite() && ft < f {
-                    x = trial;
-                    f = ft;
-                    improved = true;
-                }
-            }
-        }
-        if !improved {
-            step *= 0.5;
-        }
-    }
+    let polish = super::portfolio::values_local_polish(obj, x, max_evals, 0.1, 1e-12);
     ValuesPolish {
-        best_pos: x,
-        best_val: f,
-        n_evals: n,
+        best_pos: polish.best_pos,
+        best_val: polish.best_val,
+        n_evals: polish.n_evals,
     }
 }
 
