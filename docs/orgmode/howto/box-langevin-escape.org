@@ -48,6 +48,14 @@ A replica without a funded step and quench stops; it does not silently switch
 to the Gaussian control. Values-only search rejects this gradient-dependent
 selection before evaluating the objective.
 
+Each gradient chain starts with a dimension-based quench allowance. If a
+quench exhausts that allowance with a finite, still-uncertified projected
+gradient, the chain doubles its allowance for subsequent quenches. Numerical
+failures do not supply this evidence. The polisher can finish before the
+allowance is spent; every request remains capped by the residual combined
+work budget. This rule applies to Gaussian and Langevin escapes and to all
+history modes. It changes relaxation effort, not the certificate tolerance.
+
 The terminal trajectory point feeds the quench even when the trajectory
 visits a lower objective elsewhere. Independently, the result retains the
 best finite feasible objective evaluation, including trajectory points and
@@ -84,3 +92,26 @@ Those sizes are not interchangeable coverage measurements. The example
 rejects =HISTORY_NNG= so its communication comparison cannot be mislabeled
 as a network-transport measurement. These controls test integration and
 exploration; they are not a paper-wide state-of-the-art qualification.
+
+* Diagnose an empty history
+
+The comparison executable's =quench= control mode measures whether the
+conditioned-quadratic surface can supply the unchanged history certificate
+with a larger objective-call allowance:
+
+#+begin_src sh
+cargo run --locked --example box_noise_comparison -- 8 8000 1 16 quench
+#+end_src
+
+The control uses the same seeded start for each allowance and reports actual
+objective/gradient work and the maximum projected gradient. Representative
+seed-zero results are:
+
+| Objective allowance | Objectives used | Gradients used | Maximum projected gradient | History certificate |
+|---------------------+-----------------+----------------+----------------------------+---------------------|
+|                  24 |              24 |             21 |                    3.28594 | No                  |
+|                  48 |              48 |             42 |                 0.00379649 | No                  |
+|                  96 |              70 |             59 |                 7.26373e-9 | Yes                 |
+
+The certificate threshold is =1e-3=. These are standalone relaxation
+controls; their budgets are not an ensemble success-rate measurement.
