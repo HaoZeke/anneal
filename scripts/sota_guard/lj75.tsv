@@ -1,3 +1,4 @@
-# SOTA guard arms for LJ75: one orbit chain at the paper budget.
+# SOTA guard arms for LJ75: one orbit chain at the paper budget, with the
+# symmetry tolerance the recorded 31/48 (orbit98 campaign, 2026-09-07) used.
 # name budget cpus [KEY=VALUE ...]
-guard75-1x4e6 4000000 1 HISTORY_REPLICAS=1 HISTORY=none
+guard75-1x4e6 4000000 1 HISTORY_REPLICAS=1 HISTORY=none SYM_TOL=0.5
