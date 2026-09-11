@@ -12,7 +12,9 @@ use anneal_core::pes_exploration::StructureContext;
 use ndarray::{Array1, ArrayView1, array};
 
 fn tetrahedron() -> Array1<f64> {
-    array![1.0, 1.0, 1.0, 1.0, -1.0, -1.0, -1.0, 1.0, -1.0, -1.0, -1.0, 1.0]
+    array![
+        1.0, 1.0, 1.0, 1.0, -1.0, -1.0, -1.0, 1.0, -1.0, -1.0, -1.0, 1.0
+    ]
 }
 
 fn run(shared: bool, gossip: bool, restart: bool) -> EnsembleReport {
