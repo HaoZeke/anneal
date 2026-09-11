@@ -6,9 +6,21 @@
 //! visits it made since its last publication as descriptor centres with
 //! counts, and takes every other chain's since its last read. The bias each
 //! chain sees is the population's up to one checkpoint of lag. Nothing else
-//! crosses: no coordinates, no energies, no instruction to move.
+//! crosses in a visit delta: no coordinates, no energies, no instruction to move.
+//! A separate bounded sample channel retains producer-tagged descriptors of
+//! paid search positions. Samples do not assert a visit count or stationarity.
+
+use std::collections::VecDeque;
 
 use ndarray::Array1;
+
+/// Maximum recent paid samples retained per producer and receiver cloud.
+pub const SAMPLE_WINDOW: usize = 32;
+
+struct Sample {
+    sequence: u64,
+    descriptor: Array1<f64>,
+}
 
 /// One published batch of visits.
 struct Batch {
@@ -27,6 +39,10 @@ pub struct SharedDeposits {
     cursors: Vec<u64>,
     published: u64,
     delivered: u64,
+    samples: Vec<VecDeque<Sample>>,
+    sample_cursors: Vec<u64>,
+    samples_published: u64,
+    samples_delivered: u64,
 }
 
 impl SharedDeposits {
@@ -40,7 +56,55 @@ impl SharedDeposits {
             cursors: vec![0; walkers],
             published: 0,
             delivered: 0,
+            samples: (0..walkers).map(|_| VecDeque::new()).collect(),
+            sample_cursors: vec![0; walkers],
+            samples_published: 0,
+            samples_delivered: 0,
         }
+    }
+
+    /// Retain a paid sample without manufacturing a coverage visit. Consecutive
+    /// duplicate descriptors from one producer need no extra transmission.
+    pub fn publish_sample(&mut self, walker: usize, descriptor: Array1<f64>) -> bool {
+        assert!(walker < self.walkers, "walker index out of range");
+        let samples = &mut self.samples[walker];
+        if samples.back().is_some_and(|sample| sample.descriptor == descriptor) {
+            return false;
+        }
+        if samples.len() == SAMPLE_WINDOW {
+            samples.pop_front();
+        }
+        samples.push_back(Sample {
+            sequence: self.samples_published,
+            descriptor,
+        });
+        self.samples_published += 1;
+        true
+    }
+
+    /// Unread samples in producer order, excluding self-delivery. The bounded
+    /// channel drops old samples for lagging readers, never paid visit deltas.
+    /// Reading samples neither advances visit cursors nor republishes anything.
+    pub fn drain_samples(&mut self, walker: usize) -> Vec<(usize, Array1<f64>)> {
+        assert!(walker < self.walkers, "walker index out of range");
+        let cursor = self.sample_cursors[walker];
+        let mut received = Vec::new();
+        for (source, samples) in self.samples.iter().enumerate() {
+            if source == walker {
+                continue;
+            }
+            for sample in samples.iter().filter(|sample| sample.sequence >= cursor) {
+                received.push((source, sample.descriptor.clone()));
+            }
+        }
+        self.sample_cursors[walker] = self.samples_published;
+        self.samples_delivered += received.len() as u64;
+        received
+    }
+
+    /// Distinct samples published and delivered, independent of visit counts.
+    pub fn sample_counts(&self) -> (u64, u64) {
+        (self.samples_published, self.samples_delivered)
     }
 
     /// Walkers in the exchange.

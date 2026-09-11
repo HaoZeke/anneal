@@ -41,6 +41,7 @@ use crate::pes_exploration::{ExactStructureWitness, StructureContext};
 
 mod coverage;
 mod free_coordinates;
+mod repulsion;
 mod temperature;
 use coverage::Coverage;
 pub use coverage::{BoxCoverageConfig, CoverageDecisionStats, CoverageStats};
@@ -466,6 +467,9 @@ where
         let start_depth = values_search_depth(dim, replica.budget, needs_certificate);
         let launch = FirstEvaluation::new(obj);
         let polish = pattern_search_polish(&launch, replica.x.clone(), start_depth.max(1));
+        if let Some(energy) = launch.energy() {
+            coverage.sample(index, replica.x.view(), energy);
+        }
         replica.work += polish.n_evals;
         n_evals += polish.n_evals;
         if polish.best_val.is_finite() {
@@ -525,8 +529,12 @@ where
                 replica.trial[j] += STEP0 * escape * widths[j] * noise;
             }
             replica.trial = reflect_into_box(replica.trial.view(), &bounds);
+            coverage.repel(index, replica.x.view(), &mut replica.trial, &mut replica.rng);
             let launch = FirstEvaluation::new(obj);
             let polish = pattern_search_polish(&launch, replica.trial.clone(), depth);
+            if let Some(energy) = launch.energy() {
+                coverage.sample(index, replica.trial.view(), energy);
+            }
             replica.work += polish.n_evals;
             n_evals += polish.n_evals;
             let mut report = None;
@@ -968,6 +976,9 @@ where
             let launch = FirstEvaluation::new(obj);
             let quench =
                 projected_gradient_polish(&launch, grad, replica.x.clone(), start_depth, 1.0, 1e-8);
+            if let Some(energy) = launch.energy() {
+                coverage.sample(index, replica.x.view(), energy);
+            }
             learn_quench_allowance(
                 &mut quench_allowances[index],
                 start_depth,
@@ -1055,6 +1066,7 @@ where
                         replica.trial[j] += STEP0 * escape * widths[j] * noise;
                     }
                     replica.trial = reflect_into_box(replica.trial.view(), &bounds);
+                    coverage.repel(index, replica.x.view(), &mut replica.trial, &mut replica.rng);
                 }
                 BoxEscape::Langevin(settings) => {
                     let temperature = temp * escape * escape;
@@ -1075,7 +1087,9 @@ where
                     replica.work += 1;
                     n_grads += 1;
                     for _ in 0..escape_steps {
-                        let energy = stepper.step(obj, grad, &mut replica.trial, &mut force);
+                        let energy = stepper.step(obj, grad, &mut replica.trial, &mut force, |point| {
+                            coverage.repel(index, replica.x.view(), point, &mut replica.rng);
+                        });
                         if energy.is_finite() {
                             excursion_peak =
                                 Some(excursion_peak.map_or(energy, |peak| peak.max(energy)));
@@ -1095,6 +1109,7 @@ where
             let polish =
                 projected_gradient_polish(&launch, grad, replica.trial.clone(), depth, 1.0, 1e-8);
             if let Some(energy) = launch.energy() {
+                coverage.sample(index, replica.trial.view(), energy);
                 excursion_peak = Some(excursion_peak.map_or(energy, |peak| peak.max(energy)));
             }
             learn_quench_allowance(

@@ -12,6 +12,7 @@ use crate::methods::minima_hopping::EscapeFeedback;
 use crate::shared_bias::SharedDeposits;
 
 use super::BoxEnsembleConfig;
+use super::repulsion::{PeerSamples, Separation};
 
 /// Repulsion over the evaluated regions of a finite box.
 ///
@@ -23,7 +24,8 @@ pub struct BoxCoverageConfig {
     /// Coverage-region radius in normalized RMS box distance, independent of
     /// [`BoxEnsembleConfig::identity_tol`].
     pub radius: f64,
-    /// Initial deposit height in objective units; zero leaves acceptance unbiased.
+    /// Initial deposit height in objective units; zero also disables directional
+    /// sample repulsion and coverage-driven escape feedback.
     pub height: f64,
     /// Well-tempering factor, finite and greater than one.
     pub well_tempering: f64,
@@ -105,6 +107,17 @@ pub struct CoverageStats {
     pub novel_arrivals: usize,
     /// Novel-arrival updates that change the bounded escape scale.
     pub novelty_updates: usize,
+    /// Distinct paid launch/boundary descriptors sent through the bounded
+    /// sample channel. Samples do not increase coverage visits.
+    pub published_samples: u64,
+    /// Received sampled descriptors, excluding self-delivery and replay.
+    pub applied_foreign_samples: usize,
+    /// Proposed Gaussian or Langevin positions within the sample interaction radius.
+    pub sample_overlaps: usize,
+    /// Proposals displaced to increase clearance from the held peer sample cloud.
+    pub repelled_proposals: usize,
+    /// Overlaps for which box constraints or another sample prevent an increase.
+    pub constrained_repulsions: usize,
 }
 
 /// Conditional influence of imported coverage heights on terminal acceptance.
@@ -208,6 +221,7 @@ pub(super) struct Coverage {
     biases: Vec<BasinBias<NormalizedCoordinates>>,
     foreign_wells: Vec<Vec<ForeignWell>>,
     exchange: Option<SharedDeposits>,
+    peer_samples: Vec<PeerSamples>,
     peer_weight: f64,
     foreign_cap: u64,
     stats: CoverageStats,
@@ -245,6 +259,7 @@ impl Coverage {
             biases,
             foreign_wells: vec![Vec::new(); replicas],
             exchange,
+            peer_samples: (0..replicas).map(|_| PeerSamples::new(replicas)).collect(),
             peer_weight: config.peer_weight,
             foreign_cap: foreign_cap as u64,
             stats: CoverageStats::default(),
@@ -254,6 +269,62 @@ impl Coverage {
 
     pub(super) fn describe(&self, x: ArrayView1<f64>, value: f64) -> Option<Array1<f64>> {
         (value.is_finite() && self.coordinates.feasible(x)).then(|| self.coordinates.describe(x))
+    }
+
+    /// A paid launch remains useful even when local improvement returns to a
+    /// shared centre. It is a geometric sample, not another boundary visit.
+    pub(super) fn sample(&mut self, replica: usize, x: ArrayView1<f64>, value: f64) {
+        if self.exchange.is_none() {
+            return;
+        }
+        if let Some(descriptor) = self.describe(x, value) {
+            self.exchange.as_mut().expect("sample exchange").publish_sample(replica, descriptor);
+        }
+    }
+
+    /// Shape a funded proposal before any callback evaluates it. All distances
+    /// and corrections use the same normalized free-coordinate box geometry.
+    pub(super) fn repel<R: Rng + ?Sized>(
+        &mut self,
+        replica: usize,
+        anchor: ArrayView1<f64>,
+        proposal: &mut Array1<f64>,
+        rng: &mut R,
+    ) {
+        if self.exchange.is_none() || self.biases[replica].height() == 0.0
+            || !self.coordinates.feasible(proposal.view())
+            || !self.coordinates.feasible(anchor)
+        {
+            return;
+        }
+        let point = self.coordinates.describe(proposal.view());
+        let anchor = self.coordinates.describe(anchor);
+        match self.peer_samples[replica].separate(
+            point.view(), anchor.view(), self.coordinates.widths.view(),
+            self.coordinates.free_scale, self.biases[replica].index().merge_radius(),
+            self.peer_weight, rng,
+        ) {
+            Separation::Distant => (),
+            Separation::Constrained => {
+                self.stats.sample_overlaps += 1;
+                self.stats.constrained_repulsions += 1;
+            }
+            Separation::Moved(descriptor) => {
+                let mut moved = proposal.clone();
+                for j in 0..moved.len() {
+                    moved[j] = (self.coordinates.low[j]
+                        + self.coordinates.widths[j] * (descriptor[j] / self.coordinates.free_scale))
+                        .clamp(self.coordinates.low[j], self.coordinates.high[j]);
+                }
+                self.stats.sample_overlaps += 1;
+                if moved != *proposal {
+                    *proposal = moved;
+                    self.stats.repelled_proposals += 1;
+                } else {
+                    self.stats.constrained_repulsions += 1;
+                }
+            }
+        }
     }
 
     fn heights(&self, replica: usize, descriptor: ArrayView1<f64>) -> (f64, ForeignWell) {
@@ -389,6 +460,10 @@ impl Coverage {
         let Some(exchange) = &mut self.exchange else {
             return;
         };
+        for (source, sample) in exchange.drain_samples(replica) {
+            self.peer_samples[replica].receive(source, sample);
+            self.stats.applied_foreign_samples += 1;
+        }
         let mut applied = HashMap::<usize, u64>::new();
         let bias = &mut self.biases[replica];
         for (descriptor, count) in exchange.drain(replica) {
@@ -426,11 +501,13 @@ impl Coverage {
         self.biases[replica].deposit(descriptor, temperature);
         self.stats.local_observations += 1;
         if let Some(exchange) = &mut self.exchange {
+            exchange.publish_sample(replica, descriptor.to_owned());
             exchange.publish(replica, vec![(descriptor.to_owned(), 1)]);
         }
     }
 
     pub(super) fn finish(mut self) -> (CoverageStats, CoverageDecisionStats) {
+        self.stats.published_samples = self.exchange.as_ref().map_or(0, |exchange| exchange.sample_counts().0);
         self.stats.published_visits = self
             .exchange
             .as_ref()
