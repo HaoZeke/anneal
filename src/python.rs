@@ -1875,20 +1875,11 @@ fn box_ensemble_optimize(
     let dim = parsed.dim;
     let grad = CallablePyGradient { fn_: grad_fn, dim };
     let result = with_replica_threads(py, || {
-        crate::methods::box_hopping::box_ensemble_optimize(
-            &obj,
-            &grad,
-            seed,
-            seed_view,
-            &config,
-        )
+        crate::methods::box_hopping::box_ensemble_optimize(&obj, &grad, seed, seed_view, &config)
     });
     let out = PyDict::new(py);
     out.set_item("best_val", result.best_val)?;
-    out.set_item(
-        "best_pos",
-        py_view1(py, result.best_pos.view()),
-    )?;
+    out.set_item("best_pos", py_view1(py, result.best_pos.view()))?;
     out.set_item("n_evals", result.n_evals)?;
     out.set_item("n_grads", result.n_grads)?;
     out.set_item("hops", result.hops)?;
@@ -2038,10 +2029,7 @@ fn ensemble_optimize(
     });
     let out = PyDict::new(py);
     out.set_item("best_val", result.best_val)?;
-    out.set_item(
-        "best_pos",
-        py_view1(py, result.best_pos.view()),
-    )?;
+    out.set_item("best_pos", py_view1(py, result.best_pos.view()))?;
     out.set_item("charged", result.charged)?;
     out.set_item("n_evals", result.n_evals)?;
     out.set_item("n_grads", result.n_grads)?;
@@ -2266,7 +2254,9 @@ fn global_optimize(
         return Err(PyValueError::new_err("replicas must be positive"));
     }
     if !coverage_radius.is_finite() || coverage_radius <= 0.0 {
-        return Err(PyValueError::new_err("coverage_radius must be positive and finite"));
+        return Err(PyValueError::new_err(
+            "coverage_radius must be positive and finite",
+        ));
     }
     if replicas > 1 {
         let config = crate::methods::portfolio::PortfolioEnsembleConfig {

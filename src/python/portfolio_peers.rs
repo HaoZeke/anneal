@@ -30,29 +30,60 @@ where
             total.1 += arm.successes;
         }
     }
-    let out = super::portfolio_result_to_dict(py, crate::PortfolioResult {
-        best_pos: result.best_pos,
-        best_val: result.best_val,
-        n_evals: result.n_evals,
-        n_grads: result.n_grads,
-        arm_stats: totals.into_iter().map(|(name, (pulls, successes))| {
-            crate::ArmStat { name, pulls, successes }
-        }).collect(),
-        hop_state: None,
-    })?;
-    let replicas = result.replicas.into_iter()
+    let out = super::portfolio_result_to_dict(
+        py,
+        crate::PortfolioResult {
+            best_pos: result.best_pos,
+            best_val: result.best_val,
+            n_evals: result.n_evals,
+            n_grads: result.n_grads,
+            arm_stats: totals
+                .into_iter()
+                .map(|(name, (pulls, successes))| crate::ArmStat {
+                    name,
+                    pulls,
+                    successes,
+                })
+                .collect(),
+            hop_state: None,
+        },
+    )?;
+    let replicas = result
+        .replicas
+        .into_iter()
         .map(|replica| super::portfolio_result_to_dict(py, replica))
         .collect::<PyResult<Vec<_>>>()?;
     let dict = out.bind(py);
     dict.set_item("replicas", replicas)?;
     dict.set_item("charged", result.n_evals + result.n_grads)?;
-    dict.set_item("coverage_published_samples", result.coverage.published_samples)?;
-    dict.set_item("coverage_applied_foreign_samples", result.coverage.applied_foreign_samples)?;
-    dict.set_item("coverage_sample_peer_checks", result.coverage.sample_peer_checks)?;
-    dict.set_item("coverage_sample_anchor_overlaps", result.coverage.sample_anchor_overlaps)?;
-    dict.set_item("coverage_sample_anchor_only_overlaps", result.coverage.sample_anchor_only_overlaps)?;
+    dict.set_item(
+        "coverage_published_samples",
+        result.coverage.published_samples,
+    )?;
+    dict.set_item(
+        "coverage_applied_foreign_samples",
+        result.coverage.applied_foreign_samples,
+    )?;
+    dict.set_item(
+        "coverage_sample_peer_checks",
+        result.coverage.sample_peer_checks,
+    )?;
+    dict.set_item(
+        "coverage_sample_anchor_overlaps",
+        result.coverage.sample_anchor_overlaps,
+    )?;
+    dict.set_item(
+        "coverage_sample_anchor_only_overlaps",
+        result.coverage.sample_anchor_only_overlaps,
+    )?;
     dict.set_item("coverage_sample_overlaps", result.coverage.sample_overlaps)?;
-    dict.set_item("coverage_repelled_proposals", result.coverage.repelled_proposals)?;
-    dict.set_item("coverage_constrained_repulsions", result.coverage.constrained_repulsions)?;
+    dict.set_item(
+        "coverage_repelled_proposals",
+        result.coverage.repelled_proposals,
+    )?;
+    dict.set_item(
+        "coverage_constrained_repulsions",
+        result.coverage.constrained_repulsions,
+    )?;
     Ok(out)
 }
