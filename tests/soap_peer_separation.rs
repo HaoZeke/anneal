@@ -72,3 +72,43 @@ fn absent_and_incompatible_references_have_no_direction() {
     assert!(push_away_means(x.view(), &[vec![0.0]], spec, 0.01).is_none());
     assert!(push_away_clouds(x.view(), &[vec![0.0]], spec, 0.01).is_none());
 }
+
+#[test]
+fn the_requested_rmsd_cap_is_not_raised_to_the_general_packing_floor() {
+    let x = structure();
+    let peer = &x * 1.03;
+    let spec = SoapSpec::default();
+    let means = vec![packing_mean_nu3(peer.view(), spec, None, None).to_vec()];
+    let cap = 1e-8;
+    let proposed = push_away_means(x.view(), &means, spec, cap).unwrap();
+    let actual = distance(proposed.view(), x.view()) / 2.0;
+    assert!(actual > 0.0 && actual <= cap * (1.0 + 1e-8));
+    for invalid in [0.0, -1.0, f64::NAN, f64::INFINITY] {
+        assert!(push_away_means(x.view(), &means, spec, invalid).is_none());
+    }
+}
+
+#[test]
+fn another_occupied_packing_cannot_become_closer_than_the_initial_clearance() {
+    let x = structure();
+    let spec = SoapSpec::default();
+    let here = packing_mean_nu3(x.view(), spec, None, None);
+    let mut means: Vec<_> = [0.97, 1.03]
+        .map(|scale| packing_mean_nu3((&x * scale).view(), spec, None, None).to_vec())
+        .into();
+    let clearance = |point: ArrayView1<f64>| {
+        means
+            .iter()
+            .map(|peer| distance(point, ArrayView1::from(peer.as_slice())))
+            .min_by(f64::total_cmp)
+            .unwrap()
+    };
+    let proposal = push_away_means(x.view(), &means, spec, 1e-4).unwrap();
+    let moved = packing_mean_nu3(proposal.view(), spec, None, None);
+    assert!(clearance(moved.view()) > clearance(here.view()));
+    means.reverse();
+    assert_eq!(
+        Some(proposal),
+        push_away_means(x.view(), &means, spec, 1e-4)
+    );
+}
