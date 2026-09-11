@@ -74,7 +74,7 @@ fn rounded_case(fixed: bool) -> (Array1<f64>, Array1<f64>, Vec<Array1<f64>>, Bou
     coverage.repel(0, initial.view(), &mut proposal, &mut rng);
     assert_eq!(rng.random::<u64>(), untouched_rng.random::<u64>());
     let (stats, _) = coverage.finish();
-    assert_eq!(stats.applied_foreign_samples, peers.len() as u64);
+    assert_eq!(stats.applied_foreign_samples, peers.len());
     assert_eq!(stats.sample_overlaps, 1);
     assert_eq!(stats.repelled_proposals, 1);
     assert_eq!(stats.constrained_repulsions, 0);
