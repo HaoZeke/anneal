@@ -69,8 +69,14 @@ fn run(history: HistoryMode, shared: bool) {
     if matches!(history, HistoryMode::None) {
         // This allowance funds complete pattern-search sweeps. Their smallest
         // displacement is 0.05, distinct from the certificate's 1e-6 probes.
-        assert_eq!(certificate_probes, 0, "disabled history consumes certificate probes");
-        assert!(result.hops >= 2 * config.replicas, "certificate reservations waste funded hops");
+        assert_eq!(
+            certificate_probes, 0,
+            "disabled history consumes certificate probes"
+        );
+        assert!(
+            result.hops >= 2 * config.replicas,
+            "certificate reservations waste funded hops"
+        );
         assert_eq!(result.history_observations, 0);
         assert_eq!(result.history_minima, 0);
         assert_eq!(result.history_cost, (0, 0, 0.0));
@@ -79,7 +85,10 @@ fn run(history: HistoryMode, shared: bool) {
         assert!(result.history_observations >= config.replicas);
         assert!(result.history_minima > 0);
     }
-    assert_eq!(result.coverage.local_observations, config.replicas + result.hops);
+    assert_eq!(
+        result.coverage.local_observations,
+        config.replicas + result.hops
+    );
     if shared {
         assert!(result.coverage.applied_foreign_visits > 0);
     } else {
