@@ -368,8 +368,8 @@ impl Coverage {
     ) -> Option<Array1<f64>> {
         let peers = &self.peer_samples[replica];
         let distance = peers.clearance(point)?;
-        let increment = (self.biases[replica].index().merge_radius() - distance)
-            * self.peer_weight.min(1.0);
+        let increment =
+            (self.biases[replica].index().merge_radius() - distance) * self.peer_weight.min(1.0);
         let cap = increment + 16.0 * f64::EPSILON;
         let admissible = |candidate: ArrayView1<f64>| {
             let actual = self.coordinates.describe(candidate);
