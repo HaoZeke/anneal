@@ -104,9 +104,19 @@ fn array_rules_retain_compact_support_and_downhill_acceptance() {
 fn nan_energy_differences_do_not_become_finite_acceptance_probabilities() {
     let deltas = vec![f64::NAN];
     let arithmetic = VectorArithmetic(1);
-    assert!(Metropolis.probabilities_with(&deltas, 1.0, &arithmetic).unwrap()[0].is_nan());
+    assert!(
+        Metropolis
+            .probabilities_with(&deltas, 1.0, &arithmetic)
+            .unwrap()[0]
+            .is_nan()
+    );
     for q in [0.0, 1.0, 1.7] {
-        assert!(TsallisAccept::new(q).probabilities_with(&deltas, 1.0, &arithmetic).unwrap()[0].is_nan());
+        assert!(
+            TsallisAccept::new(q)
+                .probabilities_with(&deltas, 1.0, &arithmetic)
+                .unwrap()[0]
+                .is_nan()
+        );
     }
 }
 
