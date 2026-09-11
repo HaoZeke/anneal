@@ -290,6 +290,10 @@ fn catalog_environment_cannot_enable_a_box_coverage_penalty() {
         .env("CATALOG_ENTROPIC_BIAS", "1")
         .output()
         .unwrap();
-    assert!(output.status.success(), "{}\n{}",
-        String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr));
+    assert!(
+        output.status.success(),
+        "{}\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
 }
