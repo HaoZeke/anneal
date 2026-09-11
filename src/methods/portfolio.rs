@@ -570,13 +570,18 @@ impl<O: Objective<f64>> Objective<f64> for BudgetedObjective<'_, O> {
             return f64::INFINITY;
         }
         self.ledger.n_evals.fetch_add(1, Ordering::Relaxed);
-        // Reflect (not bare-clip) into the box before eval+record: clipping
-        // piles mass on the wall; reflection keeps a feasible point while
-        // preserving more of the proposal structure. Archive is always in-bounds.
+        // Feasible proposals retain their exact coordinates. Reflection
+        // folds only out-of-box proposals, keeping the archive feasible.
         let bounds = self.inner.bounds();
-        let x_feas = crate::movekernel::reflect_into_box(x, bounds);
-        let value = self.inner.eval(x_feas.view());
-        self.ledger.record(x_feas.view(), value, bounds);
+        let reflected;
+        let x_feas = if bounds.contains(x) {
+            x
+        } else {
+            reflected = crate::movekernel::reflect_into_box(x, bounds);
+            reflected.view()
+        };
+        let value = self.inner.eval(x_feas);
+        self.ledger.record(x_feas, value, bounds);
         value
     }
 }
