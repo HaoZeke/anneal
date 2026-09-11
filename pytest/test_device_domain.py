@@ -26,7 +26,9 @@ def test_device_rejects_invalid_boxes_before_objective_work(low, high, batched):
         kwargs["n_chains"] = 4
     entry = anneal.run_ensemble if batched else anneal.run_device
     with pytest.raises(ValueError, match="bounds"):
-        entry(objective, np.asarray(low), np.asarray(high), anneal.Boltzmann(), **kwargs)
+        entry(
+            objective, np.asarray(low), np.asarray(high), anneal.Boltzmann(), **kwargs
+        )
 
 
 def test_device_rejects_nan_start_before_objective_work():
