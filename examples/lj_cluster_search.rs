@@ -3761,6 +3761,28 @@ fn ape_seeds_enabled() -> bool {
     *ENABLED.get_or_init(|| !std::env::var("CATALOG_APE_SEEDS").is_ok_and(|v| v == "0"))
 }
 
+/// The checkpoint takes no action: the tally counts a "continue", the
+/// trace is completed for the slice, and the chain goes on.
+#[cfg(feature = "bank-rpc")]
+fn continue_checkpoint(
+    phases: &mut PhaseTally,
+    cooperative: &mut anneal_core::cooperative_search::CooperativeRun,
+    replica: u32,
+    slice_sequence: &mut u64,
+    checkpoint_charged: usize,
+    best_energy: f64,
+) -> CheckpointAction {
+    phases.fire("continue");
+    complete_checkpoint_trace(
+        cooperative,
+        replica,
+        slice_sequence,
+        checkpoint_charged,
+        best_energy,
+        |_cooperative, _slice_sequence| CheckpointAction::Continue,
+    )
+}
+
 /// State of the census restart phase across checkpoints.
 #[derive(Default)]
 struct RestartState {
@@ -5024,14 +5046,13 @@ fn run_capnp_catalog(
                 let Ok(position) = descriptor_space
                     .describe(snapshot.current_state(), Some(&signature.atomic_numbers))
                 else {
-                    phases.fire("continue");
-                    return complete_checkpoint_trace(
+                    return continue_checkpoint(
+                        &mut phases,
                         &mut cooperative,
                         replica,
                         &mut slice_sequence,
                         checkpoint_charged,
                         snapshot.best_energy(),
-                        |_cooperative, _slice_sequence| CheckpointAction::Continue,
                     );
                 };
                 let descriptor = position.values().to_vec();
@@ -5485,14 +5506,13 @@ fn run_capnp_catalog(
                             .zip(live.iter())
                             .all(|(a, b)| (a - b).abs() <= 1e-12)
                         {
-                            phases.fire("continue");
-                            return complete_checkpoint_trace(
+                            return continue_checkpoint(
+                                &mut phases,
                                 &mut cooperative,
                                 replica,
                                 &mut slice_sequence,
                                 checkpoint_charged,
                                 snapshot.best_energy(),
-                                |_cooperative, _slice_sequence| CheckpointAction::Continue,
                             );
                         }
                         phases.fire("population_reseed");
@@ -5742,14 +5762,13 @@ fn run_capnp_catalog(
                     // measured crossing floor (LEAVE_CROSSING_HOPS). Policy
                     // RPC is the measured hop-cost gap; census still sees
                     // posted minima.
-                    phases.fire("continue");
-                    return complete_checkpoint_trace(
+                    return continue_checkpoint(
+                        &mut phases,
                         &mut cooperative,
                         replica,
                         &mut slice_sequence,
                         checkpoint_charged,
                         snapshot.best_energy(),
-                        |_cooperative, _slice_sequence| CheckpointAction::Continue,
                     );
                 }
                 // The asynchronous request returns LocalFallback until the
@@ -5803,14 +5822,13 @@ fn run_capnp_catalog(
                     PolicyEvidenceOutcome::Rejected
                     | PolicyEvidenceOutcome::LocalFallback
                     | PolicyEvidenceOutcome::SharingDisabled => {
-                        phases.fire("continue");
-                        return complete_checkpoint_trace(
+                        return continue_checkpoint(
+                            &mut phases,
                             &mut cooperative,
                             replica,
                             &mut slice_sequence,
                             checkpoint_charged,
                             snapshot.best_energy(),
-                            |_cooperative, _slice_sequence| CheckpointAction::Continue,
                         );
                     }
                 };
