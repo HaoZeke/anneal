@@ -165,6 +165,15 @@ request deadlines are a separate client contract. The pair-hello endpoint
 can be TCP, but the pair binding is IPC: this carrier path is same-node and
 does not establish cross-host catalog transport.
 
+The catalogue's request cache is separate from carrier delivery. A committed
+request replay reuses its accepted operation payload and returns a snapshot
+of the live coordinator state without repeating candidate validation.
+Campaign, ensemble and system identity checks precede cache lookup; conflicting
+content at an occupied replica/sequence key is rejected. Application rechecks
+these guards under the coordinator lock because other requests can commit
+during asynchronous validation. Two concurrent requests that both miss the
+cache can still perform separate validations.
+
 * Live minima, well tables and deposits
 
 ** Live-minimum census
