@@ -254,6 +254,15 @@ when that is zero. Distant samples do not alter the proposal. Private
 coverage, zero height, zero peer weight and zero incoming allowance disable
 this correction; they do not disable the underlying escape mechanism.
 
+If the radial endpoint does not improve clearance, the correction tests
+positive and negative free-coordinate directions within the same displacement
+limit. The first feasible endpoint farther from the entire held cloud is
+retained. This permits sideways separation when a box face clips the radial
+push. Fixed coordinates stay fixed. These are geometric distance queries,
+not objective or gradient evaluations, and they add no random draws. Failure
+of these finite direction tests is reported as constrained; it is not proof
+that no separating direction exists in the box.
+
 Langevin applies this correction before the raw gradient and objective
 callbacks, keeping its cached force consistent with the evaluated point.
 Colored auxiliary state stays with the chain. Local polishing uses the
