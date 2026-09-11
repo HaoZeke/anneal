@@ -321,10 +321,19 @@ mod controller_tests {
     #[test]
     fn controller_records_separate_policy_splitting_and_sharing() {
         let records = values_controller_records(Landscape::ConditionedQuadratic, 2, 256, 7);
-        let names: Vec<_> = records.iter().map(|row| row["arm"].as_str().unwrap()).collect();
+        let names: Vec<_> = records
+            .iter()
+            .map(|row| row["arm"].as_str().unwrap())
+            .collect();
         assert_eq!(
             names,
-            ["portfolio_single", "portfolio_independent", "hopping_single", "hopping_independent", "hopping_shared"]
+            [
+                "portfolio_single",
+                "portfolio_independent",
+                "hopping_single",
+                "hopping_independent",
+                "hopping_shared"
+            ]
         );
         for row in &records {
             assert_eq!(row["budget"], 256);
@@ -345,14 +354,31 @@ mod controller_tests {
     #[test]
     fn controller_comparisons_match_starts_and_isolate_sample_delivery() {
         let records = values_controller_records(Landscape::Rastrigin, 2, 257, 13);
-        assert_eq!(records[1]["initial_positions"], records[3]["initial_positions"]);
-        assert_eq!(records[1]["initial_positions"], records[4]["initial_positions"]);
-        assert_eq!(records[0]["initial_positions"][0], records[1]["initial_positions"][0]);
-        assert_eq!(records[0]["initial_positions"], records[2]["initial_positions"]);
+        assert_eq!(
+            records[1]["initial_positions"],
+            records[3]["initial_positions"]
+        );
+        assert_eq!(
+            records[1]["initial_positions"],
+            records[4]["initial_positions"]
+        );
+        assert_eq!(
+            records[0]["initial_positions"][0],
+            records[1]["initial_positions"][0]
+        );
+        assert_eq!(
+            records[0]["initial_positions"],
+            records[2]["initial_positions"]
+        );
         assert_eq!(records[1]["replica_budgets"], json!([65, 64, 64, 64]));
         for row in &records[..4] {
             assert_eq!(row["coverage_applied_foreign_samples"], 0);
         }
-        assert!(records[4]["coverage_applied_foreign_samples"].as_u64().unwrap() > 0);
+        assert!(
+            records[4]["coverage_applied_foreign_samples"]
+                .as_u64()
+                .unwrap()
+                > 0
+        );
     }
 }
