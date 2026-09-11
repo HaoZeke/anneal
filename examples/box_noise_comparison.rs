@@ -288,17 +288,25 @@ fn portfolio_peer_record(
     let replica_seeds: Vec<_> = (0..4)
         .map(|index| seed ^ (index as u64).wrapping_mul(0x9E37_79B9))
         .collect();
-    let starts: Vec<_> = replica_seeds.iter().enumerate().map(|(index, &seed)| {
-        if index == 0 {
-            start.clone()
-        } else {
-            let mut rng = StdRng::seed_from_u64(seed);
-            Array1::from_shape_fn(dim, |_| -5.12 + 10.24 * rng.random::<f64>())
-        }
-    }).collect();
+    let starts: Vec<_> = replica_seeds
+        .iter()
+        .enumerate()
+        .map(|(index, &seed)| {
+            if index == 0 {
+                start.clone()
+            } else {
+                let mut rng = StdRng::seed_from_u64(seed);
+                Array1::from_shape_fn(dim, |_| -5.12 + 10.24 * rng.random::<f64>())
+            }
+        })
+        .collect();
     let began = Instant::now();
     let out = portfolio_ensemble_optimize::<_, Surface>(
-        &surface, None, seed, Some(start.view()), &config,
+        &surface,
+        None,
+        seed,
+        Some(start.view()),
+        &config,
     );
     let elapsed = began.elapsed().as_secs_f64();
     let observed = surface.surface.evaluations.load(Ordering::Relaxed);
@@ -396,14 +404,19 @@ fn main() {
                     if peers {
                         for shared in [false, true] {
                             peer_coverage.shared = shared;
-                            println!("{}", portfolio_peer_record(landscape, dim, budget, seed, &peer_coverage));
+                            println!(
+                                "{}",
+                                portfolio_peer_record(landscape, dim, budget, seed, &peer_coverage)
+                            );
                         }
                     }
                 }
             }
             return;
         }
-        Some(_) => panic!("the optional control mode is coverage, quench, controllers or controllers-peers"),
+        Some(_) => panic!(
+            "the optional control mode is coverage, quench, controllers or controllers-peers"
+        ),
     };
     let mut coverage_settings = BoxCoverageConfig::default();
     if let Some(radius) = args.get(6) {
