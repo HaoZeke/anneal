@@ -6987,6 +6987,113 @@ mod census_policy_tests {
     }
 }
 
+#[cfg(all(test, feature = "bank-rpc"))]
+mod census_repulsion_tests {
+    use super::census_nearby_updates;
+    use anneal_core::catalog::{nearby_packing, packing_references, set_packing_references};
+    use anneal_core::census_bus::PeerMinimum;
+    use anneal_core::methods::cluster_hopping::ClusterMove;
+    use anneal_core::soap::{SoapSpec, push_away_clouds, step_away_cloud};
+    use ndarray::{Array1, array};
+    use rand::{SeedableRng, rngs::StdRng};
+    use std::collections::HashMap;
+
+    fn structure() -> Array1<f64> {
+        array![0.0, 0.0, 0.0, 1.1, 0.0, 0.0, 0.0, 1.2, 0.0, 0.0, 0.0, 1.3]
+    }
+
+    #[test]
+    fn a_nearby_ring_peer_activates_separation_even_when_archive_entries_merge() {
+        let x = structure();
+        let peer = &x * 1.0001;
+        assert!(nearby_packing(
+            x.as_slice().unwrap(),
+            peer.as_slice().unwrap()
+        ));
+        let spec = SoapSpec::default();
+        let cap = 1e-4;
+        let expected = push_away_clouds(x.view(), &[peer.to_vec()], spec, cap).unwrap();
+        for count in 1..=3 {
+            set_packing_references(Vec::new());
+            let peers: Vec<_> = (1..=count)
+                .map(|replica| PeerMinimum {
+                    replica,
+                    hops: 7,
+                    energy: -1.0,
+                    coordinates: peer.to_vec(),
+                })
+                .collect();
+            let (_, crowd) = census_nearby_updates(
+                &mut None,
+                1,
+                -1.0,
+                x.as_slice().unwrap(),
+                &peers.iter().collect::<Vec<_>>(),
+                &peers,
+                &HashMap::new(),
+            );
+            assert_eq!(crowd, count as usize);
+            assert_eq!(
+                packing_references().len(),
+                1,
+                "history merges one occupied well"
+            );
+            let proposed = ClusterMove::SoapRepel {
+                rmsd: cap,
+                cutoff: spec.rcut_nn,
+            }
+            .propose(x.view(), 1.0, &mut StdRng::seed_from_u64(53));
+            assert_eq!(
+                proposed, expected,
+                "{count} nearby peers supply directed separation"
+            );
+        }
+    }
+
+    #[test]
+    fn empty_live_census_cannot_repel_from_archived_peer_positions() {
+        let x = structure();
+        let peer = &x * 1.03;
+        let archive = vec![peer.to_vec(); 3];
+        set_packing_references(archive.clone());
+        let (_, crowd) = census_nearby_updates(
+            &mut None,
+            1,
+            -1.0,
+            x.as_slice().unwrap(),
+            &[],
+            &[],
+            &HashMap::new(),
+        );
+        assert_eq!(crowd, 0);
+        assert_eq!(
+            packing_references(),
+            archive,
+            "live occupancy does not erase history"
+        );
+        let spec = SoapSpec::default();
+        let cap = 1e-4;
+        let expected = step_away_cloud(
+            x.view(),
+            spec,
+            cap,
+            None,
+            None,
+            None,
+            &mut StdRng::seed_from_u64(53),
+        );
+        let proposed = ClusterMove::SoapRepel {
+            rmsd: cap,
+            cutoff: spec.rcut_nn,
+        }
+        .propose(x.view(), 1.0, &mut StdRng::seed_from_u64(53));
+        assert_eq!(
+            proposed, expected,
+            "no live crowd means the independent escape"
+        );
+    }
+}
+
 #[cfg(feature = "bank-rpc")]
 fn lj_catalog_candidate(
     descriptor_space: &anneal_core::descriptor_space::DescriptorSpace,
