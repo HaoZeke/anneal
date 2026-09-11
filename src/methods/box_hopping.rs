@@ -1018,9 +1018,10 @@ where
             let escape_steps = match config.escape {
                 BoxEscape::Gaussian => 0,
                 BoxEscape::Langevin(escape) => {
-                    // Reserve four combined work units for a bounded quench,
-                    // then one launch gradient and two callbacks per step.
-                    let steps = escape.steps.min(remaining.saturating_sub(5) / 2);
+                    // A terminal quench can evaluate its launch and gradient
+                    // in two work units. The segment pays one launch gradient
+                    // and two callbacks per step without consuming that reserve.
+                    let steps = escape.steps.min(remaining.saturating_sub(3) / 2);
                     if steps == 0 {
                         continue;
                     }
@@ -1074,7 +1075,8 @@ where
                     depth = quench_depth(
                         quench_allowances[index],
                         replica.budget.saturating_sub(replica.work),
-                    );
+                    )
+                    .max(1);
                 }
             }
             let launch = FirstEvaluation::new(obj);
