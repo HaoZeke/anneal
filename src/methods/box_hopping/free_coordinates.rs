@@ -69,7 +69,7 @@ where
         seed,
         None,
         PortfolioPolicy::Auto,
-        start.as_ref().map(Array1::view),
+        start.as_ref().map(|x| x.view()),
     );
     result.best_pos = reduced.expand(ArrayView1::from(&result.best_pos)).to_vec();
     result
