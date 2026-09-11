@@ -254,6 +254,8 @@ fn main() {
                             "coverage_peer_recrossings": result.coverage.peer_recrossings,
                             "coverage_peer_only_recrossings": result.coverage.peer_only_recrossings,
                             "coverage_escape_updates": result.coverage.escape_updates,
+                            "coverage_novel_arrivals": result.coverage.novel_arrivals,
+                            "coverage_novelty_updates": result.coverage.novelty_updates,
                             "coverage_decisions": result.coverage_decisions,
                         })
                     );

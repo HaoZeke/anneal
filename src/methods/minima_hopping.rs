@@ -597,6 +597,12 @@ impl EscapeFeedback {
         self.apply_escape_feedback(visit, prior_visits.max(1) as f64);
     }
 
+    /// Settle the bounded escape scale after reaching an unexplored region.
+    /// Region novelty supplies no stationary-point identity or minimum record.
+    pub(crate) fn observe_coverage_discovery(&mut self) {
+        self.apply_escape_feedback(Visit::New, 1.0);
+    }
+
     fn apply_escape_feedback(&mut self, visit: Visit, prior_visits: f64) {
         match visit {
             Visit::Same => {

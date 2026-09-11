@@ -100,6 +100,11 @@ pub struct CoverageStats {
     pub peer_only_recrossings: usize,
     /// Recrossing updates that change the bounded escape scale.
     pub escape_updates: usize,
+    /// Uncertified trial arrivals outside every held region, before their local
+    /// deposit. Initial observations and zero-height coverage do not supply feedback.
+    pub novel_arrivals: usize,
+    /// Novel-arrival updates that change the bounded escape scale.
+    pub novelty_updates: usize,
 }
 
 /// Conditional influence of imported coverage heights on terminal acceptance.
@@ -266,9 +271,9 @@ impl Coverage {
             })
     }
 
-    /// Connect a paid quench return to escape without asserting stationarity.
+    /// Connect a paid arrival to escape without asserting stationarity.
     /// The existing map is read before recording this trial's local arrival.
-    pub(super) fn feedback_from_return(
+    pub(super) fn feedback_from_arrival(
         &mut self,
         replica: usize,
         here: ArrayView1<f64>,
@@ -282,6 +287,10 @@ impl Coverage {
         }
         let index = bias.index();
         let Some(region) = index.lookup(trial) else {
+            let previous_scale = feedback.escape();
+            feedback.observe_coverage_discovery();
+            self.stats.novel_arrivals += 1;
+            self.stats.novelty_updates += usize::from(feedback.escape() != previous_scale);
             return;
         };
         // Overlapping regions can select different IDs without a departure.
