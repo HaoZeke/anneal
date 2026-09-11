@@ -1765,6 +1765,7 @@ fn box_ensemble_optimize(
         history: history_mode,
         membership,
         identity_tol: crate::methods::box_hopping::IDENTITY_TOL,
+        ..crate::methods::box_hopping::BoxEnsembleConfig::default()
     };
     let obj = CallableObjective {
         fn_: obj_fn,
