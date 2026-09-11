@@ -21,7 +21,6 @@ use rand::SeedableRng;
 use rand::rngs::StdRng;
 use rand_distr::{Distribution, StandardNormal};
 
-use crate::bias::{BasinBias, Bias, Fingerprint};
 use crate::descriptor_space::DescriptorGeometry;
 use crate::methods::ensemble::HistoryMode;
 use crate::methods::gle_langevin::{GleNoise, LangevinStepper};
@@ -35,6 +34,10 @@ use crate::methods::minima_hopping::{
 use crate::methods::portfolio::{PortfolioPolicy, portfolio_optimize_seeded};
 use crate::movekernel::reflect_into_box;
 use crate::pes_exploration::{ExactStructureWitness, StructureContext};
+
+mod coverage;
+pub use coverage::{BoxCoverageConfig, CoverageStats};
+use coverage::Coverage;
 
 #[cfg(feature = "history-nng")]
 use crate::history_nng::{HistoryNngClient, HistoryNngServer};
@@ -108,7 +111,8 @@ pub struct BoxEnsembleConfig {
     pub membership: HistoryMembership,
     /// Scaled max-norm that identifies two quenched points.
     pub identity_tol: f64,
-    /// Foreign visits paid into this chain's bias, capped per look.
+    /// Foreign coverage visits paid into each receiving region per hop boundary.
+    /// Zero disables incoming coverage deposits.
     pub shared_deposits: usize,
     /// Per-chain escape mechanism. Langevin segments require a gradient callback.
     pub escape: BoxEscape,
@@ -161,6 +165,8 @@ pub struct BoxEnsembleResult {
     pub history_cost: (usize, usize, f64),
     /// Bias deposits made on behalf of other chains' visits.
     pub shared_deposits: usize,
+    /// Evaluated-region coverage, independent of the certified-minimum ledger.
+    pub coverage: CoverageStats,
 }
 
 /// Outcome of [`ensemble_hop_optimize`]: hop ledger plus history size.
@@ -181,6 +187,8 @@ pub struct EnsembleHopResult {
     /// History attempts, refusals and summed operation seconds across replicas.
     /// Zero when the selected search does not use history.
     pub history_cost: (usize, usize, f64),
+    /// Evaluated-region coverage; empty for the one-replica values-only portfolio.
+    pub coverage: CoverageStats,
 }
 
 /// Search on `obj`: hop and quench when `grad` is present.
@@ -224,6 +232,7 @@ where
             charged: out.n_evals + out.n_grads,
             history_minima: 0,
             history_cost: (0, 0, 0.0),
+            coverage: CoverageStats::default(),
         };
     }
     let config = BoxEnsembleConfig {
@@ -244,6 +253,7 @@ impl From<BoxEnsembleResult> for EnsembleHopResult {
             charged: out.n_evals + out.n_grads,
             history_minima: out.history_minima,
             history_cost: out.history_cost,
+            coverage: out.coverage,
         }
     }
 }
@@ -256,6 +266,24 @@ pub fn box_values_ensemble_optimize<O>(
     seed: u64,
     x0: Option<ArrayView1<f64>>,
     config: &BoxEnsembleConfig,
+) -> BoxEnsembleResult
+where
+    O: Objective<f64>,
+{
+    box_values_ensemble_optimize_with_coverage(obj, seed, x0, config, &BoxCoverageConfig::for_ensemble(config))
+}
+
+/// Values-only box chains with coverage settings independent of minimum history.
+///
+/// Feasible search boundaries share repulsion even when no quench receives a
+/// minimum certificate or `config.history` is [`HistoryMode::None`]. Coverage
+/// uses an in-process exchange, not the optional minimum-ledger NNG transport.
+pub fn box_values_ensemble_optimize_with_coverage<O>(
+    obj: &O,
+    seed: u64,
+    x0: Option<ArrayView1<f64>>,
+    config: &BoxEnsembleConfig,
+    coverage_config: &BoxCoverageConfig,
 ) -> BoxEnsembleResult
 where
     O: Objective<f64>,
@@ -305,13 +333,7 @@ where
         DescriptorGeometry::finite(mean_width.max(1e-6)).ok(),
         Some("design-box".into()),
     );
-    let merge = (config.identity_tol * mean_width.max(1e-12)).max(1e-12);
-    let mut biases: Vec<BasinBias<RawCoordinates>> = (0..replica_count)
-        .map(|_| BasinBias::new(RawCoordinates, merge, 0.1, 5.0))
-        .collect();
-    let mut history_seen: Vec<std::collections::HashMap<usize, u64>> = (0..replica_count)
-        .map(|_| std::collections::HashMap::new())
-        .collect();
+    let mut coverage = Coverage::new(&bounds, replica_count, coverage_config, config.shared_deposits);
     let mut hooks: Vec<ReplicaHook<'_>> = (0..replica_count)
         .map(|index| {
             replica_hook(
@@ -361,8 +383,6 @@ where
     let mut n_evals = 0usize;
     let n_grads = 0usize;
     let mut history_observations = 0usize;
-    let mut shared_deposits = 0usize;
-
     for (index, replica) in replicas.iter_mut().enumerate() {
         if replica.budget == 0 {
             continue;
@@ -374,7 +394,10 @@ where
         if polish.best_val.is_finite() {
             replica.x = polish.best_pos;
             replica.f = polish.best_val;
-            replica.cv = replica.x.clone();
+        }
+        if let Some(descriptor) = coverage.describe(replica.x.view(), replica.f) {
+            replica.cv = descriptor;
+            coverage.observe(index, replica.cv.view(), temp_of(replica.generation, replica.f));
         }
         let before = replica.work;
         let certified =
@@ -402,6 +425,7 @@ where
             progressed = true;
             replica.generation += 1;
             replica.hops += 1;
+            coverage.hear(index, temp_of(replica.generation, replica.f));
             let escape = replica.feedback.escape();
             replica.trial.assign(&replica.x);
             for j in 0..dim {
@@ -440,44 +464,19 @@ where
                     report.is_new,
                     report.visits.max(1),
                 );
-                if config.shared_deposits > 0 {
-                    let seen = history_seen[index].entry(report.minimum).or_insert(0);
-                    let foreign = report
-                        .visits
-                        .saturating_sub(*seen)
-                        .saturating_sub(1)
-                        .min(config.shared_deposits as u64);
-                    let cv = biases[index].cv(trial_x.view());
-                    for _ in 0..foreign {
-                        biases[index].deposit_scaled_n(
-                            cv.view(),
-                            temp_of(replica.generation, replica.f),
-                            1.0,
-                            1,
-                        );
-                        shared_deposits += 1;
-                    }
-                    *seen = report.visits;
-                }
             }
-            if !trial_f.is_finite() {
-                continue;
-            }
+            let Some(trial_cv) = coverage.describe(trial_x.view(), trial_f) else { continue; };
             let temp = temp_of(replica.generation, replica.f);
-            let trial_cv = biases[index].cv(trial_x.view());
-            let v_here = biases[index].potential(replica.cv.view());
-            let v_trial = biases[index].potential(trial_cv.view());
+            let v_here = coverage.potential(index, replica.cv.view());
+            let v_trial = coverage.potential(index, trial_cv.view());
             let delta = (trial_f + v_trial) - (replica.f + v_here);
             let accept =
                 delta <= 0.0 || replica.rng.random::<f64>() < (-delta / temp.max(1e-300)).exp();
+            coverage.observe(index, trial_cv.view(), temp);
             replica.adopt_trial(accept, trial_x, trial_f, trial_cv, report);
             if accept {
-                biases[index].deposit(replica.cv.view(), temp);
                 if let Some(report) = report {
                     hooks[index].mark_accepted(report.minimum);
-                    if report.visits == 0 {
-                        history_seen[index].insert(report.minimum, 1);
-                    }
                 }
             }
         }
@@ -508,6 +507,7 @@ where
             .unwrap_or(0)
     });
 
+    let coverage = coverage.finish();
     BoxEnsembleResult {
         best_pos,
         best_val,
@@ -517,7 +517,8 @@ where
         history_observations,
         history_minima,
         history_cost: total_history_cost(&hooks),
-        shared_deposits,
+        shared_deposits: coverage.applied_foreign_visits,
+        coverage,
     }
 }
 
@@ -692,15 +693,6 @@ impl ExactStructureWitness for WidthWitness {
     }
 }
 
-/// Design coordinates as the bias fingerprint. A box is not a point set.
-struct RawCoordinates;
-
-impl Fingerprint for RawCoordinates {
-    fn describe(&self, x: ArrayView1<f64>) -> Array1<f64> {
-        x.to_owned()
-    }
-}
-
 /// Run `replicas` box hops that divide `config.budget` and talk through
 /// one [`HistoryHook`] per replica.
 pub fn box_ensemble_optimize<O, G>(
@@ -709,6 +701,26 @@ pub fn box_ensemble_optimize<O, G>(
     seed: u64,
     x0: Option<ArrayView1<f64>>,
     config: &BoxEnsembleConfig,
+) -> BoxEnsembleResult
+where
+    O: Objective<f64>,
+    G: Gradient<f64>,
+{
+    box_ensemble_optimize_with_coverage(obj, grad, seed, x0, config, &BoxCoverageConfig::for_ensemble(config))
+}
+
+/// Gradient box chains with coverage settings independent of minimum history.
+///
+/// Repulsion records finite feasible search boundaries, not just certified
+/// stationary points. `config.history` controls only the minimum ledger;
+/// `coverage_config.shared` controls the in-process coverage exchange.
+pub fn box_ensemble_optimize_with_coverage<O, G>(
+    obj: &O,
+    grad: &G,
+    seed: u64,
+    x0: Option<ArrayView1<f64>>,
+    config: &BoxEnsembleConfig,
+    coverage_config: &BoxCoverageConfig,
 ) -> BoxEnsembleResult
 where
     O: Objective<f64>,
@@ -759,13 +771,7 @@ where
         DescriptorGeometry::finite(mean_width.max(1e-6)).ok(),
         Some("design-box".into()),
     );
-    let merge = (config.identity_tol * mean_width.max(1e-12)).max(1e-12);
-    let mut biases: Vec<BasinBias<RawCoordinates>> = (0..replica_count)
-        .map(|_| BasinBias::new(RawCoordinates, merge, 0.1, 5.0))
-        .collect();
-    let mut history_seen: Vec<std::collections::HashMap<usize, u64>> = (0..replica_count)
-        .map(|_| std::collections::HashMap::new())
-        .collect();
+    let mut coverage = Coverage::new(&bounds, replica_count, coverage_config, config.shared_deposits);
     let mut hooks: Vec<ReplicaHook<'_>> = (0..replica_count)
         .map(|index| {
             replica_hook(
@@ -815,8 +821,6 @@ where
     let mut n_evals = 0usize;
     let mut n_grads = 0usize;
     let mut history_observations = 0usize;
-    let mut shared_deposits = 0usize;
-
     let mut quench_allowances = vec![(2 * dim + 8).max(MIN_QUENCH); replica_count];
     for (index, replica) in replicas.iter_mut().enumerate() {
         if replica.budget == 0 {
@@ -840,13 +844,16 @@ where
             if quench.best_val.is_finite() {
                 replica.x = quench.best_pos;
                 replica.f = quench.best_val;
-                replica.cv = replica.x.clone();
             }
             start_grad = quench.best_grad;
         } else {
             replica.f = obj.eval(replica.x.view());
             replica.work += 1;
             n_evals += 1;
+        }
+        if let Some(descriptor) = coverage.describe(replica.x.view(), replica.f) {
+            replica.cv = descriptor;
+            coverage.observe(index, replica.cv.view(), temp_of(replica.generation, replica.f));
         }
         if let Some(gradient) = certificate_gradient(
             start_grad,
@@ -891,6 +898,7 @@ where
             progressed = true;
             replica.generation += 1;
             replica.hops += 1;
+            coverage.hear(index, temp_of(replica.generation, replica.f));
             let escape = replica.feedback.escape();
             replica.trial.assign(&replica.x);
             match config.escape {
@@ -973,44 +981,19 @@ where
                     report.is_new,
                     report.visits.max(1),
                 );
-                if config.shared_deposits > 0 {
-                    let seen = history_seen[index].entry(report.minimum).or_insert(0);
-                    let foreign = report
-                        .visits
-                        .saturating_sub(*seen)
-                        .saturating_sub(1)
-                        .min(config.shared_deposits as u64);
-                    let cv = biases[index].cv(trial_x.view());
-                    for _ in 0..foreign {
-                        biases[index].deposit_scaled_n(
-                            cv.view(),
-                            temp_of(replica.generation, replica.f),
-                            1.0,
-                            1,
-                        );
-                        shared_deposits += 1;
-                    }
-                    *seen = report.visits;
-                }
             }
-            if !trial_f.is_finite() {
-                continue;
-            }
+            let Some(trial_cv) = coverage.describe(trial_x.view(), trial_f) else { continue; };
             let temp = temp_of(replica.generation, replica.f);
-            let trial_cv = biases[index].cv(trial_x.view());
-            let v_here = biases[index].potential(replica.cv.view());
-            let v_trial = biases[index].potential(trial_cv.view());
+            let v_here = coverage.potential(index, replica.cv.view());
+            let v_trial = coverage.potential(index, trial_cv.view());
             let delta = (trial_f + v_trial) - (replica.f + v_here);
             let accept =
                 delta <= 0.0 || replica.rng.random::<f64>() < (-delta / temp.max(1e-300)).exp();
+            coverage.observe(index, trial_cv.view(), temp);
             replica.adopt_trial(accept, trial_x, trial_f, trial_cv, report);
             if accept {
-                biases[index].deposit(replica.cv.view(), temp);
                 if let Some(report) = report {
                     hooks[index].mark_accepted(report.minimum);
-                    if report.visits == 0 {
-                        history_seen[index].insert(report.minimum, 1);
-                    }
                 }
             }
         }
@@ -1041,6 +1024,7 @@ where
             .unwrap_or(0)
     });
 
+    let coverage = coverage.finish();
     BoxEnsembleResult {
         best_pos,
         best_val,
@@ -1050,7 +1034,8 @@ where
         history_observations,
         history_minima,
         history_cost: total_history_cost(&hooks),
-        shared_deposits,
+        shared_deposits: coverage.applied_foreign_visits,
+        coverage,
     }
 }
 
