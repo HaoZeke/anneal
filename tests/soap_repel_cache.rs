@@ -17,7 +17,7 @@ fn a_reference_mean_is_keyed_by_its_descriptor_parameters() {
             ..Default::default()
         };
         let mean = packing_mean_nu3(peer.view(), spec, None, None);
-        let expected = push_away_means(x.view(), &[mean.to_vec(); 3], spec, cap).unwrap();
+        let expected = push_away_means(x.view(), &vec![mean.to_vec(); 3], spec, cap).unwrap();
         let actual = ClusterMove::SoapRepel { rmsd: cap, cutoff }.propose(x.view(), 1.0, &mut rng);
         assert_eq!(
             actual, expected,
