@@ -33,6 +33,8 @@ pub struct LocalPolishResult {
     pub projected_grad_norm: f64,
     /// Whether the projected gradient satisfies the requested tolerance.
     pub projected_stationary: bool,
+    /// Unprojected gradient at [`LocalPolishResult::best_pos`], when paid.
+    pub best_grad: Option<Array1<f64>>,
 }
 
 /// Result of QMC-seeded bounded local refinement.
@@ -191,24 +193,6 @@ fn vector_norm(x: &Array1<f64>) -> f64 {
     x.iter().map(|v| v * v).sum::<f64>().sqrt()
 }
 
-fn projected_grad_norm<G>(
-    gradient: &G,
-    x: &Array1<f64>,
-    low: &Array1<f64>,
-    high: &Array1<f64>,
-) -> Option<f64>
-where
-    G: Gradient<f64>,
-{
-    let grad = gradient.grad(x.view());
-    if grad.len() != x.len() || grad.iter().any(|v| !v.is_finite()) {
-        return None;
-    }
-    let pgrad = projected_gradient(x, &grad, low, high);
-    let norm = vector_norm(&pgrad);
-    norm.is_finite().then_some(norm)
-}
-
 fn box_diagonal(low: &Array1<f64>, high: &Array1<f64>) -> f64 {
     low.iter()
         .zip(high.iter())
@@ -296,6 +280,7 @@ where
     let mut prev_pgrad = None;
     let mut final_projected_grad_norm = f64::INFINITY;
     let mut final_grad_matches_x = false;
+    let mut best_grad: Option<Array1<f64>> = None;
     // Stall-recovery scale: each failed line search restarts the memory two
     // orders finer from the best point instead of abandoning the remaining
     // budget. The floor ties to machine precision at the incumbent scale.
@@ -310,6 +295,7 @@ where
         let pgrad = projected_gradient(&x, &grad, low, high);
         final_projected_grad_norm = vector_norm(&pgrad);
         final_grad_matches_x = true;
+        best_grad = Some(grad);
         if final_projected_grad_norm <= grad_tol {
             break;
         }
@@ -412,8 +398,15 @@ where
 
     if !final_grad_matches_x {
         n_grads += 1;
-        final_projected_grad_norm =
-            projected_grad_norm(gradient, &best_pos, low, high).unwrap_or(f64::INFINITY);
+        let grad = gradient.grad(best_pos.view());
+        if grad.len() == best_pos.len() && grad.iter().all(|v| v.is_finite()) {
+            let pgrad = projected_gradient(&best_pos, &grad, low, high);
+            final_projected_grad_norm = vector_norm(&pgrad);
+            best_grad = Some(grad);
+        } else {
+            final_projected_grad_norm = f64::INFINITY;
+            best_grad = None;
+        }
     }
     let projected_stationary =
         final_projected_grad_norm.is_finite() && final_projected_grad_norm <= grad_tol;
@@ -425,6 +418,7 @@ where
         n_grads,
         projected_grad_norm: final_projected_grad_norm,
         projected_stationary,
+        best_grad,
     }
 }
 
