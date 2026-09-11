@@ -1,5 +1,6 @@
 //! Replica checkpoints preserve complete local portfolio invocations.
 
+use std::collections::VecDeque;
 use std::sync::{Arc, Condvar, Mutex};
 
 use eindir_core::{Bounds, Gradient, Objective};
@@ -98,6 +99,8 @@ where
                 let peer = enabled.then(|| Peer {
                     coordinator: Arc::clone(&coordinator),
                     replica,
+                    rng: Mutex::new(StdRng::seed_from_u64(replica_seed ^ 0x5045_4552_5f47_454f)),
+                    prepared: Mutex::new(VecDeque::new()),
                 });
                 scope.spawn(move || {
                     let start = x0.map(|x| {
@@ -203,10 +206,15 @@ impl Coordinator {
 pub(super) struct Peer {
     coordinator: Arc<Coordinator>,
     replica: usize,
+    rng: Mutex<StdRng>,
+    prepared: Mutex<VecDeque<Array1<f64>>>,
 }
 
 impl Peer {
     pub(super) fn checkpoint(&self, position: ArrayView1<f64>, value: f64) {
+        // Unfunded prepared points are not observations and cannot survive
+        // into a different arm's line searches or derivative stencils.
+        self.prepared.lock().expect("prepared proposals lock").clear();
         let mut state = self
             .coordinator
             .state
@@ -222,6 +230,28 @@ impl Peer {
                 .changed
                 .wait(state)
                 .expect("portfolio exchange lock");
+        }
+    }
+
+    pub(super) fn prepare(&self, anchor: ArrayView1<f64>, proposal: &mut Array1<f64>) -> bool {
+        let original = proposal.clone();
+        let mut rng = self.rng.lock().expect("peer geometry random stream lock");
+        self.coordinator.state.lock().expect("portfolio exchange lock")
+            .coverage.repel(self.replica, anchor, proposal, &mut *rng);
+        let changed = *proposal != original;
+        self.prepared.lock().expect("prepared proposals lock").push_back(proposal.clone());
+        changed
+    }
+
+    pub(super) fn evaluated(&self, position: ArrayView1<f64>, value: f64) {
+        let paid_proposal = {
+            let mut prepared = self.prepared.lock().expect("prepared proposals lock");
+            prepared.iter().position(|x| x.view() == position)
+                .and_then(|index| prepared.remove(index))
+        };
+        if let Some(position) = paid_proposal {
+            self.coordinator.state.lock().expect("portfolio exchange lock")
+                .coverage.sample(self.replica, position.view(), value);
         }
     }
 }

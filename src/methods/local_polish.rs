@@ -438,6 +438,27 @@ where
     O: Objective<f64>,
     G: Gradient<f64>,
 {
+    qmc_projected_gradient_polish_with_proposals(
+        obj, gradient, n_starts, max_fevals_per_start, seed, step0, grad_tol, top_k, None,
+    )
+}
+
+#[allow(clippy::too_many_arguments, clippy::type_complexity)]
+pub(crate) fn qmc_projected_gradient_polish_with_proposals<O, G>(
+    obj: &O,
+    gradient: &G,
+    n_starts: usize,
+    max_fevals_per_start: usize,
+    seed: u64,
+    step0: f64,
+    grad_tol: f64,
+    top_k: usize,
+    prepare: Option<&dyn Fn(ndarray::ArrayView1<f64>, &mut Array1<f64>) -> bool>,
+) -> QmcPolishResult
+where
+    O: Objective<f64>,
+    G: Gradient<f64>,
+{
     assert!(n_starts > 0, "n_starts must be positive");
     assert!(
         max_fevals_per_start > 0,
@@ -453,7 +474,10 @@ where
     // Clip starts into a dense matrix, then batch-evaluate in parallel.
     let mut clipped = Array2::<f64>::zeros((n_starts, bounds.dims));
     for (i, start) in starts.outer_iter().enumerate() {
-        let pos = bounds.clip(start);
+        let mut pos = bounds.clip(start);
+        if let Some(prepare) = prepare {
+            prepare(start, &mut pos);
+        }
         clipped.row_mut(i).assign(&pos);
     }
     // Trait eval_batch: Python overrides for single-GIL / process-pool walkers;
@@ -638,6 +662,23 @@ pub fn qmc_gsa_global_search<O>(
 where
     O: Objective<f64>,
 {
+    qmc_gsa_global_search_with_proposals(obj, max_evals, seed, n_chains, t_init, q_v, q_a, None)
+}
+
+#[allow(clippy::too_many_arguments, clippy::type_complexity)]
+pub(crate) fn qmc_gsa_global_search_with_proposals<O>(
+    obj: &O,
+    max_evals: usize,
+    seed: u64,
+    n_chains: usize,
+    t_init: f64,
+    q_v: f64,
+    q_a: f64,
+    prepare: Option<&dyn Fn(ndarray::ArrayView1<f64>, &mut Array1<f64>) -> bool>,
+) -> QmcPolishResult
+where
+    O: Objective<f64>,
+{
     assert!(max_evals > 0, "max_evals must be positive");
     assert!(n_chains > 0, "n_chains must be positive");
     assert!(
@@ -671,7 +712,10 @@ where
     let mut n_evals = 0usize;
 
     for start in starts.outer_iter() {
-        let pos = bounds.clip(start);
+        let mut pos = bounds.clip(start);
+        if let Some(prepare) = prepare {
+            prepare(start, &mut pos);
+        }
         let unit = Array1::from_iter(
             (0..dim).map(|axis| unit_coordinate(pos[axis], bounds.low[axis], bounds.high[axis])),
         );
@@ -694,10 +738,18 @@ where
             if n_evals >= global_budget {
                 break;
             }
-            let proposal_unit = visit
+            let mut proposal_unit = visit
                 .propose(units[chain].view(), temp, &mut rng)
                 .mapv(|value| value.clamp(0.0, 1.0));
-            let proposal_pos = unit_to_box(&proposal_unit, &bounds.low, &bounds.high);
+            let mut proposal_pos = unit_to_box(&proposal_unit, &bounds.low, &bounds.high);
+            if let Some(prepare) = prepare {
+                let anchor = unit_to_box(&units[chain], &bounds.low, &bounds.high);
+                if prepare(anchor.view(), &mut proposal_pos) {
+                    proposal_unit = Array1::from_iter((0..dim).map(|axis| {
+                        unit_coordinate(proposal_pos[axis], bounds.low[axis], bounds.high[axis])
+                    }));
+                }
+            }
             let proposal_val = obj.eval(proposal_pos.view());
             n_evals += 1;
             if proposal_val.is_finite() && proposal_val < best_val {

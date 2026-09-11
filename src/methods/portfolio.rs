@@ -540,6 +540,9 @@ impl BudgetLedger {
     /// Archive a candidate only if `value` is finite **and** `x` lies inside
     /// `bounds` (GJQ-style feasibility choke-point: never promote OOB bests).
     fn record(&self, x: ArrayView1<f64>, value: f64, bounds: &Bounds<f64>) {
+        if let Some(peer) = &self.peer {
+            peer.evaluated(x, value);
+        }
         if !value.is_finite() || !bounds.contains(x) {
             return;
         }
@@ -571,6 +574,25 @@ impl BudgetLedger {
 struct BudgetedObjective<'a, O: Objective<f64>> {
     inner: &'a O,
     ledger: &'a BudgetLedger,
+}
+
+impl<O: Objective<f64>> BudgetedObjective<'_, O> {
+    /// Correct global candidates, never raw objective values or local probes.
+    fn prepare_proposal(&self, anchor: Option<ArrayView1<f64>>, proposal: &mut Array1<f64>) -> bool {
+        if self.ledger.exhausted() {
+            return false;
+        }
+        let Some(peer) = &self.ledger.peer else { return false };
+        let incumbent;
+        let anchor = match anchor {
+            Some(anchor) => anchor,
+            None => {
+                incumbent = self.ledger.incumbent(self.bounds());
+                incumbent.view()
+            }
+        };
+        peer.prepare(anchor, proposal)
+    }
 }
 
 impl<O: Objective<f64>> Objective<f64> for BudgetedObjective<'_, O> {
@@ -1165,7 +1187,8 @@ where
         if obj.ledger.exhausted() {
             break;
         }
-        let pos = bounds.clip(start);
+        let mut pos = bounds.clip(start);
+        obj.prepare_proposal(None, &mut pos);
         let value = obj.eval(pos.view());
         if value.is_finite() && value < best_val {
             best_val = value;
@@ -1518,7 +1541,7 @@ fn dual_style_local_search<O, G, R>(
         if ledger.remaining() < 8 {
             break;
         }
-        let start = if s == 0 {
+        let mut start = if s == 0 {
             x_inc.clone()
         } else if has_analytic && wide {
             // Global QMC sample — needs cheap analytic polish to pay off.
@@ -1544,6 +1567,9 @@ fn dual_style_local_search<O, G, R>(
             }
             y
         };
+        if s > 0 {
+            obj.prepare_proposal(Some(x_inc.view()), &mut start);
+        }
         // FD: spend most of per_start as polish depth (grad is expensive).
         let maxf = if has_analytic {
             (per_start / 2).max(4)
@@ -1635,7 +1661,7 @@ fn run_persistent_gsa<O, G>(
                     break;
                 }
                 let x = &state.xs[chain];
-                let proposal = if j < dim {
+                let mut proposal = if j < dim {
                     // All coordinates: full Tsallis visit in physical space.
                     let y = visit.propose(x.view(), temp, &mut state.rng);
                     crate::movekernel::reflect_into_box(y.view(), &bounds)
@@ -1651,6 +1677,7 @@ fn run_persistent_gsa<O, G>(
                     y[axis] = y1[0];
                     crate::movekernel::reflect_into_box(y.view(), &bounds)
                 };
+                obj.prepare_proposal(Some(x.view()), &mut proposal);
                 let proposal_val = obj.eval(proposal.view());
                 let accepted = if !proposal_val.is_finite() {
                     false
@@ -1717,7 +1744,8 @@ fn run_persistent_gsa<O, G>(
                 let hi = bounds.high[i];
                 x[i] = lo + (hi - lo) * state.rng.random::<f64>();
             }
-            let x = bounds.clip(x.view());
+            let mut x = bounds.clip(x.view());
+            obj.prepare_proposal(None, &mut x);
             let v = obj.eval(x.view());
             if v.is_finite() {
                 // Prefer replacing the current chain when worse; keep elite if multi.
@@ -2020,8 +2048,10 @@ fn run_arm<O, G>(
                 let n_starts = (slice / 3).max(4);
                 let per_start = slice.saturating_sub(n_starts) / 2;
                 if per_start >= 2 {
-                    let res = qmc_projected_gradient_polish(
+                    let prepare = |anchor, proposal: &mut Array1<f64>| obj.prepare_proposal(Some(anchor), proposal);
+                    let res = crate::methods::local_polish::qmc_projected_gradient_polish_with_proposals(
                         obj, grad, n_starts, per_start, seed, 1.0, 1e-8, 1,
+                        obj.ledger.peer.as_ref().map(|_| &prepare as &dyn Fn(ArrayView1<f64>, &mut Array1<f64>) -> bool),
                     );
                     states
                         .basins
@@ -2031,7 +2061,11 @@ fn run_arm<O, G>(
             }
             if slice >= 8 {
                 let chains = (slice / 8).clamp(2, 4 * dim.max(1));
-                let res = qmc_gsa_global_search(obj, slice, seed, chains, 1.0, GSA_Q_V, GSA_Q_A);
+                let prepare = |anchor, proposal: &mut Array1<f64>| obj.prepare_proposal(Some(anchor), proposal);
+                let res = crate::methods::local_polish::qmc_gsa_global_search_with_proposals(
+                    obj, slice, seed, chains, 1.0, GSA_Q_V, GSA_Q_A,
+                    obj.ledger.peer.as_ref().map(|_| &prepare as &dyn Fn(ArrayView1<f64>, &mut Array1<f64>) -> bool),
+                );
                 states
                     .basins
                     .register(res.best_pos.view(), res.best_val, &bounds);
@@ -2074,7 +2108,8 @@ fn run_arm<O, G>(
                 // Reflect the symmetric basin-hop perturbation into the box
                 // (keeps the hop proposal symmetric for the Metropolis guard
                 // below; clipping would bias hops toward the boundary).
-                let trial = crate::movekernel::reflect_into_box(trial.view(), &bounds);
+                let mut trial = crate::movekernel::reflect_into_box(trial.view(), &bounds);
+                obj.prepare_proposal(Some(current.pos.view()), &mut trial);
                 // Descent-dominated valleys reward one full-depth descent
                 // per slice (basin-hopping depth); multimodal boxes keep
                 // the half-slice cap so hops stay frequent.
@@ -2139,7 +2174,8 @@ fn run_arm<O, G>(
             // global candidate, tested at the cost of one evaluation.
             let modal = surr.sample(1, 1e-15, SURROGATE_GRID, rng);
             let before_modal = ledger.best_get();
-            let modal_x = bounds.clip(modal.row(0));
+            let mut modal_x = bounds.clip(modal.row(0));
+            obj.prepare_proposal(None, &mut modal_x);
             let modal_val = obj.eval(modal_x.view());
             if let Some(grad) = grad
                 && modal_val.is_finite()
@@ -2160,7 +2196,8 @@ fn run_arm<O, G>(
                 if ledger.exhausted() {
                     break;
                 }
-                let trial = bounds.clip(proposals.row(i));
+                let mut trial = bounds.clip(proposals.row(i));
+                obj.prepare_proposal(None, &mut trial);
                 let ft = obj.eval(trial.view());
                 let accepted = accept_move(
                     noise_sigma,
@@ -2192,7 +2229,8 @@ fn run_arm<O, G>(
                     if ledger.exhausted() {
                         break;
                     }
-                    let x = points.row(i).to_owned();
+                    let mut x = points.row(i).to_owned();
+                    obj.prepare_proposal(None, &mut x);
                     let v = obj.eval(x.view());
                     pop.push(x);
                     vals.push(v);
@@ -2239,7 +2277,8 @@ fn run_arm<O, G>(
                             trial[j] = best_x[j] + weight * (state.pop[r0][j] - state.pop[r1][j]);
                         }
                     }
-                    let trial = bounds.clip(trial.view());
+                    let mut trial = bounds.clip(trial.view());
+                    obj.prepare_proposal(Some(state.pop[i].view()), &mut trial);
                     let ft = obj.eval(trial.view());
                     used += 1;
                     if ft.is_finite() && (!state.vals[i].is_finite() || ft < state.vals[i]) {
