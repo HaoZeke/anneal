@@ -53,8 +53,12 @@ impl Objective<f64> for FlatObjective {
         self.offset
     }
 
-    fn dim(&self) -> usize { 2 }
-    fn bounds(&self) -> &Bounds<f64> { &self.bounds }
+    fn dim(&self) -> usize {
+        2
+    }
+    fn bounds(&self) -> &Bounds<f64> {
+        &self.bounds
+    }
 }
 
 impl Gradient<f64> for FlatObjective {
@@ -63,7 +67,9 @@ impl Gradient<f64> for FlatObjective {
         Array1::zeros(x.len())
     }
 
-    fn dim(&self) -> usize { 2 }
+    fn dim(&self) -> usize {
+        2
+    }
 }
 
 fn same_trace(left: &Mutex<Vec<Array1<f64>>>, right: &Mutex<Vec<Array1<f64>>>) {
@@ -79,11 +85,18 @@ fn origin_contract(gradient: bool, escape: BoxEscape) {
         let config = BoxEnsembleConfig {
             replicas: 4,
             budget: 4096,
-            history: if shared { HistoryMode::Shared } else { HistoryMode::Private },
+            history: if shared {
+                HistoryMode::Shared
+            } else {
+                HistoryMode::Private
+            },
             escape,
             ..BoxEnsembleConfig::default()
         };
-        let coverage = BoxCoverageConfig { shared, ..BoxCoverageConfig::default() };
+        let coverage = BoxCoverageConfig {
+            shared,
+            ..BoxCoverageConfig::default()
+        };
         let original = FlatObjective::new(0.0);
         let shifted = FlatObjective::new(1024.0);
         let a = original.run(gradient, &config, &coverage);
@@ -91,7 +104,10 @@ fn origin_contract(gradient: bool, escape: BoxEscape) {
         same_trace(&original.evaluations, &shifted.evaluations);
         same_trace(&original.gradients, &shifted.gradients);
         assert_eq!(a.best_pos, b.best_pos);
-        assert_eq!((a.n_evals, a.n_grads, a.hops), (b.n_evals, b.n_grads, b.hops));
+        assert_eq!(
+            (a.n_evals, a.n_grads, a.hops),
+            (b.n_evals, b.n_grads, b.hops)
+        );
     }
 }
 
@@ -107,10 +123,13 @@ fn values_search_is_independent_of_objective_origin() {
 
 #[test]
 fn white_langevin_search_is_independent_of_objective_origin() {
-    origin_contract(true, BoxEscape::Langevin(GleEscapeConfig {
-        noise: GleNoise::White { friction: 4.0 },
-        ..GleEscapeConfig::default()
-    }));
+    origin_contract(
+        true,
+        BoxEscape::Langevin(GleEscapeConfig {
+            noise: GleNoise::White { friction: 4.0 },
+            ..GleEscapeConfig::default()
+        }),
+    );
 }
 
 #[test]
@@ -123,11 +142,15 @@ fn whole_box_coverage_delivers_visits_without_direct_height_influence() {
     for gradient in [false, true] {
         let objective = FlatObjective::new(0.0);
         let config = BoxEnsembleConfig {
-            replicas: 4, budget: 512, history: HistoryMode::None,
+            replicas: 4,
+            budget: 512,
+            history: HistoryMode::None,
             ..BoxEnsembleConfig::default()
         };
         let coverage = BoxCoverageConfig {
-            radius: 2.0, height: 10.0, ..BoxCoverageConfig::default()
+            radius: 2.0,
+            height: 10.0,
+            ..BoxCoverageConfig::default()
         };
         let result = objective.run(gradient, &config, &coverage);
         assert!(result.coverage.applied_foreign_visits > 0);
@@ -149,11 +172,15 @@ fn overlapping_peer_coverage_can_change_acceptance_probabilities() {
     for gradient in [false, true] {
         let objective = FlatObjective::new(0.0);
         let config = BoxEnsembleConfig {
-            replicas: 4, budget: 512, history: HistoryMode::None,
+            replicas: 4,
+            budget: 512,
+            history: HistoryMode::None,
             ..BoxEnsembleConfig::default()
         };
         let coverage = BoxCoverageConfig {
-            radius: 0.2, height: 10.0, ..BoxCoverageConfig::default()
+            radius: 0.2,
+            height: 10.0,
+            ..BoxCoverageConfig::default()
         };
         let result = objective.run(gradient, &config, &coverage);
         let decisions = result.coverage_decisions;
