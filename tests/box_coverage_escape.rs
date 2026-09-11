@@ -185,3 +185,35 @@ fn certified_feedback_is_not_counted_twice_as_coverage_feedback() {
         );
     }
 }
+
+#[test]
+fn return_counters_match_paid_geometry_and_bounded_scale_changes() {
+    let radius = 0.01;
+    let (result, trace) = run(
+        false,
+        false,
+        BoxEscape::Gaussian,
+        HistoryMode::None,
+        radius,
+        0.1,
+    );
+    assert_eq!(trace.len(), 1 + 2 * result.hops);
+    let mut recrossings = 0;
+    let mut updates = 0;
+    let mut scale = 1.0_f64;
+    for hop in trace[1..].chunks_exact(2) {
+        assert_eq!(hop[1], array![0.0]);
+        if hop[0][0].abs() / 2.0 > radius {
+            recrossings += 1;
+            let increased = (scale * 1.05).min(4.0);
+            updates += usize::from(increased != scale);
+            scale = increased;
+        }
+    }
+    assert_eq!(result.coverage.recrossings, recrossings);
+    assert_eq!(result.coverage.escape_updates, updates);
+    assert_eq!(result.coverage.peer_recrossings, 0);
+    assert_eq!(result.coverage.peer_only_recrossings, 0);
+    assert!(recrossings > updates);
+    assert_eq!(scale, 4.0);
+}
