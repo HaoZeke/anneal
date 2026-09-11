@@ -674,6 +674,9 @@ def ensemble_optimize(
     replicas: int = 4,
     history: str = "shared",
     membership: str = "accepted",
+    *,
+    coverage_shared=None,
+    coverage_radius=None,
 ):
     """Search on a design box.
 
@@ -686,6 +689,12 @@ def ensemble_optimize(
     ``n_evals`` / ``n_grads``, their sum ``charged``, ``hops``, minimum-history
     diagnostics, and evaluated-region ``coverage_*`` counters. Coverage is
     not a count of certified minima.
+
+    ``coverage_shared`` overrides sharing independently of ``history``;
+    ``coverage_radius`` sets the normalized RMS parameter distance. Explicit
+    coverage controls select native hop chains, including for one replica.
+    With neither control, the one-replica values-only portfolio remains the
+    convenience policy. Neither coverage control requires a gradient.
 
     Coordinates are design variables regardless of dimension. Atomic
     symmetry-aware proposals require the explicit ``cluster_search`` adapter.
@@ -704,6 +713,8 @@ def ensemble_optimize(
         int(replicas),
         str(history),
         str(membership),
+        coverage_shared=coverage_shared,
+        coverage_radius=coverage_radius,
     )
     out["best_pos"] = np.asarray(out["best_pos"], dtype=np.float64)
     return out
@@ -882,6 +893,8 @@ def minimize(
     history="shared",
     membership="accepted",
     store=None,
+    coverage_shared=None,
+    coverage_radius=None,
 ):
     """Box search with a SciPy ``minimize`` shape.
 
@@ -893,6 +906,9 @@ def minimize(
     - ``history``: shared, private, or no minimum ledger. Its default also
       selects shared coverage; coverage itself needs no minimum certificate.
     - ``membership``: which certified observations enter the minimum ledger.
+    - ``coverage_shared`` and ``coverage_radius``: explicit native coverage
+      controls. Use ``history="none", coverage_shared=True`` to communicate
+      sampled parameter regions without requesting minimum certificates.
     - ``store``: existing parameter archive. An ``.h5`` / ``.hdf5`` path,
       a campaign directory that already holds a readcon-db corpus (params
       are written beside it, never padded into CON frames), or an object
@@ -939,6 +955,8 @@ def minimize(
         replicas=int(replicas),
         history=str(history),
         membership=str(membership),
+        coverage_shared=coverage_shared,
+        coverage_radius=coverage_radius,
     )
     fun_v = float(out["best_val"])
     best = np.asarray(out["best_pos"], dtype=np.float64)
