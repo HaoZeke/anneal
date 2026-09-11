@@ -39,8 +39,10 @@ use crate::pes_exploration::{ExactStructureWitness, StructureContext};
 
 mod coverage;
 mod free_coordinates;
+mod temperature;
 use coverage::Coverage;
 pub use coverage::{BoxCoverageConfig, CoverageDecisionStats, CoverageStats};
+use temperature::Temperatures;
 
 #[cfg(feature = "history-nng")]
 use crate::history_nng::{HistoryNngClient, HistoryNngServer};
@@ -422,6 +424,7 @@ where
     let mut n_evals = 0usize;
     let n_grads = 0usize;
     let mut history_observations = 0usize;
+    let mut temperatures = Temperatures::new(replica_count);
     for (index, replica) in replicas.iter_mut().enumerate() {
         if replica.budget == 0 {
             continue;
@@ -439,7 +442,7 @@ where
             coverage.observe(
                 index,
                 replica.cv.view(),
-                temp_of(replica.generation, replica.f),
+                temperatures.at(index, replica.generation),
             );
         }
         let before = replica.work;
@@ -468,7 +471,8 @@ where
             progressed = true;
             replica.generation += 1;
             replica.hops += 1;
-            coverage.hear(index, temp_of(replica.generation, replica.f));
+            let temp = temperatures.at(index, replica.generation);
+            coverage.hear(index, temp);
             let escape = replica.feedback.escape();
             replica.trial.assign(&replica.x);
             for j in 0..dim {
@@ -511,7 +515,6 @@ where
             let Some(trial_cv) = coverage.describe(trial_x.view(), trial_f) else {
                 continue;
             };
-            let temp = temp_of(replica.generation, replica.f);
             let accept = coverage.accepts(
                 index,
                 replica.cv.view(),
@@ -522,6 +525,7 @@ where
                 &mut replica.rng,
             );
             coverage.observe(index, trial_cv.view(), temp);
+            temperatures.observe(index, replica.f, trial_f);
             replica.adopt_trial(accept, trial_x, trial_f, trial_cv, report);
             if accept {
                 if let Some(report) = report {
@@ -887,6 +891,7 @@ where
     let mut n_evals = 0usize;
     let mut n_grads = 0usize;
     let mut history_observations = 0usize;
+    let mut temperatures = Temperatures::new(replica_count);
     let mut quench_allowances = vec![(2 * dim + 8).max(MIN_QUENCH); replica_count];
     for (index, replica) in replicas.iter_mut().enumerate() {
         if replica.budget == 0 {
@@ -922,7 +927,7 @@ where
             coverage.observe(
                 index,
                 replica.cv.view(),
-                temp_of(replica.generation, replica.f),
+                temperatures.at(index, replica.generation),
             );
         }
         if let Some(gradient) = certificate_gradient(
@@ -968,7 +973,8 @@ where
             progressed = true;
             replica.generation += 1;
             replica.hops += 1;
-            coverage.hear(index, temp_of(replica.generation, replica.f));
+            let temp = temperatures.at(index, replica.generation);
+            coverage.hear(index, temp);
             let escape = replica.feedback.escape();
             replica.trial.assign(&replica.x);
             match config.escape {
@@ -980,7 +986,7 @@ where
                     replica.trial = reflect_into_box(replica.trial.view(), &bounds);
                 }
                 BoxEscape::Langevin(settings) => {
-                    let temperature = temp_of(replica.generation, replica.f) * escape * escape;
+                    let temperature = temp * escape * escape;
                     let stepper = noise_states[index].get_or_insert_with(|| {
                         LangevinStepper::new(
                             settings.noise,
@@ -1055,7 +1061,6 @@ where
             let Some(trial_cv) = coverage.describe(trial_x.view(), trial_f) else {
                 continue;
             };
-            let temp = temp_of(replica.generation, replica.f);
             let accept = coverage.accepts(
                 index,
                 replica.cv.view(),
@@ -1066,6 +1071,7 @@ where
                 &mut replica.rng,
             );
             coverage.observe(index, trial_cv.view(), temp);
+            temperatures.observe(index, replica.f, trial_f);
             replica.adopt_trial(accept, trial_x, trial_f, trial_cv, report);
             if accept {
                 if let Some(report) = report {
@@ -1184,11 +1190,6 @@ impl Replica {
         self.cv = descriptor;
         self.here = report.map(|report| report.minimum);
     }
-}
-
-fn temp_of(generation: usize, energy: f64) -> f64 {
-    let scale = (1.0 + energy.abs()).max(1e-6);
-    scale * 5.0 * std::f64::consts::LN_2 / (generation as f64 + 1.0).ln().max(1e-12)
 }
 
 fn quench_depth(allowance: usize, remaining: usize) -> usize {
