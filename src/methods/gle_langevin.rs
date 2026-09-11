@@ -38,7 +38,10 @@ pub enum GleNoise {
     /// Fitted extended-state thermostat across the configured frequency band.
     Colored,
     /// Scalar Langevin friction, with no auxiliary momentum rows.
-    White { friction: f64 },
+    White {
+        /// Positive finite damping rate for the physical momentum.
+        friction: f64,
+    },
 }
 
 impl GleNoise {

@@ -1,0 +1,84 @@
+#+TITLE: Persistent colored-noise escape in communicating box chains
+
+* Select the escape mechanism
+
+The gradient box ensemble accepts =BoxEscape::Langevin= in its configuration.
+This replaces the proposal segment while retaining the bounded quench,
+minimum certificate, history, escape feedback and acceptance rule. It is a
+global-minimisation proposal mechanism, not a physical-time simulation.
+The default is =BoxEscape::Gaussian=, the reflected Gaussian kick.
+
+#+begin_src rust
+use anneal_core::methods::box_hopping::{
+    BoxEnsembleConfig, BoxEscape, GleEscapeConfig, box_ensemble_optimize,
+};
+use anneal_core::methods::ensemble::HistoryMode;
+
+let config = BoxEnsembleConfig {
+    replicas: 4,
+    budget: 8_000,
+    history: HistoryMode::Shared,
+    escape: BoxEscape::Langevin(GleEscapeConfig::default()),
+    ..BoxEnsembleConfig::default()
+};
+// objective supplies Objective<f64>; gradient supplies Gradient<f64>.
+let result = box_ensemble_optimize(&objective, &gradient, 7, Some(start.view()), &config);
+assert!(result.n_evals + result.n_grads <= config.budget);
+#+end_src
+
+=GleEscapeConfig= contains the maximum number of steps per escape, the lower
+frequency =omega0= of the fitted band, the requested =dt=, and the noise law.
+The defaults are 16 steps, =omega0= 0.2, =dt= 0.01 and colored noise. The
+effective timestep resolves the same upper band frequency for both noise
+laws. These are controls, not established optimal settings for every PES.
+
+Each chain owns its physical momentum, auxiliary momentum rows and noise
+generator. Segment boundaries preserve them. The optimization temperature
+uses the box temperature schedule multiplied by the square of the history
+escape scale; a temperature change rescales every momentum row together.
+A fresh raw gradient is paid at each occupied launch point. A quench's
+projected stationarity certificate cannot substitute for that force.
+
+* Account for the complete search
+
+A segment consumes one launch gradient and one gradient plus one objective
+per integration step. Its length shortens to reserve four combined work
+units for a bounded quench. Quench depth uses the actual residual allowance.
+A replica without a funded step and quench stops; it does not silently switch
+to the Gaussian control. Values-only search rejects this gradient-dependent
+selection before evaluating the objective.
+
+The terminal trajectory point feeds the quench even when the trajectory
+visits a lower objective elsewhere. Independently, the result retains the
+best finite feasible objective evaluation, including trajectory points and
+quench trials. Only certified quenches reach minimum history. Thus search
+occupancy, certified basin visits and the returned incumbent are distinct.
+
+The thermostat uses the same stepping implementation as standalone GLE.
+Its boundary rule is clipping in a Cartesian box, not a Manopt retraction.
+Atomic and molecular point-set constraints require their geometric path;
+the box option does not supply an atomic GLE escape by itself.
+
+* Run matched noise and communication controls
+
+For scalar-white noise, keep the same configuration and select
+=GleNoise::White { friction: 4.0 }= as the noise law. The comparison example
+=box_noise_comparison= runs Gaussian, scalar-white and colored proposals,
+each with private and shared in-process minimum histories. Its first replica
+starts at 2.5 in every coordinate; the others use the same seeded uniform
+starts across controls. The Rastrigin and conditioned-quadratic objectives
+have nonzero values at that supplied start.
+
+#+begin_src sh
+cargo run --locked --example box_noise_comparison -- 32 8000 4 16
+#+end_src
+
+The arguments are dimension, aggregate work budget, number of seeds and
+maximum Langevin steps. Each JSON result reports the objective and gradient
+counts, best value, hop count, history observations/refusals, shared deposits,
+summed history operation seconds and elapsed seconds. Private history size
+is the largest replica-local table; shared size is one ensemble-wide table.
+Those sizes are not interchangeable coverage measurements. The example
+rejects =HISTORY_NNG= so its communication comparison cannot be mislabeled
+as a network-transport measurement. These controls test integration and
+exploration; they are not a paper-wide state-of-the-art qualification.

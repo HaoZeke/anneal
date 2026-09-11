@@ -81,6 +81,10 @@ map the atomic, box-gradient and values-only entry points to their history,
 bias, census and coordinate-adoption channels, including certificate and
 charged-work boundaries.
 
+The [persistent box escape guide](docs/orgmode/howto/box-langevin-escape.org)
+connects colored or scalar-white Langevin proposals to that same quench and
+history path, with per-chain noise memory and combined callback accounting.
+
 ```rust
 use anneal_core::methods::cluster_hopping::{optimize, Config, Ledger};
 

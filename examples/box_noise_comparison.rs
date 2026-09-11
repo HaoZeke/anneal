@@ -173,7 +173,10 @@ fn main() {
                             "dimension": dim, "seed": seed, "noise": noise, "history": history_name,
                             "initial_value": initial_value, "best_value": result.best_val,
                             "n_evals": counts.0, "n_grads": counts.1, "budget": budget,
-                            "hops": result.hops, "history_minima": result.history_minima,
+                        "hops": result.hops, "history_minima": result.history_minima,
+                        "history_minima_scope": if matches!(history, HistoryMode::Private) {
+                            "largest-private-table"
+                        } else { "ensemble-shared-table" },
                             "history_observations": result.history_observations,
                             "history_refusals": result.history_cost.1, "history_seconds": result.history_cost.2,
                             "shared_deposits": result.shared_deposits, "elapsed_seconds": elapsed,
