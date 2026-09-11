@@ -68,3 +68,27 @@ def test_values_portfolio_does_not_claim_box_escape_feedback():
         replicas=1,
     )
     assert all(result[field] == 0 for field in FIELDS)
+
+
+@pytest.mark.parametrize("replicas", [1, 4])
+def test_values_results_expose_native_novelty_actions(replicas):
+    result = anneal.ensemble_optimize(
+        lambda x: 0.0,
+        np.full(8, -1.0),
+        np.full(8, 1.0),
+        budget=512,
+        seed=7,
+        replicas=replicas,
+        history="none",
+    )
+    assert (
+        0
+        <= result["coverage_novelty_updates"]
+        <= result["coverage_novel_arrivals"]
+        <= result["hops"]
+    )
+    if replicas == 1:
+        assert result["coverage_novel_arrivals"] == 0
+    else:
+        assert result["coverage_novelty_updates"] > 0
+    assert result["history_observations"] == 0
