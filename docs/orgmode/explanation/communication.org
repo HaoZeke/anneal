@@ -55,8 +55,8 @@ have interchangeable communication configurations.
 | Path | Information exchanged | Consumer and direct effect |
 |------+-----------------------+----------------------------|
 | =methods::ensemble::run_ensemble= | Exact-history reports, descriptor visit deltas, optional well tables and occupied structures | History feedback and local bias updates; optional two-choice restart constructs a fresh start |
-| =box_ensemble_optimize= | Evaluated-region descriptor/count events; optional certified minimum reports | Coverage changes local acceptance penalties; minimum reports supply escape feedback; local proposals and gradient polish generate coordinates |
-| =box_values_ensemble_optimize= | Same coverage stream; optional minimum reports with a finite-difference certificate | Coverage changes local acceptance penalties; local kick and pattern search generate coordinates without a gradient |
+| =box_ensemble_optimize= | Evaluated-region descriptor/count events; optional certified minimum reports | Coverage changes acceptance and supplies uncertified quench-return feedback; minimum reports supply authoritative escape feedback; local proposals and gradient polish generate coordinates |
+| =box_values_ensemble_optimize= | Same coverage stream; optional minimum reports with a finite-difference certificate | Coverage changes acceptance and supplies uncertified quench-return feedback; local kick and pattern search generate coordinates without a gradient |
 | =CensusBus= live-minimum messages | Replica, hop count, energy, Cartesian coordinates | Nearby-peer count, packing references and optionally remote bias deposits; no direct coordinate adoption |
 | Census-bus well messages | Descriptor centres and accumulated well depths | A =MergeBias= checkpoint action updates local well depths |
 | Catalog coordinator | Validated candidates, policy state, population plans and work records | Hearing, population and other boundary policies can construct or adopt coordinates |
@@ -168,6 +168,34 @@ summed as a unique ensemble census. =result.shared_deposits= is the applied
 foreign coverage count. The current box coverage exchange is in-process;
 the NNG history transport below carries minimum reports, not this stream.
 
+** Coverage returns inform escape without minimum identity
+
+A paid pre-polish launch outside a known coverage region followed by a
+retained quench endpoint inside it supplies recrossing evidence. When no
+minimum report supplies feedback, this return updates the existing bounded
+=EscapeFeedback= controller. A return to the occupied region uses its
+same-return rate; a return to another known region uses its known-return
+rate and admitted local-plus-peer visit count. Coverage IDs never enter
+the minimum-identity map. A certified report supplies one authoritative
+update, not an additional coverage update.
+
+The check uses the actual return-region ball, so overlapping regions cannot
+manufacture a departure merely by selecting different IDs. Staying inside
+a region, reaching an unknown region, and flat motion without a quench
+return do not supply this evidence. Zero coverage height disables the
+additional feedback. The update changes the next Gaussian width or the
+next Langevin excitation through the existing scale control; persistent
+noise state is retained. No extra objective call, gradient call, random
+draw or coverage deposit is required.
+
+=result.coverage.recrossings= counts these uncertified return updates;
+=peer_recrossings= identifies return regions containing admitted foreign
+visits, and =peer_only_recrossings= identifies those without local arrivals
+in the selected region. These are conditional counts under the actual
+region map, not a private-chain replay. =escape_updates= counts changes to
+the bounded scale, excluding returns at its ceiling. They are distinct
+from the terminal-acceptance influence measurements below.
+
 ** Measure delivery separately from decision influence
 
 =result.coverage_decisions= records the acceptance comparisons that consume
@@ -216,9 +244,14 @@ Three different questions require three different checks.
    its configured tolerance. The atomic runner also has its own relaxation
    certificate. The box paths use a history tolerance of =1e-3=; the
    values-only path pays for a base objective and a distinct feasible
-   one-sided probe on each nonfixed coordinate. Both box paths project the
-   certificate onto feasible bound directions. These are numerical admission rules, not a
-   proof of global optimality or a positive-definite Hessian.
+   one-sided probe on each nonfixed coordinate when a history consumer is
+   enabled. Coverage-only pattern-search hops neither reserve nor spend
+   that certificate work. An initial allowance too small for a funded
+   pattern sweep retains its terminal finite-difference fallback; every
+   measured probe remains a raw-incumbent candidate. Both box paths project
+   certificates onto feasible bound directions. These are numerical
+   admission rules, not a proof of global optimality or a positive-definite
+   Hessian.
 2. /Is this the same minimum?/ The
    [[file:../../../src/methods/minima_hopping/history.rs][minimum history]]
    delegates identity to =PesNetwork= and the configured
