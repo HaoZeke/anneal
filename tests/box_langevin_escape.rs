@@ -113,7 +113,11 @@ fn box_langevin_keeps_noise_memory_and_quenches_terminal_endpoints() {
         }
 
         let result = box_ensemble_optimize(
-            &surface, &surface, seed, Some(start.view()), &config(noise, 20),
+            &surface,
+            &surface,
+            seed,
+            Some(start.view()),
+            &config(noise, 20),
         );
         let objectives = surface.objectives.lock().unwrap();
         let gradients = surface.gradients.lock().unwrap();
@@ -121,10 +125,19 @@ fn box_langevin_keeps_noise_memory_and_quenches_terminal_endpoints() {
         assert_eq!((result.n_evals, result.n_grads), (7, 9));
         assert_eq!(objectives.len(), 7);
         assert_eq!(gradients.len(), 9);
-        assert_eq!(*objectives, expected, "{noise:?}: persistent terminal trace");
-        assert_eq!(gradients[1], start, "fresh launch force for the first segment");
+        assert_eq!(
+            *objectives, expected,
+            "{noise:?}: persistent terminal trace"
+        );
+        assert_eq!(
+            gradients[1], start,
+            "fresh launch force for the first segment"
+        );
         assert_eq!(gradients[5], expected[3], "fresh launch force after quench");
-        assert_eq!(result.best_pos, start, "equal-value escapes do not replace the incumbent");
+        assert_eq!(
+            result.best_pos, start,
+            "equal-value escapes do not replace the incumbent"
+        );
         assert_eq!(result.history_observations, 0);
     }
 }
@@ -144,17 +157,27 @@ fn box_langevin_uses_raw_force_at_a_constrained_minimum() {
         .expect("a positive launch velocity");
     let surface = Surface::new(true);
     let result = box_ensemble_optimize(
-        &surface, &surface, seed, Some(array![0.0].view()), &config(noise, 9),
+        &surface,
+        &surface,
+        seed,
+        Some(array![0.0].view()),
+        &config(noise, 9),
     );
     let objectives = surface.objectives.lock().unwrap();
     let gradients = surface.gradients.lock().unwrap();
     let expected = (momentum - 0.005) * 0.01;
     assert_eq!(result.hops, 1);
-    assert_eq!(objectives[1][0], expected, "raw gradient is one, not projected zero");
+    assert_eq!(
+        objectives[1][0], expected,
+        "raw gradient is one, not projected zero"
+    );
     assert_eq!(gradients[0], array![0.0]);
     assert_eq!(gradients[1], array![0.0]);
     assert_eq!(gradients[2], array![expected]);
-    assert_eq!((result.n_evals, result.n_grads), (objectives.len(), gradients.len()));
+    assert_eq!(
+        (result.n_evals, result.n_grads),
+        (objectives.len(), gradients.len())
+    );
     assert!(result.n_evals + result.n_grads <= 9);
 }
 
@@ -173,7 +196,10 @@ fn box_langevin_charges_segments_and_reserves_quench_work() {
                     surface.gradients.lock().unwrap().len(),
                 );
                 assert_eq!((result.n_evals, result.n_grads), counts);
-                assert!(counts.0 + counts.1 <= budget, "{noise:?} {history:?} budget {budget}");
+                assert!(
+                    counts.0 + counts.1 <= budget,
+                    "{noise:?} {history:?} budget {budget}"
+                );
                 assert!(counts.0 > 0);
                 if budget >= 48 {
                     assert!(result.hops >= 3, "every replica has a funded escape");
