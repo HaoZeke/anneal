@@ -20,8 +20,7 @@ impl Temperatures {
             .as_ref()
             .map_or(1.0, AdaptiveHeight::gap_estimate)
             .max(1e-12);
-        scale * 5.0 * std::f64::consts::LN_2
-            / (generation as f64 + 1.0).ln().max(1e-12)
+        scale * 5.0 * std::f64::consts::LN_2 / (generation as f64 + 1.0).ln().max(1e-12)
     }
 
     /// Every finite uphill trial supplies evidence, including rejected trials.
@@ -31,8 +30,7 @@ impl Temperatures {
         if !gap.is_finite() || gap <= 0.0 {
             return;
         }
-        let estimate = self.gaps[replica]
-            .get_or_insert_with(|| AdaptiveHeight::new(0.5, 1.0, gap));
+        let estimate = self.gaps[replica].get_or_insert_with(|| AdaptiveHeight::new(0.5, 1.0, gap));
         estimate.observe(gap);
     }
 }
