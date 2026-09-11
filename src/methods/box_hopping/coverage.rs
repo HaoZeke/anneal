@@ -315,7 +315,8 @@ impl Coverage {
         rng: &mut R,
     ) {
         let mut stats = RepulsionStats::default();
-        self.repulsion_field(replica).repel(anchor, proposal, rng, &mut stats);
+        self.repulsion_field(replica)
+            .repel(anchor, proposal, rng, &mut stats);
         self.record_repulsion(stats);
     }
 
