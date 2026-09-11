@@ -47,8 +47,8 @@ use crate::methods::bayesian_pilot::{
 };
 use crate::methods::gle_langevin::gle_langevin_preconditioned_sa;
 use crate::methods::local_polish::{
-    QmcPolishResult, projected_gradient_polish, qmc_gsa_global_search,
-    qmc_trust_region_poll, shifted_qmc_projected_gradient_polish,
+    QmcPolishResult, projected_gradient_polish, qmc_gsa_global_search, qmc_trust_region_poll,
+    shifted_qmc_projected_gradient_polish,
 };
 use crate::methods::parallel_tempering::{ParallelTemperingSampler, geometric_ladder};
 use crate::movekernel::{MoveKernel, TsallisVisit};
