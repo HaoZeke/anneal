@@ -111,6 +111,17 @@ including rejected probes, and can improve the returned raw incumbent. This
 local refinement does not make the two global controllers identical or certify
 global optimality.
 
+To compare cooperation without changing controllers, use
+`methods::portfolio::portfolio_ensemble_optimize`, or Python
+`global_optimize(..., replicas=4, coverage_shared=True)`. Every replica keeps
+one uninterrupted portfolio; `coverage_shared=False` gives the same controller
+and work split without peer samples. This differs from `minimize`'s documented
+one-portfolio/multiple-hop convenience policy. Peer samples move nearby global
+proposals in normalized box coordinates, without a Jacobian, force callback,
+minimum certificate, or replacement of the raw objective. The
+[portfolio interaction contract](docs/orgmode/explanation/communication.org)
+names the proposal paths, budget rules, and transport limits.
+
 `nfev` and `njev` count actual objective and gradient calls; `charged` is their
 sum. `diagnostics` preserves the underlying work, history, and coverage fields.
 `success` means a finite feasible candidate was returned, not that global
