@@ -40,7 +40,7 @@ use crate::pes_exploration::{ExactStructureWitness, StructureContext};
 mod coverage;
 mod free_coordinates;
 use coverage::Coverage;
-pub use coverage::{BoxCoverageConfig, CoverageStats};
+pub use coverage::{BoxCoverageConfig, CoverageDecisionStats, CoverageStats};
 
 #[cfg(feature = "history-nng")]
 use crate::history_nng::{HistoryNngClient, HistoryNngServer};
@@ -170,6 +170,8 @@ pub struct BoxEnsembleResult {
     pub shared_deposits: usize,
     /// Evaluated-region coverage, independent of the certified-minimum ledger.
     pub coverage: CoverageStats,
+    /// Conditional direct influence of imported coverage heights on acceptance.
+    pub coverage_decisions: CoverageDecisionStats,
 }
 
 /// Outcome of [`ensemble_hop_optimize`], retaining actual work and coverage.
@@ -200,6 +202,8 @@ pub struct EnsembleHopResult {
     pub history_cost: (usize, usize, f64),
     /// Evaluated-region coverage; empty for the one-replica values-only portfolio.
     pub coverage: CoverageStats,
+    /// Conditional direct influence of imported coverage heights on acceptance.
+    pub coverage_decisions: CoverageDecisionStats,
 }
 
 /// Search on `obj`: hop and quench when `grad` is present.
@@ -247,6 +251,7 @@ where
             history_minima: 0,
             history_cost: (0, 0, 0.0),
             coverage: CoverageStats::default(),
+            coverage_decisions: CoverageDecisionStats::default(),
         };
     }
     let config = BoxEnsembleConfig {
@@ -272,6 +277,7 @@ impl From<BoxEnsembleResult> for EnsembleHopResult {
             history_minima: out.history_minima,
             history_cost: out.history_cost,
             coverage: out.coverage,
+            coverage_decisions: out.coverage_decisions,
         }
     }
 }
@@ -506,11 +512,10 @@ where
                 continue;
             };
             let temp = temp_of(replica.generation, replica.f);
-            let v_here = coverage.potential(index, replica.cv.view());
-            let v_trial = coverage.potential(index, trial_cv.view());
-            let delta = (trial_f + v_trial) - (replica.f + v_here);
-            let accept =
-                delta <= 0.0 || replica.rng.random::<f64>() < (-delta / temp.max(1e-300)).exp();
+            let accept = coverage.accepts(
+                index, replica.cv.view(), trial_cv.view(), replica.f, trial_f, temp,
+                &mut replica.rng,
+            );
             coverage.observe(index, trial_cv.view(), temp);
             replica.adopt_trial(accept, trial_x, trial_f, trial_cv, report);
             if accept {
@@ -546,7 +551,7 @@ where
             .unwrap_or(0)
     });
 
-    let coverage = coverage.finish();
+    let (coverage, coverage_decisions) = coverage.finish();
     BoxEnsembleResult {
         best_pos,
         best_val,
@@ -558,6 +563,7 @@ where
         history_cost: total_history_cost(&hooks),
         shared_deposits: coverage.applied_foreign_visits,
         coverage,
+        coverage_decisions,
     }
 }
 
@@ -1045,11 +1051,10 @@ where
                 continue;
             };
             let temp = temp_of(replica.generation, replica.f);
-            let v_here = coverage.potential(index, replica.cv.view());
-            let v_trial = coverage.potential(index, trial_cv.view());
-            let delta = (trial_f + v_trial) - (replica.f + v_here);
-            let accept =
-                delta <= 0.0 || replica.rng.random::<f64>() < (-delta / temp.max(1e-300)).exp();
+            let accept = coverage.accepts(
+                index, replica.cv.view(), trial_cv.view(), replica.f, trial_f, temp,
+                &mut replica.rng,
+            );
             coverage.observe(index, trial_cv.view(), temp);
             replica.adopt_trial(accept, trial_x, trial_f, trial_cv, report);
             if accept {
@@ -1085,7 +1090,7 @@ where
             .unwrap_or(0)
     });
 
-    let coverage = coverage.finish();
+    let (coverage, coverage_decisions) = coverage.finish();
     BoxEnsembleResult {
         best_pos,
         best_val,
@@ -1097,6 +1102,7 @@ where
         history_cost: total_history_cost(&hooks),
         shared_deposits: coverage.applied_foreign_visits,
         coverage,
+        coverage_decisions,
     }
 }
 
