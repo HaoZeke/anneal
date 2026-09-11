@@ -142,16 +142,26 @@ pub struct TsallisVisit {
 /// SciPy `dual_annealing` `TAIL_LIMIT`: visiting steps are clipped to this.
 const VISIT_TAIL_LIMIT: f64 = 1.0e8;
 
+/// Prepared Schuur/Xiang transform shared by native and array visiting kernels.
+#[derive(Clone, Copy, Debug)]
+pub struct TsallisVisitParameters {
+    /// Multiplier of the numerator's standard-normal sample.
+    pub scale: f64,
+    /// Power of the absolute denominator standard-normal sample.
+    pub exponent: f64,
+    /// Magnitude beyond which a displacement is randomized within the tail cap.
+    pub tail_limit: f64,
+}
+
 impl TsallisVisit {
     /// Constructs a Tsallis visit kernel. Asserts `1 < q_v < 3`.
     pub fn new(q_v: f64) -> Self {
         assert!(q_v > 1.0 && q_v < 3.0, "q_v must lie in (1, 3)");
         Self { q_v }
     }
-}
 
-impl MoveKernel<f64> for TsallisVisit {
-    fn propose<R: Rng + ?Sized>(&self, i: ArrayView1<f64>, t: f64, rng: &mut R) -> Array1<f64> {
+    /// Prepare the native visiting transform at the supplied temperature.
+    pub fn parameters(&self, t: f64) -> TsallisVisitParameters {
         let qv = self.q_v;
         // SciPy dual_annealing VisitingDistribution constants (qv-dependent).
         let factor2 = (qv - 1.0).powf(4.0 - qv);
@@ -164,15 +174,26 @@ impl MoveKernel<f64> for TsallisVisit {
         let factor4 = factor4_p * factor1;
         let exponent = (qv - 1.0) / (3.0 - qv);
         let sigma = (factor4 / factor6).powf(exponent);
+        TsallisVisitParameters {
+            scale: sigma,
+            exponent,
+            tail_limit: VISIT_TAIL_LIMIT,
+        }
+    }
+}
+
+impl MoveKernel<f64> for TsallisVisit {
+    fn propose<R: Rng + ?Sized>(&self, i: ArrayView1<f64>, t: f64, rng: &mut R) -> Array1<f64> {
+        let parameters = self.parameters(t);
         let normal = NormalDist::new(0.0, 1.0).expect("std normal");
         Array1::from_iter(i.iter().map(|&xi| {
             let x: f64 = normal.sample(rng);
             let y: f64 = normal.sample(rng);
-            let mut v = sigma * x / y.abs().powf(exponent);
-            if v > VISIT_TAIL_LIMIT {
-                v = VISIT_TAIL_LIMIT * rng.random::<f64>();
-            } else if v < -VISIT_TAIL_LIMIT {
-                v = -VISIT_TAIL_LIMIT * rng.random::<f64>();
+            let mut v = parameters.scale * x / y.abs().powf(parameters.exponent);
+            if v > parameters.tail_limit {
+                v = parameters.tail_limit * rng.random::<f64>();
+            } else if v < -parameters.tail_limit {
+                v = -parameters.tail_limit * rng.random::<f64>();
             }
             xi + v
         }))
