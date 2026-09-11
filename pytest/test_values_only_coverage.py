@@ -51,7 +51,9 @@ def test_parameter_positions_communicate_without_derivatives_or_minima(entry, sh
     np.testing.assert_array_equal(diagnostics["best_pos"], start)
 
     free = high > low
-    offsets = np.max(np.abs((points[:, free] - start[free]) / (high - low)[free]), axis=1)
+    offsets = np.max(
+        np.abs((points[:, free] - start[free]) / (high - low)[free]), axis=1
+    )
     assert np.count_nonzero((offsets > 0.0) & (offsets <= 1e-5)) == 0
     if shared:
         assert diagnostics["coverage_published_samples"] > 0
@@ -72,7 +74,9 @@ def test_invalid_coverage_radius_is_rejected_before_evaluation(entry, radius):
         evaluated.append(parameters.copy())
         return 0.0
 
-    options = dict(budget=32, history="none", coverage_shared=True, coverage_radius=radius)
+    options = dict(
+        budget=32, history="none", coverage_shared=True, coverage_radius=radius
+    )
     with pytest.raises(ValueError, match="coverage radius"):
         if entry == "minimize":
             anneal.minimize(value_only, [0.0], [(-1.0, 1.0)], **options)
