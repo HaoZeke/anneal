@@ -9,6 +9,22 @@ Its bundled native library reports NNG 1.4.0. The MIT licenses remain in
 Registry cache markers are not part of this source import. Two comments use
 the standards names =RFC 6455= and =NIST 800= with space-separated numbering.
 
+* Rust wrapper and dependency selection
+
+=nng= is imported from the published =1.0.1= crate, whose archive SHA256 is
+=20a18ed7ec1c8ff1658bcfea2ce76dcedf8be21dd9e8dd2e9762ba9632d16203=.
+Its MIT license remains in =nng/LICENSE=. The root dependency selects this
+wrapper by path, and the wrapper selects =../nng-sys= by path. Both
+=bank-rpc= and =history-nng= therefore select the patched native source in
+checkout builds, Git-source consumers, and native wheels built from them.
+This does not depend on a workspace-root =[patch.crates-io]= override.
+
+Cargo rewrites path dependencies to their registry versions when publishing
+a crate. The version fields are compatibility constraints, not evidence that
+a registry release contains this repair. A crates.io source distribution
+requires its own dependency provenance check; the local path repair alone
+does not establish that release's native implementation.
+
 * Pair0 callback ordering
 
 =pair0_pipe_stop= drains send and receive callbacks before clearing the
