@@ -1264,10 +1264,7 @@ fn main() {
     // Where the seed numbering starts, so a campaign can put one seed on each
     // core instead of walking them in one process. Seeds are the same runs
     // either way: seed 5 of one process and seed 5 of another are identical.
-    let seed0: u64 = std::env::var("SEED_OFFSET")
-        .ok()
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(0);
+    let seed0: u64 = anneal_core::env::parsed("SEED_OFFSET").unwrap_or(0);
 
     let reference = reference(n);
     // Random structure search: the evaluation-matched baseline. Random starts,
@@ -1679,24 +1676,15 @@ fn main() {
     if opts.contains(&"reocc") {
         cfg.reoccupy =
             Some(anneal_core::methods::lattice_search::LatticeSearchConfig::lennard_jones(n));
-        cfg.reoccupy_interval = std::env::var("REOCCUPY_INTERVAL")
-            .ok()
-            .and_then(|v| v.parse().ok())
-            .unwrap_or(5_000);
+        cfg.reoccupy_interval = anneal_core::env::parsed("REOCCUPY_INTERVAL").unwrap_or(5_000);
         println!(
             "  reoccupation move every {} charged calls",
             cfg.reoccupy_interval
         );
     }
     let coreclass = opts.contains(&"coreclass");
-    let core_patience = std::env::var("CORE_PATIENCE")
-        .ok()
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(10_000);
-    let core_trial = std::env::var("CORE_TRIAL")
-        .ok()
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(2_000);
+    let core_patience = anneal_core::env::parsed("CORE_PATIENCE").unwrap_or(10_000);
+    let core_trial = anneal_core::env::parsed("CORE_TRIAL").unwrap_or(2_000);
     if coreclass {
         println!("  core-class table: patience {core_patience}, trial {core_trial}");
     }
@@ -1771,8 +1759,7 @@ fn main() {
     cfg.path_on_stall = opts.contains(&"path");
     // Stall exits through the recorded basin entry, named so it is
     // measurable against the Lanczos climb rather than replacing it.
-    cfg.trail_on_stall = opts.contains(&"trail")
-        || std::env::var("CLUSTER_TRAIL_EXIT").is_ok_and(|value| value == "1");
+    cfg.trail_on_stall = opts.contains(&"trail") || anneal_core::env::flag("CLUSTER_TRAIL_EXIT");
     // Do not clobber Config::recommended: that hop already turns the
     // return screen on. The flag only adds it to for_cluster.
     if opts.contains(&"rscreen") {
@@ -1809,22 +1796,19 @@ fn main() {
     // set the time step and the kinetic energy per unit escape scale.
     cfg.md_escape = opts.contains(&"mhmd");
     cfg.orbit_complete_on_new = opts.contains(&"orbit");
-    if let Some(dt) = std::env::var("MD_DT").ok().and_then(|v| v.parse().ok()) {
+    if let Some(dt) = anneal_core::env::parsed("MD_DT") {
         cfg.md_escape_dt = dt;
     }
-    if let Some(k) = std::env::var("MD_KINETIC")
-        .ok()
-        .and_then(|v| v.parse().ok())
-    {
+    if let Some(k) = anneal_core::env::parsed("MD_KINETIC") {
         cfg.md_escape_kinetic = k;
     }
-    if let Some(m) = std::env::var("MD_MINIMA").ok().and_then(|v| v.parse().ok()) {
+    if let Some(m) = anneal_core::env::parsed("MD_MINIMA") {
         cfg.md_escape_minima = m;
     }
-    if let Some(m) = std::env::var("MD_STEPS").ok().and_then(|v| v.parse().ok()) {
+    if let Some(m) = anneal_core::env::parsed("MD_STEPS") {
         cfg.md_escape_max_steps = m;
     }
-    if let Some(m) = std::env::var("MD_SOFTEN").ok().and_then(|v| v.parse().ok()) {
+    if let Some(m) = anneal_core::env::parsed("MD_SOFTEN") {
         cfg.md_escape_soften = m;
     }
     // The radius read off the search's own step length rather than swept.
@@ -1833,18 +1817,12 @@ fn main() {
     cfg.restart_on_stall = opts.contains(&"restart");
     // RESTART_PATIENCE sets the charged calls without a new best before a
     // stalled chain restarts from a fresh random cluster.
-    if let Some(patience) = std::env::var("RESTART_PATIENCE")
-        .ok()
-        .and_then(|v| v.parse::<usize>().ok())
-    {
+    if let Some(patience) = anneal_core::env::parsed::<usize>("RESTART_PATIENCE") {
         cfg.restart_patience = patience.max(1);
         println!("  restart patience {} charged calls", cfg.restart_patience);
     }
     // STALL_PATIENCE sets the hops without improvement before a stall.
-    if let Some(patience) = std::env::var("STALL_PATIENCE")
-        .ok()
-        .and_then(|v| v.parse::<usize>().ok())
-    {
+    if let Some(patience) = anneal_core::env::parsed::<usize>("STALL_PATIENCE") {
         cfg.stall_patience = patience.max(1);
         println!("  stall patience {} hops", cfg.stall_patience);
     }
@@ -1858,22 +1836,13 @@ fn main() {
     cfg.soap_repel = opts.contains(&"repel");
     // Occasional jumping on stagnation (Iwamatsu-Okabe).
     cfg.jump_on_stall = opts.contains(&"jump");
-    if let Some(p) = std::env::var("JUMP_PATIENCE")
-        .ok()
-        .and_then(|v| v.parse::<usize>().ok())
-    {
+    if let Some(p) = anneal_core::env::parsed::<usize>("JUMP_PATIENCE") {
         cfg.jump_patience = p;
     }
-    if let Some(k) = std::env::var("JUMP_STEPS")
-        .ok()
-        .and_then(|v| v.parse::<usize>().ok())
-    {
+    if let Some(k) = anneal_core::env::parsed::<usize>("JUMP_STEPS") {
         cfg.jump_steps = k;
     }
-    if let Some(h) = std::env::var("JUMP_STEP")
-        .ok()
-        .and_then(|v| v.parse::<f64>().ok())
-    {
+    if let Some(h) = anneal_core::env::parsed::<f64>("JUMP_STEP") {
         cfg.jump_step = h * cfg.length_scale;
     }
     if cfg.jump_on_stall {
@@ -1884,25 +1853,16 @@ fn main() {
     }
     // Heard structures face the receiving chain's biased-energy filter
     // unless unconditional adoption is requested explicitly.
-    cfg.exchange_metropolis = !std::env::var("CATALOG_HEAR_UNCONDITIONAL").is_ok_and(|v| v == "1");
-    if let Some(g) = std::env::var("BIAS_GAMMA")
-        .ok()
-        .and_then(|v| v.parse::<f64>().ok())
-    {
+    cfg.exchange_metropolis = !anneal_core::env::flag("CATALOG_HEAR_UNCONDITIONAL");
+    if let Some(g) = anneal_core::env::parsed::<f64>("BIAS_GAMMA") {
         cfg.bias_gamma = g;
         println!("  bias gamma {g}");
     }
-    if let Some(frac) = std::env::var("PSYM_CORE")
-        .ok()
-        .and_then(|v| v.parse::<f64>().ok())
-    {
+    if let Some(frac) = anneal_core::env::parsed::<f64>("PSYM_CORE") {
         cfg.symmetrise_core_fraction = frac;
         println!("  symmetrise core fraction {frac}");
     }
-    if let Some(tol) = std::env::var("SYM_TOL")
-        .ok()
-        .and_then(|v| v.parse::<f64>().ok())
-    {
+    if let Some(tol) = anneal_core::env::parsed::<f64>("SYM_TOL") {
         cfg.symmetry_tolerance = tol * cfg.length_scale;
         println!("  symmetry tolerance {tol}");
     }
@@ -1923,10 +1883,7 @@ fn main() {
             cfg.merge_radius = anneal_core::featomic_hop::SOAP_PACK_MERGE;
         }
         cfg.adaptive_height = true;
-        cfg.height_revisits = std::env::var("HEIGHT_REVISITS")
-            .ok()
-            .and_then(|v| v.parse::<f64>().ok())
-            .unwrap_or(20.0);
+        cfg.height_revisits = anneal_core::env::parsed::<f64>("HEIGHT_REVISITS").unwrap_or(20.0);
         println!(
             "  packing-family keyed bias, merge {}, adaptive height N_f={}",
             cfg.merge_radius, cfg.height_revisits
@@ -2043,10 +2000,7 @@ fn main() {
         None
     };
     if let Some(mode) = ladder_mode {
-        cfg.replicas = std::env::var("REPLICAS")
-            .ok()
-            .and_then(|v| v.parse().ok())
-            .unwrap_or(4);
+        cfg.replicas = anneal_core::env::parsed("REPLICAS").unwrap_or(4);
         cfg.ladder_mode = mode;
         // The swap period is the ladder's unit of time and the budget decides
         // how many units there are: at LJ38 with 4e5 charged evaluations a run
@@ -2073,9 +2027,7 @@ fn main() {
         // acceptance has grown tenfold and the rung still freezes back;
         // at the default 4.0 the two upper rungs of a 0.8 chain run at
         // 2.0 and 3.2, which is liquid.
-        if let Some(top) = std::env::var("PT_LADDER_TOP")
-            .ok()
-            .and_then(|value| value.parse::<f64>().ok())
+        if let Some(top) = anneal_core::env::parsed::<f64>("PT_LADDER_TOP")
             .filter(|value| value.is_finite() && *value > 1.0)
         {
             cfg.ladder_top = top;
@@ -2102,10 +2054,7 @@ fn main() {
         println!("  merge radius {r}");
     }
     // Acceptance temperature in energy units; Wales--Doye's 0.8 is the preset.
-    if let Some(t) = std::env::var("TEMPERATURE")
-        .ok()
-        .and_then(|v| v.parse::<f64>().ok())
-    {
+    if let Some(t) = anneal_core::env::parsed::<f64>("TEMPERATURE") {
         cfg.temperature = t * cfg.energy_scale;
         println!("  acceptance temperature {t} E0");
     }
@@ -2169,14 +2118,8 @@ fn main() {
         acquisition: opts.contains(&"acq"),
         slice: env("BANK_SLICE", 3_000),
         seeding: capacity,
-        dcut_floor: std::env::var("BANK_DCUT_FLOOR")
-            .ok()
-            .and_then(|v| v.parse().ok())
-            .unwrap_or(0.4),
-        mix_fraction: std::env::var("BANK_MIX")
-            .ok()
-            .and_then(|v| v.parse().ok())
-            .unwrap_or(0.0),
+        dcut_floor: anneal_core::env::parsed("BANK_DCUT_FLOOR").unwrap_or(0.4),
+        mix_fraction: anneal_core::env::parsed("BANK_MIX").unwrap_or(0.0),
         mix_images: env("BANK_MIX_IMAGES", 20),
         random_images: env("BANK_RANDOM", 10),
         deadlock_iters: env("BANK_DEADLOCK_ITERS", 3),
@@ -2201,10 +2144,7 @@ fn main() {
     // contract of the NVE escape-history comparison: identical replica seeds
     // and starts in both arms, one aggregate budget, first-discovery
     // aggregate calls on the record.
-    if let Some(replicas) = std::env::var("HISTORY_REPLICAS")
-        .ok()
-        .and_then(|v| v.parse::<usize>().ok())
-    {
+    if let Some(replicas) = anneal_core::env::parsed::<usize>("HISTORY_REPLICAS") {
         run_history_ensembles(&cfg, n, budget, seed0, seeds, reference, replicas, &opts);
         return;
     }
@@ -2240,17 +2180,12 @@ fn main() {
         let screen_steps = cfg.screen_steps;
         // Noise on the screening descent, as a fraction of the local gradient.
         // Zero reproduces the clean quench exactly.
-        let noise_eta: f64 = std::env::var("QUENCH_NOISE")
-            .ok()
-            .and_then(|v| v.parse().ok())
-            .unwrap_or(0.0);
+        let noise_eta: f64 = anneal_core::env::parsed("QUENCH_NOISE").unwrap_or(0.0);
         let mut qrng = <rand::rngs::StdRng as rand::SeedableRng>::seed_from_u64(
             seed.wrapping_mul(0x9E3779B97F4A7C15).wrapping_add(17),
         );
         let two_phase = cfg.two_phase.filter(|two| two.is_active());
-        let surface_block = std::env::var("SURFACE_BLOCK")
-            .ok()
-            .and_then(|v| v.parse().ok())
+        let surface_block = anneal_core::env::parsed("SURFACE_BLOCK")
             .unwrap_or(anneal_core::methods::two_phase::DEFAULT_SURFACE_BLOCK);
         let surfaces = (!cfg.surfaces.is_empty()).then(|| {
             Arc::new(Mutex::new(
@@ -2564,11 +2499,7 @@ fn main() {
             );
             let table = Arc::clone(table);
             let mut adopt_rng = rand::rngs::StdRng::seed_from_u64(seed ^ 0xC0A1);
-            let interval = std::env::var("CHECKPOINT")
-                .ok()
-                .and_then(|v| v.parse().ok())
-                .unwrap_or(500)
-                .max(1);
+            let interval = anneal_core::env::parsed("CHECKPOINT").unwrap_or(500).max(1);
             let mut checkpoint = |snapshot: ChainCheckpoint<'_>| {
                 let class = motif_class(snapshot.current_state()).index();
                 let mut table = table.lock().expect("core-class table");
@@ -3860,14 +3791,8 @@ fn census_restart_phase(
     run_cfg: &Config,
 ) -> Option<Array1<f64>> {
     use rand::SeedableRng;
-    let visits: u64 = std::env::var("CATALOG_RESTART_VISITS")
-        .ok()
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(0);
-    let quiet: usize = std::env::var("CATALOG_RESTART_QUIET")
-        .ok()
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(20_000);
+    let visits: u64 = anneal_core::env::parsed("CATALOG_RESTART_VISITS").unwrap_or(0);
+    let quiet: usize = anneal_core::env::parsed("CATALOG_RESTART_QUIET").unwrap_or(20_000);
     if visits == 0
         || crowd < visits
         || quiet_now < quiet
@@ -3922,14 +3847,9 @@ fn census_jump_phase(
     length_scale: f64,
 ) -> Option<Vec<f64>> {
     use rand::{Rng, SeedableRng};
-    let census_jump_visits: u64 = std::env::var("CATALOG_JUMP_VISITS")
-        .ok()
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(0);
-    let census_jump_cooldown: usize = std::env::var("CATALOG_JUMP_COOLDOWN")
-        .ok()
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(2000);
+    let census_jump_visits: u64 = anneal_core::env::parsed("CATALOG_JUMP_VISITS").unwrap_or(0);
+    let census_jump_cooldown: usize =
+        anneal_core::env::parsed("CATALOG_JUMP_COOLDOWN").unwrap_or(2000);
     if census_jump_visits == 0
         || local_basin_visits < census_jump_visits
         || snapshot.hops().saturating_sub(state.last_hop) < census_jump_cooldown
@@ -3941,15 +3861,8 @@ fn census_jump_phase(
     let mut jump_rng = rand::rngs::StdRng::seed_from_u64(
         (u64::from(replica) << 40) ^ checkpoint_sequence.wrapping_mul(0x9E37_79B9_7F4A_7C15),
     );
-    let steps: usize = std::env::var("JUMP_STEPS")
-        .ok()
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(10);
-    let half: f64 = std::env::var("JUMP_STEP")
-        .ok()
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(0.38)
-        * length_scale;
+    let steps: usize = anneal_core::env::parsed("JUMP_STEPS").unwrap_or(10);
+    let half: f64 = anneal_core::env::parsed("JUMP_STEP").unwrap_or(0.38) * length_scale;
     let mut jumped = here.to_vec();
     for _ in 0..steps.max(1) {
         for v in jumped.iter_mut() {
@@ -4012,12 +3925,9 @@ fn hear_phase(
     use anneal_core::cooperative_search::CatalogSampleOutcome;
     let floor_energy = snapshot.best_energy();
     let current_len = snapshot.current_state().len();
-    let hear_enabled = !std::env::var("CATALOG_NO_HEAR").is_ok_and(|v| v == "1");
+    let hear_enabled = !anneal_core::env::flag("CATALOG_NO_HEAR");
     let family_mode = std::env::var("CATALOG_HEAR").is_ok_and(|v| v == "family");
-    let hear_stall: usize = std::env::var("CATALOG_HEAR_STALL")
-        .ok()
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(5000);
+    let hear_stall: usize = anneal_core::env::parsed("CATALOG_HEAR_STALL").unwrap_or(5000);
     if snapshot.best_energy() < state.last_best - 1e-9 {
         state.last_best = snapshot.best_energy();
         state.last_best_hop = snapshot.hops();
@@ -4118,7 +4028,7 @@ fn run_capnp_catalog(
         endpoint.is_some(),
     )
     .unwrap_or_else(|error| panic!("{error}"));
-    let evidence_only = std::env::var("CATALOG_EVIDENCE_ONLY").is_ok_and(|value| value == "1");
+    let evidence_only = anneal_core::env::flag("CATALOG_EVIDENCE_ONLY");
     if evidence_only {
         println!("  catalog channels: surface evidence only; geometry policy disabled");
     }
@@ -4324,9 +4234,7 @@ fn run_capnp_catalog(
     // funnel problem, so it is available here, opt-in: the recommended
     // protocol leaves the temperature alone and the published runs used
     // it that way, so this only applies when a ladder top is named.
-    if let Some(top) = std::env::var("CATALOG_TEMP_LADDER")
-        .ok()
-        .and_then(|value| value.parse::<f64>().ok())
+    if let Some(top) = anneal_core::env::parsed::<f64>("CATALOG_TEMP_LADDER")
         .filter(|value| value.is_finite() && *value > 0.0)
     {
         let rungs = std::env::var("CATALOG_BRAIN_PEERS")
@@ -4373,12 +4281,11 @@ fn run_capnp_catalog(
     // deposit into this chain's own well-tempered bias, so acceptance
     // feels what the ensemble has visited continuously rather than only
     // at steering decisions. Gated until the paired smoke measures it.
-    let shared_bias_enabled = std::env::var("CATALOG_SHARED_BIAS").is_ok_and(|v| v == "1");
+    let shared_bias_enabled = anneal_core::env::flag("CATALOG_SHARED_BIAS");
     // The ensemble frontier ladder ships raw doorway states through the
     // coordinator at checkpoint cadence; the hop loop queues and folds,
     // this layer only moves the mail.
-    let frontier_exchange_enabled =
-        std::env::var("CATALOG_FRONTIER_EXCHANGE").is_ok_and(|v| v == "1");
+    let frontier_exchange_enabled = anneal_core::env::flag("CATALOG_FRONTIER_EXCHANGE");
     // Bridge segments: when the coordinator has commissioned a bridge
     // across the referee's seam, this replica takes a region assignment,
     // jumps to a stored entry state when one exists, and reports every
@@ -4386,7 +4293,7 @@ fn run_capnp_catalog(
     // recorded rather than moves rejected, so the weights and the
     // committor surrogate accumulate without touching the acceptance
     // rule. Gated until the paired smoke measures it.
-    let bridge_enabled = std::env::var("CATALOG_BRIDGE").is_ok_and(|v| v == "1");
+    let bridge_enabled = anneal_core::env::flag("CATALOG_BRIDGE");
     // Histogram screen: on stall, candidate escape perturbations are
     // ranked by the novelty of their per-center class histogram against
     // the chain's own visited histograms, and the most novel one is
@@ -4395,7 +4302,7 @@ fn run_capnp_catalog(
     // counts alone, so distance in histogram space is exactly the
     // direction a funnel exchange must move, named without naming any
     // structure. Gated until the paired smoke measures it.
-    let histo_screen = std::env::var("CATALOG_HISTO_SCREEN").is_ok_and(|v| v == "1");
+    let histo_screen = anneal_core::env::flag("CATALOG_HISTO_SCREEN");
     // Difficulty retargeting, the proof-of-work governor transplanted:
     // a blockchain holds its block rate constant by adjusting the
     // difficulty against measured production; here the measured
@@ -4405,13 +4312,11 @@ fn run_capnp_catalog(
     // exploration gain rises, scaling escape perturbations; recovery
     // decays it back toward one. Self-relative, no structural prior,
     // no protocol change. Gated until the paired smoke measures it.
-    let difficulty_enabled = std::env::var("CATALOG_DIFFICULTY").is_ok_and(|v| v == "1");
+    let difficulty_enabled = anneal_core::env::flag("CATALOG_DIFFICULTY");
     let mut difficulty_gain = 1.0_f64;
     let mut governor_last: Option<(u64, u64)> = None;
     let mut governor_ema: Option<f64> = None;
-    let histo_radius = std::env::var("CATALOG_HISTO_RADIUS")
-        .ok()
-        .and_then(|value| value.parse::<f64>().ok())
+    let histo_radius = anneal_core::env::parsed::<f64>("CATALOG_HISTO_RADIUS")
         .filter(|value| value.is_finite() && *value > 0.0)
         .unwrap_or(1.4);
     let mut histo_leaders: Vec<Array1<f64>> = Vec::new();
@@ -4441,14 +4346,10 @@ fn run_capnp_catalog(
         }
         engine
     });
-    let md_steps = std::env::var("CATALOG_MD_STEPS")
-        .ok()
-        .and_then(|value| value.parse::<usize>().ok())
+    let md_steps = anneal_core::env::parsed::<usize>("CATALOG_MD_STEPS")
         .unwrap_or(500)
         .max(1);
-    let md_temperature = std::env::var("CATALOG_MD_TEMP")
-        .ok()
-        .and_then(|value| value.parse::<f64>().ok())
+    let md_temperature = anneal_core::env::parsed::<f64>("CATALOG_MD_TEMP")
         .filter(|value| value.is_finite() && *value > 0.0)
         .unwrap_or(1.2);
     let mut active_bridge: Option<BridgeAssignmentRecord> = None;
@@ -4459,10 +4360,7 @@ fn run_capnp_catalog(
     let mut census_bus: Option<anneal_core::census_bus::CensusBus> =
         census_bus_base(sharing, evidence_only, configured_census_base.as_deref()).and_then(
             |base| {
-                let n: u32 = std::env::var("CATALOG_REPLICAS")
-                    .ok()
-                    .and_then(|v| v.parse().ok())
-                    .unwrap_or(0);
+                let n: u32 = anneal_core::env::parsed("CATALOG_REPLICAS").unwrap_or(0);
                 if n == 0 {
                     return None;
                 }
@@ -4499,38 +4397,26 @@ fn run_capnp_catalog(
         .and_then(|value| value.parse::<usize>().ok())
         .unwrap_or(500)
         .max(1);
-    let probe_interval = std::env::var("CATALOG_PROBE_INTERVAL")
-        .ok()
-        .and_then(|value| value.parse::<u64>().ok())
+    let probe_interval = anneal_core::env::parsed::<u64>("CATALOG_PROBE_INTERVAL")
         .unwrap_or(8)
         .max(1);
-    let probe_scale = std::env::var("CATALOG_PROBE_SCALE")
-        .ok()
-        .and_then(|value| value.parse::<f64>().ok())
+    let probe_scale = anneal_core::env::parsed::<f64>("CATALOG_PROBE_SCALE")
         .filter(|value| value.is_finite() && *value > 0.0)
         .unwrap_or(0.2 * run_cfg.length_scale);
-    let transport_noise = std::env::var("CATALOG_TRANSPORT_NOISE")
-        .ok()
-        .and_then(|value| value.parse::<f64>().ok())
+    let transport_noise = anneal_core::env::parsed::<f64>("CATALOG_TRANSPORT_NOISE")
         .filter(|value| value.is_finite() && *value >= 0.0)
         .unwrap_or(0.05 * run_cfg.length_scale);
     let minimum_population_interval = checkpoint_interval
         .checked_mul(2)
         .and_then(|value| value.checked_add(2))
         .expect("catalog checkpoint must admit a charged-work population interval");
-    let population_interval = std::env::var("CATALOG_POPULATION_INTERVAL")
-        .ok()
-        .and_then(|value| value.parse::<usize>().ok())
+    let population_interval = anneal_core::env::parsed::<usize>("CATALOG_POPULATION_INTERVAL")
         .unwrap_or(50_000)
         .max(minimum_population_interval);
-    let md_interval = std::env::var("CATALOG_MD_INTERVAL")
-        .ok()
-        .and_then(|value| value.parse::<u64>().ok())
+    let md_interval = anneal_core::env::parsed::<u64>("CATALOG_MD_INTERVAL")
         .unwrap_or(32)
         .max(1);
-    let bridge_interval = std::env::var("CATALOG_BRIDGE_INTERVAL")
-        .ok()
-        .and_then(|value| value.parse::<u64>().ok())
+    let bridge_interval = anneal_core::env::parsed::<u64>("CATALOG_BRIDGE_INTERVAL")
         .unwrap_or(64)
         .max(1);
     #[cfg(not(feature = "ira"))]
@@ -4542,27 +4428,19 @@ fn run_capnp_catalog(
         .ok()
         .map_or(endpoint.is_some(), |value| value != "0");
     #[cfg(feature = "ira")]
-    let ride_interval = std::env::var("CATALOG_RIDE_INTERVAL")
-        .ok()
-        .and_then(|value| value.parse::<u64>().ok())
+    let ride_interval = anneal_core::env::parsed::<u64>("CATALOG_RIDE_INTERVAL")
         .unwrap_or(8)
         .max(1);
     #[cfg(feature = "ira")]
-    let ride_budget_cap = std::env::var("CATALOG_RIDE_BUDGET")
-        .ok()
-        .and_then(|value| value.parse::<u64>().ok())
+    let ride_budget_cap = anneal_core::env::parsed::<u64>("CATALOG_RIDE_BUDGET")
         .unwrap_or(5_000)
         .max(1);
     #[cfg(feature = "ira")]
-    let ride_localization_radius = std::env::var("CATALOG_RIDE_LOCAL_RADIUS")
-        .ok()
-        .and_then(|value| value.parse::<f64>().ok())
+    let ride_localization_radius = anneal_core::env::parsed::<f64>("CATALOG_RIDE_LOCAL_RADIUS")
         .filter(|value| value.is_finite() && *value > 0.0)
         .unwrap_or(1.5 * run_cfg.length_scale);
     #[cfg(feature = "ira")]
-    let ride_identity_radius = std::env::var("CATALOG_RIDE_IDENTITY_RADIUS")
-        .ok()
-        .and_then(|value| value.parse::<f64>().ok())
+    let ride_identity_radius = anneal_core::env::parsed::<f64>("CATALOG_RIDE_IDENTITY_RADIUS")
         .filter(|value| value.is_finite() && *value > 0.0)
         .unwrap_or(anneal_core::catalog::lj::CALIBRATION_IRA_TOLERANCE * run_cfg.length_scale);
     #[cfg(feature = "ira")]
@@ -4754,7 +4632,7 @@ fn run_capnp_catalog(
             )
         });
     let mut next_gossip = coop_gossip.map_or(usize::MAX, |(interval, _, _)| interval);
-    let sync_policy = std::env::var("CATALOG_SYNC_POLICY").is_ok_and(|v| v == "1");
+    let sync_policy = anneal_core::env::flag("CATALOG_SYNC_POLICY");
     let mut gossip_published = 0usize;
     let mut gossip_merged = 0usize;
     let mut gossip_merge: Option<BiasUpdate> = None;
@@ -4831,7 +4709,7 @@ fn run_capnp_catalog(
                     // one cluster per funnel. CENSUS_BUS_UNBOUNDED=1 admits distant
                     // bus observations for a controlled comparison. Population-parent
                     // and own-visit deposits retain their separate admission rules.
-                    let unbounded = std::env::var("CENSUS_BUS_UNBOUNDED").is_ok_and(|v| v == "1");
+                    let unbounded = anneal_core::env::flag("CENSUS_BUS_UNBOUNDED");
                     if shared_bias_enabled {
                         for peer in &fresh {
                             if peer.coordinates.len() == here.len()
@@ -4861,7 +4739,7 @@ fn run_capnp_catalog(
                     );
                     bus.nearby.extend(updates);
                     peer_crowd = crowd;
-                    if std::env::var("CATALOG_CENSUS_TRACE").is_ok_and(|v| v == "1")
+                    if anneal_core::env::flag("CATALOG_CENSUS_TRACE")
                         && checkpoint_sequence.is_multiple_of(7)
                     {
                         println!(
@@ -5760,7 +5638,7 @@ fn run_capnp_catalog(
                         hear_state.last_best_hop = snapshot.hops();
                     }
                     let quiet_now = snapshot.hops().saturating_sub(hear_state.last_best_hop);
-                    if std::env::var("CATALOG_CENSUS_TRACE").is_ok_and(|v| v == "1")
+                    if anneal_core::env::flag("CATALOG_CENSUS_TRACE")
                         && checkpoint_sequence.is_multiple_of(7)
                     {
                         println!(
@@ -7336,9 +7214,7 @@ fn run_capnp_bank(
             None
         }
     };
-    let sync_every = std::env::var("BANK_SYNC")
-        .ok()
-        .and_then(|v| v.parse().ok())
+    let sync_every = anneal_core::env::parsed("BANK_SYNC")
         .unwrap_or(8usize)
         .max(1);
     let mut bias = BasinBias::new(
@@ -7347,10 +7223,7 @@ fn run_capnp_bank(
         cfg.bias_height,
         cfg.bias_gamma,
     );
-    let slice = std::env::var("BANK_SLICE")
-        .ok()
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(500);
+    let slice = anneal_core::env::parsed("BANK_SLICE").unwrap_or(500);
     let mut rng = <rand::rngs::StdRng as rand::SeedableRng>::seed_from_u64(seed);
     let mut best = f64::INFINITY;
     let mut best_state: Option<Array1<f64>> = None;
@@ -7562,17 +7435,12 @@ fn run_history_ensembles(
 
     let ens = config_from_env(replicas, budget, reference.map(|r| r + 1e-4));
     let mut cfg = cfg.clone();
-    if let Some(cap) = std::env::var("SHARED_DEPOSITS")
-        .ok()
-        .and_then(|v| v.parse::<usize>().ok())
-    {
+    if let Some(cap) = anneal_core::env::parsed::<usize>("SHARED_DEPOSITS") {
         cfg.shared_deposits = cap;
     }
     ens.validate(&cfg).unwrap_or_else(|error| panic!("{error}"));
-    let pair_cache_bytes: usize = std::env::var("HISTORY_PAIR_CACHE_BYTES")
-        .ok()
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(128 * 1024 * 1024);
+    let pair_cache_bytes: usize =
+        anneal_core::env::parsed("HISTORY_PAIR_CACHE_BYTES").unwrap_or(128 * 1024 * 1024);
     let descriptor = anneal_core::catalog::lj::descriptor_space();
     let ira_radius = anneal_core::catalog::lj::CALIBRATION_IRA_TOLERANCE;
     #[cfg(feature = "ira")]

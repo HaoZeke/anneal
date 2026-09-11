@@ -48,10 +48,7 @@ fn main() {
     let m: usize = args.get(1).and_then(|v| v.parse().ok()).unwrap_or(2);
     let budget: usize = args.get(2).and_then(|v| v.parse().ok()).unwrap_or(400);
     let seeds: u64 = args.get(3).and_then(|v| v.parse().ok()).unwrap_or(1);
-    let seed0: u64 = std::env::var("SEED_OFFSET")
-        .ok()
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(0);
+    let seed0: u64 = anneal_core::env::parsed("SEED_OFFSET").unwrap_or(0);
     let n = 3 * m;
     let atmnrs: Vec<i32> = (0..m).flat_map(|_| [8i32, 1, 1]).collect();
     let species: Vec<u32> = (0..m).flat_map(|_| [8, 1, 1]).collect();
@@ -72,10 +69,7 @@ fn main() {
         bank_label(),
         seed0 + seeds
     );
-    if let Some(replicas) = std::env::var("HISTORY_REPLICAS")
-        .ok()
-        .and_then(|v| v.parse::<usize>().ok())
-    {
+    if let Some(replicas) = anneal_core::env::parsed::<usize>("HISTORY_REPLICAS") {
         drop(obj);
         run_water_ensembles(
             &cfg, m, budget, seed0, seeds, replicas, &atmnrs, &species, &groups,

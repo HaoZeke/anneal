@@ -52,10 +52,7 @@ fn main() {
         .expect("usage: slab_adsorption <con_file> <budget> <seeds> [plain|recommended]");
     let budget: usize = args.get(2).and_then(|v| v.parse().ok()).unwrap_or(25);
     let seeds: u64 = args.get(3).and_then(|v| v.parse().ok()).unwrap_or(1);
-    let seed0: u64 = std::env::var("SEED_OFFSET")
-        .ok()
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(0);
+    let seed0: u64 = anneal_core::env::parsed("SEED_OFFSET").unwrap_or(0);
     let search = arm_from_args(&args);
     let (base_x, species, free_seeds, box_) = read_system(&con);
     let n = species.len();
@@ -107,10 +104,7 @@ fn main() {
         bank_label(),
         seed0 + seeds
     );
-    if let Some(replicas) = std::env::var("HISTORY_REPLICAS")
-        .ok()
-        .and_then(|v| v.parse::<usize>().ok())
-    {
+    if let Some(replicas) = anneal_core::env::parsed::<usize>("HISTORY_REPLICAS") {
         drop(obj);
         drop(inner);
         run_slab_ensembles(
