@@ -111,8 +111,9 @@ pub mod diversity;
 /// A posterior over the density of minima, and acceptance by entropy rather
 /// than by energy.
 pub mod dos;
-/// Error variants returned by `anneal-core`.
+/// Environment knobs read one way everywhere.
 pub mod env;
+/// Error variants returned by `anneal-core`.
 pub mod error;
 /// Parallel-tempering exchange operator for multi-temperature ensembles.
 pub mod exchange;

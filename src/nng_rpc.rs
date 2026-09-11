@@ -500,7 +500,7 @@ fn next_frame(shared: &StreamShared, prefer_data: &mut bool) -> Option<Outgoing>
     let fin_available = state.write_closed && state.sent == state.written && !state.fin_sent;
     if state.ack_dirty && (!*prefer_data || (!data_available && !fin_available)) {
         let flags =
-            u8::from(state.read_fin) * ACK_FIN | u8::from(state.fin_acked) * ACK_FIN_RECEIPT;
+            (u8::from(state.read_fin) * ACK_FIN) | (u8::from(state.fin_acked) * ACK_FIN_RECEIPT);
         let message = encode_frame(ACK, flags, state.received, state.consumed, &[]);
         state.ack_dirty = false;
         *prefer_data = true;
