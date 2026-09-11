@@ -1531,7 +1531,9 @@ fn dual_style_local_search<O, G, R>(
             5
         }
     } else {
-        3 // deep FD: incumbent + 2 restarts near best
+        // Each start needs its value, a full central stencil, and a trial.
+        let minimum_start_work = dim.saturating_mul(2).saturating_add(2);
+        (work_units / minimum_start_work).clamp(1, 3)
     };
     let per_start = (work_units / n_starts).max(if has_analytic { 8 } else { 24 });
     let x_inc = ledger.incumbent(bounds);
