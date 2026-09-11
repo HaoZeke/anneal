@@ -22,7 +22,8 @@ use rand::rngs::StdRng;
 use crate::catalog::euclidean_gradient_norm;
 use crate::descriptor_space::DescriptorSpace;
 use crate::methods::cluster_hopping::{
-    ChainCheckpoint, CheckpointAction, Config, Ledger, Outcome, run_with_history_at_checkpoints,
+    BiasUpdate, ChainCheckpoint, CheckpointAction, Config, Ledger, Outcome,
+    run_with_history_at_checkpoints,
 };
 use crate::methods::minima_hopping::{
     HistoryHook, HistoryMembership, MinimumHistory, SharedMinimumHistory,
@@ -469,6 +470,8 @@ pub fn run_ensemble<W: ExactStructureWitness + Sync + ?Sized>(
                     let mut restart_rng = StdRng::seed_from_u64(replica_seed ^ 0x7C0A_1CE5);
                     let mut two_choice_restarts = 0usize;
                     let mut checkpoint = |snapshot: ChainCheckpoint<'_>| {
+                        let mut action = CheckpointAction::Continue;
+                        let mut updates = Vec::new();
                         if first_target_calls.is_none()
                             && target.is_some_and(|t| snapshot.best_energy() < t)
                         {
@@ -508,7 +511,7 @@ pub fn run_ensemble<W: ExactStructureWitness + Sync + ?Sized>(
                                     two_choice_restarts += 1;
                                     charged_at_best = snapshot.charged();
                                     let fresh = (problem.start)(replica, &mut restart_rng);
-                                    return CheckpointAction::ExternalAdopt {
+                                    action = CheckpointAction::ExternalAdopt {
                                         state: fresh,
                                         action: "two-choice-restart".to_owned(),
                                         external_calls: 0,
@@ -552,37 +555,41 @@ pub fn run_ensemble<W: ExactStructureWitness + Sync + ?Sized>(
                             };
                             let wells = mailboxes[peer].lock().expect("gossip mailbox").clone();
                             if let Some(wells) = wells {
-                                return CheckpointAction::MergeBias {
+                                updates.push(BiasUpdate::MergeWells {
                                     wells,
                                     weight: gossip.weight,
                                     complete: gossip.top.is_none(),
-                                };
+                                });
                             }
                         }
                         // Multiple-walker exchange: publish own visit deltas,
                         // take everyone else's since the last look.
-                        let Some(weight) = ens.shared_bias else {
-                            return CheckpointAction::Continue;
-                        };
-                        let Some(bias) = snapshot.bias() else {
-                            return CheckpointAction::Continue;
-                        };
-                        let index = bias.index();
-                        let mine = visit_deltas(
-                            |i| index.centre(i),
-                            |i| index.visits(i),
-                            bias.n_basins(),
-                            &mut seen_visits,
-                        );
-                        published += mine.iter().map(|(_, count)| *count).sum::<u64>();
-                        let mut exchange = exchange.lock().expect("shared deposit exchange");
-                        exchange.publish(replica, mine);
-                        let deposits = exchange.drain(replica);
-                        drop(exchange);
-                        if deposits.is_empty() {
-                            CheckpointAction::Continue
+                        if let Some(weight) = ens.shared_bias
+                            && let Some(bias) = snapshot.bias()
+                        {
+                            let index = bias.index();
+                            let mine = visit_deltas(
+                                |i| index.centre(i),
+                                |i| index.visits(i),
+                                bias.n_basins(),
+                                &mut seen_visits,
+                            );
+                            published += mine.iter().map(|(_, count)| *count).sum::<u64>();
+                            let mut exchange = exchange.lock().expect("shared deposit exchange");
+                            exchange.publish(replica, mine);
+                            let deposits = exchange.drain(replica);
+                            drop(exchange);
+                            if !deposits.is_empty() {
+                                updates.push(BiasUpdate::DepositDescriptors { deposits, weight });
+                            }
+                        }
+                        if updates.is_empty() {
+                            action
                         } else {
-                            CheckpointAction::DepositDescriptors { deposits, weight }
+                            CheckpointAction::WithBiasUpdates {
+                                updates,
+                                action: Box::new(action),
+                            }
                         }
                     };
                     let mut rng = StdRng::seed_from_u64(replica_seed);
