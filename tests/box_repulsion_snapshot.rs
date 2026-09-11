@@ -9,10 +9,10 @@ use eindir_core::Bounds;
 use ndarray::{Array1, array};
 use rand::{Rng, SeedableRng, rngs::StdRng};
 
-#[path = "../src/methods/box_hopping/repulsion.rs"]
-mod repulsion;
 #[path = "../src/methods/box_hopping/coverage.rs"]
 mod coverage;
+#[path = "../src/methods/box_hopping/repulsion.rs"]
+mod repulsion;
 use coverage::{BoxCoverageConfig, Coverage};
 
 fn cloud() -> Coverage {
