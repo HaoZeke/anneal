@@ -1,0 +1,156 @@
+= Changelog
+
+All notable changes to this project will be documented in this file.
+
+The format is based on https://keepachangelog.com/en/1.0.0/[Keep a Changelog] and this project adheres to https://semver.org/spec/v2.0.0.html[Semantic Versioning].
+
+== [nng-rs Unreleased] ==
+
+=== Added ===
+
+=== Changed ===
+
+=== Deprecated ===
+
+=== Removed ===
+
+=== Fixed ===
+
+=== Security ===
+
+//------------------------------------------------------------------------------
+// Past Releases
+//------------------------------------------------------------------------------
+
+== [nng-rs v1.0.1] - 2021-12-07 ==
+
+=== Fixed ===
+
+* Made building `nng-sys` optional again. (#55)
+
+== [nng-rs v1.0.0] - 2021-04-26 ==
+
+=== Added ===
+
+* Added the `tcp::BoundPort` and `websocket::Protocol` options.
+* A new `Error::ConnectionShutdown` variant.
+* Implemented `From<[u8; x]> for Message` for all arrays of length 32 or smaller.
+
+=== Changed ===
+
+* Removed `nonblocking` argument from `Listener::new` as it is ignored in `libnng v1.2`.
+* Removed `nonblocking` argument from `ListenerOptions::new` to match `Listener::new`.
+* Renamed `{Dialer,Listener}Options` to `{Dialer,Listener}Builder` to better match the builder pattern.
+* All `Message` and `Header` methods now panic on allocation failure instead of returning a `Result`.
+* Default `libnng` version is 1.4.0.
+
+=== Deprecated ===
+
+* Deprecated `Socket::listen_async` as it is functionally equivalent to `Socket::listen` and will be removed at some point in the future.
+* Deprecated `Socket::into_raw` in favor of the `TryFrom` trait. (#43)
+* Deprecated Pair1 polyamorous mode as it will eventually be removed from NNG.
+
+=== Removed ===
+
+* `Message::from_slice` and `Message::try_clone` as the entire `Message` type now panics on allocation failure.
+
+== [nng-rs v0.5.1] - 2019-12-07 ==
+
+=== Fixed ===
+
+* Made the `RecvFd` and `SendFd` readable instead of writable. (#45)
+
+== [nng-rs v0.5.0] - 2019-06-20 ==
+
+=== Added ===
+
+* The `Socket::try_{send,recv}` and the `Socket::{dial,listen}_async` functions have been added. (#34)
+* The `ffi-module` feature is now available, which allows retrieving the underlying nng-sys types. (#33)
+* Added a `RawSocket` type that marks that the given socket is in "raw" mode. (#31)
+* Added forwarder and reflector devices. (#32)
+* The `Message` and `Header` types now implement `Write`.
+* The `Message` type received several new functions to make its API similar to that of a `Vec<u8>` or `VecDeque<u8>`.
+* Implemented additional common traits on types: (#18, #23)
+	** All options: `Clone`, `Copy`, `Debug`, `Display`, `Eq`, `Hash`, `Ord`, `PartialEq`, `PartialOrd`
+	** `Aio`: `Eq`, `Hash`, `PartialEq`
+	** `Context`: `Eq`, `Hash`, `Ord`, `PartialEq`, `PartialOrd`
+	** `Dialer`: `Copy`, `Hash`, `Ord`, `PartialOrd`
+	** `Error`: `Hash`
+	** `Header`: `Default`
+	** `Listener`: `Copy`, `Hash`, `Ord`, `PartialOrd`
+	** `Message`: `Default`, `FromIterator` for both values and references of `u8`
+	** `Pipe`: `Copy`, `Hash`, `Ord`, `PartialOrd`
+	** `PipeEvent`: `Debug`, `Copy`, `Clone`, `Eq`, `PartialEq`, `Hash`
+	** `Protocol`: `Ord`, `PartialOrd`, `Eq`, `PartialEq`, `Hash`
+	** `Socket`: `Hash`, `Ord`, `PartialOrd`
+	** `SocketAddr`: `Ord`, `PartialOrd`, `Eq`, `PartialEq`, `Hash`
+* Implemented several of the remaining options. (#5)
+	** `NNG_OPT_RECVFD`
+	** `NNG_OPT_SENDFD`
+	** `NNG_OPT_IPC_PERMISSIONS`
+	** `NNG_OPT_IPC_PEER_{GUP}ID`
+	** `NNG_OPT_PAIR1_POLY`
+
+=== Changed ===
+
+* The `AioResult` type has been changed to be three variants the standard `Result` type instead of six variants. (#35)
+* The AIO callback is now `Fn(Aio, AioResult)` instead of `Fn(&Aio, AioResult)`. (#30)
+* The pipe notification callback is now `Fn(Pipe, PipeEvent)` instead of `FnMut(Pipe, PipeEvent)`.
+* The `Aio::try_clone` function was replaced with deriving `Clone`. (#30)
+* Renamed several methods to fit the Rust API guidelines:
+	** `Message::header` → `Message::as_header`
+	** `Message::header_mut` → `Message::as_mut_header`
+	** `Message::zeros` → `Message::with_zeros`
+* All variations of the "send" operation now take `Into<Message>` instead of `Message` directly.
+* All of the "close" functions now take `&self` instead of `self`.
+* Renamed the `NNG_OPT_TLS_VERIFIED` option from `tls::TlsVerified` to `tls::Verified`.
+* Renamed the `NNG_OPT_IPC_SECURITY_DESCRIPTOR` option from `ipc::IpcSecurityDescriptor` to `ipc::SecurityDescriptor`.
+* The `ErrorKind` type has been renamed to `Error` and the old `Error` type has been deleted.
+* `Error::ProtocolError` renamed to `Error::Protocol` in order to appease Clippy.
+* `Message::try_from` was renamed to `Message::from_slice`.
+* Uncaught panics in a callback now cause the application to abort, matching the behavior concerning FFI boundaries that is currently in development for Rustc. (#6)
+* The following functions now take `&self` instead of `&mut self` (#27):
+	** `Socket::{dial, listen, recv, send, recv_async, send_async, pipe_notify}`.
+	** `Context::{send, recv}`.
+
+=== Removed ===
+
+* The `Socket::set_nonblocking` function has been removed. (#34)
+* Removed the "unsafe options" in favor of exposing the raw FFI types. (#33)
+* The `Body` type has been removed. Most applications do not need to touch the header, so it makes sense to mask the distinction between the body and header slightly.
+* `Pipe::socket_id` has been removed as well as all of the ID related functions. (#15)
+* The `nng-sys` crate has been moved to a new repository (#17).
+* The `Aio::new` function now requires a callback and the non-callback version has been removed. (#24)
+* The `Aio::result` function has been removed in favor of providing the result directly to the completion callback. (#24)
+
+=== Fixed ===
+
+* The IPv4 address is now in the correct order. (#28)
+
+== [nng-rs v0.4.0] - 2019-01-27 ==
+
+=== Added ===
+
+* Sockets can now send messages asynchronously via `Socket::send_async`.
+* Sockets can now receive messages asynchronously via `Socket::recv_async`.
+* Sockets can now be cloned to have multiple handles to the same underlying NNG socket.
+* `Socket::close` and `Context::close` have been added to match the style of Dialers, Pipes, and Listeners.
+* Pipes and the pipe notify functionality has been implemented. (#14)
+
+=== Changed ===
+
+* The majority of types are now at the root of the crate rather than a module.
+* Asynchronous sending on a context is now via `Context::send` rather than `Aio::send`.
+* Asynchronous receiving on a context is now via `Context::recv` rather than `Aio::recv`.
+* Dialers and listeners are now treated as handle values and do not close on drop.
+* The PUBSUB example now publishes the number of subscribers rather than the time in order to show off the pipe notify functionality.
+
+=== Fixed ===
+
+* The `Push0` protocol now actually opens a `Push0` socket (instead of a `Pull0` socket).
+* Asynchronous I/O callbacks no longer can enter the same callback closure simultaneously.
+* `SocketAddr` now compiles on platforms where a `c_char` is unsigned. (#11)
+
+== [nng-rs v0.3.0] - 2018-11-02 ==
+
+First fully usable version.
