@@ -1051,6 +1051,10 @@ def global_optimize(
     grad_fn=None,
     noise_sigma=None,
     policy: str = "auto",
+    *,
+    replicas: int = 1,
+    coverage_shared: bool = True,
+    coverage_radius: float = 0.05,
 ):
     """Thompson-allocated portfolio global optimizer.
 
@@ -1087,9 +1091,20 @@ def global_optimize(
         (out of regime).
       policy: ``"auto"`` (default; feature-based regime routing) or
         ``"legacy"`` (flat arm order, uninformative priors; A/B only).
+      replicas: persistent portfolio controllers sharing the aggregate budget.
+        One retains the single-controller behavior. Multiple replicas use
+        native worker threads; no caller Jacobian is required.
+      coverage_shared: share paid global proposal positions at arm checkpoints.
+        False gives independent portfolios with the same starts and work split.
+      coverage_radius: interaction radius in normalized RMS box coordinates.
+
+    Peer separation moves global candidates, not derivative stencils or raw
+    objective values. Internal scalar-refinement probes count in ``n_evals``.
+    The modified proposal law is for optimization, not equilibrium sampling.
 
     Returns a dict with ``best_pos``, ``best_val``, ``n_evals``,
-    ``n_grads``, ``arm_pulls``, and ``arm_successes``.
+    ``n_grads``, ``arm_pulls``, and ``arm_successes``. Multiple replicas also
+    report individual results, ``charged`` work and coverage sample counters.
     """
     out = _core_global_optimize(
         obj_fn,
@@ -1100,6 +1115,9 @@ def global_optimize(
         grad_fn,
         noise_sigma if noise_sigma is None else float(noise_sigma),
         str(policy),
+        replicas=int(replicas),
+        coverage_shared=bool(coverage_shared),
+        coverage_radius=float(coverage_radius),
     )
     out["best_pos"] = np.asarray(out["best_pos"], dtype=np.float64)
     return out

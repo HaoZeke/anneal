@@ -33,6 +33,7 @@ use crate::history::History;
 use crate::variant::{boltzmann, fast, gsa};
 
 mod device;
+mod portfolio_peers;
 
 /// Drop the GIL before `run_ensemble` (or any other `thread::scope`
 /// that calls back into Python).
@@ -2218,7 +2219,7 @@ fn bfwt_optimize(
 ///   grad_fn: optional gradient callable; enables the gradient arms
 ///            and the final polish.
 #[pyfunction]
-#[pyo3(signature = (obj_fn, low, high, budget, seed = 0, grad_fn = None, noise_sigma = None, policy = "auto"))]
+#[pyo3(signature = (obj_fn, low, high, budget, seed = 0, grad_fn = None, noise_sigma = None, policy = "auto", *, replicas = 1, coverage_shared = true, coverage_radius = 0.05))]
 fn global_optimize(
     py: Python<'_>,
     obj_fn: Py<PyAny>,
@@ -2229,6 +2230,9 @@ fn global_optimize(
     grad_fn: Option<Py<PyAny>>,
     noise_sigma: Option<f64>,
     policy: &str,
+    replicas: usize,
+    coverage_shared: bool,
+    coverage_radius: f64,
 ) -> PyResult<Py<PyDict>> {
     let low_vec = low.as_slice()?.to_vec();
     let high_vec = high.as_slice()?.to_vec();
@@ -2258,6 +2262,27 @@ fn global_optimize(
             )));
         }
     };
+    if replicas == 0 {
+        return Err(PyValueError::new_err("replicas must be positive"));
+    }
+    if !coverage_radius.is_finite() || coverage_radius <= 0.0 {
+        return Err(PyValueError::new_err("coverage_radius must be positive and finite"));
+    }
+    if replicas > 1 {
+        let config = crate::methods::portfolio::PortfolioEnsembleConfig {
+            replicas,
+            budget,
+            noise_sigma,
+            policy: pol,
+            coverage: crate::methods::BoxCoverageConfig {
+                shared: coverage_shared,
+                radius: coverage_radius,
+                ..crate::methods::BoxCoverageConfig::default()
+            },
+        };
+        let grad = grad_fn.map(|fn_| CallablePyGradient { fn_, dim });
+        return portfolio_peers::run(py, &obj, grad.as_ref(), seed, &config);
+    }
     let result = match grad_fn {
         Some(grad_fn) => {
             let grad = CallablePyGradient { fn_: grad_fn, dim };
