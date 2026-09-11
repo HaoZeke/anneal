@@ -19,6 +19,8 @@ use crate::soap::SoapSpec;
 mod preparation;
 use preparation::packing_rows;
 pub use preparation::prepare_rows;
+mod peers;
+pub use peers::{PackingPeerScope, nearby_packing_peers, set_packing_peers};
 
 /// Leader-clustering radius on per-center `local_nu3_z` rows. Same number
 /// as `examples/decaf_local_classes.rs` and `rewrite_2026/data/decaf/decaf_r14.txt`.

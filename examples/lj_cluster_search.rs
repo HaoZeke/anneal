@@ -4475,6 +4475,8 @@ fn run_capnp_catalog(
                 }
             },
         );
+    let _packing_peer_scope =
+        anneal_core::catalog::packing::PackingPeerScope::new(census_bus.is_some());
     let mut peer_crowd: usize = 0;
     let mut bus_received: usize = 0;
     let mut bus_last_minimum: Option<(f64, Vec<f64>)> = None;
@@ -6759,6 +6761,16 @@ fn census_nearby_updates(
     fresh: &[anneal_core::census_bus::PeerMinimum],
     nearby: &std::collections::HashMap<u32, bool>,
 ) -> (Vec<(u32, bool)>, usize) {
+    // Latest admitted peers are live occupancy, not an archive count. Keep
+    // distant peers available for classification if this chain changes family.
+    let mut ordered_peers = peers.to_vec();
+    ordered_peers.sort_unstable_by_key(|peer| peer.replica);
+    anneal_core::catalog::packing::set_packing_peers(
+        ordered_peers
+            .iter()
+            .map(|peer| peer.coordinates.clone())
+            .collect(),
+    );
     // Packing classification depends on coordinates, not objective values.
     let own_moved = last_minimum
         .as_ref()
