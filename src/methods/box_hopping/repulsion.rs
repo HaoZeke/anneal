@@ -51,6 +51,10 @@ impl PeerSamples {
             .min_by(|a, b| a.0.total_cmp(&b.0))
     }
 
+    pub(super) fn clearance(&self, point: ArrayView1<f64>) -> Option<f64> {
+        self.nearest(point).map(|(distance, _)| distance)
+    }
+
     /// A compact-support correction in normalized box coordinates. Accept a
     /// correction only when clearance from the entire received cloud improves.
     #[allow(clippy::too_many_arguments)]
