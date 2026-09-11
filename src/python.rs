@@ -46,11 +46,13 @@ where
     py.detach(f)
 }
 
-/// Reject empty, non-finite, or inverted box bounds before `Bounds::new`.
-///
-/// `eindir::Bounds::new` only checks equal length; `mkpoint` panics when
-/// `low[i] >= high[i]`. Surface a clear `ValueError` at the Python boundary.
+/// Validate a box for methods that sample every coordinate uniformly.
 fn validate_box_bounds(low: &[f64], high: &[f64]) -> PyResult<()> {
+    validate_box_domain(low, high, false)
+}
+
+/// Fixed coordinates are valid only for drivers that preserve those axes.
+fn validate_box_domain(low: &[f64], high: &[f64], allow_fixed: bool) -> PyResult<()> {
     if low.len() != high.len() {
         return Err(PyValueError::new_err(
             "low and high must have the same length",
@@ -67,9 +69,10 @@ fn validate_box_bounds(low: &[f64], high: &[f64]) -> PyResult<()> {
                 "bounds must be finite at dimension {i}"
             )));
         }
-        if lo.partial_cmp(&hi) != Some(std::cmp::Ordering::Less) {
+        if lo > hi || (!allow_fixed && lo == hi) {
+            let relation = if allow_fixed { "less than or equal to" } else { "strictly less than" };
             return Err(PyValueError::new_err(format!(
-                "low[{i}] must be strictly less than high[{i}] (got {lo} >= {hi})"
+                "low[{i}] must be {relation} high[{i}] (got {lo}, {hi})"
             )));
         }
     }
@@ -97,9 +100,18 @@ fn parse_box(
     high: PyReadonlyArray1<'_, f64>,
     x0: Option<PyReadonlyArray1<'_, f64>>,
 ) -> PyResult<(Bounds<f64>, usize, Option<Array1<f64>>)> {
+    parse_box_domain(low, high, x0, false)
+}
+
+fn parse_box_domain(
+    low: PyReadonlyArray1<'_, f64>,
+    high: PyReadonlyArray1<'_, f64>,
+    x0: Option<PyReadonlyArray1<'_, f64>>,
+    allow_fixed: bool,
+) -> PyResult<(Bounds<f64>, usize, Option<Array1<f64>>)> {
     let low_vec = low.as_slice()?.to_vec();
     let high_vec = high.as_slice()?.to_vec();
-    validate_box_bounds(&low_vec, &high_vec)?;
+    validate_box_domain(&low_vec, &high_vec, allow_fixed)?;
     let dim = low_vec.len();
     let x0 = if let Some(x0) = x0 {
         let sl = x0.as_slice()?;
@@ -142,7 +154,7 @@ fn parse_box_search(
     if replicas == 0 {
         return Err(PyValueError::new_err("replicas must be positive"));
     }
-    let (bounds, dim, x0) = parse_box(low, high, x0)?;
+    let (bounds, dim, x0) = parse_box_domain(low, high, x0, true)?;
     let history = match history {
         "none" | "no" => crate::methods::ensemble::HistoryMode::None,
         "private" => crate::methods::ensemble::HistoryMode::Private,
