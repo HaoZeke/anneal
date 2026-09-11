@@ -44,7 +44,10 @@ pub enum GleNoise {
 impl GleNoise {
     pub(crate) fn validate(self) {
         if let Self::White { friction } = self {
-            assert!(friction.is_finite() && friction > 0.0, "friction must be finite and positive");
+            assert!(
+                friction.is_finite() && friction > 0.0,
+                "friction must be finite and positive"
+            );
         }
     }
 
@@ -79,9 +82,15 @@ impl LangevinStepper {
         seed: u64,
     ) -> Self {
         noise.validate();
-        assert!(omega0.is_finite() && omega0 > 0.0, "omega0 must be finite and positive");
+        assert!(
+            omega0.is_finite() && omega0 > 0.0,
+            "omega0 must be finite and positive"
+        );
         assert!(dt.is_finite() && dt > 0.0, "dt must be finite and positive");
-        assert!(scale.iter().all(|s| s.is_finite() && *s > 0.0), "scale must be finite and positive");
+        assert!(
+            scale.iter().all(|s| s.is_finite() && *s > 0.0),
+            "scale must be finite and positive"
+        );
         let dt = dt
             .min(GLE_TIMESTEP_RESOLUTION / (GLE_BAND_RATIO * omega0).max(GLE_FREQUENCY_FLOOR))
             .max(GLE_MIN_TIMESTEP);
@@ -90,7 +99,15 @@ impl LangevinStepper {
         let covariance = Array2::<f64>::eye(drift.nrows()) * temperature;
         let mut rng = StdRng::seed_from_u64(seed);
         let momentum = thermostat.sample_stationary(&covariance, scale.len(), 1.0, &mut rng);
-        Self { drift, thermostat, momentum, scale, rng, temperature, dt }
+        Self {
+            drift,
+            thermostat,
+            momentum,
+            scale,
+            rng,
+            temperature,
+            dt,
+        }
     }
 
     pub(crate) fn set_temperature(&mut self, temperature: f64) {
@@ -119,7 +136,8 @@ impl LangevinStepper {
         let value = obj.eval(x.view());
         p = &p - &(&(&*raw_gradient * &self.scale) * (0.5 * self.dt));
         self.momentum.row_mut(0).assign(&p);
-        self.thermostat.step(&mut self.momentum.view_mut(), &mut self.rng);
+        self.thermostat
+            .step(&mut self.momentum.view_mut(), &mut self.rng);
         value
     }
 }
@@ -492,9 +510,8 @@ where
         };
     }
 
-    let mut stepper = LangevinStepper::new(
-        GleNoise::Colored, omega0, dt, t_hi, scale.clone(), seed,
-    );
+    let mut stepper =
+        LangevinStepper::new(GleNoise::Colored, omega0, dt, t_hi, scale.clone(), seed);
     'outer: for epoch in 0..n_epochs {
         let frac = epoch as f64 / (n_epochs.max(2) - 1) as f64;
         let temperature = t_hi * (t_lo / t_hi).powf(frac);
