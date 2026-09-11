@@ -15,10 +15,14 @@ impl Objective<f64> for NarrowBox {
     fn eval(&self, x: ArrayView1<f64>) -> f64 {
         assert_eq!(x.len(), self.bounds.dims);
         assert!(self.bounds.contains(x));
-        let value = x.iter().enumerate().map(|(j, &v)| {
-            let width = self.bounds.high[j] - self.bounds.low[j];
-            ((v - self.bounds.low[j]) / width - 0.37).powi(2)
-        }).sum();
+        let value = x
+            .iter()
+            .enumerate()
+            .map(|(j, &v)| {
+                let width = self.bounds.high[j] - self.bounds.low[j];
+                ((v - self.bounds.low[j]) / width - 0.37).powi(2)
+            })
+            .sum();
         self.observed.lock().unwrap().push((x.to_vec(), value));
         value
     }
@@ -53,8 +57,14 @@ fn scalar_portfolio_accepts_narrow_finite_parameter_boxes() {
         };
         let start = Array1::from_elem(2, width * 0.9);
         let result = ensemble_hop_optimize::<_, NoUserGradient>(
-            &objective, None, 7, Some(start.view()), 256, 1,
-            HistoryMode::None, HistoryMembership::Accepted,
+            &objective,
+            None,
+            7,
+            Some(start.view()),
+            256,
+            1,
+            HistoryMode::None,
+            HistoryMembership::Accepted,
         );
         let observed = objective.observed.lock().unwrap();
         assert_eq!(result.n_grads, 0);
