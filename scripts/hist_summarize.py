@@ -38,7 +38,7 @@ def num(value):
 
 def summarise(directory):
     arms = defaultdict(lambda: {
-        "tasks": 0, "done": 0, "solved": [], "first": [], "wall": [],
+        "tasks": 0, "done": 0, "finished": [], "solved": [], "first": [], "wall": [],
         "hsecs": [], "deposits": [], "gossip": [], "restarts": [], "hops": [],
         "md": [],
     })
@@ -50,8 +50,13 @@ def summarise(directory):
         record = arms[arm]
         record["tasks"] += 1
         text = path.read_text(errors="replace")
-        if "gap to reference" in text:
-            record["done"] += 1
+        if "gap to reference" not in text:
+            continue
+        exit_path = path.with_suffix(".exitcode")
+        if exit_path.exists() and exit_path.read_text().strip() != "0":
+            continue
+        record["done"] += 1
+        record["finished"].append(seed)
         for line in text.splitlines():
             m = ENSEMBLE.match(line)
             if m:
@@ -126,7 +131,8 @@ def compare(arms, control, treatment):
     a, b = arms.get(control), arms.get(treatment)
     if a is None or b is None:
         sys.exit(f"unknown arm in comparison: {control} / {treatment}")
-    sa, sb = set(a["solved"]), set(b["solved"])
+    paired = set(a["finished"]) & set(b["finished"])
+    sa, sb = set(a["solved"]) & paired, set(b["solved"]) & paired
     gained, lost = sorted(sb - sa), sorted(sa - sb)
     n = len(gained) + len(lost)
     # Two-sided exact sign test on the discordant seeds.
@@ -138,7 +144,8 @@ def compare(arms, control, treatment):
     k = min(len(gained), len(lost))
     p = min(1.0, 2 * sum(comb(n, i) for i in range(k + 1)) / 2 ** n) if n else 1.0
     print(
-        f"{treatment} vs {control}: {len(sb)} vs {len(sa)} solved; "
+        f"{treatment} vs {control}: paired seeds {len(paired)}; "
+        f"{len(sb)} vs {len(sa)} solved; "
         f"gained {len(gained)} {gained}; lost {len(lost)} {lost}; "
         f"discordant {n}, sign test p={p:.3f}"
     )
