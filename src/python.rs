@@ -1804,6 +1804,29 @@ fn amsa_optimize(
     Ok(out.into())
 }
 
+fn coverage_decisions_dict<'py>(
+    py: Python<'py>,
+    stats: &crate::methods::box_hopping::CoverageDecisionStats,
+) -> PyResult<Bound<'py, PyDict>> {
+    let out = PyDict::new(py);
+    out.set_item("comparisons", stats.comparisons)?;
+    out.set_item("unresolved", stats.unresolved)?;
+    out.set_item("accepted", stats.accepted)?;
+    out.set_item("peer_overlap", stats.peer_overlap)?;
+    out.set_item("peer_delta_changes", stats.peer_delta_changes)?;
+    out.set_item("probability_changes", stats.probability_changes)?;
+    out.set_item("drawn_comparisons", stats.drawn_comparisons)?;
+    out.set_item("drawn_disagreements", stats.drawn_disagreements)?;
+    out.set_item("probability_change_sum", stats.probability_change_sum)?;
+    out.set_item("max_probability_change", stats.max_probability_change)?;
+    out.set_item("max_abs_peer_delta", stats.max_abs_peer_delta)?;
+    out.set_item(
+        "max_abs_peer_delta_over_temperature",
+        stats.max_abs_peer_delta_over_temperature,
+    )?;
+    Ok(out)
+}
+
 /// Communicating box hops: Gaussian kick, quench, shared Euclidean history.
 ///
 /// Four (or `replicas`) algebraic hops divide one work-unit budget. They
@@ -1876,6 +1899,10 @@ fn box_ensemble_optimize(
     out.set_item("coverage_applied_foreign", result.coverage.applied_foreign_visits)?;
     out.set_item("coverage_capped_foreign", result.coverage.capped_foreign_visits)?;
     out.set_item("coverage_regions_per_chain", result.coverage.per_chain_regions)?;
+    out.set_item(
+        "coverage_decisions",
+        coverage_decisions_dict(py, &result.coverage_decisions)?,
+    )?;
     Ok(out.into())
 }
 
@@ -1950,6 +1977,10 @@ fn ensemble_optimize(
     out.set_item("coverage_applied_foreign", result.coverage.applied_foreign_visits)?;
     out.set_item("coverage_capped_foreign", result.coverage.capped_foreign_visits)?;
     out.set_item("coverage_regions_per_chain", result.coverage.per_chain_regions)?;
+    out.set_item(
+        "coverage_decisions",
+        coverage_decisions_dict(py, &result.coverage_decisions)?,
+    )?;
     Ok(out.into())
 }
 
