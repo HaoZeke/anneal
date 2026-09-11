@@ -133,15 +133,15 @@ fn main() {
         vec![("values", BoxEscape::Gaussian)]
     } else {
         vec![
-        ("gaussian", BoxEscape::Gaussian),
-        (
-            "white",
-            BoxEscape::Langevin(GleEscapeConfig {
-                noise: GleNoise::White { friction: 4.0 },
-                ..settings
-            }),
-        ),
-        ("colored", BoxEscape::Langevin(settings)),
+            ("gaussian", BoxEscape::Gaussian),
+            (
+                "white",
+                BoxEscape::Langevin(GleEscapeConfig {
+                    noise: GleNoise::White { friction: 4.0 },
+                    ..settings
+                }),
+            ),
+            ("colored", BoxEscape::Langevin(settings)),
         ]
     };
     println!(
@@ -202,7 +202,11 @@ fn main() {
                     let began = Instant::now();
                     let result = if values_only {
                         box_values_ensemble_optimize_with_coverage(
-                            &surface, seed, Some(start.view()), &config, &coverage,
+                            &surface,
+                            seed,
+                            Some(start.view()),
+                            &config,
+                            &coverage,
                         )
                     } else {
                         box_ensemble_optimize_with_coverage(
