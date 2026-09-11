@@ -28,15 +28,15 @@ struct Batch {
     deposits: Vec<(Array1<f64>, u64)>,
 }
 
-/// Append-only exchange of visit deltas, pruned once every walker has read.
+/// Exchange of visit deltas, pruned once every live reader has consumed them.
 pub struct SharedDeposits {
     walkers: usize,
-    /// Batches not yet read by every walker; index 0 is the oldest.
+    /// Batches not yet read by every live reader; index 0 is the oldest.
     batches: Vec<Batch>,
     /// Sequence number of the oldest retained batch.
     base: u64,
-    /// Next sequence number each walker has yet to read.
-    cursors: Vec<u64>,
+    /// Next unread sequence number; `None` denotes a retired reader.
+    cursors: Vec<Option<u64>>,
     published: u64,
     delivered: u64,
     samples: Vec<VecDeque<Sample>>,
@@ -53,7 +53,7 @@ impl SharedDeposits {
             walkers,
             batches: Vec::new(),
             base: 0,
-            cursors: vec![0; walkers],
+            cursors: vec![Some(0); walkers],
             published: 0,
             delivered: 0,
             samples: (0..walkers).map(|_| VecDeque::new()).collect(),
@@ -90,6 +90,9 @@ impl SharedDeposits {
     /// Reading samples neither advances visit cursors nor republishes anything.
     pub fn drain_samples(&mut self, walker: usize) -> Vec<(usize, Array1<f64>)> {
         assert!(walker < self.walkers, "walker index out of range");
+        if self.cursors[walker].is_none() {
+            return Vec::new();
+        }
         let cursor = self.sample_cursors[walker];
         let mut received = Vec::new();
         for (source, samples) in self.samples.iter().enumerate() {
@@ -125,6 +128,15 @@ impl SharedDeposits {
         self.batches.len()
     }
 
+    /// Permanently stop delivery to a finished reader. Published observations
+    /// remain available to live peers. Repeated retirement is harmless and
+    /// does not increment delivery counts or discard a live reader's backlog.
+    pub fn retire_reader(&mut self, walker: usize) {
+        assert!(walker < self.walkers, "walker index out of range");
+        self.cursors[walker] = None;
+        self.prune();
+    }
+
     /// Publish `walker`'s visits since its last publication.
     ///
     /// An empty batch is dropped. The publishing walker never reads its own
@@ -142,9 +154,11 @@ impl SharedDeposits {
     /// Every other walker's visits published since `walker` last read.
     pub fn drain(&mut self, walker: usize) -> Vec<(Array1<f64>, u64)> {
         assert!(walker < self.walkers, "walker index out of range");
+        let Some(cursor) = self.cursors[walker] else {
+            return Vec::new();
+        };
         let next = self.base + self.batches.len() as u64;
-        let first = usize::try_from(self.cursors[walker].saturating_sub(self.base))
-            .expect("cursor offset fits");
+        let first = usize::try_from(cursor.saturating_sub(self.base)).expect("cursor offset fits");
         let mut out = Vec::new();
         for batch in &self.batches[first..] {
             if batch.walker != walker {
@@ -154,14 +168,20 @@ impl SharedDeposits {
                 }
             }
         }
-        self.cursors[walker] = next;
+        self.cursors[walker] = Some(next);
         self.prune();
         out
     }
 
-    /// Drop the batches every walker has read.
+    /// Drop batches consumed by every live reader.
     fn prune(&mut self) {
-        let oldest = self.cursors.iter().copied().min().unwrap_or(self.base);
+        let oldest = self
+            .cursors
+            .iter()
+            .flatten()
+            .copied()
+            .min()
+            .unwrap_or(self.base + self.batches.len() as u64);
         let drop = usize::try_from(oldest.saturating_sub(self.base)).expect("prune offset fits");
         let drop = drop.min(self.batches.len());
         if drop > 0 {
