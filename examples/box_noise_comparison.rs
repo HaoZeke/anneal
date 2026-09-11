@@ -128,7 +128,10 @@ impl Objective<f64> for ControllerSurface {
     fn eval(&self, x: ArrayView1<f64>) -> f64 {
         self.surface.evaluations.fetch_add(1, Ordering::Relaxed);
         assert_eq!(x.len(), self.surface.bounds.dims);
-        assert!(x.iter().all(|v| v.is_finite() && (-5.12..=5.12).contains(v)));
+        assert!(
+            x.iter()
+                .all(|v| v.is_finite() && (-5.12..=5.12).contains(v))
+        );
         self.value(x)
     }
 
@@ -173,32 +176,46 @@ fn values_controller_records(
         let replica_seeds: Vec<_> = (0..replicas)
             .map(|index| seed ^ (index as u64).wrapping_mul(0x9E37_79B9))
             .collect();
-        let starts: Vec<_> = replica_seeds.iter().enumerate().map(|(index, &replica_seed)| {
-            if index == 0 {
-                start.clone()
-            } else {
-                let mut rng = StdRng::seed_from_u64(replica_seed);
-                Array1::from_shape_fn(dim, |_| -5.12 + 10.24 * rng.random::<f64>())
-            }
-        }).collect();
+        let starts: Vec<_> = replica_seeds
+            .iter()
+            .enumerate()
+            .map(|(index, &replica_seed)| {
+                if index == 0 {
+                    start.clone()
+                } else {
+                    let mut rng = StdRng::seed_from_u64(replica_seed);
+                    Array1::from_shape_fn(dim, |_| -5.12 + 10.24 * rng.random::<f64>())
+                }
+            })
+            .collect();
         let began = Instant::now();
         let results: Vec<EnsembleHopResult> = if portfolio {
-            (0..replicas).filter(|&index| budgets[index] > 0).map(|index| {
-                ensemble_hop_optimize::<_, Surface>(
-                    &surface,
-                    None,
-                    replica_seeds[index],
-                    Some(starts[index].view()),
-                    budgets[index],
-                    1,
-                    HistoryMode::None,
-                    config.membership,
-                )
-            }).collect()
+            (0..replicas)
+                .filter(|&index| budgets[index] > 0)
+                .map(|index| {
+                    ensemble_hop_optimize::<_, Surface>(
+                        &surface,
+                        None,
+                        replica_seeds[index],
+                        Some(starts[index].view()),
+                        budgets[index],
+                        1,
+                        HistoryMode::None,
+                        config.membership,
+                    )
+                })
+                .collect()
         } else {
-            vec![box_values_ensemble_optimize_with_coverage(
-                &surface, seed, Some(start.view()), &config, &coverage,
-            ).into()]
+            vec![
+                box_values_ensemble_optimize_with_coverage(
+                    &surface,
+                    seed,
+                    Some(start.view()),
+                    &config,
+                    &coverage,
+                )
+                .into(),
+            ]
         };
         let elapsed = began.elapsed().as_secs_f64();
         let n_evals: usize = results.iter().map(|out| out.n_evals).sum();
@@ -208,9 +225,16 @@ fn values_controller_records(
         assert_eq!(n_grads, 0);
         assert_eq!(surface.surface.gradients.load(Ordering::Relaxed), 0);
         assert!(n_evals > 0 && n_evals <= budget);
-        let best = results.iter().min_by(|a, b| a.best_val.total_cmp(&b.best_val)).unwrap();
+        let best = results
+            .iter()
+            .min_by(|a, b| a.best_val.total_cmp(&b.best_val))
+            .unwrap();
         assert!(best.best_val.is_finite());
-        assert!(best.best_pos.iter().all(|v| v.is_finite() && (-5.12..=5.12).contains(v)));
+        assert!(
+            best.best_pos
+                .iter()
+                .all(|v| v.is_finite() && (-5.12..=5.12).contains(v))
+        );
         let verified_value = surface.value(best.best_pos.view());
         assert_eq!(best.best_val, verified_value);
         records.push(json!({
@@ -264,14 +288,17 @@ fn main() {
             return;
         }
         Some("controllers") => {
-            println!("{}", json!({
-                "record": "configuration", "comparison": "values-controllers",
-                "dimension": dim, "budget": budget, "seeds": seeds,
-                "objective_capability": "values", "execution": "serial",
-                "history": "none", "coverage_transport": "in-process",
-                "coverage_metric": "RMS-scaled-free-box-coordinates",
-                "version": env!("CARGO_PKG_VERSION"),
-            }));
+            println!(
+                "{}",
+                json!({
+                    "record": "configuration", "comparison": "values-controllers",
+                    "dimension": dim, "budget": budget, "seeds": seeds,
+                    "objective_capability": "values", "execution": "serial",
+                    "history": "none", "coverage_transport": "in-process",
+                    "coverage_metric": "RMS-scaled-free-box-coordinates",
+                    "version": env!("CARGO_PKG_VERSION"),
+                })
+            );
             for landscape in [Landscape::Rastrigin, Landscape::ConditionedQuadratic] {
                 for seed in 0..seeds as u64 {
                     for record in values_controller_records(landscape, dim, budget, seed) {
