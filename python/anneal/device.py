@@ -270,4 +270,5 @@ def run_ensemble(
         seed=seed,
     )
 
+
 __all__ = ["DeviceHistory", "EnsembleHistory", "run_device", "run_ensemble"]
