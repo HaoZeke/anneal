@@ -32,6 +32,8 @@ use eindir_core::{Bounds, Objective};
 use crate::history::History;
 use crate::variant::{boltzmann, fast, gsa};
 
+mod device;
+
 /// Drop the GIL before `run_ensemble` (or any other `thread::scope`
 /// that calls back into Python).
 ///
@@ -2860,6 +2862,7 @@ fn cluster_search(
 #[pymodule]
 fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("__version__", crate::version::ANNEAL_VERSION)?;
+    device::register(m)?;
     m.add_class::<PyBasinBias>()?;
     m.add_class::<PyBoltzmann>()?;
     m.add_class::<PyFast>()?;
