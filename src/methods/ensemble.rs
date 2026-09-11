@@ -358,6 +358,21 @@ fn lcg(state: &mut u64) -> u64 {
     *state >> 33
 }
 
+struct DepositReaderLifetime<'a> {
+    exchange: &'a Mutex<SharedDeposits>,
+    replica: usize,
+}
+
+impl Drop for DepositReaderLifetime<'_> {
+    fn drop(&mut self) {
+        // Thread return and unwinding both end the delivery obligation. A
+        // poisoned exchange cannot publish further batches successfully.
+        if let Ok(mut exchange) = self.exchange.lock() {
+            exchange.retire_reader(self.replica);
+        }
+    }
+}
+
 /// Runs one ensemble seed.
 ///
 /// The witness is called from every replica thread, so a non-reentrant
@@ -420,6 +435,7 @@ pub fn run_ensemble<W: ExactStructureWitness + Sync + ?Sized>(
                     (&exchange, &mailboxes, &occupied, &charged_total);
                 let context = context.clone();
                 scope.spawn(move || -> Result<ReplicaReport, String> {
+                    let _reader_lifetime = DepositReaderLifetime { exchange, replica };
                     let replica_started = Instant::now();
                     let objective = Mutex::new((problem.objective)(replica));
                     let mut ledger = Ledger::new(replica_budget);

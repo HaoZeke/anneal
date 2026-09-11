@@ -538,6 +538,13 @@ impl Coverage {
         accepted
     }
 
+    /// A chain without funded proposals has no further delivery obligation.
+    pub(super) fn retire_reader(&mut self, replica: usize) {
+        if let Some(exchange) = &mut self.exchange {
+            exchange.retire_reader(replica);
+        }
+    }
+
     /// Read once at a funded hop boundary, before its acceptance decision.
     pub(super) fn hear(&mut self, replica: usize, temperature: f64) {
         let Some(exchange) = &mut self.exchange else {

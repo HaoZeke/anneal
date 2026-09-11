@@ -513,6 +513,7 @@ where
             let remaining = replica.budget.saturating_sub(replica.work);
             let needs_certificate = hooks[index].enabled();
             if remaining == 0 {
+                coverage.retire_reader(index);
                 continue;
             }
             // One scalar proposal needs no full quench or certificate. Its
@@ -1004,6 +1005,7 @@ where
             let remaining = replica.budget.saturating_sub(replica.work);
             let mut depth = quench_depth(quench_allowances[index], remaining);
             if remaining < 4 || depth == 0 {
+                coverage.retire_reader(index);
                 continue;
             }
             let escape_steps = match config.escape {
@@ -1014,6 +1016,7 @@ where
                     // and two callbacks per step without consuming that reserve.
                     let steps = escape.steps.min(remaining.saturating_sub(3) / 2);
                     if steps == 0 {
+                        coverage.retire_reader(index);
                         continue;
                     }
                     steps
