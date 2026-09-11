@@ -25,6 +25,7 @@ version = "0.4"
 
 [dependencies.nng-sys]
 version = "1.4.0-rc.0"
+path = "../nng-sys"
 default-features = false
 
 [features]
