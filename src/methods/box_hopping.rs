@@ -450,7 +450,8 @@ where
         if replica.budget == 0 {
             continue;
         }
-        let start_depth = values_search_depth(dim, replica.budget);
+        let needs_certificate = hooks[index].enabled();
+        let start_depth = values_search_depth(dim, replica.budget, needs_certificate);
         let launch = FirstEvaluation::new(obj);
         let polish = pattern_search_polish(&launch, replica.x.clone(), start_depth.max(1));
         replica.work += polish.n_evals;
@@ -470,17 +471,22 @@ where
                 temperatures.at(index, replica.generation),
             );
         }
-        let before = replica.work;
-        let certified =
-            values_certificate(obj, replica.x.view(), &mut replica.work, replica.budget);
-        n_evals += replica.work - before;
-        if let Some(gradient) = certified {
-            if let Some(report) = hooks[index].observe(replica.f, replica.x.view(), gradient.view())
-            {
-                history_observations += 1;
-                hooks[index].mark_accepted(report.minimum);
-                replica.feedback.register_initial(report.minimum);
-                replica.here = Some(report.minimum);
+        // An unfunded pattern sweep can still spend its terminal allowance on
+        // finite-difference probes. Their raw values enter the incumbent even
+        // without a history consumer; funded search needs no such certificate.
+        if needs_certificate || start_depth == 0 {
+            let before = replica.work;
+            let certified =
+                values_certificate(obj, replica.x.view(), &mut replica.work, replica.budget);
+            n_evals += replica.work - before;
+            if let Some(gradient) = certified {
+                if let Some(report) = hooks[index].observe(replica.f, replica.x.view(), gradient.view())
+                {
+                    history_observations += 1;
+                    hooks[index].mark_accepted(report.minimum);
+                    replica.feedback.register_initial(report.minimum);
+                    replica.here = Some(report.minimum);
+                }
             }
         }
     }
@@ -489,7 +495,8 @@ where
         let mut progressed = false;
         for (index, replica) in replicas.iter_mut().enumerate() {
             let remaining = replica.budget.saturating_sub(replica.work);
-            let depth = values_search_depth(dim, remaining);
+            let needs_certificate = hooks[index].enabled();
+            let depth = values_search_depth(dim, remaining, needs_certificate);
             if remaining < 4 || depth == 0 {
                 continue;
             }
@@ -510,7 +517,7 @@ where
             replica.work += polish.n_evals;
             n_evals += polish.n_evals;
             let mut report = None;
-            if polish.best_val.is_finite() {
+            if needs_certificate && polish.best_val.is_finite() {
                 let before = replica.work;
                 let certified = values_certificate(
                     obj,
@@ -664,8 +671,8 @@ fn pattern_search_polish<O: Objective<f64>>(
     }
 }
 
-fn values_search_depth(dim: usize, remaining: usize) -> usize {
-    let certificate = dim + 1;
+fn values_search_depth(dim: usize, remaining: usize, needs_certificate: bool) -> usize {
+    let certificate = if needs_certificate { dim + 1 } else { 0 };
     let room = remaining.saturating_sub(certificate + 2);
     if room < dim + 2 {
         return 0;
@@ -1282,6 +1289,12 @@ enum ReplicaHook<'a> {
     Mutex(SharedDesignHistory<'a, WidthWitness>),
     #[cfg(feature = "history-nng")]
     Nng(HistoryNngClient),
+}
+
+impl ReplicaHook<'_> {
+    fn enabled(&self) -> bool {
+        !matches!(self, Self::Off)
+    }
 }
 
 impl HistoryHook for ReplicaHook<'_> {
