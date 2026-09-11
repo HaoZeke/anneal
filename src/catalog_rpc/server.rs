@@ -873,7 +873,13 @@ impl CatalogServer {
                                         break;
                                     }
                                 }
-                                Err(error) if error.kind() == std::io::ErrorKind::TimedOut => {}
+                                // A refused hello does not invalidate the listener.
+                                Err(error)
+                                    if matches!(
+                                        error.kind(),
+                                        std::io::ErrorKind::TimedOut
+                                            | std::io::ErrorKind::InvalidData
+                                    ) => {}
                                 Err(_) => break,
                             }
                         }
