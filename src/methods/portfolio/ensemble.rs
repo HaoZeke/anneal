@@ -106,7 +106,8 @@ where
                         } else {
                             let mut rng = StdRng::seed_from_u64(replica_seed);
                             Array1::from_shape_fn(bounds.dims, |j| {
-                                bounds.low[j] + (bounds.high[j] - bounds.low[j]) * rng.random::<f64>()
+                                bounds.low[j]
+                                    + (bounds.high[j] - bounds.low[j]) * rng.random::<f64>()
                             })
                         }
                     });
@@ -179,7 +180,12 @@ impl Coordinator {
     }
 
     fn advance(&self, state: &mut State) {
-        if state.active.iter().zip(&state.arrived).all(|(&a, &r)| !a || r) {
+        if state
+            .active
+            .iter()
+            .zip(&state.arrived)
+            .all(|(&a, &r)| !a || r)
+        {
             // Every producer has finished its slice. Drain in recipient and
             // producer order before allowing any next-slice publication.
             for replica in 0..state.active.len() {
@@ -201,13 +207,21 @@ pub(super) struct Peer {
 
 impl Peer {
     pub(super) fn checkpoint(&self, position: ArrayView1<f64>, value: f64) {
-        let mut state = self.coordinator.state.lock().expect("portfolio exchange lock");
+        let mut state = self
+            .coordinator
+            .state
+            .lock()
+            .expect("portfolio exchange lock");
         state.coverage.sample(self.replica, position, value);
         let epoch = state.epoch;
         state.arrived[self.replica] = true;
         self.coordinator.advance(&mut state);
         while state.epoch == epoch {
-            state = self.coordinator.changed.wait(state).expect("portfolio exchange lock");
+            state = self
+                .coordinator
+                .changed
+                .wait(state)
+                .expect("portfolio exchange lock");
         }
     }
 }
