@@ -1949,7 +1949,8 @@ fn box_ensemble_optimize(
 /// Box search split on gradient: hop-and-quench, or the values-only portfolio.
 #[pyfunction]
 #[pyo3(signature = (obj_fn, low, high, budget, seed = 0, grad_fn = None, x0 = None,
-                    replicas = 4, history = "shared", membership = "accepted"))]
+                    replicas = 4, history = "shared", membership = "accepted", *,
+                    coverage_shared = None, coverage_radius = None))]
 #[allow(clippy::too_many_arguments)]
 fn ensemble_optimize(
     py: Python<'_>,
@@ -1963,8 +1964,15 @@ fn ensemble_optimize(
     replicas: usize,
     history: &str,
     membership: &str,
+    coverage_shared: Option<bool>,
+    coverage_radius: Option<f64>,
 ) -> PyResult<Py<PyDict>> {
     let parsed = parse_box_search(low, high, budget, replicas, x0, history, membership)?;
+    if coverage_radius.is_some_and(|radius| !radius.is_finite() || radius <= 0.0) {
+        return Err(PyValueError::new_err(
+            "coverage radius must be finite and positive",
+        ));
+    }
     let seed_view = parsed.x0.as_ref().map(|a| a.view());
     let obj = CallableObjective {
         fn_: obj_fn,
@@ -1973,12 +1981,39 @@ fn ensemble_optimize(
     let dim = parsed.dim;
     let history_mode = parsed.history;
     let membership = parsed.membership;
-    let result = with_replica_threads(py, || match grad_fn {
-        Some(grad_fn) => {
-            let grad = CallablePyGradient { fn_: grad_fn, dim };
+    let coverage = (coverage_shared.is_some() || coverage_radius.is_some()).then(|| {
+        let defaults = crate::methods::box_hopping::BoxCoverageConfig::default();
+        crate::methods::box_hopping::BoxCoverageConfig {
+            shared: coverage_shared.unwrap_or(matches!(
+                history_mode,
+                crate::methods::ensemble::HistoryMode::Shared
+            )),
+            radius: coverage_radius.unwrap_or(defaults.radius),
+            ..defaults
+        }
+    });
+    let result = with_replica_threads(py, || {
+        let grad = grad_fn.map(|fn_| CallablePyGradient { fn_, dim });
+        if let Some(coverage) = coverage.as_ref() {
+            let config = crate::methods::box_hopping::BoxEnsembleConfig {
+                replicas,
+                budget,
+                history: history_mode,
+                membership,
+                ..Default::default()
+            };
+            crate::methods::box_hopping::ensemble_hop_optimize_with_config(
+                &obj,
+                grad.as_ref(),
+                seed,
+                seed_view,
+                &config,
+                coverage,
+            )
+        } else {
             crate::methods::box_hopping::ensemble_hop_optimize(
                 &obj,
-                Some(&grad),
+                grad.as_ref(),
                 seed,
                 seed_view,
                 budget,
