@@ -1068,7 +1068,7 @@ pub fn push_away_means(
     rmsd: f64,
 ) -> Option<Array1<f64>> {
     if x.is_empty()
-        || x.len() % 3 != 0
+        || !x.len().is_multiple_of(3)
         || !x.iter().all(|value| value.is_finite())
         || !rmsd.is_finite()
         || rmsd <= 0.0

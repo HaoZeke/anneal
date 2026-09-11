@@ -495,15 +495,14 @@ where
             let certified =
                 values_certificate(obj, replica.x.view(), &mut replica.work, replica.budget);
             n_evals += replica.work - before;
-            if let Some(gradient) = certified {
-                if let Some(report) =
+            if let Some(gradient) = certified
+                && let Some(report) =
                     hooks[index].observe(replica.f, replica.x.view(), gradient.view())
-                {
-                    history_observations += 1;
-                    hooks[index].mark_accepted(report.minimum);
-                    replica.feedback.register_initial(report.minimum);
-                    replica.here = Some(report.minimum);
-                }
+            {
+                history_observations += 1;
+                hooks[index].mark_accepted(report.minimum);
+                replica.feedback.register_initial(report.minimum);
+                replica.here = Some(report.minimum);
             }
         }
     }
@@ -579,19 +578,18 @@ where
                 }
                 continue;
             };
-            if report.is_none() {
-                if let Some(launch_cv) = launch
+            if report.is_none()
+                && let Some(launch_cv) = launch
                     .energy()
                     .and_then(|energy| coverage.describe(replica.trial.view(), energy))
-                {
-                    coverage.feedback_from_arrival(
-                        index,
-                        replica.cv.view(),
-                        launch_cv.view(),
-                        trial_cv.view(),
-                        &mut replica.feedback,
-                    );
-                }
+            {
+                coverage.feedback_from_arrival(
+                    index,
+                    replica.cv.view(),
+                    launch_cv.view(),
+                    trial_cv.view(),
+                    &mut replica.feedback,
+                );
             }
             let accept = coverage.accepts(
                 index,
@@ -607,10 +605,8 @@ where
                 temperatures.observe(index, replica.f, energy);
             }
             replica.adopt_trial(accept, trial_x, trial_f, trial_cv, report);
-            if accept {
-                if let Some(report) = report {
-                    hooks[index].mark_accepted(report.minimum);
-                }
+            if accept && let Some(report) = report {
+                hooks[index].mark_accepted(report.minimum);
             }
         }
         if !progressed {
@@ -1106,8 +1102,8 @@ where
             let mut used_grads = polish.n_grads;
             replica.work += used_evals + used_grads;
             let mut report = None;
-            if polish.best_val.is_finite() {
-                if let Some(gradient) = certificate_gradient(
+            if polish.best_val.is_finite()
+                && let Some(gradient) = certificate_gradient(
                     polish.best_grad,
                     polish.best_pos.view(),
                     obj,
@@ -1115,13 +1111,10 @@ where
                     &mut replica.work,
                     replica.budget,
                     &mut used_grads,
-                ) {
-                    report = hooks[index].observe(
-                        polish.best_val,
-                        polish.best_pos.view(),
-                        gradient.view(),
-                    );
-                }
+                )
+            {
+                report =
+                    hooks[index].observe(polish.best_val, polish.best_pos.view(), gradient.view());
             }
             let trial_x = polish.best_pos;
             let trial_f = polish.best_val;
@@ -1142,19 +1135,18 @@ where
                 }
                 continue;
             };
-            if report.is_none() {
-                if let Some(launch_cv) = launch
+            if report.is_none()
+                && let Some(launch_cv) = launch
                     .energy()
                     .and_then(|energy| coverage.describe(replica.trial.view(), energy))
-                {
-                    coverage.feedback_from_arrival(
-                        index,
-                        replica.cv.view(),
-                        launch_cv.view(),
-                        trial_cv.view(),
-                        &mut replica.feedback,
-                    );
-                }
+            {
+                coverage.feedback_from_arrival(
+                    index,
+                    replica.cv.view(),
+                    launch_cv.view(),
+                    trial_cv.view(),
+                    &mut replica.feedback,
+                );
             }
             let accept = coverage.accepts(
                 index,
@@ -1170,10 +1162,8 @@ where
                 temperatures.observe(index, replica.f, energy);
             }
             replica.adopt_trial(accept, trial_x, trial_f, trial_cv, report);
-            if accept {
-                if let Some(report) = report {
-                    hooks[index].mark_accepted(report.minimum);
-                }
+            if accept && let Some(report) = report {
+                hooks[index].mark_accepted(report.minimum);
             }
         }
         if !progressed {
