@@ -67,6 +67,17 @@ supplied frequency, each gradient has a paired objective call. Automatic
 calibration adds gradient-only probes, counted in =n_preconditioner_grads=.
 The returned timestep includes the driver's frequency-resolution limit.
 
+One execution of the example produces:
+
+#+begin_example
+Initial value: 131.25
+GLE best pos: [1.10581108 4.03410745 3.10285895 0.84622254 3.05349041]
+GLE best val: 46.41501297220731
+Gradient calls: 4000
+Combined work: 8000
+Effective timestep: 0.01
+#+end_example
+
 * Step 3: The thermostat inside (what the algebra buys)
 
 - =eindir= builds the =optimal_sampling_drift= matrix A for the chosen =omega0=.
