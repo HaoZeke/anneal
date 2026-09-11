@@ -42,7 +42,7 @@ mod free_coordinates;
 mod temperature;
 use coverage::Coverage;
 pub use coverage::{BoxCoverageConfig, CoverageDecisionStats, CoverageStats};
-use temperature::Temperatures;
+use temperature::{FirstEvaluation, Temperatures};
 
 #[cfg(feature = "history-nng")]
 use crate::history_nng::{HistoryNngClient, HistoryNngServer};
@@ -430,12 +430,16 @@ where
             continue;
         }
         let start_depth = values_search_depth(dim, replica.budget);
-        let polish = pattern_search_polish(obj, replica.x.clone(), start_depth.max(1));
+        let launch = FirstEvaluation::new(obj);
+        let polish = pattern_search_polish(&launch, replica.x.clone(), start_depth.max(1));
         replica.work += polish.n_evals;
         n_evals += polish.n_evals;
         if polish.best_val.is_finite() {
             replica.x = polish.best_pos;
             replica.f = polish.best_val;
+        }
+        if let Some(energy) = launch.energy() {
+            temperatures.observe(index, replica.f, energy);
         }
         if let Some(descriptor) = coverage.describe(replica.x.view(), replica.f) {
             replica.cv = descriptor;
@@ -480,7 +484,8 @@ where
                 replica.trial[j] += STEP0 * escape * widths[j] * noise;
             }
             replica.trial = reflect_into_box(replica.trial.view(), &bounds);
-            let polish = pattern_search_polish(obj, replica.trial.clone(), depth);
+            let launch = FirstEvaluation::new(obj);
+            let polish = pattern_search_polish(&launch, replica.trial.clone(), depth);
             replica.work += polish.n_evals;
             n_evals += polish.n_evals;
             let mut report = None;
@@ -513,6 +518,9 @@ where
                 );
             }
             let Some(trial_cv) = coverage.describe(trial_x.view(), trial_f) else {
+                if let Some(energy) = launch.energy() {
+                    temperatures.observe(index, replica.f, energy);
+                }
                 continue;
             };
             let accept = coverage.accepts(
@@ -525,7 +533,9 @@ where
                 &mut replica.rng,
             );
             coverage.observe(index, trial_cv.view(), temp);
-            temperatures.observe(index, replica.f, trial_f);
+            if let Some(energy) = launch.energy() {
+                temperatures.observe(index, replica.f, energy);
+            }
             replica.adopt_trial(accept, trial_x, trial_f, trial_cv, report);
             if accept {
                 if let Some(report) = report {
@@ -900,8 +910,9 @@ where
         let start_depth = quench_depth(quench_allowances[index], replica.budget);
         let mut start_grad = None;
         if start_depth > 0 {
+            let launch = FirstEvaluation::new(obj);
             let quench =
-                projected_gradient_polish(obj, grad, replica.x.clone(), start_depth, 1.0, 1e-8);
+                projected_gradient_polish(&launch, grad, replica.x.clone(), start_depth, 1.0, 1e-8);
             learn_quench_allowance(
                 &mut quench_allowances[index],
                 start_depth,
@@ -915,6 +926,9 @@ where
             if quench.best_val.is_finite() {
                 replica.x = quench.best_pos;
                 replica.f = quench.best_val;
+            }
+            if let Some(energy) = launch.energy() {
+                temperatures.observe(index, replica.f, energy);
             }
             start_grad = quench.best_grad;
         } else {
@@ -977,6 +991,7 @@ where
             coverage.hear(index, temp);
             let escape = replica.feedback.escape();
             replica.trial.assign(&replica.x);
+            let mut excursion_peak: Option<f64> = None;
             match config.escape {
                 BoxEscape::Gaussian => {
                     for j in 0..dim {
@@ -1004,7 +1019,10 @@ where
                     replica.work += 1;
                     n_grads += 1;
                     for _ in 0..escape_steps {
-                        stepper.step(obj, grad, &mut replica.trial, &mut force);
+                        let energy = stepper.step(obj, grad, &mut replica.trial, &mut force);
+                        if energy.is_finite() {
+                            excursion_peak = Some(excursion_peak.map_or(energy, |peak| peak.max(energy)));
+                        }
                         replica.work += 2;
                         n_evals += 1;
                         n_grads += 1;
@@ -1015,8 +1033,12 @@ where
                     );
                 }
             }
+            let launch = FirstEvaluation::new(obj);
             let polish =
-                projected_gradient_polish(obj, grad, replica.trial.clone(), depth, 1.0, 1e-8);
+                projected_gradient_polish(&launch, grad, replica.trial.clone(), depth, 1.0, 1e-8);
+            if let Some(energy) = launch.energy() {
+                excursion_peak = Some(excursion_peak.map_or(energy, |peak| peak.max(energy)));
+            }
             learn_quench_allowance(
                 &mut quench_allowances[index],
                 depth,
@@ -1059,6 +1081,9 @@ where
                 );
             }
             let Some(trial_cv) = coverage.describe(trial_x.view(), trial_f) else {
+                if let Some(energy) = excursion_peak {
+                    temperatures.observe(index, replica.f, energy);
+                }
                 continue;
             };
             let accept = coverage.accepts(
@@ -1071,7 +1096,9 @@ where
                 &mut replica.rng,
             );
             coverage.observe(index, trial_cv.view(), temp);
-            temperatures.observe(index, replica.f, trial_f);
+            if let Some(energy) = excursion_peak {
+                temperatures.observe(index, replica.f, energy);
+            }
             replica.adopt_trial(accept, trial_x, trial_f, trial_cv, report);
             if accept {
                 if let Some(report) = report {

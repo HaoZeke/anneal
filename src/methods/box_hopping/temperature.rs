@@ -1,4 +1,9 @@
-//! Per-chain exploration scales learned from raw uphill energy differences.
+//! Per-chain exploration scales learned from paid raw energy excursions.
+
+use std::sync::Mutex;
+
+use eindir_core::{Bounds, Objective};
+use ndarray::ArrayView1;
 
 use crate::bias::AdaptiveHeight;
 
@@ -23,8 +28,9 @@ impl Temperatures {
         scale * 5.0 * std::f64::consts::LN_2 / (generation as f64 + 1.0).ln().max(1e-12)
     }
 
-    /// Every finite uphill trial supplies evidence, including rejected trials.
-    /// Learning occurs after the boundary's acceptance and coverage deposit.
+    /// One finite raw excursion supplies evidence, including rejected trials.
+    /// Initial relaxation supplies its launch-to-retained energy drop. Escape
+    /// learning occurs after the boundary's acceptance and coverage deposit.
     pub(super) fn observe(&mut self, replica: usize, occupied: f64, trial: f64) {
         let gap = trial - occupied;
         if !gap.is_finite() || gap <= 0.0 {
@@ -33,4 +39,35 @@ impl Temperatures {
         let estimate = self.gaps[replica].get_or_insert_with(|| AdaptiveHeight::new(0.5, 1.0, gap));
         estimate.observe(gap);
     }
+}
+
+/// Retain a polisher's already-paid launch value without evaluating it twice.
+pub(super) struct FirstEvaluation<'a, O> {
+    inner: &'a O,
+    value: Mutex<Option<f64>>,
+}
+
+impl<'a, O> FirstEvaluation<'a, O> {
+    pub(super) fn new(inner: &'a O) -> Self {
+        Self { inner, value: Mutex::new(None) }
+    }
+
+    pub(super) fn energy(&self) -> Option<f64> {
+        (*self.value.lock().expect("launch energy lock")).filter(|value| value.is_finite())
+    }
+}
+
+impl<O: Objective<f64>> Objective<f64> for FirstEvaluation<'_, O> {
+    fn eval(&self, x: ArrayView1<f64>) -> f64 {
+        let value = self.inner.eval(x);
+        let mut first = self.value.lock().expect("launch energy lock");
+        if first.is_none() {
+            *first = Some(value);
+        }
+        value
+    }
+
+    fn dim(&self) -> usize { self.inner.dim() }
+
+    fn bounds(&self) -> &Bounds<f64> { self.inner.bounds() }
 }
