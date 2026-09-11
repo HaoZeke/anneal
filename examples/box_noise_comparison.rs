@@ -145,7 +145,8 @@ fn main() {
                         gradients: AtomicUsize::new(0),
                     };
                     let mut start_rng = StdRng::seed_from_u64(seed ^ 0x5354_4152_545f_424f);
-                    let start = Array1::from_shape_fn(dim, |_| -5.12 + 10.24 * start_rng.random::<f64>());
+                    let start =
+                        Array1::from_shape_fn(dim, |_| -5.12 + 10.24 * start_rng.random::<f64>());
                     let initial_value = surface.value(start.view());
                     assert!(initial_value > 0.0);
                     let config = BoxEnsembleConfig {
