@@ -32,6 +32,98 @@ const GLE_FREQUENCY_FLOOR: f64 = 1e-12;
 /// Final annealing temperature as a fraction of the initial temperature.
 const GLE_ANNEAL_TEMPERATURE_FLOOR_RATIO: f64 = 1e-3;
 
+/// Noise law for a Langevin optimization trajectory.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum GleNoise {
+    /// Fitted extended-state thermostat across the configured frequency band.
+    Colored,
+    /// Scalar Langevin friction, with no auxiliary momentum rows.
+    White { friction: f64 },
+}
+
+impl GleNoise {
+    pub(crate) fn validate(self) {
+        if let Self::White { friction } = self {
+            assert!(friction.is_finite() && friction > 0.0, "friction must be finite and positive");
+        }
+    }
+
+    fn drift(self, omega0: f64) -> Array2<f64> {
+        match self {
+            Self::Colored => optimal_sampling_drift(omega0),
+            Self::White { friction } => Array2::from_elem((1, 1), friction),
+        }
+    }
+}
+
+/// Persistent optimization noise; positions and raw forces belong to the caller.
+/// Segment boundaries do not redraw physical or auxiliary momenta. A caller
+/// that changes its position through quench or rejection supplies a fresh force.
+pub(crate) struct LangevinStepper {
+    drift: Array2<f64>,
+    thermostat: GleThermostat,
+    momentum: Array2<f64>,
+    scale: Array1<f64>,
+    rng: StdRng,
+    temperature: f64,
+    pub(crate) dt: f64,
+}
+
+impl LangevinStepper {
+    pub(crate) fn new(
+        noise: GleNoise,
+        omega0: f64,
+        dt: f64,
+        temperature: f64,
+        scale: Array1<f64>,
+        seed: u64,
+    ) -> Self {
+        noise.validate();
+        assert!(omega0.is_finite() && omega0 > 0.0, "omega0 must be finite and positive");
+        assert!(dt.is_finite() && dt > 0.0, "dt must be finite and positive");
+        assert!(scale.iter().all(|s| s.is_finite() && *s > 0.0), "scale must be finite and positive");
+        let dt = dt
+            .min(GLE_TIMESTEP_RESOLUTION / (GLE_BAND_RATIO * omega0).max(GLE_FREQUENCY_FLOOR))
+            .max(GLE_MIN_TIMESTEP);
+        let drift = noise.drift(omega0);
+        let thermostat = GleThermostat::canonical(&drift, dt, temperature, 1.0);
+        let covariance = Array2::<f64>::eye(drift.nrows()) * temperature;
+        let mut rng = StdRng::seed_from_u64(seed);
+        let momentum = thermostat.sample_stationary(&covariance, scale.len(), 1.0, &mut rng);
+        Self { drift, thermostat, momentum, scale, rng, temperature, dt }
+    }
+
+    pub(crate) fn set_temperature(&mut self, temperature: f64) {
+        if temperature == self.temperature {
+            return;
+        }
+        self.momentum *= (temperature / self.temperature).sqrt();
+        self.thermostat = GleThermostat::canonical(&self.drift, self.dt, temperature, 1.0);
+        self.temperature = temperature;
+    }
+
+    /// One BAB step and thermostat update: exactly one gradient and objective.
+    /// The boundary operation is box clipping, not a manifold retraction.
+    pub(crate) fn step<O: Objective<f64>, G: Gradient<f64>>(
+        &mut self,
+        obj: &O,
+        grad: &G,
+        x: &mut Array1<f64>,
+        raw_gradient: &mut Array1<f64>,
+    ) -> f64 {
+        let mut p = self.momentum.row(0).to_owned();
+        p = &p - &(&(&*raw_gradient * &self.scale) * (0.5 * self.dt));
+        *x = &*x + &(&(&p * &self.scale) * self.dt);
+        *x = obj.bounds().clip(x.view());
+        *raw_gradient = grad.grad(x.view());
+        let value = obj.eval(x.view());
+        p = &p - &(&(&*raw_gradient * &self.scale) * (0.5 * self.dt));
+        self.momentum.row_mut(0).assign(&p);
+        self.thermostat.step(&mut self.momentum.view_mut(), &mut self.rng);
+        value
+    }
+}
+
 /// Result of a GLE-Langevin annealing run.
 #[derive(Clone, Debug)]
 pub struct GleLangevinResult {
@@ -362,15 +454,12 @@ where
     let bounds = obj.bounds().clone();
     let dim = bounds.dims;
     assert_eq!(scale.len(), dim, "scale length must match dimension");
-    let mut rng = StdRng::seed_from_u64(seed);
 
     // Resolve the fastest fitted frequency with the configured timestep fraction.
     let omega_hi = GLE_BAND_RATIO * omega0;
     let dt = dt
         .min(GLE_TIMESTEP_RESOLUTION / omega_hi.max(GLE_FREQUENCY_FLOOR))
         .max(GLE_MIN_TIMESTEP);
-    let drift = optimal_sampling_drift(omega0);
-    let ns = drift.nrows() - 1;
 
     // Start from the supplied anchor or the box centre.
     let mut x: Array1<f64> = x0
@@ -379,7 +468,7 @@ where
         })
         .map(|candidate| bounds.clip(candidate.view()))
         .unwrap_or_else(|| (&bounds.low + &bounds.high) * 0.5);
-    let mut fx = obj.eval(x.view());
+    let fx = obj.eval(x.view());
     let mut best_val = fx;
     let mut best_pos = x.clone();
 
@@ -403,48 +492,25 @@ where
         };
     }
 
-    // Physical momentum and auxiliary rows retain their shared noise history;
-    // temperature changes rescale the complete state without a fresh draw.
-    let mut s = Array2::<f64>::zeros((ns + 1, dim));
-    let mut previous_temperature = t_hi;
+    let mut stepper = LangevinStepper::new(
+        GleNoise::Colored, omega0, dt, t_hi, scale.clone(), seed,
+    );
     'outer: for epoch in 0..n_epochs {
         let frac = epoch as f64 / (n_epochs.max(2) - 1) as f64;
         let temperature = t_hi * (t_lo / t_hi).powf(frac);
-        let gle = GleThermostat::canonical(&drift, dt, temperature, 1.0);
-        if epoch == 0 {
-            let c = Array2::<f64>::eye(ns + 1) * temperature;
-            s = gle.sample_stationary(&c, dim, 1.0, &mut rng);
-        } else {
-            s *= (temperature / previous_temperature).sqrt();
-        }
-        previous_temperature = temperature;
+        stepper.set_temperature(temperature);
         for _ in 0..steps {
-            // B: half momentum kick from the force (mass = 1)
-            let mut p: Array1<f64> = s.row(0).to_owned();
-            p = &p - &(&(&g * scale) * (0.5 * dt));
-            // A: drift the position, clip to the box
-            x = &x + &(&(&p * scale) * dt);
-            x = bounds.clip(x.view());
-            g = grad.grad(x.view());
+            let fy = stepper.step(obj, grad, &mut x, &mut g);
             n_evals += 1;
-            let fy = obj.eval(x.view());
             if fy < best_val {
                 best_val = fy;
                 best_pos = x.clone();
             }
-            fx = fy;
-            // B: second half kick
-            p = &p - &(&(&g * scale) * (0.5 * dt));
-            // O: GLE colored-noise thermostat on the momentum
-            s.row_mut(0).assign(&p);
-            gle.step(&mut s.view_mut(), &mut rng);
             if n_evals >= max_fevals {
                 break 'outer;
             }
         }
     }
-    let _ = fx;
-
     GleLangevinResult {
         best_pos: best_pos.to_vec(),
         best_val,
