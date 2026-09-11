@@ -168,7 +168,7 @@ summed as a unique ensemble census. =result.shared_deposits= is the applied
 foreign coverage count. The current box coverage exchange is in-process;
 the NNG history transport below carries minimum reports, not this stream.
 
-** Coverage returns inform escape without minimum identity
+** Coverage arrivals inform escape without minimum identity
 
 A paid pre-polish launch outside a known coverage region followed by a
 retained quench endpoint inside it supplies recrossing evidence. When no
@@ -195,6 +195,20 @@ in the selected region. These are conditional counts under the actual
 region map, not a private-chain replay. =escape_updates= counts changes to
 the bounded scale, excluding returns at its ceiling. They are distinct
 from the terminal-acceptance influence measurements below.
+
+An evaluated trial outside every held region supplies the complementary
+novel-arrival response, including a rejected trial. It contracts the
+existing escape scale with =beta_new=, without registering a minimum.
+Initial observations do not update escape, and a region imported from a
+peer is known rather than novel. =novel_arrivals= counts those events and
+=novelty_updates= counts their bounded scale changes. Gaussian width can
+range from one quarter to four times its initial scale. Langevin uses
+one to four times its calibrated excitation: novelty relaxes a return
+boost but cannot undercut the temperature learned from raw energy gaps.
+
+Python forwards these six counters under their =coverage_= prefixed names;
+=minimize= retains them in =diagnostics=. The one-replica values portfolio
+does not use box coverage feedback and reports zero for all six.
 
 ** Measure delivery separately from decision influence
 
