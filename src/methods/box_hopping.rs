@@ -39,7 +39,7 @@ use crate::methods::minima_hopping::{
 use crate::movekernel::reflect_into_box;
 use crate::pes_exploration::{ExactStructureWitness, StructureContext};
 
-mod coverage;
+pub(crate) mod coverage;
 mod free_coordinates;
 mod repulsion;
 mod temperature;

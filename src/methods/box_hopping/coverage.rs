@@ -232,7 +232,7 @@ impl Fingerprint for NormalizedCoordinates {
     }
 }
 
-pub(super) struct Coverage {
+pub(crate) struct Coverage {
     coordinates: NormalizedCoordinates,
     biases: Vec<BasinBias<NormalizedCoordinates>>,
     foreign_wells: Vec<Vec<ForeignWell>>,
@@ -245,7 +245,7 @@ pub(super) struct Coverage {
 }
 
 impl Coverage {
-    pub(super) fn new(
+    pub(crate) fn new(
         bounds: &Bounds<f64>,
         replicas: usize,
         config: &BoxCoverageConfig,
@@ -289,7 +289,7 @@ impl Coverage {
 
     /// A paid launch remains useful even when local improvement returns to a
     /// shared centre. It is a geometric sample, not another boundary visit.
-    pub(super) fn sample(&mut self, replica: usize, x: ArrayView1<f64>, value: f64) {
+    pub(crate) fn sample(&mut self, replica: usize, x: ArrayView1<f64>, value: f64) {
         if self.exchange.is_none() {
             return;
         }
@@ -539,14 +539,14 @@ impl Coverage {
     }
 
     /// A chain without funded proposals has no further delivery obligation.
-    pub(super) fn retire_reader(&mut self, replica: usize) {
+    pub(crate) fn retire_reader(&mut self, replica: usize) {
         if let Some(exchange) = &mut self.exchange {
             exchange.retire_reader(replica);
         }
     }
 
     /// Read once at a funded hop boundary, before its acceptance decision.
-    pub(super) fn hear(&mut self, replica: usize, temperature: f64) {
+    pub(crate) fn hear(&mut self, replica: usize, temperature: f64) {
         let Some(exchange) = &mut self.exchange else {
             return;
         };
@@ -596,7 +596,7 @@ impl Coverage {
         }
     }
 
-    pub(super) fn finish(mut self) -> (CoverageStats, CoverageDecisionStats) {
+    pub(crate) fn finish(mut self) -> (CoverageStats, CoverageDecisionStats) {
         self.stats.published_samples = self
             .exchange
             .as_ref()
