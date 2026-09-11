@@ -1,0 +1,128 @@
+#+TITLE: ChemFit
+#+OPTIONS: toc:nil todo:nil num:nil author:nil title:nil ^:nil
+
+* ChemFit is a design box
+
+[[https://github.com/MSallermann/chemfit][ChemFit]] fits force-field parameters.
+The state is a flattened parameter vector with box bounds, not a
+\(3N\) point set. Use =anneal.minimize=, not =cluster_search=.
+
+Only the scalar loss is required. No objective Jacobian, atomic forces,
+descriptor Jacobian or stationary-point certificate is needed to exchange
+sampled parameter regions. All search and separation operations run in
+Rust; Python adapts the parameter dictionary and callback.
+
+* Flatten parameters and share evaluated regions
+
+The example uses a scalar quadratic loss in two named parameters. Replace
+=loss_by_name= with the fitting loss; its only return value is a number.
+The order in =keys= is shared by the initial vector, bounds and callback.
+
+#+name: chemfit-values-example
+#+begin_src python
+import numpy as np
+from anneal import minimize
+
+initial = {"epsilon": 2.0, "sigma": 1.5}
+parameter_bounds = {"epsilon": (0.2, 4.0), "sigma": (0.2, 4.0)}
+keys = tuple(initial)
+x0 = np.array([initial[key] for key in keys])
+bounds = [parameter_bounds[key] for key in keys]
+observed = []
+
+def loss_by_name(parameters):
+    a = parameters["epsilon"] - 1.0
+    b = parameters["sigma"] - 1.0
+    return (a + b) ** 2 + 25.0 * (a - b) ** 2
+
+def f_scipy(x):
+    value = loss_by_name(dict(zip(keys, x)))
+    observed.append(value)
+    return value
+
+res = minimize(
+    f_scipy, x0, bounds=bounds, jac=None,
+    budget=256, seed=0, replicas=4,
+    history="none", coverage_shared=True,
+)
+opt_params = dict(zip(keys, res.x))
+assert res.nfev == len(observed) == res.charged <= 256
+assert res.njev == 0
+assert res.fun == min(observed)
+assert res.diagnostics["history_observations"] == 0
+assert res.diagnostics["coverage_applied_foreign_samples"] > 0
+print(res.nfev, res.njev, res.diagnostics["history_observations"])
+#+end_src
+
+The three output fields are objective calls, gradient calls and certified
+minimum reports. They are =256 0 0= for this example. The coverage assertion
+checks actual received peer samples, not merely a requested replica count.
+
+=jac=None= means no caller-supplied derivatives. Scalar local refinement
+can still estimate derivatives through function evaluations; every such
+probe is included in =res.nfev= and the aggregate budget. This is not a
+promise of a derivative-free proposal law or reliable numerical derivatives
+on a noisy or discontinuous loss. The returned =res.fun= is the lowest raw
+value actually observed, not the biased acceptance score, and =success=
+does not certify a global minimum.
+
+* Replica and history controls
+
+With =jac=None= and no explicit coverage controls, =replicas=1= selects the
+scalar portfolio; two or more replicas select scalar hop chains. Explicit
+=coverage_shared= or =coverage_radius= selects hop chains even at one
+replica. Replicas divide one aggregate budget; adding replicas does not
+multiply the number of paid calls. Comparing one portfolio against several
+hopping chains changes the controller as well as communication.
+
+=history="none", coverage_shared=True= communicates evaluated parameter
+regions without a minimum ledger. The independent =coverage_radius= sets
+normalized RMS distance in parameter space. Fixed coordinates contribute
+zero distance and remain fixed in every callback. Nearby peer samples can
+repel proposals; neither distance nor repulsion requires forces. See
+[[file:../explanation/communication.org][the communication contract]] for the geometry, budget and counter definitions.
+
+With a supplied =jac=, the same entry selects gradient-capable box search.
+Langevin escapes require a gradient; their force requirement is not imposed
+on the scalar Gaussian path. Parameter coverage is an in-process exchange;
+the optional NNG minimum-history transport is a separate channel.
+
+* Optional parameter archives
+
+=store= supplies a parameter archive. Given =f_scipy=, =x0= and =bounds=
+as above and an existing =campaign_dir=:
+
+#+begin_src python
+res = minimize(
+    f_scipy,
+    x0,
+    bounds=bounds,
+    jac=None,
+    budget=8000,
+    seed=0,
+    replicas=4,           # communicating chains
+    history="shared",     # or "private" / "none"
+    store=campaign_dir,   # existing readcon-db root, or fit.h5
+)
+#+end_src
+
+- =store= is a handle to an *existing* archive:
+  - =*.h5= / =*.hdf5=: parameter rows =(x, f)=
+  - a directory that already holds a readcon-db corpus: parameters go in
+    =anneal_params.h5= (or =.jsonl=) *beside* the LMDB, never as CON
+    frames (those require length \(3N\))
+  - an object with =observations()= and =record(x, f)=
+- If the store already has rows, the walk starts from the stored best.
+
+readcon-db stays the structure corpus. HDF5 (or JSONL next to it) is
+the parameter corpus. Do not pad a force-field vector to \(3N\) to
+reuse =MinimaCorpus::record=.
+
+* Adapter boundary
+
+A fitting adapter flattens the parameter dictionary, calls
+=anneal.minimize=, and unflattens =res.x=. It forwards =replicas=,
+=history=, coverage settings and =store= explicitly. For an energy-only
+loss it forwards =jac=None=; it need not construct a Jacobian callback.
+Bounds must be finite closed intervals. This guide uses Anneal's public
+entry directly and does not require a particular ChemFit backend release.
