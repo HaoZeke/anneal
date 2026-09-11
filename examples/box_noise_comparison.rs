@@ -531,8 +531,14 @@ mod controller_tests {
         };
         let peer = portfolio_peer_record(Landscape::Rastrigin, 2, 257, 13, &coverage);
         for field in [
-            "initial_positions", "replica_seeds", "replica_budgets", "budget",
-            "best_position", "best_value", "n_evals", "n_grads",
+            "initial_positions",
+            "replica_seeds",
+            "replica_budgets",
+            "budget",
+            "best_position",
+            "best_value",
+            "n_evals",
+            "n_grads",
         ] {
             assert_eq!(peer[field], baseline[1][field], "field {field}");
         }
