@@ -186,17 +186,15 @@ fn run_slab_ensembles(
     base_x: &ndarray::Array1<f64>,
     box_: [f64; 9],
 ) {
-    use anneal_core::methods::ensemble::{
-        EnsembleProblem, ObjectiveFactory, StartFactory, run_ensemble,
-    };
+    use anneal_core::methods::ensemble::{EnsembleProblem, ObjectiveFactory, StartFactory};
+    #[cfg(feature = "ira")]
     use anneal_core::methods::minima_hopping::SerializedWitness;
     use anneal_core::pes_exploration::StructureContext;
-    use common::ensemble_report::{
-        Tally, config_from_env, print_header, print_report, print_tally,
-    };
+    use common::ensemble_report::{config_from_env, print_header, run_seeds, sorted_pairs_witness};
     use eindir_core::gradient::DifferentiableObjective;
     use ndarray::{Array1, ArrayView1};
     use rand::Rng;
+    #[cfg(feature = "ira")]
     use std::sync::Mutex;
 
     let n = species.len();
@@ -215,22 +213,7 @@ fn run_slab_ensembles(
         .with_pair_cache(128 * 1024 * 1024),
     ));
     #[cfg(not(feature = "ira"))]
-    let witness = {
-        use anneal_core::bias::{Fingerprint, SortedPairs};
-        let fingerprint = SortedPairs { n_points: n };
-        SerializedWitness(Mutex::new(
-            move |left: ArrayView1<f64>, right: ArrayView1<f64>| {
-                let l = fingerprint.describe(left);
-                let r = fingerprint.describe(right);
-                l.iter()
-                    .zip(r.iter())
-                    .map(|(a, b)| (a - b) * (a - b))
-                    .sum::<f64>()
-                    .sqrt()
-                    < radius
-            },
-        ))
-    };
+    let witness = sorted_pairs_witness(n, radius);
     let mut active = vec![false; n];
     for &i in free_seeds {
         active[i] = true;
@@ -290,11 +273,5 @@ fn run_slab_ensembles(
         );
         (e, gmax)
     };
-    let mut tally = Tally::new();
-    for seed in seed0..seed0 + seeds {
-        let report = run_ensemble(cfg, &ens, seed, &problem)
-            .unwrap_or_else(|error| panic!("seed {seed}: {error}"));
-        print_report(seed, &ens, &report, " eV", &verify, &mut tally);
-    }
-    print_tally(&ens, &tally, None);
+    run_seeds(cfg, &ens, seed0, seeds, &problem, " eV", &verify, None);
 }

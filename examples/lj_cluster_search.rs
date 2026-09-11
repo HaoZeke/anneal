@@ -7444,12 +7444,13 @@ fn run_history_ensembles(
     opts: &[&str],
 ) {
     use anneal_core::methods::cluster_hopping::random_cluster_in_radius;
-    use anneal_core::methods::ensemble::{
-        EnsembleProblem, ObjectiveFactory, StartFactory, run_ensemble,
-    };
+    use anneal_core::methods::ensemble::{EnsembleProblem, ObjectiveFactory, StartFactory};
+    #[cfg(feature = "ira")]
     use anneal_core::methods::minima_hopping::SerializedWitness;
     use anneal_core::pes_exploration::StructureContext;
-    use ensemble_report::{Tally, config_from_env, print_header, print_report, print_tally};
+    use ensemble_report::{
+        config_from_env, print_header, run_seeds, sorted_pairs_witness, witness_name,
+    };
 
     let ens = config_from_env(replicas, budget, reference.map(|r| r + 1e-4));
     let mut cfg = cfg.clone();
@@ -7471,30 +7472,10 @@ fn run_history_ensembles(
     ));
     #[cfg(not(feature = "ira"))]
     let witness = {
-        // Without the exact matcher the witness is the sorted-pair spectrum
-        // within the calibration radius: it over-merges homometric pairs
-        // and is for smoke runs only, which the record says.
         let _ = pair_cache_bytes;
-        use anneal_core::bias::{Fingerprint, SortedPairs};
-        let fingerprint = SortedPairs { n_points: n };
-        SerializedWitness(Mutex::new(
-            move |left: ArrayView1<f64>, right: ArrayView1<f64>| {
-                let l = fingerprint.describe(left);
-                let r = fingerprint.describe(right);
-                l.iter()
-                    .zip(r.iter())
-                    .map(|(a, b)| (a - b) * (a - b))
-                    .sum::<f64>()
-                    .sqrt()
-                    < ira_radius
-            },
-        ))
+        sorted_pairs_witness(n, ira_radius)
     };
-    let witness_name = if cfg!(feature = "ira") {
-        "ira-cached"
-    } else {
-        "sorted-pairs-fallback"
-    };
+    let witness_name = witness_name();
     let context = StructureContext::new(Some(vec![18; n]), None, Some(format!("lj-reduced-n{n}")));
     let objective: ObjectiveFactory<'_> = &|_| Box::new(|x: ArrayView1<f64>| lj(x));
     let start: StartFactory<'_> =
@@ -7539,11 +7520,5 @@ fn run_history_ensembles(
         );
         (e, gmax)
     };
-    let mut tally = Tally::new();
-    for seed in seed0..(seed0 + seeds) {
-        let report = run_ensemble(&cfg, &ens, seed, &problem)
-            .unwrap_or_else(|error| panic!("seed {seed}: {error}"));
-        print_report(seed, &ens, &report, "", &verify, &mut tally);
-    }
-    print_tally(&ens, &tally, reference);
+    run_seeds(&cfg, &ens, seed0, seeds, &problem, "", &verify, reference);
 }
