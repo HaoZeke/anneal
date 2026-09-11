@@ -68,6 +68,23 @@ class CampaignCompletionTests(unittest.TestCase):
         self.assertEqual(record["first"], [1234.0])
         self.assertEqual(record["wall"], [2.0])
 
+    def test_managed_task_requires_its_terminal_exit_marker(self):
+        with tempfile.TemporaryDirectory() as directory:
+            Path(directory, "control_0.out").write_text(result(0))
+            Path(directory, "control_0.meta").write_text("task=0 slurm_job=123\n")
+            record = summarise(directory)["control"]
+        self.assertEqual(record["tasks"], 1)
+        self.assertEqual(record["done"], 0)
+        self.assertEqual(record["solved"], [])
+
+    def test_footer_without_a_matching_seed_result_is_incomplete(self):
+        with tempfile.TemporaryDirectory() as directory:
+            Path(directory, "control_0.out").write_text(result(7))
+            record = summarise(directory)["control"]
+        self.assertEqual(record["tasks"], 1)
+        self.assertEqual(record["done"], 0)
+        self.assertEqual(record["solved"], [])
+
 
 if __name__ == "__main__":
     unittest.main()
