@@ -267,6 +267,80 @@ fn values_controller_records(
     records
 }
 
+fn portfolio_peer_record(
+    landscape: Landscape,
+    dim: usize,
+    budget: usize,
+    seed: u64,
+    coverage: &BoxCoverageConfig,
+) -> serde_json::Value {
+    use anneal_core::methods::portfolio::{PortfolioEnsembleConfig, portfolio_ensemble_optimize};
+
+    let surface = ControllerSurface::new(landscape, dim);
+    let mut rng = StdRng::seed_from_u64(seed ^ 0x5354_4152_545f_424f);
+    let start = Array1::from_shape_fn(dim, |_| -5.12 + 10.24 * rng.random::<f64>());
+    let config = PortfolioEnsembleConfig {
+        replicas: 4,
+        budget,
+        coverage: coverage.clone(),
+        ..PortfolioEnsembleConfig::default()
+    };
+    let replica_seeds: Vec<_> = (0..4)
+        .map(|index| seed ^ (index as u64).wrapping_mul(0x9E37_79B9))
+        .collect();
+    let starts: Vec<_> = replica_seeds.iter().enumerate().map(|(index, &seed)| {
+        if index == 0 {
+            start.clone()
+        } else {
+            let mut rng = StdRng::seed_from_u64(seed);
+            Array1::from_shape_fn(dim, |_| -5.12 + 10.24 * rng.random::<f64>())
+        }
+    }).collect();
+    let began = Instant::now();
+    let out = portfolio_ensemble_optimize::<_, Surface>(
+        &surface, None, seed, Some(start.view()), &config,
+    );
+    let elapsed = began.elapsed().as_secs_f64();
+    let observed = surface.surface.evaluations.load(Ordering::Relaxed);
+    let verified = surface.value(ArrayView1::from(&out.best_pos));
+    assert_eq!(out.n_evals, observed);
+    assert_eq!(out.n_evals, budget);
+    assert_eq!(out.n_grads, 0);
+    assert_eq!(surface.surface.gradients.load(Ordering::Relaxed), 0);
+    assert_eq!(out.best_val, verified);
+    json!({
+        "record": "result", "comparison": "values-controllers",
+        "arm": if coverage.shared { "portfolio_shared" } else { "portfolio_threaded_private" },
+        "controller": "portfolio", "execution": "scoped-replica-threads",
+        "landscape": format!("{landscape:?}"), "dimension": dim, "seed": seed,
+        "transformation": if matches!(landscape, Landscape::ConditionedQuadratic) {
+            "shifted-householder"
+        } else { "shifted" },
+        "optimum": surface.optimum.to_vec(), "budget": budget, "replicas": 4,
+        "replica_budgets": (0..4).map(|i| budget / 4 + usize::from(i < budget % 4)).collect::<Vec<_>>(),
+        "replica_seeds": replica_seeds,
+        "initial_positions": starts.iter().map(|x| x.to_vec()).collect::<Vec<_>>(),
+        "initial_values": starts.iter().map(|x| surface.value(x.view())).collect::<Vec<_>>(),
+        "n_evals": out.n_evals, "observed_calls": observed, "n_grads": out.n_grads,
+        "best_position": out.best_pos, "best_value": out.best_val,
+        "verified_value": verified, "elapsed_seconds": elapsed,
+        "history": "none", "coverage": if coverage.shared { "shared" } else { "private" },
+        "coverage_radius": coverage.radius, "coverage_height": coverage.height,
+        "coverage_published_samples": out.coverage.published_samples,
+        "coverage_applied_foreign_samples": out.coverage.applied_foreign_samples,
+        "coverage_sample_peer_checks": out.coverage.sample_peer_checks,
+        "coverage_sample_anchor_overlaps": out.coverage.sample_anchor_overlaps,
+        "coverage_sample_anchor_only_overlaps": out.coverage.sample_anchor_only_overlaps,
+        "coverage_sample_overlaps": out.coverage.sample_overlaps,
+        "coverage_repelled_proposals": out.coverage.repelled_proposals,
+        "coverage_constrained_repulsions": out.coverage.constrained_repulsions,
+        "replica_work": out.replicas.iter().map(|r| r.n_evals + r.n_grads).collect::<Vec<_>>(),
+        "replica_arms": out.replicas.iter().map(|r| r.arm_stats.iter().map(|a| {
+            json!({"name": a.name, "pulls": a.pulls, "successes": a.successes})
+        }).collect::<Vec<_>>()).collect::<Vec<_>>(),
+    })
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     let number = |index: usize, default: usize| {
@@ -290,28 +364,46 @@ fn main() {
             quench_controls(dim, budget, seeds);
             return;
         }
-        Some("controllers") => {
+        Some("controllers") | Some("controllers-peers") => {
+            let peers = args[5] == "controllers-peers";
+            let seed_start = if peers { number(8, 0) } else { 0 };
+            let mut peer_coverage = BoxCoverageConfig::default();
+            if peers {
+                if let Some(radius) = args.get(6) {
+                    peer_coverage.radius = radius.parse().expect("positive coverage radius");
+                }
+                if let Some(height) = args.get(7) {
+                    peer_coverage.height = height.parse().expect("nonnegative coverage height");
+                }
+            }
             println!(
                 "{}",
                 json!({
                     "record": "configuration", "comparison": "values-controllers",
                     "dimension": dim, "budget": budget, "seeds": seeds,
-                    "objective_capability": "values", "execution": "serial",
+                    "objective_capability": "values", "execution": if peers { "serial-and-threaded-controls" } else { "serial" },
+                    "portfolio_peers": peers, "seed_start": seed_start,
                     "history": "none", "coverage_transport": "in-process",
                     "coverage_metric": "RMS-scaled-free-box-coordinates",
                     "version": env!("CARGO_PKG_VERSION"),
                 })
             );
             for landscape in [Landscape::Rastrigin, Landscape::ConditionedQuadratic] {
-                for seed in 0..seeds as u64 {
+                for seed in seed_start as u64..(seed_start + seeds) as u64 {
                     for record in values_controller_records(landscape, dim, budget, seed) {
                         println!("{record}");
+                    }
+                    if peers {
+                        for shared in [false, true] {
+                            peer_coverage.shared = shared;
+                            println!("{}", portfolio_peer_record(landscape, dim, budget, seed, &peer_coverage));
+                        }
                     }
                 }
             }
             return;
         }
-        Some(_) => panic!("the optional control mode is coverage, quench or controllers"),
+        Some(_) => panic!("the optional control mode is coverage, quench, controllers or controllers-peers"),
     };
     let mut coverage_settings = BoxCoverageConfig::default();
     if let Some(radius) = args.get(6) {
