@@ -2,6 +2,97 @@
 
 use num_traits::Float;
 
+/// Elementwise arithmetic for one acceptance rule on scalars or device arrays.
+///
+/// Backends preserve their value shape and storage location. Only scalar policy
+/// parameters cross this interface; an array need not be copied to host memory.
+pub trait ProbabilityArithmetic<T: Float> {
+    /// Scalar or array value owned by the backend.
+    type Value;
+    /// Failure reported by a backend operation.
+    type Error;
+
+    /// A scalar broadcast to the backend's value shape.
+    fn constant(&self, value: T) -> Result<Self::Value, Self::Error>;
+    /// Multiply every entry by a scalar.
+    fn scale(&self, value: &Self::Value, factor: T) -> Result<Self::Value, Self::Error>;
+    /// Divide every entry by a scalar.
+    fn divide(&self, value: &Self::Value, divisor: T) -> Result<Self::Value, Self::Error>;
+    /// Add a scalar to every entry.
+    fn offset(&self, value: &Self::Value, addend: T) -> Result<Self::Value, Self::Error>;
+    /// Elementwise exponential.
+    fn exp(&self, value: &Self::Value) -> Result<Self::Value, Self::Error>;
+    /// Elementwise power with a scalar exponent.
+    fn powf(&self, value: &Self::Value, exponent: T) -> Result<Self::Value, Self::Error>;
+    /// Select the first value where the condition is nonpositive, else the second.
+    fn select_nonpositive(
+        &self,
+        condition: &Self::Value,
+        nonpositive: &Self::Value,
+        positive: &Self::Value,
+    ) -> Result<Self::Value, Self::Error>;
+
+    /// Map positive entries and return a scalar for nonpositive entries.
+    ///
+    /// Array backends evaluate the map on safe positive replacements for masked
+    /// entries, avoiding invalid powers in compact-support acceptance. NaNs are
+    /// not classified as nonpositive and retain the rule's nonfinite result.
+    fn positive_map<F>(
+        &self,
+        value: &Self::Value,
+        nonpositive: T,
+        positive: F,
+    ) -> Result<Self::Value, Self::Error>
+    where
+        F: FnOnce(&Self::Value) -> Result<Self::Value, Self::Error>,
+    {
+        let one = self.constant(T::one())?;
+        let safe = self.select_nonpositive(value, &one, value)?;
+        let mapped = positive(&safe)?;
+        let other = self.constant(nonpositive)?;
+        self.select_nonpositive(value, &other, &mapped)
+    }
+}
+
+struct ScalarArithmetic<T>(std::marker::PhantomData<T>);
+
+impl<T: Float> ProbabilityArithmetic<T> for ScalarArithmetic<T> {
+    type Value = T;
+    type Error = std::convert::Infallible;
+
+    fn constant(&self, value: T) -> Result<T, Self::Error> {
+        Ok(value)
+    }
+    fn scale(&self, value: &T, factor: T) -> Result<T, Self::Error> {
+        Ok(*value * factor)
+    }
+    fn divide(&self, value: &T, divisor: T) -> Result<T, Self::Error> {
+        Ok(*value / divisor)
+    }
+    fn offset(&self, value: &T, addend: T) -> Result<T, Self::Error> {
+        Ok(*value + addend)
+    }
+    fn exp(&self, value: &T) -> Result<T, Self::Error> {
+        Ok(value.exp())
+    }
+    fn powf(&self, value: &T, exponent: T) -> Result<T, Self::Error> {
+        Ok(value.powf(exponent))
+    }
+    fn select_nonpositive(&self, condition: &T, nonpositive: &T, positive: &T) -> Result<T, Self::Error> {
+        Ok(if *condition <= T::zero() { *nonpositive } else { *positive })
+    }
+    fn positive_map<F>(&self, value: &T, nonpositive: T, positive: F) -> Result<T, Self::Error>
+    where
+        F: FnOnce(&T) -> Result<T, Self::Error>,
+    {
+        if *value <= T::zero() {
+            Ok(nonpositive)
+        } else {
+            positive(value)
+        }
+    }
+}
+
 /// A `(delta_e, T) -> p` acceptance rule.
 ///
 /// IISE manuscript laws:
@@ -23,12 +114,28 @@ pub trait AcceptRule<T: Float>: Send + Sync {
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Metropolis;
 
+impl Metropolis {
+    /// Evaluate the native rule with backend-owned scalar or array arithmetic.
+    pub fn probabilities_with<T: Float, A: ProbabilityArithmetic<T>>(
+        &self,
+        delta_e: &A::Value,
+        temp: T,
+        arithmetic: &A,
+    ) -> Result<A::Value, A::Error> {
+        arithmetic.positive_map(delta_e, T::one(), |delta| {
+            let negative = arithmetic.scale(delta, -T::one())?;
+            let exponent = arithmetic.divide(&negative, temp)?;
+            arithmetic.exp(&exponent)
+        })
+    }
+}
+
 impl<T: Float + Send + Sync> AcceptRule<T> for Metropolis {
     fn accept_prob(&self, delta_e: T, temp: T) -> T {
-        if delta_e <= T::zero() {
-            T::one()
-        } else {
-            (-delta_e / temp).exp()
+        let arithmetic = ScalarArithmetic(std::marker::PhantomData);
+        match self.probabilities_with(&delta_e, temp, &arithmetic) {
+            Ok(value) => value,
+            Err(never) => match never {},
         }
     }
 }
@@ -66,21 +173,34 @@ impl<T: Float> TsallisAccept<T> {
     pub fn new(q_a: T) -> Self {
         Self { q_a }
     }
+
+    /// Evaluate the native rule with backend-owned scalar or array arithmetic.
+    pub fn probabilities_with<A: ProbabilityArithmetic<T>>(
+        &self,
+        delta_e: &A::Value,
+        temp: T,
+        arithmetic: &A,
+    ) -> Result<A::Value, A::Error> {
+        if (self.q_a - T::one()).abs() < T::epsilon() {
+            return Metropolis.probabilities_with(delta_e, temp, arithmetic);
+        }
+        arithmetic.positive_map(delta_e, T::one(), |delta| {
+            let scaled = arithmetic.scale(delta, self.q_a - T::one())?;
+            let ratio = arithmetic.divide(&scaled, temp)?;
+            let base = arithmetic.offset(&ratio, T::one())?;
+            arithmetic.positive_map(&base, T::zero(), |base| {
+                arithmetic.powf(base, T::one() / (T::one() - self.q_a))
+            })
+        })
+    }
 }
 
 impl<T: Float + Send + Sync> AcceptRule<T> for TsallisAccept<T> {
     fn accept_prob(&self, delta_e: T, temp: T) -> T {
-        if delta_e <= T::zero() {
-            return T::one();
-        }
-        if (self.q_a - T::one()).abs() < T::epsilon() {
-            return (-delta_e / temp).exp();
-        }
-        let base = T::one() + (self.q_a - T::one()) * delta_e / temp;
-        if base <= T::zero() {
-            T::zero()
-        } else {
-            base.powf(T::one() / (T::one() - self.q_a))
+        let arithmetic = ScalarArithmetic(std::marker::PhantomData);
+        match self.probabilities_with(&delta_e, temp, &arithmetic) {
+            Ok(value) => value,
+            Err(never) => match never {},
         }
     }
 }
