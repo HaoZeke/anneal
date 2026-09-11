@@ -31,7 +31,11 @@ impl Objective<f64> for ScalarBox {
 
 fn run(dim: usize, budget: usize, history: HistoryMode) {
     let objective = ScalarBox {
-        bounds: Bounds::new(Array1::from_elem(dim, -1.0), Array1::from_elem(dim, 1.0), 0.0),
+        bounds: Bounds::new(
+            Array1::from_elem(dim, -1.0),
+            Array1::from_elem(dim, 1.0),
+            0.0,
+        ),
         calls: AtomicUsize::new(0),
     };
     let start = Array1::zeros(dim);
