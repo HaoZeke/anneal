@@ -23,7 +23,10 @@ pub fn values_local_polish<O: Objective<f64>>(
 ) -> LocalPolishResult {
     assert!(max_evals > 0, "max_evals must be positive");
     let ledger = BudgetLedger::new(max_evals, obj.dim());
-    let budgeted = BudgetedObjective { inner: obj, ledger: &ledger };
+    let budgeted = BudgetedObjective {
+        inner: obj,
+        ledger: &ledger,
+    };
     refine_with_ledger(&budgeted, start, max_evals, step0, grad_tol)
 }
 
