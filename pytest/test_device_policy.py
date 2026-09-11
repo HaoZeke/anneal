@@ -7,9 +7,7 @@ import anneal
 import anneal.device as device
 
 
-@pytest.mark.parametrize(
-    "preset", [anneal.Boltzmann(), anneal.Fast(), anneal.Gsa()]
-)
+@pytest.mark.parametrize("preset", [anneal.Boltzmann(), anneal.Fast(), anneal.Gsa()])
 def test_device_temperatures_match_native_scalar_schedule(preset):
     low, high = np.full(2, -1.0), np.full(2, 1.0)
     native = anneal.run(
@@ -92,9 +90,7 @@ def test_device_compact_acceptance_does_not_evaluate_invalid_powers():
 @pytest.mark.gpu
 @pytest.mark.parametrize("dtype", ["float32", "float64"])
 @pytest.mark.parametrize("batched", [False, True])
-@pytest.mark.parametrize(
-    "preset", [anneal.Fast(), anneal.Gsa(), anneal.Gsa(q_a=-0.5)]
-)
+@pytest.mark.parametrize("preset", [anneal.Fast(), anneal.Gsa(), anneal.Gsa(q_a=-0.5)])
 def test_device_native_presets_keep_cuda_storage(preset, batched, dtype, monkeypatch):
     cupy = pytest.importorskip("cupy")
     if cupy.cuda.runtime.getDeviceCount() == 0:
