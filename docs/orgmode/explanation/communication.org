@@ -157,9 +157,9 @@ funded hop boundary and decides acceptance against the existing penalty;
 its own evaluated trial is recorded after that decision. The
 =shared_deposits= control caps imported visits per receiving region per
 boundary; excess visits are counted and discarded, not replayed. Zero
-disables incoming deposits. The convenience entry points enable sharing
-when their history mode is =Shared= and this cap is positive. Local coverage
-does not require a minimum ledger in any mode.
+disables incoming deposits. Without explicit coverage controls, the convenience
+entry points enable sharing when their history mode is =Shared= and this cap
+is positive. Local coverage does not require a minimum ledger in any mode.
 
 =result.coverage= separates local observations, published visits, applied
 foreign visits, capped foreign visits and each chain's region count.
@@ -167,6 +167,35 @@ Imported regions can occur in multiple chains, so those counts must not be
 summed as a unique ensemble census. =result.shared_deposits= is the applied
 foreign coverage count. The current box coverage exchange is in-process;
 the NNG history transport below carries minimum reports, not this stream.
+
+** Parameter fitting with values only
+
+A scalar loss over a parameter vector needs no objective Jacobian or forces.
+The Rust =box_values_ensemble_optimize_with_coverage= accepts only the
+=Objective= capability; its coordinate differences and pattern search do not
+call a gradient provider. Minimum certificates are a separate optional
+consumer, not a prerequisite for sharing evaluated regions.
+
+The common Python entries expose this distinction directly. For a supplied
+scalar =loss=, parameter vector =x0= and finite =bounds=:
+
+#+begin_src python
+result = anneal.minimize(
+    loss, x0, bounds,
+    jac=None, replicas=4, budget=8000,
+    history="none", coverage_shared=True,
+)
+assert result.njev == 0
+assert result.diagnostics["history_minima"] == 0
+assert result.charged == result.nfev <= 8000
+#+end_src
+
+=coverage_radius= optionally changes normalized parameter-space reach.
+It is finite and positive; it does not request a Jacobian, change atom counts
+or set minimum identity. Omitted coverage controls preserve the convenience
+defaults. Explicit coverage controls select native hop chains even for one
+values-only replica. =ensemble_optimize= accepts the same controls and
+returns the underlying diagnostics dictionary.
 
 ** Nearby sampled regions repel proposals directly
 
