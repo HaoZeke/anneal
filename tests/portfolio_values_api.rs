@@ -46,7 +46,10 @@ fn scalar_client(replicas: usize) {
     assert_eq!(result.n_grads, 0);
     assert_eq!(result.replicas.len(), replicas);
     assert!(result.replicas.iter().all(|replica| replica.n_grads == 0));
-    assert_eq!(result.best_val, values.into_iter().fold(f64::INFINITY, f64::min));
+    assert_eq!(
+        result.best_val,
+        values.into_iter().fold(f64::INFINITY, f64::min)
+    );
     if replicas > 1 {
         assert!(result.coverage.applied_foreign_samples > 0);
         assert!(result.coverage.repelled_proposals > 0);
