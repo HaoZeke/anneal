@@ -19,13 +19,21 @@ impl<F: Fn(ArrayView1<f64>) -> f64> Objective<f64> for ScalarObjective<F> {
         value
     }
 
-    fn dim(&self) -> usize { self.bounds.dims }
-    fn bounds(&self) -> &Bounds<f64> { &self.bounds }
+    fn dim(&self) -> usize {
+        self.bounds.dims
+    }
+    fn bounds(&self) -> &Bounds<f64> {
+        &self.bounds
+    }
 }
 
 fn objective<F: Fn(ArrayView1<f64>) -> f64>(dim: usize, value: F) -> ScalarObjective<F> {
     ScalarObjective {
-        bounds: Bounds::new(Array1::from_elem(dim, -2.0), Array1::from_elem(dim, 2.0), 0.0),
+        bounds: Bounds::new(
+            Array1::from_elem(dim, -2.0),
+            Array1::from_elem(dim, 2.0),
+            0.0,
+        ),
         value,
         observed: Mutex::new(Vec::new()),
     }
@@ -48,7 +56,13 @@ fn an_unfunded_stencil_cannot_certify_stationarity() {
 #[test]
 fn nonfinite_probe_values_cannot_certify_stationarity() {
     for invalid in [f64::INFINITY, f64::NAN] {
-        let surface = objective(2, |x| if x.iter().all(|v| *v == 0.0) { 0.0 } else { invalid });
+        let surface = objective(2, |x| {
+            if x.iter().all(|v| *v == 0.0) {
+                0.0
+            } else {
+                invalid
+            }
+        });
         let result = values_local_polish(&surface, Array1::zeros(2), 32, 0.1, 1e-12);
         assert_eq!(result.n_grads, 0);
         assert_eq!(result.n_evals, surface.observed.lock().unwrap().len());
@@ -90,9 +104,11 @@ fn scalar_refinement_resolves_a_correlated_quadratic() {
     let surface = objective(8, |x| {
         let shifted = x.mapv(|v| v - 0.37);
         let reflection = 2.0 * shifted.sum() / shifted.len() as f64;
-        shifted.iter().enumerate().map(|(i, v)| {
-            0.5 * 1000.0_f64.powf(i as f64 / 7.0) * (v - reflection).powi(2)
-        }).sum()
+        shifted
+            .iter()
+            .enumerate()
+            .map(|(i, v)| 0.5 * 1000.0_f64.powf(i as f64 / 7.0) * (v - reflection).powi(2))
+            .sum()
     });
     let result = values_local_polish(&surface, Array1::from_elem(8, 1.4), 2000, 0.1, 1e-8);
     let seen = surface.observed.lock().unwrap();
@@ -100,5 +116,10 @@ fn scalar_refinement_resolves_a_correlated_quadratic() {
     assert_eq!(result.n_evals, seen.len());
     assert!(result.n_evals <= 2000);
     assert!(result.best_val < 1e-6, "{}", result.best_val);
-    assert_eq!(result.best_val, seen.iter().map(|(_, value)| *value).fold(f64::INFINITY, f64::min));
+    assert_eq!(
+        result.best_val,
+        seen.iter()
+            .map(|(_, value)| *value)
+            .fold(f64::INFINITY, f64::min)
+    );
 }
