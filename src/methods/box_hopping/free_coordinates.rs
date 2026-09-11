@@ -22,17 +22,31 @@ where
         .collect();
     if free.len() == bounds.dims {
         return portfolio_optimize_seeded::<_, G>(
-            obj, None, budget, seed, None, PortfolioPolicy::Auto, x0,
+            obj,
+            None,
+            budget,
+            seed,
+            None,
+            PortfolioPolicy::Auto,
+            x0,
         );
     }
     if let Some(x0) = x0 {
-        assert_eq!(x0.len(), bounds.dims, "initial position must match the objective dimension");
+        assert_eq!(
+            x0.len(),
+            bounds.dims,
+            "initial position must match the objective dimension"
+        );
     }
     if free.is_empty() {
         let value = obj.eval(bounds.low.view());
         return PortfolioResult {
             best_pos: bounds.low.to_vec(),
-            best_val: if value.is_finite() { value } else { f64::INFINITY },
+            best_val: if value.is_finite() {
+                value
+            } else {
+                f64::INFINITY
+            },
             n_evals: 1,
             n_grads: 0,
             arm_stats: Vec::new(),
@@ -49,7 +63,12 @@ where
     };
     let start = x0.map(|x| Array1::from_iter(reduced.free.iter().map(|&i| x[i])));
     let mut result = portfolio_optimize_seeded::<_, G>(
-        &reduced, None, budget, seed, None, PortfolioPolicy::Auto,
+        &reduced,
+        None,
+        budget,
+        seed,
+        None,
+        PortfolioPolicy::Auto,
         start.as_ref().map(Array1::view),
     );
     result.best_pos = reduced.expand(ArrayView1::from(&result.best_pos)).to_vec();
@@ -75,8 +94,12 @@ impl<O: Objective<f64>> FreeCoordinates<'_, O> {
 }
 
 impl<O: Objective<f64>> Objective<f64> for FreeCoordinates<'_, O> {
-    fn dim(&self) -> usize { self.bounds.dims }
-    fn bounds(&self) -> &Bounds<f64> { &self.bounds }
+    fn dim(&self) -> usize {
+        self.bounds.dims
+    }
+    fn bounds(&self) -> &Bounds<f64> {
+        &self.bounds
+    }
     fn eval(&self, x: ArrayView1<f64>) -> f64 {
         self.inner.eval(self.expand(x).view())
     }
