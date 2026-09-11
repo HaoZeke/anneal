@@ -26,15 +26,21 @@ impl Objective<f64> for LoggedBox {
         value
     }
 
-    fn bounds(&self) -> &Bounds<f64> { &self.bounds }
-    fn dim(&self) -> usize { self.bounds.dims }
+    fn bounds(&self) -> &Bounds<f64> {
+        &self.bounds
+    }
+    fn dim(&self) -> usize {
+        self.bounds.dims
+    }
 }
 
 impl Gradient<f64> for LoggedBox {
     fn grad(&self, _x: ArrayView1<f64>) -> Array1<f64> {
         panic!("values-only search must not request a gradient")
     }
-    fn dim(&self) -> usize { self.bounds.dims }
+    fn dim(&self) -> usize {
+        self.bounds.dims
+    }
 }
 
 #[test]
@@ -44,15 +50,24 @@ fn values_portfolio_keeps_fixed_coordinates_in_every_callback() {
         trace: Mutex::new(Vec::new()),
     };
     let result = ensemble_hop_optimize::<_, LoggedBox>(
-        &obj, None, 7, Some(array![1.0, 3.0, 1.0].view()), 64, 1,
-        HistoryMode::None, HistoryMembership::Accepted,
+        &obj,
+        None,
+        7,
+        Some(array![1.0, 3.0, 1.0].view()),
+        64,
+        1,
+        HistoryMode::None,
+        HistoryMembership::Accepted,
     );
     let trace = obj.trace.lock().unwrap();
     assert_eq!(result.charged, trace.len());
     assert!(result.charged > 1 && result.charged <= 64);
     assert_eq!(trace[0], array![1.0, 3.0, 1.0]);
     assert_eq!(result.best_pos[1], 3.0);
-    assert_eq!(result.best_val, result.best_pos[0].powi(2) + result.best_pos[2].powi(2));
+    assert_eq!(
+        result.best_val,
+        result.best_pos[0].powi(2) + result.best_pos[2].powi(2)
+    );
 }
 
 #[test]
@@ -62,7 +77,14 @@ fn all_fixed_values_box_evaluates_its_only_point_once() {
         trace: Mutex::new(Vec::new()),
     };
     let result = ensemble_hop_optimize::<_, LoggedBox>(
-        &obj, None, 7, None, 64, 1, HistoryMode::None, HistoryMembership::Accepted,
+        &obj,
+        None,
+        7,
+        None,
+        64,
+        1,
+        HistoryMode::None,
+        HistoryMembership::Accepted,
     );
     assert_eq!(obj.trace.lock().unwrap().as_slice(), &[array![3.0, -4.0]]);
     assert_eq!(result.charged, 1);
@@ -81,12 +103,24 @@ fn fixed_axes_preserve_the_free_coordinate_portfolio_trace() {
         trace: Mutex::new(Vec::new()),
     };
     let expanded = ensemble_hop_optimize::<_, LoggedBox>(
-        &fixed, None, 7, Some(array![1.0, 3.0, 1.0].view()), 256, 1,
-        HistoryMode::None, HistoryMembership::Accepted,
+        &fixed,
+        None,
+        7,
+        Some(array![1.0, 3.0, 1.0].view()),
+        256,
+        1,
+        HistoryMode::None,
+        HistoryMembership::Accepted,
     );
     let reduced = ensemble_hop_optimize::<_, LoggedBox>(
-        &free, None, 7, Some(array![1.0, 1.0].view()), 256, 1,
-        HistoryMode::None, HistoryMembership::Accepted,
+        &free,
+        None,
+        7,
+        Some(array![1.0, 1.0].view()),
+        256,
+        1,
+        HistoryMode::None,
+        HistoryMembership::Accepted,
     );
     let fixed_trace = fixed.trace.lock().unwrap();
     let free_trace = free.trace.lock().unwrap();
