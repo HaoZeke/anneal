@@ -3,10 +3,11 @@
 //! One seed is one ensemble: `replicas` chains of [`cluster_hopping`] that
 //! divide one aggregate budget, start from their own random clusters with
 //! their own streams, and talk through exactly the channels the
-//! [`EnsembleConfig`] names. Every channel is count- or table-valued and
-//! none moves a chain: a shared exact minimum history (identity and visit
-//! counts), the multiple-walker exchange of bias visits, gossip averaging of
-//! the wells over a ring or random pairs, and the two-choice family restart.
+//! [`EnsembleConfig`] names. Exact history exchanges identity and visit
+//! counts; shared bias exchanges visits; gossip averages well tables over a
+//! ring or random pairs. The two-choice family restart uses occupied states
+//! to select a fresh start. Ordered bias updates accompany that state action,
+//! so selecting a restart does not suppress a configured communication channel.
 //! The private and shared arms of a comparison differ only in the channel,
 //! never in seeds, starts, budgets or lookups, which is the contract the
 //! campaign records are read under.

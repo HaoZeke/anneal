@@ -540,11 +540,12 @@ waits for all readers. =DepositDescriptors= applies the counts to the local
 bias with a configured weight. This exchange does not transport candidate
 energies or prescribe coordinate adoption.
 
-Box ensembles instead derive capped additional deposits from history visit
-counts at a reported identity, using =BoxEnsembleConfig::shared_deposits=.
-They do not use the atomic runner's deposit queue. Their bias fingerprint is
-the raw design point, and its distance rule is distinct from the history
-witness's width-scaled max norm.
+Box ensembles use the same =SharedDeposits= component through their coverage
+controller, with a separate exchange instance for each ensemble. They publish
+evaluated-region visits and bounded paid-position samples, independently of
+minimum history. =BoxEnsembleConfig::shared_deposits= caps incoming coverage
+visits per receiving region and boundary. The width-normalized RMS descriptor
+distance differs from the minimum witness's width-scaled max norm.
 
 The LJ catalog path uses =CATALOG_SHARED_BIAS=1= and =DepositRemote=. Fresh bus
 minima are admitted only when =nearby_packing= holds unless
@@ -640,12 +641,23 @@ typed checkpoint action. =BoundaryProposal=, =ExternalProposal= and
 Coordinate changes must maintain energy, validation-gradient and occupied-ID
 consistency regardless of which action produces them.
 
-Each checkpoint returns one action. In the atomic runner, a two-choice restart
-can return before gossip, and a gossip merge can return before visit-delta
-exchange. In the LJ path, deposit/proposal selection has precedence over a
-pending gossip merge. Thus a configured channel or a received table does not
-establish that its update was applied. Count publication, receipt and
-application separately when interpreting a trace.
+Each live checkpoint returns one state action, optionally accompanied by
+ordered =BiasUpdate= values in =CheckpointAction::WithBiasUpdates=. The chain
+applies those updates before the state action, including explicit retirement.
+Nested wrappers apply from outside inward. Standalone =MergeBias= and
+=DepositDescriptors= actions use the same implementation.
+
+The atomic runner collects a due gossip merge, then foreign visit deposits,
+without suppressing either when it selects a two-choice restart. The LJ
+handler wraps its selected action with the received well-table merge;
+Cartesian deposit queues keep their separate continuation policy. None of
+these bias updates charges an objective call, needs a gradient provider or
+manufactures a local arrival.
+
+The terminal checkpoint observation flushes publication and reporting, but
+its returned action is not executed as another search step. Publication,
+receipt and application therefore remain distinct counters. Receiving a
+table does not by itself establish that the search used its bias.
 
 * Work accounting
 
@@ -694,16 +706,15 @@ results remain a separate requirement.
   companion certified-adoption and rejected-trial checks. The same invariant
   applies to atomic adoption and restart paths; box coverage does not prove
   those paths correct.
-- Pending bias updates require explicit arbitration. The LJ handler consumes
-  =gossip_merge.take()= even when another action wins. A received-table counter
-  therefore cannot be interpreted as an applied-merge counter. This
-  source-level arbitration limitation has no runtime regression result
-  established here.
-- Bounded reference eviction can remove a still-near peer. The LJ helper's
-  =was_near= suppression does not query reference residency. Crowd-count
-  correctness alone cannot establish retained repulsion coverage. A full
-  admission/eviction reproducer, rather than a substituted eviction hook, is
-  required to measure this source-level risk.
+- Pending bias updates must accompany a state action without loss or replay.
+  =checkpoint_bias_updates= tests ordered and nested updates, adoption,
+  retirement, unchanged standalone behavior and gradient-free callback
+  accounting. The LJ helper's =pending_bias_tests= exercise its arbitration
+  against proposals, deposits, external work and retirement.
+- Live peer occupancy is independent of bounded archive multiplicity.
+  =packing_peer_view= tests repeated nearby peers, current-geometry locality,
+  replacement and scoped restoration. A populated archive cannot substitute
+  for an installed empty census view, including for strided coordinates.
 
 * Evidence required for a performance claim
 
