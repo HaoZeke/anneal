@@ -18,12 +18,14 @@ Simulated-annealing components on the [eindir](https://github.com/HaoZeke/eindir
 
 ## Generic global minimization
 
-The optimizer is implemented in Rust. Objective and gradient capabilities
+The primary optimizers are implemented in Rust. Objective and gradient capabilities
 come from `eindir`. Box chains compose bounded local polishing, the native
 Langevin stepper, descriptor coverage and shared-deposit exchange. Their
 projected polisher has its own L-BFGS memory; `rgmin` backs the separate
-`WarmLbfgs` integration, not every local-improvement path. Python and C expose
-the native implementation rather than separate solvers.
+`WarmLbfgs` integration, not every local-improvement path. The Python
+`minimize` binding and C interfaces call Rust. The optional Array API backend
+in `python/anneal/device.py` owns a separate preset loop; it does not share
+the box coverage or configured ensemble controller.
 
 The Rust [box search and noise guide](docs/orgmode/howto/box-langevin-escape.org)
 shows the typed configuration and its common work contract. Native regression
