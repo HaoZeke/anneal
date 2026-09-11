@@ -34,11 +34,11 @@ use crate::methods::minima_hopping::{
     EscapeFeedback, HistoryHook, HistoryMembership, HistoryReport, MinimumHistory,
     SharedDesignHistory,
 };
-use crate::methods::portfolio::{PortfolioPolicy, portfolio_optimize_seeded};
 use crate::movekernel::reflect_into_box;
 use crate::pes_exploration::{ExactStructureWitness, StructureContext};
 
 mod coverage;
+mod free_coordinates;
 use coverage::Coverage;
 pub use coverage::{BoxCoverageConfig, CoverageStats};
 
@@ -227,8 +227,7 @@ where
         return EnsembleHopResult::from(out);
     }
     if replicas <= 1 {
-        let out =
-            portfolio_optimize_seeded(obj, grad, budget, seed, None, PortfolioPolicy::Auto, x0);
+        let out = free_coordinates::values_portfolio::<_, G>(obj, budget, seed, x0);
         return EnsembleHopResult {
             best_pos: Array1::from(out.best_pos),
             best_val: out.best_val,
