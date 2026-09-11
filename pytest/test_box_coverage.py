@@ -7,10 +7,16 @@ import pytest
 
 @pytest.mark.parametrize(
     "driver,with_gradient",
-    [("box_ensemble_optimize", True), ("ensemble_optimize", True), ("ensemble_optimize", False)],
+    [
+        ("box_ensemble_optimize", True),
+        ("ensemble_optimize", True),
+        ("ensemble_optimize", False),
+    ],
 )
 @pytest.mark.parametrize("history", ["shared", "private", "none"])
-def test_box_coverage_survives_binding_without_certified_minima(driver, with_gradient, history):
+def test_box_coverage_survives_binding_without_certified_minima(
+    driver, with_gradient, history
+):
     curvature = 1000.0 ** (np.arange(8) / 7.0)
     low, high = np.full(8, -5.12), np.full(8, 5.12)
     calls = {"evals": 0, "grads": 0}
@@ -27,12 +33,21 @@ def test_box_coverage_survives_binding_without_certified_minima(driver, with_gra
 
     budget = 256 if with_gradient else 512
     result = getattr(anneal, driver)(
-        objective, low, high, budget=budget, seed=0,
+        objective,
+        low,
+        high,
+        budget=budget,
+        seed=0,
         grad_fn=gradient if with_gradient else None,
-        x0=np.full(8, 2.5), replicas=4, history=history,
+        x0=np.full(8, 2.5),
+        replicas=4,
+        history=history,
     )
     if driver == "box_ensemble_optimize":
-        assert (result["n_evals"], result["n_grads"]) == (calls["evals"], calls["grads"])
+        assert (result["n_evals"], result["n_grads"]) == (
+            calls["evals"],
+            calls["grads"],
+        )
     else:
         assert result["charged"] == calls["evals"] + calls["grads"]
     assert calls["evals"] + calls["grads"] <= budget
@@ -52,8 +67,12 @@ def test_box_coverage_survives_binding_without_certified_minima(driver, with_gra
 
 def test_values_only_single_portfolio_reports_no_coverage_exchange():
     result = anneal.ensemble_optimize(
-        lambda x: float(np.dot(x, x)), np.full(3, -2.0), np.full(3, 2.0),
-        budget=40, seed=0, replicas=1,
+        lambda x: float(np.dot(x, x)),
+        np.full(3, -2.0),
+        np.full(3, 2.0),
+        budget=40,
+        seed=0,
+        replicas=1,
     )
     assert result["coverage_observations"] == 0
     assert result["coverage_published"] == 0
