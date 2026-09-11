@@ -20,16 +20,23 @@ struct ScalarQuadratic {
 impl ScalarQuadratic {
     fn new() -> Self {
         Self {
-            bounds: Bounds::new(Array1::from_elem(DIM, -5.12), Array1::from_elem(DIM, 5.12), 0.0),
+            bounds: Bounds::new(
+                Array1::from_elem(DIM, -5.12),
+                Array1::from_elem(DIM, 5.12),
+                0.0,
+            ),
             traces: Mutex::new(HashMap::new()),
         }
     }
 
     fn value(x: ArrayView1<f64>) -> f64 {
-        x.iter().enumerate().map(|(j, &x)| {
-            let optimum = 0.7 + 0.3 * ((j + 1) as f64 * std::f64::consts::SQRT_2).sin();
-            (x - optimum).powi(2)
-        }).sum()
+        x.iter()
+            .enumerate()
+            .map(|(j, &x)| {
+                let optimum = 0.7 + 0.3 * ((j + 1) as f64 * std::f64::consts::SQRT_2).sin();
+                (x - optimum).powi(2)
+            })
+            .sum()
     }
 
     fn assert_funded_refinement(&self, replicas: usize) {
@@ -52,27 +59,45 @@ impl ScalarQuadratic {
                 let trial = &calls[2 * DIM + 1];
                 trial != anchor && Self::value(trial.view()).is_finite()
             });
-            assert!(complete, "a 2000-call chain must fund one full 256-call stencil and a trial, not only partial stencils");
+            assert!(
+                complete,
+                "a 2000-call chain must fund one full 256-call stencil and a trial, not only partial stencils"
+            );
         }
     }
 }
 
 impl Objective<f64> for ScalarQuadratic {
-    fn dim(&self) -> usize { DIM }
-    fn bounds(&self) -> &Bounds<f64> { &self.bounds }
+    fn dim(&self) -> usize {
+        DIM
+    }
+    fn bounds(&self) -> &Bounds<f64> {
+        &self.bounds
+    }
     fn eval(&self, x: ArrayView1<f64>) -> f64 {
         assert_eq!(x.len(), DIM);
-        assert!(x.iter().all(|v| v.is_finite() && (-5.12..=5.12).contains(v)));
-        self.traces.lock().unwrap().entry(std::thread::current().id())
-            .or_default().push(x.to_owned());
+        assert!(
+            x.iter()
+                .all(|v| v.is_finite() && (-5.12..=5.12).contains(v))
+        );
+        self.traces
+            .lock()
+            .unwrap()
+            .entry(std::thread::current().id())
+            .or_default()
+            .push(x.to_owned());
         Self::value(x)
     }
 }
 
 struct NoGradient;
 impl Gradient<f64> for NoGradient {
-    fn dim(&self) -> usize { panic!("the caller supplies values only") }
-    fn grad(&self, _: ArrayView1<f64>) -> Array1<f64> { panic!("the caller supplies values only") }
+    fn dim(&self) -> usize {
+        panic!("the caller supplies values only")
+    }
+    fn grad(&self, _: ArrayView1<f64>) -> Array1<f64> {
+        panic!("the caller supplies values only")
+    }
 }
 
 #[test]
@@ -81,18 +106,27 @@ fn scalar_portfolio_funds_complete_high_dimensional_refinement() {
     let result = portfolio_optimize::<_, NoGradient>(&loss, None, 2_000, 7, None);
     assert_eq!(result.n_evals, 2_000);
     assert_eq!(result.n_grads, 0);
-    assert_eq!(result.best_val, ScalarQuadratic::value(ArrayView1::from(&result.best_pos)));
+    assert_eq!(
+        result.best_val,
+        ScalarQuadratic::value(ArrayView1::from(&result.best_pos))
+    );
     loss.assert_funded_refinement(1);
 }
 
 #[test]
 fn each_scalar_replica_funds_complete_high_dimensional_refinement() {
     let loss = ScalarQuadratic::new();
-    let mut config = PortfolioEnsembleConfig { budget: 8_000, ..PortfolioEnsembleConfig::default() };
+    let mut config = PortfolioEnsembleConfig {
+        budget: 8_000,
+        ..PortfolioEnsembleConfig::default()
+    };
     config.coverage.shared = false;
     let result = portfolio_ensemble_optimize::<_, NoGradient>(&loss, None, 7, None, &config);
     assert_eq!(result.n_evals, 8_000);
     assert_eq!(result.n_grads, 0);
-    assert_eq!(result.best_val, ScalarQuadratic::value(ArrayView1::from(&result.best_pos)));
+    assert_eq!(
+        result.best_val,
+        ScalarQuadratic::value(ArrayView1::from(&result.best_pos))
+    );
     loss.assert_funded_refinement(4);
 }
