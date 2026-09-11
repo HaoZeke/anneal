@@ -4,7 +4,8 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Instant;
 
 use anneal_core::methods::box_hopping::{
-    BoxEnsembleConfig, BoxEscape, GleEscapeConfig, box_ensemble_optimize,
+    BoxCoverageConfig, BoxEnsembleConfig, BoxEscape, GleEscapeConfig,
+    box_ensemble_optimize_with_coverage,
 };
 use anneal_core::methods::ensemble::HistoryMode;
 use anneal_core::methods::gle_langevin::GleNoise;
@@ -103,10 +104,21 @@ fn main() {
         std::env::var_os("HISTORY_NNG").is_none(),
         "this control measures in-process shared history"
     );
-    if let Some(mode) = args.get(5) {
-        assert_eq!(mode, "quench", "the optional control mode is quench");
-        quench_controls(dim, budget, seeds);
-        return;
+    let coverage_only = match args.get(5).map(String::as_str) {
+        None => false,
+        Some("coverage") => true,
+        Some("quench") => {
+            quench_controls(dim, budget, seeds);
+            return;
+        }
+        Some(_) => panic!("the optional control mode is coverage or quench"),
+    };
+    let mut coverage_settings = BoxCoverageConfig::default();
+    if let Some(radius) = args.get(6) {
+        coverage_settings.radius = radius.parse().expect("positive coverage radius");
+    }
+    if let Some(height) = args.get(7) {
+        coverage_settings.height = height.parse().expect("nonnegative coverage height");
     }
     let settings = GleEscapeConfig {
         steps,
@@ -129,6 +141,13 @@ fn main() {
             "record": "configuration", "dimension": dim, "budget": budget, "seeds": seeds,
             "replicas": 4, "steps": steps, "omega0": settings.omega0, "requested_dt": settings.dt,
             "white_friction": 4.0, "history_transport": "in-process",
+            "comparison": if coverage_only { "coverage-only" } else { "minimum-history-and-coverage" },
+            "coverage_transport": "in-process",
+            "coverage_metric": "RMS-scaled-free-box-coordinates",
+            "coverage_radius": coverage_settings.radius,
+            "coverage_height": coverage_settings.height,
+            "coverage_well_tempering": coverage_settings.well_tempering,
+            "coverage_peer_weight": coverage_settings.peer_weight,
         "start_protocol": "seeded-uniform; independent-first-replica-start-stream",
             "version": env!("CARGO_PKG_VERSION"),
         })
@@ -140,6 +159,11 @@ fn main() {
                     ("private", HistoryMode::Private),
                     ("shared", HistoryMode::Shared),
                 ] {
+                    let coverage = BoxCoverageConfig {
+                        shared: matches!(history, HistoryMode::Shared),
+                        ..coverage_settings.clone()
+                    };
+                    let history = if coverage_only { HistoryMode::None } else { history };
                     let surface = Surface {
                         landscape,
                         bounds: Bounds::new(
@@ -162,12 +186,13 @@ fn main() {
                         ..BoxEnsembleConfig::default()
                     };
                     let began = Instant::now();
-                    let result = box_ensemble_optimize(
+                    let result = box_ensemble_optimize_with_coverage(
                         &surface,
                         &surface,
                         seed,
                         Some(start.view()),
                         &config,
+                        &coverage,
                     );
                     let elapsed = began.elapsed().as_secs_f64();
                     let counts = (
@@ -181,17 +206,26 @@ fn main() {
                         "{}",
                         json!({
                             "record": "result", "landscape": format!("{landscape:?}"),
-                        "dimension": dim, "seed": seed, "noise": noise, "history": history_name,
+                        "dimension": dim, "seed": seed, "noise": noise,
+                        "history": if coverage_only { "none" } else { history_name },
+                        "coverage": if coverage.shared { "shared" } else { "private" },
                         "initial_position": start.to_vec(),
                             "initial_value": initial_value, "best_value": result.best_val,
                             "n_evals": counts.0, "n_grads": counts.1, "budget": budget,
                         "hops": result.hops, "history_minima": result.history_minima,
-                        "history_minima_scope": if matches!(history, HistoryMode::Private) {
-                            "largest-private-table"
-                        } else { "ensemble-shared-table" },
+                        "history_minima_scope": match history {
+                            HistoryMode::None => "disabled",
+                            HistoryMode::Private => "largest-private-table",
+                            HistoryMode::Shared => "ensemble-shared-table",
+                        },
                             "history_observations": result.history_observations,
                             "history_refusals": result.history_cost.1, "history_seconds": result.history_cost.2,
                             "shared_deposits": result.shared_deposits, "elapsed_seconds": elapsed,
+                            "coverage_observations": result.coverage.local_observations,
+                            "coverage_published": result.coverage.published_visits,
+                            "coverage_applied_foreign": result.coverage.applied_foreign_visits,
+                            "coverage_capped_foreign": result.coverage.capped_foreign_visits,
+                            "coverage_regions_per_chain": result.coverage.per_chain_regions,
                         })
                     );
                 }
