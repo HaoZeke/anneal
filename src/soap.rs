@@ -1032,98 +1032,104 @@ pub fn packing_step_nu3(
     scale_to_cap(x, dr, rmsd)
 }
 
-/// Single-ended SOAP step off the occupied packing mean.
+/// Increase packing-map separation from the nearest supplied neighbour.
 ///
-/// Nearby chains only decide that this region is crowded. The
-/// direction is \(-\hat\mu\) of the occupied cloud (self plus those
-/// neighbours), pulled back with \(J^\top\). Isomer-minus-isomer is
-/// a tangent of the occupied packing and is not this step.
+/// The descriptor difference is pulled back through the analytic map. A
+/// proposal must increase clearance from every supplied packing, within
+/// the Cartesian RMSD cap. Coincident descriptors supply no direction.
 pub fn push_away_clouds(
     x: ArrayView1<f64>,
     neighbors: &[Vec<f64>],
     spec: SoapSpec,
     rmsd: f64,
 ) -> Option<Array1<f64>> {
-    let mut mu = packing_mean_nu3(x, spec, None, None);
-    if mu.is_empty() {
-        return None;
-    }
-    let mut count = 1.0;
-    for neighbor in neighbors {
-        if neighbor.len() != x.len() {
-            continue;
-        }
-        let held = packing_mean_nu3(ArrayView1::from(neighbor.as_slice()), spec, None, None);
-        if held.len() != mu.len() {
-            continue;
-        }
-        for (a, b) in mu.iter_mut().zip(held.iter()) {
-            *a += *b;
-        }
-        count += 1.0;
-    }
-    if count < 2.0 {
-        return None;
-    }
-    mu /= count;
-    let nrm = mu.iter().map(|v| v * v).sum::<f64>().sqrt();
-    if nrm < 1e-15 {
-        return None;
-    }
-    let direction: Vec<f64> = mu.iter().map(|v| -v / nrm).collect();
-    let stepped = packing_step_nu3(x, spec, &direction, rmsd, None, None);
-    if stepped
+    let means: Vec<Vec<f64>> = neighbors
         .iter()
-        .zip(x.iter())
-        .all(|(a, b)| (a - b).abs() < 1e-12)
-    {
-        return None;
-    }
-    Some(stepped)
+        .filter(|neighbor| {
+            neighbor.len() == x.len()
+                && neighbor.len() % 3 == 0
+                && neighbor.iter().all(|value| value.is_finite())
+        })
+        .map(|neighbor| {
+            packing_mean_nu3(ArrayView1::from(neighbor.as_slice()), spec, None, None).to_vec()
+        })
+        .collect();
+    push_away_means(x, &means, spec, rmsd)
 }
 
 /// [`push_away_clouds`] with the neighbours' packing means already
 /// computed. The means of the population's reference structures change
-/// only when a peer's minimum changes, so a caller caches them and pays
-/// one mean (its own) per proposal instead of one per reference.
+/// only when the coordinates or descriptor parameters change. A caller
+/// caches them to avoid recomputing every reference for each proposal.
 pub fn push_away_means(
     x: ArrayView1<f64>,
     neighbor_means: &[Vec<f64>],
     spec: SoapSpec,
     rmsd: f64,
 ) -> Option<Array1<f64>> {
-    let mut mu = packing_mean_nu3(x, spec, None, None);
-    if mu.is_empty() {
-        return None;
-    }
-    let mut count = 1.0;
-    for held in neighbor_means {
-        if held.len() != mu.len() {
-            continue;
-        }
-        for (a, b) in mu.iter_mut().zip(held.iter()) {
-            *a += *b;
-        }
-        count += 1.0;
-    }
-    if count < 2.0 {
-        return None;
-    }
-    mu /= count;
-    let nrm = mu.iter().map(|v| v * v).sum::<f64>().sqrt();
-    if nrm < 1e-15 {
-        return None;
-    }
-    let direction: Vec<f64> = mu.iter().map(|v| -v / nrm).collect();
-    let stepped = packing_step_nu3(x, spec, &direction, rmsd, None, None);
-    if stepped
-        .iter()
-        .zip(x.iter())
-        .all(|(a, b)| (a - b).abs() < 1e-12)
+    if x.is_empty()
+        || x.len() % 3 != 0
+        || !x.iter().all(|value| value.is_finite())
+        || !rmsd.is_finite()
+        || rmsd <= 0.0
     {
         return None;
     }
-    Some(stepped)
+    let here = packing_mean_nu3(x, spec, None, None);
+    if here.is_empty() || !here.iter().all(|value| value.is_finite()) {
+        return None;
+    }
+    let peers: Vec<&[f64]> = neighbor_means
+        .iter()
+        .filter(|held| held.len() == here.len() && held.iter().all(|value| value.is_finite()))
+        .map(Vec::as_slice)
+        .collect();
+    let distance = |point: ArrayView1<f64>, peer: &[f64]| {
+        point
+            .iter()
+            .zip(peer)
+            .fold(0.0_f64, |norm, (a, b)| norm.hypot(a - b))
+    };
+    let (nearest, clearance) = peers
+        .iter()
+        .map(|peer| (*peer, distance(here.view(), peer)))
+        .min_by(|a, b| a.1.total_cmp(&b.1))?;
+    if !clearance.is_finite() || clearance == 0.0 {
+        return None;
+    }
+    let direction: Vec<f64> = here
+        .iter()
+        .zip(nearest)
+        .map(|(a, b)| (a - b) / clearance)
+        .collect();
+    let stepped = packing_step_nu3(x, spec, &direction, rmsd, None, None);
+    let mut displacement = &stepped - &x;
+    let size = displacement
+        .iter()
+        .fold(0.0_f64, |norm, value| norm.hypot(*value))
+        / (x.len() as f64 / 3.0).sqrt();
+    if !size.is_finite() || size == 0.0 {
+        return None;
+    }
+    displacement *= (rmsd / size).min(1.0);
+    // The packing map is nonlinear. Reuse one pullback while shrinking a
+    // step that approaches another occupied packing or reverses direction.
+    for _ in 0..8 {
+        let candidate = &x + &displacement;
+        if candidate.iter().all(|value| value.is_finite()) {
+            let moved = packing_mean_nu3(candidate.view(), spec, None, None);
+            if moved.len() == here.len()
+                && moved.iter().all(|value| value.is_finite())
+                && peers
+                    .iter()
+                    .all(|peer| distance(moved.view(), peer) > clearance)
+            {
+                return Some(candidate);
+            }
+        }
+        displacement *= 0.5;
+    }
+    None
 }
 
 /// Mean per-centre \(\nu=3\) row: the DECAF packing mean \(\mu\).
