@@ -40,10 +40,7 @@ fn retiring_one_reader_preserves_pending_delivery_to_live_readers() {
     exchange.publish(1, vec![(array![2.0], 7)]);
     assert!(exchange.drain(1).is_empty());
     assert_eq!(exchange.retained(), 2);
-    assert_eq!(
-        exchange.drain(2),
-        vec![(array![1.0], 5), (array![2.0], 7)]
-    );
+    assert_eq!(exchange.drain(2), vec![(array![1.0], 5), (array![2.0], 7)]);
     assert!(exchange.drain(2).is_empty());
     assert_eq!(exchange.retained(), 0);
     assert_eq!(exchange.counts(), (12, 17));
