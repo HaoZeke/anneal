@@ -439,7 +439,15 @@ where
     G: Gradient<f64>,
 {
     qmc_projected_gradient_polish_with_proposals(
-        obj, gradient, n_starts, max_fevals_per_start, seed, step0, grad_tol, top_k, None,
+        obj,
+        gradient,
+        n_starts,
+        max_fevals_per_start,
+        seed,
+        step0,
+        grad_tol,
+        top_k,
+        None,
     )
 }
 
