@@ -14,6 +14,7 @@ pub(super) enum Separation {
     Moved(Array1<f64>),
 }
 
+#[derive(Clone)]
 pub(super) struct PeerSamples {
     sources: Vec<VecDeque<Array1<f64>>>,
 }
