@@ -297,3 +297,26 @@ fn catalog_environment_cannot_enable_a_box_coverage_penalty() {
         String::from_utf8_lossy(&output.stderr)
     );
 }
+
+#[test]
+fn nonzero_peer_coverage_can_change_the_search_path() {
+    for gradient in [false, true] {
+        let shared = Plateau::new(true);
+        let private = Plateau::new(true);
+        let coverage = BoxCoverageConfig {
+            radius: 0.2,
+            height: 10.0,
+            ..BoxCoverageConfig::default()
+        };
+        let shared_result = shared.run(gradient, &config(), &coverage);
+        let private_result = private.run(
+            gradient,
+            &config(),
+            &BoxCoverageConfig { shared: false, ..coverage },
+        );
+        assert!(shared_result.coverage.applied_foreign_visits > 0);
+        assert_eq!(private_result.coverage.applied_foreign_visits, 0);
+        assert_ne!(*shared.trace.lock().unwrap(), *private.trace.lock().unwrap(),
+            "peer repulsion must influence the path when evaluated regions overlap");
+    }
+}
