@@ -1187,11 +1187,21 @@ impl session::Server for SessionImpl {
         Promise::from_future(async move {
             let label = operation_label(&request.operation);
             let validation_started = std::time::Instant::now();
-            let precomputed = match candidate_needing_validation(&request.operation) {
-                Some(candidate) => {
+            let needs_validation = {
+                let shared = shared.borrow();
+                let state = lock_state(&shared.state);
+                known_request_reply(&shared.config, &state, &request)
+                    .map_err(capnp::Error::failed)?
+                    .is_none()
+            };
+            let precomputed = match (
+                needs_validation,
+                candidate_needing_validation(&request.operation),
+            ) {
+                (true, Some(candidate)) => {
                     Some(precompute_validation_async(&shared, &request.identity, candidate).await)
                 }
-                None => None,
+                _ => None,
             };
             let validation_seconds = validation_started.elapsed().as_secs_f64();
             let (reply, events) = {
@@ -1496,12 +1506,15 @@ fn candidate_needing_validation(operation: &CatalogOperation) -> Option<&Catalog
     }
 }
 
-fn process_request(
+/// Replies that require no candidate evaluation or state mutation. Both the
+/// validation preflight and the serialized application use these guards: a
+/// committed replay needs no fresh evaluation, and asynchronous validation
+/// must not make the application rely on an unlocked state snapshot.
+fn known_request_reply(
     config: &ServerConfig,
-    state: &mut CoordinatorState,
-    request: CatalogRequest,
-    precomputed: Option<Result<ValidatedCandidate, ()>>,
-) -> Result<CatalogReply, String> {
+    state: &CoordinatorState,
+    request: &CatalogRequest,
+) -> Result<Option<CatalogReply>, String> {
     if state.journal_broken {
         return Err("catalog request journal is behind the coordinator state".to_owned());
     }
@@ -1511,21 +1524,25 @@ fn process_request(
         // An observer need not occupy a replica slot, but it must identify the
         // same system as the coordinator so live state cannot cross PESes.
         if let Some(reason) = system_identity_rejection(config, &request.identity) {
-            return Ok(rejected(state, request.event_sequence, reason));
+            return Ok(Some(rejected(state, request.event_sequence, reason)));
         }
-        return Ok(observer_status_reply(config, state, request.event_sequence));
+        return Ok(Some(observer_status_reply(
+            config,
+            state,
+            request.event_sequence,
+        )));
     }
     // Identity before the replay cache. The cache is keyed by replica
     // and sequence alone, so a caller from another campaign or ensemble
     // that happens to share a replica id collides with a stored request
     // and is told its sequence replayed rather than that it is talking
     // to the wrong coordinator.
-    if let Some(reason) = identity_rejection(config, state, &request) {
-        return Ok(rejected(state, request.event_sequence, reason));
+    if let Some(reason) = identity_rejection(config, state, request) {
+        return Ok(Some(rejected(state, request.event_sequence, reason)));
     }
     let key = (request.identity.replica, request.event_sequence);
     if let Some((stored, payload)) = state.requests.get(&key) {
-        return Ok(if stored == &request {
+        return Ok(Some(if stored == request {
             accepted_with_payload(state, request.event_sequence, true, payload.clone())
         } else {
             rejected(
@@ -1533,7 +1550,19 @@ fn process_request(
                 request.event_sequence,
                 ProtocolRejection::SequenceReplay,
             )
-        });
+        }));
+    }
+    Ok(None)
+}
+
+fn process_request(
+    config: &ServerConfig,
+    state: &mut CoordinatorState,
+    request: CatalogRequest,
+    precomputed: Option<Result<ValidatedCandidate, ()>>,
+) -> Result<CatalogReply, String> {
+    if let Some(reply) = known_request_reply(config, state, &request)? {
+        return Ok(reply);
     }
     // Every operation applies straight to the live state now, not to a
     // clone taken up front and conditionally swapped in. That clone used
