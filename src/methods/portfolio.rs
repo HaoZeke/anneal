@@ -33,6 +33,9 @@ use rand_distr::{Beta, Distribution};
 
 use eindir_core::{AdditiveSurrogate, Bounds, FPair, Gradient, Objective, ReducedObjective};
 
+mod ensemble;
+pub use ensemble::{PortfolioEnsembleConfig, PortfolioEnsembleResult, portfolio_ensemble_optimize};
+
 use crate::bias::Bias;
 use crate::cool::{Cooling, LogCool, TsallisCool};
 use crate::exchange::TsallisExchange;
@@ -444,6 +447,7 @@ struct BudgetLedger {
     inner: Mutex<LedgerInner>,
     archive_cap: usize,
     dim: usize,
+    peer: Option<ensemble::Peer>,
 }
 
 impl BudgetLedger {
@@ -463,6 +467,13 @@ impl BudgetLedger {
             // itself bounds the archive.
             archive_cap: budget,
             dim,
+            peer: None,
+        }
+    }
+
+    fn checkpoint(&self, bounds: &Bounds<f64>) {
+        if let Some(peer) = &self.peer {
+            peer.checkpoint(self.incumbent(bounds).view(), self.best_get());
         }
     }
 
@@ -1473,6 +1484,7 @@ fn dual_style_local_search<O, G, R>(
     if work_units < 8 {
         return;
     }
+    ledger.checkpoint(bounds);
     let dim = bounds.dims.max(1);
     let wide = mean_width(bounds) >= 50.0;
     let has_analytic = grad.is_some();
@@ -1989,6 +2001,7 @@ fn run_arm<O, G>(
     G: Gradient<f64>,
 {
     let bounds = obj.bounds().clone();
+    ledger.checkpoint(&bounds);
     let dim = bounds.dims;
     states.seed_counter += 1;
     let seed = rng.random::<u64>() ^ states.seed_counter;
@@ -3129,6 +3142,24 @@ where
     O: Objective<f64>,
     G: Gradient<f64>,
 {
+    portfolio_optimize_interacting(obj, grad, budget, seed, noise_sigma, policy, x0, None)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn portfolio_optimize_interacting<O, G>(
+    obj: &O,
+    grad: Option<&G>,
+    budget: usize,
+    seed: u64,
+    noise_sigma: Option<f64>,
+    policy: PortfolioPolicy,
+    x0: Option<ArrayView1<f64>>,
+    peer: Option<ensemble::Peer>,
+) -> PortfolioResult
+where
+    O: Objective<f64>,
+    G: Gradient<f64>,
+{
     assert!(budget > 0, "budget must be positive");
     if let Some(sigma) = noise_sigma {
         assert!(
@@ -3170,7 +3201,8 @@ where
         PortfolioPolicy::Legacy => crate::methods::regime::OptimizationRegime::Default,
     };
 
-    let ledger = BudgetLedger::new(budget, dim);
+    let mut ledger = BudgetLedger::new(budget, dim);
+    ledger.peer = peer;
     let budgeted_obj = BudgetedObjective {
         inner: obj,
         ledger: &ledger,
