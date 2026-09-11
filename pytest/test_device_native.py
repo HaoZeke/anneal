@@ -79,3 +79,45 @@ def test_device_result_retains_finite_probes_from_an_undefined_start():
     assert result.best_val == best[0]
     np.testing.assert_array_equal(result.best_pos, best[1])
     assert result.n_evals == len(seen)
+
+
+@pytest.mark.parametrize("batched", [False, True])
+def test_device_chain_recovers_a_finite_occupied_state(batched):
+    seen = []
+
+    def objective(x):
+        seen.append(x.copy())
+        value = np.asarray(np.sum(x * x, axis=-1))
+        return np.full_like(value, np.nan) if len(seen) == 1 else value
+
+    kwargs = {"n_epochs": 1, "steps_per_epoch": 1, "seed": 71}
+    if batched:
+        kwargs["n_chains"] = 4
+    entry = anneal.run_ensemble if batched else anneal.run_device
+    result = entry(objective, np.full(2, -1.0), np.full(2, 1.0), anneal.Boltzmann(), **kwargs)
+    assert len(seen) == result.n_evals == 2
+    assert np.sum(result.accepted) == (4 if batched else 1)
+    assert np.sum(result.rejected) == 0
+    np.testing.assert_array_equal(result.best_pos, seen[1])
+    np.testing.assert_array_equal(result.best_val, np.sum(seen[1] ** 2, axis=-1))
+
+
+@pytest.mark.parametrize("batched", [False, True])
+def test_device_nonfinite_candidate_cannot_replace_finite_occupancy(batched):
+    seen = []
+
+    def objective(x):
+        seen.append(x.copy())
+        value = np.asarray(np.sum(x * x, axis=-1))
+        return np.full_like(value, -np.inf) if len(seen) == 2 else value
+
+    kwargs = {"n_epochs": 1, "steps_per_epoch": 1, "seed": 71}
+    if batched:
+        kwargs["n_chains"] = 4
+    entry = anneal.run_ensemble if batched else anneal.run_device
+    result = entry(objective, np.full(2, -1.0), np.full(2, 1.0), anneal.Boltzmann(), **kwargs)
+    assert len(seen) == result.n_evals == 2
+    assert np.sum(result.accepted) == 0
+    assert np.sum(result.rejected) == (4 if batched else 1)
+    np.testing.assert_array_equal(result.best_pos, seen[0])
+    np.testing.assert_array_equal(result.best_val, np.sum(seen[0] ** 2, axis=-1))
