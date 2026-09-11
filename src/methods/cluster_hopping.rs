@@ -227,11 +227,70 @@ impl<'a> ChainCheckpoint<'a> {
     }
 }
 
+/// A bias-only communication update, independent of the chain's state action.
+#[derive(Debug, Clone, PartialEq)]
+pub enum BiasUpdate {
+    /// Import other walkers' descriptor visits without publishing them as local.
+    DepositDescriptors {
+        /// Descriptor centres and their foreign visit counts.
+        deposits: Vec<(Array1<f64>, u64)>,
+        /// Height relative to one local deposit.
+        weight: f64,
+    },
+    /// Average local wells toward a peer's table.
+    MergeWells {
+        /// Peer descriptor centres and well depths.
+        wells: Vec<(Array1<f64>, f64)>,
+        /// Step toward the peer's depth, in `(0, 1]`.
+        weight: f64,
+        /// Whether omitted wells have zero depth in a complete peer table.
+        complete: bool,
+    },
+}
+
+impl BiasUpdate {
+    fn apply(
+        self,
+        bias: &mut BasinBias<ClusterFingerprint>,
+        temperature: f64,
+        shared_deposits: &mut usize,
+        gossip_rounds: &mut usize,
+    ) {
+        match self {
+            Self::DepositDescriptors { deposits, weight } => {
+                for (centre, count) in &deposits {
+                    bias.deposit_scaled_n(centre.view(), temperature, weight, *count);
+                    *shared_deposits += usize::try_from(*count).unwrap_or(usize::MAX);
+                }
+            }
+            Self::MergeWells {
+                wells,
+                weight,
+                complete,
+            } => {
+                bias.merge_wells(&wells, weight, complete);
+                *gossip_rounds += 1;
+            }
+        }
+    }
+}
+
 /// Action returned after observing a live-chain checkpoint.
 #[derive(Debug, Clone, PartialEq)]
 pub enum CheckpointAction {
     /// Leave the live chain and every adaptive controller unchanged.
     Continue,
+    /// Apply communication in order, then process one state action.
+    ///
+    /// Bias updates cost no objective calls and do not require a gradient or
+    /// a minimum certificate. Wrappers compose from outside inward, so a
+    /// caller can add communication without replacing a proposal or retirement.
+    WithBiasUpdates {
+        /// Ordered updates to the receiving chain's own bias.
+        updates: Vec<BiasUpdate>,
+        /// The action to process after every update in this wrapper.
+        action: Box<CheckpointAction>,
+    },
     /// Quench and adopt a target-blind boundary perturbation.
     BoundaryProposal {
         /// Cartesian proposal produced from shared region-boundary evidence.
@@ -1821,7 +1880,7 @@ where
             (Some(_), Some(threshold)) if hops > checkpoint_hops && ledger.spent() >= threshold
         );
         if checkpoint_due || internal_action.is_some() {
-            let checkpoint_action = if let Some(action) = internal_action.take() {
+            let mut checkpoint_action = if let Some(action) = internal_action.take() {
                 action
             } else {
                 let interval = checkpoint_interval.expect("a due checkpoint has an interval");
@@ -1849,6 +1908,17 @@ where
                     .and_then(|next| next.checked_mul(interval));
                 checkpoint_action
             };
+            while let CheckpointAction::WithBiasUpdates { updates, action } = checkpoint_action {
+                for update in updates {
+                    update.apply(
+                        &mut bias,
+                        cfg.temperature,
+                        &mut shared_deposits,
+                        &mut gossip_rounds,
+                    );
+                }
+                checkpoint_action = *action;
+            }
             if let CheckpointAction::Retire { .. } = checkpoint_action {
                 break;
             }
@@ -1857,6 +1927,9 @@ where
             let proposal = match checkpoint_action {
                 CheckpointAction::Continue => None,
                 CheckpointAction::Retire { .. } => unreachable!("retire breaks before this match"),
+                CheckpointAction::WithBiasUpdates { .. } => {
+                    unreachable!("bias wrappers are applied before the state action")
+                }
                 CheckpointAction::DepositRemote { states } => {
                     for remote in &states {
                         if remote.len() == x.len() {
@@ -1875,15 +1948,26 @@ where
                     weight,
                     complete,
                 } => {
-                    bias.merge_wells(&wells, weight, complete);
-                    gossip_rounds += 1;
+                    BiasUpdate::MergeWells {
+                        wells,
+                        weight,
+                        complete,
+                    }
+                    .apply(
+                        &mut bias,
+                        cfg.temperature,
+                        &mut shared_deposits,
+                        &mut gossip_rounds,
+                    );
                     None
                 }
                 CheckpointAction::DepositDescriptors { deposits, weight } => {
-                    for (centre, count) in &deposits {
-                        bias.deposit_scaled_n(centre.view(), cfg.temperature, weight, *count);
-                        shared_deposits += usize::try_from(*count).unwrap_or(usize::MAX);
-                    }
+                    BiasUpdate::DepositDescriptors { deposits, weight }.apply(
+                        &mut bias,
+                        cfg.temperature,
+                        &mut shared_deposits,
+                        &mut gossip_rounds,
+                    );
                     None
                 }
                 CheckpointAction::BoundaryProposal { state, action } => {
