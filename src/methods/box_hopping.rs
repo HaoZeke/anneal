@@ -1,12 +1,15 @@
 //! Box-constrained search, split on whether a gradient exists.
 //!
-//! * [`box_ensemble_optimize`] requires a gradient: kick, quench, one
-//!   [`HistoryHook`] per replica over one [`MinimumHistory`].
-//! * [`box_values_ensemble_optimize`] is the same replica/history object
+//! * [`box_ensemble_optimize`] requires a gradient: propose, quench, and
+//!   update descriptor-space coverage independently of minimum certificates.
+//! * [`box_values_ensemble_optimize`] is the same replica/coverage path
 //!   without a user gradient: kick, pattern-search, finite-difference
 //!   certificate. [`MinimumHistory`] only admits a point when that
-//!   certificate is flat. One replica and no gradient still uses
-//!   [`crate::methods::portfolio::portfolio_optimize`].
+//!   certificate is flat; coverage does not require one.
+//! * The explicit `*_with_coverage` entry points separate coverage sharing
+//!   from the optional [`HistoryHook`] and certified-minimum ledger.
+//!   [`ensemble_hop_optimize`] uses the values-only portfolio for one
+//!   replica without a gradient.
 //!
 //! A box is not a point set. Cluster
 //! [`crate::methods::cluster_hopping::Config::recommended`] does not apply.
@@ -258,9 +261,13 @@ impl From<BoxEnsembleResult> for EnsembleHopResult {
     }
 }
 
-/// Communicating values-only hop chains. Same history object as the
-/// gradient ensemble. A point is admitted only when a one-sided
-/// finite-difference certificate is flatter than `1e-3`.
+/// Communicating values-only hop chains with evaluated-region coverage.
+///
+/// Coverage sharing follows `config.history == HistoryMode::Shared` and a
+/// positive `config.shared_deposits`. The separate minimum ledger admits a
+/// point only when a one-sided finite-difference certificate is flatter than
+/// `1e-3`. Use [`box_values_ensemble_optimize_with_coverage`] to configure
+/// coverage independently of that ledger.
 pub fn box_values_ensemble_optimize<O>(
     obj: &O,
     seed: u64,
@@ -710,8 +717,12 @@ impl ExactStructureWitness for WidthWitness {
     }
 }
 
-/// Run `replicas` box hops that divide `config.budget` and talk through
-/// one [`HistoryHook`] per replica.
+/// Run box hop chains that divide `config.budget` and share evaluated coverage.
+///
+/// Coverage sharing follows `config.history == HistoryMode::Shared` and a
+/// positive `config.shared_deposits`. One optional [`HistoryHook`] per chain
+/// records certified minima. Use [`box_ensemble_optimize_with_coverage`] to
+/// configure coverage independently of that ledger.
 pub fn box_ensemble_optimize<O, G>(
     obj: &O,
     grad: &G,
