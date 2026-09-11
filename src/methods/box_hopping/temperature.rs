@@ -49,7 +49,10 @@ pub(super) struct FirstEvaluation<'a, O> {
 
 impl<'a, O> FirstEvaluation<'a, O> {
     pub(super) fn new(inner: &'a O) -> Self {
-        Self { inner, value: Mutex::new(None) }
+        Self {
+            inner,
+            value: Mutex::new(None),
+        }
     }
 
     pub(super) fn energy(&self) -> Option<f64> {
@@ -67,7 +70,11 @@ impl<O: Objective<f64>> Objective<f64> for FirstEvaluation<'_, O> {
         value
     }
 
-    fn dim(&self) -> usize { self.inner.dim() }
+    fn dim(&self) -> usize {
+        self.inner.dim()
+    }
 
-    fn bounds(&self) -> &Bounds<f64> { self.inner.bounds() }
+    fn bounds(&self) -> &Bounds<f64> {
+        self.inner.bounds()
+    }
 }

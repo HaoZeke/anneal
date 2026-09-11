@@ -1021,7 +1021,8 @@ where
                     for _ in 0..escape_steps {
                         let energy = stepper.step(obj, grad, &mut replica.trial, &mut force);
                         if energy.is_finite() {
-                            excursion_peak = Some(excursion_peak.map_or(energy, |peak| peak.max(energy)));
+                            excursion_peak =
+                                Some(excursion_peak.map_or(energy, |peak| peak.max(energy)));
                         }
                         replica.work += 2;
                         n_evals += 1;
