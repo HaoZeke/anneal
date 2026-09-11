@@ -1087,7 +1087,7 @@ where
                     replica.work += 1;
                     n_grads += 1;
                     for _ in 0..escape_steps {
-                        let energy = stepper.step(obj, grad, &mut replica.trial, &mut force, |point| {
+                        let energy = stepper.step_with_proposal(obj, grad, &mut replica.trial, &mut force, |point| {
                             coverage.repel(index, replica.x.view(), point, &mut replica.rng);
                         });
                         if energy.is_finite() {
