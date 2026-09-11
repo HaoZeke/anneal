@@ -149,14 +149,22 @@ performs distance calculations under its own lock, not the exchange lock.
 Proposal counters merge at checkpoints and retirement. Unfunded replicas do
 not join the barrier; completed or unwinding replicas release their reader
 obligation. Objective callbacks execute outside exchange locks.
+Scalar residual batches have a funded checkpoint even when their allowance
+cannot pay for a derivative stencil; communication consumes no objective calls.
 
 The consumers are QMC exploration starts and steps, gradient-hop launches,
 surrogate candidates, differential-evolution initialization and mutations,
-persistent GSA steps and reseeds, and local-search restart seeds. Local
+persistent GSA initialization, steps and reseeds, scalar residual global
+candidates, and local-search restart seeds. Local
 derivative stencils and line searches evaluate the raw objective without
 geometric displacement. A prepared proposal is publishable only when a real
 callback evaluates its finite feasible value. Other portfolio arm internals
 do not acquire peer steering merely by being present in the library.
+
+The =portfolio_scalar_proposals= regressions exercise the initialization and
+residual paths through the objective-only API. They identify GSA's initial
+candidate by its generating random stream and check every paid position in
+sub-stencil allowances, with private and zero-height controls.
 
 The values-only controller protects a refinement reserve across search slices,
 including enlarged warmup slices. A scalar refinement start needs its base
