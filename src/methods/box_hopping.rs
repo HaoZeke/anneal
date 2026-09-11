@@ -14,7 +14,7 @@
 
 use std::sync::Mutex;
 
-use eindir_core::{Gradient, Objective};
+use eindir_core::{Bounds, Gradient, Objective};
 use ndarray::{Array1, ArrayView1};
 use rand::Rng;
 use rand::SeedableRng;
@@ -86,7 +86,7 @@ impl BoxEnsembleConfig {
 /// Outcome of one box ensemble.
 #[derive(Clone, Debug)]
 pub struct BoxEnsembleResult {
-    /// Best feasible point among the replicas.
+    /// Best finite feasible point evaluated by any replica, including probes.
     pub best_pos: Array1<f64>,
     /// Objective at [`BoxEnsembleResult::best_pos`].
     pub best_val: f64,
@@ -205,6 +205,11 @@ pub fn box_values_ensemble_optimize<O>(
 where
     O: Objective<f64>,
 {
+    let observed = ObservedObjective {
+        inner: obj,
+        incumbent: Mutex::new(None),
+    };
+    let obj = &observed;
     let bounds = obj.bounds().clone();
     let dim = bounds.dims.max(1);
     let widths = &bounds.high - &bounds.low;
@@ -427,6 +432,10 @@ where
             best_pos = replica.x.clone();
         }
     }
+    if let Some((position, value)) = observed.incumbent.into_inner().expect("incumbent lock") {
+        best_pos = position;
+        best_val = value;
+    }
     let history_minima = nng_minimum_count(hooks.first()).unwrap_or_else(|| {
         histories
             .iter()
@@ -641,6 +650,11 @@ where
     O: Objective<f64>,
     G: Gradient<f64>,
 {
+    let observed = ObservedObjective {
+        inner: obj,
+        incumbent: Mutex::new(None),
+    };
+    let obj = &observed;
     let bounds = obj.bounds().clone();
     let dim = bounds.dims.max(1);
     let widths = &bounds.high - &bounds.low;
@@ -882,6 +896,10 @@ where
             best_pos = replica.x.clone();
         }
     }
+    if let Some((position, value)) = observed.incumbent.into_inner().expect("incumbent lock") {
+        best_pos = position;
+        best_val = value;
+    }
     let history_minima = nng_minimum_count(hooks.first()).unwrap_or_else(|| {
         histories
             .iter()
@@ -900,6 +918,43 @@ where
         history_minima,
         history_cost: total_history_cost(&hooks),
         shared_deposits,
+    }
+}
+
+/// Passive best-point observation is independent of occupied-state acceptance,
+/// history certification and work charging. Every callback reaches the wrapped
+/// objective exactly once at its original coordinates.
+struct ObservedObjective<'a, O> {
+    inner: &'a O,
+    incumbent: Mutex<Option<(Array1<f64>, f64)>>,
+}
+
+impl<O: Objective<f64>> Objective<f64> for ObservedObjective<'_, O> {
+    fn dim(&self) -> usize {
+        self.inner.dim()
+    }
+
+    fn bounds(&self) -> &Bounds<f64> {
+        self.inner.bounds()
+    }
+
+    fn eval(&self, x: ArrayView1<f64>) -> f64 {
+        let value = self.inner.eval(x);
+        let bounds = self.bounds();
+        if value.is_finite()
+            && x.len() == bounds.dims
+            && x.iter()
+                .zip(bounds.low.iter().zip(bounds.high.iter()))
+                .all(|(coordinate, (low, high))| {
+                    coordinate.is_finite() && coordinate >= low && coordinate <= high
+                })
+        {
+            let mut incumbent = self.incumbent.lock().expect("incumbent lock");
+            if incumbent.as_ref().is_none_or(|(_, best)| value < *best) {
+                *incumbent = Some((x.to_owned(), value));
+            }
+        }
+        value
     }
 }
 
