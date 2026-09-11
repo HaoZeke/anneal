@@ -513,10 +513,12 @@ where
         for (index, replica) in replicas.iter_mut().enumerate() {
             let remaining = replica.budget.saturating_sub(replica.work);
             let needs_certificate = hooks[index].enabled();
-            let depth = values_search_depth(dim, remaining, needs_certificate);
-            if remaining < 4 || depth == 0 {
+            if remaining == 0 {
                 continue;
             }
+            // One scalar proposal needs no full quench or certificate. Its
+            // paid value can improve the incumbent and supply peer coverage.
+            let depth = values_search_depth(dim, remaining, needs_certificate).max(1);
             progressed = true;
             replica.generation += 1;
             replica.hops += 1;
