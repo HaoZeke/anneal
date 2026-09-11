@@ -4,10 +4,17 @@ use std::sync::{Arc, Mutex, mpsc};
 use std::time::Duration;
 
 use anneal_core::methods::box_hopping::BoxEnsembleConfig;
-use anneal_core::{bias, methods, shared_bias};
+use anneal_core::{bias, descriptor_space, pes_exploration, shared_bias};
 use eindir_core::Bounds;
 use ndarray::{Array1, array};
 use rand::{Rng, SeedableRng, rngs::StdRng};
+
+#[path = "../src/methods/minima_hopping.rs"]
+pub mod minima_hopping_source;
+mod methods {
+    pub use crate::minima_hopping_source as minima_hopping;
+    pub use anneal_core::methods::{cluster_hopping, ensemble};
+}
 
 #[path = "../src/methods/box_hopping/coverage.rs"]
 mod coverage;
