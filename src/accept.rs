@@ -78,8 +78,17 @@ impl<T: Float> ProbabilityArithmetic<T> for ScalarArithmetic<T> {
     fn powf(&self, value: &T, exponent: T) -> Result<T, Self::Error> {
         Ok(value.powf(exponent))
     }
-    fn select_nonpositive(&self, condition: &T, nonpositive: &T, positive: &T) -> Result<T, Self::Error> {
-        Ok(if *condition <= T::zero() { *nonpositive } else { *positive })
+    fn select_nonpositive(
+        &self,
+        condition: &T,
+        nonpositive: &T,
+        positive: &T,
+    ) -> Result<T, Self::Error> {
+        Ok(if *condition <= T::zero() {
+            *nonpositive
+        } else {
+            *positive
+        })
     }
     fn positive_map<F>(&self, value: &T, nonpositive: T, positive: F) -> Result<T, Self::Error>
     where
