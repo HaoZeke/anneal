@@ -164,12 +164,16 @@ impl Coverage {
         let coordinates = NormalizedCoordinates::new(bounds);
         let biases = (0..replicas)
             .map(|_| {
-                BasinBias::new(
+                let mut bias = BasinBias::new(
                     coordinates.clone(),
                     config.radius,
                     config.height,
                     config.well_tempering,
-                )
+                );
+                // Box coverage uses its explicit fixed-height well-tempering
+                // settings, independent of catalog-specific entropy controls.
+                bias.entropic = false;
+                bias
             })
             .collect();
         let exchange =
