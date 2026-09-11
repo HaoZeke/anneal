@@ -104,6 +104,13 @@ requiring stationary points. Certified-minimum history is separate information,
 not the definition of exploration. The returned incumbent uses the original
 objective, independently of the exploration penalty and occupied chain state.
 
+Both values-only engines use the same Rust budgeted quasi-Newton local refiner.
+It estimates local derivatives from scalar values; no Jacobian or force callback
+is required. Every stencil and line-search probe counts as an objective call,
+including rejected probes, and can improve the returned raw incumbent. This
+local refinement does not make the two global controllers identical or certify
+global optimality.
+
 `nfev` and `njev` count actual objective and gradient calls; `charged` is their
 sum. `diagnostics` preserves the underlying work, history, and coverage fields.
 `success` means a finite feasible candidate was returned, not that global

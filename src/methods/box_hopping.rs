@@ -4,8 +4,8 @@
 //!   update descriptor-space coverage independently of minimum certificates.
 //! * [`box_values_ensemble_optimize`] is the same replica/coverage path
 //!   without a user gradient: kick, budgeted scalar quasi-Newton refinement,
-//!   optional finite-difference certificate. [`MinimumHistory`] only admits a point when that
-//!   certificate is flat; coverage does not require one.
+//!   optional finite-difference certificate. [`MinimumHistory`] only admits
+//!   a point when that certificate is flat; coverage does not require one.
 //! * The explicit `*_with_coverage` entry points separate coverage sharing
 //!   from the optional [`HistoryHook`] and certified-minimum ledger.
 //!   [`ensemble_hop_optimize`] uses the values-only portfolio for one
@@ -227,7 +227,7 @@ pub struct EnsembleHopResult {
 ///
 /// Without a gradient, one replica is the values-only portfolio. Two or
 /// more replicas are communicating values-only hop chains: they divide
-/// the budget, kick, pattern-search, and share [`MinimumHistory`] when
+/// the budget, kick, refine with scalar values, and share [`MinimumHistory`] when
 /// a finite-difference certificate is flat. `replicas` is not ignored.
 pub fn ensemble_hop_optimize<O, G>(
     obj: &O,
