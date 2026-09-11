@@ -78,7 +78,7 @@ impl BoxCoverageConfig {
 }
 
 /// Search observations and their delivery, not a census of certified minima.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize)]
 pub struct CoverageStats {
     /// Finite feasible initial boundaries and completed trial boundaries,
     /// including rejected trials. Inner line-search probes are not extra visits.
