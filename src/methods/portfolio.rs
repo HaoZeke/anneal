@@ -31,7 +31,7 @@ use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 use rand_distr::{Beta, Distribution};
 
-use eindir_core::{AdditiveSurrogate, Bounds, Gradient, Objective, ReducedObjective};
+use eindir_core::{AdditiveSurrogate, Bounds, FPair, Gradient, Objective, ReducedObjective};
 
 use crate::bias::Bias;
 use crate::cool::{Cooling, LogCool, TsallisCool};
@@ -422,7 +422,7 @@ pub struct PortfolioResult {
     /// This diagnostic is distinct from the best-seen incumbent and is not
     /// a resumable checkpoint. It is absent when the hop arm has no state,
     /// including values-only runs. Reading it performs no objective calls.
-    pub hop_state: Option<eindir_core::FPair<f64>>,
+    pub hop_state: Option<FPair<f64>>,
 }
 
 // ---------------------------------------------------------------------------
@@ -757,8 +757,7 @@ const RESTART_ARM: ArmKind = ArmKind::Explore;
 
 struct HopState {
     step: f64,
-    x_cur: Option<Array1<f64>>,
-    f_cur: f64,
+    current: Option<FPair<f64>>,
     generation: usize,
 }
 
@@ -2039,21 +2038,21 @@ fn run_arm<O, G>(
             let Some(grad) = grad else { return };
             let state = states.hop.get_or_insert_with(|| HopState {
                 step: HOP_STEP0,
-                x_cur: None,
-                f_cur: f64::INFINITY,
+                current: None,
                 generation: 0,
             });
-            let mut x_cur = state
-                .x_cur
-                .clone()
-                .unwrap_or_else(|| ledger.incumbent(&bounds));
-            let mut f_cur = state.f_cur.min(ledger.best_get());
+            // Archive improvements do not change the occupied hop state.
+            // The acceptance energy belongs to the retained coordinates.
+            let mut current = state.current.clone().unwrap_or_else(|| FPair {
+                pos: ledger.incumbent(&bounds),
+                val: ledger.best_get(),
+            });
             let temp = ladder_temperature(archive_temp0(ledger), state.generation);
             let width = &bounds.high - &bounds.low;
             // One full-depth descent per slice: ill-conditioned valleys
             // reward depth over hop count.
             if ledger.remaining() >= 4 {
-                let mut trial = x_cur.clone();
+                let mut trial = current.pos.clone();
                 for j in 0..dim {
                     let w = if width[j] > 0.0 { width[j] } else { 1.0 };
                     let noise: f64 = rand_distr::StandardNormal.sample(rng);
@@ -2074,18 +2073,19 @@ fn run_arm<O, G>(
                 let res = projected_gradient_polish(obj, grad, trial, hop_depth, 1.0, 1e-8);
                 if !res.best_val.is_finite() {
                     state.step = (state.step * HOP_SHRINK).max(1e-4);
-                } else if res.best_val < f_cur
-                    || metropolis(energy_delta(res.best_val, f_cur), temp, rng)
+                } else if res.best_val < current.val
+                    || metropolis(energy_delta(res.best_val, current.val), temp, rng)
                 {
-                    x_cur = res.best_pos;
-                    f_cur = res.best_val;
+                    current = FPair {
+                        pos: res.best_pos,
+                        val: res.best_val,
+                    };
                     state.step = (state.step * HOP_GROW).min(1.0);
                 } else {
                     state.step = (state.step * HOP_SHRINK).max(1e-4);
                 }
             }
-            state.x_cur = Some(x_cur);
-            state.f_cur = f_cur;
+            state.current = Some(current);
             state.generation += 1;
         }
         ArmKind::Surrogate => {
@@ -3877,12 +3877,7 @@ where
                 successes: posterior.successes,
             })
             .collect(),
-        hop_state: states.hop.as_ref().and_then(|state| {
-            state.x_cur.as_ref().map(|pos| eindir_core::FPair {
-                pos: pos.clone(),
-                val: state.f_cur,
-            })
-        }),
+        hop_state: states.hop.as_ref().and_then(|state| state.current.clone()),
     }
 }
 
