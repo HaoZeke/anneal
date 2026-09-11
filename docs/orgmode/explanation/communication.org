@@ -45,6 +45,22 @@ visit-dependent height, while the descriptor index counts only local
 arrivals. Only those local arrival deltas are publishable. Repeated exchanges
 therefore cannot manufacture coverage by circulating the same observations.
 
+* Occupied state and the global archive
+
+The portfolio's gradient-enabled hop arm retains an =eindir_core::FPair=:
+coordinates and their cached raw objective value. An accepted transition
+replaces both members. A lower archive value from another arm does not
+change the occupied pair; otherwise a downhill hop can be compared against
+an energy that does not belong to its starting position.
+
+The native =PortfolioResult.hop_state= reports this terminal occupied pair
+separately from =best_pos= and =best_val=, which retain the best raw evaluated
+candidate across all arms. Copying the diagnostic adds no objective calls
+or random draws. It is not a resumable checkpoint, and a values-only run
+has no gradient-enabled hop state and reports =None=. The native
+=portfolio_hop_state= regression checks cached energy against the occupied
+coordinates, raw-incumbent retention and actual callback accounting.
+
 * Entry points and channels
 
 The [[file:../../../src/methods/ensemble.rs][atomic ensemble runner]], the
