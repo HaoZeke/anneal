@@ -70,8 +70,8 @@ impl PeerSamples {
     ) -> Option<(Separation, bool)> {
         let (distance, neighbour) = self.nearest(point)?;
         let anchor_overlaps = self
-            .nearest(anchor)
-            .is_some_and(|(distance, _)| distance < radius);
+            .clearance(anchor)
+            .is_some_and(|distance| distance < radius);
         if distance >= radius {
             return Some((Separation::Distant, anchor_overlaps));
         }
@@ -106,8 +106,8 @@ impl PeerSamples {
                 },
             ));
         if self
-            .nearest(candidate.view())
-            .is_some_and(|(clearance, _)| clearance > distance)
+            .clearance(candidate.view())
+            .is_some_and(|clearance| clearance > distance)
         {
             return Some((Separation::Moved(candidate), anchor_overlaps));
         }
@@ -123,8 +123,8 @@ impl PeerSamples {
                 candidate[j] = (point[j] + sign * increment).clamp(0.0, upper);
                 if candidate[j] != point[j]
                     && self
-                        .nearest(candidate.view())
-                        .is_some_and(|(clearance, _)| clearance > distance)
+                        .clearance(candidate.view())
+                        .is_some_and(|clearance| clearance > distance)
                 {
                     return Some((Separation::Moved(candidate), anchor_overlaps));
                 }
