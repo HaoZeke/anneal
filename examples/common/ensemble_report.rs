@@ -179,8 +179,7 @@ pub fn config_from_env(replicas: usize, budget: usize, target: Option<f64>) -> E
     };
     let membership = HistoryMembership::parse(std::env::var("HISTORY_POLICY").ok().as_deref())
         .unwrap_or_else(|error| panic!("{error}"));
-    let shared_bias = std::env::var("SHARED_BIAS")
-        .is_ok_and(|v| v == "1")
+    let shared_bias = anneal_core::env::flag("SHARED_BIAS")
         .then(|| parsed::<f64>("SHARED_BIAS_WEIGHT").unwrap_or(1.0));
     let gossip = match std::env::var("GOSSIP").as_deref() {
         Ok("ring") => Some(GossipTopology::Ring),
@@ -192,7 +191,7 @@ pub fn config_from_env(replicas: usize, budget: usize, target: Option<f64>) -> E
         topology,
         interval: parsed::<usize>("GOSSIP_INTERVAL").unwrap_or(20_000).max(1),
         weight: parsed::<f64>("GOSSIP_WEIGHT").unwrap_or(0.5),
-        adaptive: std::env::var("GOSSIP_ADAPTIVE").is_ok_and(|v| v == "1"),
+        adaptive: anneal_core::env::flag("GOSSIP_ADAPTIVE"),
         top: match parsed::<usize>("GOSSIP_TOP") {
             Some(0) => None,
             Some(count) => Some(count),

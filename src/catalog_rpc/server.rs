@@ -1410,7 +1410,7 @@ impl PhaseClock {
 impl Drop for PhaseClock {
     fn drop(&mut self) {
         let total = self.started.elapsed().as_secs_f64();
-        if total < 2.0 || !std::env::var("CATALOG_SERVER_PROFILE").is_ok_and(|v| v == "1") {
+        if total < 2.0 || !crate::env::flag("CATALOG_SERVER_PROFILE") {
             return;
         }
         let mut laps = self.laps.clone();
@@ -1473,7 +1473,7 @@ fn profile_request(label: &'static str, validation_seconds: f64, apply_seconds: 
     static ENABLED: OnceLock<bool> = OnceLock::new();
     static PROFILE: Mutex<Option<(u64, BTreeMap<&'static str, (u64, f64, f64)>)>> =
         Mutex::new(None);
-    if !*ENABLED.get_or_init(|| std::env::var("CATALOG_SERVER_PROFILE").is_ok_and(|v| v == "1")) {
+    if !*ENABLED.get_or_init(|| crate::env::flag("CATALOG_SERVER_PROFILE")) {
         return;
     }
     let mut guard = PROFILE.lock().expect("coordinator profile");
@@ -2645,7 +2645,7 @@ fn apply_request(
                 // catalog is full and the candidate's packing family is not
                 // represented, evict the highest-energy non-incumbent entry
                 // of the most crowded family first.
-                if std::env::var("CATALOG_FAMILY_ARCHIVE").is_ok_and(|v| v == "1")
+                if crate::env::flag("CATALOG_FAMILY_ARCHIVE")
                     && scientific.catalog.len() >= scientific.catalog.capacity()
                     && let Some(new_hist) = scientific
                         .packing
@@ -4332,11 +4332,7 @@ fn invalidate_discovery_plan(scientific: &mut ScientificState) {
 fn ride_candidate_limit(replicas: usize) -> usize {
     static LIMIT: std::sync::OnceLock<Option<usize>> = std::sync::OnceLock::new();
     LIMIT
-        .get_or_init(|| {
-            std::env::var("CATALOG_RIDE_CANDIDATES")
-                .ok()
-                .and_then(|value| value.parse().ok())
-        })
+        .get_or_init(|| crate::env::parsed("CATALOG_RIDE_CANDIDATES"))
         .unwrap_or_else(|| (4 * replicas).max(16))
 }
 
@@ -5110,9 +5106,7 @@ fn worthwhile_communities(scientific: &mut ScientificState) -> usize {
 fn funnel_rank() -> usize {
     static RANK: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
     *RANK.get_or_init(|| {
-        std::env::var("CATALOG_FUNNEL_RANK")
-            .ok()
-            .and_then(|value| value.parse().ok())
+        crate::env::parsed("CATALOG_FUNNEL_RANK")
             .filter(|rank: &usize| *rank >= 8)
             .unwrap_or(512)
     })
@@ -5371,11 +5365,7 @@ fn ring_profile_memo(coordinates: &[f64]) -> Option<(usize, usize, usize)> {
 }
 
 fn occupancy_floor(scientific: &mut ScientificState) -> usize {
-    if std::env::var("CATALOG_MIN_FAMILIES")
-        .ok()
-        .and_then(|value| value.parse().ok())
-        .is_some_and(|count: usize| count >= 1)
-    {
+    if crate::env::parsed("CATALOG_MIN_FAMILIES").is_some_and(|count: usize| count >= 1) {
         return occupancy_min_families();
     }
     if let Some((at, held)) = scientific.floor_hold
@@ -5605,9 +5595,7 @@ fn record_energy(scientific: &mut ScientificState, replica: u32, energy: f64) {
 }
 
 fn hyperband_max_resource() -> u64 {
-    std::env::var("CATALOG_MAX_HOPS")
-        .ok()
-        .and_then(|value| value.parse().ok())
+    crate::env::parsed("CATALOG_MAX_HOPS")
         .filter(|&hops| hops >= crate::catalog::MIN_RESOURCE)
         .unwrap_or(crate::catalog::DEFAULT_MAX_RESOURCE)
 }

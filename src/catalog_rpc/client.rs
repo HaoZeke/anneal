@@ -23,9 +23,9 @@ use super::{
     encode_reply, fill_identity, fill_request, read_coordinator_status, read_event, read_roster,
 };
 use crate::Catalog_capnp::{coordinator, session, subscriber};
-use crate::nng_rpc::{self, NngIo};
 use crate::cooperative_search::ledger::ChargeKind;
 use crate::coreclass::CoreVerdict;
+use crate::nng_rpc::{self, NngIo};
 
 /// Connection and I/O deadlines for a catalog client.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

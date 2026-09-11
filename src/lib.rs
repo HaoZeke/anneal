@@ -81,15 +81,9 @@ pub mod catalog_policy;
 /// Versioned cooperative catalog protocol.
 #[cfg(feature = "bank-rpc")]
 pub mod catalog_rpc;
-/// nng carrier for Cap'n catalog and bank sockets.
-#[cfg(feature = "bank-rpc")]
-pub mod nng_rpc;
 /// nng pub/sub census bus between the replicas of one cooperative run.
 #[cfg(feature = "bank-rpc")]
 pub mod census_bus;
-/// nng REQ/REP for [`MinimumHistory`] observe / mark_accepted.
-#[cfg(feature = "history-nng")]
-pub mod history_nng;
 /// Versioned objective bridge compatibility descriptors.
 pub mod compatibility;
 /// Collective variables from the spectrum of the visited-basin graph.
@@ -118,6 +112,7 @@ pub mod diversity;
 /// than by energy.
 pub mod dos;
 /// Error variants returned by `anneal-core`.
+pub mod env;
 pub mod error;
 /// Parallel-tempering exchange operator for multi-temperature ensembles.
 pub mod exchange;
@@ -142,6 +137,9 @@ pub mod graphkey;
 pub mod hessian_fit;
 /// Per-epoch run history returned by `run_rs`.
 pub mod history;
+/// nng REQ/REP for [`MinimumHistory`] observe / mark_accepted.
+#[cfg(feature = "history-nng")]
+pub mod history_nng;
 /// Hamiltonian Monte Carlo inside SA (Method B Phase 1).
 pub mod hmc;
 /// Thomson covering of \(S^{d-1}\).
@@ -180,8 +178,13 @@ pub mod nd_hybrid;
 pub mod neigh;
 /// Incremental neighbour table shared across the hop.
 pub mod neighbors;
+/// nng carrier for Cap'n catalog and bank sockets.
+#[cfg(feature = "bank-rpc")]
+pub mod nng_rpc;
 /// Noise-aware acceptance (Ball, Branke & Meisel 2018 sequential OSA rule).
 pub mod noise_accept;
+/// Packing mutates: twin a dense plane, or close orbits on a new basin.
+pub mod packing;
 /// The pure-Rust SA driver loop.
 /// Multi-step paths between minima, where one hop cannot cross.
 pub mod path;
