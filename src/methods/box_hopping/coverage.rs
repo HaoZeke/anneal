@@ -6,7 +6,7 @@ use eindir_core::Bounds;
 use ndarray::{Array1, ArrayView1};
 use rand::Rng;
 
-use crate::bias::{BasinBias, Bias, Fingerprint};
+use crate::bias::{BasinBias, BasinMetric, Bias, EuclideanMetric, Fingerprint};
 use crate::methods::ensemble::HistoryMode;
 use crate::methods::minima_hopping::EscapeFeedback;
 use crate::shared_bias::SharedDeposits;
@@ -286,10 +286,10 @@ impl Coverage {
         };
         // Overlapping regions can select different IDs without a departure.
         // Require the launch to lie outside the actual return-region ball.
-        if self.coordinates.distance(launch, index.centre(region)) <= index.merge_radius() {
+        if EuclideanMetric.distance(launch, index.centre(region)) <= index.merge_radius() {
             return;
         }
-        let local_visits = index.visits(region) as u64;
+        let local_visits = index.visits(region);
         let peer_visits = self.foreign_wells[replica]
             .get(region)
             .map_or(0, |well| well.visits);
