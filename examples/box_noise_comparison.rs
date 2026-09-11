@@ -522,6 +522,41 @@ mod controller_tests {
     use super::*;
 
     #[test]
+    fn portfolio_peer_control_keeps_the_independent_controller_starts_and_work() {
+        let baseline = values_controller_records(Landscape::Rastrigin, 2, 257, 13);
+        let coverage = BoxCoverageConfig {
+            radius: 0.4,
+            height: 0.0,
+            ..BoxCoverageConfig::default()
+        };
+        let peer = portfolio_peer_record(Landscape::Rastrigin, 2, 257, 13, &coverage);
+        for field in [
+            "initial_positions", "replica_seeds", "replica_budgets", "budget",
+            "best_position", "best_value", "n_evals", "n_grads",
+        ] {
+            assert_eq!(peer[field], baseline[1][field], "field {field}");
+        }
+        assert_eq!(peer["coverage_published_samples"], 0);
+    }
+
+    #[test]
+    fn portfolio_peer_record_reports_actual_scalar_work_and_delivery() {
+        let coverage = BoxCoverageConfig {
+            radius: 0.4,
+            ..BoxCoverageConfig::default()
+        };
+        let peer = portfolio_peer_record(Landscape::ConditionedQuadratic, 2, 257, 13, &coverage);
+        assert_eq!(peer["arm"], "portfolio_shared");
+        assert_eq!(peer["controller"], "portfolio");
+        assert_eq!(peer["transformation"], "shifted-householder");
+        assert_eq!(peer["n_evals"], 257);
+        assert_eq!(peer["observed_calls"], 257);
+        assert_eq!(peer["n_grads"], 0);
+        assert_eq!(peer["best_value"], peer["verified_value"]);
+        assert!(peer["coverage_applied_foreign_samples"].as_u64().unwrap() > 0);
+    }
+
+    #[test]
     fn controller_surfaces_have_noncentral_optima() {
         for landscape in [Landscape::Rastrigin, Landscape::ConditionedQuadratic] {
             let surface = ControllerSurface::new(landscape, 8);
