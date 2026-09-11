@@ -302,7 +302,9 @@ fn run_native<'py>(
         ));
     }
     if low_shape[0] == 0 {
-        return Err(PyValueError::new_err("bounds must have at least one dimension"));
+        return Err(PyValueError::new_err(
+            "bounds must have at least one dimension",
+        ));
     }
     let finite_bounds = arrays.binary(
         "logical_and",
@@ -317,7 +319,9 @@ fn run_native<'py>(
     // Domain validation reads one reduction scalar before drawing or evaluating
     // points. Bound arrays and all per-transition decisions stay on the device.
     if !arrays.unary("all", &valid_bounds)?.is_truthy()? {
-        return Err(PyValueError::new_err("bounds must be finite with low <= high"));
+        return Err(PyValueError::new_err(
+            "bounds must be finite with low <= high",
+        ));
     }
     let batched = n_chains.is_some();
     let shape = if batched {
@@ -340,7 +344,10 @@ fn run_native<'py>(
                     "start must have the same shape as low and high",
                 ));
             }
-            if !arrays.unary("all", &arrays.unary("isfinite", &start)?)?.is_truthy()? {
+            if !arrays
+                .unary("all", &arrays.unary("isfinite", &start)?)?
+                .is_truthy()?
+            {
                 return Err(PyValueError::new_err("start coordinates must be finite"));
             }
             start
