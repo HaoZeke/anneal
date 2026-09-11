@@ -55,8 +55,8 @@ have interchangeable communication configurations.
 | Path | Information exchanged | Consumer and direct effect |
 |------+-----------------------+----------------------------|
 | =methods::ensemble::run_ensemble= | Exact-history reports, descriptor visit deltas, optional well tables and occupied structures | History feedback and local bias updates; optional two-choice restart constructs a fresh start |
-| =box_ensemble_optimize= | Evaluated-region descriptor/count events; optional certified minimum reports | Coverage changes acceptance and supplies uncertified quench-return feedback; minimum reports supply authoritative escape feedback; local proposals and gradient polish generate coordinates |
-| =box_values_ensemble_optimize= | Same coverage stream; optional minimum reports with a finite-difference certificate | Coverage changes acceptance and supplies uncertified quench-return feedback; local kick and pattern search generate coordinates without a gradient |
+| =box_ensemble_optimize= | Evaluated-region descriptor/count events, bounded paid-sample descriptors; optional certified minimum reports | Nearby samples repel Gaussian/Langevin proposals; coverage changes acceptance and escape scale; gradient polish uses the raw objective |
+| =box_values_ensemble_optimize= | Same coverage and sample streams; optional finite-difference minimum reports | Nearby samples repel kicks; coverage changes acceptance and escape scale; pattern search uses raw values without a gradient |
 | =CensusBus= live-minimum messages | Replica, hop count, energy, Cartesian coordinates | Nearby-peer count, packing references and optionally remote bias deposits; no direct coordinate adoption |
 | Census-bus well messages | Descriptor centres and accumulated well depths | A =MergeBias= checkpoint action updates local well depths |
 | Catalog coordinator | Validated candidates, policy state, population plans and work records | Hearing, population and other boundary policies can construct or adopt coordinates |
@@ -167,6 +167,46 @@ Imported regions can occur in multiple chains, so those counts must not be
 summed as a unique ensemble census. =result.shared_deposits= is the applied
 foreign coverage count. The current box coverage exchange is in-process;
 the NNG history transport below carries minimum reports, not this stream.
+
+** Nearby sampled regions repel proposals directly
+
+Paid initial local-search launches, terminal escape launches and retained
+boundaries supply an additional geometric sample stream. A launch remains
+useful when different excursions quench to the same point. These samples
+need no certificate and do not add coverage visits or objective callbacks.
+Each producer and receiving cloud holds at most 32 samples per producer;
+consecutive duplicates need no transmission. Slow readers can miss old
+samples in this bounded stream, but sample retention does not discard the
+separate visit deltas. Received samples retain their producer and are never
+republished. The stream uses the same in-process exchange component, not
+the minimum-report NNG transport.
+
+A Gaussian candidate or Langevin position update within =coverage.radius=
+of a held peer sample receives a radial displacement away from its nearest
+sample. The normalized free-coordinate metric supplies both the direction
+and radius. The displacement closes the separation deficit, multiplied by
+=min(peer_weight, 1)=, and is clipped to the box. It is retained only when
+the nearest distance across the held peer cloud increases. A coincident
+candidate uses its proposal direction, or an independent random direction
+when that is zero. Distant samples do not alter the proposal. Private
+coverage, zero height, zero peer weight and zero incoming allowance disable
+this correction; they do not disable the underlying escape mechanism.
+
+Langevin applies this correction before the raw gradient and objective
+callbacks, keeping its cached force consistent with the evaluated point.
+Colored auxiliary state stays with the chain. Local polishing uses the
+unmodified objective and gradient, and the incumbent uses raw evaluated
+values even for rejected moves. This is optimization steering, not an
+equilibrium-sampling or physical-time guarantee. Box normalization is not
+a substitute for an atomic descriptor pullback or a manifold retraction.
+
+The coverage result reports =published_samples=, =applied_foreign_samples=,
+=sample_overlaps=, =repelled_proposals= and =constrained_repulsions=.
+The last two sum to =sample_overlaps=. Langevin can correct several
+positions within one hop, so these are proposal counts, not hop counts.
+Python forwards the fields with a =coverage_= prefix. The Rust comparison
+example emits the same counters; private/shared outcomes measure whether
+the directional correction helps the search.
 
 ** Coverage arrivals inform escape without minimum identity
 
