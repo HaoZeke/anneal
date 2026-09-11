@@ -28,12 +28,19 @@ impl Objective<f64> for Rastrigin {
     fn eval(&self, x: ArrayView1<f64>) -> f64 {
         self.evaluations.fetch_add(1, Ordering::Relaxed);
         assert_eq!(x.len(), 8);
-        assert!(x.iter().all(|x| x.is_finite() && (-5.12..=5.12).contains(x)));
+        assert!(
+            x.iter()
+                .all(|x| x.is_finite() && (-5.12..=5.12).contains(x))
+        );
         Self::value(x)
     }
 
-    fn dim(&self) -> usize { 8 }
-    fn bounds(&self) -> &Bounds<f64> { &self.bounds }
+    fn dim(&self) -> usize {
+        8
+    }
+    fn bounds(&self) -> &Bounds<f64> {
+        &self.bounds
+    }
 }
 
 impl Gradient<f64> for Rastrigin {
@@ -42,7 +49,9 @@ impl Gradient<f64> for Rastrigin {
         x.mapv(|x| 2.0 * x + 10.0 * std::f64::consts::TAU * (std::f64::consts::TAU * x).sin())
     }
 
-    fn dim(&self) -> usize { 8 }
+    fn dim(&self) -> usize {
+        8
+    }
 }
 
 fn excursion_contract(noise: GleNoise) {
@@ -59,14 +68,28 @@ fn excursion_contract(noise: GleNoise) {
             replicas: 4,
             budget: 8000,
             history: HistoryMode::None,
-            escape: BoxEscape::Langevin(GleEscapeConfig { noise, ..GleEscapeConfig::default() }),
+            escape: BoxEscape::Langevin(GleEscapeConfig {
+                noise,
+                ..GleEscapeConfig::default()
+            }),
             ..BoxEnsembleConfig::default()
         };
-        let coverage = BoxCoverageConfig { shared: false, ..BoxCoverageConfig::default() };
+        let coverage = BoxCoverageConfig {
+            shared: false,
+            ..BoxCoverageConfig::default()
+        };
         let result = box_ensemble_optimize_with_coverage(
-            &objective, &objective, seed, Some(start.view()), &config, &coverage,
+            &objective,
+            &objective,
+            seed,
+            Some(start.view()),
+            &config,
+            &coverage,
         );
-        assert_eq!(result.n_evals, objective.evaluations.load(Ordering::Relaxed));
+        assert_eq!(
+            result.n_evals,
+            objective.evaluations.load(Ordering::Relaxed)
+        );
         assert_eq!(result.n_grads, objective.gradients.load(Ordering::Relaxed));
         assert!(result.n_evals + result.n_grads <= config.budget);
         assert_eq!(result.history_observations, 0);
@@ -74,7 +97,10 @@ fn excursion_contract(noise: GleNoise) {
         sum += result.best_val;
     }
     let mean = sum / 4.0;
-    assert!(mean <= 20.0, "Langevin exploration freezes on relaxed endpoints: mean {mean}");
+    assert!(
+        mean <= 20.0,
+        "Langevin exploration freezes on relaxed endpoints: mean {mean}"
+    );
 }
 
 #[test]
