@@ -1860,7 +1860,12 @@ where
                 CheckpointAction::DepositRemote { states } => {
                     for remote in &states {
                         if remote.len() == x.len() {
-                            bias.deposit(bias.cv(remote.view()).view(), cfg.temperature);
+                            bias.deposit_scaled_n(
+                                bias.cv(remote.view()).view(),
+                                cfg.temperature,
+                                1.0,
+                                1,
+                            );
                         }
                     }
                     None
@@ -3792,7 +3797,7 @@ where
                 .saturating_sub(1)
                 .min(cfg.shared_deposits as u64);
             for _ in 0..foreign {
-                bias.deposit(cv.view(), temperature);
+                bias.deposit_scaled_n(cv.view(), temperature, 1.0, 1);
                 shared_deposits += 1;
             }
             *seen = report.visits;
