@@ -574,7 +574,11 @@ impl<O: Objective<f64>> Objective<f64> for BudgetedObjective<'_, O> {
         // folds only out-of-box proposals, keeping the archive feasible.
         let bounds = self.inner.bounds();
         let reflected;
-        let x_feas = if bounds.contains(x) {
+        let strictly_feasible = x.len() == bounds.dims
+            && x.iter()
+                .enumerate()
+                .all(|(i, &value)| value >= bounds.low[i] && value <= bounds.high[i]);
+        let x_feas = if strictly_feasible {
             x
         } else {
             reflected = crate::movekernel::reflect_into_box(x, bounds);
