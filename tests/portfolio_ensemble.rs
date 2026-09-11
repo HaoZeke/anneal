@@ -10,6 +10,8 @@ use anneal_core::methods::portfolio::{
 };
 use eindir_core::{Bounds, Gradient, Objective};
 use ndarray::{Array1, ArrayView1};
+use rand::rngs::StdRng;
+use rand::{Rng, SeedableRng};
 
 struct Loss {
     bounds: Bounds<f64>,
@@ -156,6 +158,61 @@ fn private_replicas_preserve_independent_portfolio_traces() {
     assert_eq!(result.n_grads, 0);
     assert_eq!(result.coverage.published_samples, 0);
     assert!(result.replicas.iter().all(|r| !r.arm_stats.is_empty()));
+}
+
+#[test]
+fn seeded_private_replicas_match_the_convenience_portfolio_starts() {
+    use anneal_core::methods::box_hopping::ensemble_hop_optimize;
+    use anneal_core::methods::ensemble::HistoryMode;
+    use anneal_core::methods::minima_hopping::HistoryMembership;
+
+    let initial = Array1::from_elem(8, 0.375);
+    let mut expected = Vec::new();
+    for replica in 0..4 {
+        let seed = 13 ^ (replica as u64).wrapping_mul(0x9E37_79B9);
+        let mut rng = StdRng::seed_from_u64(seed);
+        let start = if replica == 0 {
+            initial.clone()
+        } else {
+            Array1::from_shape_fn(8, |_| -2.0 + 4.0 * rng.random::<f64>())
+        };
+        let loss = Loss::new();
+        ensemble_hop_optimize::<_, NoGradient>(
+            &loss, None, seed, Some(start.view()), 500, 1,
+            HistoryMode::None, HistoryMembership::Accepted,
+        );
+        expected.extend(loss.trajectories());
+    }
+    expected.sort();
+    let loss = Loss::new();
+    let mut config = PortfolioEnsembleConfig {
+        budget: 2_000,
+        ..PortfolioEnsembleConfig::default()
+    };
+    config.coverage.shared = false;
+    portfolio_ensemble_optimize::<_, NoGradient>(
+        &loss, None, 13, Some(initial.view()), &config,
+    );
+    assert_eq!(loss.trajectories(), expected);
+}
+
+#[test]
+fn zero_height_sharing_preserves_private_controller_traces() {
+    let private = Loss::new();
+    let mut config = PortfolioEnsembleConfig {
+        budget: 2_000,
+        ..PortfolioEnsembleConfig::default()
+    };
+    config.coverage.shared = false;
+    let expected = portfolio_ensemble_optimize::<_, NoGradient>(&private, None, 19, None, &config);
+    let disabled = Loss::new();
+    config.coverage.shared = true;
+    config.coverage.height = 0.0;
+    let result = portfolio_ensemble_optimize::<_, NoGradient>(&disabled, None, 19, None, &config);
+    assert_eq!(disabled.trajectories(), private.trajectories());
+    assert_eq!(result.best_val, expected.best_val);
+    assert_eq!(result.coverage.published_samples, 0);
+    assert_eq!(result.coverage.repelled_proposals, 0);
 }
 
 fn check_shared(analytic: bool) -> Vec<Vec<Vec<u64>>> {
