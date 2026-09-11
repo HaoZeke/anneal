@@ -31,7 +31,10 @@ impl Objective<f64> for Quadratic {
     fn eval(&self, x: ArrayView1<f64>) -> f64 {
         self.evaluations.fetch_add(1, Ordering::Relaxed);
         assert_eq!(x.len(), 8);
-        assert!(x.iter().all(|v| v.is_finite() && (-5.12..=5.12).contains(v)));
+        assert!(
+            x.iter()
+                .all(|v| v.is_finite() && (-5.12..=5.12).contains(v))
+        );
         x.iter()
             .enumerate()
             .map(|(axis, value)| 0.5 * Self::curvature(axis) * value * value)
@@ -83,7 +86,10 @@ fn check_coverage(gradient: bool, history: HistoryMode) {
     assert_eq!((result.n_evals, result.n_grads), actual);
     assert!(actual.0 + actual.1 <= config.budget);
     assert!(result.hops >= config.replicas);
-    assert_eq!(result.history_observations, 0, "no quench reaches the certificate");
+    assert_eq!(
+        result.history_observations, 0,
+        "no quench reaches the certificate"
+    );
     assert_eq!(result.history_minima, 0);
     if matches!(history, HistoryMode::Shared) {
         assert!(
