@@ -3427,6 +3427,16 @@ where
         }
     }
 
+    // Scalar refinement needs its full probe cost even during arm warmup.
+    // Exploration slices share the quarter-budget tail and cannot consume it.
+    let scalar_reserve = if policy == PortfolioPolicy::Auto && grad.is_none() {
+        (budget / 4)
+            .max(dim.saturating_mul(2).saturating_add(2))
+            .min(budget)
+    } else {
+        0
+    };
+
     // Auto MultimodalNoGrad: short DE/GSA front-load (values-only problems
     // need global structure before Thompson). Kept small so restarts still fire.
     if policy == PortfolioPolicy::Auto
@@ -3446,10 +3456,11 @@ where
         let per = (front_budget / preferred.len()).max(slice);
         let mut seed_f = seed ^ 0xBEEF_u64;
         for arm in preferred {
-            if !arms.contains(&arm) || ledger.remaining() < 8 {
+            let available = ledger.remaining().saturating_sub(scalar_reserve);
+            if !arms.contains(&arm) || available < 8 {
                 continue;
             }
-            let slice_use = per.min(ledger.remaining());
+            let slice_use = per.min(available);
             if slice_use < 4 {
                 break;
             }
@@ -3495,10 +3506,11 @@ where
             (ArmKind::Gsa, gsa_share),
             (ArmKind::De, de_share),
         ] {
-            if !arms.contains(&arm) || ledger.remaining() < 8 || share < 8 {
+            let available = ledger.remaining().saturating_sub(scalar_reserve);
+            if !arms.contains(&arm) || available < 8 || share < 8 {
                 continue;
             }
-            let slice_use = share.min(ledger.remaining());
+            let slice_use = share.min(available);
             let ceiling = ledger.used_get() + slice_use;
             ledger.cap_set(ceiling.min(budget));
             seed_f = seed_f.wrapping_add(1);
@@ -3686,7 +3698,10 @@ where
             run_low_dimensional_polish(&budgeted_obj, grad, &ledger, &plan, seed, budget);
             continue;
         }
-        if endgame_now || remaining < slice {
+        if endgame_now
+            || remaining < slice
+            || (scalar_reserve > 0 && remaining < scalar_reserve.saturating_add(4))
+        {
             // D5 endgame: the tail is pure polish (explore-first is
             // optimal). Cycle
             // quasi-Newton polish with shrinking trust-region poll
@@ -3844,7 +3859,7 @@ where
             slice
         }
         .max(4)
-        .min(ledger.remaining().max(4));
+        .min(ledger.remaining().saturating_sub(scalar_reserve).max(4));
         let used_before = ledger.used_get();
         let ceiling = used_before + arm_slice;
         ledger.cap_set(ceiling.min(budget));
