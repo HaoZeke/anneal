@@ -95,6 +95,27 @@ Replica count splits one aggregate objective-plus-gradient allowance; it does
 not restart the controller at every exchange. =coverage.shared=false= is the
 communication-off control with the same starts, seeds and per-replica budgets.
 
+Rust scalar clients use =portfolio_values_ensemble_optimize= with an
+=eindir_core::Objective<f64>= implementation. No gradient trait or dummy
+gradient type is required:
+
+#+begin_src rust
+use anneal_core::{PortfolioEnsembleConfig, portfolio_values_ensemble_optimize};
+
+// objective implements only eindir_core::Objective<f64> on a positive-width box.
+let config = PortfolioEnsembleConfig {
+    budget: 2003,
+    replicas: 4,
+    ..PortfolioEnsembleConfig::default()
+};
+let result = portfolio_values_ensemble_optimize(&objective, 17, None, &config);
+assert_eq!(result.n_grads, 0);
+assert!(result.n_evals <= config.budget);
+#+end_src
+
+The =portfolio_values_api= regression supplies a concrete objective-only
+client and checks actual calls for both one and four replicas.
+
 The Python =global_optimize= wrapper selects this driver when =replicas > 1=.
 For example, a parameter loss can expose only values:
 
