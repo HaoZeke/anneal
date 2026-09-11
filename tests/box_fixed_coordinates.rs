@@ -1,4 +1,5 @@
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use anneal_core::methods::box_hopping::ensemble_hop_optimize;
 use anneal_core::methods::ensemble::HistoryMode;
@@ -130,4 +131,31 @@ fn fixed_axes_preserve_the_free_coordinate_portfolio_trace() {
     }
     assert_eq!(expanded.charged, reduced.charged);
     assert_eq!(expanded.best_val, reduced.best_val);
+}
+
+#[test]
+fn all_fixed_values_box_rejects_nonfinite_bounds_before_evaluation() {
+    struct InvalidBox {
+        bounds: Bounds<f64>,
+        calls: AtomicUsize,
+    }
+    impl Objective<f64> for InvalidBox {
+        fn dim(&self) -> usize { 1 }
+        fn bounds(&self) -> &Bounds<f64> { &self.bounds }
+        fn eval(&self, _x: ArrayView1<f64>) -> f64 {
+            self.calls.fetch_add(1, Ordering::Relaxed);
+            0.0
+        }
+    }
+    let objective = InvalidBox {
+        bounds: Bounds::new(array![f64::INFINITY], array![f64::INFINITY], 0.0),
+        calls: AtomicUsize::new(0),
+    };
+    let result = std::panic::catch_unwind(|| {
+        ensemble_hop_optimize::<_, LoggedBox>(
+            &objective, None, 0, None, 10, 1, HistoryMode::None, HistoryMembership::Accepted,
+        )
+    });
+    assert!(result.is_err(), "nonfinite box bounds must be rejected");
+    assert_eq!(objective.calls.load(Ordering::Relaxed), 0);
 }
