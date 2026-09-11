@@ -172,9 +172,13 @@ the NNG history transport below carries minimum reports, not this stream.
 
 A scalar loss over a parameter vector needs no objective Jacobian or forces.
 The Rust =box_values_ensemble_optimize_with_coverage= accepts only the
-=Objective= capability; its coordinate differences and pattern search do not
-call a gradient provider. Minimum certificates are a separate optional
-consumer, not a prerequisite for sharing evaluated regions.
+=Objective= capability. Its local refinement uses the same Rust budgeted
+finite-difference quasi-Newton implementation as the values-only portfolio,
+without calling a gradient provider. Every stencil and line-search probe
+counts against the objective allowance and remains eligible for the raw
+incumbent. Fixed coordinates need no stencil probes; incomplete or nonfinite
+stencils do not certify stationarity. Minimum certificates are a separate
+optional consumer, not a prerequisite for sharing evaluated regions.
 
 The common Python entries expose this distinction directly. For a supplied
 scalar =loss=, parameter vector =x0= and finite =bounds=:
@@ -328,9 +332,9 @@ Three different questions require three different checks.
    certificate. The box paths use a history tolerance of =1e-3=; the
    values-only path pays for a base objective and a distinct feasible
    one-sided probe on each nonfixed coordinate when a history consumer is
-   enabled. Coverage-only pattern-search hops neither reserve nor spend
+   enabled. Coverage-only scalar-refinement hops neither reserve nor spend
    that certificate work. An initial allowance too small for a funded
-   pattern sweep retains its terminal finite-difference fallback; every
+   local quench retains its terminal finite-difference fallback; every
    measured probe remains a raw-incumbent candidate. Both box paths project
    certificates onto feasible bound directions. These are numerical
    admission rules, not a proof of global optimality or a positive-definite
@@ -669,9 +673,10 @@ in its manifest.
 
 The atomic =EnsembleProblem::callbacks_per_objective= distinguishes a combined
 analytic energy/gradient call from two Python callbacks. The box-gradient
-runner reports objective and gradient work separately. Values-only pattern
-search and finite-difference certification consume objective calls; the
-absence of a user gradient does not make certification free.
+runner reports objective and gradient work separately. Values-only local
+refinement and finite-difference certification consume objective calls;
+the absence of a user gradient does not make those probes free. Numerical
+derivative estimates do not increment the count of user gradient callbacks.
 
 The [[file:../../../src/cooperative_search/ledger.rs][cooperative ledger]]
 charges quench work, fresh validation, retries, auxiliary potential calls,
