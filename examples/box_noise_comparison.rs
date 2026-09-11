@@ -4,8 +4,9 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Instant;
 
 use anneal_core::methods::box_hopping::{
-    BoxCoverageConfig, BoxEnsembleConfig, BoxEscape, GleEscapeConfig,
+    BoxCoverageConfig, BoxEnsembleConfig, BoxEscape, EnsembleHopResult, GleEscapeConfig,
     box_ensemble_optimize_with_coverage, box_values_ensemble_optimize_with_coverage,
+    ensemble_hop_optimize,
 };
 use anneal_core::methods::ensemble::HistoryMode;
 use anneal_core::methods::gle_langevin::GleNoise;
@@ -88,6 +89,157 @@ impl Gradient<f64> for Surface {
     }
 }
 
+/// Values-only diagnostic with an interior optimum distinct from the box centre.
+struct ControllerSurface {
+    surface: Surface,
+    optimum: Array1<f64>,
+}
+
+impl ControllerSurface {
+    fn new(landscape: Landscape, dim: usize) -> Self {
+        Self {
+            surface: Surface {
+                landscape,
+                bounds: Bounds::new(
+                    Array1::from_elem(dim, -5.12),
+                    Array1::from_elem(dim, 5.12),
+                    0.0,
+                ),
+                evaluations: AtomicUsize::new(0),
+                gradients: AtomicUsize::new(0),
+            },
+            optimum: Array1::from_shape_fn(dim, |j| {
+                0.7 + 0.3 * ((j + 1) as f64 * std::f64::consts::SQRT_2).sin()
+            }),
+        }
+    }
+
+    fn value(&self, x: ArrayView1<f64>) -> f64 {
+        let mut shifted = &x - &self.optimum;
+        if matches!(self.surface.landscape, Landscape::ConditionedQuadratic) {
+            let twice_mean = 2.0 * shifted.sum() / shifted.len() as f64;
+            shifted.mapv_inplace(|v| v - twice_mean);
+        }
+        self.surface.value(shifted.view())
+    }
+}
+
+impl Objective<f64> for ControllerSurface {
+    fn eval(&self, x: ArrayView1<f64>) -> f64 {
+        self.surface.evaluations.fetch_add(1, Ordering::Relaxed);
+        assert_eq!(x.len(), self.surface.bounds.dims);
+        assert!(x.iter().all(|v| v.is_finite() && (-5.12..=5.12).contains(v)));
+        self.value(x)
+    }
+
+    fn dim(&self) -> usize {
+        self.surface.bounds.dims
+    }
+
+    fn bounds(&self) -> &Bounds<f64> {
+        &self.surface.bounds
+    }
+}
+
+fn values_controller_records(
+    landscape: Landscape,
+    dim: usize,
+    budget: usize,
+    seed: u64,
+) -> Vec<serde_json::Value> {
+    assert!(dim > 0 && budget > 0);
+    let mut start_rng = StdRng::seed_from_u64(seed ^ 0x5354_4152_545f_424f);
+    let start = Array1::from_shape_fn(dim, |_| -5.12 + 10.24 * start_rng.random::<f64>());
+    let mut records = Vec::new();
+    for (arm, portfolio, replicas, shared) in [
+        ("portfolio_single", true, 1, false),
+        ("portfolio_independent", true, 4, false),
+        ("hopping_single", false, 1, false),
+        ("hopping_independent", false, 4, false),
+        ("hopping_shared", false, 4, true),
+    ] {
+        let surface = ControllerSurface::new(landscape, dim);
+        let config = BoxEnsembleConfig {
+            replicas,
+            budget,
+            history: HistoryMode::None,
+            ..BoxEnsembleConfig::default()
+        };
+        let coverage = BoxCoverageConfig {
+            shared,
+            ..BoxCoverageConfig::default()
+        };
+        let budgets = config.budgets();
+        let replica_seeds: Vec<_> = (0..replicas)
+            .map(|index| seed ^ (index as u64).wrapping_mul(0x9E37_79B9))
+            .collect();
+        let starts: Vec<_> = replica_seeds.iter().enumerate().map(|(index, &replica_seed)| {
+            if index == 0 {
+                start.clone()
+            } else {
+                let mut rng = StdRng::seed_from_u64(replica_seed);
+                Array1::from_shape_fn(dim, |_| -5.12 + 10.24 * rng.random::<f64>())
+            }
+        }).collect();
+        let began = Instant::now();
+        let results: Vec<EnsembleHopResult> = if portfolio {
+            (0..replicas).filter(|&index| budgets[index] > 0).map(|index| {
+                ensemble_hop_optimize::<_, Surface>(
+                    &surface,
+                    None,
+                    replica_seeds[index],
+                    Some(starts[index].view()),
+                    budgets[index],
+                    1,
+                    HistoryMode::None,
+                    config.membership,
+                )
+            }).collect()
+        } else {
+            vec![box_values_ensemble_optimize_with_coverage(
+                &surface, seed, Some(start.view()), &config, &coverage,
+            ).into()]
+        };
+        let elapsed = began.elapsed().as_secs_f64();
+        let n_evals: usize = results.iter().map(|out| out.n_evals).sum();
+        let n_grads: usize = results.iter().map(|out| out.n_grads).sum();
+        let observed_calls = surface.surface.evaluations.load(Ordering::Relaxed);
+        assert_eq!(n_evals, observed_calls);
+        assert_eq!(n_grads, 0);
+        assert_eq!(surface.surface.gradients.load(Ordering::Relaxed), 0);
+        assert!(n_evals > 0 && n_evals <= budget);
+        let best = results.iter().min_by(|a, b| a.best_val.total_cmp(&b.best_val)).unwrap();
+        assert!(best.best_val.is_finite());
+        assert!(best.best_pos.iter().all(|v| v.is_finite() && (-5.12..=5.12).contains(v)));
+        let verified_value = surface.value(best.best_pos.view());
+        assert_eq!(best.best_val, verified_value);
+        records.push(json!({
+            "record": "result", "comparison": "values-controllers", "arm": arm,
+            "controller": if portfolio { "portfolio" } else { "pattern-search-hopping" },
+            "landscape": format!("{landscape:?}"), "dimension": dim, "seed": seed,
+            "transformation": if matches!(landscape, Landscape::ConditionedQuadratic) {
+                "shifted-householder"
+            } else { "shifted" },
+            "optimum": surface.optimum.to_vec(),
+            "budget": budget, "replicas": replicas, "replica_budgets": budgets,
+            "replica_seeds": replica_seeds,
+            "initial_positions": starts.iter().map(|x| x.to_vec()).collect::<Vec<_>>(),
+            "initial_values": starts.iter().map(|x| surface.value(x.view())).collect::<Vec<_>>(),
+            "n_evals": n_evals, "observed_calls": observed_calls, "n_grads": n_grads,
+            "best_position": best.best_pos.to_vec(), "best_value": best.best_val,
+            "verified_value": verified_value, "elapsed_seconds": elapsed,
+            "history": "none", "coverage": if shared { "shared" } else { "private" },
+            "coverage_radius": coverage.radius, "coverage_height": coverage.height,
+            "hops": results.iter().map(|out| out.hops).sum::<usize>(),
+            "coverage_published_samples": results.iter().map(|out| out.coverage.published_samples).sum::<u64>(),
+            "coverage_applied_foreign_samples": results.iter().map(|out| out.coverage.applied_foreign_samples).sum::<usize>(),
+            "coverage_sample_overlaps": results.iter().map(|out| out.coverage.sample_overlaps).sum::<usize>(),
+            "coverage_repelled_proposals": results.iter().map(|out| out.coverage.repelled_proposals).sum::<usize>(),
+        }));
+    }
+    records
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     let number = |index: usize, default: usize| {
@@ -111,7 +263,25 @@ fn main() {
             quench_controls(dim, budget, seeds);
             return;
         }
-        Some(_) => panic!("the optional control mode is coverage or quench"),
+        Some("controllers") => {
+            println!("{}", json!({
+                "record": "configuration", "comparison": "values-controllers",
+                "dimension": dim, "budget": budget, "seeds": seeds,
+                "objective_capability": "values", "execution": "serial",
+                "history": "none", "coverage_transport": "in-process",
+                "coverage_metric": "RMS-scaled-free-box-coordinates",
+                "version": env!("CARGO_PKG_VERSION"),
+            }));
+            for landscape in [Landscape::Rastrigin, Landscape::ConditionedQuadratic] {
+                for seed in 0..seeds as u64 {
+                    for record in values_controller_records(landscape, dim, budget, seed) {
+                        println!("{record}");
+                    }
+                }
+            }
+            return;
+        }
+        Some(_) => panic!("the optional control mode is coverage, quench or controllers"),
     };
     let mut coverage_settings = BoxCoverageConfig::default();
     if let Some(radius) = args.get(6) {
