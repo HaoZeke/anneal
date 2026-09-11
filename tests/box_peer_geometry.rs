@@ -51,7 +51,11 @@ fn run(flat: bool, shared: bool, radius: f64, height: f64) -> (BoxEnsembleResult
         ..BoxCoverageConfig::default()
     };
     let result = box_values_ensemble_optimize_with_coverage(
-        &objective, 7, Some(array![0.0].view()), &config, &coverage,
+        &objective,
+        7,
+        Some(array![0.0].view()),
+        &config,
+        &coverage,
     );
     assert_eq!(result.n_evals, objective.calls.load(Ordering::Relaxed));
     assert_eq!(result.n_evals, config.budget);
@@ -64,7 +68,9 @@ fn run(flat: bool, shared: bool, radius: f64, height: f64) -> (BoxEnsembleResult
 }
 
 fn count(statistics: &Value, field: &str) -> u64 {
-    statistics[field].as_u64().unwrap_or_else(|| panic!("missing peer geometry counter: {field}"))
+    statistics[field]
+        .as_u64()
+        .unwrap_or_else(|| panic!("missing peer geometry counter: {field}"))
 }
 
 #[test]
@@ -84,7 +90,10 @@ fn occupied_peer_overlap_is_distinguished_from_proposal_overlap() {
 fn whole_box_interaction_counts_both_geometries() {
     let (result, statistics) = run(true, true, 2.0, 0.1);
     assert_eq!(count(&statistics, "sample_peer_checks"), result.hops as u64);
-    assert_eq!(count(&statistics, "sample_anchor_overlaps"), result.hops as u64);
+    assert_eq!(
+        count(&statistics, "sample_anchor_overlaps"),
+        result.hops as u64
+    );
     assert_eq!(count(&statistics, "sample_anchor_only_overlaps"), 0);
     assert_eq!(result.coverage.sample_overlaps, result.hops);
 }
