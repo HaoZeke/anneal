@@ -79,7 +79,13 @@ fn coverage_shares_without_a_minimum_ledger_and_counts_only_search_boundaries() 
         assert_eq!(result.coverage.published_visits, result.coverage.local_observations as u64);
         assert!(result.coverage.applied_foreign_visits > 0);
         assert!(result.coverage.applied_foreign_visits <= result.coverage.local_observations * (config.replicas - 1));
-        assert!(result.coverage.local_observations < result.n_evals);
+        if gradient {
+            assert_eq!(result.coverage.local_observations, result.n_evals,
+                "a flat gradient quench evaluates only its search boundary");
+        } else {
+            assert!(result.coverage.local_observations < result.n_evals,
+                "pattern-search and certificate probes are not extra coverage visits");
+        }
         assert_eq!(result.coverage.per_chain_regions.len(), config.replicas);
     }
 }
