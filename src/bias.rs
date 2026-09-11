@@ -578,10 +578,13 @@ impl BasinMetric for EuclideanMetric {
     }
 }
 
-/// Maps a state to a vector that compares equal for states in the same basin.
+/// Maps a state into descriptor space for coverage lookup and repulsion.
+///
+/// The descriptor, metric and radius define which observations share a region;
+/// descriptor proximity alone does not certify a common stationary minimum.
 pub trait Fingerprint: Send + Sync {
-    /// Descriptor of `x`. Two states in the same basin must map to vectors
-    /// within the bias's merge radius, and states in different basins must not.
+    /// Descriptor of `x`, respecting the declared state-space symmetries when
+    /// equivalent states are intended to share coverage.
     fn describe(&self, x: ArrayView1<f64>) -> Array1<f64>;
 }
 
@@ -776,7 +779,7 @@ impl Fingerprint for SortedPairs {
 
 impl<F: Fingerprint> BasinBias<F> {
     /// Requires `gamma > 1`, `w0 >= 0` and `merge_radius > 0`.
-    /// A zero height retains basin identity while leaving the energy unbiased.
+    /// A zero height retains the region index without the fixed-height penalty.
     pub fn new(fingerprint: F, merge_radius: f64, w0: f64, gamma: f64) -> Self {
         assert!(gamma > 1.0, "gamma must be > 1");
         assert!(w0.is_finite() && w0 >= 0.0, "w0 must be finite and >= 0");
@@ -991,8 +994,8 @@ impl<F: Fingerprint> BasinBias<F> {
 }
 
 impl<F: Fingerprint> Bias for BasinBias<F> {
-    /// The fingerprint itself is the collective variable: identity, not a
-    /// projection onto a chosen axis.
+    /// The complete fingerprint is the collective variable; its geometry
+    /// determines coverage lookup without proving minimum identity.
     fn cv(&self, x: ArrayView1<f64>) -> Array1<f64> {
         self.index.describe(x)
     }

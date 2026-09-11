@@ -59,8 +59,11 @@ history modes. It changes relaxation effort, not the certificate tolerance.
 The terminal trajectory point feeds the quench even when the trajectory
 visits a lower objective elsewhere. Independently, the result retains the
 best finite feasible objective evaluation, including trajectory points and
-quench trials. Only certified quenches reach minimum history. Thus search
-occupancy, certified basin visits and the returned incumbent are distinct.
+quench trials. Finite feasible initial and trial search boundaries supply
+coverage repulsion whether accepted, rejected or uncertified. Only certified
+quenches reach minimum history. Thus search occupancy, coverage, certified
+minimum visits and the returned incumbent are distinct. The
+[[file:../explanation/communication.org][communication contract]] describes the independent coverage configuration.
 
 The thermostat uses the same stepping implementation as standalone GLE.
 Its boundary rule is clipping in a Cartesian box, not a Manopt retraction.
@@ -72,7 +75,9 @@ the box option does not supply an atomic GLE escape by itself.
 For scalar-white noise, keep the same configuration and select
 =GleNoise::White { friction: 4.0 }= as the noise law. The comparison example
 =box_noise_comparison= runs Gaussian, scalar-white and colored proposals,
-each with private and shared in-process minimum histories. All replicas use
+each with private and shared in-process coverage. Its default comparison also
+switches the minimum ledger between private and shared; the =coverage= mode
+disables that ledger in both arms to isolate coverage delivery. All replicas use
 seeded uniform starts matched across controls, with an independent stream
 for the first replica's explicitly recorded position. Equal-coordinate starts
 can make initial line searches solve a separable objective without testing
@@ -81,12 +86,17 @@ nonzero values at the recorded starts.
 
 #+begin_src sh
 cargo run --locked --example box_noise_comparison -- 32 8000 4 16
+cargo run --locked --example box_noise_comparison -- 32 8000 4 16 coverage 0.05 0.1
 #+end_src
 
 The arguments are dimension, aggregate work budget, number of seeds and
-maximum Langevin steps. Each JSON result reports the objective and gradient
+maximum Langevin steps. The =coverage= mode additionally accepts radius and
+deposit height. Each JSON result reports the objective and gradient
 counts, best value, hop count, history observations/refusals, shared deposits,
-summed history operation seconds and elapsed seconds. Private history size
+coverage observations/publications/applied and capped foreign visits,
+per-chain coverage-region counts, summed history operation seconds and elapsed
+seconds. The configuration record names the comparison, coverage metric,
+radius, height, well-tempering and peer weight. Private history size
 is the largest replica-local table; shared size is one ensemble-wide table.
 Those sizes are not interchangeable coverage measurements. The example
 rejects =HISTORY_NNG= so its communication comparison cannot be mislabeled

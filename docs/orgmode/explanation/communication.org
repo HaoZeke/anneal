@@ -33,10 +33,11 @@ Minimum identity is a separate, optional statement. A basin-hopping worker
 can use certified quenches to distinguish a return to its own minimum from
 a minimum found by another worker. Requiring such a certificate for that
 statement does not justify requiring stationarity for every coverage deposit.
-The box entry points derive peer deposits from minimum reports, so their
-coverage sharing is restricted by certification; the atomic shared-deposit
-channel does not have that restriction. The entry-point table names those
-implementation differences explicitly.
+The box entry points record finite feasible initial and trial search
+boundaries, including rejected trials and unfinished quenches. Inner
+line-search evaluations do not each make another coverage deposit. Minimum
+reports do not duplicate those deposits. The atomic shared-deposit channel
+likewise does not require a minimum certificate.
 
 Imported visits change what a chain knows, not how much local exploration it
 has performed. The bias tracks total local-plus-imported deposits for its
@@ -54,8 +55,8 @@ have interchangeable communication configurations.
 | Path | Information exchanged | Consumer and direct effect |
 |------+-----------------------+----------------------------|
 | =methods::ensemble::run_ensemble= | Exact-history reports, descriptor visit deltas, optional well tables and occupied structures | History feedback and local bias updates; optional two-choice restart constructs a fresh start |
-| =box_ensemble_optimize= | Certified design points sent to =HistoryHook=; identity and visit counts returned | Escape feedback and capped visit-based bias deposits; local kick and gradient polish generate coordinates |
-| =box_values_ensemble_optimize= | Same history interface with a finite-difference certificate | Local kick and pattern search generate coordinates; history feedback and visit-based bias affect acceptance |
+| =box_ensemble_optimize= | Evaluated-region descriptor/count events; optional certified minimum reports | Coverage changes local acceptance penalties; minimum reports supply escape feedback; local proposals and gradient polish generate coordinates |
+| =box_values_ensemble_optimize= | Same coverage stream; optional minimum reports with a finite-difference certificate | Coverage changes local acceptance penalties; local kick and pattern search generate coordinates without a gradient |
 | =CensusBus= live-minimum messages | Replica, hop count, energy, Cartesian coordinates | Nearby-peer count, packing references and optionally remote bias deposits; no direct coordinate adoption |
 | Census-bus well messages | Descriptor centres and accumulated well depths | A =MergeBias= checkpoint action updates local well depths |
 | Catalog coordinator | Validated candidates, policy state, population plans and work records | Hearing, population and other boundary policies can construct or adopt coordinates |
@@ -67,6 +68,60 @@ values-only box path; one replica uses the portfolio and has no minimum-history
 table. Box replicas are stepped by the box runner's loops, not by the atomic
 runner's scoped threads. The atomic runner constructs an objective per thread,
 so an external potential handle need not be shared between replicas.
+
+** Configure box coverage independently
+
+=box_ensemble_optimize_with_coverage= and
+=box_values_ensemble_optimize_with_coverage= accept =BoxCoverageConfig= in
+addition to the ensemble configuration. Setting the minimum history to
+=HistoryMode::None= does not disable explicitly shared coverage:
+
+#+begin_src rust
+use anneal_core::methods::box_hopping::{
+    BoxCoverageConfig, BoxEnsembleConfig, box_ensemble_optimize_with_coverage,
+};
+use anneal_core::methods::ensemble::HistoryMode;
+
+let ensemble = BoxEnsembleConfig {
+    history: HistoryMode::None,
+    ..BoxEnsembleConfig::default()
+};
+let coverage = BoxCoverageConfig {
+    shared: true,
+    radius: 0.05,
+    ..BoxCoverageConfig::default()
+};
+// objective and gradient provide the callbacks; start is a feasible design.
+let result = box_ensemble_optimize_with_coverage(
+    &objective, &gradient, 7, Some(start.view()), &ensemble, &coverage,
+);
+assert_eq!(result.history_minima, 0);
+assert!(result.n_evals + result.n_grads <= ensemble.budget);
+#+end_src
+
+The box descriptor divides each free coordinate by its box width and scales
+by the inverse square root of the number of free coordinates. Its Euclidean
+distance is therefore the RMS normalized-coordinate distance. Fixed
+coordinates contribute zero. =coverage.radius= sets repulsion reach;
+=ensemble.identity_tol= sets the separate minimum witness tolerance.
+
+The coverage defaults are radius 0.05, initial height 0.1 in objective units,
+well-tempering factor 5 and peer weight 1. They are explicit search settings,
+not universally calibrated choices. Each chain applies peer deposits at a
+funded hop boundary and decides acceptance against the existing penalty;
+its own evaluated trial is recorded after that decision. The
+=shared_deposits= control caps imported visits per receiving region per
+boundary; excess visits are counted and discarded, not replayed. Zero
+disables incoming deposits. The convenience entry points enable sharing
+when their history mode is =Shared= and this cap is positive. Local coverage
+does not require a minimum ledger in any mode.
+
+=result.coverage= separates local observations, published visits, applied
+foreign visits, capped foreign visits and each chain's region count.
+Imported regions can occur in multiple chains, so those counts must not be
+summed as a unique ensemble census. =result.shared_deposits= is the applied
+foreign coverage count. The current box coverage exchange is in-process;
+the NNG history transport below carries minimum reports, not this stream.
 
 * Certification, identity and packing families
 
