@@ -25,7 +25,9 @@ use crate::bias::{BasinBias, Bias, Fingerprint};
 use crate::descriptor_space::DescriptorGeometry;
 use crate::methods::ensemble::HistoryMode;
 use crate::methods::gle_langevin::{GleNoise, LangevinStepper};
-use crate::methods::local_polish::{projected_gradient, projected_gradient_polish};
+use crate::methods::local_polish::{
+    LocalPolishResult, projected_gradient, projected_gradient_polish,
+};
 use crate::methods::minima_hopping::{
     EscapeFeedback, HistoryHook, HistoryMembership, HistoryReport, MinimumHistory,
     SharedDesignHistory,
@@ -810,15 +812,19 @@ where
     let mut history_observations = 0usize;
     let mut shared_deposits = 0usize;
 
+    let mut quench_allowances = vec![(2 * dim + 8).max(MIN_QUENCH); replica_count];
     for (index, replica) in replicas.iter_mut().enumerate() {
         if replica.budget == 0 {
             continue;
         }
-        let start_depth = quench_depth(dim, replica.budget);
+        let start_depth = quench_depth(quench_allowances[index], replica.budget);
         let mut start_grad = None;
         if start_depth > 0 {
             let quench =
                 projected_gradient_polish(obj, grad, replica.x.clone(), start_depth, 1.0, 1e-8);
+            learn_quench_allowance(
+                &mut quench_allowances[index], start_depth, &quench, &bounds, gradient_tolerance,
+            );
             replica.work += quench.n_evals + quench.n_grads;
             n_evals += quench.n_evals;
             n_grads += quench.n_grads;
@@ -857,7 +863,7 @@ where
         let mut progressed = false;
         for (index, replica) in replicas.iter_mut().enumerate() {
             let remaining = replica.budget.saturating_sub(replica.work);
-            let mut depth = quench_depth(dim, remaining);
+            let mut depth = quench_depth(quench_allowances[index], remaining);
             if remaining < 4 || depth == 0 {
                 continue;
             }
@@ -910,11 +916,16 @@ where
                         n_evals += 1;
                         n_grads += 1;
                     }
-                    depth = quench_depth(dim, replica.budget.saturating_sub(replica.work));
+                    depth = quench_depth(
+                        quench_allowances[index], replica.budget.saturating_sub(replica.work),
+                    );
                 }
             }
             let polish =
                 projected_gradient_polish(obj, grad, replica.trial.clone(), depth, 1.0, 1e-8);
+            learn_quench_allowance(
+                &mut quench_allowances[index], depth, &polish, &bounds, gradient_tolerance,
+            );
             let used_evals = polish.n_evals;
             let mut used_grads = polish.n_grads;
             replica.work += used_evals + used_grads;
@@ -1099,7 +1110,7 @@ fn temp_of(generation: usize, energy: f64) -> f64 {
     scale * 5.0 * std::f64::consts::LN_2 / (generation as f64 + 1.0).ln().max(1e-12)
 }
 
-fn quench_depth(dim: usize, remaining: usize) -> usize {
+fn quench_depth(allowance: usize, remaining: usize) -> usize {
     // `projected_gradient_polish` charges one eval and about one grad per
     // outer step, then one trailing grad. Leave a unit for the history
     // certificate so the hop cannot spend past the replica budget.
@@ -1107,8 +1118,31 @@ fn quench_depth(dim: usize, remaining: usize) -> usize {
     if fevals == 0 {
         return 0;
     }
-    let target = (2 * dim + 8).max(MIN_QUENCH);
-    target.min(fevals)
+    allowance.min(fevals)
+}
+
+/// A capped but uncertified quench provides evidence that dimension alone
+/// underestimates relaxation work. Each chain learns its own allowance;
+/// the residual combined-work budget remains the hard limit on every call.
+fn learn_quench_allowance(
+    allowance: &mut usize,
+    requested: usize,
+    result: &LocalPolishResult,
+    bounds: &Bounds<f64>,
+    certificate_tolerance: f64,
+) {
+    if result.n_evals < requested || !result.best_val.is_finite() {
+        return;
+    }
+    let Some(gradient) = result.best_grad.as_ref().filter(|gradient| {
+        gradient.len() == result.best_pos.len() && gradient.iter().all(|g| g.is_finite())
+    }) else {
+        return;
+    };
+    let projected = projected_gradient(&result.best_pos, gradient, &bounds.low, &bounds.high);
+    if projected.iter().any(|g| g.abs() >= certificate_tolerance) {
+        *allowance = allowance.saturating_mul(2);
+    }
 }
 
 /// One hook value per replica. Mutex table or nng client, never both.
