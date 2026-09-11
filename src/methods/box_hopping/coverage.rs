@@ -270,7 +270,7 @@ impl Coverage {
     ) -> bool {
         let (v_here, foreign_here) = self.heights(replica, here);
         let (v_trial, foreign_trial) = self.heights(replica, trial);
-        let delta = (trial_energy + v_trial) - (energy + v_here);
+        let delta = (trial_energy - energy) + (v_trial - v_here);
         let effective_temperature = temperature.max(1e-300);
         let (probability, draw, accepted) = if delta <= 0.0 {
             (1.0, None, true)
