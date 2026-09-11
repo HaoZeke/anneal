@@ -8,6 +8,7 @@ use rand::Rng;
 
 use crate::bias::{BasinBias, Bias, Fingerprint};
 use crate::methods::ensemble::HistoryMode;
+use crate::methods::minima_hopping::EscapeFeedback;
 use crate::shared_bias::SharedDeposits;
 
 use super::BoxEnsembleConfig;
@@ -89,6 +90,16 @@ pub struct CoverageStats {
     /// Regions held by each chain, including imported regions. These counts
     /// cannot be summed as an ensemble-wide exact-identity census.
     pub per_chain_regions: Vec<usize>,
+    /// Uncertified quenches returning into a known region from a paid launch
+    /// outside that region; zero-height coverage supplies no escape feedback.
+    pub recrossings: usize,
+    /// Recrossings whose selected return region contains admitted peer visits.
+    pub peer_recrossings: usize,
+    /// Recrossings with peer visits but no local arrivals in that selected region.
+    /// This is conditional on the actual region map, not a private-chain replay.
+    pub peer_only_recrossings: usize,
+    /// Recrossing updates that change the bounded escape scale.
+    pub escape_updates: usize,
 }
 
 /// Conditional influence of imported coverage heights on terminal acceptance.
@@ -253,6 +264,44 @@ impl Coverage {
                         .unwrap_or_default(),
                 )
             })
+    }
+
+    /// Connect a paid quench return to escape without asserting stationarity.
+    /// The existing map is read before recording this trial's local arrival.
+    pub(super) fn feedback_from_return(
+        &mut self,
+        replica: usize,
+        here: ArrayView1<f64>,
+        launch: ArrayView1<f64>,
+        trial: ArrayView1<f64>,
+        feedback: &mut EscapeFeedback,
+    ) {
+        let bias = &self.biases[replica];
+        if bias.height() == 0.0 {
+            return;
+        }
+        let index = bias.index();
+        let Some(region) = index.lookup(trial) else {
+            return;
+        };
+        // Overlapping regions can select different IDs without a departure.
+        // Require the launch to lie outside the actual return-region ball.
+        if self.coordinates.distance(launch, index.centre(region)) <= index.merge_radius() {
+            return;
+        }
+        let local_visits = index.visits(region) as u64;
+        let peer_visits = self.foreign_wells[replica]
+            .get(region)
+            .map_or(0, |well| well.visits);
+        let previous_scale = feedback.escape();
+        feedback.observe_coverage_return(
+            index.lookup(here) == Some(region),
+            local_visits.saturating_add(peer_visits),
+        );
+        self.stats.recrossings += 1;
+        self.stats.peer_recrossings += usize::from(peer_visits > 0);
+        self.stats.peer_only_recrossings += usize::from(peer_visits > 0 && local_visits == 0);
+        self.stats.escape_updates += usize::from(feedback.escape() != previous_scale);
     }
 
     /// Apply the biased Metropolis decision and measure direct peer-height

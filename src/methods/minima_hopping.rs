@@ -587,6 +587,16 @@ impl EscapeFeedback {
         visit
     }
 
+    /// Increase escape after polishing returns from outside a covered region.
+    ///
+    /// Coverage-region IDs and counts are independent of minimum identity.
+    /// The caller supplies prior admitted visits without registering a minimum
+    /// or duplicating an authoritative minimum-history feedback update.
+    pub(crate) fn observe_coverage_return(&mut self, same: bool, prior_visits: u64) {
+        let visit = if same { Visit::Same } else { Visit::Known };
+        self.apply_escape_feedback(visit, prior_visits.max(1) as f64);
+    }
+
     fn apply_escape_feedback(&mut self, visit: Visit, prior_visits: f64) {
         match visit {
             Visit::Same => {
