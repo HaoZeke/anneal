@@ -112,6 +112,15 @@ pub struct CoverageStats {
     pub published_samples: u64,
     /// Received sampled descriptors, excluding self-delivery and replay.
     pub applied_foreign_samples: usize,
+    /// Enabled feasible Gaussian or Langevin proposals checked against a
+    /// nonempty peer sample cloud. Langevin counts each inner proposal.
+    pub sample_peer_checks: usize,
+    /// Checks whose occupied chain position lies within the interaction radius
+    /// of at least one held peer sample.
+    pub sample_anchor_overlaps: usize,
+    /// Checks whose occupied position overlaps a peer sample while the proposed
+    /// position lies outside the interaction radius of every held peer sample.
+    pub sample_anchor_only_overlaps: usize,
     /// Proposed Gaussian or Langevin positions within the sample interaction radius.
     pub sample_overlaps: usize,
     /// Proposals displaced to increase clearance from the held peer sample cloud.
@@ -303,7 +312,7 @@ impl Coverage {
         }
         let point = self.coordinates.describe(proposal.view());
         let anchor = self.coordinates.describe(anchor);
-        match self.peer_samples[replica].separate(
+        let Some((separation, anchor_overlaps)) = self.peer_samples[replica].separate(
             point.view(),
             anchor.view(),
             self.coordinates.widths.view(),
@@ -311,8 +320,15 @@ impl Coverage {
             self.biases[replica].index().merge_radius(),
             self.peer_weight,
             rng,
-        ) {
-            Separation::Distant => (),
+        ) else {
+            return;
+        };
+        self.stats.sample_peer_checks += 1;
+        self.stats.sample_anchor_overlaps += usize::from(anchor_overlaps);
+        match separation {
+            Separation::Distant => {
+                self.stats.sample_anchor_only_overlaps += usize::from(anchor_overlaps);
+            }
             Separation::Constrained => {
                 self.stats.sample_overlaps += 1;
                 self.stats.constrained_repulsions += 1;

@@ -1930,6 +1930,18 @@ fn box_ensemble_optimize(
         "coverage_applied_foreign_samples",
         result.coverage.applied_foreign_samples,
     )?;
+    out.set_item(
+        "coverage_sample_peer_checks",
+        result.coverage.sample_peer_checks,
+    )?;
+    out.set_item(
+        "coverage_sample_anchor_overlaps",
+        result.coverage.sample_anchor_overlaps,
+    )?;
+    out.set_item(
+        "coverage_sample_anchor_only_overlaps",
+        result.coverage.sample_anchor_only_overlaps,
+    )?;
     out.set_item("coverage_sample_overlaps", result.coverage.sample_overlaps)?;
     out.set_item(
         "coverage_repelled_proposals",
@@ -2070,6 +2082,18 @@ fn ensemble_optimize(
     out.set_item(
         "coverage_applied_foreign_samples",
         result.coverage.applied_foreign_samples,
+    )?;
+    out.set_item(
+        "coverage_sample_peer_checks",
+        result.coverage.sample_peer_checks,
+    )?;
+    out.set_item(
+        "coverage_sample_anchor_overlaps",
+        result.coverage.sample_anchor_overlaps,
+    )?;
+    out.set_item(
+        "coverage_sample_anchor_only_overlaps",
+        result.coverage.sample_anchor_only_overlaps,
     )?;
     out.set_item("coverage_sample_overlaps", result.coverage.sample_overlaps)?;
     out.set_item(

@@ -63,12 +63,13 @@ impl PeerSamples {
         radius: f64,
         weight: f64,
         rng: &mut R,
-    ) -> Separation {
-        let Some((distance, neighbour)) = self.nearest(point) else {
-            return Separation::Distant;
-        };
+    ) -> Option<(Separation, bool)> {
+        let (distance, neighbour) = self.nearest(point)?;
+        let anchor_overlaps = self
+            .nearest(anchor)
+            .is_some_and(|(distance, _)| distance < radius);
         if distance >= radius {
-            return Separation::Distant;
+            return Some((Separation::Distant, anchor_overlaps));
         }
         let mut direction = &point - neighbour;
         let mut norm = distance;
@@ -87,7 +88,7 @@ impl PeerSamples {
             }
         }
         if norm == 0.0 || !norm.is_finite() {
-            return Separation::Constrained;
+            return Some((Separation::Constrained, anchor_overlaps));
         }
         let increment = (radius - distance) * weight.min(1.0);
         let candidate =
@@ -104,9 +105,9 @@ impl PeerSamples {
             .nearest(candidate.view())
             .is_some_and(|(clearance, _)| clearance > distance)
         {
-            Separation::Moved(candidate)
+            Some((Separation::Moved(candidate), anchor_overlaps))
         } else {
-            Separation::Constrained
+            Some((Separation::Constrained, anchor_overlaps))
         }
     }
 }
