@@ -56,7 +56,7 @@ have interchangeable communication configurations.
 |------+-----------------------+----------------------------|
 | =methods::ensemble::run_ensemble= | Exact-history reports, descriptor visit deltas, optional well tables and occupied structures | History feedback and local bias updates; optional two-choice restart constructs a fresh start |
 | =box_ensemble_optimize= | Evaluated-region descriptor/count events, bounded paid-sample descriptors; optional certified minimum reports | Nearby samples repel Gaussian/Langevin proposals; coverage changes acceptance and escape scale; gradient polish uses the raw objective |
-| =box_values_ensemble_optimize= | Same coverage and sample streams; optional finite-difference minimum reports | Nearby samples repel kicks; coverage changes acceptance and escape scale; pattern search uses raw values without a gradient |
+| =box_values_ensemble_optimize= | Same coverage and sample streams; optional finite-difference minimum reports | Nearby samples repel kicks; coverage changes acceptance and escape scale; budgeted quasi-Newton refinement uses scalar values without a user gradient |
 | =CensusBus= live-minimum messages | Replica, hop count, energy, Cartesian coordinates | Nearby-peer count, packing references and optionally remote bias deposits; no direct coordinate adoption |
 | Census-bus well messages | Descriptor centres and accumulated well depths | A =MergeBias= checkpoint action updates local well depths |
 | Catalog coordinator | Validated candidates, policy state, population plans and work records | Hearing, population and other boundary policies can construct or adopt coordinates |
@@ -246,6 +246,22 @@ positions within one hop, so these are proposal counts, not hop counts.
 Python forwards the fields with a =coverage_= prefix. The Rust comparison
 example emits the same counters; private/shared outcomes measure whether
 the directional correction helps the search.
+
+The same result distinguishes occupied-position proximity from proposal
+proximity. =sample_peer_checks= counts enabled, feasible proposal checks
+against a nonempty foreign sample cloud. =sample_anchor_overlaps= counts
+checks whose occupied chain position is within the same interaction radius;
+=sample_anchor_only_overlaps= counts those whose proposal is outside that
+radius of every held peer sample. These fields also receive the =coverage_=
+prefix in Python. They add a geometric distance query, not objective calls
+or random draws, and do not change the correction or its radius.
+
+A zero =sample_overlaps= count does not establish that occupied chains are
+distinct: their kicks can leave a shared region while local refinement
+returns to it. Conversely, zero occupied-position overlaps only describes
+the held sample cloud and chosen radius, not distinct attraction basins.
+These are proposal-opportunity counts, including each Langevin inner step,
+not an exact census of simultaneously occupied minima.
 
 ** Coverage arrivals inform escape without minimum identity
 
