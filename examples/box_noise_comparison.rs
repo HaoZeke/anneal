@@ -5,7 +5,7 @@ use std::time::Instant;
 
 use anneal_core::methods::box_hopping::{
     BoxCoverageConfig, BoxEnsembleConfig, BoxEscape, GleEscapeConfig,
-    box_ensemble_optimize_with_coverage,
+    box_ensemble_optimize_with_coverage, box_values_ensemble_optimize_with_coverage,
 };
 use anneal_core::methods::ensemble::HistoryMode;
 use anneal_core::methods::gle_langevin::GleNoise;
@@ -120,11 +120,19 @@ fn main() {
     if let Some(height) = args.get(7) {
         coverage_settings.height = height.parse().expect("nonnegative coverage height");
     }
+    let values_only = match args.get(8).map(String::as_str) {
+        None | Some("gradient") => false,
+        Some("values") => true,
+        Some(_) => panic!("the objective capability must be gradient or values"),
+    };
     let settings = GleEscapeConfig {
         steps,
         ..GleEscapeConfig::default()
     };
-    let modes = [
+    let modes = if values_only {
+        vec![("values", BoxEscape::Gaussian)]
+    } else {
+        vec![
         ("gaussian", BoxEscape::Gaussian),
         (
             "white",
@@ -134,7 +142,8 @@ fn main() {
             }),
         ),
         ("colored", BoxEscape::Langevin(settings)),
-    ];
+        ]
+    };
     println!(
         "{}",
         json!({
@@ -142,6 +151,7 @@ fn main() {
             "replicas": 4, "steps": steps, "omega0": settings.omega0, "requested_dt": settings.dt,
             "white_friction": 4.0, "history_transport": "in-process",
             "comparison": if coverage_only { "coverage-only" } else { "minimum-history-and-coverage" },
+            "objective_capability": if values_only { "values" } else { "gradient" },
             "coverage_transport": "in-process",
             "coverage_metric": "RMS-scaled-free-box-coordinates",
             "coverage_radius": coverage_settings.radius,
@@ -154,7 +164,7 @@ fn main() {
     );
     for landscape in [Landscape::Rastrigin, Landscape::ConditionedQuadratic] {
         for seed in 0..seeds as u64 {
-            for (noise, escape) in modes {
+            for &(noise, escape) in &modes {
                 for (history_name, history) in [
                     ("private", HistoryMode::Private),
                     ("shared", HistoryMode::Shared),
@@ -190,14 +200,20 @@ fn main() {
                         ..BoxEnsembleConfig::default()
                     };
                     let began = Instant::now();
-                    let result = box_ensemble_optimize_with_coverage(
-                        &surface,
-                        &surface,
-                        seed,
-                        Some(start.view()),
-                        &config,
-                        &coverage,
-                    );
+                    let result = if values_only {
+                        box_values_ensemble_optimize_with_coverage(
+                            &surface, seed, Some(start.view()), &config, &coverage,
+                        )
+                    } else {
+                        box_ensemble_optimize_with_coverage(
+                            &surface,
+                            &surface,
+                            seed,
+                            Some(start.view()),
+                            &config,
+                            &coverage,
+                        )
+                    };
                     let elapsed = began.elapsed().as_secs_f64();
                     let counts = (
                         surface.evaluations.load(Ordering::Relaxed),
