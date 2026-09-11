@@ -278,3 +278,18 @@ fn rejected_finite_trials_still_record_coverage() {
     assert!(result.coverage.per_chain_regions[0] > 1);
     assert_eq!(result.coverage.applied_foreign_visits, 0);
 }
+
+#[test]
+fn catalog_environment_cannot_enable_a_box_coverage_penalty() {
+    let output = std::process::Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--exact",
+            "zero_coverage_height_preserves_the_unbiased_search_path",
+            "--nocapture",
+        ])
+        .env("CATALOG_ENTROPIC_BIAS", "1")
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{}\n{}",
+        String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr));
+}
