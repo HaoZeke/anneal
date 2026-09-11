@@ -578,11 +578,17 @@ struct BudgetedObjective<'a, O: Objective<f64>> {
 
 impl<O: Objective<f64>> BudgetedObjective<'_, O> {
     /// Correct global candidates, never raw objective values or local probes.
-    fn prepare_proposal(&self, anchor: Option<ArrayView1<f64>>, proposal: &mut Array1<f64>) -> bool {
+    fn prepare_proposal(
+        &self,
+        anchor: Option<ArrayView1<f64>>,
+        proposal: &mut Array1<f64>,
+    ) -> bool {
         if self.ledger.exhausted() {
             return false;
         }
-        let Some(peer) = &self.ledger.peer else { return false };
+        let Some(peer) = &self.ledger.peer else {
+            return false;
+        };
         let incumbent;
         let anchor = match anchor {
             Some(anchor) => anchor,
@@ -2048,11 +2054,23 @@ fn run_arm<O, G>(
                 let n_starts = (slice / 3).max(4);
                 let per_start = slice.saturating_sub(n_starts) / 2;
                 if per_start >= 2 {
-                    let prepare = |anchor, proposal: &mut Array1<f64>| obj.prepare_proposal(Some(anchor), proposal);
-                    let res = crate::methods::local_polish::qmc_projected_gradient_polish_with_proposals(
-                        obj, grad, n_starts, per_start, seed, 1.0, 1e-8, 1,
-                        obj.ledger.peer.as_ref().map(|_| &prepare as &dyn Fn(ArrayView1<f64>, &mut Array1<f64>) -> bool),
-                    );
+                    let prepare = |anchor, proposal: &mut Array1<f64>| {
+                        obj.prepare_proposal(Some(anchor), proposal)
+                    };
+                    let res =
+                        crate::methods::local_polish::qmc_projected_gradient_polish_with_proposals(
+                            obj,
+                            grad,
+                            n_starts,
+                            per_start,
+                            seed,
+                            1.0,
+                            1e-8,
+                            1,
+                            obj.ledger.peer.as_ref().map(|_| {
+                                &prepare as &dyn Fn(ArrayView1<f64>, &mut Array1<f64>) -> bool
+                            }),
+                        );
                     states
                         .basins
                         .register(res.best_pos.view(), res.best_val, &bounds);
@@ -2061,10 +2079,21 @@ fn run_arm<O, G>(
             }
             if slice >= 8 {
                 let chains = (slice / 8).clamp(2, 4 * dim.max(1));
-                let prepare = |anchor, proposal: &mut Array1<f64>| obj.prepare_proposal(Some(anchor), proposal);
+                let prepare = |anchor, proposal: &mut Array1<f64>| {
+                    obj.prepare_proposal(Some(anchor), proposal)
+                };
                 let res = crate::methods::local_polish::qmc_gsa_global_search_with_proposals(
-                    obj, slice, seed, chains, 1.0, GSA_Q_V, GSA_Q_A,
-                    obj.ledger.peer.as_ref().map(|_| &prepare as &dyn Fn(ArrayView1<f64>, &mut Array1<f64>) -> bool),
+                    obj,
+                    slice,
+                    seed,
+                    chains,
+                    1.0,
+                    GSA_Q_V,
+                    GSA_Q_A,
+                    obj.ledger
+                        .peer
+                        .as_ref()
+                        .map(|_| &prepare as &dyn Fn(ArrayView1<f64>, &mut Array1<f64>) -> bool),
                 );
                 states
                     .basins
