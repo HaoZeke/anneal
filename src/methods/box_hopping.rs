@@ -59,15 +59,26 @@ pub struct GleEscapeConfig {
 
 impl Default for GleEscapeConfig {
     fn default() -> Self {
-        Self { steps: 16, omega0: 0.2, dt: 0.01, noise: GleNoise::Colored }
+        Self {
+            steps: 16,
+            omega0: 0.2,
+            dt: 0.01,
+            noise: GleNoise::Colored,
+        }
     }
 }
 
 impl GleEscapeConfig {
     fn validate(self) {
         assert!(self.steps > 0, "Langevin escape steps must be positive");
-        assert!(self.omega0.is_finite() && self.omega0 > 0.0, "omega0 must be finite and positive");
-        assert!(self.dt.is_finite() && self.dt > 0.0, "dt must be finite and positive");
+        assert!(
+            self.omega0.is_finite() && self.omega0 > 0.0,
+            "omega0 must be finite and positive"
+        );
+        assert!(
+            self.dt.is_finite() && self.dt > 0.0,
+            "dt must be finite and positive"
+        );
         self.noise.validate();
     }
 }
@@ -247,7 +258,10 @@ pub fn box_values_ensemble_optimize<O>(
 where
     O: Objective<f64>,
 {
-    assert!(matches!(config.escape, BoxEscape::Gaussian), "Langevin escape requires a gradient");
+    assert!(
+        matches!(config.escape, BoxEscape::Gaussian),
+        "Langevin escape requires a gradient"
+    );
     let observed = ObservedObjective {
         inner: obj,
         incumbent: Mutex::new(None),
@@ -838,8 +852,7 @@ where
         }
     }
 
-    let mut noise_states: Vec<Option<LangevinStepper>> =
-        (0..replica_count).map(|_| None).collect();
+    let mut noise_states: Vec<Option<LangevinStepper>> = (0..replica_count).map(|_| None).collect();
     loop {
         let mut progressed = false;
         for (index, replica) in replicas.iter_mut().enumerate() {
@@ -877,8 +890,12 @@ where
                     let temperature = temp_of(replica.generation, replica.f) * escape * escape;
                     let stepper = noise_states[index].get_or_insert_with(|| {
                         LangevinStepper::new(
-                            settings.noise, settings.omega0, settings.dt, temperature,
-                            Array1::ones(dim), seed ^ (index as u64).wrapping_mul(0x9E37_79B9),
+                            settings.noise,
+                            settings.omega0,
+                            settings.dt,
+                            temperature,
+                            Array1::ones(dim),
+                            seed ^ (index as u64).wrapping_mul(0x9E37_79B9),
                         )
                     });
                     stepper.set_temperature(temperature);
