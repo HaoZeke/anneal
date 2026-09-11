@@ -51,6 +51,9 @@ use crate::methods::parallel_tempering::{ParallelTemperingSampler, geometric_lad
 use crate::movekernel::{MoveKernel, TsallisVisit};
 use crate::runner::{qmc_skip_from_seed, run_rs, run_rs_variant_resumed};
 
+mod values_polish;
+pub use values_polish::values_local_polish;
+
 // ---------------------------------------------------------------------------
 // Scheduler constants. Two numbers govern the allocation; everything
 // else is derived from the budget, the dimension, and the arm count.
@@ -1518,8 +1521,7 @@ fn dual_style_local_search<O, G, R>(
                 let _ = projected_gradient_polish(obj, g, start, start_budget, 0.1, 1e-12);
             }
             None => {
-                let fd = BudgetedFiniteDiffGradient { obj, h_frac: 1e-5 };
-                let _ = projected_gradient_polish(obj, &fd, start, start_budget, 0.1, 1e-12);
+                let _ = values_polish::refine_with_ledger(obj, start, start_budget, 0.1, 1e-12);
             }
         }
         ledger.cap_set(outer_cap);
