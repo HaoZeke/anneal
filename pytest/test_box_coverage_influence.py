@@ -50,11 +50,15 @@ def test_box_results_retain_direct_peer_influence(driver, with_gradient, history
         <= decisions["comparisons"]
     )
     assert 0 <= decisions["drawn_comparisons"] <= decisions["comparisons"]
-    assert 0 <= decisions["drawn_disagreements"] <= min(
-        decisions["drawn_comparisons"], decisions["probability_changes"]
+    assert (
+        0
+        <= decisions["drawn_disagreements"]
+        <= min(decisions["drawn_comparisons"], decisions["probability_changes"])
     )
     assert 0.0 <= decisions["max_probability_change"] <= 1.0
-    assert 0.0 <= decisions["probability_change_sum"] <= decisions["probability_changes"]
+    assert (
+        0.0 <= decisions["probability_change_sum"] <= decisions["probability_changes"]
+    )
     for key in ("max_abs_peer_delta", "max_abs_peer_delta_over_temperature"):
         assert np.isfinite(decisions[key]) and decisions[key] >= 0.0
     if history != "shared":
