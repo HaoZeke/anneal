@@ -320,27 +320,23 @@ mod tests {
     }
 }
 
-/// Well-tempered bias keyed on discrete basin identity rather than on a
-/// collective variable.
+/// Well-tempered repulsion over fingerprint-defined search regions.
 ///
-/// A grid bias has to be told which projection to watch. That works when the
-/// competing structures separate along the chosen axis and fails silently when
-/// they do not: on the 38-atom Lennard-Jones cluster the close-packed and
-/// icosahedral funnels differ by 0.19 in the fourth Steinhardt parameter, while
-/// at 75 atoms the decahedral and icosahedral minima differ by 0.023, which is
-/// narrower than a sensible deposition width. The bias then fills a region that
-/// contains both competitors and the search never leaves.
+/// Descriptors within `merge_radius` share a history penalty. The fingerprint,
+/// metric and radius define coverage granularity; proximity does not prove
+/// that two states belong to the same minimum or energy funnel. Deposits do
+/// not require gradients, quenches or stationary-point certificates.
 ///
-/// Keying on identity removes the choice. Two states are the same basin when
-/// their fingerprints lie within `merge_radius`, so there is no axis to be
-/// blind along. Revisiting a basin raises its bias, which is the superbasin
-/// escape acceleration of Chatterjee and Voter (J Chem Phys 132, 194101, 2010)
-/// with the Barducci well-tempered weight on top.
+/// Local visits and imported visits both raise the penalty, discouraging
+/// redundant exploration. Only local arrivals enter publishable visit deltas;
+/// imported information must not circulate as newly performed search work.
+/// A driver retains its best state under the original objective separately
+/// from the bias used to choose exploration moves.
 ///
-/// The fingerprint must be invariant to whatever the objective is invariant
-/// under, or the same physical state registers as many basins. [`SortedPairs`]
-/// is the default for point sets: invariant to permutation, translation and
-/// rotation, and free of external dependencies.
+/// The fingerprint should respect the objective's declared symmetries when
+/// equivalent states are intended to share coverage. [`SortedPairs`] provides
+/// translation-, rotation- and permutation-invariant features for point sets;
+/// arbitrary design spaces can supply their own [`Fingerprint`] and metric.
 pub struct BasinBias<F: Fingerprint> {
     index: BasinIndex<F>,
     w0: f64,
@@ -354,15 +350,16 @@ pub struct BasinBias<F: Fingerprint> {
     pub entropic: bool,
 }
 
-/// Which basin a state is in, with no potential attached.
+/// Which fingerprint-defined region a state occupies, with no potential attached.
 ///
-/// The identity half of [`BasinBias`], split out because more than one
+/// The region-indexing half of [`BasinBias`], split out because more than one
 /// mechanism needs to ask "have I been here before" and only one of them
 /// answers by depositing. History-conditioned escape uses the same rule to
 /// decide how hard to push next, and reading that off a bias would tie the two
 /// together: under replica exchange each rung owns its own bias, so the basin
 /// numbering of one rung means nothing in another, while a controller
-/// following one chain needs a numbering that outlives the swap.
+/// following one chain needs a numbering that outlives the swap. These region
+/// identifiers are not minimum certificates or proofs of structural equivalence.
 pub struct BasinIndex<F: Fingerprint> {
     fingerprint: F,
     metric: Box<dyn BasinMetric>,
