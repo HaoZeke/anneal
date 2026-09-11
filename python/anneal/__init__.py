@@ -719,7 +719,16 @@ class MinimizeResult:
     certify local convergence or global optimality.
     """
 
-    __slots__ = ("x", "fun", "nfev", "njev", "charged", "success", "message", "diagnostics")
+    __slots__ = (
+        "x",
+        "fun",
+        "nfev",
+        "njev",
+        "charged",
+        "success",
+        "message",
+        "diagnostics",
+    )
 
     def __init__(self, x, fun, nfev, success, message, *, njev=0, diagnostics=None):
         self.x = np.asarray(x, dtype=np.float64)
@@ -793,7 +802,9 @@ class Hdf5ParameterStore:
         with h5py.File(self.path, "a") as h5:
             if "x" not in h5:
                 h5.create_dataset("x", data=x, maxshape=(None, x.size), chunks=True)
-                h5.create_dataset("f", data=np.array([float(f)]), maxshape=(None,), chunks=True)
+                h5.create_dataset(
+                    "f", data=np.array([float(f)]), maxshape=(None,), chunks=True
+                )
                 return
             xs = h5["x"]
             fs = h5["f"]
@@ -853,13 +864,9 @@ def _scipy_bounds_to_low_high(bounds, dim):
         elif arr.ndim == 1 and arr.size == dim:
             raise ValueError("bounds must be pairs (low, high) per coordinate")
         else:
-            raise ValueError(
-                f"bounds shape {arr.shape} does not match dimension {dim}"
-            )
+            raise ValueError(f"bounds shape {arr.shape} does not match dimension {dim}")
     if low.size != dim or high.size != dim:
-        raise ValueError(
-            f"bounds length {low.size} does not match x0 length {dim}"
-        )
+        raise ValueError(f"bounds length {low.size} does not match x0 length {dim}")
     return low, high
 
 
