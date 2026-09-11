@@ -823,7 +823,11 @@ where
             let quench =
                 projected_gradient_polish(obj, grad, replica.x.clone(), start_depth, 1.0, 1e-8);
             learn_quench_allowance(
-                &mut quench_allowances[index], start_depth, &quench, &bounds, gradient_tolerance,
+                &mut quench_allowances[index],
+                start_depth,
+                &quench,
+                &bounds,
+                gradient_tolerance,
             );
             replica.work += quench.n_evals + quench.n_grads;
             n_evals += quench.n_evals;
@@ -917,14 +921,19 @@ where
                         n_grads += 1;
                     }
                     depth = quench_depth(
-                        quench_allowances[index], replica.budget.saturating_sub(replica.work),
+                        quench_allowances[index],
+                        replica.budget.saturating_sub(replica.work),
                     );
                 }
             }
             let polish =
                 projected_gradient_polish(obj, grad, replica.trial.clone(), depth, 1.0, 1e-8);
             learn_quench_allowance(
-                &mut quench_allowances[index], depth, &polish, &bounds, gradient_tolerance,
+                &mut quench_allowances[index],
+                depth,
+                &polish,
+                &bounds,
+                gradient_tolerance,
             );
             let used_evals = polish.n_evals;
             let mut used_grads = polish.n_grads;
