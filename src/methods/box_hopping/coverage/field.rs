@@ -133,7 +133,10 @@ impl Field<'_> {
         let admissible = |candidate: ArrayView1<f64>| {
             let actual = self.coordinates.describe(candidate);
             EuclideanMetric.distance(actual.view(), point) <= cap
-                && self.peers.clearance(actual.view()).is_some_and(|d| d > distance)
+                && self
+                    .peers
+                    .clearance(actual.view())
+                    .is_some_and(|d| d > distance)
         };
         let mut candidate = self.coordinates.position(descriptor);
         if admissible(candidate.view()) {
