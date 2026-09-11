@@ -18,6 +18,18 @@ Simulated-annealing components on the [eindir](https://github.com/HaoZeke/eindir
 
 ## Generic global minimization
 
+The optimizer is implemented in Rust. Objective and gradient capabilities
+come from `eindir`; local improvement uses `rgmin`. Box chains reuse the
+native Langevin stepper, descriptor coverage and shared-deposit exchange.
+Python and C expose the native implementation rather than separate solvers.
+
+The Rust [box search and noise guide](docs/orgmode/howto/box-langevin-escape.org)
+shows the typed configuration and its common work contract. Native regression
+targets `box_search_contract` and `box_langevin_exploration` check energy-origin
+invariance, effective coverage and sustained exploration. The
+[communication contract](docs/orgmode/explanation/communication.org) separates
+coverage from optional minimum certification and coordinate adoption.
+
 For a scalar objective on a finite box, `minimize` is the common Python entry.
 Every callback receives the declared design dimension, including fixed
 coordinates. A vector length divisible by three does not select atomic geometry.

@@ -39,6 +39,22 @@ escape scale; a temperature change rescales every momentum row together.
 A fresh raw gradient is paid at each occupied launch point. A quench's
 projected stationarity certificate cannot substitute for that force.
 
+The temperature scale comes from paid raw energy excursions, not the
+absolute objective value. Each chain initializes its scale from the energy
+drop of its initial relaxation, when positive. A Langevin escape contributes
+its largest finite raw trajectory energy relative to the occupied energy;
+a Gaussian or values-only escape contributes its pre-polish launch energy.
+The existing =AdaptiveHeight= estimator tracks these positive gaps. One
+escape supplies one sample, including a rejected escape. Without positive
+gap evidence the scale is one.
+
+Hearing, acceptance and excitation use one fixed schedule value for a funded
+boundary. Its raw excursion updates the scale for the following boundary.
+An additive constant in the objective therefore supplies no temperature
+evidence. Near-equal quenched endpoints cannot erase the raw energy variation
+that the proposal has already explored. Launch values and trajectory energies
+are retained from existing callbacks; calibration adds no evaluations.
+
 * Account for the complete search
 
 A segment consumes one launch gradient and one gradient plus one objective
@@ -71,6 +87,19 @@ Atomic and molecular point-set constraints require their geometric path;
 the box option does not supply an atomic GLE escape by itself.
 
 * Run matched noise and communication controls
+
+The optimizer and its primary contracts are Rust. The native regression
+targets cover objective-origin invariance, coverage influence and sustained
+Langevin exploration:
+
+#+begin_src sh
+cargo test --locked --test box_search_contract --test box_langevin_exploration
+#+end_src
+
+The first target compares full callback traces for shifted flat objectives
+under Gaussian, values-only, white and colored search. The second checks an
+evaluation-matched Rastrigin exploration bound. These test the native engine
+without Python bindings; Python checks cover binding conformance separately.
 
 For scalar-white noise, keep the same configuration and select
 =GleNoise::White { friction: 4.0 }= as the noise law. The comparison example
