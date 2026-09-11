@@ -480,7 +480,8 @@ where
                 values_certificate(obj, replica.x.view(), &mut replica.work, replica.budget);
             n_evals += replica.work - before;
             if let Some(gradient) = certified {
-                if let Some(report) = hooks[index].observe(replica.f, replica.x.view(), gradient.view())
+                if let Some(report) =
+                    hooks[index].observe(replica.f, replica.x.view(), gradient.view())
                 {
                     history_observations += 1;
                     hooks[index].mark_accepted(report.minimum);
