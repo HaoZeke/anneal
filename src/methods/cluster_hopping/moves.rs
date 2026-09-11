@@ -1339,9 +1339,7 @@ impl ClusterMove {
                     .ok()
                     .and_then(|v| v.parse().ok())
                     .unwrap_or(1);
-                let refs = x
-                    .as_slice()
-                    .and_then(crate::catalog::packing::nearby_packing_peers)
+                let refs = crate::catalog::packing::nearby_packing_peers(&x.to_vec())
                     .unwrap_or_else(crate::catalog::packing_references);
                 if refs.len() >= min_refs {
                     // Coordinate and map keys keep retained reference means
