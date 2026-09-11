@@ -279,3 +279,57 @@ fn novel_arrivals_match_boundaries_and_respect_the_escape_floor() {
         assert_eq!(result.coverage.escape_updates, 0);
     }
 }
+
+#[test]
+fn langevin_novelty_preserves_the_calibrated_excitation_floor() {
+    for noise in [GleNoise::Colored, GleNoise::White { friction: 4.0 }] {
+        let mut traces = Vec::new();
+        for height in [0.0, 0.1] {
+            let objective = Bowl {
+                bounds: Bounds::new(array![-1.0], array![1.0], 0.0),
+                flat: true,
+                objectives: Mutex::new(Vec::new()),
+                gradients: Mutex::new(0),
+            };
+            let config = BoxEnsembleConfig {
+                replicas: 1,
+                budget: 12,
+                history: HistoryMode::None,
+                escape: BoxEscape::Langevin(GleEscapeConfig {
+                    steps: 1,
+                    noise,
+                    ..GleEscapeConfig::default()
+                }),
+                ..BoxEnsembleConfig::default()
+            };
+            let coverage = BoxCoverageConfig {
+                shared: false,
+                radius: 1e-12,
+                height,
+                ..BoxCoverageConfig::default()
+            };
+            let result = box_ensemble_optimize_with_coverage(
+                &objective,
+                &objective,
+                7,
+                Some(array![0.0].view()),
+                &config,
+                &coverage,
+            );
+            let trace = objective.objectives.into_inner().unwrap();
+            assert_eq!(result.hops, 2);
+            assert_eq!(result.n_evals, trace.len());
+            assert_eq!(result.n_grads, objective.gradients.into_inner().unwrap());
+            assert_eq!(result.n_evals + result.n_grads, config.budget);
+            assert_eq!(result.coverage.recrossings, 0);
+            if height > 0.0 {
+                assert_eq!(result.coverage.novel_arrivals, 2);
+            }
+            traces.push(trace);
+        }
+        assert_eq!(
+            traces[0], traces[1],
+            "{noise:?}: novelty relaxes revisit boosts without undercutting the learned temperature"
+        );
+    }
+}
