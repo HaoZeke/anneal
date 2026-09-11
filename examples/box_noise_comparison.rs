@@ -10,6 +10,9 @@ use anneal_core::methods::ensemble::HistoryMode;
 use anneal_core::methods::gle_langevin::GleNoise;
 use eindir_core::{Bounds, Gradient, Objective};
 use ndarray::{Array1, ArrayView1};
+use rand::Rng;
+use rand::SeedableRng;
+use rand::rngs::StdRng;
 use serde_json::json;
 
 #[derive(Clone, Copy, Debug)]
@@ -120,7 +123,7 @@ fn main() {
             "record": "configuration", "dimension": dim, "budget": budget, "seeds": seeds,
             "replicas": 4, "steps": steps, "omega0": settings.omega0, "requested_dt": settings.dt,
             "white_friction": 4.0, "history_transport": "in-process",
-            "start_protocol": "first-replica-2.5; remaining-replicas-seeded-uniform",
+        "start_protocol": "seeded-uniform; independent-first-replica-start-stream",
             "version": env!("CARGO_PKG_VERSION"),
         })
     );
@@ -141,7 +144,8 @@ fn main() {
                         evaluations: AtomicUsize::new(0),
                         gradients: AtomicUsize::new(0),
                     };
-                    let start = Array1::from_elem(dim, 2.5);
+                    let mut start_rng = StdRng::seed_from_u64(seed ^ 0x5354_4152_545f_424f);
+                    let start = Array1::from_shape_fn(dim, |_| -5.12 + 10.24 * start_rng.random::<f64>());
                     let initial_value = surface.value(start.view());
                     assert!(initial_value > 0.0);
                     let config = BoxEnsembleConfig {
@@ -170,7 +174,8 @@ fn main() {
                         "{}",
                         json!({
                             "record": "result", "landscape": format!("{landscape:?}"),
-                            "dimension": dim, "seed": seed, "noise": noise, "history": history_name,
+                        "dimension": dim, "seed": seed, "noise": noise, "history": history_name,
+                        "initial_position": start.to_vec(),
                             "initial_value": initial_value, "best_value": result.best_val,
                             "n_evals": counts.0, "n_grads": counts.1, "budget": budget,
                         "hops": result.hops, "history_minima": result.history_minima,

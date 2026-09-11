@@ -108,7 +108,7 @@ pub struct BoxEnsembleConfig {
     pub identity_tol: f64,
     /// Foreign visits paid into this chain's bias, capped per look.
     pub shared_deposits: usize,
-    /// Per-chain escape mechanism. Langevin segments require an analytic gradient.
+    /// Per-chain escape mechanism. Langevin segments require a gradient callback.
     pub escape: BoxEscape,
 }
 

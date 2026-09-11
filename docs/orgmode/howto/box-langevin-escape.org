@@ -64,10 +64,12 @@ the box option does not supply an atomic GLE escape by itself.
 For scalar-white noise, keep the same configuration and select
 =GleNoise::White { friction: 4.0 }= as the noise law. The comparison example
 =box_noise_comparison= runs Gaussian, scalar-white and colored proposals,
-each with private and shared in-process minimum histories. Its first replica
-starts at 2.5 in every coordinate; the others use the same seeded uniform
-starts across controls. The Rastrigin and conditioned-quadratic objectives
-have nonzero values at that supplied start.
+each with private and shared in-process minimum histories. All replicas use
+seeded uniform starts matched across controls, with an independent stream
+for the first replica's explicitly recorded position. Equal-coordinate starts
+can make initial line searches solve a separable objective without testing
+global exploration. The Rastrigin and conditioned-quadratic objectives have
+nonzero values at the recorded starts.
 
 #+begin_src sh
 cargo run --locked --example box_noise_comparison -- 32 8000 4 16
