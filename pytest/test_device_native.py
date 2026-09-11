@@ -94,7 +94,9 @@ def test_device_chain_recovers_a_finite_occupied_state(batched):
     if batched:
         kwargs["n_chains"] = 4
     entry = anneal.run_ensemble if batched else anneal.run_device
-    result = entry(objective, np.full(2, -1.0), np.full(2, 1.0), anneal.Boltzmann(), **kwargs)
+    result = entry(
+        objective, np.full(2, -1.0), np.full(2, 1.0), anneal.Boltzmann(), **kwargs
+    )
     assert len(seen) == result.n_evals == 2
     assert np.sum(result.accepted) == (4 if batched else 1)
     assert np.sum(result.rejected) == 0
@@ -115,7 +117,9 @@ def test_device_nonfinite_candidate_cannot_replace_finite_occupancy(batched):
     if batched:
         kwargs["n_chains"] = 4
     entry = anneal.run_ensemble if batched else anneal.run_device
-    result = entry(objective, np.full(2, -1.0), np.full(2, 1.0), anneal.Boltzmann(), **kwargs)
+    result = entry(
+        objective, np.full(2, -1.0), np.full(2, 1.0), anneal.Boltzmann(), **kwargs
+    )
     assert len(seen) == result.n_evals == 2
     assert np.sum(result.accepted) == 0
     assert np.sum(result.rejected) == (4 if batched else 1)
