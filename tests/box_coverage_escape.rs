@@ -74,11 +74,20 @@ fn run(
     let start = array![0.0];
     let result = if values {
         box_values_ensemble_optimize_with_coverage(
-            &objective, 7, Some(start.view()), &config, &coverage,
+            &objective,
+            7,
+            Some(start.view()),
+            &config,
+            &coverage,
         )
     } else {
         box_ensemble_optimize_with_coverage(
-            &objective, &objective, 7, Some(start.view()), &config, &coverage,
+            &objective,
+            &objective,
+            7,
+            Some(start.view()),
+            &config,
+            &coverage,
         )
     };
     let trace = objective.objectives.into_inner().unwrap();
@@ -113,7 +122,10 @@ fn gradient_recrossing_changes_escape_without_a_minimum_report() {
     for escape in mechanisms() {
         let (_, inactive) = run(false, false, escape, HistoryMode::None, 0.01, 0.0);
         let (result, active) = run(false, false, escape, HistoryMode::None, 0.01, 0.1);
-        assert_eq!(active[1], inactive[1], "the first launch has no return feedback");
+        assert_eq!(
+            active[1], inactive[1],
+            "the first launch has no return feedback"
+        );
         assert_eq!(result.coverage_decisions.accepted, result.hops);
         assert_ne!(
             active, inactive,
@@ -124,10 +136,27 @@ fn gradient_recrossing_changes_escape_without_a_minimum_report() {
 
 #[test]
 fn values_recrossing_changes_escape_without_a_minimum_report() {
-    let (_, inactive) = run(true, false, BoxEscape::Gaussian, HistoryMode::None, 0.05, 0.0);
-    let (result, active) = run(true, false, BoxEscape::Gaussian, HistoryMode::None, 0.05, 0.1);
+    let (_, inactive) = run(
+        true,
+        false,
+        BoxEscape::Gaussian,
+        HistoryMode::None,
+        0.05,
+        0.0,
+    );
+    let (result, active) = run(
+        true,
+        false,
+        BoxEscape::Gaussian,
+        HistoryMode::None,
+        0.05,
+        0.1,
+    );
     assert_eq!(result.coverage_decisions.accepted, result.hops);
-    assert_ne!(active, inactive, "covered pattern-search returns must inform escape");
+    assert_ne!(
+        active, inactive,
+        "covered pattern-search returns must inform escape"
+    );
 }
 
 #[test]
@@ -136,7 +165,10 @@ fn coverage_without_a_departure_preserves_the_escape_trace() {
         for escape in mechanisms() {
             let (_, inactive) = run(false, flat, escape, HistoryMode::None, 2.0, 0.0);
             let (_, active) = run(false, flat, escape, HistoryMode::None, 2.0, 0.1);
-            assert_eq!(active, inactive, "{escape:?}: no departure is no recrossing");
+            assert_eq!(
+                active, inactive,
+                "{escape:?}: no departure is no recrossing"
+            );
         }
     }
 }
@@ -147,6 +179,9 @@ fn certified_feedback_is_not_counted_twice_as_coverage_feedback() {
         let (_, inactive) = run(false, false, escape, HistoryMode::Private, 0.01, 0.0);
         let (result, active) = run(false, false, escape, HistoryMode::Private, 0.01, 0.1);
         assert!(result.history_observations > 1);
-        assert_eq!(active, inactive, "{escape:?}: one feedback update per return");
+        assert_eq!(
+            active, inactive,
+            "{escape:?}: one feedback update per return"
+        );
     }
 }
