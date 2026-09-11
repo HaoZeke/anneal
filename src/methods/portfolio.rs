@@ -3819,6 +3819,37 @@ where
         let candidate = ledger.incumbent(&bounds);
         budgeted_obj.eval(candidate.view());
     }
+    if grad.is_none() {
+        ledger.cap_set(budget);
+        // A locally converged batch leaves its unused allowance available
+        // for further scalar searches under the same raw-incumbent ledger.
+        while ledger.remaining() >= 8 {
+            let remaining = ledger.remaining();
+            dual_style_local_search::<_, G, _>(
+                &budgeted_obj,
+                None,
+                &ledger,
+                &bounds,
+                &mut rng,
+                remaining,
+                budget,
+            );
+            if ledger.remaining() == remaining {
+                break;
+            }
+        }
+        // Even an allowance smaller than a stencil funds feasible global
+        // candidates. Convex interpolation avoids overflowing the box width.
+        while !ledger.exhausted() {
+            let candidate = Array1::from_iter(bounds.low.iter().zip(bounds.high.iter()).map(
+                |(&low, &high)| {
+                    let fraction = rng.random::<f64>();
+                    ((1.0 - fraction) * low + fraction * high).clamp(low, high)
+                },
+            ));
+            budgeted_obj.eval(candidate.view());
+        }
+    }
     let best_pos_arr = ledger.incumbent(&bounds);
     // Final safety: never return OOB coordinates from the public API.
     let best_pos = bounds.clip(best_pos_arr.view()).to_vec();
