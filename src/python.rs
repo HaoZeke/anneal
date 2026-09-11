@@ -1920,6 +1920,8 @@ fn box_ensemble_optimize(
         result.coverage.peer_only_recrossings,
     )?;
     out.set_item("coverage_escape_updates", result.coverage.escape_updates)?;
+    out.set_item("coverage_novel_arrivals", result.coverage.novel_arrivals)?;
+    out.set_item("coverage_novelty_updates", result.coverage.novelty_updates)?;
     out.set_item(
         "coverage_decisions",
         coverage_decisions_dict(py, &result.coverage_decisions)?,
@@ -2017,6 +2019,8 @@ fn ensemble_optimize(
         result.coverage.peer_only_recrossings,
     )?;
     out.set_item("coverage_escape_updates", result.coverage.escape_updates)?;
+    out.set_item("coverage_novel_arrivals", result.coverage.novel_arrivals)?;
+    out.set_item("coverage_novelty_updates", result.coverage.novelty_updates)?;
     out.set_item(
         "coverage_decisions",
         coverage_decisions_dict(py, &result.coverage_decisions)?,
