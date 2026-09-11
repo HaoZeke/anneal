@@ -1,0 +1,23 @@
+#+TITLE: Vendored transport sources
+
+* Native dependency
+
+=nng-sys= is imported from the published =1.4.0-rc.0= crate, whose archive
+SHA256 is =50d0e7f39a8fd1792a710da9351320e864dc799cf439960e332c977b2f876da6=.
+Its bundled native library reports NNG 1.4.0. The MIT licenses remain in
+=nng-sys/LICENSE= and =nng-sys/nng/LICENSE.txt=; upstream tests remain present.
+Registry cache markers are not part of this source import. Two comments use
+the standards names =RFC 6455= and =NIST 800= with space-separated numbering.
+
+* Pair0 callback ordering
+
+=pair0_pipe_stop= drains send and receive callbacks before clearing the
+socket's peer and readiness under its mutex. Waiting occurs outside that
+mutex because successful callbacks acquire it to publish readiness. Thus a
+successful receive callback cannot leave =rd_ready=true= with a null peer.
+Cancellation callbacks remain possible when an already-stopped operation is
+reused; they do not publish readiness. This changes native lifecycle ordering,
+not the Rust API, Pair0 wire format, or anneal's application framing.
+
+The regression surface includes catalogue event replay, terminal delivery,
+write-half closure, buffered full-duplex delivery and disconnect handoff.
