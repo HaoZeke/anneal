@@ -168,6 +168,43 @@ summed as a unique ensemble census. =result.shared_deposits= is the applied
 foreign coverage count. The current box coverage exchange is in-process;
 the NNG history transport below carries minimum reports, not this stream.
 
+** Measure delivery separately from decision influence
+
+=result.coverage_decisions= records the acceptance comparisons that consume
+coverage. Python returns the same fields under ="coverage_decisions"=;
+=minimize= retains that dictionary in =result.diagnostics=. The one-replica
+values-only portfolio has no box acceptance comparisons and reports zeros.
+
+The measurement subtracts the actual imported-height difference from each
+biased energy difference. It holds the actual endpoints, region map,
+temperature and local deposit heights fixed. This conditional comparison
+does not replay a private chain: peer-created centres and their effect on
+local well-tempering remain part of the conditioning. Separate matched
+private/shared runs measure the resulting search outcomes.
+
+| Field | Meaning |
+|-------+---------|
+| =comparisons=, =accepted= | Terminal acceptance decisions and actual accepted trials |
+| =unresolved= | Comparisons excluded from influence measures because arithmetic is nonfinite |
+| =peer_overlap= | Either selected endpoint region contains imported visits |
+| =peer_delta_changes= | Imported endpoint heights differ |
+| =probability_changes= | Removing that difference changes the acceptance probability |
+| =drawn_comparisons=, =drawn_disagreements= | Actual uniform draws and conditional decisions that disagree under those draws |
+| =probability_change_sum=, =max_probability_change= | Sum and maximum absolute conditional probability changes |
+| =max_abs_peer_delta=, =max_abs_peer_delta_over_temperature= | Largest absolute imported-height difference, in objective units and divided by acceptance temperature |
+
+No extra objective calls or random draws are used. Actual downhill decisions
+short-circuit without drawing; their probabilities are compared, but they
+cannot contribute a realized draw disagreement. Imported visits can produce
+zero direct influence: zero-height deposits have no penalty, and a region
+covering both endpoints contributes the same penalty to both sides.
+
+The comparison example =box_noise_comparison= emits these diagnostics in
+each JSON result. =experiments/scripts/verify_box_coverage_influence.py=
+checks zero-height, whole-box and finite-overlap controls, exact charged
+work, and optionally matching outcomes against a retained reference file.
+These checks establish measurement invariants, not an optimization benefit.
+
 * Certification, identity and packing families
 
 Three different questions require three different checks.
