@@ -238,18 +238,31 @@ fn rejected_finite_trials_still_record_coverage() {
             if x[0] == 0.0 { 0.0 } else { 1e6 }
         }
 
-        fn dim(&self) -> usize { 1 }
-        fn bounds(&self) -> &Bounds<f64> { &self.bounds }
+        fn dim(&self) -> usize {
+            1
+        }
+        fn bounds(&self) -> &Bounds<f64> {
+            &self.bounds
+        }
     }
 
     let objective = Needle {
         bounds: Bounds::new(array![-1.0], array![1.0], 0.0),
         calls: Mutex::new(0),
     };
-    let config = BoxEnsembleConfig { replicas: 1, budget: 256, history: HistoryMode::None, ..BoxEnsembleConfig::default() };
+    let config = BoxEnsembleConfig {
+        replicas: 1,
+        budget: 256,
+        history: HistoryMode::None,
+        ..BoxEnsembleConfig::default()
+    };
     let start = array![0.0];
     let result = box_values_ensemble_optimize_with_coverage(
-        &objective, 71, Some(start.view()), &config, &BoxCoverageConfig::default(),
+        &objective,
+        71,
+        Some(start.view()),
+        &config,
+        &BoxCoverageConfig::default(),
     );
     assert_eq!(result.n_evals, *objective.calls.lock().unwrap());
     assert!(result.n_evals <= config.budget);
@@ -257,8 +270,11 @@ fn rejected_finite_trials_still_record_coverage() {
     assert!(result.hops > 2);
     assert_eq!(result.best_val, 0.0);
     assert_eq!(result.best_pos, start);
-    assert_eq!(result.coverage.local_observations, 1 + result.hops,
-        "finite uphill trials remain explored even though acceptance underflows to zero");
+    assert_eq!(
+        result.coverage.local_observations,
+        1 + result.hops,
+        "finite uphill trials remain explored even though acceptance underflows to zero"
+    );
     assert!(result.coverage.per_chain_regions[0] > 1);
     assert_eq!(result.coverage.applied_foreign_visits, 0);
 }
