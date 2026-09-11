@@ -1938,6 +1938,10 @@ fn ensemble_optimize(
         py_view1(py, result.best_pos.view()),
     )?;
     out.set_item("charged", result.charged)?;
+    out.set_item("n_evals", result.n_evals)?;
+    out.set_item("n_grads", result.n_grads)?;
+    out.set_item("hops", result.hops)?;
+    out.set_item("history_observations", result.history_observations)?;
     out.set_item("history_minima", result.history_minima)?;
     out.set_item("history_refusals", result.history_cost.1)?;
     out.set_item("history_seconds", result.history_cost.2)?;

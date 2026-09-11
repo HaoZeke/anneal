@@ -172,15 +172,23 @@ pub struct BoxEnsembleResult {
     pub coverage: CoverageStats,
 }
 
-/// Outcome of [`ensemble_hop_optimize`]: hop ledger plus history size.
+/// Outcome of [`ensemble_hop_optimize`], retaining actual work and coverage.
 #[derive(Clone, Debug)]
 pub struct EnsembleHopResult {
     /// Best design-space point.
     pub best_pos: Array1<f64>,
     /// Objective at [`EnsembleHopResult::best_pos`].
     pub best_val: f64,
+    /// Actual objective callbacks, including local improvement and probes.
+    pub n_evals: usize,
+    /// Actual gradient callbacks, including local improvement and probes.
+    pub n_grads: usize,
     /// Charged hop-ledger calls (evals plus grads).
     pub charged: usize,
+    /// Accepted plus rejected hops; zero for the one-replica values portfolio.
+    pub hops: usize,
+    /// Certified observations reported to the optional minimum history.
+    pub history_observations: usize,
     /// Distinct exact identities in the shared or largest private history.
     ///
     /// Zero on the one-replica values-only portfolio, which has no hop
@@ -231,7 +239,11 @@ where
         return EnsembleHopResult {
             best_pos: Array1::from(out.best_pos),
             best_val: out.best_val,
+            n_evals: out.n_evals,
+            n_grads: out.n_grads,
             charged: out.n_evals + out.n_grads,
+            hops: 0,
+            history_observations: 0,
             history_minima: 0,
             history_cost: (0, 0, 0.0),
             coverage: CoverageStats::default(),
@@ -252,7 +264,11 @@ impl From<BoxEnsembleResult> for EnsembleHopResult {
         Self {
             best_pos: out.best_pos,
             best_val: out.best_val,
+            n_evals: out.n_evals,
+            n_grads: out.n_grads,
             charged: out.n_evals + out.n_grads,
+            hops: out.hops,
+            history_observations: out.history_observations,
             history_minima: out.history_minima,
             history_cost: out.history_cost,
             coverage: out.coverage,
