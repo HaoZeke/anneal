@@ -1404,7 +1404,7 @@ impl<O: Objective<f64>> Gradient<f64> for BudgetedFiniteDiffGradient<'_, O> {
         let mut g = Array1::zeros(dim);
         for i in 0..dim {
             let w = (bounds.high[i] - bounds.low[i]).abs().max(1e-12);
-            let h = (self.h_frac * w).clamp(1e-8, 0.05 * w);
+            let h = (self.h_frac * w).max(1e-8).min(0.05 * w);
             let mut xp = x.to_owned();
             let mut xm = x.to_owned();
             xp[i] = (x[i] + h).clamp(bounds.low[i], bounds.high[i]);
