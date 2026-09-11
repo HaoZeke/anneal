@@ -10,7 +10,7 @@ use rand::{Rng, SeedableRng};
 
 use crate::accept::{AcceptRule, TsallisAccept};
 use crate::cool::{Cooling, TsallisCool};
-use crate::movekernel::{MoveKernel, TsallisVisit};
+use crate::movekernel::{MoveKernel, Reflected, TsallisVisit};
 
 const ARMIJO_SUFFICIENT_DECREASE: f64 = 1e-4;
 const BACKTRACK_SHRINK: f64 = 0.5;
@@ -711,7 +711,10 @@ where
     );
     let mut rng = StdRng::seed_from_u64(seed);
     let cooling = TsallisCool::new(t_init, q_v);
-    let visit = TsallisVisit::new(q_v);
+    let visit = Reflected::new(
+        TsallisVisit::new(q_v),
+        Bounds::new(Array1::zeros(dim), Array1::ones(dim), 0.0),
+    );
     let accept = TsallisAccept::new(q_a);
     let mut units = Vec::with_capacity(chain_count);
     let mut values = Vec::with_capacity(chain_count);
@@ -746,9 +749,7 @@ where
             if n_evals >= global_budget {
                 break;
             }
-            let mut proposal_unit = visit
-                .propose(units[chain].view(), temp, &mut rng)
-                .mapv(|value| value.clamp(0.0, 1.0));
+            let mut proposal_unit = visit.propose(units[chain].view(), temp, &mut rng);
             let mut proposal_pos = unit_to_box(&proposal_unit, &bounds.low, &bounds.high);
             if let Some(prepare) = prepare {
                 let anchor = unit_to_box(&units[chain], &bounds.low, &bounds.high);
