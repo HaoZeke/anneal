@@ -1,4 +1,4 @@
-use anneal_core::methods::cluster_hopping::CheckpointAction;
+use anneal_core::methods::cluster_hopping::{BiasUpdate, CheckpointAction};
 use ndarray::Array1;
 
 /// Flush enabled repulsive history when the decision continues local work.
@@ -15,6 +15,32 @@ pub(crate) fn with_pending_deposits(
             }
         }
         action => action,
+    }
+}
+
+/// Select a pending bias update alongside the checkpoint's state decision.
+pub(crate) fn with_pending_bias_update(
+    action: CheckpointAction,
+    pending: &mut Option<BiasUpdate>,
+) -> CheckpointAction {
+    match (action, pending.take()) {
+        (
+            CheckpointAction::Continue,
+            Some(BiasUpdate::MergeWells {
+                wells,
+                weight,
+                complete,
+            }),
+        ) => CheckpointAction::MergeBias {
+            wells,
+            weight,
+            complete,
+        },
+        (
+            CheckpointAction::Continue,
+            Some(BiasUpdate::DepositDescriptors { deposits, weight }),
+        ) => CheckpointAction::DepositDescriptors { deposits, weight },
+        (action, _) => action,
     }
 }
 
@@ -173,5 +199,83 @@ mod tests {
                 assert_eq!(pending, vec![first, second]);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod pending_bias_tests {
+    use super::with_pending_bias_update;
+    use anneal_core::methods::cluster_hopping::{BiasUpdate, CheckpointAction};
+    use ndarray::array;
+
+    fn merge() -> BiasUpdate {
+        BiasUpdate::MergeWells {
+            wells: vec![(array![1.0, 2.0], 0.75)],
+            weight: 0.5,
+            complete: false,
+        }
+    }
+
+    #[test]
+    fn a_received_table_survives_every_state_action() {
+        let actions = [
+            CheckpointAction::Continue,
+            CheckpointAction::DepositRemote {
+                states: vec![array![0.0, 0.0, 0.0, 1.0, 0.0, 0.0]],
+            },
+            CheckpointAction::BoundaryProposal {
+                state: array![0.0, 0.0, 0.0, 1.2, 0.0, 0.0],
+                action: "boundary".into(),
+            },
+            CheckpointAction::ExternalWork { external_calls: 37 },
+            CheckpointAction::Retire {
+                reason: "contract-boundary".into(),
+            },
+        ];
+        for action in actions {
+            let mut pending = Some(merge());
+            assert_eq!(
+                with_pending_bias_update(action.clone(), &mut pending),
+                CheckpointAction::WithBiasUpdates {
+                    updates: vec![merge()],
+                    action: Box::new(action),
+                }
+            );
+            assert!(pending.is_none());
+            assert_eq!(
+                with_pending_bias_update(CheckpointAction::Continue, &mut pending),
+                CheckpointAction::Continue
+            );
+        }
+    }
+
+    #[test]
+    fn no_received_table_preserves_the_state_action() {
+        let action = CheckpointAction::ExternalAdopt {
+            state: array![0.0, 0.0, 0.0, 1.2, 0.0, 0.0],
+            action: "adoption".into(),
+            external_calls: 43,
+        };
+        assert_eq!(with_pending_bias_update(action.clone(), &mut None), action);
+    }
+
+    #[test]
+    fn an_existing_update_wrapper_keeps_its_payload_and_order() {
+        let action = CheckpointAction::WithBiasUpdates {
+            updates: vec![BiasUpdate::DepositDescriptors {
+                deposits: vec![(array![1.0, 2.0], 3)],
+                weight: 0.25,
+            }],
+            action: Box::new(CheckpointAction::Continue),
+        };
+        let mut pending = Some(merge());
+        assert_eq!(
+            with_pending_bias_update(action.clone(), &mut pending),
+            CheckpointAction::WithBiasUpdates {
+                updates: vec![merge()],
+                action: Box::new(action),
+            }
+        );
+        assert!(pending.is_none());
     }
 }

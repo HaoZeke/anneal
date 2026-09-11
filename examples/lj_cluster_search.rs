@@ -17,7 +17,10 @@ mod checkpoint_deposits;
 #[path = "common/ensemble_report.rs"]
 mod ensemble_report;
 #[cfg(feature = "bank-rpc")]
-use checkpoint_deposits::with_pending_deposits;
+use checkpoint_deposits::{with_pending_bias_update, with_pending_deposits};
+
+#[cfg(feature = "bank-rpc")]
+use anneal_core::methods::cluster_hopping::BiasUpdate;
 
 use anneal_core::bias::BasinBias;
 use anneal_core::catalog::euclidean_gradient_norm;
@@ -4754,7 +4757,7 @@ fn run_capnp_catalog(
     let sync_policy = std::env::var("CATALOG_SYNC_POLICY").is_ok_and(|v| v == "1");
     let mut gossip_published = 0usize;
     let mut gossip_merged = 0usize;
-    let mut gossip_merge: Option<CheckpointAction> = None;
+    let mut gossip_merge: Option<BiasUpdate> = None;
     // Which phase took each checkpoint; printed on the seed record so a
     // mechanism that never fires is visible as zero rather than assumed.
     let mut phases = PhaseTally::default();
@@ -4816,7 +4819,7 @@ fn run_capnp_catalog(
                         }
                         if let Some((_, wells)) = bus.poll_wells().into_iter().last() {
                             gossip_merged += 1;
-                            gossip_merge = Some(CheckpointAction::MergeBias {
+                            gossip_merge = Some(BiasUpdate::MergeWells {
                                 wells,
                                 weight,
                                 complete: top.is_none(),
@@ -6634,12 +6637,7 @@ fn run_capnp_catalog(
                 CheckpointAction::Continue
             },
         );
-        // A gossip step takes the checkpoint only when nothing else did;
-        // deposits and proposals keep their precedence.
-        match (action, gossip_merge.take()) {
-            (CheckpointAction::Continue, Some(merge)) => merge,
-            (action, _) => action,
-        }
+        with_pending_bias_update(action, &mut gossip_merge)
     };
     let outcome = run_with_bias_at_checkpoints(
         &run_cfg,
