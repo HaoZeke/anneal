@@ -1662,11 +1662,7 @@ fn apply_request(
                     }
                 };
                 if bridge.ledger.launch(region).is_err() {
-                    return rejected(
-                        state,
-                        request.event_sequence,
-                        ProtocolRejection::ValidationRejected,
-                    );
+                    return validation_rejected(state, &request);
                 }
                 let entry = bridge
                     .entries
@@ -1695,18 +1691,10 @@ fn apply_request(
         }
         CatalogOperation::BridgeCrossing { crossing } => {
             let Some(scientific) = state.scientific.as_mut() else {
-                return rejected(
-                    state,
-                    request.event_sequence,
-                    ProtocolRejection::ValidationRejected,
-                );
+                return validation_rejected(state, &request);
             };
             let Some(bridge) = scientific.bridges.get_mut(&crossing.bridge) else {
-                return rejected(
-                    state,
-                    request.event_sequence,
-                    ProtocolRejection::ValidationRejected,
-                );
+                return validation_rejected(state, &request);
             };
             let from = crossing.from_region as usize;
             let to = crossing.to_region as usize;
@@ -1716,18 +1704,10 @@ fn apply_request(
                     .push(to, ndarray::Array1::from(crossing.state.clone()))
                     .is_err()
             {
-                return rejected(
-                    state,
-                    request.event_sequence,
-                    ProtocolRejection::ValidationRejected,
-                );
+                return validation_rejected(state, &request);
             }
             let Some(snapshot_version) = state.snapshot_version.checked_add(1) else {
-                return rejected(
-                    state,
-                    request.event_sequence,
-                    ProtocolRejection::ValidationRejected,
-                );
+                return validation_rejected(state, &request);
             };
             state.snapshot_version = snapshot_version;
         }
@@ -1813,11 +1793,7 @@ fn apply_request(
             draw,
         } => {
             let Some(scientific) = state.scientific.as_ref() else {
-                return rejected(
-                    state,
-                    request.event_sequence,
-                    ProtocolRejection::ValidationRejected,
-                );
+                return validation_rejected(state, &request);
             };
             let catalog = scientific
                 .catalog
@@ -1826,11 +1802,7 @@ fn apply_request(
                 .map(|entry| Array1::from_vec(entry.descriptor().to_vec()))
                 .collect::<Vec<_>>();
             let Ok(sample_count) = usize::try_from(*samples) else {
-                return rejected(
-                    state,
-                    request.event_sequence,
-                    ProtocolRejection::ValidationRejected,
-                );
+                return validation_rejected(state, &request);
             };
             let mut rng = rand::rngs::StdRng::seed_from_u64(*draw);
             let Ok(hole) = farthest_hole(
@@ -1839,11 +1811,7 @@ fn apply_request(
                 sample_count,
                 &mut rng,
             ) else {
-                return rejected(
-                    state,
-                    request.event_sequence,
-                    ProtocolRejection::ValidationRejected,
-                );
+                return validation_rejected(state, &request);
             };
             payload = AcceptedPayload::DescriptorHole(DescriptorHoleProposal {
                 target: hole.target().to_vec(),
@@ -1853,11 +1821,7 @@ fn apply_request(
         }
         CatalogOperation::BoundaryCrossing { current, draw } => {
             let Some(scientific) = state.scientific.as_ref() else {
-                return rejected(
-                    state,
-                    request.event_sequence,
-                    ProtocolRejection::ValidationRejected,
-                );
+                return validation_rejected(state, &request);
             };
             if let Some(crossing) =
                 sample_boundary_crossing(scientific, request.identity.replica, current, *draw)
@@ -1905,25 +1869,13 @@ fn apply_request(
                 }
             }
             let Some(scientific) = state.scientific.as_mut() else {
-                return rejected(
-                    state,
-                    request.event_sequence,
-                    ProtocolRejection::ValidationRejected,
-                );
+                return validation_rejected(state, &request);
             };
             if !energy.is_finite() {
-                return rejected(
-                    state,
-                    request.event_sequence,
-                    ProtocolRejection::ValidationRejected,
-                );
+                return validation_rejected(state, &request);
             }
             if scientific.census.validate_descriptor(descriptor).is_err() {
-                return rejected(
-                    state,
-                    request.event_sequence,
-                    ProtocolRejection::ValidationRejected,
-                );
+                return validation_rejected(state, &request);
             }
             let mut clock = PhaseClock::new();
             let local_basin =
@@ -1951,21 +1903,13 @@ fn apply_request(
                 .ok()
                 .flatten();
             if local_basin.is_some() && assigned_class.is_none() {
-                return rejected(
-                    state,
-                    request.event_sequence,
-                    ProtocolRejection::ValidationRejected,
-                );
+                return validation_rejected(state, &request);
             }
             let Ok(coverage) = scientific
                 .coverage
                 .evidence_values(descriptor, assigned_class)
             else {
-                return rejected(
-                    state,
-                    request.event_sequence,
-                    ProtocolRejection::ValidationRejected,
-                );
+                return validation_rejected(state, &request);
             };
             clock.lap("coverage");
             let novelty = coverage.acquisition;
@@ -2003,11 +1947,7 @@ fn apply_request(
                     basin_action_cost,
                     ride_action_cost,
                 ) else {
-                    return rejected(
-                        state,
-                        request.event_sequence,
-                        ProtocolRejection::ValidationRejected,
-                    );
+                    return validation_rejected(state, &request);
                 };
                 assignment
             };
@@ -2033,11 +1973,7 @@ fn apply_request(
                     .mark_live(request.identity.replica)
                     .is_err()
             {
-                return rejected(
-                    state,
-                    request.event_sequence,
-                    ProtocolRejection::ValidationRejected,
-                );
+                return validation_rejected(state, &request);
             }
             // Occupied packing communities on the book, not landfold
             // cells and not the FunnelModel EI subset. Landfold splits
@@ -2113,27 +2049,15 @@ fn apply_request(
         }
         CatalogOperation::PopulationSubmit { epoch, candidate } => {
             let Some(scientific) = state.scientific.as_mut() else {
-                return rejected(
-                    state,
-                    request.event_sequence,
-                    ProtocolRejection::ValidationRejected,
-                );
+                return validation_rejected(state, &request);
             };
             let Ok(validated) =
                 resolve_validation(&mut precomputed, scientific, &request.identity, candidate)
             else {
-                return rejected(
-                    state,
-                    request.event_sequence,
-                    ProtocolRejection::ValidationRejected,
-                );
+                return validation_rejected(state, &request);
             };
             let Some(basin_id) = exact_basin_for(scientific, &validated) else {
-                return rejected(
-                    state,
-                    request.event_sequence,
-                    ProtocolRejection::ValidationRejected,
-                );
+                return validation_rejected(state, &request);
             };
             observe_packing(
                 scientific,
@@ -2175,21 +2099,13 @@ fn apply_request(
             );
             let canonical = candidate_from_validated(&validated, Some(basin_id));
             if observe_ride_source(scientific, &canonical).is_err() {
-                return rejected(
-                    state,
-                    request.event_sequence,
-                    ProtocolRejection::ValidationRejected,
-                );
+                return validation_rejected(state, &request);
             }
             let epoch_candidates = scientific.population_candidates.entry(*epoch).or_default();
             let inserted = match epoch_candidates.get(&request.identity.replica) {
                 Some(stored) if stored == &canonical => false,
                 Some(_) => {
-                    return rejected(
-                        state,
-                        request.event_sequence,
-                        ProtocolRejection::ValidationRejected,
-                    );
+                    return validation_rejected(state, &request);
                 }
                 None => {
                     epoch_candidates.insert(request.identity.replica, canonical);
@@ -2202,18 +2118,10 @@ fn apply_request(
                 novelty,
                 basin_visits as f64,
             ) else {
-                return rejected(
-                    state,
-                    request.event_sequence,
-                    ProtocolRejection::ValidationRejected,
-                );
+                return validation_rejected(state, &request);
             };
             let Ok(outcome) = scientific.population.submit(*epoch, member) else {
-                return rejected(
-                    state,
-                    request.event_sequence,
-                    ProtocolRejection::ValidationRejected,
-                );
+                return validation_rejected(state, &request);
             };
             payload = match outcome {
                 EpochSubmissionOutcome::Pending {
@@ -2236,22 +2144,14 @@ fn apply_request(
             };
             if inserted {
                 let Some(snapshot_version) = state.snapshot_version.checked_add(1) else {
-                    return rejected(
-                        state,
-                        request.event_sequence,
-                        ProtocolRejection::ValidationRejected,
-                    );
+                    return validation_rejected(state, &request);
                 };
                 state.snapshot_version = snapshot_version;
             }
         }
         CatalogOperation::PopulationJoin { epoch } => {
             let Some(scientific) = state.scientific.as_mut() else {
-                return rejected(
-                    state,
-                    request.event_sequence,
-                    ProtocolRejection::ValidationRejected,
-                );
+                return validation_rejected(state, &request);
             };
             // Barrier membership is a lookup: the member is formed from the
             // best candidate this coordinator has already fresh-validated for
@@ -2271,22 +2171,14 @@ fn apply_request(
                     .get(&request.identity.replica)
                     .cloned()
             }) else {
-                return rejected(
-                    state,
-                    request.event_sequence,
-                    ProtocolRejection::ValidationRejected,
-                );
+                return validation_rejected(state, &request);
             };
             let Some(basin_id) = member_candidate
                 .census_basin
                 .map(BasinId::from_raw)
                 .filter(|basin| scientific.census.entry(*basin).is_some())
             else {
-                return rejected(
-                    state,
-                    request.event_sequence,
-                    ProtocolRejection::ValidationRejected,
-                );
+                return validation_rejected(state, &request);
             };
             let packing = scientific.packing.histogram(&member_candidate.coordinates);
             let basin_visits = packing
@@ -2318,11 +2210,7 @@ fn apply_request(
                 novelty,
                 basin_visits as f64,
             ) else {
-                return rejected(
-                    state,
-                    request.event_sequence,
-                    ProtocolRejection::ValidationRejected,
-                );
+                return validation_rejected(state, &request);
             };
             scientific
                 .population_candidates
@@ -2335,18 +2223,10 @@ fn apply_request(
                 .mark_live(request.identity.replica)
                 .is_err()
             {
-                return rejected(
-                    state,
-                    request.event_sequence,
-                    ProtocolRejection::ValidationRejected,
-                );
+                return validation_rejected(state, &request);
             }
             let Ok(outcome) = scientific.population.submit(*epoch, member) else {
-                return rejected(
-                    state,
-                    request.event_sequence,
-                    ProtocolRejection::ValidationRejected,
-                );
+                return validation_rejected(state, &request);
             };
             payload = match outcome {
                 EpochSubmissionOutcome::Pending {
@@ -2370,21 +2250,13 @@ fn apply_request(
         }
         CatalogOperation::PopulationAbstain { epoch } => {
             let Some(scientific) = state.scientific.as_mut() else {
-                return rejected(
-                    state,
-                    request.event_sequence,
-                    ProtocolRejection::ValidationRejected,
-                );
+                return validation_rejected(state, &request);
             };
             let Ok(outcome) = scientific
                 .population
                 .abstain(*epoch, request.identity.replica)
             else {
-                return rejected(
-                    state,
-                    request.event_sequence,
-                    ProtocolRejection::ValidationRejected,
-                );
+                return validation_rejected(state, &request);
             };
             let _ = scientific.population.retire(request.identity.replica);
             payload = match outcome {
@@ -2409,11 +2281,7 @@ fn apply_request(
         }
         CatalogOperation::PopulationPlan { epoch } => {
             let Some(scientific) = state.scientific.as_ref() else {
-                return rejected(
-                    state,
-                    request.event_sequence,
-                    ProtocolRejection::ValidationRejected,
-                );
+                return validation_rejected(state, &request);
             };
             if let Some(plan) = scientific.population_plans.get(epoch) {
                 // A completed epoch's population is its participants, which
@@ -2452,11 +2320,7 @@ fn apply_request(
                     plan: None,
                 });
             } else {
-                return rejected(
-                    state,
-                    request.event_sequence,
-                    ProtocolRejection::ValidationRejected,
-                );
+                return validation_rejected(state, &request);
             }
         }
         CatalogOperation::RecordVisit { candidate } => {
@@ -2464,18 +2328,10 @@ fn apply_request(
                 let Ok(validated) =
                     resolve_validation(&mut precomputed, scientific, &request.identity, candidate)
                 else {
-                    return rejected(
-                        state,
-                        request.event_sequence,
-                        ProtocolRejection::ValidationRejected,
-                    );
+                    return validation_rejected(state, &request);
                 };
                 let Ok(observation) = observe_exact_basin(scientific, &validated) else {
-                    return rejected(
-                        state,
-                        request.event_sequence,
-                        ProtocolRejection::ValidationRejected,
-                    );
+                    return validation_rejected(state, &request);
                 };
                 let previous = scientific
                     .last_basin_by_replica
@@ -2497,11 +2353,7 @@ fn apply_request(
                 }
                 let same_basin = previous == Some(observation.basin_id);
                 if !same_basin && observe_ride_source(scientific, &canonical).is_err() {
-                    return rejected(
-                        state,
-                        request.event_sequence,
-                        ProtocolRejection::ValidationRejected,
-                    );
+                    return validation_rejected(state, &request);
                 }
                 remember_candidate(scientific, request.identity.replica, canonical);
                 let arrival = scientific
@@ -2525,30 +2377,18 @@ fn apply_request(
                     .mark_live(request.identity.replica)
                     .is_err()
                 {
-                    return rejected(
-                        state,
-                        request.event_sequence,
-                        ProtocolRejection::ValidationRejected,
-                    );
+                    return validation_rejected(state, &request);
                 }
                 let _ = transition_node(scientific, observation.basin_id);
                 observation.total_visits
             } else {
                 let Some(census_visits) = state.census_visits.checked_add(1) else {
-                    return rejected(
-                        state,
-                        request.event_sequence,
-                        ProtocolRejection::ValidationRejected,
-                    );
+                    return validation_rejected(state, &request);
                 };
                 census_visits
             };
             let Some(snapshot_version) = state.snapshot_version.checked_add(1) else {
-                return rejected(
-                    state,
-                    request.event_sequence,
-                    ProtocolRejection::ValidationRejected,
-                );
+                return validation_rejected(state, &request);
             };
             state.census_visits = census_visits;
             state.snapshot_version = snapshot_version;
@@ -2560,18 +2400,10 @@ fn apply_request(
                 let Ok(validated) =
                     resolve_validation(&mut precomputed, scientific, &request.identity, candidate)
                 else {
-                    return rejected(
-                        state,
-                        request.event_sequence,
-                        ProtocolRejection::ValidationRejected,
-                    );
+                    return validation_rejected(state, &request);
                 };
                 let Ok(observation) = observe_exact_basin(scientific, &validated) else {
-                    return rejected(
-                        state,
-                        request.event_sequence,
-                        ProtocolRejection::ValidationRejected,
-                    );
+                    return validation_rejected(state, &request);
                 };
                 // An offer is validated exactly as a visit is, so it also
                 // refreshes the best candidate the population join reads;
@@ -2588,11 +2420,7 @@ fn apply_request(
                         .insert(request.identity.replica, canonical.clone());
                 }
                 if observe_ride_source(scientific, &canonical).is_err() {
-                    return rejected(
-                        state,
-                        request.event_sequence,
-                        ProtocolRejection::ValidationRejected,
-                    );
+                    return validation_rejected(state, &request);
                 }
                 // Catalog offers are search evidence, not adoption events.
                 // An uninitialized replica may bootstrap from an offer, but
@@ -2631,11 +2459,7 @@ fn apply_request(
                     .mark_live(request.identity.replica)
                     .is_err()
                 {
-                    return rejected(
-                        state,
-                        request.event_sequence,
-                        ProtocolRejection::ValidationRejected,
-                    );
+                    return validation_rejected(state, &request);
                 }
                 // CATALOG_FAMILY_ARCHIVE=1: keep the catalog family-diverse.
                 // Admission is by energy, so on a landscape with one deep
@@ -2737,27 +2561,15 @@ fn apply_request(
                 )
             } else {
                 let Some(active_entries) = state.active_entries.checked_add(1) else {
-                    return rejected(
-                        state,
-                        request.event_sequence,
-                        ProtocolRejection::ValidationRejected,
-                    );
+                    return validation_rejected(state, &request);
                 };
                 let Some(census_visits) = state.census_visits.checked_add(1) else {
-                    return rejected(
-                        state,
-                        request.event_sequence,
-                        ProtocolRejection::ValidationRejected,
-                    );
+                    return validation_rejected(state, &request);
                 };
                 (census_visits, active_entries, None)
             };
             let Some(snapshot_version) = state.snapshot_version.checked_add(1) else {
-                return rejected(
-                    state,
-                    request.event_sequence,
-                    ProtocolRejection::ValidationRejected,
-                );
+                return validation_rejected(state, &request);
             };
             state.census_visits = census_visits;
             state.active_entries = active_entries;
@@ -2772,36 +2584,20 @@ fn apply_request(
             adopted,
         } => {
             let Some(scientific) = state.scientific.as_mut() else {
-                return rejected(
-                    state,
-                    request.event_sequence,
-                    ProtocolRejection::ValidationRejected,
-                );
+                return validation_rejected(state, &request);
             };
             if action.is_empty() {
-                return rejected(
-                    state,
-                    request.event_sequence,
-                    ProtocolRejection::ValidationRejected,
-                );
+                return validation_rejected(state, &request);
             }
             let Some(source_basin) = scientific
                 .last_basin_by_replica
                 .get(&request.identity.replica)
                 .copied()
             else {
-                return rejected(
-                    state,
-                    request.event_sequence,
-                    ProtocolRejection::ValidationRejected,
-                );
+                return validation_rejected(state, &request);
             };
             let Some(source_node) = transition_node(scientific, source_basin) else {
-                return rejected(
-                    state,
-                    request.event_sequence,
-                    ProtocolRejection::ValidationRejected,
-                );
+                return validation_rejected(state, &request);
             };
             let source_candidate = scientific
                 .last_candidate_by_replica
@@ -2819,36 +2615,20 @@ fn apply_request(
                         &request.identity,
                         candidate,
                     ) else {
-                        return rejected(
-                            state,
-                            request.event_sequence,
-                            ProtocolRejection::ValidationRejected,
-                        );
+                        return validation_rejected(state, &request);
                     };
                     let Ok(observation) = observe_exact_basin(scientific, &validated) else {
-                        return rejected(
-                            state,
-                            request.event_sequence,
-                            ProtocolRejection::ValidationRejected,
-                        );
+                        return validation_rejected(state, &request);
                     };
                     let Some(destination_node) = transition_node(scientific, observation.basin_id)
                     else {
-                        return rejected(
-                            state,
-                            request.event_sequence,
-                            ProtocolRejection::ValidationRejected,
-                        );
+                        return validation_rejected(state, &request);
                     };
                     let destination_candidate =
                         candidate_from_validated(&validated, Some(observation.basin_id));
                     let terminal_energy = destination_candidate.energy;
                     if observe_ride_source(scientific, &destination_candidate).is_err() {
-                        return rejected(
-                            state,
-                            request.event_sequence,
-                            ProtocolRejection::ValidationRejected,
-                        );
+                        return validation_rejected(state, &request);
                     }
                     if *adopted {
                         scientific
@@ -2897,11 +2677,7 @@ fn apply_request(
                         && connect_coverage_classes(scientific, source_basin, observation.basin_id)
                             .is_err()
                     {
-                        return rejected(
-                            state,
-                            request.event_sequence,
-                            ProtocolRejection::ValidationRejected,
-                        );
+                        return validation_rejected(state, &request);
                     }
                     (
                         TransitionOutcome::Resolved(destination_node),
@@ -2914,11 +2690,7 @@ fn apply_request(
                 .observe(action.clone(), source_node, outcome)
                 .is_err()
             {
-                return rejected(
-                    state,
-                    request.event_sequence,
-                    ProtocolRejection::ValidationRejected,
-                );
+                return validation_rejected(state, &request);
             }
             if let (Some(source), Some(terminal_energy)) =
                 (source_candidate.as_ref(), terminal_energy)
@@ -2932,28 +2704,16 @@ fn apply_request(
                     )
                     .is_err()
             {
-                return rejected(
-                    state,
-                    request.event_sequence,
-                    ProtocolRejection::ValidationRejected,
-                );
+                return validation_rejected(state, &request);
             }
             let Some(snapshot_version) = state.snapshot_version.checked_add(1) else {
-                return rejected(
-                    state,
-                    request.event_sequence,
-                    ProtocolRejection::ValidationRejected,
-                );
+                return validation_rejected(state, &request);
             };
             state.snapshot_version = snapshot_version;
         }
         CatalogOperation::ClaimRide { seed } => {
             let Some(scientific) = state.scientific.as_mut() else {
-                return rejected(
-                    state,
-                    request.event_sequence,
-                    ProtocolRejection::ValidationRejected,
-                );
+                return validation_rejected(state, &request);
             };
             let mut ride_ledger = scientific.ride_ledger.clone();
             let order = match scientific.discovery_roles.get(&request.identity.replica) {
@@ -2974,11 +2734,7 @@ fn apply_request(
                     .get(&order.arm.source_basin)
                     .cloned()
                 else {
-                    return rejected(
-                        state,
-                        request.event_sequence,
-                        ProtocolRejection::ValidationRejected,
-                    );
+                    return validation_rejected(state, &request);
                 };
                 let avoid_saddles = scientific
                     .ride_saddles
@@ -2987,11 +2743,7 @@ fn apply_request(
                     .map(|saddle| saddle.candidate.clone())
                     .collect();
                 let Some(snapshot_version) = state.snapshot_version.checked_add(1) else {
-                    return rejected(
-                        state,
-                        request.event_sequence,
-                        ProtocolRejection::ValidationRejected,
-                    );
+                    return validation_rejected(state, &request);
                 };
                 scientific.ride_ledger = ride_ledger;
                 scientific
@@ -3007,36 +2759,20 @@ fn apply_request(
         }
         CatalogOperation::ReportRide { report } => {
             let Some(scientific) = state.scientific.as_mut() else {
-                return rejected(
-                    state,
-                    request.event_sequence,
-                    ProtocolRejection::ValidationRejected,
-                );
+                return validation_rejected(state, &request);
             };
             let mut next_scientific = scientific.clone();
             let Some(order) = next_scientific.ride_ledger.active_order(report.work) else {
-                return rejected(
-                    state,
-                    request.event_sequence,
-                    ProtocolRejection::ValidationRejected,
-                );
+                return validation_rejected(state, &request);
             };
             if order.replica != request.identity.replica {
-                return rejected(
-                    state,
-                    request.event_sequence,
-                    ProtocolRejection::ValidationRejected,
-                );
+                return validation_rejected(state, &request);
             }
             let source_basin = order.arm.source_basin;
             let Some((ride_feature, source_energy)) =
                 ride_action_feature(&next_scientific, &order.arm)
             else {
-                return rejected(
-                    state,
-                    request.event_sequence,
-                    ProtocolRejection::ValidationRejected,
-                );
+                return validation_rejected(state, &request);
             };
             let (outcome, receiving_evaluations) = match &report.outcome {
                 CatalogRideOutcome::Certified(connection) => certify_ride_connection(
@@ -3057,11 +2793,7 @@ fn apply_request(
                 .charged_evaluations
                 .checked_add(receiving_evaluations)
             else {
-                return rejected(
-                    state,
-                    request.event_sequence,
-                    ProtocolRejection::ValidationRejected,
-                );
+                return validation_rejected(state, &request);
             };
             let Ok(credit) = next_scientific.ride_ledger.report(
                 request.identity.replica,
@@ -3069,11 +2801,7 @@ fn apply_request(
                 charged_evaluations,
                 outcome.clone(),
             ) else {
-                return rejected(
-                    state,
-                    request.event_sequence,
-                    ProtocolRejection::ValidationRejected,
-                );
+                return validation_rejected(state, &request);
             };
             let terminal_energy = match &outcome {
                 RideOutcome::Certified { endpoints, .. } => endpoints
@@ -3093,11 +2821,7 @@ fn apply_request(
                 )
                 .is_err()
             {
-                return rejected(
-                    state,
-                    request.event_sequence,
-                    ProtocolRejection::ValidationRejected,
-                );
+                return validation_rejected(state, &request);
             }
             if let RideOutcome::Certified { endpoints, .. } = &outcome
                 && endpoints[0] != endpoints[1]
@@ -3105,18 +2829,10 @@ fn apply_request(
                 let left = BasinId::from_raw(endpoints[0]);
                 let right = BasinId::from_raw(endpoints[1]);
                 let Some(left_node) = transition_node(&mut next_scientific, left) else {
-                    return rejected(
-                        state,
-                        request.event_sequence,
-                        ProtocolRejection::ValidationRejected,
-                    );
+                    return validation_rejected(state, &request);
                 };
                 let Some(right_node) = transition_node(&mut next_scientific, right) else {
-                    return rejected(
-                        state,
-                        request.event_sequence,
-                        ProtocolRejection::ValidationRejected,
-                    );
+                    return validation_rejected(state, &request);
                 };
                 if next_scientific
                     .transition_graph
@@ -3135,29 +2851,17 @@ fn apply_request(
                         )
                         .is_err()
                 {
-                    return rejected(
-                        state,
-                        request.event_sequence,
-                        ProtocolRejection::ValidationRejected,
-                    );
+                    return validation_rejected(state, &request);
                 }
                 next_scientific
                     .landscape
                     .observe_crossing(endpoints[0], endpoints[1], 1.0);
                 if connect_coverage_classes(&mut next_scientific, left, right).is_err() {
-                    return rejected(
-                        state,
-                        request.event_sequence,
-                        ProtocolRejection::ValidationRejected,
-                    );
+                    return validation_rejected(state, &request);
                 }
             }
             let Some(snapshot_version) = state.snapshot_version.checked_add(1) else {
-                return rejected(
-                    state,
-                    request.event_sequence,
-                    ProtocolRejection::ValidationRejected,
-                );
+                return validation_rejected(state, &request);
             };
             let census_visits = next_scientific.census.total_visits();
             let active_entries = u32::try_from(next_scientific.catalog.len())
@@ -3174,18 +2878,10 @@ fn apply_request(
             cumulative_charged,
         } => {
             let Some(kind) = ChargeKind::from_wire_code(*kind) else {
-                return rejected(
-                    state,
-                    request.event_sequence,
-                    ProtocolRejection::ValidationRejected,
-                );
+                return validation_rejected(state, &request);
             };
             let Some(ledger) = state.ledger.as_mut() else {
-                return rejected(
-                    state,
-                    request.event_sequence,
-                    ProtocolRejection::ValidationRejected,
-                );
+                return validation_rejected(state, &request);
             };
             if ledger
                 .record(ReplicaLedgerEvent {
@@ -3197,11 +2893,7 @@ fn apply_request(
                 })
                 .is_err()
             {
-                return rejected(
-                    state,
-                    request.event_sequence,
-                    ProtocolRejection::ValidationRejected,
-                );
+                return validation_rejected(state, &request);
             }
             let aggregate_charged = ledger.ensemble_total();
             if let Some(scientific) = state.scientific.as_mut() {
@@ -3211,11 +2903,7 @@ fn apply_request(
                 }
             }
             let Some(snapshot_version) = state.snapshot_version.checked_add(1) else {
-                return rejected(
-                    state,
-                    request.event_sequence,
-                    ProtocolRejection::ValidationRejected,
-                );
+                return validation_rejected(state, &request);
             };
             state.snapshot_version = snapshot_version;
             feed_halving(
@@ -3241,28 +2929,16 @@ fn apply_request(
                     .last()
                     .is_some_and(|event| event.sequence == request.event_sequence);
             if !ordered {
-                return rejected(
-                    state,
-                    request.event_sequence,
-                    ProtocolRejection::ValidationRejected,
-                );
+                return validation_rejected(state, &request);
             }
             let Some(ledger) = state.ledger.as_ref() else {
-                return rejected(
-                    state,
-                    request.event_sequence,
-                    ProtocolRejection::ValidationRejected,
-                );
+                return validation_rejected(state, &request);
             };
             let mut staged = ledger.clone();
             let mut discovery_cost_changed = false;
             for event in events {
                 let Some(kind) = ChargeKind::from_wire_code(event.kind) else {
-                    return rejected(
-                        state,
-                        request.event_sequence,
-                        ProtocolRejection::ValidationRejected,
-                    );
+                    return validation_rejected(state, &request);
                 };
                 discovery_cost_changed |=
                     matches!(kind, ChargeKind::BasinEscape | ChargeKind::SaddleRide);
@@ -3276,27 +2952,15 @@ fn apply_request(
                     })
                     .is_err()
                 {
-                    return rejected(
-                        state,
-                        request.event_sequence,
-                        ProtocolRejection::ValidationRejected,
-                    );
+                    return validation_rejected(state, &request);
                 }
             }
             let aggregate_charged = staged.ensemble_total();
             let Ok(event_count) = u64::try_from(events.len()) else {
-                return rejected(
-                    state,
-                    request.event_sequence,
-                    ProtocolRejection::ValidationRejected,
-                );
+                return validation_rejected(state, &request);
             };
             let Some(snapshot_version) = state.snapshot_version.checked_add(event_count) else {
-                return rejected(
-                    state,
-                    request.event_sequence,
-                    ProtocolRejection::ValidationRejected,
-                );
+                return validation_rejected(state, &request);
             };
             state.ledger = Some(staged);
             if let Some(scientific) = state.scientific.as_mut() {
@@ -3318,21 +2982,13 @@ fn apply_request(
         }
         CatalogOperation::Attach => {
             if admit_replica(state, request.identity.replica).is_err() {
-                return rejected(
-                    state,
-                    request.event_sequence,
-                    ProtocolRejection::ValidationRejected,
-                );
+                return validation_rejected(state, &request);
             }
             payload = AcceptedPayload::Roster(state.roster.reply());
         }
         CatalogOperation::Detach { reason } => {
             if retire_replica(config, state, request.identity.replica, reason).is_err() {
-                return rejected(
-                    state,
-                    request.event_sequence,
-                    ProtocolRejection::ValidationRejected,
-                );
+                return validation_rejected(state, &request);
             }
             payload = AcceptedPayload::Roster(state.roster.reply());
         }
@@ -3366,11 +3022,7 @@ fn apply_request(
                     }),
                     Ok(None) => AcceptedPayload::Roster(roster),
                     Err(_) => {
-                        return rejected(
-                            state,
-                            request.event_sequence,
-                            ProtocolRejection::ValidationRejected,
-                        );
+                        return validation_rejected(state, &request);
                     }
                 },
                 None => AcceptedPayload::Roster(roster),
@@ -3393,11 +3045,7 @@ fn apply_request(
         }
         CatalogOperation::ExchangeSurfaceEvidence { report } => {
             let Some(version) = state.snapshot_version.checked_add(1) else {
-                return rejected(
-                    state,
-                    request.event_sequence,
-                    ProtocolRejection::ValidationRejected,
-                );
+                return validation_rejected(state, &request);
             };
             match state
                 .surface_evidence
@@ -3405,11 +3053,7 @@ fn apply_request(
             {
                 Ok(peers) => payload = AcceptedPayload::SurfaceEvidence(peers),
                 Err(_) => {
-                    return rejected(
-                        state,
-                        request.event_sequence,
-                        ProtocolRejection::ValidationRejected,
-                    );
+                    return validation_rejected(state, &request);
                 }
             }
             state.snapshot_version = version;
@@ -3420,11 +3064,7 @@ fn apply_request(
             charged,
         } => {
             let Ok(charged) = usize::try_from(*charged) else {
-                return rejected(
-                    state,
-                    request.event_sequence,
-                    ProtocolRejection::ValidationRejected,
-                );
+                return validation_rejected(state, &request);
             };
             let verdict = state.core_class.report(
                 request.identity.replica as usize,
@@ -3434,11 +3074,7 @@ fn apply_request(
             );
             payload = AcceptedPayload::CoreVerdict(verdict);
             let Some(snapshot_version) = state.snapshot_version.checked_add(1) else {
-                return rejected(
-                    state,
-                    request.event_sequence,
-                    ProtocolRejection::ValidationRejected,
-                );
+                return validation_rejected(state, &request);
             };
             state.snapshot_version = snapshot_version;
         }
@@ -6216,6 +5852,16 @@ fn accepted_with_payload(
         },
         payload,
     })
+}
+
+/// The reply to a request the coordinator will not apply: the commonest
+/// rejection, spelled once.
+fn validation_rejected(state: &CoordinatorState, request: &CatalogRequest) -> CatalogReply {
+    rejected(
+        state,
+        request.event_sequence,
+        ProtocolRejection::ValidationRejected,
+    )
 }
 
 fn rejected(
