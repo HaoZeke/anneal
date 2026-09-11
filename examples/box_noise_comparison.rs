@@ -163,7 +163,11 @@ fn main() {
                         shared: matches!(history, HistoryMode::Shared),
                         ..coverage_settings.clone()
                     };
-                    let history = if coverage_only { HistoryMode::None } else { history };
+                    let history = if coverage_only {
+                        HistoryMode::None
+                    } else {
+                        history
+                    };
                     let surface = Surface {
                         landscape,
                         bounds: Bounds::new(
@@ -259,9 +263,10 @@ fn quench_controls(dim: usize, ensemble_budget: usize, seeds: usize) {
             assert_eq!((result.n_evals, result.n_grads), counts);
             // This quadratic's descent direction points inward at either
             // bound, so projection leaves every gradient component unchanged.
-            let certificate = result.best_grad.as_ref().map(|gradient| {
-                gradient.iter().map(|g| g.abs()).fold(0.0, f64::max)
-            });
+            let certificate = result
+                .best_grad
+                .as_ref()
+                .map(|gradient| gradient.iter().map(|g| g.abs()).fold(0.0, f64::max));
             println!(
                 "{}",
                 json!({
