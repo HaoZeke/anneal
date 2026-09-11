@@ -69,6 +69,51 @@ table. Box replicas are stepped by the box runner's loops, not by the atomic
 runner's scoped threads. The atomic runner constructs an objective per thread,
 so an external potential handle need not be shared between replicas.
 
+** Common Python result and domain
+
+=minimize(fun, x0, bounds, jac=None, budget=..., replicas=...)= delegates to
+=ensemble_optimize= and retains its complete result dictionary under
+=result.diagnostics=. It does not select atomic geometry from vector length
+or introduce a separate optimization loop.
+
+The declared box contains finite closed intervals. Equal endpoints fix an
+axis while every objective and gradient callback retains the full design
+dimension. The one-replica values portfolio searches the free coordinates
+through a compact index map; fixed axes require no dense basis matrix.
+A fully fixed one-replica values box has one possible point and evaluates
+it once. The box hop paths preserve fixed axes directly.
+
+The generic Rust result and Python dictionary retain =n_evals=, =n_grads=,
+=charged=, =hops=, =history_observations= and the coverage diagnostics.
+The convenience result names objective calls =nfev= and gradient calls
+=njev=, with =charged = nfev + njev=. No callback is added to construct
+these diagnostics. Minimum counts cannot substitute for any of those work
+or coverage counters.
+
+#+begin_src python
+import anneal
+import numpy as np
+
+result = anneal.minimize(
+    lambda x: float(np.dot(x, x)),
+    x0=[1.0, 0.0, 1.0],
+    bounds=[(-2.0, 2.0), (0.0, 0.0), (-2.0, 2.0)],
+    jac=lambda x: 2.0 * x,
+    budget=256,
+    replicas=4,
+    seed=7,
+)
+assert result.x.shape == (3,)
+assert result.x[1] == 0.0
+assert result.charged == result.nfev + result.njev <= 256
+assert len(result.diagnostics["coverage_regions_per_chain"]) == 4
+#+end_src
+
+=success= means a finite feasible candidate was returned. It is not a local
+convergence test or a global-optimality certificate. The optional parameter
+store is a result archive and starting-point source, not serialized chain
+state or a persisted coverage table.
+
 ** Configure box coverage independently
 
 =box_ensemble_optimize_with_coverage= and
