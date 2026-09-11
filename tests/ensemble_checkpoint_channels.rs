@@ -73,7 +73,11 @@ fn run(shared: bool, gossip: bool, restart: bool) -> EnsembleReport {
     assert!(report.aggregate_charged <= ens.budget);
     assert_eq!(
         report.aggregate_charged,
-        report.replicas.iter().map(|replica| replica.charged).sum()
+        report
+            .replicas
+            .iter()
+            .map(|replica| replica.charged)
+            .sum::<usize>()
     );
     assert!(report.histories.is_empty());
     assert_eq!(report.best, 0.0);
