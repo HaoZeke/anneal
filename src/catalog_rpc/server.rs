@@ -2071,31 +2071,11 @@ fn apply_request(
             // been rather than where a box was drawn.
             observe_descriptor(scientific, &validated.candidate.descriptor);
             record_energy(scientific, request.identity.replica, validated.fresh.energy);
-            let packing = scientific
-                .packing
-                .histogram(&validated.candidate.coordinates);
-            let basin_visits = packing
-                .as_ref()
-                .and_then(|fp| scientific.packing.family_of(fp))
-                .map_or_else(
-                    || {
-                        scientific
-                            .census
-                            .entry(basin_id)
-                            .expect("classified census basin exists")
-                            .visits()
-                    },
-                    |family| scientific.packing.visits(family),
-                );
-            let novelty = packing.as_ref().map_or_else(
-                || {
-                    nearest_other_census_distance(
-                        &scientific.census,
-                        basin_id,
-                        &validated.candidate.descriptor,
-                    )
-                },
-                |fp| scientific.packing.novelty(fp),
+            let (basin_visits, novelty) = member_evidence(
+                scientific,
+                &validated.candidate.coordinates,
+                &validated.candidate.descriptor,
+                basin_id,
             );
             let canonical = candidate_from_validated(&validated, Some(basin_id));
             if observe_ride_source(scientific, &canonical).is_err() {
@@ -2162,29 +2142,11 @@ fn apply_request(
             else {
                 return validation_rejected(state, &request);
             };
-            let packing = scientific.packing.histogram(&member_candidate.coordinates);
-            let basin_visits = packing
-                .as_ref()
-                .and_then(|fp| scientific.packing.family_of(fp))
-                .map_or_else(
-                    || {
-                        scientific
-                            .census
-                            .entry(basin_id)
-                            .expect("classified census basin exists")
-                            .visits()
-                    },
-                    |family| scientific.packing.visits(family),
-                );
-            let novelty = packing.as_ref().map_or_else(
-                || {
-                    nearest_other_census_distance(
-                        &scientific.census,
-                        basin_id,
-                        &member_candidate.descriptor,
-                    )
-                },
-                |fp| scientific.packing.novelty(fp),
+            let (basin_visits, novelty) = member_evidence(
+                scientific,
+                &member_candidate.coordinates,
+                &member_candidate.descriptor,
+                basin_id,
             );
             let Ok(member) = PopulationMember::new(
                 request.identity.replica,
@@ -5798,6 +5760,37 @@ fn accepted_with_payload(
         },
         payload,
     })
+}
+
+/// A barrier member's evidence: the visit count of its packing family (or
+/// of its census basin when the structure has no packing histogram) and
+/// its novelty (the packing book's, or the distance to the nearest other
+/// census basin).
+fn member_evidence(
+    scientific: &ScientificState,
+    coordinates: &[f64],
+    descriptor: &[f64],
+    basin_id: BasinId,
+) -> (u64, f64) {
+    let packing = scientific.packing.histogram(coordinates);
+    let basin_visits = packing
+        .as_ref()
+        .and_then(|fp| scientific.packing.family_of(fp))
+        .map_or_else(
+            || {
+                scientific
+                    .census
+                    .entry(basin_id)
+                    .expect("classified census basin exists")
+                    .visits()
+            },
+            |family| scientific.packing.visits(family),
+        );
+    let novelty = packing.as_ref().map_or_else(
+        || nearest_other_census_distance(&scientific.census, basin_id, descriptor),
+        |fp| scientific.packing.novelty(fp),
+    );
+    (basin_visits, novelty)
 }
 
 /// The reply payload after a barrier submission: the epoch's progress
