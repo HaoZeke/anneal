@@ -83,6 +83,7 @@ pub use box_hopping::{
     CoverageStats, EnsembleHopResult, GleEscapeConfig, box_ensemble_optimize,
     box_ensemble_optimize_with_coverage, box_values_ensemble_optimize,
     box_values_ensemble_optimize_with_coverage, ensemble_hop_optimize,
+    ensemble_hop_optimize_with_config,
 };
 pub use dmc_population::{
     DEFAULT_BETA0, DEFAULT_STEPS_PER_CONTROL, DEFAULT_TARGET_WALKERS, DmcPopulationResult,

@@ -10,6 +10,8 @@
 //!   from the optional [`HistoryHook`] and certified-minimum ledger.
 //!   [`ensemble_hop_optimize`] uses the values-only portfolio for one
 //!   replica without a gradient.
+//! * [`ensemble_hop_optimize_with_config`] selects either box engine from
+//!   the gradient capability while retaining explicit escape and coverage.
 //!
 //! A box is not a point set. Cluster
 //! [`crate::methods::cluster_hopping::Config::recommended`] does not apply.
@@ -196,8 +198,8 @@ pub struct EnsembleHopResult {
     /// Distinct exact identities in the shared or largest private history.
     ///
     /// Zero on the one-replica values-only portfolio, which has no hop
-    /// history. Two or more values-only replicas share this table when
-    /// a finite-difference certificate is flat.
+    /// history. Configured values-only chains admit to this table when a
+    /// finite-difference certificate is flat.
     pub history_minima: usize,
     /// History attempts, refusals and summed operation seconds across replicas.
     /// Zero when the selected search does not use history.
@@ -229,18 +231,7 @@ where
     G: Gradient<f64>,
 {
     let budget = budget.max(1);
-    if let Some(grad) = grad {
-        let config = BoxEnsembleConfig {
-            replicas: replicas.max(1),
-            budget,
-            history,
-            membership,
-            ..BoxEnsembleConfig::default()
-        };
-        let out = box_ensemble_optimize(obj, grad, seed, x0, &config);
-        return EnsembleHopResult::from(out);
-    }
-    if replicas <= 1 {
+    if grad.is_none() && replicas <= 1 {
         let out = free_coordinates::values_portfolio::<_, G>(obj, budget, seed, x0);
         return EnsembleHopResult {
             best_pos: Array1::from(out.best_pos),
@@ -257,13 +248,43 @@ where
         };
     }
     let config = BoxEnsembleConfig {
-        replicas,
+        replicas: replicas.max(1),
         budget,
         history,
         membership,
         ..BoxEnsembleConfig::default()
     };
-    EnsembleHopResult::from(box_values_ensemble_optimize(obj, seed, x0, &config))
+    let coverage = BoxCoverageConfig::for_ensemble(&config);
+    ensemble_hop_optimize_with_config(obj, grad, seed, x0, &config, &coverage)
+}
+
+/// Capability-driven box search with explicit escape and coverage settings.
+///
+/// A gradient selects the gradient box engine; its absence selects values-only
+/// chains. Both paths preserve the given configuration and common work/result
+/// contract. Coverage is independent of the optional certified-minimum history.
+///
+/// Explicit configuration selects hop chains even for one values-only replica.
+/// Use [`ensemble_hop_optimize`] for the convenience policy that selects the
+/// values-only portfolio for that case. Langevin escape without a gradient is
+/// rejected before any objective callback, not replaced by another proposal.
+pub fn ensemble_hop_optimize_with_config<O, G>(
+    obj: &O,
+    grad: Option<&G>,
+    seed: u64,
+    x0: Option<ArrayView1<f64>>,
+    config: &BoxEnsembleConfig,
+    coverage: &BoxCoverageConfig,
+) -> EnsembleHopResult
+where
+    O: Objective<f64>,
+    G: Gradient<f64>,
+{
+    let out = match grad {
+        Some(grad) => box_ensemble_optimize_with_coverage(obj, grad, seed, x0, config, coverage),
+        None => box_values_ensemble_optimize_with_coverage(obj, seed, x0, config, coverage),
+    };
+    EnsembleHopResult::from(out)
 }
 
 impl From<BoxEnsembleResult> for EnsembleHopResult {
