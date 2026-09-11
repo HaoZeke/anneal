@@ -513,7 +513,12 @@ where
             };
             let temp = temp_of(replica.generation, replica.f);
             let accept = coverage.accepts(
-                index, replica.cv.view(), trial_cv.view(), replica.f, trial_f, temp,
+                index,
+                replica.cv.view(),
+                trial_cv.view(),
+                replica.f,
+                trial_f,
+                temp,
                 &mut replica.rng,
             );
             coverage.observe(index, trial_cv.view(), temp);
@@ -1052,7 +1057,12 @@ where
             };
             let temp = temp_of(replica.generation, replica.f);
             let accept = coverage.accepts(
-                index, replica.cv.view(), trial_cv.view(), replica.f, trial_f, temp,
+                index,
+                replica.cv.view(),
+                trial_cv.view(),
+                replica.f,
+                trial_f,
+                temp,
                 &mut replica.rng,
             );
             coverage.observe(index, trial_cv.view(), temp);
