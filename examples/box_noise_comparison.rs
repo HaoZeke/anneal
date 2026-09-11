@@ -230,6 +230,7 @@ fn main() {
                             "coverage_applied_foreign": result.coverage.applied_foreign_visits,
                             "coverage_capped_foreign": result.coverage.capped_foreign_visits,
                             "coverage_regions_per_chain": result.coverage.per_chain_regions,
+                            "coverage_decisions": result.coverage_decisions,
                         })
                     );
                 }
