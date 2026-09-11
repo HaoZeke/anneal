@@ -136,7 +136,11 @@ impl LangevinStepper {
 
     /// Correct a feasible position before raw force evaluation, so cached
     /// forces always belong to the positions the objective actually samples.
-    pub(crate) fn step_with_proposal<O: Objective<f64>, G: Gradient<f64>, P: FnMut(&mut Array1<f64>)>(
+    pub(crate) fn step_with_proposal<
+        O: Objective<f64>,
+        G: Gradient<f64>,
+        P: FnMut(&mut Array1<f64>),
+    >(
         &mut self,
         obj: &O,
         grad: &G,

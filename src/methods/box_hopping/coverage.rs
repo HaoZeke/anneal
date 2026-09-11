@@ -278,7 +278,10 @@ impl Coverage {
             return;
         }
         if let Some(descriptor) = self.describe(x, value) {
-            self.exchange.as_mut().expect("sample exchange").publish_sample(replica, descriptor);
+            self.exchange
+                .as_mut()
+                .expect("sample exchange")
+                .publish_sample(replica, descriptor);
         }
     }
 
@@ -291,7 +294,8 @@ impl Coverage {
         proposal: &mut Array1<f64>,
         rng: &mut R,
     ) {
-        if self.exchange.is_none() || self.biases[replica].height() == 0.0
+        if self.exchange.is_none()
+            || self.biases[replica].height() == 0.0
             || !self.coordinates.feasible(proposal.view())
             || !self.coordinates.feasible(anchor)
         {
@@ -300,9 +304,13 @@ impl Coverage {
         let point = self.coordinates.describe(proposal.view());
         let anchor = self.coordinates.describe(anchor);
         match self.peer_samples[replica].separate(
-            point.view(), anchor.view(), self.coordinates.widths.view(),
-            self.coordinates.free_scale, self.biases[replica].index().merge_radius(),
-            self.peer_weight, rng,
+            point.view(),
+            anchor.view(),
+            self.coordinates.widths.view(),
+            self.coordinates.free_scale,
+            self.biases[replica].index().merge_radius(),
+            self.peer_weight,
+            rng,
         ) {
             Separation::Distant => (),
             Separation::Constrained => {
@@ -313,7 +321,8 @@ impl Coverage {
                 let mut moved = proposal.clone();
                 for j in 0..moved.len() {
                     moved[j] = (self.coordinates.low[j]
-                        + self.coordinates.widths[j] * (descriptor[j] / self.coordinates.free_scale))
+                        + self.coordinates.widths[j]
+                            * (descriptor[j] / self.coordinates.free_scale))
                         .clamp(self.coordinates.low[j], self.coordinates.high[j]);
                 }
                 self.stats.sample_overlaps += 1;
@@ -507,7 +516,10 @@ impl Coverage {
     }
 
     pub(super) fn finish(mut self) -> (CoverageStats, CoverageDecisionStats) {
-        self.stats.published_samples = self.exchange.as_ref().map_or(0, |exchange| exchange.sample_counts().0);
+        self.stats.published_samples = self
+            .exchange
+            .as_ref()
+            .map_or(0, |exchange| exchange.sample_counts().0);
         self.stats.published_visits = self
             .exchange
             .as_ref()

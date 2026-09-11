@@ -41,8 +41,11 @@ impl PeerSamples {
             .iter()
             .flatten()
             .map(|sample| {
-                let squared_distance = point.iter().zip(sample.iter())
-                    .map(|(a, b)| (a - b).powi(2)).sum::<f64>();
+                let squared_distance = point
+                    .iter()
+                    .zip(sample.iter())
+                    .map(|(a, b)| (a - b).powi(2))
+                    .sum::<f64>();
                 (squared_distance.sqrt(), sample)
             })
             .min_by(|a, b| a.0.total_cmp(&b.0))
@@ -74,7 +77,11 @@ impl PeerSamples {
             norm = direction.dot(&direction).sqrt();
             if norm == 0.0 {
                 for (component, width) in direction.iter_mut().zip(widths.iter()) {
-                    *component = if *width > 0.0 { StandardNormal.sample(rng) } else { 0.0 };
+                    *component = if *width > 0.0 {
+                        StandardNormal.sample(rng)
+                    } else {
+                        0.0
+                    };
                 }
                 norm = direction.dot(&direction).sqrt();
             }
@@ -83,15 +90,20 @@ impl PeerSamples {
             return Separation::Constrained;
         }
         let increment = (radius - distance) * weight.min(1.0);
-        let candidate = Array1::from_iter(point.iter().zip(direction.iter()).zip(widths.iter())
-            .map(|((coordinate, direction), width)| {
-                if *width > 0.0 {
-                    (coordinate + (direction / norm) * increment).clamp(0.0, upper)
-                } else {
-                    0.0
-                }
-            }));
-        if self.nearest(candidate.view()).is_some_and(|(clearance, _)| clearance > distance) {
+        let candidate =
+            Array1::from_iter(point.iter().zip(direction.iter()).zip(widths.iter()).map(
+                |((coordinate, direction), width)| {
+                    if *width > 0.0 {
+                        (coordinate + (direction / norm) * increment).clamp(0.0, upper)
+                    } else {
+                        0.0
+                    }
+                },
+            ));
+        if self
+            .nearest(candidate.view())
+            .is_some_and(|(clearance, _)| clearance > distance)
+        {
             Separation::Moved(candidate)
         } else {
             Separation::Constrained

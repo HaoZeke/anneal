@@ -68,7 +68,10 @@ impl SharedDeposits {
     pub fn publish_sample(&mut self, walker: usize, descriptor: Array1<f64>) -> bool {
         assert!(walker < self.walkers, "walker index out of range");
         let samples = &mut self.samples[walker];
-        if samples.back().is_some_and(|sample| sample.descriptor == descriptor) {
+        if samples
+            .back()
+            .is_some_and(|sample| sample.descriptor == descriptor)
+        {
             return false;
         }
         if samples.len() == SAMPLE_WINDOW {
