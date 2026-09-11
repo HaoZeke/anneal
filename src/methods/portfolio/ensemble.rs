@@ -8,7 +8,7 @@ use ndarray::{Array1, ArrayView1};
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 
-use crate::methods::box_hopping::coverage::Coverage;
+use crate::methods::box_hopping::coverage::{Coverage, RepulsionSnapshot};
 use crate::methods::box_hopping::{BoxCoverageConfig, CoverageStats};
 
 use super::{PortfolioPolicy, PortfolioResult, portfolio_optimize_interacting};
@@ -96,11 +96,22 @@ where
                 let replica_seed = seed ^ (replica as u64).wrapping_mul(0x9E37_79B9);
                 let allowance = config.budget / config.replicas
                     + usize::from(replica < config.budget % config.replicas);
-                let peer = enabled.then(|| Peer {
-                    coordinator: Arc::clone(&coordinator),
-                    replica,
-                    rng: Mutex::new(StdRng::seed_from_u64(replica_seed ^ 0x5045_4552_5f47_454f)),
-                    prepared: Mutex::new(VecDeque::new()),
+                let peer = enabled.then(|| {
+                    let geometry = coordinator
+                        .state
+                        .lock()
+                        .expect("portfolio exchange lock")
+                        .coverage
+                        .repulsion_snapshot(replica);
+                    Peer {
+                        coordinator: Arc::clone(&coordinator),
+                        replica,
+                        local: Mutex::new(LocalPeer {
+                            rng: StdRng::seed_from_u64(replica_seed ^ 0x5045_4552_5f47_454f),
+                            prepared: VecDeque::new(),
+                            geometry,
+                        }),
+                    }
                 });
                 scope.spawn(move || {
                     let start = x0.map(|x| {
@@ -206,23 +217,30 @@ impl Coordinator {
 pub(super) struct Peer {
     coordinator: Arc<Coordinator>,
     replica: usize,
-    rng: Mutex<StdRng>,
-    prepared: Mutex<VecDeque<Array1<f64>>>,
+    local: Mutex<LocalPeer>,
+}
+
+struct LocalPeer {
+    rng: StdRng,
+    prepared: VecDeque<Array1<f64>>,
+    geometry: RepulsionSnapshot,
 }
 
 impl Peer {
     pub(super) fn checkpoint(&self, position: ArrayView1<f64>, value: f64) {
         // Unfunded prepared points are not observations and cannot survive
         // into a different arm's line searches or derivative stencils.
-        self.prepared
-            .lock()
-            .expect("prepared proposals lock")
-            .clear();
+        let stats = {
+            let mut local = self.local.lock().expect("local peer geometry lock");
+            local.prepared.clear();
+            local.geometry.take_stats()
+        };
         let mut state = self
             .coordinator
             .state
             .lock()
             .expect("portfolio exchange lock");
+        state.coverage.record_repulsion(stats);
         state.coverage.sample(self.replica, position, value);
         let epoch = state.epoch;
         state.arrived[self.replica] = true;
@@ -234,28 +252,24 @@ impl Peer {
                 .wait(state)
                 .expect("portfolio exchange lock");
         }
+        self.local.lock().expect("local peer geometry lock").geometry =
+            state.coverage.repulsion_snapshot(self.replica);
     }
 
     pub(super) fn prepare(&self, anchor: ArrayView1<f64>, proposal: &mut Array1<f64>) -> bool {
         let original = proposal.clone();
-        let mut rng = self.rng.lock().expect("peer geometry random stream lock");
-        self.coordinator
-            .state
-            .lock()
-            .expect("portfolio exchange lock")
-            .coverage
-            .repel(self.replica, anchor, proposal, &mut *rng);
+        let mut local = self.local.lock().expect("local peer geometry lock");
+        let LocalPeer { rng, geometry, prepared } = &mut *local;
+        geometry.repel(anchor, proposal, rng);
         let changed = *proposal != original;
-        self.prepared
-            .lock()
-            .expect("prepared proposals lock")
-            .push_back(proposal.clone());
+        prepared.push_back(proposal.clone());
         changed
     }
 
     pub(super) fn evaluated(&self, position: ArrayView1<f64>, value: f64) {
         let paid_proposal = {
-            let mut prepared = self.prepared.lock().expect("prepared proposals lock");
+            let mut local = self.local.lock().expect("local peer geometry lock");
+            let prepared = &mut local.prepared;
             prepared
                 .iter()
                 .position(|x| x.view() == position)
@@ -277,6 +291,9 @@ impl Drop for Peer {
         // A callback unwind ends this reader's obligation without preventing
         // peers from completing their funded slices and checkpoint exchange.
         if let Ok(mut state) = self.coordinator.state.lock() {
+            if let Ok(local) = self.local.get_mut() {
+                state.coverage.record_repulsion(local.geometry.take_stats());
+            }
             state.active[self.replica] = false;
             state.coverage.retire_reader(self.replica);
             self.coordinator.advance(&mut state);
