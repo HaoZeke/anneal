@@ -242,15 +242,17 @@ impl Coverage {
 
     fn heights(&self, replica: usize, descriptor: ArrayView1<f64>) -> (f64, ForeignWell) {
         let bias = &self.biases[replica];
-        bias.index().lookup(descriptor).map_or(
-            (0.0, ForeignWell::default()),
-            |region| {
+        bias.index()
+            .lookup(descriptor)
+            .map_or((0.0, ForeignWell::default()), |region| {
                 (
                     bias.well_depth(region),
-                    self.foreign_wells[replica].get(region).copied().unwrap_or_default(),
+                    self.foreign_wells[replica]
+                        .get(region)
+                        .copied()
+                        .unwrap_or_default(),
                 )
-            },
-        )
+            })
     }
 
     /// Apply the biased Metropolis decision and measure direct peer-height
@@ -291,9 +293,19 @@ impl Coverage {
         };
         let normalized_peer_delta = peer_delta.abs() / effective_temperature;
         if ![
-            energy, trial_energy, temperature, delta, peer_delta,
-            conditional_delta, probability, conditional_probability, normalized_peer_delta,
-        ].iter().all(|value| value.is_finite()) {
+            energy,
+            trial_energy,
+            temperature,
+            delta,
+            peer_delta,
+            conditional_delta,
+            probability,
+            conditional_probability,
+            normalized_peer_delta,
+        ]
+        .iter()
+        .all(|value| value.is_finite())
+        {
             decisions.unresolved += 1;
             return accepted;
         }
@@ -304,9 +316,12 @@ impl Coverage {
         decisions.probability_change_sum += change;
         decisions.max_probability_change = decisions.max_probability_change.max(change);
         decisions.max_abs_peer_delta = decisions.max_abs_peer_delta.max(peer_delta.abs());
-        decisions.max_abs_peer_delta_over_temperature = decisions.max_abs_peer_delta_over_temperature.max(normalized_peer_delta);
+        decisions.max_abs_peer_delta_over_temperature = decisions
+            .max_abs_peer_delta_over_temperature
+            .max(normalized_peer_delta);
         if let Some(draw) = draw {
-            decisions.drawn_disagreements += usize::from(accepted != (draw < conditional_probability));
+            decisions.drawn_disagreements +=
+                usize::from(accepted != (draw < conditional_probability));
         }
         accepted
     }
