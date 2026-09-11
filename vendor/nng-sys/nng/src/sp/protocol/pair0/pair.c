@@ -90,6 +90,11 @@ pair0_pipe_stop(void *arg)
 	pair0_pipe *p = arg;
 	pair0_sock *s = p->pair;
 
+	// Successful callbacks can publish readiness for this peer. Drain them
+	// before removing the peer, without holding the mutex they acquire.
+	nni_aio_stop(&p->aio_send);
+	nni_aio_stop(&p->aio_recv);
+
 	nni_mtx_lock(&s->mtx);
 	if (s->p == p) {
 		s->p = NULL;
@@ -107,9 +112,6 @@ pair0_pipe_stop(void *arg)
 		}
 	}
 	nni_mtx_unlock(&s->mtx);
-
-	nni_aio_stop(&p->aio_send);
-	nni_aio_stop(&p->aio_recv);
 }
 
 static void
