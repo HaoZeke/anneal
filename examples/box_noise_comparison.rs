@@ -8,7 +8,7 @@ use anneal_core::methods::box_hopping::{
 };
 use anneal_core::methods::ensemble::HistoryMode;
 use anneal_core::methods::gle_langevin::GleNoise;
-use anneal_core::methods::local_polish::{projected_gradient, projected_gradient_polish};
+use anneal_core::methods::local_polish::projected_gradient_polish;
 use eindir_core::{Bounds, Gradient, Objective};
 use ndarray::{Array1, ArrayView1};
 use rand::Rng;
@@ -223,16 +223,10 @@ fn quench_controls(dim: usize, ensemble_budget: usize, seeds: usize) {
                 surface.gradients.load(Ordering::Relaxed),
             );
             assert_eq!((result.n_evals, result.n_grads), counts);
+            // This quadratic's descent direction points inward at either
+            // bound, so projection leaves every gradient component unchanged.
             let certificate = result.best_grad.as_ref().map(|gradient| {
-                projected_gradient(
-                    &result.best_pos,
-                    gradient,
-                    &surface.bounds.low,
-                    &surface.bounds.high,
-                )
-                .iter()
-                .map(|g| g.abs())
-                .fold(0.0, f64::max)
+                gradient.iter().map(|g| g.abs()).fold(0.0, f64::max)
             });
             println!(
                 "{}",
