@@ -53,11 +53,20 @@ def summarise(directory):
         if "gap to reference" not in text:
             continue
         exit_path = path.with_suffix(".exitcode")
+        if path.with_suffix(".meta").exists() and not exit_path.exists():
+            continue
         if exit_path.exists() and exit_path.read_text().strip() != "0":
+            continue
+        lines = text.splitlines()
+        results = [
+            match for line in lines
+            if (match := ENSEMBLE.match(line) or SINGLE.match(line))
+        ]
+        if len(results) != 1 or int(results[0].group(1)) != seed:
             continue
         record["done"] += 1
         record["finished"].append(seed)
-        for line in text.splitlines():
+        for line in lines:
             m = ENSEMBLE.match(line)
             if m:
                 record["wall"].append(float(m.group(5)))
