@@ -16,7 +16,7 @@ commit=$(git rev-parse HEAD)
 if ! git diff --quiet HEAD -- src examples tests scripts Cargo.toml Cargo.lock; then
   commit="${commit}-dirty"
 fi
-for dir in src examples tests scripts; do
+for dir in src examples tests scripts vendor; do
   rsync -a --delete "$dir/" "$HOST:$STAGING/$dir/"
 done
 rsync -a Cargo.toml Cargo.lock "$HOST:$STAGING/"
