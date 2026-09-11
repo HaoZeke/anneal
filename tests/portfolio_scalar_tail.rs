@@ -17,7 +17,10 @@ struct ScalarLoss {
 impl Objective<f64> for ScalarLoss {
     fn eval(&self, x: ArrayView1<f64>) -> f64 {
         assert_eq!(x.len(), self.bounds.dims);
-        assert!(x.iter().all(|v| v.is_finite() && (-5.12..=5.12).contains(v)));
+        assert!(
+            x.iter()
+                .all(|v| v.is_finite() && (-5.12..=5.12).contains(v))
+        );
         let value = if self.nonfinite {
             f64::INFINITY
         } else {
@@ -26,8 +29,7 @@ impl Objective<f64> for ScalarLoss {
                 .map(|(j, &v)| {
                     let optimum = 0.7 + 0.3 * ((j + 1) as f64 * std::f64::consts::SQRT_2).sin();
                     let shifted = v - optimum;
-                    shifted * shifted
-                        + 10.0 * (1.0 - (2.0 * std::f64::consts::PI * shifted).cos())
+                    shifted * shifted + 10.0 * (1.0 - (2.0 * std::f64::consts::PI * shifted).cos())
                 })
                 .sum()
         };
@@ -58,7 +60,11 @@ impl Gradient<f64> for NoUserGradient {
 
 fn check(dim: usize, budget: usize, seed: u64, nonfinite: bool) {
     let objective = ScalarLoss {
-        bounds: Bounds::new(Array1::from_elem(dim, -5.12), Array1::from_elem(dim, 5.12), 0.0),
+        bounds: Bounds::new(
+            Array1::from_elem(dim, -5.12),
+            Array1::from_elem(dim, 5.12),
+            0.0,
+        ),
         nonfinite,
         observed: Mutex::new(Vec::new()),
     };
