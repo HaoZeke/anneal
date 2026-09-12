@@ -1248,7 +1248,8 @@ fn coordinate_opposition_scout<O>(
         let center = 0.5 * (bounds.low[coordinate] + bounds.high[coordinate]);
         let opposite = (center - COORDINATE_OPPOSITION_WEIGHT * (incumbent[coordinate] - center))
             .clamp(bounds.low[coordinate], bounds.high[coordinate]);
-        if !opposite.is_finite() {
+        // Opposition at the centre produces no candidate displacement.
+        if !opposite.is_finite() || opposite == incumbent[coordinate] {
             continue;
         }
         let mut candidate = incumbent.clone();
