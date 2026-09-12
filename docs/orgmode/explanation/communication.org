@@ -193,9 +193,14 @@ sub-stencil allowances, with private and zero-height controls.
 The values-only controller protects a refinement reserve across search slices,
 including enlarged warmup slices. A scalar refinement start needs its base
 value, a complete central stencil and a trial: =2 * dimension + 2= callbacks.
-Restart count respects that cost; every numerical probe counts as an objective
-call, not a caller-gradient call. This is allocation of optimization work, not
+Both admission and restart count respect that cost. A smaller residual
+allowance bypasses local search without spending calls or random draws, so
+the global proposal loop can evaluate and communicate feasible positions.
+Every numerical probe counts as an objective call, not a caller-gradient
+call. This is allocation of optimization work, not
 physical-time integration or a certificate that the objective is smooth.
+The public =values_local_polish= API retains its terminal partial-probe
+contract; global-start admission does not change that local refinement API.
 
 This exchange is in-process. =BoxCoverageConfig.neighbors= selects its direct
 graph: zero is all-to-all; positive =k= admits cyclic replica-index distances
