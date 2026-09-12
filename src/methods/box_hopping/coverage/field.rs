@@ -53,6 +53,26 @@ impl RepulsionSnapshot {
         .repel(anchor, proposal, rng, &mut self.stats);
     }
 
+    /// Restrict displacement to one axis without changing the distance metric.
+    pub(crate) fn repel_coordinate<R: Rng + ?Sized>(
+        &mut self,
+        anchor: ArrayView1<f64>,
+        proposal: &mut Array1<f64>,
+        axis: usize,
+        rng: &mut R,
+    ) {
+        let mut motion_widths = Array1::zeros(self.coordinates.widths.len());
+        motion_widths[axis] = self.coordinates.widths[axis];
+        Field {
+            coordinates: &self.coordinates,
+            peers: &self.peers,
+            radius: self.radius,
+            weight: self.weight,
+            enabled: self.enabled,
+        }
+        .repel_with_widths(anchor, proposal, motion_widths.view(), rng, &mut self.stats);
+    }
+
     pub(crate) fn take_stats(&mut self) -> RepulsionStats {
         std::mem::take(&mut self.stats)
     }
@@ -77,6 +97,17 @@ impl Field<'_> {
         rng: &mut R,
         stats: &mut RepulsionStats,
     ) {
+        self.repel_with_widths(anchor, proposal, self.coordinates.widths.view(), rng, stats);
+    }
+
+    fn repel_with_widths<R: Rng + ?Sized>(
+        &self,
+        anchor: ArrayView1<f64>,
+        proposal: &mut Array1<f64>,
+        motion_widths: ArrayView1<f64>,
+        rng: &mut R,
+        stats: &mut RepulsionStats,
+    ) {
         if !self.enabled
             || !self.coordinates.feasible(proposal.view())
             || !self.coordinates.feasible(anchor)
@@ -88,7 +119,7 @@ impl Field<'_> {
         let Some((separation, anchor_overlaps)) = self.peers.separate(
             point.view(),
             anchor.view(),
-            self.coordinates.widths.view(),
+            motion_widths,
             self.coordinates.free_scale,
             self.radius,
             self.weight,
@@ -108,9 +139,9 @@ impl Field<'_> {
             }
             Separation::Moved(descriptor) => {
                 stats.sample_overlaps += 1;
-                if let Some(moved) =
-                    self.physical_repulsion(proposal.view(), point.view(), descriptor.view())
-                {
+                if let Some(moved) = self.physical_repulsion(
+                    proposal.view(), point.view(), descriptor.view(), motion_widths,
+                ) {
                     *proposal = moved;
                     stats.repelled_proposals += 1;
                 } else {
@@ -126,6 +157,7 @@ impl Field<'_> {
         proposal: ArrayView1<f64>,
         point: ArrayView1<f64>,
         descriptor: ArrayView1<f64>,
+        motion_widths: ArrayView1<f64>,
     ) -> Option<Array1<f64>> {
         let distance = self.peers.clearance(point)?;
         let increment = (self.radius - distance) * self.weight.min(1.0);
@@ -139,6 +171,12 @@ impl Field<'_> {
                     .is_some_and(|d| d > distance)
         };
         let mut candidate = self.coordinates.position(descriptor);
+        // Inactive coordinates retain their exact physical representation.
+        for (axis, &width) in motion_widths.iter().enumerate() {
+            if width <= 0.0 {
+                candidate[axis] = proposal[axis];
+            }
+        }
         if admissible(candidate.view()) {
             return Some(candidate);
         }
@@ -147,7 +185,7 @@ impl Field<'_> {
         // site. Poll physical coordinates without spending another callback or
         // changing the random stream, and validate against the entire cloud.
         candidate.assign(&proposal);
-        for (j, &width) in self.coordinates.widths.iter().enumerate() {
+        for (j, &width) in motion_widths.iter().enumerate() {
             if width <= 0.0 {
                 continue;
             }
