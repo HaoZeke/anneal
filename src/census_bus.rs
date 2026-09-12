@@ -20,6 +20,8 @@ use nng::options::protocol::pubsub::Subscribe;
 use nng::{Protocol, Socket};
 use std::collections::HashMap;
 
+use crate::shared_bias::accepts_peer;
+
 const REFRESH_CHECKPOINTS: u8 = 8;
 
 /// Transport failure; the search continues uncoupled.
@@ -71,18 +73,12 @@ fn url(base_port: u16, replica: u32) -> String {
     }
 }
 
-/// Direct-neighbour topology. `CENSUS_BUS_NEIGHBORS=k` subscribes a replica
-/// to ring neighbours within distance `k` only; 0 (default) is all-to-all.
-/// This restricts census traffic, not coordinator-mediated adoption. A ring
-/// has a growing diameter and supplies no logarithmic mixing guarantee.
-fn ring_distance(a: u32, b: u32, n: u32) -> u32 {
-    let d = a.abs_diff(b);
-    d.min(n - d)
-}
-
 impl CensusBus {
     /// Binds this replica's publisher at `base_port + replica` and dials
-    /// the configured neighbours in `0..replicas`.
+    /// the configured neighbours in `0..replicas`. `CENSUS_BUS_NEIGHBORS=k`
+    /// selects cyclic distances up to `k`; zero is all-to-all. This restricts
+    /// direct census delivery, not coordinator-mediated adoption, and supplies
+    /// no logarithmic mixing guarantee.
     pub fn new(replica: u32, base_port: u16, replicas: u32) -> Result<Self, CensusBusError> {
         let publisher =
             Socket::new(Protocol::Pub0).map_err(|e| CensusBusError(format!("pub: {e}")))?;
@@ -109,10 +105,7 @@ impl CensusBus {
             .and_then(|v| v.parse().ok())
             .unwrap_or(0);
         for peer in 0..replicas {
-            if peer == replica {
-                continue;
-            }
-            if neighbors > 0 && ring_distance(peer, replica, replicas) > neighbors {
+            if !accepts_peer(replica as usize, peer as usize, replicas as usize, neighbors as usize) {
                 continue;
             }
             // Non-blocking dial: peers that have not bound yet are retried

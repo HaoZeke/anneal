@@ -39,6 +39,10 @@ pub struct BoxCoverageConfig {
     /// [`BoxEnsembleConfig::shared_deposits`] caps foreign visits per receiving
     /// region at each funded hop boundary; zero disables foreign deposits.
     pub shared: bool,
+    /// Direct cyclic neighbourhood radius for both foreign samples and deposits.
+    /// Zero selects all-to-all; positive values admit replica-index distances up
+    /// to this radius. No forwarding or minimum-history restriction is implied.
+    pub neighbors: usize,
 }
 
 impl Default for BoxCoverageConfig {
@@ -49,6 +53,7 @@ impl Default for BoxCoverageConfig {
             well_tempering: 5.0,
             peer_weight: 1.0,
             shared: true,
+            neighbors: 0,
         }
     }
 }
@@ -273,7 +278,7 @@ impl Coverage {
             .collect();
         let exchange =
             (config.shared && config.peer_weight > 0.0 && foreign_cap > 0 && replicas > 1)
-                .then(|| SharedDeposits::new(replicas));
+                .then(|| SharedDeposits::with_neighbors(replicas, config.neighbors));
         Self {
             coordinates,
             biases,
