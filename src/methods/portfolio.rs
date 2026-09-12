@@ -1535,13 +1535,16 @@ fn dual_style_local_search<O, G, R>(
     R: Rng,
 {
     let work_units = work_units.min(ledger.remaining());
-    if work_units < 8 {
+    let dim = bounds.dims.max(1);
+    let has_analytic = grad.is_some();
+    // A scalar start needs its value, a full central stencil, and a trial.
+    // Unfunded starts leave the residual work for global proposals.
+    let minimum_start_work = dim.saturating_mul(2).saturating_add(2);
+    if work_units < 8 || (!has_analytic && work_units < minimum_start_work) {
         return;
     }
     ledger.checkpoint(bounds);
-    let dim = bounds.dims.max(1);
     let wide = mean_width(bounds) >= 50.0;
-    let has_analytic = grad.is_some();
     // Analytic grad: global multi-start is cheap enough to hunt Schwefel basins.
     // FD grad costs 2d evals per step — prefer *depth* on incumbent (+ few
     // restarts); shallow global FD multi-start regressed schwefel_nograd_d10.
@@ -1556,8 +1559,6 @@ fn dual_style_local_search<O, G, R>(
             5
         }
     } else {
-        // Each start needs its value, a full central stencil, and a trial.
-        let minimum_start_work = dim.saturating_mul(2).saturating_add(2);
         (work_units / minimum_start_work).clamp(1, 3)
     };
     let per_start = (work_units / n_starts).max(if has_analytic { 8 } else { 24 });
