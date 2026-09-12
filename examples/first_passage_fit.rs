@@ -33,8 +33,15 @@ fn main() {
         .iter()
         .filter(|o| matches!(o, FirstPassage::Hit(_)))
         .count();
-    let fit = ExponentialMixture::fit(&observations, components, 2000)
-        .unwrap_or_else(|error| panic!("fit: {error}"));
+    // The slow component's shift is profiled over a grid up to half the
+    // budget; the fast component is unshifted.
+    let grid: Vec<f64> = (0..=25).map(|i| budget * 0.02 * i as f64).collect();
+    let fit = if components == 2 {
+        ExponentialMixture::fit_shifted(&observations, &grid, 2000)
+    } else {
+        ExponentialMixture::fit(&observations, components, 2000)
+    }
+    .unwrap_or_else(|error| panic!("fit: {error}"));
     println!(
         "seeds {}  hits {}  budget {budget:.3e}  components {components}  iterations {}  log-likelihood {:.3}",
         observations.len(),
@@ -42,8 +49,8 @@ fn main() {
         fit.iterations,
         fit.log_likelihood
     );
-    for (w, m) in fit.weights.iter().zip(&fit.means) {
-        println!("  component weight {w:.3}  mean forces {m:.3e}");
+    for ((w, m), s) in fit.weights.iter().zip(&fit.means).zip(&fit.shifts) {
+        println!("  component weight {w:.3}  shift {s:.3e}  mean beyond it {m:.3e}");
     }
     println!(
         "  one chain at the budget: predicted {:.3}  measured {:.3}",

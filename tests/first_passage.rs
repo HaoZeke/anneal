@@ -62,6 +62,7 @@ fn the_ensemble_probability_is_the_independent_starts_bound() {
     let fit = ExponentialMixture {
         weights: vec![0.5, 0.5],
         means: vec![1.0e5, 1.0e7],
+        shifts: vec![0.0, 0.0],
         log_likelihood: 0.0,
         iterations: 0,
     };
@@ -84,4 +85,29 @@ fn invalid_inputs_are_refused() {
     assert!(
         ExponentialMixture::fit(&[FirstPassage::Hit(-1.0), FirstPassage::Hit(2.0)], 1, 10).is_err()
     );
+}
+
+#[test]
+fn a_shifted_slow_component_makes_one_long_chain_beat_two_short_ones() {
+    // Fast starts fire from the beginning; slow ones need a warm-up of
+    // 1.2e6 forces before they can fire at all.
+    let mut data = synthetic(11, 3000, 0.1, 1.0e5, 3.0e6, 4.0e6);
+    let mut state = 99u64;
+    for point in data.iter_mut() {
+        if let FirstPassage::Hit(t) = point {
+            state = state.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            let slow = ((state >> 11) as f64 / (1u64 << 53) as f64) > 0.1;
+            if slow {
+                let shifted = *t + 1.2e6;
+                *point = if shifted < 4.0e6 { FirstPassage::Hit(shifted) } else { FirstPassage::Censored(4.0e6) };
+            }
+        }
+    }
+    let grid: Vec<f64> = (0..=10).map(|i| i as f64 * 2.0e5).collect();
+    let fit = ExponentialMixture::fit_shifted(&data, &grid, 500).unwrap();
+    let shift = fit.shifts[1];
+    assert!((shift - 1.2e6).abs() <= 2.0e5, "shift {shift} weights {:?} means {:?}", fit.weights, fit.means);
+    let one = fit.ensemble_hit_probability(1, 4.0e6);
+    let two = fit.ensemble_hit_probability(2, 4.0e6);
+    assert!(one > two, "one chain {one} two chains {two}");
 }
