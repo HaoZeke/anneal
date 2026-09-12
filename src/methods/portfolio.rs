@@ -611,9 +611,11 @@ impl<O: Objective<f64>> BudgetedObjective<'_, O> {
         axis: usize,
     ) -> bool {
         !self.ledger.exhausted()
-            && self.ledger.peer.as_ref().is_some_and(|peer| {
-                peer.prepare(anchor, proposal, Some(axis))
-            })
+            && self
+                .ledger
+                .peer
+                .as_ref()
+                .is_some_and(|peer| peer.prepare(anchor, proposal, Some(axis)))
     }
 }
 

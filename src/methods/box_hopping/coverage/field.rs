@@ -140,7 +140,10 @@ impl Field<'_> {
             Separation::Moved(descriptor) => {
                 stats.sample_overlaps += 1;
                 if let Some(moved) = self.physical_repulsion(
-                    proposal.view(), point.view(), descriptor.view(), motion_widths,
+                    proposal.view(),
+                    point.view(),
+                    descriptor.view(),
+                    motion_widths,
                 ) {
                     *proposal = moved;
                     stats.repelled_proposals += 1;
