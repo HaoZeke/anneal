@@ -8,7 +8,7 @@
 //! Each `k:aggregate` asks for the predicted hit probability of `k`
 //! chains sharing `aggregate` forces; with none given, the table covers
 //! k in {1, 2, 4, 8, 16, 48} at the budget, four times it, and 0.6 of it.
-use anneal_core::first_passage::{ExponentialMixture, FirstPassage};
+use anneal_core::first_passage::{EmpiricalFirstPassage, ExponentialMixture, FirstPassage};
 use std::io::Read;
 
 fn main() {
@@ -73,11 +73,17 @@ fn main() {
     } else {
         requests
     };
-    println!("  chains  aggregate   per-chain   p(hit)  expected of 48");
+    let empirical = EmpiricalFirstPassage::new(&observations).expect("observations");
+    println!("  chains  aggregate   per-chain   mixture p  of 48  empirical p  of 48");
     for (k, aggregate) in requests {
         let p = fit.ensemble_hit_probability(k, aggregate);
+        let (e, e48) = empirical
+            .ensemble_hit_probability(k, aggregate)
+            .map_or(("-".to_owned(), "-".to_owned()), |e| {
+                (format!("{e:.3}"), format!("{:.1}", 48.0 * e))
+            });
         println!(
-            "  {k:>6}  {aggregate:>9.3e}  {:>9.3e}  {p:.3}  {:.1}",
+            "  {k:>6}  {aggregate:>9.3e}  {:>9.3e}  {p:>9.3}  {:>5.1}  {e:>11}  {e48:>5}",
             aggregate / k as f64,
             48.0 * p
         );
