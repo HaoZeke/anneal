@@ -215,7 +215,10 @@ fn private_scalar_gsa_resumes_its_partial_strategy_after_other_arms() {
             .find(|arm| arm.name == "gsa")
             .unwrap()
             .pulls;
-        assert!(gsa_pulls > 0, "the front-loaded GSA must receive another pull");
+        assert!(
+            gsa_pulls > 0,
+            "the front-loaded GSA must receive another pull"
+        );
 
         let mut rng = StdRng::seed_from_u64(seed);
         let mut position = trace[start].clone();
