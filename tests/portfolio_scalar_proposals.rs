@@ -80,6 +80,56 @@ fn sub_stencil_allowances_exchange_and_prepare_their_global_candidates() {
 }
 
 #[test]
+fn scalar_allowances_below_a_complete_start_fund_global_positions() {
+    for replicas in [1, 4] {
+        for allowance in [8, 9, 16, 32, 33] {
+            for shared in [false, true] {
+                let objective = ScalarSamples::new(16);
+                let mut config = PortfolioEnsembleConfig {
+                    replicas,
+                    budget: replicas * allowance,
+                    ..PortfolioEnsembleConfig::default()
+                };
+                config.coverage.shared = shared;
+                config.coverage.radius = 1e-12;
+                let result = portfolio_values_ensemble_optimize(&objective, 17, None, &config);
+                let positions = objective.positions();
+                assert_eq!(positions.len(), config.budget);
+                assert_eq!(result.n_evals, config.budget);
+                assert_eq!(result.n_grads, 0);
+                assert_eq!(result.best_val, 1.0);
+                let global_positions = positions.iter().filter(|position| {
+                    position.iter().any(|&bits| f64::from_bits(bits).abs() > 0.01)
+                }).count();
+                assert_eq!(global_positions, config.budget - replicas,
+                    "replicas={replicas}, allowance={allowance}, shared={shared}: an unfunded local start must leave paid work for global draws");
+            }
+        }
+    }
+}
+
+#[test]
+fn sub_stencil_scalar_work_above_the_legacy_floor_reaches_the_sample_channel() {
+    for allowance in [8, 9, 16, 32, 33] {
+        let objective = ScalarSamples::new(16);
+        let mut config = PortfolioEnsembleConfig {
+            replicas: 4,
+            budget: 4 * allowance,
+            ..PortfolioEnsembleConfig::default()
+        };
+        config.coverage.radius = 1e-12;
+        let result = portfolio_values_ensemble_optimize(&objective, 17, None, &config);
+        assert_eq!(result.n_evals, objective.positions().len());
+        assert_eq!(result.n_evals, config.budget);
+        assert_eq!(result.n_grads, 0);
+        assert_eq!(result.coverage.published_samples, config.budget as u64);
+        assert_eq!(result.coverage.sample_peer_checks, config.budget - config.replicas);
+        assert_eq!(result.coverage.applied_foreign_samples, config.replicas * (config.replicas - 1));
+        assert_eq!(result.coverage.repelled_proposals, 0);
+    }
+}
+
+#[test]
 fn sub_stencil_private_and_zero_height_controls_keep_the_same_positions() {
     let mut config = PortfolioEnsembleConfig {
         replicas: 4,
