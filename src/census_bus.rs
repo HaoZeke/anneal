@@ -105,7 +105,12 @@ impl CensusBus {
             .and_then(|v| v.parse().ok())
             .unwrap_or(0);
         for peer in 0..replicas {
-            if !accepts_peer(replica as usize, peer as usize, replicas as usize, neighbors as usize) {
+            if !accepts_peer(
+                replica as usize,
+                peer as usize,
+                replicas as usize,
+                neighbors as usize,
+            ) {
                 continue;
             }
             // Non-blocking dial: peers that have not bound yet are retried
