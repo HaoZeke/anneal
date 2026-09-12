@@ -98,11 +98,19 @@ fn scalar_allowances_below_a_complete_start_fund_global_positions() {
                 assert_eq!(result.n_evals, config.budget);
                 assert_eq!(result.n_grads, 0);
                 assert_eq!(result.best_val, 1.0);
-                let global_positions = positions.iter().filter(|position| {
-                    position.iter().any(|&bits| f64::from_bits(bits).abs() > 0.01)
-                }).count();
-                assert_eq!(global_positions, config.budget - replicas,
-                    "replicas={replicas}, allowance={allowance}, shared={shared}: an unfunded local start must leave paid work for global draws");
+                let global_positions = positions
+                    .iter()
+                    .filter(|position| {
+                        position
+                            .iter()
+                            .any(|&bits| f64::from_bits(bits).abs() > 0.01)
+                    })
+                    .count();
+                assert_eq!(
+                    global_positions,
+                    config.budget - replicas,
+                    "replicas={replicas}, allowance={allowance}, shared={shared}: an unfunded local start must leave paid work for global draws"
+                );
             }
         }
     }
@@ -123,8 +131,14 @@ fn sub_stencil_scalar_work_above_the_legacy_floor_reaches_the_sample_channel() {
         assert_eq!(result.n_evals, config.budget);
         assert_eq!(result.n_grads, 0);
         assert_eq!(result.coverage.published_samples, config.budget as u64);
-        assert_eq!(result.coverage.sample_peer_checks, config.budget - config.replicas);
-        assert_eq!(result.coverage.applied_foreign_samples, config.replicas * (config.replicas - 1));
+        assert_eq!(
+            result.coverage.sample_peer_checks,
+            config.budget - config.replicas
+        );
+        assert_eq!(
+            result.coverage.applied_foreign_samples,
+            config.replicas * (config.replicas - 1)
+        );
         assert_eq!(result.coverage.repelled_proposals, 0);
     }
 }
