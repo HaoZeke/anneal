@@ -150,6 +150,16 @@ fn values_controller_records(
     budget: usize,
     seed: u64,
 ) -> Vec<serde_json::Value> {
+    values_controller_records_with_neighbors(landscape, dim, budget, seed, 0)
+}
+
+fn values_controller_records_with_neighbors(
+    landscape: Landscape,
+    dim: usize,
+    budget: usize,
+    seed: u64,
+    neighbors: usize,
+) -> Vec<serde_json::Value> {
     assert!(dim > 0 && budget > 0);
     let mut start_rng = StdRng::seed_from_u64(seed ^ 0x5354_4152_545f_424f);
     let start = Array1::from_shape_fn(dim, |_| -5.12 + 10.24 * start_rng.random::<f64>());
@@ -170,6 +180,7 @@ fn values_controller_records(
         };
         let coverage = BoxCoverageConfig {
             shared,
+            neighbors,
             ..BoxCoverageConfig::default()
         };
         let budgets = config.budgets();
@@ -254,6 +265,7 @@ fn values_controller_records(
             "verified_value": verified_value, "elapsed_seconds": elapsed,
             "history": "none", "coverage": if shared { "shared" } else { "private" },
             "coverage_radius": coverage.radius, "coverage_height": coverage.height,
+            "coverage_neighbors": if portfolio { 0 } else { coverage.neighbors },
             "hops": results.iter().map(|out| out.hops).sum::<usize>(),
             "coverage_published_samples": results.iter().map(|out| out.coverage.published_samples).sum::<u64>(),
             "coverage_applied_foreign_samples": results.iter().map(|out| out.coverage.applied_foreign_samples).sum::<usize>(),
@@ -334,6 +346,7 @@ fn portfolio_peer_record(
         "verified_value": verified, "elapsed_seconds": elapsed,
         "history": "none", "coverage": if coverage.shared { "shared" } else { "private" },
         "coverage_radius": coverage.radius, "coverage_height": coverage.height,
+        "coverage_neighbors": coverage.neighbors,
         "coverage_published_samples": out.coverage.published_samples,
         "coverage_applied_foreign_samples": out.coverage.applied_foreign_samples,
         "coverage_sample_peer_checks": out.coverage.sample_peer_checks,
@@ -360,6 +373,7 @@ fn main() {
     let budget = number(2, 8_000);
     let seeds = number(3, 4);
     let steps = number(4, 16);
+    let coverage_neighbors = number(9, 0);
     assert!(dim > 0 && budget > 0 && seeds > 0 && steps > 0);
     assert!(
         std::env::var_os("HISTORY_NNG").is_none(),
@@ -375,7 +389,10 @@ fn main() {
         Some("controllers") | Some("controllers-peers") => {
             let peers = args[5] == "controllers-peers";
             let seed_start = if peers { number(8, 0) } else { 0 };
-            let mut peer_coverage = BoxCoverageConfig::default();
+            let mut peer_coverage = BoxCoverageConfig {
+                neighbors: coverage_neighbors,
+                ..Default::default()
+            };
             if peers {
                 if let Some(radius) = args.get(6) {
                     peer_coverage.radius = radius.parse().expect("positive coverage radius");
@@ -392,13 +409,19 @@ fn main() {
                     "objective_capability": "values", "execution": if peers { "serial-and-threaded-controls" } else { "serial" },
                     "portfolio_peers": peers, "seed_start": seed_start,
                     "history": "none", "coverage_transport": "in-process",
+                    "coverage_neighbors": coverage_neighbors,
                     "coverage_metric": "RMS-scaled-free-box-coordinates",
                     "version": env!("CARGO_PKG_VERSION"),
                 })
             );
             for landscape in [Landscape::Rastrigin, Landscape::ConditionedQuadratic] {
                 for seed in seed_start as u64..(seed_start + seeds) as u64 {
-                    for record in values_controller_records(landscape, dim, budget, seed) {
+                    let controls = if coverage_neighbors == 0 {
+                        values_controller_records(landscape, dim, budget, seed)
+                    } else {
+                        values_controller_records_with_neighbors(landscape, dim, budget, seed, coverage_neighbors)
+                    };
+                    for record in controls {
                         println!("{record}");
                     }
                     if peers {
@@ -418,7 +441,10 @@ fn main() {
             "the optional control mode is coverage, quench, controllers or controllers-peers"
         ),
     };
-    let mut coverage_settings = BoxCoverageConfig::default();
+    let mut coverage_settings = BoxCoverageConfig {
+        neighbors: coverage_neighbors,
+        ..Default::default()
+    };
     if let Some(radius) = args.get(6) {
         coverage_settings.radius = radius.parse().expect("positive coverage radius");
     }
@@ -463,6 +489,7 @@ fn main() {
             "coverage_height": coverage_settings.height,
             "coverage_well_tempering": coverage_settings.well_tempering,
             "coverage_peer_weight": coverage_settings.peer_weight,
+            "coverage_neighbors": coverage_settings.neighbors,
         "start_protocol": "seeded-uniform; independent-first-replica-start-stream",
             "version": env!("CARGO_PKG_VERSION"),
         })
@@ -538,6 +565,7 @@ fn main() {
                         "dimension": dim, "seed": seed, "noise": noise,
                         "history": if coverage_only { "none" } else { history_name },
                         "coverage": if coverage.shared { "shared" } else { "private" },
+                        "coverage_neighbors": coverage.neighbors,
                         "initial_position": start.to_vec(),
                             "initial_value": initial_value, "best_value": result.best_val,
                             "n_evals": counts.0, "n_grads": counts.1, "budget": budget,
@@ -625,6 +653,33 @@ fn quench_controls(dim: usize, ensemble_budget: usize, seeds: usize) {
 #[cfg(test)]
 mod controller_tests {
     use super::*;
+
+    #[test]
+    fn topology_records_preserve_controls_and_report_the_selected_graph() {
+        let baseline = values_controller_records(Landscape::Rastrigin, 2, 257, 13);
+        let ring = values_controller_records_with_neighbors(Landscape::Rastrigin, 2, 257, 13, 1);
+        for (index, record) in ring.iter().enumerate() {
+            assert_eq!(record["coverage_neighbors"], if index < 2 { 0 } else { 1 });
+            assert_eq!(record["n_evals"], record["observed_calls"]);
+            assert_eq!(record["n_grads"], 0);
+            assert_eq!(record["best_value"], record["verified_value"]);
+            assert_eq!(record["initial_positions"], baseline[index]["initial_positions"]);
+            assert_eq!(record["replica_budgets"], baseline[index]["replica_budgets"]);
+            if index < 4 {
+                assert_eq!(record["best_value"], baseline[index]["best_value"]);
+                assert_eq!(record["best_position"], baseline[index]["best_position"]);
+                assert_eq!(record["n_evals"], baseline[index]["n_evals"]);
+                assert_eq!(record["coverage_applied_foreign_samples"], 0);
+            }
+        }
+        let coverage = BoxCoverageConfig { neighbors: 1, radius: 0.4, ..Default::default() };
+        let peer = portfolio_peer_record(Landscape::Rastrigin, 2, 257, 13, &coverage);
+        assert_eq!(peer["coverage_neighbors"], 1);
+        assert_eq!(peer["n_evals"], 257);
+        assert_eq!(peer["n_grads"], 0);
+        assert_eq!(peer["initial_positions"], baseline[1]["initial_positions"]);
+        assert!(peer["coverage_applied_foreign_samples"].as_u64().unwrap() > 0);
+    }
 
     #[test]
     fn portfolio_peer_control_keeps_the_independent_controller_starts_and_work() {
