@@ -677,6 +677,7 @@ def ensemble_optimize(
     *,
     coverage_shared=None,
     coverage_radius=None,
+    coverage_neighbors=None,
 ):
     """Search on a design box.
 
@@ -691,10 +692,13 @@ def ensemble_optimize(
     not a count of certified minima.
 
     ``coverage_shared`` overrides sharing independently of ``history``;
-    ``coverage_radius`` sets the normalized RMS parameter distance. Explicit
-    coverage controls select native hop chains, including for one replica.
-    With neither control, the one-replica values-only portfolio remains the
-    convenience policy. Neither coverage control requires a gradient.
+    ``coverage_radius`` sets the normalized RMS parameter distance.
+    ``coverage_neighbors`` restricts both sample and deposit delivery to direct
+    cyclic neighbours: zero is all-to-all, one selects the two adjacent chains.
+    Explicit coverage controls select native hop chains, including for one
+    replica. With no coverage controls, the one-replica values-only portfolio
+    remains the convenience policy. Coverage requires no gradient and does not
+    restrict the optional minimum ledger or forward received observations.
 
     Coordinates are design variables regardless of dimension. Atomic
     symmetry-aware proposals require the explicit ``cluster_search`` adapter.
@@ -715,6 +719,7 @@ def ensemble_optimize(
         str(membership),
         coverage_shared=coverage_shared,
         coverage_radius=coverage_radius,
+        coverage_neighbors=coverage_neighbors,
     )
     out["best_pos"] = np.asarray(out["best_pos"], dtype=np.float64)
     return out
@@ -895,6 +900,7 @@ def minimize(
     store=None,
     coverage_shared=None,
     coverage_radius=None,
+    coverage_neighbors=None,
 ):
     """Box search with a SciPy ``minimize`` shape.
 
@@ -906,8 +912,10 @@ def minimize(
     - ``history``: shared, private, or no minimum ledger. Its default also
       selects shared coverage; coverage itself needs no minimum certificate.
     - ``membership``: which certified observations enter the minimum ledger.
-    - ``coverage_shared`` and ``coverage_radius``: explicit native coverage
-      controls. Use ``history="none", coverage_shared=True`` to communicate
+    - ``coverage_shared``, ``coverage_radius`` and ``coverage_neighbors``:
+      sharing, normalized distance and direct ring-neighbourhood controls.
+      Zero neighbours selects all-to-all; one selects the adjacent chains.
+      Use ``history="none", coverage_shared=True`` to communicate
       sampled parameter regions without requesting minimum certificates.
     - ``store``: existing parameter archive. An ``.h5`` / ``.hdf5`` path,
       a campaign directory that already holds a readcon-db corpus (params
@@ -957,6 +965,7 @@ def minimize(
         membership=str(membership),
         coverage_shared=coverage_shared,
         coverage_radius=coverage_radius,
+        coverage_neighbors=coverage_neighbors,
     )
     fun_v = float(out["best_val"])
     best = np.asarray(out["best_pos"], dtype=np.float64)
@@ -1055,6 +1064,7 @@ def global_optimize(
     replicas: int = 1,
     coverage_shared: bool = True,
     coverage_radius: float = 0.05,
+    coverage_neighbors: int = 0,
 ):
     """Thompson-allocated portfolio global optimizer.
 
@@ -1097,6 +1107,9 @@ def global_optimize(
       coverage_shared: share paid global proposal positions at arm checkpoints.
         False gives independent portfolios with the same starts and work split.
       coverage_radius: interaction radius in normalized RMS box coordinates.
+      coverage_neighbors: direct cyclic neighbourhood radius. Zero is all-to-all;
+        one admits the two adjacent chain identities without forwarding samples.
+        This does not remove the shared arm-checkpoint barrier.
 
     Peer separation moves global candidates, not derivative stencils or raw
     objective values. Internal scalar-refinement probes count in ``n_evals``.
@@ -1118,6 +1131,7 @@ def global_optimize(
         replicas=int(replicas),
         coverage_shared=bool(coverage_shared),
         coverage_radius=float(coverage_radius),
+        coverage_neighbors=coverage_neighbors,
     )
     out["best_pos"] = np.asarray(out["best_pos"], dtype=np.float64)
     return out
