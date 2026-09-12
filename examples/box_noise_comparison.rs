@@ -328,6 +328,9 @@ fn portfolio_peer_record(
     assert_eq!(out.n_grads, 0);
     assert_eq!(surface.surface.gradients.load(Ordering::Relaxed), 0);
     assert_eq!(out.best_val, verified);
+    let replica_arms: Vec<_> = out.replicas.iter().map(|r| r.arm_stats.iter().map(|a| {
+        json!({"name": a.name, "pulls": a.pulls, "successes": a.successes})
+    }).collect::<Vec<_>>()).collect();
     json!({
         "record": "result", "comparison": "values-controllers",
         "arm": if coverage.shared { "portfolio_shared" } else { "portfolio_threaded_private" },
@@ -356,9 +359,7 @@ fn portfolio_peer_record(
         "coverage_repelled_proposals": out.coverage.repelled_proposals,
         "coverage_constrained_repulsions": out.coverage.constrained_repulsions,
         "replica_work": out.replicas.iter().map(|r| r.n_evals + r.n_grads).collect::<Vec<_>>(),
-        "replica_arms": out.replicas.iter().map(|r| r.arm_stats.iter().map(|a| {
-            json!({"name": a.name, "pulls": a.pulls, "successes": a.successes})
-        }).collect::<Vec<_>>()).collect::<Vec<_>>(),
+        "replica_arms": replica_arms,
     })
 }
 
