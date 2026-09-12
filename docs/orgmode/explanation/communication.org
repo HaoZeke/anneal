@@ -170,6 +170,13 @@ publish their paid samples. =portfolio_coordinate_proposals= checks private
 strategy replay and effective shared correction without a caller gradient;
 =box_repulsion_support= checks immobile and empty-support cases.
 
+Allocation boundaries retain GSA's active chain and strategy coordinate as
+well as its random stream. An unfinished strategy resumes at the same
+temperature; cooling advances only after the strategy and its epoch-end
+work. The scalar continuation regression replays a partial strategy across
+intervening portfolio arms. It checks that slicing optimization work does
+not itself restart the private proposal sequence.
+
 QMC exploration composes =TsallisVisit= with =Reflected= in normalized box
 coordinates. It maps the reflected point into physical coordinates before
 peer separation and evaluation. Heavy-tailed excursions retain their reflected
