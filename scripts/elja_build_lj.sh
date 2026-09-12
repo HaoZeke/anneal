@@ -100,7 +100,8 @@ cargo build --offline --locked --release --features featomic,ira,bank-rpc \
   --example catalog_server \
   --example catalog_status \
   --example bank_server \
-  --example leave_packing_probe
+  --example leave_packing_probe \
+  --example first_passage_fit
 ldd "$BIN"
 # A staging tree's SOURCE_COMMIT names the synced revision; the tree's own
 # HEAD is whatever commit it was cloned at and would misattribute the build.
