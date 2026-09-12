@@ -1954,7 +1954,7 @@ fn box_ensemble_optimize(
 #[pyfunction]
 #[pyo3(signature = (obj_fn, low, high, budget, seed = 0, grad_fn = None, x0 = None,
                     replicas = 4, history = "shared", membership = "accepted", *,
-                    coverage_shared = None, coverage_radius = None))]
+                    coverage_shared = None, coverage_radius = None, coverage_neighbors = None))]
 #[allow(clippy::too_many_arguments)]
 fn ensemble_optimize(
     py: Python<'_>,
@@ -1970,6 +1970,7 @@ fn ensemble_optimize(
     membership: &str,
     coverage_shared: Option<bool>,
     coverage_radius: Option<f64>,
+    coverage_neighbors: Option<usize>,
 ) -> PyResult<Py<PyDict>> {
     let parsed = parse_box_search(low, high, budget, replicas, x0, history, membership)?;
     if coverage_radius.is_some_and(|radius| !radius.is_finite() || radius <= 0.0) {
@@ -1985,7 +1986,7 @@ fn ensemble_optimize(
     let dim = parsed.dim;
     let history_mode = parsed.history;
     let membership = parsed.membership;
-    let coverage = (coverage_shared.is_some() || coverage_radius.is_some()).then(|| {
+    let coverage = (coverage_shared.is_some() || coverage_radius.is_some() || coverage_neighbors.is_some()).then(|| {
         let defaults = crate::methods::box_hopping::BoxCoverageConfig::default();
         crate::methods::box_hopping::BoxCoverageConfig {
             shared: coverage_shared.unwrap_or(matches!(
@@ -1993,6 +1994,7 @@ fn ensemble_optimize(
                 crate::methods::ensemble::HistoryMode::Shared
             )),
             radius: coverage_radius.unwrap_or(defaults.radius),
+            neighbors: coverage_neighbors.unwrap_or(defaults.neighbors),
             ..defaults
         }
     });
@@ -2207,7 +2209,7 @@ fn bfwt_optimize(
 ///   grad_fn: optional gradient callable; enables the gradient arms
 ///            and the final polish.
 #[pyfunction]
-#[pyo3(signature = (obj_fn, low, high, budget, seed = 0, grad_fn = None, noise_sigma = None, policy = "auto", *, replicas = 1, coverage_shared = true, coverage_radius = 0.05))]
+#[pyo3(signature = (obj_fn, low, high, budget, seed = 0, grad_fn = None, noise_sigma = None, policy = "auto", *, replicas = 1, coverage_shared = true, coverage_radius = 0.05, coverage_neighbors = 0))]
 fn global_optimize(
     py: Python<'_>,
     obj_fn: Py<PyAny>,
@@ -2221,6 +2223,7 @@ fn global_optimize(
     replicas: usize,
     coverage_shared: bool,
     coverage_radius: f64,
+    coverage_neighbors: usize,
 ) -> PyResult<Py<PyDict>> {
     let low_vec = low.as_slice()?.to_vec();
     let high_vec = high.as_slice()?.to_vec();
@@ -2267,6 +2270,7 @@ fn global_optimize(
             coverage: crate::methods::BoxCoverageConfig {
                 shared: coverage_shared,
                 radius: coverage_radius,
+                neighbors: coverage_neighbors,
                 ..crate::methods::BoxCoverageConfig::default()
             },
         };
