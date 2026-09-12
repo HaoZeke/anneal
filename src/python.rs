@@ -1986,18 +1986,20 @@ fn ensemble_optimize(
     let dim = parsed.dim;
     let history_mode = parsed.history;
     let membership = parsed.membership;
-    let coverage = (coverage_shared.is_some() || coverage_radius.is_some() || coverage_neighbors.is_some()).then(|| {
-        let defaults = crate::methods::box_hopping::BoxCoverageConfig::default();
-        crate::methods::box_hopping::BoxCoverageConfig {
-            shared: coverage_shared.unwrap_or(matches!(
-                history_mode,
-                crate::methods::ensemble::HistoryMode::Shared
-            )),
-            radius: coverage_radius.unwrap_or(defaults.radius),
-            neighbors: coverage_neighbors.unwrap_or(defaults.neighbors),
-            ..defaults
-        }
-    });
+    let coverage =
+        (coverage_shared.is_some() || coverage_radius.is_some() || coverage_neighbors.is_some())
+            .then(|| {
+                let defaults = crate::methods::box_hopping::BoxCoverageConfig::default();
+                crate::methods::box_hopping::BoxCoverageConfig {
+                    shared: coverage_shared.unwrap_or(matches!(
+                        history_mode,
+                        crate::methods::ensemble::HistoryMode::Shared
+                    )),
+                    radius: coverage_radius.unwrap_or(defaults.radius),
+                    neighbors: coverage_neighbors.unwrap_or(defaults.neighbors),
+                    ..defaults
+                }
+            });
     let result = with_replica_threads(py, || {
         let grad = grad_fn.map(|fn_| CallablePyGradient { fn_, dim });
         if let Some(coverage) = coverage.as_ref() {
