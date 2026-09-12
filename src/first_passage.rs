@@ -17,6 +17,14 @@
 //! chains sharing an aggregate budget, `1 - (1 - F(B/k))^k`, at any split
 //! without another campaign; a mixture of exponentials has a
 //! non-increasing hazard, so the bound of independent starts applies.
+//!
+//! A chain also has a warm-up: on LJ75 no orbit chain reaches Marks
+//! before a few hundred thousand forces except the rare start that lands
+//! beside it, and a memoryless mixture cannot say that one chain of 4e6
+//! beats two of 2e6 (measured 31 against 20 of 48). Each component
+//! therefore carries a shift below which it cannot fire; [`fit_shifted`]
+//! profiles the slow component's shift over a grid and keeps the
+//! likelihood's maximum.
 
 /// One seed's outcome: the forces at first passage, or the budget it ran
 /// out at.
@@ -33,8 +41,10 @@ pub enum FirstPassage {
 pub struct ExponentialMixture {
     /// Component weights, summing to one.
     pub weights: Vec<f64>,
-    /// Component means, in forces.
+    /// Component means beyond the shift, in forces.
     pub means: Vec<f64>,
+    /// Forces below which each component cannot fire.
+    pub shifts: Vec<f64>,
     /// Log-likelihood of the data the fit was made on.
     pub log_likelihood: f64,
     /// EM iterations taken.
@@ -65,6 +75,42 @@ impl ExponentialMixture {
         components: usize,
         max_iterations: usize,
     ) -> Result<Self, FirstPassageError> {
+        Self::fit_with_shifts(observations, &vec![0.0; components], max_iterations)
+    }
+
+    /// Two components, the fast one unshifted and the slow one shifted by
+    /// the grid value that maximises the likelihood. `shift_grid` is in
+    /// forces; an empty grid means no shift.
+    pub fn fit_shifted(
+        observations: &[FirstPassage],
+        shift_grid: &[f64],
+        max_iterations: usize,
+    ) -> Result<Self, FirstPassageError> {
+        let mut best: Option<Self> = None;
+        let grid: Vec<f64> = if shift_grid.is_empty() {
+            vec![0.0]
+        } else {
+            shift_grid.to_vec()
+        };
+        for &shift in &grid {
+            let candidate = Self::fit_with_shifts(observations, &[0.0, shift], max_iterations)?;
+            if best
+                .as_ref()
+                .is_none_or(|held| candidate.log_likelihood > held.log_likelihood)
+            {
+                best = Some(candidate);
+            }
+        }
+        best.ok_or(FirstPassageError::Empty)
+    }
+
+    /// EM with every component's shift fixed.
+    pub fn fit_with_shifts(
+        observations: &[FirstPassage],
+        shifts: &[f64],
+        max_iterations: usize,
+    ) -> Result<Self, FirstPassageError> {
+        let components = shifts.len();
         if observations.is_empty() {
             return Err(FirstPassageError::Empty);
         }
@@ -86,11 +132,14 @@ impl ExponentialMixture {
             })
             .collect();
         values.sort_by(f64::total_cmp);
+        // Initial means spread over the observed range so the components
+        // start apart: geometric between the smallest value and the largest.
+        let low = values[0].max(1.0);
+        let high = values[values.len() - 1].max(low * 2.0);
         let mut means: Vec<f64> = (0..components)
             .map(|i| {
-                let q = (i as f64 + 0.5) / components as f64;
-                let index = ((values.len() as f64 * q) as usize).min(values.len() - 1);
-                values[index].max(1.0)
+                let f = (i as f64 + 0.5) / components as f64;
+                (low.ln() + f * (high.ln() - low.ln())).exp()
             })
             .collect();
         let mut weights = vec![1.0 / components as f64; components];
@@ -112,22 +161,36 @@ impl ExponentialMixture {
                 let terms: Vec<f64> = (0..components)
                     .map(|i| {
                         let m = means[i];
+                        let u = t - shifts[i];
                         if censored {
-                            weights[i] * (-t / m).exp()
+                            // Survival: one below the shift.
+                            weights[i] * if u <= 0.0 { 1.0 } else { (-u / m).exp() }
+                        } else if u <= 0.0 {
+                            0.0
                         } else {
-                            weights[i] * (-t / m).exp() / m
+                            weights[i] * (-u / m).exp() / m
                         }
                     })
                     .collect();
                 let total: f64 = terms.iter().sum();
                 if total <= 0.0 || !total.is_finite() {
+                    // A hit below every shift has zero density; it counts
+                    // against the fit through the likelihood floor.
+                    log_likelihood += f64::MIN_POSITIVE.ln();
                     continue;
                 }
                 log_likelihood += total.ln();
                 for i in 0..components {
                     let r = terms[i] / total;
                     sum_r[i] += r;
-                    sum_rt[i] += r * if censored { t + means[i] } else { t };
+                    // Expected first passage beyond the shift: a censored
+                    // seed still below the shift waits the mean from there.
+                    let beyond = if censored {
+                        (t - shifts[i]).max(0.0) + means[i]
+                    } else {
+                        t - shifts[i]
+                    };
+                    sum_rt[i] += r * beyond;
                 }
             }
             // M-step.
@@ -146,6 +209,7 @@ impl ExponentialMixture {
         Ok(Self {
             weights,
             means,
+            shifts: shifts.to_vec(),
             log_likelihood,
             iterations,
         })
@@ -160,7 +224,15 @@ impl ExponentialMixture {
         self.weights
             .iter()
             .zip(&self.means)
-            .map(|(w, m)| w * (1.0 - (-budget / m).exp()))
+            .zip(&self.shifts)
+            .map(|((w, m), s)| {
+                let u = budget - s;
+                if u <= 0.0 {
+                    0.0
+                } else {
+                    w * (1.0 - (-u / m).exp())
+                }
+            })
             .sum::<f64>()
             .clamp(0.0, 1.0)
     }
