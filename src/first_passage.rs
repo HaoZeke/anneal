@@ -256,3 +256,59 @@ impl ExponentialMixture {
             .max_by(|a, b| a.1.total_cmp(&b.1))
     }
 }
+
+/// The empirical first-passage distribution of one campaign: the fraction
+/// of seeds that had hit by `budget`, exact up to the campaign's own
+/// budget (no seed is censored below it) and undefined beyond. The
+/// mixture smooths this; the ensemble prediction from the empirical
+/// distribution is the model-free bound and the one to quote first.
+#[derive(Debug, Clone, PartialEq)]
+pub struct EmpiricalFirstPassage {
+    hits: Vec<f64>,
+    seeds: usize,
+    censor: f64,
+}
+
+impl EmpiricalFirstPassage {
+    /// From a campaign's per-seed outcomes.
+    pub fn new(observations: &[FirstPassage]) -> Result<Self, FirstPassageError> {
+        if observations.is_empty() {
+            return Err(FirstPassageError::Empty);
+        }
+        let mut hits = Vec::new();
+        let mut censor = f64::INFINITY;
+        for (index, observation) in observations.iter().enumerate() {
+            match observation {
+                FirstPassage::Hit(v) if v.is_finite() && *v > 0.0 => hits.push(*v),
+                FirstPassage::Censored(v) if v.is_finite() && *v > 0.0 => censor = censor.min(*v),
+                _ => return Err(FirstPassageError::Invalid(index)),
+            }
+        }
+        hits.sort_by(f64::total_cmp);
+        Ok(Self {
+            hits,
+            seeds: observations.len(),
+            censor,
+        })
+    }
+
+    /// Fraction of seeds that had hit by `budget`, or `None` beyond the
+    /// smallest censoring budget where the data say nothing.
+    pub fn hit_probability(&self, budget: f64) -> Option<f64> {
+        if budget > self.censor {
+            return None;
+        }
+        let hit = self.hits.iter().filter(|&&t| t <= budget).count();
+        Some(hit as f64 / self.seeds as f64)
+    }
+
+    /// `1 - (1 - F(B/k))^k` from the empirical distribution, when the
+    /// per-chain budget lies within the data.
+    pub fn ensemble_hit_probability(&self, chains: usize, aggregate: f64) -> Option<f64> {
+        if chains == 0 {
+            return None;
+        }
+        let per_chain = self.hit_probability(aggregate / chains as f64)?;
+        Some(1.0 - (1.0 - per_chain).powi(i32::try_from(chains).unwrap_or(i32::MAX)))
+    }
+}

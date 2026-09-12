@@ -1,4 +1,4 @@
-use anneal_core::first_passage::{ExponentialMixture, FirstPassage};
+use anneal_core::first_passage::{EmpiricalFirstPassage, ExponentialMixture, FirstPassage};
 
 fn synthetic(
     seed: u64,
@@ -95,19 +95,47 @@ fn a_shifted_slow_component_makes_one_long_chain_beat_two_short_ones() {
     let mut state = 99u64;
     for point in data.iter_mut() {
         if let FirstPassage::Hit(t) = point {
-            state = state.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            state = state
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
             let slow = ((state >> 11) as f64 / (1u64 << 53) as f64) > 0.1;
             if slow {
                 let shifted = *t + 1.2e6;
-                *point = if shifted < 4.0e6 { FirstPassage::Hit(shifted) } else { FirstPassage::Censored(4.0e6) };
+                *point = if shifted < 4.0e6 {
+                    FirstPassage::Hit(shifted)
+                } else {
+                    FirstPassage::Censored(4.0e6)
+                };
             }
         }
     }
     let grid: Vec<f64> = (0..=10).map(|i| i as f64 * 2.0e5).collect();
     let fit = ExponentialMixture::fit_shifted(&data, &grid, 500).unwrap();
     let shift = fit.shifts[1];
-    assert!((shift - 1.2e6).abs() <= 2.0e5, "shift {shift} weights {:?} means {:?}", fit.weights, fit.means);
+    assert!(
+        (shift - 1.2e6).abs() <= 2.0e5,
+        "shift {shift} weights {:?} means {:?}",
+        fit.weights,
+        fit.means
+    );
     let one = fit.ensemble_hit_probability(1, 4.0e6);
     let two = fit.ensemble_hit_probability(2, 4.0e6);
     assert!(one > two, "one chain {one} two chains {two}");
+}
+
+#[test]
+fn the_empirical_distribution_is_exact_within_the_budget_and_silent_beyond() {
+    let data = [
+        FirstPassage::Hit(1.0e5),
+        FirstPassage::Hit(3.0e6),
+        FirstPassage::Censored(4.0e6),
+        FirstPassage::Censored(4.0e6),
+    ];
+    let empirical = EmpiricalFirstPassage::new(&data).unwrap();
+    assert_eq!(empirical.hit_probability(2.0e6), Some(0.25));
+    assert_eq!(empirical.hit_probability(4.0e6), Some(0.5));
+    assert_eq!(empirical.hit_probability(5.0e6), None);
+    let two = empirical.ensemble_hit_probability(2, 4.0e6).unwrap();
+    assert!((two - (1.0 - 0.75f64.powi(2))).abs() < 1e-12);
+    assert_eq!(empirical.ensemble_hit_probability(1, 8.0e6), None);
 }
