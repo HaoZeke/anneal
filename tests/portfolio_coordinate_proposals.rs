@@ -197,3 +197,66 @@ fn shared_scalar_gsa_preserves_coordinate_support_with_effective_separation() {
         "coordinate separation must not be disabled"
     );
 }
+
+#[test]
+fn private_scalar_gsa_resumes_its_partial_strategy_after_other_arms() {
+    use anneal_core::cool::{Cooling, TsallisCool};
+
+    let (result, traces) = run(false);
+    let kernel = TsallisVisit::new(2.62);
+    let cooling = TsallisCool::new(5230.0, 2.62);
+    let domain = bounds();
+    for replica in 0..2 {
+        let (which, start, seed) = strategy_start(&traces, replica);
+        let trace = &traces[which];
+        let gsa_pulls = result.replicas[replica]
+            .arm_stats
+            .iter()
+            .find(|arm| arm.name == "gsa")
+            .unwrap()
+            .pulls;
+        assert!(gsa_pulls > 0, "the front-loaded GSA must receive another pull");
+
+        let mut rng = StdRng::seed_from_u64(seed);
+        let mut position = trace[start].clone();
+        let mut uninterrupted = Vec::new();
+        for epoch in 0..3 {
+            let temperature = cooling.temperature(epoch);
+            for step in 0..2 * DIM {
+                let raw = if step < DIM {
+                    kernel.propose(position.view(), temperature, &mut rng)
+                } else {
+                    let axis = step - DIM;
+                    let visited = kernel.propose(
+                        ArrayView1::from(std::slice::from_ref(&position[axis])),
+                        temperature,
+                        &mut rng,
+                    );
+                    let mut candidate = position.clone();
+                    candidate[axis] = visited[0];
+                    candidate
+                };
+                position = reflect_into_box(raw.view(), &domain);
+                let _: f64 = rng.random();
+                uninterrupted.push(position.clone());
+            }
+        }
+
+        let prefix = uninterrupted
+            .iter()
+            .zip(trace[start + 1..].iter())
+            .take_while(|(expected, observed)| expected == observed)
+            .count();
+        assert!(prefix >= 2 * DIM, "the initial GSA epoch must replay");
+        assert!(prefix < uninterrupted.len(), "another arm must intervene");
+        assert_ne!(prefix % (2 * DIM), 0, "the strategy must be partial");
+        let continuations = trace[start + 1 + prefix..]
+            .windows(uninterrupted.len() - prefix)
+            .filter(|positions| *positions == &uninterrupted[prefix..])
+            .count();
+        assert_eq!(
+            continuations, 1,
+            "replica={replica}, prefix={prefix}, gsa_pulls={gsa_pulls}: the unfinished strategy must resume at its retained temperature"
+        );
+    }
+}
