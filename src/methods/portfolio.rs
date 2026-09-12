@@ -600,7 +600,20 @@ impl<O: Objective<f64>> BudgetedObjective<'_, O> {
                 incumbent.view()
             }
         };
-        peer.prepare(anchor, proposal)
+        peer.prepare(anchor, proposal, None)
+    }
+
+    /// Coordinate strategies retain every inactive design coordinate.
+    fn prepare_coordinate_proposal(
+        &self,
+        anchor: ArrayView1<f64>,
+        proposal: &mut Array1<f64>,
+        axis: usize,
+    ) -> bool {
+        !self.ledger.exhausted()
+            && self.ledger.peer.as_ref().is_some_and(|peer| {
+                peer.prepare(anchor, proposal, Some(axis))
+            })
     }
 }
 
@@ -1689,7 +1702,11 @@ fn run_persistent_gsa<O, G>(
                     y[axis] = y1[0];
                     crate::movekernel::reflect_into_box(y.view(), &bounds)
                 };
-                obj.prepare_proposal(Some(x.view()), &mut proposal);
+                if j < dim {
+                    obj.prepare_proposal(Some(x.view()), &mut proposal);
+                } else {
+                    obj.prepare_coordinate_proposal(x.view(), &mut proposal, j - dim);
+                }
                 let proposal_val = obj.eval(proposal.view());
                 let accepted = if !proposal_val.is_finite() {
                     false

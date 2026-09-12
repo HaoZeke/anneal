@@ -285,7 +285,12 @@ impl Peer {
             .geometry = state.coverage.repulsion_snapshot(self.replica);
     }
 
-    pub(super) fn prepare(&self, anchor: ArrayView1<f64>, proposal: &mut Array1<f64>) -> bool {
+    pub(super) fn prepare(
+        &self,
+        anchor: ArrayView1<f64>,
+        proposal: &mut Array1<f64>,
+        axis: Option<usize>,
+    ) -> bool {
         let original = proposal.clone();
         let mut local = self.local.lock().expect("local peer geometry lock");
         let LocalPeer {
@@ -293,7 +298,10 @@ impl Peer {
             geometry,
             prepared,
         } = &mut *local;
-        geometry.repel(anchor, proposal, rng);
+        match axis {
+            Some(axis) => geometry.repel_coordinate(anchor, proposal, axis, rng),
+            None => geometry.repel(anchor, proposal, rng),
+        }
         let changed = *proposal != original;
         prepared.push_back(proposal.clone());
         changed

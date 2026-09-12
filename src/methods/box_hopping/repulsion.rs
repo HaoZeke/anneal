@@ -102,7 +102,7 @@ impl PeerSamples {
                     if *width > 0.0 {
                         (coordinate + (direction / norm) * increment).clamp(0.0, upper)
                     } else {
-                        0.0
+                        *coordinate
                     }
                 },
             ));
