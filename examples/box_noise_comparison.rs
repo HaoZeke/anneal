@@ -572,14 +572,11 @@ fn main() {
                     assert_eq!((result.n_evals, result.n_grads), counts);
                     assert!(counts.0 + counts.1 <= budget);
                     assert_eq!(result.best_val, surface.value(result.best_pos.view()));
-                    println!(
-                        "{}",
-                        json!({
+                    let mut record = json!({
                             "record": "result", "landscape": format!("{landscape:?}"),
                         "dimension": dim, "seed": seed, "noise": noise,
                         "history": if coverage_only { "none" } else { history_name },
                         "coverage": if coverage.shared { "shared" } else { "private" },
-                        "coverage_neighbors": coverage.neighbors,
                         "initial_position": start.to_vec(),
                             "initial_value": initial_value, "best_value": result.best_val,
                             "n_evals": counts.0, "n_grads": counts.1, "budget": budget,
@@ -612,8 +609,9 @@ fn main() {
                             "coverage_repelled_proposals": result.coverage.repelled_proposals,
                             "coverage_constrained_repulsions": result.coverage.constrained_repulsions,
                             "coverage_decisions": result.coverage_decisions,
-                        })
-                    );
+                    });
+                    record["coverage_neighbors"] = json!(coverage.neighbors);
+                    println!("{record}");
                 }
             }
         }
