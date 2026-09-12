@@ -14,10 +14,17 @@ fn immobile_nonzero_coordinates_retain_their_position_and_step_cap() {
     peers.receive(1, point.clone());
     let mut rng = StdRng::seed_from_u64(7);
     let mut untouched = rng.clone();
-    let (separation, overlap) = peers.separate(
-        point.view(), anchor.view(), array![0.0, 1.0].view(),
-        1.0, 0.25, 1.0, &mut rng,
-    ).unwrap();
+    let (separation, overlap) = peers
+        .separate(
+            point.view(),
+            anchor.view(),
+            array![0.0, 1.0].view(),
+            1.0,
+            0.25,
+            1.0,
+            &mut rng,
+        )
+        .unwrap();
     assert!(overlap);
     let Separation::Moved(moved) = separation else {
         panic!("the active coordinate admits separation");
@@ -36,8 +43,16 @@ fn an_empty_move_support_cannot_displace_a_nonzero_point() {
     let mut peers = PeerSamples::new(2);
     peers.receive(1, point.clone());
     let mut rng = StdRng::seed_from_u64(7);
-    assert!(matches!(peers.separate(
-        point.view(), array![0.4, 0.4].view(), array![0.0, 0.0].view(),
-        1.0, 0.25, 1.0, &mut rng,
-    ), Some((Separation::Constrained, true))));
+    assert!(matches!(
+        peers.separate(
+            point.view(),
+            array![0.4, 0.4].view(),
+            array![0.0, 0.0].view(),
+            1.0,
+            0.25,
+            1.0,
+            &mut rng,
+        ),
+        Some((Separation::Constrained, true))
+    ));
 }
