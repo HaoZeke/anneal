@@ -120,6 +120,8 @@ pub mod exchange;
 /// featomic SOAP power-spectrum leftover hop.
 #[cfg(feature = "featomic")]
 pub mod featomic_hop;
+/// First-passage mixture model for splitting a budget over independent chains.
+pub mod first_passage;
 /// Energy-floor flicker components and record EI.
 pub mod floors;
 /// Free-energy estimators (Bennett's BAR + descendants).

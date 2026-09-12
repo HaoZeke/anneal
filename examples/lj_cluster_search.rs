@@ -3929,10 +3929,16 @@ impl Default for HearState {
 /// Hear phase: whether a structure another replica published should be
 /// adopted at this checkpoint.
 ///
-/// `CATALOG_NO_HEAR=1` disables adoption; `CATALOG_HEAR=family` adopts the
-/// coordinator's sparsest-family entry only after `CATALOG_HEAR_STALL` hops
-/// without an own improvement, whatever its energy, and never the incumbent
-/// draw; the default adopts an incumbent deeper than the own best by 1e-3.
+/// Adoption is off unless `CATALOG_HEAR` is set: `CATALOG_HEAR=1` adopts an
+/// incumbent deeper than the own best by 1e-3, `CATALOG_HEAR=family` adopts
+/// the coordinator's sparsest-family entry only after `CATALOG_HEAR_STALL`
+/// hops without an own improvement, whatever its energy, and never the
+/// incumbent draw; `CATALOG_NO_HEAR=1` forces it off. Off is the default
+/// because handing the incumbent to stalled replicas resets the ensemble's
+/// independent starts to one funnel: measured 1 of 48 ensembles at Marks
+/// against 16 of 48 with adoption off and 23 of 48 for private chains
+/// (LJ75, 48 replicas of 5e4, 2026-09-07), the branching scheme Procacci
+/// (2015) rejects for the same reason in nonequilibrium work averages.
 /// Sampled candidates are registered as packing references either way.
 /// Returns the candidate to adopt; the caller records the trace and fires
 /// the phase.
@@ -3947,7 +3953,8 @@ fn hear_phase(
     use anneal_core::cooperative_search::CatalogSampleOutcome;
     let floor_energy = snapshot.best_energy();
     let current_len = snapshot.current_state().len();
-    let hear_enabled = !anneal_core::env::flag("CATALOG_NO_HEAR");
+    let hear_enabled =
+        std::env::var("CATALOG_HEAR").is_ok() && !anneal_core::env::flag("CATALOG_NO_HEAR");
     let family_mode = std::env::var("CATALOG_HEAR").is_ok_and(|v| v == "family");
     let hear_stall: usize = anneal_core::env::parsed("CATALOG_HEAR_STALL").unwrap_or(5000);
     if snapshot.best_energy() < state.last_best - 1e-9 {
