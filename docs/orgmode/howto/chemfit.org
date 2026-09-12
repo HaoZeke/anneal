@@ -70,7 +70,7 @@ does not certify a global minimum.
 
 With =jac=None= and no explicit coverage controls, =replicas=1= selects the
 scalar portfolio; two or more replicas select scalar hop chains. Explicit
-=coverage_shared= or =coverage_radius= selects hop chains even at one
+=coverage_shared=, =coverage_radius= or =coverage_neighbors= selects hop chains even at one
 replica. Replicas divide one aggregate budget; adding replicas does not
 multiply the number of paid calls. Comparing one portfolio against several
 hopping chains changes the controller as well as communication.
@@ -81,6 +81,14 @@ normalized RMS distance in parameter space. Fixed coordinates contribute
 zero distance and remain fixed in every callback. Nearby peer samples can
 repel proposals; neither distance nor repulsion requires forces. See
 [[file:../explanation/communication.org][the communication contract]] for the geometry, budget and counter definitions.
+
+=coverage_neighbors=1= limits both sampled-position and coverage-deposit
+delivery to adjacent chain identities on a ring. Zero selects all-to-all;
+omitting the setting preserves the convenience policy above. This does not
+restrict the optional minimum ledger or forward received observations. The
+same native setting is available to scalar =global_optimize= portfolio
+replicas. A sparse graph is an experimental diversity control, not evidence
+that a fitting run reaches a better loss.
 
 With a supplied =jac=, the same entry selects gradient-capable box search.
 Langevin escapes require a gradient; their force requirement is not imposed

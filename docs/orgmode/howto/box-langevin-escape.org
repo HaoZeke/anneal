@@ -156,6 +156,23 @@ cargo run --locked --example box_noise_comparison -- 32 8000 4 16 coverage 0.05 
 cargo run --locked --example box_noise_comparison -- 32 8000 4 16 coverage 0.05 0.1 values
 #+end_src
 
+The ninth positional argument sets the direct coverage neighbourhood: zero
+is all-to-all; one is the adjacent-chain ring. It applies to both samples and
+deposits, and every result records =coverage_neighbors=. For a matched scalar
+portfolio/hopping comparison, =controllers-peers= uses argument eight as the
+first seed and argument nine as the neighbourhood. Run each graph with the
+same dimension, aggregate budget, seed range, radius and height:
+
+#+begin_src sh
+cargo run --release --locked --example box_noise_comparison -- 32 8000 16 16 controllers-peers 0.4 0.1 32 0
+cargo run --release --locked --example box_noise_comparison -- 32 8000 16 16 controllers-peers 0.4 0.1 32 1
+#+end_src
+
+Records include =initial_positions=, =replica_budgets=, actual =n_evals= and
+=n_grads=, raw =best_value= with =verified_value=, and delivered sample counts.
+The scalar comparison requires no gradient. Configuration and delivery counts
+identify the experiment; only the paired objective results measure its benefit.
+
 The arguments are dimension, aggregate work budget, number of seeds and
 maximum Langevin steps. The =coverage= mode additionally accepts radius,
 deposit height and an optional =values= or =gradient= capability; =gradient=

@@ -197,11 +197,44 @@ Restart count respects that cost; every numerical probe counts as an objective
 call, not a caller-gradient call. This is allocation of optimization work, not
 physical-time integration or a certificate that the objective is smooth.
 
-This exchange is all-to-all and in-process. It does not use =CensusBus= ring
-settings or the NNG minimum-history transport. It changes proposals, not
+This exchange is in-process. =BoxCoverageConfig.neighbors= selects its direct
+graph: zero is all-to-all; positive =k= admits cyclic replica-index distances
+up to =k=. The Python keyword is =coverage_neighbors=. It does not read the
+=CensusBus= environment settings or use the NNG minimum-history transport.
+It changes proposals, not
 acceptance energies or occupied states by peer adoption. Coverage height gates
 sample separation but supplies no well-depth bias to this driver. A radius is
 an explicit geometric setting, not a universal diversity or quality guarantee.
+
+** Direct neighbours across scalar and gradient clients
+
+The shared receiver rule restricts both paid-sample delivery and coverage-
+deposit delivery. Box scalar hops, gradient hops and portfolio replicas use
+the same =BoxCoverageConfig.neighbors=. For five live chains, =neighbors=1=
+gives each chain two direct peers, including the edge between chain zero and
+chain four. Saturating the radius yields all-to-all without duplicate edges.
+Retiring a reader does not renumber the ring or discard its producer history
+for live neighbours. Private or zero-weight coverage delivers nothing.
+
+=global_optimize= defaults =coverage_neighbors= to zero. =minimize= and
+=ensemble_optimize= default it to =None= to preserve their convenience
+dispatch; specifying it selects configured hop coverage, like an explicit
+sharing or radius control. It requires no Jacobian or force callback.
+
+The graph restricts coverage, not the optional exact minimum ledger. Receivers
+do not republish imported samples or visits. These are direct subscriptions,
+not forwarded gossip, and a ring supplies no logarithmic global mixing
+guarantee. The generic exchange still uses in-process storage and retains the
+portfolio checkpoint barrier; a lower payload-delivery count does not prove
+lower synchronization cost or better optimization. The atomic =CensusBus=
+uses the same adjacency predicate with its own =CENSUS_BUS_NEIGHBORS= setting
+and retains its TCP/IPC transports.
+
+The native =shared_bias_topology= regression identifies producers in both
+streams and checks small/saturated rings, repeat reads and retirement.
+=portfolio_coverage_topology= and the Python =test_coverage_topology.py=
+exercise scalar public entry points, actual callback counts and private
+controls. =census_bus_topology= requires =bank-rpc= and exercises TCP and IPC.
 
 ** Common Python result and domain
 

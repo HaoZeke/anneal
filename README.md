@@ -122,6 +122,12 @@ minimum certificate, or replacement of the raw objective. The
 [portfolio interaction contract](docs/orgmode/explanation/communication.org)
 names the proposal paths, budget rules, and transport limits.
 
+`coverage_neighbors=1` restricts generic coverage to adjacent chains on a ring;
+`0` is all-to-all. Rust exposes the same rule as `BoxCoverageConfig.neighbors`.
+Both paid samples and coverage deposits follow the graph, without gradients
+or minimum certificates. This does not restrict the optional minimum ledger
+or remove the portfolio checkpoint barrier.
+
 `nfev` and `njev` count actual objective and gradient calls; `charged` is their
 sum. `diagnostics` preserves the underlying work, history, and coverage fields.
 `success` means a finite feasible candidate was returned, not that global
