@@ -4,8 +4,8 @@
 //! J. Phys. Chem. B 110, 3533, 2006) has every walker deposit into one bias.
 //! Here each chain keeps its own bias and, at every checkpoint, publishes the
 //! visits it made since its last publication as descriptor centres with
-//! counts, and takes every other chain's since its last read. The bias each
-//! chain sees is the population's up to one checkpoint of lag. Nothing else
+//! counts, and takes its direct peers' visits since its last read. The default
+//! graph is all-to-all; a ring radius restricts both delivery channels. Nothing else
 //! crosses in a visit delta: no coordinates, no energies, no instruction to move.
 //! A separate bounded sample channel retains producer-tagged descriptors of
 //! paid search positions. Samples do not assert a visit count or stationarity.
@@ -16,6 +16,16 @@ use ndarray::Array1;
 
 /// Maximum recent paid samples retained per producer and receiver cloud.
 pub const SAMPLE_WINDOW: usize = 32;
+
+/// Direct cyclic neighbours, with zero selecting all-to-all and no self edge.
+/// Fixed producer identities survive retirement; delivery does not forward data.
+pub(crate) fn accepts_peer(reader: usize, source: usize, walkers: usize, neighbors: usize) -> bool {
+    if reader >= walkers || source >= walkers || reader == source {
+        return false;
+    }
+    let distance = reader.abs_diff(source);
+    neighbors == 0 || distance.min(walkers - distance) <= neighbors
+}
 
 struct Sample {
     sequence: u64,
@@ -31,6 +41,7 @@ struct Batch {
 /// Exchange of visit deltas, pruned once every live reader has consumed them.
 pub struct SharedDeposits {
     walkers: usize,
+    neighbors: usize,
     /// Batches not yet read by every live reader; index 0 is the oldest.
     batches: Vec<Batch>,
     /// Sequence number of the oldest retained batch.
@@ -46,11 +57,19 @@ pub struct SharedDeposits {
 }
 
 impl SharedDeposits {
-    /// Empty exchange for `walkers` chains.
+    /// Empty all-to-all exchange for `walkers` chains.
     pub fn new(walkers: usize) -> Self {
+        Self::with_neighbors(walkers, 0)
+    }
+
+    /// Empty exchange restricted to cyclic distance `neighbors`. Zero selects
+    /// all other walkers. Both sample and visit delivery use this fixed graph;
+    /// receiving data does not publish it to another neighbour.
+    pub fn with_neighbors(walkers: usize, neighbors: usize) -> Self {
         assert!(walkers > 0, "a shared bias needs at least one walker");
         Self {
             walkers,
+            neighbors,
             batches: Vec::new(),
             base: 0,
             cursors: vec![Some(0); walkers],
@@ -85,7 +104,7 @@ impl SharedDeposits {
         true
     }
 
-    /// Unread samples in producer order, excluding self-delivery. The bounded
+    /// Unread direct-peer samples in producer order, excluding self-delivery. The bounded
     /// channel drops old samples for lagging readers, never paid visit deltas.
     /// Reading samples neither advances visit cursors nor republishes anything.
     pub fn drain_samples(&mut self, walker: usize) -> Vec<(usize, Array1<f64>)> {
@@ -96,7 +115,7 @@ impl SharedDeposits {
         let cursor = self.sample_cursors[walker];
         let mut received = Vec::new();
         for (source, samples) in self.samples.iter().enumerate() {
-            if source == walker {
+            if !accepts_peer(walker, source, self.walkers, self.neighbors) {
                 continue;
             }
             for sample in samples.iter().filter(|sample| sample.sequence >= cursor) {
@@ -151,7 +170,8 @@ impl SharedDeposits {
         self.prune();
     }
 
-    /// Every other walker's visits published since `walker` last read.
+    /// Direct peers' visits published since `walker` last read. Excluded batches
+    /// advance the read cursor without contributing to delivered visit counts.
     pub fn drain(&mut self, walker: usize) -> Vec<(Array1<f64>, u64)> {
         assert!(walker < self.walkers, "walker index out of range");
         let Some(cursor) = self.cursors[walker] else {
@@ -161,7 +181,7 @@ impl SharedDeposits {
         let first = usize::try_from(cursor.saturating_sub(self.base)).expect("cursor offset fits");
         let mut out = Vec::new();
         for batch in &self.batches[first..] {
-            if batch.walker != walker {
+            if accepts_peer(walker, batch.walker, self.walkers, self.neighbors) {
                 for (centre, count) in &batch.deposits {
                     self.delivered += *count;
                     out.push((centre.clone(), *count));
