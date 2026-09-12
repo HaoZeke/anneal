@@ -419,7 +419,13 @@ fn main() {
                     let controls = if coverage_neighbors == 0 {
                         values_controller_records(landscape, dim, budget, seed)
                     } else {
-                        values_controller_records_with_neighbors(landscape, dim, budget, seed, coverage_neighbors)
+                        values_controller_records_with_neighbors(
+                            landscape,
+                            dim,
+                            budget,
+                            seed,
+                            coverage_neighbors,
+                        )
                     };
                     for record in controls {
                         println!("{record}");
@@ -663,8 +669,14 @@ mod controller_tests {
             assert_eq!(record["n_evals"], record["observed_calls"]);
             assert_eq!(record["n_grads"], 0);
             assert_eq!(record["best_value"], record["verified_value"]);
-            assert_eq!(record["initial_positions"], baseline[index]["initial_positions"]);
-            assert_eq!(record["replica_budgets"], baseline[index]["replica_budgets"]);
+            assert_eq!(
+                record["initial_positions"],
+                baseline[index]["initial_positions"]
+            );
+            assert_eq!(
+                record["replica_budgets"],
+                baseline[index]["replica_budgets"]
+            );
             if index < 4 {
                 assert_eq!(record["best_value"], baseline[index]["best_value"]);
                 assert_eq!(record["best_position"], baseline[index]["best_position"]);
@@ -672,7 +684,11 @@ mod controller_tests {
                 assert_eq!(record["coverage_applied_foreign_samples"], 0);
             }
         }
-        let coverage = BoxCoverageConfig { neighbors: 1, radius: 0.4, ..Default::default() };
+        let coverage = BoxCoverageConfig {
+            neighbors: 1,
+            radius: 0.4,
+            ..Default::default()
+        };
         let peer = portfolio_peer_record(Landscape::Rastrigin, 2, 257, 13, &coverage);
         assert_eq!(peer["coverage_neighbors"], 1);
         assert_eq!(peer["n_evals"], 257);
