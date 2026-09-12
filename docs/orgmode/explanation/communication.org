@@ -161,6 +161,14 @@ geometric displacement. A prepared proposal is publishable only when a real
 callback evaluates its finite feasible value. Other portfolio arm internals
 do not acquire peer steering merely by being present in the library.
 
+QMC exploration composes =TsallisVisit= with =Reflected= in normalized box
+coordinates. It maps the reflected point into physical coordinates before
+peer separation and evaluation. Heavy-tailed excursions retain their reflected
+position instead of accumulating on box faces. The scalar-only
+=qmc_visiting_boundary= regressions verify this composition, including
+anisotropic intervals and fixed coordinates; local derivative probes are
+not displaced by this global-proposal adapter.
+
 The =portfolio_scalar_proposals= regressions exercise the initialization and
 residual paths through the objective-only API. They identify GSA's initial
 candidate by its generating random stream and check every paid position in
