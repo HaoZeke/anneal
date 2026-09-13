@@ -206,7 +206,13 @@ sub-stencil allowances, with private and zero-height controls.
 The values-only controller protects a refinement reserve across search slices,
 including enlarged warmup slices. A scalar refinement start needs its base
 value, a complete central stencil and a trial: =2 * dimension + 2= callbacks.
-Both admission and restart count respect that cost. A smaller residual
+Scalar warmup also protects the untried active arms: each requested slice is
+capped by its share of the remaining exploration work. Preferred multipliers
+cannot consume another warmup arm's share or the refinement reserve.
+The =portfolio_warmup_funding= regression checks a four-replica,
+128-dimensional scalar run without a caller gradient.
+Both local admission and restart count respect the complete-start cost.
+A smaller residual
 allowance bypasses local search without spending calls or random draws, so
 the global proposal loop can evaluate and communicate feasible positions.
 Every numerical probe counts as an objective call, not a caller-gradient
