@@ -3886,6 +3886,14 @@ where
         let before = ledger.best_get();
         let reward_scale = scheduler_reward_scale(&ledger);
         let threshold = scheduler_success_threshold(arms[choice], &ledger);
+        let exploration_remaining = ledger.remaining().saturating_sub(scalar_reserve);
+        // Scalar warmup reserves a share for each untried active arm before
+        // applying preferred slice sizes. The local-refinement tail is separate.
+        let allocation_cap = if scalar_reserve > 0 && round <= k {
+            exploration_remaining / (k - round + 1)
+        } else {
+            exploration_remaining
+        };
         // Auto: preferred arms get larger slices under the same total budget.
         let arm_slice = if policy == PortfolioPolicy::Auto {
             let name = arms[choice].name();
@@ -3903,7 +3911,7 @@ where
             slice
         }
         .max(4)
-        .min(ledger.remaining().saturating_sub(scalar_reserve).max(4));
+        .min(allocation_cap.max(4));
         let used_before = ledger.used_get();
         let ceiling = used_before + arm_slice;
         ledger.cap_set(ceiling.min(budget));
