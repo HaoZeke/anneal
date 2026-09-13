@@ -88,7 +88,10 @@ fn raw_population_starts() -> Vec<Vec<u64>> {
     for replica in 0..2_u64 {
         let replica_seed = SEED ^ replica.wrapping_mul(0x9E37_79B9);
         let mut rng = StdRng::seed_from_u64(replica_seed);
-        let arm_seed = (1..=4).map(|index| rng.random::<u64>() ^ index).last().unwrap();
+        let arm_seed = (1..=4)
+            .map(|index| rng.random::<u64>() ^ index)
+            .last()
+            .unwrap();
         let points = shifted_low_discrepancy_points(&objective.bounds, walkers, 1, arm_seed);
         // Walker zero is the incumbent; walkers 1--3 are incumbent jitter.
         for index in 4..walkers {
@@ -106,7 +109,10 @@ fn shared_scalar_population_starts_are_peer_corrected_before_evaluation() {
     let private = run(false, 0.1);
     let shared = run(true, 0.1);
     for point in raw {
-        assert!(private.contains(&point), "the DMC generator must be exercised");
+        assert!(
+            private.contains(&point),
+            "the DMC generator must be exercised"
+        );
         assert!(
             !shared.contains(&point),
             "a nearby DMC start must evaluate its peer-corrected position"
