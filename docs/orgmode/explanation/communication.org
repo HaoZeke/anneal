@@ -161,6 +161,12 @@ geometric displacement. A prepared proposal is publishable only when a real
 callback evaluates its finite feasible value. Other portfolio arm internals
 do not acquire peer steering merely by being present in the library.
 
+The population-diffusion arm (=dmc_pop=) uses continuous refinement rather
+than an assumed integer lattice. Its scalar regression translates the box
+and initial point together and checks corresponding paid positions. This
+coordinate-origin contract is separate from peer steering: the population
+arm's internal proposals do not consume the frozen peer cloud.
+
 GSA's coordinate strategy carries its active axis through this boundary.
 Peer correction moves only that coordinate; all other physical coordinates
 retain their values. Distance and radius still use the full normalized
