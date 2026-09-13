@@ -82,7 +82,8 @@ fn scalar_population_trace_translates_with_its_box() {
             let reference = run(&origin, budget, seed);
             let translated = run(&translation, budget, seed);
             assert_eq!(
-                translated.len(), reference.len(),
+                translated.len(),
+                reference.len(),
                 "budget={budget}, seed={seed}: changing the origin must not change paid work"
             );
             for (call, (base, shifted)) in reference.iter().zip(&translated).enumerate() {
@@ -90,7 +91,9 @@ fn scalar_population_trace_translates_with_its_box() {
                     assert!(
                         (shifted[axis] - translation[axis] - base[axis]).abs() < 1e-7,
                         "budget={budget}, seed={seed}, call={call}, axis={axis}: base={}, translated={}, offset={}",
-                        base[axis], shifted[axis], translation[axis]
+                        base[axis],
+                        shifted[axis],
+                        translation[axis]
                     );
                 }
             }
