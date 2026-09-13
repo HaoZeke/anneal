@@ -49,6 +49,7 @@ mod config;
 mod moves;
 mod preset;
 
+pub use crate::methods::minima_hopping::SharedVisitPolicy;
 pub use config::{Config, ContinuousSymmetry, Keying, LadderMode, SoapProposalMode};
 pub use moves::*;
 
@@ -1564,7 +1565,12 @@ where
     // structure) so the return screen can recognise a descent into any of
     // them. Recognition is monotone in this set and the acceptance still
     // sees a real quenched energy, so widening it can only refund cost.
-    let shared_screen = std::env::var("CATALOG_SHARED_SCREEN").is_ok_and(|value| value == "1");
+    // The env var is the catalog exchange path. Recognition also fills
+    // this bank from certified quenches on this chain, which is the
+    // Pedersen skip analog: abort a descent into a basin already on file.
+    let recognition_skip = matches!(cfg.shared_visit_policy, SharedVisitPolicy::Recognition);
+    let shared_screen =
+        recognition_skip || std::env::var("CATALOG_SHARED_SCREEN").is_ok_and(|value| value == "1");
     // The ensemble frontier ladder: raw doorway states ship out to the
     // coordinator, and other chains' posts fold into this chain's seam
     // bank, so the ladder holds population at every occupied stage of
@@ -1725,13 +1731,20 @@ where
                             None => identity.basin_of(destination.coordinates.view()),
                         };
                         destination.local_minimum = Some(reached);
-                        feedback.remember_driver_local(reached);
-                        feedback.observe_shared(
-                            history_here,
-                            report.minimum,
-                            report.is_new,
-                            report.visits,
-                        );
+                        match cfg.shared_visit_policy {
+                            SharedVisitPolicy::Tabu => {
+                                feedback.remember_driver_local(reached);
+                                feedback.observe_shared(
+                                    history_here,
+                                    report.minimum,
+                                    report.is_new,
+                                    report.visits,
+                                );
+                            }
+                            SharedVisitPolicy::Recognition => {
+                                feedback.observe_driver_local(here, reached);
+                            }
+                        }
                     } else if let Some((from, reached)) = local_feedback {
                         feedback.observe_driver_local(from, reached);
                     }
@@ -3199,6 +3212,15 @@ where
         }
         if recordable {
             ledger.record(e_new, x_new.view());
+            // Recognition refunds the rest of a later descent into this
+            // basin. HistoryHook still returns identity only; the bank
+            // holds coordinates the loop already paid to certify.
+            if recognition_skip && screen_bank.len() < 512 {
+                screen_bank.push((bias.cv(x_new.view()), e_new, x_new.clone()));
+                if let Some(coords) = x_new.as_slice() {
+                    crate::catalog::offer_known_minimum(e_new, coords);
+                }
+            }
         } else {
             unconverged_records += 1;
         }
@@ -3399,13 +3421,20 @@ where
                     // controller: a minimum first found by another chain is
                     // known here too, and only a minimum new under the
                     // membership policy is offered to the threshold.
-                    feedback.remember_driver_local(reached);
-                    let visit = feedback.observe_shared(
-                        history_here,
-                        report.minimum,
-                        report.is_new,
-                        report.visits,
-                    );
+                    let visit = match cfg.shared_visit_policy {
+                        SharedVisitPolicy::Tabu => {
+                            feedback.remember_driver_local(reached);
+                            feedback.observe_shared(
+                                history_here,
+                                report.minimum,
+                                report.is_new,
+                                report.visits,
+                            )
+                        }
+                        SharedVisitPolicy::Recognition => {
+                            feedback.observe_driver_local(Some(from), reached)
+                        }
+                    };
                     visit == Visit::New && feedback.accept(delta)
                 } else {
                     feedback.observe_driver_local(Some(from), reached);
@@ -3942,10 +3971,10 @@ where
         // applied to the whole cluster, so surface atoms move onto the empty
         // orbit positions the core implies. Same terms as the core
         // symmetrisation above: once per new basin, quenched, offered.
-        if cfg.orbit_complete_on_new
+        if cfg.packing_surface().orbit_on_new
             && accept
             && (moved_basin || cfg.point_symmetrise_every_accept)
-            && let Some(y) = crate::symmetrise::orbit_complete_core(
+            && let Some(y) = crate::packing::on_new_basin(
                 x.view(),
                 n,
                 cfg.symmetry_tolerance,
@@ -5398,6 +5427,37 @@ mod tests {
         assert!((der.bayes_threshold - 7.0 / 15.0).abs() < 1e-12);
     }
 
+    #[test]
+    fn communicating_is_orbit_without_depth_reward() {
+        let rec = Config::recommended(75);
+        let comm = Config::communicating(75);
+        assert!(rec.depth_reward);
+        assert!(!rec.orbit_complete_on_new);
+        assert_eq!(rec.shared_visit_policy, SharedVisitPolicy::Tabu);
+        assert!(!comm.depth_reward);
+        assert!(comm.orbit_complete_on_new);
+        assert_eq!(comm.shared_deposits, 0);
+        assert_eq!(comm.shared_visit_policy, SharedVisitPolicy::Recognition);
+        assert!(comm.allocate_moves && comm.return_screen);
+        assert!(comm.jump_on_stall);
+        assert!(!rec.jump_on_stall);
+        assert_eq!(comm.surfaces.len(), 1);
+        assert!(comm.surfaces[0].is_active());
+        assert!(rec.surfaces.is_empty());
+    }
+
+    #[test]
+    fn packing_surface_names_twin_and_orbit_together() {
+        let mut cfg = Config::recommended(13);
+        assert!(!cfg.packing_surface().orbit_on_new);
+        assert!(!cfg.packing_surface().twin_as_move);
+        cfg.orbit_complete_on_new = true;
+        cfg.move_library = MoveLibrary::Twin;
+        let surface = cfg.packing_surface();
+        assert!(surface.orbit_on_new);
+        assert!(surface.twin_as_move);
+    }
+
     /// The claim the bank rests on: a bias handed to one chain and then to the
     /// next carries what the first one learned. Without this each chain starts
     /// from an empty bias, and at 75 points the crossing takes on the order of
@@ -5825,7 +5885,124 @@ mod tests {
             1,
             "one well is one identity"
         );
+    }
+
+    #[test]
+    fn recognition_does_not_count_a_peer_well_as_known_escape() {
+        use crate::descriptor_space::{DescriptorGeometry, universal_descriptor_space};
+        use crate::methods::minima_hopping::{
+            HistoryHook, HistoryMembership, MinimumHistory, SerializedWitness, SharedMinimumHistory,
+        };
+        use crate::pes_exploration::StructureContext;
+        use std::sync::Mutex;
+
+        let n = 4;
+        let mut cfg = Config::for_cluster(n);
+        cfg.max_hops = Some(20);
+        cfg.screen_steps = 1;
+        cfg.relax_steps = 120;
+        cfg.screen_margin = f64::INFINITY;
+        cfg.return_screen = false;
+        cfg.minima_hopping = true;
+        cfg.shared_deposits = 0;
+        cfg.shared_visit_policy = SharedVisitPolicy::Recognition;
+        let target = Array1::from(vec![
+            1.0, 1.0, 1.0, 1.0, -1.0, -1.0, -1.0, 1.0, -1.0, -1.0, -1.0, 1.0,
+        ]);
+        let descriptor = universal_descriptor_space(DescriptorGeometry::finite(1.0).unwrap());
+        let context = StructureContext::new(Some(vec![18; n]), None, Some("well".into()));
+        let witness = SerializedWitness(Mutex::new(|l: ArrayView1<f64>, r: ArrayView1<f64>| {
+            l.iter()
+                .zip(r.iter())
+                .map(|(a, b)| (a - b) * (a - b))
+                .sum::<f64>()
+                .sqrt()
+                < 0.5
+        }));
+        let history = Mutex::new(MinimumHistory::new(10.0).unwrap());
+        let mut rng = StdRng::seed_from_u64(7);
+        let start = random_cluster(n, 0.7, cfg.min_separation, &mut rng);
+        let run = |seed: u64, hook: &mut dyn HistoryHook| {
+            let mut ledger = Ledger::new(12_000);
+            let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, steps: usize| {
+                well_relax(&target, led, x, steps)
+            };
+            let mut grad = |led: &mut Ledger, x: ArrayView1<f64>| -> Option<Array1<f64>> {
+                led.charge().then(|| 2.0 * (&x - &target))
+            };
+            let mut rng = StdRng::seed_from_u64(seed);
+            let mut checkpoint = |_: ChainCheckpoint<'_>| CheckpointAction::Continue;
+            run_with_history_at_checkpoints(
+                &cfg,
+                start.view(),
+                &mut ledger,
+                &mut relax,
+                Some(&mut grad),
+                None,
+                Some(hook),
+                &mut rng,
+                500,
+                &mut checkpoint,
+            )
+        };
+        let mut first = SharedMinimumHistory::new(
+            &history,
+            &descriptor,
+            context.clone(),
+            &witness,
+            HistoryMembership::Accepted,
+        );
+        let _ = run(1, &mut first);
+        let mut second = SharedMinimumHistory::new(
+            &history,
+            &descriptor,
+            context,
+            &witness,
+            HistoryMembership::Accepted,
+        );
+        let out2 = run(2, &mut second);
+        assert_eq!(
+            out2.visit_counts.1, 0,
+            "recognition must not inherit the peer well as known: {:?}",
+            out2.visit_counts
+        );
+        assert_eq!(out2.shared_deposits, 0);
         assert_eq!(second.cost().1, 0, "no certified quench was refused");
+    }
+
+    #[test]
+    fn recognition_refunds_a_second_descent_into_the_same_well() {
+        let n = 4;
+        let mut cfg = Config::for_cluster(n);
+        cfg.max_hops = Some(6);
+        cfg.screen_steps = 1;
+        cfg.relax_steps = 80;
+        cfg.screen_margin = f64::INFINITY;
+        cfg.return_screen = false;
+        cfg.merge_radius = 1.0e3;
+        cfg.shared_visit_policy = SharedVisitPolicy::Recognition;
+        let target = Array1::from(vec![
+            1.0, 1.0, 1.0, 1.0, -1.0, -1.0, -1.0, 1.0, -1.0, -1.0, -1.0, 1.0,
+        ]);
+        let mut full = 0usize;
+        let mut screen = 0usize;
+        let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, steps: usize| {
+            if steps >= 80 {
+                full += 1;
+            } else {
+                screen += 1;
+            }
+            well_relax(&target, led, x, steps)
+        };
+        let mut rng = StdRng::seed_from_u64(7);
+        let start = random_cluster(n, 0.7, cfg.min_separation, &mut rng);
+        let mut ledger = Ledger::new(8_000);
+        let _ = run(&cfg, start.view(), &mut ledger, &mut relax, &mut rng);
+        assert!(full >= 1, "the first descent must certify the well");
+        assert!(
+            full < 6,
+            "later descents into the same well must stand in: full={full} screen={screen}"
+        );
     }
 
     #[test]

@@ -454,6 +454,25 @@ pub struct EscapeFeedback {
     pub n_new: usize,
 }
 
+/// How a shared-history report drives this chain's escape and acceptance.
+///
+/// [`SharedVisitPolicy::Tabu`] is Schoenborn sharing: a basin another chain
+/// already holds is known here, and the visit count inflates the escape.
+/// Measured on hist75 that loses to a matched single chain (12-14/48 against
+/// 16/48). [`SharedVisitPolicy::Recognition`] keeps the catalog for identity
+/// and quench refunds (certified minima fill the screen stand-in bank);
+/// the controller stays on this chain's own standing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SharedVisitPolicy {
+    /// Peer visits classify the basin as known and inflate escape.
+    #[default]
+    Tabu,
+    /// Peer visits identify the basin only. Escape stays local; certified
+    /// quenches fill the screen stand-in bank.
+    Recognition,
+}
+
 impl EscapeFeedback {
     /// Controller starting at `escape` and `threshold`, with Goedecker's rates.
     pub fn new(escape: f64, threshold: f64) -> Self {
@@ -564,6 +583,10 @@ impl EscapeFeedback {
     /// `basin_visits` includes this observation. A basin first found by a
     /// different replica is therefore known even when this controller's local
     /// map has not seen it. The global count also drives enhanced feedback.
+    ///
+    /// This is [`SharedVisitPolicy::Tabu`]. Recognition keeps the catalog
+    /// report off the controller: call [`Self::observe_driver_local`] with
+    /// this chain's own basin ids.
     pub fn observe_shared(
         &mut self,
         current: Option<usize>,
@@ -947,6 +970,29 @@ mod tests {
         let expected = feedback.beta_known * (1.0 + feedback.visits_coeff * 7.0_f64.ln());
         assert!((feedback.escape() / before - expected).abs() < 1e-12);
         assert_eq!(feedback.visits(9), 8);
+    }
+
+    #[test]
+    fn recognition_keeps_a_peer_basin_new_for_this_chain() {
+        let mut tabu = EscapeFeedback::new(1.0, 1.0);
+        tabu.register_initial(3);
+        let tabu_before = tabu.escape();
+        assert_eq!(tabu.observe_shared(Some(3), 9, false, 8), Visit::Known);
+        let tabu_ratio = tabu.escape() / tabu_before;
+
+        let mut rec = EscapeFeedback::new(1.0, 1.0);
+        rec.register_driver_local_initial(3);
+        let rec_before = rec.escape();
+        assert_eq!(rec.observe_driver_local(Some(3), 9), Visit::New);
+        let rec_ratio = rec.escape() / rec_before;
+
+        assert!(
+            rec_ratio < tabu_ratio,
+            "recognition must not inherit the peer visit penalty: {rec_ratio} against {tabu_ratio}"
+        );
+        assert_eq!(rec.n_new, 1);
+        assert_eq!(rec.n_known, 0);
+        assert_eq!(SharedVisitPolicy::default(), SharedVisitPolicy::Tabu);
     }
 
     #[test]
