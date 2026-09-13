@@ -410,6 +410,10 @@ pub struct Config {
     /// acceptance rule uses it; [`Config::minima_hopping`] feeds the same
     /// counts to its escape controller instead.
     pub shared_deposits: usize,
+    /// Whether shared-history visit counts drive escape and acceptance.
+    ///
+    /// Tabu is the hist75 loss. Recognition keeps walks on their own standing.
+    pub shared_visit_policy: crate::methods::minima_hopping::SharedVisitPolicy,
     /// Basin hopping with occasional jumping: on stagnation, a short walk of
     /// unquenched, unconditionally accepted collective displacements, then a
     /// quench.
@@ -968,6 +972,43 @@ impl Config {
         cfg
     }
 
+    /// Communicating paper arm: Marks kernel, recognition, two-phase surface.
+    ///
+    /// Recommended turns `depth_reward` on and orbit off (4/48 Marks at 4e6).
+    /// Orbit with Thompson and the return screen is 31/48. Recognition keeps
+    /// peer visit counts off the escape controller, which is the hist75 loss.
+    /// The relative two-phase surface is Locatelli--Schoen compaction
+    /// (kappa 0.7, the occupancy-measured cutoff). Recommended does not
+    /// carry it. Stall jumping is Iwamatsu--Okabe (5/100 vs 1/100 on LJ75
+    /// at the paper's 5000-step budget); crate patience stays 5000 hops.
+    /// Grosso replacement is not installed.
+    pub fn communicating(n_points: usize) -> Self {
+        let mut cfg = Self::recommended(n_points);
+        cfg.depth_reward = false;
+        cfg.orbit_complete_on_new = true;
+        cfg.shared_deposits = 0;
+        cfg.shared_visit_policy = crate::methods::minima_hopping::SharedVisitPolicy::Recognition;
+        cfg.surfaces = vec![crate::methods::two_phase::TwoPhase::relative(0.7, 1.0)];
+        cfg.jump_on_stall = true;
+        cfg
+    }
+
+    /// The packing-mutate flags as one record. Twin is a library arm;
+    /// orbit and psym fire after a new basin; angular is the Wales--Doye
+    /// worst-bound relocation.
+    pub fn packing_surface(&self) -> crate::packing::PackingSurface {
+        let twin_as_move = matches!(
+            self.move_library,
+            super::MoveLibrary::Twin | super::MoveLibrary::GrowthAndTwin
+        );
+        crate::packing::PackingSurface::from_hop_flags(
+            twin_as_move,
+            self.orbit_complete_on_new,
+            self.angular_moves,
+            self.point_symmetrise_on_new,
+        )
+    }
+
     /// Unmeasured SOAP-packing superbasin on top of [`Config::recommended`].
     ///
     /// Unit high-`l` mean SOAP merge 0.10 plus adaptive height with
@@ -1106,6 +1147,7 @@ impl Config {
             md_escape_max_steps: 2_000,
             md_escape_soften: 0,
             shared_deposits: 8,
+            shared_visit_policy: crate::methods::minima_hopping::SharedVisitPolicy::Tabu,
             jump_on_stall: false,
             jump_patience: 5_000,
             jump_steps: 10,
