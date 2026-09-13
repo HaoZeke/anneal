@@ -2675,12 +2675,19 @@ fn run_arm<O, G>(
                 ledger,
             };
             let mut local_rng = StdRng::seed_from_u64(seed.wrapping_add(0xd1c_00b00));
+            let prepare = |anchor: ArrayView1<f64>, proposal: &mut Array1<f64>, axis| match axis {
+                Some(axis) => obj.prepare_coordinate_proposal(anchor, proposal, axis),
+                None => obj.prepare_proposal(Some(anchor), proposal),
+            };
+            let prepare = ledger.peer.as_ref().map(|_| {
+                &prepare as &dyn Fn(ArrayView1<f64>, &mut Array1<f64>, Option<usize>) -> bool
+            });
             if let Some(g) = grad {
                 let fresh_grad = BudgetedGradient {
                     inner: g.inner,
                     ledger,
                 };
-                let _ = crate::methods::dmc_population::run_dmc_population_seeded(
+                let _ = crate::methods::dmc_population::run_dmc_population_seeded_with_proposals(
                     &fresh_obj,
                     Some(&fresh_grad),
                     maxf,
@@ -2690,9 +2697,10 @@ fn run_arm<O, G>(
                     crate::methods::dmc_population::DEFAULT_BETA0,
                     Some(seed_pos.view()),
                     &mut local_rng,
+                    prepare,
                 );
             } else {
-                let _ = crate::methods::dmc_population::run_dmc_population_seeded::<
+                let _ = crate::methods::dmc_population::run_dmc_population_seeded_with_proposals::<
                     _,
                     BudgetedGradient<'_, G>,
                     _,
@@ -2706,6 +2714,7 @@ fn run_arm<O, G>(
                     crate::methods::dmc_population::DEFAULT_BETA0,
                     Some(seed_pos.view()),
                     &mut local_rng,
+                    prepare,
                 );
             }
         }

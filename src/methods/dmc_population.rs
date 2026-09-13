@@ -621,6 +621,40 @@ where
     G: Gradient<f64>,
     R: Rng,
 {
+    run_dmc_population_seeded_with_proposals(
+        obj,
+        grad,
+        budget,
+        seed,
+        target_n,
+        steps_per_control,
+        beta0,
+        seed_x,
+        rng,
+        None,
+    )
+}
+
+/// Global proposal correction precedes evaluation and walker-state updates.
+/// Local refinement evaluates the raw objective without this correction.
+#[allow(clippy::too_many_arguments, clippy::type_complexity)]
+pub(crate) fn run_dmc_population_seeded_with_proposals<O, G, R>(
+    obj: &O,
+    grad: Option<&G>,
+    budget: usize,
+    seed: u64,
+    target_n: usize,
+    steps_per_control: usize,
+    beta0: f64,
+    seed_x: Option<ArrayView1<f64>>,
+    rng: &mut R,
+    prepare: Option<&dyn Fn(ArrayView1<f64>, &mut Array1<f64>, Option<usize>) -> bool>,
+) -> DmcPopulationResult
+where
+    O: Objective<f64>,
+    G: Gradient<f64>,
+    R: Rng,
+{
     let bounds = obj.bounds().clone();
     let dim = bounds.dims.max(1);
     // Honour the caller's target; only clamp to a feasible range.
@@ -671,7 +705,7 @@ where
                 reflect_into_box(x.view(), &bounds)
             };
             // A few walkers near the seed/incumbent for local exploitation.
-            let x = if k > 0 && k <= 3 {
+            let mut x = if k > 0 && k <= 3 {
                 if let Some(sx) = seed_x {
                     let mut y = sx.to_owned();
                     let jitter = default_sigma(&bounds) * 0.25;
@@ -688,6 +722,13 @@ where
             } else {
                 x
             };
+            // The supplied incumbent is an occupied state, not a new launch.
+            if let Some(prepare) = prepare
+                && (k > 0 || seed_x.is_none())
+            {
+                let anchor = seed_x.unwrap_or_else(|| x.view()).to_owned();
+                prepare(anchor.view(), &mut x, None);
+            }
             let e = match charge_obj(x.view(), &mut n_evals, n_grads) {
                 Some(v) => v,
                 None => break,
@@ -800,7 +841,10 @@ where
                         }
                         let t_hop = (e_span * (0.8 / (1.0 + hop as f64))).max(0.5);
                         let raw = visit.propose(x.view(), t_hop, rng);
-                        let y = reflect_into_box(raw.view(), &bounds);
+                        let mut y = reflect_into_box(raw.view(), &bounds);
+                        if let Some(prepare) = prepare {
+                            prepare(x.view(), &mut y, None);
+                        }
                         let ey = match charge_obj(y.view(), &mut n_evals, n_grads) {
                             Some(v) => v,
                             None => break,
@@ -844,7 +888,10 @@ where
                         }
                         let t_hop = (e_span * (0.5 / (1.0 + hop as f64))).max(0.3);
                         let raw = visit.propose(x.view(), t_hop, rng);
-                        let y = reflect_into_box(raw.view(), &bounds);
+                        let mut y = reflect_into_box(raw.view(), &bounds);
+                        if let Some(prepare) = prepare {
+                            prepare(x.view(), &mut y, None);
+                        }
                         if charge_obj(y.view(), &mut n_evals, n_grads).is_none() {
                             break;
                         }
@@ -879,6 +926,9 @@ where
                         let mid = 0.5 * (bounds.low[c] + bounds.high[c]);
                         let mut trial = x.clone();
                         trial[c] = (mid - 1.05 * (x[c] - mid)).clamp(bounds.low[c], bounds.high[c]);
+                        if let Some(prepare) = prepare {
+                            prepare(x.view(), &mut trial, Some(c));
+                        }
                         let e = match charge_obj(trial.view(), &mut n_evals, n_grads) {
                             Some(v) => v,
                             None => break,
@@ -948,7 +998,10 @@ where
                             b[i]
                         };
                     }
-                    let trial = reflect_into_box(trial.view(), &bounds);
+                    let mut trial = reflect_into_box(trial.view(), &bounds);
+                    if let Some(prepare) = prepare {
+                        prepare(a.view(), &mut trial, None);
+                    }
                     if let Some(e) = charge_obj(trial.view(), &mut n_evals, n_grads) {
                         if e < elites[k_elite - 1].1 {
                             elites[k_elite - 1] = (trial.clone(), e);
@@ -1017,7 +1070,7 @@ where
             };
             let u_accept = rng.random::<f64>();
 
-            let y = if long_jump {
+            let mut y = if long_jump {
                 if rng.random::<f64>() < 0.65 {
                     let raw = visit.propose(w.pos.view(), visit_temp.max(1e-12), rng);
                     reflect_into_box(raw.view(), &bounds)
@@ -1105,6 +1158,9 @@ where
             } else {
                 diffusion_displace(w.pos.view(), &bounds, sigma, None, rng)
             };
+            if let Some(prepare) = prepare {
+                prepare(w.pos.view(), &mut y, None);
+            }
             trial_mat.row_mut(pi).assign(&y);
             metas.push(PropMeta {
                 wi,
@@ -1290,7 +1346,7 @@ where
                     if work(n_evals, n_grads) >= budget {
                         break;
                     }
-                    let y = if k.is_multiple_of(2) {
+                    let mut y = if k.is_multiple_of(2) {
                         let mut y = best_pos.clone();
                         let jit = (sigma * 3.0).max(default_sigma(&bounds) * 0.5);
                         for i in 0..dim {
@@ -1306,6 +1362,9 @@ where
                     } else {
                         continue;
                     };
+                    if let Some(prepare) = prepare {
+                        prepare(pop.walkers[wi].pos.view(), &mut y, None);
+                    }
                     if let Some(e) = charge_obj(y.view(), &mut n_evals, n_grads) {
                         pop.walkers[wi] = Walker { pos: y, energy: e };
                         if e < best_val {
