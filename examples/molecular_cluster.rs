@@ -57,6 +57,22 @@ fn main() {
     emit_engine_manifest("xtb");
     let obj = pot.wrapper();
     let mut cfg = Config::recommended_molecular(species.clone(), groups.clone(), 1.0);
+    let named: Vec<&str> = args
+        .get(4)
+        .map(|v| v.split(',').collect())
+        .unwrap_or_default();
+    if named.iter().any(|o| *o == "comm" || *o == "communicating") {
+        // Same hunt kernel as Config::communicating, on the molecular library.
+        cfg.depth_reward = false;
+        cfg.orbit_complete_on_new = true;
+        cfg.shared_deposits = 0;
+        cfg.shared_visit_policy =
+            anneal_core::methods::minima_hopping::SharedVisitPolicy::Recognition;
+        cfg.surfaces = vec![anneal_core::methods::two_phase::TwoPhase::relative(
+            0.7, 1.0,
+        )];
+        cfg.jump_on_stall = true;
+    }
     cfg.move_library = MoveLibrary::Molecular {
         groups: groups.clone(),
         reactive: false,
