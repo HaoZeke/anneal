@@ -30,16 +30,25 @@ def lj_grad(x: np.ndarray) -> np.ndarray:
 def test_config_recommended_and_for_cluster():
     rec = Config.recommended(38)
     base = Config.for_cluster(38)
+    comm = Config.communicating(38)
     assert rec.n_points == 38
     assert base.n_points == 38
     assert rec.burst_moves
     assert rec.allocate_moves
     assert rec.depth_reward
     assert rec.tabu_on_stall
+    assert rec.shared_visit_policy == "tabu"
+    assert not rec.orbit_complete_on_new
     assert not base.burst_moves
     assert not base.allocate_moves
     assert not base.depth_reward
     assert not base.tabu_on_stall
+    assert not comm.burst_moves
+    assert comm.allocate_moves
+    assert not comm.depth_reward
+    assert comm.orbit_complete_on_new
+    assert comm.shared_visit_policy == "recognition"
+    assert rec.shared_visit_policy == "tabu"
 
 
 def test_config_rejects_tiny_n():
