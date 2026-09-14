@@ -5444,6 +5444,7 @@ mod tests {
         assert_eq!(comm.surfaces.len(), 1);
         assert!(comm.surfaces[0].is_active());
         assert!(rec.surfaces.is_empty());
+        assert!(Config::communicating(98).surfaces.is_empty());
     }
 
     #[test]
