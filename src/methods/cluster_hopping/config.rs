@@ -972,28 +972,25 @@ impl Config {
         cfg
     }
 
-    /// Communicating paper arm: Marks kernel, recognition, two-phase surface.
+    /// Communicating paper arm: orbit kernel plus Recognition.
     ///
-    /// Recommended turns `depth_reward` on and orbit off (4/48 Marks at 4e6).
-    /// Orbit with Thompson and the return screen is 31/48. Recognition keeps
-    /// peer visit counts off the escape controller, which is the hist75 loss.
-    /// The relative two-phase surface is Locatelli--Schoen compaction
-    /// (kappa 0.7, the occupancy-measured cutoff on 38 and 75). It is
-    /// not installed at 98: the same preset at 4e6 is 18/48 Leary
-    /// against orbit-alone 30/48, with 23/30 misses on -543.642957.
-    /// Stall jumping is Iwamatsu--Okabe (5/100 vs 1/100 on LJ75
-    /// at the paper's 5000-step budget); crate patience stays 5000 hops.
-    /// Grosso replacement is not installed.
+    /// This is the measured single-chain orbit arm (`for_cluster` plus
+    /// Thompson, the return screen, and orbit completion: 31/48 Marks,
+    /// 30/48 Leary), not [`Self::recommended`] (LeanBurst, SOAP leftover
+    /// as a burst library, tabu-on-stall, stall jump). Peer visit counts
+    /// stay off the escape controller. Two-phase relative 0.7 stays on
+    /// below 98 (occupancy-measured on 38 and 75; 18/48 Leary when left
+    /// on at 98). Grosso replacement is not installed.
     pub fn communicating(n_points: usize) -> Self {
-        let mut cfg = Self::recommended(n_points);
-        cfg.depth_reward = false;
+        let mut cfg = Self::for_cluster(n_points);
+        cfg.allocate_moves = true;
+        cfg.return_screen = true;
         cfg.orbit_complete_on_new = true;
         cfg.shared_deposits = 0;
         cfg.shared_visit_policy = crate::methods::minima_hopping::SharedVisitPolicy::Recognition;
         if n_points < 98 {
             cfg.surfaces = vec![crate::methods::two_phase::TwoPhase::relative(0.7, 1.0)];
         }
-        cfg.jump_on_stall = true;
         cfg
     }
 

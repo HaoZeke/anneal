@@ -62,16 +62,13 @@ fn main() {
         .map(|v| v.split(',').collect())
         .unwrap_or_default();
     if named.iter().any(|o| *o == "comm" || *o == "communicating") {
-        // Same hunt kernel as Config::communicating, on the molecular library.
+        // Channel only: orbit plus Recognition. Keep the molecular library.
         cfg.depth_reward = false;
         cfg.orbit_complete_on_new = true;
         cfg.shared_deposits = 0;
         cfg.shared_visit_policy =
             anneal_core::methods::minima_hopping::SharedVisitPolicy::Recognition;
-        cfg.surfaces = vec![anneal_core::methods::two_phase::TwoPhase::relative(
-            0.7, 1.0,
-        )];
-        cfg.jump_on_stall = true;
+        cfg.jump_on_stall = false;
     }
     cfg.move_library = MoveLibrary::Molecular {
         groups: groups.clone(),

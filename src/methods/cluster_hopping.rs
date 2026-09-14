@@ -5439,8 +5439,10 @@ mod tests {
         assert_eq!(comm.shared_deposits, 0);
         assert_eq!(comm.shared_visit_policy, SharedVisitPolicy::Recognition);
         assert!(comm.allocate_moves && comm.return_screen);
-        assert!(comm.jump_on_stall);
-        assert!(!rec.jump_on_stall);
+        assert!(!comm.jump_on_stall);
+        assert!(!comm.tabu_on_stall);
+        assert!(!matches!(comm.move_library, MoveLibrary::LeanBurst));
+        assert!(matches!(rec.move_library, MoveLibrary::LeanBurst));
         assert_eq!(comm.surfaces.len(), 1);
         assert!(comm.surfaces[0].is_active());
         assert!(rec.surfaces.is_empty());
