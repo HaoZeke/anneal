@@ -1019,6 +1019,11 @@ impl Config {
         cfg.symmetrise_on_stall = true;
         cfg.soap_class_residual = false;
         cfg.soap_mode = SoapProposalMode::Flexible;
+        // The occupancy deposits were measured before the preset tolerance
+        // moved to 0.5, so this stack keeps the 0.35 it was run under. Every
+        // flag that decides those harvests is named here rather than
+        // inherited, for the same reason the LeanBurst flags above are.
+        cfg.symmetry_tolerance = 0.35 * cfg.length_scale;
         // One deposit of 0.25 exceeds the measured LJ75 intra-funnel
         // gap (~0.09-0.18). That empties a basin on the first revisit
         // and the next start is another ico draw. Adaptive height with
