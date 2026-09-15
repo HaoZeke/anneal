@@ -169,6 +169,7 @@ fn coverage_radius_is_normalized_and_peer_caps_apply_per_receiving_region() {
         let objective = Plateau::new(true);
         let config = BoxEnsembleConfig {
             shared_deposits: 1,
+            shared_visit_policy: crate::methods::minima_hopping::SharedVisitPolicy::Tabu,
             ..config()
         };
         let coverage = BoxCoverageConfig {

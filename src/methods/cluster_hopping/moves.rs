@@ -1326,7 +1326,7 @@ impl ClusterMove {
                 }
                 y
             }
-            ClusterMove::Twin { n_points } => crate::twin::propose(x, *n_points, rng),
+            ClusterMove::Twin { n_points } => crate::packing::propose_twin(x, *n_points, rng),
             ClusterMove::SoapRepel { rmsd, cutoff } => {
                 let spec = crate::soap::SoapSpec {
                     rcut_nn: *cutoff,

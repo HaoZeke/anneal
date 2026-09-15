@@ -71,6 +71,7 @@ fn check_incumbent_retention(with_gradient: bool) {
         budget: if with_gradient { 12 } else { 56 },
         history: HistoryMode::None,
         shared_deposits: 0,
+        shared_visit_policy: crate::methods::minima_hopping::SharedVisitPolicy::Tabu,
         ..BoxEnsembleConfig::default()
     };
     // Both replicas have exactly one hop. The energy scale makes the first

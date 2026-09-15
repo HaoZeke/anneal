@@ -1918,9 +1918,11 @@ through =src/python.rs=.
 ** Bounded local refinement (=local_polish=)
 
 What it is: the deterministic polish stage run after a stochastic
-annealing or pilot phase: projected-gradient descent with Armijo
-backtracking inside the box, plus QMC-seeded variants that screen a
-batch of low-discrepancy starts before polishing the best.
+annealing or pilot phase: bounded L-BFGS (two-loop, Armijo
+backtracking, active-set projection) inside the box, plus QMC-seeded
+variants that screen a batch of low-discrepancy starts before
+polishing the best. Cluster hops quench through =WarmLbfgs= / rgmin,
+not this function.
 
 Key types and functions: =LocalPolishResult=
 (src/methods/local_polish.rs:23); =QmcPolishResult=

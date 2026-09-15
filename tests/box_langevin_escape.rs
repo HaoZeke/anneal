@@ -74,6 +74,7 @@ fn config(noise: GleNoise, budget: usize) -> BoxEnsembleConfig {
         budget,
         history: HistoryMode::None,
         shared_deposits: 0,
+        shared_visit_policy: crate::methods::minima_hopping::SharedVisitPolicy::Tabu,
         escape: BoxEscape::Langevin(GleEscapeConfig {
             steps: 2,
             omega0: 0.2,

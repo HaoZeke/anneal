@@ -75,7 +75,18 @@ from anneal.tvm_ffi import (
 )
 
 
-def cluster_search(obj_fn, grad_fn, n: int, budget: int, seed: int = 0, recommended: bool = True):
+def cluster_search(
+    obj_fn,
+    grad_fn,
+    n: int,
+    budget: int,
+    seed: int = 0,
+    recommended: bool = True,
+    derived: bool = False,
+    communicating: bool = False,
+    *,
+    ras: bool = False,
+):
     """Run the measured cluster-search layer.
 
     Args:
@@ -88,6 +99,9 @@ def cluster_search(obj_fn, grad_fn, n: int, budget: int, seed: int = 0, recommen
       seed: RNG seed.
       recommended: ``Config.recommended(n)`` when true, else
         ``Config.for_cluster(n)``.
+      derived: ``Config.derived(n)``; overrides ``recommended``.
+      communicating: ``Config.communicating(n)``; overrides both.
+      ras: residual archive search on the recommended preset.
 
     Returns a dict with ``best`` (flat ``3n`` coordinates), ``best_energy``,
     and ``hops``.
@@ -99,6 +113,9 @@ def cluster_search(obj_fn, grad_fn, n: int, budget: int, seed: int = 0, recommen
         int(budget),
         int(seed),
         bool(recommended),
+        bool(derived),
+        bool(communicating),
+        ras=bool(ras),
     )
     out["best"] = np.asarray(out["best"], dtype=np.float64)
     return out
@@ -129,7 +146,7 @@ def polish(
     step0: float = 1.0,
     grad_tol: float = 1e-8,
 ):
-    """Refine ``x0`` with bounded projected-gradient polish."""
+    """Refine ``x0`` with bounded L-BFGS (two-loop, Armijo backtrack)."""
     out = _core_polish(
         obj_fn,
         grad_fn,
@@ -156,7 +173,7 @@ def qmc_polish(
     grad_tol: float = 1e-8,
     top_k: int = 0,
 ):
-    """Refine low-discrepancy starts with bounded projected-gradient polish."""
+    """Refine low-discrepancy starts with bounded L-BFGS polish."""
     out = _core_qmc_polish(
         obj_fn,
         grad_fn,
@@ -637,12 +654,10 @@ def box_ensemble_optimize(
     history: str = "shared",
     membership: str = "accepted",
 ):
-    """Communicating box hops that share a Euclidean minimum history.
+    """Communicating box hops on SharedDesignHistory / MinimumHistory.
 
-    Each replica is a Gaussian kick reflected into the box, then a charged
-    quench. Replicas keep their coordinates and streams. Shared history
-    returns identity and visit counts only and scales the next escape.
-    This is not cluster hopping.
+    Requires ``grad_fn``. Kick and quench in the box. Without a gradient
+    use ``ensemble_optimize`` (portfolio). Not cluster hopping.
     """
     low_arr = np.asarray(low, dtype=np.float64)
     high_arr = np.asarray(high, dtype=np.float64)
@@ -1167,6 +1182,7 @@ __all__ = [
     "History",
     "Ledger",
     "PyObjective",
+    "Anneal",
     "cluster_search",
     "TvmFfiTensorMetadata",
     "__version__",
@@ -1210,3 +1226,11 @@ __all__ = [
     "tvm_ffi_tensor_metadata",
     "tvm_ffi_tensors_from_history",
 ]
+
+
+def __getattr__(name):
+    if name == "Anneal":
+        from anneal.ase import Anneal as _Anneal
+
+        return _Anneal
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

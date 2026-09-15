@@ -1,4 +1,4 @@
-"""Production ensemble_optimize must run a Python objective without deadlocking."""
+"""ensemble_optimize must return from a Python objective callback."""
 
 import contextlib
 import faulthandler
@@ -16,11 +16,8 @@ _HANG_S = 30
 
 @contextlib.contextmanager
 def _native_deadline(seconds=_HANG_S):
-    """Kill the process if a native join never returns to Python.
+    """Kill the process if a native search never returns to Python.
 
-    SIGALRM cannot interrupt ensemble_optimize: CPython defers the
-    handler until the next main-thread bytecode checkpoint, and
-    with_replica_threads then thread::scope join sits in native code.
     faulthandler.dump_traceback_later uses a watchdog thread and
     os._exit. A daemon thread is the second tripwire when faulthandler
     is compiled out.
@@ -41,7 +38,7 @@ def _native_deadline(seconds=_HANG_S):
 
 
 def test_ensemble_optimize_python_callback_returns():
-    """Replica threads call back into Python. Holding the GIL deadlocks."""
+    """A Python objective must be callable from the native hop."""
 
     def fn(x):
         x = np.asarray(x, dtype=float)
@@ -65,7 +62,7 @@ def test_ensemble_optimize_python_callback_returns():
 
 
 def test_ensemble_optimize_six_dim_box_returns():
-    """CUTEst-sized box (e.g. BIGGS6). Must return; must not spin in LJ symmetry."""
+    """Six-coordinate box (e.g. BIGGS6) stays six coordinates."""
 
     def fn(x):
         x = np.asarray(x, dtype=float)
