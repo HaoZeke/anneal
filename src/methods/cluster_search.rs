@@ -122,26 +122,16 @@ fn gradient_is_converged(gradient: ArrayView1<f64>, threshold: f64) -> bool {
         < threshold
 }
 
-/// Runs a cluster search on `objective` under `ledger`.
-///
-/// The relaxation is this crate's warm-started quasi-Newton one, and its
-/// curvature is deliberately not carried between calls: measured on a cluster,
-/// retaining it across a structural change costs more than it saves.
-pub fn search<O>(
-    objective: &O,
-    cfg: &Config,
-    ledger: &mut Ledger,
+fn warm_relax<'a, O>(
+    objective: &'a O,
+    cfg: &'a Config,
+    stats: &'a mut RelaxStats,
     seed: u64,
-) -> (Outcome, RelaxStats)
+) -> impl FnMut(&mut Ledger, ArrayView1<f64>, usize) -> (f64, Array1<f64>) + 'a
 where
     O: DifferentiableObjective<f64> + ?Sized,
 {
-    let mut stats = RelaxStats::default();
     let mut opt = WarmLbfgs::default();
-
-    // Split deliberately: the relaxation needs the optimizer mutably, the
-    // gradient needs only the objective. Sharing the objective by reference is
-    // what lets both closures exist at once.
     // The driver calls the screening pass with `screen_steps` and the full one
     // with `relax_steps`, so the iteration count identifies which is which.
     let screen_iters = cfg.screen_steps;
@@ -149,7 +139,7 @@ where
     let probe = cfg.probe_screen;
     let mut surfaces = (!cfg.surfaces.is_empty())
         .then(|| crate::methods::two_phase::SurfacePortfolio::new(&cfg.surfaces, seed));
-    let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, iters: usize| {
+    move |led, x, iters| {
         opt.forget();
         let before = led.spent();
         let screening = iters <= screen_iters;
@@ -290,32 +280,57 @@ where
             stats.capped += 1;
         }
         (f, xr)
-    };
-    let mut grad = |led: &mut Ledger, x: ArrayView1<f64>| -> Option<Array1<f64>> {
-        if !led.charge() {
-            return None;
-        }
-        Some(objective.grad(x))
-    };
+    }
+}
 
-    // Value and gradient in one charge, which is what a Hamiltonian leapfrog
-    // leaf needs. On a pairwise potential both come out of one pass over the
-    // pairs, so charging twice would understate the arm by a factor of two.
-    let mut energy_grad = |led: &mut Ledger, x: ArrayView1<f64>| -> Option<(f64, Array1<f64>)> {
-        if !led.charge() {
-            return None;
-        }
-        Some(objective.value_and_gradient(x))
-    };
+/// Runs a cluster search on `objective` under `ledger`.
+///
+/// The relaxation is this crate's warm-started quasi-Newton one, and its
+/// curvature is deliberately not carried between calls: measured on a cluster,
+/// retaining it across a structural change costs more than it saves.
+pub fn search<O>(
+    objective: &O,
+    cfg: &Config,
+    ledger: &mut Ledger,
+    seed: u64,
+) -> (Outcome, RelaxStats)
+where
+    O: DifferentiableObjective<f64> + ?Sized,
+{
+    let mut stats = RelaxStats::default();
 
-    let out = optimize_with_energy_gradient(
-        cfg,
-        ledger,
-        &mut relax,
-        Some(&mut grad),
-        Some(&mut energy_grad),
-        seed,
-    );
+    // Split deliberately: the relaxation needs the optimizer mutably, the
+    // gradient needs only the objective. Sharing the objective by reference is
+    // what lets both closures exist at once.
+    let out = {
+        let mut relax = warm_relax(objective, cfg, &mut stats, seed);
+        let mut grad = |led: &mut Ledger, x: ArrayView1<f64>| -> Option<Array1<f64>> {
+            if !led.charge() {
+                return None;
+            }
+            Some(objective.grad(x))
+        };
+
+        // Value and gradient in one charge, which is what a Hamiltonian leapfrog
+        // leaf needs. On a pairwise potential both come out of one pass over the
+        // pairs, so charging twice would understate the arm by a factor of two.
+        let mut energy_grad =
+            |led: &mut Ledger, x: ArrayView1<f64>| -> Option<(f64, Array1<f64>)> {
+                if !led.charge() {
+                    return None;
+                }
+                Some(objective.value_and_gradient(x))
+            };
+
+        optimize_with_energy_gradient(
+            cfg,
+            ledger,
+            &mut relax,
+            Some(&mut grad),
+            Some(&mut energy_grad),
+            seed,
+        )
+    };
     (out, stats)
 }
 
@@ -334,136 +349,24 @@ where
     O: DifferentiableObjective<f64> + ?Sized,
 {
     let mut stats = RelaxStats::default();
-    let mut opt = WarmLbfgs::default();
-    let screen_iters = cfg.screen_steps;
-    let adaptive = cfg.adaptive_screen;
-    let probe = cfg.probe_screen;
-    let mut surfaces = (!cfg.surfaces.is_empty())
-        .then(|| crate::methods::two_phase::SurfacePortfolio::new(&cfg.surfaces, seed));
-    let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, iters: usize| {
-        opt.forget();
-        let before = led.spent();
-        let screening = iters <= screen_iters;
-        let mut pred = QuenchPredictor::new();
-        pred.warmup = cfg.quench_warmup;
-        pred.confidence = cfg.quench_confidence;
-        let mut early = false;
-        let mut probe_at: Option<(usize, f64)> = None;
-        let target = led.best;
-        // Phase one, when configured: relax on the compacted surface and hand
-        // that minimum to the plain relaxation below. Both phases charge.
-        let compacted;
-        let surface = match surfaces.as_mut() {
-            Some(portfolio) => portfolio.begin(screening),
-            None => cfg.two_phase.filter(|two| two.is_active()),
-        };
-        let x = match surface {
-            Some(two) => {
-                let cutoff = two.cutoff_for(x);
-                let shape = two.shape_for(x);
-                let (_, phase_one, _) = opt.minimize(x, iters, |v| {
-                    if !led.charge() {
-                        return None;
-                    }
-                    let (e, g) = objective.value_and_gradient(v);
-                    let (pe, pg) = two_phase_penalty(
-                        v,
-                        cfg.move_library.declared_groups(),
-                        cutoff,
-                        two.beta,
-                        two.mu,
-                        shape.as_ref(),
-                    );
-                    Some((e + pe, g + pg))
-                });
-                opt.forget();
-                compacted = phase_one;
-                compacted.view()
-            }
-            None => x,
-        };
-        let (f, xr, _) = opt.minimize_watched(
-            x,
-            iters,
-            |v| {
-                if !led.charge() {
-                    return None;
-                }
-                Some(objective.value_and_gradient(v))
-            },
-            |_, fv| {
-                if screening && probe {
-                    pred.observe(fv);
-                    if probe_at.is_none() && pred.verdict(target) == Verdict::Hopeless {
-                        probe_at = pred.predict().map(|p| (pred.len(), p.limit));
-                    }
-                    return true;
-                }
-                if !(screening && adaptive) {
-                    return true;
-                }
-                pred.observe(fv);
-                if pred.verdict(target) != Verdict::Hopeless {
-                    return true;
-                }
-                early = true;
-                false
-            },
-        );
-        if let Some((at, claim)) = probe_at {
-            stats.probe_stops += 1;
-            stats.probe_steps += at;
-            stats.probe_error += (claim - f).abs();
-        }
-        let cost = led.spent() - before;
-        if screening {
-            stats.screen_charged += cost;
-            stats.screen_steps_taken += pred.len();
-            stats.screens += 1;
-        } else {
-            stats.full_charged += cost;
-        }
-        let f = if early {
-            pred.stopped_energy(target, f)
-        } else {
-            f
-        };
-        if let Some(portfolio) = surfaces.as_mut() {
-            portfolio.observe(screening, f, target);
-        }
-        if early {
-            stats.capped += 1;
-            return (f, xr);
-        }
-        let converged = if led.charge() {
-            stats.check_charged += 1;
-            let g = objective.grad(xr.view());
-            gradient_is_converged(g.view(), cfg.record_gradient)
-        } else {
-            false
-        };
-        if converged {
-            stats.converged += 1;
-        } else {
-            stats.capped += 1;
-        }
-        (f, xr)
-    };
-    let mut grad = |led: &mut Ledger, x: ArrayView1<f64>| -> Option<Array1<f64>> {
-        if !led.charge() {
-            return None;
-        }
-        Some(objective.grad(x))
-    };
     let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
-    let out = crate::methods::cluster_hopping::run_with_gradient(
-        cfg,
-        start,
-        ledger,
-        &mut relax,
-        Some(&mut grad),
-        &mut rng,
-    );
+    let out = {
+        let mut relax = warm_relax(objective, cfg, &mut stats, seed);
+        let mut grad = |led: &mut Ledger, x: ArrayView1<f64>| -> Option<Array1<f64>> {
+            if !led.charge() {
+                return None;
+            }
+            Some(objective.grad(x))
+        };
+        crate::methods::cluster_hopping::run_with_gradient(
+            cfg,
+            start,
+            ledger,
+            &mut relax,
+            Some(&mut grad),
+            &mut rng,
+        )
+    };
     (out, stats)
 }
 
@@ -736,121 +639,7 @@ where
 
     let mut stats = RelaxStats::default();
     let mut bank_validation_charged = 0usize;
-    let mut opt = WarmLbfgs::default();
-    let screen_iters = cfg.screen_steps;
-    let adaptive = cfg.adaptive_screen;
-    let probe = cfg.probe_screen;
-    let mut surfaces = (!cfg.surfaces.is_empty())
-        .then(|| crate::methods::two_phase::SurfacePortfolio::new(&cfg.surfaces, seed));
-    let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, iters: usize| {
-        opt.forget();
-        let before = led.spent();
-        let screening = iters <= screen_iters;
-        let mut pred = QuenchPredictor::new();
-        pred.warmup = cfg.quench_warmup;
-        pred.confidence = cfg.quench_confidence;
-        let mut early = false;
-        let mut probe_at: Option<(usize, f64)> = None;
-        let target = led.best;
-        // Phase one, when configured: relax on the compacted surface and hand
-        // that minimum to the plain relaxation below. Both phases charge.
-        let compacted;
-        let surface = match surfaces.as_mut() {
-            Some(portfolio) => portfolio.begin(screening),
-            None => cfg.two_phase.filter(|two| two.is_active()),
-        };
-        let x = match surface {
-            Some(two) => {
-                let cutoff = two.cutoff_for(x);
-                let shape = two.shape_for(x);
-                let (_, phase_one, _) = opt.minimize(x, iters, |v| {
-                    if !led.charge() {
-                        return None;
-                    }
-                    let (e, g) = objective.value_and_gradient(v);
-                    let (pe, pg) = two_phase_penalty(
-                        v,
-                        cfg.move_library.declared_groups(),
-                        cutoff,
-                        two.beta,
-                        two.mu,
-                        shape.as_ref(),
-                    );
-                    Some((e + pe, g + pg))
-                });
-                opt.forget();
-                compacted = phase_one;
-                compacted.view()
-            }
-            None => x,
-        };
-        let (f, xr, _) = opt.minimize_watched(
-            x,
-            iters,
-            |v| {
-                if !led.charge() {
-                    return None;
-                }
-                Some(objective.value_and_gradient(v))
-            },
-            |_, fv| {
-                if screening && probe {
-                    pred.observe(fv);
-                    if probe_at.is_none() && pred.verdict(target) == Verdict::Hopeless {
-                        probe_at = pred.predict().map(|p| (pred.len(), p.limit));
-                    }
-                    return true;
-                }
-                if !(screening && adaptive) {
-                    return true;
-                }
-                pred.observe(fv);
-                if pred.verdict(target) != Verdict::Hopeless {
-                    return true;
-                }
-                early = true;
-                false
-            },
-        );
-        if let Some((at, claim)) = probe_at {
-            stats.probe_stops += 1;
-            stats.probe_steps += at;
-            stats.probe_error += (claim - f).abs();
-        }
-        let cost = led.spent() - before;
-        if screening {
-            stats.screen_charged += cost;
-            stats.screen_steps_taken += pred.len();
-            stats.screens += 1;
-        } else {
-            stats.full_charged += cost;
-        }
-        let f = if early {
-            pred.stopped_energy(target, f)
-        } else {
-            f
-        };
-        if let Some(portfolio) = surfaces.as_mut() {
-            portfolio.observe(screening, f, target);
-        }
-        if early {
-            stats.capped += 1;
-            return (f, xr);
-        }
-        let converged = if led.charge() {
-            stats.check_charged += 1;
-            let g = objective.grad(xr.view());
-            gradient_is_converged(g.view(), cfg.record_gradient)
-        } else {
-            false
-        };
-        if converged {
-            stats.converged += 1;
-        } else {
-            stats.capped += 1;
-        }
-        (f, xr)
-    };
+    let mut relax = warm_relax(objective, cfg, &mut stats, seed);
     let mut grad = |led: &mut Ledger, x: ArrayView1<f64>| -> Option<Array1<f64>> {
         if !led.charge() {
             return None;

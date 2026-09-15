@@ -68,6 +68,7 @@ fn matches_engine(gradient: bool, escape: BoxEscape, replicas: usize) {
             budget: 512,
             history: HistoryMode::None,
             shared_deposits: 3,
+            shared_visit_policy: crate::methods::minima_hopping::SharedVisitPolicy::Tabu,
             escape,
             ..BoxEnsembleConfig::default()
         };

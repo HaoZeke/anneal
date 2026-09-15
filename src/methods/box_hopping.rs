@@ -34,7 +34,7 @@ use crate::methods::local_polish::{
 };
 use crate::methods::minima_hopping::{
     EscapeFeedback, HistoryHook, HistoryMembership, HistoryReport, MinimumHistory,
-    SharedDesignHistory,
+    SharedDesignHistory, SharedVisitPolicy,
 };
 use crate::movekernel::reflect_into_box;
 use crate::pes_exploration::{ExactStructureWitness, StructureContext};
@@ -134,6 +134,8 @@ pub struct BoxEnsembleConfig {
     /// Foreign coverage visits paid into each receiving region per hop boundary.
     /// Zero disables incoming coverage deposits.
     pub shared_deposits: usize,
+    /// Whether shared-history visit counts drive escape and acceptance.
+    pub shared_visit_policy: crate::methods::minima_hopping::SharedVisitPolicy,
     /// Per-chain escape mechanism. Langevin segments require a gradient callback.
     pub escape: BoxEscape,
 }
@@ -147,7 +149,26 @@ impl Default for BoxEnsembleConfig {
             membership: HistoryMembership::Accepted,
             identity_tol: IDENTITY_TOL,
             shared_deposits: 8,
+            shared_visit_policy: crate::methods::minima_hopping::SharedVisitPolicy::Tabu,
             escape: BoxEscape::Gaussian,
+        }
+    }
+}
+
+fn apply_shared_visit(
+    feedback: &mut EscapeFeedback,
+    policy: SharedVisitPolicy,
+    current: Option<usize>,
+    reached: usize,
+    new_basin: bool,
+    basin_visits: u64,
+) {
+    match policy {
+        SharedVisitPolicy::Tabu => {
+            feedback.observe_shared(current, reached, new_basin, basin_visits);
+        }
+        SharedVisitPolicy::Recognition => {
+            feedback.observe_driver_local(current, reached);
         }
     }
 }
@@ -566,7 +587,9 @@ where
             let trial_f = polish.best_val;
             if let Some(report) = report {
                 history_observations += 1;
-                replica.feedback.observe_shared(
+                apply_shared_visit(
+                    &mut replica.feedback,
+                    config.shared_visit_policy,
                     replica.here,
                     report.minimum,
                     report.is_new,
@@ -1125,7 +1148,9 @@ where
             n_grads += used_grads;
             if let Some(report) = report {
                 history_observations += 1;
-                replica.feedback.observe_shared(
+                apply_shared_visit(
+                    &mut replica.feedback,
+                    config.shared_visit_policy,
                     replica.here,
                     report.minimum,
                     report.is_new,
@@ -1797,6 +1822,8 @@ mod tests {
             membership: HistoryMembership::Accepted,
             identity_tol: IDENTITY_TOL,
             shared_deposits: 8,
+            shared_visit_policy: SharedVisitPolicy::Tabu,
+            escape: BoxEscape::Gaussian,
         };
         let out = box_ensemble_optimize(&obj, &obj, 7, None, &config);
         assert!(out.n_evals + out.n_grads <= 200);
@@ -1824,6 +1851,8 @@ mod tests {
             membership: HistoryMembership::Accepted,
             identity_tol: IDENTITY_TOL,
             shared_deposits: 8,
+            shared_visit_policy: SharedVisitPolicy::Tabu,
+            escape: BoxEscape::Gaussian,
         };
         let out = box_ensemble_optimize(&obj, &obj, 11, Some(start.view()), &config);
         assert!(out.best_val.is_finite());

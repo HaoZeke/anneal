@@ -263,7 +263,12 @@ def portfolio_legacy(counter, low, high, dim, grad, rng, anchor=None):
 
 
 def _ensemble_hop_arm(counter, low, high, grad, rng, anchor, history):
-    """Four production-hop replicas; only the history channel changes."""
+    """Four box hops; only the history channel changes.
+
+    This is ``ensemble_optimize``: with a gradient, kick/quench and
+    ``SharedDesignHistory`` over ``MinimumHistory``; without, the
+    values-only portfolio. Frozen CUTEst cells pass ``counted_grad``.
+    """
     import anneal
 
     remaining = counter.budget - counter.n
@@ -296,7 +301,7 @@ def _ensemble_hop_arm(counter, low, high, grad, rng, anchor, history):
 
 
 def comm_hop(counter, low, high, dim, grad, rng, anchor=None):
-    """Four production-hop replicas sharing one MinimumHistory."""
+    """Four box hops sharing one MinimumHistory via SharedDesignHistory."""
     del dim
     return _ensemble_hop_arm(counter, low, high, grad, rng, anchor, "shared")
 

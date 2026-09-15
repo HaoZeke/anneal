@@ -4,11 +4,16 @@
 
 * Local polish through rgmin
 
-Hopping relaxations use
-=anneal_core::methods::warm_lbfgs::WarmLbfgs=, which is a handle around
+Cluster hopping relaxations use
+=anneal_core::methods::warm_lbfgs::WarmLbfgs=, a handle around
 =rgmin::Lbfgs=. The two-loop recursion, the 7.20 scale, and the
 strong Wolfe search live in rgmin. This crate keeps the
 forget / watch / budget surface the chain needs.
+
+Box and portfolio polish still use the homemade bounded L-BFGS in
+=local_polish.rs= (Armijo backtrack, active-set projection). That is a
+different solver from the cluster quench. Do not assume a CUTEst hop
+is =rgmin=.
 
 The production choice is L-BFGS with strong Wolfe (Liu and Nocedal
 1989; Nocedal and Wright 7.4 and algorithms 3.5--3.6). SciPy L-BFGS-B

@@ -1,16 +1,17 @@
 //! Single-threaded acceptor; each client is a thread sharing the bank.
 
-use std::io::Write;
-use std::net::{SocketAddr, TcpListener, TcpStream};
+use std::io::Cursor;
 use std::sync::{Arc, Mutex};
 
 use capnp::message::{Builder, ReaderOptions};
 use capnp::serialize;
 use ndarray::{Array1, ArrayView1};
+use nng::{Protocol, Socket};
 
 use crate::Bank_capnp::{bank_reply, bank_request};
 use crate::funnel_bo::FunnelModel;
 use crate::methods::bank::{Admission, Bank};
+use crate::nng_rpc;
 
 /// Hausdorff length below which two members are the same geometry.
 #[cfg(feature = "ira")]
@@ -331,9 +332,13 @@ fn featomic_hop_fallback() -> f64 {
     }
 }
 
-/// Listen on `addr` (`host:port`).
+/// Listen on `addr` (`host:port` or an nng URL).
 pub fn serve(addr: impl AsRef<str>, capacity: usize) -> std::io::Result<()> {
-    let (listener, bound_address) = bind_bank_listener(addr.as_ref())?;
+    let bound = bind_bank_listener(addr.as_ref())?;
+    let bound_address = bound
+        .addr
+        .map(|addr| addr.to_string())
+        .unwrap_or_else(|| bound.url.clone());
     let inner = Arc::new(Mutex::new(Inner::new(capacity.max(1))));
     eprintln!("bank listening on {bound_address} capacity {capacity}");
     #[cfg(all(feature = "ira", feature = "featomic"))]
@@ -348,126 +353,112 @@ pub fn serve(addr: impl AsRef<str>, capacity: usize) -> std::io::Result<()> {
         "bank identity: SOAP L2 Lee Dcut, SOAP wells merge {}",
         pack_merge()
     );
-    for conn in listener.incoming() {
-        let stream = match conn {
-            Ok(s) => s,
-            Err(e) => {
-                eprintln!("bank accept: {e}");
-                continue;
-            }
-        };
-        let _ = stream.set_nodelay(true);
-        let inner = Arc::clone(&inner);
-        std::thread::spawn(move || {
-            if let Err(e) = handle(stream, inner) {
-                eprintln!("bank client: {e}");
-            }
-        });
-    }
-    Ok(())
-}
-
-fn bind_bank_listener(addr: &str) -> std::io::Result<(TcpListener, SocketAddr)> {
-    let listener = TcpListener::bind(addr)?;
-    listener.set_nonblocking(false)?;
-    let bound_address = listener.local_addr()?;
-    Ok((listener, bound_address))
-}
-
-fn handle(mut stream: TcpStream, inner: Arc<Mutex<Inner>>) -> Result<(), String> {
     loop {
-        let reader = match serialize::read_message(&mut stream, ReaderOptions::new()) {
-            Ok(r) => r,
-            Err(_) => return Ok(()),
-        };
-        let req = reader
-            .get_root::<bank_request::Reader>()
-            .map_err(|e| e.to_string())?;
-        let mut reply = Builder::new_default();
-        {
-            let mut out = reply.init_root::<bank_reply::Builder>();
-            let mut g = inner.lock().map_err(|e| e.to_string())?;
-            match req.which().map_err(|e| e.to_string())? {
-                bank_request::Offer(o) => {
-                    let o = o.map_err(|e| e.to_string())?;
-                    let energy = o.get_energy();
-                    let coords =
-                        Array1::from_iter(o.get_coords().map_err(|e| e.to_string())?.iter());
-                    let soap = Array1::from_iter(o.get_soap().map_err(|e| e.to_string())?.iter());
-                    let (kind, dcut) = g.offer(energy, coords, soap);
-                    out.set_kind(kind);
-                    out.set_dcut(dcut);
-                    out.set_size(g.bank.len() as u32);
-                }
-                bank_request::Nearest(s) => {
-                    let s = s.map_err(|e| e.to_string())?;
-                    let soap = Array1::from_iter(s.iter());
-                    out.set_distance(g.nearest(soap.view()));
-                    out.set_dcut(g.bank.dcut);
-                    out.set_size(g.bank.len() as u32);
-                }
-                bank_request::Deposit(d) => {
-                    let d = d.map_err(|e| e.to_string())?;
-                    let soap = Array1::from_iter(d.get_soap().map_err(|e| e.to_string())?.iter());
-                    let h = g.deposit(soap, d.get_increment());
-                    out.set_height(h);
-                    out.set_dcut(g.bank.dcut);
-                    out.set_size(g.bank.len() as u32);
-                }
-                bank_request::BiasOf(s) => {
-                    let s = s.map_err(|e| e.to_string())?;
-                    let soap = Array1::from_iter(s.iter());
-                    out.set_height(g.bias_of(soap.view()));
-                    out.set_dcut(g.bank.dcut);
-                    out.set_size(g.bank.len() as u32);
-                }
-                bank_request::Sample(seed) => {
-                    match g.sample(seed) {
-                        Some((e, x)) => {
-                            out.set_empty(false);
-                            out.set_energy(e);
-                            let mut c = out.reborrow().init_coords(x.len() as u32);
-                            for (i, &v) in x.iter().enumerate() {
-                                c.set(i as u32, v);
-                            }
-                        }
-                        None => out.set_empty(true),
-                    }
-                    out.set_dcut(g.bank.dcut);
-                    out.set_size(g.bank.len() as u32);
-                }
-                bank_request::Snapshot(()) => {
-                    let n = g.wells.len() as u32;
-                    {
-                        let mut ws = out.reborrow().init_wells(n);
-                        for (i, w) in g.wells.iter().enumerate() {
-                            let mut slot = ws.reborrow().get(i as u32);
-                            slot.set_height(w.height);
-                            let mut s = slot.init_soap(w.soap.len() as u32);
-                            for (k, &v) in w.soap.iter().enumerate() {
-                                s.set(k as u32, v);
-                            }
+        match handle_one(&bound.socket, &inner) {
+            Ok(()) => {}
+            Err(error) => eprintln!("bank client: {error}"),
+        }
+    }
+}
+
+fn bind_bank_listener(addr: &str) -> std::io::Result<nng_rpc::BoundListen> {
+    nng_rpc::listen(Protocol::Rep0, addr)
+}
+
+fn handle_one(socket: &Socket, inner: &Arc<Mutex<Inner>>) -> Result<(), String> {
+    let frame = socket.recv().map_err(|e| e.to_string())?;
+    let reader = match serialize::read_message(Cursor::new(&frame[..]), ReaderOptions::new()) {
+        Ok(r) => r,
+        Err(_) => return Ok(()),
+    };
+    let req = reader
+        .get_root::<bank_request::Reader>()
+        .map_err(|e| e.to_string())?;
+    let mut reply = Builder::new_default();
+    {
+        let mut out = reply.init_root::<bank_reply::Builder>();
+        let mut g = inner.lock().map_err(|e| e.to_string())?;
+        match req.which().map_err(|e| e.to_string())? {
+            bank_request::Offer(o) => {
+                let o = o.map_err(|e| e.to_string())?;
+                let energy = o.get_energy();
+                let coords = Array1::from_iter(o.get_coords().map_err(|e| e.to_string())?.iter());
+                let soap = Array1::from_iter(o.get_soap().map_err(|e| e.to_string())?.iter());
+                let (kind, dcut) = g.offer(energy, coords, soap);
+                out.set_kind(kind);
+                out.set_dcut(dcut);
+                out.set_size(g.bank.len() as u32);
+            }
+            bank_request::Nearest(s) => {
+                let s = s.map_err(|e| e.to_string())?;
+                let soap = Array1::from_iter(s.iter());
+                out.set_distance(g.nearest(soap.view()));
+                out.set_dcut(g.bank.dcut);
+                out.set_size(g.bank.len() as u32);
+            }
+            bank_request::Deposit(d) => {
+                let d = d.map_err(|e| e.to_string())?;
+                let soap = Array1::from_iter(d.get_soap().map_err(|e| e.to_string())?.iter());
+                let h = g.deposit(soap, d.get_increment());
+                out.set_height(h);
+                out.set_dcut(g.bank.dcut);
+                out.set_size(g.bank.len() as u32);
+            }
+            bank_request::BiasOf(s) => {
+                let s = s.map_err(|e| e.to_string())?;
+                let soap = Array1::from_iter(s.iter());
+                out.set_height(g.bias_of(soap.view()));
+                out.set_dcut(g.bank.dcut);
+                out.set_size(g.bank.len() as u32);
+            }
+            bank_request::Sample(seed) => {
+                match g.sample(seed) {
+                    Some((e, x)) => {
+                        out.set_empty(false);
+                        out.set_energy(e);
+                        let mut c = out.reborrow().init_coords(x.len() as u32);
+                        for (i, &v) in x.iter().enumerate() {
+                            c.set(i as u32, v);
                         }
                     }
-                    let mut es = out.reborrow().init_energies(g.bank.len() as u32);
-                    for (i, m) in g.bank.members().iter().enumerate() {
-                        es.set(i as u32, m.energy);
-                    }
-                    out.set_dcut(g.bank.dcut);
-                    out.set_size(g.bank.len() as u32);
+                    None => out.set_empty(true),
                 }
-                bank_request::SetDcut(d) => {
-                    if g.seeded >= g.capacity && d.is_finite() && d > 0.0 {
-                        g.bank.dcut = d.max(pack_merge());
+                out.set_dcut(g.bank.dcut);
+                out.set_size(g.bank.len() as u32);
+            }
+            bank_request::Snapshot(()) => {
+                let n = g.wells.len() as u32;
+                {
+                    let mut ws = out.reborrow().init_wells(n);
+                    for (i, w) in g.wells.iter().enumerate() {
+                        let mut slot = ws.reborrow().get(i as u32);
+                        slot.set_height(w.height);
+                        let mut s = slot.init_soap(w.soap.len() as u32);
+                        for (k, &v) in w.soap.iter().enumerate() {
+                            s.set(k as u32, v);
+                        }
                     }
-                    out.set_dcut(g.bank.dcut);
-                    out.set_size(g.bank.len() as u32);
                 }
+                let mut es = out.reborrow().init_energies(g.bank.len() as u32);
+                for (i, m) in g.bank.members().iter().enumerate() {
+                    es.set(i as u32, m.energy);
+                }
+                out.set_dcut(g.bank.dcut);
+                out.set_size(g.bank.len() as u32);
+            }
+            bank_request::SetDcut(d) => {
+                if g.seeded >= g.capacity && d.is_finite() && d > 0.0 {
+                    g.bank.dcut = d.max(pack_merge());
+                }
+                out.set_dcut(g.bank.dcut);
+                out.set_size(g.bank.len() as u32);
             }
         }
-        serialize::write_message(&mut stream, &reply).map_err(|e| e.to_string())?;
-        stream.flush().map_err(|e| e.to_string())?;
     }
+    let mut out = Vec::new();
+    serialize::write_message(&mut out, &reply).map_err(|e| e.to_string())?;
+    socket.send(&out).map_err(|(_, e)| e.to_string())?;
+    Ok(())
 }
 
 #[cfg(test)]
@@ -476,7 +467,7 @@ mod tests {
 
     #[test]
     fn an_ephemeral_bank_reports_its_allocated_port() {
-        let (_listener, address) = bind_bank_listener("127.0.0.1:0").unwrap();
-        assert_ne!(address.port(), 0);
+        let bound = bind_bank_listener("127.0.0.1:0").unwrap();
+        assert_ne!(bound.addr.expect("tcp bind").port(), 0);
     }
 }

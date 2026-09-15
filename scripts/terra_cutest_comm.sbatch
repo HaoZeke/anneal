@@ -8,7 +8,7 @@
 #SBATCH --time=12:00:00
 #SBATCH --array=0-15%4
 #SBATCH --output=slurm-cutest-comm-%A_%a.out
-# Communicating-chain CUTEst census: 209 problems x 3 seeds x 8000 evals.
+# Box hop + SharedDesignHistory (225282aa). Writes shards/box_hist/.
 set -euo pipefail
 export SLURM_CONF=/etc/slurm-llnl/slurm.conf
 ROOT=${CUTEST_COMM_ROOT:-$HOME/build/cutest-comm-campaign}
@@ -16,9 +16,11 @@ ANNEAL=${ROOT}/anneal
 VERIFY=${ANNEAL_VERIFY:-$HOME/Git/Github/Rust/anneal/.pixi/envs/verify}
 MANIFEST=${ROOT}/toms_cutest_census.csv
 METHODS=${METHODS:-comm_hop}
-OUTDIR=${ROOT}/shards/${METHODS}
+OUTDIR=${ROOT}/shards/box_hist
 export PATH="${VERIFY}/bin:/usr/bin:${PATH}"
 export PYTHONPATH="${ANNEAL}${PYTHONPATH:+:$PYTHONPATH}"
+export HISTORY_NNG="ipc:///tmp/anneal-hist-${SLURM_JOB_ID:-$$}"
+export HISTORY_NNG_SERVE=1
 mkdir -p "$OUTDIR"
 cd "$ANNEAL"
 test -f "$MANIFEST"

@@ -21,13 +21,13 @@ echo "rustc=$(rustc --version)"
 echo "python=$(python --version)"
 echo "maturin=$(maturin --version)"
 # --locked needs Cargo.lock in the rsync; the filter crate tests stay on terra.
-cargo test --lib methods::cutest_ensemble -- --nocapture
+cargo test --lib box_hopping -- --nocapture
 if [[ ! -x $ROOT/.bench/SIFDecode/install/bin/sifdecoder ]]; then
   bash experiments/benchmarks/bootstrap_cutest.sh "$ROOT"
 fi
 export VIRTUAL_ENV="$VERIFY"
 mkdir -p "$ROOT/wheels"
-maturin build --release --features python --out "$ROOT/wheels"
+maturin build --release --features python,history-nng --out "$ROOT/wheels"
 "$VERIFY/bin/python" -m pip install --force-reinstall --no-deps "$ROOT/wheels"/anneal-*.whl
 "$VERIFY/bin/python" - <<'PY'
 import anneal

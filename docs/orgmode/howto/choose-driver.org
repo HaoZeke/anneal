@@ -3,27 +3,50 @@
 
 * Decision Tree
 
+The first split is geometry, not "LJ versus CUTEst". A point set
+in \(\mathbf{R}^{3N}\) is a cluster. A bound-constrained design
+vector is a box. Then split on whether a gradient exists.
+
 Ask in order:
 
-1. Do you have a gradient?
-   - No -> classical via =run= (Boltzmann/Fast/Gsa) or =additive_independence= (if you suspect separability).
-   - Yes -> consider =gle_langevin= when the spectrum is ill-conditioned (one fitted drift matrix from =eindir= flattens efficiency from =omega0= to 100*=omega0=).
+1. Is the state a point set (\(N\) atoms, length \(3N\))?
+   - Yes → =cluster_search= with =Config.recommended(n)=.
+     Use =derived=True= for the cost-asymmetric screen.
+     Use =ras=True= for residual archive search.
+     See [[file:../tutorials/cluster-search.org][cluster search]].
+   - No, it is a design box → 2.
 
-Full details on supplying native gradients (analytic, from PyTorch/JAX, finite differences, etc.) live in the [[https://eindir.rgoswami.me/howto/gradients.html][eindir gradients guide]].
-The relevant types are re-exported from ``eindir_core`` (``Gradient``, ``DifferentiableObjective``, ``AnalyticGradient``, etc.).
+2. Do you have a native gradient on that box?
+   - Yes → =ensemble_optimize(..., grad_fn=...)=.
+     Kick, quench, shared Euclidean =MinimumHistory=.
+     The hop primitive is =box_ensemble_optimize= (requires =grad_fn=).
+     See [[file:../tutorials/box-search.org][box search]].
+   - No → =ensemble_optimize(...)= without =grad_fn=, or
+     =global_optimize= when you want portfolio arms rather than hops.
 
-2. Is the objective separable (or well approximated by a rank-1 surrogate)?
-   - Yes -> =additive_independence= (O(d) per proposal, dimension-free acceptance floor on truly separable problems).
+   ChemFit is a design box. Call =anneal.minimize= with =replicas=
+   and =store= (HDF5 file or an existing readcon-db campaign directory).
+   See [[file:chemfit.org][ChemFit]]. Do not use =cluster_search=.
 
-3. Do you want a single budget knob and automatic allocation across chains?
-   - Yes -> pilot + Bayesian mixer (the =experiments/scripts/demo_bgsa.py= pattern or the internal =BayesianMixingSampler=).
-One =max_proposals=, auto =n_chains=, per-chain Beta on "produced new global best", Thompson with 0.05 guard.
+3. Do you want the typed SA algebra (Cool / Move / Accept) on a box?
+   - Values only → =run= with Boltzmann / Fast / Gsa.
+   - Separable → =additive_independence=.
+   - Ill-conditioned spectrum and a gradient → =gle_langevin=.
+   - GPU or many independent chains → =run_device= / =run_ensemble=
+     (batched SA, not communicating hops).
 
-4. Do you need only a deterministic last mile?
-   - Run any stochastic driver to a modest budget, then =qmc_polish= or =shifted_qmc_polish= (or plain =polish=) on the best point found.
+4. Last mile after any of the above?
+   - =polish= / =qmc_polish= / =shifted_qmc_polish=:
+     bounded L-BFGS (two-loop, Armijo backtrack, active-set projection).
+   - Cluster quench is =WarmLbfgs= → =rgmin::Lbfgs= (strong Wolfe).
+     See [[file:rgmin-lbfgs.org][local polish through rgmin]].
 
-5. Do you need GPU scale or large ensembles?
-   - Pass CuPy arrays to =run_device= / =run_ensemble=, or use the host versions for narrow problems (the kernel is identical).
+Full details on supplying native gradients live in the
+[[https://eindir.rgoswami.me/howto/gradients.html][eindir gradients guide]].
 
-The exposed high-level functions already encode the common good choices.
-The full portfolio auto-orchestrator (pilot several families, allocate remaining budget to the current winner, final polish) lives in the experiments tree and is described conceptually in the Bayesian tutorial.
+Do not pad a design vector to \(3N\) to reuse cluster moves.
+Do not call =Config.recommended= on a box.
+
+The Bayesian mixer (one =max_proposals=, Thompson across families)
+still lives in =experiments/scripts/demo_bgsa.py= and the
+[[file:../tutorials/bayesian-pilot-mixer.org][Bayesian tutorial]].

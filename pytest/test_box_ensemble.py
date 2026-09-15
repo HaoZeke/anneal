@@ -46,3 +46,9 @@ def test_box_ensemble_rejects_cluster_sized_zero_replicas():
     fn, _, low, high = _two_well()
     with pytest.raises(ValueError, match="replicas"):
         anneal.box_ensemble_optimize(fn, low, high, budget=20, replicas=0)
+
+
+def test_box_ensemble_requires_a_gradient():
+    fn, _, low, high = _two_well()
+    with pytest.raises(ValueError, match="grad_fn"):
+        anneal.box_ensemble_optimize(fn, low, high, budget=20)

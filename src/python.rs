@@ -8,13 +8,12 @@
 //! evaluation cost dominates the per-call GIL overhead (~hundreds of ns),
 //! which is true for any non-toy objective.
 //!
-//! `run_ensemble` spawns one OS thread per replica. Those threads call
-//! `Python::attach` inside [`CallableObjective::eval`]. A pyfunction that
-//! reaches `run_ensemble` (today: [`ensemble_optimize`]) must
-//! [`with_replica_threads`] so this frame is not still holding the GIL
-//! when the workers attach. Holding it deadlocks: workers wait for the
-//! GIL, this frame waits for `thread::scope` to join. The native
-//! `Sphere` unit test does not see that path.
+//! Replica-spawning pyfunctions must [`with_replica_threads`] so this
+//! frame is not still holding the GIL when workers attach. Holding it
+//! deadlocks: workers wait for the GIL, this frame waits for
+//! `thread::scope` to join. Box search ([`ensemble_optimize`]) drops
+//! the GIL around the native hop so a Python objective can be called
+//! back.
 
 // Python-callable signatures mirror stable keyword APIs.
 #![allow(clippy::too_many_arguments)]
@@ -35,12 +34,11 @@ use crate::variant::{boltzmann, fast, gsa};
 mod device;
 mod portfolio_peers;
 
-/// Drop the GIL before `run_ensemble` (or any other `thread::scope`
-/// that calls back into Python).
+/// Drop the GIL before native search that may call back into Python.
 ///
-/// [`CallableObjective::eval`] attaches the GIL on the replica thread.
-/// If the pyfunction that spawned those threads still holds it, every
-/// replica blocks in `attach` and the caller blocks in `join`.
+/// [`CallableObjective::eval`] attaches the GIL on the worker thread.
+/// If this frame still holds it, every worker blocks in `attach` and
+/// the caller blocks in `join`.
 fn with_replica_threads<F, T>(py: Python<'_>, f: F) -> T
 where
     F: FnOnce() -> T + Send,
@@ -481,8 +479,7 @@ impl Objective<f64> for CallableObjective {
 
     fn eval(&self, x: ArrayView1<f64>) -> f64 {
         Python::attach(|py| {
-            let owned: Vec<f64> = x.iter().copied().collect();
-            let py_arr = PyArray1::from_vec(py, owned);
+            let py_arr = py_view1(py, x);
             match self.fn_.call1(py, (py_arr,)) {
                 Ok(r) => r.extract::<f64>(py).unwrap_or(f64::INFINITY),
                 // Budget counters raise a Python exception when the shared
@@ -559,8 +556,7 @@ struct CallablePyGradient {
 impl eindir_core::Gradient<f64> for CallablePyGradient {
     fn grad(&self, x: ArrayView1<f64>) -> Array1<f64> {
         Python::attach(|py| {
-            let owned: Vec<f64> = x.iter().copied().collect();
-            let py_arr = PyArray1::from_vec(py, owned);
+            let py_arr = py_view1(py, x);
             match self.fn_.call1(py, (py_arr,)) {
                 Ok(r) => {
                     if let Ok(arr) = r.extract::<numpy::PyReadonlyArray1<f64>>(py) {
@@ -677,7 +673,7 @@ fn run_hmc(
     Ok(PyHistory::from(history))
 }
 
-/// Refines a supplied starting point with bounded projected-gradient polish.
+/// Refines a supplied starting point with bounded L-BFGS polish.
 #[pyfunction]
 #[pyo3(signature = (obj_fn, grad_fn, low, high, x0, max_fevals = 200, step0 = 1.0, grad_tol = 1e-8))]
 fn polish(
@@ -735,7 +731,7 @@ fn polish(
     Ok(out.into())
 }
 
-/// Refines QMC starts with bounded projected-gradient polish.
+/// Refines QMC starts with bounded L-BFGS polish.
 #[pyfunction]
 #[pyo3(signature = (obj_fn, grad_fn, low, high, n_starts, max_fevals_per_start, seed = 0, step0 = 1.0, grad_tol = 1e-8, top_k = 0))]
 fn qmc_polish(
@@ -1170,7 +1166,7 @@ fn qmc_trust_region_poll_objective(
     qmc_polish_result_to_dict(py, result)
 }
 
-/// Refines shifted QMC starts with bounded projected-gradient polish.
+/// Refines shifted QMC starts with bounded L-BFGS polish.
 #[pyfunction]
 #[pyo3(signature = (obj_fn, grad_fn, low, high, n_starts, max_fevals_per_start, seed = 0, n_replicates = 1, step0 = 1.0, grad_tol = 1e-8, top_k = 0))]
 fn shifted_qmc_polish(
@@ -1605,27 +1601,8 @@ fn dmc_population_optimize(
     steps_per_control: usize,
     x0: Option<PyReadonlyArray1<'_, f64>>,
 ) -> PyResult<Py<PyDict>> {
-    let low_vec = low.as_slice()?.to_vec();
-    let high_vec = high.as_slice()?.to_vec();
-    validate_box_bounds(&low_vec, &high_vec)?;
-    if budget == 0 {
-        return Err(PyValueError::new_err("budget must be positive"));
-    }
-    let dim = low_vec.len();
-    let bounds = Bounds::new(Array1::from_vec(low_vec), Array1::from_vec(high_vec), 1e-9);
-    let seed_arr = if let Some(x0) = x0 {
-        let sl = x0.as_slice()?;
-        if sl.len() != dim {
-            return Err(PyValueError::new_err(format!(
-                "x0 length {} does not match dimension {}",
-                sl.len(),
-                dim
-            )));
-        }
-        Some(Array1::from_vec(sl.to_vec()))
-    } else {
-        None
-    };
+    require_positive_budget(budget)?;
+    let (bounds, dim, seed_arr) = parse_box(low, high, x0)?;
     let seed_view = seed_arr.as_ref().map(|a| a.view());
     let obj = CallableObjective {
         fn_: obj_fn,
@@ -1663,10 +1640,7 @@ fn dmc_population_optimize(
     };
     let out = PyDict::new(py);
     out.set_item("best_val", result.best_val)?;
-    out.set_item(
-        "best_pos",
-        PyArray1::from_slice(py, result.best_pos.as_slice().unwrap()),
-    )?;
+    out.set_item("best_pos", py_view1(py, result.best_pos.view()))?;
     out.set_item("n_evals", result.n_evals)?;
     out.set_item("n_grads", result.n_grads)?;
     out.set_item("final_population", result.final_population)?;
@@ -1692,27 +1666,8 @@ fn gpmd_optimize(
     grad_fn: Option<Py<PyAny>>,
     x0: Option<PyReadonlyArray1<'_, f64>>,
 ) -> PyResult<Py<PyDict>> {
-    let low_vec = low.as_slice()?.to_vec();
-    let high_vec = high.as_slice()?.to_vec();
-    validate_box_bounds(&low_vec, &high_vec)?;
-    if budget == 0 {
-        return Err(PyValueError::new_err("budget must be positive"));
-    }
-    let dim = low_vec.len();
-    let bounds = Bounds::new(Array1::from_vec(low_vec), Array1::from_vec(high_vec), 1e-9);
-    let seed_arr = if let Some(x0) = x0 {
-        let sl = x0.as_slice()?;
-        if sl.len() != dim {
-            return Err(PyValueError::new_err(format!(
-                "x0 length {} does not match dimension {}",
-                sl.len(),
-                dim
-            )));
-        }
-        Some(Array1::from_vec(sl.to_vec()))
-    } else {
-        None
-    };
+    require_positive_budget(budget)?;
+    let (bounds, dim, seed_arr) = parse_box(low, high, x0)?;
     let seed_view = seed_arr.as_ref().map(|a| a.view());
     let obj = CallableObjective {
         fn_: obj_fn,
@@ -1729,10 +1684,7 @@ fn gpmd_optimize(
     };
     let out = PyDict::new(py);
     out.set_item("best_val", result.best_val)?;
-    out.set_item(
-        "best_pos",
-        PyArray1::from_slice(py, result.best_pos.as_slice().unwrap()),
-    )?;
+    out.set_item("best_pos", py_view1(py, result.best_pos.view()))?;
     out.set_item("n_evals", result.n_evals)?;
     out.set_item("n_grads", result.n_grads)?;
     out.set_item("n_accept", result.n_accept)?;
@@ -1760,27 +1712,8 @@ fn amsa_optimize(
     grad_fn: Option<Py<PyAny>>,
     x0: Option<PyReadonlyArray1<'_, f64>>,
 ) -> PyResult<Py<PyDict>> {
-    let low_vec = low.as_slice()?.to_vec();
-    let high_vec = high.as_slice()?.to_vec();
-    validate_box_bounds(&low_vec, &high_vec)?;
-    if budget == 0 {
-        return Err(PyValueError::new_err("budget must be positive"));
-    }
-    let dim = low_vec.len();
-    let bounds = Bounds::new(Array1::from_vec(low_vec), Array1::from_vec(high_vec), 1e-9);
-    let seed_arr = if let Some(x0) = x0 {
-        let sl = x0.as_slice()?;
-        if sl.len() != dim {
-            return Err(PyValueError::new_err(format!(
-                "x0 length {} does not match dimension {}",
-                sl.len(),
-                dim
-            )));
-        }
-        Some(Array1::from_vec(sl.to_vec()))
-    } else {
-        None
-    };
+    require_positive_budget(budget)?;
+    let (bounds, dim, seed_arr) = parse_box(low, high, x0)?;
     let seed_view = seed_arr.as_ref().map(|a| a.view());
     let obj = CallableObjective {
         fn_: obj_fn,
@@ -1797,10 +1730,7 @@ fn amsa_optimize(
     };
     let out = PyDict::new(py);
     out.set_item("best_val", result.best_val)?;
-    out.set_item(
-        "best_pos",
-        PyArray1::from_slice(py, result.best_pos.as_slice().unwrap()),
-    )?;
+    out.set_item("best_pos", py_view1(py, result.best_pos.view()))?;
     out.set_item("n_evals", result.n_evals)?;
     out.set_item("n_grads", result.n_grads)?;
     out.set_item("n_reseeds", result.n_reseeds)?;
@@ -1861,6 +1791,7 @@ fn box_ensemble_optimize(
         membership: parsed.membership,
         identity_tol: crate::methods::box_hopping::IDENTITY_TOL,
         shared_deposits: 8,
+        shared_visit_policy: crate::methods::minima_hopping::SharedVisitPolicy::Tabu,
         ..crate::methods::box_hopping::BoxEnsembleConfig::default()
     };
     let Some(grad_fn) = grad_fn else {
@@ -2123,32 +2054,13 @@ fn bfwt_optimize(
     grad_fn: Option<Py<PyAny>>,
     x0: Option<PyReadonlyArray1<'_, f64>>,
 ) -> PyResult<Py<PyDict>> {
-    let low_vec = low.as_slice()?.to_vec();
-    let high_vec = high.as_slice()?.to_vec();
-    validate_box_bounds(&low_vec, &high_vec)?;
-    if budget == 0 {
-        return Err(PyValueError::new_err("budget must be positive"));
-    }
+    require_positive_budget(budget)?;
     if !barrier_hat.is_finite() || barrier_hat < 0.0 {
         return Err(PyValueError::new_err(
             "barrier_hat must be a finite non-negative float",
         ));
     }
-    let dim = low_vec.len();
-    let bounds = Bounds::new(Array1::from_vec(low_vec), Array1::from_vec(high_vec), 1e-9);
-    let seed_arr = if let Some(x0) = x0 {
-        let sl = x0.as_slice()?;
-        if sl.len() != dim {
-            return Err(PyValueError::new_err(format!(
-                "x0 length {} does not match dimension {}",
-                sl.len(),
-                dim
-            )));
-        }
-        Some(Array1::from_vec(sl.to_vec()))
-    } else {
-        None
-    };
+    let (bounds, dim, seed_arr) = parse_box(low, high, x0)?;
     let seed_view = seed_arr.as_ref().map(|a| a.view());
     let obj = CallableObjective {
         fn_: obj_fn,
@@ -2177,10 +2089,7 @@ fn bfwt_optimize(
     };
     let out = PyDict::new(py);
     out.set_item("best_val", result.best_val)?;
-    out.set_item(
-        "best_pos",
-        PyArray1::from_slice(py, result.best_pos.as_slice().unwrap()),
-    )?;
+    out.set_item("best_pos", py_view1(py, result.best_pos.view()))?;
     out.set_item("n_evals", result.n_evals)?;
     out.set_item("n_grads", result.n_grads)?;
     out.set_item("n_accept", result.n_accept)?;
@@ -2227,14 +2136,8 @@ fn global_optimize(
     coverage_radius: f64,
     coverage_neighbors: usize,
 ) -> PyResult<Py<PyDict>> {
-    let low_vec = low.as_slice()?.to_vec();
-    let high_vec = high.as_slice()?.to_vec();
-    validate_box_bounds(&low_vec, &high_vec)?;
-    if budget == 0 {
-        return Err(PyValueError::new_err("budget must be positive"));
-    }
-    let dim = low_vec.len();
-    let bounds = Bounds::new(Array1::from_vec(low_vec), Array1::from_vec(high_vec), 1e-9);
+    require_positive_budget(budget)?;
+    let (bounds, dim, _) = parse_box(low, high, None)?;
     let obj = CallableObjective {
         fn_: obj_fn,
         bounds,
@@ -2558,6 +2461,18 @@ impl PyClusterConfig {
         })
     }
 
+    /// Communicating paper arm: orbit kernel plus recognition, not recommended.
+    #[staticmethod]
+    fn communicating(n: usize) -> PyResult<Self> {
+        if n < 2 {
+            return Err(PyValueError::new_err("n must be at least 2"));
+        }
+        Ok(Self {
+            inner: crate::methods::cluster_hopping::Config::communicating(n),
+            recommended: false,
+        })
+    }
+
     /// Recommended flags with the cost-asymmetric screen and budget-window
     /// temperature. Not the measured configuration.
     #[staticmethod]
@@ -2610,6 +2525,21 @@ impl PyClusterConfig {
         self.inner.depth_reward
     }
 
+    /// Orbit completion once per newly entered basin.
+    #[getter]
+    fn orbit_complete_on_new(&self) -> bool {
+        self.inner.orbit_complete_on_new
+    }
+
+    /// Shared-history visit policy: `tabu` or `recognition`.
+    #[getter]
+    fn shared_visit_policy(&self) -> &'static str {
+        match self.inner.shared_visit_policy {
+            crate::methods::minima_hopping::SharedVisitPolicy::Tabu => "tabu",
+            crate::methods::minima_hopping::SharedVisitPolicy::Recognition => "recognition",
+        }
+    }
+
     /// Quarantine the stalled funnel.
     #[getter]
     fn tabu_on_stall(&self) -> bool {
@@ -2631,6 +2561,14 @@ impl PyClusterConfig {
     fn __repr__(&self) -> String {
         if self.inner.bayes_screen && self.inner.budget_window {
             format!("Config.derived({})", self.inner.n_points)
+        } else if !self.inner.surfaces.is_empty()
+            && self.inner.orbit_complete_on_new
+            && matches!(
+                self.inner.shared_visit_policy,
+                crate::methods::minima_hopping::SharedVisitPolicy::Recognition
+            )
+        {
+            format!("Config.communicating({})", self.inner.n_points)
         } else if self.recommended {
             format!("Config.recommended({})", self.inner.n_points)
         } else {
@@ -2708,8 +2646,7 @@ impl Objective<f64> for CallableDiffObjective {
 
     fn eval(&self, x: ArrayView1<f64>) -> f64 {
         Python::attach(|py| {
-            let owned: Vec<f64> = x.iter().copied().collect();
-            let py_arr = PyArray1::from_vec(py, owned);
+            let py_arr = py_view1(py, x);
             match self.fn_.call1(py, (py_arr,)) {
                 Ok(r) => r.extract::<f64>(py).unwrap_or(f64::INFINITY),
                 Err(_) => f64::INFINITY,
@@ -2721,8 +2658,7 @@ impl Objective<f64> for CallableDiffObjective {
 impl eindir_core::gradient::Gradient<f64> for CallableDiffObjective {
     fn grad(&self, x: ArrayView1<f64>) -> Array1<f64> {
         Python::attach(|py| {
-            let owned: Vec<f64> = x.iter().copied().collect();
-            let py_arr = PyArray1::from_vec(py, owned);
+            let py_arr = py_view1(py, x);
             match self.grad_fn.call1(py, (py_arr,)) {
                 Ok(r) => {
                     if let Ok(arr) = r.extract::<PyReadonlyArray1<f64>>(py) {
@@ -2922,10 +2858,11 @@ fn cluster_archive_search(
 /// Runs the measured cluster-search layer on a user energy and gradient.
 ///
 /// `recommended=True` uses `Config.recommended(n)`; otherwise
-/// `Config.for_cluster(n)`. A charged central-difference probe distinguishes
-/// gradients from force-valued callbacks when the budget can cover it. Every
-/// objective or gradient evaluation is charged to a ledger of `budget` units.
-/// Returns `{best, best_energy, hops}`.
+/// `Config.for_cluster(n)`. `communicating=True` uses
+/// `Config.communicating(n)` and overrides both. A charged central-difference
+/// probe distinguishes gradients from force-valued callbacks when the budget
+/// can cover it. Every objective or gradient evaluation is charged to a ledger
+/// of `budget` units. Returns `{best, best_energy, hops}`.
 /// `ras=True` runs residual archive search on `Config.recommended(n)` and
 /// also reports `charged`, `floors`, `returned`, and `events`.
 ///
@@ -2938,10 +2875,12 @@ fn cluster_archive_search(
 ///   recommended: measured stack when true, Wales-Doye baseline when false.
 ///   derived: cost-asymmetric Bayes screen and budget-window temperature
 ///     on top of the measured flags. Overrides `recommended` when true.
+///   communicating: orbit plus recognition. Overrides `recommended` and
+///     `derived` when true. Not `Config.recommended`.
 ///   ras: residual archive search on the recommended preset. Keyword-only;
 ///     default false. Does not change `Config.recommended`.
 #[pyfunction]
-#[pyo3(signature = (obj_fn, grad_fn, n, budget, seed = 0, recommended = true, derived = false, *, ras = false))]
+#[pyo3(signature = (obj_fn, grad_fn, n, budget, seed = 0, recommended = true, derived = false, communicating = false, *, ras = false))]
 fn cluster_search(
     py: Python<'_>,
     obj_fn: Py<PyAny>,
@@ -2951,6 +2890,7 @@ fn cluster_search(
     seed: u64,
     recommended: bool,
     derived: bool,
+    communicating: bool,
     ras: bool,
 ) -> PyResult<Py<PyDict>> {
     if n < 2 {
@@ -2961,6 +2901,8 @@ fn cluster_search(
     }
     let cfg = if ras {
         crate::methods::cluster_hopping::Config::recommended(n)
+    } else if communicating {
+        crate::methods::cluster_hopping::Config::communicating(n)
     } else if derived {
         crate::methods::cluster_hopping::Config::derived(n)
     } else if recommended {

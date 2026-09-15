@@ -15,7 +15,7 @@ The device path (NumPy or CuPy) and the batched ensemble runner execute the iden
 .. admonition:: Reference
 
    DeviceHistory / EnsembleHistory, run_device, run_ensemble, the
-   projected-gradient Armijo backtrack, and the low-discrepancy
+   bounded L-BFGS (Armijo backtrack), and the low-discrepancy
    screening live in python/anneal/device.py (thin wrappers) and the
    Rust runner / local_polish. The "same kernel" claim is the algebra
    in action: the five-component object is what gets executed on the

@@ -38,6 +38,7 @@ fn values_box_ensemble_retains_a_better_certificate_probe() {
         budget: 3,
         history: HistoryMode::None,
         shared_deposits: 0,
+        shared_visit_policy: crate::methods::minima_hopping::SharedVisitPolicy::Tabu,
         ..BoxEnsembleConfig::default()
     };
 
