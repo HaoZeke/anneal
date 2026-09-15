@@ -69,7 +69,12 @@ fn apply_boolean_options(cfg: &mut Config, opts: &[&str]) {
         assert!(
             matches!(
                 *option,
-                "rec"
+                // The paper's control arm. It sets nothing: naming it leaves
+                // the plain Wales-Doye `for_cluster` protocol in place, and it
+                // stays accepted so the deposited `lj*_base_*.out` campaigns
+                // can be reproduced by the command line that produced them.
+                "base"
+                    | "rec"
                     | "askmc"
                     | "shape"
                     | "bfwt"
@@ -95,6 +100,9 @@ fn apply_boolean_options(cfg: &mut Config, opts: &[&str]) {
                     | "mh"
                     | "mhmd"
                     | "orbit"
+                    | "recognition"
+                    | "comm"
+                    | "communicating"
                     | "calib"
                     | "restart"
                     | "angular"
@@ -1634,7 +1642,14 @@ fn main() {
     // The temperature and step come from Wales and Doye's protocol for basin
     // hopping on the quenched surface, a reduced temperature of 0.8 and a step
     // between 0.36 and 0.40, rather than from tuning here.
-    let mut cfg = if args.get(4).map(|v| v.contains("rec")).unwrap_or(false) {
+    let named: Vec<&str> = args
+        .get(4)
+        .map(|v| v.split(',').collect())
+        .unwrap_or_default();
+    let mut cfg = if named.iter().any(|o| *o == "comm" || *o == "communicating") {
+        println!("  communicating configuration");
+        Config::communicating(n)
+    } else if named.iter().any(|o| *o == "rec" || *o == "recommended") {
         println!("  recommended configuration");
         Config::recommended(n)
     } else {
@@ -1795,7 +1810,12 @@ fn main() {
     // Goedecker's MD escape under the controller; MD_DT and MD_KINETIC
     // set the time step and the kinetic energy per unit escape scale.
     cfg.md_escape = opts.contains(&"mhmd");
-    cfg.orbit_complete_on_new = opts.contains(&"orbit");
+    cfg.orbit_complete_on_new = cfg.orbit_complete_on_new || opts.contains(&"orbit");
+    if opts.contains(&"recognition") {
+        cfg.shared_visit_policy =
+            anneal_core::methods::minima_hopping::SharedVisitPolicy::Recognition;
+        cfg.shared_deposits = 0;
+    }
     if let Some(dt) = anneal_core::env::parsed("MD_DT") {
         cfg.md_escape_dt = dt;
     }
