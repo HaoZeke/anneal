@@ -933,42 +933,31 @@ impl Config {
     }
 
     /// Settings for `n_points` at the campaign's measured defaults.
-    /// The measured configuration: the stack every layer of which beat or
-    /// matched its paired control across four cluster morphologies.
     ///
-    /// Composed surface relocations paying one acceptance test (LJ75 49/144
-    /// against 17/144, Bayes factor 3104 with the arm allocator), Normal-Gamma
-    /// Thompson allocation rewarded by depth, and tabu on stall (LJ98 40/72
-    /// against 20/72, Bayes factor 43.8). Neutral where its mechanisms are not
-    /// needed: 55/72 against 55/72 on the 38-point double funnel and 47-48 of
-    /// 48 on the 55-point single funnel. Reference GMIN at matched
-    /// potential-call budgets: 37/48, 0/48, 0/48.
+    /// The frozen arm is [`Config::for_cluster`] plus Thompson allocation,
+    /// the return screen, and orbit completion on a new basin, which is the
+    /// `thompson,rscreen,orbit` stack the campaigns were measured under. At
+    /// the paper budgets, one chain a seed: LJ38 \(4\times 10^{5}\) 24/24,
+    /// LJ55 \(1\times 10^{6}\) 24/24, LJ75 \(4\times 10^{6}\) 31/48 Marks,
+    /// LJ98 \(4\times 10^{6}\) 30/48 Leary.
+    ///
+    /// The earlier stack — LeanBurst, depth-rewarded Thompson, tabu and
+    /// symmetrisation on stall — is not this arm and is not a default. Depth
+    /// reward is what costs LJ75: `thompson,rscreen` alone reaches Marks in
+    /// 18/48, depth reward alone in 6/48, and the two together in 4/48.
+    /// Orbit completion is what recovers it. Those flags remain settable and
+    /// the stack is reachable through [`Config::packing_superbasin`]; it is
+    /// no longer what a caller who wants answers starts from.
     ///
     /// [`Config::for_cluster`] remains the plain Wales-Doye protocol, kept as
-    /// the comparison baseline; this is what a caller who wants answers should
-    /// start from.
-    ///
-    /// LeanBurst includes the SOAP pullback (analytic \(J^{+}\) of stacked
-    /// local power spectra). The hop target is the observed-cloud residual
-    /// `2p − μ`, the same map used on molecules and slabs: partitioned by
-    /// observed species, never by a CNA class or an fcc prototype.
-    /// Thompson allocates SOAP with surface, single, burst and sym. The
-    /// return screen and stall symmetrisation are on; Ih-dominated stalls
-    /// withhold symmetrise rather than invent a missing packing.
+    /// the comparison baseline.
     ///
     /// Basin identity stays the measured pair-spectrum merge at 0.7.
-    /// [`Config::packing_superbasin`] is the unmeasured SOAP-packing
-    /// keying and adaptive-height stack.
     pub fn recommended(n_points: usize) -> Self {
         let mut cfg = Self::for_cluster(n_points);
-        cfg.move_library = MoveLibrary::LeanBurst;
         cfg.allocate_moves = true;
-        cfg.depth_reward = true;
-        cfg.tabu_on_stall = true;
         cfg.return_screen = true;
-        cfg.symmetrise_on_stall = true;
-        cfg.soap_class_residual = false;
-        cfg.soap_mode = SoapProposalMode::Flexible;
+        cfg.orbit_complete_on_new = true;
         cfg
     }
 
@@ -1010,13 +999,26 @@ impl Config {
         )
     }
 
-    /// Unmeasured SOAP-packing superbasin on top of [`Config::recommended`].
+    /// Unmeasured SOAP-packing superbasin on the LeanBurst stack.
     ///
     /// Unit high-`l` mean SOAP merge 0.10 plus adaptive height with
     /// twenty revisits. Hit rates are not the recommended LJ38/LJ75
     /// campaign numbers.
+    ///
+    /// The LeanBurst flags are set here rather than inherited: the occupancy
+    /// campaigns were measured on that stack, and [`Config::recommended`] is
+    /// now the `thompson,rscreen,orbit` arm. Naming them keeps those harvests
+    /// meaning what they meant when they were run.
     pub fn packing_superbasin(n_points: usize) -> Self {
-        let mut cfg = Self::recommended(n_points);
+        let mut cfg = Self::for_cluster(n_points);
+        cfg.move_library = MoveLibrary::LeanBurst;
+        cfg.allocate_moves = true;
+        cfg.depth_reward = true;
+        cfg.tabu_on_stall = true;
+        cfg.return_screen = true;
+        cfg.symmetrise_on_stall = true;
+        cfg.soap_class_residual = false;
+        cfg.soap_mode = SoapProposalMode::Flexible;
         // One deposit of 0.25 exceeds the measured LJ75 intra-funnel
         // gap (~0.09-0.18). That empties a basin on the first revisit
         // and the next start is another ico draw. Adaptive height with
