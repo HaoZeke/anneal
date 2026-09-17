@@ -87,6 +87,7 @@ def cluster_search(
     *,
     ras: bool = False,
     start=None,
+    length_scale: float | None = None,
 ):
     """Run the measured cluster-search layer.
 
@@ -105,6 +106,9 @@ def cluster_search(
       ras: residual archive search on the recommended preset.
       start: optional flat ``3n`` start. When set, hops use ``search_from``
         instead of a random compact cluster.
+      length_scale: optional physical length. With the recommended preset
+        this uses ``with_scales`` so an angstrom start is not crushed into
+        the reduced LJ container.
 
     Returns a dict with ``best`` (flat ``3n`` coordinates), ``best_energy``,
     and ``hops``.
@@ -120,10 +124,12 @@ def cluster_search(
         bool(derived),
         bool(communicating),
     )
-    if start_arr is None:
-        out = _core_cluster_search(*args, ras=bool(ras))
-    else:
-        out = _core_cluster_search(*args, ras=bool(ras), start=start_arr)
+    kwargs = {"ras": bool(ras)}
+    if start_arr is not None:
+        kwargs["start"] = start_arr
+    if length_scale is not None:
+        kwargs["length_scale"] = float(length_scale)
+    out = _core_cluster_search(*args, **kwargs)
     out["best"] = np.asarray(out["best"], dtype=np.float64)
     return out
 

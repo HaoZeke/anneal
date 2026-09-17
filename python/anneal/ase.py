@@ -89,6 +89,20 @@ def _is_cell_filter(atoms) -> bool:
     return int(pos.shape[0]) != inner_n
 
 
+def _nn_length_scale(atoms) -> float:
+    pts = _positions(atoms)
+    if len(pts) < 2:
+        return 1.0
+    delta = pts[:, None, :] - pts[None, :, :]
+    dist = np.sqrt(np.einsum("ijk,ijk->ij", delta, delta))
+    np.fill_diagonal(dist, np.inf)
+    nn = np.min(dist, axis=1)
+    scale = float(np.median(nn[np.isfinite(nn)]))
+    if not np.isfinite(scale) or scale <= 0.0:
+        return 1.0
+    return scale
+
+
 def _free_count(atoms) -> int:
     n = int(len(atoms))
     frozen = getattr(atoms, "frozen", None)
@@ -277,6 +291,7 @@ class Anneal:
             seed=self.seed,
             recommended=True,
             start=start,
+            length_scale=_nn_length_scale(self.atoms),
         )
         _set_positions(self.atoms, out["best"])
         self.charged += int(out.get("charged", 0) or 0)

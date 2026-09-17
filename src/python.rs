@@ -2753,14 +2753,22 @@ fn cluster_gradient_scale(
     })
 }
 
-fn cluster_bounds(n: usize) -> Bounds<f64> {
-    let extent = 4.0 * 2.0_f64.powf(1.0 / 6.0) * (n as f64).cbrt();
+fn cluster_bounds(n: usize, length_scale: f64) -> Bounds<f64> {
+    let extent = 4.0 * 2.0_f64.powf(1.0 / 6.0) * (n as f64).cbrt() * length_scale;
     let dim = 3 * n;
     Bounds::new(
         Array1::from_elem(dim, -extent),
         Array1::from_elem(dim, extent),
         0.0,
     )
+}
+
+fn recommended_with_scale(n: usize, length_scale: f64) -> crate::methods::cluster_hopping::Config {
+    let mut cfg = crate::methods::cluster_hopping::Config::with_scales(n, length_scale, 1.0);
+    cfg.allocate_moves = true;
+    cfg.return_screen = true;
+    cfg.orbit_complete_on_new = true;
+    cfg
 }
 
 /// Residual archive search on the measured recommended preset.
@@ -2881,8 +2889,10 @@ fn cluster_archive_search(
 ///     default false. Does not change `Config.recommended`.
 ///   start: optional flat `3n` start. When set, hops use [`search_from`]
 ///     instead of seeding a random compact cluster.
+///   length_scale: optional physical length. When set with the recommended
+///     preset, hops use `with_scales` instead of the reduced LJ container.
 #[pyfunction]
-#[pyo3(signature = (obj_fn, grad_fn, n, budget, seed = 0, recommended = true, derived = false, communicating = false, *, ras = false, start = None))]
+#[pyo3(signature = (obj_fn, grad_fn, n, budget, seed = 0, recommended = true, derived = false, communicating = false, *, ras = false, start = None, length_scale = None))]
 fn cluster_search(
     py: Python<'_>,
     obj_fn: Py<PyAny>,
@@ -2895,6 +2905,7 @@ fn cluster_search(
     communicating: bool,
     ras: bool,
     start: Option<PyReadonlyArray1<'_, f64>>,
+    length_scale: Option<f64>,
 ) -> PyResult<Py<PyDict>> {
     if n < 2 {
         return Err(PyValueError::new_err("n must be at least 2"));
@@ -2902,6 +2913,14 @@ fn cluster_search(
     if budget < 1 {
         return Err(PyValueError::new_err("budget must be positive"));
     }
+    if let Some(scale) = length_scale {
+        if !scale.is_finite() || scale <= 0.0 {
+            return Err(PyValueError::new_err(
+                "length_scale must be finite and positive",
+            ));
+        }
+    }
+    let scale = length_scale.unwrap_or(1.0);
     let cfg = if ras {
         crate::methods::cluster_hopping::Config::recommended(n)
     } else if communicating {
@@ -2909,7 +2928,13 @@ fn cluster_search(
     } else if derived {
         crate::methods::cluster_hopping::Config::derived(n)
     } else if recommended {
-        crate::methods::cluster_hopping::Config::recommended(n)
+        if length_scale.is_some() {
+            recommended_with_scale(n, scale)
+        } else {
+            crate::methods::cluster_hopping::Config::recommended(n)
+        }
+    } else if length_scale.is_some() {
+        crate::methods::cluster_hopping::Config::with_scales(n, scale, 1.0)
     } else {
         crate::methods::cluster_hopping::Config::for_cluster(n)
     };
@@ -2926,7 +2951,7 @@ fn cluster_search(
     let obj = CallableDiffObjective {
         fn_: obj_fn,
         grad_fn,
-        bounds: cluster_bounds(n),
+        bounds: cluster_bounds(n, scale),
         gradient_scale,
     };
     if ras {

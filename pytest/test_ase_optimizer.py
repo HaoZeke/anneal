@@ -172,6 +172,7 @@ def test_search_passes_start(monkeypatch):
     opt = Anneal(atoms, logfile=None, mode="search", budget=10)
     opt.step()
     assert np.allclose(seen["start"], want)
+    assert seen["length_scale"] == pytest.approx(1.4)
     assert opt.get_number_of_steps() == 1
 
 
