@@ -9,7 +9,9 @@ Box Search
 
 A bound-constrained design vector is not a point set.
 =ensemble_optimize= is the entry: with a gradient it hops and
-quenches; without one it is the values-only portfolio.
+quenches. Without a gradient, one replica is the values-only
+portfolio; more than one replica is a communicating values-only
+chain.
 
 #+begin_src python
 import numpy as np
@@ -33,10 +35,11 @@ print(out["charged"], round(out["best_val"], 6), out["best_pos"].shape)
 =best_pos= has length 6. The design dimension is never rewritten as
 \(3N\).
 
-Without =grad_fn= the same call is the portfolio (no hop history):
+Without =grad_fn= and with one replica the same call is the
+values-only portfolio (no hop history):
 
 #+begin_src python
-out = ensemble_optimize(sphere, low, high, budget=400, seed=3)
+out = ensemble_optimize(sphere, low, high, budget=400, seed=3, replicas=1)
 assert out["history_minima"] == 0
 #+end_src
 
