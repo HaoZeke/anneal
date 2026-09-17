@@ -2,7 +2,7 @@
 # Rebuild the python extension and run the ASE / cluster_search tests.
 set -euo pipefail
 if [[ -z ${SLURM_JOB_ID:-} ]]; then
-  echo "terra_xioj_ase_gate.sh: run under srun/sbatch, not on $(hostname)" >&2
+  echo "terra_ase_gate.sh: run under srun/sbatch, not on $(hostname)" >&2
   exit 1
 fi
 ROOT=${ANNEAL_ROOT:-$HOME/Git/Github/Rust/anneal}
