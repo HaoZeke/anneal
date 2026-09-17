@@ -86,6 +86,7 @@ def cluster_search(
     communicating: bool = False,
     *,
     ras: bool = False,
+    start=None,
 ):
     """Run the measured cluster-search layer.
 
@@ -102,11 +103,14 @@ def cluster_search(
       derived: ``Config.derived(n)``; overrides ``recommended``.
       communicating: ``Config.communicating(n)``; overrides both.
       ras: residual archive search on the recommended preset.
+      start: optional flat ``3n`` start. When set, hops use ``search_from``
+        instead of a random compact cluster.
 
     Returns a dict with ``best`` (flat ``3n`` coordinates), ``best_energy``,
     and ``hops``.
     """
-    out = _core_cluster_search(
+    start_arr = None if start is None else np.asarray(start, dtype=np.float64).reshape(-1)
+    args = (
         obj_fn,
         grad_fn,
         int(n),
@@ -115,8 +119,11 @@ def cluster_search(
         bool(recommended),
         bool(derived),
         bool(communicating),
-        ras=bool(ras),
     )
+    if start_arr is None:
+        out = _core_cluster_search(*args, ras=bool(ras))
+    else:
+        out = _core_cluster_search(*args, ras=bool(ras), start=start_arr)
     out["best"] = np.asarray(out["best"], dtype=np.float64)
     return out
 

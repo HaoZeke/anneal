@@ -91,6 +91,23 @@ def test_cluster_search_rejects_bad_n_and_budget():
         cluster_search(lj_energy, lj_grad, 4, 0, seed=0)
 
 
+def test_cluster_search_start_kwarg():
+    import inspect
+
+    from anneal._core import cluster_search as core_cluster_search
+
+    if "start" not in inspect.signature(core_cluster_search).parameters:
+        pytest.skip("rebuild the extension for cluster_search start=")
+    n = 4
+    start = np.array(
+        [0.0, 0.0, 0.0, 1.1, 0.0, 0.0, 0.0, 1.1, 0.0, 0.0, 0.0, 1.1],
+        dtype=np.float64,
+    )
+    out = cluster_search(lj_energy, lj_grad, n, 200, seed=0, start=start)
+    assert np.asarray(out["best"]).shape == (3 * n,)
+    assert np.isfinite(out["best_energy"])
+
+
 def test_cluster_search_ras_flag_exists_and_recommended_defaults():
     import inspect
 
