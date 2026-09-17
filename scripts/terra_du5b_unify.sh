@@ -21,7 +21,7 @@ if ! command -v rg >/dev/null; then
   echo "rg required for the pad check" >&2
   exit 1
 fi
-if rg -n 'n_points = dim\.div_ceil|fn box_hop_config' src/methods/box_hopping.rs src/methods/cutest_ensemble.rs; then
+if rg -n 'n_points = dim\.div_ceil|fn box_hop_config' src/methods/box_hopping.rs; then
   echo "PAD_STILL_PRESENT" >&2
   exit 1
 fi

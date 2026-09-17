@@ -21,8 +21,10 @@ Ask in order:
      Kick, quench, shared Euclidean =MinimumHistory=.
      The hop primitive is =box_ensemble_optimize= (requires =grad_fn=).
      See [[file:../tutorials/box-search.org][box search]].
-   - No → =ensemble_optimize(...)= without =grad_fn=, or
-     =global_optimize= when you want portfolio arms rather than hops.
+   - No → =ensemble_optimize(..., replicas=1)= is the values-only
+     portfolio. Default =replicas=4= without a gradient is a
+     communicating values-only chain. Use =global_optimize= when you
+     want portfolio arms rather than hops.
 
    ChemFit is a design box. Call =anneal.minimize= with =replicas=
    and =store= (HDF5 file or an existing readcon-db campaign directory).
