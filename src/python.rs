@@ -2879,8 +2879,10 @@ fn cluster_archive_search(
 ///     `derived` when true. Not `Config.recommended`.
 ///   ras: residual archive search on the recommended preset. Keyword-only;
 ///     default false. Does not change `Config.recommended`.
+///   start: optional flat `3n` start. When set, hops use [`search_from`]
+///     instead of seeding a random compact cluster.
 #[pyfunction]
-#[pyo3(signature = (obj_fn, grad_fn, n, budget, seed = 0, recommended = true, derived = false, communicating = false, *, ras = false))]
+#[pyo3(signature = (obj_fn, grad_fn, n, budget, seed = 0, recommended = true, derived = false, communicating = false, *, ras = false, start = None))]
 fn cluster_search(
     py: Python<'_>,
     obj_fn: Py<PyAny>,
@@ -2892,6 +2894,7 @@ fn cluster_search(
     derived: bool,
     communicating: bool,
     ras: bool,
+    start: Option<PyReadonlyArray1<'_, f64>>,
 ) -> PyResult<Py<PyDict>> {
     if n < 2 {
         return Err(PyValueError::new_err("n must be at least 2"));
@@ -2929,7 +2932,20 @@ fn cluster_search(
     if ras {
         return cluster_archive_search(py, &obj, &cfg, &mut ledger, seed);
     }
-    let (out, _) = crate::methods::cluster_search::search(&obj, &cfg, &mut ledger, seed);
+    let (out, _) = if let Some(start) = start {
+        let sl = start.as_slice()?;
+        if sl.len() != 3 * n {
+            return Err(PyValueError::new_err(format!(
+                "start length {} must be 3*n = {}",
+                sl.len(),
+                3 * n
+            )));
+        }
+        let start = Array1::from_vec(sl.to_vec());
+        crate::methods::cluster_search::search_from(&obj, &cfg, &mut ledger, start.view(), seed)
+    } else {
+        crate::methods::cluster_search::search(&obj, &cfg, &mut ledger, seed)
+    };
     let dim = 3 * n;
     let best = out
         .best_state
