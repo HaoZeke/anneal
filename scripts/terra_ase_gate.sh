@@ -42,4 +42,4 @@ export VIRTUAL_ENV="$VERIFY"
   pytest/test_cluster_search.py::test_cluster_search_start_kwarg \
   pytest/test_cluster_search.py::test_cluster_search_rejects_bad_n_and_budget \
   -q --tb=short
-echo XIOJ_ASE_OK
+echo ASE_GATE_OK
