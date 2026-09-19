@@ -78,36 +78,32 @@ anneal_header_intree = custom_target(
 )
 
 cargo_prog = find_program('cargo', required: true)
-
-# Build the Rust library via cargo to ensure all dependencies
-# (ndarray, thiserror, dlpk, etc.) are properly resolved and linked.
-# Meson's native library(rust_abi: 'c') bypasses Cargo, making
-# external crates unavailable.
-#
-# On Windows cargo produces .lib; elsewhere .a.
+objcopy_prog = find_program('objcopy', 'llvm-objcopy', required: host_machine.system() == 'linux')
+nm_prog = find_program('nm', 'llvm-nm', required: host_machine.system() == 'linux')
 if host_machine.system() == 'windows'
     _cargo_lib_name = 'anneal_core.lib'
 else
     _cargo_lib_name = 'libanneal_core.a'
 endif
-
 _py = find_program('python3', 'python')
-
+# The C ABI (the capi feature) is the surface a C or C++ consumer links.
+# The archive also carries the C symbols of eindir-core, which rgmin's own
+# archive exports too; a consumer that links both would see them twice, so
+# the build localizes every symbol the header does not declare.
 anneal_cargo = custom_target(
     'anneal-cargo',
-    input: files('Cargo.toml', 'Cargo.lock', 'src/lib.rs'),
+    input: files('Cargo.toml', 'Cargo.lock', 'src/lib.rs', 'src/ffi.rs'),
     output: _cargo_lib_name,
     command: [
-        _py, '-c',
-        'import subprocess, shutil, sys; ' +
-        'subprocess.check_call([sys.argv[1], "build", "--release", "--manifest-path", sys.argv[2], "--target-dir", sys.argv[3] + "/cargo-target"]); ' +
-        'shutil.copy2(sys.argv[3] + "/cargo-target/release/" + sys.argv[4], sys.argv[5])',
-        cargo_prog, '@INPUT0@', '@PRIVATE_DIR@', _cargo_lib_name, '@OUTPUT0@',
+        _py, files('scripts/meson_cargo_build.py'),
+        cargo_prog.full_path(), _msproot, '@PRIVATE_DIR@' / 'cargo-target',
+        _cargo_lib_name, '@OUTPUT0@', 'capi',
+        host_machine.system() == 'linux' ? objcopy_prog.full_path() : '',
+        host_machine.system() == 'linux' ? nm_prog.full_path() : '',
     ],
+    console: true,
     build_by_default: true,
 )
-
-# System dependencies required when statically linking a Rust library
 _rust_sys_deps = []
 if host_machine.system() == 'linux'
     _rust_sys_deps += [
@@ -141,10 +137,11 @@ endif
 # ordering (cargo runs before any consumer links).
 anneal_dep = declare_dependency(
     link_args: [anneal_cargo.full_path()],
-    sources: anneal_cargo,
+    sources: [anneal_cargo, anneal_header_intree],
     dependencies: _rust_sys_deps,
     include_directories: include_directories('include'),
 )
+meson.override_dependency('anneal-core', anneal_dep)
 
 # Examples
 if get_option('with_examples')
