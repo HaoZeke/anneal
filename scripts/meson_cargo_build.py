@@ -26,8 +26,8 @@ def main(argv: list[str]) -> int:
         "--manifest-path", str(root / "Cargo.toml"),
         "--target-dir", target_dir,
     ]
-    if (root / "Cargo.lock").is_file():
-        cmd.append("--locked")
+    # meson lists Cargo.lock as an input: the build is always locked.
+    cmd.append("--locked")
     if features.strip():
         cmd.extend(["--features", features.strip()])
     cmd.extend(["--", "--crate-type=staticlib"])
