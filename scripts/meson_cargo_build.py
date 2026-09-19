@@ -15,7 +15,12 @@ def main(argv: list[str]) -> int:
         )
         return 2
     cargo, src_root, target_dir, lib_name, out, features, objcopy, nm = argv[1:]
-    root = Path(src_root)
+    # Meson runs the command from the build directory; the target and
+    # output paths are relative to it, so they are resolved before cargo
+    # runs from the source root.
+    root = Path(src_root).resolve()
+    target_dir = str(Path(target_dir).resolve())
+    out = str(Path(out).resolve())
     cmd = [
         cargo, "rustc", "--lib", "--release",
         "--manifest-path", str(root / "Cargo.toml"),

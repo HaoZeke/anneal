@@ -10,6 +10,10 @@
 //! same seed and identical callback results evaluate the same points in the
 //! same order; a collective objective is safe behind the callbacks.
 
+// The C names are the ABI: snake-case types and upper-case variants, as
+// cbindgen emits them.
+#![allow(non_camel_case_types)]
+
 use std::cell::RefCell;
 use std::ffi::CString;
 use std::os::raw::{c_char, c_void};
