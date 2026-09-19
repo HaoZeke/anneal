@@ -388,15 +388,15 @@ fn ensemble_config(
 /// Minimize `f` over the box `[low, high]` with a communicating-chain box
 /// ensemble.
 ///
-/// `x` holds the start of the first replica on entry and the best evaluated
-/// point on exit; the other replicas start at uniform draws in the box. A
+/// `eval` and `grad` must be non-null. `x` holds the start of the first
+/// replica on entry and the best evaluated point on exit; the other replicas start at uniform draws in the box. A
 /// callback that fails ends the search with `ANNEAL_INTERNAL_ERROR`, and
 /// `x` is left at its start. `low` and `high` have `dim` entries each and
 /// must be finite with `low <= high`.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn anneal_box_minimize(
-    eval: Option<anneal_eval_fn>,
-    grad: Option<anneal_grad_fn>,
+    eval: anneal_eval_fn,
+    grad: anneal_grad_fn,
     user: *mut c_void,
     x: *mut DLManagedTensorVersioned,
     low: *const f64,
@@ -405,10 +405,6 @@ pub unsafe extern "C" fn anneal_box_minimize(
     out: *mut anneal_box_report_t,
 ) -> anneal_status_t {
     match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        let (Some(eval), Some(grad)) = (eval, grad) else {
-            set_last_error("anneal_box_minimize: eval and grad callbacks are required");
-            return anneal_status_t::ANNEAL_INVALID_PARAMETER;
-        };
         if low.is_null() || high.is_null() || cfg.is_null() || out.is_null() {
             set_last_error("anneal_box_minimize: null argument");
             return anneal_status_t::ANNEAL_INVALID_PARAMETER;
@@ -577,8 +573,8 @@ mod tests {
         let mut report = anneal_box_report_t::default();
         let status = unsafe {
             anneal_box_minimize(
-                Some(rastrigin),
-                Some(rastrigin_grad),
+                rastrigin,
+                rastrigin_grad,
                 (&mut counter as *mut Counter).cast(),
                 shell.point_at(x.as_mut_ptr(), 2),
                 low.as_ptr(),
@@ -612,8 +608,8 @@ mod tests {
             let mut report = anneal_box_report_t::default();
             let status = unsafe {
                 anneal_box_minimize(
-                    Some(rastrigin),
-                    Some(rastrigin_grad),
+                    rastrigin,
+                    rastrigin_grad,
                     (&mut counter as *mut Counter).cast(),
                     shell.point_at(x.as_mut_ptr(), 2),
                     low.as_ptr(),
@@ -639,8 +635,8 @@ mod tests {
         let mut report = anneal_box_report_t::default();
         let status = unsafe {
             anneal_box_minimize(
-                Some(rastrigin),
-                Some(rastrigin_grad),
+                rastrigin,
+                rastrigin_grad,
                 (&mut counter as *mut Counter).cast(),
                 shell.point_at(x.as_mut_ptr(), 2),
                 low.as_ptr(),
@@ -651,15 +647,17 @@ mod tests {
         };
         assert_eq!(status, anneal_status_t::ANNEAL_INVALID_PARAMETER);
         assert!(!anneal_last_error().is_null());
+        let mut zero_budget = cfg;
+        zero_budget.budget = 0;
         let status = unsafe {
             anneal_box_minimize(
-                None,
-                Some(rastrigin_grad),
+                rastrigin,
+                rastrigin_grad,
                 (&mut counter as *mut Counter).cast(),
                 shell.point_at(x.as_mut_ptr(), 2),
                 low.as_ptr(),
                 low.as_ptr(),
-                &cfg,
+                &zero_budget,
                 &mut report,
             )
         };
