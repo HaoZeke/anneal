@@ -972,17 +972,18 @@ outcomes). A symmetric-Dirichlet posterior transition matrix and its
 diffusion power give a diffusion distance between microstates;
 complete-linkage clustering under a maximum-distance threshold groups
 microstates into attraction regions, with nodes below a minimum
-probe-observation count kept as ineligible singletons.
+count of resolved probe returns kept as ineligible singletons.
+Unresolved probes stay in the posterior and do not certify a merge.
 
 Key types and functions: =TransitionOutcome=
 (src/transition_graph.rs:14); =TransitionGraphError=
 (transition_graph.rs:23); =AttractionRegionConfig=
 (transition_graph.rs:46); =TransitionGraph= (transition_graph.rs:77),
 =observe= (transition_graph.rs:108), =posterior_matrix=
-(transition_graph.rs:170), =uncertainty= (transition_graph.rs:197),
-=attraction_regions= (transition_graph.rs:210, diffusion + complete
+(transition_graph.rs:177), =uncertainty= (transition_graph.rs:204),
+=attraction_regions= (transition_graph.rs:219, diffusion + complete
 linkage); =matrix_power=/=complete_linkage_regions=
-(transition_graph.rs:264/281, private).
+(transition_graph.rs:275/292, private).
 
 Feeds/consumes: region identity here is what =region_assignment.rs=
 consumes; kept deliberately separate from descriptor-based basin
