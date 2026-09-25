@@ -135,6 +135,30 @@ fn extras_on_a_published_prize_keep() {
 }
 
 #[test]
+fn published_reference_does_not_change_a_stalled_chains_work() {
+    let (census, basin_id) = census_with_repeated_visits(4);
+    let census = CensusEvidence::from_census(&census, Some(basin_id));
+    let progress = AggregateProgress::new(90, 100).unwrap();
+    for relation in [
+        ActiveCatalogRelation::Incumbent,
+        ActiveCatalogRelation::SameBasin,
+    ] {
+        for interface_rank in [u32::MAX, 1] {
+            let mut state = input(relation, census, progress);
+            state.local_stall_slices = 8;
+            state.interface_rank = interface_rank;
+            state.on_published_prize = false;
+            let without_reference = CatalogPolicy::decide(state);
+            state.on_published_prize = true;
+            let with_reference = CatalogPolicy::decide(state);
+            assert_eq!(with_reference, without_reference);
+            assert_eq!(with_reference.action, PolicyAction::Leave);
+            assert_eq!(with_reference.reason, PolicyReason::LocalStall);
+        }
+    }
+}
+
+#[test]
 fn incumbent_replica_stays_in_the_well_until_it_stalls() {
     let (census, basin_id) = census_with_repeated_visits(21);
     let relaxing = input(

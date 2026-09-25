@@ -758,7 +758,6 @@ mod run {
         ledger: CooperativeLedger,
         replicas: BTreeMap<u32, ReplicaState>,
         events: Vec<TraceEvent>,
-        on_published_prize: bool,
     }
 
     impl CooperativeRun {
@@ -810,18 +809,14 @@ mod run {
                 ledger,
                 replicas,
                 events: Vec::new(),
-                on_published_prize: false,
             })
         }
 
-        /// Whether the run has reached a published reference energy.
+        /// Accept a published-reference report without feeding policy.
         ///
-        /// The coordinator holds no published reference and the policy
-        /// state carries no best energy, so this is the caller's to
-        /// report; every policy input built afterwards carries it.
-        pub fn set_on_published_prize(&mut self, reached: bool) {
-            self.on_published_prize = reached;
-        }
+        /// Reference energies stay on the score path. Work selection
+        /// uses catalog evidence only, so this report is not stored.
+        pub fn set_on_published_prize(&mut self, _reached: bool) {}
 
         /// Attach or replace the coordinator connection for one replica.
         pub fn attach_client(
@@ -1053,6 +1048,27 @@ mod run {
             self.handle_transition_record(replica, action, resolved, adopted, result)
         }
 
+        /// Register `source`, then record one transition only when that origin is accepted.
+        ///
+        /// A rejected origin leaves the coordinator's current basin untouched, so the
+        /// edge is not sent. Communication failure and disabled sharing do the same:
+        /// the local trajectory stays authoritative and no edge is attached elsewhere.
+        pub fn record_transition_from_source(
+            &mut self,
+            replica: u32,
+            source: CatalogCandidate,
+            action: impl Into<String>,
+            destination: TransitionDestination,
+            adopted: bool,
+        ) -> Result<TransitionRecordOutcome, CooperativeRunError> {
+            match self.record_current(replica, source)? {
+                TransitionRecordOutcome::Recorded => {
+                    self.record_transition(replica, action, destination, adopted)
+                }
+                outcome => Ok(outcome),
+            }
+        }
+
         /// Queue a current-state visit. The hop does not wait.
         pub fn post_record_current(
             &mut self,
@@ -1205,7 +1221,6 @@ mod run {
                         receipt.state,
                         local_stall_slices,
                         local_deepened,
-                        self.on_published_prize,
                         leftover_lambda,
                     )?;
                     self.replica_mut(replica)?.snapshot = Some(receipt.snapshot);
@@ -1295,7 +1310,6 @@ mod run {
                                 receipt.state,
                                 local_stall_slices,
                                 local_deepened,
-                                self.on_published_prize,
                                 leftover_lambda,
                             )?;
                             self.replica_mut(replica)?.snapshot = Some(receipt.snapshot);
@@ -3013,7 +3027,6 @@ mod run {
         state: PolicyState,
         local_stall_slices: u32,
         local_deepened: bool,
-        on_published_prize: bool,
         path_lambda: f64,
     ) -> Result<CatalogPolicyInput, PolicyInputError> {
         let relation = match state.relation {
@@ -3059,7 +3072,7 @@ mod run {
             leftover_dwell: state.leftover_dwell,
             ei_exhausted: state.ei_exhausted,
             min_families: state.min_families as usize,
-            on_published_prize,
+            on_published_prize: false,
         })
     }
 

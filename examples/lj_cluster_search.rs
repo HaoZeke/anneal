@@ -3413,19 +3413,6 @@ fn run_capnp_catalog(
     // direction a funnel exchange must move, named without naming any
     // structure. Gated until the paired smoke measures it.
     let histo_screen = std::env::var("CATALOG_HISTO_SCREEN").is_ok_and(|v| v == "1");
-    // Difficulty retargeting, the proof-of-work governor transplanted:
-    // a blockchain holds its block rate constant by adjusting the
-    // difficulty against measured production; here the measured
-    // quantity is ensemble basin discovery per force evaluation, from
-    // the exact census counters every policy reply already carries.
-    // When discovery dries up against the run's own history the
-    // exploration gain rises, scaling escape perturbations; recovery
-    // decays it back toward one. Self-relative, no structural prior,
-    // no protocol change. Gated until the paired smoke measures it.
-    let difficulty_enabled = std::env::var("CATALOG_DIFFICULTY").is_ok_and(|v| v == "1");
-    let mut difficulty_gain = 1.0_f64;
-    let mut governor_last: Option<(u64, u64)> = None;
-    let mut governor_ema: Option<f64> = None;
     let histo_radius = std::env::var("CATALOG_HISTO_RADIUS")
         .ok()
         .and_then(|value| value.parse::<f64>().ok())
@@ -3751,6 +3738,9 @@ fn run_capnp_catalog(
         last_charged = snapshot.charged();
 
         for transition in snapshot.accepted_transitions() {
+            if !transition.validated {
+                continue;
+            }
             cooperative
                 .record_executed_transition(
                     replica,
@@ -3779,10 +3769,10 @@ fn run_capnp_catalog(
                     cooperative
                         .record_work(replica, ChargeKind::DescriptorEvaluation, 0)
                         .expect("source descriptor work must enter the cooperative ledger");
-                    path_active = cooperative
-                        .post_record_current(replica, candidate)
-                        .map(|outcome| outcome != TransitionRecordOutcome::Rejected)
-                        .unwrap_or(false);
+                    path_active = matches!(
+                        cooperative.record_current(replica, candidate),
+                        Ok(TransitionRecordOutcome::Recorded)
+                    );
                 }
                 AdaptiveCatalogOperation::Adopt {
                     action,
@@ -3792,17 +3782,29 @@ fn run_capnp_catalog(
                     cooperative
                         .record_work(replica, ChargeKind::DescriptorEvaluation, 0)
                         .expect("destination descriptor work must enter the cooperative ledger");
-                    path_active = cooperative
-                        .post_record_transition(
+                    path_active = matches!(
+                        cooperative.record_transition(
                             replica,
                             action,
                             TransitionDestination::Resolved(destination),
                             adopted,
-                        )
-                        .map(|outcome| outcome != TransitionRecordOutcome::Rejected)
-                        .unwrap_or(false);
+                        ),
+                        Ok(TransitionRecordOutcome::Recorded)
+                    );
                 }
-                AdaptiveCatalogOperation::Adopt { .. } => {}
+                AdaptiveCatalogOperation::Unresolved { action } if path_active => {
+                    path_active = matches!(
+                        cooperative.record_transition(
+                            replica,
+                            action,
+                            TransitionDestination::Unresolved,
+                            false,
+                        ),
+                        Ok(TransitionRecordOutcome::Recorded)
+                    );
+                }
+                AdaptiveCatalogOperation::Adopt { .. }
+                | AdaptiveCatalogOperation::Unresolved { .. } => {}
             }
         }
 
@@ -4414,10 +4416,6 @@ fn run_capnp_catalog(
                 }
             }
         }
-        cooperative.set_on_published_prize(published_energy_score(
-            snapshot.best_energy(),
-            reference(cfg.n_points),
-        ));
         if leave_defers(leave_quiet, leave_patience, leave_crossing) {
             // Still inside the recovered quiet stretch or the
             // measured crossing floor (LEAVE_CROSSING_HOPS). Policy
@@ -4546,24 +4544,6 @@ fn run_capnp_catalog(
         {
             assigned_discovery_role = Some(policy_trace.discovery_role);
         }
-        if difficulty_enabled && checkpoint_sequence.is_multiple_of(32) {
-            let charged = policy.progress.charged();
-            let singles = policy.census.singleton_basins();
-            if let Some((last_charged, last_singles)) = governor_last
-                && charged > last_charged
-            {
-                let rate =
-                    singles.saturating_sub(last_singles) as f64 / (charged - last_charged) as f64;
-                let ema = governor_ema.get_or_insert(rate);
-                if rate < 0.25 * *ema {
-                    difficulty_gain = (difficulty_gain * 1.5).min(4.0);
-                } else {
-                    difficulty_gain = 1.0 + (difficulty_gain - 1.0) * 0.5;
-                }
-                *ema = 0.9 * *ema + 0.1 * rate;
-            }
-            governor_last = Some((charged, singles));
-        }
         let decision = cooperative
             .decide(replica, policy)
             .expect("policy decision must name the configured replica");
@@ -4678,7 +4658,7 @@ fn run_capnp_catalog(
                 for _ in 0..6 {
                     let Some(candidate) = fixed_probe_trial(
                         snapshot.current_state(),
-                        2.0 * probe_scale * difficulty_gain,
+                        2.0 * probe_scale,
                         &mut histo_rng,
                     ) else {
                         continue;
@@ -5376,6 +5356,9 @@ enum AdaptiveCatalogOperation {
         destination: anneal_core::catalog_rpc::CatalogCandidate,
         adopted: bool,
     },
+    Unresolved {
+        action: String,
+    },
 }
 
 #[cfg(feature = "bank-rpc")]
@@ -5392,6 +5375,42 @@ fn adaptive_catalog_operations(
     let mut operations = Vec::new();
     let mut registered_state: Option<Array1<f64>> = None;
     for transition in transitions {
+        if transition.action == "probe" && !transition.validated && transition.from_gradient.is_some()
+        {
+            let continues_registered_path = registered_state
+                .as_ref()
+                .is_some_and(|state| *state == transition.from_state);
+            if !continues_registered_path {
+                let source_sequence = candidate_sequence
+                    .checked_add(1)
+                    .expect("candidate sequence must fit u64");
+                let Some(source) = lj_catalog_candidate(
+                    descriptor_space,
+                    species,
+                    replica,
+                    source_sequence,
+                    seed,
+                    charged_work,
+                    transition.from_energy,
+                    transition.from_state.view(),
+                    transition
+                        .from_gradient
+                        .as_ref()
+                        .expect("probe source gradient checked")
+                        .view(),
+                ) else {
+                    registered_state = None;
+                    continue;
+                };
+                *candidate_sequence = source_sequence;
+                operations.push(AdaptiveCatalogOperation::RegisterCurrent(source));
+            }
+            operations.push(AdaptiveCatalogOperation::Unresolved {
+                action: transition.action.clone(),
+            });
+            registered_state = Some(transition.from_state.clone());
+            continue;
+        }
         if !transition.validated
             || transition.from_gradient.is_none()
             || transition.to_gradient.is_none()
