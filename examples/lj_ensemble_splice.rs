@@ -842,11 +842,24 @@ fn main() {
         if let Some(first) = earliest {
             first_hits.push(first);
         }
+        let earliest_hops = reports.iter().filter_map(|report| {
+            target.and_then(|reference| {
+                report
+                    .outcome
+                    .improvements
+                    .iter()
+                    .find(|&&(_, _, _, energy)| energy < reference + 1e-4)
+                    .map(|&(hop, _, _, _)| hop)
+            })
+        }).min();
         println!(
-            "  ensemble {ensemble}: deepest {deepest:.6}  solved chains {:?}  first hit {}  hops {hops}  charged {charged}  splice attempts {} adopted {} below {} calls {}",
+            "  ensemble {ensemble}: deepest {deepest:.6}  solved chains {:?}  first hit {}  first hop {}  hops {hops}  charged {charged}  splice attempts {} adopted {} below {} calls {}",
             solved,
             earliest
                 .map(|c| c.to_string())
+                .unwrap_or_else(|| "-".into()),
+            earliest_hops
+                .map(|hop| hop.to_string())
                 .unwrap_or_else(|| "-".into()),
             reports.iter().map(|r| r.tally.attempts).sum::<usize>(),
             reports.iter().map(|r| r.tally.adopted).sum::<usize>(),
