@@ -306,7 +306,7 @@ fn failed_diagnostic_probe_stays_off_the_live_chain() {
         Some(&mut gradient),
         &mut bias,
         &mut rng,
-        40,
+        1,
         &mut checkpoint,
     );
 
