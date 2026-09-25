@@ -191,7 +191,7 @@ pub struct CatalogPolicyInput {
     pub ei_exhausted: bool,
     /// Measured Fiedler-and-DECAF family floor for this hop graph.
     pub min_families: usize,
-    /// Published-energy score: this replica sits on a known hurdle GM.
+    /// Published-energy score. Work selection does not read it.
     pub on_published_prize: bool,
 }
 
@@ -341,15 +341,6 @@ impl CatalogPolicy {
             }
             _ if input.local_deepened => {
                 decision(PolicyAction::ContinueLocal, PolicyReason::LocalDescent)
-            }
-            _ if input.interface_rank != u32::MAX
-                && input.on_published_prize
-                && matches!(input.relation, ActiveCatalogRelation::Incumbent) =>
-            {
-                decision(
-                    PolicyAction::ContinueLocal,
-                    PolicyReason::IncumbentLocalSearch,
-                )
             }
             _ if input.mixing.explore_collapsed
                 && !matches!(input.relation, ActiveCatalogRelation::Incumbent)
