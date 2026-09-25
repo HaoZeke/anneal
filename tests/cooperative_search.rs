@@ -12,13 +12,13 @@ use anneal_core::catalog_policy::{
     ActiveCatalogRelation, AggregateProgress, CatalogPolicyInput, CensusEvidence, PolicyAction,
     ValidationState,
 };
-use anneal_core::catalog_rpc::CatalogRelation;
 use anneal_core::catalog_rpc::client::{CatalogClient, CatalogClientError, ClientConfig};
 use anneal_core::catalog_rpc::server::{CatalogServer, ServerConfig};
+use anneal_core::catalog_rpc::CatalogRelation;
 use anneal_core::catalog_rpc::{
     CatalogCandidate, CatalogIdentity, CatalogMutationKind, CatalogRideConnection,
     CatalogRideOutcome, CatalogRideReport, PopulationSelection, ProtocolRejection,
-    SPARSE_SAMPLE_DRAW, TransitionDestination,
+    TransitionDestination, SPARSE_SAMPLE_DRAW,
 };
 use anneal_core::cooperative_search::ledger::ChargeKind;
 use anneal_core::cooperative_search::{
@@ -29,8 +29,8 @@ use anneal_core::cooperative_search::{
     TraceKind, TransitionRecordOutcome,
 };
 use anneal_core::descriptor_space::{
-    DescriptorBlockKind, DescriptorBlockSpec, DescriptorGeometry, DescriptorSchema,
-    DescriptorSpace, universal_descriptor_space,
+    universal_descriptor_space, DescriptorBlockKind, DescriptorBlockSpec, DescriptorGeometry,
+    DescriptorSchema, DescriptorSpace,
 };
 use anneal_core::discovery_roster::DiscoveryRole;
 use anneal_core::pes_exploration::{ExactStructureRelation, ExactStructureWitness};
@@ -477,11 +477,9 @@ fn coordinator_segments_live_replicas_by_shared_minimum_information() {
             .count(),
         3
     );
-    assert!(
-        states
-            .iter()
-            .all(|state| state.discovery_epoch == states[0].discovery_epoch)
-    );
+    assert!(states
+        .iter()
+        .all(|state| state.discovery_epoch == states[0].discovery_epoch));
     assert_eq!(states[0].basin_unseen_mass_upper, 1.0);
     assert_eq!(states[0].saddle_unseen_mass_upper, 1.0);
 }
@@ -1127,11 +1125,10 @@ fn pending_policy_input_is_not_an_rpc_failure() {
             .unwrap(),
         PolicyEvidenceOutcome::LocalFallback
     );
-    assert!(
-        !run.events()
-            .iter()
-            .any(|event| event.kind == TraceKind::RpcFallback)
-    );
+    assert!(!run
+        .events()
+        .iter()
+        .any(|event| event.kind == TraceKind::RpcFallback));
 }
 
 #[test]
@@ -1721,6 +1718,96 @@ fn only_explicit_probe_transitions_update_transition_uncertainty() {
     let after_unresolved = client.policy_state(8, descriptor, current.energy).unwrap();
     assert!(after_unresolved.transition_uncertainty < after_probe.transition_uncertainty);
     assert_eq!(after_unresolved.local_basin, initialized.local_basin);
+}
+
+#[test]
+fn rejected_source_does_not_attach_a_probe_edge() {
+    let server = server();
+    let digest = signature().digest();
+    let mut run = CooperativeRun::new([0], 100).unwrap();
+    run.attach_client(
+        0,
+        CatalogClient::connect(server.addr(), identity(0, digest), ClientConfig::default())
+            .unwrap(),
+    )
+    .unwrap();
+    let source = candidate(0, 1, 1.2);
+    assert_eq!(
+        run.record_current(0, source.clone()).unwrap(),
+        TransitionRecordOutcome::Recorded
+    );
+    let mut rejected_origin = source;
+    rejected_origin.census_basin = Some(9);
+    rejected_origin.event_sequence = 9;
+
+    assert_eq!(
+        run.record_transition_from_source(
+            0,
+            rejected_origin,
+            "probe",
+            TransitionDestination::Unresolved,
+            false,
+        )
+        .unwrap(),
+        TransitionRecordOutcome::Rejected
+    );
+    assert!(
+        run.events()
+            .iter()
+            .any(|event| event.kind == TraceKind::Rejection),
+        "a rejected origin must be visible as a rejection"
+    );
+    assert_eq!(
+        run.events()
+            .iter()
+            .filter(|event| {
+                event
+                    .transition
+                    .as_ref()
+                    .is_some_and(|transition| !transition.resolved)
+            })
+            .count(),
+        0,
+        "a rejected origin must not add an unresolved probe to the denominator"
+    );
+}
+
+#[test]
+fn unresolved_probe_counts_once_in_the_failure_denominator() {
+    let server = server();
+    let digest = signature().digest();
+    let mut run = CooperativeRun::new([0], 100).unwrap();
+    run.attach_client(
+        0,
+        CatalogClient::connect(server.addr(), identity(0, digest), ClientConfig::default())
+            .unwrap(),
+    )
+    .unwrap();
+    let source = candidate(0, 1, 1.2);
+
+    assert_eq!(
+        run.record_transition_from_source(
+            0,
+            source,
+            "probe",
+            TransitionDestination::Unresolved,
+            false,
+        )
+        .unwrap(),
+        TransitionRecordOutcome::Recorded
+    );
+    assert_eq!(
+        run.events()
+            .iter()
+            .filter(|event| {
+                event
+                    .transition
+                    .as_ref()
+                    .is_some_and(|transition| transition.action == "probe" && !transition.resolved)
+            })
+            .count(),
+        1
+    );
 }
 
 #[test]
@@ -2398,11 +2485,9 @@ fn population_barrier_enforces_exact_basin_capacity() {
 
     assert_eq!(plan.parent_candidates.len(), plan.parents.len());
     assert!(plan.max_family_size <= 3);
-    assert!(
-        family_counts
-            .values()
-            .all(|count| *count <= usize::try_from(plan.max_family_size).expect("family cap fits"))
-    );
+    assert!(family_counts
+        .values()
+        .all(|count| *count <= usize::try_from(plan.max_family_size).expect("family cap fits")));
     let required_families = plan
         .parents
         .len()
@@ -2502,16 +2587,14 @@ fn cooperative_run_exposes_population_barrier_and_assigned_parent() {
         ),
         "a join on a non-open epoch must not kill the walk: {ahead:?}"
     );
-    assert!(
-        run.events()
-            .iter()
-            .any(|event| event.kind == TraceKind::PopulationPending)
-    );
-    assert!(
-        run.events()
-            .iter()
-            .any(|event| event.kind == TraceKind::PopulationReady)
-    );
+    assert!(run
+        .events()
+        .iter()
+        .any(|event| event.kind == TraceKind::PopulationPending));
+    assert!(run
+        .events()
+        .iter()
+        .any(|event| event.kind == TraceKind::PopulationReady));
     let ready = run
         .events()
         .iter()
@@ -2841,11 +2924,10 @@ fn no_sharing_run_executes_without_a_server_and_preserves_local_accounting() {
         CatalogHoleOutcome::SharingDisabled
     );
     assert_eq!(run.ledger().ensemble_total(), 20);
-    assert!(
-        !run.events()
-            .iter()
-            .any(|event| event.kind == TraceKind::RpcFallback)
-    );
+    assert!(!run
+        .events()
+        .iter()
+        .any(|event| event.kind == TraceKind::RpcFallback));
 }
 
 #[test]
@@ -2902,10 +2984,8 @@ fn server_loss_preserves_independent_local_trajectory_and_ledger() {
         disconnected.ledger().event_count(),
         independent.ledger().event_count()
     );
-    assert!(
-        disconnected
-            .events()
-            .iter()
-            .any(|event| event.kind == TraceKind::RpcFallback)
-    );
+    assert!(disconnected
+        .events()
+        .iter()
+        .any(|event| event.kind == TraceKind::RpcFallback));
 }
