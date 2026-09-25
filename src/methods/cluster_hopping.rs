@@ -1640,6 +1640,19 @@ where
                 } else if adopt {
                     unconverged_records += 1;
                     bias.deposit(x.view(), cfg.temperature);
+                } else if action == "probe" {
+                    accepted_transitions.push(AcceptedTransition {
+                        hop: hops,
+                        action,
+                        from_energy,
+                        to_energy: proposal_energy,
+                        from_state,
+                        from_gradient,
+                        to_state: proposal_state,
+                        to_gradient: validation_gradient,
+                        validated: false,
+                        adopted: false,
+                    });
                 }
             }
         }
