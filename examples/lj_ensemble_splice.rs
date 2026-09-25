@@ -321,21 +321,29 @@ impl Population {
             if filled.len() < self.members.len() {
                 return false;
             }
-            // Every chain has reported once: the cutoff is a multiple of
-            // the mean pairwise dissimilarity of that first population.
+            // Every chain has reported once. The cutoff is a multiple of
+            // the mean nearest-neighbour dissimilarity, so a child farther
+            // than a typical neighbour is a new region. A multiple of the
+            // mean of all pairs sits above every nearest neighbour, and the
+            // far replacement then never fires.
             let mut total = 0.0;
-            let mut pairs = 0usize;
-            for (a, &i) in filled.iter().enumerate() {
-                for &j in &filled[a + 1..] {
-                    let (hi, hj) = (
-                        &self.members[i].as_ref().unwrap().2,
-                        &self.members[j].as_ref().unwrap().2,
-                    );
-                    total += shell_dissimilarity(hi, hj);
-                    pairs += 1;
+            let mut counted = 0usize;
+            for &i in &filled {
+                let hi = &self.members[i].as_ref().unwrap().2;
+                let mut nearest = f64::INFINITY;
+                for &j in &filled {
+                    if i == j {
+                        continue;
+                    }
+                    let hj = &self.members[j].as_ref().unwrap().2;
+                    nearest = nearest.min(shell_dissimilarity(hi, hj));
+                }
+                if nearest.is_finite() {
+                    total += nearest;
+                    counted += 1;
                 }
             }
-            self.dcut = Some(dcut_scale * total / pairs.max(1) as f64);
+            self.dcut = Some(dcut_scale * total / counted.max(1) as f64);
             return false;
         }
         let dcut = self.dcut.unwrap();
