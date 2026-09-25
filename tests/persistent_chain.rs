@@ -274,7 +274,7 @@ fn failed_diagnostic_probe_stays_off_the_live_chain() {
     cfg.relax_steps = 1;
     let mut rng = StdRng::seed_from_u64(0xfeed_600e);
     let start = random_cluster(cfg.n_points, 0.7, cfg.min_separation, &mut rng);
-    let mut ledger = Ledger::new(200);
+    let mut ledger = Ledger::new(2);
     let mut bias = fresh_bias(&cfg);
     let mut relax = toy_relax;
     let proposed = start.mapv(|value| value + 4.0);
