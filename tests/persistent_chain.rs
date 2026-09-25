@@ -1,7 +1,7 @@
 use anneal_core::bias::BasinBias;
 use anneal_core::methods::cluster_hopping::{
-    ChainCheckpoint, CheckpointAction, ClusterFingerprint, Config, Ledger, random_cluster,
-    run_with_bias, run_with_bias_at_checkpoints, run_with_gradient,
+    random_cluster, run_with_bias, run_with_bias_at_checkpoints, run_with_gradient,
+    ChainCheckpoint, CheckpointAction, ClusterFingerprint, Config, Ledger,
 };
 use ndarray::{Array1, ArrayView1};
 use rand::rngs::StdRng;
@@ -266,6 +266,58 @@ fn checkpoint_probe_is_recorded_without_becoming_the_live_chain() {
         occupied_before_probe.as_ref(),
         "a non-adopting probe replaced the occupied chain state"
     );
+}
+
+#[test]
+fn failed_diagnostic_probe_stays_off_the_live_chain() {
+    let mut cfg = Config::recommended(6);
+    cfg.relax_steps = 1;
+    let mut rng = StdRng::seed_from_u64(0xfeed_600e);
+    let start = random_cluster(cfg.n_points, 0.7, cfg.min_separation, &mut rng);
+    let mut ledger = Ledger::new(200);
+    let mut bias = fresh_bias(&cfg);
+    let mut relax = toy_relax;
+    let proposed = start.mapv(|value| value + 4.0);
+    let mut occupied_before_probe = None;
+    let mut checkpoint = |snapshot: ChainCheckpoint<'_>| {
+        if occupied_before_probe.is_none() {
+            occupied_before_probe = Some(snapshot.current_state().to_owned());
+            return CheckpointAction::ProbeProposal {
+                state: proposed.clone(),
+                action: "probe".to_string(),
+            };
+        }
+        CheckpointAction::Continue
+    };
+    let mut gradient = |_ledger: &mut Ledger, state: ArrayView1<f64>| {
+        let far = state.iter().any(|value| value.abs() > 2.0);
+        if far {
+            Some(Array1::ones(state.len()))
+        } else {
+            Some(Array1::zeros(state.len()))
+        }
+    };
+
+    let outcome = run_with_bias_at_checkpoints(
+        &cfg,
+        start.view(),
+        &mut ledger,
+        &mut relax,
+        Some(&mut gradient),
+        &mut bias,
+        &mut rng,
+        40,
+        &mut checkpoint,
+    );
+
+    let probe = outcome
+        .accepted_transitions
+        .iter()
+        .find(|transition| transition.action == "probe")
+        .expect("a failed diagnostic probe is absent from the trajectory evidence");
+    assert!(!probe.validated);
+    assert!(!probe.adopted);
+    assert_eq!(outcome.final_state.as_ref(), occupied_before_probe.as_ref());
 }
 
 #[test]

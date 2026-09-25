@@ -658,6 +658,50 @@ mod option_tests {
 
     #[cfg(feature = "bank-rpc")]
     #[test]
+    fn failed_probe_is_one_unresolved_observation() {
+        let signature = anneal_core::catalog::lj::system_signature(2).unwrap();
+        let descriptor_space = anneal_core::catalog::lj::descriptor_space();
+        let separation = 2.0_f64.powf(1.0 / 6.0);
+        let source = Array1::from(vec![0.0, 0.0, 0.0, separation, 0.0, 0.0]);
+        let (energy, gradient) = lj(source.view());
+        let transitions = vec![AcceptedTransition {
+            hop: 1,
+            action: "probe".into(),
+            from_energy: energy,
+            to_energy: energy,
+            from_state: source.clone(),
+            from_gradient: Some(gradient),
+            to_state: source,
+            to_gradient: None,
+            validated: false,
+            adopted: false,
+        }];
+        let mut sequence = 4;
+
+        let operations = adaptive_catalog_operations(
+            &descriptor_space,
+            &signature.atomic_numbers,
+            0,
+            &mut sequence,
+            71,
+            40,
+            &transitions,
+        );
+
+        assert_eq!(sequence, 5);
+        assert_eq!(operations.len(), 2);
+        assert!(matches!(
+            operations[0],
+            AdaptiveCatalogOperation::RegisterCurrent(_)
+        ));
+        assert!(matches!(
+            &operations[1],
+            AdaptiveCatalogOperation::Unresolved { action } if action == "probe"
+        ));
+    }
+
+    #[cfg(feature = "bank-rpc")]
+    #[test]
     fn shared_crossing_is_aligned_into_the_live_lj_frame() {
         let crossing = anneal_core::catalog_rpc::BoundaryCrossingRecord {
             action: "surface_relocate".into(),
@@ -4779,11 +4823,8 @@ fn run_capnp_catalog(
         }
         if checkpoint_sequence.is_multiple_of(probe_interval)
             && snapshot.remaining() > run_cfg.relax_steps.saturating_add(2)
-            && let Some(state) = fixed_probe_trial(
-                snapshot.current_state(),
-                probe_scale,
-                &mut probe_rng,
-            )
+            && let Some(state) =
+                fixed_probe_trial(snapshot.current_state(), probe_scale, &mut probe_rng)
         {
             cooperative
                 .record_slice(replica, trace)
@@ -5375,8 +5416,10 @@ fn adaptive_catalog_operations(
     let mut operations = Vec::new();
     let mut registered_state: Option<Array1<f64>> = None;
     for transition in transitions {
-        if transition.action == "probe" && !transition.validated && transition.from_gradient.is_some()
-        {
+        let failed_probe = transition.action == "probe"
+            && !transition.validated
+            && transition.from_gradient.is_some();
+        if failed_probe {
             let continues_registered_path = registered_state
                 .as_ref()
                 .is_some_and(|state| *state == transition.from_state);

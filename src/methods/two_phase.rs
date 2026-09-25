@@ -19,28 +19,30 @@
 //! <https://doi.org/10.1007/s10107-006-0006-3>; Doye, J. P. K. *Phys. Rev.
 //! E* **2000**, *62*, 8753 <https://doi.org/10.1103/PhysRevE.62.8753>.
 
+use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
 use ndarray::{Array1, ArrayView1};
-use rand::SeedableRng;
 use rand::rngs::StdRng;
+use rand::SeedableRng;
 use serde::Serialize;
 
-use crate::allocate::DepthAllocator;
+use crate::allocate::{DepthAllocator, RewardMoments};
+use crate::surface_evidence::{
+    SourceTransferKey, SurfaceEvidenceBook, SurfaceEvidenceMessage, MIN_TRANSFER_OBSERVATIONS,
+};
 
 /// A surface allocator posterior several chains update together.
 ///
-/// Pooled evidence is the cooperative channel that never touches a walk:
-/// every chain draws its arm from the same Normal-Gamma posterior and
-/// credits its block back to it, so an ensemble of `n` chains learns which
-/// surface pays `n` times faster than one chain does, and no chain is
-/// steered, relocated or interrupted to get that.
-pub type SharedSurfaceAllocator = Arc<Mutex<DepthAllocator>>;
+/// Evidence is keyed by the occupied validated source. Chains that share a
+/// key draw from that key's posterior. Importing a peer reply does not
+/// replace a walk's coordinates, held arm, local rewards, or random stream.
+pub type SharedSurfaceAllocator = Arc<Mutex<SurfaceEvidenceBook>>;
 
 /// A fresh shared posterior over the plain surface plus `transforms`.
 pub fn shared_surface_allocator(transforms: &[TwoPhase]) -> SharedSurfaceAllocator {
     let arms = 1 + transforms.iter().filter(|two| two.is_active()).count();
-    Arc::new(Mutex::new(DepthAllocator::new(arms)))
+    Arc::new(Mutex::new(SurfaceEvidenceBook::new(arms)))
 }
 
 /// How the diameter cutoff is chosen for one relaxation.
@@ -299,9 +301,16 @@ pub fn penalty_groups(
 pub struct SurfacePortfolio {
     arms: Vec<Option<TwoPhase>>,
     allocator: DepthAllocator,
-    /// When set, draws and credits go through this posterior instead of
-    /// the private one, which then only mirrors this chain's own draws.
+    /// When set, draws and credits for the occupied source go through this book.
     shared: Option<SharedSurfaceAllocator>,
+    /// Validated source occupied when the current block opened.
+    occupied: Option<SourceTransferKey>,
+    /// Source fixed at block open. Later occupancy does not rewrite it.
+    block_source: Option<SourceTransferKey>,
+    /// Rewards this chain credited, by source. Imports do not write here.
+    own_by_source: BTreeMap<SourceTransferKey, Vec<RewardMoments>>,
+    /// Peer replies, still keyed by the producer's source.
+    peer_by_source: BTreeMap<SourceTransferKey, Vec<RewardMoments>>,
     held: Option<usize>,
     block: usize,
     hops_in_block: usize,
@@ -335,6 +344,10 @@ impl SurfacePortfolio {
             allocator: DepthAllocator::new(arms.len()),
             arms,
             shared: None,
+            occupied: None,
+            block_source: None,
+            own_by_source: BTreeMap::new(),
+            peer_by_source: BTreeMap::new(),
             held: None,
             block: block.max(1),
             hops_in_block: 0,
@@ -357,24 +370,107 @@ impl SurfacePortfolio {
         self
     }
 
-    fn select_arm(&mut self) -> usize {
-        match self.shared.as_ref() {
-            Some(shared) => shared
-                .lock()
-                .expect("shared surface allocator")
-                .select(&mut self.rng),
-            None => self.allocator.select(&mut self.rng),
+    /// Record the occupied validated source. A mismatched block interval is refused.
+    pub fn set_occupied_source(&mut self, source: SourceTransferKey) -> Result<(), &'static str> {
+        if source.block != self.block
+            || source.descriptor_schema.is_empty()
+            || source.descriptor_version == 0
+            || source.proposal.is_empty()
+            || source.quench_schema.is_empty()
+        {
+            return Err("occupied source does not match the declared block");
         }
+        self.occupied = Some(source);
+        Ok(())
+    }
+
+    /// Adopt a checkpoint only when its interval is this portfolio's block.
+    pub fn adopt_checkpoint(
+        &mut self,
+        interval: usize,
+        source: SourceTransferKey,
+    ) -> Result<(), &'static str> {
+        if interval != self.block {
+            return Err("checkpoint interval is not the occupied source");
+        }
+        self.set_occupied_source(source)
+    }
+
+    /// The relaxation input is not a source and does not replace occupancy.
+    pub fn note_perturbed_input(&mut self, _perturbed: &SourceTransferKey) {}
+
+    fn select_arm(&mut self) -> usize {
+        if let Some(key) = self.block_source.clone() {
+            if let Some(shared) = self.shared.as_ref() {
+                let book = shared.lock().expect("shared surface allocator");
+                if let Some(allocator) = book.decision_allocator(&key) {
+                    return allocator.select(&mut self.rng);
+                }
+            } else if let Some(allocator) = self.local_decision(&key) {
+                return allocator.select(&mut self.rng);
+            }
+            return DepthAllocator::new(self.arms.len()).select(&mut self.rng);
+        }
+        self.allocator.select(&mut self.rng)
+    }
+
+    fn local_decision(&self, key: &SourceTransferKey) -> Option<DepthAllocator> {
+        let mut moments = self
+            .own_by_source
+            .get(key)
+            .cloned()
+            .unwrap_or_else(|| vec![RewardMoments::default(); self.arms.len()]);
+        if let Some(peers) = self.peer_by_source.get(key) {
+            for (slot, peer) in moments.iter_mut().zip(peers) {
+                *slot = slot.merge(*peer).ok()?;
+            }
+        }
+        if moments.iter().map(|arm| arm.count).sum::<u64>() < MIN_TRANSFER_OBSERVATIONS {
+            return None;
+        }
+        DepthAllocator::from_moments(&moments).ok()
     }
 
     fn credit_arm(&mut self, arm: usize, reward: f64) {
-        if let Some(shared) = self.shared.as_ref() {
-            shared
-                .lock()
-                .expect("shared surface allocator")
-                .update(arm, reward);
-        }
         self.allocator.update(arm, reward);
+    }
+
+    fn credit_source(&mut self, key: SourceTransferKey, arm: usize, reward: f64) {
+        if !reward.is_finite() {
+            return;
+        }
+        let moments = self
+            .own_by_source
+            .entry(key.clone())
+            .or_insert_with(|| vec![RewardMoments::default(); self.arms.len()]);
+        if moments[arm].observe(reward).is_err() {
+            return;
+        }
+        let charged_work = u64::try_from(self.block).unwrap_or(u64::MAX).max(1);
+        if let Some(shared) = self.shared.as_ref() {
+            let _ = shared.lock().expect("shared surface allocator").observe(
+                0,
+                &key,
+                arm,
+                reward,
+                reward,
+                charged_work,
+            );
+        }
+        self.allocator.draws[arm] += 1;
+    }
+
+    /// Store a peer reply under its original key.
+    ///
+    /// Local rewards, the held arm, and the random stream stay as they are.
+    /// Coordinates are not portfolio state and are not an argument.
+    pub fn import_evidence(&mut self, message: SurfaceEvidenceMessage) -> Result<(), &'static str> {
+        if self.shared.is_some() || message.key.block != self.block {
+            return Err("incompatible surface evidence");
+        }
+        message.validate(self.arms.len())?;
+        self.peer_by_source.insert(message.key, message.arms);
+        Ok(())
     }
 
     /// The surface for the relaxation about to start.
@@ -390,6 +486,7 @@ impl SurfacePortfolio {
             self.hops_in_block += 1;
         }
         if self.held.is_none() {
+            self.block_source = self.occupied.clone();
             self.held = Some(self.select_arm());
             self.hops_in_block = self.hops_in_block.max(1);
             self.block_start_best = self.latest_best;
@@ -427,7 +524,11 @@ impl SurfacePortfolio {
             } else {
                 0.0
             };
-            self.credit_arm(arm, reward);
+            if let Some(key) = self.block_source.take() {
+                self.credit_source(key, arm, reward);
+            } else {
+                self.credit_arm(arm, reward);
+            }
         }
         self.block_lowest = f64::INFINITY;
         self.hops_in_block = 0;
@@ -452,6 +553,7 @@ impl SurfacePortfolio {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rand::Rng;
 
     fn cluster() -> Array1<f64> {
         Array1::from(vec![
@@ -555,7 +657,16 @@ mod tests {
     fn chains_sharing_a_posterior_learn_from_each_other_s_blocks() {
         let deep = TwoPhase::diameter(2.0, 1.0);
         let shared = shared_surface_allocator(&[deep]);
+        let source = crate::surface_evidence::SourceTransferKey {
+            descriptor_schema: "lj".into(),
+            descriptor_version: 1,
+            region: 1,
+            proposal: "hop".into(),
+            quench_schema: "lbfgs".into(),
+            block: 2,
+        };
         let mut teacher = SurfacePortfolio::with_block(&[deep], 1, 2).sharing(Arc::clone(&shared));
+        teacher.set_occupied_source(source.clone()).unwrap();
         let mut best = 0.0_f64;
         for _ in 0..200 {
             let arm = teacher.begin(true);
@@ -568,6 +679,7 @@ mod tests {
             teacher.observe(false, reached, best);
         }
         let mut student = SurfacePortfolio::with_block(&[deep], 2, 2).sharing(Arc::clone(&shared));
+        student.set_occupied_source(source).unwrap();
         let deep_draws = (0..40)
             .filter(|_| {
                 let arm = student.begin(true);
@@ -582,6 +694,63 @@ mod tests {
         assert!(
             student.draws().iter().sum::<usize>() > 0,
             "the private mirror records draws"
+        );
+    }
+
+    #[test]
+    fn imported_surface_evidence_keeps_the_held_arm_local_rewards_and_rng() {
+        let deep = TwoPhase::diameter(2.0, 1.0);
+        let mut portfolio = SurfacePortfolio::with_block(&[deep], 5, 4);
+        let source = crate::surface_evidence::SourceTransferKey {
+            descriptor_schema: "universal".into(),
+            descriptor_version: 1,
+            region: 2,
+            proposal: "hop".into(),
+            quench_schema: "lbfgs".into(),
+            block: 4,
+        };
+        portfolio.set_occupied_source(source.clone()).unwrap();
+        assert!(portfolio.adopt_checkpoint(9, source.clone()).is_err());
+        let held = portfolio.begin(true);
+        let perturbed = crate::surface_evidence::SourceTransferKey {
+            region: 9,
+            ..source.clone()
+        };
+        portfolio.note_perturbed_input(&perturbed);
+        assert_eq!(portfolio.occupied.as_ref(), Some(&source));
+        let coordinates = [0.0_f64, 1.0, 2.0];
+        let before_rng = portfolio.rng.clone();
+        let before_held = portfolio.held;
+        let before_local = portfolio.own_by_source.clone();
+        let message = crate::surface_evidence::SurfaceEvidenceMessage {
+            producer: 7,
+            key: source,
+            arms: vec![
+                crate::allocate::RewardMoments {
+                    count: 20,
+                    mean: 1.0,
+                    m2: 0.0,
+                },
+                crate::allocate::RewardMoments {
+                    count: 20,
+                    mean: -1.0,
+                    m2: 0.0,
+                },
+            ],
+            incumbent_gap: -1.0,
+            charged_work: 20,
+        };
+        portfolio.import_evidence(message).unwrap();
+        assert_eq!(portfolio.held, before_held);
+        assert_eq!(portfolio.own_by_source, before_local);
+        assert_eq!(portfolio.begin(false), held);
+        assert_eq!(coordinates, [0.0, 1.0, 2.0]);
+        let mut expected = before_rng;
+        let mut actual = portfolio.rng.clone();
+        assert_eq!(
+            expected.random::<u64>(),
+            actual.random::<u64>(),
+            "import replaced the random stream"
         );
     }
 
