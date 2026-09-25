@@ -52,7 +52,7 @@ pub struct AttractionRegionConfig {
     pub diffusion_steps: usize,
     /// Maximum complete-linkage diffusion distance within one region.
     pub maximum_distance: f64,
-    /// Probe observations required before a microstate can merge.
+    /// Resolved probe returns required before a microstate can merge.
     pub minimum_probes: u64,
 }
 
@@ -147,17 +147,26 @@ impl TransitionGraph {
         }
     }
 
+    /// Resolved returns leaving `from` under exactly one action.
+    pub fn resolved_returns(&self, action: &str, from: usize) -> u64 {
+        self.actions
+            .get(action)
+            .and_then(|counts| counts.resolved.get(from))
+            .map(|row| row.iter().copied().sum())
+            .unwrap_or(0)
+    }
+
     /// Total observations leaving `from` under exactly one action.
+    ///
+    /// The total includes unresolved probes. Region eligibility uses
+    /// [`Self::resolved_returns`] instead, so unresolved mass stays in the
+    /// posterior without certifying shared return dynamics.
     pub fn observations(&self, action: &str, from: usize) -> u64 {
         let Some(counts) = self.actions.get(action) else {
             return 0;
         };
-        let resolved = counts
-            .resolved
-            .get(from)
-            .map(|row| row.iter().copied().sum::<u64>())
-            .unwrap_or(0);
-        resolved.saturating_add(counts.unresolved.get(from).copied().unwrap_or(0))
+        self.resolved_returns(action, from)
+            .saturating_add(counts.unresolved.get(from).copied().unwrap_or(0))
     }
 
     /// Dirichlet-posterior mean transition matrix for exactly one action.
@@ -203,8 +212,10 @@ impl TransitionGraph {
     /// Deterministic complete-linkage attraction regions from fixed-probe dynamics.
     ///
     /// The unresolved posterior column is retained as an evidence diagnostic.
-    /// Diffusion propagates on the resolved conditional operator; nodes below
-    /// `minimum_probes` remain singleton unresolved regions and cannot merge.
+    /// Diffusion propagates on the resolved conditional operator. Eligibility
+    /// counts resolved returns only: a node below `minimum_probes` resolved
+    /// returns, including one whose probes are all unresolved, stays a
+    /// singleton unresolved region and cannot merge.
     pub fn attraction_regions(
         &self,
         config: &AttractionRegionConfig,
@@ -249,7 +260,9 @@ impl TransitionGraph {
             }
         }
         let eligible = (0..n)
-            .map(|node| self.observations(&config.probe_action, node) >= config.minimum_probes)
+            .map(|node| {
+                self.resolved_returns(&config.probe_action, node) >= config.minimum_probes
+            })
             .collect::<Vec<_>>();
         Ok(complete_linkage_regions(
             &distances,
