@@ -195,6 +195,8 @@ pub mod screen;
 pub mod soap;
 /// Budgeted perturb--quench source generation for hybrid PES exploration.
 pub mod source_escape;
+/// Source-keyed relaxation-surface rewards exchanged between chains.
+pub mod surface_evidence;
 pub mod spectral;
 pub mod structure;
 /// How a leftover chain uses the shared packing catalog.
