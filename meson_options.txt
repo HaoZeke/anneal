@@ -1,0 +1,15 @@
+# Build-time options for the anneal-core meson glue. Defaults keep the
+# configure surface minimal; flip these to exercise the FFI examples or
+# run the cargo test suite through `meson test`.
+option('with_examples', type : 'boolean',
+       value : false,
+       description: 'Builds and runs FFI examples',
+      )
+option('with_cpp', type : 'boolean',
+       value : false,
+       description: 'Builds and runs CPP FFI examples',
+      )
+option('with_tests', type : 'boolean',
+       value : false,
+       description: 'Builds and runs tests',
+      )

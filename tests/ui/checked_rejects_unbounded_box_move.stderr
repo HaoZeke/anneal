@@ -1,0 +1,28 @@
+error[E0277]: the trait bound `Gaussian: CertifiedMoveFor<f64, BoxConstrained<f64>>` is not satisfied
+  --> tests/ui/checked_rejects_unbounded_box_move.rs:16:9
+   |
+12 |     let _ = SaVariant::checked(
+   |             ------------------ required by a bound introduced by this call
+...
+16 |         Gaussian::new(0.5),
+   |         ^^^^^^^^^^^^^^^^^^ the trait `CertifiedMoveFor<f64, BoxConstrained<f64>>` is not implemented for `Gaussian`
+   |
+help: the trait `CertifiedMoveFor<f64, BoxConstrained<f64>>` is not implemented for `Gaussian`
+      but trait `CertifiedMoveFor<f64, ContinuousR_n>` is implemented for it
+  --> src/variant.rs
+   |
+   |         impl CertifiedMoveFor<f64, ContinuousR_n> for $move {
+   |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+   | certify_full_space_move!(Gaussian);
+   | ---------------------------------- in this macro invocation
+   = help: for that trait implementation, expected `ContinuousR_n`, found `BoxConstrained<f64>`
+note: required by a bound in `SaVariant::<T, O, C, N, M, A>::checked`
+  --> src/variant.rs
+   |
+   |     pub fn checked(obj: O, cool: C, neigh: N, mover: M, accept: A) -> Result<Self, LawViolation>
+   |            ------- required by a bound in this associated function
+...
+   |         M: CertifiedMoveFor<T, N>,
+   |            ^^^^^^^^^^^^^^^^^^^^^^ required by this bound in `SaVariant::<T, O, C, N, M, A>::checked`
+   = note: this error originates in the macro `certify_full_space_move` (in Nightly builds, run with -Z macro-backtrace for more info)

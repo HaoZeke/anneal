@@ -1,0 +1,32 @@
+#+TITLE: Regime auto-selection policy (GJQ-style)
+#+OPTIONS: toc:nil num:nil author:nil title:nil
+
+Policy is *documented, safe, not oracle-optimal* (same stance as
+=GaussJacobiQuad= =select_method_auto=).
+
+* Features
+
+| Feature | Source |
+|---------+--------|
+| =dim= | objective bounds |
+| =has_grad= | caller supplied gradient |
+| =noise_sigma= | optional known cost noise |
+| =aspect_ratio= | max box width / min box width (eindir =BoxGeometry=) |
+| =budget= | work-unit budget |
+
+* Regimes → preferred portfolio arms / kernels
+
+| Regime | When | Prefer |
+|--------+------+--------|
+| =LowDimSmooth= | dim ≤ 5 and gradient | shift/hop/GLE polish-heavy; early QMC polish |
+| =HighDimIllConditioned= | dim ≥ 20 and gradient | GLE, reduced-space, hop; surrogates deprioritized |
+| =StochasticNoise= | noise_sigma set | OSA accept required; explore + GSA; refuse exact-only accept path |
+| =MultimodalNoGrad= | no gradient, mid dim or aspect ≥ 8 | DE, GSA, surrogate, explore |
+| =Default= | else | balanced library order (explore first for restart floor) |
+
+* Safety
+
+- Restart arm (=explore=) always remains first so Borel–Cantelli restart still fires.
+- Unknown features fall to =Default= (safe fallback).
+- Policy biases Beta priors and arm *order*, not hard exclusion (except
+  noise-aware accept requirement under =StochasticNoise=).

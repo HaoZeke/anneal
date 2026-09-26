@@ -1,0 +1,86 @@
+#+TITLE: Work-ledger charge invariants (=Ledger=)
+#+OPTIONS: toc:2 num:t
+
+* Abstract
+
+Cluster comparison under anneal uses a finite integer work ledger
+(=src/methods/cluster_hopping.rs=, =struct Ledger=): one unit per charged
+objective or gradient evaluation. This note states the *implementation
+invariants* the way TOMS kernel papers state overflow safety or BLAS
+contracts: what the type guarantees, independent of the optimiser.
+
+* 1. State and operations
+
+\[
+  \mathrm{Ledger} = (\mathtt{budget},\; \mathtt{spent},\; \mathtt{best},\; \mathtt{best\_state})
+\]
+with \(\mathtt{budget},\mathtt{spent}\in\mathbb{N}_0\),
+\(\mathtt{spent}\le\mathtt{budget}\) after every public operation that
+preserves the invariant below.
+
+| Method | Semantics |
+|--------|-----------|
+| =new(B)= | \(\mathtt{budget}=B\), \(\mathtt{spent}=0\) |
+| =charge()= | if \(\mathtt{spent}<B\): \(\mathtt{spent}\leftarrow\mathtt{spent}+1\), return true; else return false |
+| =charge_many(n)= | \(\mathtt{spent}\leftarrow\mathtt{spent}+\min(n,\mathtt{remaining})\); return \(n\le\mathtt{remaining}_{\mathrm{before}}\) |
+| =remaining()= | \(B-\mathtt{spent}\) (saturating) |
+| =spent()= | \(\mathtt{spent}\) |
+| =record(v,x)= | if \(v<\mathtt{best}\): update incumbent (does *not* charge) |
+
+* 2. Invariants
+
+** Invariant I1 (partition of budget).
+After =new= and after every successful or failed =charge= / =charge_many=,
+\begin{equation}
+  \mathtt{spent} + \mathtt{remaining} = \mathtt{budget}.
+  \tag{L1}
+\end{equation}
+
+**Proof.** =remaining= is defined as \(\mathtt{budget}.\mathtt{saturating\_sub}(\mathtt{spent})\).
+While \(\mathtt{spent}\le\mathtt{budget}\), this equals \(\mathtt{budget}-\mathtt{spent}\).
+=charge= only increments when \(\mathtt{spent}<\mathtt{budget}\), so
+\(\mathtt{spent}\) never exceeds \(\mathtt{budget}\). =charge_many=
+adds at most =remaining=, so \(\mathtt{spent}\le\mathtt{budget}\) is
+preserved. \(\square\)
+
+** Invariant I2 (monotonic spent).
+=spent= is nondecreasing under =charge= and =charge_many=.
+
+** Invariant I3 (hard stop).
+If =charge()= returns false, then =remaining()= \(=0\) and further
+=charge()= returns false without changing state.
+
+** Invariant I4 (partial charge_many).
+If =charge_many(n)= is called with \(n>r:=\)=remaining()= before the call,
+then after the call =spent= has increased by \(r\), =remaining= \(=0\), and
+the return value is false. Exactly \(r\) units were charged, not \(n\).
+
+**Proof.** Code: =self.spent += n.min(room)= with =room= = remaining before;
+return =n <= room=. \(\square\)
+
+** Invariant I5 (record does not charge).
+=record= never modifies =spent= or =budget=.
+
+* 3. Consequences for fair comparison
+
+Any driver that obtains a value or gradient by calling through a wrapper that
+invokes =charge= once per evaluation obeys: total evaluations \(\le\)
+=budget=, and two drivers with the same budget are comparable on success
+rate *only if* both charge the same class of operations (including quenches).
+That is a protocol requirement, not a theorem about global optimisation.
+
+* 4. What is not claimed
+
+- Optimality of the budget size for LJ75.
+- That every code path in =anneal= charges correctly (needs audit + tests per
+  driver). This note characterises =Ledger= itself.
+- Floating-point rounding of force values (integer counter only).
+
+* 5. Verification
+
+=proofs/ledger_charge_invariant.py= exhausts small \((B,n)\) grids for I1--I4.
+
+* Reference pattern
+
+Anderson, Algorithm 978 (Safe Scaling in Level 1 BLAS): specify the
+numerical contract of a foundational routine used everywhere above it.
