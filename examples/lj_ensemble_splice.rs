@@ -33,7 +33,8 @@ use std::sync::{Arc, Mutex};
 
 use anneal_core::bias::BasinBias;
 use anneal_core::methods::cluster_hopping::{
-    ChainCheckpoint, CheckpointAction, ClusterFingerprint, Config, Ledger, MoveLibrary, Outcome,
+    AcceptedTransition, ChainCheckpoint, CheckpointAction, ClusterFingerprint, Config, Ledger,
+    MoveLibrary, Outcome,
     random_cluster,
     run_with_bias_at_checkpoints,
 };
@@ -299,6 +300,8 @@ struct Population {
     dcut: Option<f64>,
     replacements_near: usize,
     replacements_far: usize,
+    /// Offers since the cutoff was fixed. Annealing steps off this.
+    offers: usize,
 }
 
 impl Population {
@@ -348,12 +351,26 @@ impl Population {
             return false;
         }
         let dcut = self.dcut.unwrap();
+        let moved = self.decide_replacement(p, energy, state, &hist, dcut, &filled);
+        self.anneal();
+        return moved;
+    }
+
+    fn decide_replacement(
+        &mut self,
+        p: usize,
+        energy: f64,
+        state: &[f64],
+        hist: &([u32; 32], [u32; 32]),
+        dcut: f64,
+        filled: &[usize],
+    ) -> bool {
         let mut nearest: Option<(usize, f64)> = None;
         for &q in &filled {
             if q == p {
                 continue;
             }
-            let d = shell_dissimilarity(&hist, &self.members[q].as_ref().unwrap().2);
+            let d = shell_dissimilarity(hist, &self.members[q].as_ref().unwrap().2);
             if nearest.is_none_or(|(_, best)| d < best) {
                 nearest = Some((q, d));
             }
@@ -387,6 +404,24 @@ impl Population {
             return true;
         }
         false
+    }
+
+    /// Shrink the cutoff by 0.85 every 50 generations for the first 250,
+    /// the schedule published for the shell-histogram measure.
+    fn anneal(&mut self) {
+        if std::env::var("PBH_ANNEAL").ok().as_deref() != Some("1") {
+            return;
+        }
+        let n = self.members.len().max(1);
+        if self.dcut.is_none() {
+            return;
+        }
+        self.offers += 1;
+        if self.offers.is_multiple_of(50 * n) && self.offers <= 250 * n {
+            if let Some(dcut) = self.dcut.as_mut() {
+                *dcut *= 0.85;
+            }
+        }
     }
 
     fn take_pending(&mut self, chain: usize) -> Option<(f64, Vec<f64>)> {
@@ -684,17 +719,118 @@ fn run_chain(
             CheckpointAction::ExternalWork { external_calls }
         }
     };
-    let outcome = run_with_bias_at_checkpoints(
-        &cfg,
-        start.view(),
-        &mut ledger,
-        &mut relax,
-        None,
-        &mut bias,
-        &mut rng,
-        exchange.checkpoint,
-        &mut checkpoint,
-    );
+    let box_half = std::env::var("BOX").ok().and_then(|value| {
+        if value == "1" {
+            Some(0.25)
+        } else {
+            value.parse::<f64>().ok().filter(|half| *half > 0.0)
+        }
+    });
+    let outcome = if let Some(half) = box_half {
+        // One uniform kick and one two-phase local search per hop. Accept
+        // only a descent. The population replacement still runs, so a peer
+        // that found a lower minimum becomes the structure that is kicked.
+        let (mut energy, mut state) = relax(&mut ledger, start.view(), relax_steps);
+        let mut best = energy;
+        let mut best_state = state.clone();
+        let mut improvements = Vec::new();
+        if energy.is_finite() {
+            improvements.push((0usize, ledger.spent(), 0usize, energy));
+        }
+        let mut accepted_transitions = Vec::new();
+        let mut hops = 0usize;
+        while ledger.remaining() > 0 {
+            if let Some(population) = population.as_ref() {
+                let mut population = population.lock().expect("population");
+                if let Some((offered, offered_state)) = population.take_pending(chain) {
+                    if offered < energy - 1e-9 && offered_state.len() == state.len() {
+                        accepted_transitions.push(AcceptedTransition {
+                            hop: hops,
+                            action: "pbh".to_owned(),
+                            from_energy: energy,
+                            to_energy: offered,
+                            from_state: state.clone(),
+                            from_gradient: None,
+                            to_state: Array1::from(offered_state.clone()),
+                            to_gradient: None,
+                            validated: true,
+                            adopted: true,
+                        });
+                        energy = offered;
+                        state = Array1::from(offered_state);
+                        if energy < best {
+                            best = energy;
+                            best_state = state.clone();
+                            if improvements.len() < 512 {
+                                improvements.push((hops, ledger.spent(), 0, energy));
+                            }
+                        }
+                    }
+                }
+                population.offer(
+                    chain,
+                    energy,
+                    state.as_slice().expect("state is contiguous"),
+                    exchange.pbh_dcut_scale,
+                );
+            }
+            if ledger.remaining() == 0 {
+                break;
+            }
+            hops += 1;
+            let mut trial = state.clone();
+            for coord in trial.iter_mut() {
+                *coord += (rng.random::<f64>() - 0.5) * 2.0 * half;
+            }
+            let (child, child_state) = relax(&mut ledger, trial.view(), relax_steps);
+            if child < energy {
+                accepted_transitions.push(AcceptedTransition {
+                    hop: hops,
+                    action: "box".to_owned(),
+                    from_energy: energy,
+                    to_energy: child,
+                    from_state: state.clone(),
+                    from_gradient: None,
+                    to_state: child_state.clone(),
+                    to_gradient: None,
+                    validated: true,
+                    adopted: true,
+                });
+                energy = child;
+                state = child_state;
+                if energy < best {
+                    best = energy;
+                    best_state = state.clone();
+                    if improvements.len() < 512 {
+                        improvements.push((hops, ledger.spent(), 0, energy));
+                    }
+                }
+            }
+        }
+        Outcome {
+            best,
+            best_state: Some(best_state),
+            final_state: Some(state),
+            final_energy: energy,
+            accepted_transitions,
+            hops,
+            charged: ledger.spent(),
+            improvements,
+            ..Outcome::default()
+        }
+    } else {
+        run_with_bias_at_checkpoints(
+            &cfg,
+            start.view(),
+            &mut ledger,
+            &mut relax,
+            None,
+            &mut bias,
+            &mut rng,
+            exchange.checkpoint,
+            &mut checkpoint,
+        )
+    };
     let first_hit = target.and_then(|reference| {
         outcome
             .improvements
