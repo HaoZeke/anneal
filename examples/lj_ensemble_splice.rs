@@ -466,19 +466,6 @@ impl Population {
             .min_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal))
             .map(|(energy, state, _)| (*energy, state.clone()))
     }
-
-    /// Shell distance from this chain's recorded structure to `state`.
-    /// `None` before the cutoff exists, so a near copy is not treated as a
-    /// different morphology.
-    fn far_from(&self, chain: usize, state: &[f64]) -> bool {
-        let Some(dcut) = self.dcut else {
-            return false;
-        };
-        let Some(mine) = self.members.get(chain).and_then(|member| member.as_ref()) else {
-            return true;
-        };
-        shell_dissimilarity(&mine.2, &shell_histograms(state)) >= dcut
-    }
 }
 
 fn km_median_first_hit(records: &[(Option<usize>, usize)]) -> Option<usize> {
@@ -679,21 +666,37 @@ fn run_chain(
                 );
             }
             if stall_adopt > 0 && snapshot.hops().saturating_sub(mark_hop) >= stall_adopt {
-                if let Some((energy, state)) = population.deepest() {
-                    // A near copy of the leader is the same morphology. Taking
-                    // it freezes the walk. A farther, deeper structure is a
-                    // different body and is worth starting from.
-                    if energy + 1e-9 < snapshot.best_energy()
+                // Same DECAF family: the fast rearrangements are one
+                // superbasin. Copying another member of it freezes the
+                // walk. A different family is a new packing and is taken.
+                // Otherwise the chain leaves with one collective kick.
+                let other_family = population.deepest().filter(|(energy, state)| {
+                    *energy + 1e-9 < snapshot.best_energy()
                         && state.len() == n * 3
-                        && population.far_from(chain, &state)
-                    {
-                        mark_hop = snapshot.hops();
-                        tally.adopted += 1;
-                        return CheckpointAction::BoundaryProposal {
-                            state: Array1::from(state),
-                            action: "pbh".to_owned(),
-                        };
+                        && snapshot.best_state().is_some_and(|mine| {
+                            mine.as_slice().is_some_and(|origin| {
+                                anneal_core::catalog::different_decaf_family(origin, state)
+                            })
+                        })
+                });
+                if let Some((_, state)) = other_family {
+                    mark_hop = snapshot.hops();
+                    tally.adopted += 1;
+                    return CheckpointAction::BoundaryProposal {
+                        state: Array1::from(state),
+                        action: "pbh".to_owned(),
+                    };
+                }
+                if let Some(mine) = snapshot.best_state() {
+                    let mut kicked = mine.to_owned();
+                    for coord in kicked.iter_mut() {
+                        *coord += (exchange_rng.random::<f64>() - 0.5) * 0.76;
                     }
+                    mark_hop = snapshot.hops();
+                    return CheckpointAction::BoundaryProposal {
+                        state: kicked,
+                        action: "exit".to_owned(),
+                    };
                 }
             }
             if stall_restart > 0 && snapshot.hops().saturating_sub(mark_hop) >= stall_restart {
