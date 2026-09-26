@@ -33,16 +33,14 @@ use std::sync::{Arc, Mutex};
 
 use anneal_core::bias::BasinBias;
 use anneal_core::methods::cluster_hopping::{
-    AcceptedTransition, ChainCheckpoint, CheckpointAction, ClusterFingerprint, Config, Ledger,
-    MoveLibrary, Outcome,
-    random_cluster,
-    run_with_bias_at_checkpoints,
+    random_cluster, run_with_bias_at_checkpoints, AcceptedTransition, ChainCheckpoint,
+    CheckpointAction, ClusterFingerprint, Config, Ledger, MoveLibrary, Outcome,
 };
-use anneal_core::methods::cluster_search::{Encounter, median_encounter};
+use anneal_core::methods::cluster_search::{median_encounter, Encounter};
 use anneal_core::methods::splice::cut_and_splice;
 use anneal_core::methods::two_phase::{
-    Cutoff, SharedSurfaceAllocator, SurfacePortfolio, TwoPhase, largest_pair_distance, penalty,
-    shared_surface_allocator,
+    largest_pair_distance, penalty, shared_surface_allocator, Cutoff, SharedSurfaceAllocator,
+    SurfacePortfolio, TwoPhase,
 };
 use anneal_core::methods::warm_lbfgs::WarmLbfgs;
 use anneal_core::potentials::PairPotential;
@@ -75,6 +73,71 @@ fn lj(x: ArrayView1<f64>) -> (f64, Array1<f64>) {
         }
     }
     (e, g)
+}
+
+/// Place the worst-bound atom just outside the current hull.
+///
+/// Copying the deepest population member parks every other chain on
+/// that neighbour. A stall relocates one atom and the walk continues.
+fn relocate_worst_atom(x: &[f64], rng: &mut impl Rng) -> Array1<f64> {
+    let n = x.len() / 3;
+    let mut out = Array1::from(x.to_vec());
+    if n < 2 {
+        return out;
+    }
+    let mut bound = vec![0.0; n];
+    let mut cm = [0.0; 3];
+    for i in 0..n {
+        cm[0] += x[3 * i];
+        cm[1] += x[3 * i + 1];
+        cm[2] += x[3 * i + 2];
+    }
+    let scale = n as f64;
+    cm[0] /= scale;
+    cm[1] /= scale;
+    cm[2] /= scale;
+    for i in 0..n {
+        for j in (i + 1)..n {
+            let d = [
+                x[3 * i] - x[3 * j],
+                x[3 * i + 1] - x[3 * j + 1],
+                x[3 * i + 2] - x[3 * j + 2],
+            ];
+            let r2 = d[0] * d[0] + d[1] * d[1] + d[2] * d[2];
+            if r2 < 1e-12 {
+                continue;
+            }
+            let inv2 = 1.0 / r2;
+            let inv6 = inv2 * inv2 * inv2;
+            let vij = 4.0 * (inv6 * inv6 - inv6);
+            bound[i] += vij;
+            bound[j] += vij;
+        }
+    }
+    let worst = bound
+        .iter()
+        .enumerate()
+        .max_by(|a, b| a.1.partial_cmp(b.1).unwrap_or(std::cmp::Ordering::Equal))
+        .map(|(i, _)| i)
+        .unwrap_or(0);
+    let mut radius = 0.0;
+    for i in 0..n {
+        if i == worst {
+            continue;
+        }
+        let d0 = x[3 * i] - cm[0];
+        let d1 = x[3 * i + 1] - cm[1];
+        let d2 = x[3 * i + 2] - cm[2];
+        radius = radius.max((d0 * d0 + d1 * d1 + d2 * d2).sqrt());
+    }
+    let z: f64 = rng.random_range(-1.0..1.0);
+    let phi: f64 = rng.random_range(0.0..std::f64::consts::TAU);
+    let s = (1.0 - z * z).sqrt();
+    let r = radius + 2.0_f64.powf(1.0 / 6.0);
+    out[3 * worst] = cm[0] + r * s * phi.cos();
+    out[3 * worst + 1] = cm[1] + r * s * phi.sin();
+    out[3 * worst + 2] = cm[2] + r * z;
+    out
 }
 
 /// The pair potential the ensemble walks: reduced Lennard-Jones by default,
@@ -383,8 +446,8 @@ impl Population {
     ) -> bool {
         // Include the structure this child left. Distance to the slot just
         // written is zero, so the previous histogram is the parent.
-        let mut nearest: Option<(usize, f64)> = previous
-            .map(|old| (p, shell_dissimilarity(hist, old)));
+        let mut nearest: Option<(usize, f64)> =
+            previous.map(|old| (p, shell_dissimilarity(hist, old)));
         for &q in filled {
             if q == p {
                 continue;
@@ -406,9 +469,7 @@ impl Population {
             // pending offer is kept when it is already lower.
             let eq = self.members[q].as_ref().unwrap().0;
             let pending_energy = self.pending[q].as_ref().map(|offer| offer.0);
-            if energy < eq - 1e-9
-                && pending_energy.is_none_or(|queued| energy < queued - 1e-9)
-            {
+            if energy < eq - 1e-9 && pending_energy.is_none_or(|queued| energy < queued - 1e-9) {
                 self.pending[q] = Some((energy, state.to_vec()));
                 self.replacements_near += 1;
                 return true;
@@ -456,15 +517,6 @@ impl Population {
 
     fn take_pending(&mut self, chain: usize) -> Option<(f64, Vec<f64>)> {
         self.pending[chain].take()
-    }
-
-    /// Lowest recorded member, if any chain has reported.
-    fn deepest(&self) -> Option<(f64, Vec<f64>)> {
-        self.members
-            .iter()
-            .filter_map(|member| member.as_ref())
-            .min_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal))
-            .map(|(energy, state, _)| (*energy, state.clone()))
     }
 }
 
@@ -666,24 +718,19 @@ fn run_chain(
                 );
             }
             if stall_adopt > 0 && snapshot.hops().saturating_sub(mark_hop) >= stall_adopt {
-                // Same DECAF family: keep walking. A kick and a packing hop
-                // both quenched back onto the near neighbour. A different
-                // family is a new packing and is taken.
-                let other_family = population.deepest().filter(|(energy, state)| {
-                    *energy + 1e-9 < snapshot.best_energy()
-                        && state.len() == n * 3
-                        && snapshot.best_state().is_some_and(|mine| {
-                            mine.as_slice().is_some_and(|origin| {
-                                anneal_core::catalog::different_decaf_family(origin, state)
-                            })
-                        })
-                });
-                if let Some((_, state)) = other_family {
+                // A kick of the whole cluster and a packing hop both quenched
+                // back onto the same neighbour. Copying that neighbour parks
+                // the ensemble there. Move the worst-bound atom instead.
+                if let Some(origin) = snapshot
+                    .best_state()
+                    .as_ref()
+                    .and_then(|mine| mine.as_slice())
+                {
                     mark_hop = snapshot.hops();
                     tally.adopted += 1;
                     return CheckpointAction::BoundaryProposal {
-                        state: Array1::from(state),
-                        action: "pbh".to_owned(),
+                        state: relocate_worst_atom(origin, &mut exchange_rng),
+                        action: "exit".to_owned(),
                     };
                 }
             }
@@ -1082,16 +1129,19 @@ fn main() {
         if let Some(first) = earliest {
             first_hits.push(first);
         }
-        let earliest_hops = reports.iter().filter_map(|report| {
-            target.and_then(|reference| {
-                report
-                    .outcome
-                    .improvements
-                    .iter()
-                    .find(|&&(_, _, _, energy)| energy < reference + 1e-4)
-                    .map(|&(hop, _, _, _)| hop)
+        let earliest_hops = reports
+            .iter()
+            .filter_map(|report| {
+                target.and_then(|reference| {
+                    report
+                        .outcome
+                        .improvements
+                        .iter()
+                        .find(|&&(_, _, _, energy)| energy < reference + 1e-4)
+                        .map(|&(hop, _, _, _)| hop)
+                })
             })
-        }).min();
+            .min();
         println!(
             "  ensemble {ensemble}: deepest {deepest:.6}  solved chains {:?}  first hit {}  first hop {}  hops {hops}  charged {charged}  splice attempts {} adopted {} below {} calls {}",
             solved,
