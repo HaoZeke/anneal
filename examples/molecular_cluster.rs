@@ -10,6 +10,7 @@ use anneal_core::methods::cluster_hopping::{
 };
 use anneal_core::methods::cluster_search::{search_from_maybe_bank, verify};
 use common::efficiency::{apply_two_phase, bank_label, report_eval_wall, report_trace};
+use eindir_core::gradient::DifferentiableObjective;
 use common::rgpot_eindir::{RgpotObjective, emit_engine_manifest};
 use ndarray::Array1;
 use rand::SeedableRng;
@@ -84,6 +85,12 @@ fn main() {
         }
         let x0 = repack_rigid_groups(template.view(), &groups, cfg.length_scale, &mut rng);
         if seed == seed0 {
+            let (energy, gradient) = obj.value_and_gradient(x0.view());
+            let finite_grad = gradient.iter().filter(|value| value.is_finite()).count();
+            println!(
+                "  first energy {energy} finite_grad {finite_grad}/{}",
+                gradient.len()
+            );
             report_eval_wall(&obj, x0.view(), "gfn2");
         }
         let mut ledger = Ledger::new(budget);
