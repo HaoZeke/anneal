@@ -39,7 +39,7 @@ use anneal_core::methods::cluster_hopping::{
 use anneal_core::methods::cluster_search::{median_encounter, Encounter};
 use anneal_core::methods::splice::cut_and_splice;
 use anneal_core::methods::two_phase::{
-    largest_pair_distance, penalty, shared_surface_allocator, Cutoff, SharedSurfaceAllocator,
+    largest_pair_distance, penalty_axes, shared_surface_allocator, Cutoff, SharedSurfaceAllocator,
     SurfacePortfolio, TwoPhase,
 };
 use anneal_core::methods::warm_lbfgs::WarmLbfgs;
@@ -216,9 +216,10 @@ fn compressed(
     mu: f64,
     diameter: f64,
     beta: f64,
+    axes: [f64; 3],
 ) -> (f64, Array1<f64>) {
     let (e, g) = surface.energy(x);
-    let (pe, pg) = penalty(x, diameter, beta, mu);
+    let (pe, pg) = penalty_axes(x, diameter, beta, mu, axes);
     (e + pe, g + pg)
 }
 
@@ -284,6 +285,9 @@ struct ExchangeConfig {
     /// Relative cutoff: `kappa` times the largest pair distance of the
     /// structure entering the quench; zero keeps the fixed cutoff.
     diameter_kappa: f64,
+    /// Axis weights on the squared y and z pair components. Ones are spherical.
+    diameter_wy: f64,
+    diameter_wz: f64,
     /// Learned portfolio over surfaces (plain plus these), one arm held
     /// per block of hops; empty runs the fixed surface above.
     portfolio: Vec<TwoPhase>,
@@ -598,6 +602,7 @@ fn run_chain(
     let diameter = exchange.diameter;
     let beta = exchange.diameter_beta;
     let kappa = exchange.diameter_kappa;
+    let axes = [1.0, exchange.diameter_wy, exchange.diameter_wz];
     let two_phase = compress_mu > 0.0 || ((diameter > 0.0 || kappa > 0.0) && beta > 0.0);
     let screen_steps = cfg.screen_steps;
     let split_surface = (exchange.portfolio_split && !exchange.portfolio.is_empty()).then(|| {
@@ -643,7 +648,7 @@ fn run_chain(
                 if !led.charge() {
                     return None;
                 }
-                Some(compressed(&surface_kind, v, mu, cutoff, beta))
+                Some(compressed(&surface_kind, v, mu, cutoff, beta, axes))
             });
             start = compressed;
         }
@@ -1001,6 +1006,8 @@ fn main() {
         diameter: env_f64("DIAMETER_D", 0.0) * 2f64.powf(1.0 / 6.0),
         diameter_beta: env_f64("DIAMETER_BETA", 1.0),
         diameter_kappa: env_f64("DIAMETER_KAPPA", 0.0),
+        diameter_wy: env_f64("DIAMETER_WY", 1.0),
+        diameter_wz: env_f64("DIAMETER_WZ", 1.0),
         portfolio: std::env::var("SURFACES")
             .map(|spec| parse_surfaces(&spec))
             .unwrap_or_default(),

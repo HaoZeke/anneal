@@ -126,6 +126,20 @@ pub fn largest_pair_distance(x: ArrayView1<f64>) -> f64 {
 /// The centroid contributes no gradient of its own because displacements
 /// from it sum to zero.
 pub fn penalty(x: ArrayView1<f64>, cutoff: f64, beta: f64, mu: f64) -> (f64, Array1<f64>) {
+    penalty_axes(x, cutoff, beta, mu, [1.0, 1.0, 1.0])
+}
+
+/// Diameter penalty with axis weights on the squared pair components.
+///
+/// The spherical penalty is weights `[1, 1, 1]`. A prolate or oblate
+/// penalty uses other positive weights on the y and z components.
+pub fn penalty_axes(
+    x: ArrayView1<f64>,
+    cutoff: f64,
+    beta: f64,
+    mu: f64,
+    axes: [f64; 3],
+) -> (f64, Array1<f64>) {
     let n = x.len() / 3;
     let mut e = 0.0;
     let mut g = Array1::zeros(x.len());
@@ -138,13 +152,15 @@ pub fn penalty(x: ArrayView1<f64>, cutoff: f64, beta: f64, mu: f64) -> (f64, Arr
                     x[3 * i + 1] - x[3 * j + 1],
                     x[3 * i + 2] - x[3 * j + 2],
                 ];
-                let excess = d[0] * d[0] + d[1] * d[1] + d[2] * d[2] - d2;
+                let excess =
+                    axes[0] * d[0] * d[0] + axes[1] * d[1] * d[1] + axes[2] * d[2] * d[2] - d2;
                 if excess > 0.0 {
                     e += beta * excess * excess;
                     let coef = 4.0 * beta * excess;
                     for k in 0..3 {
-                        g[3 * i + k] += coef * d[k];
-                        g[3 * j + k] -= coef * d[k];
+                        let force = coef * axes[k] * d[k];
+                        g[3 * i + k] += force;
+                        g[3 * j + k] -= force;
                     }
                 }
             }
