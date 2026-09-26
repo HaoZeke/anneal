@@ -352,6 +352,12 @@ impl Population {
             return false;
         }
         let dcut = self.dcut.unwrap();
+        // Record every chain and leave its walk alone. A stalled chain
+        // copies the deepest member itself; a neighbour is not displaced.
+        if std::env::var("PBH_HOLD").ok().as_deref() == Some("1") {
+            self.anneal();
+            return false;
+        }
         let moved = self.decide_replacement(
             p,
             energy,
@@ -450,6 +456,15 @@ impl Population {
 
     fn take_pending(&mut self, chain: usize) -> Option<(f64, Vec<f64>)> {
         self.pending[chain].take()
+    }
+
+    /// Lowest recorded member, if any chain has reported.
+    fn deepest(&self) -> Option<(f64, Vec<f64>)> {
+        self.members
+            .iter()
+            .filter_map(|member| member.as_ref())
+            .min_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal))
+            .map(|(energy, state, _)| (*energy, state.clone()))
     }
 }
 
@@ -606,6 +621,7 @@ fn run_chain(
     let min_separation = cfg.min_separation;
     let mut child_opt = WarmLbfgs::default();
     let stall_restart = env_usize("STALL_RESTART", 0);
+    let stall_adopt = env_usize("STALL_ADOPT", 0);
     let mut best_mark = f64::INFINITY;
     let mut mark_hop = 0usize;
     let mut checkpoint = |snapshot: ChainCheckpoint<'_>| {
@@ -632,14 +648,15 @@ fn run_chain(
                     action: "pbh".to_owned(),
                 };
             }
-            if stall_restart > 0 && snapshot.hops().saturating_sub(mark_hop) >= stall_restart {
-                mark_hop = snapshot.hops();
-                return CheckpointAction::BoundaryProposal {
-                    state: random_cluster(n, 0.7, min_separation, &mut exchange_rng),
-                    action: "restart".to_owned(),
-                };
-            }
-            if let Some(current) = snapshot.current_state().as_slice() {
+            if let Some(best) = snapshot.best_state() {
+                tally.attempts += 1;
+                population.offer(
+                    chain,
+                    snapshot.best_energy(),
+                    best.as_slice().expect("best state is contiguous"),
+                    exchange.pbh_dcut_scale,
+                );
+            } else if let Some(current) = snapshot.current_state().as_slice() {
                 tally.attempts += 1;
                 population.offer(
                     chain,
@@ -647,6 +664,25 @@ fn run_chain(
                     current,
                     exchange.pbh_dcut_scale,
                 );
+            }
+            if stall_adopt > 0 && snapshot.hops().saturating_sub(mark_hop) >= stall_adopt {
+                if let Some((energy, state)) = population.deepest() {
+                    if energy + 1e-9 < snapshot.best_energy() && state.len() == n * 3 {
+                        mark_hop = snapshot.hops();
+                        tally.adopted += 1;
+                        return CheckpointAction::BoundaryProposal {
+                            state: Array1::from(state),
+                            action: "pbh".to_owned(),
+                        };
+                    }
+                }
+            }
+            if stall_restart > 0 && snapshot.hops().saturating_sub(mark_hop) >= stall_restart {
+                mark_hop = snapshot.hops();
+                return CheckpointAction::BoundaryProposal {
+                    state: random_cluster(n, 0.7, min_separation, &mut exchange_rng),
+                    action: "restart".to_owned(),
+                };
             }
             return CheckpointAction::Continue;
         }
