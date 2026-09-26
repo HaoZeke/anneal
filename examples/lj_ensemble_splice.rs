@@ -466,6 +466,19 @@ impl Population {
             .min_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal))
             .map(|(energy, state, _)| (*energy, state.clone()))
     }
+
+    /// Shell distance from this chain's recorded structure to `state`.
+    /// `None` before the cutoff exists, so a near copy is not treated as a
+    /// different morphology.
+    fn far_from(&self, chain: usize, state: &[f64]) -> bool {
+        let Some(dcut) = self.dcut else {
+            return false;
+        };
+        let Some(mine) = self.members.get(chain).and_then(|member| member.as_ref()) else {
+            return true;
+        };
+        shell_dissimilarity(&mine.2, &shell_histograms(state)) >= dcut
+    }
 }
 
 fn km_median_first_hit(records: &[(Option<usize>, usize)]) -> Option<usize> {
@@ -667,7 +680,13 @@ fn run_chain(
             }
             if stall_adopt > 0 && snapshot.hops().saturating_sub(mark_hop) >= stall_adopt {
                 if let Some((energy, state)) = population.deepest() {
-                    if energy + 1e-9 < snapshot.best_energy() && state.len() == n * 3 {
+                    // A near copy of the leader is the same morphology. Taking
+                    // it freezes the walk. A farther, deeper structure is a
+                    // different body and is worth starting from.
+                    if energy + 1e-9 < snapshot.best_energy()
+                        && state.len() == n * 3
+                        && population.far_from(chain, &state)
+                    {
                         mark_hop = snapshot.hops();
                         tally.adopted += 1;
                         return CheckpointAction::BoundaryProposal {
