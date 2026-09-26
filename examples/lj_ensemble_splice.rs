@@ -33,7 +33,8 @@ use std::sync::{Arc, Mutex};
 
 use anneal_core::bias::BasinBias;
 use anneal_core::methods::cluster_hopping::{
-    ChainCheckpoint, CheckpointAction, ClusterFingerprint, Config, Ledger, Outcome, random_cluster,
+    ChainCheckpoint, CheckpointAction, ClusterFingerprint, Config, Ledger, MoveLibrary, Outcome,
+    random_cluster,
     run_with_bias_at_checkpoints,
 };
 use anneal_core::methods::cluster_search::{Encounter, median_encounter};
@@ -448,7 +449,13 @@ fn run_chain(
     shared_surfaces: Option<SharedSurfaceAllocator>,
     population: Option<Arc<Mutex<Population>>>,
 ) -> ChainReport {
-    let cfg = Config::recommended(n);
+    let mut cfg = Config::recommended(n);
+    if std::env::var("MOVE").ok().as_deref() == Some("wales") {
+        cfg.move_library = MoveLibrary::WalesDoye;
+        cfg.allocate_moves = false;
+        cfg.depth_reward = false;
+        cfg.tabu_on_stall = false;
+    }
     let surface_kind = Surface::from_environment(n);
     let child_surface = surface_kind.clone();
     let mut rng = StdRng::seed_from_u64(seed);
