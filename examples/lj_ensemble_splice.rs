@@ -546,7 +546,14 @@ fn run_chain(
     let temperature = cfg.temperature;
     let min_separation = cfg.min_separation;
     let mut child_opt = WarmLbfgs::default();
+    let stall_restart = env_usize("STALL_RESTART", 0);
+    let mut best_mark = f64::INFINITY;
+    let mut mark_hop = 0usize;
     let mut checkpoint = |snapshot: ChainCheckpoint<'_>| {
+        if snapshot.best_energy() + 1e-6 < best_mark {
+            best_mark = snapshot.best_energy();
+            mark_hop = snapshot.hops();
+        }
         {
             let mut slots = board.lock().expect("ensemble board");
             let slot = &mut slots[chain];
@@ -564,6 +571,13 @@ fn run_chain(
                 return CheckpointAction::BoundaryProposal {
                     state: Array1::from(state),
                     action: "pbh".to_owned(),
+                };
+            }
+            if stall_restart > 0 && snapshot.hops().saturating_sub(mark_hop) >= stall_restart {
+                mark_hop = snapshot.hops();
+                return CheckpointAction::BoundaryProposal {
+                    state: random_cluster(n, 0.7, min_separation, &mut exchange_rng),
+                    action: "restart".to_owned(),
                 };
             }
             if let Some(current) = snapshot.current_state().as_slice() {
