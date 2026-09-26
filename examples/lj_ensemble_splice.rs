@@ -666,10 +666,9 @@ fn run_chain(
                 );
             }
             if stall_adopt > 0 && snapshot.hops().saturating_sub(mark_hop) >= stall_adopt {
-                // Same DECAF family: the fast rearrangements are one
-                // superbasin. Copying another member of it freezes the
-                // walk. A different family is a new packing and is taken.
-                // Otherwise the chain leaves with one collective kick.
+                // Same DECAF family: keep walking. A kick and a packing hop
+                // both quenched back onto the near neighbour. A different
+                // family is a new packing and is taken.
                 let other_family = population.deepest().filter(|(energy, state)| {
                     *energy + 1e-9 < snapshot.best_energy()
                         && state.len() == n * 3
@@ -685,21 +684,6 @@ fn run_chain(
                     return CheckpointAction::BoundaryProposal {
                         state: Array1::from(state),
                         action: "pbh".to_owned(),
-                    };
-                }
-                if let Some(mine) = snapshot.best_state() {
-                    // The recommended packing hop, taken at five merge radii
-                    // so the superbasin exit is larger than a local move.
-                    let kicked = anneal_core::soap::step_away_mean(
-                        mine.view(),
-                        anneal_core::catalog::PACKING_SPEC,
-                        0.50,
-                        &mut exchange_rng,
-                    );
-                    mark_hop = snapshot.hops();
-                    return CheckpointAction::BoundaryProposal {
-                        state: kicked,
-                        action: "exit".to_owned(),
                     };
                 }
             }
