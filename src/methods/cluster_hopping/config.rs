@@ -905,6 +905,10 @@ impl Config {
         cfg.soap_mode = SoapProposalMode::Flexible;
         cfg.adaptive_height = true;
         cfg.height_revisits = 20.0;
+        // The reduced-unit gate is 1e-3 where forces are order one. A
+        // GFN-class force is eV per angstrom, and an iteration-capped
+        // quasi-Newton step leaves a maximum component near 1e-2.
+        cfg.record_gradient = 5.0e-2;
         #[cfg(feature = "featomic")]
         {
             cfg.keying = Keying::SoapPacking;
