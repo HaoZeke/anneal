@@ -317,6 +317,7 @@ impl Population {
     /// to move.
     fn offer(&mut self, p: usize, energy: f64, state: &[f64], dcut_scale: f64) -> bool {
         let hist = shell_histograms(state);
+        let previous = self.members[p].clone();
         self.members[p] = Some((energy, state.to_vec(), hist));
         let filled: Vec<usize> = (0..self.members.len())
             .filter(|&i| self.members[i].is_some())
@@ -351,9 +352,17 @@ impl Population {
             return false;
         }
         let dcut = self.dcut.unwrap();
-        let moved = self.decide_replacement(p, energy, state, &hist, dcut, &filled);
+        let moved = self.decide_replacement(
+            p,
+            energy,
+            state,
+            &hist,
+            dcut,
+            &filled,
+            previous.as_ref().map(|member| &member.2),
+        );
         self.anneal();
-        return moved;
+        moved
     }
 
     fn decide_replacement(
@@ -364,8 +373,12 @@ impl Population {
         hist: &([u32; 32], [u32; 32]),
         dcut: f64,
         filled: &[usize],
+        previous: Option<&([u32; 32], [u32; 32])>,
     ) -> bool {
-        let mut nearest: Option<(usize, f64)> = None;
+        // Include the structure this child left. Distance to the slot just
+        // written is zero, so the previous histogram is the parent.
+        let mut nearest: Option<(usize, f64)> = previous
+            .map(|old| (p, shell_dissimilarity(hist, old)));
         for &q in filled {
             if q == p {
                 continue;
@@ -379,9 +392,17 @@ impl Population {
             return false;
         };
         if d < dcut {
-            // Same region as q: only a better child displaces q.
+            // Closest to the parent: the child already occupies p.
+            if q == p {
+                return false;
+            }
+            // Same region as q: only a better child displaces q, and a
+            // pending offer is kept when it is already lower.
             let eq = self.members[q].as_ref().unwrap().0;
-            if energy < eq - 1e-9 {
+            let pending_energy = self.pending[q].as_ref().map(|offer| offer.0);
+            if energy < eq - 1e-9
+                && pending_energy.is_none_or(|queued| energy < queued - 1e-9)
+            {
                 self.pending[q] = Some((energy, state.to_vec()));
                 self.replacements_near += 1;
                 return true;
@@ -396,12 +417,15 @@ impl Population {
                 .0
                 .total_cmp(&self.members[b].as_ref().unwrap().0)
         });
-        if let Some(w) = worst
-            && energy < self.members[w].as_ref().unwrap().0 - 1e-9
-        {
-            self.pending[w] = Some((energy, state.to_vec()));
-            self.replacements_far += 1;
-            return true;
+        if let Some(w) = worst {
+            let queued = self.pending[w].as_ref().map(|offer| offer.0);
+            if energy < self.members[w].as_ref().unwrap().0 - 1e-9
+                && queued.is_none_or(|pending| energy < pending - 1e-9)
+            {
+                self.pending[w] = Some((energy, state.to_vec()));
+                self.replacements_far += 1;
+                return true;
+            }
         }
         false
     }
