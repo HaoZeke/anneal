@@ -688,10 +688,14 @@ fn run_chain(
                     };
                 }
                 if let Some(mine) = snapshot.best_state() {
-                    let mut kicked = mine.to_owned();
-                    for coord in kicked.iter_mut() {
-                        *coord += (exchange_rng.random::<f64>() - 0.5) * 0.76;
-                    }
+                    // The recommended packing hop, taken at five merge radii
+                    // so the superbasin exit is larger than a local move.
+                    let kicked = anneal_core::soap::step_away_mean(
+                        mine.view(),
+                        anneal_core::catalog::PACKING_SPEC,
+                        0.50,
+                        &mut exchange_rng,
+                    );
                     mark_hop = snapshot.hops();
                     return CheckpointAction::BoundaryProposal {
                         state: kicked,
