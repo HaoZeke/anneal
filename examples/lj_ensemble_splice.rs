@@ -366,7 +366,7 @@ impl Population {
         filled: &[usize],
     ) -> bool {
         let mut nearest: Option<(usize, f64)> = None;
-        for &q in &filled {
+        for &q in filled {
             if q == p {
                 continue;
             }
