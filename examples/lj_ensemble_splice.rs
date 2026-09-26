@@ -456,6 +456,11 @@ fn run_chain(
         cfg.depth_reward = false;
         cfg.tabu_on_stall = false;
     }
+    if let Ok(temperature) = std::env::var("TEMP") {
+        cfg.temperature = temperature
+            .parse()
+            .unwrap_or_else(|_| panic!("TEMP must be a finite temperature"));
+    }
     let surface_kind = Surface::from_environment(n);
     let child_surface = surface_kind.clone();
     let mut rng = StdRng::seed_from_u64(seed);
