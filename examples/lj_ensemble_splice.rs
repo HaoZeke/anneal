@@ -120,7 +120,7 @@ fn relocate_worst_atom(x: &[f64], rng: &mut impl Rng) -> Array1<f64> {
         .max_by(|a, b| a.1.partial_cmp(b.1).unwrap_or(std::cmp::Ordering::Equal))
         .map(|(i, _)| i)
         .unwrap_or(0);
-    let mut radius = 0.0;
+    let mut radius: f64 = 0.0;
     for i in 0..n {
         if i == worst {
             continue;
