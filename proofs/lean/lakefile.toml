@@ -1,0 +1,8 @@
+name = "Gpmd"
+defaultTargets = ["Gpmd", "Hop"]
+
+[[lean_lib]]
+name = "Gpmd"
+
+[[lean_lib]]
+name = "Hop"

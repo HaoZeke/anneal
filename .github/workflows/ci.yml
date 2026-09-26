@@ -1,0 +1,308 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Every feature a runner can satisfy that gates code today.
+  # `lammps` is excluded because its build script requires
+  # LAMMPS_LIB_DIR pointing at a liblammps no runner installs, so
+  # --all-features cannot resolve here. `nng-transport` is excluded
+  # because it gates no source at all yet and its dependency builds
+  # the nng C library through cmake; put it back the day it does.
+  CI_FEATURES: ira,graphkey,featomic,vesin-nl,bank-rpc,capi,python,rgpot-ex
+
+jobs:
+  lint:
+    name: Lint (fmt + clippy)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: cargo fmt
+        run: cargo fmt --all -- --check
+
+      - name: Verify crate publication package
+        run: cargo publish --dry-run
+
+      - name: Checkout Vesin
+        uses: actions/checkout@v6
+        with:
+          repository: Luthaf/vesin
+          ref: 976b5dbbdf392db5197353037eefc01a46e9e667
+          path: .ci/vesin
+          persist-credentials: false
+
+      - name: Checkout IRA
+        uses: actions/checkout@v6
+        with:
+          repository: mammasmias/IterativeRotationsAssignments
+          ref: 2b2fc312569a5a50183ca82b2f260ebaaf87c508
+          path: .ci/ira
+          persist-credentials: false
+
+      - name: Build all-feature dependencies
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends gfortran liblapack-dev
+          cmake -S .ci/ira -B .ci/ira/build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_Fortran_COMPILER=gfortran
+          cmake --build .ci/ira/build --parallel 2
+          test -f .ci/ira/lib/libira.so
+          echo "VESIN_SRC=$GITHUB_WORKSPACE/.ci/vesin" >> "$GITHUB_ENV"
+          echo "IRA_LIB_DIR=$GITHUB_WORKSPACE/.ci/ira/lib" >> "$GITHUB_ENV"
+          echo "LD_LIBRARY_PATH=$GITHUB_WORKSPACE/.ci/ira/lib:${LD_LIBRARY_PATH:-}" \
+            >> "$GITHUB_ENV"
+
+      - name: cargo clippy
+        run: cargo clippy --features "$CI_FEATURES" --all-targets -- -D warnings
+
+      - name: Install Cocogitto
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cocogitto
+
+      - name: Conventional commits check
+        shell: bash
+        env:
+          COG_FROM: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+          COG_TO: ${{ github.sha }}
+        run: |
+          if [[ -z "$COG_FROM" || "$COG_FROM" =~ ^0+$ ]] || \
+             ! git cat-file -e "$COG_FROM^{commit}"; then
+            COG_FROM=$(git rev-parse "$COG_TO^")
+          fi
+          cog check "$COG_FROM..$COG_TO"
+
+      - name: Audit for large files
+        shell: bash
+        run: |
+          oversized=$(
+            git rev-list --objects --all |
+              git cat-file --batch-check='%(objecttype) %(objectsize) %(objectname) %(rest)' |
+              awk '$1 == "blob" && $2 > 1048576'
+          )
+          if [[ -n "$oversized" ]]; then
+            printf 'Git history contains blobs larger than 1 MiB:\n%s\n' "$oversized" >&2
+            exit 1
+          fi
+
+  test:
+    name: Test (${{ matrix.os }}, py ${{ matrix.python-version }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-14, macos-15]
+        python-version: ["3.10", "3.11", "3.12", "3.13"]
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Checkout Vesin
+        uses: actions/checkout@v6
+        with:
+          repository: Luthaf/vesin
+          ref: 976b5dbbdf392db5197353037eefc01a46e9e667
+          path: .ci/vesin
+          persist-credentials: false
+
+      - name: Checkout IRA
+        uses: actions/checkout@v6
+        with:
+          repository: mammasmias/IterativeRotationsAssignments
+          ref: 2b2fc312569a5a50183ca82b2f260ebaaf87c508
+          path: .ci/ira
+          persist-credentials: false
+
+      - name: Build all-feature dependencies
+        shell: bash
+        run: |
+          if [[ "$RUNNER_OS" == Linux ]]; then
+            sudo apt-get update
+            sudo apt-get install -y --no-install-recommends gfortran liblapack-dev
+            fortran=gfortran
+            lapack=Generic
+          else
+            for candidate in gfortran gfortran-15 gfortran-14 gfortran-13; do
+              if command -v "$candidate" >/dev/null 2>&1; then
+                fortran=$candidate
+                break
+              fi
+            done
+            test -n "${fortran:-}"
+            lapack=Apple
+          fi
+          cmake -S .ci/ira -B .ci/ira/build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_Fortran_COMPILER="$fortran" \
+            -DBLA_VENDOR="$lapack"
+          cmake --build .ci/ira/build --parallel 2
+          if [[ "$RUNNER_OS" == Linux ]]; then
+            test -f .ci/ira/lib/libira.so
+            echo "LD_LIBRARY_PATH=$GITHUB_WORKSPACE/.ci/ira/lib:${LD_LIBRARY_PATH:-}" \
+              >> "$GITHUB_ENV"
+          else
+            test -f .ci/ira/lib/libira.dylib
+            echo "DYLD_FALLBACK_LIBRARY_PATH=$GITHUB_WORKSPACE/.ci/ira/lib:${DYLD_FALLBACK_LIBRARY_PATH:-}" \
+              >> "$GITHUB_ENV"
+          fi
+          echo "VESIN_SRC=$GITHUB_WORKSPACE/.ci/vesin" >> "$GITHUB_ENV"
+          echo "IRA_LIB_DIR=$GITHUB_WORKSPACE/.ci/ira/lib" >> "$GITHUB_ENV"
+
+      - name: cargo test
+        if: runner.os != 'macOS'
+        run: cargo test
+
+      - name: cargo test (macOS)
+        if: runner.os == 'macOS'
+        run: >-
+          cargo
+          --config 'target.x86_64-apple-darwin.rustflags=["-C","link-arg=-undefined","-C","link-arg=dynamic_lookup"]'
+          --config 'target.aarch64-apple-darwin.rustflags=["-C","link-arg=-undefined","-C","link-arg=dynamic_lookup"]'
+          test
+
+      - name: cargo test (all satisfiable features)
+        if: runner.os != 'macOS'
+        run: cargo test --features "$CI_FEATURES"
+
+      - name: cargo test (all satisfiable features, macOS)
+        if: runner.os == 'macOS'
+        run: >-
+          cargo
+          --config 'target.x86_64-apple-darwin.rustflags=["-C","link-arg=-undefined","-C","link-arg=dynamic_lookup"]'
+          --config 'target.aarch64-apple-darwin.rustflags=["-C","link-arg=-undefined","-C","link-arg=dynamic_lookup"]'
+          test --features "$CI_FEATURES"
+
+      - name: Create virtualenv
+        shell: bash
+        run: python -m venv .venv
+
+      - name: Install maturin + pytest
+        run: |
+          .venv/bin/python -m pip install --upgrade pip
+          .venv/bin/python -m pip install "maturin>=1.5,<2" pytest numpy
+
+      - name: maturin develop
+        run: .venv/bin/python -m maturin develop --features python --pip-path .venv/bin/pip3
+
+      - name: pytest
+        run: .venv/bin/python -m pytest pytest/
+
+      - name: Execute quickstart notebook (MyST source)
+        if: runner.os != 'macOS' && matrix.python-version == '3.12'
+        run: |
+          .venv/bin/python -m pip install jupytext nbconvert nbclient ipykernel
+          .venv/bin/python -m jupytext --to ipynb --execute --output - \
+            examples/notebooks/01_quickstart.md > /dev/null
+
+  ffi-smoke:
+    name: FFI smoke (linux + cargo-c + valgrind)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            pkg-config libssl-dev valgrind libc6-dbg
+
+      - name: Install cargo-c
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-c
+
+      - name: Install cbindgen
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cbindgen
+
+      - name: cargo cinstall (smoke)
+        run: |
+          mkdir -p staging
+          cargo cinstall --release --prefix=/usr --destdir="$PWD/staging"
+
+      - name: Show installed FFI artefacts
+        run: |
+          find staging -type f | sort
+
+      - name: Resolve FFI install paths via pkg-config
+        id: pcfg
+        run: |
+          set -euxo pipefail
+          PCFILE="$(find staging -name 'anneal-core.pc' -print -quit)"
+          test -n "$PCFILE"
+          PCDIR="$(dirname "$PCFILE")"
+          # cargo-c installs the .pc with the destdir-stripped prefix
+          # (/usr). Recover absolute paths by overriding `prefix` via
+          # PKG_CONFIG_SYSROOT_DIR which prepends the staging root.
+          STAGING_ROOT="$PWD/staging"
+          export PKG_CONFIG_PATH="$PCDIR"
+          export PKG_CONFIG_SYSROOT_DIR="$STAGING_ROOT"
+          CFLAGS_OUT="$(pkg-config --cflags anneal-core)"
+          LIBS_OUT="$(pkg-config --libs anneal-core)"
+          LIBDIR_OUT="$(pkg-config --variable=libdir anneal-core)"
+          # Create unversioned .so symlink so the linker can resolve
+          # `-lanneal_core` (cargo-c installs `libanneal_core.so.<ver>`
+          # only).
+          (
+            cd "$LIBDIR_OUT"
+            for f in libanneal_core.so.*; do
+              [ -e "$f" ] || continue
+              base="${f%.so.*}.so"
+              [ -e "$base" ] || ln -s "$f" "$base"
+            done
+          )
+          {
+            echo "cflags=$CFLAGS_OUT"
+            echo "libs=$LIBS_OUT"
+            echo "libdir=$LIBDIR_OUT"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Build ffi_smoke against installed lib
+        run: |
+          set -euxo pipefail
+          # shellcheck disable=SC2086
+          cc -std=c99 -Wall -Wextra \
+             ${{ steps.pcfg.outputs.cflags }} \
+             tests/ffi_smoke.c \
+             -Wl,-rpath,${{ steps.pcfg.outputs.libdir }} \
+             ${{ steps.pcfg.outputs.libs }} \
+             -o ffi_smoke
+          ./ffi_smoke
+
+      - name: valgrind ffi_smoke
+        run: |
+          set -euxo pipefail
+          LD_LIBRARY_PATH="${{ steps.pcfg.outputs.libdir }}" valgrind \
+            --leak-check=full \
+            --show-leak-kinds=definite,indirect \
+            --track-origins=yes \
+            --error-exitcode=1 \
+            ./ffi_smoke

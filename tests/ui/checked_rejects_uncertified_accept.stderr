@@ -1,0 +1,29 @@
+error[E0277]: the trait bound `AlwaysReject: CertifiedAcceptance<f64>` is not satisfied
+  --> tests/ui/checked_rejects_uncertified_accept.rs:22:9
+   |
+17 |     let _ = SaVariant::checked(
+   |             ------------------ required by a bound introduced by this call
+...
+22 |         AlwaysReject,
+   |         ^^^^^^^^^^^^ unsatisfied trait bound
+   |
+help: the trait `CertifiedAcceptance<f64>` is not implemented for `AlwaysReject`
+  --> tests/ui/checked_rejects_uncertified_accept.rs:8:1
+   |
+ 8 | struct AlwaysReject;
+   | ^^^^^^^^^^^^^^^^^^^
+help: the following other types implement trait `CertifiedAcceptance<T>`
+  --> src/variant.rs
+   |
+   | impl<T: Float + Send + Sync> CertifiedAcceptance<T> for Metropolis {}
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `Metropolis`
+   | impl<T: Float + Send + Sync> CertifiedAcceptance<T> for TsallisAccept<T> {}
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `TsallisAccept<T>`
+note: required by a bound in `SaVariant::<T, O, C, N, M, A>::checked`
+  --> src/variant.rs
+   |
+   |     pub fn checked(obj: O, cool: C, neigh: N, mover: M, accept: A) -> Result<Self, LawViolation>
+   |            ------- required by a bound in this associated function
+...
+   |         A: CertifiedAcceptance<T>,
+   |            ^^^^^^^^^^^^^^^^^^^^^^ required by this bound in `SaVariant::<T, O, C, N, M, A>::checked`

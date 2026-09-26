@@ -1,0 +1,175 @@
+<p align="center">
+  <img src="./branding/logo/anneal_logo.png" alt="Anneal" width="280">
+</p>
+
+# Anneal
+
+**Start here.** Bound-constrained global optimization with a single budget knob, or classical simulated-annealing presets you can swap without rewriting a driver.
+
+Simulated-annealing components on the [eindir](https://github.com/HaoZeke/eindir) typed primitives. One surface, many drivers: classical presets, Bayesian pilot+mixer, generalized Langevin equation (GLE) colored noise, rank-1 additive independence, quasi-Monte Carlo (QMC) polish, device/ensemble scale. All obey the same five-component algebra (Obj / Cool / Neigh / Move / Accept) and four composition laws checked at construction.
+
+| | |
+|---|---|
+| Docs | https://anneal.rgoswami.me |
+| License | MIT |
+| Software DOI | https://zenodo.org/doi/10.5281/zenodo.10672746 |
+| Paper reproducibility | https://github.com/HaoZeke/anneal_repro — Zenodo [10.5281/zenodo.20672620](https://doi.org/10.5281/zenodo.20672620) |
+| History | Continuous development since **2023-02** (see git log); multi-author `CITATION.cff` |
+
+## Cluster search and cooperative production
+
+`Config::recommended(n)` composes surface relocations that pay one acceptance
+test for a whole excursion, Normal-Gamma Thompson allocation over move arms,
+and tabu response to a stalled walk. `Config::for_cluster(n)` retains the plain
+Wales-Doye protocol as a comparison baseline. Accuracy and efficiency claims
+come from sealed, evaluation-matched ensembles rather than reference energies
+or morphology labels supplied to the search.
+
+Large-cluster production uses four synchronously cooperating replicas. Each
+replica spends an independently auditable charged-work sequence and submits a
+freshly validated quenched representative. The coordinator updates an exact
+basin census and bounded descriptor catalogue, then closes a population epoch
+only after all replicas submit. A target-free Feynman--Kac potential ranks
+energy, descriptor novelty, census scarcity, and latent-Gaussian transition
+uncertainty. Replayable systematic resampling assigns parents at fixed
+population size; family caps and distinct descriptor-space rejuvenation keep
+one funnel from consuming every processor element.
+
+This population layer borrows fixed-population bookkeeping from diffusion
+Monte Carlo, not imaginary-time quantum propagation or fixed-node physics.
+The latent transition field is the Gaussian part of an INLA-style model; its
+Gaussian posterior is solved directly, so no Laplace approximation or R-INLA
+runtime is involved. Bayesian move allocation and quench screening retain
+their own evidence, while nested sampling remains a matched-budget comparison
+with separate live-point weights. Shared-catalogue and one-private-catalogue-
+per-replica ensembles form the causal communication comparison.
+
+```rust
+use anneal_core::methods::cluster_hopping::{optimize, Config, Ledger};
+
+let cfg = Config::recommended(38);
+let mut ledger = Ledger::new(400_000);
+// supply `relax` closing over your objective; see examples/lj_cluster_search.rs
+```
+
+External potentials use the same optimizer driver. The molecular-cluster and
+slab examples share one persistent in-process profile adapter; selecting
+`nwchemc` loads `libnwchemc` once and serves the complete hop loop without an
+RPC server or a result cache. Molecular requests omit a simulation cell, while
+the slab driver sends the periodic cell through the same adapter.
+
+```bash
+POTENTIAL_CONFIG=/path/to/PotentialConfig.bin \
+POTENTIAL_LIBRARY=/path/to/libnwchemc.so \
+cargo run --locked --release --features rgpot-ex \
+  --example molecular_cluster -- 6 1200 8 nwchemc
+```
+
+The shared adapter is
+[`examples/common/profile_engine.rs`](examples/common/profile_engine.rs); the
+two consumers are
+[`examples/molecular_cluster.rs`](examples/molecular_cluster.rs) and
+[`examples/slab_adsorption.rs`](examples/slab_adsorption.rs).
+
+## Install
+
+```bash
+pip install anneal
+```
+
+Full stack (pinned Rust + Python + docs):
+
+```bash
+pixi install
+```
+
+## Start here (budget-only portfolio)
+
+The intended stand-alone tool for most users: pass an objective, box bounds, and a work-unit budget (objective and gradient evaluations share the counter).
+
+```python
+import numpy as np
+from anneal import global_optimize
+
+def rastrigin(x):
+    return 10.0 * len(x) + np.sum(x * x - 10.0 * np.cos(2.0 * np.pi * x))
+
+low, high = np.full(5, -5.0), np.full(5, 5.0)
+out = global_optimize(rastrigin, low, high, budget=4000, seed=0)
+print(out["best_val"], out["best_pos"])
+```
+
+Runnable copies:
+
+- Script: [`examples/quickstart_portfolio.py`](examples/quickstart_portfolio.py)
+- Notebook: [`examples/notebooks/01_quickstart.ipynb`](examples/notebooks/01_quickstart.ipynb)
+- Website quickstart + four tutorials: https://anneal.rgoswami.me
+
+## Classical presets (same driver, different slots)
+
+```python
+from anneal import Boltzmann, Fast, Gsa, run
+
+h = run(rastrigin, low, high, Boltzmann(t_init=5.0, sigma=0.5),
+        n_epochs=40, steps_per_epoch=50, seed=1)
+print(h.best_val)
+```
+
+## Optional arms (additive independence + QMC polish)
+
+```python
+import numpy as np
+from anneal import additive_independence, qmc_polish
+
+def rastrigin(x):
+    return 10.0 * len(x) + np.sum(x*x - 10.0 * np.cos(2.0 * np.pi * x))
+
+def grad_rastrigin(x):
+    return 2.0 * x + 20.0 * np.pi * np.sin(2.0 * np.pi * x)
+
+low = np.full(5, -5.0)
+high = np.full(5, 5.0)
+
+# Values-only rank-1 independence (no gradient)
+res = additive_independence(rastrigin, low, high, max_fevals=3000, seed=7)
+
+# Polish with gradient
+refined = qmc_polish(rastrigin, grad_rastrigin, low, high,
+                     n_starts=32, max_fevals_per_start=50, seed=0, top_k=1)
+print(refined["best_val"])
+```
+
+Full docs, tutorials (classical, Bayesian pilot+mixer, GLE, polish+device), algebra, how-tos, and reference at https://anneal.rgoswami.me .
+
+## Method catalog
+
+Every algorithmic mechanism in the crate, with file:line references,
+constants, and how the pieces feed each other:
+[`docs/orgmode/methods/catalog.org`](docs/orgmode/methods/catalog.org).
+A narrative walk of one cooperative run end to end, naming each
+mechanism as it fires, plus a dataflow diagram:
+[`docs/orgmode/methods/composition.org`](docs/orgmode/methods/composition.org).
+
+| Group | Covers |
+|---|---|
+| Local search | Quenching, screening, biased hopping, move kernels, stall escapes |
+| Learned allocation | Thompson/depth/contextual allocators, budget-window temperature, regime selection |
+| Descriptors and identity | SOAP/ACE spaces, featomic, IRA/SOFI shape matching, census calibration |
+| Cooperative layer | Catalog/census, policy, boundary transport, descriptor holes, Feynman-Kac population epochs, spectral referee, umbrella bridges, the Cap'n Proto protocol |
+| Population methods | CSA bank, archive search, splice, portfolio, replica exchange, warm L-BFGS |
+| Statistics and accounting | Cooperative and local ledgers, Good-Turing census accounting, paired-seed evaluation methodology |
+
+## Development
+
+```bash
+pixi install
+pixi run -e python python-test
+pixi run -e docs docs-export
+pixi run -e docs docs-build
+```
+
+See `pixi.toml` and `docs/export.el` (modeled on rgpycrumbs/rsx-rs patterns).
+
+## License and citation
+
+MIT (see `LICENSE.txt`). Citation: `CITATION.cff` or the software Zenodo DOI. Multi-author software citation lists six authors. Project history since February 2023. Reproducibility package for paper tables and figures: [HaoZeke/anneal_repro](https://github.com/HaoZeke/anneal_repro) (Zenodo [10.5281/zenodo.20672620](https://doi.org/10.5281/zenodo.20672620)).

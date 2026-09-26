@@ -1,0 +1,3549 @@
+"""Run the three SA drivers (classical, dense MCMC-SA, sparse MCMC-SA)
+across the 12-problem CUTEst manifest and emit the long-form CSV
+consumed by the Dolan-Moré / Pareto plotters.
+
+Schema: problem, dim, driver, seed, fevals, best_val, wall_time_s,
+solved (1 if best_val within 5% of f(x0) -- a weak surrogate for
+"reached a low region", since most CUTEst problems do not ship a
+known global minimum we can test against directly).
+
+This is the headline figure-feed for IISE Section 6 (benchmark
+comparison) and Section 7 (Pareto front)."""
+
+from __future__ import annotations
+
+import argparse
+import csv
+import math
+import os
+import sys
+import time
+
+import numpy as np
+
+from experiments.benchmarks.cutest_runner import (
+    load_default_manifest,
+    load_highdim_manifest,
+)
+from experiments.shared.runner import (
+    gelman_rubin_max,
+    gaussian_propose,
+    log_cool,
+    metropolis_accept_prob,
+)
+
+TARGET_ACCEPT_RATE = 0.234
+TARGET_SWAP_RATE = 0.234
+FINITE_DIFFERENCE_GRAD_STEP = 1e-6
+COVERED_BOUND_POLISH_BUDGET_DIVISOR = 2
+QMC_DIFFERENTIAL_MUTATION_WEIGHT = 0.5
+QMC_DIFFERENTIAL_CROSSOVER_RATE = 0.9
+# A moving projected-gradient step needs the start value and one trial value.
+PROJECTED_POLISH_MIN_FEVALS_FOR_STEP = 2
+CUTEST_NATIVE_BOUNDS_SLACK = 1e-9
+BAYESIAN_GLE_POLISH_BUDGET_DIVISOR = 2
+BAYESIAN_GLE_SCOUT_MAX_DIM = 4
+BAYESIAN_GLE_SCOUT_BUDGET_DIVISOR = 4
+BAYESIAN_GLE_SCOUT_DEFAULT_POPULATION = 30
+BAYESIAN_GLE_QMC_POLISH_WORK_PER_START_DIVISOR = 2
+
+
+def _low_discrepancy_starts(
+    low, high, n_points, seed, design_low=None, design_high=None
+):
+    try:
+        from experiments.scripts.demo_bgsa import low_discrepancy_init
+    except Exception:
+        from demo_bgsa import low_discrepancy_init
+
+    return low_discrepancy_init(
+        np.random.default_rng(seed),
+        int(n_points),
+        np.asarray(low, dtype=np.float64),
+        np.asarray(high, dtype=np.float64),
+        design_low=design_low,
+        design_high=design_high,
+    )
+
+
+def _design_bounds(prob):
+    low = np.asarray(getattr(prob, "design_low", prob.low), dtype=np.float64)
+    high = np.asarray(getattr(prob, "design_high", prob.high), dtype=np.float64)
+    return low, high
+
+
+_CUTEST_FIELDNAMES = [
+    "problem",
+    "dim",
+    "driver",
+    "seed",
+    "fevals",
+    "best_val",
+    "wall_time_s",
+    "f_x0",
+    "solved",
+]
+
+
+def _write_cutest_rows(path, rows):
+    """Write all rows to `path` (checkpoint-safe; called after each problem)."""
+    with open(path, "w", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=_CUTEST_FIELDNAMES)
+        w.writeheader()
+        w.writerows(rows)
+
+
+def _straggler_indices(chain_pos, top_k):
+    if top_k <= 0 or top_k >= len(chain_pos):
+        return list(range(len(chain_pos)))
+    pooled = np.mean(chain_pos, axis=0)
+    dists = [(i, np.linalg.norm(p - pooled)) for i, p in enumerate(chain_pos)]
+    dists.sort(key=lambda x: -x[1])
+    return [i for i, _ in dists[:top_k]]
+
+
+def _step_chain(prob, rng, cur_pos, cur_val, best_val, temp, sigma):
+    proposal = gaussian_propose(rng, cur_pos, sigma, np.float64)
+    proposal = np.clip(proposal, prob.low, prob.high)
+    proposal_val = prob.fn(proposal)
+    delta = proposal_val - cur_val
+    p = metropolis_accept_prob(delta, temp, np.float64)
+    if rng.random() < p:
+        cur_pos = proposal
+        cur_val = proposal_val
+        if proposal_val < best_val:
+            best_val = proposal_val
+    return cur_pos, cur_val, best_val
+
+
+def _step_chain_observed(prob, rng, cur_pos, cur_val, best_val, temp, sigma):
+    proposal = gaussian_propose(rng, cur_pos, sigma, np.float64)
+    proposal = np.clip(proposal, prob.low, prob.high)
+    proposal_val = prob.fn(proposal)
+    delta = proposal_val - cur_val
+    p = metropolis_accept_prob(delta, temp, np.float64)
+    accepted = bool(rng.random() < p)
+    improved = False
+    if accepted:
+        cur_pos = proposal
+        cur_val = proposal_val
+        if proposal_val < best_val:
+            best_val = proposal_val
+            improved = True
+    return cur_pos, cur_val, best_val, accepted, improved
+
+
+def classical_sa(prob, seed, n_epochs, k_fixed, sigma=None, t_init=5.0):
+    rng = np.random.default_rng(seed)
+    if sigma is None:
+        sigma = _auto_sigma(prob)
+    design_low, design_high = _design_bounds(prob)
+    cur_pos = _low_discrepancy_starts(
+        prob.low, prob.high, 1, seed, design_low, design_high
+    )[0]
+    cur_val = prob.fn(cur_pos)
+    best_val = cur_val
+    n_calls = 1
+    for epoch in range(n_epochs):
+        temp = log_cool(t_init, 2.0, epoch, np.float64)
+        for _ in range(k_fixed):
+            proposal = gaussian_propose(rng, cur_pos, sigma, np.float64)
+            proposal = np.clip(proposal, prob.low, prob.high)
+            proposal_val = prob.fn(proposal)
+            n_calls += 1
+            delta = proposal_val - cur_val
+            p = metropolis_accept_prob(delta, temp, np.float64)
+            if rng.random() < p:
+                cur_pos = proposal
+                cur_val = proposal_val
+                if proposal_val < best_val:
+                    best_val = proposal_val
+    return best_val, n_calls
+
+
+def mcmc_sa(
+    prob,
+    seed,
+    n_epochs,
+    n_chains,
+    k_min,
+    k_check,
+    k_max,
+    rhat_threshold,
+    sigma=None,
+    t_init=5.0,
+    sparse=False,
+    straggler_top_k=0,
+):
+    if sigma is None:
+        sigma = _auto_sigma(prob)
+    design_low, design_high = _design_bounds(prob)
+    starts = _low_discrepancy_starts(
+        prob.low, prob.high, n_chains, seed, design_low, design_high
+    )
+    rngs = [np.random.default_rng(seed + c) for c in range(n_chains)]
+    chain_pos = [starts[c].copy() for c in range(n_chains)]
+    chain_val = [prob.fn(p) for p in chain_pos]
+    chain_best_val = list(chain_val)
+    n_calls = n_chains
+    for epoch in range(n_epochs):
+        temp = log_cool(t_init, 2.0, epoch, np.float64)
+        traces = [[] for _ in range(n_chains)]
+        for _ in range(k_min):
+            for c in range(n_chains):
+                proposal = gaussian_propose(rngs[c], chain_pos[c], sigma, np.float64)
+                proposal = np.clip(proposal, prob.low, prob.high)
+                proposal_val = prob.fn(proposal)
+                n_calls += 1
+                delta = proposal_val - chain_val[c]
+                p = metropolis_accept_prob(delta, temp, np.float64)
+                if rngs[c].random() < p:
+                    chain_pos[c] = proposal
+                    chain_val[c] = proposal_val
+                    if proposal_val < chain_best_val[c]:
+                        chain_best_val[c] = proposal_val
+                traces[c].append(chain_pos[c].copy())
+        total_steps = k_min
+        rhat = gelman_rubin_max(traces)
+        while rhat > rhat_threshold and total_steps < k_max:
+            if sparse and 0 < straggler_top_k < n_chains:
+                active = _straggler_indices(chain_pos, straggler_top_k)
+            else:
+                active = list(range(n_chains))
+            batch = min(k_check, k_max - total_steps)
+            for _ in range(batch):
+                for c in active:
+                    chain_pos[c], chain_val[c], chain_best_val[c] = _step_chain(
+                        prob,
+                        rngs[c],
+                        chain_pos[c],
+                        chain_val[c],
+                        chain_best_val[c],
+                        temp,
+                        sigma,
+                    )
+                    n_calls += 1
+                    traces[c].append(chain_pos[c].copy())
+                for c in range(n_chains):
+                    if c not in active:
+                        traces[c].append(chain_pos[c].copy())
+            total_steps += batch
+            rhat = gelman_rubin_max(traces)
+    return min(chain_best_val), n_calls
+
+
+def _append_budgeted_round(traces, chain_pos, step_active):
+    step_active = set(step_active)
+    for c in range(len(chain_pos)):
+        if c not in step_active:
+            traces[c].append(chain_pos[c].copy())
+
+
+def _budgeted_step_round(
+    prob,
+    rngs,
+    chain_pos,
+    chain_val,
+    chain_best_val,
+    traces,
+    active,
+    remaining,
+    temp,
+    sigma,
+):
+    stepped = []
+    for c in active[:remaining]:
+        chain_pos[c], chain_val[c], chain_best_val[c] = _step_chain(
+            prob, rngs[c], chain_pos[c], chain_val[c], chain_best_val[c], temp, sigma
+        )
+        traces[c].append(chain_pos[c].copy())
+        stepped.append(c)
+    _append_budgeted_round(traces, chain_pos, stepped)
+    return len(stepped)
+
+
+def mcmc_sa_budgeted(
+    prob,
+    seed,
+    n_epochs,
+    n_chains,
+    epoch_budget,
+    k_min=30,
+    k_check=20,
+    rhat_threshold=1.2,
+    sigma=None,
+    t_init=5.0,
+    sparse=False,
+    straggler_top_k=0,
+):
+    if n_chains < 1:
+        raise ValueError("n_chains must be positive")
+    if epoch_budget < 1:
+        raise ValueError("epoch_budget must be positive")
+
+    if sigma is None:
+        sigma = _auto_sigma(prob)
+    design_low, design_high = _design_bounds(prob)
+    starts = _low_discrepancy_starts(
+        prob.low, prob.high, n_chains, seed, design_low, design_high
+    )
+    rngs = [np.random.default_rng(seed + c) for c in range(n_chains)]
+    chain_pos = [starts[c].copy() for c in range(n_chains)]
+    chain_val = [prob.fn(p) for p in chain_pos]
+    chain_best_val = list(chain_val)
+    n_calls = n_chains
+    for epoch in range(n_epochs):
+        temp = log_cool(t_init, 2.0, epoch, np.float64)
+        traces = [[] for _ in range(n_chains)]
+        epoch_calls = 0
+
+        min_rounds = min(k_min, epoch_budget // n_chains)
+        for _ in range(min_rounds):
+            epoch_calls += _budgeted_step_round(
+                prob,
+                rngs,
+                chain_pos,
+                chain_val,
+                chain_best_val,
+                traces,
+                list(range(n_chains)),
+                epoch_budget - epoch_calls,
+                temp,
+                sigma,
+            )
+        while epoch_calls < epoch_budget:
+            rhat = gelman_rubin_max(traces)
+            if rhat <= rhat_threshold:
+                break
+            if sparse and 0 < straggler_top_k < n_chains:
+                active = _straggler_indices(chain_pos, straggler_top_k)
+            else:
+                active = list(range(n_chains))
+            for _ in range(k_check):
+                if epoch_calls >= epoch_budget:
+                    break
+                epoch_calls += _budgeted_step_round(
+                    prob,
+                    rngs,
+                    chain_pos,
+                    chain_val,
+                    chain_best_val,
+                    traces,
+                    active,
+                    epoch_budget - epoch_calls,
+                    temp,
+                    sigma,
+                )
+        n_calls += epoch_calls
+    return min(chain_best_val), n_calls
+
+
+def _geometric_ladder(t_cold, t_hot, n_chains):
+    if n_chains < 1:
+        raise ValueError("n_chains must be positive")
+    if n_chains == 1:
+        return np.array([t_cold], dtype=np.float64)
+    if t_cold <= 0 or t_hot <= t_cold:
+        raise ValueError("temperature ladder requires 0 < t_cold < t_hot")
+    ratios = np.linspace(0.0, 1.0, n_chains)
+    return t_cold * (t_hot / t_cold) ** ratios
+
+
+def _pt_swap_accept_prob(f_i, t_i, f_j, t_j):
+    log_alpha = (1.0 / t_i - 1.0 / t_j) * (f_i - f_j)
+    if log_alpha >= 0.0:
+        return 1.0
+    return float(np.exp(max(log_alpha, -745.0)))
+
+
+def pt_sa_budgeted(
+    prob,
+    seed,
+    n_epochs,
+    n_chains,
+    epoch_budget,
+    swap_period=5,
+    sigma=None,
+    t_init=5.0,
+    t_hot_multiplier=4.0,
+    return_diagnostics=False,
+):
+    if n_chains < 1:
+        raise ValueError("n_chains must be positive")
+    if epoch_budget < 1:
+        raise ValueError("epoch_budget must be positive")
+    if swap_period < 1:
+        raise ValueError("swap_period must be positive")
+    if t_hot_multiplier <= 1.0:
+        raise ValueError("t_hot_multiplier must exceed one")
+
+    if sigma is None:
+        sigma = _auto_sigma(prob)
+    design_low, design_high = _design_bounds(prob)
+    starts = _low_discrepancy_starts(
+        prob.low, prob.high, n_chains, seed, design_low, design_high
+    )
+    rngs = [np.random.default_rng(seed + c) for c in range(n_chains)]
+    swap_rng = np.random.default_rng(seed + n_chains + 1)
+    chain_pos = [starts[c].copy() for c in range(n_chains)]
+    chain_val = [prob.fn(p) for p in chain_pos]
+    chain_best_val = list(chain_val)
+    best_val = min(chain_best_val)
+    n_calls = n_chains
+    swap_attempts = 0
+    swap_accepts = 0
+
+    for epoch in range(n_epochs):
+        cold_temp = log_cool(t_init, 2.0, epoch, np.float64)
+        temps = _geometric_ladder(cold_temp, cold_temp * t_hot_multiplier, n_chains)
+        epoch_calls = 0
+        rounds = 0
+        while epoch_calls < epoch_budget:
+            for c in range(n_chains):
+                if epoch_calls >= epoch_budget:
+                    break
+                chain_pos[c], chain_val[c], chain_best_val[c] = _step_chain(
+                    prob,
+                    rngs[c],
+                    chain_pos[c],
+                    chain_val[c],
+                    chain_best_val[c],
+                    temps[c],
+                    sigma,
+                )
+                n_calls += 1
+                epoch_calls += 1
+                if chain_best_val[c] < best_val:
+                    best_val = chain_best_val[c]
+            rounds += 1
+            if n_chains > 1 and rounds % swap_period == 0:
+                i = int(swap_rng.integers(0, n_chains - 1))
+                alpha = _pt_swap_accept_prob(
+                    chain_val[i], temps[i], chain_val[i + 1], temps[i + 1]
+                )
+                swap_attempts += 1
+                if swap_rng.random() < alpha:
+                    chain_pos[i], chain_pos[i + 1] = chain_pos[i + 1], chain_pos[i]
+                    chain_val[i], chain_val[i + 1] = chain_val[i + 1], chain_val[i]
+                    swap_accepts += 1
+
+    if return_diagnostics:
+        return (
+            best_val,
+            n_calls,
+            {
+                "swap_attempts": swap_attempts,
+                "swap_accepts": swap_accepts,
+            },
+        )
+    return best_val, n_calls
+
+
+def _auto_chain_count(prob, max_fevals):
+    dim = int(getattr(prob, "dim", len(prob.low)))
+    budget_limited = max(2, min(4, max_fevals // 64))
+    dim_limited = max(2, min(4, int(np.ceil(np.sqrt(max(dim, 1))))))
+    return max(1, min(budget_limited, dim_limited, max_fevals))
+
+
+def _auto_sigma(prob):
+    """Per-coordinate Gaussian proposal scale for random-walk Metropolis.
+
+    The optimal RWM scale falls as 1/sqrt(dim): with a fixed per-coordinate
+    sigma the total step magnitude grows as sigma*sqrt(dim), so acceptance
+    collapses to zero in high dimension and the chain freezes. Scaling the
+    per-coordinate sigma by the box diagonal divided by dim keeps the total
+    step magnitude at O(box) across dimensions.
+    """
+    low = np.asarray(prob.low, dtype=np.float64)
+    high = np.asarray(prob.high, dtype=np.float64)
+    dim = max(len(low), 1)
+    diag = float(np.linalg.norm(high - low))
+    if not np.isfinite(diag) or diag <= 0.0:
+        diag = float(np.sqrt(dim))
+    per_coord_width = diag / np.sqrt(dim)
+    sigma = 0.25 * diag / dim  # = 0.25 * per_coord_width / sqrt(dim)
+    return float(np.clip(sigma, 1e-6, per_coord_width))
+
+
+def _auto_initial_temperature(chain_val):
+    vals = np.asarray(chain_val, dtype=np.float64)
+    finite = vals[np.isfinite(vals)]
+    if finite.size < 2:
+        return 1.0
+    scale = float(np.std(finite))
+    if not np.isfinite(scale) or scale <= 1e-12:
+        scale = float(np.median(np.abs(finite)))
+    return float(np.clip(scale, 1e-6, 5.0))
+
+
+class _BudgetExhausted(RuntimeError):
+    pass
+
+
+class _BudgetedObjective:
+    def __init__(self, prob, max_fevals):
+        if max_fevals < 1:
+            raise ValueError("max_fevals must be positive")
+        self.prob = prob
+        self.max_fevals = int(max_fevals)
+        self.n_calls = 0
+        self.best_val = float("inf")
+        self.best_pos = None
+
+    def __call__(self, x):
+        if self.n_calls >= self.max_fevals:
+            raise _BudgetExhausted
+        x = np.clip(
+            np.asarray(x, dtype=np.float64).reshape(-1),
+            self.prob.low,
+            self.prob.high,
+        )
+        value = float(self.prob.fn(x))
+        self.n_calls += 1
+        if np.isfinite(value) and value < self.best_val:
+            self.best_val = value
+            self.best_pos = x.copy()
+        return value
+
+    def result(self, fallback=float("inf")):
+        if np.isfinite(self.best_val):
+            return self.best_val, self.n_calls
+        return float(fallback), self.n_calls
+
+
+def _scipy_bounds(prob):
+    design_low, design_high = _design_bounds(prob)
+    return list(zip(design_low.tolist(), design_high.tolist()))
+
+
+def _scipy_start(prob, seed):
+    design_low, design_high = _design_bounds(prob)
+    return _low_discrepancy_starts(
+        prob.low, prob.high, 1, seed, design_low, design_high
+    )[0]
+
+
+def scipy_lbfgsb(prob, seed, max_fevals):
+    from scipy import optimize
+
+    obj = _BudgetedObjective(prob, max_fevals)
+    bounds = _scipy_bounds(prob)
+    x0 = _scipy_start(prob, seed)
+    fallback = float("inf")
+    try:
+        res = optimize.minimize(
+            obj,
+            x0,
+            method="L-BFGS-B",
+            bounds=bounds,
+            options={"maxfun": int(max_fevals), "maxiter": int(max_fevals)},
+        )
+        fallback = float(getattr(res, "fun", fallback))
+    except _BudgetExhausted:
+        pass
+    return obj.result(fallback)
+
+
+def scipy_de(prob, seed, max_fevals):
+    from scipy import optimize
+
+    obj = _BudgetedObjective(prob, max_fevals)
+    dim = max(int(getattr(prob, "dim", len(prob.low))), 1)
+    popsize = max(3, min(15, int(max_fevals) // max(2 * dim, 1)))
+    generation = max(popsize * dim, 1)
+    maxiter = max(1, int(max_fevals) // generation)
+    fallback = float("inf")
+    try:
+        res = optimize.differential_evolution(
+            obj,
+            _scipy_bounds(prob),
+            maxiter=maxiter,
+            popsize=popsize,
+            polish=False,
+            init="sobol",
+            tol=0.0,
+            atol=0.0,
+            rng=seed,
+        )
+        fallback = float(getattr(res, "fun", fallback))
+    except _BudgetExhausted:
+        pass
+    return obj.result(fallback)
+
+
+def scipy_dual_annealing(prob, seed, max_fevals):
+    from scipy import optimize
+
+    obj = _BudgetedObjective(prob, max_fevals)
+    fallback = float("inf")
+    try:
+        res = optimize.dual_annealing(
+            obj,
+            _scipy_bounds(prob),
+            maxfun=int(max_fevals),
+            rng=seed,
+            x0=_scipy_start(prob, seed),
+        )
+        fallback = float(getattr(res, "fun", fallback))
+    except _BudgetExhausted:
+        pass
+    return obj.result(fallback)
+
+
+def scipy_basinhopping(prob, seed, max_fevals):
+    from scipy import optimize
+
+    obj = _BudgetedObjective(prob, max_fevals)
+    dim = max(int(getattr(prob, "dim", len(prob.low))), 1)
+    local_budget = max(1, int(max_fevals) // max(4, dim))
+    niter = max(1, int(max_fevals) // max(local_budget, 1) - 1)
+    fallback = float("inf")
+    try:
+        res = optimize.basinhopping(
+            obj,
+            _scipy_start(prob, seed),
+            niter=niter,
+            stepsize=_auto_sigma(prob),
+            minimizer_kwargs={
+                "method": "L-BFGS-B",
+                "bounds": _scipy_bounds(prob),
+                "options": {"maxfun": local_budget, "maxiter": local_budget},
+            },
+            rng=seed,
+        )
+        fallback = float(getattr(res, "fun", fallback))
+    except _BudgetExhausted:
+        pass
+    return obj.result(fallback)
+
+
+def scipy_direct(prob, seed, max_fevals):
+    from scipy import optimize
+
+    obj = _BudgetedObjective(prob, max_fevals)
+    fallback = float("inf")
+    try:
+        res = optimize.direct(
+            obj,
+            _scipy_bounds(prob),
+            maxfun=int(max_fevals),
+            maxiter=int(max_fevals),
+        )
+        fallback = float(getattr(res, "fun", fallback))
+    except _BudgetExhausted:
+        pass
+    return obj.result(fallback)
+
+
+def scipy_shgo(prob, seed, max_fevals):
+    from scipy import optimize
+
+    obj = _BudgetedObjective(prob, max_fevals)
+    dim = max(int(getattr(prob, "dim", len(prob.low))), 1)
+    n = max(dim + 1, min(int(max_fevals), 2 * dim + 1))
+    fallback = float("inf")
+    try:
+        res = optimize.shgo(
+            obj,
+            _scipy_bounds(prob),
+            n=n,
+            iters=max(1, int(max_fevals) // max(n, 1)),
+            minimizer_kwargs={
+                "method": "L-BFGS-B",
+                "bounds": _scipy_bounds(prob),
+                "options": {"maxfun": int(max_fevals), "maxiter": int(max_fevals)},
+            },
+            sampling_method="sobol",
+        )
+        fallback = float(getattr(res, "fun", fallback))
+    except _BudgetExhausted:
+        pass
+    return obj.result(fallback)
+
+
+def scipy_cobyqa(prob, seed, max_fevals):
+    from scipy import optimize
+
+    obj = _BudgetedObjective(prob, max_fevals)
+    fallback = float("inf")
+    try:
+        res = optimize.minimize(
+            obj,
+            _scipy_start(prob, seed),
+            method="COBYQA",
+            bounds=_scipy_bounds(prob),
+            options={
+                "maxfev": int(max_fevals),
+                "maxiter": int(max_fevals),
+                "scale": True,
+            },
+        )
+        fallback = float(getattr(res, "fun", fallback))
+    except _BudgetExhausted:
+        pass
+    return obj.result(fallback)
+
+
+def pdfo_bobyqa(prob, seed, max_fevals):
+    import pdfo
+
+    obj = _BudgetedObjective(prob, max_fevals)
+    fallback = float("inf")
+    try:
+        res = pdfo.pdfo(
+            obj,
+            _scipy_start(prob, seed),
+            method="bobyqa",
+            bounds=np.asarray(_scipy_bounds(prob), dtype=np.float64),
+            options={
+                "maxfev": int(max_fevals),
+                "quiet": True,
+                "scale": True,
+            },
+        )
+        fallback = float(getattr(res, "fun", fallback))
+    except _BudgetExhausted:
+        pass
+    return obj.result(fallback)
+
+
+def pdfo_bobyqa_available():
+    try:
+        import pdfo.gethuge  # noqa: F401
+    except Exception:
+        return False
+    return True
+
+
+def cma_es(prob, seed, max_fevals):
+    import cma
+
+    obj = _BudgetedObjective(prob, max_fevals)
+    low, high = _design_bounds(prob)
+    fallback = float("inf")
+    try:
+        _xbest, _es = cma.fmin2(
+            obj,
+            _scipy_start(prob, seed),
+            _auto_sigma(prob),
+            options={
+                "bounds": [low.tolist(), high.tolist()],
+                "maxfevals": int(max_fevals),
+                "seed": int(seed),
+                "verbose": -9,
+            },
+        )
+        fallback = obj.best_val
+    except _BudgetExhausted:
+        pass
+    return obj.result(fallback)
+
+
+SCIPY_DRIVERS = {
+    "scipy_lbfgsb": scipy_lbfgsb,
+    "scipy_de": scipy_de,
+    "scipy_dual_annealing": scipy_dual_annealing,
+    "scipy_basinhopping": scipy_basinhopping,
+    "scipy_direct": scipy_direct,
+    "scipy_shgo": scipy_shgo,
+    "scipy_cobyqa": scipy_cobyqa,
+    "pdfo_bobyqa": pdfo_bobyqa,
+    "cma_es": cma_es,
+}
+
+
+def bayesian_mixing_sa(prob, seed, max_fevals, return_diagnostics=False):
+    if max_fevals < 1:
+        raise ValueError("max_fevals must be positive")
+
+    n_chains = _auto_chain_count(prob, max_fevals)
+    design_low, design_high = _design_bounds(prob)
+    starts = _low_discrepancy_starts(
+        prob.low, prob.high, n_chains, seed, design_low, design_high
+    )
+    rngs = [np.random.default_rng(seed + c) for c in range(n_chains)]
+    controller_rng = np.random.default_rng(seed + 10_007)
+    chain_pos = [starts[c].copy() for c in range(n_chains)]
+    chain_val = [prob.fn(p) for p in chain_pos]
+    chain_best_val = list(chain_val)
+    n_calls = n_chains
+    best_val = min(chain_best_val)
+    if n_calls >= max_fevals:
+        if return_diagnostics:
+            return (
+                best_val,
+                n_calls,
+                {
+                    "n_chains": n_chains,
+                    "swap_attempts": 0,
+                    "swap_accepts": 0,
+                    "posterior_accept_mean": 0.5,
+                    "posterior_improve_mean": 0.5,
+                    "proposal_counts": [0] * n_chains,
+                },
+            )
+        return best_val, n_calls
+
+    base_sigma = _auto_sigma(prob)
+    log_sigma = np.full(n_chains, np.log(base_sigma), dtype=np.float64)
+    t_init = _auto_initial_temperature(chain_val)
+    improve_alpha = np.ones(n_chains, dtype=np.float64)
+    improve_beta = np.ones(n_chains, dtype=np.float64)
+    improve_alpha[0] = 4.0
+    if n_chains > 1:
+        improve_beta[1:] = 4.0
+    accept_alpha = np.ones(n_chains, dtype=np.float64)
+    accept_beta = np.ones(n_chains, dtype=np.float64)
+    swap_alpha = np.ones(max(n_chains - 1, 1), dtype=np.float64)
+    swap_beta = np.ones(max(n_chains - 1, 1), dtype=np.float64)
+    ladder_log_span = np.log(4.0)
+    swap_attempts = 0
+    swap_accepts = 0
+    proposals_since_swap = 0
+    proposal_counts = np.zeros(n_chains, dtype=np.int64)
+    proposal_budget = max_fevals - n_calls
+    incumbent_chain = 0
+
+    while n_calls < max_fevals:
+        progress = (n_calls - n_chains) / max(proposal_budget, 1)
+        cold_temp = max(t_init / np.log(2.0 + 20.0 * progress), 1e-12)
+        temps = _geometric_ladder(
+            cold_temp,
+            cold_temp * float(np.exp(ladder_log_span)),
+            n_chains,
+        )
+        best_chain = incumbent_chain
+        utility = controller_rng.beta(improve_alpha, improve_beta)
+        challenger_idx = int(np.argmax(utility))
+        if (
+            challenger_idx != best_chain
+            and utility[challenger_idx] > utility[best_chain] + 0.05
+        ):
+            chain_idx = challenger_idx
+        else:
+            chain_idx = best_chain
+        sigma = float(np.exp(log_sigma[chain_idx]))
+        temp = cold_temp if chain_idx == best_chain else temps[chain_idx]
+        (
+            chain_pos[chain_idx],
+            chain_val[chain_idx],
+            chain_best_val[chain_idx],
+            accepted,
+            _improved,
+        ) = _step_chain_observed(
+            prob,
+            rngs[chain_idx],
+            chain_pos[chain_idx],
+            chain_val[chain_idx],
+            chain_best_val[chain_idx],
+            temp,
+            sigma,
+        )
+        n_calls += 1
+        proposals_since_swap += 1
+        proposal_counts[chain_idx] += 1
+
+        accept_alpha[chain_idx] += 1.0 if accepted else 0.0
+        accept_beta[chain_idx] += 0.0 if accepted else 1.0
+        global_improved = chain_best_val[chain_idx] < best_val
+        if global_improved:
+            improve_alpha[chain_idx] += 1.0
+        else:
+            improve_beta[chain_idx] += 1.0
+        accept_mean = accept_alpha[chain_idx] / (
+            accept_alpha[chain_idx] + accept_beta[chain_idx]
+        )
+        log_sigma[chain_idx] += 0.05 * (accept_mean - TARGET_ACCEPT_RATE)
+        log_sigma[chain_idx] = np.clip(
+            log_sigma[chain_idx],
+            np.log(base_sigma / 32.0),
+            np.log(base_sigma * 32.0),
+        )
+        if global_improved:
+            best_val = chain_best_val[chain_idx]
+            incumbent_chain = chain_idx
+
+        if n_chains > 1 and proposals_since_swap >= n_chains:
+            pair_scores = controller_rng.beta(swap_alpha, swap_beta)
+            pair_idx = int(np.argmin(pair_scores))
+            alpha = _pt_swap_accept_prob(
+                chain_val[pair_idx],
+                temps[pair_idx],
+                chain_val[pair_idx + 1],
+                temps[pair_idx + 1],
+            )
+            swap_attempts += 1
+            accepted_swap = bool(controller_rng.random() < alpha)
+            if accepted_swap:
+                chain_pos[pair_idx], chain_pos[pair_idx + 1] = (
+                    chain_pos[pair_idx + 1],
+                    chain_pos[pair_idx],
+                )
+                chain_val[pair_idx], chain_val[pair_idx + 1] = (
+                    chain_val[pair_idx + 1],
+                    chain_val[pair_idx],
+                )
+                swap_accepts += 1
+                swap_alpha[pair_idx] += 1.0
+            else:
+                swap_beta[pair_idx] += 1.0
+            swap_mean = swap_alpha[pair_idx] / (
+                swap_alpha[pair_idx] + swap_beta[pair_idx]
+            )
+            ladder_log_span += 0.05 * (swap_mean - TARGET_SWAP_RATE)
+            ladder_log_span = float(np.clip(ladder_log_span, np.log(1.5), np.log(16.0)))
+            proposals_since_swap = 0
+
+    if return_diagnostics:
+        return (
+            best_val,
+            n_calls,
+            {
+                "n_chains": n_chains,
+                "swap_attempts": swap_attempts,
+                "swap_accepts": swap_accepts,
+                "posterior_accept_mean": float(
+                    np.mean(accept_alpha / (accept_alpha + accept_beta))
+                ),
+                "posterior_improve_mean": float(
+                    np.mean(improve_alpha / (improve_alpha + improve_beta))
+                ),
+                "proposal_counts": proposal_counts.tolist(),
+            },
+        )
+    return best_val, n_calls
+
+
+def portfolio_sa(prob, seed, max_fevals):
+    """Native Thompson-portfolio driver under the shared work-unit budget.
+
+    Native gradients are charged at one work unit each inside the Rust
+    budget ledger, matching the suite convention. Problems without a
+    native gradient run the values-only arm set; finite-difference
+    gradients at ``dim + 1`` units per call are not worth the spend
+    inside the shared budget.
+    """
+    if max_fevals < 1:
+        raise ValueError("max_fevals must be positive")
+    import anneal
+
+    grad_fn, grad_kind = _cutest_gradient(prob)
+    if grad_kind != "native":
+        grad_fn = None
+    design_low, design_high = _design_bounds(prob)
+    out = anneal.global_optimize(
+        prob.fn,
+        design_low,
+        design_high,
+        budget=int(max_fevals),
+        seed=int(seed),
+        grad_fn=grad_fn,
+    )
+    work_units = int(out.get("n_evals", 0)) + int(out.get("n_grads", 0))
+    return float(out.get("best_val", float("inf"))), work_units
+
+
+DRIVERS = [
+    "classical",
+    "mcmc_sa",
+    "mcmc_sa_sparse",
+    "mcmc_sa_budgeted",
+    "mcmc_sa_sparse_budgeted",
+    "pt_sa_budgeted",
+    "bayesian_mixing_sa",
+    "portfolio",
+    "additive_indep",
+    "gle_langevin",
+    "bayesian_adaptive_gle",
+    "scipy_lbfgsb",
+    "scipy_de",
+    "scipy_dual_annealing",
+    "scipy_basinhopping",
+    "scipy_direct",
+    "scipy_shgo",
+    "scipy_cobyqa",
+    "pdfo_bobyqa",
+    "cma_es",
+    "bgsa",
+    "bgsa_metad",
+    "bgsa_pt_metad",
+    "bgsa_auto",
+]
+
+
+def _rust_hmc_omelyan_grad_calls(n_trajectories, l_steps):
+    """Gradient calls made by Rust Omelyan HMC trajectories."""
+    return int(n_trajectories) * (1 + 2 * int(l_steps))
+
+
+def _rust_hmc_native_grad_work_units(n_trajectories, l_steps, total_accepted=0):
+    """Objective-equivalent work units for Rust Omelyan HMC with native gradients."""
+    n_trajectories = int(n_trajectories)
+    return (
+        1
+        + n_trajectories
+        + int(total_accepted)
+        + _rust_hmc_omelyan_grad_calls(n_trajectories, l_steps)
+    )
+
+
+def _rust_hmc_fd_work_units(dim, n_trajectories, l_steps, total_accepted=0):
+    """Objective-call work units for Rust Omelyan HMC with finite differences."""
+    n_trajectories = int(n_trajectories)
+    grad_cost = int(dim) + 1
+    return (
+        1
+        + n_trajectories
+        + int(total_accepted)
+        + grad_cost * _rust_hmc_omelyan_grad_calls(n_trajectories, l_steps)
+    )
+
+
+def _rust_hmc_max_work_units_per_trajectory(dim, l_steps, grad_kind):
+    grad_cost = 1 if grad_kind == "native" else int(dim) + 1
+    return 2 + grad_cost * (1 + 2 * int(l_steps))
+
+
+def _rust_hmc_steps_per_epoch_budget(epoch_budget, dim, l_steps, grad_kind):
+    if epoch_budget <= 0:
+        raise ValueError("epoch_budget must be positive")
+    per_trajectory = _rust_hmc_max_work_units_per_trajectory(dim, l_steps, grad_kind)
+    return max(1, int(epoch_budget) // per_trajectory)
+
+
+def _pt_hmc_inner_steps_per_epoch_budget(
+    epoch_budget, n_chains, dim, l_steps, grad_kind
+):
+    if epoch_budget <= 0:
+        raise ValueError("epoch_budget must be positive")
+    per_inner = max(1, int(n_chains)) * _rust_hmc_max_work_units_per_trajectory(
+        dim, l_steps, grad_kind
+    )
+    return max(1, int(epoch_budget) // per_inner)
+
+
+def _bgsa_pilot_budget(n_epochs, k_per_epoch, n_chains):
+    pilot_steps = max(5, min(20, int(k_per_epoch) // 10))
+    return {
+        "n_pilot": max(4, min(8, int(n_epochs) // 2)),
+        "pilot_steps": pilot_steps,
+        "n_rw_pilot": max(4, min(6, int(n_chains))),
+        "rw_steps": pilot_steps,
+        "n_scout": 4,
+    }
+
+
+def _bayesian_adaptive_gle_pilot_budget():
+    return {
+        "n_pilot": 1,
+        "pilot_steps": 1,
+        "n_rw_pilot": 0,
+        "rw_steps": 1,
+        "n_scout": 0,
+    }
+
+
+def _cutest_gradient(prob):
+    native_grad = getattr(prob, "grad", None)
+    if callable(native_grad):
+
+        def _native_grad(x):
+            return np.asarray(native_grad(x), dtype=np.float64).reshape(-1)
+
+        return _native_grad, "native"
+
+    return _finite_difference_gradient(prob), "finite-difference"
+
+
+def _finite_difference_gradient(prob):
+    def _fd_grad(x):
+        x = np.asarray(x, dtype=np.float64)
+        f0 = prob.fn(x)
+        g = np.zeros_like(x)
+        for i in range(len(x)):
+            x1 = x.copy()
+            x1[i] += FINITE_DIFFERENCE_GRAD_STEP
+            g[i] = (prob.fn(x1) - f0) / FINITE_DIFFERENCE_GRAD_STEP
+        return g
+
+    return _fd_grad
+
+
+def _run_cutest_rust_hmc(
+    anneal_module,
+    prob,
+    grad_fn,
+    grad_kind,
+    seed,
+    n_epochs,
+    epoch_budget,
+    t_map,
+    e_map,
+    L_map,
+    q_map,
+    best_pilot_pos,
+):
+    bounds_dim = int(np.asarray(prob.low).size)
+    l_steps = max(1, int(L_map))
+    q_hmc = min(float(q_map), float(np.nextafter(1.0 + 2.0 / bounds_dim, 1.0)))
+    hmc_steps_per_epoch = _rust_hmc_steps_per_epoch_budget(
+        epoch_budget, bounds_dim, l_steps, grad_kind
+    )
+    x0 = _hmc_initial_position(best_pilot_pos, bounds_dim)
+    history = anneal_module.run_hmc(
+        prob.fn,
+        grad_fn,
+        prob.low.astype(np.float64),
+        prob.high.astype(np.float64),
+        t_init=float(t_map),
+        epsilon=float(e_map),
+        l_steps=l_steps,
+        q=q_hmc,
+        n_epochs=int(n_epochs),
+        steps_per_epoch=hmc_steps_per_epoch,
+        seed=int(seed),
+        x0=x0,
+    )
+    n_trajectories = int(n_epochs) * hmc_steps_per_epoch
+    total_accepted = int(getattr(history, "total_accepted", 0))
+    if grad_kind == "native":
+        work_units = _rust_hmc_native_grad_work_units(
+            n_trajectories, l_steps, total_accepted=total_accepted
+        )
+    else:
+        work_units = _rust_hmc_fd_work_units(
+            bounds_dim, n_trajectories, l_steps, total_accepted=total_accepted
+        )
+    return float(history.best_val), work_units
+
+
+def _polish_work_units(dim, grad_kind, n_evals, n_grads):
+    grad_cost = 1 if grad_kind == "native" else int(dim) + 1
+    return int(n_evals) + grad_cost * int(n_grads)
+
+
+def _run_cutest_rust_polish(
+    anneal_module,
+    prob,
+    grad_fn,
+    grad_kind,
+    best_pilot_pos,
+    max_fevals,
+    return_stationarity=False,
+):
+    bounds_dim = int(np.asarray(prob.low).size)
+    x0 = _hmc_initial_position(best_pilot_pos, bounds_dim)
+    if x0 is None or max_fevals < 1:
+        return float("inf"), 0
+    design_low, design_high = _design_bounds(prob)
+    result = anneal_module.polish(
+        prob.fn,
+        grad_fn,
+        design_low,
+        design_high,
+        x0,
+        max_fevals=int(max_fevals),
+    )
+    work_units = _polish_work_units(
+        bounds_dim,
+        grad_kind,
+        result.get("n_evals", 0),
+        result.get("n_grads", 0),
+    )
+    best_val = float(result["best_val"])
+    if return_stationarity:
+        return best_val, work_units, bool(result.get("projected_stationary", False))
+    return best_val, work_units
+
+
+def _polish_values_agree_to_roundoff(values):
+    arr = np.asarray(values, dtype=np.float64)
+    if arr.size == 0 or not np.all(np.isfinite(arr)):
+        return False
+    scale = max(1.0, float(np.max(np.abs(arr))))
+    tolerance = np.sqrt(np.finfo(np.float64).eps) * scale
+    return float(np.max(arr) - np.min(arr)) <= tolerance
+
+
+def _values_match_to_roundoff(left, right):
+    if not np.isfinite(left) or not np.isfinite(right):
+        return False
+    scale = max(1.0, abs(float(left)), abs(float(right)))
+    tolerance = np.sqrt(np.finfo(np.float64).eps) * scale
+    return abs(float(left) - float(right)) <= tolerance
+
+
+def _polished_values_from_result(result):
+    raw_values = result.get("polished_values", ())
+    try:
+        values = np.asarray(raw_values, dtype=np.float64).reshape(-1)
+    except (TypeError, ValueError):
+        return tuple()
+    return tuple(float(value) for value in values)
+
+
+def _polished_stationary_from_result(result):
+    raw_values = result.get("polished_stationary", ())
+    try:
+        values = np.asarray(raw_values, dtype=np.bool_).reshape(-1)
+    except (TypeError, ValueError):
+        return tuple()
+    return tuple(bool(value) for value in values)
+
+
+def _polish_stationarity_supports_terminal(values, stationary):
+    value_arr = np.asarray(values, dtype=np.float64)
+    if value_arr.size == 0 or not np.all(np.isfinite(value_arr)):
+        return False
+    stationary_arr = np.asarray(stationary, dtype=np.bool_).reshape(-1)
+    return stationary_arr.size == value_arr.size and bool(np.all(stationary_arr))
+
+
+def _polish_best_dominates_sample(values):
+    arr = np.asarray(values, dtype=np.float64)
+    if arr.size < 2 or not np.all(np.isfinite(arr)):
+        return False
+    best = float(np.min(arr))
+    median = float(np.median(arr))
+    if best <= 0.0:
+        scale = max(1.0, abs(best), abs(median))
+        return median - best >= np.sqrt(np.finfo(np.float64).eps) * scale
+    return best * np.sqrt(float(arr.size)) <= median
+
+
+def _polish_bulk_dominates_worst_tail(values):
+    arr = np.sort(np.asarray(values, dtype=np.float64))
+    if arr.size < 3 or not np.all(np.isfinite(arr)):
+        return False
+    bulk_worst = float(arr[-2])
+    tail = float(arr[-1])
+    if bulk_worst <= 0.0:
+        scale = max(1.0, abs(bulk_worst), abs(tail))
+        return tail - bulk_worst >= np.sqrt(np.finfo(np.float64).eps) * scale
+    return bulk_worst * np.sqrt(float(arr.size)) <= tail
+
+
+def _polish_values_have_terminal_shape(values):
+    return (
+        _polish_values_agree_to_roundoff(values)
+        or _polish_best_dominates_sample(values)
+        or _polish_bulk_dominates_worst_tail(values)
+    )
+
+
+def _polish_values_are_terminal(values, stationary):
+    if not _polish_stationarity_supports_terminal(values, stationary):
+        return False
+    return _polish_values_have_terminal_shape(values)
+
+
+def _polish_values_replicate_terminal(previous_values, values):
+    previous_arr = np.asarray(previous_values, dtype=np.float64)
+    arr = np.asarray(values, dtype=np.float64)
+    if (
+        previous_arr.size == 0
+        or arr.size == 0
+        or not np.all(np.isfinite(previous_arr))
+        or not np.all(np.isfinite(arr))
+    ):
+        return False
+    if not _polish_values_have_terminal_shape(previous_arr):
+        return False
+    if not _polish_values_have_terminal_shape(arr):
+        return False
+    return _values_match_to_roundoff(float(np.min(previous_arr)), float(np.min(arr)))
+
+
+def _run_cutest_multistart_polish(
+    anneal_module,
+    prob,
+    grad_fn,
+    grad_kind,
+    seed,
+    n_starts,
+    max_fevals_per_start,
+):
+    if not hasattr(anneal_module, "polish"):
+        return None
+    if n_starts < 1 or max_fevals_per_start < 1:
+        return None
+    design_low, design_high = _design_bounds(prob)
+    try:
+        starts = _low_discrepancy_starts(
+            prob.low,
+            prob.high,
+            n_starts,
+            seed,
+            design_low,
+            design_high,
+        )
+    except Exception:
+        return None
+    outcomes = []
+    stationary_values = []
+    total_work = 0
+    for start in starts:
+        best_val, work_units, stationary = _run_cutest_rust_polish(
+            anneal_module,
+            prob,
+            grad_fn,
+            grad_kind,
+            start,
+            max_fevals_per_start,
+            return_stationarity=True,
+        )
+        outcomes.append(float(best_val))
+        stationary_values.append(bool(stationary))
+        total_work += int(work_units)
+    if not outcomes:
+        return None
+    return min(outcomes), total_work, outcomes, stationary_values
+
+
+def _run_cutest_best_start_polish(
+    anneal_module,
+    prob,
+    grad_fn,
+    grad_kind,
+    seed,
+    n_starts,
+    max_fevals,
+):
+    if not hasattr(anneal_module, "polish"):
+        return None
+    if n_starts < 1 or max_fevals < 1:
+        return None
+    design_low, design_high = _design_bounds(prob)
+    try:
+        starts = _low_discrepancy_starts(
+            prob.low,
+            prob.high,
+            n_starts,
+            seed,
+            design_low,
+            design_high,
+        )
+    except Exception:
+        return None
+    screened = []
+    for start in starts:
+        value = float(prob.fn(start))
+        if np.isfinite(value):
+            screened.append((value, start))
+    if not screened:
+        return None
+    screened.sort(key=lambda item: item[0])
+    if screened[0][0] > 0.0:
+        cutoff = screened[0][0] * np.sqrt(float(len(starts)))
+        candidates = [item for item in screened if item[0] <= cutoff]
+    else:
+        candidates = [screened[0]]
+    best_val = float("inf")
+    total_work = len(starts)
+    for _value, start in candidates:
+        candidate_val, work_units = _run_cutest_rust_polish(
+            anneal_module,
+            prob,
+            grad_fn,
+            grad_kind,
+            start,
+            max_fevals,
+        )
+        total_work += int(work_units)
+        if candidate_val < best_val:
+            best_val = candidate_val
+    return best_val, total_work
+
+
+def _run_cutest_raw_best_polish(
+    anneal_module,
+    prob,
+    grad_fn,
+    grad_kind,
+    seed,
+    n_starts,
+    max_fevals,
+):
+    if not hasattr(anneal_module, "polish"):
+        return None
+    if n_starts < 1 or max_fevals < 1:
+        return None
+    design_low, design_high = _design_bounds(prob)
+    try:
+        starts = _low_discrepancy_starts(
+            prob.low,
+            prob.high,
+            n_starts,
+            seed,
+            design_low,
+            design_high,
+        )
+    except Exception:
+        return None
+    screened = []
+    for start in starts:
+        value = float(prob.fn(start))
+        if np.isfinite(value):
+            screened.append((value, start))
+    if not screened:
+        return None
+    screened.sort(key=lambda item: item[0])
+    best_val, work_units = _run_cutest_rust_polish(
+        anneal_module,
+        prob,
+        grad_fn,
+        grad_kind,
+        screened[0][1],
+        max_fevals,
+    )
+    return best_val, len(starts) + int(work_units)
+
+
+def _run_cutest_qmc_polish(
+    anneal_module,
+    prob,
+    grad_fn,
+    grad_kind,
+    seed,
+    n_starts,
+    max_fevals_per_start,
+    top_k=0,
+    return_polished_values=False,
+):
+    has_objective_api = all(
+        hasattr(anneal_module, name)
+        for name in ("Bounds", "PyObjective", "qmc_polish_objective")
+    )
+    has_callable_api = hasattr(anneal_module, "qmc_polish")
+    if not has_objective_api and not has_callable_api:
+        return None
+    if n_starts < 1 or max_fevals_per_start < 1:
+        return None
+    design_low, design_high = _design_bounds(prob)
+    result = None
+    if grad_kind == "native" and has_objective_api:
+        try:
+            bounds = anneal_module.Bounds(
+                design_low,
+                design_high,
+                CUTEST_NATIVE_BOUNDS_SLACK,
+            )
+            objective = anneal_module.PyObjective(prob.fn, bounds, grad_fn=grad_fn)
+            result = anneal_module.qmc_polish_objective(
+                objective,
+                int(n_starts),
+                int(max_fevals_per_start),
+                seed=int(seed),
+                top_k=int(top_k),
+            )
+        except Exception:
+            result = None
+    if result is None:
+        if not has_callable_api:
+            return None
+        result = anneal_module.qmc_polish(
+            prob.fn,
+            grad_fn,
+            design_low,
+            design_high,
+            int(n_starts),
+            int(max_fevals_per_start),
+            seed=int(seed),
+            top_k=int(top_k),
+        )
+    work_units = _polish_work_units(
+        int(np.asarray(prob.low).size),
+        grad_kind,
+        result.get("n_evals", 0),
+        result.get("n_grads", 0),
+    )
+    best_val = float(result["best_val"])
+    if not np.isfinite(best_val):
+        return None
+    if return_polished_values:
+        return (
+            best_val,
+            work_units,
+            _polished_values_from_result(result),
+            _polished_stationary_from_result(result),
+        )
+    return best_val, work_units
+
+
+def _has_declared_cutest_bounds(prob):
+    return bool(getattr(prob, "has_cutest_bounds", False))
+
+
+def _has_finite_design_box(prob):
+    low, high = _design_bounds(prob)
+    return (
+        low.shape == high.shape
+        and low.size > 0
+        and np.all(np.isfinite(low))
+        and np.all(np.isfinite(high))
+        and np.all(high > low)
+    )
+
+
+def _bounded_polish_dimension_is_covered(dim, n_chains):
+    if dim < 1:
+        raise ValueError("dim must be positive")
+    if n_chains < 1:
+        raise ValueError("n_chains must be positive")
+    return int(dim) <= int(n_chains) * int(n_chains)
+
+
+def _bounded_polish_top_k(n_chains):
+    if n_chains < 1:
+        raise ValueError("n_chains must be positive")
+    return max(1, int(np.ceil(np.sqrt(float(n_chains)))))
+
+
+def _native_qmc_dense_dimension_is_covered(dim, n_chains):
+    if dim < 1:
+        raise ValueError("dim must be positive")
+    if n_chains < 1:
+        raise ValueError("n_chains must be positive")
+    return int(dim) <= int(n_chains) * _bounded_polish_top_k(n_chains)
+
+
+def _native_qmc_polish_start_count(dim, n_chains):
+    if dim < 1:
+        raise ValueError("dim must be positive")
+    if n_chains < 1:
+        raise ValueError("n_chains must be positive")
+    if _bounded_polish_dimension_is_covered(dim, n_chains):
+        return int(n_chains) + int(dim)
+    return int(n_chains) + int(np.ceil(np.sqrt(float(dim))))
+
+
+def _native_qmc_box_start_count(dim, n_chains):
+    if dim < 1:
+        raise ValueError("dim must be positive")
+    if n_chains < 1:
+        raise ValueError("n_chains must be positive")
+    return int(dim) * int(n_chains)
+
+
+def _native_qmc_box_top_k(n_chains):
+    if n_chains < 1:
+        raise ValueError("n_chains must be positive")
+    return int(n_chains)
+
+
+def _native_qmc_box_stage_specs(dim, n_chains, include_full_polish=True):
+    if dim < 1:
+        raise ValueError("dim must be positive")
+    if n_chains < 1:
+        raise ValueError("n_chains must be positive")
+    dim = int(dim)
+    n_chains = int(n_chains)
+    coverage = [n_chains, 2 * n_chains]
+    if dim <= n_chains * n_chains:
+        coverage.append(n_chains * n_chains)
+    seen = set()
+    specs = []
+    for multiplier in coverage:
+        n_starts = dim * multiplier
+        top_values = [n_chains]
+        if multiplier > n_chains and include_full_polish:
+            top_values.append(0)
+        if multiplier == n_chains * n_chains:
+            top_values.append(dim)
+        for top_k in top_values:
+            key = (n_starts, top_k)
+            if key in seen:
+                continue
+            seen.add(key)
+            specs.append((n_starts, top_k))
+    return tuple(specs)
+
+
+def _qmc_polish_count(n_starts, top_k):
+    if n_starts < 1:
+        raise ValueError("n_starts must be positive")
+    if top_k < 0:
+        raise ValueError("top_k must be non-negative")
+    return int(n_starts) if int(top_k) == 0 else min(int(top_k), int(n_starts))
+
+
+def _native_qmc_polish_budget(epoch_budget, dim, n_starts, top_k=0):
+    if epoch_budget < 1:
+        raise ValueError("epoch_budget must be positive")
+    if dim < 1:
+        raise ValueError("dim must be positive")
+    if n_starts < 1:
+        raise ValueError("n_starts must be positive")
+    polish_count = _qmc_polish_count(n_starts, top_k)
+    screening_work = int(n_starts)
+    remaining_work = max(1, int(epoch_budget) - screening_work)
+    per_step_work = _polish_work_units(int(dim), "native", 1, 1)
+    return max(1, remaining_work // max(1, per_step_work * polish_count))
+
+
+def _covered_local_polish_budget(epoch_budget, n_chains):
+    if epoch_budget < 1:
+        raise ValueError("epoch_budget must be positive")
+    if n_chains < 1:
+        raise ValueError("n_chains must be positive")
+    return int(epoch_budget) * int(n_chains)
+
+
+def _covered_bound_polish_budget(epoch_budget, dim, n_chains):
+    if epoch_budget < 1:
+        raise ValueError("epoch_budget must be positive")
+    if dim < 1:
+        raise ValueError("dim must be positive")
+    if n_chains < 1:
+        raise ValueError("n_chains must be positive")
+    finite_difference_sweep = int(dim) + 1
+    local_budget = int(epoch_budget) // COVERED_BOUND_POLISH_BUDGET_DIVISOR
+    return max(1, local_budget - finite_difference_sweep)
+
+
+def _hmc_initial_position(best_pilot_pos, dim: int) -> np.ndarray | None:
+    if best_pilot_pos is None:
+        return None
+    x0 = np.asarray(best_pilot_pos, dtype=np.float64)
+    if x0.shape != (int(dim),) or not np.all(np.isfinite(x0)):
+        return None
+    return np.ascontiguousarray(x0)
+
+
+def _metad_cv_supported(prob) -> bool:
+    return int(np.asarray(prob.low).size) >= 2 and int(np.asarray(prob.high).size) >= 2
+
+
+def _run_cutest_dominant_multistart_polish(
+    anneal_module,
+    prob,
+    grad_fn,
+    grad_kind,
+    seed,
+    n_chains,
+    k_per_epoch,
+):
+    auto_multistart_polish = _run_cutest_multistart_polish(
+        anneal_module,
+        prob,
+        grad_fn,
+        grad_kind,
+        seed,
+        int(n_chains),
+        int(k_per_epoch),
+    )
+    if auto_multistart_polish is None:
+        return None
+    polish_bv, polish_calls, polish_values, polish_stationary = auto_multistart_polish
+    if _polish_values_are_terminal(polish_values, polish_stationary):
+        return polish_bv, polish_calls, polish_values
+    return None
+
+
+def _run_cutest_native_qmc_box_schedule(
+    anneal_module,
+    prob,
+    grad_fn,
+    grad_kind,
+    seed,
+    n_chains,
+    k_per_epoch,
+    include_full_polish=True,
+    return_terminal=False,
+):
+    if grad_kind != "native" or not _has_finite_design_box(prob):
+        return None
+    best_val = None
+    total_work = 0
+    skip_full_polish = False
+    terminal = False
+    previous_terminal_polished_values = None
+    for n_starts, top_k in _native_qmc_box_stage_specs(
+        prob.dim,
+        n_chains,
+        include_full_polish=include_full_polish,
+    ):
+        if top_k == 0 and skip_full_polish:
+            continue
+        max_fevals_per_start = _native_qmc_polish_budget(
+            k_per_epoch,
+            prob.dim,
+            n_starts,
+            top_k=top_k,
+        )
+        # Full lanes need a moving step; top-k lanes can certify screened starts.
+        if top_k == 0 and max_fevals_per_start < PROJECTED_POLISH_MIN_FEVALS_FOR_STEP:
+            continue
+        result = _run_cutest_qmc_polish(
+            anneal_module,
+            prob,
+            grad_fn,
+            grad_kind,
+            seed,
+            n_starts,
+            max_fevals_per_start,
+            top_k=top_k,
+            return_polished_values=True,
+        )
+        if result is None:
+            continue
+        value, work_units, polished_values, polished_stationary = result
+        total_work += int(work_units)
+        if best_val is None or value < best_val:
+            best_val = value
+        if top_k != 0:
+            if _polish_values_are_terminal(polished_values, polished_stationary):
+                terminal = True
+                skip_full_polish = True
+                break
+            if _polish_values_replicate_terminal(
+                previous_terminal_polished_values,
+                polished_values,
+            ):
+                terminal = True
+                skip_full_polish = True
+                break
+            if _polish_values_have_terminal_shape(polished_values):
+                previous_terminal_polished_values = polished_values
+            else:
+                previous_terminal_polished_values = None
+    if best_val is None:
+        return None
+    if return_terminal:
+        return best_val, total_work, terminal
+    return best_val, total_work
+
+
+def _run_cutest_native_qmc_bounded_screen(
+    anneal_module,
+    prob,
+    grad_fn,
+    grad_kind,
+    seed,
+    n_chains,
+    k_per_epoch,
+):
+    if grad_kind != "native" or not _has_finite_design_box(prob):
+        return None
+    return _run_cutest_qmc_polish(
+        anneal_module,
+        prob,
+        grad_fn,
+        grad_kind,
+        seed,
+        int(prob.dim) * int(n_chains),
+        _covered_bound_polish_budget(k_per_epoch, prob.dim, n_chains),
+        top_k=_bounded_polish_top_k(n_chains),
+    )
+
+
+def _qmc_differential_population_size(dim, n_chains):
+    if dim < 1:
+        raise ValueError("dim must be positive")
+    if n_chains < 1:
+        raise ValueError("n_chains must be positive")
+    return max(4, 2 * int(dim) * int(n_chains))
+
+
+def _run_cutest_qmc_differential_search(
+    prob,
+    seed,
+    n_chains,
+    max_fevals_per_chain,
+):
+    dim = int(prob.dim)
+    if dim < 1 or n_chains < 1 or max_fevals_per_chain < 1:
+        return None
+    design_low, design_high = _design_bounds(prob)
+    pop_size = _qmc_differential_population_size(dim, n_chains)
+    best_val = float("inf")
+    best_pos = None
+    total_calls = 0
+    for chain in range(int(n_chains)):
+        chain_seed = int(seed) + int(chain)
+        rng = np.random.default_rng(chain_seed)
+        pop = np.ascontiguousarray(
+            _low_discrepancy_starts(
+                prob.low,
+                prob.high,
+                pop_size,
+                chain_seed,
+                design_low,
+                design_high,
+            )
+        )
+        values = np.asarray([float(prob.fn(x)) for x in pop], dtype=np.float64)
+        calls = int(pop_size)
+        finite = np.where(np.isfinite(values))[0]
+        if finite.size:
+            idx = int(finite[np.argmin(values[finite])])
+            if values[idx] < best_val:
+                best_val = float(values[idx])
+                best_pos = pop[idx].copy()
+        while calls < int(max_fevals_per_chain):
+            for idx in range(pop_size):
+                choices = [
+                    candidate for candidate in range(pop_size) if candidate != idx
+                ]
+                a, b, c = rng.choice(choices, 3, replace=False)
+                mutant = np.clip(
+                    pop[a] + QMC_DIFFERENTIAL_MUTATION_WEIGHT * (pop[b] - pop[c]),
+                    design_low,
+                    design_high,
+                )
+                cross = rng.random(dim) < QMC_DIFFERENTIAL_CROSSOVER_RATE
+                if not np.any(cross):
+                    cross[int(rng.integers(dim))] = True
+                trial = np.where(cross, mutant, pop[idx])
+                value = float(prob.fn(trial))
+                calls += 1
+                if np.isfinite(value) and (
+                    not np.isfinite(values[idx]) or value < values[idx]
+                ):
+                    pop[idx] = trial
+                    values[idx] = value
+                    if value < best_val:
+                        best_val = value
+                        best_pos = trial.copy()
+                if calls >= int(max_fevals_per_chain):
+                    break
+        total_calls += calls
+    if best_pos is None or not np.isfinite(best_val):
+        return None
+    return best_val, total_calls
+
+
+def _shifted_qmc_start_count(dim, n_chains):
+    if dim < 1:
+        raise ValueError("dim must be positive")
+    if n_chains < 1:
+        raise ValueError("n_chains must be positive")
+    return int(dim) * int(n_chains) * int(n_chains) * int(n_chains)
+
+
+def _shifted_qmc_top_k(n_chains):
+    if n_chains < 1:
+        raise ValueError("n_chains must be positive")
+    return int(n_chains) * int(n_chains)
+
+
+def _shifted_qmc_replicates(n_chains):
+    if n_chains < 1:
+        raise ValueError("n_chains must be positive")
+    return int(n_chains)
+
+
+def _run_cutest_shifted_qmc_polish(
+    anneal_module,
+    prob,
+    grad_fn,
+    grad_kind,
+    seed,
+    n_chains,
+    k_per_epoch,
+):
+    dim = int(prob.dim)
+    if dim < 1 or n_chains < 1 or k_per_epoch < 1:
+        return None
+    design_low, design_high = _design_bounds(prob)
+    width = design_high - design_low
+    if not np.all(np.isfinite(width)) or np.any(width <= 0.0):
+        return None
+    n_points = _shifted_qmc_start_count(dim, n_chains)
+    if hasattr(anneal_module, "shifted_qmc_polish"):
+        result = anneal_module.shifted_qmc_polish(
+            prob.fn,
+            grad_fn,
+            design_low,
+            design_high,
+            int(n_points),
+            int(k_per_epoch) * int(n_chains),
+            seed=int(seed),
+            n_replicates=_shifted_qmc_replicates(n_chains),
+            top_k=_shifted_qmc_top_k(n_chains),
+        )
+        work_units = _polish_work_units(
+            dim,
+            grad_kind,
+            result.get("n_evals", 0),
+            result.get("n_grads", 0),
+        )
+        best_val = float(result["best_val"])
+        if not np.isfinite(best_val):
+            return None
+        return best_val, work_units
+    if not hasattr(anneal_module, "polish"):
+        return None
+    starts = _low_discrepancy_starts(
+        prob.low,
+        prob.high,
+        n_points,
+        0,
+        design_low,
+        design_high,
+    )
+    unit = (starts - design_low) / width
+    shift = np.random.default_rng(int(seed)).random(dim)
+    shifted = design_low + width * np.mod(unit + shift, 1.0)
+    screened = []
+    for start in shifted:
+        value = float(prob.fn(start))
+        if np.isfinite(value):
+            screened.append((value, np.ascontiguousarray(start, dtype=np.float64)))
+    if not screened:
+        return None
+    screened.sort(key=lambda item: item[0])
+    best_val = screened[0][0]
+    total_work = int(n_points)
+    for _value, start in screened[: _shifted_qmc_top_k(n_chains)]:
+        result = anneal_module.polish(
+            prob.fn,
+            grad_fn,
+            design_low,
+            design_high,
+            start,
+            max_fevals=int(k_per_epoch) * int(n_chains),
+        )
+        total_work += _polish_work_units(
+            dim,
+            grad_kind,
+            result.get("n_evals", 0),
+            result.get("n_grads", 0),
+        )
+        value = float(result["best_val"])
+        if np.isfinite(value) and value < best_val:
+            best_val = value
+    return best_val, total_work
+
+
+def _run_cutest_additive_independence(
+    anneal_module,
+    prob,
+    seed,
+    n_epochs,
+    k_per_epoch,
+):
+    if not hasattr(anneal_module, "additive_independence"):
+        return None
+    if n_epochs < 1 or k_per_epoch < 1 or not _has_finite_design_box(prob):
+        return None
+    design_low, design_high = _design_bounds(prob)
+    max_fevals = 1 + int(n_epochs) * int(k_per_epoch)
+    try:
+        result = anneal_module.additive_independence(
+            prob.fn,
+            design_low,
+            design_high,
+            int(max_fevals),
+            seed=int(seed),
+            n_epochs=int(n_epochs),
+        )
+    except Exception:
+        return None
+    best_val = float(result["best_val"])
+    if not np.isfinite(best_val):
+        return None
+    return best_val, int(result.get("n_evals", 0))
+
+
+def _gle_langevin_screen_budget(k_per_epoch):
+    if k_per_epoch < 1:
+        raise ValueError("k_per_epoch must be positive")
+    return 1 + int(k_per_epoch)
+
+
+def _gle_core_budget(work_budget):
+    if work_budget < 1:
+        return 0
+    return max(1, int(work_budget) // 2)
+
+
+def _gle_preconditioner_probe_count(dim, gle_fevals):
+    full_sweep_grads = 2 * max(0, int(dim))
+    available = max(0, int(gle_fevals))
+    if full_sweep_grads > 0 and full_sweep_grads <= available - full_sweep_grads:
+        return int(dim)
+    return None
+
+
+def _gle_cutest_work_units(result):
+    gradient_units = max(0, int(result.get("n_evals", 0)))
+    preconditioner_grads = max(0, int(result.get("n_preconditioner_grads", 0)))
+    dynamics_grads = max(0, gradient_units - preconditioner_grads)
+    return int(gradient_units + dynamics_grads)
+
+
+def _run_cutest_gle_langevin(
+    anneal_module,
+    prob,
+    grad_fn,
+    grad_kind,
+    seed,
+    n_epochs,
+    k_per_epoch,
+):
+    has_native_preconditioned = all(
+        hasattr(anneal_module, name)
+        for name in ("Bounds", "PyObjective", "gle_langevin_preconditioned_objective")
+    )
+    has_native_scalar = all(
+        hasattr(anneal_module, name)
+        for name in ("Bounds", "PyObjective", "gle_langevin_objective")
+    )
+    has_callable_preconditioned = hasattr(anneal_module, "gle_langevin_preconditioned")
+    has_callable_scalar = hasattr(anneal_module, "gle_langevin")
+    if not (
+        has_native_preconditioned
+        or has_native_scalar
+        or has_callable_preconditioned
+        or has_callable_scalar
+    ):
+        return None
+    if grad_kind != "native":
+        return None
+    if n_epochs < 1 or k_per_epoch < 1 or not _has_finite_design_box(prob):
+        return None
+    design_low, design_high = _design_bounds(prob)
+    max_fevals = _gle_langevin_screen_budget(k_per_epoch)
+    gle_fevals = _gle_core_budget(max_fevals)
+    if gle_fevals < 1:
+        return None
+    kwargs = {
+        "seed": int(seed),
+        "n_epochs": 1,
+        "x0": 0.5 * (design_low + design_high),
+    }
+    preconditioned_kwargs = {
+        **kwargs,
+        "preconditioner_probes": _gle_preconditioner_probe_count(
+            prob.dim,
+            gle_fevals,
+        ),
+    }
+    if (
+        not has_native_preconditioned
+        and not has_callable_preconditioned
+        and hasattr(
+            anneal_module,
+            "estimate_gle_omega0",
+        )
+    ):
+        try:
+            omega0 = anneal_module.estimate_gle_omega0(
+                prob.fn,
+                grad_fn,
+                design_low,
+                design_high,
+            )
+            if np.isfinite(float(omega0)) and float(omega0) > 0.0:
+                kwargs["omega0"] = float(omega0)
+        except Exception:
+            pass
+    try:
+        if has_native_preconditioned or has_native_scalar:
+            bounds = anneal_module.Bounds(
+                design_low,
+                design_high,
+                CUTEST_NATIVE_BOUNDS_SLACK,
+            )
+            objective = anneal_module.PyObjective(prob.fn, bounds, grad_fn=grad_fn)
+            if has_native_preconditioned:
+                result = anneal_module.gle_langevin_preconditioned_objective(
+                    objective,
+                    int(gle_fevals),
+                    **preconditioned_kwargs,
+                )
+            else:
+                result = anneal_module.gle_langevin_objective(
+                    objective,
+                    int(gle_fevals),
+                    **kwargs,
+                )
+        else:
+            gle_langevin = (
+                anneal_module.gle_langevin_preconditioned
+                if has_callable_preconditioned
+                else anneal_module.gle_langevin
+            )
+            result = gle_langevin(
+                prob.fn,
+                grad_fn,
+                design_low,
+                design_high,
+                int(gle_fevals),
+                **(preconditioned_kwargs if has_callable_preconditioned else kwargs),
+            )
+    except Exception:
+        return None
+    best_val = float(result["best_val"])
+    if not np.isfinite(best_val):
+        return None
+    return best_val, _gle_cutest_work_units(result)
+
+
+def _bayesian_gle_dt(e_map):
+    try:
+        dt = float(e_map)
+    except (TypeError, ValueError):
+        dt = 0.2
+    if not np.isfinite(dt) or dt <= 0.0:
+        dt = 0.2
+    return float(np.clip(dt, 1e-4, 0.2))
+
+
+def _bayesian_gle_local_box(prob, t_map, sigma_map, best_pilot_pos, t_hot):
+    design_low, design_high = _design_bounds(prob)
+    width = design_high - design_low
+    dim = int(design_low.size)
+    midpoint = 0.5 * (design_low + design_high)
+    try:
+        center = np.asarray(best_pilot_pos, dtype=np.float64).reshape(-1)
+    except (TypeError, ValueError):
+        center = midpoint
+    if center.shape != design_low.shape or not np.all(np.isfinite(center)):
+        center = midpoint
+    center = np.clip(center, design_low, design_high)
+
+    try:
+        sigma = abs(float(sigma_map))
+    except (TypeError, ValueError):
+        sigma = _auto_sigma(prob)
+    if not np.isfinite(sigma) or sigma <= 0.0:
+        sigma = _auto_sigma(prob)
+
+    try:
+        cold = float(t_map)
+    except (TypeError, ValueError):
+        cold = 1.0
+    try:
+        hot = float(t_hot)
+    except (TypeError, ValueError):
+        hot = cold
+    cold = cold if np.isfinite(cold) and cold > 0.0 else 1.0
+    hot = hot if np.isfinite(hot) and hot > 0.0 else cold
+    temp_ratio = np.sqrt(max(hot, cold) / cold)
+
+    scalar_radius = sigma * temp_ratio * np.sqrt(max(dim, 1))
+    if not np.isfinite(scalar_radius) or scalar_radius <= 0.0:
+        scalar_radius = _auto_sigma(prob) * np.sqrt(max(dim, 1))
+    min_radius = 0.02 * width
+    max_radius = 0.5 * width
+    radius = np.clip(
+        np.full(dim, scalar_radius, dtype=np.float64),
+        min_radius,
+        max_radius,
+    )
+    low = np.maximum(design_low, center - radius)
+    high = np.minimum(design_high, center + radius)
+    bad = ~(np.isfinite(low) & np.isfinite(high) & (high > low))
+    if np.any(bad):
+        low = low.copy()
+        high = high.copy()
+        low[bad] = design_low[bad]
+        high[bad] = design_high[bad]
+    return low, high
+
+
+def _bayesian_gle_anchor(prob, best_pilot_pos):
+    design_low, design_high = _design_bounds(prob)
+    midpoint = 0.5 * (design_low + design_high)
+    candidates = []
+    try:
+        pilot_pos = np.asarray(best_pilot_pos, dtype=np.float64).reshape(-1)
+    except (TypeError, ValueError):
+        pilot_pos = None
+    if (
+        pilot_pos is not None
+        and pilot_pos.shape == midpoint.shape
+        and np.all(np.isfinite(pilot_pos))
+    ):
+        candidates.append(np.clip(pilot_pos, design_low, design_high))
+    candidates.append(midpoint)
+
+    unique = []
+    for candidate in candidates:
+        if any(np.array_equal(candidate, seen) for seen in unique):
+            continue
+        unique.append(candidate)
+
+    calls = 0
+    best_pos = unique[0]
+    best_val = float("inf")
+    for candidate in unique:
+        calls += 1
+        try:
+            value = float(prob.fn(candidate))
+        except Exception:
+            continue
+        if np.isfinite(value) and value < best_val:
+            best_val = value
+            best_pos = candidate
+    return best_pos, best_val, calls
+
+
+def _run_bayesian_gle_low_dimensional_scout(
+    anneal_module,
+    prob,
+    seed,
+    max_evals,
+):
+    dim = int(getattr(prob, "dim", np.asarray(prob.low).size))
+    if dim < 1 or dim > BAYESIAN_GLE_SCOUT_MAX_DIM or int(max_evals) < 4:
+        return None
+    if not _has_finite_design_box(prob):
+        return None
+    has_native_api = all(
+        hasattr(anneal_module, name)
+        for name in ("Bounds", "PyObjective", "qmc_best1bin_scout_objective")
+    )
+    has_callable_api = hasattr(anneal_module, "qmc_best1bin_scout")
+    if not (has_native_api or has_callable_api):
+        return None
+    design_low, design_high = _design_bounds(prob)
+    population_size = max(
+        4,
+        min(
+            BAYESIAN_GLE_SCOUT_DEFAULT_POPULATION,
+            int(max_evals),
+        ),
+    )
+    try:
+        if has_native_api:
+            bounds = anneal_module.Bounds(
+                design_low,
+                design_high,
+                CUTEST_NATIVE_BOUNDS_SLACK,
+            )
+            objective = anneal_module.PyObjective(prob.fn, bounds)
+            result = anneal_module.qmc_best1bin_scout_objective(
+                objective,
+                int(max_evals),
+                seed=int(seed),
+                population_size=int(population_size),
+            )
+        else:
+            result = anneal_module.qmc_best1bin_scout(
+                prob.fn,
+                design_low,
+                design_high,
+                int(max_evals),
+                seed=int(seed),
+                population_size=int(population_size),
+            )
+    except Exception:
+        return None
+    best_val = float(result.get("best_val", float("nan")))
+    if not np.isfinite(best_val):
+        return None
+    try:
+        best_pos = np.asarray(result.get("best_pos"), dtype=np.float64).reshape(-1)
+    except (TypeError, ValueError):
+        best_pos = None
+    if (
+        best_pos is None
+        or best_pos.shape != design_low.shape
+        or not np.all(np.isfinite(best_pos))
+    ):
+        best_pos = None
+    return best_val, int(result.get("n_evals", 0)), best_pos
+
+
+def _bayesian_gle_scout_followup_budget(
+    scout_budget,
+    gle_fevals,
+    available_work,
+):
+    if available_work < 4:
+        return 0
+    return max(4, min(int(available_work), max(int(scout_budget), int(gle_fevals))))
+
+
+def _run_bayesian_gle_qmc_polish_arm(
+    anneal_module,
+    prob,
+    grad_fn,
+    grad_kind,
+    seed,
+    available_work,
+    n_chains,
+):
+    dim = int(getattr(prob, "dim", np.asarray(prob.low).size))
+    if dim < 1 or int(available_work) < 1:
+        return None
+    has_qmc_polish = hasattr(anneal_module, "qmc_polish") or all(
+        hasattr(anneal_module, name)
+        for name in ("Bounds", "PyObjective", "qmc_polish_objective")
+    )
+    if not has_qmc_polish:
+        return None
+    n_chains = max(1, int(n_chains))
+    top_k = _bounded_polish_top_k(n_chains)
+    start_ceiling = _native_qmc_polish_start_count(dim, n_chains)
+    work_scaled_starts = max(
+        n_chains,
+        int(available_work)
+        // max(
+            1,
+            BAYESIAN_GLE_QMC_POLISH_WORK_PER_START_DIVISOR * dim
+            + BAYESIAN_GLE_QMC_POLISH_WORK_PER_START_DIVISOR,
+        ),
+    )
+    n_starts = max(1, min(start_ceiling, work_scaled_starts))
+    top_k = min(top_k, n_starts)
+    screening_work = int(n_starts)
+    if int(available_work) <= screening_work:
+        return None
+    polish_count = _qmc_polish_count(n_starts, top_k)
+    per_step_work = _polish_work_units(dim, grad_kind, 1, 1)
+    max_fevals_per_start = max(
+        1,
+        (int(available_work) - screening_work) // max(1, per_step_work * polish_count),
+    )
+    return _run_cutest_qmc_polish(
+        anneal_module,
+        prob,
+        grad_fn,
+        grad_kind,
+        int(seed),
+        int(n_starts),
+        int(max_fevals_per_start),
+        top_k=int(top_k),
+    )
+
+
+def _run_cutest_bayesian_adaptive_gle(
+    anneal_module,
+    prob,
+    grad_fn,
+    grad_kind,
+    seed,
+    max_fevals,
+    n_epochs,
+    t_map,
+    e_map,
+    sigma_map,
+    best_pilot_pos,
+    t_hot,
+    n_chains=1,
+):
+    has_native_preconditioned = all(
+        hasattr(anneal_module, name)
+        for name in ("Bounds", "PyObjective", "gle_langevin_preconditioned_objective")
+    )
+    has_native_scalar = all(
+        hasattr(anneal_module, name)
+        for name in ("Bounds", "PyObjective", "gle_langevin_objective")
+    )
+    has_callable_preconditioned = hasattr(anneal_module, "gle_langevin_preconditioned")
+    has_callable_scalar = hasattr(anneal_module, "gle_langevin")
+    if not (
+        has_native_preconditioned
+        or has_native_scalar
+        or has_callable_preconditioned
+        or has_callable_scalar
+    ):
+        return None
+    if grad_kind != "native":
+        return None
+    if n_epochs < 1 or max_fevals < 1 or not _has_finite_design_box(prob):
+        return None
+    anchor_pos, anchor_val, anchor_calls = _bayesian_gle_anchor(prob, best_pilot_pos)
+    remaining_fevals = int(max_fevals) - int(anchor_calls)
+    if remaining_fevals < 1:
+        if np.isfinite(anchor_val):
+            return anchor_val, int(anchor_calls)
+        return None
+    scout_budget = 0
+    scout_result = None
+    if int(prob.dim) <= BAYESIAN_GLE_SCOUT_MAX_DIM and remaining_fevals >= 8:
+        scout_budget = max(
+            4,
+            int(remaining_fevals) // BAYESIAN_GLE_SCOUT_BUDGET_DIVISOR,
+        )
+        scout_result = _run_bayesian_gle_low_dimensional_scout(
+            anneal_module,
+            prob,
+            int(seed) + 1,
+            int(scout_budget),
+        )
+        if scout_result is None:
+            scout_budget = 0
+    polish_budget = 0
+    gle_fevals = max(1, int(remaining_fevals) - int(scout_budget))
+    if hasattr(anneal_module, "polish") and remaining_fevals >= 4:
+        polish_budget = max(
+            1,
+            (int(remaining_fevals) - int(scout_budget))
+            // BAYESIAN_GLE_POLISH_BUDGET_DIVISOR,
+        )
+        gle_work_budget = max(
+            1,
+            int(remaining_fevals) - int(scout_budget) - int(polish_budget),
+        )
+    else:
+        gle_work_budget = int(gle_fevals)
+    gle_fevals = _gle_core_budget(gle_work_budget)
+    if gle_fevals < 1:
+        candidates = []
+        if np.isfinite(anchor_val):
+            candidates.append((float(anchor_val), int(anchor_calls)))
+        if scout_result is not None:
+            scout_val, scout_work, _scout_pos = scout_result
+            candidates.append((float(scout_val), int(anchor_calls) + int(scout_work)))
+        if candidates:
+            return min(candidates, key=lambda item: item[0])
+        return None
+    local_low, local_high = _bayesian_gle_local_box(
+        prob,
+        t_map,
+        sigma_map,
+        anchor_pos,
+        t_hot,
+    )
+    kwargs = {
+        "seed": int(seed),
+        "omega0": None,
+        "dt": _bayesian_gle_dt(e_map),
+        "n_epochs": max(1, min(int(n_epochs), int(max_fevals))),
+        "x0": np.clip(anchor_pos, local_low, local_high),
+    }
+    preconditioned_kwargs = {
+        **kwargs,
+        "preconditioner_probes": _gle_preconditioner_probe_count(
+            prob.dim,
+            gle_fevals,
+        ),
+    }
+    try:
+        result = None
+        if has_native_preconditioned or has_native_scalar:
+            bounds = anneal_module.Bounds(
+                local_low,
+                local_high,
+                CUTEST_NATIVE_BOUNDS_SLACK,
+            )
+            objective = anneal_module.PyObjective(prob.fn, bounds, grad_fn=grad_fn)
+            if has_native_preconditioned:
+                result = anneal_module.gle_langevin_preconditioned_objective(
+                    objective,
+                    int(gle_fevals),
+                    **preconditioned_kwargs,
+                )
+            else:
+                result = anneal_module.gle_langevin_objective(
+                    objective,
+                    int(gle_fevals),
+                    **kwargs,
+                )
+        if result is None:
+            gle_langevin = (
+                anneal_module.gle_langevin_preconditioned
+                if has_callable_preconditioned
+                else anneal_module.gle_langevin
+            )
+            result = gle_langevin(
+                prob.fn,
+                grad_fn,
+                local_low,
+                local_high,
+                int(gle_fevals),
+                **(preconditioned_kwargs if has_callable_preconditioned else kwargs),
+            )
+    except Exception:
+        candidates = []
+        if np.isfinite(anchor_val):
+            candidates.append((float(anchor_val), int(anchor_calls)))
+        if scout_result is not None:
+            scout_val, scout_work, _scout_pos = scout_result
+            candidates.append((float(scout_val), int(anchor_calls) + int(scout_work)))
+        if candidates:
+            return min(candidates, key=lambda item: item[0])
+        return None
+    best_val = float(result["best_val"])
+    if not np.isfinite(best_val):
+        candidates = []
+        if np.isfinite(anchor_val):
+            candidates.append((float(anchor_val), int(anchor_calls)))
+        if scout_result is not None:
+            scout_val, scout_work, _scout_pos = scout_result
+            candidates.append((float(scout_val), int(anchor_calls) + int(scout_work)))
+        if candidates:
+            return min(candidates, key=lambda item: item[0])
+        return None
+    work_units = int(anchor_calls)
+    best_pos = None
+    if scout_result is not None:
+        scout_val, scout_work, scout_pos = scout_result
+        work_units += int(scout_work)
+        if np.isfinite(scout_val) and scout_val < best_val:
+            best_val = float(scout_val)
+            best_pos = scout_pos
+    work_units += _gle_cutest_work_units(result)
+    if best_pos is None:
+        try:
+            best_pos = np.asarray(
+                result.get("best_pos", anchor_pos),
+                dtype=np.float64,
+            ).reshape(-1)
+        except (TypeError, ValueError):
+            best_pos = anchor_pos
+    if np.isfinite(anchor_val):
+        if anchor_val < best_val:
+            best_val = float(anchor_val)
+            best_pos = anchor_pos
+    if scout_result is not None:
+        scout_val, _scout_work, _scout_pos = scout_result
+        available_work = int(max_fevals) - int(work_units)
+        followup_budget = _bayesian_gle_scout_followup_budget(
+            scout_budget,
+            gle_fevals,
+            available_work,
+        )
+        if followup_budget > 0 and np.isfinite(scout_val) and scout_val <= best_val:
+            followup_scout = _run_bayesian_gle_low_dimensional_scout(
+                anneal_module,
+                prob,
+                int(seed) + 2,
+                int(followup_budget),
+            )
+            if followup_scout is not None:
+                scout_val, scout_work, scout_pos = followup_scout
+                work_units += int(scout_work)
+                if np.isfinite(scout_val) and scout_val < best_val:
+                    best_val = float(scout_val)
+                    best_pos = scout_pos
+    available_work = int(max_fevals) - int(work_units)
+    qmc_polish_result = _run_bayesian_gle_qmc_polish_arm(
+        anneal_module,
+        prob,
+        grad_fn,
+        grad_kind,
+        int(seed) + 3,
+        int(available_work),
+        int(n_chains),
+    )
+    if qmc_polish_result is not None:
+        qmc_polish_val, qmc_polish_work = qmc_polish_result
+        if int(qmc_polish_work) <= available_work:
+            work_units += int(qmc_polish_work)
+            if np.isfinite(qmc_polish_val) and qmc_polish_val < best_val:
+                best_val = float(qmc_polish_val)
+    if polish_budget > 0:
+        available_work = int(max_fevals) - int(work_units)
+        if available_work >= 2:
+            polish_start = best_pos if best_pos is not None else anchor_pos
+            if polish_start.shape == anchor_pos.shape and np.all(
+                np.isfinite(polish_start)
+            ):
+                design_low, design_high = _design_bounds(prob)
+                polish_eval_cap = max(
+                    1,
+                    min(int(polish_budget), int(available_work) // 2),
+                )
+                try:
+                    polish_result = anneal_module.polish(
+                        prob.fn,
+                        grad_fn,
+                        design_low,
+                        design_high,
+                        np.clip(polish_start, design_low, design_high),
+                        max_fevals=int(polish_eval_cap),
+                    )
+                except Exception:
+                    polish_result = None
+                if polish_result is not None:
+                    polish_val = float(polish_result["best_val"])
+                    polish_work = _polish_work_units(
+                        int(anchor_pos.size),
+                        grad_kind,
+                        polish_result.get("n_evals", 0),
+                        polish_result.get("n_grads", 0),
+                    )
+                    work_units += int(polish_work)
+                    if np.isfinite(polish_val):
+                        best_val = min(best_val, polish_val)
+    return best_val, int(work_units)
+
+
+def _combine_candidate_results(*candidates):
+    valid = [
+        candidate
+        for candidate in candidates
+        if candidate is not None and np.isfinite(float(candidate[0]))
+    ]
+    if not valid:
+        return None
+    best_val = min(value for value, _work in valid)
+    total_work = sum(int(work) for _value, work in valid)
+    return best_val, total_work
+
+
+def _finite_best_value(candidates):
+    valid = [float(value) for value, _work in candidates if np.isfinite(float(value))]
+    return min(valid) if valid else float("inf")
+
+
+def _candidate_family_matches_best(results, best_value):
+    finite = [
+        float(value) for _seed, value, _calls in results if np.isfinite(float(value))
+    ]
+    return bool(finite) and min(finite) == float(best_value)
+
+
+def _auto_portfolio_seed_offsets(seed, n_chains):
+    if n_chains < 1:
+        raise ValueError("n_chains must be positive")
+    total = int(n_chains) * int(n_chains)
+    return tuple(int(seed) + offset for offset in range(total))
+
+
+def _bgsa_run(prob, seed, n_epochs, k_per_epoch, n_chains, driver):
+    """Run a bGSA driver on a CUTEst problem.
+
+    The wrapper reuses demo_bgsa's pilot and driver functions by binding
+    OBJ_FN/LOW/HIGH/OBJ_GRAD to the CUTEst problem.
+    """
+    here = os.path.dirname(os.path.abspath(__file__))
+    if here not in sys.path:
+        sys.path.insert(0, here)
+    import demo_bgsa as d
+
+    # Save / patch globals.
+    saved = (
+        d.OBJ_FN,
+        d.OBJ_GRAD,
+        d.LOW,
+        d.HIGH,
+        getattr(d, "DESIGN_LOW", None),
+        getattr(d, "DESIGN_HIGH", None),
+    )
+    try:
+        d.OBJ_FN = prob.fn
+        grad_fn, grad_kind = _cutest_gradient(prob)
+        d.OBJ_GRAD = grad_fn
+        d.LOW = prob.low.astype(np.float64)
+        d.HIGH = prob.high.astype(np.float64)
+        d.DESIGN_LOW = getattr(prob, "design_low", prob.low).astype(np.float64)
+        d.DESIGN_HIGH = getattr(prob, "design_high", prob.high).astype(np.float64)
+        auto_best_start_polish = None
+        auto_multistart_polish = None
+        if driver == "bgsa_auto":
+            import anneal
+
+            core_qmc_available = hasattr(anneal, "qmc_polish")
+            if (
+                core_qmc_available
+                and grad_kind == "native"
+                and _has_finite_design_box(prob)
+                and not _has_declared_cutest_bounds(prob)
+            ):
+                auto_best_start_polish = _run_cutest_native_qmc_box_schedule(
+                    anneal,
+                    prob,
+                    grad_fn,
+                    grad_kind,
+                    seed,
+                    int(n_chains),
+                    int(k_per_epoch),
+                    include_full_polish=False,
+                    return_terminal=True,
+                )
+                if auto_best_start_polish is not None:
+                    polish_bv, polish_calls, qmc_terminal = auto_best_start_polish
+                    auto_best_start_polish = (polish_bv, polish_calls)
+                    if qmc_terminal and np.isfinite(float(polish_bv)):
+                        return auto_best_start_polish
+            if int(prob.dim) <= int(n_chains) and not (
+                core_qmc_available
+                and grad_kind == "native"
+                and _has_finite_design_box(prob)
+            ):
+                local_screen_starts = int(n_chains) + int(prob.dim)
+                auto_best_start_polish = _run_cutest_qmc_polish(
+                    anneal,
+                    prob,
+                    grad_fn,
+                    grad_kind,
+                    seed,
+                    local_screen_starts,
+                    _covered_local_polish_budget(k_per_epoch, n_chains),
+                    top_k=0,
+                )
+                if auto_best_start_polish is None:
+                    auto_best_start_polish = _run_cutest_best_start_polish(
+                        anneal,
+                        prob,
+                        grad_fn,
+                        grad_kind,
+                        seed,
+                        local_screen_starts,
+                        _covered_local_polish_budget(k_per_epoch, n_chains),
+                    )
+            elif _has_declared_cutest_bounds(
+                prob
+            ) and _bounded_polish_dimension_is_covered(prob.dim, n_chains):
+                if grad_kind == "native":
+                    auto_best_start_polish = _run_cutest_native_qmc_box_schedule(
+                        anneal,
+                        prob,
+                        grad_fn,
+                        grad_kind,
+                        seed,
+                        int(n_chains),
+                        int(k_per_epoch),
+                    )
+                if auto_best_start_polish is None:
+                    auto_best_start_polish = _run_cutest_qmc_polish(
+                        anneal,
+                        prob,
+                        _finite_difference_gradient(prob),
+                        "finite-difference",
+                        seed,
+                        int(n_chains),
+                        _covered_bound_polish_budget(k_per_epoch, prob.dim, n_chains),
+                        top_k=_bounded_polish_top_k(n_chains),
+                    )
+                if auto_best_start_polish is None:
+                    auto_best_start_polish = _run_cutest_raw_best_polish(
+                        anneal,
+                        prob,
+                        _finite_difference_gradient(prob),
+                        "finite-difference",
+                        seed,
+                        int(n_chains),
+                        _covered_bound_polish_budget(k_per_epoch, prob.dim, n_chains),
+                    )
+            elif _has_declared_cutest_bounds(prob) and grad_kind == "native":
+                auto_best_start_polish = _run_cutest_native_qmc_box_schedule(
+                    anneal,
+                    prob,
+                    grad_fn,
+                    grad_kind,
+                    seed,
+                    int(n_chains),
+                    int(k_per_epoch),
+                )
+                if auto_best_start_polish is None:
+                    auto_multistart_polish = _run_cutest_dominant_multistart_polish(
+                        anneal,
+                        prob,
+                        grad_fn,
+                        grad_kind,
+                        seed,
+                        int(n_chains),
+                        int(k_per_epoch),
+                    )
+            elif (
+                _has_finite_design_box(prob)
+                and grad_kind == "native"
+                and auto_best_start_polish is None
+            ):
+                auto_best_start_polish = _run_cutest_native_qmc_box_schedule(
+                    anneal,
+                    prob,
+                    grad_fn,
+                    grad_kind,
+                    seed,
+                    int(n_chains),
+                    int(k_per_epoch),
+                    include_full_polish=False,
+                )
+                if auto_best_start_polish is None:
+                    auto_multistart_polish = _run_cutest_dominant_multistart_polish(
+                        anneal,
+                        prob,
+                        grad_fn,
+                        grad_kind,
+                        seed,
+                        int(n_chains),
+                        int(k_per_epoch),
+                    )
+            else:
+                auto_multistart_polish = _run_cutest_dominant_multistart_polish(
+                    anneal,
+                    prob,
+                    grad_fn,
+                    grad_kind,
+                    seed,
+                    int(n_chains),
+                    int(k_per_epoch),
+                )
+            if (
+                auto_best_start_polish is not None
+                and core_qmc_available
+                and grad_kind == "native"
+                and _has_finite_design_box(prob)
+                and int(prob.dim) <= int(n_chains)
+            ):
+                auto_shifted_qmc_polish = _run_cutest_shifted_qmc_polish(
+                    anneal,
+                    prob,
+                    grad_fn,
+                    grad_kind,
+                    seed,
+                    int(n_chains),
+                    int(k_per_epoch),
+                )
+                qmc_extras = [auto_best_start_polish, auto_shifted_qmc_polish]
+                if not _has_declared_cutest_bounds(prob):
+                    qmc_extras.append(
+                        _run_cutest_qmc_differential_search(
+                            prob,
+                            seed,
+                            int(n_chains),
+                            1 + int(n_epochs) * int(k_per_epoch),
+                        )
+                    )
+                auto_best_start_polish = (
+                    _combine_candidate_results(*qmc_extras) or auto_best_start_polish
+                )
+        # Run the pilot.
+        pilot_budget = (
+            _bayesian_adaptive_gle_pilot_budget()
+            if driver == "bayesian_adaptive_gle"
+            else _bgsa_pilot_budget(n_epochs, k_per_epoch, n_chains)
+        )
+        out = d.run_pilot(
+            seed,
+            pilot_budget["n_pilot"],
+            pilot_budget["pilot_steps"],
+            dim=prob.dim,
+            n_rw_pilot=pilot_budget["n_rw_pilot"],
+            rw_steps=pilot_budget["rw_steps"],
+            n_scout=pilot_budget["n_scout"],
+        )
+        (
+            t_map,
+            e_map,
+            L_map,
+            q_map,
+            sigma_map,
+            best_pilot_pos,
+            pilot_calls,
+            t_hot,
+            t_rw_map,
+            features,
+        ) = out
+        if driver == "bayesian_adaptive_gle":
+            import anneal
+
+            total_budget = 1 + int(n_epochs) * int(k_per_epoch)
+            gle_budget = max(1, total_budget - int(pilot_calls))
+            gle_result = _run_cutest_bayesian_adaptive_gle(
+                anneal,
+                prob,
+                grad_fn,
+                grad_kind,
+                seed,
+                gle_budget,
+                n_epochs,
+                t_map,
+                e_map,
+                sigma_map,
+                best_pilot_pos,
+                t_hot,
+                n_chains=n_chains,
+            )
+            if gle_result is None:
+                return float("nan"), int(pilot_calls)
+            best_val, gle_calls = gle_result
+            return best_val, int(pilot_calls) + int(gle_calls)
+        if driver == "bgsa":
+            import anneal
+
+            best_val, work_units = _run_cutest_rust_hmc(
+                anneal,
+                prob,
+                grad_fn,
+                grad_kind,
+                seed,
+                n_epochs,
+                k_per_epoch,
+                t_map,
+                e_map,
+                L_map,
+                q_map,
+                best_pilot_pos,
+            )
+            return best_val, pilot_calls + work_units
+        if driver == "bgsa_metad":
+            if not _metad_cv_supported(prob):
+                import anneal
+
+                best_val, work_units = _run_cutest_rust_hmc(
+                    anneal,
+                    prob,
+                    grad_fn,
+                    grad_kind,
+                    seed,
+                    n_epochs,
+                    k_per_epoch,
+                    t_map,
+                    e_map,
+                    L_map,
+                    q_map,
+                    best_pilot_pos,
+                )
+                return best_val, pilot_calls + work_units
+            bv, nc, _, _, _, _ = d.bgsa_metad(
+                seed,
+                n_epochs,
+                k_per_epoch,
+                t_rw_map,
+                e_map,
+                L_map,
+                q_map,
+                pilot_calls,
+                sigma_rw=sigma_map,
+                best_pilot_pos=best_pilot_pos,
+            )
+            return bv, nc
+        if driver == "bgsa_pt_metad":
+            if not _metad_cv_supported(prob):
+                import anneal
+
+                best_val, work_units = _run_cutest_rust_hmc(
+                    anneal,
+                    prob,
+                    grad_fn,
+                    grad_kind,
+                    seed,
+                    n_epochs,
+                    k_per_epoch,
+                    t_map,
+                    e_map,
+                    L_map,
+                    q_map,
+                    best_pilot_pos,
+                )
+                return best_val, pilot_calls + work_units
+            bv, nc, _, _, _, _, _, _, _ = d.bgsa_pt_metad(
+                seed,
+                n_epochs,
+                n_chains,
+                t_rw_map,
+                e_map,
+                L_map,
+                q_map,
+                pilot_calls,
+                k_inner=20,
+                k_swap=5,
+                sigma_rw=sigma_map,
+                t_hot=t_hot,
+            )
+            return bv, nc
+        if driver == "bgsa_auto":
+            import anneal
+
+            candidate_budget = int(k_per_epoch)
+            hmc_bv, hmc_calls = _run_cutest_rust_hmc(
+                anneal,
+                prob,
+                grad_fn,
+                grad_kind,
+                seed,
+                n_epochs,
+                candidate_budget,
+                t_map,
+                e_map,
+                L_map,
+                q_map,
+                best_pilot_pos,
+            )
+            hybrid_inner = _pt_hmc_inner_steps_per_epoch_budget(
+                candidate_budget, n_chains, prob.dim, max(1, int(L_map)), grad_kind
+            )
+            hybrid_bv, hybrid_calls, _, _, _, _, _, _ = d.bgsa_pt_hybrid_v2(
+                seed + 3,
+                n_epochs,
+                n_chains,
+                t_map,
+                e_map,
+                L_map,
+                q_map,
+                pilot_calls=0,
+                k_inner=hybrid_inner,
+                k_swap=max(1, min(5, hybrid_inner)),
+                t_hot=t_hot,
+            )
+            outcomes = [
+                (hmc_bv, hmc_calls),
+                (hybrid_bv, hybrid_calls),
+            ]
+            if auto_best_start_polish is not None:
+                polish_bv, polish_calls = auto_best_start_polish
+                outcomes.append((polish_bv, polish_calls))
+            if auto_multistart_polish is not None:
+                polish_bv, polish_calls, _polish_values = auto_multistart_polish
+                outcomes.append((polish_bv, polish_calls))
+            if hasattr(anneal, "polish"):
+                polish_bv, polish_calls = _run_cutest_rust_polish(
+                    anneal,
+                    prob,
+                    grad_fn,
+                    grad_kind,
+                    best_pilot_pos,
+                    k_per_epoch,
+                )
+                outcomes.append((polish_bv, polish_calls))
+            mix_results = []
+            primary_mix_seeds = (int(seed), int(seed) + int(n_chains))
+            for mix_seed in primary_mix_seeds:
+                mix_bv, mix_calls = bayesian_mixing_sa(
+                    prob,
+                    mix_seed,
+                    1 + int(n_epochs) * int(k_per_epoch),
+                )
+                mix_results.append((mix_seed, mix_bv, mix_calls))
+                outcomes.append((mix_bv, mix_calls))
+            tensor_results = []
+            gle_results = []
+            tensor_gle_covered = _bounded_polish_dimension_is_covered(
+                prob.dim,
+                n_chains,
+            )
+            if tensor_gle_covered:
+                for tensor_seed in primary_mix_seeds:
+                    tensor_result = _run_cutest_additive_independence(
+                        anneal,
+                        prob,
+                        tensor_seed,
+                        n_epochs,
+                        k_per_epoch,
+                    )
+                    if tensor_result is None:
+                        continue
+                    tensor_bv, tensor_calls = tensor_result
+                    tensor_results.append((tensor_seed, tensor_bv, tensor_calls))
+                    outcomes.append((tensor_bv, tensor_calls))
+                for gle_seed in primary_mix_seeds:
+                    gle_result = _run_cutest_gle_langevin(
+                        anneal,
+                        prob,
+                        grad_fn,
+                        grad_kind,
+                        gle_seed,
+                        n_epochs,
+                        k_per_epoch,
+                    )
+                    if gle_result is None:
+                        break
+                    gle_bv, gle_calls = gle_result
+                    gle_results.append((gle_seed, gle_bv, gle_calls))
+                    outcomes.append((gle_bv, gle_calls))
+            metad_results = []
+            if _metad_cv_supported(prob):
+                metad_bv, metad_calls, _, _, _, _ = d.bgsa_metad(
+                    seed + 1,
+                    n_epochs,
+                    candidate_budget,
+                    t_rw_map,
+                    e_map,
+                    L_map,
+                    q_map,
+                    pilot_calls=0,
+                    sigma_rw=sigma_map,
+                    best_pilot_pos=best_pilot_pos,
+                )
+                metad_results.append((int(seed) + 1, metad_bv, metad_calls))
+                pt_inner = max(1, candidate_budget // max(1, int(n_chains)))
+                pt_bv, pt_calls, _, _, _, _, _, _, _ = d.bgsa_pt_metad(
+                    seed + 2,
+                    n_epochs,
+                    n_chains,
+                    t_rw_map,
+                    e_map,
+                    L_map,
+                    q_map,
+                    pilot_calls=0,
+                    k_inner=pt_inner,
+                    k_swap=max(1, min(5, pt_inner)),
+                    sigma_rw=sigma_map,
+                    t_hot=t_hot,
+                )
+                outcomes.extend([(metad_bv, metad_calls), (pt_bv, pt_calls)])
+            initial_best = _finite_best_value(outcomes)
+            if _candidate_family_matches_best(mix_results, initial_best):
+                seen_mix_seeds = {mix_seed for mix_seed, _value, _calls in mix_results}
+                for mix_seed in _auto_portfolio_seed_offsets(seed, n_chains):
+                    if mix_seed in seen_mix_seeds:
+                        continue
+                    mix_bv, mix_calls = bayesian_mixing_sa(
+                        prob,
+                        mix_seed,
+                        1 + int(n_epochs) * int(k_per_epoch),
+                    )
+                    outcomes.append((mix_bv, mix_calls))
+            if _candidate_family_matches_best(tensor_results, initial_best):
+                seen_tensor_seeds = {
+                    tensor_seed for tensor_seed, _value, _calls in tensor_results
+                }
+                for tensor_seed in _auto_portfolio_seed_offsets(seed, n_chains):
+                    if tensor_seed in seen_tensor_seeds:
+                        continue
+                    tensor_result = _run_cutest_additive_independence(
+                        anneal,
+                        prob,
+                        tensor_seed,
+                        n_epochs,
+                        k_per_epoch,
+                    )
+                    if tensor_result is not None:
+                        outcomes.append(tensor_result)
+            if _candidate_family_matches_best(gle_results, initial_best):
+                seen_gle_seeds = {gle_seed for gle_seed, _value, _calls in gle_results}
+                for gle_seed in _auto_portfolio_seed_offsets(seed, n_chains):
+                    if gle_seed in seen_gle_seeds:
+                        continue
+                    gle_result = _run_cutest_gle_langevin(
+                        anneal,
+                        prob,
+                        grad_fn,
+                        grad_kind,
+                        gle_seed,
+                        n_epochs,
+                        k_per_epoch,
+                    )
+                    if gle_result is not None:
+                        outcomes.append(gle_result)
+                    else:
+                        break
+            if _candidate_family_matches_best(metad_results, initial_best):
+                seen_metad_seeds = {
+                    metad_seed for metad_seed, _value, _calls in metad_results
+                }
+                for metad_seed in _auto_portfolio_seed_offsets(seed, n_chains):
+                    if metad_seed in seen_metad_seeds:
+                        continue
+                    metad_bv, metad_calls, _, _, _, _ = d.bgsa_metad(
+                        metad_seed,
+                        n_epochs,
+                        candidate_budget,
+                        t_rw_map,
+                        e_map,
+                        L_map,
+                        q_map,
+                        pilot_calls=0,
+                        sigma_rw=sigma_map,
+                        best_pilot_pos=best_pilot_pos,
+                    )
+                    outcomes.append((metad_bv, metad_calls))
+            finite_outcomes = [
+                (float(value), calls)
+                for value, calls in outcomes
+                if np.isfinite(float(value))
+            ]
+            best_outcomes = finite_outcomes if finite_outcomes else outcomes
+            return min(value for value, _calls in best_outcomes), pilot_calls + sum(
+                calls for _value, calls in outcomes
+            )
+        raise ValueError(f"Unknown bGSA driver: {driver}")
+    finally:
+        (
+            d.OBJ_FN,
+            d.OBJ_GRAD,
+            d.LOW,
+            d.HIGH,
+            d.DESIGN_LOW,
+            d.DESIGN_HIGH,
+        ) = saved
+
+
+def main():
+    p = argparse.ArgumentParser()
+    p.add_argument("--out", default="data/cutest_benchmarks.csv")
+    p.add_argument("--seeds", type=int, default=5)
+    p.add_argument("--n-epochs", type=int, default=20)
+    p.add_argument("--k-fixed", type=int, default=200)
+    p.add_argument("--n-chains", type=int, default=4)
+    p.add_argument("--k-min", type=int, default=30)
+    p.add_argument("--k-check", type=int, default=20)
+    p.add_argument("--k-max", type=int, default=200)
+    p.add_argument("--rhat-threshold", type=float, default=1.2)
+    p.add_argument("--straggler-top-k", type=int, default=2)
+    p.add_argument(
+        "--manifest",
+        choices=["default", "highdim"],
+        default="default",
+        help="default: 12 low-dim problems; highdim: scalable problems at n~100 "
+        "to test dimension robustness.",
+    )
+    args = p.parse_args()
+
+    os.makedirs(os.path.dirname(args.out) or ".", exist_ok=True)
+    print(f"Loading CUTEst manifest ({args.manifest})...")
+    problems = (
+        load_highdim_manifest()
+        if args.manifest == "highdim"
+        else load_default_manifest()
+    )
+    print(
+        f"Loaded {len(problems)} problems. Running {args.seeds} seeds x "
+        f"{len(DRIVERS)} drivers = {args.seeds * len(DRIVERS) * len(problems)} cells."
+    )
+
+    rows = []
+    t_start = time.perf_counter()
+    for prob in problems:
+        f0 = prob.fn((prob.low + prob.high) / 2)
+        for seed in range(args.seeds):
+            t0 = time.perf_counter()
+            bv, nc = classical_sa(prob, seed, args.n_epochs, args.k_fixed)
+            wt = time.perf_counter() - t0
+            rows.append(
+                dict(
+                    problem=prob.name,
+                    dim=prob.dim,
+                    driver="classical",
+                    seed=seed,
+                    fevals=nc,
+                    best_val=bv,
+                    wall_time_s=wt,
+                    f_x0=f0,
+                    solved=int(bv < 0.95 * f0 if f0 > 0 else bv < 1.05 * f0),
+                )
+            )
+
+            t0 = time.perf_counter()
+            bv, nc = mcmc_sa(
+                prob,
+                seed,
+                args.n_epochs,
+                args.n_chains,
+                args.k_min,
+                args.k_check,
+                args.k_max,
+                args.rhat_threshold,
+            )
+            wt = time.perf_counter() - t0
+            rows.append(
+                dict(
+                    problem=prob.name,
+                    dim=prob.dim,
+                    driver="mcmc_sa",
+                    seed=seed,
+                    fevals=nc,
+                    best_val=bv,
+                    wall_time_s=wt,
+                    f_x0=f0,
+                    solved=int(bv < 0.95 * f0 if f0 > 0 else bv < 1.05 * f0),
+                )
+            )
+
+            t0 = time.perf_counter()
+            bv, nc = mcmc_sa(
+                prob,
+                seed,
+                args.n_epochs,
+                args.n_chains,
+                args.k_min,
+                args.k_check,
+                args.k_max,
+                args.rhat_threshold,
+                sparse=True,
+                straggler_top_k=args.straggler_top_k,
+            )
+            wt = time.perf_counter() - t0
+            rows.append(
+                dict(
+                    problem=prob.name,
+                    dim=prob.dim,
+                    driver="mcmc_sa_sparse",
+                    seed=seed,
+                    fevals=nc,
+                    best_val=bv,
+                    wall_time_s=wt,
+                    f_x0=f0,
+                    solved=int(bv < 0.95 * f0 if f0 > 0 else bv < 1.05 * f0),
+                )
+            )
+
+            t0 = time.perf_counter()
+            bv, nc = mcmc_sa_budgeted(
+                prob,
+                seed,
+                args.n_epochs,
+                args.n_chains,
+                args.k_fixed,
+                args.k_min,
+                args.k_check,
+                args.rhat_threshold,
+            )
+            wt = time.perf_counter() - t0
+            rows.append(
+                dict(
+                    problem=prob.name,
+                    dim=prob.dim,
+                    driver="mcmc_sa_budgeted",
+                    seed=seed,
+                    fevals=nc,
+                    best_val=bv,
+                    wall_time_s=wt,
+                    f_x0=f0,
+                    solved=int(bv < 0.95 * f0 if f0 > 0 else bv < 1.05 * f0),
+                )
+            )
+
+            t0 = time.perf_counter()
+            bv, nc = mcmc_sa_budgeted(
+                prob,
+                seed,
+                args.n_epochs,
+                args.n_chains,
+                args.k_fixed,
+                args.k_min,
+                args.k_check,
+                args.rhat_threshold,
+                sparse=True,
+                straggler_top_k=args.straggler_top_k,
+            )
+            wt = time.perf_counter() - t0
+            rows.append(
+                dict(
+                    problem=prob.name,
+                    dim=prob.dim,
+                    driver="mcmc_sa_sparse_budgeted",
+                    seed=seed,
+                    fevals=nc,
+                    best_val=bv,
+                    wall_time_s=wt,
+                    f_x0=f0,
+                    solved=int(bv < 0.95 * f0 if f0 > 0 else bv < 1.05 * f0),
+                )
+            )
+
+            t0 = time.perf_counter()
+            bv, nc = pt_sa_budgeted(
+                prob, seed, args.n_epochs, args.n_chains, args.k_fixed
+            )
+            wt = time.perf_counter() - t0
+            rows.append(
+                dict(
+                    problem=prob.name,
+                    dim=prob.dim,
+                    driver="pt_sa_budgeted",
+                    seed=seed,
+                    fevals=nc,
+                    best_val=bv,
+                    wall_time_s=wt,
+                    f_x0=f0,
+                    solved=int(bv < 0.95 * f0 if f0 > 0 else bv < 1.05 * f0),
+                )
+            )
+
+            t0 = time.perf_counter()
+            max_fevals = 1 + args.n_epochs * args.k_fixed
+            bv, nc = bayesian_mixing_sa(prob, seed, max_fevals)
+            wt = time.perf_counter() - t0
+            rows.append(
+                dict(
+                    problem=prob.name,
+                    dim=prob.dim,
+                    driver="bayesian_mixing_sa",
+                    seed=seed,
+                    fevals=nc,
+                    best_val=bv,
+                    wall_time_s=wt,
+                    f_x0=f0,
+                    solved=int(bv < 0.95 * f0 if f0 > 0 else bv < 1.05 * f0),
+                )
+            )
+
+            # Rank-1 (mean-field) independence-sampler SA: the separable
+            # surrogate as a samplable tempered density, in the Rust core.
+            t0 = time.perf_counter()
+            try:
+                import anneal as _anneal_mod
+
+                add_budget = 1 + args.n_epochs * args.k_fixed
+                # Use the finite design box, not the raw CUTEst bounds: an
+                # unconstrained problem reports +/-1e20, and sampling the
+                # surrogate over that span would feed extreme points to the
+                # Fortran objective.
+                add_low, add_high = _design_bounds(prob)
+                add_out = _anneal_mod.additive_independence(
+                    prob.fn,
+                    np.asarray(add_low, dtype=np.float64),
+                    np.asarray(add_high, dtype=np.float64),
+                    int(add_budget),
+                    seed=int(seed),
+                )
+                bv, nc = float(add_out["best_val"]), int(add_out["n_evals"])
+            except Exception as exc:
+                print(
+                    f"    additive_indep failed on {prob.name} seed {seed}: "
+                    f"{type(exc).__name__}: {exc}"
+                )
+                bv, nc = float("nan"), 0
+            wt = time.perf_counter() - t0
+            rows.append(
+                dict(
+                    problem=prob.name,
+                    dim=prob.dim,
+                    driver="additive_indep",
+                    seed=seed,
+                    fevals=nc,
+                    best_val=bv,
+                    wall_time_s=wt,
+                    f_x0=f0,
+                    solved=int(
+                        math.isfinite(bv)
+                        and (bv < 0.95 * f0 if f0 > 0 else bv < 1.05 * f0)
+                    ),
+                )
+            )
+
+            # GLE-thermostatted Langevin: colored-noise dynamics in the Rust
+            # core. Gradient-driven; uses the native CUTEst gradient when
+            # available, else finite differences.
+            t0 = time.perf_counter()
+            try:
+                import anneal as _anneal_mod
+
+                gle_budget = 1 + args.n_epochs * args.k_fixed
+                gle_grad_fn, _gk = _cutest_gradient(prob)
+                gle_low, gle_high = _design_bounds(prob)
+                gle_out = _anneal_mod.gle_langevin(
+                    prob.fn,
+                    gle_grad_fn,
+                    np.asarray(gle_low, dtype=np.float64),
+                    np.asarray(gle_high, dtype=np.float64),
+                    int(gle_budget),
+                    seed=int(seed),
+                )
+                bv, nc = float(gle_out["best_val"]), int(gle_out["n_evals"])
+            except Exception as exc:
+                print(
+                    f"    gle_langevin failed on {prob.name} seed {seed}: "
+                    f"{type(exc).__name__}: {exc}"
+                )
+                bv, nc = float("nan"), 0
+            wt = time.perf_counter() - t0
+            rows.append(
+                dict(
+                    problem=prob.name,
+                    dim=prob.dim,
+                    driver="gle_langevin",
+                    seed=seed,
+                    fevals=nc,
+                    best_val=bv,
+                    wall_time_s=wt,
+                    f_x0=f0,
+                    solved=int(
+                        math.isfinite(bv)
+                        and (bv < 0.95 * f0 if f0 > 0 else bv < 1.05 * f0)
+                    ),
+                )
+            )
+
+            # External field at budget parity: scipy global optimisers, CMA-ES,
+            # and PDFO, each capped at the same work-unit budget as the SA/MCMC
+            # drivers via _BudgetedObjective. A missing optional package or a
+            # solver error is recorded as a non-improving cell so the sweep
+            # never dies on one driver.
+            field_budget = 1 + args.n_epochs * args.k_fixed
+            # DIRECT is exponential in dimension, SHGO builds a simplicial
+            # complex, and basin-hopping / dual annealing / COBYQA run inner
+            # restart or trust-region loops that overrun the work-unit budget by
+            # orders of magnitude at high dimension. Skip them once the problem
+            # is large enough that they would dominate wall time; the scalable,
+            # budget-respecting field (L-BFGS-B, DE, CMA-ES) remains the
+            # high-dimensional comparison.
+            _nonscalable = {
+                "scipy_direct",
+                "scipy_shgo",
+                "scipy_basinhopping",
+                "scipy_dual_annealing",
+                "scipy_cobyqa",
+            }
+            for ext_name, ext_fn in SCIPY_DRIVERS.items():
+                if prob.dim > 30 and ext_name in _nonscalable:
+                    continue
+                t0 = time.perf_counter()
+                try:
+                    bv, nc = ext_fn(prob, seed, field_budget)
+                    field_ok = True
+                except Exception as exc:
+                    print(
+                        f"    {ext_name} failed on {prob.name} seed {seed}: "
+                        f"{type(exc).__name__}: {exc}"
+                    )
+                    bv, nc, field_ok = float("nan"), 0, False
+                wt = time.perf_counter() - t0
+                rows.append(
+                    dict(
+                        problem=prob.name,
+                        dim=prob.dim,
+                        driver=ext_name,
+                        seed=seed,
+                        fevals=nc,
+                        best_val=bv,
+                        wall_time_s=wt,
+                        f_x0=f0,
+                        solved=int(
+                            field_ok and (bv < 0.95 * f0 if f0 > 0 else bv < 1.05 * f0)
+                        ),
+                    )
+                )
+
+            # bGSA stack on the same CUTEst problem.
+            for bgsa_drv in ["bgsa", "bgsa_metad", "bgsa_pt_metad", "bgsa_auto"]:
+                try:
+                    t0 = time.perf_counter()
+                    bv, nc = _bgsa_run(
+                        prob, seed, args.n_epochs, args.k_fixed, args.n_chains, bgsa_drv
+                    )
+                    wt = time.perf_counter() - t0
+                    rows.append(
+                        dict(
+                            problem=prob.name,
+                            dim=prob.dim,
+                            driver=bgsa_drv,
+                            seed=seed,
+                            fevals=nc,
+                            best_val=bv,
+                            wall_time_s=wt,
+                            f_x0=f0,
+                            solved=int(bv < 0.95 * f0 if f0 > 0 else bv < 1.05 * f0),
+                        )
+                    )
+                except Exception as exc:
+                    # Don't kill the whole sweep on a single driver failure;
+                    # mark the cell as failed and move on.
+                    print(
+                        f"    {bgsa_drv} failed on {prob.name} seed {seed}: "
+                        f"{type(exc).__name__}: {exc}"
+                    )
+                    rows.append(
+                        dict(
+                            problem=prob.name,
+                            dim=prob.dim,
+                            driver=bgsa_drv,
+                            seed=seed,
+                            fevals=0,
+                            best_val=float("nan"),
+                            wall_time_s=0.0,
+                            f_x0=f0,
+                            solved=0,
+                        )
+                    )
+        elapsed = time.perf_counter() - t_start
+        print(f"  done {prob.name:<10} (n={prob.dim:>3}) -- elapsed {elapsed:.1f}s")
+        # Checkpoint after every problem so a later hard crash (e.g. a C-level
+        # segfault in an external solver) never discards the completed rows.
+        _write_cutest_rows(args.out, rows)
+
+    _write_cutest_rows(args.out, rows)
+    print(f"\nWrote {len(rows)} rows to {args.out}")
+    for driver in DRIVERS:
+        sub = [r for r in rows if r["driver"] == driver]
+        solved = sum(r["solved"] for r in sub)
+        mean_fevals = np.mean([r["fevals"] for r in sub])
+        print(
+            f"  {driver:<16}: solved {solved}/{len(sub)} cells, mean fevals = {mean_fevals:.0f}"
+        )
+
+
+if __name__ == "__main__":
+    sys.exit(main())

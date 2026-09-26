@@ -1,0 +1,179 @@
+[workspace]
+name      = "anneal"
+version   = "0.9.0"
+description = "Simulated annealing components on the eindir typed primitives."
+channels  = ["conda-forge"]
+platforms = ["linux-64", "osx-arm64", "osx-64"]
+
+[tasks]
+test     = "cargo test"
+test-all = "cargo test --all-features"
+bench    = "cargo bench"
+build    = "cargo build --release"
+
+# towncrier newsfragments live under docs/ for changelog backfill and releases.
+# Fragments: docs/newsfragments/+foo.added.rst etc. (or 123.changed.rst).
+# Preview/build: pixi r towncrier-draft ; pixi r towncrier-build.
+towncrier-draft = { cmd = "uvx towncrier build --draft", description = "Preview release notes from newsfragments" }
+towncrier-build = { cmd = "uvx towncrier build", description = "Incorporate newsfragments into CHANGELOG.md for release preparation" }
+
+[dependencies]
+rust       = ">=1.88"
+uv         = ">=0.6.0"
+capnproto  = ">=1,<2"
+
+[feature.python.dependencies]
+python  = ">=3.10"
+maturin = ">=1.5"
+pytest  = "*"
+pip     = "*"
+array-api-compat = ">=1.12"
+
+[feature.python.tasks]
+python-build = "maturin develop --features python"
+python-test  = { cmd = "pytest pytest/", depends-on = ["python-build"] }
+
+[feature.gpu]
+platforms = ["linux-64"]
+
+[feature.gpu.pypi-dependencies]
+cupy-cuda12x = ">=13,<15"
+
+[feature.gpu.tasks]
+gpu-test = { cmd = "pytest pytest/test_device.py -q -m gpu", depends-on = ["python-build"] }
+
+[feature.docs.dependencies]
+python = ">=3.10"
+emacs  = "*"
+sphinx = ">=7,<9"
+pandoc = ">=3.1,<4"
+
+[feature.docs.pypi-dependencies]
+shibuya                    = ">=2026.1.9, <2027"
+sphinxcontrib-rust         = ">=1.0.0, <2"
+sphinx-rustdoc-postprocess = ">=0.1.0, <0.2"
+myst-parser                = ">=4.0.0, <5"
+sphinx-sitemap             = ">=2.7.0, <3"
+
+[feature.docs.tasks]
+# Keep the rustdoc generator inside the checked-out Pixi docs prefix.
+setup-rustdocgen = "test -x .pixi/envs/docs/bin/sphinx-rustdocgen || cargo install --root .pixi/envs/docs sphinx-rustdocgen"
+orgbld           = "emacs --batch -l docs/export.el"
+docbld           = { cmd = "python -m sphinx docs/source docs/build -b html", depends-on = ["orgbld", "setup-rustdocgen"] }
+
+# rgpycrumbs/rsx-rs aligned named tasks for docs (Task 1 infra).
+# These are the entry points used by the plan verify commands and CI.
+docs-export = "emacs --batch -l docs/export.el"
+docs-build = { cmd = "cd docs && python -m sphinx -b html source build -E -q", depends-on = ["docs-export", "setup-rustdocgen"] }
+docs-clean = "rm -rf docs/build docs/source/*.rst docs/source/*/*.rst"
+
+# verify profile
+#
+# Bundles the verification toolchain that backs the IISE manuscript:
+#   - sympy proofs runner (proofs/, pytest harness)
+#   - TLA+ TLC model checker (downloaded as tla2tools.jar at first use)
+#   - Apalache symbolic model checker (downloaded as a tarball at first use)
+#
+# Network: setup-tlc and setup-apalache pull JARs from the public
+# nightly.tlapl.us / GitHub release CDNs. If the host blocks outbound
+# HTTPS, both setup tasks fail and tlc-small/apalache-check fail with
+# them. Pre-stage .verify/tla2tools.jar and .verify/apalache/ manually
+# in that case (see tla/README.org).
+#
+# Aggregator: `pixi run -e verify all` smoke-runs every artefact:
+#   proofs-test (pytest) -> proofs-derive (4 thm scripts + occupancy) ->
+#   tlc-small (TLC on small.cfg) -> apalache-check (apalache.cfg).
+[feature.verify.dependencies]
+python      = ">=3.11"
+sympy       = "*"
+pytest      = "*"
+pytest-cov  = "*"
+numpy       = ">=1.24,<2"
+matplotlib  = ">=3.6"
+scipy       = ">=1.11"
+openjdk     = ">=17"
+curl        = "*"
+
+[feature.verify.pypi-dependencies]
+chemparseplot = ">=1.7.0"
+cma = ">=4.4"
+pdfo = ">=2.1"
+pycutest = ">=1.8.1, <2"
+
+[feature.verify.tasks]
+setup-tlc       = "test -f .verify/tla2tools.jar || (mkdir -p .verify && curl -L -o .verify/tla2tools.jar https://nightly.tlapl.us/dist/tla2tools.jar)"
+setup-apalache  = "test -x .verify/apalache/bin/apalache-mc || (mkdir -p .verify && curl -L https://github.com/apalache-mc/apalache/releases/download/v0.57.0/apalache.tgz | tar xz -C .verify && (test -d .verify/apalache || mv .verify/apalache-* .verify/apalache))"
+proofs-test     = "pytest proofs/tests/ -v"
+proofs-derive   = "python -m proofs.thm1_bsa_visit && python -m proofs.thm2_fsa_visit && python -m proofs.thm3_metropolis && python -m proofs.thm4_log_cool && python -m proofs.occupancy_cooperative_search"
+tlc-small       = { cmd = "java -cp .verify/tla2tools.jar tlc2.TLC tla/Workflow.tla -config tla/small.cfg -workers auto -depth 30", depends-on = ["setup-tlc"] }
+apalache-check  = { cmd = ".verify/apalache/bin/apalache-mc check --config=tla/apalache.cfg --length=20 --inv=TypeOK tla/WorkflowApalache.tla", depends-on = ["setup-apalache"] }
+exp-test        = "XDG_CACHE_HOME=.pixi/cache pytest experiments/tests/ -v"
+exp1            = "python -m experiments.exp1_underflow --out data/exp1_underflow.csv --samples 200000"
+exp2            = "python -m experiments.exp2_cancellation --out data/exp2_cancellation.csv"
+exp3            = "python -m experiments.exp3_trajectory_bias --out data/exp3_trajectory.csv --seeds 32 --n-epochs 200"
+exp4            = "python -m experiments.exp4_compensated --out data/exp4_compensated.csv --seeds 32 --n-epochs 200"
+exp3-summary    = "python -m experiments.scripts.exp3_summary data/exp3_trajectory.csv"
+bench-suite     = "python -m experiments.scripts.run_benchmarks --out data/benchmarks.csv --seeds 5 --n-epochs 100"
+bench-plots     = { cmd = "python -m experiments.scripts.render_plots data/benchmarks.csv data/", depends-on = ["bench-suite"] }
+all             = { depends-on = ["proofs-test", "proofs-derive", "tlc-small", "apalache-check"] }
+all-exp         = { depends-on = ["exp-test", "exp1", "exp2", "exp3", "exp4", "exp3-summary"] }
+all-bench       = { depends-on = ["bench-suite", "bench-plots"] }
+cutest-bootstrap = "bash experiments/benchmarks/bootstrap_cutest.sh"
+cutest-smoke    = "python -m experiments.benchmarks.cutest_runner"
+cutest-bench    = { cmd = "python -m experiments.scripts.run_cutest_benchmarks --out data/cutest_benchmarks.csv --seeds 3 --n-epochs 15", depends-on = ["python-build"] }
+cutest-plots    = { cmd = "python -m experiments.scripts.render_plots data/cutest_benchmarks.csv data/cutest/", depends-on = ["cutest-bench"] }
+cutest-full     = { cmd = "python -m experiments.scripts.run_cutest_full_suite --out data/cutest_full_rust_bgsa.csv --seeds 3 --dim-cap 50 --n-epochs 30", depends-on = ["python-build"] }
+cutest-full-summary = { cmd = "python -m experiments.scripts.summarize_cutest_benchmarks data/cutest_full_rust_bgsa.csv --out data/cutest_full_summary.csv --min-problems 216", depends-on = ["cutest-full"] }
+cutest-full-plots = { cmd = "python -m experiments.scripts.render_plots data/cutest_full_rust_bgsa.csv data/cutest-full/", depends-on = ["cutest-full"] }
+mcmc-demo       = "python -m experiments.scripts.demo_mcmc_vs_classical --seeds 8 --n-epochs 30 --out data/mcmc_demo.csv"
+bgsa-rastrigin  = "python -m experiments.scripts.demo_bgsa --objective rastrigin_5d --seeds 8 --n-epochs 100 --k-per-epoch 200 --n-pilot 20 --pilot-steps 80 --n-chains 4 --out data/bgsa_rastrigin.csv"
+bgsa-rosenbrock = "python -m experiments.scripts.demo_bgsa --objective rosenbrock_5d --seeds 8 --n-epochs 100 --k-per-epoch 200 --n-pilot 20 --pilot-steps 80 --n-chains 4 --out data/bgsa_rosenbrock.csv"
+bgsa-schwefel   = "python -m experiments.scripts.demo_bgsa --objective schwefel_20d --seeds 8 --n-epochs 100 --k-per-epoch 200 --n-pilot 20 --pilot-steps 80 --n-chains 4 --out data/bgsa_schwefel.csv"
+bgsa-cross-plot = { cmd = "python -m experiments.scripts.plot_cross_landscape --rastrigin data/bgsa_rastrigin.csv --rosenbrock data/bgsa_rosenbrock.csv --schwefel data/bgsa_schwefel.csv --out-dir data/figs", depends-on = ["bgsa-rastrigin", "bgsa-rosenbrock", "bgsa-schwefel"] }
+
+[feature.chem]
+platforms = ["linux-64"]
+
+[feature.chem.dependencies]
+# The molecular example's engines and the campaign figure stack. cp2k from
+# conda-forge (pinned below 2025 for the glibc of the cluster login nodes,
+# libint pinned to the SONAME that build links); featomic and matplotlib for
+# the sketch-map projections; pip for the agox baseline.
+ase = ">=3.23,<3.28"
+xtb = ">=6.6"
+xtb-python = ">=22.1"
+numpy = "<2.3"
+cp2k = "<2025"
+libint = "<2.10"
+pip = "*"
+matplotlib = "*"
+scipy = "*"
+cmcrameri = "*"
+click = "*"
+
+[feature.chem.pypi-dependencies]
+featomic = "*"
+agox = "*"
+chemparseplot = ">=1.10.2"
+xyzrender = ">=0.3"
+
+# conda compilers and cmake so nng-sys sees a sysroot with headers.
+[feature.cluster]
+platforms = ["linux-64"]
+
+[feature.cluster.dependencies]
+cmake = "*"
+ninja = "*"
+make = "*"
+pkg-config = "*"
+c-compiler = "*"
+cxx-compiler = "*"
+
+[environments]
+default = { solve-group = "default" }
+python  = { features = ["python"], solve-group = "default" }
+gpu     = { features = ["python", "gpu"], solve-group = "default" }
+docs    = { features = ["docs"],   solve-group = "default" }
+verify  = { features = ["python", "verify"], solve-group = "default" }
+chem    = { features = ["chem"], solve-group = "chem" }
+cluster = { features = ["cluster"], solve-group = "default" }

@@ -1,0 +1,117 @@
+//! Occupancy extras Leave OtherFamily or ArchiveHole. A same-family
+//! quench is Refuse, then a packing hole; it is not a box start.
+
+#[test]
+fn catalog_min_families_override_requires_a_parsed_floor() {
+    let source = include_str!("../src/catalog_rpc/server.rs");
+    let floor = source
+        .split("fn occupancy_floor(")
+        .nth(1)
+        .expect("occupancy_floor must exist");
+    let body = floor.split("fn leftover_census_dwell(").next().expect("floor ends at leftover dwell");
+    assert!(
+        body.contains("parse()"),
+        "an empty CATALOG_MIN_FAMILIES must not skip the Fiedler floor"
+    );
+    assert!(
+        !body.contains("is_ok()"),
+        "presence of CATALOG_MIN_FAMILIES is not a paper-floor override"
+    );
+}
+
+#[test]
+fn occupancy_leave_refuse_is_not_a_box_start() {
+    let source = include_str!("../src/methods/cluster_hopping.rs");
+    let after = source
+        .split("if leave == Some(crate::catalog::OccupancyLeaveAdopt::Refuse)")
+        .nth(1)
+        .expect("refuse arm must exist");
+    let arm = after
+        .split("if leave == Some(crate::catalog::OccupancyLeaveAdopt::HoleStep)")
+        .next()
+        .expect("refuse arm must end at HoleStep");
+    assert!(
+        !arm.contains("random_cluster"),
+        "same-family occupancy Leave must stay or packing-kick, not box-start"
+    );
+}
+
+#[test]
+fn occupancy_leave_action_does_not_fall_back_to_a_random_cluster() {
+    let source = include_str!("../examples/lj_cluster_search.rs");
+    let leave = source
+        .split("PolicyAction::Leave =>")
+        .nth(1)
+        .expect("Leave arm must exist");
+    let arm = leave
+        .split("PolicyAction::Explore =>")
+        .next()
+        .expect("Leave arm must end at Explore");
+    assert!(
+        !arm.contains("random_cluster"),
+        "occupancy extras Leave OtherFamily or ArchiveHole, not a random cluster"
+    );
+    assert!(
+        arm.contains("packing_saturated") || arm.contains("policy.packing_saturated"),
+        "after packing sat Leave must see packing_saturated and choose ArchiveHole"
+    );
+}
+
+#[test]
+fn occupied_packing_extras_do_not_reseed_a_random_cluster() {
+    let source = include_str!("../examples/lj_cluster_search.rs");
+    let extra = source
+        .split("extra_of_occupied_packing")
+        .nth(2)
+        .expect("extra-of-occupied-packing arm must exist");
+    let arm = extra
+        .split("slice_sequence = slice_sequence")
+        .next()
+        .expect("extra arm must end at the slice record");
+    assert!(
+        !arm.contains("random_cluster"),
+        "occupied-packing extras Leave a hole, they do not box-start"
+    );
+}
+
+#[test]
+fn putative_saturated_does_not_latch_the_done_line() {
+    let source = include_str!("../examples/lj_cluster_search.rs");
+    let retire = source
+        .split("if occupancy_retire_at(")
+        .nth(1)
+        .expect("retire latch must exist");
+    let after_retire = retire
+        .split("let policy_trace = cooperative")
+        .next()
+        .expect("retire block must end at the policy trace");
+    assert!(
+        after_retire.contains("announced_putative"),
+        "CatalogSaturated putative must not share the done latch"
+    );
+    assert!(
+        !after_retire
+            .split("return CheckpointAction::Retire")
+            .nth(1)
+            .expect("putative print follows Retire")
+            .contains("announced_done = true"),
+        "putative saturated must not suppress a later done mixing line"
+    );
+}
+
+#[test]
+fn foreign_parent_population_reseed_is_not_a_box_start() {
+    let source = include_str!("../examples/lj_cluster_search.rs");
+    let extra = source
+        .split("if foreign_parent {")
+        .nth(1)
+        .expect("foreign-parent population reseed arm must exist");
+    let arm = extra
+        .split("slice_sequence = slice_sequence")
+        .next()
+        .expect("foreign-parent arm must end at the slice record");
+    assert!(
+        !arm.contains("random_cluster"),
+        "Feynman-Kac extras Leave a SOAP hole or packing kick, not a box start"
+    );
+}
