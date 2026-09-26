@@ -243,6 +243,24 @@ impl Inner {
         if n == 0 {
             return None;
         }
+        // u64::MAX asks for the deepest member. The walk uses that when
+        // a peer has already quenched a lower minimum than its own.
+        if seed == u64::MAX {
+            let i = self
+                .bank
+                .members()
+                .iter()
+                .enumerate()
+                .min_by(|a, b| {
+                    a.1.energy
+                        .partial_cmp(&b.1.energy)
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                })
+                .map(|(i, _)| i)
+                .unwrap_or(0);
+            let m = &self.bank.members()[i];
+            return Some((m.energy, m.state.clone()));
+        }
         let merge = pack_merge();
         // Shared GP over packing SOAP. EI says where to go (unvisited
         // morphology scores on variance). UCB on well height is the

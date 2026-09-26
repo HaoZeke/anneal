@@ -852,6 +852,10 @@ where
         .and_then(|v| v.parse().ok())
         .unwrap_or(8usize)
         .max(1);
+    // Adopt the bank's deepest minimum when it beats this chain. The
+    // default pull is an informer and stays quiet while the chain is
+    // still descending in its own basin.
+    let adopt_bank = std::env::var("BANK_ADOPT").ok().as_deref() == Some("1");
     let mut bias = BasinBias::new(
         ClusterFingerprint::of_config(cfg, &start.to_owned()),
         cfg.merge_radius,
@@ -880,7 +884,7 @@ where
     let mut stall = 0u32;
     while ledger.remaining() > 0 {
         let progress = 1.0 - ledger.remaining() as f64 / total.max(1) as f64;
-        let pull = slices == 0 || slices.is_multiple_of(sync_every);
+        let pull = adopt_bank || slices == 0 || slices.is_multiple_of(sync_every);
         if pull && client.is_none() {
             client = BankClient::connect(sock).ok();
         }
@@ -938,6 +942,35 @@ where
             on_known && sat,
             stall,
         );
+        if adopt_bank && catalog_best < best - 1e-6 && let Some(c) = client.as_mut() {
+            match c.sample(u64::MAX) {
+                Ok(Some((reported_energy, x)))
+                    if x.len() == expected
+                        && reported_energy < best - 1e-6
+                        && structure_is_sane(x.view(), sane_sep(cfg)) =>
+                {
+                    let fresh_energy = validate_bank_sample(
+                        objective,
+                        cfg,
+                        ledger,
+                        &mut bank_validation_charged,
+                        reported_energy,
+                        x.view(),
+                    );
+                    if let Some(energy) = fresh_energy.filter(|energy| *energy < best - 1e-6) {
+                        println!("      bank adopt {energy:.6} over {best:.6} at slice {slices}");
+                        best = energy;
+                        best_state = Some(x.clone());
+                        if improvements.len() < 512 {
+                            improvements.push((hops, ledger.spent(), bias.n_basins(), energy));
+                        }
+                        start = x;
+                    }
+                }
+                Ok(_) => {}
+                Err(_) => client = None,
+            }
+        }
         if pull
             && swarm.pull
             && let Some(c) = client.as_mut()
