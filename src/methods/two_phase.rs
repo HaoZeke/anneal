@@ -187,6 +187,67 @@ pub fn penalty_axes(
     (e, g)
 }
 
+/// Axis-weighted diameter penalty in the inertia frame of `x`.
+///
+/// The weights are applied in order of increasing inertia eigenvalue, so the
+/// first weight lies on the longest principal axis of the structure being
+/// relaxed. The frame is rebuilt from those coordinates.
+pub fn penalty_body(
+    x: ArrayView1<f64>,
+    cutoff: f64,
+    beta: f64,
+    mu: f64,
+    axes: [f64; 3],
+) -> (f64, Array1<f64>) {
+    let n = x.len() / 3;
+    if n < 2 {
+        return penalty_axes(x, cutoff, beta, mu, axes);
+    }
+    let mut cm = [0.0; 3];
+    for i in 0..n {
+        for k in 0..3 {
+            cm[k] += x[3 * i + k];
+        }
+    }
+    let scale = n as f64;
+    for value in cm.iter_mut() {
+        *value /= scale;
+    }
+    let mut tensor = ndarray::Array2::<f64>::zeros((3, 3));
+    for i in 0..n {
+        let v = [x[3 * i] - cm[0], x[3 * i + 1] - cm[1], x[3 * i + 2] - cm[2]];
+        let r2 = v[0] * v[0] + v[1] * v[1] + v[2] * v[2];
+        for a in 0..3 {
+            for b in 0..3 {
+                tensor[[a, b]] += if a == b { r2 } else { 0.0 } - v[a] * v[b];
+            }
+        }
+    }
+    let (_, vecs) = crate::spectral::symmetric_eigen(tensor.view(), 32);
+    let mut y = Array1::zeros(x.len());
+    for i in 0..n {
+        for a in 0..3 {
+            let mut acc = 0.0;
+            for b in 0..3 {
+                acc += vecs[[b, a]] * (x[3 * i + b] - cm[b]);
+            }
+            y[3 * i + a] = acc;
+        }
+    }
+    let (e, gy) = penalty_axes(y.view(), cutoff, beta, mu, axes);
+    let mut g = Array1::zeros(x.len());
+    for i in 0..n {
+        for b in 0..3 {
+            let mut acc = 0.0;
+            for a in 0..3 {
+                acc += vecs[[b, a]] * gy[3 * i + a];
+            }
+            g[3 * i + b] = acc;
+        }
+    }
+    (e, g)
+}
+
 fn group_centroid(x: ArrayView1<f64>, atoms: &[usize]) -> [f64; 3] {
     let mut c = [0.0_f64; 3];
     if atoms.is_empty() {
