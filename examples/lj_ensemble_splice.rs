@@ -747,7 +747,7 @@ impl Population {
     /// A stalled chain takes the member that improved most recently.
     /// That member is further along the same descent. Filtering it out
     /// for being the same packing leaves only a different trap.
-    fn pull_improving(&self, chain: usize) -> Option<Vec<f64>> {
+    fn pull_improving(&self, chain: usize, mine: f64) -> Option<Vec<f64>> {
         let my_tick = self.improved_at.get(chain).copied().unwrap_or(0);
         let mut chosen: Option<(u64, Vec<f64>)> = None;
         for (i, member) in self.members.iter().enumerate() {
@@ -757,6 +757,11 @@ impl Population {
             let Some(member) = member else {
                 continue;
             };
+            // A shallow leader that improved by a wiggle is what glued
+            // eight ensembles near -541. The donor has to be deeper.
+            if member.0 + 0.5 >= mine {
+                continue;
+            }
             let tick = self.improved_at.get(i).copied().unwrap_or(0);
             if tick <= my_tick {
                 continue;
@@ -982,7 +987,7 @@ fn run_chain(
                 );
             }
             if stall_handoff > 0 && snapshot.hops().saturating_sub(mark_hop) >= stall_handoff {
-                if let Some(state) = population.pull_improving(chain) {
+                if let Some(state) = population.pull_improving(chain, snapshot.best_energy()) {
                     mark_hop = snapshot.hops();
                     tally.adopted += 1;
                     return CheckpointAction::BoundaryProposal {
