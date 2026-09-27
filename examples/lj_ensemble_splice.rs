@@ -297,6 +297,8 @@ struct ExchangeConfig {
     diameter_wz: f64,
     /// Apply the axis weights in the structure's inertia frame.
     diameter_body: bool,
+    /// Stretch factor applied to a spherical minimum before the kick. 0 disables it.
+    sphere_stretch: f64,
     /// Learned portfolio over surfaces (plain plus these), one arm held
     /// per block of hops; empty runs the fixed surface above.
     portfolio: Vec<TwoPhase>,
@@ -394,6 +396,88 @@ fn shell_dissimilarity(a: &([u32; 32], [u32; 32]), b: &([u32; 32], [u32; 32])) -
 }
 
 /// Distances of the atoms from the centroid, sorted.
+/// Ratio of the largest inertia eigenvalue to the smallest.
+/// A value near 1 is a spherical cluster.
+fn inertia_ratio(x: &[f64]) -> f64 {
+    let n = x.len() / 3;
+    if n < 2 {
+        return 1.0;
+    }
+    let mut cm = [0.0; 3];
+    for i in 0..n {
+        cm[0] += x[3 * i];
+        cm[1] += x[3 * i + 1];
+        cm[2] += x[3 * i + 2];
+    }
+    let scale = n as f64;
+    for value in cm.iter_mut() {
+        *value /= scale;
+    }
+    let mut tensor = ndarray::Array2::<f64>::zeros((3, 3));
+    for i in 0..n {
+        let v = [x[3 * i] - cm[0], x[3 * i + 1] - cm[1], x[3 * i + 2] - cm[2]];
+        let r2 = v[0] * v[0] + v[1] * v[1] + v[2] * v[2];
+        for a in 0..3 {
+            for b in 0..3 {
+                tensor[[a, b]] += if a == b { r2 } else { 0.0 } - v[a] * v[b];
+            }
+        }
+    }
+    let (evals, _) = anneal_core::spectral::symmetric_eigen(tensor.view(), 8);
+    let mut lo = f64::INFINITY;
+    let mut hi = 0.0;
+    for value in evals.iter().copied() {
+        if value.is_finite() {
+            lo = lo.min(value);
+            hi = hi.max(value);
+        }
+    }
+    if !(lo > 1e-12 && hi.is_finite()) {
+        return f64::INFINITY;
+    }
+    hi / lo
+}
+
+/// Stretch a spherical cluster along one principal axis before the kick.
+fn stretch_if_spherical(x: &mut [f64], factor: f64) {
+    if !(factor.is_finite() && factor > 1.0) || inertia_ratio(x) > 1.05 {
+        return;
+    }
+    let n = x.len() / 3;
+    let mut cm = [0.0; 3];
+    for i in 0..n {
+        cm[0] += x[3 * i];
+        cm[1] += x[3 * i + 1];
+        cm[2] += x[3 * i + 2];
+    }
+    let scale = n as f64;
+    for value in cm.iter_mut() {
+        *value /= scale;
+    }
+    let mut tensor = ndarray::Array2::<f64>::zeros((3, 3));
+    for i in 0..n {
+        let v = [x[3 * i] - cm[0], x[3 * i + 1] - cm[1], x[3 * i + 2] - cm[2]];
+        let r2 = v[0] * v[0] + v[1] * v[1] + v[2] * v[2];
+        for a in 0..3 {
+            for b in 0..3 {
+                tensor[[a, b]] += if a == b { r2 } else { 0.0 } - v[a] * v[b];
+            }
+        }
+    }
+    let (_, vecs) = anneal_core::spectral::symmetric_eigen(tensor.view(), 8);
+    // Column 0 is the smallest inertia eigenvalue, the longest axis.
+    for i in 0..n {
+        let mut along = 0.0;
+        for k in 0..3 {
+            along += vecs[[k, 0]] * (x[3 * i + k] - cm[k]);
+        }
+        let extra = (factor - 1.0) * along;
+        for k in 0..3 {
+            x[3 * i + k] += extra * vecs[[k, 0]];
+        }
+    }
+}
+
 fn radial_order(x: &[f64]) -> Vec<f64> {
     let n = x.len() / 3;
     let mut cm = [0.0; 3];
@@ -584,6 +668,11 @@ impl Population {
             return false;
         }
         // A new region: the worst member moves there if the child beats it.
+        // PBH_NEAR_ONLY keeps that member. A far child must not evict a
+        // chain that is still in another geometry.
+        if std::env::var("PBH_NEAR_ONLY").ok().as_deref() == Some("1") {
+            return false;
+        }
         let worst = filled.iter().copied().filter(|&i| i != p).max_by(|&a, &b| {
             self.members[a]
                 .as_ref()
@@ -1013,6 +1102,9 @@ fn run_chain(
             }
             hops += 1;
             let mut trial = state.clone();
+            if let Some(slice) = trial.as_slice_mut() {
+                stretch_if_spherical(slice, exchange.sphere_stretch);
+            }
             for coord in trial.iter_mut() {
                 *coord += (rng.random::<f64>() - 0.5) * 2.0 * half;
             }
@@ -1122,6 +1214,7 @@ fn main() {
         diameter_wy: env_f64("DIAMETER_WY", 1.0),
         diameter_wz: env_f64("DIAMETER_WZ", 1.0),
         diameter_body: env_usize("DIAMETER_BODY", 0) == 1,
+        sphere_stretch: env_f64("SPHERE_STRETCH", 0.0),
         portfolio: std::env::var("SURFACES")
             .map(|spec| parse_surfaces(&spec))
             .unwrap_or_default(),
