@@ -762,6 +762,18 @@ impl Population {
             if member.0 + 0.5 >= mine {
                 continue;
             }
+            // A minimum just above the reference is deep enough to pass
+            // the 0.5 test and then collects every stall. Two occupants
+            // is enough. Later stalls keep their own walk.
+            let occupants = self
+                .members
+                .iter()
+                .filter_map(|slot| slot.as_ref())
+                .filter(|other| (other.0 - member.0).abs() < 1e-4)
+                .count();
+            if occupants >= 2 {
+                continue;
+            }
             let tick = self.improved_at.get(i).copied().unwrap_or(0);
             if tick <= my_tick {
                 continue;
