@@ -79,10 +79,10 @@ fn lj(x: ArrayView1<f64>) -> (f64, Array1<f64>) {
 ///
 /// Copying the deepest population member parks every other chain on
 /// that neighbour. A stall relocates one atom and the walk continues.
-fn relocate_worst_atom(x: &[f64], rng: &mut impl Rng) -> Array1<f64> {
+fn relocate_worst_atom(x: &[f64], count: usize, rng: &mut impl Rng) -> Array1<f64> {
     let n = x.len() / 3;
     let mut out = Array1::from(x.to_vec());
-    if n < 2 {
+    if n < 2 || count == 0 {
         return out;
     }
     let mut bound = vec![0.0; n];
@@ -114,29 +114,30 @@ fn relocate_worst_atom(x: &[f64], rng: &mut impl Rng) -> Array1<f64> {
             bound[j] += vij;
         }
     }
-    let worst = bound
-        .iter()
-        .enumerate()
-        .max_by(|a, b| a.1.partial_cmp(b.1).unwrap_or(std::cmp::Ordering::Equal))
-        .map(|(i, _)| i)
-        .unwrap_or(0);
+    let mut order: Vec<usize> = (0..n).collect();
+    order.sort_by(|&a, &b| {
+        bound[b]
+            .partial_cmp(&bound[a])
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    let count = count.min(n.saturating_sub(1)).max(1);
     let mut radius: f64 = 0.0;
     for i in 0..n {
-        if i == worst {
-            continue;
-        }
         let d0 = x[3 * i] - cm[0];
         let d1 = x[3 * i + 1] - cm[1];
         let d2 = x[3 * i + 2] - cm[2];
         radius = radius.max((d0 * d0 + d1 * d1 + d2 * d2).sqrt());
     }
-    let z: f64 = rng.random_range(-1.0..1.0);
-    let phi: f64 = rng.random_range(0.0..std::f64::consts::TAU);
-    let s = (1.0 - z * z).sqrt();
-    let r = radius + 2.0_f64.powf(1.0 / 6.0);
-    out[3 * worst] = cm[0] + r * s * phi.cos();
-    out[3 * worst + 1] = cm[1] + r * s * phi.sin();
-    out[3 * worst + 2] = cm[2] + r * z;
+    let bond = 2.0_f64.powf(1.0 / 6.0);
+    for &atom in order.iter().take(count) {
+        let z: f64 = rng.random_range(-1.0..1.0);
+        let phi: f64 = rng.random_range(0.0..std::f64::consts::TAU);
+        let s = (1.0 - z * z).sqrt();
+        let r = radius + bond;
+        out[3 * atom] = cm[0] + r * s * phi.cos();
+        out[3 * atom + 1] = cm[1] + r * s * phi.sin();
+        out[3 * atom + 2] = cm[2] + r * z;
+    }
     out
 }
 
@@ -299,6 +300,9 @@ struct ExchangeConfig {
     diameter_body: bool,
     /// Stretch factor applied to a spherical minimum before the kick. 0 disables it.
     sphere_stretch: f64,
+    /// When a quenched incumbent is spherical, move this many worst-bound
+    /// atoms onto the hull instead of taking the uniform kick.
+    sphere_relocate: usize,
     /// Learned portfolio over surfaces (plain plus these), one arm held
     /// per block of hops; empty runs the fixed surface above.
     portfolio: Vec<TwoPhase>,
@@ -949,7 +953,7 @@ fn run_chain(
                     mark_hop = snapshot.hops();
                     tally.adopted += 1;
                     return CheckpointAction::BoundaryProposal {
-                        state: relocate_worst_atom(origin, &mut exchange_rng),
+                        state: relocate_worst_atom(origin, 1, &mut exchange_rng),
                         action: "exit".to_owned(),
                     };
                 }
@@ -1116,11 +1120,20 @@ fn run_chain(
             }
             hops += 1;
             let mut trial = state.clone();
-            if let Some(slice) = trial.as_slice_mut() {
-                stretch_if_spherical(slice, exchange.sphere_stretch);
-            }
-            for coord in trial.iter_mut() {
-                *coord += (rng.random::<f64>() - 0.5) * 2.0 * half;
+            let spherical = state
+                .as_slice()
+                .is_some_and(|slice| inertia_ratio(slice) < 1.05);
+            if exchange.sphere_relocate > 0 && spherical {
+                if let Some(slice) = state.as_slice() {
+                    trial = relocate_worst_atom(slice, exchange.sphere_relocate, &mut rng);
+                }
+            } else {
+                if let Some(slice) = trial.as_slice_mut() {
+                    stretch_if_spherical(slice, exchange.sphere_stretch);
+                }
+                for coord in trial.iter_mut() {
+                    *coord += (rng.random::<f64>() - 0.5) * 2.0 * half;
+                }
             }
             let (child, child_state) = relax(&mut ledger, trial.view(), relax_steps);
             if child < energy {
@@ -1229,6 +1242,7 @@ fn main() {
         diameter_wz: env_f64("DIAMETER_WZ", 1.0),
         diameter_body: env_usize("DIAMETER_BODY", 0) == 1,
         sphere_stretch: env_f64("SPHERE_STRETCH", 0.0),
+        sphere_relocate: env_usize("SPHERE_RELOCATE", 0),
         portfolio: std::env::var("SURFACES")
             .map(|spec| parse_surfaces(&spec))
             .unwrap_or_default(),
