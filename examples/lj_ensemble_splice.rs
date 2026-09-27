@@ -39,8 +39,8 @@ use anneal_core::methods::cluster_hopping::{
 use anneal_core::methods::cluster_search::{median_encounter, Encounter};
 use anneal_core::methods::splice::cut_and_splice;
 use anneal_core::methods::two_phase::{
-    largest_pair_distance, penalty_axes, shared_surface_allocator, Cutoff, SharedSurfaceAllocator,
-    SurfacePortfolio, TwoPhase,
+    largest_pair_distance, penalty_axes, penalty_body, shared_surface_allocator, Cutoff,
+    SharedSurfaceAllocator, SurfacePortfolio, TwoPhase,
 };
 use anneal_core::methods::warm_lbfgs::WarmLbfgs;
 use anneal_core::potentials::PairPotential;
@@ -217,9 +217,14 @@ fn compressed(
     diameter: f64,
     beta: f64,
     axes: [f64; 3],
+    body: bool,
 ) -> (f64, Array1<f64>) {
     let (e, g) = surface.energy(x);
-    let (pe, pg) = penalty_axes(x, diameter, beta, mu, axes);
+    let (pe, pg) = if body {
+        penalty_body(x, diameter, beta, mu, axes)
+    } else {
+        penalty_axes(x, diameter, beta, mu, axes)
+    };
     (e + pe, g + pg)
 }
 
@@ -285,9 +290,13 @@ struct ExchangeConfig {
     /// Relative cutoff: `kappa` times the largest pair distance of the
     /// structure entering the quench; zero keeps the fixed cutoff.
     diameter_kappa: f64,
-    /// Axis weights on the squared y and z pair components. Ones are spherical.
+    /// Axis weights. In the laboratory frame the first entry is x and stays 1.
+    /// In the inertia frame the first entry lies on the longest principal axis.
+    diameter_wl: f64,
     diameter_wy: f64,
     diameter_wz: f64,
+    /// Apply the axis weights in the structure's inertia frame.
+    diameter_body: bool,
     /// Learned portfolio over surfaces (plain plus these), one arm held
     /// per block of hops; empty runs the fixed surface above.
     portfolio: Vec<TwoPhase>,
@@ -602,7 +611,16 @@ fn run_chain(
     let diameter = exchange.diameter;
     let beta = exchange.diameter_beta;
     let kappa = exchange.diameter_kappa;
-    let axes = [1.0, exchange.diameter_wy, exchange.diameter_wz];
+    let axes = if exchange.diameter_body {
+        [
+            exchange.diameter_wl,
+            exchange.diameter_wy,
+            exchange.diameter_wz,
+        ]
+    } else {
+        [1.0, exchange.diameter_wy, exchange.diameter_wz]
+    };
+    let body = exchange.diameter_body;
     let two_phase = compress_mu > 0.0 || ((diameter > 0.0 || kappa > 0.0) && beta > 0.0);
     let screen_steps = cfg.screen_steps;
     let split_surface = (exchange.portfolio_split && !exchange.portfolio.is_empty()).then(|| {
@@ -648,7 +666,7 @@ fn run_chain(
                 if !led.charge() {
                     return None;
                 }
-                Some(compressed(&surface_kind, v, mu, cutoff, beta, axes))
+                Some(compressed(&surface_kind, v, mu, cutoff, beta, axes, body))
             });
             start = compressed;
         }
@@ -1006,8 +1024,10 @@ fn main() {
         diameter: env_f64("DIAMETER_D", 0.0) * 2f64.powf(1.0 / 6.0),
         diameter_beta: env_f64("DIAMETER_BETA", 1.0),
         diameter_kappa: env_f64("DIAMETER_KAPPA", 0.0),
+        diameter_wl: env_f64("DIAMETER_WL", 1.0),
         diameter_wy: env_f64("DIAMETER_WY", 1.0),
         diameter_wz: env_f64("DIAMETER_WZ", 1.0),
+        diameter_body: env_usize("DIAMETER_BODY", 0) == 1,
         portfolio: std::env::var("SURFACES")
             .map(|spec| parse_surfaces(&spec))
             .unwrap_or_default(),
