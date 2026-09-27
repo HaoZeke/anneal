@@ -663,7 +663,16 @@ impl Population {
             }
             // Same region as q: only a better child displaces q, and a
             // pending offer is kept when it is already lower.
-            let eq = self.members[q].as_ref().unwrap().0;
+            let target = self.members[q].as_ref().unwrap();
+            let eq = target.0;
+            // A different packing is not a copy. The walk that leaves a
+            // trap is the chain's own; importing the trap's coordinates
+            // is what parks the ensemble there.
+            if std::env::var("SAME_PACKING").ok().as_deref() == Some("1")
+                && anneal_core::catalog::different_decaf_family(state, target.1.as_slice())
+            {
+                return false;
+            }
             let pending_energy = self.pending[q].as_ref().map(|offer| offer.0);
             if energy < eq - 1e-9 && pending_energy.is_none_or(|queued| energy < queued - 1e-9) {
                 self.pending[q] = Some((energy, state.to_vec()));
