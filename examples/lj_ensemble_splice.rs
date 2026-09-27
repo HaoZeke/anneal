@@ -365,6 +365,59 @@ fn shell_dissimilarity(a: &([u32; 32], [u32; 32]), b: &([u32; 32], [u32; 32])) -
         .sum()
 }
 
+/// Distances of the atoms from the centroid, sorted.
+fn radial_order(x: &[f64]) -> Vec<f64> {
+    let n = x.len() / 3;
+    let mut cm = [0.0; 3];
+    for i in 0..n {
+        cm[0] += x[3 * i];
+        cm[1] += x[3 * i + 1];
+        cm[2] += x[3 * i + 2];
+    }
+    let scale = (n as f64).max(1.0);
+    for value in cm.iter_mut() {
+        *value /= scale;
+    }
+    let mut radii = Vec::with_capacity(n);
+    for i in 0..n {
+        let d0 = x[3 * i] - cm[0];
+        let d1 = x[3 * i + 1] - cm[1];
+        let d2 = x[3 * i + 2] - cm[2];
+        radii.push((d0 * d0 + d1 * d1 + d2 * d2).sqrt());
+    }
+    radii.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    radii
+}
+
+/// Ordered centre-of-mass distance with power 3.
+fn ord_dissimilarity(a: &[f64], b: &[f64]) -> f64 {
+    radial_order(a)
+        .into_iter()
+        .zip(radial_order(b))
+        .map(|(u, v)| {
+            let d = (u - v).abs();
+            d * d * d
+        })
+        .sum()
+}
+
+fn dissimilarity_is_ord() -> bool {
+    std::env::var("DISSIM").ok().as_deref() == Some("ord")
+}
+
+fn structure_distance(
+    a: &[f64],
+    a_hist: &([u32; 32], [u32; 32]),
+    b: &[f64],
+    b_hist: &([u32; 32], [u32; 32]),
+) -> f64 {
+    if dissimilarity_is_ord() {
+        ord_dissimilarity(a, b)
+    } else {
+        shell_dissimilarity(a_hist, b_hist)
+    }
+}
+
 type Member = (f64, Vec<f64>, ([u32; 32], [u32; 32]));
 
 /// The ensemble's population under the replacement rule: one member per
@@ -402,26 +455,45 @@ impl Population {
             if filled.len() < self.members.len() {
                 return false;
             }
-            // Every chain has reported once. The cutoff is a multiple of
-            // the mean nearest-neighbour dissimilarity, so a child farther
-            // than a typical neighbour is a new region. A multiple of the
-            // mean of all pairs sits above every nearest neighbour, and the
-            // far replacement then never fires.
+            // Every chain has reported once. The published cutoff is a
+            // multiple of the mean dissimilarity over all pairs. The
+            // nearest-neighbour mean remains the default.
+            let pairs = std::env::var("PBH_PAIRS").ok().as_deref() == Some("1");
             let mut total = 0.0;
             let mut counted = 0usize;
             for &i in &filled {
-                let hi = &self.members[i].as_ref().unwrap().2;
-                let mut nearest = f64::INFINITY;
-                for &j in &filled {
-                    if i == j {
-                        continue;
+                let (si, hi) = (
+                    self.members[i].as_ref().unwrap().1.as_slice(),
+                    &self.members[i].as_ref().unwrap().2,
+                );
+                if pairs {
+                    for &j in &filled {
+                        if j <= i {
+                            continue;
+                        }
+                        let (sj, hj) = (
+                            self.members[j].as_ref().unwrap().1.as_slice(),
+                            &self.members[j].as_ref().unwrap().2,
+                        );
+                        total += structure_distance(si, hi, sj, hj);
+                        counted += 1;
                     }
-                    let hj = &self.members[j].as_ref().unwrap().2;
-                    nearest = nearest.min(shell_dissimilarity(hi, hj));
-                }
-                if nearest.is_finite() {
-                    total += nearest;
-                    counted += 1;
+                } else {
+                    let mut nearest = f64::INFINITY;
+                    for &j in &filled {
+                        if i == j {
+                            continue;
+                        }
+                        let (sj, hj) = (
+                            self.members[j].as_ref().unwrap().1.as_slice(),
+                            &self.members[j].as_ref().unwrap().2,
+                        );
+                        nearest = nearest.min(structure_distance(si, hi, sj, hj));
+                    }
+                    if nearest.is_finite() {
+                        total += nearest;
+                        counted += 1;
+                    }
                 }
             }
             self.dcut = Some(dcut_scale * total / counted.max(1) as f64);
@@ -434,15 +506,8 @@ impl Population {
             self.anneal();
             return false;
         }
-        let moved = self.decide_replacement(
-            p,
-            energy,
-            state,
-            &hist,
-            dcut,
-            &filled,
-            previous.as_ref().map(|member| &member.2),
-        );
+        let moved =
+            self.decide_replacement(p, energy, state, &hist, dcut, &filled, previous.as_ref());
         self.anneal();
         moved
     }
@@ -455,17 +520,18 @@ impl Population {
         hist: &([u32; 32], [u32; 32]),
         dcut: f64,
         filled: &[usize],
-        previous: Option<&([u32; 32], [u32; 32])>,
+        previous: Option<&Member>,
     ) -> bool {
         // Include the structure this child left. Distance to the slot just
-        // written is zero, so the previous histogram is the parent.
+        // written is zero, so the previous member is the parent.
         let mut nearest: Option<(usize, f64)> =
-            previous.map(|old| (p, shell_dissimilarity(hist, old)));
+            previous.map(|old| (p, structure_distance(state, hist, old.1.as_slice(), &old.2)));
         for &q in filled {
             if q == p {
                 continue;
             }
-            let d = shell_dissimilarity(hist, &self.members[q].as_ref().unwrap().2);
+            let member = self.members[q].as_ref().unwrap();
+            let d = structure_distance(state, hist, member.1.as_slice(), &member.2);
             if nearest.is_none_or(|(_, best)| d < best) {
                 nearest = Some((q, d));
             }
