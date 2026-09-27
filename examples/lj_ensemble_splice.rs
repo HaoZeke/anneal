@@ -300,8 +300,9 @@ struct ExchangeConfig {
     diameter_body: bool,
     /// Stretch factor applied to a spherical minimum before the kick. 0 disables it.
     sphere_stretch: f64,
-    /// When a quenched incumbent is spherical, move this many worst-bound
-    /// atoms onto the hull instead of taking the uniform kick.
+    /// After a spherical incumbent stalls for 40 hops without improving,
+    /// move this many worst-bound atoms onto the hull instead of the
+    /// uniform kick. Zero disables the move.
     sphere_relocate: usize,
     /// How many atoms take the uniform kick. Zero moves every atom.
     kick_atoms: usize,
@@ -1082,6 +1083,9 @@ fn run_chain(
         }
         let mut accepted_transitions = Vec::new();
         let mut hops = 0usize;
+        // Hop index of the last incumbent improvement; relocation waits for a stall.
+        let mut mark_hop = 0usize;
+        const SPHERE_RELOCATE_STALL: usize = 40;
         while ledger.remaining() > 0 {
             if let Some(population) = population.as_ref() {
                 let mut population = population.lock().expect("population");
@@ -1104,6 +1108,7 @@ fn run_chain(
                         if energy < best {
                             best = energy;
                             best_state = state.clone();
+                            mark_hop = hops;
                             if improvements.len() < 512 {
                                 improvements.push((hops, ledger.spent(), 0, energy));
                             }
@@ -1125,7 +1130,8 @@ fn run_chain(
             let spherical = state
                 .as_slice()
                 .is_some_and(|slice| inertia_ratio(slice) < 1.05);
-            if exchange.sphere_relocate > 0 && spherical {
+            let stalled = hops.saturating_sub(mark_hop) >= SPHERE_RELOCATE_STALL;
+            if exchange.sphere_relocate > 0 && spherical && stalled {
                 if let Some(slice) = state.as_slice() {
                     trial = relocate_worst_atom(slice, exchange.sphere_relocate, &mut rng);
                 }
@@ -1171,6 +1177,7 @@ fn run_chain(
                 if energy < best {
                     best = energy;
                     best_state = state.clone();
+                    mark_hop = hops;
                     if improvements.len() < 512 {
                         improvements.push((hops, ledger.spent(), 0, energy));
                     }
