@@ -364,18 +364,23 @@ fn shell_histograms(x: &[f64]) -> ([u32; 32], [u32; 32]) {
     let Ok(cell) = linkcell::Cell::ortho(span[0], span[1], span[2]) else {
         return (h1, h2);
     };
-    let Ok(pairs) = linkcell::pairs_within(&xyz, &cell, r2, None, Some(r2), true) else {
+    // k is above a compact cluster's first two shells. The cutoff is the
+    // outer shell radius, so the list is the neighbours inside that shell.
+    let Ok(rows) = linkcell::knearest(&xyz, &cell, 48, None, Some(r2)) else {
         return (h1, h2);
     };
     let mut first = vec![0usize; n];
     let mut second = vec![0usize; n];
-    for pair in pairs {
-        if pair.dist2 < r1sq {
-            first[pair.i] += 1;
-            first[pair.j] += 1;
-        } else if pair.dist2 < r2sq {
-            second[pair.i] += 1;
-            second[pair.j] += 1;
+    for (i, row) in rows.iter().enumerate() {
+        for (&j, &d2) in row.indices.iter().zip(row.dist2.iter()) {
+            if j == i {
+                continue;
+            }
+            if d2 < r1sq {
+                first[i] += 1;
+            } else if d2 < r2sq {
+                second[i] += 1;
+            }
         }
     }
     for i in 0..n {
@@ -425,7 +430,7 @@ fn inertia_ratio(x: &[f64]) -> f64 {
     }
     let (evals, _) = anneal_core::spectral::symmetric_eigen(tensor.view(), 8);
     let mut lo = f64::INFINITY;
-    let mut hi = 0.0;
+    let mut hi = 0.0_f64;
     for value in evals.iter().copied() {
         if value.is_finite() {
             lo = lo.min(value);
