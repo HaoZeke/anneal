@@ -744,12 +744,10 @@ impl Population {
         }
     }
 
-    /// A stalled chain takes the member that improved most recently in
-    /// another packing. The structure may be higher in energy than the
-    /// stall. Several chains then continue from the trajectory that is
-    /// still descending, and the first of them can beat the donor's hop.
+    /// A stalled chain takes the member that improved most recently.
+    /// That member is further along the same descent. Filtering it out
+    /// for being the same packing leaves only a different trap.
     fn pull_improving(&self, chain: usize) -> Option<Vec<f64>> {
-        let me = self.members.get(chain)?.as_ref()?;
         let my_tick = self.improved_at.get(chain).copied().unwrap_or(0);
         let mut chosen: Option<(u64, Vec<f64>)> = None;
         for (i, member) in self.members.iter().enumerate() {
@@ -761,9 +759,6 @@ impl Population {
             };
             let tick = self.improved_at.get(i).copied().unwrap_or(0);
             if tick <= my_tick {
-                continue;
-            }
-            if !anneal_core::catalog::different_decaf_family(me.1.as_slice(), member.1.as_slice()) {
                 continue;
             }
             if chosen.as_ref().is_none_or(|(best, _)| tick > *best) {
