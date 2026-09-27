@@ -323,31 +323,59 @@ struct ExchangeConfig {
 /// first shell, `H2[n]` those with exactly `n` in the second shell, and the
 /// distance is `sum_n n (2 |dH1| + |dH2|)`. Shell radii are the published
 /// 1.25 and 1.55 pair-well units in sigma units.
+///
+/// Pairs come from `linkcell`, whose distances are `minimage` vectors.
+/// The orthorhombic cell is wider than the cluster by more than twice the
+/// outer shell, so the minimum image inside that shell is the free-space
+/// separation.
 fn shell_histograms(x: &[f64]) -> ([u32; 32], [u32; 32]) {
     let n = x.len() / 3;
+    let mut h1 = [0u32; 32];
+    let mut h2 = [0u32; 32];
+    if n == 0 {
+        return (h1, h2);
+    }
     let unit = 2f64.powf(1.0 / 6.0);
     let (r1, r2) = (1.25 * unit, 1.55 * unit);
     let (r1sq, r2sq) = (r1 * r1, r2 * r2);
-    let mut first = vec![0usize; n];
-    let mut second = vec![0usize; n];
+    let mut xyz = Vec::with_capacity(n);
+    let mut lo = [f64::INFINITY; 3];
+    let mut hi = [f64::NEG_INFINITY; 3];
     for i in 0..n {
-        for j in (i + 1)..n {
-            let mut d2 = 0.0;
-            for k in 0..3 {
-                let d = x[3 * i + k] - x[3 * j + k];
-                d2 += d * d;
-            }
-            if d2 < r1sq {
-                first[i] += 1;
-                first[j] += 1;
-            } else if d2 < r2sq {
-                second[i] += 1;
-                second[j] += 1;
-            }
+        let p = [x[3 * i], x[3 * i + 1], x[3 * i + 2]];
+        for k in 0..3 {
+            lo[k] = lo[k].min(p[k]);
+            hi[k] = hi[k].max(p[k]);
+        }
+        xyz.push(p);
+    }
+    let margin = 2.0 * r2;
+    let mut span = [0.0; 3];
+    for k in 0..3 {
+        span[k] = (hi[k] - lo[k] + 4.0 * margin).max(4.0 * r2);
+    }
+    for point in &mut xyz {
+        for k in 0..3 {
+            point[k] = point[k] - lo[k] + margin;
         }
     }
-    let mut h1 = [0u32; 32];
-    let mut h2 = [0u32; 32];
+    let Ok(cell) = linkcell::Cell::ortho(span[0], span[1], span[2]) else {
+        return (h1, h2);
+    };
+    let Ok(pairs) = linkcell::pairs_within(&xyz, &cell, r2, None, Some(r2), true) else {
+        return (h1, h2);
+    };
+    let mut first = vec![0usize; n];
+    let mut second = vec![0usize; n];
+    for pair in pairs {
+        if pair.dist2 < r1sq {
+            first[pair.i] += 1;
+            first[pair.j] += 1;
+        } else if pair.dist2 < r2sq {
+            second[pair.i] += 1;
+            second[pair.j] += 1;
+        }
+    }
     for i in 0..n {
         h1[first[i].min(31)] += 1;
         h2[second[i].min(31)] += 1;
