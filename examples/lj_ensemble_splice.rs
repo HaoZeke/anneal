@@ -303,6 +303,8 @@ struct ExchangeConfig {
     /// When a quenched incumbent is spherical, move this many worst-bound
     /// atoms onto the hull instead of taking the uniform kick.
     sphere_relocate: usize,
+    /// How many atoms take the uniform kick. Zero moves every atom.
+    kick_atoms: usize,
     /// Learned portfolio over surfaces (plain plus these), one arm held
     /// per block of hops; empty runs the fixed surface above.
     portfolio: Vec<TwoPhase>,
@@ -1131,8 +1133,23 @@ fn run_chain(
                 if let Some(slice) = trial.as_slice_mut() {
                     stretch_if_spherical(slice, exchange.sphere_stretch);
                 }
-                for coord in trial.iter_mut() {
-                    *coord += (rng.random::<f64>() - 0.5) * 2.0 * half;
+                let width = 2.0 * half;
+                let n_atoms = trial.len() / 3;
+                if exchange.kick_atoms > 0 && exchange.kick_atoms < n_atoms {
+                    let mut order: Vec<usize> = (0..n_atoms).collect();
+                    for i in 0..exchange.kick_atoms {
+                        let j = rng.random_range(i..n_atoms);
+                        order.swap(i, j);
+                    }
+                    for &atom in order.iter().take(exchange.kick_atoms) {
+                        for k in 0..3 {
+                            trial[3 * atom + k] += (rng.random::<f64>() - 0.5) * width;
+                        }
+                    }
+                } else {
+                    for coord in trial.iter_mut() {
+                        *coord += (rng.random::<f64>() - 0.5) * width;
+                    }
                 }
             }
             let (child, child_state) = relax(&mut ledger, trial.view(), relax_steps);
@@ -1243,6 +1260,7 @@ fn main() {
         diameter_body: env_usize("DIAMETER_BODY", 0) == 1,
         sphere_stretch: env_f64("SPHERE_STRETCH", 0.0),
         sphere_relocate: env_usize("SPHERE_RELOCATE", 0),
+        kick_atoms: env_usize("KICK_ATOMS", 0),
         portfolio: std::env::var("SURFACES")
             .map(|spec| parse_surfaces(&spec))
             .unwrap_or_default(),
