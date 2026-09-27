@@ -555,6 +555,10 @@ struct Population {
     replacements_far: usize,
     /// Offers since the cutoff was fixed. Annealing steps off this.
     offers: usize,
+    /// Offer count at which each member last improved. A stalled chain
+    /// pulls a member that improved more recently than it did.
+    improved_at: Vec<u64>,
+    tick: u64,
 }
 
 impl Population {
@@ -562,6 +566,7 @@ impl Population {
         Self {
             members: vec![None; chains],
             pending: vec![None; chains],
+            improved_at: vec![0; chains],
             ..Self::default()
         }
     }
@@ -571,6 +576,13 @@ impl Population {
     fn offer(&mut self, p: usize, energy: f64, state: &[f64], dcut_scale: f64) -> bool {
         let hist = shell_histograms(state);
         let previous = self.members[p].clone();
+        self.tick = self.tick.saturating_add(1);
+        if previous
+            .as_ref()
+            .is_none_or(|(old, _, _)| energy + 1e-9 < *old)
+        {
+            self.improved_at[p] = self.tick;
+        }
         self.members[p] = Some((energy, state.to_vec(), hist));
         let filled: Vec<usize> = (0..self.members.len())
             .filter(|&i| self.members[i].is_some())
@@ -730,6 +742,35 @@ impl Population {
                 *dcut *= 0.85;
             }
         }
+    }
+
+    /// A stalled chain takes the member that improved most recently in
+    /// another packing. The structure may be higher in energy than the
+    /// stall. Several chains then continue from the trajectory that is
+    /// still descending, and the first of them can beat the donor's hop.
+    fn pull_improving(&self, chain: usize) -> Option<Vec<f64>> {
+        let me = self.members.get(chain)?.as_ref()?;
+        let my_tick = self.improved_at.get(chain).copied().unwrap_or(0);
+        let mut chosen: Option<(u64, Vec<f64>)> = None;
+        for (i, member) in self.members.iter().enumerate() {
+            if i == chain {
+                continue;
+            }
+            let Some(member) = member else {
+                continue;
+            };
+            let tick = self.improved_at.get(i).copied().unwrap_or(0);
+            if tick <= my_tick {
+                continue;
+            }
+            if !anneal_core::catalog::different_decaf_family(me.1.as_slice(), member.1.as_slice()) {
+                continue;
+            }
+            if chosen.as_ref().is_none_or(|(best, _)| tick > *best) {
+                chosen = Some((tick, member.1.clone()));
+            }
+        }
+        chosen.map(|(_, state)| state)
     }
 
     fn take_pending(&mut self, chain: usize) -> Option<(f64, Vec<f64>)> {
@@ -901,6 +942,7 @@ fn run_chain(
     let mut child_opt = WarmLbfgs::default();
     let stall_restart = env_usize("STALL_RESTART", 0);
     let stall_adopt = env_usize("STALL_ADOPT", 0);
+    let stall_handoff = env_usize("STALL_HANDOFF", 0);
     let mut best_mark = f64::INFINITY;
     let mut mark_hop = 0usize;
     let mut checkpoint = |snapshot: ChainCheckpoint<'_>| {
@@ -943,6 +985,16 @@ fn run_chain(
                     current,
                     exchange.pbh_dcut_scale,
                 );
+            }
+            if stall_handoff > 0 && snapshot.hops().saturating_sub(mark_hop) >= stall_handoff {
+                if let Some(state) = population.pull_improving(chain) {
+                    mark_hop = snapshot.hops();
+                    tally.adopted += 1;
+                    return CheckpointAction::BoundaryProposal {
+                        state: Array1::from(state),
+                        action: "handoff".to_owned(),
+                    };
+                }
             }
             if stall_adopt > 0 && snapshot.hops().saturating_sub(mark_hop) >= stall_adopt {
                 // A kick of the whole cluster and a packing hop both quenched
