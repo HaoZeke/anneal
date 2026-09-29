@@ -436,15 +436,21 @@ impl SurfacePortfolio {
     }
 
     /// Draw from and credit a posterior shared with other chains.
-    pub fn sharing(mut self, shared: SharedSurfaceAllocator) -> Self {
+    ///
+    /// `source` is the key the credit writes and the draw reads. A book
+    /// with no source stays empty, and every chain keeps a private allocator.
+    pub fn sharing(
+        mut self,
+        shared: SharedSurfaceAllocator,
+        source: SourceTransferKey,
+    ) -> Result<Self, &'static str> {
         let arms = shared.lock().expect("shared surface allocator").arms();
-        assert_eq!(
-            arms,
-            self.arms.len(),
-            "a shared surface allocator must cover the same arms"
-        );
+        if arms != self.arms.len() {
+            return Err("a shared surface allocator must cover the same arms");
+        }
+        self.set_occupied_source(source)?;
         self.shared = Some(shared);
-        self
+        Ok(self)
     }
 
     /// Record the occupied validated source. A mismatched block interval is refused.
@@ -742,8 +748,9 @@ mod tests {
             quench_schema: "lbfgs".into(),
             block: 2,
         };
-        let mut teacher = SurfacePortfolio::with_block(&[deep], 1, 2).sharing(Arc::clone(&shared));
-        teacher.set_occupied_source(source.clone()).unwrap();
+        let mut teacher = SurfacePortfolio::with_block(&[deep], 1, 2)
+            .sharing(Arc::clone(&shared), source.clone())
+            .unwrap();
         let mut best = 0.0_f64;
         for _ in 0..200 {
             let arm = teacher.begin(true);
@@ -755,8 +762,9 @@ mod tests {
             best = best.min(reached);
             teacher.observe(false, reached, best);
         }
-        let mut student = SurfacePortfolio::with_block(&[deep], 2, 2).sharing(Arc::clone(&shared));
-        student.set_occupied_source(source).unwrap();
+        let mut student = SurfacePortfolio::with_block(&[deep], 2, 2)
+            .sharing(Arc::clone(&shared), source)
+            .unwrap();
         let deep_draws = (0..40)
             .filter(|_| {
                 let arm = student.begin(true);
