@@ -558,6 +558,10 @@ struct Population {
     /// Offer count at which each member last improved. A stalled chain
     /// pulls a member that improved more recently than it did.
     improved_at: Vec<u64>,
+    /// Offer count of each member's latest report. A live descent is a
+    /// member whose latest report improved. A minimum that was recorded
+    /// once and then sat still is a trap.
+    offered_at: Vec<u64>,
     tick: u64,
 }
 
@@ -567,6 +571,7 @@ impl Population {
             members: vec![None; chains],
             pending: vec![None; chains],
             improved_at: vec![0; chains],
+            offered_at: vec![0; chains],
             ..Self::default()
         }
     }
@@ -577,6 +582,7 @@ impl Population {
         let hist = shell_histograms(state);
         let previous = self.members[p].clone();
         self.tick = self.tick.saturating_add(1);
+        self.offered_at[p] = self.tick;
         if previous
             .as_ref()
             .is_none_or(|(old, _, _)| energy + 1e-9 < *old)
@@ -744,9 +750,10 @@ impl Population {
         }
     }
 
-    /// A stalled chain takes the member that improved most recently.
-    /// That member is further along the same descent. Filtering it out
-    /// for being the same packing leaves only a different trap.
+    /// A stalled chain takes a member that improved on its latest report
+    /// and is at least 0.5 lower. That member is still descending. A
+    /// minimum recorded once keeps an old improvement tick while its
+    /// latest report did not improve, and a stall must not copy it.
     fn pull_improving(&self, chain: usize, mine: f64) -> Option<Vec<f64>> {
         let my_tick = self.improved_at.get(chain).copied().unwrap_or(0);
         let mut chosen: Option<(u64, Vec<f64>)> = None;
@@ -775,7 +782,10 @@ impl Population {
                 continue;
             }
             let tick = self.improved_at.get(i).copied().unwrap_or(0);
-            if tick <= my_tick {
+            let offered = self.offered_at.get(i).copied().unwrap_or(0);
+            // The latest report has to be the improvement. A trap that
+            // dropped once still has a newer tick than a long stall.
+            if tick != offered || tick <= my_tick {
                 continue;
             }
             if chosen.as_ref().is_none_or(|(best, _)| tick > *best) {
