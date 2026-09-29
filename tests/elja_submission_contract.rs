@@ -682,6 +682,32 @@ fn production_lj_driver_does_not_consume_kinetic_boundary_crossings() {
 }
 
 #[test]
+fn shared_catalog_checkpoint_proposes_an_aligned_boundary_crossing() {
+    let driver = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("examples")
+        .join("lj_cluster_search.rs");
+    let source = fs::read_to_string(&driver)
+        .unwrap_or_else(|error| panic!("failed to read {}: {error}", driver.display()));
+
+    assert!(
+        source.contains("if sharing"),
+        "only a shared catalog may request a crossing"
+    );
+    assert!(
+        source.contains(".boundary_crossing("),
+        "a shared checkpoint must request one observed crossing"
+    );
+    assert!(
+        source.contains("boundary_crossing_trial("),
+        "the proposal must be the aligned displacement"
+    );
+    assert!(
+        source.contains("action: \"boundary\""),
+        "the charged proposal must be named boundary"
+    );
+}
+
+#[test]
 fn cooperative_share_optimization_is_one_quench_not_ten() {
     let driver = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("examples")

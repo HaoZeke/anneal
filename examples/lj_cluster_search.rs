@@ -3161,10 +3161,10 @@ fn run_capnp_catalog(
     };
     use anneal_core::cooperative_search::ledger::ChargeKind;
     use anneal_core::cooperative_search::{
-        CatalogBridgeOutcome, CatalogHoleOutcome, CatalogSampleOutcome, CatalogSamplesOutcome,
-        CooperativeRun, PolicyEvidenceOutcome, PolicyRole, PopulationSynchronizationOutcome,
-        ProposalFamily, RunManifest, SliceAdoption, SliceQuench, SliceTrace, SliceValidation,
-        TransitionRecordOutcome,
+        CatalogBoundaryOutcome, CatalogBridgeOutcome, CatalogHoleOutcome, CatalogSampleOutcome,
+        CatalogSamplesOutcome, CooperativeRun, PolicyEvidenceOutcome, PolicyRole,
+        PopulationSynchronizationOutcome, ProposalFamily, RunManifest, SliceAdoption, SliceQuench,
+        SliceTrace, SliceValidation, TransitionRecordOutcome,
     };
     #[cfg(feature = "ira")]
     use anneal_core::cooperative_search::{RideClaimOutcome, RideReportOutcome};
@@ -3736,6 +3736,7 @@ fn run_capnp_catalog(
     let mut count_other_family = 0usize;
     let mut count_walk = 0usize;
     let mut count_hole = 0usize;
+    let mut count_boundary = 0usize;
     let mut last_policy_action = ACTION_LOCAL;
     let mut checkpoint = |snapshot: ChainCheckpoint<'_>| {
         checkpoint_sequence = checkpoint_sequence
@@ -4821,6 +4822,35 @@ fn run_capnp_catalog(
                 );
             }
         }
+        if sharing
+            && checkpoint_sequence.is_multiple_of(probe_interval)
+            && snapshot.remaining() > run_cfg.relax_steps.saturating_add(2)
+        {
+            // The draw is the checkpoint and the replica. It stays off the
+            // probe stream, so an empty answer leaves that stream where it was.
+            let draw = checkpoint_sequence.wrapping_mul(0x9E37_79B9_7F4A_7C15) ^ u64::from(replica);
+            if let CatalogBoundaryOutcome::Crossing(crossing) = cooperative
+                .boundary_crossing(replica, snapshot.current_state().to_vec(), draw)
+                .expect("boundary crossing poll must preserve local execution")
+                && let Some(state) = boundary_crossing_trial(
+                    snapshot.current_state(),
+                    &crossing,
+                    transport_noise,
+                    transport_radius,
+                    &mut probe_rng,
+                )
+            {
+                trace.proposal_family = ProposalFamily::BoundaryTransport;
+                cooperative
+                    .record_slice(replica, trace)
+                    .expect("boundary checkpoint trace must remain complete");
+                count_boundary += 1;
+                return CheckpointAction::ProbeProposal {
+                    state,
+                    action: "boundary".to_owned(),
+                };
+            }
+        }
         if checkpoint_sequence.is_multiple_of(probe_interval)
             && snapshot.remaining() > run_cfg.relax_steps.saturating_add(2)
             && let Some(state) =
@@ -5201,7 +5231,7 @@ fn run_capnp_catalog(
     // stretches after the last improvement, so a count carried on the
     // personal-best line systematically misses the tail.
     println!(
-        "  policy: leaves {count_leave} other {count_other_family} walk {count_walk} hole {count_hole} refused {leave_refused}"
+        "  policy: leaves {count_leave} other {count_other_family} walk {count_walk} hole {count_hole} boundary {count_boundary} refused {leave_refused}"
     );
     let wall = occupancy_started.elapsed().as_secs_f64();
     if let Some(rate) = hops_per_core_hour(outcome.hops as u64, wall, 1) {

@@ -74,6 +74,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Fixed
 
+- A shared catalog checkpoint requests one observed boundary crossing
+  on the probe interval. The proposal is the aligned displacement at
+  the parsed transport noise and radius. A private catalog, an empty
+  region, a rejection, and a transport that does not fit keep the fixed
+  probe. The recorded destination is not adopted.
 - ``SurfacePortfolio::sharing`` records the occupied source before the
   shared book is attached. The draw and the block credit use that
   source. A book with no source is not attached.
