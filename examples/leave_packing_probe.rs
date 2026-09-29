@@ -57,8 +57,9 @@ fn quench(potential: &PairPotential, x: ArrayView1<f64>, steps: usize) -> Array1
 }
 
 /// DECAF distance between two structures, in the same L1 the packing
-/// grain is quoted in. `PACKING_LINK` is 0.35 and icosahedral-to-Marks
-/// is 0.69, so this says how far along that road a walk actually got.
+/// grain is quoted in. `PACKING_LINK` is 0.35. On the sealed LJ75 pair
+/// this distance is 0.4267. The class-histogram L1 of that pair is
+/// 0.6933 and is not what this function returns.
 fn packing_gap(origin: &[f64], trial: &[f64]) -> f64 {
     let mut book = PackingBook::default();
     for state in [origin, trial] {

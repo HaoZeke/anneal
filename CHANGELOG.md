@@ -41,6 +41,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   \(0.35\) is the middle of what both sizes allow. Leave adopts on that
   community, OtherFamily draws on it, and the certificate counts live
   packings rather than cells.
+- The packing angular band stays at ``l_max`` 3 with ``PACKING_LINK``
+  \(0.35\). On 72 LJ75 points (70 shelf isomers within \(8\varepsilon\)
+  of the icosahedral floor, plus the two references; seed 20260821)
+  the book gap is \(0.4267\) at ``l_max`` 3, with Marks alone at link
+  \(0.35\) (71 of 72 in the icosahedral component) and the join at
+  \(0.45\). At ``l_max`` 4 the gap is \(0.4533\) and the join is at
+  \(0.50\). At ``l_max`` 6 the gap is \(1.6267\), Marks stays alone
+  through radius \(1.20\), and the link \(0.35\) component holds 64 of
+  72. On 159 LJ38 points (157 shelf isomers plus the two references)
+  the same link holds 152 of 159 at ``l_max`` 3 and 60 of 159 at
+  ``l_max`` 6. ``DECAF_LMAX`` selects the band in
+  ``examples/decaf_packing_separator``. Production ``PACKING_SPEC``
+  does not change. The class-histogram icosahedron-Marks distance
+  \(0.6933\) is a different codebook.
 - The Leave start is a rung of a ladder in the packing map
   (``known_basin::leave_packing_rung``): a covering direction of the
   DECAF feature with the \(\mu\) component stripped, pointed away from
