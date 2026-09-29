@@ -45,6 +45,13 @@ pub const PACKING_MERGE: f64 = 0.20;
 pub const PACKING_LINK: f64 = 0.35;
 
 /// DECAF used [`SoapSpec::default`], not the leftover hop spec.
+///
+/// The angular band stays at `l_max` 3. On 72 LJ75 points (70 shelf
+/// isomers and the two references) the book gap is 0.4267 at `l_max`
+/// 3, 0.4533 at 4, and 1.6267 at 6. Marks is alone at link 0.35 for
+/// all three. The join moves from 0.45 to 0.50 to 1.50. At `l_max` 6
+/// and link 0.35 the icosahedral component holds 64 of 72 LJ75 points
+/// and 60 of 159 LJ38 points. A wider band is not the production book.
 pub const PACKING_SPEC: SoapSpec = SoapSpec {
     n_max: 3,
     l_max: 3,
