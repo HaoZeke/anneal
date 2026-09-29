@@ -178,7 +178,9 @@ fn main() {
         distance[0][1]
     );
 
-    for radius in [0.10, 0.15, 0.20, 0.25, 0.30, 0.35, 0.40, 0.45] {
+    for radius in [
+        0.10, 0.15, 0.20, 0.25, 0.30, 0.35, 0.40, 0.45, 0.50, 0.60, 0.80, 1.00, 1.20, 1.50,
+    ] {
         let label = components(&distance, radius);
         let mut distinct: Vec<usize> = label.clone();
         distinct.sort_unstable();
