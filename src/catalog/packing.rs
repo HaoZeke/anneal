@@ -78,6 +78,10 @@ pub struct PackingBook {
     /// draw.
     well_visits: Vec<u64>,
     histogram_cache: RefCell<Vec<CachedHistogram>>,
+    /// SOAP+ACE spec of every row in this book. [`SoapSpec::default`]
+    /// matches [`PACKING_SPEC`]. A measurement book can raise `l_max`
+    /// without changing the live codebook.
+    spec: SoapSpec,
 }
 
 /// One remembered histogram and the path that built it.
@@ -93,6 +97,14 @@ struct CachedHistogram {
 }
 
 impl PackingBook {
+    /// Codebook whose rows are `local_nu3_z` at `spec`.
+    pub fn with_spec(spec: SoapSpec) -> Self {
+        Self {
+            spec,
+            ..Self::default()
+        }
+    }
+
     /// Changes to the book since it was created.
     pub fn version(&self) -> u64 {
         self.version
@@ -356,7 +368,7 @@ impl PackingBook {
         if atoms < MINIMUM_PACKING_ATOMS {
             return None;
         }
-        let loc = local_nu3_z(ArrayView1::from(coordinates), PACKING_SPEC, None);
+        let loc = local_nu3_z(ArrayView1::from(coordinates), self.spec, None);
         if loc.nrows() == 0 || loc.ncols() == 0 {
             return None;
         }
@@ -380,7 +392,7 @@ impl PackingBook {
         if atoms < MINIMUM_PACKING_ATOMS {
             return None;
         }
-        let loc = local_nu3_z(ArrayView1::from(coordinates), PACKING_SPEC, None);
+        let loc = local_nu3_z(ArrayView1::from(coordinates), self.spec, None);
         if loc.nrows() == 0 || loc.ncols() == 0 {
             return None;
         }
