@@ -74,6 +74,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Fixed
 
+- ``SurfacePortfolio::sharing`` records the occupied source before the
+  shared book is attached. The draw and the block credit use that
+  source. A book with no source is not attached.
 - Occupancy extras idled against a one-packing book. A Leave trades a
   replica's walk for coverage, and that trade is only worth making when
   the Leave has somewhere to go: with one community on the book the

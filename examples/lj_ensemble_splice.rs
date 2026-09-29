@@ -891,7 +891,20 @@ fn run_chain(
         let mut portfolio =
             SurfacePortfolio::with_block(&exchange.portfolio, seed, exchange.portfolio_block);
         if let Some(shared) = shared_surfaces.clone() {
-            portfolio = portfolio.sharing(shared);
+            // One declared source for the ensemble. Block rewards are
+            // finite and carry the block's charged work, so the book
+            // can credit them. The Cambridge energy is not this key.
+            let source = anneal_core::surface_evidence::SourceTransferKey {
+                descriptor_schema: "lj".into(),
+                descriptor_version: 1,
+                region: 1,
+                proposal: "hop".into(),
+                quench_schema: "lbfgs".into(),
+                block: exchange.portfolio_block.max(1),
+            };
+            portfolio = portfolio
+                .sharing(shared, source)
+                .expect("shared surface source matches the portfolio block");
         }
         portfolio
     });
