@@ -21,10 +21,12 @@
 //! `CHECKPOINT` charged evaluations between board updates (default 500),
 //! `COMPRESS_MU` two-phase quench: relax first on the compressed surface
 //! `E + mu * sum |r_i - r_cm|^2`, then on the plain potential from there
-//! (default 0, plain quench), `DIAMETER_D` and `DIAMETER_BETA` add the
-//! Locatelli--Schoen diameter penalty `beta * sum_{i<j} max(0, r_ij^2 - D^2)^2`
-//! to the same first phase (`D` in units of the pair-well minimum distance,
-//! default 0 and 1); `DIAMETER_KAPPA` instead sets the cutoff per quench
+//! (`mu` in energy per length squared, default 0, plain quench).
+//! `DIAMETER_D` and `DIAMETER_BETA` add the Locatelli--Schoen diameter
+//! penalty `beta * sum_{i<j} max(0, r_ij^2 - D^2)^2` to the same first
+//! phase (`D` in units of the pair-well minimum distance, `beta` in energy
+//! per length to the fourth, default 0 and 1); `DIAMETER_KAPPA` instead
+//! sets the cutoff per quench
 //! to `kappa` times the largest pair distance of the structure being
 //! relaxed, a size-free rule that reads only the live structure. Every
 //! evaluation of either phase is charged.
@@ -286,10 +288,11 @@ struct ExchangeConfig {
     source_best: bool,
     checkpoint: usize,
     /// Compression strength of the first quench phase; zero is a plain quench.
+    /// Energy per length squared. Zero leaves the first phase unweighted.
     compress_mu: f64,
     /// Diameter penalty cutoff in sigma units; zero disables the penalty.
     diameter: f64,
-    /// Diameter penalty strength.
+    /// Energy per length to the fourth, on `(r^2 - D^2)^2`.
     diameter_beta: f64,
     /// Relative cutoff: `kappa` times the largest pair distance of the
     /// structure entering the quench; zero keeps the fixed cutoff.
