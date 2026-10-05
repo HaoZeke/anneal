@@ -21,8 +21,9 @@
 //! 200, and 250. `fixed` leaves the cutoff at 1.5 times the mean pairwise
 //! shell distance of the initial population. A run stops at the first
 //! two-phase search whose energy is within `1e-3` of `-543.665361`, or at
-//! 1500 iterations. The printed call count is those searches. The initial
-//! population is minimized too and is reported separately.
+//! 1500 iterations. The printed call count is those moves. Each initial
+//! member is a plain local minimum; the two-phase move is not used to
+//! build the population.
 
 use std::env;
 use std::fs::OpenOptions;
@@ -30,7 +31,10 @@ use std::io::{Write, stdout};
 use std::thread;
 use std::time::Instant;
 
+use anneal_core::diversity::DiversityAnnealer;
+use anneal_core::methods::bank::{Admission, Bank};
 use anneal_core::methods::cluster_hopping::random_cluster;
+use anneal_core::methods::csa_cluster::coordination_histogram_distance;
 use anneal_core::methods::two_phase::penalty;
 use anneal_core::methods::warm_lbfgs::WarmLbfgs;
 use anneal_core::potentials::PairPotential;
@@ -54,65 +58,15 @@ struct Point {
     x: Vec<f64>,
 }
 
-fn shell_counts(x: &[f64]) -> (Vec<u32>, Vec<u32>) {
-    let n = x.len() / 3;
-    let mut h1 = vec![0u32; n];
-    let mut h2 = vec![0u32; n];
-    let unit = pair_unit();
-    let r1 = 1.25 * unit;
-    let r2 = 1.55 * unit;
-    let mut neighbours = vec![0usize; n];
-    let mut second = vec![0usize; n];
-    for i in 0..n {
-        for j in (i + 1)..n {
-            let mut r2s = 0.0;
-            for k in 0..3 {
-                let d = x[3 * i + k] - x[3 * j + k];
-                r2s += d * d;
-            }
-            let r = r2s.sqrt();
-            if r < r1 {
-                neighbours[i] += 1;
-                neighbours[j] += 1;
-            } else if r < r2 {
-                second[i] += 1;
-                second[j] += 1;
-            }
-        }
-    }
-    for i in 0..n {
-        h1[neighbours[i]] += 1;
-        h2[second[i]] += 1;
-    }
-    (h1, h2)
-}
-
-/// `sum_n n (2 |H1x-H1y| + |H2x-H2y|)`.
+/// Shell distance at 1.25 and 1.55 pair-minimum units.
 fn shell_distance(a: &[f64], b: &[f64]) -> f64 {
-    let (h1a, h2a) = shell_counts(a);
-    let (h1b, h2b) = shell_counts(b);
-    let n = h1a.len().max(h1b.len());
-    let mut total = 0.0;
-    for i in 0..n {
-        let d1 = f64::from(h1a.get(i).copied().unwrap_or(0))
-            - f64::from(h1b.get(i).copied().unwrap_or(0));
-        let d2 = f64::from(h2a.get(i).copied().unwrap_or(0))
-            - f64::from(h2b.get(i).copied().unwrap_or(0));
-        total += i as f64 * (2.0 * d1.abs() + d2.abs());
-    }
-    total
-}
-
-fn mean_pairwise(pop: &[Point]) -> f64 {
-    let mut total = 0.0;
-    let mut count = 0usize;
-    for i in 0..pop.len() {
-        for j in (i + 1)..pop.len() {
-            total += shell_distance(&pop[i].x, &pop[j].x);
-            count += 1;
-        }
-    }
-    total / count.max(1) as f64
+    let unit = pair_unit();
+    coordination_histogram_distance(
+        ArrayView1::from(a),
+        ArrayView1::from(b),
+        1.25 * unit,
+        1.55 * unit,
+    )
 }
 
 /// Cutoff in force during iteration `iteration` (1-based).
@@ -151,17 +105,6 @@ fn replacement(energies: &[f64], dists: &[f64], child: f64, dcut: f64) -> Option
         return Some((worst, false));
     }
     None
-}
-
-fn apply_replacement(pop: &mut [Point], child: Point, dcut: f64) -> Option<bool> {
-    let dists: Vec<f64> = pop
-        .iter()
-        .map(|member| shell_distance(&child.x, &member.x))
-        .collect();
-    let energies: Vec<f64> = pop.iter().map(|member| member.energy).collect();
-    let decision = replacement(&energies, &dists, child.energy, dcut)?;
-    pop[decision.0] = child;
-    Some(decision.1)
 }
 
 fn emit(line: &str) {
@@ -215,28 +158,38 @@ struct Run {
     unconverged: u64,
 }
 
-fn minimize_seed(
-    pot: &PairPotential,
-    opt: &mut WarmLbfgs,
-    rng: &mut StdRng,
-) -> (Point, usize, f64) {
+fn shell_view(a: ArrayView1<f64>, b: ArrayView1<f64>) -> f64 {
+    let unit = pair_unit();
+    coordination_histogram_distance(a, b, 1.25 * unit, 1.55 * unit)
+}
+
+/// Plain local minimum. The two-phase move is the iteration, not the seed.
+fn plain_local(pot: &PairPotential, opt: &mut WarmLbfgs, rng: &mut StdRng) -> (Point, usize, f64) {
     let seed = random_cluster(N, 0.7, 0.85, rng);
-    let (energy, x, evals, ginf) =
-        two_phase(pot, opt, seed.as_slice().expect("seed is contiguous"));
-    (Point { energy, x }, evals, ginf)
+    opt.forget();
+    let (energy, x, evals) = opt.minimize(seed.view(), 2000, |v| Some(pot.value_and_gradient(v)));
+    let (_, g) = pot.value_and_gradient(x.view());
+    (
+        Point {
+            energy,
+            x: x.to_vec(),
+        },
+        evals,
+        inf_norm(&g),
+    )
 }
 
 fn run_one(seed: u64, anneal: bool) -> Run {
     let mut rng = StdRng::seed_from_u64(seed);
     let pot = PairPotential::lennard_jones(N);
     let mut opt = WarmLbfgs::default();
-    let mut pop = Vec::with_capacity(K);
+    let mut bank = Bank::new(K, 1.0);
     let mut init_calls = 0u64;
     let mut unconverged = 0u64;
     let mut best = f64::INFINITY;
     let started = Instant::now();
     for _ in 0..K {
-        let (point, _, ginf) = minimize_seed(&pot, &mut opt, &mut rng);
+        let (point, _, ginf) = plain_local(&pot, &mut opt, &mut rng);
         if ginf > 1e-4 {
             unconverged += 1;
         }
@@ -259,24 +212,45 @@ fn run_one(seed: u64, anneal: bool) -> Run {
                 unconverged,
             };
         }
-        pop.push(point);
+        let stored = Array1::from_vec(point.x);
+        assert!(
+            bank.seed(stored.view(), point.energy),
+            "the initial population has one slot per member"
+        );
     }
+    let coords: Vec<Vec<f64>> = bank
+        .members()
+        .iter()
+        .map(|member| member.state.to_vec())
+        .collect();
+    let slots: Vec<usize> = (0..coords.len()).collect();
+    let dcut0 = DiversityAnnealer::scaled_from_population(
+        &slots,
+        |i, j| shell_distance(&coords[i], &coords[j]),
+        1.5,
+    )
+    .map(|schedule| schedule.initial())
+    .unwrap_or(1.0);
+    bank.dcut = dcut0;
     emit(&format!(
-        "seed {seed} init {init_calls} best {best:.4} seconds {:.1}",
+        "seed {seed} init {init_calls} best {best:.4} seconds {:.1} dcut {dcut0:.3}",
         started.elapsed().as_secs_f64()
     ));
-    let dcut0 = 1.5 * mean_pairwise(&pop);
     let half = 0.4 * pair_unit();
     let mut calls = 0u64;
     let mut near = 0u64;
     let mut far = 0u64;
     for iteration in 1..=MAX_STEP {
-        let dcut = dcut_for_iteration(iteration, dcut0, anneal);
+        bank.dcut = dcut_for_iteration(iteration, dcut0, anneal);
+        let parents: Vec<Vec<f64>> = bank
+            .members()
+            .iter()
+            .map(|member| member.state.to_vec())
+            .collect();
         let mut children = Vec::with_capacity(K);
         let mut hit_at: Option<Point> = None;
-        for member in &pop {
-            let kicked = member
-                .x
+        for parent in &parents {
+            let kicked = parent
                 .iter()
                 .map(|v| v + rng.random_range(-half..half))
                 .collect::<Vec<_>>();
@@ -311,10 +285,11 @@ fn run_one(seed: u64, anneal: bool) -> Run {
             };
         }
         for child in children {
-            match apply_replacement(&mut pop, child, dcut) {
-                Some(true) => near += 1,
-                Some(false) => far += 1,
-                None => {}
+            let stored = Array1::from_vec(child.x);
+            match bank.offer(stored.view(), child.energy, shell_view) {
+                Admission::Improved(_) => near += 1,
+                Admission::Displaced(_) => far += 1,
+                Admission::Duplicate(_) | Admission::Added(_) | Admission::Rejected => {}
             }
         }
         emit(&format!(
@@ -427,11 +402,15 @@ fn main() {
     let pot = PairPotential::lennard_jones(N);
     let mut opt = WarmLbfgs::default();
     let mut rng = StdRng::seed_from_u64(0);
-    let (sample, evals, ginf) = minimize_seed(&pot, &mut opt, &mut rng);
+    let sample = random_cluster(N, 0.7, 0.85, &mut rng);
+    let (energy, _, evals, ginf) = two_phase(
+        &pot,
+        &mut opt,
+        sample.as_slice().expect("sample is contiguous"),
+    );
     emit(&format!(
-        "one_quench {:.3}s evals {evals} ginf {ginf:.3e} energy {:.4}",
-        quench_started.elapsed().as_secs_f64(),
-        sample.energy
+        "one_quench {:.3}s evals {evals} ginf {ginf:.3e} energy {energy:.4}",
+        quench_started.elapsed().as_secs_f64()
     ));
     let mut handles = Vec::with_capacity(runs);
     for i in 0..runs {
