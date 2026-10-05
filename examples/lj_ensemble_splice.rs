@@ -317,10 +317,10 @@ struct ExchangeConfig {
     /// chain `i` walks arm `i mod (1 + arms)` for its whole budget, the
     /// plain surface being arm zero.
     portfolio_split: bool,
-    /// Population basin hopping: at every checkpoint a chain's live minimum
-    /// is offered to the ensemble under the Grosso--Locatelli--Schoen
-    /// replacement rule, and a chain told to move adopts the offered
-    /// structure at its next checkpoint.
+    /// At every checkpoint the chain's incumbent is written into its own
+    /// slot, and a strictly better incumbent may be copied onto another
+    /// chain. A parent is not kept when its child is assigned elsewhere,
+    /// and a step that loses to its parent is never offered.
     pbh: bool,
     /// Replacement radius as a multiple of the ensemble's mean pairwise
     /// dissimilarity at the first exchange.
@@ -571,8 +571,8 @@ impl Population {
         }
     }
 
-    /// Offer chain `p`'s live minimum. Returns whether some chain was told
-    /// to move.
+    /// Record chain `p`'s incumbent, then maybe copy it onto another chain.
+    /// The slot is updated before that test.
     fn offer(&mut self, p: usize, energy: f64, state: &[f64], dcut_scale: f64) -> bool {
         let hist = shell_histograms(state);
         let previous = self.members[p].clone();
