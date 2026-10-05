@@ -25,7 +25,10 @@
 //! population is minimized too and is reported separately.
 
 use std::env;
+use std::fs::OpenOptions;
+use std::io::{Write, stdout};
 use std::thread;
+use std::time::Instant;
 
 use anneal_core::methods::cluster_hopping::random_cluster;
 use anneal_core::methods::two_phase::penalty;
@@ -161,6 +164,21 @@ fn apply_replacement(pop: &mut [Point], child: Point, dcut: f64) -> Option<bool>
     Some(decision.1)
 }
 
+fn emit(line: &str) {
+    println!("{line}");
+    let _ = stdout().flush();
+    let Ok(dir) = env::var("PBH_LOGDIR") else {
+        return;
+    };
+    if let Ok(mut file) = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(format!("{dir}/progress.log"))
+    {
+        let _ = writeln!(file, "{line}");
+    }
+}
+
 fn inf_norm(g: &Array1<f64>) -> f64 {
     g.iter().fold(0.0_f64, |m, v| m.max(v.abs()))
 }
@@ -216,6 +234,7 @@ fn run_one(seed: u64, anneal: bool) -> Run {
     let mut init_calls = 0u64;
     let mut unconverged = 0u64;
     let mut best = f64::INFINITY;
+    let started = Instant::now();
     for _ in 0..K {
         let (point, _, ginf) = minimize_seed(&pot, &mut opt, &mut rng);
         if ginf > 1e-4 {
@@ -224,6 +243,10 @@ fn run_one(seed: u64, anneal: bool) -> Run {
         init_calls += 1;
         best = best.min(point.energy);
         if point.energy <= TARGET + HIT {
+            emit(&format!(
+                "seed {seed} hit 1 calls 0 init {init_calls} energy {:.6}",
+                point.energy
+            ));
             return Run {
                 seed,
                 hit: true,
@@ -238,6 +261,10 @@ fn run_one(seed: u64, anneal: bool) -> Run {
         }
         pop.push(point);
     }
+    emit(&format!(
+        "seed {seed} init {init_calls} best {best:.4} seconds {:.1}",
+        started.elapsed().as_secs_f64()
+    ));
     let dcut0 = 1.5 * mean_pairwise(&pop);
     let half = 0.4 * pair_unit();
     let mut calls = 0u64;
@@ -267,6 +294,10 @@ fn run_one(seed: u64, anneal: bool) -> Run {
             children.push(child);
         }
         if let Some(child) = hit_at {
+            emit(&format!(
+                "seed {seed} hit 1 calls {calls} init {init_calls} energy {:.6} iteration {iteration}",
+                child.energy
+            ));
             return Run {
                 seed,
                 hit: true,
@@ -286,6 +317,9 @@ fn run_one(seed: u64, anneal: bool) -> Run {
                 None => {}
             }
         }
+        emit(&format!(
+            "seed {seed} iter {iteration} calls {calls} best {best:.4} near {near} far {far}"
+        ));
     }
     Run {
         seed,
@@ -381,14 +415,24 @@ fn main() {
     let mode = args.get(2).map(String::as_str).unwrap_or("anneal");
     let anneal = mode != "fixed";
     let unit = pair_unit();
-    println!(
+    emit(&format!(
         "LJ98 synchronous population K={K} MaxStep={MAX_STEP} mode={mode} seeds {seed0}..{} D={:.6} kick={:.6} shells {:.6} {:.6} target {REFERENCE} tol {HIT}",
         seed0 + runs as u64 - 1,
         3.5 * unit,
         0.4 * unit,
         1.25 * unit,
         1.55 * unit,
-    );
+    ));
+    let quench_started = Instant::now();
+    let pot = PairPotential::lennard_jones(N);
+    let mut opt = WarmLbfgs::default();
+    let mut rng = StdRng::seed_from_u64(0);
+    let (sample, evals, ginf) = minimize_seed(&pot, &mut opt, &mut rng);
+    emit(&format!(
+        "one_quench {:.3}s evals {evals} ginf {ginf:.3e} energy {:.4}",
+        quench_started.elapsed().as_secs_f64(),
+        sample.energy
+    ));
     let mut handles = Vec::with_capacity(runs);
     for i in 0..runs {
         let seed = seed0 + i as u64;
@@ -406,7 +450,7 @@ fn main() {
             hits += 1;
             hit_calls += run.calls;
         }
-        println!(
+        emit(&format!(
             "seed {} hit {} calls {} init {} energy {:.6} iteration {} near {} far {} unconverged {}",
             run.seed,
             run.hit as u8,
@@ -417,12 +461,12 @@ fn main() {
             run.near,
             run.far,
             run.unconverged,
-        );
+        ));
     }
     let mean = if hits == 0 {
         f64::NAN
     } else {
         hit_calls as f64 / hits as f64
     };
-    println!("RS {hits}/{runs} mean_hit_calls {mean:.1}");
+    emit(&format!("RS {hits}/{runs} mean_hit_calls {mean:.1}"));
 }
