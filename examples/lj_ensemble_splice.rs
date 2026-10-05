@@ -33,14 +33,14 @@ use std::sync::{Arc, Mutex};
 
 use anneal_core::bias::BasinBias;
 use anneal_core::methods::cluster_hopping::{
-    random_cluster, run_with_bias_at_checkpoints, AcceptedTransition, ChainCheckpoint,
-    CheckpointAction, ClusterFingerprint, Config, Ledger, MoveLibrary, Outcome,
+    AcceptedTransition, ChainCheckpoint, CheckpointAction, ClusterFingerprint, Config, Ledger,
+    MoveLibrary, Outcome, random_cluster, run_with_bias_at_checkpoints,
 };
-use anneal_core::methods::cluster_search::{median_encounter, Encounter};
+use anneal_core::methods::cluster_search::{Encounter, median_encounter};
 use anneal_core::methods::splice::cut_and_splice;
 use anneal_core::methods::two_phase::{
-    largest_pair_distance, penalty_axes, penalty_body, shared_surface_allocator, Cutoff,
-    SharedSurfaceAllocator, SurfacePortfolio, TwoPhase,
+    Cutoff, SharedSurfaceAllocator, SurfacePortfolio, TwoPhase, largest_pair_distance,
+    penalty_axes, penalty_body, shared_surface_allocator,
 };
 use anneal_core::methods::warm_lbfgs::WarmLbfgs;
 use anneal_core::potentials::PairPotential;
