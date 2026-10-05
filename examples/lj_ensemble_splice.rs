@@ -889,7 +889,8 @@ fn run_chain(
                 }
             } else {
                 for boundary in snapshot.quench_boundaries() {
-                    let Some(quenched) = boundary.state().as_slice() else {
+                    let quenched = boundary.state();
+                    let Some(quenched) = quenched.as_slice() else {
                         continue;
                     };
                     tally.attempts += 1;
