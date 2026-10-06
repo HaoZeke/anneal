@@ -221,6 +221,29 @@ where
 {
     let mut best = origin.to_owned();
     let mut best_e = energy(origin.view());
+    let mut keep = |quenched: Array1<f64>| {
+        let value = energy(quenched.view());
+        if value.is_finite() {
+            println!("{{\"kind\":\"exit_candidate\",\"energy\":{value:.6}}}");
+        }
+        if value.is_finite() && value < best_e - 1e-6 {
+            best_e = value;
+            best = quenched;
+        }
+    };
+    // Several amplitudes of the pentagonal opening, quenched on their own.
+    for amp in [0.35_f64, 0.55, 0.75, 1.0, 1.25] {
+        for which in 0..4 {
+            keep(quench(fivefold_opening(origin, amp, which).view()));
+        }
+    }
+    // The same opening stacked, then one quench, so the shell can
+    // reconstruct before it is relaxed.
+    let mut chain = origin.to_owned();
+    for which in 0..8 {
+        chain = fivefold_opening(chain.view(), 0.75, which);
+    }
+    keep(quench(chain.view()));
     let mut here = origin.to_owned();
     let mut here_e = best_e;
     let mut rng = rand::rngs::StdRng::seed_from_u64(1 + cover_index as u64);
@@ -230,7 +253,7 @@ where
     // Keep walking: a covering displacement, sometimes a pentagonal
     // opening, a minimum-mode climb when the ridge is real, then a
     // quench. Uphill quenches are accepted so the walk can leave.
-    for hop in 0..48 {
+    for hop in 0..16 {
         let point = if hop % 6 == 0 {
             fivefold_opening(here.view(), rmsd, hop)
         } else {
