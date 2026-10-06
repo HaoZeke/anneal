@@ -220,18 +220,23 @@ where
 {
     let mut best = origin.to_owned();
     let mut best_e = energy(origin.view());
-    let mut consider = |mut point: Array1<f64>| {
-        let climbed = activate_from_origin(point.view(), origin, &mut grad, cfg);
-        if let Some(outcome) = climbed {
+    let mut consider = |point: Array1<f64>| {
+        let direct = quench(point.view());
+        let mut candidates = vec![direct];
+        if let Some(outcome) = activate_from_origin(point.view(), origin, &mut grad, cfg) {
             if outcome.crossed {
-                point = outcome.state;
+                candidates.push(quench(outcome.state.view()));
             }
         }
-        let quenched = quench(point.view());
-        let value = energy(quenched.view());
-        if value.is_finite() && value < best_e - 1e-6 {
-            best_e = value;
-            best = quenched;
+        for quenched in candidates {
+            let value = energy(quenched.view());
+            if value.is_finite() {
+                println!("{{\"kind\":\"exit_candidate\",\"energy\":{value:.6}}}");
+            }
+            if value.is_finite() && value < best_e - 1e-6 {
+                best_e = value;
+                best = quenched;
+            }
         }
     };
     let n_cover = crate::hypersphere::default_cover_size();
