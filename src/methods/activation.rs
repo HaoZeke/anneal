@@ -245,14 +245,32 @@ where
     if placed.len() == origin.len() {
         consider(Array1::from(placed));
     }
-    let table = crate::soap::fivefold_axis_table(origin);
-    let mut openings: Vec<([f64; 3], f64)> = table
+    // A perfect pentagon has a fivefold length near zero, so a window
+    // around 0.90 matches nothing. The openings that leave are the axes
+    // closest to those two lengths, among axes that are still fivefold.
+    let good: Vec<([f64; 3], f64)> = crate::soap::fivefold_axis_table(origin)
         .into_iter()
-        .filter(|(_, d5)| (*d5 - 0.90).abs() < 0.06 || (*d5 - 0.99).abs() < 0.06)
+        .filter(|(_, d5)| *d5 < 1.40)
         .collect();
-    openings.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
-    openings.dedup_by(|a, b| (a.1 - b.1).abs() < 1e-3);
-    for (axis, _) in openings.into_iter().take(2) {
+    let nearest = |target: f64| {
+        good.iter()
+            .min_by(|a, b| {
+                (a.1 - target)
+                    .abs()
+                    .partial_cmp(&(b.1 - target).abs())
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
+            .copied()
+    };
+    let mut seen = Vec::new();
+    for target in [0.90_f64, 0.99] {
+        let Some((axis, d5)) = nearest(target) else {
+            continue;
+        };
+        if seen.iter().any(|kept: &f64| (*kept - d5).abs() < 1e-3) {
+            continue;
+        }
+        seen.push(d5);
         let kicked = crate::soap::step_away_fivefold_about(origin, rmsd.max(0.75), axis);
         consider(kicked);
     }
