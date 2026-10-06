@@ -25,4 +25,5 @@ export LJ_ROOT=$SCRATCH/src
 bash "$LJ_ROOT/scripts/elja_build_lj.sh"
 PROBE=$LJ_ROOT/target/release/examples/leave_packing_probe
 test -x "$PROBE"
-"$PROBE" 96 600 climb 0.7
+# The fourth argument is only the nudge cap. The climb sets the distance.
+"$PROBE" 96 600 climb 0.15

@@ -163,10 +163,14 @@ where
 {
     let n_cover = crate::hypersphere::default_cover_size();
     let direction = crate::hypersphere::cover_direction(n_cover, origin.len(), cover_index);
+    // A hop-sized kick is the wrong distance: it leaves the basin before
+    // the mode is known, and the quench falls into a shallower well.
+    // The cover only picks the half-space. The climb walks the ridge.
+    let nudge = rmsd.min(cfg.step).max(1e-3);
     let placed = crate::hypersphere::place_around(
         origin.as_slice().unwrap_or(&[]),
         &direction,
-        rmsd,
+        nudge,
         None,
     );
     let start = if placed.len() == origin.len() {
