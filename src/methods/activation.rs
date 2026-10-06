@@ -439,9 +439,10 @@ where
         if best_e < origin_e - 0.05 {
             return best;
         }
+        let amplitude = [0.36_f64, 0.70, 1.15][hop % 3];
         let mut trial = walker.clone();
         for value in trial.iter_mut() {
-            *value += 0.40 * (2.0 * rng.random::<f64>() - 1.0);
+            *value += amplitude * (2.0 * rng.random::<f64>() - 1.0);
         }
         let quenched = quench(trial.view());
         note_candidate(
