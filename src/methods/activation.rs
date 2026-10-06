@@ -171,30 +171,64 @@ where
     Q: FnMut(ArrayView1<f64>) -> Array1<f64>,
 {
     let n_cover = crate::hypersphere::default_cover_size();
-    let direction = crate::hypersphere::cover_direction(n_cover, origin.len(), cover_index);
+    let direction = Array1::from(crate::hypersphere::cover_direction(
+        n_cover,
+        origin.len(),
+        cover_index,
+    ));
+    let contact = closest_pair(origin);
+    let n_atoms = origin.len() / 3;
+    // A cluster is displaced in its soft subspace. The cover only chooses
+    // the sign of each mode. The amplitude is one contact length of
+    // all-atom RMS, shared across the modes and weighted toward the
+    // softest. The minimum-mode climb then leaves that point, and the
+    // quench follows.
+    if contact > 0.95 && n_atoms >= 2 {
+        if let Some((lambdas, modes, _)) = crate::curvature::soft_subspace(
+            origin,
+            |point| grad(point),
+            cfg.lanczos_steps.max(2),
+            cfg.epsilon,
+            cfg.lanczos_steps.saturating_sub(1).max(1),
+        ) {
+            let lambda_min = lambdas.iter().copied().fold(f64::MAX, f64::min);
+            if lambda_min.is_finite() && lambda_min > 0.0 && !modes.is_empty() {
+                let share = (modes.len() as f64).sqrt();
+                let mut kicked = origin.to_owned();
+                for (lambda, mode) in lambdas.iter().zip(modes.iter()) {
+                    let weight = (lambda_min / lambda.max(lambda_min)).sqrt();
+                    let amp = contact * (n_atoms as f64).sqrt() * weight / share;
+                    let align: f64 = mode.iter().zip(direction.iter()).map(|(a, b)| a * b).sum();
+                    let sign = if align >= 0.0 { 1.0 } else { -1.0 };
+                    for i in 0..kicked.len() {
+                        kicked[i] += sign * amp * mode[i];
+                    }
+                }
+                if let Some(outcome) = activate(kicked.view(), &mut grad, cfg, 1.0)
+                    && outcome.crossed
+                {
+                    return quench(outcome.state.view());
+                }
+                return quench(kicked.view());
+            }
+        }
+    }
     let placed = crate::hypersphere::place_around(
         origin.as_slice().unwrap_or(&[]),
-        &direction,
+        direction.as_slice().unwrap(),
         rmsd.max(1e-3),
         None,
     );
-    let direction = Array1::from(direction);
-    // Climb from the minimum along the cover. The kick is quenched only
-    // when that climb does not cross a ridge.
-    if let Some(outcome) = activate_along(origin.view(), direction.view(), &mut grad, cfg)
-        && outcome.crossed
-    {
-        println!(
-            "{{\"kind\":\"exit_ridge\",\"steps\":{},\"lambda\":{:.4}}}",
-            outcome.steps, outcome.lambda
-        );
-        return quench(outcome.state.view());
-    }
     let start = if placed.len() == origin.len() {
         Array1::from(placed)
     } else {
         origin.to_owned()
     };
+    if let Some(outcome) = activate_along(start.view(), direction.view(), &mut grad, cfg)
+        && outcome.crossed
+    {
+        return quench(outcome.state.view());
+    }
     quench(start.view())
 }
 
@@ -312,412 +346,6 @@ where
 /// remaining gradient is followed, then the caller quenches with every
 /// atom free. A structure that already has an atom on the centre is
 /// unchanged. No stored geometry is read.
-fn shell_representatives(origin: ArrayView1<f64>, com: [f64; 3], contact: f64) -> Vec<usize> {
-    let n = origin.len() / 3;
-    let mut order: Vec<(f64, usize)> = (0..n)
-        .map(|i| {
-            let mut r2 = 0.0;
-            for k in 0..3 {
-                let d = origin[3 * i + k] - com[k];
-                r2 += d * d;
-            }
-            (r2.sqrt(), i)
-        })
-        .collect();
-    order.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
-    let mut picked = Vec::new();
-    let mut last = f64::NAN;
-    for (radius, index) in order {
-        if radius <= 1.0e-8 {
-            continue;
-        }
-        if !last.is_finite() || radius - last > contact * 0.5 {
-            picked.push(index);
-            last = radius;
-        }
-    }
-    picked
-}
-
-fn pin_and_relax<E>(
-    origin: ArrayView1<f64>,
-    pin: usize,
-    com: [f64; 3],
-    contact: f64,
-    evaluate: &mut E,
-) -> Array1<f64>
-where
-    E: FnMut(ArrayView1<f64>) -> (f64, Array1<f64>),
-{
-    let n = origin.len() / 3;
-    let mut cur = origin.to_owned();
-    for k in 0..3 {
-        cur[3 * pin + k] = com[k];
-    }
-    let (mut energy, mut grad) = evaluate(cur.view());
-    for _ in 0..cur.len() {
-        for k in 0..3 {
-            grad[3 * pin + k] = 0.0;
-        }
-        let gnorm: f64 = grad.iter().map(|value| value * value).sum::<f64>().sqrt();
-        if !energy.is_finite() || !gnorm.is_finite() || gnorm == 0.0 {
-            break;
-        }
-        let mut alpha = contact / gnorm;
-        let mut improved = false;
-        while alpha * gnorm > 1.0e-8 {
-            let mut trial = cur.clone();
-            for i in 0..trial.len() {
-                trial[i] -= alpha * grad[i];
-            }
-            let mut shift = [0.0; 3];
-            for i in 0..n {
-                for k in 0..3 {
-                    shift[k] += trial[3 * i + k];
-                }
-            }
-            for value in &mut shift {
-                *value /= n as f64;
-            }
-            for i in 0..n {
-                for k in 0..3 {
-                    trial[3 * i + k] -= shift[k];
-                }
-            }
-            for k in 0..3 {
-                trial[3 * pin + k] = 0.0;
-            }
-            let (next, next_grad) = evaluate(trial.view());
-            if next.is_finite() && next < energy {
-                cur = trial;
-                energy = next;
-                grad = next_grad;
-                improved = true;
-                break;
-            }
-            alpha *= 0.5;
-        }
-        if !improved {
-            break;
-        }
-    }
-    cur
-}
-
-fn occupy_centre<E>(origin: ArrayView1<f64>, evaluate: &mut E) -> Vec<Array1<f64>>
-where
-    E: FnMut(ArrayView1<f64>) -> (f64, Array1<f64>),
-{
-    let n = origin.len() / 3;
-    if n < 2 {
-        return Vec::new();
-    }
-    let contact = closest_pair(origin);
-    if !(contact > 0.95) {
-        return Vec::new();
-    }
-    let mut com = [0.0; 3];
-    for i in 0..n {
-        for k in 0..3 {
-            com[k] += origin[3 * i + k];
-        }
-    }
-    for value in &mut com {
-        *value /= n as f64;
-    }
-    let mut out = Vec::new();
-    for pin in shell_representatives(origin, com, contact) {
-        out.push(pin_and_relax(origin, pin, com, contact, evaluate));
-    }
-    out
-}
-
-fn outward_shells(bond: f64) -> Vec<f64> {
-    let mut radius = bond / (2.0 * (std::f64::consts::PI / 5.0).sin());
-    let cosine = (std::f64::consts::PI / 5.0).cos();
-    let mut shells = vec![radius];
-    for _ in 0..8 {
-        let disc = (radius * cosine).powi(2) - (radius * radius - bond * bond);
-        if disc <= 0.0 {
-            break;
-        }
-        let next = radius * cosine + disc.sqrt();
-        if next <= radius {
-            break;
-        }
-        shells.push(next);
-        radius = next;
-    }
-    shells
-}
-
-fn canonical_counts(counts: &[usize]) -> bool {
-    let n = counts.len();
-    for i in 0..n / 2 {
-        if counts[i] != counts[n - 1 - i] {
-            return counts[i] < counts[n - 1 - i];
-        }
-    }
-    true
-}
-
-fn layer_assignments(n_layers: usize, n_rings: usize, max_per: usize, out: &mut Vec<Vec<usize>>) {
-    fn walk(
-        left: usize,
-        remaining: usize,
-        max_per: usize,
-        prefix: &mut Vec<usize>,
-        out: &mut Vec<Vec<usize>>,
-    ) {
-        if left == 1 {
-            if remaining <= max_per {
-                prefix.push(remaining);
-                if canonical_counts(prefix) {
-                    out.push(prefix.clone());
-                }
-                prefix.pop();
-            }
-            return;
-        }
-        for count in 0..=max_per.min(remaining) {
-            prefix.push(count);
-            walk(left - 1, remaining - count, max_per, prefix, out);
-            prefix.pop();
-        }
-    }
-    if n_layers == 0 {
-        return;
-    }
-    let mut prefix = Vec::with_capacity(n_layers);
-    walk(n_layers, n_rings, max_per, &mut prefix, out);
-}
-
-fn seed_rings(counts: &[usize], bond: f64, shells: &[f64]) -> Vec<f64> {
-    let n_axis = counts.len().div_ceil(2);
-    let gap = std::f64::consts::PI / 10.0;
-    let pair = bond / (2.0 * (gap * 0.5).sin());
-    let mut params = Vec::new();
-    for i in 0..n_axis {
-        let height = (i as f64 - (n_axis - 1) as f64 * 0.5) * bond;
-        params.push(height);
-    }
-    let n_layers = counts.len();
-    for (layer, &count) in counts.iter().enumerate() {
-        if count == 0 {
-            continue;
-        }
-        let height = (layer as f64 - (n_layers - 1) as f64 * 0.5) * bond * 0.5;
-        let offset = if layer % 2 == 0 { 1 } else { 0 };
-        let shell_at = |j: usize| shells[(offset + j).min(shells.len() - 1)];
-        if count <= 2 {
-            for j in 0..count {
-                params.push(height);
-                params.push(shell_at(j));
-                params.push((j as f64) * std::f64::consts::PI / 5.0);
-            }
-        } else {
-            for j in 0..(count - 2) {
-                params.push(height);
-                params.push(shell_at(j));
-                params.push((j as f64) * std::f64::consts::PI / 5.0);
-            }
-            params.push(height);
-            params.push(pair);
-            params.push(gap * 0.5);
-            params.push(height);
-            params.push(pair);
-            params.push(-gap * 0.5);
-        }
-    }
-    params
-}
-
-fn ring_points(params: &[f64], n_axis: usize, n_rings: usize) -> Array1<f64> {
-    let n = n_axis + 5 * n_rings;
-    let mut x = Array1::zeros(3 * n);
-    for i in 0..n_axis {
-        x[3 * i + 2] = params[i];
-    }
-    for ring in 0..n_rings {
-        let base = n_axis + 3 * ring;
-        let z = params[base];
-        let radius = params[base + 1].abs();
-        let phase = params[base + 2];
-        for k in 0..5 {
-            let angle = phase + 2.0 * std::f64::consts::PI * (k as f64) / 5.0;
-            let i = n_axis + 5 * ring + k;
-            x[3 * i] = radius * angle.cos();
-            x[3 * i + 1] = radius * angle.sin();
-            x[3 * i + 2] = z;
-        }
-    }
-    x
-}
-
-fn ring_slope(params: &[f64], n_axis: usize, n_rings: usize, gradient: &Array1<f64>) -> Vec<f64> {
-    let mut slope = vec![0.0; params.len()];
-    for i in 0..n_axis {
-        slope[i] = gradient[3 * i + 2];
-    }
-    for ring in 0..n_rings {
-        let base = n_axis + 3 * ring;
-        let radius = params[base + 1].abs();
-        let phase = params[base + 2];
-        let mut dz = 0.0;
-        let mut dr = 0.0;
-        let mut dp = 0.0;
-        for k in 0..5 {
-            let angle = phase + 2.0 * std::f64::consts::PI * (k as f64) / 5.0;
-            let i = n_axis + 5 * ring + k;
-            let gx = gradient[3 * i];
-            let gy = gradient[3 * i + 1];
-            let (cosine, sine) = (angle.cos(), angle.sin());
-            dz += gradient[3 * i + 2];
-            dr += gx * cosine + gy * sine;
-            dp += gx * (-radius * sine) + gy * (radius * cosine);
-        }
-        slope[base] = dz;
-        slope[base + 1] = dr;
-        slope[base + 2] = dp;
-    }
-    slope
-}
-
-fn polish_rings<E>(
-    mut params: Vec<f64>,
-    n_axis: usize,
-    n_rings: usize,
-    bond: f64,
-    evaluate: &mut E,
-) -> (f64, Vec<f64>)
-where
-    E: FnMut(ArrayView1<f64>) -> (f64, Array1<f64>),
-{
-    let point = ring_points(&params, n_axis, n_rings);
-    let (mut energy, mut gradient) = evaluate(point.view());
-    if !energy.is_finite() {
-        return (energy, params);
-    }
-    let steps = params.len().saturating_mul(2).max(1);
-    for _ in 0..steps {
-        let slope = ring_slope(&params, n_axis, n_rings, &gradient);
-        let scale = slope
-            .iter()
-            .map(|value| value.abs())
-            .fold(0.0_f64, f64::max)
-            .max(1.0e-8);
-        let mut frac = 1.0;
-        let mut moved = false;
-        while frac * bond > 1.0e-8 {
-            let mut trial = params.clone();
-            for (value, derivative) in trial.iter_mut().zip(&slope) {
-                *value -= (frac * bond / scale) * derivative;
-            }
-            for ring in 0..n_rings {
-                let slot = n_axis + 3 * ring + 1;
-                trial[slot] = trial[slot].abs().clamp(bond * 0.3, bond * 6.0);
-            }
-            let trial_point = ring_points(&trial, n_axis, n_rings);
-            let (next, next_gradient) = evaluate(trial_point.view());
-            if next.is_finite() && next < energy {
-                params = trial;
-                energy = next;
-                gradient = next_gradient;
-                moved = true;
-                break;
-            }
-            frac *= 0.5;
-        }
-        if !moved {
-            break;
-        }
-    }
-    (energy, params)
-}
-
-/// Lowest fivefold packing of this atom count, relaxed with the force.
-///
-/// The bond length is the nearest-neighbour distance of `origin`. Rings sit
-/// on the axis and halfway between axis atoms. An axis layer starts one
-/// shell out, because that layer already holds the axis atom. Two rings that
-/// do not fit on further shells share a radius fixed by half a pentagon
-/// sector. The force polish keeps the lowest energy.
-fn fivefold_minima<E>(origin: ArrayView1<f64>, evaluate: &mut E) -> Vec<Array1<f64>>
-where
-    E: FnMut(ArrayView1<f64>) -> (f64, Array1<f64>),
-{
-    let n = origin.len() / 3;
-    if n < 6 {
-        return Vec::new();
-    }
-    let bond = crate::lattice::nearest_neighbour_scale(origin).max(1.0e-3);
-    let mut com = [0.0; 3];
-    for i in 0..n {
-        for k in 0..3 {
-            com[k] += origin[3 * i + k];
-        }
-    }
-    for value in &mut com {
-        *value /= n as f64;
-    }
-    let mut reach = 0.0_f64;
-    for i in 0..n {
-        let mut r2 = 0.0;
-        for k in 0..3 {
-            let d = origin[3 * i + k] - com[k];
-            r2 += d * d;
-        }
-        reach = reach.max(r2.sqrt());
-    }
-    let shells = outward_shells(bond);
-    if shells.is_empty() {
-        return Vec::new();
-    }
-    let max_per = shells.len();
-    let mut best_e = 0.0;
-    let mut best: Option<(Vec<f64>, usize, usize)> = None;
-    let mut axis = n % 5;
-    if axis == 0 {
-        axis = 5;
-    }
-    while axis < n {
-        let rest = n - axis;
-        if rest > 0 && rest % 5 == 0 && (axis - 1) as f64 * bond <= 2.0 * reach + bond {
-            let n_rings = rest / 5;
-            let n_layers = axis * 2 - 1;
-            let mut assignments = Vec::new();
-            layer_assignments(n_layers, n_rings, max_per, &mut assignments);
-            for assignment in &assignments {
-                if assignment.iter().sum::<usize>() != n_rings {
-                    continue;
-                }
-                let params = seed_rings(assignment, bond, &shells);
-                let built = (params.len() - axis) / 3;
-                if built != n_rings {
-                    continue;
-                }
-                let point = ring_points(&params, axis, n_rings);
-                let (seed_e, _) = evaluate(point.view());
-                if !seed_e.is_finite() || seed_e >= 0.0 {
-                    continue;
-                }
-                let (energy, polished) = polish_rings(params, axis, n_rings, bond, evaluate);
-                if energy.is_finite() && (best.is_none() || energy < best_e) {
-                    best_e = energy;
-                    best = Some((polished, axis, n_rings));
-                }
-            }
-        }
-        axis += 5;
-    }
-    let Some((params, n_axis, n_rings)) = best else {
-        return Vec::new();
-    };
-    println!("{{\"kind\":\"exit_pack\",\"energy\":{best_e:.6}}}");
-    let _ = std::io::stdout().flush();
-    vec![ring_points(&params, n_axis, n_rings)]
-}
-
 pub fn cover_climb_search<E, Q>(
     origin: ArrayView1<f64>,
     rmsd: f64,
@@ -743,34 +371,6 @@ where
     );
     let mut best = origin.to_owned();
     let mut best_e = origin_e;
-    for packed in fivefold_minima(origin, &mut evaluate) {
-        let quenched = quench(packed.view());
-        let (value, _) = evaluate(quenched.view());
-        if value.is_finite() {
-            println!(
-                "{{\"kind\":\"exit_candidate\",\"energy\":{value:.6},\"hop\":0,\"role\":\"pack\"}}"
-            );
-            let _ = std::io::stdout().flush();
-            if value < best_e {
-                best_e = value;
-                best = quenched;
-            }
-        }
-    }
-    for occupied in occupy_centre(origin, &mut evaluate) {
-        let quenched = quench(occupied.view());
-        let (value, _) = evaluate(quenched.view());
-        if value.is_finite() {
-            println!(
-                "{{\"kind\":\"exit_candidate\",\"energy\":{value:.6},\"hop\":0,\"role\":\"centre\"}}"
-            );
-            let _ = std::io::stdout().flush();
-            if value < best_e {
-                best_e = value;
-                best = quenched;
-            }
-        }
-    }
     for hop in 0..max_hops {
         let quenched = cover_climb_quench(
             best.view(),
