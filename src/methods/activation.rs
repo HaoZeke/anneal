@@ -477,9 +477,24 @@ where
 {
     let n = origin.len() / 3;
     let mut out = Vec::new();
-    let span = 1.6 * (n as f64).cbrt();
+    let mut reach = 0.0;
+    let mut com = [0.0; 3];
+    for i in 0..n {
+        let atom = atom_at(origin, i);
+        for axis in 0..3 {
+            com[axis] += atom[axis];
+        }
+    }
+    for value in &mut com {
+        *value /= n as f64;
+    }
+    for i in 0..n {
+        reach = reach.max(len3(sub3(atom_at(origin, i), com)));
+    }
+    let span = (1.15 * reach).max(1.5);
     for (n_axis, n_rings) in fivefold_partitions(n).into_iter().take(3) {
-        for copy in 0..2 {
+        let mut best_params: Option<(f64, Vec<f64>)> = None;
+        for _trial in 0..40 {
             let mut params = vec![0.0; n_axis + 2 * n_rings];
             for i in 0..n_axis {
                 let frac = if n_axis == 1 {
@@ -487,15 +502,20 @@ where
                 } else {
                     i as f64 / (n_axis - 1) as f64 - 0.5
                 };
-                params[i] = span * frac + 0.2 * (rng.random::<f64>() - 0.5);
+                params[i] = span * frac + 0.25 * (rng.random::<f64>() - 0.5);
             }
             for ring in 0..n_rings {
                 let frac = (ring as f64 + 0.5) / n_rings as f64 - 0.5;
-                params[n_axis + 2 * ring] = span * frac + 0.15 * (rng.random::<f64>() - 0.5);
-                let shell = (ring % 4) as f64;
+                params[n_axis + 2 * ring] = span * frac * 0.85 + 0.2 * (rng.random::<f64>() - 0.5);
                 params[n_axis + 2 * ring + 1] =
-                    0.85 + 0.45 * shell + 0.1 * copy as f64 * (rng.random::<f64>() - 0.5);
+                    0.7 + reach * 0.15 * (1 + ring % 5) as f64 + 0.15 * (rng.random::<f64>() - 0.5);
             }
+            let (energy, _) = evaluate(build_fivefold(&params, n_axis, n_rings).view());
+            if energy.is_finite() && best_params.as_ref().is_none_or(|(held, _)| energy < *held) {
+                best_params = Some((energy, params));
+            }
+        }
+        if let Some((_, params)) = best_params {
             out.push(relax_fivefold_params(params, n_axis, n_rings, evaluate));
         }
     }
