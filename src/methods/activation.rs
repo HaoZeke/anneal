@@ -1676,7 +1676,14 @@ fn ride_lowest_mode<E, Q>(
     let surface = ForceSurface {
         evaluate: std::sync::Mutex::new(evaluate),
     };
-    for (index, feature) in [features.mode].iter().enumerate() {
+    let mut ride_modes = vec![features.mode.clone()];
+    for axis in outer_axes(start, contact).into_iter().take(3) {
+        let (_, mut strain) = twist_and_strain(start, axis);
+        if renormalize_mode(&mut strain, start) {
+            ride_modes.push(strain);
+        }
+    }
+    for (index, feature) in ride_modes.iter().enumerate() {
         for travel in [1.0_f64, -1.0] {
             let mode = if travel < 0.0 {
                 -feature.clone()
