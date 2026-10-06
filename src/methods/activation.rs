@@ -845,6 +845,113 @@ where
     }
 }
 
+fn note_shelf(
+    shelf: &mut Option<(f64, Array1<f64>)>,
+    value: f64,
+    quenched: &Array1<f64>,
+    origin_energy: f64,
+    reach: f64,
+    contact: f64,
+) {
+    // The shelf is the nearest distinct minimum above the start. A lower
+    // minimum is the search result itself and is not a place to leave from.
+    if !(value > origin_energy + 1e-6) || cluster_reach(quenched.view()) > reach + contact {
+        return;
+    }
+    if shelf.as_ref().is_none_or(|(energy, _)| value < *energy) {
+        *shelf = Some((value, quenched.clone()));
+    }
+}
+
+fn climb_directions<E, Q>(
+    start: ArrayView1<f64>,
+    direction: &[f64],
+    hop: usize,
+    evaluate: &mut E,
+    quench: &mut Q,
+    cfg: &Activation,
+    best_energy: &mut f64,
+    best: &mut Array1<f64>,
+    origin_energy: f64,
+    reach: f64,
+    contact: f64,
+    shelf: &mut Option<(f64, Array1<f64>)>,
+) where
+    E: FnMut(ArrayView1<f64>) -> (f64, Array1<f64>),
+    Q: FnMut(ArrayView1<f64>) -> Array1<f64>,
+{
+    let mut follow: Option<(f64, Array1<f64>)> = None;
+    for (axis, raw) in cover_axes(direction) {
+        for travel in [1.0_f64, -1.0] {
+            let ridge = climb_cover(start, raw.view(), travel, true, evaluate, cfg);
+            println!(
+                "{{\"kind\":\"climb\",\"hop\":{hop},\"axis\":\"{axis}\",\"travel\":{travel},\"crossed\":{},\"lambda\":{:.6},\"lowest\":{:.6},\"steps\":{},\"axial\":{:.4},\"landings\":{}}}",
+                ridge.crossed,
+                ridge.lambda,
+                ridge.lowest,
+                ridge.steps,
+                ridge.axial,
+                ridge.landings.len()
+            );
+            let _ = std::io::stdout().flush();
+            for landing in &ridge.landings {
+                if landing.iter().any(|value| !value.is_finite()) {
+                    continue;
+                }
+                let quenched = quench(landing.view());
+                let Some(value) = note_exit(evaluate, &quenched, hop, best_energy, best) else {
+                    continue;
+                };
+                note_shelf(shelf, value, &quenched, origin_energy, reach, contact);
+                let distinct = (value - origin_energy).abs() > 1e-6;
+                let compact = cluster_reach(quenched.view()) <= reach + contact;
+                if distinct && compact && follow.as_ref().is_none_or(|(energy, _)| value < *energy)
+                {
+                    follow = Some((value, quenched));
+                }
+            }
+        }
+    }
+    if let Some((_, neighbour)) = follow
+        && let Some((_, soft_mode)) = lowest_mode(
+            neighbour.view(),
+            evaluate,
+            cfg.lanczos_steps,
+            cfg.epsilon.max(1e-8),
+        )
+    {
+        for travel in [1.0_f64, -1.0] {
+            let ridge = climb_cover(
+                neighbour.view(),
+                soft_mode.view(),
+                travel,
+                false,
+                evaluate,
+                cfg,
+            );
+            println!(
+                "{{\"kind\":\"climb\",\"hop\":{hop},\"axis\":\"mode\",\"travel\":{travel},\"crossed\":{},\"lambda\":{:.6},\"lowest\":{:.6},\"steps\":{},\"axial\":{:.4},\"landings\":{}}}",
+                ridge.crossed,
+                ridge.lambda,
+                ridge.lowest,
+                ridge.steps,
+                ridge.axial,
+                ridge.landings.len()
+            );
+            let _ = std::io::stdout().flush();
+            for landing in &ridge.landings {
+                if landing.iter().any(|value| !value.is_finite()) {
+                    continue;
+                }
+                let quenched = quench(landing.view());
+                if let Some(value) = note_exit(evaluate, &quenched, hop, best_energy, best) {
+                    note_shelf(shelf, value, &quenched, origin_energy, reach, contact);
+                }
+            }
+        }
+    }
+}
+
 fn note_exit<E>(
     evaluate: &mut E,
     quenched: &Array1<f64>,
@@ -937,6 +1044,7 @@ where
     if stations.last().copied().unwrap_or(0.0) < outer {
         stations.push(outer);
     }
+    let mut shelf: Option<(f64, Array1<f64>)> = None;
     for hop in 0..max_hops {
         if contact > 0.95 && n_atoms >= 2 {
             let n_cover = crate::hypersphere::default_cover_size();
@@ -945,81 +1053,20 @@ where
                 origin.len(),
                 hop.wrapping_add(seed as usize),
             );
-            let mut follow: Option<(f64, Array1<f64>)> = None;
-            for (axis, raw) in cover_axes(&direction) {
-                for travel in [1.0_f64, -1.0] {
-                    let ridge =
-                        climb_cover(origin.view(), raw.view(), travel, true, &mut evaluate, cfg);
-                    println!(
-                        "{{\"kind\":\"climb\",\"hop\":{},\"axis\":\"{axis}\",\"travel\":{travel},\"crossed\":{},\"lambda\":{:.6},\"lowest\":{:.6},\"steps\":{},\"axial\":{:.4},\"landings\":{}}}",
-                        hop + 1,
-                        ridge.crossed,
-                        ridge.lambda,
-                        ridge.lowest,
-                        ridge.steps,
-                        ridge.axial,
-                        ridge.landings.len()
-                    );
-                    let _ = std::io::stdout().flush();
-                    for landing in &ridge.landings {
-                        if landing.iter().any(|value| !value.is_finite()) {
-                            continue;
-                        }
-                        let quenched = quench(landing.view());
-                        let Some(value) =
-                            note_exit(&mut evaluate, &quenched, hop + 1, &mut best_e, &mut best)
-                        else {
-                            continue;
-                        };
-                        let distinct = (value - origin_e).abs() > 1e-6;
-                        let compact = cluster_reach(quenched.view()) <= reach + contact;
-                        if distinct
-                            && compact
-                            && follow.as_ref().is_none_or(|(energy, _)| value < *energy)
-                        {
-                            follow = Some((value, quenched));
-                        }
-                    }
-                }
-            }
-            if let Some((_, neighbour)) = follow
-                && let Some((_, soft_mode)) = lowest_mode(
-                    neighbour.view(),
-                    &mut evaluate,
-                    cfg.lanczos_steps,
-                    cfg.epsilon.max(1e-8),
-                )
-            {
-                for travel in [1.0_f64, -1.0] {
-                    let ridge = climb_cover(
-                        neighbour.view(),
-                        soft_mode.view(),
-                        travel,
-                        false,
-                        &mut evaluate,
-                        cfg,
-                    );
-                    println!(
-                        "{{\"kind\":\"climb\",\"hop\":{},\"axis\":\"mode\",\"travel\":{travel},\"crossed\":{},\"lambda\":{:.6},\"lowest\":{:.6},\"steps\":{},\"axial\":{:.4},\"landings\":{}}}",
-                        hop + 1,
-                        ridge.crossed,
-                        ridge.lambda,
-                        ridge.lowest,
-                        ridge.steps,
-                        ridge.axial,
-                        ridge.landings.len()
-                    );
-                    let _ = std::io::stdout().flush();
-                    for landing in &ridge.landings {
-                        if landing.iter().any(|value| !value.is_finite()) {
-                            continue;
-                        }
-                        let quenched = quench(landing.view());
-                        let _ =
-                            note_exit(&mut evaluate, &quenched, hop + 1, &mut best_e, &mut best);
-                    }
-                }
-            }
+            climb_directions(
+                origin.view(),
+                &direction,
+                hop + 1,
+                &mut evaluate,
+                &mut quench,
+                cfg,
+                &mut best_e,
+                &mut best,
+                origin_e,
+                reach,
+                contact,
+                &mut shelf,
+            );
             for &station in &stations {
                 let placed = crate::hypersphere::place_around(
                     origin.as_slice().unwrap_or(&[]),
@@ -1062,6 +1109,7 @@ where
                         hop + 1
                     );
                     let _ = std::io::stdout().flush();
+                    note_shelf(&mut shelf, value, &quenched, origin_e, reach, contact);
                     if value < best_e {
                         best_e = value;
                         best = quenched;
@@ -1087,7 +1135,43 @@ where
         }
         if value.is_finite() && value < best_e {
             best_e = value;
-            best = quenched;
+            best = quenched.clone();
+        }
+        if value.is_finite() {
+            note_shelf(&mut shelf, value, &quenched, origin_e, reach, contact);
+        }
+    }
+    if contact > 0.95
+        && n_atoms >= 2
+        && let Some((shelf_energy, shelf_state)) = shelf
+    {
+        println!(
+            "{{\"kind\":\"shelf\",\"energy\":{shelf_energy:.6},\"above\":{:.6}}}",
+            shelf_energy - origin_e
+        );
+        let _ = std::io::stdout().flush();
+        let mut shelf_next: Option<(f64, Array1<f64>)> = None;
+        let n_cover = crate::hypersphere::default_cover_size();
+        for hop in 0..max_hops {
+            let direction = crate::hypersphere::cover_direction(
+                n_cover,
+                shelf_state.len(),
+                hop.wrapping_add(seed as usize),
+            );
+            climb_directions(
+                shelf_state.view(),
+                &direction,
+                hop + 1,
+                &mut evaluate,
+                &mut quench,
+                cfg,
+                &mut best_e,
+                &mut best,
+                origin_e,
+                reach,
+                contact,
+                &mut shelf_next,
+            );
         }
     }
     best
