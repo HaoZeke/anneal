@@ -411,10 +411,11 @@ where
             }
             reach = reach.max(r2.sqrt());
         }
-        let _ = reach;
+        let span = reach.max(contact);
         let mut climb = cfg.clone();
-        // The whole budget walks one contact length, as an all-atom RMS.
-        climb.step = contact * (n_atoms as f64).sqrt() / climb.max_steps.max(1) as f64;
+        // The whole budget walks one cluster radius, as an all-atom RMS.
+        // Perpendicular steps stay at one contact length over that budget.
+        climb.step = span * (n_atoms as f64).sqrt() / climb.max_steps.max(1) as f64;
         if let Some((lambdas, modes, _)) = crate::curvature::soft_subspace(
             origin,
             |point| Some(evaluate(point).1),
