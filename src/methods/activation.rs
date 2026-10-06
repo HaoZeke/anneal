@@ -656,50 +656,71 @@ where
         "{{\"kind\":\"exit_candidate\",\"energy\":{origin_e:.6},\"hop\":0,\"role\":\"start\"}}"
     );
 
-    // Facet hops, not an all-atom amplitude. Each round leaves from the
-    // lowest new basin found so far, then from the original minimum.
-    let rounds = max_hops.clamp(1, 6);
-    let mut launch = origin.to_owned();
-    for round in 0..rounds {
-        if best_e < origin_e - 0.05 {
-            return best;
-        }
-        println!("{{\"kind\":\"exit_move\",\"move\":\"facet\",\"round\":{round}}}");
-        let mut trials = cap_twists(launch.view(), 24);
-        trials.extend(facet_trials(launch.view(), 24));
-        for trial in trials {
+    // Wales and Doye's angular move throws the worst-bound atom to the
+    // surface at a random angle. That is the displacement their basin
+    // hopping used to reach decahedral minima. Shell rotation, surface
+    // relocation and a twin are the other packing changes. Uphill
+    // quenches are accepted on a fixed temperature so the walk can
+    // leave the funnel it starts in. Nothing named is a target energy.
+    if cluster {
+        let n_atoms = origin.len() / 3;
+        let arms = [
+            crate::methods::cluster_hopping::ClusterMove::Angular {
+                n_points: n_atoms,
+                length_scale: 1.0,
+                energy_scale: 1.0,
+            },
+            crate::methods::cluster_hopping::ClusterMove::ShellRotate(
+                crate::movekernel::ShellRotate { n_points: n_atoms },
+            ),
+            crate::methods::cluster_hopping::ClusterMove::SurfaceRelocate(
+                crate::movekernel::SurfaceRelocate {
+                    n_points: n_atoms,
+                    neighbour_cutoff: 1.35,
+                },
+            ),
+            crate::methods::cluster_hopping::ClusterMove::Twin { n_points: n_atoms },
+        ];
+        let mut walker = origin.to_owned();
+        let mut walker_e = origin_e;
+        for hop in 0..max_hops {
+            if best_e < origin_e - 0.05 {
+                println!(
+                    "{{\"kind\":\"exit_hop\",\"hop\":{hop},\"here\":{walker_e:.6},\"best\":{best_e:.6},\"phase\":\"angular\",\"left\":true}}"
+                );
+                let _ = std::io::stdout().flush();
+                return best;
+            }
+            let trial = arms[hop % arms.len()].propose(walker.view(), 1.0, &mut rng);
             let quenched = quench(trial.view());
             note_candidate(
                 &quenched,
                 &mut evaluate,
                 &mut best,
                 &mut best_e,
-                round,
+                hop,
                 origin_e,
                 &mut bank,
                 &rejected,
             );
-            if best_e < origin_e - 0.05 {
+            let (value, _) = evaluate(quenched.view());
+            let rise = value - walker_e;
+            if value.is_finite()
+                && value < origin_e + 8.0
+                && (rise <= 0.0 || rng.random::<f64>() < (-rise / 0.8).exp())
+            {
+                walker = quenched;
+                walker_e = value;
+                here = walker.clone();
+                here_e = value;
+            }
+            if hop.is_multiple_of(400) {
                 println!(
-                    "{{\"kind\":\"exit_hop\",\"hop\":{round},\"here\":{best_e:.6},\"best\":{best_e:.6},\"phase\":\"facet\",\"left\":true}}"
+                    "{{\"kind\":\"exit_hop\",\"hop\":{hop},\"here\":{walker_e:.6},\"best\":{best_e:.6},\"phase\":\"angular\"}}"
                 );
                 let _ = std::io::stdout().flush();
-                return best;
             }
         }
-        if let Some((energy, state)) = bank.iter().flatten().min_by(|left, right| {
-            left.0
-                .partial_cmp(&right.0)
-                .unwrap_or(std::cmp::Ordering::Equal)
-        }) {
-            launch = state.clone();
-            here = state.clone();
-            here_e = *energy;
-        }
-        println!(
-            "{{\"kind\":\"exit_hop\",\"hop\":{round},\"here\":{here_e:.6},\"best\":{best_e:.6},\"phase\":\"facet\"}}"
-        );
-        let _ = std::io::stdout().flush();
     }
     if best_e < origin_e - 0.05 {
         return best;
