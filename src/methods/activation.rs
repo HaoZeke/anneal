@@ -372,21 +372,27 @@ fn core_fills(origin: ArrayView1<f64>) -> Vec<Array1<f64>> {
 /// loses the others. The factors change only the component parallel to
 /// the axis, or that component together with the perpendicular part so
 /// the volume stays put. The quench decides which packing results.
-fn compact_fivefold(n_axis: usize, n_rings: usize, span: f64) -> Vec<f64> {
+fn compact_fivefold(n_axis: usize, n_rings: usize, bond: f64) -> Vec<f64> {
     let mut params = vec![0.0; n_axis + 2 * n_rings];
+    let axis_n = n_axis.max(1);
     for i in 0..n_axis {
         let frac = if n_axis == 1 {
             0.0
         } else {
             i as f64 / (n_axis - 1) as f64 - 0.5
         };
-        params[i] = span * frac;
+        params[i] = bond * frac * (axis_n as f64 - 1.0);
     }
     for ring in 0..n_rings {
-        let frac = (ring as f64 + 0.5) / n_rings as f64;
-        params[n_axis + 2 * ring] = span * (frac - 0.5);
-        let belly = (std::f64::consts::PI * frac).sin();
-        params[n_axis + 2 * ring + 1] = 0.75 + 1.35 * belly;
+        let layer = if n_axis == 0 { 0 } else { ring % n_axis };
+        let shell = if n_axis == 0 { ring } else { ring / n_axis };
+        let frac = if n_axis <= 1 {
+            0.0
+        } else {
+            layer as f64 / (n_axis - 1) as f64 - 0.5
+        };
+        params[n_axis + 2 * ring] = bond * frac * (axis_n as f64 - 1.0);
+        params[n_axis + 2 * ring + 1] = bond * (shell as f64 + 1.0);
     }
     params
 }
@@ -417,7 +423,7 @@ where
     let span = (0.95 * reach).max(1.2);
     let mut out = Vec::new();
     for (n_axis, n_rings) in fivefold_partitions(n).into_iter().take(3) {
-        let mut params = compact_fivefold(n_axis, n_rings, span);
+        let mut params = compact_fivefold(n_axis, n_rings, 1.12);
         let (mut energy, _) = evaluate(build_fivefold(&params, n_axis, n_rings).view());
         if !energy.is_finite() {
             continue;
