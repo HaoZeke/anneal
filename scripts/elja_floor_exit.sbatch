@@ -9,9 +9,9 @@
 #SBATCH --mem=16G
 #SBATCH --time=04:00:00
 #SBATCH --output=floor-exit-%j.out
-# One exclusive job. Facet hops, then a covering displacement, a
-# minimum-mode climb, and a quench, from the quenched LJ75 icosahedron.
-# Work stays on the node scratch disk.
+# One exclusive job. Angular, shell, surface and twin moves, then a
+# quench, from the quenched LJ75 icosahedron. Work stays on the node
+# scratch disk.
 set -euo pipefail
 SCRATCH=/scratch/users/${USER}/${SLURM_JOB_ID}
 mkdir -p "$SCRATCH"
@@ -28,9 +28,9 @@ HOP=$LJ_ROOT/target/release/examples/ico75_hop
 test -x "$HOP"
 cd "$SCRATCH"
 echo "pwd $(pwd)"
-# Facet hops from the quenched icosahedron, then the cover and climb.
+# Angular basin hopping from the quenched icosahedron.
 # The log is one line per quenched candidate.
-HOPS=${FLOOR_HOPS:-4}
+HOPS=${FLOOR_HOPS:-8000}
 SEEDS=${FLOOR_SEEDS:-1}
 "$HOP" search "$HOPS" "$SEEDS" > "$SCRATCH/climb.log"
 RECORD=${LJ_RECORD:-$HOME/ljwork}
