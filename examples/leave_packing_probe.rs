@@ -324,43 +324,60 @@ fn main() {
             let placed = anneal_core::hypersphere::place_around(
                 ico.as_slice().expect("coords"),
                 &direction,
-                rmsd.max(0.05),
+                rmsd.max(0.2),
                 None,
             );
-            let start = Array1::from(placed);
-            let mut axis = Array1::zeros(ico.len());
-            for i in 0..ico.len() {
-                axis[i] = start[i] - ico[i];
+            // The covering point is quenched onto a minimum before the
+            // climb. The soft mode of that minimum is a valley floor.
+            let landed = quench(&potential, Array1::from(placed).view(), steps);
+            let landed_e = potential.value_and_gradient(landed.view()).0;
+            let mut best = landed.clone();
+            let mut best_e = landed_e;
+            let mut crossed_any = false;
+            for sign in [1.0_f64, -1.0] {
+                let outcome = anneal_core::methods::activation::activate(
+                    landed.view(),
+                    |v: ArrayView1<f64>| Some(potential.value_and_gradient(v).1),
+                    &cfg,
+                    sign,
+                );
+                let Some(outcome) = outcome else {
+                    continue;
+                };
+                let shoulder = potential.value_and_gradient(outcome.state.view()).0;
+                println!(
+                    "{{\"kind\":\"climb_ridge\",\"index\":{index},\"sign\":{sign},\"crossed\":{},\"shoulder\":{shoulder:.6},\"landed\":{landed_e:.6}}}",
+                    outcome.crossed
+                );
+                if !outcome.crossed {
+                    continue;
+                }
+                if !shoulder.is_finite() || shoulder > landed_e + 25.0 {
+                    continue;
+                }
+                crossed_any = true;
+                let trial = quench(&potential, outcome.state.view(), steps);
+                let energy = potential.value_and_gradient(trial.view()).0;
+                if energy.is_finite() && energy < best_e {
+                    best_e = energy;
+                    best = trial;
+                }
             }
-            let outcome = anneal_core::methods::activation::activate_along(
-                start.view(),
-                axis.view(),
-                |v: ArrayView1<f64>| Some(potential.value_and_gradient(v).1),
-                &cfg,
-            );
-            let (crossed, climbed_state) = match outcome {
-                Some(outcome) => (outcome.crossed, outcome.state),
-                None => (false, start.clone()),
-            };
-            let pre = potential.value_and_gradient(climbed_state.view()).0;
-            // A shoulder thousands above the well is a clash. Only a
-            // modest rise is a ridge worth quenching off.
-            let trial = if crossed && pre.is_finite() && pre < ico_energy + 30.0 {
-                quench(&potential, climbed_state.view(), steps)
-            } else {
-                anneal_core::methods::activation::cover_climb_quench(
+            if !crossed_any && best_e >= ico_energy - 1e-6 {
+                let trial = anneal_core::methods::activation::cover_climb_quench(
                     ico.view(),
                     rmsd,
                     index,
                     |v: ArrayView1<f64>| Some(potential.value_and_gradient(v).1),
                     |v: ArrayView1<f64>| quench(&potential, v, steps),
                     &cfg,
-                )
-            };
-            println!(
-                "{{\"kind\":\"climb_ridge\",\"index\":{index},\"crossed\":{crossed},\"shoulder\":{pre:.6}}}"
-            );
-            classify("climb", index, &mut climbed, &trial, None);
+                );
+                let energy = potential.value_and_gradient(trial.view()).0;
+                if energy.is_finite() && energy < best_e {
+                    best = trial;
+                }
+            }
+            classify("climb", index, &mut climbed, &best, None);
             let _ = std::io::Write::flush(&mut std::io::stdout());
         }
         report("climb", &climbed, n);
