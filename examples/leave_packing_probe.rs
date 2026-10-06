@@ -309,40 +309,57 @@ fn main() {
             "{{\"kind\":\"climb_setup\",\"n\":{n},\"rmsd\":{rmsd:.3},\"ico\":{ico_energy:.6},\"marks\":{marks_energy:.6}}}"
         );
         let cfg = anneal_core::methods::activation::Activation {
-            max_steps: 60,
-            overshoot: 4.0,
-            step: 0.12,
-            lanczos_steps: 16,
+            max_steps: 160,
+            overshoot: 3.0,
+            step: 0.08,
+            lanczos_steps: 20,
+            perp_steps: 2,
+            refresh: 4,
             ..anneal_core::methods::activation::Activation::default()
         };
+        let n_cover = anneal_core::hypersphere::default_cover_size();
         for index in 0..n {
-            // Up to four escapes. A higher neighbour is kept as the next
-            // start so a later saddle can fall below the original well.
-            let mut here = ico.clone();
-            let mut best = ico.clone();
-            let mut best_e = ico_energy;
-            for hop in 0usize..4 {
-                let trial = anneal_core::methods::activation::cover_climb_quench(
-                    here.view(),
+            let direction = anneal_core::hypersphere::cover_direction(n_cover, ico.len(), index);
+            let placed = anneal_core::hypersphere::place_around(
+                ico.as_slice().expect("coords"),
+                &direction,
+                rmsd.max(0.05),
+                None,
+            );
+            let start = Array1::from(placed);
+            let mut axis = Array1::zeros(ico.len());
+            for i in 0..ico.len() {
+                axis[i] = start[i] - ico[i];
+            }
+            let outcome = anneal_core::methods::activation::activate_along(
+                start.view(),
+                axis.view(),
+                |v: ArrayView1<f64>| Some(potential.value_and_gradient(v).1),
+                &cfg,
+            );
+            let (crossed, climbed_state) = match outcome {
+                Some(outcome) => (outcome.crossed, outcome.state),
+                None => (false, start.clone()),
+            };
+            let trial = if crossed {
+                quench(&potential, climbed_state.view(), steps)
+            } else {
+                // The ridge was not reached. Quenching the shoulder
+                // falls back into the well, so try the shipped exit too.
+                anneal_core::methods::activation::cover_climb_quench(
+                    ico.view(),
                     rmsd,
-                    index + hop * 17,
+                    index,
                     |v: ArrayView1<f64>| Some(potential.value_and_gradient(v).1),
                     |v: ArrayView1<f64>| quench(&potential, v, steps),
                     &cfg,
-                );
-                let energy = potential.value_and_gradient(trial.view()).0;
-                if energy.is_finite() && energy < best_e - 1e-6 {
-                    best_e = energy;
-                    best = trial.clone();
-                }
-                let here_e = potential.value_and_gradient(here.view()).0;
-                if energy.is_finite() && (energy - here_e).abs() > 1e-3 {
-                    here = trial;
-                } else {
-                    break;
-                }
-            }
-            classify("climb", index, &mut climbed, &best, None);
+                )
+            };
+            let pre = potential.value_and_gradient(climbed_state.view()).0;
+            println!(
+                "{{\"kind\":\"climb_ridge\",\"index\":{index},\"crossed\":{crossed},\"shoulder\":{pre:.6}}}"
+            );
+            classify("climb", index, &mut climbed, &trial, None);
             let _ = std::io::Write::flush(&mut std::io::stdout());
         }
         report("climb", &climbed, n);
