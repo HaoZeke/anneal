@@ -68,6 +68,11 @@ pub struct MdEscapeConfig {
     pub geometry: MdEscapeGeometry,
     /// Published finite modified-dimer softening of the Gaussian direction.
     pub softening: Option<VelocitySofteningConfig>,
+    /// A time-series minimum counts only after the energy has fallen by
+    /// at least this much from the highest point since the previous
+    /// counted minimum. Zero keeps every wiggle. A positive value is the
+    /// barrier the escape has to cross before it is allowed to stop.
+    pub minimum_rise: f64,
 }
 
 impl Default for MdEscapeConfig {
@@ -78,6 +83,7 @@ impl Default for MdEscapeConfig {
             maximum_steps: 2_000,
             geometry: MdEscapeGeometry::Euclidean,
             softening: None,
+            minimum_rise: 0.0,
         }
     }
 }
@@ -226,6 +232,7 @@ where
     let mut minima = 0usize;
     let mut last_energy = f64::NAN;
     let mut last_kinetic = initial_kinetic;
+    let mut peak = f64::NEG_INFINITY;
 
     for steps in 1..=config.maximum_steps {
         let report = match config.geometry {
@@ -236,11 +243,16 @@ where
         };
         last_energy = report.energy;
         last_kinetic = report.kinetic;
+        if last_energy > peak {
+            peak = last_energy;
+        }
         if let (Some(older), Some(previous)) = (older_energy, previous_energy)
             && previous < older
             && previous <= report.energy
+            && peak - previous >= config.minimum_rise
         {
             minima += 1;
+            peak = previous;
             if minima >= config.potential_minima {
                 return Ok(MdEscapeReport {
                     position: session.position().to_owned(),
@@ -470,6 +482,7 @@ mod tests {
             maximum_steps: 200,
             geometry: MdEscapeGeometry::Euclidean,
             softening: None,
+            minimum_rise: 0.0,
         };
         let mut evaluations = 0usize;
         let mut evaluate = |x: ArrayView1<f64>| {
@@ -499,6 +512,7 @@ mod tests {
                 displacement: 0.1,
                 mixing: 0.15,
             }),
+            minimum_rise: 0.0,
         };
         let mut evaluations = 0usize;
         let mut evaluate = |x: ArrayView1<f64>| {

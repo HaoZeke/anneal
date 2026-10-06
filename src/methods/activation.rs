@@ -387,7 +387,7 @@ where
     let mut next_id = 1usize;
     let mut current = 0usize;
     let ke0 = 1.0_f64;
-    let mut feedback = EscapeFeedback::new(ke0, 0.5);
+    let mut feedback = EscapeFeedback::new(ke0, 4.0);
     feedback.escape_ceiling = 80.0;
     feedback.escape_floor = 0.25;
     feedback.register_initial(current);
@@ -459,16 +459,20 @@ where
             break;
         }
 
+        let md_steps = (400.0 + 50.0 * kinetic).clamp(400.0, 1_600.0) as usize;
         let md = MdEscapeConfig {
             dt: 0.005,
-            potential_minima: 2,
-            maximum_steps: 2_000,
+            potential_minima: 1,
+            maximum_steps: md_steps,
             geometry,
             softening: Some(rgsaddle::VelocitySofteningConfig {
-                steps: 12,
+                steps: 6,
                 displacement: 0.1,
                 mixing: 0.15,
             }),
+            // A wiggle inside the well is not a crossing. Stop only after
+            // the energy has fallen at least this far from its peak.
+            minimum_rise: 2.0,
         };
         let mut escaped = None;
         {
@@ -480,9 +484,12 @@ where
                 &md,
                 &mut eval,
                 &mut rng,
-            ) && report.potential_minima >= md.potential_minima
-                && report.position.iter().all(|value| value.is_finite())
+            ) && report.position.iter().all(|value| value.is_finite())
             {
+                println!(
+                    "{{\"kind\":\"exit_md\",\"hop\":{hop},\"steps\":{},\"minima\":{},\"energy\":{:.6}}}",
+                    report.steps, report.potential_minima, report.energy
+                );
                 escaped = Some(report.position);
             }
         }
