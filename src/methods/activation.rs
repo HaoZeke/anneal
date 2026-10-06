@@ -1960,6 +1960,43 @@ where
                 &mut best_e,
                 &mut best,
             );
+            let mut delta = Array1::zeros(quenched.len());
+            for (component, (there, here)) in
+                delta.iter_mut().zip(quenched.iter().zip(origin.iter()))
+            {
+                *component = there - here;
+            }
+            if renormalize_mode(&mut delta, quenched.view()) {
+                let lead = max_atom_weight(delta.view()).max(1e-12);
+                for step in [contact / lead, reach.max(contact) / lead] {
+                    let mut beyond = quenched.clone();
+                    for (value, component) in beyond.iter_mut().zip(delta.iter()) {
+                        *value += step * component;
+                    }
+                    if closest_pair(beyond.view()) < contact * 0.5 {
+                        continue;
+                    }
+                    let landed = quench(beyond.view());
+                    let _ = note_exit(&mut evaluate, &landed, 0, &mut best_e, &mut best);
+                }
+                for travel in [1.0_f64, -1.0] {
+                    let ridge = climb_cover(
+                        quenched.view(),
+                        delta.view(),
+                        travel,
+                        true,
+                        &mut evaluate,
+                        cfg,
+                    );
+                    for landing in &ridge.landings {
+                        if landing.iter().any(|value| !value.is_finite()) {
+                            continue;
+                        }
+                        let landed = quench(landing.view());
+                        let _ = note_exit(&mut evaluate, &landed, 0, &mut best_e, &mut best);
+                    }
+                }
+            }
             // The centred minimum gets the whole cover, one climb each way.
             // The caller's hop cap still bounds the search that starts on
             // the original geometry.
