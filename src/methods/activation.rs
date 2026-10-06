@@ -937,44 +937,85 @@ fn climb_relaxed_cover<E, Q>(
     if n_atoms < 2 || direction.len() != start.len() || !(contact.is_finite() && contact > 0.0) {
         return;
     }
-    let placed =
-        crate::hypersphere::place_around(start.as_slice().unwrap_or(&[]), direction, contact, None);
-    if placed.len() != start.len() {
+    let epsilon = cfg.epsilon.max(1e-8);
+    let mut push = Array1::from_vec(direction.to_vec());
+    if !renormalize_mode(&mut push, start) {
         return;
     }
-    let mut placed = Array1::from(placed);
+    let mut scale = epsilon;
+    if let Some(value) = directional_curvature(start, push.view(), evaluate, epsilon) {
+        scale = scale.max(value.abs());
+    }
+    if let Some((soft, _)) = lowest_mode(start, evaluate, cfg.lanczos_steps, epsilon) {
+        scale = scale.max(soft.abs());
+    }
+    // One curvature length, as a per-atom displacement, is the first shell.
+    // Later shells double until the lowest curvature changes sign or a pair
+    // would overlap. The scale is the curvature of the minimum.
+    let mut rms = (1.0 / scale.max(epsilon).sqrt()) / (n_atoms as f64).sqrt();
+    rms = rms.clamp(epsilon, contact);
+    let max_rms = reach.max(contact);
+    let mut shell = start.to_owned();
+    let mut moved = false;
+    let mut activated = false;
+    while rms <= max_rms + epsilon {
+        let trial =
+            crate::hypersphere::place_around(start.as_slice().unwrap_or(&[]), direction, rms, None);
+        if trial.len() != start.len() {
+            break;
+        }
+        let mut trial = Array1::from(trial);
+        if closest_pair(trial.view()) < contact * 0.5 {
+            break;
+        }
+        let mut mode = Array1::zeros(start.len());
+        for (component, (there, here)) in mode.iter_mut().zip(trial.iter().zip(start.iter())) {
+            *component = there - here;
+        }
+        if !renormalize_mode(&mut mode, trial.view()) {
+            break;
+        }
+        let axial = axial_projection(trial.view(), start, mode.view());
+        let trust = (rms * (n_atoms as f64).sqrt()).max(epsilon);
+        let snapshot = trial.clone();
+        if !relax_pinned(
+            &mut trial, start, &mode, axial, trust, contact, evaluate, cfg,
+        ) || closest_pair(trial.view()) < contact * 0.5
+        {
+            trial = snapshot;
+        }
+        if closest_pair(trial.view()) < contact * 0.5 {
+            break;
+        }
+        shell.clone_from(&trial);
+        moved = true;
+        if let Some((soft, _)) = lowest_mode(shell.view(), evaluate, cfg.lanczos_steps, epsilon)
+            && soft.is_finite()
+            && soft < 0.0
+            && soft > -(scale * scale)
+        {
+            activated = true;
+            break;
+        }
+        let next = (rms * 2.0).min(max_rms);
+        if next <= rms + epsilon {
+            break;
+        }
+        rms = next;
+    }
+    if !moved && !activated {
+        return;
+    }
     let mut mode = Array1::zeros(start.len());
-    for (component, (there, here)) in mode.iter_mut().zip(placed.iter().zip(start.iter())) {
+    for (component, (there, here)) in mode.iter_mut().zip(shell.iter().zip(start.iter())) {
         *component = there - here;
     }
-    if !renormalize_mode(&mut mode, placed.view()) {
+    if !renormalize_mode(&mut mode, shell.view()) {
         return;
     }
-    let axial = axial_projection(placed.view(), start, mode.view());
-    let trust = contact * (n_atoms as f64).sqrt();
-    let mut relax_cfg = cfg.clone();
-    relax_cfg.perp_steps = n_atoms.max(cfg.perp_steps);
-    let snapshot = placed.clone();
-    if !relax_pinned(
-        &mut placed,
-        start,
-        &mode,
-        axial,
-        trust,
-        contact,
-        evaluate,
-        &relax_cfg,
-    ) {
-        placed = snapshot;
-    }
-    if placed.iter().any(|value| !value.is_finite()) {
-        return;
-    }
-    let quenched = quench(placed.view());
-    if let Some(value) = note_exit(evaluate, &quenched, hop, best_energy, best) {
-        note_shelf(shelf, value, &quenched, origin_energy, reach, contact);
-    }
-    let ridge = climb_cover(placed.view(), mode.view(), 1.0, false, evaluate, cfg);
+    println!("{{\"kind\":\"shell\",\"hop\":{hop},\"rms\":{rms:.4},\"activated\":{activated}}}");
+    let _ = std::io::stdout().flush();
+    let ridge = climb_cover(shell.view(), mode.view(), 1.0, false, evaluate, cfg);
     println!(
         "{{\"kind\":\"climb\",\"hop\":{hop},\"axis\":\"relaxed\",\"travel\":1,\"crossed\":{},\"lambda\":{:.6},\"lowest\":{:.6},\"steps\":{},\"axial\":{:.4},\"landings\":{}}}",
         ridge.crossed,
