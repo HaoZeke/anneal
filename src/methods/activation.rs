@@ -55,7 +55,7 @@ use crate::methods::minima_hopping::{
 };
 use ndarray::{Array1, ArrayView1};
 use rand::{Rng, SeedableRng};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::io::Write;
 
 /// How the climb is run.
@@ -318,6 +318,7 @@ fn note_candidate<E>(
     hop: usize,
     origin_e: f64,
     bank: &mut [Option<(f64, Array1<f64>)>],
+    rejected: &HashSet<i64>,
 ) where
     E: FnMut(ArrayView1<f64>) -> (f64, Array1<f64>),
 {
@@ -337,6 +338,9 @@ fn note_candidate<E>(
     // lowest structure in each one-energy band is kept so a later hop
     // can leave from that rung instead of from the floor.
     let rise = value - origin_e;
+    if rejected.contains(&basin_key(value)) {
+        return;
+    }
     if (0.3..crate::catalog::SEAM_WINDOW).contains(&rise) && !bank.is_empty() {
         let bin = (rise as usize).min(bank.len() - 1);
         let replace = match &bank[bin] {
@@ -412,6 +416,7 @@ where
         vec![None; crate::catalog::SEAM_WINDOW.ceil() as usize];
     let mut frontier_stuck = 0u32;
     let mut frontier_energy = f64::NAN;
+    let mut rejected: HashSet<i64> = HashSet::new();
     let n_cover = crate::hypersphere::default_cover_size();
     let cluster = origin.len() % 3 == 0 && {
         let pair = closest_pair(origin);
@@ -455,6 +460,7 @@ where
                 hop,
                 origin_e,
                 &mut bank,
+                &rejected,
             );
         }
         if cluster && hop % 4 == 0 {
@@ -467,6 +473,7 @@ where
                 hop,
                 origin_e,
                 &mut bank,
+                &rejected,
             );
         }
         let amp = (0.38 * span).clamp(0.25, 0.9);
@@ -483,6 +490,7 @@ where
             hop,
             origin_e,
             &mut bank,
+            &rejected,
         );
 
         // A displacement stays inside the packing it started in. A twin
@@ -492,7 +500,7 @@ where
             let n_atoms = here.len() / 3;
             let planes = crate::twin::dense_planes(here.view(), n_atoms, 0.25);
             if !planes.is_empty() {
-                let width = if hop == 0 { planes.len().min(24) } else { 2 };
+                let width = if hop == 0 { planes.len().min(80) } else { 2 };
                 for slot in 0..width {
                     let plane = &planes[(hop + slot) % planes.len()];
                     for mode in [crate::twin::Mode::Reflect, crate::twin::Mode::Rotate] {
@@ -507,6 +515,7 @@ where
                                 hop,
                                 origin_e,
                                 &mut bank,
+                                &rejected,
                             );
                         }
                     }
@@ -528,6 +537,7 @@ where
                         hop,
                         origin_e,
                         &mut bank,
+                        &rejected,
                     );
                 }
             }
@@ -586,6 +596,7 @@ where
                 hop,
                 origin_e,
                 &mut bank,
+                &rejected,
             );
         }
         if best_e < origin_e - 0.05 {
@@ -643,6 +654,7 @@ where
             }
             if frontier_stuck >= 2 {
                 let drop = basin_key(energy);
+                rejected.insert(drop);
                 for slot in bank.iter_mut() {
                     if slot
                         .as_ref()
