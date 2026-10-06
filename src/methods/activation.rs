@@ -591,7 +591,7 @@ fn stagger_layers(x: ArrayView1<f64>, axis: [f64; 3], angle: f64, contact: f64) 
     rows.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
     let mut layer = 0usize;
     for index in 0..rows.len() {
-        if index > 0 && rows[index].0 - rows[index - 1].0 > contact * 0.25 {
+        if index > 0 && rows[index].0 - rows[index - 1].0 > contact * 0.15 {
             layer += 1;
         }
         if layer % 2 == 1 && rows[index].2 > 1e-8 {
@@ -1943,6 +1943,16 @@ where
             }
             climb_soft_modes(
                 quenched.view(),
+                0,
+                &mut evaluate,
+                &mut quench,
+                cfg,
+                &mut best_e,
+                &mut best,
+            );
+            climb_outer_axes(
+                quenched.view(),
+                contact,
                 0,
                 &mut evaluate,
                 &mut quench,
