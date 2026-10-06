@@ -466,7 +466,6 @@ where
                     force[3 * i + axis] += scale * tangent[axis] / radius.max(1.0e-8);
                 }
             }
-            let total = energy + restraint;
             let mut trial_step = step;
             let mut moved = false;
             for _attempt in 0..6 {
