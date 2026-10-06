@@ -1524,33 +1524,41 @@ where
             note_shelf(&mut shelf, value, &quenched, origin_e, reach, contact);
             let distinct = (value - origin_e).abs() > 1e-6;
             let compact = cluster_reach(quenched.view()) <= reach + contact;
+            println!(
+                "{{\"kind\":\"core\",\"outermost\":{outermost},\"energy\":{value:.6},\"climbed\":{}}}",
+                distinct && compact
+            );
+            let _ = std::io::stdout().flush();
             if !distinct || !compact {
                 continue;
             }
-            println!("{{\"kind\":\"core\",\"outermost\":{outermost},\"energy\":{value:.6}}}");
-            let _ = std::io::stdout().flush();
-            let mut ignored: Option<(f64, Array1<f64>)> = None;
+            // The centred minimum gets the whole cover, one climb each way.
+            // The caller's hop cap still bounds the search that starts on
+            // the original geometry.
             let n_cover = crate::hypersphere::default_cover_size();
-            for hop in 0..max_hops {
+            for hop in 0..n_cover {
                 let direction = crate::hypersphere::cover_direction(
                     n_cover,
                     quenched.len(),
                     hop.wrapping_add(seed as usize),
                 );
-                climb_directions(
-                    quenched.view(),
-                    &direction,
-                    hop + 1,
-                    &mut evaluate,
-                    &mut quench,
-                    cfg,
-                    &mut best_e,
-                    &mut best,
-                    origin_e,
-                    reach,
-                    contact,
-                    &mut ignored,
-                );
+                for travel in [1.0_f64, -1.0] {
+                    let mut aimed = Array1::from_vec(direction.clone());
+                    if travel < 0.0 {
+                        for component in aimed.iter_mut() {
+                            *component = -*component;
+                        }
+                    }
+                    let ridge =
+                        climb_cover(quenched.view(), aimed.view(), 1.0, true, &mut evaluate, cfg);
+                    for landing in &ridge.landings {
+                        if landing.iter().any(|value| !value.is_finite()) {
+                            continue;
+                        }
+                        let landed = quench(landing.view());
+                        let _ = note_exit(&mut evaluate, &landed, hop + 1, &mut best_e, &mut best);
+                    }
+                }
             }
         }
     }
