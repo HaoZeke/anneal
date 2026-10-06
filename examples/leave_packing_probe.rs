@@ -321,11 +321,11 @@ fn main() {
             let mut here = ico.clone();
             let mut best = ico.clone();
             let mut best_e = ico_energy;
-            for hop in 0..4 {
+            for hop in 0usize..4 {
                 let trial = anneal_core::methods::activation::cover_climb_quench(
                     here.view(),
                     rmsd,
-                    index.wrapping_add(hop.wrapping_mul(17)),
+                    index + hop * 17,
                     |v: ArrayView1<f64>| Some(potential.value_and_gradient(v).1),
                     |v: ArrayView1<f64>| quench(&potential, v, steps),
                     &cfg,
