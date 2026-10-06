@@ -868,11 +868,11 @@ where
                     lambda = soft;
                     saw_negative = true;
                     axial = axial_projection(cur.view(), origin, mode.view());
-                    let (_, gradient) = evaluate(cur.view());
+                    let (energy_now, gradient) = evaluate(cur.view());
                     let along = dot_av(gradient.view(), mode.view());
                     if along >= 0.0 {
                         uphill = true;
-                    } else if uphill {
+                    } else if uphill && energy_now - start_energy >= rise_lid {
                         push_ridge(
                             &mut landings,
                             &mut crossed,
@@ -916,11 +916,12 @@ where
             {
                 break;
             }
-            let (_, gradient) = evaluate(cur.view());
+            let (energy_now, gradient) = evaluate(cur.view());
             let along = dot_av(gradient.view(), mode.view());
+            let rise_now = energy_now - start_energy;
             if along >= 0.0 {
                 uphill = true;
-            } else if uphill && lambda < 0.0 {
+            } else if uphill && lambda < 0.0 && rise_now >= rise_lid {
                 push_ridge(
                     &mut landings,
                     &mut crossed,
@@ -934,23 +935,34 @@ where
                 );
                 uphill = false;
             }
+            // Effective gradient of a min-mode saddle search: descend in the
+            // perpendicular plane and ascend along the mode.
+            let mut eff = gradient.clone();
+            for (component, mode_component) in eff.iter_mut().zip(mode.iter()) {
+                *component -= 2.0 * along * *mode_component;
+            }
+            let eff_norm = dot_av(eff.view(), eff.view()).sqrt().max(epsilon);
             let curvature_length = 1.0 / lambda.abs().max(epsilon).sqrt();
             let mut stride = curvature_length.min(contact / lead).max(epsilon);
             let snapshot = cur.clone();
             let mut placed = false;
             while stride > epsilon {
                 cur.clone_from(&snapshot);
-                for (value, component) in cur.iter_mut().zip(mode.iter()) {
-                    *value += stride * component;
+                for (value, component) in cur.iter_mut().zip(eff.iter()) {
+                    *value -= stride * component / eff_norm;
                 }
                 if closest_pair(cur.view()) < contact * 0.5 {
                     stride *= 0.5;
                     continue;
                 }
-                let target = axial_projection(cur.view(), origin, mode.view());
-                if relax_pinned(
-                    &mut cur, origin, &mode, target, stride, contact, evaluate, cfg,
-                ) {
+                let (_, trial_gradient) = evaluate(cur.view());
+                let trial_along = dot_av(trial_gradient.view(), mode.view());
+                let mut trial_eff = trial_gradient;
+                for (component, mode_component) in trial_eff.iter_mut().zip(mode.iter()) {
+                    *component -= 2.0 * trial_along * *mode_component;
+                }
+                let trial_norm = dot_av(trial_eff.view(), trial_eff.view()).sqrt();
+                if trial_norm < eff_norm {
                     placed = true;
                     break;
                 }
@@ -963,7 +975,11 @@ where
             steps += 1;
             axial = axial_projection(cur.view(), origin, mode.view());
             let (energy_after, climbed) = evaluate(cur.view());
-            if !cleared_lid && start_energy.is_finite() && energy_after - start_energy >= rise_lid {
+            if !cleared_lid
+                && start_energy.is_finite()
+                && energy_after - start_energy >= rise_lid
+                && lambda < 0.0
+            {
                 cleared_lid = true;
                 if landings.len() < n_atoms {
                     landings.push(cur.clone());
@@ -980,7 +996,7 @@ where
             }
             if along_after >= 0.0 {
                 uphill = true;
-            } else if uphill && lambda < 0.0 {
+            } else if uphill && lambda < 0.0 && energy_after - start_energy >= rise_lid {
                 push_ridge(
                     &mut landings,
                     &mut crossed,
@@ -1019,7 +1035,10 @@ where
         && lambda < 0.0
         && lambda > -(positive_scale * positive_scale)
     {
-        landings.extend(landings_past(&cur, &mode, lambda, contact, cfg.overshoot));
+        let (energy_end, _) = evaluate(cur.view());
+        if energy_end - start_energy >= rise_lid {
+            landings.extend(landings_past(&cur, &mode, lambda, contact, cfg.overshoot));
+        }
     }
     CoverRidge {
         landings,
