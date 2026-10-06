@@ -310,22 +310,59 @@ fn basin_key(energy: f64) -> i64 {
     (energy / 5.0e-3).round() as i64
 }
 
+fn note_candidate<E>(
+    proposal: &Array1<f64>,
+    evaluate: &mut E,
+    best: &mut Array1<f64>,
+    best_e: &mut f64,
+    hop: usize,
+) where
+    E: FnMut(ArrayView1<f64>) -> (f64, Array1<f64>),
+{
+    if !proposal.iter().all(|value| value.is_finite()) {
+        return;
+    }
+    let (value, _) = evaluate(proposal.view());
+    if !value.is_finite() {
+        return;
+    }
+    println!("{{\"kind\":\"exit_candidate\",\"energy\":{value:.6},\"hop\":{hop}}}");
+    if value < *best_e - 1.0e-6 {
+        *best_e = value;
+        *best = proposal.clone();
+    }
+}
+
+fn basin_id(basins: &mut HashMap<i64, usize>, next_id: &mut usize, key: i64) -> usize {
+    if let Some(id) = basins.get(&key).copied() {
+        id
+    } else {
+        let id = *next_id;
+        *next_id += 1;
+        basins.insert(key, id);
+        id
+    }
+}
+
 /// Repeated covering displacement, minimum-mode climb, and quench.
 ///
 /// One kick from a deep minimum falls back into it. The loop keeps
 /// going. Each hop places one covering direction, optionally opens a
-/// pentagonal axis, kicks every coordinate, climbs the minimum mode,
-/// and runs a short constant-energy trajectory seeded by that cover.
-/// The trajectory is what carries the system over the ridge. A quench
-/// that returns home raises the escape energy. A quench into another
-/// basin is kept when the rise is under the adaptive threshold, uphill
-/// included. The lowest quench is returned. Nothing in the loop is a
-/// named target energy: the only early stop is a quench strictly below
-/// the minimum the search started from.
+/// pentagonal axis, kicks every coordinate, and climbs the minimum
+/// mode. Those quenches compete for the lowest energy only. The
+/// escape scale is the constant-energy trajectory seeded by the
+/// cover: returning home raises it, and a new basin lowers it. A
+/// sideways hop into a higher neighbour must not be counted as that
+/// new basin, or the trajectory never becomes violent enough to leave
+/// the funnel. The lowest quench is returned. Nothing in the loop is
+/// a named target energy. The early stop is a quench at least `0.05`
+/// below the minimum the search started from, which is a different
+/// basin rather than a tighter polish of the same one.
 pub fn cover_climb_search<E, Q>(
     origin: ArrayView1<f64>,
     rmsd: f64,
     max_hops: usize,
+    seed: u64,
     mut evaluate: E,
     mut quench: Q,
     cfg: &Activation,
@@ -349,12 +386,12 @@ where
     basins.insert(basin_key(origin_e), 0);
     let mut next_id = 1usize;
     let mut current = 0usize;
-    let ke0 = 4.0_f64;
-    let mut feedback = EscapeFeedback::new(ke0, 3.0);
-    feedback.escape_ceiling = 60.0;
-    feedback.escape_floor = 1.0;
+    let ke0 = 1.0_f64;
+    let mut feedback = EscapeFeedback::new(ke0, 0.5);
+    feedback.escape_ceiling = 80.0;
+    feedback.escape_floor = 0.25;
     feedback.register_initial(current);
-    let mut rng = rand::rngs::StdRng::seed_from_u64(1);
+    let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
     let n_cover = crate::hypersphere::default_cover_size();
     let cluster = origin.len() % 3 == 0 && {
         let pair = closest_pair(origin);
@@ -370,7 +407,7 @@ where
     );
 
     for hop in 0..max_hops {
-        if best_e < origin_e - 1.0e-4 {
+        if best_e < origin_e - 0.05 {
             break;
         }
         let kinetic = feedback.escape();
@@ -379,9 +416,8 @@ where
         let direction = Array1::from(crate::hypersphere::cover_direction(
             n_cover,
             here.len(),
-            hop,
+            hop.wrapping_add(seed as usize),
         ));
-        let mut proposals: Vec<Array1<f64>> = Vec::new();
 
         let placed = crate::hypersphere::place_around(
             here.as_slice().unwrap_or(&[]),
@@ -390,39 +426,47 @@ where
             None,
         );
         if placed.len() == here.len() {
-            proposals.push(quench(Array1::from(placed).view()));
+            let quenched = quench(Array1::from(placed).view());
+            note_candidate(&quenched, &mut evaluate, &mut best, &mut best_e, hop);
         }
         if cluster && hop % 4 == 0 {
-            proposals.push(quench(
-                fivefold_opening(here.view(), cover_rmsd, hop).view(),
-            ));
+            let quenched = quench(fivefold_opening(here.view(), cover_rmsd, hop).view());
+            note_candidate(&quenched, &mut evaluate, &mut best, &mut best_e, hop);
         }
         let amp = (0.38 * span).clamp(0.25, 0.9);
         let mut kicked = here.clone();
         for value in kicked.iter_mut() {
             *value += amp * (2.0 * rng.random::<f64>() - 1.0);
         }
-        proposals.push(quench(kicked.view()));
+        let quenched = quench(kicked.view());
+        note_candidate(&quenched, &mut evaluate, &mut best, &mut best_e, hop);
 
-        if hop % 5 == 0 {
+        if hop % 8 == 0 {
             for sign in [1.0_f64, -1.0] {
                 if let Some(outcome) = activate(here.view(), |y| Some(evaluate(y).1), cfg, sign)
                     && outcome.crossed
                 {
-                    proposals.push(quench(outcome.state.view()));
+                    let quenched = quench(outcome.state.view());
+                    note_candidate(&quenched, &mut evaluate, &mut best, &mut best_e, hop);
                 }
             }
         }
+        if best_e < origin_e - 0.05 {
+            println!(
+                "{{\"kind\":\"exit_hop\",\"hop\":{hop},\"here\":{here_e:.6},\"best\":{best_e:.6},\"left\":true}}"
+            );
+            let _ = std::io::stdout().flush();
+            break;
+        }
 
-        let dt = (0.015 / (1.0 + kinetic).sqrt()).clamp(2.0e-4, 0.02);
         let md = MdEscapeConfig {
-            dt,
+            dt: 0.005,
             potential_minima: 2,
-            maximum_steps: 700,
+            maximum_steps: 2_000,
             geometry,
             softening: Some(rgsaddle::VelocitySofteningConfig {
-                steps: 6,
-                displacement: 0.08,
+                steps: 12,
+                displacement: 0.1,
                 mixing: 0.15,
             }),
         };
@@ -437,55 +481,16 @@ where
                 &mut eval,
                 &mut rng,
             ) && report.potential_minima >= md.potential_minima
-                && report.position.iter().all(|v| v.is_finite())
+                && report.position.iter().all(|value| value.is_finite())
             {
                 escaped = Some(report.position);
             }
         }
-        if let Some(position) = escaped {
-            proposals.push(quench(position.view()));
+        let landed = escaped.map(|position| quench(position.view()));
+        if let Some(position) = landed.as_ref() {
+            note_candidate(position, &mut evaluate, &mut best, &mut best_e, hop);
         }
-
-        let mut landing: Option<(f64, Array1<f64>, usize)> = None;
-        let mut overshot = false;
-        for proposal in proposals {
-            if !proposal.iter().all(|v| v.is_finite()) {
-                continue;
-            }
-            let (value, _) = evaluate(proposal.view());
-            if !value.is_finite() {
-                continue;
-            }
-            println!("{{\"kind\":\"exit_candidate\",\"energy\":{value:.6},\"hop\":{hop}}}");
-            if value < best_e - 1.0e-6 {
-                best_e = value;
-                best = proposal.clone();
-            }
-            if value > origin_e + 30.0 {
-                overshot = true;
-                continue;
-            }
-            let key = basin_key(value);
-            if key == basin_key(here_e) {
-                continue;
-            }
-            let replace = landing
-                .as_ref()
-                .is_none_or(|(energy, _, _)| value < *energy);
-            if replace {
-                let reached = if let Some(id) = basins.get(&key).copied() {
-                    id
-                } else {
-                    let id = next_id;
-                    next_id += 1;
-                    basins.insert(key, id);
-                    id
-                };
-                landing = Some((value, proposal, reached));
-            }
-        }
-
-        if best_e < origin_e - 1.0e-4 {
+        if best_e < origin_e - 0.05 {
             println!(
                 "{{\"kind\":\"exit_hop\",\"hop\":{hop},\"here\":{here_e:.6},\"best\":{best_e:.6},\"left\":true}}"
             );
@@ -493,27 +498,34 @@ where
             break;
         }
 
-        match landing {
-            Some((value, state, reached)) => {
-                let visit = feedback.observe(Some(current), reached);
-                if visit != Visit::Same && feedback.accept(value - here_e) {
-                    here = state;
-                    here_e = value;
-                    current = reached;
-                }
-            }
-            None => {
-                if overshot {
+        match landed {
+            Some(position) => {
+                let (value, _) = evaluate(position.view());
+                if !value.is_finite() || value > origin_e + 30.0 {
                     let id = next_id;
                     next_id += 1;
                     feedback.observe(Some(current), id);
                 } else {
-                    feedback.observe(Some(current), current);
+                    let key = basin_key(value);
+                    if key == basin_key(here_e) {
+                        feedback.observe(Some(current), current);
+                    } else {
+                        let reached = basin_id(&mut basins, &mut next_id, key);
+                        let visit = feedback.observe(Some(current), reached);
+                        if visit != Visit::Same && feedback.accept(value - here_e) {
+                            here = position;
+                            here_e = value;
+                            current = reached;
+                        }
+                    }
                 }
+            }
+            None => {
+                feedback.observe(Some(current), current);
             }
         }
         println!(
-            "{{\"kind\":\"exit_hop\",\"hop\":{hop},\"here\":{here_e:.6},\"best\":{best_e:.6},\"escape\":{:.3},\"threshold\":{:.3}}}",
+            "{{\"kind\":\"exit_hop\",\"hop\":{hop},\"seed\":{seed},\"here\":{here_e:.6},\"best\":{best_e:.6},\"escape\":{:.3},\"threshold\":{:.3}}}",
             feedback.escape(),
             feedback.threshold()
         );
@@ -1171,6 +1183,7 @@ mod tests {
             capped.view(),
             0.4,
             40,
+            1,
             lj,
             quench,
             &Activation {
