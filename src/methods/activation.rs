@@ -178,58 +178,18 @@ where
     ));
     let contact = closest_pair(origin);
     let n_atoms = origin.len() / 3;
-    // A cluster is displaced in its soft subspace. The cover only chooses
-    // the sign of each mode. The amplitude is the cluster radius as an
-    // all-atom RMS, shared across the modes and weighted toward the
-    // softest. The minimum-mode climb then leaves that point, and the
-    // quench follows.
+    // On a cluster the cover is the direction of the climb, not a kick
+    // that is quenched on its own. One step is one contact length spread
+    // over the caller budget. The walk may run for one step per atom,
+    // until the force along the cover changes sign, and the quench follows.
     if contact > 0.95 && n_atoms >= 2 {
-        let mut com = [0.0; 3];
-        for i in 0..n_atoms {
-            for k in 0..3 {
-                com[k] += origin[3 * i + k];
-            }
-        }
-        for value in &mut com {
-            *value /= n_atoms as f64;
-        }
-        let mut reach = 0.0_f64;
-        for i in 0..n_atoms {
-            let mut r2 = 0.0;
-            for k in 0..3 {
-                let d = origin[3 * i + k] - com[k];
-                r2 += d * d;
-            }
-            reach = reach.max(r2.sqrt());
-        }
-        let span = reach.max(contact);
-        if let Some((lambdas, modes, _)) = crate::curvature::soft_subspace(
-            origin,
-            |point| grad(point),
-            cfg.lanczos_steps.max(2),
-            cfg.epsilon,
-            cfg.lanczos_steps.saturating_sub(1).max(1),
-        ) {
-            let lambda_min = lambdas.iter().copied().fold(f64::MAX, f64::min);
-            if lambda_min.is_finite() && lambda_min > 0.0 && !modes.is_empty() {
-                let share = (modes.len() as f64).sqrt();
-                let mut kicked = origin.to_owned();
-                for (lambda, mode) in lambdas.iter().zip(modes.iter()) {
-                    let weight = (lambda_min / lambda.max(lambda_min)).sqrt();
-                    let amp = span * (n_atoms as f64).sqrt() * weight / share;
-                    let align: f64 = mode.iter().zip(direction.iter()).map(|(a, b)| a * b).sum();
-                    let sign = if align >= 0.0 { 1.0 } else { -1.0 };
-                    for i in 0..kicked.len() {
-                        kicked[i] += sign * amp * mode[i];
-                    }
-                }
-                if let Some(outcome) = activate(kicked.view(), &mut grad, cfg, 1.0)
-                    && outcome.crossed
-                {
-                    return quench(outcome.state.view());
-                }
-                return quench(kicked.view());
-            }
+        let mut climb = cfg.clone();
+        let budget = climb.max_steps.max(1);
+        climb.step = contact * (n_atoms as f64).sqrt() / budget as f64;
+        climb.max_steps = n_atoms.max(budget);
+        climb.min_rise = 0.0;
+        if let Some(outcome) = activate_along(origin.view(), direction.view(), &mut grad, &climb) {
+            return quench(outcome.state.view());
         }
     }
     let placed = crate::hypersphere::place_around(
@@ -390,75 +350,6 @@ where
     );
     let mut best = origin.to_owned();
     let mut best_e = origin_e;
-    let contact = closest_pair(origin);
-    let n_atoms = origin.len() / 3;
-    if contact > 0.95 && n_atoms >= 2 {
-        let mut com = [0.0; 3];
-        for i in 0..n_atoms {
-            for k in 0..3 {
-                com[k] += origin[3 * i + k];
-            }
-        }
-        for value in &mut com {
-            *value /= n_atoms as f64;
-        }
-        let mut reach = 0.0_f64;
-        for i in 0..n_atoms {
-            let mut r2 = 0.0;
-            for k in 0..3 {
-                let d = origin[3 * i + k] - com[k];
-                r2 += d * d;
-            }
-            reach = reach.max(r2.sqrt());
-        }
-        let span = reach.max(contact);
-        let mut climb = cfg.clone();
-        // One step is a cluster radius spread over the caller's budget.
-        // The walk may continue for one step per atom, until the force
-        // along the mode changes sign.
-        let budget = climb.max_steps.max(1);
-        climb.step = span * (n_atoms as f64).sqrt() / budget as f64;
-        climb.max_steps = n_atoms.max(budget);
-        climb.min_rise = 0.0;
-        if let Some((lambdas, modes, _)) = crate::curvature::soft_subspace(
-            origin,
-            |point| Some(evaluate(point).1),
-            climb.lanczos_steps.max(2),
-            climb.epsilon,
-            climb.lanczos_steps.saturating_sub(1).max(1),
-        ) {
-            let _ = lambdas;
-            for mode in modes {
-                for sign in [1.0_f64, -1.0] {
-                    let mut directed = mode.clone();
-                    if sign < 0.0 {
-                        directed *= -1.0;
-                    }
-                    let Some(outcome) = activate_along(
-                        origin,
-                        directed.view(),
-                        |point| Some(evaluate(point).1),
-                        &climb,
-                    ) else {
-                        continue;
-                    };
-                    let quenched = quench(outcome.state.view());
-                    let (value, _) = evaluate(quenched.view());
-                    if !value.is_finite() {
-                        continue;
-                    }
-                    println!(
-                        "{{\"kind\":\"exit_candidate\",\"energy\":{value:.6},\"hop\":0,\"role\":\"quench\"}}"
-                    );
-                    let _ = std::io::stdout().flush();
-                    if value < best_e {
-                        best_e = value;
-                        best = quenched;
-                    }
-                }
-            }
-        }
-    }
     for hop in 0..max_hops {
         let quenched = cover_climb_quench(
             best.view(),
