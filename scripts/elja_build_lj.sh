@@ -15,6 +15,9 @@ if [[ ! -x $CMAKE_BIN ]]; then
   exit 1
 fi
 mkdir -p "$SYS/bin"
+test -x "$GCC/bin/gcc"
+test -x "$GCC/bin/g++"
+test -x "$CMAKE_BIN"
 ln -sfn "$GCC/bin/gcc" "$SYS/bin/cc"
 ln -sfn "$GCC/bin/gcc" "$SYS/bin/gcc"
 ln -sfn "$GCC/bin/g++" "$SYS/bin/g++"
@@ -40,6 +43,7 @@ export CXXFLAGS="${CXXFLAGS:-} -isystem $SYS/usr-include"
 export LIBRARY_PATH="${SYS}:${GCC}/lib64:/usr/lib64:${LIBRARY_PATH:-}"
 # Do not pass -fuse-ld=/path: OHPC gcc 12 rejects it. collect2 finds
 # ld via -B. rust-lld is avoided by pointing gcc at SYS/bin/ld.
+test -x /usr/bin/ld
 ln -sfn /usr/bin/ld "$SYS/bin/ld"
 export RUSTFLAGS="${RUSTFLAGS:-} -C linker=${GCC}/bin/gcc -C link-arg=-B${SYS} -C link-arg=-B${SYS}/bin -L ${SYS}"
 cd "$ROOT"
