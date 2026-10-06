@@ -49,7 +49,7 @@
 //! [`crate::curvature`]. The controller in [`crate::methods::minima_hopping`]
 //! sets how far to climb; this module decides when to stop.
 
-use crate::curvature::curvature_features;
+use crate::curvature::{curvature_features, project_rigid_with, rigid_basis};
 use ndarray::{Array1, ArrayView1};
 use rand::{Rng, SeedableRng};
 use std::io::Write;
@@ -316,17 +316,567 @@ where
     best
 }
 
-/// If the centre of mass is empty, move one atom there.
+struct CoverRidge {
+    landings: Vec<Array1<f64>>,
+    crossed: bool,
+    lambda: f64,
+    lowest: f64,
+    steps: usize,
+    axial: f64,
+}
+
+fn empty_ridge() -> CoverRidge {
+    CoverRidge {
+        landings: Vec::new(),
+        crossed: false,
+        lambda: 0.0,
+        lowest: 0.0,
+        steps: 0,
+        axial: 0.0,
+    }
+}
+
+fn dot_av(left: ArrayView1<f64>, right: ArrayView1<f64>) -> f64 {
+    left.iter().zip(right.iter()).map(|(a, b)| a * b).sum()
+}
+
+fn max_atom_weight(mode: ArrayView1<f64>) -> f64 {
+    let n_atoms = mode.len() / 3;
+    let mut weight = 0.0_f64;
+    for atom in 0..n_atoms {
+        let mut square = 0.0;
+        for axis in 0..3 {
+            let component = mode[3 * atom + axis];
+            square += component * component;
+        }
+        weight = weight.max(square.sqrt());
+    }
+    weight
+}
+
+fn cluster_reach(x: ArrayView1<f64>) -> f64 {
+    let n_atoms = x.len() / 3;
+    if n_atoms == 0 {
+        return 0.0;
+    }
+    let mut com = [0.0; 3];
+    for atom in 0..n_atoms {
+        for axis in 0..3 {
+            com[axis] += x[3 * atom + axis];
+        }
+    }
+    for value in &mut com {
+        *value /= n_atoms as f64;
+    }
+    let mut reach = 0.0_f64;
+    for atom in 0..n_atoms {
+        let mut square = 0.0;
+        for axis in 0..3 {
+            let delta = x[3 * atom + axis] - com[axis];
+            square += delta * delta;
+        }
+        reach = reach.max(square.sqrt());
+    }
+    reach
+}
+
+fn axial_projection(cur: ArrayView1<f64>, origin: ArrayView1<f64>, mode: ArrayView1<f64>) -> f64 {
+    cur.iter()
+        .zip(origin.iter())
+        .zip(mode.iter())
+        .map(|((value, start), component)| (value - start) * component)
+        .sum()
+}
+
+fn pin_axial(cur: &mut Array1<f64>, origin: ArrayView1<f64>, mode: ArrayView1<f64>, target: f64) {
+    let shift = target - axial_projection(cur.view(), origin, mode);
+    if shift == 0.0 {
+        return;
+    }
+    for (value, component) in cur.iter_mut().zip(mode.iter()) {
+        *value += shift * component;
+    }
+}
+
+fn renormalize_mode(mode: &mut Array1<f64>, x: ArrayView1<f64>) -> bool {
+    let basis = rigid_basis(x);
+    project_rigid_with(mode, &basis);
+    let norm = dot_av(mode.view(), mode.view()).sqrt();
+    if !norm.is_finite() || norm < 1e-15 {
+        return false;
+    }
+    *mode /= norm;
+    true
+}
+
+fn directional_curvature<E>(
+    cur: ArrayView1<f64>,
+    mode: ArrayView1<f64>,
+    evaluate: &mut E,
+    epsilon: f64,
+) -> Option<f64>
+where
+    E: FnMut(ArrayView1<f64>) -> (f64, Array1<f64>),
+{
+    let (_, left) = evaluate(cur);
+    let mut shifted = cur.to_owned();
+    for (value, component) in shifted.iter_mut().zip(mode.iter()) {
+        *value += epsilon * component;
+    }
+    let (_, right) = evaluate(shifted.view());
+    let curvature = (dot_av(right.view(), mode) - dot_av(left.view(), mode)) / epsilon;
+    curvature.is_finite().then_some(curvature)
+}
+
+/// Directions carried by one covering vector.
 ///
-/// A hollow centre and a centred core are different packings. The atom
-/// that moves is one of the innermost, or the outermost. The quench
-/// decides which packing that core belongs to. No target geometry is used.
-/// Move the atom nearest the centre onto the centre and relax the others.
+/// The full vector is kept. Atoms heavier than the mean of that vector,
+/// and the single heaviest atom, are separate pushes: a uniform step
+/// stretches every contact, and the lowest curvature is then an overlap
+/// rather than a rearrangement.
+fn cover_axes(direction: &[f64]) -> Vec<(&'static str, Array1<f64>)> {
+    let n_atoms = direction.len() / 3;
+    if n_atoms == 0 || direction.len() != n_atoms * 3 {
+        return Vec::new();
+    }
+    let mut weights = vec![0.0; n_atoms];
+    let mut total = 0.0;
+    let mut leading = 0usize;
+    for atom in 0..n_atoms {
+        let mut square = 0.0;
+        for axis in 0..3 {
+            let component = direction[3 * atom + axis];
+            square += component * component;
+        }
+        let weight = square.sqrt();
+        weights[atom] = weight;
+        total += weight;
+        if weight > weights[leading] {
+            leading = atom;
+        }
+    }
+    let mean = total / n_atoms as f64;
+    let mut above = Array1::zeros(direction.len());
+    let mut kept = 0usize;
+    for atom in 0..n_atoms {
+        if weights[atom] > mean {
+            kept += 1;
+            for axis in 0..3 {
+                above[3 * atom + axis] = direction[3 * atom + axis];
+            }
+        }
+    }
+    let mut lead = Array1::zeros(direction.len());
+    for axis in 0..3 {
+        lead[3 * leading + axis] = direction[3 * leading + axis];
+    }
+    let mut axes = Vec::new();
+    axes.push(("cover", Array1::from_vec(direction.to_vec())));
+    if kept >= 2 {
+        axes.push(("mean", above));
+    }
+    if weights[leading] > mean {
+        axes.push(("atom", lead));
+    }
+    axes
+}
+
+fn relax_pinned<E>(
+    cur: &mut Array1<f64>,
+    origin: ArrayView1<f64>,
+    mode: &Array1<f64>,
+    target: f64,
+    trust: f64,
+    contact: f64,
+    evaluate: &mut E,
+    cfg: &Activation,
+) -> bool
+where
+    E: FnMut(ArrayView1<f64>) -> (f64, Array1<f64>),
+{
+    let clash = contact * 0.5;
+    // Each round is one trial along the perpendicular force. Further rounds
+    // are how a valley is reached; the displacement stays inside `trust`.
+    let rounds = cfg.perp_steps.max(1);
+    let mut spent = 0.0_f64;
+    for _ in 0..rounds {
+        if spent >= trust {
+            break;
+        }
+        pin_axial(cur, origin, mode.view(), target);
+        if closest_pair(cur.view()) < clash {
+            return false;
+        }
+        let (energy, gradient) = evaluate(cur.view());
+        if !energy.is_finite() {
+            return false;
+        }
+        let along = dot_av(gradient.view(), mode.view());
+        let mut perp_square = 0.0;
+        let mut perp = gradient;
+        for (component, mode_component) in perp.iter_mut().zip(mode.iter()) {
+            *component -= along * mode_component;
+            perp_square += *component * *component;
+        }
+        let perp_norm = perp_square.sqrt();
+        if !perp_norm.is_finite() {
+            return false;
+        }
+        if perp_norm <= along.abs() {
+            pin_axial(cur, origin, mode.view(), target);
+            return closest_pair(cur.view()) >= clash;
+        }
+        let mut length = (trust - spent).min(trust).max(0.0);
+        let mut accepted = false;
+        while length > cfg.epsilon {
+            let mut trial = cur.clone();
+            for (value, component) in trial.iter_mut().zip(perp.iter()) {
+                *value -= length * component / perp_norm;
+            }
+            pin_axial(&mut trial, origin, mode.view(), target);
+            if closest_pair(trial.view()) < clash {
+                length *= 0.5;
+                continue;
+            }
+            let (trial_energy, trial_gradient) = evaluate(trial.view());
+            if !trial_energy.is_finite() {
+                length *= 0.5;
+                continue;
+            }
+            let trial_along = dot_av(trial_gradient.view(), mode.view());
+            let mut trial_perp = 0.0;
+            for (component, mode_component) in trial_gradient.iter().zip(mode.iter()) {
+                let orthogonal = component - trial_along * mode_component;
+                trial_perp += orthogonal * orthogonal;
+            }
+            if trial_energy <= energy || trial_perp.sqrt() < perp_norm {
+                *cur = trial;
+                spent += length;
+                accepted = true;
+                break;
+            }
+            length *= 0.5;
+        }
+        if !accepted {
+            break;
+        }
+    }
+    pin_axial(cur, origin, mode.view(), target);
+    closest_pair(cur.view()) >= clash
+}
+
+fn landings_past(
+    state: &Array1<f64>,
+    mode: &Array1<f64>,
+    lambda: f64,
+    contact: f64,
+    overshoot: f64,
+) -> Vec<Array1<f64>> {
+    let mut landings = vec![state.clone()];
+    let lead = max_atom_weight(mode.view()).max(1e-12);
+    let contact_step = contact / lead;
+    let curvature_length = 1.0 / lambda.abs().sqrt().max(1e-8);
+    let extra = curvature_length.min(contact_step) * overshoot.max(0.0);
+    if extra > 1e-8 {
+        let mut farther = state.clone();
+        for (value, component) in farther.iter_mut().zip(mode.iter()) {
+            *value += extra * component;
+        }
+        if closest_pair(farther.view()) >= contact * 0.5 {
+            landings.push(farther);
+        }
+    }
+    landings
+}
+
+fn lowest_mode<E>(
+    cur: ArrayView1<f64>,
+    evaluate: &mut E,
+    steps: usize,
+    epsilon: f64,
+) -> Option<(f64, Array1<f64>)>
+where
+    E: FnMut(ArrayView1<f64>) -> (f64, Array1<f64>),
+{
+    let features = curvature_features(cur, |point| Some(evaluate(point).1), steps, epsilon)?;
+    Some((features.lambda_min, features.mode))
+}
+
+/// Climb `direction` until the force along the lowest negative mode flips.
 ///
-/// The centre is the centre of mass. The atom is held there while the
-/// remaining gradient is followed, then the caller quenches with every
-/// atom free. A structure that already has an atom on the centre is
-/// unchanged. No stored geometry is read.
+/// `hold_cover` keeps the supplied direction until that curvature is
+/// negative. The other path follows the lowest mode from the first step.
+/// Lengths are the curvature length and the contact distance. The walk
+/// stops when the leading atom has moved by the cluster radius.
+fn climb_cover<E>(
+    origin: ArrayView1<f64>,
+    direction: ArrayView1<f64>,
+    travel0: f64,
+    hold_cover: bool,
+    evaluate: &mut E,
+    cfg: &Activation,
+) -> CoverRidge
+where
+    E: FnMut(ArrayView1<f64>) -> (f64, Array1<f64>),
+{
+    let n_atoms = origin.len() / 3;
+    if n_atoms < 2 || direction.len() != origin.len() || cfg.lanczos_steps < 2 {
+        return empty_ridge();
+    }
+    let mut mode = direction.to_owned();
+    if travel0 < 0.0 {
+        for component in mode.iter_mut() {
+            *component = -*component;
+        }
+    }
+    if !renormalize_mode(&mut mode, origin) {
+        return empty_ridge();
+    }
+    let contact = closest_pair(origin);
+    if !contact.is_finite() || contact <= 0.0 {
+        return empty_ridge();
+    }
+    let reach = cluster_reach(origin);
+    let epsilon = cfg.epsilon.max(1e-8);
+    let Some(mut directional) = directional_curvature(origin, mode.view(), evaluate, epsilon)
+    else {
+        return empty_ridge();
+    };
+    let mut lambda = directional;
+    let mut lowest = directional;
+    let mut cur = origin.to_owned();
+    let mut axial = 0.0_f64;
+    let mut steps = 0usize;
+    let budget = cfg.max_steps.max(n_atoms);
+    let mut saw_negative = false;
+
+    let finish = |state: &Array1<f64>,
+                  mode: &Array1<f64>,
+                  lambda: f64,
+                  lowest: f64,
+                  steps: usize,
+                  axial: f64,
+                  crossed: bool|
+     -> CoverRidge {
+        let landings = if lambda.is_finite() && lambda < 0.0 {
+            landings_past(state, mode, lambda, contact, cfg.overshoot)
+        } else {
+            Vec::new()
+        };
+        CoverRidge {
+            landings,
+            crossed,
+            lambda,
+            lowest,
+            steps,
+            axial,
+        }
+    };
+
+    if hold_cover {
+        while steps < budget && !saw_negative {
+            let lead = max_atom_weight(mode.view()).max(1e-12);
+            let axial_cap = reach.max(contact) / lead;
+            let curvature_length = 1.0 / directional.abs().max(epsilon).sqrt();
+            let grow = curvature_length.min(contact / lead).max(epsilon);
+            let target = if axial <= epsilon {
+                grow.min(axial_cap)
+            } else {
+                (axial * 2.0).min(axial_cap)
+            };
+            if target <= axial + epsilon {
+                break;
+            }
+            let snapshot = cur.clone();
+            let trust = target - axial;
+            let accepted = relax_pinned(
+                &mut cur, origin, &mode, target, trust, contact, evaluate, cfg,
+            );
+            if !accepted {
+                cur.clone_from(&snapshot);
+                let mid = 0.5 * (axial + target);
+                if mid <= axial + epsilon
+                    || !relax_pinned(
+                        &mut cur,
+                        origin,
+                        &mode,
+                        mid,
+                        mid - axial,
+                        contact,
+                        evaluate,
+                        cfg,
+                    )
+                {
+                    cur.clone_from(&snapshot);
+                    break;
+                }
+                axial = mid;
+            } else {
+                axial = target;
+            }
+            steps += 1;
+            if let Some(value) = directional_curvature(cur.view(), mode.view(), evaluate, epsilon) {
+                directional = value;
+                lambda = directional;
+            }
+            if let Some((soft, soft_mode)) =
+                lowest_mode(cur.view(), evaluate, cfg.lanczos_steps, epsilon)
+            {
+                lowest = soft;
+                if soft.is_finite() && soft < 0.0 {
+                    let align = dot_av(soft_mode.view(), mode.view());
+                    mode = if align < 0.0 { -soft_mode } else { soft_mode };
+                    if !renormalize_mode(&mut mode, cur.view()) {
+                        break;
+                    }
+                    lambda = soft;
+                    saw_negative = true;
+                    axial = axial_projection(cur.view(), origin, mode.view());
+                    let (_, gradient) = evaluate(cur.view());
+                    let along = dot_av(gradient.view(), mode.view());
+                    if along < 0.0 {
+                        return finish(&cur, &mode, lambda, lowest, steps, axial, true);
+                    }
+                }
+            }
+        }
+    } else if let Some((soft, soft_mode)) =
+        lowest_mode(cur.view(), evaluate, cfg.lanczos_steps, epsilon)
+    {
+        let align = dot_av(soft_mode.view(), mode.view());
+        mode = if align < 0.0 { -soft_mode } else { soft_mode };
+        if !renormalize_mode(&mut mode, cur.view()) {
+            return empty_ridge();
+        }
+        lambda = soft;
+        lowest = soft;
+        directional = soft;
+        if soft.is_finite() && soft < 0.0 {
+            saw_negative = true;
+        }
+    }
+
+    if saw_negative || !hold_cover {
+        while steps < budget {
+            if !renormalize_mode(&mut mode, cur.view()) {
+                break;
+            }
+            let lead = max_atom_weight(mode.view()).max(1e-12);
+            if axial_projection(cur.view(), origin, mode.view()).abs() > reach.max(contact) / lead
+                && steps > 0
+            {
+                break;
+            }
+            let (_, gradient) = evaluate(cur.view());
+            let along = dot_av(gradient.view(), mode.view());
+            if saw_negative && lambda < 0.0 && along < 0.0 {
+                return finish(&cur, &mode, lambda, lowest, steps, axial, true);
+            }
+            let curvature_length = 1.0 / lambda.abs().max(epsilon).sqrt();
+            let mut stride = curvature_length.min(contact / lead).max(epsilon);
+            let snapshot = cur.clone();
+            let mut placed = false;
+            while stride > epsilon {
+                cur.clone_from(&snapshot);
+                for (value, component) in cur.iter_mut().zip(mode.iter()) {
+                    *value += stride * component;
+                }
+                if closest_pair(cur.view()) < contact * 0.5 {
+                    stride *= 0.5;
+                    continue;
+                }
+                let target = axial_projection(cur.view(), origin, mode.view());
+                if relax_pinned(
+                    &mut cur, origin, &mode, target, stride, contact, evaluate, cfg,
+                ) {
+                    placed = true;
+                    break;
+                }
+                stride *= 0.5;
+            }
+            if !placed {
+                cur.clone_from(&snapshot);
+                break;
+            }
+            steps += 1;
+            axial = axial_projection(cur.view(), origin, mode.view());
+            let (_, climbed) = evaluate(cur.view());
+            let along_after = dot_av(climbed.view(), mode.view());
+            let step_curvature = (along_after - along) / stride;
+            if step_curvature.is_finite() {
+                lambda = step_curvature;
+                if step_curvature < 0.0 {
+                    saw_negative = true;
+                }
+            }
+            if saw_negative && lambda < 0.0 && along_after < 0.0 {
+                return finish(&cur, &mode, lambda, lowest, steps, axial, true);
+            }
+            if steps % cfg.refresh.max(1) == 0
+                && let Some((soft, soft_mode)) =
+                    lowest_mode(cur.view(), evaluate, cfg.lanczos_steps, epsilon)
+            {
+                lowest = soft;
+                if soft.is_finite() {
+                    let align = dot_av(soft_mode.view(), mode.view());
+                    mode = if align < 0.0 { -soft_mode } else { soft_mode };
+                    if !renormalize_mode(&mut mode, cur.view()) {
+                        break;
+                    }
+                    lambda = soft;
+                    if soft < 0.0 {
+                        saw_negative = true;
+                    }
+                }
+            }
+        }
+    }
+
+    if lambda.is_finite() && lambda < 0.0 {
+        return finish(&cur, &mode, lambda, lowest, steps, axial, false);
+    }
+    CoverRidge {
+        landings: Vec::new(),
+        crossed: false,
+        lambda,
+        lowest,
+        steps,
+        axial,
+    }
+}
+
+fn note_exit<E>(
+    evaluate: &mut E,
+    quenched: &Array1<f64>,
+    hop: usize,
+    best_energy: &mut f64,
+    best: &mut Array1<f64>,
+) -> Option<f64>
+where
+    E: FnMut(ArrayView1<f64>) -> (f64, Array1<f64>),
+{
+    let (value, _) = evaluate(quenched.view());
+    if !value.is_finite() {
+        return None;
+    }
+    println!(
+        "{{\"kind\":\"exit_candidate\",\"energy\":{value:.6},\"hop\":{hop},\"role\":\"quench\"}}"
+    );
+    let _ = std::io::stdout().flush();
+    if value < *best_energy {
+        *best_energy = value;
+        *best = quenched.clone();
+    }
+    Some(value)
+}
+
+/// Covering displacements, a minimum-mode climb, and a quench.
+///
+/// Each hop takes one direction of the hypersphere cover. The climb holds
+/// that direction and relaxes the force perpendicular to it, then follows
+/// the lowest mode once its curvature changes sign. The quench is the
+/// caller's local minimiser, taken past that ridge. No target energy is
+/// read.
 pub fn cover_climb_search<E, Q>(
     origin: ArrayView1<f64>,
     rmsd: f64,
@@ -395,6 +945,81 @@ where
                 origin.len(),
                 hop.wrapping_add(seed as usize),
             );
+            let mut follow: Option<(f64, Array1<f64>)> = None;
+            for (axis, raw) in cover_axes(&direction) {
+                for travel in [1.0_f64, -1.0] {
+                    let ridge =
+                        climb_cover(origin.view(), raw.view(), travel, true, &mut evaluate, cfg);
+                    println!(
+                        "{{\"kind\":\"climb\",\"hop\":{},\"axis\":\"{axis}\",\"travel\":{travel},\"crossed\":{},\"lambda\":{:.6},\"lowest\":{:.6},\"steps\":{},\"axial\":{:.4},\"landings\":{}}}",
+                        hop + 1,
+                        ridge.crossed,
+                        ridge.lambda,
+                        ridge.lowest,
+                        ridge.steps,
+                        ridge.axial,
+                        ridge.landings.len()
+                    );
+                    let _ = std::io::stdout().flush();
+                    for landing in &ridge.landings {
+                        if landing.iter().any(|value| !value.is_finite()) {
+                            continue;
+                        }
+                        let quenched = quench(landing.view());
+                        let Some(value) =
+                            note_exit(&mut evaluate, &quenched, hop + 1, &mut best_e, &mut best)
+                        else {
+                            continue;
+                        };
+                        let distinct = (value - origin_e).abs() > 1e-6;
+                        let compact = cluster_reach(quenched.view()) <= reach + contact;
+                        if distinct
+                            && compact
+                            && follow.as_ref().is_none_or(|(energy, _)| value < *energy)
+                        {
+                            follow = Some((value, quenched));
+                        }
+                    }
+                }
+            }
+            if let Some((_, neighbour)) = follow
+                && let Some((_, soft_mode)) = lowest_mode(
+                    neighbour.view(),
+                    &mut evaluate,
+                    cfg.lanczos_steps,
+                    cfg.epsilon.max(1e-8),
+                )
+            {
+                for travel in [1.0_f64, -1.0] {
+                    let ridge = climb_cover(
+                        neighbour.view(),
+                        soft_mode.view(),
+                        travel,
+                        false,
+                        &mut evaluate,
+                        cfg,
+                    );
+                    println!(
+                        "{{\"kind\":\"climb\",\"hop\":{},\"axis\":\"mode\",\"travel\":{travel},\"crossed\":{},\"lambda\":{:.6},\"lowest\":{:.6},\"steps\":{},\"axial\":{:.4},\"landings\":{}}}",
+                        hop + 1,
+                        ridge.crossed,
+                        ridge.lambda,
+                        ridge.lowest,
+                        ridge.steps,
+                        ridge.axial,
+                        ridge.landings.len()
+                    );
+                    let _ = std::io::stdout().flush();
+                    for landing in &ridge.landings {
+                        if landing.iter().any(|value| !value.is_finite()) {
+                            continue;
+                        }
+                        let quenched = quench(landing.view());
+                        let _ =
+                            note_exit(&mut evaluate, &quenched, hop + 1, &mut best_e, &mut best);
+                    }
+                }
+            }
             for &station in &stations {
                 let placed = crate::hypersphere::place_around(
                     origin.as_slice().unwrap_or(&[]),
