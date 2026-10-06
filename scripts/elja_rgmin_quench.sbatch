@@ -14,7 +14,11 @@ export PIXI_CACHE_DIR=${PIXI_CACHE_DIR:-$HOME/.cache/pixi}
 ROOT=${LJ_ROOT:-$HOME/anneal-occ-a6fc882}
 PIXI=${PIXI:-$HOME/.pixi/bin/pixi}
 cd "$ROOT"
+# shellcheck disable=SC1091
+source "$ROOT/scripts/elja_scratch.sh"
+elja_enter_scratch
+trap elja_leave_scratch EXIT
 mkdir -p probe
 echo "{\"kind\":\"build\",\"head\":\"$(git rev-parse HEAD 2>/dev/null || cat SOURCE_COMMIT)\",\"job\":\"${SLURM_JOB_ID:-}\"}"
 "$PIXI" run -e cluster cargo build --offline --release --example rgmin_quench_compare
-exec "$PIXI" run -e cluster -- ./target/release/examples/rgmin_quench_compare "${RELAX_STEPS:-200}"
+exec "$PIXI" run -e cluster -- "$CARGO_TARGET_DIR/release/examples/rgmin_quench_compare" "${RELAX_STEPS:-200}"

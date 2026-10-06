@@ -906,3 +906,49 @@ fn census_calibration_campaign_covers_every_analyzed_lj_system() {
         "the calibration finalizer must validate every hard-LJ analysis system"
     );
 }
+
+#[test]
+fn elja_jobs_use_the_node_scratch_disk() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let scratch = fs::read_to_string(root.join("scripts/elja_scratch.sh"))
+        .unwrap_or_else(|error| panic!("failed to read scratch helper: {error}"));
+    assert!(
+        scratch.contains("scratchlocation=/scratch/users"),
+        "Elja scratch is /scratch/users on the compute node"
+    );
+    assert!(
+        scratch.contains("/users/home"),
+        "the helper must recognise the home filer"
+    );
+    assert!(
+        scratch.contains("--bwlimit=40000"),
+        "copies back to the filer use the documented cap"
+    );
+    assert!(
+        !scratch.contains("/users/home/rog32/var/scratch"),
+        "a home directory named scratch is not the node disk"
+    );
+    for script in [
+        "scripts/elja_build_lj.sh",
+        "scripts/elja_build_brains.sh",
+        "scripts/elja_leave_ridge.sbatch",
+        "scripts/elja_rgmin_quench.sbatch",
+    ] {
+        let source = fs::read_to_string(root.join(script))
+            .unwrap_or_else(|error| panic!("failed to read {script}: {error}"));
+        assert!(
+            source.contains("elja_enter_scratch"),
+            "{script} must run the cargo target on the node scratch disk"
+        );
+    }
+    let profile = fs::read_to_string(root.join("profiles/elja/config.yaml"))
+        .unwrap_or_else(|error| panic!("failed to read Elja profile: {error}"));
+    assert!(
+        profile.contains("executor: slurm") && profile.contains("jobs: 4"),
+        "the Elja profile is one Snakemake process with a job cap"
+    );
+    assert!(
+        profile.contains("/scratch/users/$USER"),
+        "the profile must name the node scratch disk"
+    );
+}

@@ -1,0 +1,42 @@
+# Elja Lennard-Jones probe.
+# Launch with the profile, which caps concurrency:
+#   snakemake --profile profiles/elja --config sizes=75 seeds=0
+# An empty config submits nothing. The build script refuses to write
+# the cargo target onto /users/home.
+
+configfile: "config/elja_lj.yaml"
+
+
+SIZES = [s.strip() for s in str(config.get("sizes", "")).split(",") if s.strip()]
+SEEDS = [s.strip() for s in str(config.get("seeds", "")).split(",") if s.strip()]
+
+
+rule all:
+    input:
+        expand("results/elja/n{n}/seed{seed}.log", n=SIZES, seed=SEEDS),
+
+
+rule lj_seed:
+    output:
+        "results/elja/n{n}/seed{seed}.log",
+    params:
+        budget=config["budget"],
+        arm=config["arm"],
+    resources:
+        runtime=480,
+        mem_mb=16000,
+        cpus_per_task=4,
+    shell:
+        """
+        set -euo pipefail
+        export LJ_ROOT="$PWD"
+        bash scripts/elja_build_lj.sh
+        source scripts/elja_scratch.sh
+        elja_enter_scratch
+        trap elja_leave_scratch EXIT
+        SEED_OFFSET={wildcards.seed} \
+          "$LJ_ROOT/target/release/examples/lj_cluster_search" \
+          {wildcards.n} {params.budget} 1 {params.arm} \
+          > "$ELJA_SCRATCH/seed.log" 2>&1
+        elja_publish "$ELJA_SCRATCH/seed.log" {output}
+        """

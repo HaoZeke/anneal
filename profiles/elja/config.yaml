@@ -1,0 +1,14 @@
+# One Snakemake process submits the rules as Slurm jobs.
+# At most four jobs at once. The account quota is shared.
+# Each job runs under /scratch/users/$USER on the compute node's local
+# scratch disk. /users/home is the NFS filer and is not scratch.
+executor: slurm
+jobs: 4
+latency-wait: 30
+max-jobs-per-second: 1
+default-resources:
+  slurm_partition: s-normal
+  slurm_account: chem-ui
+  runtime: 480
+  mem_mb: 16000
+  cpus_per_task: 4

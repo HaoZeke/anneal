@@ -1,0 +1,5 @@
+# Default submits no seeds. Pass sizes and seeds on the snakemake command.
+sizes: ""
+seeds: ""
+budget: 4000000
+arm: rec
