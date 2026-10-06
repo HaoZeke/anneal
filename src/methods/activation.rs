@@ -656,12 +656,12 @@ where
         "{{\"kind\":\"exit_candidate\",\"energy\":{origin_e:.6},\"hop\":0,\"role\":\"start\"}}"
     );
 
-    // Wales and Doye's angular move throws the worst-bound atom to the
-    // surface at a random angle. That is the displacement their basin
-    // hopping used to reach decahedral minima. Shell rotation, surface
-    // relocation and a twin are the other packing changes. Uphill
-    // quenches are accepted on a fixed temperature so the walk can
-    // leave the funnel it starts in. Nothing named is a target energy.
+    // A Metropolis temperature that only accepts small rises never
+    // crosses the barrier out of a deep funnel. Below a fixed lid every
+    // new quenched basin is kept, and the next move leaves from the
+    // least visited one. The moves are an angular surface throw, a
+    // shell rotation, a relocation of a poorly coordinated atom, and a
+    // twin. No named target energy is used.
     if cluster {
         let n_atoms = origin.len() / 3;
         let arms = [
@@ -681,17 +681,35 @@ where
             ),
             crate::methods::cluster_hopping::ClusterMove::Twin { n_points: n_atoms },
         ];
-        let mut walker = origin.to_owned();
-        let mut walker_e = origin_e;
+        struct Held {
+            energy: f64,
+            state: Array1<f64>,
+            visits: u32,
+        }
+        let mut held = vec![Held {
+            energy: origin_e,
+            state: origin.to_owned(),
+            visits: 0,
+        }];
+        let mut seen = HashSet::from([basin_key(origin_e)]);
+        let lid = origin_e + 10.5;
         for hop in 0..max_hops {
             if best_e < origin_e - 0.05 {
                 println!(
-                    "{{\"kind\":\"exit_hop\",\"hop\":{hop},\"here\":{walker_e:.6},\"best\":{best_e:.6},\"phase\":\"angular\",\"left\":true}}"
+                    "{{\"kind\":\"exit_hop\",\"hop\":{hop},\"here\":{here_e:.6},\"best\":{best_e:.6},\"phase\":\"lid\",\"left\":true}}"
                 );
                 let _ = std::io::stdout().flush();
                 return best;
             }
-            let trial = arms[hop % arms.len()].propose(walker.view(), 1.0, &mut rng);
+            let idx = held
+                .iter()
+                .enumerate()
+                .min_by_key(|(_, item)| (item.visits, item.energy.to_bits()))
+                .map(|(i, _)| i)
+                .unwrap_or(0);
+            held[idx].visits += 1;
+            let parent = held[idx].state.clone();
+            let trial = arms[hop % arms.len()].propose(parent.view(), 1.0, &mut rng);
             let quenched = quench(trial.view());
             note_candidate(
                 &quenched,
@@ -704,19 +722,20 @@ where
                 &rejected,
             );
             let (value, _) = evaluate(quenched.view());
-            let rise = value - walker_e;
-            if value.is_finite()
-                && value < origin_e + 8.0
-                && (rise <= 0.0 || rng.random::<f64>() < (-rise / 0.8).exp())
-            {
-                walker = quenched;
-                walker_e = value;
-                here = walker.clone();
-                here_e = value;
+            if value.is_finite() && value < lid && held.len() < 400 {
+                let key = basin_key(value);
+                if seen.insert(key) {
+                    held.push(Held {
+                        energy: value,
+                        state: quenched,
+                        visits: 0,
+                    });
+                }
             }
             if hop.is_multiple_of(400) {
                 println!(
-                    "{{\"kind\":\"exit_hop\",\"hop\":{hop},\"here\":{walker_e:.6},\"best\":{best_e:.6},\"phase\":\"angular\"}}"
+                    "{{\"kind\":\"exit_hop\",\"hop\":{hop},\"here\":{here_e:.6},\"best\":{best_e:.6},\"basins\":{},\"phase\":\"lid\"}}",
+                    held.len()
                 );
                 let _ = std::io::stdout().flush();
             }
