@@ -423,6 +423,16 @@ where
             climb.epsilon,
             climb.lanczos_steps.saturating_sub(1).max(1),
         ) {
+            let lambda_min = lambdas
+                .iter()
+                .copied()
+                .filter(|value| value.is_finite() && *value > 0.0)
+                .fold(f64::MAX, f64::min);
+            if lambda_min.is_finite() {
+                // One harmonic step along the soft mode. Shallower ridges
+                // stay in the same funnel.
+                climb.min_rise = 0.5 * lambda_min * climb.step * climb.step;
+            }
             for mode in modes {
                 for sign in [1.0_f64, -1.0] {
                     let mut directed = mode.clone();
@@ -620,6 +630,9 @@ where
     let mut crossed = false;
     let mut rise = 0.0;
     let mut saw_uphill = false;
+    // A clash eigenvalue is far below the curvature of the minimum.
+    // The square of that curvature separates the two without a fixed cutoff.
+    let mut curvature_scale = first.lambda_min.abs();
     // Highest ridge crossed on this climb. A shallow first saddle is kept
     // only until a higher one is crossed. The quench leaves from that ridge.
     let mut ridge: Option<(Array1<f64>, Array1<f64>, f64)> = None;
@@ -753,13 +766,17 @@ where
                 }
             }
         }
+        if lambda > curvature_scale {
+            curvature_scale = lambda;
+        }
         let descending = sign * along < 0.0;
-        if saw_uphill && descending && lambda < 0.0 && rise >= cfg.min_rise {
-            // A clash has a large negative curvature. The ridge to leave
-            // from is the one closest to zero.
-            let softer = ridge.as_ref().is_none_or(|(_, _, kept)| lambda > *kept);
-            if softer {
-                ridge = Some((cur.clone(), mode.clone(), lambda));
+        let intact = lambda < 0.0 && lambda > -(curvature_scale * curvature_scale);
+        if saw_uphill && descending && intact && rise >= cfg.min_rise {
+            // Keep the highest intact ridge. A shallow first saddle stays
+            // inside one funnel; a later one can leave it.
+            let higher = ridge.as_ref().is_none_or(|(_, _, kept)| rise > *kept);
+            if higher {
+                ridge = Some((cur.clone(), mode.clone(), rise));
                 crossed = true;
             }
             saw_uphill = false;
