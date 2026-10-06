@@ -1456,6 +1456,138 @@ fn climb_relaxed_cover<E, Q>(
     }
 }
 
+fn regularize_pentagons(
+    x: ArrayView1<f64>,
+    axis: [f64; 3],
+    extra: f64,
+    contact: f64,
+) -> Array1<f64> {
+    let n_atoms = x.len() / 3;
+    let mut y = x.to_owned();
+    if n_atoms == 0 {
+        return y;
+    }
+    let mut com = [0.0; 3];
+    for atom in 0..n_atoms {
+        for coord in 0..3 {
+            com[coord] += y[3 * atom + coord];
+        }
+    }
+    for value in &mut com {
+        *value /= n_atoms as f64;
+    }
+    let [ax, ay, az] = axis;
+    let (e1, e2) = plane_basis(axis);
+    let mut rows = Vec::with_capacity(n_atoms);
+    for atom in 0..n_atoms {
+        let r = [
+            y[3 * atom] - com[0],
+            y[3 * atom + 1] - com[1],
+            y[3 * atom + 2] - com[2],
+        ];
+        let height = r[0] * ax + r[1] * ay + r[2] * az;
+        let perp = [r[0] - height * ax, r[1] - height * ay, r[2] - height * az];
+        let rho = (perp[0] * perp[0] + perp[1] * perp[1] + perp[2] * perp[2]).sqrt();
+        let phi = if rho > 1e-8 {
+            let c = (perp[0] * e1[0] + perp[1] * e1[1] + perp[2] * e1[2]) / rho;
+            let s = (perp[0] * e2[0] + perp[1] * e2[1] + perp[2] * e2[2]) / rho;
+            s.atan2(c)
+        } else {
+            0.0
+        };
+        rows.push((height, rho, phi, atom));
+    }
+    let tol = contact * 0.35;
+    let mut used = vec![false; n_atoms];
+    let mut rings = Vec::new();
+    let order: Vec<usize> = (0..n_atoms).collect();
+    for seed in 0..n_atoms {
+        if used[seed] {
+            continue;
+        }
+        let mut ring = vec![seed];
+        used[seed] = true;
+        let mut grew = true;
+        while grew {
+            grew = false;
+            for &other in &order {
+                if used[other] {
+                    continue;
+                }
+                let close = ring.iter().any(|&member| {
+                    let dz = rows[other].0 - rows[member].0;
+                    let dr = rows[other].1 - rows[member].1;
+                    dz * dz + dr * dr <= tol * tol
+                });
+                if close {
+                    used[other] = true;
+                    ring.push(other);
+                    grew = true;
+                }
+            }
+        }
+        rings.push(ring);
+    }
+    rings.sort_by(|left, right| {
+        let z_left = left.iter().map(|&atom| rows[atom].0).sum::<f64>() / left.len() as f64;
+        let z_right = right.iter().map(|&atom| rows[atom].0).sum::<f64>() / right.len() as f64;
+        z_left
+            .partial_cmp(&z_right)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    let turn = 2.0 * std::f64::consts::PI / 5.0;
+    for (layer, ring) in rings.iter().enumerate() {
+        if ring.len() != 5 {
+            continue;
+        }
+        if ring.iter().any(|&atom| rows[atom].1 <= contact * 0.2) {
+            continue;
+        }
+        let mut members = ring.clone();
+        members.sort_by(|&a, &b| {
+            rows[a]
+                .2
+                .partial_cmp(&rows[b].2)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+        let base = rows[members[0]].2 + if layer % 2 == 1 { extra } else { 0.0 };
+        for (slot, &atom) in members.iter().enumerate() {
+            rows[atom].2 = base + turn * slot as f64;
+        }
+    }
+    for (height, rho, phi, atom) in rows {
+        let (sin, cos) = phi.sin_cos();
+        for coord in 0..3 {
+            y[3 * atom + coord] = com[coord]
+                + height * [ax, ay, az][coord]
+                + rho * (cos * e1[coord] + sin * e2[coord]);
+        }
+    }
+    y
+}
+
+fn quench_regular_pentagons<E, Q>(
+    start: ArrayView1<f64>,
+    contact: f64,
+    evaluate: &mut E,
+    quench: &mut Q,
+    best_energy: &mut f64,
+    best: &mut Array1<f64>,
+) where
+    E: FnMut(ArrayView1<f64>) -> (f64, Array1<f64>),
+    Q: FnMut(ArrayView1<f64>) -> Array1<f64>,
+{
+    let stagger = std::f64::consts::PI / 5.0;
+    for axis in outer_axes(start, contact) {
+        for extra in [0.0_f64, stagger] {
+            let turned = regularize_pentagons(start, axis, extra, contact);
+            let held = relax_held_phi(turned.view(), axis, evaluate);
+            let quenched = quench(held.view());
+            let _ = note_exit(evaluate, &quenched, 0, best_energy, best);
+        }
+    }
+}
+
 struct ForceSurface<'a, E> {
     evaluate: std::sync::Mutex<&'a mut E>,
 }
@@ -1516,20 +1648,18 @@ fn ride_lowest_mode<E, Q>(
         (square / n_atoms as f64).sqrt() < contact * 1e-3
     };
     let mut config = PesExplorationConfig::default();
-    config.ride_method = RideMethod::Dimer;
-    // The initial push is one curvature-scale step in 3N. Repeated doubling
-    // reaches a per-atom displacement of one contact.
+    config.ride_method = RideMethod::Lanczos;
+    // The initial push is one curvature-scale step in 3N. Five doublings
+    // stay inside a fraction of a contact, where the soft mode is still defined.
     config.saddle_displacement = contact / (n_atoms as f64).sqrt();
     config.activation_growth = 2.0;
-    // Seven doublings reach about one contact of root-mean-square motion.
-    // An eighth doubling pulls pairs through each other.
-    config.activation_attempts = 7;
+    config.activation_attempts = 5;
+    config.maximum_move = contact * 0.05;
     config.quench_steps = n_atoms.saturating_mul(16).max(64);
     config.saddle_steps = n_atoms.saturating_mul(16).max(64);
     // A residual near 1e-5 is a minimised Lennard-Jones cluster. The
     // tighter library default stops the ride before the saddle search.
     config.quench_gradient_tolerance = 1e-5;
-    config.maximum_move = contact * 0.25;
     let surface = ForceSurface {
         evaluate: std::sync::Mutex::new(evaluate),
     };
@@ -1901,6 +2031,14 @@ where
     }
     let mut shelf: Option<(f64, Array1<f64>)> = None;
     if contact > 0.95 && n_atoms >= 2 {
+        quench_regular_pentagons(
+            origin.view(),
+            contact,
+            &mut evaluate,
+            &mut quench,
+            &mut best_e,
+            &mut best,
+        );
         ride_lowest_mode(
             origin.view(),
             contact,
@@ -2079,6 +2217,14 @@ where
             if !distinct || !compact {
                 continue;
             }
+            quench_regular_pentagons(
+                quenched.view(),
+                contact,
+                &mut evaluate,
+                &mut quench,
+                &mut best_e,
+                &mut best,
+            );
             ride_lowest_mode(
                 quenched.view(),
                 contact,
