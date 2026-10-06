@@ -411,36 +411,60 @@ where
             }
             reach = reach.max(r2.sqrt());
         }
-        let span = reach.max(contact);
+        let _ = reach;
         let mut climb = cfg.clone();
-        // The whole budget walks one cluster radius, as an all-atom RMS.
-        climb.step = span * (n_atoms as f64).sqrt() / climb.max_steps.max(1) as f64;
-        if let Some((lambdas, modes, _)) = crate::curvature::soft_subspace(
-            origin,
-            |point| Some(evaluate(point).1),
-            climb.lanczos_steps.max(2),
-            climb.epsilon,
-            climb.lanczos_steps.saturating_sub(1).max(1),
-        ) {
-            for mode in modes {
-                if let Some(outcome) =
-                    activate_along(origin, mode.view(), |point| Some(evaluate(point).1), &climb)
-                {
-                    let quenched = quench(outcome.state.view());
-                    let (value, _) = evaluate(quenched.view());
-                    if value.is_finite() {
-                        println!(
-                            "{{\"kind\":\"exit_candidate\",\"energy\":{value:.6},\"hop\":0,\"role\":\"quench\"}}"
-                        );
-                        let _ = std::io::stdout().flush();
-                        if value < best_e {
-                            best_e = value;
-                            best = quenched;
-                        }
-                    }
+        // The whole budget walks one contact length, as an all-atom RMS.
+        climb.step = contact * (n_atoms as f64).sqrt() / climb.max_steps.max(1) as f64;
+        let mut here = origin.to_owned();
+        for _generation in 0..climb.lanczos_steps.max(1) {
+            let Some((lambdas, modes, _)) = (crate::curvature::soft_subspace(
+                here.view(),
+                |point| Some(evaluate(point).1),
+                climb.lanczos_steps.max(2),
+                climb.epsilon,
+                1,
+            )) else {
+                break;
+            };
+            let Some(mode) = modes.into_iter().next() else {
+                break;
+            };
+            let _ = lambdas;
+            let mut successor: Option<(f64, Array1<f64>)> = None;
+            for sign in [1.0_f64, -1.0] {
+                let mut directed = mode.clone();
+                if sign < 0.0 {
+                    directed *= -1.0;
+                }
+                let Some(outcome) = activate_along(
+                    here.view(),
+                    directed.view(),
+                    |point| Some(evaluate(point).1),
+                    &climb,
+                ) else {
+                    continue;
+                };
+                let quenched = quench(outcome.state.view());
+                let (value, _) = evaluate(quenched.view());
+                if !value.is_finite() {
+                    continue;
+                }
+                println!(
+                    "{{\"kind\":\"exit_candidate\",\"energy\":{value:.6},\"hop\":0,\"role\":\"quench\"}}"
+                );
+                let _ = std::io::stdout().flush();
+                if value < best_e {
+                    best_e = value;
+                    best = quenched.clone();
+                }
+                if successor.as_ref().is_none_or(|(kept, _)| value < *kept) {
+                    successor = Some((value, quenched));
                 }
             }
-            let _ = lambdas;
+            let Some((_, next)) = successor else {
+                break;
+            };
+            here = next;
         }
     }
     for hop in 0..max_hops {
