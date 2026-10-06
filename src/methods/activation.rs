@@ -50,6 +50,10 @@
 //! sets how far to climb; this module decides when to stop.
 
 use crate::curvature::{curvature_features, project_rigid_with, rigid_basis, soft_subspace};
+use crate::descriptor_space::{DescriptorGeometry, universal_descriptor_space};
+use crate::pes_exploration::{
+    PesExplorationConfig, PesNetwork, PesSurface, RideMethod, discover_cartesian_mode_connection,
+};
 use ndarray::{Array1, ArrayView1};
 use rand::{Rng, SeedableRng};
 use std::io::Write;
@@ -1452,6 +1456,126 @@ fn climb_relaxed_cover<E, Q>(
     }
 }
 
+struct ForceSurface<'a, E> {
+    evaluate: std::sync::Mutex<&'a mut E>,
+}
+
+impl<E> PesSurface for ForceSurface<'_, E>
+where
+    E: FnMut(ArrayView1<f64>) -> (f64, Array1<f64>) + Send,
+{
+    type Error = String;
+
+    fn evaluate(&self, coordinates: ArrayView1<f64>) -> Result<(f64, Array1<f64>), String> {
+        let mut evaluate = self
+            .evaluate
+            .lock()
+            .map_err(|_| "interrupted".to_string())?;
+        let (energy, gradient) = evaluate(coordinates);
+        if energy.is_finite() && gradient.iter().all(|value| value.is_finite()) {
+            Ok((energy, gradient))
+        } else {
+            Err("nonfinite surface value".to_string())
+        }
+    }
+}
+
+fn ride_lowest_mode<E, Q>(
+    start: ArrayView1<f64>,
+    contact: f64,
+    evaluate: &mut E,
+    quench: &mut Q,
+    best_energy: &mut f64,
+    best: &mut Array1<f64>,
+) where
+    E: FnMut(ArrayView1<f64>) -> (f64, Array1<f64>) + Send,
+    Q: FnMut(ArrayView1<f64>) -> Array1<f64>,
+{
+    let n_atoms = start.len() / 3;
+    if n_atoms < 2 || !(contact.is_finite() && contact > 0.0) {
+        return;
+    }
+    let epsilon = 1e-4;
+    let Some(features) = curvature_features(start, |point| Some(evaluate(point).1), 12, epsilon)
+    else {
+        return;
+    };
+    let Ok(geometry) = DescriptorGeometry::finite(contact) else {
+        return;
+    };
+    let descriptor_space = universal_descriptor_space(geometry);
+    let masses = Array1::ones(n_atoms);
+    let frozen = vec![false; n_atoms];
+    let species = vec![1_u32; n_atoms];
+    let witness = |left: ArrayView1<f64>, right: ArrayView1<f64>| {
+        let mut square = 0.0;
+        for (a, b) in left.iter().zip(right.iter()) {
+            let delta = a - b;
+            square += delta * delta;
+        }
+        (square / n_atoms as f64).sqrt() < contact * 1e-3
+    };
+    let mut config = PesExplorationConfig::default();
+    config.ride_method = RideMethod::Dimer;
+    // The initial push is one curvature-scale step in 3N. Repeated doubling
+    // reaches a per-atom displacement of one contact.
+    config.saddle_displacement = contact / (n_atoms as f64).sqrt();
+    config.activation_growth = 2.0;
+    config.activation_attempts = 8;
+    config.quench_steps = n_atoms.saturating_mul(8).max(32);
+    config.saddle_steps = n_atoms.saturating_mul(4).max(32);
+    let surface = ForceSurface {
+        evaluate: std::sync::Mutex::new(evaluate),
+    };
+    for travel in [1.0_f64, -1.0] {
+        let mode = if travel < 0.0 {
+            -features.mode.clone()
+        } else {
+            features.mode.clone()
+        };
+        let mut network = PesNetwork::new();
+        let connection = discover_cartesian_mode_connection(
+            &surface,
+            &descriptor_space,
+            &mut network,
+            start,
+            masses.view(),
+            &frozen,
+            mode.view(),
+            Some(&species),
+            &config,
+            &witness,
+        );
+        match connection {
+            Ok(connection) => {
+                println!(
+                    "{{\"kind\":\"dimer\",\"saddle\":{:.6},\"curvature\":{:.6},\"index\":{}}}",
+                    connection.saddle_energy, connection.curvature, connection.negative_modes
+                );
+                let _ = std::io::stdout().flush();
+                for minimum in network.minima() {
+                    println!(
+                        "{{\"kind\":\"exit_candidate\",\"energy\":{:.6},\"hop\":0,\"role\":\"quench\"}}",
+                        minimum.energy
+                    );
+                    let _ = std::io::stdout().flush();
+                    if minimum.energy < *best_energy {
+                        *best_energy = minimum.energy;
+                        *best = minimum.coordinates.clone();
+                    }
+                }
+            }
+            Err(error) => {
+                let message = error.to_string().replace('"', "'");
+                println!("{{\"kind\":\"dimer\",\"error\":\"{message}\"}}");
+                let _ = std::io::stdout().flush();
+            }
+        }
+    }
+    drop(surface);
+    let _ = quench;
+}
+
 fn climb_outer_axes<E, Q>(
     start: ArrayView1<f64>,
     contact: f64,
@@ -1771,6 +1895,14 @@ where
     }
     let mut shelf: Option<(f64, Array1<f64>)> = None;
     if contact > 0.95 && n_atoms >= 2 {
+        ride_lowest_mode(
+            origin.view(),
+            contact,
+            &mut evaluate,
+            &mut quench,
+            &mut best_e,
+            &mut best,
+        );
         climb_outer_axes(
             origin.view(),
             contact,
