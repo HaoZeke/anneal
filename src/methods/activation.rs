@@ -523,6 +523,38 @@ where
             }
         }
 
+        if cluster && hop % 4 == 0 {
+            if let Some(features) = crate::curvature::curvature_features(
+                here.view(),
+                |point| Some(evaluate(point).1),
+                32,
+                1.0e-4,
+            ) {
+                println!(
+                    "{{\"kind\":\"exit_mode\",\"hop\":{hop},\"lambda\":{:.4},\"participation\":{:.3}}}",
+                    features.lambda_min, features.participation
+                );
+                let atoms = (here.len() / 3) as f64;
+                for delta in [0.15_f64, 0.3, 0.5, 0.8, 1.1, 1.5] {
+                    for sign in [1.0, -1.0] {
+                        let mut displaced = here.clone();
+                        displaced.scaled_add(sign * delta * atoms.sqrt(), &features.mode);
+                        let quenched = quench(displaced.view());
+                        note_candidate(
+                            &quenched,
+                            &mut evaluate,
+                            &mut best,
+                            &mut best_e,
+                            hop,
+                            origin_e,
+                            &mut bank,
+                            &rejected,
+                        );
+                    }
+                }
+            }
+        }
+
         if hop % 8 == 0 {
             for sign in [1.0_f64, -1.0] {
                 if let Some(outcome) = activate(here.view(), |y| Some(evaluate(y).1), cfg, sign)
