@@ -143,6 +143,45 @@ where
     activate_aligned(x, None, &mut grad, cfg, sign)
 }
 
+/// One covering displacement, the minimum-mode climb, then the caller's quench.
+///
+/// The start is only a point and a force. No target energy is read.
+/// `cover_index` selects one point of the hypersphere cover. The climb
+/// walks away from `origin`. The quench is whatever the caller uses for
+/// a local minimisation of the same force.
+pub fn cover_climb_quench<G, Q>(
+    origin: ArrayView1<f64>,
+    rmsd: f64,
+    cover_index: usize,
+    mut grad: G,
+    mut quench: Q,
+    cfg: &Activation,
+) -> Array1<f64>
+where
+    G: FnMut(ArrayView1<f64>) -> Option<Array1<f64>>,
+    Q: FnMut(ArrayView1<f64>) -> Array1<f64>,
+{
+    let n_cover = crate::hypersphere::default_cover_size();
+    let direction = crate::hypersphere::cover_direction(n_cover, origin.len(), cover_index);
+    let placed = crate::hypersphere::place_around(
+        origin.as_slice().unwrap_or(&[]),
+        &direction,
+        rmsd,
+        None,
+    );
+    let start = if placed.len() == origin.len() {
+        Array1::from(placed)
+    } else {
+        origin.to_owned()
+    };
+    let climbed = activate_from_origin(start.view(), origin, &mut grad, cfg);
+    let seed = match climbed {
+        Some(outcome) => outcome.state,
+        None => start,
+    };
+    quench(seed.view())
+}
+
 /// Climb away from `origin`: the first mode is aligned with \(x-x_0\)
 /// so the walk goes up the covering half-space, not back into the well.
 pub fn activate_from_origin<G>(
@@ -372,6 +411,118 @@ mod tests {
             travelled <= bound + 1e-9,
             "moved {travelled:.3} where the caps allow {bound:.3}"
         );
+    }
+
+    fn quench_double_well(
+        w: &Array1<f64>,
+        k: &Array1<f64>,
+        mut x: Array1<f64>,
+    ) -> Array1<f64> {
+        let g = double_well(w, k);
+        for _ in 0..80 {
+            let grad = g(x.view()).unwrap();
+            let n: f64 = grad.iter().map(|z| z * z).sum::<f64>().sqrt();
+            if n < 1e-6 {
+                break;
+            }
+            let step = (0.05_f64).min(0.2 / n);
+            x.scaled_add(-step, &grad);
+        }
+        x
+    }
+
+    #[test]
+    fn cover_climb_quench_on_a_double_well_uses_only_the_force() {
+        let dim = 36;
+        let w = direction(dim);
+        let k = perp_stiffness(dim);
+        let origin = w.clone();
+        let g = double_well(&w, &k);
+        let end = cover_climb_quench(
+            origin.view(),
+            0.2,
+            0,
+            &g,
+            |x| quench_double_well(&w, &k, x.to_owned()),
+            &Activation::default(),
+        );
+        assert_eq!(end.len(), dim);
+        let grad = g(end.view()).unwrap();
+        let n: f64 = grad.iter().map(|z| z * z).sum::<f64>().sqrt();
+        assert!(n < 1e-2, "quench did not reach a stationary point, |g|={n}");
+        assert!(end.iter().all(|v| v.is_finite()));
+    }
+
+    /// Four Lennard-Jones atoms at the tetrahedron. The call is the same
+    /// function as the smooth well: coordinates in, force in, quench in.
+    #[test]
+    fn cover_climb_quench_on_a_lennard_jones_tetrahedron_reads_no_target() {
+        let scale = 2.0_f64.powf(1.0 / 6.0);
+        let raw = [
+            [1.0, 1.0, 1.0],
+            [1.0, -1.0, -1.0],
+            [-1.0, 1.0, -1.0],
+            [-1.0, -1.0, 1.0],
+        ];
+        let mut origin = Array1::zeros(12);
+        for (i, p) in raw.iter().enumerate() {
+            for k in 0..3 {
+                origin[3 * i + k] = p[k] * scale / 3.0_f64.sqrt();
+            }
+        }
+        let lj = |x: ArrayView1<f64>| -> (f64, Array1<f64>) {
+            let n = x.len() / 3;
+            let mut value = 0.0;
+            let mut gradient = Array1::zeros(x.len());
+            for i in 0..n {
+                for j in (i + 1)..n {
+                    let mut d = [0.0; 3];
+                    let mut r2 = 0.0;
+                    for k in 0..3 {
+                        d[k] = x[3 * i + k] - x[3 * j + k];
+                        r2 += d[k] * d[k];
+                    }
+                    let inv2 = 1.0 / r2;
+                    let inv6 = inv2.powi(3);
+                    let inv12 = inv6 * inv6;
+                    value += 4.0 * (inv12 - inv6);
+                    let coefficient = 24.0 * inv2 * (2.0 * inv12 - inv6);
+                    for k in 0..3 {
+                        gradient[3 * i + k] -= coefficient * d[k];
+                        gradient[3 * j + k] += coefficient * d[k];
+                    }
+                }
+            }
+            (value, gradient)
+        };
+        let cfg = Activation {
+            max_steps: 6,
+            lanczos_steps: 8,
+            ..Activation::default()
+        };
+        let end = cover_climb_quench(
+            origin.view(),
+            0.2,
+            0,
+            |x| Some(lj(x).1),
+            |x| {
+                let mut y = x.to_owned();
+                for _ in 0..40 {
+                    let (_, g) = lj(y.view());
+                    let n: f64 = g.iter().map(|z| z * z).sum::<f64>().sqrt();
+                    if n < 1e-4 {
+                        break;
+                    }
+                    let step = (1e-3_f64).min(0.05 / n);
+                    y.scaled_add(-step, &g);
+                }
+                y
+            },
+            &cfg,
+        );
+        let (energy, gradient) = lj(end.view());
+        assert!(energy.is_finite());
+        assert!(gradient.iter().all(|v| v.is_finite()));
     }
 
     /// The property the module exists for. A straight displacement of the same

@@ -76,6 +76,19 @@ pub fn packing_archive() -> Vec<Array1<f64>> {
 /// Leftover RMS below which the hop yields.
 const DEFECT: f64 = 1e-4;
 
+/// First proposal that actually moves, in order.
+///
+/// A closed shell has no leftover direction. The order is one covering
+/// displacement, then the fivefold residual, then the ordinary kick.
+pub fn first_that_moves(origin: ArrayView1<f64>, steps: &[Array1<f64>]) -> Array1<f64> {
+    for step in steps {
+        if displacement_rms(step, origin) > 1e-6 {
+            return step.clone();
+        }
+    }
+    origin.to_owned()
+}
+
 fn displacement_rms(y: &Array1<f64>, x: ArrayView1<f64>) -> f64 {
     let n = (x.len() / 3).max(1) as f64;
     let sum = y
@@ -1080,14 +1093,9 @@ pub fn step_away_featomic<R: Rng + ?Sized>(
         // fivefold residual is the fallback when that placement does
         // not move, and the kick remains only if that residual is flat.
         let covered = leave_archive_hole(x, rcut, species, mobile, rmsd, rng);
-        if displacement_rms(&covered, x) > 1e-6 {
-            return covered;
-        }
         let five = crate::soap::step_away_fivefold_measured(x, rmsd);
-        if displacement_rms(&five, x) > 1e-6 {
-            return five;
-        }
-        return packing_kick(x, &s, rmsd, mobile, rng);
+        let kick = packing_kick(x, &s, rmsd, mobile, rng);
+        return first_that_moves(x, &[covered, five, kick]);
     }
     focus_patch(&mut s, x, rcut, rng);
     let dr = tikhonov(&s.jacobian, s.leftover.view(), LAMBDA);
@@ -1555,6 +1563,39 @@ mod tests {
             distance >= SOAP_PACK_ESCAPE,
             "hole step stopped {distance} from the well it left, inside the escape {SOAP_PACK_ESCAPE}"
         );
+    }
+
+    #[test]
+    fn lj75_closed_shell_proposal_matches_the_covering_point() {
+        let ico75 = load_xyz(include_str!("../tests/fixtures/lj75_ico.xyz"));
+        let mut rng_hop = StdRng::seed_from_u64(7);
+        let hopped = step_away_featomic(ico75.view(), 0.35, 3.5, None, None, &mut rng_hop);
+        let mut rng_cover = StdRng::seed_from_u64(7);
+        let covered = leave_archive_hole(ico75.view(), 3.5, None, None, 0.35, &mut rng_cover);
+        let err: f64 = hopped
+            .iter()
+            .zip(covered.iter())
+            .map(|(a, b)| (a - b).abs())
+            .sum();
+        assert!(
+            err < 1e-6,
+            "closed shell did not propose the covering point, err={err}"
+        );
+    }
+
+    #[test]
+    fn closed_shell_yield_is_cover_then_fivefold_then_kick() {
+        let origin = Array1::zeros(9);
+        let cover = Array1::from(vec![0.4, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]);
+        let five = Array1::from(vec![0.0, 0.5, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]);
+        let kick = Array1::from(vec![0.0, 0.0, 0.6, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]);
+        let first = first_that_moves(origin.view(), &[cover.clone(), five.clone(), kick.clone()]);
+        assert_eq!(first, cover);
+        let flat = origin.clone();
+        let second = first_that_moves(origin.view(), &[flat.clone(), five.clone(), kick.clone()]);
+        assert_eq!(second, five);
+        let third = first_that_moves(origin.view(), &[flat.clone(), flat.clone(), kick.clone()]);
+        assert_eq!(third, kick);
     }
 
     #[test]

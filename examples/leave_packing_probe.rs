@@ -293,6 +293,38 @@ fn main() {
         return;
     }
 
+    // Cover, then the minimum-mode climb, then the same quench.
+    // No target energy is passed in.
+    if std::env::args().nth(3).as_deref() == Some("climb") {
+        let rmsd: f64 = std::env::args()
+            .nth(4)
+            .and_then(|value| value.parse().ok())
+            .unwrap_or(0.7);
+        let n = leaves.min(anneal_core::hypersphere::default_cover_size());
+        let mut climbed = Tally {
+            best: ico_energy,
+            ..Tally::default()
+        };
+        println!(
+            "{{\"kind\":\"climb_setup\",\"n\":{n},\"rmsd\":{rmsd:.3},\"ico\":{ico_energy:.6},\"marks\":{marks_energy:.6}}}"
+        );
+        let cfg = anneal_core::methods::activation::Activation::default();
+        for index in 0..n {
+            let trial = anneal_core::methods::activation::cover_climb_quench(
+                ico.view(),
+                rmsd,
+                index,
+                |v: ArrayView1<f64>| Some(potential.value_and_gradient(v).1),
+                |v: ArrayView1<f64>| quench(&potential, v, steps),
+                &cfg,
+            );
+            classify("climb", index, &mut climbed, &trial, None);
+            let _ = std::io::Write::flush(&mut std::io::stdout());
+        }
+        report("climb", &climbed, n);
+        return;
+    }
+
     if only_ridge {
         // Directed packing-map walk: 96 covering points on the packing
         // sphere miss Marks. This arm aims at Marks' mu, then at the

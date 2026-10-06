@@ -1,0 +1,28 @@
+#!/bin/bash
+#SBATCH --job-name=lj75-floor-exit
+#SBATCH --partition=s-normal
+#SBATCH --account=chem-ui
+#SBATCH --nodes=1
+#SBATCH --exclusive
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=8
+#SBATCH --mem=16G
+#SBATCH --time=04:00:00
+#SBATCH --output=floor-exit-%j.out
+# One exclusive job. Cover, minimum-mode climb, quench, from the
+# quenched LJ75 icosahedron. Work stays on the node scratch disk.
+set -euo pipefail
+SCRATCH=/scratch/users/${USER}/${SLURM_JOB_ID}
+mkdir -p "$SCRATCH"
+df -PT "$SCRATCH" | awk 'NR==2 { if ($2 ~ /^nfs/) { print "scratch is nfs" > "/dev/stderr"; exit 1 } }'
+case "$SCRATCH" in
+  /users/home/*) echo "work directory is the home filer" >&2; exit 1 ;;
+esac
+export UV_CACHE_DIR=$SCRATCH/uv-cache
+mkdir -p "$UV_CACHE_DIR"
+git clone --depth 1 --branch main https://github.com/HaoZeke/anneal.git "$SCRATCH/src"
+export LJ_ROOT=$SCRATCH/src
+bash "$LJ_ROOT/scripts/elja_build_lj.sh"
+PROBE=$LJ_ROOT/target/release/examples/leave_packing_probe
+test -x "$PROBE"
+"$PROBE" 96 600 climb 0.7

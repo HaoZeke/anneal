@@ -190,6 +190,10 @@ name = "decaf_local_classes"
 required-features = ["bank-rpc"]
 
 [[example]]
+name = "leave_packing_probe"
+required-features = ["featomic"]
+
+[[example]]
 name = "occupancy_landfold_book"
 required-features = ["featomic"]
 
