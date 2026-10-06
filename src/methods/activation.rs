@@ -692,7 +692,7 @@ where
             let dt = 0.003;
             let mut best_pack = base_pack;
             let mut quenched_peak = false;
-            for step in 0..2_500 {
+            for step in 0..8_000 {
                 let (energy, force) = evaluate(point.view());
                 if !energy.is_finite() || energy > origin_e + 120.0 {
                     break;
