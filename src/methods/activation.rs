@@ -916,6 +916,86 @@ fn note_shelf(
     }
 }
 
+fn climb_relaxed_cover<E, Q>(
+    start: ArrayView1<f64>,
+    direction: &[f64],
+    hop: usize,
+    evaluate: &mut E,
+    quench: &mut Q,
+    cfg: &Activation,
+    best_energy: &mut f64,
+    best: &mut Array1<f64>,
+    origin_energy: f64,
+    reach: f64,
+    contact: f64,
+    shelf: &mut Option<(f64, Array1<f64>)>,
+) where
+    E: FnMut(ArrayView1<f64>) -> (f64, Array1<f64>),
+    Q: FnMut(ArrayView1<f64>) -> Array1<f64>,
+{
+    let n_atoms = start.len() / 3;
+    if n_atoms < 2 || direction.len() != start.len() || !(contact.is_finite() && contact > 0.0) {
+        return;
+    }
+    let placed =
+        crate::hypersphere::place_around(start.as_slice().unwrap_or(&[]), direction, contact, None);
+    if placed.len() != start.len() {
+        return;
+    }
+    let mut placed = Array1::from(placed);
+    let mut mode = Array1::zeros(start.len());
+    for (component, (there, here)) in mode.iter_mut().zip(placed.iter().zip(start.iter())) {
+        *component = there - here;
+    }
+    if !renormalize_mode(&mut mode, placed.view()) {
+        return;
+    }
+    let axial = axial_projection(placed.view(), start, mode.view());
+    let trust = contact * (n_atoms as f64).sqrt();
+    let mut relax_cfg = cfg.clone();
+    relax_cfg.perp_steps = n_atoms.max(cfg.perp_steps);
+    let snapshot = placed.clone();
+    if !relax_pinned(
+        &mut placed,
+        start,
+        &mode,
+        axial,
+        trust,
+        contact,
+        evaluate,
+        &relax_cfg,
+    ) {
+        placed = snapshot;
+    }
+    if placed.iter().any(|value| !value.is_finite()) {
+        return;
+    }
+    let quenched = quench(placed.view());
+    if let Some(value) = note_exit(evaluate, &quenched, hop, best_energy, best) {
+        note_shelf(shelf, value, &quenched, origin_energy, reach, contact);
+    }
+    let ridge = climb_cover(placed.view(), mode.view(), 1.0, false, evaluate, cfg);
+    println!(
+        "{{\"kind\":\"climb\",\"hop\":{hop},\"axis\":\"relaxed\",\"travel\":1,\"crossed\":{},\"lambda\":{:.6},\"lowest\":{:.6},\"steps\":{},\"axial\":{:.4},\"landings\":{}}}",
+        ridge.crossed,
+        ridge.lambda,
+        ridge.lowest,
+        ridge.steps,
+        ridge.axial,
+        ridge.landings.len()
+    );
+    let _ = std::io::stdout().flush();
+    for landing in &ridge.landings {
+        if landing.iter().any(|value| !value.is_finite()) {
+            continue;
+        }
+        let quenched = quench(landing.view());
+        if let Some(value) = note_exit(evaluate, &quenched, hop, best_energy, best) {
+            note_shelf(shelf, value, &quenched, origin_energy, reach, contact);
+        }
+    }
+}
+
 fn climb_directions<E, Q>(
     start: ArrayView1<f64>,
     direction: &[f64],
@@ -1003,6 +1083,35 @@ fn climb_directions<E, Q>(
             }
         }
     }
+    climb_relaxed_cover(
+        start,
+        direction,
+        hop,
+        evaluate,
+        quench,
+        cfg,
+        best_energy,
+        best,
+        origin_energy,
+        reach,
+        contact,
+        shelf,
+    );
+    let flipped: Vec<f64> = direction.iter().copied().map(|value| -value).collect();
+    climb_relaxed_cover(
+        start,
+        &flipped,
+        hop,
+        evaluate,
+        quench,
+        cfg,
+        best_energy,
+        best,
+        origin_energy,
+        reach,
+        contact,
+        shelf,
+    );
 }
 
 fn note_exit<E>(
