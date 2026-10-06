@@ -140,7 +140,7 @@ pub fn activate<G>(
 where
     G: FnMut(ArrayView1<f64>) -> Option<Array1<f64>>,
 {
-    activate_aligned(x, None, &mut grad, cfg, sign)
+    activate_aligned(x, None, None, &mut grad, cfg, sign)
 }
 
 /// One covering displacement, the minimum-mode climb, then the caller's quench.
@@ -178,12 +178,33 @@ where
     } else {
         origin.to_owned()
     };
-    let climbed = activate_from_origin(start.view(), origin, &mut grad, cfg);
+    let mut direction_step = Array1::zeros(origin.len());
+    for i in 0..origin.len() {
+        direction_step[i] = start[i] - origin[i];
+    }
+    let climbed = activate_along(start.view(), direction_step.view(), &mut grad, cfg);
     let seed = match climbed {
         Some(outcome) => outcome.state,
         None => start,
     };
     quench(seed.view())
+}
+
+/// Climb along `direction` first, then track the minimum mode.
+///
+/// The first steps follow the supplied vector. Later steps replace it
+/// with the softest mode, keeping the sense of travel. `direction` is
+/// what selects the half-space; the mode is what the ridge becomes.
+pub fn activate_along<G>(
+    x: ArrayView1<f64>,
+    direction: ArrayView1<f64>,
+    mut grad: G,
+    cfg: &Activation,
+) -> Option<ActivationOutcome>
+where
+    G: FnMut(ArrayView1<f64>) -> Option<Array1<f64>>,
+{
+    activate_aligned(x, None, Some(direction), &mut grad, cfg, 1.0)
 }
 
 /// Climb away from `origin`: the first mode is aligned with \(x-x_0\)
@@ -197,12 +218,13 @@ pub fn activate_from_origin<G>(
 where
     G: FnMut(ArrayView1<f64>) -> Option<Array1<f64>>,
 {
-    activate_aligned(x, Some(origin), &mut grad, cfg, 1.0)
+    activate_aligned(x, Some(origin), None, &mut grad, cfg, 1.0)
 }
 
 fn activate_aligned<G>(
     x: ArrayView1<f64>,
     origin: Option<ArrayView1<f64>>,
+    initial_direction: Option<ArrayView1<f64>>,
     grad: &mut G,
     cfg: &Activation,
     sign0: f64,
@@ -223,8 +245,20 @@ where
         cfg.lanczos_steps,
         cfg.epsilon,
     )?;
-    let mut mode = first.mode.clone();
-    let mut lambda = first.lambda_min;
+    let (mut mode, mut lambda) = if let Some(direction) = initial_direction {
+        let n: f64 = direction.iter().map(|z| z * z).sum::<f64>().sqrt();
+        if n < 1e-15 {
+            (first.mode.clone(), first.lambda_min)
+        } else {
+            // Positive so the first steps cannot look like a crossed ridge
+            // before the mode has been recomputed.
+            let mut unit = direction.to_owned();
+            unit /= n;
+            (unit, 1.0)
+        }
+    } else {
+        (first.mode.clone(), first.lambda_min)
+    };
     let sign = if let Some(origin) = origin {
         let align: f64 = mode
             .iter()

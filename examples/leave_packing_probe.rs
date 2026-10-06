@@ -308,7 +308,10 @@ fn main() {
         println!(
             "{{\"kind\":\"climb_setup\",\"n\":{n},\"rmsd\":{rmsd:.3},\"ico\":{ico_energy:.6},\"marks\":{marks_energy:.6}}}"
         );
-        let cfg = anneal_core::methods::activation::Activation::default();
+        let cfg = anneal_core::methods::activation::Activation {
+            max_steps: 48,
+            ..anneal_core::methods::activation::Activation::default()
+        };
         for index in 0..n {
             let trial = anneal_core::methods::activation::cover_climb_quench(
                 ico.view(),
