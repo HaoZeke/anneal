@@ -310,6 +310,128 @@ fn basin_key(energy: f64) -> i64 {
     (energy / 5.0e-3).round() as i64
 }
 
+fn atom_at(x: ArrayView1<f64>, i: usize) -> [f64; 3] {
+    [x[3 * i], x[3 * i + 1], x[3 * i + 2]]
+}
+
+fn sub3(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
+    [a[0] - b[0], a[1] - b[1], a[2] - b[2]]
+}
+
+fn dot3(a: [f64; 3], b: [f64; 3]) -> f64 {
+    a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
+}
+
+fn cross3(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
+    [
+        a[1] * b[2] - a[2] * b[1],
+        a[2] * b[0] - a[0] * b[2],
+        a[0] * b[1] - a[1] * b[0],
+    ]
+}
+
+fn len3(a: [f64; 3]) -> f64 {
+    dot3(a, a).sqrt()
+}
+
+/// Surface hops: move one outer atom onto a tetrahedral site of a facet.
+///
+/// An all-atom displacement of a deep minimum falls back into that
+/// minimum. A facet hop changes which hollow a surface atom occupies.
+/// The centre-of-mass vacancy, when the innermost atom is not already
+/// there, is filled by that atom as one extra trial. No target
+/// geometry is used.
+fn facet_trials(origin: ArrayView1<f64>, limit: usize) -> Vec<Array1<f64>> {
+    let n = origin.len() / 3;
+    if n < 4 || limit == 0 {
+        return Vec::new();
+    }
+    let mut com = [0.0; 3];
+    for i in 0..n {
+        let a = atom_at(origin, i);
+        for k in 0..3 {
+            com[k] += a[k];
+        }
+    }
+    for value in &mut com {
+        *value /= n as f64;
+    }
+    let mut radial = Vec::with_capacity(n);
+    for i in 0..n {
+        radial.push((len3(sub3(atom_at(origin, i), com)), i));
+    }
+    radial.sort_by(|left, right| {
+        left.0
+            .partial_cmp(&right.0)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    let mut trials = Vec::new();
+    if radial[0].0 > 0.2 {
+        let mut filled = origin.to_owned();
+        let i = radial[0].1;
+        for k in 0..3 {
+            filled[3 * i + k] = com[k];
+        }
+        trials.push(filled);
+    }
+    let req = 2.0_f64.powf(1.0 / 6.0);
+    let cutoff = 1.35 * req;
+    let cutoff2 = cutoff * cutoff;
+    let mut faces = 0usize;
+    'bonds: for i in 0..n {
+        for j in (i + 1)..n {
+            if len3(sub3(atom_at(origin, i), atom_at(origin, j))).powi(2) > cutoff2 {
+                continue;
+            }
+            for k in (j + 1)..n {
+                if trials.len() >= limit {
+                    break 'bonds;
+                }
+                let jk = len3(sub3(atom_at(origin, j), atom_at(origin, k))).powi(2);
+                let ik = len3(sub3(atom_at(origin, i), atom_at(origin, k))).powi(2);
+                if jk > cutoff2 || ik > cutoff2 {
+                    continue;
+                }
+                let a = atom_at(origin, i);
+                let b = atom_at(origin, j);
+                let c = atom_at(origin, k);
+                let centroid = [
+                    (a[0] + b[0] + c[0]) / 3.0,
+                    (a[1] + b[1] + c[1]) / 3.0,
+                    (a[2] + b[2] + c[2]) / 3.0,
+                ];
+                let normal = cross3(sub3(b, a), sub3(c, a));
+                let length = len3(normal);
+                if length < 1.0e-8 {
+                    continue;
+                }
+                let mut hat = [normal[0] / length, normal[1] / length, normal[2] / length];
+                if dot3(hat, sub3(centroid, com)) < 0.0 {
+                    hat = [-hat[0], -hat[1], -hat[2]];
+                }
+                let reach = len3(sub3(a, centroid));
+                let height = (req * req - reach * reach).max(0.05).sqrt();
+                let site = [
+                    centroid[0] + hat[0] * height,
+                    centroid[1] + hat[1] * height,
+                    centroid[2] + hat[2] * height,
+                ];
+                let mover = radial[n - 1 - (faces % 3)].1;
+                if mover == i || mover == j || mover == k {
+                    continue;
+                }
+                let mut moved = origin.to_owned();
+                for axis in 0..3 {
+                    moved[3 * mover + axis] = site[axis];
+                }
+                trials.push(moved);
+                faces += 1;
+            }
+        }
+    }
+    trials
+}
+
 fn note_candidate<E>(
     proposal: &Array1<f64>,
     evaluate: &mut E,
@@ -431,45 +553,49 @@ where
         "{{\"kind\":\"exit_candidate\",\"energy\":{origin_e:.6},\"hop\":0,\"role\":\"start\"}}"
     );
 
-    // Ordinary basin hopping. A fixed lid, not a shrinking threshold:
-    // the walk has to be able to leave the bottom of a funnel.
-    let mut walker = origin.to_owned();
-    let mut walker_e = origin_e;
-    for hop in 0..max_hops {
+    // Facet hops, not an all-atom amplitude. Each round leaves from the
+    // lowest new basin found so far, then from the original minimum.
+    let rounds = max_hops.clamp(1, 6);
+    let mut launch = origin.to_owned();
+    for round in 0..rounds {
         if best_e < origin_e - 0.05 {
             return best;
         }
-        let amplitude = [0.36_f64, 0.70, 1.15][hop % 3];
-        let mut trial = walker.clone();
-        for value in trial.iter_mut() {
-            *value += amplitude * (2.0 * rng.random::<f64>() - 1.0);
-        }
-        let quenched = quench(trial.view());
-        note_candidate(
-            &quenched,
-            &mut evaluate,
-            &mut best,
-            &mut best_e,
-            hop,
-            origin_e,
-            &mut bank,
-            &rejected,
-        );
-        let (value, _) = evaluate(quenched.view());
-        let rise = value - walker_e;
-        if value.is_finite()
-            && value <= origin_e + 5.0
-            && (rise <= 0.0 || rng.random::<f64>() < (-rise / 0.8).exp())
-        {
-            walker = quenched;
-            walker_e = value;
-        }
-        if hop.is_multiple_of(200) {
-            println!(
-                "{{\"kind\":\"exit_hop\",\"hop\":{hop},\"here\":{walker_e:.6},\"best\":{best_e:.6},\"phase\":\"basin\"}}"
+        println!("{{\"kind\":\"exit_move\",\"move\":\"facet\",\"round\":{round}}}");
+        let trials = facet_trials(launch.view(), 48);
+        for trial in trials {
+            let quenched = quench(trial.view());
+            note_candidate(
+                &quenched,
+                &mut evaluate,
+                &mut best,
+                &mut best_e,
+                round,
+                origin_e,
+                &mut bank,
+                &rejected,
             );
-            let _ = std::io::stdout().flush();
+            if best_e < origin_e - 0.05 {
+                println!(
+                    "{{\"kind\":\"exit_hop\",\"hop\":{round},\"here\":{best_e:.6},\"best\":{best_e:.6},\"phase\":\"facet\",\"left\":true}}"
+                );
+                let _ = std::io::stdout().flush();
+                return best;
+            }
         }
+        if let Some((energy, state)) = bank.iter().flatten().min_by(|left, right| {
+            left.0
+                .partial_cmp(&right.0)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        }) {
+            launch = state.clone();
+            here = state.clone();
+            here_e = *energy;
+        }
+        println!(
+            "{{\"kind\":\"exit_hop\",\"hop\":{round},\"here\":{here_e:.6},\"best\":{best_e:.6},\"phase\":\"facet\"}}"
+        );
+        let _ = std::io::stdout().flush();
     }
     if best_e < origin_e - 0.05 {
         return best;
