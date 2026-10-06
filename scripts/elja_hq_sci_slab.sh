@@ -2,6 +2,9 @@
 # FCC Cu(100) slab + H2 through in-process rgpot CuH2 EAM. Not potserv.
 # 128 Cu frozen, 2 H free (PotBench geometry). Not cuh2_tiny.
 set -euo pipefail
+echo "refusing HyperQueue submit: the work directory would be the home filer." >&2
+echo "scripts/elja_hq_pilot.sh is one Slurm allocation; each task uses /scratch/users." >&2
+exit 2
 ROOT=${LJ_ROOT:-$HOME/anneal-build}
 RGPOT=${RGPOT_ROOT:-$HOME/rgpot}
 BASE=${SLAB_OUT:-$HOME/ljwork/hq-sci-cuh2}

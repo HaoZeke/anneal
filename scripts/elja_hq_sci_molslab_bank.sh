@@ -11,6 +11,9 @@
 #
 # Does not cancel running HQ jobs.
 set -euo pipefail
+echo "refusing HyperQueue submit: the work directory would be the home filer." >&2
+echo "scripts/elja_hq_pilot.sh is one Slurm allocation; each task uses /scratch/users." >&2
+exit 2
 ROOT=${LJ_ROOT:-$HOME/anneal-build}
 RGPOT=${RGPOT_ROOT:-$HOME/rgpot}
 MOL=${MOL_BIN:-$ROOT/target/release/examples/molecular_cluster}

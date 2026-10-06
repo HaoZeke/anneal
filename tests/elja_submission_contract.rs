@@ -952,3 +952,58 @@ fn elja_jobs_use_the_node_scratch_disk() {
         "the profile must name the node scratch disk"
     );
 }
+
+#[test]
+fn elja_hyperqueue_is_one_allocation_on_node_scratch() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let pilot = fs::read_to_string(root.join("scripts/elja_hq_pilot.sh"))
+        .unwrap_or_else(|error| panic!("failed to read pilot: {error}"));
+    for required in [
+        "--max-worker-count 1",
+        "--exclusive",
+        "--no-dry-run",
+        "--no-hyper-threading",
+        "/scratch/users/$USER/hq",
+        "elja_hq_one.sh",
+    ] {
+        assert!(
+            pilot.contains(required),
+            "pilot missing {required}"
+        );
+    }
+    assert!(
+        !pilot.contains("--cwd"),
+        "the pilot must not set a HyperQueue work directory on the filer"
+    );
+    let one = fs::read_to_string(root.join("scripts/elja_hq_one.sh"))
+        .unwrap_or_else(|error| panic!("failed to read task: {error}"));
+    assert!(
+        one.contains("elja_enter_scratch") && one.contains("elja_publish"),
+        "a task runs on the node scratch disk and copies one log back"
+    );
+    for script in [
+        "elja_hq_sci_rec.sh",
+        "elja_hq_sci_bank.sh",
+        "elja_hq_sci_escape.sh",
+        "elja_hq_sci_feat.sh",
+        "elja_hq_sci_mol.sh",
+        "elja_hq_sci_molslab_bank.sh",
+        "elja_hq_sci_pack.sh",
+        "elja_hq_sci_sb.sh",
+        "elja_hq_sci_slab.sh",
+        "elja_hq_sci_bankrpc.sh",
+    ] {
+        let source = fs::read_to_string(root.join("scripts").join(script))
+            .unwrap_or_else(|error| panic!("failed to read {script}: {error}"));
+        let refuse = source
+            .find("exit 2")
+            .unwrap_or_else(|| panic!("{script} must refuse"));
+        let submit = source
+            .find("hq submit")
+            .unwrap_or_else(|| panic!("{script} should keep the old submit after the refusal"));
+        assert!(
+            refuse < submit,
+            "{script} must exit before hq submit"
+        );
+    }
+}
