@@ -184,6 +184,10 @@ where
     if let Some(outcome) = activate_along(origin.view(), direction.view(), &mut grad, cfg)
         && outcome.crossed
     {
+        println!(
+            "{{\"kind\":\"exit_ridge\",\"steps\":{},\"lambda\":{:.4}}}",
+            outcome.steps, outcome.lambda
+        );
         return quench(outcome.state.view());
     }
     let start = if placed.len() == origin.len() {
@@ -442,6 +446,15 @@ where
     // A pair closer than half the contact distance of the start is inside
     // the core. The threshold is that distance, not a fixed length.
     let clash = contact * 0.5;
+    let n_atoms = (dim / 3).max(1) as f64;
+    // Perpendicular relaxation may move by one contact length, as an
+    // all-atom RMS, or it cannot steer around a neighbour. The absolute
+    // cap stays in force for a system that is not a cluster.
+    let perp_cap = if cluster {
+        contact * n_atoms.sqrt()
+    } else {
+        cfg.perp_max_move
+    };
     let mut evaluations = 0usize;
 
     let first = curvature_features(
@@ -488,11 +501,15 @@ where
     // flips, then take the minimum mode. Replacing it on the first refresh
     // walks the softest well of the minimum the cover was meant to leave.
     let mut hold_direction = initial_direction.is_some();
+    let mut along_scale = 1.0;
 
-    for k in 0..cfg.max_steps {
+    'climb: while steps < cfg.max_steps {
+        if cfg.step * along_scale <= cfg.epsilon {
+            break;
+        }
         // Refresh the direction on schedule, and always after the curvature has
         // already been seen to fall, since that is where it rotates fastest.
-        if k > 0 && k % cfg.refresh == 0 && !hold_direction {
+        if steps > 0 && steps % cfg.refresh == 0 && !hold_direction {
             match curvature_features(
                 cur.view(),
                 |y| {
@@ -512,10 +529,11 @@ where
                 None => break,
             }
         }
+        let stride = cfg.step * along_scale;
+        let snapshot = cur.clone();
         for i in 0..dim {
-            cur[i] += sign * cfg.step * mode[i];
+            cur[i] += sign * stride * mode[i];
         }
-        steps += 1;
 
         // Perpendicular relaxation. Sliding down the component of the gradient
         // orthogonal to the mode keeps the structure on the valley floor; the
@@ -530,13 +548,8 @@ where
                     g
                 }
                 None => {
-                    return Some(ActivationOutcome {
-                        state: cur,
-                        lambda,
-                        steps,
-                        crossed,
-                        evaluations,
-                    });
+                    cur.clone_from(&snapshot);
+                    break 'climb;
                 }
             };
             gnorm = g.iter().map(|z| z * z).sum::<f64>().sqrt();
@@ -546,8 +559,8 @@ where
                 d[i] = cfg.perp_rate * (g[i] - along * mode[i]);
             }
             let n: f64 = d.iter().map(|z| z * z).sum::<f64>().sqrt();
-            let scale = if n > cfg.perp_max_move && n > 0.0 {
-                cfg.perp_max_move / n
+            let scale = if n > perp_cap && n > 0.0 {
+                perp_cap / n
             } else {
                 1.0
             };
@@ -557,15 +570,15 @@ where
         }
 
         // A pair inside half the starting contact distance is a clash.
-        // Stepping back keeps the last intact structure. A ridge already
-        // crossed stays the place the quench will leave from.
+        // Restore the last intact structure and halve the step. A ridge
+        // already crossed stays the place the quench will leave from.
         let crowded = cluster && closest_pair(cur.view()) < clash;
         if !gnorm.is_finite() || crowded {
-            for i in 0..dim {
-                cur[i] -= sign * cfg.step * mode[i];
-            }
-            break;
+            cur.clone_from(&snapshot);
+            along_scale *= 0.5;
+            continue;
         }
+        steps += 1;
 
         // A ridge is a force flip at negative curvature. The highest such
         // ridge on the climb is the one the quench leaves from.
@@ -580,7 +593,7 @@ where
         // sign: uphill while `sign * g . v > 0`, downhill after. Combined with
         // negative curvature that is the ridge, and past it a quench falls the
         // other way.
-        rise += along * sign * cfg.step;
+        rise += along * sign * stride;
         let climbing = sign * along > 0.0;
         if climbing {
             saw_uphill = true;
