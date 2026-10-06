@@ -372,6 +372,126 @@ fn core_fills(origin: ArrayView1<f64>) -> Vec<Array1<f64>> {
 /// loses the others. The factors change only the component parallel to
 /// the axis, or that component together with the perpendicular part so
 /// the volume stays put. The quench decides which packing results.
+fn plane_basis(hat: [f64; 3]) -> ([f64; 3], [f64; 3]) {
+    let aux = if hat[0].abs() < 0.9 {
+        [1.0, 0.0, 0.0]
+    } else {
+        [0.0, 1.0, 0.0]
+    };
+    let crossed = cross3(hat, aux);
+    let length = len3(crossed).max(1.0e-12);
+    let u = [
+        crossed[0] / length,
+        crossed[1] / length,
+        crossed[2] / length,
+    ];
+    let v = cross3(hat, u);
+    (u, v)
+}
+
+/// Stretch along one fivefold axis, then relax with an angular restraint
+/// that keeps that axis and forgets the others. The final quench uses
+/// only the physical force.
+fn restrained_fivefold<E>(origin: ArrayView1<f64>, evaluate: &mut E) -> Vec<Array1<f64>>
+where
+    E: FnMut(ArrayView1<f64>) -> (f64, Array1<f64>),
+{
+    let n = origin.len() / 3;
+    if n < 7 {
+        return Vec::new();
+    }
+    let mut com = [0.0; 3];
+    for i in 0..n {
+        let atom = atom_at(origin, i);
+        for axis in 0..3 {
+            com[axis] += atom[axis];
+        }
+    }
+    for value in &mut com {
+        *value /= n as f64;
+    }
+    let mut hat = [0.0_f64, 0.0, 1.0];
+    if let Some((raw, _)) = crate::soap::fivefold_axis_table(origin).into_iter().next() {
+        let length = len3(raw);
+        if length > 1.0e-8 {
+            hat = [raw[0] / length, raw[1] / length, raw[2] / length];
+        }
+    }
+    let (u, v) = plane_basis(hat);
+    let mut out = Vec::new();
+    for (stretch, kappa) in [(1.25_f64, 8.0), (1.45, 20.0), (0.8, 12.0)] {
+        let mut point = origin.to_owned();
+        for i in 0..n {
+            let rel = sub3(atom_at(origin, i), com);
+            let along = dot3(rel, hat);
+            for axis in 0..3 {
+                let radial = rel[axis] - hat[axis] * along;
+                point[3 * i + axis] = com[axis] + hat[axis] * along * stretch + radial;
+            }
+        }
+        let mut step = 0.002_f64;
+        for _ in 0..80 {
+            let (energy, mut force) = evaluate(point.view());
+            if !energy.is_finite() {
+                break;
+            }
+            for i in 0..n {
+                let rel = sub3(atom_at(point.view(), i), com);
+                let along = dot3(rel, hat);
+                let radial = [
+                    rel[0] - hat[0] * along,
+                    rel[1] - hat[1] * along,
+                    rel[2] - hat[2] * along,
+                ];
+                let radius = len3(radial);
+                if radius < 0.35 {
+                    continue;
+                }
+                let phi = dot3(radial, v).atan2(dot3(radial, u));
+                let sector = 2.0 * std::f64::consts::PI / 5.0;
+                let target = (phi / sector).round() * sector;
+                let mut delta = phi - target;
+                if delta > std::f64::consts::PI {
+                    delta -= 2.0 * std::f64::consts::PI;
+                } else if delta < -std::f64::consts::PI {
+                    delta += 2.0 * std::f64::consts::PI;
+                }
+                let tangent = [
+                    radius * (-phi.sin() * u[0] + phi.cos() * v[0]),
+                    radius * (-phi.sin() * u[1] + phi.cos() * v[1]),
+                    radius * (-phi.sin() * u[2] + phi.cos() * v[2]),
+                ];
+                let scale = kappa * delta / radius.max(1.0e-8);
+                for axis in 0..3 {
+                    force[3 * i + axis] += scale * tangent[axis] / radius.max(1.0e-8);
+                }
+            }
+            let total = energy + restraint;
+            let mut trial_step = step;
+            let mut moved = false;
+            for _attempt in 0..6 {
+                let mut trial = point.clone();
+                for (coord, component) in trial.iter_mut().zip(force.iter()) {
+                    *coord -= trial_step * component;
+                }
+                let (next_e, _) = evaluate(trial.view());
+                if next_e.is_finite() && next_e < energy + 0.5 {
+                    point = trial;
+                    step = (trial_step * 1.2).min(0.02);
+                    moved = true;
+                    break;
+                }
+                trial_step *= 0.5;
+            }
+            if !moved {
+                break;
+            }
+        }
+        out.push(point);
+    }
+    out
+}
+
 fn project_fivefold(origin: ArrayView1<f64>) -> Option<(usize, usize, Vec<f64>)> {
     let n = origin.len() / 3;
     if n < 6 {
@@ -1057,6 +1177,27 @@ where
     // from the floor never visits. No named target energy is used.
     if cluster {
         let n_atoms = origin.len() / 3;
+        println!("{{\"kind\":\"exit_move\",\"move\":\"restrain\"}}");
+        for trial in restrained_fivefold(origin, &mut evaluate) {
+            let quenched = quench(trial.view());
+            note_candidate(
+                &quenched,
+                &mut evaluate,
+                &mut best,
+                &mut best_e,
+                0,
+                origin_e,
+                &mut bank,
+                &rejected,
+            );
+            if best_e < origin_e - 0.05 {
+                println!(
+                    "{{\"kind\":\"exit_hop\",\"hop\":0,\"here\":{best_e:.6},\"best\":{best_e:.6},\"phase\":\"restrain\",\"left\":true}}"
+                );
+                let _ = std::io::stdout().flush();
+                return best;
+            }
+        }
         println!("{{\"kind\":\"exit_move\",\"move\":\"hop\"}}");
         let mut feedback = EscapeFeedback::new(4.0, 4.0);
         feedback.escape_ceiling = 80.0;
