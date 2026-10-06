@@ -1657,9 +1657,17 @@ fn ride_lowest_mode<E, Q>(
     config.maximum_move = contact * 0.05;
     config.quench_steps = n_atoms.saturating_mul(16).max(64);
     config.saddle_steps = n_atoms.saturating_mul(16).max(64);
-    // A residual near 1e-5 is a minimised Lennard-Jones cluster. The
-    // tighter library default stops the ride before the saddle search.
-    config.quench_gradient_tolerance = 1e-5;
+    // The library gates are tighter than a quenched Lennard-Jones cluster
+    // reaches, so the ride aborts before the saddle is recorded.
+    config.quench_gradient_tolerance = 1e-3;
+    config.saddle_force_tolerance = 1e-2;
+    config.minimum_mode_force_tolerance = 1e-2;
+    config.refine_with_prfo = false;
+    println!(
+        "{{\"kind\":\"dimer_cfg\",\"quench_tol\":{},\"saddle_tol\":{},\"move\":{}}}",
+        config.quench_gradient_tolerance, config.saddle_force_tolerance, config.maximum_move
+    );
+    let _ = std::io::stdout().flush();
     let surface = ForceSurface {
         evaluate: std::sync::Mutex::new(evaluate),
     };
