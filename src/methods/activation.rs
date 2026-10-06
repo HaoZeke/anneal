@@ -1663,11 +1663,12 @@ fn ride_lowest_mode<E, Q>(
     config.saddle_force_tolerance = 1e-2;
     config.minimum_mode_force_tolerance = 1e-2;
     config.refine_with_prfo = false;
-    // The library shrinks the IRC launch once per extra branch attempt.
-    // One attempt keeps a launch of half a contact, large enough that the
-    // two downhill quenches need not fall back into the same well.
+    // Extra branch attempts shrink the launch, and hundreds of IRC steps
+    // at a large launch tear the cluster apart. One step of a quarter of
+    // a contact, then the quench, is the downhill branch.
     config.branch_attempts = 1;
-    config.irc_step = 0.5 * contact * (n_atoms as f64).sqrt();
+    config.irc_steps = 1;
+    config.irc_step = 0.25 * contact * (n_atoms as f64).sqrt();
     println!(
         "{{\"kind\":\"dimer_cfg\",\"quench_tol\":{},\"saddle_tol\":{},\"move\":{}}}",
         config.quench_gradient_tolerance, config.saddle_force_tolerance, config.maximum_move
