@@ -2,6 +2,9 @@
 # Production of the packing-mean SOAP hop (Config::recommended).
 # Paper budgets. Does not cancel any running HQ job.
 set -euo pipefail
+echo "refusing HyperQueue submit: the work directory would be the home filer." >&2
+echo "scripts/elja_hq_pilot.sh is one Slurm allocation; each task uses /scratch/users." >&2
+exit 2
 ROOT=${LJ_ROOT:-$HOME/anneal-build}
 OUT=${LJ_OUT:-$HOME/ljwork/hq-sci-pack}
 ONE=$ROOT/scripts/elja_hq_one.sh

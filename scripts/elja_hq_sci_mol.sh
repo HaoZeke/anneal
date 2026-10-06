@@ -2,6 +2,9 @@
 # Paper water budgets through in-process rgpot GFN2-xTB. Not potserv.
 # (H2O)4 at 2500 x 8; (H2O)6 at 4000 x 8. Does not cancel running HQ jobs.
 set -euo pipefail
+echo "refusing HyperQueue submit: the work directory would be the home filer." >&2
+echo "scripts/elja_hq_pilot.sh is one Slurm allocation; each task uses /scratch/users." >&2
+exit 2
 ROOT=${LJ_ROOT:-$HOME/anneal-build}
 RGPOT=${RGPOT_ROOT:-$HOME/rgpot}
 BASE=${MOL_OUT:-$HOME/ljwork/hq-sci-h2o}

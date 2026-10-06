@@ -2,6 +2,9 @@
 # Production: SOAP packing superbasin (CV-GO) + packing-mean hop.
 # Paper budgets. Does not cancel running HQ jobs. Uses LJ_BIN if set.
 set -euo pipefail
+echo "refusing HyperQueue submit: the work directory would be the home filer." >&2
+echo "scripts/elja_hq_pilot.sh is one Slurm allocation; each task uses /scratch/users." >&2
+exit 2
 ROOT=${LJ_ROOT:-$HOME/anneal-build}
 OUT=${LJ_OUT:-$HOME/ljwork/hq-sci-sb}
 ONE=$ROOT/scripts/elja_hq_one.sh
