@@ -354,6 +354,85 @@ fn max_atom_weight(mode: ArrayView1<f64>) -> f64 {
     weight
 }
 
+fn relax_shell_around_centre<E>(
+    x: ArrayView1<f64>,
+    outermost: bool,
+    evaluate: &mut E,
+) -> Array1<f64>
+where
+    E: FnMut(ArrayView1<f64>) -> (f64, Array1<f64>),
+{
+    let n_atoms = x.len() / 3;
+    let mut full = move_extreme_atom_to_com(x, outermost);
+    if n_atoms < 2 {
+        return full;
+    }
+    let mut anchor = [0.0; 3];
+    for atom in 0..n_atoms {
+        for axis in 0..3 {
+            anchor[axis] += full[3 * atom + axis];
+        }
+    }
+    for value in &mut anchor {
+        *value /= n_atoms as f64;
+    }
+    let mut pin = 0usize;
+    let mut pin_r = f64::MAX;
+    for atom in 0..n_atoms {
+        let mut square = 0.0;
+        for axis in 0..3 {
+            let delta = full[3 * atom + axis] - anchor[axis];
+            square += delta * delta;
+        }
+        if square < pin_r {
+            pin_r = square;
+            pin = atom;
+        }
+    }
+    for axis in 0..3 {
+        full[3 * pin + axis] = anchor[axis];
+    }
+    let mobile: Vec<usize> = (0..n_atoms).filter(|atom| *atom != pin).collect();
+    let mut reduced = Array1::zeros(mobile.len() * 3);
+    for (slot, &atom) in mobile.iter().enumerate() {
+        for axis in 0..3 {
+            reduced[3 * slot + axis] = full[3 * atom + axis];
+        }
+    }
+    let mut opt = crate::methods::warm_lbfgs::WarmLbfgs::default();
+    let (_, reduced, _) = opt.minimize(reduced.view(), n_atoms.saturating_mul(8).max(8), |point| {
+        let mut y = full.clone();
+        for (slot, &atom) in mobile.iter().enumerate() {
+            for axis in 0..3 {
+                y[3 * atom + axis] = point[3 * slot + axis];
+            }
+        }
+        for axis in 0..3 {
+            y[3 * pin + axis] = anchor[axis];
+        }
+        let (energy, gradient) = evaluate(y.view());
+        if !energy.is_finite() {
+            return None;
+        }
+        let mut reduced_gradient = Array1::zeros(point.len());
+        for (slot, &atom) in mobile.iter().enumerate() {
+            for axis in 0..3 {
+                reduced_gradient[3 * slot + axis] = gradient[3 * atom + axis];
+            }
+        }
+        Some((energy, reduced_gradient))
+    });
+    for (slot, &atom) in mobile.iter().enumerate() {
+        for axis in 0..3 {
+            full[3 * atom + axis] = reduced[3 * slot + axis];
+        }
+    }
+    for axis in 0..3 {
+        full[3 * pin + axis] = anchor[axis];
+    }
+    full
+}
+
 fn move_extreme_atom_to_com(x: ArrayView1<f64>, outermost: bool) -> Array1<f64> {
     let n_atoms = x.len() / 3;
     let mut y = x.to_owned();
@@ -803,7 +882,7 @@ where
                             positive_scale,
                             contact,
                             cfg.overshoot,
-                            n_atoms,
+                            2,
                         );
                         uphill = false;
                     }
@@ -851,7 +930,7 @@ where
                     positive_scale,
                     contact,
                     cfg.overshoot,
-                    n_atoms,
+                    2,
                 );
                 uphill = false;
             }
@@ -911,7 +990,7 @@ where
                     positive_scale,
                     contact,
                     cfg.overshoot,
-                    n_atoms,
+                    2,
                 );
                 uphill = false;
             }
@@ -1437,7 +1516,7 @@ where
         // Placing the innermost or the outermost atom there is a radial
         // displacement of length equal to that atom's own radius.
         for outermost in [false, true] {
-            let shifted = move_extreme_atom_to_com(origin.view(), outermost);
+            let shifted = relax_shell_around_centre(origin.view(), outermost, &mut evaluate);
             let quenched = quench(shifted.view());
             let Some(value) = note_exit(&mut evaluate, &quenched, 0, &mut best_e, &mut best) else {
                 continue;
