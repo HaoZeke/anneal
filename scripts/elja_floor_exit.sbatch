@@ -28,7 +28,7 @@ test -x "$PROBE"
 cd "$SCRATCH"
 echo "pwd $(pwd)"
 # The fourth argument is the line step along one covering direction.
-"$PROBE" 24 600 climb 0.7 > "$SCRATCH/climb.log"
+"$PROBE" 4 400 climb 0.5 > "$SCRATCH/climb.log"
 RECORD=${LJ_RECORD:-$HOME/ljwork}
 mkdir -p "$RECORD"
 rsync -a --bwlimit=40000 "$SCRATCH/climb.log" "$RECORD/floor-exit-${SLURM_JOB_ID}.log"

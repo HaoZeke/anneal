@@ -51,6 +51,7 @@
 
 use crate::curvature::curvature_features;
 use ndarray::{Array1, ArrayView1};
+use rand::{Rng, SeedableRng};
 
 /// How the climb is run.
 #[derive(Debug, Clone)]
@@ -220,66 +221,82 @@ where
 {
     let mut best = origin.to_owned();
     let mut best_e = energy(origin.view());
-    let mut consider = |point: Array1<f64>| {
-        let direct = quench(point.view());
-        let mut candidates = vec![direct];
-        if let Some(outcome) = activate_from_origin(point.view(), origin, &mut grad, cfg) {
-            if outcome.crossed {
-                candidates.push(quench(outcome.state.view()));
-            }
-        }
-        for quenched in candidates {
-            let value = energy(quenched.view());
-            if value.is_finite() {
-                println!("{{\"kind\":\"exit_candidate\",\"energy\":{value:.6}}}");
-            }
-            if value.is_finite() && value < best_e - 1e-6 {
-                best_e = value;
-                best = quenched;
-            }
-        }
-    };
+    let mut here = origin.to_owned();
+    let mut here_e = best_e;
+    let mut rng = rand::rngs::StdRng::seed_from_u64(1 + cover_index as u64);
     let n_cover = crate::hypersphere::default_cover_size();
-    let direction = crate::hypersphere::cover_direction(n_cover, origin.len(), cover_index);
-    let placed = crate::hypersphere::place_around(
-        origin.as_slice().unwrap_or(&[]),
-        &direction,
-        rmsd.max(1e-3),
-        None,
-    );
-    if placed.len() == origin.len() {
-        consider(Array1::from(placed));
+    let temperature = 8.0_f64;
+    // One kick stays in the icosahedral funnel or lands above it.
+    // Keep walking: a covering displacement, sometimes a pentagonal
+    // opening, a minimum-mode climb when the ridge is real, then a
+    // quench. Uphill quenches are accepted so the walk can leave.
+    for hop in 0..48 {
+        let point = if hop % 6 == 0 {
+            fivefold_opening(here.view(), rmsd, hop)
+        } else {
+            let direction = crate::hypersphere::cover_direction(n_cover, here.len(), hop + cover_index);
+            let placed = crate::hypersphere::place_around(
+                here.as_slice().unwrap_or(&[]),
+                &direction,
+                rmsd.max(1e-3),
+                None,
+            );
+            if placed.len() == here.len() {
+                Array1::from(placed)
+            } else {
+                here.clone()
+            }
+        };
+        let mut quenched = quench(point.view());
+        if let Some(outcome) = activate_from_origin(point.view(), here.view(), &mut grad, cfg) {
+            if outcome.crossed {
+                let climbed = quench(outcome.state.view());
+                let climbed_e = energy(climbed.view());
+                let direct_e = energy(quenched.view());
+                if climbed_e.is_finite() && (!direct_e.is_finite() || climbed_e < direct_e) {
+                    quenched = climbed;
+                }
+            }
+        }
+        let value = energy(quenched.view());
+        if !value.is_finite() {
+            continue;
+        }
+        println!("{{\"kind\":\"exit_candidate\",\"energy\":{value:.6}}}");
+        if value < best_e - 1e-6 {
+            best_e = value;
+            best = quenched.clone();
+        }
+        let uphill = value - here_e;
+        let accept = uphill <= 0.0 || rng.random::<f64>() < (-uphill / temperature).exp();
+        if accept {
+            here = quenched;
+            here_e = value;
+        }
     }
-    // A perfect pentagon has a fivefold length near zero, so a window
-    // around 0.90 matches nothing. The openings that leave are the axes
-    // closest to those two lengths, among axes that are still fivefold.
+    best
+}
+
+fn fivefold_opening(origin: ArrayView1<f64>, rmsd: f64, which: usize) -> Array1<f64> {
     let good: Vec<([f64; 3], f64)> = crate::soap::fivefold_axis_table(origin)
         .into_iter()
         .filter(|(_, d5)| *d5 < 1.40)
         .collect();
-    let nearest = |target: f64| {
-        good.iter()
-            .min_by(|a, b| {
-                (a.1 - target)
-                    .abs()
-                    .partial_cmp(&(b.1 - target).abs())
-                    .unwrap_or(std::cmp::Ordering::Equal)
-            })
-            .copied()
-    };
-    let mut seen = Vec::new();
-    for target in [0.90_f64, 0.99] {
-        let Some((axis, d5)) = nearest(target) else {
-            continue;
-        };
-        if seen.iter().any(|kept: &f64| (*kept - d5).abs() < 1e-3) {
-            continue;
-        }
-        seen.push(d5);
-        let kicked = crate::soap::step_away_fivefold_about(origin, rmsd.max(0.75), axis);
-        consider(kicked);
+    if good.is_empty() {
+        return origin.to_owned();
     }
-    best
+    let target = if which % 2 == 0 { 0.90 } else { 0.99 };
+    let (axis, _) = good
+        .iter()
+        .min_by(|a, b| {
+            (a.1 - target)
+                .abs()
+                .partial_cmp(&(b.1 - target).abs())
+                .unwrap_or(std::cmp::Ordering::Equal)
+        })
+        .copied()
+        .unwrap_or(good[0]);
+    crate::soap::step_away_fivefold_about(origin, rmsd.max(0.75), axis)
 }
 
 /// Climb along `direction` first, then track the minimum mode.
