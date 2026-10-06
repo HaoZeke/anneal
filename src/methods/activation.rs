@@ -423,43 +423,47 @@ where
     let span = (0.95 * reach).max(1.2);
     let mut out = Vec::new();
     for (n_axis, n_rings) in fivefold_partitions(n).into_iter().take(3) {
-        let mut params = compact_fivefold(n_axis, n_rings, 1.12);
-        let (mut energy, _) = evaluate(build_fivefold(&params, n_axis, n_rings).view());
-        if !energy.is_finite() {
-            continue;
-        }
-        let mut best_params = params.clone();
-        let mut best_energy = energy;
-        let steps = 2_500;
-        for step in 0..steps {
-            let temp = 6.0 * (1.0 - step as f64 / steps as f64).max(0.02);
-            let mut trial = params.clone();
-            let slot = (rng.random::<u64>() as usize) % trial.len();
-            let width = 0.04 + 0.22 * temp / 6.0;
-            trial[slot] += width * (rng.random::<f64>() - 0.5) * 2.0;
-            if slot >= n_axis && (slot - n_axis) % 2 == 1 {
-                trial[slot] = trial[slot].abs().clamp(0.4, span);
-            }
-            let (next, _) = evaluate(build_fivefold(&trial, n_axis, n_rings).view());
-            if !next.is_finite() || next > -1.0 {
+        for stagger in [false, true] {
+            let mut params = compact_fivefold(n_axis, n_rings, 1.12);
+            let (mut energy, _) =
+                evaluate(build_fivefold(&params, n_axis, n_rings, stagger).view());
+            if !energy.is_finite() {
                 continue;
             }
-            let rise = next - energy;
-            if rise <= 0.0 || rng.random::<f64>() < (-rise / temp).exp() {
-                params = trial;
-                energy = next;
-                if next < best_energy {
-                    best_energy = next;
-                    best_params = params.clone();
+            let mut best_params = params.clone();
+            let mut best_energy = energy;
+            let steps = 2_500;
+            for step in 0..steps {
+                let temp = 6.0 * (1.0 - step as f64 / steps as f64).max(0.02);
+                let mut trial = params.clone();
+                let slot = (rng.random::<u64>() as usize) % trial.len();
+                let width = 0.04 + 0.22 * temp / 6.0;
+                trial[slot] += width * (rng.random::<f64>() - 0.5) * 2.0;
+                if slot >= n_axis && (slot - n_axis) % 2 == 1 {
+                    trial[slot] = trial[slot].abs().clamp(0.4, span);
+                }
+                let (next, _) = evaluate(build_fivefold(&trial, n_axis, n_rings, stagger).view());
+                if !next.is_finite() || next > -1.0 {
+                    continue;
+                }
+                let rise = next - energy;
+                if rise <= 0.0 || rng.random::<f64>() < (-rise / temp).exp() {
+                    params = trial;
+                    energy = next;
+                    if next < best_energy {
+                        best_energy = next;
+                        best_params = params.clone();
+                    }
                 }
             }
+            out.push(relax_fivefold_params(
+                best_params,
+                n_axis,
+                n_rings,
+                stagger,
+                evaluate,
+            ));
         }
-        out.push(relax_fivefold_params(
-            best_params,
-            n_axis,
-            n_rings,
-            evaluate,
-        ));
     }
     out
 }
@@ -692,7 +696,7 @@ fn fivefold_partitions(n: usize) -> Vec<(usize, usize)> {
     out
 }
 
-fn build_fivefold(params: &[f64], n_axis: usize, n_rings: usize) -> Array1<f64> {
+fn build_fivefold(params: &[f64], n_axis: usize, n_rings: usize, stagger: bool) -> Array1<f64> {
     let n = n_axis + 5 * n_rings;
     let mut x = Array1::zeros(3 * n);
     for i in 0..n_axis {
@@ -701,10 +705,10 @@ fn build_fivefold(params: &[f64], n_axis: usize, n_rings: usize) -> Array1<f64> 
     for ring in 0..n_rings {
         let z = params[n_axis + 2 * ring];
         let radius = params[n_axis + 2 * ring + 1].abs().max(0.35);
-        let phase = if ring % 2 == 0 {
-            0.0
-        } else {
+        let phase = if stagger && ring % 2 == 1 {
             std::f64::consts::PI / 5.0
+        } else {
+            0.0
         };
         for k in 0..5 {
             let angle = phase + 2.0 * std::f64::consts::PI * (k as f64) / 5.0;
@@ -721,6 +725,7 @@ fn relax_fivefold_params<E>(
     mut params: Vec<f64>,
     n_axis: usize,
     n_rings: usize,
+    stagger: bool,
     evaluate: &mut E,
 ) -> Array1<f64>
 where
@@ -729,7 +734,7 @@ where
     let eps = 1.0e-3;
     let mut step = 0.08;
     for _ in 0..28 {
-        let current = build_fivefold(&params, n_axis, n_rings);
+        let current = build_fivefold(&params, n_axis, n_rings, stagger);
         let (energy, _) = evaluate(current.view());
         if !energy.is_finite() {
             break;
@@ -737,7 +742,7 @@ where
         let mut slope = vec![0.0; params.len()];
         for i in 0..params.len() {
             params[i] += eps;
-            let (shifted, _) = evaluate(build_fivefold(&params, n_axis, n_rings).view());
+            let (shifted, _) = evaluate(build_fivefold(&params, n_axis, n_rings, stagger).view());
             params[i] -= eps;
             slope[i] = (shifted - energy) / eps;
         }
@@ -752,7 +757,7 @@ where
                 let slot = n_axis + 2 * ring + 1;
                 trial[slot] = trial[slot].abs().max(0.35);
             }
-            let (next, _) = evaluate(build_fivefold(&trial, n_axis, n_rings).view());
+            let (next, _) = evaluate(build_fivefold(&trial, n_axis, n_rings, stagger).view());
             if next.is_finite() && next < energy {
                 params = trial;
                 step = (trial_step * 1.2).min(0.25);
@@ -765,7 +770,7 @@ where
             break;
         }
     }
-    build_fivefold(&params, n_axis, n_rings)
+    build_fivefold(&params, n_axis, n_rings, stagger)
 }
 
 fn fivefold_family<E>(
@@ -782,7 +787,7 @@ where
         && n_axis + 5 * n_rings == n
     {
         let mut params = start;
-        let (mut energy, _) = evaluate(build_fivefold(&params, n_axis, n_rings).view());
+        let (mut energy, _) = evaluate(build_fivefold(&params, n_axis, n_rings, true).view());
         let mut best_params = params.clone();
         let mut best_energy = energy;
         if energy.is_finite() {
@@ -796,7 +801,7 @@ where
                     let slot = n_axis + 2 * ring + 1;
                     trial[slot] = trial[slot].abs().max(0.35);
                 }
-                let (next, _) = evaluate(build_fivefold(&trial, n_axis, n_rings).view());
+                let (next, _) = evaluate(build_fivefold(&trial, n_axis, n_rings, true).view());
                 let rise = next - energy;
                 if next.is_finite() && (rise <= 0.0 || rng.random::<f64>() < (-rise / 4.0).exp()) {
                     params = trial;
@@ -811,6 +816,7 @@ where
                 best_params,
                 n_axis,
                 n_rings,
+                true,
                 evaluate,
             ));
         }
@@ -848,13 +854,15 @@ where
                 params[n_axis + 2 * ring + 1] =
                     0.7 + reach * 0.15 * (1 + ring % 5) as f64 + 0.15 * (rng.random::<f64>() - 0.5);
             }
-            let (energy, _) = evaluate(build_fivefold(&params, n_axis, n_rings).view());
+            let (energy, _) = evaluate(build_fivefold(&params, n_axis, n_rings, true).view());
             if energy.is_finite() && best_params.as_ref().is_none_or(|(held, _)| energy < *held) {
                 best_params = Some((energy, params));
             }
         }
         if let Some((_, params)) = best_params {
-            out.push(relax_fivefold_params(params, n_axis, n_rings, evaluate));
+            out.push(relax_fivefold_params(
+                params, n_axis, n_rings, true, evaluate,
+            ));
         }
     }
     out
