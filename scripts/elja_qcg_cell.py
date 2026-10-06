@@ -48,6 +48,9 @@ def _sbatch(n: int, budget: int, arm: str, seed: int, binary: Path, record: Path
 #SBATCH --time=08:00:00
 #SBATCH --output={record}/slurm-lj{n}-{arm}-{seed}-%j.out
 set -euo pipefail
+# The uv environment is the node disk. /scratch/users does not exist on the login node.
+export UV_CACHE_DIR=/scratch/users/$USER/uv-cache
+mkdir -p "$UV_CACHE_DIR"
 exec uv run --script {quoted} cell --n {n} --budget {budget} --arm {arm} --seed {seed} --binary {binary_q} --record {record_q}
 """
 
