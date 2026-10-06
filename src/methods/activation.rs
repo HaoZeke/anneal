@@ -650,7 +650,7 @@ where
                     None => true,
                     Some((score, held, _)) => {
                         packed > *score + 1.0e-6
-                            || ((packed - score).abs() <= 1.0e-6 && energy < *held)
+                            || ((packed - score).abs() <= 1.0e-6 && energy < held)
                     }
                 };
                 if better {
