@@ -187,20 +187,14 @@ fn load_xyz(path: &str) -> Array1<f64> {
 fn run_floor_search(hops: usize, seeds: u64) {
     let raw = coords_from_text(include_str!("../tests/fixtures/lj75_ico.xyz"));
     let (e0, x0) = relax(raw.view(), 800);
-    println!("{{\"kind\":\"floor_start\",\"energy\":{e0:.9},\"hops\":{hops}}}");
-    let cfg = anneal_core::methods::activation::Activation {
-        max_steps: 8,
-        lanczos_steps: 8,
-        step: 0.08,
-        min_rise: 1.0,
-        perp_steps: 2,
-        ..anneal_core::methods::activation::Activation::default()
-    };
+    let bond = anneal_core::lattice::nearest_neighbour_scale(x0.view());
+    println!("{{\"kind\":\"floor_start\",\"energy\":{e0:.9},\"hops\":{hops},\"bond\":{bond:.6}}}");
+    let cfg = anneal_core::methods::activation::Activation::default();
     let mut best_e = e0;
     for seed in 1u64..=seeds.max(1) {
         let end = anneal_core::methods::activation::cover_climb_search(
             x0.view(),
-            0.7,
+            bond,
             hops,
             seed,
             |v| lj(v),
@@ -227,7 +221,7 @@ fn main() {
         let hops = std::env::args()
             .nth(2)
             .and_then(|value| value.parse().ok())
-            .unwrap_or(4000);
+            .unwrap_or_else(anneal_core::hypersphere::default_cover_size);
         let seeds = std::env::args()
             .nth(3)
             .and_then(|value| value.parse().ok())
