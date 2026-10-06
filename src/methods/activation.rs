@@ -672,6 +672,10 @@ where
         lowest = soft;
         positive_scale = positive_scale.max(soft.abs());
     }
+    let (start_energy, _) = evaluate(origin);
+    // Harmonic energy of a one-contact step at the curvature of the minimum.
+    let rise_lid = 0.5 * positive_scale * contact * contact;
+    let mut cleared_lid = false;
     let mut cur = origin.to_owned();
     let mut axial = 0.0_f64;
     let mut steps = 0usize;
@@ -836,7 +840,14 @@ where
             }
             steps += 1;
             axial = axial_projection(cur.view(), origin, mode.view());
-            let (_, climbed) = evaluate(cur.view());
+            let (energy_after, climbed) = evaluate(cur.view());
+            if !cleared_lid && start_energy.is_finite() && energy_after - start_energy >= rise_lid {
+                cleared_lid = true;
+                if landings.len() < n_atoms {
+                    landings.push(cur.clone());
+                    crossed = true;
+                }
+            }
             let along_after = dot_av(climbed.view(), mode.view());
             let step_curvature = (along_after - along) / stride;
             if step_curvature.is_finite() {
@@ -987,16 +998,17 @@ fn climb_relaxed_cover<E, Q>(
         if closest_pair(trial.view()) < contact * 0.5 {
             break;
         }
+        if let Some((soft, _)) = lowest_mode(trial.view(), evaluate, cfg.lanczos_steps, epsilon) {
+            if !(soft.is_finite() && soft > -(scale * scale)) {
+                // This shell's softest curvature is an overlap. Keep the previous one.
+                break;
+            }
+            if soft < 0.0 {
+                activated = true;
+            }
+        }
         shell.clone_from(&trial);
         moved = true;
-        if let Some((soft, _)) = lowest_mode(shell.view(), evaluate, cfg.lanczos_steps, epsilon)
-            && soft.is_finite()
-            && soft < 0.0
-            && soft > -(scale * scale)
-        {
-            activated = true;
-            break;
-        }
         let next = (rms * 2.0).min(max_rms);
         if next <= rms + epsilon {
             break;
