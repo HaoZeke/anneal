@@ -1521,9 +1521,11 @@ fn ride_lowest_mode<E, Q>(
     // reaches a per-atom displacement of one contact.
     config.saddle_displacement = contact / (n_atoms as f64).sqrt();
     config.activation_growth = 2.0;
-    config.activation_attempts = 8;
+    // Seven doublings reach about one contact of root-mean-square motion.
+    // An eighth doubling pulls pairs through each other.
+    config.activation_attempts = 7;
     config.quench_steps = n_atoms.saturating_mul(16).max(64);
-    config.saddle_steps = n_atoms.saturating_mul(8).max(64);
+    config.saddle_steps = n_atoms.saturating_mul(16).max(64);
     // A residual near 1e-5 is a minimised Lennard-Jones cluster. The
     // tighter library default stops the ride before the saddle search.
     config.quench_gradient_tolerance = 1e-5;
@@ -2077,6 +2079,14 @@ where
             if !distinct || !compact {
                 continue;
             }
+            ride_lowest_mode(
+                quenched.view(),
+                contact,
+                &mut evaluate,
+                &mut quench,
+                &mut best_e,
+                &mut best,
+            );
             climb_soft_modes(
                 quenched.view(),
                 0,
