@@ -316,6 +316,8 @@ fn note_candidate<E>(
     best: &mut Array1<f64>,
     best_e: &mut f64,
     hop: usize,
+    origin_e: f64,
+    bank: &mut [Option<(f64, Array1<f64>)>],
 ) where
     E: FnMut(ArrayView1<f64>) -> (f64, Array1<f64>),
 {
@@ -330,6 +332,20 @@ fn note_candidate<E>(
     if value < *best_e - 1.0e-6 {
         *best_e = value;
         *best = proposal.clone();
+    }
+    // Minima above the floor and below the melt window are rungs. The
+    // lowest structure in each one-energy band is kept so a later hop
+    // can leave from that rung instead of from the floor.
+    let rise = value - origin_e;
+    if (0.3..crate::catalog::SEAM_WINDOW).contains(&rise) && !bank.is_empty() {
+        let bin = (rise as usize).min(bank.len() - 1);
+        let replace = match &bank[bin] {
+            Some((held, _)) => value < *held,
+            None => true,
+        };
+        if replace {
+            bank[bin] = Some((value, proposal.clone()));
+        }
     }
 }
 
@@ -392,6 +408,10 @@ where
     feedback.escape_floor = 0.25;
     feedback.register_initial(current);
     let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
+    let mut bank: Vec<Option<(f64, Array1<f64>)>> =
+        vec![None; crate::catalog::SEAM_WINDOW.ceil() as usize];
+    let mut frontier_stuck = 0u32;
+    let mut frontier_energy = f64::NAN;
     let n_cover = crate::hypersphere::default_cover_size();
     let cluster = origin.len() % 3 == 0 && {
         let pair = closest_pair(origin);
@@ -427,11 +447,27 @@ where
         );
         if placed.len() == here.len() {
             let quenched = quench(Array1::from(placed).view());
-            note_candidate(&quenched, &mut evaluate, &mut best, &mut best_e, hop);
+            note_candidate(
+                &quenched,
+                &mut evaluate,
+                &mut best,
+                &mut best_e,
+                hop,
+                origin_e,
+                &mut bank,
+            );
         }
         if cluster && hop % 4 == 0 {
             let quenched = quench(fivefold_opening(here.view(), cover_rmsd, hop).view());
-            note_candidate(&quenched, &mut evaluate, &mut best, &mut best_e, hop);
+            note_candidate(
+                &quenched,
+                &mut evaluate,
+                &mut best,
+                &mut best_e,
+                hop,
+                origin_e,
+                &mut bank,
+            );
         }
         let amp = (0.38 * span).clamp(0.25, 0.9);
         let mut kicked = here.clone();
@@ -439,7 +475,15 @@ where
             *value += amp * (2.0 * rng.random::<f64>() - 1.0);
         }
         let quenched = quench(kicked.view());
-        note_candidate(&quenched, &mut evaluate, &mut best, &mut best_e, hop);
+        note_candidate(
+            &quenched,
+            &mut evaluate,
+            &mut best,
+            &mut best_e,
+            hop,
+            origin_e,
+            &mut bank,
+        );
 
         // A displacement stays inside the packing it started in. A twin
         // across one dense plane of that packing changes only the boundary,
@@ -455,7 +499,15 @@ where
                         let moved = crate::twin::twin(here.view(), n_atoms, plane, mode, 0.25);
                         if moved.iter().all(|value| value.is_finite()) {
                             let quenched = quench(moved.view());
-                            note_candidate(&quenched, &mut evaluate, &mut best, &mut best_e, hop);
+                            note_candidate(
+                                &quenched,
+                                &mut evaluate,
+                                &mut best,
+                                &mut best_e,
+                                hop,
+                                origin_e,
+                                &mut bank,
+                            );
                         }
                     }
                 }
@@ -468,7 +520,15 @@ where
                     && outcome.crossed
                 {
                     let quenched = quench(outcome.state.view());
-                    note_candidate(&quenched, &mut evaluate, &mut best, &mut best_e, hop);
+                    note_candidate(
+                        &quenched,
+                        &mut evaluate,
+                        &mut best,
+                        &mut best_e,
+                        hop,
+                        origin_e,
+                        &mut bank,
+                    );
                 }
             }
         }
@@ -518,7 +578,15 @@ where
         }
         let landed = escaped.map(|position| quench(position.view()));
         if let Some(position) = landed.as_ref() {
-            note_candidate(position, &mut evaluate, &mut best, &mut best_e, hop);
+            note_candidate(
+                position,
+                &mut evaluate,
+                &mut best,
+                &mut best_e,
+                hop,
+                origin_e,
+                &mut bank,
+            );
         }
         if best_e < origin_e - 0.05 {
             println!(
@@ -552,6 +620,24 @@ where
             }
             None => {
                 feedback.observe(Some(current), current);
+            }
+        }
+        if let Some((energy, state)) = bank.iter().rev().find_map(|slot| slot.clone()) {
+            if (energy - frontier_energy).abs() < 1.0e-6 {
+                frontier_stuck += 1;
+            } else {
+                frontier_stuck = 0;
+                frontier_energy = energy;
+            }
+            if frontier_stuck >= 2 {
+                if let Some(slot) = bank.iter_mut().rev().find(|slot| slot.is_some()) {
+                    *slot = None;
+                }
+                frontier_stuck = 0;
+                frontier_energy = f64::NAN;
+            } else {
+                here = state;
+                here_e = energy;
             }
         }
         println!(
