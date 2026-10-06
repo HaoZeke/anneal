@@ -204,7 +204,7 @@ fn run_floor_search(hops: usize, seeds: u64) {
             hops,
             seed,
             |v| lj(v),
-            |v| relax(v, 300).1,
+            |v| relax(v, 600).1,
             &cfg,
         );
         let e = energy(end.view());
