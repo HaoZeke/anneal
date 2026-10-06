@@ -1087,7 +1087,7 @@ pub fn step_away_featomic<R: Rng + ?Sized>(
         if displacement_rms(&five, x) > 1e-6 {
             return five;
         }
-        packing_kick(x, &s, rmsd, mobile, rng)
+        return packing_kick(x, &s, rmsd, mobile, rng);
     }
     focus_patch(&mut s, x, rcut, rng);
     let dr = tikhonov(&s.jacobian, s.leftover.view(), LAMBDA);
