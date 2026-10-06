@@ -1057,23 +1057,86 @@ where
     // from the floor never visits. No named target energy is used.
     if cluster {
         let n_atoms = origin.len() / 3;
-        println!("{{\"kind\":\"exit_move\",\"move\":\"shell\"}}");
-        let shell_scale = crate::lattice::nearest_neighbour_scale(origin);
-        for trial in crate::lattice::sized_decahedra(n_atoms, shell_scale, &mut rng) {
-            let quenched = quench(trial.view());
+        println!("{{\"kind\":\"exit_move\",\"move\":\"cover\"}}");
+        let climb = Activation {
+            max_steps: 20,
+            lanczos_steps: 10,
+            min_rise: 1.5,
+            overshoot: 2.0,
+            ..cfg.clone()
+        };
+        for hop in 0..max_hops {
+            if best_e < origin_e - 0.05 {
+                println!(
+                    "{{\"kind\":\"exit_hop\",\"hop\":{hop},\"here\":{here_e:.6},\"best\":{best_e:.6},\"phase\":\"cover\",\"left\":true}}"
+                );
+                let _ = std::io::stdout().flush();
+                return best;
+            }
+            let parent = here.clone();
+            let direction = Array1::from(crate::hypersphere::cover_direction(
+                n_cover,
+                parent.len(),
+                hop,
+            ));
+            let placed = crate::hypersphere::place_around(
+                parent.as_slice().unwrap_or(&[]),
+                direction.as_slice().unwrap_or(&[]),
+                rmsd.max(0.25),
+                None,
+            );
+            let mut climbed = if placed.len() == parent.len() {
+                Array1::from(placed)
+            } else {
+                parent.clone()
+            };
+            for _ridge in 0..3 {
+                let mut advanced = false;
+                for sign in [1.0_f64, -1.0] {
+                    if let Some(outcome) = activate(
+                        climbed.view(),
+                        |point| Some(evaluate(point).1),
+                        &climb,
+                        sign,
+                    ) && outcome.crossed
+                    {
+                        climbed = outcome.state;
+                        advanced = true;
+                        break;
+                    }
+                }
+                if !advanced {
+                    break;
+                }
+            }
+            let quenched = quench(climbed.view());
             note_candidate(
                 &quenched,
                 &mut evaluate,
                 &mut best,
                 &mut best_e,
-                0,
+                hop,
                 origin_e,
                 &mut bank,
                 &rejected,
             );
+            let (value, _) = evaluate(quenched.view());
+            if value.is_finite() && value < origin_e + 10.5 && value + 1.0e-4 < here_e {
+                here = quenched;
+                here_e = value;
+            } else if value.is_finite() && value < origin_e + 10.5 && value > here_e + 0.2 {
+                here = quenched;
+                here_e = value;
+            }
+            if hop % 25 == 0 {
+                println!(
+                    "{{\"kind\":\"exit_hop\",\"hop\":{hop},\"here\":{here_e:.6},\"best\":{best_e:.6},\"phase\":\"cover\"}}"
+                );
+                let _ = std::io::stdout().flush();
+            }
             if best_e < origin_e - 0.05 {
                 println!(
-                    "{{\"kind\":\"exit_hop\",\"hop\":0,\"here\":{best_e:.6},\"best\":{best_e:.6},\"phase\":\"shell\",\"left\":true}}"
+                    "{{\"kind\":\"exit_hop\",\"hop\":{hop},\"here\":{here_e:.6},\"best\":{best_e:.6},\"phase\":\"cover\",\"left\":true}}"
                 );
                 let _ = std::io::stdout().flush();
                 return best;
