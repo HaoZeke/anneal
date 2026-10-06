@@ -354,6 +354,49 @@ fn max_atom_weight(mode: ArrayView1<f64>) -> f64 {
     weight
 }
 
+fn move_extreme_atom_to_com(x: ArrayView1<f64>, outermost: bool) -> Array1<f64> {
+    let n_atoms = x.len() / 3;
+    let mut y = x.to_owned();
+    if n_atoms == 0 {
+        return y;
+    }
+    let mut com = [0.0; 3];
+    for atom in 0..n_atoms {
+        for axis in 0..3 {
+            com[axis] += y[3 * atom + axis];
+        }
+    }
+    for value in &mut com {
+        *value /= n_atoms as f64;
+    }
+    let mut chosen = 0usize;
+    let mut chosen_r = if outermost { 0.0 } else { f64::MAX };
+    for atom in 0..n_atoms {
+        let mut square = 0.0;
+        for axis in 0..3 {
+            let delta = y[3 * atom + axis] - com[axis];
+            square += delta * delta;
+        }
+        let radius = square.sqrt();
+        let better = if outermost {
+            radius > chosen_r
+        } else {
+            radius < chosen_r
+        };
+        if better {
+            chosen_r = radius;
+            chosen = atom;
+        }
+    }
+    if !outermost && chosen_r < 1e-8 {
+        return y;
+    }
+    for axis in 0..3 {
+        y[3 * chosen + axis] = com[axis];
+    }
+    y
+}
+
 fn cluster_reach(x: ArrayView1<f64>) -> f64 {
     let n_atoms = x.len() / 3;
     if n_atoms == 0 {
@@ -1358,7 +1401,7 @@ where
     }
     if contact > 0.95
         && n_atoms >= 2
-        && let Some((shelf_energy, shelf_state)) = shelf
+        && let Some((shelf_energy, shelf_state)) = shelf.clone()
     {
         println!(
             "{{\"kind\":\"shelf\",\"energy\":{shelf_energy:.6},\"above\":{:.6}}}",
@@ -1387,6 +1430,49 @@ where
                 contact,
                 &mut shelf_next,
             );
+        }
+    }
+    if contact > 0.95 && n_atoms >= 2 {
+        // The centre of mass is a point the coordinates already define.
+        // Placing the innermost or the outermost atom there is a radial
+        // displacement of length equal to that atom's own radius.
+        for outermost in [false, true] {
+            let shifted = move_extreme_atom_to_com(origin.view(), outermost);
+            let quenched = quench(shifted.view());
+            let Some(value) = note_exit(&mut evaluate, &quenched, 0, &mut best_e, &mut best) else {
+                continue;
+            };
+            note_shelf(&mut shelf, value, &quenched, origin_e, reach, contact);
+            let distinct = (value - origin_e).abs() > 1e-6;
+            let compact = cluster_reach(quenched.view()) <= reach + contact;
+            if !distinct || !compact {
+                continue;
+            }
+            println!("{{\"kind\":\"core\",\"outermost\":{outermost},\"energy\":{value:.6}}}");
+            let _ = std::io::stdout().flush();
+            let mut ignored: Option<(f64, Array1<f64>)> = None;
+            let n_cover = crate::hypersphere::default_cover_size();
+            for hop in 0..max_hops {
+                let direction = crate::hypersphere::cover_direction(
+                    n_cover,
+                    quenched.len(),
+                    hop.wrapping_add(seed as usize),
+                );
+                climb_directions(
+                    quenched.view(),
+                    &direction,
+                    hop + 1,
+                    &mut evaluate,
+                    &mut quench,
+                    cfg,
+                    &mut best_e,
+                    &mut best,
+                    origin_e,
+                    reach,
+                    contact,
+                    &mut ignored,
+                );
+            }
         }
     }
     best
