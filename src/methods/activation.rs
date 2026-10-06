@@ -306,6 +306,66 @@ where
     best
 }
 
+/// If the centre of mass is empty, move one atom there.
+///
+/// A hollow centre and a centred core are different packings. The atom
+/// that moves is one of the innermost, or the outermost. The quench
+/// decides which packing that core belongs to. No target geometry is used.
+fn core_fills(origin: ArrayView1<f64>) -> Vec<Array1<f64>> {
+    let n = origin.len() / 3;
+    if n < 5 {
+        return Vec::new();
+    }
+    let mut com = [0.0; 3];
+    for i in 0..n {
+        let atom = atom_at(origin, i);
+        for axis in 0..3 {
+            com[axis] += atom[axis];
+        }
+    }
+    for value in &mut com {
+        *value /= n as f64;
+    }
+    let mut radial: Vec<(f64, usize)> = (0..n)
+        .map(|i| (len3(sub3(atom_at(origin, i), com)), i))
+        .collect();
+    radial.sort_by(|left, right| {
+        left.0
+            .partial_cmp(&right.0)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    if radial[0].0 < 0.25 {
+        return Vec::new();
+    }
+    let mut movers: Vec<usize> = radial.iter().take(4).map(|(_, i)| *i).collect();
+    movers.push(radial[n - 1].1);
+    let mut trials = Vec::new();
+    for i in movers {
+        let mut moved = origin.to_owned();
+        for axis in 0..3 {
+            moved[3 * i + axis] = com[axis];
+        }
+        trials.push(moved);
+    }
+    // Surface atom into the hollow, with the two innermost atoms eased
+    // outward so the new core is not buried inside them.
+    let outer = radial[n - 1].1;
+    let mut eased = origin.to_owned();
+    for axis in 0..3 {
+        eased[3 * outer + axis] = com[axis];
+    }
+    for (_, i) in radial.iter().take(2) {
+        let atom = atom_at(origin, *i);
+        let rel = sub3(atom, com);
+        let length = len3(rel).max(1.0e-8);
+        for axis in 0..3 {
+            eased[3 * *i + axis] = com[axis] + rel[axis] / length * (length + 0.55);
+        }
+    }
+    trials.push(eased);
+    trials
+}
+
 fn packed_fraction(x: ArrayView1<f64>) -> f64 {
     let n = x.len() / 3;
     if n < 4 {
@@ -672,6 +732,27 @@ where
     // from the floor never visits. No named target energy is used.
     if cluster {
         let n_atoms = origin.len() / 3;
+        println!("{{\"kind\":\"exit_move\",\"move\":\"core\"}}");
+        for trial in core_fills(origin) {
+            let quenched = quench(trial.view());
+            note_candidate(
+                &quenched,
+                &mut evaluate,
+                &mut best,
+                &mut best_e,
+                0,
+                origin_e,
+                &mut bank,
+                &rejected,
+            );
+            if best_e < origin_e - 0.05 {
+                println!(
+                    "{{\"kind\":\"exit_hop\",\"hop\":0,\"here\":{best_e:.6},\"best\":{best_e:.6},\"phase\":\"core\",\"left\":true}}"
+                );
+                let _ = std::io::stdout().flush();
+                return best;
+            }
+        }
         let base_pack = packed_fraction(origin);
         println!("{{\"kind\":\"exit_order\",\"packed\":{base_pack:.4},\"role\":\"start\"}}");
         let kinetics = [40.0_f64, 120.0, 220.0];
