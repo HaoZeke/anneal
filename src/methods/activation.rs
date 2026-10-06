@@ -372,6 +372,92 @@ fn core_fills(origin: ArrayView1<f64>) -> Vec<Array1<f64>> {
 /// loses the others. The factors change only the component parallel to
 /// the axis, or that component together with the perpendicular part so
 /// the volume stays put. The quench decides which packing results.
+fn compact_fivefold(n_axis: usize, n_rings: usize, span: f64) -> Vec<f64> {
+    let mut params = vec![0.0; n_axis + 2 * n_rings];
+    for i in 0..n_axis {
+        let frac = if n_axis == 1 {
+            0.0
+        } else {
+            i as f64 / (n_axis - 1) as f64 - 0.5
+        };
+        params[i] = span * frac;
+    }
+    for ring in 0..n_rings {
+        let frac = (ring as f64 + 0.5) / n_rings as f64;
+        params[n_axis + 2 * ring] = span * (frac - 0.5);
+        let belly = (std::f64::consts::PI * frac).sin();
+        params[n_axis + 2 * ring + 1] = 0.75 + 1.35 * belly;
+    }
+    params
+}
+
+fn anneal_fivefold<E>(
+    origin: ArrayView1<f64>,
+    evaluate: &mut E,
+    rng: &mut impl rand::Rng,
+) -> Vec<Array1<f64>>
+where
+    E: FnMut(ArrayView1<f64>) -> (f64, Array1<f64>),
+{
+    let n = origin.len() / 3;
+    let mut reach = 0.0_f64;
+    let mut com = [0.0; 3];
+    for i in 0..n {
+        let atom = atom_at(origin, i);
+        for axis in 0..3 {
+            com[axis] += atom[axis];
+        }
+    }
+    for value in &mut com {
+        *value /= n as f64;
+    }
+    for i in 0..n {
+        reach = reach.max(len3(sub3(atom_at(origin, i), com)));
+    }
+    let span = (0.95 * reach).max(1.2);
+    let mut out = Vec::new();
+    for (n_axis, n_rings) in fivefold_partitions(n).into_iter().take(3) {
+        let mut params = compact_fivefold(n_axis, n_rings, span);
+        let (mut energy, _) = evaluate(build_fivefold(&params, n_axis, n_rings).view());
+        if !energy.is_finite() {
+            continue;
+        }
+        let mut best_params = params.clone();
+        let mut best_energy = energy;
+        let steps = 2_500;
+        for step in 0..steps {
+            let temp = 6.0 * (1.0 - step as f64 / steps as f64).max(0.02);
+            let mut trial = params.clone();
+            let slot = (rng.random::<u64>() as usize) % trial.len();
+            let width = 0.04 + 0.22 * temp / 6.0;
+            trial[slot] += width * (rng.random::<f64>() - 0.5) * 2.0;
+            if slot >= n_axis && (slot - n_axis) % 2 == 1 {
+                trial[slot] = trial[slot].abs().clamp(0.4, span);
+            }
+            let (next, _) = evaluate(build_fivefold(&trial, n_axis, n_rings).view());
+            if !next.is_finite() || next > -1.0 {
+                continue;
+            }
+            let rise = next - energy;
+            if rise <= 0.0 || rng.random::<f64>() < (-rise / temp).exp() {
+                params = trial;
+                energy = next;
+                if next < best_energy {
+                    best_energy = next;
+                    best_params = params.clone();
+                }
+            }
+        }
+        out.push(relax_fivefold_params(
+            best_params,
+            n_axis,
+            n_rings,
+            evaluate,
+        ));
+    }
+    out
+}
+
 fn plane_basis(hat: [f64; 3]) -> ([f64; 3], [f64; 3]) {
     let aux = if hat[0].abs() < 0.9 {
         [1.0, 0.0, 0.0]
@@ -1176,6 +1262,27 @@ where
     // from the floor never visits. No named target energy is used.
     if cluster {
         let n_atoms = origin.len() / 3;
+        println!("{{\"kind\":\"exit_move\",\"move\":\"anneal\"}}");
+        for trial in anneal_fivefold(origin, &mut evaluate, &mut rng) {
+            let quenched = quench(trial.view());
+            note_candidate(
+                &quenched,
+                &mut evaluate,
+                &mut best,
+                &mut best_e,
+                0,
+                origin_e,
+                &mut bank,
+                &rejected,
+            );
+            if best_e < origin_e - 0.05 {
+                println!(
+                    "{{\"kind\":\"exit_hop\",\"hop\":0,\"here\":{best_e:.6},\"best\":{best_e:.6},\"phase\":\"anneal\",\"left\":true}}"
+                );
+                let _ = std::io::stdout().flush();
+                return best;
+            }
+        }
         println!("{{\"kind\":\"exit_move\",\"move\":\"restrain\"}}");
         for trial in restrained_fivefold(origin, &mut evaluate) {
             let quenched = quench(trial.view());
