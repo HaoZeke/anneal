@@ -299,6 +299,7 @@ where
         // component along the mode is what the climb is fighting and is left
         // alone.
         let mut along = 0.0;
+        let mut gnorm = 0.0;
         for _ in 0..cfg.perp_steps {
             let g = match grad(cur.view()) {
                 Some(g) => {
@@ -315,6 +316,7 @@ where
                     });
                 }
             };
+            gnorm = g.iter().map(|z| z * z).sum::<f64>().sqrt();
             along = g.iter().zip(mode.iter()).map(|(a, b)| a * b).sum();
             let mut d = Array1::<f64>::zeros(dim);
             for i in 0..dim {
@@ -329,6 +331,16 @@ where
             for i in 0..dim {
                 cur[i] -= scale * d[i];
             }
+        }
+
+        // A huge force is a clash, not a ridge. Stepping back keeps the
+        // last intact structure and does not call that a crossing.
+        if !gnorm.is_finite() || gnorm > 400.0 {
+            for i in 0..dim {
+                cur[i] -= sign * cfg.step * mode[i];
+            }
+            crossed = false;
+            break;
         }
 
         // Stop at the saddle, not at the inflection.
