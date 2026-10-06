@@ -90,6 +90,12 @@ pub struct Activation {
     /// Extra push along the mode once the curvature has turned over, in units
     /// of `step`, before the quench.
     pub overshoot: f64,
+    /// Ignore a ridge whose integrated rise is below this.
+    ///
+    /// The first saddle out of a low minimum is often a shallow step to a
+    /// neighbour of similar depth. A later ridge, several energy units up,
+    /// is the one that can open another funnel. Zero keeps every ridge.
+    pub min_rise: f64,
 }
 
 impl Default for Activation {
@@ -104,6 +110,7 @@ impl Default for Activation {
             epsilon: 1e-4,
             refresh: 3,
             overshoot: 1.5,
+            min_rise: 0.0,
         }
     }
 }
@@ -291,6 +298,7 @@ where
     };
     let mut steps = 0usize;
     let mut crossed = false;
+    let mut rise = 0.0;
 
     for k in 0..cfg.max_steps {
         // Refresh the direction on schedule, and always after the curvature has
@@ -382,8 +390,13 @@ where
         // sign: uphill while `sign * g . v > 0`, downhill after. Combined with
         // negative curvature that is the ridge, and past it a quench falls the
         // other way.
-        if lambda < 0.0 && sign * along < 0.0 {
+        rise += along * sign * cfg.step;
+        if lambda < 0.0 && sign * along < 0.0 && rise >= cfg.min_rise {
             crossed = true;
+            break;
+        }
+        if rise > 40.0 {
+            crossed = false;
             break;
         }
     }
