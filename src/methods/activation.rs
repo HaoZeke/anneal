@@ -171,11 +171,16 @@ where
     axis /= norm;
     // Walk this covering line until the slope flips. A fixed hop length
     // either stays in the well or dumps the quench into a shallower one.
-    let step = if rmsd > 0.0 {
-        rmsd.min(cfg.step).max(1e-3)
+    let n_at = (origin.len() / 3).max(1) as f64;
+    // `rmsd` is an all-atom root-mean-square length. The line step has
+    // to be that long in coordinate norm, or a 200-dimensional shell
+    // barely leaves its well.
+    let rms = if rmsd > 0.0 {
+        rmsd.min(0.35).max(1e-3)
     } else {
         cfg.step
     };
+    let step = rms * n_at.sqrt();
     let mut x = origin.to_owned();
     let mut last_safe = x.clone();
     let mut saw_uphill = false;

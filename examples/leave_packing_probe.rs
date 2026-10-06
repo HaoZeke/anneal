@@ -309,7 +309,7 @@ fn main() {
             "{{\"kind\":\"climb_setup\",\"n\":{n},\"rmsd\":{rmsd:.3},\"ico\":{ico_energy:.6},\"marks\":{marks_energy:.6}}}"
         );
         let cfg = anneal_core::methods::activation::Activation {
-            max_steps: 48,
+            max_steps: 80,
             ..anneal_core::methods::activation::Activation::default()
         };
         for index in 0..n {
