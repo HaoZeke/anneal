@@ -49,7 +49,7 @@
 //! [`crate::curvature`]. The controller in [`crate::methods::minima_hopping`]
 //! sets how far to climb; this module decides when to stop.
 
-use crate::curvature::{curvature_features, project_rigid_with, rigid_basis};
+use crate::curvature::{curvature_features, project_rigid_with, rigid_basis, soft_subspace};
 use ndarray::{Array1, ArrayView1};
 use rand::{Rng, SeedableRng};
 use std::io::Write;
@@ -1171,6 +1171,60 @@ fn climb_relaxed_cover<E, Q>(
     }
 }
 
+fn climb_soft_modes<E, Q>(
+    start: ArrayView1<f64>,
+    hop: usize,
+    evaluate: &mut E,
+    quench: &mut Q,
+    cfg: &Activation,
+    best_energy: &mut f64,
+    best: &mut Array1<f64>,
+) where
+    E: FnMut(ArrayView1<f64>) -> (f64, Array1<f64>),
+    Q: FnMut(ArrayView1<f64>) -> Array1<f64>,
+{
+    let epsilon = cfg.epsilon.max(1e-8);
+    // Twice the climb's Lanczos length resolves the softest band. The
+    // higher Ritz values in a longer run are not that band.
+    let steps = cfg.lanczos_steps.saturating_mul(2).max(8);
+    let count = cfg.lanczos_steps.max(2);
+    let Some((_, modes, _)) = soft_subspace(
+        start,
+        |point| Some(evaluate(point).1),
+        steps,
+        epsilon,
+        count,
+    ) else {
+        return;
+    };
+    println!(
+        "{{\"kind\":\"subspace\",\"hop\":{hop},\"modes\":{}}}",
+        modes.len()
+    );
+    let _ = std::io::stdout().flush();
+    for (index, mode) in modes.iter().enumerate() {
+        for travel in [1.0_f64, -1.0] {
+            let ridge = climb_cover(start, mode.view(), travel, true, evaluate, cfg);
+            println!(
+                "{{\"kind\":\"climb\",\"hop\":{hop},\"axis\":\"mode{index}\",\"travel\":{travel},\"crossed\":{},\"lambda\":{:.6},\"lowest\":{:.6},\"steps\":{},\"axial\":{:.4},\"landings\":{}}}",
+                ridge.crossed,
+                ridge.lambda,
+                ridge.lowest,
+                ridge.steps,
+                ridge.axial,
+                ridge.landings.len()
+            );
+            for landing in &ridge.landings {
+                if landing.iter().any(|value| !value.is_finite()) {
+                    continue;
+                }
+                let quenched = quench(landing.view());
+                let _ = note_exit(evaluate, &quenched, hop, best_energy, best);
+            }
+        }
+    }
+}
+
 fn climb_directions<E, Q>(
     start: ArrayView1<f64>,
     direction: &[f64],
@@ -1382,6 +1436,17 @@ where
         stations.push(outer);
     }
     let mut shelf: Option<(f64, Array1<f64>)> = None;
+    if contact > 0.95 && n_atoms >= 2 {
+        climb_soft_modes(
+            origin.view(),
+            0,
+            &mut evaluate,
+            &mut quench,
+            cfg,
+            &mut best_e,
+            &mut best,
+        );
+    }
     for hop in 0..max_hops {
         if contact > 0.95 && n_atoms >= 2 {
             let n_cover = crate::hypersphere::default_cover_size();
@@ -1532,6 +1597,15 @@ where
             if !distinct || !compact {
                 continue;
             }
+            climb_soft_modes(
+                quenched.view(),
+                0,
+                &mut evaluate,
+                &mut quench,
+                cfg,
+                &mut best_e,
+                &mut best,
+            );
             // The centred minimum gets the whole cover, one climb each way.
             // The caller's hop cap still bounds the search that starts on
             // the original geometry.
