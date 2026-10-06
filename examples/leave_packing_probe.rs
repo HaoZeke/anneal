@@ -313,7 +313,8 @@ fn main() {
             overshoot: 3.0,
             step: 0.08,
             lanczos_steps: 20,
-            perp_steps: 2,
+            perp_steps: 8,
+            perp_rate: 0.05,
             refresh: 4,
             ..anneal_core::methods::activation::Activation::default()
         };
@@ -341,11 +342,12 @@ fn main() {
                 Some(outcome) => (outcome.crossed, outcome.state),
                 None => (false, start.clone()),
             };
-            let trial = if crossed {
+            let pre = potential.value_and_gradient(climbed_state.view()).0;
+            // A shoulder thousands above the well is a clash. Only a
+            // modest rise is a ridge worth quenching off.
+            let trial = if crossed && pre.is_finite() && pre < ico_energy + 30.0 {
                 quench(&potential, climbed_state.view(), steps)
             } else {
-                // The ridge was not reached. Quenching the shoulder
-                // falls back into the well, so try the shipped exit too.
                 anneal_core::methods::activation::cover_climb_quench(
                     ico.view(),
                     rmsd,
@@ -355,7 +357,6 @@ fn main() {
                     &cfg,
                 )
             };
-            let pre = potential.value_and_gradient(climbed_state.view()).0;
             println!(
                 "{{\"kind\":\"climb_ridge\",\"index\":{index},\"crossed\":{crossed},\"shoulder\":{pre:.6}}}"
             );
