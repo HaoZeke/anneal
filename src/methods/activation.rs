@@ -312,51 +312,52 @@ where
 /// remaining gradient is followed, then the caller quenches with every
 /// atom free. A structure that already has an atom on the centre is
 /// unchanged. No stored geometry is read.
-fn occupy_centre<E>(origin: ArrayView1<f64>, evaluate: &mut E) -> Option<Array1<f64>>
+fn shell_representatives(origin: ArrayView1<f64>, com: [f64; 3], contact: f64) -> Vec<usize> {
+    let n = origin.len() / 3;
+    let mut order: Vec<(f64, usize)> = (0..n)
+        .map(|i| {
+            let mut r2 = 0.0;
+            for k in 0..3 {
+                let d = origin[3 * i + k] - com[k];
+                r2 += d * d;
+            }
+            (r2.sqrt(), i)
+        })
+        .collect();
+    order.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+    let mut picked = Vec::new();
+    let mut last = f64::NAN;
+    for (radius, index) in order {
+        if radius <= 1.0e-8 {
+            continue;
+        }
+        if !last.is_finite() || radius - last > contact * 0.5 {
+            picked.push(index);
+            last = radius;
+        }
+    }
+    picked
+}
+
+fn pin_and_relax<E>(
+    origin: ArrayView1<f64>,
+    pin: usize,
+    com: [f64; 3],
+    contact: f64,
+    evaluate: &mut E,
+) -> Array1<f64>
 where
     E: FnMut(ArrayView1<f64>) -> (f64, Array1<f64>),
 {
     let n = origin.len() / 3;
-    if n < 2 {
-        return None;
-    }
-    let contact = closest_pair(origin);
-    if !(contact > 0.95) {
-        return None;
-    }
-    let mut com = [0.0; 3];
-    for i in 0..n {
-        for k in 0..3 {
-            com[k] += origin[3 * i + k];
-        }
-    }
-    for value in &mut com {
-        *value /= n as f64;
-    }
-    let mut nearest = 0usize;
-    let mut best_r2 = f64::MAX;
-    for i in 0..n {
-        let mut r2 = 0.0;
-        for k in 0..3 {
-            let d = origin[3 * i + k] - com[k];
-            r2 += d * d;
-        }
-        if r2 < best_r2 {
-            best_r2 = r2;
-            nearest = i;
-        }
-    }
-    if best_r2 <= 1.0e-8 {
-        return None;
-    }
     let mut cur = origin.to_owned();
     for k in 0..3 {
-        cur[3 * nearest + k] = com[k];
+        cur[3 * pin + k] = com[k];
     }
     let (mut energy, mut grad) = evaluate(cur.view());
     for _ in 0..cur.len() {
         for k in 0..3 {
-            grad[3 * nearest + k] = 0.0;
+            grad[3 * pin + k] = 0.0;
         }
         let gnorm: f64 = grad.iter().map(|value| value * value).sum::<f64>().sqrt();
         if !energy.is_finite() || !gnorm.is_finite() || gnorm == 0.0 {
@@ -384,7 +385,7 @@ where
                 }
             }
             for k in 0..3 {
-                trial[3 * nearest + k] = 0.0;
+                trial[3 * pin + k] = 0.0;
             }
             let (next, next_grad) = evaluate(trial.view());
             if next.is_finite() && next < energy {
@@ -400,7 +401,35 @@ where
             break;
         }
     }
-    Some(cur)
+    cur
+}
+
+fn occupy_centre<E>(origin: ArrayView1<f64>, evaluate: &mut E) -> Vec<Array1<f64>>
+where
+    E: FnMut(ArrayView1<f64>) -> (f64, Array1<f64>),
+{
+    let n = origin.len() / 3;
+    if n < 2 {
+        return Vec::new();
+    }
+    let contact = closest_pair(origin);
+    if !(contact > 0.95) {
+        return Vec::new();
+    }
+    let mut com = [0.0; 3];
+    for i in 0..n {
+        for k in 0..3 {
+            com[k] += origin[3 * i + k];
+        }
+    }
+    for value in &mut com {
+        *value /= n as f64;
+    }
+    let mut out = Vec::new();
+    for pin in shell_representatives(origin, com, contact) {
+        out.push(pin_and_relax(origin, pin, com, contact, evaluate));
+    }
+    out
 }
 
 pub fn cover_climb_search<E, Q>(
@@ -428,7 +457,7 @@ where
     );
     let mut best = origin.to_owned();
     let mut best_e = origin_e;
-    if let Some(occupied) = occupy_centre(origin, &mut evaluate) {
+    for occupied in occupy_centre(origin, &mut evaluate) {
         let quenched = quench(occupied.view());
         let (value, _) = evaluate(quenched.view());
         if value.is_finite() {
@@ -740,9 +769,11 @@ where
         }
         let descending = sign * along < 0.0;
         if saw_uphill && descending && lambda < 0.0 && rise >= cfg.min_rise {
-            let higher = ridge.as_ref().is_none_or(|(_, _, kept)| rise > *kept);
-            if higher {
-                ridge = Some((cur.clone(), mode.clone(), rise));
+            // A clash has a large negative curvature. The ridge to leave
+            // from is the one closest to zero.
+            let softer = ridge.as_ref().is_none_or(|(_, _, kept)| lambda > *kept);
+            if softer {
+                ridge = Some((cur.clone(), mode.clone(), lambda));
                 crossed = true;
             }
             saw_uphill = false;
