@@ -1062,7 +1062,24 @@ pub fn step_away_featomic<R: Rng + ?Sized>(
         if mobile.is_some_and(|set| set.len() < x.len() / 3) {
             return x.to_owned();
         }
-        return packing_kick(x, &s, rmsd, mobile, rng);
+        // SOAP has no direction. The fivefold residual is the step that
+        // still changes a pentagon-rich shell. A shell with no fivefold
+        // axis leaves that residual at the identity, and the kick remains.
+        let five = crate::soap::step_away_fivefold_measured(x, rmsd);
+        let n = (x.len() / 3).max(1) as f64;
+        let moved = five
+            .iter()
+            .zip(x.iter())
+            .map(|(a, b)| {
+                let d = a - b;
+                d * d
+            })
+            .sum::<f64>()
+            / n;
+        if moved.sqrt() > 1e-6 {
+            return five;
+        }
+        packing_kick(x, &s, rmsd, mobile, rng)
     }
     focus_patch(&mut s, x, rcut, rng);
     let dr = tikhonov(&s.jacobian, s.leftover.view(), LAMBDA);
