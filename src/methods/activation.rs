@@ -179,11 +179,30 @@ where
     let contact = closest_pair(origin);
     let n_atoms = origin.len() / 3;
     // A cluster is displaced in its soft subspace. The cover only chooses
-    // the sign of each mode. The amplitude is one contact length of
+    // the sign of each mode. The amplitude is the cluster radius as an
     // all-atom RMS, shared across the modes and weighted toward the
     // softest. The minimum-mode climb then leaves that point, and the
     // quench follows.
     if contact > 0.95 && n_atoms >= 2 {
+        let mut com = [0.0; 3];
+        for i in 0..n_atoms {
+            for k in 0..3 {
+                com[k] += origin[3 * i + k];
+            }
+        }
+        for value in &mut com {
+            *value /= n_atoms as f64;
+        }
+        let mut reach = 0.0_f64;
+        for i in 0..n_atoms {
+            let mut r2 = 0.0;
+            for k in 0..3 {
+                let d = origin[3 * i + k] - com[k];
+                r2 += d * d;
+            }
+            reach = reach.max(r2.sqrt());
+        }
+        let span = reach.max(contact);
         if let Some((lambdas, modes, _)) = crate::curvature::soft_subspace(
             origin,
             |point| grad(point),
@@ -197,7 +216,7 @@ where
                 let mut kicked = origin.to_owned();
                 for (lambda, mode) in lambdas.iter().zip(modes.iter()) {
                     let weight = (lambda_min / lambda.max(lambda_min)).sqrt();
-                    let amp = contact * (n_atoms as f64).sqrt() * weight / share;
+                    let amp = span * (n_atoms as f64).sqrt() * weight / share;
                     let align: f64 = mode.iter().zip(direction.iter()).map(|(a, b)| a * b).sum();
                     let sign = if align >= 0.0 { 1.0 } else { -1.0 };
                     for i in 0..kicked.len() {
