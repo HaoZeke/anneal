@@ -1656,7 +1656,7 @@ fn ride_lowest_mode<E, Q>(
     config.activation_attempts = 5;
     config.maximum_move = contact * 0.05;
     config.quench_steps = n_atoms.saturating_mul(16).max(64);
-    config.saddle_steps = n_atoms.saturating_mul(16).max(64);
+    config.saddle_steps = n_atoms.saturating_mul(2).max(64);
     // The library gates are tighter than a quenched Lennard-Jones cluster
     // reaches, so the ride aborts before the saddle is recorded.
     config.quench_gradient_tolerance = 1e-3;
