@@ -1673,10 +1673,10 @@ fn ride_lowest_mode<E, Q>(
         config.quench_gradient_tolerance, config.saddle_force_tolerance, config.maximum_move
     );
     let _ = std::io::stdout().flush();
+    let (floor_energy, _) = evaluate(start);
     let surface = ForceSurface {
         evaluate: std::sync::Mutex::new(evaluate),
     };
-    let (floor_energy, _) = evaluate(start);
     let mut saddles: Vec<(Array1<f64>, Array1<f64>, f64)> = Vec::new();
     let mut ride_modes = vec![features.mode.clone()];
     for axis in outer_axes(start, contact).into_iter().take(3) {
