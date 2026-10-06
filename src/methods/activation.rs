@@ -673,7 +673,7 @@ where
         let n_atoms = origin.len() / 3;
         let base_pack = packed_fraction(origin);
         println!("{{\"kind\":\"exit_order\",\"packed\":{base_pack:.4},\"role\":\"start\"}}");
-        let kinetics = [12.0_f64, 28.0, 55.0, 90.0];
+        let kinetics = [40.0_f64, 120.0, 220.0];
         for (attempt, kinetic) in kinetics.into_iter().enumerate().take(max_hops.max(1)) {
             if best_e < origin_e - 0.05 {
                 return best;
@@ -688,12 +688,12 @@ where
             }
             let scale = (2.0 * kinetic / draw_sum.max(1.0e-12)).sqrt();
             velocity *= scale;
-            let dt = 0.004;
+            let dt = 0.003;
             let mut best_pack = base_pack;
-            let mut best_frame = point.clone();
-            for step in 0..900 {
+            let mut quenched_peak = false;
+            for step in 0..2_500 {
                 let (energy, force) = evaluate(point.view());
-                if !energy.is_finite() || energy > origin_e + 80.0 {
+                if !energy.is_finite() || energy > origin_e + 120.0 {
                     break;
                 }
                 for i in 0..point.len() {
@@ -716,38 +716,48 @@ where
                 for value in &mut com_v {
                     *value /= n_atoms as f64;
                 }
+                let mut kinetic_now = 0.0;
                 for atom in 0..n_atoms {
                     for axis in 0..3 {
                         velocity[3 * atom + axis] -= com_v[axis];
+                        let speed = velocity[3 * atom + axis];
+                        kinetic_now += speed * speed;
                     }
                 }
-                if step % 30 == 0 {
+                let rescale = (2.0 * kinetic / kinetic_now.max(1.0e-12)).sqrt();
+                velocity *= rescale;
+                if step % 40 == 0 {
                     let packed = packed_fraction(point.view());
                     if packed > best_pack {
                         best_pack = packed;
-                        best_frame = point.clone();
+                    }
+                    if packed > base_pack + 0.08 {
+                        let quenched = quench(point.view());
+                        note_candidate(
+                            &quenched,
+                            &mut evaluate,
+                            &mut best,
+                            &mut best_e,
+                            attempt,
+                            origin_e,
+                            &mut bank,
+                            &rejected,
+                        );
+                        quenched_peak = true;
+                        if best_e < origin_e - 0.05 {
+                            println!(
+                                "{{\"kind\":\"exit_hop\",\"hop\":{attempt},\"here\":{best_e:.6},\"best\":{best_e:.6},\"packed\":{best_pack:.4},\"phase\":\"order\",\"left\":true}}"
+                            );
+                            let _ = std::io::stdout().flush();
+                            return best;
+                        }
                     }
                 }
             }
-            let quenched = quench(best_frame.view());
-            note_candidate(
-                &quenched,
-                &mut evaluate,
-                &mut best,
-                &mut best_e,
-                attempt,
-                origin_e,
-                &mut bank,
-                &rejected,
-            );
-            let (value, _) = evaluate(quenched.view());
             println!(
-                "{{\"kind\":\"exit_hop\",\"hop\":{attempt},\"here\":{value:.6},\"best\":{best_e:.6},\"packed\":{best_pack:.4},\"phase\":\"order\"}}"
+                "{{\"kind\":\"exit_hop\",\"hop\":{attempt},\"here\":{here_e:.6},\"best\":{best_e:.6},\"packed\":{best_pack:.4},\"quenched\":{quenched_peak},\"phase\":\"order\"}}"
             );
             let _ = std::io::stdout().flush();
-            if best_e < origin_e - 0.05 {
-                return best;
-            }
         }
     }
     if best_e < origin_e - 0.05 {
