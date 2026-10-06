@@ -5,9 +5,9 @@
 //! stick out of the species mean. On a closed shell that leftover is
 //! a core-versus-surface breath: the quench returns the same packing.
 //! The packing label is the unit species mean `μ` (the bank Dcut).
-//! When leftover is a shell mode the hop is a kick of `μ` along a
-//! random direction orthogonal to the occupied mean, pulled back
-//! through `∂μ/∂x`. Occupancy archive holes and packing kicks then
+//! When leftover is a shell mode the hop places one point of the
+//! Plasencia cover of the displacement sphere. A fivefold residual
+//! is the fallback, then a kick of `μ`. Occupancy archive holes and packing kicks then
 //! ring-lens that Cartesian step: pentagon atoms when the occupied
 //! profile has 5-rings, triangle atoms when it does not. Champion
 //! leftover SOAP is not that lens. No Marks, fcc, or 421 target.
@@ -75,6 +75,19 @@ pub fn packing_archive() -> Vec<Array1<f64>> {
 
 /// Leftover RMS below which the hop yields.
 const DEFECT: f64 = 1e-4;
+
+fn displacement_rms(y: &Array1<f64>, x: ArrayView1<f64>) -> f64 {
+    let n = (x.len() / 3).max(1) as f64;
+    let sum = y
+        .iter()
+        .zip(x.iter())
+        .map(|(a, b)| {
+            let d = a - b;
+            d * d
+        })
+        .sum::<f64>();
+    (sum / n).sqrt()
+}
 const LAMBDA: f64 = 1e-3;
 
 thread_local! {
@@ -1062,21 +1075,16 @@ pub fn step_away_featomic<R: Rng + ?Sized>(
         if mobile.is_some_and(|set| set.len() < x.len() / 3) {
             return x.to_owned();
         }
-        // SOAP has no direction. The fivefold residual is the step that
-        // still changes a pentagon-rich shell. A shell with no fivefold
-        // axis leaves that residual at the identity, and the kick remains.
+        // SOAP has no direction. One point of the Plasencia cover of
+        // the displacement sphere is the generic rearrangement. The
+        // fivefold residual is the fallback when that placement does
+        // not move, and the kick remains only if that residual is flat.
+        let covered = leave_archive_hole(x, rcut, species, mobile, rmsd, rng);
+        if displacement_rms(&covered, x) > 1e-6 {
+            return covered;
+        }
         let five = crate::soap::step_away_fivefold_measured(x, rmsd);
-        let n = (x.len() / 3).max(1) as f64;
-        let moved = five
-            .iter()
-            .zip(x.iter())
-            .map(|(a, b)| {
-                let d = a - b;
-                d * d
-            })
-            .sum::<f64>()
-            / n;
-        if moved.sqrt() > 1e-6 {
+        if displacement_rms(&five, x) > 1e-6 {
             return five;
         }
         packing_kick(x, &s, rmsd, mobile, rng)
