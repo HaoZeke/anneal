@@ -105,11 +105,12 @@ cargo build --offline --locked --release --features featomic,ira,bank-rpc \
   --example catalog_server \
   --example catalog_status \
   --example bank_server \
-  --example leave_packing_probe
+  --example leave_packing_probe \
+  --example ico75_hop
 BIN=$CARGO_TARGET_DIR/release/examples/lj_cluster_search
 ldd "$BIN"
 mkdir -p "$NFS_ROOT/target/release/examples"
-for example in lj_cluster_search lj_census_calibration catalog_server catalog_status bank_server leave_packing_probe; do
+for example in lj_cluster_search lj_census_calibration catalog_server catalog_status bank_server leave_packing_probe ico75_hop; do
   elja_publish "$CARGO_TARGET_DIR/release/examples/$example" "$NFS_ROOT/target/release/examples/$example"
 done
 git rev-parse HEAD >SOURCE_COMMIT
