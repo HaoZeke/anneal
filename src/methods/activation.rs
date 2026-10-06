@@ -1628,13 +1628,10 @@ fn ride_lowest_mode<E, Q>(
         return;
     }
     let epsilon = 1e-4;
-    let Some((_, modes, _)) = soft_subspace(start, |point| Some(evaluate(point).1), 16, epsilon, 4)
+    let Some(features) = curvature_features(start, |point| Some(evaluate(point).1), 12, epsilon)
     else {
         return;
     };
-    if modes.is_empty() {
-        return;
-    }
     let Ok(geometry) = DescriptorGeometry::finite(contact) else {
         return;
     };
@@ -1666,12 +1663,11 @@ fn ride_lowest_mode<E, Q>(
     config.saddle_force_tolerance = 1e-2;
     config.minimum_mode_force_tolerance = 1e-2;
     config.refine_with_prfo = false;
-    // Extra branch attempts shrink the launch, and hundreds of IRC steps
-    // at a large launch tear the cluster apart. One step of a quarter of
-    // a contact, then the quench, is the downhill branch.
+    // One IRC step of one contact, then the quench. A shorter step falls
+    // back into the same well. Many steps at this length tear the cluster.
     config.branch_attempts = 1;
     config.irc_steps = 1;
-    config.irc_step = 0.5 * contact * (n_atoms as f64).sqrt();
+    config.irc_step = contact * (n_atoms as f64).sqrt();
     println!(
         "{{\"kind\":\"dimer_cfg\",\"quench_tol\":{},\"saddle_tol\":{},\"move\":{}}}",
         config.quench_gradient_tolerance, config.saddle_force_tolerance, config.maximum_move
@@ -1680,7 +1676,7 @@ fn ride_lowest_mode<E, Q>(
     let surface = ForceSurface {
         evaluate: std::sync::Mutex::new(evaluate),
     };
-    for (index, feature) in modes.iter().enumerate() {
+    for (index, feature) in [features.mode].iter().enumerate() {
         for travel in [1.0_f64, -1.0] {
             let mode = if travel < 0.0 {
                 -feature.clone()
