@@ -197,6 +197,68 @@ where
     chosen
 }
 
+/// Covering displacement, fivefold openings of the same shell, a
+/// minimum-mode climb, then a quench. The lowest minimum is kept.
+///
+/// The hypersphere cover picks a direction. On a shell that still has
+/// pentagonal axes, those axes are further covering directions: they
+/// are read off the coordinates, not off a target minimum. No target
+/// energy is supplied.
+pub fn cover_climb_quench_min<G, Q, E>(
+    origin: ArrayView1<f64>,
+    rmsd: f64,
+    cover_index: usize,
+    mut grad: G,
+    mut quench: Q,
+    mut energy: E,
+    cfg: &Activation,
+) -> Array1<f64>
+where
+    G: FnMut(ArrayView1<f64>) -> Option<Array1<f64>>,
+    Q: FnMut(ArrayView1<f64>) -> Array1<f64>,
+    E: FnMut(ArrayView1<f64>) -> f64,
+{
+    let mut best = origin.to_owned();
+    let mut best_e = energy(origin.view());
+    let mut consider = |mut point: Array1<f64>| {
+        let climbed = activate_from_origin(point.view(), origin, &mut grad, cfg);
+        if let Some(outcome) = climbed {
+            if outcome.crossed {
+                point = outcome.state;
+            }
+        }
+        let quenched = quench(point.view());
+        let value = energy(quenched.view());
+        if value.is_finite() && value < best_e - 1e-6 {
+            best_e = value;
+            best = quenched;
+        }
+    };
+    let n_cover = crate::hypersphere::default_cover_size();
+    let direction = crate::hypersphere::cover_direction(n_cover, origin.len(), cover_index);
+    let placed = crate::hypersphere::place_around(
+        origin.as_slice().unwrap_or(&[]),
+        &direction,
+        rmsd.max(1e-3),
+        None,
+    );
+    if placed.len() == origin.len() {
+        consider(Array1::from(placed));
+    }
+    let table = crate::soap::fivefold_axis_table(origin);
+    let mut openings: Vec<([f64; 3], f64)> = table
+        .into_iter()
+        .filter(|(_, d5)| (*d5 - 0.90).abs() < 0.06 || (*d5 - 0.99).abs() < 0.06)
+        .collect();
+    openings.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
+    openings.dedup_by(|a, b| (a.1 - b.1).abs() < 1e-3);
+    for (axis, _) in openings.into_iter().take(2) {
+        let kicked = crate::soap::step_away_fivefold_about(origin, rmsd.max(0.75), axis);
+        consider(kicked);
+    }
+    best
+}
+
 /// Climb along `direction` first, then track the minimum mode.
 ///
 /// The first steps follow the supplied vector. Later steps replace it

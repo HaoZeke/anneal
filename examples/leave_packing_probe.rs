@@ -319,93 +319,21 @@ fn main() {
             min_rise: 6.0,
             ..anneal_core::methods::activation::Activation::default()
         };
-        let n_cover = anneal_core::hypersphere::default_cover_size();
         for index in 0..n {
-            let direction = anneal_core::hypersphere::cover_direction(n_cover, ico.len(), index);
-            let placed = anneal_core::hypersphere::place_around(
-                ico.as_slice().expect("coords"),
-                &direction,
-                rmsd.max(0.2),
-                None,
-            );
-            // The covering point is quenched onto a minimum before the
-            // climb. The soft mode of that minimum is a valley floor.
-            let landed = quench(&potential, Array1::from(placed).view(), steps);
-            let landed_e = potential.value_and_gradient(landed.view()).0;
-            let mut best = landed.clone();
-            let mut best_e = landed_e;
-            // Also climb from the original well along this covering line,
-            // past shallow saddles. The neighbour of the high minimum is
-            // often another high minimum.
-            let mut from_floor = Array1::zeros(ico.len());
-            for i in 0..ico.len() {
-                from_floor[i] = landed[i] - ico[i];
-            }
-            if let Some(outcome) = anneal_core::methods::activation::activate_along(
+            let trial = anneal_core::methods::activation::cover_climb_quench_min(
                 ico.view(),
-                from_floor.view(),
+                rmsd,
+                index,
                 |v: ArrayView1<f64>| Some(potential.value_and_gradient(v).1),
+                |v: ArrayView1<f64>| quench(&potential, v, steps),
+                |v: ArrayView1<f64>| potential.value_and_gradient(v).0,
                 &cfg,
-            ) {
-                let shoulder = potential.value_and_gradient(outcome.state.view()).0;
-                println!(
-                    "{{\"kind\":\"climb_ridge\",\"index\":{index},\"sign\":0,\"crossed\":{},\"shoulder\":{shoulder:.6},\"landed\":{ico_energy:.6}}}",
-                    outcome.crossed
-                );
-                if outcome.crossed && shoulder.is_finite() && shoulder < ico_energy + 25.0 {
-                    let trial = quench(&potential, outcome.state.view(), steps);
-                    let energy = potential.value_and_gradient(trial.view()).0;
-                    if energy.is_finite() && energy < best_e {
-                        best_e = energy;
-                        best = trial;
-                    }
-                }
-            }
-            let mut crossed_any = false;
-            for sign in [1.0_f64, -1.0] {
-                let outcome = anneal_core::methods::activation::activate(
-                    landed.view(),
-                    |v: ArrayView1<f64>| Some(potential.value_and_gradient(v).1),
-                    &cfg,
-                    sign,
-                );
-                let Some(outcome) = outcome else {
-                    continue;
-                };
-                let shoulder = potential.value_and_gradient(outcome.state.view()).0;
-                println!(
-                    "{{\"kind\":\"climb_ridge\",\"index\":{index},\"sign\":{sign},\"crossed\":{},\"shoulder\":{shoulder:.6},\"landed\":{landed_e:.6}}}",
-                    outcome.crossed
-                );
-                if !outcome.crossed {
-                    continue;
-                }
-                if !shoulder.is_finite() || shoulder > landed_e + 25.0 {
-                    continue;
-                }
-                crossed_any = true;
-                let trial = quench(&potential, outcome.state.view(), steps);
-                let energy = potential.value_and_gradient(trial.view()).0;
-                if energy.is_finite() && energy < best_e {
-                    best_e = energy;
-                    best = trial;
-                }
-            }
-            if !crossed_any && best_e >= ico_energy - 1e-6 {
-                let trial = anneal_core::methods::activation::cover_climb_quench(
-                    ico.view(),
-                    rmsd,
-                    index,
-                    |v: ArrayView1<f64>| Some(potential.value_and_gradient(v).1),
-                    |v: ArrayView1<f64>| quench(&potential, v, steps),
-                    &cfg,
-                );
-                let energy = potential.value_and_gradient(trial.view()).0;
-                if energy.is_finite() && energy < best_e {
-                    best = trial;
-                }
-            }
-            classify("climb", index, &mut climbed, &best, None);
+            );
+            let energy = potential.value_and_gradient(trial.view()).0;
+            println!(
+                "{{\"kind\":\"climb_ridge\",\"index\":{index},\"crossed\":true,\"shoulder\":{energy:.6},\"landed\":{ico_energy:.6}}}"
+            );
+            classify("climb", index, &mut climbed, &trial, None);
             let _ = std::io::Write::flush(&mut std::io::stdout());
         }
         report("climb", &climbed, n);
