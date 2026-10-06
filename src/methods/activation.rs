@@ -306,6 +306,103 @@ where
 /// A hollow centre and a centred core are different packings. The atom
 /// that moves is one of the innermost, or the outermost. The quench
 /// decides which packing that core belongs to. No target geometry is used.
+/// Move the atom nearest the centre onto the centre and relax the others.
+///
+/// The centre is the centre of mass. The atom is held there while the
+/// remaining gradient is followed, then the caller quenches with every
+/// atom free. A structure that already has an atom on the centre is
+/// unchanged. No stored geometry is read.
+fn occupy_centre<E>(origin: ArrayView1<f64>, evaluate: &mut E) -> Option<Array1<f64>>
+where
+    E: FnMut(ArrayView1<f64>) -> (f64, Array1<f64>),
+{
+    let n = origin.len() / 3;
+    if n < 2 {
+        return None;
+    }
+    let contact = closest_pair(origin);
+    if !(contact > 0.95) {
+        return None;
+    }
+    let mut com = [0.0; 3];
+    for i in 0..n {
+        for k in 0..3 {
+            com[k] += origin[3 * i + k];
+        }
+    }
+    for value in &mut com {
+        *value /= n as f64;
+    }
+    let mut nearest = 0usize;
+    let mut best_r2 = f64::MAX;
+    for i in 0..n {
+        let mut r2 = 0.0;
+        for k in 0..3 {
+            let d = origin[3 * i + k] - com[k];
+            r2 += d * d;
+        }
+        if r2 < best_r2 {
+            best_r2 = r2;
+            nearest = i;
+        }
+    }
+    if best_r2 <= 1.0e-8 {
+        return None;
+    }
+    let mut cur = origin.to_owned();
+    for k in 0..3 {
+        cur[3 * nearest + k] = com[k];
+    }
+    let (mut energy, mut grad) = evaluate(cur.view());
+    for _ in 0..cur.len() {
+        for k in 0..3 {
+            grad[3 * nearest + k] = 0.0;
+        }
+        let gnorm: f64 = grad.iter().map(|value| value * value).sum::<f64>().sqrt();
+        if !energy.is_finite() || !gnorm.is_finite() || gnorm == 0.0 {
+            break;
+        }
+        let mut alpha = contact / gnorm;
+        let mut improved = false;
+        while alpha * gnorm > 1.0e-8 {
+            let mut trial = cur.clone();
+            for i in 0..trial.len() {
+                trial[i] -= alpha * grad[i];
+            }
+            let mut shift = [0.0; 3];
+            for i in 0..n {
+                for k in 0..3 {
+                    shift[k] += trial[3 * i + k];
+                }
+            }
+            for value in &mut shift {
+                *value /= n as f64;
+            }
+            for i in 0..n {
+                for k in 0..3 {
+                    trial[3 * i + k] -= shift[k];
+                }
+            }
+            for k in 0..3 {
+                trial[3 * nearest + k] = 0.0;
+            }
+            let (next, next_grad) = evaluate(trial.view());
+            if next.is_finite() && next < energy {
+                cur = trial;
+                energy = next;
+                grad = next_grad;
+                improved = true;
+                break;
+            }
+            alpha *= 0.5;
+        }
+        if !improved {
+            break;
+        }
+    }
+    Some(cur)
+}
+
 pub fn cover_climb_search<E, Q>(
     origin: ArrayView1<f64>,
     rmsd: f64,
@@ -331,6 +428,20 @@ where
     );
     let mut best = origin.to_owned();
     let mut best_e = origin_e;
+    if let Some(occupied) = occupy_centre(origin, &mut evaluate) {
+        let quenched = quench(occupied.view());
+        let (value, _) = evaluate(quenched.view());
+        if value.is_finite() {
+            println!(
+                "{{\"kind\":\"exit_candidate\",\"energy\":{value:.6},\"hop\":0,\"role\":\"centre\"}}"
+            );
+            let _ = std::io::stdout().flush();
+            if value < best_e {
+                best_e = value;
+                best = quenched;
+            }
+        }
+    }
     for hop in 0..max_hops {
         let quenched = cover_climb_quench(
             best.view(),
