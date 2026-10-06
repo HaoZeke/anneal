@@ -526,7 +526,33 @@ fn outer_axes(x: ArrayView1<f64>, contact: f64) -> Vec<[f64; 3]> {
     axes
 }
 
-fn rotate_positive_cap(x: ArrayView1<f64>, axis: [f64; 3], angle: f64) -> Array1<f64> {
+fn plane_basis(axis: [f64; 3]) -> ([f64; 3], [f64; 3]) {
+    let [ax, ay, az] = axis;
+    let seed = if ax.abs() < 0.9 {
+        [1.0, 0.0, 0.0]
+    } else {
+        [0.0, 1.0, 0.0]
+    };
+    let mut e1 = [
+        ay * seed[2] - az * seed[1],
+        az * seed[0] - ax * seed[2],
+        ax * seed[1] - ay * seed[0],
+    ];
+    let n = (e1[0] * e1[0] + e1[1] * e1[1] + e1[2] * e1[2])
+        .sqrt()
+        .max(1e-15);
+    for value in &mut e1 {
+        *value /= n;
+    }
+    let e2 = [
+        ay * e1[2] - az * e1[1],
+        az * e1[0] - ax * e1[2],
+        ax * e1[1] - ay * e1[0],
+    ];
+    (e1, e2)
+}
+
+fn stagger_layers(x: ArrayView1<f64>, axis: [f64; 3], angle: f64, contact: f64) -> Array1<f64> {
     let n_atoms = x.len() / 3;
     let mut y = x.to_owned();
     if n_atoms == 0 {
@@ -541,20 +567,9 @@ fn rotate_positive_cap(x: ArrayView1<f64>, axis: [f64; 3], angle: f64) -> Array1
     for value in &mut com {
         *value /= n_atoms as f64;
     }
-    let (sin, cos) = angle.sin_cos();
-    let t = 1.0 - cos;
     let [ax, ay, az] = axis;
-    let rot = [
-        t * ax * ax + cos,
-        t * ax * ay - sin * az,
-        t * ax * az + sin * ay,
-        t * ax * ay + sin * az,
-        t * ay * ay + cos,
-        t * ay * az - sin * ax,
-        t * ax * az - sin * ay,
-        t * ay * az + sin * ax,
-        t * az * az + cos,
-    ];
+    let (e1, e2) = plane_basis(axis);
+    let mut rows: Vec<(f64, usize, f64, f64)> = Vec::with_capacity(n_atoms);
     for atom in 0..n_atoms {
         let r = [
             y[3 * atom] - com[0],
@@ -562,16 +577,124 @@ fn rotate_positive_cap(x: ArrayView1<f64>, axis: [f64; 3], angle: f64) -> Array1
             y[3 * atom + 2] - com[2],
         ];
         let height = r[0] * ax + r[1] * ay + r[2] * az;
-        if height <= 0.0 {
-            continue;
+        let perp = [r[0] - height * ax, r[1] - height * ay, r[2] - height * az];
+        let rho = (perp[0] * perp[0] + perp[1] * perp[1] + perp[2] * perp[2]).sqrt();
+        let phi = if rho > 1e-8 {
+            let c = (perp[0] * e1[0] + perp[1] * e1[1] + perp[2] * e1[2]) / rho;
+            let s = (perp[0] * e2[0] + perp[1] * e2[1] + perp[2] * e2[2]) / rho;
+            s.atan2(c)
+        } else {
+            0.0
+        };
+        rows.push((height, atom, rho, phi));
+    }
+    rows.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+    let mut layer = 0usize;
+    for index in 0..rows.len() {
+        if index > 0 && rows[index].0 - rows[index - 1].0 > contact * 0.25 {
+            layer += 1;
         }
-        let turned = [
-            rot[0] * r[0] + rot[1] * r[1] + rot[2] * r[2],
-            rot[3] * r[0] + rot[4] * r[1] + rot[5] * r[2],
-            rot[6] * r[0] + rot[7] * r[1] + rot[8] * r[2],
-        ];
+        if layer % 2 == 1 && rows[index].2 > 1e-8 {
+            rows[index].3 += angle;
+        }
+        let (_, atom, rho, phi) = rows[index];
+        let (sin, cos) = phi.sin_cos();
         for coord in 0..3 {
-            y[3 * atom + coord] = com[coord] + turned[coord];
+            y[3 * atom + coord] = com[coord]
+                + rows[index].0 * [ax, ay, az][coord]
+                + rho * (cos * e1[coord] + sin * e2[coord]);
+        }
+    }
+    y
+}
+
+fn relax_held_phi<E>(x: ArrayView1<f64>, axis: [f64; 3], evaluate: &mut E) -> Array1<f64>
+where
+    E: FnMut(ArrayView1<f64>) -> (f64, Array1<f64>),
+{
+    let n_atoms = x.len() / 3;
+    if n_atoms < 2 {
+        return x.to_owned();
+    }
+    let mut com = [0.0; 3];
+    for atom in 0..n_atoms {
+        for coord in 0..3 {
+            com[coord] += x[3 * atom + coord];
+        }
+    }
+    for value in &mut com {
+        *value /= n_atoms as f64;
+    }
+    let [ax, ay, az] = axis;
+    let (e1, e2) = plane_basis(axis);
+    let mut polar = Vec::with_capacity(n_atoms);
+    for atom in 0..n_atoms {
+        let r = [
+            x[3 * atom] - com[0],
+            x[3 * atom + 1] - com[1],
+            x[3 * atom + 2] - com[2],
+        ];
+        let height = r[0] * ax + r[1] * ay + r[2] * az;
+        let perp = [r[0] - height * ax, r[1] - height * ay, r[2] - height * az];
+        let rho = (perp[0] * perp[0] + perp[1] * perp[1] + perp[2] * perp[2]).sqrt();
+        let phi = if rho > 1e-8 {
+            let c = (perp[0] * e1[0] + perp[1] * e1[1] + perp[2] * e1[2]) / rho;
+            let s = (perp[0] * e2[0] + perp[1] * e2[1] + perp[2] * e2[2]) / rho;
+            s.atan2(c)
+        } else {
+            0.0
+        };
+        polar.push((rho, height, phi));
+    }
+    let mut reduced = Array1::zeros(n_atoms * 2);
+    for (atom, (rho, height, _)) in polar.iter().enumerate() {
+        reduced[2 * atom] = *rho;
+        reduced[2 * atom + 1] = *height;
+    }
+    let mut opt = crate::methods::warm_lbfgs::WarmLbfgs::default();
+    let (_, reduced, _) = opt.minimize(reduced.view(), n_atoms.saturating_mul(8).max(8), |point| {
+        let mut y = Array1::zeros(x.len());
+        for atom in 0..n_atoms {
+            let rho = point[2 * atom].max(0.0);
+            let height = point[2 * atom + 1];
+            let (sin, cos) = polar[atom].2.sin_cos();
+            for coord in 0..3 {
+                y[3 * atom + coord] = com[coord]
+                    + height * [ax, ay, az][coord]
+                    + rho * (cos * e1[coord] + sin * e2[coord]);
+            }
+        }
+        let (energy, gradient) = evaluate(y.view());
+        if !energy.is_finite() {
+            return None;
+        }
+        let mut reduced_gradient = Array1::zeros(point.len());
+        for atom in 0..n_atoms {
+            let g = [
+                gradient[3 * atom],
+                gradient[3 * atom + 1],
+                gradient[3 * atom + 2],
+            ];
+            let (sin, cos) = polar[atom].2.sin_cos();
+            let e_rho = [
+                cos * e1[0] + sin * e2[0],
+                cos * e1[1] + sin * e2[1],
+                cos * e1[2] + sin * e2[2],
+            ];
+            reduced_gradient[2 * atom] = g[0] * e_rho[0] + g[1] * e_rho[1] + g[2] * e_rho[2];
+            reduced_gradient[2 * atom + 1] = g[0] * ax + g[1] * ay + g[2] * az;
+        }
+        Some((energy, reduced_gradient))
+    });
+    let mut y = Array1::zeros(x.len());
+    for atom in 0..n_atoms {
+        let rho = reduced[2 * atom].max(0.0);
+        let height = reduced[2 * atom + 1];
+        let (sin, cos) = polar[atom].2.sin_cos();
+        for coord in 0..3 {
+            y[3 * atom + coord] = com[coord]
+                + height * [ax, ay, az][coord]
+                + rho * (cos * e1[coord] + sin * e2[coord]);
         }
     }
     y
@@ -1329,121 +1452,6 @@ fn climb_relaxed_cover<E, Q>(
     }
 }
 
-fn relax_twisted_cap<E>(
-    x: ArrayView1<f64>,
-    axis: [f64; 3],
-    angle: f64,
-    evaluate: &mut E,
-) -> Array1<f64>
-where
-    E: FnMut(ArrayView1<f64>) -> (f64, Array1<f64>),
-{
-    let turned = rotate_positive_cap(x, axis, angle);
-    let n_atoms = turned.len() / 3;
-    if n_atoms < 2 {
-        return turned;
-    }
-    let mut com = [0.0; 3];
-    for atom in 0..n_atoms {
-        for coord in 0..3 {
-            com[coord] += turned[3 * atom + coord];
-        }
-    }
-    for value in &mut com {
-        *value /= n_atoms as f64;
-    }
-    let [ax, ay, az] = axis;
-    let mut caps = Vec::new();
-    let mut free = Vec::new();
-    for atom in 0..n_atoms {
-        let r = [
-            turned[3 * atom] - com[0],
-            turned[3 * atom + 1] - com[1],
-            turned[3 * atom + 2] - com[2],
-        ];
-        let height = r[0] * ax + r[1] * ay + r[2] * az;
-        let perp = [r[0] - height * ax, r[1] - height * ay, r[2] - height * az];
-        let rho = (perp[0] * perp[0] + perp[1] * perp[1] + perp[2] * perp[2]).sqrt();
-        if height > 0.0 && rho > 1e-8 {
-            caps.push((
-                atom,
-                [perp[0] / rho, perp[1] / rho, perp[2] / rho],
-                rho,
-                height,
-            ));
-        } else {
-            free.push(atom);
-        }
-    }
-    if caps.is_empty() {
-        return turned;
-    }
-    let mut reduced = Array1::zeros(free.len() * 3 + caps.len() * 2);
-    for (slot, &atom) in free.iter().enumerate() {
-        for coord in 0..3 {
-            reduced[3 * slot + coord] = turned[3 * atom + coord];
-        }
-    }
-    let cap_at = free.len() * 3;
-    for (slot, &(_, _, rho, height)) in caps.iter().enumerate() {
-        reduced[cap_at + 2 * slot] = rho;
-        reduced[cap_at + 2 * slot + 1] = height;
-    }
-    let mut opt = crate::methods::warm_lbfgs::WarmLbfgs::default();
-    let (_, reduced, _) = opt.minimize(reduced.view(), n_atoms.saturating_mul(8).max(8), |point| {
-        let mut y = turned.clone();
-        for (slot, &atom) in free.iter().enumerate() {
-            for coord in 0..3 {
-                y[3 * atom + coord] = point[3 * slot + coord];
-            }
-        }
-        for (slot, &(atom, e_rho, _, _)) in caps.iter().enumerate() {
-            let rho = point[cap_at + 2 * slot].max(1e-3);
-            let height = point[cap_at + 2 * slot + 1];
-            for coord in 0..3 {
-                let axial = [ax, ay, az][coord];
-                y[3 * atom + coord] = com[coord] + height * axial + rho * e_rho[coord];
-            }
-        }
-        let (energy, gradient) = evaluate(y.view());
-        if !energy.is_finite() {
-            return None;
-        }
-        let mut reduced_gradient = Array1::zeros(point.len());
-        for (slot, &atom) in free.iter().enumerate() {
-            for coord in 0..3 {
-                reduced_gradient[3 * slot + coord] = gradient[3 * atom + coord];
-            }
-        }
-        for (slot, &(atom, e_rho, _, _)) in caps.iter().enumerate() {
-            let g = [
-                gradient[3 * atom],
-                gradient[3 * atom + 1],
-                gradient[3 * atom + 2],
-            ];
-            reduced_gradient[cap_at + 2 * slot] =
-                g[0] * e_rho[0] + g[1] * e_rho[1] + g[2] * e_rho[2];
-            reduced_gradient[cap_at + 2 * slot + 1] = g[0] * ax + g[1] * ay + g[2] * az;
-        }
-        Some((energy, reduced_gradient))
-    });
-    let mut y = turned;
-    for (slot, &atom) in free.iter().enumerate() {
-        for coord in 0..3 {
-            y[3 * atom + coord] = reduced[3 * slot + coord];
-        }
-    }
-    for (slot, &(atom, e_rho, _, _)) in caps.iter().enumerate() {
-        let rho = reduced[cap_at + 2 * slot].max(1e-3);
-        let height = reduced[cap_at + 2 * slot + 1];
-        for coord in 0..3 {
-            let axial = [ax, ay, az][coord];
-            y[3 * atom + coord] = com[coord] + height * axial + rho * e_rho[coord];
-        }
-    }
-    y
-}
-
 fn climb_outer_axes<E, Q>(
     start: ArrayView1<f64>,
     contact: f64,
@@ -1459,10 +1467,13 @@ fn climb_outer_axes<E, Q>(
 {
     // Half a pentagon sector. The axis is an outermost atom of this
     // geometry, so the angle is the symmetry of that axis.
-    let half_sector = std::f64::consts::PI / 10.0;
+    // A pentagon sector is 2π/5. Half of that puts one ring in the gaps of
+    // the next; a quarter sector is the other symmetry fraction.
+    let sector = 2.0 * std::f64::consts::PI / 5.0;
     for (index, axis) in outer_axes(start, contact).into_iter().enumerate() {
-        for sign in [1.0_f64, -1.0] {
-            let held = relax_twisted_cap(start, axis, sign * half_sector, evaluate);
+        for fraction in [0.5_f64, 0.25] {
+            let staggered = stagger_layers(start, axis, fraction * sector, contact);
+            let held = relax_held_phi(staggered.view(), axis, evaluate);
             let quenched = quench(held.view());
             let _ = note_exit(evaluate, &quenched, hop, best_energy, best);
         }
