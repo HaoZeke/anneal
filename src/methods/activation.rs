@@ -366,6 +366,54 @@ fn core_fills(origin: ArrayView1<f64>) -> Vec<Array1<f64>> {
     trials
 }
 
+/// Stretch or compress the cluster along one of its own fivefold axes.
+///
+/// An icosahedron has several such axes. A decahedron keeps one and
+/// loses the others. The factors change only the component parallel to
+/// the axis, or that component together with the perpendicular part so
+/// the volume stays put. The quench decides which packing results.
+fn axis_strains(origin: ArrayView1<f64>) -> Vec<Array1<f64>> {
+    let n = origin.len() / 3;
+    if n < 7 {
+        return Vec::new();
+    }
+    let mut com = [0.0; 3];
+    for i in 0..n {
+        let atom = atom_at(origin, i);
+        for axis in 0..3 {
+            com[axis] += atom[axis];
+        }
+    }
+    for value in &mut com {
+        *value /= n as f64;
+    }
+    let mut trials = Vec::new();
+    for (raw, _) in crate::soap::fivefold_axis_table(origin).into_iter().take(3) {
+        let length = len3(raw);
+        if length < 1.0e-8 {
+            continue;
+        }
+        let hat = [raw[0] / length, raw[1] / length, raw[2] / length];
+        for factor in [0.70_f64, 0.82, 1.20, 1.40, 1.65] {
+            for preserve in [false, true] {
+                let perp = if preserve { 1.0 / factor.sqrt() } else { 1.0 };
+                let mut moved = origin.to_owned();
+                for i in 0..n {
+                    let rel = sub3(atom_at(origin, i), com);
+                    let along = dot3(rel, hat);
+                    for axis in 0..3 {
+                        let radial = rel[axis] - hat[axis] * along;
+                        moved[3 * i + axis] =
+                            com[axis] + hat[axis] * along * factor + radial * perp;
+                    }
+                }
+                trials.push(moved);
+            }
+        }
+    }
+    trials
+}
+
 fn packed_fraction(x: ArrayView1<f64>) -> f64 {
     let n = x.len() / 3;
     if n < 4 {
@@ -732,6 +780,27 @@ where
     // from the floor never visits. No named target energy is used.
     if cluster {
         let n_atoms = origin.len() / 3;
+        println!("{{\"kind\":\"exit_move\",\"move\":\"strain\"}}");
+        for trial in axis_strains(origin) {
+            let quenched = quench(trial.view());
+            note_candidate(
+                &quenched,
+                &mut evaluate,
+                &mut best,
+                &mut best_e,
+                0,
+                origin_e,
+                &mut bank,
+                &rejected,
+            );
+            if best_e < origin_e - 0.05 {
+                println!(
+                    "{{\"kind\":\"exit_hop\",\"hop\":0,\"here\":{best_e:.6},\"best\":{best_e:.6},\"phase\":\"strain\",\"left\":true}}"
+                );
+                let _ = std::io::stdout().flush();
+                return best;
+            }
+        }
         println!("{{\"kind\":\"exit_move\",\"move\":\"deca\"}}");
         let scale = crate::lattice::nearest_neighbour_scale(origin);
         for _draw in 0..4 {
