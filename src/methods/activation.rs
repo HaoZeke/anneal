@@ -733,9 +733,17 @@ where
     if cluster {
         let n_atoms = origin.len() / 3;
         println!("{{\"kind\":\"exit_move\",\"move\":\"grow\"}}");
-        for source in crate::lattice::Source::library() {
-            for _draw in 0..3 {
-                let trial = crate::lattice::candidate(source, origin, n_atoms, &mut rng);
+        let mut sources = crate::lattice::Source::library();
+        sources.push(crate::lattice::Source::Pentagonal);
+        for source in sources {
+            let keeps: [f64; 2] = if matches!(source, crate::lattice::Source::Pentagonal) {
+                [0.0, 0.45]
+            } else {
+                [0.0, 0.0]
+            };
+            for keep in keeps {
+                let trial =
+                    crate::lattice::candidate_keeping(source, origin, n_atoms, keep, &mut rng);
                 let quenched = quench(trial.view());
                 note_candidate(
                     &quenched,
