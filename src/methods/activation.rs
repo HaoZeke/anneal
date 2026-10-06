@@ -517,7 +517,7 @@ fn cap_twists(origin: ArrayView1<f64>, limit: usize) -> Vec<Array1<f64>> {
                 if *radial < 0.45 {
                     continue;
                 }
-                let rel = sub3(atom_at(origin, i), com);
+                let rel = sub3(atom_at(origin, *i), com);
                 let (turned, extra) = if *along >= north_cut {
                     (apply_rot(&north, rel), shift)
                 } else if *along <= south_cut {
@@ -526,7 +526,7 @@ fn cap_twists(origin: ArrayView1<f64>, limit: usize) -> Vec<Array1<f64>> {
                     continue;
                 };
                 for k in 0..3 {
-                    moved[3 * i + k] = com[k] + turned[k] + hat[k] * extra;
+                    moved[3 * *i + k] = com[k] + turned[k] + hat[k] * extra;
                 }
             }
             trials.push(moved);
