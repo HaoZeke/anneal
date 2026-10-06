@@ -178,25 +178,20 @@ where
         rmsd.max(1e-3),
         None,
     );
+    let direction = Array1::from(direction);
+    // Climb from the minimum along the cover. The kick is quenched only
+    // when that climb does not cross a ridge.
+    if let Some(outcome) = activate_along(origin.view(), direction.view(), &mut grad, cfg)
+        && outcome.crossed
+    {
+        return quench(outcome.state.view());
+    }
     let start = if placed.len() == origin.len() {
         Array1::from(placed)
     } else {
         origin.to_owned()
     };
-    // Sit on the minimum the covering point falls into. The soft mode
-    // is only a valley floor there. Climbing the raw kick walks into
-    // overlaps and the curvature of that clash is not a ridge.
-    let landed = quench(start.view());
-    let mut chosen = landed.clone();
-    for sign in [1.0_f64, -1.0] {
-        let Some(outcome) = activate(landed.view(), &mut grad, cfg, sign) else {
-            continue;
-        };
-        if outcome.crossed {
-            chosen = quench(outcome.state.view());
-        }
-    }
-    chosen
+    quench(start.view())
 }
 
 /// Covering displacement, fivefold openings of the same shell, a
@@ -332,9 +327,10 @@ where
     );
     let mut best = origin.to_owned();
     let mut best_e = origin_e;
+    let mut here = origin.to_owned();
     for hop in 0..max_hops {
         let quenched = cover_climb_quench(
-            origin.view(),
+            here.view(),
             rmsd,
             hop.wrapping_add(seed as usize),
             |point| Some(evaluate(point).1),
@@ -348,10 +344,11 @@ where
                 hop + 1
             );
             let _ = std::io::stdout().flush();
+            here = quenched;
         }
         if value.is_finite() && value < best_e {
             best_e = value;
-            best = quenched;
+            best = here.clone();
         }
     }
     best
@@ -481,11 +478,15 @@ where
     let mut steps = 0usize;
     let mut crossed = false;
     let mut rise = 0.0;
+    // A supplied direction is the cover. Hold it until the force along it
+    // flips, then take the minimum mode. Replacing it on the first refresh
+    // walks the softest well of the minimum the cover was meant to leave.
+    let mut hold_direction = initial_direction.is_some();
 
     for k in 0..cfg.max_steps {
         // Refresh the direction on schedule, and always after the curvature has
         // already been seen to fall, since that is where it rotates fastest.
-        if k > 0 && k % cfg.refresh == 0 {
+        if k > 0 && k % cfg.refresh == 0 && !hold_direction {
             match curvature_features(
                 cur.view(),
                 |y| {
@@ -573,6 +574,35 @@ where
         // negative curvature that is the ridge, and past it a quench falls the
         // other way.
         rise += along * sign * cfg.step;
+        if hold_direction && sign * along < 0.0 {
+            hold_direction = false;
+            if let Some(features) = curvature_features(
+                cur.view(),
+                |y| {
+                    evaluations += 1;
+                    grad(y)
+                },
+                cfg.lanczos_steps,
+                cfg.epsilon,
+            ) {
+                let dot: f64 = features
+                    .mode
+                    .iter()
+                    .zip(mode.iter())
+                    .map(|(a, b)| a * b)
+                    .sum();
+                mode = if dot < 0.0 {
+                    -features.mode
+                } else {
+                    features.mode
+                };
+                lambda = features.lambda_min;
+                if let Some(g) = grad(cur.view()) {
+                    evaluations += 1;
+                    along = g.iter().zip(mode.iter()).map(|(a, b)| a * b).sum();
+                }
+            }
+        }
         if lambda < 0.0 && sign * along < 0.0 && rise >= cfg.min_rise {
             crossed = true;
             break;
