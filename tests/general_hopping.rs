@@ -85,8 +85,43 @@ fn cutest_hs1_and_lj_hexamer_share_the_hop_loop() {
     );
     let hexamer_history = run_rs(hexamer, &cooling, 4, 8, 19);
 
-    for history in [&hs1_history, &hexamer_history] {
+    // Two atoms in a cube. The force is the minimum-image pair. The
+    // entry is the same `run_rs` call: it has no target energy to stop on.
+    let dimer = HoppingSampler::new(
+        array![0.2, 0.2, 0.2, 1.6, 0.4, 0.5],
+        anneal_core::movekernel::Gaussian::new(0.15),
+        cooling.clone(),
+        Metropolis,
+        30,
+        |x, steps| gradient_quench(x.to_owned(), steps, 1.0e-4, periodic_dimer_l4),
+    );
+    let dimer_history = run_rs(dimer, &cooling, 4, 8, 23);
+
+    for history in [&hs1_history, &hexamer_history, &dimer_history] {
         assert_eq!(history.total_accepted() + history.total_rejected(), 32);
         assert!(history.best.val.is_finite());
     }
+}
+
+fn periodic_dimer_l4(x: ArrayView1<f64>) -> (f64, Array1<f64>) {
+    let cell = 4.0;
+    let mut d = [0.0; 3];
+    let mut r2 = 0.0;
+    for k in 0..3 {
+        let mut delta = x[k] - x[3 + k];
+        delta -= cell * (delta / cell).round();
+        d[k] = delta;
+        r2 += delta * delta;
+    }
+    let inv2 = 1.0 / r2.max(1e-8);
+    let inv6 = inv2.powi(3);
+    let inv12 = inv6 * inv6;
+    let value = 4.0 * (inv12 - inv6);
+    let coefficient = 24.0 * inv2 * (2.0 * inv12 - inv6);
+    let mut gradient = Array1::zeros(6);
+    for k in 0..3 {
+        gradient[k] -= coefficient * d[k];
+        gradient[3 + k] += coefficient * d[k];
+    }
+    (value, gradient)
 }
