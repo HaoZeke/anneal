@@ -732,6 +732,29 @@ where
     // from the floor never visits. No named target energy is used.
     if cluster {
         let n_atoms = origin.len() / 3;
+        println!("{{\"kind\":\"exit_move\",\"move\":\"deca\"}}");
+        let scale = crate::lattice::nearest_neighbour_scale(origin);
+        for _draw in 0..4 {
+            let trial = crate::lattice::decahedral_cut(n_atoms, scale, &mut rng);
+            let quenched = quench(trial.view());
+            note_candidate(
+                &quenched,
+                &mut evaluate,
+                &mut best,
+                &mut best_e,
+                0,
+                origin_e,
+                &mut bank,
+                &rejected,
+            );
+            if best_e < origin_e - 0.05 {
+                println!(
+                    "{{\"kind\":\"exit_hop\",\"hop\":0,\"here\":{best_e:.6},\"best\":{best_e:.6},\"phase\":\"deca\",\"left\":true}}"
+                );
+                let _ = std::io::stdout().flush();
+                return best;
+            }
+        }
         println!("{{\"kind\":\"exit_move\",\"move\":\"grow\"}}");
         let mut sources = crate::lattice::Source::library();
         sources.push(crate::lattice::Source::Pentagonal);

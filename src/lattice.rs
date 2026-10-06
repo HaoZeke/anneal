@@ -90,6 +90,66 @@ impl Source {
 /// Ring-ring and apex-ring distances are one. The centre-ring distance is
 /// shorter, which is the strain of a fivefold axis rather than a fitted
 /// global minimum.
+/// `n` atoms cut from a fivefold lattice, scaled to `scale`.
+///
+/// The axis spacing is the ring-ring bond, and the centre-ring distance is
+/// shorter. That strain is the fivefold axis. Which surface atoms the cut
+/// keeps depends on a jittered centre, and a small random shift keeps the
+/// cut off a symmetric saddle. The quench decides the minimum.
+pub fn decahedral_cut<R: Rng + ?Sized>(n: usize, scale: f64, rng: &mut R) -> Array1<f64> {
+    if n == 0 {
+        return Array1::zeros(0);
+    }
+    let radius_unit = 1.0 / (2.0 * (PI / 5.0).sin());
+    let mut sites: Vec<[f64; 3]> = vec![[0.0, 0.0, 0.0]];
+    for shell in 1..10 {
+        if sites.len() >= n + 40 {
+            break;
+        }
+        for z in -shell..=shell {
+            let m = shell - z.abs();
+            if m <= 0 {
+                let point = [0.0, 0.0, z as f64];
+                if sites.iter().all(|old| sq(old, &point) > 0.04) {
+                    sites.push(point);
+                }
+                continue;
+            }
+            let rad = m as f64 * radius_unit;
+            for k in 0..5 {
+                let angle = 2.0 * PI * (k as f64) / 5.0;
+                let point = [rad * angle.cos(), rad * angle.sin(), z as f64];
+                if sites.iter().all(|old| sq(old, &point) > 0.04) {
+                    sites.push(point);
+                }
+            }
+        }
+    }
+    let centre = [
+        0.35 * (rng.random::<f64>() - 0.5),
+        0.35 * (rng.random::<f64>() - 0.5),
+        0.35 * (rng.random::<f64>() - 0.5),
+    ];
+    sites.sort_by(|left, right| {
+        sq(left, &centre)
+            .partial_cmp(&sq(right, &centre))
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    sites.truncate(n.min(sites.len()));
+    let mut raw = Array1::zeros(3 * sites.len());
+    for (i, site) in sites.iter().enumerate() {
+        for k in 0..3 {
+            raw[3 * i + k] = site[k];
+        }
+    }
+    let local = nearest_neighbour_scale(raw.view()).max(1.0e-6);
+    let factor = scale / local;
+    for value in raw.iter_mut() {
+        *value = *value * factor + 0.02 * scale * (rng.random::<f64>() - 0.5);
+    }
+    raw
+}
+
 fn pentagonal_shell() -> Vec<[f64; 3]> {
     let radius = 1.0 / (2.0 * (PI / 5.0).sin());
     let height = (1.0 - radius * radius).max(0.05).sqrt();
