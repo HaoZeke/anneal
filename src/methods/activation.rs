@@ -395,7 +395,7 @@ where
                 origin.len(),
                 hop.wrapping_add(seed as usize),
             );
-            for station in stations {
+            for &station in &stations {
                 let placed = crate::hypersphere::place_around(
                     origin.as_slice().unwrap_or(&[]),
                     &direction,
