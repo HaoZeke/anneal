@@ -1628,10 +1628,13 @@ fn ride_lowest_mode<E, Q>(
         return;
     }
     let epsilon = 1e-4;
-    let Some(features) = curvature_features(start, |point| Some(evaluate(point).1), 12, epsilon)
+    let Some((_, modes, _)) = soft_subspace(start, |point| Some(evaluate(point).1), 16, epsilon, 4)
     else {
         return;
     };
+    if modes.is_empty() {
+        return;
+    }
     let Ok(geometry) = DescriptorGeometry::finite(contact) else {
         return;
     };
@@ -1677,48 +1680,52 @@ fn ride_lowest_mode<E, Q>(
     let surface = ForceSurface {
         evaluate: std::sync::Mutex::new(evaluate),
     };
-    for travel in [1.0_f64, -1.0] {
-        let mode = if travel < 0.0 {
-            -features.mode.clone()
-        } else {
-            features.mode.clone()
-        };
-        let mut network = PesNetwork::new();
-        let connection = discover_cartesian_mode_connection(
-            &surface,
-            &descriptor_space,
-            &mut network,
-            start,
-            masses.view(),
-            &frozen,
-            mode.view(),
-            Some(&species),
-            &config,
-            &witness,
-        );
-        match connection {
-            Ok(connection) => {
-                println!(
-                    "{{\"kind\":\"dimer\",\"saddle\":{:.6},\"curvature\":{:.6},\"index\":{}}}",
-                    connection.saddle_energy, connection.curvature, connection.negative_modes
-                );
-                let _ = std::io::stdout().flush();
-                for minimum in network.minima() {
+    for (index, feature) in modes.iter().enumerate() {
+        for travel in [1.0_f64, -1.0] {
+            let mode = if travel < 0.0 {
+                -feature.clone()
+            } else {
+                feature.clone()
+            };
+            println!("{{\"kind\":\"dimer_mode\",\"index\":{index},\"travel\":{travel}}}");
+            let _ = std::io::stdout().flush();
+            let mut network = PesNetwork::new();
+            let connection = discover_cartesian_mode_connection(
+                &surface,
+                &descriptor_space,
+                &mut network,
+                start,
+                masses.view(),
+                &frozen,
+                mode.view(),
+                Some(&species),
+                &config,
+                &witness,
+            );
+            match connection {
+                Ok(connection) => {
                     println!(
-                        "{{\"kind\":\"exit_candidate\",\"energy\":{:.6},\"hop\":0,\"role\":\"quench\"}}",
-                        minimum.energy
+                        "{{\"kind\":\"dimer\",\"saddle\":{:.6},\"curvature\":{:.6},\"index\":{}}}",
+                        connection.saddle_energy, connection.curvature, connection.negative_modes
                     );
                     let _ = std::io::stdout().flush();
-                    if minimum.energy < *best_energy {
-                        *best_energy = minimum.energy;
-                        *best = minimum.coordinates.clone();
+                    for minimum in network.minima() {
+                        println!(
+                            "{{\"kind\":\"exit_candidate\",\"energy\":{:.6},\"hop\":0,\"role\":\"quench\"}}",
+                            minimum.energy
+                        );
+                        let _ = std::io::stdout().flush();
+                        if minimum.energy < *best_energy {
+                            *best_energy = minimum.energy;
+                            *best = minimum.coordinates.clone();
+                        }
                     }
                 }
-            }
-            Err(error) => {
-                let message = error.to_string().replace('"', "'");
-                println!("{{\"kind\":\"dimer\",\"error\":\"{message}\"}}");
-                let _ = std::io::stdout().flush();
+                Err(error) => {
+                    let message = error.to_string().replace('"', "'");
+                    println!("{{\"kind\":\"dimer\",\"error\":\"{message}\"}}");
+                    let _ = std::io::stdout().flush();
+                }
             }
         }
     }
@@ -2232,14 +2239,6 @@ where
                 continue;
             }
             quench_regular_pentagons(
-                quenched.view(),
-                contact,
-                &mut evaluate,
-                &mut quench,
-                &mut best_e,
-                &mut best,
-            );
-            ride_lowest_mode(
                 quenched.view(),
                 contact,
                 &mut evaluate,
