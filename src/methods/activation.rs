@@ -565,6 +565,29 @@ where
     closest_pair(cur.view()) >= clash
 }
 
+fn push_ridge(
+    landings: &mut Vec<Array1<f64>>,
+    crossed: &mut bool,
+    state: &Array1<f64>,
+    mode: &Array1<f64>,
+    lambda: f64,
+    scale: f64,
+    contact: f64,
+    overshoot: f64,
+    cap: usize,
+) {
+    if landings.len() >= cap {
+        return;
+    }
+    // An overlap eigenvalue is far below the curvature of the minimum.
+    // The square of that curvature separates the two.
+    if !(lambda.is_finite() && lambda < 0.0 && lambda > -(scale * scale)) {
+        return;
+    }
+    *crossed = true;
+    landings.extend(landings_past(state, mode, lambda, contact, overshoot));
+}
+
 fn landings_past(
     state: &Array1<f64>,
     mode: &Array1<f64>,
@@ -644,34 +667,21 @@ where
     };
     let mut lambda = directional;
     let mut lowest = directional;
+    let mut positive_scale = directional.abs().max(epsilon);
+    if let Some((soft, _)) = lowest_mode(origin, evaluate, cfg.lanczos_steps, epsilon) {
+        lowest = soft;
+        positive_scale = positive_scale.max(soft.abs());
+    }
     let mut cur = origin.to_owned();
     let mut axial = 0.0_f64;
     let mut steps = 0usize;
     let budget = cfg.max_steps.max(n_atoms);
     let mut saw_negative = false;
-
-    let finish = |state: &Array1<f64>,
-                  mode: &Array1<f64>,
-                  lambda: f64,
-                  lowest: f64,
-                  steps: usize,
-                  axial: f64,
-                  crossed: bool|
-     -> CoverRidge {
-        let landings = if lambda.is_finite() && lambda < 0.0 {
-            landings_past(state, mode, lambda, contact, cfg.overshoot)
-        } else {
-            Vec::new()
-        };
-        CoverRidge {
-            landings,
-            crossed,
-            lambda,
-            lowest,
-            steps,
-            axial,
-        }
-    };
+    let mut crossed = false;
+    // The opening push leaves a minimum uphill, so the first downhill
+    // reading with negative curvature is a ridge rather than the well.
+    let mut uphill = true;
+    let mut landings: Vec<Array1<f64>> = Vec::new();
 
     if hold_cover {
         while steps < budget && !saw_negative {
@@ -734,8 +744,21 @@ where
                     axial = axial_projection(cur.view(), origin, mode.view());
                     let (_, gradient) = evaluate(cur.view());
                     let along = dot_av(gradient.view(), mode.view());
-                    if along < 0.0 {
-                        return finish(&cur, &mode, lambda, lowest, steps, axial, true);
+                    if along >= 0.0 {
+                        uphill = true;
+                    } else if uphill {
+                        push_ridge(
+                            &mut landings,
+                            &mut crossed,
+                            &cur,
+                            &mode,
+                            lambda,
+                            positive_scale,
+                            contact,
+                            cfg.overshoot,
+                            n_atoms,
+                        );
+                        uphill = false;
                     }
                 }
             }
@@ -769,8 +792,21 @@ where
             }
             let (_, gradient) = evaluate(cur.view());
             let along = dot_av(gradient.view(), mode.view());
-            if saw_negative && lambda < 0.0 && along < 0.0 {
-                return finish(&cur, &mode, lambda, lowest, steps, axial, true);
+            if along >= 0.0 {
+                uphill = true;
+            } else if uphill && lambda < 0.0 {
+                push_ridge(
+                    &mut landings,
+                    &mut crossed,
+                    &cur,
+                    &mode,
+                    lambda,
+                    positive_scale,
+                    contact,
+                    cfg.overshoot,
+                    n_atoms,
+                );
+                uphill = false;
             }
             let curvature_length = 1.0 / lambda.abs().max(epsilon).sqrt();
             let mut stride = curvature_length.min(contact / lead).max(epsilon);
@@ -809,8 +845,21 @@ where
                     saw_negative = true;
                 }
             }
-            if saw_negative && lambda < 0.0 && along_after < 0.0 {
-                return finish(&cur, &mode, lambda, lowest, steps, axial, true);
+            if along_after >= 0.0 {
+                uphill = true;
+            } else if uphill && lambda < 0.0 {
+                push_ridge(
+                    &mut landings,
+                    &mut crossed,
+                    &cur,
+                    &mode,
+                    lambda,
+                    positive_scale,
+                    contact,
+                    cfg.overshoot,
+                    n_atoms,
+                );
+                uphill = false;
             }
             if steps % cfg.refresh.max(1) == 0
                 && let Some((soft, soft_mode)) =
@@ -832,12 +881,16 @@ where
         }
     }
 
-    if lambda.is_finite() && lambda < 0.0 {
-        return finish(&cur, &mode, lambda, lowest, steps, axial, false);
+    if landings.is_empty()
+        && lambda.is_finite()
+        && lambda < 0.0
+        && lambda > -(positive_scale * positive_scale)
+    {
+        landings.extend(landings_past(&cur, &mode, lambda, contact, cfg.overshoot));
     }
     CoverRidge {
-        landings: Vec::new(),
-        crossed: false,
+        landings,
+        crossed,
         lambda,
         lowest,
         steps,
