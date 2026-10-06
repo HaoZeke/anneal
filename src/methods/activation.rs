@@ -327,10 +327,9 @@ where
     );
     let mut best = origin.to_owned();
     let mut best_e = origin_e;
-    let mut here = origin.to_owned();
     for hop in 0..max_hops {
         let quenched = cover_climb_quench(
-            here.view(),
+            best.view(),
             rmsd,
             hop.wrapping_add(seed as usize),
             |point| Some(evaluate(point).1),
@@ -344,11 +343,10 @@ where
                 hop + 1
             );
             let _ = std::io::stdout().flush();
-            here = quenched;
         }
         if value.is_finite() && value < best_e {
             best_e = value;
-            best = here.clone();
+            best = quenched;
         }
     }
     best
@@ -439,7 +437,11 @@ where
 {
     let dim = x.len();
     let mut cur = x.to_owned();
-    let cluster = closest_pair(x) > 0.95;
+    let contact = closest_pair(x);
+    let cluster = contact > 0.95;
+    // A pair closer than half the contact distance of the start is inside
+    // the core. The threshold is that distance, not a fixed length.
+    let clash = contact * 0.5;
     let mut evaluations = 0usize;
 
     let first = curvature_features(
@@ -478,6 +480,10 @@ where
     let mut steps = 0usize;
     let mut crossed = false;
     let mut rise = 0.0;
+    let mut saw_uphill = false;
+    // Highest ridge crossed on this climb. A shallow first saddle is kept
+    // only until a higher one is crossed. The quench leaves from that ridge.
+    let mut ridge: Option<(Array1<f64>, Array1<f64>, f64)> = None;
     // A supplied direction is the cover. Hold it until the force along it
     // flips, then take the minimum mode. Replacing it on the first refresh
     // walks the softest well of the minimum the cover was meant to leave.
@@ -550,18 +556,19 @@ where
             }
         }
 
-        // A huge force, or a pair inside the repulsive core, is a clash.
-        // Stepping back keeps the last intact structure.
-        let crowded = cluster && closest_pair(cur.view()) < 0.85;
-        if !gnorm.is_finite() || gnorm > 80.0 || crowded {
+        // A pair inside half the starting contact distance is a clash.
+        // Stepping back keeps the last intact structure. A ridge already
+        // crossed stays the place the quench will leave from.
+        let crowded = cluster && closest_pair(cur.view()) < clash;
+        if !gnorm.is_finite() || crowded {
             for i in 0..dim {
                 cur[i] -= sign * cfg.step * mode[i];
             }
-            crossed = false;
             break;
         }
 
-        // Stop at the saddle, not at the inflection.
+        // A ridge is a force flip at negative curvature. The highest such
+        // ridge on the climb is the one the quench leaves from.
         //
         // Negative curvature says the ridge is ahead, not behind: on a double
         // well the curvature along the well direction turns over at
@@ -574,7 +581,11 @@ where
         // negative curvature that is the ridge, and past it a quench falls the
         // other way.
         rise += along * sign * cfg.step;
-        if hold_direction && sign * along < 0.0 {
+        let climbing = sign * along > 0.0;
+        if climbing {
+            saw_uphill = true;
+        }
+        if hold_direction && saw_uphill && !climbing {
             hold_direction = false;
             if let Some(features) = curvature_features(
                 cur.view(),
@@ -603,16 +614,21 @@ where
                 }
             }
         }
-        if lambda < 0.0 && sign * along < 0.0 && rise >= cfg.min_rise {
-            crossed = true;
-            break;
-        }
-        if rise > 40.0 {
-            crossed = false;
-            break;
+        let descending = sign * along < 0.0;
+        if saw_uphill && descending && lambda < 0.0 && rise >= cfg.min_rise {
+            let higher = ridge.as_ref().is_none_or(|(_, _, kept)| rise > *kept);
+            if higher {
+                ridge = Some((cur.clone(), mode.clone(), rise));
+                crossed = true;
+            }
+            saw_uphill = false;
         }
     }
 
+    if let Some((state, ridge_mode, _)) = ridge {
+        cur = state;
+        mode = ridge_mode;
+    }
     if crossed && cfg.overshoot > 0.0 {
         // One push past the turning point, so the quench falls forward rather
         // than back down the way it came.
