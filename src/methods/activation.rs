@@ -633,19 +633,32 @@ where
                 feedback.observe(Some(current), current);
             }
         }
-        // The top of the window is a melt. The next hop leaves from the
-        // rung nearest the middle of the window, where a packing saddle
-        // sits, and a rung that does not move the search is dropped.
-        let target = 0.6 * crate::catalog::SEAM_WINDOW;
-        let chosen = bank.iter().flatten().min_by(|left, right| {
-            let left_d = ((left.0 - origin_e) - target).abs();
-            let right_d = ((right.0 - origin_e) - target).abs();
-            left_d
-                .partial_cmp(&right_d)
-                .unwrap_or(std::cmp::Ordering::Equal)
-        });
-        if let Some((energy, state)) = chosen {
-            let energy = *energy;
+        // A decahedron carries close-packed `421` pairs that an
+        // icosahedron does not. Among rungs that are still bound, the
+        // next hop leaves from the one with the most of those pairs.
+        let mut chosen: Option<(f64, f64, Array1<f64>)> = None;
+        if here.len() % 3 == 0 {
+            let n_atoms = here.len() / 3;
+            for (energy, state) in bank.iter().flatten() {
+                let rise = energy - origin_e;
+                if !(0.4..10.0).contains(&rise) {
+                    continue;
+                }
+                let cutoff = 1.35 * crate::twin::spacing(state.view(), n_atoms);
+                let packed = crate::structure::cna_descriptor(state.view(), n_atoms, cutoff)[1];
+                let better = match &chosen {
+                    None => true,
+                    Some((score, held, _)) => {
+                        packed > *score + 1.0e-6
+                            || ((packed - score).abs() <= 1.0e-6 && energy < *held)
+                    }
+                };
+                if better {
+                    chosen = Some((packed, *energy, state.clone()));
+                }
+            }
+        }
+        if let Some((_, energy, state)) = chosen {
             if (energy - frontier_energy).abs() < 1.0e-6 {
                 frontier_stuck += 1;
             } else {
