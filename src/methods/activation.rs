@@ -477,7 +477,7 @@ where
 {
     let n = origin.len() / 3;
     let mut out = Vec::new();
-    let mut reach = 0.0;
+    let mut reach = 0.0_f64;
     let mut com = [0.0; 3];
     for i in 0..n {
         let atom = atom_at(origin, i);
