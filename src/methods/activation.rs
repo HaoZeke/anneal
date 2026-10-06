@@ -180,7 +180,7 @@ where
     } else {
         cfg.step
     };
-    let step = rms * n_at.sqrt();
+    let mut step = rms * n_at.sqrt();
     let mut x = origin.to_owned();
     let mut last_safe = x.clone();
     let mut saw_uphill = false;
