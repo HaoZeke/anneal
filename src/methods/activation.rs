@@ -1057,59 +1057,59 @@ where
     // from the floor never visits. No named target energy is used.
     if cluster {
         let n_atoms = origin.len() / 3;
-        println!("{{\"kind\":\"exit_move\",\"move\":\"cover\"}}");
-        let climb = Activation {
-            max_steps: 20,
-            lanczos_steps: 10,
-            min_rise: 1.5,
-            overshoot: 2.0,
-            ..cfg.clone()
-        };
+        println!("{{\"kind\":\"exit_move\",\"move\":\"hop\"}}");
+        let mut feedback = EscapeFeedback::new(4.0, 4.0);
+        feedback.escape_ceiling = 80.0;
+        feedback.escape_floor = 1.0;
+        feedback.register_initial(0);
+        let mut md_steps: usize = 300;
+        let mut walker = here.clone();
+        let mut walker_e = here_e;
+        let mut walker_id = 0usize;
+        let mut basin_of: HashMap<i64, usize> = HashMap::new();
+        basin_of.insert(basin_key(origin_e), 0);
+        let mut next_basin = 1usize;
         for hop in 0..max_hops {
             if best_e < origin_e - 0.05 {
                 println!(
-                    "{{\"kind\":\"exit_hop\",\"hop\":{hop},\"here\":{here_e:.6},\"best\":{best_e:.6},\"phase\":\"cover\",\"left\":true}}"
+                    "{{\"kind\":\"exit_hop\",\"hop\":{hop},\"here\":{walker_e:.6},\"best\":{best_e:.6},\"phase\":\"hop\",\"left\":true}}"
                 );
                 let _ = std::io::stdout().flush();
                 return best;
             }
-            let parent = here.clone();
+            let kinetic = feedback.escape();
             let direction = Array1::from(crate::hypersphere::cover_direction(
                 n_cover,
-                parent.len(),
+                walker.len(),
                 hop,
             ));
-            let placed = crate::hypersphere::place_around(
-                parent.as_slice().unwrap_or(&[]),
-                direction.as_slice().unwrap_or(&[]),
-                rmsd.max(0.25),
-                None,
-            );
-            let mut climbed = if placed.len() == parent.len() {
-                Array1::from(placed)
-            } else {
-                parent.clone()
+            let md = MdEscapeConfig {
+                dt: 0.004,
+                potential_minima: usize::MAX / 4,
+                maximum_steps: md_steps,
+                geometry,
+                softening: Some(rgsaddle::VelocitySofteningConfig {
+                    steps: 8,
+                    displacement: 0.1,
+                    mixing: 0.15,
+                }),
+                minimum_rise: 0.0,
             };
-            for _ridge in 0..3 {
-                let mut advanced = false;
-                for sign in [1.0_f64, -1.0] {
-                    if let Some(outcome) = activate(
-                        climbed.view(),
-                        |point| Some(evaluate(point).1),
-                        &climb,
-                        sign,
-                    ) && outcome.crossed
-                    {
-                        climbed = outcome.state;
-                        advanced = true;
-                        break;
-                    }
-                }
-                if !advanced {
-                    break;
-                }
-            }
-            let quenched = quench(climbed.view());
+            let landed = {
+                let mut eval = |point: ArrayView1<f64>| Some(evaluate(point));
+                nve_escape_seeded(
+                    walker.view(),
+                    kinetic,
+                    Some(direction.view()),
+                    &md,
+                    &mut eval,
+                    &mut rng,
+                )
+                .ok()
+                .filter(|report| report.position.iter().all(|value| value.is_finite()))
+                .map(|report| report.position)
+            };
+            let quenched = quench(landed.as_ref().map(|p| p.view()).unwrap_or(walker.view()));
             note_candidate(
                 &quenched,
                 &mut evaluate,
@@ -1121,25 +1121,48 @@ where
                 &rejected,
             );
             let (value, _) = evaluate(quenched.view());
-            if value.is_finite() && value < origin_e + 10.5 && value + 1.0e-4 < here_e {
-                here = quenched;
-                here_e = value;
-            } else if value.is_finite() && value < origin_e + 10.5 && value > here_e + 0.2 {
-                here = quenched;
-                here_e = value;
-            }
-            if hop % 25 == 0 {
-                println!(
-                    "{{\"kind\":\"exit_hop\",\"hop\":{hop},\"here\":{here_e:.6},\"best\":{best_e:.6},\"phase\":\"cover\"}}"
-                );
-                let _ = std::io::stdout().flush();
+            if !value.is_finite() {
+                feedback.observe(Some(walker_id), walker_id);
+                md_steps = ((md_steps as f64) * 1.15).min(2_000.0) as usize;
+            } else {
+                let key = basin_key(value);
+                let same = key == basin_key(walker_e);
+                if same || value > origin_e + 12.0 {
+                    feedback.observe(Some(walker_id), walker_id);
+                    md_steps = ((md_steps as f64) * 1.12).min(2_000.0) as usize;
+                } else {
+                    let id = if let Some(found) = basin_of.get(&key).copied() {
+                        found
+                    } else {
+                        let id = next_basin;
+                        next_basin += 1;
+                        basin_of.insert(key, id);
+                        id
+                    };
+                    feedback.observe(Some(walker_id), id);
+                    if value < walker_e || value < origin_e + 8.0 {
+                        walker = quenched;
+                        walker_e = value;
+                        walker_id = id;
+                        here = walker.clone();
+                        here_e = value;
+                        md_steps = ((md_steps as f64) * 0.9).max(200.0) as usize;
+                    }
+                }
             }
             if best_e < origin_e - 0.05 {
                 println!(
-                    "{{\"kind\":\"exit_hop\",\"hop\":{hop},\"here\":{here_e:.6},\"best\":{best_e:.6},\"phase\":\"cover\",\"left\":true}}"
+                    "{{\"kind\":\"exit_hop\",\"hop\":{hop},\"here\":{walker_e:.6},\"best\":{best_e:.6},\"phase\":\"hop\",\"left\":true}}"
                 );
                 let _ = std::io::stdout().flush();
                 return best;
+            }
+            if hop % 100 == 0 {
+                println!(
+                    "{{\"kind\":\"exit_hop\",\"hop\":{hop},\"here\":{walker_e:.6},\"best\":{best_e:.6},\"escape\":{:.3},\"steps\":{md_steps},\"phase\":\"hop\"}}",
+                    feedback.escape()
+                );
+                let _ = std::io::stdout().flush();
             }
         }
         println!("{{\"kind\":\"exit_move\",\"move\":\"fivefold\"}}");
