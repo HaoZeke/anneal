@@ -174,14 +174,20 @@ where
     } else {
         origin.to_owned()
     };
-    // The covering point is only the side of the well. The climb has to
-    // leave that side before the quench, or the minimiser falls home.
-    let climbed = activate_from_origin(start.view(), origin, &mut grad, cfg);
-    let seed = match climbed {
-        Some(outcome) => outcome.state,
-        None => start,
-    };
-    quench(seed.view())
+    // Sit on the minimum the covering point falls into. The soft mode
+    // is only a valley floor there. Climbing the raw kick walks into
+    // overlaps and the curvature of that clash is not a ridge.
+    let landed = quench(start.view());
+    let mut chosen = landed.clone();
+    for sign in [1.0_f64, -1.0] {
+        let Some(outcome) = activate(landed.view(), &mut grad, cfg, sign) else {
+            continue;
+        };
+        if outcome.crossed {
+            chosen = quench(outcome.state.view());
+        }
+    }
+    chosen
 }
 
 /// Climb along `direction` first, then track the minimum mode.
@@ -215,6 +221,25 @@ where
     activate_aligned(x, Some(origin), None, &mut grad, cfg, 1.0)
 }
 
+fn closest_pair(x: ArrayView1<f64>) -> f64 {
+    let n = x.len() / 3;
+    if n < 2 {
+        return f64::MAX;
+    }
+    let mut best = f64::MAX;
+    for i in 0..n {
+        for j in (i + 1)..n {
+            let mut r2 = 0.0;
+            for k in 0..3 {
+                let d = x[3 * i + k] - x[3 * j + k];
+                r2 += d * d;
+            }
+            best = best.min(r2);
+        }
+    }
+    best.sqrt()
+}
+
 fn activate_aligned<G>(
     x: ArrayView1<f64>,
     origin: Option<ArrayView1<f64>>,
@@ -228,6 +253,7 @@ where
 {
     let dim = x.len();
     let mut cur = x.to_owned();
+    let cluster = closest_pair(x) > 0.95;
     let mut evaluations = 0usize;
 
     let first = curvature_features(
@@ -333,9 +359,10 @@ where
             }
         }
 
-        // A huge force is a clash, not a ridge. Stepping back keeps the
-        // last intact structure and does not call that a crossing.
-        if !gnorm.is_finite() || gnorm > 400.0 {
+        // A huge force, or a pair inside the repulsive core, is a clash.
+        // Stepping back keeps the last intact structure.
+        let crowded = cluster && closest_pair(cur.view()) < 0.85;
+        if !gnorm.is_finite() || gnorm > 80.0 || crowded {
             for i in 0..dim {
                 cur[i] -= sign * cfg.step * mode[i];
             }
