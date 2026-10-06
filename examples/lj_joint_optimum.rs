@@ -328,6 +328,7 @@ fn run_minima_hopping(
             displacement: MH_SOFTENING_DISPLACEMENT,
             mixing: MH_SOFTENING_MIXING,
         }),
+        minimum_rise: 0.0,
     };
     let mut ledger = Ledger::new(budget);
     let mut optimizer = WarmLbfgs::default();
