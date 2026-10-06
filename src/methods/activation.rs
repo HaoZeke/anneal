@@ -186,7 +186,7 @@ where
         let mut climb = cfg.clone();
         let budget = climb.max_steps.max(1);
         climb.step = contact * (n_atoms as f64).sqrt() / budget as f64;
-        climb.max_steps = n_atoms.max(budget);
+        climb.max_steps = budget;
         climb.min_rise = 0.0;
         if let Some(outcome) = activate_along(origin.view(), direction.view(), &mut grad, &climb)
             && outcome.crossed
@@ -352,7 +352,63 @@ where
     );
     let mut best = origin.to_owned();
     let mut best_e = origin_e;
+    let contact = closest_pair(origin);
+    let n_atoms = origin.len() / 3;
+    let mut reach = 0.0_f64;
+    if n_atoms >= 2 {
+        let mut com = [0.0; 3];
+        for i in 0..n_atoms {
+            for k in 0..3 {
+                com[k] += origin[3 * i + k];
+            }
+        }
+        for value in &mut com {
+            *value /= n_atoms as f64;
+        }
+        for i in 0..n_atoms {
+            let mut r2 = 0.0;
+            for k in 0..3 {
+                let d = origin[3 * i + k] - com[k];
+                r2 += d * d;
+            }
+            reach = reach.max(r2.sqrt());
+        }
+    }
+    let stations = [contact * 0.5, contact, reach.max(contact)];
     for hop in 0..max_hops {
+        if contact > 0.95 && n_atoms >= 2 {
+            let n_cover = crate::hypersphere::default_cover_size();
+            let direction = crate::hypersphere::cover_direction(
+                n_cover,
+                origin.len(),
+                hop.wrapping_add(seed as usize),
+            );
+            for station in stations {
+                let placed = crate::hypersphere::place_around(
+                    origin.as_slice().unwrap_or(&[]),
+                    &direction,
+                    station.max(1.0e-3),
+                    None,
+                );
+                if placed.len() != origin.len() {
+                    continue;
+                }
+                let quenched = quench(Array1::from(placed).view());
+                let (value, _) = evaluate(quenched.view());
+                if !value.is_finite() {
+                    continue;
+                }
+                println!(
+                    "{{\"kind\":\"exit_candidate\",\"energy\":{value:.6},\"hop\":{},\"role\":\"quench\"}}",
+                    hop + 1
+                );
+                let _ = std::io::stdout().flush();
+                if value < best_e {
+                    best_e = value;
+                    best = quenched;
+                }
+            }
+        }
         let quenched = cover_climb_quench(
             best.view(),
             rmsd,
