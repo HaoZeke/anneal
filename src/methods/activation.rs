@@ -366,47 +366,260 @@ fn core_fills(origin: ArrayView1<f64>) -> Vec<Array1<f64>> {
     trials
 }
 
-/// Stretch or compress the cluster along one of its own fivefold axes.
-///
-/// An icosahedron has several such axes. A decahedron keeps one and
-/// loses the others. The factors change only the component parallel to
-/// the axis, or that component together with the perpendicular part so
-/// the volume stays put. The quench decides which packing results.
-fn compact_fivefold(n_axis: usize, n_rings: usize, bond: f64) -> Vec<f64> {
-    let mut params = vec![0.0; n_axis + 2 * n_rings];
-    let axis_n = n_axis.max(1);
-    for i in 0..n_axis {
-        let frac = if n_axis == 1 {
-            0.0
+/// Radii of successive pentagons whose nearest atoms are one bond apart.
+fn shell_radii(bond: f64) -> Vec<f64> {
+    let mut radius = bond / (2.0 * (std::f64::consts::PI / 5.0).sin());
+    let cosine = (std::f64::consts::PI / 5.0).cos();
+    let mut radii = Vec::with_capacity(6);
+    radii.push(radius);
+    for _ in 0..5 {
+        let disc = (radius * cosine).powi(2) - (radius * radius - bond * bond);
+        radius = if disc > 0.0 {
+            radius * cosine + disc.sqrt()
         } else {
-            i as f64 / (n_axis - 1) as f64 - 0.5
+            radius + 0.75 * bond
         };
-        params[i] = bond * frac * (axis_n as f64 - 1.0);
+        radii.push(radius);
     }
-    for ring in 0..n_rings {
-        let layer = if n_axis == 0 { 0 } else { ring % n_axis };
-        let shell = if n_axis == 0 { ring } else { ring / n_axis };
-        let frac = if n_axis <= 1 {
-            0.0
-        } else {
-            layer as f64 / (n_axis - 1) as f64 - 0.5
-        };
-        params[n_axis + 2 * ring] = bond * frac * (axis_n as f64 - 1.0);
-        params[n_axis + 2 * ring + 1] = bond * (shell as f64 + 1.0);
-    }
-    params
+    radii
 }
 
-fn anneal_fivefold<E>(
-    origin: ArrayView1<f64>,
+fn layer_heights(n_axis: usize, bond: f64) -> Vec<f64> {
+    let n_layers = n_axis * 2 - 1;
+    (0..n_layers)
+        .map(|i| (i as f64 - (n_axis - 1) as f64) * 0.5 * bond)
+        .collect()
+}
+
+fn counts_are_canonical(counts: &[usize]) -> bool {
+    let n = counts.len();
+    for i in 0..n / 2 {
+        if counts[i] != counts[n - 1 - i] {
+            return counts[i] < counts[n - 1 - i];
+        }
+    }
+    true
+}
+
+fn push_counts(n_layers: usize, n_rings: usize, max_per: usize, out: &mut Vec<Vec<usize>>) {
+    fn walk(
+        left: usize,
+        remaining: usize,
+        max_per: usize,
+        prefix: &mut Vec<usize>,
+        out: &mut Vec<Vec<usize>>,
+    ) {
+        if left == 1 {
+            if remaining <= max_per {
+                prefix.push(remaining);
+                if counts_are_canonical(prefix) {
+                    out.push(prefix.clone());
+                }
+                prefix.pop();
+            }
+            return;
+        }
+        for count in 0..=max_per.min(remaining) {
+            prefix.push(count);
+            walk(left - 1, remaining - count, max_per, prefix, out);
+            prefix.pop();
+        }
+    }
+    if n_layers == 0 {
+        return;
+    }
+    let mut prefix = Vec::with_capacity(n_layers);
+    walk(n_layers, n_rings, max_per, &mut prefix, out);
+}
+
+/// Axis atoms, then each ring as `(height, radius, phase)`.
+fn ring_seed(counts: &[usize], bond: f64, gap: f64, axis_offset: usize) -> (Vec<f64>, usize) {
+    let n_axis = counts.len().div_ceil(2);
+    let heights = layer_heights(n_axis, bond);
+    let shells = shell_radii(bond);
+    let denom = 2.0 * (gap * 0.5).sin();
+    let pair_radius = if denom < 1.0e-3 {
+        3.2 * bond
+    } else {
+        (bond / denom).min(3.2 * bond)
+    };
+    let mut params = Vec::new();
+    for i in 0..n_axis {
+        params.push(heights[2 * i]);
+    }
+    for (layer, &count) in counts.iter().enumerate() {
+        if count == 0 {
+            continue;
+        }
+        let offset = if layer % 2 == 0 { axis_offset } else { 0 };
+        let shell_at = |j: usize| shells[(offset + j).min(shells.len() - 1)];
+        let phase_at = |j: usize| (j as f64) * std::f64::consts::PI / 5.0;
+        if count <= 2 {
+            for j in 0..count {
+                params.push(heights[layer]);
+                params.push(shell_at(j));
+                params.push(phase_at(j));
+            }
+        } else {
+            for j in 0..(count - 2) {
+                params.push(heights[layer]);
+                params.push(shell_at(j));
+                params.push(phase_at(j));
+            }
+            params.push(heights[layer]);
+            params.push(pair_radius);
+            params.push(gap * 0.5);
+            params.push(heights[layer]);
+            params.push(pair_radius);
+            params.push(-gap * 0.5);
+        }
+    }
+    (params, n_axis)
+}
+
+fn phased_points(params: &[f64], n_axis: usize, n_rings: usize) -> Array1<f64> {
+    let n = n_axis + 5 * n_rings;
+    let mut x = Array1::zeros(3 * n);
+    for i in 0..n_axis {
+        x[3 * i + 2] = params[i];
+    }
+    for ring in 0..n_rings {
+        let base = n_axis + 3 * ring;
+        let z = params[base];
+        let radius = params[base + 1].abs().clamp(0.35, 4.5);
+        let phase = params[base + 2];
+        for k in 0..5 {
+            let angle = phase + 2.0 * std::f64::consts::PI * (k as f64) / 5.0;
+            let i = n_axis + 5 * ring + k;
+            x[3 * i] = radius * angle.cos();
+            x[3 * i + 1] = radius * angle.sin();
+            x[3 * i + 2] = z;
+        }
+    }
+    x
+}
+
+fn ring_slope(params: &[f64], n_axis: usize, n_rings: usize, gradient: &Array1<f64>) -> Vec<f64> {
+    let mut slope = vec![0.0; params.len()];
+    for i in 0..n_axis {
+        slope[i] = gradient[3 * i + 2];
+    }
+    for ring in 0..n_rings {
+        let base = n_axis + 3 * ring;
+        let radius = params[base + 1].abs().clamp(0.35, 4.5);
+        let phase = params[base + 2];
+        let mut dz = 0.0;
+        let mut dr = 0.0;
+        let mut dp = 0.0;
+        for k in 0..5 {
+            let angle = phase + 2.0 * std::f64::consts::PI * (k as f64) / 5.0;
+            let i = n_axis + 5 * ring + k;
+            let gx = gradient[3 * i];
+            let gy = gradient[3 * i + 1];
+            let (cosine, sine) = (angle.cos(), angle.sin());
+            dz += gradient[3 * i + 2];
+            dr += gx * cosine + gy * sine;
+            dp += gx * (-radius * sine) + gy * (radius * cosine);
+        }
+        slope[base] = dz;
+        slope[base + 1] = dr;
+        slope[base + 2] = dp;
+    }
+    slope
+}
+
+fn polish_rings<E>(
+    mut params: Vec<f64>,
+    n_axis: usize,
+    n_rings: usize,
     evaluate: &mut E,
-    rng: &mut impl rand::Rng,
-) -> Vec<Array1<f64>>
+) -> (f64, Vec<f64>)
+where
+    E: FnMut(ArrayView1<f64>) -> (f64, Array1<f64>),
+{
+    let point = phased_points(&params, n_axis, n_rings);
+    let (mut energy, mut gradient) = evaluate(point.view());
+    if !energy.is_finite() {
+        return (energy, params);
+    }
+    for _ in 0..80 {
+        let mut slope = ring_slope(&params, n_axis, n_rings, &gradient);
+        for value in &mut slope {
+            *value = value.clamp(-30.0, 30.0);
+        }
+        let norm = slope.iter().map(|value| value * value).sum::<f64>().sqrt();
+        if norm < 1.0e-3 {
+            break;
+        }
+        let mut step = 0.08;
+        let mut moved = false;
+        for _attempt in 0..12 {
+            let mut trial = params.clone();
+            for (value, derivative) in trial.iter_mut().zip(&slope) {
+                *value -= step * derivative;
+            }
+            for ring in 0..n_rings {
+                let slot = n_axis + 3 * ring + 1;
+                trial[slot] = trial[slot].abs().clamp(0.4, 4.5);
+            }
+            let trial_point = phased_points(&trial, n_axis, n_rings);
+            let (next, next_gradient) = evaluate(trial_point.view());
+            if next.is_finite() && next < energy {
+                params = trial;
+                energy = next;
+                gradient = next_gradient;
+                moved = true;
+                break;
+            }
+            step *= 0.5;
+        }
+        if !moved {
+            break;
+        }
+    }
+    (energy, params)
+}
+
+fn remember_packing(
+    best: &mut Vec<(f64, Vec<f64>, usize, usize)>,
+    energy: f64,
+    params: Vec<f64>,
+    n_axis: usize,
+    n_rings: usize,
+) {
+    if best
+        .iter()
+        .any(|(found, _, _, _)| (found - energy).abs() < 1.0e-4)
+    {
+        return;
+    }
+    best.push((energy, params, n_axis, n_rings));
+    best.sort_by(|left, right| {
+        left.0
+            .partial_cmp(&right.0)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    best.truncate(4);
+}
+
+/// Every fivefold layer assignment of this atom count, relaxed with the force.
+///
+/// The bond length is the nearest-neighbour distance of the supplied
+/// geometry. Layers lie on the axis and halfway between those atoms. An
+/// axis layer is tried with its rings on the first shell and one shell
+/// further out. A ring that cannot sit on a further distinct shell shares
+/// its radius with the previous one, and the angle between those pentagons
+/// is scanned on a uniform grid. The lowest energies are returned. The
+/// search does not read a stored geometry.
+fn fivefold_packings<E>(origin: ArrayView1<f64>, evaluate: &mut E) -> Vec<Array1<f64>>
 where
     E: FnMut(ArrayView1<f64>) -> (f64, Array1<f64>),
 {
     let n = origin.len() / 3;
-    let mut reach = 0.0_f64;
+    if n < 6 {
+        return Vec::new();
+    }
+    let bond = crate::lattice::nearest_neighbour_scale(origin).max(0.2);
     let mut com = [0.0; 3];
     for i in 0..n {
         let atom = atom_at(origin, i);
@@ -417,55 +630,59 @@ where
     for value in &mut com {
         *value /= n as f64;
     }
+    let mut reach = 0.0_f64;
     for i in 0..n {
         reach = reach.max(len3(sub3(atom_at(origin, i), com)));
     }
-    let span = (0.95 * reach).max(1.2);
-    let mut out = Vec::new();
-    for (n_axis, n_rings) in fivefold_partitions(n).into_iter().take(3) {
-        for stagger in [false, true] {
-            let mut params = compact_fivefold(n_axis, n_rings, 1.12);
-            let (mut energy, _) =
-                evaluate(build_fivefold(&params, n_axis, n_rings, stagger).view());
-            if !energy.is_finite() {
+    let mut best: Vec<(f64, Vec<f64>, usize, usize)> = Vec::new();
+    let gaps_deg = [6.0_f64, 12.0, 18.0, 24.0, 30.0, 36.0];
+    for (n_axis, n_rings) in fivefold_partitions(n) {
+        if n_axis < 2 {
+            continue;
+        }
+        if (n_axis - 1) as f64 * bond > 2.0 * reach + bond {
+            continue;
+        }
+        let mut assignments = Vec::new();
+        // Four pentagons are twenty atoms on one layer. A disk of radius
+        // three bonds has room for three.
+        push_counts(n_axis * 2 - 1, n_rings, 3, &mut assignments);
+        for assignment in &assignments {
+            let rings: usize = assignment.iter().sum();
+            if n_axis + 5 * rings != n {
                 continue;
             }
-            let mut best_params = params.clone();
-            let mut best_energy = energy;
-            let steps = 2_500;
-            for step in 0..steps {
-                let temp = 6.0 * (1.0 - step as f64 / steps as f64).max(0.02);
-                let mut trial = params.clone();
-                let slot = (rng.random::<u64>() as usize) % trial.len();
-                let width = 0.04 + 0.22 * temp / 6.0;
-                trial[slot] += width * (rng.random::<f64>() - 0.5) * 2.0;
-                if slot >= n_axis && (slot - n_axis) % 2 == 1 {
-                    trial[slot] = trial[slot].abs().clamp(0.4, span);
-                }
-                let (next, _) = evaluate(build_fivefold(&trial, n_axis, n_rings, stagger).view());
-                if !next.is_finite() || next > -1.0 {
-                    continue;
-                }
-                let rise = next - energy;
-                if rise <= 0.0 || rng.random::<f64>() < (-rise / temp).exp() {
-                    params = trial;
-                    energy = next;
-                    if next < best_energy {
-                        best_energy = next;
-                        best_params = params.clone();
+            for offset in [0usize, 1] {
+                for gap_deg in gaps_deg {
+                    let gap = gap_deg * std::f64::consts::PI / 180.0;
+                    let (params, na) = ring_seed(assignment, bond, gap, offset);
+                    if params.len() != na + 3 * rings {
+                        continue;
+                    }
+                    let point = phased_points(&params, na, rings);
+                    let (seed_e, _) = evaluate(point.view());
+                    if !seed_e.is_finite() || seed_e >= 0.0 {
+                        continue;
+                    }
+                    let (energy, polished) = polish_rings(params, na, rings, evaluate);
+                    if !energy.is_finite() {
+                        continue;
+                    }
+                    let improved = best.is_empty() || energy < best[0].0;
+                    remember_packing(&mut best, energy, polished, na, rings);
+                    if improved {
+                        println!(
+                            "{{\"kind\":\"exit_pack\",\"energy\":{energy:.6},\"rings\":{rings},\"offset\":{offset},\"gap\":{gap_deg:.0}}}"
+                        );
+                        let _ = std::io::stdout().flush();
                     }
                 }
             }
-            out.push(relax_fivefold_params(
-                best_params,
-                n_axis,
-                n_rings,
-                stagger,
-                evaluate,
-            ));
         }
     }
-    out
+    best.into_iter()
+        .map(|(_, params, na, rings)| phased_points(&params, na, rings))
+        .collect()
 }
 
 fn plane_basis(hat: [f64; 3]) -> ([f64; 3], [f64; 3]) {
@@ -1277,7 +1494,7 @@ where
     if cluster {
         let n_atoms = origin.len() / 3;
         println!("{{\"kind\":\"exit_move\",\"move\":\"anneal\"}}");
-        for trial in anneal_fivefold(origin, &mut evaluate, &mut rng) {
+        for trial in fivefold_packings(origin, &mut evaluate) {
             let quenched = quench(trial.view());
             note_candidate(
                 &quenched,
