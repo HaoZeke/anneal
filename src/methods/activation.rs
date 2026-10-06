@@ -1676,6 +1676,7 @@ fn ride_lowest_mode<E, Q>(
     let surface = ForceSurface {
         evaluate: std::sync::Mutex::new(evaluate),
     };
+    let mut saddles: Vec<(Array1<f64>, Array1<f64>)> = Vec::new();
     let mut ride_modes = vec![features.mode.clone()];
     for axis in outer_axes(start, contact).into_iter().take(3) {
         let (_, mut strain) = twist_and_strain(start, axis);
@@ -1723,6 +1724,7 @@ fn ride_lowest_mode<E, Q>(
                             *best = minimum.coordinates.clone();
                         }
                     }
+                    saddles.push((connection.saddle_coordinates, connection.lowest_mode));
                 }
                 Err(error) => {
                     let message = error.to_string().replace('"', "'");
@@ -1733,7 +1735,23 @@ fn ride_lowest_mode<E, Q>(
         }
     }
     drop(surface);
-    let _ = quench;
+    for (saddle, mode) in saddles {
+        let lead = max_atom_weight(mode.view()).max(1e-12);
+        for sign in [1.0_f64, -1.0] {
+            for factor in [1.0_f64, 2.0] {
+                let mut point = saddle.clone();
+                let step = sign * factor * contact / lead;
+                for (value, component) in point.iter_mut().zip(mode.iter()) {
+                    *value += step * component;
+                }
+                if closest_pair(point.view()) < contact * 0.5 {
+                    continue;
+                }
+                let quenched = quench(point.view());
+                let _ = note_exit(evaluate, &quenched, 0, best_energy, best);
+            }
+        }
+    }
 }
 
 fn climb_outer_axes<E, Q>(
