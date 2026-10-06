@@ -162,65 +162,26 @@ where
     Q: FnMut(ArrayView1<f64>) -> Array1<f64>,
 {
     let n_cover = crate::hypersphere::default_cover_size();
-    let raw = crate::hypersphere::cover_direction(n_cover, origin.len(), cover_index);
-    let mut axis = Array1::from(raw);
-    let norm: f64 = axis.iter().map(|z| z * z).sum::<f64>().sqrt();
-    if norm < 1e-15 || axis.len() != origin.len() {
-        return quench(origin);
-    }
-    axis /= norm;
-    // Walk this covering line until the slope flips. A fixed hop length
-    // either stays in the well or dumps the quench into a shallower one.
-    let n_at = (origin.len() / 3).max(1) as f64;
-    // `rmsd` is an all-atom root-mean-square length. The line step has
-    // to be that long in coordinate norm, or a 200-dimensional shell
-    // barely leaves its well.
-    let rms = if rmsd > 0.0 {
-        rmsd.min(0.35).max(1e-3)
+    let direction = crate::hypersphere::cover_direction(n_cover, origin.len(), cover_index);
+    let placed = crate::hypersphere::place_around(
+        origin.as_slice().unwrap_or(&[]),
+        &direction,
+        rmsd.max(1e-3),
+        None,
+    );
+    let start = if placed.len() == origin.len() {
+        Array1::from(placed)
     } else {
-        cfg.step
+        origin.to_owned()
     };
-    let mut step = rms * n_at.sqrt();
-    let mut x = origin.to_owned();
-    let mut last_safe = x.clone();
-    let mut saw_uphill = false;
-    let mut crossed = false;
-    let mut taken = 0usize;
-    while taken < cfg.max_steps {
-        let mut trial = x.clone();
-        for i in 0..trial.len() {
-            trial[i] += step * axis[i];
-        }
-        let Some(g) = grad(trial.view()) else {
-            break;
-        };
-        let gnorm: f64 = g.iter().map(|z| z * z).sum::<f64>().sqrt();
-        if !gnorm.is_finite() || gnorm > 5.0e3 {
-            step *= 0.5;
-            if step < 1e-3 {
-                break;
-            }
-            continue;
-        }
-        x = trial;
-        last_safe = x.clone();
-        taken += 1;
-        let along: f64 = g.iter().zip(axis.iter()).map(|(a, b)| a * b).sum();
-        if along > 0.0 {
-            saw_uphill = true;
-        }
-        if saw_uphill && along < 0.0 {
-            crossed = true;
-            break;
-        }
-    }
-    let _ = last_safe;
-    if crossed {
-        if let Some(outcome) = activate_from_origin(x.view(), origin, &mut grad, cfg) {
-            x = outcome.state;
-        }
-    }
-    quench(x.view())
+    // The covering point is only the side of the well. The climb has to
+    // leave that side before the quench, or the minimiser falls home.
+    let climbed = activate_from_origin(start.view(), origin, &mut grad, cfg);
+    let seed = match climbed {
+        Some(outcome) => outcome.state,
+        None => start,
+    };
+    quench(seed.view())
 }
 
 /// Climb along `direction` first, then track the minimum mode.

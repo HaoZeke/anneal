@@ -309,19 +309,40 @@ fn main() {
             "{{\"kind\":\"climb_setup\",\"n\":{n},\"rmsd\":{rmsd:.3},\"ico\":{ico_energy:.6},\"marks\":{marks_energy:.6}}}"
         );
         let cfg = anneal_core::methods::activation::Activation {
-            max_steps: 80,
+            max_steps: 60,
+            overshoot: 4.0,
+            step: 0.12,
+            lanczos_steps: 16,
             ..anneal_core::methods::activation::Activation::default()
         };
         for index in 0..n {
-            let trial = anneal_core::methods::activation::cover_climb_quench(
-                ico.view(),
-                rmsd,
-                index,
-                |v: ArrayView1<f64>| Some(potential.value_and_gradient(v).1),
-                |v: ArrayView1<f64>| quench(&potential, v, steps),
-                &cfg,
-            );
-            classify("climb", index, &mut climbed, &trial, None);
+            // Up to four escapes. A higher neighbour is kept as the next
+            // start so a later saddle can fall below the original well.
+            let mut here = ico.clone();
+            let mut best = ico.clone();
+            let mut best_e = ico_energy;
+            for hop in 0..4 {
+                let trial = anneal_core::methods::activation::cover_climb_quench(
+                    here.view(),
+                    rmsd,
+                    index.wrapping_add(hop.wrapping_mul(17)),
+                    |v: ArrayView1<f64>| Some(potential.value_and_gradient(v).1),
+                    |v: ArrayView1<f64>| quench(&potential, v, steps),
+                    &cfg,
+                );
+                let energy = potential.value_and_gradient(trial.view()).0;
+                if energy.is_finite() && energy < best_e - 1e-6 {
+                    best_e = energy;
+                    best = trial.clone();
+                }
+                let here_e = potential.value_and_gradient(here.view()).0;
+                if energy.is_finite() && (energy - here_e).abs() > 1e-3 {
+                    here = trial;
+                } else {
+                    break;
+                }
+            }
+            classify("climb", index, &mut climbed, &best, None);
             let _ = std::io::Write::flush(&mut std::io::stdout());
         }
         report("climb", &climbed, n);
