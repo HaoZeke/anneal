@@ -7,6 +7,8 @@ if [[ -z ${SLURM_JOB_ID:-} ]]; then
   exit 1
 fi
 ROOT=${LJ_ROOT:-$HOME/anneal-build}
+# shellcheck disable=SC1091
+source "$ROOT/scripts/elja_scratch.sh"
 GCC=${GCC_ROOT:-/opt/ohpc/pub/compiler/gcc/12.4.0}
 SYS=${IRA_SYSROOT:-$HOME/ira/sysroot}
 CMAKE_BIN=${CMAKE_BIN:-$HOME/rgpot/.pixi/envs/xtbbld/bin/cmake}
@@ -91,6 +93,12 @@ if ! git diff --quiet HEAD --; then
   git status --short >&2
   exit 2
 fi
+# The checkout stays on the home filer. The object tree does not.
+NFS_ROOT=$ROOT
+elja_enter_scratch
+trap elja_leave_scratch EXIT
+rsync -a --bwlimit=40000 --exclude target "$NFS_ROOT/" "$ELJA_SCRATCH/src/"
+cd "$ELJA_SCRATCH/src"
 cargo build --offline --locked --release --features featomic,ira,bank-rpc \
   --example lj_cluster_search \
   --example lj_census_calibration \
@@ -98,14 +106,23 @@ cargo build --offline --locked --release --features featomic,ira,bank-rpc \
   --example catalog_status \
   --example bank_server \
   --example leave_packing_probe
+BIN=$CARGO_TARGET_DIR/release/examples/lj_cluster_search
 ldd "$BIN"
+mkdir -p "$NFS_ROOT/target/release/examples"
+for example in lj_cluster_search lj_census_calibration catalog_server catalog_status bank_server leave_packing_probe; do
+  elja_publish "$CARGO_TARGET_DIR/release/examples/$example" "$NFS_ROOT/target/release/examples/$example"
+done
 git rev-parse HEAD >SOURCE_COMMIT
-sha256sum \
-  target/release/examples/lj_cluster_search \
-  target/release/examples/catalog_server \
-  target/release/examples/catalog_status \
-  >BUILD_SHA256SUMS
+elja_publish SOURCE_COMMIT "$NFS_ROOT/SOURCE_COMMIT"
+(
+  cd "$NFS_ROOT"
+  sha256sum \
+    target/release/examples/lj_cluster_search \
+    target/release/examples/catalog_server \
+    target/release/examples/catalog_status \
+    >BUILD_SHA256SUMS
+)
 echo "SMOKE"
-"$BIN" 13 200 1 rec
-echo "BUILD_OK $PWD/$BIN"
+( cd "$ELJA_SCRATCH" && "$BIN" 13 200 1 rec )
+echo "BUILD_OK $BIN"
 echo "NOTE molecular_cluster and slab_adsorption: scripts/elja_build_rgpot_ex.sh (in-process rgpot, not potserv)"

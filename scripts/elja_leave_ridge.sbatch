@@ -18,6 +18,10 @@ export LD_LIBRARY_PATH="${IRA_LIB_DIR}:${LD_LIBRARY_PATH:-}"
 ROOT=${LJ_ROOT:-$HOME/anneal-leave-ridge}
 PIXI=${PIXI:-$HOME/.pixi/bin/pixi}
 cd "$ROOT"
+# shellcheck disable=SC1091
+source "$ROOT/scripts/elja_scratch.sh"
+elja_enter_scratch
+trap elja_leave_scratch EXIT
 mkdir -p probe
 git rev-parse HEAD >SOURCE_COMMIT
 if [[ ! -x $PIXI ]]; then
@@ -31,7 +35,7 @@ fi
 echo "{\"kind\":\"build\",\"head\":\"$(git rev-parse HEAD)\",\"host\":\"$(hostname)\",\"job\":\"${SLURM_JOB_ID:-}\"}"
 "$PIXI" run -e cluster cargo test --offline --release --test occupancy_leave_contract leave_quench_keeps_the_walk
 "$PIXI" run -e cluster cargo build --offline --release --features featomic --example leave_packing_probe
-exec "$PIXI" run -e cluster -- ./target/release/examples/leave_packing_probe \
+exec "$PIXI" run -e cluster -- "$CARGO_TARGET_DIR/release/examples/leave_packing_probe" \
   "${LEAVE_PROBE_N:-0}" \
   "${LEAVE_PROBE_STEPS:-400}" \
   ridge

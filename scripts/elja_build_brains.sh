@@ -6,6 +6,8 @@ if [[ -z ${SLURM_JOB_ID:-} ]]; then
   exit 1
 fi
 ROOT=${LJ_ROOT:-$HOME/anneal-occ-brains}
+# shellcheck disable=SC1091
+source "$ROOT/scripts/elja_scratch.sh"
 PIXI=${PIXI:-$HOME/.pixi/bin/pixi}
 if [[ ! -x $PIXI ]]; then
   echo "missing pixi at $PIXI" >&2
@@ -19,6 +21,8 @@ if [[ ! -e $IRA_LIB_DIR/libira.so ]]; then
 fi
 export LD_LIBRARY_PATH="${IRA_LIB_DIR}:${LD_LIBRARY_PATH:-}"
 cd "$ROOT"
+elja_enter_scratch
+trap elja_leave_scratch EXIT
 if [[ ! -s SOURCE_COMMIT ]]; then
   echo "missing SOURCE_COMMIT" >&2
   exit 1
@@ -63,6 +67,9 @@ fi
 "$PIXI" run -e cluster cargo build --offline --locked --release --features featomic,ira,bank-rpc \
   --example lj_cluster_search \
   --example catalog_server
+mkdir -p target/release/examples
+elja_publish "$CARGO_TARGET_DIR/release/examples/lj_cluster_search" target/release/examples/lj_cluster_search
+elja_publish "$CARGO_TARGET_DIR/release/examples/catalog_server" target/release/examples/catalog_server
 BIN=target/release/examples/lj_cluster_search
 ldd "$BIN"
 for symbol in different_packing_family "occupancy leave archive hole" "packing invert nu3 pullback" "leave ridge climb" CATALOG_BRAIN_LISTEN "leftover-SOAP TIS seats" "occupancy min families" "gt stop packing"; do
