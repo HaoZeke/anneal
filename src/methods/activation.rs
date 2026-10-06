@@ -1668,7 +1668,7 @@ fn ride_lowest_mode<E, Q>(
     // a contact, then the quench, is the downhill branch.
     config.branch_attempts = 1;
     config.irc_steps = 1;
-    config.irc_step = 0.25 * contact * (n_atoms as f64).sqrt();
+    config.irc_step = 0.5 * contact * (n_atoms as f64).sqrt();
     println!(
         "{{\"kind\":\"dimer_cfg\",\"quench_tol\":{},\"saddle_tol\":{},\"move\":{}}}",
         config.quench_gradient_tolerance, config.saddle_force_tolerance, config.maximum_move
