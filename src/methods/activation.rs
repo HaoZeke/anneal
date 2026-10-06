@@ -306,6 +306,15 @@ where
     best
 }
 
+fn packed_fraction(x: ArrayView1<f64>) -> f64 {
+    let n = x.len() / 3;
+    if n < 4 {
+        return 0.0;
+    }
+    let cutoff = 1.35 * crate::twin::spacing(x, n);
+    crate::structure::cna_descriptor(x, n, cutoff)[1]
+}
+
 fn basin_key(energy: f64) -> i64 {
     (energy / 5.0e-3).round() as i64
 }
@@ -656,88 +665,88 @@ where
         "{{\"kind\":\"exit_candidate\",\"energy\":{origin_e:.6},\"hop\":0,\"role\":\"start\"}}"
     );
 
-    // A Metropolis temperature that only accepts small rises never
-    // crosses the barrier out of a deep funnel. Below a fixed lid every
-    // new quenched basin is kept, and the next move leaves from the
-    // least visited one. The moves are an angular surface throw, a
-    // shell rotation, a relocation of a poorly coordinated atom, and a
-    // twin. No named target energy is used.
+    // A decahedron is the packing with close-packed `421` pairs. Follow
+    // a short constant-energy trajectory and quench at the point where
+    // that fraction is highest, which is a geometry the steepest descent
+    // from the floor never visits. No named target energy is used.
     if cluster {
         let n_atoms = origin.len() / 3;
-        let arms = [
-            crate::methods::cluster_hopping::ClusterMove::Angular {
-                n_points: n_atoms,
-                length_scale: 1.0,
-                energy_scale: 1.0,
-            },
-            crate::methods::cluster_hopping::ClusterMove::ShellRotate(
-                crate::movekernel::ShellRotate { n_points: n_atoms },
-            ),
-            crate::methods::cluster_hopping::ClusterMove::SurfaceRelocate(
-                crate::movekernel::SurfaceRelocate {
-                    n_points: n_atoms,
-                    neighbour_cutoff: 1.35,
-                },
-            ),
-            crate::methods::cluster_hopping::ClusterMove::Twin { n_points: n_atoms },
-        ];
-        struct Held {
-            energy: f64,
-            state: Array1<f64>,
-            visits: u32,
-        }
-        let mut held = vec![Held {
-            energy: origin_e,
-            state: origin.to_owned(),
-            visits: 0,
-        }];
-        let mut seen = HashSet::from([basin_key(origin_e)]);
-        let lid = origin_e + 10.5;
-        for hop in 0..max_hops {
+        let base_pack = packed_fraction(origin);
+        println!("{{\"kind\":\"exit_order\",\"packed\":{base_pack:.4},\"role\":\"start\"}}");
+        let kinetics = [12.0_f64, 28.0, 55.0, 90.0];
+        for (attempt, kinetic) in kinetics.into_iter().enumerate().take(max_hops.max(1)) {
             if best_e < origin_e - 0.05 {
-                println!(
-                    "{{\"kind\":\"exit_hop\",\"hop\":{hop},\"here\":{here_e:.6},\"best\":{best_e:.6},\"phase\":\"lid\",\"left\":true}}"
-                );
-                let _ = std::io::stdout().flush();
                 return best;
             }
-            let idx = held
-                .iter()
-                .enumerate()
-                .min_by_key(|(_, item)| (item.visits, item.energy.to_bits()))
-                .map(|(i, _)| i)
-                .unwrap_or(0);
-            held[idx].visits += 1;
-            let parent = held[idx].state.clone();
-            let trial = arms[hop % arms.len()].propose(parent.view(), 1.0, &mut rng);
-            let quenched = quench(trial.view());
+            let mut point = origin.to_owned();
+            let mut velocity = Array1::zeros(point.len());
+            let mut draw_sum = 0.0;
+            for value in velocity.iter_mut() {
+                let draw = rng.random::<f64>() - 0.5;
+                *value = draw;
+                draw_sum += draw * draw;
+            }
+            let scale = (2.0 * kinetic / draw_sum.max(1.0e-12)).sqrt();
+            velocity *= scale;
+            let dt = 0.004;
+            let mut best_pack = base_pack;
+            let mut best_frame = point.clone();
+            for step in 0..900 {
+                let (energy, force) = evaluate(point.view());
+                if !energy.is_finite() || energy > origin_e + 80.0 {
+                    break;
+                }
+                for i in 0..point.len() {
+                    velocity[i] += 0.5 * dt * (-force[i]);
+                    point[i] += dt * velocity[i];
+                }
+                let (energy_new, force_new) = evaluate(point.view());
+                if !energy_new.is_finite() {
+                    break;
+                }
+                for i in 0..point.len() {
+                    velocity[i] += 0.5 * dt * (-force_new[i]);
+                }
+                let mut com_v = [0.0; 3];
+                for atom in 0..n_atoms {
+                    for axis in 0..3 {
+                        com_v[axis] += velocity[3 * atom + axis];
+                    }
+                }
+                for value in &mut com_v {
+                    *value /= n_atoms as f64;
+                }
+                for atom in 0..n_atoms {
+                    for axis in 0..3 {
+                        velocity[3 * atom + axis] -= com_v[axis];
+                    }
+                }
+                if step.is_multiple_of(30) {
+                    let packed = packed_fraction(point.view());
+                    if packed > best_pack {
+                        best_pack = packed;
+                        best_frame = point.clone();
+                    }
+                }
+            }
+            let quenched = quench(best_frame.view());
             note_candidate(
                 &quenched,
                 &mut evaluate,
                 &mut best,
                 &mut best_e,
-                hop,
+                attempt,
                 origin_e,
                 &mut bank,
                 &rejected,
             );
             let (value, _) = evaluate(quenched.view());
-            if value.is_finite() && value < lid && held.len() < 400 {
-                let key = basin_key(value);
-                if seen.insert(key) {
-                    held.push(Held {
-                        energy: value,
-                        state: quenched,
-                        visits: 0,
-                    });
-                }
-            }
-            if hop.is_multiple_of(400) {
-                println!(
-                    "{{\"kind\":\"exit_hop\",\"hop\":{hop},\"here\":{here_e:.6},\"best\":{best_e:.6},\"basins\":{},\"phase\":\"lid\"}}",
-                    held.len()
-                );
-                let _ = std::io::stdout().flush();
+            println!(
+                "{{\"kind\":\"exit_hop\",\"hop\":{attempt},\"here\":{value:.6},\"best\":{best_e:.6},\"packed\":{best_pack:.4},\"phase\":\"order\"}}"
+            );
+            let _ = std::io::stdout().flush();
+            if best_e < origin_e - 0.05 {
+                return best;
             }
         }
     }
