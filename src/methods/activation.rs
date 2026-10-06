@@ -1522,8 +1522,12 @@ fn ride_lowest_mode<E, Q>(
     config.saddle_displacement = contact / (n_atoms as f64).sqrt();
     config.activation_growth = 2.0;
     config.activation_attempts = 8;
-    config.quench_steps = n_atoms.saturating_mul(8).max(32);
-    config.saddle_steps = n_atoms.saturating_mul(4).max(32);
+    config.quench_steps = n_atoms.saturating_mul(16).max(64);
+    config.saddle_steps = n_atoms.saturating_mul(8).max(64);
+    // A residual near 1e-5 is a minimised Lennard-Jones cluster. The
+    // tighter library default stops the ride before the saddle search.
+    config.quench_gradient_tolerance = 1e-5;
+    config.maximum_move = contact * 0.25;
     let surface = ForceSurface {
         evaluate: std::sync::Mutex::new(evaluate),
     };
