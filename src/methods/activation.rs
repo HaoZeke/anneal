@@ -185,20 +185,26 @@ where
     let mut last_safe = x.clone();
     let mut saw_uphill = false;
     let mut crossed = false;
-    for _ in 0..cfg.max_steps {
-        for i in 0..x.len() {
-            x[i] += step * axis[i];
+    let mut taken = 0usize;
+    while taken < cfg.max_steps {
+        let mut trial = x.clone();
+        for i in 0..trial.len() {
+            trial[i] += step * axis[i];
         }
-        let Some(g) = grad(x.view()) else {
-            x = last_safe;
+        let Some(g) = grad(trial.view()) else {
             break;
         };
         let gnorm: f64 = g.iter().map(|z| z * z).sum::<f64>().sqrt();
-        if !gnorm.is_finite() || gnorm > 1.0e3 {
-            x = last_safe;
-            break;
+        if !gnorm.is_finite() || gnorm > 5.0e3 {
+            step *= 0.5;
+            if step < 1e-3 {
+                break;
+            }
+            continue;
         }
+        x = trial;
         last_safe = x.clone();
+        taken += 1;
         let along: f64 = g.iter().zip(axis.iter()).map(|(a, b)| a * b).sum();
         if along > 0.0 {
             saw_uphill = true;
@@ -208,6 +214,7 @@ where
             break;
         }
     }
+    let _ = last_safe;
     if crossed {
         if let Some(outcome) = activate_from_origin(x.view(), origin, &mut grad, cfg) {
             x = outcome.state;
@@ -504,11 +511,14 @@ mod tests {
         let g = double_well(&w, &k);
         let end = cover_climb_quench(
             origin.view(),
-            0.2,
+            0.05,
             0,
             &g,
             |x| quench_double_well(&w, &k, x.to_owned()),
-            &Activation::default(),
+            &Activation {
+                max_steps: 12,
+                ..Activation::default()
+            },
         );
         assert_eq!(end.len(), dim);
         let grad = g(end.view()).unwrap();
