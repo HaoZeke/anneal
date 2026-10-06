@@ -393,59 +393,51 @@ where
     let contact = closest_pair(origin);
     let n_atoms = origin.len() / 3;
     if contact > 0.95 && n_atoms >= 2 {
+        let mut com = [0.0; 3];
+        for i in 0..n_atoms {
+            for k in 0..3 {
+                com[k] += origin[3 * i + k];
+            }
+        }
+        for value in &mut com {
+            *value /= n_atoms as f64;
+        }
+        let mut reach = 0.0_f64;
+        for i in 0..n_atoms {
+            let mut r2 = 0.0;
+            for k in 0..3 {
+                let d = origin[3 * i + k] - com[k];
+                r2 += d * d;
+            }
+            reach = reach.max(r2.sqrt());
+        }
+        let span = reach.max(contact);
+        let mut climb = cfg.clone();
+        // The whole budget walks one cluster radius, as an all-atom RMS.
+        climb.step = span * (n_atoms as f64).sqrt() / climb.max_steps.max(1) as f64;
         if let Some((lambdas, modes, _)) = crate::curvature::soft_subspace(
             origin,
             |point| Some(evaluate(point).1),
-            cfg.lanczos_steps.max(2),
-            cfg.epsilon,
-            1,
+            climb.lanczos_steps.max(2),
+            climb.epsilon,
+            climb.lanczos_steps.saturating_sub(1).max(1),
         ) {
-            if let Some(mode) = modes.first() {
-                let mut reach = 0.0_f64;
-                let mut com = [0.0; 3];
-                for i in 0..n_atoms {
-                    for k in 0..3 {
-                        com[k] += origin[3 * i + k];
-                    }
-                }
-                for value in &mut com {
-                    *value /= n_atoms as f64;
-                }
-                for i in 0..n_atoms {
-                    let mut r2 = 0.0;
-                    for k in 0..3 {
-                        let d = origin[3 * i + k] - com[k];
-                        r2 += d * d;
-                    }
-                    reach = reach.max(r2.sqrt());
-                }
-                let span = reach.max(contact);
-                let mut amp = contact;
-                while amp <= span {
-                    for sign in [1.0_f64, -1.0] {
-                        let mut kicked = origin.to_owned();
-                        let scale = amp * (n_atoms as f64).sqrt();
-                        for i in 0..kicked.len() {
-                            kicked[i] += sign * scale * mode[i];
-                        }
-                        let quenched = quench(kicked.view());
-                        let (value, _) = evaluate(quenched.view());
-                        if value.is_finite() {
-                            println!(
-                                "{{\"kind\":\"exit_candidate\",\"energy\":{value:.6},\"hop\":0,\"role\":\"quench\"}}"
-                            );
-                            let _ = std::io::stdout().flush();
-                            if value < best_e {
-                                best_e = value;
-                                best = quenched;
-                            }
+            for mode in modes {
+                if let Some(outcome) =
+                    activate_along(origin, mode.view(), |point| Some(evaluate(point).1), &climb)
+                {
+                    let quenched = quench(outcome.state.view());
+                    let (value, _) = evaluate(quenched.view());
+                    if value.is_finite() {
+                        println!(
+                            "{{\"kind\":\"exit_candidate\",\"energy\":{value:.6},\"hop\":0,\"role\":\"quench\"}}"
+                        );
+                        let _ = std::io::stdout().flush();
+                        if value < best_e {
+                            best_e = value;
+                            best = quenched;
                         }
                     }
-                    let next = amp * 2.0;
-                    if next <= amp {
-                        break;
-                    }
-                    amp = next;
                 }
             }
             let _ = lambdas;
