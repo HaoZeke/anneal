@@ -1565,13 +1565,42 @@ mod tests {
         );
     }
 
+    fn regular_icosahedron() -> Array1<f64> {
+        let p = (1.0 + 5.0_f64.sqrt()) / 2.0;
+        let mut coords = Vec::with_capacity(36);
+        for (a, b, c) in [
+            (0.0, 1.0, p),
+            (0.0, 1.0, -p),
+            (0.0, -1.0, p),
+            (0.0, -1.0, -p),
+            (1.0, p, 0.0),
+            (1.0, -p, 0.0),
+            (-1.0, p, 0.0),
+            (-1.0, -p, 0.0),
+            (p, 0.0, 1.0),
+            (p, 0.0, -1.0),
+            (-p, 0.0, 1.0),
+            (-p, 0.0, -1.0),
+        ] {
+            coords.extend([a, b, c]);
+        }
+        Array1::from(coords)
+    }
+
     #[test]
-    fn lj75_closed_shell_proposal_matches_the_covering_point() {
-        let ico75 = load_xyz(include_str!("../tests/fixtures/lj75_ico.xyz"));
+    fn closed_shell_with_no_local_leftover_takes_the_covering_point() {
+        let shell = regular_icosahedron();
+        let spec = spectrum(shell.view(), 3.5, None, None);
+        let nnu = (spec.n_at * spec.n_feat).max(1) as f64;
+        let rms = (spec.leftover.iter().map(|v| v * v).sum::<f64>() / nnu).sqrt();
+        assert!(
+            rms < DEFECT || shell_leftover(&spec),
+            "icosahedral shell still has a local leftover, rms={rms}"
+        );
         let mut rng_hop = StdRng::seed_from_u64(7);
-        let hopped = step_away_featomic(ico75.view(), 0.35, 3.5, None, None, &mut rng_hop);
+        let hopped = step_away_featomic(shell.view(), 0.35, 3.5, None, None, &mut rng_hop);
         let mut rng_cover = StdRng::seed_from_u64(7);
-        let covered = leave_archive_hole(ico75.view(), 3.5, None, None, 0.35, &mut rng_cover);
+        let covered = leave_archive_hole(shell.view(), 3.5, None, None, 0.35, &mut rng_cover);
         let err: f64 = hopped
             .iter()
             .zip(covered.iter())
