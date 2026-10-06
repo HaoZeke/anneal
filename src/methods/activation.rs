@@ -622,7 +622,18 @@ where
                 feedback.observe(Some(current), current);
             }
         }
-        if let Some((energy, state)) = bank.iter().rev().find_map(|slot| slot.clone()) {
+        // The top of the window is a melt. The next hop leaves from the
+        // rung nearest the middle of the window, where a packing saddle
+        // sits, and a rung that does not move the search is dropped.
+        let target = 0.6 * crate::catalog::SEAM_WINDOW;
+        let chosen = bank.iter().flatten().min_by(|left, right| {
+            let left_d = ((left.0 - origin_e) - target).abs();
+            let right_d = ((right.0 - origin_e) - target).abs();
+            left_d
+                .partial_cmp(&right_d)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+        if let Some((energy, state)) = chosen {
             if (energy - frontier_energy).abs() < 1.0e-6 {
                 frontier_stuck += 1;
             } else {
@@ -630,13 +641,19 @@ where
                 frontier_energy = energy;
             }
             if frontier_stuck >= 2 {
-                if let Some(slot) = bank.iter_mut().rev().find(|slot| slot.is_some()) {
-                    *slot = None;
+                let drop = basin_key(energy);
+                for slot in bank.iter_mut() {
+                    if slot
+                        .as_ref()
+                        .is_some_and(|(held, _)| basin_key(*held) == drop)
+                    {
+                        *slot = None;
+                    }
                 }
                 frontier_stuck = 0;
                 frontier_energy = f64::NAN;
             } else {
-                here = state;
+                here = state.clone();
                 here_e = energy;
             }
         }
