@@ -1796,21 +1796,11 @@ where
                 }
             }
         }
-        // A packing the chain keeps returning to shortens the proposal.
-        // The charge is the same cost the Metropolis test already adds.
-        // A fresh packing keeps the library amplitude.
-        let packing_scale = if let Some(pave) = pave.as_ref() {
-            let here = identity.basin_of(x.view()) as u64;
-            crate::catalog::packing_step_scale(pave.potential(here), cfg.bias_height)
+        let escape = if cfg.minima_hopping {
+            feedback.escape()
         } else {
             1.0
         };
-        let escape = packing_scale
-            * if cfg.minima_hopping {
-                feedback.escape()
-            } else {
-                1.0
-            };
         // Ordinary hops: scale the library move by the escape feedback. Soft
         // mode climbs live under `escape_on_stall` below; they are a few per
         // cent of the budget when the chain has stopped improving, not the
