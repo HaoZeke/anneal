@@ -476,6 +476,145 @@ fn move_extreme_atom_to_com(x: ArrayView1<f64>, outermost: bool) -> Array1<f64> 
     y
 }
 
+fn outer_axes(x: ArrayView1<f64>, contact: f64) -> Vec<[f64; 3]> {
+    let n_atoms = x.len() / 3;
+    if n_atoms == 0 {
+        return Vec::new();
+    }
+    let mut com = [0.0; 3];
+    for atom in 0..n_atoms {
+        for axis in 0..3 {
+            com[axis] += x[3 * atom + axis];
+        }
+    }
+    for value in &mut com {
+        *value /= n_atoms as f64;
+    }
+    let mut radii = Vec::with_capacity(n_atoms);
+    let mut reach = 0.0_f64;
+    for atom in 0..n_atoms {
+        let mut square = 0.0;
+        for axis in 0..3 {
+            let delta = x[3 * atom + axis] - com[axis];
+            square += delta * delta;
+        }
+        let radius = square.sqrt();
+        reach = reach.max(radius);
+        radii.push(radius);
+    }
+    let mut axes = Vec::new();
+    for atom in 0..n_atoms {
+        if radii[atom] + contact * 0.5 < reach {
+            continue;
+        }
+        if radii[atom] < 1e-8 {
+            continue;
+        }
+        let mut direction = [0.0; 3];
+        for axis in 0..3 {
+            direction[axis] = (x[3 * atom + axis] - com[axis]) / radii[atom];
+        }
+        // Axes within 60 degrees, and their opposites, are the same line.
+        let distinct = axes.iter().all(|known: &[f64; 3]| {
+            let dot = known[0] * direction[0] + known[1] * direction[1] + known[2] * direction[2];
+            dot.abs() < 0.5
+        });
+        if distinct {
+            axes.push(direction);
+        }
+    }
+    axes
+}
+
+fn rotate_positive_cap(x: ArrayView1<f64>, axis: [f64; 3], angle: f64) -> Array1<f64> {
+    let n_atoms = x.len() / 3;
+    let mut y = x.to_owned();
+    if n_atoms == 0 {
+        return y;
+    }
+    let mut com = [0.0; 3];
+    for atom in 0..n_atoms {
+        for coord in 0..3 {
+            com[coord] += y[3 * atom + coord];
+        }
+    }
+    for value in &mut com {
+        *value /= n_atoms as f64;
+    }
+    let (sin, cos) = angle.sin_cos();
+    let t = 1.0 - cos;
+    let [ax, ay, az] = axis;
+    let rot = [
+        t * ax * ax + cos,
+        t * ax * ay - sin * az,
+        t * ax * az + sin * ay,
+        t * ax * ay + sin * az,
+        t * ay * ay + cos,
+        t * ay * az - sin * ax,
+        t * ax * az - sin * ay,
+        t * ay * az + sin * ax,
+        t * az * az + cos,
+    ];
+    for atom in 0..n_atoms {
+        let r = [
+            y[3 * atom] - com[0],
+            y[3 * atom + 1] - com[1],
+            y[3 * atom + 2] - com[2],
+        ];
+        let height = r[0] * ax + r[1] * ay + r[2] * az;
+        if height <= 0.0 {
+            continue;
+        }
+        let turned = [
+            rot[0] * r[0] + rot[1] * r[1] + rot[2] * r[2],
+            rot[3] * r[0] + rot[4] * r[1] + rot[5] * r[2],
+            rot[6] * r[0] + rot[7] * r[1] + rot[8] * r[2],
+        ];
+        for coord in 0..3 {
+            y[3 * atom + coord] = com[coord] + turned[coord];
+        }
+    }
+    y
+}
+
+fn twist_and_strain(x: ArrayView1<f64>, axis: [f64; 3]) -> (Array1<f64>, Array1<f64>) {
+    let n_atoms = x.len() / 3;
+    let mut twist = Array1::zeros(x.len());
+    let mut strain = Array1::zeros(x.len());
+    let mut com = [0.0; 3];
+    for atom in 0..n_atoms {
+        for coord in 0..3 {
+            com[coord] += x[3 * atom + coord];
+        }
+    }
+    if n_atoms > 0 {
+        for value in &mut com {
+            *value /= n_atoms as f64;
+        }
+    }
+    let [ax, ay, az] = axis;
+    for atom in 0..n_atoms {
+        let r = [
+            x[3 * atom] - com[0],
+            x[3 * atom + 1] - com[1],
+            x[3 * atom + 2] - com[2],
+        ];
+        let height = r[0] * ax + r[1] * ay + r[2] * az;
+        let perp = [r[0] - height * ax, r[1] - height * ay, r[2] - height * az];
+        // Tangential rotation of the positive cap, and a volume-preserving
+        // stretch along the same axis.
+        if height > 0.0 {
+            twist[3 * atom] = ay * r[2] - az * r[1];
+            twist[3 * atom + 1] = az * r[0] - ax * r[2];
+            twist[3 * atom + 2] = ax * r[1] - ay * r[0];
+        }
+        strain[3 * atom] = -height * ax + 0.5 * perp[0];
+        strain[3 * atom + 1] = -height * ay + 0.5 * perp[1];
+        strain[3 * atom + 2] = -height * az + 0.5 * perp[2];
+    }
+    (twist, strain)
+}
+
 fn cluster_reach(x: ArrayView1<f64>) -> f64 {
     let n_atoms = x.len() / 3;
     if n_atoms == 0 {
@@ -1190,6 +1329,56 @@ fn climb_relaxed_cover<E, Q>(
     }
 }
 
+fn climb_outer_axes<E, Q>(
+    start: ArrayView1<f64>,
+    contact: f64,
+    hop: usize,
+    evaluate: &mut E,
+    quench: &mut Q,
+    cfg: &Activation,
+    best_energy: &mut f64,
+    best: &mut Array1<f64>,
+) where
+    E: FnMut(ArrayView1<f64>) -> (f64, Array1<f64>),
+    Q: FnMut(ArrayView1<f64>) -> Array1<f64>,
+{
+    // Half a pentagon sector. The axis is an outermost atom of this
+    // geometry, so the angle is the symmetry of that axis.
+    let half_sector = std::f64::consts::PI / 10.0;
+    for (index, axis) in outer_axes(start, contact).into_iter().enumerate() {
+        for sign in [1.0_f64, -1.0] {
+            let turned = rotate_positive_cap(start, axis, sign * half_sector);
+            let quenched = quench(turned.view());
+            let _ = note_exit(evaluate, &quenched, hop, best_energy, best);
+        }
+        let (twist, strain) = twist_and_strain(start, axis);
+        for (name, mode) in [("twist", twist), ("strain", strain)] {
+            if dot_av(mode.view(), mode.view()) < 1e-16 {
+                continue;
+            }
+            for travel in [1.0_f64, -1.0] {
+                let ridge = climb_cover(start, mode.view(), travel, true, evaluate, cfg);
+                println!(
+                    "{{\"kind\":\"climb\",\"hop\":{hop},\"axis\":\"{name}{index}\",\"travel\":{travel},\"crossed\":{},\"lambda\":{:.6},\"lowest\":{:.6},\"steps\":{},\"axial\":{:.4},\"landings\":{}}}",
+                    ridge.crossed,
+                    ridge.lambda,
+                    ridge.lowest,
+                    ridge.steps,
+                    ridge.axial,
+                    ridge.landings.len()
+                );
+                for landing in &ridge.landings {
+                    if landing.iter().any(|value| !value.is_finite()) {
+                        continue;
+                    }
+                    let quenched = quench(landing.view());
+                    let _ = note_exit(evaluate, &quenched, hop, best_energy, best);
+                }
+            }
+        }
+    }
+}
+
 fn climb_soft_modes<E, Q>(
     start: ArrayView1<f64>,
     hop: usize,
@@ -1456,6 +1645,16 @@ where
     }
     let mut shelf: Option<(f64, Array1<f64>)> = None;
     if contact > 0.95 && n_atoms >= 2 {
+        climb_outer_axes(
+            origin.view(),
+            contact,
+            0,
+            &mut evaluate,
+            &mut quench,
+            cfg,
+            &mut best_e,
+            &mut best,
+        );
         climb_soft_modes(
             origin.view(),
             0,
