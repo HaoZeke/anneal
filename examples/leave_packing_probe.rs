@@ -21,6 +21,7 @@
 //! landscape.
 
 use anneal_core::catalog::{PACKING_LINK, PackingBook, leaves_packing, packing_link_labels};
+use rand::SeedableRng;
 use anneal_core::known_basin;
 use anneal_core::methods::activation::{Activation, activate_from_origin};
 use anneal_core::methods::warm_lbfgs::WarmLbfgs;
@@ -256,6 +257,41 @@ fn main() {
             rung.map_or_else(|| "null".to_owned(), |value| value.to_string())
         );
     };
+
+    // The hop's own covering start: one Plasencia point per index,
+    // quenched raw. `rmsd` is the fourth argument and defaults to the
+    // step the LJ75 walk prints (0.7).
+    if std::env::args().nth(3).as_deref() == Some("cover") {
+        let rmsd: f64 = std::env::args()
+            .nth(4)
+            .and_then(|value| value.parse().ok())
+            .unwrap_or(0.7);
+        let n = leaves.min(anneal_core::hypersphere::default_cover_size());
+        let mut cover = Tally {
+            best: ico_energy,
+            ..Tally::default()
+        };
+        let mut rng = rand::rngs::StdRng::seed_from_u64(1);
+        println!(
+            "{{\"kind\":\"cover_setup\",\"n\":{n},\"rmsd\":{rmsd:.3},\"ico\":{ico_energy:.6},\"marks\":{marks_energy:.6}}}"
+        );
+        for index in 0..n {
+            let start = anneal_core::featomic_hop::leave_archive_hole_at(
+                ico.view(),
+                0.0,
+                None,
+                None,
+                rmsd,
+                Some(index),
+                &mut rng,
+            );
+            let trial = quench(&potential, start.view(), steps);
+            classify("cover", index, &mut cover, &trial, None);
+            let _ = std::io::Write::flush(&mut std::io::stdout());
+        }
+        report("cover", &cover, n);
+        return;
+    }
 
     if only_ridge {
         // Directed packing-map walk: 96 covering points on the packing
