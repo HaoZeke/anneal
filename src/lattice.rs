@@ -51,6 +51,12 @@ pub enum Source {
     Observed,
     /// One of the classifier's ideal local environments.
     Named(Template),
+    /// Fivefold bipyramid, the local order of a decahedral packing.
+    ///
+    /// It does not tile space. Growth accumulates the strain a decahedron
+    /// carries, and the quench decides the minimum, the same way an
+    /// icosahedral shell does.
+    Pentagonal,
 }
 
 impl Source {
@@ -74,8 +80,27 @@ impl Source {
             Source::Named(Template::Icosahedral) => "ico",
             Source::Named(Template::SimpleCubic) => "sc",
             Source::Named(Template::Other) => "other",
+            Source::Pentagonal => "pentagonal",
         }
     }
+}
+
+/// Neighbour offsets of a centred pentagonal bipyramid.
+///
+/// Ring-ring and apex-ring distances are one. The centre-ring distance is
+/// shorter, which is the strain of a fivefold axis rather than a fitted
+/// global minimum.
+fn pentagonal_shell() -> Vec<[f64; 3]> {
+    let radius = 1.0 / (2.0 * (PI / 5.0).sin());
+    let height = (1.0 - radius * radius).max(0.05).sqrt();
+    let mut shell = Vec::with_capacity(7);
+    for k in 0..5 {
+        let angle = 2.0 * PI * (k as f64) / 5.0;
+        shell.push([radius * angle.cos(), radius * angle.sin(), 0.0]);
+    }
+    shell.push([0.0, 0.0, height]);
+    shell.push([0.0, 0.0, -height]);
+    shell
 }
 
 /// Mean distance to the nearest other point.
@@ -240,6 +265,7 @@ pub fn candidate_keeping<R: Rng + ?Sized>(
     let offsets = match source {
         Source::Observed => observed_order(x, 1.35),
         Source::Named(t) => t.points(),
+        Source::Pentagonal => pentagonal_shell(),
     };
     if offsets.is_empty() || n == 0 {
         return x.to_owned();
