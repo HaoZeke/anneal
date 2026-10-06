@@ -634,6 +634,7 @@ where
                 .unwrap_or(std::cmp::Ordering::Equal)
         });
         if let Some((energy, state)) = chosen {
+            let energy = *energy;
             if (energy - frontier_energy).abs() < 1.0e-6 {
                 frontier_stuck += 1;
             } else {
