@@ -374,7 +374,19 @@ where
             reach = reach.max(r2.sqrt());
         }
     }
-    let stations = [contact * 0.5, contact, reach.max(contact)];
+    let mut stations = Vec::new();
+    let mut station = contact * 0.5;
+    let outer = reach.max(contact);
+    if station > 0.0 {
+        stations.push(station);
+        while station * 2.0 <= outer * 1.01 {
+            station *= 2.0;
+            stations.push(station);
+        }
+    }
+    if stations.last().copied().unwrap_or(0.0) < outer {
+        stations.push(outer);
+    }
     for hop in 0..max_hops {
         if contact > 0.95 && n_atoms >= 2 {
             let n_cover = crate::hypersphere::default_cover_size();
