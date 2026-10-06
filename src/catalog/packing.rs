@@ -1020,37 +1020,6 @@ impl PackingPave {
     }
 }
 
-/// Step scale once a packing's charge exceeds two deposit heights.
-///
-/// A fresh packing keeps the library amplitude. A packing the chain has
-/// returned to shortens the proposal, down to one fifth, so the next
-/// quench is a short hop on that packing. The scale uses the standing
-/// charge and the deposit height.
-pub fn packing_step_scale(cost: f64, height: f64) -> f64 {
-    if !(height > 0.0) || !(cost > 2.0 * height) {
-        return 1.0;
-    }
-    (height / cost).clamp(0.2, 1.0)
-}
-
-#[cfg(test)]
-mod step_scale_tests {
-    use super::packing_step_scale;
-
-    #[test]
-    fn a_fresh_packing_keeps_the_full_step() {
-        assert_eq!(packing_step_scale(0.0, 0.25), 1.0);
-        assert_eq!(packing_step_scale(0.5, 0.25), 1.0);
-    }
-
-    #[test]
-    fn a_revisited_packing_shortens_the_step() {
-        let shortened = packing_step_scale(1.0, 0.25);
-        assert!((shortened - 0.25).abs() < 1e-12);
-        assert!((packing_step_scale(10.0, 0.25) - 0.2).abs() < 1e-12);
-    }
-}
-
 /// Shared frontier along the seam out of the occupied packing.
 ///
 /// The crossing to another packing is a staged rare event: measured on
