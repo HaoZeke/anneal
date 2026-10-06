@@ -459,10 +459,14 @@ where
             break;
         }
 
-        let md_steps = (400.0 + 50.0 * kinetic).clamp(400.0, 1_600.0) as usize;
+        // A drop of a few energy units is one vibration of the same well.
+        // The quench from that point returns to the well it left. The
+        // trajectory runs its whole step budget, and the quench is taken
+        // at the end.
+        let md_steps = (800.0 + 20.0 * kinetic).clamp(800.0, 2_000.0) as usize;
         let md = MdEscapeConfig {
-            dt: 0.005,
-            potential_minima: 1,
+            dt: 0.004,
+            potential_minima: usize::MAX / 4,
             maximum_steps: md_steps,
             geometry,
             softening: Some(rgsaddle::VelocitySofteningConfig {
@@ -470,9 +474,7 @@ where
                 displacement: 0.1,
                 mixing: 0.15,
             }),
-            // A wiggle inside the well is not a crossing. Stop only after
-            // the energy has fallen at least this far from its peak.
-            minimum_rise: 2.0,
+            minimum_rise: 0.0,
         };
         let mut escaped = None;
         {
