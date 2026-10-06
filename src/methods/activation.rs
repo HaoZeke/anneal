@@ -441,6 +441,27 @@ where
         let quenched = quench(kicked.view());
         note_candidate(&quenched, &mut evaluate, &mut best, &mut best_e, hop);
 
+        // A displacement stays inside the packing it started in. A twin
+        // across one dense plane of that packing changes only the boundary,
+        // which is the relation between the close-packed morphologies.
+        if cluster {
+            let n_atoms = here.len() / 3;
+            let planes = crate::twin::dense_planes(here.view(), n_atoms, 0.25);
+            if !planes.is_empty() {
+                let width = if hop == 0 { planes.len().min(24) } else { 2 };
+                for slot in 0..width {
+                    let plane = &planes[(hop + slot) % planes.len()];
+                    for mode in [crate::twin::Mode::Reflect, crate::twin::Mode::Rotate] {
+                        let moved = crate::twin::twin(here.view(), n_atoms, plane, mode, 0.25);
+                        if moved.iter().all(|value| value.is_finite()) {
+                            let quenched = quench(moved.view());
+                            note_candidate(&quenched, &mut evaluate, &mut best, &mut best_e, hop);
+                        }
+                    }
+                }
+            }
+        }
+
         if hop % 8 == 0 {
             for sign in [1.0_f64, -1.0] {
                 if let Some(outcome) = activate(here.view(), |y| Some(evaluate(y).1), cfg, sign)
