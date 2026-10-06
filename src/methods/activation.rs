@@ -1741,7 +1741,10 @@ fn ride_lowest_mode<E, Q>(
     let n_cover = 8usize;
     for (saddle, mode) in saddles {
         let lead = max_atom_weight(mode.view()).max(1e-12);
-        let along = contact / lead;
+        // A short step picks the side of the saddle. The perpendicular
+        // cover is then one contact and two, which is the move that left
+        // the half-contact cone above the floor.
+        let along = 0.1 * contact / lead;
         for hop in 0..n_cover {
             let raw = crate::hypersphere::cover_direction(n_cover, saddle.len(), hop);
             let mut perp = Array1::from_vec(raw);
@@ -1752,17 +1755,20 @@ fn ride_lowest_mode<E, Q>(
             if !renormalize_mode(&mut perp, saddle.view()) {
                 continue;
             }
-            let side = 0.5 * contact / max_atom_weight(perp.view()).max(1e-12);
+            let side_unit = contact / max_atom_weight(perp.view()).max(1e-12);
             for sign in [1.0_f64, -1.0] {
-                let mut point = saddle.clone();
-                for i in 0..point.len() {
-                    point[i] += sign * along * mode[i] + side * perp[i];
+                for factor in [1.0_f64, 2.0] {
+                    let mut point = saddle.clone();
+                    let side = factor * side_unit;
+                    for i in 0..point.len() {
+                        point[i] += sign * along * mode[i] + side * perp[i];
+                    }
+                    if closest_pair(point.view()) < contact * 0.5 {
+                        continue;
+                    }
+                    let quenched = quench(point.view());
+                    let _ = note_exit(evaluate, &quenched, hop, best_energy, best);
                 }
-                if closest_pair(point.view()) < contact * 0.5 {
-                    continue;
-                }
-                let quenched = quench(point.view());
-                let _ = note_exit(evaluate, &quenched, hop, best_energy, best);
             }
         }
     }
