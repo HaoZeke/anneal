@@ -405,19 +405,42 @@ where
                 if placed.len() != origin.len() {
                     continue;
                 }
-                let quenched = quench(Array1::from(placed).view());
-                let (value, _) = evaluate(quenched.view());
-                if !value.is_finite() {
-                    continue;
+                let mut points = vec![Array1::from(placed)];
+                let mut single = origin.to_owned();
+                let mut best_atom = 0usize;
+                let mut best_weight = 0.0_f64;
+                for atom in 0..n_atoms {
+                    let weight: f64 = (0..3)
+                        .map(|k| direction[3 * atom + k].powi(2))
+                        .sum::<f64>()
+                        .sqrt();
+                    if weight > best_weight {
+                        best_weight = weight;
+                        best_atom = atom;
+                    }
                 }
-                println!(
-                    "{{\"kind\":\"exit_candidate\",\"energy\":{value:.6},\"hop\":{},\"role\":\"quench\"}}",
-                    hop + 1
-                );
-                let _ = std::io::stdout().flush();
-                if value < best_e {
-                    best_e = value;
-                    best = quenched;
+                if best_weight > 0.0 {
+                    let step = outer / best_weight;
+                    for k in 0..3 {
+                        single[3 * best_atom + k] += step * direction[3 * best_atom + k];
+                    }
+                    points.push(single);
+                }
+                for point in points {
+                    let quenched = quench(point.view());
+                    let (value, _) = evaluate(quenched.view());
+                    if !value.is_finite() {
+                        continue;
+                    }
+                    println!(
+                        "{{\"kind\":\"exit_candidate\",\"energy\":{value:.6},\"hop\":{},\"role\":\"quench\"}}",
+                        hop + 1
+                    );
+                    let _ = std::io::stdout().flush();
+                    if value < best_e {
+                        best_e = value;
+                        best = quenched;
+                    }
                 }
             }
         }
