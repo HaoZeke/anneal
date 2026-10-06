@@ -413,9 +413,13 @@ where
         }
         let span = reach.max(contact);
         let mut climb = cfg.clone();
-        // The whole budget walks one cluster radius, as an all-atom RMS.
-        // Perpendicular steps stay at one contact length over that budget.
-        climb.step = span * (n_atoms as f64).sqrt() / climb.max_steps.max(1) as f64;
+        // One step is a cluster radius spread over the caller's budget.
+        // The walk may continue for one step per atom, until the force
+        // along the mode changes sign.
+        let budget = climb.max_steps.max(1);
+        climb.step = span * (n_atoms as f64).sqrt() / budget as f64;
+        climb.max_steps = n_atoms.max(budget);
+        climb.min_rise = 0.0;
         if let Some((lambdas, modes, _)) = crate::curvature::soft_subspace(
             origin,
             |point| Some(evaluate(point).1),
@@ -423,16 +427,7 @@ where
             climb.epsilon,
             climb.lanczos_steps.saturating_sub(1).max(1),
         ) {
-            let lambda_min = lambdas
-                .iter()
-                .copied()
-                .filter(|value| value.is_finite() && *value > 0.0)
-                .fold(f64::MAX, f64::min);
-            if lambda_min.is_finite() {
-                // One harmonic step along the soft mode. Shallower ridges
-                // stay in the same funnel.
-                climb.min_rise = 0.5 * lambda_min * climb.step * climb.step;
-            }
+            let _ = lambdas;
             for mode in modes {
                 for sign in [1.0_f64, -1.0] {
                     let mut directed = mode.clone();
@@ -462,7 +457,6 @@ where
                     }
                 }
             }
-            let _ = lambdas;
         }
     }
     for hop in 0..max_hops {
