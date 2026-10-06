@@ -633,6 +633,7 @@ where
     // A clash eigenvalue is far below the curvature of the minimum.
     // The square of that curvature separates the two without a fixed cutoff.
     let mut curvature_scale = first.lambda_min.abs();
+    let mut previous_along: Option<f64> = None;
     // Highest ridge crossed on this climb. A shallow first saddle is kept
     // only until a higher one is crossed. The quench leaves from that ridge.
     let mut ridge: Option<(Array1<f64>, Array1<f64>, f64)> = None;
@@ -732,6 +733,15 @@ where
         // sign: uphill while `sign * g . v > 0`, downhill after. Combined with
         // negative curvature that is the ridge, and past it a quench falls the
         // other way.
+        if stride > 0.0 {
+            if let Some(prev) = previous_along {
+                let fd = (along - prev) / (sign * stride);
+                if fd.is_finite() {
+                    lambda = fd;
+                }
+            }
+            previous_along = Some(along);
+        }
         rise += along * sign * stride;
         let climbing = sign * along > 0.0;
         if climbing {
