@@ -587,7 +587,9 @@ where
     // all-atom RMS, or it cannot steer around a neighbour. The absolute
     // cap stays in force for a system that is not a cluster.
     let perp_cap = if cluster {
-        contact * n_atoms.sqrt()
+        // One perpendicular step moves as far as one climb step: a contact
+        // length spread over the climb budget, as an all-atom RMS.
+        contact / cfg.max_steps.max(1) as f64 * n_atoms.sqrt()
     } else {
         cfg.perp_max_move
     };
