@@ -1006,4 +1006,28 @@ fn elja_hyperqueue_is_one_allocation_on_node_scratch() {
             "{script} must exit before hq submit"
         );
     }
+    let pilot_refuse = pilot
+        .find("refusing: a seed is one Slurm job")
+        .unwrap_or_else(|| panic!("the HyperQueue pilot must refuse a packed node"));
+    let alloc = pilot
+        .find("hq alloc add")
+        .unwrap_or_else(|| panic!("pilot should keep the old allocation text after the refusal"));
+    assert!(
+        pilot_refuse < alloc,
+        "the pilot must exit before it requests an allocation"
+    );
+    let qcg = fs::read_to_string(root.join("scripts/elja_qcg_cell.py"))
+        .unwrap_or_else(|error| panic!("failed to read QCG cell: {error}"));
+    for required in [
+        "uv run --script",
+        "qcg-pilotjob>=0.13",
+        "cyclopts>=3",
+        "/scratch/users/",
+        "--bwlimit=40000",
+        "model=\"default\"",
+        "SLURM_JOB_ID",
+        "submit refuses without --yes",
+    ] {
+        assert!(qcg.contains(required), "QCG cell missing {required}");
+    }
 }

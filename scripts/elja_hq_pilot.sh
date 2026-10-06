@@ -23,6 +23,9 @@ if [[ ${1:-} != launch ]]; then
   usage
   exit 0
 fi
+echo "refusing: a seed is one Slurm job, not a pack of seeds on one node." >&2
+echo "uv run --script scripts/elja_qcg_cell.py plan" >&2
+exit 2
 shift
 N=${1:?n}
 BUDGET=${2:?budget}
