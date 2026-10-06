@@ -23,12 +23,13 @@ mkdir -p "$UV_CACHE_DIR"
 git clone --depth 1 --branch main https://github.com/HaoZeke/anneal.git "$SCRATCH/src"
 export LJ_ROOT=$SCRATCH/src
 bash "$LJ_ROOT/scripts/elja_build_lj.sh"
-PROBE=$LJ_ROOT/target/release/examples/leave_packing_probe
-test -x "$PROBE"
+HOP=$LJ_ROOT/target/release/examples/ico75_hop
+test -x "$HOP"
 cd "$SCRATCH"
 echo "pwd $(pwd)"
-# The fourth argument is the line step along one covering direction.
-"$PROBE" 4 400 climb 0.5 > "$SCRATCH/climb.log"
+# Shipped fivefold hop from the quenched icosahedron. The log is the
+# quench energy of each axis and amplitude.
+"$HOP" > "$SCRATCH/climb.log"
 RECORD=${LJ_RECORD:-$HOME/ljwork}
 mkdir -p "$RECORD"
 rsync -a --bwlimit=40000 "$SCRATCH/climb.log" "$RECORD/floor-exit-${SLURM_JOB_ID}.log"
