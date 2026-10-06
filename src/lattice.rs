@@ -96,6 +96,100 @@ impl Source {
 /// shorter. That strain is the fivefold axis. Which surface atoms the cut
 /// keeps depends on a jittered centre, and a small random shift keeps the
 /// cut off a symmetric saddle. The quench decides the minimum.
+/// Decahedra whose shell indices give exactly `n` atoms, scaled to `scale`.
+///
+/// `p` and `q` are the widths of the (100) facets, `r` the depth of the
+/// re-entrant corner. The range is small and fixed. A cluster size that
+/// matches none of them yields nothing. The quench, not this constructor,
+/// decides the energy.
+pub fn sized_decahedra<R: Rng + ?Sized>(n: usize, scale: f64, rng: &mut R) -> Vec<Array1<f64>> {
+    let mut found = Vec::new();
+    if n == 0 {
+        return found;
+    }
+    for p in 1..6 {
+        for q in 1..6 {
+            for r in 0..4 {
+                let sites = decahedron_sites(p, q, r);
+                if sites.len() != n {
+                    continue;
+                }
+                let mut raw = Array1::zeros(3 * n);
+                for (i, site) in sites.iter().enumerate() {
+                    for k in 0..3 {
+                        raw[3 * i + k] = site[k];
+                    }
+                }
+                let local = nearest_neighbour_scale(raw.view()).max(1.0e-6);
+                let factor = scale / local;
+                for value in raw.iter_mut() {
+                    *value = *value * factor + 0.005 * scale * (rng.random::<f64>() - 0.5);
+                }
+                found.push(raw);
+            }
+        }
+    }
+    found
+}
+
+fn decahedron_sites(p: i32, q: i32, r: i32) -> Vec<[f64; 3]> {
+    let b = 1.0 / 2.0_f64.sqrt();
+    let a = b * 3.0_f64.sqrt() / 2.0;
+    let turn = 2.0 * PI / 5.0;
+    let mut vertices = [[0.0; 3]; 5];
+    for m in 0..5 {
+        let angle = turn * m as f64 + PI / 2.0;
+        vertices[m] = [a * angle.cos(), a * angle.sin(), 0.0];
+    }
+    let h_signed = p + q + 2 * r - 1;
+    if h_signed <= 0 {
+        return Vec::new();
+    }
+    let h = h_signed as usize;
+    let g = h_signed - q + 1;
+    let mut sites = Vec::new();
+    let mut push = |point: [f64; 3]| {
+        let fresh = sites.iter().all(|old: &[f64; 3]| {
+            let dx = old[0] - point[0];
+            let dy = old[1] - point[1];
+            let dz = old[2] - point[2];
+            dx * dx + dy * dy + dz * dz > 1.0e-8
+        });
+        if fresh {
+            sites.push(point);
+        }
+    };
+    for j in 0..h {
+        push([0.0, 0.0, j as f64 * b - (h - 1) as f64 * b / 2.0]);
+    }
+    for n in 1..h {
+        if n as i32 >= g {
+            continue;
+        }
+        for m in 0..5 {
+            let v1 = vertices[(m + 4) % 5];
+            let v2 = vertices[m];
+            for i in 0..n {
+                if (n as i32) - (i as i32) < g - r && (i as i32) < g - r {
+                    for j in 0..(h - n) {
+                        let along = [
+                            (n - i) as f64 * v1[0] + i as f64 * v2[0],
+                            (n - i) as f64 * v1[1] + i as f64 * v2[1],
+                            (n - i) as f64 * v1[2] + i as f64 * v2[2],
+                        ];
+                        push([
+                            along[0],
+                            along[1],
+                            along[2] + j as f64 * b - (h - n - 1) as f64 * b / 2.0,
+                        ]);
+                    }
+                }
+            }
+        }
+    }
+    sites
+}
+
 pub fn decahedral_cut<R: Rng + ?Sized>(n: usize, scale: f64, rng: &mut R) -> Array1<f64> {
     if n == 0 {
         return Array1::zeros(0);
