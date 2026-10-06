@@ -9,8 +9,8 @@
 #SBATCH --mem=16G
 #SBATCH --time=04:00:00
 #SBATCH --output=floor-exit-%j.out
-# One exclusive job. Cover, minimum-mode climb, quench, from the
-# quenched LJ75 icosahedron. Work stays on the node scratch disk.
+# One exclusive job. Repeated cover, minimum-mode climb, and quench
+# from the quenched LJ75 icosahedron. Work stays on the node scratch disk.
 set -euo pipefail
 SCRATCH=/scratch/users/${USER}/${SLURM_JOB_ID}
 mkdir -p "$SCRATCH"
@@ -27,9 +27,10 @@ HOP=$LJ_ROOT/target/release/examples/ico75_hop
 test -x "$HOP"
 cd "$SCRATCH"
 echo "pwd $(pwd)"
-# Shipped fivefold hop from the quenched icosahedron. The log is the
-# quench energy of each axis and amplitude.
-"$HOP" > "$SCRATCH/climb.log"
+# Repeated cover, climb, and quench from the quenched icosahedron.
+# The log is one line per quenched candidate.
+HOPS=${FLOOR_HOPS:-4000}
+"$HOP" search "$HOPS" > "$SCRATCH/climb.log"
 RECORD=${LJ_RECORD:-$HOME/ljwork}
 mkdir -p "$RECORD"
 rsync -a --bwlimit=40000 "$SCRATCH/climb.log" "$RECORD/floor-exit-${SLURM_JOB_ID}.log"

@@ -152,8 +152,7 @@ fn dump_xyz(path: &str, x: ArrayView1<f64>, e: f64) {
     }
 }
 
-fn load_xyz(path: &str) -> Array1<f64> {
-    let text = std::fs::read_to_string(path).expect(path);
+fn coords_from_text(text: &str) -> Array1<f64> {
     let mut vals = Vec::new();
     for line in text.lines() {
         let t = line.trim();
@@ -176,16 +175,50 @@ fn load_xyz(path: &str) -> Array1<f64> {
             }
         }
     }
-    assert_eq!(
-        vals.len(),
-        225,
-        "{path} has {} coords, want 225",
-        vals.len()
-    );
+    assert_eq!(vals.len(), 225, "xyz has {} coords, want 225", vals.len());
     Array1::from(vals)
 }
 
+fn load_xyz(path: &str) -> Array1<f64> {
+    let text = std::fs::read_to_string(path).expect(path);
+    coords_from_text(&text)
+}
+
+fn run_floor_search(hops: usize) {
+    let raw = coords_from_text(include_str!("../tests/fixtures/lj75_ico.xyz"));
+    let (e0, x0) = relax(raw.view(), 800);
+    println!("{{\"kind\":\"floor_start\",\"energy\":{e0:.9},\"hops\":{hops}}}");
+    let end = anneal_core::methods::activation::cover_climb_search(
+        x0.view(),
+        0.7,
+        hops,
+        |v| lj(v),
+        |v| relax(v, 250).1,
+        &anneal_core::methods::activation::Activation {
+            max_steps: 8,
+            lanczos_steps: 8,
+            step: 0.08,
+            min_rise: 1.0,
+            perp_steps: 2,
+            ..anneal_core::methods::activation::Activation::default()
+        },
+    );
+    let e = energy(end.view());
+    println!(
+        "{{\"kind\":\"floor_exit\",\"start\":{e0:.9},\"best\":{e:.9},\"below_start\":{}}}",
+        e < e0 - 1.0e-4
+    );
+}
+
 fn main() {
+    if std::env::args().nth(1).as_deref() == Some("search") {
+        let hops = std::env::args()
+            .nth(2)
+            .and_then(|value| value.parse().ok())
+            .unwrap_or(4000);
+        run_floor_search(hops);
+        return;
+    }
     let path = std::env::args().nth(1);
     let (e0, x0) = if let Some(ref p) = path {
         if std::path::Path::new(p).is_file() {
