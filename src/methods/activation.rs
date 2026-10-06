@@ -372,6 +372,96 @@ fn core_fills(origin: ArrayView1<f64>) -> Vec<Array1<f64>> {
 /// loses the others. The factors change only the component parallel to
 /// the axis, or that component together with the perpendicular part so
 /// the volume stays put. The quench decides which packing results.
+fn project_fivefold(origin: ArrayView1<f64>) -> Option<(usize, usize, Vec<f64>)> {
+    let n = origin.len() / 3;
+    if n < 6 {
+        return None;
+    }
+    let mut com = [0.0; 3];
+    for i in 0..n {
+        let atom = atom_at(origin, i);
+        for axis in 0..3 {
+            com[axis] += atom[axis];
+        }
+    }
+    for value in &mut com {
+        *value /= n as f64;
+    }
+    let mut hat = [0.0, 0.0, 1.0];
+    if let Some((raw, _)) = crate::soap::fivefold_axis_table(origin).into_iter().next() {
+        let length = len3(raw);
+        if length > 1.0e-8 {
+            hat = [raw[0] / length, raw[1] / length, raw[2] / length];
+        }
+    }
+    let mut rows: Vec<(f64, f64)> = (0..n)
+        .map(|i| {
+            let rel = sub3(atom_at(origin, i), com);
+            let along = dot3(rel, hat);
+            let radial = (dot3(rel, rel) - along * along).max(0.0).sqrt();
+            (along, radial)
+        })
+        .collect();
+    rows.sort_by(|left, right| {
+        left.0
+            .partial_cmp(&right.0)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    let mut used = vec![false; n];
+    let mut axis_z = Vec::new();
+    let mut rings = Vec::new();
+    for i in 0..n {
+        if used[i] {
+            continue;
+        }
+        if rows[i].1 < 0.45 {
+            axis_z.push(rows[i].0);
+            used[i] = true;
+            continue;
+        }
+        let mut group = vec![i];
+        for j in (i + 1)..n {
+            if used[j] {
+                continue;
+            }
+            if (rows[j].0 - rows[i].0).abs() < 0.35 && (rows[j].1 - rows[i].1).abs() < 0.4 {
+                group.push(j);
+            }
+            if group.len() == 5 {
+                break;
+            }
+        }
+        if group.len() == 5 {
+            let mut z = 0.0;
+            let mut radius = 0.0;
+            for index in &group {
+                used[*index] = true;
+                z += rows[*index].0;
+                radius += rows[*index].1;
+            }
+            rings.push((z / 5.0, radius / 5.0));
+        }
+    }
+    if rings.is_empty() {
+        return None;
+    }
+    if axis_z.is_empty() {
+        axis_z.push(0.0);
+    }
+    let n_axis = axis_z.len();
+    let n_rings = rings.len();
+    if n_axis + 5 * n_rings == 0 {
+        return None;
+    }
+    let mut params = Vec::with_capacity(n_axis + 2 * n_rings);
+    params.extend(axis_z);
+    for (z, radius) in rings {
+        params.push(z);
+        params.push(radius);
+    }
+    Some((n_axis, n_rings, params))
+}
+
 fn fivefold_partitions(n: usize) -> Vec<(usize, usize)> {
     let mut out = Vec::new();
     if n < 6 {
@@ -477,6 +567,41 @@ where
 {
     let n = origin.len() / 3;
     let mut out = Vec::new();
+    if let Some((n_axis, n_rings, start)) = project_fivefold(origin) {
+        let mut params = start;
+        let (mut energy, _) = evaluate(build_fivefold(&params, n_axis, n_rings).view());
+        let mut best_params = params.clone();
+        let mut best_energy = energy;
+        if energy.is_finite() {
+            for _step in 0..240 {
+                let mut trial = params.clone();
+                for _kick in 0..4 {
+                    let slot = rng.random_range(0..trial.len());
+                    trial[slot] += 0.45 * (rng.random::<f64>() - 0.5);
+                }
+                for ring in 0..n_rings {
+                    let slot = n_axis + 2 * ring + 1;
+                    trial[slot] = trial[slot].abs().max(0.35);
+                }
+                let (next, _) = evaluate(build_fivefold(&trial, n_axis, n_rings).view());
+                let rise = next - energy;
+                if next.is_finite() && (rise <= 0.0 || rng.random::<f64>() < (-rise / 4.0).exp()) {
+                    params = trial;
+                    energy = next;
+                    if next < best_energy {
+                        best_energy = next;
+                        best_params = params.clone();
+                    }
+                }
+            }
+            out.push(relax_fivefold_params(
+                best_params,
+                n_axis,
+                n_rings,
+                evaluate,
+            ));
+        }
+    }
     let mut reach = 0.0_f64;
     let mut com = [0.0; 3];
     for i in 0..n {
