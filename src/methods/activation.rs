@@ -1057,6 +1057,28 @@ where
     // from the floor never visits. No named target energy is used.
     if cluster {
         let n_atoms = origin.len() / 3;
+        println!("{{\"kind\":\"exit_move\",\"move\":\"shell\"}}");
+        let shell_scale = crate::lattice::nearest_neighbour_scale(origin);
+        for trial in crate::lattice::sized_decahedra(n_atoms, shell_scale, &mut rng) {
+            let quenched = quench(trial.view());
+            note_candidate(
+                &quenched,
+                &mut evaluate,
+                &mut best,
+                &mut best_e,
+                0,
+                origin_e,
+                &mut bank,
+                &rejected,
+            );
+            if best_e < origin_e - 0.05 {
+                println!(
+                    "{{\"kind\":\"exit_hop\",\"hop\":0,\"here\":{best_e:.6},\"best\":{best_e:.6},\"phase\":\"shell\",\"left\":true}}"
+                );
+                let _ = std::io::stdout().flush();
+                return best;
+            }
+        }
         println!("{{\"kind\":\"exit_move\",\"move\":\"fivefold\"}}");
         for trial in fivefold_family(origin, &mut evaluate, &mut rng) {
             let quenched = quench(trial.view());
