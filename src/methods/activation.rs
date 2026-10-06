@@ -1735,27 +1735,34 @@ fn ride_lowest_mode<E, Q>(
         }
     }
     drop(surface);
+    // A pure step along the unstable mode falls back above the floor.
+    // Quench a cone around that mode: one contact of the leading atom
+    // along the mode, plus half a contact in a perpendicular cover direction.
+    let n_cover = 8usize;
     for (saddle, mode) in saddles {
         let lead = max_atom_weight(mode.view()).max(1e-12);
-        let rms_unit = contact * (saddle.len() as f64 / 3.0).sqrt();
-        for sign in [1.0_f64, -1.0] {
-            let mut steps = Vec::new();
-            for factor in [1.0_f64, 2.0] {
-                steps.push(sign * factor * contact / lead);
+        let along = contact / lead;
+        for hop in 0..n_cover {
+            let raw = crate::hypersphere::cover_direction(n_cover, saddle.len(), hop);
+            let mut perp = Array1::from_vec(raw);
+            let parallel = dot_av(perp.view(), mode.view());
+            for (value, component) in perp.iter_mut().zip(mode.iter()) {
+                *value -= parallel * component;
             }
-            for factor in [1.5_f64, 2.0] {
-                steps.push(sign * factor * rms_unit);
+            if !renormalize_mode(&mut perp, saddle.view()) {
+                continue;
             }
-            for step in steps {
+            let side = 0.5 * contact / max_atom_weight(perp.view()).max(1e-12);
+            for sign in [1.0_f64, -1.0] {
                 let mut point = saddle.clone();
-                for (value, component) in point.iter_mut().zip(mode.iter()) {
-                    *value += step * component;
+                for i in 0..point.len() {
+                    point[i] += sign * along * mode[i] + side * perp[i];
                 }
                 if closest_pair(point.view()) < contact * 0.5 {
                     continue;
                 }
                 let quenched = quench(point.view());
-                let _ = note_exit(evaluate, &quenched, 0, best_energy, best);
+                let _ = note_exit(evaluate, &quenched, hop, best_energy, best);
             }
         }
     }
