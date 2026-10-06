@@ -372,6 +372,136 @@ fn core_fills(origin: ArrayView1<f64>) -> Vec<Array1<f64>> {
 /// loses the others. The factors change only the component parallel to
 /// the axis, or that component together with the perpendicular part so
 /// the volume stays put. The quench decides which packing results.
+fn fivefold_partitions(n: usize) -> Vec<(usize, usize)> {
+    let mut out = Vec::new();
+    if n < 6 {
+        return out;
+    }
+    let mut axis = n % 5;
+    if axis == 0 {
+        axis = 5;
+    }
+    while axis < n && axis <= 15 {
+        let rest = n - axis;
+        if rest % 5 == 0 {
+            out.push((axis, rest / 5));
+        }
+        axis += 5;
+    }
+    out
+}
+
+fn build_fivefold(params: &[f64], n_axis: usize, n_rings: usize) -> Array1<f64> {
+    let n = n_axis + 5 * n_rings;
+    let mut x = Array1::zeros(3 * n);
+    for i in 0..n_axis {
+        x[3 * i + 2] = params[i];
+    }
+    for ring in 0..n_rings {
+        let z = params[n_axis + 2 * ring];
+        let radius = params[n_axis + 2 * ring + 1].abs().max(0.35);
+        let phase = if ring % 2 == 0 {
+            0.0
+        } else {
+            std::f64::consts::PI / 5.0
+        };
+        for k in 0..5 {
+            let angle = phase + 2.0 * std::f64::consts::PI * (k as f64) / 5.0;
+            let i = n_axis + 5 * ring + k;
+            x[3 * i] = radius * angle.cos();
+            x[3 * i + 1] = radius * angle.sin();
+            x[3 * i + 2] = z;
+        }
+    }
+    x
+}
+
+fn relax_fivefold_params<E>(
+    mut params: Vec<f64>,
+    n_axis: usize,
+    n_rings: usize,
+    evaluate: &mut E,
+) -> Array1<f64>
+where
+    E: FnMut(ArrayView1<f64>) -> (f64, Array1<f64>),
+{
+    let eps = 1.0e-3;
+    let mut step = 0.08;
+    for _ in 0..28 {
+        let current = build_fivefold(&params, n_axis, n_rings);
+        let (energy, _) = evaluate(current.view());
+        if !energy.is_finite() {
+            break;
+        }
+        let mut slope = vec![0.0; params.len()];
+        for i in 0..params.len() {
+            params[i] += eps;
+            let (shifted, _) = evaluate(build_fivefold(&params, n_axis, n_rings).view());
+            params[i] -= eps;
+            slope[i] = (shifted - energy) / eps;
+        }
+        let mut trial_step = step;
+        let mut moved = false;
+        for _attempt in 0..8 {
+            let mut trial = params.clone();
+            for (value, derivative) in trial.iter_mut().zip(&slope) {
+                *value -= trial_step * derivative;
+            }
+            for ring in 0..n_rings {
+                let slot = n_axis + 2 * ring + 1;
+                trial[slot] = trial[slot].abs().max(0.35);
+            }
+            let (next, _) = evaluate(build_fivefold(&trial, n_axis, n_rings).view());
+            if next.is_finite() && next < energy {
+                params = trial;
+                step = (trial_step * 1.2).min(0.25);
+                moved = true;
+                break;
+            }
+            trial_step *= 0.5;
+        }
+        if !moved {
+            break;
+        }
+    }
+    build_fivefold(&params, n_axis, n_rings)
+}
+
+fn fivefold_family<E>(
+    origin: ArrayView1<f64>,
+    evaluate: &mut E,
+    rng: &mut impl rand::Rng,
+) -> Vec<Array1<f64>>
+where
+    E: FnMut(ArrayView1<f64>) -> (f64, Array1<f64>),
+{
+    let n = origin.len() / 3;
+    let mut out = Vec::new();
+    let span = 1.6 * (n as f64).cbrt();
+    for (n_axis, n_rings) in fivefold_partitions(n).into_iter().take(3) {
+        for copy in 0..2 {
+            let mut params = vec![0.0; n_axis + 2 * n_rings];
+            for i in 0..n_axis {
+                let frac = if n_axis == 1 {
+                    0.0
+                } else {
+                    i as f64 / (n_axis - 1) as f64 - 0.5
+                };
+                params[i] = span * frac + 0.2 * (rng.random::<f64>() - 0.5);
+            }
+            for ring in 0..n_rings {
+                let frac = (ring as f64 + 0.5) / n_rings as f64 - 0.5;
+                params[n_axis + 2 * ring] = span * frac + 0.15 * (rng.random::<f64>() - 0.5);
+                let shell = (ring % 4) as f64;
+                params[n_axis + 2 * ring + 1] =
+                    0.85 + 0.45 * shell + 0.1 * copy as f64 * (rng.random::<f64>() - 0.5);
+            }
+            out.push(relax_fivefold_params(params, n_axis, n_rings, evaluate));
+        }
+    }
+    out
+}
+
 fn axis_strains(origin: ArrayView1<f64>) -> Vec<Array1<f64>> {
     let n = origin.len() / 3;
     if n < 7 {
@@ -780,6 +910,27 @@ where
     // from the floor never visits. No named target energy is used.
     if cluster {
         let n_atoms = origin.len() / 3;
+        println!("{{\"kind\":\"exit_move\",\"move\":\"fivefold\"}}");
+        for trial in fivefold_family(origin, &mut evaluate, &mut rng) {
+            let quenched = quench(trial.view());
+            note_candidate(
+                &quenched,
+                &mut evaluate,
+                &mut best,
+                &mut best_e,
+                0,
+                origin_e,
+                &mut bank,
+                &rejected,
+            );
+            if best_e < origin_e - 0.05 {
+                println!(
+                    "{{\"kind\":\"exit_hop\",\"hop\":0,\"here\":{best_e:.6},\"best\":{best_e:.6},\"phase\":\"fivefold\",\"left\":true}}"
+                );
+                let _ = std::io::stdout().flush();
+                return best;
+            }
+        }
         println!("{{\"kind\":\"exit_move\",\"move\":\"strain\"}}");
         for trial in axis_strains(origin) {
             let quenched = quench(trial.view());
