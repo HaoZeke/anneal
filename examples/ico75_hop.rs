@@ -184,29 +184,41 @@ fn load_xyz(path: &str) -> Array1<f64> {
     coords_from_text(&text)
 }
 
-fn run_floor_search(hops: usize) {
+fn run_floor_search(hops: usize, seeds: u64) {
     let raw = coords_from_text(include_str!("../tests/fixtures/lj75_ico.xyz"));
     let (e0, x0) = relax(raw.view(), 800);
     println!("{{\"kind\":\"floor_start\",\"energy\":{e0:.9},\"hops\":{hops}}}");
-    let end = anneal_core::methods::activation::cover_climb_search(
-        x0.view(),
-        0.7,
-        hops,
-        |v| lj(v),
-        |v| relax(v, 250).1,
-        &anneal_core::methods::activation::Activation {
-            max_steps: 8,
-            lanczos_steps: 8,
-            step: 0.08,
-            min_rise: 1.0,
-            perp_steps: 2,
-            ..anneal_core::methods::activation::Activation::default()
-        },
-    );
-    let e = energy(end.view());
+    let cfg = anneal_core::methods::activation::Activation {
+        max_steps: 8,
+        lanczos_steps: 8,
+        step: 0.08,
+        min_rise: 1.0,
+        perp_steps: 2,
+        ..anneal_core::methods::activation::Activation::default()
+    };
+    let mut best_e = e0;
+    for seed in 1u64..=seeds.max(1) {
+        let end = anneal_core::methods::activation::cover_climb_search(
+            x0.view(),
+            0.7,
+            hops,
+            seed,
+            |v| lj(v),
+            |v| relax(v, 300).1,
+            &cfg,
+        );
+        let e = energy(end.view());
+        if e < best_e {
+            best_e = e;
+        }
+        println!("{{\"kind\":\"floor_seed\",\"seed\":{seed},\"start\":{e0:.9},\"best\":{e:.9}}}");
+        if best_e < e0 - 0.05 {
+            break;
+        }
+    }
     println!(
-        "{{\"kind\":\"floor_exit\",\"start\":{e0:.9},\"best\":{e:.9},\"below_start\":{}}}",
-        e < e0 - 1.0e-4
+        "{{\"kind\":\"floor_exit\",\"start\":{e0:.9},\"best\":{best_e:.9},\"below_start\":{}}}",
+        best_e < e0 - 0.05
     );
 }
 
@@ -216,7 +228,11 @@ fn main() {
             .nth(2)
             .and_then(|value| value.parse().ok())
             .unwrap_or(4000);
-        run_floor_search(hops);
+        let seeds = std::env::args()
+            .nth(3)
+            .and_then(|value| value.parse().ok())
+            .unwrap_or(1);
+        run_floor_search(hops, seeds);
         return;
     }
     let path = std::env::args().nth(1);

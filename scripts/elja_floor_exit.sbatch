@@ -30,7 +30,8 @@ echo "pwd $(pwd)"
 # Repeated cover, climb, and quench from the quenched icosahedron.
 # The log is one line per quenched candidate.
 HOPS=${FLOOR_HOPS:-4000}
-"$HOP" search "$HOPS" > "$SCRATCH/climb.log"
+SEEDS=${FLOOR_SEEDS:-2}
+"$HOP" search "$HOPS" "$SEEDS" > "$SCRATCH/climb.log"
 RECORD=${LJ_RECORD:-$HOME/ljwork}
 mkdir -p "$RECORD"
 rsync -a --bwlimit=40000 "$SCRATCH/climb.log" "$RECORD/floor-exit-${SLURM_JOB_ID}.log"
