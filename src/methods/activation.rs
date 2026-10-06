@@ -1737,10 +1737,17 @@ fn ride_lowest_mode<E, Q>(
     drop(surface);
     for (saddle, mode) in saddles {
         let lead = max_atom_weight(mode.view()).max(1e-12);
+        let rms_unit = contact * (saddle.len() as f64 / 3.0).sqrt();
         for sign in [1.0_f64, -1.0] {
+            let mut steps = Vec::new();
             for factor in [1.0_f64, 2.0] {
+                steps.push(sign * factor * contact / lead);
+            }
+            for factor in [1.5_f64, 2.0] {
+                steps.push(sign * factor * rms_unit);
+            }
+            for step in steps {
                 let mut point = saddle.clone();
-                let step = sign * factor * contact / lead;
                 for (value, component) in point.iter_mut().zip(mode.iter()) {
                     *value += step * component;
                 }
@@ -2260,6 +2267,14 @@ where
                 continue;
             }
             quench_regular_pentagons(
+                quenched.view(),
+                contact,
+                &mut evaluate,
+                &mut quench,
+                &mut best_e,
+                &mut best,
+            );
+            ride_lowest_mode(
                 quenched.view(),
                 contact,
                 &mut evaluate,
