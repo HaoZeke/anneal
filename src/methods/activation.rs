@@ -721,7 +721,7 @@ where
                         velocity[3 * atom + axis] -= com_v[axis];
                     }
                 }
-                if step.is_multiple_of(30) {
+                if step % 30 == 0 {
                     let packed = packed_fraction(point.view());
                     if packed > best_pack {
                         best_pack = packed;
