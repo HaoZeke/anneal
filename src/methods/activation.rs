@@ -432,6 +432,109 @@ fn facet_trials(origin: ArrayView1<f64>, limit: usize) -> Vec<Array1<f64>> {
     trials
 }
 
+fn rotation_about(axis: [f64; 3], angle: f64) -> [f64; 9] {
+    let n = len3(axis).max(1.0e-12);
+    let (x, y, z) = (axis[0] / n, axis[1] / n, axis[2] / n);
+    let (s, c) = angle.sin_cos();
+    let t = 1.0 - c;
+    [
+        t * x * x + c,
+        t * x * y - s * z,
+        t * x * z + s * y,
+        t * x * y + s * z,
+        t * y * y + c,
+        t * y * z - s * x,
+        t * x * z - s * y,
+        t * y * z + s * x,
+        t * z * z + c,
+    ]
+}
+
+fn apply_rot(r: &[f64; 9], p: [f64; 3]) -> [f64; 3] {
+    [
+        r[0] * p[0] + r[1] * p[1] + r[2] * p[2],
+        r[3] * p[0] + r[4] * p[1] + r[5] * p[2],
+        r[6] * p[0] + r[7] * p[1] + r[8] * p[2],
+    ]
+}
+
+/// Twist the two polar caps about one fivefold axis of the cluster.
+///
+/// The axis and the caps are read from the coordinates. A half-pentagon
+/// turn swaps a vertex site with a hollow. The opposite cap turns the
+/// other way, so the move is a shear of the packing rather than a
+/// rigid rotation of the whole cluster.
+fn cap_twists(origin: ArrayView1<f64>, limit: usize) -> Vec<Array1<f64>> {
+    let n = origin.len() / 3;
+    if n < 7 || limit == 0 {
+        return Vec::new();
+    }
+    let mut com = [0.0; 3];
+    for i in 0..n {
+        let a = atom_at(origin, i);
+        for k in 0..3 {
+            com[k] += a[k];
+        }
+    }
+    for value in &mut com {
+        *value /= n as f64;
+    }
+    let mut trials = Vec::new();
+    let axes = crate::soap::fivefold_axis_table(origin);
+    for (axis, _) in axes.into_iter().take(6) {
+        if trials.len() >= limit {
+            break;
+        }
+        let mut hat = axis;
+        let length = len3(hat);
+        if length < 1.0e-8 {
+            continue;
+        }
+        hat = [hat[0] / length, hat[1] / length, hat[2] / length];
+        let mut proj = Vec::with_capacity(n);
+        for i in 0..n {
+            let rel = sub3(atom_at(origin, i), com);
+            let along = dot3(rel, hat);
+            let radial = (dot3(rel, rel) - along * along).max(0.0).sqrt();
+            proj.push((along, radial, i));
+        }
+        let (mut lo, mut hi) = (f64::MAX, f64::MIN);
+        for (along, _, _) in &proj {
+            lo = lo.min(*along);
+            hi = hi.max(*along);
+        }
+        let span = (hi - lo).max(1.0e-6);
+        let north_cut = lo + 0.72 * span;
+        let south_cut = lo + 0.28 * span;
+        for (angle, shift) in [(0.628_f64, 0.0), (0.628, 0.35), (-0.628, 0.0), (0.35, 0.2)] {
+            if trials.len() >= limit {
+                break;
+            }
+            let north = rotation_about(hat, angle);
+            let south = rotation_about(hat, -angle);
+            let mut moved = origin.to_owned();
+            for (along, radial, i) in &proj {
+                if *radial < 0.45 {
+                    continue;
+                }
+                let rel = sub3(atom_at(origin, i), com);
+                let (turned, extra) = if *along >= north_cut {
+                    (apply_rot(&north, rel), shift)
+                } else if *along <= south_cut {
+                    (apply_rot(&south, rel), -shift)
+                } else {
+                    continue;
+                };
+                for k in 0..3 {
+                    moved[3 * i + k] = com[k] + turned[k] + hat[k] * extra;
+                }
+            }
+            trials.push(moved);
+        }
+    }
+    trials
+}
+
 fn note_candidate<E>(
     proposal: &Array1<f64>,
     evaluate: &mut E,
@@ -562,7 +665,8 @@ where
             return best;
         }
         println!("{{\"kind\":\"exit_move\",\"move\":\"facet\",\"round\":{round}}}");
-        let trials = facet_trials(launch.view(), 48);
+        let mut trials = cap_twists(launch.view(), 24);
+        trials.extend(facet_trials(launch.view(), 24));
         for trial in trials {
             let quenched = quench(trial.view());
             note_candidate(
