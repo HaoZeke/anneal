@@ -134,6 +134,28 @@ where
     F: for<'a> FnMut(ArrayView1<'a, f64>) -> Option<(f64, Array1<f64>)> + Send,
     R: Rng + ?Sized,
 {
+    nve_escape_seeded(start, initial_kinetic, None, config, evaluate, rng)
+}
+
+/// Same escape as [`nve_escape`], with the launch velocity seeded by
+/// `seed_direction` when that vector has the right length.
+///
+/// The seed is the covering displacement. Softening, when the config
+/// asks for it, mixes the seed toward the softest direction. A small
+/// Gaussian part remains so two nearby covers do not collapse onto one
+/// trajectory. `None` is the unbiased Gaussian launch.
+pub fn nve_escape_seeded<F, R>(
+    start: ArrayView1<f64>,
+    initial_kinetic: f64,
+    seed_direction: Option<ArrayView1<f64>>,
+    config: &MdEscapeConfig,
+    evaluate: &mut F,
+    rng: &mut R,
+) -> Result<MdEscapeReport, SaddleError>
+where
+    F: for<'a> FnMut(ArrayView1<'a, f64>) -> Option<(f64, Array1<f64>)> + Send,
+    R: Rng + ?Sized,
+{
     if start.is_empty()
         || !config.dt.is_finite()
         || config.dt <= 0.0
@@ -156,10 +178,19 @@ where
         MdEscapeGeometry::Euclidean => ManifoldKind::Euclidean,
         MdEscapeGeometry::RigidQuotient => ManifoldKind::RigidQuotient,
     };
-    let mut velocity = Array1::from_iter(start.iter().map(|_| {
-        let draw: f64 = StandardNormal.sample(rng);
-        draw
-    }));
+    let mut velocity = if let Some(direction) = seed_direction.filter(|d| d.len() == start.len()) {
+        let mut mixed = direction.to_owned();
+        for slot in mixed.iter_mut() {
+            let draw: f64 = StandardNormal.sample(rng);
+            *slot += 0.25 * draw;
+        }
+        mixed
+    } else {
+        Array1::from_iter(start.iter().map(|_| {
+            let draw: f64 = StandardNormal.sample(rng);
+            draw
+        }))
+    };
     velocity = manifold.project(&start.to_owned(), &velocity);
     let surface = CallbackSurface {
         evaluate: Mutex::new(evaluate),

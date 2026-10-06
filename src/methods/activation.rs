@@ -50,8 +50,13 @@
 //! sets how far to climb; this module decides when to stop.
 
 use crate::curvature::curvature_features;
+use crate::methods::minima_hopping::{
+    EscapeFeedback, MdEscapeConfig, MdEscapeGeometry, Visit, nve_escape_seeded,
+};
 use ndarray::{Array1, ArrayView1};
 use rand::{Rng, SeedableRng};
+use std::collections::HashMap;
+use std::io::Write;
 
 /// How the climb is run.
 #[derive(Debug, Clone)]
@@ -257,7 +262,8 @@ where
         let point = if hop % 6 == 0 {
             fivefold_opening(here.view(), rmsd, hop)
         } else {
-            let direction = crate::hypersphere::cover_direction(n_cover, here.len(), hop + cover_index);
+            let direction =
+                crate::hypersphere::cover_direction(n_cover, here.len(), hop + cover_index);
             let placed = crate::hypersphere::place_around(
                 here.as_slice().unwrap_or(&[]),
                 &direction,
@@ -296,6 +302,222 @@ where
             here = quenched;
             here_e = value;
         }
+    }
+    best
+}
+
+fn basin_key(energy: f64) -> i64 {
+    (energy / 5.0e-3).round() as i64
+}
+
+/// Repeated covering displacement, minimum-mode climb, and quench.
+///
+/// One kick from a deep minimum falls back into it. The loop keeps
+/// going. Each hop places one covering direction, optionally opens a
+/// pentagonal axis, kicks every coordinate, climbs the minimum mode,
+/// and runs a short constant-energy trajectory seeded by that cover.
+/// The trajectory is what carries the system over the ridge. A quench
+/// that returns home raises the escape energy. A quench into another
+/// basin is kept when the rise is under the adaptive threshold, uphill
+/// included. The lowest quench is returned. Nothing in the loop is a
+/// named target energy: the only early stop is a quench strictly below
+/// the minimum the search started from.
+pub fn cover_climb_search<E, Q>(
+    origin: ArrayView1<f64>,
+    rmsd: f64,
+    max_hops: usize,
+    mut evaluate: E,
+    mut quench: Q,
+    cfg: &Activation,
+) -> Array1<f64>
+where
+    E: FnMut(ArrayView1<f64>) -> (f64, Array1<f64>) + Send,
+    Q: FnMut(ArrayView1<f64>) -> Array1<f64>,
+{
+    if max_hops == 0 || origin.is_empty() {
+        return origin.to_owned();
+    }
+    let (origin_e, _) = evaluate(origin);
+    if !origin_e.is_finite() {
+        return origin.to_owned();
+    }
+    let mut best = origin.to_owned();
+    let mut best_e = origin_e;
+    let mut here = origin.to_owned();
+    let mut here_e = origin_e;
+    let mut basins: HashMap<i64, usize> = HashMap::new();
+    basins.insert(basin_key(origin_e), 0);
+    let mut next_id = 1usize;
+    let mut current = 0usize;
+    let ke0 = 4.0_f64;
+    let mut feedback = EscapeFeedback::new(ke0, 3.0);
+    feedback.escape_ceiling = 60.0;
+    feedback.escape_floor = 1.0;
+    feedback.register_initial(current);
+    let mut rng = rand::rngs::StdRng::seed_from_u64(1);
+    let n_cover = crate::hypersphere::default_cover_size();
+    let cluster = origin.len() % 3 == 0 && {
+        let pair = closest_pair(origin);
+        pair > 0.5 && pair < 3.0
+    };
+    let geometry = if cluster {
+        MdEscapeGeometry::RigidQuotient
+    } else {
+        MdEscapeGeometry::Euclidean
+    };
+    println!(
+        "{{\"kind\":\"exit_candidate\",\"energy\":{origin_e:.6},\"hop\":0,\"role\":\"start\"}}"
+    );
+
+    for hop in 0..max_hops {
+        if best_e < origin_e - 1.0e-4 {
+            break;
+        }
+        let kinetic = feedback.escape();
+        let span = (kinetic / ke0).sqrt();
+        let cover_rmsd = (rmsd * span).clamp(0.25, 1.4);
+        let direction = Array1::from(crate::hypersphere::cover_direction(
+            n_cover,
+            here.len(),
+            hop,
+        ));
+        let mut proposals: Vec<Array1<f64>> = Vec::new();
+
+        let placed = crate::hypersphere::place_around(
+            here.as_slice().unwrap_or(&[]),
+            direction.as_slice().unwrap_or(&[]),
+            cover_rmsd,
+            None,
+        );
+        if placed.len() == here.len() {
+            proposals.push(quench(Array1::from(placed).view()));
+        }
+        if cluster && hop % 4 == 0 {
+            proposals.push(quench(
+                fivefold_opening(here.view(), cover_rmsd, hop).view(),
+            ));
+        }
+        let amp = (0.38 * span).clamp(0.25, 0.9);
+        let mut kicked = here.clone();
+        for value in kicked.iter_mut() {
+            *value += amp * (2.0 * rng.random::<f64>() - 1.0);
+        }
+        proposals.push(quench(kicked.view()));
+
+        if hop % 5 == 0 {
+            for sign in [1.0_f64, -1.0] {
+                if let Some(outcome) = activate(here.view(), |y| Some(evaluate(y).1), cfg, sign)
+                    && outcome.crossed
+                {
+                    proposals.push(quench(outcome.state.view()));
+                }
+            }
+        }
+
+        let dt = (0.015 / (1.0 + kinetic).sqrt()).clamp(2.0e-4, 0.02);
+        let md = MdEscapeConfig {
+            dt,
+            potential_minima: 2,
+            maximum_steps: 700,
+            geometry,
+            softening: Some(rgsaddle::VelocitySofteningConfig {
+                steps: 6,
+                displacement: 0.08,
+                mixing: 0.15,
+            }),
+        };
+        let mut escaped = None;
+        {
+            let mut eval = |point: ArrayView1<f64>| Some(evaluate(point));
+            if let Ok(report) = nve_escape_seeded(
+                here.view(),
+                kinetic,
+                Some(direction.view()),
+                &md,
+                &mut eval,
+                &mut rng,
+            ) && report.potential_minima >= md.potential_minima
+                && report.position.iter().all(|v| v.is_finite())
+            {
+                escaped = Some(report.position);
+            }
+        }
+        if let Some(position) = escaped {
+            proposals.push(quench(position.view()));
+        }
+
+        let mut landing: Option<(f64, Array1<f64>, usize)> = None;
+        let mut overshot = false;
+        for proposal in proposals {
+            if !proposal.iter().all(|v| v.is_finite()) {
+                continue;
+            }
+            let (value, _) = evaluate(proposal.view());
+            if !value.is_finite() {
+                continue;
+            }
+            println!("{{\"kind\":\"exit_candidate\",\"energy\":{value:.6},\"hop\":{hop}}}");
+            if value < best_e - 1.0e-6 {
+                best_e = value;
+                best = proposal.clone();
+            }
+            if value > origin_e + 30.0 {
+                overshot = true;
+                continue;
+            }
+            let key = basin_key(value);
+            if key == basin_key(here_e) {
+                continue;
+            }
+            let replace = landing
+                .as_ref()
+                .is_none_or(|(energy, _, _)| value < *energy);
+            if replace {
+                let reached = if let Some(id) = basins.get(&key).copied() {
+                    id
+                } else {
+                    let id = next_id;
+                    next_id += 1;
+                    basins.insert(key, id);
+                    id
+                };
+                landing = Some((value, proposal, reached));
+            }
+        }
+
+        if best_e < origin_e - 1.0e-4 {
+            println!(
+                "{{\"kind\":\"exit_hop\",\"hop\":{hop},\"here\":{here_e:.6},\"best\":{best_e:.6},\"left\":true}}"
+            );
+            let _ = std::io::stdout().flush();
+            break;
+        }
+
+        match landing {
+            Some((value, state, reached)) => {
+                let visit = feedback.observe(Some(current), reached);
+                if visit != Visit::Same && feedback.accept(value - here_e) {
+                    here = state;
+                    here_e = value;
+                    current = reached;
+                }
+            }
+            None => {
+                if overshot {
+                    let id = next_id;
+                    next_id += 1;
+                    feedback.observe(Some(current), id);
+                } else {
+                    feedback.observe(Some(current), current);
+                }
+            }
+        }
+        println!(
+            "{{\"kind\":\"exit_hop\",\"hop\":{hop},\"here\":{here_e:.6},\"best\":{best_e:.6},\"escape\":{:.3},\"threshold\":{:.3}}}",
+            feedback.escape(),
+            feedback.threshold()
+        );
+        let _ = std::io::stdout().flush();
     }
     best
 }
@@ -622,11 +844,7 @@ mod tests {
         );
     }
 
-    fn quench_double_well(
-        w: &Array1<f64>,
-        k: &Array1<f64>,
-        mut x: Array1<f64>,
-    ) -> Array1<f64> {
+    fn quench_double_well(w: &Array1<f64>, k: &Array1<f64>, mut x: Array1<f64>) -> Array1<f64> {
         let g = double_well(w, k);
         for _ in 0..80 {
             let grad = g(x.view()).unwrap();
@@ -870,6 +1088,102 @@ mod tests {
         assert!(
             ua > ub,
             "the two signs ended at u = {ua:.3} and {ub:.3}, not on opposite sides"
+        );
+    }
+
+    /// A capped octahedron of seven Lennard-Jones atoms is a local minimum.
+    /// The pentagonal bipyramid lies below it. The search is given only the
+    /// higher minimum, the force, and a quench.
+    #[test]
+    fn cover_climb_search_leaves_a_higher_lennard_jones_minimum() {
+        fn lj(x: ArrayView1<f64>) -> (f64, Array1<f64>) {
+            let n = x.len() / 3;
+            let mut value = 0.0;
+            let mut gradient = Array1::zeros(x.len());
+            for i in 0..n {
+                for j in (i + 1)..n {
+                    let mut d = [0.0; 3];
+                    let mut r2 = 0.0;
+                    for k in 0..3 {
+                        d[k] = x[3 * i + k] - x[3 * j + k];
+                        r2 += d[k] * d[k];
+                    }
+                    let inv2 = 1.0 / r2;
+                    let inv6 = inv2.powi(3);
+                    let inv12 = inv6 * inv6;
+                    value += 4.0 * (inv12 - inv6);
+                    let coefficient = 24.0 * inv2 * (2.0 * inv12 - inv6);
+                    for k in 0..3 {
+                        gradient[3 * i + k] -= coefficient * d[k];
+                        gradient[3 * j + k] += coefficient * d[k];
+                    }
+                }
+            }
+            (value, gradient)
+        }
+        fn quench(x: ArrayView1<f64>) -> Array1<f64> {
+            let mut opt = crate::methods::warm_lbfgs::WarmLbfgs::default();
+            opt.minimize(x, 80, |v| Some(lj(v))).1
+        }
+
+        let req = 2.0_f64.powf(1.0 / 6.0);
+        let scale = req / 2.0_f64.sqrt();
+        let mut capped = Array1::zeros(21);
+        let axes = [
+            [1.0, 0.0, 0.0],
+            [-1.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0],
+            [0.0, -1.0, 0.0],
+            [0.0, 0.0, 1.0],
+            [0.0, 0.0, -1.0],
+        ];
+        for (i, p) in axes.iter().enumerate() {
+            for k in 0..3 {
+                capped[3 * i + k] = p[k] * scale;
+            }
+        }
+        let centroid = scale / 3.0;
+        let unit = 1.0 / 3.0_f64.sqrt();
+        for k in 0..3 {
+            capped[18 + k] = centroid + req * unit;
+        }
+        let capped = quench(capped.view());
+        let e_cap = lj(capped.view()).0;
+
+        let mut bipyramid = Array1::zeros(21);
+        let radius = req / (2.0 * (std::f64::consts::PI / 5.0).sin());
+        let height = (req * req - radius * radius).max(0.0).sqrt();
+        for k in 0..5 {
+            let angle = 2.0 * std::f64::consts::PI * (k as f64) / 5.0;
+            bipyramid[3 * k] = radius * angle.cos();
+            bipyramid[3 * k + 1] = radius * angle.sin();
+        }
+        bipyramid[17] = height;
+        bipyramid[20] = -height;
+        let bipyramid = quench(bipyramid.view());
+        let e_low = lj(bipyramid.view()).0;
+        assert!(
+            e_low < e_cap - 0.2,
+            "the lower isomer is not below the start: {e_low} vs {e_cap}"
+        );
+
+        let end = cover_climb_search(
+            capped.view(),
+            0.4,
+            40,
+            lj,
+            quench,
+            &Activation {
+                max_steps: 4,
+                lanczos_steps: 6,
+                perp_steps: 1,
+                ..Activation::default()
+            },
+        );
+        let found = lj(end.view()).0;
+        assert!(
+            found < e_cap - 0.2,
+            "search energy {found}, start {e_cap}, lower isomer {e_low}"
         );
     }
 }
