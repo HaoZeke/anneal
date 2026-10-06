@@ -188,7 +188,9 @@ where
         climb.step = contact * (n_atoms as f64).sqrt() / budget as f64;
         climb.max_steps = n_atoms.max(budget);
         climb.min_rise = 0.0;
-        if let Some(outcome) = activate_along(origin.view(), direction.view(), &mut grad, &climb) {
+        if let Some(outcome) = activate_along(origin.view(), direction.view(), &mut grad, &climb)
+            && outcome.crossed
+        {
             return quench(outcome.state.view());
         }
     }
@@ -673,6 +675,7 @@ where
             if higher {
                 ridge = Some((cur.clone(), mode.clone(), rise));
                 crossed = true;
+                break 'climb;
             }
             saw_uphill = false;
         }
