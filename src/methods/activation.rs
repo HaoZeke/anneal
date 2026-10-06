@@ -1676,7 +1676,8 @@ fn ride_lowest_mode<E, Q>(
     let surface = ForceSurface {
         evaluate: std::sync::Mutex::new(evaluate),
     };
-    let mut saddles: Vec<(Array1<f64>, Array1<f64>)> = Vec::new();
+    let (floor_energy, _) = evaluate(start);
+    let mut saddles: Vec<(Array1<f64>, Array1<f64>, f64)> = Vec::new();
     let mut ride_modes = vec![features.mode.clone()];
     for axis in outer_axes(start, contact).into_iter().take(3) {
         let (_, mut strain) = twist_and_strain(start, axis);
@@ -1724,7 +1725,11 @@ fn ride_lowest_mode<E, Q>(
                             *best = minimum.coordinates.clone();
                         }
                     }
-                    saddles.push((connection.saddle_coordinates, connection.lowest_mode));
+                    saddles.push((
+                        connection.saddle_coordinates,
+                        connection.lowest_mode,
+                        connection.curvature,
+                    ));
                 }
                 Err(error) => {
                     let message = error.to_string().replace('"', "'");
@@ -1735,41 +1740,42 @@ fn ride_lowest_mode<E, Q>(
         }
     }
     drop(surface);
-    // A pure step along the unstable mode falls back above the floor.
-    // Quench a cone around that mode: one contact of the leading atom
-    // along the mode, plus half a contact in a perpendicular cover direction.
-    let n_cover = 8usize;
-    for (saddle, mode) in saddles {
-        let lead = max_atom_weight(mode.view()).max(1e-12);
-        // A short step picks the side of the saddle. The perpendicular
-        // cover is then one contact and two, which is the move that left
-        // the half-contact cone above the floor.
-        let along = 0.1 * contact / lead;
-        for hop in 0..n_cover {
-            let raw = crate::hypersphere::cover_direction(n_cover, saddle.len(), hop);
-            let mut perp = Array1::from_vec(raw);
-            let parallel = dot_av(perp.view(), mode.view());
-            for (value, component) in perp.iter_mut().zip(mode.iter()) {
-                *value -= parallel * component;
+    // A static step off the saddle falls back above the floor. Give the
+    // unstable mode the kinetic energy of the saddle above the reactant,
+    // integrate two vibrational periods, and quench.
+    for (saddle, mode, curvature) in saddles {
+        let energy_saddle = evaluate(saddle.view()).0;
+        let rise = (energy_saddle - floor_energy).max(0.0);
+        let speed = (2.0 * rise).sqrt();
+        let omega = curvature.abs().sqrt().max(1e-3);
+        let period = 2.0 * std::f64::consts::PI / omega;
+        let dt = period / 20.0;
+        let n_atoms = saddle.len() / 3;
+        for sign in [1.0_f64, -1.0] {
+            let mut point = saddle.clone();
+            let mut velocity = Array1::zeros(point.len());
+            for (vel, component) in velocity.iter_mut().zip(mode.iter()) {
+                *vel = sign * speed * component;
             }
-            if !renormalize_mode(&mut perp, saddle.view()) {
-                continue;
-            }
-            let side_unit = contact / max_atom_weight(perp.view()).max(1e-12);
-            for sign in [1.0_f64, -1.0] {
-                for factor in [1.0_f64, 2.0] {
-                    let mut point = saddle.clone();
-                    let side = factor * side_unit;
-                    for i in 0..point.len() {
-                        point[i] += sign * along * mode[i] + side * perp[i];
-                    }
-                    if closest_pair(point.view()) < contact * 0.5 {
-                        continue;
-                    }
-                    let quenched = quench(point.view());
-                    let _ = note_exit(evaluate, &quenched, hop, best_energy, best);
+            for _ in 0..(40) {
+                let (_, gradient) = evaluate(point.view());
+                for i in 0..point.len() {
+                    velocity[i] -= 0.5 * dt * gradient[i];
+                    point[i] += dt * velocity[i];
+                }
+                if closest_pair(point.view()) < contact * 0.5 {
+                    break;
+                }
+                let (_, gradient) = evaluate(point.view());
+                for vel in velocity.iter_mut().zip(gradient.iter()) {
+                    *vel.0 -= 0.5 * dt * *vel.1;
                 }
             }
+            if closest_pair(point.view()) < contact * 0.5 || n_atoms == 0 {
+                continue;
+            }
+            let quenched = quench(point.view());
+            let _ = note_exit(evaluate, &quenched, 0, best_energy, best);
         }
     }
 }
