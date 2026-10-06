@@ -107,7 +107,8 @@ pub fn decahedral_cut<R: Rng + ?Sized>(n: usize, scale: f64, rng: &mut R) -> Arr
             break;
         }
         for z in -shell..=shell {
-            let m = shell - z.abs();
+            let z = z as i32;
+            let m = shell - z.unsigned_abs() as i32;
             if m <= 0 {
                 let point = [0.0, 0.0, z as f64];
                 if sites.iter().all(|old| sq(old, &point) > 0.04) {
