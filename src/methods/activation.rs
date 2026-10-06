@@ -431,7 +431,50 @@ where
         "{{\"kind\":\"exit_candidate\",\"energy\":{origin_e:.6},\"hop\":0,\"role\":\"start\"}}"
     );
 
+    // Ordinary basin hopping. A fixed lid, not a shrinking threshold:
+    // the walk has to be able to leave the bottom of a funnel.
+    let mut walker = origin.to_owned();
+    let mut walker_e = origin_e;
     for hop in 0..max_hops {
+        if best_e < origin_e - 0.05 {
+            return best;
+        }
+        let mut trial = walker.clone();
+        for value in trial.iter_mut() {
+            *value += 0.40 * (2.0 * rng.random::<f64>() - 1.0);
+        }
+        let quenched = quench(trial.view());
+        note_candidate(
+            &quenched,
+            &mut evaluate,
+            &mut best,
+            &mut best_e,
+            hop,
+            origin_e,
+            &mut bank,
+            &rejected,
+        );
+        let (value, _) = evaluate(quenched.view());
+        let rise = value - walker_e;
+        if value.is_finite()
+            && value <= origin_e + 5.0
+            && (rise <= 0.0 || rng.random::<f64>() < (-rise / 0.8).exp())
+        {
+            walker = quenched;
+            walker_e = value;
+        }
+        if hop.is_multiple_of(200) {
+            println!(
+                "{{\"kind\":\"exit_hop\",\"hop\":{hop},\"here\":{walker_e:.6},\"best\":{best_e:.6},\"phase\":\"basin\"}}"
+            );
+            let _ = std::io::stdout().flush();
+        }
+    }
+    if best_e < origin_e - 0.05 {
+        return best;
+    }
+
+    for hop in 0..max_hops.min(8) {
         if best_e < origin_e - 0.05 {
             break;
         }
