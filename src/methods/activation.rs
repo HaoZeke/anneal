@@ -428,9 +428,6 @@ where
                         for i in 0..kicked.len() {
                             kicked[i] += sign * scale * mode[i];
                         }
-                        if closest_pair(kicked.view()) < contact * 0.5 {
-                            continue;
-                        }
                         let quenched = quench(kicked.view());
                         let (value, _) = evaluate(quenched.view());
                         if value.is_finite() {
