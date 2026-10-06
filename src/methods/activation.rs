@@ -567,7 +567,9 @@ where
 {
     let n = origin.len() / 3;
     let mut out = Vec::new();
-    if let Some((n_axis, n_rings, start)) = project_fivefold(origin) {
+    if let Some((n_axis, n_rings, start)) = project_fivefold(origin)
+        && n_axis + 5 * n_rings == n
+    {
         let mut params = start;
         let (mut energy, _) = evaluate(build_fivefold(&params, n_axis, n_rings).view());
         let mut best_params = params.clone();
