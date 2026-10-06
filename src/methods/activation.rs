@@ -1329,6 +1329,121 @@ fn climb_relaxed_cover<E, Q>(
     }
 }
 
+fn relax_twisted_cap<E>(
+    x: ArrayView1<f64>,
+    axis: [f64; 3],
+    angle: f64,
+    evaluate: &mut E,
+) -> Array1<f64>
+where
+    E: FnMut(ArrayView1<f64>) -> (f64, Array1<f64>),
+{
+    let turned = rotate_positive_cap(x, axis, angle);
+    let n_atoms = turned.len() / 3;
+    if n_atoms < 2 {
+        return turned;
+    }
+    let mut com = [0.0; 3];
+    for atom in 0..n_atoms {
+        for coord in 0..3 {
+            com[coord] += turned[3 * atom + coord];
+        }
+    }
+    for value in &mut com {
+        *value /= n_atoms as f64;
+    }
+    let [ax, ay, az] = axis;
+    let mut caps = Vec::new();
+    let mut free = Vec::new();
+    for atom in 0..n_atoms {
+        let r = [
+            turned[3 * atom] - com[0],
+            turned[3 * atom + 1] - com[1],
+            turned[3 * atom + 2] - com[2],
+        ];
+        let height = r[0] * ax + r[1] * ay + r[2] * az;
+        let perp = [r[0] - height * ax, r[1] - height * ay, r[2] - height * az];
+        let rho = (perp[0] * perp[0] + perp[1] * perp[1] + perp[2] * perp[2]).sqrt();
+        if height > 0.0 && rho > 1e-8 {
+            caps.push((
+                atom,
+                [perp[0] / rho, perp[1] / rho, perp[2] / rho],
+                rho,
+                height,
+            ));
+        } else {
+            free.push(atom);
+        }
+    }
+    if caps.is_empty() {
+        return turned;
+    }
+    let mut reduced = Array1::zeros(free.len() * 3 + caps.len() * 2);
+    for (slot, &atom) in free.iter().enumerate() {
+        for coord in 0..3 {
+            reduced[3 * slot + coord] = turned[3 * atom + coord];
+        }
+    }
+    let cap_at = free.len() * 3;
+    for (slot, &(_, _, rho, height)) in caps.iter().enumerate() {
+        reduced[cap_at + 2 * slot] = rho;
+        reduced[cap_at + 2 * slot + 1] = height;
+    }
+    let mut opt = crate::methods::warm_lbfgs::WarmLbfgs::default();
+    let (_, reduced, _) = opt.minimize(reduced.view(), n_atoms.saturating_mul(8).max(8), |point| {
+        let mut y = turned.clone();
+        for (slot, &atom) in free.iter().enumerate() {
+            for coord in 0..3 {
+                y[3 * atom + coord] = point[3 * slot + coord];
+            }
+        }
+        for (slot, &(atom, e_rho, _, _)) in caps.iter().enumerate() {
+            let rho = point[cap_at + 2 * slot].max(1e-3);
+            let height = point[cap_at + 2 * slot + 1];
+            for coord in 0..3 {
+                let axial = [ax, ay, az][coord];
+                y[3 * atom + coord] = com[coord] + height * axial + rho * e_rho[coord];
+            }
+        }
+        let (energy, gradient) = evaluate(y.view());
+        if !energy.is_finite() {
+            return None;
+        }
+        let mut reduced_gradient = Array1::zeros(point.len());
+        for (slot, &atom) in free.iter().enumerate() {
+            for coord in 0..3 {
+                reduced_gradient[3 * slot + coord] = gradient[3 * atom + coord];
+            }
+        }
+        for (slot, &(atom, e_rho, _, _)) in caps.iter().enumerate() {
+            let g = [
+                gradient[3 * atom],
+                gradient[3 * atom + 1],
+                gradient[3 * atom + 2],
+            ];
+            reduced_gradient[cap_at + 2 * slot] =
+                g[0] * e_rho[0] + g[1] * e_rho[1] + g[2] * e_rho[2];
+            reduced_gradient[cap_at + 2 * slot + 1] = g[0] * ax + g[1] * ay + g[2] * az;
+        }
+        Some((energy, reduced_gradient))
+    });
+    let mut y = turned;
+    for (slot, &atom) in free.iter().enumerate() {
+        for coord in 0..3 {
+            y[3 * atom + coord] = reduced[3 * slot + coord];
+        }
+    }
+    for (slot, &(atom, e_rho, _, _)) in caps.iter().enumerate() {
+        let rho = reduced[cap_at + 2 * slot].max(1e-3);
+        let height = reduced[cap_at + 2 * slot + 1];
+        for coord in 0..3 {
+            let axial = [ax, ay, az][coord];
+            y[3 * atom + coord] = com[coord] + height * axial + rho * e_rho[coord];
+        }
+    }
+    y
+}
+
 fn climb_outer_axes<E, Q>(
     start: ArrayView1<f64>,
     contact: f64,
@@ -1347,8 +1462,8 @@ fn climb_outer_axes<E, Q>(
     let half_sector = std::f64::consts::PI / 10.0;
     for (index, axis) in outer_axes(start, contact).into_iter().enumerate() {
         for sign in [1.0_f64, -1.0] {
-            let turned = rotate_positive_cap(start, axis, sign * half_sector);
-            let quenched = quench(turned.view());
+            let held = relax_twisted_cap(start, axis, sign * half_sector, evaluate);
+            let quenched = quench(held.view());
             let _ = note_exit(evaluate, &quenched, hop, best_energy, best);
         }
         let (twist, strain) = twist_and_strain(start, axis);
