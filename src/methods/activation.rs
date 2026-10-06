@@ -311,8 +311,9 @@ fn packed_fraction(x: ArrayView1<f64>) -> f64 {
     if n < 4 {
         return 0.0;
     }
-    let cutoff = 1.35 * crate::twin::spacing(x, n);
-    crate::structure::cna_descriptor(x, n, cutoff)[1]
+    // Fixed neighbour shell of the Lennard-Jones minimum, so an expanded
+    // hot frame is not given a cutoff that counts non-bonds.
+    crate::structure::cna_descriptor(x, n, 1.50)[1]
 }
 
 fn basin_key(energy: f64) -> i64 {
@@ -731,7 +732,7 @@ where
                     if packed > best_pack {
                         best_pack = packed;
                     }
-                    if packed > base_pack + 0.08 {
+                    if packed > base_pack + 0.04 {
                         let quenched = quench(point.view());
                         note_candidate(
                             &quenched,
