@@ -2071,9 +2071,10 @@ fn climb_later_ridges<E, Q>(
     ));
     let mut climb = cfg.clone();
     let n_atoms = start.len() / 3;
-    let budget = climb.max_steps.max(16);
-    climb.step = contact * (n_atoms as f64).sqrt() / budget as f64;
-    climb.max_steps = budget;
+    // A contact-length step spread over the atoms. The climb then has room
+    // to cross more than one ridge before the budget ends.
+    climb.step = contact / (n_atoms as f64).sqrt();
+    climb.max_steps = climb.max_steps.max(48);
     climb.later_ridges = true;
     climb.min_rise = 0.0;
     if let Some(features) = curvature_features(
@@ -2084,7 +2085,9 @@ fn climb_later_ridges<E, Q>(
     ) {
         let lid = 0.5 * features.lambda_min.abs() * contact * contact;
         if lid.is_finite() && lid > 0.0 {
-            climb.min_rise = 0.5 * lid;
+            // A quarter of that rise is above a neighbour-to-neighbour step
+            // and still below the harmonic cost of a full contact.
+            climb.min_rise = 0.25 * lid;
         }
     }
     let Some(outcome) = activate_along(
@@ -2096,9 +2099,11 @@ fn climb_later_ridges<E, Q>(
         return;
     };
     println!(
-        "{{\"kind\":\"later_ridge\",\"hop\":{hop},\"ridges\":{},\"min_rise\":{:.4},\"crossed\":{}}}",
+        "{{\"kind\":\"later_ridge\",\"hop\":{hop},\"ridges\":{},\"min_rise\":{:.4},\"steps\":{},\"lambda\":{:.4},\"crossed\":{}}}",
         outcome.ridges.len(),
         climb.min_rise,
+        outcome.steps,
+        outcome.lambda,
         outcome.crossed
     );
     let _ = std::io::stdout().flush();
@@ -2783,7 +2788,7 @@ where
                 crossed = true;
                 // The first ridge is the whole answer for a short climb.
                 // A funnel exit is a later ridge, so that search keeps going.
-                if !cfg.later_ridges || ridge_log.len() >= 4 {
+                if !cfg.later_ridges || ridge_log.len() >= 6 {
                     break 'climb;
                 }
                 saw_uphill = false;
