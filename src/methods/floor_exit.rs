@@ -5,7 +5,6 @@
 //! harmonic ceiling is climbed in turn. The search reads the caller's
 //! energy and force. It does not read a target energy.
 
-use std::collections::HashSet;
 use std::io::Write;
 
 use ndarray::{Array1, ArrayView1};
@@ -93,8 +92,9 @@ where
     let limit = hops.max(1);
     let n_cover = crate::hypersphere::default_cover_size();
     let mut queue = vec![(start_energy, origin.to_owned())];
-    let mut climbed = HashSet::new();
     let mut best = start_energy;
+    let mut walker = origin.to_owned();
+    let mut walker_e = start_energy;
     let ceiling = start_energy + harmonic * LEAVE_BARRIER_GROWTH;
     println!(
         "{{\"kind\":\"cover_network\",\"hops\":{limit},\"min_rise\":{:.4},\"step\":{:.4}}}",
@@ -102,31 +102,28 @@ where
     );
     let _ = std::io::stdout().flush();
     for hop in 0..limit {
-        // Stay inside one harmonic rise of the start, and climb the minimum
-        // farthest from it. The lowest shelf is not the way out.
-        let band = start_energy + harmonic;
-        let unclimbed = |energy: f64| !climbed.contains(&basin_key(energy));
-        let in_band = queue
-            .iter()
-            .any(|(energy, _)| unclimbed(*energy) && *energy <= band);
-        let Some(choice) = queue
-            .iter()
-            .enumerate()
-            .filter(|(_, (energy, _))| unclimbed(*energy) && (!in_band || *energy <= band))
-            .max_by(|(_, (_, left)), (_, (_, right))| {
-                separation(origin.view(), left).total_cmp(&separation(origin.view(), right))
-            })
-            .map(|(index, _)| index)
-        else {
-            break;
-        };
-        let (height, point) = queue[choice].clone();
-        climbed.insert(basin_key(height));
+        let point = walker.clone();
+        let height = walker_e;
         println!(
-            "{{\"kind\":\"climb_from\",\"hop\":{hop},\"height\":{height:.6},\"band\":{band:.4},\"rms\":{:.4}}}",
+            "{{\"kind\":\"climb_from\",\"hop\":{hop},\"height\":{height:.6},\"rms\":{:.4}}}",
             separation(origin.view(), &point)
         );
         let _ = std::io::stdout().flush();
+        let next = hollow_scan(
+            &point,
+            height,
+            hop,
+            contact,
+            start_energy,
+            ceiling,
+            evaluate,
+            quench,
+            &mut best,
+            &mut queue,
+        );
+        if best < start_energy - 1.0e-4 {
+            return best;
+        }
         if hop == 0 {
             let mut best_x = point.clone();
             crate::methods::activation::climb_outer_axes(
@@ -234,8 +231,197 @@ where
                 }
             }
         }
+        let Some((energy, coords)) = next else {
+            break;
+        };
+        walker_e = energy;
+        walker = coords;
     }
     best
+}
+
+/// Move an under-coordinated atom onto an empty face, then quench.
+///
+/// The faces come from the contact graph. The site is the point that
+/// sits one face-edge off that triangle, on either side, when the site
+/// is empty. The quench is the plain energy.
+fn hollow_scan<E, Q>(
+    point: &Array1<f64>,
+    height: f64,
+    hop: usize,
+    contact: f64,
+    start_energy: f64,
+    ceiling: f64,
+    evaluate: &mut E,
+    quench: &mut Q,
+    best: &mut f64,
+    queue: &mut Vec<(f64, Array1<f64>)>,
+) -> Option<(f64, Array1<f64>)>
+where
+    E: FnMut(ArrayView1<f64>) -> (f64, Array1<f64>),
+    Q: FnMut(ArrayView1<f64>) -> Array1<f64>,
+{
+    let n = point.len() / 3;
+    if n < 4 || !(contact.is_finite() && contact > 0.0) {
+        return None;
+    }
+    let cutoff2 = (contact * (1.0 + LEAVE_BARRIER_FLOOR)).powi(2);
+    let near2 = (contact * LEAVE_BARRIER_GROWTH).powi(2);
+    let occupy2 = (contact * LEAVE_BARRIER_FLOOR).powi(2);
+    let mut coord = vec![0usize; n];
+    let mut neigh = vec![Vec::new(); n];
+    for i in 0..n {
+        for j in (i + 1)..n {
+            if pair_distance2(point, i, j) < cutoff2 {
+                coord[i] += 1;
+                coord[j] += 1;
+                neigh[i].push(j);
+                neigh[j].push(i);
+            }
+        }
+    }
+    let mut order = coord.clone();
+    order.sort_unstable();
+    let median = order[n / 2];
+    let mut faces = Vec::new();
+    for i in 0..n {
+        for &j in &neigh[i] {
+            if j <= i {
+                continue;
+            }
+            for &k in &neigh[i] {
+                if k <= j {
+                    continue;
+                }
+                if neigh[j].contains(&k) {
+                    faces.push((i, j, k));
+                }
+            }
+        }
+    }
+    let per_atom = LEAVE_BARRIER_GROWTH as usize;
+    let mut placed = 0usize;
+    let mut chosen: Option<(f64, Array1<f64>)> = None;
+    let here = basin_key(height);
+    for atom in 0..n {
+        if coord[atom] > median {
+            continue;
+        }
+        let origin = atom_at(point, atom);
+        let mut sites = Vec::new();
+        for &(a, b, c) in &faces {
+            if a == atom || b == atom || c == atom {
+                continue;
+            }
+            let pa = atom_at(point, a);
+            let pb = atom_at(point, b);
+            let pc = atom_at(point, c);
+            let mid = [
+                (pa[0] + pb[0] + pc[0]) / 3.0,
+                (pa[1] + pb[1] + pc[1]) / 3.0,
+                (pa[2] + pb[2] + pc[2]) / 3.0,
+            ];
+            let reach = distance2(origin, mid);
+            if reach > near2 {
+                continue;
+            }
+            let e1 = [pb[0] - pa[0], pb[1] - pa[1], pb[2] - pa[2]];
+            let e2 = [pc[0] - pa[0], pc[1] - pa[1], pc[2] - pa[2]];
+            let normal = [
+                e1[1] * e2[2] - e1[2] * e2[1],
+                e1[2] * e2[0] - e1[0] * e2[2],
+                e1[0] * e2[1] - e1[1] * e2[0],
+            ];
+            let nnorm =
+                (normal[0] * normal[0] + normal[1] * normal[1] + normal[2] * normal[2]).sqrt();
+            if nnorm < 1.0e-8 {
+                continue;
+            }
+            let edge = (distance(pa, pb) + distance(pb, pc) + distance(pc, pa)) / 3.0;
+            let base2 = distance2(mid, pa);
+            let height2 = edge * edge - base2;
+            if height2 <= 1.0e-8 {
+                continue;
+            }
+            let height = height2.sqrt();
+            for sign in [1.0, -1.0] {
+                let site = [
+                    mid[0] + sign * height * normal[0] / nnorm,
+                    mid[1] + sign * height * normal[1] / nnorm,
+                    mid[2] + sign * height * normal[2] / nnorm,
+                ];
+                let mut occupied = false;
+                for other in 0..n {
+                    if other == atom {
+                        continue;
+                    }
+                    if distance2(site, atom_at(point, other)) < occupy2 {
+                        occupied = true;
+                        break;
+                    }
+                }
+                if !occupied {
+                    sites.push((reach, site));
+                }
+            }
+        }
+        sites.sort_by(|left, right| left.0.total_cmp(&right.0));
+        sites.dedup_by(|left, right| distance2(left.1, right.1) < occupy2);
+        sites.truncate(per_atom);
+        for (_, site) in sites {
+            let mut trial = point.clone();
+            trial[3 * atom] = site[0];
+            trial[3 * atom + 1] = site[1];
+            trial[3 * atom + 2] = site[2];
+            placed += 1;
+            let Some((energy, coords)) = record_quench(trial.view(), hop, evaluate, quench, best)
+            else {
+                continue;
+            };
+            if energy > start_energy + 1.0e-4 && energy < ceiling {
+                let key = basin_key(energy);
+                if !queue.iter().any(|(known, _)| basin_key(*known) == key) {
+                    queue.push((energy, coords.clone()));
+                }
+            }
+            if basin_key(energy) != here
+                && chosen
+                    .as_ref()
+                    .map(|(have, _)| energy < *have)
+                    .unwrap_or(true)
+            {
+                chosen = Some((energy, coords));
+            }
+            if *best < start_energy - 1.0e-4 {
+                return chosen;
+            }
+        }
+    }
+    println!(
+        "{{\"kind\":\"hollow_scan\",\"hop\":{hop},\"faces\":{},\"placed\":{placed}}}",
+        faces.len()
+    );
+    let _ = std::io::stdout().flush();
+    chosen
+}
+
+fn atom_at(point: &Array1<f64>, atom: usize) -> [f64; 3] {
+    [point[3 * atom], point[3 * atom + 1], point[3 * atom + 2]]
+}
+
+fn distance2(left: [f64; 3], right: [f64; 3]) -> f64 {
+    let dx = left[0] - right[0];
+    let dy = left[1] - right[1];
+    let dz = left[2] - right[2];
+    dx * dx + dy * dy + dz * dz
+}
+
+fn distance(left: [f64; 3], right: [f64; 3]) -> f64 {
+    distance2(left, right).sqrt()
+}
+
+fn pair_distance2(point: &Array1<f64>, i: usize, j: usize) -> f64 {
+    distance2(atom_at(point, i), atom_at(point, j))
 }
 
 fn separation(origin: ArrayView1<f64>, point: &Array1<f64>) -> f64 {
