@@ -1,11 +1,12 @@
-//! Recommended search on a compact spherical surface.
+//! Recommended search that pulls the outer radius in and the inertia toward a sphere.
 //!
-//! Two terms are added to the caller's energy. One is the squared spread of
-//! the three principal moments. The other is the fourth moment of the
-//! distance from the centre of mass. On the cluster that enters the search
-//! each term equals the cohesive energy times the number of atoms. The
-//! second step minimises the plain energy. No pair distance is penalised,
-//! and no target energy is read.
+//! The radial term is a smooth maximum of the distance from the centre of
+//! mass. Its width is the entering cluster's nearest-neighbour distance
+//! divided by the square root of the number of atoms. The angular term is
+//! the squared spread of the three principal moments. On the entering
+//! cluster each term equals the cohesive energy times the number of atoms.
+//! The second step minimises the plain energy. No pair distance is
+//! penalised, and no target energy is read.
 
 use ndarray::{Array1, ArrayView1};
 use rand::SeedableRng;
@@ -36,17 +37,18 @@ where
         return start_energy;
     }
     let target = start_energy.abs() * n as f64;
+    let width = radial_width(origin);
     let aniso0 = shape_parts(origin).0;
-    let moment0 = radial_fourth(origin).0;
+    let radius0 = smooth_radius(origin, width).0;
     let nu = if aniso0 < 1.0e-8 {
         0.0
     } else {
         target / aniso0
     };
-    let mu = if moment0 < 1.0e-8 {
+    let mu = if radius0 < 1.0e-8 {
         0.0
     } else {
-        target / moment0
+        target / radius0
     };
     let cfg = Config::recommended(n);
     let budget = n.saturating_mul(4_000);
@@ -64,7 +66,7 @@ where
             }
             let (energy, gradient) = evaluate(v);
             let (extra_a, grad_a) = anisotropy_penalty(v, nu);
-            let (extra_r, grad_r) = radial_fourth_penalty(v, mu);
+            let (extra_r, grad_r) = smooth_radius_penalty(v, width, mu);
             Some((energy + extra_a + extra_r, gradient + grad_a + grad_r))
         });
         opt.forget();
@@ -108,10 +110,38 @@ where
     best
 }
 
-fn radial_fourth(x: ArrayView1<f64>) -> (f64, Array1<f64>) {
+fn radial_width(x: ArrayView1<f64>) -> f64 {
+    let n = x.len() / 3;
+    let shortest = shortest_pair(x);
+    if n < 2 || !(shortest.is_finite() && shortest > 0.0) {
+        return 1.0;
+    }
+    shortest / (n as f64).sqrt()
+}
+
+fn shortest_pair(x: ArrayView1<f64>) -> f64 {
+    let n = x.len() / 3;
+    let mut best = f64::MAX;
+    for i in 0..n {
+        for j in (i + 1)..n {
+            let mut r2 = 0.0;
+            for k in 0..3 {
+                let d = x[3 * i + k] - x[3 * j + k];
+                r2 += d * d;
+            }
+            if r2 < best {
+                best = r2;
+            }
+        }
+    }
+    best.sqrt()
+}
+
+/// Smooth maximum of the distance from the centre of mass.
+fn smooth_radius(x: ArrayView1<f64>, width: f64) -> (f64, Array1<f64>) {
     let n = x.len() / 3;
     let mut gradient = Array1::zeros(x.len());
-    if n == 0 {
+    if n == 0 || !(width.is_finite() && width > 0.0) {
         return (0.0, gradient);
     }
     let mut com = [0.0; 3];
@@ -124,20 +154,40 @@ fn radial_fourth(x: ArrayView1<f64>) -> (f64, Array1<f64>) {
     for value in &mut com {
         *value /= scale;
     }
-    let mut moment = 0.0;
-    let mut raw = vec![[0.0; 3]; n];
+    let mut radii = vec![0.0; n];
+    let mut zmax = f64::NEG_INFINITY;
+    for i in 0..n {
+        let mut r2 = 0.0;
+        for k in 0..3 {
+            let d = x[3 * i + k] - com[k];
+            r2 += d * d;
+        }
+        radii[i] = r2.sqrt();
+        zmax = zmax.max(radii[i] / width);
+    }
+    if !zmax.is_finite() {
+        return (0.0, gradient);
+    }
+    let mut sum = 0.0;
+    let mut weights = vec![0.0; n];
+    for i in 0..n {
+        let weight = (radii[i] / width - zmax).exp();
+        weights[i] = weight;
+        sum += weight;
+    }
+    if sum <= 0.0 || !sum.is_finite() {
+        return (0.0, gradient);
+    }
+    let value = width * (zmax + sum.ln());
     let mut mean = [0.0; 3];
     for i in 0..n {
-        let d = [
-            x[3 * i] - com[0],
-            x[3 * i + 1] - com[1],
-            x[3 * i + 2] - com[2],
-        ];
-        let r2 = d[0] * d[0] + d[1] * d[1] + d[2] * d[2];
-        moment += r2 * r2;
+        let share = weights[i] / sum;
+        let radius = radii[i].max(1.0e-12);
         for k in 0..3 {
-            raw[i][k] = 4.0 * r2 * d[k];
-            mean[k] += raw[i][k];
+            let unit = (x[3 * i + k] - com[k]) / radius;
+            let piece = share * unit;
+            gradient[3 * i + k] = piece;
+            mean[k] += piece;
         }
     }
     for value in &mut mean {
@@ -145,15 +195,15 @@ fn radial_fourth(x: ArrayView1<f64>) -> (f64, Array1<f64>) {
     }
     for i in 0..n {
         for k in 0..3 {
-            gradient[3 * i + k] = raw[i][k] - mean[k];
+            gradient[3 * i + k] -= mean[k];
         }
     }
-    (moment, gradient)
+    (value, gradient)
 }
 
-fn radial_fourth_penalty(x: ArrayView1<f64>, mu: f64) -> (f64, Array1<f64>) {
-    let (moment, gradient) = radial_fourth(x);
-    (mu * moment, gradient * mu)
+fn smooth_radius_penalty(x: ArrayView1<f64>, width: f64, mu: f64) -> (f64, Array1<f64>) {
+    let (value, gradient) = smooth_radius(x, width);
+    (mu * value, gradient * mu)
 }
 
 fn anisotropy_penalty(x: ArrayView1<f64>, nu: f64) -> (f64, Array1<f64>) {
