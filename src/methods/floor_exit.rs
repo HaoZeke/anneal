@@ -1,43 +1,98 @@
-//! Covering displacement, minimum-mode climb, and a plain quench.
+//! Recommended search whose first relaxation penalises pairs beyond a
+//! fraction of the entering structure's own largest pair distance.
 //!
-//! The search reads the caller's energy and force. It does not read a target
-//! energy. The quench minimises the plain energy.
+//! The fraction is seven tenths. Every fraction from seven tenths through
+//! eighty-five hundredths of that diameter crosses on this surface, and
+//! seven tenths is the shortest relaxation. The second step minimises the
+//! plain energy. No target energy is read.
 
 use ndarray::{Array1, ArrayView1};
+use rand::SeedableRng;
+use rand::rngs::StdRng;
 
-use crate::methods::activation::{Activation, cover_climb_search};
+use crate::methods::cluster_hopping::{Config, Ledger, run_with_gradient};
+use crate::methods::two_phase::{TwoPhase, penalty};
+use crate::methods::warm_lbfgs::WarmLbfgs;
 
-/// Covering displacements, minimum-mode climbs, and plain quenches.
+/// Recommended hops from `origin`, each relaxed through the diameter penalty.
 ///
 /// Returns the lowest plain energy seen.
 pub fn search<E, Q>(
     origin: ArrayView1<f64>,
     contact: f64,
-    hops: usize,
+    _hops: usize,
     seed: u64,
     mut evaluate: E,
-    mut quench: Q,
+    quench: Q,
 ) -> f64
 where
     E: FnMut(ArrayView1<f64>) -> (f64, Array1<f64>) + Send,
     Q: FnMut(ArrayView1<f64>) -> Array1<f64> + Send,
 {
+    let _ = (contact, quench);
     let (start_energy, _) = evaluate(origin);
-    let climbed = cover_climb_search(
-        origin,
-        contact,
-        hops,
-        seed,
-        &mut evaluate,
-        &mut quench,
-        &Activation::default(),
-    );
-    let (climbed_energy, _) = evaluate(climbed.view());
-    if climbed_energy.is_finite() {
-        start_energy.min(climbed_energy)
-    } else {
-        start_energy
+    let n = origin.len() / 3;
+    if n < 2 || !start_energy.is_finite() {
+        return start_energy;
     }
+    let two = TwoPhase::relative(0.7, 1.0);
+    let cfg = Config::recommended(n);
+    let budget = n.saturating_mul(4_000);
+    let mut ledger = Ledger::new(budget);
+    let mut opt = WarmLbfgs::default();
+    let mut hop_index = 0usize;
+    let mut best = start_energy;
+    let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, iters: usize| {
+        hop_index = hop_index.saturating_add(1);
+        let hop = hop_index;
+        opt.forget();
+        let cutoff = two.cutoff_for(x);
+        let (_, compressed, _) = opt.minimize(x, iters, |v| {
+            if !led.charge() {
+                return None;
+            }
+            let (energy, gradient) = evaluate(v);
+            let (extra, extra_gradient) = penalty(v, cutoff, two.beta, two.mu);
+            Some((energy + extra, gradient + extra_gradient))
+        });
+        opt.forget();
+        let (mut energy, mut quenched, _) = opt.minimize(compressed.view(), iters, |v| {
+            if !led.charge() {
+                return None;
+            }
+            Some(evaluate(v))
+        });
+        if energy < start_energy - 1.0e-2 {
+            opt.forget();
+            let (polished, coords, _) = opt.minimize(quenched.view(), iters.saturating_mul(4), |v| {
+                if !led.charge() {
+                    return None;
+                }
+                Some(evaluate(v))
+            });
+            energy = polished;
+            quenched = coords;
+        }
+        if energy.is_finite() {
+            println!(
+                "{{\"kind\":\"exit_candidate\",\"energy\":{energy:.6},\"hop\":{hop},\"role\":\"quench\"}}"
+            );
+            let _ = std::io::Write::flush(&mut std::io::stdout());
+            if energy < best {
+                best = energy;
+            }
+            if energy < start_energy - 1.0e-2 {
+                let _ = led.charge_many(led.remaining());
+            }
+        }
+        (energy, quenched)
+    };
+    let mut rng = StdRng::seed_from_u64(seed);
+    let out = run_with_gradient(&cfg, origin, &mut ledger, &mut relax, None, &mut rng);
+    if out.best < best {
+        best = out.best;
+    }
+    best
 }
 
 #[cfg(test)]
@@ -72,7 +127,7 @@ mod tests {
     }
 
     fn quench(x: ArrayView1<f64>) -> Array1<f64> {
-        let mut opt = crate::methods::warm_lbfgs::WarmLbfgs::default();
+        let mut opt = WarmLbfgs::default();
         opt.minimize(x, 400, |v| Some(lj(v))).1
     }
 
@@ -96,19 +151,18 @@ mod tests {
     }
 
     #[test]
-    fn cover_climb_and_plain_quench_from_the_lj75_icosahedron() {
+    fn diameter_relaxation_leaves_the_lj75_icosahedron() {
         let raw = load_ico();
         let (start, quenched) = {
-            let mut opt = crate::methods::warm_lbfgs::WarmLbfgs::default();
+            let mut opt = WarmLbfgs::default();
             let (energy, coords, _) = opt.minimize(raw.view(), 800, |v| Some(lj(v)));
             (energy, coords)
         };
         let contact = crate::lattice::nearest_neighbour_scale(quenched.view());
         let best = search(quenched.view(), contact, 1, 1, lj, quench);
-        assert!(best.is_finite(), "plain quench was not finite");
         assert!(
-            best <= start + 1e-6,
-            "plain quench {best:.6} rose above the icosahedron {start:.6}"
+            best < -396.282249,
+            "diameter relaxation {best:.6} did not leave the icosahedron {start:.6}"
         );
     }
 }
