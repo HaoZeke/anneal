@@ -12,7 +12,7 @@ use ndarray::{Array1, ArrayView1};
 
 use crate::curvature::curvature_features;
 use crate::known_basin::{LEAVE_BARRIER_FLOOR, LEAVE_BARRIER_GROWTH};
-use crate::methods::activation::{Activation, activate_from_origin};
+use crate::methods::activation::Activation;
 
 /// Covering displacements, minimum-mode climbs, and plain quenches.
 ///
@@ -93,17 +93,12 @@ where
         .max_steps
         .saturating_mul(LEAVE_BARRIER_GROWTH.powi(2) as usize);
     let limit = hops.max(1);
-    let covers = LEAVE_BARRIER_GROWTH.powi(2) as usize;
-    let lengths = [
-        contact,
-        contact * LEAVE_BARRIER_GROWTH,
-        contact * LEAVE_BARRIER_GROWTH.powi(2),
-    ];
+    let n_cover = crate::hypersphere::default_cover_size();
+    let covers = n_cover;
     let mut queue = vec![(start_energy, origin.to_owned())];
     let mut climbed = HashSet::new();
     let mut best = start_energy;
     let ceiling = start_energy + harmonic * LEAVE_BARRIER_GROWTH;
-    let n_cover = crate::hypersphere::default_cover_size();
     println!(
         "{{\"kind\":\"cover_network\",\"hops\":{limit},\"min_rise\":{:.4},\"step\":{:.4}}}",
         cfg.min_rise, cfg.step
@@ -135,14 +130,14 @@ where
             if norm <= 1.0e-12 {
                 continue;
             }
-            if self_climb(
+            if hold_cover(
                 &point,
                 direction.view(),
                 norm,
-                &lengths,
                 height,
                 hop,
                 contact,
+                harmonic,
                 &cfg,
                 start_energy,
                 ceiling,
@@ -161,14 +156,14 @@ where
     best
 }
 
-fn self_climb<E, Q>(
+fn hold_cover<E, Q>(
     point: &Array1<f64>,
     direction: ArrayView1<f64>,
     norm: f64,
-    lengths: &[f64],
     height: f64,
     hop: usize,
     contact: f64,
+    harmonic: f64,
     cfg: &Activation,
     start_energy: f64,
     ceiling: f64,
@@ -181,84 +176,184 @@ where
     E: FnMut(ArrayView1<f64>) -> (f64, Array1<f64>),
     Q: FnMut(ArrayView1<f64>) -> Array1<f64>,
 {
-    for length in lengths {
-        let mut here = point.clone();
-        for (value, component) in here.iter_mut().zip(direction.iter()) {
-            *value += length * *component / norm;
+    let mut mode = direction.to_owned();
+    mode /= norm;
+    let step = cfg.step;
+    let n_atoms = (point.len() / 3).max(1) as f64;
+    let perp_cap = contact / cfg.max_steps.max(1) as f64 * n_atoms.sqrt();
+    let min_rise = harmonic * LEAVE_BARRIER_FLOOR;
+    let reach = contact * LEAVE_BARRIER_GROWTH.powi(2);
+    let mut cur = point.clone();
+    let mut previous_along: Option<f64> = None;
+    let mut saw_uphill = false;
+    let mut rise = 0.0;
+    for _ in 0..cfg.max_steps {
+        let snapshot = cur.clone();
+        for (value, component) in cur.iter_mut().zip(mode.iter()) {
+            *value += step * *component;
         }
-        let Some(outcome) = activate_from_origin(
-            here.view(),
-            point.view(),
-            |sample| Some(evaluate(sample).1),
-            cfg,
-        ) else {
-            continue;
-        };
-        println!(
-            "{{\"kind\":\"later_ridge\",\"hop\":{hop},\"from\":{height:.6},\"length\":{length:.4},\"ridges\":{},\"steps\":{},\"lambda\":{:.4},\"crossed\":{}}}",
-            outcome.ridges.len(),
-            outcome.steps,
-            outcome.lambda,
-            outcome.crossed
-        );
-        let _ = std::io::stdout().flush();
-        let landed = if outcome.ridges.is_empty() {
-            vec![outcome.state]
-        } else {
-            outcome.ridges
-        };
-        for ridge in landed {
-            if ridge.iter().any(|value| !value.is_finite()) {
-                continue;
+        let mut along = 0.0;
+        for _perp in 0..cfg.perp_steps {
+            let (_energy, gradient) = evaluate(cur.view());
+            if gradient.iter().any(|value| !value.is_finite()) {
+                cur.clone_from(&snapshot);
+                break;
             }
-            let mut shots = vec![ridge.clone()];
-            let mut delta = &ridge - point;
-            let delta_norm = delta.dot(&delta).sqrt();
-            let reach = contact * LEAVE_BARRIER_GROWTH.powi(2);
-            if delta_norm > cfg.step && delta_norm < reach {
-                delta *= reach / delta_norm;
-                shots.push(point + &delta);
-            }
-            if let Some(features) = curvature_features(
-                ridge.view(),
-                |sample| Some(evaluate(sample).1),
-                cfg.lanczos_steps,
-                cfg.epsilon,
-            ) && features.lambda_min < 0.0
+            along = gradient
+                .iter()
+                .zip(mode.iter())
+                .map(|(force, component)| force * component)
+                .sum();
+            let mut shift = Array1::zeros(cur.len());
+            let mut shift_norm = 0.0;
+            for (slot, (force, component)) in shift.iter_mut().zip(gradient.iter().zip(mode.iter()))
             {
-                for sign in [1.0_f64, -1.0] {
-                    for scale in [1.0, LEAVE_BARRIER_GROWTH, LEAVE_BARRIER_GROWTH.powi(2)] {
-                        let mut landed = ridge.clone();
-                        let step = contact * scale;
-                        for (value, component) in landed.iter_mut().zip(features.mode.iter()) {
-                            *value += sign * step * *component;
-                        }
-                        shots.push(landed);
-                    }
-                }
+                *slot = cfg.perp_rate * (force - along * component);
+                shift_norm += *slot * *slot;
             }
+            shift_norm = shift_norm.sqrt();
+            let scale = if shift_norm > perp_cap && shift_norm > 0.0 {
+                perp_cap / shift_norm
+            } else {
+                1.0
+            };
+            for (value, component) in cur.iter_mut().zip(shift.iter()) {
+                *value -= scale * *component;
+            }
+        }
+        if cur.iter().any(|value| !value.is_finite()) || pair_gap(cur.view()) < 0.5 * contact {
+            cur.clone_from(&snapshot);
+            break;
+        }
+        let (_energy, gradient) = evaluate(cur.view());
+        along = gradient
+            .iter()
+            .zip(mode.iter())
+            .map(|(force, component)| force * component)
+            .sum();
+        let mut lambda = 0.0;
+        if let Some(previous) = previous_along {
+            let slope = (along - previous) / step;
+            if slope.is_finite() {
+                lambda = slope;
+            }
+        }
+        previous_along = Some(along);
+        rise += along * step;
+        if along > 0.0 {
+            saw_uphill = true;
+        }
+        if lambda < 0.0 && rise >= min_rise && saw_uphill {
+            let newton = if lambda.abs() > 1.0e-8 {
+                along.abs() / lambda.abs()
+            } else {
+                reach
+            };
+            let push = if along <= 0.0 {
+                reach
+            } else {
+                (LEAVE_BARRIER_GROWTH * newton).clamp(contact, reach * LEAVE_BARRIER_GROWTH)
+            };
+            let mut far = cur.clone();
+            for (value, component) in far.iter_mut().zip(mode.iter()) {
+                *value += push * *component;
+            }
+            println!(
+                "{{\"kind\":\"held_ridge\",\"hop\":{hop},\"from\":{height:.6},\"rise\":{rise:.4},\"lambda\":{lambda:.4},\"along\":{along:.4}}}"
+            );
+            let _ = std::io::stdout().flush();
+            let shots = if along <= 0.0 {
+                vec![cur, far]
+            } else {
+                vec![far]
+            };
             for shot in shots {
-                if shot.iter().any(|value| !value.is_finite()) {
-                    continue;
-                }
-                let Some((energy, coords)) =
-                    record_quench(shot.view(), hop, evaluate, quench, best)
-                else {
-                    continue;
-                };
-                if *best < start_energy - 1.0e-4 {
+                if note_shot(
+                    shot.view(),
+                    hop,
+                    start_energy,
+                    ceiling,
+                    evaluate,
+                    quench,
+                    best,
+                    queue,
+                ) {
                     return true;
                 }
-                if energy > start_energy + 1.0e-4 && energy < ceiling {
-                    let key = basin_key(energy);
-                    if !queue.iter().any(|(known, _)| basin_key(*known) == key) {
-                        queue.push((energy, coords));
-                    }
-                }
             }
+            return false;
+        }
+        if rise > harmonic * LEAVE_BARRIER_GROWTH {
+            return note_shot(
+                cur.view(),
+                hop,
+                start_energy,
+                ceiling,
+                evaluate,
+                quench,
+                best,
+                queue,
+            );
+        }
+    }
+    note_shot(
+        cur.view(),
+        hop,
+        start_energy,
+        ceiling,
+        evaluate,
+        quench,
+        best,
+        queue,
+    )
+}
+
+fn note_shot<E, Q>(
+    shot: ArrayView1<f64>,
+    hop: usize,
+    start_energy: f64,
+    ceiling: f64,
+    evaluate: &mut E,
+    quench: &mut Q,
+    best: &mut f64,
+    queue: &mut Vec<(f64, Array1<f64>)>,
+) -> bool
+where
+    E: FnMut(ArrayView1<f64>) -> (f64, Array1<f64>),
+    Q: FnMut(ArrayView1<f64>) -> Array1<f64>,
+{
+    if shot.iter().any(|value| !value.is_finite()) {
+        return false;
+    }
+    let Some((energy, coords)) = record_quench(shot, hop, evaluate, quench, best) else {
+        return false;
+    };
+    if *best < start_energy - 1.0e-4 {
+        return true;
+    }
+    if energy > start_energy + 1.0e-4 && energy < ceiling {
+        let key = basin_key(energy);
+        if !queue.iter().any(|(known, _)| basin_key(*known) == key) {
+            queue.push((energy, coords));
         }
     }
     false
+}
+
+fn pair_gap(x: ArrayView1<f64>) -> f64 {
+    let n = x.len() / 3;
+    let mut best = f64::MAX;
+    for i in 0..n {
+        for j in (i + 1)..n {
+            let mut distance2 = 0.0;
+            for k in 0..3 {
+                let delta = x[3 * i + k] - x[3 * j + k];
+                distance2 += delta * delta;
+            }
+            best = best.min(distance2);
+        }
+    }
+    best.sqrt()
 }
 
 fn basin_key(energy: f64) -> i64 {
@@ -366,7 +461,7 @@ mod tests {
             (energy, coords)
         };
         let contact = crate::lattice::nearest_neighbour_scale(quenched.view());
-        let best = search(quenched.view(), contact, 4, 1, lj, quench);
+        let best = search(quenched.view(), contact, 1, 1, lj, quench);
         assert!(best.is_finite(), "plain quench was not finite");
         assert!(
             best <= start + 1.0e-6,
