@@ -318,7 +318,7 @@ fn run_minima_hopping(
     bound_escape: bool,
 ) -> Outcome {
     let hopping = HoppingConfig::for_cluster(n);
-    let escape_config = MdEscapeConfig {
+    let mut escape_config = MdEscapeConfig {
         dt: 0.005,
         potential_minima: 2,
         maximum_steps: 2_000,
@@ -363,6 +363,10 @@ fn run_minima_hopping(
     ledger.record(energy, state.view());
     let mut minima = vec![state.clone()];
     let mut current_basin = 0usize;
+    if let Some(softening) = escape_config.softening.as_mut() {
+        softening.displacement =
+            anneal_core::methods::activation::softening_displacement(state.view());
+    }
     let mut feedback = EscapeFeedback::new(hopping.energy_scale, 0.5 * hopping.energy_scale);
     if !bound_escape {
         feedback.escape_floor = f64::MIN_POSITIVE;
