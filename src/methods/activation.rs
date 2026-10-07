@@ -102,6 +102,13 @@ pub struct Activation {
     /// neighbour of similar depth. A later ridge, several energy units up,
     /// is the one that can open another funnel. Zero keeps every ridge.
     pub min_rise: f64,
+    /// Keep climbing after the first ridge and retain the later ones.
+    ///
+    /// The default stops at the first ridge so a short budget still crosses
+    /// one barrier. A search that is trying to leave a deep funnel has to
+    /// see the ridge after that, because the first one usually returns to
+    /// the same well.
+    pub later_ridges: bool,
 }
 
 impl Default for Activation {
@@ -117,6 +124,7 @@ impl Default for Activation {
             refresh: 3,
             overshoot: 1.5,
             min_rise: 0.0,
+            later_ridges: false,
         }
     }
 }
@@ -134,6 +142,9 @@ pub struct ActivationOutcome {
     pub crossed: bool,
     /// Gradient evaluations spent, all of them charged by the caller.
     pub evaluations: usize,
+    /// Ridge points kept when [`Activation::later_ridges`] is set, each
+    /// already pushed past its turning point.
+    pub ridges: Vec<Array1<f64>>,
 }
 
 /// Climbs out of the basin containing `x`.
@@ -2030,6 +2041,76 @@ where
     Some(value)
 }
 
+/// Climb one covering direction past the first shallow ridge and quench each later ridge.
+///
+/// The rise cutoff is half the harmonic energy of a one-contact step at the
+/// soft curvature of this minimum. A neighbour reached by a smaller rise is
+/// the same funnel. The cutoff is zero when the curvature is not available,
+/// and every ridge is then kept. Short budgets skip the climb.
+fn climb_later_ridges<E, Q>(
+    start: ArrayView1<f64>,
+    contact: f64,
+    hop: usize,
+    evaluate: &mut E,
+    quench: &mut Q,
+    cfg: &Activation,
+    best_energy: &mut f64,
+    best: &mut Array1<f64>,
+) where
+    E: FnMut(ArrayView1<f64>) -> (f64, Array1<f64>),
+    Q: FnMut(ArrayView1<f64>) -> Array1<f64>,
+{
+    if cfg.max_steps < 12 || !(contact.is_finite() && contact > 0.95) || start.len() < 6 {
+        return;
+    }
+    let n_cover = crate::hypersphere::default_cover_size();
+    let direction = Array1::from(crate::hypersphere::cover_direction(
+        n_cover,
+        start.len(),
+        hop,
+    ));
+    let mut climb = cfg.clone();
+    let n_atoms = start.len() / 3;
+    let budget = climb.max_steps.max(16);
+    climb.step = contact * (n_atoms as f64).sqrt() / budget as f64;
+    climb.max_steps = budget;
+    climb.later_ridges = true;
+    climb.min_rise = 0.0;
+    if let Some(features) = curvature_features(
+        start,
+        |point| Some(evaluate(point).1),
+        cfg.lanczos_steps.max(8),
+        cfg.epsilon.max(1e-8),
+    ) {
+        let lid = 0.5 * features.lambda_min.abs() * contact * contact;
+        if lid.is_finite() && lid > 0.0 {
+            climb.min_rise = 0.5 * lid;
+        }
+    }
+    let Some(outcome) = activate_along(
+        start,
+        direction.view(),
+        |point| Some(evaluate(point).1),
+        &climb,
+    ) else {
+        return;
+    };
+    println!(
+        "{{\"kind\":\"later_ridge\",\"hop\":{hop},\"ridges\":{},\"min_rise\":{:.4},\"crossed\":{}}}",
+        outcome.ridges.len(),
+        climb.min_rise,
+        outcome.crossed
+    );
+    let _ = std::io::stdout().flush();
+    for ridge in outcome.ridges {
+        if ridge.iter().any(|value| !value.is_finite()) {
+            continue;
+        }
+        let quenched = quench(ridge.view());
+        let _ = note_exit(evaluate, &quenched, hop, best_energy, best);
+    }
+}
+
 /// Covering displacements, a minimum-mode climb, and a quench.
 ///
 /// Each hop takes one direction of the hypersphere cover. The climb holds
@@ -2142,6 +2223,16 @@ where
                 n_cover,
                 origin.len(),
                 hop.wrapping_add(seed as usize),
+            );
+            climb_later_ridges(
+                origin.view(),
+                contact,
+                hop,
+                &mut evaluate,
+                &mut quench,
+                cfg,
+                &mut best_e,
+                &mut best,
             );
             climb_directions(
                 origin.view(),
@@ -2537,6 +2628,7 @@ where
     // Highest ridge crossed on this climb. A shallow first saddle is kept
     // only until a higher one is crossed. The quench leaves from that ridge.
     let mut ridge: Option<(Array1<f64>, Array1<f64>, f64)> = None;
+    let mut ridge_log: Vec<(Array1<f64>, Array1<f64>, f64)> = Vec::new();
     // A supplied direction is the cover. Hold it until the force along it
     // flips, then take the minimum mode. Replacing it on the first refresh
     // walks the softest well of the minimum the cover was meant to leave.
@@ -2687,22 +2779,37 @@ where
             let higher = ridge.as_ref().is_none_or(|(_, _, kept)| rise > *kept);
             if higher {
                 ridge = Some((cur.clone(), mode.clone(), rise));
+                ridge_log.push((cur.clone(), mode.clone(), rise));
                 crossed = true;
-                break 'climb;
+                // The first ridge is the whole answer for a short climb.
+                // A funnel exit is a later ridge, so that search keeps going.
+                if !cfg.later_ridges || ridge_log.len() >= 4 {
+                    break 'climb;
+                }
+                saw_uphill = false;
             }
-            saw_uphill = false;
         }
     }
 
-    if let Some((state, ridge_mode, _)) = ridge {
-        cur = state;
-        mode = ridge_mode;
+    let mut ridges = Vec::with_capacity(ridge_log.len());
+    if cfg.later_ridges && crossed {
+        for (state, ridge_mode, _) in &ridge_log {
+            let mut landed = state.clone();
+            if cfg.overshoot > 0.0 {
+                for i in 0..dim {
+                    landed[i] += sign * cfg.overshoot * cfg.step * ridge_mode[i];
+                }
+            }
+            ridges.push(landed);
+        }
     }
-    if crossed && cfg.overshoot > 0.0 {
-        // One push past the turning point, so the quench falls forward rather
-        // than back down the way it came.
-        for i in 0..dim {
-            cur[i] += sign * cfg.overshoot * cfg.step * mode[i];
+    if let Some((state, ridge_mode, _)) = ridge_log.last() {
+        cur = state.clone();
+        mode = ridge_mode.clone();
+        if cfg.overshoot > 0.0 {
+            for i in 0..dim {
+                cur[i] += sign * cfg.overshoot * cfg.step * mode[i];
+            }
         }
     }
 
@@ -2712,6 +2819,7 @@ where
         steps,
         crossed,
         evaluations,
+        ridges,
     })
 }
 
@@ -2944,6 +3052,26 @@ mod tests {
             us < 0.0,
             "the straight line should also cross this simple well: {us:.3}"
         );
+    }
+
+    /// Continuing past the first ridge still finishes on the far side.
+    #[test]
+    fn later_ridges_still_cross_the_barrier() {
+        let dim = 36;
+        let w = direction(dim);
+        let k = perp_stiffness(dim);
+        let g = double_well(&w, &k);
+        let x: Array1<f64> = w.clone();
+        let cfg = Activation {
+            later_ridges: true,
+            max_steps: 16,
+            ..Activation::default()
+        };
+        let out = activate(x.view(), &g, &cfg, -1.0).unwrap();
+        let u: f64 = out.state.iter().zip(w.iter()).map(|(a, b)| a * b).sum();
+        assert!(out.crossed, "no ridge, u = {u:.3}");
+        assert!(!out.ridges.is_empty(), "the later-ridge climb kept nothing");
+        assert!(u < 0.0, "the climb ended at u = {u:.3}");
     }
 
     /// The climb must not run forever on a direction that never turns over.
