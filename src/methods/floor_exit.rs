@@ -1,12 +1,15 @@
-//! Recommended search that pulls the outer radius in and the inertia toward a sphere.
+//! A separate relaxation that pulls the outer radius in and the inertia toward a sphere.
 //!
-//! The radial term is a smooth maximum of the distance from the centre of
+//! This is not the generic sampler. The generic sampler is the plain
+//! recommended search: it reads only the caller's energy and force. The
+//! radial term here is a smooth maximum of the distance from the centre of
 //! mass. Its width is the entering cluster's nearest-neighbour distance
 //! divided by the square root of the number of atoms. The angular term is
-//! the squared spread of the three principal moments. On the entering
-//! cluster each term equals the cohesive energy times the number of atoms.
-//! The second step minimises the plain energy. No pair distance is
-//! penalised, and no target energy is read.
+//! the squared spread of the three principal moments. Neither term places
+//! atoms on a decahedral or fivefold shell. On the entering cluster each
+//! term equals the cohesive energy times the number of atoms. The second
+//! step minimises the plain energy. No pair distance is penalised, and no
+//! target energy is read.
 
 use ndarray::{Array1, ArrayView1};
 use rand::SeedableRng;
@@ -427,6 +430,32 @@ mod tests {
         assert!(
             best < -396.282249,
             "compact sphere {best:.6} did not leave the icosahedron {start:.6}"
+        );
+    }
+
+    #[test]
+    fn cover_climb_and_plain_quench_from_the_lj75_icosahedron() {
+        let raw = load_ico();
+        let (start, quenched) = {
+            let mut opt = WarmLbfgs::default();
+            let (energy, coords, _) = opt.minimize(raw.view(), 800, |v| Some(lj(v)));
+            (energy, coords)
+        };
+        let contact = crate::lattice::nearest_neighbour_scale(quenched.view());
+        let climbed = crate::methods::activation::cover_climb_search(
+            quenched.view(),
+            contact,
+            1,
+            1,
+            lj,
+            quench,
+            &crate::methods::activation::Activation::default(),
+        );
+        let best = lj(climbed.view()).0;
+        assert!(best.is_finite(), "plain quench was not finite");
+        assert!(
+            best <= start + 1e-6,
+            "plain quench {best:.6} rose above the icosahedron {start:.6}"
         );
     }
 }
