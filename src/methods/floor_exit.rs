@@ -306,6 +306,7 @@ where
     let mut tau = heading.clone();
     let mut last_curv = 0.0;
     let mut last_rise = 0.0;
+    let mut negative = false;
     // A fraction of the cover step. A full step walks out of the valley
     // and the curvature stiffens before it can change sign.
     let stride = cfg.step * LEAVE_BARRIER_FLOOR;
@@ -327,42 +328,52 @@ where
         };
         last_curv = features.lambda_min;
         let along_curv = directional_curvature(&cur, &tau, cfg.epsilon, evaluate).unwrap_or(0.0);
-        if (features.lambda_min < 0.0 || along_curv < 0.0) && _step > 0 {
+        let turned = (features.lambda_min < 0.0 || along_curv < 0.0) && _step > 0;
+        if turned && !negative {
+            negative = true;
             let rms = separation(point.view(), &cur);
             println!(
                 "{{\"kind\":\"art_negative\",\"hop\":{hop},\"cover\":{cover},\"rise\":{last_rise:.4},\"curv\":{last_curv:.4},\"rms\":{rms:.4}}}"
             );
             let _ = std::io::stdout().flush();
-            for length in [cfg.step, contact] {
-                for sign in [1.0, -1.0] {
-                    let mut far = cur.clone();
-                    for (value, component) in far.iter_mut().zip(tau.iter()) {
-                        *value += sign * length * *component;
-                    }
-                    if note_shot(
-                        far.view(),
-                        hop,
-                        start_energy,
-                        ceiling,
-                        evaluate,
-                        quench,
-                        best,
-                        queue,
-                    ) {
-                        return true;
+            // The first turnover is a shallow neighbour. A later one,
+            // at least one harmonic rise up, is the ridge that is quenched.
+            if last_rise >= harmonic {
+                for length in [cfg.step, contact] {
+                    for sign in [1.0, -1.0] {
+                        let mut far = cur.clone();
+                        for (value, component) in far.iter_mut().zip(tau.iter()) {
+                            *value += sign * length * *component;
+                        }
+                        if note_shot(
+                            far.view(),
+                            hop,
+                            start_energy,
+                            ceiling,
+                            evaluate,
+                            quench,
+                            best,
+                            queue,
+                        ) {
+                            return true;
+                        }
                     }
                 }
+                if note_shot(
+                    cur.view(),
+                    hop,
+                    start_energy,
+                    ceiling,
+                    evaluate,
+                    quench,
+                    best,
+                    queue,
+                ) {
+                    return true;
+                }
             }
-            return note_shot(
-                cur.view(),
-                hop,
-                start_energy,
-                ceiling,
-                evaluate,
-                quench,
-                best,
-                queue,
-            );
+        } else if !turned {
+            negative = false;
         }
         let mut mode = features.mode;
         if mode.dot(&tau) < 0.0 {
