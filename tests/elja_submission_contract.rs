@@ -142,6 +142,21 @@ fn hard_lj_campaigns_bind_structural_coordination_only() {
         );
     }
 
+    let campaign = fs::read_to_string(root.join("examples/lj_cluster_search.rs"))
+        .unwrap_or_else(|error| panic!("failed to read the LJ search entry: {error}"));
+    assert!(
+        !campaign.contains("floor_exit"),
+        "the sealed LJ entry must not call the icosahedron floor search"
+    );
+    assert!(
+        runner.contains(r#"exec "$BIN" "$N" "$PER_REPLICA_BUDGET" 1 rec"#),
+        "the sealed arm must be the plain recommended mechanism list"
+    );
+    assert!(
+        !runner.contains("twophase"),
+        "the sealed arm must not request a diameter penalty"
+    );
+
     for forbidden in [
         "CATALOG_TEMP_LADDER",
         "CATALOG_MD_ENGINE",
