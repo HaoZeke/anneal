@@ -2041,6 +2041,262 @@ where
     Some(value)
 }
 
+/// Length of the modified-dimer probe, as a fraction of the nearest neighbour.
+///
+/// A probe of a tenth of the contact reaches the repulsive wall. The dimer
+/// then aligns with that clash. One hundredth of the contact stays where the
+/// curvature is still the soft mode.
+pub fn softening_displacement(x: ArrayView1<f64>) -> f64 {
+    let contact = closest_pair(x);
+    if contact.is_finite() && contact > 1e-8 && contact < 1e6 {
+        contact * 0.01
+    } else {
+        1e-2
+    }
+}
+
+fn vector_norm(v: &Array1<f64>) -> f64 {
+    v.iter().map(|value| value * value).sum::<f64>().sqrt()
+}
+
+fn normalise_direction(v: &mut Array1<f64>) -> bool {
+    let norm = vector_norm(v);
+    if !norm.is_finite() || norm < 1e-14 {
+        return false;
+    }
+    *v /= norm;
+    true
+}
+
+/// Point a covering seed along the soft curvature.
+///
+/// Forty force probes, each one hundredth of a contact off the minimum, with
+/// the perpendicular force mixed in at 0.15. Rigid motion is removed so the
+/// direction is an internal one.
+fn soften_direction<E>(
+    start: ArrayView1<f64>,
+    seed: ArrayView1<f64>,
+    evaluate: &mut E,
+) -> Option<Array1<f64>>
+where
+    E: FnMut(ArrayView1<f64>) -> (f64, Array1<f64>),
+{
+    if seed.len() != start.len() || start.len() < 6 {
+        return None;
+    }
+    let basis = crate::curvature::rigid_basis(start);
+    let displacement = softening_displacement(start);
+    let mixing = 0.15_f64;
+    let mut direction = seed.to_owned();
+    crate::curvature::project_rigid_with(&mut direction, &basis);
+    if !normalise_direction(&mut direction) {
+        return None;
+    }
+    for _ in 0..40 {
+        let mut probe = start.to_owned();
+        for (slot, step) in probe.iter_mut().zip(direction.iter()) {
+            *slot += displacement * *step;
+        }
+        let (_, gradient) = evaluate(probe.view());
+        if gradient.len() != start.len() || gradient.iter().any(|value| !value.is_finite()) {
+            return None;
+        }
+        let mut perpendicular = gradient.mapv(|value| -value);
+        crate::curvature::project_rigid_with(&mut perpendicular, &basis);
+        let parallel: f64 = perpendicular
+            .iter()
+            .zip(direction.iter())
+            .map(|(force, axis)| force * axis)
+            .sum();
+        for (slot, axis) in perpendicular.iter_mut().zip(direction.iter()) {
+            *slot -= parallel * *axis;
+        }
+        for (slot, push) in direction.iter_mut().zip(perpendicular.iter()) {
+            *slot += mixing * *push;
+        }
+        crate::curvature::project_rigid_with(&mut direction, &basis);
+        if !normalise_direction(&mut direction) {
+            return None;
+        }
+    }
+    Some(direction)
+}
+
+fn curvature_along<E>(start: ArrayView1<f64>, direction: ArrayView1<f64>, evaluate: &mut E) -> f64
+where
+    E: FnMut(ArrayView1<f64>) -> (f64, Array1<f64>),
+{
+    let eps = 1e-4;
+    let (_, lower) = evaluate(start);
+    let mut probe = start.to_owned();
+    for (slot, step) in probe.iter_mut().zip(direction.iter()) {
+        *slot += eps * *step;
+    }
+    let (_, upper) = evaluate(probe.view());
+    if lower.len() != upper.len() || direction.len() != lower.len() {
+        return f64::NAN;
+    }
+    upper
+        .iter()
+        .zip(lower.iter())
+        .zip(direction.iter())
+        .map(|((high, low), axis)| (high - low) * axis)
+        .sum::<f64>()
+        / eps
+}
+
+/// Farthest point of a short rigid-projected trajectory launched along `direction`.
+fn farthest_along<E>(
+    start: ArrayView1<f64>,
+    direction: ArrayView1<f64>,
+    kinetic: f64,
+    evaluate: &mut E,
+) -> Array1<f64>
+where
+    E: FnMut(ArrayView1<f64>) -> (f64, Array1<f64>),
+{
+    let speed = (2.0 * kinetic.max(0.0)).sqrt();
+    let mut velocity = direction.to_owned() * speed;
+    let mut point = start.to_owned();
+    let (_, gradient) = evaluate(point.view());
+    let mut accel = gradient.mapv(|value| -value);
+    let dt = 0.005_f64;
+    let mut far = point.clone();
+    let mut best = 0.0_f64;
+    for _ in 0..800 {
+        for (slot, push) in velocity.iter_mut().zip(accel.iter()) {
+            *slot += 0.5 * dt * *push;
+        }
+        let basis = crate::curvature::rigid_basis(point.view());
+        crate::curvature::project_rigid_with(&mut velocity, &basis);
+        for (slot, step) in point.iter_mut().zip(velocity.iter()) {
+            *slot += dt * *step;
+        }
+        let (_, gradient) = evaluate(point.view());
+        if gradient.iter().any(|value| !value.is_finite()) {
+            break;
+        }
+        accel = gradient.mapv(|value| -value);
+        for (slot, push) in velocity.iter_mut().zip(accel.iter()) {
+            *slot += 0.5 * dt * *push;
+        }
+        let basis = crate::curvature::rigid_basis(point.view());
+        crate::curvature::project_rigid_with(&mut velocity, &basis);
+        let dist: f64 = point
+            .iter()
+            .zip(start.iter())
+            .map(|(here, there)| {
+                let delta = here - there;
+                delta * delta
+            })
+            .sum();
+        if dist > best {
+            best = dist;
+            far = point.clone();
+        }
+    }
+    far
+}
+
+fn gradient_infinity(gradient: &Array1<f64>) -> f64 {
+    gradient
+        .iter()
+        .fold(0.0_f64, |best, value| best.max(value.abs()))
+}
+
+/// Softened escapes that keep walking after they leave the start basin.
+///
+/// The launch is a covering direction mixed toward the soft curvature. The
+/// kinetic energy starts at the harmonic cost of a one-contact step and grows
+/// when the quench falls back onto the basin it left, or onto the basin the
+/// walk started in. A converged quench of the far point is recorded either way.
+fn softened_escape_walk<E, Q>(
+    origin: ArrayView1<f64>,
+    escapes: usize,
+    seed: u64,
+    evaluate: &mut E,
+    quench: &mut Q,
+    cfg: &Activation,
+    best_energy: &mut f64,
+    best: &mut Array1<f64>,
+) where
+    E: FnMut(ArrayView1<f64>) -> (f64, Array1<f64>),
+    Q: FnMut(ArrayView1<f64>) -> Array1<f64>,
+{
+    if cfg.max_steps < 12 || escapes == 0 || origin.len() < 6 {
+        return;
+    }
+    let contact = closest_pair(origin);
+    if !(contact.is_finite() && contact > 0.95) {
+        return;
+    }
+    let (origin_energy, _) = evaluate(origin);
+    if !origin_energy.is_finite() {
+        return;
+    }
+    let n_cover = crate::hypersphere::default_cover_size();
+    let mut rng = rand::rngs::StdRng::seed_from_u64(seed ^ 0x51e0u64);
+    let Some(first) = soften_direction(
+        origin,
+        Array1::from(crate::hypersphere::cover_direction(
+            n_cover,
+            origin.len(),
+            seed as usize,
+        ))
+        .view(),
+        evaluate,
+    ) else {
+        return;
+    };
+    let curv = curvature_along(origin, first.view(), evaluate).abs();
+    let harmonic = (0.5 * curv * contact * contact).max(1e-3);
+    let ceiling = harmonic * 8.0;
+    let mut kinetic = harmonic;
+    let mut threshold = harmonic;
+    let mut current = origin_energy;
+    let mut here = origin.to_owned();
+    let beta = 1.05_f64;
+    println!(
+        "{{\"kind\":\"soft_walk\",\"escapes\":{escapes},\"harmonic\":{harmonic:.4},\"curvature\":{curv:.4}}}"
+    );
+    let _ = std::io::stdout().flush();
+    for hop in 0..escapes {
+        let mut seed_direction = Array1::from(crate::hypersphere::cover_direction(
+            n_cover,
+            here.len(),
+            hop,
+        ));
+        for slot in seed_direction.iter_mut() {
+            *slot += 0.25 * rng.random::<f64>();
+        }
+        let Some(direction) = soften_direction(here.view(), seed_direction.view(), evaluate) else {
+            kinetic = (kinetic * beta).min(ceiling);
+            continue;
+        };
+        let landed = farthest_along(here.view(), direction.view(), kinetic, evaluate);
+        let quenched = quench(landed.view());
+        let (trial, gradient) = evaluate(quenched.view());
+        if !trial.is_finite() || gradient_infinity(&gradient) > 1e-3 {
+            kinetic = (kinetic * beta).min(ceiling);
+            continue;
+        }
+        let _ = note_exit(evaluate, &quenched, hop, best_energy, best);
+        let same = (trial - current).abs() < 1e-3;
+        let home = (trial - origin_energy).abs() < 1e-3;
+        if same || home {
+            kinetic = (kinetic * beta).min(ceiling);
+            threshold = (threshold * beta).min(ceiling);
+        } else if trial - current < threshold {
+            current = trial;
+            here = quenched;
+            kinetic = (kinetic / beta).max(harmonic / 4.0);
+            threshold = (threshold / beta).max(harmonic / 4.0);
+        } else {
+            threshold = (threshold * beta).min(ceiling);
+        }
+    }
+}
+
 /// Climb one covering direction past the first shallow ridge and quench each later ridge.
 ///
 /// The rise cutoff is half the harmonic energy of a one-contact step at the
@@ -2235,6 +2491,18 @@ where
                 origin.len(),
                 hop.wrapping_add(seed as usize),
             );
+            if hop == 0 {
+                softened_escape_walk(
+                    origin.view(),
+                    max_hops.max(48),
+                    seed,
+                    &mut evaluate,
+                    &mut quench,
+                    cfg,
+                    &mut best_e,
+                    &mut best,
+                );
+            }
             climb_later_ridges(
                 origin.view(),
                 contact,
@@ -3274,6 +3542,118 @@ mod tests {
         assert!(
             found < e_cap - 0.2,
             "search energy {found}, start {e_cap}, lower isomer {e_low}"
+        );
+    }
+
+    /// A probe of one hundredth of the contact moves a random direction onto
+    /// the soft curvature. The same direction probed at a tenth of the contact
+    /// does not.
+    #[test]
+    fn a_harmonic_probe_lowers_the_curvature() {
+        fn lj(x: ArrayView1<f64>) -> (f64, Array1<f64>) {
+            let n = x.len() / 3;
+            let mut value = 0.0;
+            let mut gradient = Array1::zeros(x.len());
+            for i in 0..n {
+                for j in (i + 1)..n {
+                    let mut d = [0.0; 3];
+                    let mut r2 = 0.0;
+                    for k in 0..3 {
+                        d[k] = x[3 * i + k] - x[3 * j + k];
+                        r2 += d[k] * d[k];
+                    }
+                    let inv2 = 1.0 / r2;
+                    let inv6 = inv2.powi(3);
+                    let inv12 = inv6 * inv6;
+                    value += 4.0 * (inv12 - inv6);
+                    let coefficient = 24.0 * inv2 * (2.0 * inv12 - inv6);
+                    for k in 0..3 {
+                        gradient[3 * i + k] -= coefficient * d[k];
+                        gradient[3 * j + k] += coefficient * d[k];
+                    }
+                }
+            }
+            (value, gradient)
+        }
+        fn quench(x: ArrayView1<f64>) -> Array1<f64> {
+            let mut opt = crate::methods::warm_lbfgs::WarmLbfgs::default();
+            opt.minimize(x, 80, |v| Some(lj(v))).1
+        }
+        let req = 2.0_f64.powf(1.0 / 6.0);
+        let scale = req / 2.0_f64.sqrt();
+        let mut capped = Array1::zeros(21);
+        let axes = [
+            [1.0, 0.0, 0.0],
+            [-1.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0],
+            [0.0, -1.0, 0.0],
+            [0.0, 0.0, 1.0],
+            [0.0, 0.0, -1.0],
+        ];
+        for (i, p) in axes.iter().enumerate() {
+            for k in 0..3 {
+                capped[3 * i + k] = p[k] * scale;
+            }
+        }
+        let centroid = scale / 3.0;
+        let unit = 1.0 / 3.0_f64.sqrt();
+        for k in 0..3 {
+            capped[18 + k] = centroid + req * unit;
+        }
+        let capped = quench(capped.view());
+        let mut seed = Array1::zeros(capped.len());
+        seed[0] = 1.0;
+        seed[4] = -0.5;
+        seed[8] = 0.25;
+        let basis = crate::curvature::rigid_basis(capped.view());
+        let mut plain = seed.clone();
+        crate::curvature::project_rigid_with(&mut plain, &basis);
+        let norm = vector_norm(&plain);
+        plain /= norm;
+        let before = curvature_along(capped.view(), plain.view(), &mut lj);
+        let softened = soften_direction(capped.view(), seed.view(), &mut lj)
+            .expect("softening returns a direction");
+        let after = curvature_along(capped.view(), softened.view(), &mut lj);
+        assert!(
+            after < before * 0.5,
+            "curvature {before:.3} did not fall, softened {after:.3}"
+        );
+        let wide = {
+            // A probe ten times longer than the harmonic one.
+            let basis = crate::curvature::rigid_basis(capped.view());
+            let displacement = softening_displacement(capped.view()) * 10.0;
+            let mut direction = seed.clone();
+            crate::curvature::project_rigid_with(&mut direction, &basis);
+            let norm = vector_norm(&direction);
+            direction /= norm;
+            for _ in 0..40 {
+                let mut probe = capped.clone();
+                for (slot, step) in probe.iter_mut().zip(direction.iter()) {
+                    *slot += displacement * *step;
+                }
+                let (_, gradient) = lj(probe.view());
+                let mut perpendicular = gradient.mapv(|value| -value);
+                crate::curvature::project_rigid_with(&mut perpendicular, &basis);
+                let parallel: f64 = perpendicular
+                    .iter()
+                    .zip(direction.iter())
+                    .map(|(force, axis)| force * axis)
+                    .sum();
+                for (slot, axis) in perpendicular.iter_mut().zip(direction.iter()) {
+                    *slot -= parallel * *axis;
+                }
+                for (slot, push) in direction.iter_mut().zip(perpendicular.iter()) {
+                    *slot += 0.15 * *push;
+                }
+                crate::curvature::project_rigid_with(&mut direction, &basis);
+                let norm = vector_norm(&direction);
+                direction /= norm;
+            }
+            curvature_along(capped.view(), direction.view(), &mut lj)
+        };
+        assert!(
+            after < wide,
+            "harmonic probe {after:.3} is not softer than the long probe {wide:.3}"
         );
     }
 }
