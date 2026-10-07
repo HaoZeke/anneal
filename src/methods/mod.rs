@@ -26,6 +26,8 @@ pub mod csa_cluster;
 /// Archive-ratcheted exploration of the minima network.
 #[cfg(feature = "graphkey")]
 pub mod ffs;
+/// Cover, minimum-mode climb, and plain quench from one starting structure.
+pub mod floor_exit;
 /// Spectral referee over the explored landscape's transition graph.
 pub mod landscape_graph;
 pub mod minima_hopping;
