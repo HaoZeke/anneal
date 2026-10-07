@@ -188,7 +188,9 @@ fn run_floor_search(hops: usize, seeds: u64) {
     let raw = coords_from_text(include_str!("../tests/fixtures/lj75_ico.xyz"));
     let (e0, x0) = relax(raw.view(), 800);
     let bond = anneal_core::lattice::nearest_neighbour_scale(x0.view());
-    println!("{{\"kind\":\"floor_start\",\"energy\":{e0:.9},\"hops\":{hops},\"bond\":{bond:.6}}}");
+    println!(
+        "{{\"kind\":\"floor_start\",\"energy\":{e0:.9},\"energy_6\":{e0:.6},\"hops\":{hops},\"bond\":{bond:.6}}}"
+    );
     let mut best_e = e0;
     for seed in 1u64..=seeds.max(1) {
         let e = anneal_core::methods::floor_exit::search(
