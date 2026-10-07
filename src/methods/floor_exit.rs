@@ -102,16 +102,19 @@ where
     );
     let _ = std::io::stdout().flush();
     for hop in 0..limit {
-        // The harmonic rise is the barrier scale of this minimum. The next
-        // climb starts from the queued minimum nearest that rise, so the
-        // walk does not stay on the lowest shelf.
-        let focus = start_energy + harmonic;
+        // Stay inside one harmonic rise of the start, and climb the minimum
+        // farthest from it. The lowest shelf is not the way out.
+        let band = start_energy + harmonic;
+        let unclimbed = |energy: f64| !climbed.contains(&basin_key(energy));
+        let in_band = queue
+            .iter()
+            .any(|(energy, _)| unclimbed(*energy) && *energy <= band);
         let Some(choice) = queue
             .iter()
             .enumerate()
-            .filter(|(_, (energy, _))| !climbed.contains(&basin_key(*energy)))
-            .min_by(|(_, (left, _)), (_, (right, _))| {
-                (*left - focus).abs().total_cmp(&(*right - focus).abs())
+            .filter(|(_, (energy, _))| unclimbed(*energy) && (!in_band || *energy <= band))
+            .max_by(|(_, (_, left)), (_, (_, right))| {
+                separation(origin.view(), left).total_cmp(&separation(origin.view(), right))
             })
             .map(|(index, _)| index)
         else {
@@ -120,7 +123,8 @@ where
         let (height, point) = queue[choice].clone();
         climbed.insert(basin_key(height));
         println!(
-            "{{\"kind\":\"climb_from\",\"hop\":{hop},\"height\":{height:.6},\"focus\":{focus:.4}}}"
+            "{{\"kind\":\"climb_from\",\"hop\":{hop},\"height\":{height:.6},\"band\":{band:.4},\"rms\":{:.4}}}",
+            separation(origin.view(), &point)
         );
         let _ = std::io::stdout().flush();
         if hop == 0 {
@@ -232,6 +236,16 @@ where
         }
     }
     best
+}
+
+fn separation(origin: ArrayView1<f64>, point: &Array1<f64>) -> f64 {
+    let mut square = 0.0;
+    let atoms = (origin.len() / 3).max(1) as f64;
+    for (there, here) in origin.iter().zip(point.iter()) {
+        let delta = there - here;
+        square += delta * delta;
+    }
+    (square / atoms).sqrt()
 }
 
 /// Rotate a bonded pair's common neighbours until the torque flips, then quench.
