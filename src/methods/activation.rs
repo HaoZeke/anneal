@@ -1623,6 +1623,125 @@ where
     }
 }
 
+/// Climb one covering direction to a converged index-1 saddle and quench both sides.
+///
+/// The direction is the launch mode. The climb is a Lanczos minimum-mode
+/// search. The recorded points are plain quenches, with no kinetic commit.
+pub(crate) fn connect_cover<E, Q>(
+    start: ArrayView1<f64>,
+    mode: ArrayView1<f64>,
+    contact: f64,
+    hop: usize,
+    evaluate: &mut E,
+    quench: &mut Q,
+    best_energy: &mut f64,
+    best: &mut Array1<f64>,
+) -> Vec<(f64, Array1<f64>)>
+where
+    E: FnMut(ArrayView1<f64>) -> (f64, Array1<f64>) + Send,
+    Q: FnMut(ArrayView1<f64>) -> Array1<f64>,
+{
+    let mut found = Vec::new();
+    let n_atoms = start.len() / 3;
+    if n_atoms < 2 || mode.len() != start.len() || !(contact.is_finite() && contact > 0.0) {
+        return found;
+    }
+    let mut heading = mode.to_owned();
+    if !renormalize_mode(&mut heading, start) {
+        return found;
+    }
+    let Ok(geometry) = DescriptorGeometry::finite(contact) else {
+        return found;
+    };
+    let descriptor_space = universal_descriptor_space(geometry);
+    let masses = Array1::ones(n_atoms);
+    let frozen = vec![false; n_atoms];
+    let species = vec![1_u32; n_atoms];
+    let witness = |left: ArrayView1<f64>, right: ArrayView1<f64>| {
+        let mut square = 0.0;
+        for (a, b) in left.iter().zip(right.iter()) {
+            let delta = a - b;
+            square += delta * delta;
+        }
+        (square / n_atoms as f64).sqrt() < contact * 1e-3
+    };
+    let mut config = PesExplorationConfig::default();
+    config.ride_method = RideMethod::Lanczos;
+    config.saddle_displacement = contact / (n_atoms as f64).sqrt();
+    config.activation_growth = 2.0;
+    config.activation_attempts = 5;
+    config.maximum_move = contact * 0.05;
+    config.quench_steps = n_atoms.saturating_mul(16).max(64);
+    config.saddle_steps = n_atoms.saturating_mul(4).max(64);
+    config.quench_gradient_tolerance = 1e-3;
+    config.saddle_force_tolerance = 1e-2;
+    config.minimum_mode_force_tolerance = 1e-2;
+    config.refine_with_prfo = false;
+    config.branch_attempts = 1;
+    config.irc_steps = 1;
+    // One contact of root-mean-square motion. A shorter step falls back
+    // into the well the climb just left.
+    config.irc_step = contact * (n_atoms as f64).sqrt();
+    let surface = ForceSurface {
+        evaluate: std::sync::Mutex::new(evaluate),
+    };
+    let mut network = PesNetwork::new();
+    let connection = discover_cartesian_mode_connection(
+        &surface,
+        &descriptor_space,
+        &mut network,
+        start,
+        masses.view(),
+        &frozen,
+        heading.view(),
+        Some(&species),
+        &config,
+        &witness,
+    );
+    drop(surface);
+    let pushes = match connection {
+        Ok(connection) => {
+            println!(
+                "{{\"kind\":\"dimer\",\"hop\":{hop},\"saddle\":{:.6},\"curvature\":{:.6},\"index\":{}}}",
+                connection.saddle_energy, connection.curvature, connection.negative_modes
+            );
+            let _ = std::io::stdout().flush();
+            let mut shots = Vec::new();
+            for minimum in network.minima() {
+                shots.push(minimum.coordinates.clone());
+            }
+            let rms = contact * (n_atoms as f64).sqrt();
+            for length in [contact, rms] {
+                for sign in [1.0_f64, -1.0] {
+                    let mut far = connection.saddle_coordinates.clone();
+                    for (value, component) in far.iter_mut().zip(connection.lowest_mode.iter()) {
+                        *value += sign * length * *component;
+                    }
+                    shots.push(far);
+                }
+            }
+            shots
+        }
+        Err(error) => {
+            let message = error.to_string().replace('"', "'");
+            println!("{{\"kind\":\"dimer\",\"hop\":{hop},\"error\":\"{message}\"}}");
+            let _ = std::io::stdout().flush();
+            Vec::new()
+        }
+    };
+    for shot in pushes {
+        if shot.iter().any(|value| !value.is_finite()) {
+            continue;
+        }
+        let quenched = quench(shot.view());
+        let Some(energy) = note_exit(evaluate, &quenched, hop, best_energy, best) else {
+            continue;
+        };
+        found.push((energy, quenched));
+    }
+    found
+}
+
 fn ride_lowest_mode<E, Q>(
     start: ArrayView1<f64>,
     contact: f64,
