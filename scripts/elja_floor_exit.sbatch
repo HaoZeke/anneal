@@ -30,7 +30,7 @@ cd "$SCRATCH"
 echo "pwd $(pwd)"
 # Covering displacement, minimum-mode climb, plain quench.
 # The log is one line per quenched candidate.
-HOPS=${FLOOR_HOPS:-16}
+HOPS=${FLOOR_HOPS:-4}
 SEEDS=${FLOOR_SEEDS:-1}
 "$HOP" search "$HOPS" "$SEEDS" > "$SCRATCH/climb.log"
 RECORD=${LJ_RECORD:-$HOME/ljwork}
