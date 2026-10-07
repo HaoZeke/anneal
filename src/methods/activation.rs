@@ -1791,7 +1791,7 @@ fn ride_lowest_mode<E, Q>(
     }
 }
 
-fn climb_outer_axes<E, Q>(
+pub(crate) fn climb_outer_axes<E, Q>(
     start: ArrayView1<f64>,
     contact: f64,
     hop: usize,

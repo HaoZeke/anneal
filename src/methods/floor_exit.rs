@@ -113,6 +113,38 @@ where
         };
         let (height, point) = queue[choice].clone();
         climbed.insert(basin_key(height));
+        if hop == 0 {
+            let mut best_x = point.clone();
+            crate::methods::activation::climb_outer_axes(
+                point.view(),
+                contact,
+                hop,
+                evaluate,
+                quench,
+                &cfg,
+                &mut best,
+                &mut best_x,
+            );
+            if best < start_energy - 1.0e-4 {
+                return best;
+            }
+        }
+        if bond_scan(
+            &point,
+            height,
+            hop,
+            contact,
+            harmonic,
+            &cfg,
+            start_energy,
+            ceiling,
+            evaluate,
+            quench,
+            &mut best,
+            &mut queue,
+        ) {
+            return best;
+        }
         let window = soft_window(&point, contact, harmonic, evaluate);
         println!(
             "{{\"kind\":\"soft_window\",\"hop\":{hop},\"modes\":{}}}",
@@ -181,6 +213,188 @@ where
         }
     }
     best
+}
+
+/// Rotate a bonded pair's common neighbours until the torque flips, then quench.
+///
+/// The cover is the contact graph. The climb is the rotation about that
+/// bond, which is one coordinate. The quench is the plain energy.
+fn bond_scan<E, Q>(
+    point: &Array1<f64>,
+    height: f64,
+    hop: usize,
+    contact: f64,
+    harmonic: f64,
+    cfg: &Activation,
+    start_energy: f64,
+    ceiling: f64,
+    evaluate: &mut E,
+    quench: &mut Q,
+    best: &mut f64,
+    queue: &mut Vec<(f64, Array1<f64>)>,
+) -> bool
+where
+    E: FnMut(ArrayView1<f64>) -> (f64, Array1<f64>),
+    Q: FnMut(ArrayView1<f64>) -> Array1<f64>,
+{
+    let _ = (height, harmonic);
+    let n = point.len() / 3;
+    if n < 4 {
+        return false;
+    }
+    let cutoff = contact * (1.0 + LEAVE_BARRIER_FLOOR);
+    let cutoff2 = cutoff * cutoff;
+    let mut bonds: Vec<(usize, usize)> = Vec::new();
+    for i in 0..n {
+        for j in (i + 1)..n {
+            let mut d2 = 0.0;
+            for k in 0..3 {
+                let d = point[3 * i + k] - point[3 * j + k];
+                d2 += d * d;
+            }
+            if d2 < cutoff2 && d2 > 0.0 {
+                bonds.push((i, j));
+            }
+        }
+    }
+    let mut neigh = vec![Vec::new(); n];
+    for &(i, j) in &bonds {
+        neigh[i].push(j);
+        neigh[j].push(i);
+    }
+    let angle_step = cfg.step / contact;
+    if !(angle_step > 0.0) {
+        return false;
+    }
+    let mut turns = 0usize;
+    for &(i, j) in &bonds {
+        let mut common = Vec::new();
+        for &k in &neigh[i] {
+            if neigh[j].contains(&k) {
+                common.push(k);
+            }
+        }
+        if common.len() < 2 {
+            continue;
+        }
+        let mut axis = [0.0; 3];
+        let mut origin = [0.0; 3];
+        for k in 0..3 {
+            axis[k] = point[3 * j + k] - point[3 * i + k];
+            origin[k] = 0.5 * (point[3 * i + k] + point[3 * j + k]);
+        }
+        let axis_norm = (axis[0] * axis[0] + axis[1] * axis[1] + axis[2] * axis[2]).sqrt();
+        if !(axis_norm > 1.0e-8) {
+            continue;
+        }
+        for k in 0..3 {
+            axis[k] /= axis_norm;
+        }
+        for a in 0..common.len() {
+            for b in (a + 1)..common.len() {
+                for sign in [1.0, -1.0] {
+                    turns += 1;
+                    if turn_bond(
+                        point,
+                        common[a],
+                        common[b],
+                        origin,
+                        axis,
+                        sign * angle_step,
+                        hop,
+                        start_energy,
+                        ceiling,
+                        evaluate,
+                        quench,
+                        best,
+                        queue,
+                    ) {
+                        return true;
+                    }
+                }
+                if turns > n.saturating_mul(n) {
+                    println!("{{\"kind\":\"bond_scan\",\"hop\":{hop},\"turns\":{turns}}}");
+                    let _ = std::io::stdout().flush();
+                    return false;
+                }
+            }
+        }
+    }
+    println!("{{\"kind\":\"bond_scan\",\"hop\":{hop},\"turns\":{turns}}}");
+    let _ = std::io::stdout().flush();
+    false
+}
+
+fn turn_bond<E, Q>(
+    point: &Array1<f64>,
+    a: usize,
+    b: usize,
+    origin: [f64; 3],
+    axis: [f64; 3],
+    angle_step: f64,
+    hop: usize,
+    start_energy: f64,
+    ceiling: f64,
+    evaluate: &mut E,
+    quench: &mut Q,
+    best: &mut f64,
+    queue: &mut Vec<(f64, Array1<f64>)>,
+) -> bool
+where
+    E: FnMut(ArrayView1<f64>) -> (f64, Array1<f64>),
+    Q: FnMut(ArrayView1<f64>) -> Array1<f64>,
+{
+    let (e0, _) = evaluate(point.view());
+    let mut prev = e0;
+    let mut angle: f64 = 0.0;
+    let half_turn = std::f64::consts::PI;
+    while angle.abs() < half_turn {
+        angle += angle_step;
+        let mut trial = point.clone();
+        spin_atom(&mut trial, a, origin, axis, angle);
+        spin_atom(&mut trial, b, origin, axis, angle);
+        let (energy, _) = evaluate(trial.view());
+        if !energy.is_finite() {
+            return false;
+        }
+        if prev > e0 && energy < prev {
+            println!(
+                "{{\"kind\":\"bond_ridge\",\"hop\":{hop},\"rise\":{:.4},\"angle\":{angle:.4}}}",
+                prev - e0
+            );
+            let _ = std::io::stdout().flush();
+            return note_shot(
+                trial.view(),
+                hop,
+                start_energy,
+                ceiling,
+                evaluate,
+                quench,
+                best,
+                queue,
+            );
+        }
+        prev = energy;
+    }
+    false
+}
+
+fn spin_atom(point: &mut Array1<f64>, atom: usize, origin: [f64; 3], axis: [f64; 3], angle: f64) {
+    let (s, c) = angle.sin_cos();
+    let v = [
+        point[3 * atom] - origin[0],
+        point[3 * atom + 1] - origin[1],
+        point[3 * atom + 2] - origin[2],
+    ];
+    let along = axis[0] * v[0] + axis[1] * v[1] + axis[2] * v[2];
+    let cross = [
+        axis[1] * v[2] - axis[2] * v[1],
+        axis[2] * v[0] - axis[0] * v[2],
+        axis[0] * v[1] - axis[1] * v[0],
+    ];
+    for k in 0..3 {
+        point[3 * atom + k] = origin[k] + v[k] * c + cross[k] * s + axis[k] * along * (1.0 - c);
+    }
 }
 
 /// Climb one soft mode by gentlest ascent, then quench both sides.
