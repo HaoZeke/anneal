@@ -2107,7 +2107,13 @@ fn climb_later_ridges<E, Q>(
         outcome.crossed
     );
     let _ = std::io::stdout().flush();
-    for ridge in outcome.ridges {
+    let mut landed = outcome.ridges;
+    if landed.is_empty() && outcome.lambda < 0.0 {
+        // The force-flip test can miss a ridge that the curvature has
+        // already passed. The last point is still on the far side.
+        landed.push(outcome.state);
+    }
+    for ridge in landed {
         if ridge.iter().any(|value| !value.is_finite()) {
             continue;
         }
