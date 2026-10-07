@@ -91,7 +91,7 @@ where
         .max_steps
         .saturating_mul(LEAVE_BARRIER_GROWTH.powi(2) as usize);
     let limit = hops.max(1);
-    let _ = seed;
+    let n_cover = crate::hypersphere::default_cover_size();
     let mut queue = vec![(start_energy, origin.to_owned())];
     let mut climbed = HashSet::new();
     let mut best = start_energy;
@@ -122,37 +122,61 @@ where
         if window.is_empty() {
             break;
         }
-        for (mode_index, (_, mode)) in window.iter().enumerate() {
-            for sign in [1.0, -1.0] {
-                let mut heading = mode.clone();
-                if sign < 0.0 {
-                    heading *= sign;
+        for cover in 0..n_cover {
+            let index = hop
+                .saturating_mul(n_cover)
+                .wrapping_add(cover)
+                .wrapping_add(seed as usize);
+            let direction = Array1::from(crate::hypersphere::cover_direction(
+                n_cover,
+                point.len(),
+                index,
+            ));
+            let mut heading = Array1::<f64>::zeros(point.len());
+            for (lambda, mode) in &window {
+                let scale = lambda.sqrt();
+                if !(scale > 0.0) {
+                    continue;
                 }
-                let cover = mode_index;
-                println!(
-                    "{{\"kind\":\"cover\",\"hop\":{hop},\"cover\":{cover},\"sign\":{sign},\"from\":{height:.6}}}"
-                );
-                let _ = std::io::stdout().flush();
-                if climb_cover(
-                    &point,
-                    heading.view(),
-                    height,
-                    hop,
-                    contact,
-                    harmonic,
-                    &cfg,
-                    start_energy,
-                    ceiling,
-                    evaluate,
-                    quench,
-                    &mut best,
-                    &mut queue,
-                ) {
-                    return best;
+                let coeff = direction
+                    .iter()
+                    .zip(mode.iter())
+                    .map(|(left, right)| left * right)
+                    .sum::<f64>()
+                    / scale;
+                if !coeff.is_finite() {
+                    continue;
                 }
-                if best < start_energy - 1.0e-4 {
-                    return best;
+                for (slot, component) in heading.iter_mut().zip(mode.iter()) {
+                    *slot += coeff * *component;
                 }
+            }
+            let norm = heading.dot(&heading).sqrt();
+            if !(norm > 1.0e-12) {
+                continue;
+            }
+            heading /= norm;
+            println!("{{\"kind\":\"cover\",\"hop\":{hop},\"cover\":{cover},\"from\":{height:.6}}}");
+            let _ = std::io::stdout().flush();
+            if climb_cover(
+                &point,
+                heading.view(),
+                height,
+                hop,
+                contact,
+                harmonic,
+                &cfg,
+                start_energy,
+                ceiling,
+                evaluate,
+                quench,
+                &mut best,
+                &mut queue,
+            ) {
+                return best;
+            }
+            if best < start_energy - 1.0e-4 {
+                return best;
             }
         }
     }
