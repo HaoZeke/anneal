@@ -184,63 +184,6 @@ fn load_xyz(path: &str) -> Array1<f64> {
     coords_from_text(&text)
 }
 
-/// Recommended basin hop on the diameter-penalized surface, from `x0`.
-///
-/// The cutoff is a fraction of the cluster's own diameter. Every quenched
-/// plain energy is printed. The driver compares nothing to a stored packing.
-fn two_phase_from_floor(x0: ArrayView1<f64>) -> f64 {
-    use anneal_core::methods::cluster_hopping::{Config, Ledger, run_with_gradient};
-    use anneal_core::methods::two_phase::{penalty, TwoPhase};
-    use rand::SeedableRng;
-    use rand::rngs::StdRng;
-    use std::io::Write;
-
-    let n = x0.len() / 3;
-    let mut cfg = Config::recommended(n);
-    let two = TwoPhase::relative(0.7, 1.0);
-    cfg.two_phase = Some(two);
-    let budget = 300_000usize;
-    let mut ledger = Ledger::new(budget);
-    let mut opt = WarmLbfgs::default();
-    println!("{{\"kind\":\"two_phase_hop\",\"budget\":{budget},\"kappa\":0.7}}");
-    let _ = std::io::stdout().flush();
-    let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, iters: usize| {
-        opt.forget();
-        let cutoff = two.cutoff_for(x);
-        let (_, phase, _) = opt.minimize(x, iters, |v| {
-            if !led.charge() {
-                return None;
-            }
-            let (energy, gradient) = lj(v);
-            let (penalty_energy, penalty_gradient) = penalty(v, cutoff, two.beta, two.mu);
-            Some((energy + penalty_energy, gradient + penalty_gradient))
-        });
-        opt.forget();
-        let (energy, quenched, _) = opt.minimize(phase.view(), iters, |v| {
-            if !led.charge() {
-                return None;
-            }
-            Some(lj(v))
-        });
-        if energy.is_finite() {
-            println!(
-                "{{\"kind\":\"exit_candidate\",\"energy\":{energy:.6},\"hop\":0,\"role\":\"quench\"}}"
-            );
-            let _ = std::io::stdout().flush();
-        }
-        (energy, quenched)
-    };
-    let mut rng = StdRng::seed_from_u64(1);
-    let out = run_with_gradient(&cfg, x0, &mut ledger, &mut relax, None, &mut rng);
-    println!(
-        "{{\"kind\":\"two_phase_done\",\"best\":{:.9},\"hops\":{},\"charged\":{}}}",
-        out.best,
-        out.hops,
-        ledger.spent()
-    );
-    out.best
-}
-
 fn run_floor_search(hops: usize, seeds: u64) {
     let raw = coords_from_text(include_str!("../tests/fixtures/lj75_ico.xyz"));
     let (e0, x0) = relax(raw.view(), 800);
@@ -266,10 +209,6 @@ fn run_floor_search(hops: usize, seeds: u64) {
         if best_e < e0 - 0.05 {
             break;
         }
-    }
-    let hopped = two_phase_from_floor(x0.view());
-    if hopped < best_e {
-        best_e = hopped;
     }
     println!(
         "{{\"kind\":\"floor_exit\",\"start\":{e0:.9},\"best\":{best_e:.9},\"below_start\":{}}}",
