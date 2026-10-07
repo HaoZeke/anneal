@@ -31,7 +31,7 @@ echo "pwd $(pwd)"
 # Three-contact pair penalty, then a plain quench.
 # The log is one line per quenched candidate.
 HOPS=${FLOOR_HOPS:-4}
-SEEDS=${FLOOR_SEEDS:-1}
+SEEDS=${FLOOR_SEEDS:-4}
 "$HOP" search "$HOPS" "$SEEDS" > "$SCRATCH/climb.log"
 RECORD=${LJ_RECORD:-$HOME/ljwork}
 mkdir -p "$RECORD"
