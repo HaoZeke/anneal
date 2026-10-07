@@ -10,8 +10,8 @@ use std::io::Write;
 
 use ndarray::{Array1, ArrayView1};
 
-use crate::curvature::curvature_features;
-use crate::known_basin::{LEAVE_BARRIER_FLOOR, LEAVE_BARRIER_GROWTH};
+use crate::curvature::{curvature_features, project_rigid_with, rigid_basis};
+use crate::known_basin::{LEAVE_BARRIER_FLOOR, LEAVE_BARRIER_GROWTH, LEAVE_RUNGS};
 use crate::methods::activation::Activation;
 
 /// Covering displacements, minimum-mode climbs, and plain quenches.
@@ -83,11 +83,9 @@ where
     }
     let n_atoms = (origin.len() / 3).max(1) as f64;
     let mut cfg = Activation::default();
-    cfg.later_ridges = true;
     cfg.step = contact / n_atoms.sqrt();
-    // Shallow ridges stay inside one funnel. A ridge at least one rung
-    // up is the one a later minimum can leave from. The longer climb is
-    // what reaches that ridge.
+    // A flip while the cover is still inside the harmonic bowl is a
+    // numerical wiggle. A ridge at least one rung up is a barrier.
     cfg.min_rise = harmonic * LEAVE_BARRIER_FLOOR;
     cfg.max_steps = cfg
         .max_steps
@@ -130,6 +128,8 @@ where
             if norm <= 1.0e-12 {
                 continue;
             }
+            println!("{{\"kind\":\"cover\",\"hop\":{hop},\"cover\":{cover},\"from\":{height:.6}}}");
+            let _ = std::io::stdout().flush();
             if hold_cover(
                 &point,
                 direction.view(),
@@ -176,114 +176,66 @@ where
     E: FnMut(ArrayView1<f64>) -> (f64, Array1<f64>),
     Q: FnMut(ArrayView1<f64>) -> Array1<f64>,
 {
-    let mut mode = direction.to_owned();
-    mode /= norm;
+    // The cover is held until the force along it changes sign. Negative
+    // curvature alone is still the uphill side of the ridge, and a quench
+    // from there falls back into the well the climb left.
+    let mut heading = direction.to_owned();
+    heading /= norm;
+    let basis = rigid_basis(point.view());
+    project_rigid_with(&mut heading, &basis);
+    if !normalize(&mut heading) {
+        return false;
+    }
     let step = cfg.step;
-    let n_atoms = (point.len() / 3).max(1) as f64;
-    let perp_cap = contact / cfg.max_steps.max(1) as f64 * n_atoms.sqrt();
-    let min_rise = harmonic * LEAVE_BARRIER_FLOOR;
-    let reach = contact * LEAVE_BARRIER_GROWTH.powi(2);
     let mut cur = point.clone();
     let mut previous_along: Option<f64> = None;
     let mut saw_uphill = false;
-    let mut rise = 0.0;
+    let mut ridges = 0usize;
+    let mut last_rise = 0.0;
     for _ in 0..cfg.max_steps {
-        let snapshot = cur.clone();
-        for (value, component) in cur.iter_mut().zip(mode.iter()) {
-            *value += step * *component;
-        }
-        let mut along = 0.0;
-        for _perp in 0..cfg.perp_steps {
-            let (_energy, gradient) = evaluate(cur.view());
-            if gradient.iter().any(|value| !value.is_finite()) {
-                cur.clone_from(&snapshot);
-                break;
-            }
-            along = gradient
-                .iter()
-                .zip(mode.iter())
-                .map(|(force, component)| force * component)
-                .sum();
-            let mut shift = Array1::zeros(cur.len());
-            let mut shift_norm = 0.0;
-            for (slot, (force, component)) in shift.iter_mut().zip(gradient.iter().zip(mode.iter()))
-            {
-                *slot = cfg.perp_rate * (force - along * component);
-                shift_norm += *slot * *slot;
-            }
-            shift_norm = shift_norm.sqrt();
-            let scale = if shift_norm > perp_cap && shift_norm > 0.0 {
-                perp_cap / shift_norm
-            } else {
-                1.0
-            };
-            for (value, component) in cur.iter_mut().zip(shift.iter()) {
-                *value -= scale * *component;
-            }
-        }
-        if cur.iter().any(|value| !value.is_finite()) || pair_gap(cur.view()) < 0.5 * contact {
-            cur.clone_from(&snapshot);
+        if !step_along(&mut cur, &heading, step, contact, cfg.epsilon, evaluate) {
             break;
         }
-        let (_energy, gradient) = evaluate(cur.view());
-        along = gradient
-            .iter()
-            .zip(mode.iter())
-            .map(|(force, component)| force * component)
-            .sum();
-        let mut lambda = 0.0;
-        if let Some(previous) = previous_along {
-            let slope = (along - previous) / step;
-            if slope.is_finite() {
-                lambda = slope;
-            }
+        let (energy, gradient) = evaluate(cur.view());
+        if !energy.is_finite() || gradient.iter().any(|value| !value.is_finite()) {
+            break;
         }
-        previous_along = Some(along);
-        rise += along * step;
+        let along = dot(&gradient, &heading);
+        last_rise = energy - height;
+        let lambda = directional_curvature(&cur, &heading, cfg.epsilon, evaluate).unwrap_or(0.0);
         if along > 0.0 {
             saw_uphill = true;
         }
-        if lambda < 0.0 && rise >= min_rise && saw_uphill {
-            let newton = if lambda.abs() > 1.0e-8 {
-                along.abs() / lambda.abs()
-            } else {
-                reach
-            };
-            let push = if along <= 0.0 {
-                reach
-            } else {
-                (LEAVE_BARRIER_GROWTH * newton).clamp(contact, reach * LEAVE_BARRIER_GROWTH)
-            };
-            let mut far = cur.clone();
-            for (value, component) in far.iter_mut().zip(mode.iter()) {
-                *value += push * *component;
-            }
+        let flip =
+            saw_uphill && previous_along.is_some_and(|previous| previous > 0.0 && along <= 0.0);
+        if flip && lambda < 0.0 && last_rise >= cfg.min_rise {
             println!(
-                "{{\"kind\":\"held_ridge\",\"hop\":{hop},\"from\":{height:.6},\"rise\":{rise:.4},\"lambda\":{lambda:.4},\"along\":{along:.4}}}"
+                "{{\"kind\":\"held_ridge\",\"hop\":{hop},\"from\":{height:.6},\"rise\":{last_rise:.4},\"lambda\":{lambda:.4},\"along\":{along:.4}}}"
             );
             let _ = std::io::stdout().flush();
-            let shots = if along <= 0.0 {
-                vec![cur, far]
-            } else {
-                vec![far]
-            };
-            for shot in shots {
-                if note_shot(
-                    shot.view(),
-                    hop,
-                    start_energy,
-                    ceiling,
-                    evaluate,
-                    quench,
-                    best,
-                    queue,
-                ) {
-                    return true;
-                }
+            if push_lowest_mode(
+                &cur,
+                &heading,
+                hop,
+                contact,
+                step,
+                cfg,
+                start_energy,
+                ceiling,
+                evaluate,
+                quench,
+                best,
+                queue,
+            ) {
+                return true;
             }
-            return false;
+            ridges += 1;
+            saw_uphill = false;
+            if ridges >= LEAVE_RUNGS {
+                return false;
+            }
         }
-        if rise > harmonic * LEAVE_BARRIER_GROWTH {
+        if last_rise > harmonic * LEAVE_BARRIER_GROWTH {
             return note_shot(
                 cur.view(),
                 hop,
@@ -295,7 +247,12 @@ where
                 queue,
             );
         }
+        previous_along = Some(along);
     }
+    println!(
+        "{{\"kind\":\"cover_end\",\"hop\":{hop},\"ridges\":{ridges},\"rise\":{last_rise:.4}}}"
+    );
+    let _ = std::io::stdout().flush();
     note_shot(
         cur.view(),
         hop,
@@ -306,6 +263,192 @@ where
         best,
         queue,
     )
+}
+
+/// One step along `heading`, then a slide downhill in the perpendicular
+/// plane. The heading itself stays put: it is the cover, not the softest
+/// well of the minimum.
+fn step_along<E>(
+    cur: &mut Array1<f64>,
+    heading: &Array1<f64>,
+    step: f64,
+    contact: f64,
+    epsilon: f64,
+    evaluate: &mut E,
+) -> bool
+where
+    E: FnMut(ArrayView1<f64>) -> (f64, Array1<f64>),
+{
+    let snapshot = cur.clone();
+    for (value, component) in cur.iter_mut().zip(heading.iter()) {
+        *value += step * *component;
+    }
+    if !cur.iter().all(|value| value.is_finite()) || pair_gap(cur.view()) < 0.5 * contact {
+        cur.clone_from(&snapshot);
+        return false;
+    }
+    let budget = ((cur.len() / 3).max(1) as f64).sqrt().round().max(1.0) as usize;
+    for _ in 0..budget {
+        let (energy, gradient) = evaluate(cur.view());
+        if !energy.is_finite() || gradient.iter().any(|value| !value.is_finite()) {
+            cur.clone_from(&snapshot);
+            return false;
+        }
+        let along = dot(&gradient, heading);
+        let mut perp = gradient;
+        for (value, component) in perp.iter_mut().zip(heading.iter()) {
+            *value -= along * *component;
+        }
+        let basis = rigid_basis(cur.view());
+        project_rigid_with(&mut perp, &basis);
+        let perp_norm = perp.dot(&perp).sqrt();
+        if !(perp_norm > along.abs()) || perp_norm <= epsilon {
+            break;
+        }
+        let mut span = step;
+        let mut accepted = false;
+        while span > epsilon {
+            let mut trial = cur.clone();
+            for (value, component) in trial.iter_mut().zip(perp.iter()) {
+                *value -= span * (*component / perp_norm);
+            }
+            if trial.iter().all(|value| value.is_finite())
+                && pair_gap(trial.view()) >= 0.5 * contact
+            {
+                let (trial_energy, _) = evaluate(trial.view());
+                if trial_energy.is_finite() && trial_energy <= energy {
+                    cur.clone_from(&trial);
+                    accepted = true;
+                    break;
+                }
+            }
+            span *= 0.5;
+        }
+        if !accepted {
+            break;
+        }
+    }
+    true
+}
+
+/// Quench both sides of the lowest mode at the ridge.
+///
+/// The cover that arrived here is not that mode. Lengths are the climb
+/// step and the contact distance, grown by the same rung ratio the climb
+/// uses for its ceiling.
+fn push_lowest_mode<E, Q>(
+    cur: &Array1<f64>,
+    heading: &Array1<f64>,
+    hop: usize,
+    contact: f64,
+    step: f64,
+    cfg: &Activation,
+    start_energy: f64,
+    ceiling: f64,
+    evaluate: &mut E,
+    quench: &mut Q,
+    best: &mut f64,
+    queue: &mut Vec<(f64, Array1<f64>)>,
+) -> bool
+where
+    E: FnMut(ArrayView1<f64>) -> (f64, Array1<f64>),
+    Q: FnMut(ArrayView1<f64>) -> Array1<f64>,
+{
+    let mut mode = heading.clone();
+    if let Some(features) = curvature_features(
+        cur.view(),
+        |point| Some(evaluate(point).1),
+        cfg.lanczos_steps.saturating_mul(2),
+        cfg.epsilon,
+    ) {
+        if features.lambda_min < 0.0 && features.lambda_min.is_finite() {
+            mode = features.mode;
+            if dot(&mode, heading) < 0.0 {
+                for value in mode.iter_mut() {
+                    *value = -*value;
+                }
+            }
+        }
+    }
+    if !normalize(&mut mode) {
+        return false;
+    }
+    let lengths = [
+        step,
+        contact,
+        contact * LEAVE_BARRIER_GROWTH,
+        contact * LEAVE_BARRIER_GROWTH.powi(2),
+    ];
+    for sign in [1.0, -1.0] {
+        for length in lengths {
+            let mut far = cur.clone();
+            for (value, component) in far.iter_mut().zip(mode.iter()) {
+                *value += sign * length * *component;
+            }
+            if pair_gap(far.view()) < 0.5 * contact {
+                continue;
+            }
+            if note_shot(
+                far.view(),
+                hop,
+                start_energy,
+                ceiling,
+                evaluate,
+                quench,
+                best,
+                queue,
+            ) {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+fn directional_curvature<E>(
+    cur: &Array1<f64>,
+    heading: &Array1<f64>,
+    epsilon: f64,
+    evaluate: &mut E,
+) -> Option<f64>
+where
+    E: FnMut(ArrayView1<f64>) -> (f64, Array1<f64>),
+{
+    if !(epsilon > 0.0) {
+        return None;
+    }
+    let mut plus = cur.clone();
+    let mut minus = cur.clone();
+    for ((up, down), component) in plus.iter_mut().zip(minus.iter_mut()).zip(heading.iter()) {
+        *up += epsilon * *component;
+        *down -= epsilon * *component;
+    }
+    let (_, up) = evaluate(plus.view());
+    let (_, down) = evaluate(minus.view());
+    if up.iter().any(|value| !value.is_finite()) || down.iter().any(|value| !value.is_finite()) {
+        return None;
+    }
+    let slope = up
+        .iter()
+        .zip(down.iter())
+        .zip(heading.iter())
+        .map(|((left, right), component)| (left - right) * component)
+        .sum::<f64>();
+    let lambda = slope / (2.0 * epsilon);
+    lambda.is_finite().then_some(lambda)
+}
+
+fn dot(left: &Array1<f64>, right: &Array1<f64>) -> f64 {
+    left.iter().zip(right.iter()).map(|(a, b)| a * b).sum()
+}
+
+fn normalize(vector: &mut Array1<f64>) -> bool {
+    let norm = vector.dot(vector).sqrt();
+    if !(norm > 1.0e-12) {
+        return false;
+    }
+    *vector /= norm;
+    true
 }
 
 fn note_shot<E, Q>(
