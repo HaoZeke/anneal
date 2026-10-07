@@ -1,17 +1,17 @@
 //! Covering displacement, minimum-mode climb, and a plain quench.
 //!
-//! Each hop takes one covering direction and climbs it, keeping the later
-//! ridges. Every ridge is quenched on the plain energy. A new minimum
-//! below the harmonic ceiling is climbed in turn. The search reads the
-//! caller's energy and force. It does not read a target energy.
+//! Each hop climbs the soft modes by gentlest ascent. A saddle is quenched
+//! on the plain energy, on both sides of the mode. A new minimum below the
+//! harmonic ceiling is climbed in turn. The search reads the caller's
+//! energy and force. It does not read a target energy.
 
 use std::collections::HashSet;
 use std::io::Write;
 
 use ndarray::{Array1, ArrayView1};
 
-use crate::curvature::{curvature_features, project_rigid_with, rigid_basis};
-use crate::known_basin::{LEAVE_BARRIER_FLOOR, LEAVE_BARRIER_GROWTH, LEAVE_RUNGS};
+use crate::curvature::{curvature_features, soft_subspace};
+use crate::known_basin::{LEAVE_BARRIER_FLOOR, LEAVE_BARRIER_GROWTH};
 use crate::methods::activation::Activation;
 
 /// Covering displacements, minimum-mode climbs, and plain quenches.
@@ -91,8 +91,7 @@ where
         .max_steps
         .saturating_mul(LEAVE_BARRIER_GROWTH.powi(2) as usize);
     let limit = hops.max(1);
-    let n_cover = crate::hypersphere::default_cover_size();
-    let covers = n_cover;
+    let _ = seed;
     let mut queue = vec![(start_energy, origin.to_owned())];
     let mut climbed = HashSet::new();
     let mut best = start_energy;
@@ -114,52 +113,57 @@ where
         };
         let (height, point) = queue[choice].clone();
         climbed.insert(basin_key(height));
-        for cover in 0..covers {
-            let index = hop
-                .saturating_mul(covers)
-                .wrapping_add(cover)
-                .wrapping_add(seed as usize);
-            let direction = Array1::from(crate::hypersphere::cover_direction(
-                n_cover,
-                point.len(),
-                index,
-            ));
-            let norm = direction.dot(&direction).sqrt();
-            if norm <= 1.0e-12 {
-                continue;
-            }
-            println!("{{\"kind\":\"cover\",\"hop\":{hop},\"cover\":{cover},\"from\":{height:.6}}}");
-            let _ = std::io::stdout().flush();
-            if hold_cover(
-                &point,
-                direction.view(),
-                norm,
-                height,
-                hop,
-                contact,
-                harmonic,
-                &cfg,
-                start_energy,
-                ceiling,
-                evaluate,
-                quench,
-                &mut best,
-                &mut queue,
-            ) {
-                return best;
-            }
-            if best < start_energy - 1.0e-4 {
-                return best;
+        let window = soft_window(&point, contact, harmonic, evaluate);
+        println!(
+            "{{\"kind\":\"soft_window\",\"hop\":{hop},\"modes\":{}}}",
+            window.len()
+        );
+        let _ = std::io::stdout().flush();
+        if window.is_empty() {
+            break;
+        }
+        for (mode_index, (_, mode)) in window.iter().enumerate() {
+            for sign in [1.0, -1.0] {
+                let mut heading = mode.clone();
+                if sign < 0.0 {
+                    heading *= sign;
+                }
+                let cover = mode_index;
+                println!(
+                    "{{\"kind\":\"cover\",\"hop\":{hop},\"cover\":{cover},\"sign\":{sign},\"from\":{height:.6}}}"
+                );
+                let _ = std::io::stdout().flush();
+                if climb_cover(
+                    &point,
+                    heading.view(),
+                    height,
+                    hop,
+                    contact,
+                    harmonic,
+                    &cfg,
+                    start_energy,
+                    ceiling,
+                    evaluate,
+                    quench,
+                    &mut best,
+                    &mut queue,
+                ) {
+                    return best;
+                }
+                if best < start_energy - 1.0e-4 {
+                    return best;
+                }
             }
         }
     }
     best
 }
 
-fn hold_cover<E, Q>(
+/// Climb one soft mode by gentlest ascent, then quench both sides.
+/// then quench a contact past each ridge on the plain energy.
+fn climb_cover<E, Q>(
     point: &Array1<f64>,
-    direction: ArrayView1<f64>,
-    norm: f64,
+    heading: ArrayView1<f64>,
     height: f64,
     hop: usize,
     contact: f64,
@@ -176,266 +180,153 @@ where
     E: FnMut(ArrayView1<f64>) -> (f64, Array1<f64>),
     Q: FnMut(ArrayView1<f64>) -> Array1<f64>,
 {
-    // The cover is held until the force along it changes sign. Negative
-    // curvature alone is still the uphill side of the ridge, and a quench
-    // from there falls back into the well the climb left.
-    let mut heading = direction.to_owned();
-    heading /= norm;
-    let basis = rigid_basis(point.view());
-    project_rigid_with(&mut heading, &basis);
-    if !normalize(&mut heading) {
+    let _ = (harmonic, cfg.later_ridges);
+    let mut tau = heading.to_owned();
+    if !normalize(&mut tau) {
         return false;
     }
-    let step = cfg.step;
     let mut cur = point.clone();
-    let mut previous_along: Option<f64> = None;
-    let mut saw_uphill = false;
-    let mut ridges = 0usize;
+    for (value, component) in cur.iter_mut().zip(tau.iter()) {
+        *value += cfg.step * *component;
+    }
+    // The ascent is an ordinary differential equation. The step is the
+    // curvature finite-difference length, grown by one rung, which is small
+    // enough that the softest direction can turn over instead of jumping.
+    let dt = (cfg.epsilon * LEAVE_BARRIER_GROWTH).max(cfg.epsilon);
+    let force_tol =
+        (harmonic / contact / ((point.len() / 3).max(1) as f64).sqrt()).max(cfg.epsilon);
     let mut last_rise = 0.0;
-    for _ in 0..cfg.max_steps {
-        if !step_along(&mut cur, &heading, step, contact, cfg.epsilon, evaluate) {
-            break;
-        }
+    let mut last_curv = 0.0;
+    let mut last_gnorm = 0.0;
+    let steps = ((contact / dt) as usize).clamp(cfg.max_steps, 8_000);
+    for _ in 0..steps {
         let (energy, gradient) = evaluate(cur.view());
         if !energy.is_finite() || gradient.iter().any(|value| !value.is_finite()) {
             break;
         }
-        let along = dot(&gradient, &heading);
         last_rise = energy - height;
-        let lambda = directional_curvature(&cur, &heading, cfg.epsilon, evaluate).unwrap_or(0.0);
-        if along > 0.0 {
-            saw_uphill = true;
+        if last_rise > harmonic * LEAVE_BARRIER_GROWTH.powi(2)
+            || pair_gap(cur.view()) < 0.5 * contact
+        {
+            break;
         }
-        let flip =
-            saw_uphill && previous_along.is_some_and(|previous| previous > 0.0 && along <= 0.0);
-        if flip && lambda < 0.0 && last_rise >= cfg.min_rise {
+        let mut plus = cur.clone();
+        let mut minus = cur.clone();
+        for ((up, down), component) in plus.iter_mut().zip(minus.iter_mut()).zip(tau.iter()) {
+            *up += cfg.epsilon * *component;
+            *down -= cfg.epsilon * *component;
+        }
+        let (_, up) = evaluate(plus.view());
+        let (_, down) = evaluate(minus.view());
+        if up.iter().any(|value| !value.is_finite()) || down.iter().any(|value| !value.is_finite())
+        {
+            break;
+        }
+        let mut curv = 0.0;
+        let mut hv = Array1::zeros(cur.len());
+        for i in 0..cur.len() {
+            hv[i] = (up[i] - down[i]) / (2.0 * cfg.epsilon);
+            curv += hv[i] * tau[i];
+        }
+        last_curv = curv;
+        for (value, slope) in tau.iter_mut().zip(hv.iter()) {
+            *value -= dt * (*slope - curv * *value);
+        }
+        if !normalize(&mut tau) {
+            break;
+        }
+        let along = dot(&gradient, &tau);
+        let mut step_vec = Array1::zeros(cur.len());
+        for i in 0..cur.len() {
+            step_vec[i] = -gradient[i] + 2.0 * along * tau[i];
+        }
+        let step_norm = step_vec.dot(&step_vec).sqrt();
+        last_gnorm = gradient.dot(&gradient).sqrt();
+        if !(step_norm > 0.0) {
+            break;
+        }
+        let capped = if dt * step_norm > cfg.step {
+            cfg.step / (dt * step_norm)
+        } else {
+            1.0
+        };
+        for (value, component) in cur.iter_mut().zip(step_vec.iter()) {
+            *value += dt * capped * *component;
+        }
+        if last_gnorm <= force_tol && last_curv < 0.0 && along.abs() <= force_tol {
             println!(
-                "{{\"kind\":\"held_ridge\",\"hop\":{hop},\"from\":{height:.6},\"rise\":{last_rise:.4},\"lambda\":{lambda:.4},\"along\":{along:.4}}}"
+                "{{\"kind\":\"gad_saddle\",\"hop\":{hop},\"rise\":{last_rise:.4},\"curv\":{last_curv:.4},\"gnorm\":{last_gnorm:.4}}}"
             );
             let _ = std::io::stdout().flush();
-            if push_lowest_mode(
-                &cur,
-                &heading,
-                hop,
-                contact,
-                step,
-                cfg,
-                start_energy,
-                ceiling,
-                evaluate,
-                quench,
-                best,
-                queue,
-            ) {
-                return true;
+            for sign in [1.0, -1.0] {
+                let mut far = cur.clone();
+                for (value, component) in far.iter_mut().zip(tau.iter()) {
+                    *value += sign * contact * *component;
+                }
+                if note_shot(
+                    far.view(),
+                    hop,
+                    start_energy,
+                    ceiling,
+                    evaluate,
+                    quench,
+                    best,
+                    queue,
+                ) {
+                    return true;
+                }
             }
-            ridges += 1;
-            saw_uphill = false;
-            if ridges >= LEAVE_RUNGS {
-                return false;
-            }
-        }
-        if last_rise > harmonic * LEAVE_BARRIER_GROWTH {
-            return note_shot(
-                cur.view(),
-                hop,
-                start_energy,
-                ceiling,
-                evaluate,
-                quench,
-                best,
-                queue,
-            );
-        }
-        previous_along = Some(along);
-    }
-    println!(
-        "{{\"kind\":\"cover_end\",\"hop\":{hop},\"ridges\":{ridges},\"rise\":{last_rise:.4}}}"
-    );
-    let _ = std::io::stdout().flush();
-    note_shot(
-        cur.view(),
-        hop,
-        start_energy,
-        ceiling,
-        evaluate,
-        quench,
-        best,
-        queue,
-    )
-}
-
-/// One step along `heading`, then a slide downhill in the perpendicular
-/// plane. The heading itself stays put: it is the cover, not the softest
-/// well of the minimum.
-fn step_along<E>(
-    cur: &mut Array1<f64>,
-    heading: &Array1<f64>,
-    step: f64,
-    contact: f64,
-    epsilon: f64,
-    evaluate: &mut E,
-) -> bool
-where
-    E: FnMut(ArrayView1<f64>) -> (f64, Array1<f64>),
-{
-    let snapshot = cur.clone();
-    for (value, component) in cur.iter_mut().zip(heading.iter()) {
-        *value += step * *component;
-    }
-    if !cur.iter().all(|value| value.is_finite()) || pair_gap(cur.view()) < 0.5 * contact {
-        cur.clone_from(&snapshot);
-        return false;
-    }
-    let budget = ((cur.len() / 3).max(1) as f64).sqrt().round().max(1.0) as usize;
-    for _ in 0..budget {
-        let (energy, gradient) = evaluate(cur.view());
-        if !energy.is_finite() || gradient.iter().any(|value| !value.is_finite()) {
-            cur.clone_from(&snapshot);
             return false;
         }
-        let along = dot(&gradient, heading);
-        let mut perp = gradient;
-        for (value, component) in perp.iter_mut().zip(heading.iter()) {
-            *value -= along * *component;
-        }
-        let basis = rigid_basis(cur.view());
-        project_rigid_with(&mut perp, &basis);
-        let perp_norm = perp.dot(&perp).sqrt();
-        if !(perp_norm > along.abs()) || perp_norm <= epsilon {
-            break;
-        }
-        let mut span = step;
-        let mut accepted = false;
-        while span > epsilon {
-            let mut trial = cur.clone();
-            for (value, component) in trial.iter_mut().zip(perp.iter()) {
-                *value -= span * (*component / perp_norm);
-            }
-            if trial.iter().all(|value| value.is_finite())
-                && pair_gap(trial.view()) >= 0.5 * contact
-            {
-                let (trial_energy, _) = evaluate(trial.view());
-                if trial_energy.is_finite() && trial_energy <= energy {
-                    cur.clone_from(&trial);
-                    accepted = true;
-                    break;
-                }
-            }
-            span *= 0.5;
-        }
-        if !accepted {
-            break;
-        }
     }
-    true
-}
-
-/// Quench both sides of the lowest mode at the ridge.
-///
-/// The cover that arrived here is not that mode. Lengths are the climb
-/// step and the contact distance, grown by the same rung ratio the climb
-/// uses for its ceiling.
-fn push_lowest_mode<E, Q>(
-    cur: &Array1<f64>,
-    heading: &Array1<f64>,
-    hop: usize,
-    contact: f64,
-    step: f64,
-    cfg: &Activation,
-    start_energy: f64,
-    ceiling: f64,
-    evaluate: &mut E,
-    quench: &mut Q,
-    best: &mut f64,
-    queue: &mut Vec<(f64, Array1<f64>)>,
-) -> bool
-where
-    E: FnMut(ArrayView1<f64>) -> (f64, Array1<f64>),
-    Q: FnMut(ArrayView1<f64>) -> Array1<f64>,
-{
-    let mut mode = heading.clone();
-    if let Some(features) = curvature_features(
-        cur.view(),
-        |point| Some(evaluate(point).1),
-        cfg.lanczos_steps.saturating_mul(2),
-        cfg.epsilon,
-    ) {
-        if features.lambda_min < 0.0 && features.lambda_min.is_finite() {
-            mode = features.mode;
-            if dot(&mode, heading) < 0.0 {
-                for value in mode.iter_mut() {
-                    *value = -*value;
-                }
-            }
-        }
-    }
-    if !normalize(&mut mode) {
-        return false;
-    }
-    let lengths = [
-        step,
-        contact,
-        contact * LEAVE_BARRIER_GROWTH,
-        contact * LEAVE_BARRIER_GROWTH.powi(2),
-    ];
-    for sign in [1.0, -1.0] {
-        for length in lengths {
-            let mut far = cur.clone();
-            for (value, component) in far.iter_mut().zip(mode.iter()) {
-                *value += sign * length * *component;
-            }
-            if pair_gap(far.view()) < 0.5 * contact {
-                continue;
-            }
-            if note_shot(
-                far.view(),
-                hop,
-                start_energy,
-                ceiling,
-                evaluate,
-                quench,
-                best,
-                queue,
-            ) {
-                return true;
-            }
-        }
-    }
+    println!(
+        "{{\"kind\":\"gad_end\",\"hop\":{hop},\"rise\":{last_rise:.4},\"curv\":{last_curv:.4},\"gnorm\":{last_gnorm:.4}}}"
+    );
+    let _ = std::io::stdout().flush();
     false
 }
 
-fn directional_curvature<E>(
-    cur: &Array1<f64>,
-    heading: &Array1<f64>,
-    epsilon: f64,
+/// Flexible modes whose harmonic cost over one contact stays inside the
+/// climb's energy window. A raw cover is stiff: one step along it spends
+/// the whole window before the force can flip.
+fn soft_window<E>(
+    point: &Array1<f64>,
+    contact: f64,
+    harmonic: f64,
     evaluate: &mut E,
-) -> Option<f64>
+) -> Vec<(f64, Array1<f64>)>
 where
     E: FnMut(ArrayView1<f64>) -> (f64, Array1<f64>),
 {
-    if !(epsilon > 0.0) {
-        return None;
+    let atoms = point.len() / 3;
+    let krylov = atoms.clamp(48, 96);
+    let ask = krylov.saturating_sub(6).max(2);
+    // A curvature below the finite-difference step is not resolved, and a
+    // leftover rigid direction sits there.
+    let epsilon = 1.0e-4;
+    let Some((lambdas, modes, _)) = soft_subspace(
+        point.view(),
+        |sample| Some(evaluate(sample).1),
+        krylov,
+        epsilon,
+        ask,
+    ) else {
+        return Vec::new();
+    };
+    let limit = harmonic * LEAVE_BARRIER_GROWTH.powi(4);
+    let mut window = Vec::new();
+    for (lambda, mode) in lambdas.into_iter().zip(modes) {
+        if !(lambda > epsilon) || !lambda.is_finite() {
+            continue;
+        }
+        let contact_cost = 0.5 * lambda * contact * contact;
+        if contact_cost.is_finite() && contact_cost <= limit {
+            window.push((lambda, mode));
+        }
     }
-    let mut plus = cur.clone();
-    let mut minus = cur.clone();
-    for ((up, down), component) in plus.iter_mut().zip(minus.iter_mut()).zip(heading.iter()) {
-        *up += epsilon * *component;
-        *down -= epsilon * *component;
-    }
-    let (_, up) = evaluate(plus.view());
-    let (_, down) = evaluate(minus.view());
-    if up.iter().any(|value| !value.is_finite()) || down.iter().any(|value| !value.is_finite()) {
-        return None;
-    }
-    let slope = up
-        .iter()
-        .zip(down.iter())
-        .zip(heading.iter())
-        .map(|((left, right), component)| (left - right) * component)
-        .sum::<f64>();
-    let lambda = slope / (2.0 * epsilon);
-    lambda.is_finite().then_some(lambda)
+    let keep = (atoms / LEAVE_BARRIER_GROWTH.powi(2) as usize).max(1);
+    window.truncate(keep);
+    window
 }
 
 fn dot(left: &Array1<f64>, right: &Array1<f64>) -> f64 {
