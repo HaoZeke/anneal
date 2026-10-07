@@ -9,8 +9,9 @@
 #SBATCH --mem=16G
 #SBATCH --time=04:00:00
 #SBATCH --output=floor-exit-%j.out
-# One exclusive job. A smooth outer-radius relaxation and a plain quench,
-# from the quenched LJ75 icosahedron. Work stays on the node scratch disk.
+# One exclusive job. Pairs beyond three nearest neighbours are penalised,
+# then the plain energy is quenched, from the LJ75 icosahedron.
+# Work stays on the node scratch disk.
 set -euo pipefail
 SCRATCH=/scratch/users/${USER}/${SLURM_JOB_ID}
 mkdir -p "$SCRATCH"
@@ -27,7 +28,7 @@ HOP=$LJ_ROOT/target/release/examples/ico75_hop
 test -x "$HOP"
 cd "$SCRATCH"
 echo "pwd $(pwd)"
-# Smooth outer-radius relaxation from the quenched icosahedron.
+# Three-contact pair penalty, then a plain quench.
 # The log is one line per quenched candidate.
 HOPS=${FLOOR_HOPS:-4}
 SEEDS=${FLOOR_SEEDS:-1}
