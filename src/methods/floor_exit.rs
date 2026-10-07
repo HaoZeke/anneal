@@ -27,7 +27,7 @@ pub fn search<E, Q>(
 ) -> f64
 where
     E: FnMut(ArrayView1<f64>) -> (f64, Array1<f64>) + Send,
-    Q: FnMut(ArrayView1<f64>) -> Array1<f64> + Send,
+    Q: FnMut(ArrayView1<f64>) -> Array1<f64>,
 {
     let (start_energy, _) = evaluate(origin);
     if !start_energy.is_finite() || !(contact > 0.0) {
@@ -75,7 +75,7 @@ fn cover_network<E, Q>(
     quench: &mut Q,
 ) -> f64
 where
-    E: FnMut(ArrayView1<f64>) -> (f64, Array1<f64>),
+    E: FnMut(ArrayView1<f64>) -> (f64, Array1<f64>) + Send,
     Q: FnMut(ArrayView1<f64>) -> Array1<f64>,
 {
     if hops == 0 {
@@ -102,17 +102,27 @@ where
     );
     let _ = std::io::stdout().flush();
     for hop in 0..limit {
+        // The harmonic rise is the barrier scale of this minimum. The next
+        // climb starts from the queued minimum nearest that rise, so the
+        // walk does not stay on the lowest shelf.
+        let focus = start_energy + harmonic;
         let Some(choice) = queue
             .iter()
             .enumerate()
             .filter(|(_, (energy, _))| !climbed.contains(&basin_key(*energy)))
-            .min_by(|(_, (left, _)), (_, (right, _))| left.total_cmp(right))
+            .min_by(|(_, (left, _)), (_, (right, _))| {
+                (*left - focus).abs().total_cmp(&(*right - focus).abs())
+            })
             .map(|(index, _)| index)
         else {
             break;
         };
         let (height, point) = queue[choice].clone();
         climbed.insert(basin_key(height));
+        println!(
+            "{{\"kind\":\"climb_from\",\"hop\":{hop},\"height\":{height:.6},\"focus\":{focus:.4}}}"
+        );
+        let _ = std::io::stdout().flush();
         if hop == 0 {
             let mut best_x = point.clone();
             crate::methods::activation::climb_outer_axes(
@@ -129,20 +139,22 @@ where
                 return best;
             }
         }
-        if bond_scan(
-            &point,
-            height,
-            hop,
-            contact,
-            harmonic,
-            &cfg,
-            start_energy,
-            ceiling,
-            evaluate,
-            quench,
-            &mut best,
-            &mut queue,
-        ) {
+        if hop == 0
+            && bond_scan(
+                &point,
+                height,
+                hop,
+                contact,
+                harmonic,
+                &cfg,
+                start_energy,
+                ceiling,
+                evaluate,
+                quench,
+                &mut best,
+                &mut queue,
+            )
+        {
             return best;
         }
         let window = soft_window(&point, contact, harmonic, evaluate);
@@ -154,7 +166,12 @@ where
         if window.is_empty() {
             break;
         }
-        for cover in 0..n_cover {
+        // A few covers, each walked past its first ridge. One ridge returns
+        // to the well it left; the next ridge is the one that can leave.
+        let n_use = (n_cover / LEAVE_BARRIER_GROWTH.powi(4) as usize).clamp(2, 4);
+        println!("{{\"kind\":\"cover_chain\",\"hop\":{hop},\"covers\":{n_use}}}");
+        let _ = std::io::stdout().flush();
+        for cover in 0..n_use {
             let index = hop
                 .saturating_mul(n_cover)
                 .wrapping_add(cover)
@@ -190,25 +207,27 @@ where
             heading /= norm;
             println!("{{\"kind\":\"cover\",\"hop\":{hop},\"cover\":{cover},\"from\":{height:.6}}}");
             let _ = std::io::stdout().flush();
-            if climb_cover(
-                &point,
+            let mut best_x = point.clone();
+            let landed = crate::methods::activation::connect_cover(
+                point.view(),
                 heading.view(),
-                height,
-                hop,
                 contact,
-                harmonic,
-                &cfg,
-                start_energy,
-                ceiling,
+                hop,
                 evaluate,
                 quench,
                 &mut best,
-                &mut queue,
-            ) {
-                return best;
-            }
+                &mut best_x,
+            );
             if best < start_energy - 1.0e-4 {
                 return best;
+            }
+            for (energy, coords) in landed {
+                if energy > start_energy + 1.0e-4 && energy < ceiling {
+                    let key = basin_key(energy);
+                    if !queue.iter().any(|(known, _)| basin_key(*known) == key) {
+                        queue.push((energy, coords));
+                    }
+                }
             }
         }
     }
@@ -397,133 +416,6 @@ fn spin_atom(point: &mut Array1<f64>, atom: usize, origin: [f64; 3], axis: [f64;
     }
 }
 
-/// Climb one soft mode by gentlest ascent, then quench both sides.
-/// then quench a contact past each ridge on the plain energy.
-fn climb_cover<E, Q>(
-    point: &Array1<f64>,
-    heading: ArrayView1<f64>,
-    height: f64,
-    hop: usize,
-    contact: f64,
-    harmonic: f64,
-    cfg: &Activation,
-    start_energy: f64,
-    ceiling: f64,
-    evaluate: &mut E,
-    quench: &mut Q,
-    best: &mut f64,
-    queue: &mut Vec<(f64, Array1<f64>)>,
-) -> bool
-where
-    E: FnMut(ArrayView1<f64>) -> (f64, Array1<f64>),
-    Q: FnMut(ArrayView1<f64>) -> Array1<f64>,
-{
-    let _ = (harmonic, cfg.later_ridges);
-    let mut tau = heading.to_owned();
-    if !normalize(&mut tau) {
-        return false;
-    }
-    let mut cur = point.clone();
-    for (value, component) in cur.iter_mut().zip(tau.iter()) {
-        *value += cfg.step * *component;
-    }
-    // The ascent is an ordinary differential equation. The step is the
-    // curvature finite-difference length, grown by one rung, which is small
-    // enough that the softest direction can turn over instead of jumping.
-    let dt = (cfg.epsilon * LEAVE_BARRIER_GROWTH).max(cfg.epsilon);
-    let force_tol =
-        (harmonic / contact / ((point.len() / 3).max(1) as f64).sqrt()).max(cfg.epsilon);
-    let mut last_rise = 0.0;
-    let mut last_curv = 0.0;
-    let mut last_gnorm = 0.0;
-    let steps = ((contact / dt) as usize).clamp(cfg.max_steps, 8_000);
-    for _ in 0..steps {
-        let (energy, gradient) = evaluate(cur.view());
-        if !energy.is_finite() || gradient.iter().any(|value| !value.is_finite()) {
-            break;
-        }
-        last_rise = energy - height;
-        if last_rise > harmonic * LEAVE_BARRIER_GROWTH.powi(2)
-            || pair_gap(cur.view()) < 0.5 * contact
-        {
-            break;
-        }
-        let mut plus = cur.clone();
-        let mut minus = cur.clone();
-        for ((up, down), component) in plus.iter_mut().zip(minus.iter_mut()).zip(tau.iter()) {
-            *up += cfg.epsilon * *component;
-            *down -= cfg.epsilon * *component;
-        }
-        let (_, up) = evaluate(plus.view());
-        let (_, down) = evaluate(minus.view());
-        if up.iter().any(|value| !value.is_finite()) || down.iter().any(|value| !value.is_finite())
-        {
-            break;
-        }
-        let mut curv = 0.0;
-        let mut hv = Array1::zeros(cur.len());
-        for i in 0..cur.len() {
-            hv[i] = (up[i] - down[i]) / (2.0 * cfg.epsilon);
-            curv += hv[i] * tau[i];
-        }
-        last_curv = curv;
-        for (value, slope) in tau.iter_mut().zip(hv.iter()) {
-            *value -= dt * (*slope - curv * *value);
-        }
-        if !normalize(&mut tau) {
-            break;
-        }
-        let along = dot(&gradient, &tau);
-        let mut step_vec = Array1::zeros(cur.len());
-        for i in 0..cur.len() {
-            step_vec[i] = -gradient[i] + 2.0 * along * tau[i];
-        }
-        let step_norm = step_vec.dot(&step_vec).sqrt();
-        last_gnorm = gradient.dot(&gradient).sqrt();
-        if !(step_norm > 0.0) {
-            break;
-        }
-        let capped = if dt * step_norm > cfg.step {
-            cfg.step / (dt * step_norm)
-        } else {
-            1.0
-        };
-        for (value, component) in cur.iter_mut().zip(step_vec.iter()) {
-            *value += dt * capped * *component;
-        }
-        if last_gnorm <= force_tol && last_curv < 0.0 && along.abs() <= force_tol {
-            println!(
-                "{{\"kind\":\"gad_saddle\",\"hop\":{hop},\"rise\":{last_rise:.4},\"curv\":{last_curv:.4},\"gnorm\":{last_gnorm:.4}}}"
-            );
-            let _ = std::io::stdout().flush();
-            for sign in [1.0, -1.0] {
-                let mut far = cur.clone();
-                for (value, component) in far.iter_mut().zip(tau.iter()) {
-                    *value += sign * contact * *component;
-                }
-                if note_shot(
-                    far.view(),
-                    hop,
-                    start_energy,
-                    ceiling,
-                    evaluate,
-                    quench,
-                    best,
-                    queue,
-                ) {
-                    return true;
-                }
-            }
-            return false;
-        }
-    }
-    println!(
-        "{{\"kind\":\"gad_end\",\"hop\":{hop},\"rise\":{last_rise:.4},\"curv\":{last_curv:.4},\"gnorm\":{last_gnorm:.4}}}"
-    );
-    let _ = std::io::stdout().flush();
-    false
-}
-
 /// Flexible modes whose harmonic cost over one contact stays inside the
 /// climb's energy window. A raw cover is stiff: one step along it spends
 /// the whole window before the force can flip.
@@ -563,21 +455,10 @@ where
         }
     }
     let keep = (atoms / LEAVE_BARRIER_GROWTH.powi(2) as usize).max(1);
-    window.truncate(keep);
+    // Two bands: the softest, and the next band whose contact cost still
+    // fits. The softest band alone returns to the shelf.
+    window.truncate(keep.saturating_mul(2));
     window
-}
-
-fn dot(left: &Array1<f64>, right: &Array1<f64>) -> f64 {
-    left.iter().zip(right.iter()).map(|(a, b)| a * b).sum()
-}
-
-fn normalize(vector: &mut Array1<f64>) -> bool {
-    let norm = vector.dot(vector).sqrt();
-    if !(norm > 1.0e-12) {
-        return false;
-    }
-    *vector /= norm;
-    true
 }
 
 fn note_shot<E, Q>(
@@ -610,22 +491,6 @@ where
         }
     }
     false
-}
-
-fn pair_gap(x: ArrayView1<f64>) -> f64 {
-    let n = x.len() / 3;
-    let mut best = f64::MAX;
-    for i in 0..n {
-        for j in (i + 1)..n {
-            let mut distance2 = 0.0;
-            for k in 0..3 {
-                let delta = x[3 * i + k] - x[3 * j + k];
-                distance2 += delta * delta;
-            }
-            best = best.min(distance2);
-        }
-    }
-    best.sqrt()
 }
 
 fn basin_key(energy: f64) -> i64 {
