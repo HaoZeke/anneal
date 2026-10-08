@@ -92,13 +92,20 @@ where
     let limit = hops.max(1);
     let n_cover = crate::hypersphere::default_cover_size();
     let mut queue = vec![(start_energy, origin.to_owned())];
+    // Minima reached by stepping below a converged saddle. The walk climbs
+    // those, highest first, instead of a placement that is still in the well.
+    let mut bridges: Vec<(f64, Array1<f64>)> = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    seen.insert(basin_key(start_energy));
     let mut best = start_energy;
     let mut walker = origin.to_owned();
     let mut walker_e = start_energy;
     let ceiling = start_energy + harmonic * LEAVE_BARRIER_GROWTH;
     println!(
-        "{{\"kind\":\"cover_network\",\"hops\":{limit},\"min_rise\":{:.4},\"step\":{:.4}}}",
-        cfg.min_rise, cfg.step
+        "{{\"kind\":\"cover_network\",\"hops\":{limit},\"min_rise\":{:.4},\"step\":{:.4},\"shape\":{:.2}}}",
+        cfg.min_rise,
+        cfg.step,
+        inertia_shape(&walker)
     );
     let _ = std::io::stdout().flush();
     for hop in 0..limit {
@@ -167,12 +174,18 @@ where
         if window.is_empty() {
             break;
         }
-        // The softest modes, not a stiff mixture. Their curvature turns
-        // negative inside the harmonic cap.
-        let n_mode = (n_cover / LEAVE_BARRIER_GROWTH.powi(4) as usize)
-            .clamp(2, 4)
-            .min(window.len());
-        for (index, (_, mode)) in window.iter().enumerate().take(n_mode) {
+        // The softest modes, converged to a saddle. A point where the
+        // curvature has only just changed sign still falls back into the well.
+        // Later hops follow two soft modes. The first hop uses a wider
+        // window so the bridge list is not a single valley.
+        let n_mode = if hop == 0 {
+            (n_cover / LEAVE_BARRIER_GROWTH.powi(3) as usize)
+                .clamp(2, 6)
+                .min(window.len())
+        } else {
+            (LEAVE_BARRIER_GROWTH as usize).min(window.len())
+        };
+        for (_, mode) in window.iter().take(n_mode) {
             for sign in [1.0_f64, -1.0] {
                 let mut directed = mode.clone();
                 if sign < 0.0 {
@@ -183,29 +196,64 @@ where
                     continue;
                 }
                 directed /= norm;
-                if push_until_negative(
-                    &point,
-                    &directed,
-                    index,
-                    height,
-                    hop,
+                if take_downhill(
+                    point.view(),
+                    directed.view(),
                     contact,
-                    harmonic,
-                    &cfg,
+                    hop,
                     start_energy,
                     ceiling,
                     evaluate,
                     quench,
                     &mut best,
-                    &mut queue,
+                    &mut bridges,
                 ) {
                     return best;
                 }
             }
         }
+        // The first hop also follows the soft direction until its curvature
+        // changes sign. Later hops spend the budget on converged saddles.
+        if hop == 0 {
+            for (index, (_, mode)) in window.iter().enumerate().take(n_mode.min(4)) {
+                for sign in [1.0_f64, -1.0] {
+                    let mut directed = mode.clone();
+                    if sign < 0.0 {
+                        directed *= sign;
+                    }
+                    let norm = directed.dot(&directed).sqrt();
+                    if !(norm > 1.0e-12) {
+                        continue;
+                    }
+                    directed /= norm;
+                    if push_until_negative(
+                        &point,
+                        &directed,
+                        index,
+                        height,
+                        hop,
+                        contact,
+                        harmonic,
+                        &cfg,
+                        start_energy,
+                        ceiling,
+                        evaluate,
+                        quench,
+                        &mut best,
+                        &mut queue,
+                    ) {
+                        return best;
+                    }
+                }
+            }
+        }
         // A few covers, each walked past its first ridge. One ridge returns
         // to the well it left; the next ridge is the one that can leave.
-        let n_use = (n_cover / LEAVE_BARRIER_GROWTH.powi(4) as usize).clamp(2, 4);
+        let n_use = if hop == 0 {
+            (n_cover / LEAVE_BARRIER_GROWTH.powi(4) as usize).clamp(2, 4)
+        } else {
+            LEAVE_BARRIER_GROWTH as usize
+        };
         println!("{{\"kind\":\"cover_chain\",\"hop\":{hop},\"covers\":{n_use}}}");
         let _ = std::io::stdout().flush();
         for cover in 0..n_use {
@@ -244,28 +292,33 @@ where
             heading /= norm;
             println!("{{\"kind\":\"cover\",\"hop\":{hop},\"cover\":{cover},\"from\":{height:.6}}}");
             let _ = std::io::stdout().flush();
-            let mut best_x = point.clone();
-            let landed = crate::methods::activation::connect_cover(
+            if take_downhill(
                 point.view(),
                 heading.view(),
                 contact,
                 hop,
+                start_energy,
+                ceiling,
                 evaluate,
                 quench,
                 &mut best,
-                &mut best_x,
-            );
-            if best < start_energy - 1.0e-4 {
+                &mut bridges,
+            ) {
                 return best;
             }
-            for (energy, coords) in landed {
-                if energy > start_energy + 1.0e-4 && energy < ceiling {
-                    let key = basin_key(energy);
-                    if !queue.iter().any(|(known, _)| basin_key(*known) == key) {
-                        queue.push((energy, coords));
-                    }
-                }
-            }
+        }
+        if let Some((energy, coords)) = next_bridge(&bridges, &seen, ceiling) {
+            println!(
+                "{{\"kind\":\"bridge\",\"hop\":{hop},\"energy\":{energy:.6},\"shape\":{:.2},\"rms\":{:.4},\"waiting\":{}}}",
+                inertia_shape(&coords),
+                separation(origin.view(), &coords),
+                bridges.len()
+            );
+            let _ = std::io::stdout().flush();
+            seen.insert(basin_key(energy));
+            walker_e = energy;
+            walker = coords;
+            continue;
         }
         let Some((energy, coords)) = next else {
             break;
@@ -274,6 +327,158 @@ where
         walker = coords;
     }
     best
+}
+
+/// Quench both sides of one converged saddle and keep the side below it.
+fn take_downhill<E, Q>(
+    start: ArrayView1<f64>,
+    mode: ArrayView1<f64>,
+    contact: f64,
+    hop: usize,
+    start_energy: f64,
+    ceiling: f64,
+    evaluate: &mut E,
+    quench: &mut Q,
+    best: &mut f64,
+    bridges: &mut Vec<(f64, Array1<f64>)>,
+) -> bool
+where
+    E: FnMut(ArrayView1<f64>) -> (f64, Array1<f64>) + Send,
+    Q: FnMut(ArrayView1<f64>) -> Array1<f64>,
+{
+    let mut best_x = start.to_owned();
+    let (saddle_energy, landed) = crate::methods::activation::connect_cover(
+        start,
+        mode,
+        contact,
+        hop,
+        evaluate,
+        quench,
+        best,
+        &mut best_x,
+    );
+    if *best < start_energy - 1.0e-4 {
+        return true;
+    }
+    let Some(saddle_energy) = saddle_energy else {
+        return false;
+    };
+    for (energy, coords) in landed {
+        // Above the saddle the push left the adjacent basin.
+        if energy + 1.0e-3 >= saddle_energy || !(energy < ceiling) {
+            continue;
+        }
+        if energy < start_energy - 1.0e-4 {
+            return true;
+        }
+        if energy > start_energy + 1.0e-4 {
+            let key = basin_key(energy);
+            if !bridges.iter().any(|(known, _)| basin_key(*known) == key) {
+                bridges.push((energy, coords));
+            }
+        }
+    }
+    false
+}
+
+/// The earliest downhill minimum that has not been climbed.
+fn next_bridge(
+    bridges: &[(f64, Array1<f64>)],
+    seen: &std::collections::HashSet<i64>,
+    ceiling: f64,
+) -> Option<(f64, Array1<f64>)> {
+    bridges.iter().find_map(|bridge| {
+        if bridge.0 >= ceiling || seen.contains(&basin_key(bridge.0)) {
+            None
+        } else {
+            Some(bridge.clone())
+        }
+    })
+}
+
+fn inertia_shape(x: &Array1<f64>) -> f64 {
+    let atoms = x.len() / 3;
+    if atoms == 0 {
+        return 0.0;
+    }
+    let mut com = [0.0; 3];
+    for atom in 0..atoms {
+        for axis in 0..3 {
+            com[axis] += x[3 * atom + axis];
+        }
+    }
+    let scale = atoms as f64;
+    for value in &mut com {
+        *value /= scale;
+    }
+    let mut moment = [[0.0; 3]; 3];
+    for atom in 0..atoms {
+        let r = [
+            x[3 * atom] - com[0],
+            x[3 * atom + 1] - com[1],
+            x[3 * atom + 2] - com[2],
+        ];
+        for row in 0..3 {
+            for col in 0..3 {
+                moment[row][col] += r[row] * r[col];
+            }
+        }
+    }
+    let values = jacobi_eigenvalues(moment);
+    let low_gap = values[1] - values[0];
+    let high_gap = values[2] - values[1];
+    if high_gap >= low_gap {
+        high_gap
+    } else {
+        -low_gap
+    }
+}
+
+/// Eigenvalues of a symmetric 3×3 matrix, ascending.
+fn jacobi_eigenvalues(mut moment: [[f64; 3]; 3]) -> [f64; 3] {
+    for _ in 0..8 {
+        let mut pivot = (0usize, 1usize, moment[0][1].abs());
+        if moment[0][2].abs() > pivot.2 {
+            pivot = (0, 2, moment[0][2].abs());
+        }
+        if moment[1][2].abs() > pivot.2 {
+            pivot = (1, 2, moment[1][2].abs());
+        }
+        if pivot.2 < 1.0e-10 {
+            break;
+        }
+        let (p, q) = (pivot.0, pivot.1);
+        let app = moment[p][p];
+        let aqq = moment[q][q];
+        let apq = moment[p][q];
+        let tau = (aqq - app) / (2.0 * apq);
+        let root = (1.0 + tau * tau).sqrt();
+        let t = if tau >= 0.0 {
+            1.0 / (tau + root)
+        } else {
+            -1.0 / (-tau + root)
+        };
+        let c = 1.0 / (1.0 + t * t).sqrt();
+        let s = t * c;
+        moment[p][p] = app - t * apq;
+        moment[q][q] = aqq + t * apq;
+        moment[p][q] = 0.0;
+        moment[q][p] = 0.0;
+        for row in 0..3 {
+            if row == p || row == q {
+                continue;
+            }
+            let arp = moment[row][p];
+            let arq = moment[row][q];
+            moment[row][p] = c * arp - s * arq;
+            moment[p][row] = moment[row][p];
+            moment[row][q] = s * arp + c * arq;
+            moment[q][row] = moment[row][q];
+        }
+    }
+    let mut values = [moment[0][0], moment[1][1], moment[2][2]];
+    values.sort_by(|left, right| left.total_cmp(right));
+    values
 }
 
 /// Push a soft covering direction until its curvature is negative, then quench.

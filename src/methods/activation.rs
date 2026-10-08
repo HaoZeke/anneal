@@ -1636,7 +1636,7 @@ pub(crate) fn connect_cover<E, Q>(
     quench: &mut Q,
     best_energy: &mut f64,
     best: &mut Array1<f64>,
-) -> Vec<(f64, Array1<f64>)>
+) -> (Option<f64>, Vec<(f64, Array1<f64>)>)
 where
     E: FnMut(ArrayView1<f64>) -> (f64, Array1<f64>) + Send,
     Q: FnMut(ArrayView1<f64>) -> Array1<f64>,
@@ -1644,14 +1644,14 @@ where
     let mut found = Vec::new();
     let n_atoms = start.len() / 3;
     if n_atoms < 2 || mode.len() != start.len() || !(contact.is_finite() && contact > 0.0) {
-        return found;
+        return (None, found);
     }
     let mut heading = mode.to_owned();
     if !renormalize_mode(&mut heading, start) {
-        return found;
+        return (None, found);
     }
     let Ok(geometry) = DescriptorGeometry::finite(contact) else {
-        return found;
+        return (None, found);
     };
     let descriptor_space = universal_descriptor_space(geometry);
     let masses = Array1::ones(n_atoms);
@@ -1667,6 +1667,8 @@ where
     };
     let mut config = PesExplorationConfig::default();
     config.ride_method = RideMethod::Lanczos;
+    // The initial push is one curvature-scale step in 3N. Five doublings
+    // stay inside a fraction of a contact, where the soft mode is still defined.
     config.saddle_displacement = contact / (n_atoms as f64).sqrt();
     config.activation_growth = 2.0;
     config.activation_attempts = 5;
@@ -1699,8 +1701,10 @@ where
         &witness,
     );
     drop(surface);
+    let mut saddle_energy = None;
     let pushes = match connection {
         Ok(connection) => {
+            saddle_energy = Some(connection.saddle_energy);
             println!(
                 "{{\"kind\":\"dimer\",\"hop\":{hop},\"saddle\":{:.6},\"curvature\":{:.6},\"index\":{}}}",
                 connection.saddle_energy, connection.curvature, connection.negative_modes
@@ -1739,7 +1743,7 @@ where
         };
         found.push((energy, quenched));
     }
-    found
+    (saddle_energy, found)
 }
 
 fn ride_lowest_mode<E, Q>(
