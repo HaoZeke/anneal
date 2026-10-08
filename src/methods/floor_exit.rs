@@ -250,6 +250,54 @@ where
                 }
             }
         }
+        // A cover grown out to the harmonic cap, then climbed from that
+        // point. The climb follows the lowest curvature there, which is not
+        // the softest mode of the minimum just left.
+        let n_grown = if hop == 0 { 2 } else { 1 };
+        for cover in 0..n_grown {
+            let index = hop
+                .saturating_mul(n_cover)
+                .wrapping_add(cover)
+                .wrapping_add(seed as usize)
+                .wrapping_add(n_cover / 2);
+            let direction = Array1::from(crate::hypersphere::cover_direction(
+                n_cover,
+                point.len(),
+                index,
+            ));
+            let grown = grow_cover(
+                &point,
+                direction.view(),
+                height,
+                contact,
+                harmonic,
+                &cfg,
+                evaluate,
+            );
+            println!(
+                "{{\"kind\":\"grown\",\"hop\":{hop},\"cover\":{cover},\"rms\":{:.4}}}",
+                separation(point.view(), &grown)
+            );
+            let _ = std::io::stdout().flush();
+            if push_until_negative(
+                &grown,
+                &direction,
+                cover,
+                height,
+                hop,
+                contact,
+                harmonic,
+                &cfg,
+                start_energy,
+                ceiling,
+                evaluate,
+                quench,
+                &mut best,
+                &mut queue,
+            ) {
+                return best;
+            }
+        }
         // A few covers, each walked past its first ridge. One ridge returns
         // to the well it left; the next ridge is the one that can leave.
         let n_use = if hop == 0 {
@@ -313,9 +361,8 @@ where
                 return best;
             }
         }
-        if let Some((energy, coords)) =
-            next_bridge(&bridges, &seen, start_energy, cfg.min_rise, ceiling)
-        {
+        keep_basins(&queue, f64::INFINITY, start_energy, ceiling, &mut bridges);
+        if let Some((energy, coords)) = next_bridge(&bridges, &seen, start_energy, ceiling) {
             println!(
                 "{{\"kind\":\"bridge\",\"hop\":{hop},\"energy\":{energy:.6},\"shape\":{:.2},\"rms\":{:.4},\"waiting\":{}}}",
                 inertia_shape(&coords),
@@ -328,12 +375,12 @@ where
             walker = coords;
             continue;
         }
-        // A hollow neighbour inside one rung is the same shelf as the
-        // returning bridge. Do not climb it.
+        // A distinct neighbour on the shelf is climbed as well. Only the
+        // basin just left is skipped.
         let Some((energy, coords)) = next else {
             break;
         };
-        if energy < start_energy + cfg.min_rise {
+        if basin_key(energy) == basin_key(height) {
             break;
         }
         walker_e = energy;
@@ -389,6 +436,12 @@ where
             "{{\"kind\":\"saddle_return\",\"hop\":{hop},\"saddle\":{saddle_energy:.6},\"rise\":{rise:.4}}}"
         );
         let _ = std::io::stdout().flush();
+        // The quench on the far side can be a different basin even when the
+        // saddle itself is only one rung up. Keep that basin.
+        keep_basins(&landed, saddle_energy, start_energy, ceiling, bridges);
+        if below_printed_floor(*best, start_energy) {
+            return true;
+        }
         return step_past_saddle(
             start,
             &saddle_at,
@@ -413,13 +466,13 @@ where
         if below_printed_floor(energy, start_energy) {
             return true;
         }
-        // Inside one rung the neighbour is the shelf bridge.
-        if energy > start_energy + min_rise {
-            let key = basin_key(energy);
-            if !bridges.iter().any(|(known, _)| basin_key(*known) == key) {
-                bridges.push((energy, coords));
-            }
-        }
+        keep_basins(
+            &[(energy, coords)],
+            saddle_energy,
+            start_energy,
+            ceiling,
+            bridges,
+        );
     }
     false
 }
@@ -476,14 +529,7 @@ where
     ) {
         return true;
     }
-    for (energy, coords) in queue {
-        if energy > start_energy + cfg.min_rise && energy < ceiling {
-            let key = basin_key(energy);
-            if !bridges.iter().any(|(known, _)| basin_key(*known) == key) {
-                bridges.push((energy, coords));
-            }
-        }
-    }
+    keep_basins(&queue, f64::INFINITY, start_energy, ceiling, bridges);
     push_until_negative(
         &past,
         &heading,
@@ -502,22 +548,79 @@ where
     )
 }
 
-/// The earliest downhill minimum that has cleared one rung.
+/// The lowest distinct basin still under the harmonic ceiling.
 fn next_bridge(
     bridges: &[(f64, Array1<f64>)],
     seen: &std::collections::HashSet<i64>,
     start_energy: f64,
-    min_rise: f64,
     ceiling: f64,
 ) -> Option<(f64, Array1<f64>)> {
-    bridges.iter().find_map(|bridge| {
-        let shelf = bridge.0 > start_energy && bridge.0 < start_energy + min_rise;
-        if shelf || bridge.0 >= ceiling || seen.contains(&basin_key(bridge.0)) {
-            None
-        } else {
-            Some(bridge.clone())
+    bridges
+        .iter()
+        .filter(|bridge| {
+            bridge.0 > start_energy + 1.0e-4
+                && bridge.0 < ceiling
+                && !seen.contains(&basin_key(bridge.0))
+        })
+        .min_by(|left, right| left.0.total_cmp(&right.0))
+        .cloned()
+}
+
+/// Keep a quenched basin that is not the minimum the climb left.
+fn keep_basins(
+    landed: &[(f64, Array1<f64>)],
+    saddle_energy: f64,
+    start_energy: f64,
+    ceiling: f64,
+    bridges: &mut Vec<(f64, Array1<f64>)>,
+) {
+    for (energy, coords) in landed {
+        if *energy + 1.0e-3 >= saddle_energy || !(*energy < ceiling) {
+            continue;
         }
-    })
+        if *energy <= start_energy + 1.0e-4 {
+            continue;
+        }
+        let key = basin_key(*energy);
+        if bridges.iter().any(|(known, _)| basin_key(*known) == key) {
+            continue;
+        }
+        bridges.push((*energy, coords.clone()));
+    }
+}
+
+/// Walk a covering direction until the rise meets the cap or two atoms meet.
+fn grow_cover<E>(
+    point: &Array1<f64>,
+    direction: ArrayView1<f64>,
+    height: f64,
+    contact: f64,
+    harmonic: f64,
+    cfg: &Activation,
+    evaluate: &mut E,
+) -> Array1<f64>
+where
+    E: FnMut(ArrayView1<f64>) -> (f64, Array1<f64>),
+{
+    let mut scale = cfg.step;
+    let mut grown = point.clone();
+    let cap = height + harmonic * LEAVE_BARRIER_GROWTH;
+    for _ in 0..16 {
+        let mut trial = point.clone();
+        for (value, component) in trial.iter_mut().zip(direction.iter()) {
+            *value += scale * *component;
+        }
+        if closest_pair(trial.view()) < 0.7 * contact {
+            break;
+        }
+        let (energy, _) = evaluate(trial.view());
+        if !energy.is_finite() || energy > cap {
+            break;
+        }
+        grown = trial;
+        scale *= 1.35;
+    }
+    grown
 }
 
 /// Six-decimal print of the quenched start. A role quench has left the
