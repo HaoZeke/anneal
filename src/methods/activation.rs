@@ -1636,7 +1636,10 @@ pub(crate) fn connect_cover<E, Q>(
     quench: &mut Q,
     best_energy: &mut f64,
     best: &mut Array1<f64>,
-) -> (Option<f64>, Vec<(f64, Array1<f64>)>)
+) -> (
+    Option<(f64, Array1<f64>, Array1<f64>)>,
+    Vec<(f64, Array1<f64>)>,
+)
 where
     E: FnMut(ArrayView1<f64>) -> (f64, Array1<f64>) + Send,
     Q: FnMut(ArrayView1<f64>) -> Array1<f64>,
@@ -1701,10 +1704,14 @@ where
         &witness,
     );
     drop(surface);
-    let mut saddle_energy = None;
+    let mut saddle_pose: Option<(f64, Array1<f64>, Array1<f64>)> = None;
     let pushes = match connection {
         Ok(connection) => {
-            saddle_energy = Some(connection.saddle_energy);
+            saddle_pose = Some((
+                connection.saddle_energy,
+                connection.saddle_coordinates.clone(),
+                connection.lowest_mode.clone(),
+            ));
             println!(
                 "{{\"kind\":\"dimer\",\"hop\":{hop},\"saddle\":{:.6},\"curvature\":{:.6},\"index\":{}}}",
                 connection.saddle_energy, connection.curvature, connection.negative_modes
@@ -1743,7 +1750,7 @@ where
         };
         found.push((energy, quenched));
     }
-    (saddle_energy, found)
+    (saddle_pose, found)
 }
 
 fn ride_lowest_mode<E, Q>(
