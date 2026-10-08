@@ -205,13 +205,15 @@ fn run_floor_search(hops: usize, seeds: u64) {
             best_e = e;
         }
         println!("{{\"kind\":\"floor_seed\",\"seed\":{seed},\"start\":{e0:.9},\"best\":{e:.9}}}");
-        if best_e < e0 - 0.05 {
+        let floor = (e0 * 1.0e6).round() / 1.0e6;
+        if best_e < floor {
             break;
         }
     }
+    let floor = (e0 * 1.0e6).round() / 1.0e6;
     println!(
         "{{\"kind\":\"floor_exit\",\"start\":{e0:.9},\"best\":{best_e:.9},\"below_start\":{}}}",
-        best_e < e0 - 0.05
+        best_e < floor
     );
 }
 

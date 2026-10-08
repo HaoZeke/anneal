@@ -128,7 +128,7 @@ where
             &mut best,
             &mut queue,
         );
-        if best < start_energy - 1.0e-4 {
+        if below_printed_floor(best, start_energy) {
             return best;
         }
         if hop == 0 {
@@ -143,7 +143,7 @@ where
                 &mut best,
                 &mut best_x,
             );
-            if best < start_energy - 1.0e-4 {
+            if below_printed_floor(best, start_energy) {
                 return best;
             }
         }
@@ -203,6 +203,9 @@ where
                     hop,
                     start_energy,
                     ceiling,
+                    cfg.min_rise,
+                    &cfg,
+                    harmonic,
                     evaluate,
                     quench,
                     &mut best,
@@ -299,6 +302,9 @@ where
                 hop,
                 start_energy,
                 ceiling,
+                cfg.min_rise,
+                &cfg,
+                harmonic,
                 evaluate,
                 quench,
                 &mut best,
@@ -307,7 +313,9 @@ where
                 return best;
             }
         }
-        if let Some((energy, coords)) = next_bridge(&bridges, &seen, ceiling) {
+        if let Some((energy, coords)) =
+            next_bridge(&bridges, &seen, start_energy, cfg.min_rise, ceiling)
+        {
             println!(
                 "{{\"kind\":\"bridge\",\"hop\":{hop},\"energy\":{energy:.6},\"shape\":{:.2},\"rms\":{:.4},\"waiting\":{}}}",
                 inertia_shape(&coords),
@@ -320,9 +328,14 @@ where
             walker = coords;
             continue;
         }
+        // A hollow neighbour inside one rung is the same shelf as the
+        // returning bridge. Do not climb it.
         let Some((energy, coords)) = next else {
             break;
         };
+        if energy < start_energy + cfg.min_rise {
+            break;
+        }
         walker_e = energy;
         walker = coords;
     }
@@ -337,6 +350,9 @@ fn take_downhill<E, Q>(
     hop: usize,
     start_energy: f64,
     ceiling: f64,
+    min_rise: f64,
+    cfg: &Activation,
+    harmonic: f64,
     evaluate: &mut E,
     quench: &mut Q,
     best: &mut f64,
@@ -347,7 +363,7 @@ where
     Q: FnMut(ArrayView1<f64>) -> Array1<f64>,
 {
     let mut best_x = start.to_owned();
-    let (saddle_energy, landed) = crate::methods::activation::connect_cover(
+    let (saddle_pose, landed) = crate::methods::activation::connect_cover(
         start,
         mode,
         contact,
@@ -357,21 +373,48 @@ where
         best,
         &mut best_x,
     );
-    if *best < start_energy - 1.0e-4 {
+    if below_printed_floor(*best, start_energy) {
         return true;
     }
-    let Some(saddle_energy) = saddle_energy else {
+    let Some((saddle_energy, saddle_at, saddle_mode)) = saddle_pose else {
         return false;
     };
+    // The first index-1 saddles sit about one rung up and both quenches
+    // fall back into the well, or onto the bridge just above the floor.
+    // They are not where the climb stops.
+    let returning = saddle_energy < start_energy + min_rise;
+    if returning {
+        let rise = saddle_energy - start_energy;
+        println!(
+            "{{\"kind\":\"saddle_return\",\"hop\":{hop},\"saddle\":{saddle_energy:.6},\"rise\":{rise:.4}}}"
+        );
+        let _ = std::io::stdout().flush();
+        return step_past_saddle(
+            start,
+            &saddle_at,
+            &saddle_mode,
+            contact,
+            hop,
+            start_energy,
+            ceiling,
+            harmonic,
+            cfg,
+            evaluate,
+            quench,
+            best,
+            bridges,
+        );
+    }
     for (energy, coords) in landed {
         // Above the saddle the push left the adjacent basin.
         if energy + 1.0e-3 >= saddle_energy || !(energy < ceiling) {
             continue;
         }
-        if energy < start_energy - 1.0e-4 {
+        if below_printed_floor(energy, start_energy) {
             return true;
         }
-        if energy > start_energy + 1.0e-4 {
+        // Inside one rung the neighbour is the shelf bridge.
+        if energy > start_energy + min_rise {
             let key = basin_key(energy);
             if !bridges.iter().any(|(known, _)| basin_key(*known) == key) {
                 bridges.push((energy, coords));
@@ -381,19 +424,107 @@ where
     false
 }
 
-/// The earliest downhill minimum that has not been climbed.
+/// Leave a returning saddle along its unstable mode and climb from there.
+fn step_past_saddle<E, Q>(
+    origin: ArrayView1<f64>,
+    saddle: &Array1<f64>,
+    mode: &Array1<f64>,
+    contact: f64,
+    hop: usize,
+    start_energy: f64,
+    ceiling: f64,
+    harmonic: f64,
+    cfg: &Activation,
+    evaluate: &mut E,
+    quench: &mut Q,
+    best: &mut f64,
+    bridges: &mut Vec<(f64, Array1<f64>)>,
+) -> bool
+where
+    E: FnMut(ArrayView1<f64>) -> (f64, Array1<f64>),
+    Q: FnMut(ArrayView1<f64>) -> Array1<f64>,
+{
+    let mut away = 0.0;
+    for ((at, from), component) in saddle.iter().zip(origin.iter()).zip(mode.iter()) {
+        away += (at - from) * component;
+    }
+    let sign = if away >= 0.0 { 1.0 } else { -1.0 };
+    let mut heading = mode.clone();
+    if sign < 0.0 {
+        heading *= -1.0;
+    }
+    let mut past = saddle.clone();
+    // A contact already falls back into the well. A fraction of the cover
+    // step leaves the saddle without driving two atoms through each other.
+    let span = cfg.step * LEAVE_BARRIER_GROWTH;
+    for (value, component) in past.iter_mut().zip(heading.iter()) {
+        *value += span * component;
+    }
+    if closest_pair(past.view()) < 0.5 * contact {
+        return false;
+    }
+    let mut queue = Vec::new();
+    if note_shot(
+        past.view(),
+        hop,
+        start_energy,
+        ceiling,
+        evaluate,
+        quench,
+        best,
+        &mut queue,
+    ) {
+        return true;
+    }
+    for (energy, coords) in queue {
+        if energy > start_energy + cfg.min_rise && energy < ceiling {
+            let key = basin_key(energy);
+            if !bridges.iter().any(|(known, _)| basin_key(*known) == key) {
+                bridges.push((energy, coords));
+            }
+        }
+    }
+    push_until_negative(
+        &past,
+        &heading,
+        0,
+        start_energy,
+        hop,
+        contact,
+        harmonic,
+        cfg,
+        start_energy,
+        ceiling,
+        evaluate,
+        quench,
+        best,
+        bridges,
+    )
+}
+
+/// The earliest downhill minimum that has cleared one rung.
 fn next_bridge(
     bridges: &[(f64, Array1<f64>)],
     seen: &std::collections::HashSet<i64>,
+    start_energy: f64,
+    min_rise: f64,
     ceiling: f64,
 ) -> Option<(f64, Array1<f64>)> {
     bridges.iter().find_map(|bridge| {
-        if bridge.0 >= ceiling || seen.contains(&basin_key(bridge.0)) {
+        let shelf = bridge.0 > start_energy && bridge.0 < start_energy + min_rise;
+        if shelf || bridge.0 >= ceiling || seen.contains(&basin_key(bridge.0)) {
             None
         } else {
             Some(bridge.clone())
         }
     })
+}
+
+/// Six-decimal print of the quenched start. A role quench has left the
+/// floor when it is strictly below that print.
+fn below_printed_floor(energy: f64, start: f64) -> bool {
+    let floor = (start * 1.0e6).round() / 1.0e6;
+    energy < floor
 }
 
 fn inertia_shape(x: &Array1<f64>) -> f64 {
@@ -599,6 +730,22 @@ where
             }
             relax_sideways(&mut trial, &tau, evaluate, cfg, contact);
             let (energy, _) = evaluate(trial.view());
+            if energy.is_finite()
+                && below_printed_floor(energy, start_energy)
+                && closest_pair(trial.view()) >= 0.5 * contact
+            {
+                // The mode has crossed the printed floor. Quench this side.
+                return note_shot(
+                    trial.view(),
+                    hop,
+                    start_energy,
+                    ceiling,
+                    evaluate,
+                    quench,
+                    best,
+                    queue,
+                );
+            }
             if energy.is_finite()
                 && energy - height <= rise_cap
                 && energy + 1.0e-8 >= height
@@ -887,7 +1034,7 @@ where
             {
                 chosen = Some((energy, coords));
             }
-            if *best < start_energy - 1.0e-4 {
+            if below_printed_floor(*best, start_energy) {
                 return chosen;
             }
         }
@@ -1176,7 +1323,7 @@ where
     let Some((energy, coords)) = record_quench(shot, hop, evaluate, quench, best) else {
         return false;
     };
-    if *best < start_energy - 1.0e-4 {
+    if below_printed_floor(*best, start_energy) {
         return true;
     }
     if energy > start_energy + 1.0e-4 && energy < ceiling {
