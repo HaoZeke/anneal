@@ -1235,6 +1235,34 @@ def _chemfit_preset(method: str, preset_kwargs: dict[str, Any]):
     return _classical_preset(method, kwargs=values)
 
 
+def _initial_mapping(initial: Any) -> Mapping:
+    """``fitter.initial_parameters`` for :func:`fit_chemfit`, as a mapping.
+
+    ChemFit 3.1's Fitter keeps ``initial_params`` as given, and anneal 0.10.0
+    read a list or tuple of ``(key, value)`` pairs as the dict they make; that
+    still runs, with a FutureWarning. Anything else that is not a mapping is
+    a TypeError.
+    """
+    if isinstance(initial, Mapping):
+        return initial
+    pairs = None
+    if isinstance(initial, (list, tuple)):
+        try:
+            pairs = dict(initial)
+        except (TypeError, ValueError):
+            pass
+    if pairs is None:
+        raise TypeError("fitter.initial_parameters must be a mapping")
+    if pairs:
+        _deprecated(
+            f"fit_chemfit reads fitter.initial_parameters, a {type(initial).__name__} "
+            "of (key, value) pairs, as a dict; give the fitter a dict. A fitter "
+            "whose initial_parameters is not a mapping will raise in a future "
+            "release."
+        )
+    return pairs
+
+
 def fit_chemfit(
     fitter: Any,
     budget: int,
@@ -1252,7 +1280,10 @@ def fit_chemfit(
             optional ``bounds``. Only the session protocol is used, so
             gradient-free drivers never need forces: ``init``, ``finish``,
             and ``evaluate`` / ``step`` (current ChemFit) or ``ask`` /
-            ``tell`` (ChemFit 3.1).
+            ``tell`` (ChemFit 3.1). ``initial_parameters`` given as a list
+            or tuple of ``(key, value)`` pairs, which ChemFit 3.1 keeps, is
+            read as the dict they make, as in anneal 0.10.0, with a
+            FutureWarning; it will raise in a future release.
         budget: total objective evaluations, the start included; it is
             never exceeded.
         method: ``"portfolio"`` (default; Thompson-allocated SOTA including
@@ -1297,9 +1328,7 @@ def fit_chemfit(
     steps = min(_whole("steps_per_epoch", steps_per_epoch, 1), budget)
     preset = _chemfit_preset(name, preset_kwargs)
 
-    initial = getattr(fitter, "initial_parameters", None)
-    if not isinstance(initial, Mapping):
-        raise TypeError("fitter.initial_parameters must be a mapping")
+    initial = _initial_mapping(getattr(fitter, "initial_parameters", None))
     with _Strings("fit_chemfit"):
         vector = ChemFitVector(initial)
         if vector.dim == 0:

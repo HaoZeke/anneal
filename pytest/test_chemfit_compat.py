@@ -82,6 +82,12 @@ def _as(fitter, bounds=None, **leaves):
     return fitter
 
 
+def _paired(fitter, kind=list):
+    """``fitter`` with its initial parameters given as (key, value) pairs."""
+    fitter.initial_parameters = kind(fitter.initial_parameters.items())
+    return fitter
+
+
 def _reads(caller, what, one=False):
     """The start of the warning for the numeric strings ``caller`` reads."""
     source, number = ("a string", "a number") if one else ("strings", "numbers")
@@ -368,6 +374,27 @@ WARNS = [
         lambda f: fit_anneal(f, 60, x0=_START[:7]),
         _reads("fit_anneal", "x0"),
     ),
+    # 0.10.0's fit_chemfit read initial_parameters given as (key, value)
+    # pairs, which ChemFit 3.1's Fitter keeps, as the dict they make.
+    (
+        "fit_chemfit initial_parameters as a list of pairs",
+        _fitter,
+        lambda f: fit_chemfit(_paired(f), 60),
+        lambda f: fit_chemfit(f, 60),
+        re.escape(
+            "fit_chemfit reads fitter.initial_parameters, a list of (key, value) "
+            "pairs, as a dict; give the fitter a dict"
+        ),
+    ),
+    (
+        "fit_chemfit boltzmann initial_parameters as a tuple of pairs",
+        _fitter,
+        lambda f: fit_chemfit(
+            _paired(f, tuple), 60, method="boltzmann", steps_per_epoch=10
+        ),
+        lambda f: fit_chemfit(f, 60, method="boltzmann", steps_per_epoch=10),
+        re.escape("initial_parameters, a tuple of (key, value) pairs, as a dict"),
+    ),
 ]
 
 
@@ -530,6 +557,37 @@ def test_the_installed_chemfit_fitter_runs_on_bounds_read_from_yaml(entry):
     for got, expected in zip(calls, want_calls):
         assert np.array_equal(got, expected)
     assert np.array_equal(out["x"], want["x"])
+
+
+def test_fit_chemfit_reads_the_pairs_a_chemfit_3_1_fitter_keeps():
+    fitter_type = pytest.importorskip("chemfit.fitter").Fitter
+    pairs = [("a", 0.5), ("b", 0.1)]
+    bounds = {"a": (0.0, 1.0), "b": (0.0, 1.0)}
+    try:
+        fitter_type(lambda params: 0.0, initial_params=pairs, bounds=bounds)
+    except TypeError:
+        pytest.skip("this ChemFit refuses initial_params that is not a mapping")
+
+    def run(initial):
+        calls = []
+
+        def objective(params):
+            calls.append((params["a"], params["b"]))
+            return (params["a"] - 0.3) ** 2 + (params["b"] - 0.2) ** 2
+
+        fitter = fitter_type(objective, initial_params=initial, bounds=bounds)
+        return fit_chemfit(fitter, 60), calls
+
+    with pytest.warns(
+        FutureWarning, match=re.escape("a list of (key, value) pairs, as a dict")
+    ) as record:
+        out, calls = run(pairs)
+    assert len([w for w in record if issubclass(w.category, FutureWarning)]) == 1
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", FutureWarning)
+        want, want_calls = run(dict(pairs))
+    assert calls == want_calls and len(calls) > 1
+    assert out == want
 
 
 def _box(fitter):
