@@ -14,21 +14,76 @@ Policy is *documented, safe, not oracle-optimal* (same stance as
 | =aspect_ratio= | max box width / min box width (eindir =BoxGeometry=) |
 | =budget= | work-unit budget |
 
+* Values-only runs under Auto
+
+With =policy="auto"=, no =grad_fn= and no =noise_sigma=, the driver does
+not consult the regime: every such run, whatever its box width or
+dimension, goes to one values-only loop over six arms.
+
+| Arm | Starts from |
+|-----+-------------|
+| =cma= | BIPOP CMA-ES centred on the incumbent: local runs with short steps, large-population runs with a box-wide step; separable above 100 dimensions or when the budget is shorter than the covariance learning horizon |
+| =qn= | finite-difference projected BFGS from the incumbent, kicked from it once converged |
+| =gsa= | one chain at the incumbent; its first temperature step ends with a finite-difference local search from the best point, and later steps search from each new record (dual_annealing's schedule) |
+| =de= | best/1/bin with the incumbent as the first population member (differential_evolution's =x0=) |
+| =surrogate= | an additive model fitted to every evaluation so far: one evaluation tests its per-coordinate minimum, then tempered samples from its marginals |
+| =explore= | QMC restarts over the whole box |
+
+Without =x0= the start is the best of a seeded low-discrepancy design of
+=dim + 1= points (at most a tenth of the budget), so seeds vary it; with
+=x0= it is =x0=. A slice is four gradients' worth of evaluations or a
+48th of the budget (eight rounds for each of the six arms), whichever is
+larger. When the budget affords five finite-difference gradients per
+coordinate, a descent from the start opens the run and continues while
+its slices lower the incumbent, up to convergence; its successes
+describe the start, so =qn= then rejoins the ranking on the prior.
+
+From the minimum the opening reaches, =gsa= and then =cma= each keep the
+turn while they pay. A phase ends once it has gone eight slices without
+lowering the incumbent, or as long as its last gain took if that is
+longer, and it stops short of the closing descent plus one slice for
+each other arm not yet played, the next phase's included. Against a
+descended incumbent a GSA record is a lower basin and a CMA-ES gain a
+better point of the same one; both come in bursts (a local search per
+record, a run per covariance) that single slices would not see. From an
+undescended start GSA's first records are box-wide samples that leave
+the start's basin, so without an opening there are no phases.
+
+Each arm not yet played then takes one slice (the warm-up round, as in
+the main bandit), after which a round picks uniformly with probability
+=1/round=, otherwise replays the arm whose last slice lowered the
+incumbent, and otherwise takes a discounted Thompson draw. A slice
+succeeds when it lowers the incumbent by more than
+=1e-4 max(|f|, 1)=. A closing finite-difference descent from the final
+incumbent takes the last ten gradients' worth of evaluations (at most
+40% of the budget), enough for it to converge.
+
 * Regimes → preferred portfolio arms / kernels
+
+These rows govern runs with a gradient or a declared noise scale; Legacy
+always uses =Default=.
 
 | Regime | When | Prefer |
 |--------+------+--------|
+| =StochasticNoise= | noise_sigma set | OSA accept required; explore + GSA; refuse exact-only accept path |
+| =MultimodalGlobal= | mean box width > 9 and dim ≥ 2 | GSA and DE first, after a short multimodality probe on boxes narrower than 50 |
 | =LowDimSmooth= | dim ≤ 5 and gradient | shift/hop/GLE polish-heavy; early QMC polish |
 | =HighDimIllConditioned= | dim ≥ 20 and gradient | GLE, reduced-space, hop; surrogates deprioritized |
-| =StochasticNoise= | noise_sigma set | OSA accept required; explore + GSA; refuse exact-only accept path |
-| =MultimodalNoGrad= | no gradient, mid dim or aspect ≥ 8 | under Auto, a fixed schedule: finite-difference descent, CMA-ES from the incumbent, closing descent |
+| =MultimodalNoGrad= | no gradient, dim ≥ 5 or aspect ≥ 8 | reported by =select_regime= but never run by the driver (values-only Auto runs take the loop above) |
 | =Default= | else | balanced library order (explore first for restart floor) |
+
+The rows are tested in this order, so a wide box with a gradient is
+=MultimodalGlobal= even when dim ≤ 5.
 
 * Safety
 
-- Restart arm (=explore=) always remains first so Borel–Cantelli restart still fires.
-  The =MultimodalNoGrad= schedule under Auto runs no bandit; its restarts are
-  the BIPOP CMA-ES runs, large-population ones spanning the box.
+- In the main bandit the restart arm (=explore=) always remains first so
+  Borel–Cantelli restart still fires. The values-only loop gives =explore=,
+  =gsa=, =de= and =surrogate= a warm-up slice each whenever the budget
+  left after the opening holds those slices and the closing descent (the
+  phases leave room for them; at 39 dimensions and 1000 evaluations it
+  does not, and =surrogate= and =explore= go unplayed), and keeps the
+  same =1/round= uniform floor afterwards.
 - Unknown features fall to =Default= (safe fallback).
 - Policy biases Beta priors and arm *order*, not hard exclusion (except
   noise-aware accept requirement under =StochasticNoise=).

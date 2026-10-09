@@ -9,6 +9,14 @@
 //! least `1/(Km)`. The divergent harmonic mass keeps every arm scheduled
 //! infinitely often and preserves the randomized restart guarantee.
 //!
+//! Under [`PortfolioPolicy::Auto`] a run with neither a gradient nor a
+//! declared noise scale takes a smaller loop, whatever its box
+//! (`run_values_only_portfolio`): CMA-ES, a finite-difference
+//! quasi-Newton descent, GSA, DE, the additive surrogate and the restart
+//! arm, each played once before ranking and then under the same decaying
+//! floor, after an opening descent from the start and GSA and CMA-ES
+//! phases from its minimum, and before a closing one from the incumbent.
+//!
 //! Scheduler quantities derive from the problem and the budget rather
 //! than from tuning knobs: the slice size affords a few gradient-
 //! equivalents and at least several expected rounds per arm; the
@@ -3802,11 +3810,14 @@ where
 
 /// [`portfolio_optimize_with_policy`] from a caller-supplied start.
 ///
-/// `x0` is the first charged evaluation and the first incumbent. Arms that
-/// read the incumbent, such as the trust-region poll, HMC, the population
-/// arm, CMA-ES and the quasi-Newton descent, start from it until a lower
-/// point is found; arms with their own designs (the Bayesian pilot, the
-/// reduced-space search) do not. It costs one work unit of `budget`.
+/// `x0` is the first charged evaluation and costs one work unit of
+/// `budget`. It is the incumbent until a lower value is found (if its value
+/// is not finite, until any finite value is), and arms that read the
+/// incumbent start from it: in the values-only loop the descents, CMA-ES,
+/// one GSA chain and the first DE member; with a gradient or declared noise
+/// the trust-region poll, HMC and the population arm. Arms with their own
+/// designs (the Bayesian pilot, the reduced-space search) do not. Without
+/// `x0` the values-only loop starts from the best of a small seeded design.
 pub fn portfolio_optimize_from<O, G>(
     obj: &O,
     grad: Option<&G>,
