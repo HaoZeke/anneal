@@ -1,14 +1,15 @@
 """ChemFit review-response pattern: fit per-atom positions with anneal.
 
 This is the corrected form of the ``run_anneal(benchmark_context)`` snippet
-from the ChemFit review thread. Three things were wrong there:
+from the ChemFit review thread. Its ``fitter.evaluate`` / ``fitter.step``
+loop is current ChemFit's protocol; ChemFit 3.1 named the pair ``ask`` /
+``tell``, and :func:`anneal.chemfit.fit_anneal` drives whichever pair the
+fitter has. Two things were wrong there:
 
-1. ``fitter.evaluate`` / ``fitter.step`` are not the ChemFit protocol; the
-   user-driven loop is ``init`` -> ``ask`` -> ``tell`` -> ``finish``.
-2. ``anneal.run`` used to drive an unconstrained variant, so proposals left
+1. ``anneal.run`` used to drive an unconstrained variant, so proposals left
    ``[low, high]``. It now mirror-reflects every proposal into the box, and
    the portfolio reflects before evaluation.
-3. There was no way to pass the benchmark's initial parameters; ``x0`` (the
+2. There was no way to pass the benchmark's initial parameters; ``x0`` (the
    fitter's ``initial_params`` by default) now seeds the chain / incumbent.
 
 Run with a stub fitter (no ChemFit install needed)::
@@ -31,9 +32,10 @@ class StubFitter:
     """Minimal duck-typed stand-in for ``chemfit.Fitter``.
 
     Harmonic wells pull each atom toward a hidden target; the loss is the
-    squared deviation. Implements the user-driven protocol
+    squared deviation. Implements ChemFit 3.1's user-driven protocol
     (``init``/``ask``/``tell``/``finish``) with ChemFit's best-seen
-    tracking semantics.
+    tracking semantics; ``fit_anneal`` drives ``evaluate``/``step`` the
+    same way.
     """
 
     def __init__(self, initial_params: dict[str, Any], target: np.ndarray):
