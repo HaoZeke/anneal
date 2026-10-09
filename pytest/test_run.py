@@ -1022,3 +1022,13 @@ def test_cluster_search_probe_follows_the_callback_rules():
 
     out = cluster_search(infinite_far_out, lj_cluster_gradient, 13, 2000, seed=1)
     assert isinstance(out["best_energy"], float)
+
+
+def test_steps_near_the_float_limit_keep_the_documented_call_count():
+    low, high = np.full(3, -4.4e307), np.full(3, 4.4e307)
+    for preset in (Fast(t_init=1.0, gamma=8.8e306), Boltzmann(t_init=1.0, sigma=8.8e306)):
+        objective = Recorder(lambda x: float(np.sum(np.abs(x)) / 1e307))
+        run(objective, low, high, preset, n_epochs=3, steps_per_epoch=100, seed=0)
+        points = np.array(objective.points)
+        assert len(points) == 301
+        assert np.all(np.isfinite(points)) and np.all(points >= low) and np.all(points <= high)
