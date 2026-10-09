@@ -266,3 +266,17 @@ def test_run_fitter_passes_preset_and_keywords_down_the_fallback_path():
         run_fitter(fitter(), 50, gradient=lambda p: p)
     with pytest.raises(TypeError, match="stepz_per_epoch"):
         run_fitter(fitter(), 50, method="sa", stepz_per_epoch=7)
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "name"),
+    [({"budget": 2.5}, "budget"), ({"budget": True}, "budget"), ({"seed": 1.5}, "seed"), ({"seed": -1}, "seed")],
+)
+def test_run_fitter_does_not_coerce_what_fit_anneal_refuses(kwargs, name):
+    from anneal.chemfit import run_fitter
+
+    fitter = StepFitter({"positions": np.zeros((2, 3)) + 0.5}, {"positions": (-3.0, 3.0)})
+    arguments = {"budget": 50, **kwargs}
+    with pytest.raises(ValueError, match=name):
+        run_fitter(fitter, arguments.pop("budget"), method="sa", **arguments)
+    assert fitter.seen == []
