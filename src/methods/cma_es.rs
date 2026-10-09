@@ -57,7 +57,8 @@ const MAX_WIDTH_RATIO: f64 = 10.0;
 /// Why a CMA-ES run stopped.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CmaStop {
-    /// Recent best values and the latest generation span a negligible range.
+    /// The best values of the last `10 + 30n/lambda` generations span a
+    /// negligible range relative to their magnitude (TolHistFun).
     TolFun,
     /// At least ten recent best values span less than the configured
     /// absolute tolerance (pycma's `tolfunhist`; see

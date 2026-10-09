@@ -1,4 +1,7 @@
-Without a gradient, mid-width multimodal portfolio boxes (mean width above 9
-and below 50) spend 85% of the budget on one GSA anneal before the Thompson
-allocation, and the anneal follows every new record with a finite-difference
-descent, as dual_annealing does with L-BFGS-B.
+In values-only portfolio runs the GSA arm starts one chain at the incumbent,
+ends its first temperature step with a finite-difference local search from its
+best point, and follows every later record with another, as dual_annealing
+does with L-BFGS-B. The search stops on L-BFGS-B's tests: a decrease below
+``1e7 eps max(|f|, 1)`` or a projected gradient below ``1e-5``. The DE arm's
+population starts with the incumbent, as SciPy's differential_evolution places
+``x0``, and its first slice evolves the population once it is seeded.

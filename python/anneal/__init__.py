@@ -862,12 +862,16 @@ def global_optimize(
     every scheduler quantity derives from the budget, the dimension,
     and the arm count.
 
-    Without ``grad_fn``, boxes too narrow for heavy-tailed visiting
-    (least-squares fits, clusters, curved valleys) run a fixed schedule
-    instead: a finite-difference quasi-Newton descent, CMA-ES restarted
-    from the incumbent, and a closing descent. Mid-width multimodal
-    boxes spend most of the budget on one generalized-simulated-annealing
-    run with a finite-difference local search from every new record.
+    With ``policy="auto"``, no ``grad_fn`` and no ``noise_sigma``, the
+    run takes a values-only loop instead, whatever the box: CMA-ES, a
+    finite-difference quasi-Newton descent, generalized simulated
+    annealing with dual_annealing's local search, differential
+    evolution, the additive surrogate, and the QMC restart arm. When the
+    budget lets a descent converge, one from the start opens the run while
+    it pays, and from the minimum it reaches annealing and then CMA-ES
+    each keep the turn while they lower the incumbent. Each arm gets one
+    slice before the allocation ranks them and the same decaying uniform
+    floor afterwards, and a descent from the incumbent closes the run.
 
     Args:
       obj_fn: callable ``f(numpy.ndarray) -> float``.
@@ -889,7 +893,13 @@ def global_optimize(
       policy: ``"auto"`` (default; feature-based regime routing) or
         ``"legacy"`` (flat arm order, uninformative priors; A/B only).
       x0: optional starting point inside the box, same size as ``low``. It is
-        the first charged evaluation and the first incumbent.
+        the first charged evaluation and the incumbent until a lower value
+        is found (if its value is not finite, until any finite value is).
+        The values-only loop starts its descents, CMA-ES, one annealing
+        chain and the first evolution member there; with ``grad_fn`` or
+        ``noise_sigma`` the arms that read the incumbent (trust-region
+        poll, HMC, the population arm) do. Without ``x0`` the values-only
+        loop starts from the best of a small seeded design.
 
     ``obj_fn`` and ``grad_fn`` are only called inside ``[low, high]``: a
     point an arm proposes outside is mirror-reflected into the box, and the
