@@ -10,9 +10,9 @@ best evaluated parameters and its return value is the result; ChemFit returns
 the parameters it was given.
 
 Nested parameter dictionaries are flattened only at the optimizer
-boundary and rebuilt on the way back. Every evaluation stays inside the box,
-and the fitter's initial parameters are the start unless a caller passes
-another ``x0``. The default driver is the Thompson-allocated portfolio.
+boundary and rebuilt on the way back. Every evaluation lies inside the box,
+the first one is the start, and the budget counts it. The default driver is
+the Thompson-allocated portfolio.
 
 The first exception the fitter raises, or a loss that is not a real number,
 ends the drive: the fitter is not called again, ``finish`` is skipped, and
@@ -265,6 +265,11 @@ def _resolve_bounds(
     return np.concatenate(lows), np.concatenate(highs)
 
 
+def _clip(x: np.ndarray, low: np.ndarray, high: np.ndarray) -> np.ndarray:
+    """``x`` moved onto ``[low, high]``; coordinates inside keep their bits."""
+    return np.where(x < low, low, np.where(x > high, high, x))
+
+
 # ---------------------------------------------------------------------------
 # One drive of a fitter.
 # ---------------------------------------------------------------------------
@@ -277,9 +282,10 @@ class _Stop(BaseException):
 class _Session:
     """The objective a driver calls: one fitter evaluation per call.
 
-    It sends a step notice every ``step_every`` evaluations and records the
-    first exception from the fitter or from reading its loss. That exception
-    stops the driver.
+    It counts evaluations against the budget, sends a step notice every
+    ``step_every`` of them, keeps the best point, and records the first
+    exception from the fitter or from reading its loss. That exception, or
+    a spent budget, stops the driver.
     """
 
     def __init__(self, candidate, evaluate, step, budget: int, step_every: int):
@@ -289,15 +295,20 @@ class _Session:
         self.budget = budget
         self.step_every = step_every
         self.count = 0
+        self.best: np.ndarray | None = None
+        self.best_loss = math.inf
         self.error: BaseException | None = None
 
     def __call__(self, x) -> float:
-        if self.error is not None:
+        if self.error is not None or self.count >= self.budget:
             raise _Stop
         try:
             point = np.array(x, dtype=np.float64)
             loss = _loss_value(self._evaluate(self._candidate(point)))
             self.count += 1
+            rank = math.inf if math.isnan(loss) else loss
+            if self.best is None or rank < self.best_loss:
+                self.best, self.best_loss = point, rank
             if self.count % self.step_every == 0:
                 self._step()
         except BaseException as error:
@@ -310,25 +321,24 @@ def _drive(
     session: _Session,
     low: np.ndarray,
     high: np.ndarray,
-    start: np.ndarray | None,
+    start: np.ndarray,
     driver: str,
     seed: int,
     preset: Any = None,
     steps_per_epoch: int = 1,
 ) -> np.ndarray:
-    """Run ``driver`` on the session and return the best point it reports.
+    """Run ``driver`` from ``start`` and return the best evaluated point.
 
     The first fitter exception is raised here, after the driver has returned.
     """
     from anneal import global_optimize, run
 
     budget = session.budget
-    best = None
     try:
         if driver == "portfolio":
-            best = global_optimize(session, low, high, budget, seed=seed, x0=start)["best_pos"]
+            global_optimize(session, low, high, budget, seed=seed, x0=start)
         else:
-            best = run(
+            run(
                 session,
                 low,
                 high,
@@ -337,12 +347,15 @@ def _drive(
                 steps_per_epoch=steps_per_epoch,
                 seed=seed,
                 x0=start,
-            ).best_pos
+                max_evals=budget,
+            )
     except _Stop:
         pass
     if session.error is not None:
         raise session.error
-    return np.asarray(best, dtype=np.float64)
+    if session.best is None:
+        raise RuntimeError("the driver ended before evaluating the start")
+    return session.best
 
 
 def _classical_preset(driver: str, preset_kwargs: dict[str, Any] | None):
@@ -376,9 +389,8 @@ def fit_anneal(
         ``bounds``, ``init``, ``finish``, and either ``evaluate`` and
         ``step`` (current ChemFit) or ``ask`` and ``tell`` (ChemFit 3.1).
         Each evaluation is followed by one ``step`` (or ``tell``).
-      budget: total objective-evaluation budget. The portfolio charges one
-        unit per evaluation; the classical drivers run
-        ``n_epochs * steps_per_epoch <= budget`` evaluations.
+      budget: total objective-evaluation budget, the start included; it is
+        never exceeded.
       driver: ``"portfolio"`` (default; Thompson-allocated SOTA driver
         over the gradient-free arms — QMC restarts, basin hopping,
         differential evolution, GSA, parallel tempering — with no
@@ -387,14 +399,16 @@ def fit_anneal(
       seed: RNG seed.
       x0: warm start. ``None`` (default) uses the fitter's
         ``initial_parameters``; a nested dict with the same structure or
-        a flat vector of the flattened dimension overrides it.
+        a flat vector of the flattened dimension overrides it. A start
+        outside the box is moved onto it.
       low, high: explicit flat bound vectors. When omitted, bounds come
         from the fitter's ``bounds`` dict (``(lower, upper)`` pairs
         mirroring ``initial_params``); entries without bounds fall back
         to ``x0 +/- bound_span``.
       bound_span: half-width of the fallback box around unbounded entries.
-      steps_per_epoch: classical-driver epoch width; epochs are derived
-        as ``max(1, budget // steps_per_epoch)``.
+      steps_per_epoch: classical-driver epoch width; the chain runs
+        ``max(1, budget // steps_per_epoch)`` epochs and stops when the
+        budget is spent.
       preset_kwargs: extra kwargs for the preset constructor
         (e.g. ``{"t_init": 5.0}``); classical drivers only.
 
@@ -442,7 +456,7 @@ def fit_anneal(
     )
     # run and global_optimize refuse a start outside the box. A caller vector
     # such as zeros is pulled onto the box before the first evaluation.
-    start_vector = np.minimum(np.maximum(start_vector, low_vec), high_vec)
+    start_vector = _clip(start_vector, low_vec, high_vec)
 
     # The fitter owns bookkeeping; every evaluation is one optimizer step.
     _init(fitter)
@@ -642,19 +656,21 @@ def fit_chemfit(
             gradient-free drivers never need forces: ``init``, ``finish``,
             and ``evaluate`` / ``step`` (current ChemFit) or ``ask`` /
             ``tell`` (ChemFit 3.1).
-        budget: total objective evaluations (one ``evaluate`` or ``ask``
-            each).
+        budget: total objective evaluations, the start included; it is
+            never exceeded.
         method: ``"portfolio"`` (default; Thompson-allocated SOTA including
             parallel-tempering communicating chains), or ``"boltzmann"``,
-            ``"fast"``, ``"gsa"`` for the bound-respecting classical chain
-            from the matching initial parameters.
+            ``"fast"``, ``"gsa"`` for the bound-respecting classical chain.
+            Every method starts from the initial parameters, moved onto the
+            box when they lie outside it.
         seed: RNG seed forwarded to the anneal driver.
         default_span: half-width around the initial value for parameters
             ChemFit leaves unbounded.
         tell_every: portfolio evaluations between step notices (``step`` or
             ``tell``) so registered callbacks still fire.
-        steps_per_epoch: classical-chain evaluations per epoch; epochs are
-            derived as ``budget // steps_per_epoch``.
+        steps_per_epoch: classical-chain evaluations per epoch, and per
+            step notice; the chain runs ``max(1, budget // steps_per_epoch)``
+            epochs and stops when the budget is spent.
         **preset_kwargs: ``t_init`` / ``sigma`` / ``gamma`` / ``q_v`` /
             ``q_a`` forwarded to the classical preset constructors.
 
@@ -667,16 +683,19 @@ def fit_chemfit(
     from anneal import Boltzmann, Fast, Gsa
 
     evaluate, step = _protocol(fitter)
-    if int(budget) < 1:
+    budget = int(budget)
+    if budget < 1:
         raise ValueError("budget must be positive")
     vector = ChemFitVector(dict(fitter.initial_parameters))
     if vector.dim == 0:
         raise ValueError("fitter.initial_parameters holds no parameters")
     low, high = chemfit_box(fitter, vector, default_span=default_span)
+    start = _clip(vector.x0, low, high)
+    steps = max(1, min(int(steps_per_epoch), budget))
 
     _init(fitter)
     if method == "portfolio":
-        preset, start, every = None, None, max(1, int(tell_every))
+        preset, every = None, max(1, int(tell_every))
     elif method in ("boltzmann", "fast", "gsa"):
         presets = {
             "boltzmann": Boltzmann(
@@ -693,15 +712,12 @@ def fit_chemfit(
                 q_a=float(preset_kwargs.get("q_a", 1.7)),
             ),
         }
-        preset = presets[method]
-        start = np.asarray(vector.x0, dtype=np.float64)
-        every = max(1, int(steps_per_epoch))
+        preset, every = presets[method], steps
     else:
         raise ValueError(
             f"unknown method {method!r}: expected 'portfolio', 'boltzmann', 'fast', or 'gsa'"
         )
-    session = _Session(vector.unpack, evaluate, step, int(budget), step_every=every)
-    steps = max(1, int(steps_per_epoch))
+    session = _Session(vector.unpack, evaluate, step, budget, step_every=every)
     best = _drive(session, low, high, start, method, int(seed), preset, steps)
 
     best_params = vector.unpack(best)
@@ -848,9 +864,11 @@ def run_benchmark(
 
     ``method`` is ``portfolio`` (the budget-only global optimizer), or
     ``boltzmann``, ``fast``, or ``gsa``. The chain starts at
-    ``initial_params``. Every coordinate the fitter sees lies in the box.
-    The fitter is driven through ``evaluate`` / ``step`` or ``ask`` /
-    ``tell``, with one step notice per evaluation.
+    ``initial_params``, moved onto the box when it lies outside. Every
+    coordinate the fitter sees lies in the box, and ``budget`` caps the
+    evaluations, the start included. The fitter is driven through
+    ``evaluate`` / ``step`` or ``ask`` / ``tell``, with one step notice per
+    evaluation.
 
     ``low`` and ``high`` may be vectors or scalars (broadcast). When they
     are omitted, bounds are read from ``benchmark_context["bounds"]`` or
@@ -879,7 +897,7 @@ def run_benchmark(
     )
     if np.any(box_high <= box_low):
         raise ValueError("each upper bound must be greater than the lower bound")
-    x0 = np.minimum(np.maximum(x0, box_low), box_high)
+    x0 = _clip(x0, box_low, box_high)
 
     _init(fitter)
     name = method.lower()
