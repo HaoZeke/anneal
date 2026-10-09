@@ -267,59 +267,73 @@ where
 }
 
 /// Type alias for the Boltzmann (BSA) preset:
-/// `(O, LogCool, ContinuousR_n, Gaussian, Metropolis)`.
-pub type BoltzmannVariant<O> = SaVariant<f64, O, LogCool<f64>, ContinuousR_n, Gaussian, Metropolis>;
+/// `(O, LogCool, BoxConstrained, Reflected<Gaussian>, Metropolis)`.
+pub type BoltzmannVariant<O> =
+    SaVariant<f64, O, LogCool<f64>, BoxConstrained<f64>, Reflected<Gaussian>, Metropolis>;
 
 /// Type alias for the Fast (FSA) preset:
-/// `(O, ReciprocalCool, ContinuousR_n, Cauchy, Metropolis)`.
-pub type FastVariant<O> = SaVariant<f64, O, ReciprocalCool<f64>, ContinuousR_n, Cauchy, Metropolis>;
+/// `(O, ReciprocalCool, BoxConstrained, Reflected<Cauchy>, Metropolis)`.
+pub type FastVariant<O> =
+    SaVariant<f64, O, ReciprocalCool<f64>, BoxConstrained<f64>, Reflected<Cauchy>, Metropolis>;
 
 /// Type alias for the GSA preset:
-/// `(O, TsallisCool, ContinuousR_n, TsallisVisit, TsallisAccept)`.
-pub type GsaVariant<O> =
-    SaVariant<f64, O, TsallisCool<f64>, ContinuousR_n, TsallisVisit, TsallisAccept<f64>>;
+/// `(O, TsallisCool, BoxConstrained, Reflected<TsallisVisit>, TsallisAccept)`.
+pub type GsaVariant<O> = SaVariant<
+    f64,
+    O,
+    TsallisCool<f64>,
+    BoxConstrained<f64>,
+    Reflected<TsallisVisit>,
+    TsallisAccept<f64>,
+>;
 
 /// Constructs the Boltzmann SA variant: logarithmic cooling, isotropic
-/// Gaussian moves, Metropolis acceptance, on the unconstrained `R^dim`.
+/// Gaussian moves, Metropolis acceptance, on the box `obj.bounds()`.
 ///
-/// `dim` is read from `obj.dim()`. `t_init` is the initial temperature;
-/// the cooling decays as `T_0 log(2) / log(k+2)` (the `k0 = 2` choice
-/// matches the IISE manuscript Section 4 convention). `sigma` is the
-/// per-component Gaussian step size.
+/// Every proposal is mirror-reflected into the box ([`Reflected`]), so the
+/// chain and every evaluated point stay in the closed box. Reflection keeps
+/// the kernel symmetric, so Metropolis needs no Hastings term. An axis with
+/// `low == high` is held at that value.
+///
+/// `t_init` is the initial temperature; the cooling decays as
+/// `T_0 log(2) / log(k+2)` (the `k0 = 2` choice matches the IISE manuscript
+/// Section 4 convention). `sigma` is the per-component Gaussian step size.
 pub fn boltzmann<O: Objective<f64> + Send + Sync>(
     obj: O,
     t_init: f64,
     sigma: f64,
 ) -> Result<BoltzmannVariant<O>, LawViolation> {
-    let dim = obj.dim();
+    let bounds = obj.bounds().clone();
     SaVariant::checked(
         obj,
         LogCool::new(t_init, 2.0),
-        ContinuousR_n::new(dim),
-        Gaussian::new(sigma),
+        BoxConstrained::new(bounds.clone()),
+        Reflected::new(Gaussian::new(sigma), bounds),
         Metropolis,
     )
 }
 
 /// Constructs the Fast SA variant: reciprocal cooling, isotropic Cauchy
-/// moves, Metropolis acceptance, on the unconstrained `R^dim`.
+/// moves, Metropolis acceptance, on the box `obj.bounds()` (proposals are
+/// reflected into it as in [`boltzmann`]).
 pub fn fast<O: Objective<f64> + Send + Sync>(
     obj: O,
     t_init: f64,
     gamma: f64,
 ) -> Result<FastVariant<O>, LawViolation> {
-    let dim = obj.dim();
+    let bounds = obj.bounds().clone();
     SaVariant::checked(
         obj,
         ReciprocalCool::new(t_init),
-        ContinuousR_n::new(dim),
-        Cauchy::new(gamma),
+        BoxConstrained::new(bounds.clone()),
+        Reflected::new(Cauchy::new(gamma), bounds),
         Metropolis,
     )
 }
 
 /// Constructs the GSA variant: Tsallis cooling, Tsallis visit kernel,
-/// Tsallis acceptance, on the unconstrained `R^dim`.
+/// Tsallis acceptance, on the box `obj.bounds()` (proposals are reflected
+/// into it as in [`boltzmann`]).
 ///
 /// `q_v in (1, 3)` is the visiting index; `q_a` is the acceptance index
 /// (`q_a == 1` collapses to Metropolis).
@@ -329,12 +343,12 @@ pub fn gsa<O: Objective<f64> + Send + Sync>(
     q_v: f64,
     q_a: f64,
 ) -> Result<GsaVariant<O>, LawViolation> {
-    let dim = obj.dim();
+    let bounds = obj.bounds().clone();
     SaVariant::checked(
         obj,
         TsallisCool::new(t_init, q_v),
-        ContinuousR_n::new(dim),
-        TsallisVisit::new(q_v),
+        BoxConstrained::new(bounds.clone()),
+        Reflected::new(TsallisVisit::new(q_v), bounds),
         TsallisAccept::new(q_a),
     )
 }
