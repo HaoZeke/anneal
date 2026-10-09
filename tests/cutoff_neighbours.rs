@@ -90,7 +90,72 @@ fn brute_shortest(
                 });
             }
         }
-        lists[i].sort_by_key(|neighbour| neighbour.index);
+        lists[i].sort_by(|left, right| {
+            left.index.cmp(&right.index).then_with(|| {
+                left.displacement[0]
+                    .total_cmp(&right.displacement[0])
+                    .then_with(|| left.displacement[1].total_cmp(&right.displacement[1]))
+                    .then_with(|| left.displacement[2].total_cmp(&right.displacement[2]))
+            })
+        });
+    }
+    lists
+}
+
+/// Every lattice image inside the cutoff, not only the shortest one.
+fn brute_images(
+    positions: &[[f64; 3]],
+    cell: &Cell,
+    periodic: [bool; 3],
+    cutoff: f64,
+) -> Vec<Vec<CutoffNeighbour>> {
+    let n = positions.len();
+    let mut reach = [0_i32; 3];
+    let widths = cell.widths();
+    for axis in 0..3 {
+        if periodic[axis] {
+            let width = widths[axis].abs().max(1e-12);
+            reach[axis] = ((cutoff / width).ceil() as i32 + 2).clamp(2, 8);
+        }
+    }
+    let cutoff2 = cutoff * cutoff;
+    let mut lists = vec![Vec::new(); n];
+    for i in 0..n {
+        for j in 0..n {
+            for na in -reach[0]..=reach[0] {
+                for nb in -reach[1]..=reach[1] {
+                    for nc in -reach[2]..=reach[2] {
+                        if i == j && na == 0 && nb == 0 && nc == 0 {
+                            continue;
+                        }
+                        let shift = cell.lattice_shift(na, nb, nc);
+                        let p = positions[i];
+                        let q = positions[j];
+                        let displacement = [
+                            q[0] + shift[0] - p[0],
+                            q[1] + shift[1] - p[1],
+                            q[2] + shift[2] - p[2],
+                        ];
+                        let d2 = length2(displacement);
+                        if d2 < cutoff2 && d2 > 1e-24 {
+                            lists[i].push(CutoffNeighbour {
+                                index: j,
+                                displacement,
+                                distance: d2.sqrt(),
+                            });
+                        }
+                    }
+                }
+            }
+        }
+        lists[i].sort_by(|left, right| {
+            left.index.cmp(&right.index).then_with(|| {
+                left.displacement[0]
+                    .total_cmp(&right.displacement[0])
+                    .then_with(|| left.displacement[1].total_cmp(&right.displacement[1]))
+                    .then_with(|| left.displacement[2].total_cmp(&right.displacement[2]))
+            })
+        });
     }
     lists
 }
@@ -125,12 +190,12 @@ fn periodic_cutoff_matches_the_shortest_lattice_vector() {
     ];
     let ortho_cutoff = 6.0;
     let got = periodic_cutoff_pairs(&ortho_points, &ortho, ortho_cutoff).expect("ortho pairs");
-    let expect = brute_shortest(&ortho_points, &ortho, [true; 3], ortho_cutoff);
+    let expect = brute_images(&ortho_points, &ortho, [true; 3], ortho_cutoff);
     assert_lists_match(&got, &expect);
     let half = got[0]
         .iter()
-        .find(|neighbour| neighbour.index == 1)
-        .expect("atom 0 sees the half-box atom");
+        .find(|neighbour| neighbour.index == 1 && (neighbour.displacement[0] + 5.0).abs() < 1e-9)
+        .expect("atom 0 keeps the half-box image -L/2");
     assert!(
         (half.displacement[0] + 5.0).abs() < 1e-9,
         "the half-box tie keeps -L/2, got {:?}",
@@ -164,7 +229,7 @@ fn periodic_cutoff_matches_the_shortest_lattice_vector() {
     let skew = Cell::from_vectors(skew_vectors[0], skew_vectors[1], skew_vectors[2], [0.0; 3])
         .expect("skewed cell");
     let got = periodic_cutoff_pairs(&skew_points, &skew, skew_cutoff).expect("skewed pairs");
-    let expect = brute_shortest(&skew_points, &skew, [true; 3], skew_cutoff);
+    let expect = brute_images(&skew_points, &skew, [true; 3], skew_cutoff);
     assert_lists_match(&got, &expect);
 
     // Hexagonal prism. The fractional wrap of the body diagonal is longer
@@ -177,11 +242,12 @@ fn periodic_cutoff_matches_the_shortest_lattice_vector() {
     let hex_points = [hex.cartesian([0.49, 0.49, 0.49]), [0.0; 3]];
     let hex_cutoff = 9.85;
     let got = periodic_cutoff_pairs(&hex_points, &hex, hex_cutoff).expect("hex pairs");
-    let expect = brute_shortest(&hex_points, &hex, [true; 3], hex_cutoff);
+    let expect = brute_images(&hex_points, &hex, [true; 3], hex_cutoff);
     assert_lists_match(&got, &expect);
     let named = got[0]
         .iter()
-        .find(|neighbour| neighbour.index == 1)
+        .filter(|neighbour| neighbour.index == 1)
+        .min_by(|left, right| length2(left.displacement).total_cmp(&length2(right.displacement)))
         .expect("pair (0, 1) is inside the cutoff");
     let fractional = hex.displacement(hex_points[0], hex_points[1]);
     assert!(
@@ -255,6 +321,92 @@ fn free_cluster_shells_match_cartesian_pairs() {
     assert_eq!(h2, expect2);
 }
 
+#[test]
+fn descriptor_length_scale_divides_the_cell_and_the_coordinates() {
+    let geometry = DescriptorGeometry::finite(2.0).expect("finite geometry");
+    let coordinates = Array1::from_vec(vec![0.0, 0.0, 0.0, 3.0, 0.0, 0.0]);
+    let rows = descriptor_cutoff_neighbours(geometry, coordinates.view(), 2.0)
+        .expect("scaled free neighbours");
+    let named = rows[0]
+        .iter()
+        .find(|neighbour| neighbour.0 == 1)
+        .expect("pair (0, 1) stays inside the descriptor cutoff");
+    assert!((named.1[0] - 1.5).abs() < 1e-12, "got {:?}", named.1);
+    assert!(named.1[1].abs() < 1e-12);
+    assert!(named.1[2].abs() < 1e-12);
+
+    let periodic = DescriptorGeometry::new(
+        2.0,
+        Some([10.0, 0.0, 0.0, 0.0, 10.0, 0.0, 0.0, 0.0, 10.0]),
+        [true; 3],
+    )
+    .expect("scaled periodic geometry");
+    let across = Array1::from_vec(vec![0.0, 0.0, 0.0, 9.0, 0.0, 0.0]);
+    let rows = descriptor_cutoff_neighbours(periodic, across.view(), 1.0)
+        .expect("scaled periodic neighbours");
+    let wrapped = rows[0]
+        .iter()
+        .find(|neighbour| neighbour.0 == 1)
+        .expect("pair (0, 1) uses the scaled cell");
+    assert!(
+        (wrapped.1[0] + 0.5).abs() < 1e-9,
+        "scaled minimum image is -0.5, got {:?}",
+        wrapped.1
+    );
+    assert!(wrapped.1[1].abs() < 1e-9);
+    assert!(wrapped.1[2].abs() < 1e-9);
+}
+
+#[test]
+fn partly_open_cell_keeps_one_shortest_image() {
+    let vectors = [[10.0, 0.0, 0.0], [0.0, 10.0, 0.0], [0.0, 0.0, 10.0]];
+    let periodic = [true, true, false];
+    let cell =
+        Cell::from_vectors(vectors[0], vectors[1], vectors[2], [0.0; 3]).expect("partly open cell");
+    let points = [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]];
+    let cutoff = 9.5;
+    let got = cutoff_pairs(&points, vectors, periodic, cutoff).expect("partly open pairs");
+    let expect = brute_shortest(&points, &cell, periodic, cutoff);
+    assert_lists_match(&got, &expect);
+    assert!(
+        length2([-9.0, 0.0, 0.0]) < cutoff * cutoff,
+        "the long image is inside the cutoff"
+    );
+    let images = got[0]
+        .iter()
+        .filter(|neighbour| neighbour.index == 1)
+        .count();
+    assert_eq!(images, 1, "pair (0, 1) keeps one image");
+    let named = got[0]
+        .iter()
+        .find(|neighbour| neighbour.index == 1)
+        .expect("pair (0, 1)");
+    assert!(
+        (named.displacement[0] - 1.0).abs() < 1e-9
+            && named.displacement[1].abs() < 1e-9
+            && named.displacement[2].abs() < 1e-9,
+        "pair (0, 1) keeps [1, 0, 0], got {:?}",
+        named.displacement
+    );
+
+    let self_points = [[0.0, 0.0, 0.0]];
+    let self_cutoff = 11.0;
+    let got = cutoff_pairs(&self_points, vectors, periodic, self_cutoff).expect("self-image");
+    let expect = brute_shortest(&self_points, &cell, periodic, self_cutoff);
+    assert_lists_match(&got, &expect);
+    let image = got[0]
+        .iter()
+        .find(|neighbour| neighbour.index == 0)
+        .expect("periodic self-image");
+    assert!(
+        (image.displacement[0] + 10.0).abs() < 1e-9
+            && image.displacement[1].abs() < 1e-9
+            && image.displacement[2].abs() < 1e-9,
+        "the self-image is [-10, 0, 0], got {:?}",
+        image.displacement
+    );
+}
+
 /// The previous descriptor loop: fractional wrap, then extra lattice shifts.
 /// A zero shift is that wrap. Later shifts are images of it.
 fn hand_rolled_images(
@@ -303,19 +455,15 @@ fn assert_descriptor_matches(rows: &[Vec<(usize, [f64; 3])>], expect: &[Vec<Cuto
     for (centre, (found, wanted)) in rows.iter().zip(expect.iter()).enumerate() {
         assert_eq!(found.len(), wanted.len(), "centre {centre}");
         for right in wanted {
-            let left = found
-                .iter()
-                .find(|neighbour| neighbour.0 == right.index)
-                .unwrap_or_else(|| panic!("centre {centre} missing atom {}", right.index));
-            for axis in 0..3 {
-                assert!(
-                    (left.1[axis] - right.displacement[axis]).abs() < 1e-9,
-                    "centre {centre} atom {} axis {axis}: got {:?} want {:?}",
-                    right.index,
-                    left.1,
-                    right.displacement
-                );
-            }
+            assert!(
+                found.iter().any(|left| {
+                    left.0 == right.index
+                        && (0..3).all(|axis| (left.1[axis] - right.displacement[axis]).abs() < 1e-9)
+                }),
+                "centre {centre} missing atom {} image {:?}",
+                right.index,
+                right.displacement
+            );
         }
     }
 }
@@ -346,7 +494,7 @@ fn descriptor_periodic_neighbours_use_the_shortest_vector() {
         .expect("descriptor neighbours");
     let vectors = [a, b, c];
     let shipped = cutoff_pairs(&positions, vectors, [true; 3], cutoff).expect("cutoff pairs");
-    let expect = brute_shortest(&positions, &cell, [true; 3], cutoff);
+    let expect = brute_images(&positions, &cell, [true; 3], cutoff);
     assert_lists_match(&shipped, &expect);
     assert_descriptor_matches(&rows, &expect);
     let named = rows[0]

@@ -313,9 +313,10 @@ struct NeighborImage {
 
 /// Neighbour list used by the universal descriptor.
 ///
-/// A periodic geometry is [`cutoff_pairs`]. A free cluster is
-/// [`open_cutoff_pairs`]. Each entry is `(atom, displacement)` in
-/// descriptor-length units.
+/// Coordinates and the cell are divided by the geometry length scale, so
+/// the search runs in descriptor lengths. The cutoff is already in those
+/// units. A periodic geometry is [`cutoff_pairs`]. A free cluster is
+/// [`open_cutoff_pairs`]. Each entry is `(atom, displacement)`.
 pub fn descriptor_cutoff_neighbours(
     geometry: DescriptorGeometry,
     coordinates: ArrayView1<f64>,
@@ -348,32 +349,27 @@ fn neighbour_images(
         })
         .collect::<Vec<_>>();
     let scale = geometry.length_scale;
-    let physical = positions
+    let positions = positions
         .iter()
-        .map(|point| [point[0] * scale, point[1] * scale, point[2] * scale])
+        .map(|point| [point[0] / scale, point[1] / scale, point[2] / scale])
         .collect::<Vec<_>>();
-    let physical_cutoff = maximum_cutoff * scale;
     let rows = if geometry.periodic.iter().any(|&axis| axis) {
         let cell = geometry.cell.expect("periodic geometry has a cell");
         let vectors = [
-            [cell[0], cell[1], cell[2]],
-            [cell[3], cell[4], cell[5]],
-            [cell[6], cell[7], cell[8]],
+            [cell[0] / scale, cell[1] / scale, cell[2] / scale],
+            [cell[3] / scale, cell[4] / scale, cell[5] / scale],
+            [cell[6] / scale, cell[7] / scale, cell[8] / scale],
         ];
-        cutoff_pairs(&physical, vectors, geometry.periodic, physical_cutoff)
+        cutoff_pairs(&positions, vectors, geometry.periodic, maximum_cutoff)
             .map_err(|_| DescriptorError::NeighborSearch)?
     } else {
-        open_cutoff_pairs(&physical, physical_cutoff, false)
+        open_cutoff_pairs(&positions, maximum_cutoff, false)
     };
     let mut neighbors = vec![Vec::new(); atoms];
     for (centre, row) in rows.into_iter().enumerate() {
         for neighbour in row {
-            let displacement = [
-                neighbour.displacement[0] / scale,
-                neighbour.displacement[1] / scale,
-                neighbour.displacement[2] / scale,
-            ];
-            let distance = neighbour.distance / scale;
+            let displacement = neighbour.displacement;
+            let distance = neighbour.distance;
             if distance <= 1e-12 || distance >= maximum_cutoff {
                 continue;
             }
