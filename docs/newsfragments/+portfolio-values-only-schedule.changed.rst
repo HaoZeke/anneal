@@ -11,6 +11,6 @@ then each take a turn if they have not yet; later rounds pick uniformly with
 probability ``1/round``, otherwise replay an arm whose last turn lowered the
 incumbent, and otherwise draw by discounted Thompson sampling. A turn is one
 slice, but the descent keeps the turn while each slice lowers its value by more
-than the success threshold, so a kicked descent, or a long one from a poor
-start, is scored on the basin it reaches. A closing descent from the incumbent
-gets the ten gradients' worth of evaluations it needs to converge.
+than the success threshold, until it converges, so a kicked descent, or a long
+one from a poor start, is scored on the basin it reaches. A closing descent from
+the incumbent gets the ten gradients' worth of evaluations it needs to converge.

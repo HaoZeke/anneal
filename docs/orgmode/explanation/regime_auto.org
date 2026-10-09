@@ -58,8 +58,9 @@ the main bandit), after which a round picks uniformly with probability
 =1/round=, otherwise replays the arm whose last turn lowered the
 incumbent, and otherwise takes a discounted Thompson draw. A turn is one
 slice, except that =qn= keeps the turn while each slice lowers its
-descent's value by more than the success threshold, short of the closing
-descent: a kicked descent climbs before it can beat the incumbent, and
+descent's value by more than the success threshold, until that descent
+converges and short of the closing descent: a kicked descent climbs
+before it can beat the incumbent, and
 one from a poor start (Lennard-Jones positions with overlapping atoms)
 takes many slices to settle, so the turn is scored on the basin the
 descent reaches. A turn succeeds when it lowers the incumbent by more

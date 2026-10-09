@@ -1009,18 +1009,24 @@ struct QnArmState {
     /// Descent value at the last [`QnArmState::paid`] check; infinite once
     /// the descent restarts or is kicked.
     checked: f64,
+    /// Whether a descent converged inside a slice since the last check and
+    /// a kick replaced it there.
+    replaced: bool,
 }
 
 impl QnArmState {
     /// Whether the descent has lowered its value by more than the success
     /// threshold since the last check. A new descent pays its first check
-    /// once it has a finite value; a converged one never pays.
+    /// once it has a finite value; a converged one never pays, nor does the
+    /// descent that replaced it inside the same slice.
     fn paid(&mut self) -> bool {
         let value = self.engine.value();
         let paid = !self.engine.is_done()
+            && !self.replaced
             && value.is_finite()
             && value < self.checked - arm_success_threshold(ArmKind::Qn, self.checked);
         self.checked = value;
+        self.replaced = false;
         paid
     }
 }
@@ -3098,6 +3104,7 @@ fn run_qn_arm<O>(
         seen_best: best,
         rng: StdRng::seed_from_u64(seed ^ QN_STREAM),
         checked: f64::INFINITY,
+        replaced: false,
     });
     if best < state.seen_best && best < state.engine.value() {
         state
@@ -3127,6 +3134,7 @@ fn run_qn_arm<O>(
             state.engine.restart_at(x.view(), None, true);
             state.base_val = best;
             state.checked = f64::INFINITY;
+            state.replaced |= ledger.used_get() > start;
         }
         let x = state.engine.ask();
         state.engine.tell(obj.eval(x.view()));
@@ -3169,11 +3177,11 @@ const VALUES_ONLY_ARMS: [ArmKind; 6] = [
 /// failing that a discounted Thompson draw picks. A turn is one slice,
 /// except that the descent keeps the turn, short of the closing polish,
 /// while each slice lowers its own value by more than the success
-/// threshold ([`QnArmState::paid`]). A turn succeeds when it lowers the
-/// incumbent by more than [`arm_success_threshold`]. The closing
-/// polish is a finite-difference descent from the final incumbent with the
-/// evaluations one needs to converge ([`LOCAL_FIRST_POLISH_GRADIENTS`]),
-/// kicked from it once it does.
+/// threshold, until it converges ([`QnArmState::paid`]). A turn succeeds
+/// when it lowers the incumbent by more than [`arm_success_threshold`].
+/// The closing polish is a finite-difference descent from the final
+/// incumbent with the evaluations one needs to converge
+/// ([`LOCAL_FIRST_POLISH_GRADIENTS`]), kicked from it once it does.
 fn run_values_only_portfolio<O, G>(
     obj: &BudgetedObjective<'_, O>,
     ledger: &BudgetLedger,
@@ -6143,6 +6151,33 @@ mod tests {
             "{turns} turns of at most {slice} evaluations would not spend {budget}"
         );
         assert!(result.best_val < 1e-12, "{}", result.best_val);
+    }
+
+    #[test]
+    fn values_only_descent_turn_ends_when_its_descent_converges() {
+        // A slice that outlasts the descent kicks a new one inside it. The
+        // turn follows one descent, so the check after that slice does not
+        // pay, although the new descent is under way.
+        let start = Array1::from_elem(3, 0.7);
+        let slice_from_start = |slice: usize, settle: bool| {
+            let obj = Traced::new(-2.0, 2.0, 3, |x| x.dot(&x));
+            let ledger = BudgetLedger::new(10_000, 3);
+            let budgeted = BudgetedObjective {
+                inner: &obj,
+                ledger: &ledger,
+            };
+            budgeted.eval(start.view());
+            let mut states = ArmStates::default();
+            run_qn_arm(&budgeted, &ledger, &mut states, slice, 1, settle);
+            (ledger.used_get() - 1, states.qn.expect("qn state"))
+        };
+        let (descent, settled) = slice_from_start(10_000, true);
+        assert!(settled.engine.is_done());
+        let (used, mut qn) = slice_from_start(descent + 2, false);
+        assert_eq!(used, descent + 2);
+        assert!(!qn.engine.is_done() && qn.engine.value().is_finite());
+        assert!(!qn.paid(), "the turn ends with the descent it followed");
+        assert!(!qn.replaced);
     }
 
     #[test]
