@@ -1,5 +1,6 @@
 """Tests for the native Thompson-allocated portfolio driver."""
 
+import inspect
 import math
 
 import numpy as np
@@ -95,6 +96,90 @@ def test_arm_statistics_are_reported():
     assert "explore" in out["arm_pulls"]
     assert sum(out["arm_pulls"].values()) > 0
     assert set(out["arm_successes"]) == set(out["arm_pulls"])
+
+
+def _rosenbrock(dim):
+    def fn(x):
+        return float(np.sum(100.0 * (x[1:] - x[:-1] ** 2) ** 2 + (1.0 - x[:-1]) ** 2))
+
+    low = np.full(dim, -2.0)
+    high = np.full(dim, 2.0)
+    return fn, None, low, high
+
+
+def _recorded(fn):
+    calls = []
+
+    def wrapped(x):
+        calls.append(np.array(x, dtype=np.float64, copy=True))
+        return fn(x)
+
+    return wrapped, calls
+
+
+def test_x0_is_the_last_parameter():
+    assert list(inspect.signature(anneal.global_optimize).parameters) == [
+        "obj_fn",
+        "low",
+        "high",
+        "budget",
+        "seed",
+        "grad_fn",
+        "noise_sigma",
+        "policy",
+        "x0",
+    ]
+    assert list(inspect.signature(anneal.global_optimize_objective).parameters)[-1] == "x0"
+
+
+@pytest.mark.parametrize(("problem", "dim"), [(_rosenbrock, 6), (_rastrigin, 4)])
+def test_x0_is_the_first_evaluation_and_every_call_is_charged(problem, dim):
+    fn, _, low, high = problem(dim)
+    x0 = np.linspace(low[0] * 0.75, high[0] * 0.75, dim)
+    wrapped, calls = _recorded(fn)
+    out = anneal.global_optimize(wrapped, low, high, budget=900, seed=4, x0=x0)
+    np.testing.assert_array_equal(calls[0], x0)
+    assert len(calls) == out["n_evals"] <= 900
+    assert out["n_grads"] == 0
+    assert all(np.all((c >= low) & (c <= high)) for c in calls)
+    assert out["best_val"] <= fn(x0)
+
+
+def test_x0_at_the_minimum_stays_the_incumbent():
+    dim = 6
+    fn, _, low, high = _rosenbrock(dim)
+    x0 = np.ones(dim)
+    out = anneal.global_optimize(fn, low, high, budget=300, seed=2, x0=x0)
+    assert out["best_val"] == 0.0
+    np.testing.assert_array_equal(out["best_pos"], x0)
+
+
+@pytest.mark.parametrize(
+    ("x0", "match"),
+    [
+        (np.zeros(3), "length"),
+        (np.array([0.0, np.nan, 0.0, 0.0]), "finite"),
+        (np.array([0.0, 0.0, 6.0, 0.0]), "outside"),
+        (np.zeros((1, 4)), "one-dimensional"),
+    ],
+)
+def test_invalid_x0_raises_value_error(x0, match):
+    fn, _, low, high = _rastrigin(4)
+    with pytest.raises(ValueError, match=match):
+        anneal.global_optimize(fn, low, high, budget=50, seed=0, x0=x0)
+
+
+def test_global_optimize_objective_starts_at_x0():
+    dim = 6
+    fn, _, low, high = _rosenbrock(dim)
+    wrapped, calls = _recorded(fn)
+    objective = anneal.PyObjective(wrapped, anneal.Bounds(low, high, 1e-9))
+    x0 = np.full(dim, 0.5)
+    out = anneal.global_optimize_objective(objective, 600, seed=1, use_gradient=False, x0=x0)
+    np.testing.assert_array_equal(calls[0], x0)
+    assert len(calls) == out["n_evals"] <= 600
+    with pytest.raises(ValueError, match="outside"):
+        anneal.global_optimize_objective(objective, 600, x0=np.full(dim, 3.0))
 
 
 def test_additive_surrogate_from_points_recovers_separable():

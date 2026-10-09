@@ -1538,6 +1538,39 @@ fn gle_langevin_preconditioned_objective(
 // Thompson-allocated portfolio driver.
 // ---------------------------------------------------------------------------
 
+/// Check an optional portfolio start point against the box, raising
+/// `ValueError` where the core would panic.
+fn portfolio_start(
+    x0: Option<PyReadonlyArray1<'_, f64>>,
+    bounds: &Bounds<f64>,
+) -> PyResult<Option<Array1<f64>>> {
+    let Some(x0) = x0 else {
+        return Ok(None);
+    };
+    let values: Vec<f64> = x0.as_array().iter().copied().collect();
+    if values.len() != bounds.dims {
+        return Err(PyValueError::new_err(format!(
+            "x0 length {} does not match dimension {}",
+            values.len(),
+            bounds.dims
+        )));
+    }
+    for (i, &value) in values.iter().enumerate() {
+        if !value.is_finite() {
+            return Err(PyValueError::new_err(format!(
+                "x0 must be finite at dimension {i}"
+            )));
+        }
+        if value < bounds.low[i] || value > bounds.high[i] {
+            return Err(PyValueError::new_err(format!(
+                "x0[{i}] = {value} lies outside [{}, {}]",
+                bounds.low[i], bounds.high[i]
+            )));
+        }
+    }
+    Ok(Some(Array1::from_vec(values)))
+}
+
 fn portfolio_result_to_dict(
     py: Python<'_>,
     result: crate::PortfolioResult,
@@ -1887,8 +1920,10 @@ fn bfwt_optimize(
 ///   seed: RNG seed.
 ///   grad_fn: optional gradient callable; enables the gradient arms
 ///            and the final polish.
+///   x0: optional start point inside the box, evaluated first and used
+///       as the first incumbent.
 #[pyfunction]
-#[pyo3(signature = (obj_fn, low, high, budget, seed = 0, grad_fn = None, noise_sigma = None, policy = "auto"))]
+#[pyo3(signature = (obj_fn, low, high, budget, seed = 0, grad_fn = None, noise_sigma = None, policy = "auto", x0 = None))]
 fn global_optimize(
     py: Python<'_>,
     obj_fn: Py<PyAny>,
@@ -1899,6 +1934,7 @@ fn global_optimize(
     grad_fn: Option<Py<PyAny>>,
     noise_sigma: Option<f64>,
     policy: &str,
+    x0: Option<PyReadonlyArray1<'_, f64>>,
 ) -> PyResult<Py<PyDict>> {
     let low_vec = low.as_slice()?.to_vec();
     let high_vec = high.as_slice()?.to_vec();
@@ -1928,18 +1964,29 @@ fn global_optimize(
             )));
         }
     };
+    let start = portfolio_start(x0, obj.bounds())?;
+    let start = start.as_ref().map(|x| x.view());
     let result = match grad_fn {
         Some(grad_fn) => {
             let grad = CallablePyGradient { fn_: grad_fn, dim };
-            crate::portfolio_optimize_with_policy(&obj, Some(&grad), budget, seed, noise_sigma, pol)
+            crate::portfolio_optimize_with_start(
+                &obj,
+                Some(&grad),
+                budget,
+                seed,
+                noise_sigma,
+                pol,
+                start,
+            )
         }
-        None => crate::portfolio_optimize_with_policy::<_, CallablePyGradient>(
+        None => crate::portfolio_optimize_with_start::<_, CallablePyGradient>(
             &obj,
             None,
             budget,
             seed,
             noise_sigma,
             pol,
+            start,
         ),
     };
     portfolio_result_to_dict(py, result)
@@ -1947,7 +1994,7 @@ fn global_optimize(
 
 /// Runs the portfolio global optimizer with a native objective handle.
 #[pyfunction]
-#[pyo3(signature = (objective, budget, seed = 0, use_gradient = true, noise_sigma = None))]
+#[pyo3(signature = (objective, budget, seed = 0, use_gradient = true, noise_sigma = None, x0 = None))]
 fn global_optimize_objective(
     py: Python<'_>,
     objective: PyRef<'_, PyObjective>,
@@ -1955,6 +2002,7 @@ fn global_optimize_objective(
     seed: u64,
     use_gradient: bool,
     noise_sigma: Option<f64>,
+    x0: Option<PyReadonlyArray1<'_, f64>>,
 ) -> PyResult<Py<PyDict>> {
     if budget == 0 {
         return Err(PyValueError::new_err("budget must be positive"));
@@ -1966,10 +2014,29 @@ fn global_optimize_objective(
             "noise_sigma must be positive and finite",
         ));
     }
+    let start = portfolio_start(x0, Objective::bounds(&*objective))?;
+    let start = start.as_ref().map(|x| x.view());
+    let auto = crate::PortfolioPolicy::Auto;
     let result = if use_gradient {
-        crate::portfolio_optimize(&*objective, Some(&*objective), budget, seed, noise_sigma)
+        crate::portfolio_optimize_with_start(
+            &*objective,
+            Some(&*objective),
+            budget,
+            seed,
+            noise_sigma,
+            auto,
+            start,
+        )
     } else {
-        crate::portfolio_optimize::<_, PyObjective>(&*objective, None, budget, seed, noise_sigma)
+        crate::portfolio_optimize_with_start::<_, PyObjective>(
+            &*objective,
+            None,
+            budget,
+            seed,
+            noise_sigma,
+            auto,
+            start,
+        )
     };
     portfolio_result_to_dict(py, result)
 }
