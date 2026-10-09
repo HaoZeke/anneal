@@ -133,7 +133,14 @@ where
             .unwrap_or_else(|| variant.initial_state(&mut rng)),
         None => variant.initial_state(&mut rng),
     };
-    drive_rs(&variant, &cooling, state, n_epochs, steps_per_epoch, &mut rng)
+    drive_rs(
+        &variant,
+        &cooling,
+        state,
+        n_epochs,
+        steps_per_epoch,
+        &mut rng,
+    )
 }
 
 /// Resumable variant driver: runs epochs `[start_epoch, start_epoch + n_epochs)`
