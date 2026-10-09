@@ -3,3 +3,4 @@ bridge_check_2000.jsonl: anneal 0.10.0 with the ChemFit lifecycle fix (0c90a2f8)
 positions_fit_anneal_2000.jsonl, positions_fit_anneal_10000.jsonl: anneal 0.10.0 (branch 4c6fe804), chemfit upstream next 37dcfe6 + f1c8ade + 2694374, numpy 2.3.5
 0003 patch: chemfit 8b59ece on 2694374
 0004 patch: chemfit 347c607 on 8b59ece
+0005 patch: chemfit 5d4de8c on 347c607

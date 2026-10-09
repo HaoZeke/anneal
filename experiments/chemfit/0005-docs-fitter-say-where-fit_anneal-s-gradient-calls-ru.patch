@@ -1,0 +1,52 @@
+From 5d4de8cca903797911c178104a0dac28cb96dd39 Mon Sep 17 00:00:00 2001
+From: Rohit Goswami <rgoswami@ieee.org>
+Date: Fri, 9 Oct 2026 16:27:12 +0000
+Subject: [PATCH] docs(fitter): say where fit_anneal's gradient calls run
+
+Objective evaluations go through the fitter's scheduler, but the
+gradient= callable is called in the calling process, outside the
+prepared schedule, so a thread or process pool never runs it. The
+docstring and fitter.rst now say so.
+---
+ docs/src/usage/fitter.rst | 5 ++++-
+ src/chemfit/fitter.py     | 8 +++++---
+ 2 files changed, 9 insertions(+), 4 deletions(-)
+
+diff --git a/docs/src/usage/fitter.rst b/docs/src/usage/fitter.rst
+index f98d33c..4a6b9ff 100644
+--- a/docs/src/usage/fitter.rst
++++ b/docs/src/usage/fitter.rst
+@@ -141,7 +141,10 @@ example ``anneal.Boltzmann(t_init=0.5, sigma=0.01)`` with
+ ``method="boltzmann"``) to set the step and the temperature, which is in loss
+ units. Exceptions from the objective, from callbacks run by ``step()`` and
+ from ``gradient=`` follow ``swallow_exceptions`` and ``log_exceptions``; when
+-one is re-raised, the fit stops at that evaluation.
++one is re-raised, the fit stops at that evaluation. Objective evaluations go
++through the fitter's scheduler, but ``gradient=`` is called in the calling
++process, outside the prepared schedule, so a thread or process pool runs only
++the objective.
+ 
+ ----------------------------------
+ Objective interface
+diff --git a/src/chemfit/fitter.py b/src/chemfit/fitter.py
+index 1fd7e98..a1f56d8 100644
+--- a/src/chemfit/fitter.py
++++ b/src/chemfit/fitter.py
+@@ -1148,9 +1148,11 @@ class Fitter(Generic[ParametersT]):
+             gradient: Optional callable returning the gradient of the loss
+                 as a mapping with the structure of ``initial_params``; used by
+                 ``"portfolio"`` and ``"gpmd"``. Gradient calls do not count
+-                against ``budget``, and an exception from them follows the
+-                fitter's ``log_exceptions`` and ``swallow_exceptions`` policy;
+-                a swallowed one leaves a zero gradient.
++                against ``budget`` and run in the calling process, outside the
++                prepared schedule, so a scheduler's workers never see them; an
++                exception from them follows the fitter's ``log_exceptions``
++                and ``swallow_exceptions`` policy, and a swallowed one leaves
++                a zero gradient.
+             contexts: Optional single-element list with the fitter context to
+                 reuse.
+ 
+-- 
+2.43.0
+
