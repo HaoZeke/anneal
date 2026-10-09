@@ -1,0 +1,79 @@
+#+TITLE: ChemFit Integration
+#+OPTIONS: toc:nil todo:nil num:nil author:nil title:nil ^:nil
+
+#+begin_export rst
+===================
+ChemFit Integration
+===================
+#+end_export
+
+ChemFit owns parameter reconstruction, callbacks, exception penalties, and
+the best evaluated parameter set. =anneal= owns the bounded proposal chain.
+Keep those responsibilities separate: call =fitter.step()= exactly once after
+each =fitter.evaluate()= and return =fitter.finish()= rather than rebuilding
+the result from =History.best_pos=.
+
+For a positions-only fit:
+
+#+begin_src python
+from typing import Any
+
+import numpy as np
+from anneal import Boltzmann, run
+
+
+def run_anneal(benchmark_context: dict[str, Any]):
+    fitter = benchmark_context["fitter"]
+    budget = int(benchmark_context["budget"])
+    initial = np.asarray(
+        benchmark_context["initial_params"]["positions"],
+        dtype=np.float64,
+    )
+    n_atoms = initial.shape[0]
+
+    if initial.shape != (n_atoms, 3):
+        raise ValueError("positions must have shape (n_atoms, 3)")
+    if budget < 1:
+        raise ValueError("budget must be positive")
+
+    low = np.full(initial.size, -3.0)
+    high = np.full(initial.size, 3.0)
+
+    fitter.init()
+    if hasattr(fitter, "evaluate"):
+        evaluate = fitter.evaluate
+        advance = fitter.step
+    else:
+        evaluate = fitter.ask
+        advance = fitter.tell
+
+    def objective(position):
+        params = {"positions": np.asarray(position).reshape(n_atoms, 3)}
+        loss = evaluate(params)
+        advance()
+        return float(loss)
+
+    run(
+        objective,
+        low,
+        high,
+        Boltzmann(),
+        n_epochs=1,
+        steps_per_epoch=budget - 1,
+        x0=initial.reshape(-1),
+    )
+    return fitter.finish()
+#+end_src
+
+The initial state costs one objective evaluation, hence =budget - 1=
+proposals. Mirror reflection keeps every position inside =low= and =high=.
+The expression =positions.reshape((n_atoms * 3))= without assignment has no
+effect and is not needed.
+
+The feature check supports both ChemFit's released =ask=/=tell= lifecycle and
+the =evaluate=/=step= lifecycle on its custom-optimizer API branch.
+
+For a general nested parameter dictionary, flatten =fitter.initial_parameters=
+and =fitter.bounds= with ChemFit's own =flatten_dict= ordering, pass that
+initial vector as =x0=, and reconstruct each objective vector with the matching
+=unflatten_dict=. Every scalar leaf needs a finite lower and upper bound.

@@ -206,6 +206,8 @@ impl MoveKernel<f64> for TsallisVisit {
 /// in it keeps the proposal symmetric: `q(x -> y) = q(y -> x)`. The Metropolis
 /// test therefore still targets the box-restricted Gibbs measure with no
 /// Hastings correction (manuscript law L1 holds for the reflected proposal).
+/// A box with one infinite wall, or a finite box whose period overflows,
+/// mirrors across the wall the point crossed.
 pub fn reflect_coord(x: f64, lo: f64, hi: f64) -> f64 {
     let w = hi - lo;
     if w.is_nan() || w <= 0.0 {
@@ -216,36 +218,58 @@ pub fn reflect_coord(x: f64, lo: f64, hi: f64) -> f64 {
     if (lo..=hi).contains(&x) {
         return x;
     }
-    let y = fold_offset(x, lo, w);
-    (lo + y).clamp(lo, hi)
-}
-
-/// `(x + s - lo) mod 2w`, folded onto `[0, w]`, where `x + s` overflows:
-/// the remainder is taken at quarter scale, `4 ((x/4 + s/4 - lo/4) mod w/2)`,
-/// whose terms cannot overflow when added.
-fn fold_sum_offset(x: f64, s: f64, lo: f64, w: f64) -> f64 {
-    let mut y = 4.0 * (0.25 * x + 0.25 * s - 0.25 * lo).rem_euclid(0.5 * w);
-    if y > w {
-        y = 2.0 * w - y;
-    }
-    y
-}
-
-/// `(x - lo) mod 2w`, folded onto `[0, w]`, for finite `x`. When `x - lo`
-/// itself overflows the remainder is taken at half scale,
-/// `2 ((x/2 - lo/2) mod w)`, which needs only `2w` to be finite.
-fn fold_offset(x: f64, lo: f64, w: f64) -> f64 {
     let period = 2.0 * w;
-    let d = x - lo;
-    let mut y = if d.is_finite() {
-        d.rem_euclid(period)
-    } else {
-        2.0 * (0.5 * x - 0.5 * lo).rem_euclid(w)
-    };
+    if !period.is_finite() {
+        // The box is wider than half the f64 range, or one wall is infinite,
+        // so the triangle-wave period is not a finite f64. Fold the overshoot
+        // across the wall it crossed. A finite overshoot is below `2 w` after
+        // one fold, so at most one more fold, across the other wall, remains.
+        // An infinite overshoot makes the fold NaN; `max`/`min` then stop on
+        // the wall that was crossed.
+        let fold = |d: f64| if d < w { d } else { w - (d - w) };
+        return if x < lo {
+            (lo + fold(lo - x)).max(lo).min(hi)
+        } else {
+            (hi - fold(x - hi)).min(hi).max(lo)
+        };
+    }
+    let mut y = offset_in_period(x, lo, w);
     if y > w {
         y = period - y;
     }
-    y
+    // `hi - lo` and `lo + y` both round, so the sum can land one ulp past
+    // `hi`. A non-finite `x` leaves `y` NaN, and `max` sends that to `lo`.
+    (lo + y).max(lo).min(hi)
+}
+
+/// `(x - lo) mod 2w` for a finite period `2w`. When `x - lo` itself
+/// overflows the remainder is taken at half scale, `2 ((x/2 - lo/2) mod w)`.
+fn offset_in_period(x: f64, lo: f64, w: f64) -> f64 {
+    let d = x - lo;
+    if d.is_finite() {
+        d.rem_euclid(2.0 * w)
+    } else {
+        2.0 * (0.5 * x - 0.5 * lo).rem_euclid(w)
+    }
+}
+
+/// Where an overshoot of `d >= 0` past one wall lands after mirror
+/// reflection: past `hi` when `past_high`, past `lo` otherwise.
+fn fold_overshoot(d: f64, lo: f64, hi: f64, past_high: bool) -> f64 {
+    let w = hi - lo;
+    let period = 2.0 * w;
+    let e = if period.is_finite() {
+        d.rem_euclid(period)
+    } else {
+        d
+    };
+    let landed = match (past_high, e <= w) {
+        (true, true) => hi - e,
+        (true, false) => lo + (e - w),
+        (false, true) => lo + e,
+        (false, false) => hi - (e - w),
+    };
+    landed.max(lo).min(hi)
 }
 
 /// [`reflect_coord`] together with its slope there: `1` where the fold keeps
@@ -259,12 +283,13 @@ pub fn reflect_coord_with_slope(x: f64, lo: f64, hi: f64) -> (f64, f64) {
     if (lo..=hi).contains(&x) {
         return (x, 1.0);
     }
-    let d = x - lo;
-    let y = if d.is_finite() {
-        d.rem_euclid(2.0 * w)
-    } else {
-        2.0 * (0.5 * x - 0.5 * lo).rem_euclid(w)
-    };
+    let period = 2.0 * w;
+    if !period.is_finite() {
+        let d = if x < lo { lo - x } else { x - hi };
+        let slope = if d < w { -1.0 } else { 1.0 };
+        return (reflect_coord(x, lo, hi), slope);
+    }
+    let y = offset_in_period(x, lo, w);
     let slope = if y > w { -1.0 } else { 1.0 };
     (reflect_coord(x, lo, hi), slope)
 }
@@ -314,18 +339,26 @@ impl<M: MoveKernel<f64>> MoveKernel<f64> for Reflected<M> {
         let steps = self.inner.propose(origin.view(), t, rng);
         Array1::from_iter(steps.iter().enumerate().map(|(k, &step)| {
             let (lo, hi) = (self.bounds.low[k], self.bounds.high[k]);
+            if !(hi > lo) {
+                // Equal bounds pin the axis.
+                return lo;
+            }
             if !step.is_finite() {
                 // An infinite step has no fold; reflecting ever longer steps
                 // tends to the uniform law on the box. Whether a step is
                 // infinite does not depend on `x`, so this stays symmetric.
-                return (lo + (hi - lo) * rng.random::<f64>()).clamp(lo, hi);
+                return (lo + (hi - lo) * rng.random::<f64>()).max(lo).min(hi);
             }
             let x = i[k];
             let proposal = x + step;
             if proposal.is_finite() {
                 reflect_coord(proposal, lo, hi)
+            } else if step > 0.0 {
+                // `x + s` overflowed; the overshoot past the wall it crossed
+                // is still finite when measured from the step.
+                fold_overshoot(step - (hi - x), lo, hi, true)
             } else {
-                (lo + fold_sum_offset(x, step, lo, hi - lo)).clamp(lo, hi)
+                fold_overshoot(-step - (x - lo), lo, hi, false)
             }
         }))
     }
@@ -401,18 +434,7 @@ mod tests {
     }
 
     #[test]
-    fn reflect_coord_leaves_a_point_in_the_box_unchanged() {
-        for &x in &[-3.0, -1.2345678901234567, 0.0, 0.7] {
-            assert_eq!(reflect_coord(x, -3.0, 0.7).to_bits(), x.to_bits());
-        }
-        for &x in &[0.7000000000000001, 1.3, 4.4, -6.7, 12.1] {
-            let r = reflect_coord(x, -3.0, 0.7);
-            assert!((-3.0..=0.7).contains(&r), "{x} folded to {r}");
-        }
-    }
-
-    #[test]
-    fn reflect_coord_folds_steps_that_overflow_x_minus_lo() {
+    fn reflect_coord_folds_points_where_x_minus_lo_overflows() {
         let (lo, hi) = (-8.98e307, 0.0);
         for &x in &[1.7e308, -1.79e308, 1.79e308, f64::MAX] {
             let r = reflect_coord(x, lo, hi);
@@ -438,9 +460,8 @@ mod tests {
     #[test]
     fn reflected_chain_is_uniform_on_a_flat_box_near_the_float_limit() {
         // On a flat objective every proposal is accepted, so the chain samples
-        // the stationary law of the kernel, which is uniform when it is
-        // symmetric. Steps are large enough that x + s overflows from part of
-        // the box.
+        // the stationary law of the kernel, uniform when it is symmetric.
+        // Steps are large enough that x + s overflows from part of the box.
         let (lo, hi) = (-8.98e307, 0.0);
         let bounds = Bounds::new(array![lo], array![hi], 0.0);
         let kernel = Reflected::new(Gaussian::new(5.4e307), bounds);
@@ -465,8 +486,6 @@ mod tests {
 
     #[test]
     fn reflected_steps_keep_their_size_next_to_the_float_limit() {
-        // A box against MAX: Gaussian steps of 1% of the width must stay
-        // that size, not turn into uniform jumps across the box.
         let (lo, hi) = (f64::MAX / 2.0, f64::MAX);
         let bounds = Bounds::new(array![lo], array![hi], 0.0);
         let sigma = 0.01 * (hi - lo);
@@ -493,8 +512,72 @@ mod tests {
         for _ in 0..1000 {
             let p = kernel.propose(x.view(), 1.0, &mut a);
             let raw = Cauchy::new(0.8).propose(x.view(), 1.0, &mut b);
-            let q = reflect_into_box(raw.view(), &bounds);
-            assert_eq!(p, q);
+            assert_eq!(p, reflect_into_box(raw.view(), &bounds));
+        }
+    }
+
+    #[test]
+    fn reflected_keeps_a_pinned_axis_pinned_under_overflowing_steps() {
+        let bounds = Bounds::new(
+            array![0.9 * f64::MAX, -1.0],
+            array![0.9 * f64::MAX, 1.0],
+            0.0,
+        );
+        let kernel = Reflected::new(Gaussian::new(0.1 * f64::MAX), bounds);
+        let mut rng = StdRng::seed_from_u64(21);
+        let x = array![0.9 * f64::MAX, 0.0];
+        for _ in 0..5000 {
+            let p = kernel.propose(x.view(), 1.0, &mut rng);
+            assert_eq!(p[0], 0.9 * f64::MAX);
+            assert!(p[1].is_finite() && (-1.0..=1.0).contains(&p[1]));
+        }
+    }
+
+    #[test]
+    fn reflect_coord_stays_in_the_closed_box_under_rounding() {
+        // `0.3 - (-1.0)` rounds up to 1.3, so an unguarded fold returned
+        // `-1.0 + 1.3 = 0.30000000000000004` for a point on the upper wall.
+        assert_eq!(reflect_coord(0.3, -1.0, 0.3), 0.3);
+        for x in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            let r = reflect_coord(x, -1.0, 0.3);
+            assert!((-1.0..=0.3).contains(&r), "{x} folded to {r}");
+        }
+    }
+
+    #[test]
+    fn reflect_coord_mirrors_when_twice_the_width_overflows() {
+        let near = |a: f64, b: f64| (a - b).abs() <= 1e-12 * b.abs();
+        assert!(near(reflect_coord(6.1e307, -6e307, 6e307), 5.9e307));
+        assert!(near(reflect_coord(-6.1e307, -6e307, 6e307), -5.9e307));
+        let (lo, hi) = (-f64::MAX, 1e308 - f64::MAX);
+        assert!(near(reflect_coord(5e307, lo, hi), -1.5e308));
+        assert!(near(reflect_coord(1.5e308, -1e308, 1e308), 0.5e308));
+        assert!(near(reflect_coord(-1.5e308, -1e308, 1e308), -0.5e308));
+        assert_eq!(reflect_coord(0.5e308, -1e308, 1e308), 0.5e308);
+        assert_eq!(reflect_coord(f64::INFINITY, -1e308, 1e308), 1e308);
+        assert_eq!(reflect_coord(f64::NEG_INFINITY, -6e307, 6e307), -6e307);
+    }
+
+    #[test]
+    fn reflect_coord_mirrors_across_the_finite_wall_of_a_half_infinite_box() {
+        let inf = f64::INFINITY;
+        assert_eq!(reflect_coord(-0.5, 0.0, inf), 0.5);
+        assert_eq!(reflect_coord(-3.0, 0.0, inf), 3.0);
+        assert_eq!(reflect_coord(0.5, -inf, 0.0), -0.5);
+        assert_eq!(reflect_coord(2.0, -inf, -1.0), -4.0);
+        assert_eq!(reflect_coord(7.0, 0.0, inf), 7.0);
+        assert_eq!(reflect_coord(-inf, 0.0, inf), 0.0);
+        assert_eq!(reflect_coord(inf, -inf, 0.0), 0.0);
+    }
+
+    #[test]
+    fn reflect_coord_leaves_a_point_in_the_box_unchanged() {
+        for &x in &[-3.0, -1.2345678901234567, 0.0, 0.7] {
+            assert_eq!(reflect_coord(x, -3.0, 0.7).to_bits(), x.to_bits());
+        }
+        for &x in &[0.7000000000000001, 1.3, 4.4, -6.7, 12.1] {
+            let r = reflect_coord(x, -3.0, 0.7);
+            assert!((-3.0..=0.7).contains(&r), "{x} folded to {r}");
         }
     }
 

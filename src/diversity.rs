@@ -199,6 +199,18 @@ mod tests {
     }
 
     #[test]
+    fn lee_bank_starts_at_half_the_mean_and_ends_at_one_fifth() {
+        // Mean pairwise distance is 2. Dave/2 is 1. Dave/5 is 0.4, which is
+        // a final fraction 0.4 of the starting threshold.
+        let pts = [0.0, 1.0, 3.0];
+        let mut schedule = DiversityAnnealer::from_population(&[0, 1, 2], line_distance(&pts))
+            .unwrap()
+            .with_final_fraction(0.4);
+        assert!((schedule.threshold(0.0) - 1.0).abs() < 1e-12);
+        assert!((schedule.threshold(1.0) - 0.4).abs() < 1e-12);
+    }
+
+    #[test]
     fn a_caller_scale_multiplies_the_mean_pairwise_distance() {
         let pts = [0.0, 1.0, 3.0];
         let a = DiversityAnnealer::scaled_from_population(&[0, 1, 2], line_distance(&pts), 1.5)
