@@ -2418,7 +2418,7 @@ fn run_arm<O, G>(
             let start_epoch = states.variant_epoch;
             let resume = states.variant_chain.clone();
             let chain = if posterior.q_v_map > 1.3 {
-                crate::variant::gsa(
+                crate::variant::gsa_boxed(
                     fresh_obj,
                     posterior.t_init_map.max(1e-9),
                     posterior.q_v_map.clamp(1.05, 2.95),
@@ -2429,7 +2429,7 @@ fn run_arm<O, G>(
                     run_rs_variant_resumed(variant, start_epoch, epochs, steps, seed, resume).1
                 })
             } else {
-                crate::variant::boltzmann(
+                crate::variant::boltzmann_boxed(
                     fresh_obj,
                     posterior.t_init_map.max(1e-9),
                     (posterior.sigma_map * width_scale).max(1e-9),
@@ -2446,7 +2446,10 @@ fn run_arm<O, G>(
         }
         ArmKind::Pt => {
             // Parallel-tempering ladder over the GSA point with Tsallis
-            // exchange; chains run at fixed ladder temperatures.
+            // exchange; chains run at fixed ladder temperatures. The boxed
+            // variant keeps every chain position inside the box, so swaps
+            // exchange feasible states instead of out-of-box proposals whose
+            // energies were reflected behind their backs.
             let n_chains = 4usize;
             let k_inner = 8usize;
             let pt_epochs = (slice / (n_chains * k_inner)).max(1);
@@ -2456,7 +2459,7 @@ fn run_arm<O, G>(
                 inner: obj.inner,
                 ledger,
             };
-            let Ok(variant) = crate::variant::gsa(fresh_obj, t0, GSA_Q_V, GSA_Q_A) else {
+            let Ok(variant) = crate::variant::gsa_boxed(fresh_obj, t0, GSA_Q_V, GSA_Q_A) else {
                 return;
             };
             let cool = LogCool::new(t0, 2.0);

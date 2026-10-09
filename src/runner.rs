@@ -102,6 +102,40 @@ where
     run_rs(variant, &cooling, n_epochs, steps_per_epoch, seed)
 }
 
+/// Convenience wrapper: drives a `SaVariant` from a caller-supplied start
+/// position through `run_rs`, supplying the variant's own cooling schedule.
+///
+/// The start is clipped into the objective bounds (via the sampler's
+/// `initial_state_from_position`, which clips); a `None` position falls back
+/// to the uniform prior. This is how the Python `run(..., x0=...)` initial
+/// parameters reach the chain without breaking the boxed invariant: every
+/// evaluated position, including the first, lies inside the box.
+pub fn run_rs_variant_from_position<O, C, N, M, A>(
+    variant: SaVariant<f64, O, C, N, M, A>,
+    n_epochs: usize,
+    steps_per_epoch: usize,
+    seed: u64,
+    start: Option<ndarray::Array1<f64>>,
+) -> History
+where
+    O: eindir_core::Objective<f64> + Send + Sync,
+    C: Cooling<f64> + Clone,
+    N: crate::neigh::Neighborhood<f64>,
+    M: crate::movekernel::MoveKernel<f64>,
+    A: crate::accept::AcceptRule<f64>,
+{
+    use crate::sampler::Sampler;
+    let cooling = variant.cool.clone();
+    let mut rng = StdRng::seed_from_u64(seed);
+    let state = match start {
+        Some(pos) => variant
+            .initial_state_from_position(pos)
+            .unwrap_or_else(|| variant.initial_state(&mut rng)),
+        None => variant.initial_state(&mut rng),
+    };
+    drive_rs(&variant, &cooling, state, n_epochs, steps_per_epoch, &mut rng)
+}
+
 /// Resumable variant driver: runs epochs `[start_epoch, start_epoch + n_epochs)`
 /// of the variant's own cooling schedule, continuing from a prior chain
 /// position when one is supplied, and returns the history together with the
@@ -209,6 +243,77 @@ where
         {
             best_history = Some(history);
         }
+    }
+    best_history.expect("n_starts.max(1) guarantees at least one chain")
+}
+
+/// Runs the same `SaVariant` from a bounded low-discrepancy start set plus
+/// an optional caller-supplied anchor, returning the best history across
+/// all starts.
+///
+/// The anchor (e.g. Python `run_qmc(..., x0=...)`) is clipped into bounds
+/// and run as one extra chain with a domain-separated seed; the QMC design
+/// itself is unchanged. With no anchor this is `run_rs_qmc_variant`.
+pub fn run_rs_qmc_variant_from_position<O, C, N, M, A>(
+    variant: SaVariant<f64, O, C, N, M, A>,
+    n_starts: usize,
+    n_epochs: usize,
+    steps_per_epoch: usize,
+    seed: u64,
+    anchor: Option<ndarray::Array1<f64>>,
+) -> History
+where
+    O: eindir_core::Objective<f64> + Send + Sync,
+    C: Cooling<f64> + Clone,
+    N: crate::neigh::Neighborhood<f64>,
+    M: crate::movekernel::MoveKernel<f64>,
+    A: crate::accept::AcceptRule<f64>,
+{
+    use crate::sampler::Sampler;
+    let cooling = variant.cool.clone();
+    let n_starts = n_starts.max(1);
+    let starts = eindir_core::low_discrepancy_points(
+        variant.obj.bounds(),
+        n_starts,
+        qmc_skip_from_seed(seed),
+    );
+    // Serial multi-start: Python objectives cannot be driven from Rayon
+    // without GIL deadlock. Native multi-walker scaling lives in dmc_pop.
+    let mut best_history: Option<History> = None;
+    let mut consider = |state: State, chain_seed: u64| {
+        let mut rng = StdRng::seed_from_u64(chain_seed);
+        let history = drive_rs(&variant, &cooling, state, n_epochs, steps_per_epoch, &mut rng);
+        if best_history
+            .as_ref()
+            .is_none_or(|best: &History| history.best.val < best.best.val)
+        {
+            best_history = Some(history);
+        }
+    };
+    for idx in 0..n_starts {
+        let start = starts.row(idx);
+        let pos = variant.obj.bounds().clip(start);
+        let val = variant.obj.eval(pos.view());
+        let pair = eindir_core::FPair { pos, val };
+        let state = State {
+            cur: pair.clone(),
+            best: pair,
+        };
+        let chain_seed = seed.wrapping_add(0x9e37_79b9_7f4a_7c15_u64.wrapping_mul(idx as u64 + 1));
+        consider(
+            state,
+            chain_seed,
+        );
+    }
+    if let Some(pos) = anchor {
+        let mut rng = StdRng::seed_from_u64(seed ^ 0x51ab_3f9d_2c77_41e5);
+        let state = variant
+            .initial_state_from_position(pos)
+            .unwrap_or_else(|| variant.initial_state(&mut rng));
+        consider(
+            state,
+            seed ^ 0x9e37_79b9_7f4a_7c15_u64.wrapping_mul(n_starts as u64 + 1),
+        );
     }
     best_history.expect("n_starts.max(1) guarantees at least one chain")
 }
