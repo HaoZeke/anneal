@@ -91,10 +91,7 @@ def _paired(fitter, kind=list):
 def _reads(caller, what, one=False):
     """The start of the warning for the numeric strings ``caller`` reads."""
     source, number = ("a string", "a number") if one else ("strings", "numbers")
-    return re.escape(
-        f"{caller} reads {what} from {source}, as anneal 0.10.0 did; "
-        f"pass {number} instead"
-    )
+    return re.escape(f"{caller} reads {what} from {source}; pass {number} instead")
 
 
 def _shape_warning(name, given, shape):
@@ -339,6 +336,20 @@ WARNS = [
         lambda f: fit_anneal(f, 60),
         _reads("fit_anneal", _YAML_READS),
     ),
+    # 0.10.0's fit_chemfit read a tuple of numeric strings but searched the
+    # start +/- default_span in place of a NumPy pair of them.
+    (
+        "fit_chemfit bounds entry that is a NumPy pair of strings",
+        _fitter,
+        lambda f: fit_chemfit(
+            _as(f, {**_NARROW, "positions": np.array(["-0.5", "5e-1"])}), 60
+        ),
+        lambda f: fit_chemfit(_as(f, _NARROW), 60),
+        _reads(
+            "fit_chemfit",
+            "the lower bound of positions and the upper bound of positions",
+        ),
+    ),
     (
         "run_benchmark context bounds read from YAML",
         _fitter,
@@ -536,6 +547,12 @@ HELPERS_READ = [
         _reads("chemfit_box", "the lower bound of x and the upper bound of x"),
     ),
     (
+        "chemfit_box NumPy pair of strings",
+        lambda: _box(ReleasedFitter({"x": 0.5}, {"x": np.array(["0", "1e0"])})),
+        lambda: _box(ReleasedFitter({"x": 0.5}, {"x": (0.0, 1.0)})),
+        _reads("chemfit_box", "the lower bound of x and the upper bound of x"),
+    ),
+    (
         "resolve_bounds",
         lambda: resolve_bounds(_X, low="-1", high="1"),
         lambda: resolve_bounds(_X, low=-1.0, high=1.0),
@@ -590,7 +607,7 @@ def test_the_installed_chemfit_fitter_runs_on_bounds_read_from_yaml(entry):
 
     # PyYAML reads x: [-1e0, 1e0] as two strings, and the Fitter keeps them.
     with pytest.warns(
-        FutureWarning, match="from strings, as anneal 0.10.0 did"
+        FutureWarning, match="from strings; pass numbers instead"
     ) as record:
         out, calls = run(["-1e0", "1e0"])
     assert len([w for w in record if issubclass(w.category, FutureWarning)]) == 1
@@ -1224,10 +1241,35 @@ def test_fit_chemfit_and_run_fitter_read_method_names_in_any_case(call, same_as)
 
 
 _NARROW = {"positions": (-0.5, 0.5), "eps": (0.0, 1.0)}
+_ROWS = np.stack([np.full((2, 3), -0.5), np.full((2, 3), 0.5)])
 
-# Bounds 0.10.0 ignored, using fitter.bounds or x0 +/- bound_span instead,
-# each with the call it now matches.
+# Bounds 0.10.0 ignored, using fitter.bounds or the start +/- bound_span or
+# default_span instead, each with the call it now matches.
 NOW_READ = [
+    pytest.param(
+        lambda f: fit_chemfit(
+            _as(f, {**_NARROW, "positions": np.array([-0.5, 0.5], dtype=object)}), 60
+        ),
+        lambda f: fit_chemfit(_as(f, _NARROW), 60),
+        id="fit_chemfit bounds entry that is a NumPy pair of objects",
+    ),
+    pytest.param(
+        lambda f: fit_chemfit(
+            _as(f, {**_NARROW, "positions": np.array([False, True])}), 60
+        ),
+        lambda f: fit_chemfit(_as(f, {**_NARROW, "positions": (0.0, 1.0)}), 60),
+        id="fit_chemfit bounds entry that is a NumPy pair of bools",
+    ),
+    pytest.param(
+        lambda f: fit_chemfit(_as(f, {**_NARROW, "positions": _ROWS}), 60),
+        lambda f: fit_chemfit(_as(f, _NARROW), 60),
+        id="fit_chemfit per-element bounds in a NumPy array of two rows",
+    ),
+    pytest.param(
+        lambda f: fit_chemfit(_as(f, {**_NARROW, "positions": list(_ROWS)}), 60),
+        lambda f: fit_chemfit(_as(f, _NARROW), 60),
+        id="fit_chemfit per-element bounds in a list of two arrays",
+    ),
     pytest.param(
         lambda f: run_benchmark(
             {**_context(f), "bounds": {**_NARROW, "positions": np.array([-0.5, 0.5])}}
@@ -1285,6 +1327,14 @@ HELPERS_NOW_READ = [
     pytest.param(
         lambda: bounds_from_fitter(_X, _PROXY, 2),
         id="bounds_from_fitter bounds in a mapping proxy",
+    ),
+    pytest.param(
+        lambda: _box(ReleasedFitter(_X, {"x": np.array([-1.0, 1.0], dtype=object)})),
+        id="chemfit_box bounds entry that is a NumPy pair of objects",
+    ),
+    pytest.param(
+        lambda: _box(ReleasedFitter(_X, {"x": np.array([[-1.0, -1.0], [1.0, 1.0]])})),
+        id="chemfit_box per-element bounds in a NumPy array of two rows",
     ),
 ]
 

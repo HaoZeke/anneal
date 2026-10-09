@@ -23,7 +23,11 @@ bounds entry that is not one ``(lower, upper)`` pair, such as a 3-tuple or a
 list of three per-element pairs, or that holds a non-numeric string, raises in
 ``fit_chemfit`` and ``chemfit_box``, which ignored it in favour of
 ``default_span``; a two-item list is that pair, each side a scalar or an array
-of the leaf's shape. An entry that is not one pair raises in
+of the leaf's shape. ``fit_chemfit`` and ``chemfit_box`` now read bounds pairs
+they ignored in favour of ``default_span``: one with per-element sides, such
+as a NumPy array of two rows, and a NumPy pair that does not hold numbers,
+such as ``np.array(["0", "0.8"])``, which is read as ``[0, 0.8]`` with the
+``FutureWarning`` for numeric strings. An entry that is not one pair raises in
 ``run_benchmark``'s context bounds and the ``context_bounds`` of
 ``resolve_bounds`` too, where 0.10.0 fell back to ``fitter.bounds``, and in
 ``bounds_from_fitter``, which returned ``None``. A NumPy pair there is now

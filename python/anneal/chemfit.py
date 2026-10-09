@@ -29,8 +29,8 @@ the caller. The few arguments anneal 0.10.0 accepted and ignored, such as
 preset keywords under the portfolio, still run with a FutureWarning that
 says what to pass instead; they will raise in a future release. So does a
 numeric string where a parameter value or a bound goes, such as a bounds
-pair PyYAML reads from ``[1e-3, 1e1]``: it is read as a number, as 0.10.0
-read it, with one FutureWarning per call.
+pair PyYAML reads from ``[1e-3, 1e1]``: it is read as a number, with one
+FutureWarning per call.
 """
 
 from __future__ import annotations
@@ -115,8 +115,8 @@ def _first(mask: np.ndarray) -> int | None:
 def _real_array(value: Any, what: str) -> np.ndarray:
     """``value`` as a float64 array; anything not real-numeric is an error.
 
-    Numeric strings are read as numbers, as anneal 0.10.0 read them, and
-    reported to the :class:`_Strings` the call runs in.
+    Numeric strings are read as numbers and reported to the
+    :class:`_Strings` the call runs in.
     """
     arr = np.asarray(value)
     if arr.dtype.kind in "SU":
@@ -149,9 +149,9 @@ _STRINGS: contextvars.ContextVar[dict[str, int] | None] = contextvars.ContextVar
 class _Strings:
     """The numeric strings one call reads, named in one FutureWarning at its end.
 
-    anneal 0.10.0 read a numeric string wherever it read a parameter value or
-    a bound, such as the strings PyYAML reads for ``[1e-3, 1e1]``. A call
-    made inside another reports its strings to the outer one.
+    PyYAML reads ``1e-3`` and ``1e1`` as strings, so a parameter value or a
+    bound from a YAML file may be one. A call made inside another reports
+    its strings to the outer one.
     """
 
     def __init__(self, caller: str):
@@ -185,8 +185,8 @@ def _strings_message(caller: str, found: dict[str, int]) -> str:
     shown = names if len(names) <= 3 else [*names[:2], f"{len(names) - 2} more"]
     one = sum(found.values()) == 1
     return (
-        f"{caller} reads {_listed(shown)} from {'a string' if one else 'strings'}, "
-        f"as anneal 0.10.0 did; pass {'a number' if one else 'numbers'} instead. "
+        f"{caller} reads {_listed(shown)} from {'a string' if one else 'strings'}; "
+        f"pass {'a number' if one else 'numbers'} instead. "
         "A string will raise in a future release."
     )
 
