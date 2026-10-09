@@ -13,14 +13,15 @@ evaluated parameters and its return value is the result; ChemFit returns the
 parameters it was given.
 
 Nested parameter dicts are flattened only at the optimizer boundary and
-rebuilt on the way back. A leaf keeps its type: a Python number comes back as
-a float, a NumPy scalar or array keeps its shape and its floating dtype
-(integer and bool leaves are optimized, and returned, as float64), a list or
-tuple comes back as a list or tuple nested the same way, and the bounds of a
-float32 or float16 leaf are rounded inward so the cast candidate stays inside
-them. A parameter whose lower and upper bounds are equal is held
-fixed. Every evaluation lies inside the box, the first one is the start, and
-the budget counts it. The default driver is the Thompson-allocated portfolio.
+rebuilt on the way back. A leaf keeps its type: a Python number, a
+``Decimal`` included, comes back as a float, a NumPy scalar or array keeps its
+shape and its floating dtype (integer, bool and object leaves are optimized,
+and returned, as float64), a list or tuple comes back as a list or tuple
+nested the same way, and the bounds of a float32 or float16 leaf are rounded
+inward so the cast candidate stays inside them. A parameter whose lower and
+upper bounds are equal is held fixed. Every evaluation lies inside the box,
+the first one is the start, and the budget counts it. The default driver is
+the Thompson-allocated portfolio.
 
 Every argument is checked before ``fitter.init()``. The first exception the
 fitter raises, or a loss that is not a real number, ends the drive: the
@@ -42,6 +43,7 @@ import numbers
 import sys
 import warnings
 from collections.abc import Mapping
+from decimal import Decimal
 from typing import Any
 
 import numpy as np
@@ -116,9 +118,12 @@ def _real_array(value: Any, what: str) -> np.ndarray:
     """``value`` as a float64 array; anything not real-numeric is an error.
 
     Numeric strings are read as numbers and reported to the
-    :class:`_Strings` the call runs in.
+    :class:`_Strings` the call runs in. What NumPy holds only as objects,
+    such as a ``Decimal`` or an object array, is read item by item.
     """
     arr = np.asarray(value)
+    if arr.dtype.kind == "O":
+        return _object_items(arr, what)
     if arr.dtype.kind in "SU":
         try:
             arr = arr.astype(np.float64)
@@ -128,6 +133,31 @@ def _real_array(value: Any, what: str) -> np.ndarray:
     if arr.dtype.kind not in "biuf":
         raise ValueError(f"{what} is not real-numeric")
     return arr.astype(np.float64)
+
+
+def _object_items(arr: np.ndarray, what: str) -> np.ndarray:
+    """An object array as float64, each item read with ``float()``.
+
+    An item that is a one-element array is read as its element, and numeric
+    string items are reported to the :class:`_Strings` the call runs in. A
+    complex number, a larger array or anything ``float()`` refuses is an
+    error.
+    """
+    out = np.empty(arr.shape)
+    strings = 0
+    for index, item in np.ndenumerate(arr):
+        if isinstance(item, np.ndarray) and item.size == 1:
+            item = item.reshape(())[()]
+        if np.iscomplexobj(item) or isinstance(item, np.ndarray):
+            raise ValueError(f"{what} is not real-numeric")
+        try:
+            out[index] = float(item)
+        except (TypeError, ValueError, OverflowError):
+            raise ValueError(f"{what} is not real-numeric") from None
+        strings += isinstance(item, (str, bytes))
+    if strings:
+        _Strings.note(what, strings)
+    return out
 
 
 def _deprecated(message: str) -> None:
@@ -326,16 +356,17 @@ def _copy_tree(tree: dict) -> dict:
 def _leaf_form(name: str, value: Any) -> tuple[str, np.dtype, tuple[int, ...]]:
     """``(kind, dtype, shape)`` of a parameter leaf.
 
-    ``kind`` is ``"number"`` for a Python number, ``"scalar"`` for a NumPy
-    scalar, ``"sequence"`` for a list or tuple and ``"array"`` for anything
-    else array-like. ``dtype`` is the float type a candidate value is cast
-    to; integer and bool leaves are optimized as float64.
+    ``kind`` is ``"number"`` for a Python number, a ``Decimal`` included,
+    ``"scalar"`` for a NumPy scalar, ``"sequence"`` for a list or tuple and
+    ``"array"`` for anything else array-like. ``dtype`` is the float type a
+    candidate value is cast to; integer, bool and object leaves are
+    optimized as float64.
     """
     if isinstance(value, np.generic):
         kind, raw, shape = "scalar", value.dtype, ()
     elif isinstance(value, np.ndarray):
         kind, raw, shape = "array", value.dtype, value.shape
-    elif isinstance(value, numbers.Real):
+    elif isinstance(value, (numbers.Real, Decimal)):
         return "number", np.dtype(np.float64), ()
     else:
         try:
@@ -344,7 +375,7 @@ def _leaf_form(name: str, value: Any) -> tuple[str, np.dtype, tuple[int, ...]]:
             raise ValueError(f"parameter {name} is not real-numeric") from error
         kind = "sequence" if isinstance(value, (list, tuple)) else "array"
         raw, shape = arr.dtype, arr.shape
-    if raw.kind in "biu":
+    if raw.kind in "biuO":
         return kind, np.dtype(np.float64), shape
     if raw.kind != "f":
         raise ValueError(f"parameter {name} is not real-numeric")
@@ -389,29 +420,30 @@ def _items_like(form: Any, values: np.ndarray) -> Any:
 
 
 def _numeric_leaf(name: str, value: Any) -> Any:
-    """``value`` with its numeric strings read as floats, laid out the same.
+    """``value`` with its strings and objects read as floats, laid out the same.
 
     A string leaf becomes a float, and a list, tuple or array of strings
     one of floats; each is reported to the :class:`_Strings` the call runs
-    in. Any other leaf is returned as it is.
+    in. A leaf NumPy holds only as objects, such as a ``Decimal``, a list
+    of them or an object array, is read item by item the same way. Any
+    other leaf is returned as it is.
     """
     if isinstance(value, (str, bytes)):
         return float(_real_array(value, f"parameter {name}"))
-    if isinstance(value, np.ndarray):
-        kind = value.dtype.kind
-    elif isinstance(value, (list, tuple)):
-        try:
-            kind = np.asarray(value).dtype.kind
-        except (TypeError, ValueError):
-            return value
-    else:
+    if isinstance(value, (numbers.Real, np.generic)):
         return value
-    if kind not in "SU":
+    try:
+        kind = np.asarray(value).dtype.kind
+    except (TypeError, ValueError):
+        return value
+    if kind not in "OSU":
         return value
     values = _real_array(value, f"parameter {name}")
-    if isinstance(value, np.ndarray):
+    if isinstance(value, (list, tuple)):
+        return _items_like(_items_form(value), values)
+    if isinstance(value, np.ndarray) or values.ndim:
         return values
-    return _items_like(_items_form(value), values)
+    return float(values)
 
 
 class _Leaf:
@@ -446,8 +478,9 @@ class _Leaf:
 class _Layout:
     """Where each leaf of a nested parameter mapping sits in the flat vector.
 
-    A numeric string leaf is laid out as the number it reads as, as anneal
-    0.10.0 read it.
+    A numeric string leaf, or one NumPy holds only as objects, such as a
+    ``Decimal`` or an object array, is laid out as the floats it reads as,
+    as anneal 0.10.0 read it.
     """
 
     def __init__(self, template: Mapping):
@@ -855,9 +888,10 @@ def flatten_parameters(params: dict[str, Any]):
     ravelled entries in C order. ``spec`` records ``(path, shape)`` per
     leaf (``shape == ()`` for scalars) so :func:`unflatten_parameters`
     can rebuild the structure. Only real-numeric leaves are supported (a
-    numeric string is read as a number, with a FutureWarning); non-finite
-    starts are rejected, and so are ``longdouble`` leaves, which a float64
-    vector cannot carry exactly.
+    ``Decimal`` or an object array is read item by item, and a numeric
+    string as a number, with a FutureWarning); non-finite starts are
+    rejected, and so are ``longdouble`` leaves, which a float64 vector
+    cannot carry exactly.
     """
     if not isinstance(params, Mapping) or not params:
         raise ValueError("params must be a non-empty dict")
@@ -879,11 +913,12 @@ def unflatten_parameters(vector: np.ndarray, spec, template: dict[str, Any]):
     """Rebuild a nested parameter dict from a flat vector and a spec.
 
     Array leaves are reshaped to their original shape, and each leaf takes
-    the type of the matching ``template`` leaf: a Python number comes back as
-    a float, a NumPy scalar or array keeps its floating dtype, an integer or
-    bool leaf comes back as float64, and a list or tuple comes back as a list
-    or tuple nested the same way. The returned dict mirrors ``template``'s
-    nesting and never mutates the template.
+    the type of the matching ``template`` leaf: a Python number, a
+    ``Decimal`` included, comes back as a float, a NumPy scalar or array
+    keeps its floating dtype, an integer, bool or object leaf comes back as
+    float64, and a list or tuple comes back as a list or tuple nested the
+    same way. The returned dict mirrors ``template``'s nesting and never
+    mutates the template.
     """
     vector = np.asarray(vector, dtype=np.float64).ravel()
     total = spec_total(spec)
