@@ -956,3 +956,67 @@ def test_global_optimize_never_calls_with_a_non_finite_coordinate():
         objective = Recorder(partly_infeasible)
         global_optimize(objective, np.full(4, -3.0), np.full(4, 3.0), budget=4000, seed=1, grad_fn=grad_fn)
         assert np.all(np.isfinite(np.array(objective.points)))
+
+
+def test_qmc_gsa_global_search_never_rounds_past_the_upper_wall():
+    low, high = np.full(3, -3.0), np.full(3, 0.7)
+    objective = Recorder(lambda x: float(np.sum((x - 1.0) ** 2)))
+    qmc_gsa_global_search(objective, low, high, max_evals=2000, seed=0)
+    points = np.array(objective.points)
+    assert np.all(points >= low) and np.all(points <= high)
+
+
+@pytest.mark.parametrize(
+    ("low", "high"),
+    [
+        (np.array([1.0, -1.0]), np.array([-1.0, 1.0])),
+        (np.array([-np.inf, -1.0]), np.array([1.0, 1.0])),
+        (np.array([np.nan, -1.0]), np.array([1.0, 1.0])),
+        (np.array([-1.8e308, -1.0]), np.array([1.8e308, 1.0])),
+    ],
+)
+def test_every_box_driver_refuses_bounds_it_cannot_use(low, high):
+    objective = Recorder(shifted_quadratic)
+    calls = [
+        lambda: run(objective, low, high, Boltzmann(), n_epochs=1, steps_per_epoch=2),
+        lambda: run_qmc(objective, low, high, Boltzmann(), n_starts=2, n_epochs=1, steps_per_epoch=2),
+        lambda: global_optimize(objective, low, high, budget=20),
+        lambda: qmc_gsa_global_search(objective, low, high, max_evals=20),
+    ]
+    for call in calls:
+        with pytest.raises(ValueError):
+            call()
+    assert objective.points == []
+
+
+@pytest.mark.parametrize(
+    ("name", "kwargs"),
+    [("n_starts", {"n_starts": 0}), ("n_epochs", {"n_epochs": -1}), ("steps_per_epoch", {"steps_per_epoch": 1.5})],
+)
+def test_run_qmc_refuses_counts_it_cannot_run(name, kwargs):
+    with pytest.raises(ValueError, match=name):
+        run_qmc(shifted_quadratic, np.array([-1.0, -1.0]), np.array([1.0, 1.0]), Boltzmann(), **kwargs)
+
+
+def test_cluster_search_probe_follows_the_callback_rules():
+    calls = []
+
+    def fails_first(x):
+        calls.append(1)
+        if len(calls) == 1:
+            raise RuntimeError("budget counter tripped")
+        return lj_cluster_energy(x)
+
+    with pytest.warns(RuntimeWarning, match="budget counter tripped"):
+        out = cluster_search(fails_first, lj_cluster_gradient, 13, 2000, seed=0)
+    assert np.isfinite(out["best_energy"])
+
+    with pytest.raises(TypeError, match="grad_fn must return"):
+        cluster_search(lj_cluster_energy, lambda x: None, 13, 200, seed=0)
+
+    def infinite_far_out(x):
+        p = np.asarray(x).reshape(-1, 3)
+        return float("inf") if np.max(np.abs(p)) > 1.2 else lj_cluster_energy(x)
+
+    out = cluster_search(infinite_far_out, lj_cluster_gradient, 13, 2000, seed=1)
+    assert isinstance(out["best_energy"], float)

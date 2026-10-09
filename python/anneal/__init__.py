@@ -77,6 +77,15 @@ def _flat_or_none(value):
     return None if value is None else _flat(value)
 
 
+def _count(name, value, minimum):
+    """A whole number of at least ``minimum``, or a ValueError naming it."""
+    count = int(value)
+    if count != value or count < minimum:
+        msg = f"{name} must be a whole number of at least {minimum}, got {value!r}"
+        raise ValueError(msg)
+    return count
+
+
 def _max_evals(value):
     """``None``, or a positive whole number of objective calls."""
     if value is None:
@@ -127,8 +136,8 @@ def run(
         _flat(low),
         _flat(high),
         preset,
-        int(n_epochs),
-        int(steps_per_epoch),
+        _count("n_epochs", n_epochs, 0),
+        _count("steps_per_epoch", steps_per_epoch, 0),
         int(seed),
         _flat_or_none(x0),
         _max_evals(max_evals),
@@ -159,9 +168,9 @@ def run_qmc(
         _flat(low),
         _flat(high),
         preset,
-        int(n_starts),
-        int(n_epochs),
-        int(steps_per_epoch),
+        _count("n_starts", n_starts, 1),
+        _count("n_epochs", n_epochs, 0),
+        _count("steps_per_epoch", steps_per_epoch, 0),
         int(seed),
         _flat_or_none(x0),
         _max_evals(max_evals),
