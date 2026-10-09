@@ -11,6 +11,7 @@ another ``x0``. The default driver is the Thompson-allocated portfolio.
 
 from __future__ import annotations
 
+from numbers import Integral
 from typing import Any
 
 import numpy as np
@@ -27,6 +28,24 @@ __all__ = [
 ]
 
 _CLASSICAL_DRIVERS = ("boltzmann", "fast", "gsa")
+_SEED_MODULUS = 2**64
+
+
+def _whole_number(name: str, value: Any) -> int:
+    """``value`` as an int of at least 1, or a ValueError naming ``name``."""
+    if isinstance(value, bool) or not isinstance(value, Integral) or value < 1:
+        raise ValueError(f"{name} must be a whole number, at least 1, got {value!r}")
+    return int(value)
+
+
+def _seed(value: Any) -> int:
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, Integral)
+        or not 0 <= int(value) < _SEED_MODULUS
+    ):
+        raise ValueError(f"seed must be a whole number in [0, 2**64), got {value!r}")
+    return int(value)
 
 
 def _path_str(path: tuple) -> str:
@@ -245,20 +264,27 @@ def fit_anneal(
         none of ``steps_per_epoch``, ``preset_kwargs`` and ``preset``, and
         raises ``ValueError`` when one is given.
 
+    ``budget`` and ``steps_per_epoch`` must be whole numbers of at least 1 and
+    ``seed`` one in ``[0, 2**64)``; ``driver`` is matched exactly. Every value
+    is checked before ``fitter.init()``. The search runs on the parameters
+    themselves, so a preset's ``sigma`` or ``gamma`` is in their units;
+    ``Fitter.fit_anneal`` from the ChemFit patches searches the unit cube,
+    where the same preset steps in units of each box width.
+
     Returns the finished parameter dict (``fitter.finish`` of the best
     position), with array leaves restored to their original shapes.
     """
     from anneal import global_optimize, run
 
-    driver = str(driver).lower()
     if driver not in ("portfolio", *_CLASSICAL_DRIVERS):
         raise ValueError(
             f"driver must be 'portfolio' or one of {', '.join(_CLASSICAL_DRIVERS)}; "
             f"got {driver!r}"
         )
-    budget = int(budget)
-    if budget < 1:
-        raise ValueError("budget must be positive")
+    budget = _whole_number("budget", budget)
+    seed = _seed(seed)
+    if steps_per_epoch is not None:
+        steps_per_epoch = _whole_number("steps_per_epoch", steps_per_epoch)
     if driver == "portfolio":
         unused = [
             name
@@ -271,6 +297,9 @@ def fit_anneal(
         ]
         if unused:
             raise ValueError(f"driver 'portfolio' does not take {', '.join(unused)}")
+        classical = None
+    else:
+        classical = _classical_preset(driver, preset, preset_kwargs)
 
     initial_parameters = getattr(fitter, "initial_parameters", None)
     if not isinstance(initial_parameters, dict) or not initial_parameters:
@@ -311,19 +340,18 @@ def fit_anneal(
         return loss
 
     if driver == "portfolio":
-        result = global_optimize(obj, low_vec, high_vec, budget, seed=int(seed), x0=start_vector)
+        result = global_optimize(obj, low_vec, high_vec, budget, seed=seed, x0=start_vector)
         best_pos = np.asarray(result["best_pos"], dtype=np.float64)
     else:
-        preset = _classical_preset(driver, preset, preset_kwargs)
-        steps = max(1, min(100 if steps_per_epoch is None else int(steps_per_epoch), budget))
+        steps = min(100 if steps_per_epoch is None else steps_per_epoch, budget)
         history = run(
             obj,
             low_vec,
             high_vec,
-            preset,
+            classical,
             n_epochs=-(-budget // steps),
             steps_per_epoch=steps,
-            seed=int(seed),
+            seed=seed,
             x0=start_vector,
             max_evals=budget,
         )
@@ -846,7 +874,9 @@ def run_fitter(
     Boltzmann preset; other names pass through. A fitter that implements
     ``fit_anneal`` is called with that method name, otherwise :func:`fit_anneal`
     drives it. ``preset`` and every keyword reach whichever path runs; one
-    that path does not take raises rather than being dropped.
+    that path does not take raises rather than being dropped. The paths
+    measure a preset's step differently: ``Fitter.fit_anneal`` in units of
+    each box width, :func:`fit_anneal` in the units of the parameters.
     """
     driver = {"global_optimize": "portfolio", "sa": "boltzmann"}.get(method, method)
     if hasattr(fitter, "fit_anneal"):
