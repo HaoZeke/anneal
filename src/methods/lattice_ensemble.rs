@@ -22,9 +22,10 @@
 //! for bit at any thread count.
 //!
 //! Resemblance is the mean absolute difference between the sorted distances
-//! of the atoms from their centroid. The merge distance starts at a fraction
-//! of the mean pairwise resemblance of the first full bank and shrinks
-//! linearly to a smaller fraction as the budget is spent.
+//! of the atoms from their centroid. The merge distance is a fraction of the
+//! mean pairwise resemblance of the first full bank. It may shrink linearly as
+//! the budget is spent; by default it holds, because a shrinking cutoff lets
+//! the variants of one funnel fill the bank as distinct members.
 //!
 //! Parents are drawn least-used first, and a member that improves is fresh
 //! again, so the effort follows the funnels that are still descending. A
@@ -123,8 +124,8 @@ impl Default for Plan {
             fresh: 0.3,
             splice: 0.2,
             moved: (1, 4),
-            merge: (0.5, 0.1),
-            retire: 0,
+            merge: (0.5, 0.5),
+            retire: 20,
             density: 0.7,
             min_separation: 0.85,
             sharing: Sharing::Shared,
