@@ -3,7 +3,8 @@
 An argument 0.10.0 took and ignored still runs. It gives one FutureWarning,
 attributed to the caller, that says what to pass instead, and the fit is the
 one the call that passes that gives. So does a numeric string where 0.10.0
-read a parameter value or a bound as a number. ``run_benchmark`` still
+read a parameter value, a bound, a span or a ``fit_chemfit`` preset keyword
+as a number. ``run_benchmark`` still
 drives a fitter with half a session protocol, as 0.10.0 did, with a
 FutureWarning too.
 
@@ -67,6 +68,7 @@ def _with(initial, bounds):
 
 
 _ONLY = _with({"x": np.array([0.9, -0.6, 0.2])}, {"x": (-1.0, 1.0)})
+_UNBOUNDED = _with({"x": 0.5, "y": 0.1}, {})
 
 
 def _context(fitter, budget=60):
@@ -473,6 +475,112 @@ WARNS = [
             "the lower bound of positions and the upper bound of positions",
         ),
     ),
+    # 0.10.0 passed bound_span, default_span and the preset keywords of
+    # fit_chemfit's methods through float(), which reads a numeric string.
+    # Such a string warns where the span goes unused too.
+    (
+        "fit_anneal bound_span read from YAML",
+        _UNBOUNDED,
+        lambda f: fit_anneal(f, 60, bound_span="5e-1"),
+        lambda f: fit_anneal(f, 60, bound_span=0.5),
+        _reads("fit_anneal", "bound_span", one=True),
+    ),
+    (
+        "fit_anneal bound_span as bytes beside low and high",
+        _fitter,
+        lambda f: fit_anneal(f, 60, low=_LOW, high=_HIGH, bound_span=b"0.5"),
+        lambda f: fit_anneal(f, 60, low=_LOW, high=_HIGH, bound_span=0.5),
+        _reads("fit_anneal", "bound_span", one=True),
+    ),
+    (
+        "run_fitter bound_span read from YAML",
+        _UNBOUNDED,
+        lambda f: run_fitter(f, 60, bound_span="5e-1"),
+        lambda f: run_fitter(f, 60, bound_span=0.5),
+        _reads("run_fitter", "bound_span", one=True),
+    ),
+    (
+        "fit_chemfit default_span read from YAML",
+        _UNBOUNDED,
+        lambda f: fit_chemfit(f, 60, default_span="5e-1"),
+        lambda f: fit_chemfit(f, 60, default_span=0.5),
+        _reads("fit_chemfit", "default_span", one=True),
+    ),
+    (
+        "fit_chemfit default_span string with every parameter bounded",
+        _fitter,
+        lambda f: fit_chemfit(f, 60, default_span=np.str_("0.5")),
+        lambda f: fit_chemfit(f, 60, default_span=0.5),
+        _reads("fit_chemfit", "default_span", one=True),
+    ),
+    (
+        "fit_chemfit boltzmann t_init='2.0'",
+        _fitter,
+        lambda f: fit_chemfit(
+            f, 60, method="boltzmann", steps_per_epoch=10, t_init="2.0"
+        ),
+        lambda f: fit_chemfit(
+            f, 60, method="boltzmann", steps_per_epoch=10, t_init=2.0
+        ),
+        _reads("fit_chemfit", "t_init", one=True),
+    ),
+    (
+        "fit_chemfit boltzmann sigma in a one-element string array",
+        _fitter,
+        lambda f: fit_chemfit(
+            f, 60, method="boltzmann", steps_per_epoch=10, sigma=np.array(["0.4"])
+        ),
+        lambda f: fit_chemfit(f, 60, method="boltzmann", steps_per_epoch=10, sigma=0.4),
+        _reads("fit_chemfit", "sigma", one=True),
+    ),
+    (
+        "fit_chemfit fast t_init and gamma read from YAML",
+        _fitter,
+        lambda f: fit_chemfit(
+            f, 60, method="fast", steps_per_epoch=10, t_init="3e0", gamma="5e-1"
+        ),
+        lambda f: fit_chemfit(
+            f, 60, method="fast", steps_per_epoch=10, t_init=3.0, gamma=0.5
+        ),
+        _reads("fit_chemfit", "t_init and gamma"),
+    ),
+    (
+        "fit_chemfit gsa q_v and q_a as NumPy strings",
+        _fitter,
+        lambda f: fit_chemfit(
+            f,
+            60,
+            method="gsa",
+            steps_per_epoch=10,
+            q_v=np.str_("2.5"),
+            q_a=np.array(b"1.5"),
+        ),
+        lambda f: fit_chemfit(
+            f, 60, method="gsa", steps_per_epoch=10, q_v=2.5, q_a=1.5
+        ),
+        _reads("fit_chemfit", "q_v and q_a"),
+    ),
+    (
+        "fit_chemfit default_span, t_init and bounds read from YAML",
+        _fitter,
+        lambda f: fit_chemfit(
+            _as(f, {"positions": ["-2e0", "2e0"]}),
+            60,
+            method="boltzmann",
+            steps_per_epoch=10,
+            default_span="5e-1",
+            t_init="2e0",
+        ),
+        lambda f: fit_chemfit(
+            _as(f, _EPS_UNBOUNDED),
+            60,
+            method="boltzmann",
+            steps_per_epoch=10,
+            default_span=0.5,
+            t_init=2.0,
+        ),
+        _reads("fit_chemfit", "default_span, t_init and 2 more"),
+    ),
     # 0.10.0's fit_chemfit read initial_parameters given as (key, value)
     # pairs, which ChemFit 3.1's Fitter keeps, as the dict they make.
     (
@@ -647,6 +755,12 @@ HELPERS_READ = [
         _reads("chemfit_box", "the lower bound of x and the upper bound of x"),
     ),
     (
+        "chemfit_box default_span read from YAML",
+        lambda: chemfit_box(ReleasedFitter(_X, {}), ChemFitVector(_X), "5e-1"),
+        lambda: chemfit_box(ReleasedFitter(_X, {}), ChemFitVector(_X), 0.5),
+        _reads("chemfit_box", "default_span", one=True),
+    ),
+    (
         "resolve_bounds",
         lambda: resolve_bounds(_X, low="-1", high="1"),
         lambda: resolve_bounds(_X, low=-1.0, high=1.0),
@@ -791,7 +905,6 @@ _NOT_A_PAIR = "the bounds of x must be a (lower, upper) pair"
 _THREE_PAIRS = [(-1.0, 1.0), (-2.0, 2.0), (-3.0, 3.0)]
 _SPAN = "{} must be positive and finite, got {}"
 _LOW, _HIGH = np.full(7, -1.0), np.full(7, 1.0)
-_UNBOUNDED = _with({"x": 0.5, "y": 0.1}, {})
 _NOT_FINITE = "the bounds of x[0] must be finite: lower={}, upper={}"
 
 
@@ -801,7 +914,7 @@ def _raises(label, call, error, message, make=_fitter):
 
 
 RAISES = [
-    # 0.10.0 passed budget and seed through int().
+    # 0.10.0 passed budget, seed, steps_per_epoch and tell_every through int().
     _raises(
         "fit_anneal budget=60.5",
         lambda f: fit_anneal(f, 60.5),
@@ -843,6 +956,18 @@ RAISES = [
         lambda f: fit_anneal(f, 60, seed="7"),
         TypeError,
         _WHOLE.format("seed", "'7'"),
+    ),
+    _raises(
+        "fit_chemfit tell_every='50'",
+        lambda f: fit_chemfit(f, 60, tell_every="50"),
+        TypeError,
+        _WHOLE.format("tell_every", "'50'"),
+    ),
+    _raises(
+        "fit_anneal boltzmann steps_per_epoch='10'",
+        lambda f: fit_anneal(f, 60, driver="boltzmann", steps_per_epoch="10"),
+        TypeError,
+        _WHOLE.format("steps_per_epoch", "'10'"),
     ),
     _raises(
         "run_fitter seed=1.5",
@@ -1118,10 +1243,39 @@ RAISES = [
         "fit_chemfit() got an unexpected keyword argument 'tell_evry'",
     ),
     _raises(
-        "fit_chemfit t_init='2.0'",
-        lambda f: fit_chemfit(f, 60, method="boltzmann", t_init="2.0"),
+        "fit_chemfit boltzmann t_init='hot'",
+        lambda f: fit_chemfit(f, 60, method="boltzmann", t_init="hot"),
         TypeError,
-        "t_init must be a number, got '2.0'",
+        "t_init must be a number, got 'hot'",
+    ),
+    _raises(
+        "fit_anneal bound_span='wide'",
+        lambda f: fit_anneal(f, 60, bound_span="wide"),
+        TypeError,
+        "bound_span must be a number, got 'wide'",
+        make=_UNBOUNDED,
+    ),
+    _raises(
+        "fit_chemfit default_span='wide' with every parameter bounded",
+        lambda f: fit_chemfit(f, 60, default_span="wide"),
+        TypeError,
+        "default_span must be a number, got 'wide'",
+    ),
+    _raises(
+        "fit_anneal bound_span='-1'",
+        lambda f: fit_anneal(f, 60, bound_span="-1"),
+        ValueError,
+        _SPAN.format("bound_span", "'-1'"),
+        make=_UNBOUNDED,
+    ),
+    # 0.10.0's preset constructors refused a string too, after init.
+    _raises(
+        "fit_anneal boltzmann preset_kwargs t_init='2.0'",
+        lambda f: fit_anneal(
+            f, 60, driver="boltzmann", preset_kwargs={"t_init": "2.0"}
+        ),
+        TypeError,
+        "argument 't_init': must be real number, not str",
     ),
     _raises(
         "fit_anneal preset_kwargs='t_init=2'",

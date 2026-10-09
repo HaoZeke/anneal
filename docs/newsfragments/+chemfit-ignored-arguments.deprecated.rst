@@ -7,8 +7,9 @@ preset keyword of another method, so one set of keywords still sweeps
 ``boltzmann``, ``fast`` and ``gsa``, and a ``run_fitter`` preset of another
 kind than its classical ``method`` (``method="sa"`` runs the preset).
 ``run_benchmark`` runs a preset of another method, or one given with
-``method="sa"``, as that preset's own method. A numeric string where a
-parameter value or a bound goes, such as a bounds pair PyYAML reads from
+``method="sa"``, as that preset's own method. A numeric string given for a
+parameter value, a bound, ``bound_span``, ``default_span`` or a preset keyword
+a ``fit_chemfit`` method takes, such as a bounds pair PyYAML reads from
 ``[1e-3, 1e1]`` or an item of an object array, is read as a number, with one
 warning per call, and a string parameter comes back as the float it reads as.
 An ``x0`` dict leaf with its parameter's size but another shape is read in C

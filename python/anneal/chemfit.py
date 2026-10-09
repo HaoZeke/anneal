@@ -29,9 +29,11 @@ fitter is not called again, ``finish`` is skipped, and the exception reaches
 the caller. The few arguments anneal 0.10.0 accepted and ignored, such as
 preset keywords under the portfolio, still run with a FutureWarning that
 says what to pass instead; they will raise in a future release. So does a
-numeric string where a parameter value or a bound goes, such as a bounds
-pair PyYAML reads from ``[1e-3, 1e1]``: it is read as a number, with one
-FutureWarning per call.
+numeric string given for a parameter value, a bound, ``bound_span``,
+``default_span`` or a preset keyword a :func:`fit_chemfit` method takes, such
+as a bounds pair PyYAML reads from ``[1e-3, 1e1]``: it is read as a number,
+with one FutureWarning per call. A string ``budget``, ``seed``,
+``steps_per_epoch`` or ``tell_every`` is a TypeError.
 """
 
 from __future__ import annotations
@@ -112,9 +114,10 @@ def _as_number(value: Any) -> Any:
 
     A real number other than a bool counts, a ``Decimal`` included unless it
     is a signalling NaN, and so does the element of a one-element array of
-    any shape, NumPy's or another library's. An object of another type, such
-    as an array on a GPU that NumPy cannot read, is read with ``float()``, as
-    anneal 0.10.0 read it, unless NumPy names its dtype bool or complex.
+    any shape, NumPy's or another library's. A string does not. An object of
+    another type, such as an array on a GPU that NumPy cannot read, is read
+    with ``float()``, as anneal 0.10.0 read it, unless NumPy names its dtype
+    bool or complex.
     """
     value = _one_value(value)
     if _is_number(value) or (isinstance(value, Decimal) and not value.is_snan()):
@@ -127,6 +130,26 @@ def _as_number(value: Any) -> Any:
         return float(value)
     except (TypeError, ValueError, OverflowError, RuntimeError):
         return None
+
+
+def _float_setting(name: str, value: Any) -> float | None:
+    """The float setting ``name`` as a float, else ``None``.
+
+    ``value`` is read as :func:`_as_number` reads a number, or, when it is or
+    holds a string, such as one PyYAML reads from ``5e-1``, with ``float()``,
+    as anneal 0.10.0 read it; that string is reported to the
+    :class:`_Strings` the call runs in.
+    """
+    item = _one_value(value)
+    if isinstance(item, (str, bytes, bytearray)):
+        try:
+            number = float(item)
+        except ValueError:
+            return None
+        _Strings.note(name, 1)
+        return number
+    number = _as_number(item)
+    return None if number is None else float(number)
 
 
 def _whole(name: str, value: Any, minimum: int, maximum: int = sys.maxsize) -> int:
@@ -154,12 +177,11 @@ def _whole(name: str, value: Any, minimum: int, maximum: int = sys.maxsize) -> i
 def _positive(name: str, value: Any) -> float:
     """``value`` as a positive finite float, or an error naming it.
 
-    ``value`` is read as :func:`_as_number` reads a number.
+    ``value`` is read as :func:`_float_setting` reads a float setting.
     """
-    number = _as_number(value)
+    number = _float_setting(name, value)
     if number is None:
         raise TypeError(f"{name} must be a number, got {value!r}")
-    number = float(number)
     if not (math.isfinite(number) and number > 0.0):
         raise ValueError(f"{name} must be positive and finite, got {value!r}")
     return number
@@ -243,9 +265,9 @@ _STRINGS: contextvars.ContextVar[dict[str, int] | None] = contextvars.ContextVar
 class _Strings:
     """The numeric strings one call reads, named in one FutureWarning at its end.
 
-    PyYAML reads ``1e-3`` and ``1e1`` as strings, so a parameter value or a
-    bound from a YAML file may be one. A call made inside another reports
-    its strings to the outer one.
+    PyYAML reads ``1e-3`` and ``1e1`` as strings, so a parameter value, a
+    bound, a span or a preset keyword from a YAML file may be one. A call
+    made inside another reports its strings to the outer one.
     """
 
     def __init__(self, caller: str):
@@ -1157,23 +1179,24 @@ def _fit_anneal(
     budget = _whole("budget", budget, 1)
     seed = _whole("seed", seed, 0, _SEED_LIMIT)
     steps = min(_whole("steps_per_epoch", steps_per_epoch, 1), budget)
-    span = _positive("bound_span", bound_span)
-    kwargs = _preset_kwargs(preset_kwargs)
-    if name == "portfolio":
-        if kwargs:
-            _deprecated(
-                "fit_anneal ignores preset_kwargs under the portfolio driver, which "
-                "takes no preset; leave them out, or pass driver='boltzmann', 'fast' "
-                "or 'gsa' to use them. This will raise in a future release."
-            )
-        preset = None
-    else:
-        preset = _classical_preset(name, preset, kwargs)
-
-    initial = getattr(fitter, "initial_parameters", None)
-    if not isinstance(initial, Mapping) or not initial:
-        raise ValueError("fitter.initial_parameters must be a non-empty dict")
     with _Strings(caller):
+        span = _positive("bound_span", bound_span)
+        kwargs = _preset_kwargs(preset_kwargs)
+        if name == "portfolio":
+            if kwargs:
+                _deprecated(
+                    "fit_anneal ignores preset_kwargs under the portfolio driver, "
+                    "which takes no preset; leave them out, or pass "
+                    "driver='boltzmann', 'fast' or 'gsa' to use them. This will "
+                    "raise in a future release."
+                )
+            preset = None
+        else:
+            preset = _classical_preset(name, preset, kwargs)
+
+        initial = getattr(fitter, "initial_parameters", None)
+        if not isinstance(initial, Mapping) or not initial:
+            raise ValueError("fitter.initial_parameters must be a non-empty dict")
         layout = _Layout(initial)
         start, _ = flatten_parameters(initial)
         if x0 is not None:
@@ -1265,8 +1288,8 @@ def chemfit_box(
     :func:`fit_chemfit` holds a zero-width parameter fixed instead.
     """
     layout = vector._layout
-    span = _positive("default_span", default_span)
     with _Strings("chemfit_box"):
+        span = _positive("default_span", default_span)
         box = _mapped_box(layout, getattr(fitter, "bounds", None), vector.x0, span)
         low, high = _settle(layout, *box)
     fixed = _first(low == high)
@@ -1301,7 +1324,9 @@ def _chemfit_preset(method: str, preset_kwargs: dict[str, Any]):
     """The preset of a :func:`fit_chemfit` method, from its keyword defaults.
 
     A preset keyword the method does not take is ignored, as anneal 0.10.0
-    ignored it, with a FutureWarning; any other keyword is a TypeError.
+    ignored it, with a FutureWarning; any other keyword is a TypeError. Each
+    keyword the method takes is read as :func:`_float_setting` reads a float
+    setting.
     """
     defaults = _CHEMFIT_PRESET_DEFAULTS.get(method, {})
     unknown = [key for key in preset_kwargs if key not in _PRESET_KEYWORDS]
@@ -1334,10 +1359,10 @@ def _chemfit_preset(method: str, preset_kwargs: dict[str, Any]):
     values = {}
     for key, default in defaults.items():
         value = preset_kwargs.get(key, default)
-        number = _as_number(value)
+        number = _float_setting(key, value)
         if number is None:
             raise TypeError(f"{key} must be a number, got {value!r}")
-        values[key] = float(number)
+        values[key] = number
     return _classical_preset(method, kwargs=values)
 
 
@@ -1429,13 +1454,13 @@ def fit_chemfit(
         )
     budget = _whole("budget", budget, 1)
     seed = _whole("seed", seed, 0, _SEED_LIMIT)
-    span = _positive("default_span", default_span)
-    tell_every = _whole("tell_every", tell_every, 1)
-    steps = min(_whole("steps_per_epoch", steps_per_epoch, 1), budget)
-    preset = _chemfit_preset(name, preset_kwargs)
-
-    initial = _initial_mapping(getattr(fitter, "initial_parameters", None))
     with _Strings("fit_chemfit"):
+        span = _positive("default_span", default_span)
+        tell_every = _whole("tell_every", tell_every, 1)
+        steps = min(_whole("steps_per_epoch", steps_per_epoch, 1), budget)
+        preset = _chemfit_preset(name, preset_kwargs)
+
+        initial = _initial_mapping(getattr(fitter, "initial_parameters", None))
         vector = ChemFitVector(initial)
         if vector.dim == 0:
             raise ValueError("fitter.initial_parameters holds no parameters")
