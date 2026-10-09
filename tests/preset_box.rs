@@ -2,7 +2,8 @@
 //! evaluated point and `History.best` lie in the closed box, an axis with
 //! `low == high` never moves, a supplied start is the first point evaluated,
 //! and inside the box the chain consumes the RNG exactly as the
-//! unconstrained composition did.
+//! unconstrained composition did. A NaN objective value at the start neither
+//! freezes the chain nor survives as its best value.
 
 use std::sync::{Arc, Mutex};
 
@@ -55,12 +56,36 @@ fn recorder(low: &Array1<f64>, high: &Array1<f64>) -> (Recorder, Seen) {
     (obj, seen)
 }
 
+/// The squared norm, except NaN at the first point evaluated: the start of
+/// the chain, or of the first chain of a multistart.
+struct NanFirst {
+    bounds: Bounds<f64>,
+    vals: Arc<Mutex<Vec<f64>>>,
+}
+
+impl Objective<f64> for NanFirst {
+    fn dim(&self) -> usize {
+        self.bounds.dims
+    }
+
+    fn bounds(&self) -> &Bounds<f64> {
+        &self.bounds
+    }
+
+    fn eval(&self, x: ArrayView1<f64>) -> f64 {
+        let mut vals = self.vals.lock().unwrap();
+        let val = if vals.is_empty() { f64::NAN } else { x.dot(&x) };
+        vals.push(val);
+        val
+    }
+}
+
 /// Runs preset `which` (0 Boltzmann, 1 Fast, 2 GSA) with step scale `scale`
 /// (the GSA scale is its initial temperature), from a uniform start or from
 /// `n_starts` low-discrepancy starts, with `x0` as the (first) start if given.
-fn run_preset(
+fn run_preset<O: Objective<f64> + Send + Sync>(
     which: usize,
-    obj: Recorder,
+    obj: O,
     scale: f64,
     q_v: f64,
     n_starts: Option<usize>,
@@ -247,6 +272,33 @@ fn half_infinite_boxes_mirror_across_the_finite_wall() {
                     "preset {which} evaluated {x} in [{low}, {high}]"
                 );
                 assert_in_box(x, &low, &high);
+            }
+        }
+    }
+}
+
+#[test]
+fn a_nan_start_is_left_and_never_kept_as_the_best() {
+    let low = array![-1.0, -1.0];
+    let high = array![1.0, 1.0];
+    let x0 = array![0.5, 0.5];
+    for which in 0..3 {
+        for n_starts in [None, Some(3)] {
+            for start in [None, Some(x0.view())] {
+                let vals = Arc::<Mutex<Vec<f64>>>::default();
+                let obj = NanFirst {
+                    bounds: Bounds::new(low.clone(), high.clone(), 0.0),
+                    vals: Arc::clone(&vals),
+                };
+                let history = run_preset(which, obj, 0.5, 2.62, n_starts, 1, start);
+                let vals = vals.lock().unwrap();
+                let lowest = vals.iter().skip(1).copied().fold(f64::INFINITY, f64::min);
+                assert!(vals[0].is_nan());
+                assert!(history.total_accepted() > 0);
+                assert_eq!(
+                    history.best.val, lowest,
+                    "preset {which}, {n_starts:?} starts, x0 {start:?}"
+                );
             }
         }
     }
