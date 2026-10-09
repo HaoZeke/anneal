@@ -30,6 +30,8 @@ pub mod ffs;
 pub mod floor_exit;
 /// Spectral referee over the explored landscape's transition graph.
 pub mod landscape_graph;
+/// Dynamic lattice search with a counted quench, for Lennard-Jones clusters.
+pub mod lattice_search;
 pub mod minima_hopping;
 /// Nested search: population under a descending energy ceiling.
 pub mod nested;
