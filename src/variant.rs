@@ -338,3 +338,74 @@ pub fn gsa<O: Objective<f64> + Send + Sync>(
         TsallisAccept::new(q_a),
     )
 }
+
+/// Boltzmann preset on the objective box.
+///
+/// Proposals are mirror-reflected into `obj.bounds()`. Reflection keeps a
+/// symmetric kernel, so the Metropolis test needs no Hastings correction,
+/// and every evaluated point lies in the box.
+pub type BoltzmannBox<O> =
+    SaVariant<f64, O, LogCool<f64>, BoxConstrained<f64>, Reflected<Gaussian>, Metropolis>;
+
+/// Fast preset on the objective box. See [`boltzmann_box`].
+pub type FastBox<O> =
+    SaVariant<f64, O, ReciprocalCool<f64>, BoxConstrained<f64>, Reflected<Cauchy>, Metropolis>;
+
+/// GSA preset on the objective box. See [`boltzmann_box`].
+pub type GsaBox<O> = SaVariant<
+    f64,
+    O,
+    TsallisCool<f64>,
+    BoxConstrained<f64>,
+    Reflected<TsallisVisit>,
+    TsallisAccept<f64>,
+>;
+
+/// Boltzmann SA reflected into the objective box.
+pub fn boltzmann_box<O: Objective<f64> + Send + Sync>(
+    obj: O,
+    t_init: f64,
+    sigma: f64,
+) -> Result<BoltzmannBox<O>, LawViolation> {
+    let bounds = obj.bounds().clone();
+    SaVariant::checked(
+        obj,
+        LogCool::new(t_init, 2.0),
+        BoxConstrained::new(bounds.clone()),
+        Reflected::new(Gaussian::new(sigma), bounds),
+        Metropolis,
+    )
+}
+
+/// Fast SA reflected into the objective box.
+pub fn fast_box<O: Objective<f64> + Send + Sync>(
+    obj: O,
+    t_init: f64,
+    gamma: f64,
+) -> Result<FastBox<O>, LawViolation> {
+    let bounds = obj.bounds().clone();
+    SaVariant::checked(
+        obj,
+        ReciprocalCool::new(t_init),
+        BoxConstrained::new(bounds.clone()),
+        Reflected::new(Cauchy::new(gamma), bounds),
+        Metropolis,
+    )
+}
+
+/// GSA reflected into the objective box.
+pub fn gsa_box<O: Objective<f64> + Send + Sync>(
+    obj: O,
+    t_init: f64,
+    q_v: f64,
+    q_a: f64,
+) -> Result<GsaBox<O>, LawViolation> {
+    let bounds = obj.bounds().clone();
+    SaVariant::checked(
+        obj,
+        TsallisCool::new(t_init, q_v),
+        BoxConstrained::new(bounds.clone()),
+        Reflected::new(TsallisVisit::new(q_v), bounds),
+        TsallisAccept::new(q_a),
+    )
+}

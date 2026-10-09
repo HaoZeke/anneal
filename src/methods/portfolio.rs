@@ -3059,7 +3059,15 @@ where
     O: Objective<f64>,
     G: Gradient<f64>,
 {
-    portfolio_optimize_with_policy(obj, grad, budget, seed, noise_sigma, PortfolioPolicy::Auto)
+    portfolio_optimize_with_policy(
+        obj,
+        grad,
+        budget,
+        seed,
+        noise_sigma,
+        PortfolioPolicy::Auto,
+        None,
+    )
 }
 
 /// Runs the portfolio driver under a shared work-unit budget.
@@ -3068,6 +3076,8 @@ where
 /// evaluations and is the driver's only required parameter. `grad`
 /// enables the gradient arms and the final polish.
 /// `policy` selects regime auto-routing (`Auto`) or flat legacy order.
+/// `x0`, when set, is reflected into the box and recorded as the
+/// incumbent before any arm runs, and that evaluation is charged.
 pub fn portfolio_optimize_with_policy<O, G>(
     obj: &O,
     grad: Option<&G>,
@@ -3075,6 +3085,7 @@ pub fn portfolio_optimize_with_policy<O, G>(
     seed: u64,
     noise_sigma: Option<f64>,
     policy: PortfolioPolicy,
+    x0: Option<ArrayView1<f64>>,
 ) -> PortfolioResult
 where
     O: Objective<f64>,
@@ -3130,6 +3141,14 @@ where
         inner: g,
         ledger: &ledger,
     });
+    if let Some(x0) = x0 {
+        assert_eq!(
+            x0.len(),
+            dim,
+            "x0 length must match the objective dimension"
+        );
+        let _ = budgeted_obj.eval(x0);
+    }
 
     // Probe-based demotion for mid-width MultimodalGlobal boxes. Width alone
     // cannot separate a Styblinski-class multi-basin box from a least-squares
@@ -4476,6 +4495,7 @@ mod tests {
             73,
             None,
             PortfolioPolicy::Legacy,
+            None,
         );
         let b = portfolio_optimize_with_policy(
             &shifted,
@@ -4484,6 +4504,7 @@ mod tests {
             73,
             None,
             PortfolioPolicy::Legacy,
+            None,
         );
 
         assert_eq!(a.arm_stats.len(), b.arm_stats.len());

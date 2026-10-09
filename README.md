@@ -111,9 +111,29 @@ Runnable copies:
 from anneal import Boltzmann, Fast, Gsa, run
 
 h = run(rastrigin, low, high, Boltzmann(t_init=5.0, sigma=0.5),
-        n_epochs=40, steps_per_epoch=50, seed=1)
+        n_epochs=40, steps_per_epoch=50, seed=1, x0=[0.0] * 5)
 print(h.best_val)
 ```
+
+`low` and `high` are a hard box: every trial is reflected back into it. `x0` is an optional start and is clipped into that box.
+
+## ChemFit
+
+Gradient-free fits go through `anneal.chemfit.run_benchmark`. The chain starts at `initial_params`, and every candidate the fitter evaluates stays inside the box. `method="portfolio"` is the budget-only global optimizer. `method="boltzmann"` (also `"fast"` and `"gsa"`) is the classical preset.
+
+```python
+from anneal.chemfit import run_benchmark
+
+def run_anneal(benchmark_context):
+    return run_benchmark(
+        benchmark_context,
+        method="portfolio",
+        low=-3.0,
+        high=3.0,
+    )
+```
+
+A scalar `low` or `high` is broadcast across the flattened parameters. Bounds may also live on `benchmark_context["bounds"]` or `fitter.bounds`, mirroring `initial_params`. The fitter may speak `ask`/`tell` or `evaluate`/`step`.
 
 ## Optional arms (additive independence + QMC polish)
 

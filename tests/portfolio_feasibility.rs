@@ -76,8 +76,15 @@ fn portfolio_best_stays_in_bounds_schwefel() {
 #[test]
 fn portfolio_legacy_best_stays_in_bounds_schwefel() {
     let obj = Schwefel::new(5);
-    let result =
-        portfolio_optimize_with_policy(&obj, Some(&obj), 1500, 11, None, PortfolioPolicy::Legacy);
+    let result = portfolio_optimize_with_policy(
+        &obj,
+        Some(&obj),
+        1500,
+        11,
+        None,
+        PortfolioPolicy::Legacy,
+        None,
+    );
     assert_feasible(&result.best_pos, result.best_val, -500.0, 500.0);
 }
 

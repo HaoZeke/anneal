@@ -4,7 +4,8 @@ Public API:
   - Boltzmann(t_init, sigma): logarithmic cooling + Gaussian + Metropolis.
   - Fast(t_init, gamma): reciprocal cooling + Cauchy + Metropolis.
   - Gsa(t_init, q_v, q_a): Tsallis cooling + Tsallis visit + Tsallis accept.
-  - run(obj_fn, low, high, preset, n_epochs, steps_per_epoch, seed): SA loop.
+  - run(obj_fn, low, high, preset, n_epochs, steps_per_epoch, seed, x0):
+    SA loop. Every trial is reflected into [low, high]. x0 is an optional start.
   - History, EpochLine: returned by `run`.
   - Config.recommended(n) / Config.for_cluster(n), Ledger(budget),
     cluster_search(obj_fn, grad_fn, n, budget, seed, recommended): measured
@@ -690,6 +691,7 @@ def global_optimize(
     grad_fn=None,
     noise_sigma=None,
     policy: str = "auto",
+    x0=None,
 ):
     """Thompson-allocated portfolio global optimizer.
 
@@ -726,6 +728,8 @@ def global_optimize(
         (out of regime).
       policy: ``"auto"`` (default; feature-based regime routing) or
         ``"legacy"`` (flat arm order, uninformative priors; A/B only).
+      x0: optional start. Reflected into the box, charged as one
+        evaluation, and kept as the incumbent the arms improve on.
 
     Returns a dict with ``best_pos``, ``best_val``, ``n_evals``,
     ``n_grads``, ``arm_pulls``, and ``arm_successes``.
@@ -739,6 +743,7 @@ def global_optimize(
         grad_fn,
         noise_sigma if noise_sigma is None else float(noise_sigma),
         str(policy),
+        None if x0 is None else np.asarray(x0, dtype=np.float64),
     )
     out["best_pos"] = np.asarray(out["best_pos"], dtype=np.float64)
     return out

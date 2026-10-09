@@ -259,6 +259,11 @@ struct Slot {
     state: Vec<f64>,
     best_energy: f64,
     best_state: Vec<f64>,
+    /// First quenched structure this chain published. Lee, Lee and Scheraga
+    /// keep that bank frozen and draw mix partners from it, so a later
+    /// collapse of the live population still has something outside the funnel.
+    first_energy: f64,
+    first_state: Vec<f64>,
 }
 
 #[derive(Default, Clone, Copy)]
@@ -326,8 +331,9 @@ struct ExchangeConfig {
     /// Quenched children are admitted by the bank. A child replaces the
     /// member it resembles, or the worst member when it resembles none.
     pbh: bool,
-    /// Replacement radius as a multiple of the ensemble's mean pairwise
-    /// dissimilarity at the first exchange.
+    /// `Dcut` starts at this multiple of the first bank's mean pairwise
+    /// distance. Lee, Lee and Scheraga use one half (`PBH_DCUT`, default
+    /// 0.5). The schedule then carries the cutoff to one fifth of that mean.
     pbh_dcut_scale: f64,
 }
 
@@ -467,6 +473,8 @@ struct Population {
     offers: usize,
     improved_at: Vec<u64>,
     tick: u64,
+    /// Lee schedule: half the first-bank mean, down to one fifth of that mean.
+    schedule: Option<DiversityAnnealer>,
 }
 
 fn population_distance(a: ArrayView1<f64>, b: ArrayView1<f64>) -> f64 {
@@ -493,6 +501,7 @@ impl Population {
             offers: 0,
             improved_at: vec![0; chains],
             tick: 0,
+            schedule: None,
         }
     }
 
@@ -527,10 +536,10 @@ impl Population {
         let scale = if factor.is_finite() && factor > 0.0 {
             factor
         } else {
-            1.5
+            0.5
         };
         let slots: Vec<usize> = (0..self.bank.len()).collect();
-        let cutoff = DiversityAnnealer::scaled_from_population(
+        let schedule = DiversityAnnealer::scaled_from_population(
             &slots,
             |i, j| {
                 population_distance(
@@ -539,12 +548,25 @@ impl Population {
                 )
             },
             scale,
-        )
-        .map(|schedule| schedule.initial());
-        if let Some(cutoff) = cutoff {
-            self.bank.dcut = cutoff;
+        );
+        if let Some(schedule) = schedule {
+            // Initial threshold is `factor * mean`. One fifth of the mean is
+            // `0.2 / factor` of that threshold. At the Lee factor 0.5 this
+            // floor fraction is 0.4.
+            let floor = (0.2 / scale).clamp(1e-6, 1.0);
+            let schedule = schedule.with_final_fraction(floor);
+            self.bank.dcut = schedule.initial();
+            self.schedule = Some(schedule);
         }
         self.cutoff_ready = true;
+    }
+
+    /// Move `Dcut` along the Lee schedule. `progress` is the fraction of
+    /// this chain's charged budget already spent, in `[0, 1]`.
+    fn set_progress(&mut self, progress: f64) {
+        if let Some(schedule) = self.schedule.as_mut() {
+            self.bank.dcut = schedule.threshold(progress.clamp(0.0, 1.0));
+        }
     }
 
     /// Offer one quenched child. Returns whether some chain was told to move.
@@ -600,7 +622,6 @@ impl Population {
             self.pending[chain] = Some((energy, state.to_vec()));
             self.improved_at[chain] = self.tick;
         }
-        self.anneal();
         replaced.is_some()
     }
 
@@ -622,20 +643,6 @@ impl Population {
             && state
                 .as_slice()
                 .is_some_and(|child| anneal_core::catalog::different_decaf_family(child, coords))
-    }
-
-    /// Shrink the cutoff by 0.85 every 50 generations for the first 250.
-    fn anneal(&mut self) {
-        if std::env::var("PBH_ANNEAL").ok().as_deref() != Some("1") {
-            return;
-        }
-        let n = self.bank.len().max(1);
-        if !self.cutoff_ready {
-            return;
-        }
-        if self.offers.is_multiple_of(50 * n) && self.offers <= 250 * n {
-            self.bank.dcut *= 0.85;
-        }
     }
 
     /// A stalled chain takes the member that improved most recently.
@@ -878,9 +885,22 @@ fn run_chain(
             if let Some(best) = snapshot.best_state() {
                 slot.best_state = best.to_vec();
             }
+            if slot.first_state.is_empty() {
+                if !slot.best_state.is_empty() {
+                    slot.first_state = slot.best_state.clone();
+                    slot.first_energy = slot.best_energy;
+                } else if !slot.state.is_empty() {
+                    slot.first_state = slot.state.clone();
+                    slot.first_energy = slot.energy;
+                }
+            }
         }
         if let Some(population) = population.as_ref() {
             let mut population = population.lock().expect("population");
+            let spent = snapshot.charged();
+            let left = snapshot.remaining();
+            let progress = spent as f64 / (spent.saturating_add(left).max(1)) as f64;
+            population.set_progress(progress);
             if !population.is_seeded(chain) {
                 if let Some(current) = snapshot.current_state().as_slice() {
                     population.offer(
@@ -958,6 +978,7 @@ fn run_chain(
                 snapshot.current_energy(),
             )
         };
+        let from_first = exchange_rng.random::<bool>();
         let partner = {
             let slots = board.lock().expect("ensemble board");
             let candidates: Vec<(f64, &Vec<f64>)> = slots
@@ -965,7 +986,9 @@ fn run_chain(
                 .enumerate()
                 .filter(|(other, _)| *other != chain)
                 .map(|(_, slot)| {
-                    if exchange.partner_best {
+                    if from_first && !slot.first_state.is_empty() {
+                        (slot.first_energy, &slot.first_state)
+                    } else if exchange.partner_best {
                         (slot.best_energy, &slot.best_state)
                     } else {
                         (slot.energy, &slot.state)
@@ -1279,7 +1302,7 @@ fn main() {
         portfolio_shared: mode == "shared",
         portfolio_split: env_usize("SURFACES_SPLIT", 0) == 1,
         pbh: mode == "pbh",
-        pbh_dcut_scale: env_f64("PBH_DCUT", 1.5),
+        pbh_dcut_scale: env_f64("PBH_DCUT", 0.5),
     };
     let surface = Surface::from_environment(n);
     let target = surface.reference(n);
