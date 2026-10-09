@@ -56,7 +56,7 @@ from anneal._core import (
     amsa_optimize as _core_amsa_optimize,
     bfwt_optimize as _core_bfwt_optimize,
     run as _core_run,
-    run_hmc,
+    run_hmc as _core_run_hmc,
     run_qmc as _core_run_qmc,
 )
 from anneal.device import DeviceHistory, EnsembleHistory, run_device, run_ensemble
@@ -75,6 +75,17 @@ def _flat(value):
 
 def _flat_or_none(value):
     return None if value is None else _flat(value)
+
+
+def _max_evals(value):
+    """``None``, or a positive whole number of objective calls."""
+    if value is None:
+        return None
+    count = int(value)
+    if count != value or count < 1:
+        msg = f"max_evals must be a whole number of calls, at least 1, got {value!r}"
+        raise ValueError(msg)
+    return count
 
 
 def run(
@@ -120,7 +131,7 @@ def run(
         int(steps_per_epoch),
         int(seed),
         _flat_or_none(x0),
-        None if max_evals is None else int(max_evals),
+        _max_evals(max_evals),
     )
 
 
@@ -153,7 +164,42 @@ def run_qmc(
         int(steps_per_epoch),
         int(seed),
         _flat_or_none(x0),
-        None if max_evals is None else int(max_evals),
+        _max_evals(max_evals),
+    )
+
+
+def run_hmc(
+    obj_fn,
+    grad_fn,
+    low,
+    high,
+    t_init: float = 5.0,
+    epsilon: float = 0.05,
+    l_steps: int = 5,
+    q: float = 1.0,
+    n_epochs: int = 100,
+    steps_per_epoch: int = 50,
+    seed: int = 42,
+    x0=None,
+):
+    """HMC-driven simulated annealing inside the box ``[low, high]``.
+
+    ``low``, ``high`` and ``x0`` may be any array-like of one shape; they are
+    flattened in C order and the callables receive the flat vector.
+    """
+    return _core_run_hmc(
+        obj_fn,
+        grad_fn,
+        _flat(low),
+        _flat(high),
+        float(t_init),
+        float(epsilon),
+        int(l_steps),
+        float(q),
+        int(n_epochs),
+        int(steps_per_epoch),
+        int(seed),
+        _flat_or_none(x0),
     )
 
 

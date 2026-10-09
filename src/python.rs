@@ -451,7 +451,7 @@ impl CallbackErrors {
                 .clone()
                 .unwrap_or_default();
             let message = std::ffi::CString::new(format!(
-                "a callback raised {scored} exception(s) that were scored as the worst value; the first was: {first}"
+                "a callback raised {scored} exception(s): an objective call that raised was scored as the worst value and a gradient call as zero; the first was: {first}"
             ))
             .unwrap_or_default();
             let category = py.get_type::<pyo3::exceptions::PyRuntimeWarning>();
@@ -1075,7 +1075,7 @@ fn validate_qmc_gsa_global_search_args(
     if !t_init.is_finite() || t_init <= 0.0 {
         return Err(PyValueError::new_err("t_init must be finite and positive"));
     }
-    if !q_v.is_finite() || !(1.0..3.0).contains(&q_v) {
+    if !(q_v > 1.0 && q_v < 3.0) {
         return Err(PyValueError::new_err("q_v must lie in (1, 3)"));
     }
     if !q_a.is_finite() {
@@ -2574,6 +2574,7 @@ struct CallableDiffObjective {
     grad_fn: Py<PyAny>,
     bounds: Bounds<f64>,
     gradient_scale: f64,
+    errors: std::sync::Arc<CallbackErrors>,
 }
 
 impl Objective<f64> for CallableDiffObjective {
@@ -2586,12 +2587,18 @@ impl Objective<f64> for CallableDiffObjective {
     }
 
     fn eval(&self, x: ArrayView1<f64>) -> f64 {
+        if self.errors.aborted() {
+            return f64::INFINITY;
+        }
         Python::attach(|py| {
             let owned: Vec<f64> = x.iter().copied().collect();
             let py_arr = PyArray1::from_vec(py, owned);
             match self.fn_.call1(py, (py_arr,)) {
-                Ok(r) => r.extract::<f64>(py).unwrap_or(f64::INFINITY),
-                Err(_) => f64::INFINITY,
+                Ok(r) => self.errors.float(py, &r),
+                Err(err) => {
+                    self.errors.record(py, err);
+                    f64::INFINITY
+                }
             }
         })
     }
@@ -2599,24 +2606,30 @@ impl Objective<f64> for CallableDiffObjective {
 
 impl eindir_core::gradient::Gradient<f64> for CallableDiffObjective {
     fn grad(&self, x: ArrayView1<f64>) -> Array1<f64> {
+        let dim = Objective::dim(self);
+        if self.errors.aborted() {
+            return Array1::zeros(dim);
+        }
         Python::attach(|py| {
             let owned: Vec<f64> = x.iter().copied().collect();
             let py_arr = PyArray1::from_vec(py, owned);
             match self.grad_fn.call1(py, (py_arr,)) {
-                Ok(r) => {
-                    if let Ok(arr) = r.extract::<PyReadonlyArray1<f64>>(py) {
-                        Array1::from_vec(
-                            arr.as_slice()
-                                .expect("contiguous")
-                                .iter()
-                                .map(|value| self.gradient_scale * value)
-                                .collect(),
-                        )
-                    } else {
-                        Array1::zeros(Objective::dim(self))
+                Ok(r) => match as_float_vector(py, &r) {
+                    Some(values) if values.len() == dim => Array1::from_iter(
+                        values.into_iter().map(|value| self.gradient_scale * value),
+                    ),
+                    _ => {
+                        self.errors
+                            .abort(pyo3::exceptions::PyTypeError::new_err(format!(
+                                "grad_fn must return {dim} numbers"
+                            )));
+                        Array1::zeros(dim)
                     }
+                },
+                Err(err) => {
+                    self.errors.record(py, err);
+                    Array1::zeros(dim)
                 }
-                Err(_) => Array1::zeros(Objective::dim(self)),
             }
         })
     }
@@ -2652,8 +2665,7 @@ fn cluster_gradient_scale(
 
     let py_probe = PyArray1::from_vec(py, probe.to_vec());
     let gradient_result = grad_fn.call1(py, (py_probe,))?;
-    let gradient_array = gradient_result.extract::<PyReadonlyArray1<f64>>(py)?;
-    let gradient = gradient_array.as_slice()?;
+    let gradient = as_float_vector(py, &gradient_result).unwrap_or_default();
     if gradient.len() != probe.len() || gradient.iter().any(|value| !value.is_finite()) {
         return Err(PyValueError::new_err(
             "gradient callback must return one finite value per coordinate",
@@ -2677,8 +2689,21 @@ fn cluster_gradient_scale(
     minus[index] -= step;
     let plus_array = PyArray1::from_vec(py, plus.to_vec());
     let minus_array = PyArray1::from_vec(py, minus.to_vec());
-    let plus_value = obj_fn.call1(py, (plus_array,))?.extract::<f64>(py)?;
-    let minus_value = obj_fn.call1(py, (minus_array,))?.extract::<f64>(py)?;
+    let as_energy = |value: Py<PyAny>| -> PyResult<f64> {
+        value.extract::<f64>(py).map_err(|_| {
+            let kind = value
+                .bind(py)
+                .get_type()
+                .name()
+                .map(|n| n.to_string())
+                .unwrap_or_else(|_| "unknown".to_owned());
+            pyo3::exceptions::PyTypeError::new_err(format!(
+                "obj_fn must return a float, got {kind}"
+            ))
+        })
+    };
+    let plus_value = as_energy(obj_fn.call1(py, (plus_array,))?)?;
+    let minus_value = as_energy(obj_fn.call1(py, (minus_array,))?)?;
     if !plus_value.is_finite() || !minus_value.is_finite() {
         return Err(PyValueError::new_err(
             "objective callback returned a non-finite orientation probe",
@@ -2862,11 +2887,16 @@ fn cluster_search(
         grad_fn,
         bounds: cluster_bounds(n),
         gradient_scale,
+        errors: std::sync::Arc::default(),
     };
+    let errors = std::sync::Arc::clone(&obj.errors);
     if ras {
-        return cluster_archive_search(py, &obj, &cfg, &mut ledger, seed);
+        let out = cluster_archive_search(py, &obj, &cfg, &mut ledger, seed);
+        errors.finish(py)?;
+        return out;
     }
     let (out, _) = crate::methods::cluster_search::search(&obj, &cfg, &mut ledger, seed);
+    errors.finish(py)?;
     let dim = 3 * n;
     let best = out
         .best_state
