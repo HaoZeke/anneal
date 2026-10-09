@@ -8,11 +8,14 @@ drives a fitter with half a session protocol, as 0.10.0 did, with a
 FutureWarning too.
 
 An argument 0.10.0 coerced, or dropped without a word, now raises an error
-that names it before the fitter's session starts.
+that names it before the fitter's session starts. Bounds 0.10.0 ignored in
+favour of others, such as a NumPy pair in ``run_benchmark``'s context
+bounds, are now read.
 """
 
 import re
 import warnings
+from types import MappingProxyType
 
 import numpy as np
 import pytest
@@ -937,6 +940,38 @@ RAISES = [
         "lower=-1.0, upper=-2.0",
         make=_with({"x": np.zeros(2)}, {"x": [(-1, 1), (-2, 2)]}),
     ),
+    # 0.10.0 fell back to fitter.bounds on a context bounds entry that is not
+    # one pair, and bounds_from_fitter returned None.
+    _raises(
+        "run_benchmark context bounds entry of three items",
+        lambda f: run_benchmark(
+            {**_context(f), "bounds": {"positions": (-3.0, 3.0, 9), "eps": (0.0, 1.0)}}
+        ),
+        ValueError,
+        "the bounds of positions must be a (lower, upper) pair, got (-3.0, 3.0, 9)",
+    ),
+    _raises(
+        "run_benchmark context bounds entry that is a number",
+        lambda f: run_benchmark(
+            {**_context(f), "bounds": {"positions": 3.0, "eps": (0.0, 1.0)}}
+        ),
+        ValueError,
+        "the bounds of positions must be a (lower, upper) pair, got 3.0",
+    ),
+    _raises(
+        "resolve_bounds context bounds entry that is a dict",
+        lambda f: resolve_bounds(
+            _X, context_bounds={"x": {"lo": -1.0}}, fitter_bounds={"x": (-2.0, 2.0)}
+        ),
+        ValueError,
+        f"{_NOT_A_PAIR}, got {{'lo': -1.0}}",
+    ),
+    _raises(
+        "bounds_from_fitter entry of three items",
+        lambda f: bounds_from_fitter(_X, {"x": (-1.0, 1.0, 9)}, 2),
+        ValueError,
+        f"{_NOT_A_PAIR}, got (-1.0, 1.0, 9)",
+    ),
     _raises(
         "fit_chemfit NaN parameter",
         lambda f: fit_chemfit(f, 60),
@@ -1068,8 +1103,8 @@ NOW_ACCEPTED = [
 ]
 
 
-@pytest.mark.parametrize("call, same_as", NOW_ACCEPTED)
-def test_fit_chemfit_and_run_fitter_read_method_names_in_any_case(call, same_as):
+def _same_fit(call, same_as):
+    """``call`` and ``same_as`` fit fresh fitters alike, with no FutureWarning."""
     fitter, plain = _fitter(), _fitter()
     with warnings.catch_warnings():
         warnings.simplefilter("error", FutureWarning)
@@ -1079,3 +1114,79 @@ def test_fit_chemfit_and_run_fitter_read_method_names_in_any_case(call, same_as)
     for got, want in zip(fitter.evaluated, plain.evaluated):
         assert same_params(got, want)
     assert same_params(out, expected)
+
+
+@pytest.mark.parametrize("call, same_as", NOW_ACCEPTED)
+def test_fit_chemfit_and_run_fitter_read_method_names_in_any_case(call, same_as):
+    _same_fit(call, same_as)
+
+
+_NARROW = {"positions": (-0.5, 0.5), "eps": (0.0, 1.0)}
+
+# Bounds 0.10.0 ignored, using fitter.bounds or x0 +/- bound_span instead,
+# each with the call it now matches.
+NOW_READ = [
+    pytest.param(
+        lambda f: run_benchmark(
+            {**_context(f), "bounds": {**_NARROW, "positions": np.array([-0.5, 0.5])}}
+        ),
+        lambda f: run_benchmark({**_context(f), "bounds": _NARROW}),
+        id="run_benchmark context bounds entry that is a NumPy pair",
+    ),
+    pytest.param(
+        lambda f: run_benchmark({**_context(f), "bounds": MappingProxyType(_NARROW)}),
+        lambda f: run_benchmark({**_context(f), "bounds": _NARROW}),
+        id="run_benchmark context bounds in a mapping proxy",
+    ),
+    pytest.param(
+        lambda f: run_benchmark(
+            {**_context(f), "bounds": MappingProxyType({"low": -0.5, "high": 0.5})}
+        ),
+        lambda f: run_benchmark({**_context(f), "bounds": {"low": -0.5, "high": 0.5}}),
+        id="run_benchmark context low and high in a mapping proxy",
+    ),
+    pytest.param(
+        lambda f: fit_anneal(_as(f, MappingProxyType(_NARROW)), 60),
+        lambda f: fit_anneal(_as(f, _NARROW), 60),
+        id="fit_anneal fitter bounds in a mapping proxy",
+    ),
+    pytest.param(
+        lambda f: run_fitter(_as(f, MappingProxyType(_NARROW)), 60, method="fast"),
+        lambda f: run_fitter(_as(f, _NARROW), 60, method="fast"),
+        id="run_fitter fitter bounds in a mapping proxy",
+    ),
+]
+
+
+@pytest.mark.parametrize("call, same_as", NOW_READ)
+def test_bounds_0_10_0_ignored_are_now_read(call, same_as):
+    _same_fit(call, same_as)
+
+
+_PAIR = {"x": np.array([-1.0, 1.0])}
+_PROXY = MappingProxyType({"x": (-1.0, 1.0)})
+_WIDE = {"x": (-2.0, 2.0)}
+
+HELPERS_NOW_READ = [
+    pytest.param(
+        lambda: resolve_bounds(_X, context_bounds=_PAIR, fitter_bounds=_WIDE),
+        id="resolve_bounds context bounds entry that is a NumPy pair",
+    ),
+    pytest.param(
+        lambda: resolve_bounds(_X, context_bounds=_PROXY, fitter_bounds=_WIDE),
+        id="resolve_bounds context bounds in a mapping proxy",
+    ),
+    pytest.param(
+        lambda: bounds_from_fitter(_X, _PAIR, 2),
+        id="bounds_from_fitter entry that is a NumPy pair",
+    ),
+    pytest.param(
+        lambda: bounds_from_fitter(_X, _PROXY, 2),
+        id="bounds_from_fitter bounds in a mapping proxy",
+    ),
+]
+
+
+@pytest.mark.parametrize("call", HELPERS_NOW_READ)
+def test_the_helpers_read_bounds_0_10_0_ignored(call):
+    assert _same(call(), (np.full(2, -1.0), np.full(2, 1.0)))
