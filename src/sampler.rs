@@ -154,24 +154,33 @@ fn nan_as_worst(value: f64) -> f64 {
     if value.is_nan() { f64::INFINITY } else { value }
 }
 
-/// A uniform draw on `bounds`. An axis with `low == high` is that value.
-/// `Bounds::mkpoint` panics on such an axis, and it is the draw whenever
-/// every axis has a positive width, so the seed stream of a non-degenerate
-/// box stays the one `mkpoint` already used.
+/// A uniform draw on `bounds`. An axis with `low == high` is that value, and
+/// an axis with an infinite wall is its finite wall, or 0 when both walls are
+/// infinite; neither draws a number. `Bounds::mkpoint` panics on such axes,
+/// and it is the draw whenever every axis has finite walls and a positive
+/// width, so the seed stream of such a box stays the one `mkpoint` already
+/// used.
 fn initial_position<R: Rng>(bounds: &Bounds<f64>, rng: &mut R) -> Array1<f64> {
-    let pinned = bounds
+    let drawable = |lo: f64, hi: f64| lo != hi && lo.is_finite() && hi.is_finite();
+    if bounds
         .low
         .iter()
         .zip(bounds.high.iter())
-        .any(|(lo, hi)| lo == hi);
-    if !pinned {
+        .all(|(&lo, &hi)| drawable(lo, hi))
+    {
         return bounds.mkpoint(rng);
     }
     Array1::from_iter(bounds.low.iter().zip(bounds.high.iter()).map(|(&lo, &hi)| {
         if lo == hi {
             lo
-        } else {
+        } else if drawable(lo, hi) {
             rng.random_range(lo..hi)
+        } else if lo.is_finite() {
+            lo
+        } else if hi.is_finite() {
+            hi
+        } else {
+            0.0
         }
     }))
 }

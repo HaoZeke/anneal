@@ -12,13 +12,16 @@ use anneal_core::accept::Metropolis;
 use anneal_core::cool::LogCool;
 use anneal_core::movekernel::Gaussian;
 use anneal_core::neigh::ContinuousR_n;
+use anneal_core::sampler::Sampler;
 use anneal_core::variant::{SaVariant, boltzmann_in_box, fast_in_box, gsa_in_box};
-use anneal_core::{History, run_rs_qmc_variant_from, run_rs_variant, run_rs_variant_from};
+use anneal_core::{
+    History, run_rs_qmc_variant_from, run_rs_variant, run_rs_variant_from, run_rs_variant_resumed,
+};
 use eindir_core::{Bounds, Objective};
 use ndarray::{Array1, ArrayView1, array};
 use proptest::prelude::*;
-use rand::SeedableRng;
 use rand::rngs::StdRng;
+use rand::{RngCore, SeedableRng};
 
 const N_EPOCHS: usize = 4;
 const STEPS_PER_EPOCH: usize = 50;
@@ -332,6 +335,51 @@ fn half_infinite_boxes_mirror_across_the_finite_wall() {
                 assert_in_box(x, &low, &high);
             }
         }
+    }
+}
+
+#[test]
+fn an_infinite_wall_starts_the_chain_on_its_finite_wall() {
+    // Without x0 an axis with an infinite wall has no uniform draw. It starts
+    // where a pinned axis on its finite wall would, or at 0 when both walls
+    // are infinite, and the other axes draw the same numbers.
+    let inf = f64::INFINITY;
+    let start = |low: &Array1<f64>, high: &Array1<f64>, seed: u64| {
+        let (obj, _) = recorder(low, high);
+        let mut rng = StdRng::seed_from_u64(seed);
+        let state = boltzmann_in_box(obj, 1.0, 1.0)
+            .unwrap()
+            .initial_state(&mut rng);
+        (state.cur.pos, rng.next_u64())
+    };
+    for (low, high, wall) in [
+        (array![2.0, -1.0], array![inf, 1.0], 2.0),
+        (array![-inf, -1.0], array![-2.0, 1.0], -2.0),
+        (array![-inf, -1.0], array![inf, 1.0], 0.0),
+    ] {
+        let (pinned_low, pinned_high) = (array![wall, -1.0], array![wall, 1.0]);
+        for seed in [0, 1, 99] {
+            assert_eq!(
+                start(&low, &high, seed),
+                start(&pinned_low, &pinned_high, seed)
+            );
+        }
+        for which in 0..3 {
+            let (obj, seen) = recorder(&low, &high);
+            let history = run_preset(which, obj, 1.0, 2.62, None, 5, None);
+            let seen = seen.lock().unwrap();
+            assert_eq!(seen[0][0], wall, "preset {which}");
+            for x in seen.iter().chain(std::iter::once(&history.best.pos)) {
+                assert!(
+                    x.iter().all(|v| v.is_finite()),
+                    "preset {which} evaluated {x}"
+                );
+                assert_in_box(x, &low, &high);
+            }
+        }
+        let (obj, seen) = recorder(&low, &high);
+        run_rs_variant_resumed(boltzmann_in_box(obj, 1.0, 1.0).unwrap(), 0, 1, 1, 5, None);
+        assert_eq!(seen.lock().unwrap()[0][0], wall);
     }
 }
 
