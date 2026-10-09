@@ -9,6 +9,7 @@ reach the caller unchanged, with no further fitter call and no ``finish``.
 """
 
 import warnings
+from decimal import Decimal
 
 import numpy as np
 import pytest
@@ -168,6 +169,31 @@ def test_keyboard_interrupt_from_the_fitter_reaches_the_caller(entry, protocol):
     assert "finish" not in fitter.calls
 
 
+def _matrix(rows, dtype=None):
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", PendingDeprecationWarning)
+        return np.matrix(rows, dtype=dtype)
+
+
+class _DeviceScalar:
+    """A 0-d array NumPy cannot read, as on a GPU or under autograd.
+
+    Only ``float()`` reads it, as ``float()`` reads a CuPy or torch scalar.
+    """
+
+    def __init__(self, value, dtype=np.float64, refusal=TypeError):
+        self.value, self.dtype, self.refusal = value, np.dtype(dtype), refusal
+
+    def __array__(self, dtype=None, copy=None):
+        raise self.refusal("this array cannot be read as a NumPy array")
+
+    def __float__(self):
+        return float(self.value)
+
+    def __repr__(self):
+        return f"_DeviceScalar({self.value!r}, {self.dtype}, {self.refusal.__name__})"
+
+
 NOT_REAL = [
     None,
     "1.5",
@@ -181,6 +207,12 @@ NOT_REAL = [
     np.array(["1.5"]),
     np.array([0.5 + 0j]),
     np.complex128(0.5),
+    Decimal("sNaN"),
+    _matrix([[0.5, 0.25]]),
+    np.array(["1.5"], dtype=object),
+    np.array([None], dtype=object),
+    _DeviceScalar(1.0, bool),
+    _DeviceScalar(0.5, complex),
 ]
 
 
@@ -208,6 +240,13 @@ REAL_FORMS = {
     "one-element array": lambda v: np.array([v]),
     "1x1 float32 array": lambda v: np.array([[v]], dtype=np.float32),
     "list of a one-element array": lambda v: [np.array([v])],
+    "Decimal": lambda v: Decimal(repr(v)),
+    "list of a Decimal": lambda v: [Decimal(repr(v))],
+    "0-d object array of a Decimal": lambda v: np.array(Decimal(repr(v)), dtype=object),
+    "object array of a Decimal": lambda v: np.array([Decimal(repr(v))], dtype=object),
+    "1x1 matrix": lambda v: _matrix([[v]]),
+    "1x1 float32 matrix": lambda v: _matrix([[v]], dtype=np.float32),
+    "list of a 1x1 matrix": lambda v: [_matrix([[v]])],
 }
 
 
@@ -223,6 +262,69 @@ def test_every_form_of_a_real_loss_is_used(entry, protocol, form):
     assert fitter.calls.count("finish") == 1
     assert fitter.calls[-1] == "finish"
     seen = [float(np.asarray(loss).reshape(-1)[0]) for loss in fitter.losses]
+    assert same_params(fitter.finished_with, fitter.evaluated[int(np.argmin(seen))])
+
+
+ARRAY_API_REAL = {
+    "0-d float64": lambda xp, v: xp.asarray(v),
+    "0-d float32": lambda xp, v: xp.asarray(v, dtype=xp.float32),
+    "0-d int64": lambda xp, v: xp.asarray(round(1000 * v)),
+    "one-element array": lambda xp, v: xp.asarray([v]),
+    "1x1 array": lambda xp, v: xp.asarray([[v]]),
+    "list of a 0-d array": lambda xp, v: [xp.asarray(v)],
+}
+
+
+@pytest.mark.filterwarnings("error::DeprecationWarning")
+@pytest.mark.filterwarnings("error::RuntimeWarning")
+@pytest.mark.parametrize("form", list(ARRAY_API_REAL))
+@pytest.mark.parametrize("protocol", PROTOCOLS)
+@pytest.mark.parametrize("entry", ENTRIES)
+def test_a_real_loss_from_an_array_api_library_is_used(entry, protocol, form):
+    xp = pytest.importorskip("array_api_strict")
+    wrap = ARRAY_API_REAL[form]
+    fitter = protocol(*_problem(), loss=lambda params: wrap(xp, sum_of_squares(params)))
+    drive(entry, fitter, 30)
+    assert fitter.calls[-1] == "finish"
+    seen = [float(np.asarray(loss).reshape(-1)[0]) for loss in fitter.losses]
+    assert same_params(fitter.finished_with, fitter.evaluated[int(np.argmin(seen))])
+
+
+ARRAY_API_NOT_REAL = {
+    "0-d bool": lambda xp: xp.asarray(True),
+    "0-d complex": lambda xp: xp.asarray(0.5 + 0j),
+    "two elements": lambda xp: xp.asarray([0.5, 0.25]),
+}
+
+
+@pytest.mark.parametrize("form", list(ARRAY_API_NOT_REAL))
+@pytest.mark.parametrize("protocol", PROTOCOLS)
+@pytest.mark.parametrize("entry", ENTRIES)
+def test_an_array_api_loss_that_is_not_one_real_number_is_an_error(
+    entry, protocol, form
+):
+    xp = pytest.importorskip("array_api_strict")
+    loss = ARRAY_API_NOT_REAL[form](xp)
+    evaluate, _ = protocol_names(protocol)
+    fitter = protocol(*_problem(), loss=lambda params: loss)
+    with pytest.raises(TypeError, match="loss"):
+        drive(entry, fitter, 60)
+    assert fitter.calls.count(evaluate) == 1
+    assert "finish" not in fitter.calls
+
+
+@pytest.mark.filterwarnings("error::DeprecationWarning")
+@pytest.mark.parametrize("refusal", [TypeError, RuntimeError])
+@pytest.mark.parametrize("protocol", PROTOCOLS)
+@pytest.mark.parametrize("entry", ENTRIES)
+def test_a_loss_numpy_cannot_read_is_read_with_float(entry, protocol, refusal):
+    def loss(params):
+        return _DeviceScalar(sum_of_squares(params), refusal=refusal)
+
+    fitter = protocol(*_problem(), loss=loss)
+    drive(entry, fitter, 30)
+    assert fitter.calls[-1] == "finish"
+    seen = [loss.value for loss in fitter.losses]
     assert same_params(fitter.finished_with, fitter.evaluated[int(np.argmin(seen))])
 
 
