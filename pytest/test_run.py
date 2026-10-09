@@ -973,10 +973,12 @@ def test_qmc_gsa_global_search_never_rounds_past_the_upper_wall():
         (np.array([-np.inf, -1.0]), np.array([1.0, 1.0])),
         (np.array([np.nan, -1.0]), np.array([1.0, 1.0])),
         (np.array([-1.8e308, -1.0]), np.array([1.8e308, 1.0])),
+        (np.array([-6e307, -1.0]), np.array([6e307, 1.0])),
+        (np.full(5, -2e307), np.full(5, 2e307)),
     ],
 )
 def test_every_box_driver_refuses_bounds_it_cannot_use(low, high):
-    objective = Recorder(shifted_quadratic)
+    objective = Recorder(lambda x: float(np.sum(np.asarray(x) ** 2)))
     calls = [
         lambda: run(objective, low, high, Boltzmann(), n_epochs=1, steps_per_epoch=2),
         lambda: run_qmc(objective, low, high, Boltzmann(), n_starts=2, n_epochs=1, steps_per_epoch=2),

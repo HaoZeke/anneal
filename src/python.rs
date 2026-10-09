@@ -39,11 +39,20 @@ fn validate_box_bounds(low: &[f64], high: &[f64]) -> PyResult<()> {
             "bounds must have at least one dimension",
         ));
     }
+    let mut total_width = 0.0;
     for (i, (&lo, &hi)) in low.iter().zip(high.iter()).enumerate() {
-        if !lo.is_finite() || !hi.is_finite() || !(hi - lo).is_finite() {
+        // Reflection folds with period 2 (hi - lo), and the drivers average
+        // widths across axes, so both must stay finite.
+        if !lo.is_finite() || !hi.is_finite() || !(2.0 * (hi - lo)).is_finite() {
             return Err(PyValueError::new_err(format!(
                 "bounds must be finite, with a finite width, at dimension {i}"
             )));
+        }
+        total_width += hi - lo;
+        if !total_width.is_finite() {
+            return Err(PyValueError::new_err(
+                "the box is too wide: the sum of its widths is not finite",
+            ));
         }
         if lo.partial_cmp(&hi) != Some(std::cmp::Ordering::Less) {
             return Err(PyValueError::new_err(format!(
@@ -2317,10 +2326,14 @@ fn run_qmc(
             "bounds must have at least one dimension",
         ));
     }
-    if low_vec
+    if low_vec.iter().zip(high_vec.iter()).any(|(&lo, &hi)| {
+        !lo.is_finite() || !hi.is_finite() || !(2.0 * (hi - lo)).is_finite() || hi < lo
+    }) || !low_vec
         .iter()
         .zip(high_vec.iter())
-        .any(|(&lo, &hi)| !lo.is_finite() || !hi.is_finite() || !(hi - lo).is_finite() || hi < lo)
+        .map(|(&lo, &hi)| hi - lo)
+        .sum::<f64>()
+        .is_finite()
     {
         return Err(PyValueError::new_err(
             "each bound must be finite and each upper bound must be greater than or equal to the lower bound",
