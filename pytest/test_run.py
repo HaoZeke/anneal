@@ -1087,6 +1087,10 @@ def test_qmc_gsa_global_search_never_rounds_past_the_upper_wall():
         (np.array([-1.8e308, -1.0]), np.array([1.8e308, 1.0])),
         (np.array([-6e307, -1.0]), np.array([6e307, 1.0])),
         (np.full(5, -2e307), np.full(5, 2e307)),
+        # Regression pins: finite bounds whose width overflows, which made run
+        # panic before 0.10.0 refused them.
+        (np.array([-1e308, -1.0]), np.array([1e308, 1.0])),
+        (np.array([0.0, -np.finfo(float).max]), np.array([1.0, np.finfo(float).max])),
     ],
 )
 def test_every_box_driver_refuses_bounds_it_cannot_use(low, high):
