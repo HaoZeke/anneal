@@ -1038,6 +1038,22 @@ RAISES = [
         make=_with({"x": 0.5}, {"x": ("0", "hi")}),
     ),
     _raises(
+        "fit_chemfit bounds entry that is a NumPy pair of non-numeric strings",
+        lambda f: fit_chemfit(f, 60),
+        ValueError,
+        "the lower bound of x is not real-numeric",
+        make=_with(
+            {"x": 0.5, "y": 0.1}, {"x": np.array(["lo", "1"]), "y": (-1.0, 1.0)}
+        ),
+    ),
+    _raises(
+        "chemfit_box bounds entry that is a NumPy pair of non-numeric strings",
+        _box,
+        ValueError,
+        "the upper bound of x is not real-numeric",
+        make=_with({"x": 0.5}, {"x": np.array(["0", "hi"])}),
+    ),
+    _raises(
         "fit_chemfit three per-element pairs",
         lambda f: fit_chemfit(f, 60),
         ValueError,
