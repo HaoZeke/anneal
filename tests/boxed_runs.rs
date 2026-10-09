@@ -122,12 +122,13 @@ fn boxed_start_from_position_anchors_and_clips() {
 }
 
 #[test]
-fn boxed_qmc_anchor_runs_as_extra_chain_in_box() {
+fn boxed_qmc_x0_start_runs_in_box() {
     let obj = RecordingQuadratic::new(-3.0, 3.0, 4);
     let probe = obj.clone();
     let x0 = Array1::from_vec(vec![0.5, -0.5, 0.25, 0.75]);
     let variant = gsa_boxed(obj, 3.0, 2.2, 1.5).expect("boxed gsa");
-    let history = run_rs_qmc_variant_from_position(variant, 4, 3, 5, 1, Some(x0));
+    let history = run_rs_qmc_variant_from_position(variant, 4, 3, 5, 1, Some(x0.clone()));
+    assert_eq!(probe.seen()[0], x0.to_vec());
     assert_all_in_box(&probe.seen(), -3.0, 3.0);
     assert!(history.best.val.is_finite());
     for &v in &history.best.pos {

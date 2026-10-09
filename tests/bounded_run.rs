@@ -153,13 +153,14 @@ fn seeded_chain_never_regresses_past_x0() {
 }
 
 #[test]
-fn seeded_qmc_extra_chain_starts_from_x0() {
+fn seeded_qmc_first_start_is_x0() {
     let x0 = Array1::from_vec(vec![1.0, 2.0, -1.0]);
     let f0 = 6.0;
     let obj = RecordingSphere::new(3);
     let probe = obj.clone();
     let variant = boltzmann_bounded(obj, 5.0, 0.5).expect("bounded construction");
-    let history = run_rs_qmc_variant_start(variant, Some(x0), 4, 5, 20, 9);
+    let history = run_rs_qmc_variant_start(variant, Some(x0.clone()), 4, 5, 20, 9);
+    assert_eq!(probe.seen.lock().expect("seen mutex")[0], x0.to_vec());
     assert!(
         history.best.val <= f0,
         "seeded multistart regressed past x0: {} > {f0}",

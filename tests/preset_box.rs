@@ -555,8 +555,9 @@ fn a_nan_start_is_left_and_never_kept_as_the_best() {
 
 #[test]
 fn a_start_that_meets_only_nan_never_wins_the_multistart() {
-    // The first chain evaluates nothing but NaN, so its best value stays NaN,
-    // and the later starts, which meet numbers, must beat it.
+    // The first chain evaluates nothing but NaN, which counts as +inf, so its
+    // best value is +inf, and the later starts, which meet numbers, must beat
+    // it.
     let low = array![-1.0, -1.0];
     let high = array![1.0, 1.0];
     let x0 = array![0.5, 0.5];
