@@ -897,6 +897,8 @@ struct GsaState {
     t_init: f64,
     /// Strategy-chain step counter (dual_annealing uses T/(step+1) accept).
     strategy_step: usize,
+    /// Chains keep only improvements and visit one coordinate at a time.
+    quenched: bool,
 }
 
 /// Persistent CMA-ES arm. Runs live in box-normalised coordinates, so one
@@ -1084,10 +1086,14 @@ struct ArmStates {
     /// Persistent finite-difference quasi-Newton descent.
     qn: Option<QnArmState>,
     /// Set by the values-only loop. Without a gradient, the GSA arm then
-    /// starts one chain at the incumbent and runs no local search, and the
-    /// DE population starts with the incumbent, as SciPy's
-    /// differential_evolution places its `x0`.
+    /// starts one chain at the incumbent and runs it quenched, without a
+    /// local search, and the DE population starts with the incumbent, as
+    /// SciPy's differential_evolution places its `x0`.
     values_only: bool,
+    /// Evaluation counts before and after each values-only turn, with its
+    /// arm.
+    #[cfg(test)]
+    turns: Vec<(ArmKind, usize, usize)>,
 }
 
 /// Persistent adaptive-Metropolis descent chain (D6 + D11 BFWT).
@@ -1599,12 +1605,15 @@ where
 
 /// Starts the GSA chains. With `anchor`, an evaluated point and its value,
 /// chain 0 starts there without another evaluation (dual_annealing's `x0`);
-/// the other chains start at seeded low-discrepancy points.
+/// the other chains start at seeded low-discrepancy points. `quenched`
+/// chains keep only improvements and visit one coordinate at a time
+/// ([`run_persistent_gsa`]).
 fn initialize_gsa_state<O>(
     obj: &BudgetedObjective<'_, O>,
     slice: usize,
     seed: u64,
     anchor: Option<(Array1<f64>, f64)>,
+    quenched: bool,
 ) -> Option<GsaState>
 where
     O: Objective<f64>,
@@ -1657,6 +1666,7 @@ where
         rng: StdRng::seed_from_u64(seed),
         t_init,
         strategy_step: 0,
+        quenched,
     })
 }
 
@@ -1823,6 +1833,15 @@ fn dual_accept_prob(delta: f64, temperature_step: f64, accept_param: f64) -> f64
 /// chain (all-coordinate visit then per-coordinate visits) with reflection.
 /// Optional local polish after a strategy chain when `grad` is provided
 /// (mirrors dual_annealing local_search on improvement).
+///
+/// A quenched state skips the all-coordinate visits and accepts only
+/// improvements, so each temperature step tries every coordinate once at
+/// the cooling visit scale, box-wide early and local late. Without a local
+/// search, Metropolis moves at dual_annealing's temperatures take most of
+/// a few hundred evaluations per coordinate uphill, and an all-coordinate
+/// visit from a good point in many dimensions almost never improves it,
+/// while a single-coordinate visit can drop that coordinate into a lower
+/// basin without disturbing the others.
 fn run_persistent_gsa<O, G>(
     obj: &BudgetedObjective<'_, O>,
     grad: Option<&BudgetedGradient<'_, G>>,
@@ -1860,7 +1879,8 @@ fn run_persistent_gsa<O, G>(
             let before = state.vals[chain];
             // Strategy chain length 2*dim (all-dim + each single coord), dual_annealing.
             let n_strategy = (2 * dim).max(2);
-            for j in 0..n_strategy {
+            let first = if state.quenched { dim } else { 0 };
+            for j in first..n_strategy {
                 if obj.ledger.used_get().saturating_sub(start_used) >= slice
                     || obj.ledger.exhausted()
                 {
@@ -1888,6 +1908,8 @@ fn run_persistent_gsa<O, G>(
                     false
                 } else if !state.vals[chain].is_finite() {
                     true
+                } else if state.quenched {
+                    proposal_val < state.vals[chain]
                 } else {
                     let delta = proposal_val - state.vals[chain];
                     // dual_annealing accept_reject (accept=-5), not Tsallis q_a.
@@ -2567,7 +2589,7 @@ fn run_arm<O, G>(
                 } else {
                     None
                 };
-                states.gsa = initialize_gsa_state(obj, slice, seed, anchor);
+                states.gsa = initialize_gsa_state(obj, slice, seed, anchor, values_only);
             }
             if let Some(state) = states.gsa.as_mut() {
                 // Keep T₀ at box scale (do not re-inflate from |f|).
@@ -3149,6 +3171,8 @@ where
      -> bool {
         let arm = arms[choice];
         let before = ledger.best_get();
+        #[cfg(test)]
+        let used = ledger.used_get();
         let mut take = take;
         loop {
             ledger.cap_set((ledger.used_get() + take).min(budget));
@@ -3169,6 +3193,8 @@ where
             }
             take = take.min(ledger.remaining() - reserve);
         }
+        #[cfg(test)]
+        states.turns.push((arm, used, ledger.used_get()));
         let after = ledger.best_get();
         let improved = after.is_finite() && after < before - arm_success_threshold(arm, before);
         posteriors[choice].update(improved);
@@ -6171,6 +6197,72 @@ mod tests {
             points[1..].iter().all(|x| *x != start),
             "the chain starts from the recorded value"
         );
+    }
+
+    #[test]
+    fn values_only_gsa_turns_are_quenched_coordinate_visits() {
+        // Replays every evaluation of the loop's GSA turns on the one chain
+        // the arm keeps from ten dimensions up. Each moves one coordinate of
+        // the chain's point and is kept only when lower, except box-wide
+        // reseeds, one at most every five temperature steps of `dim`
+        // visits; nothing else (a local search's trials) runs in a turn.
+        for (dim, budget, seed) in [(10usize, 2000usize, 0u64), (10, 2000, 1), (12, 5000, 2)] {
+            let obj = Traced::new(-5.12, 5.12, dim, rastrigin);
+            let ledger = BudgetLedger::new(budget, dim);
+            let budgeted = BudgetedObjective {
+                inner: &obj,
+                ledger: &ledger,
+            };
+            let start = Array1::from_shape_fn(dim, |i| 1.1 + 0.29 * i as f64);
+            budgeted.eval(start.view());
+            let mut states = ArmStates::default();
+            run_values_only_portfolio::<_, ShiftQuadratic>(
+                &budgeted,
+                &ledger,
+                &mut states,
+                seed,
+                budget,
+            );
+            let points = obj.points();
+            assert_eq!(points.len(), budget);
+            let values: Vec<f64> = points.iter().map(|x| rastrigin(x.view())).collect();
+            let turns: Vec<(usize, usize)> = states
+                .turns
+                .iter()
+                .filter(|&&(arm, used, after)| arm == ArmKind::Gsa && after > used)
+                .map(|&(_, used, after)| (used, after))
+                .collect();
+            assert!(turns.len() > 1, "{dim}-D at {budget}: GSA turns {turns:?}");
+            let mut chain = 0;
+            for i in 1..turns[0].0 {
+                if values[i] < values[chain] {
+                    chain = i;
+                }
+            }
+            let (mut x, mut fx) = (points[chain].clone(), values[chain]);
+            let (mut visits, mut reseeds) = (0usize, 0usize);
+            for &(used, after) in &turns {
+                for i in used..after {
+                    let moved = (0..dim).filter(|&k| points[i][k] != x[k]).count();
+                    if moved <= 1 {
+                        visits += 1;
+                    } else {
+                        reseeds += 1;
+                    }
+                    if values[i] < fx {
+                        x = points[i].clone();
+                        fx = values[i];
+                    }
+                }
+            }
+            let state = states.gsa.as_ref().expect("gsa state");
+            assert_eq!(state.xs, vec![x]);
+            assert_eq!(state.vals, vec![fx]);
+            assert!(
+                5 * reseeds <= visits / dim + turns.len(),
+                "{dim}-D at {budget}: {reseeds} reseeds, {visits} visits"
+            );
+        }
     }
 
     #[test]
