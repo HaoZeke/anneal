@@ -102,6 +102,39 @@ where
     run_rs(variant, &cooling, n_epochs, steps_per_epoch, seed)
 }
 
+/// Convenience wrapper: drives a `SaVariant` with an optional initial position `x0`.
+pub fn run_rs_variant_with_x0<O, C, N, M, A>(
+    variant: SaVariant<f64, O, C, N, M, A>,
+    n_epochs: usize,
+    steps_per_epoch: usize,
+    seed: u64,
+    x0: Option<ndarray::Array1<f64>>,
+) -> History
+where
+    O: eindir_core::Objective<f64> + Send + Sync,
+    C: Cooling<f64> + Clone,
+    N: crate::neigh::Neighborhood<f64>,
+    M: crate::movekernel::MoveKernel<f64>,
+    A: crate::accept::AcceptRule<f64>,
+{
+    let cooling = variant.cool.clone();
+    let mut rng = StdRng::seed_from_u64(seed);
+    let state = match x0 {
+        Some(pos) => variant
+            .initial_state_from_position(pos)
+            .unwrap_or_else(|| variant.initial_state(&mut rng)),
+        None => variant.initial_state(&mut rng),
+    };
+    drive_rs(
+        &variant,
+        &cooling,
+        state,
+        n_epochs,
+        steps_per_epoch,
+        &mut rng,
+    )
+}
+
 /// Resumable variant driver: runs epochs `[start_epoch, start_epoch + n_epochs)`
 /// of the variant's own cooling schedule, continuing from a prior chain
 /// position when one is supplied, and returns the history together with the
@@ -159,13 +192,32 @@ where
 }
 
 /// Runs the same `SaVariant` from a bounded low-discrepancy start set and
-/// returns the best history across starts.
+/// returns the best history across starts. An optional `x0` replaces the first start.
 pub fn run_rs_qmc_variant<O, C, N, M, A>(
     variant: SaVariant<f64, O, C, N, M, A>,
     n_starts: usize,
     n_epochs: usize,
     steps_per_epoch: usize,
     seed: u64,
+) -> History
+where
+    O: eindir_core::Objective<f64> + Send + Sync,
+    C: Cooling<f64> + Clone,
+    N: crate::neigh::Neighborhood<f64>,
+    M: crate::movekernel::MoveKernel<f64>,
+    A: crate::accept::AcceptRule<f64>,
+{
+    run_rs_qmc_variant_with_x0(variant, n_starts, n_epochs, steps_per_epoch, seed, None)
+}
+
+/// Runs the same `SaVariant` from a bounded low-discrepancy start set with optional `x0`.
+pub fn run_rs_qmc_variant_with_x0<O, C, N, M, A>(
+    variant: SaVariant<f64, O, C, N, M, A>,
+    n_starts: usize,
+    n_epochs: usize,
+    steps_per_epoch: usize,
+    seed: u64,
+    x0: Option<ndarray::Array1<f64>>,
 ) -> History
 where
     O: eindir_core::Objective<f64> + Send + Sync,
@@ -185,8 +237,12 @@ where
     // without GIL deadlock. Native multi-walker scaling lives in dmc_pop.
     let mut best_history = None;
     for idx in 0..n_starts {
-        let start = starts.row(idx);
-        let pos = variant.obj.bounds().clip(start);
+        let pos = if idx == 0 && x0.is_some() {
+            variant.obj.bounds().clip(x0.as_ref().unwrap().view())
+        } else {
+            let start = starts.row(idx);
+            variant.obj.bounds().clip(start)
+        };
         let val = variant.obj.eval(pos.view());
         let pair = eindir_core::FPair { pos, val };
         let state = State {
