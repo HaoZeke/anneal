@@ -1,0 +1,45 @@
+{"budget": 10000, "seed": 0, "driver": "nevergrad CMA", "best": -37.787862822010965, "evals": 10000, "inside": true}
+{"budget": 10000, "seed": 0, "driver": "nevergrad NgIohTuned", "best": -39.116709992678175, "evals": 10000, "inside": true}
+{"budget": 10000, "seed": 0, "driver": "anneal cluster_search, difference gradients", "best": -39.469070814556794, "evals": 10000, "inside": true}
+{"budget": 10000, "seed": 0, "driver": "scipy L-BFGS-B, difference gradients", "best": -38.103918980844384, "evals": 7480, "inside": true}
+{"budget": 10000, "seed": 0, "driver": "anneal dmc_population_optimize", "best": -29.229198627803452, "evals": 9995, "inside": true}
+{"budget": 10000, "seed": 0, "driver": "anneal Gsa", "best": -24.679300016340967, "evals": 10000, "inside": true}
+{"budget": 10000, "seed": 0, "driver": "anneal gpmd_optimize", "best": -28.183548025345075, "evals": 10000, "inside": true}
+{"budget": 10000, "seed": 0, "driver": "anneal Boltzmann sigma=0.1", "best": -24.394345877828837, "evals": 10000, "inside": true}
+{"budget": 10000, "seed": 0, "driver": "anneal global_optimize, values only", "best": -20.48273931639062, "evals": 9990, "inside": true}
+{"budget": 10000, "seed": 1, "driver": "nevergrad CMA", "best": -40.675379882426135, "evals": 10000, "inside": true}
+{"budget": 10000, "seed": 1, "driver": "nevergrad NgIohTuned", "best": -44.326801419533666, "evals": 10000, "inside": true}
+{"budget": 10000, "seed": 1, "driver": "anneal cluster_search, difference gradients", "best": -41.47197984711188, "evals": 10000, "inside": true}
+{"budget": 10000, "seed": 1, "driver": "scipy L-BFGS-B, difference gradients", "best": -38.83875596089773, "evals": 6280, "inside": true}
+{"budget": 10000, "seed": 1, "driver": "anneal dmc_population_optimize", "best": -34.834824056481594, "evals": 10000, "inside": true}
+{"budget": 10000, "seed": 1, "driver": "anneal Gsa", "best": -35.21583850691545, "evals": 10000, "inside": true}
+{"budget": 10000, "seed": 1, "driver": "anneal gpmd_optimize", "best": -32.75218752576961, "evals": 10000, "inside": true}
+{"budget": 10000, "seed": 1, "driver": "anneal Boltzmann sigma=0.1", "best": -20.960609908510737, "evals": 10000, "inside": true}
+{"budget": 10000, "seed": 1, "driver": "anneal global_optimize, values only", "best": -30.611192801822405, "evals": 9995, "inside": true}
+{"budget": 10000, "seed": 2, "driver": "nevergrad CMA", "best": -40.670167310838984, "evals": 10000, "inside": true}
+{"budget": 10000, "seed": 2, "driver": "nevergrad NgIohTuned", "best": -37.2777874271528, "evals": 10000, "inside": true}
+{"budget": 10000, "seed": 2, "driver": "anneal cluster_search, difference gradients", "best": -38.51530313186631, "evals": 10000, "inside": true}
+{"budget": 10000, "seed": 2, "driver": "scipy L-BFGS-B, difference gradients", "best": -40.71040674789213, "evals": 4760, "inside": true}
+{"budget": 10000, "seed": 2, "driver": "anneal dmc_population_optimize", "best": -34.123480195436755, "evals": 9997, "inside": true}
+{"budget": 10000, "seed": 2, "driver": "anneal Gsa", "best": -34.929254747760545, "evals": 10000, "inside": true}
+{"budget": 10000, "seed": 2, "driver": "anneal gpmd_optimize", "best": -31.896784381596426, "evals": 10000, "inside": true}
+{"budget": 10000, "seed": 2, "driver": "anneal Boltzmann sigma=0.1", "best": -28.224809018416668, "evals": 10000, "inside": true}
+{"budget": 10000, "seed": 2, "driver": "anneal global_optimize, values only", "best": -25.610908772593444, "evals": 9999, "inside": true}
+{"budget": 10000, "seed": 3, "driver": "nevergrad CMA", "best": -41.394398415436754, "evals": 10000, "inside": true}
+{"budget": 10000, "seed": 3, "driver": "nevergrad NgIohTuned", "best": -39.176760911542885, "evals": 10000, "inside": true}
+{"budget": 10000, "seed": 3, "driver": "anneal cluster_search, difference gradients", "best": -41.471979847433964, "evals": 10000, "inside": true}
+{"budget": 10000, "seed": 3, "driver": "scipy L-BFGS-B, difference gradients", "best": -41.39439826959511, "evals": 4720, "inside": true}
+{"budget": 10000, "seed": 3, "driver": "anneal dmc_population_optimize", "best": -35.714089042074896, "evals": 9999, "inside": true}
+{"budget": 10000, "seed": 3, "driver": "anneal Gsa", "best": -32.48455015525161, "evals": 10000, "inside": true}
+{"budget": 10000, "seed": 3, "driver": "anneal gpmd_optimize", "best": -29.161642634600273, "evals": 10000, "inside": true}
+{"budget": 10000, "seed": 3, "driver": "anneal Boltzmann sigma=0.1", "best": -27.47557792017299, "evals": 10000, "inside": true}
+{"budget": 10000, "seed": 3, "driver": "anneal global_optimize, values only", "best": -24.662330638513538, "evals": 9996, "inside": true}
+{"budget": 10000, "seed": 4, "driver": "nevergrad CMA", "best": -38.85929723429609, "evals": 10000, "inside": true}
+{"budget": 10000, "seed": 4, "driver": "nevergrad NgIohTuned", "best": -40.71040681829281, "evals": 10000, "inside": true}
+{"budget": 10000, "seed": 4, "driver": "anneal cluster_search, difference gradients", "best": -38.972640804603586, "evals": 10000, "inside": true}
+{"budget": 10000, "seed": 4, "driver": "scipy L-BFGS-B, difference gradients", "best": 10000000000.0, "evals": 80, "inside": true}
+{"budget": 10000, "seed": 4, "driver": "anneal dmc_population_optimize", "best": -20.39284971353114, "evals": 9997, "inside": true}
+{"budget": 10000, "seed": 4, "driver": "anneal Gsa", "best": -21.671046029712503, "evals": 10000, "inside": true}
+{"budget": 10000, "seed": 4, "driver": "anneal gpmd_optimize", "best": -31.321881323994816, "evals": 10000, "inside": true}
+{"budget": 10000, "seed": 4, "driver": "anneal Boltzmann sigma=0.1", "best": -23.849266891467003, "evals": 10000, "inside": true}
+{"budget": 10000, "seed": 4, "driver": "anneal global_optimize, values only", "best": -21.750329648648776, "evals": 9995, "inside": true}
