@@ -147,6 +147,13 @@ where
 // SaVariant impl: glues the typed component algebra to the Sampler trait.
 // ---------------------------------------------------------------------------
 
+/// A NaN objective value is scored as the worst value. Left as NaN it makes
+/// every later energy difference NaN, so the chain never accepts a move and
+/// reports NaN as its best.
+fn nan_as_worst(value: f64) -> f64 {
+    if value.is_nan() { f64::INFINITY } else { value }
+}
+
 impl<O, C, N, M, A> Sampler<f64> for SaVariant<f64, O, C, N, M, A>
 where
     O: eindir_core::Objective<f64> + Send + Sync,
@@ -157,7 +164,7 @@ where
 {
     fn initial_state<R: Rng>(&self, rng: &mut R) -> State {
         let pos = self.obj.bounds().mkpoint(rng);
-        let val = self.obj.eval(pos.view());
+        let val = nan_as_worst(self.obj.eval(pos.view()));
         let pair = FPair { pos, val };
         State {
             cur: pair.clone(),
@@ -171,7 +178,7 @@ where
 
     fn initial_state_from_position(&self, pos: Array1<f64>) -> Option<State> {
         let pos = self.obj.bounds().clip(pos.view());
-        let val = self.obj.eval(pos.view());
+        let val = nan_as_worst(self.obj.eval(pos.view()));
         let pair = FPair { pos, val };
         Some(State {
             cur: pair.clone(),
@@ -188,7 +195,7 @@ where
         {
             return false;
         }
-        let proposal_val = self.obj.eval(proposal_pos.view());
+        let proposal_val = nan_as_worst(self.obj.eval(proposal_pos.view()));
         let delta = proposal_val - state.cur.val;
         let p = self.accept.accept_prob(delta, temp);
         let u: f64 = rng.random();

@@ -7,4 +7,6 @@ the start, and a 13-atom walk in a ``[-3, 3]`` box evaluated 99.95% of its
 points outside the box. ``run`` starts its walk at ``x0`` and ``run_qmc``
 uses it as the first start; a starting point outside the box, of the wrong
 length, or not finite raises ``ValueError``, and so do invalid preset
-parameters, which used to panic.
+parameters, which used to panic. ``low``, ``high`` and ``x0`` may be any
+array-like of one shape, an ``(n_atoms, 3)`` positions array included; they
+are flattened in C order and ``obj_fn`` receives the flat vector.
