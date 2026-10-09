@@ -239,53 +239,13 @@ impl MoveKernel<f64> for TsallisVisit {
 /// test therefore still targets the box-restricted Gibbs measure with no
 /// Hastings correction (manuscript law L1 holds for the reflected proposal).
 /// A box with one infinite wall, or a finite box whose period overflows,
-/// mirrors across the wall the point crossed. An infinite `x` stops on the
-/// wall it crossed.
+/// mirrors across the wall the point crossed. An infinite wall stands at
+/// `+-f64::MAX`, the last finite value on its side, so an image that would
+/// leave the `f64` range folds back across it; such a point, and one whose
+/// distance from the box overflows, is folded at quarter scale, where
+/// nothing overflows. An infinite `x` stops on the wall it crossed.
 pub fn reflect_coord(x: f64, lo: f64, hi: f64) -> f64 {
-    let w = hi - lo;
-    if w.is_nan() || w <= 0.0 {
-        return lo;
-    }
-    // A point already in the box is its own image. Folding it anyway can
-    // round `lo + (x - lo)` past `hi` by an ulp.
-    if (lo..=hi).contains(&x) {
-        return x;
-    }
-    let period = 2.0 * w;
-    if !period.is_finite() {
-        // The box is wider than half the f64 range, or one wall is infinite,
-        // so the triangle-wave period is not a finite f64. Fold the overshoot
-        // across the wall it crossed. A finite overshoot is below `2 w` after
-        // one fold, so at most one more fold, across the other wall, remains.
-        // An infinite overshoot makes the fold NaN; `max`/`min` then stop on
-        // the wall that was crossed.
-        let fold = |d: f64| if d < w { d } else { w - (d - w) };
-        return if x < lo {
-            (lo + fold(lo - x)).max(lo).min(hi)
-        } else {
-            (hi - fold(x - hi)).min(hi).max(lo)
-        };
-    }
-    if !(x - lo).is_finite() {
-        // The box lies far from zero, so the offset from `lo` overflows
-        // although the period does not. At half scale it cannot overflow.
-        return if x.is_finite() {
-            (2.0 * reflect_coord(0.5 * x, 0.5 * lo, 0.5 * hi))
-                .max(lo)
-                .min(hi)
-        } else if x > hi {
-            hi
-        } else {
-            lo
-        };
-    }
-    let mut y = (x - lo).rem_euclid(period);
-    if y > w {
-        y = period - y;
-    }
-    // `hi - lo` and `lo + y` both round, so the sum can land one ulp past
-    // `hi`.
-    (lo + y).max(lo).min(hi)
+    reflect_coord_with_slope(x, lo, hi).0
 }
 
 /// [`reflect_coord`] together with its slope there: `1` where the fold keeps
@@ -296,22 +256,71 @@ pub fn reflect_coord_with_slope(x: f64, lo: f64, hi: f64) -> (f64, f64) {
     if w.is_nan() || w <= 0.0 {
         return (lo, 0.0);
     }
+    // A point already in the box is its own image. Folding it anyway can
+    // round `lo + (x - lo)` past `hi` by an ulp.
     if (lo..=hi).contains(&x) {
         return (x, 1.0);
     }
     let period = 2.0 * w;
     if !period.is_finite() {
+        // The box is wider than half the f64 range, or one wall is infinite,
+        // so the triangle-wave period is not a finite f64. Fold the overshoot
+        // across the wall it crossed. A finite overshoot is below `2 w` after
+        // one fold, so at most one more fold, across the other wall, remains.
+        // A finite point whose image is not finite, because it lies past an
+        // infinite wall or because the overshoot overflows, is folded at
+        // quarter scale instead. An infinite `x` has no image; `max`/`min`
+        // then stop on the wall that was crossed.
         let d = if x < lo { lo - x } else { x - hi };
-        let slope = if d < w { -1.0 } else { 1.0 };
-        return (reflect_coord(x, lo, hi), slope);
+        let (fold, slope) = if d < w { (d, -1.0) } else { (w - (d - w), 1.0) };
+        let image = if x < lo { lo + fold } else { hi - fold };
+        if x.is_finite() && !image.is_finite() {
+            return reflect_quarter(0.25 * x, lo, hi);
+        }
+        let y = if x < lo {
+            image.max(lo).min(hi)
+        } else {
+            image.min(hi).max(lo)
+        };
+        return (y, slope);
     }
-    if x.is_finite() && !(x - lo).is_finite() {
-        let (_, slope) = reflect_coord_with_slope(0.5 * x, 0.5 * lo, 0.5 * hi);
-        return (reflect_coord(x, lo, hi), slope);
+    let offset = x - lo;
+    if !offset.is_finite() {
+        // The box lies far from zero, so the offset from `lo` overflows
+        // although the period does not.
+        return reflect_quarter(0.25 * x, lo, hi);
     }
-    let y = (x - lo).rem_euclid(period);
-    let slope = if y > w { -1.0 } else { 1.0 };
-    (reflect_coord(x, lo, hi), slope)
+    let y = offset.rem_euclid(period);
+    let (y, slope) = if y > w { (period - y, -1.0) } else { (y, 1.0) };
+    // `hi - lo` and `lo + y` both round, so the sum can land one ulp past
+    // `hi`.
+    ((lo + y).max(lo).min(hi), slope)
+}
+
+/// [`reflect_coord_with_slope`] of `4 x4`, which need not be representable,
+/// for a point outside the box whose image or offset overflows, folded at
+/// quarter scale: differences of quarters of values within `+-f64::MAX` are
+/// finite, and scaling by a power of two is exact above the subnormals. The
+/// overshoot is measured from the crossed wall, so a small one stays exact.
+/// An infinite wall folds as `+-f64::MAX`.
+fn reflect_quarter(x4: f64, lo: f64, hi: f64) -> (f64, f64) {
+    let (lo, hi) = (lo.max(f64::MIN), hi.min(f64::MAX));
+    let (lo4, hi4) = (0.25 * lo, 0.25 * hi);
+    let w = hi4 - lo4;
+    let fold = |d: f64| {
+        let r = d % (2.0 * w);
+        if r < w { (r, -1.0) } else { (w - (r - w), 1.0) }
+    };
+    // A subnormal point just past `hi` can round onto `hi4` and must still fold
+    // from `hi`. An infinite overshoot folds to NaN, which clamping against the
+    // crossed wall first sends to that wall.
+    if x4 >= hi4 {
+        let (r, slope) = fold(x4 - hi4);
+        ((4.0 * (hi4 - r)).min(hi).max(lo), slope)
+    } else {
+        let (r, slope) = fold(lo4 - x4);
+        ((4.0 * (lo4 + r)).max(lo).min(hi), slope)
+    }
 }
 
 /// Mirror-reflects every coordinate of `x` into `bounds` (see
@@ -328,9 +337,8 @@ pub fn reflect_into_box(x: ArrayView1<f64>, bounds: &Bounds<f64>) -> Array1<f64>
 }
 
 /// [`reflect_coord`] of `x + d`. A sum of finite `x` and `d` that overflows
-/// is folded at half scale, where it cannot, and an infinite wall then acts
-/// as a wall at `f64::MAX`. An infinite `d` has no image, and the coordinate
-/// stays at `x`.
+/// is folded at quarter scale, as an image that overflows is. An infinite `d`
+/// has no image, and the coordinate stays at `x`.
 fn reflect_step(x: f64, d: f64, lo: f64, hi: f64) -> f64 {
     let sum = x + d;
     if sum.is_finite() || !x.is_finite() {
@@ -339,12 +347,7 @@ fn reflect_step(x: f64, d: f64, lo: f64, hi: f64) -> f64 {
     if !d.is_finite() {
         return x;
     }
-    let half = reflect_coord(
-        0.5 * x + 0.5 * d,
-        0.5 * lo.max(f64::MIN),
-        0.5 * hi.min(f64::MAX),
-    );
-    (2.0 * half).max(lo).min(hi)
+    reflect_quarter(0.25 * x + 0.25 * d, lo, hi).0
 }
 
 /// Box-reflecting adapter: wraps an inner move kernel and mirror-reflects each
@@ -506,6 +509,79 @@ mod tests {
         assert_eq!(reflect_coord(7.0, 0.0, inf), 7.0);
         assert_eq!(reflect_coord(-inf, 0.0, inf), 0.0);
         assert_eq!(reflect_coord(inf, -inf, 0.0), 0.0);
+    }
+
+    #[test]
+    fn reflect_coord_folds_an_image_past_f64_max_back_across_it() {
+        // On a box far from zero the image across the finite wall can lie
+        // past f64::MAX, where an infinite wall stands, and `lo - x` itself
+        // can overflow. Neither may reach infinity or stop on the finite wall.
+        let near = |a: f64, b: f64| (a - b).abs() <= 1e-12 * b.abs();
+        let (m, inf) = (f64::MAX, f64::INFINITY);
+        for (x, lo, hi, image, slope) in [
+            (-5e307, 1e308, inf, 1.0953862697246314e308, 1.0),
+            (1e307, 1e308, inf, 1.6953862697246314e308, 1.0),
+            (-8e307, 1e308, inf, 1.2046137302753687e308, -1.0),
+            (5e307, -inf, -1e308, -1.0953862697246314e308, 1.0),
+            (8e307, -inf, -1e308, -1.2046137302753687e308, -1.0),
+            (-0.25 * m, 0.5 * m, inf, 0.75 * m, 1.0),
+            (0.25 * m, -inf, -0.5 * m, -0.75 * m, 1.0),
+            (0.75 * m, 0.9 * m, inf, 0.95 * m, 1.0),
+            (-0.95 * m, 0.1 * m, 0.9 * m, 0.65 * m, 1.0),
+        ] {
+            let y = reflect_coord(x, lo, hi);
+            let s = reflect_coord_with_slope(x, lo, hi).1;
+            assert!(
+                near(y, image) && s == slope,
+                "{x:e} in [{lo:e}, {hi:e}] folded to {y:e} with slope {s}"
+            );
+        }
+        let image = 1.4953862697246314e308;
+        assert!(near(reflect_step(1.6e308, -1.7e308, 1e308, inf), image));
+        assert!(near(reflect_step(-1.6e308, 1.7e308, -inf, -1e308), -image));
+        assert_eq!(reflect_coord(-inf, 1e308, inf), 1e308);
+        assert_eq!(reflect_coord(inf, -inf, -1e308), -1e308);
+    }
+
+    #[test]
+    fn a_step_on_a_half_infinite_box_far_from_zero_is_undone_by_its_reverse() {
+        // Detailed balance pairs the move from x by d to y = reflect(x + d)
+        // with the move from y by -s d back to x, where s is the slope of the
+        // fold at x + d, read here from the exact sum at quarter scale with
+        // the infinite wall at f64::MAX. Far from zero the image of x + d
+        // often lies past f64::MAX, and x + d itself can overflow.
+        let (m, inf) = (f64::MAX, f64::INFINITY);
+        let mut rng = StdRng::seed_from_u64(5);
+        for (lo, hi) in [
+            (1e308, inf),
+            (-inf, -1e308),
+            (0.5 * m, inf),
+            (-inf, -0.5 * m),
+            (0.9 * m, inf),
+            (-inf, -0.9 * m),
+        ] {
+            let (l, h) = (lo.max(-m), hi.min(m));
+            let wall = if lo.is_finite() { lo } else { hi };
+            let (mut images, mut sums) = (0, 0);
+            for _ in 0..20_000 {
+                let x = (l + (h - l) * rng.random::<f64>()).min(h);
+                let d = m * (2.0 * rng.random::<f64>() - 1.0);
+                let s = reflect_coord_with_slope(0.25 * x + 0.25 * d, 0.25 * l, 0.25 * h).1;
+                let y = reflect_step(x, d, lo, hi);
+                let back = reflect_step(y, -s * d, lo, hi);
+                assert!(
+                    (l..=h).contains(&y) && (back - x).abs() <= 1e-12 * x.abs(),
+                    "x = {x:e}, d = {d:e} in [{lo:e}, {hi:e}]: y = {y:e}, back = {back:e}"
+                );
+                let sum = x + d;
+                sums += usize::from(!sum.is_finite());
+                images += usize::from(sum.is_finite() && !(wall + (wall - sum)).is_finite());
+            }
+            assert!(
+                images > 0 && sums > 0,
+                "[{lo:e}, {hi:e}]: {images} images and {sums} sums overflowed"
+            );
+        }
     }
 
     #[test]

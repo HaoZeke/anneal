@@ -30,9 +30,11 @@ const STEPS_PER_EPOCH: usize = 50;
 type Seen = Arc<Mutex<Vec<Array1<f64>>>>;
 
 /// Records every point it evaluates. The objective falls toward the upper
-/// corner, so an annealing chain presses on the walls.
+/// corner, so an annealing chain presses on the walls; divided by a large
+/// `scale`, it falls gently enough for the chain to wander the box.
 struct Recorder {
     bounds: Bounds<f64>,
+    scale: f64,
     seen: Seen,
 }
 
@@ -47,15 +49,21 @@ impl Objective<f64> for Recorder {
 
     fn eval(&self, x: ArrayView1<f64>) -> f64 {
         self.seen.lock().unwrap().push(x.to_owned());
-        -x.sum()
+        -x.sum() / self.scale
     }
 }
 
 /// A recorder on the box `[low, high]` with no membership slack.
 fn recorder(low: &Array1<f64>, high: &Array1<f64>) -> (Recorder, Seen) {
+    scaled_recorder(low, high, 1.0)
+}
+
+/// [`recorder`] with its objective divided by `scale`.
+fn scaled_recorder(low: &Array1<f64>, high: &Array1<f64>, scale: f64) -> (Recorder, Seen) {
     let seen = Seen::default();
     let obj = Recorder {
         bounds: Bounds::new(low.clone(), high.clone(), 0.0),
+        scale,
         seen: Arc::clone(&seen),
     };
     (obj, seen)
@@ -291,25 +299,71 @@ fn a_step_whose_offset_from_low_overflows_mirrors_off_high() {
     }
 }
 
+/// The seeds among `0..40` on which preset `which`, started at `x0` with step
+/// scale `step` on the objective divided by `scale`, evaluates a point
+/// outside the open box `(low, high)`, where an infinite wall stands at
+/// `+-f64::MAX`.
+fn seeds_leaving_the_open_box(
+    which: usize,
+    (low, high): (&Array1<f64>, &Array1<f64>),
+    x0: &Array1<f64>,
+    step: f64,
+    scale: f64,
+) -> Vec<u64> {
+    let m = f64::MAX;
+    (0..40)
+        .filter(|&seed| {
+            let (obj, seen) = scaled_recorder(low, high, scale);
+            run_preset(which, obj, step, 2.62, None, seed, Some(x0.view()));
+            let seen = seen.lock().unwrap();
+            !seen
+                .iter()
+                .all(|x| low[0].max(-m) < x[0] && x[0] < high[0].min(m))
+        })
+        .collect()
+}
+
 #[test]
 fn a_step_whose_sum_overflows_mirrors_instead_of_stopping_on_a_wall() {
     // Each box reaches within a few steps of f64::MAX, where `x + step`
     // overflows, and the chain climbs there. An infinite wall then acts as a
     // wall at f64::MAX.
     let m = f64::MAX;
-    for (low, high, x0, scale) in [
+    for (low, high, x0, step) in [
         (array![0.0], array![m], array![0.99 * m], 0.01 * m),
         (array![1e308], array![1.7e308], array![1.6e308], 3e307),
         (array![1e308], array![f64::INFINITY], array![1.6e308], 3e307),
         (array![-6e307], array![6e307], array![3e307], 1e307),
     ] {
         for which in 0..2 {
-            let (obj, seen) = recorder(&low, &high);
-            run_preset(which, obj, scale, 2.62, None, 1, Some(x0.view()));
-            let seen = seen.lock().unwrap();
+            let seeds = seeds_leaving_the_open_box(which, (&low, &high), &x0, step, 1.0);
             assert!(
-                seen.iter().all(|x| low[0] < x[0] && x[0] < high[0].min(m)),
-                "preset {which} evaluated a wall of [{:e}, {:e}]",
+                seeds.is_empty(),
+                "preset {which} evaluated a wall of [{:e}, {:e}] on seeds {seeds:?}",
+                low[0],
+                high[0]
+            );
+        }
+    }
+}
+
+#[test]
+fn a_half_infinite_box_far_from_zero_is_never_evaluated_at_infinity() {
+    // Across the finite wall of [1e308, inf) or (-inf, -1e308] the image of a
+    // step can lie past +-f64::MAX, and its distance from the wall can
+    // overflow. Divided by 1e308, the objective lets the chain wander down to
+    // the finite wall.
+    let inf = f64::INFINITY;
+    for (low, high, x0) in [
+        (array![1e308], array![inf], array![1.6e308]),
+        (array![-inf], array![-1e308], array![-1.6e308]),
+    ] {
+        for (which, scale) in [(0, 1.0), (1, 1.0), (0, 1e308), (1, 1e308)] {
+            let seeds = seeds_leaving_the_open_box(which, (&low, &high), &x0, 5e307, scale);
+            assert!(
+                seeds.is_empty(),
+                "preset {which} on -x / {scale:e} evaluated a wall or infinity of \
+                 [{:e}, {:e}] on seeds {seeds:?}",
                 low[0],
                 high[0]
             );
