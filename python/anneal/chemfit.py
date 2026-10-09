@@ -884,5 +884,5 @@ def run_fitter(
             budget=budget, method=driver, preset=preset, seed=seed, **kwargs
         )
     return fit_anneal(
-        fitter, int(budget), driver=driver, seed=int(seed), preset=preset, **kwargs
+        fitter, budget, driver=driver, seed=seed, preset=preset, **kwargs
     )
