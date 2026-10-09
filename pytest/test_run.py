@@ -741,6 +741,29 @@ def test_run_reads_lists_tuples_and_other_dtypes_as_float64(driver, convert):
     assert np.array_equal(evaluated(convert(low), convert(high), convert(x0)), evaluated(low, high, x0))
 
 
+@pytest.mark.parametrize("driver", [run, run_qmc])
+@pytest.mark.parametrize(
+    "view",
+    [
+        lambda a: np.repeat(a, 2)[::2],
+        lambda a: a[::-1].copy()[::-1],
+        lambda a: np.stack([a, a + 7.0], axis=1)[:, 0],
+    ],
+    ids=["strided", "reversed", "column"],
+)
+def test_run_reads_non_contiguous_views(driver, view):
+    # A scipy-style (n, 2) bounds array hands low and high over as column views.
+    low, high, x0 = np.array([-2.0, -1.0]), np.array([2.0, 3.0]), np.array([1.0, 0.0])
+    assert not any(view(a).flags.c_contiguous for a in (low, high, x0))
+
+    def evaluated(lo, hi, start):
+        objective = Recorder(styb_tang_2d)
+        driver(objective, lo, hi, Boltzmann(), n_epochs=2, steps_per_epoch=5, seed=3, x0=start)
+        return np.array(objective.points)
+
+    assert np.array_equal(evaluated(view(low), view(high), view(x0)), evaluated(low, high, x0))
+
+
 @pytest.mark.parametrize("budget", [1, 2, 100, 1999, 2000])
 def test_run_max_evals_spends_exactly_the_budget(budget):
     objective = Recorder(lj_cluster_energy)
