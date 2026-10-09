@@ -22,8 +22,12 @@
 //! nearly linear gets one longer trial at the minimiser of the quadratic
 //! through the two values and the slope: the long steps a Wolfe search finds
 //! by extrapolation, without paying for a gradient at every trial. Pairs that
-//! violate the curvature condition are skipped, and the first accepted pair
-//! scales the initial matrix by `s.y / y.y`.
+//! violate the curvature condition are skipped.
+//!
+//! The initial inverse Hessian is the box metric `D = diag(w^2)`, the identity
+//! in box-normalised coordinates, so a side that spans decades moves as far,
+//! relative to its width, as a unit one. The first accepted pair scales it to
+//! `(s.y / y.D.y) D`, and the steepest-descent fallback steps along `-D g`.
 
 use eindir_core::Bounds;
 use ndarray::{Array1, Array2, ArrayView1};
@@ -112,6 +116,8 @@ pub struct FdBfgs {
     low: Array1<f64>,
     high: Array1<f64>,
     width: Array1<f64>,
+    /// Box metric `diag(w^2)`, kept as its diagonal.
+    metric: Array1<f64>,
     x: Array1<f64>,
     f: f64,
     grad: Array1<f64>,
@@ -139,6 +145,7 @@ impl FdBfgs {
         assert!(n > 0, "descent needs a positive dimension");
         assert_eq!(x0.len(), n, "start length must match the box");
         let width = &bounds.high - &bounds.low;
+        let metric = width.mapv(|w| w * w);
         let mut engine = Self {
             n,
             low: bounds.low.clone(),
@@ -147,7 +154,8 @@ impl FdBfgs {
             x: bounds.clip(x0),
             f: f64::INFINITY,
             grad: Array1::zeros(n),
-            inv_hessian: Array2::eye(n),
+            inv_hessian: Array2::from_diag(&metric),
+            metric,
             scaled: false,
             gamma: 1.0,
             scheme: FdScheme::Forward,
@@ -177,7 +185,7 @@ impl FdBfgs {
         self.iterations = 0;
         self.slow = 0;
         if !keep_curvature {
-            self.inv_hessian = Array2::eye(self.n);
+            self.inv_hessian = Array2::from_diag(&self.metric);
             self.scaled = false;
             self.gamma = 1.0;
         }
@@ -369,10 +377,10 @@ impl FdBfgs {
         if !(sy.is_finite() && sy > 8.0 * f64::EPSILON * s_norm * y_norm) {
             return;
         }
-        let yy = y.dot(y);
-        self.gamma = sy / yy;
+        let ydy: f64 = (0..self.n).map(|i| self.metric[i] * y[i] * y[i]).sum();
+        self.gamma = sy / ydy;
         if !self.scaled {
-            self.inv_hessian = Array2::eye(self.n) * self.gamma;
+            self.inv_hessian = Array2::from_diag(&(&self.metric * self.gamma));
             self.scaled = true;
         }
         let hy = self.inv_hessian.dot(y);
@@ -408,7 +416,7 @@ impl FdBfgs {
             steepest = true;
             direction.fill(0.0);
             for &i in &free {
-                direction[i] = -self.grad[i];
+                direction[i] = -self.metric[i] * self.grad[i];
             }
             slope = self.grad.dot(&direction);
         }
@@ -640,6 +648,39 @@ mod tests {
         assert_eq!(engine.scheme(), FdScheme::Central);
         assert!(engine.is_done());
         assert!(engine.value() < 1e-14, "value {}", engine.value());
+    }
+
+    #[test]
+    fn mixed_widths_descend_like_unit_widths() {
+        // The same Rosenbrock on [-2, 2]^6 and stretched to [-2w, 2w] per
+        // coordinate: under the box metric the two descents agree up to
+        // rounding, where an identity start crawls along the wide sides.
+        let widths = [1e-3, 1e-2, 0.1, 1.0, 10.0, 100.0];
+        let start = [-1.2, 1.0, -0.5, 0.3, 1.5, -1.0];
+        let unit = boxed(-2.0, 2.0, 6);
+        let mut plain = FdBfgs::new(
+            Array1::from_vec(start.to_vec()).view(),
+            None,
+            &unit,
+            FdBfgsOptions::default(),
+        );
+        let plain_used = drive(&mut plain, rosenbrock, 4000, &unit);
+        let w = Array1::from_vec(widths.to_vec());
+        let stretched = Bounds::new(&w * -2.0, &w * 2.0, 0.0);
+        let scaled = |x: ArrayView1<f64>| rosenbrock((&x / &w).view());
+        let mut wide = FdBfgs::new(
+            (&Array1::from_vec(start.to_vec()) * &w).view(),
+            None,
+            &stretched,
+            FdBfgsOptions::default(),
+        );
+        let wide_used = drive(&mut wide, scaled, 4000, &stretched);
+        assert!(plain.value() < 1e-10, "unit widths {}", plain.value());
+        assert!(wide.value() < 1e-10, "mixed widths {}", wide.value());
+        assert!(
+            wide_used <= plain_used + plain_used / 10,
+            "mixed widths took {wide_used} evaluations against {plain_used}"
+        );
     }
 
     #[test]
