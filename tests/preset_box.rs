@@ -15,7 +15,8 @@ use anneal_core::neigh::ContinuousR_n;
 use anneal_core::sampler::Sampler;
 use anneal_core::variant::{SaVariant, boltzmann_in_box, fast_in_box, gsa_in_box};
 use anneal_core::{
-    History, run_rs_qmc_variant_from, run_rs_variant, run_rs_variant_from, run_rs_variant_resumed,
+    History, qmc_skip_from_seed, run_rs_qmc_variant_from, run_rs_variant, run_rs_variant_from,
+    run_rs_variant_resumed,
 };
 use eindir_core::{Bounds, Objective};
 use ndarray::{Array1, ArrayView1, array};
@@ -415,6 +416,56 @@ fn qmc_starts_on_an_infinite_wall_lie_on_its_finite_wall() {
                     );
                     assert_in_box(x, &low, &high);
                 }
+            }
+        }
+    }
+}
+
+#[test]
+fn a_box_whose_width_overflows_draws_its_starts_at_half_scale() {
+    // `high - low` overflows on the first axis, so the uniform start and the
+    // Halton starts are drawn on the halved box and doubled. The pinned last
+    // axis sends the halved box down the same per-axis draw.
+    let m = f64::MAX;
+    let n_starts = 6;
+    for (low, high) in [
+        (array![-1e308, -1.0, 0.25], array![1e308, 1.0, 0.25]),
+        (array![-m, -1.0, 0.25], array![m, 1.0, 0.25]),
+        (array![-m, -1.0, 0.25], array![0.5 * m, 1.0, 0.25]),
+    ] {
+        let (half_low, half_high) = (&low * 0.5, &high * 0.5);
+        for seed in [0, 1, 99] {
+            let draw = |low: &Array1<f64>, high: &Array1<f64>| {
+                let (obj, _) = recorder(low, high);
+                let mut rng = StdRng::seed_from_u64(seed);
+                let state = boltzmann_in_box(obj, 1.0, 1.0)
+                    .unwrap()
+                    .initial_state(&mut rng);
+                (state.cur.pos, rng.next_u64())
+            };
+            let (pos, next) = draw(&low, &high);
+            let (half_pos, half_next) = draw(&half_low, &half_high);
+            assert_eq!((pos, next), (&half_pos * 2.0, half_next));
+        }
+        let halton = eindir_core::low_discrepancy_points(
+            &Bounds::new(half_low, half_high, 0.0),
+            n_starts,
+            qmc_skip_from_seed(1),
+        ) * 2.0;
+        let x0 = array![0.0, 0.5, 0.25];
+        for start in [None, Some(x0.clone())] {
+            let (obj, seen) = recorder(&low, &high);
+            let variant = boltzmann_in_box(obj, 1.0, 1e300).unwrap();
+            run_rs_qmc_variant_from(variant, n_starts, 1, 0, 1, start.clone(), None);
+            let seen = seen.lock().unwrap();
+            assert_eq!(seen.len(), n_starts);
+            assert_eq!(seen[0], start.unwrap_or_else(|| halton.row(0).to_owned()));
+            for (x, expected) in seen.iter().zip(halton.outer_iter()).skip(1) {
+                assert_eq!(x, &expected);
+            }
+            for (i, x) in seen.iter().enumerate() {
+                assert!(low[0] < x[0] && x[0] < high[0], "a start on a wall: {x}");
+                assert!(seen[..i].iter().all(|y| y[0] != x[0]), "repeated start {x}");
             }
         }
     }

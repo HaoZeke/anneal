@@ -316,24 +316,26 @@ where
     best_history.expect("n_starts.max(1) guarantees at least one chain")
 }
 
-/// The Halton points of `bounds`, except that an axis with an infinite wall,
-/// where they are infinite or NaN, starts on its finite wall, or at 0 when
-/// both walls are infinite, as the single-chain start does.
+/// The Halton points of `bounds`, except where they are not finite points of
+/// the box. An axis with an infinite wall starts on its finite wall, or at 0
+/// when both walls are infinite, as the single-chain start does, and an axis
+/// whose width overflows is scaled at half size and doubled.
 fn qmc_starts(bounds: &eindir_core::Bounds<f64>, n: usize, skip: u64) -> ndarray::Array2<f64> {
-    let finite = |lo: f64, hi: f64| lo.is_finite() && hi.is_finite();
     if bounds
         .low
         .iter()
         .zip(bounds.high.iter())
-        .all(|(&lo, &hi)| finite(lo, hi))
+        .all(|(&lo, &hi)| (hi - lo).is_finite())
     {
         return eindir_core::low_discrepancy_points(bounds, n, skip);
     }
+    let wide = |lo: f64, hi: f64| lo.is_finite() && hi.is_finite() && !(hi - lo).is_finite();
     let (low, high): (Vec<f64>, Vec<f64>) = bounds
         .low
         .iter()
         .zip(bounds.high.iter())
         .map(|(&lo, &hi)| match (lo.is_finite(), hi.is_finite()) {
+            (true, true) if wide(lo, hi) => (0.5 * lo, 0.5 * hi),
             (true, true) => (lo, hi),
             (true, false) => (lo, lo),
             (false, true) => (hi, hi),
@@ -341,7 +343,15 @@ fn qmc_starts(bounds: &eindir_core::Bounds<f64>, n: usize, skip: u64) -> ndarray
         })
         .unzip();
     let anchored = eindir_core::Bounds::new(low.into(), high.into(), bounds.slack);
-    eindir_core::low_discrepancy_points(&anchored, n, skip)
+    let mut starts = eindir_core::low_discrepancy_points(&anchored, n, skip);
+    for (k, (&lo, &hi)) in bounds.low.iter().zip(bounds.high.iter()).enumerate() {
+        if wide(lo, hi) {
+            starts
+                .column_mut(k)
+                .mapv_inplace(|x| (2.0 * x).max(lo).min(hi));
+        }
+    }
+    starts
 }
 
 /// [`run_rs_variant_from`] with no evaluation cap.
