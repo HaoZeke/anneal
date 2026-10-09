@@ -220,6 +220,17 @@ pub fn reflect_coord(x: f64, lo: f64, hi: f64) -> f64 {
     (lo + y).clamp(lo, hi)
 }
 
+/// `(x + s - lo) mod 2w`, folded onto `[0, w]`, where `x + s` overflows:
+/// the remainder is taken at quarter scale, `4 ((x/4 + s/4 - lo/4) mod w/2)`,
+/// whose terms cannot overflow when added.
+fn fold_sum_offset(x: f64, s: f64, lo: f64, w: f64) -> f64 {
+    let mut y = 4.0 * (0.25 * x + 0.25 * s - 0.25 * lo).rem_euclid(0.5 * w);
+    if y > w {
+        y = 2.0 * w - y;
+    }
+    y
+}
+
 /// `(x - lo) mod 2w`, folded onto `[0, w]`, for finite `x`. When `x - lo`
 /// itself overflows the remainder is taken at half scale,
 /// `2 ((x/2 - lo/2) mod w)`, which needs only `2w` to be finite.
@@ -271,13 +282,14 @@ pub fn reflect_into_box(x: ArrayView1<f64>, bounds: &Bounds<f64>) -> Array1<f64>
     )
 }
 
-/// Box-reflecting adapter: wraps an inner move kernel and mirror-reflects each
-/// proposed coordinate back into the supplied box. Unlike clipping (which piles
-/// probability mass on the boundary and breaks proposal symmetry), reflection
-/// keeps the proposal symmetric, so `Reflected<M>` is safe to pair with
-/// [`BoxConstrained`](crate::neigh::BoxConstrained) and satisfies L1/L2 without
-/// a Hastings term whenever the inner kernel `M` is symmetric (`Gaussian`,
-/// `Cauchy`, `TsallisVisit`).
+/// Box-reflecting adapter: wraps an additive inner move kernel (one whose
+/// proposal is `x` plus a step that does not depend on `x`) and mirror-reflects
+/// each proposed coordinate back into the supplied box. Unlike clipping (which
+/// piles probability mass on the boundary and breaks proposal symmetry),
+/// reflection keeps the proposal symmetric, so `Reflected<M>` is safe to pair
+/// with [`BoxConstrained`](crate::neigh::BoxConstrained) and satisfies L1/L2
+/// without a Hastings term whenever the inner kernel `M` is symmetric
+/// (`Gaussian`, `Cauchy`, `TsallisVisit`).
 #[derive(Clone, Debug)]
 pub struct Reflected<M> {
     /// Inner symmetric move kernel.
@@ -295,22 +307,27 @@ impl<M> Reflected<M> {
 
 impl<M: MoveKernel<f64>> MoveKernel<f64> for Reflected<M> {
     fn propose<R: Rng + ?Sized>(&self, i: ArrayView1<f64>, t: f64, rng: &mut R) -> Array1<f64> {
-        let mut p = self.inner.propose(i, t, rng);
-        for (k, pk) in p.iter_mut().enumerate() {
+        // The step is drawn at the origin, so it is known even where `x + s`
+        // overflows; the shipped kernels add their step to `x`, so this uses
+        // the same draws and gives the same proposals as drawing at `x`.
+        let origin = Array1::zeros(i.len());
+        let steps = self.inner.propose(origin.view(), t, rng);
+        Array1::from_iter(steps.iter().enumerate().map(|(k, &step)| {
             let (lo, hi) = (self.bounds.low[k], self.bounds.high[k]);
-            // The longest step that cannot overflow from any point of the box.
-            // A longer step lands uniformly on the box, the limit of
-            // reflecting ever longer steps. Deciding on the step alone, not on
-            // whether `x + s` happened to overflow, keeps the landing chance
-            // the same from every `x`, so the proposal stays symmetric.
-            let reach = f64::MAX - lo.abs().max(hi.abs());
-            *pk = if pk.is_finite() && (*pk - i[k]).abs() <= reach {
-                reflect_coord(*pk, lo, hi)
+            if !step.is_finite() {
+                // An infinite step has no fold; reflecting ever longer steps
+                // tends to the uniform law on the box. Whether a step is
+                // infinite does not depend on `x`, so this stays symmetric.
+                return (lo + (hi - lo) * rng.random::<f64>()).clamp(lo, hi);
+            }
+            let x = i[k];
+            let proposal = x + step;
+            if proposal.is_finite() {
+                reflect_coord(proposal, lo, hi)
             } else {
-                (lo + (hi - lo) * rng.random::<f64>()).clamp(lo, hi)
-            };
-        }
-        p
+                (lo + fold_sum_offset(x, step, lo, hi - lo)).clamp(lo, hi)
+            }
+        }))
     }
 
     fn supports_in<N: Neighborhood<f64>>(&self, _n: &N) -> bool {
@@ -444,6 +461,41 @@ mod tests {
             .sum();
         // 19 degrees of freedom: chi2 above 43.8 has probability 0.001.
         assert!(chi2 < 43.8, "chi2 {chi2} over {bins} bins: {counts:?}");
+    }
+
+    #[test]
+    fn reflected_steps_keep_their_size_next_to_the_float_limit() {
+        // A box against MAX: Gaussian steps of 1% of the width must stay
+        // that size, not turn into uniform jumps across the box.
+        let (lo, hi) = (f64::MAX / 2.0, f64::MAX);
+        let bounds = Bounds::new(array![lo], array![hi], 0.0);
+        let sigma = 0.01 * (hi - lo);
+        let kernel = Reflected::new(Gaussian::new(sigma), bounds);
+        let mut rng = StdRng::seed_from_u64(5);
+        let mut far = 0;
+        let mut x = array![0.75 * f64::MAX];
+        for _ in 0..20_000 {
+            let p = kernel.propose(x.view(), 1.0, &mut rng);
+            assert!(p[0].is_finite() && (lo..=hi).contains(&p[0]));
+            far += usize::from((p[0] - x[0]).abs() > 6.0 * sigma);
+            x = p;
+        }
+        assert!(far < 20, "{far} of 20000 steps jumped more than 6 sigma");
+    }
+
+    #[test]
+    fn reflected_matches_drawing_at_x_for_ordinary_boxes() {
+        let bounds = Bounds::new(array![-3.0, -3.0], array![3.0, 0.7], 0.0);
+        let kernel = Reflected::new(Cauchy::new(0.8), bounds.clone());
+        let mut a = StdRng::seed_from_u64(9);
+        let mut b = StdRng::seed_from_u64(9);
+        let x = array![2.5, -2.9];
+        for _ in 0..1000 {
+            let p = kernel.propose(x.view(), 1.0, &mut a);
+            let raw = Cauchy::new(0.8).propose(x.view(), 1.0, &mut b);
+            let q = reflect_into_box(raw.view(), &bounds);
+            assert_eq!(p, q);
+        }
     }
 
     #[test]
