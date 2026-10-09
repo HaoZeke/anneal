@@ -36,7 +36,10 @@ impl RecordingSphere {
 
     fn assert_all_in_bounds(&self) {
         let seen = self.seen.lock().expect("seen mutex");
-        assert!(!seen.is_empty(), "objective must be evaluated at least once");
+        assert!(
+            !seen.is_empty(),
+            "objective must be evaluated at least once"
+        );
         for point in seen.iter() {
             for (k, value) in point.iter().enumerate() {
                 assert!(
