@@ -21,12 +21,14 @@ Policy is *documented, safe, not oracle-optimal* (same stance as
 | =LowDimSmooth= | dim ≤ 5 and gradient | shift/hop/GLE polish-heavy; early QMC polish |
 | =HighDimIllConditioned= | dim ≥ 20 and gradient | GLE, reduced-space, hop; surrogates deprioritized |
 | =StochasticNoise= | noise_sigma set | OSA accept required; explore + GSA; refuse exact-only accept path |
-| =MultimodalNoGrad= | no gradient, mid dim or aspect ≥ 8 | DE, GSA, surrogate, explore |
+| =MultimodalNoGrad= | no gradient, mid dim or aspect ≥ 8 | under Auto, a fixed schedule: finite-difference descent, CMA-ES from the incumbent, closing descent |
 | =Default= | else | balanced library order (explore first for restart floor) |
 
 * Safety
 
 - Restart arm (=explore=) always remains first so Borel–Cantelli restart still fires.
+  The =MultimodalNoGrad= schedule under Auto runs no bandit; its restarts are
+  the BIPOP CMA-ES runs, large-population ones spanning the box.
 - Unknown features fall to =Default= (safe fallback).
 - Policy biases Beta priors and arm *order*, not hard exclusion (except
   noise-aware accept requirement under =StochasticNoise=).
