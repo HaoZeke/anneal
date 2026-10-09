@@ -30,6 +30,8 @@ pub mod ffs;
 pub mod floor_exit;
 /// Spectral referee over the explored landscape's transition graph.
 pub mod landscape_graph;
+/// Lattice-searching chains pooling their funnel bottoms in one bank.
+pub mod lattice_ensemble;
 /// Dynamic lattice search with a counted quench, for Lennard-Jones clusters.
 pub mod lattice_search;
 pub mod minima_hopping;
