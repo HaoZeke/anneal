@@ -4,7 +4,9 @@ Every driver gets the same evaluation budget, the box [-3, 3]^39 and the same
 initial positions, and evaluates through ``Fitter.evaluate``. The score is the
 best energy ChemFit recorded. Usage::
 
-    python positions_benchmark.py BUDGET SEEDS > rows.jsonl
+    python positions_benchmark.py BUDGET SEEDS [NAME_FILTER] > rows.jsonl
+
+With NAME_FILTER only the drivers whose name contains it run.
 
 Needs chemfit (4.x), nevergrad, scipy and anneal.
 """
@@ -106,6 +108,13 @@ def anneal_driver(name):
     return drive
 
 
+def fit_anneal_driver(method):
+    def drive(fitter, budget, seed, initial):
+        return fitter.fit_anneal(budget=budget, method=method, seed=seed)
+
+    return drive
+
+
 def scipy_fd(fitter, budget, seed, initial):
     f = Budgeted(fitter, budget)
     bounds = [(LOW, HIGH)] * (3 * N_ATOMS)
@@ -122,18 +131,29 @@ DRIVERS = {
     "anneal gpmd_optimize": anneal_driver("gpmd"),
     "anneal Boltzmann sigma=0.1": anneal_driver("boltzmann"),
     "anneal global_optimize, values only": anneal_driver("portfolio"),
+    "Fitter.fit_anneal portfolio": fit_anneal_driver("portfolio"),
+    "Fitter.fit_anneal boltzmann": fit_anneal_driver("boltzmann"),
+    "Fitter.fit_anneal fast": fit_anneal_driver("fast"),
+    "Fitter.fit_anneal gsa": fit_anneal_driver("gsa"),
+    "Fitter.fit_anneal gpmd": fit_anneal_driver("gpmd"),
 }
 
 
-def main(budget, seeds):
+def main(budget, seeds, name_filter=""):
     best = defaultdict(list)
     for seed in range(seeds):
         initial = np.random.default_rng(1000 + seed).uniform(-1.6, 1.6, (N_ATOMS, 3))
         for name, drive in DRIVERS.items():
-            fitter = Fitter(objective, initial_params={"positions": initial.copy()}, value_bad_params=1e10)
-            fitter.init()
-            drive(fitter, budget, seed, initial.copy())
-            result = fitter.finish()
+            if name_filter not in name:
+                continue
+            fitter = Fitter(objective, initial_params={"positions": initial.copy()},
+                            bounds={"positions": (LOW, HIGH)}, value_bad_params=1e10)
+            if name.startswith("Fitter.fit_anneal"):
+                result = drive(fitter, budget, seed, initial.copy())
+            else:
+                fitter.init()
+                drive(fitter, budget, seed, initial.copy())
+                result = fitter.finish()
             evals = sum(ctx.n_evals for ctx in fitter.contexts)
             energy = lj_energy(result["positions"])
             best[name].append(energy)
@@ -145,4 +165,4 @@ def main(budget, seeds):
 
 
 if __name__ == "__main__":
-    main(int(sys.argv[1]), int(sys.argv[2]))
+    main(int(sys.argv[1]), int(sys.argv[2]), *sys.argv[3:4])

@@ -72,21 +72,26 @@ a warning.
 ** Fitter.fit_anneal
 
 [[file:../../../experiments/chemfit/0001-feat-fitter-add-Fitter.fit_anneal.patch][experiments/chemfit/0001-feat-fitter-add-Fitter.fit_anneal.patch]]
-adds =Fitter.fit_anneal= to ChemFit 4 (=git am= it onto ChemFit's =next=).
-It takes the box from =Fitter.bounds=, including array leaves with scalar or
-per-element bounds, starts at =initial_params=, evaluates at most =budget=
-times, calls =step()= after each evaluation, and returns the best evaluated
-parameters.
+and [[file:../../../experiments/chemfit/0002-fix-fitter-make-fit_anneal-follow-the-fitter-s-polic.patch][0002-fix-fitter-make-fit_anneal-follow-the-fitter-s-polic.patch]]
+add =Fitter.fit_anneal= to ChemFit 4 (=git am= both onto ChemFit's =next=;
+the extra requires anneal 0.10.0 or later). It takes the box from
+=Fitter.bounds=, including array leaves with scalar or per-element bounds, and
+holds a coordinate with equal bounds fixed. It evaluates =initial_params=
+exactly first, makes exactly =budget= evaluations, calls =step()= after each,
+and returns the best parameters evaluated in this fit.
 
 #+begin_src python
-best = fitter.fit_anneal(budget=10_000, method="boltzmann")
+best = fitter.fit_anneal(budget=10_000, method="gsa")
 #+end_src
 
 =method= is ="portfolio"= (=global_optimize=, the default), ="boltzmann"=,
-="fast"=, ="gsa"= or ="gpmd"=. The parameters are passed to anneal in the
-unit cube, so a preset's step is in units of each box width; the temperature
-is in loss units. An objective exception stops further evaluations and is
-re-raised when anneal returns, unless the fitter swallows exceptions.
+="fast"=, ="gsa"= or ="gpmd"=; the portfolio and gpmd are restarted from the
+best point until the budget is spent. The parameters are passed to anneal in
+the unit cube, so a preset's step is in units of each box width; the
+temperature is in loss units. An exception from the objective, from a
+callback in =step()= or from =gradient= follows the fitter's
+=swallow_exceptions= and =log_exceptions=: when it is re-raised, the fit stops
+at that evaluation.
 
 [[file:../../../experiments/chemfit/bridge_check.py][experiments/chemfit/bridge_check.py]] runs every path on this page on one
 ChemFit 4 fitter. At a budget of 2000, each made exactly 2000 evaluations,
@@ -103,7 +108,7 @@ ChemFit recorded (the global minimum is \(-44.327\)). Measured with
 | Driver                                  | 2000 evaluations | 10000 evaluations |
 |-----------------------------------------+------------------+-------------------|
 | Nevergrad CMA                           |          \(-31.1\) |           \(-40.7\) |
-| Nevergrad NgIohTuned                    |          \(-31.0\) |           \(-39.2\) |
+| Nevergrad NgIohTuned                    |          \(-30.9\) |           \(-39.2\) |
 | anneal =cluster_search=, difference gradients |    \(-36.5\) |           \(-39.5\) |
 | SciPy L-BFGS-B, difference gradients    |          \(-30.4\) |           \(-38.8\) |
 | anneal =dmc_population_optimize=        |          \(-20.4\) |           \(-34.1\) |
@@ -112,9 +117,28 @@ ChemFit recorded (the global minimum is \(-44.327\)). Measured with
 | anneal =Boltzmann=, =sigma=0.1=         |          \(-21.4\) |           \(-24.4\) |
 | anneal =global_optimize=, values only   |          \(-11.5\) |           \(-24.7\) |
 
-With function values only, on a smooth surface, CMA-ES is the strongest of
-these. The classical presets are the simulated-annealing comparison, not the
-fastest descent. Energies come with forces in ChemFit's ASE objectives; given
-a gradient, =cluster_search= on atomic positions, or =global_optimize= with
-=grad_fn=, uses it. =cluster_search= draws its own starts in its own box, so
-it does not take =x0= or a user box.
+These drivers see raw coordinates. Every one uses function values only, the
+difference gradients included: at 2000 evaluations =cluster_search= on
+difference gradients is the strongest, and at 10000 CMA-ES is. The classical
+presets are the simulated-annealing comparison, not the fastest descent.
+Energies come with forces in ChemFit's ASE objectives; given a gradient,
+=cluster_search= on atomic positions, or =global_optimize= with =grad_fn=,
+uses it. =cluster_search= draws its own starts in its own box, so it does not
+take =x0= or a user box.
+
+Through =Fitter.fit_anneal=, on the same starts and seeds with
+=bounds={"positions": (-3, 3)}=, the search runs in the unit cube and every
+method makes exactly the budget of evaluations
+([[file:../../../experiments/chemfit/positions_fit_anneal_2000.jsonl][2000 rows]], [[file:../../../experiments/chemfit/positions_fit_anneal_10000.jsonl][10000 rows]]):
+
+| =method=      | 2000 evaluations | 10000 evaluations |
+|---------------+------------------+-------------------|
+| ="gsa"=       |        \(-24.9\) |         \(-32.7\) |
+| ="gpmd"=      |        \(-25.3\) |         \(-31.3\) |
+| ="boltzmann"= |        \(-20.2\) |         \(-22.3\) |
+| ="portfolio"= |        \(-15.6\) |         \(-16.2\) |
+| ="fast"=      |        \(-12.1\) |         \(-16.3\) |
+
+For a smooth positions fit, pass =method="gsa"= or =method="gpmd"=. The
+default portfolio spreads the budget over restarts and population arms meant
+for rugged surfaces and ends far above them here.
