@@ -1987,7 +1987,9 @@ enum Preset {
 ///
 /// Args:
 ///   obj_fn: Python callable `f(numpy.ndarray) -> float` evaluated at every
-///           proposal. Held via the GIL.
+///           proposal. Held via the GIL. A NaN result counts as worse than
+///           every number, so it never becomes the best value and a chain
+///           started at one moves off it.
 ///   low, high: one-dimensional array-likes of numbers (lists, tuples or
 ///              numpy arrays of any numeric dtype and strides) of the same
 ///              length, finite, with `low <= high` and a finite

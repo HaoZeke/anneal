@@ -148,6 +148,12 @@ where
 // SaVariant impl: glues the typed component algebra to the Sampler trait.
 // ---------------------------------------------------------------------------
 
+/// An objective value as the presets compare it: NaN counts as `+inf`, so it
+/// never beats a number and every finite value beats it.
+pub(crate) fn nan_as_inf(val: f64) -> f64 {
+    if val.is_nan() { f64::INFINITY } else { val }
+}
+
 impl<O, C, N, M, A> Sampler<f64> for SaVariant<f64, O, C, N, M, A>
 where
     O: eindir_core::Objective<f64> + Send + Sync,
@@ -201,7 +207,7 @@ where
             return false;
         }
         let proposal_val = self.obj.eval(proposal_pos.view());
-        let delta = proposal_val - state.cur.val;
+        let delta = nan_as_inf(proposal_val) - nan_as_inf(state.cur.val);
         let p = self.accept.accept_prob(delta, temp);
         let u: f64 = rng.random();
         if u < p {
@@ -209,7 +215,7 @@ where
                 pos: proposal_pos,
                 val: proposal_val,
             };
-            if state.cur.val < state.best.val {
+            if nan_as_inf(state.cur.val) < nan_as_inf(state.best.val) {
                 state.best = state.cur.clone();
             }
             true

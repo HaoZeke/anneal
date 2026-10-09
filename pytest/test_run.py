@@ -779,6 +779,24 @@ def test_unreadable_inputs_raise_value_error(driver, arg, value, message):
 
 
 @pytest.mark.parametrize("driver", DRIVERS)
+@pytest.mark.parametrize("preset", [Boltzmann(), Fast(), Gsa()], ids=repr)
+@pytest.mark.parametrize("nan", [np.nan, -np.nan], ids=["nan", "negative-nan"])
+def test_a_nan_at_x0_neither_freezes_the_chain_nor_wins(driver, preset, nan):
+    x0 = np.array([0.5, 0.5])
+    obj, seen = recording(
+        lambda x: nan if np.array_equal(x, x0) else float(np.sum(x**2))
+    )
+
+    h = driver(
+        obj, -np.ones(2), np.ones(2), preset, n_epochs=10, steps_per_epoch=100, x0=x0
+    )
+
+    assert np.array_equal(seen[0], x0)
+    assert h.total_accepted > 0
+    assert h.best_val == min(float(np.sum(x**2)) for x in seen[1:])
+
+
+@pytest.mark.parametrize("driver", DRIVERS)
 @pytest.mark.parametrize("preset", WIDE_PRESETS, ids=repr)
 @pytest.mark.parametrize(
     "x0", [None, np.array([1.5, 0.5, -2.0])], ids=["uniform", "x0"]
