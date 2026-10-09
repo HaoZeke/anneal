@@ -32,8 +32,9 @@ dict, such as a ``MappingProxyType``, there and in ``fit_anneal`` and
 ``run_fitter``. A parameter that is not finite raises in ``ChemFitVector`` and
 in ``fit_chemfit``, whose portfolio ignored it, and a complex leaf raises
 instead of losing its imaginary part. Each ``x0`` dict leaf must have its
-parameter's size, apart from one value for an only parameter the fitter
-bounds: 0.10.0 read the leaves flat, so leaves of the wrong sizes with the
+parameter's size, apart from one value for the fitter's only parameter where
+``fitter.bounds`` gives both of its sides and ``low`` and ``high`` are
+omitted: 0.10.0 read the leaves flat, so leaves of the wrong sizes with the
 right total moved values across parameters (``{"a": 0.3, "b": [0.6, 0.7]}``
 started ``a`` at ``[0.3, 0.6]``). ``resolve_bounds`` and
 ``bounds_from_fitter`` raise on an infinite or NaN bound, a box too wide for a
