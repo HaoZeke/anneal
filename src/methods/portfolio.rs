@@ -397,20 +397,15 @@ const QN_KICK0: f64 = 0.05;
 const QN_KICK_MIN: f64 = 1e-3;
 const QN_KICK_MAX: f64 = 0.5;
 /// Gradients per dimension a finite-difference descent needs to converge;
-/// the local-first schedule opens with one only when the budget affords it.
+/// the values-only loop opens with one only when the budget affords it.
 const QN_AFFORDABLE_GRADIENTS: usize = 5;
 /// Fewest gradients worth a closing finite-difference polish.
 const QN_MIN_POLISH_GRADIENTS: usize = 3;
-/// The local-first schedule's closing polish gets this many gradients,
-/// held between the two budget shares: in 39-D at 1000 evaluations the
-/// polish needs the upper share to converge, while a 6-D fit at 5000 does
-/// better with the lower share and more CMA-ES.
+/// The values-only loop's closing polish gets this many gradients, enough
+/// for one finite-difference descent from the incumbent to converge, but
+/// never more than the budget share below.
 const LOCAL_FIRST_POLISH_GRADIENTS: usize = 10;
-const LOCAL_FIRST_POLISH_SHARE: f64 = 0.2;
 const LOCAL_FIRST_POLISH_MAX_SHARE: f64 = 0.4;
-/// Budget share of the contiguous GSA anneal, with finite-difference local
-/// search, on mid-width values-only multimodal boxes.
-const GSA_LOCAL_FRONT_SHARE: f64 = 0.85;
 /// Omelyan trajectory length for the HMC arm.
 const HMC_L_STEPS: usize = 5;
 /// Additive-surrogate fit degree and inverse-CDF grid, matching the
@@ -1062,10 +1057,11 @@ struct ArmStates {
     cma: Option<CmaArmState>,
     /// Persistent finite-difference quasi-Newton descent.
     qn: Option<QnArmState>,
-    /// Without a gradient, the GSA arm follows each temperature step that
-    /// beats the chain best with a finite-difference descent, the L-BFGS-B
-    /// local search dual_annealing runs on improvement.
-    gsa_local_search: bool,
+    /// Set by the values-only loop. Without a gradient, the GSA arm then
+    /// follows each temperature step that beats the chain best with a
+    /// finite-difference descent, the L-BFGS-B local search dual_annealing
+    /// runs on improvement.
+    values_only: bool,
 }
 
 /// Persistent adaptive-Metropolis descent chain (D6 + D11 BFWT).
@@ -2574,7 +2570,7 @@ fn run_arm<O, G>(
             if states.gsa.is_none() {
                 states.gsa = initialize_gsa_state(obj, slice, seed);
             }
-            let local_search = states.gsa_local_search && grad.is_none();
+            let local_search = states.values_only && grad.is_none();
             if let Some(state) = states.gsa.as_mut() {
                 // Keep T₀ at box scale (do not re-inflate from |f|).
                 // In-epoch dual-style LS when grad is present (run_persistent_gsa).
@@ -3045,43 +3041,41 @@ fn run_qn_arm<O>(
     state.seen_best = ledger.best_get();
 }
 
-/// Runs one slice of a scheduled arm under a ledger cap and books the pull.
-#[allow(clippy::too_many_arguments)]
-fn scheduled_slice<O>(
-    arm: ArmKind,
-    obj: &BudgetedObjective<'_, O>,
-    ledger: &BudgetLedger,
-    states: &mut ArmStates,
-    slice: usize,
-    seed: u64,
-    budget: usize,
-    stat: &mut ArmStat,
-    settle: bool,
-) where
-    O: Objective<f64>,
-{
-    let before = ledger.best_get();
-    ledger.cap_set((ledger.used_get() + slice).min(budget));
-    match arm {
-        ArmKind::Qn => run_qn_arm(obj, ledger, states, slice, seed, settle),
-        ArmKind::Cma => run_cma_arm(obj, ledger, states, slice, seed, budget),
-        _ => unreachable!("only the quasi-Newton and CMA-ES arms are scheduled"),
-    }
-    ledger.cap_set(budget);
-    stat.pulls += 1;
-    if ledger.best_get() < before {
-        stat.successes += 1;
-    }
-}
+/// Arms of the values-only loop in warm-up order: the two arms that start
+/// from the incumbent, the two global visitors that keep one member there,
+/// the additive surrogate fitted to every evaluation so far, and the
+/// restart arm.
+const VALUES_ONLY_ARMS: [ArmKind; 6] = [
+    ArmKind::Cma,
+    ArmKind::Qn,
+    ArmKind::Gsa,
+    ArmKind::De,
+    ArmKind::Surrogate,
+    ArmKind::Explore,
+];
 
-/// Local-first schedule for values-only multimodal boxes too narrow for
-/// heavy-tailed visiting (least-squares fits, clusters, curved valleys),
-/// where every bandit arm but the incumbent-seeded ones measured behind.
-/// A finite-difference descent opens when the budget affords one to
-/// converge; CMA-ES runs from the incumbent, restarted by BIPOP, take the
-/// middle; a descent from the final incumbent closes. All three start from
-/// the caller's `x0` while it is the incumbent.
-fn run_local_first_schedule<O>(
+/// Values-only allocation under the Auto policy (no gradient, no declared
+/// noise), whatever the box width.
+///
+/// When the budget affords one ([`QN_AFFORDABLE_GRADIENTS`]), a
+/// finite-difference descent from the incumbent opens the run and goes on
+/// while its slices succeed, up to convergence. From the minimum it reaches,
+/// GSA and then CMA-ES each keep the turn while they pay: a phase ends once
+/// it has gone [`ROUNDS_PER_ARM`] slices without lowering the incumbent, or
+/// as long as its last gain took if that is longer, and it leaves the
+/// closing polish and one slice for each other arm not yet played. Bandit
+/// rounds over [`VALUES_ONLY_ARMS`] follow until the closing polish reserve
+/// remains. As in the main bandit, each arm not yet played takes one slice
+/// first, in list order, so the restart arm and the global searches get an
+/// observation whenever the budget holds a slice each. After that a round
+/// picks uniformly with probability `1/round` (rounds counted from the
+/// opening); otherwise the arm whose last slice succeeded plays again, and
+/// failing that a discounted Thompson draw picks. A slice succeeds when it
+/// lowers the incumbent by more than [`arm_success_threshold`]. The closing
+/// polish is a finite-difference descent from the final incumbent with the
+/// evaluations one needs to converge ([`LOCAL_FIRST_POLISH_GRADIENTS`]),
+/// kicked from it once it does.
+fn run_values_only_portfolio<O, G>(
     obj: &BudgetedObjective<'_, O>,
     ledger: &BudgetLedger,
     states: &mut ArmStates,
@@ -3090,48 +3084,77 @@ fn run_local_first_schedule<O>(
 ) -> Vec<ArmStat>
 where
     O: Objective<f64>,
+    G: Gradient<f64>,
 {
-    let dim = obj.bounds().dims;
+    let bounds = obj.bounds().clone();
+    let dim = bounds.dims;
     let gradient = dim + 1;
-    let slice = SLICE_GRAD_EQUIVALENTS * gradient;
-    let mut qn = ArmStat {
-        name: ArmKind::Qn.name(),
-        pulls: 0,
-        successes: 0,
+    states.values_only = true;
+
+    let arms = VALUES_ONLY_ARMS;
+    let k = arms.len();
+    let slice = (SLICE_GRAD_EQUIVALENTS * gradient).max(budget / (ROUNDS_PER_ARM * k));
+    let n_slices = (budget / slice).max(1);
+    let discount = 1.0 - 1.0 / (n_slices.max(2) as f64);
+    let mut posteriors: Vec<ArmPosterior> = arms
+        .iter()
+        .map(|_| ArmPosterior::with_prior(discount, 1.0, 1.0))
+        .collect();
+    let index = |arm: ArmKind| arms.iter().position(|&a| a == arm).expect("arm listed");
+    let mut rng = StdRng::seed_from_u64(seed);
+    let mut round = 0usize;
+    let mut winner = None;
+    let play = |choice: usize,
+                take: usize,
+                states: &mut ArmStates,
+                rng: &mut StdRng,
+                posteriors: &mut [ArmPosterior]|
+     -> bool {
+        let arm = arms[choice];
+        let before = ledger.best_get();
+        ledger.cap_set((ledger.used_get() + take).min(budget));
+        run_arm::<O, G>(arm, obj, None, ledger, states, rng, take, budget);
+        ledger.cap_set(budget);
+        let after = ledger.best_get();
+        let improved = after.is_finite() && after < before - arm_success_threshold(arm, before);
+        posteriors[choice].update(improved);
+        improved
     };
-    let mut cma = ArmStat {
-        name: ArmKind::Cma.name(),
-        pulls: 0,
-        successes: 0,
-    };
-    if budget >= QN_AFFORDABLE_GRADIENTS * dim * gradient {
+
+    let opened = budget >= QN_AFFORDABLE_GRADIENTS * dim * gradient;
+    if opened {
+        let qn = index(ArmKind::Qn);
         while ledger.remaining() > 0 {
-            scheduled_slice(
-                ArmKind::Qn,
-                obj,
-                ledger,
-                states,
-                slice,
-                seed,
-                budget,
-                &mut qn,
-                true,
-            );
-            if states
-                .qn
-                .as_ref()
-                .is_none_or(|state| state.engine.is_done())
+            round += 1;
+            let before = ledger.best_get();
+            ledger.cap_set((ledger.used_get() + slice).min(budget));
+            run_qn_arm(obj, ledger, states, slice, seed, true);
+            ledger.cap_set(budget);
+            let after = ledger.best_get();
+            let improved =
+                after.is_finite() && after < before - arm_success_threshold(ArmKind::Qn, before);
+            posteriors[qn].update(improved);
+            winner = improved.then_some(qn);
+            if !improved
+                || states
+                    .qn
+                    .as_ref()
+                    .is_none_or(|state| state.engine.is_done())
             {
                 break;
             }
         }
-        // A converged descent sits on a valley floor no isotropic sample
-        // improves, so an elite there freezes the run. A non-elitist run
-        // with a short step climbs the walls and relearns the valley's
+        // The opening's successes show the start was no minimum, not that
+        // kicks from the minimum pay: QN enters the rounds on the prior.
+        posteriors[qn].alpha = 1.0;
+        posteriors[qn].beta = 1.0;
+        // A descent that stops paying sits on a valley floor no isotropic
+        // sample improves, so an elite there freezes the run. A non-elitist
+        // run with a short step climbs the walls and relearns the valley's
         // shape on the way back down.
         states.cma = Some(CmaArmState::new(
             ledger,
-            obj.bounds(),
+            &bounds,
             budget,
             seed,
             CMA_VALLEY_SIGMA,
@@ -3140,44 +3163,83 @@ where
     }
     let share = |fraction: f64| (budget as f64 * fraction).round() as usize;
     let polish = (LOCAL_FIRST_POLISH_GRADIENTS * gradient)
-        .clamp(
-            share(LOCAL_FIRST_POLISH_SHARE),
-            share(LOCAL_FIRST_POLISH_MAX_SHARE),
-        )
+        .min(share(LOCAL_FIRST_POLISH_MAX_SHARE))
         .min(ledger.remaining());
     let polish = if polish >= QN_MIN_POLISH_GRADIENTS * gradient {
         polish
     } else {
         0
     };
-    while ledger.remaining() > polish {
+    if opened {
+        // Against a descended incumbent a GSA record is a lower basin and a
+        // CMA-ES gain a better point of this one. From an undescended start
+        // GSA's first records are box-wide samples that leave the start's
+        // basin, so the phases wait for the opening. Both find their gains
+        // in bursts (a local search per record, a run per covariance), which
+        // single slices of the rounds below would not see.
+        const PHASES: [ArmKind; 2] = [ArmKind::Gsa, ArmKind::Cma];
+        for arm in PHASES {
+            let choice = index(arm);
+            // A phase that keeps paying must still leave the warm-up round
+            // a slice for every other arm, the next phase's included.
+            let unplayed = posteriors
+                .iter()
+                .enumerate()
+                .filter(|&(i, posterior)| i != choice && posterior.pulls == 0)
+                .count();
+            let reserve = polish + unplayed * slice;
+            let start = ledger.used_get();
+            let mut last_gain = start;
+            while ledger.remaining() >= reserve + 8 {
+                let idle = ledger.used_get() - last_gain;
+                if idle >= (ROUNDS_PER_ARM * slice).max(last_gain - start) {
+                    break;
+                }
+                round += 1;
+                let take = slice.min(ledger.remaining() - reserve);
+                let gained = play(choice, take, states, &mut rng, &mut posteriors);
+                if gained {
+                    last_gain = ledger.used_get();
+                }
+                winner = gained.then_some(choice);
+            }
+        }
+    }
+    // Explore and GSA skip slices shorter than eight evaluations; the polish
+    // takes such a remainder.
+    while ledger.remaining() >= polish + 8 {
+        round += 1;
+        let choice = if let Some(unplayed) = posteriors.iter().position(|p| p.pulls == 0) {
+            unplayed
+        } else if rng.random::<f64>() < 1.0 / round as f64 {
+            rng.random_range(0..k)
+        } else if let Some(last) = winner {
+            last
+        } else {
+            let mut best = (0usize, f64::NEG_INFINITY);
+            for (i, posterior) in posteriors.iter().enumerate() {
+                let draw = posterior.draw(&mut rng);
+                if draw > best.1 {
+                    best = (i, draw);
+                }
+            }
+            best.0
+        };
         let take = slice.min(ledger.remaining() - polish);
-        scheduled_slice(
-            ArmKind::Cma,
-            obj,
-            ledger,
-            states,
-            take,
-            seed,
-            budget,
-            &mut cma,
-            false,
-        );
+        winner = play(choice, take, states, &mut rng, &mut posteriors).then_some(choice);
     }
+    let qn = index(ArmKind::Qn);
     while ledger.remaining() > 0 {
-        scheduled_slice(
-            ArmKind::Qn,
-            obj,
-            ledger,
-            states,
-            slice,
-            seed,
-            budget,
-            &mut qn,
-            false,
-        );
+        play(qn, slice, states, &mut rng, &mut posteriors);
     }
-    vec![cma, qn]
+    arms.iter()
+        .zip(posteriors.iter())
+        .map(|(arm, posterior)| ArmStat {
+            name: arm.name(),
+            pulls: posterior.pulls,
+            successes: posterior.successes,
+        })
+        .collect()
 }
 
 fn arm_kind_from_name(name: &str) -> Option<ArmKind> {
@@ -3572,13 +3634,9 @@ fn enabled_arms(
     // The posterior needs ROUNDS_PER_ARM pulls per arm to rank them;
     // activate only as many arms as the horizon can rank (the D4 regret
     // grows with K, and a starved arm is worse than an absent one).
-    // Gradient-free multimodal boxes are capped harder: ranking ten arms
-    // leaves no arm the contiguous budget its chain or population needs,
-    // which is how the flagship no-grad path lost to its own preset.
+    // Values-only Auto runs never reach this bandit (see
+    // run_values_only_portfolio), so MultimodalNoGrad needs no cap here.
     let regime_cap = match regime {
-        // Cap dual-class multimodal: ranking many arms starves GSA of the
-        // contiguous budget dual_annealing spends on one strategy chain.
-        crate::methods::regime::OptimizationRegime::MultimodalNoGrad => 6,
         // Keep enough arms that MetaD/TPS/dmc remain callable under Auto
         // (tests + exploration) while still preferring GSA/DE first.
         crate::methods::regime::OptimizationRegime::MultimodalGlobal => 8,
@@ -3745,17 +3803,10 @@ where
         let _ = budgeted_obj.eval(x0);
     }
 
-    if policy == PortfolioPolicy::Auto
-        && matches!(
-            regime,
-            crate::methods::regime::OptimizationRegime::MultimodalNoGrad
-        )
-    {
-        let mut states = ArmStates {
-            noise_sigma,
-            ..ArmStates::default()
-        };
-        let arm_stats = run_local_first_schedule(&budgeted_obj, &ledger, &mut states, seed, budget);
+    if policy == PortfolioPolicy::Auto && grad.is_none() && noise_sigma.is_none() {
+        let mut states = ArmStates::default();
+        let arm_stats =
+            run_values_only_portfolio::<O, G>(&budgeted_obj, &ledger, &mut states, seed, budget);
         return portfolio_result(&ledger, &bounds, arm_stats);
     }
 
@@ -3831,7 +3882,6 @@ where
         (
             PortfolioPolicy::Auto,
             crate::methods::regime::OptimizationRegime::HighDimIllConditioned
-            | crate::methods::regime::OptimizationRegime::MultimodalNoGrad
             | crate::methods::regime::OptimizationRegime::LowDimSmooth,
         ) => 4,
         (PortfolioPolicy::Auto, _) => 2,
@@ -3888,38 +3938,6 @@ where
             // and the budget is the caller's authority on effort.
             run_low_dimensional_polish(&budgeted_obj, grad, &ledger, plan, seed, budget);
             low_dimensional_polish = None;
-        }
-    }
-
-    // Mid-width values-only multimodal boxes (Rastrigin/Styblinski class):
-    // one contiguous dual_annealing-style anneal, GSA visiting with a
-    // finite-difference local search from every new record, takes most of
-    // the budget before the bandit residual and the endgame.
-    if policy == PortfolioPolicy::Auto
-        && matches!(
-            regime,
-            crate::methods::regime::OptimizationRegime::MultimodalGlobal
-        )
-        && mean_width(&bounds) < 50.0
-        && budgeted_grad.is_none()
-    {
-        states.gsa_local_search = true;
-        let front =
-            (((budget as f64) * GSA_LOCAL_FRONT_SHARE).round() as usize).min(ledger.remaining());
-        if front >= 8 {
-            ledger.cap_set(ledger.used_get() + front);
-            let mut front_rng = StdRng::seed_from_u64(seed ^ 0xD5A1_u64);
-            run_arm(
-                ArmKind::Gsa,
-                &budgeted_obj,
-                budgeted_grad.as_ref(),
-                &ledger,
-                &mut states,
-                &mut front_rng,
-                front,
-                budget,
-            );
-            ledger.cap_set(budget);
         }
     }
 
@@ -4766,9 +4784,17 @@ mod tests {
 
     #[test]
     fn portfolio_dmc_pop_arm_runs_on_real_path() {
-        // Multimodal no-grad + large horizon so dmc_pop is preferred and pulled.
+        // dmc_pop is a main-bandit arm, which values-only runs reach under
+        // Legacy; the horizon activates the whole library.
         let obj = Rastrigin::<8>::new();
-        let result = portfolio_optimize::<_, Rastrigin<8>>(&obj, None, 4000, 23, None);
+        let result = portfolio_optimize_with_policy::<_, Rastrigin<8>>(
+            &obj,
+            None,
+            4000,
+            23,
+            None,
+            PortfolioPolicy::Legacy,
+        );
         assert!(result.best_val.is_finite());
         assert!(result.n_evals + result.n_grads <= 4000);
         eprintln!("portfolio arm_stats={:?}", result.arm_stats);
@@ -5722,8 +5748,8 @@ mod tests {
 
     #[test]
     fn values_only_narrow_box_charges_exactly_with_and_without_a_start() {
-        // Width 4 and no gradient: the local-first schedule. The 12-d case
-        // cannot afford an opening descent, so CMA-ES opens instead.
+        // Width 4 and no gradient. The 6-d case affords an opening descent;
+        // the 12-d one does not, so its warm-up round plays every arm.
         for (dim, budget) in [(6usize, 900usize), (12, 600)] {
             let start = Array1::from_elem(dim, -1.5);
             for x0 in [Some(start.view()), None] {
@@ -5742,14 +5768,17 @@ mod tests {
                 assert_eq!(result.n_evals, budget);
                 assert_eq!(result.n_grads, 0);
                 assert!(points.iter().all(|x| obj.bounds.contains(x.view())));
-                for name in ["cma", "qn"] {
-                    assert!(
-                        result
-                            .arm_stats
-                            .iter()
-                            .any(|s| s.name == name && s.pulls > 0),
-                        "{name} ran in {dim}-D"
-                    );
+                let names: Vec<_> = result.arm_stats.iter().map(|s| s.name).collect();
+                assert_eq!(names, ["cma", "qn", "gsa", "de", "surrogate", "explore"]);
+                let played: Vec<_> = result
+                    .arm_stats
+                    .iter()
+                    .filter(|s| s.pulls > 0)
+                    .map(|s| s.name)
+                    .collect();
+                assert!(played.contains(&"qn"), "qn ran in {dim}-D");
+                if dim == 12 {
+                    assert_eq!(played.len(), 6, "every arm took a slice in 12-D");
                 }
                 if x0.is_some() {
                     assert_eq!(points[0], start, "the start is the first evaluation");
@@ -5777,8 +5806,8 @@ mod tests {
 
     #[test]
     fn start_at_the_minimum_stays_the_incumbent() {
-        // The narrow box runs the local-first schedule and the wide one the
-        // bandit; neither may displace a start that no point improves on.
+        // On a narrow box and a wide one, no arm may displace a start that
+        // no point improves on.
         for (low, high) in [(-2.0, 2.0), (-5.12, 5.12)] {
             let obj = Traced::new(low, high, 6, rosenbrock);
             let start = Array1::ones(6);
@@ -5810,7 +5839,7 @@ mod tests {
             ledger: &ledger,
         };
         let mut states = ArmStates {
-            gsa_local_search: true,
+            values_only: true,
             ..ArmStates::default()
         };
         let mut rng = StdRng::seed_from_u64(9);
@@ -5831,6 +5860,85 @@ mod tests {
         assert_eq!(obj.points().len(), ledger.used_get());
         assert!(obj.points().iter().all(|x| obj.bounds.contains(x.view())));
         assert!(ledger.best_get() < 1e-8, "best {}", ledger.best_get());
+    }
+
+    fn rastrigin(x: ArrayView1<f64>) -> f64 {
+        10.0 * x.len() as f64
+            + x.iter()
+                .map(|v| v * v - 10.0 * (2.0 * std::f64::consts::PI * v).cos())
+                .sum::<f64>()
+    }
+
+    fn ackley(x: ArrayView1<f64>) -> f64 {
+        let n = x.len() as f64;
+        let ripple = x
+            .iter()
+            .map(|v| (2.0 * std::f64::consts::PI * v).cos())
+            .sum::<f64>();
+        -20.0 * (-0.2 * (x.dot(&x) / n).sqrt()).exp() - (ripple / n).exp()
+            + 20.0
+            + std::f64::consts::E
+    }
+
+    #[test]
+    fn values_only_warm_up_plays_every_arm() {
+        // Rastrigin from a side basin, on a narrow box and a wide one.
+        for half in [2.0, 5.12] {
+            let obj = Traced::new(-half, half, 4, rastrigin);
+            let start = Array1::from_elem(4, 1.0);
+            let result = portfolio_optimize_from::<_, ShiftQuadratic>(
+                &obj,
+                None,
+                2000,
+                5,
+                None,
+                PortfolioPolicy::Auto,
+                Some(start.view()),
+            );
+            let points = obj.points();
+            assert_eq!(points.len(), 2000);
+            assert_eq!(result.n_evals, 2000);
+            assert!(points.iter().all(|x| obj.bounds.contains(x.view())));
+            for stat in &result.arm_stats {
+                assert!(
+                    stat.pulls > 0,
+                    "{} took no slice at half-width {half}",
+                    stat.name
+                );
+            }
+            assert!(result.best_val < rastrigin(start.view()));
+        }
+    }
+
+    #[test]
+    fn values_only_phases_leave_every_arm_a_slice() {
+        // Far out on Ackley GSA records keep paying, so its phase runs into
+        // the reserve; CMA-ES, DE, the surrogate and explore still take one.
+        for (dim, budget) in [(4usize, 2000usize), (10, 5000)] {
+            let start = Array1::from_shape_fn(dim, |i| if i % 2 == 0 { 20.0 } else { -20.0 });
+            for seed in [0u64, 1] {
+                let obj = Traced::new(-32.768, 32.768, dim, ackley);
+                let result = portfolio_optimize_from::<_, ShiftQuadratic>(
+                    &obj,
+                    None,
+                    budget,
+                    seed,
+                    None,
+                    PortfolioPolicy::Auto,
+                    Some(start.view()),
+                );
+                assert_eq!(obj.points().len(), budget);
+                let gsa = result.arm_stats.iter().find(|s| s.name == "gsa");
+                assert!(gsa.is_some_and(|s| s.pulls > ROUNDS_PER_ARM));
+                for stat in &result.arm_stats {
+                    assert!(
+                        stat.pulls > 0,
+                        "{} took no slice in {dim}-D, seed {seed}",
+                        stat.name
+                    );
+                }
+            }
+        }
     }
 
     #[test]
