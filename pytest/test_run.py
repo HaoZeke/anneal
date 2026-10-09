@@ -788,6 +788,24 @@ def test_a_non_number_from_the_objective_raises_type_error():
         run(lambda x: None, LOW, HIGH, Boltzmann(), n_epochs=1, steps_per_epoch=3)
 
 
+@pytest.mark.parametrize(
+    "drive",
+    [
+        lambda f: run(f, LOW, HIGH, Boltzmann(), n_epochs=2, steps_per_epoch=10, seed=0),
+        lambda f: run_qmc(f, LOW, HIGH, Boltzmann(), n_starts=2, n_epochs=2, steps_per_epoch=5),
+        lambda f: global_optimize(f, LOW, HIGH, budget=50, seed=0),
+    ],
+)
+def test_an_objective_that_never_returns_re_raises_its_first_exception(drive):
+    # A fitter driven through the wrong lifecycle raises on every call; a
+    # warning would leave the caller holding a "best" point nothing measured.
+    def wrong_lifecycle(x):
+        raise AttributeError("'Fitter' object has no attribute 'ask'")
+
+    with pytest.raises(AttributeError, match="no attribute 'ask'"):
+        drive(wrong_lifecycle)
+
+
 def test_objective_exceptions_are_scored_and_reported_once():
     calls = []
 
