@@ -59,6 +59,13 @@ pub struct FdBfgsOptions {
     /// Whether a failed or slow forward-difference iteration switches to
     /// central differences instead of ending (or slowing) the descent.
     pub refine: bool,
+    /// Floor on the value scale of the slow-iteration test, which compares
+    /// the decrease with `ftol * max(|f_k|, |f_k+1|, value_floor)`.
+    /// L-BFGS-B uses 1.
+    pub value_floor: f64,
+    /// Infinity norm of the projected gradient at or below which the descent
+    /// ends; zero disables the test. L-BFGS-B's `pgtol`.
+    pub gtol: f64,
 }
 
 impl Default for FdBfgsOptions {
@@ -69,6 +76,8 @@ impl Default for FdBfgsOptions {
             patience: 3,
             max_iter: 0,
             refine: true,
+            value_floor: f64::MIN_POSITIVE,
+            gtol: 0.0,
         }
     }
 }
@@ -367,7 +376,27 @@ impl FdBfgs {
             self.phase = Phase::Done;
             return;
         }
+        if self.options.gtol > 0.0 && self.projected_gradient_norm() <= self.options.gtol {
+            self.phase = Phase::Done;
+            return;
+        }
         self.begin_line_search(false);
+    }
+
+    /// Infinity norm of the gradient projected onto the box, each component
+    /// capped by the room to its bound in the descent direction (L-BFGS-B's
+    /// `projgr`).
+    fn projected_gradient_norm(&self) -> f64 {
+        (0..self.n)
+            .map(|i| {
+                let g = self.grad[i];
+                if g < 0.0 {
+                    (self.x[i] - self.high[i]).max(g).abs()
+                } else {
+                    (self.x[i] - self.low[i]).min(g).abs()
+                }
+            })
+            .fold(0.0_f64, f64::max)
     }
 
     fn bfgs_update(&mut self, s: &Array1<f64>, y: &Array1<f64>) {
@@ -516,7 +545,10 @@ impl FdBfgs {
         self.pair_from = Some((std::mem::replace(&mut self.x, trial), self.grad.clone()));
         self.f = value;
         self.iterations += 1;
-        let scale = previous.abs().max(value.abs()).max(f64::MIN_POSITIVE);
+        let scale = previous
+            .abs()
+            .max(value.abs())
+            .max(self.options.value_floor);
         if (previous - value) <= self.options.ftol * scale {
             if self.scheme == FdScheme::Forward && self.options.refine {
                 // A forward-difference direction that only buys a sliver of
@@ -681,6 +713,64 @@ mod tests {
             wide_used <= plain_used + plain_used / 10,
             "mixed widths took {wide_used} evaluations against {plain_used}"
         );
+    }
+
+    #[test]
+    fn unit_value_floor_and_gradient_tolerance_end_converged_descents() {
+        // Rastrigin-6 from inside its global basin, whose minimum value is 0:
+        // without the unit floor the slow test shrinks with |f| and only a
+        // failed line search ends the descent.
+        let bounds = boxed(-5.12, 5.12, 6);
+        let rastrigin = |x: ArrayView1<f64>| {
+            x.iter()
+                .map(|v| v * v - 10.0 * (2.0 * std::f64::consts::PI * v).cos() + 10.0)
+                .sum::<f64>()
+        };
+        let start = Array1::from_vec(vec![0.08, -0.05, 0.03, -0.07, 0.02, 0.06]);
+        let base = FdBfgsOptions {
+            ftol: 1e7 * f64::EPSILON,
+            patience: 1,
+            max_iter: 1000,
+            refine: false,
+            ..FdBfgsOptions::default()
+        };
+        let mut raw = FdBfgs::new(start.view(), None, &bounds, base);
+        let raw_used = drive(&mut raw, rastrigin, 2000, &bounds);
+        let mut floored = FdBfgs::new(
+            start.view(),
+            None,
+            &bounds,
+            FdBfgsOptions {
+                value_floor: 1.0,
+                gtol: 1e-5,
+                ..base
+            },
+        );
+        let floored_used = drive(&mut floored, rastrigin, 2000, &bounds);
+        assert!(raw.is_done() && floored.is_done());
+        assert!(floored.value() < 1e-8, "value {}", floored.value());
+        assert!(
+            floored_used < raw_used,
+            "floored {floored_used} evaluations against {raw_used}"
+        );
+    }
+
+    #[test]
+    fn gradient_tolerance_stops_at_a_stationary_start() {
+        let bounds = boxed(-1.0, 1.0, 3);
+        let f = |x: ArrayView1<f64>| x.iter().map(|v| v * v).sum::<f64>();
+        let mut engine = FdBfgs::new(
+            Array1::zeros(3).view(),
+            Some(0.0),
+            &bounds,
+            FdBfgsOptions {
+                gtol: 1e-5,
+                ..FdBfgsOptions::default()
+            },
+        );
+        let used = drive(&mut engine, f, 100, &bounds);
+        assert!(engine.is_done());
+        assert_eq!(used, 3, "one forward stencil, then stop");
     }
 
     #[test]
