@@ -97,6 +97,34 @@ def test_arm_statistics_are_reported():
     assert set(out["arm_successes"]) == set(out["arm_pulls"])
 
 
+def test_global_optimize_accepts_initial_position():
+    dim = 4
+    low = np.full(dim, -3.0)
+    high = np.full(dim, 3.0)
+    x0 = np.array([1.0, -2.0, 0.5, 1.5])
+    f0 = float(np.sum(x0**2))
+
+    def fn(x):
+        return float(np.sum(np.asarray(x) ** 2))
+
+    out = anneal.global_optimize(fn, low, high, budget=400, seed=3, x0=x0)
+    assert out["best_val"] <= f0
+    assert np.all(np.asarray(out["best_pos"]) >= low)
+    assert np.all(np.asarray(out["best_pos"]) <= high)
+    assert out["n_evals"] <= 400
+
+
+def test_global_optimize_rejects_bad_initial_position():
+    dim = 2
+    fn, _, low, high = _rastrigin(dim)
+    with pytest.raises(ValueError, match="same length"):
+        anneal.global_optimize(fn, low, high, budget=50, seed=0, x0=np.array([0.0]))
+    with pytest.raises(ValueError, match="finite"):
+        anneal.global_optimize(
+            fn, low, high, budget=50, seed=0, x0=np.array([0.0, np.inf])
+        )
+
+
 def test_additive_surrogate_from_points_recovers_separable():
     rng = np.random.default_rng(5)
     dim = 3
