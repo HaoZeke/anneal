@@ -12,7 +12,7 @@
 #![allow(clippy::too_many_arguments)]
 
 use ndarray::{Array1, ArrayView1};
-use numpy::{AllowTypeChange, PyArray1, PyArrayLikeDyn, PyReadonlyArray1};
+use numpy::{PyArray1, PyReadonlyArray1, PyReadonlyArrayDyn};
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
@@ -87,13 +87,21 @@ fn validate_closed_box(low: &[f64], high: &[f64]) -> PyResult<()> {
     Ok(())
 }
 
-/// Reads `obj` as `numpy.asarray(obj, dtype=float)` would, so lists, tuples
-/// and arrays of any numeric dtype or strides are accepted, and returns its
-/// values in C order with its number of dimensions. Anything NumPy cannot
-/// read as floats raises `ValueError` naming `name`.
+/// Reads `obj` with `numpy.asarray(obj, dtype=float)`, so lists, tuples and
+/// arrays of any numeric dtype or strides are accepted, and returns its values
+/// in C order with its number of dimensions. Anything NumPy cannot read as
+/// floats raises `ValueError` naming `name`.
 fn float_values(obj: &Bound<'_, PyAny>, name: &str) -> PyResult<(Vec<f64>, usize)> {
-    let arr = obj
-        .extract::<PyArrayLikeDyn<'_, f64, AllowTypeChange>>()
+    let py = obj.py();
+    let kwargs = PyDict::new(py);
+    kwargs.set_item("dtype", numpy::dtype::<f64>(py))?;
+    // Not `PyArrayLikeDyn`: it tries a `Vec<f64>` before `asarray` and so reads
+    // a non-float64 `(n, 1)` array row by row, through NumPy's deprecated
+    // array-to-scalar conversion, as one-dimensional.
+    let arr = py
+        .import("numpy")?
+        .call_method("asarray", (obj,), Some(&kwargs))
+        .and_then(|arr| arr.extract::<PyReadonlyArrayDyn<'_, f64>>())
         .map_err(|e| PyValueError::new_err(format!("{name} must be an array of numbers ({e})")))?;
     let arr = arr.as_array();
     Ok((arr.iter().copied().collect(), arr.ndim()))

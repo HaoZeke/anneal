@@ -2,6 +2,8 @@
 preset constructors plus run() driver). Replaces the legacy
 test_funcs / test_mcsamplers / test_quench suites."""
 
+import warnings
+
 import numpy as np
 import pytest
 
@@ -764,10 +766,14 @@ def test_multidimensional_x0_is_flattened_in_c_order(driver, order):
         ("x0", [0.0, "a"], "x0 must be an array of numbers"),
         ("x0", [[0.0], [0.0, 0.0]], "x0 must be an array of numbers"),
         ("x0", object(), "x0 must be an array of numbers"),
+        ("x0", b"ab", "x0 must be an array of numbers"),
         ("x0", np.zeros((2, 2)), "x0 must have the same length"),
         ("low", "ab", "low must be an array of numbers"),
         ("low", [[-1.0, -1.0]], "low must be one-dimensional"),
+        ("low", -np.ones((2, 1), dtype=np.float32), "low must be one-dimensional"),
         ("high", 1.0, "high must be one-dimensional"),
+        ("high", np.ones((2, 1), dtype=np.int64), "high must be one-dimensional"),
+        ("high", [np.ones(1), np.ones(1)], "high must be one-dimensional"),
     ],
 )
 def test_unreadable_inputs_raise_value_error(driver, arg, value, message):
@@ -783,6 +789,21 @@ def test_unreadable_inputs_raise_value_error(driver, arg, value, message):
             steps_per_epoch=1,
             x0=args["x0"],
         )
+
+
+@pytest.mark.parametrize("driver", DRIVERS)
+def test_the_shape_of_an_input_does_not_depend_on_its_dtype(driver):
+    obj, seen = recording(styb_tang_2d)
+    budget = {"n_epochs": 1, "steps_per_epoch": 1}
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        with pytest.raises(ValueError, match="low must be one-dimensional"):
+            driver(obj, -np.ones((2, 1), np.float32), np.ones(2), Boltzmann(), **budget)
+        x0 = np.full((2, 1), 0.5, np.float32)
+        driver(obj, -np.ones(2), np.ones(2), Boltzmann(), x0=x0, **budget)
+
+    assert [str(w.message) for w in caught] == []
+    assert np.array_equal(seen[0], [0.5, 0.5])
 
 
 @pytest.mark.parametrize("driver", DRIVERS)
