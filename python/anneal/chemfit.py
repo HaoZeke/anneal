@@ -13,11 +13,17 @@ Nested parameter dictionaries are flattened only at the optimizer
 boundary and rebuilt on the way back. Every evaluation stays inside the box,
 and the fitter's initial parameters are the start unless a caller passes
 another ``x0``. The default driver is the Thompson-allocated portfolio.
+
+The first exception the fitter raises, or a loss that is not a real number,
+ends the drive: the fitter is not called again, ``finish`` is skipped, and
+the exception reaches the caller.
 """
 
 from __future__ import annotations
 
 import inspect
+import math
+import numbers
 from typing import Any
 
 import numpy as np
@@ -34,6 +40,11 @@ __all__ = [
 ]
 
 _CLASSICAL_DRIVERS = ("boltzmann", "fast", "gsa")
+
+
+def _is_number(value: Any) -> bool:
+    """Whether ``value`` is a real number other than a bool."""
+    return isinstance(value, numbers.Real) and not isinstance(value, (bool, np.bool_))
 
 
 # ---------------------------------------------------------------------------
@@ -81,6 +92,23 @@ def _finish(fitter: Any, params: dict[str, Any]) -> Any:
     except TypeError:
         return finish()
     return finish(params)
+
+
+def _loss_value(value: Any) -> float:
+    """One real loss as a float; anything else is a TypeError.
+
+    A one-element list (a batch of one) and a 0-d array are unwrapped first.
+    """
+    if isinstance(value, (list, tuple)) and len(value) == 1:
+        value = value[0]
+    if isinstance(value, np.ndarray) and value.ndim == 0:
+        value = value[()]
+    if not _is_number(value):
+        raise TypeError(
+            f"the fitter returned a loss of type {type(value).__name__}; "
+            "a loss must be one real number"
+        )
+    return float(value)
 
 
 def _path_str(path: tuple) -> str:
@@ -237,6 +265,86 @@ def _resolve_bounds(
     return np.concatenate(lows), np.concatenate(highs)
 
 
+# ---------------------------------------------------------------------------
+# One drive of a fitter.
+# ---------------------------------------------------------------------------
+
+
+class _Stop(BaseException):
+    """Ends a driver run from inside the objective; the bridge catches it."""
+
+
+class _Session:
+    """The objective a driver calls: one fitter evaluation per call.
+
+    It sends a step notice every ``step_every`` evaluations and records the
+    first exception from the fitter or from reading its loss. That exception
+    stops the driver.
+    """
+
+    def __init__(self, candidate, evaluate, step, budget: int, step_every: int):
+        self._candidate = candidate
+        self._evaluate = evaluate
+        self._step = step
+        self.budget = budget
+        self.step_every = step_every
+        self.count = 0
+        self.error: BaseException | None = None
+
+    def __call__(self, x) -> float:
+        if self.error is not None:
+            raise _Stop
+        try:
+            point = np.array(x, dtype=np.float64)
+            loss = _loss_value(self._evaluate(self._candidate(point)))
+            self.count += 1
+            if self.count % self.step_every == 0:
+                self._step()
+        except BaseException as error:
+            self.error = error
+            raise _Stop from None
+        return loss
+
+
+def _drive(
+    session: _Session,
+    low: np.ndarray,
+    high: np.ndarray,
+    start: np.ndarray | None,
+    driver: str,
+    seed: int,
+    preset: Any = None,
+    steps_per_epoch: int = 1,
+) -> np.ndarray:
+    """Run ``driver`` on the session and return the best point it reports.
+
+    The first fitter exception is raised here, after the driver has returned.
+    """
+    from anneal import global_optimize, run
+
+    budget = session.budget
+    best = None
+    try:
+        if driver == "portfolio":
+            best = global_optimize(session, low, high, budget, seed=seed, x0=start)["best_pos"]
+        else:
+            best = run(
+                session,
+                low,
+                high,
+                preset,
+                n_epochs=max(1, budget // steps_per_epoch),
+                steps_per_epoch=steps_per_epoch,
+                seed=seed,
+                x0=start,
+            ).best_pos
+    except _Stop:
+        pass
+    if session.error is not None:
+        raise session.error
+    return np.asarray(best, dtype=np.float64)
+
+
 def _classical_preset(driver: str, preset_kwargs: dict[str, Any] | None):
     from anneal import Boltzmann, Fast, Gsa
 
@@ -292,10 +400,10 @@ def fit_anneal(
 
     Returns what ``fitter.finish`` returns for the best evaluated parameters
     (ChemFit returns them as given), with array leaves restored to their
-    original shapes.
+    original shapes. The first exception raised by the fitter, or a loss
+    that is not a real number, stops the fit and is raised without calling
+    ``finish``.
     """
-    from anneal import global_optimize, run
-
     evaluate, step = _protocol(fitter)
     driver = str(driver).lower()
     if driver not in ("portfolio", *_CLASSICAL_DRIVERS):
@@ -338,31 +446,12 @@ def fit_anneal(
 
     # The fitter owns bookkeeping; every evaluation is one optimizer step.
     _init(fitter)
-
-    def obj(x: np.ndarray) -> float:
-        params = unflatten_parameters(np.asarray(x, dtype=np.float64), spec, template)
-        loss = evaluate(params)
-        step()
-        return float(loss)
-
-    if driver == "portfolio":
-        result = global_optimize(obj, low_vec, high_vec, budget, seed=int(seed), x0=start_vector)
-        best_pos = np.asarray(result["best_pos"], dtype=np.float64)
-    else:
-        preset = _classical_preset(driver, preset_kwargs)
-        steps = max(1, min(int(steps_per_epoch), budget))
-        epochs = max(1, budget // steps)
-        history = run(
-            obj,
-            low_vec,
-            high_vec,
-            preset,
-            n_epochs=epochs,
-            steps_per_epoch=steps,
-            seed=int(seed),
-            x0=start_vector,
-        )
-        best_pos = np.asarray(history.best_pos, dtype=np.float64)
+    preset = None if driver == "portfolio" else _classical_preset(driver, preset_kwargs)
+    steps = max(1, min(int(steps_per_epoch), budget))
+    session = _Session(
+        lambda x: unflatten_parameters(x, spec, template), evaluate, step, budget, step_every=1
+    )
+    best_pos = _drive(session, low_vec, high_vec, start_vector, driver, int(seed), preset, steps)
 
     best_params = unflatten_parameters(best_pos, spec, template)
     return _finish(fitter, best_params)
@@ -571,9 +660,11 @@ def fit_chemfit(
 
     Returns:
         What ``fitter.finish(best_params)`` returns; ChemFit returns
-        ``best_params``.
+        ``best_params``. The first exception raised by the fitter, or a
+        loss that is not a real number, stops the fit and is raised without
+        calling ``finish``.
     """
-    from anneal import Boltzmann, Fast, Gsa, global_optimize, run
+    from anneal import Boltzmann, Fast, Gsa
 
     evaluate, step = _protocol(fitter)
     if int(budget) < 1:
@@ -584,28 +675,8 @@ def fit_chemfit(
     low, high = chemfit_box(fitter, vector, default_span=default_span)
 
     _init(fitter)
-    n_evals = 0
-
-    def ask_vector(x: np.ndarray) -> float:
-        nonlocal n_evals
-        params = vector.unpack(np.asarray(x, dtype=np.float64))
-        loss = evaluate(params)
-        if isinstance(loss, list):
-            if len(loss) != 1:
-                raise ValueError("expected one loss per candidate")
-            loss = loss[0]
-        n_evals += 1
-        if method == "portfolio" and n_evals % max(1, int(tell_every)) == 0:
-            step()
-        elif method != "portfolio" and n_evals % max(1, int(steps_per_epoch)) == 0:
-            step()
-        return float(loss)
-
     if method == "portfolio":
-        out = global_optimize(
-            ask_vector, low, high, budget=int(budget), seed=int(seed)
-        )
-        best = np.asarray(out["best_pos"], dtype=np.float64)
+        preset, start, every = None, None, max(1, int(tell_every))
     elif method in ("boltzmann", "fast", "gsa"):
         presets = {
             "boltzmann": Boltzmann(
@@ -622,24 +693,18 @@ def fit_chemfit(
                 q_a=float(preset_kwargs.get("q_a", 1.7)),
             ),
         }
-        n_epochs = max(1, int(budget) // max(1, int(steps_per_epoch)))
-        history = run(
-            ask_vector,
-            low,
-            high,
-            presets[method],
-            n_epochs=n_epochs,
-            steps_per_epoch=max(1, int(steps_per_epoch)),
-            seed=int(seed),
-            x0=np.asarray(vector.x0, dtype=np.float64),
-        )
-        best = np.asarray(history.best_pos, dtype=np.float64)
+        preset = presets[method]
+        start = np.asarray(vector.x0, dtype=np.float64)
+        every = max(1, int(steps_per_epoch))
     else:
         raise ValueError(
             f"unknown method {method!r}: expected 'portfolio', 'boltzmann', 'fast', or 'gsa'"
         )
+    session = _Session(vector.unpack, evaluate, step, int(budget), step_every=every)
+    steps = max(1, int(steps_per_epoch))
+    best = _drive(session, low, high, start, method, int(seed), preset, steps)
 
-    best_params = vector.unpack(np.asarray(best, dtype=np.float64))
+    best_params = vector.unpack(best)
     return _finish(fitter, best_params)
 
 def flatten_params(params: dict[str, Any]) -> tuple[np.ndarray, list[tuple[tuple[str, ...], tuple[int, ...]]]]:
@@ -789,9 +854,10 @@ def run_benchmark(
 
     ``low`` and ``high`` may be vectors or scalars (broadcast). When they
     are omitted, bounds are read from ``benchmark_context["bounds"]`` or
-    ``fitter.bounds``.
+    ``fitter.bounds``. The first exception raised by the fitter is raised
+    without calling ``finish``.
     """
-    from anneal import Boltzmann, Fast, Gsa, global_optimize, run
+    from anneal import Boltzmann, Fast, Gsa
 
     fitter = benchmark_context["fitter"]
     evaluate, step = _protocol(fitter)
@@ -816,37 +882,14 @@ def run_benchmark(
     x0 = np.minimum(np.maximum(x0, box_low), box_high)
 
     _init(fitter)
-
-    def obj(flat: np.ndarray) -> float:
-        params = unflatten_params(np.asarray(flat, dtype=np.float64), spec)
-        loss = evaluate(params)
-        if isinstance(loss, list):
-            if len(loss) != 1:
-                raise ValueError("expected one loss per candidate")
-            loss = loss[0]
-        step()
-        return float(loss)
-
     name = method.lower()
-    if name == "portfolio":
-        out = global_optimize(obj, box_low, box_high, budget=budget, seed=seed, x0=x0)
-        best = np.asarray(out["best_pos"], dtype=np.float64)
-    else:
-        if preset is None:
-            preset = {"boltzmann": Boltzmann(), "fast": Fast(), "gsa": Gsa()}[name]
-        steps = max(1, min(int(steps_per_epoch), budget))
-        epochs = max(1, budget // steps)
-        history = run(
-            obj,
-            box_low,
-            box_high,
-            preset,
-            n_epochs=epochs,
-            steps_per_epoch=steps,
-            seed=int(seed),
-            x0=x0,
-        )
-        best = np.asarray(history.best_pos, dtype=np.float64)
+    if name != "portfolio" and preset is None:
+        preset = {"boltzmann": Boltzmann(), "fast": Fast(), "gsa": Gsa()}[name]
+    steps = max(1, min(int(steps_per_epoch), budget))
+    session = _Session(
+        lambda flat: unflatten_params(flat, spec), evaluate, step, budget, step_every=1
+    )
+    best = _drive(session, box_low, box_high, x0, name, int(seed), preset, steps)
     return _finish(fitter, unflatten_params(best, spec))
 
 def run_fitter(
