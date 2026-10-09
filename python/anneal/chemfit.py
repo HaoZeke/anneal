@@ -1235,6 +1235,20 @@ _FITTER_METHODS = {
     "fast": "fast",
     "gsa": "gsa",
 }
+_FITTER_OPTIONS = ("x0", "low", "high", "bound_span", "steps_per_epoch", "preset_kwargs")
+
+
+def _fitter_keyword_error(key: str) -> TypeError:
+    """The error for a keyword :func:`run_fitter` does not pass on."""
+    message = (
+        f"run_fitter() got an unexpected keyword argument {key!r}; it passes only "
+        f"{', '.join(_FITTER_OPTIONS[:-1])} and {_FITTER_OPTIONS[-1]} on to fit_anneal"
+    )
+    if key in ("tell_every", "default_span"):
+        message += f" ({key} is an option of fit_chemfit)"
+    elif any(key in keys for keys in _CHEMFIT_PRESET_DEFAULTS.values()):
+        message += f" (pass {key} in preset_kwargs)"
+    return TypeError(message)
 
 
 def run_fitter(
@@ -1252,13 +1266,17 @@ def run_fitter(
     ``method="sa"`` runs ``preset`` (``Boltzmann()`` when none is given),
     both through :func:`fit_anneal`; ``"portfolio"``, ``"boltzmann"``,
     ``"fast"`` and ``"gsa"`` name a :func:`fit_anneal` driver directly.
-    Other keywords (``x0``, ``low``, ``high``, ``bound_span``,
-    ``steps_per_epoch``, ``preset_kwargs``) go to :func:`fit_anneal`.
+    The keywords ``x0``, ``low``, ``high``, ``bound_span``,
+    ``steps_per_epoch`` and ``preset_kwargs`` go to :func:`fit_anneal`; any
+    other keyword is a TypeError.
     """
     if hasattr(fitter, "fit_anneal"):
         return fitter.fit_anneal(
             budget=budget, method=method, preset=preset, seed=seed, **kwargs
         )
+    for key in kwargs:
+        if key not in _FITTER_OPTIONS:
+            raise _fitter_keyword_error(key)
     key = _choice(method, _FITTER_METHODS)
     if key is None:
         raise ValueError(
