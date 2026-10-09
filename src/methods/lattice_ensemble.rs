@@ -24,10 +24,16 @@
 //! Resemblance is the mean absolute difference between the sorted distances
 //! of the atoms from their centroid. The merge distance starts at a fraction
 //! of the mean pairwise resemblance of the first full bank and shrinks
-//! linearly to a smaller fraction as the budget is spent. Parents are drawn
-//! least-used first, and a member that improves is fresh again, so the effort
-//! follows the funnels that are still descending. Nothing in the run reads a
-//! reference energy or a structure class.
+//! linearly to a smaller fraction as the budget is spent.
+//!
+//! Parents are drawn least-used first, and a member that improves is fresh
+//! again, so the effort follows the funnels that are still descending. A
+//! member drawn [`Plan::retire`] times without improving gives its slot to the
+//! next random start that resembles no member, whatever that start's energy.
+//! Without it, a bank whose members have all stopped descending rejects every
+//! start higher than its worst member, which on a funnelled surface is nearly
+//! every start. Nothing in the run reads a reference energy or a structure
+//! class.
 
 use ndarray::ArrayView1;
 use rand::rngs::StdRng;
@@ -97,6 +103,10 @@ pub struct Plan {
     /// Merge distance when the first bank fills and when the budget ends, as
     /// fractions of that bank's mean pairwise resemblance.
     pub merge: (f64, f64),
+    /// Draws without improvement after which a member gives its slot to the
+    /// next random start that resembles no member, whatever its energy.
+    /// Zero keeps every member until a lower minimum displaces it.
+    pub retire: usize,
     /// Number density of the random starts.
     pub density: f64,
     /// Closest approach allowed in random starts and splices.
@@ -114,6 +124,7 @@ impl Default for Plan {
             splice: 0.2,
             moved: (1, 4),
             merge: (0.5, 0.1),
+            retire: 0,
             density: 0.7,
             min_separation: 0.85,
             sharing: Sharing::Shared,
@@ -130,6 +141,9 @@ pub enum Admission {
     Improved(usize),
     /// Resembles no member, and displaced the highest one.
     Displaced(usize),
+    /// A random start that resembles no member, given the slot of the member
+    /// drawn most often without improving.
+    Recycled(usize),
     /// Resembles a member and is not lower.
     Duplicate(usize),
     /// Resembles no member and is higher than every member of a full bank.
@@ -200,6 +214,9 @@ pub struct FunnelBank {
     scale: Option<f64>,
     /// Current merge distance; zero until the bank first fills.
     merge: f64,
+    /// Draws without improvement that make a member's slot free for a
+    /// random start; zero never frees one.
+    retire: usize,
 }
 
 impl FunnelBank {
@@ -211,7 +228,15 @@ impl FunnelBank {
             capacity,
             scale: None,
             merge: 0.0,
+            retire: 0,
         }
+    }
+
+    /// The same bank, freeing the slot of a member drawn `retire` times
+    /// without improving for the next random start that resembles no member.
+    pub fn with_retirement(mut self, retire: usize) -> Self {
+        self.retire = retire;
+        self
     }
 
     /// The members in slot order.
@@ -279,6 +304,23 @@ impl FunnelBank {
                 self.calibrate();
             }
             return Admission::Added(self.members.len() - 1);
+        }
+        if self.retire > 0 && origin == Origin::Fresh {
+            let stale = self
+                .members
+                .iter()
+                .enumerate()
+                .filter(|(_, m)| m.draws >= self.retire)
+                .max_by(|a, b| {
+                    a.1.draws
+                        .cmp(&b.1.draws)
+                        .then_with(|| a.1.energy.total_cmp(&b.1.energy))
+                })
+                .map(|(i, _)| i);
+            if let Some(s) = stale {
+                self.members[s] = member(energy, key);
+                return Admission::Recycled(s);
+            }
         }
         let worst = self
             .members
@@ -364,10 +406,11 @@ pub struct Run {
     pub trials: [usize; 3],
     /// Force calls by origin.
     pub calls: [usize; 3],
-    /// Minima taken into a bank (added, improved or displaced) by origin.
+    /// Minima taken into a bank (added, improved, displaced or recycled) by
+    /// origin.
     pub admitted: [usize; 3],
-    /// Member energies at the end, every bank in chain order.
-    pub bank: Vec<f64>,
+    /// Members at the end, every bank in chain order.
+    pub bank: Vec<Member>,
 }
 
 /// Random stream of chain `chain` in ensemble `seed`.
@@ -496,7 +539,9 @@ pub fn run(
         Sharing::Shared => 0,
         Sharing::Private => c,
     };
-    let mut banks: Vec<FunnelBank> = (0..banks).map(|_| FunnelBank::new(capacity)).collect();
+    let mut banks: Vec<FunnelBank> = (0..banks)
+        .map(|_| FunnelBank::new(capacity).with_retirement(plan.retire))
+        .collect();
     let mut out = Run {
         best: f64::INFINITY,
         best_state: Vec::new(),
@@ -557,17 +602,17 @@ pub fn run(
                 });
             }
             match banks[bank_of(c)].offer(energy, &state, trial.origin) {
-                Admission::Added(_) | Admission::Improved(_) | Admission::Displaced(_) => {
+                Admission::Added(_)
+                | Admission::Improved(_)
+                | Admission::Displaced(_)
+                | Admission::Recycled(_) => {
                     out.admitted[o] += 1;
                 }
                 Admission::Duplicate(_) | Admission::Rejected => {}
             }
         }
     }
-    out.bank = banks
-        .iter()
-        .flat_map(|b| b.members.iter().map(|m| m.energy))
-        .collect();
+    out.bank = banks.into_iter().flat_map(|b| b.members).collect();
     out
 }
 
@@ -638,6 +683,34 @@ mod tests {
         assert_eq!(bank.draw(), Some(1));
         assert_eq!(bank.draw(), Some(0));
         assert_eq!(bank.draw(), Some(1));
+    }
+
+    #[test]
+    fn a_member_drawn_without_improving_yields_to_a_random_start() {
+        let mut bank = FunnelBank::new(2).with_retirement(2);
+        bank.offer(-1.0, &line(4, 1.0), Origin::Fresh);
+        bank.offer(-2.0, &line(4, 3.0), Origin::Fresh);
+        bank.set_progress((0.5, 0.5), 0.0);
+        assert_eq!(bank.draw(), Some(1));
+        assert_eq!(bank.draw(), Some(0));
+        assert_eq!(bank.draw(), Some(1));
+        // Higher than both members and like neither: a refinement is
+        // rejected, a random start takes the stalled member's slot.
+        assert_eq!(
+            bank.offer(-0.5, &line(4, 9.0), Origin::Moved),
+            Admission::Rejected
+        );
+        assert_eq!(
+            bank.offer(-0.5, &line(4, 9.0), Origin::Fresh),
+            Admission::Recycled(1)
+        );
+        assert_eq!(bank.members()[1].draws, 0);
+        assert_eq!(bank.members()[1].origin, Origin::Fresh);
+        // Member 0 has one draw, short of the threshold.
+        assert_eq!(
+            bank.offer(-0.7, &line(4, 30.0), Origin::Fresh),
+            Admission::Displaced(1)
+        );
     }
 
     fn small_plan(sharing: Sharing) -> Plan {
