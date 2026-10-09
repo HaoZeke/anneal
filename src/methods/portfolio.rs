@@ -6472,4 +6472,48 @@ mod tests {
             assert!(gap > 1e-6, "the first kick reuses a CMA-ES draw");
         }
     }
+
+    #[test]
+    fn cma_arm_restarts_box_wide_once_its_local_first_run_converges() {
+        // The first run is local, a short step from the incumbent, and is
+        // booked to the small regime, so the planner's first restart is a
+        // default-population run with the box-wide step. A run ends once
+        // its recent bests span less than the success threshold, so that
+        // restart comes as soon as the local run has converged to the
+        // resolution the portfolio scores. The minimum value 10 keeps the
+        // threshold well above the relative tolerance of a plain stop.
+        use crate::methods::cma_es::CmaStop;
+        let (dim, budget, seed) = (4usize, 4000usize, 7u64);
+        let obj = Traced::new(-2.0, 2.0, dim, |x| {
+            10.0 + x.iter().map(|v| (v - 0.3) * (v - 0.3)).sum::<f64>()
+        });
+        let ledger = BudgetLedger::new(budget, dim);
+        let budgeted = BudgetedObjective {
+            inner: &obj,
+            ledger: &ledger,
+        };
+        budgeted.eval(Array1::from_elem(dim, 0.5).view());
+        let mut states = ArmStates::default();
+        let stop = loop {
+            assert!(ledger.remaining() > 0, "the local first run never stopped");
+            run_cma_arm(&budgeted, &ledger, &mut states, 1, seed, budget);
+            let state = states.cma.as_ref().expect("cma state");
+            if let Some(reason) = state.es.stop_reason() {
+                break reason;
+            }
+        };
+        let first = states.cma.as_ref().expect("cma state");
+        assert_eq!(first.regime, CmaRegime::Small);
+        assert_eq!(
+            stop,
+            CmaStop::TolFunHist,
+            "the local first run stopped after {} evaluations",
+            first.es.evaluations()
+        );
+        run_cma_arm(&budgeted, &ledger, &mut states, 1, seed, budget);
+        let restart = states.cma.as_ref().expect("cma state");
+        assert_eq!(restart.regime, CmaRegime::Large);
+        assert_eq!(restart.es.sigma(), CMA_LARGE_SIGMA);
+        assert_eq!(restart.es.lambda(), default_lambda(dim));
+    }
 }
