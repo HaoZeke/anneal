@@ -93,6 +93,15 @@ def _paired(fitter, kind=list):
     return fitter
 
 
+# Each makes, from a dict's items, (key, value) pairs a ChemFit 3.1 Fitter keeps.
+_PAIRS = {
+    "list": list,
+    "dict_items": lambda items: items,
+    "zip": lambda items: zip([key for key, _ in items], [value for _, value in items]),
+    "generator": lambda items: (pair for pair in items),
+}
+
+
 def _reads(caller, what, one=False):
     """The start of the warning for the numeric strings ``caller`` reads."""
     source, number = ("a string", "a number") if one else ("strings", "numbers")
@@ -602,6 +611,16 @@ WARNS = [
         lambda f: fit_chemfit(f, 60, method="boltzmann", steps_per_epoch=10),
         re.escape("initial_parameters, a tuple of (key, value) pairs, as a dict"),
     ),
+    *[
+        (
+            f"fit_chemfit initial_parameters as a {kind} of pairs",
+            _fitter,
+            lambda f, k=kind: fit_chemfit(_paired(f, _PAIRS[k]), 60),
+            lambda f: fit_chemfit(f, 60),
+            re.escape(f"initial_parameters, a {kind} of (key, value) pairs, as a dict"),
+        )
+        for kind in ("dict_items", "zip", "generator")
+    ],
 ]
 
 
@@ -860,12 +879,13 @@ def test_the_installed_chemfit_fitter_runs_on_decimal_and_fraction_parameters(en
     assert out == want
 
 
-def test_fit_chemfit_reads_the_pairs_a_chemfit_3_1_fitter_keeps():
+@pytest.mark.parametrize("kind", list(_PAIRS))
+def test_fit_chemfit_reads_the_pairs_a_chemfit_3_1_fitter_keeps(kind):
     fitter_type = pytest.importorskip("chemfit.fitter").Fitter
-    pairs = [("a", 0.5), ("b", 0.1)]
+    params = {"a": 0.5, "b": 0.1}
     bounds = {"a": (0.0, 1.0), "b": (0.0, 1.0)}
     try:
-        fitter_type(lambda params: 0.0, initial_params=pairs, bounds=bounds)
+        fitter_type(lambda p: 0.0, initial_params=list(params.items()), bounds=bounds)
     except TypeError:
         pytest.skip("this ChemFit refuses initial_params that is not a mapping")
 
@@ -877,18 +897,52 @@ def test_fit_chemfit_reads_the_pairs_a_chemfit_3_1_fitter_keeps():
             return (params["a"] - 0.3) ** 2 + (params["b"] - 0.2) ** 2
 
         fitter = fitter_type(objective, initial_params=initial, bounds=bounds)
-        return fit_chemfit(fitter, 60), calls
+        return fit_chemfit(fitter, 60), calls, fitter
 
+    given = _PAIRS[kind](params.items())
     with pytest.warns(
-        FutureWarning, match=re.escape("a list of (key, value) pairs, as a dict")
+        FutureWarning, match=re.escape(f"a {kind} of (key, value) pairs, as a dict")
     ) as record:
-        out, calls = run(pairs)
+        out, calls, fitter = run(given)
     assert len([w for w in record if issubclass(w.category, FutureWarning)]) == 1
+    assert fitter.initial_parameters is given
     with warnings.catch_warnings():
         warnings.simplefilter("error", FutureWarning)
-        want, want_calls = run(dict(pairs))
+        want, want_calls, _ = run(dict(params))
     assert calls == want_calls and len(calls) > 1
     assert out == want
+
+
+def test_fit_chemfit_reads_a_generator_of_pairs_once_and_leaves_it_as_0_10_0_did():
+    read = []
+
+    def pairs(params):
+        for key, value in params.items():
+            read.append(key)
+            yield key, value
+
+    fitter = _fitter()
+    params = fitter.initial_parameters
+    given = fitter.initial_parameters = pairs(params)
+    with pytest.warns(FutureWarning, match=re.escape("a generator of (key, value)")):
+        out = fit_chemfit(fitter, 60)
+    plain = _fitter()
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", FutureWarning)
+        expected = fit_chemfit(plain, 60)
+    assert len(fitter.evaluated) == len(plain.evaluated) > 1
+    for got, want in zip(fitter.evaluated, plain.evaluated):
+        assert same_params(got, want)
+    assert same_params(out, expected)
+    assert read == list(params)
+
+    # 0.10.0 kept no copy either: the fitter holds the spent generator, and a
+    # second fit finds no parameters in it before init.
+    assert fitter.initial_parameters is given and next(given, None) is None
+    calls = list(fitter.calls)
+    with pytest.raises(ValueError, match="holds no parameters"):
+        fit_chemfit(fitter, 60)
+    assert fitter.calls == calls
 
 
 def _box(fitter):
@@ -1574,6 +1628,13 @@ RAISES = [
             {"x": np.array([np.complex128(0.5), 0.25], dtype=object)},
             {"x": (-2.0, 2.0)},
         ),
+    ),
+    # 0.10.0's dict() refused these before init too.
+    _raises(
+        "fit_chemfit initial_parameters as a generator of keys",
+        lambda f: fit_chemfit(_paired(f, lambda items: (key for key, _ in items)), 60),
+        TypeError,
+        "fitter.initial_parameters must be a mapping",
     ),
 ]
 

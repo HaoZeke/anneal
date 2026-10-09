@@ -15,8 +15,10 @@ warning per call, and a string parameter comes back as the float it reads as.
 An ``x0`` dict leaf with its parameter's size but another shape is read in C
 order, and one ``x0`` value for the fitter's only parameter fills it where
 ``fitter.bounds`` gives both of its sides and ``low`` and ``high`` are
-omitted. ``fit_chemfit`` reads a fitter's ``initial_parameters`` given as a
-list or tuple of ``(key, value)`` pairs, which ChemFit 3.1 keeps as given, as
-the dict they make. ``run_benchmark`` drives a fitter that has ``evaluate``
-but no ``step``, or ``ask`` but no ``tell``, with its ``tell`` or ``step`` as
-the step notice, or with no step notices when it has neither.
+omitted. ``fit_chemfit`` reads a fitter's ``initial_parameters`` given as
+``(key, value)`` pairs, which ChemFit 3.1 keeps as given, as the dict they
+make, whether a list, a tuple, ``d.items()``, a zip or a generator; as in
+0.10.0 they are read once, so a zip or a generator is spent after one fit.
+``run_benchmark`` drives a fitter that has ``evaluate`` but no ``step``, or
+``ask`` but no ``tell``, with its ``tell`` or ``step`` as the step notice, or
+with no step notices when it has neither.
