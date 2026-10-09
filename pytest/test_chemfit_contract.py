@@ -14,7 +14,9 @@ from anneal.chemfit import (  # noqa: E402
     ChemFitVector,
     chemfit_box,
     fit_anneal,
+    flatten_parameters,
     resolve_bounds,
+    unflatten_parameters,
 )
 from chemfit_doubles import (  # noqa: E402
     DRIVERS,
@@ -102,6 +104,64 @@ def test_scalar_leaves_and_zero_d_arrays_come_back_as_their_own_type(entry, prot
             leaf = params[key]
             assert isinstance(leaf, np.ndarray)
             assert leaf.shape == () and leaf.dtype == dtype
+
+
+def _kinds(value):
+    """A leaf's containers and the type of each item, for comparison."""
+    if isinstance(value, (list, tuple)):
+        return type(value).__name__, [_kinds(item) for item in value]
+    if isinstance(value, np.ndarray):
+        return f"ndarray {value.dtype} {value.shape}"
+    return type(value).__name__
+
+
+_PAIR = ["float", "float"]
+SEQUENCE_LEAVES = {
+    "list": ([0.5, -0.5], ("list", _PAIR)),
+    "tuple": ((0.25, 0.75), ("tuple", _PAIR)),
+    "list of lists": ([[0.1, 0.2], [0.3, 0.4]], ("list", [("list", _PAIR)] * 2)),
+    "tuple of tuples": (((0.1, -0.1), (0.2, -0.2)), ("tuple", [("tuple", _PAIR)] * 2)),
+    "list of a tuple and a list": (
+        [(0.1, 0.2), [0.3, 0.4]],
+        ("list", [("tuple", _PAIR), ("list", _PAIR)]),
+    ),
+    "list of ints": ([1, 0], ("list", _PAIR)),
+    "list of float32": ([np.float32(0.5), np.float32(0.25)], ("list", ["float32"] * 2)),
+    "list of arrays": (
+        [np.array([0.1, 0.2]), np.array([0.3, 0.4])],
+        ("list", ["ndarray float64 (2,)"] * 2),
+    ),
+    "one-item tuple": ((0.25,), ("tuple", ["float"])),
+}
+
+
+@pytest.mark.parametrize("protocol", PROTOCOLS)
+@pytest.mark.parametrize("entry", ENTRIES)
+def test_list_and_tuple_leaves_come_back_as_lists_and_tuples(entry, protocol):
+    initial = {name: value for name, (value, _) in SEQUENCE_LEAVES.items()}
+    initial["nested"] = {"tuple": (0.5, -0.25)}
+    bounds = {name: (-1.0, 1.0) for name in SEQUENCE_LEAVES}
+    bounds["nested"] = {"tuple": (-1.0, 1.0)}
+    fitter = protocol(initial, bounds)
+    out = drive(entry, fitter, 60)
+    for params in [*fitter.evaluated, out]:
+        for name, (_, kinds) in SEQUENCE_LEAVES.items():
+            assert _kinds(params[name]) == kinds, name
+        assert _kinds(params["nested"]["tuple"]) == ("tuple", _PAIR)
+    for name, (value, _) in SEQUENCE_LEAVES.items():
+        start = np.asarray(fitter.evaluated[0][name], dtype=np.float64)
+        assert np.array_equal(start, np.asarray(value, dtype=np.float64)), name
+
+
+def test_the_flatten_helpers_give_list_and_tuple_leaves_back():
+    template = {"w": [1.0, 2.0], "t": ((0.5, 1.5), (2.5, 3.5))}
+    vector, spec = flatten_parameters(template)
+    assert vector.tolist() == [1.0, 2.0, 0.5, 1.5, 2.5, 3.5]
+    doubled = unflatten_parameters(2 * vector, spec, template)
+    assert doubled == {"w": [2.0, 4.0], "t": ((1.0, 3.0), (5.0, 7.0))}
+    unpacked = ChemFitVector(template).unpack(vector)
+    assert unpacked == template
+    assert _kinds(unpacked["t"]) == ("tuple", [("tuple", _PAIR)] * 2)
 
 
 BAD_ARGUMENTS = [
