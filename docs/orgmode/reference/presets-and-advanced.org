@@ -7,8 +7,9 @@
 - =Fast(t_init, gamma)= :: Reciprocal cooling + Cauchy + Metropolis.
 - =Gsa(t_init, =q_v=, q_a)= :: =Tsallis= cooling + =Tsallis= visit + =Tsallis= accept.
 
-All called via =run(obj, low, high, preset, n_epochs, steps_per_epoch, seed)=.
+All called via =run(obj, low, high, preset, n_epochs, steps_per_epoch, seed, x0=None)=.
 Every proposal is reflected into the closed box =[low, high]=, so no evaluation leaves it; a coordinate with =low == high= stays fixed.
+A start point =x0= inside the box is the first point evaluated; without it the start is drawn uniformly.
 
 * Pilot and low-discrepancy
 

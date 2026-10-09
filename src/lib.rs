@@ -261,7 +261,8 @@ pub use movekernel::{MoveKernel, Reflected};
 pub use neigh::Neighborhood;
 pub use noise_accept::{OsaAccept, OsaResult};
 pub use runner::{
-    qmc_skip_from_seed, run_rs, run_rs_qmc_variant, run_rs_variant, run_rs_variant_resumed,
+    qmc_skip_from_seed, run_rs, run_rs_qmc_variant, run_rs_qmc_variant_from, run_rs_variant,
+    run_rs_variant_from, run_rs_variant_resumed,
 };
 pub use sampler::Sampler;
 pub use variant::SaVariant;
