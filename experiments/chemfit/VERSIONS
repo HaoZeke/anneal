@@ -1,2 +1,3 @@
 positions_2000.jsonl, positions_10000.jsonl: anneal 0.9.0 (branch head 9b3c0ddd), chemfit upstream next 37dcfe6 + f1c8ade, nevergrad 1.0.12, scipy 1.18.1, numpy 2.3.5
 bridge_check_2000.jsonl: anneal 0.10.0 with the ChemFit lifecycle fix (0c90a2f8) and the re-raise rule (bd153266), chemfit upstream next 37dcfe6 + f1c8ade, numpy 2.3.5
+positions_fit_anneal_2000.jsonl, positions_fit_anneal_10000.jsonl: anneal 0.10.0 (branch 4c6fe804), chemfit upstream next 37dcfe6 + f1c8ade + 2694374, numpy 2.3.5

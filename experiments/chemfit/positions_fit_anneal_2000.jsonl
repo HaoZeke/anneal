@@ -1,0 +1,30 @@
+{"budget": 2000, "seed": 0, "driver": "Fitter.fit_anneal portfolio", "best": -16.82165049688825, "evals": 2000, "inside": true}
+{"budget": 2000, "seed": 0, "driver": "Fitter.fit_anneal boltzmann", "best": -19.667409994234685, "evals": 2000, "inside": true}
+{"budget": 2000, "seed": 0, "driver": "Fitter.fit_anneal fast", "best": -12.404868849446576, "evals": 2000, "inside": true}
+{"budget": 2000, "seed": 0, "driver": "Fitter.fit_anneal gsa", "best": -24.93834235514347, "evals": 2000, "inside": true}
+{"budget": 2000, "seed": 0, "driver": "Fitter.fit_anneal gpmd", "best": -23.986660550122913, "evals": 2000, "inside": true}
+{"budget": 2000, "seed": 1, "driver": "Fitter.fit_anneal portfolio", "best": -10.628755274090858, "evals": 2000, "inside": true}
+{"budget": 2000, "seed": 1, "driver": "Fitter.fit_anneal boltzmann", "best": -20.158773343563755, "evals": 2000, "inside": true}
+{"budget": 2000, "seed": 1, "driver": "Fitter.fit_anneal fast", "best": -10.245174445255012, "evals": 2000, "inside": true}
+{"budget": 2000, "seed": 1, "driver": "Fitter.fit_anneal gsa", "best": -27.186618951550127, "evals": 2000, "inside": true}
+{"budget": 2000, "seed": 1, "driver": "Fitter.fit_anneal gpmd", "best": -26.525893633729282, "evals": 2000, "inside": true}
+{"budget": 2000, "seed": 2, "driver": "Fitter.fit_anneal portfolio", "best": -16.03716247871271, "evals": 2000, "inside": true}
+{"budget": 2000, "seed": 2, "driver": "Fitter.fit_anneal boltzmann", "best": -20.5345319441574, "evals": 2000, "inside": true}
+{"budget": 2000, "seed": 2, "driver": "Fitter.fit_anneal fast", "best": -15.040423462982522, "evals": 2000, "inside": true}
+{"budget": 2000, "seed": 2, "driver": "Fitter.fit_anneal gsa", "best": -22.04838339119835, "evals": 2000, "inside": true}
+{"budget": 2000, "seed": 2, "driver": "Fitter.fit_anneal gpmd", "best": -23.442425189221183, "evals": 2000, "inside": true}
+{"budget": 2000, "seed": 3, "driver": "Fitter.fit_anneal portfolio", "best": -13.977655126779572, "evals": 2000, "inside": true}
+{"budget": 2000, "seed": 3, "driver": "Fitter.fit_anneal boltzmann", "best": -24.36852438531126, "evals": 2000, "inside": true}
+{"budget": 2000, "seed": 3, "driver": "Fitter.fit_anneal fast", "best": -12.11436379094175, "evals": 2000, "inside": true}
+{"budget": 2000, "seed": 3, "driver": "Fitter.fit_anneal gsa", "best": -23.32282576991577, "evals": 2000, "inside": true}
+{"budget": 2000, "seed": 3, "driver": "Fitter.fit_anneal gpmd", "best": -27.18727425375423, "evals": 2000, "inside": true}
+{"budget": 2000, "seed": 4, "driver": "Fitter.fit_anneal portfolio", "best": -15.559544593424379, "evals": 2000, "inside": true}
+{"budget": 2000, "seed": 4, "driver": "Fitter.fit_anneal boltzmann", "best": -17.034597476177055, "evals": 2000, "inside": true}
+{"budget": 2000, "seed": 4, "driver": "Fitter.fit_anneal fast", "best": -11.063363193122989, "evals": 2000, "inside": true}
+{"budget": 2000, "seed": 4, "driver": "Fitter.fit_anneal gsa", "best": -29.090671357052422, "evals": 2000, "inside": true}
+{"budget": 2000, "seed": 4, "driver": "Fitter.fit_anneal gpmd", "best": -25.31283561462029, "evals": 2000, "inside": true}
+# 2000 Fitter.fit_anneal portfolio: median -15.56 over 5 seeds
+# 2000 Fitter.fit_anneal boltzmann: median -20.16 over 5 seeds
+# 2000 Fitter.fit_anneal fast: median -12.11 over 5 seeds
+# 2000 Fitter.fit_anneal gsa: median -24.94 over 5 seeds
+# 2000 Fitter.fit_anneal gpmd: median -25.31 over 5 seeds
