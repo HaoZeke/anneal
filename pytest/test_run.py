@@ -1025,7 +1025,9 @@ def test_cluster_search_probe_follows_the_callback_rules():
 
 
 def test_steps_near_the_float_limit_keep_the_documented_call_count():
-    low, high = np.full(3, -4.4e307), np.full(3, 4.4e307)
+    # Two axes keep the summed width finite; steps of a tenth of the width
+    # still overflow x - lo or reach infinity.
+    low, high = np.full(2, -4.4e307), np.full(2, 4.4e307)
     for preset in (Fast(t_init=1.0, gamma=8.8e306), Boltzmann(t_init=1.0, sigma=8.8e306)):
         objective = Recorder(lambda x: float(np.sum(np.abs(x)) / 1e307))
         run(objective, low, high, preset, n_epochs=3, steps_per_epoch=100, seed=0)
