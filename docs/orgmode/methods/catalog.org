@@ -1414,21 +1414,25 @@ over =VALUES_ONLY_ARMS= (portfolio.rs:3156: =cma=, =qn=, =gsa=, =de=,
 the best of a seeded design of =d+1= points; when the budget affords
 five gradients per coordinate, an opening finite-difference descent
 runs while its slices succeed, up to convergence, and =qn= then rejoins
-the ranking on the prior. After an opening, =gsa= and then =cma= each
-keep the turn until they have gone =ROUNDS_PER_ARM= slices without
-lowering the incumbent (or as long as their last gain took, if longer),
-stopping short of the closing descent plus a slice for each other arm
-not yet played. Every unplayed arm then takes one turn, after which
-rounds pick uniformly with probability =1/round=, replay the arm whose
-last turn succeeded, or take a discounted Thompson draw; a closing
-descent from the incumbent with ten gradients' worth of evaluations
-ends the run. A turn is one slice, except that =qn= keeps it while each
-slice lowers its descent's value by more than the success threshold,
-until that descent converges; a turn succeeds when it lowers the
-incumbent by more than =1e-4 max(|f|, 1)=. The GSA arm starts one chain
-at the incumbent and runs it quenched, without a local search: each
+the ranking on the prior. With less, =cma= and the descent take one
+slice each from the start, =gsa= the next =WARM_UP_GSA_SLICES= (two)
+from the incumbent, and a descent turn settles the basin it reached.
+From there =gsa= and then =cma= each keep the turn until they have gone
+=ROUNDS_PER_ARM= slices without lowering the incumbent (or as long as
+their last gain took, if longer), stopping short of the closing descent
+plus a slice for each other arm not yet played (without an opening, for
+=de= only). Every unplayed arm then takes one turn, after which rounds
+pick uniformly with probability =1/round=, replay the arm whose last
+turn succeeded, or take a discounted Thompson draw; a closing descent
+from the incumbent with ten gradients' worth of evaluations ends the
+run. A turn is one slice, except that =qn= keeps it while each slice
+lowers its descent's value by more than the success threshold, until
+that descent converges; a turn succeeds when it lowers the incumbent by
+more than =1e-4 max(|f|, 1)=. The GSA arm starts one chain at the
+incumbent and runs it quenched, without a local search: each
 temperature step visits every coordinate once and keeps only
-improvements. The DE arm keeps one population member at the incumbent. The floor the restart guarantee needs is asymptotic: the
+improvements. The DE arm keeps one population member at the incumbent.
+The floor the restart guarantee needs is asymptotic: the
 opening, the phases and the descent's turns run only while they pay by
 the success threshold, which cannot last on a bounded objective, and
 the number of slices grows with the budget, so every arm keeps a

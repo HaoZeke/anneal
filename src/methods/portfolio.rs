@@ -14,15 +14,17 @@
 //! (`run_values_only_portfolio`), over CMA-ES, a finite-difference
 //! quasi-Newton descent, GSA, DE, the additive surrogate and the restart
 //! arm. An opening descent from the start, then GSA and CMA-ES phases
-//! from its minimum, run while they pay; each arm not yet played then
-//! takes a turn, later rounds keep the same decaying floor, and a closing
-//! descent from the incumbent ends the run. In this loop the floor the
-//! guarantee needs is asymptotic. The opening runs while it improves by
-//! the success threshold, which cannot last on a bounded objective, and
-//! after that every arm keeps a uniform share and is pulled infinitely
-//! often as the budget grows. The phases and the descent's turns stop for
-//! the same reason, and the number of slices keeps growing with the
-//! budget (`values_only_slice`).
+//! from its minimum, run while they pay; short of the budget the opening
+//! needs, CMA-ES, the descent and GSA take the first slices and a descent
+//! turn settles the basin GSA reached before the phases. Each arm not yet
+//! played then takes a turn, later rounds keep the same decaying floor,
+//! and a closing descent from the incumbent ends the run. In this loop
+//! the floor the guarantee needs is asymptotic. The opening runs while it
+//! improves by the success threshold, which cannot last on a bounded
+//! objective, and after that every arm keeps a uniform share and is
+//! pulled infinitely often as the budget grows. The phases and the
+//! descent's turns stop for the same reason, and the number of slices
+//! keeps growing with the budget (`values_only_slice`).
 //!
 //! Scheduler quantities derive from the problem and the budget rather
 //! than from tuning knobs: the slice size affords a few gradient-
@@ -407,6 +409,8 @@ const QN_KICK_MAX: f64 = 0.5;
 /// Gradients per dimension a finite-difference descent needs to converge;
 /// the values-only loop opens with one only when the budget affords it.
 const QN_AFFORDABLE_GRADIENTS: usize = 5;
+/// Slices of GSA's warm-up turn in a values-only run short of that budget.
+const WARM_UP_GSA_SLICES: usize = 2;
 /// Fewest gradients worth a closing finite-difference polish.
 const QN_MIN_POLISH_GRADIENTS: usize = 3;
 /// The values-only loop's closing polish gets this many gradients, enough
@@ -3099,11 +3103,15 @@ fn values_only_slice(dim: usize, budget: usize) -> usize {
 /// so seeds vary it. When the budget affords one
 /// ([`QN_AFFORDABLE_GRADIENTS`]), a finite-difference descent from the
 /// incumbent opens the run and goes on while its slices succeed, up to
-/// convergence. From the minimum it reaches, GSA and then CMA-ES each keep
-/// the turn while they pay: a phase ends once it has gone
+/// convergence. Short of that budget the descent would converge only by
+/// taking most of the run: CMA-ES and the descent take one slice each,
+/// GSA up to [`WARM_UP_GSA_SLICES`] from the incumbent, and a descent turn
+/// then settles the basin GSA reached. From there GSA and then CMA-ES each
+/// keep the turn while they pay: a phase ends once it has gone
 /// [`ROUNDS_PER_ARM`] slices without lowering the incumbent, or as long as
 /// its last gain took if that is longer, and it leaves the closing polish
-/// and one slice for each other arm not yet played. Bandit rounds over
+/// and one slice for each other arm not yet played (short of the opening
+/// budget, one for DE only). Bandit rounds over
 /// [`VALUES_ONLY_ARMS`] follow until the closing polish reserve remains. As
 /// in the main bandit, each arm not yet played takes one slice first, in
 /// list order, so the restart arm and the global searches get an
@@ -3238,40 +3246,103 @@ where
     } else {
         0
     };
-    if opened {
-        // Against a descended incumbent a GSA record is a lower basin and a
-        // CMA-ES gain a better point of this one. From an undescended start
-        // GSA's first records are box-wide samples that leave the start's
-        // basin, so the phases wait for the opening. Both find their gains
-        // in bursts (records as the anneal cools, a run per covariance),
-        // which single slices of the rounds below would not see.
-        const PHASES: [ArmKind; 2] = [ArmKind::Gsa, ArmKind::Cma];
-        for arm in PHASES {
-            let choice = index(arm);
-            // A phase that keeps paying must still leave the warm-up round
-            // a slice for every other arm, the next phase's included.
-            let unplayed = posteriors
-                .iter()
-                .enumerate()
-                .filter(|&(i, posterior)| i != choice && posterior.pulls == 0)
-                .count();
-            let reserve = polish + unplayed * slice;
-            let start = ledger.used_get();
-            let mut last_gain = start;
-            while ledger.remaining() >= reserve + 8 {
-                let idle = ledger.used_get() - last_gain;
-                if idle >= (ROUNDS_PER_ARM * slice).max(last_gain - start) {
-                    break;
-                }
-                round += 1;
-                let take = slice.min(ledger.remaining() - reserve);
-                let gained = play(choice, take, reserve, states, &mut rng, &mut posteriors);
-                if gained {
-                    last_gain = ledger.used_get();
-                }
-                winner = gained.then_some(choice);
+    // A phase keeps the turn while its arm pays: it ends once the arm has
+    // gone `ROUNDS_PER_ARM` slices without lowering the incumbent, or as long
+    // as its last gain took if that is longer, or at `reserve`.
+    let phase = |choice: usize,
+                 reserve: usize,
+                 states: &mut ArmStates,
+                 rng: &mut StdRng,
+                 posteriors: &mut [ArmPosterior],
+                 round: &mut usize,
+                 winner: &mut Option<usize>| {
+        let start = ledger.used_get();
+        let mut last_gain = start;
+        while ledger.remaining() >= reserve + 8 {
+            let idle = ledger.used_get() - last_gain;
+            if idle >= (ROUNDS_PER_ARM * slice).max(last_gain - start) {
+                break;
             }
+            *round += 1;
+            let take = slice.min(ledger.remaining() - reserve);
+            let gained = play(choice, take, reserve, states, rng, posteriors);
+            if gained {
+                last_gain = ledger.used_get();
+            }
+            *winner = gained.then_some(choice);
         }
+    };
+    if !opened {
+        // Short of the opening budget a descent from the start converges
+        // only by taking most of the run. CMA-ES and the descent take a
+        // slice each from the start, then GSA's quenched visits leave the
+        // start's basin one coordinate at a time, and a descent turn
+        // settles the basin they reach, keeping the turn while it pays.
+        let (cma, qn, gsa) = (index(ArmKind::Cma), index(ArmKind::Qn), index(ArmKind::Gsa));
+        if ledger.remaining() >= polish + 8 {
+            round += 1;
+            let take = slice.min(ledger.remaining() - polish);
+            winner = play(cma, take, polish, states, &mut rng, &mut posteriors).then_some(cma);
+        }
+        if ledger.remaining() >= polish + 8 {
+            round += 1;
+            let take = slice.min(ledger.remaining() - polish);
+            // Reserving all but the slice ends the turn with it.
+            let reserve = ledger.remaining() - take;
+            winner = play(qn, take, reserve, states, &mut rng, &mut posteriors).then_some(qn);
+        }
+        let reserve = polish.max(
+            ledger
+                .remaining()
+                .saturating_sub(WARM_UP_GSA_SLICES * slice),
+        );
+        phase(
+            gsa,
+            reserve,
+            states,
+            &mut rng,
+            &mut posteriors,
+            &mut round,
+            &mut winner,
+        );
+        if ledger.remaining() >= polish + 8 {
+            round += 1;
+            let take = slice.min(ledger.remaining() - polish);
+            winner = play(qn, take, polish, states, &mut rng, &mut posteriors).then_some(qn);
+        }
+    }
+    // GSA records and CMA-ES gains come in bursts (records as the anneal
+    // cools, a run per covariance) that single slices of the rounds below
+    // would not see.
+    const PHASES: [ArmKind; 2] = [ArmKind::Gsa, ArmKind::Cma];
+    for arm in PHASES {
+        let choice = index(arm);
+        // After an opening a phase that keeps paying must still leave the
+        // warm-up round a slice for every other arm, the next phase's
+        // included. Short of the opening budget, slices held for the
+        // surrogate and the restart arm cost the phases more than those
+        // arms return there, and DE keeps one.
+        let unplayed = posteriors
+            .iter()
+            .enumerate()
+            .filter(|&(i, posterior)| i != choice && posterior.pulls == 0)
+            .count();
+        let reserve = if opened {
+            polish + unplayed * slice
+        } else if posteriors[index(ArmKind::De)].pulls == 0 {
+            polish + slice
+        } else {
+            polish
+        };
+        phase(
+            choice,
+            reserve,
+            states,
+            &mut rng,
+            &mut posteriors,
+            &mut round,
+            &mut winner,
+        );
     }
     // Explore and GSA skip slices shorter than eight evaluations; the polish
     // takes such a remainder.
@@ -6054,9 +6125,9 @@ mod tests {
     #[test]
     fn values_only_descent_keeps_its_turn_while_it_pays() {
         // Twelve dimensions and 700 evaluations are short of the opening,
-        // so the descent first plays in the warm-up round. On a stiff
-        // quadratic it pays every slice until it converges, which takes
-        // several slices: one turn spans them.
+        // so after GSA's warm-up turn a descent turn settles the incumbent.
+        // On a stiff quadratic it pays every slice until it converges,
+        // which takes several slices: one turn spans them.
         fn stiff(x: ArrayView1<f64>) -> f64 {
             let last = (x.len() - 1) as f64;
             x.iter()
@@ -6262,6 +6333,42 @@ mod tests {
                 5 * reseeds <= visits / dim + turns.len(),
                 "{dim}-D at {budget}: {reseeds} reseeds, {visits} visits"
             );
+        }
+    }
+
+    #[test]
+    fn values_only_gsa_and_de_play_short_of_the_opening_budget() {
+        // Short of the opening budget a descent from the start would take
+        // most of the run. CMA-ES and the descent take one slice each, GSA
+        // the next two, a descent turn settles the basin GSA reached, and
+        // DE still gets a turn.
+        use ArmKind::{Cma, De, Gsa, Qn};
+        for (dim, budget) in [(10usize, 500usize), (20, 2000), (30, 4000)] {
+            assert!(budget < QN_AFFORDABLE_GRADIENTS * dim * (dim + 1));
+            let obj = Traced::new(-5.12, 5.12, dim, rastrigin);
+            let ledger = BudgetLedger::new(budget, dim);
+            let budgeted = BudgetedObjective {
+                inner: &obj,
+                ledger: &ledger,
+            };
+            let start = Array1::from_shape_fn(dim, |i| 1.1 + 0.29 * (i % 12) as f64);
+            budgeted.eval(start.view());
+            let mut states = ArmStates::default();
+            run_values_only_portfolio::<_, ShiftQuadratic>(
+                &budgeted,
+                &ledger,
+                &mut states,
+                0,
+                budget,
+            );
+            assert_eq!(obj.points().len(), budget);
+            let slice = values_only_slice(dim, budget);
+            let arms: Vec<ArmKind> = states.turns.iter().map(|turn| turn.0).collect();
+            assert_eq!(arms[..5], [Cma, Qn, Gsa, Gsa, Qn], "{dim}-D at {budget}");
+            for &(arm, used, after) in &states.turns[..4] {
+                assert_eq!(after - used, slice, "{} in {dim}-D at {budget}", arm.name());
+            }
+            assert!(arms.contains(&De), "{dim}-D at {budget}: turns {arms:?}");
         }
     }
 
