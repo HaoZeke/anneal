@@ -54,6 +54,15 @@ fn validate_box_bounds(low: &[f64], high: &[f64]) -> PyResult<()> {
     Ok(())
 }
 
+fn validate_max_evals(max_evals: Option<usize>) -> PyResult<()> {
+    if max_evals == Some(0) {
+        return Err(PyValueError::new_err(
+            "max_evals must be at least 1: the start costs one evaluation",
+        ));
+    }
+    Ok(())
+}
+
 /// Reads an optional starting point and refuses one that the box drivers
 /// could not start from: wrong length, non-finite, or outside `[low, high]`.
 fn read_x0(
@@ -365,12 +374,115 @@ impl From<History> for PyHistory {
 // Objective adapter wrapping a Python callable.
 // ---------------------------------------------------------------------------
 
+/// What the Python callbacks of one driver call did that a float cannot carry.
+///
+/// An ordinary exception is scored as the worst value and counted: budget
+/// counters stop a driver by raising once their ledger is spent. Anything
+/// else ends the run: `KeyboardInterrupt`, `SystemExit`, or a return value
+/// that is not a number. Once a run is ending, no further callback is made,
+/// and the driver call re-raises the exception when it returns.
+#[derive(Default)]
+struct CallbackErrors {
+    fatal: std::sync::Mutex<Option<PyErr>>,
+    aborted: std::sync::atomic::AtomicBool,
+    scored: std::sync::atomic::AtomicUsize,
+    first_scored: std::sync::Mutex<Option<String>>,
+}
+
+impl CallbackErrors {
+    fn aborted(&self) -> bool {
+        self.aborted.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    fn record(&self, py: Python<'_>, err: PyErr) {
+        if err.is_instance_of::<pyo3::exceptions::PyException>(py) {
+            let previous = self
+                .scored
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            if previous == 0 {
+                *self.first_scored.lock().expect("callback error lock") = Some(err.to_string());
+            }
+        } else {
+            self.abort(err);
+        }
+    }
+
+    fn abort(&self, err: PyErr) {
+        let mut fatal = self.fatal.lock().expect("callback error lock");
+        if fatal.is_none() {
+            *fatal = Some(err);
+        }
+        self.aborted
+            .store(true, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// A number from a callback's return value, or the end of the run.
+    fn float(&self, py: Python<'_>, value: &Py<PyAny>) -> f64 {
+        match value.extract::<f64>(py) {
+            Ok(v) if v.is_nan() => f64::INFINITY,
+            Ok(v) => v,
+            Err(_) => {
+                let kind = value
+                    .bind(py)
+                    .get_type()
+                    .name()
+                    .map(|n| n.to_string())
+                    .unwrap_or_else(|_| "unknown".to_owned());
+                self.abort(pyo3::exceptions::PyTypeError::new_err(format!(
+                    "obj_fn must return a float, got {kind}"
+                )));
+                f64::INFINITY
+            }
+        }
+    }
+
+    /// Re-raises the exception that ended the run, and warns once when
+    /// ordinary exceptions were scored as the worst value.
+    fn finish(&self, py: Python<'_>) -> PyResult<()> {
+        if let Some(err) = self.fatal.lock().expect("callback error lock").take() {
+            return Err(err);
+        }
+        let scored = self.scored.load(std::sync::atomic::Ordering::Relaxed);
+        if scored > 0 {
+            let first = self
+                .first_scored
+                .lock()
+                .expect("callback error lock")
+                .clone()
+                .unwrap_or_default();
+            let message = std::ffi::CString::new(format!(
+                "a callback raised {scored} exception(s) that were scored as the worst value; the first was: {first}"
+            ))
+            .unwrap_or_default();
+            let category = py.get_type::<pyo3::exceptions::PyRuntimeWarning>();
+            PyErr::warn(py, category.as_any(), &message, 2)?;
+        }
+        Ok(())
+    }
+}
+
 /// Internal objective adapter: a Python callable plus a `Bounds`.
 /// Holds the GIL per `eval` call. `Py<PyAny>` is `Send + Sync` because
 /// pyo3 ref-counts atomically and gates dereferencing on the GIL.
 struct CallableObjective {
     fn_: Py<PyAny>,
     bounds: Bounds<f64>,
+    errors: std::sync::Arc<CallbackErrors>,
+}
+
+impl CallableObjective {
+    fn new(fn_: Py<PyAny>, bounds: Bounds<f64>) -> Self {
+        Self {
+            fn_,
+            bounds,
+            errors: std::sync::Arc::default(),
+        }
+    }
+
+    /// The error record this objective and its gradient share.
+    fn errors(&self) -> std::sync::Arc<CallbackErrors> {
+        std::sync::Arc::clone(&self.errors)
+    }
 }
 
 impl Objective<f64> for CallableObjective {
@@ -383,15 +495,18 @@ impl Objective<f64> for CallableObjective {
     }
 
     fn eval(&self, x: ArrayView1<f64>) -> f64 {
+        if self.errors.aborted() {
+            return f64::INFINITY;
+        }
         Python::attach(|py| {
             let owned: Vec<f64> = x.iter().copied().collect();
             let py_arr = PyArray1::from_vec(py, owned);
             match self.fn_.call1(py, (py_arr,)) {
-                Ok(r) => r.extract::<f64>(py).unwrap_or(f64::INFINITY),
-                // Budget counters raise a Python exception when the shared
-                // work ledger is exhausted. Map that to +inf so Rust drivers
-                // stop improving instead of panicking the whole process.
-                Err(_) => f64::INFINITY,
+                Ok(r) => self.errors.float(py, &r),
+                Err(err) => {
+                    self.errors.record(py, err);
+                    f64::INFINITY
+                }
             }
         })
     }
@@ -407,6 +522,9 @@ impl Objective<f64> for CallableObjective {
         if n == 0 {
             return Array1::zeros(0);
         }
+        if self.errors.aborted() {
+            return Array1::from(vec![f64::INFINITY; n]);
+        }
         Python::attach(|py| {
             // Multi-walker entry: Python objects (e.g. SOTA Counter) may
             // evaluate independent walker proposals in parallel.
@@ -419,27 +537,42 @@ impl Objective<f64> for CallableObjective {
                     PyArray2::from_vec2(py, &rows).expect("anneal: build walker batch array");
                 match batch_fn.call1(py, (py_arr,)) {
                     Ok(r) => {
-                        if let Ok(arr) = r.extract::<PyReadonlyArray1<f64>>(py) {
-                            return Array1::from_vec(arr.as_slice().expect("contiguous").to_vec());
-                        }
-                        if let Ok(seq) = r.extract::<Vec<f64>>(py)
-                            && seq.len() == n
-                        {
-                            return Array1::from(seq);
-                        }
+                        return match as_float_vector(py, &r) {
+                            Some(values) if values.len() == n => Array1::from_iter(
+                                values
+                                    .into_iter()
+                                    .map(|v| if v.is_nan() { f64::INFINITY } else { v }),
+                            ),
+                            _ => {
+                                self.errors
+                                    .abort(pyo3::exceptions::PyTypeError::new_err(format!(
+                                        "eval_batch must return {n} floats"
+                                    )));
+                                Array1::from(vec![f64::INFINITY; n])
+                            }
+                        };
+                    }
+                    Err(err) => {
+                        self.errors.record(py, err);
                         return Array1::from(vec![f64::INFINITY; n]);
                     }
-                    Err(_) => return Array1::from(vec![f64::INFINITY; n]),
                 }
             }
             // Single attach, serial walkers (cheaper than n attach/release).
             let mut out = Vec::with_capacity(n);
             for row in x.outer_iter() {
+                if self.errors.aborted() {
+                    out.push(f64::INFINITY);
+                    continue;
+                }
                 let owned: Vec<f64> = row.iter().copied().collect();
                 let py_arr = PyArray1::from_vec(py, owned);
                 let v = match self.fn_.call1(py, (py_arr,)) {
-                    Ok(r) => r.extract::<f64>(py).unwrap_or(f64::INFINITY),
-                    Err(_) => f64::INFINITY,
+                    Ok(r) => self.errors.float(py, &r),
+                    Err(err) => {
+                        self.errors.record(py, err);
+                        f64::INFINITY
+                    }
                 };
                 out.push(v);
             }
@@ -457,23 +590,62 @@ impl Objective<f64> for CallableObjective {
 struct CallablePyGradient {
     fn_: Py<PyAny>,
     dim: usize,
+    errors: std::sync::Arc<CallbackErrors>,
+}
+
+impl CallablePyGradient {
+    fn new(fn_: Py<PyAny>, dim: usize, errors: &std::sync::Arc<CallbackErrors>) -> Self {
+        Self {
+            fn_,
+            dim,
+            errors: std::sync::Arc::clone(errors),
+        }
+    }
+}
+
+/// A flat float64 vector from any array-like a callback returns: a NumPy
+/// array of another dtype or shape, a list, or a JAX or torch array.
+fn as_float_vector(py: Python<'_>, value: &Py<PyAny>) -> Option<Vec<f64>> {
+    if let Ok(arr) = value.extract::<PyReadonlyArray1<f64>>(py) {
+        return Some(arr.as_array().iter().copied().collect());
+    }
+    let kwargs = PyDict::new(py);
+    kwargs.set_item("dtype", "float64").ok()?;
+    let flat = py
+        .import("numpy")
+        .ok()?
+        .call_method("asarray", (value.bind(py),), Some(&kwargs))
+        .ok()?
+        .call_method0("ravel")
+        .ok()?;
+    let arr: PyReadonlyArray1<f64> = flat.extract().ok()?;
+    Some(arr.as_array().iter().copied().collect())
 }
 
 impl eindir_core::Gradient<f64> for CallablePyGradient {
     fn grad(&self, x: ArrayView1<f64>) -> Array1<f64> {
+        if self.errors.aborted() {
+            return Array1::zeros(self.dim);
+        }
         Python::attach(|py| {
             let owned: Vec<f64> = x.iter().copied().collect();
             let py_arr = PyArray1::from_vec(py, owned);
             match self.fn_.call1(py, (py_arr,)) {
-                Ok(r) => {
-                    if let Ok(arr) = r.extract::<numpy::PyReadonlyArray1<f64>>(py) {
-                        Array1::from_vec(arr.as_slice().expect("contiguous").to_vec())
-                    } else {
+                Ok(r) => match as_float_vector(py, &r) {
+                    Some(values) if values.len() == self.dim => Array1::from(values),
+                    _ => {
+                        self.errors
+                            .abort(pyo3::exceptions::PyTypeError::new_err(format!(
+                                "grad_fn must return {} numbers",
+                                self.dim
+                            )));
                         Array1::zeros(self.dim)
                     }
+                },
+                Err(err) => {
+                    self.errors.record(py, err);
+                    Array1::zeros(self.dim)
                 }
-                // Budget exhaustion must not panic the process mid-optimize.
-                Err(_) => Array1::zeros(self.dim),
             }
         })
     }
@@ -507,6 +679,7 @@ impl eindir_core::Gradient<f64> for CallablePyGradient {
 #[pyo3(signature = (obj_fn, grad_fn, low, high, t_init = 5.0, epsilon = 0.05, l_steps = 5, q = 1.0, n_epochs = 100, steps_per_epoch = 50, seed = 42, x0 = None))]
 #[allow(clippy::too_many_arguments)]
 fn run_hmc(
+    py: Python<'_>,
     obj_fn: Py<PyAny>,
     grad_fn: Py<PyAny>,
     low: PyReadonlyArray1<'_, f64>,
@@ -546,11 +719,9 @@ fn run_hmc(
         None
     };
     let bounds = Bounds::new(Array1::from_vec(low_vec), Array1::from_vec(high_vec), 1e-9);
-    let obj = CallableObjective {
-        fn_: obj_fn,
-        bounds,
-    };
-    let grad = CallablePyGradient { fn_: grad_fn, dim };
+    let obj = CallableObjective::new(obj_fn, bounds);
+    let errors = obj.errors();
+    let grad = CallablePyGradient::new(grad_fn, dim, &errors);
     let cool = LogCool::new(t_init, 2.0_f64);
     let integrator = OmelyanIntegrator::new(epsilon, l_steps, t_init);
     let history = if q <= 1.0 + 1e-9 {
@@ -577,6 +748,7 @@ fn run_hmc(
         };
         crate::runner::run_rs(sampler, &cool, n_epochs, steps_per_epoch, seed)
     };
+    errors.finish(py)?;
     Ok(PyHistory::from(history))
 }
 
@@ -614,11 +786,9 @@ fn polish(
 
     let dim = low_vec.len();
     let bounds = Bounds::new(Array1::from_vec(low_vec), Array1::from_vec(high_vec), 1e-9);
-    let obj = CallableObjective {
-        fn_: obj_fn,
-        bounds,
-    };
-    let grad = CallablePyGradient { fn_: grad_fn, dim };
+    let obj = CallableObjective::new(obj_fn, bounds);
+    let errors = obj.errors();
+    let grad = CallablePyGradient::new(grad_fn, dim, &errors);
     let result = crate::projected_gradient_polish(
         &obj,
         &grad,
@@ -635,6 +805,7 @@ fn polish(
     out.set_item("n_grads", result.n_grads)?;
     out.set_item("projected_grad_norm", result.projected_grad_norm)?;
     out.set_item("projected_stationary", result.projected_stationary)?;
+    errors.finish(py)?;
     Ok(out.into())
 }
 
@@ -678,11 +849,9 @@ fn qmc_polish(
 
     let dim = low_vec.len();
     let bounds = Bounds::new(Array1::from_vec(low_vec), Array1::from_vec(high_vec), 1e-9);
-    let obj = CallableObjective {
-        fn_: obj_fn,
-        bounds,
-    };
-    let grad = CallablePyGradient { fn_: grad_fn, dim };
+    let obj = CallableObjective::new(obj_fn, bounds);
+    let errors = obj.errors();
+    let grad = CallablePyGradient::new(grad_fn, dim, &errors);
     let result = crate::qmc_projected_gradient_polish(
         &obj,
         &grad,
@@ -707,6 +876,7 @@ fn qmc_polish(
         result.polished_projected_grad_norms,
     )?;
     out.set_item("polished_stationary", result.polished_stationary)?;
+    errors.finish(py)?;
     Ok(out.into())
 }
 
@@ -824,10 +994,8 @@ fn qmc_best1bin_scout(
     }
 
     let bounds = Bounds::new(Array1::from_vec(low_vec), Array1::from_vec(high_vec), 1e-9);
-    let obj = CallableObjective {
-        fn_: obj_fn,
-        bounds,
-    };
+    let obj = CallableObjective::new(obj_fn, bounds);
+    let errors = obj.errors();
     let result = crate::qmc_best1bin_scout(
         &obj,
         max_evals,
@@ -837,6 +1005,7 @@ fn qmc_best1bin_scout(
         weight_span,
         crossover_rate,
     );
+    errors.finish(py)?;
     qmc_polish_result_to_dict(py, result)
 }
 
@@ -945,11 +1114,10 @@ fn qmc_gsa_global_search(
     validate_qmc_gsa_global_search_args(max_evals, n_chains, t_init, q_v, q_a)?;
 
     let bounds = Bounds::new(Array1::from_vec(low_vec), Array1::from_vec(high_vec), 1e-9);
-    let obj = CallableObjective {
-        fn_: obj_fn,
-        bounds,
-    };
+    let obj = CallableObjective::new(obj_fn, bounds);
+    let errors = obj.errors();
     let result = crate::qmc_gsa_global_search(&obj, max_evals, seed, n_chains, t_init, q_v, q_a);
+    errors.finish(py)?;
     qmc_polish_result_to_dict(py, result)
 }
 
@@ -1014,10 +1182,8 @@ fn qmc_trust_region_poll(
     }
 
     let bounds = Bounds::new(Array1::from_vec(low_vec), Array1::from_vec(high_vec), 1e-9);
-    let obj = CallableObjective {
-        fn_: obj_fn,
-        bounds,
-    };
+    let obj = CallableObjective::new(obj_fn, bounds);
+    let errors = obj.errors();
     let result = crate::qmc_trust_region_poll(
         &obj,
         Array1::from_vec(center_vec),
@@ -1027,6 +1193,7 @@ fn qmc_trust_region_poll(
         n_levels,
         points_per_level,
     );
+    errors.finish(py)?;
     qmc_polish_result_to_dict(py, result)
 }
 
@@ -1117,11 +1284,9 @@ fn shifted_qmc_polish(
 
     let dim = low_vec.len();
     let bounds = Bounds::new(Array1::from_vec(low_vec), Array1::from_vec(high_vec), 1e-9);
-    let obj = CallableObjective {
-        fn_: obj_fn,
-        bounds,
-    };
-    let grad = CallablePyGradient { fn_: grad_fn, dim };
+    let obj = CallableObjective::new(obj_fn, bounds);
+    let errors = obj.errors();
+    let grad = CallablePyGradient::new(grad_fn, dim, &errors);
     let result = crate::shifted_qmc_projected_gradient_polish(
         &obj,
         &grad,
@@ -1147,6 +1312,7 @@ fn shifted_qmc_polish(
         result.polished_projected_grad_norms,
     )?;
     out.set_item("polished_stationary", result.polished_stationary)?;
+    errors.finish(py)?;
     Ok(out.into())
 }
 
@@ -1194,10 +1360,8 @@ fn additive_independence(
         n_pilot
     };
     let bounds = Bounds::new(Array1::from_vec(low_vec), Array1::from_vec(high_vec), 1e-9);
-    let obj = CallableObjective {
-        fn_: obj_fn,
-        bounds,
-    };
+    let obj = CallableObjective::new(obj_fn, bounds);
+    let errors = obj.errors();
     let result = crate::methods::additive_independence_sa(
         &obj, seed, max_fevals, degree, grid_m, local_frac, n_epochs, pilot,
     );
@@ -1205,12 +1369,14 @@ fn additive_independence(
     out.set_item("best_pos", PyArray1::from_vec(py, result.best_pos.to_vec()))?;
     out.set_item("best_val", result.best_val)?;
     out.set_item("n_evals", result.n_evals)?;
+    errors.finish(py)?;
     Ok(out.into())
 }
 
 /// Estimate the characteristic frequency used to scale the GLE drift.
 #[pyfunction]
 fn estimate_gle_omega0(
+    py: Python<'_>,
     obj_fn: Py<PyAny>,
     grad_fn: Py<PyAny>,
     low: PyReadonlyArray1<'_, f64>,
@@ -1225,12 +1391,12 @@ fn estimate_gle_omega0(
     }
     let dim = low_vec.len();
     let bounds = Bounds::new(Array1::from_vec(low_vec), Array1::from_vec(high_vec), 1e-9);
-    let obj = CallableObjective {
-        fn_: obj_fn,
-        bounds,
-    };
-    let grad = CallablePyGradient { fn_: grad_fn, dim };
-    Ok(crate::methods::estimate_gle_omega0(&obj, &grad))
+    let obj = CallableObjective::new(obj_fn, bounds);
+    let errors = obj.errors();
+    let grad = CallablePyGradient::new(grad_fn, dim, &errors);
+    let omega0 = crate::methods::estimate_gle_omega0(&obj, &grad);
+    errors.finish(py)?;
+    Ok(omega0)
 }
 
 fn gle_langevin_x0(
@@ -1311,16 +1477,15 @@ fn gle_langevin(
     let dim = low_vec.len();
     let x0 = gle_langevin_x0(x0, dim)?;
     let bounds = Bounds::new(Array1::from_vec(low_vec), Array1::from_vec(high_vec), 1e-9);
-    let obj = CallableObjective {
-        fn_: obj_fn,
-        bounds,
-    };
-    let grad = CallablePyGradient { fn_: grad_fn, dim };
+    let obj = CallableObjective::new(obj_fn, bounds);
+    let errors = obj.errors();
+    let grad = CallablePyGradient::new(grad_fn, dim, &errors);
     let result = if let Some(omega0) = omega0 {
         crate::methods::gle_langevin_sa(&obj, &grad, seed, max_fevals, omega0, dt, n_epochs, x0)
     } else {
         crate::methods::gle_langevin_adaptive_sa(&obj, &grad, seed, max_fevals, dt, n_epochs, x0)
     };
+    errors.finish(py)?;
     gle_langevin_result_to_dict(py, result)
 }
 
@@ -1355,11 +1520,9 @@ fn gle_langevin_preconditioned(
     let dim = low_vec.len();
     let x0 = gle_langevin_x0(x0, dim)?;
     let bounds = Bounds::new(Array1::from_vec(low_vec), Array1::from_vec(high_vec), 1e-9);
-    let obj = CallableObjective {
-        fn_: obj_fn,
-        bounds,
-    };
-    let grad = CallablePyGradient { fn_: grad_fn, dim };
+    let obj = CallableObjective::new(obj_fn, bounds);
+    let errors = obj.errors();
+    let grad = CallablePyGradient::new(grad_fn, dim, &errors);
     let result = if let Some(omega0) = omega0 {
         crate::methods::gle_langevin_sa(&obj, &grad, seed, max_fevals, omega0, dt, n_epochs, x0)
     } else {
@@ -1374,6 +1537,7 @@ fn gle_langevin_preconditioned(
             preconditioner_probes,
         )
     };
+    errors.finish(py)?;
     gle_langevin_result_to_dict(py, result)
 }
 
@@ -1530,14 +1694,12 @@ fn dmc_population_optimize(
         None
     };
     let seed_view = seed_arr.as_ref().map(|a| a.view());
-    let obj = CallableObjective {
-        fn_: obj_fn,
-        bounds,
-    };
+    let obj = CallableObjective::new(obj_fn, bounds);
+    let errors = obj.errors();
     let mut rng = rand::rngs::StdRng::seed_from_u64(seed ^ 0xd1c_00b0);
     let result = match grad_fn {
         Some(grad_fn) => {
-            let grad = CallablePyGradient { fn_: grad_fn, dim };
+            let grad = CallablePyGradient::new(grad_fn, dim, &errors);
             crate::methods::dmc_population::run_dmc_population_seeded(
                 &obj,
                 Some(&grad),
@@ -1574,6 +1736,7 @@ fn dmc_population_optimize(
     out.set_item("n_grads", result.n_grads)?;
     out.set_item("final_population", result.final_population)?;
     out.set_item("controls", result.controls)?;
+    errors.finish(py)?;
     Ok(out.into())
 }
 
@@ -1617,13 +1780,11 @@ fn gpmd_optimize(
         None
     };
     let seed_view = seed_arr.as_ref().map(|a| a.view());
-    let obj = CallableObjective {
-        fn_: obj_fn,
-        bounds,
-    };
+    let obj = CallableObjective::new(obj_fn, bounds);
+    let errors = obj.errors();
     let result = match grad_fn {
         Some(grad_fn) => {
-            let grad = CallablePyGradient { fn_: grad_fn, dim };
+            let grad = CallablePyGradient::new(grad_fn, dim, &errors);
             crate::methods::gpmd::gpmd_optimize(&obj, Some(&grad), budget, seed, seed_view)
         }
         None => crate::methods::gpmd::gpmd_optimize::<_, CallablePyGradient>(
@@ -1640,6 +1801,7 @@ fn gpmd_optimize(
     out.set_item("n_grads", result.n_grads)?;
     out.set_item("n_accept", result.n_accept)?;
     out.set_item("n_propose", result.n_propose)?;
+    errors.finish(py)?;
     Ok(out.into())
 }
 
@@ -1685,13 +1847,11 @@ fn amsa_optimize(
         None
     };
     let seed_view = seed_arr.as_ref().map(|a| a.view());
-    let obj = CallableObjective {
-        fn_: obj_fn,
-        bounds,
-    };
+    let obj = CallableObjective::new(obj_fn, bounds);
+    let errors = obj.errors();
     let result = match grad_fn {
         Some(grad_fn) => {
-            let grad = CallablePyGradient { fn_: grad_fn, dim };
+            let grad = CallablePyGradient::new(grad_fn, dim, &errors);
             crate::methods::amsa::amsa_optimize(&obj, Some(&grad), budget, seed, seed_view)
         }
         None => crate::methods::amsa::amsa_optimize::<_, CallablePyGradient>(
@@ -1707,6 +1867,7 @@ fn amsa_optimize(
     out.set_item("n_evals", result.n_evals)?;
     out.set_item("n_grads", result.n_grads)?;
     out.set_item("n_reseeds", result.n_reseeds)?;
+    errors.finish(py)?;
     Ok(out.into())
 }
 
@@ -1756,13 +1917,11 @@ fn bfwt_optimize(
         None
     };
     let seed_view = seed_arr.as_ref().map(|a| a.view());
-    let obj = CallableObjective {
-        fn_: obj_fn,
-        bounds,
-    };
+    let obj = CallableObjective::new(obj_fn, bounds);
+    let errors = obj.errors();
     let result = match grad_fn {
         Some(grad_fn) => {
-            let grad = CallablePyGradient { fn_: grad_fn, dim };
+            let grad = CallablePyGradient::new(grad_fn, dim, &errors);
             crate::methods::bfwt::bfwt_optimize(
                 &obj,
                 Some(&grad),
@@ -1791,6 +1950,7 @@ fn bfwt_optimize(
     out.set_item("n_grads", result.n_grads)?;
     out.set_item("n_accept", result.n_accept)?;
     out.set_item("last_mode", result.last_mode.as_str())?;
+    errors.finish(py)?;
     Ok(out.into())
 }
 
@@ -1839,10 +1999,8 @@ fn global_optimize(
     let start = read_x0(x0, &low_vec, &high_vec)?;
     let dim = low_vec.len();
     let bounds = Bounds::new(Array1::from_vec(low_vec), Array1::from_vec(high_vec), 1e-9);
-    let obj = CallableObjective {
-        fn_: obj_fn,
-        bounds,
-    };
+    let obj = CallableObjective::new(obj_fn, bounds);
+    let errors = obj.errors();
     if let Some(sigma) = noise_sigma
         && (sigma <= 0.0 || !sigma.is_finite())
     {
@@ -1862,7 +2020,7 @@ fn global_optimize(
     let x0_view = start.as_ref().map(|x| x.view());
     let result = match grad_fn {
         Some(grad_fn) => {
-            let grad = CallablePyGradient { fn_: grad_fn, dim };
+            let grad = CallablePyGradient::new(grad_fn, dim, &errors);
             crate::portfolio_optimize_from(
                 &obj,
                 Some(&grad),
@@ -1883,6 +2041,7 @@ fn global_optimize(
             x0_view,
         ),
     };
+    errors.finish(py)?;
     portfolio_result_to_dict(py, result)
 }
 
@@ -2003,12 +2162,17 @@ impl Preset {
 ///   n_epochs, steps_per_epoch: SA loop dimensions.
 ///   seed: u64 seed for the StdRng.
 ///   x0: optional starting point inside the box; a uniform draw otherwise.
+///   max_evals: optional cap on calls to `obj_fn`, the start included. The
+///              cooling schedule still spans `n_epochs`; the cap ends the run
+///              inside the epoch where it falls.
 ///
 /// The start costs one evaluation, so the run makes
-/// `1 + n_epochs * steps_per_epoch` calls to `obj_fn`.
+/// `1 + n_epochs * steps_per_epoch` calls to `obj_fn`, or `max_evals` when
+/// that is smaller.
 #[pyfunction]
-#[pyo3(signature = (obj_fn, low, high, preset, n_epochs = 100, steps_per_epoch = 200, seed = 42, x0 = None))]
+#[pyo3(signature = (obj_fn, low, high, preset, n_epochs = 100, steps_per_epoch = 200, seed = 42, x0 = None, max_evals = None))]
 fn run(
+    py: Python<'_>,
     obj_fn: Py<PyAny>,
     low: PyReadonlyArray1<'_, f64>,
     high: PyReadonlyArray1<'_, f64>,
@@ -2017,34 +2181,35 @@ fn run(
     steps_per_epoch: usize,
     seed: u64,
     x0: Option<PyReadonlyArray1<'_, f64>>,
+    max_evals: Option<usize>,
 ) -> PyResult<PyHistory> {
     let low_vec = low.as_slice()?.to_vec();
     let high_vec = high.as_slice()?.to_vec();
     validate_box_bounds(&low_vec, &high_vec)?;
     preset.validate()?;
+    validate_max_evals(max_evals)?;
     let start = read_x0(x0, &low_vec, &high_vec)?;
     let bounds = Bounds::new(Array1::from_vec(low_vec), Array1::from_vec(high_vec), 1e-9);
-    let obj = CallableObjective {
-        fn_: obj_fn,
-        bounds,
-    };
+    let obj = CallableObjective::new(obj_fn, bounds);
+    let errors = obj.errors();
     let history = match preset {
         Preset::Boltzmann(p) => {
             let v = boltzmann_in_box(obj, p.t_init, p.sigma)
                 .map_err(|e| PyValueError::new_err(format!("{e}")))?;
-            crate::runner::run_rs_variant_from(v, n_epochs, steps_per_epoch, seed, start)
+            crate::runner::run_rs_variant_from(v, n_epochs, steps_per_epoch, seed, start, max_evals)
         }
         Preset::Fast(p) => {
             let v = fast_in_box(obj, p.t_init, p.gamma)
                 .map_err(|e| PyValueError::new_err(format!("{e}")))?;
-            crate::runner::run_rs_variant_from(v, n_epochs, steps_per_epoch, seed, start)
+            crate::runner::run_rs_variant_from(v, n_epochs, steps_per_epoch, seed, start, max_evals)
         }
         Preset::Gsa(p) => {
             let v = gsa_in_box(obj, p.t_init, p.q_v, p.q_a)
                 .map_err(|e| PyValueError::new_err(format!("{e}")))?;
-            crate::runner::run_rs_variant_from(v, n_epochs, steps_per_epoch, seed, start)
+            crate::runner::run_rs_variant_from(v, n_epochs, steps_per_epoch, seed, start, max_evals)
         }
     };
+    errors.finish(py)?;
     Ok(PyHistory::from(history))
 }
 
@@ -2100,9 +2265,12 @@ fn pilot_draws_qmc(n: usize, seed: u64) -> PyResult<Vec<Vec<f64>>> {
 /// `x0`, when supplied, replaces the first design point. Every start costs one
 /// evaluation, so the run makes `n_starts * (1 + n_epochs * steps_per_epoch)`
 /// calls to `obj_fn`, and every one of them lies inside `[low, high]`.
+/// `max_evals`, when supplied, is split as evenly as possible over the starts
+/// and caps the total.
 #[pyfunction]
-#[pyo3(signature = (obj_fn, low, high, preset, n_starts = 8, n_epochs = 100, steps_per_epoch = 200, seed = 42, x0 = None))]
+#[pyo3(signature = (obj_fn, low, high, preset, n_starts = 8, n_epochs = 100, steps_per_epoch = 200, seed = 42, x0 = None, max_evals = None))]
 fn run_qmc(
+    py: Python<'_>,
     obj_fn: Py<PyAny>,
     low: PyReadonlyArray1<'_, f64>,
     high: PyReadonlyArray1<'_, f64>,
@@ -2112,9 +2280,11 @@ fn run_qmc(
     steps_per_epoch: usize,
     seed: u64,
     x0: Option<PyReadonlyArray1<'_, f64>>,
+    max_evals: Option<usize>,
 ) -> PyResult<PyHistory> {
     let low_vec = low.as_slice()?.to_vec();
     let high_vec = high.as_slice()?.to_vec();
+    validate_max_evals(max_evals)?;
     if low_vec.len() != high_vec.len() {
         return Err(PyValueError::new_err(
             "low and high must have the same length",
@@ -2137,10 +2307,8 @@ fn run_qmc(
     preset.validate()?;
     let start = read_x0(x0, &low_vec, &high_vec)?;
     let bounds = Bounds::new(Array1::from_vec(low_vec), Array1::from_vec(high_vec), 1e-9);
-    let obj = CallableObjective {
-        fn_: obj_fn,
-        bounds,
-    };
+    let obj = CallableObjective::new(obj_fn, bounds);
+    let errors = obj.errors();
     let history = match preset {
         Preset::Boltzmann(p) => {
             let v = boltzmann_in_box(obj, p.t_init, p.sigma)
@@ -2152,6 +2320,7 @@ fn run_qmc(
                 steps_per_epoch,
                 seed,
                 start,
+                max_evals,
             )
         }
         Preset::Fast(p) => {
@@ -2164,6 +2333,7 @@ fn run_qmc(
                 steps_per_epoch,
                 seed,
                 start,
+                max_evals,
             )
         }
         Preset::Gsa(p) => {
@@ -2176,9 +2346,11 @@ fn run_qmc(
                 steps_per_epoch,
                 seed,
                 start,
+                max_evals,
             )
         }
     };
+    errors.finish(py)?;
     Ok(PyHistory::from(history))
 }
 

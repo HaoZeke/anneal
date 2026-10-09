@@ -683,3 +683,158 @@ def test_global_optimize_starts_from_x0_and_stays_in_the_box():
 def test_global_optimize_refuses_x0_outside_the_box():
     with pytest.raises(ValueError, match="outside"):
         global_optimize(styb_tang_2d, LOW, HIGH, budget=50, x0=np.array([0.0, 7.0]))
+
+
+def test_run_takes_array_likes_of_any_shape_and_stride():
+    # Positions arrive as (n_atoms, 3); bounds as lists; slices are strided.
+    n_atoms = 13
+    x0 = np.random.default_rng(3).uniform(-1.5, 1.5, (n_atoms, 3))
+    wide = np.zeros((n_atoms, 6))
+    wide[:, ::2] = x0
+    for start in [x0, x0.tolist(), wide[:, ::2], x0.astype(np.float32)]:
+        objective = Recorder(lj_cluster_energy)
+        h = run(
+            objective,
+            [-3.0] * (3 * n_atoms),
+            np.full((n_atoms, 3), 3.0),
+            Boltzmann(),
+            n_epochs=2,
+            steps_per_epoch=5,
+            seed=0,
+            x0=start,
+        )
+        assert objective.points[0] == pytest.approx(np.asarray(start, dtype=np.float64).ravel(), abs=1e-6)
+        assert len(h.best_pos) == 3 * n_atoms
+    run_qmc(
+        lj_cluster_energy,
+        np.full((n_atoms, 3), -3.0),
+        np.full((n_atoms, 3), 3.0),
+        Gsa(),
+        n_starts=2,
+        n_epochs=1,
+        steps_per_epoch=3,
+        x0=x0,
+    )
+
+
+@pytest.mark.parametrize("budget", [1, 2, 100, 1999, 2000])
+def test_run_max_evals_spends_exactly_the_budget(budget):
+    objective = Recorder(lj_cluster_energy)
+    run(
+        objective,
+        np.full(39, -3.0),
+        np.full(39, 3.0),
+        Boltzmann(),
+        n_epochs=-(-budget // 100),
+        steps_per_epoch=100,
+        seed=1,
+        max_evals=budget,
+    )
+    assert len(objective.points) == budget
+
+
+@pytest.mark.parametrize("budget", [3, 10, 97])
+def test_run_qmc_max_evals_spends_exactly_the_budget(budget):
+    objective = Recorder(shifted_quadratic)
+    run_qmc(
+        objective,
+        np.array([-1.0, -1.0]),
+        np.array([1.0, 1.0]),
+        Fast(),
+        n_starts=4,
+        n_epochs=10,
+        steps_per_epoch=10,
+        seed=2,
+        max_evals=budget,
+    )
+    assert len(objective.points) == budget
+
+
+def test_run_refuses_max_evals_of_zero():
+    with pytest.raises(ValueError, match="max_evals"):
+        run(styb_tang_2d, LOW, HIGH, Boltzmann(), max_evals=0)
+
+
+def test_run_leaves_a_nan_start():
+    def nan_at_origin(x):
+        return float("nan") if np.all(x == 0.0) else styb_tang_2d(x)
+
+    h = run(nan_at_origin, LOW, HIGH, Boltzmann(), n_epochs=5, steps_per_epoch=100, seed=4, x0=np.zeros(2))
+    assert np.isfinite(h.best_val)
+    assert h.total_accepted > 0
+
+
+def test_keyboard_interrupt_in_the_objective_ends_the_run():
+    calls = []
+
+    def interrupted(x):
+        calls.append(1)
+        if len(calls) == 10:
+            raise KeyboardInterrupt
+        return styb_tang_2d(x)
+
+    with pytest.raises(KeyboardInterrupt):
+        run(interrupted, LOW, HIGH, Boltzmann(), n_epochs=10, steps_per_epoch=100, seed=0)
+    assert len(calls) == 10
+    calls.clear()
+    with pytest.raises(KeyboardInterrupt):
+        global_optimize(interrupted, LOW, HIGH, budget=500, seed=0)
+    assert len(calls) == 10
+
+
+def test_a_non_number_from_the_objective_raises_type_error():
+    with pytest.raises(TypeError, match="must return a float"):
+        run(lambda x: None, LOW, HIGH, Boltzmann(), n_epochs=1, steps_per_epoch=3)
+
+
+def test_objective_exceptions_are_scored_and_reported_once():
+    calls = []
+
+    def flaky(x):
+        calls.append(np.array(x, copy=True))
+        if len(calls) % 7 == 3:
+            raise ValueError("solver did not converge")
+        return styb_tang_2d(x)
+
+    with pytest.warns(RuntimeWarning, match=r"raised 72 exception.*solver did not converge"):
+        h = run(flaky, LOW, HIGH, Boltzmann(), n_epochs=5, steps_per_epoch=100, seed=0)
+    assert len(calls) == 501
+    assert np.isfinite(h.best_val)
+    assert not any(np.array_equal(calls[i], h.best_pos) for i in range(2, 501, 7))
+
+
+def test_gsa_near_q_v_three_spends_the_whole_schedule():
+    objective = Recorder(lj_cluster_energy)
+    run(objective, np.full(39, -3.0), np.full(39, 3.0), Gsa(t_init=1.0, q_v=2.999, q_a=1.7), n_epochs=20, steps_per_epoch=100, seed=0)
+    points = np.array(objective.points)
+    assert len(points) == 1 + 20 * 100
+    assert np.all(np.isfinite(points))
+
+
+def test_no_evaluation_rounds_past_the_upper_wall():
+    low, high = np.array([-3.0, -1.0]), np.array([0.7, 0.3])
+    objective = Recorder(styb_tang_2d)
+    run(objective, low, high, Gsa(t_init=1.0, q_v=2.99, q_a=1.7), n_epochs=20, steps_per_epoch=100, seed=9, x0=high.copy())
+    points = np.array(objective.points)
+    assert np.all(points >= low) and np.all(points <= high)
+    objective = Recorder(lambda x: float(np.sum((x - 1.0) ** 2)))
+    global_optimize(objective, np.full(10, -3.0), np.full(10, 0.7), budget=600, seed=0)
+    points = np.array(objective.points)
+    assert np.all(points >= -3.0) and np.all(points <= 0.7)
+
+
+def test_global_optimize_takes_bounds_of_any_shape():
+    x0 = np.random.default_rng(5).uniform(-1.5, 1.5, (13, 3))
+    objective = Recorder(lj_cluster_energy)
+    global_optimize(objective, np.full((13, 3), -3.0), np.full((13, 3), 3.0), budget=50, seed=0, x0=x0)
+    assert objective.points[0] == pytest.approx(x0.ravel())
+
+
+@pytest.mark.parametrize("x0", [np.array([0.9, -0.3]), np.array([5.0, 5.0]), np.array([-5.0, 1.0])])
+def test_global_optimize_evaluates_x0_exactly(x0):
+    objective = Recorder(styb_tang_2d)
+    result = global_optimize(objective, LOW, HIGH, budget=1, seed=0, x0=x0)
+    assert len(objective.points) == 1
+    assert np.array_equal(objective.points[0], x0)
+    assert np.array_equal(result["best_pos"], x0)
+    assert result["best_val"] == styb_tang_2d(x0)

@@ -150,31 +150,45 @@ impl TsallisVisit {
     }
 }
 
+impl TsallisVisit {
+    /// `ln sigma(T, q_v)` of the visiting scale. Near `q_v = 3` the scale
+    /// itself underflows to zero while `|y|^{-exponent}` overflows, and their
+    /// product is NaN; the step is formed from logarithms instead.
+    fn log_sigma(&self, t: f64) -> f64 {
+        let qv = self.q_v;
+        // SciPy dual_annealing VisitingDistribution constants (qv-dependent).
+        let ln_factor2 = (4.0 - qv) * (qv - 1.0).ln();
+        let ln_factor3 = (2.0 - qv) / (qv - 1.0) * std::f64::consts::LN_2;
+        let ln_factor4_p =
+            0.5 * std::f64::consts::PI.ln() + ln_factor2 - ln_factor3 - (3.0 - qv).ln();
+        // factor6 = pi (1-f5) / sin(pi(1-f5)) / Gamma(2-f5) = Gamma(f5) by Euler reflection.
+        let factor5 = 1.0 / (qv - 1.0) - 0.5;
+        let ln_factor6 = gamma_fn(factor5).ln();
+        let ln_factor1 = t.ln() / (qv - 1.0);
+        let exponent = (qv - 1.0) / (3.0 - qv);
+        exponent * (ln_factor4_p + ln_factor1 - ln_factor6)
+    }
+}
+
 impl MoveKernel<f64> for TsallisVisit {
     fn propose<R: Rng + ?Sized>(&self, i: ArrayView1<f64>, t: f64, rng: &mut R) -> Array1<f64> {
         let qv = self.q_v;
-        // SciPy dual_annealing VisitingDistribution constants (qv-dependent).
-        let factor2 = (qv - 1.0).powf(4.0 - qv);
-        let factor3 = 2.0_f64.powf((2.0 - qv) / (qv - 1.0));
-        let factor4_p = std::f64::consts::PI.sqrt() * factor2 / (factor3 * (3.0 - qv));
-        // factor6 = pi (1-f5) / sin(pi(1-f5)) / Gamma(2-f5) = Gamma(f5) by Euler reflection.
-        let factor5 = 1.0 / (qv - 1.0) - 0.5;
-        let factor6 = gamma_fn(factor5);
-        let factor1 = t.powf(1.0 / (qv - 1.0));
-        let factor4 = factor4_p * factor1;
         let exponent = (qv - 1.0) / (3.0 - qv);
-        let sigma = (factor4 / factor6).powf(exponent);
+        let ln_sigma = self.log_sigma(t);
+        let ln_tail = VISIT_TAIL_LIMIT.ln();
         let normal = NormalDist::new(0.0, 1.0).expect("std normal");
         Array1::from_iter(i.iter().map(|&xi| {
             let x: f64 = normal.sample(rng);
             let y: f64 = normal.sample(rng);
-            let mut v = sigma * x / y.abs().powf(exponent);
-            if v > VISIT_TAIL_LIMIT {
-                v = VISIT_TAIL_LIMIT * rng.random::<f64>();
-            } else if v < -VISIT_TAIL_LIMIT {
-                v = -VISIT_TAIL_LIMIT * rng.random::<f64>();
-            }
-            xi + v
+            let ln_v = ln_sigma + x.abs().ln() - exponent * y.abs().ln();
+            // A step past the tail limit, or one the logarithms cannot
+            // resolve, is redrawn uniformly inside the limit (SciPy's rule).
+            let v = if ln_v.is_nan() || ln_v > ln_tail {
+                VISIT_TAIL_LIMIT * rng.random::<f64>()
+            } else {
+                ln_v.exp()
+            };
+            xi + v.copysign(x)
         }))
     }
 
@@ -194,12 +208,33 @@ pub fn reflect_coord(x: f64, lo: f64, hi: f64) -> f64 {
     if w.is_nan() || w <= 0.0 {
         return lo;
     }
+    // A point already in the box is its own image. Folding it anyway can
+    // round `lo + (x - lo)` past `hi` by an ulp.
+    if (lo..=hi).contains(&x) {
+        return x;
+    }
     let period = 2.0 * w;
     let mut y = (x - lo).rem_euclid(period);
     if y > w {
         y = period - y;
     }
-    lo + y
+    (lo + y).clamp(lo, hi)
+}
+
+/// [`reflect_coord`] together with its slope there: `1` where the fold keeps
+/// the direction (an even number of reflections), `-1` where it reverses it.
+/// The chain rule for `x -> f(reflect(x))` multiplies `df` by this slope.
+pub fn reflect_coord_with_slope(x: f64, lo: f64, hi: f64) -> (f64, f64) {
+    let w = hi - lo;
+    if w.is_nan() || w <= 0.0 {
+        return (lo, 0.0);
+    }
+    if (lo..=hi).contains(&x) {
+        return (x, 1.0);
+    }
+    let y = (x - lo).rem_euclid(2.0 * w);
+    let slope = if y > w { -1.0 } else { 1.0 };
+    (reflect_coord(x, lo, hi), slope)
 }
 
 /// Mirror-reflects every coordinate of `x` into `bounds` (see
@@ -313,6 +348,43 @@ mod tests {
         for &x in &[3.4_f64, 2.9, -1.5, 0.0, 4.99] {
             let r = reflect_coord(x, lo, hi);
             assert!(r >= lo - 1e-12 && r <= hi + 1e-12, "{r} not in box");
+        }
+    }
+
+    #[test]
+    fn reflect_coord_leaves_a_point_in_the_box_unchanged() {
+        for &x in &[-3.0, -1.2345678901234567, 0.0, 0.7] {
+            assert_eq!(reflect_coord(x, -3.0, 0.7).to_bits(), x.to_bits());
+        }
+        for &x in &[0.7000000000000001, 1.3, 4.4, -6.7, 12.1] {
+            let r = reflect_coord(x, -3.0, 0.7);
+            assert!((-3.0..=0.7).contains(&r), "{x} folded to {r}");
+        }
+    }
+
+    #[test]
+    fn reflect_slope_flips_on_odd_folds() {
+        assert_eq!(reflect_coord_with_slope(0.5, 0.0, 1.0), (0.5, 1.0));
+        let (y, s) = reflect_coord_with_slope(1.25, 0.0, 1.0);
+        assert!((y - 0.75).abs() < 1e-12 && s == -1.0);
+        let (y, s) = reflect_coord_with_slope(-0.25, 0.0, 1.0);
+        assert!((y - 0.25).abs() < 1e-12 && s == -1.0);
+        let (y, s) = reflect_coord_with_slope(2.25, 0.0, 1.0);
+        assert!((y - 0.25).abs() < 1e-12 && s == 1.0);
+    }
+
+    #[test]
+    fn tsallis_visit_is_finite_near_q_v_three() {
+        let mut rng = StdRng::seed_from_u64(11);
+        let x = array![0.0, 0.0, 0.0];
+        for q_v in [2.9, 2.99, 2.999, 2.9999] {
+            let kernel = TsallisVisit::new(q_v);
+            for t in [1e-3, 1.0, 50.0] {
+                for _ in 0..500 {
+                    let p = kernel.propose(x.view(), t, &mut rng);
+                    assert!(p.iter().all(|v| v.is_finite()), "q_v {q_v} t {t}: {p}");
+                }
+            }
         }
     }
 
