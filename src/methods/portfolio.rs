@@ -914,9 +914,10 @@ struct CmaArmState {
 
 impl CmaArmState {
     /// First run centred on the incumbent with step `sigma` (a fraction of
-    /// each box side); large-population restarts are never elitist. Runs are
-    /// separable above [`CMA_FULL_MAX_DIM`] or when the budget is shorter than
-    /// the full covariance's learning horizon.
+    /// each box side), charged to the small (local) regime, so the planner's
+    /// first restart searches the whole box; large-population restarts are
+    /// never elitist. Runs are separable above [`CMA_FULL_MAX_DIM`] or when
+    /// the budget is shorter than the full covariance's learning horizon.
     fn new(
         ledger: &BudgetLedger,
         bounds: &Bounds<f64>,
@@ -931,17 +932,26 @@ impl CmaArmState {
         let separable = dim > CMA_FULL_MAX_DIM
             || (budget as f64) < covariance_learning_evaluations(dim, lambda);
         let mean = to_unit_box(&ledger.incumbent(bounds), bounds);
-        let mut es = Self::run(mean.view(), sigma, lambda, &unit, seed, separable);
+        let mut es = Self::run(
+            mean.view(),
+            sigma,
+            lambda,
+            &unit,
+            seed,
+            separable,
+            ledger.best_get(),
+        );
         if elitist {
             es = es.with_elite(mean.view(), ledger.best_get());
         }
         Self {
             es,
-            regime: CmaRegime::Large,
+            regime: CmaRegime::Small,
             planner: Bipop::new(
                 lambda,
                 (budget / CMA_MIN_GENERATIONS).max(lambda),
                 CMA_LARGE_SIGMA,
+                CmaRegime::Small,
             ),
             unit,
             rng: StdRng::seed_from_u64(seed.rotate_left(17)),
@@ -950,7 +960,9 @@ impl CmaArmState {
         }
     }
 
-    /// One run, keeping only the diagonal of its covariance when `separable`.
+    /// One run from an incumbent valued `best`. It ends once its recent
+    /// best values span less than the portfolio's success threshold at that
+    /// value: past that point no slice of it can count as a success.
     fn run(
         mean: ArrayView1<f64>,
         sigma: f64,
@@ -958,8 +970,10 @@ impl CmaArmState {
         unit: &Bounds<f64>,
         seed: u64,
         separable: bool,
+        best: f64,
     ) -> CmaEs {
-        let es = CmaEs::new(mean, sigma, lambda, unit, seed);
+        let es = CmaEs::new(mean, sigma, lambda, unit, seed)
+            .with_tol_fun_hist(arm_success_threshold(ArmKind::Cma, best));
         if separable { es.separable() } else { es }
     }
 }
@@ -2947,6 +2961,7 @@ fn run_cma_arm<O>(
                 &state.unit,
                 run_seed,
                 state.separable,
+                ledger.best_get(),
             );
             if state.elitist && plan.regime == CmaRegime::Small {
                 es = es.with_elite(mean.view(), ledger.best_get());

@@ -59,6 +59,10 @@ const MAX_WIDTH_RATIO: f64 = 10.0;
 pub enum CmaStop {
     /// Recent best values and the latest generation span a negligible range.
     TolFun,
+    /// At least ten recent best values span less than the configured
+    /// absolute tolerance (pycma's `tolfunhist`; see
+    /// [`CmaEs::with_tol_fun_hist`]).
+    TolFunHist,
     /// The sampling width shrank below the resolution of the run.
     TolX,
     /// A tenth of a principal axis no longer moves the mean.
@@ -151,6 +155,7 @@ pub struct CmaEs {
     stall: usize,
     stop: Option<CmaStop>,
     elitist: bool,
+    tol_fun_hist: f64,
 }
 
 impl CmaEs {
@@ -220,6 +225,7 @@ impl CmaEs {
             stall: 0,
             stop: None,
             elitist: false,
+            tol_fun_hist: 0.0,
         }
     }
 
@@ -237,6 +243,18 @@ impl CmaEs {
         self.basis = Array2::zeros((0, 0));
         self.diag = Array1::ones(self.n);
         self.separable = true;
+        self
+    }
+
+    /// Ends the run once more than nine generation bests are on record and
+    /// the recent ones, up to the `10 + 30n/lambda` generations of the
+    /// TolHistFun window, span less than `tol` ([`CmaStop::TolFunHist`],
+    /// pycma's `tolfunhist`). A run that starts converged, or converges,
+    /// stops within ten generations of its last improvement larger than
+    /// `tol`. Zero (the default) disables it.
+    pub fn with_tol_fun_hist(mut self, tol: f64) -> Self {
+        assert!(tol >= 0.0 && tol.is_finite(), "tol_fun_hist must be finite");
+        self.tol_fun_hist = tol;
         self
     }
 
@@ -525,20 +543,20 @@ impl CmaEs {
         if !self.sigma.is_finite() || self.sigma * max_scale > MAX_WIDTH_RATIO * self.max_width {
             return Some(CmaStop::Diverged);
         }
+        let finite = |v: &&f64| v.is_finite();
+        let hist_max = self
+            .history
+            .iter()
+            .filter(finite)
+            .copied()
+            .fold(f64::NEG_INFINITY, f64::max);
+        let hist_min = self
+            .history
+            .iter()
+            .filter(finite)
+            .copied()
+            .fold(f64::INFINITY, f64::min);
         if self.history.len() >= self.history_len {
-            let finite = |v: &&f64| v.is_finite();
-            let hist_max = self
-                .history
-                .iter()
-                .filter(finite)
-                .copied()
-                .fold(f64::NEG_INFINITY, f64::max);
-            let hist_min = self
-                .history
-                .iter()
-                .filter(finite)
-                .copied()
-                .fold(f64::INFINITY, f64::min);
             let scale = self.best_f.abs().max(hist_max.abs());
             if hist_max.is_finite()
                 && hist_min.is_finite()
@@ -549,6 +567,14 @@ impl CmaEs {
             if self.stall >= self.history_len {
                 return Some(CmaStop::Stagnation);
             }
+        }
+        if self.tol_fun_hist > 0.0
+            && self.history.len() > 9
+            && hist_max.is_finite()
+            && hist_min.is_finite()
+            && hist_max - hist_min < self.tol_fun_hist
+        {
+            return Some(CmaStop::TolFunHist);
         }
         let width = (0..self.n)
             .map(|i| self.variance(i).sqrt().max(self.p_c[i].abs()))
@@ -605,6 +631,7 @@ pub struct Bipop {
     default_lambda: usize,
     max_lambda: usize,
     large_sigma: f64,
+    /// Large-regime runs so far, the first run included when it was one.
     large_runs: u32,
     last_large_lambda: usize,
     spent_large: usize,
@@ -613,15 +640,24 @@ pub struct Bipop {
 
 impl Bipop {
     /// Planner for the default population `default_lambda`, capped at
-    /// `max_lambda`, with `large_sigma` as the global step size. The first
-    /// run counts against the large regime.
-    pub fn new(default_lambda: usize, max_lambda: usize, large_sigma: f64) -> Self {
+    /// `max_lambda`, with `large_sigma` as the global step size. `first` is
+    /// the regime of the run started before the planner is consulted, to
+    /// which [`Bipop::record`] charges it: a large first run is the
+    /// default-population IPOP run, so the first planned large run doubles
+    /// it, while after a local (small) first run the first planned large run
+    /// uses the default population.
+    pub fn new(
+        default_lambda: usize,
+        max_lambda: usize,
+        large_sigma: f64,
+        first: CmaRegime,
+    ) -> Self {
         let default_lambda = default_lambda.max(2);
         Self {
             default_lambda,
             max_lambda: max_lambda.max(default_lambda),
             large_sigma,
-            large_runs: 0,
+            large_runs: u32::from(first == CmaRegime::Large),
             last_large_lambda: default_lambda,
             spent_large: 0,
             spent_small: 0,
@@ -639,11 +675,11 @@ impl Bipop {
     /// Plans the next restart.
     pub fn next_run<R: Rng + ?Sized>(&mut self, rng: &mut R) -> CmaRunPlan {
         if self.spent_large <= self.spent_small {
-            self.large_runs += 1;
             let lambda = self
                 .default_lambda
                 .saturating_mul(1usize << self.large_runs.min(20))
                 .min(self.max_lambda);
+            self.large_runs += 1;
             self.last_large_lambda = lambda;
             CmaRunPlan {
                 lambda,
@@ -782,8 +818,56 @@ mod tests {
     }
 
     #[test]
+    fn history_tolerance_ends_a_converged_run_early() {
+        // A local run near the minimum of a shifted sphere: the default
+        // stops wait for the history to flatten to 1e-12 of |f|, the
+        // history tolerance only for gains below 1e-4 of it.
+        let n = 10;
+        let bounds = unit_box(n, 1.0);
+        let f = |x: ArrayView1<f64>| 5.0 + x.iter().map(|v| (v - 0.3).powi(2)).sum::<f64>();
+        let start = Array1::from_elem(n, 0.31);
+        let run = |tol: f64| {
+            let mut es = CmaEs::new(start.view(), 0.01, default_lambda(n), &bounds, 3)
+                .with_tol_fun_hist(tol);
+            let mut evals = 0;
+            while es.stop_reason().is_none() && evals < 50_000 {
+                let x = es.ask();
+                es.tell(f(x.view()));
+                evals += 1;
+            }
+            (evals, es.stop_reason(), es.best().1)
+        };
+        let (plain_evals, plain_stop, _) = run(0.0);
+        let (hist_evals, hist_stop, hist_best) = run(5e-4);
+        assert_ne!(plain_stop, Some(CmaStop::TolFunHist));
+        assert_eq!(hist_stop, Some(CmaStop::TolFunHist));
+        assert!(
+            2 * hist_evals < plain_evals,
+            "history tolerance {hist_evals} against default {plain_evals}"
+        );
+        assert!(hist_best - 5.0 < 1e-3, "best {hist_best}");
+    }
+
+    #[test]
+    fn bipop_after_a_local_first_run_plans_a_default_large_run() {
+        let mut planner = Bipop::new(10, 640, 0.3, CmaRegime::Small);
+        let mut rng = StdRng::seed_from_u64(2);
+        planner.record(CmaRegime::Small, 500);
+        let large = planner.next_run(&mut rng);
+        assert_eq!(large.regime, CmaRegime::Large);
+        assert_eq!(large.lambda, 10);
+        assert_eq!(large.sigma, 0.3);
+        planner.record(CmaRegime::Large, 900);
+        assert_eq!(planner.next_run(&mut rng).regime, CmaRegime::Small);
+        planner.record(CmaRegime::Small, 400);
+        let large = planner.next_run(&mut rng);
+        assert_eq!(large.regime, CmaRegime::Large);
+        assert_eq!(large.lambda, 20);
+    }
+
+    #[test]
     fn bipop_alternates_regimes_by_budget() {
-        let mut planner = Bipop::new(10, 640, 2.0);
+        let mut planner = Bipop::new(10, 640, 2.0, CmaRegime::Large);
         let mut rng = StdRng::seed_from_u64(1);
         planner.record(CmaRegime::Large, 500);
         let small = planner.next_run(&mut rng);
