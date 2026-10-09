@@ -339,6 +339,9 @@ const DUAL_INITIAL_TEMP: f64 = 5230.0;
 const DUAL_ACCEPT_PARAM: f64 = -5.0;
 /// SciPy dual_annealing `restart_temp_ratio` (reanneal trigger).
 const DUAL_RESTART_TEMP_RATIO: f64 = 2.0e-5;
+/// Relative decrease that ends dual_annealing's L-BFGS-B local search
+/// (factr 1e7 times machine epsilon).
+const DUAL_LOCAL_FTOL: f64 = 1e7 * f64::EPSILON;
 /// GLE integrator timestep, matching the thermostat band resolution.
 const GLE_DT: f64 = 0.2;
 /// Minimum timestep exposed by the portfolio-level Bayesian GLE policy.
@@ -390,6 +393,9 @@ const QN_MIN_POLISH_GRADIENTS: usize = 3;
 const LOCAL_FIRST_POLISH_GRADIENTS: usize = 10;
 const LOCAL_FIRST_POLISH_SHARE: f64 = 0.2;
 const LOCAL_FIRST_POLISH_MAX_SHARE: f64 = 0.4;
+/// Budget share of the contiguous GSA anneal, with finite-difference local
+/// search, on mid-width values-only multimodal boxes.
+const GSA_LOCAL_FRONT_SHARE: f64 = 0.85;
 /// Omelyan trajectory length for the HMC arm.
 const HMC_L_STEPS: usize = 5;
 /// Additive-surrogate fit degree and inverse-CDF grid, matching the
@@ -873,6 +879,11 @@ struct GsaState {
     t_init: f64,
     /// Strategy-chain step counter (dual_annealing uses T/(step+1) accept).
     strategy_step: usize,
+    /// Lowest value any chain has reached; beating it triggers the
+    /// finite-difference local search.
+    best: f64,
+    /// Local search in progress from a chain point, resumed across slices.
+    local: Option<(usize, FdBfgs)>,
 }
 
 /// Persistent CMA-ES arm. Runs live in box-normalised coordinates, so one
@@ -1002,6 +1013,10 @@ struct ArmStates {
     cma: Option<CmaArmState>,
     /// Persistent finite-difference quasi-Newton descent.
     qn: Option<QnArmState>,
+    /// Without a gradient, the GSA arm follows each temperature step that
+    /// beats the chain best with a finite-difference descent, the L-BFGS-B
+    /// local search dual_annealing runs on improvement.
+    gsa_local_search: bool,
 }
 
 /// Persistent adaptive-Metropolis descent chain (D6 + D11 BFWT).
@@ -1553,6 +1568,7 @@ where
 
     // SciPy dual_annealing default initial_temp=5230 (translation-invariant).
     let t_init = DUAL_INITIAL_TEMP;
+    let best = vals.iter().copied().fold(f64::INFINITY, f64::min);
 
     (!xs.is_empty()).then(|| GsaState {
         xs,
@@ -1561,6 +1577,8 @@ where
         rng: StdRng::seed_from_u64(seed),
         t_init,
         strategy_step: 0,
+        best,
+        local: None,
     })
 }
 
@@ -1723,15 +1741,50 @@ fn dual_accept_prob(delta: f64, temperature_step: f64, accept_param: f64) -> f64
     (pqv_temp.ln() / (1.0 - accept_param)).exp().clamp(0.0, 1.0)
 }
 
+/// Advances the GSA arm's pending local search within the slice. Returns
+/// false when the slice ends first; a finished search moves its chain to
+/// the descent's endpoint when that is lower.
+fn advance_gsa_local<O>(
+    obj: &BudgetedObjective<'_, O>,
+    state: &mut GsaState,
+    start_used: usize,
+    slice: usize,
+) -> bool
+where
+    O: Objective<f64>,
+{
+    let Some((chain, mut engine)) = state.local.take() else {
+        return true;
+    };
+    while !engine.is_done() {
+        if obj.ledger.used_get().saturating_sub(start_used) >= slice || obj.ledger.exhausted() {
+            state.local = Some((chain, engine));
+            return false;
+        }
+        let x = engine.ask();
+        engine.tell(obj.eval(x.view()));
+    }
+    let value = engine.value();
+    if value.is_finite() && value < state.vals[chain] {
+        state.xs[chain] = engine.position().to_owned();
+        state.vals[chain] = value;
+        state.best = state.best.min(value);
+    }
+    true
+}
+
 /// Dual-annealing-style GSA epoch: box-scaled Tsallis cool + strategy
 /// chain (all-coordinate visit then per-coordinate visits) with reflection.
 /// Optional local polish after a strategy chain when `grad` is provided
-/// (mirrors dual_annealing local_search on improvement).
+/// (mirrors dual_annealing local_search on improvement); with
+/// `local_search` and no gradient the polish is a finite-difference descent
+/// with L-BFGS-B's stopping rule.
 fn run_persistent_gsa<O, G>(
     obj: &BudgetedObjective<'_, O>,
     grad: Option<&BudgetedGradient<'_, G>>,
     state: &mut GsaState,
     slice: usize,
+    local_search: bool,
 ) where
     O: Objective<f64>,
     G: Gradient<f64>,
@@ -1743,8 +1796,17 @@ fn run_persistent_gsa<O, G>(
     let visit = TsallisVisit::new(GSA_Q_V);
     let start_used = obj.ledger.used_get();
     let reanneal_floor = t0 * DUAL_RESTART_TEMP_RATIO;
+    let local_options = FdBfgsOptions {
+        ftol: DUAL_LOCAL_FTOL,
+        patience: 1,
+        max_iter: (6 * dim).clamp(100, 1000),
+        refine: false,
+    };
 
     while obj.ledger.used_get().saturating_sub(start_used) < slice && !obj.ledger.exhausted() {
+        if !advance_gsa_local(obj, state, start_used, slice) {
+            return;
+        }
         let mut temp = cooling.temperature(state.epoch).max(1e-300);
         // dual_annealing reannealing when T drops below initial * ratio.
         if temp < reanneal_floor {
@@ -1756,6 +1818,9 @@ fn run_persistent_gsa<O, G>(
         state.strategy_step = state.strategy_step.saturating_add(1);
         let t_accept = (temp / (state.strategy_step as f64)).max(1e-300);
         let mut improved = false;
+        // Best new record of this temperature step: dual_annealing's local
+        // search starts there once the strategy chain finishes.
+        let mut step_best: Option<(usize, Array1<f64>, f64)> = None;
 
         for chain in 0..state.xs.len() {
             if obj.ledger.used_get().saturating_sub(start_used) >= slice || obj.ledger.exhausted() {
@@ -1788,6 +1853,12 @@ fn run_persistent_gsa<O, G>(
                     crate::movekernel::reflect_into_box(y.view(), &bounds)
                 };
                 let proposal_val = obj.eval(proposal.view());
+                if proposal_val < state.best {
+                    state.best = proposal_val;
+                    if local_search && grad.is_none() {
+                        step_best = Some((chain, proposal.clone(), proposal_val));
+                    }
+                }
                 let accepted = if !proposal_val.is_finite() {
                     false
                 } else if !state.vals[chain].is_finite() {
@@ -1805,6 +1876,12 @@ fn run_persistent_gsa<O, G>(
             if state.vals[chain].is_finite() && state.vals[chain] < before {
                 improved = true;
             }
+        }
+        if let Some((chain, x, value)) = step_best.take() {
+            state.local = Some((
+                chain,
+                FdBfgs::new(x.view(), Some(value), &bounds, local_options),
+            ));
         }
         // dual_annealing local_search when energy improved this temperature step.
         if improved
@@ -2446,10 +2523,11 @@ fn run_arm<O, G>(
             if states.gsa.is_none() {
                 states.gsa = initialize_gsa_state(obj, slice, seed);
             }
+            let local_search = states.gsa_local_search && grad.is_none();
             if let Some(state) = states.gsa.as_mut() {
                 // Keep T₀ at box scale (do not re-inflate from |f|).
                 // In-epoch dual-style LS when grad is present (run_persistent_gsa).
-                run_persistent_gsa(obj, grad, state, slice);
+                run_persistent_gsa(obj, grad, state, slice, local_search);
             }
         }
         ArmKind::AmSa => {
@@ -3754,10 +3832,42 @@ where
         }
     }
 
+    // Mid-width values-only multimodal boxes (Rastrigin/Styblinski class):
+    // one contiguous dual_annealing-style anneal, GSA visiting with a
+    // finite-difference local search from every new record, takes most of
+    // the budget before the bandit residual and the endgame.
+    if policy == PortfolioPolicy::Auto
+        && matches!(
+            regime,
+            crate::methods::regime::OptimizationRegime::MultimodalGlobal
+        )
+        && mean_width(&bounds) < 50.0
+        && budgeted_grad.is_none()
+    {
+        states.gsa_local_search = true;
+        let front =
+            (((budget as f64) * GSA_LOCAL_FRONT_SHARE).round() as usize).min(ledger.remaining());
+        if front >= 8 {
+            ledger.cap_set(ledger.used_get() + front);
+            let mut front_rng = StdRng::seed_from_u64(seed ^ 0xD5A1_u64);
+            run_arm(
+                ArmKind::Gsa,
+                &budgeted_obj,
+                budgeted_grad.as_ref(),
+                &ledger,
+                &mut states,
+                &mut front_rng,
+                front,
+                budget,
+            );
+            ledger.cap_set(budget);
+        }
+    }
+
     // Auto MultimodalGlobal on *very* wide boxes only (Schwefel mean_width
-    // ~1000). Mid-width multimodal (Rastrigin/Styblinski ~10) keep bandit
-    // residual so dmc_pop/metad/endgame still run; dual-class GSA front-load
-    // is reserved for boxes where dual_annealing dominates.
+    // ~1000). Mid-width multimodal (Rastrigin/Styblinski ~10) keep a bandit
+    // residual so dmc_pop/metad/endgame still run; this explore/GSA/DE
+    // front-load is reserved for boxes where dual_annealing dominates.
     if policy == PortfolioPolicy::Auto
         && matches!(
             regime,
@@ -5626,5 +5736,41 @@ mod tests {
             assert_eq!(result.best_pos, start.to_vec());
             assert_eq!(obj.points()[0], start);
         }
+    }
+
+    #[test]
+    fn gsa_local_search_descends_from_each_new_record() {
+        // Mid-width values-only box: the anneal's local search should reach
+        // the bottom of a smooth bowl that visiting alone only approaches.
+        let obj = Traced::new(-5.12, 5.12, 4, |x| {
+            x.iter().map(|v| (v - 1.3).powi(2)).sum()
+        });
+        let ledger = BudgetLedger::new(400, 4);
+        let budgeted = BudgetedObjective {
+            inner: &obj,
+            ledger: &ledger,
+        };
+        let mut states = ArmStates {
+            gsa_local_search: true,
+            ..ArmStates::default()
+        };
+        let mut rng = StdRng::seed_from_u64(9);
+        for _ in 0..4 {
+            ledger.cap_set(ledger.used_get() + 100);
+            run_arm::<_, ShiftQuadratic>(
+                ArmKind::Gsa,
+                &budgeted,
+                None,
+                &ledger,
+                &mut states,
+                &mut rng,
+                100,
+                400,
+            );
+            ledger.cap_set(400);
+        }
+        assert_eq!(obj.points().len(), ledger.used_get());
+        assert!(obj.points().iter().all(|x| obj.bounds.contains(x.view())));
+        assert!(ledger.best_get() < 1e-8, "best {}", ledger.best_get());
     }
 }
