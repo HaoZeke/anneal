@@ -72,8 +72,8 @@ a warning.
 ** Fitter.fit_anneal
 
 [[file:../../../experiments/chemfit/0001-feat-fitter-add-Fitter.fit_anneal.patch][experiments/chemfit/0001-feat-fitter-add-Fitter.fit_anneal.patch]]
-and [[file:../../../experiments/chemfit/0002-fix-fitter-make-fit_anneal-follow-the-fitter-s-polic.patch][0002-fix-fitter-make-fit_anneal-follow-the-fitter-s-polic.patch]]
-add =Fitter.fit_anneal= to ChemFit 4 (=git am= both onto ChemFit's =next=;
+with [[file:../../../experiments/chemfit/0002-fix-fitter-make-fit_anneal-follow-the-fitter-s-polic.patch][0002]] and [[file:../../../experiments/chemfit/0003-fix-fitter-validate-seed-and-preset-in-fit_anneal-and.patch][0003]]
+add =Fitter.fit_anneal= to ChemFit 4 (=git am= all three onto ChemFit's =next=;
 the extra requires anneal 0.10.0 or later). It takes the box from
 =Fitter.bounds=, including array leaves with scalar or per-element bounds, and
 holds a coordinate with equal bounds fixed. It evaluates =initial_params=

@@ -1,0 +1,282 @@
+From 8b59ecee0a58858231ff9b4c5595180c49b24fd2 Mon Sep 17 00:00:00 2001
+From: Rohit Goswami <rgoswami@ieee.org>
+Date: Fri, 9 Oct 2026 15:04:59 +0000
+Subject: [PATCH] fix(fitter): validate seed and preset in fit_anneal and run
+ its tests in CI
+
+The nox test session installed .[test] without the anneal extra, so
+tests/test_fit_anneal.py was skipped upstream on every Python version,
+taking the only array-leaf test of check_params_near_bounds with it. The
+session installs .[test,anneal], and tests/test_utils.py tests array
+leaves itself.
+
+seed must be a whole number in [0, 2**64); None, -1, 1.5, True and 2**64
+raise ValueError naming seed, and restarts take the following seeds
+modulo 2**64. A preset of another family than method (Gsa with
+method='boltzmann', Boltzmann with 'gsa' or 'fast') raises instead of
+silently running the preset.
+
+docs/src/usage/fitter.rst follows the patched behaviour: exact budget,
+initial_params first, equal bounds fixed, this fit's best, the exception
+policy for callbacks and gradients, and method advice.
+---
+ docs/src/usage/fitter.rst | 28 +++++++++++++-------
+ noxfile.py                |  2 +-
+ src/chemfit/fitter.py     | 55 +++++++++++++++++++++++++++++----------
+ tests/test_fit_anneal.py  | 28 ++++++++++++++++++++
+ tests/test_utils.py       | 14 ++++++++++
+ 5 files changed, 102 insertions(+), 25 deletions(-)
+
+diff --git a/docs/src/usage/fitter.rst b/docs/src/usage/fitter.rst
+index 7d17e35..f98d33c 100644
+--- a/docs/src/usage/fitter.rst
++++ b/docs/src/usage/fitter.rst
+@@ -109,11 +109,13 @@ Simulated annealing with anneal
+ ----------------------------------
+ 
+ :py:meth:`~chemfit.fitter.Fitter.fit_anneal` runs the
+-`anneal <https://anneal.rgoswami.me>`_ drivers. It starts at
+-``initial_params``, never evaluates outside ``bounds`` (every leaf needs a
+-finite ``(lower, upper)`` pair), calls ``step()`` after each evaluation, and
+-evaluates the objective at most ``budget`` times. Array leaves are supported,
+-so atomic positions can be optimized directly:
++`anneal <https://anneal.rgoswami.me>`_ drivers (install the ``anneal`` extra,
++which requires anneal 0.10.0 or later). It evaluates ``initial_params`` first,
++never evaluates outside ``bounds`` (every leaf needs a finite
++``(lower, upper)`` pair, and equal bounds hold a coordinate fixed), calls
++``step()`` after each evaluation, and evaluates the objective exactly
++``budget`` times. It returns the best parameters evaluated in this fit. Array
++leaves are supported, so atomic positions can be optimized directly:
+ 
+ .. code-block:: python
+ 
+@@ -125,15 +127,21 @@ so atomic positions can be optimized directly:
+         initial_params={"positions": initial_positions},  # shape (n_atoms, 3)
+         bounds={"positions": (-3.0, 3.0)},
+     )
+-    opt_params = fitter.fit_anneal(budget=10_000, method="boltzmann")
++    opt_params = fitter.fit_anneal(budget=10_000, method="gsa")
+ 
+ ``method="portfolio"`` (the default) is anneal's general-purpose driver;
+ ``"boltzmann"``, ``"fast"`` and ``"gsa"`` are the classical simulated
+-annealing presets and ``"gpmd"`` is gap-proportional Metropolis descent.
++annealing presets and ``"gpmd"`` is gap-proportional Metropolis descent. On a
++smooth fit, such as thirteen Lennard-Jones atoms from random positions,
++``"gsa"`` and ``"gpmd"`` reach far lower losses than the default at 2000 and
++10000 evaluations (see the
++`anneal ChemFit guide <https://anneal.rgoswami.me/howto/chemfit.html>`_).
+ Steps are taken in units of each parameter's box width; pass ``preset=`` (for
+-example ``anneal.Boltzmann(t_init=0.5, sigma=0.01)``) to set the step and the
+-temperature, which is in loss units. An objective exception is re-raised once
+-anneal returns, unless the fitter swallows exceptions.
++example ``anneal.Boltzmann(t_init=0.5, sigma=0.01)`` with
++``method="boltzmann"``) to set the step and the temperature, which is in loss
++units. Exceptions from the objective, from callbacks run by ``step()`` and
++from ``gradient=`` follow ``swallow_exceptions`` and ``log_exceptions``; when
++one is re-raised, the fit stops at that evaluation.
+ 
+ ----------------------------------
+ Objective interface
+diff --git a/noxfile.py b/noxfile.py
+index 69b1eaa..24a1033 100644
+--- a/noxfile.py
++++ b/noxfile.py
+@@ -46,7 +46,7 @@ def tests_mpi(session):  # noqa: ANN001
+ # full set of tests for all python versions
+ @nox.session(python=["3.10", "3.11", "3.12", "3.13"])
+ def tests_all_versions(session):  # noqa: ANN001
+-    session.install(".[test]")
++    session.install(".[test,anneal]")
+     session.run("pytest", "tests/")
+ 
+ 
+diff --git a/src/chemfit/fitter.py b/src/chemfit/fitter.py
+index bc31dfd..1fd7e98 100644
+--- a/src/chemfit/fitter.py
++++ b/src/chemfit/fitter.py
+@@ -96,6 +96,7 @@ CallbackT = Callable[[int, list[FitterEvaluateContext]], None]
+ ANNEAL_METHODS = ("portfolio", "boltzmann", "fast", "gsa", "gpmd")
+ _CLASSICAL_ANNEAL_METHODS = ("boltzmann", "fast", "gsa")
+ _ANNEAL_FLOOR = "0.10.0"
++_SEED_MODULUS = 2**64
+ 
+ 
+ class _StopAnneal(BaseException):
+@@ -294,23 +295,43 @@ class _AnnealBox:
+ 
+ 
+ def _anneal_arguments(
++    anneal: Any,
+     method: str,
++    *,
+     budget: object,
++    seed: object,
+     preset: object | None,
+     steps_per_epoch: object | None,
+-    *,
+     has_gradient: bool,
+-) -> tuple[int, int]:
+-    """Validated ``(budget, steps_per_epoch)`` for one ``fit_anneal`` call."""
++) -> tuple[int, int, int]:
++    """Validated ``(budget, seed, steps_per_epoch)`` for one ``fit_anneal`` call."""
+ 
+     if method not in ANNEAL_METHODS:
+         msg = f"method must be one of {ANNEAL_METHODS}, got {method!r}"
+         raise ValueError(msg)
+     whole_budget = _whole_number("budget", budget)
++    if (
++        isinstance(seed, bool)
++        or not isinstance(seed, Integral)
++        or not 0 <= int(seed) < _SEED_MODULUS
++    ):
++        msg = f"seed must be a whole number in [0, 2**64), got {seed!r}"
++        raise ValueError(msg)
+     if method in _CLASSICAL_ANNEAL_METHODS:
+         if has_gradient:
+             msg = f"method {method!r} does not use a gradient"
+             raise ValueError(msg)
++        family = {
++            "boltzmann": anneal.Boltzmann,
++            "fast": anneal.Fast,
++            "gsa": anneal.Gsa,
++        }[method]
++        if preset is not None and not isinstance(preset, family):
++            msg = (
++                f"preset {type(preset).__name__} does not match method "
++                f"{method!r}; pass anneal.{family.__name__} or omit the preset"
++            )
++            raise ValueError(msg)
+     elif preset is not None:
+         msg = f"method {method!r} does not take a preset"
+         raise ValueError(msg)
+@@ -320,7 +341,7 @@ def _anneal_arguments(
+     steps = _whole_number(
+         "steps_per_epoch", 100 if steps_per_epoch is None else steps_per_epoch
+     )
+-    return whole_budget, steps
++    return whole_budget, int(seed), steps
+ 
+ 
+ class _AnnealSession:
+@@ -425,7 +446,8 @@ class _AnnealSession:
+                 or self.best_unit is None
+             ):
+                 return
+-            start, round_seed, cached_start = self.best_unit, round_seed + 1, 1
++            start, cached_start = self.best_unit, 1
++            round_seed = (round_seed + 1) % _SEED_MODULUS
+             if self.evaluations == spent:
+                 # Too few evaluations are left for the driver to start; a
+                 # Boltzmann walk spends exactly what remains.
+@@ -1114,10 +1136,12 @@ class Fitter(Generic[ParametersT]):
+                 from the best point with a new seed, and a remainder too
+                 small for it to start is spent by a Boltzmann walk from the
+                 best point.
+-            seed: Random seed forwarded to anneal.
++            seed: Random seed forwarded to anneal, a whole number in
++                ``[0, 2**64)``; restarts use the following seeds, modulo
++                ``2**64``.
+             preset: Optional ``anneal.Boltzmann``, ``anneal.Fast`` or
+-                ``anneal.Gsa`` for the classical methods. Steps are in units
+-                of the box width (anneal searches the unit cube); the
++                ``anneal.Gsa``, matching a classical ``method``. Steps are in
++                units of the box width (anneal searches the unit cube); the
+                 temperature is in loss units.
+             steps_per_epoch: Proposals per temperature for the classical
+                 methods, 100 when omitted.
+@@ -1137,18 +1161,21 @@ class Fitter(Generic[ParametersT]):
+             ImportError: If anneal is missing or older than 0.10.0.
+             TypeError: For a leaf that is not a real number or array.
+             ValueError: For an unknown method, a budget or steps_per_epoch
+-                that is not a whole number of at least 1, an argument the
+-                method does not use, a missing, infinite or mis-shaped bound,
++                that is not a whole number of at least 1, a seed outside
++                ``[0, 2**64)``, an argument the method does not use, a preset
++                of another method, a missing, infinite or mis-shaped bound,
+                 or an initial value outside its bounds.
+ 
+         """
+ 
+         anneal = _import_anneal()
+-        budget, steps = _anneal_arguments(
++        budget, seed, steps = _anneal_arguments(
++            anneal,
+             method,
+-            budget,
+-            preset,
+-            steps_per_epoch,
++            budget=budget,
++            seed=seed,
++            preset=preset,
++            steps_per_epoch=steps_per_epoch,
+             has_gradient=gradient is not None,
+         )
+         box = _AnnealBox(self.initial_parameters, self.bounds)
+diff --git a/tests/test_fit_anneal.py b/tests/test_fit_anneal.py
+index 07a43f7..2828cb6 100644
+--- a/tests/test_fit_anneal.py
++++ b/tests/test_fit_anneal.py
+@@ -381,3 +381,31 @@ def test_fit_anneal_names_the_anneal_floor(monkeypatch: pytest.MonkeyPatch):
+     )
+     with pytest.raises(ImportError, match=r"anneal >= 0\.10\.0.*found anneal"):
+         fitter.fit_anneal(budget=10)
++
++
++@pytest.mark.parametrize("seed", [None, -1, 1.5, True, 2**64])
++def test_fit_anneal_names_seed_in_seed_errors(seed: object):
++    fitter = Fitter(
++        lambda p: (p["x"] - 0.3) ** 2, initial_params={"x": 1.5}, bounds={"x": (-2, 2)}
++    )
++    with pytest.raises(ValueError, match="seed"):
++        fitter.fit_anneal(budget=10, seed=seed)  # type: ignore[arg-type]
++
++
++def test_fit_anneal_restarts_past_the_largest_seed():
++    recorder = Recorder(lambda p: (p["x"] - 0.3) ** 2)
++    fitter = Fitter(recorder, initial_params={"x": 1.5}, bounds={"x": (-2.0, 2.0)})
++    fitter.fit_anneal(budget=300, seed=2**64 - 1)
++    assert len(recorder.seen) == 300
++
++
++@pytest.mark.parametrize(
++    ("method", "preset"),
++    [("boltzmann", "Gsa"), ("gsa", "Boltzmann"), ("fast", "Boltzmann")],
++)
++def test_fit_anneal_rejects_a_preset_of_another_method(method: str, preset: str):
++    fitter = Fitter(
++        lambda p: (p["x"] - 0.3) ** 2, initial_params={"x": 1.5}, bounds={"x": (-2, 2)}
++    )
++    with pytest.raises(ValueError, match="does not match method"):
++        fitter.fit_anneal(budget=10, method=method, preset=getattr(anneal, preset)())
+diff --git a/tests/test_utils.py b/tests/test_utils.py
+index 54a3bc2..3fcde07 100644
+--- a/tests/test_utils.py
++++ b/tests/test_utils.py
+@@ -1,3 +1,4 @@
++import numpy as np
+ import pytest
+ 
+ from chemfit.debug_utils import log_all_methods
+@@ -30,6 +31,19 @@ def test_check_params():
+     assert problematic_params == expected
+ 
+ 
++def test_check_params_flags_an_array_leaf_when_any_element_is_near_a_bound():
++    params = {"positions": np.array([[0.0, 2.95], [0.5, -0.5]]), "eps": 1.0}
++    bounds = {
++        "positions": (-3.0, 3.0),
++        "eps": (np.float64(0.5), np.float64(2.0)),
++    }
++
++    problematic_params = check_params_near_bounds(params, bounds, relative_tol=0.05)
++
++    assert [entry[0] for entry in problematic_params] == ["positions"]
++    assert check_params_near_bounds(params, bounds, relative_tol=0.0) == []
++
++
+ def test_debug_log():
+     class MyCoolObject:
+         def __init__(self, a: int, b: int):
+-- 
+2.43.0
+
