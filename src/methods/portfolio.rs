@@ -391,6 +391,7 @@ const CMA_FULL_MAX_DIM: usize = 100;
 /// generators.
 const CMA_STREAM: u64 = 0xC3A5_C85C_97CB_3127;
 const QN_STREAM: u64 = 0xB492_B66F_BE98_F273;
+const START_STREAM: u64 = 0x9AE1_6A3B_2F90_404F;
 /// Kick radius, as a fraction of each box side, that restarts a converged
 /// finite-difference descent from the incumbent; adapted like the hop step.
 const QN_KICK0: f64 = 0.05;
@@ -3115,16 +3116,19 @@ const VALUES_ONLY_ARMS: [ArmKind; 6] = [
 /// Values-only allocation under the Auto policy (no gradient, no declared
 /// noise), whatever the box width.
 ///
-/// When the budget affords one ([`QN_AFFORDABLE_GRADIENTS`]), a
-/// finite-difference descent from the incumbent opens the run and goes on
-/// while its slices succeed, up to convergence. From the minimum it reaches,
-/// GSA and then CMA-ES each keep the turn while they pay: a phase ends once
-/// it has gone [`ROUNDS_PER_ARM`] slices without lowering the incumbent, or
-/// as long as its last gain took if that is longer, and it leaves the
-/// closing polish and one slice for each other arm not yet played. Bandit
-/// rounds over [`VALUES_ONLY_ARMS`] follow until the closing polish reserve
-/// remains. As in the main bandit, each arm not yet played takes one slice
-/// first, in list order, so the restart arm and the global searches get an
+/// Without `x0`, the start is the best of a seeded low-discrepancy design of
+/// `dim + 1` points (one gradient's worth, at most a tenth of the budget),
+/// so seeds vary it. When the budget affords one
+/// ([`QN_AFFORDABLE_GRADIENTS`]), a finite-difference descent from the
+/// incumbent opens the run and goes on while its slices succeed, up to
+/// convergence. From the minimum it reaches, GSA and then CMA-ES each keep
+/// the turn while they pay: a phase ends once it has gone
+/// [`ROUNDS_PER_ARM`] slices without lowering the incumbent, or as long as
+/// its last gain took if that is longer, and it leaves the closing polish
+/// and one slice for each other arm not yet played. Bandit rounds over
+/// [`VALUES_ONLY_ARMS`] follow until the closing polish reserve remains. As
+/// in the main bandit, each arm not yet played takes one slice first, in
+/// list order, so the restart arm and the global searches get an
 /// observation whenever the budget holds a slice each. After that a round
 /// picks uniformly with probability `1/round` (rounds counted from the
 /// opening); otherwise the arm whose last slice succeeded plays again, and
@@ -3148,6 +3152,21 @@ where
     let dim = bounds.dims;
     let gradient = dim + 1;
     states.values_only = true;
+    if ledger.incumbent_value().is_none() {
+        let count = gradient.min(budget.div_ceil(10));
+        let design = eindir_core::shifted_low_discrepancy_points(
+            &bounds,
+            count,
+            qmc_skip_from_seed(seed ^ START_STREAM),
+            seed ^ START_STREAM,
+        );
+        for row in design.outer_iter() {
+            if ledger.exhausted() {
+                break;
+            }
+            let _ = obj.eval(bounds.clip(row).view());
+        }
+    }
 
     let arms = VALUES_ONLY_ARMS;
     let k = arms.len();
@@ -5997,6 +6016,34 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn values_only_seeds_vary_the_run_with_and_without_a_start() {
+        let run = |seed, x0: Option<ArrayView1<f64>>| {
+            let obj = Traced::new(-2.0, 2.0, 4, rastrigin);
+            portfolio_optimize_from::<_, ShiftQuadratic>(
+                &obj,
+                None,
+                600,
+                seed,
+                None,
+                PortfolioPolicy::Auto,
+                x0,
+            );
+            obj.points()
+        };
+        let (a, b) = (run(1, None), run(2, None));
+        assert_eq!(a, run(1, None), "a seed replays exactly");
+        assert_ne!(
+            a[0], b[0],
+            "without a start the first point follows the seed"
+        );
+        // From a fixed start the opening descent is shared and the rest is not.
+        let start = Array1::from_elem(4, 1.0);
+        let (c, d) = (run(1, Some(start.view())), run(2, Some(start.view())));
+        assert_eq!((&c[0], &d[0]), (&start, &start));
+        assert_ne!(c, d, "seeds vary the run from a fixed start");
     }
 
     #[test]
