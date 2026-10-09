@@ -189,12 +189,29 @@ impl MoveKernel<f64> for TsallisVisit {
 /// in it keeps the proposal symmetric: `q(x -> y) = q(y -> x)`. The Metropolis
 /// test therefore still targets the box-restricted Gibbs measure with no
 /// Hastings correction (manuscript law L1 holds for the reflected proposal).
+/// A box with one infinite wall mirrors across its finite wall.
 pub fn reflect_coord(x: f64, lo: f64, hi: f64) -> f64 {
     let w = hi - lo;
     if w.is_nan() || w <= 0.0 {
         return lo;
     }
     let period = 2.0 * w;
+    if !period.is_finite() {
+        // The box is wider than half the f64 range or has an infinite wall,
+        // so fold the overshoot `d` across the crossed wall instead. A finite
+        // `d` is below `2 w`, so at most one more fold, across the other wall,
+        // is needed. An infinite `d` folds to -inf or NaN, which clamping
+        // against the crossed wall first sends to that wall.
+        let fold = |d: f64| if d < w { d } else { w - (d - w) };
+        return if x < lo {
+            (lo + fold(lo - x)).max(lo).min(hi)
+        } else if x > hi {
+            (hi - fold(x - hi)).min(hi).max(lo)
+        } else {
+            // Inside the box; a NaN goes to `lo` as below.
+            x.max(lo)
+        };
+    }
     let mut y = (x - lo).rem_euclid(period);
     if y > w {
         y = period - y;
@@ -320,6 +337,36 @@ mod tests {
             let r = reflect_coord(x, -1.0, 0.3);
             assert!((-1.0..=0.3).contains(&r), "{x} folded to {r}");
         }
+    }
+
+    #[test]
+    fn reflect_coord_mirrors_when_twice_the_width_overflows() {
+        let near = |a: f64, b: f64| (a - b).abs() <= 1e-12 * b.abs();
+        // Finite boxes wider than half the f64 range, then one whose width
+        // itself overflows.
+        assert!(near(reflect_coord(6.1e307, -6e307, 6e307), 5.9e307));
+        assert!(near(reflect_coord(-6.1e307, -6e307, 6e307), -5.9e307));
+        // More than the width past `hi`, so it also folds off `lo`.
+        let (lo, hi) = (-f64::MAX, 1e308 - f64::MAX);
+        assert!(near(reflect_coord(5e307, lo, hi), -1.5e308));
+        assert!(near(reflect_coord(1.5e308, -1e308, 1e308), 0.5e308));
+        assert!(near(reflect_coord(-1.5e308, -1e308, 1e308), -0.5e308));
+        assert_eq!(reflect_coord(0.5e308, -1e308, 1e308), 0.5e308);
+        // An infinite overshoot stops on the wall it crossed.
+        assert_eq!(reflect_coord(f64::INFINITY, -1e308, 1e308), 1e308);
+        assert_eq!(reflect_coord(f64::NEG_INFINITY, -6e307, 6e307), -6e307);
+    }
+
+    #[test]
+    fn reflect_coord_mirrors_across_the_finite_wall_of_a_half_infinite_box() {
+        let inf = f64::INFINITY;
+        assert_eq!(reflect_coord(-0.5, 0.0, inf), 0.5);
+        assert_eq!(reflect_coord(-3.0, 0.0, inf), 3.0);
+        assert_eq!(reflect_coord(0.5, -inf, 0.0), -0.5);
+        assert_eq!(reflect_coord(2.0, -inf, -1.0), -4.0);
+        assert_eq!(reflect_coord(7.0, 0.0, inf), 7.0);
+        assert_eq!(reflect_coord(-inf, 0.0, inf), 0.0);
+        assert_eq!(reflect_coord(inf, -inf, 0.0), 0.0);
     }
 
     #[test]
