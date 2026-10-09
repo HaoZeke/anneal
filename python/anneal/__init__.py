@@ -54,7 +54,7 @@ from anneal._core import (
     gpmd_optimize as _core_gpmd_optimize,
     amsa_optimize as _core_amsa_optimize,
     bfwt_optimize as _core_bfwt_optimize,
-    run,
+    run as _core_run,
     run_hmc,
     run_qmc,
 )
@@ -65,6 +65,52 @@ from anneal.tvm_ffi import (
     tvm_ffi_tensor_metadata,
     tvm_ffi_tensors_from_history,
 )
+
+
+def run(
+    obj_fn,
+    low,
+    high,
+    preset,
+    n_epochs: int = 100,
+    steps_per_epoch: int = 200,
+    seed: int = 42,
+    x0=None,
+    boundary: str = "reflect",
+):
+    """Run a classical preset in a bounded box.
+
+    Python objective failures are re-raised after the native loop stops calling
+    the objective. This preserves callback and evaluation failures from
+    integrations such as ChemFit instead of silently returning an infinite
+    objective value.
+    """
+    failure = None
+
+    def guarded_objective(position):
+        nonlocal failure
+        if failure is not None:
+            return np.inf
+        try:
+            return obj_fn(position)
+        except Exception as exc:
+            failure = exc
+            return np.inf
+
+    history = _core_run(
+        guarded_objective,
+        np.asarray(low, dtype=np.float64),
+        np.asarray(high, dtype=np.float64),
+        preset,
+        int(n_epochs),
+        int(steps_per_epoch),
+        int(seed),
+        None if x0 is None else np.asarray(x0, dtype=np.float64),
+        str(boundary),
+    )
+    if failure is not None:
+        raise failure
+    return history
 
 
 def cluster_search(obj_fn, grad_fn, n: int, budget: int, seed: int = 0, recommended: bool = True):
