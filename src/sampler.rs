@@ -196,7 +196,14 @@ where
             return false;
         }
         let proposal_val = nan_as_worst(self.obj.eval(proposal_pos.view()));
-        let delta = proposal_val - state.cur.val;
+        // Two infeasible points sit on one flat plateau. `inf - inf` is NaN,
+        // which every acceptance rule rejects, so a walk started there could
+        // never reach the feasible region; the plateau is walked as level.
+        let delta = if proposal_val == f64::INFINITY && state.cur.val == f64::INFINITY {
+            0.0
+        } else {
+            proposal_val - state.cur.val
+        };
         let p = self.accept.accept_prob(delta, temp);
         let u: f64 = rng.random();
         if u < p {

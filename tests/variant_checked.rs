@@ -278,6 +278,47 @@ fn a_nan_start_does_not_freeze_the_walk() {
     assert!(h.epochs.iter().map(|e| e.accepted).sum::<usize>() > 0);
 }
 
+/// Styblinski-Tang that is infeasible (NaN) on the half-plane `x0 > 1`.
+struct InfeasibleHalfPlane {
+    inner: StybTang2D,
+}
+
+impl Objective<f64> for InfeasibleHalfPlane {
+    fn dim(&self) -> usize {
+        2
+    }
+
+    fn bounds(&self) -> &Bounds<f64> {
+        self.inner.bounds()
+    }
+
+    fn eval(&self, x: ArrayView1<f64>) -> f64 {
+        if x[0] > 1.0 {
+            f64::NAN
+        } else {
+            self.inner.eval(x)
+        }
+    }
+}
+
+#[test]
+fn a_walk_started_on_an_infeasible_plateau_reaches_the_feasible_region() {
+    for seed in 0..10 {
+        let objective = InfeasibleHalfPlane {
+            inner: StybTang2D::new(),
+        };
+        let h = run_rs_variant_from(
+            boltzmann_in_box(objective, 1.0, 0.5).unwrap(),
+            10,
+            100,
+            seed,
+            Some(array![4.5, 0.0]),
+            None,
+        );
+        assert!(h.best.val.is_finite(), "seed {seed} never left the plateau");
+    }
+}
+
 #[test]
 fn matching_reflected_box_pair_is_certified() {
     let objective = StybTang2D::new();
