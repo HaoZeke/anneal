@@ -11,6 +11,7 @@ Public API:
   - Config.recommended(n) / Config.for_cluster(n), Ledger(budget),
     cluster_search(obj_fn, grad_fn, n, budget, seed, recommended): measured
     cluster-search layer.
+  - fit_anneal, fit_chemfit, run_benchmark: gradient-free ChemFit bridges.
 
 The IISE-manuscript composition laws L1-L4 are enforced inside the Rust
 SaVariant::checked constructor; preset constructors call it under the hood.
@@ -964,6 +965,14 @@ __all__ = [
     "bfwt_optimize",
     "global_optimize",
     "global_optimize_objective",
+    "ChemFitVector",
+    "chemfit_box",
+    "fit_anneal",
+    "fit_chemfit",
+    "flatten_parameters",
+    "run_benchmark",
+    "run_fitter",
+    "unflatten_parameters",
     "run",
     "run_device",
     "run_ensemble",
@@ -973,3 +982,14 @@ __all__ = [
     "tvm_ffi_tensor_metadata",
     "tvm_ffi_tensors_from_history",
 ]
+
+from anneal.chemfit import (  # noqa: E402
+    ChemFitVector,
+    chemfit_box,
+    fit_anneal,
+    fit_chemfit,
+    flatten_parameters,
+    run_benchmark,
+    run_fitter,
+    unflatten_parameters,
+)
