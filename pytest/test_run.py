@@ -565,6 +565,30 @@ def test_run_qmc_sees_deceptive_basin():
     assert h.best_val < -0.7
 
 
+def test_run_qmc_only_evaluates_inside_bounds():
+    evaluated = []
+
+    def bounded_objective(x):
+        point = np.asarray(x, dtype=np.float64).copy()
+        evaluated.append(point)
+        return float(np.sum(point**2))
+
+    run_qmc(
+        bounded_objective,
+        np.array([-0.25, -0.5]),
+        np.array([0.25, 0.5]),
+        Fast(t_init=10.0, gamma=50.0),
+        n_starts=4,
+        n_epochs=3,
+        steps_per_epoch=20,
+        seed=SEED,
+    )
+
+    points = np.asarray(evaluated)
+    assert np.all(points >= np.array([-0.25, -0.5]))
+    assert np.all(points <= np.array([0.25, 0.5]))
+
+
 def test_run_is_deterministic():
     h1 = run(
         styb_tang_2d,
