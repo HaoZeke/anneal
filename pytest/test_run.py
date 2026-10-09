@@ -719,7 +719,14 @@ def test_array_like_inputs_match_float64_arrays(driver, convert):
     for lo, hi, start in [(low, high, x0), map(convert, (low, high, x0))]:
         obj, seen = recording(lambda x: float(np.sum(x**2)))
         h = driver(
-            obj, lo, hi, Fast(gamma=2.0), n_epochs=3, steps_per_epoch=10, seed=5, x0=start
+            obj,
+            lo,
+            hi,
+            Fast(gamma=2.0),
+            n_epochs=3,
+            steps_per_epoch=10,
+            seed=5,
+            x0=start,
         )
         runs.append(((h.best_val, h.best_pos, h.total_accepted), np.array(seen)))
 
