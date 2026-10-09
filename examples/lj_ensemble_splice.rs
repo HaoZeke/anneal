@@ -477,6 +477,43 @@ struct Population {
     schedule: Option<DiversityAnnealer>,
 }
 
+/// Every chain's current minimum and when it arrived there. A stalled chain
+/// whose minimum another chain reached first only repeats that chain's
+/// work, and `DEDUP_STALL` restarts it from a fresh cluster.
+struct Registry {
+    current: Vec<Option<(f64, u64)>>,
+    arrivals: u64,
+    restarts: usize,
+}
+
+impl Registry {
+    fn new(chains: usize) -> Self {
+        Self {
+            current: vec![None; chains],
+            arrivals: 0,
+            restarts: 0,
+        }
+    }
+
+    fn arrive(&mut self, chain: usize, energy: f64) {
+        self.arrivals += 1;
+        self.current[chain] = Some((energy, self.arrivals));
+    }
+
+    /// Whether another chain sits at this chain's energy and got there first.
+    fn repeated(&self, chain: usize) -> bool {
+        let Some((energy, since)) = self.current[chain] else {
+            return false;
+        };
+        let tolerance = 1e-6 * energy.abs().max(1.0);
+        self.current.iter().enumerate().any(|(other, entry)| {
+            other != chain
+                && entry
+                    .is_some_and(|(e, arrived)| (e - energy).abs() <= tolerance && arrived < since)
+        })
+    }
+}
+
 fn population_distance(a: ArrayView1<f64>, b: ArrayView1<f64>) -> f64 {
     if dissimilarity_is_ord() {
         let (Some(a), Some(b)) = (a.as_slice(), b.as_slice()) else {
@@ -745,6 +782,7 @@ fn run_chain(
     resume: Option<Array1<f64>>,
     shared_surfaces: Option<SharedSurfaceAllocator>,
     population: Option<Arc<Mutex<Population>>>,
+    registry: Option<Arc<Mutex<Registry>>>,
 ) -> ChainReport {
     let mut cfg = Config::recommended(n);
     if std::env::var("MOVE").ok().as_deref() == Some("wales") {
@@ -1077,6 +1115,15 @@ fn run_chain(
                 population.offer(chain, energy, slice, exchange.pbh_dcut_scale);
             }
         }
+        // RESTART_STALL restarts any chain that has not lowered its current
+        // minimum for that many hops; DEDUP_STALL only one whose minimum
+        // another chain reached first.
+        let restart_stall = env_usize("RESTART_STALL", 0);
+        let dedup_stall = env_usize("DEDUP_STALL", 0);
+        let mut mark_current = 0usize;
+        if let Some(registry) = registry.as_ref() {
+            registry.lock().expect("registry").arrive(chain, energy);
+        }
         let mut best = energy;
         let mut best_state = state.clone();
         let mut improvements = Vec::new();
@@ -1120,6 +1167,34 @@ fn run_chain(
             }
             if ledger.remaining() == 0 {
                 break;
+            }
+            let stalled = hops.saturating_sub(mark_current);
+            let restart = (restart_stall > 0 && stalled >= restart_stall)
+                || (dedup_stall > 0
+                    && stalled >= dedup_stall
+                    && registry.as_ref().is_some_and(|registry| {
+                        registry.lock().expect("registry").repeated(chain)
+                    }));
+            if restart {
+                let fresh = random_cluster(n, 0.7, cfg.min_separation, &mut rng);
+                let (fresh_energy, fresh_state) = relax(&mut ledger, fresh.view(), relax_steps);
+                energy = fresh_energy;
+                state = fresh_state;
+                mark_current = hops;
+                if let Some(registry) = registry.as_ref() {
+                    let mut registry = registry.lock().expect("registry");
+                    registry.arrive(chain, energy);
+                    registry.restarts += 1;
+                }
+                if energy < best {
+                    best = energy;
+                    best_state = state.clone();
+                    mark_hop = hops;
+                    if improvements.len() < 512 {
+                        improvements.push((hops, ledger.spent(), 0, energy));
+                    }
+                }
+                continue;
             }
             hops += 1;
             let mut trial = state.clone();
@@ -1201,6 +1276,10 @@ fn run_chain(
                 });
                 energy = child;
                 state = child_state;
+                mark_current = hops;
+                if let Some(registry) = registry.as_ref() {
+                    registry.lock().expect("registry").arrive(chain, energy);
+                }
                 if energy < best {
                     best = energy;
                     best_state = state.clone();
@@ -1361,12 +1440,15 @@ fn main() {
         let population = exchange
             .pbh
             .then(|| Arc::new(Mutex::new(Population::new(chains))));
+        let registry =
+            (env_usize("DEDUP_STALL", 0) > 0).then(|| Arc::new(Mutex::new(Registry::new(chains))));
         let reports: Vec<ChainReport> = std::thread::scope(|scope| {
             let handles: Vec<_> = (0..chains)
                 .map(|chain| {
                     let board = Arc::clone(&board);
                     let shared = shared.clone();
                     let population = population.clone();
+                    let registry = registry.clone();
                     let exchange = exchange.clone();
                     let seed = ensemble
                         .wrapping_mul(0x9E37_79B9)
@@ -1375,7 +1457,7 @@ fn main() {
                     scope.spawn(move || {
                         run_chain(
                             n, budget, seed, chain, &board, exchange, target, None, shared,
-                            population,
+                            population, registry,
                         )
                     })
                 })
@@ -1408,6 +1490,12 @@ fn main() {
             if r.hit_by_splice {
                 splice_hits += 1;
             }
+        }
+        if let Some(registry) = registry.as_ref() {
+            println!(
+                "      dedup: {} restarts",
+                registry.lock().expect("registry").restarts
+            );
         }
         if let Some(population) = population.as_ref() {
             let population = population.lock().expect("population");
@@ -1566,7 +1654,7 @@ fn run_halving(
                             scope.spawn(move || {
                                 run_chain(
                                     n, per_chain, seed, chain, &board, exchange, target, resume,
-                                    None, None,
+                                    None, None, None,
                                 )
                             })
                         })
