@@ -6,9 +6,11 @@ Current ChemFit names the middle two ``evaluate`` and ``step``; ChemFit 3.1
 named them ``ask`` and ``tell``. Every bridge here drives ``evaluate`` and
 ``step`` when the fitter has both, ``ask`` and ``tell`` otherwise, and refuses
 a fitter with neither pair before calling ``init``; only :func:`run_benchmark`
-still drives ``evaluate`` or ``ask`` alone, as anneal 0.10.0 did, with a
-FutureWarning. ``finish`` receives the best evaluated parameters and its
-return value is the result; ChemFit returns the parameters it was given.
+still drives ``evaluate`` or ``ask`` without its partner, as anneal 0.10.0
+did, with a FutureWarning, and sends the step notices to the other pair's
+``tell`` or ``step`` when the fitter has one. ``finish`` receives the best
+evaluated parameters and its return value is the result; ChemFit returns the
+parameters it was given.
 
 Nested parameter dicts are flattened only at the optimizer boundary and
 rebuilt on the way back. A leaf keeps its type: a Python number comes back as
@@ -205,7 +207,9 @@ def _protocol(fitter: Any, *, without_step: str | None = None):
 
     A fitter with neither whole pair, or without ``finish``, is a TypeError.
     ``without_step`` names a bridge that, as in anneal 0.10.0, still drives
-    ``evaluate`` or ``ask`` alone, with a FutureWarning and no step notices.
+    ``evaluate`` or ``ask`` without its partner, with a FutureWarning: the
+    step notices go to the other pair's ``tell`` or ``step`` when the fitter
+    has one, and nowhere otherwise.
     """
     name = type(fitter).__name__
     half = None
@@ -227,12 +231,15 @@ def _protocol(fitter: Any, *, without_step: str | None = None):
     if not callable(getattr(fitter, "finish", None)):
         raise TypeError(f"the fitter needs finish; {name} has none")
     if step is None:
+        other = "tell" if step_name == "step" else "step"
+        step, notices = getattr(fitter, other, None), f"{other} notices"
+        if not callable(step):
+            step, notices = _no_step, "no step notices"
         _deprecated(
-            f"{without_step} drives {name} through {evaluate_name} with no step "
-            f"notices, since it has no {step_name}; give it a {step_name} method. "
+            f"{without_step} drives {name} through {evaluate_name} with {notices}, "
+            f"since it has no {step_name}; give it a {step_name} method. "
             f"A fitter without {step_name} will raise in a future release."
         )
-        step = _no_step
     return evaluate, step
 
 
@@ -1528,9 +1535,10 @@ def run_benchmark(
 
     As in anneal 0.10.0, a preset of another method, or ``method="sa"``
     with a preset, runs the preset; a preset under the portfolio is ignored;
-    and a fitter with ``evaluate`` or ``ask`` but no ``step`` or ``tell`` is
-    driven without step notices. Each gives a FutureWarning and will raise
-    in a future release.
+    and a fitter with ``evaluate`` but no ``step``, or ``ask`` but no
+    ``tell``, is driven with its ``tell`` or ``step`` as the step notice, or
+    without step notices when it has neither. Each gives a FutureWarning and
+    will raise in a future release.
 
     ``low`` and ``high`` may be vectors or scalars (broadcast). When they
     are omitted, bounds are read from ``benchmark_context["bounds"]`` or

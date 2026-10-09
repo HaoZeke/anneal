@@ -84,7 +84,7 @@ initial vector as =x0=, and reconstruct each objective vector with the matching
 =anneal.chemfit.fit_anneal=, =fit_chemfit=, =run_benchmark= and =run_fitter=
 do all of this for any nested parameter dictionary. They make the same
 feature check and refuse a fitter with neither pair before =init=; only
-=run_benchmark= still drives =evaluate= or =ask= alone, with a
+=run_benchmark= still drives =evaluate= or =ask= without its partner, with a
 =FutureWarning=. The first exception the fitter raises, or a loss that is not
 a real number, stops the fit: the fitter is not called again, =finish= is
 skipped, and the exception reaches the caller.
