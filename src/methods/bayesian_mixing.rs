@@ -9,7 +9,7 @@ use rand::rngs::StdRng;
 use rand_distr::{Beta, Distribution};
 
 use crate::history::{EpochLine, History, State};
-use crate::runner::qmc_skip_from_seed;
+use crate::runner::{qmc_skip_from_seed, qmc_starts};
 use crate::sampler::Sampler;
 
 /// Result of an automatic Bayesian chain-mixing run.
@@ -64,8 +64,7 @@ impl<S: Sampler<f64>> BayesianMixingSampler<S> {
         let mut rngs: Vec<StdRng> = Vec::with_capacity(n_chains);
         let mut states: Vec<State> = Vec::with_capacity(n_chains);
         if let Some(bounds) = qmc_bounds {
-            let starts =
-                eindir_core::low_discrepancy_points(bounds, n_chains, qmc_skip_from_seed(seed));
+            let starts = qmc_starts(bounds, n_chains, qmc_skip_from_seed(seed));
             for c in 0..n_chains {
                 let mut rng = StdRng::seed_from_u64(seed.wrapping_add(c as u64));
                 let state = self
