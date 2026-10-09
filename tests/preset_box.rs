@@ -3,7 +3,8 @@
 //! `low == high` never moves, a supplied start is the first point evaluated,
 //! and inside the box the chain consumes the RNG exactly as the
 //! unconstrained composition did. A NaN objective value at the start neither
-//! freezes the chain nor survives as its best value.
+//! freezes the chain nor survives as its best value, and a start that meets
+//! only NaN never wins a multistart.
 
 use std::sync::{Arc, Mutex};
 
@@ -56,10 +57,11 @@ fn recorder(low: &Array1<f64>, high: &Array1<f64>) -> (Recorder, Seen) {
     (obj, seen)
 }
 
-/// The squared norm, except NaN at the first point evaluated: the start of
-/// the chain, or of the first chain of a multistart.
+/// The squared norm, except NaN at the first `n_nan` points evaluated, which
+/// begin with the start of the chain, or of the first chain of a multistart.
 struct NanFirst {
     bounds: Bounds<f64>,
+    n_nan: usize,
     vals: Arc<Mutex<Vec<f64>>>,
 }
 
@@ -74,7 +76,11 @@ impl Objective<f64> for NanFirst {
 
     fn eval(&self, x: ArrayView1<f64>) -> f64 {
         let mut vals = self.vals.lock().unwrap();
-        let val = if vals.is_empty() { f64::NAN } else { x.dot(&x) };
+        let val = if vals.len() < self.n_nan {
+            f64::NAN
+        } else {
+            x.dot(&x)
+        };
         vals.push(val);
         val
     }
@@ -288,6 +294,7 @@ fn a_nan_start_is_left_and_never_kept_as_the_best() {
                 let vals = Arc::<Mutex<Vec<f64>>>::default();
                 let obj = NanFirst {
                     bounds: Bounds::new(low.clone(), high.clone(), 0.0),
+                    n_nan: 1,
                     vals: Arc::clone(&vals),
                 };
                 let history = run_preset(which, obj, 0.5, 2.62, n_starts, 1, start);
@@ -300,6 +307,33 @@ fn a_nan_start_is_left_and_never_kept_as_the_best() {
                     "preset {which}, {n_starts:?} starts, x0 {start:?}"
                 );
             }
+        }
+    }
+}
+
+#[test]
+fn a_start_that_meets_only_nan_never_wins_the_multistart() {
+    // The first chain evaluates nothing but NaN, so its best value stays NaN,
+    // and the later starts, which meet numbers, must beat it.
+    let low = array![-1.0, -1.0];
+    let high = array![1.0, 1.0];
+    let x0 = array![0.5, 0.5];
+    let first_chain = 1 + N_EPOCHS * STEPS_PER_EPOCH;
+    for which in 0..3 {
+        for start in [None, Some(x0.view())] {
+            let vals = Arc::<Mutex<Vec<f64>>>::default();
+            let obj = NanFirst {
+                bounds: Bounds::new(low.clone(), high.clone(), 0.0),
+                n_nan: first_chain,
+                vals: Arc::clone(&vals),
+            };
+            let history = run_preset(which, obj, 0.5, 2.62, Some(3), 1, start);
+            let vals = vals.lock().unwrap();
+            let lowest = vals[first_chain..]
+                .iter()
+                .copied()
+                .fold(f64::INFINITY, f64::min);
+            assert_eq!(history.best.val, lowest, "preset {which}, x0 {start:?}");
         }
     }
 }
