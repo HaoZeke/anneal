@@ -48,6 +48,8 @@ pub mod bfwt;
 /// Resumable box-constrained CMA-ES with BIPOP restart planning.
 pub mod cma_es;
 pub mod dmc_population;
+/// Resumable projected BFGS on finite-difference gradients.
+pub mod fd_bfgs;
 /// Target-free Feynman--Kac reconfiguration for cooperative search chains.
 pub mod feynman_kac;
 pub mod gle_langevin;

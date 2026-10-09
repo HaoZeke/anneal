@@ -43,6 +43,7 @@ use crate::methods::bayesian_pilot::{
     fit_laplace_skew_corrected, pilot_draws_qmc,
 };
 use crate::methods::cma_es::{Bipop, CmaEs, CmaRegime, default_lambda};
+use crate::methods::fd_bfgs::{FdBfgs, FdBfgsOptions};
 use crate::methods::gle_langevin::gle_langevin_preconditioned_sa;
 use crate::methods::local_polish::{
     QmcPolishResult, projected_gradient_polish, qmc_gsa_global_search,
@@ -370,6 +371,11 @@ const CMA_LARGE_SIGMA: f64 = 0.3;
 /// IPOP stops doubling once a run could no longer afford this many
 /// generations of the budget.
 const CMA_MIN_GENERATIONS: usize = 40;
+/// Kick radius, as a fraction of each box side, that restarts a converged
+/// finite-difference descent from the incumbent; adapted like the hop step.
+const QN_KICK0: f64 = 0.05;
+const QN_KICK_MIN: f64 = 1e-3;
+const QN_KICK_MAX: f64 = 0.5;
 /// Omelyan trajectory length for the HMC arm.
 const HMC_L_STEPS: usize = 5;
 /// Additive-surrogate fit degree and inverse-CDF grid, matching the
@@ -714,6 +720,8 @@ enum ArmKind {
     DmcPop,
     /// BIPOP CMA-ES restarted from the incumbent.
     Cma,
+    /// Projected BFGS on finite-difference gradients from the incumbent.
+    Qn,
 }
 
 impl ArmKind {
@@ -736,6 +744,7 @@ impl ArmKind {
             ArmKind::AmSa => "am_sa",
             ArmKind::DmcPop => "dmc_pop",
             ArmKind::Cma => "cma",
+            ArmKind::Qn => "qn",
         }
     }
 
@@ -832,6 +841,19 @@ fn to_unit_box(x: &Array1<f64>, bounds: &Bounds<f64>) -> Array1<f64> {
     )
 }
 
+/// Persistent finite-difference quasi-Newton arm: one descent at a time,
+/// moved to the incumbent when another arm improves on it and kicked from
+/// the incumbent once it converges.
+struct QnArmState {
+    engine: FdBfgs,
+    kick: f64,
+    /// Incumbent value when the current descent began.
+    base_val: f64,
+    /// Incumbent value when the arm last yielded its slice.
+    seen_best: f64,
+    rng: StdRng,
+}
+
 #[derive(Clone, Debug)]
 struct PilotState {
     posterior: LaplacePosterior,
@@ -890,6 +912,8 @@ struct ArmStates {
     am: Option<AmSaState>,
     /// Persistent CMA-ES run and restart planner.
     cma: Option<CmaArmState>,
+    /// Persistent finite-difference quasi-Newton descent.
+    qn: Option<QnArmState>,
 }
 
 /// Persistent adaptive-Metropolis descent chain (D6 + D11 BFWT).
@@ -2627,6 +2651,7 @@ fn run_arm<O, G>(
             }
         }
         ArmKind::Cma => run_cma_arm(obj, ledger, states, slice, seed, budget),
+        ArmKind::Qn => run_qn_arm(obj, ledger, states, slice, seed),
         ArmKind::Reduced => {
             // Active-subspace collapse: charged pilot gradients estimate
             // the dominant gradient-covariance directions, then GSA
@@ -2732,6 +2757,61 @@ fn run_cma_arm<O>(
     }
 }
 
+/// One slice of the finite-difference quasi-Newton arm. Stencil points and
+/// line-search trials are each one charged evaluation.
+fn run_qn_arm<O>(
+    obj: &BudgetedObjective<'_, O>,
+    ledger: &BudgetLedger,
+    states: &mut ArmStates,
+    slice: usize,
+    seed: u64,
+) where
+    O: Objective<f64>,
+{
+    let bounds = obj.bounds();
+    let best = ledger.best_get();
+    let state = states.qn.get_or_insert_with(|| QnArmState {
+        engine: FdBfgs::new(
+            ledger.incumbent(bounds).view(),
+            best.is_finite().then_some(best),
+            bounds,
+            FdBfgsOptions::default(),
+        ),
+        kick: QN_KICK0,
+        base_val: best,
+        seen_best: best,
+        rng: StdRng::seed_from_u64(seed),
+    });
+    if best < state.seen_best && best < state.engine.value() {
+        state
+            .engine
+            .restart_at(ledger.incumbent(bounds).view(), Some(best), false);
+        state.base_val = best;
+    }
+    let start = ledger.used_get();
+    while ledger.used_get() - start < slice && ledger.remaining() > 0 {
+        if state.engine.is_done() {
+            let best = ledger.best_get();
+            state.kick = if best < state.base_val {
+                (state.kick * HOP_GROW).min(QN_KICK_MAX)
+            } else {
+                (state.kick * HOP_SHRINK).max(QN_KICK_MIN)
+            };
+            let mut x = ledger.incumbent(bounds);
+            for i in 0..x.len() {
+                let noise: f64 = rand_distr::StandardNormal.sample(&mut state.rng);
+                x[i] += state.kick * (bounds.high[i] - bounds.low[i]) * noise;
+            }
+            let x = crate::movekernel::reflect_into_box(x.view(), bounds);
+            state.engine.restart_at(x.view(), None, true);
+            state.base_val = best;
+        }
+        let x = state.engine.ask();
+        state.engine.tell(obj.eval(x.view()));
+    }
+    state.seen_best = ledger.best_get();
+}
+
 fn arm_kind_from_name(name: &str) -> Option<ArmKind> {
     Some(match name {
         "explore" => ArmKind::Explore,
@@ -2751,6 +2831,7 @@ fn arm_kind_from_name(name: &str) -> Option<ArmKind> {
         "am_sa" => ArmKind::AmSa,
         "dmc_pop" => ArmKind::DmcPop,
         "cma" => ArmKind::Cma,
+        "qn" => ArmKind::Qn,
         _ => return None,
     })
 }
@@ -5037,6 +5118,7 @@ mod tests {
             ledger.cap_set((ledger.used_get() + slice).min(budget));
             match arm {
                 ArmKind::Cma => run_cma_arm(&budgeted, &ledger, &mut states, slice, seed, budget),
+                ArmKind::Qn => run_qn_arm(&budgeted, &ledger, &mut states, slice, seed),
                 _ => unreachable!(),
             }
             ledger.cap_set(budget);
@@ -5102,5 +5184,20 @@ mod tests {
             replay(ArmKind::Cma, 6),
             "the sampling stream follows the seed"
         );
+    }
+
+    #[test]
+    fn qn_arm_charges_every_evaluation_inside_the_box() {
+        assert_charges_inside_the_box(ArmKind::Qn);
+    }
+
+    #[test]
+    fn qn_arm_resumes_identically_across_slices() {
+        assert_resumes_identically(ArmKind::Qn);
+    }
+
+    #[test]
+    fn qn_arm_replays_by_seed() {
+        assert_eq!(replay(ArmKind::Qn, 5), replay(ArmKind::Qn, 5));
     }
 }
