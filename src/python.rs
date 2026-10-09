@@ -29,6 +29,13 @@ use crate::variant::{boltzmann_in_box, fast_in_box, gsa_in_box};
 /// `eindir::Bounds::new` only checks equal length; `mkpoint` panics when
 /// `low[i] >= high[i]`. Surface a clear `ValueError` at the Python boundary.
 fn validate_box_bounds(low: &[f64], high: &[f64]) -> PyResult<()> {
+    validate_bounds(low, high, false)
+}
+
+/// The checks of [`validate_box_bounds`], each naming the dimension and the
+/// reason. With `allow_equal`, `low[i] == high[i]` pins that coordinate, as
+/// `run_qmc` allows, and only `low[i] > high[i]` is refused.
+fn validate_bounds(low: &[f64], high: &[f64], allow_equal: bool) -> PyResult<()> {
     if low.len() != high.len() {
         return Err(PyValueError::new_err(
             "low and high must have the same length",
@@ -55,7 +62,13 @@ fn validate_box_bounds(low: &[f64], high: &[f64]) -> PyResult<()> {
                 "the box is too wide: the sum of its widths is not finite",
             ));
         }
-        if lo.partial_cmp(&hi) != Some(std::cmp::Ordering::Less) {
+        if allow_equal {
+            if hi < lo {
+                return Err(PyValueError::new_err(format!(
+                    "low[{i}] must not exceed high[{i}] (got {lo} > {hi})"
+                )));
+            }
+        } else if lo.partial_cmp(&hi) != Some(std::cmp::Ordering::Less) {
             return Err(PyValueError::new_err(format!(
                 "low[{i}] must be strictly less than high[{i}] (got {lo} >= {hi})"
             )));
@@ -2332,32 +2345,7 @@ fn run_qmc(
     let low_vec = low.as_slice()?.to_vec();
     let high_vec = high.as_slice()?.to_vec();
     validate_max_evals(max_evals)?;
-    if low_vec.len() != high_vec.len() {
-        return Err(PyValueError::new_err(
-            "low and high must have the same length",
-        ));
-    }
-    if low_vec.is_empty() {
-        return Err(PyValueError::new_err(
-            "bounds must have at least one dimension",
-        ));
-    }
-    for (i, (&lo, &hi)) in low_vec.iter().zip(high_vec.iter()).enumerate() {
-        validate_finite_bound(i, lo, hi)?;
-    }
-    if low_vec.iter().zip(high_vec.iter()).any(|(&lo, &hi)| {
-        !lo.is_finite() || !hi.is_finite() || !(2.0 * (hi - lo)).is_finite() || hi < lo
-    }) || !low_vec
-        .iter()
-        .zip(high_vec.iter())
-        .map(|(&lo, &hi)| hi - lo)
-        .sum::<f64>()
-        .is_finite()
-    {
-        return Err(PyValueError::new_err(
-            "each bound must be finite and each upper bound must be greater than or equal to the lower bound",
-        ));
-    }
+    validate_bounds(&low_vec, &high_vec, true)?;
     preset.validate()?;
     let start = read_x0(x0, &low_vec, &high_vec)?;
     let bounds = Bounds::new(Array1::from_vec(low_vec), Array1::from_vec(high_vec), 1e-9);
