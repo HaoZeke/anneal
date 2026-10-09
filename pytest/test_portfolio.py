@@ -117,9 +117,9 @@ def test_global_optimize_accepts_initial_position():
 def test_global_optimize_rejects_bad_initial_position():
     dim = 2
     fn, _, low, high = _rastrigin(dim)
-    with pytest.raises(ValueError, match="same length"):
+    with pytest.raises(ValueError, match="has length"):
         anneal.global_optimize(fn, low, high, budget=50, seed=0, x0=np.array([0.0]))
-    with pytest.raises(ValueError, match="finite"):
+    with pytest.raises(ValueError, match="not finite"):
         anneal.global_optimize(
             fn, low, high, budget=50, seed=0, x0=np.array([0.0, np.inf])
         )
