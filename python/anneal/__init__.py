@@ -14,6 +14,9 @@ Public API:
   - Config.recommended(n) / Config.for_cluster(n), Ledger(budget),
     cluster_search(obj_fn, grad_fn, n, budget, seed, recommended): measured
     cluster-search layer.
+  - chemfit.fit(fitter, budget, method, bounds, ...): fit a ChemFit Fitter
+    with these drivers from its start, inside its bounds. ChemFit itself is
+    optional and is never imported.
 
 The IISE-manuscript composition laws L1-L4 are enforced inside the Rust
 SaVariant::checked constructor; preset constructors call it under the hood.
@@ -69,6 +72,7 @@ from anneal.tvm_ffi import (
     tvm_ffi_tensor_metadata,
     tvm_ffi_tensors_from_history,
 )
+from anneal import chemfit as chemfit
 
 
 def cluster_search(obj_fn, grad_fn, n: int, budget: int, seed: int = 0, recommended: bool = True):
