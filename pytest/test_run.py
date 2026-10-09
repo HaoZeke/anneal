@@ -1079,21 +1079,26 @@ def test_qmc_gsa_global_search_never_rounds_past_the_upper_wall():
 
 
 @pytest.mark.parametrize(
-    ("low", "high"),
+    ("low", "high", "message"),
     [
-        (np.array([1.0, -1.0]), np.array([-1.0, 1.0])),
-        (np.array([-np.inf, -1.0]), np.array([1.0, 1.0])),
-        (np.array([np.nan, -1.0]), np.array([1.0, 1.0])),
-        (np.array([-1.8e308, -1.0]), np.array([1.8e308, 1.0])),
-        (np.array([-6e307, -1.0]), np.array([6e307, 1.0])),
-        (np.full(5, -2e307), np.full(5, 2e307)),
-        # Regression pins: finite bounds whose width overflows, which made run
-        # panic before 0.10.0 refused them.
-        (np.array([-1e308, -1.0]), np.array([1e308, 1.0])),
-        (np.array([0.0, -np.finfo(float).max]), np.array([1.0, np.finfo(float).max])),
+        # run_qmc lets low == high pin a coordinate; the others need low < high.
+        (np.array([1.0, -1.0]), np.array([-1.0, 1.0]), r"low\[0\] must (be strictly less than|not exceed) high\[0\]"),
+        (np.array([-np.inf, -1.0]), np.array([1.0, 1.0]), r"low\[0\] = -inf must be finite"),
+        (np.array([np.nan, -1.0]), np.array([1.0, 1.0]), r"low\[0\] = NaN must be finite"),
+        (np.array([-1.8e308, -1.0]), np.array([1.8e308, 1.0]), r"low\[0\] = -inf must be finite"),
+        (np.array([-6e307, -1.0]), np.array([6e307, 1.0]), "with a finite width, at dimension 0"),
+        (np.full(5, -2e307), np.full(5, 2e307), "the sum of its widths is not finite"),
+        # Regression pins, except for the message of run_qmc: finite bounds
+        # whose width overflows, which made run panic before 0.10.0 refused them.
+        (np.array([-1e308, -1.0]), np.array([1e308, 1.0]), "with a finite width, at dimension 0"),
+        (
+            np.array([0.0, -np.finfo(float).max]),
+            np.array([1.0, np.finfo(float).max]),
+            "with a finite width, at dimension 1",
+        ),
     ],
 )
-def test_every_box_driver_refuses_bounds_it_cannot_use(low, high):
+def test_every_box_driver_refuses_bounds_it_cannot_use(low, high, message):
     objective = Recorder(lambda x: float(np.sum(np.asarray(x) ** 2)))
     calls = [
         lambda: run(objective, low, high, Boltzmann(), n_epochs=1, steps_per_epoch=2),
@@ -1102,9 +1107,17 @@ def test_every_box_driver_refuses_bounds_it_cannot_use(low, high):
         lambda: qmc_gsa_global_search(objective, low, high, max_evals=20),
     ]
     for call in calls:
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match=message):
             call()
     assert objective.points == []
+
+
+def test_run_qmc_holds_a_coordinate_whose_bounds_are_equal():
+    """Regression pin: run_qmc accepts low == high, as 0.10.0 does."""
+    objective = Recorder(shifted_quadratic)
+    run_qmc(objective, [-1.0, 0.25], [1.0, 0.25], Boltzmann(), n_starts=2, n_epochs=1, steps_per_epoch=5)
+    assert len(objective.points) == 2 * (1 + 5)
+    assert all(x[1] == 0.25 for x in objective.points)
 
 
 @pytest.mark.parametrize("driver", [run, run_qmc])
