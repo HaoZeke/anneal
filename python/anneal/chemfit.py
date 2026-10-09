@@ -1,8 +1,9 @@
 """ChemFit bridges for the gradient-free drivers.
 
-``fit_anneal`` and ``fit_chemfit`` speak the ``init`` / ``ask`` / ``tell`` /
-``finish`` protocol. ``run_benchmark`` also accepts the ``evaluate`` / ``step``
-names. Nested parameter dictionaries are flattened only at the optimizer
+Every bridge drives a fitter through ``init``, one loss call per candidate,
+and ``finish``. The loss call is ChemFit 4's ``evaluate`` / ``step`` when the
+fitter has them and the ``ask`` / ``tell`` of ChemFit 3.1 otherwise. Nested
+parameter dictionaries are flattened only at the optimizer
 boundary and rebuilt on the way back. Every evaluation stays inside the box,
 and the fitter's initial parameters are the start unless a caller passes
 another ``x0``. The default driver is the Thompson-allocated portfolio.
@@ -210,10 +211,11 @@ def fit_anneal(
 
     Args:
       fitter: ChemFit ``Fitter`` (duck-typed: ``initial_parameters``,
-        ``bounds``, ``init``, ``ask``, ``tell``, ``finish``).
-      budget: total objective-evaluation budget. The portfolio charges one
-        unit per evaluation; the classical drivers run
-        ``n_epochs * steps_per_epoch <= budget`` evaluations.
+        ``bounds``, ``init``, ``evaluate`` and ``step`` or ``ask`` and
+        ``tell``, ``finish``).
+      budget: total objective evaluations, the start included. The
+        portfolio makes at most ``budget``; the classical drivers make
+        exactly ``budget``.
       driver: ``"portfolio"`` (default; Thompson-allocated SOTA driver
         over the gradient-free arms — QMC restarts, basin hopping,
         differential evolution, GSA, parallel tempering — with no
@@ -228,8 +230,9 @@ def fit_anneal(
         mirroring ``initial_params``); entries without bounds fall back
         to ``x0 +/- bound_span``.
       bound_span: half-width of the fallback box around unbounded entries.
-      steps_per_epoch: classical-driver epoch width; epochs are derived
-        as ``max(1, budget // steps_per_epoch)``.
+      steps_per_epoch: classical-driver epoch width; the cooling schedule
+        runs ``ceil(budget / steps_per_epoch)`` epochs, the last one cut
+        short at ``budget``.
       preset_kwargs: extra kwargs for the preset constructor
         (e.g. ``{"t_init": 5.0}``); classical drivers only.
 
@@ -277,14 +280,14 @@ def fit_anneal(
     # such as zeros is pulled onto the box before the first evaluation.
     start_vector = np.minimum(np.maximum(start_vector, low_vec), high_vec)
 
-    # The fitter owns bookkeeping; every ask is one optimizer step.
+    # The fitter owns bookkeeping; every evaluation is one optimizer step.
     fitter.init()
 
     def obj(x: np.ndarray) -> float:
         params = unflatten_parameters(np.asarray(x, dtype=np.float64), spec, template)
-        loss = fitter.ask(params)
-        fitter.tell()
-        return float(loss)
+        loss = _loss(fitter, params)
+        _step(fitter)
+        return loss
 
     if driver == "portfolio":
         result = global_optimize(obj, low_vec, high_vec, budget, seed=int(seed), x0=start_vector)
@@ -292,16 +295,16 @@ def fit_anneal(
     else:
         preset = _classical_preset(driver, preset_kwargs)
         steps = max(1, min(int(steps_per_epoch), budget))
-        epochs = max(1, budget // steps)
         history = run(
             obj,
             low_vec,
             high_vec,
             preset,
-            n_epochs=epochs,
+            n_epochs=-(-budget // steps),
             steps_per_epoch=steps,
             seed=int(seed),
             x0=start_vector,
+            max_evals=budget,
         )
         best_pos = np.asarray(history.best_pos, dtype=np.float64)
 
@@ -490,9 +493,11 @@ def fit_chemfit(
 
     Args:
         fitter: a :class:`chemfit.Fitter` with ``initial_parameters`` and
-            optional ``bounds``. Only the ask/tell/finish protocol is used,
-            so gradient-free drivers never need forces.
-        budget: total objective evaluations (one ``ask`` each).
+            optional ``bounds``. Only ``init``, ``evaluate`` / ``step`` (or
+            ``ask`` / ``tell``) and ``finish`` are used, so gradient-free
+            drivers never need forces.
+        budget: total objective evaluations (one loss call each), the start
+            included; the classical chains spend all of it.
         method: ``"portfolio"`` (default; Thompson-allocated SOTA including
             parallel-tempering communicating chains), or ``"boltzmann"``,
             ``"fast"``, ``"gsa"`` for the bound-respecting classical chain
@@ -500,10 +505,10 @@ def fit_chemfit(
         seed: RNG seed forwarded to the anneal driver.
         default_span: half-width around the initial value for parameters
             ChemFit leaves unbounded.
-        tell_every: portfolio evaluations between ``fitter.tell()`` calls
-            so registered callbacks still fire.
-        steps_per_epoch: classical-chain evaluations per epoch; epochs are
-            derived as ``budget // steps_per_epoch``.
+        tell_every: portfolio evaluations between ``step`` (or ``tell``)
+            calls so registered callbacks still fire.
+        steps_per_epoch: classical-chain evaluations per epoch; the cooling
+            schedule runs ``ceil(budget / steps_per_epoch)`` epochs.
         **preset_kwargs: ``t_init`` / ``sigma`` / ``gamma`` / ``q_v`` /
             ``q_a`` forwarded to the classical preset constructors.
 
@@ -525,21 +530,18 @@ def fit_chemfit(
     def ask_vector(x: np.ndarray) -> float:
         nonlocal n_evals
         params = vector.unpack(np.asarray(x, dtype=np.float64))
-        loss = fitter.ask(params)
-        if isinstance(loss, list):
-            if len(loss) != 1:
-                raise ValueError("expected one loss per candidate")
-            loss = loss[0]
+        loss = _loss(fitter, params)
         n_evals += 1
         if method == "portfolio" and n_evals % max(1, int(tell_every)) == 0:
-            fitter.tell()
+            _step(fitter)
         elif method != "portfolio" and n_evals % max(1, int(steps_per_epoch)) == 0:
-            fitter.tell()
-        return float(loss)
+            _step(fitter)
+        return loss
 
+    start = np.minimum(np.maximum(vector.x0, low), high)
     if method == "portfolio":
         out = global_optimize(
-            ask_vector, low, high, budget=int(budget), seed=int(seed)
+            ask_vector, low, high, budget=int(budget), seed=int(seed), x0=start
         )
         best = np.asarray(out["best_pos"], dtype=np.float64)
     elif method in ("boltzmann", "fast", "gsa"):
@@ -558,16 +560,17 @@ def fit_chemfit(
                 q_a=float(preset_kwargs.get("q_a", 1.7)),
             ),
         }
-        n_epochs = max(1, int(budget) // max(1, int(steps_per_epoch)))
+        steps = max(1, int(steps_per_epoch))
         history = run(
             ask_vector,
             low,
             high,
             presets[method],
-            n_epochs=n_epochs,
-            steps_per_epoch=max(1, int(steps_per_epoch)),
+            n_epochs=-(-int(budget) // steps),
+            steps_per_epoch=steps,
             seed=int(seed),
-            x0=np.asarray(vector.x0, dtype=np.float64),
+            x0=start,
+            max_evals=int(budget),
         )
         best = np.asarray(history.best_pos, dtype=np.float64)
     else:
@@ -747,6 +750,8 @@ def run_benchmark(
     ``method`` is ``portfolio`` (the budget-only global optimizer), or
     ``boltzmann``, ``fast``, or ``gsa``. The chain starts at
     ``initial_params``. Every coordinate the fitter sees lies in the box.
+    The fitter sees at most ``budget`` evaluations, the start included, and
+    exactly ``budget`` from a classical chain.
 
     ``low`` and ``high`` may be vectors or scalars (broadcast). When they
     are omitted, bounds are read from ``benchmark_context["bounds"]`` or
@@ -792,16 +797,16 @@ def run_benchmark(
         if preset is None:
             preset = {"boltzmann": Boltzmann(), "fast": Fast(), "gsa": Gsa()}[name]
         steps = max(1, min(int(steps_per_epoch), budget))
-        epochs = max(1, budget // steps)
         history = run(
             obj,
             box_low,
             box_high,
             preset,
-            n_epochs=epochs,
+            n_epochs=-(-budget // steps),
             steps_per_epoch=steps,
             seed=int(seed),
             x0=x0,
+            max_evals=budget,
         )
         best = np.asarray(history.best_pos, dtype=np.float64)
     return _finish(fitter, unflatten_params(best, spec))
