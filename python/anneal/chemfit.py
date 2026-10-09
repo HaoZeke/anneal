@@ -821,13 +821,14 @@ def run_fitter(
 ) -> dict[str, Any]:
     """Run a ChemFit fitter with the gradient-free bridges.
 
-    A fitter that already implements ``fit_anneal`` is called as it stands.
-    Otherwise ``method="global_optimize"`` uses the portfolio and
-    ``method="sa"`` uses the Boltzmann preset, both through :func:`fit_anneal`.
+    ``method="global_optimize"`` is the portfolio and ``method="sa"`` the
+    Boltzmann preset; other names pass through. A fitter that implements
+    ``fit_anneal`` is called with that method name, otherwise :func:`fit_anneal`
+    drives it.
     """
+    driver = {"global_optimize": "portfolio", "sa": "boltzmann"}.get(method, method)
     if hasattr(fitter, "fit_anneal"):
         return fitter.fit_anneal(
-            budget=budget, method=method, preset=preset, seed=seed, **kwargs
+            budget=budget, method=driver, preset=preset, seed=seed, **kwargs
         )
-    driver = {"global_optimize": "portfolio", "sa": "boltzmann"}.get(method, method)
     return fit_anneal(fitter, int(budget), driver=driver, seed=int(seed))
