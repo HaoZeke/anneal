@@ -1370,20 +1370,19 @@ def _initial_mapping(initial: Any) -> Mapping:
     """``fitter.initial_parameters`` for :func:`fit_chemfit`, as a mapping.
 
     ChemFit 3.1's Fitter keeps ``initial_params`` as given, and anneal 0.10.0
-    read a list or tuple of ``(key, value)`` pairs as the dict they make; that
-    still runs, with a FutureWarning. Anything else that is not a mapping is
-    a TypeError.
+    read any iterable of ``(key, value)`` pairs, such as a list, ``d.items()``,
+    a zip or a generator, as the dict they make; that still runs, with a
+    FutureWarning. The pairs are read once, with ``dict()`` as 0.10.0 read
+    them, and the fitter keeps what it was given, so a zip or a generator is
+    left spent, as 0.10.0 left it. Anything else that is not a mapping is a
+    TypeError.
     """
     if isinstance(initial, Mapping):
         return initial
-    pairs = None
-    if isinstance(initial, (list, tuple)):
-        try:
-            pairs = dict(initial)
-        except (TypeError, ValueError):
-            pass
-    if pairs is None:
-        raise TypeError("fitter.initial_parameters must be a mapping")
+    try:
+        pairs = dict(initial)
+    except (TypeError, ValueError) as error:
+        raise TypeError("fitter.initial_parameters must be a mapping") from error
     if pairs:
         _deprecated(
             f"fit_chemfit reads fitter.initial_parameters, a {type(initial).__name__} "
@@ -1411,10 +1410,11 @@ def fit_chemfit(
             optional ``bounds``. Only the session protocol is used, so
             gradient-free drivers never need forces: ``init``, ``finish``,
             and ``evaluate`` / ``step`` (current ChemFit) or ``ask`` /
-            ``tell`` (ChemFit 3.1). ``initial_parameters`` given as a list
-            or tuple of ``(key, value)`` pairs, which ChemFit 3.1 keeps, is
-            read as the dict they make, as in anneal 0.10.0, with a
-            FutureWarning; it will raise in a future release.
+            ``tell`` (ChemFit 3.1). ``initial_parameters`` given as
+            ``(key, value)`` pairs, such as a list, ``d.items()``, a zip or
+            a generator, which ChemFit 3.1 keeps, is read once as the dict
+            they make, as in anneal 0.10.0, with a FutureWarning; it will
+            raise in a future release.
         budget: total objective evaluations, the start included; it is
             never exceeded.
         method: ``"portfolio"`` (default; Thompson-allocated SOTA including
