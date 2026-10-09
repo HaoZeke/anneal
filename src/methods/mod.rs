@@ -45,6 +45,8 @@ pub mod amsa;
 pub mod bayesian_mixing;
 pub mod bayesian_pilot;
 pub mod bfwt;
+/// Resumable box-constrained CMA-ES with BIPOP restart planning.
+pub mod cma_es;
 pub mod dmc_population;
 /// Target-free Feynman--Kac reconfiguration for cooperative search chains.
 pub mod feynman_kac;
