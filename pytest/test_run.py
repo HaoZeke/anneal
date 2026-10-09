@@ -28,6 +28,7 @@ from anneal import (
     qmc_polish_objective,
     qmc_trust_region_poll,
     qmc_trust_region_poll_objective,
+    cluster_search,
     run,
     run_hmc,
     run_qmc,
@@ -857,3 +858,90 @@ def test_qmc_gsa_global_search_starts_from_x0():
     result = qmc_gsa_global_search(objective, np.array([-1.0, -1.0]), np.array([1.0, 1.0]), max_evals=120, seed=0, x0=x0)
     assert np.array_equal(objective.points[0], x0)
     assert result["best_val"] <= smooth_needle(x0)
+
+
+def lj_cluster_gradient(x: np.ndarray) -> np.ndarray:
+    p = np.asarray(x, dtype=np.float64).reshape(-1, 3)
+    d = p[:, None] - p[None]
+    r2 = np.sum(d * d, axis=-1)
+    np.fill_diagonal(r2, np.inf)
+    inv6 = r2**-3
+    coef = 24.0 * (2.0 * inv6 * inv6 - inv6) / r2
+    return -np.sum(coef[:, :, None] * d, axis=1).ravel()
+
+
+def test_cluster_search_ends_on_keyboard_interrupt():
+    calls = []
+
+    def interrupted(x):
+        calls.append(1)
+        if len(calls) == 50:
+            raise KeyboardInterrupt
+        return lj_cluster_energy(x)
+
+    with pytest.raises(KeyboardInterrupt):
+        cluster_search(interrupted, lj_cluster_gradient, 13, 5000, seed=0)
+    assert len(calls) == 50
+
+
+def test_cluster_search_takes_array_like_gradients():
+    def as_list(x):
+        return lj_cluster_gradient(x).tolist()
+
+    out = cluster_search(lj_cluster_energy, as_list, 13, 3000, seed=0)
+    assert out["best_energy"] < -40.0
+
+
+def test_cluster_search_rejects_a_non_number_energy():
+    with pytest.raises(TypeError, match="must return a float"):
+        cluster_search(lambda x: None, lj_cluster_gradient, 13, 200, seed=0)
+
+
+def test_global_optimize_keeps_x0_when_nothing_is_finite():
+    x0 = np.random.default_rng(6).uniform(-1.0, 1.0, 39)
+    for budget in (1, 2, 50):
+        result = global_optimize(lambda x: float("inf"), np.full(39, -3.0), np.full(39, 3.0), budget=budget, seed=0, x0=x0)
+        assert np.array_equal(result["best_pos"], x0)
+
+
+@pytest.mark.parametrize("q_v", [1.0001, 1.001, 1.005])
+def test_gsa_near_q_v_one_takes_finite_moving_steps(q_v):
+    objective = Recorder(styb_tang_2d)
+    h = run(objective, LOW, HIGH, Gsa(t_init=1.0, q_v=q_v, q_a=1.7), n_epochs=5, steps_per_epoch=100, seed=0, x0=np.zeros(2))
+    points = np.array(objective.points)
+    assert len(points) == 501
+    assert len({tuple(p) for p in points}) > 400
+    assert h.best_val < styb_tang_2d(np.zeros(2))
+
+
+def test_qmc_gsa_global_search_refuses_q_v_of_one():
+    with pytest.raises(ValueError, match="q_v"):
+        qmc_gsa_global_search(smooth_needle, np.array([-1.0, -1.0]), np.array([1.0, 1.0]), max_evals=50, q_v=1.0)
+
+
+def test_a_walk_started_on_an_infeasible_plateau_finds_the_feasible_region():
+    def half_plane(x):
+        return float("nan") if x[0] > 1.0 else styb_tang_2d(x)
+
+    for seed in range(10):
+        h = run(half_plane, LOW, HIGH, Boltzmann(), n_epochs=10, steps_per_epoch=100, seed=seed, x0=np.array([4.5, 0.0]))
+        assert np.isfinite(h.best_val), seed
+
+
+@pytest.mark.parametrize("bad", [0, -1, 2.5])
+def test_run_refuses_a_max_evals_that_is_not_a_positive_whole_number(bad):
+    with pytest.raises(ValueError, match="max_evals"):
+        run(styb_tang_2d, LOW, HIGH, Boltzmann(), max_evals=bad)
+
+
+def test_run_hmc_takes_array_like_bounds():
+    h = run_hmc(
+        styb_tang_2d,
+        styb_tang_grad_2d,
+        [-5.0, -5.0],
+        [5.0, 5.0],
+        n_epochs=2,
+        steps_per_epoch=5,
+        x0=[-2.903534, -2.903534],
+    )
+    assert h.best_val == pytest.approx(GLOBAL_MIN, abs=1e-2)
