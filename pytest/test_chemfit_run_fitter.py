@@ -5,15 +5,64 @@ import pytest
 
 pytest.importorskip("anneal")
 
-from anneal.chemfit import run_fitter  # noqa: E402
-from chemfit_doubles import ReleasedFitter  # noqa: E402
+from anneal import Fast  # noqa: E402
+from anneal.chemfit import fit_anneal, run_fitter  # noqa: E402
+from chemfit_doubles import NextFitter, ReleasedFitter, same_params  # noqa: E402
 
 
-def _fitter():
-    return ReleasedFitter(
+def _fitter(kind=ReleasedFitter, bounds=None):
+    return kind(
         {"x": np.array([0.2, -0.1]), "eps": 1.0},
-        {"x": (-1.0, 1.0), "eps": (0.5, 2.0)},
+        {"x": (-1.0, 1.0), "eps": (0.5, 2.0)} if bounds is None else bounds,
     )
+
+
+def _same_run(left, right):
+    return len(left.evaluated) == len(right.evaluated) and all(
+        same_params(a, b) for a, b in zip(left.evaluated, right.evaluated)
+    )
+
+
+def test_run_fitter_forwards_the_fit_anneal_options():
+    fitter = _fitter(NextFitter)
+    low = np.array([0.0, 0.0, 1.0])
+    high = np.array([1.0, 1.0, 2.0])
+    run_fitter(fitter, 40, x0={"x": np.array([0.5, 0.25]), "eps": 1.5}, low=low, high=high)
+    seen = np.array([np.append(p["x"], p["eps"]) for p in fitter.evaluated])
+    assert 1 < len(seen) <= 40
+    assert np.array_equal(seen[0], [0.5, 0.25, 1.5])
+    assert np.all(seen >= low) and np.all(seen <= high)
+
+
+def test_run_fitter_runs_the_preset_it_is_given():
+    given = _fitter()
+    run_fitter(given, 60, method="sa", preset=Fast(t_init=2.0), seed=4, steps_per_epoch=10)
+    named = _fitter()
+    fit_anneal(
+        named, 60, driver="fast", seed=4, steps_per_epoch=10, preset_kwargs={"t_init": 2.0}
+    )
+    assert len(given.evaluated) > 1
+    assert _same_run(given, named)
+
+
+@pytest.mark.parametrize(
+    "method, option",
+    [
+        ("global_optimize", {"bound_span": 0.25}),
+        ("boltzmann", {"steps_per_epoch": 7}),
+        ("fast", {"preset_kwargs": {"t_init": 0.5, "gamma": 2.0}}),
+    ],
+    ids=["bound_span", "steps_per_epoch", "preset_kwargs"],
+)
+def test_each_forwarded_option_takes_effect(method, option):
+    driver = "portfolio" if method == "global_optimize" else method
+    forwarded, direct, plain = (_fitter(bounds={}) for _ in range(3))
+    run_fitter(forwarded, 60, method=method, **option)
+    fit_anneal(direct, 60, driver=driver, seed=42, **option)
+    run_fitter(plain, 60, method=method)
+    assert len(forwarded.evaluated) > 1
+    assert _same_run(forwarded, direct)
+    assert not _same_run(forwarded, plain)
 
 
 @pytest.mark.parametrize(
