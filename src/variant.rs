@@ -279,6 +279,24 @@ pub type FastVariant<O> = SaVariant<f64, O, ReciprocalCool<f64>, ContinuousR_n, 
 pub type GsaVariant<O> =
     SaVariant<f64, O, TsallisCool<f64>, ContinuousR_n, TsallisVisit, TsallisAccept<f64>>;
 
+/// Box-constrained Boltzmann preset with mirror-reflected Gaussian moves.
+pub type BoundedBoltzmannVariant<O> =
+    SaVariant<f64, O, LogCool<f64>, BoxConstrained<f64>, Reflected<Gaussian>, Metropolis>;
+
+/// Box-constrained Fast-SA preset with mirror-reflected Cauchy moves.
+pub type BoundedFastVariant<O> =
+    SaVariant<f64, O, ReciprocalCool<f64>, BoxConstrained<f64>, Reflected<Cauchy>, Metropolis>;
+
+/// Box-constrained GSA preset with mirror-reflected Tsallis visiting moves.
+pub type BoundedGsaVariant<O> = SaVariant<
+    f64,
+    O,
+    TsallisCool<f64>,
+    BoxConstrained<f64>,
+    Reflected<TsallisVisit>,
+    TsallisAccept<f64>,
+>;
+
 /// Constructs the Boltzmann SA variant: logarithmic cooling, isotropic
 /// Gaussian moves, Metropolis acceptance, on the unconstrained `R^dim`.
 ///
@@ -335,6 +353,59 @@ pub fn gsa<O: Objective<f64> + Send + Sync>(
         TsallisCool::new(t_init, q_v),
         ContinuousR_n::new(dim),
         TsallisVisit::new(q_v),
+        TsallisAccept::new(q_a),
+    )
+}
+
+/// Constructs bounded Boltzmann SA.
+///
+/// Proposals are mirror-reflected into `obj.bounds()`. Reflection preserves
+/// the symmetry required by the Metropolis rule without accumulating proposal
+/// mass on a clipped boundary.
+pub fn bounded_boltzmann<O: Objective<f64> + Send + Sync>(
+    obj: O,
+    t_init: f64,
+    sigma: f64,
+) -> Result<BoundedBoltzmannVariant<O>, LawViolation> {
+    let bounds = obj.bounds().clone();
+    SaVariant::checked(
+        obj,
+        LogCool::new(t_init, 2.0),
+        BoxConstrained::new(bounds.clone()),
+        Reflected::new(Gaussian::new(sigma), bounds),
+        Metropolis,
+    )
+}
+
+/// Constructs bounded Fast SA with mirror-reflected Cauchy moves.
+pub fn bounded_fast<O: Objective<f64> + Send + Sync>(
+    obj: O,
+    t_init: f64,
+    gamma: f64,
+) -> Result<BoundedFastVariant<O>, LawViolation> {
+    let bounds = obj.bounds().clone();
+    SaVariant::checked(
+        obj,
+        ReciprocalCool::new(t_init),
+        BoxConstrained::new(bounds.clone()),
+        Reflected::new(Cauchy::new(gamma), bounds),
+        Metropolis,
+    )
+}
+
+/// Constructs bounded GSA with mirror-reflected Tsallis visiting moves.
+pub fn bounded_gsa<O: Objective<f64> + Send + Sync>(
+    obj: O,
+    t_init: f64,
+    q_v: f64,
+    q_a: f64,
+) -> Result<BoundedGsaVariant<O>, LawViolation> {
+    let bounds = obj.bounds().clone();
+    SaVariant::checked(
+        obj,
+        TsallisCool::new(t_init, q_v),
+        BoxConstrained::new(bounds.clone()),
+        Reflected::new(TsallisVisit::new(q_v), bounds),
         TsallisAccept::new(q_a),
     )
 }

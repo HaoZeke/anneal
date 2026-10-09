@@ -22,7 +22,7 @@ use eindir_core::py_objective::{PyBounds as EindirPyBounds, PyObjective};
 use eindir_core::{Bounds, Objective};
 
 use crate::history::History;
-use crate::variant::{boltzmann, fast, gsa};
+use crate::variant::{boltzmann, bounded_boltzmann, bounded_fast, bounded_gsa, fast, gsa};
 
 /// Reject empty, non-finite, or inverted box bounds before `Bounds::new`.
 ///
@@ -1892,14 +1892,18 @@ enum Preset {
 /// Args:
 ///   obj_fn: Python callable `f(numpy.ndarray) -> float` evaluated at every
 ///           proposal. Held via the GIL.
-///   low, high: numpy arrays defining the box bounds used to draw the
-///              initial position uniformly. Same length defines the
-///              objective dimensionality.
+///   low, high: finite numpy arrays defining the box-constrained state space.
+///              Same length defines the objective dimensionality.
 ///   preset: one of `Boltzmann()`, `Fast()`, `Gsa()` from `anneal`.
 ///   n_epochs, steps_per_epoch: SA loop dimensions.
 ///   seed: u64 seed for the StdRng.
+///   x0: optional initial position. Out-of-box coordinates are clipped before
+///       the first objective evaluation.
+///   boundary: `"reflect"` (default) keeps every evaluation in the box while
+///             preserving proposal symmetry. `"unbounded"` reproduces the
+///             pre-0.9 behavior in which bounds only selected the first point.
 #[pyfunction]
-#[pyo3(signature = (obj_fn, low, high, preset, n_epochs = 100, steps_per_epoch = 200, seed = 42))]
+#[pyo3(signature = (obj_fn, low, high, preset, n_epochs = 100, steps_per_epoch = 200, seed = 42, x0 = None, boundary = "reflect"))]
 fn run(
     obj_fn: Py<PyAny>,
     low: PyReadonlyArray1<'_, f64>,
@@ -1908,12 +1912,30 @@ fn run(
     n_epochs: usize,
     steps_per_epoch: usize,
     seed: u64,
+    x0: Option<PyReadonlyArray1<'_, f64>>,
+    boundary: &str,
 ) -> PyResult<PyHistory> {
     let low_vec = low.as_slice()?.to_vec();
     let high_vec = high.as_slice()?.to_vec();
-    if low_vec.len() != high_vec.len() {
-        return Err(pyo3::exceptions::PyValueError::new_err(
-            "low and high must have the same length",
+    validate_box_bounds(&low_vec, &high_vec)?;
+    let dim = low_vec.len();
+    let x0_arr = if let Some(arr) = x0 {
+        let values = arr.as_slice()?.to_vec();
+        if values.len() != dim {
+            return Err(PyValueError::new_err(
+                "x0 must have the same length as low and high",
+            ));
+        }
+        if values.iter().any(|value| !value.is_finite()) {
+            return Err(PyValueError::new_err("x0 must contain only finite values"));
+        }
+        Some(Array1::from_vec(values))
+    } else {
+        None
+    };
+    if !matches!(boundary, "reflect" | "unbounded") {
+        return Err(PyValueError::new_err(
+            "boundary must be 'reflect' or 'unbounded'",
         ));
     }
     let bounds = Bounds::new(Array1::from_vec(low_vec), Array1::from_vec(high_vec), 1e-9);
@@ -1922,20 +1944,35 @@ fn run(
         bounds,
     };
     let history = match preset {
+        Preset::Boltzmann(p) if boundary == "reflect" => {
+            let v = bounded_boltzmann(obj, p.t_init, p.sigma)
+                .map_err(|e| pyo3::exceptions::PyValueError::new_err(format!("{e}")))?;
+            crate::runner::run_rs_variant_from_position(v, n_epochs, steps_per_epoch, seed, x0_arr)
+        }
+        Preset::Fast(p) if boundary == "reflect" => {
+            let v = bounded_fast(obj, p.t_init, p.gamma)
+                .map_err(|e| pyo3::exceptions::PyValueError::new_err(format!("{e}")))?;
+            crate::runner::run_rs_variant_from_position(v, n_epochs, steps_per_epoch, seed, x0_arr)
+        }
+        Preset::Gsa(p) if boundary == "reflect" => {
+            let v = bounded_gsa(obj, p.t_init, p.q_v, p.q_a)
+                .map_err(|e| pyo3::exceptions::PyValueError::new_err(format!("{e}")))?;
+            crate::runner::run_rs_variant_from_position(v, n_epochs, steps_per_epoch, seed, x0_arr)
+        }
         Preset::Boltzmann(p) => {
             let v = boltzmann(obj, p.t_init, p.sigma)
                 .map_err(|e| pyo3::exceptions::PyValueError::new_err(format!("{e}")))?;
-            crate::runner::run_rs_variant(v, n_epochs, steps_per_epoch, seed)
+            crate::runner::run_rs_variant_from_position(v, n_epochs, steps_per_epoch, seed, x0_arr)
         }
         Preset::Fast(p) => {
             let v = fast(obj, p.t_init, p.gamma)
                 .map_err(|e| pyo3::exceptions::PyValueError::new_err(format!("{e}")))?;
-            crate::runner::run_rs_variant(v, n_epochs, steps_per_epoch, seed)
+            crate::runner::run_rs_variant_from_position(v, n_epochs, steps_per_epoch, seed, x0_arr)
         }
         Preset::Gsa(p) => {
             let v = gsa(obj, p.t_init, p.q_v, p.q_a)
                 .map_err(|e| pyo3::exceptions::PyValueError::new_err(format!("{e}")))?;
-            crate::runner::run_rs_variant(v, n_epochs, steps_per_epoch, seed)
+            crate::runner::run_rs_variant_from_position(v, n_epochs, steps_per_epoch, seed, x0_arr)
         }
     };
     Ok(PyHistory::from(history))
