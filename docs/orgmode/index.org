@@ -52,6 +52,7 @@ See the [[file:architecture.org][architecture]] page for the five signatures and
 
 - [[file:quickstart.org][Quickstart]] shows the smallest Python workflow.
 - [[file:howto/choose-driver.org][Choose a driver]] maps landscape symptoms to driver families.
+- [[file:howto/chemfit.org][Optimize through ChemFit]] drives a ChemFit fitter with the box drivers.
 - [[file:reference/presets-and-advanced.org][Presets and advanced drivers]] gives the parameter surface.
 - The generated Rust API starts at [[file:reference/rust-api.org][Rust API Reference]] and follows the =anneal-core= crate modules.
 - [[file:used_by.org][Used by]] links the reproducibility harness that regenerates the CUTEst tables and figures.
@@ -78,6 +79,7 @@ See the [[file:architecture.org][architecture]] page for the five signatures and
    howto/choose-driver
    howto/precision-policy
    howto/rgmin-lbfgs
+   howto/chemfit
    howto/faq
    faq
 #+end_export

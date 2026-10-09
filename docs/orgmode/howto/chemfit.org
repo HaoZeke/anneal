@@ -1,0 +1,106 @@
+#+TITLE: Optimize through ChemFit
+#+OPTIONS: toc:nil todo:nil num:nil author:nil title:nil
+#+STARTUP: content
+
+* Optimize through ChemFit
+
+[[https://chemfit.readthedocs.io][ChemFit]] evaluates a loss for a nested parameter dictionary and keeps
+the best evaluated parameters. Its =Fitter= exposes a user-driven loop,
+=init()=, =evaluate()=, =step()= and =finish()=, so an anneal driver can
+propose the parameters while ChemFit evaluates and records them.
+
+** The box drivers
+
+=run=, =run_qmc=, =global_optimize= and =qmc_gsa_global_search= call the
+objective only inside =[low, high]=, start at =x0= when it is given, and take
+=low=, =high= and =x0= as any array-like of one shape. The objective
+receives the flat vector. =run= makes =1 + n_epochs * steps_per_epoch=
+calls unless =max_evals= caps them; =max_evals= counts the start.
+
+#+begin_src python
+import math
+
+import anneal
+import numpy as np
+
+
+def run_anneal(benchmark_context):
+    fitter = benchmark_context["fitter"]
+    budget = benchmark_context["budget"]
+    initial = np.asarray(benchmark_context["initial_params"]["positions"])
+    n_atoms = len(initial)
+
+    def obj(positions):
+        loss = fitter.evaluate({"positions": positions.reshape(n_atoms, 3)})
+        fitter.step()
+        return loss
+
+    fitter.init()
+    anneal.run(
+        obj,
+        np.full((n_atoms, 3), -3.0),
+        np.full((n_atoms, 3), 3.0),
+        anneal.Boltzmann(t_init=1.0, sigma=0.1),
+        n_epochs=math.ceil(budget / 100),
+        steps_per_epoch=100,
+        x0=initial,
+        max_evals=budget,
+    )
+    return fitter.finish()
+#+end_src
+
+The positions array goes in as =x0= unchanged; =max_evals=budget= spends
+exactly =budget= evaluations, start included, while the cooling schedule
+spans =n_epochs=. =sigma= is in the units of the coordinates. Before the
+box presets, =Boltzmann=, =Fast= and =Gsa= drew only their start from the
+box; a 13-atom walk in =[-3, 3]= evaluated 99.95% of its points outside it.
+
+** Fitter.fit_anneal
+
+[[file:../../../experiments/chemfit/0001-feat-fitter-add-Fitter.fit_anneal.patch][experiments/chemfit/0001-feat-fitter-add-Fitter.fit_anneal.patch]]
+adds =Fitter.fit_anneal= to ChemFit 4 (=git am= it onto ChemFit's =next=).
+It takes the box from =Fitter.bounds=, including array leaves with scalar or
+per-element bounds, starts at =initial_params=, evaluates at most =budget=
+times, calls =step()= after each evaluation, and returns the best evaluated
+parameters.
+
+#+begin_src python
+fitter = Fitter(
+    objective,
+    initial_params={"positions": initial_positions},
+    bounds={"positions": (-3.0, 3.0)},
+)
+best = fitter.fit_anneal(budget=10_000, method="boltzmann")
+#+end_src
+
+=method= is ="portfolio"= (=global_optimize=, the default), ="boltzmann"=,
+="fast"=, ="gsa"= or ="gpmd"=. The parameters are passed to anneal in the
+unit cube, so a preset's step is in units of each box width; the temperature
+is in loss units. An objective exception stops further evaluations and is
+re-raised when anneal returns, unless the fitter swallows exceptions.
+
+** What to expect on a positions benchmark
+
+Thirteen Lennard-Jones atoms in =[-3, 3]^{39}=, started from uniform
+positions in =[-1.6, 1.6]=, five seeds, the median of the best energy
+ChemFit recorded (the global minimum is \(-44.327\)). Measured with
+[[file:../../../experiments/chemfit/positions_benchmark.py][experiments/chemfit/positions_benchmark.py]].
+
+| Driver                                  | 2000 evaluations | 10000 evaluations |
+|-----------------------------------------+------------------+-------------------|
+| Nevergrad CMA                           |          \(-31.1\) |           \(-40.7\) |
+| Nevergrad NgIohTuned                    |          \(-31.0\) |           \(-39.2\) |
+| anneal =cluster_search=, difference gradients |    \(-36.5\) |           \(-39.5\) |
+| SciPy L-BFGS-B, difference gradients    |          \(-30.4\) |           \(-38.8\) |
+| anneal =dmc_population_optimize=        |          \(-20.4\) |           \(-34.1\) |
+| anneal =Gsa=                            |          \(-13.5\) |           \(-32.5\) |
+| anneal =gpmd_optimize=                  |          \(-25.3\) |           \(-31.3\) |
+| anneal =Boltzmann=, =sigma=0.1=         |          \(-21.4\) |           \(-24.4\) |
+| anneal =global_optimize=, values only   |          \(-11.5\) |           \(-24.7\) |
+
+With function values only, on a smooth surface, CMA-ES is the strongest of
+these. The classical presets are the simulated-annealing comparison, not the
+fastest descent. Energies come with forces in ChemFit's ASE objectives; given
+a gradient, =cluster_search= on atomic positions, or =global_optimize= with
+=grad_fn=, uses it. =cluster_search= draws its own starts in its own box, so
+it does not take =x0= or a user box.

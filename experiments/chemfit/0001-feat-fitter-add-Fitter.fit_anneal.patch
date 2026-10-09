@@ -1,0 +1,588 @@
+From f1c8adea0fbca27b63a2622716ca5113f36061e8 Mon Sep 17 00:00:00 2001
+From: Rohit Goswami <rgoswami@ieee.org>
+Date: Fri, 9 Oct 2026 13:30:27 +0000
+Subject: [PATCH] feat(fitter): add Fitter.fit_anneal
+
+Runs the anneal drivers through the ChemFit 4 fitter loop. The search starts at initial_params, stays inside bounds (scalar and array leaves, array leaves taking scalar or per-element bounds, so (n_atoms, 3) positions work directly), evaluates the objective at most budget times through evaluate(), calls step() after each evaluation, and returns the best evaluated parameters.
+
+method is portfolio (anneal.global_optimize, default), boltzmann, fast or gsa (anneal.run), or gpmd. Parameters are passed to anneal in the unit cube, so preset steps are in units of each box width. An objective exception stops further evaluations and is re-raised once anneal returns, unless the fitter swallows exceptions. A gradient mapping can be supplied for portfolio and gpmd. anneal is an optional extra; fit_anneal refuses an anneal whose run() lacks x0 and max_evals.
+---
+ docs/src/usage/fitter.rst |  37 +++++-
+ pyproject.toml            |   1 +
+ src/chemfit/fitter.py     | 258 +++++++++++++++++++++++++++++++++++++-
+ tests/test_fit_anneal.py  | 192 ++++++++++++++++++++++++++++
+ 4 files changed, 485 insertions(+), 3 deletions(-)
+ create mode 100644 tests/test_fit_anneal.py
+
+diff --git a/docs/src/usage/fitter.rst b/docs/src/usage/fitter.rst
+index 3f63560..7d17e35 100644
+--- a/docs/src/usage/fitter.rst
++++ b/docs/src/usage/fitter.rst
+@@ -61,15 +61,17 @@ adds fitter-specific functionality such as:
+ Supported backends
+ ----------------------------------
+ 
+-ChemFit currently supports two optimization backends:
++ChemFit currently supports three optimization backends:
+ 
+ 1. :py:meth:`~chemfit.fitter.Fitter.fit_scipy`
+ 2. :py:meth:`~chemfit.fitter.Fitter.fit_nevergrad`
++3. :py:meth:`~chemfit.fitter.Fitter.fit_anneal` (needs the optional
++   ``anneal`` package: ``pip install chemfit[anneal]``)
+ 
+ Custom optimizers can be connected through the user-driven
+ ``init``/``evaluate``/``step``/``finish`` interface.
+ 
+-Both operate on the same parameter-dictionary interface.
++All three operate on the same parameter-dictionary interface.
+ 
+ ----------------------------------
+ Basic usage
+@@ -102,6 +104,37 @@ controls are needed:
+ 
+     opt_params = fitter.fit_nevergrad(budget=100)
+ 
++----------------------------------
++Simulated annealing with anneal
++----------------------------------
++
++:py:meth:`~chemfit.fitter.Fitter.fit_anneal` runs the
++`anneal <https://anneal.rgoswami.me>`_ drivers. It starts at
++``initial_params``, never evaluates outside ``bounds`` (every leaf needs a
++finite ``(lower, upper)`` pair), calls ``step()`` after each evaluation, and
++evaluates the objective at most ``budget`` times. Array leaves are supported,
++so atomic positions can be optimized directly:
++
++.. code-block:: python
++
++    import numpy as np
++    from chemfit.fitter import Fitter
++
++    fitter = Fitter(
++        objective_function=objective,  # objective(params) reads params["positions"]
++        initial_params={"positions": initial_positions},  # shape (n_atoms, 3)
++        bounds={"positions": (-3.0, 3.0)},
++    )
++    opt_params = fitter.fit_anneal(budget=10_000, method="boltzmann")
++
++``method="portfolio"`` (the default) is anneal's general-purpose driver;
++``"boltzmann"``, ``"fast"`` and ``"gsa"`` are the classical simulated
++annealing presets and ``"gpmd"`` is gap-proportional Metropolis descent.
++Steps are taken in units of each parameter's box width; pass ``preset=`` (for
++example ``anneal.Boltzmann(t_init=0.5, sigma=0.01)``) to set the step and the
++temperature, which is in loss units. An objective exception is re-raised once
++anneal returns, unless the fitter swallows exceptions.
++
+ ----------------------------------
+ Objective interface
+ ----------------------------------
+diff --git a/pyproject.toml b/pyproject.toml
+index c5cd9cf..0a537dd 100644
+--- a/pyproject.toml
++++ b/pyproject.toml
+@@ -18,6 +18,7 @@ license-files = ["LICEN[CS]E*"]
+ Repository = "https://github.com/MSallermann/chemfit"
+ 
+ [project.optional-dependencies]
++anneal = ["anneal"]
+ build_docs = ["sphinx", "furo", "sphinxcontrib-napoleon", "sphinx-autobuild"]
+ examples = ["optuna"]
+ mpi = ["mpi4py"]
+diff --git a/src/chemfit/fitter.py b/src/chemfit/fitter.py
+index 74b99ef..85dae45 100644
+--- a/src/chemfit/fitter.py
++++ b/src/chemfit/fitter.py
+@@ -1,6 +1,7 @@
+ from __future__ import annotations
+ 
+ import copy
++import inspect
+ import logging
+ import math
+ import time
+@@ -11,6 +12,7 @@ from typing import TYPE_CHECKING, Any, Generic, cast
+ import nevergrad as ng
+ import numpy as np
+ import numpy.typing as npt
++from pydictnest import flatten_dict, has_nested, keys_nested, unflatten_dict
+ from scipy.optimize import OptimizeResult, minimize
+ from typing_extensions import TypeVar
+ 
+@@ -18,7 +20,6 @@ from chemfit.abstract_objective_function import EvaluateContext, ObjectiveFuncto
+ from chemfit.scheduling import EvaluationRequest, PreparedSchedule, SerialScheduler
+ from chemfit.utils import check_params_near_bounds
+ from chemfit.wrap_funcs import WrappedObjectiveFunctor
+-from pydictnest import flatten_dict, has_nested, keys_nested, unflatten_dict
+ 
+ if TYPE_CHECKING:
+     from collections.abc import Iterable
+@@ -90,6 +91,137 @@ class FitterEvaluateContext(EvaluateContext):
+ 
+ CallbackT = Callable[[int, list[FitterEvaluateContext]], None]
+ 
++ANNEAL_METHODS = ("portfolio", "boltzmann", "fast", "gsa", "gpmd")
++
++
++def _import_anneal() -> Any:
++    """Return the anneal module, refusing releases without bounded presets."""
++
++    try:
++        import anneal  # noqa: PLC0415
++    except ImportError as exc:
++        msg = "fit_anneal requires the anneal package (pip install anneal)"
++        raise ImportError(msg) from exc
++    if "max_evals" not in inspect.signature(anneal.run).parameters:
++        msg = (
++            "fit_anneal requires an anneal release whose run() keeps every "
++            "evaluation inside the box and accepts x0 and max_evals"
++        )
++        raise ImportError(msg)
++    return anneal
++
++
++def _run_anneal_driver(
++    anneal: Any,
++    method: str,
++    loss: Callable[[npt.NDArray], float],
++    unit_x0: npt.NDArray,
++    *,
++    budget: int,
++    seed: int,
++    preset: object | None,
++    steps_per_epoch: int,
++    gradient: Callable[[npt.NDArray], npt.NDArray] | None,
++) -> None:
++    """Run one anneal driver on the unit cube from ``unit_x0``."""
++
++    low, high = np.zeros(unit_x0.size), np.ones(unit_x0.size)
++    if method == "portfolio":
++        anneal.global_optimize(
++            loss, low, high, budget=budget, seed=seed, grad_fn=gradient, x0=unit_x0
++        )
++        return
++    if method == "gpmd":
++        anneal.gpmd_optimize(
++            loss, low, high, budget=budget, seed=seed, grad_fn=gradient, x0=unit_x0
++        )
++        return
++    if preset is None:
++        preset = {
++            "boltzmann": anneal.Boltzmann(t_init=1.0, sigma=0.02),
++            "fast": anneal.Fast(t_init=1.0, gamma=0.01),
++            "gsa": anneal.Gsa(t_init=0.05),
++        }[method]
++    anneal.run(
++        loss,
++        low,
++        high,
++        preset,
++        n_epochs=max(1, math.ceil((budget - 1) / steps_per_epoch)),
++        steps_per_epoch=steps_per_epoch,
++        seed=seed,
++        x0=unit_x0,
++        max_evals=budget,
++    )
++
++
++class _AnnealBox:
++    """
++    The fitter's parameters as one flat vector inside a finite box.
++
++    Scalar and array leaves are flattened in C order. Each leaf needs a
++    ``(lower, upper)`` bound; an array leaf takes scalars or arrays that
++    broadcast to its shape. Points are passed to anneal in the unit cube, so
++    step sizes do not depend on the units of the parameters.
++    """
++
++    def __init__(self, initial: Mapping[str, Any], bounds: Mapping[str, object]):
++        flat_initial = flatten_dict(dict(initial))
++        flat_bounds = flatten_dict(dict(bounds))
++        self.keys = list(flat_initial)
++        self.shapes: list[tuple[tuple[int, ...], bool]] = []
++        starts, lows, highs = [], [], []
++        for key in self.keys:
++            leaf = flat_initial[key]
++            value = np.asarray(leaf, dtype=np.float64)
++            bound = flat_bounds.get(key)
++            if bound is None or len(bound) != 2 or bound[0] is None or bound[1] is None:
++                msg = (
++                    f"fit_anneal needs finite bounds (lower, upper) for {key!r}; "
++                    "anneal searches inside a box"
++                )
++                raise ValueError(msg)
++            lower = np.broadcast_to(np.asarray(bound[0], dtype=np.float64), value.shape)
++            upper = np.broadcast_to(np.asarray(bound[1], dtype=np.float64), value.shape)
++            finite = np.isfinite(lower).all() and np.isfinite(upper).all()
++            if not finite or np.any(lower >= upper):
++                msg = f"bounds for {key!r} must be finite with lower < upper"
++                raise ValueError(msg)
++            if not np.isfinite(value).all() or np.any(
++                (value < lower) | (value > upper)
++            ):
++                msg = f"initial value of {key!r} lies outside its bounds"
++                raise ValueError(msg)
++            self.shapes.append((value.shape, isinstance(leaf, Real)))
++            starts.append(value.ravel())
++            lows.append(lower.ravel())
++            highs.append(upper.ravel())
++        self.low = np.concatenate(lows)
++        self.width = np.concatenate(highs) - self.low
++        self.x0 = np.concatenate(starts)
++
++    def to_unit(self, x: npt.NDArray) -> npt.NDArray:
++        return np.clip((x - self.low) / self.width, 0.0, 1.0)
++
++    def parameters(self, unit: npt.NDArray) -> dict[str, Any]:
++        x = self.low + self.width * np.clip(unit, 0.0, 1.0)
++        out: dict[str, Any] = {}
++        offset = 0
++        for key, (shape, scalar) in zip(self.keys, self.shapes, strict=True):
++            size = math.prod(shape)
++            chunk = np.array(x[offset : offset + size], dtype=np.float64)
++            offset += size
++            out[key] = float(chunk[0]) if scalar else chunk.reshape(shape)
++        return unflatten_dict(out, dict_factory=dict[str, Any])
++
++    def unit_gradient(self, gradient: Mapping[str, Any]) -> npt.NDArray:
++        flat = flatten_dict(dict(gradient))
++        parts = [
++            np.broadcast_to(np.asarray(flat[key], dtype=np.float64), shape).ravel()
++            for key, (shape, _) in zip(self.keys, self.shapes, strict=True)
++        ]
++        return np.concatenate(parts) * self.width
++
+ 
+ def _validate_batch_size(batch_size: int) -> None:
+     """Reject empty candidate batches."""
+@@ -729,6 +861,130 @@ class Fitter(Generic[ParametersT]):
+                     )
+             raise
+ 
++    def fit_anneal(
++        self,
++        budget: int,
++        method: str = "portfolio",
++        seed: int = 0,
++        preset: object | None = None,
++        steps_per_epoch: int = 100,
++        gradient: Callable[[ParametersT], Mapping[str, Any]] | None = None,
++        contexts: list[FitterEvaluateContext] | None = None,
++    ) -> ParametersT:
++        """
++        Optimize parameters with the anneal library.
++
++        The search starts at ``initial_params`` and stays inside ``bounds``,
++        which must give a finite ``(lower, upper)`` pair for every parameter
++        leaf; array leaves such as an ``(n_atoms, 3)`` positions array take
++        scalar or array bounds. Every candidate is evaluated through
++        :meth:`evaluate`, :meth:`step` is called after each evaluation, and the
++        objective is evaluated at most ``budget`` times. The best evaluated
++        parameters are returned.
++
++        Args:
++            budget: Maximum number of objective evaluations.
++            method: ``"portfolio"`` (``anneal.global_optimize``, the
++                general-purpose driver), ``"boltzmann"``, ``"fast"`` or
++                ``"gsa"`` (classical simulated annealing, ``anneal.run``),
++                or ``"gpmd"`` (gap-proportional Metropolis descent).
++            seed: Random seed forwarded to anneal.
++            preset: Optional ``anneal.Boltzmann``, ``anneal.Fast`` or
++                ``anneal.Gsa`` for the classical methods. Steps are in units
++                of the box width (anneal searches the unit cube); the
++                temperature is in loss units.
++            steps_per_epoch: Proposals per temperature for the classical
++                methods.
++            gradient: Optional callable returning the gradient of the loss
++                as a mapping with the structure of ``initial_params``; used by
++                ``"portfolio"`` and ``"gpmd"``. Gradient calls do not count
++                against ``budget`` but anneal charges them as work units.
++            contexts: Optional single-element list with the fitter context to
++                reuse.
++
++        Returns:
++            Dictionary of the best evaluated parameter values.
++
++        Raises:
++            ImportError: If anneal is missing or predates bounded presets
++                with ``x0`` and ``max_evals``.
++            ValueError: For an unknown method, a non-positive budget, a
++                missing or infinite bound, or an initial value outside its
++                bounds.
++
++        """
++
++        anneal = _import_anneal()
++
++        if method not in ANNEAL_METHODS:
++            msg = f"method must be one of {ANNEAL_METHODS}, got {method!r}"
++            raise ValueError(msg)
++        if budget < 1:
++            msg = "budget must be at least 1"
++            raise ValueError(msg)
++
++        box = _AnnealBox(self.initial_parameters, self.bounds)
++        unit_x0 = box.to_unit(box.x0)
++
++        evaluations = 0
++        failure: list[Exception] = []
++
++        def loss(unit: npt.NDArray) -> float:
++            nonlocal evaluations
++            if failure or evaluations >= budget:
++                return math.inf
++            evaluations += 1
++            parameters = cast("ParametersT", box.parameters(unit))
++            try:
++                value = self.evaluate(parameters)
++            except Exception as exc:
++                # Keep ChemFit's exception policy: stop evaluating, let anneal
++                # return, then re-raise below.
++                failure.append(exc)
++                return math.inf
++            self.step()
++            assert isinstance(value, float)
++            return value
++
++        unit_gradient: Callable[[npt.NDArray], npt.NDArray] | None = None
++        if gradient is not None:
++            user_gradient = gradient
++
++            def gradient_in_unit_cube(unit: npt.NDArray) -> npt.NDArray:
++                parameters = cast("ParametersT", box.parameters(unit))
++                return box.unit_gradient(user_gradient(parameters))
++
++            unit_gradient = gradient_in_unit_cube
++
++        self.init(contexts=contexts)
++        try:
++            _run_anneal_driver(
++                anneal,
++                method,
++                loss,
++                unit_x0,
++                budget=budget,
++                seed=seed,
++                preset=preset,
++                steps_per_epoch=steps_per_epoch,
++                gradient=unit_gradient,
++            )
++            if failure:
++                raise failure[0]
++            if evaluations == 0:
++                msg = "anneal made no evaluation within the budget"
++                raise RuntimeError(msg)
++            return self.finish()
++        except BaseException as exception:
++            try:
++                self._close_schedule()
++            except BaseException as cleanup_exception:
++                if hasattr(exception, "add_note"):
++                    exception.add_note(
++                        f"Schedule cleanup failed: {cleanup_exception!r}"
++                    )
++            raise
++
+     def fit_scipy(
+         self,
+         method: str = "L-BFGS-B",
+diff --git a/tests/test_fit_anneal.py b/tests/test_fit_anneal.py
+new file mode 100644
+index 0000000..ae45683
+--- /dev/null
++++ b/tests/test_fit_anneal.py
+@@ -0,0 +1,192 @@
++from __future__ import annotations
++
++from typing import TYPE_CHECKING, Any
++
++import numpy as np
++import pytest
++
++from chemfit.fitter import ANNEAL_METHODS, Fitter
++
++if TYPE_CHECKING:
++    from collections.abc import Callable
++
++anneal = pytest.importorskip("anneal")
++
++N_ATOMS = 13
++
++
++def lj_energy(params: dict[str, Any]) -> float:
++    p = np.asarray(params["positions"], dtype=np.float64).reshape(-1, 3)
++    r = np.linalg.norm(p[:, None] - p[None], axis=-1)[np.triu_indices(len(p), 1)]
++    with np.errstate(divide="ignore", invalid="ignore", over="ignore"):
++        energy = float(np.sum(4.0 * (r**-12 - r**-6)))
++    return energy if np.isfinite(energy) else 1e10
++
++
++class Recorder:
++    def __init__(self, func: Callable[[dict[str, Any]], float]) -> None:
++        """Wrap ``func`` and keep a copy of every parameter set it sees."""
++        self.func = func
++        self.seen: list[dict[str, Any]] = []
++
++    def __call__(self, params: dict[str, Any]) -> float:
++        self.seen.append({k: np.array(v, copy=True) for k, v in params.items()})
++        return self.func(params)
++
++
++def positions_fitter(
++    objective: Callable[[dict[str, Any]], float],
++) -> tuple[Fitter, np.ndarray]:
++    initial = np.random.default_rng(3).uniform(-1.6, 1.6, (N_ATOMS, 3))
++    fitter = Fitter(
++        objective,
++        initial_params={"positions": initial},
++        bounds={"positions": (-3.0, 3.0)},
++        value_bad_params=1e10,
++    )
++    return fitter, initial
++
++
++@pytest.mark.parametrize("method", ANNEAL_METHODS)
++def test_fit_anneal_keeps_positions_in_bounds_and_starts_at_initial_params(method: str):
++    objective = Recorder(lj_energy)
++    fitter, initial = positions_fitter(objective)
++    best = fitter.fit_anneal(budget=300, method=method, seed=1)
++
++    positions = np.array([seen["positions"] for seen in objective.seen])
++    assert positions.shape[1:] == (N_ATOMS, 3)
++    assert np.all(positions >= -3.0)
++    assert np.all(positions <= 3.0)
++    assert np.allclose(positions[0], initial)
++    assert len(objective.seen) <= 300
++    assert lj_energy(best) <= lj_energy({"positions": initial})
++    assert lj_energy(best) == min(lj_energy(seen) for seen in objective.seen)
++
++
++@pytest.mark.parametrize("method", ["boltzmann", "fast", "gsa"])
++def test_fit_anneal_classical_methods_spend_exactly_the_budget(method: str):
++    objective = Recorder(lj_energy)
++    fitter, _ = positions_fitter(objective)
++    steps: list[int] = []
++    fitter.register_callback(lambda step, _ctxs: steps.append(step), n_steps=100)
++    fitter.fit_anneal(budget=1037, method=method, seed=2)
++    assert len(objective.seen) == 1037
++    assert steps == [100 * k for k in range(1, 11)] + [1037]
++
++
++def test_fit_anneal_mixes_scalar_and_array_leaves():
++    target = np.array([[0.5, -0.25], [1.0, 2.0]])
++
++    def loss(params: dict[str, Any]) -> float:
++        return float(
++            np.sum((params["matrix"] - target) ** 2)
++            + (params["nested"]["scale"] - 1.5) ** 2
++        )
++
++    fitter = Fitter(
++        loss,
++        initial_params={"matrix": np.zeros((2, 2)), "nested": {"scale": 0.0}},
++        bounds={"matrix": (-3.0, 3.0), "nested": {"scale": (0.0, 2.0)}},
++    )
++    best = fitter.fit_anneal(budget=600, method="portfolio", seed=0)
++    assert isinstance(best["nested"]["scale"], float)
++    assert best["matrix"].shape == (2, 2)
++    assert loss(best) < loss({"matrix": np.zeros((2, 2)), "nested": {"scale": 0.0}})
++
++
++@pytest.mark.parametrize("method", ANNEAL_METHODS)
++def test_fit_anneal_takes_array_bounds_per_element(method: str):
++    objective = Recorder(lambda p: float(np.sum(p["x"] ** 2)))
++    fitter = Fitter(
++        objective,
++        initial_params={"x": np.array([0.5, 0.5])},
++        bounds={"x": (np.array([0.1, -1.0]), np.array([1.0, 1.0]))},
++    )
++    fitter.fit_anneal(budget=200, method=method, seed=0)
++    points = np.array([seen["x"] for seen in objective.seen])
++    assert np.all(points[:, 0] >= 0.1)
++    assert np.all(points[:, 1] >= -1.0)
++    assert np.all(points <= 1.0)
++
++
++@pytest.mark.parametrize(
++    ("bounds", "message"),
++    [
++        (None, "finite bounds"),
++        ({"x": (None, 1.0)}, "finite bounds"),
++        ({"x": (-np.inf, 1.0)}, "finite with lower < upper"),
++        ({"x": (2.0, 3.0)}, "outside its bounds"),
++    ],
++)
++def test_fit_anneal_rejects_boxes_it_cannot_search(
++    bounds: dict[str, tuple[float | None, float]] | None, message: str
++):
++    fitter = Fitter(lambda p: p["x"] ** 2, initial_params={"x": 1.0}, bounds=bounds)
++    with pytest.raises(ValueError, match=message):
++        fitter.fit_anneal(budget=10)
++
++
++def test_fit_anneal_rejects_unknown_method_and_empty_budget():
++    fitter = Fitter(
++        lambda p: p["x"] ** 2, initial_params={"x": 1.0}, bounds={"x": (-2.0, 2.0)}
++    )
++    with pytest.raises(ValueError, match="method"):
++        fitter.fit_anneal(budget=10, method="tabu")
++    with pytest.raises(ValueError, match="budget"):
++        fitter.fit_anneal(budget=0)
++
++
++def test_fit_anneal_reraises_objective_exceptions_and_stops_evaluating():
++    calls: list[float] = []
++
++    def fails_on_fifth(params: dict[str, float]) -> float:
++        calls.append(params["x"])
++        if len(calls) == 5:
++            msg = "external program failed"
++            raise RuntimeError(msg)
++        return params["x"] ** 2
++
++    fitter = Fitter(
++        fails_on_fifth,
++        initial_params={"x": 1.0},
++        bounds={"x": (-2.0, 2.0)},
++        log_exceptions=False,
++    )
++    with pytest.raises(RuntimeError, match="external program failed"):
++        fitter.fit_anneal(budget=200, method="boltzmann")
++    assert len(calls) == 5
++
++
++def test_fit_anneal_swallowed_exceptions_become_penalties():
++    def flaky(params: dict[str, float]) -> float:
++        if params["x"] > 1.0:
++            msg = "unphysical"
++            raise ValueError(msg)
++        return (params["x"] - 0.5) ** 2
++
++    fitter = Fitter(
++        flaky,
++        initial_params={"x": 0.0},
++        bounds={"x": (-2.0, 2.0)},
++        swallow_exceptions=True,
++        log_exceptions=False,
++    )
++    best = fitter.fit_anneal(budget=300, method="portfolio")
++    assert best["x"] == pytest.approx(0.5, abs=0.05)
++
++
++def test_fit_anneal_uses_a_supplied_gradient():
++    grads: list[float] = []
++
++    def gradient(params: dict[str, float]) -> dict[str, float]:
++        grads.append(params["x"])
++        return {"x": 2.0 * (params["x"] - 0.3)}
++
++    fitter = Fitter(
++        lambda p: (p["x"] - 0.3) ** 2,
++        initial_params={"x": -1.5},
++        bounds={"x": (-2.0, 2.0)},
++    )
++    best = fitter.fit_anneal(budget=200, method="portfolio", gradient=gradient)
++    assert grads
++    assert best["x"] == pytest.approx(0.3, abs=1e-3)
+-- 
+2.43.0
+
