@@ -49,14 +49,19 @@ record, a run per covariance) that single slices would not see. From an
 undescended start GSA's first records are box-wide samples that leave
 the start's basin, so without an opening there are no phases.
 
-Each arm not yet played then takes one slice (the warm-up round, as in
+Each arm not yet played then takes a turn (the warm-up round, as in
 the main bandit), after which a round picks uniformly with probability
-=1/round=, otherwise replays the arm whose last slice lowered the
-incumbent, and otherwise takes a discounted Thompson draw. A slice
-succeeds when it lowers the incumbent by more than
-=1e-4 max(|f|, 1)=. A closing finite-difference descent from the final
-incumbent takes the last ten gradients' worth of evaluations (at most
-40% of the budget), enough for it to converge.
+=1/round=, otherwise replays the arm whose last turn lowered the
+incumbent, and otherwise takes a discounted Thompson draw. A turn is one
+slice, except that =qn= keeps the turn while each slice lowers its
+descent's value by more than the success threshold, short of the closing
+descent: a kicked descent climbs before it can beat the incumbent, and
+one from a poor start (Lennard-Jones positions with overlapping atoms)
+takes many slices to settle, so the turn is scored on the basin the
+descent reaches. A turn succeeds when it lowers the incumbent by more
+than =1e-4 max(|f|, 1)=. A closing finite-difference descent from the
+final incumbent takes the last ten gradients' worth of evaluations (at
+most 40% of the budget), enough for it to converge.
 
 * Regimes → preferred portfolio arms / kernels
 
@@ -80,10 +85,11 @@ The rows are tested in this order, so a wide box with a gradient is
 - In the main bandit the restart arm (=explore=) always remains first so
   Borel–Cantelli restart still fires. The values-only loop gives =explore=,
   =gsa=, =de= and =surrogate= a warm-up slice each whenever the budget
-  left after the opening holds those slices and the closing descent (the
-  phases leave room for them; at 39 dimensions and 1000 evaluations it
-  does not, and =surrogate= and =explore= go unplayed), and keeps the
-  same =1/round= uniform floor afterwards.
+  left after the opening and the descent's turn holds those slices and
+  the closing descent (the phases leave room for them, the descent's turn
+  does not; on Lennard-Jones positions at 39 dimensions and 1000
+  evaluations the descent's turn runs to the closing descent and none of
+  them plays), and keeps the same =1/round= uniform floor afterwards.
 - Unknown features fall to =Default= (safe fallback).
 - Policy biases Beta priors and arm *order*, not hard exclusion (except
   noise-aware accept requirement under =StochasticNoise=).
