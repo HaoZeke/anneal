@@ -347,7 +347,10 @@ impl<M: MoveKernel<f64>> MoveKernel<f64> for Reflected<M> {
                 // An infinite step has no fold; reflecting ever longer steps
                 // tends to the uniform law on the box. Whether a step is
                 // infinite does not depend on `x`, so this stays symmetric.
-                return (lo + (hi - lo) * rng.random::<f64>()).max(lo).min(hi);
+                // A convex combination, so a box wider than MAX does not
+                // overflow to its upper wall.
+                let u = rng.random::<f64>();
+                return ((1.0 - u) * lo + u * hi).max(lo).min(hi);
             }
             let x = i[k];
             let proposal = x + step;
@@ -514,6 +517,25 @@ mod tests {
             let raw = Cauchy::new(0.8).propose(x.view(), 1.0, &mut b);
             assert_eq!(p, reflect_into_box(raw.view(), &bounds));
         }
+    }
+
+    #[test]
+    fn reflected_lands_infinite_steps_across_a_box_wider_than_max() {
+        let bounds = Bounds::new(array![-f64::MAX], array![f64::MAX], 0.0);
+        let kernel = Reflected::new(Cauchy::new(f64::MAX), bounds);
+        let mut rng = StdRng::seed_from_u64(29);
+        let (mut below, mut above, mut on_wall) = (0, 0, 0);
+        for _ in 0..4000 {
+            let p = kernel.propose(array![0.0].view(), 1.0, &mut rng)[0];
+            assert!(p.is_finite());
+            on_wall += usize::from(p.abs() == f64::MAX);
+            if p < 0.0 { below += 1 } else { above += 1 }
+        }
+        assert!(on_wall < 40, "{on_wall} of 4000 proposals sit on a wall");
+        assert!(
+            below > 1500 && above > 1500,
+            "{below} below and {above} above zero"
+        );
     }
 
     #[test]
