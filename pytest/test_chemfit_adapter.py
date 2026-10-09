@@ -133,7 +133,7 @@ def test_fit_anneal_defaults_to_fitter_initial_params():
 def test_fit_anneal_rejects_bad_drivers_and_budgets():
     with pytest.raises(ValueError, match="driver must be"):
         fit_anneal(_stub(), 100, driver="simplex")
-    with pytest.raises(ValueError, match="budget must be positive"):
+    with pytest.raises(ValueError, match="budget must be a whole number"):
         fit_anneal(_stub(), 0)
 
 
@@ -217,3 +217,38 @@ def test_classical_bridges_spend_exactly_the_budget(budget):
         context = {"fitter": f, "budget": budget, "initial_params": f.initial_parameters}
         run_benchmark(context, method=driver, low=-3.0, high=3.0)
         assert len(f.seen) == budget
+
+
+class CountingInit(StepFitter):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.inits = 0
+
+    def init(self):
+        self.inits += 1
+        super().init()
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "name"),
+    [
+        ({"budget": 2.5}, "budget"),
+        ({"budget": True}, "budget"),
+        ({"seed": 1.5}, "seed"),
+        ({"seed": -1}, "seed"),
+        ({"seed": "0"}, "seed"),
+        ({"seed": 2**64}, "seed"),
+        ({"driver": "boltzmann", "steps_per_epoch": 0}, "steps_per_epoch"),
+        ({"driver": "boltzmann", "steps_per_epoch": 2.5}, "steps_per_epoch"),
+        ({"driver": "Boltzmann"}, "driver"),
+        ({"driver": "boltzmann", "preset": anneal.Gsa()}, "does not match driver"),
+    ],
+)
+def test_fit_anneal_refuses_bad_values_before_init(kwargs, name):
+    fitter = CountingInit({"positions": np.array([[2.5, 0.0, -1.0]]), "eps": 2.0}, bounds={"eps": (0.5, 3.0)})
+    arguments = {"budget": 50, **kwargs}
+    budget = arguments.pop("budget")
+    with pytest.raises(ValueError, match=name):
+        fit_anneal(fitter, budget, **arguments)
+    assert fitter.inits == 0
+    assert fitter.seen == []
