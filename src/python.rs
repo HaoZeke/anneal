@@ -1971,7 +1971,25 @@ fn low_discrepancy_points(
 ) -> PyResult<Vec<Vec<f64>>> {
     let low_vec = low.as_slice()?.to_vec();
     let high_vec = high.as_slice()?.to_vec();
-    validate_box_bounds(&low_vec, &high_vec)?;
+    if low_vec.len() != high_vec.len() {
+        return Err(PyValueError::new_err(
+            "low and high must have the same length",
+        ));
+    }
+    if low_vec.is_empty() {
+        return Err(PyValueError::new_err(
+            "bounds must have at least one dimension",
+        ));
+    }
+    if low_vec
+        .iter()
+        .zip(high_vec.iter())
+        .any(|(&lo, &hi)| hi < lo)
+    {
+        return Err(PyValueError::new_err(
+            "each upper bound must be greater than or equal to the lower bound",
+        ));
+    }
     let bounds = Bounds::new(Array1::from_vec(low_vec), Array1::from_vec(high_vec), 0.0);
     let points = eindir_core::low_discrepancy_points(&bounds, n, skip);
     Ok(points.outer_iter().map(|row| row.to_vec()).collect())
@@ -2004,25 +2022,7 @@ fn run_qmc(
 ) -> PyResult<PyHistory> {
     let low_vec = low.as_slice()?.to_vec();
     let high_vec = high.as_slice()?.to_vec();
-    if low_vec.len() != high_vec.len() {
-        return Err(PyValueError::new_err(
-            "low and high must have the same length",
-        ));
-    }
-    if low_vec.is_empty() {
-        return Err(PyValueError::new_err(
-            "bounds must have at least one dimension",
-        ));
-    }
-    if low_vec
-        .iter()
-        .zip(high_vec.iter())
-        .any(|(&lo, &hi)| hi < lo)
-    {
-        return Err(PyValueError::new_err(
-            "each upper bound must be greater than or equal to the lower bound",
-        ));
-    }
+    validate_box_bounds(&low_vec, &high_vec)?;
     let bounds = Bounds::new(Array1::from_vec(low_vec), Array1::from_vec(high_vec), 1e-9);
     let obj = CallableObjective {
         fn_: obj_fn,
@@ -2387,7 +2387,7 @@ fn cluster_archive_search(
     ledger: &mut crate::methods::cluster_hopping::Ledger,
     seed: u64,
 ) -> PyResult<Py<PyDict>> {
-    use crate::methods::archive_search::{Archive, archive_search};
+    use crate::methods::archive_search::{archive_search, Archive};
     use crate::methods::cluster_hopping::random_cluster_in_radius;
     use crate::methods::warm_lbfgs::WarmLbfgs;
     use eindir_core::gradient::{DifferentiableObjective, Gradient};
