@@ -189,36 +189,53 @@ impl MoveKernel<f64> for TsallisVisit {
 /// in it keeps the proposal symmetric: `q(x -> y) = q(y -> x)`. The Metropolis
 /// test therefore still targets the box-restricted Gibbs measure with no
 /// Hastings correction (manuscript law L1 holds for the reflected proposal).
-/// A box with one infinite wall mirrors across its finite wall.
+/// A box with one infinite wall mirrors across its finite wall, and across
+/// `+-f64::MAX` in place of the infinite one when an image would leave the
+/// `f64` range. An infinite `x` has no image and stops on the wall it crossed;
+/// a NaN goes to `lo`.
 pub fn reflect_coord(x: f64, lo: f64, hi: f64) -> f64 {
     let w = hi - lo;
     if w.is_nan() || w <= 0.0 {
         return lo;
     }
     let period = 2.0 * w;
-    if !period.is_finite() {
-        // The box is wider than half the f64 range or has an infinite wall,
-        // so fold the overshoot `d` across the crossed wall instead. A finite
-        // `d` is below `2 w`, so at most one more fold, across the other wall,
-        // is needed. An infinite `d` folds to -inf or NaN, which clamping
-        // against the crossed wall first sends to that wall.
-        let fold = |d: f64| if d < w { d } else { w - (d - w) };
-        return if x < lo {
-            (lo + fold(lo - x)).max(lo).min(hi)
-        } else if x > hi {
-            (hi - fold(x - hi)).min(hi).max(lo)
+    let offset = x - lo;
+    if !(period.is_finite() && offset.is_finite()) {
+        return if x < lo || x > hi {
+            reflect_quarter(0.25 * x, lo, hi)
         } else {
-            // Inside the box; a NaN goes to `lo` as below.
             x.max(lo)
         };
     }
-    let mut y = (x - lo).rem_euclid(period);
+    let mut y = offset.rem_euclid(period);
     if y > w {
         y = period - y;
     }
-    // `hi - lo` and `lo + y` both round, so the sum can land one ulp past
-    // `hi`; a non-finite `x` leaves `y` NaN, which `max` sends to `lo`.
+    // `hi - lo` and `lo + y` both round, so the sum can land one ulp past `hi`.
     (lo + y).max(lo).min(hi)
+}
+
+/// [`reflect_coord`] of `4 x4` for a point outside the box whose offset or
+/// period overflows, folded at quarter scale: differences of quarters of values
+/// within `+-f64::MAX` are finite, and scaling by a power of two is exact above
+/// the subnormals. The overshoot is measured from the crossed wall, so a small
+/// one stays exact. An infinite wall folds as `+-f64::MAX`.
+fn reflect_quarter(x4: f64, lo: f64, hi: f64) -> f64 {
+    let (lo, hi) = (lo.max(f64::MIN), hi.min(f64::MAX));
+    let (lo4, hi4) = (0.25 * lo, 0.25 * hi);
+    let w = hi4 - lo4;
+    let fold = |d: f64| {
+        let r = d % (2.0 * w);
+        if r < w { r } else { w - (r - w) }
+    };
+    // A subnormal point just past `hi` can round onto `hi4` and must still fold
+    // from `hi`. An infinite overshoot folds to NaN, which clamping against the
+    // crossed wall first sends to that wall.
+    if x4 >= hi4 {
+        (4.0 * (hi4 - fold(x4 - hi4))).min(hi).max(lo)
+    } else {
+        (4.0 * (lo4 + fold(lo4 - x4))).max(lo).min(hi)
+    }
 }
 
 /// Mirror-reflects every coordinate of `x` into `bounds` (see
@@ -355,6 +372,28 @@ mod tests {
         // An infinite overshoot stops on the wall it crossed.
         assert_eq!(reflect_coord(f64::INFINITY, -1e308, 1e308), 1e308);
         assert_eq!(reflect_coord(f64::NEG_INFINITY, -6e307, 6e307), -6e307);
+    }
+
+    #[test]
+    fn reflect_coord_mirrors_when_the_offset_from_lo_overflows() {
+        let near = |a: f64, b: f64| (a - b).abs() <= 1e-12 * b.abs();
+        let m = f64::MAX;
+        // `x - lo` overflows although twice the width is finite.
+        assert!(near(reflect_coord(8.5e307, -1e308, -9e307), -9.5e307));
+        assert!(near(reflect_coord(-9.5e307, 9e307, 1e308), 9.5e307));
+        assert!(near(reflect_coord(0.5 * m, -0.6 * m, -0.1 * m), -0.5 * m));
+        // Twice the width overflows too.
+        assert!(near(reflect_coord(m, -m, -0.45 * m), -0.8 * m));
+        // The infinite wall of a half-infinite box mirrors as `+-f64::MAX`.
+        assert!(near(reflect_coord(-0.25 * m, 0.5 * m, f64::INFINITY), 0.75 * m));
+        assert!(near(reflect_coord(0.25 * m, f64::NEG_INFINITY, -0.5 * m), -0.75 * m));
+        // An infinite `x` stops on the wall it crossed, whatever the width.
+        assert_eq!(reflect_coord(f64::INFINITY, 1e308, 1.7e308), 1.7e308);
+        assert_eq!(reflect_coord(f64::INFINITY, -1.0, 0.3), 0.3);
+        assert_eq!(reflect_coord(f64::NEG_INFINITY, -1.0, 0.3), -1.0);
+        // A subnormal point just past `hi` stays by `hi` at quarter scale.
+        let r = reflect_coord(f64::from_bits(2025), -m, f64::from_bits(2024));
+        assert!(r >= f64::from_bits(2023), "{r:e}");
     }
 
     #[test]
