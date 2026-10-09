@@ -1046,6 +1046,14 @@ _CHEMFIT_PRESET_DEFAULTS = {
 _PRESET_KEYWORDS = ("t_init", "sigma", "gamma", "q_v", "q_a")
 
 
+def _listed(names: Any) -> str:
+    """``a``, ``a and b``, or ``a, b and c``."""
+    names = list(names)
+    if len(names) == 1:
+        return names[0]
+    return f"{', '.join(names[:-1])} and {names[-1]}"
+
+
 def _chemfit_preset(method: str, preset_kwargs: dict[str, Any]):
     """The preset of a :func:`fit_chemfit` method, from its keyword defaults.
 
@@ -1066,15 +1074,16 @@ def _chemfit_preset(method: str, preset_kwargs: dict[str, Any]):
         )
     ignored = [key for key in preset_kwargs if key not in defaults]
     if ignored and method == "portfolio":
+        them = "it" if len(ignored) == 1 else "them"
         _deprecated(
-            f"fit_chemfit ignores {', '.join(ignored)} under method 'portfolio', "
-            "which takes no preset; leave them out, or pass method='boltzmann', "
-            "'fast' or 'gsa' to use them. This will raise in a future release."
+            f"fit_chemfit ignores {_listed(ignored)} under method 'portfolio', "
+            f"which takes no preset; leave {them} out, or pass method='boltzmann', "
+            f"'fast' or 'gsa' to use {them}. This will raise in a future release."
         )
     elif ignored:
         _deprecated(
-            f"fit_chemfit ignores {', '.join(ignored)}, which method {method!r} does "
-            f"not take; it takes {', '.join(defaults)}. Pass only those; a preset "
+            f"fit_chemfit ignores {_listed(ignored)}, which method {method!r} does "
+            f"not take; it takes {_listed(defaults)}. Pass only those; a preset "
             "keyword of another method will raise in a future release."
         )
     if method == "portfolio":

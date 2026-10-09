@@ -72,6 +72,11 @@ _OWN = {
     "fast": ("t_init", "gamma"),
     "gsa": ("t_init", "q_v", "q_a"),
 }
+_TAKES = {
+    "boltzmann": "t_init and sigma",
+    "fast": "t_init and gamma",
+    "gsa": "t_init, q_v and q_a",
+}
 
 # (id, fitter, the call 0.10.0 took, the call that passes what it meant, warning)
 WARNS = [
@@ -87,7 +92,10 @@ WARNS = [
         _fitter,
         lambda f: fit_chemfit(f, 60, t_init=2.0),
         lambda f: fit_chemfit(f, 60),
-        "fit_chemfit ignores t_init under method 'portfolio'",
+        (
+            "fit_chemfit ignores t_init under method 'portfolio', which takes no "
+            "preset; leave it out"
+        ),
     ),
     (
         "fit_chemfit gamma under boltzmann",
@@ -96,7 +104,7 @@ WARNS = [
         lambda f: fit_chemfit(f, 60, method="boltzmann"),
         (
             "fit_chemfit ignores gamma, which method 'boltzmann' does not take; "
-            "it takes t_init, sigma"
+            "it takes t_init and sigma"
         ),
     ),
     (
@@ -104,7 +112,10 @@ WARNS = [
         _fitter,
         lambda f: fit_chemfit(f, 60, **_SWEEP),
         lambda f: fit_chemfit(f, 60),
-        "fit_chemfit ignores t_init, sigma, gamma, q_v, q_a under method 'portfolio'",
+        (
+            "fit_chemfit ignores t_init, sigma, gamma, q_v and q_a under method "
+            "'portfolio', which takes no preset; leave them out"
+        ),
     ),
     *[
         (
@@ -118,7 +129,7 @@ WARNS = [
             ),
             (
                 f"which method '{method}' does not take; "
-                f"it takes {', '.join(_OWN[method])}"
+                f"it takes {_TAKES[method]}. Pass only those"
             ),
         )
         for method in _OWN
