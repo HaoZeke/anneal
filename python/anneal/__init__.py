@@ -865,7 +865,9 @@ def global_optimize(
     Without ``grad_fn``, boxes too narrow for heavy-tailed visiting
     (least-squares fits, clusters, curved valleys) run a fixed schedule
     instead: a finite-difference quasi-Newton descent, CMA-ES restarted
-    from the incumbent, and a closing descent.
+    from the incumbent, and a closing descent. Mid-width multimodal
+    boxes spend most of the budget on one generalized-simulated-annealing
+    run with a finite-difference local search from every new record.
 
     Args:
       obj_fn: callable ``f(numpy.ndarray) -> float``.
