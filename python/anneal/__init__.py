@@ -870,8 +870,9 @@ def global_optimize(
     budget lets a descent converge, one from the start opens the run while
     it pays, and from the minimum it reaches annealing and then CMA-ES
     each keep the turn while they lower the incumbent. Each arm gets one
-    slice before the allocation ranks them and the same decaying uniform
-    floor afterwards, and a descent from the incumbent closes the run.
+    turn before the allocation ranks them and the same decaying uniform
+    floor afterwards; a turn is one slice, except that the descent keeps
+    it while it pays. A descent from the incumbent closes the run.
 
     Args:
       obj_fn: callable ``f(numpy.ndarray) -> float``.

@@ -1006,6 +1006,23 @@ struct QnArmState {
     /// Incumbent value when the arm last yielded its slice.
     seen_best: f64,
     rng: StdRng,
+    /// Descent value at the last [`QnArmState::paid`] check; infinite once
+    /// the descent restarts or is kicked.
+    checked: f64,
+}
+
+impl QnArmState {
+    /// Whether the descent has lowered its value by more than the success
+    /// threshold since the last check. A new descent pays its first check
+    /// once it has a finite value; a converged one never pays.
+    fn paid(&mut self) -> bool {
+        let value = self.engine.value();
+        let paid = !self.engine.is_done()
+            && value.is_finite()
+            && value < self.checked - arm_success_threshold(ArmKind::Qn, self.checked);
+        self.checked = value;
+        paid
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -3072,12 +3089,14 @@ fn run_qn_arm<O>(
         base_val: best,
         seen_best: best,
         rng: StdRng::seed_from_u64(seed ^ QN_STREAM),
+        checked: f64::INFINITY,
     });
     if best < state.seen_best && best < state.engine.value() {
         state
             .engine
             .restart_at(ledger.incumbent(bounds).view(), Some(best), false);
         state.base_val = best;
+        state.checked = f64::INFINITY;
     }
     let start = ledger.used_get();
     while ledger.used_get() - start < slice && ledger.remaining() > 0 {
@@ -3099,6 +3118,7 @@ fn run_qn_arm<O>(
             let x = crate::movekernel::reflect_into_box(x.view(), bounds);
             state.engine.restart_at(x.view(), None, true);
             state.base_val = best;
+            state.checked = f64::INFINITY;
         }
         let x = state.engine.ask();
         state.engine.tell(obj.eval(x.view()));
@@ -3137,9 +3157,12 @@ const VALUES_ONLY_ARMS: [ArmKind; 6] = [
 /// list order, so the restart arm and the global searches get an
 /// observation whenever the budget holds a slice each. After that a round
 /// picks uniformly with probability `1/round` (rounds counted from the
-/// opening); otherwise the arm whose last slice succeeded plays again, and
-/// failing that a discounted Thompson draw picks. A slice succeeds when it
-/// lowers the incumbent by more than [`arm_success_threshold`]. The closing
+/// opening); otherwise the arm whose last turn succeeded plays again, and
+/// failing that a discounted Thompson draw picks. A turn is one slice,
+/// except that the descent keeps the turn, short of the closing polish,
+/// while each slice lowers its own value by more than the success
+/// threshold ([`QnArmState::paid`]). A turn succeeds when it lowers the
+/// incumbent by more than [`arm_success_threshold`]. The closing
 /// polish is a finite-difference descent from the final incumbent with the
 /// evaluations one needs to converge ([`LOCAL_FIRST_POLISH_GRADIENTS`]),
 /// kicked from it once it does.
@@ -3189,15 +3212,30 @@ where
     let mut winner = None;
     let play = |choice: usize,
                 take: usize,
+                reserve: usize,
                 states: &mut ArmStates,
                 rng: &mut StdRng,
                 posteriors: &mut [ArmPosterior]|
      -> bool {
         let arm = arms[choice];
         let before = ledger.best_get();
-        ledger.cap_set((ledger.used_get() + take).min(budget));
-        run_arm::<O, G>(arm, obj, None, ledger, states, rng, take, budget);
-        ledger.cap_set(budget);
+        let mut take = take;
+        loop {
+            ledger.cap_set((ledger.used_get() + take).min(budget));
+            run_arm::<O, G>(arm, obj, None, ledger, states, rng, take, budget);
+            ledger.cap_set(budget);
+            // A kicked descent climbs before it can beat the incumbent, and
+            // one from a poor start takes many slices to settle: the turn
+            // is scored on the basin the descent reaches once it stops
+            // paying, not where a slice boundary cuts it.
+            if arm != ArmKind::Qn
+                || !states.qn.as_mut().is_some_and(QnArmState::paid)
+                || ledger.remaining() < reserve + 8
+            {
+                break;
+            }
+            take = take.min(ledger.remaining() - reserve);
+        }
         let after = ledger.best_get();
         let improved = after.is_finite() && after < before - arm_success_threshold(arm, before);
         posteriors[choice].update(improved);
@@ -3268,7 +3306,7 @@ where
                 }
                 round += 1;
                 let take = slice.min(ledger.remaining() - reserve);
-                let gained = play(choice, take, states, &mut rng, &mut posteriors);
+                let gained = play(choice, take, reserve, states, &mut rng, &mut posteriors);
                 if gained {
                     last_gain = ledger.used_get();
                 }
@@ -3297,11 +3335,11 @@ where
             best.0
         };
         let take = slice.min(ledger.remaining() - polish);
-        winner = play(choice, take, states, &mut rng, &mut posteriors).then_some(choice);
+        winner = play(choice, take, polish, states, &mut rng, &mut posteriors).then_some(choice);
     }
     let qn = index(ArmKind::Qn);
     while ledger.remaining() > 0 {
-        play(qn, slice, states, &mut rng, &mut posteriors);
+        play(qn, slice, budget, states, &mut rng, &mut posteriors);
     }
     arms.iter()
         .zip(posteriors.iter())
@@ -5823,7 +5861,8 @@ mod tests {
     #[test]
     fn values_only_narrow_box_charges_exactly_with_and_without_a_start() {
         // Width 4 and no gradient. The 6-d case affords an opening descent;
-        // the 12-d one does not, so its warm-up round plays every arm.
+        // the 12-d one does not, so its descent first plays in the warm-up
+        // round.
         for (dim, budget) in [(6usize, 900usize), (12, 600)] {
             let start = Array1::from_elem(dim, -1.5);
             for x0 in [Some(start.view()), None] {
@@ -5851,9 +5890,6 @@ mod tests {
                     .map(|s| s.name)
                     .collect();
                 assert!(played.contains(&"qn"), "qn ran in {dim}-D");
-                if dim == 12 {
-                    assert_eq!(played.len(), 6, "every arm took a slice in 12-D");
-                }
                 if x0.is_some() {
                     assert_eq!(points[0], start, "the start is the first evaluation");
                     assert!(result.best_val <= rosenbrock(start.view()));
@@ -6057,6 +6093,43 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn values_only_descent_keeps_its_turn_while_it_pays() {
+        // Twelve dimensions and 700 evaluations are short of the opening,
+        // so the descent first plays in the warm-up round. On a stiff
+        // quadratic it pays every slice until it converges, which takes
+        // several slices: one turn spans them.
+        fn stiff(x: ArrayView1<f64>) -> f64 {
+            let last = (x.len() - 1) as f64;
+            x.iter()
+                .enumerate()
+                .map(|(i, v)| 10f64.powf(3.0 * i as f64 / last) * v * v)
+                .sum()
+        }
+        let (dim, budget) = (12usize, 700usize);
+        assert!(budget < QN_AFFORDABLE_GRADIENTS * dim * (dim + 1));
+        let slice = (SLICE_GRAD_EQUIVALENTS * (dim + 1))
+            .max(budget / (ROUNDS_PER_ARM * VALUES_ONLY_ARMS.len()));
+        let obj = Traced::new(-2.0, 2.0, dim, stiff);
+        let start = Array1::from_elem(dim, 1.5);
+        let result = portfolio_optimize_from::<_, ShiftQuadratic>(
+            &obj,
+            None,
+            budget,
+            3,
+            None,
+            PortfolioPolicy::Auto,
+            Some(start.view()),
+        );
+        assert_eq!(obj.points().len(), budget);
+        let turns: usize = result.arm_stats.iter().map(|s| s.pulls).sum();
+        assert!(
+            turns * slice < budget - 1,
+            "{turns} turns of at most {slice} evaluations would not spend {budget}"
+        );
+        assert!(result.best_val < 1e-12, "{}", result.best_val);
     }
 
     #[test]
