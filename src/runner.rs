@@ -8,7 +8,7 @@ use rand::rngs::StdRng;
 
 use crate::cool::Cooling;
 use crate::history::{EpochLine, History, State};
-use crate::sampler::{Sampler, nan_as_inf};
+use crate::sampler::{Sampler, improves};
 use crate::variant::SaVariant;
 
 /// Deterministic positive Halton skip derived from a run seed.
@@ -267,7 +267,7 @@ where
         );
         if best_history
             .as_ref()
-            .is_none_or(|best: &History| nan_as_inf(history.best.val) < nan_as_inf(best.best.val))
+            .is_none_or(|best: &History| improves(history.best.val, best.best.val))
         {
             best_history = Some(history);
         }

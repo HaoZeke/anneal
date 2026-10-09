@@ -2,9 +2,10 @@
 //! evaluated point and `History.best` lie in the closed box, an axis with
 //! `low == high` never moves, a supplied start is the first point evaluated,
 //! and inside the box the chain consumes the RNG exactly as the
-//! unconstrained composition did. A NaN objective value at the start neither
-//! freezes the chain nor survives as its best value, and a start that meets
-//! only NaN never wins a multistart.
+//! unconstrained composition did. A NaN objective value ranks above every
+//! number, `+inf` included: at the start it neither freezes the chain nor
+//! survives as its best value, and a start that meets only NaN never wins a
+//! multistart.
 
 use std::sync::{Arc, Mutex};
 
@@ -57,11 +58,12 @@ fn recorder(low: &Array1<f64>, high: &Array1<f64>) -> (Recorder, Seen) {
     (obj, seen)
 }
 
-/// The squared norm, except NaN at the first `n_nan` points evaluated, which
-/// begin with the start of the chain, or of the first chain of a multistart.
+/// `after`, except NaN at the first `n_nan` points evaluated, which begin with
+/// the start of the chain, or of the first chain of a multistart.
 struct NanFirst {
     bounds: Bounds<f64>,
     n_nan: usize,
+    after: fn(ArrayView1<f64>) -> f64,
     vals: Arc<Mutex<Vec<f64>>>,
 }
 
@@ -79,7 +81,7 @@ impl Objective<f64> for NanFirst {
         let val = if vals.len() < self.n_nan {
             f64::NAN
         } else {
-            x.dot(&x)
+            (self.after)(x)
         };
         vals.push(val);
         val
@@ -314,6 +316,7 @@ fn a_nan_start_is_left_and_never_kept_as_the_best() {
                 let obj = NanFirst {
                     bounds: Bounds::new(low.clone(), high.clone(), 0.0),
                     n_nan: 1,
+                    after: |x| x.dot(&x),
                     vals: Arc::clone(&vals),
                 };
                 let history = run_preset(which, obj, 0.5, 2.62, n_starts, 1, start);
@@ -344,6 +347,7 @@ fn a_start_that_meets_only_nan_never_wins_the_multistart() {
             let obj = NanFirst {
                 bounds: Bounds::new(low.clone(), high.clone(), 0.0),
                 n_nan: first_chain,
+                after: |x| x.dot(&x),
                 vals: Arc::clone(&vals),
             };
             let history = run_preset(which, obj, 0.5, 2.62, Some(3), 1, start);
@@ -355,6 +359,44 @@ fn a_start_that_meets_only_nan_never_wins_the_multistart() {
             assert_eq!(history.best.val, lowest, "preset {which}, x0 {start:?}");
         }
     }
+}
+
+#[test]
+fn an_infinite_value_beats_a_nan() {
+    // A Python objective that raises reaches the chain as `+inf`. A chain at a
+    // NaN start must take such a point, and a multistart that runs no steps
+    // must keep a start at `+inf` over the NaN at x0.
+    let low = array![-1.0, -1.0];
+    let high = array![1.0, 1.0];
+    let x0 = array![0.5, 0.5];
+    let nan_then_inf = || NanFirst {
+        bounds: Bounds::new(low.clone(), high.clone(), 0.0),
+        n_nan: 1,
+        after: |_| f64::INFINITY,
+        vals: Arc::default(),
+    };
+    for which in 0..3 {
+        for n_starts in [None, Some(3)] {
+            let history = run_preset(
+                which,
+                nan_then_inf(),
+                0.5,
+                2.62,
+                n_starts,
+                1,
+                Some(x0.view()),
+            );
+            assert!(
+                history.total_accepted() > 0,
+                "preset {which}, {n_starts:?} starts"
+            );
+            assert_eq!(history.best.val, f64::INFINITY);
+        }
+    }
+    let variant = boltzmann(nan_then_inf(), 1.0, 0.5).unwrap();
+    let history = run_rs_qmc_variant_from(variant, 3, 1, 0, 1, Some(x0.view()));
+    assert_eq!(history.best.val, f64::INFINITY);
+    assert_ne!(history.best.pos, x0);
 }
 
 #[test]

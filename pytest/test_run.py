@@ -803,6 +803,54 @@ def test_a_nan_at_x0_neither_freezes_the_chain_nor_wins(driver, preset, nan):
     assert h.best_val == min(float(np.sum(x**2)) for x in seen[1:])
 
 
+def nan_at(x0):
+    """NaN at ``x0``; raises elsewhere, which the drivers read as +inf."""
+
+    def f(x):
+        if np.array_equal(x, x0):
+            return np.nan
+        raise RuntimeError("undefined away from x0")
+
+    return f
+
+
+@pytest.mark.parametrize("driver", DRIVERS)
+@pytest.mark.parametrize("preset", [Boltzmann(), Fast(), Gsa()], ids=repr)
+def test_an_evaluation_that_raised_beats_a_nan_at_x0(driver, preset):
+    x0 = np.array([0.5, 0.5])
+
+    h = driver(
+        nan_at(x0),
+        -np.ones(2),
+        np.ones(2),
+        preset,
+        n_epochs=2,
+        steps_per_epoch=10,
+        x0=x0,
+    )
+
+    assert h.total_accepted > 0
+    assert h.best_val == np.inf
+
+
+def test_run_qmc_keeps_a_start_that_raised_over_a_nan_at_x0():
+    x0 = np.array([0.5, 0.5])
+
+    h = run_qmc(
+        nan_at(x0),
+        -np.ones(2),
+        np.ones(2),
+        Boltzmann(),
+        n_starts=3,
+        n_epochs=1,
+        steps_per_epoch=0,
+        x0=x0,
+    )
+
+    assert h.best_val == np.inf
+    assert not np.array_equal(h.best_pos, x0)
+
+
 @pytest.mark.parametrize("driver", DRIVERS)
 @pytest.mark.parametrize("preset", WIDE_PRESETS, ids=repr)
 @pytest.mark.parametrize(
