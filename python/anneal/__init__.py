@@ -4,7 +4,11 @@ Public API:
   - Boltzmann(t_init, sigma): logarithmic cooling + Gaussian + Metropolis.
   - Fast(t_init, gamma): reciprocal cooling + Cauchy + Metropolis.
   - Gsa(t_init, q_v, q_a): Tsallis cooling + Tsallis visit + Tsallis accept.
-  - run(obj_fn, low, high, preset, n_epochs, steps_per_epoch, seed): SA loop.
+  - run(obj_fn, low, high, preset, n_epochs, steps_per_epoch, seed, x0): SA loop.
+    Every proposal is mirror-reflected into [low, high] on the
+    box-constrained neighborhood, so the objective never sees an
+    out-of-box evaluation; x0 optionally anchors the chain at caller
+    initial parameters (clipped into the box).
   - History, EpochLine: returned by `run`.
   - Config.recommended(n) / Config.for_cluster(n), Ledger(budget),
     cluster_search(obj_fn, grad_fn, n, budget, seed, recommended): measured
@@ -58,6 +62,7 @@ from anneal._core import (
     run_qmc,
 )
 from anneal.device import DeviceHistory, EnsembleHistory, run_device, run_ensemble
+from anneal.chemfit import ChemFitVector, chemfit_box, fit_chemfit
 from anneal.tvm_ffi import (
     TvmFfiTensorMetadata,
     tvm_ffi_tensor,
@@ -765,6 +770,7 @@ __all__ = [
     "BasinBias",
     "Boltzmann",
     "Bounds",
+    "ChemFitVector",
     "Config",
     "DeviceHistory",
     "EnsembleHistory",
@@ -774,7 +780,9 @@ __all__ = [
     "History",
     "Ledger",
     "PyObjective",
+    "chemfit_box",
     "cluster_search",
+    "fit_chemfit",
     "TvmFfiTensorMetadata",
     "__version__",
     "low_discrepancy_points",
