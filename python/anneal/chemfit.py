@@ -17,9 +17,10 @@ inside them. A parameter whose lower and upper bounds are equal is held
 fixed. Every evaluation lies inside the box, the first one is the start, and
 the budget counts it. The default driver is the Thompson-allocated portfolio.
 
-The first exception the fitter raises, or a loss that is not a real number,
-ends the drive: the fitter is not called again, ``finish`` is skipped, and
-the exception reaches the caller.
+Every argument is checked before ``fitter.init()``. The first exception the
+fitter raises, or a loss that is not a real number, ends the drive: the
+fitter is not called again, ``finish`` is skipped, and the exception reaches
+the caller.
 """
 
 from __future__ import annotations
@@ -27,6 +28,7 @@ from __future__ import annotations
 import inspect
 import math
 import numbers
+import sys
 from collections.abc import Mapping
 from typing import Any
 
@@ -44,13 +46,52 @@ __all__ = [
 ]
 
 _CLASSICAL_DRIVERS = ("boltzmann", "fast", "gsa")
+_DRIVERS = ("portfolio", *_CLASSICAL_DRIVERS)
+_SEED_LIMIT = 2**64 - 1
 _FLOAT64_MANTISSA = np.finfo(np.float64).nmant
 _MISSING = object()
+
+
+# ---------------------------------------------------------------------------
+# Argument checks. All of them run before the fitter's session starts.
+# ---------------------------------------------------------------------------
 
 
 def _is_number(value: Any) -> bool:
     """Whether ``value`` is a real number other than a bool."""
     return isinstance(value, numbers.Real) and not isinstance(value, (bool, np.bool_))
+
+
+def _whole(name: str, value: Any, minimum: int, maximum: int = sys.maxsize) -> int:
+    """``value`` as an int in ``[minimum, maximum]``, or an error naming it."""
+    if not _is_number(value):
+        raise TypeError(f"{name} must be a whole number, got {value!r}")
+    if not isinstance(value, numbers.Integral) and not float(value).is_integer():
+        raise ValueError(f"{name} must be a whole number, got {value!r}")
+    count = int(value)
+    if count < minimum:
+        least = "positive" if minimum == 1 else f"at least {minimum}"
+        raise ValueError(f"{name} must be {least}, got {value!r}")
+    if count > maximum:
+        raise ValueError(f"{name} must be at most {maximum}, got {value!r}")
+    return count
+
+
+def _positive(name: str, value: Any) -> float:
+    """``value`` as a positive finite float, or an error naming it."""
+    if not _is_number(value):
+        raise TypeError(f"{name} must be a number, got {value!r}")
+    number = float(value)
+    if not (math.isfinite(number) and number > 0.0):
+        raise ValueError(f"{name} must be positive and finite, got {value!r}")
+    return number
+
+
+def _choice(value: Any, choices) -> str | None:
+    """``value`` lower-cased when it names one of ``choices``, else ``None``."""
+    if isinstance(value, str) and value.lower() in choices:
+        return value.lower()
+    return None
 
 
 def _first(mask: np.ndarray) -> int | None:
@@ -544,15 +585,64 @@ def _drive(
     return problem.candidate(session.best)
 
 
-def _classical_preset(driver: str, preset_kwargs: dict[str, Any] | None):
+# ---------------------------------------------------------------------------
+# Classical presets.
+# ---------------------------------------------------------------------------
+
+
+def _preset_types() -> dict[str, type]:
     from anneal import Boltzmann, Fast, Gsa
 
-    kwargs = dict(preset_kwargs or {})
-    if driver == "boltzmann":
-        return Boltzmann(**kwargs)
-    if driver == "fast":
-        return Fast(**kwargs)
-    return Gsa(**kwargs)
+    return {"boltzmann": Boltzmann, "fast": Fast, "gsa": Gsa}
+
+
+def _preset_driver(preset: Any) -> str:
+    """The classical driver a preset instance belongs to."""
+    for name, kind in _preset_types().items():
+        if isinstance(preset, kind):
+            return name
+    raise TypeError(
+        f"preset must be Boltzmann(), Fast() or Gsa(), got {type(preset).__name__}"
+    )
+
+
+_PRESET_SCALES = {"boltzmann": "sigma", "fast": "gamma"}
+
+
+def _check_preset(driver: str, preset: Any) -> None:
+    """Refuse the preset values ``anneal.run`` refuses, before the fitter starts."""
+    for name in ("t_init", _PRESET_SCALES.get(driver)):
+        if name is None:
+            continue
+        value = getattr(preset, name)
+        if not (math.isfinite(value) and value > 0.0):
+            raise ValueError(f"{name} must be positive and finite, got {value!r}")
+    if driver == "gsa":
+        if not 1.0 < preset.q_v < 3.0:
+            raise ValueError(f"q_v must lie in (1, 3), got {preset.q_v!r}")
+        if not math.isfinite(preset.q_a):
+            raise ValueError(f"q_a must be finite, got {preset.q_a!r}")
+
+
+def _classical_preset(driver: str, preset: Any = None, kwargs: Any = None):
+    """The preset ``driver`` runs, built and checked now; ``None`` for the portfolio."""
+    if kwargs is not None and not isinstance(kwargs, Mapping):
+        raise TypeError(f"preset_kwargs must be a dict, got {type(kwargs).__name__}")
+    kwargs = dict(kwargs or {})
+    if driver == "portfolio":
+        if preset is not None:
+            raise ValueError("a preset applies to the classical drivers; the portfolio takes none")
+        if kwargs:
+            raise ValueError("preset_kwargs apply to the classical drivers; the portfolio takes none")
+        return None
+    if preset is None:
+        preset = _preset_types()[driver](**kwargs)
+    elif kwargs:
+        raise ValueError("pass a preset or preset_kwargs, not both")
+    elif _preset_driver(preset) != driver:
+        raise ValueError(f"a {type(preset).__name__} preset does not run the {driver!r} driver")
+    _check_preset(driver, preset)
+    return preset
 
 
 # ---------------------------------------------------------------------------
@@ -629,6 +719,27 @@ def unflatten_parameters(vector: np.ndarray, spec, template: dict[str, Any]):
     return out
 
 
+def _start_vector(layout: _Layout, x0: Any) -> np.ndarray:
+    """The flat start from ``x0``: a dict mirroring the parameters, or a vector."""
+    if isinstance(x0, Mapping):
+        paths = {path for path, _ in _iter_leaves(x0)}
+        if paths != {leaf.path for leaf in layout.leaves}:
+            raise ValueError("x0 dict must mirror fitter.initial_parameters")
+        return layout.vector(x0, "x0")
+    start = _real_array(x0, "x0").reshape(-1)
+    if start.size != layout.size:
+        raise ValueError(
+            f"x0 has length {start.size} but the parameters flatten to {layout.size}"
+        )
+    bad = _first(~np.isfinite(start))
+    if bad is not None:
+        raise ValueError(
+            f"x0 must contain only finite values; {layout.name(bad)} is "
+            f"{float(start[bad])!r}"
+        )
+    return start
+
+
 def fit_anneal(
     fitter: Any,
     budget: int,
@@ -658,9 +769,9 @@ def fit_anneal(
         single-chain ablation runs.
       seed: RNG seed.
       x0: warm start. ``None`` (default) uses the fitter's
-        ``initial_parameters``; a nested dict with the same structure or
-        a flat vector of the flattened dimension overrides it. A start
-        outside the box is moved onto it.
+        ``initial_parameters``; a nested dict with the same structure and
+        leaf shapes, or a flat vector of the flattened dimension, overrides
+        it. A start outside the box is moved onto it.
       low, high: explicit flat bound vectors. When omitted, bounds come
         from the fitter's ``bounds`` dict (``(lower, upper)`` pairs
         mirroring ``initial_params``; each side a scalar, an array of the
@@ -674,50 +785,65 @@ def fit_anneal(
       preset_kwargs: extra kwargs for the preset constructor
         (e.g. ``{"t_init": 5.0}``); classical drivers only.
 
-    Returns what ``fitter.finish`` returns for the best evaluated parameters
-    (ChemFit returns them as given); each leaf keeps its type, dtype and
-    shape. The first exception raised by the fitter, or a loss that is not a
-    real number, stops the fit and is raised without calling ``finish``.
+    Every argument is checked before ``fitter.init()``. Returns what
+    ``fitter.finish`` returns for the best evaluated parameters (ChemFit
+    returns them as given); each leaf keeps its type, dtype and shape. The
+    first exception raised by the fitter, or a loss that is not a real
+    number, stops the fit and is raised without calling ``finish``.
     """
+    return _fit_anneal(
+        fitter,
+        budget,
+        driver=driver,
+        seed=seed,
+        x0=x0,
+        low=low,
+        high=high,
+        bound_span=bound_span,
+        steps_per_epoch=steps_per_epoch,
+        preset_kwargs=preset_kwargs,
+    )
+
+
+def _fit_anneal(
+    fitter: Any,
+    budget: int,
+    *,
+    driver: str = "portfolio",
+    seed: int = 0,
+    x0: Any = None,
+    low: Any = None,
+    high: Any = None,
+    bound_span: float = 3.0,
+    steps_per_epoch: int = 100,
+    preset_kwargs: Any = None,
+    preset: Any = None,
+) -> Any:
+    """:func:`fit_anneal`, also taking a preset instance from :func:`run_fitter`."""
     evaluate, step = _protocol(fitter)
-    driver = str(driver).lower()
-    if driver not in ("portfolio", *_CLASSICAL_DRIVERS):
+    name = _choice(driver, _DRIVERS)
+    if name is None:
         raise ValueError(
             f"driver must be 'portfolio' or one of {', '.join(_CLASSICAL_DRIVERS)}; "
             f"got {driver!r}"
         )
-    budget = int(budget)
-    if budget < 1:
-        raise ValueError("budget must be positive")
+    budget = _whole("budget", budget, 1)
+    seed = _whole("seed", seed, 0, _SEED_LIMIT)
+    steps = min(_whole("steps_per_epoch", steps_per_epoch, 1), budget)
+    span = _positive("bound_span", bound_span)
+    preset = _classical_preset(name, preset, preset_kwargs)
 
-    initial_parameters = getattr(fitter, "initial_parameters", None)
-    if not isinstance(initial_parameters, dict) or not initial_parameters:
+    initial = getattr(fitter, "initial_parameters", None)
+    if not isinstance(initial, Mapping) or not initial:
         raise ValueError("fitter.initial_parameters must be a non-empty dict")
-
-    layout = _Layout(initial_parameters)
-    start_vector, spec = flatten_parameters(initial_parameters)
+    layout = _Layout(initial)
+    start, _ = flatten_parameters(initial)
     if x0 is not None:
-        if isinstance(x0, dict):
-            start_vector, x0_spec = flatten_parameters(x0)
-            if [path for path, _ in x0_spec] != [path for path, _ in spec]:
-                raise ValueError("x0 dict must mirror fitter.initial_parameters")
-        else:
-            start_vector = np.asarray(x0, dtype=np.float64).ravel()
-            if start_vector.size != spec_total(spec):
-                raise ValueError(
-                    f"x0 has length {start_vector.size} but the parameters "
-                    f"flatten to {spec_total(spec)}"
-                )
-            if not np.all(np.isfinite(start_vector)):
-                raise ValueError("x0 must contain only finite values")
-
+        start = _start_vector(layout, x0)
     if (low is None) != (high is None):
         raise ValueError("low and high must be given together")
     if low is None:
-        span = float(bound_span)
-        if not (math.isfinite(span) and span > 0.0):
-            raise ValueError("bound_span must be positive and finite")
-        box = _mapped_box(layout, getattr(fitter, "bounds", None), start_vector, span)
+        box = _mapped_box(layout, getattr(fitter, "bounds", None), start, span)
     else:
         box = (_real_array(low, "low").ravel(), _real_array(high, "high").ravel())
         if box[0].size != layout.size or box[1].size != layout.size:
@@ -727,14 +853,12 @@ def fit_anneal(
             )
     # run and global_optimize refuse a start outside the box. A caller vector
     # such as zeros is pulled onto the box before the first evaluation.
-    problem = _Problem(layout, *_settle(layout, *box), start_vector)
+    problem = _Problem(layout, *_settle(layout, *box), start)
 
     # The fitter owns bookkeeping; every evaluation is one optimizer step.
     _init(fitter)
-    preset = None if driver == "portfolio" else _classical_preset(driver, preset_kwargs)
-    steps = max(1, min(int(steps_per_epoch), budget))
     session = _Session(problem, evaluate, step, budget, step_every=1)
-    return _finish(fitter, _drive(session, driver, int(seed), preset, steps))
+    return _finish(fitter, _drive(session, name, seed, preset, steps))
 
 
 # ---------------------------------------------------------------------------
@@ -796,7 +920,7 @@ def chemfit_box(
     :func:`fit_chemfit` holds a zero-width parameter fixed instead.
     """
     layout = vector._layout
-    span = float(default_span)
+    span = _positive("default_span", default_span)
     low, high = _settle(
         layout, *_mapped_box(layout, getattr(fitter, "bounds", None), vector.x0, span)
     )
@@ -808,6 +932,32 @@ def chemfit_box(
             "a driver box needs lower < upper"
         )
     return low, high
+
+
+_CHEMFIT_PRESET_DEFAULTS = {
+    "boltzmann": {"t_init": 5.0, "sigma": 0.5},
+    "fast": {"t_init": 3.0, "gamma": 0.5},
+    "gsa": {"t_init": 3.0, "q_v": 2.62, "q_a": 1.7},
+}
+
+
+def _chemfit_preset(method: str, preset_kwargs: dict[str, Any]):
+    """The preset of a :func:`fit_chemfit` method, from its keyword defaults."""
+    defaults = _CHEMFIT_PRESET_DEFAULTS.get(method, {})
+    unknown = sorted(set(preset_kwargs) - set(defaults))
+    if unknown:
+        takes = ", ".join(defaults) or "none"
+        raise TypeError(
+            f"fit_chemfit got preset keyword(s) {', '.join(unknown)} that method "
+            f"{method!r} does not take; it takes {takes}"
+        )
+    values = {}
+    for key, default in defaults.items():
+        value = preset_kwargs.get(key, default)
+        if not _is_number(value):
+            raise TypeError(f"{key} must be a number, got {value!r}")
+        values[key] = float(value)
+    return _classical_preset(method, kwargs=values)
 
 
 def fit_chemfit(
@@ -844,8 +994,11 @@ def fit_chemfit(
         steps_per_epoch: classical-chain evaluations per epoch, and per
             step notice; the chain runs ``max(1, budget // steps_per_epoch)``
             epochs and stops when the budget is spent.
-        **preset_kwargs: ``t_init`` / ``sigma`` / ``gamma`` / ``q_v`` /
-            ``q_a`` forwarded to the classical preset constructors.
+        **preset_kwargs: ``t_init`` / ``sigma`` (boltzmann), ``t_init`` /
+            ``gamma`` (fast), ``t_init`` / ``q_v`` / ``q_a`` (gsa) for the
+            classical preset constructors; any other keyword is a TypeError.
+
+    Every argument is checked before ``fitter.init()``.
 
     Returns:
         What ``fitter.finish(best_params)`` returns; ChemFit returns
@@ -853,47 +1006,33 @@ def fit_chemfit(
         raised by the fitter, or a loss that is not a real number, stops the
         fit and is raised without calling ``finish``.
     """
-    from anneal import Boltzmann, Fast, Gsa
-
     evaluate, step = _protocol(fitter)
-    budget = int(budget)
-    if budget < 1:
-        raise ValueError("budget must be positive")
-    vector = ChemFitVector(dict(fitter.initial_parameters))
-    if vector.dim == 0:
-        raise ValueError("fitter.initial_parameters holds no parameters")
-    layout = vector._layout
-    span = float(default_span)
-    box = _mapped_box(layout, getattr(fitter, "bounds", None), vector.x0, span)
-    problem = _Problem(layout, *_settle(layout, *box), vector.x0)
-    steps = max(1, min(int(steps_per_epoch), budget))
-
-    _init(fitter)
-    if method == "portfolio":
-        preset, every = None, max(1, int(tell_every))
-    elif method in ("boltzmann", "fast", "gsa"):
-        presets = {
-            "boltzmann": Boltzmann(
-                t_init=float(preset_kwargs.get("t_init", 5.0)),
-                sigma=float(preset_kwargs.get("sigma", 0.5)),
-            ),
-            "fast": Fast(
-                t_init=float(preset_kwargs.get("t_init", 3.0)),
-                gamma=float(preset_kwargs.get("gamma", 0.5)),
-            ),
-            "gsa": Gsa(
-                t_init=float(preset_kwargs.get("t_init", 3.0)),
-                q_v=float(preset_kwargs.get("q_v", 2.62)),
-                q_a=float(preset_kwargs.get("q_a", 1.7)),
-            ),
-        }
-        preset, every = presets[method], steps
-    else:
+    name = _choice(method, _DRIVERS)
+    if name is None:
         raise ValueError(
             f"unknown method {method!r}: expected 'portfolio', 'boltzmann', 'fast', or 'gsa'"
         )
+    budget = _whole("budget", budget, 1)
+    seed = _whole("seed", seed, 0, _SEED_LIMIT)
+    span = _positive("default_span", default_span)
+    tell_every = _whole("tell_every", tell_every, 1)
+    steps = min(_whole("steps_per_epoch", steps_per_epoch, 1), budget)
+    preset = _chemfit_preset(name, preset_kwargs)
+
+    initial = getattr(fitter, "initial_parameters", None)
+    if not isinstance(initial, Mapping):
+        raise TypeError("fitter.initial_parameters must be a mapping")
+    vector = ChemFitVector(initial)
+    if vector.dim == 0:
+        raise ValueError("fitter.initial_parameters holds no parameters")
+    layout = vector._layout
+    box = _mapped_box(layout, getattr(fitter, "bounds", None), vector.x0, span)
+    problem = _Problem(layout, *_settle(layout, *box), vector.x0)
+
+    _init(fitter)
+    every = tell_every if name == "portfolio" else steps
     session = _Session(problem, evaluate, step, budget, step_every=every)
-    return _finish(fitter, _drive(session, method, int(seed), preset, steps))
+    return _finish(fitter, _drive(session, name, seed, preset, steps))
 
 
 # ---------------------------------------------------------------------------
@@ -1039,33 +1178,39 @@ def run_benchmark(
     """Minimize a ChemFit fitter with a gradient-free anneal driver.
 
     ``method`` is ``portfolio`` (the budget-only global optimizer), or
-    ``boltzmann``, ``fast``, or ``gsa``. The chain starts at
-    ``initial_params``, moved onto the box when it lies outside. Every
-    coordinate the fitter sees lies in the box, and ``budget`` caps the
-    evaluations, the start included. The fitter is driven through
-    ``evaluate`` / ``step`` or ``ask`` / ``tell``, with one step notice per
-    evaluation, and each parameter leaf keeps its type.
+    ``boltzmann``, ``fast``, or ``gsa``; ``preset``, when given, must be the
+    matching preset instance. The chain starts at ``initial_params``, moved
+    onto the box when it lies outside. Every coordinate the fitter sees lies
+    in the box, and ``budget`` caps the evaluations, the start included. The
+    fitter is driven through ``evaluate`` / ``step`` or ``ask`` / ``tell``,
+    with one step notice per evaluation, and each parameter leaf keeps its
+    type.
 
     ``low`` and ``high`` may be vectors or scalars (broadcast). When they
     are omitted, bounds are read from ``benchmark_context["bounds"]`` or
     ``fitter.bounds``. A coordinate whose two bounds are equal is held fixed.
-    The first exception raised by the fitter is raised without calling
-    ``finish``.
+    Every argument is checked before ``fitter.init()``; the first exception
+    raised by the fitter is raised without calling ``finish``.
     """
-    from anneal import Boltzmann, Fast, Gsa
-
     fitter = benchmark_context["fitter"]
     evaluate, step = _protocol(fitter)
-    budget = int(benchmark_context["budget"])
-    if budget < 1:
-        raise ValueError("budget must be positive")
+    name = _choice(method, _DRIVERS)
+    if name is None:
+        raise ValueError(
+            f"unknown method {method!r}: expected 'portfolio', 'boltzmann', 'fast', or 'gsa'"
+        )
+    budget = _whole("budget", benchmark_context["budget"], 1)
+    seed = _whole("seed", seed, 0, _SEED_LIMIT)
+    steps = min(_whole("steps_per_epoch", steps_per_epoch, 1), budget)
+    preset = _classical_preset(name, preset)
+
     initial = benchmark_context["initial_params"]
-    if not isinstance(initial, dict):
+    if not isinstance(initial, Mapping):
         raise TypeError("initial_params must be a mapping")
     layout = _Layout(initial)
     if layout.size == 0:
         raise ValueError("initial_params is empty")
-    start = layout.vector(initial, "parameter", finite=False)
+    start = layout.vector(initial, "parameter")
     box = _benchmark_box(
         layout,
         low,
@@ -1076,12 +1221,19 @@ def run_benchmark(
     problem = _Problem(layout, *box, start)
 
     _init(fitter)
-    name = method.lower()
-    if name != "portfolio" and preset is None:
-        preset = {"boltzmann": Boltzmann(), "fast": Fast(), "gsa": Gsa()}[name]
-    steps = max(1, min(int(steps_per_epoch), budget))
     session = _Session(problem, evaluate, step, budget, step_every=1)
-    return _finish(fitter, _drive(session, name, int(seed), preset, steps))
+    return _finish(fitter, _drive(session, name, seed, preset, steps))
+
+
+_FITTER_METHODS = {
+    "global_optimize": "portfolio",
+    "sa": None,
+    "portfolio": "portfolio",
+    "boltzmann": "boltzmann",
+    "fast": "fast",
+    "gsa": "gsa",
+}
+
 
 def run_fitter(
     fitter: Any,
@@ -1095,11 +1247,23 @@ def run_fitter(
 
     A fitter that already implements ``fit_anneal`` is called as it stands.
     Otherwise ``method="global_optimize"`` uses the portfolio and
-    ``method="sa"`` uses the Boltzmann preset, both through :func:`fit_anneal`.
+    ``method="sa"`` runs ``preset`` (``Boltzmann()`` when none is given),
+    both through :func:`fit_anneal`; ``"portfolio"``, ``"boltzmann"``,
+    ``"fast"`` and ``"gsa"`` name a :func:`fit_anneal` driver directly.
+    Other keywords (``x0``, ``low``, ``high``, ``bound_span``,
+    ``steps_per_epoch``, ``preset_kwargs``) go to :func:`fit_anneal`.
     """
     if hasattr(fitter, "fit_anneal"):
         return fitter.fit_anneal(
             budget=budget, method=method, preset=preset, seed=seed, **kwargs
         )
-    driver = {"global_optimize": "portfolio", "sa": "boltzmann"}.get(method, method)
-    return fit_anneal(fitter, int(budget), driver=driver, seed=int(seed))
+    key = _choice(method, _FITTER_METHODS)
+    if key is None:
+        raise ValueError(
+            f"method must be one of {', '.join(map(repr, _FITTER_METHODS))}; "
+            f"got {method!r}"
+        )
+    driver = _FITTER_METHODS[key]
+    if driver is None:
+        driver = "boltzmann" if preset is None else _preset_driver(preset)
+    return _fit_anneal(fitter, budget, driver=driver, seed=seed, preset=preset, **kwargs)

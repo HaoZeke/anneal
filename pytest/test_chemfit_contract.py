@@ -1,4 +1,4 @@
-"""What the ChemFit bridges promise about leaves, bounds, the start and the budget.
+"""What the ChemFit bridges promise about leaves, bounds, arguments and the budget.
 
 The doubles speak ChemFit 3.1's ``ask`` / ``tell`` unless the protocol is
 what a test is about; ``test_chemfit_protocol.py`` covers both protocols.
@@ -9,6 +9,7 @@ import pytest
 
 anneal = pytest.importorskip("anneal")
 
+from anneal import Boltzmann, Fast  # noqa: E402
 from anneal.chemfit import (  # noqa: E402
     ChemFitVector,
     chemfit_box,
@@ -101,6 +102,79 @@ def test_scalar_leaves_and_zero_d_arrays_come_back_as_their_own_type(entry, prot
             leaf = params[key]
             assert isinstance(leaf, np.ndarray)
             assert leaf.shape == () and leaf.dtype == dtype
+
+
+BAD_ARGUMENTS = [
+    ("fit_anneal", "budget=0", {"budget": 0}),
+    ("fit_anneal", "budget=2.5", {"budget": 2.5}),
+    ("fit_anneal", "budget='10'", {"budget": "10"}),
+    ("fit_anneal", "budget=None", {"budget": None}),
+    ("fit_anneal", "seed=-1", {"seed": -1}),
+    ("fit_anneal", "seed=2**64", {"seed": 2**64}),
+    ("fit_anneal", "seed=2.5", {"seed": 2.5}),
+    ("fit_anneal", "seed='seven'", {"seed": "seven"}),
+    ("fit_anneal", "driver", {"driver": "simplex"}),
+    ("fit_anneal", "steps_per_epoch=0", {"driver": "boltzmann", "steps_per_epoch": 0}),
+    ("fit_anneal", "steps_per_epoch=2.5", {"driver": "boltzmann", "steps_per_epoch": 2.5}),
+    ("fit_anneal", "preset_kwargs key", {"driver": "boltzmann", "preset_kwargs": {"bogus": 1.0}}),
+    ("fit_anneal", "preset_kwargs value", {"driver": "boltzmann", "preset_kwargs": {"t_init": -1.0}}),
+    ("fit_anneal", "preset_kwargs type", {"driver": "boltzmann", "preset_kwargs": "t_init=2"}),
+    ("fit_anneal", "preset_kwargs portfolio", {"preset_kwargs": {"t_init": 2.0}}),
+    ("fit_anneal", "x0 leaf shape", {"x0": {"positions": np.zeros((3, 2)), "eps": 0.5}}),
+    ("fit_anneal", "x0 missing leaf", {"x0": {"positions": np.zeros((2, 3))}}),
+    ("fit_anneal", "x0 length", {"x0": np.zeros(5)}),
+    ("fit_anneal", "x0 nan", {"x0": np.array([0.1, 0.2, np.nan, 0.0, 0.0, 0.0, 0.5])}),
+    ("fit_anneal", "x0 inf leaf", {"x0": {"positions": np.full((2, 3), np.inf), "eps": 0.5}}),
+    ("fit_anneal", "low > high", {"low": np.full(7, 1.0), "high": np.full(7, -1.0)}),
+    ("fit_anneal", "high nan", {"low": np.full(7, -1.0), "high": np.append(np.ones(6), np.nan)}),
+    ("fit_anneal", "low alone", {"low": np.full(7, -1.0)}),
+    ("fit_anneal", "bound_span=0", {"bound_span": 0.0}),
+    ("fit_anneal", "bound_span=nan", {"bound_span": float("nan")}),
+    ("fit_chemfit", "budget=0", {"budget": 0}),
+    ("fit_chemfit", "budget=2.5", {"budget": 2.5}),
+    ("fit_chemfit", "seed=-1", {"seed": -1}),
+    ("fit_chemfit", "method", {"driver": "newton"}),
+    ("fit_chemfit", "tell_every=0", {"tell_every": 0}),
+    ("fit_chemfit", "default_span=-1", {"default_span": -1.0}),
+    ("fit_chemfit", "default_span=inf", {"default_span": float("inf")}),
+    ("fit_chemfit", "steps_per_epoch=0", {"driver": "fast", "steps_per_epoch": 0}),
+    ("fit_chemfit", "preset key", {"driver": "fast", "bogus": 1.0}),
+    ("fit_chemfit", "preset value", {"driver": "fast", "t_init": -1.0}),
+    ("fit_chemfit", "preset type", {"driver": "fast", "t_init": "hot"}),
+    ("fit_chemfit", "preset key of another method", {"driver": "boltzmann", "gamma": 0.5}),
+    ("fit_chemfit", "preset portfolio", {"t_init": 2.0}),
+    ("run_benchmark", "budget=0", {"budget": 0}),
+    ("run_benchmark", "budget='10'", {"budget": "10"}),
+    ("run_benchmark", "seed=-1", {"seed": -1}),
+    ("run_benchmark", "method", {"driver": "newton"}),
+    ("run_benchmark", "steps_per_epoch=0", {"driver": "boltzmann", "steps_per_epoch": 0}),
+    ("run_benchmark", "preset type", {"driver": "boltzmann", "preset": "hot"}),
+    ("run_benchmark", "preset of another method", {"driver": "boltzmann", "preset": Fast()}),
+    ("run_benchmark", "preset portfolio", {"preset": Boltzmann()}),
+    ("run_benchmark", "low > high", {"low": 1.0, "high": -1.0}),
+    ("run_benchmark", "low alone", {"low": -1.0}),
+    ("run_fitter", "budget=0", {"budget": 0}),
+    ("run_fitter", "seed=-1", {"seed": -1}),
+    ("run_fitter", "method", {"driver": "newton"}),
+    ("run_fitter", "preset portfolio", {"preset": Fast()}),
+    ("run_fitter", "x0 length", {"x0": np.zeros(5)}),
+    ("run_fitter", "unknown keyword", {"bogus": 1.0}),
+]
+
+
+@pytest.mark.parametrize(
+    "entry, arguments",
+    [(entry, arguments) for entry, _, arguments in BAD_ARGUMENTS],
+    ids=[f"{entry}-{label}" for entry, label, _ in BAD_ARGUMENTS],
+)
+def test_every_argument_is_checked_before_fitter_init(entry, arguments):
+    fitter = _fitter()
+    arguments = dict(arguments)
+    budget = arguments.pop("budget", 60)
+    driver = arguments.pop("driver", "portfolio")
+    with pytest.raises((TypeError, ValueError)):
+        drive(entry, fitter, budget, driver=driver, **arguments)
+    assert fitter.calls == []
 
 
 _SHAPE = (4, 3)
