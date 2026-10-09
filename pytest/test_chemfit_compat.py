@@ -20,6 +20,7 @@ pytest.importorskip("anneal")
 from anneal import Boltzmann, Fast  # noqa: E402
 from anneal.chemfit import (  # noqa: E402
     ChemFitVector,
+    bounds_from_fitter,
     chemfit_box,
     fit_anneal,
     fit_chemfit,
@@ -303,6 +304,10 @@ _PASSES = (
 )
 _NOT_A_PAIR = "the bounds of x must be a (lower, upper) pair"
 _THREE_PAIRS = [(-1.0, 1.0), (-2.0, 2.0), (-3.0, 3.0)]
+_SPAN = "{} must be positive and finite, got {}"
+_LOW, _HIGH = np.full(7, -1.0), np.full(7, 1.0)
+_UNBOUNDED = _with({"x": 0.5, "y": 0.1}, {})
+_NOT_FINITE = "the bounds of x[0] must be finite: lower={}, upper={}"
 
 
 def _raises(label, call, error, message, make=_fitter):
@@ -360,6 +365,69 @@ RAISES = [
         ValueError,
         _WHOLE.format("seed", 1.5),
     ),
+    # 0.10.0 read a bool as 1 wherever it read a number.
+    _raises(
+        "fit_anneal budget=True",
+        lambda f: fit_anneal(f, True),
+        TypeError,
+        _WHOLE.format("budget", True),
+    ),
+    _raises(
+        "run_benchmark budget=True",
+        lambda f: run_benchmark(_context(f, True)),
+        TypeError,
+        _WHOLE.format("budget", True),
+    ),
+    _raises(
+        "fit_anneal seed=True",
+        lambda f: fit_anneal(f, 60, seed=True),
+        TypeError,
+        _WHOLE.format("seed", True),
+    ),
+    _raises(
+        "fit_chemfit seed=True",
+        lambda f: fit_chemfit(f, 60, seed=True),
+        TypeError,
+        _WHOLE.format("seed", True),
+    ),
+    _raises(
+        "run_fitter seed=True",
+        lambda f: run_fitter(f, 60, seed=True),
+        TypeError,
+        _WHOLE.format("seed", True),
+    ),
+    _raises(
+        "fit_anneal boltzmann steps_per_epoch=True",
+        lambda f: fit_anneal(f, 60, driver="boltzmann", steps_per_epoch=True),
+        TypeError,
+        _WHOLE.format("steps_per_epoch", True),
+    ),
+    _raises(
+        "fit_chemfit tell_every=True",
+        lambda f: fit_chemfit(f, 60, tell_every=True),
+        TypeError,
+        _WHOLE.format("tell_every", True),
+    ),
+    _raises(
+        "fit_anneal bound_span=True",
+        lambda f: fit_anneal(f, 60, bound_span=True),
+        TypeError,
+        "bound_span must be a number, got True",
+        make=_UNBOUNDED,
+    ),
+    _raises(
+        "fit_chemfit default_span=True",
+        lambda f: fit_chemfit(f, 60, default_span=True),
+        TypeError,
+        "default_span must be a number, got True",
+        make=_UNBOUNDED,
+    ),
+    _raises(
+        "fit_chemfit boltzmann t_init=True",
+        lambda f: fit_chemfit(f, 60, method="boltzmann", t_init=True),
+        TypeError,
+        "t_init must be a number, got True",
+    ),
     # 0.10.0 raised OverflowError after init.
     _raises(
         "fit_anneal seed=-1",
@@ -415,6 +483,84 @@ RAISES = [
         lambda f: fit_anneal(f, 60, driver="boltzmann", steps_per_epoch=2.5),
         ValueError,
         _WHOLE.format("steps_per_epoch", 2.5),
+    ),
+    # 0.10.0 never read these: tell_every under a classical method, which
+    # steps the fitter once an epoch, steps_per_epoch under the portfolio,
+    # bound_span beside low and high, and default_span when the fitter
+    # bounds every parameter.
+    _raises(
+        "fit_chemfit boltzmann tell_every=0",
+        lambda f: fit_chemfit(f, 60, method="boltzmann", tell_every=0),
+        ValueError,
+        "tell_every must be positive, got 0",
+    ),
+    _raises(
+        "fit_chemfit fast tell_every=2.5",
+        lambda f: fit_chemfit(f, 60, method="fast", tell_every=2.5),
+        ValueError,
+        _WHOLE.format("tell_every", 2.5),
+    ),
+    _raises(
+        "fit_chemfit gsa tell_every=None",
+        lambda f: fit_chemfit(f, 60, method="gsa", tell_every=None),
+        TypeError,
+        _WHOLE.format("tell_every", None),
+    ),
+    _raises(
+        "fit_chemfit boltzmann tell_every='x'",
+        lambda f: fit_chemfit(f, 60, method="boltzmann", tell_every="x"),
+        TypeError,
+        _WHOLE.format("tell_every", "'x'"),
+    ),
+    _raises(
+        "fit_chemfit portfolio steps_per_epoch=0",
+        lambda f: fit_chemfit(f, 60, steps_per_epoch=0),
+        ValueError,
+        "steps_per_epoch must be positive, got 0",
+    ),
+    _raises(
+        "fit_anneal bound_span=0 with low and high",
+        lambda f: fit_anneal(f, 60, low=_LOW, high=_HIGH, bound_span=0),
+        ValueError,
+        _SPAN.format("bound_span", 0),
+    ),
+    _raises(
+        "fit_anneal bound_span=inf with low and high",
+        lambda f: fit_anneal(f, 60, low=_LOW, high=_HIGH, bound_span=np.inf),
+        ValueError,
+        _SPAN.format("bound_span", "inf"),
+    ),
+    _raises(
+        "run_fitter bound_span=-1.0 with low and high",
+        lambda f: run_fitter(f, 60, low=_LOW, high=_HIGH, bound_span=-1.0),
+        ValueError,
+        _SPAN.format("bound_span", -1.0),
+    ),
+    _raises(
+        "fit_chemfit default_span=0 with every parameter bounded",
+        lambda f: fit_chemfit(f, 60, default_span=0),
+        ValueError,
+        _SPAN.format("default_span", 0),
+    ),
+    _raises(
+        "fit_chemfit boltzmann default_span=-1.0 with every parameter bounded",
+        lambda f: fit_chemfit(f, 60, method="boltzmann", default_span=-1.0),
+        ValueError,
+        _SPAN.format("default_span", -1.0),
+    ),
+    _raises(
+        "fit_chemfit default_span=None with every parameter bounded",
+        lambda f: fit_chemfit(f, 60, default_span=None),
+        TypeError,
+        "default_span must be a number, got None",
+    ),
+    _raises(
+        "chemfit_box default_span=-1.0 with every parameter bounded",
+        lambda f: chemfit_box(
+            f, ChemFitVector(f.initial_parameters), default_span=-1.0
+        ),
+        ValueError,
+        _SPAN.format("default_span", -1.0),
     ),
     # 0.10.0 ignored these, or passed them through float().
     _raises(
@@ -541,6 +687,67 @@ RAISES = [
         lambda f: resolve_bounds({"x": np.zeros(2)}, low=1.0, high=-1.0),
         ValueError,
         "the bounds of x[0] are empty, the lower above the upper",
+    ),
+    # The helpers returned these boxes, which no driver accepts.
+    _raises(
+        "resolve_bounds low=-inf",
+        lambda f: resolve_bounds({"x": np.zeros(2)}, low=-np.inf, high=1.0),
+        ValueError,
+        _NOT_FINITE.format(-np.inf, 1.0),
+    ),
+    _raises(
+        "resolve_bounds high=nan",
+        lambda f: resolve_bounds({"x": np.zeros(2)}, low=-1.0, high=np.nan),
+        ValueError,
+        _NOT_FINITE.format(-1.0, np.nan),
+    ),
+    _raises(
+        "resolve_bounds context low=-inf",
+        lambda f: resolve_bounds(
+            {"x": np.zeros(2)}, context_bounds={"low": -np.inf, "high": 1.0}
+        ),
+        ValueError,
+        _NOT_FINITE.format(-np.inf, 1.0),
+    ),
+    _raises(
+        "resolve_bounds fitter bounds (-inf, 1)",
+        lambda f: resolve_bounds(
+            {"x": np.zeros(2)}, fitter_bounds={"x": (-np.inf, 1.0)}
+        ),
+        ValueError,
+        _NOT_FINITE.format(-np.inf, 1.0),
+    ),
+    _raises(
+        "resolve_bounds too wide for a float",
+        lambda f: resolve_bounds({"x": np.zeros(2)}, low=-1e308, high=1e308),
+        ValueError,
+        "the bounds of x[0] are too wide for a float: lower=-1e+308, upper=1e+308",
+    ),
+    _raises(
+        "bounds_from_fitter (nan, 1)",
+        lambda f: bounds_from_fitter({"x": np.zeros(2)}, {"x": (np.nan, 1.0)}, 2),
+        ValueError,
+        _NOT_FINITE.format(np.nan, 1.0),
+    ),
+    _raises(
+        "bounds_from_fitter (1, -1)",
+        lambda f: bounds_from_fitter({"x": np.zeros(2)}, {"x": (1.0, -1.0)}, 2),
+        ValueError,
+        "the bounds of x[0] are empty, the lower above the upper",
+    ),
+    _raises(
+        "chemfit_box too wide for a float",
+        _box,
+        ValueError,
+        "the bounds of x are too wide for a float: lower=-1e+308, upper=1e+308",
+        make=_with({"x": 0.5}, {"x": (-1e308, 1e308)}),
+    ),
+    _raises(
+        "chemfit_box bounds (-inf, 3)",
+        _box,
+        ValueError,
+        "the bounds of x must be finite: lower=-inf, upper=3.0",
+        make=_with({"x": 0.5}, {"x": (-np.inf, 3.0)}),
     ),
     _raises(
         "flatten_parameters complex leaf",
