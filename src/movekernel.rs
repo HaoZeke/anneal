@@ -298,12 +298,15 @@ impl<M: MoveKernel<f64>> MoveKernel<f64> for Reflected<M> {
         let mut p = self.inner.propose(i, t, rng);
         for (k, pk) in p.iter_mut().enumerate() {
             let (lo, hi) = (self.bounds.low[k], self.bounds.high[k]);
-            *pk = if pk.is_finite() {
+            // The longest step that cannot overflow from any point of the box.
+            // A longer step lands uniformly on the box, the limit of
+            // reflecting ever longer steps. Deciding on the step alone, not on
+            // whether `x + s` happened to overflow, keeps the landing chance
+            // the same from every `x`, so the proposal stays symmetric.
+            let reach = f64::MAX - lo.abs().max(hi.abs());
+            *pk = if pk.is_finite() && (*pk - i[k]).abs() <= reach {
                 reflect_coord(*pk, lo, hi)
             } else {
-                // A step that overflowed has no fold. Reflecting ever longer
-                // steps tends to the uniform law on the box, which is also
-                // symmetric, so that is where it lands.
                 (lo + (hi - lo) * rng.random::<f64>()).clamp(lo, hi)
             };
         }
@@ -413,6 +416,34 @@ mod tests {
                 p[0]
             );
         }
+    }
+
+    #[test]
+    fn reflected_chain_is_uniform_on_a_flat_box_near_the_float_limit() {
+        // On a flat objective every proposal is accepted, so the chain samples
+        // the stationary law of the kernel, which is uniform when it is
+        // symmetric. Steps are large enough that x + s overflows from part of
+        // the box.
+        let (lo, hi) = (-8.98e307, 0.0);
+        let bounds = Bounds::new(array![lo], array![hi], 0.0);
+        let kernel = Reflected::new(Gaussian::new(5.4e307), bounds);
+        let mut rng = StdRng::seed_from_u64(3);
+        let bins = 20;
+        let mut counts = vec![0usize; bins];
+        let mut x = array![-4.0e307];
+        let steps = 400_000;
+        for _ in 0..steps {
+            x = kernel.propose(x.view(), 1.0, &mut rng);
+            let u = ((x[0] - lo) / (hi - lo)).clamp(0.0, 1.0 - 1e-12);
+            counts[(u * bins as f64) as usize] += 1;
+        }
+        let expected = steps as f64 / bins as f64;
+        let chi2: f64 = counts
+            .iter()
+            .map(|&c| (c as f64 - expected).powi(2) / expected)
+            .sum();
+        // 19 degrees of freedom: chi2 above 43.8 has probability 0.001.
+        assert!(chi2 < 43.8, "chi2 {chi2} over {bins} bins: {counts:?}");
     }
 
     #[test]
