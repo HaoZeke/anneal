@@ -40,9 +40,9 @@ fn validate_box_bounds(low: &[f64], high: &[f64]) -> PyResult<()> {
         ));
     }
     for (i, (&lo, &hi)) in low.iter().zip(high.iter()).enumerate() {
-        if !lo.is_finite() || !hi.is_finite() {
+        if !lo.is_finite() || !hi.is_finite() || !(hi - lo).is_finite() {
             return Err(PyValueError::new_err(format!(
-                "bounds must be finite at dimension {i}"
+                "bounds must be finite, with a finite width, at dimension {i}"
             )));
         }
         if lo.partial_cmp(&hi) != Some(std::cmp::Ordering::Less) {
@@ -1107,11 +1107,7 @@ fn qmc_gsa_global_search(
             "low and high must have the same length",
         ));
     }
-    if low_vec.is_empty() {
-        return Err(PyValueError::new_err(
-            "bounds must have at least one dimension",
-        ));
-    }
+    validate_box_bounds(&low_vec, &high_vec)?;
     validate_qmc_gsa_global_search_args(max_evals, n_chains, t_init, q_v, q_a)?;
     let start = read_x0(x0, &low_vec, &high_vec)?;
 
@@ -2324,7 +2320,7 @@ fn run_qmc(
     if low_vec
         .iter()
         .zip(high_vec.iter())
-        .any(|(&lo, &hi)| !lo.is_finite() || !hi.is_finite() || hi < lo)
+        .any(|(&lo, &hi)| !lo.is_finite() || !hi.is_finite() || !(hi - lo).is_finite() || hi < lo)
     {
         return Err(PyValueError::new_err(
             "each bound must be finite and each upper bound must be greater than or equal to the lower bound",
@@ -2647,8 +2643,37 @@ fn cluster_gradient_scale(
     grad_fn: &Py<PyAny>,
     cfg: &crate::methods::cluster_hopping::Config,
     seed: u64,
+    errors: &CallbackErrors,
 ) -> PyResult<f64> {
     use crate::methods::cluster_hopping::random_cluster_in_radius;
+
+    // The probe follows the run's callback rules: an ordinary exception or a
+    // value that cannot orient the gradient leaves the callback taken as a
+    // gradient, counted in the run's warning; KeyboardInterrupt, SystemExit
+    // and a return that is not a number end the call.
+    let call = |f: &Py<PyAny>, x: Vec<f64>| -> PyResult<Option<Py<PyAny>>> {
+        match f.call1(py, (PyArray1::from_vec(py, x),)) {
+            Ok(value) => Ok(Some(value)),
+            Err(err) if err.is_instance_of::<pyo3::exceptions::PyException>(py) => {
+                errors.record(py, err);
+                Ok(None)
+            }
+            Err(err) => Err(err),
+        }
+    };
+    let as_energy = |value: Py<PyAny>| -> PyResult<f64> {
+        value.extract::<f64>(py).map_err(|_| {
+            let kind = value
+                .bind(py)
+                .get_type()
+                .name()
+                .map(|n| n.to_string())
+                .unwrap_or_else(|_| "unknown".to_owned());
+            pyo3::exceptions::PyTypeError::new_err(format!(
+                "obj_fn must return a float, got {kind}"
+            ))
+        })
+    };
 
     let mut rng = rand::rngs::StdRng::seed_from_u64(seed ^ 0x6a09_e667_f3bc_c909);
     let probe = random_cluster_in_radius(
@@ -2663,13 +2688,20 @@ fn cluster_gradient_scale(
         ));
     }
 
-    let py_probe = PyArray1::from_vec(py, probe.to_vec());
-    let gradient_result = grad_fn.call1(py, (py_probe,))?;
-    let gradient = as_float_vector(py, &gradient_result).unwrap_or_default();
-    if gradient.len() != probe.len() || gradient.iter().any(|value| !value.is_finite()) {
-        return Err(PyValueError::new_err(
-            "gradient callback must return one finite value per coordinate",
-        ));
+    let Some(gradient_result) = call(grad_fn, probe.to_vec())? else {
+        return Ok(1.0);
+    };
+    let gradient = match as_float_vector(py, &gradient_result) {
+        Some(values) if values.len() == probe.len() => values,
+        _ => {
+            return Err(pyo3::exceptions::PyTypeError::new_err(format!(
+                "grad_fn must return {} numbers",
+                probe.len()
+            )));
+        }
+    };
+    if gradient.iter().any(|value| !value.is_finite()) {
+        return Ok(1.0);
     }
     let Some((index, component)) = gradient
         .iter()
@@ -2687,27 +2719,16 @@ fn cluster_gradient_scale(
     let mut minus = probe;
     plus[index] += step;
     minus[index] -= step;
-    let plus_array = PyArray1::from_vec(py, plus.to_vec());
-    let minus_array = PyArray1::from_vec(py, minus.to_vec());
-    let as_energy = |value: Py<PyAny>| -> PyResult<f64> {
-        value.extract::<f64>(py).map_err(|_| {
-            let kind = value
-                .bind(py)
-                .get_type()
-                .name()
-                .map(|n| n.to_string())
-                .unwrap_or_else(|_| "unknown".to_owned());
-            pyo3::exceptions::PyTypeError::new_err(format!(
-                "obj_fn must return a float, got {kind}"
-            ))
-        })
+    let Some(plus_value) = call(obj_fn, plus.to_vec())? else {
+        return Ok(1.0);
     };
-    let plus_value = as_energy(obj_fn.call1(py, (plus_array,))?)?;
-    let minus_value = as_energy(obj_fn.call1(py, (minus_array,))?)?;
+    let plus_value = as_energy(plus_value)?;
+    let Some(minus_value) = call(obj_fn, minus.to_vec())? else {
+        return Ok(1.0);
+    };
+    let minus_value = as_energy(minus_value)?;
     if !plus_value.is_finite() || !minus_value.is_finite() {
-        return Err(PyValueError::new_err(
-            "objective callback returned a non-finite orientation probe",
-        ));
+        return Ok(1.0);
     }
     let numerical = (plus_value - minus_value) / (2.0 * step);
     let noise_floor = f64::EPSILON.sqrt() * (1.0 + component.abs());
@@ -2873,8 +2894,9 @@ fn cluster_search(
         crate::methods::cluster_hopping::Config::for_cluster(n)
     };
     let mut ledger = crate::methods::cluster_hopping::Ledger::new(budget);
+    let errors: std::sync::Arc<CallbackErrors> = std::sync::Arc::default();
     let gradient_scale = if budget >= 4 {
-        let scale = cluster_gradient_scale(py, &obj_fn, &grad_fn, &cfg, seed)?;
+        let scale = cluster_gradient_scale(py, &obj_fn, &grad_fn, &cfg, seed, &errors)?;
         for _ in 0..3 {
             assert!(ledger.charge());
         }
@@ -2887,9 +2909,8 @@ fn cluster_search(
         grad_fn,
         bounds: cluster_bounds(n),
         gradient_scale,
-        errors: std::sync::Arc::default(),
+        errors: std::sync::Arc::clone(&errors),
     };
-    let errors = std::sync::Arc::clone(&obj.errors);
     if ras {
         let out = cluster_archive_search(py, &obj, &cfg, &mut ledger, seed);
         errors.finish(py)?;

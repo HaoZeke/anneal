@@ -230,11 +230,11 @@ fn unit_coordinate(pos: f64, low: f64, high: f64) -> f64 {
 }
 
 fn unit_to_box(unit: &Array1<f64>, low: &Array1<f64>, high: &Array1<f64>) -> Array1<f64> {
-    Array1::from_iter(
-        unit.iter()
-            .enumerate()
-            .map(|(axis, value)| low[axis] + (high[axis] - low[axis]) * (*value).clamp(0.0, 1.0)),
-    )
+    // `low + (high - low) * 1` can round past `high`, as on [-3, 0.7].
+    Array1::from_iter(unit.iter().enumerate().map(|(axis, value)| {
+        (low[axis] + (high[axis] - low[axis]) * (*value).clamp(0.0, 1.0))
+            .clamp(low[axis], high[axis])
+    }))
 }
 
 fn initial_line_search_step(direction: &Array1<f64>, low: &Array1<f64>, high: &Array1<f64>) -> f64 {
