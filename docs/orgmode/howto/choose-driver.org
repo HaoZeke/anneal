@@ -35,8 +35,12 @@ The default =driver="portfolio"= allocates the gradient-free arms.
 =driver="boltzmann"=, ="fast"=, or ="gsa"= is the single-chain ablation.
 The fitter's initial parameters are the start, bounds come from the fitter
 or from =low= / =high=, and every evaluation stays in the box.
-=fit_chemfit= is the same protocol with dotted-key flattening. Every bridge
-(=fit_anneal=, =fit_chemfit=, =run_benchmark=, =run_fitter=) drives
+=fit_chemfit= reads parameters and bounds the same way, but takes no =x0=,
+=low= or =high=: =method= names the driver, the preset keywords (=t_init=,
+=sigma=, =gamma=, =q_v=, =q_a=) are its own keywords, =default_span= sets the
+box of an unbounded parameter, and it steps the fitter every =tell_every=
+portfolio evaluations or once an epoch, not after every evaluation. Every
+bridge (=fit_anneal=, =fit_chemfit=, =run_benchmark=, =run_fitter=) drives
 =evaluate= / =step= on current ChemFit and =ask= / =tell= on ChemFit 3.1,
 and the first exception the fitter raises stops the fit and reaches the
 caller without =finish=.
