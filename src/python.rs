@@ -1086,7 +1086,7 @@ fn validate_qmc_gsa_global_search_args(
 
 /// Runs bounded QMC-initialized generalized simulated annealing.
 #[pyfunction]
-#[pyo3(signature = (obj_fn, low, high, max_evals, seed = 0, n_chains = 30, t_init = 1.0, q_v = 2.62, q_a = 1.7))]
+#[pyo3(signature = (obj_fn, low, high, max_evals, seed = 0, n_chains = 30, t_init = 1.0, q_v = 2.62, q_a = 1.7, x0 = None))]
 fn qmc_gsa_global_search(
     py: Python<'_>,
     obj_fn: Py<PyAny>,
@@ -1098,6 +1098,7 @@ fn qmc_gsa_global_search(
     t_init: f64,
     q_v: f64,
     q_a: f64,
+    x0: Option<PyReadonlyArray1<'_, f64>>,
 ) -> PyResult<Py<PyDict>> {
     let low_vec = low.as_slice()?.to_vec();
     let high_vec = high.as_slice()?.to_vec();
@@ -1112,18 +1113,28 @@ fn qmc_gsa_global_search(
         ));
     }
     validate_qmc_gsa_global_search_args(max_evals, n_chains, t_init, q_v, q_a)?;
+    let start = read_x0(x0, &low_vec, &high_vec)?;
 
     let bounds = Bounds::new(Array1::from_vec(low_vec), Array1::from_vec(high_vec), 1e-9);
     let obj = CallableObjective::new(obj_fn, bounds);
     let errors = obj.errors();
-    let result = crate::qmc_gsa_global_search(&obj, max_evals, seed, n_chains, t_init, q_v, q_a);
+    let result = crate::qmc_gsa_global_search_from(
+        &obj,
+        max_evals,
+        seed,
+        n_chains,
+        t_init,
+        q_v,
+        q_a,
+        start.as_ref().map(|x| x.view()),
+    );
     errors.finish(py)?;
     qmc_polish_result_to_dict(py, result)
 }
 
 /// Runs bounded QMC-initialized GSA using a native objective handle.
 #[pyfunction]
-#[pyo3(signature = (objective, max_evals, seed = 0, n_chains = 30, t_init = 1.0, q_v = 2.62, q_a = 1.7))]
+#[pyo3(signature = (objective, max_evals, seed = 0, n_chains = 30, t_init = 1.0, q_v = 2.62, q_a = 1.7, x0 = None))]
 fn qmc_gsa_global_search_objective(
     py: Python<'_>,
     objective: PyRef<'_, PyObjective>,
@@ -1133,11 +1144,26 @@ fn qmc_gsa_global_search_objective(
     t_init: f64,
     q_v: f64,
     q_a: f64,
+    x0: Option<PyReadonlyArray1<'_, f64>>,
 ) -> PyResult<Py<PyDict>> {
     validate_qmc_gsa_global_search_args(max_evals, n_chains, t_init, q_v, q_a)?;
+    let bounds = <PyObjective as Objective<f64>>::bounds(&objective);
+    let start = read_x0(
+        x0,
+        bounds.low.as_slice().expect("contiguous bounds"),
+        bounds.high.as_slice().expect("contiguous bounds"),
+    )?;
 
-    let result =
-        crate::qmc_gsa_global_search(&*objective, max_evals, seed, n_chains, t_init, q_v, q_a);
+    let result = crate::qmc_gsa_global_search_from(
+        &*objective,
+        max_evals,
+        seed,
+        n_chains,
+        t_init,
+        q_v,
+        q_a,
+        start.as_ref().map(|x| x.view()),
+    );
     qmc_polish_result_to_dict(py, result)
 }
 

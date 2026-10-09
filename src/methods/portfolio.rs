@@ -609,6 +609,44 @@ impl<O: Objective<f64>> Objective<f64> for LocalBoxBudgetedObjective<'_, O> {
     }
 }
 
+/// Gradient of `x -> f(reflect_into_box(x))`, the function the budgeted
+/// objective evaluates: the caller's gradient at the reflected point, with the
+/// sign of each coordinate the fold reverses flipped. The caller's gradient is
+/// therefore only ever called inside the box; inside it this is `grad f(x)`.
+struct ReflectedGradient<'a, G: Gradient<f64>> {
+    inner: &'a G,
+    bounds: &'a Bounds<f64>,
+}
+
+impl<G: Gradient<f64>> Gradient<f64> for ReflectedGradient<'_, G> {
+    fn dim(&self) -> usize {
+        self.inner.dim()
+    }
+
+    fn grad(&self, x: ArrayView1<f64>) -> Array1<f64> {
+        let inside = x
+            .iter()
+            .enumerate()
+            .all(|(k, &xk)| (self.bounds.low[k]..=self.bounds.high[k]).contains(&xk));
+        if inside {
+            return self.inner.grad(x);
+        }
+        let (folded, slopes): (Vec<f64>, Vec<f64>) = x
+            .iter()
+            .enumerate()
+            .map(|(k, &xk)| {
+                crate::movekernel::reflect_coord_with_slope(
+                    xk,
+                    self.bounds.low[k],
+                    self.bounds.high[k],
+                )
+            })
+            .unzip();
+        let g = self.inner.grad(ArrayView1::from(&folded));
+        g * &Array1::from(slopes)
+    }
+}
+
 /// Gradient proxy charging one unit per evaluation.
 struct BudgetedGradient<'a, G: Gradient<f64>> {
     inner: &'a G,
@@ -3085,10 +3123,11 @@ where
 
 /// [`portfolio_optimize_with_policy`] from a caller-supplied start.
 ///
-/// `x0` is the first charged evaluation and the first incumbent, so the arms
-/// that start from the incumbent (hop, shift, trust-region poll, GLE, HMC,
-/// population and reduced-space arms) start from it until a lower point is
-/// found. It costs one work unit of `budget`.
+/// `x0` is the first charged evaluation and the first incumbent. Arms that
+/// read the incumbent, such as the trust-region poll, HMC and the population
+/// arm, start from it until a lower point is found; arms with their own
+/// designs (the Bayesian pilot, the reduced-space search) do not. It costs
+/// one work unit of `budget`.
 pub fn portfolio_optimize_from<O, G>(
     obj: &O,
     grad: Option<&G>,
@@ -3148,7 +3187,11 @@ where
         inner: obj,
         ledger: &ledger,
     };
-    let budgeted_grad = grad.map(|g| BudgetedGradient {
+    let reflected_grad = grad.map(|g| ReflectedGradient {
+        inner: g,
+        bounds: &bounds,
+    });
+    let budgeted_grad = reflected_grad.as_ref().map(|g| BudgetedGradient {
         inner: g,
         ledger: &ledger,
     });
