@@ -33,16 +33,18 @@ such as ``np.array(["0", "0.8"])``, which is read as ``[0, 0.8]`` with the
 ``bounds_from_fitter``, which returned ``None``. A NumPy pair there is now
 read where 0.10.0 ignored it, and so are bounds held in a mapping other than a
 dict, such as a ``MappingProxyType``, there and in ``fit_anneal`` and
-``run_fitter``. A parameter that is not finite raises in ``ChemFitVector`` and
-in ``fit_chemfit``, whose portfolio ignored it, and a complex leaf raises
-instead of losing its imaginary part. Each ``x0`` dict leaf must have its
-parameter's size, apart from one value for the fitter's only parameter where
-``fitter.bounds`` gives both of its sides and ``low`` and ``high`` are
-omitted: 0.10.0 read the leaves flat, so leaves of the wrong sizes with the
-right total moved values across parameters (``{"a": 0.3, "b": [0.6, 0.7]}``
-started ``a`` at ``[0.3, 0.6]``). ``resolve_bounds`` and
-``bounds_from_fitter`` raise on an infinite or NaN bound, a box too wide for a
-float, or a lower bound above the upper, and ``chemfit_box`` on an infinite
-bound or a box too wide for a float, where each returned the box.
-``fit_chemfit`` and ``run_fitter`` now read method names in any case, as
-``fit_anneal`` and ``run_benchmark`` did.
+``run_fitter``. A parameter that is not finite or holds ``None``, which 0.10.0
+read as NaN, raises in ``ChemFitVector``, in ``fit_chemfit``, whose portfolio
+ignored it, and in ``run_benchmark``, which moved an infinite start to the
+nearer bound and raised on NaN after ``init``. A complex leaf, or a NumPy
+complex number in an object array, raises instead of losing its imaginary
+part. Each ``x0`` dict leaf must have its parameter's size, apart from one
+value for the fitter's only parameter where ``fitter.bounds`` gives both of
+its sides and ``low`` and ``high`` are omitted: 0.10.0 read the leaves flat,
+so leaves of the wrong sizes with the right total moved values across
+parameters (``{"a": 0.3, "b": [0.6, 0.7]}`` started ``a`` at ``[0.3, 0.6]``).
+``resolve_bounds`` and ``bounds_from_fitter`` raise on an infinite or NaN
+bound, a box too wide for a float, or a lower bound above the upper, and
+``chemfit_box`` on an infinite bound or a box too wide for a float, where each
+returned the box. ``fit_chemfit`` and ``run_fitter`` now read method names in
+any case, as ``fit_anneal`` and ``run_benchmark`` did.

@@ -15,6 +15,8 @@ bounds, are now read.
 
 import re
 import warnings
+from decimal import Decimal
+from fractions import Fraction
 from types import MappingProxyType
 
 import numpy as np
@@ -33,6 +35,7 @@ from anneal.chemfit import (  # noqa: E402
     resolve_bounds,
     run_benchmark,
     run_fitter,
+    unflatten_parameters,
 )
 from chemfit_doubles import (  # noqa: E402
     ENTRIES,
@@ -118,7 +121,21 @@ _YAML_READS = (
     "the lower bound of positions, the upper bound of positions and the upper "
     "bound of eps"
 )
-_POSITIONS_AS_TEXT = np.array([[0.5, -0.5, 0.25], [1.0, -1.0, 0.0]]).astype(str)
+_POSITIONS = np.array([[0.5, -0.5, 0.25], [1.0, -1.0, 0.0]])
+_POSITIONS_AS_TEXT = _POSITIONS.astype(str)
+
+
+def _objects(values, item=float):
+    """An object array of ``values``' shape holding ``item(value)`` for each."""
+    out = np.empty(np.shape(values), dtype=object)
+    for index, value in np.ndenumerate(np.asarray(values)):
+        out[index] = item(value)
+    return out
+
+
+def _decimal(value):
+    return Decimal(repr(float(value)))
+
 
 # (id, fitter, the call 0.10.0 took, the call that passes what it meant, warning)
 WARNS = [
@@ -385,6 +402,67 @@ WARNS = [
         lambda f: fit_anneal(f, 60, x0=_START[:7]),
         _reads("fit_anneal", "x0"),
     ),
+    # It read the numeric strings in an object array too, item by item.
+    (
+        "fit_chemfit object array of strings parameter",
+        _fitter,
+        lambda f: fit_chemfit(_as(f, positions=_objects(_POSITIONS, str)), 60),
+        lambda f: fit_chemfit(f, 60),
+        _reads("fit_chemfit", "parameter positions"),
+    ),
+    (
+        "fit_anneal object array of strings parameter",
+        _fitter,
+        lambda f: fit_anneal(_as(f, positions=_objects(_POSITIONS, str)), 60),
+        lambda f: fit_anneal(f, 60),
+        _reads("fit_anneal", "parameter positions"),
+    ),
+    (
+        "run_benchmark object array of strings parameter",
+        _fitter,
+        lambda f: run_benchmark(
+            {
+                **_context(f),
+                "initial_params": {"positions": _objects(_POSITIONS, str), "eps": 0.5},
+            }
+        ),
+        lambda f: run_benchmark(_context(f)),
+        _reads("run_benchmark", "parameter positions"),
+    ),
+    (
+        "run_fitter object array of strings parameter",
+        _fitter,
+        lambda f: run_fitter(_as(f, positions=_objects(_POSITIONS, str)), 60),
+        lambda f: run_fitter(f, 60),
+        _reads("run_fitter", "parameter positions"),
+    ),
+    (
+        "fit_anneal x0 object array of strings",
+        _fitter,
+        lambda f: fit_anneal(f, 60, x0=_objects(_START[:7], str)),
+        lambda f: fit_anneal(f, 60, x0=_START[:7]),
+        _reads("fit_anneal", "x0"),
+    ),
+    (
+        "fit_anneal low and high object arrays of strings",
+        _fitter,
+        lambda f: fit_anneal(f, 60, low=_objects(_LOW, str), high=_objects(_HIGH, str)),
+        lambda f: fit_anneal(f, 60, low=_LOW, high=_HIGH),
+        _reads("fit_anneal", "low and high"),
+    ),
+    (
+        "fit_anneal bounds sides that are object arrays of strings",
+        _fitter,
+        lambda f: fit_anneal(
+            _as(f, {**_NARROW, "positions": tuple(_objects(s, str) for s in _ROWS)}),
+            60,
+        ),
+        lambda f: fit_anneal(_as(f, _NARROW), 60),
+        _reads(
+            "fit_anneal",
+            "the lower bound of positions and the upper bound of positions",
+        ),
+    ),
     # 0.10.0's fit_chemfit read initial_parameters given as (key, value)
     # pairs, which ChemFit 3.1's Fitter keeps, as the dict they make.
     (
@@ -535,6 +613,12 @@ HELPERS_READ = [
         _reads("flatten_parameters", "parameter a and parameter b"),
     ),
     (
+        "flatten_parameters object array of strings",
+        lambda: flatten_parameters({"a": _objects([0.5, 1.0], str)}),
+        lambda: flatten_parameters({"a": np.array([0.5, 1.0])}),
+        _reads("flatten_parameters", "parameter a"),
+    ),
+    (
         "ChemFitVector",
         lambda: ChemFitVector({"a": "0.5"}).x0,
         lambda: ChemFitVector({"a": 0.5}).x0,
@@ -555,6 +639,14 @@ HELPERS_READ = [
     (
         "resolve_bounds",
         lambda: resolve_bounds(_X, low="-1", high="1"),
+        lambda: resolve_bounds(_X, low=-1.0, high=1.0),
+        _reads("resolve_bounds", "low and high"),
+    ),
+    (
+        "resolve_bounds object arrays of strings",
+        lambda: resolve_bounds(
+            _X, low=_objects([-1, -1], str), high=_objects([1, 1], str)
+        ),
         lambda: resolve_bounds(_X, low=-1.0, high=1.0),
         _reads("resolve_bounds", "low and high"),
     ),
@@ -618,6 +710,30 @@ def test_the_installed_chemfit_fitter_runs_on_bounds_read_from_yaml(entry):
     for got, expected in zip(calls, want_calls):
         assert np.array_equal(got, expected)
     assert np.array_equal(out["x"], want["x"])
+
+
+@pytest.mark.parametrize("entry", ENTRIES)
+def test_the_installed_chemfit_fitter_runs_on_decimal_and_fraction_parameters(entry):
+    fitter_type = pytest.importorskip("chemfit.fitter").Fitter
+
+    def run(initial):
+        calls = []
+
+        def objective(params):
+            calls.append((params["a"], params["b"]))
+            return (params["a"] - 0.3) ** 2 + (params["b"] - 0.2) ** 2
+
+        bounds = {"a": (0.0, 1.0), "b": (0.0, 1.0)}
+        fitter = fitter_type(objective, initial_params=initial, bounds=bounds)
+        return drive(entry, fitter, 60), calls
+
+    # The Fitter keeps these as given, and 0.10.0 read them as floats.
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", FutureWarning)
+        out, calls = run({"a": Decimal("0.5"), "b": Fraction(1, 10)})
+        want, want_calls = run({"a": 0.5, "b": 0.1})
+    assert calls == want_calls and len(calls) > 1
+    assert out == want
 
 
 def test_fit_chemfit_reads_the_pairs_a_chemfit_3_1_fitter_keeps():
@@ -1121,6 +1237,35 @@ RAISES = [
         "parameter a must be finite",
     ),
     _raises(
+        "fit_chemfit Decimal NaN parameter",
+        lambda f: fit_chemfit(f, 60),
+        ValueError,
+        "parameter a must be finite",
+        make=_with({"a": Decimal("NaN"), "b": 0.5}, {"a": (0.0, 1.0), "b": (0.0, 1.0)}),
+    ),
+    # 0.10.0's run_benchmark moved an infinite start to the nearer bound.
+    _raises(
+        "run_benchmark infinite parameter",
+        lambda f: run_benchmark(_context(f)),
+        ValueError,
+        "parameter a must be finite",
+        make=_with({"a": np.inf, "b": 0.5}, {"a": (0.0, 1.0), "b": (0.0, 1.0)}),
+    ),
+    # 0.10.0 read None as NaN.
+    _raises(
+        "fit_chemfit parameter holding None",
+        lambda f: fit_chemfit(f, 60),
+        ValueError,
+        "parameter a is not real-numeric",
+        make=_with({"a": [None, 0.5], "b": 0.5}, {"a": (0.0, 1.0), "b": (0.0, 1.0)}),
+    ),
+    _raises(
+        "ChemFitVector object array holding None",
+        lambda f: ChemFitVector({"a": np.array([None, 0.5])}),
+        ValueError,
+        "parameter a is not real-numeric",
+    ),
+    _raises(
         "resolve_bounds low > high",
         lambda f: resolve_bounds({"x": np.zeros(2)}, low=1.0, high=-1.0),
         ValueError,
@@ -1199,6 +1344,16 @@ RAISES = [
         ValueError,
         "parameter x is not real-numeric",
         make=_with({"x": np.array([1 + 1j, 0.5])}, {"x": (-2.0, 2.0)}),
+    ),
+    _raises(
+        "fit_chemfit object array holding a NumPy complex number",
+        lambda f: fit_chemfit(f, 60),
+        ValueError,
+        "parameter x is not real-numeric",
+        make=_with(
+            {"x": np.array([np.complex128(0.5), 0.25], dtype=object)},
+            {"x": (-2.0, 2.0)},
+        ),
     ),
 ]
 
@@ -1358,3 +1513,115 @@ HELPERS_NOW_READ = [
 @pytest.mark.parametrize("call", HELPERS_NOW_READ)
 def test_the_helpers_read_bounds_0_10_0_ignored(call):
     assert _same(call(), (np.full(2, -1.0), np.full(2, 1.0)))
+
+
+# Numbers 0.10.0 read through NumPy as the floats they hold, though NumPy
+# holds them only as objects, each with the call it matches.
+OBJECTS_READ = [
+    pytest.param(
+        lambda f: fit_chemfit(_as(f, eps=Decimal("0.5")), 60),
+        lambda f: fit_chemfit(f, 60),
+        id="fit_chemfit Decimal parameter",
+    ),
+    pytest.param(
+        lambda f: fit_anneal(_as(f, eps=Fraction(1, 2)), 60),
+        lambda f: fit_anneal(f, 60),
+        id="fit_anneal Fraction parameter",
+    ),
+    pytest.param(
+        lambda f: run_benchmark(
+            {
+                **_context(f),
+                "initial_params": {
+                    "positions": _objects(_POSITIONS, _decimal).tolist(),
+                    "eps": Fraction(1, 2),
+                },
+            }
+        ),
+        lambda f: run_benchmark(
+            {
+                **_context(f),
+                "initial_params": {"positions": _POSITIONS.tolist(), "eps": 0.5},
+            }
+        ),
+        id="run_benchmark lists of Decimals and a Fraction",
+    ),
+    pytest.param(
+        lambda f: run_fitter(_as(f, positions=_objects(_POSITIONS, _decimal)), 60),
+        lambda f: run_fitter(f, 60),
+        id="run_fitter object array of Decimals",
+    ),
+    pytest.param(
+        lambda f: fit_chemfit(_as(f, positions=_objects(_POSITIONS)), 60),
+        lambda f: fit_chemfit(f, 60),
+        id="fit_chemfit object array of floats",
+    ),
+    pytest.param(
+        lambda f: fit_anneal(
+            _as(f, positions=_objects(_POSITIONS, lambda v: np.array([v]))), 60
+        ),
+        lambda f: fit_anneal(f, 60),
+        id="fit_anneal object array of one-element arrays",
+    ),
+    pytest.param(
+        lambda f: fit_chemfit(
+            _as(f, {**_NARROW, "eps": (Decimal(0), Fraction(1))}), 60
+        ),
+        lambda f: fit_chemfit(_as(f, _NARROW), 60),
+        id="fit_chemfit Decimal and Fraction bounds",
+    ),
+    pytest.param(
+        lambda f: fit_anneal(_as(f, {**_NARROW, "eps": (Fraction(0), Decimal(1))}), 60),
+        lambda f: fit_anneal(_as(f, _NARROW), 60),
+        id="fit_anneal Fraction and Decimal bounds",
+    ),
+    pytest.param(
+        lambda f: fit_anneal(f, 60, x0=[_decimal(v) for v in _START[:7]]),
+        lambda f: fit_anneal(f, 60, x0=_START[:7]),
+        id="fit_anneal x0 of Decimals",
+    ),
+    pytest.param(
+        lambda f: fit_anneal(
+            f, 60, low=[Fraction(-1)] * 7, high=_objects(_HIGH, _decimal)
+        ),
+        lambda f: fit_anneal(f, 60, low=_LOW, high=_HIGH),
+        id="fit_anneal low of Fractions and high of Decimals",
+    ),
+    pytest.param(
+        lambda f: run_benchmark(_context(f), low=Decimal(-1), high=Fraction(1)),
+        lambda f: run_benchmark(_context(f), low=-1.0, high=1.0),
+        id="run_benchmark Decimal low and Fraction high",
+    ),
+    pytest.param(
+        lambda f: run_benchmark(
+            {**_context(f), "bounds": {**_NARROW, "eps": (Decimal(0), Decimal(1))}}
+        ),
+        lambda f: run_benchmark({**_context(f), "bounds": _NARROW}),
+        id="run_benchmark Decimal context bounds",
+    ),
+]
+
+
+@pytest.mark.parametrize("call, same_as", OBJECTS_READ)
+def test_numbers_numpy_holds_as_objects_are_read_as_the_floats_they_hold(call, same_as):
+    _same_fit(call, same_as)
+
+
+def test_the_helpers_read_numbers_numpy_holds_as_objects():
+    template = {
+        "a": Decimal("0.5"),
+        "b": [Fraction(1, 4), Decimal(1)],
+        "c": _objects([0.5, 0.25]),
+    }
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", FutureWarning)
+        vector = ChemFitVector(template)
+        x0, spec = flatten_parameters(template)
+        back = unflatten_parameters(x0, spec, template)
+        box = resolve_bounds(template, low=Decimal(-1), high=Fraction(1))
+    assert _same(vector.x0, np.array([0.5, 0.25, 1.0, 0.5, 0.25]))
+    assert _same(x0, vector.x0)
+    expected = {"a": 0.5, "b": [0.25, 1.0], "c": np.array([0.5, 0.25])}
+    assert same_params(back, expected)
+    assert same_params(vector.unpack(vector.x0), expected)
+    assert _same(box, (np.full(5, -1.0), np.full(5, 1.0)))
