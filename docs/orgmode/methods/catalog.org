@@ -1329,7 +1329,8 @@ SOAP leftover with =featomic=, CNA fractions otherwise); =BankConfig=
 =spectrum_distance= (csa_cluster.rs:581, default sorted-pairwise-
 distance-spectrum Euclidean metric); =coordination_histogram_distance=
 (csa_cluster.rs:606, Lee-Lee-Scheraga coordination-histogram distance
-at shells =r1=1.35=, =r2=1.70=).
+at shells =r1=1.35=, =r2=1.70=). Those shell counts come from the
+unwrapped cutoff. The weights are unchanged.
 
 Constants and defaults: bond cutoff derived as
 =cfg.min_separation * (1.39 / 0.85)= (csa_cluster.rs:291), between
