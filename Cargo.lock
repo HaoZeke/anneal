@@ -50,7 +50,7 @@ dependencies = [
  "featomic",
  "futures",
  "libloading",
- "linkcell",
+ "linkcell 0.3.11",
  "metatensor",
  "nauty-pet",
  "ndarray 0.17.2",
@@ -1090,6 +1090,14 @@ version = "0.3.3"
 source = "git+https://github.com/d-SEAMS/linkcell?rev=a46717c564d01ea4f3dab09c07bd2d215290b2ab#a46717c564d01ea4f3dab09c07bd2d215290b2ab"
 
 [[package]]
+name = "linkcell"
+version = "0.3.11"
+source = "git+https://github.com/d-SEAMS/linkcell?rev=2e26b83c0c9bbc07d09eb056011dd8e2cec6f4a5#2e26b83c0c9bbc07d09eb056011dd8e2cec6f4a5"
+dependencies = [
+ "minimage",
+]
+
+[[package]]
 name = "linux-raw-sys"
 version = "0.12.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1174,6 +1182,12 @@ dependencies = [
  "cmake",
  "which",
 ]
+
+[[package]]
+name = "minimage"
+version = "0.1.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6e0c930112bcf7c3606a5e4dd67c90522432cb536a250d879967d094f1803abe"
 
 [[package]]
 name = "minimal-lexical"
@@ -1835,7 +1849,7 @@ version = "0.1.0"
 source = "git+https://github.com/OmniPotentRPC/rgsaddle.git?rev=84fe96bfc1ed163379c0af8bd664b74bf71407d1#84fe96bfc1ed163379c0af8bd664b74bf71407d1"
 dependencies = [
  "eindir-core",
- "linkcell",
+ "linkcell 0.3.3",
  "ndarray 0.17.2",
  "rgmin",
  "thiserror",
