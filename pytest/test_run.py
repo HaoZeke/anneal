@@ -806,6 +806,36 @@ def test_an_objective_that_never_returns_re_raises_its_first_exception(drive):
         drive(wrong_lifecycle)
 
 
+@pytest.mark.parametrize("spent", [1, 2, 3])
+def test_cluster_search_keeps_the_warning_when_only_its_probe_returned(spent):
+    calls = []
+
+    def counter(x):
+        calls.append(1)
+        if len(calls) > spent:
+            raise RuntimeError("budget spent")
+        return lj_cluster_energy(x)
+
+    with pytest.warns(RuntimeWarning, match="budget spent"):
+        cluster_search(counter, lj_cluster_gradient, 13, 200, seed=0)
+
+
+def test_a_gradient_only_driver_keeps_the_warning_when_most_calls_returned():
+    from anneal import estimate_gle_omega0
+
+    calls = []
+
+    def gradient(x):
+        calls.append(1)
+        if len(calls) == 1:
+            raise ValueError("first gradient failed")
+        return 2.0 * np.asarray(x)
+
+    with pytest.warns(RuntimeWarning, match="first gradient failed"):
+        estimate_gle_omega0(lambda x: float(np.sum(np.asarray(x) ** 2)), gradient, np.full(4, -3.0), np.full(4, 3.0))
+    assert len(calls) > 1
+
+
 def test_objective_exceptions_are_scored_and_reported_once():
     calls = []
 

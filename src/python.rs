@@ -390,8 +390,8 @@ impl From<History> for PyHistory {
 /// else ends the run: `KeyboardInterrupt`, `SystemExit`, or a return value
 /// that is not a number. Once a run is ending, no further callback is made,
 /// and the driver call re-raises the exception when it returns. When no
-/// objective call returned a number, nothing the driver returns was
-/// measured, so the first scored exception is re-raised as well.
+/// objective or gradient call returned a usable value, nothing the driver
+/// returns was measured, so the first scored exception is re-raised as well.
 #[derive(Default)]
 struct CallbackErrors {
     fatal: std::sync::Mutex<Option<PyErr>>,
@@ -428,7 +428,7 @@ impl CallbackErrors {
             .store(true, std::sync::atomic::Ordering::Relaxed);
     }
 
-    /// Counts objective values returned without an exception.
+    /// Counts objective values and gradients returned without an exception.
     fn answered(&self, n: usize) {
         self.answered
             .fetch_add(n, std::sync::atomic::Ordering::Relaxed);
@@ -457,7 +457,7 @@ impl CallbackErrors {
     }
 
     /// Re-raises the exception that ended the run, or the first scored one
-    /// when no objective call returned, and otherwise warns once when
+    /// when no callback returned, and otherwise warns once when
     /// ordinary exceptions were scored as the worst value.
     fn finish(&self, py: Python<'_>) -> PyResult<()> {
         if let Some(err) = self.fatal.lock().expect("callback error lock").take() {
@@ -661,7 +661,10 @@ impl eindir_core::Gradient<f64> for CallablePyGradient {
             let py_arr = PyArray1::from_vec(py, owned);
             match self.fn_.call1(py, (py_arr,)) {
                 Ok(r) => match as_float_vector(py, &r) {
-                    Some(values) if values.len() == self.dim => Array1::from(values),
+                    Some(values) if values.len() == self.dim => {
+                        self.errors.answered(1);
+                        Array1::from(values)
+                    }
                     _ => {
                         self.errors
                             .abort(pyo3::exceptions::PyTypeError::new_err(format!(
@@ -2644,9 +2647,12 @@ impl eindir_core::gradient::Gradient<f64> for CallableDiffObjective {
             let py_arr = PyArray1::from_vec(py, owned);
             match self.grad_fn.call1(py, (py_arr,)) {
                 Ok(r) => match as_float_vector(py, &r) {
-                    Some(values) if values.len() == dim => Array1::from_iter(
-                        values.into_iter().map(|value| self.gradient_scale * value),
-                    ),
+                    Some(values) if values.len() == dim => {
+                        self.errors.answered(1);
+                        Array1::from_iter(
+                            values.into_iter().map(|value| self.gradient_scale * value),
+                        )
+                    }
                     _ => {
                         self.errors
                             .abort(pyo3::exceptions::PyTypeError::new_err(format!(
@@ -2725,7 +2731,10 @@ fn cluster_gradient_scale(
         return Ok(1.0);
     };
     let gradient = match as_float_vector(py, &gradient_result) {
-        Some(values) if values.len() == probe.len() => values,
+        Some(values) if values.len() == probe.len() => {
+            errors.answered(1);
+            values
+        }
         _ => {
             return Err(pyo3::exceptions::PyTypeError::new_err(format!(
                 "grad_fn must return {} numbers",
@@ -2756,10 +2765,12 @@ fn cluster_gradient_scale(
         return Ok(1.0);
     };
     let plus_value = as_energy(plus_value)?;
+    errors.answered(1);
     let Some(minus_value) = call(obj_fn, minus.to_vec())? else {
         return Ok(1.0);
     };
     let minus_value = as_energy(minus_value)?;
+    errors.answered(1);
     if !plus_value.is_finite() || !minus_value.is_finite() {
         return Ok(1.0);
     }
