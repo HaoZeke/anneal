@@ -290,7 +290,7 @@ mod vesin_ffi {
             let pairs = unsafe { core::slice::from_raw_parts(list.pairs, list.length) };
             for p in pairs {
                 let (a, b) = (p[0], p[1]);
-                if a < n && b < n {
+                if a < n && b < n && a != b {
                     lists[a].push(b);
                 }
             }
@@ -328,4 +328,381 @@ mod vesin_ffi {
             }
         }
     }
+
+    /// Cutoff rows for an open or partly open cell. An axis marked open is
+    /// not wrapped. `inclusive` keeps a pair whose distance equals `cutoff`.
+    pub(super) fn cutoff_rows(
+        positions: &[[f64; 3]],
+        vectors: Option<[[f64; 3]; 3]>,
+        periodic: [bool; 3],
+        cutoff: f64,
+        inclusive: bool,
+    ) -> Option<Vec<Vec<super::CutoffNeighbour>>> {
+        let n = positions.len();
+        let bbox = vectors.unwrap_or([[0.0; 3]; 3]);
+        let query = if inclusive { cutoff.next_up() } else { cutoff };
+        let options = VesinOptions {
+            cutoff: query,
+            full: true,
+            sorted: false,
+            algorithm: 0,
+            skin: 0.0,
+            n_threads: 1,
+            return_shifts: true,
+            return_distances: true,
+            return_vectors: true,
+        };
+        let mut list = VesinNeighborList {
+            length: 0,
+            device: VesinDevice {
+                kind: 0,
+                device_id: 0,
+            },
+            pairs: core::ptr::null_mut(),
+            shifts: core::ptr::null_mut(),
+            distances: core::ptr::null_mut(),
+            vectors: core::ptr::null_mut(),
+            opaque: core::ptr::null_mut(),
+        };
+        let mut err: *const core::ffi::c_char = core::ptr::null();
+        let status = unsafe {
+            vesin_neighbors(
+                positions.as_ptr(),
+                n,
+                bbox.as_ptr(),
+                periodic.as_ptr(),
+                VesinDevice {
+                    kind: 1,
+                    device_id: 0,
+                },
+                options,
+                &mut list,
+                &mut err,
+            )
+        };
+        if status != 0 {
+            return None;
+        }
+        let pairs = unsafe { core::slice::from_raw_parts(list.pairs, list.length) };
+        let returned = unsafe { core::slice::from_raw_parts(list.vectors, list.length) };
+        let distances = unsafe { core::slice::from_raw_parts(list.distances, list.length) };
+        let limit = cutoff * cutoff;
+        let mut rows = vec![Vec::new(); n];
+        for (pair, (vector, distance)) in pairs.iter().zip(returned.iter().zip(distances.iter())) {
+            let (i, j) = (pair[0], pair[1]);
+            if i >= n || j >= n || i == j {
+                continue;
+            }
+            let d2 = distance * distance;
+            let keep = if inclusive { d2 <= limit } else { d2 < limit };
+            if !keep || d2 <= 1e-24 {
+                continue;
+            }
+            rows[i].push(super::CutoffNeighbour {
+                index: j,
+                displacement: *vector,
+                distance: *distance,
+            });
+        }
+        unsafe { vesin_free(&mut list) };
+        for row in &mut rows {
+            row.sort_by(|left, right| {
+                left.index
+                    .cmp(&right.index)
+                    .then_with(|| left.displacement[0].total_cmp(&right.displacement[0]))
+            });
+        }
+        Some(rows)
+    }
+}
+
+/// One neighbour inside a cutoff, with the displacement from the centre.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct CutoffNeighbour {
+    /// Index of the neighbour atom.
+    pub index: usize,
+    /// Cartesian displacement from the centre to the chosen image.
+    pub displacement: [f64; 3],
+    /// Length of `displacement`.
+    pub distance: f64,
+}
+
+/// Periodic cutoff list.
+///
+/// The pairs are [`linkcell::pairs_within`]. Each displacement is the
+/// shortest lattice vector of that pair.
+/// [`linkcell::Cell::displacement_euclidean`] replaces the stencil image
+/// when it is strictly shorter. A half-box tie keeps
+/// [`linkcell::Cell::displacement`], which sends `+L/2` to `-L/2`.
+pub fn periodic_cutoff_pairs(
+    positions: &[[f64; 3]],
+    cell: &linkcell::Cell,
+    cutoff: f64,
+) -> Result<Vec<Vec<CutoffNeighbour>>, linkcell::Error> {
+    let n = positions.len();
+    let mut lists = vec![Vec::new(); n];
+    if n == 0 || !(cutoff.is_finite() && cutoff > 0.0) {
+        return Ok(lists);
+    }
+    let cutoff2 = cutoff * cutoff;
+    let rows = linkcell::pairs_within(positions, cell, cutoff, None, None, false)?;
+    let mut best = vec![vec![None; n]; n];
+    for row in rows {
+        if row.i >= n || row.j >= n {
+            continue;
+        }
+        let shift = cell.lattice_shift(row.shift[0], row.shift[1], row.shift[2]);
+        let p = positions[row.i];
+        let q = positions[row.j];
+        let displacement = [
+            q[0] + shift[0] - p[0],
+            q[1] + shift[1] - p[1],
+            q[2] + shift[2] - p[2],
+        ];
+        let length2 = dot3(displacement);
+        if !(length2 < cutoff2) || length2 <= 1e-24 {
+            continue;
+        }
+        consider(&mut best[row.i][row.j], length2, displacement);
+    }
+    for i in 0..n {
+        for j in 0..n {
+            let Some((length2, mut displacement)) = best[i][j] else {
+                continue;
+            };
+            if i != j {
+                displacement = shortest_periodic(
+                    cell,
+                    positions[i],
+                    positions[j],
+                    displacement,
+                    length2,
+                    cutoff2,
+                );
+            }
+            lists[i].push(CutoffNeighbour {
+                index: j,
+                displacement,
+                distance: dot3(displacement).sqrt(),
+            });
+        }
+        lists[i].sort_by(|left, right| {
+            left.index
+                .cmp(&right.index)
+                .then_with(|| left.displacement[0].total_cmp(&right.displacement[0]))
+        });
+    }
+    Ok(lists)
+}
+
+/// Cutoff pairs on a free cluster. No coordinate is wrapped.
+///
+/// When the vesin backend is compiled, the rows come from vesin. Otherwise
+/// the same Cartesian pairs are counted directly. `inclusive` keeps a
+/// distance that equals `cutoff`.
+pub fn open_cutoff_pairs(
+    positions: &[[f64; 3]],
+    cutoff: f64,
+    inclusive: bool,
+) -> Vec<Vec<CutoffNeighbour>> {
+    #[cfg(feature = "vesin-nl")]
+    if let Some(rows) = vesin_ffi::cutoff_rows(positions, None, [false; 3], cutoff, inclusive) {
+        return rows;
+    }
+    cartesian_pairs(positions, cutoff, inclusive)
+}
+
+/// Cutoff pairs for a cell that may leave an axis open.
+///
+/// Every periodic axis uses [`periodic_cutoff_pairs`]. An open axis uses
+/// [`open_cutoff_pairs`] and is not wrapped. A cell with both kinds of axis
+/// searches lattice images on the periodic axes only.
+pub fn cutoff_pairs(
+    positions: &[[f64; 3]],
+    vectors: [[f64; 3]; 3],
+    periodic: [bool; 3],
+    cutoff: f64,
+) -> Result<Vec<Vec<CutoffNeighbour>>, linkcell::Error> {
+    if periodic.iter().all(|axis| *axis) {
+        let cell = linkcell::Cell::from_vectors(vectors[0], vectors[1], vectors[2], [0.0; 3])?;
+        return periodic_cutoff_pairs(positions, &cell, cutoff);
+    }
+    if periodic.iter().all(|axis| !*axis) {
+        return Ok(open_cutoff_pairs(positions, cutoff, false));
+    }
+    #[cfg(feature = "vesin-nl")]
+    if let Some(rows) = vesin_ffi::cutoff_rows(positions, Some(vectors), periodic, cutoff, false) {
+        return Ok(rows);
+    }
+    mixed_cutoff_pairs(positions, vectors, periodic, cutoff)
+}
+
+fn cartesian_pairs(
+    positions: &[[f64; 3]],
+    cutoff: f64,
+    inclusive: bool,
+) -> Vec<Vec<CutoffNeighbour>> {
+    let n = positions.len();
+    let mut lists = vec![Vec::new(); n];
+    if n == 0 || !(cutoff.is_finite() && cutoff > 0.0) {
+        return lists;
+    }
+    let limit = cutoff * cutoff;
+    for i in 0..n {
+        for j in 0..n {
+            if i == j {
+                continue;
+            }
+            let displacement = [
+                positions[j][0] - positions[i][0],
+                positions[j][1] - positions[i][1],
+                positions[j][2] - positions[i][2],
+            ];
+            let length2 = dot3(displacement);
+            let keep = if inclusive {
+                length2 <= limit
+            } else {
+                length2 < limit
+            };
+            if keep && length2 > 1e-24 {
+                lists[i].push(CutoffNeighbour {
+                    index: j,
+                    displacement,
+                    distance: length2.sqrt(),
+                });
+            }
+        }
+    }
+    lists
+}
+
+fn mixed_cutoff_pairs(
+    positions: &[[f64; 3]],
+    vectors: [[f64; 3]; 3],
+    periodic: [bool; 3],
+    cutoff: f64,
+) -> Result<Vec<Vec<CutoffNeighbour>>, linkcell::Error> {
+    let n = positions.len();
+    let mut lists = vec![Vec::new(); n];
+    if n == 0 || !(cutoff.is_finite() && cutoff > 0.0) {
+        return Ok(lists);
+    }
+    let cell = linkcell::Cell::from_vectors(vectors[0], vectors[1], vectors[2], [0.0; 3])?;
+    let widths = cell.widths();
+    let mut reach = [0_i32; 3];
+    for axis in 0..3 {
+        if !periodic[axis] {
+            continue;
+        }
+        let width = widths[axis].abs().max(1e-12);
+        let images = (cutoff / width).ceil() as i32 + 1;
+        reach[axis] = images.clamp(1, 8);
+    }
+    let cutoff2 = cutoff * cutoff;
+    for i in 0..n {
+        for j in 0..n {
+            let mut chosen: Option<(f64, [f64; 3])> = None;
+            for na in -reach[0]..=reach[0] {
+                for nb in -reach[1]..=reach[1] {
+                    for nc in -reach[2]..=reach[2] {
+                        if i == j && na == 0 && nb == 0 && nc == 0 {
+                            continue;
+                        }
+                        let shift = cell.lattice_shift(na, nb, nc);
+                        let p = positions[i];
+                        let q = positions[j];
+                        let displacement = [
+                            q[0] + shift[0] - p[0],
+                            q[1] + shift[1] - p[1],
+                            q[2] + shift[2] - p[2],
+                        ];
+                        let length2 = dot3(displacement);
+                        if length2 < cutoff2 && length2 > 1e-24 {
+                            consider(&mut chosen, length2, displacement);
+                        }
+                    }
+                }
+            }
+            if let Some((_, displacement)) = chosen {
+                lists[i].push(CutoffNeighbour {
+                    index: j,
+                    displacement,
+                    distance: dot3(displacement).sqrt(),
+                });
+            }
+        }
+        lists[i].sort_by(|left, right| left.index.cmp(&right.index));
+    }
+    Ok(lists)
+}
+
+/// Shortest periodic displacement for one pair.
+///
+/// The Euclidean image wins when it is strictly shorter than the
+/// stencil vector and still inside the cutoff. An equal length keeps the
+/// engine wrap, so an orthorhombic half-box tie stays at `-L/2`.
+fn shortest_periodic(
+    cell: &linkcell::Cell,
+    p: [f64; 3],
+    q: [f64; 3],
+    stencil: [f64; 3],
+    stencil2: f64,
+    cutoff2: f64,
+) -> [f64; 3] {
+    let euclidean = cell.displacement_euclidean(p, q);
+    let euclidean2 = dot3(euclidean);
+    if euclidean2 < cutoff2
+        && euclidean2 > 1e-24
+        && euclidean2 + 1e-9 * euclidean2.max(1.0) < stencil2
+    {
+        return euclidean;
+    }
+    let engine = cell.displacement(p, q);
+    let engine2 = dot3(engine);
+    if engine2 < cutoff2
+        && engine2 > 1e-24
+        && engine2 <= stencil2 + 1e-9 * stencil2.max(1.0)
+        && prefers_negative(engine, stencil)
+    {
+        return engine;
+    }
+    stencil
+}
+
+fn consider(slot: &mut Option<(f64, [f64; 3])>, length2: f64, displacement: [f64; 3]) {
+    let replace = match slot {
+        None => true,
+        Some((old2, old)) => {
+            if length2 < *old2 - 1e-12 {
+                true
+            } else if (*old2 - length2).abs() <= 1e-9 * old2.max(1.0) {
+                prefers_negative(displacement, *old)
+            } else {
+                false
+            }
+        }
+    };
+    if replace {
+        *slot = Some((length2, displacement));
+    }
+}
+
+/// On a length tie, keep the vector whose first differing component is
+/// smaller. An orthorhombic half-box pair then keeps `-L/2` rather than
+/// `+L/2`.
+fn prefers_negative(candidate: [f64; 3], incumbent: [f64; 3]) -> bool {
+    for axis in 0..3 {
+        let delta = candidate[axis] - incumbent[axis];
+        if delta < -1e-12 {
+            return true;
+        }
+        if delta > 1e-12 {
+            return false;
+        }
+    }
+    false
+}
+
+fn dot3(value: [f64; 3]) -> f64 {
+    value[0] * value[0] + value[1] * value[1] + value[2] * value[2]
 }
