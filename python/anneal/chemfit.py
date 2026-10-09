@@ -12,9 +12,10 @@ the parameters it was given.
 Nested parameter dicts are flattened only at the optimizer boundary and
 rebuilt on the way back. A leaf keeps its type: a Python number comes back as
 a float, a NumPy scalar or array keeps its shape and its floating dtype
-(integer and bool leaves are optimized, and returned, as float64), and the
-bounds of a float32 or float16 leaf are rounded inward so the cast candidate
-stays inside them. A parameter whose lower and upper bounds are equal is held
+(integer and bool leaves are optimized, and returned, as float64), a list or
+tuple comes back as a list or tuple nested the same way, and the bounds of a
+float32 or float16 leaf are rounded inward so the cast candidate stays inside
+them. A parameter whose lower and upper bounds are equal is held
 fixed. Every evaluation lies inside the box, the first one is the start, and
 the budget counts it. The default driver is the Thompson-allocated portfolio.
 
@@ -219,9 +220,9 @@ def _leaf_form(name: str, value: Any) -> tuple[str, np.dtype, tuple[int, ...]]:
     """``(kind, dtype, shape)`` of a parameter leaf.
 
     ``kind`` is ``"number"`` for a Python number, ``"scalar"`` for a NumPy
-    scalar and ``"array"`` for anything array-like. ``dtype`` is the float
-    type a candidate value is cast to; integer and bool leaves are optimized
-    as float64.
+    scalar, ``"sequence"`` for a list or tuple and ``"array"`` for anything
+    else array-like. ``dtype`` is the float type a candidate value is cast
+    to; integer and bool leaves are optimized as float64.
     """
     if isinstance(value, np.generic):
         kind, raw, shape = "scalar", value.dtype, ()
@@ -234,7 +235,8 @@ def _leaf_form(name: str, value: Any) -> tuple[str, np.dtype, tuple[int, ...]]:
             arr = np.asarray(value)
         except (TypeError, ValueError) as error:
             raise ValueError(f"parameter {name} is not real-numeric") from error
-        kind, raw, shape = "array", arr.dtype, arr.shape
+        kind = "sequence" if isinstance(value, (list, tuple)) else "array"
+        raw, shape = arr.dtype, arr.shape
     if raw.kind in "biu":
         return kind, np.dtype(np.float64), shape
     if raw.kind != "f":
@@ -247,10 +249,42 @@ def _leaf_form(name: str, value: Any) -> tuple[str, np.dtype, tuple[int, ...]]:
     return kind, raw, shape
 
 
+def _items_form(value: Any) -> Any:
+    """What :func:`_items_like` needs to rebuild a list or tuple leaf.
+
+    A list or tuple becomes ``(list or tuple, the forms of its items)``, a
+    NumPy array or scalar becomes its base type, and a number ``float``.
+    """
+    if isinstance(value, (list, tuple)):
+        kind = tuple if isinstance(value, tuple) else list
+        return kind, [_items_form(item) for item in value]
+    if isinstance(value, np.ndarray):
+        return np.ndarray
+    if isinstance(value, np.generic):
+        return np.generic
+    return float
+
+
+def _items_like(form: Any, values: np.ndarray) -> Any:
+    """``values``, an array in the leaf's shape and dtype, laid out as ``form``."""
+    if isinstance(form, tuple):
+        kind, items = form
+        if all(item is float for item in items):
+            out = values.tolist()
+        else:
+            out = [_items_like(item, values[i]) for i, item in enumerate(items)]
+        return out if kind is list else tuple(out)
+    if form is np.ndarray:
+        return np.array(values)
+    if form is np.generic:
+        return values[()]
+    return float(values)
+
+
 class _Leaf:
     """One parameter leaf: its path, its slice of the flat vector, its type."""
 
-    __slots__ = ("path", "name", "kind", "dtype", "shape", "size", "offset")
+    __slots__ = ("path", "name", "kind", "dtype", "shape", "size", "offset", "form")
 
     def __init__(self, path: tuple, value: Any, offset: int):
         self.path = path
@@ -258,6 +292,7 @@ class _Leaf:
         self.kind, self.dtype, self.shape = _leaf_form(self.name, value)
         self.size = math.prod(self.shape)
         self.offset = offset
+        self.form = _items_form(value) if self.kind == "sequence" else None
 
     @property
     def span(self) -> slice:
@@ -269,7 +304,10 @@ class _Leaf:
             return float(chunk[0])
         if self.kind == "scalar":
             return self.dtype.type(chunk[0])
-        return chunk.astype(self.dtype).reshape(self.shape)
+        values = chunk.astype(self.dtype).reshape(self.shape)
+        if self.kind == "sequence":
+            return _items_like(self.form, values)
+        return values
 
 
 class _Layout:
@@ -695,9 +733,10 @@ def unflatten_parameters(vector: np.ndarray, spec, template: dict[str, Any]):
 
     Array leaves are reshaped to their original shape, and each leaf takes
     the type of the matching ``template`` leaf: a Python number comes back as
-    a float, a NumPy scalar or array keeps its floating dtype, and an integer
-    or bool leaf comes back as float64. The returned dict mirrors
-    ``template``'s nesting and never mutates the template.
+    a float, a NumPy scalar or array keeps its floating dtype, an integer or
+    bool leaf comes back as float64, and a list or tuple comes back as a list
+    or tuple nested the same way. The returned dict mirrors ``template``'s
+    nesting and never mutates the template.
     """
     vector = np.asarray(vector, dtype=np.float64).ravel()
     total = spec_total(spec)
