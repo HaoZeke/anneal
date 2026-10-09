@@ -320,7 +320,11 @@ where
 /// the box. An axis with an infinite wall starts on its finite wall, or at 0
 /// when both walls are infinite, as the single-chain start does, and an axis
 /// whose width overflows is scaled at half size and doubled.
-fn qmc_starts(bounds: &eindir_core::Bounds<f64>, n: usize, skip: u64) -> ndarray::Array2<f64> {
+pub(crate) fn qmc_starts(
+    bounds: &eindir_core::Bounds<f64>,
+    n: usize,
+    skip: u64,
+) -> ndarray::Array2<f64> {
     if bounds
         .low
         .iter()
