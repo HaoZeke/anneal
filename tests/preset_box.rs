@@ -283,6 +283,28 @@ fn a_step_whose_offset_from_low_overflows_mirrors_off_high() {
 }
 
 #[test]
+fn a_step_that_overflows_is_mirrored_instead_of_landing_on_a_wall() {
+    // Near `f64::MAX`, Gaussian and Cauchy steps of this size often overflow
+    // `x + d`, and the infinite sum landed exactly on `high`, or at infinity
+    // on a half-infinite box.
+    let m = f64::MAX;
+    for (low, high, x0, scale) in [
+        (array![0.0], array![m], array![0.99 * m], 0.01 * m),
+        (array![1e308], array![f64::INFINITY], array![1.6e308], 3e307),
+    ] {
+        for which in 0..2 {
+            let (obj, seen) = recorder(&low, &high);
+            run_preset(which, obj, scale, 2.62, None, 1, Some(x0.view()));
+            let seen = seen.lock().unwrap();
+            assert!(
+                seen.iter().all(|x| low[0] < x[0] && x[0] < m),
+                "preset {which} reached a wall of [{low}, {high}]"
+            );
+        }
+    }
+}
+
+#[test]
 fn half_infinite_boxes_mirror_across_the_finite_wall() {
     let inf = f64::INFINITY;
     for (low, high, x0) in [
