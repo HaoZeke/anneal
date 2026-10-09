@@ -422,6 +422,9 @@ pub struct PortfolioResult {
 
 struct LedgerInner {
     best_pos: Option<Array1<f64>>,
+    /// The first in-bounds point evaluated, whatever its value: the
+    /// incumbent while no evaluation has been finite.
+    first_pos: Option<Array1<f64>>,
     archive_x: Vec<f64>,
     archive_y: Vec<f64>,
 }
@@ -447,6 +450,7 @@ impl BudgetLedger {
             best_val: AtomicU64::new(f64::INFINITY.to_bits()),
             inner: Mutex::new(LedgerInner {
                 best_pos: None,
+                first_pos: None,
                 archive_x: Vec::new(),
                 archive_y: Vec::new(),
             }),
@@ -520,10 +524,16 @@ impl BudgetLedger {
     /// Archive a candidate only if `value` is finite **and** `x` lies inside
     /// `bounds` (GJQ-style feasibility choke-point: never promote OOB bests).
     fn record(&self, x: ArrayView1<f64>, value: f64, bounds: &Bounds<f64>) {
-        if !value.is_finite() || !bounds.contains(x) {
+        if !bounds.contains(x) {
             return;
         }
         let mut inner = self.inner.lock().expect("ledger lock");
+        if inner.first_pos.is_none() {
+            inner.first_pos = Some(x.to_owned());
+        }
+        if !value.is_finite() {
+            return;
+        }
         // Re-read under the lock so two sequential records cannot promote a
         // worse best_val after a better one (relaxed atomic alone is racy
         // with the mutex-held position write).
@@ -539,8 +549,9 @@ impl BudgetLedger {
     }
 
     fn incumbent(&self, bounds: &Bounds<f64>) -> Array1<f64> {
-        match self.inner.lock().expect("ledger lock").best_pos.as_ref() {
-            // Defensive clip: best_pos is only written for in-bounds points.
+        let inner = self.inner.lock().expect("ledger lock");
+        match inner.best_pos.as_ref().or(inner.first_pos.as_ref()) {
+            // Defensive clip: both positions are only written in bounds.
             Some(pos) => bounds.clip(pos.view()),
             None => (&bounds.low + &bounds.high) * 0.5,
         }
