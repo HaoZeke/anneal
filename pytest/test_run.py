@@ -691,6 +691,87 @@ def test_invalid_box_raises_value_error(driver, low, high, message):
         )
 
 
+ARRAY_LIKES = [
+    pytest.param(lambda a: a.tolist(), id="list"),
+    pytest.param(lambda a: [int(v) for v in a], id="int-list"),
+    pytest.param(lambda a: tuple(a.tolist()), id="tuple"),
+    pytest.param(lambda a: a.astype(np.float32), id="float32"),
+    pytest.param(lambda a: a.astype(np.int64), id="int64"),
+    pytest.param(lambda a: np.repeat(a, 2)[::2], id="strided"),
+    pytest.param(lambda a: a[::-1].copy()[::-1], id="reversed"),
+    pytest.param(lambda a: np.stack([a, a + 7.0], axis=1)[:, 0], id="column"),
+]
+
+
+@pytest.mark.parametrize("driver", DRIVERS)
+@pytest.mark.parametrize("convert", ARRAY_LIKES)
+def test_array_like_inputs_match_float64_arrays(driver, convert):
+    low = np.array([-2.0, -1.0, 0.0, -3.0])
+    high = np.array([2.0, 3.0, 1.0, 3.0])
+    x0 = np.array([1.0, -1.0, 0.0, 2.0])
+    runs = []
+    for lo, hi, start in [(low, high, x0), map(convert, (low, high, x0))]:
+        obj, seen = recording(lambda x: float(np.sum(x**2)))
+        h = driver(
+            obj, lo, hi, Fast(gamma=2.0), n_epochs=3, steps_per_epoch=10, seed=5, x0=start
+        )
+        runs.append(((h.best_val, h.best_pos, h.total_accepted), np.array(seen)))
+
+    (ref, ref_seen), (got, got_seen) = runs
+    assert got == ref
+    assert np.array_equal(got_seen, ref_seen)
+    assert np.array_equal(got_seen[0], x0)
+
+
+@pytest.mark.parametrize("driver", DRIVERS)
+@pytest.mark.parametrize("order", ["C", "F"])
+def test_multidimensional_x0_is_flattened_in_c_order(driver, order):
+    n_atoms = 4
+    init = np.random.default_rng(0).uniform(-1.5, 1.5, size=(n_atoms, 3))
+    obj, seen = recording(lj_energy)
+
+    driver(
+        obj,
+        np.full(3 * n_atoms, -3.0),
+        np.full(3 * n_atoms, 3.0),
+        Boltzmann(),
+        n_epochs=2,
+        steps_per_epoch=10,
+        x0=np.asarray(init, order=order),
+    )
+
+    assert np.array_equal(seen[0], init.reshape(-1))
+
+
+@pytest.mark.parametrize("driver", DRIVERS)
+@pytest.mark.parametrize(
+    ("arg", "value", "message"),
+    [
+        ("x0", "ab", "x0 must be an array of numbers"),
+        ("x0", [0.0, "a"], "x0 must be an array of numbers"),
+        ("x0", [[0.0], [0.0, 0.0]], "x0 must be an array of numbers"),
+        ("x0", object(), "x0 must be an array of numbers"),
+        ("x0", np.zeros((2, 2)), "x0 must have the same length"),
+        ("low", "ab", "low must be an array of numbers"),
+        ("low", [[-1.0, -1.0]], "low must be one-dimensional"),
+        ("high", 1.0, "high must be one-dimensional"),
+    ],
+)
+def test_unreadable_inputs_raise_value_error(driver, arg, value, message):
+    args = {"low": np.array([-1.0, -1.0]), "high": np.array([1.0, 1.0]), "x0": None}
+    args[arg] = value
+    with pytest.raises(ValueError, match=message):
+        driver(
+            styb_tang_2d,
+            args["low"],
+            args["high"],
+            Boltzmann(),
+            n_epochs=1,
+            steps_per_epoch=1,
+            x0=args["x0"],
+        )
+
+
 @pytest.mark.parametrize("driver", DRIVERS)
 @pytest.mark.parametrize("preset", WIDE_PRESETS, ids=repr)
 @pytest.mark.parametrize(
