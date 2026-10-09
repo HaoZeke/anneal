@@ -58,15 +58,17 @@ def run_anneal(benchmark_context: dict[str, Any]):
         low,
         high,
         Boltzmann(),
-        n_epochs=1,
-        steps_per_epoch=budget - 1,
+        n_epochs=max(1, budget // 100),
+        steps_per_epoch=100,
         x0=initial.reshape(-1),
+        max_evals=budget,
     )
     return fitter.finish()
 #+end_src
 
-The initial state costs one objective evaluation, hence =budget - 1=
-proposals. Mirror reflection keeps every position inside =low= and =high=.
+The temperature drops once per epoch, so the loop cools over =budget // 100=
+epochs of 100 steps, and =max_evals= counts the start and stops the run at
+the budget. Mirror reflection keeps every position inside =low= and =high=.
 The expression =positions.reshape((n_atoms * 3))= without assignment has no
 effect and is not needed.
 
