@@ -1,0 +1,147 @@
+#+TITLE: Fit a ChemFit Fitter
+#+OPTIONS: toc:nil todo:nil num:nil author:nil title:nil ^:nil
+
+#+begin_export rst
+====================
+Fit a ChemFit Fitter
+====================
+#+end_export
+
+[[https://github.com/MSallermann/chemfit][ChemFit]] fits the parameters of simulation-based objectives, held in nested mappings such as ~{"positions": array, "lj": {"sigma": 1.0}}~.
+=anneal.chemfit.fit= runs anneal's drivers on a ChemFit =Fitter= through its session API (=init=, =evaluate=, =step= and =finish=, on ChemFit's =next= branch).
+The search starts at =fitter.initial_parameters=, every candidate lies inside the bounds, at most =budget= candidates reach =fitter.evaluate=, and the result is =fitter.finish()=.
+ChemFit stays an optional dependency: =anneal= never imports it.
+
+* Before
+
+A benchmark that relaxes Lennard-Jones positions held by a =Fitter= drove =anneal.run= by hand:
+
+#+begin_src python
+def run_anneal(benchmark_context):
+    import anneal
+
+    fitter = benchmark_context["fitter"]
+    budget = benchmark_context["budget"]
+    n_atoms = len(benchmark_context["initial_params"]["positions"])
+
+    def obj(positions):
+        loss = fitter.evaluate({"positions": positions.reshape(n_atoms, 3)})
+        fitter.step()
+        return loss
+
+    low = -3.0 * np.ones(3 * n_atoms)
+    high = 3.0 * np.ones(3 * n_atoms)
+    fitter.init()
+    anneal.run(obj, low, high, anneal.Boltzmann(),
+               n_epochs=int(budget / 100), steps_per_epoch=100)
+    return fitter.finish()
+#+end_src
+
+This call goes wrong in several ways:
+
+- Positions leave the box. Earlier releases let the Boltzmann, Fast and GSA moves step past =low= and =high=; =run= and =run_qmc= now reflect every proposal into the box.
+- The search does not start at the initial positions. =run= draws its start uniformly unless it gets one as =x0=, which it now accepts, but the call passes none.
+- =run= evaluates =1 + n_epochs * steps_per_epoch= points: one more than =budget= when =budget= is a multiple of 100, and up to 99 fewer otherwise.
+- Only the =positions= leaf is fitted, flattened and reshaped by hand; every other parameter needs more code.
+- anneal turns an exception raised by the objective into =inf= and keeps going, so a failing simulation goes unnoticed.
+
+* After
+
+#+begin_src python
+import anneal.chemfit
+
+def run_anneal(benchmark_context):
+    return anneal.chemfit.fit(
+        benchmark_context["fitter"],
+        benchmark_context["budget"],
+        bounds={"positions": (-3.0, 3.0)},
+    )
+#+end_src
+
+=fit= opens the session with ~fitter.init(batch_size=batch_size)~, evaluates =fitter.initial_parameters= first, and runs the driver from there over every leaf of the parameter tree.
+It calls =fitter.step()= after every evaluation or batch, so callbacks registered with =fitter.register_callback= fire as they do in ChemFit's own fitters.
+Calls past the budget return =inf= to the driver without reaching ChemFit.
+The result is =fitter.finish()=: the best candidate ChemFit evaluated, with every leaf in its own shape and dtype.
+Pass ~method="boltzmann"~ to keep the driver of the original call.
+
+=examples/chemfit_lj_positions.py= runs this fit for 13 atoms with every method; no evaluation leaves the box.
+
+* Methods
+
+| =method=                   | Driver                                             | Options                                                                       |
+|----------------------------+----------------------------------------------------+-------------------------------------------------------------------------------|
+| =portfolio= (the default)  | =global_optimize=, the budget-allocating portfolio | =policy= and the driver's other options                                       |
+| =boltzmann=, =fast=, =gsa= | =run= with that preset                             | =steps_per_epoch= (default 100) and the preset's parameters, such as =t_init= |
+| =qmc=                      | =run_qmc=, =run= from low-discrepancy starts       | =preset= (default =Boltzmann()=), =n_starts= (default 8), =steps_per_epoch=   |
+| =dmc=                      | =dmc_population_optimize=                          | =target_n= and =steps_per_control=                                            |
+
+The =run= methods get as many epochs as the budget allows, and =qmc= shortens its epochs so that every start gets an equal share of the budget.
+Each driver gets the start as =x0= when the installed version takes one.
+=global_optimize= does not take one yet, so with =portfolio= the start is evaluated but the search does not begin there; =fitter.finish()= still returns the start if nothing better turns up.
+
+* Bounds
+
+Bounds follow ChemFit's format: a tree that mirrors the parameters, with a =(lower, upper)= pair for each leaf.
+
+- A pair of numbers applies to every element of an array leaf, as in ~{"positions": (-3.0, 3.0)}~.
+- A pair of arrays bounds each element. Any arrays that broadcast to the leaf's shape work, so ~([-3, -3, 0], [3, 3, 2])~ bounds the three axes of =(n, 3)= positions separately.
+- The =bounds= argument overrides =fitter.bounds= leaf by leaf.
+- Equal bounds hold a value fixed with =boltzmann=, =fast=, =gsa= and =qmc=. The =portfolio= and =dmc= drivers need every lower bound below its upper bound, so =fit= refuses equal bounds for them.
+
+anneal searches a finite box, so every leaf needs a bound on both sides.
+A leaf with no bound, a one-sided or infinite bound, an inverted pair, or a start outside its bounds raises a =ValueError= that names the key, before anything is evaluated:
+
+#+begin_example
+ValueError: parameter 'lj.sigma' has no bound; give it a (lower, upper) pair
+ValueError: start of 'positions' lies outside its bounds
+#+end_example
+
+* Batches and concurrency
+
+=batch_size= sets the candidate slots of the session.
+The =dmc= method hands its walkers over in batches of that size, each as one =fitter.evaluate= call followed by one =fitter.step()=, so a concurrent ChemFit schedule evaluates a whole batch in parallel:
+
+#+begin_src python
+from concurrent.futures import ThreadPoolExecutor
+
+import chemfit
+import anneal.chemfit
+
+@chemfit.objective()
+def loss(params):
+    return lj_energy(params["positions"])
+
+scheduler = chemfit.ExecutorTreeScheduler(
+    executor_factory=lambda: ThreadPoolExecutor(max_workers=8)
+)
+with scheduler.prepare(loss) as schedule:
+    fitter = chemfit.Fitter(schedule, initial_params, bounds)
+    best = anneal.chemfit.fit(fitter, 4000, method="dmc", batch_size=8)
+#+end_src
+
+The other methods propose one candidate at a time.
+
+* Errors raised by the objective
+
+=fit= sends nothing more after the first exception from =fitter.evaluate=, or from a callback run by =fitter.step=, and re-raises it once the driver returns.
+With ~chemfit.Fitter(..., swallow_exceptions=True)~, ChemFit scores a failed candidate as =value_bad_params= instead, and the fit goes on.
+
+* Driving a driver by hand
+
+=anneal.chemfit.objective(fitter, bounds=None)= returns the flat view that =fit= hands to the drivers.
+Its =x0=, =low= and =high= are float64 vectors that hold the leaves in tree order, each raveled in C order.
+=unflatten(x)= and =flatten(params)= convert between such a vector and the parameter tree, and =eval_batch(X)= evaluates the rows of =X= in batches.
+=n_evals= counts the candidates sent to ChemFit, and setting =budget= caps them.
+
+#+begin_src python
+view = anneal.chemfit.objective(fitter, bounds={"positions": (-3.0, 3.0)})
+view.budget = 2000
+fitter.init()
+anneal.run(view, view.low, view.high, anneal.Gsa(),
+           n_epochs=20, steps_per_epoch=100, x0=view.x0)
+if view.error is not None:
+    raise view.error
+best = fitter.finish()
+#+end_src
+
+anneal turns an exception raised by the view into =inf=, so check =view.error= once the driver returns, as above.
