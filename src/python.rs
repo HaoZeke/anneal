@@ -383,22 +383,54 @@ impl From<History> for PyHistory {
 // Objective adapter wrapping a Python callable.
 // ---------------------------------------------------------------------------
 
+/// Which callback a driver called.
+#[derive(Clone, Copy)]
+enum Callback {
+    Objective,
+    Gradient,
+}
+
+/// Calls of one callback that returned a usable value and calls that raised
+/// an ordinary exception, with the first such exception.
+#[derive(Default)]
+struct CallbackTally {
+    answered: std::sync::atomic::AtomicUsize,
+    scored: std::sync::atomic::AtomicUsize,
+    first: std::sync::Mutex<Option<PyErr>>,
+}
+
+impl CallbackTally {
+    fn answered(&self) -> usize {
+        self.answered.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    fn scored(&self) -> usize {
+        self.scored.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    fn take_first(&self) -> Option<PyErr> {
+        self.first.lock().expect("callback error lock").take()
+    }
+}
+
 /// What the Python callbacks of one driver call did that a float cannot carry.
 ///
 /// An ordinary exception is scored as the worst value and counted: budget
 /// counters stop a driver by raising once their ledger is spent. Anything
 /// else ends the run: `KeyboardInterrupt`, `SystemExit`, or a return value
 /// that is not a number. Once a run is ending, no further callback is made,
-/// and the driver call re-raises the exception when it returns. When no
-/// objective or gradient call returned a usable value, nothing the driver
-/// returns was measured, so the first scored exception is re-raised as well.
+/// and the driver call re-raises the exception when it returns. Nothing the
+/// driver returns was measured when the objective was called and never
+/// returned a usable value, whatever the gradient did, or when only the
+/// gradient was called and it never returned one; the first scored exception
+/// of that callback is then re-raised as well.
 #[derive(Default)]
 struct CallbackErrors {
     fatal: std::sync::Mutex<Option<PyErr>>,
     aborted: std::sync::atomic::AtomicBool,
-    scored: std::sync::atomic::AtomicUsize,
-    first_scored: std::sync::Mutex<Option<PyErr>>,
-    answered: std::sync::atomic::AtomicUsize,
+    objective: CallbackTally,
+    gradient: CallbackTally,
+    first_message: std::sync::Mutex<Option<String>>,
 }
 
 impl CallbackErrors {
@@ -406,13 +438,27 @@ impl CallbackErrors {
         self.aborted.load(std::sync::atomic::Ordering::Relaxed)
     }
 
-    fn record(&self, py: Python<'_>, err: PyErr) {
+    fn tally(&self, kind: Callback) -> &CallbackTally {
+        match kind {
+            Callback::Objective => &self.objective,
+            Callback::Gradient => &self.gradient,
+        }
+    }
+
+    fn record(&self, py: Python<'_>, err: PyErr, kind: Callback) {
         if err.is_instance_of::<pyo3::exceptions::PyException>(py) {
-            let previous = self
+            {
+                let mut message = self.first_message.lock().expect("callback error lock");
+                if message.is_none() {
+                    *message = Some(err.to_string());
+                }
+            }
+            let tally = self.tally(kind);
+            let previous = tally
                 .scored
                 .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             if previous == 0 {
-                *self.first_scored.lock().expect("callback error lock") = Some(err);
+                *tally.first.lock().expect("callback error lock") = Some(err);
             }
         } else {
             self.abort(err);
@@ -428,9 +474,10 @@ impl CallbackErrors {
             .store(true, std::sync::atomic::Ordering::Relaxed);
     }
 
-    /// Counts objective values and gradients returned without an exception.
-    fn answered(&self, n: usize) {
-        self.answered
+    /// Counts values a callback returned without an exception.
+    fn answered(&self, kind: Callback, n: usize) {
+        self.tally(kind)
+            .answered
             .fetch_add(n, std::sync::atomic::Ordering::Relaxed);
     }
 
@@ -438,7 +485,7 @@ impl CallbackErrors {
     fn float(&self, py: Python<'_>, value: &Py<PyAny>) -> f64 {
         match value.extract::<f64>(py) {
             Ok(v) => {
-                self.answered(1);
+                self.answered(Callback::Objective, 1);
                 if v.is_nan() { f64::INFINITY } else { v }
             }
             Err(_) => {
@@ -456,33 +503,43 @@ impl CallbackErrors {
         }
     }
 
-    /// Re-raises the exception that ended the run, or the first scored one
-    /// when no callback returned, and otherwise warns once when
-    /// ordinary exceptions were scored as the worst value.
+    /// Re-raises the exception that ended the run, or the first scored one of
+    /// a callback that never returned while nothing else was measured, and
+    /// otherwise warns once when ordinary exceptions were scored as the
+    /// worst value.
     fn finish(&self, py: Python<'_>) -> PyResult<()> {
         if let Some(err) = self.fatal.lock().expect("callback error lock").take() {
             return Err(err);
         }
-        let scored = self.scored.load(std::sync::atomic::Ordering::Relaxed);
-        if scored > 0 {
-            let first = self
-                .first_scored
-                .lock()
-                .expect("callback error lock")
-                .take();
-            if self.answered.load(std::sync::atomic::Ordering::Relaxed) == 0
-                && let Some(err) = first
-            {
-                return Err(err);
-            }
-            let first = first.map(|err| err.to_string()).unwrap_or_default();
-            let message = std::ffi::CString::new(format!(
-                "a callback raised {scored} exception(s): an objective call that raised was scored as the worst value and a gradient call as zero; the first was: {first}"
-            ))
-            .unwrap_or_default();
-            let category = py.get_type::<pyo3::exceptions::PyRuntimeWarning>();
-            PyErr::warn(py, category.as_any(), &message, 2)?;
+        let scored = self.objective.scored() + self.gradient.scored();
+        if scored == 0 {
+            return Ok(());
         }
+        let objective_called = self.objective.answered() + self.objective.scored() > 0;
+        if objective_called
+            && self.objective.answered() == 0
+            && let Some(err) = self.objective.take_first()
+        {
+            return Err(err);
+        }
+        if !objective_called
+            && self.gradient.answered() == 0
+            && let Some(err) = self.gradient.take_first()
+        {
+            return Err(err);
+        }
+        let first = self
+            .first_message
+            .lock()
+            .expect("callback error lock")
+            .clone()
+            .unwrap_or_default();
+        let message = std::ffi::CString::new(format!(
+            "a callback raised {scored} exception(s): an objective call that raised was scored as the worst value and a gradient call as zero; the first was: {first}"
+        ))
+        .unwrap_or_default();
+        let category = py.get_type::<pyo3::exceptions::PyRuntimeWarning>();
+        PyErr::warn(py, category.as_any(), &message, 2)?;
         Ok(())
     }
 }
@@ -530,7 +587,7 @@ impl Objective<f64> for CallableObjective {
             match self.fn_.call1(py, (py_arr,)) {
                 Ok(r) => self.errors.float(py, &r),
                 Err(err) => {
-                    self.errors.record(py, err);
+                    self.errors.record(py, err, Callback::Objective);
                     f64::INFINITY
                 }
             }
@@ -565,7 +622,7 @@ impl Objective<f64> for CallableObjective {
                     Ok(r) => {
                         return match as_float_vector(py, &r) {
                             Some(values) if values.len() == n => {
-                                self.errors.answered(n);
+                                self.errors.answered(Callback::Objective, n);
                                 Array1::from_iter(
                                     values
                                         .into_iter()
@@ -582,7 +639,7 @@ impl Objective<f64> for CallableObjective {
                         };
                     }
                     Err(err) => {
-                        self.errors.record(py, err);
+                        self.errors.record(py, err, Callback::Objective);
                         return Array1::from(vec![f64::INFINITY; n]);
                     }
                 }
@@ -599,7 +656,7 @@ impl Objective<f64> for CallableObjective {
                 let v = match self.fn_.call1(py, (py_arr,)) {
                     Ok(r) => self.errors.float(py, &r),
                     Err(err) => {
-                        self.errors.record(py, err);
+                        self.errors.record(py, err, Callback::Objective);
                         f64::INFINITY
                     }
                 };
@@ -662,7 +719,7 @@ impl eindir_core::Gradient<f64> for CallablePyGradient {
             match self.fn_.call1(py, (py_arr,)) {
                 Ok(r) => match as_float_vector(py, &r) {
                     Some(values) if values.len() == self.dim => {
-                        self.errors.answered(1);
+                        self.errors.answered(Callback::Gradient, 1);
                         Array1::from(values)
                     }
                     _ => {
@@ -675,7 +732,7 @@ impl eindir_core::Gradient<f64> for CallablePyGradient {
                     }
                 },
                 Err(err) => {
-                    self.errors.record(py, err);
+                    self.errors.record(py, err, Callback::Gradient);
                     Array1::zeros(self.dim)
                 }
             }
@@ -2628,7 +2685,7 @@ impl Objective<f64> for CallableDiffObjective {
             match self.fn_.call1(py, (py_arr,)) {
                 Ok(r) => self.errors.float(py, &r),
                 Err(err) => {
-                    self.errors.record(py, err);
+                    self.errors.record(py, err, Callback::Objective);
                     f64::INFINITY
                 }
             }
@@ -2648,7 +2705,7 @@ impl eindir_core::gradient::Gradient<f64> for CallableDiffObjective {
             match self.grad_fn.call1(py, (py_arr,)) {
                 Ok(r) => match as_float_vector(py, &r) {
                     Some(values) if values.len() == dim => {
-                        self.errors.answered(1);
+                        self.errors.answered(Callback::Gradient, 1);
                         Array1::from_iter(
                             values.into_iter().map(|value| self.gradient_scale * value),
                         )
@@ -2662,7 +2719,7 @@ impl eindir_core::gradient::Gradient<f64> for CallableDiffObjective {
                     }
                 },
                 Err(err) => {
-                    self.errors.record(py, err);
+                    self.errors.record(py, err, Callback::Gradient);
                     Array1::zeros(dim)
                 }
             }
@@ -2690,11 +2747,11 @@ fn cluster_gradient_scale(
     // value that cannot orient the gradient leaves the callback taken as a
     // gradient, counted in the run's warning; KeyboardInterrupt, SystemExit
     // and a return that is not a number end the call.
-    let call = |f: &Py<PyAny>, x: Vec<f64>| -> PyResult<Option<Py<PyAny>>> {
+    let call = |f: &Py<PyAny>, x: Vec<f64>, kind: Callback| -> PyResult<Option<Py<PyAny>>> {
         match f.call1(py, (PyArray1::from_vec(py, x),)) {
             Ok(value) => Ok(Some(value)),
             Err(err) if err.is_instance_of::<pyo3::exceptions::PyException>(py) => {
-                errors.record(py, err);
+                errors.record(py, err, kind);
                 Ok(None)
             }
             Err(err) => Err(err),
@@ -2727,12 +2784,12 @@ fn cluster_gradient_scale(
         ));
     }
 
-    let Some(gradient_result) = call(grad_fn, probe.to_vec())? else {
+    let Some(gradient_result) = call(grad_fn, probe.to_vec(), Callback::Gradient)? else {
         return Ok(1.0);
     };
     let gradient = match as_float_vector(py, &gradient_result) {
         Some(values) if values.len() == probe.len() => {
-            errors.answered(1);
+            errors.answered(Callback::Gradient, 1);
             values
         }
         _ => {
@@ -2761,16 +2818,16 @@ fn cluster_gradient_scale(
     let mut minus = probe;
     plus[index] += step;
     minus[index] -= step;
-    let Some(plus_value) = call(obj_fn, plus.to_vec())? else {
+    let Some(plus_value) = call(obj_fn, plus.to_vec(), Callback::Objective)? else {
         return Ok(1.0);
     };
     let plus_value = as_energy(plus_value)?;
-    errors.answered(1);
-    let Some(minus_value) = call(obj_fn, minus.to_vec())? else {
+    errors.answered(Callback::Objective, 1);
+    let Some(minus_value) = call(obj_fn, minus.to_vec(), Callback::Objective)? else {
         return Ok(1.0);
     };
     let minus_value = as_energy(minus_value)?;
-    errors.answered(1);
+    errors.answered(Callback::Objective, 1);
     if !plus_value.is_finite() || !minus_value.is_finite() {
         return Ok(1.0);
     }
