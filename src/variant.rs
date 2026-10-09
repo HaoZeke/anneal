@@ -338,3 +338,80 @@ pub fn gsa<O: Objective<f64> + Send + Sync>(
         TsallisAccept::new(q_a),
     )
 }
+
+/// Box-constrained Boltzmann variant: logarithmic cooling, isotropic
+/// Gaussian moves mirror-reflected into the objective's box, Metropolis
+/// acceptance, on the [`BoxConstrained`] neighborhood.
+///
+/// This is the variant the `run` Python entry point drives: every proposal
+/// is reflected into `obj.bounds()`, so every evaluation point is feasible.
+/// Reflection (not clipping) keeps the proposal symmetric, which is what
+/// lets the Metropolis test stand without a Hastings correction.
+pub fn boltzmann_bounded<O: Objective<f64> + Send + Sync>(
+    obj: O,
+    t_init: f64,
+    sigma: f64,
+) -> Result<
+    SaVariant<f64, O, LogCool<f64>, BoxConstrained<f64>, Reflected<Gaussian>, Metropolis>,
+    LawViolation,
+> {
+    let bounds = obj.bounds().clone();
+    SaVariant::checked(
+        obj,
+        LogCool::new(t_init, 2.0),
+        BoxConstrained::new(bounds.clone()),
+        Reflected::new(Gaussian::new(sigma), bounds),
+        Metropolis,
+    )
+}
+
+/// Box-constrained Fast variant: reciprocal cooling, Cauchy moves
+/// mirror-reflected into the objective's box, Metropolis acceptance.
+pub fn fast_bounded<O: Objective<f64> + Send + Sync>(
+    obj: O,
+    t_init: f64,
+    gamma: f64,
+) -> Result<
+    SaVariant<f64, O, ReciprocalCool<f64>, BoxConstrained<f64>, Reflected<Cauchy>, Metropolis>,
+    LawViolation,
+> {
+    let bounds = obj.bounds().clone();
+    SaVariant::checked(
+        obj,
+        ReciprocalCool::new(t_init),
+        BoxConstrained::new(bounds.clone()),
+        Reflected::new(Cauchy::new(gamma), bounds),
+        Metropolis,
+    )
+}
+
+/// Box-constrained GSA variant: Tsallis cooling, Tsallis-visit moves
+/// mirror-reflected into the objective's box, Tsallis acceptance.
+///
+/// `q_v in (1, 3)` is the visiting index; `q_a` is the acceptance index
+/// (`q_a == 1` collapses to Metropolis).
+pub fn gsa_bounded<O: Objective<f64> + Send + Sync>(
+    obj: O,
+    t_init: f64,
+    q_v: f64,
+    q_a: f64,
+) -> Result<
+    SaVariant<
+        f64,
+        O,
+        TsallisCool<f64>,
+        BoxConstrained<f64>,
+        Reflected<TsallisVisit>,
+        TsallisAccept<f64>,
+    >,
+    LawViolation,
+> {
+    let bounds = obj.bounds().clone();
+    SaVariant::checked(
+        obj,
+        TsallisCool::new(t_init, q_v),
+        BoxConstrained::new(bounds.clone()),
+        Reflected::new(TsallisVisit::new(q_v), bounds),
+        TsallisAccept::new(q_a),
+    )
+}
