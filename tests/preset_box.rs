@@ -263,6 +263,31 @@ fn boxes_wider_than_half_the_f64_range_mirror_off_the_walls() {
 }
 
 #[test]
+fn a_step_whose_offset_from_low_overflows_mirrors_off_high() {
+    // Each box is narrower than half the f64 range but lies far from zero,
+    // so `x - low` overflows for a step past `high`, and near f64::MAX the
+    // step itself overflows to +inf. The chain starts on `high`, the best
+    // point, and every step is drawn from there.
+    let m = f64::MAX;
+    for (low, high, scale, n_starts) in [
+        (array![-0.6 * m], array![-0.1 * m], m / 4.0, None),
+        (array![-0.6 * m], array![-0.1 * m], m / 4.0, Some(2)),
+        (array![1e308], array![1.7e308], 1e307, None),
+        (array![1e308], array![1.7e308], 3e307, None),
+    ] {
+        let (obj, seen) = recorder(&low, &high);
+        run_preset(0, obj, scale, 2.62, n_starts, 3, Some(high.view()));
+        let seen = seen.lock().unwrap();
+        assert!(
+            seen.iter().all(|x| low[0] < x[0] && x[0] <= high[0]),
+            "a step past {:e} landed on {:e}",
+            high[0],
+            low[0]
+        );
+    }
+}
+
+#[test]
 fn half_infinite_boxes_mirror_across_the_finite_wall() {
     let inf = f64::INFINITY;
     for (low, high, x0) in [
