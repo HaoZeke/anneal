@@ -288,6 +288,32 @@ fn a_step_whose_offset_from_low_overflows_mirrors_off_high() {
 }
 
 #[test]
+fn a_step_whose_sum_overflows_mirrors_instead_of_stopping_on_a_wall() {
+    // Each box reaches within a few steps of f64::MAX, where `x + step`
+    // overflows, and the chain climbs there. An infinite wall then acts as a
+    // wall at f64::MAX.
+    let m = f64::MAX;
+    for (low, high, x0, scale) in [
+        (array![0.0], array![m], array![0.99 * m], 0.01 * m),
+        (array![1e308], array![1.7e308], array![1.6e308], 3e307),
+        (array![1e308], array![f64::INFINITY], array![1.6e308], 3e307),
+        (array![-6e307], array![6e307], array![3e307], 1e307),
+    ] {
+        for which in 0..2 {
+            let (obj, seen) = recorder(&low, &high);
+            run_preset(which, obj, scale, 2.62, None, 1, Some(x0.view()));
+            let seen = seen.lock().unwrap();
+            assert!(
+                seen.iter().all(|x| low[0] < x[0] && x[0] < high[0].min(m)),
+                "preset {which} evaluated a wall of [{:e}, {:e}]",
+                low[0],
+                high[0]
+            );
+        }
+    }
+}
+
+#[test]
 fn half_infinite_boxes_mirror_across_the_finite_wall() {
     let inf = f64::INFINITY;
     for (low, high, x0) in [
