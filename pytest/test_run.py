@@ -823,6 +823,17 @@ def test_no_evaluation_rounds_past_the_upper_wall():
     assert np.all(points >= -3.0) and np.all(points <= 0.7)
 
 
+def test_global_optimize_calls_the_gradient_only_inside_the_box():
+    # The minimum sits outside the box, so descents push against the wall.
+    low, high = np.full(4, -3.0), np.full(4, 3.0)
+    objective = Recorder(lambda x: float(np.sum((x - 5.0) ** 2)))
+    gradient = Recorder(lambda x: 2.0 * (x - 5.0))
+    result = global_optimize(objective, low, high, budget=400, seed=0, grad_fn=gradient)
+    for points in (np.array(objective.points), np.array(gradient.points)):
+        assert np.all(points >= low) and np.all(points <= high)
+    assert result["best_pos"] == pytest.approx(high, abs=1e-6)
+
+
 def test_global_optimize_takes_bounds_of_any_shape():
     x0 = np.random.default_rng(5).uniform(-1.5, 1.5, (13, 3))
     objective = Recorder(lj_cluster_energy)
@@ -838,3 +849,11 @@ def test_global_optimize_evaluates_x0_exactly(x0):
     assert np.array_equal(objective.points[0], x0)
     assert np.array_equal(result["best_pos"], x0)
     assert result["best_val"] == styb_tang_2d(x0)
+
+
+def test_qmc_gsa_global_search_starts_from_x0():
+    x0 = np.array([0.5, -0.5])
+    objective = Recorder(smooth_needle)
+    result = qmc_gsa_global_search(objective, np.array([-1.0, -1.0]), np.array([1.0, 1.0]), max_evals=120, seed=0, x0=x0)
+    assert np.array_equal(objective.points[0], x0)
+    assert result["best_val"] <= smooth_needle(x0)

@@ -253,9 +253,10 @@ pub use methods::{
     gle_langevin_preconditioned_sa, gle_langevin_sa, order_arms, pilot_draws, pilot_draws_qmc,
     population_control, portfolio_optimize, portfolio_optimize_from,
     portfolio_optimize_with_policy, preferred_arm_tail, projected_gradient_polish,
-    qmc_best1bin_scout, qmc_gsa_global_search, qmc_projected_gradient_polish,
-    qmc_trust_region_poll, regime_exploit_prob, regime_exploit_width, require_accept_compatible,
-    run_dmc_population, select_regime, shifted_qmc_projected_gradient_polish, walker_weight,
+    qmc_best1bin_scout, qmc_gsa_global_search, qmc_gsa_global_search_from,
+    qmc_projected_gradient_polish, qmc_trust_region_poll, regime_exploit_prob,
+    regime_exploit_width, require_accept_compatible, run_dmc_population, select_regime,
+    shifted_qmc_projected_gradient_polish, walker_weight,
 };
 pub use movekernel::{MoveKernel, Reflected};
 pub use neigh::Neighborhood;

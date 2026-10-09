@@ -4,7 +4,7 @@
 use eindir_core::Bounds;
 use eindir_core::Gradient;
 use eindir_core::Objective;
-use ndarray::{Array1, Array2};
+use ndarray::{Array1, Array2, ArrayView1};
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 
@@ -644,6 +644,25 @@ pub fn qmc_gsa_global_search<O>(
 where
     O: Objective<f64>,
 {
+    qmc_gsa_global_search_from(obj, max_evals, seed, n_chains, t_init, q_v, q_a, None)
+}
+
+/// [`qmc_gsa_global_search`] with `x0`, when supplied, in place of the first
+/// chain's low-discrepancy start.
+#[allow(clippy::too_many_arguments)]
+pub fn qmc_gsa_global_search_from<O>(
+    obj: &O,
+    max_evals: usize,
+    seed: u64,
+    n_chains: usize,
+    t_init: f64,
+    q_v: f64,
+    q_a: f64,
+    x0: Option<ArrayView1<f64>>,
+) -> QmcPolishResult
+where
+    O: Objective<f64>,
+{
     assert!(max_evals > 0, "max_evals must be positive");
     assert!(n_chains > 0, "n_chains must be positive");
     assert!(
@@ -660,12 +679,16 @@ where
     let dim = bounds.dims;
     assert!(dim > 0, "objective dimension must be positive");
     let chain_count = n_chains.min(max_evals).max(1);
-    let starts = eindir_core::shifted_low_discrepancy_points(
+    let mut starts = eindir_core::shifted_low_discrepancy_points(
         bounds,
         chain_count,
         crate::runner::qmc_skip_from_seed(seed),
         seed,
     );
+    if let Some(x0) = x0 {
+        assert_eq!(x0.len(), dim, "x0 must have the objective's dimension");
+        starts.row_mut(0).assign(&x0);
+    }
     let mut rng = StdRng::seed_from_u64(seed);
     let cooling = TsallisCool::new(t_init, q_v);
     let visit = TsallisVisit::new(q_v);

@@ -1,7 +1,9 @@
-``global_optimize`` and ``global_optimize_objective`` take ``x0``. The
-portfolio charges it as its first evaluation and records it as the first
-incumbent, so every arm that starts from the incumbent (hop, shift,
-trust-region poll, GLE, HMC, population and reduced-space arms) starts from
-``x0`` until a lower point is found. A starting point outside the box, of the
-wrong length, or not finite raises ``ValueError``.
-``portfolio_optimize_from`` is the Rust entry point.
+``global_optimize``, ``global_optimize_objective``,
+``qmc_gsa_global_search`` and ``qmc_gsa_global_search_objective`` take
+``x0``. The portfolio charges it as its first evaluation and records it as
+the first incumbent, so arms that read the incumbent, such as the
+trust-region poll, HMC and the population arm, start from it until a lower
+point is found; the GSA search uses it as its first chain's start. A
+starting point outside the box, of the wrong size, or not finite raises
+``ValueError``. ``portfolio_optimize_from`` and
+``qmc_gsa_global_search_from`` are the Rust entry points.
