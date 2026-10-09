@@ -216,12 +216,25 @@ pub fn reflect_coord(x: f64, lo: f64, hi: f64) -> f64 {
     if (lo..=hi).contains(&x) {
         return x;
     }
+    let y = fold_offset(x, lo, w);
+    (lo + y).clamp(lo, hi)
+}
+
+/// `(x - lo) mod 2w`, folded onto `[0, w]`, for finite `x`. When `x - lo`
+/// itself overflows the remainder is taken at half scale,
+/// `2 ((x/2 - lo/2) mod w)`, which needs only `2w` to be finite.
+fn fold_offset(x: f64, lo: f64, w: f64) -> f64 {
     let period = 2.0 * w;
-    let mut y = (x - lo).rem_euclid(period);
+    let d = x - lo;
+    let mut y = if d.is_finite() {
+        d.rem_euclid(period)
+    } else {
+        2.0 * (0.5 * x - 0.5 * lo).rem_euclid(w)
+    };
     if y > w {
         y = period - y;
     }
-    (lo + y).clamp(lo, hi)
+    y
 }
 
 /// [`reflect_coord`] together with its slope there: `1` where the fold keeps
@@ -235,7 +248,12 @@ pub fn reflect_coord_with_slope(x: f64, lo: f64, hi: f64) -> (f64, f64) {
     if (lo..=hi).contains(&x) {
         return (x, 1.0);
     }
-    let y = (x - lo).rem_euclid(2.0 * w);
+    let d = x - lo;
+    let y = if d.is_finite() {
+        d.rem_euclid(2.0 * w)
+    } else {
+        2.0 * (0.5 * x - 0.5 * lo).rem_euclid(w)
+    };
     let slope = if y > w { -1.0 } else { 1.0 };
     (reflect_coord(x, lo, hi), slope)
 }
@@ -279,7 +297,15 @@ impl<M: MoveKernel<f64>> MoveKernel<f64> for Reflected<M> {
     fn propose<R: Rng + ?Sized>(&self, i: ArrayView1<f64>, t: f64, rng: &mut R) -> Array1<f64> {
         let mut p = self.inner.propose(i, t, rng);
         for (k, pk) in p.iter_mut().enumerate() {
-            *pk = reflect_coord(*pk, self.bounds.low[k], self.bounds.high[k]);
+            let (lo, hi) = (self.bounds.low[k], self.bounds.high[k]);
+            *pk = if pk.is_finite() {
+                reflect_coord(*pk, lo, hi)
+            } else {
+                // A step that overflowed has no fold. Reflecting ever longer
+                // steps tends to the uniform law on the box, which is also
+                // symmetric, so that is where it lands.
+                (lo + (hi - lo) * rng.random::<f64>()).clamp(lo, hi)
+            };
         }
         p
     }
@@ -362,6 +388,30 @@ mod tests {
         for &x in &[0.7000000000000001, 1.3, 4.4, -6.7, 12.1] {
             let r = reflect_coord(x, -3.0, 0.7);
             assert!((-3.0..=0.7).contains(&r), "{x} folded to {r}");
+        }
+    }
+
+    #[test]
+    fn reflect_coord_folds_steps_that_overflow_x_minus_lo() {
+        let (lo, hi) = (-8.98e307, 0.0);
+        for &x in &[1.7e308, -1.79e308, 1.79e308, f64::MAX] {
+            let r = reflect_coord(x, lo, hi);
+            assert!(r.is_finite() && (lo..=hi).contains(&r), "{x} folded to {r}");
+        }
+    }
+
+    #[test]
+    fn reflected_kernel_lands_an_infinite_step_inside_the_box() {
+        let bounds = Bounds::new(array![0.0], array![8e307], 0.0);
+        let kernel = Reflected::new(Cauchy::new(8e306), bounds);
+        let mut rng = StdRng::seed_from_u64(17);
+        for _ in 0..5000 {
+            let p = kernel.propose(array![4e307].view(), 1.0, &mut rng);
+            assert!(
+                p[0].is_finite() && (0.0..=8e307).contains(&p[0]),
+                "{}",
+                p[0]
+            );
         }
     }
 
