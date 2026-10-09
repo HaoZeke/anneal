@@ -83,13 +83,14 @@ Flatten only at the optimizer boundary, and pass the initial positions as
 for a fitter. They drive =evaluate= / =step= on current ChemFit and =ask= /
 =tell= on ChemFit 3.1, and the first exception the fitter raises stops the
 fit and reaches the caller without =finish=. A positions-only objective is
-the same loop:
+the same loop as their Boltzmann driver:
 
 #+begin_src python
 import numpy as np
 import anneal
 
 def fit_positions(fitter, initial_positions, budget):
+    budget = int(budget)
     if budget < 1:
         raise ValueError("budget must include at least the initial evaluation")
     initial = np.asarray(initial_positions, dtype=np.float64)
@@ -108,25 +109,28 @@ def fit_positions(fitter, initial_positions, budget):
         advance()
         return float(loss)
 
-    proposals = max(0, int(budget) - 1)
     fitter.init()
     history = anneal.run(
         objective,
         low,
         high,
         anneal.Boltzmann(),
-        n_epochs=1,
-        steps_per_epoch=proposals,
+        n_epochs=max(1, budget // 100),
+        steps_per_epoch=100,
         x0=initial.reshape(-1),
+        max_evals=budget,
     )
     return fitter.finish({
         "positions": np.asarray(history.best_pos).reshape(n_atoms, 3)
     })
 #+end_src
 
-The expression =positions.reshape(...)= does not modify an array in place.
-In a loop like this one, an exception from =evaluate= is scored as the worst
-value and reported once as a =RuntimeWarning=; the bridges raise it instead.
+The temperature drops once per epoch, so the loop cools over =budget // 100=
+epochs of 100 steps, and =max_evals= counts the start and stops the run at
+the budget. The expression =positions.reshape(...)= does not modify an array
+in place. In a loop like this one, an exception from =evaluate= is scored as
+the worst value and reported once as a =RuntimeWarning=; the bridges raise it
+instead.
 
 * Pilot draws for Bayesian warm-start
 
