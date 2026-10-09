@@ -10,17 +10,21 @@ With less, as for a 30-dimensional problem under 4650 evaluations, CMA-ES and
 the descent take one slice each from the start, GSA two, and a descent turn
 settles the basin GSA reached before the GSA and CMA-ES phases, which then
 leave DE a slice. CMA-ES, the descent, GSA, DE, the additive surrogate and the
-QMC restart arm then each take a turn if they have not yet; later rounds pick
-uniformly with probability ``1/round``, otherwise replay an arm whose last turn
-lowered the incumbent, and otherwise draw by discounted Thompson sampling. A
-turn is one slice, but the descent keeps the turn while each slice lowers its
-value by more than the success threshold, until it converges, so a kicked
-descent, or a long one from a poor start, is scored on the basin it reaches. A
-closing descent from the incumbent gets the ten gradients' worth of evaluations
-it needs to converge. A slice is four gradients' worth of evaluations or a 48th
-of the budget, whichever is larger, but at most the geometric mean of the
-budget and four gradients' worth, so past 48 times 48 four-gradient slices the
-number of slices keeps growing with the budget. The floor the restart guarantee
-needs is asymptotic: the opening runs while it improves by the success
-threshold, which cannot last on a bounded objective, and after that every arm
-keeps a uniform share and is pulled infinitely often as the budget grows.
+QMC restart arm then each take a turn if they have not yet and the budget left
+holds a slice beyond the closing reserve; later rounds pick uniformly with
+probability ``1/round``, otherwise replay an arm whose last turn lowered the
+incumbent, and otherwise draw by discounted Thompson sampling. A turn is one
+slice, but the descent keeps the turn while each slice lowers its value by more
+than the success threshold, until it converges, so a kicked descent, or a long
+one from a poor start, is scored on the basin it reaches. The descent closes
+the run with a reserve of the ten gradients' worth of evaluations a descent
+needs to converge (at most 40% of the budget), going on with its current
+descent unless another arm has lowered the incumbent since it last played, in
+which case it restarts there. A slice is four gradients' worth of evaluations
+or a 48th of the budget, whichever is larger, but at most the geometric mean of
+the budget and four gradients' worth, so past 48 times 48 four-gradient slices
+the number of slices keeps growing with the budget. The floor the restart
+guarantee needs is asymptotic: the opening runs while it improves by the
+success threshold, which cannot last on a bounded objective, and after that
+every arm keeps a uniform share and is pulled infinitely often as the budget
+grows.

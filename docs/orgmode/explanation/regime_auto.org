@@ -73,9 +73,11 @@ before it can beat the incumbent, and one from a poor start
 (Lennard-Jones positions with overlapping atoms) takes many slices to
 settle, so the turn is scored on the basin the descent reaches. A turn
 succeeds when it lowers the incumbent by more than =1e-4 max(|f|, 1)=.
-A closing finite-difference descent from the final incumbent takes the
-last ten gradients' worth of evaluations (at most 40% of the budget),
-enough for it to converge.
+The descent closes the run with the rest of the budget, which holds
+ten gradients' worth of evaluations back for it (at most 40% of the
+budget), enough for a descent to converge. It goes on with its current
+descent, which may be a kick from the incumbent, and restarts at the
+incumbent only if another arm has lowered it since =qn= last played.
 
 * Regimes → preferred portfolio arms / kernels
 

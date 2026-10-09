@@ -871,14 +871,17 @@ def global_optimize(
     while it pays; with less, CMA-ES and the descent take one slice each,
     annealing two, and a descent turn settles what annealing found. From
     there annealing and then CMA-ES each keep the turn while they lower
-    the incumbent. Arms not yet played then take a turn before the
+    the incumbent. Arms not yet played then take a turn, while the budget
+    holds one beyond the closing descent's reserve, before the
     allocation ranks them, and the same decaying uniform floor follows;
     a turn is one slice, except that the descent keeps it while it pays,
-    until it converges. A descent from the incumbent closes the run. The
-    floor the guarantee needs is asymptotic: the opening runs while it
-    improves by the success threshold, which cannot last on a bounded
-    objective, and after that every arm keeps a uniform share and is
-    pulled infinitely often as the budget grows.
+    until it converges. The descent closes the run, going on with its
+    current descent, or restarting at the incumbent if another arm has
+    lowered it since the descent last played. The floor the guarantee
+    needs is asymptotic: the opening runs while it improves by the
+    success threshold, which cannot last on a bounded objective, and
+    after that every arm keeps a uniform share and is pulled infinitely
+    often as the budget grows.
 
     Args:
       obj_fn: callable ``f(numpy.ndarray) -> float``.
@@ -904,9 +907,10 @@ def global_optimize(
         is found (if its value is not finite, until any finite value is).
         The values-only loop starts its descents, CMA-ES, one annealing
         chain and the first evolution member there; with ``grad_fn`` or
-        ``noise_sigma`` the arms that read the incumbent (trust-region
-        poll, HMC, the population arm) do. Without ``x0`` the values-only
-        loop starts from the best of a small seeded design.
+        ``noise_sigma``, arms that read the incumbent do, such as the
+        trust-region poll and the population arm, and with ``grad_fn``
+        also basin hopping and HMC. Without ``x0`` the values-only loop
+        starts from the best of a small seeded design.
 
     ``obj_fn`` and ``grad_fn`` are only called inside ``[low, high]``: a
     point an arm proposes outside is mirror-reflected into the box, and the
