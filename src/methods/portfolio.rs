@@ -11,11 +11,18 @@
 //!
 //! Under [`PortfolioPolicy::Auto`] a run with neither a gradient nor a
 //! declared noise scale takes a smaller loop, whatever its box
-//! (`run_values_only_portfolio`): CMA-ES, a finite-difference
+//! (`run_values_only_portfolio`), over CMA-ES, a finite-difference
 //! quasi-Newton descent, GSA, DE, the additive surrogate and the restart
-//! arm, each played once before ranking and then under the same decaying
-//! floor, after an opening descent from the start and GSA and CMA-ES
-//! phases from its minimum, and before a closing one from the incumbent.
+//! arm. An opening descent from the start, then GSA and CMA-ES phases
+//! from its minimum, run while they pay; each arm not yet played then
+//! takes a turn, later rounds keep the same decaying floor, and a closing
+//! descent from the incumbent ends the run. In this loop the floor the
+//! guarantee needs is asymptotic. The opening runs while it improves by
+//! the success threshold, which cannot last on a bounded objective, and
+//! after that every arm keeps a uniform share and is pulled infinitely
+//! often as the budget grows. The phases and the descent's turns stop for
+//! the same reason, and the number of slices keeps growing with the
+//! budget (`values_only_slice`).
 //!
 //! Scheduler quantities derive from the problem and the budget rather
 //! than from tuning knobs: the slice size affords a few gradient-
@@ -3155,6 +3162,18 @@ const VALUES_ONLY_ARMS: [ArmKind; 6] = [
     ArmKind::Explore,
 ];
 
+/// Evaluations per values-only slice: four gradients' worth, or one
+/// [`ROUNDS_PER_ARM`]-th of each arm's share of the budget if that is
+/// larger, but at most the geometric mean of the budget and four
+/// gradients' worth. The cap binds past 48 times 48 minimal slices; from
+/// there the slice and the number of slices both grow as the square root
+/// of the budget, so the rounds keep growing with it.
+fn values_only_slice(dim: usize, budget: usize) -> usize {
+    let minimal = SLICE_GRAD_EQUIVALENTS * (dim + 1);
+    let share = budget / (ROUNDS_PER_ARM * VALUES_ONLY_ARMS.len());
+    minimal.max(share.min(budget.saturating_mul(minimal).isqrt()))
+}
+
 /// Values-only allocation under the Auto policy (no gradient, no declared
 /// noise), whatever the box width.
 ///
@@ -3215,7 +3234,7 @@ where
 
     let arms = VALUES_ONLY_ARMS;
     let k = arms.len();
-    let slice = (SLICE_GRAD_EQUIVALENTS * gradient).max(budget / (ROUNDS_PER_ARM * k));
+    let slice = values_only_slice(dim, budget);
     let n_slices = (budget / slice).max(1);
     let discount = 1.0 - 1.0 / (n_slices.max(2) as f64);
     let mut posteriors: Vec<ArmPosterior> = arms
@@ -6117,6 +6136,39 @@ mod tests {
     }
 
     #[test]
+    fn values_only_pulls_every_arm_once_the_opening_stalls() {
+        // From a side basin of Rastrigin the opening descent stalls on the
+        // basin floor. Every arm is pulled after it at each budget, and past
+        // 48 times 48 minimal slices the slices, and the turns with them,
+        // keep growing in number: slices of a 48th of the budget would hold
+        // the 64000-evaluation run to about 50 turns.
+        let dim = 2;
+        let start = Array1::from_elem(dim, 1.0);
+        let rounds = ROUNDS_PER_ARM * VALUES_ONLY_ARMS.len();
+        let mut turns = Vec::new();
+        for budget in [1000usize, 4000, 16000, 64000] {
+            assert!(budget >= QN_AFFORDABLE_GRADIENTS * dim * (dim + 1));
+            let obj = Traced::new(-5.12, 5.12, dim, rastrigin);
+            let result = portfolio_optimize_from::<_, ShiftQuadratic>(
+                &obj,
+                None,
+                budget,
+                4,
+                None,
+                PortfolioPolicy::Auto,
+                Some(start.view()),
+            );
+            assert_eq!(obj.points().len(), budget);
+            for stat in &result.arm_stats {
+                assert!(stat.pulls > 0, "{} not pulled at {budget}", stat.name);
+            }
+            turns.push(result.arm_stats.iter().map(|s| s.pulls).sum::<usize>());
+        }
+        assert!(64000 / values_only_slice(dim, 64000) > rounds);
+        assert!(turns[3] > rounds + rounds / 4, "turns {turns:?}");
+    }
+
+    #[test]
     fn values_only_descent_keeps_its_turn_while_it_pays() {
         // Twelve dimensions and 700 evaluations are short of the opening,
         // so the descent first plays in the warm-up round. On a stiff
@@ -6131,8 +6183,7 @@ mod tests {
         }
         let (dim, budget) = (12usize, 700usize);
         assert!(budget < QN_AFFORDABLE_GRADIENTS * dim * (dim + 1));
-        let slice = (SLICE_GRAD_EQUIVALENTS * (dim + 1))
-            .max(budget / (ROUNDS_PER_ARM * VALUES_ONLY_ARMS.len()));
+        let slice = values_only_slice(dim, budget);
         let obj = Traced::new(-2.0, 2.0, dim, stiff);
         let start = Array1::from_elem(dim, 1.5);
         let result = portfolio_optimize_from::<_, ShiftQuadratic>(
