@@ -53,11 +53,12 @@ from anneal._core import (
     gpmd_optimize as _core_gpmd_optimize,
     amsa_optimize as _core_amsa_optimize,
     bfwt_optimize as _core_bfwt_optimize,
-    run,
+    run as _core_run,
     run_hmc,
-    run_qmc,
+    run_qmc as _core_run_qmc,
 )
 from anneal.device import DeviceHistory, EnsembleHistory, run_device, run_ensemble
+from anneal import chemfit
 from anneal.tvm_ffi import (
     TvmFfiTensorMetadata,
     tvm_ffi_tensor,
@@ -744,6 +745,76 @@ def global_optimize(
     return out
 
 
+def run(
+    obj_fn,
+    low,
+    high,
+    preset,
+    n_epochs: int = 100,
+    steps_per_epoch: int = 200,
+    seed: int = 42,
+    x0=None,
+    box_constrained: bool = True,
+):
+    """Run simulated annealing on an objective with box reflection and optional x0.
+
+    Args:
+        obj_fn: Callable f(x: np.ndarray) -> float.
+        low, high: Lower and upper coordinate bounds.
+        preset: Boltzmann, Fast, or Gsa preset.
+        n_epochs: Number of cooling epochs.
+        steps_per_epoch: Proposals evaluated per epoch.
+        seed: RNG seed.
+        x0: Optional initial coordinates (must match dimension of low/high).
+        box_constrained: When True (default), proposals are mirror-reflected into
+            [low, high], strictly preventing bounds escape.
+    """
+    low_arr = np.asarray(low, dtype=np.float64)
+    high_arr = np.asarray(high, dtype=np.float64)
+    x0_arr = None if x0 is None else np.asarray(x0, dtype=np.float64)
+    return _core_run(
+        obj_fn,
+        low_arr,
+        high_arr,
+        preset,
+        int(n_epochs),
+        int(steps_per_epoch),
+        int(seed),
+        x0_arr,
+        bool(box_constrained),
+    )
+
+
+def run_qmc(
+    obj_fn,
+    low,
+    high,
+    preset,
+    n_starts: int = 8,
+    n_epochs: int = 100,
+    steps_per_epoch: int = 200,
+    seed: int = 42,
+    x0=None,
+    box_constrained: bool = True,
+):
+    """Run QMC multi-start simulated annealing with box reflection and optional x0."""
+    low_arr = np.asarray(low, dtype=np.float64)
+    high_arr = np.asarray(high, dtype=np.float64)
+    x0_arr = None if x0 is None else np.asarray(x0, dtype=np.float64)
+    return _core_run_qmc(
+        obj_fn,
+        low_arr,
+        high_arr,
+        preset,
+        int(n_starts),
+        int(n_epochs),
+        int(steps_per_epoch),
+        int(seed),
+        x0_arr,
+        bool(box_constrained),
+    )
+
+
 def global_optimize_objective(
     objective,
     budget: int,
@@ -806,6 +877,7 @@ __all__ = [
     "run_ensemble",
     "run_hmc",
     "run_qmc",
+    "chemfit",
     "tvm_ffi_tensor",
     "tvm_ffi_tensor_metadata",
     "tvm_ffi_tensors_from_history",

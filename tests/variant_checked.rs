@@ -8,7 +8,10 @@ use anneal_core::cool::LogCool;
 use anneal_core::laws::LawViolation;
 use anneal_core::movekernel::{Gaussian, Reflected};
 use anneal_core::neigh::{BoxConstrained, Neighborhood};
-use anneal_core::variant::{SaVariant, SweepBudget, ValidationEvidence, boltzmann, fast, gsa};
+use anneal_core::variant::{
+    SaVariant, SweepBudget, ValidationEvidence, boltzmann, boltzmann_box, fast, fast_box, gsa,
+    gsa_box,
+};
 
 use eindir_core::objectives::StybTang2D;
 use eindir_core::{Bounds, Objective};
@@ -30,6 +33,16 @@ fn fast_preset_constructs() {
 fn gsa_preset_constructs() {
     let v = gsa(StybTang2D::new(), 1.0, 2.62, 1.7).expect("GSA should pass L1-L4");
     assert_eq!(v.obj.dim(), 2);
+}
+
+#[test]
+fn box_presets_construct() {
+    let v_b = boltzmann_box(StybTang2D::new(), 1.0, 0.5).expect("BoltzmannBox should pass L1-L4");
+    assert_eq!(v_b.obj.dim(), 2);
+    let v_f = fast_box(StybTang2D::new(), 1.0, 0.3).expect("FastBox should pass L1-L4");
+    assert_eq!(v_f.obj.dim(), 2);
+    let v_g = gsa_box(StybTang2D::new(), 1.0, 2.62, 1.7).expect("GsaBox should pass L1-L4");
+    assert_eq!(v_g.obj.dim(), 2);
 }
 
 #[test]
