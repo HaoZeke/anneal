@@ -1,8 +1,9 @@
 """Tests for the ChemFit adapter (``anneal.chemfit``).
 
-ChemFit itself is not a test dependency: a duck-typed stub implements the
-user-driven ``init``/``ask``/``tell``/``finish`` protocol with ChemFit's
-best-seen tracking semantics.
+ChemFit itself is not a test dependency: duck-typed stubs implement the
+user-driven ``init``/``ask``/``tell``/``finish`` protocol of ChemFit 3.1 and
+the ``evaluate``/``step`` names of ChemFit 4, with ChemFit's best-seen
+tracking semantics.
 """
 
 import numpy as np
@@ -116,8 +117,8 @@ def test_fit_anneal_classical_drivers_respect_bounds_and_budget():
         positions = np.asarray(out["positions"])
         assert np.all(positions >= -3.0) and np.all(positions <= 3.0)
         assert 0.5 <= out["eps"] <= 3.0
-        # 400 evals for the chain plus the seeded start.
-        assert fitter.tells <= 401
+        # The seeded start counts against the 400.
+        assert fitter.tells == 400
         start_loss = float(np.sum(np.array([[2.5, 0.0, -1.0]]) ** 2) + 1.0)
         got_loss = float(np.sum(positions**2) + (out["eps"] - 1.0) ** 2)
         assert got_loss < start_loss
@@ -156,3 +157,63 @@ def test_fit_anneal_accepts_dict_and_vector_x0():
         fit_anneal(_stub(), 100, x0={"other": 1.0})
     with pytest.raises(ValueError, match="has length"):
         fit_anneal(_stub(), 100, x0=np.zeros(3))
+
+
+class StepFitter:
+    """ChemFit 4 lifecycle: ``evaluate`` and ``step``, no ``ask``/``tell``."""
+
+    def __init__(self, initial_params, bounds=None):
+        self.initial_parameters = initial_params
+        self.bounds = dict(bounds or {})
+        self.seen = []
+        self.steps = 0
+
+    def init(self):
+        self.seen.clear()
+
+    def evaluate(self, params):
+        positions = np.asarray(params["positions"], dtype=np.float64)
+        self.seen.append(positions.copy())
+        return float(np.sum(positions**2) + (params["eps"] - 1.0) ** 2)
+
+    def step(self, step=None):
+        self.steps += 1
+
+    def finish(self, opt_params=None):
+        return dict(opt_params)
+
+
+@pytest.mark.parametrize("driver", ["portfolio", "boltzmann", "fast", "gsa"])
+def test_fit_anneal_drives_the_evaluate_step_lifecycle(driver):
+    start = np.array([[2.5, 0.0, -1.0]])
+    fitter = StepFitter({"positions": start, "eps": 2.0}, bounds={"eps": (0.5, 3.0)})
+    out = fit_anneal(fitter, 300, driver=driver, seed=0)
+    seen = np.array(fitter.seen)
+    assert np.allclose(seen[0], start)
+    assert fitter.steps == len(seen)
+    assert np.all(seen >= start - 3.0) and np.all(seen <= start + 3.0)
+    loss = float(np.sum(np.asarray(out["positions"]) ** 2) + (out["eps"] - 1.0) ** 2)
+    assert loss < float(np.sum(start**2) + 1.0)
+
+
+@pytest.mark.parametrize("budget", [1, 99, 300, 1234])
+def test_classical_bridges_spend_exactly_the_budget(budget):
+    from anneal.chemfit import fit_chemfit, run_benchmark
+
+    def fitter():
+        return StepFitter(
+            {"positions": np.array([[0.5, 0.0, -1.0]]), "eps": 2.0},
+            bounds={"positions": (-3.0, 3.0), "eps": (0.5, 3.0)},
+        )
+
+    for driver in ("boltzmann", "fast", "gsa"):
+        f = fitter()
+        fit_anneal(f, budget, driver=driver, seed=0)
+        assert len(f.seen) == budget
+        f = fitter()
+        fit_chemfit(f, budget, method=driver, seed=0)
+        assert len(f.seen) == budget
+        f = fitter()
+        context = {"fitter": f, "budget": budget, "initial_params": f.initial_parameters}
+        run_benchmark(context, method=driver, low=-3.0, high=3.0)
+        assert len(f.seen) == budget

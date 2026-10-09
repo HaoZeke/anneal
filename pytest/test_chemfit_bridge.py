@@ -2,8 +2,9 @@
 
 Covers the ChemFit bug report: classical `run` chains escaped
 `[low, high]` (unconstrained presets), and there was no way to pass
-initial parameters. Uses a stub fitter speaking the real
-ask/tell/finish protocol so the suite runs without chemfit installed.
+initial parameters. Uses stub fitters speaking ChemFit 3.1's
+ask/tell/finish protocol and ChemFit 4's evaluate/step names, so the suite
+runs without chemfit installed.
 """
 
 import numpy as np
@@ -187,3 +188,41 @@ def test_fit_chemfit_rejects_bad_args():
         fit_chemfit(fitter, budget=0)
     with pytest.raises(ValueError, match="unknown method"):
         fit_chemfit(fitter, budget=10, method="newton")
+
+
+class StepFitter:
+    """ChemFit 4 lifecycle: ``evaluate`` and ``step``, no ``ask``/``tell``."""
+
+    def __init__(self, initial_parameters, bounds=None):
+        self.initial_parameters = initial_parameters
+        self.bounds = bounds or {}
+        self.seen = []
+        self.steps = 0
+
+    def init(self):
+        self.seen.clear()
+
+    def evaluate(self, params):
+        positions = np.asarray(params["positions"], dtype=np.float64)
+        self.seen.append(positions.copy())
+        return float(np.sum((positions - 1.0) ** 2))
+
+    def step(self, step=None):
+        self.steps += 1
+
+    def finish(self, opt_params=None):
+        return dict(opt_params)
+
+
+@pytest.mark.parametrize("method", ["portfolio", "boltzmann"])
+def test_fit_chemfit_starts_at_the_initial_parameters_of_an_evaluate_step_fitter(method):
+    rng = np.random.default_rng(0)
+    start = rng.uniform(-3, 3, size=(4, 3))
+    fitter = StepFitter({"positions": start}, {"positions": (-3.0, 3.0)})
+    out = fit_chemfit(fitter, budget=400, method=method, seed=0)
+    seen = np.array(fitter.seen)
+    assert np.allclose(seen[0], start)
+    assert np.all(seen >= -3.0) and np.all(seen <= 3.0)
+    assert fitter.steps > 0
+    end = float(np.sum((np.asarray(out["positions"]) - 1.0) ** 2))
+    assert end < float(np.sum((start - 1.0) ** 2))
