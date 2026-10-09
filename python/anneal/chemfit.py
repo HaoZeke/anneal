@@ -273,6 +273,9 @@ def fit_anneal(
     low_vec, high_vec = _resolve_bounds(
         fitter_bounds, start_vector, spec, float(bound_span), low, high
     )
+    # run and global_optimize refuse a start outside the box. A caller vector
+    # such as zeros is pulled onto the box before the first evaluation.
+    start_vector = np.minimum(np.maximum(start_vector, low_vec), high_vec)
 
     # The fitter owns bookkeeping; every ask is one optimizer step.
     fitter.init()

@@ -89,7 +89,7 @@ The =History= also carries the final state and per-epoch diagnostics that the Ba
 =low= and =high= are the box the chain walks, not only the random initial draw.
 Every proposal is mirror-reflected into that box, so the objective is never
 called outside it. Pass =x0= to evaluate a known parameter vector first.
-Coordinates of =x0= outside the box are clipped before that evaluation.
+An =x0= outside the box is refused.
 The initial state costs one objective call, so a complete run makes
 =1 + n_epochs * steps_per_epoch= calls.
 
