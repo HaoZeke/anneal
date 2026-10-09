@@ -68,9 +68,14 @@ fn validate_closed_box(low: &[f64], high: &[f64]) -> PyResult<()> {
         ));
     }
     for (i, (&lo, &hi)) in low.iter().zip(high.iter()).enumerate() {
-        if !lo.is_finite() || !hi.is_finite() {
+        if !lo.is_finite() {
             return Err(PyValueError::new_err(format!(
-                "bounds must be finite at dimension {i}"
+                "low[{i}] = {lo} must be finite"
+            )));
+        }
+        if !hi.is_finite() {
+            return Err(PyValueError::new_err(format!(
+                "high[{i}] = {hi} must be finite"
             )));
         }
         if lo > hi {
