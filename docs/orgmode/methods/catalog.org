@@ -1878,15 +1878,14 @@ Key types and functions: =CmaEs= (src/methods/cma_es.rs:119);
 =covariance_learning_evaluations= (cma_es.rs:111, the horizon
 \(\lambda/(c_1 + c_\mu)\)); =Bipop= and =CmaRegime=
 (cma_es.rs:631/610); the portfolio's =CmaArmState= and =run_cma_arm=
-(src/methods/portfolio.rs:915/3002).
+(src/methods/portfolio.rs:913/3000).
 
 Constants and defaults: =default_lambda= \(4 + \lfloor 3 \ln n
 \rfloor\) (cma_es.rs:82). In the portfolio every run is centred on the
-incumbent; the first is local, with step 0.025 of each side (0.003 after
-a converged opening descent), and large runs use step 0.3
-(portfolio.rs:385-388). Runs keep the full covariance up to
-=CMA_FULL_MAX_DIM = 100= (portfolio.rs:397) and only when the budget
-exceeds the learning horizon; each run's =tolfunhist= is the
+incumbent; the first is local, with step 0.025 of each side, and large
+runs use step 0.3 (portfolio.rs:385-386). Runs keep the full covariance
+up to =CMA_FULL_MAX_DIM = 100= (portfolio.rs:395) and only when the
+budget exceeds the learning horizon; each run's =tolfunhist= is the
 portfolio's success threshold at its start.
 
 Feeds/consumes: the =cma= arm of the portfolio's values-only loop,
