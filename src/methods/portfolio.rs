@@ -1092,6 +1092,10 @@ struct ArmStates {
     /// population starts with the incumbent, as SciPy's
     /// differential_evolution places its `x0`.
     values_only: bool,
+    /// Set by the values-only loop once a descent from the incumbent has
+    /// stopped paying, at the end of the opening or of a descent's turn.
+    /// The GSA arm then leaves its records undescended.
+    descended: bool,
 }
 
 /// Persistent adaptive-Metropolis descent chain (D6 + D11 BFWT).
@@ -2642,9 +2646,13 @@ fn run_arm<O, G>(
             if slice < 8 {
                 return;
             }
-            let local_search = states.values_only && grad.is_none();
+            let values_only = states.values_only && grad.is_none();
+            // Against a descended incumbent a record's search costs several
+            // gradients and mostly finds a basin the descent's turns and the
+            // closing polish reach from the best record anyway.
+            let local_search = values_only && !states.descended;
             if states.gsa.is_none() {
-                let anchor = if local_search {
+                let anchor = if values_only {
                     ledger
                         .incumbent_value()
                         .map(|value| (ledger.incumbent(&bounds), value))
@@ -3228,10 +3236,14 @@ where
             // one from a poor start takes many slices to settle: the turn
             // is scored on the basin the descent reaches once it stops
             // paying, not where a slice boundary cuts it.
-            if arm != ArmKind::Qn
-                || !states.qn.as_mut().is_some_and(QnArmState::paid)
-                || ledger.remaining() < reserve + 8
-            {
+            if arm != ArmKind::Qn {
+                break;
+            }
+            if !states.qn.as_mut().is_some_and(QnArmState::paid) {
+                states.descended = true;
+                break;
+            }
+            if ledger.remaining() < reserve + 8 {
                 break;
             }
             take = take.min(ledger.remaining() - reserve);
@@ -3269,6 +3281,7 @@ where
         // kicks from the minimum pay: QN enters the rounds on the prior.
         posteriors[qn].alpha = 1.0;
         posteriors[qn].beta = 1.0;
+        states.descended = true;
     }
     let share = |fraction: f64| (budget as f64 * fraction).round() as usize;
     let polish = (LOCAL_FIRST_POLISH_GRADIENTS * gradient)
@@ -3284,8 +3297,8 @@ where
         // CMA-ES gain a better point of this one. From an undescended start
         // GSA's first records are box-wide samples that leave the start's
         // basin, so the phases wait for the opening. Both find their gains
-        // in bursts (a local search per record, a run per covariance), which
-        // single slices of the rounds below would not see.
+        // in bursts (records as the anneal cools, a run per covariance),
+        // which single slices of the rounds below would not see.
         const PHASES: [ArmKind; 2] = [ArmKind::Gsa, ArmKind::Cma];
         for arm in PHASES {
             let choice = index(arm);
@@ -6218,6 +6231,40 @@ mod tests {
             "the chain starts from the recorded value"
         );
         assert!(ledger.best_get() < 1e-8, "best {}", ledger.best_get());
+    }
+
+    #[test]
+    fn values_only_gsa_leaves_records_undescended_after_a_stalled_descent() {
+        // The start of the test above, once a descent has stopped paying:
+        // the slice anneals without starting a local search.
+        let obj = Traced::new(-5.12, 5.12, 4, rastrigin);
+        let ledger = BudgetLedger::new(400, 4);
+        let budgeted = BudgetedObjective {
+            inner: &obj,
+            ledger: &ledger,
+        };
+        let start = Array1::from_elem(4, 0.05);
+        budgeted.eval(start.view());
+        let mut states = ArmStates {
+            values_only: true,
+            descended: true,
+            ..ArmStates::default()
+        };
+        let mut rng = StdRng::seed_from_u64(3);
+        run_arm::<_, ShiftQuadratic>(
+            ArmKind::Gsa,
+            &budgeted,
+            None,
+            &ledger,
+            &mut states,
+            &mut rng,
+            399,
+            400,
+        );
+        assert_eq!(ledger.used_get(), 400);
+        let state = states.gsa.as_ref().expect("gsa state");
+        assert!(state.local.is_none(), "no local search started");
+        assert!(ledger.best_get() > 1e-8, "best {}", ledger.best_get());
     }
 
     #[test]
