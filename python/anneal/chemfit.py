@@ -11,9 +11,10 @@ the parameters it was given.
 
 Nested parameter dicts are flattened only at the optimizer boundary and
 rebuilt on the way back. A leaf keeps its type: a Python number comes back as
-a float, a NumPy scalar or array keeps its dtype and shape, and the bounds of
-a float32 or float16 leaf are rounded inward so the cast candidate stays
-inside them. A parameter whose lower and upper bounds are equal is held
+a float, a NumPy scalar or array keeps its shape and its floating dtype
+(integer and bool leaves are optimized, and returned, as float64), and the
+bounds of a float32 or float16 leaf are rounded inward so the cast candidate
+stays inside them. A parameter whose lower and upper bounds are equal is held
 fixed. Every evaluation lies inside the box, the first one is the start, and
 the budget counts it. The default driver is the Thompson-allocated portfolio.
 
@@ -694,8 +695,9 @@ def unflatten_parameters(vector: np.ndarray, spec, template: dict[str, Any]):
 
     Array leaves are reshaped to their original shape, and each leaf takes
     the type of the matching ``template`` leaf: a Python number comes back as
-    a float, a NumPy scalar or array keeps its dtype. The returned dict
-    mirrors ``template``'s nesting and never mutates the template.
+    a float, a NumPy scalar or array keeps its floating dtype, and an integer
+    or bool leaf comes back as float64. The returned dict mirrors
+    ``template``'s nesting and never mutates the template.
     """
     vector = np.asarray(vector, dtype=np.float64).ravel()
     total = spec_total(spec)
@@ -787,9 +789,9 @@ def fit_anneal(
 
     Every argument is checked before ``fitter.init()``. Returns what
     ``fitter.finish`` returns for the best evaluated parameters (ChemFit
-    returns them as given); each leaf keeps its type, dtype and shape. The
-    first exception raised by the fitter, or a loss that is not a real
-    number, stops the fit and is raised without calling ``finish``.
+    returns them as given); each leaf keeps its type, shape and floating
+    dtype. The first exception raised by the fitter, or a loss that is not a
+    real number, stops the fit and is raised without calling ``finish``.
     """
     return _fit_anneal(
         fitter,
@@ -873,7 +875,7 @@ class ChemFitVector:
     in C order under the same dotted key. The vector layout is fixed at
     construction, so :meth:`pack` / :meth:`unpack` round-trip between anneal's
     flat box and ChemFit's nested parameter dicts; :meth:`unpack` gives each
-    leaf the template's type, dtype and shape.
+    leaf the template's type, shape and floating dtype.
     """
 
     def __init__(self, template: dict[str, Any]):
