@@ -51,15 +51,28 @@ fn sample_cauchy_01<R: Rng>(loc: f64, scale: f64, rng: &mut R) -> f64 {
 }
 
 /// Weighted Lehmer mean for SHADE memory update.
+///
+/// A success by a walker that sat at `+inf` improves by `+inf`. Weighed as
+/// such it turns the mean into `inf / inf`, and a NaN scale factor makes every
+/// later trial coordinate NaN, so it is weighed like the largest finite
+/// improvement instead.
 fn lehmer_mean(vals: &[f64], weights: &[f64]) -> f64 {
+    let largest = weights
+        .iter()
+        .copied()
+        .filter(|w| w.is_finite())
+        .fold(0.0_f64, f64::max);
+    let cap = if largest > 0.0 { largest } else { 1.0 };
     let mut num = 0.0;
     let mut den = 0.0;
     for (v, w) in vals.iter().zip(weights.iter()) {
+        let w = if w.is_finite() { *w } else { cap };
         num += w * v * v;
         den += w * v;
     }
-    if den > 1e-18 {
-        (num / den).clamp(0.05, 1.0)
+    let mean = num / den;
+    if den > 1e-18 && mean.is_finite() {
+        mean.clamp(0.05, 1.0)
     } else {
         0.5
     }
@@ -1815,6 +1828,14 @@ mod tests {
             let y = diffusion_displace(x.view(), &bounds, 0.5, None, &mut rng);
             assert!(bounds.contains(y.view()), "y={y:?}");
         }
+    }
+
+    #[test]
+    fn lehmer_mean_stays_finite_when_a_success_left_infinity() {
+        let mean = lehmer_mean(&[0.4, 0.8, 0.6], &[f64::INFINITY, 2.0, 1.0]);
+        assert!(mean.is_finite() && (0.05..=1.0).contains(&mean), "{mean}");
+        let mean = lehmer_mean(&[0.4, 0.8], &[f64::INFINITY, f64::INFINITY]);
+        assert!(mean.is_finite() && (0.05..=1.0).contains(&mean), "{mean}");
     }
 
     #[test]

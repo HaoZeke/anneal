@@ -578,6 +578,12 @@ impl<O: Objective<f64>> Objective<f64> for BudgetedObjective<'_, O> {
             return f64::INFINITY;
         }
         self.ledger.n_evals.fetch_add(1, Ordering::Relaxed);
+        // A non-finite coordinate has no image in the box. The arm that made
+        // it is charged and told the point is worthless; the caller's
+        // objective never sees it.
+        if x.iter().any(|v| !v.is_finite()) {
+            return f64::INFINITY;
+        }
         // Reflect (not bare-clip) into the box before eval+record: clipping
         // piles mass on the wall; reflection keeps a feasible point while
         // preserving more of the proposal structure. Archive is always in-bounds.
@@ -611,6 +617,9 @@ impl<O: Objective<f64>> Objective<f64> for LocalBoxBudgetedObjective<'_, O> {
             return f64::INFINITY;
         }
         self.ledger.n_evals.fetch_add(1, Ordering::Relaxed);
+        if x.iter().any(|v| !v.is_finite()) {
+            return f64::INFINITY;
+        }
         // Reflect into the local box; archive only if also globally feasible.
         let x_local = crate::movekernel::reflect_into_box(x, &self.bounds);
         let value = self.inner.eval(x_local.view());
@@ -635,6 +644,9 @@ impl<G: Gradient<f64>> Gradient<f64> for ReflectedGradient<'_, G> {
     }
 
     fn grad(&self, x: ArrayView1<f64>) -> Array1<f64> {
+        if x.iter().any(|v| !v.is_finite()) {
+            return Array1::zeros(x.len());
+        }
         let inside = x
             .iter()
             .enumerate()
