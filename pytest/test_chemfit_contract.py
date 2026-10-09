@@ -9,7 +9,6 @@ import pytest
 
 anneal = pytest.importorskip("anneal")
 
-from anneal import Boltzmann, Fast  # noqa: E402
 from anneal.chemfit import (  # noqa: E402
     ChemFitVector,
     chemfit_box,
@@ -179,8 +178,7 @@ BAD_ARGUMENTS = [
     ("fit_anneal", "preset_kwargs key", {"driver": "boltzmann", "preset_kwargs": {"bogus": 1.0}}),
     ("fit_anneal", "preset_kwargs value", {"driver": "boltzmann", "preset_kwargs": {"t_init": -1.0}}),
     ("fit_anneal", "preset_kwargs type", {"driver": "boltzmann", "preset_kwargs": "t_init=2"}),
-    ("fit_anneal", "preset_kwargs portfolio", {"preset_kwargs": {"t_init": 2.0}}),
-    ("fit_anneal", "x0 leaf shape", {"x0": {"positions": np.zeros((3, 2)), "eps": 0.5}}),
+    ("fit_anneal", "x0 leaf size", {"x0": {"positions": np.zeros((3, 3)), "eps": 0.5}}),
     ("fit_anneal", "x0 missing leaf", {"x0": {"positions": np.zeros((2, 3))}}),
     ("fit_anneal", "x0 length", {"x0": np.zeros(5)}),
     ("fit_anneal", "x0 nan", {"x0": np.array([0.1, 0.2, np.nan, 0.0, 0.0, 0.0, 0.5])}),
@@ -201,22 +199,18 @@ BAD_ARGUMENTS = [
     ("fit_chemfit", "preset key", {"driver": "fast", "bogus": 1.0}),
     ("fit_chemfit", "preset value", {"driver": "fast", "t_init": -1.0}),
     ("fit_chemfit", "preset type", {"driver": "fast", "t_init": "hot"}),
-    ("fit_chemfit", "preset key of another method", {"driver": "boltzmann", "gamma": 0.5}),
-    ("fit_chemfit", "preset portfolio", {"t_init": 2.0}),
     ("run_benchmark", "budget=0", {"budget": 0}),
     ("run_benchmark", "budget='10'", {"budget": "10"}),
     ("run_benchmark", "seed=-1", {"seed": -1}),
     ("run_benchmark", "method", {"driver": "newton"}),
     ("run_benchmark", "steps_per_epoch=0", {"driver": "boltzmann", "steps_per_epoch": 0}),
     ("run_benchmark", "preset type", {"driver": "boltzmann", "preset": "hot"}),
-    ("run_benchmark", "preset of another method", {"driver": "boltzmann", "preset": Fast()}),
-    ("run_benchmark", "preset portfolio", {"preset": Boltzmann()}),
     ("run_benchmark", "low > high", {"low": 1.0, "high": -1.0}),
     ("run_benchmark", "low alone", {"low": -1.0}),
     ("run_fitter", "budget=0", {"budget": 0}),
     ("run_fitter", "seed=-1", {"seed": -1}),
     ("run_fitter", "method", {"driver": "newton"}),
-    ("run_fitter", "preset portfolio", {"preset": Fast()}),
+    ("run_fitter", "preset type", {"driver": "sa", "preset": "hot"}),
     ("run_fitter", "x0 length", {"x0": np.zeros(5)}),
     ("run_fitter", "unknown keyword", {"bogus": 1.0}),
 ]

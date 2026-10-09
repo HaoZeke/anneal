@@ -5,9 +5,10 @@ evaluation per candidate, one notice per optimizer step, then ``finish``.
 Current ChemFit names the middle two ``evaluate`` and ``step``; ChemFit 3.1
 named them ``ask`` and ``tell``. Every bridge here drives ``evaluate`` and
 ``step`` when the fitter has both, ``ask`` and ``tell`` otherwise, and refuses
-a fitter with neither pair before calling ``init``. ``finish`` receives the
-best evaluated parameters and its return value is the result; ChemFit returns
-the parameters it was given.
+a fitter with neither pair before calling ``init``; only :func:`run_benchmark`
+still drives ``evaluate`` or ``ask`` alone, as anneal 0.10.0 did, with a
+FutureWarning. ``finish`` receives the best evaluated parameters and its
+return value is the result; ChemFit returns the parameters it was given.
 
 Nested parameter dicts are flattened only at the optimizer boundary and
 rebuilt on the way back. A leaf keeps its type: a Python number comes back as
@@ -22,7 +23,9 @@ the budget counts it. The default driver is the Thompson-allocated portfolio.
 Every argument is checked before ``fitter.init()``. The first exception the
 fitter raises, or a loss that is not a real number, ends the drive: the
 fitter is not called again, ``finish`` is skipped, and the exception reaches
-the caller.
+the caller. The few arguments anneal 0.10.0 accepted and ignored, such as
+preset keywords under the portfolio, still run with a FutureWarning that
+says what to pass instead; they will raise in a future release.
 """
 
 from __future__ import annotations
@@ -31,6 +34,7 @@ import inspect
 import math
 import numbers
 import sys
+import warnings
 from collections.abc import Mapping
 from typing import Any
 
@@ -110,6 +114,17 @@ def _real_array(value: Any, what: str) -> np.ndarray:
     return arr.astype(np.float64)
 
 
+def _deprecated(message: str) -> None:
+    """A FutureWarning for a call anneal 0.10.0 took that will raise later.
+
+    The warning points at the first caller outside this module.
+    """
+    frame, depth = sys._getframe(), 0
+    while frame is not None and frame.f_globals.get("__name__") == __name__:
+        frame, depth = frame.f_back, depth + 1
+    warnings.warn(message, FutureWarning, stacklevel=depth + 1)
+
+
 # ---------------------------------------------------------------------------
 # The fitter's session protocol.
 # ---------------------------------------------------------------------------
@@ -117,23 +132,43 @@ def _real_array(value: Any, what: str) -> np.ndarray:
 _PROTOCOLS = (("evaluate", "step"), ("ask", "tell"))
 
 
-def _protocol(fitter: Any):
+def _no_step() -> None:
+    """The step notice of a fitter that has no step method."""
+
+
+def _protocol(fitter: Any, *, without_step: str | None = None):
     """The fitter's ``(evaluate, step)`` methods, else its ``(ask, tell)``.
 
     A fitter with neither whole pair, or without ``finish``, is a TypeError.
+    ``without_step`` names a bridge that, as in anneal 0.10.0, still drives
+    ``evaluate`` or ``ask`` alone, with a FutureWarning and no step notices.
     """
+    name = type(fitter).__name__
+    half = None
     for evaluate_name, step_name in _PROTOCOLS:
         evaluate = getattr(fitter, evaluate_name, None)
         step = getattr(fitter, step_name, None)
         if callable(evaluate) and callable(step):
             break
+        if half is None and callable(evaluate):
+            half = evaluate_name, step_name, evaluate
     else:
-        raise TypeError(
-            "the fitter needs evaluate and step (ChemFit) or ask and tell "
-            f"(ChemFit 3.1); {type(fitter).__name__} has neither pair"
-        )
+        if without_step is None or half is None:
+            raise TypeError(
+                "the fitter needs evaluate and step (ChemFit) or ask and tell "
+                f"(ChemFit 3.1); {name} has neither pair"
+            )
+        evaluate_name, step_name, evaluate = half
+        step = None
     if not callable(getattr(fitter, "finish", None)):
-        raise TypeError(f"the fitter needs finish; {type(fitter).__name__} has none")
+        raise TypeError(f"the fitter needs finish; {name} has none")
+    if step is None:
+        _deprecated(
+            f"{without_step} drives {name} through {evaluate_name} with no step "
+            f"notices, since it has no {step_name}; give it a {step_name} method. "
+            f"A fitter without {step_name} will raise in a future release."
+        )
+        step = _no_step
     return evaluate, step
 
 
@@ -663,17 +698,16 @@ def _check_preset(driver: str, preset: Any) -> None:
             raise ValueError(f"q_a must be finite, got {preset.q_a!r}")
 
 
-def _classical_preset(driver: str, preset: Any = None, kwargs: Any = None):
-    """The preset ``driver`` runs, built and checked now; ``None`` for the portfolio."""
-    if kwargs is not None and not isinstance(kwargs, Mapping):
-        raise TypeError(f"preset_kwargs must be a dict, got {type(kwargs).__name__}")
+def _preset_kwargs(value: Any) -> dict:
+    """``preset_kwargs`` as a dict; anything but a mapping or None is a TypeError."""
+    if value is not None and not isinstance(value, Mapping):
+        raise TypeError(f"preset_kwargs must be a dict, got {type(value).__name__}")
+    return dict(value or {})
+
+
+def _classical_preset(driver: str, preset: Any = None, kwargs: Mapping | None = None):
+    """The preset the classical ``driver`` runs, built and checked now."""
     kwargs = dict(kwargs or {})
-    if driver == "portfolio":
-        if preset is not None:
-            raise ValueError("a preset applies to the classical drivers; the portfolio takes none")
-        if kwargs:
-            raise ValueError("preset_kwargs apply to the classical drivers; the portfolio takes none")
-        return None
     if preset is None:
         preset = _preset_types()[driver](**kwargs)
     elif kwargs:
@@ -761,12 +795,25 @@ def unflatten_parameters(vector: np.ndarray, spec, template: dict[str, Any]):
 
 
 def _start_vector(layout: _Layout, x0: Any) -> np.ndarray:
-    """The flat start from ``x0``: a dict mirroring the parameters, or a vector."""
+    """The flat start from ``x0``: a dict mirroring the parameters, or a vector.
+
+    A dict leaf with its parameter's size but another shape is read in C
+    order, as anneal 0.10.0 read it, with a FutureWarning.
+    """
     if isinstance(x0, Mapping):
         paths = {path for path, _ in _iter_leaves(x0)}
         if paths != {leaf.path for leaf in layout.leaves}:
             raise ValueError("x0 dict must mirror fitter.initial_parameters")
-        return layout.vector(x0, "x0")
+        start = layout.vector(x0, "x0", exact=False)
+        for leaf in layout.leaves:
+            shape = np.shape(_lookup(x0, leaf.path))
+            if shape != leaf.shape:
+                _deprecated(
+                    f"x0 {leaf.name} has shape {shape}, but the parameter has shape "
+                    f"{leaf.shape}; its values are read in C order. Pass it in the "
+                    "parameter's shape; another shape will raise in a future release."
+                )
+        return start
     start = _real_array(x0, "x0").reshape(-1)
     if start.size != layout.size:
         raise ValueError(
@@ -812,7 +859,9 @@ def fit_anneal(
       x0: warm start. ``None`` (default) uses the fitter's
         ``initial_parameters``; a nested dict with the same structure and
         leaf shapes, or a flat vector of the flattened dimension, overrides
-        it. A start outside the box is moved onto it.
+        it. A start outside the box is moved onto it. A dict leaf with the
+        parameter's size but another shape is read in C order with a
+        FutureWarning, and will raise in a future release.
       low, high: explicit flat bound vectors. When omitted, bounds come
         from the fitter's ``bounds`` dict (``(lower, upper)`` pairs
         mirroring ``initial_params``; each side a scalar, an array of the
@@ -824,7 +873,9 @@ def fit_anneal(
         ``max(1, budget // steps_per_epoch)`` epochs and stops when the
         budget is spent.
       preset_kwargs: extra kwargs for the preset constructor
-        (e.g. ``{"t_init": 5.0}``); classical drivers only.
+        (e.g. ``{"t_init": 5.0}``); classical drivers only. Under the
+        portfolio they are ignored with a FutureWarning, and will raise in
+        a future release.
 
     Every argument is checked before ``fitter.init()``. Returns what
     ``fitter.finish`` returns for the best evaluated parameters (ChemFit
@@ -872,7 +923,17 @@ def _fit_anneal(
     seed = _whole("seed", seed, 0, _SEED_LIMIT)
     steps = min(_whole("steps_per_epoch", steps_per_epoch, 1), budget)
     span = _positive("bound_span", bound_span)
-    preset = _classical_preset(name, preset, preset_kwargs)
+    kwargs = _preset_kwargs(preset_kwargs)
+    if name == "portfolio":
+        if kwargs:
+            _deprecated(
+                "fit_anneal ignores preset_kwargs under the portfolio driver, which "
+                "takes no preset; leave them out, or pass driver='boltzmann', 'fast' "
+                "or 'gsa' to use them. This will raise in a future release."
+            )
+        preset = None
+    else:
+        preset = _classical_preset(name, preset, kwargs)
 
     initial = getattr(fitter, "initial_parameters", None)
     if not isinstance(initial, Mapping) or not initial:
@@ -982,16 +1043,42 @@ _CHEMFIT_PRESET_DEFAULTS = {
 }
 
 
+_PRESET_KEYWORDS = ("t_init", "sigma", "gamma", "q_v", "q_a")
+
+
 def _chemfit_preset(method: str, preset_kwargs: dict[str, Any]):
-    """The preset of a :func:`fit_chemfit` method, from its keyword defaults."""
+    """The preset of a :func:`fit_chemfit` method, from its keyword defaults.
+
+    A preset keyword the method does not take is ignored, as anneal 0.10.0
+    ignored it, with a FutureWarning; any other keyword is a TypeError.
+    """
     defaults = _CHEMFIT_PRESET_DEFAULTS.get(method, {})
-    unknown = sorted(set(preset_kwargs) - set(defaults))
+    unknown = [key for key in preset_kwargs if key not in _PRESET_KEYWORDS]
     if unknown:
-        takes = ", ".join(defaults) or "none"
-        raise TypeError(
-            f"fit_chemfit got preset keyword(s) {', '.join(unknown)} that method "
-            f"{method!r} does not take; it takes {takes}"
+        got = (
+            f"an unexpected keyword argument {unknown[0]!r}"
+            if len(unknown) == 1
+            else f"unexpected keyword arguments {', '.join(map(repr, unknown))}"
         )
+        raise TypeError(
+            f"fit_chemfit() got {got}; its preset keywords are t_init, sigma, "
+            "gamma, q_v and q_a"
+        )
+    ignored = [key for key in preset_kwargs if key not in defaults]
+    if ignored and method == "portfolio":
+        _deprecated(
+            f"fit_chemfit ignores {', '.join(ignored)} under method 'portfolio', "
+            "which takes no preset; leave them out, or pass method='boltzmann', "
+            "'fast' or 'gsa' to use them. This will raise in a future release."
+        )
+    elif ignored:
+        _deprecated(
+            f"fit_chemfit ignores {', '.join(ignored)}, which method {method!r} does "
+            f"not take; it takes {', '.join(defaults)}. Pass only those; a preset "
+            "keyword of another method will raise in a future release."
+        )
+    if method == "portfolio":
+        return None
     values = {}
     for key, default in defaults.items():
         value = preset_kwargs.get(key, default)
@@ -1037,7 +1124,10 @@ def fit_chemfit(
             epochs and stops when the budget is spent.
         **preset_kwargs: ``t_init`` / ``sigma`` (boltzmann), ``t_init`` /
             ``gamma`` (fast), ``t_init`` / ``q_v`` / ``q_a`` (gsa) for the
-            classical preset constructors; any other keyword is a TypeError.
+            classical preset constructors. One of these that the method
+            does not take, or any under the portfolio, is ignored with a
+            FutureWarning, as 0.10.0 ignored it, and will raise in a
+            future release; any other keyword is a TypeError.
 
     Every argument is checked before ``fitter.init()``.
 
@@ -1206,6 +1296,34 @@ def resolve_bounds(
     return _benchmark_box(layout, low, high, context_bounds, fitter_bounds)
 
 
+def _benchmark_preset(method: str, preset: Any) -> tuple[str, Any]:
+    """The driver and checked preset :func:`run_benchmark` runs for ``method``."""
+    if preset is None:
+        return method, None if method == "portfolio" else _classical_preset(method)
+    own = _preset_driver(preset)
+    kind = type(preset).__name__
+    if method == "portfolio":
+        _deprecated(
+            f"run_benchmark ignores the {kind} preset under method 'portfolio', "
+            f"which takes none; leave it out, or pass method={own!r} to run it. "
+            "This will raise in a future release."
+        )
+        return "portfolio", None
+    if method == "sa":
+        _deprecated(
+            f"run_benchmark has no method 'sa'; it runs the {kind} preset as "
+            f"method {own!r}. Pass method={own!r}; 'sa' will raise in a future "
+            "release."
+        )
+    elif method != own:
+        _deprecated(
+            f"run_benchmark runs the {kind} preset it was given, not method "
+            f"{method!r}; pass method={own!r} with it. A preset of another method "
+            "will raise in a future release."
+        )
+    return own, _classical_preset(own, preset)
+
+
 def run_benchmark(
     benchmark_context: dict[str, Any],
     *,
@@ -1219,13 +1337,19 @@ def run_benchmark(
     """Minimize a ChemFit fitter with a gradient-free anneal driver.
 
     ``method`` is ``portfolio`` (the budget-only global optimizer), or
-    ``boltzmann``, ``fast``, or ``gsa``; ``preset``, when given, must be the
+    ``boltzmann``, ``fast``, or ``gsa``; ``preset``, when given, is the
     matching preset instance. The chain starts at ``initial_params``, moved
     onto the box when it lies outside. Every coordinate the fitter sees lies
     in the box, and ``budget`` caps the evaluations, the start included. The
     fitter is driven through ``evaluate`` / ``step`` or ``ask`` / ``tell``,
     with one step notice per evaluation, and each parameter leaf keeps its
     type.
+
+    As in anneal 0.10.0, a preset of another method, or ``method="sa"``
+    with a preset, runs the preset; a preset under the portfolio is ignored;
+    and a fitter with ``evaluate`` or ``ask`` but no ``step`` or ``tell`` is
+    driven without step notices. Each gives a FutureWarning and will raise
+    in a future release.
 
     ``low`` and ``high`` may be vectors or scalars (broadcast). When they
     are omitted, bounds are read from ``benchmark_context["bounds"]`` or
@@ -1234,16 +1358,16 @@ def run_benchmark(
     raised by the fitter is raised without calling ``finish``.
     """
     fitter = benchmark_context["fitter"]
-    evaluate, step = _protocol(fitter)
-    name = _choice(method, _DRIVERS)
-    if name is None:
+    evaluate, step = _protocol(fitter, without_step="run_benchmark")
+    key = _choice(method, (*_DRIVERS, "sa"))
+    if key is None or (key == "sa" and preset is None):
         raise ValueError(
             f"unknown method {method!r}: expected 'portfolio', 'boltzmann', 'fast', or 'gsa'"
         )
     budget = _whole("budget", benchmark_context["budget"], 1)
     seed = _whole("seed", seed, 0, _SEED_LIMIT)
     steps = min(_whole("steps_per_epoch", steps_per_epoch, 1), budget)
-    preset = _classical_preset(name, preset)
+    name, preset = _benchmark_preset(key, preset)
 
     initial = benchmark_context["initial_params"]
     if not isinstance(initial, Mapping):
@@ -1285,7 +1409,7 @@ def _fitter_keyword_error(key: str) -> TypeError:
     )
     if key in ("tell_every", "default_span"):
         message += f" ({key} is an option of fit_chemfit)"
-    elif any(key in keys for keys in _CHEMFIT_PRESET_DEFAULTS.values()):
+    elif key in _PRESET_KEYWORDS:
         message += f" (pass {key} in preset_kwargs)"
     return TypeError(message)
 
@@ -1304,10 +1428,15 @@ def run_fitter(
     Otherwise ``method="global_optimize"`` uses the portfolio and
     ``method="sa"`` runs ``preset`` (``Boltzmann()`` when none is given),
     both through :func:`fit_anneal`; ``"portfolio"``, ``"boltzmann"``,
-    ``"fast"`` and ``"gsa"`` name a :func:`fit_anneal` driver directly.
+    ``"fast"`` and ``"gsa"`` name a :func:`fit_anneal` driver directly, and
+    a classical one runs ``preset`` when it is that driver's kind.
     The keywords ``x0``, ``low``, ``high``, ``bound_span``,
     ``steps_per_epoch`` and ``preset_kwargs`` go to :func:`fit_anneal`; any
     other keyword is a TypeError.
+
+    As in anneal 0.10.0, a preset is ignored under the portfolio or with a
+    classical method of another kind, and so is ``preset_kwargs`` under the
+    portfolio. Each gives a FutureWarning and will raise in a future release.
     """
     if hasattr(fitter, "fit_anneal"):
         return fitter.fit_anneal(
@@ -1322,7 +1451,38 @@ def run_fitter(
             f"method must be one of {', '.join(map(repr, _FITTER_METHODS))}; "
             f"got {method!r}"
         )
+    options = dict(kwargs)
+    preset_kwargs = _preset_kwargs(options.pop("preset_kwargs", None))
     driver = _FITTER_METHODS[key]
-    if driver is None:
-        driver = "boltzmann" if preset is None else _preset_driver(preset)
-    return _fit_anneal(fitter, budget, driver=driver, seed=seed, preset=preset, **kwargs)
+    if preset is not None:
+        own = _preset_driver(preset)
+        if driver is None:
+            driver = own
+        elif driver != own:
+            runs = "the portfolio"
+            if driver != "portfolio":
+                runs = f"its own {driver} preset"
+            _deprecated(
+                f"run_fitter ignores the {type(preset).__name__} preset under method "
+                f"{method!r}, which runs {runs}; leave it out, or pass method='sa' "
+                "to run it. This will raise in a future release."
+            )
+            preset = None
+    elif driver is None:
+        driver = "boltzmann"
+    if driver == "portfolio" and preset_kwargs:
+        _deprecated(
+            f"run_fitter ignores preset_kwargs under method {method!r}, which runs "
+            "the portfolio; leave them out, or pass method='boltzmann', 'fast' or "
+            "'gsa' to use them. This will raise in a future release."
+        )
+        preset_kwargs = {}
+    return _fit_anneal(
+        fitter,
+        budget,
+        driver=driver,
+        seed=seed,
+        preset=preset,
+        preset_kwargs=preset_kwargs,
+        **options,
+    )
