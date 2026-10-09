@@ -76,6 +76,7 @@ See the [[file:architecture.org][architecture]] page for the five signatures and
 
    howto/install
    howto/choose-driver
+   howto/chemfit
    howto/precision-policy
    howto/rgmin-lbfgs
    howto/faq
