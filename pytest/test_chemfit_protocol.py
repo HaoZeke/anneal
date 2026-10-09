@@ -20,7 +20,6 @@ from chemfit_doubles import (  # noqa: E402
     PROTOCOLS,
     NextFitter,
     Recorder,
-    ReleasedFitter,
     drive,
     protocol_names,
     same_params,
@@ -193,16 +192,29 @@ def test_a_loss_that_is_not_one_real_number_is_an_error(entry, protocol, loss):
     assert "finish" not in fitter.calls
 
 
-REAL = [2, 1.5, np.float32(1.5), np.float64(1.5), np.int64(2), np.array(1.5), [1.5]]
+REAL_FORMS = {
+    "int": lambda v: int(round(1000 * v)),
+    "float": float,
+    "float32": np.float32,
+    "float64": np.float64,
+    "int64": lambda v: np.int64(round(1000 * v)),
+    "0-d array": np.array,
+    "one-element list": lambda v: [v],
+}
 
 
-@pytest.mark.parametrize("loss", REAL, ids=repr)
+@pytest.mark.filterwarnings("error::RuntimeWarning")
+@pytest.mark.parametrize("form", list(REAL_FORMS))
+@pytest.mark.parametrize("protocol", PROTOCOLS)
 @pytest.mark.parametrize("entry", ENTRIES)
-def test_every_form_of_a_real_loss_is_accepted(entry, loss):
-    fitter = ReleasedFitter(*_problem(), loss=lambda params: loss)
+def test_every_form_of_a_real_loss_is_used(entry, protocol, form):
+    wrap = REAL_FORMS[form]
+    fitter = protocol(*_problem(), loss=lambda params: wrap(sum_of_squares(params)))
     drive(entry, fitter, 30)
-    assert fitter.calls[-1] == "finish"
     assert fitter.calls.count("finish") == 1
+    assert fitter.calls[-1] == "finish"
+    seen = [float(np.asarray(loss).reshape(-1)[0]) for loss in fitter.losses]
+    assert same_params(fitter.finished_with, fitter.evaluated[int(np.argmin(seen))])
 
 
 @pytest.mark.parametrize("protocol", PROTOCOLS)
