@@ -157,6 +157,20 @@ def test_x0_is_the_first_evaluation_and_every_call_is_charged(problem, dim):
     assert out["best_val"] <= fn(x0)
 
 
+@pytest.mark.parametrize(("problem", "dim"), [(_styblinski_tang, 4), (_rastrigin, 6)])
+def test_x0_is_the_first_evaluation_with_a_gradient(problem, dim):
+    fn, grad, low, high = problem(dim)
+    x0 = np.linspace(low[0] * 0.75, high[0] * 0.75, dim)
+    wrapped, calls = _recorded(fn)
+    out = anneal.global_optimize(
+        wrapped, low, high, budget=600, seed=3, x0=x0, grad_fn=grad
+    )
+    np.testing.assert_array_equal(calls[0], x0)
+    assert len(calls) == out["n_evals"]
+    assert out["n_evals"] + out["n_grads"] <= 600
+    assert out["best_val"] <= fn(x0)
+
+
 def test_values_only_rosenbrock_descends_from_x0():
     dim = 10
     fn, _, low, high = _rosenbrock(dim)

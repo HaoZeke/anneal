@@ -5957,6 +5957,50 @@ mod tests {
             + std::f64::consts::E
     }
 
+    struct RosenbrockGrad {
+        dim: usize,
+    }
+
+    impl Gradient<f64> for RosenbrockGrad {
+        fn grad(&self, x: ArrayView1<f64>) -> Array1<f64> {
+            let mut g = Array1::zeros(x.len());
+            for i in 0..x.len() - 1 {
+                let r = x[i + 1] - x[i] * x[i];
+                g[i] += -400.0 * x[i] * r - 2.0 * (1.0 - x[i]);
+                g[i + 1] += 200.0 * r;
+            }
+            g
+        }
+
+        fn dim(&self) -> usize {
+            self.dim
+        }
+    }
+
+    #[test]
+    fn gradient_path_evaluates_the_start_first() {
+        // Boxes and dimensions that select LowDimSmooth, HighDim and
+        // MultimodalGlobal.
+        for (half, dim) in [(2.0, 4usize), (2.0, 20), (5.12, 6)] {
+            let obj = Traced::new(-half, half, dim, rosenbrock);
+            let start = Array1::from_shape_fn(dim, |i| if i % 2 == 0 { -1.2 } else { 1.0 });
+            let result = portfolio_optimize_from(
+                &obj,
+                Some(&RosenbrockGrad { dim }),
+                600,
+                3,
+                None,
+                PortfolioPolicy::Auto,
+                Some(start.view()),
+            );
+            let points = obj.points();
+            assert_eq!(points[0], start, "the start is the first call in {dim}-D");
+            assert_eq!(points.len(), result.n_evals);
+            assert!(result.n_evals + result.n_grads <= 600);
+            assert!(result.best_val <= rosenbrock(start.view()));
+        }
+    }
+
     #[test]
     fn values_only_warm_up_plays_every_arm() {
         // Rastrigin from a side basin, on a narrow box and a wide one.
