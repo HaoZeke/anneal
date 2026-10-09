@@ -166,10 +166,9 @@ class _Strings:
         else:
             found.setdefault(what, count)
 
-    def __enter__(self) -> _Strings:
+    def __enter__(self) -> None:
         if _STRINGS.get() is None:
             self.token = _STRINGS.set(self.found)
-        return self
 
     def __exit__(self, kind, error, trace) -> None:
         if self.token is None:
@@ -1161,9 +1160,8 @@ def chemfit_box(
     layout = vector._layout
     span = _positive("default_span", default_span)
     with _Strings("chemfit_box"):
-        low, high = _settle(
-            layout, *_mapped_box(layout, getattr(fitter, "bounds", None), vector.x0, span)
-        )
+        box = _mapped_box(layout, getattr(fitter, "bounds", None), vector.x0, span)
+        low, high = _settle(layout, *box)
     fixed = _first(low == high)
     if fixed is not None:
         raise ValueError(
