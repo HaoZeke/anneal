@@ -1426,9 +1426,8 @@ ends the run. A turn is one slice, except that =qn= keeps it while each
 slice lowers its descent's value by more than the success threshold,
 until that descent converges; a turn succeeds when it lowers the
 incumbent by more than =1e-4 max(|f|, 1)=. The GSA arm starts one chain
-at the incumbent and searches locally from its records until a descent
-from the incumbent has stopped paying; the DE arm keeps one population
-member there. The floor the restart guarantee needs is asymptotic: the
+at the incumbent and anneals without a local search; the DE arm keeps
+one population member there. The floor the restart guarantee needs is asymptotic: the
 opening, the phases and the descent's turns run only while they pay by
 the success threshold, which cannot last on a bounded objective, and
 the number of slices grows with the budget, so every arm keeps a
@@ -1953,20 +1952,17 @@ one is set, or a failed line search.
 
 Key types and functions: =FdBfgs= (src/methods/fd_bfgs.rs:146);
 =FdBfgsOptions= (fd_bfgs.rs:74); the portfolio's =QnArmState= and
-=run_qn_arm= (src/methods/portfolio.rs:1008/3088), and the GSA arm's
-local search in =run_persistent_gsa=.
+=run_qn_arm= (src/methods/portfolio.rs:1008/3088).
 
 Constants and defaults: =ARMIJO = 1e-4=, =MAX_LINE_TRIALS = 40=, a first
 step of at most 5% of each side, =CENTRAL_INTERVAL_FRACTION = 0.1=,
 =INTERVAL_MOVE = 2=, =MAX_REDIFFERENCES = 2= (fd_bfgs.rs:50-70). The
 default options have the value floor =f64::MIN_POSITIVE= in the
-slow-iteration test and no gradient tolerance; the GSA local search
-uses L-BFGS-B's =ftol = 1e7 eps=, value floor 1 and =gtol = 1e-5=.
+slow-iteration test and no gradient tolerance.
 
 Feeds/consumes: the =qn= arm of the portfolio's values-only loop (its
 opening and closing descents, and descents kicked from the incumbent
-once one converges) and the dual_annealing-style local search of the
-=gsa= arm.
+once one converges).
 
 ** GLE-thermostatted Langevin annealing (=gle_langevin=)
 

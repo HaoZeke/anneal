@@ -356,12 +356,6 @@ const DUAL_INITIAL_TEMP: f64 = 5230.0;
 const DUAL_ACCEPT_PARAM: f64 = -5.0;
 /// SciPy dual_annealing `restart_temp_ratio` (reanneal trigger).
 const DUAL_RESTART_TEMP_RATIO: f64 = 2.0e-5;
-/// Relative decrease that ends dual_annealing's L-BFGS-B local search
-/// (factr 1e7 times machine epsilon).
-const DUAL_LOCAL_FTOL: f64 = 1e7 * f64::EPSILON;
-/// Projected-gradient norm that ends dual_annealing's L-BFGS-B local search
-/// (SciPy's `pgtol`).
-const DUAL_LOCAL_GTOL: f64 = 1e-5;
 /// GLE integrator timestep, matching the thermostat band resolution.
 const GLE_DT: f64 = 0.2;
 /// Minimum timestep exposed by the portfolio-level Bayesian GLE policy.
@@ -903,15 +897,6 @@ struct GsaState {
     t_init: f64,
     /// Strategy-chain step counter (dual_annealing uses T/(step+1) accept).
     strategy_step: usize,
-    /// Lowest value any chain has reached; beating it triggers the
-    /// finite-difference local search.
-    best: f64,
-    /// Local search in progress from a chain point, resumed across slices.
-    local: Option<(usize, FdBfgs)>,
-    /// Best start (chain, position, value) of an anchored state, searched
-    /// after the first temperature step even without a record, as
-    /// dual_annealing searches from its best point after its first chain.
-    first_search: Option<(usize, Array1<f64>, f64)>,
 }
 
 /// Persistent CMA-ES arm. Runs live in box-normalised coordinates, so one
@@ -1099,16 +1084,10 @@ struct ArmStates {
     /// Persistent finite-difference quasi-Newton descent.
     qn: Option<QnArmState>,
     /// Set by the values-only loop. Without a gradient, the GSA arm then
-    /// starts one chain at the incumbent and follows each temperature step
-    /// that beats the chain best with a finite-difference descent, the
-    /// L-BFGS-B local search dual_annealing runs on improvement, and the DE
-    /// population starts with the incumbent, as SciPy's
+    /// starts one chain at the incumbent and runs no local search, and the
+    /// DE population starts with the incumbent, as SciPy's
     /// differential_evolution places its `x0`.
     values_only: bool,
-    /// Set by the values-only loop once a descent from the incumbent has
-    /// stopped paying, at the end of the opening or of a descent's turn.
-    /// The GSA arm then leaves its records undescended.
-    descended: bool,
 }
 
 /// Persistent adaptive-Metropolis descent chain (D6 + D11 BFWT).
@@ -1619,9 +1598,8 @@ where
 }
 
 /// Starts the GSA chains. With `anchor`, an evaluated point and its value,
-/// chain 0 starts there without another evaluation (dual_annealing's `x0`)
-/// and the best start is searched after the first temperature step; the
-/// other chains start at seeded low-discrepancy points.
+/// chain 0 starts there without another evaluation (dual_annealing's `x0`);
+/// the other chains start at seeded low-discrepancy points.
 fn initialize_gsa_state<O>(
     obj: &BudgetedObjective<'_, O>,
     slice: usize,
@@ -1644,7 +1622,6 @@ where
     } else {
         (slice / 8).clamp(2, 4).min(slice)
     };
-    let anchored = anchor.is_some();
     let mut xs = Vec::with_capacity(chain_count);
     let mut vals = Vec::with_capacity(chain_count);
     if let Some((x, value)) = anchor {
@@ -1672,16 +1649,6 @@ where
 
     // SciPy dual_annealing default initial_temp=5230 (translation-invariant).
     let t_init = DUAL_INITIAL_TEMP;
-    let best = vals.iter().copied().fold(f64::INFINITY, f64::min);
-    let first_search = anchored
-        .then(|| {
-            vals.iter()
-                .enumerate()
-                .filter(|(_, v)| v.is_finite())
-                .min_by(|a, b| a.1.total_cmp(b.1))
-                .map(|(i, v)| (i, xs[i].clone(), *v))
-        })
-        .flatten();
 
     (!xs.is_empty()).then(|| GsaState {
         xs,
@@ -1690,9 +1657,6 @@ where
         rng: StdRng::seed_from_u64(seed),
         t_init,
         strategy_step: 0,
-        best,
-        local: None,
-        first_search,
     })
 }
 
@@ -1855,50 +1819,15 @@ fn dual_accept_prob(delta: f64, temperature_step: f64, accept_param: f64) -> f64
     (pqv_temp.ln() / (1.0 - accept_param)).exp().clamp(0.0, 1.0)
 }
 
-/// Advances the GSA arm's pending local search within the slice. Returns
-/// false when the slice ends first; a finished search moves its chain to
-/// the descent's endpoint when that is lower.
-fn advance_gsa_local<O>(
-    obj: &BudgetedObjective<'_, O>,
-    state: &mut GsaState,
-    start_used: usize,
-    slice: usize,
-) -> bool
-where
-    O: Objective<f64>,
-{
-    let Some((chain, mut engine)) = state.local.take() else {
-        return true;
-    };
-    while !engine.is_done() {
-        if obj.ledger.used_get().saturating_sub(start_used) >= slice || obj.ledger.exhausted() {
-            state.local = Some((chain, engine));
-            return false;
-        }
-        let x = engine.ask();
-        engine.tell(obj.eval(x.view()));
-    }
-    let value = engine.value();
-    if value.is_finite() && value < state.vals[chain] {
-        state.xs[chain] = engine.position().to_owned();
-        state.vals[chain] = value;
-        state.best = state.best.min(value);
-    }
-    true
-}
-
 /// Dual-annealing-style GSA epoch: box-scaled Tsallis cool + strategy
 /// chain (all-coordinate visit then per-coordinate visits) with reflection.
 /// Optional local polish after a strategy chain when `grad` is provided
-/// (mirrors dual_annealing local_search on improvement); with
-/// `local_search` and no gradient the polish is a finite-difference descent
-/// with L-BFGS-B's stopping rule.
+/// (mirrors dual_annealing local_search on improvement).
 fn run_persistent_gsa<O, G>(
     obj: &BudgetedObjective<'_, O>,
     grad: Option<&BudgetedGradient<'_, G>>,
     state: &mut GsaState,
     slice: usize,
-    local_search: bool,
 ) where
     O: Objective<f64>,
     G: Gradient<f64>,
@@ -1910,19 +1839,8 @@ fn run_persistent_gsa<O, G>(
     let visit = TsallisVisit::new(GSA_Q_V);
     let start_used = obj.ledger.used_get();
     let reanneal_floor = t0 * DUAL_RESTART_TEMP_RATIO;
-    let local_options = FdBfgsOptions {
-        ftol: DUAL_LOCAL_FTOL,
-        patience: 1,
-        max_iter: (6 * dim).clamp(100, 1000),
-        refine: false,
-        value_floor: 1.0,
-        gtol: DUAL_LOCAL_GTOL,
-    };
 
     while obj.ledger.used_get().saturating_sub(start_used) < slice && !obj.ledger.exhausted() {
-        if !advance_gsa_local(obj, state, start_used, slice) {
-            return;
-        }
         let mut temp = cooling.temperature(state.epoch).max(1e-300);
         // dual_annealing reannealing when T drops below initial * ratio.
         if temp < reanneal_floor {
@@ -1934,9 +1852,6 @@ fn run_persistent_gsa<O, G>(
         state.strategy_step = state.strategy_step.saturating_add(1);
         let t_accept = (temp / (state.strategy_step as f64)).max(1e-300);
         let mut improved = false;
-        // Best new record of this temperature step: dual_annealing's local
-        // search starts there once the strategy chain finishes.
-        let mut step_best: Option<(usize, Array1<f64>, f64)> = None;
 
         for chain in 0..state.xs.len() {
             if obj.ledger.used_get().saturating_sub(start_used) >= slice || obj.ledger.exhausted() {
@@ -1969,12 +1884,6 @@ fn run_persistent_gsa<O, G>(
                     crate::movekernel::reflect_into_box(y.view(), &bounds)
                 };
                 let proposal_val = obj.eval(proposal.view());
-                if proposal_val < state.best {
-                    state.best = proposal_val;
-                    if local_search && grad.is_none() {
-                        step_best = Some((chain, proposal.clone(), proposal_val));
-                    }
-                }
                 let accepted = if !proposal_val.is_finite() {
                     false
                 } else if !state.vals[chain].is_finite() {
@@ -1992,16 +1901,6 @@ fn run_persistent_gsa<O, G>(
             if state.vals[chain].is_finite() && state.vals[chain] < before {
                 improved = true;
             }
-        }
-        let first_search = state.first_search.take();
-        if local_search && grad.is_none() && step_best.is_none() {
-            step_best = first_search;
-        }
-        if let Some((chain, x, value)) = step_best.take() {
-            state.local = Some((
-                chain,
-                FdBfgs::new(x.view(), Some(value), &bounds, local_options),
-            ));
         }
         // dual_annealing local_search when energy improved this temperature step.
         if improved
@@ -2660,10 +2559,6 @@ fn run_arm<O, G>(
                 return;
             }
             let values_only = states.values_only && grad.is_none();
-            // Against a descended incumbent a record's search costs several
-            // gradients and mostly finds a basin the descent's turns and the
-            // closing polish reach from the best record anyway.
-            let local_search = values_only && !states.descended;
             if states.gsa.is_none() {
                 let anchor = if values_only {
                     ledger
@@ -2677,7 +2572,7 @@ fn run_arm<O, G>(
             if let Some(state) = states.gsa.as_mut() {
                 // Keep T₀ at box scale (do not re-inflate from |f|).
                 // In-epoch dual-style LS when grad is present (run_persistent_gsa).
-                run_persistent_gsa(obj, grad, state, slice, local_search);
+                run_persistent_gsa(obj, grad, state, slice);
             }
         }
         ArmKind::AmSa => {
@@ -3267,7 +3162,6 @@ where
                 break;
             }
             if !states.qn.as_mut().is_some_and(QnArmState::paid) {
-                states.descended = true;
                 break;
             }
             if ledger.remaining() < reserve + 8 {
@@ -3308,7 +3202,6 @@ where
         // kicks from the minimum pay: QN enters the rounds on the prior.
         posteriors[qn].alpha = 1.0;
         posteriors[qn].beta = 1.0;
-        states.descended = true;
     }
     let share = |fraction: f64| (budget as f64 * fraction).round() as usize;
     let polish = (LOCAL_FIRST_POLISH_GRADIENTS * gradient)
@@ -5976,42 +5869,6 @@ mod tests {
         }
     }
 
-    #[test]
-    fn gsa_local_search_descends_from_each_new_record() {
-        // Mid-width values-only box: the anneal's local search should reach
-        // the bottom of a smooth bowl that visiting alone only approaches.
-        let obj = Traced::new(-5.12, 5.12, 4, |x| {
-            x.iter().map(|v| (v - 1.3).powi(2)).sum()
-        });
-        let ledger = BudgetLedger::new(400, 4);
-        let budgeted = BudgetedObjective {
-            inner: &obj,
-            ledger: &ledger,
-        };
-        let mut states = ArmStates {
-            values_only: true,
-            ..ArmStates::default()
-        };
-        let mut rng = StdRng::seed_from_u64(9);
-        for _ in 0..4 {
-            ledger.cap_set(ledger.used_get() + 100);
-            run_arm::<_, ShiftQuadratic>(
-                ArmKind::Gsa,
-                &budgeted,
-                None,
-                &ledger,
-                &mut states,
-                &mut rng,
-                100,
-                400,
-            );
-            ledger.cap_set(400);
-        }
-        assert_eq!(obj.points().len(), ledger.used_get());
-        assert!(obj.points().iter().all(|x| obj.bounds.contains(x.view())));
-        assert!(ledger.best_get() < 1e-8, "best {}", ledger.best_get());
-    }
-
     fn rastrigin(x: ArrayView1<f64>) -> f64 {
         10.0 * x.len() as f64
             + x.iter()
@@ -6284,9 +6141,7 @@ mod tests {
     }
 
     #[test]
-    fn values_only_gsa_descends_from_the_incumbent_first() {
-        // Only the global basin beats this start, so the first local search
-        // runs from it and one slice reaches the floor.
+    fn values_only_gsa_starts_its_chain_at_the_incumbent() {
         let obj = Traced::new(-5.12, 5.12, 4, rastrigin);
         let ledger = BudgetLedger::new(400, 4);
         let budgeted = BudgetedObjective {
@@ -6311,46 +6166,11 @@ mod tests {
             400,
         );
         let points = obj.points();
-        assert_eq!(points.len(), ledger.used_get());
+        assert_eq!(points.len(), 400);
         assert!(
             points[1..].iter().all(|x| *x != start),
             "the chain starts from the recorded value"
         );
-        assert!(ledger.best_get() < 1e-8, "best {}", ledger.best_get());
-    }
-
-    #[test]
-    fn values_only_gsa_leaves_records_undescended_after_a_stalled_descent() {
-        // The start of the test above, once a descent has stopped paying:
-        // the slice anneals without starting a local search.
-        let obj = Traced::new(-5.12, 5.12, 4, rastrigin);
-        let ledger = BudgetLedger::new(400, 4);
-        let budgeted = BudgetedObjective {
-            inner: &obj,
-            ledger: &ledger,
-        };
-        let start = Array1::from_elem(4, 0.05);
-        budgeted.eval(start.view());
-        let mut states = ArmStates {
-            values_only: true,
-            descended: true,
-            ..ArmStates::default()
-        };
-        let mut rng = StdRng::seed_from_u64(3);
-        run_arm::<_, ShiftQuadratic>(
-            ArmKind::Gsa,
-            &budgeted,
-            None,
-            &ledger,
-            &mut states,
-            &mut rng,
-            399,
-            400,
-        );
-        assert_eq!(ledger.used_get(), 400);
-        let state = states.gsa.as_ref().expect("gsa state");
-        assert!(state.local.is_none(), "no local search started");
-        assert!(ledger.best_get() > 1e-8, "best {}", ledger.best_get());
     }
 
     #[test]
