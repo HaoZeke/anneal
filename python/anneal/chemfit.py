@@ -9,10 +9,13 @@ a fitter with neither pair before calling ``init``. ``finish`` receives the
 best evaluated parameters and its return value is the result; ChemFit returns
 the parameters it was given.
 
-Nested parameter dictionaries are flattened only at the optimizer
-boundary and rebuilt on the way back. Every evaluation lies inside the box,
-the first one is the start, and the budget counts it. The default driver is
-the Thompson-allocated portfolio.
+Nested parameter dicts are flattened only at the optimizer boundary and
+rebuilt on the way back. A leaf keeps its type: a Python number comes back as
+a float, a NumPy scalar or array keeps its dtype and shape, and the bounds of
+a float32 or float16 leaf are rounded inward so the cast candidate stays
+inside them. Every evaluation lies inside the box, the first one is the
+start, and the budget counts it. The default driver is the Thompson-allocated
+portfolio.
 
 The first exception the fitter raises, or a loss that is not a real number,
 ends the drive: the fitter is not called again, ``finish`` is skipped, and
@@ -24,6 +27,7 @@ from __future__ import annotations
 import inspect
 import math
 import numbers
+from collections.abc import Mapping
 from typing import Any
 
 import numpy as np
@@ -40,11 +44,27 @@ __all__ = [
 ]
 
 _CLASSICAL_DRIVERS = ("boltzmann", "fast", "gsa")
+_FLOAT64_MANTISSA = np.finfo(np.float64).nmant
+_MISSING = object()
 
 
 def _is_number(value: Any) -> bool:
     """Whether ``value`` is a real number other than a bool."""
     return isinstance(value, numbers.Real) and not isinstance(value, (bool, np.bool_))
+
+
+def _first(mask: np.ndarray) -> int | None:
+    """Index of the first true entry of ``mask``, or ``None``."""
+    hits = np.flatnonzero(mask)
+    return int(hits[0]) if hits.size else None
+
+
+def _real_array(value: Any, what: str) -> np.ndarray:
+    """``value`` as a float64 array; anything not real-numeric is an error."""
+    arr = np.asarray(value)
+    if arr.dtype.kind not in "biuf":
+        raise ValueError(f"{what} is not real-numeric")
+    return arr.astype(np.float64)
 
 
 # ---------------------------------------------------------------------------
@@ -111,23 +131,178 @@ def _loss_value(value: Any) -> float:
     return float(value)
 
 
+# ---------------------------------------------------------------------------
+# Parameter layout: where each leaf of a nested dict sits in the flat vector.
+# ---------------------------------------------------------------------------
+
+
 def _path_str(path: tuple) -> str:
     return ".".join(str(key) for key in path)
 
 
-def _iter_leaves(params: dict[str, Any], path: tuple = ()):
-    """Yield ``(path, value)`` for every non-dict leaf of a nested dict."""
+def _iter_leaves(params: Mapping, path: tuple = ()):
+    """Yield ``(path, value)`` for every non-mapping leaf of a nested mapping."""
     for key, value in params.items():
-        if isinstance(value, dict):
+        if isinstance(value, Mapping):
             yield from _iter_leaves(value, path + (key,))
         else:
             yield path + (key,), value
 
 
-def _assign_path(params: dict[str, Any], path: tuple, value: Any) -> None:
-    for key in path[:-1]:
-        params = params[key]
-    params[path[-1]] = value
+def _lookup(params: Any, path: tuple) -> Any:
+    node = params
+    for key in path:
+        if not isinstance(node, Mapping) or key not in node:
+            return _MISSING
+        node = node[key]
+    return node
+
+
+def _tree(params: Mapping) -> dict:
+    """The nesting of ``params`` with every leaf replaced by ``None``."""
+    return {
+        key: _tree(value) if isinstance(value, Mapping) else None
+        for key, value in params.items()
+    }
+
+
+def _copy_tree(tree: dict) -> dict:
+    return {
+        key: _copy_tree(value) if isinstance(value, dict) else None
+        for key, value in tree.items()
+    }
+
+
+def _leaf_form(name: str, value: Any) -> tuple[str, np.dtype, tuple[int, ...]]:
+    """``(kind, dtype, shape)`` of a parameter leaf.
+
+    ``kind`` is ``"number"`` for a Python number, ``"scalar"`` for a NumPy
+    scalar and ``"array"`` for anything array-like. ``dtype`` is the float
+    type a candidate value is cast to; integer and bool leaves are optimized
+    as float64.
+    """
+    if isinstance(value, np.generic):
+        kind, raw, shape = "scalar", value.dtype, ()
+    elif isinstance(value, np.ndarray):
+        kind, raw, shape = "array", value.dtype, value.shape
+    elif isinstance(value, numbers.Real):
+        return "number", np.dtype(np.float64), ()
+    else:
+        try:
+            arr = np.asarray(value)
+        except (TypeError, ValueError) as error:
+            raise ValueError(f"parameter {name} is not real-numeric") from error
+        kind, raw, shape = "array", arr.dtype, arr.shape
+    if raw.kind in "biu":
+        return kind, np.dtype(np.float64), shape
+    if raw.kind != "f":
+        raise ValueError(f"parameter {name} is not real-numeric")
+    if np.finfo(raw).nmant > _FLOAT64_MANTISSA:
+        raise TypeError(
+            f"parameter {name} is {raw.name}, which the float64 drivers cannot "
+            "carry exactly; convert it to float64 first"
+        )
+    return kind, raw, shape
+
+
+class _Leaf:
+    """One parameter leaf: its path, its slice of the flat vector, its type."""
+
+    __slots__ = ("path", "name", "kind", "dtype", "shape", "size", "offset")
+
+    def __init__(self, path: tuple, value: Any, offset: int):
+        self.path = path
+        self.name = _path_str(path)
+        self.kind, self.dtype, self.shape = _leaf_form(self.name, value)
+        self.size = math.prod(self.shape)
+        self.offset = offset
+
+    @property
+    def span(self) -> slice:
+        return slice(self.offset, self.offset + self.size)
+
+    def rebuild(self, chunk: np.ndarray) -> Any:
+        """A fresh leaf holding ``chunk``, in the leaf's own type."""
+        if self.kind == "number":
+            return float(chunk[0])
+        if self.kind == "scalar":
+            return self.dtype.type(chunk[0])
+        return chunk.astype(self.dtype).reshape(self.shape)
+
+
+class _Layout:
+    """Where each leaf of a nested parameter mapping sits in the flat vector."""
+
+    def __init__(self, template: Mapping):
+        self.leaves: list[_Leaf] = []
+        offset = 0
+        for path, value in _iter_leaves(template):
+            leaf = _Leaf(path, value, offset)
+            self.leaves.append(leaf)
+            offset += leaf.size
+        self.size = offset
+        self._tree = _tree(template)
+
+    def name(self, i: int) -> str:
+        """Name of coordinate ``i``: the dotted key, indexed inside an array."""
+        for leaf in self.leaves:
+            if leaf.offset <= i < leaf.offset + leaf.size:
+                if leaf.shape == ():
+                    return leaf.name
+                index = np.unravel_index(i - leaf.offset, leaf.shape)
+                return f"{leaf.name}[{','.join(str(int(k)) for k in index)}]"
+        raise IndexError(i)
+
+    def names(self) -> list[str]:
+        return [self.name(i) for i in range(self.size)]
+
+    def vector(
+        self, params: Any, what: str, *, exact: bool = True, finite: bool = True
+    ) -> np.ndarray:
+        """The flat float64 vector of ``params``, a mapping that mirrors the layout.
+
+        Each leaf must have the layout's shape (only its size when ``exact``
+        is false) and, when ``finite``, finite values. Errors name the leaf.
+        """
+        out = np.empty(self.size)
+        for leaf in self.leaves:
+            value = _lookup(params, leaf.path)
+            if value is _MISSING:
+                raise ValueError(f"{what} has no {leaf.name}")
+            arr = _real_array(value, f"{what} {leaf.name}")
+            if arr.shape != leaf.shape if exact else arr.size != leaf.size:
+                raise ValueError(
+                    f"{what} {leaf.name} has shape {arr.shape}, but the parameter "
+                    f"has shape {leaf.shape}"
+                )
+            values = arr.reshape(-1)
+            if finite and not np.all(np.isfinite(values)):
+                raise ValueError(f"{what} {leaf.name} must be finite")
+            out[leaf.span] = values
+        return out
+
+    def cast(self, vector: np.ndarray) -> np.ndarray:
+        """``vector`` with each coordinate rounded to its leaf's dtype."""
+        out = np.array(vector, dtype=np.float64)
+        for leaf in self.leaves:
+            if leaf.dtype != np.float64:
+                out[leaf.span] = out[leaf.span].astype(leaf.dtype)
+        return out
+
+    def params(self, vector: np.ndarray) -> dict[str, Any]:
+        """A fresh nested dict holding ``vector``, each leaf in its own type."""
+        out = _copy_tree(self._tree)
+        for leaf in self.leaves:
+            node = out
+            for key in leaf.path[:-1]:
+                node = node[key]
+            node[leaf.path[-1]] = leaf.rebuild(vector[leaf.span])
+        return out
+
+
+# ---------------------------------------------------------------------------
+# Bounds.
+# ---------------------------------------------------------------------------
 
 
 def _lookup_path(params: Any, path: tuple):
@@ -137,69 +312,6 @@ def _lookup_path(params: Any, path: tuple):
             return None
         node = node[key]
     return node
-
-
-def _deep_copy(node: Any) -> Any:
-    if isinstance(node, dict):
-        return {key: _deep_copy(value) for key, value in node.items()}
-    if isinstance(node, np.ndarray):
-        return node.copy()
-    return node
-
-
-def flatten_parameters(params: dict[str, Any]):
-    """Flatten a nested parameter dict to ``(vector, spec)``.
-
-    Scalar leaves contribute one entry; array leaves contribute their
-    ravelled entries in C order. ``spec`` records ``(path, shape)`` per
-    leaf (``shape == ()`` for scalars) so :func:`unflatten_parameters`
-    can rebuild the structure. Only real-numeric leaves are supported;
-    non-finite starts are rejected.
-    """
-    if not isinstance(params, dict) or not params:
-        raise ValueError("params must be a non-empty dict")
-    segments: list[np.ndarray] = []
-    spec: list[tuple[tuple, tuple]] = []
-    for path, value in _iter_leaves(params):
-        try:
-            arr = np.asarray(value, dtype=np.float64).ravel()
-        except (TypeError, ValueError) as e:
-            raise ValueError(
-                f"parameter {_path_str(path)} is not real-numeric"
-            ) from e
-        if arr.size == 0:
-            raise ValueError(f"parameter {_path_str(path)} is empty")
-        if not np.all(np.isfinite(arr)):
-            raise ValueError(f"parameter {_path_str(path)} must be finite")
-        shape = np.shape(value)
-        segments.append(arr)
-        spec.append((path, shape if isinstance(shape, tuple) else ()))
-    return np.concatenate(segments), spec
-
-
-def spec_total(spec) -> int:
-    """Flattened dimension of a :func:`flatten_parameters` spec."""
-    return sum(int(np.prod(shape)) if shape != () else 1 for _, shape in spec)
-
-
-def unflatten_parameters(vector: np.ndarray, spec, template: dict[str, Any]):
-    """Rebuild a nested parameter dict from a flat vector and a spec.
-
-    Array leaves are reshaped to their original shape; the returned dict
-    mirrors ``template``'s nesting and never mutates the template.
-    """
-    vector = np.asarray(vector, dtype=np.float64).ravel()
-    total = spec_total(spec)
-    if vector.size != total:
-        raise ValueError(f"vector has length {vector.size} but the spec needs {total}")
-    out = _deep_copy(template)
-    offset = 0
-    for path, shape in spec:
-        size = int(np.prod(shape)) if shape != () else 1
-        chunk = vector[offset : offset + size]
-        _assign_path(out, path, chunk[0] if shape == () else chunk.reshape(shape))
-        offset += size
-    return out
 
 
 def _bound_pair(entry: Any, size: int, fallback: tuple[np.ndarray, np.ndarray]):
@@ -265,6 +377,39 @@ def _resolve_bounds(
     return np.concatenate(lows), np.concatenate(highs)
 
 
+def _inward(low: np.ndarray, high: np.ndarray, dtype: np.dtype):
+    """``low`` rounded up and ``high`` rounded down to values ``dtype`` holds."""
+    info = np.finfo(dtype)
+    up = np.clip(low, info.min, info.max).astype(dtype)
+    up = np.where(up < low, np.nextafter(up, dtype.type(np.inf)), up)
+    down = np.clip(high, info.min, info.max).astype(dtype)
+    down = np.where(down > high, np.nextafter(down, dtype.type(-np.inf)), down)
+    return up.astype(np.float64), down.astype(np.float64)
+
+
+def _round_inward(layout: _Layout, low, high):
+    """The box with the bounds of each float32 or float16 leaf rounded inward.
+
+    A coordinate left with no value of its leaf's dtype is a ValueError
+    naming it.
+    """
+    low = np.array(low, dtype=np.float64)
+    high = np.array(high, dtype=np.float64)
+    for leaf in layout.leaves:
+        if leaf.dtype == np.float64:
+            continue
+        up, down = _inward(low[leaf.span], high[leaf.span], leaf.dtype)
+        bad = _first(up > down)
+        if bad is not None:
+            i = leaf.offset + bad
+            raise ValueError(
+                f"the bounds of {layout.name(i)} hold no {leaf.dtype.name} value: "
+                f"lower={float(low[i])!r}, upper={float(high[i])!r}"
+            )
+        low[leaf.span], high[leaf.span] = up, down
+    return low, high
+
+
 def _clip(x: np.ndarray, low: np.ndarray, high: np.ndarray) -> np.ndarray:
     """``x`` moved onto ``[low, high]``; coordinates inside keep their bits."""
     return np.where(x < low, low, np.where(x > high, high, x))
@@ -273,6 +418,20 @@ def _clip(x: np.ndarray, low: np.ndarray, high: np.ndarray) -> np.ndarray:
 # ---------------------------------------------------------------------------
 # One drive of a fitter.
 # ---------------------------------------------------------------------------
+
+
+class _Problem:
+    """A flattened fit: the layout, the box and the start."""
+
+    def __init__(self, layout: _Layout, low: np.ndarray, high: np.ndarray, start):
+        self.layout = layout
+        self.low = low
+        self.high = high
+        self.start = layout.cast(_clip(np.asarray(start, dtype=np.float64), low, high))
+
+    def candidate(self, x: np.ndarray) -> dict[str, Any]:
+        """The parameters at the driver's point ``x``."""
+        return self.layout.params(_clip(x, self.low, self.high))
 
 
 class _Stop(BaseException):
@@ -288,8 +447,8 @@ class _Session:
     a spent budget, stops the driver.
     """
 
-    def __init__(self, candidate, evaluate, step, budget: int, step_every: int):
-        self._candidate = candidate
+    def __init__(self, problem: _Problem, evaluate, step, budget: int, step_every: int):
+        self.problem = problem
         self._evaluate = evaluate
         self._step = step
         self.budget = budget
@@ -304,7 +463,7 @@ class _Session:
             raise _Stop
         try:
             point = np.array(x, dtype=np.float64)
-            loss = _loss_value(self._evaluate(self._candidate(point)))
+            loss = _loss_value(self._evaluate(self.problem.candidate(point)))
             self.count += 1
             rank = math.inf if math.isnan(loss) else loss
             if self.best is None or rank < self.best_loss:
@@ -319,21 +478,19 @@ class _Session:
 
 def _drive(
     session: _Session,
-    low: np.ndarray,
-    high: np.ndarray,
-    start: np.ndarray,
     driver: str,
     seed: int,
     preset: Any = None,
     steps_per_epoch: int = 1,
-) -> np.ndarray:
-    """Run ``driver`` from ``start`` and return the best evaluated point.
+) -> dict[str, Any]:
+    """Run ``driver`` from the start and return the best evaluated parameters.
 
     The first fitter exception is raised here, after the driver has returned.
     """
     from anneal import global_optimize, run
 
-    budget = session.budget
+    problem, budget = session.problem, session.budget
+    low, high, start = problem.low, problem.high, problem.start
     try:
         if driver == "portfolio":
             global_optimize(session, low, high, budget, seed=seed, x0=start)
@@ -355,7 +512,7 @@ def _drive(
         raise session.error
     if session.best is None:
         raise RuntimeError("the driver ended before evaluating the start")
-    return session.best
+    return problem.candidate(session.best)
 
 
 def _classical_preset(driver: str, preset_kwargs: dict[str, Any] | None):
@@ -367,6 +524,80 @@ def _classical_preset(driver: str, preset_kwargs: dict[str, Any] | None):
     if driver == "fast":
         return Fast(**kwargs)
     return Gsa(**kwargs)
+
+
+# ---------------------------------------------------------------------------
+# fit_anneal and its flatten helpers.
+# ---------------------------------------------------------------------------
+
+
+def _deep_copy(node: Any) -> Any:
+    if isinstance(node, dict):
+        return {key: _deep_copy(value) for key, value in node.items()}
+    if isinstance(node, np.ndarray):
+        return node.copy()
+    return node
+
+
+def _assign_path(params: dict[str, Any], path: tuple, value: Any) -> None:
+    for key in path[:-1]:
+        params = params[key]
+    params[path[-1]] = value
+
+
+def flatten_parameters(params: dict[str, Any]):
+    """Flatten a nested parameter dict to ``(vector, spec)``.
+
+    Scalar leaves contribute one entry; array leaves contribute their
+    ravelled entries in C order. ``spec`` records ``(path, shape)`` per
+    leaf (``shape == ()`` for scalars) so :func:`unflatten_parameters`
+    can rebuild the structure. Only real-numeric leaves are supported;
+    non-finite starts are rejected, and so are ``longdouble`` leaves, which a
+    float64 vector cannot carry exactly.
+    """
+    if not isinstance(params, Mapping) or not params:
+        raise ValueError("params must be a non-empty dict")
+    layout = _Layout(params)
+    for leaf in layout.leaves:
+        if leaf.size == 0:
+            raise ValueError(f"parameter {leaf.name} is empty")
+    vector = layout.vector(params, "parameter")
+    return vector, [(leaf.path, leaf.shape) for leaf in layout.leaves]
+
+
+def spec_total(spec) -> int:
+    """Flattened dimension of a :func:`flatten_parameters` spec."""
+    return sum(int(np.prod(shape)) if shape != () else 1 for _, shape in spec)
+
+
+def unflatten_parameters(vector: np.ndarray, spec, template: dict[str, Any]):
+    """Rebuild a nested parameter dict from a flat vector and a spec.
+
+    Array leaves are reshaped to their original shape, and each leaf takes
+    the type of the matching ``template`` leaf: a Python number comes back as
+    a float, a NumPy scalar or array keeps its dtype. The returned dict
+    mirrors ``template``'s nesting and never mutates the template.
+    """
+    vector = np.asarray(vector, dtype=np.float64).ravel()
+    total = spec_total(spec)
+    if vector.size != total:
+        raise ValueError(f"vector has length {vector.size} but the spec needs {total}")
+    out = _deep_copy(template)
+    offset = 0
+    for path, shape in spec:
+        size = int(np.prod(shape)) if shape != () else 1
+        chunk = vector[offset : offset + size]
+        try:
+            leaf = _Leaf(path, _lookup(template, path), 0)
+        except (TypeError, ValueError):
+            leaf = None
+        if leaf is not None and leaf.shape == tuple(shape):
+            value = leaf.rebuild(chunk)
+        else:
+            value = chunk[0] if shape == () else chunk.reshape(shape)
+        _assign_path(out, path, value)
+        offset += size
+    return out
 
 
 def fit_anneal(
@@ -413,10 +644,9 @@ def fit_anneal(
         (e.g. ``{"t_init": 5.0}``); classical drivers only.
 
     Returns what ``fitter.finish`` returns for the best evaluated parameters
-    (ChemFit returns them as given), with array leaves restored to their
-    original shapes. The first exception raised by the fitter, or a loss
-    that is not a real number, stops the fit and is raised without calling
-    ``finish``.
+    (ChemFit returns them as given); each leaf keeps its type, dtype and
+    shape. The first exception raised by the fitter, or a loss that is not a
+    real number, stops the fit and is raised without calling ``finish``.
     """
     evaluate, step = _protocol(fitter)
     driver = str(driver).lower()
@@ -434,8 +664,8 @@ def fit_anneal(
         raise ValueError("fitter.initial_parameters must be a non-empty dict")
     fitter_bounds = getattr(fitter, "bounds", None) or {}
 
+    layout = _Layout(initial_parameters)
     start_vector, spec = flatten_parameters(initial_parameters)
-    template = initial_parameters
     if x0 is not None:
         if isinstance(x0, dict):
             start_vector, x0_spec = flatten_parameters(x0)
@@ -456,26 +686,24 @@ def fit_anneal(
     )
     # run and global_optimize refuse a start outside the box. A caller vector
     # such as zeros is pulled onto the box before the first evaluation.
-    start_vector = _clip(start_vector, low_vec, high_vec)
+    problem = _Problem(layout, *_round_inward(layout, low_vec, high_vec), start_vector)
 
     # The fitter owns bookkeeping; every evaluation is one optimizer step.
     _init(fitter)
     preset = None if driver == "portfolio" else _classical_preset(driver, preset_kwargs)
     steps = max(1, min(int(steps_per_epoch), budget))
-    session = _Session(
-        lambda x: unflatten_parameters(x, spec, template), evaluate, step, budget, step_every=1
-    )
-    best_pos = _drive(session, low_vec, high_vec, start_vector, driver, int(seed), preset, steps)
+    session = _Session(problem, evaluate, step, budget, step_every=1)
+    return _finish(fitter, _drive(session, driver, int(seed), preset, steps))
 
-    best_params = unflatten_parameters(best_pos, spec, template)
-    return _finish(fitter, best_params)
+
+# ---------------------------------------------------------------------------
+# fit_chemfit and its vector view.
+# ---------------------------------------------------------------------------
 
 try:  # ChemFit flattens nested dicts with dotted keys; mirror that order.
     from pydictnest import flatten_dict as _pydict_flatten
-    from pydictnest import unflatten_dict as _pydict_unflatten
 except ImportError:  # pragma: no cover - minimal fallback when chemfit is absent
     _pydict_flatten = None
-    _pydict_unflatten = None
 
 
 def _flatten_mapping(mapping: dict[str, Any], prefix: str = "") -> dict[str, Any]:
@@ -490,98 +718,41 @@ def _flatten_mapping(mapping: dict[str, Any], prefix: str = "") -> dict[str, Any
     return flat
 
 
-def _unflatten_mapping(flat: dict[str, Any]) -> dict[str, Any]:
-    """Invert dotted keys back into nested dicts."""
-    if _pydict_unflatten is not None:
-        return dict(_pydict_unflatten(dict(flat), dict_factory=dict))
-    out: dict[str, Any] = {}
-    for key, value in flat.items():
-        node = out
-        parts = str(key).split(".")
-        for part in parts[:-1]:
-            node = node.setdefault(part, {})
-        node[parts[-1]] = value
-    return out
-
-
 class ChemFitVector:
     """Flattened view of ChemFit (possibly nested, array-valued) parameters.
 
-    Scalar leaves become one coordinate each; ``numpy`` array leaves expand
-    element-wise in C order under the same dotted key. The vector layout is
-    fixed at construction, so :meth:`pack` / :meth:`unpack` round-trip
-    between anneal's flat box and ChemFit's nested parameter dicts.
+    Scalar leaves become one coordinate each; array leaves expand element-wise
+    in C order under the same dotted key. The vector layout is fixed at
+    construction, so :meth:`pack` / :meth:`unpack` round-trip between anneal's
+    flat box and ChemFit's nested parameter dicts; :meth:`unpack` gives each
+    leaf the template's type, dtype and shape.
     """
 
     def __init__(self, template: dict[str, Any]):
-        flat = (
-            dict(_pydict_flatten(template))
-            if _pydict_flatten is not None
-            else _flatten_mapping(template)
-        )
-        self.keys: list[str] = []
-        self.shapes: dict[str, tuple[int, ...]] = {}
-        values: list[float] = []
-        for key, value in flat.items():
-            arr = np.asarray(value, dtype=np.float64)
-            if arr.ndim == 0:
-                self.keys.append(key)
-                self.shapes[key] = ()
-                values.append(float(arr))
-            else:
-                self.shapes[key] = arr.shape
-                for index in np.ndindex(arr.shape):
-                    self.keys.append(f"{key}[{','.join(map(str, index))}]")
-                values.extend(float(v) for v in arr.reshape(-1))
-        self.x0 = np.asarray(values, dtype=np.float64)
+        self._layout = _Layout(template)
+        self.keys: list[str] = self._layout.names()
+        self.shapes: dict[str, tuple[int, ...]] = {
+            leaf.name: leaf.shape for leaf in self._layout.leaves
+        }
+        self.x0 = self._layout.vector(template, "parameter")
 
     @property
     def dim(self) -> int:
-        return len(self.keys)
+        return self._layout.size
 
     def _base_key(self, key: str) -> str:
         return key.split("[", 1)[0]
 
     def pack(self, params: dict[str, Any]) -> np.ndarray:
         """Flatten a nested parameter dict into the fixed vector layout."""
-        flat = (
-            dict(_pydict_flatten(params))
-            if _pydict_flatten is not None
-            else _flatten_mapping(params)
-        )
-        out = np.empty(len(self.keys), dtype=np.float64)
-        cursor = 0
-        seen: set[str] = set()
-        for key in self.keys:
-            base = self._base_key(key)
-            if base not in seen:
-                seen.add(base)
-                arr = np.asarray(flat[base], dtype=np.float64).reshape(-1)
-                shape = self.shapes[base]
-                size = int(np.prod(shape)) if shape != () else 1
-                out[cursor : cursor + size] = arr
-                cursor += size
-        return out
+        return self._layout.vector(params, "params", exact=False, finite=False)
 
     def unpack(self, vector: np.ndarray) -> dict[str, Any]:
         """Rebuild the nested parameter dict from a flat vector."""
-        flat: dict[str, Any] = {}
-        cursor = 0
-        seen: set[str] = set()
-        for key in self.keys:
-            base = self._base_key(key)
-            if base in seen:
-                continue
-            seen.add(base)
-            shape = self.shapes[base]
-            if shape == ():
-                flat[base] = float(vector[cursor])
-                cursor += 1
-            else:
-                size = int(np.prod(shape))
-                flat[base] = np.asarray(vector[cursor : cursor + size]).reshape(shape)
-                cursor += size
-        return _unflatten_mapping(flat)
+        vector = np.asarray(vector, dtype=np.float64).reshape(-1)
+        if vector.size != self.dim:
+            raise ValueError(f"vector has length {vector.size} but the layout needs {self.dim}")
+        return self._layout.params(vector)
 
 
 def _span_bound_pair(leaf: Any) -> tuple[Any, Any]:
@@ -611,7 +782,8 @@ def chemfit_box(
     Bounds mirror ``fitter.bounds`` (same structure as the initial
     parameters). A parameter without bounds gets
     ``init +/- default_span``; scalar ``(lower, upper)`` pairs apply to
-    every element of an array leaf.
+    every element of an array leaf. The bounds of a float32 or float16 leaf
+    are rounded inward to that dtype.
     """
     raw_bounds: dict[str, Any] = getattr(fitter, "bounds", None) or {}
     flat_bounds = (
@@ -635,7 +807,7 @@ def chemfit_box(
             )
         low[i] = lower
         high[i] = upper
-    return low, high
+    return _round_inward(vector._layout, low, high)
 
 
 def fit_chemfit(
@@ -676,9 +848,9 @@ def fit_chemfit(
 
     Returns:
         What ``fitter.finish(best_params)`` returns; ChemFit returns
-        ``best_params``. The first exception raised by the fitter, or a
-        loss that is not a real number, stops the fit and is raised without
-        calling ``finish``.
+        ``best_params``, whose leaves keep their types. The first exception
+        raised by the fitter, or a loss that is not a real number, stops the
+        fit and is raised without calling ``finish``.
     """
     from anneal import Boltzmann, Fast, Gsa
 
@@ -689,8 +861,9 @@ def fit_chemfit(
     vector = ChemFitVector(dict(fitter.initial_parameters))
     if vector.dim == 0:
         raise ValueError("fitter.initial_parameters holds no parameters")
-    low, high = chemfit_box(fitter, vector, default_span=default_span)
-    start = _clip(vector.x0, low, high)
+    problem = _Problem(
+        vector._layout, *chemfit_box(fitter, vector, default_span=default_span), vector.x0
+    )
     steps = max(1, min(int(steps_per_epoch), budget))
 
     _init(fitter)
@@ -717,11 +890,14 @@ def fit_chemfit(
         raise ValueError(
             f"unknown method {method!r}: expected 'portfolio', 'boltzmann', 'fast', or 'gsa'"
         )
-    session = _Session(vector.unpack, evaluate, step, budget, step_every=every)
-    best = _drive(session, low, high, start, method, int(seed), preset, steps)
+    session = _Session(problem, evaluate, step, budget, step_every=every)
+    return _finish(fitter, _drive(session, method, int(seed), preset, steps))
 
-    best_params = vector.unpack(best)
-    return _finish(fitter, best_params)
+
+# ---------------------------------------------------------------------------
+# run_benchmark, run_fitter and their helpers.
+# ---------------------------------------------------------------------------
+
 
 def flatten_params(params: dict[str, Any]) -> tuple[np.ndarray, list[tuple[tuple[str, ...], tuple[int, ...]]]]:
     """Flatten a nested parameter mapping in key order.
@@ -868,7 +1044,7 @@ def run_benchmark(
     coordinate the fitter sees lies in the box, and ``budget`` caps the
     evaluations, the start included. The fitter is driven through
     ``evaluate`` / ``step`` or ``ask`` / ``tell``, with one step notice per
-    evaluation.
+    evaluation, and each parameter leaf keeps its type.
 
     ``low`` and ``high`` may be vectors or scalars (broadcast). When they
     are omitted, bounds are read from ``benchmark_context["bounds"]`` or
@@ -885,7 +1061,10 @@ def run_benchmark(
     initial = benchmark_context["initial_params"]
     if not isinstance(initial, dict):
         raise TypeError("initial_params must be a mapping")
-    x0, spec = flatten_params(initial)
+    layout = _Layout(initial)
+    if layout.size == 0:
+        raise ValueError("initial_params is empty")
+    start = layout.vector(initial, "parameter", finite=False)
     context_bounds = benchmark_context.get("bounds")
     fitter_bounds = getattr(fitter, "bounds", None)
     box_low, box_high = resolve_bounds(
@@ -897,18 +1076,15 @@ def run_benchmark(
     )
     if np.any(box_high <= box_low):
         raise ValueError("each upper bound must be greater than the lower bound")
-    x0 = _clip(x0, box_low, box_high)
+    problem = _Problem(layout, *_round_inward(layout, box_low, box_high), start)
 
     _init(fitter)
     name = method.lower()
     if name != "portfolio" and preset is None:
         preset = {"boltzmann": Boltzmann(), "fast": Fast(), "gsa": Gsa()}[name]
     steps = max(1, min(int(steps_per_epoch), budget))
-    session = _Session(
-        lambda flat: unflatten_params(flat, spec), evaluate, step, budget, step_every=1
-    )
-    best = _drive(session, box_low, box_high, x0, name, int(seed), preset, steps)
-    return _finish(fitter, unflatten_params(best, spec))
+    session = _Session(problem, evaluate, step, budget, step_every=1)
+    return _finish(fitter, _drive(session, name, int(seed), preset, steps))
 
 def run_fitter(
     fitter: Any,
