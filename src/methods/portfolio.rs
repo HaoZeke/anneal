@@ -342,6 +342,9 @@ const DUAL_RESTART_TEMP_RATIO: f64 = 2.0e-5;
 /// Relative decrease that ends dual_annealing's L-BFGS-B local search
 /// (factr 1e7 times machine epsilon).
 const DUAL_LOCAL_FTOL: f64 = 1e7 * f64::EPSILON;
+/// Projected-gradient norm that ends dual_annealing's L-BFGS-B local search
+/// (SciPy's `pgtol`).
+const DUAL_LOCAL_GTOL: f64 = 1e-5;
 /// GLE integrator timestep, matching the thermostat band resolution.
 const GLE_DT: f64 = 0.2;
 /// Minimum timestep exposed by the portfolio-level Bayesian GLE policy.
@@ -1801,6 +1804,8 @@ fn run_persistent_gsa<O, G>(
         patience: 1,
         max_iter: (6 * dim).clamp(100, 1000),
         refine: false,
+        value_floor: 1.0,
+        gtol: DUAL_LOCAL_GTOL,
     };
 
     while obj.ledger.used_get().saturating_sub(start_used) < slice && !obj.ledger.exhausted() {
