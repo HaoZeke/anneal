@@ -862,6 +862,11 @@ def global_optimize(
     every scheduler quantity derives from the budget, the dimension,
     and the arm count.
 
+    Without ``grad_fn``, boxes too narrow for heavy-tailed visiting
+    (least-squares fits, clusters, curved valleys) run a fixed schedule
+    instead: a finite-difference quasi-Newton descent, CMA-ES restarted
+    from the incumbent, and a closing descent.
+
     Args:
       obj_fn: callable ``f(numpy.ndarray) -> float``.
       low, high: box bounds.
