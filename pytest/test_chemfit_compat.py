@@ -460,6 +460,50 @@ def test_run_benchmark_still_drives_half_a_protocol_with_a_future_warning(half, 
     assert same_params(out, full.finished_with)
 
 
+class _EvaluateTell(Recorder):
+    def evaluate(self, parameters, context_index=0):
+        return self._evaluate("evaluate", parameters)
+
+    def tell(self, step=None):
+        self._record("tell")
+
+
+class _AskStep(Recorder):
+    def ask(self, parameters, context_index=0):
+        return self._evaluate("ask", parameters)
+
+    def step(self, step=None):
+        self._record("step")
+
+
+@pytest.mark.parametrize("method", ["portfolio", "boltzmann"])
+@pytest.mark.parametrize(
+    "mixed, whole", [(_EvaluateTell, NextFitter), (_AskStep, ReleasedFitter)]
+)
+def test_run_benchmark_still_sends_a_mixed_fitter_its_other_step_notice(
+    mixed, whole, method
+):
+    evaluate, step = protocol_names(whole)
+    notice = "tell" if step == "step" else "step"
+    fitter = _fitter(mixed)
+    warning = (
+        f"run_benchmark drives {mixed.__name__} through {evaluate} with {notice} "
+        f"notices, since it has no {step}; give it a {step} method"
+    )
+    with pytest.warns(FutureWarning, match=warning) as record:
+        out = run_benchmark(_context(fitter), method=method)
+    future = [w for w in record if issubclass(w.category, FutureWarning)]
+    assert len(future) == 1 and future[0].filename == __file__
+
+    full = _fitter(whole)
+    run_benchmark(_context(full), method=method)
+    assert fitter.calls == [notice if call == step else call for call in full.calls]
+    assert fitter.calls.count(notice) == len(fitter.evaluated) > 1
+    for got, want in zip(fitter.evaluated, full.evaluated):
+        assert same_params(got, want)
+    assert same_params(out, full.finished_with)
+
+
 def _same(got, want):
     """Whether two helper results hold the same values, dtype and bits alike."""
     if isinstance(want, (tuple, list)):

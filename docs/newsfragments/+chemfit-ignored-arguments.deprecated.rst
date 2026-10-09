@@ -16,5 +16,6 @@ for the fitter's only parameter fills it where ``fitter.bounds`` gives both of
 its sides and ``low`` and ``high`` are omitted. ``fit_chemfit`` reads a
 fitter's ``initial_parameters`` given as a list or tuple of ``(key, value)``
 pairs, which ChemFit 3.1 keeps as given, as the dict they make.
-``run_benchmark`` drives a fitter that has ``evaluate`` or ``ask`` but no
-``step`` or ``tell`` without step notices.
+``run_benchmark`` drives a fitter that has ``evaluate`` but no ``step``, or
+``ask`` but no ``tell``, with its ``tell`` or ``step`` as the step notice, or
+with no step notices when it has neither.
