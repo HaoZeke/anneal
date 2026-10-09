@@ -1,8 +1,15 @@
 """ChemFit bridges for the gradient-free drivers.
 
-``fit_anneal`` and ``fit_chemfit`` speak the ``init`` / ``ask`` / ``tell`` /
-``finish`` protocol. ``run_benchmark`` also accepts the ``evaluate`` / ``step``
-names. Nested parameter dictionaries are flattened only at the optimizer
+ChemFit's ``Fitter`` runs a session that the caller drives: ``init``, one
+evaluation per candidate, one notice per optimizer step, then ``finish``.
+Current ChemFit names the middle two ``evaluate`` and ``step``; ChemFit 3.1
+named them ``ask`` and ``tell``. Every bridge here drives ``evaluate`` and
+``step`` when the fitter has both, ``ask`` and ``tell`` otherwise, and refuses
+a fitter with neither pair before calling ``init``. ``finish`` receives the
+best evaluated parameters and its return value is the result; ChemFit returns
+the parameters it was given.
+
+Nested parameter dictionaries are flattened only at the optimizer
 boundary and rebuilt on the way back. Every evaluation stays inside the box,
 and the fitter's initial parameters are the start unless a caller passes
 another ``x0``. The default driver is the Thompson-allocated portfolio.
@@ -10,6 +17,7 @@ another ``x0``. The default driver is the Thompson-allocated portfolio.
 
 from __future__ import annotations
 
+import inspect
 from typing import Any
 
 import numpy as np
@@ -26,6 +34,53 @@ __all__ = [
 ]
 
 _CLASSICAL_DRIVERS = ("boltzmann", "fast", "gsa")
+
+
+# ---------------------------------------------------------------------------
+# The fitter's session protocol.
+# ---------------------------------------------------------------------------
+
+_PROTOCOLS = (("evaluate", "step"), ("ask", "tell"))
+
+
+def _protocol(fitter: Any):
+    """The fitter's ``(evaluate, step)`` methods, else its ``(ask, tell)``.
+
+    A fitter with neither whole pair, or without ``finish``, is a TypeError.
+    """
+    for evaluate_name, step_name in _PROTOCOLS:
+        evaluate = getattr(fitter, evaluate_name, None)
+        step = getattr(fitter, step_name, None)
+        if callable(evaluate) and callable(step):
+            break
+    else:
+        raise TypeError(
+            "the fitter needs evaluate and step (ChemFit) or ask and tell "
+            f"(ChemFit 3.1); {type(fitter).__name__} has neither pair"
+        )
+    if not callable(getattr(fitter, "finish", None)):
+        raise TypeError(f"the fitter needs finish; {type(fitter).__name__} has none")
+    return evaluate, step
+
+
+def _init(fitter: Any) -> None:
+    init = getattr(fitter, "init", None)
+    if callable(init):
+        init()
+
+
+def _finish(fitter: Any, params: dict[str, Any]) -> Any:
+    """``fitter.finish(params)``, or ``fitter.finish()`` when it takes no argument."""
+    finish = fitter.finish
+    try:
+        signature = inspect.signature(finish)
+    except (TypeError, ValueError):
+        return finish(params)
+    try:
+        signature.bind(params)
+    except TypeError:
+        return finish()
+    return finish(params)
 
 
 def _path_str(path: tuple) -> str:
@@ -209,8 +264,10 @@ def fit_anneal(
     """Fit a ChemFit ``Fitter`` with an anneal gradient-free optimizer.
 
     Args:
-      fitter: ChemFit ``Fitter`` (duck-typed: ``initial_parameters``,
-        ``bounds``, ``init``, ``ask``, ``tell``, ``finish``).
+      fitter: ChemFit ``Fitter``, duck-typed: ``initial_parameters``,
+        ``bounds``, ``init``, ``finish``, and either ``evaluate`` and
+        ``step`` (current ChemFit) or ``ask`` and ``tell`` (ChemFit 3.1).
+        Each evaluation is followed by one ``step`` (or ``tell``).
       budget: total objective-evaluation budget. The portfolio charges one
         unit per evaluation; the classical drivers run
         ``n_epochs * steps_per_epoch <= budget`` evaluations.
@@ -233,11 +290,13 @@ def fit_anneal(
       preset_kwargs: extra kwargs for the preset constructor
         (e.g. ``{"t_init": 5.0}``); classical drivers only.
 
-    Returns the finished parameter dict (``fitter.finish`` of the best
-    position), with array leaves restored to their original shapes.
+    Returns what ``fitter.finish`` returns for the best evaluated parameters
+    (ChemFit returns them as given), with array leaves restored to their
+    original shapes.
     """
     from anneal import global_optimize, run
 
+    evaluate, step = _protocol(fitter)
     driver = str(driver).lower()
     if driver not in ("portfolio", *_CLASSICAL_DRIVERS):
         raise ValueError(
@@ -277,13 +336,13 @@ def fit_anneal(
     # such as zeros is pulled onto the box before the first evaluation.
     start_vector = np.minimum(np.maximum(start_vector, low_vec), high_vec)
 
-    # The fitter owns bookkeeping; every ask is one optimizer step.
-    fitter.init()
+    # The fitter owns bookkeeping; every evaluation is one optimizer step.
+    _init(fitter)
 
     def obj(x: np.ndarray) -> float:
         params = unflatten_parameters(np.asarray(x, dtype=np.float64), spec, template)
-        loss = fitter.ask(params)
-        fitter.tell()
+        loss = evaluate(params)
+        step()
         return float(loss)
 
     if driver == "portfolio":
@@ -306,7 +365,7 @@ def fit_anneal(
         best_pos = np.asarray(history.best_pos, dtype=np.float64)
 
     best_params = unflatten_parameters(best_pos, spec, template)
-    return fitter.finish(best_params)
+    return _finish(fitter, best_params)
 
 try:  # ChemFit flattens nested dicts with dotted keys; mirror that order.
     from pydictnest import flatten_dict as _pydict_flatten
@@ -490,9 +549,12 @@ def fit_chemfit(
 
     Args:
         fitter: a :class:`chemfit.Fitter` with ``initial_parameters`` and
-            optional ``bounds``. Only the ask/tell/finish protocol is used,
-            so gradient-free drivers never need forces.
-        budget: total objective evaluations (one ``ask`` each).
+            optional ``bounds``. Only the session protocol is used, so
+            gradient-free drivers never need forces: ``init``, ``finish``,
+            and ``evaluate`` / ``step`` (current ChemFit) or ``ask`` /
+            ``tell`` (ChemFit 3.1).
+        budget: total objective evaluations (one ``evaluate`` or ``ask``
+            each).
         method: ``"portfolio"`` (default; Thompson-allocated SOTA including
             parallel-tempering communicating chains), or ``"boltzmann"``,
             ``"fast"``, ``"gsa"`` for the bound-respecting classical chain
@@ -500,18 +562,20 @@ def fit_chemfit(
         seed: RNG seed forwarded to the anneal driver.
         default_span: half-width around the initial value for parameters
             ChemFit leaves unbounded.
-        tell_every: portfolio evaluations between ``fitter.tell()`` calls
-            so registered callbacks still fire.
+        tell_every: portfolio evaluations between step notices (``step`` or
+            ``tell``) so registered callbacks still fire.
         steps_per_epoch: classical-chain evaluations per epoch; epochs are
             derived as ``budget // steps_per_epoch``.
         **preset_kwargs: ``t_init`` / ``sigma`` / ``gamma`` / ``q_v`` /
             ``q_a`` forwarded to the classical preset constructors.
 
     Returns:
-        The dict from ``fitter.finish(best_params)``.
+        What ``fitter.finish(best_params)`` returns; ChemFit returns
+        ``best_params``.
     """
     from anneal import Boltzmann, Fast, Gsa, global_optimize, run
 
+    evaluate, step = _protocol(fitter)
     if int(budget) < 1:
         raise ValueError("budget must be positive")
     vector = ChemFitVector(dict(fitter.initial_parameters))
@@ -519,22 +583,22 @@ def fit_chemfit(
         raise ValueError("fitter.initial_parameters holds no parameters")
     low, high = chemfit_box(fitter, vector, default_span=default_span)
 
-    fitter.init()
+    _init(fitter)
     n_evals = 0
 
     def ask_vector(x: np.ndarray) -> float:
         nonlocal n_evals
         params = vector.unpack(np.asarray(x, dtype=np.float64))
-        loss = fitter.ask(params)
+        loss = evaluate(params)
         if isinstance(loss, list):
             if len(loss) != 1:
                 raise ValueError("expected one loss per candidate")
             loss = loss[0]
         n_evals += 1
         if method == "portfolio" and n_evals % max(1, int(tell_every)) == 0:
-            fitter.tell()
+            step()
         elif method != "portfolio" and n_evals % max(1, int(steps_per_epoch)) == 0:
-            fitter.tell()
+            step()
         return float(loss)
 
     if method == "portfolio":
@@ -576,7 +640,7 @@ def fit_chemfit(
         )
 
     best_params = vector.unpack(np.asarray(best, dtype=np.float64))
-    return fitter.finish(best_params)
+    return _finish(fitter, best_params)
 
 def flatten_params(params: dict[str, Any]) -> tuple[np.ndarray, list[tuple[tuple[str, ...], tuple[int, ...]]]]:
     """Flatten a nested parameter mapping in key order.
@@ -705,33 +769,6 @@ def resolve_bounds(
     return mirrored
 
 
-def _loss(fitter: Any, params: dict[str, Any]) -> float:
-    if hasattr(fitter, "evaluate"):
-        return float(fitter.evaluate(params))
-    if hasattr(fitter, "ask"):
-        loss = fitter.ask(params)
-        if isinstance(loss, list):
-            if len(loss) != 1:
-                raise ValueError("ask returned more than one loss for one candidate")
-            return float(loss[0])
-        return float(loss)
-    raise TypeError("fitter needs evaluate or ask")
-
-
-def _step(fitter: Any) -> None:
-    if hasattr(fitter, "step"):
-        fitter.step()
-    elif hasattr(fitter, "tell"):
-        fitter.tell()
-
-
-def _finish(fitter: Any, params: dict[str, Any]) -> Any:
-    try:
-        return fitter.finish(params)
-    except TypeError:
-        return fitter.finish()
-
-
 def run_benchmark(
     benchmark_context: dict[str, Any],
     *,
@@ -747,6 +784,8 @@ def run_benchmark(
     ``method`` is ``portfolio`` (the budget-only global optimizer), or
     ``boltzmann``, ``fast``, or ``gsa``. The chain starts at
     ``initial_params``. Every coordinate the fitter sees lies in the box.
+    The fitter is driven through ``evaluate`` / ``step`` or ``ask`` /
+    ``tell``, with one step notice per evaluation.
 
     ``low`` and ``high`` may be vectors or scalars (broadcast). When they
     are omitted, bounds are read from ``benchmark_context["bounds"]`` or
@@ -755,6 +794,7 @@ def run_benchmark(
     from anneal import Boltzmann, Fast, Gsa, global_optimize, run
 
     fitter = benchmark_context["fitter"]
+    evaluate, step = _protocol(fitter)
     budget = int(benchmark_context["budget"])
     if budget < 1:
         raise ValueError("budget must be positive")
@@ -775,14 +815,17 @@ def run_benchmark(
         raise ValueError("each upper bound must be greater than the lower bound")
     x0 = np.minimum(np.maximum(x0, box_low), box_high)
 
-    if hasattr(fitter, "init"):
-        fitter.init()
+    _init(fitter)
 
     def obj(flat: np.ndarray) -> float:
         params = unflatten_params(np.asarray(flat, dtype=np.float64), spec)
-        loss = _loss(fitter, params)
-        _step(fitter)
-        return loss
+        loss = evaluate(params)
+        if isinstance(loss, list):
+            if len(loss) != 1:
+                raise ValueError("expected one loss per candidate")
+            loss = loss[0]
+        step()
+        return float(loss)
 
     name = method.lower()
     if name == "portfolio":
