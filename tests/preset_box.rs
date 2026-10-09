@@ -215,6 +215,44 @@ fn x0_replaces_only_the_first_qmc_start() {
 }
 
 #[test]
+fn boxes_wider_than_half_the_f64_range_mirror_off_the_walls() {
+    // Unit temperature is far below the objective's steps here, so the chain
+    // climbs onto the upper wall and keeps overshooting it. Gaussian steps of
+    // this size stay finite, so a mirrored overshoot never lands on a wall.
+    let low = array![-6e307];
+    let high = array![6e307];
+    let (obj, seen) = recorder(&low, &high);
+    run_preset(0, obj, 1e307, 2.62, None, 1, Some(array![3e307].view()));
+    let seen = seen.lock().unwrap();
+    assert!(
+        seen.iter().all(|x| low[0] < x[0] && x[0] < high[0]),
+        "an evaluation reached a wall"
+    );
+}
+
+#[test]
+fn half_infinite_boxes_mirror_across_the_finite_wall() {
+    let inf = f64::INFINITY;
+    for (low, high, x0) in [
+        (array![0.0], array![inf], array![0.1]),
+        (array![-inf], array![0.0], array![-0.1]),
+    ] {
+        for which in 0..3 {
+            let (obj, seen) = recorder(&low, &high);
+            let history = run_preset(which, obj, 1.0, 2.62, None, 3, Some(x0.view()));
+            let seen = seen.lock().unwrap();
+            for x in seen.iter().chain(std::iter::once(&history.best.pos)) {
+                assert!(
+                    x[0].is_finite(),
+                    "preset {which} evaluated {x} in [{low}, {high}]"
+                );
+                assert_in_box(x, &low, &high);
+            }
+        }
+    }
+}
+
+#[test]
 fn inside_the_box_the_preset_follows_the_unconstrained_chain() {
     // Steps far smaller than the box never reach a wall, so the reflected
     // chain must match the old unconstrained composition draw for draw, and
