@@ -218,6 +218,23 @@ jobs:
           .venv/bin/python -m jupytext --to ipynb --execute --output - \
             examples/notebooks/01_quickstart.md > /dev/null
 
+      # The tests that drive a real ChemFit Fitter skip without ChemFit. It
+      # pins numpy<2.4, so it goes in only after the steps above have run on
+      # the newest numpy. Its next branch has no release, hence the commit.
+      - name: pytest (ChemFit 3.1.1, ask/tell)
+        run: |
+          .venv/bin/python -m pip install "chemfit==3.1.1"
+          .venv/bin/python -c "from chemfit.fitter import Fitter; assert hasattr(Fitter, 'tell')"
+          .venv/bin/python -m pytest pytest/test_chemfit*.py
+
+      - name: pytest (ChemFit next, evaluate/step)
+        run: |
+          .venv/bin/python -m pip uninstall --yes chemfit
+          .venv/bin/python -m pip install \
+            "chemfit @ git+https://github.com/MSallermann/chemfit@37dcfe69c118419d040a0d7f3bf8304d52b569e2"
+          .venv/bin/python -c "from chemfit.fitter import Fitter; assert hasattr(Fitter, 'step')"
+          .venv/bin/python -m pytest pytest/test_chemfit*.py
+
   ffi-smoke:
     name: FFI smoke (linux + cargo-c + valgrind)
     runs-on: ubuntu-latest
