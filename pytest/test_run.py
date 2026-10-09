@@ -5,6 +5,8 @@ test_funcs / test_mcsamplers / test_quench suites."""
 import numpy as np
 import pytest
 
+import anneal
+
 from anneal import (
     Boltzmann,
     Bounds,
@@ -834,6 +836,52 @@ def test_a_gradient_only_driver_keeps_the_warning_when_most_calls_returned():
     with pytest.warns(RuntimeWarning, match="first gradient failed"):
         estimate_gle_omega0(lambda x: float(np.sum(np.asarray(x) ** 2)), gradient, np.full(4, -3.0), np.full(4, 3.0))
     assert len(calls) > 1
+
+
+BOX_LOW, BOX_HIGH = np.full(4, -3.0), np.full(4, 3.0)
+
+
+def _bowl_gradient(x):
+    return 2.0 * (np.asarray(x, dtype=float) - 0.37)
+
+
+@pytest.mark.parametrize(
+    "drive",
+    [
+        lambda f, g: anneal.run_hmc(f, g, BOX_LOW, BOX_HIGH, n_epochs=3, steps_per_epoch=20, seed=0),
+        lambda f, g: anneal.polish(f, g, BOX_LOW, BOX_HIGH, np.zeros(4), max_fevals=100),
+        lambda f, g: anneal.gle_langevin(f, g, BOX_LOW, BOX_HIGH, max_fevals=200, seed=0),
+        lambda f, g: anneal.gle_langevin(f, g, BOX_LOW, BOX_HIGH, max_fevals=200, seed=0, omega0=1.0),
+        lambda f, g: anneal.gle_langevin_preconditioned(f, g, BOX_LOW, BOX_HIGH, max_fevals=200, seed=0),
+        lambda f, g: anneal.gpmd_optimize(f, BOX_LOW, BOX_HIGH, budget=300, seed=0, grad_fn=g),
+        lambda f, g: anneal.bfwt_optimize(f, BOX_LOW, BOX_HIGH, budget=300, seed=0, grad_fn=g),
+        lambda f, g: anneal.global_optimize(f, BOX_LOW, BOX_HIGH, budget=300, seed=0, grad_fn=g),
+    ],
+)
+def test_a_returning_gradient_does_not_hide_an_objective_that_never_returns(drive):
+    def typo(x):
+        return undefined_name_in_the_objective  # noqa: F821
+
+    with pytest.raises(NameError, match="undefined_name_in_the_objective"):
+        drive(typo, _bowl_gradient)
+
+
+def test_cluster_search_re_raises_an_objective_that_never_returns_beside_its_gradient():
+    def typo(x):
+        return undefined_name_in_the_objective  # noqa: F821
+
+    with pytest.raises(NameError, match="undefined_name_in_the_objective"):
+        cluster_search(typo, lj_cluster_gradient, 13, 200, seed=0)
+
+
+def test_a_gradient_only_driver_re_raises_when_no_gradient_returned():
+    def gradient(x):
+        raise ValueError("every gradient failed")
+
+    with pytest.raises(ValueError, match="every gradient failed"):
+        anneal.estimate_gle_omega0(
+            lambda x: float(np.sum(np.asarray(x) ** 2)), gradient, BOX_LOW, BOX_HIGH
+        )
 
 
 def test_objective_exceptions_are_scored_and_reported_once():
