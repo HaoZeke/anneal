@@ -384,8 +384,6 @@ const HOP_SHRINK: f64 = 0.75;
 /// around the incumbent, large-population restarts search the whole box.
 const CMA_FIRST_SIGMA: f64 = 0.025;
 const CMA_LARGE_SIGMA: f64 = 0.3;
-/// First CMA-ES step after a converged finite-difference descent.
-const CMA_VALLEY_SIGMA: f64 = 0.003;
 /// IPOP stops doubling once a run could no longer afford this many
 /// generations of the budget.
 const CMA_MIN_GENERATIONS: usize = 40;
@@ -3233,18 +3231,6 @@ where
         // kicks from the minimum pay: QN enters the rounds on the prior.
         posteriors[qn].alpha = 1.0;
         posteriors[qn].beta = 1.0;
-        // A descent that stops paying sits on a valley floor no isotropic
-        // sample improves, so an elite there freezes the run. A non-elitist
-        // run with a short step climbs the walls and relearns the valley's
-        // shape on the way back down.
-        states.cma = Some(CmaArmState::new(
-            ledger,
-            &bounds,
-            budget,
-            seed,
-            CMA_VALLEY_SIGMA,
-            false,
-        ));
     }
     let share = |fraction: f64| (budget as f64 * fraction).round() as usize;
     let polish = (LOCAL_FIRST_POLISH_GRADIENTS * gradient)
