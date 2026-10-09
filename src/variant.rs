@@ -416,3 +416,16 @@ pub fn gsa_in_box<O: Objective<f64> + Send + Sync>(
         TsallisAccept::new(q_a),
     )
 }
+
+/// Names used by the boxed-preset callers. Each is [`boltzmann_in_box`],
+/// [`fast_in_box`], or [`gsa_in_box`]. The unconstrained [`boltzmann`],
+/// [`fast`], and [`gsa`] constructors stay on `R^dim`.
+pub use boltzmann_in_box as boltzmann_box;
+pub use boltzmann_in_box as boltzmann_bounded;
+pub use boltzmann_in_box as boltzmann_boxed;
+pub use fast_in_box as fast_box;
+pub use fast_in_box as fast_bounded;
+pub use fast_in_box as fast_boxed;
+pub use gsa_in_box as gsa_box;
+pub use gsa_in_box as gsa_bounded;
+pub use gsa_in_box as gsa_boxed;
