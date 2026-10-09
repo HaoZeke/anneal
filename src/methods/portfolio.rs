@@ -42,6 +42,7 @@ use crate::methods::bayesian_pilot::{
     LaplacePosterior, PilotObservation, PilotPrior, empirical_prior_from_observations,
     fit_laplace_skew_corrected, pilot_draws_qmc,
 };
+use crate::methods::cma_es::{Bipop, CmaEs, CmaRegime, default_lambda};
 use crate::methods::gle_langevin::gle_langevin_preconditioned_sa;
 use crate::methods::local_polish::{
     QmcPolishResult, projected_gradient_polish, qmc_gsa_global_search,
@@ -362,6 +363,13 @@ const DE_WEIGHT_SPAN: f64 = 0.5;
 const HOP_STEP0: f64 = 0.25;
 const HOP_GROW: f64 = 1.3;
 const HOP_SHRINK: f64 = 0.75;
+/// CMA-ES step sizes as fractions of each box side: the first run searches
+/// around the incumbent, large-population restarts search the whole box.
+const CMA_FIRST_SIGMA: f64 = 0.025;
+const CMA_LARGE_SIGMA: f64 = 0.3;
+/// IPOP stops doubling once a run could no longer afford this many
+/// generations of the budget.
+const CMA_MIN_GENERATIONS: usize = 40;
 /// Omelyan trajectory length for the HMC arm.
 const HMC_L_STEPS: usize = 5;
 /// Additive-surrogate fit degree and inverse-CDF grid, matching the
@@ -765,6 +773,8 @@ enum ArmKind {
     AmSa,
     /// Classical population-controlled diffusion (DMC-inspired walkers).
     DmcPop,
+    /// BIPOP CMA-ES restarted from the incumbent.
+    Cma,
 }
 
 impl ArmKind {
@@ -786,6 +796,7 @@ impl ArmKind {
             ArmKind::Tps => "tps",
             ArmKind::AmSa => "am_sa",
             ArmKind::DmcPop => "dmc_pop",
+            ArmKind::Cma => "cma",
         }
     }
 
@@ -826,6 +837,60 @@ struct GsaState {
     t_init: f64,
     /// Strategy-chain step counter (dual_annealing uses T/(step+1) accept).
     strategy_step: usize,
+}
+
+/// Persistent CMA-ES arm. Runs live in box-normalised coordinates, so one
+/// step size is the same fraction of every side; a stopped run is replaced
+/// by the BIPOP planner's next run, centred on the incumbent.
+struct CmaArmState {
+    es: CmaEs,
+    regime: CmaRegime,
+    planner: Bipop,
+    unit: Bounds<f64>,
+    rng: StdRng,
+    /// Whether runs centred on the incumbent keep it as an elite.
+    elitist: bool,
+}
+
+impl CmaArmState {
+    /// First run centred on the incumbent with step `sigma` (a fraction of
+    /// each box side); large-population restarts are never elitist.
+    fn new(
+        ledger: &BudgetLedger,
+        bounds: &Bounds<f64>,
+        budget: usize,
+        seed: u64,
+        sigma: f64,
+        elitist: bool,
+    ) -> Self {
+        let dim = bounds.dims;
+        let lambda = default_lambda(dim);
+        let unit = Bounds::new(Array1::zeros(dim), Array1::ones(dim), 0.0);
+        let mean = to_unit_box(&ledger.incumbent(bounds), bounds);
+        let mut es = CmaEs::new(mean.view(), sigma, lambda, &unit, seed);
+        if elitist {
+            es = es.with_elite(mean.view(), ledger.best_get());
+        }
+        Self {
+            es,
+            regime: CmaRegime::Large,
+            planner: Bipop::new(
+                lambda,
+                (budget / CMA_MIN_GENERATIONS).max(lambda),
+                CMA_LARGE_SIGMA,
+            ),
+            unit,
+            rng: StdRng::seed_from_u64(seed.rotate_left(17)),
+            elitist,
+        }
+    }
+}
+
+fn to_unit_box(x: &Array1<f64>, bounds: &Bounds<f64>) -> Array1<f64> {
+    Array1::from_iter(
+        (0..bounds.dims)
+            .map(|i| ((x[i] - bounds.low[i]) / (bounds.high[i] - bounds.low[i])).clamp(0.0, 1.0)),
+    )
 }
 
 #[derive(Clone, Debug)]
@@ -884,6 +949,8 @@ struct ArmStates {
     basins: BasinRegistry,
     /// Persistent D6 adaptive-Metropolis descent chain.
     am: Option<AmSaState>,
+    /// Persistent CMA-ES run and restart planner.
+    cma: Option<CmaArmState>,
 }
 
 /// Persistent adaptive-Metropolis descent chain (D6 + D11 BFWT).
@@ -2620,6 +2687,7 @@ fn run_arm<O, G>(
                 );
             }
         }
+        ArmKind::Cma => run_cma_arm(obj, ledger, states, slice, seed, budget),
         ArmKind::Reduced => {
             // Active-subspace collapse: charged pilot gradients estimate
             // the dominant gradient-covariance directions, then GSA
@@ -2685,6 +2753,46 @@ fn run_arm<O, G>(
     }
 }
 
+/// One slice of the CMA-ES arm. Each candidate is one charged evaluation and
+/// the arm never asks past the slice or the ledger cap.
+fn run_cma_arm<O>(
+    obj: &BudgetedObjective<'_, O>,
+    ledger: &BudgetLedger,
+    states: &mut ArmStates,
+    slice: usize,
+    seed: u64,
+    budget: usize,
+) where
+    O: Objective<f64>,
+{
+    let bounds = obj.bounds();
+    let dim = bounds.dims;
+    let state = states.cma.get_or_insert_with(|| {
+        CmaArmState::new(ledger, bounds, budget, seed, CMA_FIRST_SIGMA, true)
+    });
+    let start = ledger.used_get();
+    while ledger.used_get() - start < slice && ledger.remaining() > 0 {
+        if state.es.stop_reason().is_some() {
+            state.planner.record(state.regime, state.es.evaluations());
+            let plan = state.planner.next_run(&mut state.rng);
+            let mean = to_unit_box(&ledger.incumbent(bounds), bounds);
+            let run_seed = state.rng.random::<u64>();
+            let mut es = CmaEs::new(mean.view(), plan.sigma, plan.lambda, &state.unit, run_seed);
+            if state.elitist && plan.regime == CmaRegime::Small {
+                es = es.with_elite(mean.view(), ledger.best_get());
+            }
+            state.es = es;
+            state.regime = plan.regime;
+        }
+        let u = state.es.ask();
+        let x = Array1::from_iter((0..dim).map(|i| {
+            (bounds.low[i] + (bounds.high[i] - bounds.low[i]) * u[i])
+                .clamp(bounds.low[i], bounds.high[i])
+        }));
+        state.es.tell(obj.eval(x.view()));
+    }
+}
+
 fn arm_kind_from_name(name: &str) -> Option<ArmKind> {
     Some(match name {
         "explore" => ArmKind::Explore,
@@ -2703,6 +2811,7 @@ fn arm_kind_from_name(name: &str) -> Option<ArmKind> {
         "tps" => ArmKind::Tps,
         "am_sa" => ArmKind::AmSa,
         "dmc_pop" => ArmKind::DmcPop,
+        "cma" => ArmKind::Cma,
         _ => return None,
     })
 }
@@ -4979,5 +5088,165 @@ mod tests {
         );
 
         assert!(states.pilot.is_none());
+    }
+
+    /// Objective that records every point it is asked to evaluate.
+    struct Traced {
+        bounds: Bounds<f64>,
+        f: fn(ArrayView1<f64>) -> f64,
+        trace: Mutex<Vec<Array1<f64>>>,
+    }
+
+    impl Traced {
+        fn new(low: f64, high: f64, dim: usize, f: fn(ArrayView1<f64>) -> f64) -> Self {
+            Self {
+                bounds: Bounds::new(
+                    Array1::from_elem(dim, low),
+                    Array1::from_elem(dim, high),
+                    0.0,
+                ),
+                f,
+                trace: Mutex::new(Vec::new()),
+            }
+        }
+
+        fn points(&self) -> Vec<Array1<f64>> {
+            self.trace.lock().expect("trace lock").clone()
+        }
+    }
+
+    impl Objective<f64> for Traced {
+        fn dim(&self) -> usize {
+            self.bounds.dims
+        }
+
+        fn bounds(&self) -> &Bounds<f64> {
+            &self.bounds
+        }
+
+        fn eval(&self, x: ArrayView1<f64>) -> f64 {
+            self.trace.lock().expect("trace lock").push(x.to_owned());
+            (self.f)(x)
+        }
+    }
+
+    fn rosenbrock(x: ArrayView1<f64>) -> f64 {
+        (0..x.len() - 1)
+            .map(|i| 100.0 * (x[i + 1] - x[i] * x[i]).powi(2) + (1.0 - x[i]).powi(2))
+            .sum()
+    }
+
+    /// Drives one arm directly, one call per slice, and returns every point
+    /// the caller's objective saw. With `headroom` the ledger cap allows each
+    /// call only that many evaluations; without it the cap stays at the
+    /// budget and the arm must stop at its slice on its own.
+    fn drive_arm(
+        arm: ArmKind,
+        obj: &Traced,
+        budget: usize,
+        slices: &[usize],
+        headroom: Option<usize>,
+        seed: u64,
+    ) -> Vec<Array1<f64>> {
+        let ledger = BudgetLedger::new(budget, obj.dim());
+        let budgeted = BudgetedObjective {
+            inner: obj,
+            ledger: &ledger,
+        };
+        let mut states = ArmStates::default();
+        for &slice in slices {
+            let before = ledger.used_get();
+            let allowed = headroom.map_or(budget, |h| (before + h).min(budget));
+            ledger.cap_set(allowed);
+            match arm {
+                ArmKind::Cma => run_cma_arm(&budgeted, &ledger, &mut states, slice, seed, budget),
+                _ => unreachable!(),
+            }
+            ledger.cap_set(budget);
+            assert_eq!(
+                ledger.used_get() - before,
+                slice.min(allowed - before),
+                "{} spends exactly its slice or the cap",
+                arm.name()
+            );
+        }
+        assert_eq!(ledger.used_get(), ledger.n_evals.load(Ordering::Relaxed));
+        let points = obj.points();
+        assert_eq!(
+            points.len(),
+            ledger.used_get(),
+            "every call the objective saw is charged once"
+        );
+        points
+    }
+
+    fn assert_charges_inside_the_box(arm: ArmKind) {
+        // The minimum at (1, ..., 1) lies outside, so the search presses on a
+        // face.
+        let obj = Traced::new(-2.0, 0.5, 5, rosenbrock);
+        let points = drive_arm(arm, &obj, 700, &[700], None, 3);
+        assert_eq!(points.len(), 700, "{} used the whole budget", arm.name());
+        for x in &points {
+            assert!(
+                obj.bounds.contains(x.view()),
+                "{} evaluated {x} outside the box",
+                arm.name()
+            );
+        }
+    }
+
+    fn assert_resumes_identically(arm: ArmKind) {
+        let whole = Traced::new(-2.0, 2.0, 4, rosenbrock);
+        let parts = Traced::new(-2.0, 2.0, 4, rosenbrock);
+        let a = drive_arm(arm, &whole, 400, &[400], None, 11);
+        let b = drive_arm(arm, &parts, 400, &[1, 37, 112, 250], None, 11);
+        assert_eq!(a, b, "{} trajectory depends on slicing", arm.name());
+    }
+
+    fn assert_pauses_at_the_ledger_cap(arm: ArmKind) {
+        // The cap cuts every call short of its slice; an arm that asked past
+        // it would be told a refused charge and leave the uncut trajectory.
+        let whole = Traced::new(-2.0, 2.0, 4, rosenbrock);
+        let cut = Traced::new(-2.0, 2.0, 4, rosenbrock);
+        let a = drive_arm(arm, &whole, 400, &[240], None, 13);
+        let b = drive_arm(arm, &cut, 400, &[100, 100, 100, 100], Some(60), 13);
+        assert_eq!(b.len(), 240);
+        assert_eq!(a, b, "{} trajectory depends on the cap", arm.name());
+    }
+
+    fn replay(arm: ArmKind, seed: u64) -> Vec<Array1<f64>> {
+        drive_arm(
+            arm,
+            &Traced::new(-2.0, 2.0, 4, rosenbrock),
+            300,
+            &[300],
+            None,
+            seed,
+        )
+    }
+
+    #[test]
+    fn cma_arm_charges_every_evaluation_inside_the_box() {
+        assert_charges_inside_the_box(ArmKind::Cma);
+    }
+
+    #[test]
+    fn cma_arm_resumes_identically_across_slices() {
+        assert_resumes_identically(ArmKind::Cma);
+    }
+
+    #[test]
+    fn cma_arm_pauses_at_the_ledger_cap() {
+        assert_pauses_at_the_ledger_cap(ArmKind::Cma);
+    }
+
+    #[test]
+    fn cma_arm_replays_by_seed() {
+        assert_eq!(replay(ArmKind::Cma, 5), replay(ArmKind::Cma, 5));
+        assert_ne!(
+            replay(ArmKind::Cma, 5),
+            replay(ArmKind::Cma, 6),
+            "the sampling stream follows the seed"
+        );
     }
 }
