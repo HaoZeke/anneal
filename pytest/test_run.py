@@ -764,6 +764,40 @@ def test_run_reads_non_contiguous_views(driver, view):
     assert np.array_equal(evaluated(view(low), view(high), view(x0)), evaluated(low, high, x0))
 
 
+# NumPy deprecates reading a size-1 row as a scalar, so a column read row by
+# row would warn.
+@pytest.mark.filterwarnings("error")
+@pytest.mark.parametrize("driver", [run, run_qmc])
+@pytest.mark.parametrize(
+    "column",
+    [
+        lambda a: a.reshape(-1, 1),
+        lambda a: a.reshape(-1, 1).astype(np.float32),
+        lambda a: a.reshape(-1, 1).astype(np.int64),
+        lambda a: [np.array([v]) for v in a],
+    ],
+    ids=["float64", "float32", "int64", "list-of-arrays"],
+)
+def test_run_reads_columns_of_any_dtype_as_the_flat_vector(driver, column):
+    low, high, x0 = np.array([-2.0, -1.0]), np.array([2.0, 3.0]), np.array([1.0, 0.0])
+
+    def evaluated(lo, hi, start):
+        objective = Recorder(styb_tang_2d)
+        driver(objective, lo, hi, Boltzmann(), n_epochs=2, steps_per_epoch=5, seed=3, x0=start)
+        return np.array(objective.points)
+
+    assert np.array_equal(evaluated(column(low), column(high), column(x0)), evaluated(low, high, x0))
+
+
+@pytest.mark.parametrize("driver", [run, run_qmc])
+def test_run_refuses_bytes_for_x0(driver):
+    # Read as its byte values, b"ab" would start the walk at [97, 98].
+    objective = Recorder(styb_tang_2d)
+    with pytest.raises(ValueError):
+        driver(objective, [0.0, 0.0], [200.0, 200.0], Boltzmann(), n_epochs=1, steps_per_epoch=1, x0=b"ab")
+    assert objective.points == []
+
+
 @pytest.mark.parametrize("budget", [1, 2, 100, 1999, 2000])
 def test_run_max_evals_spends_exactly_the_budget(budget):
     objective = Recorder(lj_cluster_energy)
