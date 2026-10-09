@@ -667,7 +667,7 @@ def test_anneal_imports_without_chemfit():
 
 
 @pytest.mark.parametrize("method", METHODS)
-def test_reporter_lj_positions_stay_in_the_box(method):
+def test_lj_positions_never_leave_the_box(method):
     n_atoms, budget = 13, 2000
     initial = np.random.default_rng(0).uniform(-1.5, 1.5, size=(n_atoms, 3))
     fitter, recorder = make_fitter(
