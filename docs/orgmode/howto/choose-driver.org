@@ -27,3 +27,15 @@ One =max_proposals=, auto =n_chains=, per-chain Beta on "produced new global bes
 
 The exposed high-level functions already encode the common good choices.
 The full portfolio auto-orchestrator (pilot several families, allocate remaining budget to the current winner, final polish) lives in the experiments tree and is described conceptually in the Bayesian tutorial.
+
+* Fitting through ChemFit
+
+For ChemFit review-response fits (typically gradient-free, per-atom
+positions), use =anneal.chemfit.fit_anneal(fitter, budget, driver=...)=. The
+default =driver="portfolio"= is the Thompson-allocated SOTA driver over the
+gradient-free arms (QMC restarts, basin hopping, differential evolution, GSA,
+parallel tempering); =driver="boltzmann"/"fast"/"gsa"= run single-chain
+ablations for method comparison. The fitter's =initial_params= seed the
+start by default (=x0=), bounds come from the fitter's =bounds= dict or
+explicit =low= / =high= vectors, and every evaluation stays in-bounds. See
+=examples/chemfit_positions.py= for the corrected driver pattern.

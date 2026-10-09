@@ -4,7 +4,12 @@ Public API:
   - Boltzmann(t_init, sigma): logarithmic cooling + Gaussian + Metropolis.
   - Fast(t_init, gamma): reciprocal cooling + Cauchy + Metropolis.
   - Gsa(t_init, q_v, q_a): Tsallis cooling + Tsallis visit + Tsallis accept.
-  - run(obj_fn, low, high, preset, n_epochs, steps_per_epoch, seed): SA loop.
+  - run(obj_fn, low, high, preset, n_epochs, steps_per_epoch, seed, x0):
+    box-constrained SA loop (proposals mirror-reflected into the box).
+  - run_qmc(...): low-discrepancy multistart SA loop, also box-constrained.
+  - global_optimize(obj_fn, low, high, budget, seed, ...): Thompson-allocated
+    portfolio driver with optional x0 warm start.
+  - fit_anneal(fitter, budget, ...): ChemFit Fitter integration.
   - History, EpochLine: returned by `run`.
   - Config.recommended(n) / Config.for_cluster(n), Ledger(budget),
     cluster_search(obj_fn, grad_fn, n, budget, seed, recommended): measured
@@ -690,6 +695,7 @@ def global_optimize(
     grad_fn=None,
     noise_sigma=None,
     policy: str = "auto",
+    x0=None,
 ):
     """Thompson-allocated portfolio global optimizer.
 
@@ -726,6 +732,9 @@ def global_optimize(
         (out of regime).
       policy: ``"auto"`` (default; feature-based regime routing) or
         ``"legacy"`` (flat arm order, uninformative priors; A/B only).
+      x0: optional starting position, evaluated once up front (one
+        charged budget unit) and installed as the incumbent the arms
+        improve on. Clipped into the box.
 
     Returns a dict with ``best_pos``, ``best_val``, ``n_evals``,
     ``n_grads``, ``arm_pulls``, and ``arm_successes``.
@@ -739,6 +748,7 @@ def global_optimize(
         grad_fn,
         noise_sigma if noise_sigma is None else float(noise_sigma),
         str(policy),
+        None if x0 is None else np.asarray(x0, dtype=np.float64),
     )
     out["best_pos"] = np.asarray(out["best_pos"], dtype=np.float64)
     return out
@@ -749,6 +759,7 @@ def global_optimize_objective(
     budget: int,
     seed: int = 0,
     use_gradient: bool = True,
+    x0=None,
 ):
     """Portfolio global optimizer over a native ``PyObjective`` handle."""
     out = _core_global_optimize_objective(
@@ -756,6 +767,8 @@ def global_optimize_objective(
         int(budget),
         int(seed),
         bool(use_gradient),
+        None,
+        None if x0 is None else np.asarray(x0, dtype=np.float64),
     )
     out["best_pos"] = np.asarray(out["best_pos"], dtype=np.float64)
     return out
@@ -809,4 +822,9 @@ __all__ = [
     "tvm_ffi_tensor",
     "tvm_ffi_tensor_metadata",
     "tvm_ffi_tensors_from_history",
+    "fit_anneal",
+    "flatten_parameters",
+    "unflatten_parameters",
 ]
+
+from anneal.chemfit import fit_anneal, flatten_parameters, unflatten_parameters  # noqa: E402

@@ -7,7 +7,9 @@
 - =Fast(t_init, gamma)= :: Reciprocal cooling + Cauchy + Metropolis.
 - =Gsa(t_init, =q_v=, q_a)= :: =Tsallis= cooling + =Tsallis= visit + =Tsallis= accept.
 
-All called via =run(obj, low, high, preset, n_epochs, steps_per_epoch, seed)=.
+All called via =run(obj, low, high, preset, n_epochs, steps_per_epoch, seed, x0=None)=.
+Proposals are mirror-reflected into =[low, high]=, so every evaluation is
+feasible; =x0= (when given) seeds the chain after clipping into the box.
 
 * Pilot and low-discrepancy
 

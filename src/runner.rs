@@ -5,6 +5,8 @@
 use rand::SeedableRng;
 use rand::rngs::StdRng;
 
+use ndarray::Array1;
+
 use crate::cool::Cooling;
 use crate::history::{EpochLine, History, State};
 use crate::sampler::Sampler;
@@ -98,8 +100,40 @@ where
     M: crate::movekernel::MoveKernel<f64>,
     A: crate::accept::AcceptRule<f64>,
 {
+    run_rs_variant_start(variant, None, n_epochs, steps_per_epoch, seed)
+}
+
+/// Drives a `SaVariant` like [`run_rs_variant`], but starts the chain from
+/// a caller-supplied position when one is given.
+///
+/// The start is routed through the sampler's
+/// [`initial_state_from_position`](Sampler::initial_state_from_position),
+/// which clips it into the objective's bounds and evaluates it once, so the
+/// chain's first state — and every proposal after it — is feasible. `None`
+/// recovers exactly [`run_rs_variant`] (uniform draw from the bounds).
+pub fn run_rs_variant_start<O, C, N, M, A>(
+    variant: SaVariant<f64, O, C, N, M, A>,
+    start: Option<Array1<f64>>,
+    n_epochs: usize,
+    steps_per_epoch: usize,
+    seed: u64,
+) -> History
+where
+    O: eindir_core::Objective<f64> + Send + Sync,
+    C: Cooling<f64> + Clone,
+    N: crate::neigh::Neighborhood<f64>,
+    M: crate::movekernel::MoveKernel<f64>,
+    A: crate::accept::AcceptRule<f64>,
+{
     let cooling = variant.cool.clone();
-    run_rs(variant, &cooling, n_epochs, steps_per_epoch, seed)
+    let mut rng = StdRng::seed_from_u64(seed);
+    let state = match start {
+        Some(pos) => variant
+            .initial_state_from_position(pos)
+            .unwrap_or_else(|| variant.initial_state(&mut rng)),
+        None => variant.initial_state(&mut rng),
+    };
+    drive_rs(&variant, &cooling, state, n_epochs, steps_per_epoch, &mut rng)
 }
 
 /// Resumable variant driver: runs epochs `[start_epoch, start_epoch + n_epochs)`
@@ -174,6 +208,27 @@ where
     M: crate::movekernel::MoveKernel<f64>,
     A: crate::accept::AcceptRule<f64>,
 {
+    run_rs_qmc_variant_start(variant, None, n_starts, n_epochs, steps_per_epoch, seed)
+}
+
+/// Like [`run_rs_qmc_variant`], with one extra chain started from a
+/// caller-supplied position (clipped into bounds and evaluated once).
+/// The returned history is still the best across all starts.
+pub fn run_rs_qmc_variant_start<O, C, N, M, A>(
+    variant: SaVariant<f64, O, C, N, M, A>,
+    start: Option<Array1<f64>>,
+    n_starts: usize,
+    n_epochs: usize,
+    steps_per_epoch: usize,
+    seed: u64,
+) -> History
+where
+    O: eindir_core::Objective<f64> + Send + Sync,
+    C: Cooling<f64> + Clone,
+    N: crate::neigh::Neighborhood<f64>,
+    M: crate::movekernel::MoveKernel<f64>,
+    A: crate::accept::AcceptRule<f64>,
+{
     let cooling = variant.cool.clone();
     let n_starts = n_starts.max(1);
     let starts = eindir_core::low_discrepancy_points(
@@ -184,9 +239,20 @@ where
     // Serial multi-start: Python objectives cannot be driven from Rayon
     // without GIL deadlock. Native multi-walker scaling lives in dmc_pop.
     let mut best_history = None;
-    for idx in 0..n_starts {
-        let start = starts.row(idx);
-        let pos = variant.obj.bounds().clip(start);
+    let mut n_chains = n_starts;
+    if start.is_some() {
+        n_chains += 1;
+    }
+    for idx in 0..n_chains {
+        let pos = if idx < n_starts {
+            let row = starts.row(idx);
+            variant.obj.bounds().clip(row)
+        } else {
+            variant
+                .obj
+                .bounds()
+                .clip(start.as_ref().expect("seeded chain has a start").view())
+        };
         let val = variant.obj.eval(pos.view());
         let pair = eindir_core::FPair { pos, val };
         let state = State {

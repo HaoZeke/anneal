@@ -3062,6 +3062,39 @@ where
     portfolio_optimize_with_policy(obj, grad, budget, seed, noise_sigma, PortfolioPolicy::Auto)
 }
 
+/// Runs the portfolio under the default auto policy, seeded with a
+/// caller-supplied starting position.
+///
+/// `seed_pos` is evaluated once up front (one charged budget unit,
+/// reflected into the box like every other evaluation) and becomes the
+/// initial incumbent that the arms — trust-region polls, differential
+/// evolution, HMC, the DMC walkers — improve on. This is the protocol
+/// anchor for warm starts (for example ChemFit `initial_params`).
+/// A mismatched length or a non-finite entry is a programming error and
+/// panics, matching the budget/bounds asserts below.
+pub fn portfolio_optimize_seeded<O, G>(
+    obj: &O,
+    grad: Option<&G>,
+    budget: usize,
+    seed: u64,
+    noise_sigma: Option<f64>,
+    seed_pos: Option<ArrayView1<f64>>,
+) -> PortfolioResult
+where
+    O: Objective<f64>,
+    G: Gradient<f64>,
+{
+    portfolio_optimize_with_policy_seeded(
+        obj,
+        grad,
+        budget,
+        seed,
+        noise_sigma,
+        PortfolioPolicy::Auto,
+        seed_pos,
+    )
+}
+
 /// Runs the portfolio driver under a shared work-unit budget.
 ///
 /// `budget` bounds combined true-objective and native-gradient
@@ -3075,6 +3108,24 @@ pub fn portfolio_optimize_with_policy<O, G>(
     seed: u64,
     noise_sigma: Option<f64>,
     policy: PortfolioPolicy,
+) -> PortfolioResult
+where
+    O: Objective<f64>,
+    G: Gradient<f64>,
+{
+    portfolio_optimize_with_policy_seeded(obj, grad, budget, seed, noise_sigma, policy, None)
+}
+
+/// Like [`portfolio_optimize_with_policy`], with an optional seed
+/// position evaluated once up front (see [`portfolio_optimize_seeded`]).
+pub fn portfolio_optimize_with_policy_seeded<O, G>(
+    obj: &O,
+    grad: Option<&G>,
+    budget: usize,
+    seed: u64,
+    noise_sigma: Option<f64>,
+    policy: PortfolioPolicy,
+    seed_pos: Option<ArrayView1<f64>>,
 ) -> PortfolioResult
 where
     O: Objective<f64>,
@@ -3130,6 +3181,22 @@ where
         inner: g,
         ledger: &ledger,
     });
+
+    // Warm-start anchor: one charged evaluation of the caller-supplied
+    // start, reflected into the box and recorded by the same path every
+    // arm uses, so it becomes the incumbent the slices improve on.
+    if let Some(seed_pos) = seed_pos {
+        assert_eq!(
+            seed_pos.len(),
+            dim,
+            "seed position length must match the objective dimension"
+        );
+        assert!(
+            seed_pos.iter().all(|v| v.is_finite()),
+            "seed position must contain only finite values"
+        );
+        let _ = budgeted_obj.eval(seed_pos);
+    }
 
     // Probe-based demotion for mid-width MultimodalGlobal boxes. Width alone
     // cannot separate a Styblinski-class multi-basin box from a least-squares

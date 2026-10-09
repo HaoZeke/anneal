@@ -564,3 +564,147 @@ def test_preset_repr():
     assert "Gsa(t_init=3.0, q_v=2.5, q_a=1.7)" == repr(
         Gsa(t_init=3.0, q_v=2.5, q_a=1.7)
     )
+
+
+def _recording_quadratic(dim, low, high):
+    seen = []
+
+    def fn(x: np.ndarray) -> float:
+        seen.append(np.asarray(x, dtype=np.float64).copy())
+        return float(np.sum(x**2))
+
+    return fn, seen
+
+
+def test_run_evaluations_stay_in_bounds():
+    dim = 6
+    low = -3.0 * np.ones(dim)
+    high = 3.0 * np.ones(dim)
+    presets = [
+        Boltzmann(t_init=5.0, sigma=0.5),
+        Fast(t_init=3.0, gamma=0.5),
+        Gsa(t_init=3.0, q_v=2.62, q_a=1.7),
+    ]
+    for preset in presets:
+        fn, seen = _recording_quadratic(dim, low, high)
+        h = run(
+            fn, low, high, preset, n_epochs=20, steps_per_epoch=50, seed=1
+        )
+        assert len(seen) == 20 * 50 + 1
+        for point in seen:
+            assert np.all(point >= low) and np.all(point <= high)
+        assert np.all(np.asarray(h.best_pos) >= low)
+        assert np.all(np.asarray(h.best_pos) <= high)
+
+
+def test_run_qmc_evaluations_stay_in_bounds():
+    dim = 4
+    low = -2.0 * np.ones(dim)
+    high = 2.0 * np.ones(dim)
+    fn, seen = _recording_quadratic(dim, low, high)
+    h = run_qmc(
+        fn,
+        low,
+        high,
+        Gsa(t_init=3.0, q_v=2.62, q_a=1.7),
+        n_starts=4,
+        n_epochs=5,
+        steps_per_epoch=20,
+        seed=2,
+    )
+    assert len(seen) > 0
+    for point in seen:
+        assert np.all(point >= low) and np.all(point <= high)
+    assert np.all(np.asarray(h.best_pos) >= low)
+    assert np.all(np.asarray(h.best_pos) <= high)
+
+
+def test_run_accepts_initial_position():
+    dim = 3
+    low = -3.0 * np.ones(dim)
+    high = 3.0 * np.ones(dim)
+    x0 = np.array([1.0, 2.0, -1.0])
+    fn, _ = _recording_quadratic(dim, low, high)
+    h = run(
+        fn,
+        low,
+        high,
+        Boltzmann(t_init=5.0, sigma=0.5),
+        n_epochs=0,
+        steps_per_epoch=10,
+        seed=0,
+        x0=x0,
+    )
+    assert h.best_val == pytest.approx(6.0)
+    assert np.asarray(h.best_pos) == pytest.approx(x0)
+
+
+def test_run_seeded_chain_never_regresses_past_x0():
+    dim = 3
+    low = -3.0 * np.ones(dim)
+    high = 3.0 * np.ones(dim)
+    x0 = np.array([1.0, 2.0, -1.0])
+    fn, _ = _recording_quadratic(dim, low, high)
+    h = run(
+        fn,
+        low,
+        high,
+        Gsa(t_init=3.0, q_v=2.62, q_a=1.7),
+        n_epochs=10,
+        steps_per_epoch=25,
+        seed=4,
+        x0=x0,
+    )
+    assert h.best_val <= 6.0
+
+
+def test_run_qmc_accepts_initial_position():
+    dim = 3
+    low = -3.0 * np.ones(dim)
+    high = 3.0 * np.ones(dim)
+    x0 = np.array([1.0, 2.0, -1.0])
+    fn, seen = _recording_quadratic(dim, low, high)
+    h = run_qmc(
+        fn,
+        low,
+        high,
+        Boltzmann(t_init=5.0, sigma=0.5),
+        n_starts=4,
+        n_epochs=5,
+        steps_per_epoch=20,
+        seed=9,
+        x0=x0,
+    )
+    assert h.best_val <= 6.0
+    for point in seen:
+        assert np.all(point >= low) and np.all(point <= high)
+
+
+def test_run_rejects_bad_initial_positions():
+    dim = 2
+    low = -3.0 * np.ones(dim)
+    high = 3.0 * np.ones(dim)
+    fn, _ = _recording_quadratic(dim, low, high)
+    with pytest.raises(ValueError, match="same length"):
+        run(
+            fn,
+            low,
+            high,
+            Boltzmann(),
+            n_epochs=1,
+            steps_per_epoch=1,
+            seed=0,
+            x0=np.array([0.0]),
+        )
+    bad = np.array([0.0, float("nan")])
+    with pytest.raises(ValueError, match="finite"):
+        run(
+            fn,
+            low,
+            high,
+            Boltzmann(),
+            n_epochs=1,
+            steps_per_epoch=1,
+            seed=0,
+            x0=bad,
+        )

@@ -22,7 +22,7 @@ use eindir_core::py_objective::{PyBounds as EindirPyBounds, PyObjective};
 use eindir_core::{Bounds, Objective};
 
 use crate::history::History;
-use crate::variant::{boltzmann, fast, gsa};
+use crate::variant::{boltzmann_bounded, fast_bounded, gsa_bounded};
 
 /// Reject empty, non-finite, or inverted box bounds before `Bounds::new`.
 ///
@@ -1201,7 +1201,7 @@ fn estimate_gle_omega0(
     Ok(crate::methods::estimate_gle_omega0(&obj, &grad))
 }
 
-fn gle_langevin_x0(
+fn parse_optional_x0(
     x0: Option<PyReadonlyArray1<'_, f64>>,
     dim: usize,
 ) -> PyResult<Option<Array1<f64>>> {
@@ -1277,7 +1277,7 @@ fn gle_langevin(
     }
     validate_gle_args(max_fevals, omega0)?;
     let dim = low_vec.len();
-    let x0 = gle_langevin_x0(x0, dim)?;
+    let x0 = parse_optional_x0(x0, dim)?;
     let bounds = Bounds::new(Array1::from_vec(low_vec), Array1::from_vec(high_vec), 1e-9);
     let obj = CallableObjective {
         fn_: obj_fn,
@@ -1321,7 +1321,7 @@ fn gle_langevin_preconditioned(
     }
     validate_gle_args(max_fevals, omega0)?;
     let dim = low_vec.len();
-    let x0 = gle_langevin_x0(x0, dim)?;
+    let x0 = parse_optional_x0(x0, dim)?;
     let bounds = Bounds::new(Array1::from_vec(low_vec), Array1::from_vec(high_vec), 1e-9);
     let obj = CallableObjective {
         fn_: obj_fn,
@@ -1361,7 +1361,7 @@ fn gle_langevin_objective(
     x0: Option<PyReadonlyArray1<'_, f64>>,
 ) -> PyResult<Py<PyDict>> {
     validate_gle_args(max_fevals, omega0)?;
-    let x0 = gle_langevin_x0(x0, objective.dim())?;
+    let x0 = parse_optional_x0(x0, objective.dim())?;
     let result = if let Some(omega0) = omega0 {
         crate::methods::gle_langevin_sa(
             &*objective,
@@ -1404,7 +1404,7 @@ fn gle_langevin_preconditioned_objective(
     preconditioner_probes: Option<usize>,
 ) -> PyResult<Py<PyDict>> {
     validate_gle_args(max_fevals, omega0)?;
-    let x0 = gle_langevin_x0(x0, objective.dim())?;
+    let x0 = parse_optional_x0(x0, objective.dim())?;
     let result = if let Some(omega0) = omega0 {
         crate::methods::gle_langevin_sa(
             &*objective,
@@ -1784,8 +1784,12 @@ fn bfwt_optimize(
 ///   seed: RNG seed.
 ///   grad_fn: optional gradient callable; enables the gradient arms
 ///            and the final polish.
+///   x0: optional starting position, evaluated once up front (one
+///       charged budget unit) and installed as the incumbent the arms
+///       improve on. Clipped into the box; must match the bounds length
+///       and contain only finite values.
 #[pyfunction]
-#[pyo3(signature = (obj_fn, low, high, budget, seed = 0, grad_fn = None, noise_sigma = None, policy = "auto"))]
+#[pyo3(signature = (obj_fn, low, high, budget, seed = 0, grad_fn = None, noise_sigma = None, policy = "auto", x0 = None))]
 fn global_optimize(
     py: Python<'_>,
     obj_fn: Py<PyAny>,
@@ -1796,6 +1800,7 @@ fn global_optimize(
     grad_fn: Option<Py<PyAny>>,
     noise_sigma: Option<f64>,
     policy: &str,
+    x0: Option<PyReadonlyArray1<'_, f64>>,
 ) -> PyResult<Py<PyDict>> {
     let low_vec = low.as_slice()?.to_vec();
     let high_vec = high.as_slice()?.to_vec();
@@ -1804,6 +1809,7 @@ fn global_optimize(
         return Err(PyValueError::new_err("budget must be positive"));
     }
     let dim = low_vec.len();
+    let x0 = parse_optional_x0(x0, dim)?;
     let bounds = Bounds::new(Array1::from_vec(low_vec), Array1::from_vec(high_vec), 1e-9);
     let obj = CallableObjective {
         fn_: obj_fn,
@@ -1825,18 +1831,28 @@ fn global_optimize(
             )));
         }
     };
+    let seed_view = x0.as_ref().map(|a| a.view());
     let result = match grad_fn {
         Some(grad_fn) => {
             let grad = CallablePyGradient { fn_: grad_fn, dim };
-            crate::portfolio_optimize_with_policy(&obj, Some(&grad), budget, seed, noise_sigma, pol)
+            crate::portfolio_optimize_with_policy_seeded(
+                &obj,
+                Some(&grad),
+                budget,
+                seed,
+                noise_sigma,
+                pol,
+                seed_view,
+            )
         }
-        None => crate::portfolio_optimize_with_policy::<_, CallablePyGradient>(
+        None => crate::portfolio_optimize_with_policy_seeded::<_, CallablePyGradient>(
             &obj,
             None,
             budget,
             seed,
             noise_sigma,
             pol,
+            seed_view,
         ),
     };
     portfolio_result_to_dict(py, result)
@@ -1844,7 +1860,7 @@ fn global_optimize(
 
 /// Runs the portfolio global optimizer with a native objective handle.
 #[pyfunction]
-#[pyo3(signature = (objective, budget, seed = 0, use_gradient = true, noise_sigma = None))]
+#[pyo3(signature = (objective, budget, seed = 0, use_gradient = true, noise_sigma = None, x0 = None))]
 fn global_optimize_objective(
     py: Python<'_>,
     objective: PyRef<'_, PyObjective>,
@@ -1852,6 +1868,7 @@ fn global_optimize_objective(
     seed: u64,
     use_gradient: bool,
     noise_sigma: Option<f64>,
+    x0: Option<PyReadonlyArray1<'_, f64>>,
 ) -> PyResult<Py<PyDict>> {
     if budget == 0 {
         return Err(PyValueError::new_err("budget must be positive"));
@@ -1863,10 +1880,26 @@ fn global_optimize_objective(
             "noise_sigma must be positive and finite",
         ));
     }
+    let x0 = parse_optional_x0(x0, objective.dim())?;
+    let seed_view = x0.as_ref().map(|a| a.view());
     let result = if use_gradient {
-        crate::portfolio_optimize(&*objective, Some(&*objective), budget, seed, noise_sigma)
+        crate::portfolio_optimize_seeded(
+            &*objective,
+            Some(&*objective),
+            budget,
+            seed,
+            noise_sigma,
+            seed_view,
+        )
     } else {
-        crate::portfolio_optimize::<_, PyObjective>(&*objective, None, budget, seed, noise_sigma)
+        crate::portfolio_optimize_seeded::<_, PyObjective>(
+            &*objective,
+            None,
+            budget,
+            seed,
+            noise_sigma,
+            seed_view,
+        )
     };
     portfolio_result_to_dict(py, result)
 }
@@ -1892,14 +1925,18 @@ enum Preset {
 /// Args:
 ///   obj_fn: Python callable `f(numpy.ndarray) -> float` evaluated at every
 ///           proposal. Held via the GIL.
-///   low, high: numpy arrays defining the box bounds used to draw the
-///              initial position uniformly. Same length defines the
-///              objective dimensionality.
+///   low, high: numpy arrays defining the box bounds. Every proposal is
+///              mirror-reflected into this box, so every evaluation point
+///              is feasible; the initial position is drawn uniformly from
+///              the box unless `x0` is given.
 ///   preset: one of `Boltzmann()`, `Fast()`, `Gsa()` from `anneal`.
 ///   n_epochs, steps_per_epoch: SA loop dimensions.
 ///   seed: u64 seed for the StdRng.
+///   x0: optional deterministic starting position. Clipped into the box
+///       and evaluated once before the chain starts; must match the bounds
+///       length and contain only finite values.
 #[pyfunction]
-#[pyo3(signature = (obj_fn, low, high, preset, n_epochs = 100, steps_per_epoch = 200, seed = 42))]
+#[pyo3(signature = (obj_fn, low, high, preset, n_epochs = 100, steps_per_epoch = 200, seed = 42, x0 = None))]
 fn run(
     obj_fn: Py<PyAny>,
     low: PyReadonlyArray1<'_, f64>,
@@ -1908,14 +1945,13 @@ fn run(
     n_epochs: usize,
     steps_per_epoch: usize,
     seed: u64,
+    x0: Option<PyReadonlyArray1<'_, f64>>,
 ) -> PyResult<PyHistory> {
     let low_vec = low.as_slice()?.to_vec();
     let high_vec = high.as_slice()?.to_vec();
-    if low_vec.len() != high_vec.len() {
-        return Err(pyo3::exceptions::PyValueError::new_err(
-            "low and high must have the same length",
-        ));
-    }
+    validate_box_bounds(&low_vec, &high_vec)?;
+    let dim = low_vec.len();
+    let x0 = parse_optional_x0(x0, dim)?;
     let bounds = Bounds::new(Array1::from_vec(low_vec), Array1::from_vec(high_vec), 1e-9);
     let obj = CallableObjective {
         fn_: obj_fn,
@@ -1923,19 +1959,19 @@ fn run(
     };
     let history = match preset {
         Preset::Boltzmann(p) => {
-            let v = boltzmann(obj, p.t_init, p.sigma)
+            let v = boltzmann_bounded(obj, p.t_init, p.sigma)
                 .map_err(|e| pyo3::exceptions::PyValueError::new_err(format!("{e}")))?;
-            crate::runner::run_rs_variant(v, n_epochs, steps_per_epoch, seed)
+            crate::runner::run_rs_variant_start(v, x0, n_epochs, steps_per_epoch, seed)
         }
         Preset::Fast(p) => {
-            let v = fast(obj, p.t_init, p.gamma)
+            let v = fast_bounded(obj, p.t_init, p.gamma)
                 .map_err(|e| pyo3::exceptions::PyValueError::new_err(format!("{e}")))?;
-            crate::runner::run_rs_variant(v, n_epochs, steps_per_epoch, seed)
+            crate::runner::run_rs_variant_start(v, x0, n_epochs, steps_per_epoch, seed)
         }
         Preset::Gsa(p) => {
-            let v = gsa(obj, p.t_init, p.q_v, p.q_a)
+            let v = gsa_bounded(obj, p.t_init, p.q_v, p.q_a)
                 .map_err(|e| pyo3::exceptions::PyValueError::new_err(format!("{e}")))?;
-            crate::runner::run_rs_variant(v, n_epochs, steps_per_epoch, seed)
+            crate::runner::run_rs_variant_start(v, x0, n_epochs, steps_per_epoch, seed)
         }
     };
     Ok(PyHistory::from(history))
@@ -1989,8 +2025,12 @@ fn pilot_draws_qmc(n: usize, seed: u64) -> PyResult<Vec<Vec<f64>>> {
 }
 
 /// Runs the SA driver from a low-discrepancy multistart design.
+///
+/// `n_starts` QMC points seed the chains; when `x0` is given one extra
+/// chain starts from it (clipped into the box). The returned history is
+/// the best across all starts.
 #[pyfunction]
-#[pyo3(signature = (obj_fn, low, high, preset, n_starts = 8, n_epochs = 100, steps_per_epoch = 200, seed = 42))]
+#[pyo3(signature = (obj_fn, low, high, preset, n_starts = 8, n_epochs = 100, steps_per_epoch = 200, seed = 42, x0 = None))]
 fn run_qmc(
     obj_fn: Py<PyAny>,
     low: PyReadonlyArray1<'_, f64>,
@@ -2000,28 +2040,13 @@ fn run_qmc(
     n_epochs: usize,
     steps_per_epoch: usize,
     seed: u64,
+    x0: Option<PyReadonlyArray1<'_, f64>>,
 ) -> PyResult<PyHistory> {
     let low_vec = low.as_slice()?.to_vec();
     let high_vec = high.as_slice()?.to_vec();
-    if low_vec.len() != high_vec.len() {
-        return Err(PyValueError::new_err(
-            "low and high must have the same length",
-        ));
-    }
-    if low_vec.is_empty() {
-        return Err(PyValueError::new_err(
-            "bounds must have at least one dimension",
-        ));
-    }
-    if low_vec
-        .iter()
-        .zip(high_vec.iter())
-        .any(|(&lo, &hi)| hi < lo)
-    {
-        return Err(PyValueError::new_err(
-            "each upper bound must be greater than or equal to the lower bound",
-        ));
-    }
+    validate_box_bounds(&low_vec, &high_vec)?;
+    let dim = low_vec.len();
+    let x0 = parse_optional_x0(x0, dim)?;
     let bounds = Bounds::new(Array1::from_vec(low_vec), Array1::from_vec(high_vec), 1e-9);
     let obj = CallableObjective {
         fn_: obj_fn,
@@ -2029,19 +2054,40 @@ fn run_qmc(
     };
     let history = match preset {
         Preset::Boltzmann(p) => {
-            let v = boltzmann(obj, p.t_init, p.sigma)
+            let v = boltzmann_bounded(obj, p.t_init, p.sigma)
                 .map_err(|e| PyValueError::new_err(format!("{e}")))?;
-            crate::runner::run_rs_qmc_variant(v, n_starts, n_epochs, steps_per_epoch, seed)
+            crate::runner::run_rs_qmc_variant_start(
+                v,
+                x0,
+                n_starts,
+                n_epochs,
+                steps_per_epoch,
+                seed,
+            )
         }
         Preset::Fast(p) => {
-            let v =
-                fast(obj, p.t_init, p.gamma).map_err(|e| PyValueError::new_err(format!("{e}")))?;
-            crate::runner::run_rs_qmc_variant(v, n_starts, n_epochs, steps_per_epoch, seed)
+            let v = fast_bounded(obj, p.t_init, p.gamma)
+                .map_err(|e| PyValueError::new_err(format!("{e}")))?;
+            crate::runner::run_rs_qmc_variant_start(
+                v,
+                x0,
+                n_starts,
+                n_epochs,
+                steps_per_epoch,
+                seed,
+            )
         }
         Preset::Gsa(p) => {
-            let v = gsa(obj, p.t_init, p.q_v, p.q_a)
+            let v = gsa_bounded(obj, p.t_init, p.q_v, p.q_a)
                 .map_err(|e| PyValueError::new_err(format!("{e}")))?;
-            crate::runner::run_rs_qmc_variant(v, n_starts, n_epochs, steps_per_epoch, seed)
+            crate::runner::run_rs_qmc_variant_start(
+                v,
+                x0,
+                n_starts,
+                n_epochs,
+                steps_per_epoch,
+                seed,
+            )
         }
     };
     Ok(PyHistory::from(history))
