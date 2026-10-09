@@ -1138,6 +1138,7 @@ fn run_chain(
         while ledger.remaining() > 0 {
             if let Some(population) = population.as_ref() {
                 let mut population = population.lock().expect("population");
+                population.set_progress(ledger.spent() as f64 / budget.max(1) as f64);
                 if let Some((offered, offered_state)) = population.take_pending(chain) {
                     if offered < energy - 1e-9 && offered_state.len() == state.len() {
                         accepted_transitions.push(AcceptedTransition {
