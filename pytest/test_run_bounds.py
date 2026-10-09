@@ -104,3 +104,24 @@ def test_run_propagates_objective_failures():
         )
 
     assert calls == 1
+
+
+def test_run_propagates_cancellation():
+    calls = 0
+
+    def cancelled_objective(_x):
+        nonlocal calls
+        calls += 1
+        raise KeyboardInterrupt
+
+    with pytest.raises(KeyboardInterrupt):
+        run(
+            cancelled_objective,
+            np.array([-1.0]),
+            np.array([1.0]),
+            Boltzmann(),
+            n_epochs=2,
+            steps_per_epoch=10,
+        )
+
+    assert calls == 1
