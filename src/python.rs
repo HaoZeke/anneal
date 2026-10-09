@@ -22,7 +22,7 @@ use eindir_core::py_objective::{PyBounds as EindirPyBounds, PyObjective};
 use eindir_core::{Bounds, Objective};
 
 use crate::history::History;
-use crate::variant::{boltzmann, boxed_boltzmann, boxed_fast, boxed_gsa, fast, gsa};
+use crate::variant::{boxed_boltzmann, boxed_fast, boxed_gsa};
 
 /// Reject empty, non-finite, or inverted box bounds before `Bounds::new`.
 ///
