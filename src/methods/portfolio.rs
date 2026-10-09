@@ -17,14 +17,17 @@
 //! from its minimum, run while they pay; short of the budget the opening
 //! needs, CMA-ES, the descent and GSA take the first slices and a descent
 //! turn settles the basin GSA reached before the phases. Each arm not yet
-//! played then takes a turn, later rounds keep the same decaying floor,
-//! and a closing descent from the incumbent ends the run. In this loop
-//! the floor the guarantee needs is asymptotic. The opening runs while it
-//! improves by the success threshold, which cannot last on a bounded
-//! objective, and after that every arm keeps a uniform share and is
-//! pulled infinitely often as the budget grows. The phases and the
-//! descent's turns stop for the same reason, and the number of slices
-//! keeps growing with the budget (`values_only_slice`).
+//! played then takes a turn while the budget holds one beyond the closing
+//! reserve, later rounds keep the same decaying floor, and the descent
+//! closes the run, going on with its current descent unless another arm
+//! has lowered the incumbent since it last played, in which case it
+//! restarts there. In this loop the floor the guarantee needs is
+//! asymptotic. The opening runs while it improves by the success
+//! threshold, which cannot last on a bounded objective, and after that
+//! every arm keeps a uniform share and is pulled infinitely often as the
+//! budget grows. The phases and the descent's turns stop for the same
+//! reason, and the number of slices keeps growing with the budget
+//! (`values_only_slice`).
 //!
 //! Scheduler quantities derive from the problem and the budget rather
 //! than from tuning knobs: the slice size affords a few gradient-
@@ -413,8 +416,8 @@ const QN_AFFORDABLE_GRADIENTS: usize = 5;
 const WARM_UP_GSA_SLICES: usize = 2;
 /// Fewest gradients worth a closing finite-difference polish.
 const QN_MIN_POLISH_GRADIENTS: usize = 3;
-/// The values-only loop's closing polish gets this many gradients, enough
-/// for one finite-difference descent from the incumbent to converge, but
+/// The values-only loop holds this many gradients back for its closing
+/// descent, enough for one finite-difference descent to converge, but
 /// never more than the budget share below.
 const LOCAL_FIRST_POLISH_GRADIENTS: usize = 10;
 const LOCAL_FIRST_POLISH_MAX_SHARE: f64 = 0.4;
@@ -3109,23 +3112,29 @@ fn values_only_slice(dim: usize, budget: usize) -> usize {
 /// then settles the basin GSA reached. From there GSA and then CMA-ES each
 /// keep the turn while they pay: a phase ends once it has gone
 /// [`ROUNDS_PER_ARM`] slices without lowering the incumbent, or as long as
-/// its last gain took if that is longer, and it leaves the closing polish
+/// its last gain took if that is longer, and it leaves the closing reserve
 /// and one slice for each other arm not yet played (short of the opening
-/// budget, one for DE only). Bandit rounds over
-/// [`VALUES_ONLY_ARMS`] follow until the closing polish reserve remains. As
-/// in the main bandit, each arm not yet played takes one slice first, in
-/// list order, so the restart arm and the global searches get an
-/// observation whenever the budget holds a slice each. After that a round
+/// budget, one for DE only). Bandit rounds over [`VALUES_ONLY_ARMS`]
+/// follow until only the closing reserve remains. As in the main bandit,
+/// each arm not yet played takes one slice first, in list order, while a
+/// slice beyond the reserve is left. A descent's turn holds back only the
+/// reserve, so a short budget or a descent that keeps paying can leave an
+/// arm without a turn: on Lennard-Jones positions at 39 dimensions and
+/// 1000 evaluations the first turns leave only the reserve, and DE, the
+/// surrogate and the restart arm do not play. After the warm-up a round
 /// picks uniformly with probability `1/round` (rounds counted from the
 /// opening); otherwise the arm whose last turn succeeded plays again, and
 /// failing that a discounted Thompson draw picks. A turn is one slice,
-/// except that the descent keeps the turn, short of the closing polish,
+/// except that the descent keeps the turn, short of the closing reserve,
 /// while each slice lowers its own value by more than the success
 /// threshold, until it converges ([`QnArmState::paid`]). A turn succeeds
 /// when it lowers the incumbent by more than [`arm_success_threshold`].
-/// The closing polish is a finite-difference descent from the final
-/// incumbent with the evaluations one needs to converge
-/// ([`LOCAL_FIRST_POLISH_GRADIENTS`]), kicked from it once it does.
+/// The descent closes the run with what is left, a reserve of the
+/// evaluations one descent needs to converge
+/// ([`LOCAL_FIRST_POLISH_GRADIENTS`]) when the budget affords it. It goes
+/// on with its current descent, which may be a kick from the incumbent,
+/// and restarts at the incumbent only if another arm has lowered it since
+/// the descent last played.
 fn run_values_only_portfolio<O, G>(
     obj: &BudgetedObjective<'_, O>,
     ledger: &BudgetLedger,
@@ -3868,10 +3877,11 @@ where
 /// `budget`. It is the incumbent until a lower value is found (if its value
 /// is not finite, until any finite value is), and arms that read the
 /// incumbent start from it: in the values-only loop the descents, CMA-ES,
-/// one GSA chain and the first DE member; with a gradient or declared noise
-/// the trust-region poll, HMC and the population arm. Arms with their own
-/// designs (the Bayesian pilot, the reduced-space search) do not. Without
-/// `x0` the values-only loop starts from the best of a small seeded design.
+/// one GSA chain and the first DE member; with a gradient or declared
+/// noise, arms such as the trust-region poll and the population arm, and
+/// with a gradient also basin hopping and HMC. Arms with their own
+/// designs, such as the Bayesian pilot, do not. Without `x0` the
+/// values-only loop starts from the best of a small seeded design.
 pub fn portfolio_optimize_from<O, G>(
     obj: &O,
     grad: Option<&G>,
