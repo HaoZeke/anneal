@@ -266,12 +266,13 @@ def _finish(fitter: Any, params: dict[str, Any]) -> Any:
 def _loss_value(value: Any) -> float:
     """One real loss as a float; anything else is a TypeError.
 
-    A one-element list (a batch of one) and a 0-d array are unwrapped first.
+    A one-element list or tuple (a batch of one) and a one-element array of
+    any shape, which anneal 0.10.0 read too, are unwrapped first.
     """
     if isinstance(value, (list, tuple)) and len(value) == 1:
         value = value[0]
-    if isinstance(value, np.ndarray) and value.ndim == 0:
-        value = value[()]
+    if isinstance(value, np.ndarray) and value.size == 1:
+        value = value.reshape(())[()]
     if not _is_number(value):
         raise TypeError(
             f"the fitter returned a loss of type {type(value).__name__}; "

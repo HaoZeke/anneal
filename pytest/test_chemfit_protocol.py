@@ -177,6 +177,10 @@ NOT_REAL = [
     {"loss": 1.0},
     True,
     np.array([1.0, 2.0]),
+    np.array([True]),
+    np.array(["1.5"]),
+    np.array([0.5 + 0j]),
+    np.complex128(0.5),
 ]
 
 
@@ -200,9 +204,14 @@ REAL_FORMS = {
     "int64": lambda v: np.int64(round(1000 * v)),
     "0-d array": np.array,
     "one-element list": lambda v: [v],
+    "one-element tuple": lambda v: (v,),
+    "one-element array": lambda v: np.array([v]),
+    "1x1 float32 array": lambda v: np.array([[v]], dtype=np.float32),
+    "list of a one-element array": lambda v: [np.array([v])],
 }
 
 
+@pytest.mark.filterwarnings("error::DeprecationWarning")
 @pytest.mark.filterwarnings("error::RuntimeWarning")
 @pytest.mark.parametrize("form", list(REAL_FORMS))
 @pytest.mark.parametrize("protocol", PROTOCOLS)
