@@ -2,6 +2,7 @@
 //! and returns a `History`. The `Sampler` trait keeps the driver loop
 //! independent of the concrete proposal and acceptance machinery.
 
+use ndarray::Array1;
 use rand::SeedableRng;
 use rand::rngs::StdRng;
 
@@ -100,6 +101,43 @@ where
 {
     let cooling = variant.cool.clone();
     run_rs(variant, &cooling, n_epochs, steps_per_epoch, seed)
+}
+
+/// Drives a variant from an optional caller-supplied position.
+///
+/// The sampler owns start-position normalization; [`SaVariant`] clips the
+/// position to its objective bounds before the first evaluation. With `None`,
+/// this is identical to [`run_rs_variant`].
+pub fn run_rs_variant_from_position<O, C, N, M, A>(
+    variant: SaVariant<f64, O, C, N, M, A>,
+    n_epochs: usize,
+    steps_per_epoch: usize,
+    seed: u64,
+    initial_pos: Option<Array1<f64>>,
+) -> History
+where
+    O: eindir_core::Objective<f64> + Send + Sync,
+    C: Cooling<f64> + Clone,
+    N: crate::neigh::Neighborhood<f64>,
+    M: crate::movekernel::MoveKernel<f64>,
+    A: crate::accept::AcceptRule<f64>,
+{
+    let cooling = variant.cool.clone();
+    let mut rng = StdRng::seed_from_u64(seed);
+    let state = match initial_pos {
+        Some(pos) => variant
+            .initial_state_from_position(pos)
+            .expect("SaVariant supports explicit initial positions"),
+        None => variant.initial_state(&mut rng),
+    };
+    drive_rs(
+        &variant,
+        &cooling,
+        state,
+        n_epochs,
+        steps_per_epoch,
+        &mut rng,
+    )
 }
 
 /// Resumable variant driver: runs epochs `[start_epoch, start_epoch + n_epochs)`
