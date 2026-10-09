@@ -865,14 +865,15 @@ def global_optimize(
     With ``policy="auto"``, no ``grad_fn`` and no ``noise_sigma``, the
     run takes a values-only loop instead, whatever the box: CMA-ES, a
     finite-difference quasi-Newton descent, generalized simulated
-    annealing with dual_annealing's local search, differential
-    evolution, the additive surrogate, and the QMC restart arm. When the
-    budget lets a descent converge, one from the start opens the run while
-    it pays, and from the minimum it reaches annealing and then CMA-ES
-    each keep the turn while they lower the incumbent. Each arm gets one
-    turn before the allocation ranks them and the same decaying uniform
-    floor afterwards; a turn is one slice, except that the descent keeps
-    it while it pays. A descent from the incumbent closes the run.
+    annealing with dual_annealing's local search until a descent has
+    stalled, differential evolution, the additive surrogate, and the QMC
+    restart arm. When the budget lets a descent converge, one from the
+    start opens the run while it pays, and from the minimum it reaches
+    annealing and then CMA-ES each keep the turn while they lower the
+    incumbent. Each arm gets one turn before the allocation ranks them
+    and the same decaying uniform floor afterwards; a turn is one slice,
+    except that the descent keeps it while it pays. A descent from the
+    incumbent closes the run.
 
     Args:
       obj_fn: callable ``f(numpy.ndarray) -> float``.
