@@ -845,6 +845,38 @@ def test_run_leaves_a_nan_start():
     assert h.total_accepted > 0
 
 
+@pytest.mark.parametrize("driver", [run, run_qmc])
+@pytest.mark.parametrize("preset", PRESETS, ids=repr)
+def test_a_nan_start_counts_as_inf_when_nothing_else_is_finite(driver, preset):
+    # Everywhere else the objective raises, which is scored as +inf as well.
+    x0 = np.array([0.5, 0.5])
+
+    def nan_at_x0(x):
+        if np.array_equal(x, x0):
+            return float("nan")
+        raise RuntimeError("no value here")
+
+    with pytest.warns(RuntimeWarning, match="no value here"):
+        h = driver(nan_at_x0, -np.ones(2), np.ones(2), preset, n_epochs=2, steps_per_epoch=50, seed=1, x0=x0)
+    assert h.total_accepted > 0
+    assert h.best_val == np.inf
+
+
+def test_run_qmc_scores_a_nan_start_as_inf():
+    x0 = np.array([0.5, 0.5])
+    h = run_qmc(
+        lambda x: float("nan") if np.array_equal(x, x0) else np.inf,
+        -np.ones(2),
+        np.ones(2),
+        Boltzmann(),
+        n_starts=4,
+        n_epochs=1,
+        steps_per_epoch=0,
+        x0=x0,
+    )
+    assert h.best_val == np.inf
+
+
 def test_keyboard_interrupt_in_the_objective_ends_the_run():
     calls = []
 
