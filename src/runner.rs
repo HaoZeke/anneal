@@ -2,6 +2,7 @@
 //! and returns a `History`. The `Sampler` trait keeps the driver loop
 //! independent of the concrete proposal and acceptance machinery.
 
+use ndarray::Array1;
 use rand::SeedableRng;
 use rand::rngs::StdRng;
 
@@ -102,6 +103,42 @@ where
     run_rs(variant, &cooling, n_epochs, steps_per_epoch, seed)
 }
 
+/// Same driver as [`run_rs_variant`], starting at `x0` when one is given.
+///
+/// `x0` is clipped into the objective box before the first evaluation.
+/// `None` draws the start uniformly from that box, as [`run_rs_variant`] does.
+pub fn run_rs_variant_at<O, C, N, M, A>(
+    variant: SaVariant<f64, O, C, N, M, A>,
+    n_epochs: usize,
+    steps_per_epoch: usize,
+    seed: u64,
+    x0: Option<Array1<f64>>,
+) -> History
+where
+    O: eindir_core::Objective<f64> + Send + Sync,
+    C: Cooling<f64> + Clone,
+    N: crate::neigh::Neighborhood<f64>,
+    M: crate::movekernel::MoveKernel<f64>,
+    A: crate::accept::AcceptRule<f64>,
+{
+    let cooling = variant.cool.clone();
+    let mut rng = StdRng::seed_from_u64(seed);
+    let state = match x0 {
+        Some(pos) => variant
+            .initial_state_from_position(pos)
+            .unwrap_or_else(|| variant.initial_state(&mut rng)),
+        None => variant.initial_state(&mut rng),
+    };
+    drive_rs(
+        &variant,
+        &cooling,
+        state,
+        n_epochs,
+        steps_per_epoch,
+        &mut rng,
+    )
+}
+
 /// Resumable variant driver: runs epochs `[start_epoch, start_epoch + n_epochs)`
 /// of the variant's own cooling schedule, continuing from a prior chain
 /// position when one is supplied, and returns the history together with the
@@ -174,6 +211,28 @@ where
     M: crate::movekernel::MoveKernel<f64>,
     A: crate::accept::AcceptRule<f64>,
 {
+    run_rs_qmc_variant_from(variant, n_starts, n_epochs, steps_per_epoch, seed, None)
+}
+
+/// [`run_rs_qmc_variant`] with an optional incumbent on the first chain.
+///
+/// When `x0` is set, chain 0 starts there (clipped into the box) and the
+/// remaining chains keep the low-discrepancy design.
+pub fn run_rs_qmc_variant_from<O, C, N, M, A>(
+    variant: SaVariant<f64, O, C, N, M, A>,
+    n_starts: usize,
+    n_epochs: usize,
+    steps_per_epoch: usize,
+    seed: u64,
+    x0: Option<Array1<f64>>,
+) -> History
+where
+    O: eindir_core::Objective<f64> + Send + Sync,
+    C: Cooling<f64> + Clone,
+    N: crate::neigh::Neighborhood<f64>,
+    M: crate::movekernel::MoveKernel<f64>,
+    A: crate::accept::AcceptRule<f64>,
+{
     let cooling = variant.cool.clone();
     let n_starts = n_starts.max(1);
     let starts = eindir_core::low_discrepancy_points(
@@ -185,8 +244,15 @@ where
     // without GIL deadlock. Native multi-walker scaling lives in dmc_pop.
     let mut best_history = None;
     for idx in 0..n_starts {
-        let start = starts.row(idx);
-        let pos = variant.obj.bounds().clip(start);
+        let pos = if idx == 0 {
+            if let Some(start) = x0.as_ref() {
+                variant.obj.bounds().clip(start.view())
+            } else {
+                variant.obj.bounds().clip(starts.row(idx))
+            }
+        } else {
+            variant.obj.bounds().clip(starts.row(idx))
+        };
         let val = variant.obj.eval(pos.view());
         let pair = eindir_core::FPair { pos, val };
         let state = State {
