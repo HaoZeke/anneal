@@ -677,6 +677,12 @@ def test_invalid_x0_raises_value_error(driver, x0, message):
         ([-1.0, np.nan], [1.0, 1.0], "finite"),
         ([-1.0, -1.0], [1.0, np.inf], "finite"),
         ([-1.0, 2.0], [1.0, 1.0], "must not exceed"),
+        ([-1e308], [1e308], "high - low must be finite at dimension 0"),
+        (
+            [0.0, -np.finfo(float).max],
+            [1.0, np.finfo(float).max],
+            "high - low must be finite at dimension 1",
+        ),
     ],
 )
 def test_invalid_box_raises_value_error(driver, low, high, message):
