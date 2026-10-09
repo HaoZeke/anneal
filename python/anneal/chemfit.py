@@ -561,6 +561,15 @@ def _covers(layout: _Layout, bounds: Any) -> bool:
     return True
 
 
+def _bounds_every_side(layout: _Layout, bounds: Any) -> bool:
+    """Whether a bounds mapping gives both sides of every leaf."""
+    try:
+        _mapped_box(layout, bounds, None, None)
+    except (TypeError, ValueError):
+        return False
+    return True
+
+
 def _mapped_box(layout: _Layout, bounds: Any, start, span):
     """The raw box from a bounds mapping that mirrors the parameters.
 
@@ -891,16 +900,32 @@ def unflatten_parameters(vector: np.ndarray, spec, template: dict[str, Any]):
     return out
 
 
-def _start_vector(layout: _Layout, x0: Any) -> np.ndarray:
+def _start_vector(layout: _Layout, x0: Any, *, fill: bool = False) -> np.ndarray:
     """The flat start from ``x0``: a dict mirroring the parameters, or a vector.
 
     A dict leaf with its parameter's size but another shape is read in C
-    order, as anneal 0.10.0 read it, with a FutureWarning.
+    order, as anneal 0.10.0 read it, with a FutureWarning. When ``fill`` is
+    true, one value for the only parameter fills it, as 0.10.0 filled a
+    parameter the fitter bounds on both sides, with a FutureWarning too.
     """
     if isinstance(x0, Mapping):
         paths = {path for path, _ in _iter_leaves(x0)}
         if paths != {leaf.path for leaf in layout.leaves}:
             raise ValueError("x0 dict must mirror fitter.initial_parameters")
+        if fill and len(layout.leaves) == 1:
+            leaf = layout.leaves[0]
+            value = _lookup(x0, leaf.path)
+            one = _real_array(value, f"x0 {leaf.name}").reshape(-1)
+            if one.size == 1 < leaf.size:
+                if not np.isfinite(one[0]):
+                    raise ValueError(f"x0 {leaf.name} must be finite")
+                _deprecated(
+                    f"x0 {leaf.name} has shape {np.shape(value)}, but the parameter "
+                    f"has shape {leaf.shape}; its one value fills the parameter. Pass "
+                    "it in the parameter's shape; another shape will raise in a "
+                    "future release."
+                )
+                return np.full(leaf.size, one[0])
         start = layout.vector(x0, "x0", exact=False)
         for leaf in layout.leaves:
             shape = np.shape(_lookup(x0, leaf.path))
@@ -957,8 +982,11 @@ def fit_anneal(
         ``initial_parameters``; a nested dict with the same structure and
         leaf shapes, or a flat vector of the flattened dimension, overrides
         it. A start outside the box is moved onto it. A dict leaf with the
-        parameter's size but another shape is read in C order with a
-        FutureWarning, and will raise in a future release.
+        parameter's size but another shape is read in C order, and one
+        value for the fitter's only parameter, when ``fitter.bounds``
+        gives both of its sides and ``low`` and ``high`` are omitted, fills
+        it, as in anneal 0.10.0; each gives a FutureWarning and will raise
+        in a future release.
       low, high: explicit flat bound vectors. When omitted, bounds come
         from the fitter's ``bounds`` dict (``(lower, upper)`` pairs
         mirroring ``initial_params``; each side a scalar, an array of the
@@ -1043,7 +1071,12 @@ def _fit_anneal(
         layout = _Layout(initial)
         start, _ = flatten_parameters(initial)
         if x0 is not None:
-            start = _start_vector(layout, x0)
+            fill = (
+                low is None
+                and high is None
+                and _bounds_every_side(layout, getattr(fitter, "bounds", None))
+            )
+            start = _start_vector(layout, x0, fill=fill)
         if (low is None) != (high is None):
             raise ValueError("low and high must be given together")
         if low is None:

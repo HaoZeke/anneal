@@ -56,6 +56,13 @@ def _tall_fitter():
     )
 
 
+def _with(initial, bounds):
+    return lambda: ReleasedFitter(initial, bounds)
+
+
+_ONLY = _with({"x": np.array([0.9, -0.6, 0.2])}, {"x": (-1.0, 1.0)})
+
+
 def _context(fitter, budget=60):
     return {
         "fitter": fitter,
@@ -196,6 +203,29 @@ WARNS = [
         ),
         lambda f: fit_anneal(f, 60, x0={"positions": _START.reshape(4, 3), "eps": 0.3}),
         _shape_warning("eps", (1,), ()),
+    ),
+    # 0.10.0 filled the only parameter with one x0 value where the fitter
+    # bounds it on both sides.
+    (
+        "fit_anneal x0 one value for the only parameter (3,)",
+        _ONLY,
+        lambda f: fit_anneal(f, 60, x0={"x": 0.4}),
+        lambda f: fit_anneal(f, 60, x0={"x": np.full(3, 0.4)}),
+        _shape_warning("x", (), (3,)) + ".*its one value fills the parameter",
+    ),
+    (
+        "fit_anneal x0 [0.4] for the only parameter (2, 3)",
+        _with({"x": np.zeros((2, 3))}, {"x": (-1.0, 1.0)}),
+        lambda f: fit_anneal(f, 60, driver="fast", x0={"x": [0.4]}),
+        lambda f: fit_anneal(f, 60, driver="fast", x0={"x": np.full((2, 3), 0.4)}),
+        _shape_warning("x", (1,), (2, 3)) + ".*its one value fills the parameter",
+    ),
+    (
+        "run_fitter x0 one value for the only parameter (3,)",
+        _ONLY,
+        lambda f: run_fitter(f, 60, x0={"x": 0.4}),
+        lambda f: run_fitter(f, 60, x0={"x": np.full(3, 0.4)}),
+        _shape_warning("x", (), (3,)) + ".*its one value fills the parameter",
     ),
     (
         "run_benchmark method sa with Boltzmann()",
@@ -497,10 +527,6 @@ def test_the_installed_chemfit_fitter_runs_on_bounds_read_from_yaml(entry):
     for got, expected in zip(calls, want_calls):
         assert np.array_equal(got, expected)
     assert np.array_equal(out["x"], want["x"])
-
-
-def _with(initial, bounds):
-    return lambda: ReleasedFitter(initial, bounds)
 
 
 def _box(fitter):
@@ -836,6 +862,23 @@ RAISES = [
         lambda f: run_fitter(f, 60, x0=np.zeros(5)),
         ValueError,
         "x0 has length 5 but the parameters flatten to 7",
+    ),
+    # 0.10.0 read x0 dict leaves flat, so leaves of the wrong sizes with the
+    # right total moved values across parameters: a started at [0.3, 0.6].
+    _raises(
+        "fit_anneal x0 leaves of the wrong sizes",
+        lambda f: fit_anneal(f, 60, x0={"a": 0.3, "b": [0.6, 0.7]}),
+        ValueError,
+        "x0 a has shape (), but the parameter has shape (2,)",
+        make=_with({"a": np.zeros(2), "b": 0.0}, {"a": (-1.0, 1.0), "b": (-1.0, 1.0)}),
+    ),
+    # 0.10.0 raised after init when one x0 value met an unbounded parameter.
+    _raises(
+        "fit_anneal x0 one value for an unbounded parameter",
+        lambda f: fit_anneal(f, 60, x0={"x": 0.4}),
+        ValueError,
+        "x0 x has shape (), but the parameter has shape (3,)",
+        make=_with({"x": np.zeros(3)}, {}),
     ),
     # 0.10.0 ran the preset, or raised KeyError after init.
     _raises(
