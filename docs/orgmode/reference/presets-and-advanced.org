@@ -7,19 +7,23 @@
 - =Fast(t_init, gamma)= :: Reciprocal cooling + Cauchy + Metropolis.
 - =Gsa(t_init, =q_v=, q_a)= :: =Tsallis= cooling + =Tsallis= visit + =Tsallis= accept.
 
-All called via =run(obj, low, high, preset, n_epochs, steps_per_epoch, seed, x0=None)=.
+All called via =run(obj, low, high, preset, n_epochs, steps_per_epoch, seed, x0=None, max_evals=None)=.
 Each move is mirror-reflected into =[low, high]= and the neighbourhood is the
 box, so =obj= is only evaluated inside it. =x0= starts the walk at a given
 point; without it the start is a uniform draw. The start costs one
-evaluation, so a run makes =1 + n_epochs * steps_per_epoch= calls.
-=run_qmc(obj, low, high, preset, n_starts, n_epochs, steps_per_epoch, seed, x0=None)=
+evaluation, so a run makes =1 + n_epochs * steps_per_epoch= calls, or
+=max_evals= when that is smaller.
+=run_qmc(obj, low, high, preset, n_starts, n_epochs, steps_per_epoch, seed, x0=None, max_evals=None)=
 runs such a walk from each of =n_starts= (default 8) low-discrepancy starts
 inside the box, and every chain stays in =[low, high]=. Its =x0= replaces the
 first start and is the first evaluation; it returns the =History= of the start
-that found the lowest value. =global_optimize= takes =x0= as well.
+that found the lowest value. Its =max_evals= is split as evenly as possible
+over the starts and caps the total. =global_optimize= takes =x0= as well.
 =low=, =high= and =x0= may be any array-like of one shape, flattened in C order.
 A coordinate with =low == high= stays fixed. A NaN objective value counts as
-worse than every finite value, so it is never kept as the best.
+=+inf=, the value of a failed evaluation, so a point where the objective is
+NaN is reported as the best only when no evaluation returned a number below
+=+inf=, and then with =best_val = inf=.
 
 * Pilot and low-discrepancy
 
