@@ -207,7 +207,8 @@ impl MoveKernel<f64> for TsallisVisit {
 /// test therefore still targets the box-restricted Gibbs measure with no
 /// Hastings correction (manuscript law L1 holds for the reflected proposal).
 /// A box with one infinite wall, or a finite box whose period overflows,
-/// mirrors across the wall the point crossed.
+/// mirrors across the wall the point crossed. An infinite `x` stops on the
+/// wall it crossed.
 pub fn reflect_coord(x: f64, lo: f64, hi: f64) -> f64 {
     let w = hi - lo;
     if w.is_nan() || w <= 0.0 {
@@ -233,12 +234,25 @@ pub fn reflect_coord(x: f64, lo: f64, hi: f64) -> f64 {
             (hi - fold(x - hi)).min(hi).max(lo)
         };
     }
+    if !(x - lo).is_finite() {
+        // The box lies far from zero, so the offset from `lo` overflows
+        // although the period does not. At half scale it cannot overflow.
+        return if x.is_finite() {
+            (2.0 * reflect_coord(0.5 * x, 0.5 * lo, 0.5 * hi))
+                .max(lo)
+                .min(hi)
+        } else if x > hi {
+            hi
+        } else {
+            lo
+        };
+    }
     let mut y = (x - lo).rem_euclid(period);
     if y > w {
         y = period - y;
     }
     // `hi - lo` and `lo + y` both round, so the sum can land one ulp past
-    // `hi`. A non-finite `x` leaves `y` NaN, and `max` sends that to `lo`.
+    // `hi`.
     (lo + y).max(lo).min(hi)
 }
 
@@ -257,6 +271,10 @@ pub fn reflect_coord_with_slope(x: f64, lo: f64, hi: f64) -> (f64, f64) {
     if !period.is_finite() {
         let d = if x < lo { lo - x } else { x - hi };
         let slope = if d < w { -1.0 } else { 1.0 };
+        return (reflect_coord(x, lo, hi), slope);
+    }
+    if x.is_finite() && !(x - lo).is_finite() {
+        let (_, slope) = reflect_coord_with_slope(0.5 * x, 0.5 * lo, 0.5 * hi);
         return (reflect_coord(x, lo, hi), slope);
     }
     let y = (x - lo).rem_euclid(period);
@@ -401,6 +419,21 @@ mod tests {
         assert_eq!(reflect_coord(0.5e308, -1e308, 1e308), 0.5e308);
         assert_eq!(reflect_coord(f64::INFINITY, -1e308, 1e308), 1e308);
         assert_eq!(reflect_coord(f64::NEG_INFINITY, -6e307, 6e307), -6e307);
+    }
+
+    #[test]
+    fn reflect_coord_mirrors_when_the_offset_from_lo_overflows() {
+        // Each box is narrower than half the f64 range, so its period is
+        // finite, but `x - lo` overflows.
+        let near = |a: f64, b: f64| (a - b).abs() <= 1e-12 * b.abs();
+        let m = f64::MAX;
+        let (y, slope) = reflect_coord_with_slope(8.5e307, -1e308, -9e307);
+        assert!(near(y, -9.5e307) && slope == 1.0, "({y}, {slope})");
+        let (y, slope) = reflect_coord_with_slope(-9.5e307, 9e307, 1e308);
+        assert!(near(y, 9.5e307) && slope == -1.0, "({y}, {slope})");
+        assert!(near(reflect_coord(0.4 * m, -m, -0.5 * m), -0.6 * m));
+        assert_eq!(reflect_coord(f64::INFINITY, 1e308, 1.7e308), 1.7e308);
+        assert_eq!(reflect_coord(f64::NEG_INFINITY, 1e308, 1.7e308), 1e308);
     }
 
     #[test]
