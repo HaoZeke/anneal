@@ -7,7 +7,12 @@
 - =Fast(t_init, gamma)= :: Reciprocal cooling + Cauchy + Metropolis.
 - =Gsa(t_init, =q_v=, q_a)= :: =Tsallis= cooling + =Tsallis= visit + =Tsallis= accept.
 
-All called via =run(obj, low, high, preset, n_epochs, steps_per_epoch, seed)=.
+All called via =run(obj, low, high, preset, n_epochs, steps_per_epoch, seed, x0=None)=.
+Each move is mirror-reflected into =[low, high]= and the neighbourhood is the
+box, so =obj= is only evaluated inside it. =x0= starts the walk at a given
+point; without it the start is a uniform draw. The start costs one
+evaluation, so a run makes =1 + n_epochs * steps_per_epoch= calls.
+=run_qmc= takes =x0= as well, in place of its first design point.
 
 * Pilot and low-discrepancy
 

@@ -102,6 +102,41 @@ where
     run_rs(variant, &cooling, n_epochs, steps_per_epoch, seed)
 }
 
+/// Drives a `SaVariant` from `x0` when one is supplied, else from a uniform
+/// draw on the objective's bounds. The start costs one evaluation, so the run
+/// makes `1 + n_epochs * steps_per_epoch` objective calls.
+pub fn run_rs_variant_from<O, C, N, M, A>(
+    variant: SaVariant<f64, O, C, N, M, A>,
+    n_epochs: usize,
+    steps_per_epoch: usize,
+    seed: u64,
+    x0: Option<ndarray::Array1<f64>>,
+) -> History
+where
+    O: eindir_core::Objective<f64> + Send + Sync,
+    C: Cooling<f64> + Clone,
+    N: crate::neigh::Neighborhood<f64>,
+    M: crate::movekernel::MoveKernel<f64>,
+    A: crate::accept::AcceptRule<f64>,
+{
+    let Some(x0) = x0 else {
+        return run_rs_variant(variant, n_epochs, steps_per_epoch, seed);
+    };
+    let cooling = variant.cool.clone();
+    let mut rng = StdRng::seed_from_u64(seed);
+    let state = variant
+        .initial_state_from_position(x0)
+        .expect("SaVariant constructs a state from any position");
+    drive_rs(
+        &variant,
+        &cooling,
+        state,
+        n_epochs,
+        steps_per_epoch,
+        &mut rng,
+    )
+}
+
 /// Resumable variant driver: runs epochs `[start_epoch, start_epoch + n_epochs)`
 /// of the variant's own cooling schedule, continuing from a prior chain
 /// position when one is supplied, and returns the history together with the
@@ -174,13 +209,36 @@ where
     M: crate::movekernel::MoveKernel<f64>,
     A: crate::accept::AcceptRule<f64>,
 {
+    run_rs_qmc_variant_from(variant, n_starts, n_epochs, steps_per_epoch, seed, None)
+}
+
+/// [`run_rs_qmc_variant`] with `x0`, when supplied, in place of the first
+/// low-discrepancy start.
+pub fn run_rs_qmc_variant_from<O, C, N, M, A>(
+    variant: SaVariant<f64, O, C, N, M, A>,
+    n_starts: usize,
+    n_epochs: usize,
+    steps_per_epoch: usize,
+    seed: u64,
+    x0: Option<ndarray::Array1<f64>>,
+) -> History
+where
+    O: eindir_core::Objective<f64> + Send + Sync,
+    C: Cooling<f64> + Clone,
+    N: crate::neigh::Neighborhood<f64>,
+    M: crate::movekernel::MoveKernel<f64>,
+    A: crate::accept::AcceptRule<f64>,
+{
     let cooling = variant.cool.clone();
     let n_starts = n_starts.max(1);
-    let starts = eindir_core::low_discrepancy_points(
+    let mut starts = eindir_core::low_discrepancy_points(
         variant.obj.bounds(),
         n_starts,
         qmc_skip_from_seed(seed),
     );
+    if let Some(x0) = x0 {
+        starts.row_mut(0).assign(&x0);
+    }
     // Serial multi-start: Python objectives cannot be driven from Rayon
     // without GIL deadlock. Native multi-walker scaling lives in dmc_pop.
     let mut best_history = None;

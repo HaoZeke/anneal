@@ -4,7 +4,9 @@ Public API:
   - Boltzmann(t_init, sigma): logarithmic cooling + Gaussian + Metropolis.
   - Fast(t_init, gamma): reciprocal cooling + Cauchy + Metropolis.
   - Gsa(t_init, q_v, q_a): Tsallis cooling + Tsallis visit + Tsallis accept.
-  - run(obj_fn, low, high, preset, n_epochs, steps_per_epoch, seed): SA loop.
+  - run(obj_fn, low, high, preset, n_epochs, steps_per_epoch, seed, x0): SA
+    loop; every proposal is reflected into [low, high] and the walk starts at
+    x0 when one is given.
   - History, EpochLine: returned by `run`.
   - Config.recommended(n) / Config.for_cluster(n), Ledger(budget),
     cluster_search(obj_fn, grad_fn, n, budget, seed, recommended): measured
