@@ -279,6 +279,31 @@ pub type FastVariant<O> = SaVariant<f64, O, ReciprocalCool<f64>, ContinuousR_n, 
 pub type GsaVariant<O> =
     SaVariant<f64, O, TsallisCool<f64>, ContinuousR_n, TsallisVisit, TsallisAccept<f64>>;
 
+/// Type alias for the box-constrained Boltzmann preset:
+/// `(O, LogCool, BoxConstrained, Reflected<Gaussian>, Metropolis)`.
+///
+/// Reflection keeps every proposal inside the box while preserving the
+/// symmetric-proposal Metropolis target (manuscript law L1); clipping would
+/// pile mass on the wall and break it.
+pub type BoltzmannBoxedVariant<O> =
+    SaVariant<f64, O, LogCool<f64>, BoxConstrained<f64>, Reflected<Gaussian>, Metropolis>;
+
+/// Type alias for the box-constrained Fast preset:
+/// `(O, ReciprocalCool, BoxConstrained, Reflected<Cauchy>, Metropolis)`.
+pub type FastBoxedVariant<O> =
+    SaVariant<f64, O, ReciprocalCool<f64>, BoxConstrained<f64>, Reflected<Cauchy>, Metropolis>;
+
+/// Type alias for the box-constrained GSA preset:
+/// `(O, TsallisCool, BoxConstrained, Reflected<TsallisVisit>, TsallisAccept)`.
+pub type GsaBoxedVariant<O> = SaVariant<
+    f64,
+    O,
+    TsallisCool<f64>,
+    BoxConstrained<f64>,
+    Reflected<TsallisVisit>,
+    TsallisAccept<f64>,
+>;
+
 /// Constructs the Boltzmann SA variant: logarithmic cooling, isotropic
 /// Gaussian moves, Metropolis acceptance, on the unconstrained `R^dim`.
 ///
@@ -335,6 +360,63 @@ pub fn gsa<O: Objective<f64> + Send + Sync>(
         TsallisCool::new(t_init, q_v),
         ContinuousR_n::new(dim),
         TsallisVisit::new(q_v),
+        TsallisAccept::new(q_a),
+    )
+}
+
+/// Constructs the box-constrained Boltzmann variant: the same logarithmic
+/// cooling, Gaussian steps, and Metropolis acceptance, but proposals are
+/// mirror-reflected into `obj.bounds()` and the neighborhood is the box.
+///
+/// This is the bound-respecting form of [`boltzmann`]. Every chain position
+/// stays inside the box; the Python `run` driver uses this constructor so
+/// bounded objectives never see out-of-box evaluations.
+pub fn boltzmann_boxed<O: Objective<f64> + Send + Sync>(
+    obj: O,
+    t_init: f64,
+    sigma: f64,
+) -> Result<BoltzmannBoxedVariant<O>, LawViolation> {
+    let bounds = obj.bounds().clone();
+    SaVariant::checked(
+        obj,
+        LogCool::new(t_init, 2.0),
+        BoxConstrained::new(bounds.clone()),
+        Reflected::new(Gaussian::new(sigma), bounds),
+        Metropolis,
+    )
+}
+
+/// Box-constrained form of [`fast`]: reciprocal cooling, Cauchy steps
+/// reflected into `obj.bounds()`, Metropolis acceptance on the box.
+pub fn fast_boxed<O: Objective<f64> + Send + Sync>(
+    obj: O,
+    t_init: f64,
+    gamma: f64,
+) -> Result<FastBoxedVariant<O>, LawViolation> {
+    let bounds = obj.bounds().clone();
+    SaVariant::checked(
+        obj,
+        ReciprocalCool::new(t_init),
+        BoxConstrained::new(bounds.clone()),
+        Reflected::new(Cauchy::new(gamma), bounds),
+        Metropolis,
+    )
+}
+
+/// Box-constrained form of [`gsa`]: Tsallis cooling, Tsallis visits reflected
+/// into `obj.bounds()`, Tsallis acceptance on the box.
+pub fn gsa_boxed<O: Objective<f64> + Send + Sync>(
+    obj: O,
+    t_init: f64,
+    q_v: f64,
+    q_a: f64,
+) -> Result<GsaBoxedVariant<O>, LawViolation> {
+    let bounds = obj.bounds().clone();
+    SaVariant::checked(
+        obj,
+        TsallisCool::new(t_init, q_v),
+        BoxConstrained::new(bounds.clone()),
+        Reflected::new(TsallisVisit::new(q_v), bounds),
         TsallisAccept::new(q_a),
     )
 }
