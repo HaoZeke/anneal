@@ -183,15 +183,19 @@ def _resolve_bounds(
     return np.concatenate(lows), np.concatenate(highs)
 
 
-def _classical_preset(driver: str, preset_kwargs: dict[str, Any] | None):
+def _classical_preset(driver: str, preset: Any, preset_kwargs: dict[str, Any] | None):
     from anneal import Boltzmann, Fast, Gsa
 
-    kwargs = dict(preset_kwargs or {})
-    if driver == "boltzmann":
-        return Boltzmann(**kwargs)
-    if driver == "fast":
-        return Fast(**kwargs)
-    return Gsa(**kwargs)
+    family = {"boltzmann": Boltzmann, "fast": Fast, "gsa": Gsa}[driver]
+    if preset is not None:
+        if preset_kwargs:
+            raise ValueError("pass preset or preset_kwargs, not both")
+        if not isinstance(preset, family):
+            raise ValueError(
+                f"preset {type(preset).__name__} does not match driver {driver!r}"
+            )
+        return preset
+    return family(**dict(preset_kwargs or {}))
 
 
 def fit_anneal(
@@ -204,8 +208,9 @@ def fit_anneal(
     low: np.ndarray | None = None,
     high: np.ndarray | None = None,
     bound_span: float = 3.0,
-    steps_per_epoch: int = 100,
+    steps_per_epoch: int | None = None,
     preset_kwargs: dict[str, Any] | None = None,
+    preset: Any = None,
 ) -> dict[str, Any]:
     """Fit a ChemFit ``Fitter`` with an anneal gradient-free optimizer.
 
@@ -230,11 +235,15 @@ def fit_anneal(
         mirroring ``initial_params``); entries without bounds fall back
         to ``x0 +/- bound_span``.
       bound_span: half-width of the fallback box around unbounded entries.
-      steps_per_epoch: classical-driver epoch width; the cooling schedule
-        runs ``ceil(budget / steps_per_epoch)`` epochs, the last one cut
-        short at ``budget``.
+      steps_per_epoch: classical-driver epoch width, 100 when omitted; the
+        cooling schedule runs ``ceil(budget / steps_per_epoch)`` epochs, the
+        last one cut short at ``budget``.
       preset_kwargs: extra kwargs for the preset constructor
         (e.g. ``{"t_init": 5.0}``); classical drivers only.
+      preset: an ``anneal.Boltzmann``, ``Fast`` or ``Gsa`` matching a
+        classical driver, instead of ``preset_kwargs``. The portfolio takes
+        none of ``steps_per_epoch``, ``preset_kwargs`` and ``preset``, and
+        raises ``ValueError`` when one is given.
 
     Returns the finished parameter dict (``fitter.finish`` of the best
     position), with array leaves restored to their original shapes.
@@ -250,6 +259,18 @@ def fit_anneal(
     budget = int(budget)
     if budget < 1:
         raise ValueError("budget must be positive")
+    if driver == "portfolio":
+        unused = [
+            name
+            for name, value in (
+                ("steps_per_epoch", steps_per_epoch),
+                ("preset_kwargs", preset_kwargs),
+                ("preset", preset),
+            )
+            if value is not None
+        ]
+        if unused:
+            raise ValueError(f"driver 'portfolio' does not take {', '.join(unused)}")
 
     initial_parameters = getattr(fitter, "initial_parameters", None)
     if not isinstance(initial_parameters, dict) or not initial_parameters:
@@ -293,8 +314,8 @@ def fit_anneal(
         result = global_optimize(obj, low_vec, high_vec, budget, seed=int(seed), x0=start_vector)
         best_pos = np.asarray(result["best_pos"], dtype=np.float64)
     else:
-        preset = _classical_preset(driver, preset_kwargs)
-        steps = max(1, min(int(steps_per_epoch), budget))
+        preset = _classical_preset(driver, preset, preset_kwargs)
+        steps = max(1, min(100 if steps_per_epoch is None else int(steps_per_epoch), budget))
         history = run(
             obj,
             low_vec,
@@ -824,11 +845,14 @@ def run_fitter(
     ``method="global_optimize"`` is the portfolio and ``method="sa"`` the
     Boltzmann preset; other names pass through. A fitter that implements
     ``fit_anneal`` is called with that method name, otherwise :func:`fit_anneal`
-    drives it.
+    drives it. ``preset`` and every keyword reach whichever path runs; one
+    that path does not take raises rather than being dropped.
     """
     driver = {"global_optimize": "portfolio", "sa": "boltzmann"}.get(method, method)
     if hasattr(fitter, "fit_anneal"):
         return fitter.fit_anneal(
             budget=budget, method=driver, preset=preset, seed=seed, **kwargs
         )
-    return fit_anneal(fitter, int(budget), driver=driver, seed=int(seed))
+    return fit_anneal(
+        fitter, int(budget), driver=driver, seed=int(seed), preset=preset, **kwargs
+    )

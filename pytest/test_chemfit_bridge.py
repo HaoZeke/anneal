@@ -244,3 +244,25 @@ def test_run_fitter_translates_its_method_names_for_a_native_fit_anneal():
     run_fitter(fitter, 10, method="sa")
     run_fitter(fitter, 10, method="gsa")
     assert [call["method"] for call in fitter.calls] == ["portfolio", "boltzmann", "gsa"]
+
+
+def test_run_fitter_passes_preset_and_keywords_down_the_fallback_path():
+    from anneal import Boltzmann, Gsa
+    from anneal.chemfit import run_fitter
+
+    def fitter():
+        return StepFitter({"positions": np.zeros((2, 3)) + 0.5}, {"positions": (-3.0, 3.0)})
+
+    f = fitter()
+    run_fitter(f, 50, method="boltzmann", preset=Boltzmann(t_init=1.0, sigma=0.05), steps_per_epoch=7)
+    assert len(f.seen) == 50
+    with pytest.raises(ValueError, match="does not match driver"):
+        run_fitter(fitter(), 50, method="boltzmann", preset=Gsa())
+    with pytest.raises(ValueError, match="does not take preset"):
+        run_fitter(fitter(), 50, preset=Boltzmann())
+    with pytest.raises(ValueError, match="does not take steps_per_epoch"):
+        run_fitter(fitter(), 50, steps_per_epoch=7)
+    with pytest.raises(TypeError, match="gradient"):
+        run_fitter(fitter(), 50, gradient=lambda p: p)
+    with pytest.raises(TypeError, match="stepz_per_epoch"):
+        run_fitter(fitter(), 50, method="sa", stepz_per_epoch=7)
