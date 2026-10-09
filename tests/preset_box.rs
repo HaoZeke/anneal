@@ -262,6 +262,25 @@ fn boxes_wider_than_half_the_f64_range_mirror_off_the_walls() {
 }
 
 #[test]
+fn a_step_whose_offset_from_low_overflows_mirrors_off_high() {
+    // From `high`, steps of a quarter of the f64 range often pass it by so
+    // much that `x - low` overflows although twice the width is finite. They
+    // must mirror off `high` rather than drop onto `low`.
+    let m = f64::MAX;
+    let low = array![-0.6 * m];
+    let high = array![-0.1 * m];
+    for n_starts in [None, Some(2)] {
+        let (obj, seen) = recorder(&low, &high);
+        run_preset(0, obj, m / 4.0, 2.62, n_starts, 1, Some(high.view()));
+        let seen = seen.lock().unwrap();
+        assert!(
+            seen.iter().all(|x| low[0] < x[0] && x[0] <= high[0]),
+            "an evaluation reached low with {n_starts:?} starts"
+        );
+    }
+}
+
+#[test]
 fn half_infinite_boxes_mirror_across_the_finite_wall() {
     let inf = f64::INFINITY;
     for (low, high, x0) in [
