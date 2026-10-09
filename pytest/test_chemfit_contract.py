@@ -21,6 +21,7 @@ from chemfit_doubles import (  # noqa: E402
     PROTOCOLS,
     ReleasedFitter,
     drive,
+    same_params,
 )
 
 
@@ -249,3 +250,53 @@ def test_the_budget_counts_the_start_and_is_never_exceeded(entry, driver, budget
     assert 1 <= evaluations <= budget
     if driver != "portfolio" and budget in (1, 7, 400):
         assert evaluations == budget
+
+
+@pytest.mark.parametrize("protocol", PROTOCOLS)
+@pytest.mark.parametrize("entry", ENTRIES)
+def test_narrow_and_fixed_parameters_pass_through_the_default_portfolio(entry, protocol):
+    initial = {
+        "narrow": 0.0,
+        "fixed": 0.5,
+        "pinned": np.array([1.0, -2.0]),
+        "free": np.array([0.3, -0.4]),
+    }
+    bounds = {
+        "narrow": (-1e-8, 1e-8),
+        "fixed": (0.5, 0.5),
+        "pinned": (np.array([1.0, -3.0]), np.array([1.0, 3.0])),
+        "free": (-1.0, 1.0),
+    }
+    fitter = protocol(initial, bounds)
+    out = drive(entry, fitter, 300)
+    assert len(fitter.evaluated) > 1
+    for params in [*fitter.evaluated, out]:
+        assert -1e-8 <= params["narrow"] <= 1e-8
+        assert params["fixed"] == 0.5
+        assert params["pinned"][0] == 1.0 and -3.0 <= params["pinned"][1] <= 3.0
+        assert np.all(np.abs(params["free"]) <= 1.0)
+
+
+@pytest.mark.parametrize("width", [2e-8, 2e-9, 1e-12])
+@pytest.mark.parametrize("entry", ENTRIES)
+def test_a_bound_narrower_than_the_difference_step_runs_inside_the_box(entry, width):
+    fitter = ReleasedFitter(
+        {"narrow": 0.0, "free": np.array([0.3, -0.4])},
+        {"narrow": (-width / 2, width / 2), "free": (-1.0, 1.0)},
+    )
+    out = drive(entry, fitter, 300)
+    for params in [*fitter.evaluated, out]:
+        assert -width / 2 <= params["narrow"] <= width / 2
+        assert np.all(np.abs(params["free"]) <= 1.0)
+
+
+@pytest.mark.parametrize("entry", ENTRIES)
+def test_a_fit_with_every_parameter_fixed_evaluates_the_start_once(entry):
+    fitter = ReleasedFitter(
+        {"x": 0.5, "y": np.array([1.0, 2.0])},
+        {"x": (0.5, 0.5), "y": (np.array([1.0, 2.0]), np.array([1.0, 2.0]))},
+    )
+    out = drive(entry, fitter, 50)
+    assert fitter.calls[0] == "init" and fitter.calls[-1] == "finish"
+    assert fitter.calls.count("ask") == 1
+    assert same_params(out, fitter.evaluated[0])

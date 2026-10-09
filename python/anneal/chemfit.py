@@ -13,9 +13,9 @@ Nested parameter dicts are flattened only at the optimizer boundary and
 rebuilt on the way back. A leaf keeps its type: a Python number comes back as
 a float, a NumPy scalar or array keeps its dtype and shape, and the bounds of
 a float32 or float16 leaf are rounded inward so the cast candidate stays
-inside them. Every evaluation lies inside the box, the first one is the
-start, and the budget counts it. The default driver is the Thompson-allocated
-portfolio.
+inside them. A parameter whose lower and upper bounds are equal is held
+fixed. Every evaluation lies inside the box, the first one is the start, and
+the budget counts it. The default driver is the Thompson-allocated portfolio.
 
 The first exception the fitter raises, or a loss that is not a real number,
 ends the drive: the fitter is not called again, ``finish`` is skipped, and
@@ -396,7 +396,7 @@ def _settle(layout: _Layout, low, high):
     """Check a raw box coordinate by coordinate and round it to each leaf's dtype.
 
     Errors name the coordinate. Coordinates whose lower and upper bounds are
-    equal stay in the result.
+    equal stay in the result; the bridges hold them fixed.
     """
     low = np.array(low, dtype=np.float64)
     high = np.array(high, dtype=np.float64)
@@ -444,17 +444,20 @@ def _clip(x: np.ndarray, low: np.ndarray, high: np.ndarray) -> np.ndarray:
 
 
 class _Problem:
-    """A flattened fit: the layout, the box and the start."""
+    """A flattened fit: the layout, the box, the start, the free coordinates."""
 
     def __init__(self, layout: _Layout, low: np.ndarray, high: np.ndarray, start):
         self.layout = layout
         self.low = low
         self.high = high
+        self.free = low < high
         self.start = layout.cast(_clip(np.asarray(start, dtype=np.float64), low, high))
 
     def candidate(self, x: np.ndarray) -> dict[str, Any]:
-        """The parameters at the driver's point ``x``."""
-        return self.layout.params(_clip(x, self.low, self.high))
+        """The parameters at the driver's point ``x`` over the free coordinates."""
+        full = self.start.copy()
+        full[self.free] = _clip(x, self.low[self.free], self.high[self.free])
+        return self.layout.params(full)
 
 
 class _Stop(BaseException):
@@ -506,16 +509,19 @@ def _drive(
     preset: Any = None,
     steps_per_epoch: int = 1,
 ) -> dict[str, Any]:
-    """Run ``driver`` from the start and return the best evaluated parameters.
+    """Run ``driver`` over the free coordinates and return the best parameters.
 
     The first fitter exception is raised here, after the driver has returned.
     """
     from anneal import global_optimize, run
 
     problem, budget = session.problem, session.budget
-    low, high, start = problem.low, problem.high, problem.start
+    free = problem.free
+    low, high, start = problem.low[free], problem.high[free], problem.start[free]
     try:
-        if driver == "portfolio":
+        if not free.any():
+            session(start)
+        elif driver == "portfolio":
             global_optimize(session, low, high, budget, seed=seed, x0=start)
         else:
             run(
@@ -659,7 +665,8 @@ def fit_anneal(
         from the fitter's ``bounds`` dict (``(lower, upper)`` pairs
         mirroring ``initial_params``; each side a scalar, an array of the
         leaf's shape, or ``None``); entries without bounds fall back to
-        ``x0 +/- bound_span``.
+        ``x0 +/- bound_span``. A coordinate whose two bounds are equal is
+        held fixed.
       bound_span: half-width of the fallback box around unbounded entries.
       steps_per_epoch: classical-driver epoch width; the chain runs
         ``max(1, budget // steps_per_epoch)`` epochs and stops when the
@@ -785,7 +792,8 @@ def chemfit_box(
     without bounds gets ``init +/- default_span``. The bounds of a float32 or
     float16 leaf are rounded inward to that dtype. A bound that is not
     finite, is inverted, overflows, or has no width is a ValueError naming
-    the parameter: the drivers need ``lower < upper``.
+    the parameter: the drivers need ``lower < upper``, and
+    :func:`fit_chemfit` holds a zero-width parameter fixed instead.
     """
     layout = vector._layout
     span = float(default_span)
@@ -829,7 +837,8 @@ def fit_chemfit(
             box when they lie outside it.
         seed: RNG seed forwarded to the anneal driver.
         default_span: half-width around the initial value for parameters
-            ChemFit leaves unbounded.
+            ChemFit leaves unbounded. Bounds read as in :func:`chemfit_box`,
+            except that a parameter with equal bounds is held fixed.
         tell_every: portfolio evaluations between step notices (``step`` or
             ``tell``) so registered callbacks still fire.
         steps_per_epoch: classical-chain evaluations per epoch, and per
@@ -853,9 +862,10 @@ def fit_chemfit(
     vector = ChemFitVector(dict(fitter.initial_parameters))
     if vector.dim == 0:
         raise ValueError("fitter.initial_parameters holds no parameters")
-    problem = _Problem(
-        vector._layout, *chemfit_box(fitter, vector, default_span=default_span), vector.x0
-    )
+    layout = vector._layout
+    span = float(default_span)
+    box = _mapped_box(layout, getattr(fitter, "bounds", None), vector.x0, span)
+    problem = _Problem(layout, *_settle(layout, *box), vector.x0)
     steps = max(1, min(int(steps_per_epoch), budget))
 
     _init(fitter)
@@ -1038,8 +1048,9 @@ def run_benchmark(
 
     ``low`` and ``high`` may be vectors or scalars (broadcast). When they
     are omitted, bounds are read from ``benchmark_context["bounds"]`` or
-    ``fitter.bounds``. The first exception raised by the fitter is raised
-    without calling ``finish``.
+    ``fitter.bounds``. A coordinate whose two bounds are equal is held fixed.
+    The first exception raised by the fitter is raised without calling
+    ``finish``.
     """
     from anneal import Boltzmann, Fast, Gsa
 
@@ -1062,8 +1073,6 @@ def run_benchmark(
         benchmark_context.get("bounds"),
         getattr(fitter, "bounds", None),
     )
-    if np.any(box[1] <= box[0]):
-        raise ValueError("each upper bound must be greater than the lower bound")
     problem = _Problem(layout, *box, start)
 
     _init(fitter)
