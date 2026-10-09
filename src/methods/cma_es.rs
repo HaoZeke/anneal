@@ -22,7 +22,13 @@
 //!
 //! The eigendecomposition is refreshed lazily, once per
 //! `lambda / ((c1 + c_mu) n 10)` evaluations, through the crate's Jacobi
-//! solver. Restarts are planned by [`Bipop`]: large-population runs double
+//! solver. A separable run ([`CmaEs::separable`], sep-CMA-ES of Ros and
+//! Hansen 2008) keeps only the diagonal of the covariance, with learning
+//! rates raised by `(n + 2) / 3`: linear time and memory per candidate, for
+//! dimensions or budgets at which the full matrix cannot be learned (see
+//! [`covariance_learning_evaluations`]).
+//!
+//! Restarts are planned by [`Bipop`]: large-population runs double
 //! lambda (IPOP) and small-population runs draw a reduced population and a
 //! step size up to two decades smaller, each regime taking its turn when it
 //! has spent less of the budget (Hansen 2009, BIPOP-CMA-ES).
@@ -72,6 +78,38 @@ pub fn default_lambda(dim: usize) -> usize {
     4 + (3.0 * (dim.max(1) as f64).ln()).floor() as usize
 }
 
+/// Log-rank recombination weights of a population of `lambda` (at least 2)
+/// and their variance-effective selection mass.
+fn recombination(lambda: usize) -> (Vec<f64>, f64) {
+    let mu = lambda.max(2) / 2;
+    let raw: Vec<f64> = (1..=mu)
+        .map(|i| ((lambda.max(2) as f64 + 1.0) / 2.0).ln() - (i as f64).ln())
+        .collect();
+    let total: f64 = raw.iter().sum();
+    let weights: Vec<f64> = raw.iter().map(|w| w / total).collect();
+    let mu_eff = 1.0 / weights.iter().map(|w| w * w).sum::<f64>();
+    (weights, mu_eff)
+}
+
+/// Rank-one and rank-mu learning rates of the full covariance.
+fn learning_rates(n: usize, mu_eff: f64) -> (f64, f64) {
+    let nf = n as f64;
+    let c_1 = 2.0 / ((nf + 1.3).powi(2) + mu_eff);
+    let c_mu = (1.0 - c_1).min(2.0 * (mu_eff - 2.0 + 1.0 / mu_eff) / ((nf + 2.0).powi(2) + mu_eff));
+    (c_1, c_mu)
+}
+
+/// Evaluations a full-covariance run of population `lambda` needs to learn
+/// its covariance, `lambda / (c1 + c_mu)`: the matrix forgets its start at
+/// rate `c1 + c_mu` per generation. A run given less than this adapts only a
+/// fraction of the matrix it pays to decompose.
+pub fn covariance_learning_evaluations(dim: usize, lambda: usize) -> f64 {
+    let lambda = lambda.max(2);
+    let (_, mu_eff) = recombination(lambda);
+    let (c_1, c_mu) = learning_rates(dim.max(1), mu_eff);
+    lambda as f64 / (c_1 + c_mu)
+}
+
 /// One CMA-ES run over a box.
 pub struct CmaEs {
     n: usize,
@@ -89,8 +127,12 @@ pub struct CmaEs {
     mean: Array1<f64>,
     sigma: f64,
     sigma0: f64,
+    /// Full covariance and its eigenbasis; empty in a separable run.
     cov: Array2<f64>,
     basis: Array2<f64>,
+    /// Diagonal covariance of a separable run; empty otherwise.
+    diag: Array1<f64>,
+    separable: bool,
     scales: Array1<f64>,
     p_sigma: Array1<f64>,
     p_c: Array1<f64>,
@@ -129,20 +171,12 @@ impl CmaEs {
             "sigma must be positive and finite"
         );
         let lambda = lambda.max(2);
-        let mu = lambda / 2;
-        let raw: Vec<f64> = (1..=mu)
-            .map(|i| ((lambda as f64 + 1.0) / 2.0).ln() - (i as f64).ln())
-            .collect();
-        let total: f64 = raw.iter().sum();
-        let weights: Vec<f64> = raw.iter().map(|w| w / total).collect();
-        let mu_eff = 1.0 / weights.iter().map(|w| w * w).sum::<f64>();
+        let (weights, mu_eff) = recombination(lambda);
         let nf = n as f64;
         let c_sigma = (mu_eff + 2.0) / (nf + mu_eff + 5.0);
         let d_sigma = 1.0 + 2.0 * (((mu_eff - 1.0) / (nf + 1.0)).sqrt() - 1.0).max(0.0) + c_sigma;
         let c_c = (4.0 + mu_eff / nf) / (nf + 4.0 + 2.0 * mu_eff / nf);
-        let c_1 = 2.0 / ((nf + 1.3).powi(2) + mu_eff);
-        let c_mu =
-            (1.0 - c_1).min(2.0 * (mu_eff - 2.0 + 1.0 / mu_eff) / ((nf + 2.0).powi(2) + mu_eff));
+        let (c_1, c_mu) = learning_rates(n, mu_eff);
         let chi_n = nf.sqrt() * (1.0 - 1.0 / (4.0 * nf) + 1.0 / (21.0 * nf * nf));
         let max_width = (0..n)
             .map(|i| bounds.high[i] - bounds.low[i])
@@ -167,6 +201,8 @@ impl CmaEs {
             sigma0: sigma,
             cov: Array2::eye(n),
             basis: Array2::eye(n),
+            diag: Array1::zeros(0),
+            separable: false,
             scales: Array1::ones(n),
             p_sigma: Array1::zeros(n),
             p_c: Array1::zeros(n),
@@ -184,6 +220,36 @@ impl CmaEs {
             stall: 0,
             stop: None,
             elitist: false,
+        }
+    }
+
+    /// Restricts the covariance to its diagonal (sep-CMA-ES, Ros and Hansen
+    /// 2008). The rank-one and rank-mu rates grow by `(n + 2) / 3`, the rate
+    /// at which `n` free parameters can be learned in place of `n^2 / 2`, and
+    /// no eigendecomposition or `n x n` matrix is kept, so a candidate costs
+    /// linear time and memory. Call before the first [`CmaEs::ask`].
+    pub fn separable(mut self) -> Self {
+        assert_eq!(self.evals, 0, "a run turns separable before sampling");
+        let boost = (self.n as f64 + 2.0) / 3.0;
+        self.c_1 = (self.c_1 * boost).min(1.0);
+        self.c_mu = (self.c_mu * boost).min(1.0 - self.c_1);
+        self.cov = Array2::zeros((0, 0));
+        self.basis = Array2::zeros((0, 0));
+        self.diag = Array1::ones(self.n);
+        self.separable = true;
+        self
+    }
+
+    /// Whether the run keeps only the diagonal of its covariance.
+    pub fn is_separable(&self) -> bool {
+        self.separable
+    }
+
+    fn variance(&self, i: usize) -> f64 {
+        if self.separable {
+            self.diag[i]
+        } else {
+            self.cov[[i, i]]
         }
     }
 
@@ -267,7 +333,11 @@ impl CmaEs {
     }
 
     fn mahalanobis_norm(&self, step: &Array1<f64>) -> f64 {
-        let rotated = self.basis.t().dot(step);
+        let rotated = if self.separable {
+            step.clone()
+        } else {
+            self.basis.t().dot(step)
+        };
         rotated
             .iter()
             .zip(self.scales.iter())
@@ -302,7 +372,11 @@ impl CmaEs {
         while self.candidates.len() < self.lambda {
             let z: Array1<f64> =
                 Array1::from_iter((0..n).map(|_| StandardNormal.sample(&mut self.rng)));
-            let y = self.basis.dot(&(&self.scales * &z));
+            let y = if self.separable {
+                &self.scales * &z
+            } else {
+                self.basis.dot(&(&self.scales * &z))
+            };
             let x = &self.mean + &(&y * self.sigma);
             let repaired = reflect_into_box(x.view(), &self.bounds);
             let step = if repaired == x {
@@ -335,7 +409,9 @@ impl CmaEs {
         self.mean.scaled_add(self.sigma, &y_w);
         self.mean = self.bounds.clip(self.mean.view());
 
-        let whitened = {
+        let whitened = if self.separable {
+            &y_w / &self.scales
+        } else {
             let rotated = self.basis.t().dot(&y_w);
             let scaled =
                 Array1::from_iter(rotated.iter().zip(self.scales.iter()).map(|(r, s)| r / s));
@@ -360,17 +436,28 @@ impl CmaEs {
         };
 
         let keep = 1.0 - self.c_1 - self.c_mu + self.c_1 * delta_h;
-        self.cov *= keep;
-        for i in 0..n {
-            for j in 0..=i {
-                let mut add = self.c_1 * self.p_c[i] * self.p_c[j];
+        if self.separable {
+            for i in 0..n {
+                let mut add = self.c_1 * self.p_c[i] * self.p_c[i];
                 for (rank, &idx) in order.iter().take(self.weights.len()).enumerate() {
                     let step = &self.steps[idx];
-                    add += self.c_mu * self.weights[rank] * step[i] * step[j];
+                    add += self.c_mu * self.weights[rank] * step[i] * step[i];
                 }
-                self.cov[[i, j]] += add;
-                if i != j {
-                    self.cov[[j, i]] = self.cov[[i, j]];
+                self.diag[i] = keep * self.diag[i] + add;
+            }
+        } else {
+            self.cov *= keep;
+            for i in 0..n {
+                for j in 0..=i {
+                    let mut add = self.c_1 * self.p_c[i] * self.p_c[j];
+                    for (rank, &idx) in order.iter().take(self.weights.len()).enumerate() {
+                        let step = &self.steps[idx];
+                        add += self.c_mu * self.weights[rank] * step[i] * step[j];
+                    }
+                    self.cov[[i, j]] += add;
+                    if i != j {
+                        self.cov[[j, i]] = self.cov[[i, j]];
+                    }
                 }
             }
         }
@@ -385,9 +472,13 @@ impl CmaEs {
         }
 
         self.generation += 1;
-        let gap = self.lambda as f64 / ((self.c_1 + self.c_mu) * n as f64 * 10.0);
-        if (self.evals - self.eigen_evals) as f64 > gap {
-            self.decompose();
+        if self.separable {
+            self.rescale_diagonal();
+        } else {
+            let gap = self.lambda as f64 / ((self.c_1 + self.c_mu) * n as f64 * 10.0);
+            if (self.evals - self.eigen_evals) as f64 > gap {
+                self.decompose();
+            }
         }
         self.history.push_back(generation_best);
         while self.history.len() > self.history_len {
@@ -413,6 +504,16 @@ impl CmaEs {
         self.scales = values.mapv(|v| v.max(floor).sqrt());
         self.basis = vectors;
         self.cov = sym;
+    }
+
+    fn rescale_diagonal(&mut self) {
+        let top = self.diag.iter().copied().fold(0.0_f64, f64::max);
+        if !(top.is_finite() && top > 0.0) {
+            self.stop = Some(CmaStop::ConditionCov);
+            return;
+        }
+        let floor = top * 1e-20;
+        self.scales = self.diag.mapv(|v| v.max(floor).sqrt());
     }
 
     fn check_stop(&self) -> Option<CmaStop> {
@@ -450,18 +551,23 @@ impl CmaEs {
             }
         }
         let width = (0..self.n)
-            .map(|i| self.cov[[i, i]].sqrt().max(self.p_c[i].abs()))
+            .map(|i| self.variance(i).sqrt().max(self.p_c[i].abs()))
             .fold(0.0_f64, f64::max);
         if self.sigma * width < TOL_X_REL * self.sigma0 {
             return Some(CmaStop::TolX);
         }
         let axis = self.generation % self.n;
         let shift = 0.1 * self.sigma * self.scales[axis];
-        if (0..self.n).all(|i| self.mean[i] + shift * self.basis[[i, axis]] == self.mean[i]) {
+        let no_effect_axis = if self.separable {
+            self.mean[axis] + shift == self.mean[axis]
+        } else {
+            (0..self.n).all(|i| self.mean[i] + shift * self.basis[[i, axis]] == self.mean[i])
+        };
+        if no_effect_axis {
             return Some(CmaStop::NoEffectAxis);
         }
         if (0..self.n)
-            .any(|i| self.mean[i] + 0.2 * self.sigma * self.cov[[i, i]].sqrt() == self.mean[i])
+            .any(|i| self.mean[i] + 0.2 * self.sigma * self.variance(i).sqrt() == self.mean[i])
         {
             return Some(CmaStop::NoEffectCoord);
         }
@@ -646,6 +752,33 @@ mod tests {
             evals += 1;
         }
         assert!(es.stop_reason().is_some());
+    }
+
+    #[test]
+    fn separable_run_learns_an_axis_aligned_ellipsoid_in_linear_memory() {
+        let n = 40;
+        let bounds = unit_box(n, 5.0);
+        let f = |x: ArrayView1<f64>| {
+            (0..n)
+                .map(|i| 10f64.powf(4.0 * i as f64 / (n - 1) as f64) * (x[i] - 1.0).powi(2))
+                .sum::<f64>()
+        };
+        let mut es =
+            CmaEs::new(Array1::zeros(n).view(), 1.0, default_lambda(n), &bounds, 7).separable();
+        assert!(es.is_separable());
+        drive(&mut es, f, 20_000);
+        assert_eq!(es.cov.len() + es.basis.len(), 0, "no n x n storage");
+        assert!(es.best().1 < 1e-6, "best {}", es.best().1);
+    }
+
+    #[test]
+    fn learning_horizon_grows_with_dimension() {
+        let h10 = covariance_learning_evaluations(10, default_lambda(10));
+        let h39 = covariance_learning_evaluations(39, default_lambda(39));
+        let h100 = covariance_learning_evaluations(100, default_lambda(100));
+        assert!((250.0..400.0).contains(&h10), "{h10}");
+        assert!((3000.0..4500.0).contains(&h39), "{h39}");
+        assert!((15_000.0..30_000.0).contains(&h100), "{h100}");
     }
 
     #[test]

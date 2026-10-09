@@ -42,7 +42,9 @@ use crate::methods::bayesian_pilot::{
     LaplacePosterior, PilotObservation, PilotPrior, empirical_prior_from_observations,
     fit_laplace_skew_corrected, pilot_draws_qmc,
 };
-use crate::methods::cma_es::{Bipop, CmaEs, CmaRegime, default_lambda};
+use crate::methods::cma_es::{
+    Bipop, CmaEs, CmaRegime, covariance_learning_evaluations, default_lambda,
+};
 use crate::methods::fd_bfgs::{FdBfgs, FdBfgsOptions};
 use crate::methods::gle_langevin::gle_langevin_preconditioned_sa;
 use crate::methods::local_polish::{
@@ -379,6 +381,12 @@ const CMA_VALLEY_SIGMA: f64 = 0.003;
 /// IPOP stops doubling once a run could no longer afford this many
 /// generations of the budget.
 const CMA_MIN_GENERATIONS: usize = 40;
+/// Largest dimension at which CMA-ES runs keep a full covariance. Its Jacobi
+/// refresh costs O(n^3) every O(n) evaluations, about a millisecond of
+/// driver time per evaluation at this size and growing as n^2; above it, and
+/// whenever the budget is shorter than the covariance's learning horizon,
+/// runs are separable.
+const CMA_FULL_MAX_DIM: usize = 100;
 /// Kick radius, as a fraction of each box side, that restarts a converged
 /// finite-difference descent from the incumbent; adapted like the hop step.
 const QN_KICK0: f64 = 0.05;
@@ -900,11 +908,15 @@ struct CmaArmState {
     rng: StdRng,
     /// Whether runs centred on the incumbent keep it as an elite.
     elitist: bool,
+    /// Whether runs keep only the diagonal of their covariance.
+    separable: bool,
 }
 
 impl CmaArmState {
     /// First run centred on the incumbent with step `sigma` (a fraction of
-    /// each box side); large-population restarts are never elitist.
+    /// each box side); large-population restarts are never elitist. Runs are
+    /// separable above [`CMA_FULL_MAX_DIM`] or when the budget is shorter than
+    /// the full covariance's learning horizon.
     fn new(
         ledger: &BudgetLedger,
         bounds: &Bounds<f64>,
@@ -916,8 +928,10 @@ impl CmaArmState {
         let dim = bounds.dims;
         let lambda = default_lambda(dim);
         let unit = Bounds::new(Array1::zeros(dim), Array1::ones(dim), 0.0);
+        let separable = dim > CMA_FULL_MAX_DIM
+            || (budget as f64) < covariance_learning_evaluations(dim, lambda);
         let mean = to_unit_box(&ledger.incumbent(bounds), bounds);
-        let mut es = CmaEs::new(mean.view(), sigma, lambda, &unit, seed);
+        let mut es = Self::run(mean.view(), sigma, lambda, &unit, seed, separable);
         if elitist {
             es = es.with_elite(mean.view(), ledger.best_get());
         }
@@ -932,7 +946,21 @@ impl CmaArmState {
             unit,
             rng: StdRng::seed_from_u64(seed.rotate_left(17)),
             elitist,
+            separable,
         }
+    }
+
+    /// One run, keeping only the diagonal of its covariance when `separable`.
+    fn run(
+        mean: ArrayView1<f64>,
+        sigma: f64,
+        lambda: usize,
+        unit: &Bounds<f64>,
+        seed: u64,
+        separable: bool,
+    ) -> CmaEs {
+        let es = CmaEs::new(mean, sigma, lambda, unit, seed);
+        if separable { es.separable() } else { es }
     }
 }
 
@@ -2912,7 +2940,14 @@ fn run_cma_arm<O>(
             let plan = state.planner.next_run(&mut state.rng);
             let mean = to_unit_box(&ledger.incumbent(bounds), bounds);
             let run_seed = state.rng.random::<u64>();
-            let mut es = CmaEs::new(mean.view(), plan.sigma, plan.lambda, &state.unit, run_seed);
+            let mut es = CmaArmState::run(
+                mean.view(),
+                plan.sigma,
+                plan.lambda,
+                &state.unit,
+                run_seed,
+                state.separable,
+            );
             if state.elitist && plan.regime == CmaRegime::Small {
                 es = es.with_elite(mean.view(), ledger.best_get());
             }
@@ -5777,5 +5812,26 @@ mod tests {
         assert_eq!(obj.points().len(), ledger.used_get());
         assert!(obj.points().iter().all(|x| obj.bounds.contains(x.view())));
         assert!(ledger.best_get() < 1e-8, "best {}", ledger.best_get());
+    }
+
+    #[test]
+    fn cma_arm_goes_separable_above_the_cap_or_short_of_the_learning_horizon() {
+        for (dim, budget, separable) in [
+            (10usize, 5000usize, false),
+            (39, 1000, true),
+            (39, 20_000, false),
+            (CMA_FULL_MAX_DIM + 1, 10_000_000, true),
+        ] {
+            let obj = Traced::new(-2.0, 2.0, dim, rosenbrock);
+            let ledger = BudgetLedger::new(budget, dim);
+            let budgeted = BudgetedObjective {
+                inner: &obj,
+                ledger: &ledger,
+            };
+            let mut states = ArmStates::default();
+            run_cma_arm(&budgeted, &ledger, &mut states, 1, 3, budget);
+            let state = states.cma.as_ref().expect("cma state");
+            assert_eq!(state.es.is_separable(), separable, "{dim}-D at {budget}");
+        }
     }
 }
