@@ -3144,6 +3144,30 @@ where
     portfolio_optimize_from(obj, grad, budget, seed, noise_sigma, policy, None)
 }
 
+/// [`portfolio_optimize_from`] under [`PortfolioPolicy::Auto`].
+pub fn portfolio_optimize_seeded<O, G>(
+    obj: &O,
+    grad: Option<&G>,
+    budget: usize,
+    seed: u64,
+    noise_sigma: Option<f64>,
+    x0: Option<ArrayView1<f64>>,
+) -> PortfolioResult
+where
+    O: Objective<f64>,
+    G: Gradient<f64>,
+{
+    portfolio_optimize_from(
+        obj,
+        grad,
+        budget,
+        seed,
+        noise_sigma,
+        PortfolioPolicy::Auto,
+        x0,
+    )
+}
+
 /// [`portfolio_optimize_with_policy`] from a caller-supplied start.
 ///
 /// `x0` is the first charged evaluation and the first incumbent. Arms that

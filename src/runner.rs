@@ -317,3 +317,111 @@ where
     }
     best_history.expect("n_starts.max(1) guarantees at least one chain")
 }
+
+/// [`run_rs_variant_from`] with no evaluation cap.
+pub fn run_rs_variant_at<O, C, N, M, A>(
+    variant: SaVariant<f64, O, C, N, M, A>,
+    n_epochs: usize,
+    steps_per_epoch: usize,
+    seed: u64,
+    x0: Option<ndarray::Array1<f64>>,
+) -> History
+where
+    O: eindir_core::Objective<f64> + Send + Sync,
+    C: Cooling<f64> + Clone,
+    N: crate::neigh::Neighborhood<f64>,
+    M: crate::movekernel::MoveKernel<f64>,
+    A: crate::accept::AcceptRule<f64>,
+{
+    run_rs_variant_from(variant, n_epochs, steps_per_epoch, seed, x0, None)
+}
+
+/// [`run_rs_variant_from`] with the start before the schedule lengths.
+pub fn run_rs_variant_start<O, C, N, M, A>(
+    variant: SaVariant<f64, O, C, N, M, A>,
+    start: Option<ndarray::Array1<f64>>,
+    n_epochs: usize,
+    steps_per_epoch: usize,
+    seed: u64,
+) -> History
+where
+    O: eindir_core::Objective<f64> + Send + Sync,
+    C: Cooling<f64> + Clone,
+    N: crate::neigh::Neighborhood<f64>,
+    M: crate::movekernel::MoveKernel<f64>,
+    A: crate::accept::AcceptRule<f64>,
+{
+    run_rs_variant_from(variant, n_epochs, steps_per_epoch, seed, start, None)
+}
+
+/// [`run_rs_variant_from`] with the start after the seed.
+pub fn run_rs_variant_from_position<O, C, N, M, A>(
+    variant: SaVariant<f64, O, C, N, M, A>,
+    n_epochs: usize,
+    steps_per_epoch: usize,
+    seed: u64,
+    start: Option<ndarray::Array1<f64>>,
+) -> History
+where
+    O: eindir_core::Objective<f64> + Send + Sync,
+    C: Cooling<f64> + Clone,
+    N: crate::neigh::Neighborhood<f64>,
+    M: crate::movekernel::MoveKernel<f64>,
+    A: crate::accept::AcceptRule<f64>,
+{
+    run_rs_variant_from(variant, n_epochs, steps_per_epoch, seed, start, None)
+}
+
+/// [`run_rs_qmc_variant_from`] with the anchor before the start count.
+pub fn run_rs_qmc_variant_start<O, C, N, M, A>(
+    variant: SaVariant<f64, O, C, N, M, A>,
+    start: Option<ndarray::Array1<f64>>,
+    n_starts: usize,
+    n_epochs: usize,
+    steps_per_epoch: usize,
+    seed: u64,
+) -> History
+where
+    O: eindir_core::Objective<f64> + Send + Sync,
+    C: Cooling<f64> + Clone,
+    N: crate::neigh::Neighborhood<f64>,
+    M: crate::movekernel::MoveKernel<f64>,
+    A: crate::accept::AcceptRule<f64>,
+{
+    run_rs_qmc_variant_from(
+        variant,
+        n_starts,
+        n_epochs,
+        steps_per_epoch,
+        seed,
+        start,
+        None,
+    )
+}
+
+/// [`run_rs_qmc_variant_from`] with the anchor after the seed.
+pub fn run_rs_qmc_variant_from_position<O, C, N, M, A>(
+    variant: SaVariant<f64, O, C, N, M, A>,
+    n_starts: usize,
+    n_epochs: usize,
+    steps_per_epoch: usize,
+    seed: u64,
+    anchor: Option<ndarray::Array1<f64>>,
+) -> History
+where
+    O: eindir_core::Objective<f64> + Send + Sync,
+    C: Cooling<f64> + Clone,
+    N: crate::neigh::Neighborhood<f64>,
+    M: crate::movekernel::MoveKernel<f64>,
+    A: crate::accept::AcceptRule<f64>,
+{
+    run_rs_qmc_variant_from(
+        variant,
+        n_starts,
+        n_epochs,
+        steps_per_epoch,
+        seed,
+        anchor,
+        None,
+    )
+}
