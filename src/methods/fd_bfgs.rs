@@ -57,8 +57,10 @@ const MAX_LINE_TRIALS: usize = 40;
 const EXTRAPOLATE_RATIO: f64 = 0.6;
 /// Longest extrapolated trial, as a multiple of the accepted step.
 const MAX_EXTRAPOLATION: f64 = 16.0;
-/// Largest first step, as a fraction of each coordinate's box width, before
-/// any curvature pair has scaled the inverse Hessian.
+/// Until a curvature pair has scaled the inverse Hessian, each line search's
+/// first trial moves the coordinate that moves most by this fraction of its
+/// box width, whatever the gradient's size, so the descent does not depend on
+/// the scale of the objective.
 const FIRST_STEP_FRACTION: f64 = 0.05;
 /// Central interval as a fraction of the distance `|g_i / c_i|` to the
 /// minimum of the coordinate's local quadratic.
@@ -532,7 +534,9 @@ impl FdBfgs {
             let reach = (0..self.n)
                 .map(|i| direction[i].abs() / self.width[i].max(f64::MIN_POSITIVE))
                 .fold(0.0_f64, f64::max);
-            (FIRST_STEP_FRACTION / reach).min(1.0)
+            // A finite step keeps the held coordinates' zero components at
+            // zero when the reach is subnormal.
+            (FIRST_STEP_FRACTION / reach).min(f64::MAX)
         } else if steepest {
             self.gamma
         } else {
@@ -706,6 +710,31 @@ mod tests {
         let mut engine = FdBfgs::new(start.view(), None, &bounds, FdBfgsOptions::default());
         drive(&mut engine, rosenbrock, 4000, &bounds);
         assert!(engine.value() < 1e-10, "value {}", engine.value());
+    }
+
+    #[test]
+    fn scaling_the_objective_by_a_power_of_two_leaves_the_descent_unchanged() {
+        // A power of two rescales every value exactly. The tests compare
+        // values with values, and the first trial is a fraction of the box
+        // however small the scaled gradient is, so the same points are asked.
+        let bounds = boxed(-2.0, 2.0, 4);
+        let start = Array1::from_vec(vec![0.5, -1.0, 1.5, 0.0]);
+        let trace = |scale: f64| {
+            let mut engine = FdBfgs::new(start.view(), None, &bounds, FdBfgsOptions::default());
+            let mut asked = Vec::new();
+            while asked.len() < 600 && !engine.is_done() {
+                let x = engine.ask();
+                engine.tell(scale * rosenbrock(x.view()));
+                asked.push(x);
+            }
+            (asked, engine.value() / scale)
+        };
+        let (plain, value) = trace(1.0);
+        for scale in [2f64.powi(-30), 2f64.powi(30)] {
+            let (scaled, scaled_value) = trace(scale);
+            assert_eq!(scaled, plain, "scale {scale}");
+            assert_eq!(scaled_value, value, "scale {scale}");
+        }
     }
 
     #[test]

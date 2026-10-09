@@ -1432,7 +1432,10 @@ incumbent since =qn= last played, in which case it restarts there. A
 turn is one slice, except that =qn= keeps it while each slice lowers
 its descent's value by more than the success threshold, until that
 descent converges; a turn succeeds when it lowers the incumbent by more
-than =1e-4 max(|f|, 1)=. The GSA arm starts one chain at the incumbent
+than =1e-4 max(|f|, s)= (=values_only_threshold=), where =s= is the
+resolution =eps |f|= of the start's value (=values_only_floor=), so
+every threshold of the run scales with the objective. The GSA arm
+starts one chain at the incumbent
 and runs it quenched, without a local search: each temperature step
 visits every coordinate once and keeps only improvements. The DE arm
 keeps one population member at the incumbent. The floor the restart
@@ -1955,16 +1958,19 @@ curvature-checked updates, followed by a projected backtracking Armijo
 line search that may extrapolate once. The initial inverse Hessian is
 the box metric \(D = \mathrm{diag}(w^2)\), scaled to
 \((s^\top y / y^\top D y) D\) by the first accepted pair, so sides that
-span decades move as far, relative to their width, as unit ones. A
-descent ends on a slow iteration, a projected-gradient tolerance when
-one is set, or a failed line search.
+span decades move as far, relative to their width, as unit ones. Until
+then each line search's first trial moves the coordinate that moves
+most by 5% of its side, whatever the gradient's size, so the descent
+does not depend on the objective's scale. A descent ends on a slow
+iteration, a projected-gradient tolerance when one is set, or a failed
+line search.
 
 Key types and functions: =FdBfgs= (src/methods/fd_bfgs.rs:146);
 =FdBfgsOptions= (fd_bfgs.rs:74); the portfolio's =QnArmState= and
 =run_qn_arm= (src/methods/portfolio.rs:1008/3088).
 
-Constants and defaults: =ARMIJO = 1e-4=, =MAX_LINE_TRIALS = 40=, a first
-step of at most 5% of each side, =CENTRAL_INTERVAL_FRACTION = 0.1=,
+Constants and defaults: =ARMIJO = 1e-4=, =MAX_LINE_TRIALS = 40=,
+=FIRST_STEP_FRACTION = 0.05=, =CENTRAL_INTERVAL_FRACTION = 0.1=,
 =INTERVAL_MOVE = 2=, =MAX_REDIFFERENCES = 2= (fd_bfgs.rs:50-70). The
 default options have the value floor =f64::MIN_POSITIVE= in the
 slow-iteration test and no gradient tolerance.
