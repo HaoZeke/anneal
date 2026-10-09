@@ -79,8 +79,11 @@ the box faces, and an optional =x0= supplies the first point.
 ** ChemFit
 
 Flatten only at the optimizer boundary, and pass the initial positions as
-=x0=. =fit_anneal= and =run_benchmark= do that for a fitter. A positions-only
-objective is the same loop:
+=x0=. =fit_anneal=, =fit_chemfit=, =run_benchmark= and =run_fitter= do that
+for a fitter. They drive =evaluate= / =step= on current ChemFit and =ask= /
+=tell= on ChemFit 3.1, and the first exception the fitter raises stops the
+fit and reaches the caller without =finish=. A positions-only objective is
+the same loop:
 
 #+begin_src python
 import numpy as np
@@ -93,12 +96,16 @@ def fit_positions(fitter, initial_positions, budget):
     n_atoms = initial.shape[0]
     low = np.full(initial.size, -3.0)
     high = np.full(initial.size, 3.0)
+    if hasattr(fitter, "evaluate"):
+        evaluate, advance = fitter.evaluate, fitter.step
+    else:  # ChemFit 3.1
+        evaluate, advance = fitter.ask, fitter.tell
 
     def objective(flat_positions):
-        loss = fitter.ask({
+        loss = evaluate({
             "positions": np.asarray(flat_positions).reshape(n_atoms, 3).copy()
         })
-        fitter.tell()
+        advance()
         return float(loss)
 
     proposals = max(0, int(budget) - 1)
@@ -118,6 +125,8 @@ def fit_positions(fitter, initial_positions, budget):
 #+end_src
 
 The expression =positions.reshape(...)= does not modify an array in place.
+In a loop like this one, an exception from =evaluate= is scored as the worst
+value and reported once as a =RuntimeWarning=; the bridges raise it instead.
 
 * Pilot draws for Bayesian warm-start
 

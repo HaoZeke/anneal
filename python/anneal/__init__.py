@@ -11,7 +11,9 @@ Public API:
   - Config.recommended(n) / Config.for_cluster(n), Ledger(budget),
     cluster_search(obj_fn, grad_fn, n, budget, seed, recommended): measured
     cluster-search layer.
-  - fit_anneal, fit_chemfit, run_benchmark: gradient-free ChemFit bridges.
+  - fit_anneal, fit_chemfit, run_benchmark, run_fitter: gradient-free ChemFit
+    bridges; they drive evaluate/step (current ChemFit) or ask/tell
+    (ChemFit 3.1) and raise the first exception the fitter raises.
 
 The IISE-manuscript composition laws L1-L4 are enforced inside the Rust
 SaVariant::checked constructor; preset constructors call it under the hood.
