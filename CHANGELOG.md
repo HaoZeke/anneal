@@ -109,6 +109,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   every one and the Householder inverted nothing but the well it started
   in. References cross as structures.
 
+## [0.9.1](https://github.com/HaoZeke/anneal/tree/v0.9.1) - 2026-10-09
+
+### Fixed
+
+- Keep classical Python preset evaluations inside their declared box by
+  default, accept an explicit initial position, and propagate objective
+  callback failures.
+
 ## [0.9.0](https://github.com/HaoZeke/anneal/tree/v0.9.0) - 2026-08-13
 
 ### Added
