@@ -7,9 +7,13 @@
 - =Fast(t_init, gamma)= :: Reciprocal cooling + Cauchy + Metropolis.
 - =Gsa(t_init, =q_v=, q_a)= :: =Tsallis= cooling + =Tsallis= visit + =Tsallis= accept.
 
-All called via =run(obj, low, high, preset, n_epochs, steps_per_epoch, seed, x0=None)=.
-Every proposal is reflected into the closed box =[low, high]=, so no evaluation leaves it; a coordinate with =low == high= stays fixed.
-A start point =x0= inside the box is the first point evaluated; without it the start is drawn uniformly.
+All called via =run(obj, low, high, preset, n_epochs, steps_per_epoch, seed, x0=None)= or its multistart form =run_qmc(obj, low, high, preset, n_starts, n_epochs, steps_per_epoch, seed, x0=None)=.
+Both keep every chain in the closed box =[low, high]=: each proposal is reflected into the box, so no evaluation leaves it, and a coordinate with =low == high= stays fixed.
+=low=, =high= and =x0= may be lists, tuples or NumPy arrays of any numeric type; a multi-dimensional =x0=, such as =(n_atoms, 3)= positions, is flattened in C order.
+A start point =x0= inside the box is the first point evaluated.
+Without it =run= draws the start uniformly.
+=run_qmc= starts =n_starts= chains at low-discrepancy points of the box, with =x0= in place of the first, and returns the =History= of the chain that found the lowest value.
+A NaN objective value counts as worse than every number, so it is never kept as the best value.
 
 * Pilot and low-discrepancy
 
@@ -37,6 +41,7 @@ Gradient support is provided by =eindir=; see the [[https://eindir.rgoswami.me/h
 
 * Hamiltonian Monte Carlo (HMC) / quasi-Monte Carlo (QMC) variants (also exposed)
 
-- =run_hmc=, =run_qmc= (see =python/anneal/__init__.py= and tests for current signatures).
+- =run_hmc= (see =python/anneal/__init__.py= and tests for current signatures).
+- =run_qmc= (the multistart =run= described under Classical above).
 
-All return dicts with =best_pos=, =best_val=, =n_evals= (or the rich =History= / =DeviceHistory= / =EnsembleHistory= objects from =run= / =run_device=).
+All return dicts with =best_pos=, =best_val=, =n_evals= (or the rich =History= / =DeviceHistory= / =EnsembleHistory= objects from =run= / =run_qmc= / =run_device=).
