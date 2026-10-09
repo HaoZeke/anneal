@@ -145,6 +145,13 @@ def test_x0_is_the_first_evaluation_and_every_call_is_charged(problem, dim):
     assert out["best_val"] <= fn(x0)
 
 
+def test_values_only_rosenbrock_descends_from_x0():
+    dim = 10
+    fn, _, low, high = _rosenbrock(dim)
+    out = anneal.global_optimize(fn, low, high, budget=1500, seed=0, x0=np.full(dim, -1.2))
+    assert out["best_val"] < 1e-8
+
+
 def test_x0_at_the_minimum_stays_the_incumbent():
     dim = 6
     fn, _, low, high = _rosenbrock(dim)
