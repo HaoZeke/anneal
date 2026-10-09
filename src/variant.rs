@@ -279,6 +279,24 @@ pub type FastVariant<O> = SaVariant<f64, O, ReciprocalCool<f64>, ContinuousR_n, 
 pub type GsaVariant<O> =
     SaVariant<f64, O, TsallisCool<f64>, ContinuousR_n, TsallisVisit, TsallisAccept<f64>>;
 
+/// Box-constrained Boltzmann preset with reflected Gaussian proposals.
+pub type BoxedBoltzmannVariant<O> =
+    SaVariant<f64, O, LogCool<f64>, BoxConstrained<f64>, Reflected<Gaussian>, Metropolis>;
+
+/// Box-constrained Fast preset with reflected Cauchy proposals.
+pub type BoxedFastVariant<O> =
+    SaVariant<f64, O, ReciprocalCool<f64>, BoxConstrained<f64>, Reflected<Cauchy>, Metropolis>;
+
+/// Box-constrained GSA preset with reflected Tsallis proposals.
+pub type BoxedGsaVariant<O> = SaVariant<
+    f64,
+    O,
+    TsallisCool<f64>,
+    BoxConstrained<f64>,
+    Reflected<TsallisVisit>,
+    TsallisAccept<f64>,
+>;
+
 /// Constructs the Boltzmann SA variant: logarithmic cooling, isotropic
 /// Gaussian moves, Metropolis acceptance, on the unconstrained `R^dim`.
 ///
@@ -335,6 +353,58 @@ pub fn gsa<O: Objective<f64> + Send + Sync>(
         TsallisCool::new(t_init, q_v),
         ContinuousR_n::new(dim),
         TsallisVisit::new(q_v),
+        TsallisAccept::new(q_a),
+    )
+}
+
+/// Constructs the box-constrained Boltzmann preset used by the Python API.
+///
+/// Mirror reflection retains proposal symmetry while guaranteeing that every
+/// objective evaluation remains inside the objective bounds.
+pub fn boxed_boltzmann<O: Objective<f64> + Send + Sync>(
+    obj: O,
+    t_init: f64,
+    sigma: f64,
+) -> Result<BoxedBoltzmannVariant<O>, LawViolation> {
+    let bounds = obj.bounds().clone();
+    SaVariant::checked(
+        obj,
+        LogCool::new(t_init, 2.0),
+        BoxConstrained::new(bounds.clone()),
+        Reflected::new(Gaussian::new(sigma), bounds),
+        Metropolis,
+    )
+}
+
+/// Constructs the box-constrained Fast preset used by the Python API.
+pub fn boxed_fast<O: Objective<f64> + Send + Sync>(
+    obj: O,
+    t_init: f64,
+    gamma: f64,
+) -> Result<BoxedFastVariant<O>, LawViolation> {
+    let bounds = obj.bounds().clone();
+    SaVariant::checked(
+        obj,
+        ReciprocalCool::new(t_init),
+        BoxConstrained::new(bounds.clone()),
+        Reflected::new(Cauchy::new(gamma), bounds),
+        Metropolis,
+    )
+}
+
+/// Constructs the box-constrained GSA preset used by the Python API.
+pub fn boxed_gsa<O: Objective<f64> + Send + Sync>(
+    obj: O,
+    t_init: f64,
+    q_v: f64,
+    q_a: f64,
+) -> Result<BoxedGsaVariant<O>, LawViolation> {
+    let bounds = obj.bounds().clone();
+    SaVariant::checked(
+        obj,
+        TsallisCool::new(t_init, q_v),
+        BoxConstrained::new(bounds.clone()),
+        Reflected::new(TsallisVisit::new(q_v), bounds),
         TsallisAccept::new(q_a),
     )
 }

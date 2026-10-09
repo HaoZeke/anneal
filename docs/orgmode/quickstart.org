@@ -73,6 +73,57 @@ print("Gsa best:", h3.best_pos, h3.best_val)
 #+end_src
 
 Each returns a =History= with =best_pos=, =best_val=, =epochs= (list of =EpochLine=), etc.
+The bounds constrain every objective evaluation. Proposals are reflected at
+the box faces, and an optional =x0= supplies the first point (out-of-box values
+are clipped).
+
+** ChemFit (gradient-free)
+
+ChemFit's user-driven lifecycle can be used directly as the objective. Flatten
+only at the optimizer boundary; always pass a fresh reshaped array to ChemFit.
+The initial ChemFit positions become =x0=.
+
+#+begin_src python
+import numpy as np
+import anneal
+
+def fit_positions(fitter, initial_positions, budget):
+    if budget < 1:
+        raise ValueError("budget must include at least the initial evaluation")
+    initial = np.asarray(initial_positions, dtype=np.float64)
+    n_atoms = initial.shape[0]
+    low = np.full(initial.size, -3.0)
+    high = np.full(initial.size, 3.0)
+
+    def objective(flat_positions):
+        loss = fitter.ask({
+            "positions": np.asarray(flat_positions).reshape(n_atoms, 3).copy()
+        })
+        fitter.tell()
+        return float(loss)
+
+    # run spends one evaluation on x0 and one per proposal.
+    proposals = max(0, int(budget) - 1)
+    fitter.init()
+    history = anneal.run(
+        objective,
+        low,
+        high,
+        anneal.Boltzmann(),
+        n_epochs=1,
+        steps_per_epoch=proposals,
+        x0=initial.reshape(-1),
+    )
+    return fitter.finish({
+        "positions": np.asarray(history.best_pos).reshape(n_atoms, 3)
+    })
+#+end_src
+
+ChemFit releases that name the user-driven methods =evaluate= and =step= can
+substitute those two calls for =ask= and =tell=; the array and budget handling
+are unchanged. The expression =positions.reshape(...)= does not modify an
+array in place, so ignoring its return value does not flatten or restore
+anything.
 
 * Pilot draws for Bayesian warm-start
 

@@ -2,6 +2,7 @@
 //! and returns a `History`. The `Sampler` trait keeps the driver loop
 //! independent of the concrete proposal and acceptance machinery.
 
+use ndarray::Array1;
 use rand::SeedableRng;
 use rand::rngs::StdRng;
 
@@ -83,6 +84,33 @@ pub fn run_rs<S: Sampler<f64>>(
     )
 }
 
+/// Runs a sampler from an optional caller-supplied position.
+///
+/// The sampler owns the start-position policy. Shipped variants clip the
+/// position to their objective bounds before the first evaluation. `None`
+/// retains the ordinary seeded draw from the objective bounds.
+pub fn run_rs_from_position<S: Sampler<f64>>(
+    sampler: S,
+    cooling: &dyn Cooling<f64>,
+    n_epochs: usize,
+    steps_per_epoch: usize,
+    seed: u64,
+    x0: Option<Array1<f64>>,
+) -> History {
+    let mut rng = StdRng::seed_from_u64(seed);
+    let state = x0
+        .and_then(|pos| sampler.initial_state_from_position(pos))
+        .unwrap_or_else(|| sampler.initial_state(&mut rng));
+    drive_rs(
+        &sampler,
+        cooling,
+        state,
+        n_epochs,
+        steps_per_epoch,
+        &mut rng,
+    )
+}
+
 /// Convenience wrapper: drives a `SaVariant` through `run_rs`, supplying
 /// the variant's own cooling schedule. Equivalent to the pre-A1 API.
 pub fn run_rs_variant<O, C, N, M, A>(
@@ -100,6 +128,25 @@ where
 {
     let cooling = variant.cool.clone();
     run_rs(variant, &cooling, n_epochs, steps_per_epoch, seed)
+}
+
+/// Convenience wrapper for a `SaVariant` with an optional initial position.
+pub fn run_rs_variant_from_position<O, C, N, M, A>(
+    variant: SaVariant<f64, O, C, N, M, A>,
+    n_epochs: usize,
+    steps_per_epoch: usize,
+    seed: u64,
+    x0: Option<Array1<f64>>,
+) -> History
+where
+    O: eindir_core::Objective<f64> + Send + Sync,
+    C: Cooling<f64> + Clone,
+    N: crate::neigh::Neighborhood<f64>,
+    M: crate::movekernel::MoveKernel<f64>,
+    A: crate::accept::AcceptRule<f64>,
+{
+    let cooling = variant.cool.clone();
+    run_rs_from_position(variant, &cooling, n_epochs, steps_per_epoch, seed, x0)
 }
 
 /// Resumable variant driver: runs epochs `[start_epoch, start_epoch + n_epochs)`
