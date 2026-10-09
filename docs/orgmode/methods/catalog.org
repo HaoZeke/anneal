@@ -1936,7 +1936,13 @@ arm and exposed through =src/python.rs= as
 What it is: a resumable ask/tell quasi-Newton descent on
 finite-difference gradients inside a box. Stencils step inward at the
 bounds and forward differences give way to central ones when they
-stall; directions come from a projected BFGS inverse Hessian, with
+stall. After the first central stencil at a coordinate, its interval is
+a tenth of the distance \(|g_i / c_i|\) to the minimum of the quadratic
+through the stencil, between the rounding limit and the
+\(\epsilon^{1/3}\) rule, so a valley narrower than that rule is not
+straddled; a failed central line search re-differences once an interval
+has moved by more than a factor of two, at most twice per iterate.
+Directions come from a projected BFGS inverse Hessian, with
 curvature-checked updates, followed by a projected backtracking Armijo
 line search that may extrapolate once. The initial inverse Hessian is
 the box metric \(D = \mathrm{diag}(w^2)\), scaled to
@@ -1945,16 +1951,17 @@ span decades move as far, relative to their width, as unit ones. A
 descent ends on a slow iteration, a projected-gradient tolerance when
 one is set, or a failed line search.
 
-Key types and functions: =FdBfgs= (src/methods/fd_bfgs.rs:123);
-=FdBfgsOptions= (fd_bfgs.rs:52); the portfolio's =QnArmState= and
+Key types and functions: =FdBfgs= (src/methods/fd_bfgs.rs:146);
+=FdBfgsOptions= (fd_bfgs.rs:74); the portfolio's =QnArmState= and
 =run_qn_arm= (src/methods/portfolio.rs:1008/3088), and the GSA arm's
 local search in =run_persistent_gsa=.
 
 Constants and defaults: =ARMIJO = 1e-4=, =MAX_LINE_TRIALS = 40=, a first
-step of at most 5% of each side (fd_bfgs.rs:36-48). The default options
-have the value floor =f64::MIN_POSITIVE= in the slow-iteration test and
-no gradient tolerance; the GSA local search uses L-BFGS-B's =ftol = 1e7
-eps=, value floor 1 and =gtol = 1e-5=.
+step of at most 5% of each side, =CENTRAL_INTERVAL_FRACTION = 0.1=,
+=INTERVAL_MOVE = 2=, =MAX_REDIFFERENCES = 2= (fd_bfgs.rs:50-70). The
+default options have the value floor =f64::MIN_POSITIVE= in the
+slow-iteration test and no gradient tolerance; the GSA local search
+uses L-BFGS-B's =ftol = 1e7 eps=, value floor 1 and =gtol = 1e-5=.
 
 Feeds/consumes: the =qn= arm of the portfolio's values-only loop (its
 opening and closing descents, and descents kicked from the incumbent
