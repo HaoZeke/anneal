@@ -8,6 +8,7 @@
 - =Gsa(t_init, =q_v=, q_a)= :: =Tsallis= cooling + =Tsallis= visit + =Tsallis= accept.
 
 All called via =run(obj, low, high, preset, n_epochs, steps_per_epoch, seed)=.
+Every proposal is reflected into the closed box =[low, high]=, so no evaluation leaves it; a coordinate with =low == high= stays fixed.
 
 * Pilot and low-discrepancy
 

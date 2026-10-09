@@ -11,6 +11,7 @@ use eindir_core::{Bounds, FPair};
 use ndarray::{Array1, ArrayView1};
 use num_traits::Float;
 use rand::Rng;
+use rand_distr::{Distribution, Uniform};
 use std::sync::Mutex;
 
 use crate::accept::AcceptRule;
@@ -156,7 +157,18 @@ where
     A: AcceptRule<f64>,
 {
     fn initial_state<R: Rng>(&self, rng: &mut R) -> State {
-        let pos = self.obj.bounds().mkpoint(rng);
+        // `Bounds::mkpoint` panics on a `low == high` axis. Hold that axis at
+        // its value and draw every other axis exactly as `mkpoint` does.
+        let bounds = self.obj.bounds();
+        let pos = Array1::from_iter(bounds.low.iter().zip(bounds.high.iter()).map(|(&lo, &hi)| {
+            if lo == hi {
+                lo
+            } else {
+                Uniform::new(lo, hi)
+                    .expect("low < high required for Uniform sampling")
+                    .sample(rng)
+            }
+        }));
         let val = self.obj.eval(pos.view());
         let pair = FPair { pos, val };
         State {

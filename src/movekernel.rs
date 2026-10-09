@@ -199,7 +199,9 @@ pub fn reflect_coord(x: f64, lo: f64, hi: f64) -> f64 {
     if y > w {
         y = period - y;
     }
-    lo + y
+    // `hi - lo` and `lo + y` both round, so the sum can land one ulp past
+    // `hi`; a non-finite `x` leaves `y` NaN, which `max` sends to `lo`.
+    (lo + y).max(lo).min(hi)
 }
 
 /// Mirror-reflects every coordinate of `x` into `bounds` (see
@@ -241,7 +243,12 @@ impl<M: MoveKernel<f64>> MoveKernel<f64> for Reflected<M> {
     fn propose<R: Rng + ?Sized>(&self, i: ArrayView1<f64>, t: f64, rng: &mut R) -> Array1<f64> {
         let mut p = self.inner.propose(i, t, rng);
         for (k, pk) in p.iter_mut().enumerate() {
-            *pk = reflect_coord(*pk, self.bounds.low[k], self.bounds.high[k]);
+            let (lo, hi) = (self.bounds.low[k], self.bounds.high[k]);
+            // `reflect_coord` rebuilds an in-box value as `lo + (x - lo)`,
+            // which rounds, so only coordinates outside the box are folded.
+            if !(lo..=hi).contains(pk) {
+                *pk = reflect_coord(*pk, lo, hi);
+            }
         }
         p
     }
@@ -302,6 +309,17 @@ mod tests {
         assert!((reflect_coord(7.0, -5.0, 5.0) - 3.0).abs() < 1e-12);
         assert!((reflect_coord(-7.0, -5.0, 5.0) + 3.0).abs() < 1e-12);
         assert!((reflect_coord(0.0, -5.0, 5.0) - 0.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn reflect_coord_stays_in_the_closed_box_under_rounding() {
+        // `0.3 - (-1.0)` rounds up to 1.3, so the unguarded fold returned
+        // `-1.0 + 1.3 = 0.30000000000000004` for a point on the upper wall.
+        assert_eq!(reflect_coord(0.3, -1.0, 0.3), 0.3);
+        for x in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            let r = reflect_coord(x, -1.0, 0.3);
+            assert!((-1.0..=0.3).contains(&r), "{x} folded to {r}");
+        }
     }
 
     #[test]

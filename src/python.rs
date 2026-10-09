@@ -54,6 +54,34 @@ fn validate_box_bounds(low: &[f64], high: &[f64]) -> PyResult<()> {
     Ok(())
 }
 
+/// Like [`validate_box_bounds`], but `low[i] == high[i]` passes: the classical
+/// presets hold such a coordinate at that value.
+fn validate_closed_box(low: &[f64], high: &[f64]) -> PyResult<()> {
+    if low.len() != high.len() {
+        return Err(PyValueError::new_err(
+            "low and high must have the same length",
+        ));
+    }
+    if low.is_empty() {
+        return Err(PyValueError::new_err(
+            "bounds must have at least one dimension",
+        ));
+    }
+    for (i, (&lo, &hi)) in low.iter().zip(high.iter()).enumerate() {
+        if !lo.is_finite() || !hi.is_finite() {
+            return Err(PyValueError::new_err(format!(
+                "bounds must be finite at dimension {i}"
+            )));
+        }
+        if lo > hi {
+            return Err(PyValueError::new_err(format!(
+                "low[{i}] must not exceed high[{i}] (got {lo} > {hi})"
+            )));
+        }
+    }
+    Ok(())
+}
+
 // ---------------------------------------------------------------------------
 // Preset parameter holders.
 // ---------------------------------------------------------------------------
@@ -1889,12 +1917,17 @@ enum Preset {
 
 /// Runs the SA driver and returns a `History`.
 ///
+/// The chain lives in the closed box `[low, high]`: the initial position is
+/// drawn uniformly from it and every proposal is mirror-reflected back into
+/// it, so every objective evaluation and `History.best_pos` lie inside the
+/// box. A coordinate with `low[i] == high[i]` is held at that value.
+///
 /// Args:
 ///   obj_fn: Python callable `f(numpy.ndarray) -> float` evaluated at every
 ///           proposal. Held via the GIL.
-///   low, high: numpy arrays defining the box bounds used to draw the
-///              initial position uniformly. Same length defines the
-///              objective dimensionality.
+///   low, high: finite numpy arrays of the same length with
+///              `low <= high`; they define the box and the objective
+///              dimensionality. Anything else raises `ValueError`.
 ///   preset: one of `Boltzmann()`, `Fast()`, `Gsa()` from `anneal`.
 ///   n_epochs, steps_per_epoch: SA loop dimensions.
 ///   seed: u64 seed for the StdRng.
@@ -1911,11 +1944,7 @@ fn run(
 ) -> PyResult<PyHistory> {
     let low_vec = low.as_slice()?.to_vec();
     let high_vec = high.as_slice()?.to_vec();
-    if low_vec.len() != high_vec.len() {
-        return Err(pyo3::exceptions::PyValueError::new_err(
-            "low and high must have the same length",
-        ));
-    }
+    validate_closed_box(&low_vec, &high_vec)?;
     let bounds = Bounds::new(Array1::from_vec(low_vec), Array1::from_vec(high_vec), 1e-9);
     let obj = CallableObjective {
         fn_: obj_fn,
@@ -1988,7 +2017,18 @@ fn pilot_draws_qmc(n: usize, seed: u64) -> PyResult<Vec<Vec<f64>>> {
         .collect())
 }
 
-/// Runs the SA driver from a low-discrepancy multistart design.
+/// Runs the SA driver from a low-discrepancy multistart design and returns
+/// the `History` of the best start.
+///
+/// Each of the `n_starts` chains begins at a low-discrepancy point of the
+/// box and runs `n_epochs * steps_per_epoch` proposals under its own seed.
+/// The box is enforced as in `run`: every objective evaluation and
+/// `History.best_pos` lie in the closed box `[low, high]`, and a coordinate
+/// with `low[i] == high[i]` is held at that value.
+///
+/// Args:
+///   obj_fn, low, high, preset, n_epochs, steps_per_epoch, seed: as in `run`.
+///   n_starts: number of low-discrepancy starts (at least one runs).
 #[pyfunction]
 #[pyo3(signature = (obj_fn, low, high, preset, n_starts = 8, n_epochs = 100, steps_per_epoch = 200, seed = 42))]
 fn run_qmc(
@@ -2003,25 +2043,7 @@ fn run_qmc(
 ) -> PyResult<PyHistory> {
     let low_vec = low.as_slice()?.to_vec();
     let high_vec = high.as_slice()?.to_vec();
-    if low_vec.len() != high_vec.len() {
-        return Err(PyValueError::new_err(
-            "low and high must have the same length",
-        ));
-    }
-    if low_vec.is_empty() {
-        return Err(PyValueError::new_err(
-            "bounds must have at least one dimension",
-        ));
-    }
-    if low_vec
-        .iter()
-        .zip(high_vec.iter())
-        .any(|(&lo, &hi)| hi < lo)
-    {
-        return Err(PyValueError::new_err(
-            "each upper bound must be greater than or equal to the lower bound",
-        ));
-    }
+    validate_closed_box(&low_vec, &high_vec)?;
     let bounds = Bounds::new(Array1::from_vec(low_vec), Array1::from_vec(high_vec), 1e-9);
     let obj = CallableObjective {
         fn_: obj_fn,

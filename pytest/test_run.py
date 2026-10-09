@@ -66,6 +66,26 @@ def smooth_needle(x: np.ndarray) -> float:
     return float(-np.exp(-40.0 * np.dot(dx, dx)))
 
 
+def lj_energy(x: np.ndarray) -> float:
+    """Lennard-Jones energy of flattened ``(n, 3)`` atomic positions."""
+    pos = np.asarray(x, dtype=np.float64).reshape(-1, 3)
+    d = pos[:, None, :] - pos[None, :, :]
+    r2 = (d**2).sum(-1)[np.triu_indices(len(pos), 1)]
+    inv6 = 1.0 / r2**3
+    return float(np.sum(4.0 * (inv6 * inv6 - inv6)))
+
+
+def recording(fn):
+    """Wrap ``fn`` so every point it is evaluated at is kept, in call order."""
+    seen = []
+
+    def wrapped(x):
+        seen.append(np.array(x, copy=True))
+        return fn(x)
+
+    return wrapped, seen
+
+
 LOW = np.array([-5.0, -5.0])
 HIGH = np.array([5.0, 5.0])
 GLOBAL_MIN = -78.33198
@@ -564,3 +584,81 @@ def test_preset_repr():
     assert "Gsa(t_init=3.0, q_v=2.5, q_a=1.7)" == repr(
         Gsa(t_init=3.0, q_v=2.5, q_a=1.7)
     )
+
+
+DRIVERS = [pytest.param(run, id="run"), pytest.param(run_qmc, id="run_qmc")]
+WIDE_PRESETS = [Boltzmann(sigma=10.0), Fast(gamma=10.0), Gsa(t_init=50.0)]
+
+
+@pytest.mark.parametrize("driver", DRIVERS)
+@pytest.mark.parametrize("preset", WIDE_PRESETS, ids=repr)
+def test_every_evaluation_stays_in_the_box(driver, preset):
+    low = np.array([-3.0, -1.0, 0.5])
+    high = np.array([3.0, 2.0, 0.75])
+    obj, seen = recording(lambda x: -float(np.sum(x)))
+
+    h = driver(obj, low, high, preset, n_epochs=20, steps_per_epoch=50, seed=3)
+
+    evals = np.array(seen)
+    assert np.all((evals >= low) & (evals <= high))
+    assert np.all((np.array(h.best_pos) >= low) & (np.array(h.best_pos) <= high))
+
+
+def test_chemfit_positions_stay_in_the_box():
+    n_atoms = 13
+    low = np.full(3 * n_atoms, -3.0)
+    high = np.full(3 * n_atoms, 3.0)
+    obj, seen = recording(lj_energy)
+    budget = 2000
+
+    h = run(
+        obj,
+        low,
+        high,
+        Boltzmann(),
+        n_epochs=budget // 100,
+        steps_per_epoch=100,
+    )
+
+    evals = np.array(seen)
+    assert evals.shape == (budget + 1, 3 * n_atoms)
+    assert np.all((evals >= low) & (evals <= high))
+    assert np.all((np.array(h.best_pos) >= low) & (np.array(h.best_pos) <= high))
+    assert h.best_val == min(lj_energy(x) for x in evals)
+
+
+@pytest.mark.parametrize("driver", DRIVERS)
+@pytest.mark.parametrize(
+    ("low", "high", "message"),
+    [
+        ([-1.0, -1.0], [1.0], "same length"),
+        ([], [], "at least one dimension"),
+        ([-1.0, np.nan], [1.0, 1.0], "finite"),
+        ([-1.0, -1.0], [1.0, np.inf], "finite"),
+        ([-1.0, 2.0], [1.0, 1.0], "must not exceed"),
+    ],
+)
+def test_invalid_box_raises_value_error(driver, low, high, message):
+    with pytest.raises(ValueError, match=message):
+        driver(
+            styb_tang_2d,
+            np.array(low, dtype=np.float64),
+            np.array(high, dtype=np.float64),
+            Boltzmann(),
+            n_epochs=1,
+            steps_per_epoch=1,
+        )
+
+
+@pytest.mark.parametrize("driver", DRIVERS)
+@pytest.mark.parametrize("preset", WIDE_PRESETS, ids=repr)
+def test_equal_endpoints_fix_the_coordinate(driver, preset):
+    low = np.array([-2.0, 0.5, -2.0])
+    high = np.array([2.0, 0.5, 2.0])
+    obj, seen = recording(lambda x: float(np.sum(x**2)))
+
+    h = driver(obj, low, high, preset, n_epochs=10, steps_per_epoch=50, seed=1)
+
+    evals = np.array(seen)
+    assert np.all(evals[:, 1] == 0.5)
+    assert h.best_pos[1] == 0.5
