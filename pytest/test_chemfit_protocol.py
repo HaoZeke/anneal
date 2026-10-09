@@ -2,7 +2,8 @@
 
 Current ChemFit drives a ``Fitter`` with ``evaluate`` / ``step``; ChemFit 3.1
 with ``ask`` / ``tell``. Every bridge must speak whichever pair the fitter
-has, and refuse a fitter with neither before starting its session. An
+has, and refuse a fitter with neither before starting its session; only
+``run_benchmark`` still drives half a pair, as anneal 0.10.0 did. An
 exception raised by the fitter, or a loss that is not a real number, must
 reach the caller unchanged, with no further fitter call and no ``finish``.
 """
@@ -80,8 +81,25 @@ class _EvaluateWithoutStep(Recorder):
         return self._evaluate("evaluate", parameters)
 
 
-@pytest.mark.parametrize("fitter_type", [Recorder, _EvaluateWithoutStep])
-@pytest.mark.parametrize("entry", ENTRIES)
+class _AskWithoutTell(Recorder):
+    def ask(self, parameters, context_index=0):
+        return self._evaluate("ask", parameters)
+
+
+# run_benchmark still drives half a pair; test_chemfit_compat.py covers it.
+REFUSED = [
+    (entry, fitter_type)
+    for entry in ENTRIES
+    for fitter_type in (Recorder, _EvaluateWithoutStep, _AskWithoutTell)
+    if entry != "run_benchmark" or fitter_type is Recorder
+]
+
+
+@pytest.mark.parametrize(
+    "entry, fitter_type",
+    REFUSED,
+    ids=[f"{entry}-{fitter_type.__name__}" for entry, fitter_type in REFUSED],
+)
 def test_a_fitter_without_a_whole_protocol_is_refused_before_init(entry, fitter_type):
     fitter = fitter_type(*_problem())
     with pytest.raises(TypeError, match="evaluate"):
