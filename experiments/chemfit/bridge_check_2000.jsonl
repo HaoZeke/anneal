@@ -1,0 +1,10 @@
+{"budget": 2000, "path": "bug report loop", "evals": 2001, "outside": 0, "starts_at_initial": false, "best": -8.138247584076302}
+{"budget": 2000, "path": "corrected loop", "evals": 2000, "outside": 0, "starts_at_initial": true, "best": -17.149658941256373}
+{"budget": 2000, "path": "run_benchmark boltzmann", "evals": 2000, "outside": 0, "starts_at_initial": true, "best": -21.39396842041121}
+{"budget": 2000, "path": "run_benchmark portfolio", "evals": 2000, "outside": 0, "starts_at_initial": true, "best": -13.943871190232931}
+{"budget": 2000, "path": "fit_anneal boltzmann", "evals": 2000, "outside": 0, "starts_at_initial": true, "best": -21.39396842041121}
+{"budget": 2000, "path": "fit_anneal portfolio", "evals": 2000, "outside": 0, "starts_at_initial": true, "best": -13.943871190232931}
+{"budget": 2000, "path": "fit_chemfit boltzmann", "evals": 2000, "outside": 0, "starts_at_initial": true, "best": -21.39396842041121}
+{"budget": 2000, "path": "fit_chemfit portfolio", "evals": 2000, "outside": 0, "starts_at_initial": true, "best": -13.943871190232931}
+{"budget": 2000, "path": "Fitter.fit_anneal boltzmann", "evals": 2000, "outside": 0, "starts_at_initial": true, "best": -19.667409994234685}
+{"budget": 2000, "path": "Fitter.fit_anneal portfolio", "evals": 2000, "outside": 0, "starts_at_initial": true, "best": -16.82165049688825}

@@ -122,7 +122,7 @@ makes `1 + n_epochs * steps_per_epoch` evaluations.
 
 ## ChemFit
 
-Gradient-free fits go through `anneal.chemfit`. The chain starts at the fitter's initial parameters, and every candidate stays inside the box. `fit_anneal` and `fit_chemfit` speak `init` / `ask` / `tell` / `finish`. `run_benchmark` also accepts `evaluate` / `step`. `driver="portfolio"` (the default) is the budget-only global optimizer. `driver="boltzmann"`, `"fast"`, and `"gsa"` are the classical presets.
+Gradient-free fits go through `anneal.chemfit`. The chain starts at the fitter's initial parameters, and every candidate stays inside the box. `fit_anneal`, `fit_chemfit` and `run_benchmark` drive a fitter through `init`, `evaluate` / `step` (ChemFit 4) or `ask` / `tell` (ChemFit 3.1), and `finish`, and make at most `budget` evaluations, the start included. `driver="portfolio"` (the default) is the budget-only global optimizer. `driver="boltzmann"`, `"fast"`, and `"gsa"` are the classical presets, which spend exactly `budget`.
 
 ```python
 from anneal.chemfit import run_benchmark
