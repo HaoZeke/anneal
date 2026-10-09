@@ -17,6 +17,18 @@ pub trait MoveKernel<T: Float>: Send + Sync {
     /// Draws a proposal point from the kernel at temperature `t`.
     fn propose<R: Rng + ?Sized>(&self, i: ArrayView1<T>, t: T, rng: &mut R) -> Array1<T>;
 
+    /// The step `d` of a kernel whose proposal is `i + d`, drawn with the same
+    /// calls on `rng` as [`propose`](Self::propose). [`Reflected`] folds the
+    /// sum itself when it overflows. Default `None`, which draws nothing.
+    fn displacement<R: Rng + ?Sized>(
+        &self,
+        _i: ArrayView1<T>,
+        _t: T,
+        _rng: &mut R,
+    ) -> Option<Array1<T>> {
+        None
+    }
+
     /// Witnesses L2: returns `true` iff `supp(propose) subseteq n` over the
     /// implementor's declared domain. Sampled validation also exercises the
     /// proposal behavior. Default `false`.
@@ -46,6 +58,16 @@ impl MoveKernel<f64> for Gaussian {
     fn propose<R: Rng + ?Sized>(&self, i: ArrayView1<f64>, _t: f64, rng: &mut R) -> Array1<f64> {
         let dist = NormalDist::new(0.0, self.sigma).expect("sigma > 0");
         Array1::from_iter(i.iter().map(|&xi| xi + dist.sample(rng)))
+    }
+
+    fn displacement<R: Rng + ?Sized>(
+        &self,
+        i: ArrayView1<f64>,
+        _t: f64,
+        rng: &mut R,
+    ) -> Option<Array1<f64>> {
+        let dist = NormalDist::new(0.0, self.sigma).expect("sigma > 0");
+        Some(Array1::from_iter(i.iter().map(|_| dist.sample(rng))))
     }
 
     fn supports_in<N: Neighborhood<f64>>(&self, _n: &N) -> bool {
@@ -78,6 +100,16 @@ impl MoveKernel<f64> for Cauchy {
     fn propose<R: Rng + ?Sized>(&self, i: ArrayView1<f64>, _t: f64, rng: &mut R) -> Array1<f64> {
         let dist = CauchyDist::new(0.0, self.gamma).expect("gamma > 0");
         Array1::from_iter(i.iter().map(|&xi| xi + dist.sample(rng)))
+    }
+
+    fn displacement<R: Rng + ?Sized>(
+        &self,
+        i: ArrayView1<f64>,
+        _t: f64,
+        rng: &mut R,
+    ) -> Option<Array1<f64>> {
+        let dist = CauchyDist::new(0.0, self.gamma).expect("gamma > 0");
+        Some(Array1::from_iter(i.iter().map(|_| dist.sample(rng))))
     }
 
     fn supports_in<N: Neighborhood<f64>>(&self, _n: &N) -> bool {
@@ -295,13 +327,35 @@ pub fn reflect_into_box(x: ArrayView1<f64>, bounds: &Bounds<f64>) -> Array1<f64>
     )
 }
 
+/// [`reflect_coord`] of `x + d`. A sum of finite `x` and `d` that overflows
+/// is folded at half scale, where it cannot, and an infinite wall then acts
+/// as a wall at `f64::MAX`. An infinite `d` has no image, and the coordinate
+/// stays at `x`.
+fn reflect_step(x: f64, d: f64, lo: f64, hi: f64) -> f64 {
+    let sum = x + d;
+    if sum.is_finite() || !x.is_finite() {
+        return reflect_coord(sum, lo, hi);
+    }
+    if !d.is_finite() {
+        return x;
+    }
+    let half = reflect_coord(
+        0.5 * x + 0.5 * d,
+        0.5 * lo.max(f64::MIN),
+        0.5 * hi.min(f64::MAX),
+    );
+    (2.0 * half).max(lo).min(hi)
+}
+
 /// Box-reflecting adapter: wraps an inner move kernel and mirror-reflects each
 /// proposed coordinate back into the supplied box. Unlike clipping (which piles
 /// probability mass on the boundary and breaks proposal symmetry), reflection
 /// keeps the proposal symmetric, so `Reflected<M>` is safe to pair with
 /// [`BoxConstrained`](crate::neigh::BoxConstrained) and satisfies L1/L2 without
 /// a Hastings term whenever the inner kernel `M` is symmetric (`Gaussian`,
-/// `Cauchy`, `TsallisVisit`).
+/// `Cauchy`, `TsallisVisit`). A kernel that exposes its
+/// [`displacement`](MoveKernel::displacement) mirrors even a step whose sum
+/// overflows f64.
 #[derive(Clone, Debug)]
 pub struct Reflected<M> {
     /// Inner symmetric move kernel.
@@ -319,6 +373,12 @@ impl<M> Reflected<M> {
 
 impl<M: MoveKernel<f64>> MoveKernel<f64> for Reflected<M> {
     fn propose<R: Rng + ?Sized>(&self, i: ArrayView1<f64>, t: f64, rng: &mut R) -> Array1<f64> {
+        if let Some(d) = self.inner.displacement(i, t, rng) {
+            let (low, high) = (&self.bounds.low, &self.bounds.high);
+            return Array1::from_iter(
+                (0..i.len()).map(|k| reflect_step(i[k], d[k], low[k], high[k])),
+            );
+        }
         let mut p = self.inner.propose(i, t, rng);
         for (k, pk) in p.iter_mut().enumerate() {
             *pk = reflect_coord(*pk, self.bounds.low[k], self.bounds.high[k]);
@@ -543,6 +603,45 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// Proposes `i + step` with no randomness.
+    struct FixedStep(f64);
+
+    impl MoveKernel<f64> for FixedStep {
+        fn propose<R: Rng + ?Sized>(
+            &self,
+            i: ArrayView1<f64>,
+            _t: f64,
+            _rng: &mut R,
+        ) -> Array1<f64> {
+            i.mapv(|x| x + self.0)
+        }
+
+        fn displacement<R: Rng + ?Sized>(
+            &self,
+            i: ArrayView1<f64>,
+            _t: f64,
+            _rng: &mut R,
+        ) -> Option<Array1<f64>> {
+            Some(Array1::from_elem(i.len(), self.0))
+        }
+    }
+
+    #[test]
+    fn reflected_mirrors_a_step_whose_sum_overflows() {
+        let near = |a: f64, b: f64| (a - b).abs() <= 1e-12 * b.abs();
+        let (m, inf) = (f64::MAX, f64::INFINITY);
+        let mut rng = StdRng::seed_from_u64(0);
+        let mut fold = |x: f64, step: f64, lo: f64, hi: f64| {
+            let bounds = Bounds::new(array![lo], array![hi], 0.0);
+            Reflected::new(FixedStep(step), bounds).propose(array![x].view(), 1.0, &mut rng)[0]
+        };
+        assert!(near(fold(0.5 * m, 0.9 * m, 0.0, m), 0.6 * m));
+        assert!(near(fold(-0.6 * m, -0.6 * m, -m, -0.5 * m), -0.8 * m));
+        assert!(near(fold(0.5 * m, 0.9 * m, 0.5 * m, inf), 0.6 * m));
+        assert_eq!(fold(0.25, inf, 0.0, 1.0), 0.25);
+        assert_eq!(fold(0.25, -inf, 0.0, 1.0), 0.25);
     }
 }
 
