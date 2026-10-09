@@ -93,7 +93,7 @@ def run(
             return np.inf
         try:
             return obj_fn(position)
-        except Exception as exc:
+        except BaseException as exc:
             failure = exc
             return np.inf
 
