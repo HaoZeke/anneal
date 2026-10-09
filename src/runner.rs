@@ -230,7 +230,8 @@ where
 }
 
 /// Runs the same `SaVariant` from a bounded low-discrepancy start set and
-/// returns the best history across starts.
+/// returns the best history across starts. An axis with an infinite wall
+/// starts on its finite wall, or at 0 when both walls are infinite.
 pub fn run_rs_qmc_variant<O, C, N, M, A>(
     variant: SaVariant<f64, O, C, N, M, A>,
     n_starts: usize,
@@ -278,11 +279,7 @@ where
 {
     let cooling = variant.cool.clone();
     let n_starts = n_starts.max(1);
-    let mut starts = eindir_core::low_discrepancy_points(
-        variant.obj.bounds(),
-        n_starts,
-        qmc_skip_from_seed(seed),
-    );
+    let mut starts = qmc_starts(variant.obj.bounds(), n_starts, qmc_skip_from_seed(seed));
     if let Some(x0) = x0 {
         starts.row_mut(0).assign(&x0);
     }
@@ -317,6 +314,34 @@ where
         }
     }
     best_history.expect("n_starts.max(1) guarantees at least one chain")
+}
+
+/// The Halton points of `bounds`, except that an axis with an infinite wall,
+/// where they are infinite or NaN, starts on its finite wall, or at 0 when
+/// both walls are infinite, as the single-chain start does.
+fn qmc_starts(bounds: &eindir_core::Bounds<f64>, n: usize, skip: u64) -> ndarray::Array2<f64> {
+    let finite = |lo: f64, hi: f64| lo.is_finite() && hi.is_finite();
+    if bounds
+        .low
+        .iter()
+        .zip(bounds.high.iter())
+        .all(|(&lo, &hi)| finite(lo, hi))
+    {
+        return eindir_core::low_discrepancy_points(bounds, n, skip);
+    }
+    let (low, high): (Vec<f64>, Vec<f64>) = bounds
+        .low
+        .iter()
+        .zip(bounds.high.iter())
+        .map(|(&lo, &hi)| match (lo.is_finite(), hi.is_finite()) {
+            (true, true) => (lo, hi),
+            (true, false) => (lo, lo),
+            (false, true) => (hi, hi),
+            (false, false) => (0.0, 0.0),
+        })
+        .unzip();
+    let anchored = eindir_core::Bounds::new(low.into(), high.into(), bounds.slack);
+    eindir_core::low_discrepancy_points(&anchored, n, skip)
 }
 
 /// [`run_rs_variant_from`] with no evaluation cap.

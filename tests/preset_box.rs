@@ -384,6 +384,43 @@ fn an_infinite_wall_starts_the_chain_on_its_finite_wall() {
 }
 
 #[test]
+fn qmc_starts_on_an_infinite_wall_lie_on_its_finite_wall() {
+    // The Halton points of an axis with an infinite wall are infinite or
+    // NaN, so every start but x0 lies on the finite wall instead, or at 0
+    // when both walls are infinite, and no chain reaches infinity.
+    let inf = f64::INFINITY;
+    let per_chain = 1 + N_EPOCHS * STEPS_PER_EPOCH;
+    for (low, high, wall, x0) in [
+        (array![2.0, -1.0], array![inf, 1.0], 2.0, array![3.0, 0.5]),
+        (
+            array![-inf, -1.0],
+            array![-2.0, 1.0],
+            -2.0,
+            array![-3.0, 0.5],
+        ),
+        (array![-inf, -1.0], array![inf, 1.0], 0.0, array![1.0, 0.5]),
+    ] {
+        for which in 0..3 {
+            for start in [None, Some(x0.view())] {
+                let (obj, seen) = recorder(&low, &high);
+                let history = run_preset(which, obj, 1.0, 2.62, Some(3), 5, start);
+                let seen = seen.lock().unwrap();
+                for idx in usize::from(start.is_some())..3 {
+                    assert_eq!(seen[idx * per_chain][0], wall, "preset {which}");
+                }
+                for x in seen.iter().chain(std::iter::once(&history.best.pos)) {
+                    assert!(
+                        x.iter().all(|v| v.is_finite()),
+                        "preset {which} evaluated {x}"
+                    );
+                    assert_in_box(x, &low, &high);
+                }
+            }
+        }
+    }
+}
+
+#[test]
 fn a_nan_start_is_left_and_never_kept_as_the_best() {
     let low = array![-1.0, -1.0];
     let high = array![1.0, 1.0];
