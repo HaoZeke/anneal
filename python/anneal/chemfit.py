@@ -76,6 +76,59 @@ def _is_number(value: Any) -> bool:
     return isinstance(value, numbers.Real) and not isinstance(value, (bool, np.bool_))
 
 
+_NOT_ARRAYS = (numbers.Number, str, bytes, bytearray, np.generic, list, tuple, Mapping)
+
+
+def _one_value(value: Any) -> Any:
+    """``value``, or the element of a one-element array of any shape.
+
+    The array may be NumPy's or another library's that NumPy can read; a
+    larger one comes back as a NumPy array.
+    """
+    if value is None or isinstance(value, _NOT_ARRAYS):
+        return value
+    try:
+        array = np.asarray(value)
+    except (TypeError, ValueError, RuntimeError):
+        return value
+    if array.size == 1:
+        return array.reshape(())[()]
+    return value if array.dtype.kind == "O" else array
+
+
+def _dtype_kind(value: Any) -> str:
+    """The NumPy kind of ``value``'s dtype, or ``""`` when NumPy cannot name it."""
+    dtype = getattr(value, "dtype", None)
+    if dtype is None:
+        return ""
+    try:
+        return np.dtype(dtype).kind
+    except TypeError:
+        return ""
+
+
+def _as_number(value: Any) -> Any:
+    """The real number ``value`` is or holds, else ``None``.
+
+    A real number other than a bool counts, a ``Decimal`` included unless it
+    is a signalling NaN, and so does the element of a one-element array of
+    any shape, NumPy's or another library's. An object of another type, such
+    as an array on a GPU that NumPy cannot read, is read with ``float()``, as
+    anneal 0.10.0 read it, unless NumPy names its dtype bool or complex.
+    """
+    value = _one_value(value)
+    if _is_number(value) or (isinstance(value, Decimal) and not value.is_snan()):
+        return value
+    if value is None or isinstance(value, (*_NOT_ARRAYS, np.ndarray)):
+        return None
+    if _dtype_kind(value) in ("b", "c"):
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError, OverflowError, RuntimeError):
+        return None
+
+
 def _whole(name: str, value: Any, minimum: int, maximum: int = sys.maxsize) -> int:
     """``value`` as an int in ``[minimum, maximum]``, or an error naming it."""
     if not _is_number(value):
@@ -296,19 +349,19 @@ def _finish(fitter: Any, params: dict[str, Any]) -> Any:
 def _loss_value(value: Any) -> float:
     """One real loss as a float; anything else is a TypeError.
 
-    A one-element list or tuple (a batch of one) and a one-element array of
-    any shape, which anneal 0.10.0 read too, are unwrapped first.
+    A one-element list or tuple (a batch of one) is unwrapped first, and the
+    loss is then read as :func:`_as_number` reads a number: a ``Decimal``,
+    an ``np.matrix`` and another library's array of one element count.
     """
     if isinstance(value, (list, tuple)) and len(value) == 1:
         value = value[0]
-    if isinstance(value, np.ndarray) and value.size == 1:
-        value = value.reshape(())[()]
-    if not _is_number(value):
+    number = _as_number(value)
+    if number is None:
         raise TypeError(
             f"the fitter returned a loss of type {type(value).__name__}; "
             "a loss must be one real number"
         )
-    return float(value)
+    return float(number)
 
 
 # ---------------------------------------------------------------------------
