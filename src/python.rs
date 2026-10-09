@@ -78,6 +78,11 @@ fn validate_closed_box(low: &[f64], high: &[f64]) -> PyResult<()> {
                 "low[{i}] must not exceed high[{i}] (got {lo} > {hi})"
             )));
         }
+        if !(hi - lo).is_finite() {
+            return Err(PyValueError::new_err(format!(
+                "high - low must be finite at dimension {i} (got low = {lo:e}, high = {hi:e})"
+            )));
+        }
     }
     Ok(())
 }
@@ -1985,9 +1990,9 @@ enum Preset {
 ///           proposal. Held via the GIL.
 ///   low, high: one-dimensional array-likes of numbers (lists, tuples or
 ///              numpy arrays of any numeric dtype and strides) of the same
-///              length, finite, with `low <= high`; they define the box and
-///              the objective dimensionality. Anything else raises
-///              `ValueError`.
+///              length, finite, with `low <= high` and a finite
+///              `high - low`; they define the box and the objective
+///              dimensionality. Anything else raises `ValueError`.
 ///   preset: one of `Boltzmann()`, `Fast()`, `Gsa()` from `anneal`.
 ///   n_epochs, steps_per_epoch: SA loop dimensions.
 ///   seed: u64 seed for the StdRng.
