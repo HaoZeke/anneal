@@ -564,3 +564,104 @@ def test_preset_repr():
     assert "Gsa(t_init=3.0, q_v=2.5, q_a=1.7)" == repr(
         Gsa(t_init=3.0, q_v=2.5, q_a=1.7)
     )
+
+
+def lj_cluster_energy(x: np.ndarray) -> float:
+    """Reduced Lennard-Jones energy of a flattened point set."""
+    p = np.asarray(x, dtype=np.float64).reshape(-1, 3)
+    r = np.linalg.norm(p[:, None] - p[None], axis=-1)[np.triu_indices(len(p), 1)]
+    with np.errstate(divide="ignore", invalid="ignore"):
+        energy = float(np.sum(4.0 * (r**-12 - r**-6)))
+    return energy if np.isfinite(energy) else float("inf")
+
+
+class Recorder:
+    """Objective wrapper that keeps every point it is asked to evaluate."""
+
+    def __init__(self, fn):
+        self.fn = fn
+        self.points = []
+
+    def __call__(self, x):
+        self.points.append(np.array(x, dtype=np.float64, copy=True))
+        return self.fn(x)
+
+
+PRESETS = [
+    Boltzmann(t_init=1.0, sigma=0.5),
+    Fast(t_init=1.0, gamma=0.5),
+    Gsa(t_init=1.0, q_v=2.62, q_a=1.7),
+]
+
+
+@pytest.mark.parametrize("preset", PRESETS, ids=repr)
+def test_run_evaluates_only_inside_the_box(preset):
+    # Thirteen atoms in a [-3, 3] box: the ChemFit positions benchmark.
+    low, high = np.full(39, -3.0), np.full(39, 3.0)
+    objective = Recorder(lj_cluster_energy)
+    h = run(objective, low, high, preset, n_epochs=20, steps_per_epoch=100, seed=0)
+    points = np.array(objective.points)
+    assert len(points) == 1 + 20 * 100
+    assert np.all(points >= low) and np.all(points <= high)
+    best = np.asarray(h.best_pos)
+    assert np.all(best >= low) and np.all(best <= high)
+
+
+@pytest.mark.parametrize("preset", PRESETS, ids=repr)
+def test_run_qmc_evaluates_only_inside_the_box(preset):
+    low, high = np.full(6, -1.0), np.full(6, 1.0)
+    objective = Recorder(lambda x: float(np.sum(x * x)))
+    run_qmc(objective, low, high, preset, n_starts=3, n_epochs=5, steps_per_epoch=20, seed=1)
+    points = np.array(objective.points)
+    assert len(points) == 3 * (1 + 5 * 20)
+    assert np.all(points >= low) and np.all(points <= high)
+
+
+@pytest.mark.parametrize("preset", PRESETS, ids=repr)
+def test_run_starts_from_x0(preset):
+    x0 = np.array([-2.903534, -2.903534])
+    objective = Recorder(styb_tang_2d)
+    h = run(objective, LOW, HIGH, preset, n_epochs=2, steps_per_epoch=5, seed=SEED, x0=x0)
+    assert objective.points[0] == pytest.approx(x0)
+    assert h.best_val <= styb_tang_2d(x0)
+
+
+def test_run_qmc_x0_replaces_the_first_start():
+    x0 = np.array([0.25, -0.4])
+    objective = Recorder(shifted_quadratic)
+    h = run_qmc(
+        objective,
+        np.array([-1.0, -1.0]),
+        np.array([1.0, 1.0]),
+        Boltzmann(t_init=0.1, sigma=0.1),
+        n_starts=4,
+        n_epochs=1,
+        steps_per_epoch=1,
+        seed=7,
+        x0=x0,
+    )
+    assert objective.points[0] == pytest.approx(x0)
+    assert h.best_val == pytest.approx(0.0)
+
+
+@pytest.mark.parametrize(
+    ("x0", "message"),
+    [
+        (np.array([5.5, 0.0]), "outside"),
+        (np.array([0.0]), "length"),
+        (np.array([np.nan, 0.0]), "not finite"),
+    ],
+)
+def test_run_refuses_a_bad_x0(x0, message):
+    with pytest.raises(ValueError, match=message):
+        run(styb_tang_2d, LOW, HIGH, Boltzmann(), n_epochs=1, steps_per_epoch=1, x0=x0)
+
+
+@pytest.mark.parametrize(
+    "preset",
+    [Boltzmann(sigma=0.0), Fast(t_init=-1.0), Gsa(q_v=3.5)],
+    ids=repr,
+)
+def test_run_refuses_invalid_preset_parameters(preset):
+    with pytest.raises(ValueError):
+        run(styb_tang_2d, LOW, HIGH, preset, n_epochs=1, steps_per_epoch=1)
