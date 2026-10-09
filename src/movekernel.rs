@@ -85,9 +85,12 @@ impl MoveKernel<f64> for Cauchy {
     }
 }
 
-/// Lanczos approximation (g = 7, n = 9) to the Gamma function for real `x > 0`,
-/// accurate to ~1e-13. Used for the visiting-distribution normalization constant.
-fn gamma_fn(x: f64) -> f64 {
+/// `ln Gamma(x)` for real `x > 0`: the Lanczos approximation (g = 7, n = 9,
+/// accurate to ~1e-13) summed in logarithms, so it stays finite where
+/// `Gamma(x)` itself overflows (`x` beyond about 171). Near `q_v = 1` the
+/// visiting scale needs `ln Gamma(1 / (q_v - 1) - 1/2)` for arguments in the
+/// thousands.
+fn ln_gamma(x: f64) -> f64 {
     const G: f64 = 7.0;
     const C: [f64; 9] = [
         0.999_999_999_999_809_9,
@@ -101,16 +104,16 @@ fn gamma_fn(x: f64) -> f64 {
         1.505_632_735_149_311_6e-7,
     ];
     if x < 0.5 {
-        std::f64::consts::PI / ((std::f64::consts::PI * x).sin() * gamma_fn(1.0 - x))
-    } else {
-        let x = x - 1.0;
-        let mut a = C[0];
-        let t = x + G + 0.5;
-        for (i, &c) in C.iter().enumerate().skip(1) {
-            a += c / (x + i as f64);
-        }
-        (2.0 * std::f64::consts::PI).sqrt() * t.powf(x + 0.5) * (-t).exp() * a
+        let pi = std::f64::consts::PI;
+        return pi.ln() - (pi * x).sin().abs().ln() - ln_gamma(1.0 - x);
     }
+    let x = x - 1.0;
+    let mut a = C[0];
+    let t = x + G + 0.5;
+    for (i, &c) in C.iter().enumerate().skip(1) {
+        a += c / (x + i as f64);
+    }
+    0.5 * (2.0 * std::f64::consts::PI).ln() + (x + 0.5) * t.ln() - t + a.ln()
 }
 
 /// Generalized (Tsallis) simulated-annealing visiting kernel
@@ -163,7 +166,7 @@ impl TsallisVisit {
             0.5 * std::f64::consts::PI.ln() + ln_factor2 - ln_factor3 - (3.0 - qv).ln();
         // factor6 = pi (1-f5) / sin(pi(1-f5)) / Gamma(2-f5) = Gamma(f5) by Euler reflection.
         let factor5 = 1.0 / (qv - 1.0) - 0.5;
-        let ln_factor6 = gamma_fn(factor5).ln();
+        let ln_factor6 = ln_gamma(factor5);
         let ln_factor1 = t.ln() / (qv - 1.0);
         let exponent = (qv - 1.0) / (3.0 - qv);
         exponent * (ln_factor4_p + ln_factor1 - ln_factor6)
@@ -371,6 +374,48 @@ mod tests {
         assert!((y - 0.25).abs() < 1e-12 && s == -1.0);
         let (y, s) = reflect_coord_with_slope(2.25, 0.0, 1.0);
         assert!((y - 0.25).abs() < 1e-12 && s == 1.0);
+    }
+
+    #[test]
+    fn ln_gamma_matches_gamma_and_survives_overflow() {
+        // Reference values of ln Gamma(x) from libm's lgamma.
+        let reference = [
+            (0.1, 2.252712651734206),
+            (0.5, 0.5723649429247001),
+            (1.0, 0.0),
+            (2.5, 0.2846828704729192),
+            (7.0, 6.579251212010101),
+            (30.0, 71.257038967168),
+            (150.0, 600.0094705553274),
+            (2000.0, 13198.923448054265),
+        ];
+        for (x, expected) in reference {
+            let got = ln_gamma(x);
+            assert!(
+                (got - expected).abs() < 1e-10 * (1.0 + expected.abs()),
+                "ln_gamma({x}) = {got}, expected {expected}"
+            );
+        }
+    }
+
+    #[test]
+    fn tsallis_visit_moves_near_q_v_one() {
+        // The light-tailed limit: steps are finite, nonzero, and not tail redraws.
+        let mut rng = StdRng::seed_from_u64(13);
+        let x = array![0.0, 0.0, 0.0];
+        for q_v in [1.0001, 1.001, 1.005, 1.01] {
+            let kernel = TsallisVisit::new(q_v);
+            let mut moved = 0;
+            for _ in 0..500 {
+                let p = kernel.propose(x.view(), 1.0, &mut rng);
+                assert!(
+                    p.iter().all(|v| v.is_finite() && v.abs() < 1e3),
+                    "q_v {q_v}: {p}"
+                );
+                moved += usize::from(p.iter().any(|v| *v != 0.0));
+            }
+            assert_eq!(moved, 500, "q_v {q_v}");
+        }
     }
 
     #[test]
