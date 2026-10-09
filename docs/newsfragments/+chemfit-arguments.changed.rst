@@ -5,13 +5,17 @@ evaluations), and a negative seed, or one of ``2**64`` or more, raises
 ``ValueError`` where it raised ``OverflowError`` after ``init``. A string or
 bool ``budget``, ``seed``, ``steps_per_epoch``, ``tell_every``, ``bound_span``
 or ``default_span`` raises ``TypeError``, where 0.10.0 passed it through
-``int()`` or ``float()``, reading ``True`` as 1, or did not read it.
-``tell_every`` and ``steps_per_epoch`` must be positive whole numbers under
-every method: where the method uses one, 0 ran as 1 and 2.5 as 2, and where it
-does not (``tell_every`` under the classical methods, ``steps_per_epoch``
-under the portfolio), any value ran. ``bound_span`` must be positive and
-finite beside ``low`` and ``high`` too, and ``default_span`` when the fitter
-bounds every parameter, where 0.10.0 did not read them. ``fit_chemfit`` raises
+``int()`` or ``float()``, reading ``True`` as 1, or did not read it. Each of
+these settings, and each preset keyword of ``fit_chemfit``, may be a
+``Decimal`` or a one-element array, read as the number it holds, as 0.10.0's
+``int()`` and ``float()`` read it; a one-element ``array_api_strict`` array
+with dimensions, which they refused, is read the same way. ``tell_every`` and
+``steps_per_epoch`` must be positive whole numbers under every method: where
+the method uses one, 0 ran as 1 and 2.5 as 2, and where it does not
+(``tell_every`` under the classical methods, ``steps_per_epoch`` under the
+portfolio), any value ran. ``bound_span`` must be positive and finite beside
+``low`` and ``high`` too, and ``default_span`` when the fitter bounds every
+parameter, where 0.10.0 did not read them. ``fit_chemfit`` raises
 ``TypeError`` on a keyword no preset takes, such as ``t_inti`` or
 ``tell_evry``, which it ignored, and on a preset keyword of its method that is
 not a number, such as ``"2.0"`` or ``True``, which it passed through

@@ -130,12 +130,19 @@ def _as_number(value: Any) -> Any:
 
 
 def _whole(name: str, value: Any, minimum: int, maximum: int = sys.maxsize) -> int:
-    """``value`` as an int in ``[minimum, maximum]``, or an error naming it."""
-    if not _is_number(value):
+    """``value`` as an int in ``[minimum, maximum]``, or an error naming it.
+
+    ``value`` is read as :func:`_as_number` reads a number.
+    """
+    number = _as_number(value)
+    if number is None:
         raise TypeError(f"{name} must be a whole number, got {value!r}")
-    if not isinstance(value, numbers.Integral) and not float(value).is_integer():
+    try:
+        count = int(number)
+    except (OverflowError, ValueError):
+        count = None
+    if count is None or count != number:
         raise ValueError(f"{name} must be a whole number, got {value!r}")
-    count = int(value)
     if count < minimum:
         least = "positive" if minimum == 1 else f"at least {minimum}"
         raise ValueError(f"{name} must be {least}, got {value!r}")
@@ -145,10 +152,14 @@ def _whole(name: str, value: Any, minimum: int, maximum: int = sys.maxsize) -> i
 
 
 def _positive(name: str, value: Any) -> float:
-    """``value`` as a positive finite float, or an error naming it."""
-    if not _is_number(value):
+    """``value`` as a positive finite float, or an error naming it.
+
+    ``value`` is read as :func:`_as_number` reads a number.
+    """
+    number = _as_number(value)
+    if number is None:
         raise TypeError(f"{name} must be a number, got {value!r}")
-    number = float(value)
+    number = float(number)
     if not (math.isfinite(number) and number > 0.0):
         raise ValueError(f"{name} must be positive and finite, got {value!r}")
     return number
@@ -1323,9 +1334,10 @@ def _chemfit_preset(method: str, preset_kwargs: dict[str, Any]):
     values = {}
     for key, default in defaults.items():
         value = preset_kwargs.get(key, default)
-        if not _is_number(value):
+        number = _as_number(value)
+        if number is None:
             raise TypeError(f"{key} must be a number, got {value!r}")
-        values[key] = float(value)
+        values[key] = float(number)
     return _classical_preset(method, kwargs=values)
 
 
