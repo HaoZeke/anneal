@@ -338,8 +338,12 @@ def qmc_gsa_global_search(
     t_init: float = 1.0,
     q_v: float = 2.62,
     q_a: float = 1.7,
+    x0=None,
 ):
-    """Run bounded QMC-initialized generalized simulated annealing."""
+    """Run bounded QMC-initialized generalized simulated annealing.
+
+    ``x0``, when given, replaces the first chain's low-discrepancy start.
+    """
     out = _core_qmc_gsa_global_search(
         obj_fn,
         _flat(low),
@@ -350,6 +354,7 @@ def qmc_gsa_global_search(
         float(t_init),
         float(q_v),
         float(q_a),
+        _flat_or_none(x0),
     )
     out["best_pos"] = np.asarray(out["best_pos"], dtype=np.float64)
     return out
@@ -363,6 +368,7 @@ def qmc_gsa_global_search_objective(
     t_init: float = 1.0,
     q_v: float = 2.62,
     q_a: float = 1.7,
+    x0=None,
 ):
     """Run bounded QMC-initialized GSA with a native objective handle."""
     out = _core_qmc_gsa_global_search_objective(
@@ -373,6 +379,7 @@ def qmc_gsa_global_search_objective(
         float(t_init),
         float(q_v),
         float(q_a),
+        _flat_or_none(x0),
     )
     out["best_pos"] = np.asarray(out["best_pos"], dtype=np.float64)
     return out
@@ -818,11 +825,12 @@ def global_optimize(
         (out of regime).
       policy: ``"auto"`` (default; feature-based regime routing) or
         ``"legacy"`` (flat arm order, uninformative priors; A/B only).
-      x0: optional starting point inside the box. It is the first charged
-        evaluation and the first incumbent, so the arms that start from the
-        incumbent start from it until a lower point is found.
+      x0: optional starting point inside the box, same size as ``low``. It is
+        the first charged evaluation and the first incumbent.
 
-    Every evaluation lies inside ``[low, high]``. Returns a dict with
+    ``obj_fn`` and ``grad_fn`` are only called inside ``[low, high]``: a
+    point an arm proposes outside is mirror-reflected into the box, and the
+    gradient there is reflected with it. Returns a dict with
     ``best_pos``, ``best_val``, ``n_evals``, ``n_grads``, ``arm_pulls``, and
     ``arm_successes``.
     """
