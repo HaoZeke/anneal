@@ -83,3 +83,24 @@ def test_run_rejects_unknown_boundary_policy():
             Boltzmann(),
             boundary="clip",
         )
+
+
+def test_run_propagates_objective_failures():
+    calls = 0
+
+    def failing_objective(_x):
+        nonlocal calls
+        calls += 1
+        raise RuntimeError("ChemFit callback failed")
+
+    with pytest.raises(RuntimeError, match="ChemFit callback failed"):
+        run(
+            failing_objective,
+            np.array([-1.0]),
+            np.array([1.0]),
+            Boltzmann(),
+            n_epochs=2,
+            steps_per_epoch=10,
+        )
+
+    assert calls == 1

@@ -40,11 +40,17 @@ def run_anneal(benchmark_context: dict[str, Any]):
     high = np.full(initial.size, 3.0)
 
     fitter.init()
+    if hasattr(fitter, "evaluate"):
+        evaluate = fitter.evaluate
+        advance = fitter.step
+    else:
+        evaluate = fitter.ask
+        advance = fitter.tell
 
     def objective(position):
         params = {"positions": np.asarray(position).reshape(n_atoms, 3)}
-        loss = fitter.evaluate(params)
-        fitter.step()
+        loss = evaluate(params)
+        advance()
         return float(loss)
 
     run(
@@ -64,8 +70,8 @@ proposals. Mirror reflection keeps every position inside =low= and =high=.
 The expression =positions.reshape((n_atoms * 3))= without assignment has no
 effect and is not needed.
 
-ChemFit releases that expose the older custom-optimizer lifecycle use
-=fitter.ask(params)= and =fitter.tell()= in place of =evaluate= and =step=.
+The feature check supports both ChemFit's released =ask=/=tell= lifecycle and
+the =evaluate=/=step= lifecycle on its custom-optimizer API branch.
 
 For a general nested parameter dictionary, flatten =fitter.initial_parameters=
 and =fitter.bounds= with ChemFit's own =flatten_dict= ordering, pass that
