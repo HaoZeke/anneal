@@ -148,10 +148,22 @@ where
 // SaVariant impl: glues the typed component algebra to the Sampler trait.
 // ---------------------------------------------------------------------------
 
-/// An objective value as the presets compare it: NaN counts as `+inf`, so it
-/// never beats a number and every finite value beats it.
-pub(crate) fn nan_as_inf(val: f64) -> f64 {
-    if val.is_nan() { f64::INFINITY } else { val }
+/// `val - cur` with NaN ranked above every number, `+inf` included, and level
+/// with another NaN: a chain at a NaN takes any proposal, and a chain at a
+/// number never takes a NaN.
+fn ranked_delta(val: f64, cur: f64) -> f64 {
+    match (val.is_nan(), cur.is_nan()) {
+        (false, false) => val - cur,
+        (true, false) => f64::INFINITY,
+        (false, true) => f64::NEG_INFINITY,
+        (true, true) => 0.0,
+    }
+}
+
+/// `val < best` with NaN ranked above every number: any number, `+inf`
+/// included, improves on a NaN, and a NaN improves on nothing.
+pub(crate) fn improves(val: f64, best: f64) -> bool {
+    val < best || (best.is_nan() && !val.is_nan())
 }
 
 impl<O, C, N, M, A> Sampler<f64> for SaVariant<f64, O, C, N, M, A>
@@ -207,7 +219,7 @@ where
             return false;
         }
         let proposal_val = self.obj.eval(proposal_pos.view());
-        let delta = nan_as_inf(proposal_val) - nan_as_inf(state.cur.val);
+        let delta = ranked_delta(proposal_val, state.cur.val);
         let p = self.accept.accept_prob(delta, temp);
         let u: f64 = rng.random();
         if u < p {
@@ -215,7 +227,7 @@ where
                 pos: proposal_pos,
                 val: proposal_val,
             };
-            if nan_as_inf(state.cur.val) < nan_as_inf(state.best.val) {
+            if improves(state.cur.val, state.best.val) {
                 state.best = state.cur.clone();
             }
             true
