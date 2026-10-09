@@ -41,9 +41,10 @@ fn validate_box_bounds(low: &[f64], high: &[f64]) -> PyResult<()> {
     }
     let mut total_width = 0.0;
     for (i, (&lo, &hi)) in low.iter().zip(high.iter()).enumerate() {
+        validate_finite_bound(i, lo, hi)?;
         // Reflection folds with period 2 (hi - lo), and the drivers average
         // widths across axes, so both must stay finite.
-        if !lo.is_finite() || !hi.is_finite() || !(2.0 * (hi - lo)).is_finite() {
+        if !(2.0 * (hi - lo)).is_finite() {
             return Err(PyValueError::new_err(format!(
                 "bounds must be finite, with a finite width, at dimension {i}"
             )));
@@ -59,6 +60,21 @@ fn validate_box_bounds(low: &[f64], high: &[f64]) -> PyResult<()> {
                 "low[{i}] must be strictly less than high[{i}] (got {lo} >= {hi})"
             )));
         }
+    }
+    Ok(())
+}
+
+/// Names the bound, `low[i]` or `high[i]`, that is NaN or infinite.
+fn validate_finite_bound(i: usize, lo: f64, hi: f64) -> PyResult<()> {
+    if !lo.is_finite() {
+        return Err(PyValueError::new_err(format!(
+            "low[{i}] = {lo} must be finite"
+        )));
+    }
+    if !hi.is_finite() {
+        return Err(PyValueError::new_err(format!(
+            "high[{i}] = {hi} must be finite"
+        )));
     }
     Ok(())
 }
@@ -2325,6 +2341,9 @@ fn run_qmc(
         return Err(PyValueError::new_err(
             "bounds must have at least one dimension",
         ));
+    }
+    for (i, (&lo, &hi)) in low_vec.iter().zip(high_vec.iter()).enumerate() {
+        validate_finite_bound(i, lo, hi)?;
     }
     if low_vec.iter().zip(high_vec.iter()).any(|(&lo, &hi)| {
         !lo.is_finite() || !hi.is_finite() || !(2.0 * (hi - lo)).is_finite() || hi < lo

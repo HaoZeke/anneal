@@ -991,6 +991,20 @@ def test_every_box_driver_refuses_bounds_it_cannot_use(low, high):
     assert objective.points == []
 
 
+@pytest.mark.parametrize("driver", [run, run_qmc])
+@pytest.mark.parametrize(
+    ("low", "high", "message"),
+    [
+        ([-1.0, np.nan], [1.0, 1.0], r"low\[1\] = NaN must be finite"),
+        ([-1.0, -1.0], [1.0, np.inf], r"high\[1\] = inf must be finite"),
+        ([-np.inf, -1.0], [np.nan, 1.0], r"low\[0\] = -inf must be finite"),
+    ],
+)
+def test_run_names_the_bound_that_is_not_finite(driver, low, high, message):
+    with pytest.raises(ValueError, match=message):
+        driver(styb_tang_2d, low, high, Boltzmann(), n_epochs=1, steps_per_epoch=1)
+
+
 @pytest.mark.parametrize(
     ("name", "kwargs"),
     [("n_starts", {"n_starts": 0}), ("n_epochs", {"n_epochs": -1}), ("steps_per_epoch", {"steps_per_epoch": 1.5})],
