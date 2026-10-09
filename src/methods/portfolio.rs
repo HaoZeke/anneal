@@ -894,6 +894,10 @@ struct GsaState {
     best: f64,
     /// Local search in progress from a chain point, resumed across slices.
     local: Option<(usize, FdBfgs)>,
+    /// Best start (chain, position, value) of an anchored state, searched
+    /// after the first temperature step even without a record, as
+    /// dual_annealing searches from its best point after its first chain.
+    first_search: Option<(usize, Array1<f64>, f64)>,
 }
 
 /// Persistent CMA-ES arm. Runs live in box-normalised coordinates, so one
@@ -1058,9 +1062,11 @@ struct ArmStates {
     /// Persistent finite-difference quasi-Newton descent.
     qn: Option<QnArmState>,
     /// Set by the values-only loop. Without a gradient, the GSA arm then
-    /// follows each temperature step that beats the chain best with a
-    /// finite-difference descent, the L-BFGS-B local search dual_annealing
-    /// runs on improvement.
+    /// starts one chain at the incumbent and follows each temperature step
+    /// that beats the chain best with a finite-difference descent, the
+    /// L-BFGS-B local search dual_annealing runs on improvement, and the DE
+    /// population starts with the incumbent, as SciPy's
+    /// differential_evolution places its `x0`.
     values_only: bool,
 }
 
@@ -1571,10 +1577,15 @@ where
     stationary
 }
 
+/// Starts the GSA chains. With `anchor`, an evaluated point and its value,
+/// chain 0 starts there without another evaluation (dual_annealing's `x0`)
+/// and the best start is searched after the first temperature step; the
+/// other chains start at seeded low-discrepancy points.
 fn initialize_gsa_state<O>(
     obj: &BudgetedObjective<'_, O>,
     slice: usize,
     seed: u64,
+    anchor: Option<(Array1<f64>, f64)>,
 ) -> Option<GsaState>
 where
     O: Objective<f64>,
@@ -1592,28 +1603,44 @@ where
     } else {
         (slice / 8).clamp(2, 4).min(slice)
     };
-    let starts = eindir_core::shifted_low_discrepancy_points(
-        &bounds,
-        chain_count,
-        qmc_skip_from_seed(seed),
-        seed,
-    );
+    let anchored = anchor.is_some();
     let mut xs = Vec::with_capacity(chain_count);
     let mut vals = Vec::with_capacity(chain_count);
-
-    for start in starts.outer_iter() {
-        if obj.ledger.exhausted() {
-            break;
-        }
-        let pos = bounds.clip(start);
-        let value = obj.eval(pos.view());
-        xs.push(pos);
+    if let Some((x, value)) = anchor {
+        xs.push(bounds.clip(x.view()));
         vals.push(value);
+    }
+    let sampled = chain_count - xs.len();
+    if sampled > 0 {
+        let starts = eindir_core::shifted_low_discrepancy_points(
+            &bounds,
+            sampled,
+            qmc_skip_from_seed(seed),
+            seed,
+        );
+        for start in starts.outer_iter() {
+            if obj.ledger.exhausted() {
+                break;
+            }
+            let pos = bounds.clip(start);
+            let value = obj.eval(pos.view());
+            xs.push(pos);
+            vals.push(value);
+        }
     }
 
     // SciPy dual_annealing default initial_temp=5230 (translation-invariant).
     let t_init = DUAL_INITIAL_TEMP;
     let best = vals.iter().copied().fold(f64::INFINITY, f64::min);
+    let first_search = anchored
+        .then(|| {
+            vals.iter()
+                .enumerate()
+                .filter(|(_, v)| v.is_finite())
+                .min_by(|a, b| a.1.total_cmp(b.1))
+                .map(|(i, v)| (i, xs[i].clone(), *v))
+        })
+        .flatten();
 
     (!xs.is_empty()).then(|| GsaState {
         xs,
@@ -1624,6 +1651,7 @@ where
         strategy_step: 0,
         best,
         local: None,
+        first_search,
     })
 }
 
@@ -1923,6 +1951,10 @@ fn run_persistent_gsa<O, G>(
             if state.vals[chain].is_finite() && state.vals[chain] < before {
                 improved = true;
             }
+        }
+        let first_search = state.first_search.take();
+        if local_search && grad.is_none() && step_best.is_none() {
+            step_best = first_search;
         }
         if let Some((chain, x, value)) = step_best.take() {
             state.local = Some((
@@ -2434,6 +2466,7 @@ fn run_arm<O, G>(
             states.surrogate_gen += 1;
         }
         ArmKind::De => {
+            let mut used = 0usize;
             if states.de.is_none() {
                 let pop_size = (DE_POP_PER_DIM * dim)
                     .clamp(DE_POP_MIN, DE_POP_MAX)
@@ -2446,12 +2479,27 @@ fn run_arm<O, G>(
                 );
                 let mut pop = Vec::with_capacity(pop_size);
                 let mut vals = Vec::with_capacity(pop_size);
+                let anchor = if states.values_only {
+                    ledger
+                        .incumbent_value()
+                        .map(|value| (ledger.incumbent(&bounds), value))
+                } else {
+                    None
+                };
                 for i in 0..points.nrows() {
                     if ledger.exhausted() {
                         break;
                     }
+                    if i == 0
+                        && let Some((x, value)) = anchor.as_ref()
+                    {
+                        pop.push(x.clone());
+                        vals.push(*value);
+                        continue;
+                    }
                     let x = points.row(i).to_owned();
                     let v = obj.eval(x.view());
+                    used += 1;
                     pop.push(x);
                     vals.push(v);
                 }
@@ -2460,7 +2508,11 @@ fn run_arm<O, G>(
                     return;
                 }
                 states.de = Some(DeState { pop, vals });
-                return;
+                // The values-only loop scores a pull by the incumbent it
+                // leaves, so its first pull also evolves the population.
+                if !states.values_only {
+                    return;
+                }
             }
             let state = states.de.as_mut().expect("de state initialised");
             let n = state.pop.len();
@@ -2475,7 +2527,6 @@ fn run_arm<O, G>(
                 return;
             }
             let mut best_x = state.pop[best_i].clone();
-            let mut used = 0usize;
             while used < slice && !ledger.exhausted() {
                 let weight = DE_WEIGHT_MIN + DE_WEIGHT_SPAN * rng.random::<f64>();
                 for i in 0..n {
@@ -2567,10 +2618,17 @@ fn run_arm<O, G>(
             if slice < 8 {
                 return;
             }
-            if states.gsa.is_none() {
-                states.gsa = initialize_gsa_state(obj, slice, seed);
-            }
             let local_search = states.values_only && grad.is_none();
+            if states.gsa.is_none() {
+                let anchor = if local_search {
+                    ledger
+                        .incumbent_value()
+                        .map(|value| (ledger.incumbent(&bounds), value))
+                } else {
+                    None
+                };
+                states.gsa = initialize_gsa_state(obj, slice, seed, anchor);
+            }
             if let Some(state) = states.gsa.as_mut() {
                 // Keep T₀ at box scale (do not re-inflate from |f|).
                 // In-epoch dual-style LS when grad is present (run_persistent_gsa).
@@ -5939,6 +5997,106 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn values_only_start_in_the_global_basin_descends() {
+        // Rastrigin-10 from just off its minimum, on the usual box and on a
+        // shifted one whose centre lies in another basin.
+        for (low, high) in [(-5.12, 5.12), (-3.1, 4.9)] {
+            let obj = Traced::new(low, high, 10, rastrigin);
+            let start = Array1::from_elem(10, 0.1);
+            let result = portfolio_optimize_from::<_, ShiftQuadratic>(
+                &obj,
+                None,
+                1000,
+                4,
+                None,
+                PortfolioPolicy::Auto,
+                Some(start.view()),
+            );
+            assert!(
+                result.best_val < 1e-8,
+                "best {} on [{low}, {high}]",
+                result.best_val
+            );
+        }
+    }
+
+    #[test]
+    fn values_only_gsa_descends_from_the_incumbent_first() {
+        // Only the global basin beats this start, so the first local search
+        // runs from it and one slice reaches the floor.
+        let obj = Traced::new(-5.12, 5.12, 4, rastrigin);
+        let ledger = BudgetLedger::new(400, 4);
+        let budgeted = BudgetedObjective {
+            inner: &obj,
+            ledger: &ledger,
+        };
+        let start = Array1::from_elem(4, 0.05);
+        budgeted.eval(start.view());
+        let mut states = ArmStates {
+            values_only: true,
+            ..ArmStates::default()
+        };
+        let mut rng = StdRng::seed_from_u64(3);
+        run_arm::<_, ShiftQuadratic>(
+            ArmKind::Gsa,
+            &budgeted,
+            None,
+            &ledger,
+            &mut states,
+            &mut rng,
+            399,
+            400,
+        );
+        let points = obj.points();
+        assert_eq!(points.len(), ledger.used_get());
+        assert!(
+            points[1..].iter().all(|x| *x != start),
+            "the chain starts from the recorded value"
+        );
+        assert!(ledger.best_get() < 1e-8, "best {}", ledger.best_get());
+    }
+
+    #[test]
+    fn values_only_de_population_starts_with_the_incumbent() {
+        let obj = Traced::new(-2.0, 2.0, 4, rosenbrock);
+        let ledger = BudgetLedger::new(400, 4);
+        let budgeted = BudgetedObjective {
+            inner: &obj,
+            ledger: &ledger,
+        };
+        let start = Array1::ones(4);
+        budgeted.eval(start.view());
+        let mut states = ArmStates {
+            values_only: true,
+            ..ArmStates::default()
+        };
+        let mut rng = StdRng::seed_from_u64(3);
+        run_arm::<_, ShiftQuadratic>(
+            ArmKind::De,
+            &budgeted,
+            None,
+            &ledger,
+            &mut states,
+            &mut rng,
+            100,
+            400,
+        );
+        let state = states.de.as_ref().expect("population");
+        assert_eq!(state.pop[0], start);
+        assert_eq!(state.vals[0], 0.0);
+        assert_eq!(
+            ledger.used_get(),
+            101,
+            "the first pull evolves the population for the rest of its slice"
+        );
+        let pop = state.pop.len();
+        assert!(
+            obj.points()[1..pop].iter().all(|x| *x != start),
+            "the population is not charged for the incumbent"
+        );
     }
 
     #[test]
