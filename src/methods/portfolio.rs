@@ -387,6 +387,10 @@ const CMA_MIN_GENERATIONS: usize = 40;
 /// whenever the budget is shorter than the covariance's learning horizon,
 /// runs are separable.
 const CMA_FULL_MAX_DIM: usize = 100;
+/// Stream tags: arms built from the same seed draw from independent
+/// generators.
+const CMA_STREAM: u64 = 0xC3A5_C85C_97CB_3127;
+const QN_STREAM: u64 = 0xB492_B66F_BE98_F273;
 /// Kick radius, as a fraction of each box side, that restarts a converged
 /// finite-difference descent from the incumbent; adapted like the hop step.
 const QN_KICK0: f64 = 0.05;
@@ -937,7 +941,7 @@ impl CmaArmState {
             sigma,
             lambda,
             &unit,
-            seed,
+            seed ^ CMA_STREAM,
             separable,
             ledger.best_get(),
         );
@@ -954,7 +958,7 @@ impl CmaArmState {
                 CmaRegime::Small,
             ),
             unit,
-            rng: StdRng::seed_from_u64(seed.rotate_left(17)),
+            rng: StdRng::seed_from_u64((seed ^ CMA_STREAM).rotate_left(17)),
             elitist,
             separable,
         }
@@ -3006,7 +3010,7 @@ fn run_qn_arm<O>(
         kick: QN_KICK0,
         base_val: best,
         seen_best: best,
-        rng: StdRng::seed_from_u64(seed),
+        rng: StdRng::seed_from_u64(seed ^ QN_STREAM),
     });
     if best < state.seen_best && best < state.engine.value() {
         state
@@ -5847,6 +5851,36 @@ mod tests {
             run_cma_arm(&budgeted, &ledger, &mut states, 1, 3, budget);
             let state = states.cma.as_ref().expect("cma state");
             assert_eq!(state.es.is_separable(), separable, "{dim}-D at {budget}");
+        }
+    }
+
+    #[test]
+    fn cma_and_qn_arms_draw_from_separate_streams() {
+        // Given one seed, the first CMA-ES generation samples mean + sigma z
+        // in the unit box and the first kick moves along the descent's first
+        // normal draws. Shared generators would make that kick one of the z.
+        let (dim, seed) = (4usize, 17u64);
+        let obj = Traced::new(-2.0, 2.0, dim, |x| x.dot(&x));
+        let ledger = BudgetLedger::new(100, dim);
+        let budgeted = BudgetedObjective {
+            inner: &obj,
+            ledger: &ledger,
+        };
+        budgeted.eval(Array1::zeros(dim).view());
+        let mut states = ArmStates::default();
+        let samples = default_lambda(dim) - 1;
+        run_cma_arm(&budgeted, &ledger, &mut states, samples, seed, 100);
+        run_qn_arm(&budgeted, &ledger, &mut states, 0, seed, false);
+        let mut kicks = states.qn.as_ref().expect("qn state").rng.clone();
+        let noise = Array1::<f64>::from_iter(
+            (0..dim).map(|_| rand_distr::StandardNormal.sample(&mut kicks)),
+        );
+        let points = obj.points();
+        assert_eq!(points.len(), 1 + samples);
+        for x in &points[1..] {
+            let z = x / (4.0 * CMA_FIRST_SIGMA);
+            let gap = (&z - &noise).fold(0.0_f64, |a, b| a.max(b.abs()));
+            assert!(gap > 1e-6, "the first kick reuses a CMA-ES draw");
         }
     }
 }
