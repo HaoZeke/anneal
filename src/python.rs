@@ -12,7 +12,7 @@
 #![allow(clippy::too_many_arguments)]
 
 use ndarray::{Array1, ArrayView1};
-use numpy::{PyArray1, PyReadonlyArray1};
+use numpy::{AllowTypeChange, PyArray1, PyArrayLikeDyn, PyReadonlyArray1};
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
@@ -82,17 +82,41 @@ fn validate_closed_box(low: &[f64], high: &[f64]) -> PyResult<()> {
     Ok(())
 }
 
-/// Copies an optional start point after checking it lies in the closed box
-/// already accepted by [`validate_closed_box`].
+/// Reads `obj` as `numpy.asarray(obj, dtype=float)` would, so lists, tuples
+/// and arrays of any numeric dtype or strides are accepted, and returns its
+/// values in C order with its number of dimensions. Anything NumPy cannot
+/// read as floats raises `ValueError` naming `name`.
+fn float_values(obj: &Bound<'_, PyAny>, name: &str) -> PyResult<(Vec<f64>, usize)> {
+    let arr = obj
+        .extract::<PyArrayLikeDyn<'_, f64, AllowTypeChange>>()
+        .map_err(|e| PyValueError::new_err(format!("{name} must be an array of numbers ({e})")))?;
+    let arr = arr.as_array();
+    Ok((arr.iter().copied().collect(), arr.ndim()))
+}
+
+/// [`float_values`] of `low` or `high`, which must be one-dimensional.
+fn bound_values(obj: &Bound<'_, PyAny>, name: &str) -> PyResult<Vec<f64>> {
+    let (values, ndim) = float_values(obj, name)?;
+    if ndim != 1 {
+        return Err(PyValueError::new_err(format!(
+            "{name} must be one-dimensional (got {ndim} dimensions)"
+        )));
+    }
+    Ok(values)
+}
+
+/// Reads an optional start point with [`float_values`], flattened in C order,
+/// and checks it lies in the closed box already accepted by
+/// [`validate_closed_box`].
 fn checked_x0(
-    x0: Option<PyReadonlyArray1<'_, f64>>,
+    x0: Option<&Bound<'_, PyAny>>,
     low: &[f64],
     high: &[f64],
 ) -> PyResult<Option<Array1<f64>>> {
     let Some(x0) = x0 else {
         return Ok(None);
     };
-    let x0 = x0.as_slice()?.to_vec();
+    let (x0, _) = float_values(x0, "x0")?;
     if x0.len() != low.len() {
         return Err(PyValueError::new_err(format!(
             "x0 must have the same length as low and high (got {}, expected {})",
@@ -1959,29 +1983,33 @@ enum Preset {
 /// Args:
 ///   obj_fn: Python callable `f(numpy.ndarray) -> float` evaluated at every
 ///           proposal. Held via the GIL.
-///   low, high: finite numpy arrays of the same length with
-///              `low <= high`; they define the box and the objective
-///              dimensionality. Anything else raises `ValueError`.
+///   low, high: one-dimensional array-likes of numbers (lists, tuples or
+///              numpy arrays of any numeric dtype and strides) of the same
+///              length, finite, with `low <= high`; they define the box and
+///              the objective dimensionality. Anything else raises
+///              `ValueError`.
 ///   preset: one of `Boltzmann()`, `Fast()`, `Gsa()` from `anneal`.
 ///   n_epochs, steps_per_epoch: SA loop dimensions.
 ///   seed: u64 seed for the StdRng.
-///   x0: optional start point, a finite numpy array of the same length as
-///       `low` inside `[low, high]` (else `ValueError`). The first
-///       objective evaluation is at `x0`.
+///   x0: optional start point, an array-like of numbers with as many
+///       elements as `low`, finite and inside `[low, high]` (else
+///       `ValueError`). A multi-dimensional `x0`, such as `(n_atoms, 3)`
+///       positions, is flattened in C order. The first objective evaluation
+///       is at `x0`.
 #[pyfunction]
 #[pyo3(signature = (obj_fn, low, high, preset, n_epochs = 100, steps_per_epoch = 200, seed = 42, x0 = None))]
 fn run(
     obj_fn: Py<PyAny>,
-    low: PyReadonlyArray1<'_, f64>,
-    high: PyReadonlyArray1<'_, f64>,
+    low: &Bound<'_, PyAny>,
+    high: &Bound<'_, PyAny>,
     preset: Preset,
     n_epochs: usize,
     steps_per_epoch: usize,
     seed: u64,
-    x0: Option<PyReadonlyArray1<'_, f64>>,
+    x0: Option<&Bound<'_, PyAny>>,
 ) -> PyResult<PyHistory> {
-    let low_vec = low.as_slice()?.to_vec();
-    let high_vec = high.as_slice()?.to_vec();
+    let low_vec = bound_values(low, "low")?;
+    let high_vec = bound_values(high, "high")?;
     validate_closed_box(&low_vec, &high_vec)?;
     let x0 = checked_x0(x0, &low_vec, &high_vec)?;
     let x0 = x0.as_ref().map(|x| x.view());
@@ -2077,17 +2105,17 @@ fn pilot_draws_qmc(n: usize, seed: u64) -> PyResult<Vec<Vec<f64>>> {
 #[pyo3(signature = (obj_fn, low, high, preset, n_starts = 8, n_epochs = 100, steps_per_epoch = 200, seed = 42, x0 = None))]
 fn run_qmc(
     obj_fn: Py<PyAny>,
-    low: PyReadonlyArray1<'_, f64>,
-    high: PyReadonlyArray1<'_, f64>,
+    low: &Bound<'_, PyAny>,
+    high: &Bound<'_, PyAny>,
     preset: Preset,
     n_starts: usize,
     n_epochs: usize,
     steps_per_epoch: usize,
     seed: u64,
-    x0: Option<PyReadonlyArray1<'_, f64>>,
+    x0: Option<&Bound<'_, PyAny>>,
 ) -> PyResult<PyHistory> {
-    let low_vec = low.as_slice()?.to_vec();
-    let high_vec = high.as_slice()?.to_vec();
+    let low_vec = bound_values(low, "low")?;
+    let high_vec = bound_values(high, "high")?;
     validate_closed_box(&low_vec, &high_vec)?;
     let x0 = checked_x0(x0, &low_vec, &high_vec)?;
     let x0 = x0.as_ref().map(|x| x.view());
