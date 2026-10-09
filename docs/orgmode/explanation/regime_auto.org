@@ -24,7 +24,7 @@ dimension, goes to one values-only loop over six arms.
 |-----+-------------|
 | =cma= | BIPOP CMA-ES centred on the incumbent: local runs with short steps, large-population runs with a box-wide step; separable above 100 dimensions or when the budget is shorter than the covariance learning horizon |
 | =qn= | finite-difference projected BFGS from the incumbent, kicked from it once converged |
-| =gsa= | one chain at the incumbent (dual_annealing's =x0=), annealing without a local search |
+| =gsa= | one chain at the incumbent (dual_annealing's =x0=), quenched: each temperature step visits every coordinate once at the cooling visit scale, box-wide early and local late, and keeps only improvements; no local search |
 | =de= | best/1/bin with the incumbent as the first population member (differential_evolution's =x0=) |
 | =surrogate= | an additive model fitted to every evaluation so far: one evaluation tests its per-coordinate minimum, then tempered samples from its marginals |
 | =explore= | QMC restarts over the whole box |

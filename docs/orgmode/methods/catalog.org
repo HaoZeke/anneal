@@ -1426,8 +1426,9 @@ ends the run. A turn is one slice, except that =qn= keeps it while each
 slice lowers its descent's value by more than the success threshold,
 until that descent converges; a turn succeeds when it lowers the
 incumbent by more than =1e-4 max(|f|, 1)=. The GSA arm starts one chain
-at the incumbent and anneals without a local search; the DE arm keeps
-one population member there. The floor the restart guarantee needs is asymptotic: the
+at the incumbent and runs it quenched, without a local search: each
+temperature step visits every coordinate once and keeps only
+improvements. The DE arm keeps one population member at the incumbent. The floor the restart guarantee needs is asymptotic: the
 opening, the phases and the descent's turns run only while they pay by
 the success threshold, which cannot last on a bounded objective, and
 the number of slices grows with the budget, so every arm keeps a
