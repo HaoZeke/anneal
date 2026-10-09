@@ -224,7 +224,7 @@ def test_the_installed_chemfit_fitter_is_driven_through_its_protocol(entry, driv
     steps = []
     fitter.register_callback(lambda step, contexts: steps.append(step), 1)
     out = drive(entry, fitter, 80, driver=driver)
-    assert calls
+    assert 0 < len(calls) <= 80
     assert fitter.contexts[0].n_evals == len(calls)
     assert steps
     assert np.array_equal(out["x"], fitter.contexts[0].opt_params["x"])
