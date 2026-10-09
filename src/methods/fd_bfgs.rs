@@ -14,6 +14,20 @@
 //! dominate. A stencil that would leave the box steps inward instead (one-sided
 //! and second order in the central scheme), so no candidate lies outside it.
 //!
+//! That rule assumes the third derivative is of order `|f|` over the cube of
+//! the scale. Across a valley much narrower than the scale it is not: the
+//! stencil straddles the valley floor and returns a secant slope. Each
+//! central stencil also yields the second difference `c_i` along its
+//! coordinate, so the next central gradient at a coordinate uses the interval
+//! `0.1 |g_i / c_i|`, a tenth of the distance to the minimum of the local
+//! quadratic, where the relative truncation error of the slope is about
+//! `h^2 / (3 L^2)`, 0.3%. The interval never exceeds the `eps^(1/3)` rule and
+//! never drops below `eps^(2/3)` times the scale or `sqrt(eps |f| / |c_i|)`,
+//! below which rounding moves the slope more than curvature does. A failed
+//! central line search re-differences at the same point when an interval
+//! has since moved by more than a factor of two, at most twice per iterate,
+//! before it falls back to steepest descent.
+//!
 //! The step is projected BFGS. Coordinates held at a bound by the gradient are
 //! fixed, the free block of the dense inverse-Hessian approximation scales the
 //! free gradient, and a backtracking line search along the projected arc
@@ -46,6 +60,14 @@ const MAX_EXTRAPOLATION: f64 = 16.0;
 /// Largest first step, as a fraction of each coordinate's box width, before
 /// any curvature pair has scaled the inverse Hessian.
 const FIRST_STEP_FRACTION: f64 = 0.05;
+/// Central interval as a fraction of the distance `|g_i / c_i|` to the
+/// minimum of the coordinate's local quadratic.
+const CENTRAL_INTERVAL_FRACTION: f64 = 0.1;
+/// Factor by which an adapted interval must differ from the one a gradient
+/// used before a failed line search re-differences.
+const INTERVAL_MOVE: f64 = 2.0;
+/// Re-differenced gradients allowed at one iterate.
+const MAX_REDIFFERENCES: usize = 2;
 
 /// Termination controls for one descent.
 #[derive(Clone, Copy, Debug)]
@@ -98,6 +120,7 @@ struct GradientWork {
     weights: Vec<f64>,
     base_weight: f64,
     acc: f64,
+    values: Vec<f64>,
     finite: bool,
     grad: Array1<f64>,
 }
@@ -139,6 +162,13 @@ pub struct FdBfgs {
     iterations: usize,
     slow: usize,
     options: FdBfgsOptions,
+    /// Curvature-adapted central interval per coordinate, once a central
+    /// stencil has measured it.
+    intervals: Vec<Option<f64>>,
+    /// Interval the last central stencil at each coordinate used.
+    used_intervals: Vec<f64>,
+    /// Gradients re-differenced at the current iterate.
+    redifferences: usize,
 }
 
 impl FdBfgs {
@@ -173,6 +203,9 @@ impl FdBfgs {
             iterations: 0,
             slow: 0,
             options,
+            intervals: vec![None; n],
+            used_intervals: vec![0.0; n],
+            redifferences: 0,
         };
         if let Some(f0) = f0 {
             engine.set_start_value(f0);
@@ -193,6 +226,8 @@ impl FdBfgs {
         self.scheme = FdScheme::Forward;
         self.iterations = 0;
         self.slow = 0;
+        self.intervals.fill(None);
+        self.redifferences = 0;
         if !keep_curvature {
             self.inv_hessian = Array2::from_diag(&self.metric);
             self.scaled = false;
@@ -274,11 +309,12 @@ impl FdBfgs {
         let room_up = self.high[i] - xi;
         let room_down = xi - self.low[i];
         let realized = |h: f64| (xi + h) - xi;
-        let relative = match self.scheme {
-            FdScheme::Forward => f64::EPSILON.sqrt(),
-            FdScheme::Central => f64::EPSILON.cbrt(),
-        };
-        let h = (relative * self.typical(i)).min(0.25 * self.width[i]);
+        let h = match (self.scheme, self.intervals[i]) {
+            (FdScheme::Forward, _) => f64::EPSILON.sqrt() * self.typical(i),
+            (FdScheme::Central, Some(adapted)) => adapted,
+            (FdScheme::Central, None) => f64::EPSILON.cbrt() * self.typical(i),
+        }
+        .min(0.25 * self.width[i]);
         if self.scheme == FdScheme::Central && room_up >= h && room_down >= h {
             let hp = realized(h);
             let hm = realized(-h);
@@ -314,6 +350,7 @@ impl FdBfgs {
             weights: Vec::new(),
             base_weight: 0.0,
             acc: 0.0,
+            values: Vec::new(),
             finite: true,
             grad: Array1::zeros(self.n),
         };
@@ -331,6 +368,7 @@ impl FdBfgs {
                 work.base_weight = base;
                 work.point = 0;
                 work.acc = 0.0;
+                work.values.clear();
                 work.finite = true;
                 return;
             }
@@ -345,6 +383,7 @@ impl FdBfgs {
         } else {
             work.finite = false;
         }
+        work.values.push(value);
         work.point += 1;
         if work.point < work.offsets.len() {
             self.phase = Phase::Gradient(work);
@@ -356,6 +395,9 @@ impl FdBfgs {
         } else {
             0.0
         };
+        if self.scheme == FdScheme::Central && work.offsets.len() == 2 {
+            self.adapt_interval(&work, component);
+        }
         work.coord += 1;
         self.load_coord(&mut work);
         if work.coord < self.n {
@@ -363,6 +405,39 @@ impl FdBfgs {
         } else {
             self.finish_gradient(work.grad);
         }
+    }
+
+    /// Sets the next central interval at `work.coord` from the slope and the
+    /// second difference of the quadratic through its stencil.
+    fn adapt_interval(&mut self, work: &GradientWork, slope: f64) {
+        let i = work.coord;
+        let (t1, t2) = (work.offsets[0], work.offsets[1]);
+        let (f1, f2) = (work.values[0], work.values[1]);
+        self.used_intervals[i] = t1.abs().min(t2.abs());
+        let curvature = 2.0 * (self.f / (t1 * t2) + f1 / (t1 * (t1 - t2)) + f2 / (t2 * (t2 - t1)));
+        if !(work.finite && slope.is_finite() && curvature.is_finite() && curvature != 0.0) {
+            return;
+        }
+        let typical = self.typical(i);
+        let ceiling = f64::EPSILON.cbrt() * typical;
+        let floor = (f64::EPSILON.powf(2.0 / 3.0) * typical)
+            .max((f64::EPSILON * self.f.abs() / curvature.abs()).sqrt())
+            .min(ceiling);
+        let reach = slope.abs() / curvature.abs();
+        self.intervals[i] = Some((CENTRAL_INTERVAL_FRACTION * reach).clamp(floor, ceiling));
+    }
+
+    /// Whether some adapted interval differs from the one the current
+    /// gradient used by more than [`INTERVAL_MOVE`].
+    fn intervals_moved(&self) -> bool {
+        self.intervals
+            .iter()
+            .zip(&self.used_intervals)
+            .any(|(adapted, &used)| {
+                adapted.is_some_and(|h| {
+                    used > 0.0 && (h * INTERVAL_MOVE < used || h > INTERVAL_MOVE * used)
+                })
+            })
     }
 
     fn finish_gradient(&mut self, grad: Array1<f64>) {
@@ -541,6 +616,7 @@ impl FdBfgs {
     }
 
     fn accept(&mut self, trial: Array1<f64>, value: f64) {
+        self.redifferences = 0;
         let previous = self.f;
         self.pair_from = Some((std::mem::replace(&mut self.x, trial), self.grad.clone()));
         self.f = value;
@@ -571,6 +647,15 @@ impl FdBfgs {
     }
 
     fn line_search_failed(&mut self, steepest: bool) {
+        if self.scheme == FdScheme::Central
+            && self.redifferences < MAX_REDIFFERENCES
+            && self.intervals_moved()
+        {
+            self.redifferences += 1;
+            self.pair_from = None;
+            self.phase = Phase::Gradient(self.gradient_work());
+            return;
+        }
         match self.scheme {
             FdScheme::Forward if !self.options.refine => self.phase = Phase::Done,
             FdScheme::Forward => {
@@ -682,11 +767,31 @@ mod tests {
         assert!(engine.value() < 1e-14, "value {}", engine.value());
     }
 
+    /// Evaluations until the descent's value first drops below `target`.
+    fn evaluations_to<F: Fn(ArrayView1<f64>) -> f64>(
+        engine: &mut FdBfgs,
+        f: F,
+        target: f64,
+        budget: usize,
+        bounds: &Bounds<f64>,
+    ) -> usize {
+        let mut used = 0;
+        while used < budget && !engine.is_done() && engine.value() >= target {
+            let x = engine.ask();
+            assert!(bounds.contains(x.view()), "candidate left the box: {x}");
+            engine.tell(f(x.view()));
+            used += 1;
+        }
+        used
+    }
+
     #[test]
     fn mixed_widths_descend_like_unit_widths() {
         // The same Rosenbrock on [-2, 2]^6 and stretched to [-2w, 2w] per
         // coordinate: under the box metric the two descents agree up to
         // rounding, where an identity start crawls along the wide sides.
+        // They are compared at a common depth; below it rounding decides
+        // how long each tail runs.
         let widths = [1e-3, 1e-2, 0.1, 1.0, 10.0, 100.0];
         let start = [-1.2, 1.0, -0.5, 0.3, 1.5, -1.0];
         let unit = boxed(-2.0, 2.0, 6);
@@ -696,7 +801,7 @@ mod tests {
             &unit,
             FdBfgsOptions::default(),
         );
-        let plain_used = drive(&mut plain, rosenbrock, 4000, &unit);
+        let plain_used = evaluations_to(&mut plain, rosenbrock, 1e-10, 4000, &unit);
         let w = Array1::from_vec(widths.to_vec());
         let stretched = Bounds::new(&w * -2.0, &w * 2.0, 0.0);
         let scaled = |x: ArrayView1<f64>| rosenbrock((&x / &w).view());
@@ -706,7 +811,7 @@ mod tests {
             &stretched,
             FdBfgsOptions::default(),
         );
-        let wide_used = drive(&mut wide, scaled, 4000, &stretched);
+        let wide_used = evaluations_to(&mut wide, scaled, 1e-10, 4000, &stretched);
         assert!(plain.value() < 1e-10, "unit widths {}", plain.value());
         assert!(wide.value() < 1e-10, "mixed widths {}", wide.value());
         assert!(
@@ -787,5 +892,67 @@ mod tests {
         assert!(!engine.is_done());
         engine.restart_at(Array1::from_vec(vec![0.25, 0.5]).view(), None, true);
         assert_eq!(engine.ask(), Array1::from_vec(vec![0.25, 0.5]));
+    }
+
+    /// log10 of the mean squared residual of a linear fit whose singular
+    /// values span 3.5 decades, floored at 1e-16 like `binary_lj_fit`.
+    fn stiff_fit(x: ArrayView1<f64>) -> f64 {
+        let scales = [1e3, 3e1, 1.0, 0.3];
+        let mut total = 0.0;
+        for (k, scale) in scales.iter().enumerate() {
+            let residual: f64 = (0..4)
+                .map(|j| {
+                    let weight = if j <= k { 1.0 } else { 0.5 };
+                    weight * (x[j] - 0.4 - 0.1 * j as f64)
+                })
+                .sum();
+            total += (scale * residual).powi(2);
+        }
+        (total / 4.0 + 1e-16).log10()
+    }
+
+    #[test]
+    fn central_intervals_follow_a_narrow_valley() {
+        // The eps^(1/3) interval straddles the valley floor once the fit is
+        // near 1e-8 and the descent stalls there; intervals adapted to the
+        // measured curvature keep the slopes honest to near the 1e-16 floor.
+        let bounds = boxed(0.0, 1.0, 4);
+        let mut engine = FdBfgs::new(
+            Array1::from_elem(4, 0.9).view(),
+            None,
+            &bounds,
+            FdBfgsOptions::default(),
+        );
+        drive(&mut engine, stiff_fit, 1500, &bounds);
+        assert!(engine.value() < -14.0, "value {}", engine.value());
+        let stiff = engine.intervals[0].expect("central stencils ran");
+        let cube_root = f64::EPSILON.cbrt() * engine.typical(0);
+        assert!(
+            stiff < 0.5 * cube_root,
+            "interval {stiff} against {cube_root}"
+        );
+    }
+
+    #[test]
+    fn adapted_intervals_stay_between_the_rounding_floor_and_the_cube_root_rule() {
+        let bounds = boxed(-3.0, 3.0, 3);
+        let f = |x: ArrayView1<f64>| x.iter().map(|v| (v - 0.7).powi(2)).sum::<f64>();
+        let mut engine = FdBfgs::new(
+            Array1::from_elem(3, 2.0).view(),
+            None,
+            &bounds,
+            FdBfgsOptions {
+                ftol: 0.0,
+                ..FdBfgsOptions::default()
+            },
+        );
+        drive(&mut engine, f, 2000, &bounds);
+        assert_eq!(engine.scheme(), FdScheme::Central);
+        for i in 0..3 {
+            let h = engine.intervals[i].expect("central stencils ran");
+            let typical = engine.typical(i);
+            assert!(h <= f64::EPSILON.cbrt() * typical, "interval {h}");
+            assert!(h >= f64::EPSILON.powf(2.0 / 3.0) * typical, "interval {h}");
+        }
     }
 }
