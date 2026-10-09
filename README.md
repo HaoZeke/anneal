@@ -117,7 +117,7 @@ print(h.best_val)
 
 Every proposal is reflected into `[low, high]`, so `obj_fn` is only ever
 called inside the box. Pass `x0=` to start the walk from a known point
-(`run_qmc` takes it too). The start costs one call: a run
+(`global_optimize` and `run_qmc` take it too). The start costs one call: a run
 makes `1 + n_epochs * steps_per_epoch` evaluations.
 
 ## Optional arms (additive independence + QMC polish)
