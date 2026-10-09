@@ -860,6 +860,7 @@ def test_a_nan_start_counts_as_inf_when_nothing_else_is_finite(driver, preset):
         h = driver(nan_at_x0, -np.ones(2), np.ones(2), preset, n_epochs=2, steps_per_epoch=50, seed=1, x0=x0)
     assert h.total_accepted > 0
     assert h.best_val == np.inf
+    assert np.array_equal(h.best_pos, x0)
 
 
 def test_run_qmc_scores_a_nan_start_as_inf():
