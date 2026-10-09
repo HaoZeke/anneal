@@ -25,11 +25,15 @@ fitter raises, or a loss that is not a real number, ends the drive: the
 fitter is not called again, ``finish`` is skipped, and the exception reaches
 the caller. The few arguments anneal 0.10.0 accepted and ignored, such as
 preset keywords under the portfolio, still run with a FutureWarning that
-says what to pass instead; they will raise in a future release.
+says what to pass instead; they will raise in a future release. So does a
+numeric string where a parameter value or a bound goes, such as a bounds
+pair PyYAML reads from ``[1e-3, 1e1]``: it is read as a number, as 0.10.0
+read it, with one FutureWarning per call.
 """
 
 from __future__ import annotations
 
+import contextvars
 import inspect
 import math
 import numbers
@@ -107,8 +111,18 @@ def _first(mask: np.ndarray) -> int | None:
 
 
 def _real_array(value: Any, what: str) -> np.ndarray:
-    """``value`` as a float64 array; anything not real-numeric is an error."""
+    """``value`` as a float64 array; anything not real-numeric is an error.
+
+    Numeric strings are read as numbers, as anneal 0.10.0 read them, and
+    reported to the :class:`_Strings` the call runs in.
+    """
     arr = np.asarray(value)
+    if arr.dtype.kind in "SU":
+        try:
+            arr = arr.astype(np.float64)
+        except ValueError:
+            raise ValueError(f"{what} is not real-numeric") from None
+        _Strings.note(what, arr.size)
     if arr.dtype.kind not in "biuf":
         raise ValueError(f"{what} is not real-numeric")
     return arr.astype(np.float64)
@@ -123,6 +137,57 @@ def _deprecated(message: str) -> None:
     while frame is not None and frame.f_globals.get("__name__") == __name__:
         frame, depth = frame.f_back, depth + 1
     warnings.warn(message, FutureWarning, stacklevel=depth + 1)
+
+
+_STRINGS: contextvars.ContextVar[dict[str, int] | None] = contextvars.ContextVar(
+    "anneal_chemfit_strings", default=None
+)
+
+
+class _Strings:
+    """The numeric strings one call reads, named in one FutureWarning at its end.
+
+    anneal 0.10.0 read a numeric string wherever it read a parameter value or
+    a bound, such as the strings PyYAML reads for ``[1e-3, 1e1]``. A call
+    made inside another reports its strings to the outer one.
+    """
+
+    def __init__(self, caller: str):
+        self.caller = caller
+        self.found: dict[str, int] = {}
+        self.token = None
+
+    @staticmethod
+    def note(what: str, count: int) -> None:
+        """Report ``count`` strings read for ``what``."""
+        found = _STRINGS.get()
+        if found is None:
+            _deprecated(_strings_message("anneal.chemfit", {what: count}))
+        else:
+            found.setdefault(what, count)
+
+    def __enter__(self) -> _Strings:
+        if _STRINGS.get() is None:
+            self.token = _STRINGS.set(self.found)
+        return self
+
+    def __exit__(self, kind, error, trace) -> None:
+        if self.token is None:
+            return
+        _STRINGS.reset(self.token)
+        if kind is None and self.found:
+            _deprecated(_strings_message(self.caller, self.found))
+
+
+def _strings_message(caller: str, found: dict[str, int]) -> str:
+    names = list(found)
+    shown = names if len(names) <= 3 else [*names[:2], f"{len(names) - 2} more"]
+    one = sum(found.values()) == 1
+    return (
+        f"{caller} reads {_listed(shown)} from {'a string' if one else 'strings'}, "
+        f"as anneal 0.10.0 did; pass {'a number' if one else 'numbers'} instead. "
+        "A string will raise in a future release."
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -316,6 +381,32 @@ def _items_like(form: Any, values: np.ndarray) -> Any:
     return float(values)
 
 
+def _numeric_leaf(name: str, value: Any) -> Any:
+    """``value`` with its numeric strings read as floats, laid out the same.
+
+    A string leaf becomes a float, and a list, tuple or array of strings
+    one of floats; each is reported to the :class:`_Strings` the call runs
+    in. Any other leaf is returned as it is.
+    """
+    if isinstance(value, (str, bytes)):
+        return float(_real_array(value, f"parameter {name}"))
+    if isinstance(value, np.ndarray):
+        kind = value.dtype.kind
+    elif isinstance(value, (list, tuple)):
+        try:
+            kind = np.asarray(value).dtype.kind
+        except (TypeError, ValueError):
+            return value
+    else:
+        return value
+    if kind not in "SU":
+        return value
+    values = _real_array(value, f"parameter {name}")
+    if isinstance(value, np.ndarray):
+        return values
+    return _items_like(_items_form(value), values)
+
+
 class _Leaf:
     """One parameter leaf: its path, its slice of the flat vector, its type."""
 
@@ -346,13 +437,17 @@ class _Leaf:
 
 
 class _Layout:
-    """Where each leaf of a nested parameter mapping sits in the flat vector."""
+    """Where each leaf of a nested parameter mapping sits in the flat vector.
+
+    A numeric string leaf is laid out as the number it reads as, as anneal
+    0.10.0 read it.
+    """
 
     def __init__(self, template: Mapping):
         self.leaves: list[_Leaf] = []
         offset = 0
         for path, value in _iter_leaves(template):
-            leaf = _Leaf(path, value, offset)
+            leaf = _Leaf(path, _numeric_leaf(_path_str(path), value), offset)
             self.leaves.append(leaf)
             offset += leaf.size
         self.size = offset
@@ -743,17 +838,19 @@ def flatten_parameters(params: dict[str, Any]):
     Scalar leaves contribute one entry; array leaves contribute their
     ravelled entries in C order. ``spec`` records ``(path, shape)`` per
     leaf (``shape == ()`` for scalars) so :func:`unflatten_parameters`
-    can rebuild the structure. Only real-numeric leaves are supported;
-    non-finite starts are rejected, and so are ``longdouble`` leaves, which a
-    float64 vector cannot carry exactly.
+    can rebuild the structure. Only real-numeric leaves are supported (a
+    numeric string is read as a number, with a FutureWarning); non-finite
+    starts are rejected, and so are ``longdouble`` leaves, which a float64
+    vector cannot carry exactly.
     """
     if not isinstance(params, Mapping) or not params:
         raise ValueError("params must be a non-empty dict")
-    layout = _Layout(params)
-    for leaf in layout.leaves:
-        if leaf.size == 0:
-            raise ValueError(f"parameter {leaf.name} is empty")
-    vector = layout.vector(params, "parameter")
+    with _Strings("flatten_parameters"):
+        layout = _Layout(params)
+        for leaf in layout.leaves:
+            if leaf.size == 0:
+                raise ValueError(f"parameter {leaf.name} is empty")
+        vector = layout.vector(params, "parameter")
     return vector, [(leaf.path, leaf.shape) for leaf in layout.leaves]
 
 
@@ -910,8 +1007,12 @@ def _fit_anneal(
     steps_per_epoch: int = 100,
     preset_kwargs: Any = None,
     preset: Any = None,
+    caller: str = "fit_anneal",
 ) -> Any:
-    """:func:`fit_anneal`, also taking a preset instance from :func:`run_fitter`."""
+    """:func:`fit_anneal`, also taking a preset instance from :func:`run_fitter`.
+
+    ``caller`` names the bridge in the warning about numeric strings.
+    """
     evaluate, step = _protocol(fitter)
     name = _choice(driver, _DRIVERS)
     if name is None:
@@ -938,24 +1039,25 @@ def _fit_anneal(
     initial = getattr(fitter, "initial_parameters", None)
     if not isinstance(initial, Mapping) or not initial:
         raise ValueError("fitter.initial_parameters must be a non-empty dict")
-    layout = _Layout(initial)
-    start, _ = flatten_parameters(initial)
-    if x0 is not None:
-        start = _start_vector(layout, x0)
-    if (low is None) != (high is None):
-        raise ValueError("low and high must be given together")
-    if low is None:
-        box = _mapped_box(layout, getattr(fitter, "bounds", None), start, span)
-    else:
-        box = (_real_array(low, "low").ravel(), _real_array(high, "high").ravel())
-        if box[0].size != layout.size or box[1].size != layout.size:
-            raise ValueError(
-                f"low/high have lengths {box[0].size}/{box[1].size} "
-                f"but the flattened parameters have dimension {layout.size}"
-            )
-    # run and global_optimize refuse a start outside the box. A caller vector
-    # such as zeros is pulled onto the box before the first evaluation.
-    problem = _Problem(layout, *_settle(layout, *box), start)
+    with _Strings(caller):
+        layout = _Layout(initial)
+        start, _ = flatten_parameters(initial)
+        if x0 is not None:
+            start = _start_vector(layout, x0)
+        if (low is None) != (high is None):
+            raise ValueError("low and high must be given together")
+        if low is None:
+            box = _mapped_box(layout, getattr(fitter, "bounds", None), start, span)
+        else:
+            box = (_real_array(low, "low").ravel(), _real_array(high, "high").ravel())
+            if box[0].size != layout.size or box[1].size != layout.size:
+                raise ValueError(
+                    f"low/high have lengths {box[0].size}/{box[1].size} "
+                    f"but the flattened parameters have dimension {layout.size}"
+                )
+        # run and global_optimize refuse a start outside the box. A caller vector
+        # such as zeros is pulled onto the box before the first evaluation.
+        problem = _Problem(layout, *_settle(layout, *box), start)
 
     # The fitter owns bookkeeping; every evaluation is one optimizer step.
     _init(fitter)
@@ -979,12 +1081,13 @@ class ChemFitVector:
     """
 
     def __init__(self, template: dict[str, Any]):
-        self._layout = _Layout(template)
+        with _Strings("ChemFitVector"):
+            self._layout = _Layout(template)
+            self.x0 = self._layout.vector(template, "parameter")
         self.keys: list[str] = self._layout.names()
         self.shapes: dict[str, tuple[int, ...]] = {
             leaf.name: leaf.shape for leaf in self._layout.leaves
         }
-        self.x0 = self._layout.vector(template, "parameter")
 
     @property
     def dim(self) -> int:
@@ -995,7 +1098,8 @@ class ChemFitVector:
 
     def pack(self, params: dict[str, Any]) -> np.ndarray:
         """Flatten a nested parameter dict into the fixed vector layout."""
-        return self._layout.vector(params, "params", exact=False, finite=False)
+        with _Strings("ChemFitVector.pack"):
+            return self._layout.vector(params, "params", exact=False, finite=False)
 
     def unpack(self, vector: np.ndarray) -> dict[str, Any]:
         """Rebuild the nested parameter dict from a flat vector."""
@@ -1023,9 +1127,10 @@ def chemfit_box(
     """
     layout = vector._layout
     span = _positive("default_span", default_span)
-    low, high = _settle(
-        layout, *_mapped_box(layout, getattr(fitter, "bounds", None), vector.x0, span)
-    )
+    with _Strings("chemfit_box"):
+        low, high = _settle(
+            layout, *_mapped_box(layout, getattr(fitter, "bounds", None), vector.x0, span)
+        )
     fixed = _first(low == high)
     if fixed is not None:
         raise ValueError(
@@ -1162,12 +1267,13 @@ def fit_chemfit(
     initial = getattr(fitter, "initial_parameters", None)
     if not isinstance(initial, Mapping):
         raise TypeError("fitter.initial_parameters must be a mapping")
-    vector = ChemFitVector(initial)
-    if vector.dim == 0:
-        raise ValueError("fitter.initial_parameters holds no parameters")
-    layout = vector._layout
-    box = _mapped_box(layout, getattr(fitter, "bounds", None), vector.x0, span)
-    problem = _Problem(layout, *_settle(layout, *box), vector.x0)
+    with _Strings("fit_chemfit"):
+        vector = ChemFitVector(initial)
+        if vector.dim == 0:
+            raise ValueError("fitter.initial_parameters holds no parameters")
+        layout = vector._layout
+        box = _mapped_box(layout, getattr(fitter, "bounds", None), vector.x0, span)
+        problem = _Problem(layout, *_settle(layout, *box), vector.x0)
 
     _init(fitter)
     every = tell_every if name == "portfolio" else steps
@@ -1234,9 +1340,9 @@ def unflatten_params(
     return out
 
 
-def _flat_bound(value: Any, size: int) -> np.ndarray:
+def _flat_bound(value: Any, size: int, what: str) -> np.ndarray:
     """An explicit bound vector; a single value is broadcast."""
-    arr = _real_array(value, "bound").reshape(-1)
+    arr = _real_array(value, what).reshape(-1)
     if arr.size == 1 and size != 1:
         return np.full(size, arr[0])
     if arr.size != size:
@@ -1249,7 +1355,11 @@ def _benchmark_box(layout: _Layout, low, high, context_bounds, fitter_bounds):
     if low is not None or high is not None:
         if low is None or high is None:
             raise ValueError("low and high must be passed together")
-        return _settle(layout, _flat_bound(low, layout.size), _flat_bound(high, layout.size))
+        return _settle(
+            layout,
+            _flat_bound(low, layout.size, "low"),
+            _flat_bound(high, layout.size, "high"),
+        )
     if (
         isinstance(context_bounds, Mapping)
         and "low" in context_bounds
@@ -1257,8 +1367,8 @@ def _benchmark_box(layout: _Layout, low, high, context_bounds, fitter_bounds):
     ):
         return _settle(
             layout,
-            _flat_bound(context_bounds["low"], layout.size),
-            _flat_bound(context_bounds["high"], layout.size),
+            _flat_bound(context_bounds["low"], layout.size, 'bounds["low"]'),
+            _flat_bound(context_bounds["high"], layout.size, 'bounds["high"]'),
         )
     for bounds in (context_bounds, fitter_bounds):
         if _covers(layout, bounds):
@@ -1277,10 +1387,11 @@ def bounds_from_fitter(
     ``None`` when the mapping does not bound every leaf or the parameters do
     not flatten to ``size``.
     """
-    layout = _Layout(initial)
-    if layout.size != size or not _covers(layout, fitter_bounds):
-        return None
-    return _settle(layout, *_mapped_box(layout, fitter_bounds, None, None))
+    with _Strings("bounds_from_fitter"):
+        layout = _Layout(initial)
+        if layout.size != size or not _covers(layout, fitter_bounds):
+            return None
+        return _settle(layout, *_mapped_box(layout, fitter_bounds, None, None))
 
 
 def resolve_bounds(
@@ -1299,10 +1410,11 @@ def resolve_bounds(
     shape, and a NumPy array of two rows is a pair too. Bounds are checked
     coordinate by coordinate, and errors name the parameter.
     """
-    layout = _Layout(initial)
-    if layout.size == 0:
-        raise ValueError("initial_params is empty")
-    return _benchmark_box(layout, low, high, context_bounds, fitter_bounds)
+    with _Strings("resolve_bounds"):
+        layout = _Layout(initial)
+        if layout.size == 0:
+            raise ValueError("initial_params is empty")
+        return _benchmark_box(layout, low, high, context_bounds, fitter_bounds)
 
 
 def _benchmark_preset(method: str, preset: Any) -> tuple[str, Any]:
@@ -1381,18 +1493,19 @@ def run_benchmark(
     initial = benchmark_context["initial_params"]
     if not isinstance(initial, Mapping):
         raise TypeError("initial_params must be a mapping")
-    layout = _Layout(initial)
-    if layout.size == 0:
-        raise ValueError("initial_params is empty")
-    start = layout.vector(initial, "parameter")
-    box = _benchmark_box(
-        layout,
-        low,
-        high,
-        benchmark_context.get("bounds"),
-        getattr(fitter, "bounds", None),
-    )
-    problem = _Problem(layout, *box, start)
+    with _Strings("run_benchmark"):
+        layout = _Layout(initial)
+        if layout.size == 0:
+            raise ValueError("initial_params is empty")
+        start = layout.vector(initial, "parameter")
+        box = _benchmark_box(
+            layout,
+            low,
+            high,
+            benchmark_context.get("bounds"),
+            getattr(fitter, "bounds", None),
+        )
+        problem = _Problem(layout, *box, start)
 
     _init(fitter)
     session = _Session(problem, evaluate, step, budget, step_every=1)
@@ -1493,5 +1606,6 @@ def run_fitter(
         seed=seed,
         preset=preset,
         preset_kwargs=preset_kwargs,
+        caller="run_fitter",
         **options,
     )

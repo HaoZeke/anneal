@@ -2,8 +2,10 @@
 
 An argument 0.10.0 took and ignored still runs. It gives one FutureWarning,
 attributed to the caller, that says what to pass instead, and the fit is the
-one the call that passes that gives. ``run_benchmark`` still drives a fitter
-with half a session protocol, as 0.10.0 did, with a FutureWarning too.
+one the call that passes that gives. So does a numeric string where 0.10.0
+read a parameter value or a bound as a number. ``run_benchmark`` still
+drives a fitter with half a session protocol, as 0.10.0 did, with a
+FutureWarning too.
 
 An argument 0.10.0 coerced, or dropped without a word, now raises an error
 that names it before the fitter's session starts.
@@ -30,9 +32,11 @@ from anneal.chemfit import (  # noqa: E402
     run_fitter,
 )
 from chemfit_doubles import (  # noqa: E402
+    ENTRIES,
     NextFitter,
     Recorder,
     ReleasedFitter,
+    drive,
     protocol_names,
     same_params,
 )
@@ -60,6 +64,23 @@ def _context(fitter, budget=60):
     }
 
 
+def _as(fitter, bounds=None, **leaves):
+    """``fitter`` with some initial parameters, or its bounds, replaced."""
+    fitter.initial_parameters = {**fitter.initial_parameters, **leaves}
+    if bounds is not None:
+        fitter.bounds = bounds
+    return fitter
+
+
+def _reads(caller, what, one=False):
+    """The start of the warning for the numeric strings ``caller`` reads."""
+    source, number = ("a string", "a number") if one else ("strings", "numbers")
+    return re.escape(
+        f"{caller} reads {what} from {source}, as anneal 0.10.0 did; "
+        f"pass {number} instead"
+    )
+
+
 def _shape_warning(name, given, shape):
     return re.escape(
         f"x0 {name} has shape {given}, but the parameter has shape {shape}"
@@ -78,6 +99,13 @@ _TAKES = {
     "fast": "t_init and gamma",
     "gsa": "t_init, q_v and q_a",
 }
+# PyYAML reads [-2e0, 2e0] as two strings, and [0, 1e0] as 0 and a string.
+_YAML = {"positions": ["-2e0", "2e0"], "eps": [0, "1e0"]}
+_YAML_READS = (
+    "the lower bound of positions, the upper bound of positions and the upper "
+    "bound of eps"
+)
+_POSITIONS_AS_TEXT = np.array([[0.5, -0.5, 0.25], [1.0, -1.0, 0.0]]).astype(str)
 
 # (id, fitter, the call 0.10.0 took, the call that passes what it meant, warning)
 WARNS = [
@@ -223,6 +251,90 @@ WARNS = [
         lambda f: run_fitter(f, 60),
         "run_fitter ignores preset_kwargs under method 'global_optimize'",
     ),
+    # 0.10.0 read a numeric string wherever it read a parameter value or a
+    # bound.
+    (
+        "fit_anneal string parameter",
+        _fitter,
+        lambda f: fit_anneal(_as(f, eps="0.5"), 60),
+        lambda f: fit_anneal(f, 60),
+        _reads("fit_anneal", "parameter eps", one=True),
+    ),
+    (
+        "fit_chemfit string parameter",
+        _fitter,
+        lambda f: fit_chemfit(_as(f, eps="0.5"), 60),
+        lambda f: fit_chemfit(f, 60),
+        _reads("fit_chemfit", "parameter eps", one=True),
+    ),
+    (
+        "run_benchmark string parameters",
+        _fitter,
+        lambda f: run_benchmark(
+            {
+                **_context(f),
+                "initial_params": {"positions": _POSITIONS_AS_TEXT, "eps": "0.5"},
+            }
+        ),
+        lambda f: run_benchmark(_context(f)),
+        _reads("run_benchmark", "parameter positions and parameter eps"),
+    ),
+    (
+        "run_fitter string parameter",
+        _fitter,
+        lambda f: run_fitter(_as(f, eps="0.5"), 60),
+        lambda f: run_fitter(f, 60),
+        _reads("run_fitter", "parameter eps", one=True),
+    ),
+    (
+        "fit_chemfit bounds read from YAML",
+        _fitter,
+        lambda f: fit_chemfit(_as(f, bounds=_YAML), 60),
+        lambda f: fit_chemfit(f, 60),
+        _reads("fit_chemfit", _YAML_READS),
+    ),
+    (
+        "fit_anneal bounds read from YAML",
+        _fitter,
+        lambda f: fit_anneal(_as(f, bounds=_YAML), 60),
+        lambda f: fit_anneal(f, 60),
+        _reads("fit_anneal", _YAML_READS),
+    ),
+    (
+        "run_benchmark context bounds read from YAML",
+        _fitter,
+        lambda f: run_benchmark({**_context(f), "bounds": _YAML}),
+        lambda f: run_benchmark(_context(f)),
+        _reads("run_benchmark", _YAML_READS),
+    ),
+    (
+        "run_benchmark context low and high strings",
+        _fitter,
+        lambda f: run_benchmark({**_context(f), "bounds": {"low": "-1", "high": "1"}}),
+        lambda f: run_benchmark({**_context(f), "bounds": {"low": -1.0, "high": 1.0}}),
+        _reads("run_benchmark", 'bounds["low"] and bounds["high"]'),
+    ),
+    (
+        "run_benchmark low and high strings",
+        _fitter,
+        lambda f: run_benchmark(_context(f), low="-1", high="1"),
+        lambda f: run_benchmark(_context(f), low=-1.0, high=1.0),
+        _reads("run_benchmark", "low and high"),
+    ),
+    (
+        "fit_anneal low and high strings",
+        _fitter,
+        lambda f: fit_anneal(f, 60, low=_LOW.astype(str), high=_HIGH.astype(str)),
+        lambda f: fit_anneal(f, 60, low=_LOW, high=_HIGH),
+        _reads("fit_anneal", "low and high"),
+    ),
+    (
+        "fit_anneal x0 strings",
+        _fitter,
+        lambda f: fit_anneal(f, 60, x0=[str(v) for v in _START[:7]]),
+        lambda f: fit_anneal(f, 60, x0=_START[:7]),
+        _reads("fit_anneal", "x0"),
+    ),
 ]
 
 
@@ -286,6 +398,105 @@ def test_run_benchmark_still_drives_half_a_protocol_with_a_future_warning(half, 
     for got, want in zip(fitter.evaluated, full.evaluated):
         assert same_params(got, want)
     assert same_params(out, full.finished_with)
+
+
+def _same(got, want):
+    """Whether two helper results hold the same values, dtype and bits alike."""
+    if isinstance(want, (tuple, list)):
+        return len(got) == len(want) and all(map(_same, got, want))
+    if isinstance(want, np.ndarray):
+        return got.dtype == want.dtype and np.array_equal(got, want)
+    return got == want
+
+
+_X = {"x": np.zeros(2)}
+
+# (id, the call with numeric strings, the call with numbers, what it reads)
+HELPERS_READ = [
+    (
+        "flatten_parameters",
+        lambda: flatten_parameters({"a": "0.5", "b": ["1", "2e0"]}),
+        lambda: flatten_parameters({"a": 0.5, "b": [1.0, 2.0]}),
+        _reads("flatten_parameters", "parameter a and parameter b"),
+    ),
+    (
+        "ChemFitVector",
+        lambda: ChemFitVector({"a": "0.5"}).x0,
+        lambda: ChemFitVector({"a": 0.5}).x0,
+        _reads("ChemFitVector", "parameter a", one=True),
+    ),
+    (
+        "chemfit_box",
+        lambda: _box(ReleasedFitter({"x": 0.5}, {"x": ["0", "1e0"]})),
+        lambda: _box(ReleasedFitter({"x": 0.5}, {"x": (0.0, 1.0)})),
+        _reads("chemfit_box", "the lower bound of x and the upper bound of x"),
+    ),
+    (
+        "resolve_bounds",
+        lambda: resolve_bounds(_X, low="-1", high="1"),
+        lambda: resolve_bounds(_X, low=-1.0, high=1.0),
+        _reads("resolve_bounds", "low and high"),
+    ),
+    (
+        "bounds_from_fitter",
+        lambda: bounds_from_fitter(_X, {"x": ["-1e0", "1e0"]}, 2),
+        lambda: bounds_from_fitter(_X, {"x": (-1.0, 1.0)}, 2),
+        _reads("bounds_from_fitter", "the lower bound of x and the upper bound of x"),
+    ),
+]
+
+
+@pytest.mark.parametrize(
+    "deprecated, supported, warning",
+    [case[1:] for case in HELPERS_READ],
+    ids=[case[0] for case in HELPERS_READ],
+)
+def test_the_helpers_read_numeric_strings_with_a_future_warning(
+    deprecated, supported, warning
+):
+    with pytest.warns(FutureWarning, match=warning) as record:
+        got = deprecated()
+    future = [w for w in record if issubclass(w.category, FutureWarning)]
+    assert len(future) == 1
+    assert future[0].filename == __file__
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", FutureWarning)
+        want = supported()
+    assert _same(got, want)
+
+
+@pytest.mark.parametrize("entry", ENTRIES)
+def test_the_installed_chemfit_fitter_runs_on_bounds_read_from_yaml(entry):
+    fitter_type = pytest.importorskip("chemfit.fitter").Fitter
+
+    def run(bounds):
+        calls = []
+
+        def objective(params):
+            x = np.asarray(params["x"])
+            calls.append(x.copy())
+            return float(np.sum((x - 0.3) ** 2))
+
+        fitter = fitter_type(
+            objective,
+            initial_params={"x": np.array([0.9, -0.6, 0.2])},
+            bounds={"x": bounds},
+        )
+        return drive(entry, fitter, 60), calls
+
+    # PyYAML reads x: [-1e0, 1e0] as two strings, and the Fitter keeps them.
+    with pytest.warns(
+        FutureWarning, match="from strings, as anneal 0.10.0 did"
+    ) as record:
+        out, calls = run(["-1e0", "1e0"])
+    assert len([w for w in record if issubclass(w.category, FutureWarning)]) == 1
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", FutureWarning)
+        want, want_calls = run((-1.0, 1.0))
+    assert len(calls) == len(want_calls) > 1
+    for got, expected in zip(calls, want_calls):
+        assert np.array_equal(got, expected)
+    assert np.array_equal(out["x"], want["x"])
 
 
 def _with(initial, bounds):
@@ -646,6 +857,20 @@ RAISES = [
         ValueError,
         f"{_NOT_A_PAIR}, got (0.0, 1.0, 'extra')",
         make=_with({"x": 0.5, "y": 0.1}, {"x": (0.0, 1.0, "extra"), "y": (-1.0, 1.0)}),
+    ),
+    _raises(
+        "fit_chemfit bounds pair of non-numeric strings",
+        lambda f: fit_chemfit(f, 60),
+        ValueError,
+        "the lower bound of x is not real-numeric",
+        make=_with({"x": 0.5, "y": 0.1}, {"x": ("lo", "1"), "y": (-1.0, 1.0)}),
+    ),
+    _raises(
+        "chemfit_box bounds pair of non-numeric strings",
+        _box,
+        ValueError,
+        "the upper bound of x is not real-numeric",
+        make=_with({"x": 0.5}, {"x": ("0", "hi")}),
     ),
     _raises(
         "fit_chemfit three per-element pairs",
