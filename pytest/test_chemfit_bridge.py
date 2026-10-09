@@ -226,3 +226,21 @@ def test_fit_chemfit_starts_at_the_initial_parameters_of_an_evaluate_step_fitter
     assert fitter.steps > 0
     end = float(np.sum((np.asarray(out["positions"]) - 1.0) ** 2))
     assert end < float(np.sum((start - 1.0) ** 2))
+
+
+def test_run_fitter_translates_its_method_names_for_a_native_fit_anneal():
+    from anneal.chemfit import run_fitter
+
+    class NativeFitter:
+        def __init__(self):
+            self.calls = []
+
+        def fit_anneal(self, **kwargs):
+            self.calls.append(kwargs)
+            return {}
+
+    fitter = NativeFitter()
+    run_fitter(fitter, 10)
+    run_fitter(fitter, 10, method="sa")
+    run_fitter(fitter, 10, method="gsa")
+    assert [call["method"] for call in fitter.calls] == ["portfolio", "boltzmann", "gsa"]
