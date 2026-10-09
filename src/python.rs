@@ -22,7 +22,7 @@ use eindir_core::py_objective::{PyBounds as EindirPyBounds, PyObjective};
 use eindir_core::{Bounds, Objective};
 
 use crate::history::History;
-use crate::variant::{boltzmann, fast, gsa};
+use crate::variant::{boltzmann, boxed_boltzmann, boxed_fast, boxed_gsa, fast, gsa};
 
 /// Reject empty, non-finite, or inverted box bounds before `Bounds::new`.
 ///
@@ -52,6 +52,25 @@ fn validate_box_bounds(low: &[f64], high: &[f64]) -> PyResult<()> {
         }
     }
     Ok(())
+}
+
+fn validate_initial_position(
+    x0: Option<PyReadonlyArray1<'_, f64>>,
+    dim: usize,
+) -> PyResult<Option<Array1<f64>>> {
+    let Some(x0) = x0 else {
+        return Ok(None);
+    };
+    let values = x0.as_slice()?;
+    if values.len() != dim {
+        return Err(PyValueError::new_err(
+            "x0 must have the same length as low and high",
+        ));
+    }
+    if values.iter().any(|value| !value.is_finite()) {
+        return Err(PyValueError::new_err("x0 must contain only finite values"));
+    }
+    Ok(Some(Array1::from_vec(values.to_vec())))
 }
 
 // ---------------------------------------------------------------------------
@@ -1893,13 +1912,15 @@ enum Preset {
 ///   obj_fn: Python callable `f(numpy.ndarray) -> float` evaluated at every
 ///           proposal. Held via the GIL.
 ///   low, high: numpy arrays defining the box bounds used to draw the
-///              initial position uniformly. Same length defines the
-///              objective dimensionality.
+///              box containing every objective evaluation. Same length
+///              defines the objective dimensionality.
 ///   preset: one of `Boltzmann()`, `Fast()`, `Gsa()` from `anneal`.
 ///   n_epochs, steps_per_epoch: SA loop dimensions.
 ///   seed: u64 seed for the StdRng.
+///   x0: optional initial position. Values outside the box are clipped before
+///       the first objective evaluation.
 #[pyfunction]
-#[pyo3(signature = (obj_fn, low, high, preset, n_epochs = 100, steps_per_epoch = 200, seed = 42))]
+#[pyo3(signature = (obj_fn, low, high, preset, n_epochs = 100, steps_per_epoch = 200, seed = 42, x0 = None))]
 fn run(
     obj_fn: Py<PyAny>,
     low: PyReadonlyArray1<'_, f64>,
@@ -1908,14 +1929,12 @@ fn run(
     n_epochs: usize,
     steps_per_epoch: usize,
     seed: u64,
+    x0: Option<PyReadonlyArray1<'_, f64>>,
 ) -> PyResult<PyHistory> {
     let low_vec = low.as_slice()?.to_vec();
     let high_vec = high.as_slice()?.to_vec();
-    if low_vec.len() != high_vec.len() {
-        return Err(pyo3::exceptions::PyValueError::new_err(
-            "low and high must have the same length",
-        ));
-    }
+    validate_box_bounds(&low_vec, &high_vec)?;
+    let x0 = validate_initial_position(x0, low_vec.len())?;
     let bounds = Bounds::new(Array1::from_vec(low_vec), Array1::from_vec(high_vec), 1e-9);
     let obj = CallableObjective {
         fn_: obj_fn,
@@ -1923,19 +1942,19 @@ fn run(
     };
     let history = match preset {
         Preset::Boltzmann(p) => {
-            let v = boltzmann(obj, p.t_init, p.sigma)
+            let v = boxed_boltzmann(obj, p.t_init, p.sigma)
                 .map_err(|e| pyo3::exceptions::PyValueError::new_err(format!("{e}")))?;
-            crate::runner::run_rs_variant(v, n_epochs, steps_per_epoch, seed)
+            crate::runner::run_rs_variant_from_position(v, n_epochs, steps_per_epoch, seed, x0)
         }
         Preset::Fast(p) => {
-            let v = fast(obj, p.t_init, p.gamma)
+            let v = boxed_fast(obj, p.t_init, p.gamma)
                 .map_err(|e| pyo3::exceptions::PyValueError::new_err(format!("{e}")))?;
-            crate::runner::run_rs_variant(v, n_epochs, steps_per_epoch, seed)
+            crate::runner::run_rs_variant_from_position(v, n_epochs, steps_per_epoch, seed, x0)
         }
         Preset::Gsa(p) => {
-            let v = gsa(obj, p.t_init, p.q_v, p.q_a)
+            let v = boxed_gsa(obj, p.t_init, p.q_v, p.q_a)
                 .map_err(|e| pyo3::exceptions::PyValueError::new_err(format!("{e}")))?;
-            crate::runner::run_rs_variant(v, n_epochs, steps_per_epoch, seed)
+            crate::runner::run_rs_variant_from_position(v, n_epochs, steps_per_epoch, seed, x0)
         }
     };
     Ok(PyHistory::from(history))
@@ -1952,25 +1971,7 @@ fn low_discrepancy_points(
 ) -> PyResult<Vec<Vec<f64>>> {
     let low_vec = low.as_slice()?.to_vec();
     let high_vec = high.as_slice()?.to_vec();
-    if low_vec.len() != high_vec.len() {
-        return Err(PyValueError::new_err(
-            "low and high must have the same length",
-        ));
-    }
-    if low_vec.is_empty() {
-        return Err(PyValueError::new_err(
-            "bounds must have at least one dimension",
-        ));
-    }
-    if low_vec
-        .iter()
-        .zip(high_vec.iter())
-        .any(|(&lo, &hi)| hi < lo)
-    {
-        return Err(PyValueError::new_err(
-            "each upper bound must be greater than or equal to the lower bound",
-        ));
-    }
+    validate_box_bounds(&low_vec, &high_vec)?;
     let bounds = Bounds::new(Array1::from_vec(low_vec), Array1::from_vec(high_vec), 0.0);
     let points = eindir_core::low_discrepancy_points(&bounds, n, skip);
     Ok(points.outer_iter().map(|row| row.to_vec()).collect())
@@ -2029,17 +2030,17 @@ fn run_qmc(
     };
     let history = match preset {
         Preset::Boltzmann(p) => {
-            let v = boltzmann(obj, p.t_init, p.sigma)
+            let v = boxed_boltzmann(obj, p.t_init, p.sigma)
                 .map_err(|e| PyValueError::new_err(format!("{e}")))?;
             crate::runner::run_rs_qmc_variant(v, n_starts, n_epochs, steps_per_epoch, seed)
         }
         Preset::Fast(p) => {
-            let v =
-                fast(obj, p.t_init, p.gamma).map_err(|e| PyValueError::new_err(format!("{e}")))?;
+            let v = boxed_fast(obj, p.t_init, p.gamma)
+                .map_err(|e| PyValueError::new_err(format!("{e}")))?;
             crate::runner::run_rs_qmc_variant(v, n_starts, n_epochs, steps_per_epoch, seed)
         }
         Preset::Gsa(p) => {
-            let v = gsa(obj, p.t_init, p.q_v, p.q_a)
+            let v = boxed_gsa(obj, p.t_init, p.q_v, p.q_a)
                 .map_err(|e| PyValueError::new_err(format!("{e}")))?;
             crate::runner::run_rs_qmc_variant(v, n_starts, n_epochs, steps_per_epoch, seed)
         }

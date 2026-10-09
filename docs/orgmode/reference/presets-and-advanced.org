@@ -7,7 +7,12 @@
 - =Fast(t_init, gamma)= :: Reciprocal cooling + Cauchy + Metropolis.
 - =Gsa(t_init, =q_v=, q_a)= :: =Tsallis= cooling + =Tsallis= visit + =Tsallis= accept.
 
-All called via =run(obj, low, high, preset, n_epochs, steps_per_epoch, seed)=.
+All are called via
+=run(obj, low, high, preset, n_epochs, steps_per_epoch, seed, x0=None)=.
+The Python driver mirror-reflects proposals at =low= and =high=, so every
+objective evaluation stays inside the box without accumulating clipped
+probability on its faces. When supplied, =x0= is clipped to the box and
+evaluated first.
 
 * Pilot and low-discrepancy
 

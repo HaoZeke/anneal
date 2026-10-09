@@ -131,6 +131,81 @@ def test_run_returns_history_object():
     assert h.epochs[-1].best_val == h.best_val
 
 
+@pytest.mark.parametrize(
+    "preset",
+    [
+        Boltzmann(t_init=10.0, sigma=50.0),
+        Fast(t_init=10.0, gamma=50.0),
+        Gsa(t_init=10.0, q_v=2.62, q_a=1.7),
+    ],
+)
+def test_run_only_evaluates_inside_bounds(preset):
+    evaluated = []
+
+    def bounded_objective(x):
+        point = np.asarray(x, dtype=np.float64).copy()
+        evaluated.append(point)
+        return float(np.sum(point**2))
+
+    run(
+        bounded_objective,
+        np.array([-0.25, -0.5]),
+        np.array([0.25, 0.5]),
+        preset,
+        n_epochs=3,
+        steps_per_epoch=20,
+        seed=SEED,
+    )
+
+    points = np.asarray(evaluated)
+    assert np.all(points >= np.array([-0.25, -0.5]))
+    assert np.all(points <= np.array([0.25, 0.5]))
+
+
+def test_run_accepts_and_clips_initial_position():
+    evaluated = []
+
+    def recording_objective(x):
+        point = np.asarray(x, dtype=np.float64).copy()
+        evaluated.append(point)
+        return float(np.sum(point**2))
+
+    h = run(
+        recording_objective,
+        np.array([-1.0, -2.0]),
+        np.array([1.0, 2.0]),
+        Boltzmann(),
+        n_epochs=0,
+        steps_per_epoch=0,
+        seed=SEED,
+        x0=np.array([4.0, -5.0]),
+    )
+
+    assert evaluated[0] == pytest.approx([1.0, -2.0])
+    assert h.best_pos == pytest.approx([1.0, -2.0])
+
+
+@pytest.mark.parametrize(
+    ("x0", "message"),
+    [
+        (np.array([0.0]), "same length"),
+        (np.array([0.0, np.nan]), "finite"),
+        (np.array([0.0, np.inf]), "finite"),
+    ],
+)
+def test_run_rejects_invalid_initial_position(x0, message):
+    with pytest.raises(ValueError, match=message):
+        run(
+            styb_tang_2d,
+            LOW,
+            HIGH,
+            Boltzmann(),
+            n_epochs=1,
+            steps_per_epoch=1,
+            x0=x0,
+        )
+
+
 def test_run_hmc_accepts_initial_position():
     x0 = np.array([-2.903534, -2.903534])
     h = run_hmc(
@@ -525,6 +600,26 @@ def test_low_high_dimension_mismatch_raises():
             n_epochs=10,
             steps_per_epoch=10,
             seed=SEED,
+        )
+
+
+@pytest.mark.parametrize(
+    ("low", "high", "message"),
+    [
+        (np.array([]), np.array([]), "at least one"),
+        (np.array([0.0]), np.array([0.0]), "strictly less"),
+        (np.array([0.0]), np.array([np.inf]), "finite"),
+    ],
+)
+def test_run_rejects_invalid_bounds(low, high, message):
+    with pytest.raises(ValueError, match=message):
+        run(
+            lambda x: float(np.sum(x)),
+            low,
+            high,
+            Boltzmann(),
+            n_epochs=1,
+            steps_per_epoch=1,
         )
 
 
