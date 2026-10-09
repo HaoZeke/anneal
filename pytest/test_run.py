@@ -608,6 +608,7 @@ def test_chemfit_positions_stay_in_the_box():
     n_atoms = 13
     low = np.full(3 * n_atoms, -3.0)
     high = np.full(3 * n_atoms, 3.0)
+    init = np.random.default_rng(0).uniform(-1.5, 1.5, size=(n_atoms, 3))
     obj, seen = recording(lj_energy)
     budget = 2000
 
@@ -618,13 +619,53 @@ def test_chemfit_positions_stay_in_the_box():
         Boltzmann(),
         n_epochs=budget // 100,
         steps_per_epoch=100,
+        x0=init.reshape(-1),
     )
 
     evals = np.array(seen)
     assert evals.shape == (budget + 1, 3 * n_atoms)
+    assert np.array_equal(evals[0], init.reshape(-1))
     assert np.all((evals >= low) & (evals <= high))
     assert np.all((np.array(h.best_pos) >= low) & (np.array(h.best_pos) <= high))
     assert h.best_val == min(lj_energy(x) for x in evals)
+
+
+@pytest.mark.parametrize("driver", DRIVERS)
+@pytest.mark.parametrize("preset", WIDE_PRESETS, ids=repr)
+def test_x0_is_the_first_evaluation(driver, preset):
+    low = np.array([-3.0, -1.0, 0.5])
+    high = np.array([3.0, 2.0, 0.75])
+    x0 = np.array([0.1, -1.0, 0.75])
+    obj, seen = recording(lambda x: -float(np.sum(x)))
+
+    driver(obj, low, high, preset, n_epochs=5, steps_per_epoch=20, seed=3, x0=x0)
+
+    evals = np.array(seen)
+    assert np.array_equal(evals[0], x0)
+    assert np.all((evals >= low) & (evals <= high))
+
+
+@pytest.mark.parametrize("driver", DRIVERS)
+@pytest.mark.parametrize(
+    ("x0", "message"),
+    [
+        ([0.0], "x0 must have the same length"),
+        ([0.0, np.nan], "x0 must be finite"),
+        ([-np.inf, 0.0], "x0 must be finite"),
+        ([0.0, 1.5], "outside the box"),
+    ],
+)
+def test_invalid_x0_raises_value_error(driver, x0, message):
+    with pytest.raises(ValueError, match=message):
+        driver(
+            styb_tang_2d,
+            np.array([-1.0, -1.0]),
+            np.array([1.0, 1.0]),
+            Boltzmann(),
+            n_epochs=1,
+            steps_per_epoch=1,
+            x0=np.array(x0, dtype=np.float64),
+        )
 
 
 @pytest.mark.parametrize("driver", DRIVERS)
@@ -652,12 +693,15 @@ def test_invalid_box_raises_value_error(driver, low, high, message):
 
 @pytest.mark.parametrize("driver", DRIVERS)
 @pytest.mark.parametrize("preset", WIDE_PRESETS, ids=repr)
-def test_equal_endpoints_fix_the_coordinate(driver, preset):
+@pytest.mark.parametrize(
+    "x0", [None, np.array([1.5, 0.5, -2.0])], ids=["uniform", "x0"]
+)
+def test_equal_endpoints_fix_the_coordinate(driver, preset, x0):
     low = np.array([-2.0, 0.5, -2.0])
     high = np.array([2.0, 0.5, 2.0])
     obj, seen = recording(lambda x: float(np.sum(x**2)))
 
-    h = driver(obj, low, high, preset, n_epochs=10, steps_per_epoch=50, seed=1)
+    h = driver(obj, low, high, preset, n_epochs=10, steps_per_epoch=50, seed=1, x0=x0)
 
     evals = np.array(seen)
     assert np.all(evals[:, 1] == 0.5)

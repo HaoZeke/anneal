@@ -82,6 +82,39 @@ fn validate_closed_box(low: &[f64], high: &[f64]) -> PyResult<()> {
     Ok(())
 }
 
+/// Copies an optional start point after checking it lies in the closed box
+/// already accepted by [`validate_closed_box`].
+fn checked_x0(
+    x0: Option<PyReadonlyArray1<'_, f64>>,
+    low: &[f64],
+    high: &[f64],
+) -> PyResult<Option<Array1<f64>>> {
+    let Some(x0) = x0 else {
+        return Ok(None);
+    };
+    let x0 = x0.as_slice()?.to_vec();
+    if x0.len() != low.len() {
+        return Err(PyValueError::new_err(format!(
+            "x0 must have the same length as low and high (got {}, expected {})",
+            x0.len(),
+            low.len()
+        )));
+    }
+    for (i, ((&x, &lo), &hi)) in x0.iter().zip(low).zip(high).enumerate() {
+        if !x.is_finite() {
+            return Err(PyValueError::new_err(format!(
+                "x0 must be finite at dimension {i}"
+            )));
+        }
+        if x < lo || x > hi {
+            return Err(PyValueError::new_err(format!(
+                "x0[{i}] = {x} lies outside the box [{lo}, {hi}]"
+            )));
+        }
+    }
+    Ok(Some(Array1::from_vec(x0)))
+}
+
 // ---------------------------------------------------------------------------
 // Preset parameter holders.
 // ---------------------------------------------------------------------------
@@ -1917,10 +1950,11 @@ enum Preset {
 
 /// Runs the SA driver and returns a `History`.
 ///
-/// The chain lives in the closed box `[low, high]`: the initial position is
-/// drawn uniformly from it and every proposal is mirror-reflected back into
-/// it, so every objective evaluation and `History.best_pos` lie inside the
-/// box. A coordinate with `low[i] == high[i]` is held at that value.
+/// The chain lives in the closed box `[low, high]`: it starts at `x0` when
+/// given and otherwise at a uniform draw from the box, and every proposal is
+/// mirror-reflected back into it, so every objective evaluation and
+/// `History.best_pos` lie inside the box. A coordinate with
+/// `low[i] == high[i]` is held at that value.
 ///
 /// Args:
 ///   obj_fn: Python callable `f(numpy.ndarray) -> float` evaluated at every
@@ -1931,8 +1965,11 @@ enum Preset {
 ///   preset: one of `Boltzmann()`, `Fast()`, `Gsa()` from `anneal`.
 ///   n_epochs, steps_per_epoch: SA loop dimensions.
 ///   seed: u64 seed for the StdRng.
+///   x0: optional start point, a finite numpy array of the same length as
+///       `low` inside `[low, high]` (else `ValueError`). The first
+///       objective evaluation is at `x0`.
 #[pyfunction]
-#[pyo3(signature = (obj_fn, low, high, preset, n_epochs = 100, steps_per_epoch = 200, seed = 42))]
+#[pyo3(signature = (obj_fn, low, high, preset, n_epochs = 100, steps_per_epoch = 200, seed = 42, x0 = None))]
 fn run(
     obj_fn: Py<PyAny>,
     low: PyReadonlyArray1<'_, f64>,
@@ -1941,10 +1978,13 @@ fn run(
     n_epochs: usize,
     steps_per_epoch: usize,
     seed: u64,
+    x0: Option<PyReadonlyArray1<'_, f64>>,
 ) -> PyResult<PyHistory> {
     let low_vec = low.as_slice()?.to_vec();
     let high_vec = high.as_slice()?.to_vec();
     validate_closed_box(&low_vec, &high_vec)?;
+    let x0 = checked_x0(x0, &low_vec, &high_vec)?;
+    let x0 = x0.as_ref().map(|x| x.view());
     let bounds = Bounds::new(Array1::from_vec(low_vec), Array1::from_vec(high_vec), 1e-9);
     let obj = CallableObjective {
         fn_: obj_fn,
@@ -1954,17 +1994,17 @@ fn run(
         Preset::Boltzmann(p) => {
             let v = boltzmann(obj, p.t_init, p.sigma)
                 .map_err(|e| pyo3::exceptions::PyValueError::new_err(format!("{e}")))?;
-            crate::runner::run_rs_variant(v, n_epochs, steps_per_epoch, seed)
+            crate::runner::run_rs_variant_from(v, n_epochs, steps_per_epoch, seed, x0)
         }
         Preset::Fast(p) => {
             let v = fast(obj, p.t_init, p.gamma)
                 .map_err(|e| pyo3::exceptions::PyValueError::new_err(format!("{e}")))?;
-            crate::runner::run_rs_variant(v, n_epochs, steps_per_epoch, seed)
+            crate::runner::run_rs_variant_from(v, n_epochs, steps_per_epoch, seed, x0)
         }
         Preset::Gsa(p) => {
             let v = gsa(obj, p.t_init, p.q_v, p.q_a)
                 .map_err(|e| pyo3::exceptions::PyValueError::new_err(format!("{e}")))?;
-            crate::runner::run_rs_variant(v, n_epochs, steps_per_epoch, seed)
+            crate::runner::run_rs_variant_from(v, n_epochs, steps_per_epoch, seed, x0)
         }
     };
     Ok(PyHistory::from(history))
@@ -2021,16 +2061,20 @@ fn pilot_draws_qmc(n: usize, seed: u64) -> PyResult<Vec<Vec<f64>>> {
 /// the `History` of the best start.
 ///
 /// Each of the `n_starts` chains begins at a low-discrepancy point of the
-/// box and runs `n_epochs * steps_per_epoch` proposals under its own seed.
-/// The box is enforced as in `run`: every objective evaluation and
-/// `History.best_pos` lie in the closed box `[low, high]`, and a coordinate
-/// with `low[i] == high[i]` is held at that value.
+/// box and runs `n_epochs * steps_per_epoch` proposals under its own seed;
+/// `x0`, when given, replaces the first of these points. The box is enforced
+/// as in `run`: every objective evaluation and `History.best_pos` lie in the
+/// closed box `[low, high]`, and a coordinate with `low[i] == high[i]` is
+/// held at that value.
 ///
 /// Args:
 ///   obj_fn, low, high, preset, n_epochs, steps_per_epoch, seed: as in `run`.
 ///   n_starts: number of low-discrepancy starts (at least one runs).
+///   x0: optional start point, checked as in `run`. It replaces the first
+///       low-discrepancy start, so the first objective evaluation is at
+///       `x0`; the other starts are unchanged.
 #[pyfunction]
-#[pyo3(signature = (obj_fn, low, high, preset, n_starts = 8, n_epochs = 100, steps_per_epoch = 200, seed = 42))]
+#[pyo3(signature = (obj_fn, low, high, preset, n_starts = 8, n_epochs = 100, steps_per_epoch = 200, seed = 42, x0 = None))]
 fn run_qmc(
     obj_fn: Py<PyAny>,
     low: PyReadonlyArray1<'_, f64>,
@@ -2040,10 +2084,13 @@ fn run_qmc(
     n_epochs: usize,
     steps_per_epoch: usize,
     seed: u64,
+    x0: Option<PyReadonlyArray1<'_, f64>>,
 ) -> PyResult<PyHistory> {
     let low_vec = low.as_slice()?.to_vec();
     let high_vec = high.as_slice()?.to_vec();
     validate_closed_box(&low_vec, &high_vec)?;
+    let x0 = checked_x0(x0, &low_vec, &high_vec)?;
+    let x0 = x0.as_ref().map(|x| x.view());
     let bounds = Bounds::new(Array1::from_vec(low_vec), Array1::from_vec(high_vec), 1e-9);
     let obj = CallableObjective {
         fn_: obj_fn,
@@ -2053,17 +2100,17 @@ fn run_qmc(
         Preset::Boltzmann(p) => {
             let v = boltzmann(obj, p.t_init, p.sigma)
                 .map_err(|e| PyValueError::new_err(format!("{e}")))?;
-            crate::runner::run_rs_qmc_variant(v, n_starts, n_epochs, steps_per_epoch, seed)
+            crate::runner::run_rs_qmc_variant_from(v, n_starts, n_epochs, steps_per_epoch, seed, x0)
         }
         Preset::Fast(p) => {
             let v =
                 fast(obj, p.t_init, p.gamma).map_err(|e| PyValueError::new_err(format!("{e}")))?;
-            crate::runner::run_rs_qmc_variant(v, n_starts, n_epochs, steps_per_epoch, seed)
+            crate::runner::run_rs_qmc_variant_from(v, n_starts, n_epochs, steps_per_epoch, seed, x0)
         }
         Preset::Gsa(p) => {
             let v = gsa(obj, p.t_init, p.q_v, p.q_a)
                 .map_err(|e| PyValueError::new_err(format!("{e}")))?;
-            crate::runner::run_rs_qmc_variant(v, n_starts, n_epochs, steps_per_epoch, seed)
+            crate::runner::run_rs_qmc_variant_from(v, n_starts, n_epochs, steps_per_epoch, seed, x0)
         }
     };
     Ok(PyHistory::from(history))

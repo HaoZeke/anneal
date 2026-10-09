@@ -2,6 +2,7 @@
 //! and returns a `History`. The `Sampler` trait keeps the driver loop
 //! independent of the concrete proposal and acceptance machinery.
 
+use ndarray::ArrayView1;
 use rand::SeedableRng;
 use rand::rngs::StdRng;
 
@@ -102,6 +103,42 @@ where
     run_rs(variant, &cooling, n_epochs, steps_per_epoch, seed)
 }
 
+/// [`run_rs_variant`] started from `x0` when one is supplied: `x0` is clipped
+/// into `variant.obj.bounds()` and evaluated first, and the chain draws its
+/// proposals from `seed` with no initial uniform draw. `None` is exactly
+/// [`run_rs_variant`].
+pub fn run_rs_variant_from<O, C, N, M, A>(
+    variant: SaVariant<f64, O, C, N, M, A>,
+    n_epochs: usize,
+    steps_per_epoch: usize,
+    seed: u64,
+    x0: Option<ArrayView1<'_, f64>>,
+) -> History
+where
+    O: eindir_core::Objective<f64> + Send + Sync,
+    C: Cooling<f64> + Clone,
+    N: crate::neigh::Neighborhood<f64>,
+    M: crate::movekernel::MoveKernel<f64>,
+    A: crate::accept::AcceptRule<f64>,
+{
+    let Some(x0) = x0 else {
+        return run_rs_variant(variant, n_epochs, steps_per_epoch, seed);
+    };
+    let cooling = variant.cool.clone();
+    let state = variant
+        .initial_state_from_position(x0.to_owned())
+        .expect("a SaVariant starts from any position");
+    let mut rng = StdRng::seed_from_u64(seed);
+    drive_rs(
+        &variant,
+        &cooling,
+        state,
+        n_epochs,
+        steps_per_epoch,
+        &mut rng,
+    )
+}
+
 /// Resumable variant driver: runs epochs `[start_epoch, start_epoch + n_epochs)`
 /// of the variant's own cooling schedule, continuing from a prior chain
 /// position when one is supplied, and returns the history together with the
@@ -174,6 +211,28 @@ where
     M: crate::movekernel::MoveKernel<f64>,
     A: crate::accept::AcceptRule<f64>,
 {
+    run_rs_qmc_variant_from(variant, n_starts, n_epochs, steps_per_epoch, seed, None)
+}
+
+/// [`run_rs_qmc_variant`] with `x0`, when supplied, in place of the first
+/// low-discrepancy start, so the first evaluation is at `x0` clipped into
+/// `variant.obj.bounds()`. The other starts and every chain seed are
+/// unchanged.
+pub fn run_rs_qmc_variant_from<O, C, N, M, A>(
+    variant: SaVariant<f64, O, C, N, M, A>,
+    n_starts: usize,
+    n_epochs: usize,
+    steps_per_epoch: usize,
+    seed: u64,
+    x0: Option<ArrayView1<'_, f64>>,
+) -> History
+where
+    O: eindir_core::Objective<f64> + Send + Sync,
+    C: Cooling<f64> + Clone,
+    N: crate::neigh::Neighborhood<f64>,
+    M: crate::movekernel::MoveKernel<f64>,
+    A: crate::accept::AcceptRule<f64>,
+{
     let cooling = variant.cool.clone();
     let n_starts = n_starts.max(1);
     let starts = eindir_core::low_discrepancy_points(
@@ -185,7 +244,10 @@ where
     // without GIL deadlock. Native multi-walker scaling lives in dmc_pop.
     let mut best_history = None;
     for idx in 0..n_starts {
-        let start = starts.row(idx);
+        let start = match x0 {
+            Some(x0) if idx == 0 => x0,
+            _ => starts.row(idx),
+        };
         let pos = variant.obj.bounds().clip(start);
         let val = variant.obj.eval(pos.view());
         let pair = eindir_core::FPair { pos, val };
