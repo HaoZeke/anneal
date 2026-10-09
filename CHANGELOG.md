@@ -6,7 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 <!-- towncrier release notes start -->
 
-## Unreleased
+## [0.10.0](https://github.com/HaoZeke/anneal/tree/v0.10.0) - 2026-10-09
 
 ### Added
 
@@ -72,6 +72,83 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   quenches from the overshoot. A packing-map kick plus a quench is
   still inside the occupied well; the ridge walk is the crossing.
 
+- New ``anneal.chemfit.fit_anneal`` drives the gradient-free optimizers from a
+  ChemFit fitter through ``init`` / ``ask`` / ``tell`` / ``finish``. The default
+  driver is the Thompson-allocated portfolio. ``boltzmann``, ``fast``, and
+  ``gsa`` are the single-chain ablations. Nested parameter dictionaries are
+  flattened to vectors and rebuilt on return. The fitter's initial parameters
+  are the start unless ``x0`` is passed, and every evaluation stays in the box.
+
+- New ``anneal.chemfit.fit_chemfit`` and ``ChemFitVector`` flatten a fitter
+  with dotted keys, build a finite box from ``fitter.bounds`` (unbounded
+  parameters fall back to ``init +/- default_span``), and close the run with
+  ``fitter.finish``. ``run_benchmark`` accepts the same session when the fitter
+  speaks ``evaluate`` / ``step`` instead of ``ask`` / ``tell``.
+
+- ``CooperativeRun::flush`` waits for a replica's posted work to reach the
+  coordinator, and ``CooperativeRun::set_on_published_prize`` reports a
+  published reference the coordinator cannot know about.
+
+- Inverted Gelman--Rubin on the cooperative catalog: explore-role chains
+  that mix are forced to leave, and a sampled incumbent is marked dominant
+  only when occupant chains have mixed onto it and it is strictly more
+  occupied than every observed competing packing. This is a convergence
+  diagnostic, not a global-optimality certificate.
+
+- Occupancy visit floor, hatch-stable dwell, Cheeger Fiedler
+  witness, and Gelman--Rubin certificate length are derived
+  bounds with Lean and SymPy identities, not free constants.
+
+- Occupancy retires only on a compact putative: one connected
+  first-neighbour component with a cycle. A path or a split
+  fragment is not a cluster.
+
+- Leftover dwell uses the Esty (1983) upper bound. Occupant
+  mixing is Vehtari split-R-hat at 1.01. Leave accepts a new
+  Franzblau ring class as well as a new DECAF family.
+
+- Symbolic identities for inverted Gelman--Rubin certification, the
+  Good--Turing occupancy stop, keep-fraction ranking, Chatterjee--Voter
+  frequent-hop refusal, and same-packing Exploit versus different-packing
+  Explore.
+
+- Live catalog roster with Attach/Detach/Tick/Scale, a deterministic
+  coordinator clock, and successive-halving spawn/retire decisions.
+  The supervisor launches workers for pending spawns; workers Attach
+  themselves and honour a retired policy reply.
+
+- Same-system cooperative searches enact Raft-committed spectral segments by
+  retrieving one coordinator-validated basin anchor per changed assignment;
+  stale replies and repeated snapshots cannot restart a live chain.
+
+- Two-phase relaxation on a molecular library penalizes group centroids
+  rather than atoms, so the diameter and compression terms cannot squeeze
+  intramolecular bonds.
+
+- ``global_optimize``, ``global_optimize_objective``,
+  ``qmc_gsa_global_search`` and ``qmc_gsa_global_search_objective`` take
+  ``x0``. The portfolio charges it as its first evaluation and records it as
+  the first incumbent, so arms that read the incumbent, such as the
+  trust-region poll, HMC and the population arm, start from it until a lower
+  point is found; the GSA search uses it as its first chain's start. A
+  starting point outside the box, of the wrong size, or not finite raises
+  ``ValueError``. While no evaluation is finite the incumbent is the first
+  point evaluated, so ``global_optimize`` returns ``x0`` rather than a point it
+  never evaluated. ``portfolio_optimize_from`` and
+  ``qmc_gsa_global_search_from`` are the Rust entry points.
+
+### Changed
+
+- The cooperative catalog speaks Cap'n Proto RPC. A replica attaches
+  with a subscriber capability, calls through a session bound to its
+  identity, and receives epoch-close, roster, and retire events. The
+  existing CatalogRequest/CatalogReply payload, journal, and operation
+  handlers are unchanged. Observe needs no identity.
+
+- Plain-exchange population replacement anneals its distance cutoff from
+  half the mean pairwise distance of the first bank to one fifth, and
+  draws mix partners from that frozen bank.
+
 ### Fixed
 
 - A shared catalog checkpoint requests one observed boundary crossing
@@ -108,6 +185,103 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   holds cloud means rather than structures, so the length check dropped
   every one and the Householder inverted nothing but the well it started
   in. References cross as structures.
+
+- ``run`` and ``run_qmc`` keep every evaluation inside ``[low, high]`` and take
+  ``x0``. The ``Boltzmann``, ``Fast`` and ``Gsa`` presets now pair their
+  Gaussian, Cauchy and Tsallis moves with mirror reflection into the box and the
+  box neighbourhood (``boltzmann_in_box``, ``fast_in_box``, ``gsa_in_box``), a
+  pairing the composition laws certify. Before, ``low`` and ``high`` only drew
+  the start, and a 13-atom walk in a ``[-3, 3]`` box evaluated 99.95% of its
+  points outside the box. ``run`` starts its walk at ``x0`` and ``run_qmc``
+  uses it as the first start; a starting point outside the box, of the wrong
+  length, or not finite raises ``ValueError``, and so do invalid preset
+  parameters, which used to panic. ``low``, ``high`` and ``x0`` may be any
+  array-like of one shape, an ``(n_atoms, 3)`` positions array included; they
+  are flattened in C order and ``obj_fn`` receives the flat vector.
+
+- Python callbacks no longer fail silently. ``KeyboardInterrupt`` and
+  ``SystemExit`` raised inside ``obj_fn`` or ``grad_fn`` end the run and are
+  re-raised when the driver returns, where they used to be scored as ``+inf``
+  while the run went on. A return value that is not a number raises
+  ``TypeError``. An ordinary exception is still scored as the worst value, so
+  budget counters can stop a driver by raising, and the driver now reports how
+  many were scored, with the first message, as one ``RuntimeWarning``. A NaN
+  objective value is scored as ``+inf``, and in ``run`` and ``run_qmc`` two
+  infeasible points count as level, so a walk started where the objective is
+  NaN or ``+inf`` moves until it finds the feasible region instead of freezing
+  there. ``cluster_search`` follows the same rules for exceptions and return
+  values; its hop chain still skips quenches whose energy is not finite.
+  Gradients may be returned as any array-like (``jax.grad``, torch, lists).
+
+- Universal descriptor schema version 2 applies the nonexpansive map
+  ``x / sqrt(1 + ||x||^2)`` to every dimensionless block. Near-zero chiral
+  signals retain their amplitude instead of being inflated to unit scale, while
+  large radial, angular, graph, SOAP, and ACE blocks remain bounded.
+
+- Family extras of a crowded DECAF packing Leave it. The packing
+  champion stays and walks isomers.
+
+- ``global_optimize`` only calls ``grad_fn`` inside the box. A point an arm
+  proposes outside is mirror-reflected before the objective sees it, and the
+  gradient is now taken at the same reflected point, its sign flipped along
+  every coordinate the fold reverses, which is the gradient of the function
+  the portfolio actually evaluates. Before, the gradient was called at the
+  unreflected point, up to 0.34 outside a ``[-3, 3]`` box. No arm hands the
+  caller's objective or gradient a non-finite coordinate: the population arm's
+  success-history mean weighed a success from a walker at ``+inf`` as
+  infinite, its scale factors became NaN, and up to 15% of a run's calls went
+  to NaN points when part of the box was infeasible.
+
+- An occupancy Leave that keeps the unquenched hole step records that
+  geometry's own energy, updates the basin the chain stands in, and is
+  reported as unvalidated rather than validated.
+
+- A TIS extra seated on a leftover-SOAP interface Leaves once its path
+  maximum crosses that interface, and interface seats persist across
+  policy requests so the RETIS exchange and the one-sided promotion have
+  an ordering to repair. Leave-path frames carry their own lambda rather
+  than the replica's running maximum, so the shoot returns to the frame
+  furthest from the occupied well.
+
+- Occupancy Leave waits for the measured Marks crossing floor before interrupting a quiet walk.
+
+- Occupancy retire honors leftover-SOAP dwell unless the packing
+  book holds one family. MixingCertified plus packing saturation
+  does not retire extras while leftover is still hatching.
+
+- Occupancy extras walk while leftover SOAP is unsaturated, so Marks is a long chain not a Leave.
+
+- MixingCertified on a two-family book waits for leftover-SOAP
+  hatch-stable dwell. Mixed ico plus a mixed shallower competitor
+  is not MixingCertified on that pair alone.
+
+- Occupancy workers skip policy RPC during the Leave crossing floor and print hops per core-hour.
+
+- Occupancy Leave takes a catalog representative of a different DECAF
+  family, or a hole of the shared occupied-packing archive. Occupancy
+  extras do not draw a random cluster.
+
+- Occupancy OtherFamily walks when FunnelModel EI on seen packings is exhausted.
+
+- A packing-book query can no longer credit a visit. Histograms built for
+  a read fold unseen environments into one shared bin, and taking one on
+  the visit path merged structurally distinct packings into a single
+  family.
+
+- Mirror reflection folds a box whose period ``2 (high - low)`` overflows,
+  and a box with one infinite wall, across the wall the point crossed.
+  An axis with equal bounds stays at that value. The Python drivers still
+  refuse a box whose width is not finite.
+
+- Reflection into a box returns a point already inside unchanged, so a point
+  on the upper wall is no longer folded to ``high`` plus an ulp and evaluated
+  outside the box. The Tsallis visiting step is formed from logarithms: near
+  ``q_v = 3`` its scale underflowed to zero while ``|y|^{-e}`` overflowed, the
+  product was NaN, and ``Gsa`` walks stalled with fewer evaluations than the
+  schedule promised; below ``q_v`` of about 1.007, ``Gamma`` in the scale
+  overflowed and every step was zero or a tail redraw. ``run`` and ``run_qmc`` take ``max_evals`` to spend an
+  exact number of objective calls.
+
 
 ## [0.9.0](https://github.com/HaoZeke/anneal/tree/v0.9.0) - 2026-08-13
 
