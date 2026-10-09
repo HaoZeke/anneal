@@ -137,6 +137,16 @@ def _decimal(value):
     return Decimal(repr(float(value)))
 
 
+def _matrix(rows):
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", PendingDeprecationWarning)
+        return np.matrix(rows)
+
+
+def _xp():
+    return pytest.importorskip("array_api_strict")
+
+
 # (id, fitter, the call 0.10.0 took, the call that passes what it meant, warning)
 WARNS = [
     (
@@ -840,6 +850,18 @@ RAISES = [
         ValueError,
         _WHOLE.format("seed", 1.5),
     ),
+    _raises(
+        "fit_anneal budget=Decimal('60.5')",
+        lambda f: fit_anneal(f, Decimal("60.5")),
+        ValueError,
+        _WHOLE.format("budget", "Decimal('60.5')"),
+    ),
+    _raises(
+        "fit_chemfit seed in a 0-d array of 7.5",
+        lambda f: fit_chemfit(f, 60, seed=np.array(7.5)),
+        ValueError,
+        _WHOLE.format("seed", "array(7.5)"),
+    ),
     # 0.10.0 read a bool as 1 wherever it read a number.
     _raises(
         "fit_anneal budget=True",
@@ -903,6 +925,25 @@ RAISES = [
         TypeError,
         "t_init must be a number, got True",
     ),
+    _raises(
+        "fit_chemfit budget in a 0-d bool array",
+        lambda f: fit_chemfit(f, np.array(True)),
+        TypeError,
+        _WHOLE.format("budget", "array(True)"),
+    ),
+    _raises(
+        "fit_anneal bound_span in a 0-d bool array",
+        lambda f: fit_anneal(f, 60, bound_span=np.array(True)),
+        TypeError,
+        "bound_span must be a number, got array(True)",
+        make=_UNBOUNDED,
+    ),
+    _raises(
+        "run_benchmark seed in an array_api_strict bool",
+        lambda f: run_benchmark(_context(f), seed=_xp().asarray(True)),
+        TypeError,
+        "seed must be a whole number, got Array(True",
+    ),
     # 0.10.0 raised OverflowError after init.
     _raises(
         "fit_anneal seed=-1",
@@ -915,6 +956,31 @@ RAISES = [
         lambda f: fit_chemfit(f, 60, seed=2**64),
         ValueError,
         f"seed must be at most {2**64 - 1}",
+    ),
+    _raises(
+        "fit_chemfit seed=Decimal('Infinity')",
+        lambda f: fit_chemfit(f, 60, seed=Decimal("Infinity")),
+        ValueError,
+        _WHOLE.format("seed", "Decimal('Infinity')"),
+    ),
+    # 0.10.0 raised ValueError after init.
+    _raises(
+        "fit_anneal seed=Decimal('NaN')",
+        lambda f: fit_anneal(f, 60, seed=Decimal("NaN")),
+        ValueError,
+        _WHOLE.format("seed", "Decimal('NaN')"),
+    ),
+    _raises(
+        "fit_chemfit boltzmann t_init=Decimal('NaN')",
+        lambda f: fit_chemfit(f, 60, method="boltzmann", t_init=Decimal("NaN")),
+        ValueError,
+        "t_init must be positive and finite, got nan",
+    ),
+    _raises(
+        "fit_chemfit boltzmann t_init=Decimal('sNaN')",
+        lambda f: fit_chemfit(f, 60, method="boltzmann", t_init=Decimal("sNaN")),
+        TypeError,
+        "t_init must be a number, got Decimal('sNaN')",
     ),
     # 0.10.0 took max(1, int(value)).
     _raises(
@@ -1625,3 +1691,238 @@ def test_the_helpers_read_numbers_numpy_holds_as_objects():
     assert same_params(back, expected)
     assert same_params(vector.unpack(vector.x0), expected)
     assert _same(box, (np.full(5, -1.0), np.full(5, 1.0)))
+
+
+_EPS_UNBOUNDED = {"positions": (-2.0, 2.0)}
+
+# Settings 0.10.0 passed through int() or float(), which read each of these
+# as the number it holds, each with the call that passes that number.
+SETTINGS_READ = [
+    pytest.param(
+        lambda f: fit_anneal(f, Decimal(60), seed=Decimal(3)),
+        lambda f: fit_anneal(f, 60, seed=3),
+        id="fit_anneal Decimal budget and seed",
+    ),
+    pytest.param(
+        lambda f: fit_chemfit(f, Decimal(60), seed=Decimal(3), tell_every=Decimal(5)),
+        lambda f: fit_chemfit(f, 60, seed=3, tell_every=5),
+        id="fit_chemfit Decimal budget, seed and tell_every",
+    ),
+    pytest.param(
+        lambda f: run_benchmark(_context(f, Decimal(60)), seed=Decimal(3)),
+        lambda f: run_benchmark(_context(f), seed=3),
+        id="run_benchmark Decimal budget and seed",
+    ),
+    pytest.param(
+        lambda f: run_fitter(f, Decimal(60), seed=Decimal(3)),
+        lambda f: run_fitter(f, 60, seed=3),
+        id="run_fitter Decimal budget and seed",
+    ),
+    pytest.param(
+        lambda f: fit_anneal(f, 60, driver="boltzmann", steps_per_epoch=Decimal(10)),
+        lambda f: fit_anneal(f, 60, driver="boltzmann", steps_per_epoch=10),
+        id="fit_anneal Decimal steps_per_epoch",
+    ),
+    pytest.param(
+        lambda f: fit_anneal(_as(f, _EPS_UNBOUNDED), 60, bound_span=Decimal("0.5")),
+        lambda f: fit_anneal(_as(f, _EPS_UNBOUNDED), 60, bound_span=0.5),
+        id="fit_anneal Decimal bound_span",
+    ),
+    pytest.param(
+        lambda f: fit_chemfit(_as(f, _EPS_UNBOUNDED), 60, default_span=Decimal("0.5")),
+        lambda f: fit_chemfit(_as(f, _EPS_UNBOUNDED), 60, default_span=0.5),
+        id="fit_chemfit Decimal default_span",
+    ),
+    pytest.param(
+        lambda f: fit_chemfit(
+            f,
+            60,
+            method="boltzmann",
+            steps_per_epoch=Decimal(10),
+            t_init=Decimal(2),
+            sigma=Decimal("0.4"),
+        ),
+        lambda f: fit_chemfit(
+            f, 60, method="boltzmann", steps_per_epoch=10, t_init=2.0, sigma=0.4
+        ),
+        id="fit_chemfit boltzmann Decimal steps_per_epoch, t_init and sigma",
+    ),
+    pytest.param(
+        lambda f: fit_chemfit(
+            f, 60, method="fast", steps_per_epoch=10, gamma=Decimal("0.6")
+        ),
+        lambda f: fit_chemfit(f, 60, method="fast", steps_per_epoch=10, gamma=0.6),
+        id="fit_chemfit fast Decimal gamma",
+    ),
+    pytest.param(
+        lambda f: fit_chemfit(
+            f,
+            60,
+            method="gsa",
+            steps_per_epoch=10,
+            q_v=Decimal("2.5"),
+            q_a=Decimal("1.5"),
+        ),
+        lambda f: fit_chemfit(
+            f, 60, method="gsa", steps_per_epoch=10, q_v=2.5, q_a=1.5
+        ),
+        id="fit_chemfit gsa Decimal q_v and q_a",
+    ),
+    pytest.param(
+        lambda f: fit_chemfit(f, np.array(60), seed=np.array(3.0)),
+        lambda f: fit_chemfit(f, 60, seed=3),
+        id="fit_chemfit budget and seed in 0-d arrays",
+    ),
+    pytest.param(
+        lambda f: fit_anneal(
+            _as(f, _EPS_UNBOUNDED),
+            60,
+            driver="fast",
+            steps_per_epoch=np.array(10),
+            bound_span=np.array(0.5),
+        ),
+        lambda f: fit_anneal(
+            _as(f, _EPS_UNBOUNDED),
+            60,
+            driver="fast",
+            steps_per_epoch=10,
+            bound_span=0.5,
+        ),
+        id="fit_anneal steps_per_epoch and bound_span in 0-d arrays",
+    ),
+    pytest.param(
+        lambda f: fit_chemfit(
+            f,
+            60,
+            method="boltzmann",
+            steps_per_epoch=10,
+            t_init=np.array(2),
+            sigma=np.array(0.4, dtype=np.float32),
+        ),
+        lambda f: fit_chemfit(
+            f,
+            60,
+            method="boltzmann",
+            steps_per_epoch=10,
+            t_init=2.0,
+            sigma=float(np.float32(0.4)),
+        ),
+        id="fit_chemfit boltzmann t_init and sigma in 0-d arrays",
+    ),
+    pytest.param(
+        lambda f: fit_chemfit(f, np.array(Decimal(60), dtype=object)),
+        lambda f: fit_chemfit(f, 60),
+        id="fit_chemfit budget in a 0-d object array of a Decimal",
+    ),
+    pytest.param(
+        lambda f: run_benchmark(
+            _context(f, np.array([60])),
+            method="boltzmann",
+            seed=np.array([[3]]),
+            steps_per_epoch=np.array([10]),
+        ),
+        lambda f: run_benchmark(
+            _context(f), method="boltzmann", seed=3, steps_per_epoch=10
+        ),
+        id="run_benchmark budget, seed and steps_per_epoch in one-element arrays",
+    ),
+    pytest.param(
+        lambda f: fit_chemfit(
+            _as(f, _EPS_UNBOUNDED),
+            60,
+            default_span=np.array([0.5]),
+            tell_every=np.array([5]),
+        ),
+        lambda f: fit_chemfit(
+            _as(f, _EPS_UNBOUNDED), 60, default_span=0.5, tell_every=5
+        ),
+        id="fit_chemfit default_span and tell_every in one-element arrays",
+    ),
+    pytest.param(
+        lambda f: run_fitter(
+            _as(f, _EPS_UNBOUNDED), _matrix([[60]]), bound_span=np.array([[0.5]])
+        ),
+        lambda f: run_fitter(_as(f, _EPS_UNBOUNDED), 60, bound_span=0.5),
+        id="run_fitter budget in a 1x1 matrix and bound_span in a 1x1 array",
+    ),
+    pytest.param(
+        lambda f: fit_chemfit(
+            f, 60, method="gsa", steps_per_epoch=10, q_v=_matrix([[2.5]])
+        ),
+        lambda f: fit_chemfit(f, 60, method="gsa", steps_per_epoch=10, q_v=2.5),
+        id="fit_chemfit gsa q_v in a 1x1 matrix",
+    ),
+    pytest.param(
+        lambda f: fit_anneal(f, _xp().asarray(60), seed=_xp().asarray(3)),
+        lambda f: fit_anneal(f, 60, seed=3),
+        id="fit_anneal budget and seed in array_api_strict arrays",
+    ),
+    pytest.param(
+        lambda f: run_benchmark(_context(f, _xp().asarray(60)), seed=_xp().asarray(3)),
+        lambda f: run_benchmark(_context(f), seed=3),
+        id="run_benchmark budget and seed in array_api_strict arrays",
+    ),
+    pytest.param(
+        lambda f: run_fitter(_as(f, _EPS_UNBOUNDED), 60, bound_span=_xp().asarray(0.5)),
+        lambda f: run_fitter(_as(f, _EPS_UNBOUNDED), 60, bound_span=0.5),
+        id="run_fitter bound_span in an array_api_strict array",
+    ),
+    pytest.param(
+        lambda f: fit_chemfit(
+            _as(f, _EPS_UNBOUNDED),
+            60,
+            method="boltzmann",
+            default_span=_xp().asarray(0.5),
+            steps_per_epoch=_xp().asarray(10),
+            t_init=_xp().asarray(2.0, dtype=_xp().float32),
+        ),
+        lambda f: fit_chemfit(
+            _as(f, _EPS_UNBOUNDED),
+            60,
+            method="boltzmann",
+            default_span=0.5,
+            steps_per_epoch=10,
+            t_init=2.0,
+        ),
+        id="fit_chemfit default_span, steps_per_epoch and t_init in array_api_strict arrays",
+    ),
+]
+
+
+@pytest.mark.filterwarnings("error::DeprecationWarning")
+@pytest.mark.parametrize("call, same_as", SETTINGS_READ)
+def test_settings_0_10_0_read_as_numbers_are_read_as_those_numbers(call, same_as):
+    _same_fit(call, same_as)
+
+
+# 0.10.0 refused these, whose own int() and float() need a 0-d array.
+SETTINGS_NOW_READ = [
+    pytest.param(
+        lambda f: fit_chemfit(f, _xp().asarray([60]), seed=_xp().asarray([[3]])),
+        lambda f: fit_chemfit(f, 60, seed=3),
+        id="fit_chemfit budget and seed in one-element array_api_strict arrays",
+    ),
+    pytest.param(
+        lambda f: fit_anneal(
+            _as(f, _EPS_UNBOUNDED), 60, bound_span=_xp().asarray([0.5])
+        ),
+        lambda f: fit_anneal(_as(f, _EPS_UNBOUNDED), 60, bound_span=0.5),
+        id="fit_anneal bound_span in a one-element array_api_strict array",
+    ),
+]
+
+
+@pytest.mark.filterwarnings("error::DeprecationWarning")
+@pytest.mark.parametrize("call, same_as", SETTINGS_NOW_READ)
+def test_settings_in_one_element_arrays_0_10_0_refused_are_read(call, same_as):
+    _same_fit(call, same_as)
+
+
+def test_chemfit_box_reads_default_span_as_the_number_it_holds():
+    fitter = ReleasedFitter(_X, {})
+    vector = ChemFitVector(fitter.initial_parameters)
+    want = chemfit_box(fitter, vector, default_span=0.5)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        for span in (Decimal("0.5"), np.array(0.5), np.array([0.5]), _matrix([[0.5]])):
+            assert _same(chemfit_box(fitter, vector, default_span=span), want)
