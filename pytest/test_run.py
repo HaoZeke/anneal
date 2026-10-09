@@ -718,18 +718,21 @@ def test_run_takes_array_likes_of_any_shape_and_stride():
     )
 
 
-@pytest.mark.parametrize("driver", [run, run_qmc])
+# run with a list or a float32 x0 is test_run_takes_array_likes_of_any_shape_and_stride.
 @pytest.mark.parametrize(
-    "convert",
+    ("convert", "driver"),
     [
-        lambda a: a.tolist(),
-        lambda a: tuple(a.tolist()),
-        lambda a: a.astype(np.float32),
-        lambda a: a.astype(np.int64),
+        (lambda a: a.tolist(), run_qmc),
+        (lambda a: tuple(a.tolist()), run),
+        (lambda a: tuple(a.tolist()), run_qmc),
+        (lambda a: a.astype(np.float32), run_qmc),
+        (lambda a: a.astype(np.int64), run),
+        (lambda a: a.astype(np.int64), run_qmc),
     ],
-    ids=["list", "tuple", "float32", "int64"],
+    ids=["list-run_qmc", "tuple-run", "tuple-run_qmc", "float32-run_qmc", "int64-run", "int64-run_qmc"],
 )
 def test_run_reads_lists_tuples_and_other_dtypes_as_float64(driver, convert):
+    """Regression pin: 0.10.0 evaluates the same points from these types as from float64 arrays."""
     # Whole numbers, which every one of these types holds exactly.
     low, high, x0 = np.array([-2.0, -1.0]), np.array([2.0, 3.0]), np.array([1.0, 0.0])
 
@@ -741,17 +744,20 @@ def test_run_reads_lists_tuples_and_other_dtypes_as_float64(driver, convert):
     assert np.array_equal(evaluated(convert(low), convert(high), convert(x0)), evaluated(low, high, x0))
 
 
-@pytest.mark.parametrize("driver", [run, run_qmc])
+# run with a strided x0 is test_run_takes_array_likes_of_any_shape_and_stride.
 @pytest.mark.parametrize(
-    "view",
+    ("view", "driver"),
     [
-        lambda a: np.repeat(a, 2)[::2],
-        lambda a: a[::-1].copy()[::-1],
-        lambda a: np.stack([a, a + 7.0], axis=1)[:, 0],
+        (lambda a: np.repeat(a, 2)[::2], run_qmc),
+        (lambda a: a[::-1].copy()[::-1], run),
+        (lambda a: a[::-1].copy()[::-1], run_qmc),
+        (lambda a: np.stack([a, a + 7.0], axis=1)[:, 0], run),
+        (lambda a: np.stack([a, a + 7.0], axis=1)[:, 0], run_qmc),
     ],
-    ids=["strided", "reversed", "column"],
+    ids=["strided-run_qmc", "reversed-run", "reversed-run_qmc", "column-run", "column-run_qmc"],
 )
 def test_run_reads_non_contiguous_views(driver, view):
+    """Regression pin: 0.10.0 evaluates the same points from these views as from contiguous arrays."""
     # A scipy-style (n, 2) bounds array hands low and high over as column views.
     low, high, x0 = np.array([-2.0, -1.0]), np.array([2.0, 3.0]), np.array([1.0, 0.0])
     assert not any(view(a).flags.c_contiguous for a in (low, high, x0))
@@ -779,6 +785,7 @@ def test_run_reads_non_contiguous_views(driver, view):
     ids=["float64", "float32", "int64", "list-of-arrays"],
 )
 def test_run_reads_columns_of_any_dtype_as_the_flat_vector(driver, column):
+    """Regression pin: 0.10.0 reads an (n, 1) column of any dtype as the flat vector."""
     low, high, x0 = np.array([-2.0, -1.0]), np.array([2.0, 3.0]), np.array([1.0, 0.0])
 
     def evaluated(lo, hi, start):
@@ -791,6 +798,7 @@ def test_run_reads_columns_of_any_dtype_as_the_flat_vector(driver, column):
 
 @pytest.mark.parametrize("driver", [run, run_qmc])
 def test_run_refuses_bytes_for_x0(driver):
+    """Regression pin: 0.10.0 refuses bytes for x0."""
     # Read as its byte values, b"ab" would start the walk at [97, 98].
     objective = Recorder(styb_tang_2d)
     with pytest.raises(ValueError):
@@ -848,6 +856,7 @@ def test_run_leaves_a_nan_start():
 @pytest.mark.parametrize("driver", [run, run_qmc])
 @pytest.mark.parametrize("preset", PRESETS, ids=repr)
 def test_a_nan_start_counts_as_inf_when_nothing_else_is_finite(driver, preset):
+    """Regression pin: 0.10.0 scores a NaN as +inf, so a NaN start stays the best when nothing beats +inf."""
     # Everywhere else the objective raises, which is scored as +inf as well.
     x0 = np.array([0.5, 0.5])
 
@@ -864,6 +873,7 @@ def test_a_nan_start_counts_as_inf_when_nothing_else_is_finite(driver, preset):
 
 
 def test_run_qmc_scores_a_nan_start_as_inf():
+    """Regression pin: run_qmc in 0.10.0 scores a NaN start as +inf."""
     x0 = np.array([0.5, 0.5])
     h = run_qmc(
         lambda x: float("nan") if np.array_equal(x, x0) else np.inf,
