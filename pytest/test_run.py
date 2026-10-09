@@ -945,3 +945,14 @@ def test_run_hmc_takes_array_like_bounds():
         x0=[-2.903534, -2.903534],
     )
     assert h.best_val == pytest.approx(GLOBAL_MIN, abs=1e-2)
+
+
+def test_global_optimize_never_calls_with_a_non_finite_coordinate():
+    def partly_infeasible(x):
+        assert np.all(np.isfinite(x)), x
+        return float("inf") if x[0] > 0.0 else float(np.sum(x * x))
+
+    for grad_fn in (None, lambda x: 2.0 * x):
+        objective = Recorder(partly_infeasible)
+        global_optimize(objective, np.full(4, -3.0), np.full(4, 3.0), budget=4000, seed=1, grad_fn=grad_fn)
+        assert np.all(np.isfinite(np.array(objective.points)))
