@@ -14,3 +14,10 @@ slice, but the descent keeps the turn while each slice lowers its value by more
 than the success threshold, until it converges, so a kicked descent, or a long
 one from a poor start, is scored on the basin it reaches. A closing descent from
 the incumbent gets the ten gradients' worth of evaluations it needs to converge.
+A slice is four gradients' worth of evaluations or a 48th of the budget,
+whichever is larger, but at most the geometric mean of the budget and four
+gradients' worth, so past 48 times 48 four-gradient slices the number of slices
+keeps growing with the budget. The floor the restart guarantee needs is
+asymptotic: the opening runs while it improves by the success threshold, which
+cannot last on a bounded objective, and after that every arm keeps a uniform
+share and is pulled infinitely often as the budget grows.

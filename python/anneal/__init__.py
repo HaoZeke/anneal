@@ -870,10 +870,14 @@ def global_optimize(
     restart arm. When the budget lets a descent converge, one from the
     start opens the run while it pays, and from the minimum it reaches
     annealing and then CMA-ES each keep the turn while they lower the
-    incumbent. Each arm gets one turn before the allocation ranks them
-    and the same decaying uniform floor afterwards; a turn is one slice,
-    except that the descent keeps it while it pays, until it converges.
-    A descent from the incumbent closes the run.
+    incumbent. Arms not yet played then take a turn before the
+    allocation ranks them, and the same decaying uniform floor follows;
+    a turn is one slice, except that the descent keeps it while it pays,
+    until it converges. A descent from the incumbent closes the run. The
+    floor the guarantee needs is asymptotic: the opening runs while it
+    improves by the success threshold, which cannot last on a bounded
+    objective, and after that every arm keeps a uniform share and is
+    pulled infinitely often as the budget grows.
 
     Args:
       obj_fn: callable ``f(numpy.ndarray) -> float``.
