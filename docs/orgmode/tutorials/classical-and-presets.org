@@ -47,7 +47,8 @@ high = np.array([5.0, 5.0])
 
 h_b = run(rosenbrock, low, high,
           Boltzmann(t_init=5.0, sigma=0.5),
-          n_epochs=20, steps_per_epoch=100, seed=42)
+          n_epochs=20, steps_per_epoch=100, seed=42,
+          x0=np.array([0.0, 0.0]))
 print("Boltzmann:", h_b.best_pos, h_b.best_val)
 
 h_f = run(rosenbrock, low, high,
@@ -83,7 +84,16 @@ print("Global best val:", h_b.best_val)
 
 The =History= also carries the final state and per-epoch diagnostics that the Bayesian mixer later consumes.
 
+* Bounds and initial positions
+
+=low= and =high= are the box the chain walks, not only the random initial draw.
+Every proposal is mirror-reflected into that box, so the objective is never
+called outside it. Pass =x0= to evaluate a known parameter vector first.
+Coordinates of =x0= outside the box are clipped before that evaluation.
+The initial state costs one objective call, so a complete run makes
+=1 + n_epochs * steps_per_epoch= calls.
+
 * Why this works
 
-The algebra guarantees that any correct filling of the five slots produces a chain whose best-so-far is monotone (L3 + L4) and whose neighbors are symmetric (L1) with support covering the box (L2).
+The algebra guarantees that any correct filling of the five slots produces a chain whose best-so-far is monotone (L3 + L4) and whose neighbors are symmetric (L1) with reflected proposal support inside the box (L2).
 The three classical families are three different fillings that the literature already proved converge; the Rust implementation factors them so that the orchestrator loop, the device kernel, the noise-aware Accept, and the QMC polish are shared verbatim.
