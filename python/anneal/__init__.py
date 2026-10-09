@@ -866,10 +866,12 @@ def global_optimize(
     run takes a values-only loop instead, whatever the box: CMA-ES, a
     finite-difference quasi-Newton descent, generalized simulated
     annealing quenched to one-coordinate improvements, differential
-    evolution, the additive surrogate, and the QMC restart arm. When the budget lets a descent converge, one from the
-    start opens the run while it pays, and from the minimum it reaches
-    annealing and then CMA-ES each keep the turn while they lower the
-    incumbent. Arms not yet played then take a turn before the
+    evolution, the additive surrogate, and the QMC restart arm. When the
+    budget lets a descent converge, one from the start opens the run
+    while it pays; with less, CMA-ES and the descent take one slice each,
+    annealing two, and a descent turn settles what annealing found. From
+    there annealing and then CMA-ES each keep the turn while they lower
+    the incumbent. Arms not yet played then take a turn before the
     allocation ranks them, and the same decaying uniform floor follows;
     a turn is one slice, except that the descent keeps it while it pays,
     until it converges. A descent from the incumbent closes the run. The

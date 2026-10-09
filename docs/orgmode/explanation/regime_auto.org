@@ -41,16 +41,26 @@ coordinate, a descent from the start opens the run and continues while
 its slices lower the incumbent, up to convergence; its successes
 describe the start, so =qn= then rejoins the ranking on the prior.
 
-From the minimum the opening reaches, =gsa= and then =cma= each keep the
-turn while they pay. A phase ends once it has gone eight slices without
-lowering the incumbent, or as long as its last gain took if that is
-longer, and it stops short of the closing descent plus one slice for
-each other arm not yet played, the next phase's included. Against a
-descended incumbent a GSA record is a lower basin and a CMA-ES gain a
-better point of the same one; both come in bursts (records as the anneal
-cools, a run per covariance) that single slices would not see. From an
-undescended start GSA's first records are box-wide samples that leave
-the start's basin, so without an opening there are no phases.
+With less, a descent from the start converges only by taking most of
+the run, which would leave =gsa= and =de= no turn, and separable
+multimodal objectives (shifted Rastrigin, Styblinski-Tang, Levy) need
+theirs. Such a run opens instead with one slice each of =cma= and the
+descent from the start, then two slices of =gsa= from the incumbent,
+whose quenched visits leave the start's basin one coordinate at a time,
+and then a descent turn that settles the basin they reach and, as in
+the rounds, keeps the turn while it pays.
+
+From there =gsa= and then =cma= each keep the turn while they pay. A
+phase ends once it has gone eight slices without lowering the
+incumbent, or as long as its last gain took if that is longer. After an
+opening it stops short of the closing descent plus one slice for each
+other arm not yet played, the next phase's included; without one, short
+of the closing descent plus one slice for =de= until it has played, since
+slices held there for the surrogate and the restart arm cost the phases
+more than those arms return. Against a descended incumbent a GSA record
+is a lower basin and a CMA-ES gain a better point of the same one; both
+come in bursts (records as the anneal cools, a run per covariance) that
+single slices would not see.
 
 Each arm not yet played then takes a turn (the warm-up round, as in
 the main bandit), after which a round picks uniformly with probability
@@ -97,12 +107,16 @@ The rows are tested in this order, so a wide box with a gradient is
   objective allows a number of them that does not grow with the budget,
   while the number of slices does. The =1/round= picks, whose sum
   diverges, then reach every arm. At a given budget nothing is reserved
-  for the floor: the warm-up gives =explore=, =gsa=, =de= and =surrogate=
-  a slice each when the budget left after the opening and the descent's
-  turn holds those slices and the closing descent (the phases leave room
-  for them, the descent's turn does not; on Lennard-Jones positions at 39
-  dimensions and 1000 evaluations the descent's turn runs to the closing
-  descent and none of them plays).
+  for the floor. Short of the opening budget =gsa= plays right after the
+  descent's first slice whenever a slice is left beyond the closing
+  descent. The warm-up round gives =de=, =surrogate= and =explore= (and,
+  after an opening, =gsa=) a slice each when the budget left after the
+  opening or the first turns, the phases and the descent's turns holds
+  those slices and the closing descent. The phases leave room for all of
+  them after an opening and for =de= without one; a descent's turn does
+  not. On Lennard-Jones positions at 39 dimensions and 1000 evaluations
+  =gsa= takes the two turns after the descent's first slice, the closing
+  descent the rest, and =de=, =surrogate= and =explore= do not play.
 - Unknown features fall to =Default= (safe fallback).
 - Policy biases Beta priors and arm *order*, not hard exclusion (except
   noise-aware accept requirement under =StochasticNoise=).
