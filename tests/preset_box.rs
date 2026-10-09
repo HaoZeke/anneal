@@ -305,6 +305,42 @@ fn half_infinite_boxes_mirror_across_the_finite_wall() {
 }
 
 #[test]
+fn qmc_starts_on_an_axis_with_an_infinite_wall_are_finite() {
+    // Halton points scale the unit cube by `high - low`, so on these boxes
+    // every start but x0 sat at infinity. They now sit on the finite wall.
+    let inf = f64::INFINITY;
+    let per_chain = 1 + N_EPOCHS * STEPS_PER_EPOCH;
+    for (low, high, x0, wall) in [
+        (array![2.0, -1.0], array![inf, 1.0], array![2.5, 0.5], 2.0),
+        (
+            array![-inf, -1.0],
+            array![-2.0, 1.0],
+            array![-2.5, 0.5],
+            -2.0,
+        ),
+        (array![-inf, -1.0], array![inf, 1.0], array![0.5, 0.5], 0.0),
+    ] {
+        for which in 0..3 {
+            for start in [None, Some(x0.view())] {
+                let (obj, seen) = recorder(&low, &high);
+                let history = run_preset(which, obj, 1.0, 2.62, Some(3), 3, start);
+                let seen = seen.lock().unwrap();
+                for x in seen.iter().chain(std::iter::once(&history.best.pos)) {
+                    assert!(
+                        x.iter().all(|v| v.is_finite()),
+                        "preset {which} evaluated {x} in [{low}, {high}]"
+                    );
+                    assert_in_box(x, &low, &high);
+                }
+                for first in seen.iter().step_by(per_chain).skip(1) {
+                    assert_eq!(first[0], wall);
+                }
+            }
+        }
+    }
+}
+
+#[test]
 fn a_nan_start_is_left_and_never_kept_as_the_best() {
     let low = array![-1.0, -1.0];
     let high = array![1.0, 1.0];

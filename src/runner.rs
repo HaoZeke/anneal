@@ -2,7 +2,7 @@
 //! and returns a `History`. The `Sampler` trait keeps the driver loop
 //! independent of the concrete proposal and acceptance machinery.
 
-use ndarray::ArrayView1;
+use ndarray::{Array2, ArrayView1};
 use rand::SeedableRng;
 use rand::rngs::StdRng;
 
@@ -196,7 +196,9 @@ where
 }
 
 /// Runs the same `SaVariant` from a bounded low-discrepancy start set and
-/// returns the best history across starts.
+/// returns the best history across starts. On an axis with an infinite wall
+/// every start sits on the finite wall, or at zero when both walls are
+/// infinite.
 pub fn run_rs_qmc_variant<O, C, N, M, A>(
     variant: SaVariant<f64, O, C, N, M, A>,
     n_starts: usize,
@@ -235,11 +237,7 @@ where
 {
     let cooling = variant.cool.clone();
     let n_starts = n_starts.max(1);
-    let starts = eindir_core::low_discrepancy_points(
-        variant.obj.bounds(),
-        n_starts,
-        qmc_skip_from_seed(seed),
-    );
+    let starts = qmc_starts(variant.obj.bounds(), n_starts, qmc_skip_from_seed(seed));
     // Serial multi-start: Python objectives cannot be driven from Rayon
     // without GIL deadlock. Native multi-walker scaling lives in dmc_pop.
     let mut best_history = None;
@@ -273,4 +271,23 @@ where
         }
     }
     best_history.expect("n_starts.max(1) guarantees at least one chain")
+}
+
+/// The Halton points of `bounds`, except that an axis with an infinite wall,
+/// which has no uniform measure, holds every point on its finite wall, or at
+/// zero when both walls are infinite.
+fn qmc_starts(bounds: &eindir_core::Bounds<f64>, n: usize, skip: u64) -> Array2<f64> {
+    let (low, high): (Vec<f64>, Vec<f64>) = bounds
+        .low
+        .iter()
+        .zip(&bounds.high)
+        .map(|(&lo, &hi)| match (lo.is_finite(), hi.is_finite()) {
+            (true, true) => (lo, hi),
+            (true, false) => (lo, lo),
+            (false, true) => (hi, hi),
+            (false, false) => (0.0, 0.0),
+        })
+        .unzip();
+    let finite = eindir_core::Bounds::new(low.into(), high.into(), 0.0);
+    eindir_core::low_discrepancy_points(&finite, n, skip)
 }
