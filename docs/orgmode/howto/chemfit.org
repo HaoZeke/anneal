@@ -6,54 +6,68 @@
 
 [[https://chemfit.readthedocs.io][ChemFit]] evaluates a loss for a nested parameter dictionary and keeps
 the best evaluated parameters. Its =Fitter= exposes a user-driven loop,
-=init()=, =evaluate()=, =step()= and =finish()=, so an anneal driver can
-propose the parameters while ChemFit evaluates and records them.
-
-** The box drivers
+=init()=, =evaluate()=, =step()= and =finish()= (=ask()= and =tell()= in
+ChemFit 3.1), so an anneal driver can propose the parameters while ChemFit
+evaluates and records them. The [[file:../tutorials/chemfit.org][ChemFit tutorial]] writes that loop by
+hand; the bridges in =anneal.chemfit= write it for you.
 
 =run=, =run_qmc=, =global_optimize= and =qmc_gsa_global_search= call the
-objective only inside =[low, high]=, start at =x0= when it is given, and take
-=low=, =high= and =x0= as any array-like of one shape. The objective
-receives the flat vector. =run= makes =1 + n_epochs * steps_per_epoch=
-calls unless =max_evals= caps them; =max_evals= counts the start.
+objective only inside =[low, high]= and start at =x0= when it is given. Before
+0.10.0, =Boltzmann=, =Fast= and =Gsa= drew only their start from the box; a
+13-atom walk in =[-3, 3]= evaluated 99.95% of its points outside it.
+
+** From a fitter
 
 #+begin_src python
-import math
+from anneal.chemfit import fit_anneal
 
-import anneal
-import numpy as np
+fitter = Fitter(
+    objective,
+    initial_params={"positions": initial_positions},
+    bounds={"positions": (-3.0, 3.0)},
+)
+best = fit_anneal(
+    fitter,
+    10_000,
+    driver="boltzmann",
+    preset_kwargs={"t_init": 1.0, "sigma": 0.1},
+)
+#+end_src
+
+=fit_anneal= reads the box from =fitter.bounds=, where a scalar pair covers a
+whole array leaf and a leaf without bounds gets =x0= plus or minus
+=bound_span=. It starts at =fitter.initial_parameters=, or at =x0=, given as a
+dictionary of the same shape or a flat vector, follows every evaluation with
+=step()=, and returns =fitter.finish= of the best point. =driver= is
+="portfolio"= (=global_optimize=, the default), ="boltzmann"=, ="fast"= or
+="gsa"=; a preset's =sigma= or =gamma= is in the units of the parameters. The
+portfolio makes at most =budget= evaluations and the classical drivers make
+exactly =budget=, the start included, with the cooling schedule spread over
+=ceil(budget / steps_per_epoch)= epochs.
+
+=fit_chemfit= flattens with ChemFit's dotted keys and calls =step()= every
+=tell_every= portfolio evaluations. =run_benchmark= takes a benchmark's
+context dictionary as it is:
+
+#+begin_src python
+from anneal import Boltzmann
+from anneal.chemfit import run_benchmark
 
 
 def run_anneal(benchmark_context):
-    fitter = benchmark_context["fitter"]
-    budget = benchmark_context["budget"]
-    initial = np.asarray(benchmark_context["initial_params"]["positions"])
-    n_atoms = len(initial)
-
-    def obj(positions):
-        loss = fitter.evaluate({"positions": positions.reshape(n_atoms, 3)})
-        fitter.step()
-        return loss
-
-    fitter.init()
-    anneal.run(
-        obj,
-        np.full((n_atoms, 3), -3.0),
-        np.full((n_atoms, 3), 3.0),
-        anneal.Boltzmann(t_init=1.0, sigma=0.1),
-        n_epochs=math.ceil(budget / 100),
-        steps_per_epoch=100,
-        x0=initial,
-        max_evals=budget,
+    return run_benchmark(
+        benchmark_context,
+        method="boltzmann",
+        preset=Boltzmann(t_init=1.0, sigma=0.1),
+        low=-3.0,
+        high=3.0,
     )
-    return fitter.finish()
 #+end_src
 
-The positions array goes in as =x0= unchanged; =max_evals=budget= spends
-exactly =budget= evaluations, start included, while the cooling schedule
-spans =n_epochs=. =sigma= is in the units of the coordinates. Before the
-box presets, =Boltzmann=, =Fast= and =Gsa= drew only their start from the
-box; a 13-atom walk in =[-3, 3]= evaluated 99.95% of its points outside it.
+All three call =evaluate= and =step= when the fitter has them and =ask= and
+=tell= otherwise. When every evaluation raises, for instance because the
+fitter has neither, the first exception is re-raised rather than reported as
+a warning.
 
 ** Fitter.fit_anneal
 
@@ -65,11 +79,6 @@ times, calls =step()= after each evaluation, and returns the best evaluated
 parameters.
 
 #+begin_src python
-fitter = Fitter(
-    objective,
-    initial_params={"positions": initial_positions},
-    bounds={"positions": (-3.0, 3.0)},
-)
 best = fitter.fit_anneal(budget=10_000, method="boltzmann")
 #+end_src
 
@@ -78,6 +87,11 @@ best = fitter.fit_anneal(budget=10_000, method="boltzmann")
 unit cube, so a preset's step is in units of each box width; the temperature
 is in loss units. An objective exception stops further evaluations and is
 re-raised when anneal returns, unless the fitter swallows exceptions.
+
+[[file:../../../experiments/chemfit/bridge_check.py][experiments/chemfit/bridge_check.py]] runs every path on this page on one
+ChemFit 4 fitter. At a budget of 2000, each made exactly 2000 evaluations,
+none outside the box, the first at the initial positions; the loop from the
+original report made 2001 from a uniform start.
 
 ** What to expect on a positions benchmark
 

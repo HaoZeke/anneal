@@ -16,6 +16,7 @@ the result from =History.best_pos=.
 For a positions-only fit:
 
 #+begin_src python
+import math
 from typing import Any
 
 import numpy as np
@@ -57,23 +58,27 @@ def run_anneal(benchmark_context: dict[str, Any]):
         objective,
         low,
         high,
-        Boltzmann(),
-        n_epochs=1,
-        steps_per_epoch=budget - 1,
+        Boltzmann(t_init=1.0, sigma=0.1),
+        n_epochs=math.ceil(budget / 100),
+        steps_per_epoch=100,
         x0=initial.reshape(-1),
+        max_evals=budget,
     )
     return fitter.finish()
 #+end_src
 
-The initial state costs one objective evaluation, hence =budget - 1=
-proposals. Mirror reflection keeps every position inside =low= and =high=.
+=max_evals=budget= stops after =budget= evaluations, the initial state
+included. The temperature is held for an epoch, so the schedule needs many
+epochs: a single epoch of =budget - 1= steps walks at =t_init= throughout and
+never cools. =sigma= is in the units of the positions. Mirror reflection
+keeps every position inside =low= and =high=.
 The expression =positions.reshape((n_atoms * 3))= without assignment has no
 effect and is not needed.
 
 The feature check supports both ChemFit's released =ask=/=tell= lifecycle and
 the =evaluate=/=step= lifecycle on its custom-optimizer API branch.
 
-For a general nested parameter dictionary, flatten =fitter.initial_parameters=
-and =fitter.bounds= with ChemFit's own =flatten_dict= ordering, pass that
-initial vector as =x0=, and reconstruct each objective vector with the matching
-=unflatten_dict=. Every scalar leaf needs a finite lower and upper bound.
+For a general nested parameter dictionary, =anneal.chemfit.fit_anneal= does
+the flattening: it reads the box from =fitter.bounds=, starts at
+=fitter.initial_parameters=, and rebuilds every candidate before ChemFit sees
+it, with the same feature check. [[file:../howto/chemfit.org][Optimize through ChemFit]] shows it.
