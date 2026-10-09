@@ -97,7 +97,8 @@ pub use local_polish::{
 pub use mcmc_sa::{GelmanRubin, MultiChainResult, MultiChainSampler, MultiChainState};
 pub use parallel_tempering::{ParallelTemperingSampler, PtChainState, PtResult, geometric_ladder};
 pub use portfolio::{
-    ArmStat, PortfolioPolicy, PortfolioResult, portfolio_optimize, portfolio_optimize_with_policy,
+    ArmStat, PortfolioPolicy, PortfolioResult, portfolio_optimize, portfolio_optimize_from,
+    portfolio_optimize_with_policy,
 };
 pub use regime::{
     OptimizationRegime, ProblemFeatures, RegimeError, arm_prior_boost, arm_slice_multiplier,
