@@ -1,0 +1,37 @@
+From 347c6078252bfc51ed7130ffb1d60922f3431d41 Mon Sep 17 00:00:00 2001
+From: Rohit Goswami <rgoswami@ieee.org>
+Date: Fri, 9 Oct 2026 16:07:25 +0000
+Subject: [PATCH] test(fitter): type the fit_anneal callback test against
+ CallbackT
+
+register_callback takes Callable[[int, list[FitterEvaluateContext]],
+None]; the callback in the step-exception test was annotated with
+list[EvaluateContext], which pyright rejects because list is invariant.
+---
+ tests/test_fit_anneal.py | 3 +--
+ 1 file changed, 1 insertion(+), 2 deletions(-)
+
+diff --git a/tests/test_fit_anneal.py b/tests/test_fit_anneal.py
+index 2828cb6..f1d57b9 100644
+--- a/tests/test_fit_anneal.py
++++ b/tests/test_fit_anneal.py
+@@ -6,7 +6,6 @@ from typing import TYPE_CHECKING, Any
+ import numpy as np
+ import pytest
+ 
+-from chemfit.abstract_objective_function import EvaluateContext
+ from chemfit.fitter import ANNEAL_METHODS, Fitter, FitterEvaluateContext
+ 
+ if TYPE_CHECKING:
+@@ -200,7 +199,7 @@ def test_fit_anneal_reraises_a_callback_exception_at_its_step(method: str):
+     objective = Recorder(lambda p: (p["x"] - 0.3) ** 2)
+     fitter = Fitter(objective, initial_params={"x": 1.0}, bounds={"x": (-2.0, 2.0)})
+ 
+-    def fails_at_ten(step: int, _contexts: list[EvaluateContext]) -> None:
++    def fails_at_ten(step: int, _contexts: list[FitterEvaluateContext]) -> None:
+         if step == 10:
+             msg = "callback failed"
+             raise RuntimeError(msg)
+-- 
+2.43.0
+
