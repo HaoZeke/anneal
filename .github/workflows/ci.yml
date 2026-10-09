@@ -200,10 +200,14 @@ jobs:
         shell: bash
         run: python -m venv .venv
 
-      - name: Install maturin + pytest
+      # The array-API loss and setting tests skip without array-api-strict,
+      # so the step stops here if it does not import. It asks only for numpy,
+      # unpinned, so the main suite still runs on the newest numpy.
+      - name: Install maturin + pytest + array-api-strict
         run: |
           .venv/bin/python -m pip install --upgrade pip
-          .venv/bin/python -m pip install "maturin>=1.5,<2" pytest numpy
+          .venv/bin/python -m pip install "maturin>=1.5,<2" pytest numpy array-api-strict
+          .venv/bin/python -c "import array_api_strict"
 
       - name: maturin develop
         run: .venv/bin/python -m maturin develop --features python --pip-path .venv/bin/pip3
@@ -221,10 +225,13 @@ jobs:
       # The tests that drive a real ChemFit Fitter skip without ChemFit. It
       # pins numpy<2.4, so it goes in only after the steps above have run on
       # the newest numpy. Its next branch has no release, hence the commit.
+      # The ChemFit tests hold array-API rows too, so each step checks again
+      # that array-api-strict imports after ChemFit has moved numpy.
       - name: pytest (ChemFit 3.1.1, ask/tell)
         run: |
           .venv/bin/python -m pip install "chemfit==3.1.1"
           .venv/bin/python -c "from chemfit.fitter import Fitter; assert hasattr(Fitter, 'tell')"
+          .venv/bin/python -c "import array_api_strict"
           .venv/bin/python -m pytest pytest/test_chemfit*.py
 
       - name: pytest (ChemFit next, evaluate/step)
@@ -233,6 +240,7 @@ jobs:
           .venv/bin/python -m pip install \
             "chemfit @ git+https://github.com/MSallermann/chemfit@37dcfe69c118419d040a0d7f3bf8304d52b569e2"
           .venv/bin/python -c "from chemfit.fitter import Fitter; assert hasattr(Fitter, 'step')"
+          .venv/bin/python -c "import array_api_strict"
           .venv/bin/python -m pytest pytest/test_chemfit*.py
 
   ffi-smoke:
