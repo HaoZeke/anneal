@@ -20,7 +20,7 @@
 //! in every arm, so the arms are paired by ensemble.
 //!
 //! The lattice arms read `CHAINS`, `SLOTS`, `FRESH`, `SPLICE`, `MOVED_MIN`,
-//! `MOVED_MAX`, `MERGE_START`, `MERGE_END`, `DENSITY`, `QUENCH_STEP`,
+//! `MOVED_MAX`, `MERGE_START`, `MERGE_END`, `RETIRE`, `DENSITY`, `QUENCH_STEP`,
 //! `QUENCH_TOL`, `QUENCH_MEMORY` and `LATTICE_CANDIDATES`.
 //!
 //! The Cambridge reference energy and the common-neighbour 555 fraction of
@@ -220,6 +220,7 @@ fn main() {
             env_f64("MERGE_START", Plan::default().merge.0),
             env_f64("MERGE_END", Plan::default().merge.1),
         ),
+        retire: env_usize("RETIRE", Plan::default().retire),
         density: env_f64("DENSITY", Plan::default().density),
         sharing: if arm == "private" {
             Sharing::Private
@@ -246,7 +247,7 @@ fn main() {
     );
     if lattice_arm {
         println!(
-            "  plan: slots {} fresh {} splice {} moved {}..{} merge {}->{} density {} min_separation {}; \
+            "  plan: slots {} fresh {} splice {} moved {}..{} merge {}->{} retire {} density {} min_separation {}; \
              quench step {} tol {} memory {} iterations {}; lattice candidates {} bond {:.4} hollow {:.4} site {:.4} clearance {:.4}",
             plan.slots,
             plan.fresh,
@@ -255,6 +256,7 @@ fn main() {
             plan.moved.1,
             plan.merge.0,
             plan.merge.1,
+            plan.retire,
             plan.density,
             plan.min_separation,
             quench.max_step,
@@ -270,6 +272,7 @@ fn main() {
     } else {
         println!("  recommended chain: Config::recommended({n}), checkpoint 500, density 0.7");
     }
+    let show_bank = env_usize("SHOW_BANK", 0) == 1;
     let chunk = if arm == "indep" { 1 } else { threads.max(1) };
     let mut scored: Vec<Scored> = Vec::new();
     for group in seeds.chunks(chunk) {
@@ -284,8 +287,12 @@ fn main() {
                         let hit = target.and_then(|r| {
                             run.trace.iter().find(|record| record.energy < r + HIT)
                         });
-                        let low = run.bank.iter().copied().fold(f64::INFINITY, f64::min);
-                        let high = run.bank.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+                        let low = run.bank.iter().map(|m| m.energy).fold(f64::INFINITY, f64::min);
+                        let high = run
+                            .bank
+                            .iter()
+                            .map(|m| m.energy)
+                            .fold(f64::NEG_INFINITY, f64::max);
                         let line = format!(
                             "  ensemble {seed}: deepest {:.6}  solved {solved}  first hit {}  charged {}  \
                              f555 {:.3}  hit by {}  generations {}  trials {}/{}/{}  calls {}/{}/{}  \
@@ -310,6 +317,20 @@ fn main() {
                             high,
                             run.trace.len(),
                         );
+                        let mut line = line;
+                        if show_bank {
+                            let mut members: Vec<_> = run.bank.iter().collect();
+                            members.sort_by(|a, b| a.energy.total_cmp(&b.energy));
+                            for m in members {
+                                line.push_str(&format!(
+                                    "\n      member {:.6}  f555 {:.3}  draws {}  from {}",
+                                    m.energy,
+                                    f555(&m.state, n),
+                                    m.draws,
+                                    m.origin.label()
+                                ));
+                            }
+                        }
                         (
                             line,
                             Scored {
