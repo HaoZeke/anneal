@@ -156,12 +156,12 @@ fn nan_as_worst(value: f64) -> f64 {
 
 /// A uniform draw on `bounds`. An axis with `low == high` is that value, and
 /// an axis with an infinite wall is its finite wall, or 0 when both walls are
-/// infinite; neither draws a number. `Bounds::mkpoint` panics on such axes,
-/// and it is the draw whenever every axis has finite walls and a positive
-/// width, so the seed stream of such a box stays the one `mkpoint` already
-/// used.
+/// infinite; neither draws a number. An axis whose width overflows is drawn
+/// at half scale and doubled. `Bounds::mkpoint` panics on these axes, and it
+/// is the draw whenever every axis has a positive finite width, so the seed
+/// stream of such a box stays the one `mkpoint` already used.
 fn initial_position<R: Rng>(bounds: &Bounds<f64>, rng: &mut R) -> Array1<f64> {
-    let drawable = |lo: f64, hi: f64| lo != hi && lo.is_finite() && hi.is_finite();
+    let drawable = |lo: f64, hi: f64| lo != hi && (hi - lo).is_finite();
     if bounds
         .low
         .iter()
@@ -175,6 +175,8 @@ fn initial_position<R: Rng>(bounds: &Bounds<f64>, rng: &mut R) -> Array1<f64> {
             lo
         } else if drawable(lo, hi) {
             rng.random_range(lo..hi)
+        } else if lo.is_finite() && hi.is_finite() {
+            2.0 * rng.random_range(0.5 * lo..0.5 * hi)
         } else if lo.is_finite() {
             lo
         } else if hi.is_finite() {
