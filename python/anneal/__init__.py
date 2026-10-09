@@ -6,7 +6,11 @@ Public API:
   - Gsa(t_init, q_v, q_a): Tsallis cooling + Tsallis visit + Tsallis accept.
   - run(obj_fn, low, high, preset, n_epochs, steps_per_epoch, seed, x0=None):
     SA loop inside the closed box [low, high], started at x0 when given.
-  - History, EpochLine: returned by `run`.
+  - run_qmc(obj_fn, low, high, preset, n_starts, n_epochs, steps_per_epoch,
+    seed, x0=None): `run` from n_starts low-discrepancy starts, each chain
+    inside [low, high]; x0, when given, replaces the first start and is the
+    first point evaluated. Returns the History of the best start.
+  - History, EpochLine: returned by `run` and `run_qmc`.
   - Config.recommended(n) / Config.for_cluster(n), Ledger(budget),
     cluster_search(obj_fn, grad_fn, n, budget, seed, recommended): measured
     cluster-search layer.
