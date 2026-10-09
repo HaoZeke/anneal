@@ -129,8 +129,9 @@ def run(
     The start costs one call, so a run makes ``1 + n_epochs * steps_per_epoch``
     calls, or ``max_evals`` when that is smaller. An ordinary exception raised
     by ``obj_fn`` is scored as ``+inf`` and reported once as a
-    ``RuntimeWarning``; ``KeyboardInterrupt`` ends the run and is re-raised, as
-    is a ``TypeError`` when ``obj_fn`` returns something that is not a number.
+    ``RuntimeWarning``, unless no call returned at all, when the first one is
+    re-raised; ``KeyboardInterrupt`` ends the run and is re-raised, as is a
+    ``TypeError`` when ``obj_fn`` returns something that is not a number.
     """
     return _core_run(
         obj_fn,

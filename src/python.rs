@@ -389,13 +389,16 @@ impl From<History> for PyHistory {
 /// counters stop a driver by raising once their ledger is spent. Anything
 /// else ends the run: `KeyboardInterrupt`, `SystemExit`, or a return value
 /// that is not a number. Once a run is ending, no further callback is made,
-/// and the driver call re-raises the exception when it returns.
+/// and the driver call re-raises the exception when it returns. When no
+/// objective call returned a number, nothing the driver returns was
+/// measured, so the first scored exception is re-raised as well.
 #[derive(Default)]
 struct CallbackErrors {
     fatal: std::sync::Mutex<Option<PyErr>>,
     aborted: std::sync::atomic::AtomicBool,
     scored: std::sync::atomic::AtomicUsize,
-    first_scored: std::sync::Mutex<Option<String>>,
+    first_scored: std::sync::Mutex<Option<PyErr>>,
+    answered: std::sync::atomic::AtomicUsize,
 }
 
 impl CallbackErrors {
@@ -409,7 +412,7 @@ impl CallbackErrors {
                 .scored
                 .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             if previous == 0 {
-                *self.first_scored.lock().expect("callback error lock") = Some(err.to_string());
+                *self.first_scored.lock().expect("callback error lock") = Some(err);
             }
         } else {
             self.abort(err);
@@ -425,11 +428,19 @@ impl CallbackErrors {
             .store(true, std::sync::atomic::Ordering::Relaxed);
     }
 
+    /// Counts objective values returned without an exception.
+    fn answered(&self, n: usize) {
+        self.answered
+            .fetch_add(n, std::sync::atomic::Ordering::Relaxed);
+    }
+
     /// A number from a callback's return value, or the end of the run.
     fn float(&self, py: Python<'_>, value: &Py<PyAny>) -> f64 {
         match value.extract::<f64>(py) {
-            Ok(v) if v.is_nan() => f64::INFINITY,
-            Ok(v) => v,
+            Ok(v) => {
+                self.answered(1);
+                if v.is_nan() { f64::INFINITY } else { v }
+            }
             Err(_) => {
                 let kind = value
                     .bind(py)
@@ -445,7 +456,8 @@ impl CallbackErrors {
         }
     }
 
-    /// Re-raises the exception that ended the run, and warns once when
+    /// Re-raises the exception that ended the run, or the first scored one
+    /// when no objective call returned, and otherwise warns once when
     /// ordinary exceptions were scored as the worst value.
     fn finish(&self, py: Python<'_>) -> PyResult<()> {
         if let Some(err) = self.fatal.lock().expect("callback error lock").take() {
@@ -457,8 +469,13 @@ impl CallbackErrors {
                 .first_scored
                 .lock()
                 .expect("callback error lock")
-                .clone()
-                .unwrap_or_default();
+                .take();
+            if self.answered.load(std::sync::atomic::Ordering::Relaxed) == 0
+                && let Some(err) = first
+            {
+                return Err(err);
+            }
+            let first = first.map(|err| err.to_string()).unwrap_or_default();
             let message = std::ffi::CString::new(format!(
                 "a callback raised {scored} exception(s): an objective call that raised was scored as the worst value and a gradient call as zero; the first was: {first}"
             ))
@@ -547,11 +564,14 @@ impl Objective<f64> for CallableObjective {
                 match batch_fn.call1(py, (py_arr,)) {
                     Ok(r) => {
                         return match as_float_vector(py, &r) {
-                            Some(values) if values.len() == n => Array1::from_iter(
-                                values
-                                    .into_iter()
-                                    .map(|v| if v.is_nan() { f64::INFINITY } else { v }),
-                            ),
+                            Some(values) if values.len() == n => {
+                                self.errors.answered(n);
+                                Array1::from_iter(
+                                    values
+                                        .into_iter()
+                                        .map(|v| if v.is_nan() { f64::INFINITY } else { v }),
+                                )
+                            }
                             _ => {
                                 self.errors
                                     .abort(pyo3::exceptions::PyTypeError::new_err(format!(
