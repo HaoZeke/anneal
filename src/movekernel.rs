@@ -385,8 +385,14 @@ mod tests {
         // Twice the width overflows too.
         assert!(near(reflect_coord(m, -m, -0.45 * m), -0.8 * m));
         // The infinite wall of a half-infinite box mirrors as `+-f64::MAX`.
-        assert!(near(reflect_coord(-0.25 * m, 0.5 * m, f64::INFINITY), 0.75 * m));
-        assert!(near(reflect_coord(0.25 * m, f64::NEG_INFINITY, -0.5 * m), -0.75 * m));
+        assert!(near(
+            reflect_coord(-0.25 * m, 0.5 * m, f64::INFINITY),
+            0.75 * m
+        ));
+        assert!(near(
+            reflect_coord(0.25 * m, f64::NEG_INFINITY, -0.5 * m),
+            -0.75 * m
+        ));
         // An infinite `x` stops on the wall it crossed, whatever the width.
         assert_eq!(reflect_coord(f64::INFINITY, 1e308, 1.7e308), 1.7e308);
         assert_eq!(reflect_coord(f64::INFINITY, -1.0, 0.3), 0.3);
