@@ -99,6 +99,8 @@ out = global_optimize(rastrigin, low, high, budget=4000, seed=0)
 print(out["best_val"], out["best_pos"])
 ```
 
+Pass `x0=` (a point inside the box) to start from known parameters; it is the first evaluation and the first incumbent.
+
 Runnable copies:
 
 - Script: [`examples/quickstart_portfolio.py`](examples/quickstart_portfolio.py)

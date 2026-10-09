@@ -695,6 +695,7 @@ def global_optimize(
     grad_fn=None,
     noise_sigma=None,
     policy: str = "auto",
+    x0=None,
 ):
     """Thompson-allocated portfolio global optimizer.
 
@@ -731,6 +732,11 @@ def global_optimize(
         (out of regime).
       policy: ``"auto"`` (default; feature-based regime routing) or
         ``"legacy"`` (flat arm order, uninformative priors; A/B only).
+      x0: optional start point inside ``[low, high]``. It is the first
+        evaluation and the first incumbent, so the CMA-ES mean, the
+        finite-difference descent, and the other incumbent-anchored arms
+        begin there. A wrong length, a non-finite entry, or a point
+        outside the box raises ``ValueError``.
 
     Returns a dict with ``best_pos``, ``best_val``, ``n_evals``,
     ``n_grads``, ``arm_pulls``, and ``arm_successes``.
@@ -744,6 +750,7 @@ def global_optimize(
         grad_fn,
         noise_sigma if noise_sigma is None else float(noise_sigma),
         str(policy),
+        _portfolio_start(x0),
     )
     out["best_pos"] = np.asarray(out["best_pos"], dtype=np.float64)
     return out
@@ -754,16 +761,32 @@ def global_optimize_objective(
     budget: int,
     seed: int = 0,
     use_gradient: bool = True,
+    noise_sigma=None,
+    x0=None,
 ):
-    """Portfolio global optimizer over a native ``PyObjective`` handle."""
+    """Portfolio global optimizer over a native ``PyObjective`` handle.
+
+    ``noise_sigma`` and ``x0`` behave as in :func:`global_optimize`.
+    """
     out = _core_global_optimize_objective(
         objective,
         int(budget),
         int(seed),
         bool(use_gradient),
+        noise_sigma if noise_sigma is None else float(noise_sigma),
+        _portfolio_start(x0),
     )
     out["best_pos"] = np.asarray(out["best_pos"], dtype=np.float64)
     return out
+
+
+def _portfolio_start(x0):
+    if x0 is None:
+        return None
+    start = np.asarray(x0, dtype=np.float64)
+    if start.ndim != 1:
+        raise ValueError(f"x0 must be one-dimensional, got shape {start.shape}")
+    return np.ascontiguousarray(start)
 
 
 __all__ = [

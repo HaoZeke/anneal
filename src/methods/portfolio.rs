@@ -592,6 +592,22 @@ impl<O: Objective<f64>> Objective<f64> for BudgetedObjective<'_, O> {
     }
 }
 
+impl<O: Objective<f64>> BudgetedObjective<'_, O> {
+    /// Charges and evaluates a point already inside the box exactly as
+    /// given. Reflection computes `lo + (x - lo)`, which can move an in-box
+    /// coordinate by an ulp, and a caller's start must be evaluated as is.
+    fn eval_in_box(&self, x: ArrayView1<f64>) -> f64 {
+        debug_assert!(self.inner.bounds().contains(x));
+        if !self.ledger.try_charge(OBJECTIVE_WORK_UNIT) {
+            return f64::INFINITY;
+        }
+        self.ledger.n_evals.fetch_add(1, Ordering::Relaxed);
+        let value = self.inner.eval(x);
+        self.ledger.record(x, value, self.inner.bounds());
+        value
+    }
+}
+
 /// Objective proxy that evaluates the original objective while advertising
 /// a posterior local box to dynamics that clip through `Objective::bounds`.
 struct LocalBoxBudgetedObjective<'a, O: Objective<f64>> {
@@ -3270,6 +3286,34 @@ where
     O: Objective<f64>,
     G: Gradient<f64>,
 {
+    portfolio_optimize_with_start(obj, grad, budget, seed, noise_sigma, policy, None)
+}
+
+/// Runs the portfolio driver from a caller-supplied start point.
+///
+/// The start is the first charged evaluation and, when its value is finite,
+/// the first incumbent, so the arms that begin from the incumbent (the
+/// CMA-ES mean, the finite-difference descent, hops, trust-region polls)
+/// begin there. Without a start the driver behaves as
+/// [`portfolio_optimize_with_policy`].
+///
+/// # Panics
+///
+/// Panics when the start's length differs from the dimension, or when a
+/// coordinate is non-finite or outside `[low, high]`.
+pub fn portfolio_optimize_with_start<O, G>(
+    obj: &O,
+    grad: Option<&G>,
+    budget: usize,
+    seed: u64,
+    noise_sigma: Option<f64>,
+    policy: PortfolioPolicy,
+    start: Option<ArrayView1<f64>>,
+) -> PortfolioResult
+where
+    O: Objective<f64>,
+    G: Gradient<f64>,
+{
     assert!(budget > 0, "budget must be positive");
     if let Some(sigma) = noise_sigma {
         assert!(
@@ -3289,6 +3333,20 @@ where
             bounds.low[i] < bounds.high[i],
             "low[{i}] must be strictly less than high[{i}]"
         );
+    }
+    if let Some(x0) = start {
+        assert_eq!(
+            x0.len(),
+            dim,
+            "start length must match the objective dimension"
+        );
+        for (i, &value) in x0.iter().enumerate() {
+            assert!(value.is_finite(), "start must be finite at dimension {i}");
+            assert!(
+                bounds.low[i] <= value && value <= bounds.high[i],
+                "start[{i}] must lie within [low[{i}], high[{i}]]"
+            );
+        }
     }
 
     // GJQ-style regime refusal on the shipped accept path: declared noise
@@ -3320,6 +3378,9 @@ where
         inner: g,
         ledger: &ledger,
     });
+    if let Some(x0) = start {
+        budgeted_obj.eval_in_box(x0);
+    }
 
     // Probe-based demotion for mid-width MultimodalGlobal boxes. Width alone
     // cannot separate a Styblinski-class multi-basin box from a least-squares
@@ -5199,5 +5260,112 @@ mod tests {
     #[test]
     fn qn_arm_replays_by_seed() {
         assert_eq!(replay(ArmKind::Qn, 5), replay(ArmKind::Qn, 5));
+    }
+
+    #[test]
+    fn start_at_the_minimum_stays_the_incumbent() {
+        for (low, high) in [(-2.0, 2.0), (-5.12, 5.12)] {
+            let obj = Traced::new(low, high, 6, rosenbrock);
+            let start = Array1::ones(6);
+            let result = portfolio_optimize_with_start::<_, ShiftQuadratic>(
+                &obj,
+                None,
+                300,
+                2,
+                None,
+                PortfolioPolicy::Auto,
+                Some(start.view()),
+            );
+            assert_eq!(result.best_val, 0.0);
+            assert_eq!(result.best_pos, start.to_vec());
+            assert_eq!(obj.points()[0], start);
+        }
+    }
+
+    #[test]
+    fn start_is_evaluated_exactly_as_given() {
+        let start = Array1::from_vec(vec![-3.84, -1.28, 1.28, 3.84]);
+        assert!(
+            start
+                .iter()
+                .any(|&v| crate::movekernel::reflect_coord(v, -5.12, 5.12) != v),
+            "the start must exercise reflection rounding"
+        );
+        let obj = Traced::new(-5.12, 5.12, 4, |x| x.dot(&x));
+        portfolio_optimize_with_start::<_, ShiftQuadratic>(
+            &obj,
+            None,
+            200,
+            0,
+            None,
+            PortfolioPolicy::Auto,
+            Some(start.view()),
+        );
+        assert_eq!(obj.points()[0], start);
+    }
+
+    #[test]
+    fn start_is_the_first_evaluation_with_gradients() {
+        let obj = ShiftQuadratic::new();
+        let start = Array1::from_vec(vec![1.5, 1.5]);
+        let result = portfolio_optimize_with_start(
+            &obj,
+            Some(&obj),
+            200,
+            4,
+            None,
+            PortfolioPolicy::Auto,
+            Some(start.view()),
+        );
+        assert!(result.best_val <= Objective::eval(&obj, start.view()));
+        assert!(result.n_evals + result.n_grads <= 200);
+    }
+
+    #[test]
+    #[should_panic(expected = "start length must match")]
+    fn start_of_the_wrong_length_panics() {
+        let obj = ShiftQuadratic::new();
+        let start = Array1::zeros(3);
+        portfolio_optimize_with_start(
+            &obj,
+            Some(&obj),
+            50,
+            0,
+            None,
+            PortfolioPolicy::Auto,
+            Some(start.view()),
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "start must be finite")]
+    fn non_finite_start_panics() {
+        let obj = ShiftQuadratic::new();
+        let start = Array1::from_vec(vec![0.0, f64::NAN]);
+        portfolio_optimize_with_start(
+            &obj,
+            Some(&obj),
+            50,
+            0,
+            None,
+            PortfolioPolicy::Auto,
+            Some(start.view()),
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "start[0] must lie within")]
+    fn start_outside_the_box_panics() {
+        let obj = ShiftQuadratic::new();
+        let start = Array1::from_vec(vec![2.5, 0.0]);
+        portfolio_optimize_with_start(
+            &obj,
+            Some(&obj),
+            50,
+            0,
+            None,
+            PortfolioPolicy::Auto,
+            Some(start.view()),
+        );
     }
 }
