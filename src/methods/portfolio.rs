@@ -3080,6 +3080,28 @@ where
     O: Objective<f64>,
     G: Gradient<f64>,
 {
+    portfolio_optimize_from(obj, grad, budget, seed, noise_sigma, policy, None)
+}
+
+/// [`portfolio_optimize_with_policy`] from a caller-supplied start.
+///
+/// `x0` is the first charged evaluation and the first incumbent, so the arms
+/// that start from the incumbent (hop, shift, trust-region poll, GLE, HMC,
+/// population and reduced-space arms) start from it until a lower point is
+/// found. It costs one work unit of `budget`.
+pub fn portfolio_optimize_from<O, G>(
+    obj: &O,
+    grad: Option<&G>,
+    budget: usize,
+    seed: u64,
+    noise_sigma: Option<f64>,
+    policy: PortfolioPolicy,
+    x0: Option<ArrayView1<f64>>,
+) -> PortfolioResult
+where
+    O: Objective<f64>,
+    G: Gradient<f64>,
+{
     assert!(budget > 0, "budget must be positive");
     if let Some(sigma) = noise_sigma {
         assert!(
@@ -3130,6 +3152,11 @@ where
         inner: g,
         ledger: &ledger,
     });
+    if let Some(x0) = x0 {
+        assert_eq!(x0.len(), dim, "x0 must have the objective's dimension");
+        assert!(bounds.contains(x0), "x0 must lie inside the bounds");
+        let _ = budgeted_obj.eval(x0);
+    }
 
     // Probe-based demotion for mid-width MultimodalGlobal boxes. Width alone
     // cannot separate a Styblinski-class multi-basin box from a least-squares

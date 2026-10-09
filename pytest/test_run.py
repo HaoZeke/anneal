@@ -16,6 +16,7 @@ from anneal import (
     gle_langevin_objective,
     gle_langevin_preconditioned,
     gle_langevin_preconditioned_objective,
+    global_optimize,
     low_discrepancy_points,
     pilot_draws_qmc,
     polish,
@@ -665,3 +666,20 @@ def test_run_refuses_a_bad_x0(x0, message):
 def test_run_refuses_invalid_preset_parameters(preset):
     with pytest.raises(ValueError):
         run(styb_tang_2d, LOW, HIGH, preset, n_epochs=1, steps_per_epoch=1)
+
+
+def test_global_optimize_starts_from_x0_and_stays_in_the_box():
+    low, high = np.full(39, -3.0), np.full(39, 3.0)
+    x0 = np.random.default_rng(1).uniform(-1.5, 1.5, 39)
+    objective = Recorder(lj_cluster_energy)
+    result = global_optimize(objective, low, high, budget=300, seed=0, x0=x0)
+    points = np.array(objective.points)
+    assert points[0] == pytest.approx(x0)
+    assert result["n_evals"] == len(points) <= 300
+    assert np.all(points >= low) and np.all(points <= high)
+    assert result["best_val"] <= lj_cluster_energy(x0)
+
+
+def test_global_optimize_refuses_x0_outside_the_box():
+    with pytest.raises(ValueError, match="outside"):
+        global_optimize(styb_tang_2d, LOW, HIGH, budget=50, x0=np.array([0.0, 7.0]))

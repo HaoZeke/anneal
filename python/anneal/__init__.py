@@ -692,6 +692,7 @@ def global_optimize(
     grad_fn=None,
     noise_sigma=None,
     policy: str = "auto",
+    x0=None,
 ):
     """Thompson-allocated portfolio global optimizer.
 
@@ -728,9 +729,13 @@ def global_optimize(
         (out of regime).
       policy: ``"auto"`` (default; feature-based regime routing) or
         ``"legacy"`` (flat arm order, uninformative priors; A/B only).
+      x0: optional starting point inside the box. It is the first charged
+        evaluation and the first incumbent, so the arms that start from the
+        incumbent start from it until a lower point is found.
 
-    Returns a dict with ``best_pos``, ``best_val``, ``n_evals``,
-    ``n_grads``, ``arm_pulls``, and ``arm_successes``.
+    Every evaluation lies inside ``[low, high]``. Returns a dict with
+    ``best_pos``, ``best_val``, ``n_evals``, ``n_grads``, ``arm_pulls``, and
+    ``arm_successes``.
     """
     out = _core_global_optimize(
         obj_fn,
@@ -741,6 +746,7 @@ def global_optimize(
         grad_fn,
         noise_sigma if noise_sigma is None else float(noise_sigma),
         str(policy),
+        None if x0 is None else np.asarray(x0, dtype=np.float64).reshape(-1),
     )
     out["best_pos"] = np.asarray(out["best_pos"], dtype=np.float64)
     return out
@@ -751,6 +757,7 @@ def global_optimize_objective(
     budget: int,
     seed: int = 0,
     use_gradient: bool = True,
+    x0=None,
 ):
     """Portfolio global optimizer over a native ``PyObjective`` handle."""
     out = _core_global_optimize_objective(
@@ -758,6 +765,8 @@ def global_optimize_objective(
         int(budget),
         int(seed),
         bool(use_gradient),
+        None,
+        None if x0 is None else np.asarray(x0, dtype=np.float64).reshape(-1),
     )
     out["best_pos"] = np.asarray(out["best_pos"], dtype=np.float64)
     return out
