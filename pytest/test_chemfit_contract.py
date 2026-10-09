@@ -1,4 +1,4 @@
-"""What the ChemFit bridges promise about leaves, the start and the budget.
+"""What the ChemFit bridges promise about leaves, bounds, the start and the budget.
 
 The doubles speak ChemFit 3.1's ``ask`` / ``tell`` unless the protocol is
 what a test is about; ``test_chemfit_protocol.py`` covers both protocols.
@@ -9,6 +9,12 @@ import pytest
 
 anneal = pytest.importorskip("anneal")
 
+from anneal.chemfit import (  # noqa: E402
+    ChemFitVector,
+    chemfit_box,
+    fit_anneal,
+    resolve_bounds,
+)
 from chemfit_doubles import (  # noqa: E402
     DRIVERS,
     ENTRIES,
@@ -94,6 +100,91 @@ def test_scalar_leaves_and_zero_d_arrays_come_back_as_their_own_type(entry, prot
             leaf = params[key]
             assert isinstance(leaf, np.ndarray)
             assert leaf.shape == () and leaf.dtype == dtype
+
+
+_SHAPE = (4, 3)
+_LOWER = np.linspace(-2.0, -0.5, 12).reshape(_SHAPE)
+_UPPER = _LOWER + np.linspace(0.25, 2.0, 12).reshape(_SHAPE)
+BOUND_FORMS = {
+    "numpy pair": (np.array([-1.0, 1.5]), np.full(_SHAPE, -1.0), np.full(_SHAPE, 1.5)),
+    "per-element tuple": ((_LOWER, _UPPER), _LOWER, _UPPER),
+    "per-element flat list": ([_LOWER.ravel(), _UPPER.ravel()], _LOWER, _UPPER),
+    "stacked array": (np.stack([_LOWER, _UPPER]), _LOWER, _UPPER),
+    "per-column rows": (
+        (_LOWER[0], _UPPER[0]),
+        np.broadcast_to(_LOWER[0], _SHAPE),
+        np.broadcast_to(_UPPER[0], _SHAPE),
+    ),
+}
+
+
+@pytest.mark.parametrize("form", list(BOUND_FORMS))
+@pytest.mark.parametrize("entry", ENTRIES)
+def test_numpy_bounds_bind_every_element(entry, form):
+    bound, lower, upper = BOUND_FORMS[form]
+    fitter = ReleasedFitter(
+        {"positions": (lower + upper) / 2, "eps": 0.5},
+        {"positions": bound, "eps": np.array([0.25, 0.75])},
+        loss=_push_up,
+    )
+    out = drive(entry, fitter, 300)
+    for params in [*fitter.evaluated, out]:
+        positions = np.asarray(params["positions"])
+        assert positions.shape == _SHAPE
+        assert np.all(positions >= lower) and np.all(positions <= upper)
+        assert 0.25 <= params["eps"] <= 0.75
+    best = np.asarray(out["positions"])
+    assert np.all(best >= (lower + upper) / 2)
+
+
+def test_the_public_box_helpers_read_numpy_bounds():
+    initial = {"positions": np.zeros(_SHAPE), "eps": 0.5}
+    fitter = ReleasedFitter(initial, {"positions": (_LOWER, _UPPER), "eps": np.array([0.25, 0.75])})
+    low, high = chemfit_box(fitter, ChemFitVector(initial))
+    assert np.array_equal(low, np.append(_LOWER.ravel(), 0.25))
+    assert np.array_equal(high, np.append(_UPPER.ravel(), 0.75))
+    low, high = resolve_bounds(initial, fitter_bounds=fitter.bounds)
+    assert np.array_equal(low, np.append(_LOWER.ravel(), 0.25))
+    assert np.array_equal(high, np.append(_UPPER.ravel(), 0.75))
+
+
+@pytest.mark.parametrize(
+    "bound",
+    [(2.0, 1.0), (-1e308, 1e308), (-8e307, 8e307), (float("nan"), 1.0), (-float("inf"), 1.0)],
+    ids=["inverted", "width overflows", "twice the width overflows", "nan", "infinite"],
+)
+@pytest.mark.parametrize("entry", ENTRIES)
+def test_a_bad_bound_is_refused_naming_its_key(entry, bound):
+    fitter = ReleasedFitter(
+        {"cell": {"a": 0.5}, "eps": 0.5},
+        {"cell": {"a": bound}, "eps": (0.0, 1.0)},
+    )
+    with pytest.raises(ValueError, match=r"cell\.a"):
+        drive(entry, fitter, 50)
+    assert fitter.calls == []
+
+
+@pytest.mark.parametrize("entry", ENTRIES)
+def test_an_inverted_element_bound_names_the_element(entry):
+    lower = np.full((2, 3), -1.0)
+    lower[1, 2] = 2.0
+    fitter = ReleasedFitter(
+        {"positions": np.zeros((2, 3))},
+        {"positions": (lower, np.full((2, 3), 1.0))},
+    )
+    with pytest.raises(ValueError, match=r"positions\[1, ?2\]"):
+        drive(entry, fitter, 50)
+    assert fitter.calls == []
+
+
+def test_explicit_fit_anneal_bounds_name_the_coordinate():
+    fitter = _fitter()
+    low = np.full(7, -1.0)
+    high = np.full(7, 1.0)
+    low[6] = 2.0
+    with pytest.raises(ValueError, match="eps"):
+        fit_anneal(fitter, 50, low=low, high=high)
+    assert fitter.calls == []
 
 
 _LONGDOUBLE_IS_WIDER = np.finfo(np.longdouble).nmant > np.finfo(np.float64).nmant

@@ -305,76 +305,81 @@ class _Layout:
 # ---------------------------------------------------------------------------
 
 
-def _lookup_path(params: Any, path: tuple):
-    node = params
-    for key in path:
-        if not isinstance(node, dict) or key not in node:
-            return None
-        node = node[key]
-    return node
+def _bound_side(leaf: _Leaf, value: Any, side: str) -> np.ndarray | None:
+    """One side of a leaf's bounds, flat with the leaf's size; ``None`` if unset.
 
-
-def _bound_pair(entry: Any, size: int, fallback: tuple[np.ndarray, np.ndarray]):
-    """Normalize one bounds leaf to ``(low, high)`` arrays of length ``size``."""
-    if entry is None:
-        return fallback
+    A side may be a scalar, an array of the leaf's size, or an array that
+    broadcasts to the leaf's shape.
+    """
+    if value is None:
+        return None
+    arr = _real_array(value, f"the {side} bound of {leaf.name}")
+    if arr.size == leaf.size:
+        return arr.reshape(-1)
     try:
-        low_raw, high_raw = entry
-    except (TypeError, ValueError) as e:
-        raise ValueError(f"bounds entry {entry!r} must be a (lower, upper) pair") from e
-    low_fb, high_fb = fallback
-    low = (
-        np.broadcast_to(np.asarray(low_raw, dtype=np.float64), (size,)).copy()
-        if low_raw is not None
-        else low_fb
-    )
-    high = (
-        np.broadcast_to(np.asarray(high_raw, dtype=np.float64), (size,)).copy()
-        if high_raw is not None
-        else high_fb
-    )
+        return np.broadcast_to(arr, leaf.shape).reshape(-1)
+    except ValueError:
+        raise ValueError(
+            f"the {side} bound of {leaf.name} has shape {arr.shape}, which does "
+            f"not fit the parameter's shape {leaf.shape}"
+        ) from None
+
+
+def _bound_pair(leaf: _Leaf, entry: Any):
+    """``(lower, upper)`` from one bounds entry; ``None`` marks a missing side."""
+    if entry is None or entry is _MISSING:
+        return None, None
+    if isinstance(entry, np.ndarray) and entry.ndim >= 1 and entry.shape[0] == 2:
+        lower, upper = entry[0], entry[1]
+    elif isinstance(entry, (tuple, list)) and len(entry) == 2:
+        lower, upper = entry
+    else:
+        raise ValueError(
+            f"the bounds of {leaf.name} must be a (lower, upper) pair, got {entry!r}"
+        )
+    return _bound_side(leaf, lower, "lower"), _bound_side(leaf, upper, "upper")
+
+
+def _covers(layout: _Layout, bounds: Any) -> bool:
+    """Whether a bounds mapping has an entry for every leaf."""
+    if not isinstance(bounds, Mapping):
+        return False
+    for leaf in layout.leaves:
+        entry = _lookup(bounds, leaf.path)
+        if entry is _MISSING or entry is None:
+            return False
+    return True
+
+
+def _mapped_box(layout: _Layout, bounds: Any, start, span):
+    """The raw box from a bounds mapping that mirrors the parameters.
+
+    A missing entry or side falls back to ``start -/+ span``; when ``span``
+    is ``None`` every side must be given.
+    """
+    if bounds is not None and not isinstance(bounds, Mapping):
+        raise TypeError(
+            "bounds must be a mapping that mirrors the parameters, got "
+            f"{type(bounds).__name__}"
+        )
+    if span is None:
+        low = np.full(layout.size, np.nan)
+        high = np.full(layout.size, np.nan)
+    else:
+        with np.errstate(over="ignore"):
+            low, high = start - span, start + span
+    for leaf in layout.leaves:
+        entry = _MISSING if bounds is None else _lookup(bounds, leaf.path)
+        lower, upper = _bound_pair(leaf, entry)
+        for side, values, target in (("lower", lower, low), ("upper", upper, high)):
+            if values is not None:
+                target[leaf.span] = values
+            elif span is None:
+                raise ValueError(
+                    f"{leaf.name} has no {side} bound: pass low and high, or bounds "
+                    "that mirror initial_params; the chain will not invent a box"
+                )
     return low, high
-
-
-def _resolve_bounds(
-    fitter_bounds: Any,
-    x0: np.ndarray,
-    spec,
-    bound_span: float,
-    low: np.ndarray | None,
-    high: np.ndarray | None,
-):
-    """Build flat ``(low, high)`` vectors for the flattened parameters."""
-    dim = x0.size
-    if (low is None) != (high is None):
-        raise ValueError("low and high must be given together")
-    if low is not None:
-        low_arr = np.asarray(low, dtype=np.float64).ravel()
-        high_arr = np.asarray(high, dtype=np.float64).ravel()
-        if low_arr.size != dim or high_arr.size != dim:
-            raise ValueError(
-                f"low/high have lengths {low_arr.size}/{high_arr.size} "
-                f"but the flattened parameters have dimension {dim}"
-            )
-        return low_arr, high_arr
-    if not np.isfinite(bound_span) or bound_span <= 0:
-        raise ValueError("bound_span must be positive and finite")
-    lows: list[np.ndarray] = []
-    highs: list[np.ndarray] = []
-    offset = 0
-    for path, shape in spec:
-        size = int(np.prod(shape)) if shape != () else 1
-        center = x0[offset : offset + size]
-        fallback = (center - bound_span, center + bound_span)
-        entry = _lookup_path(fitter_bounds, path) if isinstance(fitter_bounds, dict) else None
-        try:
-            leaf_low, leaf_high = _bound_pair(entry, size, fallback)
-        except ValueError as e:
-            raise ValueError(f"bounds for {_path_str(path)}: {e}") from e
-        lows.append(leaf_low)
-        highs.append(leaf_high)
-        offset += size
-    return np.concatenate(lows), np.concatenate(highs)
 
 
 def _inward(low: np.ndarray, high: np.ndarray, dtype: np.dtype):
@@ -387,25 +392,43 @@ def _inward(low: np.ndarray, high: np.ndarray, dtype: np.dtype):
     return up.astype(np.float64), down.astype(np.float64)
 
 
-def _round_inward(layout: _Layout, low, high):
-    """The box with the bounds of each float32 or float16 leaf rounded inward.
+def _settle(layout: _Layout, low, high):
+    """Check a raw box coordinate by coordinate and round it to each leaf's dtype.
 
-    A coordinate left with no value of its leaf's dtype is a ValueError
-    naming it.
+    Errors name the coordinate. Coordinates whose lower and upper bounds are
+    equal stay in the result.
     """
     low = np.array(low, dtype=np.float64)
     high = np.array(high, dtype=np.float64)
+
+    def refuse(i: int, problem: str):
+        raise ValueError(
+            f"the bounds of {layout.name(i)} {problem}: "
+            f"lower={float(low[i])!r}, upper={float(high[i])!r}"
+        )
+
+    bad = _first(~(np.isfinite(low) & np.isfinite(high)))
+    if bad is not None:
+        refuse(bad, "must be finite")
+    bad = _first(low > high)
+    if bad is not None:
+        refuse(bad, "are empty, the lower above the upper")
+    with np.errstate(over="ignore"):
+        bad = _first(~np.isfinite(2.0 * (high - low)))
+    if bad is not None:
+        refuse(bad, "are too wide for a float")
+    total = 0.0
+    for width in (high - low).tolist():
+        total += width
+    if not math.isfinite(total):
+        raise ValueError("the box is too wide: the sum of its widths is not finite")
     for leaf in layout.leaves:
         if leaf.dtype == np.float64:
             continue
         up, down = _inward(low[leaf.span], high[leaf.span], leaf.dtype)
         bad = _first(up > down)
         if bad is not None:
-            i = leaf.offset + bad
-            raise ValueError(
-                f"the bounds of {layout.name(i)} hold no {leaf.dtype.name} value: "
-                f"lower={float(low[i])!r}, upper={float(high[i])!r}"
-            )
+            refuse(leaf.offset + bad, f"hold no {leaf.dtype.name} value")
         low[leaf.span], high[leaf.span] = up, down
     return low, high
 
@@ -634,8 +657,9 @@ def fit_anneal(
         outside the box is moved onto it.
       low, high: explicit flat bound vectors. When omitted, bounds come
         from the fitter's ``bounds`` dict (``(lower, upper)`` pairs
-        mirroring ``initial_params``); entries without bounds fall back
-        to ``x0 +/- bound_span``.
+        mirroring ``initial_params``; each side a scalar, an array of the
+        leaf's shape, or ``None``); entries without bounds fall back to
+        ``x0 +/- bound_span``.
       bound_span: half-width of the fallback box around unbounded entries.
       steps_per_epoch: classical-driver epoch width; the chain runs
         ``max(1, budget // steps_per_epoch)`` epochs and stops when the
@@ -662,7 +686,6 @@ def fit_anneal(
     initial_parameters = getattr(fitter, "initial_parameters", None)
     if not isinstance(initial_parameters, dict) or not initial_parameters:
         raise ValueError("fitter.initial_parameters must be a non-empty dict")
-    fitter_bounds = getattr(fitter, "bounds", None) or {}
 
     layout = _Layout(initial_parameters)
     start_vector, spec = flatten_parameters(initial_parameters)
@@ -681,12 +704,23 @@ def fit_anneal(
             if not np.all(np.isfinite(start_vector)):
                 raise ValueError("x0 must contain only finite values")
 
-    low_vec, high_vec = _resolve_bounds(
-        fitter_bounds, start_vector, spec, float(bound_span), low, high
-    )
+    if (low is None) != (high is None):
+        raise ValueError("low and high must be given together")
+    if low is None:
+        span = float(bound_span)
+        if not (math.isfinite(span) and span > 0.0):
+            raise ValueError("bound_span must be positive and finite")
+        box = _mapped_box(layout, getattr(fitter, "bounds", None), start_vector, span)
+    else:
+        box = (_real_array(low, "low").ravel(), _real_array(high, "high").ravel())
+        if box[0].size != layout.size or box[1].size != layout.size:
+            raise ValueError(
+                f"low/high have lengths {box[0].size}/{box[1].size} "
+                f"but the flattened parameters have dimension {layout.size}"
+            )
     # run and global_optimize refuse a start outside the box. A caller vector
     # such as zeros is pulled onto the box before the first evaluation.
-    problem = _Problem(layout, *_round_inward(layout, low_vec, high_vec), start_vector)
+    problem = _Problem(layout, *_settle(layout, *box), start_vector)
 
     # The fitter owns bookkeeping; every evaluation is one optimizer step.
     _init(fitter)
@@ -699,23 +733,6 @@ def fit_anneal(
 # ---------------------------------------------------------------------------
 # fit_chemfit and its vector view.
 # ---------------------------------------------------------------------------
-
-try:  # ChemFit flattens nested dicts with dotted keys; mirror that order.
-    from pydictnest import flatten_dict as _pydict_flatten
-except ImportError:  # pragma: no cover - minimal fallback when chemfit is absent
-    _pydict_flatten = None
-
-
-def _flatten_mapping(mapping: dict[str, Any], prefix: str = "") -> dict[str, Any]:
-    """Flatten nested dicts to dotted keys, keeping array leaves intact."""
-    flat: dict[str, Any] = {}
-    for key, value in mapping.items():
-        name = f"{prefix}.{key}" if prefix else str(key)
-        if isinstance(value, dict):
-            flat.update(_flatten_mapping(value, name))
-        else:
-            flat[name] = value
-    return flat
 
 
 class ChemFitVector:
@@ -755,23 +772,6 @@ class ChemFitVector:
         return self._layout.params(vector)
 
 
-def _span_bound_pair(leaf: Any) -> tuple[Any, Any]:
-    """Normalize one bounds leaf to a ``(lower, upper)`` pair of scalars."""
-    if leaf is None:
-        return (None, None)
-    if isinstance(leaf, (list, tuple)) and len(leaf) == 2:
-        try:
-            lower = None if leaf[0] is None else float(leaf[0])
-            upper = None if leaf[1] is None else float(leaf[1])
-            return (lower, upper)
-        except (TypeError, ValueError):
-            pass
-    arr = np.asarray(leaf)
-    if arr.shape == (2,) and np.issubdtype(arr.dtype, np.number):
-        return (float(arr[0]), float(arr[1]))
-    return (None, None)
-
-
 def chemfit_box(
     fitter: Any,
     vector: ChemFitVector,
@@ -780,34 +780,26 @@ def chemfit_box(
     """Build finite ``(low, high)`` box vectors for a ChemFit fitter.
 
     Bounds mirror ``fitter.bounds`` (same structure as the initial
-    parameters). A parameter without bounds gets
-    ``init +/- default_span``; scalar ``(lower, upper)`` pairs apply to
-    every element of an array leaf. The bounds of a float32 or float16 leaf
-    are rounded inward to that dtype.
+    parameters); each side is a scalar, an array of the leaf's shape, or
+    ``None``, and a NumPy array of two rows is a pair too. A parameter
+    without bounds gets ``init +/- default_span``. The bounds of a float32 or
+    float16 leaf are rounded inward to that dtype. A bound that is not
+    finite, is inverted, overflows, or has no width is a ValueError naming
+    the parameter: the drivers need ``lower < upper``.
     """
-    raw_bounds: dict[str, Any] = getattr(fitter, "bounds", None) or {}
-    flat_bounds = (
-        dict(_pydict_flatten(raw_bounds))
-        if _pydict_flatten is not None
-        else _flatten_mapping(raw_bounds)
+    layout = vector._layout
+    span = float(default_span)
+    low, high = _settle(
+        layout, *_mapped_box(layout, getattr(fitter, "bounds", None), vector.x0, span)
     )
-    low = np.empty(vector.dim, dtype=np.float64)
-    high = np.empty(vector.dim, dtype=np.float64)
-    for i, key in enumerate(vector.keys):
-        base = vector._base_key(key)
-        lower, upper = _span_bound_pair(flat_bounds.get(base))
-        center = float(vector.x0[i])
-        if lower is None:
-            lower = center - float(default_span)
-        if upper is None:
-            upper = center + float(default_span)
-        if not lower < upper:
-            raise ValueError(
-                f"ChemFit bound for {base!r} is empty: lower={lower} upper={upper}"
-            )
-        low[i] = lower
-        high[i] = upper
-    return _round_inward(vector._layout, low, high)
+    fixed = _first(low == high)
+    if fixed is not None:
+        raise ValueError(
+            f"ChemFit bound for {layout.name(fixed)!r} is empty: "
+            f"lower={float(low[fixed])} upper={float(high[fixed])}; "
+            "a driver box needs lower < upper"
+        )
+    return low, high
 
 
 def fit_chemfit(
@@ -953,41 +945,53 @@ def unflatten_params(
     return out
 
 
-def _as_float_vector(value: Any, size: int) -> np.ndarray:
-    arr = np.asarray(value, dtype=np.float64).reshape(-1)
+def _flat_bound(value: Any, size: int) -> np.ndarray:
+    """An explicit bound vector; a single value is broadcast."""
+    arr = _real_array(value, "bound").reshape(-1)
     if arr.size == 1 and size != 1:
-        arr = np.full(size, float(arr[0]), dtype=np.float64)
+        return np.full(size, arr[0])
     if arr.size != size:
         raise ValueError(f"bound length {arr.size} does not match parameter length {size}")
     return arr
 
 
-def bounds_from_fitter(initial: dict[str, Any], fitter_bounds: Any, size: int) -> tuple[np.ndarray, np.ndarray] | None:
-    """Read a ChemFit bounds mapping that mirrors ``initial_params``."""
-    if not isinstance(fitter_bounds, dict) or not fitter_bounds:
+def _benchmark_box(layout: _Layout, low, high, context_bounds, fitter_bounds):
+    """The checked box of :func:`run_benchmark` and :func:`resolve_bounds`."""
+    if low is not None or high is not None:
+        if low is None or high is None:
+            raise ValueError("low and high must be passed together")
+        return _settle(layout, _flat_bound(low, layout.size), _flat_bound(high, layout.size))
+    if (
+        isinstance(context_bounds, Mapping)
+        and "low" in context_bounds
+        and "high" in context_bounds
+    ):
+        return _settle(
+            layout,
+            _flat_bound(context_bounds["low"], layout.size),
+            _flat_bound(context_bounds["high"], layout.size),
+        )
+    for bounds in (context_bounds, fitter_bounds):
+        if _covers(layout, bounds):
+            return _settle(layout, *_mapped_box(layout, bounds, None, None))
+    raise ValueError(
+        "pass low and high, or bounds that mirror initial_params; "
+        "the chain will not invent a box"
+    )
+
+
+def bounds_from_fitter(
+    initial: dict[str, Any], fitter_bounds: Any, size: int
+) -> tuple[np.ndarray, np.ndarray] | None:
+    """Read a ChemFit bounds mapping that mirrors ``initial_params``.
+
+    ``None`` when the mapping does not bound every leaf or the parameters do
+    not flatten to ``size``.
+    """
+    layout = _Layout(initial)
+    if layout.size != size or not _covers(layout, fitter_bounds):
         return None
-    flat_init, spec = flatten_params(initial)
-    if flat_init.size != size:
-        return None
-    low_chunks: list[np.ndarray] = []
-    high_chunks: list[np.ndarray] = []
-    for path, shape in spec:
-        cursor: Any = fitter_bounds
-        for key in path:
-            if not isinstance(cursor, dict) or key not in cursor:
-                return None
-            cursor = cursor[key]
-        if isinstance(cursor, dict):
-            return None
-        pair = cursor
-        if not isinstance(pair, (tuple, list)) or len(pair) != 2:
-            return None
-        leaf = 1
-        for dim in shape:
-            leaf *= int(dim)
-        low_chunks.append(_as_float_vector(pair[0], leaf))
-        high_chunks.append(_as_float_vector(pair[1], leaf))
-    return np.concatenate(low_chunks), np.concatenate(high_chunks)
+    return _settle(layout, *_mapped_box(layout, fitter_bounds, None, None))
 
 
 def resolve_bounds(
@@ -1002,28 +1006,14 @@ def resolve_bounds(
 
     Explicit ``low`` and ``high`` win. A length-1 bound is broadcast.
     Otherwise the context or the fitter supplies a mapping that mirrors
-    ``initial``.
+    ``initial``; each side of an entry is a scalar or an array of the leaf's
+    shape, and a NumPy array of two rows is a pair too. Bounds are checked
+    coordinate by coordinate, and errors name the parameter.
     """
-    flat, _spec = flatten_params(initial)
-    size = int(flat.size)
-    if low is not None or high is not None:
-        if low is None or high is None:
-            raise ValueError("low and high must be passed together")
-        return _as_float_vector(low, size), _as_float_vector(high, size)
-    if isinstance(context_bounds, dict) and "low" in context_bounds and "high" in context_bounds:
-        return (
-            _as_float_vector(context_bounds["low"], size),
-            _as_float_vector(context_bounds["high"], size),
-        )
-    mirrored = bounds_from_fitter(initial, context_bounds, size)
-    if mirrored is None:
-        mirrored = bounds_from_fitter(initial, fitter_bounds, size)
-    if mirrored is None:
-        raise ValueError(
-            "pass low and high, or bounds that mirror initial_params; "
-            "the chain will not invent a box"
-        )
-    return mirrored
+    layout = _Layout(initial)
+    if layout.size == 0:
+        raise ValueError("initial_params is empty")
+    return _benchmark_box(layout, low, high, context_bounds, fitter_bounds)
 
 
 def run_benchmark(
@@ -1065,18 +1055,16 @@ def run_benchmark(
     if layout.size == 0:
         raise ValueError("initial_params is empty")
     start = layout.vector(initial, "parameter", finite=False)
-    context_bounds = benchmark_context.get("bounds")
-    fitter_bounds = getattr(fitter, "bounds", None)
-    box_low, box_high = resolve_bounds(
-        initial,
-        low=low,
-        high=high,
-        context_bounds=context_bounds,
-        fitter_bounds=fitter_bounds,
+    box = _benchmark_box(
+        layout,
+        low,
+        high,
+        benchmark_context.get("bounds"),
+        getattr(fitter, "bounds", None),
     )
-    if np.any(box_high <= box_low):
+    if np.any(box[1] <= box[0]):
         raise ValueError("each upper bound must be greater than the lower bound")
-    problem = _Problem(layout, *_round_inward(layout, box_low, box_high), start)
+    problem = _Problem(layout, *box, start)
 
     _init(fitter)
     name = method.lower()
