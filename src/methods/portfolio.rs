@@ -1405,11 +1405,6 @@ impl SuccessScale {
         IMPROVEMENT_RTOL * self.gain.max(self.floor)
     }
 
-    /// The run's resolution `s`.
-    fn floor(&self) -> f64 {
-        self.floor
-    }
-
     /// Whether `value` lies below the start's value.
     fn below_start(&self, value: f64) -> bool {
         value < self.start
@@ -7064,24 +7059,24 @@ mod tests {
     #[test]
     fn success_scale_floors_at_the_first_value_below_the_start() {
         let mut scale = SuccessScale::new(Some(-2.0));
-        assert_eq!(scale.floor(), f64::MIN_POSITIVE);
+        assert_eq!(scale.floor, f64::MIN_POSITIVE);
         scale.record(-2.0, f64::NAN);
         scale.record(-2.0, -1.0);
         assert_eq!(scale.threshold(), IMPROVEMENT_RTOL * f64::MIN_POSITIVE);
         scale.record(-2.0, -250.0);
-        assert_eq!(scale.floor(), f64::EPSILON * 250.0);
-        assert_eq!(scale.threshold(), IMPROVEMENT_RTOL * scale.floor());
+        assert_eq!(scale.floor, f64::EPSILON * 250.0);
+        assert_eq!(scale.threshold(), IMPROVEMENT_RTOL * scale.floor);
         scale.record(-250.0, -3000.0);
         scale.record(-3000.0, -3000.0);
-        assert_eq!(scale.floor(), f64::EPSILON * 250.0);
+        assert_eq!(scale.floor, f64::EPSILON * 250.0);
         assert_eq!(scale.threshold(), IMPROVEMENT_RTOL * 2750.0);
         let mut zero = SuccessScale::new(Some(1.0));
         zero.record(1.0, 0.0);
-        assert_eq!(zero.floor(), f64::MIN_POSITIVE);
+        assert_eq!(zero.floor, f64::MIN_POSITIVE);
         for start in [None, Some(f64::NAN), Some(f64::INFINITY)] {
             let mut scale = SuccessScale::new(start);
             scale.record(5.0, 4.0);
-            assert_eq!(scale.floor(), f64::EPSILON * 4.0, "{start:?}");
+            assert_eq!(scale.floor, f64::EPSILON * 4.0, "{start:?}");
             assert_eq!(scale.threshold(), IMPROVEMENT_RTOL, "{start:?}");
         }
     }
