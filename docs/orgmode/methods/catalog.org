@@ -463,7 +463,7 @@ no dedicated Beta sampler.
 Constants and defaults: config knob =allocate_moves=
 (config.rs:92). Portfolio-side scheduler constants derived from the
 problem rather than tuned: =SLICE_GRAD_EQUIVALENTS = 4=,
-=ROUNDS_PER_ARM = 8= (src/methods/portfolio.rs:61-64).
+=ROUNDS_PER_ARM = 8= (src/methods/portfolio.rs:83-89).
 
 Feeds/consumes: selects among the =MoveLibrary= kernels each hop when
 =allocate_moves= is set; reused conceptually by the portfolio driver's
@@ -517,15 +517,19 @@ context-conditioned rather than global or depth-conditioned.
 What it is: classifies a problem's measurable features (box width,
 geometry) into a named optimization regime and biases the portfolio's
 arm priors and exploitation probability toward the arms known to suit
-that regime, without removing exploration.
+that regime, without removing exploration. Values-only runs under the
+Auto policy (no gradient, no declared noise) bypass it for the
+portfolio's values-only loop, so the driver never runs the
+=MultimodalNoGrad= arm settings; only the regime functions themselves
+still read them.
 
 Key types and functions: =ProblemFeatures= (src/methods/regime.rs:16);
 =OptimizationRegime= enum and =select_regime=
-(src/methods/regime.rs:70/107); =preferred_arm_tail=
-(src/methods/regime.rs:132); =arm_prior_boost=
-(src/methods/regime.rs:239); =regime_exploit_prob=/=regime_exploit_width=
-(src/methods/regime.rs:257/271); =check_accept_path=/
-=require_accept_compatible= (src/methods/regime.rs:306/319), which
+(src/methods/regime.rs:70/110); =preferred_arm_tail=
+(src/methods/regime.rs:135); =arm_prior_boost=
+(src/methods/regime.rs:242); =regime_exploit_prob=/=regime_exploit_width=
+(src/methods/regime.rs:260/274); =check_accept_path=/
+=require_accept_compatible= (src/methods/regime.rs:325/309), which
 *refuse* exact Metropolis acceptance under
 =OptimizationRegime::StochasticNoise= (GJQ-style regime gate).
 
@@ -1400,22 +1404,67 @@ by a discounted Beta-Bernoulli posterior. Scheduler quantities
 (slice size, active-arm cap, discount) all derive from the problem and
 budget rather than being hand-tuned.
 
+Values-only loop: under =PortfolioPolicy::Auto= a run with no gradient
+and no declared noise goes, before any regime routing, to
+=run_values_only_portfolio= (src/methods/portfolio.rs:3169), a bandit
+over =VALUES_ONLY_ARMS= (portfolio.rs:3110: =cma=, =qn=, =gsa=, =de=,
+=surrogate=, =explore=) in slices of
+=max(4(d+1), min(budget/48, sqrt(4(d+1) budget)))= evaluations
+(=values_only_slice=, portfolio.rs:3125). Without =x0= it starts from
+the best of a seeded design of =d+1= points; when the budget affords
+five gradients per coordinate, an opening finite-difference descent
+runs while its slices succeed, up to convergence, and =qn= then rejoins
+the ranking on the prior. With less, =cma= and the descent take one
+slice each from the start, =gsa= the next =WARM_UP_GSA_SLICES= (two)
+from the incumbent, and a descent turn settles the basin it reached.
+From there =gsa= and then =cma= each keep the turn until they have gone
+=ROUNDS_PER_ARM= slices without lowering the incumbent (or as long as
+their last gain took, if longer), stopping short of the closing descent
+plus a slice for each other arm not yet played (without an opening, for
+=de= only). Every unplayed arm then takes one turn while a slice beyond
+the closing reserve is left (a descent's turn holds back only that
+reserve), after which rounds pick uniformly with probability
+=1/round=, replay the arm whose last turn succeeded, or take a
+discounted Thompson draw. The descent closes the run with the rest of
+the budget, ten gradients' worth of evaluations held back for it,
+going on with its current descent unless another arm has lowered the
+incumbent since =qn= last played, in which case it restarts there. A
+turn is one slice, except that =qn= keeps it while each slice lowers
+its descent's value by more than the success threshold, until that
+descent converges; a turn succeeds when it lowers the incumbent by more
+than =1e-4 max(|f|, s)= (=values_only_threshold=), where =s= is the
+resolution =eps |f|= of the start's value (=values_only_floor=), so
+every threshold of the run scales with the objective. The GSA arm
+starts one chain at the incumbent
+and runs it quenched, without a local search: each temperature step
+visits every coordinate once and keeps only improvements. The DE arm
+keeps one population member at the incumbent. The floor the restart
+guarantee needs is asymptotic: the opening, the phases and the
+descent's turns run only while they pay by the success threshold, which
+cannot last on a bounded objective, and the number of slices grows with
+the budget, so every arm keeps a uniform share and is pulled infinitely
+often as the budget grows.
+
 Key types and functions: top-level module doc at
-src/methods/portfolio.rs:1-23; =ContractionPosterior=
-(src/methods/portfolio.rs:252, Normal-Inverse-Gamma posterior over the
+src/methods/portfolio.rs:1-44; =ContractionPosterior=
+(src/methods/portfolio.rs:270, Normal-Inverse-Gamma posterior over the
 per-work-unit polish log-contraction rate, fit from work-normalized
 log-ratios of consecutive polish improvements); the endgame
-projected-gradient cycle helper (portfolio.rs:111) and its work-unit to
-=max_fevals= converter (portfolio.rs:103); a coordinate pattern-search
-fallback (portfolio.rs:151).
+projected-gradient cycle helper (portfolio.rs:144) and its work-unit to
+=max_fevals= converter (portfolio.rs:132); a coordinate pattern-search
+fallback (portfolio.rs:180).
 
 Constants and defaults: =SLICE_GRAD_EQUIVALENTS = 4= (a slice must
 afford a few gradient-descent steps); =ROUNDS_PER_ARM = 8=;
 =ENDGAME_WU_PER_ITER = 4=; =NEAR_BEST_ORDERS = 6.0= (Dolan-More
 tau=1e-3 to a 1e-9 win tolerance crosses six decimal orders)
-(src/methods/portfolio.rs:58-71). Endgame polish schedule: two-thirds
+(src/methods/portfolio.rs:86-96). Endgame polish schedule: two-thirds
 of remaining budget when no jittered restart has run yet, half of
-remaining otherwise, always capped at remaining (portfolio.rs:73-86).
+remaining otherwise, always capped at remaining (portfolio.rs:113).
+Values-only loop: =QN_AFFORDABLE_GRADIENTS = 5= (portfolio.rs:414);
+=WARM_UP_GSA_SLICES = 2= (portfolio.rs:416); closing descent of
+=10(d+1)= evaluations, at most 40% of the budget, skipped below
+=3(d+1)= (portfolio.rs:418-423).
 
 Feeds/consumes: consumes =crate::methods::regime= for arm priors and
 exploit probability, and the typed-algebra kernels
@@ -1832,6 +1881,38 @@ Key types and functions: =BfwtMode= (bfwt.rs:33); =BfwtResult=
 Feeds/consumes: consumed by =amsa= (above) as the temperature law
 inside its adaptive chain, and by =portfolio= as its own arm.
 
+** CMA-ES with BIPOP restarts (=cma_es=, =cma= arm)
+
+What it is: a resumable ask/tell \((\mu/\mu_w, \lambda)\)-CMA-ES in
+the unit box, with cumulative step-size adaptation, rank-one plus
+rank-\(\mu\) covariance updates, candidates mirror-reflected into the
+box, and the usual stop tests (TolHistFun, TolX, NoEffectAxis/Coord,
+ConditionCov, stagnation, divergence) plus pycma's optional absolute
+=tolfunhist=. =CmaEs::separable= turns a run into sep-CMA-ES (Ros and
+Hansen 2008): the covariance keeps its diagonal, the learning rates
+grow by \((n+2)/3\), and a candidate costs linear time and memory.
+=Bipop= alternates large-population runs, whose population doubles from
+the default up to a cap, with small local runs, by spent budget.
+
+Key types and functions: =CmaEs= (src/methods/cma_es.rs:119);
+=CmaEs::separable=, =CmaEs::with_tol_fun_hist=, =CmaEs::with_elite=
+(cma_es.rs:238/256/280); =CmaStop= (cma_es.rs:59);
+=covariance_learning_evaluations= (cma_es.rs:111, the horizon
+\(\lambda/(c_1 + c_\mu)\)); =Bipop= and =CmaRegime=
+(cma_es.rs:631/610); the portfolio's =CmaArmState= and =run_cma_arm=
+(src/methods/portfolio.rs:914/2991).
+
+Constants and defaults: =default_lambda= \(4 + \lfloor 3 \ln n
+\rfloor\) (cma_es.rs:82). In the portfolio every run is centred on the
+incumbent; the first is local, with step 0.025 of each side, and large
+runs use step 0.3 (portfolio.rs:391-392). Runs keep the full covariance
+up to =CMA_FULL_MAX_DIM = 100= (portfolio.rs:401) and only when the
+budget exceeds the learning horizon; each run's =tolfunhist= is the
+values-only success threshold at its start (=values_only_threshold=).
+
+Feeds/consumes: the =cma= arm of the portfolio's values-only loop,
+which reads the ledger incumbent for every run's mean.
+
 ** Population-controlled diffusion search (=dmc_population=, =DmcPop=)
 
 What it is: a budgeted multi-walker global search borrowing diffusion
@@ -1861,6 +1942,43 @@ the elite refine step and =accept::TsallisAccept=/
 =movekernel::TsallisVisit=; consumed by =portfolio= as the =DmcPop=
 arm and exposed through =src/python.rs= as
 =anneal.dmc_population_optimize=.
+
+** Finite-difference projected BFGS (=fd_bfgs=, =qn= arm)
+
+What it is: a resumable ask/tell quasi-Newton descent on
+finite-difference gradients inside a box. Stencils step inward at the
+bounds and forward differences give way to central ones when they
+stall. After the first central stencil at a coordinate, its interval is
+a tenth of the distance \(|g_i / c_i|\) to the minimum of the quadratic
+through the stencil, between the rounding limit and the
+\(\epsilon^{1/3}\) rule, so a valley narrower than that rule is not
+straddled; a failed central line search re-differences once an interval
+has moved by more than a factor of two, at most twice per iterate.
+Directions come from a projected BFGS inverse Hessian, with
+curvature-checked updates, followed by a projected backtracking Armijo
+line search that may extrapolate once. The initial inverse Hessian is
+the box metric \(D = \mathrm{diag}(w^2)\), scaled to
+\((s^\top y / y^\top D y) D\) by the first accepted pair, so sides that
+span decades move as far, relative to their width, as unit ones. Until
+then each line search's first trial moves the coordinate that moves
+most by 5% of its side, whatever the gradient's size, so the descent
+does not depend on the objective's scale. A descent ends on a slow
+iteration, a projected-gradient tolerance when one is set, or a failed
+line search.
+
+Key types and functions: =FdBfgs= (src/methods/fd_bfgs.rs:148);
+=FdBfgsOptions= (fd_bfgs.rs:74); the portfolio's =QnArmState= and
+=run_qn_arm= (src/methods/portfolio.rs:1003/3042).
+
+Constants and defaults: =ARMIJO = 1e-4=, =MAX_LINE_TRIALS = 40=,
+=FIRST_STEP_FRACTION = 0.05=, =CENTRAL_INTERVAL_FRACTION = 0.1=,
+=INTERVAL_MOVE = 2=, =MAX_REDIFFERENCES = 2= (fd_bfgs.rs:50-72). The
+default options have the value floor =f64::MIN_POSITIVE= in the
+slow-iteration test and no gradient tolerance.
+
+Feeds/consumes: the =qn= arm of the portfolio's values-only loop (its
+opening and closing descents, and descents kicked from the incumbent
+once one converges).
 
 ** GLE-thermostatted Langevin annealing (=gle_langevin=)
 
