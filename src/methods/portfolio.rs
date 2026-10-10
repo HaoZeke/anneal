@@ -437,6 +437,9 @@ pub struct PortfolioResult {
 
 struct LedgerInner {
     best_pos: Option<Array1<f64>>,
+    /// The first in-bounds point evaluated, whatever its value: the
+    /// incumbent while no evaluation has been finite.
+    first_pos: Option<Array1<f64>>,
     archive_x: Vec<f64>,
     archive_y: Vec<f64>,
 }
@@ -463,6 +466,7 @@ impl BudgetLedger {
             best_val: AtomicU64::new(f64::INFINITY.to_bits()),
             inner: Mutex::new(LedgerInner {
                 best_pos: None,
+                first_pos: None,
                 archive_x: Vec::new(),
                 archive_y: Vec::new(),
             }),
@@ -546,10 +550,16 @@ impl BudgetLedger {
         if let Some(peer) = &self.peer {
             peer.evaluated(x, value);
         }
-        if !value.is_finite() || !bounds.contains(x) {
+        if !bounds.contains(x) {
             return;
         }
         let mut inner = self.inner.lock().expect("ledger lock");
+        if inner.first_pos.is_none() {
+            inner.first_pos = Some(x.to_owned());
+        }
+        if !value.is_finite() {
+            return;
+        }
         // Re-read under the lock so two sequential records cannot promote a
         // worse best_val after a better one (relaxed atomic alone is racy
         // with the mutex-held position write).
@@ -565,8 +575,9 @@ impl BudgetLedger {
     }
 
     fn incumbent(&self, bounds: &Bounds<f64>) -> Array1<f64> {
-        match self.inner.lock().expect("ledger lock").best_pos.as_ref() {
-            // Defensive clip: best_pos is only written for in-bounds points.
+        let inner = self.inner.lock().expect("ledger lock");
+        match inner.best_pos.as_ref().or(inner.first_pos.as_ref()) {
+            // Defensive clip: both positions are only written in bounds.
             Some(pos) => bounds.clip(pos.view()),
             None => (&bounds.low + &bounds.high) * 0.5,
         }
@@ -633,8 +644,14 @@ impl<O: Objective<f64>> Objective<f64> for BudgetedObjective<'_, O> {
             return f64::INFINITY;
         }
         self.ledger.n_evals.fetch_add(1, Ordering::Relaxed);
-        // Feasible proposals retain their exact coordinates. Reflection
-        // folds only out-of-box proposals, keeping the archive feasible.
+        // A non-finite coordinate has no image in the box. The arm that made
+        // it is charged and told the point is worthless; the caller's
+        // objective never sees it.
+        if x.iter().any(|v| !v.is_finite()) {
+            return f64::INFINITY;
+        }
+        // Reflect into the box before eval and record. A feasible proposal
+        // keeps its coordinates. Reflection folds only an out-of-box proposal.
         let bounds = self.inner.bounds();
         let reflected;
         let strictly_feasible = x.len() == bounds.dims
@@ -675,12 +692,56 @@ impl<O: Objective<f64>> Objective<f64> for LocalBoxBudgetedObjective<'_, O> {
             return f64::INFINITY;
         }
         self.ledger.n_evals.fetch_add(1, Ordering::Relaxed);
+        if x.iter().any(|v| !v.is_finite()) {
+            return f64::INFINITY;
+        }
         // Reflect into the local box; archive only if also globally feasible.
         let x_local = crate::movekernel::reflect_into_box(x, &self.bounds);
         let value = self.inner.eval(x_local.view());
         self.ledger
             .record(x_local.view(), value, self.inner.bounds());
         value
+    }
+}
+
+/// Gradient of `x -> f(reflect_into_box(x))`, the function the budgeted
+/// objective evaluates: the caller's gradient at the reflected point, with the
+/// sign of each coordinate the fold reverses flipped. The caller's gradient is
+/// therefore only ever called inside the box; inside it this is `grad f(x)`.
+struct ReflectedGradient<'a, G: Gradient<f64>> {
+    inner: &'a G,
+    bounds: &'a Bounds<f64>,
+}
+
+impl<G: Gradient<f64>> Gradient<f64> for ReflectedGradient<'_, G> {
+    fn dim(&self) -> usize {
+        self.inner.dim()
+    }
+
+    fn grad(&self, x: ArrayView1<f64>) -> Array1<f64> {
+        if x.iter().any(|v| !v.is_finite()) {
+            return Array1::zeros(x.len());
+        }
+        let inside = x
+            .iter()
+            .enumerate()
+            .all(|(k, &xk)| (self.bounds.low[k]..=self.bounds.high[k]).contains(&xk));
+        if inside {
+            return self.inner.grad(x);
+        }
+        let (folded, slopes): (Vec<f64>, Vec<f64>) = x
+            .iter()
+            .enumerate()
+            .map(|(k, &xk)| {
+                crate::movekernel::reflect_coord_with_slope(
+                    xk,
+                    self.bounds.low[k],
+                    self.bounds.high[k],
+                )
+            })
+            .unzip();
+        let g = self.inner.grad(ArrayView1::from(&folded));
+        g * &Array1::from(slopes)
     }
 }
 
@@ -2127,6 +2188,7 @@ fn run_arm<O, G>(
                     1.0,
                     GSA_Q_V,
                     GSA_Q_A,
+                    None,
                     obj.ledger
                         .peer
                         .as_ref()
@@ -3239,11 +3301,37 @@ where
     O: Objective<f64>,
     G: Gradient<f64>,
 {
-    portfolio_optimize_seeded(obj, grad, budget, seed, noise_sigma, policy, None)
+    portfolio_optimize_from(obj, grad, budget, seed, noise_sigma, policy, None)
 }
 
-/// The optional starting point enters the paid archive under the same budget.
-pub(crate) fn portfolio_optimize_seeded<O, G>(
+/// [`portfolio_optimize_from`] under [`PortfolioPolicy::Auto`].
+pub fn portfolio_optimize_seeded<O, G>(
+    obj: &O,
+    grad: Option<&G>,
+    budget: usize,
+    seed: u64,
+    noise_sigma: Option<f64>,
+    x0: Option<ArrayView1<f64>>,
+) -> PortfolioResult
+where
+    O: Objective<f64>,
+    G: Gradient<f64>,
+{
+    portfolio_optimize_from(
+        obj,
+        grad,
+        budget,
+        seed,
+        noise_sigma,
+        PortfolioPolicy::Auto,
+        x0,
+    )
+}
+
+/// [`portfolio_optimize_with_policy`] from a caller-supplied start.
+///
+/// `x0` is clipped onto the box and charged as the first evaluation.
+pub fn portfolio_optimize_from<O, G>(
     obj: &O,
     grad: Option<&G>,
     budget: usize,
@@ -3321,22 +3409,22 @@ where
         inner: obj,
         ledger: &ledger,
     };
-    let budgeted_grad = grad.map(|g| BudgetedGradient {
+    let reflected_grad = grad.map(|g| ReflectedGradient {
+        inner: g,
+        bounds: &bounds,
+    });
+    let budgeted_grad = reflected_grad.as_ref().map(|g| BudgetedGradient {
         inner: g,
         ledger: &ledger,
     });
     if let Some(x0) = x0 {
-        assert_eq!(
-            x0.len(),
-            dim,
-            "starting point must match the objective dimension"
-        );
+        assert_eq!(x0.len(), dim, "x0 must have the objective's dimension");
         assert!(
             x0.iter().all(|value| value.is_finite()),
-            "starting point must be finite"
+            "x0 must be finite"
         );
         let start = bounds.clip(x0);
-        budgeted_obj.eval(start.view());
+        let _ = budgeted_obj.eval(start.view());
     }
 
     // Probe-based demotion for mid-width MultimodalGlobal boxes. Width alone

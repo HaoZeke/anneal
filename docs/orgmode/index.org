@@ -68,6 +68,7 @@ See the [[file:architecture.org][architecture]] page for the five signatures and
 
    quickstart
    tutorials/classical-and-presets
+   tutorials/chemfit
    tutorials/cluster-search
    tutorials/box-search
    tutorials/bayesian-pilot-mixer

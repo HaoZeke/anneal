@@ -665,9 +665,12 @@ fn transform_packing(
         // whatever distance the walk happens to be standing, and the walk
         // arms one rung out: measured on LJ75 that is
         // \(r_\varphi=0.0109\), giving a hill of 0.029 \(\varepsilon\)
-        // against a barrier of 8.69, and a width 63 times narrower than
-        // the 0.69 that separates icosahedral from Marks. Neither number
-        // can be fixed by running more chains.
+        // against a barrier of 8.69. The offset is 63 times narrower
+        // than the class-histogram icosahedron-Marks distance 0.6933.
+        // The packing-book distance of that pair is 0.4267, and the
+        // depth below is priced at PACKING_LINK. Neither the offset
+        // nor the class-histogram width is that grain, and neither
+        // is repaired by running more chains.
         //
         // What the well has to be priced at is the distance where
         // packings stop being the same packing, which is

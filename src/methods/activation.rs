@@ -49,8 +49,14 @@
 //! [`crate::curvature`]. The controller in [`crate::methods::minima_hopping`]
 //! sets how far to climb; this module decides when to stop.
 
-use crate::curvature::curvature_features;
+use crate::curvature::{curvature_features, project_rigid_with, rigid_basis, soft_subspace};
+use crate::descriptor_space::{DescriptorGeometry, universal_descriptor_space};
+use crate::pes_exploration::{
+    PesExplorationConfig, PesNetwork, PesSurface, RideMethod, discover_cartesian_mode_connection,
+};
 use ndarray::{Array1, ArrayView1};
+use rand::{Rng, SeedableRng};
+use std::io::Write;
 
 /// How the climb is run.
 #[derive(Debug, Clone)]
@@ -90,6 +96,19 @@ pub struct Activation {
     /// Extra push along the mode once the curvature has turned over, in units
     /// of `step`, before the quench.
     pub overshoot: f64,
+    /// Ignore a ridge whose integrated rise is below this.
+    ///
+    /// The first saddle out of a low minimum is often a shallow step to a
+    /// neighbour of similar depth. A later ridge, several energy units up,
+    /// is the one that can open another funnel. Zero keeps every ridge.
+    pub min_rise: f64,
+    /// Keep climbing after the first ridge and retain the later ones.
+    ///
+    /// The default stops at the first ridge so a short budget still crosses
+    /// one barrier. A search that is trying to leave a deep funnel has to
+    /// see the ridge after that, because the first one usually returns to
+    /// the same well.
+    pub later_ridges: bool,
 }
 
 impl Default for Activation {
@@ -104,6 +123,8 @@ impl Default for Activation {
             epsilon: 1e-4,
             refresh: 3,
             overshoot: 1.5,
+            min_rise: 0.0,
+            later_ridges: false,
         }
     }
 }
@@ -121,6 +142,9 @@ pub struct ActivationOutcome {
     pub crossed: bool,
     /// Gradient evaluations spent, all of them charged by the caller.
     pub evaluations: usize,
+    /// Ridge points kept when [`Activation::later_ridges`] is set, each
+    /// already pushed past its turning point.
+    pub ridges: Vec<Array1<f64>>,
 }
 
 /// Climbs out of the basin containing `x`.
@@ -140,7 +164,2769 @@ pub fn activate<G>(
 where
     G: FnMut(ArrayView1<f64>) -> Option<Array1<f64>>,
 {
-    activate_aligned(x, None, &mut grad, cfg, sign)
+    activate_aligned(x, None, None, &mut grad, cfg, sign)
+}
+
+/// One covering displacement, the minimum-mode climb, then the caller's quench.
+///
+/// The start is only a point and a force. No target energy is read.
+/// `cover_index` selects one point of the hypersphere cover. The climb
+/// walks away from `origin`. The quench is whatever the caller uses for
+/// a local minimisation of the same force.
+pub fn cover_climb_quench<G, Q>(
+    origin: ArrayView1<f64>,
+    rmsd: f64,
+    cover_index: usize,
+    mut grad: G,
+    mut quench: Q,
+    cfg: &Activation,
+) -> Array1<f64>
+where
+    G: FnMut(ArrayView1<f64>) -> Option<Array1<f64>>,
+    Q: FnMut(ArrayView1<f64>) -> Array1<f64>,
+{
+    let n_cover = crate::hypersphere::default_cover_size();
+    let direction = Array1::from(crate::hypersphere::cover_direction(
+        n_cover,
+        origin.len(),
+        cover_index,
+    ));
+    let contact = closest_pair(origin);
+    let n_atoms = origin.len() / 3;
+    // On a cluster the cover is the direction of the climb, not a kick
+    // that is quenched on its own. One step is one contact length spread
+    // over the caller budget. The walk may run for one step per atom,
+    // until the force along the cover changes sign, and the quench follows.
+    if contact > 0.95 && n_atoms >= 2 {
+        let mut climb = cfg.clone();
+        let budget = climb.max_steps.max(1);
+        climb.step = contact * (n_atoms as f64).sqrt() / budget as f64;
+        climb.max_steps = budget;
+        climb.min_rise = 0.0;
+        if let Some(outcome) = activate_along(origin.view(), direction.view(), &mut grad, &climb)
+            && outcome.crossed
+        {
+            return quench(outcome.state.view());
+        }
+    }
+    let placed = crate::hypersphere::place_around(
+        origin.as_slice().unwrap_or(&[]),
+        direction.as_slice().unwrap(),
+        rmsd.max(1e-3),
+        None,
+    );
+    let start = if placed.len() == origin.len() {
+        Array1::from(placed)
+    } else {
+        origin.to_owned()
+    };
+    if let Some(outcome) = activate_along(start.view(), direction.view(), &mut grad, cfg)
+        && outcome.crossed
+    {
+        return quench(outcome.state.view());
+    }
+    quench(start.view())
+}
+
+/// Covering displacement, fivefold openings of the same shell, a
+/// minimum-mode climb, then a quench. The lowest minimum is kept.
+///
+/// The hypersphere cover picks a direction. On a shell that still has
+/// pentagonal axes, those axes are further covering directions: they
+/// are read off the coordinates, not off a target minimum. No target
+/// energy is supplied.
+pub fn cover_climb_quench_min<G, Q, E>(
+    origin: ArrayView1<f64>,
+    rmsd: f64,
+    cover_index: usize,
+    mut grad: G,
+    mut quench: Q,
+    mut energy: E,
+    cfg: &Activation,
+) -> Array1<f64>
+where
+    G: FnMut(ArrayView1<f64>) -> Option<Array1<f64>>,
+    Q: FnMut(ArrayView1<f64>) -> Array1<f64>,
+    E: FnMut(ArrayView1<f64>) -> f64,
+{
+    let mut best = origin.to_owned();
+    let mut best_e = energy(origin.view());
+    let mut keep = |quenched: Array1<f64>| {
+        let value = energy(quenched.view());
+        if value.is_finite() {
+            println!("{{\"kind\":\"exit_candidate\",\"energy\":{value:.6}}}");
+        }
+        if value.is_finite() && value < best_e - 1e-6 {
+            best_e = value;
+            best = quenched;
+        }
+    };
+    // Several amplitudes of the pentagonal opening, quenched on their own.
+    for amp in [0.35_f64, 0.55, 0.75, 1.0, 1.25] {
+        for which in 0..4 {
+            keep(quench(fivefold_opening(origin, amp, which).view()));
+        }
+    }
+    // The same opening stacked, then one quench, so the shell can
+    // reconstruct before it is relaxed.
+    let mut chain = origin.to_owned();
+    for which in 0..8 {
+        chain = fivefold_opening(chain.view(), 0.75, which);
+    }
+    keep(quench(chain.view()));
+    let mut here = origin.to_owned();
+    let mut here_e = best_e;
+    let mut rng = rand::rngs::StdRng::seed_from_u64(1 + cover_index as u64);
+    let n_cover = crate::hypersphere::default_cover_size();
+    let temperature = 8.0_f64;
+    // One kick stays in the icosahedral funnel or lands above it.
+    // Keep walking: a covering displacement, sometimes a pentagonal
+    // opening, a minimum-mode climb when the ridge is real, then a
+    // quench. Uphill quenches are accepted so the walk can leave.
+    for hop in 0..16 {
+        let point = if hop % 6 == 0 {
+            fivefold_opening(here.view(), rmsd, hop)
+        } else {
+            let direction =
+                crate::hypersphere::cover_direction(n_cover, here.len(), hop + cover_index);
+            let placed = crate::hypersphere::place_around(
+                here.as_slice().unwrap_or(&[]),
+                &direction,
+                rmsd.max(1e-3),
+                None,
+            );
+            if placed.len() == here.len() {
+                Array1::from(placed)
+            } else {
+                here.clone()
+            }
+        };
+        let mut quenched = quench(point.view());
+        if let Some(outcome) = activate_from_origin(point.view(), here.view(), &mut grad, cfg) {
+            if outcome.crossed {
+                let climbed = quench(outcome.state.view());
+                let climbed_e = energy(climbed.view());
+                let direct_e = energy(quenched.view());
+                if climbed_e.is_finite() && (!direct_e.is_finite() || climbed_e < direct_e) {
+                    quenched = climbed;
+                }
+            }
+        }
+        let value = energy(quenched.view());
+        if !value.is_finite() {
+            continue;
+        }
+        println!("{{\"kind\":\"exit_candidate\",\"energy\":{value:.6}}}");
+        if value < best_e - 1e-6 {
+            best_e = value;
+            best = quenched.clone();
+        }
+        let uphill = value - here_e;
+        let accept = uphill <= 0.0 || rng.random::<f64>() < (-uphill / temperature).exp();
+        if accept {
+            here = quenched;
+            here_e = value;
+        }
+    }
+    best
+}
+
+struct CoverRidge {
+    landings: Vec<Array1<f64>>,
+    crossed: bool,
+    lambda: f64,
+    lowest: f64,
+    steps: usize,
+    axial: f64,
+}
+
+fn empty_ridge() -> CoverRidge {
+    CoverRidge {
+        landings: Vec::new(),
+        crossed: false,
+        lambda: 0.0,
+        lowest: 0.0,
+        steps: 0,
+        axial: 0.0,
+    }
+}
+
+fn dot_av(left: ArrayView1<f64>, right: ArrayView1<f64>) -> f64 {
+    left.iter().zip(right.iter()).map(|(a, b)| a * b).sum()
+}
+
+fn max_atom_weight(mode: ArrayView1<f64>) -> f64 {
+    let n_atoms = mode.len() / 3;
+    let mut weight = 0.0_f64;
+    for atom in 0..n_atoms {
+        let mut square = 0.0;
+        for axis in 0..3 {
+            let component = mode[3 * atom + axis];
+            square += component * component;
+        }
+        weight = weight.max(square.sqrt());
+    }
+    weight
+}
+
+fn relax_shell_around_centre<E>(
+    x: ArrayView1<f64>,
+    outermost: bool,
+    evaluate: &mut E,
+) -> Array1<f64>
+where
+    E: FnMut(ArrayView1<f64>) -> (f64, Array1<f64>),
+{
+    let n_atoms = x.len() / 3;
+    let mut full = move_extreme_atom_to_com(x, outermost);
+    if n_atoms < 2 {
+        return full;
+    }
+    let mut anchor = [0.0; 3];
+    for atom in 0..n_atoms {
+        for axis in 0..3 {
+            anchor[axis] += full[3 * atom + axis];
+        }
+    }
+    for value in &mut anchor {
+        *value /= n_atoms as f64;
+    }
+    let mut pin = 0usize;
+    let mut pin_r = f64::MAX;
+    for atom in 0..n_atoms {
+        let mut square = 0.0;
+        for axis in 0..3 {
+            let delta = full[3 * atom + axis] - anchor[axis];
+            square += delta * delta;
+        }
+        if square < pin_r {
+            pin_r = square;
+            pin = atom;
+        }
+    }
+    for axis in 0..3 {
+        full[3 * pin + axis] = anchor[axis];
+    }
+    let mobile: Vec<usize> = (0..n_atoms).filter(|atom| *atom != pin).collect();
+    let mut reduced = Array1::zeros(mobile.len() * 3);
+    for (slot, &atom) in mobile.iter().enumerate() {
+        for axis in 0..3 {
+            reduced[3 * slot + axis] = full[3 * atom + axis];
+        }
+    }
+    let mut opt = crate::methods::warm_lbfgs::WarmLbfgs::default();
+    let (_, reduced, _) = opt.minimize(reduced.view(), n_atoms.saturating_mul(8).max(8), |point| {
+        let mut y = full.clone();
+        for (slot, &atom) in mobile.iter().enumerate() {
+            for axis in 0..3 {
+                y[3 * atom + axis] = point[3 * slot + axis];
+            }
+        }
+        for axis in 0..3 {
+            y[3 * pin + axis] = anchor[axis];
+        }
+        let (energy, gradient) = evaluate(y.view());
+        if !energy.is_finite() {
+            return None;
+        }
+        let mut reduced_gradient = Array1::zeros(point.len());
+        for (slot, &atom) in mobile.iter().enumerate() {
+            for axis in 0..3 {
+                reduced_gradient[3 * slot + axis] = gradient[3 * atom + axis];
+            }
+        }
+        Some((energy, reduced_gradient))
+    });
+    for (slot, &atom) in mobile.iter().enumerate() {
+        for axis in 0..3 {
+            full[3 * atom + axis] = reduced[3 * slot + axis];
+        }
+    }
+    for axis in 0..3 {
+        full[3 * pin + axis] = anchor[axis];
+    }
+    full
+}
+
+fn move_extreme_atom_to_com(x: ArrayView1<f64>, outermost: bool) -> Array1<f64> {
+    let n_atoms = x.len() / 3;
+    let mut y = x.to_owned();
+    if n_atoms == 0 {
+        return y;
+    }
+    let mut com = [0.0; 3];
+    for atom in 0..n_atoms {
+        for axis in 0..3 {
+            com[axis] += y[3 * atom + axis];
+        }
+    }
+    for value in &mut com {
+        *value /= n_atoms as f64;
+    }
+    let mut chosen = 0usize;
+    let mut chosen_r = if outermost { 0.0 } else { f64::MAX };
+    for atom in 0..n_atoms {
+        let mut square = 0.0;
+        for axis in 0..3 {
+            let delta = y[3 * atom + axis] - com[axis];
+            square += delta * delta;
+        }
+        let radius = square.sqrt();
+        let better = if outermost {
+            radius > chosen_r
+        } else {
+            radius < chosen_r
+        };
+        if better {
+            chosen_r = radius;
+            chosen = atom;
+        }
+    }
+    if !outermost && chosen_r < 1e-8 {
+        return y;
+    }
+    for axis in 0..3 {
+        y[3 * chosen + axis] = com[axis];
+    }
+    y
+}
+
+fn outer_axes(x: ArrayView1<f64>, contact: f64) -> Vec<[f64; 3]> {
+    let n_atoms = x.len() / 3;
+    if n_atoms == 0 {
+        return Vec::new();
+    }
+    let mut com = [0.0; 3];
+    for atom in 0..n_atoms {
+        for axis in 0..3 {
+            com[axis] += x[3 * atom + axis];
+        }
+    }
+    for value in &mut com {
+        *value /= n_atoms as f64;
+    }
+    let mut radii = Vec::with_capacity(n_atoms);
+    let mut reach = 0.0_f64;
+    for atom in 0..n_atoms {
+        let mut square = 0.0;
+        for axis in 0..3 {
+            let delta = x[3 * atom + axis] - com[axis];
+            square += delta * delta;
+        }
+        let radius = square.sqrt();
+        reach = reach.max(radius);
+        radii.push(radius);
+    }
+    let mut axes = Vec::new();
+    for atom in 0..n_atoms {
+        if radii[atom] + contact * 0.5 < reach {
+            continue;
+        }
+        if radii[atom] < 1e-8 {
+            continue;
+        }
+        let mut direction = [0.0; 3];
+        for axis in 0..3 {
+            direction[axis] = (x[3 * atom + axis] - com[axis]) / radii[atom];
+        }
+        // Axes within 60 degrees, and their opposites, are the same line.
+        let distinct = axes.iter().all(|known: &[f64; 3]| {
+            let dot = known[0] * direction[0] + known[1] * direction[1] + known[2] * direction[2];
+            dot.abs() < 0.5
+        });
+        if distinct {
+            axes.push(direction);
+        }
+    }
+    axes
+}
+
+fn plane_basis(axis: [f64; 3]) -> ([f64; 3], [f64; 3]) {
+    let [ax, ay, az] = axis;
+    let seed = if ax.abs() < 0.9 {
+        [1.0, 0.0, 0.0]
+    } else {
+        [0.0, 1.0, 0.0]
+    };
+    let mut e1 = [
+        ay * seed[2] - az * seed[1],
+        az * seed[0] - ax * seed[2],
+        ax * seed[1] - ay * seed[0],
+    ];
+    let n = (e1[0] * e1[0] + e1[1] * e1[1] + e1[2] * e1[2])
+        .sqrt()
+        .max(1e-15);
+    for value in &mut e1 {
+        *value /= n;
+    }
+    let e2 = [
+        ay * e1[2] - az * e1[1],
+        az * e1[0] - ax * e1[2],
+        ax * e1[1] - ay * e1[0],
+    ];
+    (e1, e2)
+}
+
+fn stagger_layers(x: ArrayView1<f64>, axis: [f64; 3], angle: f64, contact: f64) -> Array1<f64> {
+    let n_atoms = x.len() / 3;
+    let mut y = x.to_owned();
+    if n_atoms == 0 {
+        return y;
+    }
+    let mut com = [0.0; 3];
+    for atom in 0..n_atoms {
+        for coord in 0..3 {
+            com[coord] += y[3 * atom + coord];
+        }
+    }
+    for value in &mut com {
+        *value /= n_atoms as f64;
+    }
+    let [ax, ay, az] = axis;
+    let (e1, e2) = plane_basis(axis);
+    let mut rows: Vec<(f64, usize, f64, f64)> = Vec::with_capacity(n_atoms);
+    for atom in 0..n_atoms {
+        let r = [
+            y[3 * atom] - com[0],
+            y[3 * atom + 1] - com[1],
+            y[3 * atom + 2] - com[2],
+        ];
+        let height = r[0] * ax + r[1] * ay + r[2] * az;
+        let perp = [r[0] - height * ax, r[1] - height * ay, r[2] - height * az];
+        let rho = (perp[0] * perp[0] + perp[1] * perp[1] + perp[2] * perp[2]).sqrt();
+        let phi = if rho > 1e-8 {
+            let c = (perp[0] * e1[0] + perp[1] * e1[1] + perp[2] * e1[2]) / rho;
+            let s = (perp[0] * e2[0] + perp[1] * e2[1] + perp[2] * e2[2]) / rho;
+            s.atan2(c)
+        } else {
+            0.0
+        };
+        rows.push((height, atom, rho, phi));
+    }
+    rows.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+    let mut layer = 0usize;
+    for index in 0..rows.len() {
+        if index > 0 && rows[index].0 - rows[index - 1].0 > contact * 0.15 {
+            layer += 1;
+        }
+        if layer % 2 == 1 && rows[index].2 > 1e-8 {
+            rows[index].3 += angle;
+        }
+        let (_, atom, rho, phi) = rows[index];
+        let (sin, cos) = phi.sin_cos();
+        for coord in 0..3 {
+            y[3 * atom + coord] = com[coord]
+                + rows[index].0 * [ax, ay, az][coord]
+                + rho * (cos * e1[coord] + sin * e2[coord]);
+        }
+    }
+    y
+}
+
+fn relax_held_phi<E>(x: ArrayView1<f64>, axis: [f64; 3], evaluate: &mut E) -> Array1<f64>
+where
+    E: FnMut(ArrayView1<f64>) -> (f64, Array1<f64>),
+{
+    let n_atoms = x.len() / 3;
+    if n_atoms < 2 {
+        return x.to_owned();
+    }
+    let mut com = [0.0; 3];
+    for atom in 0..n_atoms {
+        for coord in 0..3 {
+            com[coord] += x[3 * atom + coord];
+        }
+    }
+    for value in &mut com {
+        *value /= n_atoms as f64;
+    }
+    let [ax, ay, az] = axis;
+    let (e1, e2) = plane_basis(axis);
+    let mut polar = Vec::with_capacity(n_atoms);
+    for atom in 0..n_atoms {
+        let r = [
+            x[3 * atom] - com[0],
+            x[3 * atom + 1] - com[1],
+            x[3 * atom + 2] - com[2],
+        ];
+        let height = r[0] * ax + r[1] * ay + r[2] * az;
+        let perp = [r[0] - height * ax, r[1] - height * ay, r[2] - height * az];
+        let rho = (perp[0] * perp[0] + perp[1] * perp[1] + perp[2] * perp[2]).sqrt();
+        let phi = if rho > 1e-8 {
+            let c = (perp[0] * e1[0] + perp[1] * e1[1] + perp[2] * e1[2]) / rho;
+            let s = (perp[0] * e2[0] + perp[1] * e2[1] + perp[2] * e2[2]) / rho;
+            s.atan2(c)
+        } else {
+            0.0
+        };
+        polar.push((rho, height, phi));
+    }
+    let mut reduced = Array1::zeros(n_atoms * 2);
+    for (atom, (rho, height, _)) in polar.iter().enumerate() {
+        reduced[2 * atom] = *rho;
+        reduced[2 * atom + 1] = *height;
+    }
+    let mut opt = crate::methods::warm_lbfgs::WarmLbfgs::default();
+    let (_, reduced, _) = opt.minimize(reduced.view(), n_atoms.saturating_mul(8).max(8), |point| {
+        let mut y = Array1::zeros(x.len());
+        for atom in 0..n_atoms {
+            let rho = point[2 * atom].max(0.0);
+            let height = point[2 * atom + 1];
+            let (sin, cos) = polar[atom].2.sin_cos();
+            for coord in 0..3 {
+                y[3 * atom + coord] = com[coord]
+                    + height * [ax, ay, az][coord]
+                    + rho * (cos * e1[coord] + sin * e2[coord]);
+            }
+        }
+        let (energy, gradient) = evaluate(y.view());
+        if !energy.is_finite() {
+            return None;
+        }
+        let mut reduced_gradient = Array1::zeros(point.len());
+        for atom in 0..n_atoms {
+            let g = [
+                gradient[3 * atom],
+                gradient[3 * atom + 1],
+                gradient[3 * atom + 2],
+            ];
+            let (sin, cos) = polar[atom].2.sin_cos();
+            let e_rho = [
+                cos * e1[0] + sin * e2[0],
+                cos * e1[1] + sin * e2[1],
+                cos * e1[2] + sin * e2[2],
+            ];
+            reduced_gradient[2 * atom] = g[0] * e_rho[0] + g[1] * e_rho[1] + g[2] * e_rho[2];
+            reduced_gradient[2 * atom + 1] = g[0] * ax + g[1] * ay + g[2] * az;
+        }
+        Some((energy, reduced_gradient))
+    });
+    let mut y = Array1::zeros(x.len());
+    for atom in 0..n_atoms {
+        let rho = reduced[2 * atom].max(0.0);
+        let height = reduced[2 * atom + 1];
+        let (sin, cos) = polar[atom].2.sin_cos();
+        for coord in 0..3 {
+            y[3 * atom + coord] = com[coord]
+                + height * [ax, ay, az][coord]
+                + rho * (cos * e1[coord] + sin * e2[coord]);
+        }
+    }
+    y
+}
+
+fn twist_and_strain(x: ArrayView1<f64>, axis: [f64; 3]) -> (Array1<f64>, Array1<f64>) {
+    let n_atoms = x.len() / 3;
+    let mut twist = Array1::zeros(x.len());
+    let mut strain = Array1::zeros(x.len());
+    let mut com = [0.0; 3];
+    for atom in 0..n_atoms {
+        for coord in 0..3 {
+            com[coord] += x[3 * atom + coord];
+        }
+    }
+    if n_atoms > 0 {
+        for value in &mut com {
+            *value /= n_atoms as f64;
+        }
+    }
+    let [ax, ay, az] = axis;
+    for atom in 0..n_atoms {
+        let r = [
+            x[3 * atom] - com[0],
+            x[3 * atom + 1] - com[1],
+            x[3 * atom + 2] - com[2],
+        ];
+        let height = r[0] * ax + r[1] * ay + r[2] * az;
+        let perp = [r[0] - height * ax, r[1] - height * ay, r[2] - height * az];
+        // Tangential rotation of the positive cap, and a volume-preserving
+        // stretch along the same axis.
+        if height > 0.0 {
+            twist[3 * atom] = ay * r[2] - az * r[1];
+            twist[3 * atom + 1] = az * r[0] - ax * r[2];
+            twist[3 * atom + 2] = ax * r[1] - ay * r[0];
+        }
+        strain[3 * atom] = -height * ax + 0.5 * perp[0];
+        strain[3 * atom + 1] = -height * ay + 0.5 * perp[1];
+        strain[3 * atom + 2] = -height * az + 0.5 * perp[2];
+    }
+    (twist, strain)
+}
+
+fn cluster_reach(x: ArrayView1<f64>) -> f64 {
+    let n_atoms = x.len() / 3;
+    if n_atoms == 0 {
+        return 0.0;
+    }
+    let mut com = [0.0; 3];
+    for atom in 0..n_atoms {
+        for axis in 0..3 {
+            com[axis] += x[3 * atom + axis];
+        }
+    }
+    for value in &mut com {
+        *value /= n_atoms as f64;
+    }
+    let mut reach = 0.0_f64;
+    for atom in 0..n_atoms {
+        let mut square = 0.0;
+        for axis in 0..3 {
+            let delta = x[3 * atom + axis] - com[axis];
+            square += delta * delta;
+        }
+        reach = reach.max(square.sqrt());
+    }
+    reach
+}
+
+fn axial_projection(cur: ArrayView1<f64>, origin: ArrayView1<f64>, mode: ArrayView1<f64>) -> f64 {
+    cur.iter()
+        .zip(origin.iter())
+        .zip(mode.iter())
+        .map(|((value, start), component)| (value - start) * component)
+        .sum()
+}
+
+fn pin_axial(cur: &mut Array1<f64>, origin: ArrayView1<f64>, mode: ArrayView1<f64>, target: f64) {
+    let shift = target - axial_projection(cur.view(), origin, mode);
+    if shift == 0.0 {
+        return;
+    }
+    for (value, component) in cur.iter_mut().zip(mode.iter()) {
+        *value += shift * component;
+    }
+}
+
+fn renormalize_mode(mode: &mut Array1<f64>, x: ArrayView1<f64>) -> bool {
+    let basis = rigid_basis(x);
+    project_rigid_with(mode, &basis);
+    let norm = dot_av(mode.view(), mode.view()).sqrt();
+    if !norm.is_finite() || norm < 1e-15 {
+        return false;
+    }
+    *mode /= norm;
+    true
+}
+
+fn directional_curvature<E>(
+    cur: ArrayView1<f64>,
+    mode: ArrayView1<f64>,
+    evaluate: &mut E,
+    epsilon: f64,
+) -> Option<f64>
+where
+    E: FnMut(ArrayView1<f64>) -> (f64, Array1<f64>),
+{
+    let (_, left) = evaluate(cur);
+    let mut shifted = cur.to_owned();
+    for (value, component) in shifted.iter_mut().zip(mode.iter()) {
+        *value += epsilon * component;
+    }
+    let (_, right) = evaluate(shifted.view());
+    let curvature = (dot_av(right.view(), mode) - dot_av(left.view(), mode)) / epsilon;
+    curvature.is_finite().then_some(curvature)
+}
+
+/// Directions carried by one covering vector.
+///
+/// The full vector is kept. Atoms heavier than the mean of that vector,
+/// and the single heaviest atom, are separate pushes: a uniform step
+/// stretches every contact, and the lowest curvature is then an overlap
+/// rather than a rearrangement.
+fn cover_axes(direction: &[f64]) -> Vec<(&'static str, Array1<f64>)> {
+    let n_atoms = direction.len() / 3;
+    if n_atoms == 0 || direction.len() != n_atoms * 3 {
+        return Vec::new();
+    }
+    let mut weights = vec![0.0; n_atoms];
+    let mut total = 0.0;
+    let mut leading = 0usize;
+    for atom in 0..n_atoms {
+        let mut square = 0.0;
+        for axis in 0..3 {
+            let component = direction[3 * atom + axis];
+            square += component * component;
+        }
+        let weight = square.sqrt();
+        weights[atom] = weight;
+        total += weight;
+        if weight > weights[leading] {
+            leading = atom;
+        }
+    }
+    let mean = total / n_atoms as f64;
+    let mut above = Array1::zeros(direction.len());
+    let mut kept = 0usize;
+    for atom in 0..n_atoms {
+        if weights[atom] > mean {
+            kept += 1;
+            for axis in 0..3 {
+                above[3 * atom + axis] = direction[3 * atom + axis];
+            }
+        }
+    }
+    let mut lead = Array1::zeros(direction.len());
+    for axis in 0..3 {
+        lead[3 * leading + axis] = direction[3 * leading + axis];
+    }
+    let mut axes = Vec::new();
+    axes.push(("cover", Array1::from_vec(direction.to_vec())));
+    if kept >= 2 {
+        axes.push(("mean", above));
+    }
+    if weights[leading] > mean {
+        axes.push(("atom", lead));
+    }
+    axes
+}
+
+fn relax_pinned<E>(
+    cur: &mut Array1<f64>,
+    origin: ArrayView1<f64>,
+    mode: &Array1<f64>,
+    target: f64,
+    trust: f64,
+    contact: f64,
+    evaluate: &mut E,
+    cfg: &Activation,
+) -> bool
+where
+    E: FnMut(ArrayView1<f64>) -> (f64, Array1<f64>),
+{
+    let clash = contact * 0.5;
+    // Each round is one trial along the perpendicular force. Further rounds
+    // are how a valley is reached; the displacement stays inside `trust`.
+    let rounds = cfg.perp_steps.max(1);
+    let mut spent = 0.0_f64;
+    for _ in 0..rounds {
+        if spent >= trust {
+            break;
+        }
+        pin_axial(cur, origin, mode.view(), target);
+        if closest_pair(cur.view()) < clash {
+            return false;
+        }
+        let (energy, gradient) = evaluate(cur.view());
+        if !energy.is_finite() {
+            return false;
+        }
+        let along = dot_av(gradient.view(), mode.view());
+        let mut perp_square = 0.0;
+        let mut perp = gradient;
+        for (component, mode_component) in perp.iter_mut().zip(mode.iter()) {
+            *component -= along * mode_component;
+            perp_square += *component * *component;
+        }
+        let perp_norm = perp_square.sqrt();
+        if !perp_norm.is_finite() {
+            return false;
+        }
+        if perp_norm <= along.abs() {
+            pin_axial(cur, origin, mode.view(), target);
+            return closest_pair(cur.view()) >= clash;
+        }
+        let mut length = (trust - spent).min(trust).max(0.0);
+        let mut accepted = false;
+        while length > cfg.epsilon {
+            let mut trial = cur.clone();
+            for (value, component) in trial.iter_mut().zip(perp.iter()) {
+                *value -= length * component / perp_norm;
+            }
+            pin_axial(&mut trial, origin, mode.view(), target);
+            if closest_pair(trial.view()) < clash {
+                length *= 0.5;
+                continue;
+            }
+            let (trial_energy, trial_gradient) = evaluate(trial.view());
+            if !trial_energy.is_finite() {
+                length *= 0.5;
+                continue;
+            }
+            let trial_along = dot_av(trial_gradient.view(), mode.view());
+            let mut trial_perp = 0.0;
+            for (component, mode_component) in trial_gradient.iter().zip(mode.iter()) {
+                let orthogonal = component - trial_along * mode_component;
+                trial_perp += orthogonal * orthogonal;
+            }
+            if trial_energy <= energy || trial_perp.sqrt() < perp_norm {
+                *cur = trial;
+                spent += length;
+                accepted = true;
+                break;
+            }
+            length *= 0.5;
+        }
+        if !accepted {
+            break;
+        }
+    }
+    pin_axial(cur, origin, mode.view(), target);
+    closest_pair(cur.view()) >= clash
+}
+
+fn push_ridge(
+    landings: &mut Vec<Array1<f64>>,
+    crossed: &mut bool,
+    state: &Array1<f64>,
+    mode: &Array1<f64>,
+    lambda: f64,
+    scale: f64,
+    contact: f64,
+    overshoot: f64,
+    cap: usize,
+) {
+    if landings.len() >= cap {
+        return;
+    }
+    // An overlap eigenvalue is far below the curvature of the minimum.
+    // The square of that curvature separates the two.
+    if !(lambda.is_finite() && lambda < 0.0 && lambda > -(scale * scale)) {
+        return;
+    }
+    *crossed = true;
+    landings.extend(landings_past(state, mode, lambda, contact, overshoot));
+}
+
+fn landings_past(
+    state: &Array1<f64>,
+    mode: &Array1<f64>,
+    lambda: f64,
+    contact: f64,
+    overshoot: f64,
+) -> Vec<Array1<f64>> {
+    let mut landings = vec![state.clone()];
+    let lead = max_atom_weight(mode.view()).max(1e-12);
+    let contact_step = contact / lead;
+    let curvature_length = 1.0 / lambda.abs().sqrt().max(1e-8);
+    let extra = curvature_length.min(contact_step) * overshoot.max(0.0);
+    if extra > 1e-8 {
+        let mut farther = state.clone();
+        for (value, component) in farther.iter_mut().zip(mode.iter()) {
+            *value += extra * component;
+        }
+        if closest_pair(farther.view()) >= contact * 0.5 {
+            landings.push(farther);
+        }
+    }
+    landings
+}
+
+fn lowest_mode<E>(
+    cur: ArrayView1<f64>,
+    evaluate: &mut E,
+    steps: usize,
+    epsilon: f64,
+) -> Option<(f64, Array1<f64>)>
+where
+    E: FnMut(ArrayView1<f64>) -> (f64, Array1<f64>),
+{
+    let features = curvature_features(cur, |point| Some(evaluate(point).1), steps, epsilon)?;
+    Some((features.lambda_min, features.mode))
+}
+
+/// Climb `direction` until the force along the lowest negative mode flips.
+///
+/// `hold_cover` keeps the supplied direction until that curvature is
+/// negative. The other path follows the lowest mode from the first step.
+/// Lengths are the curvature length and the contact distance. The walk
+/// stops when the leading atom has moved by the cluster radius.
+fn climb_cover<E>(
+    origin: ArrayView1<f64>,
+    direction: ArrayView1<f64>,
+    travel0: f64,
+    hold_cover: bool,
+    evaluate: &mut E,
+    cfg: &Activation,
+) -> CoverRidge
+where
+    E: FnMut(ArrayView1<f64>) -> (f64, Array1<f64>),
+{
+    let n_atoms = origin.len() / 3;
+    if n_atoms < 2 || direction.len() != origin.len() || cfg.lanczos_steps < 2 {
+        return empty_ridge();
+    }
+    let mut mode = direction.to_owned();
+    if travel0 < 0.0 {
+        for component in mode.iter_mut() {
+            *component = -*component;
+        }
+    }
+    if !renormalize_mode(&mut mode, origin) {
+        return empty_ridge();
+    }
+    let contact = closest_pair(origin);
+    if !contact.is_finite() || contact <= 0.0 {
+        return empty_ridge();
+    }
+    let reach = cluster_reach(origin);
+    let epsilon = cfg.epsilon.max(1e-8);
+    let Some(mut directional) = directional_curvature(origin, mode.view(), evaluate, epsilon)
+    else {
+        return empty_ridge();
+    };
+    let mut lambda = directional;
+    let mut lowest = directional;
+    let mut positive_scale = directional.abs().max(epsilon);
+    if let Some((soft, _)) = lowest_mode(origin, evaluate, cfg.lanczos_steps, epsilon) {
+        lowest = soft;
+        positive_scale = positive_scale.max(soft.abs());
+    }
+    let (start_energy, _) = evaluate(origin);
+    // Harmonic energy of a one-contact step at the curvature of the minimum.
+    let rise_lid = 0.5 * positive_scale * contact * contact;
+    let mut cleared_lid = false;
+    let mut cur = origin.to_owned();
+    let mut axial = 0.0_f64;
+    let mut steps = 0usize;
+    let budget = cfg.max_steps.max(n_atoms);
+    let mut saw_negative = false;
+    let mut crossed = false;
+    // The opening push leaves a minimum uphill, so the first downhill
+    // reading with negative curvature is a ridge rather than the well.
+    let mut uphill = true;
+    let mut landings: Vec<Array1<f64>> = Vec::new();
+
+    if hold_cover {
+        while steps < budget && !saw_negative {
+            let lead = max_atom_weight(mode.view()).max(1e-12);
+            let axial_cap = reach.max(contact) / lead;
+            let curvature_length = 1.0 / directional.abs().max(epsilon).sqrt();
+            let grow = curvature_length.min(contact / lead).max(epsilon);
+            let target = if axial <= epsilon {
+                grow.min(axial_cap)
+            } else {
+                (axial * 2.0).min(axial_cap)
+            };
+            if target <= axial + epsilon {
+                break;
+            }
+            let snapshot = cur.clone();
+            let trust = target - axial;
+            let accepted = relax_pinned(
+                &mut cur, origin, &mode, target, trust, contact, evaluate, cfg,
+            );
+            if !accepted {
+                cur.clone_from(&snapshot);
+                let mid = 0.5 * (axial + target);
+                if mid <= axial + epsilon
+                    || !relax_pinned(
+                        &mut cur,
+                        origin,
+                        &mode,
+                        mid,
+                        mid - axial,
+                        contact,
+                        evaluate,
+                        cfg,
+                    )
+                {
+                    cur.clone_from(&snapshot);
+                    break;
+                }
+                axial = mid;
+            } else {
+                axial = target;
+            }
+            steps += 1;
+            if let Some(value) = directional_curvature(cur.view(), mode.view(), evaluate, epsilon) {
+                directional = value;
+                lambda = directional;
+            }
+            if let Some((soft, soft_mode)) =
+                lowest_mode(cur.view(), evaluate, cfg.lanczos_steps, epsilon)
+            {
+                lowest = soft;
+                if soft.is_finite() && soft < 0.0 {
+                    let align = dot_av(soft_mode.view(), mode.view());
+                    mode = if align < 0.0 { -soft_mode } else { soft_mode };
+                    if !renormalize_mode(&mut mode, cur.view()) {
+                        break;
+                    }
+                    lambda = soft;
+                    saw_negative = true;
+                    axial = axial_projection(cur.view(), origin, mode.view());
+                    let (energy_now, gradient) = evaluate(cur.view());
+                    let along = dot_av(gradient.view(), mode.view());
+                    if along >= 0.0 {
+                        uphill = true;
+                    } else if uphill && energy_now - start_energy >= rise_lid {
+                        push_ridge(
+                            &mut landings,
+                            &mut crossed,
+                            &cur,
+                            &mode,
+                            lambda,
+                            positive_scale,
+                            contact,
+                            cfg.overshoot,
+                            2,
+                        );
+                        uphill = false;
+                    }
+                }
+            }
+        }
+    } else if let Some((soft, soft_mode)) =
+        lowest_mode(cur.view(), evaluate, cfg.lanczos_steps, epsilon)
+    {
+        let align = dot_av(soft_mode.view(), mode.view());
+        mode = if align < 0.0 { -soft_mode } else { soft_mode };
+        if !renormalize_mode(&mut mode, cur.view()) {
+            return empty_ridge();
+        }
+        lambda = soft;
+        lowest = soft;
+        directional = soft;
+        if soft.is_finite() && soft < 0.0 {
+            saw_negative = true;
+        }
+    }
+
+    if saw_negative || !hold_cover {
+        while steps < budget {
+            if !renormalize_mode(&mut mode, cur.view()) {
+                break;
+            }
+            let lead = max_atom_weight(mode.view()).max(1e-12);
+            if axial_projection(cur.view(), origin, mode.view()).abs() > reach.max(contact) / lead
+                && steps > 0
+            {
+                break;
+            }
+            let (energy_now, gradient) = evaluate(cur.view());
+            let along = dot_av(gradient.view(), mode.view());
+            let rise_now = energy_now - start_energy;
+            if along >= 0.0 {
+                uphill = true;
+            } else if uphill && lambda < 0.0 && rise_now >= rise_lid {
+                push_ridge(
+                    &mut landings,
+                    &mut crossed,
+                    &cur,
+                    &mode,
+                    lambda,
+                    positive_scale,
+                    contact,
+                    cfg.overshoot,
+                    2,
+                );
+                uphill = false;
+            }
+            // Effective gradient of a min-mode saddle search: descend in the
+            // perpendicular plane and ascend along the mode.
+            let mut eff = gradient.clone();
+            for (component, mode_component) in eff.iter_mut().zip(mode.iter()) {
+                *component -= 2.0 * along * *mode_component;
+            }
+            let eff_norm = dot_av(eff.view(), eff.view()).sqrt().max(epsilon);
+            let curvature_length = 1.0 / lambda.abs().max(epsilon).sqrt();
+            let mut stride = curvature_length.min(contact / lead).max(epsilon);
+            let snapshot = cur.clone();
+            let mut placed = false;
+            while stride > epsilon {
+                cur.clone_from(&snapshot);
+                for (value, component) in cur.iter_mut().zip(eff.iter()) {
+                    *value -= stride * component / eff_norm;
+                }
+                if closest_pair(cur.view()) < contact * 0.5 {
+                    stride *= 0.5;
+                    continue;
+                }
+                let (_, trial_gradient) = evaluate(cur.view());
+                let trial_along = dot_av(trial_gradient.view(), mode.view());
+                let mut trial_eff = trial_gradient;
+                for (component, mode_component) in trial_eff.iter_mut().zip(mode.iter()) {
+                    *component -= 2.0 * trial_along * *mode_component;
+                }
+                let trial_norm = dot_av(trial_eff.view(), trial_eff.view()).sqrt();
+                if trial_norm < eff_norm {
+                    placed = true;
+                    break;
+                }
+                stride *= 0.5;
+            }
+            if !placed {
+                cur.clone_from(&snapshot);
+                break;
+            }
+            steps += 1;
+            axial = axial_projection(cur.view(), origin, mode.view());
+            let (energy_after, climbed) = evaluate(cur.view());
+            if !cleared_lid
+                && start_energy.is_finite()
+                && energy_after - start_energy >= rise_lid
+                && lambda < 0.0
+            {
+                cleared_lid = true;
+                if landings.len() < n_atoms {
+                    landings.push(cur.clone());
+                    crossed = true;
+                }
+            }
+            let along_after = dot_av(climbed.view(), mode.view());
+            let step_curvature = (along_after - along) / stride;
+            if step_curvature.is_finite() {
+                lambda = step_curvature;
+                if step_curvature < 0.0 {
+                    saw_negative = true;
+                }
+            }
+            if along_after >= 0.0 {
+                uphill = true;
+            } else if uphill && lambda < 0.0 && energy_after - start_energy >= rise_lid {
+                push_ridge(
+                    &mut landings,
+                    &mut crossed,
+                    &cur,
+                    &mode,
+                    lambda,
+                    positive_scale,
+                    contact,
+                    cfg.overshoot,
+                    2,
+                );
+                uphill = false;
+            }
+            if steps % cfg.refresh.max(1) == 0
+                && let Some((soft, soft_mode)) =
+                    lowest_mode(cur.view(), evaluate, cfg.lanczos_steps, epsilon)
+            {
+                lowest = soft;
+                if soft.is_finite() {
+                    let align = dot_av(soft_mode.view(), mode.view());
+                    mode = if align < 0.0 { -soft_mode } else { soft_mode };
+                    if !renormalize_mode(&mut mode, cur.view()) {
+                        break;
+                    }
+                    lambda = soft;
+                    if soft < 0.0 {
+                        saw_negative = true;
+                    }
+                }
+            }
+        }
+    }
+
+    if landings.is_empty()
+        && lambda.is_finite()
+        && lambda < 0.0
+        && lambda > -(positive_scale * positive_scale)
+    {
+        let (energy_end, _) = evaluate(cur.view());
+        if energy_end - start_energy >= rise_lid {
+            landings.extend(landings_past(&cur, &mode, lambda, contact, cfg.overshoot));
+        }
+    }
+    CoverRidge {
+        landings,
+        crossed,
+        lambda,
+        lowest,
+        steps,
+        axial,
+    }
+}
+
+fn note_shelf(
+    shelf: &mut Option<(f64, Array1<f64>)>,
+    value: f64,
+    quenched: &Array1<f64>,
+    origin_energy: f64,
+    reach: f64,
+    contact: f64,
+) {
+    // The shelf is the nearest distinct minimum above the start. A lower
+    // minimum is the search result itself and is not a place to leave from.
+    if !(value > origin_energy + 1e-6) || cluster_reach(quenched.view()) > reach + contact {
+        return;
+    }
+    if shelf.as_ref().is_none_or(|(energy, _)| value < *energy) {
+        *shelf = Some((value, quenched.clone()));
+    }
+}
+
+fn climb_relaxed_cover<E, Q>(
+    start: ArrayView1<f64>,
+    direction: &[f64],
+    hop: usize,
+    evaluate: &mut E,
+    quench: &mut Q,
+    cfg: &Activation,
+    best_energy: &mut f64,
+    best: &mut Array1<f64>,
+    origin_energy: f64,
+    reach: f64,
+    contact: f64,
+    shelf: &mut Option<(f64, Array1<f64>)>,
+) where
+    E: FnMut(ArrayView1<f64>) -> (f64, Array1<f64>),
+    Q: FnMut(ArrayView1<f64>) -> Array1<f64>,
+{
+    let n_atoms = start.len() / 3;
+    if n_atoms < 2 || direction.len() != start.len() || !(contact.is_finite() && contact > 0.0) {
+        return;
+    }
+    let epsilon = cfg.epsilon.max(1e-8);
+    let mut push = Array1::from_vec(direction.to_vec());
+    if !renormalize_mode(&mut push, start) {
+        return;
+    }
+    let mut scale = epsilon;
+    if let Some(value) = directional_curvature(start, push.view(), evaluate, epsilon) {
+        scale = scale.max(value.abs());
+    }
+    if let Some((soft, _)) = lowest_mode(start, evaluate, cfg.lanczos_steps, epsilon) {
+        scale = scale.max(soft.abs());
+    }
+    // One curvature length, as a per-atom displacement, is the first shell.
+    // Later shells double until the lowest curvature changes sign or a pair
+    // would overlap. The scale is the curvature of the minimum.
+    let mut rms = (1.0 / scale.max(epsilon).sqrt()) / (n_atoms as f64).sqrt();
+    rms = rms.clamp(epsilon, contact);
+    let max_rms = reach.max(contact);
+    let mut shell = start.to_owned();
+    let mut moved = false;
+    let mut activated = false;
+    while rms <= max_rms + epsilon {
+        let trial =
+            crate::hypersphere::place_around(start.as_slice().unwrap_or(&[]), direction, rms, None);
+        if trial.len() != start.len() {
+            break;
+        }
+        let mut trial = Array1::from(trial);
+        if closest_pair(trial.view()) < contact * 0.5 {
+            break;
+        }
+        let mut mode = Array1::zeros(start.len());
+        for (component, (there, here)) in mode.iter_mut().zip(trial.iter().zip(start.iter())) {
+            *component = there - here;
+        }
+        if !renormalize_mode(&mut mode, trial.view()) {
+            break;
+        }
+        let axial = axial_projection(trial.view(), start, mode.view());
+        let trust = (rms * (n_atoms as f64).sqrt()).max(epsilon);
+        let snapshot = trial.clone();
+        if !relax_pinned(
+            &mut trial, start, &mode, axial, trust, contact, evaluate, cfg,
+        ) || closest_pair(trial.view()) < contact * 0.5
+        {
+            trial = snapshot;
+        }
+        if closest_pair(trial.view()) < contact * 0.5 {
+            break;
+        }
+        if let Some((soft, _)) = lowest_mode(trial.view(), evaluate, cfg.lanczos_steps, epsilon) {
+            if !(soft.is_finite() && soft > -(scale * scale)) {
+                // This shell's softest curvature is an overlap. Keep the previous one.
+                break;
+            }
+            if soft < 0.0 {
+                activated = true;
+            }
+        }
+        shell.clone_from(&trial);
+        moved = true;
+        let next = (rms * 2.0).min(max_rms);
+        if next <= rms + epsilon {
+            break;
+        }
+        rms = next;
+    }
+    if !moved && !activated {
+        return;
+    }
+    let mut mode = Array1::zeros(start.len());
+    for (component, (there, here)) in mode.iter_mut().zip(shell.iter().zip(start.iter())) {
+        *component = there - here;
+    }
+    if !renormalize_mode(&mut mode, shell.view()) {
+        return;
+    }
+    println!("{{\"kind\":\"shell\",\"hop\":{hop},\"rms\":{rms:.4},\"activated\":{activated}}}");
+    let _ = std::io::stdout().flush();
+    let ridge = climb_cover(shell.view(), mode.view(), 1.0, false, evaluate, cfg);
+    println!(
+        "{{\"kind\":\"climb\",\"hop\":{hop},\"axis\":\"relaxed\",\"travel\":1,\"crossed\":{},\"lambda\":{:.6},\"lowest\":{:.6},\"steps\":{},\"axial\":{:.4},\"landings\":{}}}",
+        ridge.crossed,
+        ridge.lambda,
+        ridge.lowest,
+        ridge.steps,
+        ridge.axial,
+        ridge.landings.len()
+    );
+    let _ = std::io::stdout().flush();
+    for landing in &ridge.landings {
+        if landing.iter().any(|value| !value.is_finite()) {
+            continue;
+        }
+        let quenched = quench(landing.view());
+        if let Some(value) = note_exit(evaluate, &quenched, hop, best_energy, best) {
+            note_shelf(shelf, value, &quenched, origin_energy, reach, contact);
+        }
+    }
+}
+
+fn regularize_pentagons(
+    x: ArrayView1<f64>,
+    axis: [f64; 3],
+    extra: f64,
+    contact: f64,
+) -> Array1<f64> {
+    let n_atoms = x.len() / 3;
+    let mut y = x.to_owned();
+    if n_atoms == 0 {
+        return y;
+    }
+    let mut com = [0.0; 3];
+    for atom in 0..n_atoms {
+        for coord in 0..3 {
+            com[coord] += y[3 * atom + coord];
+        }
+    }
+    for value in &mut com {
+        *value /= n_atoms as f64;
+    }
+    let [ax, ay, az] = axis;
+    let (e1, e2) = plane_basis(axis);
+    let mut rows = Vec::with_capacity(n_atoms);
+    for atom in 0..n_atoms {
+        let r = [
+            y[3 * atom] - com[0],
+            y[3 * atom + 1] - com[1],
+            y[3 * atom + 2] - com[2],
+        ];
+        let height = r[0] * ax + r[1] * ay + r[2] * az;
+        let perp = [r[0] - height * ax, r[1] - height * ay, r[2] - height * az];
+        let rho = (perp[0] * perp[0] + perp[1] * perp[1] + perp[2] * perp[2]).sqrt();
+        let phi = if rho > 1e-8 {
+            let c = (perp[0] * e1[0] + perp[1] * e1[1] + perp[2] * e1[2]) / rho;
+            let s = (perp[0] * e2[0] + perp[1] * e2[1] + perp[2] * e2[2]) / rho;
+            s.atan2(c)
+        } else {
+            0.0
+        };
+        rows.push((height, rho, phi, atom));
+    }
+    let tol = contact * 0.35;
+    let mut used = vec![false; n_atoms];
+    let mut rings = Vec::new();
+    let order: Vec<usize> = (0..n_atoms).collect();
+    for seed in 0..n_atoms {
+        if used[seed] {
+            continue;
+        }
+        let mut ring = vec![seed];
+        used[seed] = true;
+        let mut grew = true;
+        while grew {
+            grew = false;
+            for &other in &order {
+                if used[other] {
+                    continue;
+                }
+                let close = ring.iter().any(|&member| {
+                    let dz = rows[other].0 - rows[member].0;
+                    let dr = rows[other].1 - rows[member].1;
+                    dz * dz + dr * dr <= tol * tol
+                });
+                if close {
+                    used[other] = true;
+                    ring.push(other);
+                    grew = true;
+                }
+            }
+        }
+        rings.push(ring);
+    }
+    rings.sort_by(|left, right| {
+        let z_left = left.iter().map(|&atom| rows[atom].0).sum::<f64>() / left.len() as f64;
+        let z_right = right.iter().map(|&atom| rows[atom].0).sum::<f64>() / right.len() as f64;
+        z_left
+            .partial_cmp(&z_right)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    let turn = 2.0 * std::f64::consts::PI / 5.0;
+    for (layer, ring) in rings.iter().enumerate() {
+        if ring.len() != 5 {
+            continue;
+        }
+        if ring.iter().any(|&atom| rows[atom].1 <= contact * 0.2) {
+            continue;
+        }
+        let mut members = ring.clone();
+        members.sort_by(|&a, &b| {
+            rows[a]
+                .2
+                .partial_cmp(&rows[b].2)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+        let base = rows[members[0]].2 + if layer % 2 == 1 { extra } else { 0.0 };
+        for (slot, &atom) in members.iter().enumerate() {
+            rows[atom].2 = base + turn * slot as f64;
+        }
+    }
+    for (height, rho, phi, atom) in rows {
+        let (sin, cos) = phi.sin_cos();
+        for coord in 0..3 {
+            y[3 * atom + coord] = com[coord]
+                + height * [ax, ay, az][coord]
+                + rho * (cos * e1[coord] + sin * e2[coord]);
+        }
+    }
+    y
+}
+
+fn quench_regular_pentagons<E, Q>(
+    start: ArrayView1<f64>,
+    contact: f64,
+    evaluate: &mut E,
+    quench: &mut Q,
+    best_energy: &mut f64,
+    best: &mut Array1<f64>,
+) where
+    E: FnMut(ArrayView1<f64>) -> (f64, Array1<f64>),
+    Q: FnMut(ArrayView1<f64>) -> Array1<f64>,
+{
+    let stagger = std::f64::consts::PI / 5.0;
+    for axis in outer_axes(start, contact) {
+        for extra in [0.0_f64, stagger] {
+            let turned = regularize_pentagons(start, axis, extra, contact);
+            let held = relax_held_phi(turned.view(), axis, evaluate);
+            let quenched = quench(held.view());
+            let _ = note_exit(evaluate, &quenched, 0, best_energy, best);
+        }
+    }
+}
+
+struct ForceSurface<'a, E> {
+    evaluate: std::sync::Mutex<&'a mut E>,
+}
+
+impl<E> PesSurface for ForceSurface<'_, E>
+where
+    E: FnMut(ArrayView1<f64>) -> (f64, Array1<f64>) + Send,
+{
+    type Error = String;
+
+    fn evaluate(&self, coordinates: ArrayView1<f64>) -> Result<(f64, Array1<f64>), String> {
+        let mut evaluate = self
+            .evaluate
+            .lock()
+            .map_err(|_| "interrupted".to_string())?;
+        let (energy, gradient) = evaluate(coordinates);
+        if energy.is_finite() && gradient.iter().all(|value| value.is_finite()) {
+            Ok((energy, gradient))
+        } else {
+            Err("nonfinite surface value".to_string())
+        }
+    }
+}
+
+/// Climb one covering direction to a converged index-1 saddle and quench both sides.
+///
+/// The direction is the launch mode. The climb is a Lanczos minimum-mode
+/// search. The recorded points are plain quenches, with no kinetic commit.
+pub(crate) fn connect_cover<E, Q>(
+    start: ArrayView1<f64>,
+    mode: ArrayView1<f64>,
+    contact: f64,
+    hop: usize,
+    evaluate: &mut E,
+    quench: &mut Q,
+    best_energy: &mut f64,
+    best: &mut Array1<f64>,
+) -> (
+    Option<(f64, Array1<f64>, Array1<f64>)>,
+    Vec<(f64, Array1<f64>)>,
+)
+where
+    E: FnMut(ArrayView1<f64>) -> (f64, Array1<f64>) + Send,
+    Q: FnMut(ArrayView1<f64>) -> Array1<f64>,
+{
+    let mut found = Vec::new();
+    let n_atoms = start.len() / 3;
+    if n_atoms < 2 || mode.len() != start.len() || !(contact.is_finite() && contact > 0.0) {
+        return (None, found);
+    }
+    let mut heading = mode.to_owned();
+    if !renormalize_mode(&mut heading, start) {
+        return (None, found);
+    }
+    let Ok(geometry) = DescriptorGeometry::finite(contact) else {
+        return (None, found);
+    };
+    let descriptor_space = universal_descriptor_space(geometry);
+    let masses = Array1::ones(n_atoms);
+    let frozen = vec![false; n_atoms];
+    let species = vec![1_u32; n_atoms];
+    let witness = |left: ArrayView1<f64>, right: ArrayView1<f64>| {
+        let mut square = 0.0;
+        for (a, b) in left.iter().zip(right.iter()) {
+            let delta = a - b;
+            square += delta * delta;
+        }
+        (square / n_atoms as f64).sqrt() < contact * 1e-3
+    };
+    let mut config = PesExplorationConfig::default();
+    config.ride_method = RideMethod::Lanczos;
+    // The initial push is one curvature-scale step in 3N. Five doublings
+    // stay inside a fraction of a contact, where the soft mode is still defined.
+    config.saddle_displacement = contact / (n_atoms as f64).sqrt();
+    config.activation_growth = 2.0;
+    config.activation_attempts = 5;
+    config.maximum_move = contact * 0.05;
+    config.quench_steps = n_atoms.saturating_mul(16).max(64);
+    config.saddle_steps = n_atoms.saturating_mul(4).max(64);
+    config.quench_gradient_tolerance = 1e-3;
+    config.saddle_force_tolerance = 1e-2;
+    config.minimum_mode_force_tolerance = 1e-2;
+    config.refine_with_prfo = false;
+    config.branch_attempts = 1;
+    config.irc_steps = 1;
+    // One contact of root-mean-square motion. A shorter step falls back
+    // into the well the climb just left.
+    config.irc_step = contact * (n_atoms as f64).sqrt();
+    let surface = ForceSurface {
+        evaluate: std::sync::Mutex::new(evaluate),
+    };
+    let mut network = PesNetwork::new();
+    let connection = discover_cartesian_mode_connection(
+        &surface,
+        &descriptor_space,
+        &mut network,
+        start,
+        masses.view(),
+        &frozen,
+        heading.view(),
+        Some(&species),
+        &config,
+        &witness,
+    );
+    drop(surface);
+    let mut saddle_pose: Option<(f64, Array1<f64>, Array1<f64>)> = None;
+    let pushes = match connection {
+        Ok(connection) => {
+            saddle_pose = Some((
+                connection.saddle_energy,
+                connection.saddle_coordinates.clone(),
+                connection.lowest_mode.clone(),
+            ));
+            println!(
+                "{{\"kind\":\"dimer\",\"hop\":{hop},\"saddle\":{:.6},\"curvature\":{:.6},\"index\":{}}}",
+                connection.saddle_energy, connection.curvature, connection.negative_modes
+            );
+            let _ = std::io::stdout().flush();
+            let mut shots = Vec::new();
+            for minimum in network.minima() {
+                shots.push(minimum.coordinates.clone());
+            }
+            let rms = contact * (n_atoms as f64).sqrt();
+            for length in [contact, rms] {
+                for sign in [1.0_f64, -1.0] {
+                    let mut far = connection.saddle_coordinates.clone();
+                    for (value, component) in far.iter_mut().zip(connection.lowest_mode.iter()) {
+                        *value += sign * length * *component;
+                    }
+                    shots.push(far);
+                }
+            }
+            shots
+        }
+        Err(error) => {
+            let message = error.to_string().replace('"', "'");
+            println!("{{\"kind\":\"dimer\",\"hop\":{hop},\"error\":\"{message}\"}}");
+            let _ = std::io::stdout().flush();
+            Vec::new()
+        }
+    };
+    for shot in pushes {
+        if shot.iter().any(|value| !value.is_finite()) {
+            continue;
+        }
+        let quenched = quench(shot.view());
+        let Some(energy) = note_exit(evaluate, &quenched, hop, best_energy, best) else {
+            continue;
+        };
+        found.push((energy, quenched));
+    }
+    (saddle_pose, found)
+}
+
+fn ride_lowest_mode<E, Q>(
+    start: ArrayView1<f64>,
+    contact: f64,
+    evaluate: &mut E,
+    quench: &mut Q,
+    best_energy: &mut f64,
+    best: &mut Array1<f64>,
+) where
+    E: FnMut(ArrayView1<f64>) -> (f64, Array1<f64>) + Send,
+    Q: FnMut(ArrayView1<f64>) -> Array1<f64>,
+{
+    let n_atoms = start.len() / 3;
+    if n_atoms < 2 || !(contact.is_finite() && contact > 0.0) {
+        return;
+    }
+    let epsilon = 1e-4;
+    let Some(features) = curvature_features(start, |point| Some(evaluate(point).1), 12, epsilon)
+    else {
+        return;
+    };
+    let Ok(geometry) = DescriptorGeometry::finite(contact) else {
+        return;
+    };
+    let descriptor_space = universal_descriptor_space(geometry);
+    let masses = Array1::ones(n_atoms);
+    let frozen = vec![false; n_atoms];
+    let species = vec![1_u32; n_atoms];
+    let witness = |left: ArrayView1<f64>, right: ArrayView1<f64>| {
+        let mut square = 0.0;
+        for (a, b) in left.iter().zip(right.iter()) {
+            let delta = a - b;
+            square += delta * delta;
+        }
+        (square / n_atoms as f64).sqrt() < contact * 1e-3
+    };
+    let mut config = PesExplorationConfig::default();
+    config.ride_method = RideMethod::Lanczos;
+    // The initial push is one curvature-scale step in 3N. Five doublings
+    // stay inside a fraction of a contact, where the soft mode is still defined.
+    config.saddle_displacement = contact / (n_atoms as f64).sqrt();
+    config.activation_growth = 2.0;
+    config.activation_attempts = 5;
+    config.maximum_move = contact * 0.05;
+    config.quench_steps = n_atoms.saturating_mul(16).max(64);
+    config.saddle_steps = n_atoms.saturating_mul(2).max(64);
+    // The library gates are tighter than a quenched Lennard-Jones cluster
+    // reaches, so the ride aborts before the saddle is recorded.
+    config.quench_gradient_tolerance = 1e-3;
+    config.saddle_force_tolerance = 1e-2;
+    config.minimum_mode_force_tolerance = 1e-2;
+    config.refine_with_prfo = false;
+    // One IRC step of one contact, then the quench. A shorter step falls
+    // back into the same well. Many steps at this length tear the cluster.
+    config.branch_attempts = 1;
+    config.irc_steps = 1;
+    config.irc_step = contact * (n_atoms as f64).sqrt();
+    println!(
+        "{{\"kind\":\"dimer_cfg\",\"quench_tol\":{},\"saddle_tol\":{},\"move\":{}}}",
+        config.quench_gradient_tolerance, config.saddle_force_tolerance, config.maximum_move
+    );
+    let _ = std::io::stdout().flush();
+    let (floor_energy, _) = evaluate(start);
+    let surface = ForceSurface {
+        evaluate: std::sync::Mutex::new(evaluate),
+    };
+    let mut saddles: Vec<(Array1<f64>, Array1<f64>, f64)> = Vec::new();
+    let mut ride_modes = vec![features.mode.clone()];
+    for axis in outer_axes(start, contact).into_iter().take(3) {
+        let (_, mut strain) = twist_and_strain(start, axis);
+        if renormalize_mode(&mut strain, start) {
+            ride_modes.push(strain);
+        }
+    }
+    for (index, feature) in ride_modes.iter().enumerate() {
+        for travel in [1.0_f64, -1.0] {
+            let mode = if travel < 0.0 {
+                -feature.clone()
+            } else {
+                feature.clone()
+            };
+            println!("{{\"kind\":\"dimer_mode\",\"index\":{index},\"travel\":{travel}}}");
+            let _ = std::io::stdout().flush();
+            let mut network = PesNetwork::new();
+            let connection = discover_cartesian_mode_connection(
+                &surface,
+                &descriptor_space,
+                &mut network,
+                start,
+                masses.view(),
+                &frozen,
+                mode.view(),
+                Some(&species),
+                &config,
+                &witness,
+            );
+            match connection {
+                Ok(connection) => {
+                    println!(
+                        "{{\"kind\":\"dimer\",\"saddle\":{:.6},\"curvature\":{:.6},\"index\":{}}}",
+                        connection.saddle_energy, connection.curvature, connection.negative_modes
+                    );
+                    let _ = std::io::stdout().flush();
+                    for minimum in network.minima() {
+                        println!(
+                            "{{\"kind\":\"exit_candidate\",\"energy\":{:.6},\"hop\":0,\"role\":\"quench\"}}",
+                            minimum.energy
+                        );
+                        let _ = std::io::stdout().flush();
+                        if minimum.energy < *best_energy {
+                            *best_energy = minimum.energy;
+                            *best = minimum.coordinates.clone();
+                        }
+                    }
+                    saddles.push((
+                        connection.saddle_coordinates,
+                        connection.lowest_mode,
+                        connection.curvature,
+                    ));
+                }
+                Err(error) => {
+                    let message = error.to_string().replace('"', "'");
+                    println!("{{\"kind\":\"dimer\",\"error\":\"{message}\"}}");
+                    let _ = std::io::stdout().flush();
+                }
+            }
+        }
+    }
+    drop(surface);
+    // A static step off the saddle falls back above the floor. Give the
+    // unstable mode the kinetic energy of the saddle above the reactant,
+    // integrate two vibrational periods, and quench.
+    for (saddle, mode, curvature) in saddles {
+        let energy_saddle = evaluate(saddle.view()).0;
+        let rise = (energy_saddle - floor_energy).max(0.0);
+        let speed = (2.0 * rise).sqrt();
+        let omega = curvature.abs().sqrt().max(1e-3);
+        let period = 2.0 * std::f64::consts::PI / omega;
+        let dt = period / 20.0;
+        let n_atoms = saddle.len() / 3;
+        for sign in [1.0_f64, -1.0] {
+            let mut point = saddle.clone();
+            let mut velocity = Array1::zeros(point.len());
+            for (vel, component) in velocity.iter_mut().zip(mode.iter()) {
+                *vel = sign * speed * component;
+            }
+            for _ in 0..(40) {
+                let (_, gradient) = evaluate(point.view());
+                for i in 0..point.len() {
+                    velocity[i] -= 0.5 * dt * gradient[i];
+                    point[i] += dt * velocity[i];
+                }
+                if closest_pair(point.view()) < contact * 0.5 {
+                    break;
+                }
+                let (_, gradient) = evaluate(point.view());
+                for vel in velocity.iter_mut().zip(gradient.iter()) {
+                    *vel.0 -= 0.5 * dt * *vel.1;
+                }
+            }
+            if closest_pair(point.view()) < contact * 0.5 || n_atoms == 0 {
+                continue;
+            }
+            let quenched = quench(point.view());
+            let _ = note_exit(evaluate, &quenched, 0, best_energy, best);
+        }
+    }
+}
+
+pub(crate) fn climb_outer_axes<E, Q>(
+    start: ArrayView1<f64>,
+    contact: f64,
+    hop: usize,
+    evaluate: &mut E,
+    quench: &mut Q,
+    cfg: &Activation,
+    best_energy: &mut f64,
+    best: &mut Array1<f64>,
+) where
+    E: FnMut(ArrayView1<f64>) -> (f64, Array1<f64>),
+    Q: FnMut(ArrayView1<f64>) -> Array1<f64>,
+{
+    // Half a pentagon sector. The axis is an outermost atom of this
+    // geometry, so the angle is the symmetry of that axis.
+    // A pentagon sector is 2π/5. Half of that puts one ring in the gaps of
+    // the next; a quarter sector is the other symmetry fraction.
+    let sector = 2.0 * std::f64::consts::PI / 5.0;
+    for (index, axis) in outer_axes(start, contact).into_iter().enumerate() {
+        for fraction in [0.5_f64, 0.25] {
+            let staggered = stagger_layers(start, axis, fraction * sector, contact);
+            let held = relax_held_phi(staggered.view(), axis, evaluate);
+            let quenched = quench(held.view());
+            let _ = note_exit(evaluate, &quenched, hop, best_energy, best);
+        }
+        let (twist, strain) = twist_and_strain(start, axis);
+        for (name, mode) in [("twist", twist), ("strain", strain)] {
+            if dot_av(mode.view(), mode.view()) < 1e-16 {
+                continue;
+            }
+            for travel in [1.0_f64, -1.0] {
+                let ridge = climb_cover(start, mode.view(), travel, true, evaluate, cfg);
+                println!(
+                    "{{\"kind\":\"climb\",\"hop\":{hop},\"axis\":\"{name}{index}\",\"travel\":{travel},\"crossed\":{},\"lambda\":{:.6},\"lowest\":{:.6},\"steps\":{},\"axial\":{:.4},\"landings\":{}}}",
+                    ridge.crossed,
+                    ridge.lambda,
+                    ridge.lowest,
+                    ridge.steps,
+                    ridge.axial,
+                    ridge.landings.len()
+                );
+                for landing in &ridge.landings {
+                    if landing.iter().any(|value| !value.is_finite()) {
+                        continue;
+                    }
+                    let quenched = quench(landing.view());
+                    let _ = note_exit(evaluate, &quenched, hop, best_energy, best);
+                }
+            }
+        }
+    }
+}
+
+fn climb_soft_modes<E, Q>(
+    start: ArrayView1<f64>,
+    hop: usize,
+    evaluate: &mut E,
+    quench: &mut Q,
+    cfg: &Activation,
+    best_energy: &mut f64,
+    best: &mut Array1<f64>,
+) where
+    E: FnMut(ArrayView1<f64>) -> (f64, Array1<f64>),
+    Q: FnMut(ArrayView1<f64>) -> Array1<f64>,
+{
+    let epsilon = cfg.epsilon.max(1e-8);
+    // Twice the climb's Lanczos length resolves the softest band. The
+    // higher Ritz values in a longer run are not that band.
+    let steps = cfg.lanczos_steps.saturating_mul(2).max(8);
+    let count = cfg.lanczos_steps.max(2);
+    let Some((_, modes, _)) = soft_subspace(
+        start,
+        |point| Some(evaluate(point).1),
+        steps,
+        epsilon,
+        count,
+    ) else {
+        return;
+    };
+    println!(
+        "{{\"kind\":\"subspace\",\"hop\":{hop},\"modes\":{}}}",
+        modes.len()
+    );
+    let _ = std::io::stdout().flush();
+    for (index, mode) in modes.iter().enumerate() {
+        for travel in [1.0_f64, -1.0] {
+            let ridge = climb_cover(start, mode.view(), travel, true, evaluate, cfg);
+            println!(
+                "{{\"kind\":\"climb\",\"hop\":{hop},\"axis\":\"mode{index}\",\"travel\":{travel},\"crossed\":{},\"lambda\":{:.6},\"lowest\":{:.6},\"steps\":{},\"axial\":{:.4},\"landings\":{}}}",
+                ridge.crossed,
+                ridge.lambda,
+                ridge.lowest,
+                ridge.steps,
+                ridge.axial,
+                ridge.landings.len()
+            );
+            for landing in &ridge.landings {
+                if landing.iter().any(|value| !value.is_finite()) {
+                    continue;
+                }
+                let quenched = quench(landing.view());
+                let _ = note_exit(evaluate, &quenched, hop, best_energy, best);
+            }
+        }
+    }
+}
+
+fn climb_directions<E, Q>(
+    start: ArrayView1<f64>,
+    direction: &[f64],
+    hop: usize,
+    evaluate: &mut E,
+    quench: &mut Q,
+    cfg: &Activation,
+    best_energy: &mut f64,
+    best: &mut Array1<f64>,
+    origin_energy: f64,
+    reach: f64,
+    contact: f64,
+    shelf: &mut Option<(f64, Array1<f64>)>,
+) where
+    E: FnMut(ArrayView1<f64>) -> (f64, Array1<f64>),
+    Q: FnMut(ArrayView1<f64>) -> Array1<f64>,
+{
+    let mut follow: Option<(f64, Array1<f64>)> = None;
+    for (axis, raw) in cover_axes(direction) {
+        for travel in [1.0_f64, -1.0] {
+            let ridge = climb_cover(start, raw.view(), travel, true, evaluate, cfg);
+            println!(
+                "{{\"kind\":\"climb\",\"hop\":{hop},\"axis\":\"{axis}\",\"travel\":{travel},\"crossed\":{},\"lambda\":{:.6},\"lowest\":{:.6},\"steps\":{},\"axial\":{:.4},\"landings\":{}}}",
+                ridge.crossed,
+                ridge.lambda,
+                ridge.lowest,
+                ridge.steps,
+                ridge.axial,
+                ridge.landings.len()
+            );
+            let _ = std::io::stdout().flush();
+            for landing in &ridge.landings {
+                if landing.iter().any(|value| !value.is_finite()) {
+                    continue;
+                }
+                let quenched = quench(landing.view());
+                let Some(value) = note_exit(evaluate, &quenched, hop, best_energy, best) else {
+                    continue;
+                };
+                note_shelf(shelf, value, &quenched, origin_energy, reach, contact);
+                let distinct = (value - origin_energy).abs() > 1e-6;
+                let compact = cluster_reach(quenched.view()) <= reach + contact;
+                if distinct && compact && follow.as_ref().is_none_or(|(energy, _)| value < *energy)
+                {
+                    follow = Some((value, quenched));
+                }
+            }
+        }
+    }
+    if let Some((_, neighbour)) = follow
+        && let Some((_, soft_mode)) = lowest_mode(
+            neighbour.view(),
+            evaluate,
+            cfg.lanczos_steps,
+            cfg.epsilon.max(1e-8),
+        )
+    {
+        for travel in [1.0_f64, -1.0] {
+            let ridge = climb_cover(
+                neighbour.view(),
+                soft_mode.view(),
+                travel,
+                false,
+                evaluate,
+                cfg,
+            );
+            println!(
+                "{{\"kind\":\"climb\",\"hop\":{hop},\"axis\":\"mode\",\"travel\":{travel},\"crossed\":{},\"lambda\":{:.6},\"lowest\":{:.6},\"steps\":{},\"axial\":{:.4},\"landings\":{}}}",
+                ridge.crossed,
+                ridge.lambda,
+                ridge.lowest,
+                ridge.steps,
+                ridge.axial,
+                ridge.landings.len()
+            );
+            let _ = std::io::stdout().flush();
+            for landing in &ridge.landings {
+                if landing.iter().any(|value| !value.is_finite()) {
+                    continue;
+                }
+                let quenched = quench(landing.view());
+                if let Some(value) = note_exit(evaluate, &quenched, hop, best_energy, best) {
+                    note_shelf(shelf, value, &quenched, origin_energy, reach, contact);
+                }
+            }
+        }
+    }
+    climb_relaxed_cover(
+        start,
+        direction,
+        hop,
+        evaluate,
+        quench,
+        cfg,
+        best_energy,
+        best,
+        origin_energy,
+        reach,
+        contact,
+        shelf,
+    );
+    let flipped: Vec<f64> = direction.iter().copied().map(|value| -value).collect();
+    climb_relaxed_cover(
+        start,
+        &flipped,
+        hop,
+        evaluate,
+        quench,
+        cfg,
+        best_energy,
+        best,
+        origin_energy,
+        reach,
+        contact,
+        shelf,
+    );
+}
+
+fn note_exit<E>(
+    evaluate: &mut E,
+    quenched: &Array1<f64>,
+    hop: usize,
+    best_energy: &mut f64,
+    best: &mut Array1<f64>,
+) -> Option<f64>
+where
+    E: FnMut(ArrayView1<f64>) -> (f64, Array1<f64>),
+{
+    let (value, _) = evaluate(quenched.view());
+    if !value.is_finite() {
+        return None;
+    }
+    println!(
+        "{{\"kind\":\"exit_candidate\",\"energy\":{value:.6},\"hop\":{hop},\"role\":\"quench\"}}"
+    );
+    let _ = std::io::stdout().flush();
+    if value < *best_energy {
+        *best_energy = value;
+        *best = quenched.clone();
+    }
+    Some(value)
+}
+
+/// Length of the modified-dimer probe, as a fraction of the nearest neighbour.
+///
+/// A probe of a tenth of the contact reaches the repulsive wall. The dimer
+/// then aligns with that clash. One hundredth of the contact stays where the
+/// curvature is still the soft mode.
+pub fn softening_displacement(x: ArrayView1<f64>) -> f64 {
+    let contact = closest_pair(x);
+    if contact.is_finite() && contact > 1e-8 && contact < 1e6 {
+        contact * 0.01
+    } else {
+        1e-2
+    }
+}
+
+fn vector_norm(v: &Array1<f64>) -> f64 {
+    v.iter().map(|value| value * value).sum::<f64>().sqrt()
+}
+
+fn normalise_direction(v: &mut Array1<f64>) -> bool {
+    let norm = vector_norm(v);
+    if !norm.is_finite() || norm < 1e-14 {
+        return false;
+    }
+    *v /= norm;
+    true
+}
+
+/// Point a covering seed along the soft curvature.
+///
+/// Forty force probes, each one hundredth of a contact off the minimum, with
+/// the perpendicular force mixed in at 0.15. Rigid motion is removed so the
+/// direction is an internal one.
+fn soften_direction<E>(
+    start: ArrayView1<f64>,
+    seed: ArrayView1<f64>,
+    evaluate: &mut E,
+) -> Option<Array1<f64>>
+where
+    E: FnMut(ArrayView1<f64>) -> (f64, Array1<f64>),
+{
+    if seed.len() != start.len() || start.len() < 6 {
+        return None;
+    }
+    let basis = crate::curvature::rigid_basis(start);
+    let displacement = softening_displacement(start);
+    let mixing = 0.15_f64;
+    let mut direction = seed.to_owned();
+    crate::curvature::project_rigid_with(&mut direction, &basis);
+    if !normalise_direction(&mut direction) {
+        return None;
+    }
+    for _ in 0..40 {
+        let mut probe = start.to_owned();
+        for (slot, step) in probe.iter_mut().zip(direction.iter()) {
+            *slot += displacement * *step;
+        }
+        let (_, gradient) = evaluate(probe.view());
+        if gradient.len() != start.len() || gradient.iter().any(|value| !value.is_finite()) {
+            return None;
+        }
+        let mut perpendicular = gradient.mapv(|value| -value);
+        crate::curvature::project_rigid_with(&mut perpendicular, &basis);
+        let parallel: f64 = perpendicular
+            .iter()
+            .zip(direction.iter())
+            .map(|(force, axis)| force * axis)
+            .sum();
+        for (slot, axis) in perpendicular.iter_mut().zip(direction.iter()) {
+            *slot -= parallel * *axis;
+        }
+        for (slot, push) in direction.iter_mut().zip(perpendicular.iter()) {
+            *slot += mixing * *push;
+        }
+        crate::curvature::project_rigid_with(&mut direction, &basis);
+        if !normalise_direction(&mut direction) {
+            return None;
+        }
+    }
+    Some(direction)
+}
+
+fn curvature_along<E>(start: ArrayView1<f64>, direction: ArrayView1<f64>, evaluate: &mut E) -> f64
+where
+    E: FnMut(ArrayView1<f64>) -> (f64, Array1<f64>),
+{
+    let eps = 1e-4;
+    let (_, lower) = evaluate(start);
+    let mut probe = start.to_owned();
+    for (slot, step) in probe.iter_mut().zip(direction.iter()) {
+        *slot += eps * *step;
+    }
+    let (_, upper) = evaluate(probe.view());
+    if lower.len() != upper.len() || direction.len() != lower.len() {
+        return f64::NAN;
+    }
+    upper
+        .iter()
+        .zip(lower.iter())
+        .zip(direction.iter())
+        .map(|((high, low), axis)| (high - low) * axis)
+        .sum::<f64>()
+        / eps
+}
+
+/// Farthest point of a short rigid-projected trajectory launched along `direction`.
+fn farthest_along<E>(
+    start: ArrayView1<f64>,
+    direction: ArrayView1<f64>,
+    kinetic: f64,
+    evaluate: &mut E,
+) -> Array1<f64>
+where
+    E: FnMut(ArrayView1<f64>) -> (f64, Array1<f64>),
+{
+    let speed = (2.0 * kinetic.max(0.0)).sqrt();
+    let mut velocity = direction.to_owned() * speed;
+    let mut point = start.to_owned();
+    let (_, gradient) = evaluate(point.view());
+    let mut accel = gradient.mapv(|value| -value);
+    let dt = 0.005_f64;
+    let mut far = point.clone();
+    let mut best = 0.0_f64;
+    for _ in 0..800 {
+        for (slot, push) in velocity.iter_mut().zip(accel.iter()) {
+            *slot += 0.5 * dt * *push;
+        }
+        let basis = crate::curvature::rigid_basis(point.view());
+        crate::curvature::project_rigid_with(&mut velocity, &basis);
+        for (slot, step) in point.iter_mut().zip(velocity.iter()) {
+            *slot += dt * *step;
+        }
+        let (_, gradient) = evaluate(point.view());
+        if gradient.iter().any(|value| !value.is_finite()) {
+            break;
+        }
+        accel = gradient.mapv(|value| -value);
+        for (slot, push) in velocity.iter_mut().zip(accel.iter()) {
+            *slot += 0.5 * dt * *push;
+        }
+        let basis = crate::curvature::rigid_basis(point.view());
+        crate::curvature::project_rigid_with(&mut velocity, &basis);
+        let dist: f64 = point
+            .iter()
+            .zip(start.iter())
+            .map(|(here, there)| {
+                let delta = here - there;
+                delta * delta
+            })
+            .sum();
+        if dist > best {
+            best = dist;
+            far = point.clone();
+        }
+    }
+    far
+}
+
+fn gradient_infinity(gradient: &Array1<f64>) -> f64 {
+    gradient
+        .iter()
+        .fold(0.0_f64, |best, value| best.max(value.abs()))
+}
+
+/// Softened escapes that keep walking after they leave the start basin.
+///
+/// The launch is a covering direction mixed toward the soft curvature. The
+/// kinetic energy starts at the harmonic cost of a one-contact step and grows
+/// when the quench falls back onto the basin it left, or onto the basin the
+/// walk started in. A converged quench of the far point is recorded either way.
+fn softened_escape_walk<E, Q>(
+    origin: ArrayView1<f64>,
+    escapes: usize,
+    seed: u64,
+    evaluate: &mut E,
+    quench: &mut Q,
+    cfg: &Activation,
+    best_energy: &mut f64,
+    best: &mut Array1<f64>,
+) where
+    E: FnMut(ArrayView1<f64>) -> (f64, Array1<f64>),
+    Q: FnMut(ArrayView1<f64>) -> Array1<f64>,
+{
+    if cfg.max_steps < 12 || escapes == 0 || origin.len() < 6 {
+        return;
+    }
+    let contact = closest_pair(origin);
+    if !(contact.is_finite() && contact > 0.95) {
+        return;
+    }
+    let (origin_energy, _) = evaluate(origin);
+    if !origin_energy.is_finite() {
+        return;
+    }
+    let n_cover = crate::hypersphere::default_cover_size();
+    let mut rng = rand::rngs::StdRng::seed_from_u64(seed ^ 0x51e0u64);
+    let Some(first) = soften_direction(
+        origin,
+        Array1::from(crate::hypersphere::cover_direction(
+            n_cover,
+            origin.len(),
+            seed as usize,
+        ))
+        .view(),
+        evaluate,
+    ) else {
+        return;
+    };
+    let curv = curvature_along(origin, first.view(), evaluate).abs();
+    let harmonic = (0.5 * curv * contact * contact).max(1e-3);
+    let ceiling = harmonic * 8.0;
+    let mut kinetic = harmonic;
+    let mut threshold = harmonic;
+    let mut current = origin_energy;
+    let mut here = origin.to_owned();
+    let beta = 1.05_f64;
+    println!(
+        "{{\"kind\":\"soft_walk\",\"escapes\":{escapes},\"harmonic\":{harmonic:.4},\"curvature\":{curv:.4}}}"
+    );
+    let _ = std::io::stdout().flush();
+    for hop in 0..escapes {
+        let mut seed_direction = Array1::from(crate::hypersphere::cover_direction(
+            n_cover,
+            here.len(),
+            hop,
+        ));
+        for slot in seed_direction.iter_mut() {
+            *slot += 0.25 * rng.random::<f64>();
+        }
+        let Some(direction) = soften_direction(here.view(), seed_direction.view(), evaluate) else {
+            kinetic = (kinetic * beta).min(ceiling);
+            continue;
+        };
+        let landed = farthest_along(here.view(), direction.view(), kinetic, evaluate);
+        let quenched = quench(landed.view());
+        let (trial, gradient) = evaluate(quenched.view());
+        if !trial.is_finite() || gradient_infinity(&gradient) > 1e-3 {
+            kinetic = (kinetic * beta).min(ceiling);
+            continue;
+        }
+        let _ = note_exit(evaluate, &quenched, hop, best_energy, best);
+        let same = (trial - current).abs() < 1e-3;
+        let home = (trial - origin_energy).abs() < 1e-3;
+        if same || home {
+            kinetic = (kinetic * beta).min(ceiling);
+            threshold = (threshold * beta).min(ceiling);
+        } else if trial - current < threshold {
+            current = trial;
+            here = quenched;
+            kinetic = (kinetic / beta).max(harmonic / 4.0);
+            threshold = (threshold / beta).max(harmonic / 4.0);
+        } else {
+            threshold = (threshold * beta).min(ceiling);
+        }
+    }
+}
+
+/// Climb one covering direction past the first shallow ridge and quench each later ridge.
+///
+/// The rise cutoff is half the harmonic energy of a one-contact step at the
+/// soft curvature of this minimum. A neighbour reached by a smaller rise is
+/// the same funnel. The cutoff is zero when the curvature is not available,
+/// and every ridge is then kept. Short budgets skip the climb.
+fn climb_later_ridges<E, Q>(
+    start: ArrayView1<f64>,
+    contact: f64,
+    hop: usize,
+    evaluate: &mut E,
+    quench: &mut Q,
+    cfg: &Activation,
+    best_energy: &mut f64,
+    best: &mut Array1<f64>,
+) where
+    E: FnMut(ArrayView1<f64>) -> (f64, Array1<f64>),
+    Q: FnMut(ArrayView1<f64>) -> Array1<f64>,
+{
+    if cfg.max_steps < 12 || !(contact.is_finite() && contact > 0.95) || start.len() < 6 {
+        return;
+    }
+    let n_cover = crate::hypersphere::default_cover_size();
+    let direction = Array1::from(crate::hypersphere::cover_direction(
+        n_cover,
+        start.len(),
+        hop,
+    ));
+    let mut climb = cfg.clone();
+    let n_atoms = start.len() / 3;
+    // A contact-length step spread over the atoms. The climb then has room
+    // to cross more than one ridge before the budget ends.
+    climb.step = contact / (n_atoms as f64).sqrt();
+    climb.max_steps = climb.max_steps.max(48);
+    climb.later_ridges = true;
+    climb.min_rise = 0.0;
+    if let Some(features) = curvature_features(
+        start,
+        |point| Some(evaluate(point).1),
+        cfg.lanczos_steps.max(8),
+        cfg.epsilon.max(1e-8),
+    ) {
+        let lid = 0.5 * features.lambda_min.abs() * contact * contact;
+        if lid.is_finite() && lid > 0.0 {
+            // A quarter of that rise is above a neighbour-to-neighbour step
+            // and still below the harmonic cost of a full contact.
+            climb.min_rise = 0.25 * lid;
+        }
+    }
+    let Some(outcome) = activate_along(
+        start,
+        direction.view(),
+        |point| Some(evaluate(point).1),
+        &climb,
+    ) else {
+        return;
+    };
+    println!(
+        "{{\"kind\":\"later_ridge\",\"hop\":{hop},\"ridges\":{},\"min_rise\":{:.4},\"steps\":{},\"lambda\":{:.4},\"crossed\":{}}}",
+        outcome.ridges.len(),
+        climb.min_rise,
+        outcome.steps,
+        outcome.lambda,
+        outcome.crossed
+    );
+    let _ = std::io::stdout().flush();
+    let mut landed = outcome.ridges;
+    if landed.is_empty() && outcome.lambda < 0.0 {
+        // The force-flip test can miss a ridge that the curvature has
+        // already passed. The last point is still on the far side.
+        landed.push(outcome.state);
+    }
+    for ridge in landed {
+        if ridge.iter().any(|value| !value.is_finite()) {
+            continue;
+        }
+        let quenched = quench(ridge.view());
+        let _ = note_exit(evaluate, &quenched, hop, best_energy, best);
+    }
+}
+
+/// Covering displacements, a minimum-mode climb, and a quench.
+///
+/// Each hop takes one direction of the hypersphere cover. The climb holds
+/// that direction and relaxes the force perpendicular to it, then follows
+/// the lowest mode once its curvature changes sign. The quench is the
+/// caller's local minimiser, taken past that ridge. No target energy is
+/// read.
+pub fn cover_climb_search<E, Q>(
+    origin: ArrayView1<f64>,
+    rmsd: f64,
+    max_hops: usize,
+    seed: u64,
+    mut evaluate: E,
+    mut quench: Q,
+    cfg: &Activation,
+) -> Array1<f64>
+where
+    E: FnMut(ArrayView1<f64>) -> (f64, Array1<f64>) + Send,
+    Q: FnMut(ArrayView1<f64>) -> Array1<f64>,
+{
+    if max_hops == 0 || origin.is_empty() {
+        return origin.to_owned();
+    }
+    let (origin_e, _) = evaluate(origin);
+    if !origin_e.is_finite() {
+        return origin.to_owned();
+    }
+    println!(
+        "{{\"kind\":\"exit_candidate\",\"energy\":{origin_e:.6},\"hop\":0,\"role\":\"start\"}}"
+    );
+    let mut best = origin.to_owned();
+    let mut best_e = origin_e;
+    let contact = closest_pair(origin);
+    let n_atoms = origin.len() / 3;
+    let mut reach = 0.0_f64;
+    if n_atoms >= 2 {
+        let mut com = [0.0; 3];
+        for i in 0..n_atoms {
+            for k in 0..3 {
+                com[k] += origin[3 * i + k];
+            }
+        }
+        for value in &mut com {
+            *value /= n_atoms as f64;
+        }
+        for i in 0..n_atoms {
+            let mut r2 = 0.0;
+            for k in 0..3 {
+                let d = origin[3 * i + k] - com[k];
+                r2 += d * d;
+            }
+            reach = reach.max(r2.sqrt());
+        }
+    }
+    let mut stations = Vec::new();
+    let mut station = contact * 0.5;
+    let outer = reach.max(contact);
+    if station > 0.0 {
+        stations.push(station);
+        while station * 2.0 <= outer * 1.01 {
+            station *= 2.0;
+            stations.push(station);
+        }
+    }
+    if stations.last().copied().unwrap_or(0.0) < outer {
+        stations.push(outer);
+    }
+    let mut shelf: Option<(f64, Array1<f64>)> = None;
+    if contact > 0.95 && n_atoms >= 2 {
+        quench_regular_pentagons(
+            origin.view(),
+            contact,
+            &mut evaluate,
+            &mut quench,
+            &mut best_e,
+            &mut best,
+        );
+        ride_lowest_mode(
+            origin.view(),
+            contact,
+            &mut evaluate,
+            &mut quench,
+            &mut best_e,
+            &mut best,
+        );
+        climb_outer_axes(
+            origin.view(),
+            contact,
+            0,
+            &mut evaluate,
+            &mut quench,
+            cfg,
+            &mut best_e,
+            &mut best,
+        );
+        climb_soft_modes(
+            origin.view(),
+            0,
+            &mut evaluate,
+            &mut quench,
+            cfg,
+            &mut best_e,
+            &mut best,
+        );
+    }
+    for hop in 0..max_hops {
+        if contact > 0.95 && n_atoms >= 2 {
+            let n_cover = crate::hypersphere::default_cover_size();
+            let direction = crate::hypersphere::cover_direction(
+                n_cover,
+                origin.len(),
+                hop.wrapping_add(seed as usize),
+            );
+            if hop == 0 {
+                softened_escape_walk(
+                    origin.view(),
+                    max_hops.max(48),
+                    seed,
+                    &mut evaluate,
+                    &mut quench,
+                    cfg,
+                    &mut best_e,
+                    &mut best,
+                );
+            }
+            climb_later_ridges(
+                origin.view(),
+                contact,
+                hop,
+                &mut evaluate,
+                &mut quench,
+                cfg,
+                &mut best_e,
+                &mut best,
+            );
+            climb_directions(
+                origin.view(),
+                &direction,
+                hop + 1,
+                &mut evaluate,
+                &mut quench,
+                cfg,
+                &mut best_e,
+                &mut best,
+                origin_e,
+                reach,
+                contact,
+                &mut shelf,
+            );
+            for &station in &stations {
+                let placed = crate::hypersphere::place_around(
+                    origin.as_slice().unwrap_or(&[]),
+                    &direction,
+                    station.max(1.0e-3),
+                    None,
+                );
+                if placed.len() != origin.len() {
+                    continue;
+                }
+                let mut points = vec![Array1::from(placed)];
+                let mut single = origin.to_owned();
+                let mut best_atom = 0usize;
+                let mut best_weight = 0.0_f64;
+                for atom in 0..n_atoms {
+                    let weight: f64 = (0..3)
+                        .map(|k| direction[3 * atom + k].powi(2))
+                        .sum::<f64>()
+                        .sqrt();
+                    if weight > best_weight {
+                        best_weight = weight;
+                        best_atom = atom;
+                    }
+                }
+                if best_weight > 0.0 {
+                    let step = outer / best_weight;
+                    for k in 0..3 {
+                        single[3 * best_atom + k] += step * direction[3 * best_atom + k];
+                    }
+                    points.push(single);
+                }
+                for point in points {
+                    let quenched = quench(point.view());
+                    let (value, _) = evaluate(quenched.view());
+                    if !value.is_finite() {
+                        continue;
+                    }
+                    println!(
+                        "{{\"kind\":\"exit_candidate\",\"energy\":{value:.6},\"hop\":{},\"role\":\"quench\"}}",
+                        hop + 1
+                    );
+                    let _ = std::io::stdout().flush();
+                    note_shelf(&mut shelf, value, &quenched, origin_e, reach, contact);
+                    if value < best_e {
+                        best_e = value;
+                        best = quenched;
+                    }
+                }
+            }
+        }
+        let quenched = cover_climb_quench(
+            best.view(),
+            rmsd,
+            hop.wrapping_add(seed as usize),
+            |point| Some(evaluate(point).1),
+            &mut quench,
+            cfg,
+        );
+        let (value, _) = evaluate(quenched.view());
+        if value.is_finite() {
+            println!(
+                "{{\"kind\":\"exit_candidate\",\"energy\":{value:.6},\"hop\":{},\"role\":\"quench\"}}",
+                hop + 1
+            );
+            let _ = std::io::stdout().flush();
+        }
+        if value.is_finite() && value < best_e {
+            best_e = value;
+            best = quenched.clone();
+        }
+        if value.is_finite() {
+            note_shelf(&mut shelf, value, &quenched, origin_e, reach, contact);
+        }
+    }
+    if contact > 0.95
+        && n_atoms >= 2
+        && let Some((shelf_energy, shelf_state)) = shelf.clone()
+    {
+        println!(
+            "{{\"kind\":\"shelf\",\"energy\":{shelf_energy:.6},\"above\":{:.6}}}",
+            shelf_energy - origin_e
+        );
+        let _ = std::io::stdout().flush();
+        let mut shelf_next: Option<(f64, Array1<f64>)> = None;
+        let n_cover = crate::hypersphere::default_cover_size();
+        for hop in 0..max_hops {
+            let direction = crate::hypersphere::cover_direction(
+                n_cover,
+                shelf_state.len(),
+                hop.wrapping_add(seed as usize),
+            );
+            climb_directions(
+                shelf_state.view(),
+                &direction,
+                hop + 1,
+                &mut evaluate,
+                &mut quench,
+                cfg,
+                &mut best_e,
+                &mut best,
+                origin_e,
+                reach,
+                contact,
+                &mut shelf_next,
+            );
+        }
+    }
+    if contact > 0.95 && n_atoms >= 2 {
+        // The centre of mass is a point the coordinates already define.
+        // Placing the innermost or the outermost atom there is a radial
+        // displacement of length equal to that atom's own radius.
+        for outermost in [false, true] {
+            let shifted = relax_shell_around_centre(origin.view(), outermost, &mut evaluate);
+            let quenched = quench(shifted.view());
+            let Some(value) = note_exit(&mut evaluate, &quenched, 0, &mut best_e, &mut best) else {
+                continue;
+            };
+            note_shelf(&mut shelf, value, &quenched, origin_e, reach, contact);
+            let distinct = (value - origin_e).abs() > 1e-6;
+            let compact = cluster_reach(quenched.view()) <= reach + contact;
+            println!(
+                "{{\"kind\":\"core\",\"outermost\":{outermost},\"energy\":{value:.6},\"climbed\":{}}}",
+                distinct && compact
+            );
+            let _ = std::io::stdout().flush();
+            if !distinct || !compact {
+                continue;
+            }
+            quench_regular_pentagons(
+                quenched.view(),
+                contact,
+                &mut evaluate,
+                &mut quench,
+                &mut best_e,
+                &mut best,
+            );
+            ride_lowest_mode(
+                quenched.view(),
+                contact,
+                &mut evaluate,
+                &mut quench,
+                &mut best_e,
+                &mut best,
+            );
+            climb_soft_modes(
+                quenched.view(),
+                0,
+                &mut evaluate,
+                &mut quench,
+                cfg,
+                &mut best_e,
+                &mut best,
+            );
+            climb_outer_axes(
+                quenched.view(),
+                contact,
+                0,
+                &mut evaluate,
+                &mut quench,
+                cfg,
+                &mut best_e,
+                &mut best,
+            );
+            let mut delta = Array1::zeros(quenched.len());
+            for (component, (there, here)) in
+                delta.iter_mut().zip(quenched.iter().zip(origin.iter()))
+            {
+                *component = there - here;
+            }
+            if renormalize_mode(&mut delta, quenched.view()) {
+                let lead = max_atom_weight(delta.view()).max(1e-12);
+                for step in [contact / lead, reach.max(contact) / lead] {
+                    let mut beyond = quenched.clone();
+                    for (value, component) in beyond.iter_mut().zip(delta.iter()) {
+                        *value += step * component;
+                    }
+                    if closest_pair(beyond.view()) < contact * 0.5 {
+                        continue;
+                    }
+                    let landed = quench(beyond.view());
+                    let _ = note_exit(&mut evaluate, &landed, 0, &mut best_e, &mut best);
+                }
+                for travel in [1.0_f64, -1.0] {
+                    let ridge = climb_cover(
+                        quenched.view(),
+                        delta.view(),
+                        travel,
+                        true,
+                        &mut evaluate,
+                        cfg,
+                    );
+                    for landing in &ridge.landings {
+                        if landing.iter().any(|value| !value.is_finite()) {
+                            continue;
+                        }
+                        let landed = quench(landing.view());
+                        let _ = note_exit(&mut evaluate, &landed, 0, &mut best_e, &mut best);
+                    }
+                }
+            }
+            // The centred minimum gets the whole cover, one climb each way.
+            // The caller's hop cap still bounds the search that starts on
+            // the original geometry.
+            let n_cover = crate::hypersphere::default_cover_size();
+            for hop in 0..n_cover {
+                let direction = crate::hypersphere::cover_direction(
+                    n_cover,
+                    quenched.len(),
+                    hop.wrapping_add(seed as usize),
+                );
+                for travel in [1.0_f64, -1.0] {
+                    let mut aimed = Array1::from_vec(direction.clone());
+                    if travel < 0.0 {
+                        for component in aimed.iter_mut() {
+                            *component = -*component;
+                        }
+                    }
+                    let ridge =
+                        climb_cover(quenched.view(), aimed.view(), 1.0, true, &mut evaluate, cfg);
+                    for landing in &ridge.landings {
+                        if landing.iter().any(|value| !value.is_finite()) {
+                            continue;
+                        }
+                        let landed = quench(landing.view());
+                        let _ = note_exit(&mut evaluate, &landed, hop + 1, &mut best_e, &mut best);
+                    }
+                }
+            }
+        }
+    }
+    best
+}
+
+fn fivefold_opening(origin: ArrayView1<f64>, rmsd: f64, which: usize) -> Array1<f64> {
+    let good: Vec<([f64; 3], f64)> = crate::soap::fivefold_axis_table(origin)
+        .into_iter()
+        .filter(|(_, d5)| *d5 < 1.40)
+        .collect();
+    if good.is_empty() {
+        return origin.to_owned();
+    }
+    let target = if which % 2 == 0 { 0.90 } else { 0.99 };
+    let (axis, _) = good
+        .iter()
+        .min_by(|a, b| {
+            (a.1 - target)
+                .abs()
+                .partial_cmp(&(b.1 - target).abs())
+                .unwrap_or(std::cmp::Ordering::Equal)
+        })
+        .copied()
+        .unwrap_or(good[0]);
+    crate::soap::step_away_fivefold_about(origin, rmsd.max(0.75), axis)
+}
+
+/// Climb along `direction` first, then track the minimum mode.
+///
+/// The first steps follow the supplied vector. Later steps replace it
+/// with the softest mode, keeping the sense of travel. `direction` is
+/// what selects the half-space; the mode is what the ridge becomes.
+pub fn activate_along<G>(
+    x: ArrayView1<f64>,
+    direction: ArrayView1<f64>,
+    mut grad: G,
+    cfg: &Activation,
+) -> Option<ActivationOutcome>
+where
+    G: FnMut(ArrayView1<f64>) -> Option<Array1<f64>>,
+{
+    activate_aligned(x, None, Some(direction), &mut grad, cfg, 1.0)
 }
 
 /// Climb away from `origin`: the first mode is aligned with \(x-x_0\)
@@ -154,12 +2940,32 @@ pub fn activate_from_origin<G>(
 where
     G: FnMut(ArrayView1<f64>) -> Option<Array1<f64>>,
 {
-    activate_aligned(x, Some(origin), &mut grad, cfg, 1.0)
+    activate_aligned(x, Some(origin), None, &mut grad, cfg, 1.0)
+}
+
+fn closest_pair(x: ArrayView1<f64>) -> f64 {
+    let n = x.len() / 3;
+    if n < 2 {
+        return f64::MAX;
+    }
+    let mut best = f64::MAX;
+    for i in 0..n {
+        for j in (i + 1)..n {
+            let mut r2 = 0.0;
+            for k in 0..3 {
+                let d = x[3 * i + k] - x[3 * j + k];
+                r2 += d * d;
+            }
+            best = best.min(r2);
+        }
+    }
+    best.sqrt()
 }
 
 fn activate_aligned<G>(
     x: ArrayView1<f64>,
     origin: Option<ArrayView1<f64>>,
+    initial_direction: Option<ArrayView1<f64>>,
     grad: &mut G,
     cfg: &Activation,
     sign0: f64,
@@ -169,6 +2975,22 @@ where
 {
     let dim = x.len();
     let mut cur = x.to_owned();
+    let contact = closest_pair(x);
+    let cluster = contact > 0.95;
+    // A pair closer than half the contact distance of the start is inside
+    // the core. The threshold is that distance, not a fixed length.
+    let clash = contact * 0.5;
+    let n_atoms = (dim / 3).max(1) as f64;
+    // Perpendicular relaxation may move by one contact length, as an
+    // all-atom RMS, or it cannot steer around a neighbour. The absolute
+    // cap stays in force for a system that is not a cluster.
+    let perp_cap = if cluster {
+        // One perpendicular step moves as far as one climb step: a contact
+        // length spread over the climb budget, as an all-atom RMS.
+        contact / cfg.max_steps.max(1) as f64 * n_atoms.sqrt()
+    } else {
+        cfg.perp_max_move
+    };
     let mut evaluations = 0usize;
 
     let first = curvature_features(
@@ -180,8 +3002,20 @@ where
         cfg.lanczos_steps,
         cfg.epsilon,
     )?;
-    let mut mode = first.mode.clone();
-    let mut lambda = first.lambda_min;
+    let (mut mode, mut lambda) = if let Some(direction) = initial_direction {
+        let n: f64 = direction.iter().map(|z| z * z).sum::<f64>().sqrt();
+        if n < 1e-15 {
+            (first.mode.clone(), first.lambda_min)
+        } else {
+            // Positive so the first steps cannot look like a crossed ridge
+            // before the mode has been recomputed.
+            let mut unit = direction.to_owned();
+            unit /= n;
+            (unit, 1.0)
+        }
+    } else {
+        (first.mode.clone(), first.lambda_min)
+    };
     let sign = if let Some(origin) = origin {
         let align: f64 = mode
             .iter()
@@ -194,11 +3028,29 @@ where
     };
     let mut steps = 0usize;
     let mut crossed = false;
+    let mut rise = 0.0;
+    let mut saw_uphill = false;
+    // A clash eigenvalue is far below the curvature of the minimum.
+    // The square of that curvature separates the two without a fixed cutoff.
+    let mut curvature_scale = first.lambda_min.abs();
+    let mut previous_along: Option<f64> = None;
+    // Highest ridge crossed on this climb. A shallow first saddle is kept
+    // only until a higher one is crossed. The quench leaves from that ridge.
+    let mut ridge: Option<(Array1<f64>, Array1<f64>, f64)> = None;
+    let mut ridge_log: Vec<(Array1<f64>, Array1<f64>, f64)> = Vec::new();
+    // A supplied direction is the cover. Hold it until the force along it
+    // flips, then take the minimum mode. Replacing it on the first refresh
+    // walks the softest well of the minimum the cover was meant to leave.
+    let mut hold_direction = initial_direction.is_some();
+    let mut along_scale = 1.0;
 
-    for k in 0..cfg.max_steps {
+    'climb: while steps < cfg.max_steps {
+        if cfg.step * along_scale <= cfg.epsilon {
+            break;
+        }
         // Refresh the direction on schedule, and always after the curvature has
         // already been seen to fall, since that is where it rotates fastest.
-        if k > 0 && k % cfg.refresh == 0 {
+        if steps > 0 && steps % cfg.refresh == 0 && !hold_direction {
             match curvature_features(
                 cur.view(),
                 |y| {
@@ -218,16 +3070,18 @@ where
                 None => break,
             }
         }
+        let stride = cfg.step * along_scale;
+        let snapshot = cur.clone();
         for i in 0..dim {
-            cur[i] += sign * cfg.step * mode[i];
+            cur[i] += sign * stride * mode[i];
         }
-        steps += 1;
 
         // Perpendicular relaxation. Sliding down the component of the gradient
         // orthogonal to the mode keeps the structure on the valley floor; the
         // component along the mode is what the climb is fighting and is left
         // alone.
         let mut along = 0.0;
+        let mut gnorm = 0.0;
         for _ in 0..cfg.perp_steps {
             let g = match grad(cur.view()) {
                 Some(g) => {
@@ -235,23 +3089,19 @@ where
                     g
                 }
                 None => {
-                    return Some(ActivationOutcome {
-                        state: cur,
-                        lambda,
-                        steps,
-                        crossed,
-                        evaluations,
-                    });
+                    cur.clone_from(&snapshot);
+                    break 'climb;
                 }
             };
+            gnorm = g.iter().map(|z| z * z).sum::<f64>().sqrt();
             along = g.iter().zip(mode.iter()).map(|(a, b)| a * b).sum();
             let mut d = Array1::<f64>::zeros(dim);
             for i in 0..dim {
                 d[i] = cfg.perp_rate * (g[i] - along * mode[i]);
             }
             let n: f64 = d.iter().map(|z| z * z).sum::<f64>().sqrt();
-            let scale = if n > cfg.perp_max_move && n > 0.0 {
-                cfg.perp_max_move / n
+            let scale = if n > perp_cap && n > 0.0 {
+                perp_cap / n
             } else {
                 1.0
             };
@@ -260,7 +3110,19 @@ where
             }
         }
 
-        // Stop at the saddle, not at the inflection.
+        // A pair inside half the starting contact distance is a clash.
+        // Restore the last intact structure and halve the step. A ridge
+        // already crossed stays the place the quench will leave from.
+        let crowded = cluster && closest_pair(cur.view()) < clash;
+        if !gnorm.is_finite() || crowded {
+            cur.clone_from(&snapshot);
+            along_scale *= 0.5;
+            continue;
+        }
+        steps += 1;
+
+        // A ridge is a force flip at negative curvature. The highest such
+        // ridge on the climb is the one the quench leaves from.
         //
         // Negative curvature says the ridge is ahead, not behind: on a double
         // well the curvature along the well direction turns over at
@@ -272,17 +3134,91 @@ where
         // sign: uphill while `sign * g . v > 0`, downhill after. Combined with
         // negative curvature that is the ridge, and past it a quench falls the
         // other way.
-        if lambda < 0.0 && sign * along < 0.0 {
-            crossed = true;
-            break;
+        if stride > 0.0 {
+            if let Some(prev) = previous_along {
+                let fd = (along - prev) / (sign * stride);
+                if fd.is_finite() {
+                    lambda = fd;
+                }
+            }
+            previous_along = Some(along);
+        }
+        rise += along * sign * stride;
+        let climbing = sign * along > 0.0;
+        if climbing {
+            saw_uphill = true;
+        }
+        if hold_direction && saw_uphill && !climbing {
+            hold_direction = false;
+            if let Some(features) = curvature_features(
+                cur.view(),
+                |y| {
+                    evaluations += 1;
+                    grad(y)
+                },
+                cfg.lanczos_steps,
+                cfg.epsilon,
+            ) {
+                let dot: f64 = features
+                    .mode
+                    .iter()
+                    .zip(mode.iter())
+                    .map(|(a, b)| a * b)
+                    .sum();
+                mode = if dot < 0.0 {
+                    -features.mode
+                } else {
+                    features.mode
+                };
+                lambda = features.lambda_min;
+                if let Some(g) = grad(cur.view()) {
+                    evaluations += 1;
+                    along = g.iter().zip(mode.iter()).map(|(a, b)| a * b).sum();
+                }
+            }
+        }
+        if lambda > curvature_scale {
+            curvature_scale = lambda;
+        }
+        let descending = sign * along < 0.0;
+        let intact = lambda < 0.0 && lambda > -(curvature_scale * curvature_scale);
+        if saw_uphill && descending && intact && rise >= cfg.min_rise {
+            // Keep the highest intact ridge. A shallow first saddle stays
+            // inside one funnel; a later one can leave it.
+            let higher = ridge.as_ref().is_none_or(|(_, _, kept)| rise > *kept);
+            if higher {
+                ridge = Some((cur.clone(), mode.clone(), rise));
+                ridge_log.push((cur.clone(), mode.clone(), rise));
+                crossed = true;
+                // The first ridge is the whole answer for a short climb.
+                // A funnel exit is a later ridge, so that search keeps going.
+                if !cfg.later_ridges || ridge_log.len() >= 6 {
+                    break 'climb;
+                }
+                saw_uphill = false;
+            }
         }
     }
 
-    if crossed && cfg.overshoot > 0.0 {
-        // One push past the turning point, so the quench falls forward rather
-        // than back down the way it came.
-        for i in 0..dim {
-            cur[i] += sign * cfg.overshoot * cfg.step * mode[i];
+    let mut ridges = Vec::with_capacity(ridge_log.len());
+    if cfg.later_ridges && crossed {
+        for (state, ridge_mode, _) in &ridge_log {
+            let mut landed = state.clone();
+            if cfg.overshoot > 0.0 {
+                for i in 0..dim {
+                    landed[i] += sign * cfg.overshoot * cfg.step * ridge_mode[i];
+                }
+            }
+            ridges.push(landed);
+        }
+    }
+    if let Some((state, ridge_mode, _)) = ridge_log.last() {
+        cur = state.clone();
+        mode = ridge_mode.clone();
+        if cfg.overshoot > 0.0 {
+            for i in 0..dim {
+                cur[i] += sign * cfg.overshoot * cfg.step * mode[i];
+            }
         }
     }
 
@@ -292,6 +3228,7 @@ where
         steps,
         crossed,
         evaluations,
+        ridges,
     })
 }
 
@@ -374,6 +3311,117 @@ mod tests {
         );
     }
 
+    fn quench_double_well(w: &Array1<f64>, k: &Array1<f64>, mut x: Array1<f64>) -> Array1<f64> {
+        let g = double_well(w, k);
+        for _ in 0..80 {
+            let grad = g(x.view()).unwrap();
+            let n: f64 = grad.iter().map(|z| z * z).sum::<f64>().sqrt();
+            if n < 1e-6 {
+                break;
+            }
+            let step = (0.05_f64).min(0.2 / n);
+            x.scaled_add(-step, &grad);
+        }
+        x
+    }
+
+    #[test]
+    fn cover_climb_quench_on_a_double_well_uses_only_the_force() {
+        let dim = 36;
+        let w = direction(dim);
+        let k = perp_stiffness(dim);
+        let origin = w.clone();
+        let g = double_well(&w, &k);
+        let end = cover_climb_quench(
+            origin.view(),
+            0.05,
+            0,
+            &g,
+            |x| quench_double_well(&w, &k, x.to_owned()),
+            &Activation {
+                max_steps: 12,
+                ..Activation::default()
+            },
+        );
+        assert_eq!(end.len(), dim);
+        let grad = g(end.view()).unwrap();
+        let n: f64 = grad.iter().map(|z| z * z).sum::<f64>().sqrt();
+        assert!(n < 1e-2, "quench did not reach a stationary point, |g|={n}");
+        assert!(end.iter().all(|v| v.is_finite()));
+    }
+
+    /// Four Lennard-Jones atoms at the tetrahedron. The call is the same
+    /// function as the smooth well: coordinates in, force in, quench in.
+    #[test]
+    fn cover_climb_quench_on_a_lennard_jones_tetrahedron_reads_no_target() {
+        let scale = 2.0_f64.powf(1.0 / 6.0);
+        let raw = [
+            [1.0, 1.0, 1.0],
+            [1.0, -1.0, -1.0],
+            [-1.0, 1.0, -1.0],
+            [-1.0, -1.0, 1.0],
+        ];
+        let mut origin = Array1::zeros(12);
+        for (i, p) in raw.iter().enumerate() {
+            for k in 0..3 {
+                origin[3 * i + k] = p[k] * scale / 3.0_f64.sqrt();
+            }
+        }
+        let lj = |x: ArrayView1<f64>| -> (f64, Array1<f64>) {
+            let n = x.len() / 3;
+            let mut value = 0.0;
+            let mut gradient = Array1::zeros(x.len());
+            for i in 0..n {
+                for j in (i + 1)..n {
+                    let mut d = [0.0; 3];
+                    let mut r2 = 0.0;
+                    for k in 0..3 {
+                        d[k] = x[3 * i + k] - x[3 * j + k];
+                        r2 += d[k] * d[k];
+                    }
+                    let inv2 = 1.0 / r2;
+                    let inv6 = inv2.powi(3);
+                    let inv12 = inv6 * inv6;
+                    value += 4.0 * (inv12 - inv6);
+                    let coefficient = 24.0 * inv2 * (2.0 * inv12 - inv6);
+                    for k in 0..3 {
+                        gradient[3 * i + k] -= coefficient * d[k];
+                        gradient[3 * j + k] += coefficient * d[k];
+                    }
+                }
+            }
+            (value, gradient)
+        };
+        let cfg = Activation {
+            max_steps: 6,
+            lanczos_steps: 8,
+            ..Activation::default()
+        };
+        let end = cover_climb_quench(
+            origin.view(),
+            0.2,
+            0,
+            |x| Some(lj(x).1),
+            |x| {
+                let mut y = x.to_owned();
+                for _ in 0..40 {
+                    let (_, g) = lj(y.view());
+                    let n: f64 = g.iter().map(|z| z * z).sum::<f64>().sqrt();
+                    if n < 1e-4 {
+                        break;
+                    }
+                    let step = (1e-3_f64).min(0.05 / n);
+                    y.scaled_add(-step, &g);
+                }
+                y
+            },
+            &cfg,
+        );
+        let (energy, gradient) = lj(end.view());
+        assert!(energy.is_finite());
+        assert!(gradient.iter().all(|v| v.is_finite()));
+    }
+
     /// The property the module exists for. A straight displacement of the same
     /// length stays on its own side of the barrier; the climb crosses it.
     #[test]
@@ -413,6 +3461,26 @@ mod tests {
             us < 0.0,
             "the straight line should also cross this simple well: {us:.3}"
         );
+    }
+
+    /// Continuing past the first ridge still finishes on the far side.
+    #[test]
+    fn later_ridges_still_cross_the_barrier() {
+        let dim = 36;
+        let w = direction(dim);
+        let k = perp_stiffness(dim);
+        let g = double_well(&w, &k);
+        let x: Array1<f64> = w.clone();
+        let cfg = Activation {
+            later_ridges: true,
+            max_steps: 16,
+            ..Activation::default()
+        };
+        let out = activate(x.view(), &g, &cfg, -1.0).unwrap();
+        let u: f64 = out.state.iter().zip(w.iter()).map(|(a, b)| a * b).sum();
+        assert!(out.crossed, "no ridge, u = {u:.3}");
+        assert!(!out.ridges.is_empty(), "the later-ridge climb kept nothing");
+        assert!(u < 0.0, "the climb ended at u = {u:.3}");
     }
 
     /// The climb must not run forever on a direction that never turns over.
@@ -507,6 +3575,215 @@ mod tests {
         assert!(
             ua > ub,
             "the two signs ended at u = {ua:.3} and {ub:.3}, not on opposite sides"
+        );
+    }
+
+    /// A capped octahedron of seven Lennard-Jones atoms is a local minimum.
+    /// The pentagonal bipyramid lies below it. The search is given only the
+    /// higher minimum, the force, and a quench.
+    #[test]
+    fn cover_climb_search_leaves_a_higher_lennard_jones_minimum() {
+        fn lj(x: ArrayView1<f64>) -> (f64, Array1<f64>) {
+            let n = x.len() / 3;
+            let mut value = 0.0;
+            let mut gradient = Array1::zeros(x.len());
+            for i in 0..n {
+                for j in (i + 1)..n {
+                    let mut d = [0.0; 3];
+                    let mut r2 = 0.0;
+                    for k in 0..3 {
+                        d[k] = x[3 * i + k] - x[3 * j + k];
+                        r2 += d[k] * d[k];
+                    }
+                    let inv2 = 1.0 / r2;
+                    let inv6 = inv2.powi(3);
+                    let inv12 = inv6 * inv6;
+                    value += 4.0 * (inv12 - inv6);
+                    let coefficient = 24.0 * inv2 * (2.0 * inv12 - inv6);
+                    for k in 0..3 {
+                        gradient[3 * i + k] -= coefficient * d[k];
+                        gradient[3 * j + k] += coefficient * d[k];
+                    }
+                }
+            }
+            (value, gradient)
+        }
+        fn quench(x: ArrayView1<f64>) -> Array1<f64> {
+            let mut opt = crate::methods::warm_lbfgs::WarmLbfgs::default();
+            opt.minimize(x, 80, |v| Some(lj(v))).1
+        }
+
+        let req = 2.0_f64.powf(1.0 / 6.0);
+        let scale = req / 2.0_f64.sqrt();
+        let mut capped = Array1::zeros(21);
+        let axes = [
+            [1.0, 0.0, 0.0],
+            [-1.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0],
+            [0.0, -1.0, 0.0],
+            [0.0, 0.0, 1.0],
+            [0.0, 0.0, -1.0],
+        ];
+        for (i, p) in axes.iter().enumerate() {
+            for k in 0..3 {
+                capped[3 * i + k] = p[k] * scale;
+            }
+        }
+        let centroid = scale / 3.0;
+        let unit = 1.0 / 3.0_f64.sqrt();
+        for k in 0..3 {
+            capped[18 + k] = centroid + req * unit;
+        }
+        let capped = quench(capped.view());
+        let e_cap = lj(capped.view()).0;
+
+        let mut bipyramid = Array1::zeros(21);
+        let radius = req / (2.0 * (std::f64::consts::PI / 5.0).sin());
+        let height = (req * req - radius * radius).max(0.0).sqrt();
+        for k in 0..5 {
+            let angle = 2.0 * std::f64::consts::PI * (k as f64) / 5.0;
+            bipyramid[3 * k] = radius * angle.cos();
+            bipyramid[3 * k + 1] = radius * angle.sin();
+        }
+        bipyramid[17] = height;
+        bipyramid[20] = -height;
+        let bipyramid = quench(bipyramid.view());
+        let e_low = lj(bipyramid.view()).0;
+        assert!(
+            e_low < e_cap - 0.2,
+            "the lower isomer is not below the start: {e_low} vs {e_cap}"
+        );
+
+        let end = cover_climb_search(
+            capped.view(),
+            0.4,
+            40,
+            1,
+            lj,
+            quench,
+            &Activation {
+                max_steps: 4,
+                lanczos_steps: 6,
+                perp_steps: 1,
+                ..Activation::default()
+            },
+        );
+        let found = lj(end.view()).0;
+        assert!(
+            found < e_cap - 0.2,
+            "search energy {found}, start {e_cap}, lower isomer {e_low}"
+        );
+    }
+
+    /// A probe of one hundredth of the contact moves a random direction onto
+    /// the soft curvature. The same direction probed at a tenth of the contact
+    /// does not.
+    #[test]
+    fn a_harmonic_probe_lowers_the_curvature() {
+        fn lj(x: ArrayView1<f64>) -> (f64, Array1<f64>) {
+            let n = x.len() / 3;
+            let mut value = 0.0;
+            let mut gradient = Array1::zeros(x.len());
+            for i in 0..n {
+                for j in (i + 1)..n {
+                    let mut d = [0.0; 3];
+                    let mut r2 = 0.0;
+                    for k in 0..3 {
+                        d[k] = x[3 * i + k] - x[3 * j + k];
+                        r2 += d[k] * d[k];
+                    }
+                    let inv2 = 1.0 / r2;
+                    let inv6 = inv2.powi(3);
+                    let inv12 = inv6 * inv6;
+                    value += 4.0 * (inv12 - inv6);
+                    let coefficient = 24.0 * inv2 * (2.0 * inv12 - inv6);
+                    for k in 0..3 {
+                        gradient[3 * i + k] -= coefficient * d[k];
+                        gradient[3 * j + k] += coefficient * d[k];
+                    }
+                }
+            }
+            (value, gradient)
+        }
+        fn quench(x: ArrayView1<f64>) -> Array1<f64> {
+            let mut opt = crate::methods::warm_lbfgs::WarmLbfgs::default();
+            opt.minimize(x, 80, |v| Some(lj(v))).1
+        }
+        let req = 2.0_f64.powf(1.0 / 6.0);
+        let scale = req / 2.0_f64.sqrt();
+        let mut capped = Array1::zeros(21);
+        let axes = [
+            [1.0, 0.0, 0.0],
+            [-1.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0],
+            [0.0, -1.0, 0.0],
+            [0.0, 0.0, 1.0],
+            [0.0, 0.0, -1.0],
+        ];
+        for (i, p) in axes.iter().enumerate() {
+            for k in 0..3 {
+                capped[3 * i + k] = p[k] * scale;
+            }
+        }
+        let centroid = scale / 3.0;
+        let unit = 1.0 / 3.0_f64.sqrt();
+        for k in 0..3 {
+            capped[18 + k] = centroid + req * unit;
+        }
+        let capped = quench(capped.view());
+        let mut seed = Array1::zeros(capped.len());
+        seed[0] = 1.0;
+        seed[4] = -0.5;
+        seed[8] = 0.25;
+        let basis = crate::curvature::rigid_basis(capped.view());
+        let mut plain = seed.clone();
+        crate::curvature::project_rigid_with(&mut plain, &basis);
+        let norm = vector_norm(&plain);
+        plain /= norm;
+        let before = curvature_along(capped.view(), plain.view(), &mut lj);
+        let softened = soften_direction(capped.view(), seed.view(), &mut lj)
+            .expect("softening returns a direction");
+        let after = curvature_along(capped.view(), softened.view(), &mut lj);
+        assert!(
+            after < before * 0.5,
+            "curvature {before:.3} did not fall, softened {after:.3}"
+        );
+        let wide = {
+            // A probe ten times longer than the harmonic one.
+            let basis = crate::curvature::rigid_basis(capped.view());
+            let displacement = softening_displacement(capped.view()) * 10.0;
+            let mut direction = seed.clone();
+            crate::curvature::project_rigid_with(&mut direction, &basis);
+            let norm = vector_norm(&direction);
+            direction /= norm;
+            for _ in 0..40 {
+                let mut probe = capped.clone();
+                for (slot, step) in probe.iter_mut().zip(direction.iter()) {
+                    *slot += displacement * *step;
+                }
+                let (_, gradient) = lj(probe.view());
+                let mut perpendicular = gradient.mapv(|value| -value);
+                crate::curvature::project_rigid_with(&mut perpendicular, &basis);
+                let parallel: f64 = perpendicular
+                    .iter()
+                    .zip(direction.iter())
+                    .map(|(force, axis)| force * axis)
+                    .sum();
+                for (slot, axis) in perpendicular.iter_mut().zip(direction.iter()) {
+                    *slot -= parallel * *axis;
+                }
+                for (slot, push) in direction.iter_mut().zip(perpendicular.iter()) {
+                    *slot += 0.15 * *push;
+                }
+                crate::curvature::project_rigid_with(&mut direction, &basis);
+                let norm = vector_norm(&direction);
+                direction /= norm;
+            }
+            curvature_along(capped.view(), direction.view(), &mut lj)
+        };
+        assert!(
+            after < wide,
+            "harmonic probe {after:.3} is not softer than the long probe {wide:.3}"
         );
     }
 }

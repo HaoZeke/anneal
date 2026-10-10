@@ -8,9 +8,11 @@
 //! keeps that work off the hop thread.
 
 use std::sync::mpsc::{self, Sender};
+use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 
 use super::client::CatalogClient;
+use crate::surface_evidence::{SurfaceEvidenceBook, SurfaceEvidenceMessage};
 
 enum CatalogJob {
     Run(Box<dyn FnOnce(&mut CatalogClient) + Send>),
@@ -20,6 +22,8 @@ enum CatalogJob {
 pub struct CatalogMailbox {
     jobs: Option<Sender<CatalogJob>>,
     thread: Option<JoinHandle<()>>,
+    /// Peer surface rewards, applied on the catalog thread under their original key.
+    surface_evidence: Arc<Mutex<SurfaceEvidenceBook>>,
 }
 
 impl CatalogMailbox {
@@ -37,7 +41,28 @@ impl CatalogMailbox {
         Self {
             jobs: Some(jobs),
             thread: Some(thread),
+            surface_evidence: Arc::new(Mutex::new(SurfaceEvidenceBook::new(0))),
         }
+    }
+
+    /// Queue one surface-evidence reply. The hop thread does not wait.
+    ///
+    /// The message keeps the source key from the block that produced it.
+    pub fn post_surface_evidence(&self, message: SurfaceEvidenceMessage) {
+        let book = Arc::clone(&self.surface_evidence);
+        let arms = message.arms.len();
+        self.post(move |_client| {
+            let mut evidence = book.lock().expect("surface evidence book");
+            if evidence.arms() == 0 {
+                *evidence = SurfaceEvidenceBook::new(arms);
+            }
+            let _ = evidence.exchange(message);
+        });
+    }
+
+    /// Book of surface-evidence messages applied by this mailbox.
+    pub fn surface_evidence(&self) -> Arc<Mutex<SurfaceEvidenceBook>> {
+        Arc::clone(&self.surface_evidence)
     }
 
     /// Run one client call and wait for it. Tests and rare control paths.

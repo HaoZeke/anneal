@@ -972,17 +972,18 @@ outcomes). A symmetric-Dirichlet posterior transition matrix and its
 diffusion power give a diffusion distance between microstates;
 complete-linkage clustering under a maximum-distance threshold groups
 microstates into attraction regions, with nodes below a minimum
-probe-observation count kept as ineligible singletons.
+count of resolved probe returns kept as ineligible singletons.
+Unresolved probes stay in the posterior and do not certify a merge.
 
 Key types and functions: =TransitionOutcome=
 (src/transition_graph.rs:14); =TransitionGraphError=
 (transition_graph.rs:23); =AttractionRegionConfig=
 (transition_graph.rs:46); =TransitionGraph= (transition_graph.rs:77),
 =observe= (transition_graph.rs:108), =posterior_matrix=
-(transition_graph.rs:170), =uncertainty= (transition_graph.rs:197),
-=attraction_regions= (transition_graph.rs:210, diffusion + complete
+(transition_graph.rs:177), =uncertainty= (transition_graph.rs:204),
+=attraction_regions= (transition_graph.rs:219, diffusion + complete
 linkage); =matrix_power=/=complete_linkage_regions=
-(transition_graph.rs:264/281, private).
+(transition_graph.rs:275/292, private).
 
 Feeds/consumes: region identity here is what =region_assignment.rs=
 consumes; kept deliberately separate from descriptor-based basin
@@ -1328,7 +1329,8 @@ SOAP leftover with =featomic=, CNA fractions otherwise); =BankConfig=
 =spectrum_distance= (csa_cluster.rs:581, default sorted-pairwise-
 distance-spectrum Euclidean metric); =coordination_histogram_distance=
 (csa_cluster.rs:606, Lee-Lee-Scheraga coordination-histogram distance
-at shells =r1=1.35=, =r2=1.70=).
+at shells =r1=1.35=, =r2=1.70=). Those shell counts come from the
+unwrapped cutoff. The weights are unchanged.
 
 Constants and defaults: bond cutoff derived as
 =cfg.min_separation * (1.39 / 0.85)= (csa_cluster.rs:291), between

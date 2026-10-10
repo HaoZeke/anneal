@@ -2005,8 +2005,11 @@ where
         return Ok((origin, positive, negative));
     }
 
-    let identity_tolerance =
-        (config.quench_gradient_tolerance * f64::EPSILON.sqrt()).max(f64::MIN_POSITIVE);
+    // The reconciliation quench uses the same force gate as the ride.
+    // Scaling that gate by the square root of machine epsilon asks for a
+    // residual a cluster minimizer does not reach, and a real connection
+    // is discarded.
+    let identity_tolerance = config.quench_gradient_tolerance;
     let origin = quench_with_certification(
         surface,
         origin.coordinates.view(),

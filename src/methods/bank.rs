@@ -372,6 +372,20 @@ mod tests {
         );
     }
 
+    /// A child can lose to the member it was generated from and still replace
+    /// a different member it resembles. The source member stays.
+    #[test]
+    fn a_worse_child_replaces_the_member_it_resembles_and_leaves_its_source() {
+        let mut b = Bank::new(2, 1.0);
+        assert!(b.seed(point(0.0).view(), -10.0));
+        assert!(b.seed(point(10.0).view(), -9.0));
+        let admission = b.offer(point(10.2).view(), -9.5, line);
+        assert_eq!(admission, Admission::Improved(1));
+        assert!((b.members()[0].energy + 10.0).abs() < 1e-12);
+        assert!((b.members()[0].state[0]).abs() < 1e-12);
+        assert!((b.members()[1].energy + 9.5).abs() < 1e-12);
+    }
+
     #[test]
     fn a_worse_near_copy_is_discarded() {
         let mut b = Bank::new(2, 1.0);

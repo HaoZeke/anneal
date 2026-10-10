@@ -2,6 +2,9 @@
 //!
 //!     decaf_packing_separator [ISOMERS] [N]
 //!
+//! `DECAF_LMAX` overrides [`PACKING_SPEC`]'s angular band. Unset, the
+//! book is the live spec.
+//!
 //! `N` picks the sealed pair: 75 is ico versus Marks, 38 is ico versus Oh.
 //!
 //! A scalar L1 radius on DECAF histograms does not: quenched icosahedral
@@ -13,7 +16,7 @@
 //! * single-linkage components of the shared book at a radius ladder,
 //! * the Franzblau ring profile, raw counts and normalized shares.
 
-use anneal_core::catalog::{PackingBook, occupancy_ring_profile, packing_distance};
+use anneal_core::catalog::{PACKING_SPEC, PackingBook, occupancy_ring_profile, packing_distance};
 use anneal_core::methods::warm_lbfgs::WarmLbfgs;
 use anneal_core::potentials::{PairKind, PairPotential};
 use ndarray::{Array1, ArrayView1};
@@ -131,13 +134,20 @@ fn main() {
         energies.push(energy);
     }
     let points = states.len();
+    let l_max = std::env::var("DECAF_LMAX")
+        .ok()
+        .and_then(|value| value.parse().ok())
+        .filter(|value| *value > 0)
+        .unwrap_or(PACKING_SPEC.l_max);
     println!(
-        "{{\"kind\":\"separator_sample\",\"atoms\":{n},\"points\":{points},\"ico\":{ico_energy:.6},\"marks\":{marks_energy:.6}}}"
+        "{{\"kind\":\"separator_sample\",\"atoms\":{n},\"l_max\":{l_max},\"points\":{points},\"ico\":{ico_energy:.6},\"marks\":{marks_energy:.6}}}"
     );
     let n = points;
 
     // One shared codebook over every structure, the live PackingBook form.
-    let mut book = PackingBook::default();
+    let mut spec = PACKING_SPEC;
+    spec.l_max = l_max;
+    let mut book = PackingBook::with_spec(spec);
     let mut histograms: Vec<Vec<f64>> = Vec::with_capacity(n);
     for state in &states {
         book.observe(state.as_slice().expect("state is contiguous"));
@@ -168,7 +178,9 @@ fn main() {
         distance[0][1]
     );
 
-    for radius in [0.10, 0.15, 0.20, 0.25, 0.30, 0.35, 0.40, 0.45] {
+    for radius in [
+        0.10, 0.15, 0.20, 0.25, 0.30, 0.35, 0.40, 0.45, 0.50, 0.60, 0.80, 1.00, 1.20, 1.50,
+    ] {
         let label = components(&distance, radius);
         let mut distinct: Vec<usize> = label.clone();
         distinct.sort_unstable();

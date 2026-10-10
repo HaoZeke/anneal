@@ -549,7 +549,7 @@ struct CoordinatorState {
     frontier: std::collections::VecDeque<crate::catalog_rpc::CatalogFrontierPost>,
     /// Shared motif-class table for cooperative restarts.
     core_class: CoreClassTable,
-    surface_evidence: crate::surface_evidence::SurfaceEvidenceBook,
+    surface_evidence: crate::surface_evidence::SurfaceReportBook,
     /// A journal append failed after the live state had already moved,
     /// so a replay of the log no longer reproduces this coordinator.
     journal_broken: bool,
@@ -698,7 +698,7 @@ impl CoordinatorState {
             halving: config.halving.clone(),
             frontier: std::collections::VecDeque::new(),
             core_class: CoreClassTable::new(config.core_patience, config.core_trial),
-            surface_evidence: crate::surface_evidence::SurfaceEvidenceBook::default(),
+            surface_evidence: crate::surface_evidence::SurfaceReportBook::default(),
             journal_broken: false,
         })
     }

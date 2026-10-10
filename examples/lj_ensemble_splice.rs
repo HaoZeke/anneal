@@ -21,10 +21,12 @@
 //! `CHECKPOINT` charged evaluations between board updates (default 500),
 //! `COMPRESS_MU` two-phase quench: relax first on the compressed surface
 //! `E + mu * sum |r_i - r_cm|^2`, then on the plain potential from there
-//! (default 0, plain quench), `DIAMETER_D` and `DIAMETER_BETA` add the
-//! Locatelli--Schoen diameter penalty `beta * sum_{i<j} max(0, r_ij^2 - D^2)^2`
-//! to the same first phase (`D` in units of the pair-well minimum distance,
-//! default 0 and 1); `DIAMETER_KAPPA` instead sets the cutoff per quench
+//! (`mu` in energy per length squared, default 0, plain quench).
+//! `DIAMETER_D` and `DIAMETER_BETA` add the Locatelli--Schoen diameter
+//! penalty `beta * sum_{i<j} max(0, r_ij^2 - D^2)^2` to the same first
+//! phase (`D` in units of the pair-well minimum distance, `beta` in energy
+//! per length to the fourth, default 0 and 1); `DIAMETER_KAPPA` instead
+//! sets the cutoff per quench
 //! to `kappa` times the largest pair distance of the structure being
 //! relaxed, a size-free rule that reads only the live structure. Every
 //! evaluation of either phase is charged.
@@ -34,16 +36,19 @@ use std::sync::{Arc, Mutex};
 use anneal_core::bias::BasinBias;
 use anneal_core::coreclass::{CoreClassTable, CoreVerdict};
 use anneal_core::corekey::motif_class;
+use anneal_core::diversity::DiversityAnnealer;
+use anneal_core::methods::bank::{Admission, Bank};
 use anneal_core::methods::cluster_hopping::{
-    ChainCheckpoint, CheckpointAction, ClusterFingerprint, Config, Ledger, Outcome, random_cluster,
-    run_with_bias_at_checkpoints,
+    AcceptedTransition, ChainCheckpoint, CheckpointAction, ClusterFingerprint, Config, Ledger,
+    MoveLibrary, Outcome, random_cluster, run_with_bias_at_checkpoints,
 };
 use anneal_core::methods::cluster_search::{Encounter, median_encounter};
 use anneal_core::methods::lattice_search::{LatticeSearchConfig, reoccupy};
+use anneal_core::methods::csa_cluster::coordination_histogram_distance;
 use anneal_core::methods::splice::cut_and_splice;
 use anneal_core::methods::two_phase::{
-    Cutoff, SharedSurfaceAllocator, SurfacePortfolio, TwoPhase, largest_pair_distance, penalty,
-    shared_surface_allocator,
+    Cutoff, SharedSurfaceAllocator, SurfacePortfolio, TwoPhase, largest_pair_distance,
+    penalty_axes, penalty_body, shared_surface_allocator,
 };
 use anneal_core::methods::warm_lbfgs::WarmLbfgs;
 use anneal_core::potentials::PairPotential;
@@ -76,6 +81,72 @@ fn lj(x: ArrayView1<f64>) -> (f64, Array1<f64>) {
         }
     }
     (e, g)
+}
+
+/// Place the worst-bound atom just outside the current hull.
+///
+/// Copying the deepest population member parks every other chain on
+/// that neighbour. A stall relocates one atom and the walk continues.
+fn relocate_worst_atom(x: &[f64], count: usize, rng: &mut impl Rng) -> Array1<f64> {
+    let n = x.len() / 3;
+    let mut out = Array1::from(x.to_vec());
+    if n < 2 || count == 0 {
+        return out;
+    }
+    let mut bound = vec![0.0; n];
+    let mut cm = [0.0; 3];
+    for i in 0..n {
+        cm[0] += x[3 * i];
+        cm[1] += x[3 * i + 1];
+        cm[2] += x[3 * i + 2];
+    }
+    let scale = n as f64;
+    cm[0] /= scale;
+    cm[1] /= scale;
+    cm[2] /= scale;
+    for i in 0..n {
+        for j in (i + 1)..n {
+            let d = [
+                x[3 * i] - x[3 * j],
+                x[3 * i + 1] - x[3 * j + 1],
+                x[3 * i + 2] - x[3 * j + 2],
+            ];
+            let r2 = d[0] * d[0] + d[1] * d[1] + d[2] * d[2];
+            if r2 < 1e-12 {
+                continue;
+            }
+            let inv2 = 1.0 / r2;
+            let inv6 = inv2 * inv2 * inv2;
+            let vij = 4.0 * (inv6 * inv6 - inv6);
+            bound[i] += vij;
+            bound[j] += vij;
+        }
+    }
+    let mut order: Vec<usize> = (0..n).collect();
+    order.sort_by(|&a, &b| {
+        bound[b]
+            .partial_cmp(&bound[a])
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    let count = count.min(n.saturating_sub(1)).max(1);
+    let mut radius: f64 = 0.0;
+    for i in 0..n {
+        let d0 = x[3 * i] - cm[0];
+        let d1 = x[3 * i + 1] - cm[1];
+        let d2 = x[3 * i + 2] - cm[2];
+        radius = radius.max((d0 * d0 + d1 * d1 + d2 * d2).sqrt());
+    }
+    let bond = 2.0_f64.powf(1.0 / 6.0);
+    for &atom in order.iter().take(count) {
+        let z: f64 = rng.random_range(-1.0..1.0);
+        let phi: f64 = rng.random_range(0.0..std::f64::consts::TAU);
+        let s = (1.0 - z * z).sqrt();
+        let r = radius + bond;
+        out[3 * atom] = cm[0] + r * s * phi.cos();
+        out[3 * atom + 1] = cm[1] + r * s * phi.sin();
+        out[3 * atom + 2] = cm[2] + r * z;
+    }
+    out
 }
 
 /// The pair potential the ensemble walks: reduced Lennard-Jones by default,
@@ -154,9 +225,15 @@ fn compressed(
     mu: f64,
     diameter: f64,
     beta: f64,
+    axes: [f64; 3],
+    body: bool,
 ) -> (f64, Array1<f64>) {
     let (e, g) = surface.energy(x);
-    let (pe, pg) = penalty(x, diameter, beta, mu);
+    let (pe, pg) = if body {
+        penalty_body(x, diameter, beta, mu, axes)
+    } else {
+        penalty_axes(x, diameter, beta, mu, axes)
+    };
     (e + pe, g + pg)
 }
 
@@ -185,6 +262,11 @@ struct Slot {
     state: Vec<f64>,
     best_energy: f64,
     best_state: Vec<f64>,
+    /// First quenched structure this chain published. Lee, Lee and Scheraga
+    /// keep that bank frozen and draw mix partners from it, so a later
+    /// collapse of the live population still has something outside the funnel.
+    first_energy: f64,
+    first_state: Vec<f64>,
 }
 
 #[derive(Default, Clone, Copy)]
@@ -214,14 +296,30 @@ struct ExchangeConfig {
     source_best: bool,
     checkpoint: usize,
     /// Compression strength of the first quench phase; zero is a plain quench.
+    /// Energy per length squared. Zero leaves the first phase unweighted.
     compress_mu: f64,
     /// Diameter penalty cutoff in sigma units; zero disables the penalty.
     diameter: f64,
-    /// Diameter penalty strength.
+    /// Energy per length to the fourth, on `(r^2 - D^2)^2`.
     diameter_beta: f64,
     /// Relative cutoff: `kappa` times the largest pair distance of the
     /// structure entering the quench; zero keeps the fixed cutoff.
     diameter_kappa: f64,
+    /// Axis weights. In the laboratory frame the first entry is x and stays 1.
+    /// In the inertia frame the first entry lies on the longest principal axis.
+    diameter_wl: f64,
+    diameter_wy: f64,
+    diameter_wz: f64,
+    /// Apply the axis weights in the structure's inertia frame.
+    diameter_body: bool,
+    /// Stretch factor applied to a spherical minimum before the kick. 0 disables it.
+    sphere_stretch: f64,
+    /// After a spherical incumbent stalls for 40 hops without improving,
+    /// move this many worst-bound atoms onto the hull instead of the
+    /// uniform kick. Zero disables the move.
+    sphere_relocate: usize,
+    /// How many atoms take the uniform kick. Zero moves every atom.
+    kick_atoms: usize,
     /// Learned portfolio over surfaces (plain plus these), one arm held
     /// per block of hops; empty runs the fixed surface above.
     portfolio: Vec<TwoPhase>,
@@ -233,13 +331,12 @@ struct ExchangeConfig {
     /// chain `i` walks arm `i mod (1 + arms)` for its whole budget, the
     /// plain surface being arm zero.
     portfolio_split: bool,
-    /// Population basin hopping: at every checkpoint a chain's live minimum
-    /// is offered to the ensemble under the Grosso--Locatelli--Schoen
-    /// replacement rule, and a chain told to move adopts the offered
-    /// structure at its next checkpoint.
+    /// Quenched children are admitted by the bank. A child replaces the
+    /// member it resembles, or the worst member when it resembles none.
     pbh: bool,
-    /// Replacement radius as a multiple of the ensemble's mean pairwise
-    /// dissimilarity at the first exchange.
+    /// `Dcut` starts at this multiple of the first bank's mean pairwise
+    /// distance. Lee, Lee and Scheraga use one half (`PBH_DCUT`, default
+    /// 0.5). The schedule then carries the cutoff to one fifth of that mean.
     pbh_dcut_scale: f64,
     /// Whether chains share a table of visited core keys and restart when
     /// the core they sit in has gone `core_patience` calls without any
@@ -263,144 +360,353 @@ struct ExchangeConfig {
     reoccupy_interval: usize,
 }
 
-/// Coordination-shell histogram dissimilarity of Grosso, Locatelli and
-/// Schoen: `H1[n]` counts atoms with exactly `n` neighbours inside the
-/// first shell, `H2[n]` those with exactly `n` in the second shell, and the
-/// distance is `sum_n n (2 |dH1| + |dH2|)`. Shell radii are the published
-/// 1.25 and 1.55 pair-well units in sigma units.
-fn shell_histograms(x: &[f64]) -> ([u32; 32], [u32; 32]) {
+/// Ratio of the largest inertia eigenvalue to the smallest.
+/// A value near 1 is a spherical cluster.
+fn inertia_ratio(x: &[f64]) -> f64 {
     let n = x.len() / 3;
-    let unit = 2f64.powf(1.0 / 6.0);
-    let (r1, r2) = (1.25 * unit, 1.55 * unit);
-    let (r1sq, r2sq) = (r1 * r1, r2 * r2);
-    let mut first = vec![0usize; n];
-    let mut second = vec![0usize; n];
+    if n < 2 {
+        return 1.0;
+    }
+    let mut cm = [0.0; 3];
     for i in 0..n {
-        for j in (i + 1)..n {
-            let mut d2 = 0.0;
-            for k in 0..3 {
-                let d = x[3 * i + k] - x[3 * j + k];
-                d2 += d * d;
-            }
-            if d2 < r1sq {
-                first[i] += 1;
-                first[j] += 1;
-            } else if d2 < r2sq {
-                second[i] += 1;
-                second[j] += 1;
+        cm[0] += x[3 * i];
+        cm[1] += x[3 * i + 1];
+        cm[2] += x[3 * i + 2];
+    }
+    let scale = n as f64;
+    for value in cm.iter_mut() {
+        *value /= scale;
+    }
+    let mut tensor = ndarray::Array2::<f64>::zeros((3, 3));
+    for i in 0..n {
+        let v = [x[3 * i] - cm[0], x[3 * i + 1] - cm[1], x[3 * i + 2] - cm[2]];
+        let r2 = v[0] * v[0] + v[1] * v[1] + v[2] * v[2];
+        for a in 0..3 {
+            for b in 0..3 {
+                tensor[[a, b]] += if a == b { r2 } else { 0.0 } - v[a] * v[b];
             }
         }
     }
-    let mut h1 = [0u32; 32];
-    let mut h2 = [0u32; 32];
-    for i in 0..n {
-        h1[first[i].min(31)] += 1;
-        h2[second[i].min(31)] += 1;
+    let (evals, _) = anneal_core::spectral::symmetric_eigen(tensor.view(), 8);
+    let mut lo = f64::INFINITY;
+    let mut hi = 0.0_f64;
+    for value in evals.iter().copied() {
+        if value.is_finite() {
+            lo = lo.min(value);
+            hi = hi.max(value);
+        }
     }
-    (h1, h2)
+    if !(lo > 1e-12 && hi.is_finite()) {
+        return f64::INFINITY;
+    }
+    hi / lo
 }
 
-fn shell_dissimilarity(a: &([u32; 32], [u32; 32]), b: &([u32; 32], [u32; 32])) -> f64 {
-    (0..32)
-        .map(|n| {
-            n as f64
-                * (2.0 * (a.0[n] as f64 - b.0[n] as f64).abs()
-                    + (a.1[n] as f64 - b.1[n] as f64).abs())
+/// Stretch a spherical cluster along one principal axis before the kick.
+fn stretch_if_spherical(x: &mut [f64], factor: f64) {
+    if !(factor.is_finite() && factor > 1.0) || inertia_ratio(x) > 1.05 {
+        return;
+    }
+    let n = x.len() / 3;
+    let mut cm = [0.0; 3];
+    for i in 0..n {
+        cm[0] += x[3 * i];
+        cm[1] += x[3 * i + 1];
+        cm[2] += x[3 * i + 2];
+    }
+    let scale = n as f64;
+    for value in cm.iter_mut() {
+        *value /= scale;
+    }
+    let mut tensor = ndarray::Array2::<f64>::zeros((3, 3));
+    for i in 0..n {
+        let v = [x[3 * i] - cm[0], x[3 * i + 1] - cm[1], x[3 * i + 2] - cm[2]];
+        let r2 = v[0] * v[0] + v[1] * v[1] + v[2] * v[2];
+        for a in 0..3 {
+            for b in 0..3 {
+                tensor[[a, b]] += if a == b { r2 } else { 0.0 } - v[a] * v[b];
+            }
+        }
+    }
+    let (_, vecs) = anneal_core::spectral::symmetric_eigen(tensor.view(), 8);
+    // Column 0 is the smallest inertia eigenvalue, the longest axis.
+    for i in 0..n {
+        let mut along = 0.0;
+        for k in 0..3 {
+            along += vecs[[k, 0]] * (x[3 * i + k] - cm[k]);
+        }
+        let extra = (factor - 1.0) * along;
+        for k in 0..3 {
+            x[3 * i + k] += extra * vecs[[k, 0]];
+        }
+    }
+}
+
+fn radial_order(x: &[f64]) -> Vec<f64> {
+    let n = x.len() / 3;
+    let mut cm = [0.0; 3];
+    for i in 0..n {
+        cm[0] += x[3 * i];
+        cm[1] += x[3 * i + 1];
+        cm[2] += x[3 * i + 2];
+    }
+    let scale = (n as f64).max(1.0);
+    for value in cm.iter_mut() {
+        *value /= scale;
+    }
+    let mut radii = Vec::with_capacity(n);
+    for i in 0..n {
+        let d0 = x[3 * i] - cm[0];
+        let d1 = x[3 * i + 1] - cm[1];
+        let d2 = x[3 * i + 2] - cm[2];
+        radii.push((d0 * d0 + d1 * d1 + d2 * d2).sqrt());
+    }
+    radii.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    radii
+}
+
+/// Ordered centre-of-mass distance with power 3.
+fn ord_dissimilarity(a: &[f64], b: &[f64]) -> f64 {
+    radial_order(a)
+        .into_iter()
+        .zip(radial_order(b))
+        .map(|(u, v)| {
+            let d = (u - v).abs();
+            d * d * d
         })
         .sum()
 }
 
-type Member = (f64, Vec<f64>, ([u32; 32], [u32; 32]));
+fn dissimilarity_is_ord() -> bool {
+    std::env::var("DISSIM").ok().as_deref() == Some("ord")
+}
 
-/// The ensemble's population under the replacement rule: one member per
-/// chain, a pending relocation per chain, and the cutoff once set.
-#[derive(Default)]
+/// One bank slot per chain. Admission goes through [`anneal_core::methods::bank::Bank`],
+/// so a child replaces the member it resembles, or the worst member when it
+/// resembles none, and every other slot stays.
 struct Population {
-    members: Vec<Option<Member>>,
+    bank: Bank,
+    /// Chain that owns each bank slot, in bank order.
+    owner: Vec<usize>,
+    seeded: Vec<bool>,
     pending: Vec<Option<(f64, Vec<f64>)>>,
-    dcut: Option<f64>,
+    cutoff_ready: bool,
     replacements_near: usize,
     replacements_far: usize,
+    offers: usize,
+    improved_at: Vec<u64>,
+    tick: u64,
+    /// Lee schedule: half the first-bank mean, down to one fifth of that mean.
+    schedule: Option<DiversityAnnealer>,
+}
+
+fn population_distance(a: ArrayView1<f64>, b: ArrayView1<f64>) -> f64 {
+    if dissimilarity_is_ord() {
+        let (Some(a), Some(b)) = (a.as_slice(), b.as_slice()) else {
+            return f64::INFINITY;
+        };
+        return ord_dissimilarity(a, b);
+    }
+    let unit = 2f64.powf(1.0 / 6.0);
+    coordination_histogram_distance(a, b, 1.25 * unit, 1.55 * unit)
 }
 
 impl Population {
     fn new(chains: usize) -> Self {
         Self {
-            members: vec![None; chains],
+            bank: Bank::new(chains.max(1), 1.0),
+            owner: Vec::with_capacity(chains),
+            seeded: vec![false; chains],
             pending: vec![None; chains],
-            ..Self::default()
+            cutoff_ready: false,
+            replacements_near: 0,
+            replacements_far: 0,
+            offers: 0,
+            improved_at: vec![0; chains],
+            tick: 0,
+            schedule: None,
         }
     }
 
-    /// Offer chain `p`'s live minimum. Returns whether some chain was told
-    /// to move.
+    fn cutoff(&self) -> Option<f64> {
+        self.cutoff_ready.then_some(self.bank.dcut)
+    }
+
+    fn is_seeded(&self, chain: usize) -> bool {
+        self.seeded.get(chain).copied().unwrap_or(false)
+    }
+
+    /// The chain's first minimum fills its slot. The cutoff is the caller
+    /// factor times the mean pairwise distance of that full population.
+    fn seed_chain(&mut self, p: usize, energy: f64, state: &[f64], factor: f64) {
+        if self.seeded[p] || self.cutoff_ready {
+            return;
+        }
+        let stored = Array1::from(state.to_vec());
+        if !self.bank.seed(stored.view(), energy) {
+            return;
+        }
+        self.owner.push(p);
+        self.seeded[p] = true;
+        self.tick = self.tick.saturating_add(1);
+        self.improved_at[p] = self.tick;
+        if self.seeded.iter().all(|&done| done) {
+            self.calibrate(factor);
+        }
+    }
+
+    fn calibrate(&mut self, factor: f64) {
+        let scale = if factor.is_finite() && factor > 0.0 {
+            factor
+        } else {
+            0.5
+        };
+        let slots: Vec<usize> = (0..self.bank.len()).collect();
+        let schedule = DiversityAnnealer::scaled_from_population(
+            &slots,
+            |i, j| {
+                population_distance(
+                    self.bank.members()[i].state.view(),
+                    self.bank.members()[j].state.view(),
+                )
+            },
+            scale,
+        );
+        if let Some(schedule) = schedule {
+            // Initial threshold is `factor * mean`. One fifth of the mean is
+            // `0.2 / factor` of that threshold. At the Lee factor 0.5 this
+            // floor fraction is 0.4.
+            let floor = (0.2 / scale).clamp(1e-6, 1.0);
+            let schedule = schedule.with_final_fraction(floor);
+            self.bank.dcut = schedule.initial();
+            self.schedule = Some(schedule);
+        }
+        self.cutoff_ready = true;
+    }
+
+    /// Move `Dcut` along the Lee schedule. `progress` is the fraction of
+    /// this chain's charged budget already spent, in `[0, 1]`.
+    fn set_progress(&mut self, progress: f64) {
+        if let Some(schedule) = self.schedule.as_mut() {
+            self.bank.dcut = schedule.threshold(progress.clamp(0.0, 1.0));
+        }
+    }
+
+    /// Offer one quenched child. Returns whether some chain was told to move.
+    ///
+    /// The child is not written into slot `p` first. [`Bank::offer`] replaces
+    /// the nearest member when the child is inside the cutoff and strictly
+    /// better, and otherwise the worst member when the child resembles none
+    /// and is strictly better.
     fn offer(&mut self, p: usize, energy: f64, state: &[f64], dcut_scale: f64) -> bool {
-        let hist = shell_histograms(state);
-        self.members[p] = Some((energy, state.to_vec(), hist));
-        let filled: Vec<usize> = (0..self.members.len())
-            .filter(|&i| self.members[i].is_some())
-            .collect();
-        if self.dcut.is_none() {
-            if filled.len() < self.members.len() {
+        if !self.is_seeded(p) {
+            self.seed_chain(p, energy, state, dcut_scale);
+            return false;
+        }
+        if !self.cutoff_ready {
+            return false;
+        }
+        if std::env::var("PBH_HOLD").ok().as_deref() == Some("1") {
+            return false;
+        }
+        let stored = Array1::from(state.to_vec());
+        if std::env::var("PBH_NEAR_ONLY").ok().as_deref() == Some("1") {
+            let nearest = self
+                .bank
+                .members()
+                .iter()
+                .map(|member| population_distance(stored.view(), member.state.view()))
+                .fold(f64::INFINITY, f64::min);
+            if nearest > self.bank.dcut {
                 return false;
             }
-            // Every chain has reported once: the cutoff is a multiple of
-            // the mean pairwise dissimilarity of that first population.
-            let mut total = 0.0;
-            let mut pairs = 0usize;
-            for (a, &i) in filled.iter().enumerate() {
-                for &j in &filled[a + 1..] {
-                    let (hi, hj) = (
-                        &self.members[i].as_ref().unwrap().2,
-                        &self.members[j].as_ref().unwrap().2,
-                    );
-                    total += shell_dissimilarity(hi, hj);
-                    pairs += 1;
-                }
-            }
-            self.dcut = Some(dcut_scale * total / pairs.max(1) as f64);
+        }
+        if std::env::var("SAME_PACKING").ok().as_deref() == Some("1")
+            && self.nearest_is_other_family(stored.view())
+        {
             return false;
         }
-        let dcut = self.dcut.unwrap();
-        let mut nearest: Option<(usize, f64)> = None;
-        for &q in &filled {
-            if q == p {
-                continue;
+        self.tick = self.tick.saturating_add(1);
+        self.offers = self.offers.saturating_add(1);
+        let admission = self.bank.offer(stored.view(), energy, population_distance);
+        let replaced = match admission {
+            Admission::Improved(slot) => {
+                self.replacements_near += 1;
+                Some(slot)
             }
-            let d = shell_dissimilarity(&hist, &self.members[q].as_ref().unwrap().2);
-            if nearest.is_none_or(|(_, best)| d < best) {
-                nearest = Some((q, d));
+            Admission::Displaced(slot) => {
+                self.replacements_far += 1;
+                Some(slot)
+            }
+            Admission::Duplicate(_) | Admission::Added(_) | Admission::Rejected => None,
+        };
+        if let Some(slot) = replaced {
+            let chain = self.owner[slot];
+            self.pending[chain] = Some((energy, state.to_vec()));
+            self.improved_at[chain] = self.tick;
+        }
+        replaced.is_some()
+    }
+
+    fn nearest_is_other_family(&self, state: ArrayView1<f64>) -> bool {
+        let mut nearest: Option<(f64, usize)> = None;
+        for (slot, member) in self.bank.members().iter().enumerate() {
+            let distance = population_distance(state, member.state.view());
+            if nearest.is_none_or(|(best, _)| distance < best) {
+                nearest = Some((distance, slot));
             }
         }
-        let Some((q, d)) = nearest else {
+        let Some((distance, slot)) = nearest else {
             return false;
         };
-        if d < dcut {
-            // Same region as q: only a better child displaces q.
-            let eq = self.members[q].as_ref().unwrap().0;
-            if energy < eq - 1e-9 {
-                self.pending[q] = Some((energy, state.to_vec()));
-                self.replacements_near += 1;
-                return true;
-            }
+        let Some(coords) = self.bank.members()[slot].state.as_slice() else {
             return false;
+        };
+        distance < self.bank.dcut
+            && state
+                .as_slice()
+                .is_some_and(|child| anneal_core::catalog::different_decaf_family(child, coords))
+    }
+
+    /// A stalled chain takes the member that improved most recently.
+    /// That member is further along the same descent. Filtering it out
+    /// for being the same packing leaves only a different trap.
+    fn pull_improving(&self, chain: usize, mine: f64) -> Option<Vec<f64>> {
+        let my_tick = self.improved_at.get(chain).copied().unwrap_or(0);
+        let mut chosen: Option<(u64, Vec<f64>)> = None;
+        for (slot, member) in self.bank.members().iter().enumerate() {
+            let Some(&owner) = self.owner.get(slot) else {
+                continue;
+            };
+            if owner == chain {
+                continue;
+            }
+            // A shallow leader that improved by a wiggle glues the ensemble
+            // on one shelf. The donor has to be deeper.
+            if member.energy + 0.5 >= mine {
+                continue;
+            }
+            // A minimum just above the reference is deep enough to pass
+            // the 0.5 test and then collects every stall. Two occupants
+            // is enough. Later stalls keep their own walk.
+            let occupants = self
+                .bank
+                .members()
+                .iter()
+                .filter(|other| (other.energy - member.energy).abs() < 1e-4)
+                .count();
+            if occupants >= 2 {
+                continue;
+            }
+            let tick = self.improved_at.get(owner).copied().unwrap_or(0);
+            if tick <= my_tick {
+                continue;
+            }
+            if chosen.as_ref().is_none_or(|(best, _)| tick > *best) {
+                chosen = Some((tick, member.state.to_vec()));
+            }
         }
-        // A new region: the worst member moves there if the child beats it.
-        let worst = filled.iter().copied().filter(|&i| i != p).max_by(|&a, &b| {
-            self.members[a]
-                .as_ref()
-                .unwrap()
-                .0
-                .total_cmp(&self.members[b].as_ref().unwrap().0)
-        });
-        if let Some(w) = worst
-            && energy < self.members[w].as_ref().unwrap().0 - 1e-9
-        {
-            self.pending[w] = Some((energy, state.to_vec()));
-            self.replacements_far += 1;
-            return true;
-        }
-        false
+        chosen.map(|(_, state)| state)
     }
 
     fn take_pending(&mut self, chain: usize) -> Option<(f64, Vec<f64>)> {
@@ -465,7 +771,18 @@ fn run_chain(
     population: Option<Arc<Mutex<Population>>>,
     cores: Option<Arc<Mutex<CoreClassTable>>>,
 ) -> ChainReport {
-    let cfg = Config::recommended(n);
+    let mut cfg = Config::recommended(n);
+    if std::env::var("MOVE").ok().as_deref() == Some("wales") {
+        cfg.move_library = MoveLibrary::WalesDoye;
+        cfg.allocate_moves = false;
+        cfg.depth_reward = false;
+        cfg.tabu_on_stall = false;
+    }
+    if let Ok(temperature) = std::env::var("TEMP") {
+        cfg.temperature = temperature
+            .parse()
+            .unwrap_or_else(|_| panic!("TEMP must be a finite temperature"));
+    }
     let surface_kind = Surface::from_environment(n);
     let child_surface = surface_kind.clone();
     let mut rng = StdRng::seed_from_u64(seed);
@@ -477,6 +794,16 @@ fn run_chain(
     let diameter = exchange.diameter;
     let beta = exchange.diameter_beta;
     let kappa = exchange.diameter_kappa;
+    let axes = if exchange.diameter_body {
+        [
+            exchange.diameter_wl,
+            exchange.diameter_wy,
+            exchange.diameter_wz,
+        ]
+    } else {
+        [1.0, exchange.diameter_wy, exchange.diameter_wz]
+    };
+    let body = exchange.diameter_body;
     let two_phase = compress_mu > 0.0 || ((diameter > 0.0 || kappa > 0.0) && beta > 0.0);
     let screen_steps = cfg.screen_steps;
     let split_surface = (exchange.portfolio_split && !exchange.portfolio.is_empty()).then(|| {
@@ -490,7 +817,20 @@ fn run_chain(
         let mut portfolio =
             SurfacePortfolio::with_block(&exchange.portfolio, seed, exchange.portfolio_block);
         if let Some(shared) = shared_surfaces.clone() {
-            portfolio = portfolio.sharing(shared);
+            // One declared source for the ensemble. Block rewards are
+            // finite and carry the block's charged work, so the book
+            // can credit them. The Cambridge energy is not this key.
+            let source = anneal_core::surface_evidence::SourceTransferKey {
+                descriptor_schema: "lj".into(),
+                descriptor_version: 1,
+                region: 1,
+                proposal: "hop".into(),
+                quench_schema: "lbfgs".into(),
+                block: exchange.portfolio_block.max(1),
+            };
+            portfolio = portfolio
+                .sharing(shared, source)
+                .expect("shared surface source matches the portfolio block");
         }
         portfolio
     });
@@ -522,7 +862,7 @@ fn run_chain(
                 if !led.charge() {
                     return None;
                 }
-                Some(compressed(&surface_kind, v, mu, cutoff, beta))
+                Some(compressed(&surface_kind, v, mu, cutoff, beta, axes, body))
             });
             start = compressed;
         }
@@ -556,7 +896,16 @@ fn run_chain(
     let temperature = cfg.temperature;
     let min_separation = cfg.min_separation;
     let mut child_opt = WarmLbfgs::default();
+    let stall_restart = env_usize("STALL_RESTART", 0);
+    let stall_adopt = env_usize("STALL_ADOPT", 0);
+    let stall_handoff = env_usize("STALL_HANDOFF", 0);
+    let mut best_mark = f64::INFINITY;
+    let mut mark_hop = 0usize;
     let mut checkpoint = |snapshot: ChainCheckpoint<'_>| {
+        if snapshot.best_energy() + 1e-6 < best_mark {
+            best_mark = snapshot.best_energy();
+            mark_hop = snapshot.hops();
+        }
         {
             let mut slots = board.lock().expect("ensemble board");
             let slot = &mut slots[chain];
@@ -565,6 +914,15 @@ fn run_chain(
             slot.best_energy = snapshot.best_energy();
             if let Some(best) = snapshot.best_state() {
                 slot.best_state = best.to_vec();
+            }
+            if slot.first_state.is_empty() {
+                if !slot.best_state.is_empty() {
+                    slot.first_state = slot.best_state.clone();
+                    slot.first_energy = slot.best_energy;
+                } else if !slot.state.is_empty() {
+                    slot.first_state = slot.state.clone();
+                    slot.first_energy = slot.energy;
+                }
             }
         }
         if exchange.reoccupy && snapshot.charged() >= next_reoccupy {
@@ -608,6 +966,29 @@ fn run_chain(
         }
         if let Some(population) = population.as_ref() {
             let mut population = population.lock().expect("population");
+            let spent = snapshot.charged();
+            let left = snapshot.remaining();
+            let progress = spent as f64 / (spent.saturating_add(left).max(1)) as f64;
+            population.set_progress(progress);
+            if !population.is_seeded(chain) {
+                if let Some(current) = snapshot.current_state().as_slice() {
+                    population.offer(
+                        chain,
+                        snapshot.current_energy(),
+                        current,
+                        exchange.pbh_dcut_scale,
+                    );
+                }
+            } else {
+                for boundary in snapshot.quench_boundaries() {
+                    let quenched = boundary.state();
+                    let Some(quenched) = quenched.as_slice() else {
+                        continue;
+                    };
+                    tally.attempts += 1;
+                    population.offer(chain, boundary.energy(), quenched, exchange.pbh_dcut_scale);
+                }
+            }
             if let Some((_, state)) = population.take_pending(chain) {
                 tally.adopted += 1;
                 return CheckpointAction::BoundaryProposal {
@@ -615,14 +996,39 @@ fn run_chain(
                     action: "pbh".to_owned(),
                 };
             }
-            if let Some(current) = snapshot.current_state().as_slice() {
-                tally.attempts += 1;
-                population.offer(
-                    chain,
-                    snapshot.current_energy(),
-                    current,
-                    exchange.pbh_dcut_scale,
-                );
+            if stall_handoff > 0 && snapshot.hops().saturating_sub(mark_hop) >= stall_handoff {
+                if let Some(state) = population.pull_improving(chain, snapshot.best_energy()) {
+                    mark_hop = snapshot.hops();
+                    tally.adopted += 1;
+                    return CheckpointAction::BoundaryProposal {
+                        state: Array1::from(state),
+                        action: "handoff".to_owned(),
+                    };
+                }
+            }
+            if stall_adopt > 0 && snapshot.hops().saturating_sub(mark_hop) >= stall_adopt {
+                // A kick of the whole cluster and a packing hop both quenched
+                // back onto the same neighbour. Copying that neighbour parks
+                // the ensemble there. Move the worst-bound atom instead.
+                if let Some(origin) = snapshot
+                    .best_state()
+                    .as_ref()
+                    .and_then(|mine| mine.as_slice())
+                {
+                    mark_hop = snapshot.hops();
+                    tally.adopted += 1;
+                    return CheckpointAction::BoundaryProposal {
+                        state: relocate_worst_atom(origin, 1, &mut exchange_rng),
+                        action: "exit".to_owned(),
+                    };
+                }
+            }
+            if stall_restart > 0 && snapshot.hops().saturating_sub(mark_hop) >= stall_restart {
+                mark_hop = snapshot.hops();
+                return CheckpointAction::BoundaryProposal {
+                    state: random_cluster(n, 0.7, min_separation, &mut exchange_rng),
+                    action: "restart".to_owned(),
+                };
             }
             return CheckpointAction::Continue;
         }
@@ -641,6 +1047,7 @@ fn run_chain(
                 snapshot.current_energy(),
             )
         };
+        let from_first = exchange_rng.random::<bool>();
         let partner = {
             let slots = board.lock().expect("ensemble board");
             let candidates: Vec<(f64, &Vec<f64>)> = slots
@@ -648,7 +1055,9 @@ fn run_chain(
                 .enumerate()
                 .filter(|(other, _)| *other != chain)
                 .map(|(_, slot)| {
-                    if exchange.partner_best {
+                    if from_first && !slot.first_state.is_empty() {
+                        (slot.first_energy, &slot.first_state)
+                    } else if exchange.partner_best {
                         (slot.best_energy, &slot.best_state)
                     } else {
                         (slot.energy, &slot.state)
@@ -719,17 +1128,182 @@ fn run_chain(
             CheckpointAction::ExternalWork { external_calls }
         }
     };
-    let outcome = run_with_bias_at_checkpoints(
-        &cfg,
-        start.view(),
-        &mut ledger,
-        &mut relax,
-        None,
-        &mut bias,
-        &mut rng,
-        exchange.checkpoint,
-        &mut checkpoint,
-    );
+    let box_half = std::env::var("BOX").ok().and_then(|value| {
+        if value == "1" {
+            Some(0.25)
+        } else {
+            value.parse::<f64>().ok().filter(|half| *half > 0.0)
+        }
+    });
+    let outcome = if let Some(half) = box_half {
+        // One uniform kick and one two-phase local search per hop. The bank
+        // decides which slot receives the quenched child. This chain kicks
+        // from its own slot, which stays put when the child replaces another.
+        let (mut energy, mut state) = relax(&mut ledger, start.view(), relax_steps);
+        if let Some(population) = population.as_ref() {
+            let mut population = population.lock().expect("population");
+            if let Some(slice) = state.as_slice() {
+                population.offer(chain, energy, slice, exchange.pbh_dcut_scale);
+            }
+        }
+        let mut best = energy;
+        let mut best_state = state.clone();
+        let mut improvements = Vec::new();
+        if energy.is_finite() {
+            improvements.push((0usize, ledger.spent(), 0usize, energy));
+        }
+        let mut accepted_transitions = Vec::new();
+        let mut hops = 0usize;
+        // Hop index of the last incumbent improvement; relocation waits for a stall.
+        let mut mark_hop = 0usize;
+        const SPHERE_RELOCATE_STALL: usize = 40;
+        while ledger.remaining() > 0 {
+            if let Some(population) = population.as_ref() {
+                let mut population = population.lock().expect("population");
+                if let Some((offered, offered_state)) = population.take_pending(chain) {
+                    if offered < energy - 1e-9 && offered_state.len() == state.len() {
+                        accepted_transitions.push(AcceptedTransition {
+                            hop: hops,
+                            action: "pbh".to_owned(),
+                            from_energy: energy,
+                            to_energy: offered,
+                            from_state: state.clone(),
+                            from_gradient: None,
+                            to_state: Array1::from(offered_state.clone()),
+                            to_gradient: None,
+                            validated: true,
+                            adopted: true,
+                        });
+                        energy = offered;
+                        state = Array1::from(offered_state);
+                        if energy < best {
+                            best = energy;
+                            best_state = state.clone();
+                            mark_hop = hops;
+                            if improvements.len() < 512 {
+                                improvements.push((hops, ledger.spent(), 0, energy));
+                            }
+                        }
+                    }
+                }
+            }
+            if ledger.remaining() == 0 {
+                break;
+            }
+            hops += 1;
+            let mut trial = state.clone();
+            let spherical = state
+                .as_slice()
+                .is_some_and(|slice| inertia_ratio(slice) < 1.05);
+            let stalled = hops.saturating_sub(mark_hop) >= SPHERE_RELOCATE_STALL;
+            if exchange.sphere_relocate > 0 && spherical && stalled {
+                if let Some(slice) = state.as_slice() {
+                    trial = relocate_worst_atom(slice, exchange.sphere_relocate, &mut rng);
+                }
+            } else {
+                if let Some(slice) = trial.as_slice_mut() {
+                    stretch_if_spherical(slice, exchange.sphere_stretch);
+                }
+                let width = 2.0 * half;
+                let n_atoms = trial.len() / 3;
+                if exchange.kick_atoms > 0 && exchange.kick_atoms < n_atoms {
+                    let mut order: Vec<usize> = (0..n_atoms).collect();
+                    for i in 0..exchange.kick_atoms {
+                        let j = rng.random_range(i..n_atoms);
+                        order.swap(i, j);
+                    }
+                    for &atom in order.iter().take(exchange.kick_atoms) {
+                        for k in 0..3 {
+                            trial[3 * atom + k] += (rng.random::<f64>() - 0.5) * width;
+                        }
+                    }
+                } else {
+                    for coord in trial.iter_mut() {
+                        *coord += (rng.random::<f64>() - 0.5) * width;
+                    }
+                }
+            }
+            let (child, child_state) = relax(&mut ledger, trial.view(), relax_steps);
+            if let Some(population) = population.as_ref() {
+                let mut population = population.lock().expect("population");
+                if let Some(slice) = child_state.as_slice() {
+                    population.offer(chain, child, slice, exchange.pbh_dcut_scale);
+                }
+                if let Some((offered, offered_state)) = population.take_pending(chain) {
+                    if offered < energy - 1e-9 && offered_state.len() == state.len() {
+                        accepted_transitions.push(AcceptedTransition {
+                            hop: hops,
+                            action: "pbh".to_owned(),
+                            from_energy: energy,
+                            to_energy: offered,
+                            from_state: state.clone(),
+                            from_gradient: None,
+                            to_state: Array1::from(offered_state.clone()),
+                            to_gradient: None,
+                            validated: true,
+                            adopted: true,
+                        });
+                        energy = offered;
+                        state = Array1::from(offered_state);
+                        if energy < best {
+                            best = energy;
+                            best_state = state.clone();
+                            mark_hop = hops;
+                            if improvements.len() < 512 {
+                                improvements.push((hops, ledger.spent(), 0, energy));
+                            }
+                        }
+                    }
+                }
+            } else if child < energy {
+                accepted_transitions.push(AcceptedTransition {
+                    hop: hops,
+                    action: "box".to_owned(),
+                    from_energy: energy,
+                    to_energy: child,
+                    from_state: state.clone(),
+                    from_gradient: None,
+                    to_state: child_state.clone(),
+                    to_gradient: None,
+                    validated: true,
+                    adopted: true,
+                });
+                energy = child;
+                state = child_state;
+                if energy < best {
+                    best = energy;
+                    best_state = state.clone();
+                    mark_hop = hops;
+                    if improvements.len() < 512 {
+                        improvements.push((hops, ledger.spent(), 0, energy));
+                    }
+                }
+            }
+        }
+        Outcome {
+            best,
+            best_state: Some(best_state),
+            final_state: Some(state),
+            final_energy: energy,
+            accepted_transitions,
+            hops,
+            charged: ledger.spent(),
+            improvements,
+            ..Outcome::default()
+        }
+    } else {
+        run_with_bias_at_checkpoints(
+            &cfg,
+            start.view(),
+            &mut ledger,
+            &mut relax,
+            None,
+            &mut bias,
+            &mut rng,
+            exchange.checkpoint,
+            &mut checkpoint,
+        )
+    };
     let first_hit = target.and_then(|reference| {
         outcome
             .improvements
@@ -785,6 +1359,13 @@ fn main() {
         diameter: env_f64("DIAMETER_D", 0.0) * 2f64.powf(1.0 / 6.0),
         diameter_beta: env_f64("DIAMETER_BETA", 1.0),
         diameter_kappa: env_f64("DIAMETER_KAPPA", 0.0),
+        diameter_wl: env_f64("DIAMETER_WL", 1.0),
+        diameter_wy: env_f64("DIAMETER_WY", 1.0),
+        diameter_wz: env_f64("DIAMETER_WZ", 1.0),
+        diameter_body: env_usize("DIAMETER_BODY", 0) == 1,
+        sphere_stretch: env_f64("SPHERE_STRETCH", 0.0),
+        sphere_relocate: env_usize("SPHERE_RELOCATE", 0),
+        kick_atoms: env_usize("KICK_ATOMS", 0),
         portfolio: std::env::var("SURFACES")
             .map(|spec| parse_surfaces(&spec))
             .unwrap_or_default(),
@@ -792,7 +1373,7 @@ fn main() {
         portfolio_shared: mode == "shared",
         portfolio_split: env_usize("SURFACES_SPLIT", 0) == 1,
         pbh: mode == "pbh",
-        pbh_dcut_scale: env_f64("PBH_DCUT", 1.5),
+        pbh_dcut_scale: env_f64("PBH_DCUT", 0.5),
         core_tabu: mode == "coretabu",
         core_patience: env_usize("CORE_PATIENCE", 20_000),
         core_tabu_calls: env_usize("CORE_TABU", 50_000),
@@ -935,7 +1516,9 @@ fn main() {
             let population = population.lock().expect("population");
             println!(
                 "      pbh: dcut {:?}, {} near replacements, {} far replacements",
-                population.dcut, population.replacements_near, population.replacements_far
+                population.cutoff(),
+                population.replacements_near,
+                population.replacements_far
             );
         }
         chains_solved += solved.len();
@@ -945,11 +1528,27 @@ fn main() {
         if let Some(first) = earliest {
             first_hits.push(first);
         }
+        let earliest_hops = reports
+            .iter()
+            .filter_map(|report| {
+                target.and_then(|reference| {
+                    report
+                        .outcome
+                        .improvements
+                        .iter()
+                        .find(|&&(_, _, _, energy)| energy < reference + 1e-4)
+                        .map(|&(hop, _, _, _)| hop)
+                })
+            })
+            .min();
         println!(
-            "  ensemble {ensemble}: deepest {deepest:.6}  solved chains {:?}  first hit {}  hops {hops}  charged {charged}  splice attempts {} adopted {} below {} calls {}",
+            "  ensemble {ensemble}: deepest {deepest:.6}  solved chains {:?}  first hit {}  first hop {}  hops {hops}  charged {charged}  splice attempts {} adopted {} below {} calls {}",
             solved,
             earliest
                 .map(|c| c.to_string())
+                .unwrap_or_else(|| "-".into()),
+            earliest_hops
+                .map(|hop| hop.to_string())
                 .unwrap_or_else(|| "-".into()),
             reports.iter().map(|r| r.tally.attempts).sum::<usize>(),
             reports.iter().map(|r| r.tally.adopted).sum::<usize>(),

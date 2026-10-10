@@ -5,9 +5,9 @@
 //! stick out of the species mean. On a closed shell that leftover is
 //! a core-versus-surface breath: the quench returns the same packing.
 //! The packing label is the unit species mean `μ` (the bank Dcut).
-//! When leftover is a shell mode the hop is a kick of `μ` along a
-//! random direction orthogonal to the occupied mean, pulled back
-//! through `∂μ/∂x`. Occupancy archive holes and packing kicks then
+//! When leftover is a shell mode the hop places one point of the
+//! Plasencia cover of the displacement sphere. A fivefold residual
+//! is the fallback, then a kick of `μ`. Occupancy archive holes and packing kicks then
 //! ring-lens that Cartesian step: pentagon atoms when the occupied
 //! profile has 5-rings, triangle atoms when it does not. Champion
 //! leftover SOAP is not that lens. No Marks, fcc, or 421 target.
@@ -75,6 +75,32 @@ pub fn packing_archive() -> Vec<Array1<f64>> {
 
 /// Leftover RMS below which the hop yields.
 const DEFECT: f64 = 1e-4;
+
+/// First proposal that actually moves, in order.
+///
+/// A closed shell has no leftover direction. The order is one covering
+/// displacement, then the fivefold residual, then the ordinary kick.
+pub fn first_that_moves(origin: ArrayView1<f64>, steps: &[Array1<f64>]) -> Array1<f64> {
+    for step in steps {
+        if displacement_rms(step, origin) > 1e-6 {
+            return step.clone();
+        }
+    }
+    origin.to_owned()
+}
+
+fn displacement_rms(y: &Array1<f64>, x: ArrayView1<f64>) -> f64 {
+    let n = (x.len() / 3).max(1) as f64;
+    let sum = y
+        .iter()
+        .zip(x.iter())
+        .map(|(a, b)| {
+            let d = a - b;
+            d * d
+        })
+        .sum::<f64>();
+    (sum / n).sqrt()
+}
 const LAMBDA: f64 = 1e-3;
 
 thread_local! {
@@ -1062,7 +1088,14 @@ pub fn step_away_featomic<R: Rng + ?Sized>(
         if mobile.is_some_and(|set| set.len() < x.len() / 3) {
             return x.to_owned();
         }
-        return packing_kick(x, &s, rmsd, mobile, rng);
+        // SOAP has no direction. One point of the Plasencia cover of
+        // the displacement sphere is the generic rearrangement. The
+        // fivefold residual is the fallback when that placement does
+        // not move, and the kick remains only if that residual is flat.
+        let covered = leave_archive_hole(x, rcut, species, mobile, rmsd, rng);
+        let five = crate::soap::step_away_fivefold_measured(x, rmsd);
+        let kick = packing_kick(x, &s, rmsd, mobile, rng);
+        return first_that_moves(x, &[covered, five, kick]);
     }
     focus_patch(&mut s, x, rcut, rng);
     let dr = tikhonov(&s.jacobian, s.leftover.view(), LAMBDA);
@@ -1530,6 +1563,68 @@ mod tests {
             distance >= SOAP_PACK_ESCAPE,
             "hole step stopped {distance} from the well it left, inside the escape {SOAP_PACK_ESCAPE}"
         );
+    }
+
+    fn regular_icosahedron() -> Array1<f64> {
+        let p = (1.0 + 5.0_f64.sqrt()) / 2.0;
+        let mut coords = Vec::with_capacity(36);
+        for (a, b, c) in [
+            (0.0, 1.0, p),
+            (0.0, 1.0, -p),
+            (0.0, -1.0, p),
+            (0.0, -1.0, -p),
+            (1.0, p, 0.0),
+            (1.0, -p, 0.0),
+            (-1.0, p, 0.0),
+            (-1.0, -p, 0.0),
+            (p, 0.0, 1.0),
+            (p, 0.0, -1.0),
+            (-p, 0.0, 1.0),
+            (-p, 0.0, -1.0),
+        ] {
+            coords.extend([a, b, c]);
+        }
+        Array1::from(coords)
+    }
+
+    #[test]
+    fn closed_shell_with_no_local_leftover_takes_the_covering_point() {
+        let shell = regular_icosahedron();
+        let spec = spectrum(shell.view(), 3.5, None, None);
+        let nnu = (spec.n_at * spec.n_feat).max(1) as f64;
+        let rms = (spec.leftover.iter().map(|v| v * v).sum::<f64>() / nnu).sqrt();
+        assert!(
+            rms < DEFECT || shell_leftover(&spec),
+            "icosahedral shell still has a local leftover, rms={rms}"
+        );
+        let mut rng_hop = StdRng::seed_from_u64(7);
+        let hopped = step_away_featomic(shell.view(), 0.35, 3.5, None, None, &mut rng_hop);
+        let mut rng_cover = StdRng::seed_from_u64(7);
+        let covered = leave_archive_hole(shell.view(), 3.5, None, None, 0.35, &mut rng_cover);
+        let err: f64 = hopped
+            .iter()
+            .zip(covered.iter())
+            .map(|(a, b)| (a - b).abs())
+            .sum();
+        assert!(
+            err < 1e-6,
+            "closed shell did not propose the covering point, err={err}"
+        );
+    }
+
+    #[test]
+    fn closed_shell_yield_is_cover_then_fivefold_then_kick() {
+        let origin = Array1::zeros(9);
+        let cover = Array1::from(vec![0.4, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]);
+        let five = Array1::from(vec![0.0, 0.5, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]);
+        let kick = Array1::from(vec![0.0, 0.0, 0.6, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]);
+        let first = first_that_moves(origin.view(), &[cover.clone(), five.clone(), kick.clone()]);
+        assert_eq!(first, cover);
+        let flat = origin.clone();
+        let second = first_that_moves(origin.view(), &[flat.clone(), five.clone(), kick.clone()]);
+        assert_eq!(second, five);
+        let third = first_that_moves(origin.view(), &[flat.clone(), flat.clone(), kick.clone()]);
+        assert_eq!(third, kick);
     }
 
     #[test]

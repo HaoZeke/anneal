@@ -905,6 +905,50 @@ mod option_tests {
 
     #[cfg(feature = "bank-rpc")]
     #[test]
+    fn failed_probe_is_one_unresolved_observation() {
+        let signature = anneal_core::catalog::lj::system_signature(2).unwrap();
+        let descriptor_space = anneal_core::catalog::lj::descriptor_space();
+        let separation = 2.0_f64.powf(1.0 / 6.0);
+        let source = Array1::from(vec![0.0, 0.0, 0.0, separation, 0.0, 0.0]);
+        let (energy, gradient) = lj(source.view());
+        let transitions = vec![AcceptedTransition {
+            hop: 1,
+            action: "probe".into(),
+            from_energy: energy,
+            to_energy: energy,
+            from_state: source.clone(),
+            from_gradient: Some(gradient),
+            to_state: source,
+            to_gradient: None,
+            validated: false,
+            adopted: false,
+        }];
+        let mut sequence = 4;
+
+        let operations = adaptive_catalog_operations(
+            &descriptor_space,
+            &signature.atomic_numbers,
+            0,
+            &mut sequence,
+            71,
+            40,
+            &transitions,
+        );
+
+        assert_eq!(sequence, 5);
+        assert_eq!(operations.len(), 2);
+        assert!(matches!(
+            operations[0],
+            AdaptiveCatalogOperation::RegisterCurrent(_)
+        ));
+        assert!(matches!(
+            &operations[1],
+            AdaptiveCatalogOperation::Unresolved { action } if action == "probe"
+        ));
+    }
+
+    #[cfg(feature = "bank-rpc")]
+    #[test]
     fn shared_crossing_is_aligned_into_the_live_lj_frame() {
         let crossing = anneal_core::catalog_rpc::BoundaryCrossingRecord {
             action: "surface_relocate".into(),
@@ -4052,9 +4096,10 @@ fn run_capnp_catalog(
     use anneal_core::catalog_rpc::{CatalogIdentity, INCUMBENT_SAMPLE_DRAW, SPARSE_SAMPLE_DRAW};
     use anneal_core::cooperative_search::ledger::ChargeKind;
     use anneal_core::cooperative_search::{
-        CatalogBridgeOutcome, CatalogHoleOutcome, CatalogSampleOutcome, CatalogSamplesOutcome,
-        CooperativeRun, PolicyEvidenceOutcome, PolicyRole, PopulationSynchronizationOutcome,
-        ProposalFamily, RunManifest, SliceAdoption, SliceQuench, SliceTrace, SliceValidation,
+        CatalogBoundaryOutcome, CatalogBridgeOutcome, CatalogHoleOutcome, CatalogSampleOutcome,
+        CatalogSamplesOutcome, CooperativeRun, PolicyEvidenceOutcome, PolicyRole,
+        PopulationSynchronizationOutcome, ProposalFamily, RunManifest, SliceAdoption, SliceQuench,
+        SliceTrace, SliceValidation, TransitionRecordOutcome,
     };
     #[cfg(feature = "ira")]
     use anneal_core::cooperative_search::{RideClaimOutcome, RideReportOutcome};
@@ -4351,21 +4396,10 @@ fn run_capnp_catalog(
     // counts alone, so distance in histogram space is exactly the
     // direction a funnel exchange must move, named without naming any
     // structure. Gated until the paired smoke measures it.
-    let histo_screen = anneal_core::env::flag("CATALOG_HISTO_SCREEN");
-    // Difficulty retargeting, the proof-of-work governor transplanted:
-    // a blockchain holds its block rate constant by adjusting the
-    // difficulty against measured production; here the measured
-    // quantity is ensemble basin discovery per force evaluation, from
-    // the exact census counters every policy reply already carries.
-    // When discovery dries up against the run's own history the
-    // exploration gain rises, scaling escape perturbations; recovery
-    // decays it back toward one. Self-relative, no structural prior,
-    // no protocol change. Gated until the paired smoke measures it.
-    let difficulty_enabled = anneal_core::env::flag("CATALOG_DIFFICULTY");
-    let mut difficulty_gain = 1.0_f64;
-    let mut governor_last: Option<(u64, u64)> = None;
-    let mut governor_ema: Option<f64> = None;
-    let histo_radius = anneal_core::env::parsed::<f64>("CATALOG_HISTO_RADIUS")
+    let histo_screen = std::env::var("CATALOG_HISTO_SCREEN").is_ok_and(|v| v == "1");
+    let histo_radius = std::env::var("CATALOG_HISTO_RADIUS")
+        .ok()
+        .and_then(|value| value.parse::<f64>().ok())
         .filter(|value| value.is_finite() && *value > 0.0)
         .unwrap_or(1.4);
     let mut histo_leaders: Vec<Array1<f64>> = Vec::new();
@@ -4657,7 +4691,7 @@ fn run_capnp_catalog(
     let mut restart_state = RestartState::default();
     let mut count_walk = 0usize;
     let mut count_hole = 0usize;
-    let mut extra_cover = 0usize;
+    let mut count_boundary = 0usize;
     let mut last_policy_action = ACTION_LOCAL;
     // Gossip over the census bus: at every GOSSIP_INTERVAL charged calls
     // publish the GOSSIP_TOP deepest wells (0 for the whole table) and step
@@ -4689,118 +4723,85 @@ fn run_capnp_catalog(
     // mechanism that never fires is visible as zero rather than assumed.
     let mut phases = PhaseTally::default();
     let mut checkpoint = |snapshot: ChainCheckpoint<'_>| {
-        let action = with_pending_deposits(
-            &mut pending_deposits,
-            shared_bias_enabled,
-            |pending_deposits| {
-                if sharing && let Some(portfolio) = surfaces.as_ref() {
+        checkpoint_sequence = checkpoint_sequence
+            .checked_add(1)
+            .expect("checkpoint sequence must fit u64");
+        // Quiet-stretch bookkeeping for the Leave gate: an improvement ends
+        // the stretch and records how long the replica took to come back.
+        if snapshot.best_energy() < leave_best - 1e-10 {
+            credit_action(last_policy_action, true);
+            leave_best = snapshot.best_energy();
+            leave_patience = leave_patience.max(leave_quiet);
+            leave_quiet = 0;
+        } else {
+            credit_action(last_policy_action, false);
+            leave_quiet += 1;
+        }
+        let boundary_charged = snapshot
+            .quench_boundaries()
+            .iter()
+            .map(|boundary| boundary.charged_calls())
+            .sum::<usize>();
+        let mut checkpoint_work = Vec::with_capacity(snapshot.quench_boundaries().len() + 1);
+        for boundary in snapshot.quench_boundaries() {
+            checkpoint_work.push((
+                ChargeKind::BasinEscape,
+                u64::try_from(boundary.charged_calls()).expect("quench charge must fit u64"),
+            ));
+        }
+        let checkpoint_charged = snapshot.charged().saturating_sub(last_charged);
+        let auxiliary_charged = checkpoint_charged
+            .checked_sub(boundary_charged)
+            .expect("quench boundaries cannot exceed checkpoint work");
+        if auxiliary_charged > 0 {
+            checkpoint_work.push((
+                ChargeKind::AuxiliaryEvaluation,
+                u64::try_from(auxiliary_charged).expect("auxiliary charge must fit u64"),
+            ));
+        } else if checkpoint_charged == 0 {
+            checkpoint_work.push((ChargeKind::LocalProposal, 0));
+        }
+        cooperative
+            .record_work_batch(replica, checkpoint_work)
+            .expect("checkpoint work batch must enter the cooperative ledger");
+        last_charged = snapshot.charged();
+
+        for transition in snapshot.accepted_transitions() {
+            if !transition.validated {
+                continue;
+            }
+            cooperative
+                .record_executed_transition(
+                    replica,
+                    u64::try_from(transition.hop).expect("transition hop must fit u64"),
+                    transition.action.clone(),
+                    transition.from_energy,
+                    transition.to_energy,
+                    transition.adopted,
+                )
+                .expect("validated local transition execution must remain traceable");
+        }
+
+        let operations = adaptive_catalog_operations(
+            &descriptor_space,
+            &signature.atomic_numbers,
+            replica,
+            &mut candidate_sequence,
+            seed,
+            snapshot.charged(),
+            snapshot.accepted_transitions(),
+        );
+        let mut path_active = false;
+        for operation in operations {
+            match operation {
+                AdaptiveCatalogOperation::RegisterCurrent(candidate) => {
                     cooperative
-                        .post_surface_evidence(replica, Arc::clone(portfolio))
-                        .expect("surface exchange must name the live replica");
-                }
-                if evidence_only {
-                    if let Some(charged) =
-                        unsettled_objective_calls(snapshot.charged(), last_charged)
-                    {
-                        cooperative
-                            .record_work(replica, EVIDENCE_ONLY_WORK_KIND, charged)
-                            .expect("evidence-only work must enter the cooperative ledger");
-                    }
-                    last_charged = snapshot.charged();
-                    phases.fire("continue");
-                    return CheckpointAction::Continue;
-                }
-                checkpoint_sequence = checkpoint_sequence
-                    .checked_add(1)
-                    .expect("checkpoint sequence must fit u64");
-                probe_due |= checkpoint_sequence.is_multiple_of(probe_interval);
-                // Census bus: publish this replica's minimum, read every peer's.
-                // Peers on this side of the packing map become repulsion
-                // references and the crowd the stopping rule reads; every fresh
-                // peer minimum is a shared-bias deposit when shared bias is on.
-                if let Some(bus) = census_bus.as_mut()
-                    && let Some(here) = snapshot.current_state().as_slice()
-                {
-                    if lj_catalog_gradient_norm(
-                        snapshot.current_energy(),
-                        snapshot.current_state(),
-                        snapshot.current_gradient(),
-                    )
-                    .is_some()
-                    {
-                        bus.publish(snapshot.hops() as u64, snapshot.current_energy(), here);
-                    }
-                    let fresh = bus.poll();
-                    bus_received += fresh.len();
-                    if let Some((interval, weight, top)) = coop_gossip
-                        && snapshot.charged() >= next_gossip
-                        && let Some(bias) = snapshot.bias()
-                    {
-                        next_gossip = snapshot.charged() + interval;
-                        let table = match top {
-                            Some(count) => bias.deepest_wells(count),
-                            None => bias.wells(),
-                        };
-                        if bus.publish_wells(&table) {
-                            gossip_published += 1;
-                        }
-                        if let Some((_, wells)) = bus.poll_wells().into_iter().last() {
-                            gossip_merged += 1;
-                            gossip_merge = Some(BiasUpdate::MergeWells {
-                                wells,
-                                weight,
-                                complete: top.is_none(),
-                            });
-                        }
-                    }
-                    // Locality-limited repulsive history: admit bus deposits from
-                    // nearby packings. This does not average coordinates or guarantee
-                    // one cluster per funnel. CENSUS_BUS_UNBOUNDED=1 admits distant
-                    // bus observations for a controlled comparison. Population-parent
-                    // and own-visit deposits retain their separate admission rules.
-                    let unbounded = anneal_core::env::flag("CENSUS_BUS_UNBOUNDED");
-                    if shared_bias_enabled {
-                        for peer in &fresh {
-                            if peer.coordinates.len() == here.len()
-                                && (unbounded
-                                    || anneal_core::catalog::nearby_packing(
-                                        here,
-                                        &peer.coordinates,
-                                    ))
-                            {
-                                pending_deposits.push(Array1::from(peer.coordinates.clone()));
-                            }
-                        }
-                    }
-                    // Recompute the nearby flags only for peers whose minimum
-                    // changed, or for all peers when this replica's own minimum
-                    // changed; otherwise reuse them. This keeps the bus at the cost
-                    // of the messages, not of 47 packing comparisons a checkpoint.
-                    let peers: Vec<_> = bus.peers().collect();
-                    let (updates, crowd) = census_nearby_updates(
-                        &mut bus_last_minimum,
-                        checkpoint_sequence,
-                        snapshot.current_energy(),
-                        here,
-                        &peers,
-                        &fresh,
-                        &bus.nearby,
+                        .record_work(replica, ChargeKind::DescriptorEvaluation, 0)
+                        .expect("source descriptor work must enter the cooperative ledger");
+                    path_active = matches!(
+                        cooperative.record_current(replica, candidate),
+                        Ok(TransitionRecordOutcome::Recorded)
                     );
-                    bus.nearby.extend(updates);
-                    peer_crowd = crowd;
-                    if anneal_core::env::flag("CATALOG_CENSUS_TRACE")
-                        && checkpoint_sequence.is_multiple_of(7)
-                    {
-                        println!(
-                            "  bus hops {}  peers {}  crowd {}  received {}  gossip published {} merged {}",
-                            snapshot.hops(),
-                            bus.peer_count(),
-                            peer_crowd,
-                            bus_received,
-                            gossip_published,
-                            gossip_merged
-                        );
-                    }
                 }
                 // Quiet-stretch bookkeeping for the Leave gate: an improvement ends
                 // the stretch and records how long the replica took to come back.
@@ -4846,7 +4847,10 @@ fn run_capnp_catalog(
 
                 for transition in snapshot.accepted_transitions() {
                     cooperative
-                        .record_executed_transition(
+                        .record_work(replica, ChargeKind::DescriptorEvaluation, 0)
+                        .expect("destination descriptor work must enter the cooperative ledger");
+                    path_active = matches!(
+                        cooperative.record_transition(
                             replica,
                             u64::try_from(transition.hop).expect("transition hop must fit u64"),
                             transition.action.clone(),
@@ -4889,36 +4893,325 @@ fn run_capnp_catalog(
                             action,
                             destination,
                             adopted,
-                        } => {
-                            let _ = cooperative.post_record_transition(
-                                replica,
-                                action,
-                                anneal_core::catalog_rpc::TransitionDestination::Resolved(
-                                    destination,
-                                ),
-                                adopted,
-                            );
-                        }
-                        AdaptiveCatalogOperation::Unresolved { action } => {
-                            let _ = cooperative.post_record_transition(
-                                replica,
-                                action,
-                                anneal_core::catalog_rpc::TransitionDestination::Unresolved,
-                                false,
-                            );
-                        }
-                    }
+                        ),
+                        Ok(TransitionRecordOutcome::Recorded)
+                    );
                 }
-                // A checkpoint registers its occupied minimum, not the origin of a
-                // sampled trajectory segment. Registration does not invent an edge.
-                // Coalesced: a chain sits in one minimum for hundreds of checkpoints,
-                // and every registration costs the coordinator a validation (0.28 s
-                // on LJ75, measured); re-sending an unchanged minimum is what
-                // saturated it with 48 replicas. Only a changed minimum is sent.
-                let occupied_changed = snapshot.current_gradient().is_some()
-                    && last_registered.as_ref().is_none_or(|(energy, state)| {
-                        (energy - snapshot.current_energy()).abs() > 1e-9
-                            || Some(state.as_slice()) != snapshot.current_state().as_slice()
+                AdaptiveCatalogOperation::Unresolved { action } if path_active => {
+                    path_active = matches!(
+                        cooperative.record_transition(
+                            replica,
+                            action,
+                            TransitionDestination::Unresolved,
+                            false,
+                        ),
+                        Ok(TransitionRecordOutcome::Recorded)
+                    );
+                }
+                AdaptiveCatalogOperation::Adopt { .. }
+                | AdaptiveCatalogOperation::Unresolved { .. } => {}
+            }
+        }
+
+        let mut boundary_candidates = Vec::new();
+        let mut descriptor_work = Vec::new();
+        for boundary in snapshot
+            .quench_boundaries()
+            .iter()
+            .filter(|boundary| boundary.status() == QuenchStatus::Validated)
+        {
+            let Some(gradient) = boundary.gradient() else {
+                continue;
+            };
+            candidate_sequence = candidate_sequence
+                .checked_add(1)
+                .expect("candidate sequence must fit u64");
+            descriptor_work.push((ChargeKind::DescriptorEvaluation, 0));
+            if let Some(candidate) = lj_catalog_candidate(
+                &descriptor_space,
+                &signature.atomic_numbers,
+                replica,
+                candidate_sequence,
+                seed,
+                snapshot.charged(),
+                boundary.energy(),
+                boundary.state(),
+                gradient,
+            ) {
+                boundary_candidates.push(candidate);
+            }
+        }
+        cooperative
+            .record_work_batch(replica, descriptor_work)
+            .expect("quench descriptor batch must enter the cooperative ledger");
+        let mut freshest_boundary = None;
+        for candidate in boundary_candidates {
+            let _ = cooperative.post_offer_candidate(replica, candidate.clone());
+            freshest_boundary = Some(candidate);
+        }
+
+        #[cfg(feature = "ira")]
+        if rides_enabled
+            && discovery_role_allows_ride(assigned_discovery_role)
+            && checkpoint_sequence.is_multiple_of(ride_interval)
+            && let Some(maximum_evaluations) = ride_producer_budget(
+                snapshot.remaining(),
+                ride_receiver_reserve,
+                ride_proposal_reserve,
+                ride_budget_cap,
+            )
+            && let RideClaimOutcome::Work(work) = cooperative
+                .claim_ride(replica, ride_rng.random())
+                .expect("ride claim must preserve cooperative invariants")
+        {
+            let producer_event_sequence = candidate_sequence
+                .checked_add(1)
+                .expect("ride event sequence must fit u64");
+            candidate_sequence = candidate_sequence
+                .checked_add(3)
+                .expect("ride event sequence must fit u64");
+            let execution = CatalogRideExecutionConfig {
+                exploration: ride_exploration.clone(),
+                localization_radius: ride_localization_radius,
+                maximum_evaluations,
+                producer_event_sequence,
+                producer_charged_work: u64::try_from(snapshot.charged())
+                    .expect("LJ charged work must fit u64"),
+            };
+            let report = execute_catalog_ride(
+                &ride_surface,
+                &descriptor_space,
+                &work,
+                &signature.atomic_numbers,
+                ride_masses.view(),
+                &ride_frozen,
+                &execution,
+                &ride_witness,
+            );
+            let producer_calls = report.charged_evaluations;
+            let destination = connected_destination(&work, &report, &ride_witness)
+                .map(|candidate| Array1::from(candidate.coordinates));
+            let cartesian_step_norm = destination.as_ref().map(|state| {
+                vector_distance(
+                    snapshot
+                        .current_state()
+                        .as_slice()
+                        .expect("LJ state is contiguous"),
+                    state.as_slice().expect("LJ ride endpoint is contiguous"),
+                )
+            });
+            let report_outcome = cooperative
+                .report_ride(replica, report)
+                .expect("ride report must preserve cooperative invariants");
+            let ride_calls = ride_total_charged_calls(report_outcome, producer_calls);
+            let settled_ride_calls = settled_external_calls(ride_calls, snapshot.remaining());
+            if settled_ride_calls > 0 {
+                cooperative
+                    .record_work(replica, ChargeKind::SaddleRide, settled_ride_calls)
+                    .expect("ride work must enter the cooperative ledger");
+                last_charged = snapshot
+                    .charged()
+                    .saturating_add(usize::try_from(settled_ride_calls).unwrap_or(usize::MAX));
+            }
+            let (policy_reason, validation, quench, adoption, novelty) = match report_outcome {
+                RideReportOutcome::Credited(credit)
+                    if credit.certified_connection && destination.is_some() =>
+                {
+                    (
+                        "ride_certified",
+                        SliceValidation::Accepted,
+                        SliceQuench::Converged,
+                        SliceAdoption::NotAttempted,
+                        Some(if credit.novel_saddle || credit.novel_edge {
+                            1.0
+                        } else {
+                            0.0
+                        }),
+                    )
+                }
+                RideReportOutcome::Credited(credit) if credit.degenerate_rearrangement => (
+                    "ride_degenerate_rearrangement",
+                    SliceValidation::Accepted,
+                    SliceQuench::Converged,
+                    SliceAdoption::NotAttempted,
+                    Some(if credit.novel_saddle { 1.0 } else { 0.0 }),
+                ),
+                RideReportOutcome::Credited(credit) => {
+                    let reason = credit
+                        .failure
+                        .map(ride_failure_reason)
+                        .unwrap_or("ride_destination_unavailable");
+                    (
+                        reason,
+                        SliceValidation::Rejected,
+                        SliceQuench::Rejected,
+                        SliceAdoption::Rejected,
+                        Some(0.0),
+                    )
+                }
+                RideReportOutcome::Rejected => (
+                    "ride_report_rejected",
+                    SliceValidation::Rejected,
+                    SliceQuench::NotAttempted,
+                    SliceAdoption::Rejected,
+                    None,
+                ),
+                RideReportOutcome::LocalFallback => (
+                    "ride_report_fallback",
+                    SliceValidation::NotAttempted,
+                    SliceQuench::NotAttempted,
+                    SliceAdoption::Rejected,
+                    None,
+                ),
+                RideReportOutcome::SharingDisabled => (
+                    "ride_sharing_disabled",
+                    SliceValidation::NotAttempted,
+                    SliceQuench::NotAttempted,
+                    SliceAdoption::Rejected,
+                    None,
+                ),
+            };
+            slice_sequence = slice_sequence
+                .checked_add(1)
+                .expect("slice sequence must fit u64");
+            cooperative
+                .record_slice(
+                    replica,
+                    SliceTrace {
+                        slice: slice_sequence,
+                        current_basin: None,
+                        active_relation: None,
+                        policy_role: PolicyRole::Explore,
+                        policy_reason,
+                        proposal_family: ProposalFamily::TransitionRide,
+                        sampled_basin: work.source.census_basin,
+                        descriptor_step_norm: None,
+                        cartesian_step_norm,
+                        validation,
+                        quench,
+                        adoption,
+                        novelty,
+                        energy: finite_trace_energy(snapshot.best_energy()),
+                        charged_work: settled_ride_calls,
+                    },
+                )
+                .expect("ride checkpoint trace must remain complete");
+            return ride_checkpoint_action(report_outcome, destination, producer_calls);
+        }
+
+        let local_deepened = snapshot.best_energy() < best_at_checkpoint - 1e-10;
+        if local_deepened {
+            best_at_checkpoint = snapshot.best_energy();
+            stall = 0;
+            let jump =
+                announced_personal.is_none_or(|previous| snapshot.best_energy() < previous - 1e-3);
+            if jump {
+                println!(
+                    "  personal best {:.6}  hops {}  refs {}  leaves {} other {} walk {} hole {}",
+                    snapshot.best_energy(),
+                    snapshot.hops(),
+                    // Packings this chain's quench is repelled from. Own
+                    // history plus every structure the coordinator has
+                    // handed over, which is the interaction at the
+                    // minimisation level and the thing chain count is
+                    // supposed to scale.
+                    anneal_core::catalog::packing_references().len(),
+                    count_leave,
+                    count_other_family,
+                    count_walk,
+                    count_hole
+                );
+                let _ = std::io::stdout().flush();
+                announced_personal = Some(snapshot.best_energy());
+            }
+        } else {
+            stall = stall.saturating_add(1);
+        }
+        if !announced_score
+            && published_energy_score(snapshot.best_energy(), reference(cfg.n_points))
+        {
+            println!(
+                "  score {:.6}  hops {}",
+                snapshot.best_energy(),
+                snapshot.hops()
+            );
+            let _ = std::io::stdout().flush();
+            announced_score = true;
+        }
+        // The population barrier is serviced before any local gate. A
+        // checkpoint often finds the chain mid-hop with nothing that passes
+        // candidate validation; that must not silence its participation and
+        // must never block the chain. Membership is joined by reference to
+        // the best candidate the coordinator has already validated for this
+        // replica; a replica with nothing on file abstains so the epoch
+        // completes without it; a pending or rejected join is answered by
+        // returning to local work until the next checkpoint rather than by
+        // polling in place or retiring, which is what left one replica
+        // asleep for its whole budget.
+        let mut population_assignment = None;
+        loop {
+            let outcome = match active_population_action(
+                &population_progress,
+                snapshot.charged(),
+                snapshot.remaining(),
+                population_interval,
+                true,
+            ) {
+                PopulationEpochAction::Submit => population_call(
+                    cooperative.join_population(replica, population_progress.epoch()),
+                ),
+                PopulationEpochAction::Poll => population_call(
+                    cooperative.poll_population(replica, population_progress.epoch()),
+                ),
+                PopulationEpochAction::Abstain => population_call(
+                    cooperative.abstain_population(replica, population_progress.epoch()),
+                ),
+                PopulationEpochAction::LocalWork => break,
+            };
+            match outcome {
+                PopulationSynchronizationOutcome::Pending { .. }
+                | PopulationSynchronizationOutcome::Rejected => {
+                    population_progress.observe_pending();
+                    break;
+                }
+                PopulationSynchronizationOutcome::Ready { parent, plan } => {
+                    let completed_epoch = population_progress.epoch();
+                    population_progress.observe_ready();
+                    population_assignment = Some((completed_epoch, parent, plan));
+                }
+                PopulationSynchronizationOutcome::Unaddressed => {
+                    population_progress.observe_ready();
+                }
+                PopulationSynchronizationOutcome::LocalFallback
+                | PopulationSynchronizationOutcome::SharingDisabled => break,
+            }
+        }
+        if let Some((completed_epoch, parent, plan)) = population_assignment
+            && snapshot.remaining() > 0
+        {
+            let family = population_family_position(&plan.destinations, &plan.parents, replica)
+                .expect("validated population plan must address this replica");
+            let draw =
+                population_rejuvenation_draw(seed, completed_epoch, replica, family.ordinal());
+            if shared_bias_enabled {
+                pending_deposits.push(Array1::from(parent.coordinates.clone()));
+            }
+            if coop_wells_enabled {
+                #[cfg(feature = "featomic")]
+                {
+                    let well = anneal_core::featomic_hop::soap_cloud_mean(
+                        ndarray::ArrayView1::from(parent.coordinates.as_slice()),
+                        coop_rcut,
+                        coop_species.as_deref(),
+                        None,
+                    );
+                    let known = shared_wells.iter().any(|w| {
+                        w.iter()
+                            .zip(well.iter())
+                            .map(|(a, b)| (a - b) * (a - b))
+                            .sum::<f64>()
+                            .sqrt()
+                            < anneal_core::featomic_hop::SOAP_PACK_MERGE
                     });
                 if let Some(gradient) = snapshot.current_gradient()
                     && occupied_changed
@@ -5958,16 +6251,204 @@ fn run_capnp_catalog(
                     phases.fire("continue");
                     return CheckpointAction::Continue;
                 }
-                match decree_anchor_action(
-                    applied_decree,
-                    decree_assignment.as_ref(),
-                    policy_trace.local_basin,
-                ) {
-                    DecreeAnchorAction::Ignore => {}
-                    DecreeAnchorAction::MarkApplied { snapshot, basin } => {
-                        applied_decree = Some(AppliedDecree { snapshot, basin });
-                    }
-                    DecreeAnchorAction::Fetch {
+                Some(_) => {}
+                None => {
+                    // Off the bridge tube entirely: the segment is over.
+                    active_bridge = None;
+                }
+            }
+        }
+        if leave_defers(leave_quiet, leave_patience, leave_crossing) {
+            // Still inside the recovered quiet stretch or the
+            // measured crossing floor (LEAVE_CROSSING_HOPS). Policy
+            // RPC is the measured hop-cost gap; census still sees
+            // posted minima.
+            return complete_checkpoint_trace(
+                &mut cooperative,
+                replica,
+                &mut slice_sequence,
+                checkpoint_charged,
+                snapshot.best_energy(),
+                |_cooperative, _slice_sequence| CheckpointAction::Continue,
+            );
+        }
+        let policy = match cooperative
+            .try_policy_input_with_lambda(
+                replica,
+                descriptor.clone(),
+                snapshot.current_energy(),
+                leave_path.max_lambda(),
+                stall,
+                local_deepened,
+            )
+            .expect("coordinator policy evidence must preserve local invariants")
+        {
+            PolicyEvidenceOutcome::Remote(input) => {
+                if cooperative
+                    .events()
+                    .last()
+                    .and_then(|event| event.policy)
+                    .is_some_and(|policy| policy.retired)
+                {
+                    return complete_checkpoint_trace(
+                        &mut cooperative,
+                        replica,
+                        &mut slice_sequence,
+                        checkpoint_charged,
+                        snapshot.best_energy(),
+                        |_cooperative, _slice_sequence| CheckpointAction::Retire {
+                            reason: "halving".to_owned(),
+                        },
+                    );
+                }
+                input
+            }
+            PolicyEvidenceOutcome::Rejected
+            | PolicyEvidenceOutcome::LocalFallback
+            | PolicyEvidenceOutcome::SharingDisabled => {
+                return complete_checkpoint_trace(
+                    &mut cooperative,
+                    replica,
+                    &mut slice_sequence,
+                    checkpoint_charged,
+                    snapshot.best_energy(),
+                    |_cooperative, _slice_sequence| CheckpointAction::Continue,
+                );
+            }
+        };
+        leave_path.push(
+            snapshot.current_state().to_vec(),
+            descriptor.clone(),
+            policy.leftover_lambda,
+        );
+        let n_occupied_families = policy.occupied_family_count;
+        if let Some(certificate) = occupancy_complete_at(
+            policy.mixing.certified_attractor,
+            policy.packing_saturated,
+            policy.leftover_dwell,
+            n_occupied_families,
+            policy.min_families,
+        ) {
+            let saturated = policy.packing_saturated;
+            let putative = snapshot
+                .best_state()
+                .map(|state| state.to_vec())
+                .unwrap_or_else(|| snapshot.current_state().to_vec());
+            if occupancy_retire_at(
+                certificate,
+                saturated,
+                policy.leftover_dwell,
+                policy.ei_exhausted,
+                n_occupied_families,
+                policy.min_families,
+            ) && occupancy_is_cluster(&putative)
+            {
+                if !announced_done {
+                    println!(
+                        "  done {}  hops {}  best {:.6}",
+                        certificate.as_str(),
+                        snapshot.hops(),
+                        snapshot.best_energy()
+                    );
+                    let _ = std::io::stdout().flush();
+                    announced_done = true;
+                }
+                return complete_checkpoint_trace(
+                    &mut cooperative,
+                    replica,
+                    &mut slice_sequence,
+                    checkpoint_charged,
+                    snapshot.best_energy(),
+                    |_cooperative, _slice_sequence| {
+                        return CheckpointAction::Retire {
+                            reason: certificate.as_str().to_owned(),
+                        };
+                    },
+                );
+            }
+            if !announced_putative {
+                println!(
+                    "  putative {}  hops {}  best {:.6}",
+                    certificate.as_str(),
+                    snapshot.hops(),
+                    snapshot.best_energy()
+                );
+                let _ = std::io::stdout().flush();
+                announced_putative = true;
+            }
+        }
+        let policy_trace = cooperative
+            .events()
+            .last()
+            .and_then(|event| event.policy)
+            .expect("registered policy evidence must remain attached to its snapshot");
+        #[cfg(feature = "ira")]
+        {
+            assigned_discovery_role = Some(policy_trace.discovery_role);
+        }
+        let decision = cooperative
+            .decide(replica, policy)
+            .expect("policy decision must name the configured replica");
+        last_policy_action = match decision.action {
+            PolicyAction::ContinueLocal | PolicyAction::Exploit { .. } => ACTION_LOCAL,
+            PolicyAction::Explore => ACTION_EXPLORE,
+            PolicyAction::Leave => ACTION_LEAVE,
+        };
+        slice_sequence = slice_sequence
+            .checked_add(1)
+            .expect("slice sequence must fit u64");
+        let mut trace = SliceTrace {
+            slice: slice_sequence,
+            current_basin: policy_trace.local_basin,
+            active_relation: Some(policy_trace.relation),
+            policy_role: PolicyRole::Local,
+            policy_reason: decision.reason.code(),
+            proposal_family: ProposalFamily::Local,
+            sampled_basin: None,
+            descriptor_step_norm: None,
+            cartesian_step_norm: None,
+            validation: SliceValidation::Accepted,
+            quench: SliceQuench::Converged,
+            adoption: SliceAdoption::NotAttempted,
+            novelty: Some(policy_trace.novelty),
+            energy: finite_trace_energy(snapshot.best_energy()),
+            charged_work: u64::try_from(checkpoint_charged)
+                .expect("checkpoint charge must fit u64"),
+        };
+        if snapshot.remaining() == 0 {
+            cooperative
+                .record_slice(replica, trace)
+                .expect("terminal checkpoint trace must remain complete");
+            return CheckpointAction::Continue;
+        }
+        match decree_anchor_action(
+            applied_decree,
+            decree_assignment.as_ref(),
+            policy_trace.local_basin,
+        ) {
+            DecreeAnchorAction::Ignore => {}
+            DecreeAnchorAction::MarkApplied { snapshot, basin } => {
+                applied_decree = Some(AppliedDecree { snapshot, basin });
+            }
+            DecreeAnchorAction::Fetch {
+                snapshot: decree_snapshot,
+                basin,
+            } => {
+                if let CatalogSampleOutcome::Candidate(candidate) = cooperative
+                    .try_sample_basin(replica, basin)
+                    .expect("seam-anchor access must preserve local execution")
+                    && candidate.census_basin == Some(basin)
+                    && candidate.coordinates.len() == snapshot.current_state().len()
+                {
+                    cooperative
+                        .record_work(replica, ChargeKind::RemoteProposal, 0)
+                        .expect("seam-anchor transfer must enter the cooperative ledger");
+                    anneal_core::catalog::include_packing_reference(&candidate.coordinates);
+                    anneal_core::catalog::offer_known_minimum(
+                        candidate.energy,
+                        &candidate.coordinates,
+                    );
+                    applied_decree = Some(AppliedDecree {
                         snapshot: decree_snapshot,
                         basin,
                     } => {
@@ -6010,7 +6491,41 @@ fn run_capnp_catalog(
                         }
                     }
                 }
-                if histo_screen {
+            }
+        }
+        if histo_screen {
+            cooperative
+                .record_work(replica, ChargeKind::DescriptorEvaluation, 0)
+                .expect("histogram descriptor work must enter the cooperative ledger");
+            let own = class_histogram(snapshot.current_state(), &mut histo_leaders, histo_radius);
+            let novel_here = histo_history
+                .iter()
+                .map(|past| histogram_l1(&own, past))
+                .fold(f64::INFINITY, f64::min);
+            histo_history.push_back(own);
+            if histo_history.len() > 256 {
+                histo_history.pop_front();
+            }
+            // Screen when stalled. Familiarity was a third gate here
+            // and measured out: thermal fluctuation alone moves a
+            // 75-atom histogram by a few flips per checkpoint, so the
+            // familiar-neighborhood test almost never passed and the
+            // mechanism fired once or twice per forty thousand
+            // evaluations. The stall counter is the gate.
+            let _ = novel_here;
+            if stall >= decree_stall_floor
+                && checkpoint_sequence.is_multiple_of(8)
+                && snapshot.remaining() > run_cfg.relax_steps.saturating_add(2)
+            {
+                let mut best: Option<(f64, Array1<f64>)> = None;
+                for _ in 0..6 {
+                    let Some(candidate) = fixed_probe_trial(
+                        snapshot.current_state(),
+                        2.0 * probe_scale,
+                        &mut histo_rng,
+                    ) else {
+                        continue;
+                    };
                     cooperative
                         .record_work(replica, ChargeKind::DescriptorEvaluation, 0)
                         .expect("histogram descriptor work must enter the cooperative ledger");
@@ -6024,16 +6539,174 @@ fn run_capnp_catalog(
                     if histo_history.len() > 256 {
                         histo_history.pop_front();
                     }
-                    // Screen when stalled. Familiarity was a third gate here
-                    // and measured out: thermal fluctuation alone moves a
-                    // 75-atom histogram by a few flips per checkpoint, so the
-                    // familiar-neighborhood test almost never passed and the
-                    // mechanism fired once or twice per forty thousand
-                    // evaluations. The stall counter is the gate.
-                    let _ = novel_here;
-                    if stall >= decree_stall_floor
-                        && checkpoint_sequence.is_multiple_of(8)
-                        && snapshot.remaining() > run_cfg.relax_steps.saturating_add(2)
+                }
+                if let Some((novelty, candidate)) = best
+                    && novelty > 0.0
+                {
+                    cooperative
+                        .record_slice(replica, trace)
+                        .expect("histogram checkpoint trace must remain complete");
+                    // Adoption, not a diagnostic probe: a screen that
+                    // cannot move the live chain contributes records
+                    // and no exploration, which the paired smokes
+                    // measured as bit-identical endpoints at every
+                    // gate setting.
+                    return CheckpointAction::BoundaryProposal {
+                        state: candidate,
+                        action: "histo".to_owned(),
+                    };
+                }
+            }
+        }
+        if let Some(engine) = md_engine.as_ref()
+            && checkpoint_sequence.is_multiple_of(md_interval)
+            && snapshot.remaining()
+                > md_steps
+                    .saturating_add(run_cfg.relax_steps)
+                    .saturating_add(2)
+        {
+            match engine.propagate(
+                snapshot.current_state(),
+                md_steps,
+                md_temperature,
+                md_rng.random(),
+            ) {
+                Ok(state) if state.len() == snapshot.current_state().len() => {
+                    cooperative
+                        .record_work(
+                            replica,
+                            ChargeKind::AuxiliaryEvaluation,
+                            u64::try_from(md_steps).expect("md steps fit u64"),
+                        )
+                        .expect("md segment work must enter the cooperative ledger");
+                    cooperative
+                        .record_slice(replica, trace)
+                        .expect("md checkpoint trace must remain complete");
+                    return CheckpointAction::ExternalProposal {
+                        state,
+                        action: format!("md_{}", engine.name()),
+                        external_calls: md_steps,
+                    };
+                }
+                Ok(_) => {}
+                Err(error) => {
+                    eprintln!("md segment failed, local search continues: {error}");
+                }
+            }
+        }
+        if (bridge_enabled || decree_bridge_duty)
+            && active_bridge.is_none()
+            && checkpoint_sequence.is_multiple_of(bridge_interval)
+            && snapshot.remaining() > run_cfg.relax_steps.saturating_add(2)
+            && let CatalogBridgeOutcome::Assignment(assignment) = cooperative
+                .bridge_assignment(replica, bridge_rng.random())
+                .expect("bridge assignment poll must preserve local execution")
+        {
+            let entry = assignment
+                .entry
+                .clone()
+                .filter(|state| state.len() == snapshot.current_state().len());
+            active_bridge = Some(assignment);
+            if let Some(state) = entry {
+                cooperative
+                    .record_slice(replica, trace)
+                    .expect("bridge checkpoint trace must remain complete");
+                return CheckpointAction::ProbeProposal {
+                    state: Array1::from(state),
+                    action: "bridge".to_owned(),
+                };
+            }
+        }
+        if frontier_exchange_enabled {
+            for (gap, energy, coordinates) in anneal_core::catalog::take_frontier_posts() {
+                let post = anneal_core::catalog_rpc::CatalogFrontierPost {
+                    gap,
+                    energy,
+                    coordinates,
+                    producer_replica: replica,
+                    posted_sequence: checkpoint_sequence,
+                };
+                let _ = cooperative.offer_frontier(replica, post);
+            }
+            // A deterministic draw untangled from every sampling stream:
+            // the checkpoint index hashed with the replica identity.
+            let draw = checkpoint_sequence.wrapping_mul(0x9E37_79B9_7F4A_7C15) ^ u64::from(replica);
+            if let Ok(Some(post)) = cooperative.draw_frontier(replica, draw)
+                && post.producer_replica != replica
+            {
+                anneal_core::catalog::deliver_frontier_post(
+                    post.gap,
+                    post.energy,
+                    post.coordinates,
+                );
+            }
+        }
+        if sharing
+            && checkpoint_sequence.is_multiple_of(probe_interval)
+            && snapshot.remaining() > run_cfg.relax_steps.saturating_add(2)
+        {
+            // The draw is the checkpoint and the replica. It stays off the
+            // probe stream, so an empty answer leaves that stream where it was.
+            let draw = checkpoint_sequence.wrapping_mul(0x9E37_79B9_7F4A_7C15) ^ u64::from(replica);
+            if let CatalogBoundaryOutcome::Crossing(crossing) = cooperative
+                .boundary_crossing(replica, snapshot.current_state().to_vec(), draw)
+                .expect("boundary crossing poll must preserve local execution")
+                && let Some(state) = boundary_crossing_trial(
+                    snapshot.current_state(),
+                    &crossing,
+                    transport_noise,
+                    transport_radius,
+                    &mut probe_rng,
+                )
+            {
+                trace.proposal_family = ProposalFamily::BoundaryTransport;
+                cooperative
+                    .record_slice(replica, trace)
+                    .expect("boundary checkpoint trace must remain complete");
+                count_boundary += 1;
+                return CheckpointAction::ProbeProposal {
+                    state,
+                    action: "boundary".to_owned(),
+                };
+            }
+        }
+        if checkpoint_sequence.is_multiple_of(probe_interval)
+            && snapshot.remaining() > run_cfg.relax_steps.saturating_add(2)
+            && let Some(state) =
+                fixed_probe_trial(snapshot.current_state(), probe_scale, &mut probe_rng)
+        {
+            cooperative
+                .record_slice(replica, trace)
+                .expect("probe checkpoint trace must remain complete");
+            return CheckpointAction::ProbeProposal {
+                state,
+                action: "probe".to_owned(),
+            };
+        }
+        match decision.action {
+            PolicyAction::ContinueLocal => {}
+            PolicyAction::Exploit { win_only } => {
+                trace.policy_role = PolicyRole::Exploit;
+                trace.proposal_family = ProposalFamily::CatalogSample;
+                if let CatalogSampleOutcome::Candidate(candidate) = cooperative
+                    .try_sample_candidate(replica, INCUMBENT_SAMPLE_DRAW)
+                    .expect("incumbent sample must preserve local execution")
+                {
+                    // Every structure the catalog hands over is another
+                    // chain's packing. The invert repels this chain's quench
+                    // from the packings it holds, so a sample is worth
+                    // keeping whether or not this arm adopts it: that is the
+                    // interaction at the minimisation level, and without it
+                    // the reference cloud is only ever this chain's own
+                    // history and the chains do not talk during the quench.
+                    anneal_core::catalog::include_packing_reference(&candidate.coordinates);
+                    anneal_core::catalog::offer_known_minimum(
+                        candidate.energy,
+                        &candidate.coordinates,
+                    );
+                    let improves = candidate.energy < snapshot.current_energy() - 1e-10;
+                    if candidate.coordinates.len() == snapshot.current_state().len()
+                        && (!win_only || improves)
                     {
                         let mut best: Option<(f64, Array1<f64>)> = None;
                         for _ in 0..6 {
@@ -6575,8 +7248,7 @@ fn run_capnp_catalog(
     // stretches after the last improvement, so a count carried on the
     // personal-best line systematically misses the tail.
     println!(
-        "  policy: leaves {count_leave} other {} walk {count_walk} hole {count_hole} refused {leave_refused}",
-        hear_state.other_family
+        "  policy: leaves {count_leave} other {count_other_family} walk {count_walk} hole {count_hole} boundary {count_boundary} refused {leave_refused}"
     );
     let wall = occupancy_started.elapsed().as_secs_f64();
     if let Some(rate) = hops_per_core_hour(outcome.hops as u64, wall, 1) {
@@ -7147,8 +7819,47 @@ fn adaptive_catalog_operations(
     let mut operations = Vec::new();
     let mut registered_state: Option<Array1<f64>> = None;
     for transition in transitions {
-        if transition.from_gradient.is_none()
-            || (transition.adopted && (!transition.validated || transition.to_gradient.is_none()))
+        let failed_probe = transition.action == "probe"
+            && !transition.validated
+            && transition.from_gradient.is_some();
+        if failed_probe {
+            let continues_registered_path = registered_state
+                .as_ref()
+                .is_some_and(|state| *state == transition.from_state);
+            if !continues_registered_path {
+                let source_sequence = candidate_sequence
+                    .checked_add(1)
+                    .expect("candidate sequence must fit u64");
+                let Some(source) = lj_catalog_candidate(
+                    descriptor_space,
+                    species,
+                    replica,
+                    source_sequence,
+                    seed,
+                    charged_work,
+                    transition.from_energy,
+                    transition.from_state.view(),
+                    transition
+                        .from_gradient
+                        .as_ref()
+                        .expect("probe source gradient checked")
+                        .view(),
+                ) else {
+                    registered_state = None;
+                    continue;
+                };
+                *candidate_sequence = source_sequence;
+                operations.push(AdaptiveCatalogOperation::RegisterCurrent(source));
+            }
+            operations.push(AdaptiveCatalogOperation::Unresolved {
+                action: transition.action.clone(),
+            });
+            registered_state = Some(transition.from_state.clone());
+            continue;
+        }
+        if !transition.validated
+            || transition.from_gradient.is_none()
+            || transition.to_gradient.is_none()
         {
             registered_state = None;
             continue;

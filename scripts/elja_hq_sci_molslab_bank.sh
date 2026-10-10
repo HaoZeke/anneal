@@ -11,6 +11,9 @@
 #
 # Does not cancel running HQ jobs.
 set -euo pipefail
+echo "refusing HyperQueue submit: the work directory would be the home filer." >&2
+echo "scripts/elja_hq_pilot.sh is one Slurm allocation; each task uses /scratch/users." >&2
+exit 2
 ROOT=${LJ_ROOT:-$HOME/anneal-build}
 RGPOT=${RGPOT_ROOT:-$HOME/rgpot}
 MOL=${MOL_BIN:-$ROOT/target/release/examples/molecular_cluster}
@@ -68,7 +71,7 @@ submit_mol() {
   local last=$((seeds - 1))
   local rpc=""
   if [[ $arm == bank ]]; then
-    rpc="export BANK_RPC=${HOST}:${port} BANK_SLICE=${SLICE}"
+    rpc="export BANK_RPC=${HOST}:${port} BANK_SLICE=${SLICE} BANK_SYNC=1 BANK_ADOPT=1"
   fi
   mkdir -p "$out"
   : >"$out/hq_submit.log"
@@ -97,7 +100,7 @@ submit_slab() {
   local last=$((seeds - 1))
   local rpc=""
   if [[ $arm == bank ]]; then
-    rpc="export BANK_RPC=${HOST}:${port} BANK_SLICE=${SLICE}"
+    rpc="export BANK_RPC=${HOST}:${port} BANK_SLICE=${SLICE} BANK_SYNC=1 BANK_ADOPT=1"
   fi
   mkdir -p "$out"
   : >"$out/hq_submit.log"

@@ -2405,7 +2405,7 @@ where
                 } else if adopt {
                     unconverged_records += 1;
                     bias.deposit(x.view(), cfg.temperature);
-                } else {
+                } else if action == "probe" {
                     // Failed diagnostics are part of the probe denominator.
                     // They carry no validated destination and cannot move the
                     // live chain or certify that its region is exhausted.

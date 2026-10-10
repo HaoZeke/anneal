@@ -142,6 +142,21 @@ fn hard_lj_campaigns_bind_structural_coordination_only() {
         );
     }
 
+    let campaign = fs::read_to_string(root.join("examples/lj_cluster_search.rs"))
+        .unwrap_or_else(|error| panic!("failed to read the LJ search entry: {error}"));
+    assert!(
+        !campaign.contains("floor_exit"),
+        "the sealed LJ entry must not call the icosahedron floor search"
+    );
+    assert!(
+        runner.contains(r#"exec "$BIN" "$N" "$PER_REPLICA_BUDGET" 1 rec"#),
+        "the sealed arm must be the plain recommended mechanism list"
+    );
+    assert!(
+        !runner.contains("twophase"),
+        "the sealed arm must not request a diameter penalty"
+    );
+
     for forbidden in [
         "CATALOG_TEMP_LADDER",
         "CATALOG_MD_ENGINE",
@@ -777,6 +792,32 @@ fn production_lj_driver_does_not_consume_kinetic_boundary_crossings() {
 }
 
 #[test]
+fn shared_catalog_checkpoint_proposes_an_aligned_boundary_crossing() {
+    let driver = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("examples")
+        .join("lj_cluster_search.rs");
+    let source = fs::read_to_string(&driver)
+        .unwrap_or_else(|error| panic!("failed to read {}: {error}", driver.display()));
+
+    assert!(
+        source.contains("if sharing"),
+        "only a shared catalog may request a crossing"
+    );
+    assert!(
+        source.contains(".boundary_crossing("),
+        "a shared checkpoint must request one observed crossing"
+    );
+    assert!(
+        source.contains("boundary_crossing_trial("),
+        "the proposal must be the aligned displacement"
+    );
+    assert!(
+        source.contains("action: \"boundary\""),
+        "the charged proposal must be named boundary"
+    );
+}
+
+#[test]
 fn cooperative_share_optimization_is_one_quench_not_ten() {
     let driver = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("examples")
@@ -974,4 +1015,129 @@ fn census_calibration_campaign_covers_every_analyzed_lj_system() {
         finalizer.contains("for n in 38 55 75 98 102 104; do"),
         "the calibration finalizer must validate every hard-LJ analysis system"
     );
+}
+
+#[test]
+fn elja_jobs_use_the_node_scratch_disk() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let scratch = fs::read_to_string(root.join("scripts/elja_scratch.sh"))
+        .unwrap_or_else(|error| panic!("failed to read scratch helper: {error}"));
+    assert!(
+        scratch.contains("scratchlocation=/scratch/users"),
+        "Elja scratch is /scratch/users on the compute node"
+    );
+    assert!(
+        scratch.contains("/users/home"),
+        "the helper must recognise the home filer"
+    );
+    assert!(
+        scratch.contains("--bwlimit=40000"),
+        "copies back to the filer use the documented cap"
+    );
+    assert!(
+        !scratch.contains("/users/home/rog32/var/scratch"),
+        "a home directory named scratch is not the node disk"
+    );
+    for script in [
+        "scripts/elja_build_lj.sh",
+        "scripts/elja_build_brains.sh",
+        "scripts/elja_leave_ridge.sbatch",
+        "scripts/elja_rgmin_quench.sbatch",
+    ] {
+        let source = fs::read_to_string(root.join(script))
+            .unwrap_or_else(|error| panic!("failed to read {script}: {error}"));
+        assert!(
+            source.contains("elja_enter_scratch"),
+            "{script} must run the cargo target on the node scratch disk"
+        );
+    }
+    let profile = fs::read_to_string(root.join("profiles/elja/config.yaml"))
+        .unwrap_or_else(|error| panic!("failed to read Elja profile: {error}"));
+    assert!(
+        profile.contains("executor: slurm") && profile.contains("jobs: 4"),
+        "the Elja profile is one Snakemake process with a job cap"
+    );
+    assert!(
+        profile.contains("/scratch/users/$USER"),
+        "the profile must name the node scratch disk"
+    );
+}
+
+#[test]
+fn elja_hyperqueue_is_one_allocation_on_node_scratch() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let pilot = fs::read_to_string(root.join("scripts/elja_hq_pilot.sh"))
+        .unwrap_or_else(|error| panic!("failed to read pilot: {error}"));
+    for required in [
+        "--max-worker-count 1",
+        "--exclusive",
+        "--no-dry-run",
+        "--no-hyper-threading",
+        "/scratch/users/$USER/hq",
+        "elja_hq_one.sh",
+    ] {
+        assert!(
+            pilot.contains(required),
+            "pilot missing {required}"
+        );
+    }
+    assert!(
+        !pilot.contains("--cwd"),
+        "the pilot must not set a HyperQueue work directory on the filer"
+    );
+    let one = fs::read_to_string(root.join("scripts/elja_hq_one.sh"))
+        .unwrap_or_else(|error| panic!("failed to read task: {error}"));
+    assert!(
+        one.contains("elja_enter_scratch") && one.contains("elja_publish"),
+        "a task runs on the node scratch disk and copies one log back"
+    );
+    for script in [
+        "elja_hq_sci_rec.sh",
+        "elja_hq_sci_bank.sh",
+        "elja_hq_sci_escape.sh",
+        "elja_hq_sci_feat.sh",
+        "elja_hq_sci_mol.sh",
+        "elja_hq_sci_molslab_bank.sh",
+        "elja_hq_sci_pack.sh",
+        "elja_hq_sci_sb.sh",
+        "elja_hq_sci_slab.sh",
+        "elja_hq_sci_bankrpc.sh",
+    ] {
+        let source = fs::read_to_string(root.join("scripts").join(script))
+            .unwrap_or_else(|error| panic!("failed to read {script}: {error}"));
+        let refuse = source
+            .find("exit 2")
+            .unwrap_or_else(|| panic!("{script} must refuse"));
+        let submit = source
+            .find("hq submit")
+            .unwrap_or_else(|| panic!("{script} should keep the old submit after the refusal"));
+        assert!(
+            refuse < submit,
+            "{script} must exit before hq submit"
+        );
+    }
+    let pilot_refuse = pilot
+        .find("refusing: a seed is one Slurm job")
+        .unwrap_or_else(|| panic!("the HyperQueue pilot must refuse a packed node"));
+    let alloc = pilot
+        .find("hq alloc add")
+        .unwrap_or_else(|| panic!("pilot should keep the old allocation text after the refusal"));
+    assert!(
+        pilot_refuse < alloc,
+        "the pilot must exit before it requests an allocation"
+    );
+    let qcg = fs::read_to_string(root.join("scripts/elja_qcg_cell.py"))
+        .unwrap_or_else(|error| panic!("failed to read QCG cell: {error}"));
+    for required in [
+        "uv run --script",
+        "qcg-pilotjob>=0.13",
+        "cyclopts>=3",
+        "/scratch/users/",
+        "--bwlimit=40000",
+        "model=\"default\"",
+        "SLURM_JOB_ID",
+        "submit refuses without --yes",
+    ] {
+        assert!(qcg.contains(required), "QCG cell missing {required}");
+    }
 }

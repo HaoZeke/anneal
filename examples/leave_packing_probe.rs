@@ -28,6 +28,7 @@
 //! landscape.
 
 use anneal_core::catalog::{PACKING_LINK, PackingBook, leaves_packing, packing_link_labels};
+use rand::SeedableRng;
 use anneal_core::known_basin;
 use anneal_core::methods::activation::{Activation, activate_from_origin};
 use anneal_core::methods::warm_lbfgs::WarmLbfgs;
@@ -66,8 +67,9 @@ fn quench(potential: &PairPotential, x: ArrayView1<f64>, steps: usize) -> Array1
 }
 
 /// DECAF distance between two structures, in the same L1 the packing
-/// grain is quoted in. `PACKING_LINK` is 0.35 and icosahedral-to-Marks
-/// is 0.69, so this says how far along that road a walk actually got.
+/// grain is quoted in. `PACKING_LINK` is 0.35. On the sealed LJ75 pair
+/// this distance is 0.4267. The class-histogram L1 of that pair is
+/// 0.6933 and is not what this function returns.
 fn packing_gap(origin: &[f64], trial: &[f64]) -> f64 {
     let mut book = PackingBook::default();
     for state in [origin, trial] {
@@ -265,299 +267,85 @@ fn main() {
         );
     };
 
-    if std::env::args().nth(3).as_deref() == Some("av") {
-        let mobile = anneal_core::soap::packing_active_volume(
-            ico.view(),
-            anneal_core::catalog::PACKING_SPEC,
-            None,
-        );
+    // The hop's own covering start: one Plasencia point per index,
+    // quenched raw. `rmsd` is the fourth argument and defaults to the
+    // step the LJ75 walk prints (0.7).
+    if std::env::args().nth(3).as_deref() == Some("cover") {
+        let rmsd: f64 = std::env::args()
+            .nth(4)
+            .and_then(|value| value.parse().ok())
+            .unwrap_or(0.7);
+        let n = leaves.min(anneal_core::hypersphere::default_cover_size());
+        let mut cover = Tally {
+            best: ico_energy,
+            ..Tally::default()
+        };
+        let mut rng = rand::rngs::StdRng::seed_from_u64(1);
         println!(
-            "{{\"kind\":\"leave_probe_av\",\"mobile\":{},\"n\":{}}}",
-            mobile.len(),
-            ico.len() / 3
+            "{{\"kind\":\"cover_setup\",\"n\":{n},\"rmsd\":{rmsd:.3},\"ico\":{ico_energy:.6},\"marks\":{marks_energy:.6}}}"
         );
-        let two = anneal_core::methods::two_phase::TwoPhase::relative(0.7, 1.0);
-        let quench_two = |start: ArrayView1<f64>| {
-            let cutoff = two.cutoff_for(start);
-            let mut opt = WarmLbfgs::default();
-            let (_, phase_one, _) = opt.minimize(start, steps, |v| {
-                let (energy, gradient) = potential.value_and_gradient(v);
-                let (pe, pg) = anneal_core::methods::two_phase::penalty_shaped(
-                    v, cutoff, two.beta, two.mu, None,
-                );
-                Some((energy + pe, gradient + pg))
-            });
-            quench(&potential, phase_one.view(), steps)
-        };
-        let mut av_shs = Tally {
-            best: ico_energy,
-            ..Tally::default()
-        };
-        let mut av_shs_2p = Tally {
-            best: ico_energy,
-            ..Tally::default()
-        };
-        let mut av_fps = Tally {
-            best: ico_energy,
-            ..Tally::default()
-        };
-        let mut av_fps_2p = Tally {
-            best: ico_energy,
-            ..Tally::default()
-        };
-        let n_cover = anneal_core::catalog::cover_arm_count();
-        let starts = known_basin::shs_av_starts(
-            ico.view(),
-            &mobile,
-            known_basin::LEAVE_WALK_STEP,
-            16,
-            4,
-            |v| Some(potential.value_and_gradient(v).0),
-        );
-        for (slot, start) in starts.iter().enumerate() {
-            let trial = quench(&potential, start.view(), steps);
-            classify("av_shs", slot, &mut av_shs, &trial, None);
-            let trial = quench_two(start.view());
-            classify("av_shs_2p", slot, &mut av_shs_2p, &trial, None);
-            let _ = std::io::Write::flush(&mut std::io::stdout());
-        }
-        let fps = known_basin::farthest_packing_cover(ico.view(), &references, n_cover);
-        let start = known_basin::leave_packing_rung_to(
-            ico.view(),
-            fps,
-            known_basin::rung_barrier(depth, 0),
-            &references,
-            None,
-            Some(mobile.as_slice()),
-            |v| Some(potential.value_and_gradient(v).0),
-        );
-        let trial = quench(&potential, start.view(), steps);
-        classify("av_fps", 0, &mut av_fps, &trial, None);
-        let trial = quench_two(start.view());
-        classify("av_fps_2p", 0, &mut av_fps_2p, &trial, None);
-        let mut av_afir = Tally {
-            best: ico_energy,
-            ..Tally::default()
-        };
-        let mut av_afir_2p = Tally {
-            best: ico_energy,
-            ..Tally::default()
-        };
-        let mut in_a = vec![false; ico.len() / 3];
-        for &atom in &mobile {
-            if atom < in_a.len() {
-                in_a[atom] = true;
-            }
-        }
-        let fragment_a: Vec<usize> = (0..in_a.len()).filter(|&i| in_a[i]).collect();
-        let fragment_b: Vec<usize> = (0..in_a.len()).filter(|&i| !in_a[i]).collect();
-        let radii = known_basin::afir_radii(ico.len() / 3, None);
-        let alpha = known_basin::afir_alpha_for_barrier(
-            ico.view(),
-            &fragment_a,
-            &fragment_b,
-            known_basin::rung_barrier(depth, 0),
-            &radii,
-        );
-        println!(
-            "{{\"kind\":\"leave_probe_afir\",\"alpha\":{},\"a\":{},\"b\":{}}}",
-            alpha.map_or_else(|| "null".to_owned(), |value| format!("{value:.6}")),
-            fragment_a.len(),
-            fragment_b.len()
-        );
-        let afir_starts = known_basin::afir_av_starts(
-            ico.view(),
-            &mobile,
-            known_basin::rung_barrier(depth, 0),
-            steps,
-            None,
-            |v| Some(potential.value_and_gradient(v)),
-        );
-        for (slot, start) in afir_starts.iter().enumerate() {
-            let trial = quench(&potential, start.view(), steps);
-            classify("av_afir", slot, &mut av_afir, &trial, None);
-            let trial = quench_two(start.view());
-            classify("av_afir_2p", slot, &mut av_afir_2p, &trial, None);
-            let _ = std::io::Write::flush(&mut std::io::stdout());
-        }
-        for index in 0..leaves {
-            let start = known_basin::leave_packing_rung_to(
+        for index in 0..n {
+            let start = anneal_core::featomic_hop::leave_archive_hole_at(
                 ico.view(),
-                index,
-                known_basin::rung_barrier(depth, 0),
-                &references,
+                0.0,
                 None,
-                Some(mobile.as_slice()),
-                |v| Some(potential.value_and_gradient(v).0),
+                None,
+                rmsd,
+                Some(index),
+                &mut rng,
             );
             let trial = quench(&potential, start.view(), steps);
-            classify("av_cover", index, &mut av_fps, &trial, None);
-            let trial = quench_two(start.view());
-            classify("av_cover_2p", index, &mut av_fps_2p, &trial, None);
+            classify("cover", index, &mut cover, &trial, None);
             let _ = std::io::Write::flush(&mut std::io::stdout());
         }
-        report("av_shs", &av_shs, starts.len());
-        report("av_shs_2p", &av_shs_2p, starts.len());
-        report("av_fps", &av_fps, leaves + 1);
-        report("av_fps_2p", &av_fps_2p, leaves + 1);
-        report("av_afir", &av_afir, afir_starts.len());
-        report("av_afir_2p", &av_afir_2p, afir_starts.len());
+        report("cover", &cover, n);
         return;
     }
 
-    if std::env::args().nth(3).as_deref() == Some("pack") {
-        let mobile = anneal_core::soap::packing_active_volume(
-            ico.view(),
-            anneal_core::catalog::PACKING_SPEC,
-            None,
-        );
+    // Cover, then the minimum-mode climb, then the same quench.
+    // No target energy is passed in.
+    if std::env::args().nth(3).as_deref() == Some("climb") {
+        let rmsd: f64 = std::env::args()
+            .nth(4)
+            .and_then(|value| value.parse().ok())
+            .unwrap_or(0.7);
+        let n = leaves.min(anneal_core::hypersphere::default_cover_size());
+        let mut climbed = Tally {
+            best: ico_energy,
+            ..Tally::default()
+        };
         println!(
-            "{{\"kind\":\"leave_probe_av\",\"mobile\":{},\"n\":{}}}",
-            mobile.len(),
-            ico.len() / 3
+            "{{\"kind\":\"climb_setup\",\"n\":{n},\"rmsd\":{rmsd:.3},\"ico\":{ico_energy:.6},\"marks\":{marks_energy:.6}}}"
         );
-        let mut av_hollow = Tally {
-            best: ico_energy,
-            ..Tally::default()
+        let cfg = anneal_core::methods::activation::Activation {
+            max_steps: 100,
+            overshoot: 3.0,
+            step: 0.08,
+            lanczos_steps: 20,
+            perp_steps: 6,
+            perp_rate: 0.04,
+            refresh: 4,
+            min_rise: 6.0,
+            ..anneal_core::methods::activation::Activation::default()
         };
-        let mut av_fill = Tally {
-            best: ico_energy,
-            ..Tally::default()
-        };
-        let mut av_surf = Tally {
-            best: ico_energy,
-            ..Tally::default()
-        };
-        let mut av_shell = Tally {
-            best: ico_energy,
-            ..Tally::default()
-        };
-        let mut rng = rand::rngs::StdRng::seed_from_u64(1);
-        let cutoff = known_basin::LEAVE_NEIGHBOUR_CUTOFF;
-        for index in 0..leaves {
-            let start = known_basin::leave_av_hollow(ico.view(), &mobile, cutoff, &mut rng);
-            let trial = quench(&potential, start.view(), steps);
-            classify("av_hollow", index, &mut av_hollow, &trial, None);
-            let start = known_basin::leave_av_fill(ico.view(), &mobile, cutoff, 12, &mut rng);
-            let trial = quench(&potential, start.view(), steps);
-            classify("av_fill", index, &mut av_fill, &trial, None);
-            let start = known_basin::leave_av_surface(ico.view(), &mobile, cutoff, &mut rng);
-            let trial = quench(&potential, start.view(), steps);
-            classify("av_surf", index, &mut av_surf, &trial, None);
-            let start = anneal_core::movekernel::ShellRotate {
-                n_points: ico.len() / 3,
-            }
-            .propose(ico.view(), 0.0, &mut rng);
-            let trial = quench(&potential, start.view(), steps);
-            classify("av_shell", index, &mut av_shell, &trial, None);
-            let _ = std::io::Write::flush(&mut std::io::stdout());
-        }
-        report("av_hollow", &av_hollow, leaves);
-        report("av_fill", &av_fill, leaves);
-        report("av_surf", &av_surf, leaves);
-        report("av_shell", &av_shell, leaves);
-        return;
-    }
-
-    if std::env::args().nth(3).as_deref() == Some("walk") {
-        let mobile = anneal_core::soap::packing_active_volume(
-            ico.view(),
-            anneal_core::catalog::PACKING_SPEC,
-            None,
-        );
-        println!(
-            "{{\"kind\":\"leave_probe_av\",\"mobile\":{},\"n\":{}}}",
-            mobile.len(),
-            ico.len() / 3
-        );
-        let two = anneal_core::methods::two_phase::TwoPhase::relative(0.7, 1.0);
-        let quench_two = |start: ArrayView1<f64>| {
-            let cutoff = two.cutoff_for(start);
-            let mut opt = WarmLbfgs::default();
-            let (_, phase_one, _) = opt.minimize(start, steps, |v| {
-                let (energy, gradient) = potential.value_and_gradient(v);
-                let (pe, pg) = anneal_core::methods::two_phase::penalty_shaped(
-                    v, cutoff, two.beta, two.mu, None,
-                );
-                Some((energy + pe, gradient + pg))
-            });
-            quench(&potential, phase_one.view(), steps)
-        };
-        let mut shell_2p = Tally {
-            best: ico_energy,
-            ..Tally::default()
-        };
-        let mut walk_raw = Tally {
-            best: ico_energy,
-            ..Tally::default()
-        };
-        let mut walk_2p = Tally {
-            best: ico_energy,
-            ..Tally::default()
-        };
-        let mut rng = rand::rngs::StdRng::seed_from_u64(1);
-        let cutoff = known_basin::LEAVE_NEIGHBOUR_CUTOFF;
-        for index in 0..leaves {
-            let start = anneal_core::movekernel::ShellRotate {
-                n_points: ico.len() / 3,
-            }
-            .propose(ico.view(), 0.0, &mut rng);
-            let trial = quench_two(start.view());
-            classify("shell_2p", index, &mut shell_2p, &trial, None);
-            let _ = std::io::Write::flush(&mut std::io::stdout());
-        }
-        for index in 0..leaves {
-            let walked = known_basin::leave_av_walk(
+        for index in 0..n {
+            let trial = anneal_core::methods::activation::cover_climb_quench_min(
                 ico.view(),
-                cutoff,
-                known_basin::LEAVE_WALK_HOPS,
-                ico_energy,
-                &mut rng,
-                |start| {
-                    let trial = quench(&potential, start, steps);
-                    let energy = potential.value_and_gradient(trial.view()).0;
-                    (energy, trial)
-                },
+                rmsd,
+                index,
+                |v: ArrayView1<f64>| Some(potential.value_and_gradient(v).1),
+                |v: ArrayView1<f64>| quench(&potential, v, steps),
+                |v: ArrayView1<f64>| potential.value_and_gradient(v).0,
+                &cfg,
             );
-            match walked {
-                Some((energy, trial, hop)) => {
-                    classify("walk_raw", index, &mut walk_raw, &trial, Some(hop));
-                    println!(
-                        "{{\"kind\":\"walk_hit\",\"generator\":\"walk_raw\",\"index\":{index},\"energy\":{energy:.6},\"hop\":{hop}}}"
-                    );
-                }
-                None => println!(
-                    "{{\"kind\":\"leave\",\"generator\":\"walk_raw\",\"index\":{index},\"rung\":null,\"refused\":true}}"
-                ),
-            }
-            let walked = known_basin::leave_av_walk(
-                ico.view(),
-                cutoff,
-                known_basin::LEAVE_WALK_HOPS,
-                ico_energy,
-                &mut rng,
-                |start| {
-                    let trial = quench_two(start);
-                    let energy = potential.value_and_gradient(trial.view()).0;
-                    (energy, trial)
-                },
+            let energy = potential.value_and_gradient(trial.view()).0;
+            println!(
+                "{{\"kind\":\"climb_ridge\",\"index\":{index},\"crossed\":true,\"shoulder\":{energy:.6},\"landed\":{ico_energy:.6}}}"
             );
-            match walked {
-                Some((energy, trial, hop)) => {
-                    classify("walk_2p", index, &mut walk_2p, &trial, Some(hop));
-                    println!(
-                        "{{\"kind\":\"walk_hit\",\"generator\":\"walk_2p\",\"index\":{index},\"energy\":{energy:.6},\"hop\":{hop}}}"
-                    );
-                }
-                None => println!(
-                    "{{\"kind\":\"leave\",\"generator\":\"walk_2p\",\"index\":{index},\"rung\":null,\"refused\":true}}"
-                ),
-            }
+            classify("climb", index, &mut climbed, &trial, None);
             let _ = std::io::Write::flush(&mut std::io::stdout());
         }
-        report("shell_2p", &shell_2p, leaves);
-        report("walk_raw", &walk_raw, leaves);
-        report("walk_2p", &walk_2p, leaves);
+        report("climb", &climbed, n);
         return;
     }
 

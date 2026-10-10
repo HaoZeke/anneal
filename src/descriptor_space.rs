@@ -17,7 +17,7 @@ pub use provider::{
 };
 pub use universal::{
     DescriptorGeometry, UNIVERSAL_DESCRIPTOR_SCHEMA, UNIVERSAL_DESCRIPTOR_VERSION,
-    UNIVERSAL_LOCAL_ENVIRONMENT_RADIUS, universal_descriptor_space,
+    UNIVERSAL_LOCAL_ENVIRONMENT_RADIUS, descriptor_cutoff_neighbours, universal_descriptor_space,
 };
 
 use crate::soap::{SoapSpec, jacobian_ace, jacobian_z, local_nu3_z, local_spectra_z};
