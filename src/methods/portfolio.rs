@@ -1776,6 +1776,16 @@ where
             xs.push(pos);
             vals.push(value);
         }
+    } else if quenched && !obj.ledger.exhausted() {
+        // The only chain is the incumbent. One named low-discrepancy
+        // start is still paid, and it is not a second chain.
+        let starts =
+            eindir_core::shifted_low_discrepancy_points(&bounds, 1, qmc_skip_from_seed(seed), seed);
+        if let Some(start) = starts.rows().into_iter().next() {
+            let mut pos = bounds.clip(start);
+            obj.prepare_proposal(None, &mut pos);
+            let _ = obj.eval(pos.view());
+        }
     }
 
     // SciPy dual_annealing default initial_temp=5230 (translation-invariant).
@@ -3368,10 +3378,10 @@ where
     let bounds = obj.bounds().clone();
     let dim = bounds.dims;
     let gradient = dim + 1;
-    // A budget below one stencil cannot fund an arm. One checkpoint
-    // exchanges the incumbent, and the rest is prepared global candidates,
-    // which is what a direct-neighbour sample count measures.
-    if budget < 8 {
+    // A budget that cannot fund one central stencil cannot fund an arm.
+    // One checkpoint exchanges the incumbent, and the rest is prepared
+    // global candidates, which is what a direct-neighbour sample count measures.
+    if budget <= dim.saturating_mul(2).saturating_add(2) {
         if ledger.incumbent_value().is_none() {
             let candidate = ledger.incumbent(&bounds);
             let _ = obj.eval(candidate.view());
