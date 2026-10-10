@@ -110,8 +110,9 @@ pub struct Config {
     pub adaptive_height: bool,
     /// Hops a single `run` may take before returning, when set.
     ///
-    /// Used by the replica ladder to advance one chain by a slice; a plain run
-    /// leaves it unset and stops only when the ledger does.
+    /// A plain run leaves it unset and stops only when the ledger does. The
+    /// replica ladder does not slice with it: every rung runs inside the one
+    /// call, and a cap counts the hops of all of them.
     pub max_hops: Option<usize>,
     /// Replicas run on a temperature ladder, with periodic swaps.
     ///
@@ -129,15 +130,20 @@ pub struct Config {
     /// rung. With equal biases it is the Metropolis exchange of
     /// [`crate::exchange::MetropolisExchange`].
     ///
-    /// A rung's temperature is what its acceptance, its deposits and the swap
-    /// read; proposals keep the move scale `temperature` sets on every rung, as
-    /// they do under [`Config::budget_window`]. Under minima hopping, and under
-    /// the flat-histogram rule once its window exists, a hop is accepted
-    /// without a temperature, so there the ratio reaches only the swap and the
-    /// bias terms. The swap exchanges the weight the acceptance applies: the
-    /// flat-histogram cost cancels from it (see [`Config::flat_histogram`]),
-    /// and minima hopping, whose threshold has no weight, swaps by the
-    /// Metropolis factor.
+    /// A rung's temperature is what its acceptance, its own bias's deposits,
+    /// the funnel bias's visits and the swap read; proposals keep the move
+    /// scale `temperature` sets on every rung, as they do under
+    /// [`Config::budget_window`]. The energy bias is built and filled at the
+    /// temperature a single chain would hop at (see [`Config::energy_bias`]).
+    /// The packing pile deposits at `temperature` itself, as do the deposits
+    /// that come with a checkpoint's proposals and remote states, which never
+    /// happen on a ladder: the runs that take a checkpoint or a shared bias
+    /// refuse one. Under minima hopping, and under the flat-histogram rule
+    /// once its window exists, a hop is accepted without a temperature, so
+    /// there the ratio reaches only the swap and the bias terms. The swap
+    /// exchanges the weight the acceptance applies: the flat-histogram cost
+    /// cancels from it (see [`Config::flat_histogram`]), and minima hopping,
+    /// whose threshold has no weight, swaps by the Metropolis factor.
     ///
     /// This is the standard non-local mechanism for a multi-funnel landscape
     /// and the measurements here say why it is the right one to reach for: no
