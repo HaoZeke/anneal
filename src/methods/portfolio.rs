@@ -3428,11 +3428,14 @@ fn values_only_slice(dim: usize, budget: usize) -> usize {
 /// evaluation than its lent slice had to beat, and hands the turn back if
 /// GSA's slice gains faster than those two did.
 /// The two alternate while a phase hands the other the turn, GSA resuming
-/// after a phase CMA-ES took from it, up to [`PHASE_TURNS`] phases. A
-/// phase leaves the closing reserve and one slice for each other arm not
-/// yet played (short of the opening budget, one for DE only while it has
-/// not played). Bandit rounds
-/// over [`VALUES_ONLY_ARMS`] follow until only the closing reserve remains.
+/// after a phase CMA-ES took from it, up to [`PHASE_TURNS`] phases. If the
+/// bar on the first slice from below the start ended the opening before
+/// the descent converged, and GSA's first phase ends at its first slice,
+/// the descent takes a turn before CMA-ES's phase. A phase, and that turn,
+/// leave the closing reserve and one slice for each other arm not yet
+/// played (short of the opening budget, a phase leaves one for DE only
+/// while it has not played). Bandit rounds over [`VALUES_ONLY_ARMS`]
+/// follow until only the closing reserve remains.
 /// As in the main bandit, each arm not yet played takes one slice first, in
 /// list order, while a slice beyond the reserve is left. A descent's turn
 /// holds back only the reserve, so a short budget or a descent that keeps
@@ -3588,6 +3591,9 @@ where
     // Gain per evaluation of the descent's last timed slice before the
     // phases: GSA's phase keeps the turn only while it gains as fast.
     let mut displaced = 0.0f64;
+    // Whether the bar on the first slice from below the start's value ended
+    // the opening before the descent converged.
+    let mut barred = false;
     if opened {
         let qn = index(ArmKind::Qn);
         // A descent that gains a little less on every slice would hold the
@@ -3599,7 +3605,10 @@ where
         // that times its largest such gain. The first slice from below the
         // start is held to the gain of the slice from the start, which a
         // descent into a side basin of a multimodal objective makes nearly
-        // all at once.
+        // all at once. From a far start on a curved valley the slice from
+        // the start can also gain more than `1 / IMPROVEMENT_RTOL` times the
+        // next, though the descent is far from converged; the phases below
+        // hand such a descent the turn back.
         let mut gains: Vec<f64> = Vec::new();
         let mut from_start = None;
         let (mut descended, mut retried) = (false, false);
@@ -3627,6 +3636,7 @@ where
             };
             let recent = largest(&gains[gains.len().saturating_sub(OPENING_GAINS)..]);
             let all = largest(&gains);
+            let first_below = gains.is_empty() && from_start.is_some();
             if from_start.is_none() && before.is_finite() && after.is_finite() {
                 from_start = Some((before - after).max(0.0));
             }
@@ -3665,6 +3675,7 @@ where
                 continue;
             }
             if !keep || done {
+                barred = first_below && improved && !done;
                 break;
             }
         }
@@ -3889,7 +3900,11 @@ where
     // cools, a run per covariance) that single slices of the rounds below
     // would not see. GSA's phase comes first and CMA-ES's second; the two
     // then alternate while a phase hands the other the turn, and GSA
-    // resumes after a phase CMA-ES took from it, up to `PHASE_TURNS`.
+    // resumes after a phase CMA-ES took from it, up to `PHASE_TURNS`. If the
+    // bar on the first slice from below the start ended the opening before
+    // the descent converged, and GSA's first phase ends at its first slice,
+    // gaining less per evaluation than the descent's last slice, the
+    // descent takes a turn before CMA-ES's phase.
     let mut turn = PhaseTurn::Fresh;
     for at in 0..PHASE_TURNS {
         let arm = if at % 2 == 0 {
@@ -3897,6 +3912,7 @@ where
         } else {
             ArmKind::Cma
         };
+        let pulls = posteriors[index(arm)].pulls;
         let next = phase(
             index(arm),
             turn,
@@ -3906,6 +3922,16 @@ where
             &mut round,
             &mut winner,
         );
+        if at == 0 && barred && next.is_none() && posteriors[index(arm)].pulls == pulls + 1 {
+            let qn = index(ArmKind::Qn);
+            let reserve = hold(qn, &posteriors);
+            if ledger.remaining() >= reserve + 8 {
+                round += 1;
+                let take = slice.min(ledger.remaining() - reserve);
+                winner =
+                    play(qn, take, reserve, states, &mut rng, &mut posteriors, None).then_some(qn);
+            }
+        }
         turn = match (next, turn) {
             (Some(next), _) => next,
             (None, PhaseTurn::Taken { .. }) => PhaseTurn::Resumed,
