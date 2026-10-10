@@ -221,8 +221,18 @@ same icosahedral-funnel floor energy (src/dos.rs:947-956).
 Feeds/consumes: an alternative/complementary acceptance and deposit
 target to =BasinBias=, wired into the same hop loop
 (src/methods/cluster_hopping.rs:1958-2050 region shows the deposit and
-sweep-refresh logic inline). On a replica ladder the energy bias is one
-function every rung reads over its own temperature; its tempering
+sweep-refresh logic inline). On a replica ladder under
+=statistical_temperature= only the rungs at ratio one feed
+=DensityOfStates=, the coldest rung alone unless the ladder is flat,
+and with =flat_histogram= on as well the flat-histogram window and its
+sweeps come from that rung alone too: a hotter rung stands with another
+weight than the one the estimator fits, and its counts would bias the
+estimate (measured on LJ13, they heated every rung). The cost is
+evidence. On a ladder of R rungs taking turns the density of states
+records one hop in R, so the estimate learns about R times slower and
+first takes over after about R times =flat_sweep= hops: at hop 750
+rather than 400 on two rungs at the default sweep. The energy bias is
+one function every rung reads over its own temperature; its tempering
 factor and its deposits read the temperature a single chain would hop
 at, so =(gamma - 1) T = sigma= holds whichever rung fills the sample or
 deposits.
@@ -1441,7 +1451,9 @@ one rung hops at a time on the shared budget, each with its own basin
 bias, and rung =k= of =R= hops at =ladder_top^(k/(R-1))= times the
 temperature a single chain would hop at (config.rs:492-497): the fixed
 =temperature=, the budget-window law's temperature, or the statistical
-estimate clamped to its band around =temperature=. Every =swap_period=
+estimate clamped to its band around =temperature=, which only the
+rungs at ratio one feed and so takes over later on a ladder (see
+[[file:catalog.org::*Density-of-states, flat histogram, and energy bias][the density-of-states entry]]). Every =swap_period=
 hops the active rung offers to exchange states with the next one up,
 the hottest with the coldest, and that rung hops next.
 
