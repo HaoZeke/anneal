@@ -99,20 +99,22 @@ fn the_ladder_multiplies_the_budget_window_temperature() {
 /// The clamped estimate is the coldest rung's temperature and the hot rung
 /// hops at its ratio times it.
 ///
-/// The density of states first refreshes after `flat_sweep` hops recorded on
-/// the coldest rung, which holds every other turn, so at the default sweep the
-/// estimate sets no temperature before hop 750 of some 950, too late to tell a
-/// ladder that drops the ratio under it from one that keeps it. A sweep of 64
-/// puts it in force from hop 114. Measured at a base of 0.15 over these seeds,
-/// the hot rung adopts 339 rises against a bar of 165, a ladder that drops the
-/// ratio under the estimate 101, and one whose rungs all hop at one
-/// temperature 109 against a bar of 225.
+/// The estimate takes over once the rungs at ratio one have recorded
+/// `flat_sweep` hops, and on a hot ladder that is the coldest rung alone. At
+/// the default turn of 50 hops it holds every other turn, so the estimate sets
+/// no temperature before hop 750 of some 970, too late to tell a ladder that
+/// drops the ratio under it from one that keeps it. Turns of 450 let the
+/// coldest rung fill the sweep of 400 within its first turn, so the hot rung's
+/// whole first turn runs under the estimate, without the refits a shorter
+/// sweep would add. Measured over these seeds, the hot rung adopts 422 rises
+/// against a bar of 195, a ladder that drops the ratio under the estimate 96,
+/// and one whose rungs all hop at one temperature 58 against a bar of 195.
 #[test]
 fn the_ladder_multiplies_the_statistical_temperature() {
     let mut cfg = Config::recommended(13);
-    cfg.temperature = 0.15;
+    cfg.temperature = 0.2;
     cfg.statistical_temperature = true;
-    cfg.flat_sweep = 64;
+    cfg.swap_period = 450;
     assert_the_hot_rung_climbs(&cfg);
 }
 
