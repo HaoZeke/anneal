@@ -2,9 +2,10 @@
 //! evaluated point and `History.best` lie in the closed box, an axis with
 //! `low == high` never moves, a supplied start is the first point evaluated,
 //! and inside the box the chain consumes the RNG exactly as the
-//! unconstrained composition did. A NaN objective value at the start neither
-//! freezes the chain nor survives as its best value, and a start that meets
-//! only NaN never wins a multistart.
+//! unconstrained composition did. A NaN objective value ranks above every
+//! number, `+inf` included: at the start it neither freezes the chain nor
+//! survives as its best value, a start that meets only NaN never wins a
+//! multistart, and `+inf` beats a NaN.
 
 use std::sync::{Arc, Mutex};
 
@@ -57,11 +58,12 @@ fn recorder(low: &Array1<f64>, high: &Array1<f64>) -> (Recorder, Seen) {
     (obj, seen)
 }
 
-/// The squared norm, except NaN at the first `n_nan` points evaluated, which
-/// begin with the start of the chain, or of the first chain of a multistart.
+/// `after`, except NaN at the first `n_nan` points evaluated, which begin with
+/// the start of the chain, or of the first chain of a multistart.
 struct NanFirst {
     bounds: Bounds<f64>,
     n_nan: usize,
+    after: fn(ArrayView1<f64>) -> f64,
     vals: Arc<Mutex<Vec<f64>>>,
 }
 
@@ -79,7 +81,7 @@ impl Objective<f64> for NanFirst {
         let val = if vals.len() < self.n_nan {
             f64::NAN
         } else {
-            x.dot(&x)
+            (self.after)(x)
         };
         vals.push(val);
         val
@@ -263,6 +265,47 @@ fn boxes_wider_than_half_the_f64_range_mirror_off_the_walls() {
 }
 
 #[test]
+fn a_step_whose_offset_from_low_overflows_mirrors_off_high() {
+    // From `high`, steps of a quarter of the f64 range often pass it by so
+    // much that `x - low` overflows although twice the width is finite. They
+    // must mirror off `high` rather than drop onto `low`.
+    let m = f64::MAX;
+    let low = array![-0.6 * m];
+    let high = array![-0.1 * m];
+    for n_starts in [None, Some(2)] {
+        let (obj, seen) = recorder(&low, &high);
+        run_preset(0, obj, m / 4.0, 2.62, n_starts, 1, Some(high.view()));
+        let seen = seen.lock().unwrap();
+        assert!(
+            seen.iter().all(|x| low[0] < x[0] && x[0] <= high[0]),
+            "an evaluation reached low with {n_starts:?} starts"
+        );
+    }
+}
+
+#[test]
+fn a_step_that_overflows_is_mirrored_instead_of_landing_on_a_wall() {
+    // Near `f64::MAX`, Gaussian and Cauchy steps of this size often overflow
+    // `x + d`, and the infinite sum landed exactly on `high`, or at infinity
+    // on a half-infinite box.
+    let m = f64::MAX;
+    for (low, high, x0, scale) in [
+        (array![0.0], array![m], array![0.99 * m], 0.01 * m),
+        (array![1e308], array![f64::INFINITY], array![1.6e308], 3e307),
+    ] {
+        for which in 0..2 {
+            let (obj, seen) = recorder(&low, &high);
+            run_preset(which, obj, scale, 2.62, None, 1, Some(x0.view()));
+            let seen = seen.lock().unwrap();
+            assert!(
+                seen.iter().all(|x| low[0] < x[0] && x[0] < m),
+                "preset {which} reached a wall of [{low}, {high}]"
+            );
+        }
+    }
+}
+
+#[test]
 fn half_infinite_boxes_mirror_across_the_finite_wall() {
     let inf = f64::INFINITY;
     for (low, high, x0) in [
@@ -296,6 +339,7 @@ fn a_nan_start_is_left_and_never_kept_as_the_best() {
                 let obj = NanFirst {
                     bounds: Bounds::new(low.clone(), high.clone(), 0.0),
                     n_nan: 1,
+                    after: |x| x.dot(&x),
                     vals: Arc::clone(&vals),
                 };
                 let history = run_preset(which, obj, 0.5, 2.62, n_starts, 1, start);
@@ -326,6 +370,7 @@ fn a_start_that_meets_only_nan_never_wins_the_multistart() {
             let obj = NanFirst {
                 bounds: Bounds::new(low.clone(), high.clone(), 0.0),
                 n_nan: first_chain,
+                after: |x| x.dot(&x),
                 vals: Arc::clone(&vals),
             };
             let history = run_preset(which, obj, 0.5, 2.62, Some(3), 1, start);
@@ -337,6 +382,79 @@ fn a_start_that_meets_only_nan_never_wins_the_multistart() {
             assert_eq!(history.best.val, lowest, "preset {which}, x0 {start:?}");
         }
     }
+}
+
+#[test]
+fn qmc_starts_on_an_axis_with_an_infinite_wall_are_finite() {
+    // Halton points scale the unit cube by `high - low`, so on these boxes
+    // every start but x0 sat at infinity. They now sit on the finite wall.
+    let inf = f64::INFINITY;
+    let per_chain = 1 + N_EPOCHS * STEPS_PER_EPOCH;
+    for (low, high, x0, wall) in [
+        (array![2.0, -1.0], array![inf, 1.0], array![2.5, 0.5], 2.0),
+        (
+            array![-inf, -1.0],
+            array![-2.0, 1.0],
+            array![-2.5, 0.5],
+            -2.0,
+        ),
+        (array![-inf, -1.0], array![inf, 1.0], array![0.5, 0.5], 0.0),
+    ] {
+        for which in 0..3 {
+            for start in [None, Some(x0.view())] {
+                let (obj, seen) = recorder(&low, &high);
+                let history = run_preset(which, obj, 1.0, 2.62, Some(3), 3, start);
+                let seen = seen.lock().unwrap();
+                for x in seen.iter().chain(std::iter::once(&history.best.pos)) {
+                    assert!(
+                        x.iter().all(|v| v.is_finite()),
+                        "preset {which} evaluated {x} in [{low}, {high}]"
+                    );
+                    assert_in_box(x, &low, &high);
+                }
+                for first in seen.iter().step_by(per_chain).skip(1) {
+                    assert_eq!(first[0], wall);
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn an_infinite_value_beats_a_nan() {
+    // A value of `+inf` beats a NaN start, and a multistart that runs no
+    // steps keeps a start at `+inf` over the NaN at x0.
+    let low = array![-1.0, -1.0];
+    let high = array![1.0, 1.0];
+    let x0 = array![0.5, 0.5];
+    let nan_then_inf = || NanFirst {
+        bounds: Bounds::new(low.clone(), high.clone(), 0.0),
+        n_nan: 1,
+        after: |_| f64::INFINITY,
+        vals: Arc::default(),
+    };
+    for which in 0..3 {
+        for n_starts in [None, Some(3)] {
+            let history = run_preset(
+                which,
+                nan_then_inf(),
+                0.5,
+                2.62,
+                n_starts,
+                1,
+                Some(x0.view()),
+            );
+            assert!(
+                history.total_accepted() > 0,
+                "preset {which}, {n_starts:?} starts"
+            );
+            assert_eq!(history.best.val, f64::INFINITY);
+        }
+    }
+    let variant = boltzmann_in_box(nan_then_inf(), 1.0, 0.5).unwrap();
+    let history = run_rs_qmc_variant_from(variant, 3, 1, 0, 1, Some(x0), None);
+    assert_eq!(history.best.val, f64::INFINITY);
+    assert_ne!(history.best.pos, x0);
 }
 
 #[test]
