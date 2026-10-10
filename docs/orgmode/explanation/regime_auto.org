@@ -356,11 +356,12 @@ landscape. That population arm in =de='s place moves at most three
 seeds on any of these rows and leaves each behind; =de= with crossover
 rate one, whose moves a rotation leaves unchanged, and with the
 incumbent in place of its worst member before each turn, repeats the
-loop's results to within the last bit. Starting a =cma= run with four
-times the default population and a box-wide step at each phase brings
-=rastR50@5000= level (313, 20/0/20) and =rastR100@20000= to 749
-(15/0/25, =p= 0.25), leaves the other four rows behind, and costs
-=ackS30@5000=, 2.01 against 6.2e-7 (1/5/34). The =|f|=-scaled
+loop exactly on 559 of the 560 runs screened and to within a relative
+=6e-16= on the last, one seed of =rastR50@20000=. Starting a =cma= run
+with four times the default population and a box-wide step at each
+phase brings =rastR50@5000= level (313, 20/0/20) and =rastR100@20000=
+to 749 (15/0/25, =p= 0.25), leaves the other four rows behind, and
+costs =ackS30@5000=, 2.01 against 6.2e-7 (1/5/34). The =|f|=-scaled
 threshold brings =rastR100@20000= to 825, still behind (5/0/35), and
 two fixed =gsa= slices short of the opening budget leave it at 873.
 
