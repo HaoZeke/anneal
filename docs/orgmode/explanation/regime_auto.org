@@ -236,17 +236,17 @@ replaced rule back costs the rows named with it:
   0.0416 against 1.0e-11 (5/15/20), =rast100_shift@20000= 9.95 against
   7.96 (9/3/28) and =rastS100@20000= 9.95 against 7.96 (9/3/28). With
   the two slices back each comes level, but =ackS50@5000= is 4.31
-  against 2.94 and =ackS100@5000= 13.2 against 5.94 (1/0/39 each),
-  =ellR30@1000= 12557 against 5589 (3/0/37), =ellR100@5000= 20110
+  against the loop's 2.94 and =ackS100@5000= 13.2 against 5.94 (1/0/39
+  each), =ellR30@1000= 12557 against 5589 (3/0/37), =ellR100@5000= 20110
   against 15750 (5/0/35) and =rosen100@5000= 252 against 168 (7/0/33).
   Handing over once a descent slice gains less than an eighth of the
   descent's best rate, instead of less than the slice before, narrows
   =ellS30@1000= to 1235 and =ellS100@20000= to 0.291 but costs
-  =ellR30@1000=, 8339 against 5589 (0/28/12), and =ackS100@5000=, 6.22
-  against 5.94 (7/17/16). Leaving =gsa='s chain where it is when
-  another arm lowers the incumbent below it narrows =ellS50@5000= to
-  4.09 and =ellS100@20000= to 0.156 but costs =ackS50@5000=, 2.99
-  against 2.94 (0/29/11).
+  =ellR30@1000=, 8339 against the loop's 5589 (0/28/12), and
+  =ackS100@5000=, 6.22 against 5.94 (7/17/16). Leaving =gsa='s chain
+  where it is when another arm lowers the incumbent below it narrows
+  =ellS50@5000= to 4.09 and =ellS100@20000= to 0.156 but costs
+  =ackS50@5000=, 2.99 against the loop's 2.94 (0/29/11).
 - The opening's bar on its recent gains, against an opening that goes
   on while each slice is a success: =ellS30@5000= 0.0626 against 0
   (0/13/27), =rosen30@5000= 22.2 against 16.2 (2/1/37), with that row's
@@ -258,9 +258,9 @@ replaced rule back costs the rows named with it:
   for =+1e2= (2.8e-11 against 3.2e-12, 1/25/14), =+1e4= (2.3e-4 against
   1.4e-5, 2/17/21) and =-1e4= (8.7e-4 against 1.2e-5, 6/15/19). Without
   the bar these come level (=ellR30@5000= and its two copies at 0,
-  0/38/2), but =ackS30@5000= is 3.8e-6 against 6.2e-7 (1/18/21),
-  =levyR30@5000= 3.51 against 0.544 (5/0/35) and =levy30@5000= 7.2e-7
-  against 4.5e-10 (6/17/17).
+  0/38/2), but =ackS30@5000= is 3.8e-6 against the loop's 6.2e-7
+  (1/18/21), =levyR30@5000= 3.51 against 0.544 (5/0/35) and
+  =levy30@5000= 7.2e-7 against 4.5e-10 (6/17/17).
 - The descent's resolution test and the floor on it, against a fixed
   =1e-12= tolerance: =griewank10@5000= without =x0=, 0.0308 against
   0.0221 (3/31/6, =p= 0.049); the loop without the floor is level there
@@ -268,29 +268,29 @@ replaced rule back costs the rows named with it:
   (2/34/4). With the tolerance the row comes level (0.0221, 3/33/4),
   but from =x0= it falls behind (0.0382 against 0.0295, 2/29/9,
   =p= 0.021), and the offset copies of =fit6@5000= give back what the
-  test won, =+1e2= -11.6 against -12.6 (0/23/17), =+1e4= -9.33 against
-  -12.6 (0/17/23) and =-1e4= -8.15 against -12.8 (0/24/16), as do its
-  =x1e-6= copy (-12.59 against -12.86, 0/33/7) and =+1e2= control
-  (-12.47 against -12.77, 1/34/5), while =fit6@5000= itself loses four
-  seeds (-12.78 against -12.94, 0/36/4). Without the floor the test
-  left behind =fit6@1000=, -4.78 against -4.89 (3/20/17), and without
-  =x0= (1/32/7), with that row's =x2^-20= and =x1e-6= copies and its
-  =+1e2= and =x1e-6= controls; =ellR30@20000= and =ellR50@20000=, where
-  five and six seeds stopped short of 0 (0/35/5, 0/34/6); and the
-  =x1e-6= control of =ellR30@5000= (2/19/19). The floor brings each
-  level (=fit6@1000= -4.82, 4/30/6; both =ellR= rows 0, 0/40/0; that
-  control 1.2e-21, 2/30/8), puts no row behind the loop without it, and
-  leaves =fit6@5000= level with that loop, -12.94 against -12.83
-  (15/10/15).
+  test won, =+1e2= -11.6 against the loop's -12.6 (0/23/17), =+1e4=
+  -9.33 against -12.6 (0/17/23) and =-1e4= -8.15 against -12.8
+  (0/24/16), as do its =x1e-6= copy (-12.59 against -12.86, 0/33/7) and
+  =+1e2= control (-12.47 against -12.77, 1/34/5), while =fit6@5000=
+  itself loses four seeds (-12.78 against -12.94, 0/36/4). Without the
+  floor the test left behind =fit6@1000=, -4.78 against -4.89 (3/20/17),
+  and without =x0= (1/32/7), with that row's =x2^-20= and =x1e-6= copies
+  and its =+1e2= and =x1e-6= controls; =ellR30@20000= and
+  =ellR50@20000=, where five and six seeds stopped short of 0 (0/35/5,
+  0/34/6); and the =x1e-6= control of =ellR30@5000= (2/19/19). The floor
+  brings each level (=fit6@1000= -4.82, 4/30/6; both =ellR= rows 0,
+  0/40/0; that control 1.2e-21, 2/30/8), puts no row behind the loop
+  without it, and leaves =fit6@5000= level with that loop, -12.94
+  against -12.83 (15/10/15).
 - The success threshold on the last gain, against =1e-4 max(|f|, s)=:
   =rastR100@20000= 870 against 833 (4/18/18) and the =+1e2= copy of
   =levy30@5000=, 6.4e-11 against 4.3e-12 (5/22/13). With the
   =|f|=-scaled threshold both come level (825, 9/21/10; 1.1e-12,
   8/29/3), but the offset copies lose what the last-gain threshold won:
-  =rosen10@1000= with =+1e4= is 5.40 against 1.2e-10 (0/0/40),
-  =fit6@1000= with =+1e4= -0.847 against -4.67 (1/0/39) and at 5000
-  -6.16 against -12.6 (1/1/38), and =ellR30@5000= with =+1e4= 4.4e-3
-  against 2.9e-4 (0/6/34).
+  =rosen10@1000= with =+1e4= is 5.40 against the loop's 1.2e-10
+  (0/0/40), =fit6@1000= with =+1e4= -0.847 against -4.67 (1/0/39) and at
+  5000 -6.16 against -12.6 (1/1/38), and =ellR30@5000= with =+1e4=
+  4.4e-3 against 2.9e-4 (0/6/34).
 - Lending from a =gsa= phase's fifth slice: =mich10@5000= -9.655
   against -9.66 (1/31/8, =p= 0.020). Two seeds lose the closing polish
   by 3.4e-6 and 4.8e-6, four lose the basin after =cma= takes the turn
@@ -315,29 +315,29 @@ replaced rule back costs the rows named with it:
   (3/27/10, 3/27/10, 4/25/11), and so did ending a phase =cma= took
   once its last two slices gain less than an eighth or a 64th of its
   bar (4/25/11, 4/27/9), which also cost =ackS30@5000= (1.2e-5 and
-  1.4e-6 against 6.2e-7). With phases that keep the turn while they
-  still find lower basins, the fifth-slice lend also trails the form
-  the two were added to on =ackS30@20000=, 9.1e-7 against 6.3e-7
-  (12/1/27, =p= 0.045; 3.9e-7 with lending from any slow slice), and on
-  =ackley10@5000= without =x0=, 4.0e-11 against 3.2e-11 (6/24/10). From
-  =x0= that row is level with that form (8/28/4), but its =-1e4= copy
-  (1.8e-10 against 2.0e-10, 6/26/8) and its =+1e4= and =-1e4= controls
-  (2.3e-11 against 3.2e-11, 5/27/8 each), which start from =x0= as
-  every copy does, trail it through the same two rules: longer =gsa=
-  phases leave the cone at Ackley's minimum unrefined on a few seeds.
+  1.4e-6 against the loop's 6.2e-7). With phases that keep the turn
+  while they still find lower basins, the fifth-slice lend also trails
+  the form the two were added to on =ackS30@20000=, 9.1e-7 against
+  6.3e-7 (12/1/27, =p= 0.045; 3.9e-7 with lending from any slow slice),
+  and on =ackley10@5000= without =x0=, 4.0e-11 against 3.2e-11
+  (6/24/10). From =x0= that row is level with that form (8/28/4), but
+  its =-1e4= copy (1.8e-10 against 2.0e-10, 6/26/8) and its =+1e4= and
+  =-1e4= controls (2.3e-11 against 3.2e-11, 5/27/8 each), which start
+  from =x0= as every copy does, trail it through the same two rules:
+  longer =gsa= phases leave the cone at Ackley's minimum unrefined on a
+  few seeds.
 - Rotated ellipsoids short of the opening budget trail an earlier form
   of this loop by three to four times, =ellR50@1000= 1.38e5 against
   4.79e4, =ellR50@5000= 37.7 against 9.20 and =ellR100@20000= 2.48
   against 0.633, and by two on =ellR30@1000=, 5589 against 2987.
-  Letting the descent keep the turn
-  while it pays brings =ellR50@5000= to 17.4 and
-  =ellR100@20000= to 0.890 (40/0/0 each) and leaves =ellR50@1000=
-  where it is, but costs =ellR30@1000=, 20880 against 5589 (0/7/33),
-  =ellR100@5000=, 41370 against 15750 (5/0/35), =ackS50@5000=, 3.26
-  against 2.94 (11/0/29), =ackS100@5000=, 9.86 against 5.94 (1/0/39),
-  =levy100@5000=, 8.83 against 2.765 (2/0/38), =rosen50@5000=, 43.8
-  against 40.1 (5/0/35), and =stybS100@5000=, -3860 against -3902
-  (4/2/34).
+  Letting the descent keep the turn while it pays brings =ellR50@5000=
+  to 17.4 and =ellR100@20000= to 0.890 (40/0/0 each) and leaves
+  =ellR50@1000= where it is, but costs =ellR30@1000=, 20880 against the
+  loop's 5589 (0/7/33), =ellR100@5000=, 41370 against 15750 (5/0/35),
+  =ackS50@5000=, 3.26 against 2.94 (11/0/29), =ackS100@5000=, 9.86
+  against 5.94 (1/0/39), =levy100@5000=, 8.83 against 2.765 (2/0/38),
+  =rosen50@5000=, 43.8 against 40.1 (5/0/35), and =stybS100@5000=, -3860
+  against -3902 (4/2/34).
 
 Of the 88 offset and =x1e-6= copies, five trail their control at
 =p < 0.05=, where chance alone gives about four and none passes a
@@ -362,17 +362,18 @@ before anything has descended: =rastR30@1000= 280 against 173
 =levyR50@5000= 98.8 against 69.8 (8/0/32) and =levyR100@20000= 203
 against 108 (0/0/40). One-coordinate visits seldom improve a rotated
 landscape. That population arm in =de='s place moves at most three
-seeds on any of these rows and leaves each behind; =de= with crossover
-rate one, whose moves a rotation leaves unchanged, and with the
-incumbent in place of its worst member before each turn, repeats the
+seeds on any of these rows and leaves each behind 0.10.0; =de= with
+crossover rate one, whose moves a rotation leaves unchanged, and with
+the incumbent in place of its worst member before each turn, repeats the
 loop exactly on 559 of the 560 runs screened and to within a relative
 =6e-16= on the last, one seed of =rastR50@20000=. Starting a =cma= run
-with four times the default population and a box-wide step at each
-phase brings =rastR50@5000= level (313, 20/0/20) and =rastR100@20000=
-to 749 (15/0/25, =p= 0.25), leaves the other four rows behind, and
-costs =ackS30@5000=, 2.01 against 6.2e-7 (1/5/34). The =|f|=-scaled
-threshold brings =rastR100@20000= to 825, still behind (5/0/35), and
-two fixed =gsa= slices short of the opening budget leave it at 873.
+with four times the default population and a box-wide step at each phase
+brings =rastR50@5000= level with 0.10.0 (313, 20/0/20) and
+=rastR100@20000= to 749 (15/0/25, =p= 0.25), leaves the other four rows
+behind 0.10.0, and costs =ackS30@5000=, 2.01 against the loop's 6.2e-7
+(1/5/34). The =|f|=-scaled threshold brings =rastR100@20000= to 825,
+still behind 0.10.0 (5/0/35), and two fixed =gsa= slices short of the
+opening budget leave it at 873.
 
 * Regimes → preferred portfolio arms / kernels
 
