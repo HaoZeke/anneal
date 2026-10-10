@@ -539,7 +539,10 @@ where
             }
             // One scalar proposal needs no full quench or certificate. Its
             // paid value can improve the incumbent and supply peer coverage.
-            let depth = values_search_depth(dim, remaining, needs_certificate).max(1);
+            let depth = values_search_depth(dim, remaining, needs_certificate);
+            if remaining < 4 || depth == 0 {
+                continue;
+            }
             progressed = true;
             replica.generation += 1;
             replica.hops += 1;
