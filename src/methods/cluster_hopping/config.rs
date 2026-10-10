@@ -134,7 +134,8 @@ pub struct Config {
     /// the funnel bias's visits and the swap read; proposals keep the move
     /// scale `temperature` sets on every rung, as they do under
     /// [`Config::budget_window`]. The energy bias is built and filled at the
-    /// temperature a single chain would hop at (see [`Config::energy_bias`]).
+    /// temperature the coldest rung would hop at from the state it holds (see
+    /// [`Config::energy_bias`]).
     /// The packing pile deposits at `temperature` itself, as do the deposits
     /// that come with a checkpoint's proposals and remote states, which never
     /// happen on a ladder: the runs that take a checkpoint or a shared bias
@@ -380,8 +381,10 @@ pub struct Config {
     ///
     /// On a replica ladder the bias is one function every rung reads over its
     /// own temperature. Its tempering factor and its deposits read the
-    /// temperature a single chain would hop at, so `(gamma - 1) T` is the
-    /// sample's spread whichever rung fills the first sample or deposits.
+    /// temperature the coldest rung would hop at from the state it holds, so
+    /// neither depends on which rung fills the first sample or deposits, and
+    /// `(gamma - 1) T` is the sample's spread at the temperature the sample
+    /// was filled at.
     pub energy_bias: bool,
     /// Reward move arms by the depth they reach, not by acceptance.
     ///

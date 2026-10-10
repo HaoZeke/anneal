@@ -909,6 +909,28 @@ fn rung_temperature(
     single_chain_temperature(cfg, held, dos, e) * ratio
 }
 
+/// The temperature a rung at `ratio` would hop at from a state at energy `e`,
+/// by the rule a hop uses and without counting a step of the law.
+///
+/// For a rung that is not hopping: the swap weighs each state at the
+/// temperature its rung would hop at, and the energy bias is built and filled
+/// at the coldest rung's.
+fn standing_temperature(
+    cfg: &Config,
+    law: &BudgetWindowTemperature,
+    ledger: &Ledger,
+    ratio: f64,
+    dos: Option<&crate::dos::DensityOfStates>,
+    e: f64,
+) -> f64 {
+    let held = if cfg.budget_window {
+        law.peek((e - ledger.best).abs().max(1e-12), ledger.remaining())
+    } else {
+        cfg.temperature
+    };
+    rung_temperature(cfg, ratio, held, dos, e)
+}
+
 /// Deposit height on a rung at `ratio` of a ladder of `n_rep`.
 ///
 /// Under [`Config::bias_by_rung`] it follows the rung's temperature, so a
@@ -1887,6 +1909,15 @@ where
         };
         let single = single_chain_temperature(cfg, held, dos.as_ref(), e);
         let temperature = single * ratios[rep];
+        // The coldest rung's temperature from the state it holds, which the
+        // energy bias is built and filled at. Read here, where that rung's own
+        // hop reads its temperature, so the reading is the same whichever rung
+        // is hopping.
+        let bias_temperature = if rep == 0 || !cfg.energy_bias {
+            single
+        } else {
+            standing_temperature(cfg, &law, ledger, ratios[0], dos.as_ref(), chains[0].energy)
+        };
 
         if cfg.anneal_diversity {
             let progress = 1.0 - (ledger.remaining() as f64 / ledger.budget() as f64);
@@ -2775,15 +2806,16 @@ where
             }
         }
         // The energy bias is one function on every rung, so its factor and its
-        // deposits read the temperature a single chain would hop at, which
-        // keeps (gamma - 1) T at the sample's spread whichever rung fills the
-        // sample or deposits. Each rung reads the bias over its own temperature.
+        // deposits read one temperature whichever rung fills the sample or
+        // deposits: the one the coldest rung hops at from the state it holds,
+        // at which (gamma - 1) T is the sample's spread. Each rung reads the
+        // bias over its own temperature.
         if cfg.energy_bias {
             let occupied = if accept { e_new } else { e };
             if occupied.is_finite() {
                 match ebias.as_mut() {
                     Some(b) => {
-                        b.deposit(occupied, single);
+                        b.deposit(occupied, bias_temperature);
                         if std::env::var("EBIAS_TRACE").is_ok() && b.deposits % 200 == 0 {
                             eprintln!("ebias deposits {} peak {:.4}", b.deposits, b.peak());
                         }
@@ -2793,7 +2825,7 @@ where
                         if flat_seen.len() >= flat_sweep {
                             ebias = crate::dos::EnergyBias::from_sample(
                                 &flat_seen,
-                                single,
+                                bias_temperature,
                                 crate::dos::BINS,
                             );
                             flat_seen.clear();
@@ -3486,12 +3518,7 @@ where
                     // adaptive one it is the rung's temperature of the moment,
                     // as in the hop rule itself.
                     let temperature_of = |rung: usize, energy: f64| {
-                        let held = if cfg.budget_window {
-                            law.peek((energy - ledger.best).abs().max(1e-12), ledger.remaining())
-                        } else {
-                            cfg.temperature
-                        };
-                        rung_temperature(cfg, ratios[rung], held, dos.as_ref(), energy)
+                        standing_temperature(cfg, &law, ledger, ratios[rung], dos.as_ref(), energy)
                     };
                     let (ek, xk) = (chains[k].energy, chains[k].state.clone());
                     let (ej, xj) = (chains[j].energy, chains[j].state.clone());

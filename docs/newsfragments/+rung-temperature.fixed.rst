@@ -11,12 +11,12 @@ the funnel bias, the packing pile and the energy bias every rung shares by the
 difference of the two inverse temperatures. Under ``flat_histogram`` it weighs
 the biases alone, since the flat-histogram cost is the same on every rung and
 cancels from the factor with the energies. Under ``energy_bias`` the bias's
-tempering factor and its deposits read the temperature a single chain would
-hop at, so which rung fills its first sample no longer sets its factor. A state
-keeps its basin and its validation gradient as it moves between rungs, so the
-first step a rung takes after a switch is recorded from the state that rung
-holds, and every rung's starting quench is validated before it is recorded. A
-ladder refuses ``delayed_acceptance``: a hop its surrogate decides is tested on
-the bare energy and one it abstains on with the biases, so no swap factor can
-balance an exchange between rungs that hop by two weights. A single chain is
-unchanged.
+tempering factor and its deposits read the temperature the coldest rung would
+hop at from the state it holds, so which rung fills its first sample or
+deposits no longer sets them. A state keeps its basin and its validation
+gradient as it moves between rungs, so the first step a rung takes after a
+switch is recorded from the state that rung holds, and every rung's starting
+quench is validated before it is recorded. A ladder refuses
+``delayed_acceptance``: a hop its surrogate decides is tested on the bare
+energy and one it abstains on with the biases, so no swap factor can balance an
+exchange between rungs that hop by two weights. A single chain is unchanged.
