@@ -378,6 +378,8 @@ struct CertifiedRideSaddle {
 struct ScientificState {
     signature: SystemSignature,
     descriptor_space: DescriptorSpace,
+    /// Length learned from the first recomputed descriptor on this server.
+    posted_descriptor_len: Option<usize>,
     structure_context: StructureContext,
     exact_witness: Arc<StructuralWitness>,
     validator: CandidateValidator,
@@ -568,6 +570,7 @@ impl CoordinatorState {
                 Ok::<ScientificState, CatalogServerError>(ScientificState {
                     signature: scientific.signature.clone(),
                     descriptor_space: scientific.descriptor_space.clone(),
+                    posted_descriptor_len: None,
                     structure_context: StructureContext::new(
                         Some(scientific.signature.atomic_numbers.clone()),
                         scientific.descriptor_space.geometry(),
@@ -3149,7 +3152,7 @@ fn rejection_for_protocol_error(error: &ProtocolError) -> ProtocolRejection {
 /// it does not already pay and stays correct without one.
 fn resolve_validation(
     precomputed: &mut Option<Result<ValidatedCandidate, ()>>,
-    scientific: &ScientificState,
+    scientific: &mut ScientificState,
     identity: &CatalogIdentity,
     candidate: &CatalogCandidate,
 ) -> Result<ValidatedCandidate, ()> {
@@ -3161,6 +3164,7 @@ fn resolve_validation(
             scientific.evaluate.as_ref(),
             identity,
             candidate,
+            &mut scientific.posted_descriptor_len,
         )
     })
 }
@@ -3172,6 +3176,7 @@ fn validate_candidate<F>(
     evaluate: &F,
     identity: &CatalogIdentity,
     candidate: &CatalogCandidate,
+    posted_descriptor_len: &mut Option<usize>,
 ) -> Result<ValidatedCandidate, ()>
 where
     F: Fn(&[f64]) -> Result<FreshEvaluation, String> + Send + Sync + ?Sized,
@@ -3243,17 +3248,16 @@ where
         reject("posted descriptor version or values do not match the schema");
         return Err(());
     }
-    // The schema's dimension is learned from the first recomputation and
-    // every posted descriptor is held to it afterwards.
-    static DIMENSION: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
-    if let Some(dimension) = DIMENSION.get()
-        && posted.len() != *dimension
+    // The schema's dimension is learned from the first recomputation on
+    // this server and every posted descriptor is held to it afterwards.
+    if let Some(dimension) = *posted_descriptor_len
+        && posted.len() != dimension
     {
         reject("posted descriptor length does not match the schema");
         return Err(());
     }
     let verify_every = descriptor_verification_period();
-    let verify = DIMENSION.get().is_none()
+    let verify = posted_descriptor_len.is_none()
         || match verify_every {
             Some(0) => false,
             Some(period) => candidate.event_sequence.is_multiple_of(period),
@@ -3290,7 +3294,7 @@ where
             );
             return Err(());
         }
-        let _ = DIMENSION.set(descriptor.values().len());
+        *posted_descriptor_len = Some(descriptor.values().len());
         validated.candidate.descriptor = descriptor.values().to_vec();
         validated.candidate.descriptor_schema_version = descriptor.schema_version();
     }
