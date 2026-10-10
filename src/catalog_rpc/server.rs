@@ -1340,6 +1340,7 @@ async fn precompute_validation_async(
     let candidate = candidate.clone();
     let (tx, rx) = futures::channel::oneshot::channel();
     rayon::spawn(move || {
+        let mut posted_len = None;
         let result = validate_candidate(
             &bits.0,
             &bits.1,
@@ -1347,7 +1348,7 @@ async fn precompute_validation_async(
             bits.3.as_ref(),
             &identity,
             &candidate,
-            None,
+            Some(&mut posted_len),
         );
         let _ = tx.send(result);
     });
@@ -3157,7 +3158,7 @@ fn resolve_validation(
     identity: &CatalogIdentity,
     candidate: &CatalogCandidate,
 ) -> Result<ValidatedCandidate, ()> {
-    precomputed.take().unwrap_or_else(|| {
+    let validated = precomputed.take().unwrap_or_else(|| {
         validate_candidate(
             &scientific.signature,
             &scientific.descriptor_space,
@@ -3167,7 +3168,15 @@ fn resolve_validation(
             candidate,
             Some(&mut scientific.posted_descriptor_len),
         )
-    })
+    })?;
+    match scientific.posted_descriptor_len {
+        Some(dimension) if validated.candidate.descriptor.len() != dimension => Err(()),
+        Some(_) => Ok(validated),
+        None => {
+            scientific.posted_descriptor_len = Some(validated.candidate.descriptor.len());
+            Ok(validated)
+        }
+    }
 }
 
 fn validate_candidate<F>(
