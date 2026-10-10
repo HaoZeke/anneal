@@ -173,12 +173,12 @@ of the shifted values (the rounding of each gain, and =s=), the start's
 value sets none, and multiplying the objective by a power of two
 multiplies every threshold exactly. The descent likewise stops on the
 resolution of its values: an iteration is slow when it lowers its value
-by less than =8 eps= of it, a few units in the last place, or by less
-than =1e-7= of the threshold as it stood when the slice began, so that
-near a minimum whose value is small against the gains that set the
-threshold the descent stops well before its gains shrink to units in
-the last place. Its first trial moves at most 5% of a side whatever
-the gradient's size.
+by no more than =8 eps= of it, a few units in the last place, or by no
+more than =1e-7= of the threshold as it stood when the slice began, so
+that near a minimum whose value is small against the gains that set the
+threshold the descent stops well before its gains shrink to units in the
+last place. Its first trial moves at most 5% of a side whatever the
+gradient's size.
 The surrogate and the restart arm take values in the run's unit, the
 power of two at or below the threshold in force when they play: the
 surrogate fits values, and sets its temperatures and their floors, in
