@@ -200,23 +200,32 @@ impl TsallisVisit {
 
 impl MoveKernel<f64> for TsallisVisit {
     fn propose<R: Rng + ?Sized>(&self, i: ArrayView1<f64>, t: f64, rng: &mut R) -> Array1<f64> {
-        let qv = self.q_v;
-        let exponent = (qv - 1.0) / (3.0 - qv);
+        let parameters = self.parameters(t);
         let ln_sigma = self.log_sigma(t);
         let ln_tail = VISIT_TAIL_LIMIT.ln();
         let normal = NormalDist::new(0.0, 1.0).expect("std normal");
         Array1::from_iter(i.iter().map(|&xi| {
             let x: f64 = normal.sample(rng);
             let y: f64 = normal.sample(rng);
-            let ln_v = ln_sigma + x.abs().ln() - exponent * y.abs().ln();
-            // A step past the tail limit, or one the logarithms cannot
-            // resolve, is redrawn uniformly inside the limit (SciPy's rule).
-            let v = if ln_v.is_nan() || ln_v > ln_tail {
-                VISIT_TAIL_LIMIT * rng.random::<f64>()
+            // The prepared scale and exponent are the visiting step. The
+            // logarithm is the same product when that form underflows.
+            let direct = parameters.scale * x / y.abs().powf(parameters.exponent);
+            let step = if parameters.scale.is_finite()
+                && parameters.scale > 0.0
+                && direct.is_finite()
+                && direct.abs() <= parameters.tail_limit
+            {
+                direct
             } else {
-                ln_v.exp()
+                let ln_v = ln_sigma + x.abs().ln() - parameters.exponent * y.abs().ln();
+                let magnitude = if ln_v.is_nan() || ln_v > ln_tail {
+                    VISIT_TAIL_LIMIT * rng.random::<f64>()
+                } else {
+                    ln_v.exp()
+                };
+                magnitude.copysign(x)
             };
-            xi + v.copysign(x)
+            xi + step
         }))
     }
 
