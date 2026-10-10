@@ -4205,12 +4205,13 @@ where
     }
     // One central finite-difference stencil, plus and minus on every
     // coordinate and one trial, when the remainder can pay it. Forward
-    // differences do not produce that block. Below 64 dimensions the
-    // polish reserve and the closing descent keep the remainder. At
-    // higher dimension an arm the phases did not play takes one slice
-    // from what is left above that stencil.
+    // differences do not produce that block. Through 100 dimensions the
+    // polish reserve stays with the closing descent, including a short
+    // GSA hand-over that leaves only that reserve. Above that, an arm
+    // the phases did not play takes one slice from what is left above
+    // that stencil.
     let stencil = dim.saturating_mul(2).saturating_add(2);
-    if dim >= 64 {
+    if dim > 100 {
         let pending: Vec<usize> = posteriors
             .iter()
             .enumerate()
