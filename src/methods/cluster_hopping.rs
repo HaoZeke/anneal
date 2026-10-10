@@ -780,14 +780,20 @@ pub struct Outcome {
     pub stall_escape_gain: f64,
     /// Mean softest eigenvalue over those proposals.
     pub soft_lambda: f64,
-    /// Per-rung temperature, basin count and best energy.
+    /// Per-rung temperature, basin count and the energy the rung ends on.
+    ///
+    /// The temperature is `temperature` times the rung's ratio. Under
+    /// [`Config::budget_window`] or [`Config::statistical_temperature`] a rung
+    /// hops at that ratio times the adaptive temperature instead, and this is
+    /// the ladder's nominal value.
     ///
     /// What says whether a ladder is doing its job rather than merely swapping:
     /// a hot rung should register many basins and a poor energy, a cold rung
     /// few basins and a deep one. A ladder where every rung looks alike is a
     /// ladder whose spread is too narrow to be worth its cost.
     pub rungs: Vec<(f64, usize, f64)>,
-    /// Swap attempts between adjacent replicas.
+    /// Swap attempts, each from the active rung to the next one up, the
+    /// hottest offering to the coldest.
     pub swaps_tried: usize,
     /// What the ladder transported: round trips, sweeps, and the communication
     /// barrier at the end of the run. `None` for a single chain.
@@ -831,6 +837,10 @@ pub struct Outcome {
     /// a metric condition near one says an adapted metric is carrying no
     /// anisotropy at all.
     pub hmc: Vec<crate::hmc::hop::HopDiagnostics>,
+
+    /// The energy bias as the run left it, under [`Config::energy_bias`] once
+    /// its first sample has filled.
+    pub energy_bias: Option<crate::dos::EnergyBias>,
 }
 
 /// Relaxes `x`, charging every evaluation, and stopping when the budget ends.
@@ -1247,6 +1257,221 @@ where
     )
 }
 
+/// Each rung's temperature as a multiple of the one a single chain would hop
+/// at: `ladder_top^(k/(R-1))` for rung `k` of `R`, and exactly one for a
+/// single chain.
+///
+/// Geometric, so swap acceptance is spaced evenly along the ladder rather than
+/// bunched at one end.
+fn rung_ratios(replicas: usize, ladder_top: f64) -> Vec<f64> {
+    let n_rep = replicas.max(1);
+    (0..n_rep)
+        .map(|k| {
+            if n_rep == 1 {
+                1.0
+            } else {
+                ladder_top.powf(k as f64 / (n_rep - 1) as f64)
+            }
+        })
+        .collect()
+}
+
+/// The temperature a single chain hops at from a state at energy `e`, given the
+/// one the budget-window law or the configuration holds it at.
+///
+/// Under [`Config::statistical_temperature`] the entropy's slope where the
+/// chain stands takes over once the density of states has been refreshed,
+/// clamped to a band around the configured value so a slope estimated from few
+/// counts cannot freeze the chain or boil it. The band is wide enough that the
+/// adaptation has somewhere to go and narrow enough that a bad estimate is
+/// survivable.
+fn single_chain_temperature(
+    cfg: &Config,
+    held: f64,
+    dos: Option<&crate::dos::DensityOfStates>,
+    e: f64,
+) -> f64 {
+    let mut single = held;
+    if cfg.statistical_temperature
+        && let Some(d) = dos
+        && d.refreshes > 0
+    {
+        let (t, _) = d.temperature(e);
+        if t.is_finite() && t > 0.0 {
+            single = t.clamp(0.2 * cfg.temperature, 5.0 * cfg.temperature);
+        }
+    }
+    single
+}
+
+/// The temperature a rung at `ratio` hops at from a state at energy `e`, given
+/// the one the budget-window law or the configuration holds a single chain at.
+///
+/// The ratio multiplies what a single chain standing there would hop at, so
+/// the coldest rung is that chain whichever temperature rule is in force. The
+/// statistical temperature's clamp comes before the ratio, so each rung's band
+/// sits around its own ladder temperature.
+fn rung_temperature(
+    cfg: &Config,
+    ratio: f64,
+    held: f64,
+    dos: Option<&crate::dos::DensityOfStates>,
+    e: f64,
+) -> f64 {
+    single_chain_temperature(cfg, held, dos, e) * ratio
+}
+
+/// The temperature a rung at `ratio` would hop at from a state at energy `e`,
+/// by the rule a hop uses and without counting a step of the law.
+///
+/// For a rung that is not hopping: the swap weighs each state at the
+/// temperature its rung would hop at, and the energy bias is built and filled
+/// at the coldest rung's.
+fn standing_temperature(
+    cfg: &Config,
+    law: &BudgetWindowTemperature,
+    ledger: &Ledger,
+    ratio: f64,
+    dos: Option<&crate::dos::DensityOfStates>,
+    e: f64,
+) -> f64 {
+    let held = if cfg.budget_window {
+        law.peek((e - ledger.best).abs().max(1e-12), ledger.remaining())
+    } else {
+        cfg.temperature
+    };
+    rung_temperature(cfg, ratio, held, dos, e)
+}
+
+/// Deposit height on a rung at `ratio` of a ladder of `n_rep`.
+///
+/// Under [`Config::bias_by_rung`] it follows the rung's temperature, so a
+/// deposit weighs the same against the temperature each rung hops at and the
+/// hottest carries the configured height.
+fn rung_height(cfg: &Config, n_rep: usize, ratio: f64) -> f64 {
+    if cfg.bias_by_rung && n_rep > 1 {
+        cfg.bias_height * ratio / cfg.ladder_top
+    } else {
+        cfg.bias_height
+    }
+}
+
+/// A rung waiting for its turn: the state it holds, and what the driver knows
+/// about that state.
+///
+/// Everything past the state describes the state rather than the rung, so a
+/// swap moves it with the state and a switch restores it with the state. Left
+/// behind, it would attribute the next hop to whatever the previous rung held.
+struct Parked {
+    energy: f64,
+    state: Array1<f64>,
+    /// Basin of the state in the shared identity map, once looked up.
+    basin: Option<usize>,
+    /// Fresh validation gradient retained for the state, when any.
+    gradient: Option<Array1<f64>>,
+    /// The surrogate's value at the state, under delayed acceptance.
+    surrogate: Option<f64>,
+    /// Screen state of the trial that entered the state's basin.
+    entry: Option<Array1<f64>>,
+}
+
+/// Log acceptance of rungs `k` and `j` exchanging the states they hold.
+///
+/// Rung `k` hops on `exp(-(E + V_k + S) / T_k)`, with `V_k` its own bias and
+/// `S` the biases every rung shares. `own_k` is `E + V_k` at the state rung
+/// `k` holds and at the one rung `j` holds, `own_j` is `E + V_j` at the state
+/// rung `j` holds and at rung `k`'s, and `shared` is `S` at rung `k`'s state
+/// and at rung `j`'s. `S` is one function on every rung, so it enters only
+/// through the difference of the inverse temperatures and drops out of a flat
+/// ladder.
+fn swap_log_acceptance(
+    own_k: [f64; 2],
+    own_j: [f64; 2],
+    shared: [f64; 2],
+    t_k: f64,
+    t_j: f64,
+) -> f64 {
+    (own_k[0] - own_k[1]) / t_k
+        + (own_j[0] - own_j[1]) / t_j
+        + (shared[0] - shared[1]) * (1.0 / t_k - 1.0 / t_j)
+}
+
+/// What a rung's acceptance can read at one state besides the rung's own bias.
+#[derive(Clone, Copy, Debug)]
+struct HopTerms {
+    energy: f64,
+    funnel: f64,
+    pile: f64,
+    energy_bias: f64,
+}
+
+/// What every rung's acceptance weighs a state by, and so what a swap between
+/// two of them has to exchange.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum RungWeight {
+    /// `exp(-(E + V_k + F + P + B) / T_k)`, with `V_k` the rung's own bias,
+    /// `F` the funnel bias, `P` the packing pile and `B` the energy bias: the
+    /// Metropolis rule. Minima hopping's threshold has no weight of its own,
+    /// and its ladder is swapped by this one.
+    Boltzmann,
+    /// `exp(-(E + V_k + F + P) / T_k)`: the flat-histogram rule's first sweep,
+    /// before its cost exists, which does not read the energy bias.
+    FirstSweep,
+    /// `exp(-c(E) - (V_k + F) / T_k)`, with `c` the flat-histogram cost, one
+    /// function of the energy that every rung reads and none divides by its
+    /// temperature.
+    Flat,
+}
+
+impl RungWeight {
+    /// The weight the acceptance test applies, given whether the
+    /// flat-histogram cost exists yet.
+    fn of(cfg: &Config, flat_cost: bool) -> Self {
+        if !cfg.flat_histogram || cfg.minima_hopping {
+            Self::Boltzmann
+        } else if flat_cost {
+            Self::Flat
+        } else {
+            Self::FirstSweep
+        }
+    }
+}
+
+/// Log acceptance of rungs `k` and `j` exchanging the states they hold, for
+/// rungs that weigh a state by `weight`.
+///
+/// `at_k` is what the weight can read at the state rung `k` holds and `at_j`
+/// at the one rung `j` holds; `own_k` is `V_k` at those two states and `own_j`
+/// is `V_j` at rung `j`'s state and at rung `k`'s. The flat cost is the same
+/// on both rungs at either state, so it cancels from the factor and takes the
+/// energy with it: under that weight a swap exchanges the biases alone.
+fn exchange_log_acceptance(
+    weight: RungWeight,
+    at_k: HopTerms,
+    at_j: HopTerms,
+    own_k: [f64; 2],
+    own_j: [f64; 2],
+    t_k: f64,
+    t_j: f64,
+) -> f64 {
+    let energy = |at: HopTerms| match weight {
+        RungWeight::Flat => 0.0,
+        RungWeight::Boltzmann | RungWeight::FirstSweep => at.energy,
+    };
+    let shared = |at: HopTerms| match weight {
+        RungWeight::Boltzmann => at.funnel + at.pile + at.energy_bias,
+        RungWeight::FirstSweep => at.funnel + at.pile,
+        RungWeight::Flat => at.funnel,
+    };
+    swap_log_acceptance(
+        [energy(at_k) + own_k[0], energy(at_j) + own_k[1]],
+        [energy(at_j) + own_j[0], energy(at_k) + own_j[1]],
+        [shared(at_k), shared(at_j)],
+        t_k,
+        t_j,
+    )
+}
+
 fn run_full<'g, R, H>(
     cfg: &Config,
     start: ArrayView1<f64>,
@@ -1298,13 +1523,13 @@ where
     // well-tempered bias rebuilt every fifty hops has nothing to accumulate:
     // measured that way an LJ38 run registered 18 basins instead of about 200.
     let n_rep = cfg.replicas.max(1);
-    let rung_temp = |k: usize| -> f64 {
-        if n_rep == 1 {
-            cfg.temperature
-        } else {
-            cfg.temperature * cfg.ladder_top.powf(k as f64 / (n_rep - 1) as f64)
-        }
-    };
+    let ratios = rung_ratios(n_rep, cfg.ladder_top);
+    assert!(
+        !(cfg.delayed_acceptance && n_rep > 1),
+        "delayed acceptance needs a single chain: a hop its surrogate decides \
+         weighs the bare energy and one it abstains on weighs the biases, so \
+         no swap between rungs can be balanced"
+    );
     // The first quench supplies a stable canonical reference before the bias
     // is built. Reporting it as a minimum additionally requires the same
     // geometry and gradient contract as every subsequent quench.
@@ -1325,26 +1550,20 @@ where
     }
     let mut current_validation_gradient = initial_validation_gradient;
     let canonical_reference = x.clone();
-    let mut biases: Vec<BasinBias<ClusterFingerprint>> = (0..n_rep)
-        .map(|k| {
-            // The coldest rung keeps a token bias so it still recognises
-            // revisits; the hottest carries the configured height.
-            let h = if cfg.bias_by_rung && n_rep > 1 {
-                cfg.bias_height * (rung_temp(k) / cfg.temperature) / cfg.ladder_top
-            } else {
-                cfg.bias_height
-            };
+    let mut biases: Vec<BasinBias<ClusterFingerprint>> = ratios
+        .iter()
+        .map(|&ratio| {
             BasinBias::new(
                 ClusterFingerprint::of_config(cfg, &canonical_reference),
                 cfg.merge_radius,
-                h,
+                rung_height(cfg, n_rep, ratio),
                 cfg.bias_gamma,
             )
         })
         .collect();
     // Geometric ladder, so swap acceptance is spaced evenly rather than
     // bunched at one end.
-    let mut temps: Vec<f64> = (0..n_rep).map(rung_temp).collect();
+    let mut temps: Vec<f64> = ratios.iter().map(|r| cfg.temperature * r).collect();
     // Under `LadderMode::NonReversible` the geometric schedule is a
     // placeholder that the pilot replaces with a ladder built from the
     // measured energy fluctuation, and the barrier estimator moves afterwards.
@@ -1812,6 +2031,9 @@ where
     let mut path_improvements = 0usize;
     let mut path_gain = 0.0_f64;
 
+    // Every rung's start is held to the first one's contract before it is
+    // recorded, and keeps its validation gradient for the first step the rung
+    // takes from it.
     for _ in 1..n_rep {
         let s0 = random_cluster_in_radius(n, cfg.start_radius(), cfg.min_separation, rng);
         let (e0, x0) = relax(ledger, s0.view(), cfg.relax_steps);
@@ -2191,7 +2413,13 @@ where
                 } else {
                     relax(ledger, state.view(), cfg.relax_steps)
                 };
-                let (mut candidate_energy, mut candidate) = quenched;
+                let (mut candidate_energy, mut candidate) = if leave_action {
+                    crate::known_basin::with_disarmed(|| {
+                        relax(ledger, quenched.1.view(), cfg.relax_steps)
+                    })
+                } else {
+                    quenched
+                };
                 let left_packing = |trial: &Array1<f64>| {
                     from_state
                         .as_slice()
@@ -2520,31 +2748,27 @@ where
         }
         // Gap to the incumbent, which is what the law scales the window by.
         let gap = (e - ledger.best).abs().max(1e-12);
-        let mut temperature = if cfg.budget_window {
+        let held = if cfg.budget_window {
             law.temperature(gap, ledger.remaining())
         } else {
             cfg.temperature
         };
-        // The rung's temperature is the rung's and has to reach the
-        // acceptance rule, or the ladder is a ladder in name only. Under the
-        // budget-window law the rung scales the law's temperature.
-        if n_rep > 1 && cfg.ladder_mode.tempers() {
-            temperature *= temps[rep] / cfg.temperature.max(1e-12);
-        }
-        // The entropy's slope where the chain stands, clamped to a band around
-        // the configured value so a slope estimated from few counts cannot
-        // freeze the chain or boil it. The band is wide enough that the
-        // adaptation has somewhere to go and narrow enough that a bad estimate
-        // is survivable.
-        if cfg.statistical_temperature
-            && let Some(d) = dos.as_ref()
-            && d.refreshes > 0
-        {
-            let (t, _) = d.temperature(e);
-            if t.is_finite() && t > 0.0 {
-                temperature = t.clamp(0.2 * cfg.temperature, 5.0 * cfg.temperature);
-            }
-        }
+        let single = single_chain_temperature(cfg, held, dos.as_ref(), e);
+        let scale = if n_rep > 1 && cfg.ladder_mode.tempers() {
+            temps[rep] / cfg.temperature.max(1e-12)
+        } else {
+            ratios[rep]
+        };
+        let temperature = single * scale;
+        // The coldest rung's temperature from the state it holds, which the
+        // energy bias is built and filled at. Read here, where that rung's own
+        // hop reads its temperature, so the reading is the same whichever rung
+        // is hopping.
+        let bias_temperature = if rep == 0 || !cfg.energy_bias || chains.is_empty() {
+            single
+        } else {
+            standing_temperature(cfg, &law, ledger, ratios[0], dos.as_ref(), chains[0].energy)
+        };
 
         if cfg.anneal_diversity {
             let progress = 1.0 - (ledger.remaining() as f64 / ledger.budget() as f64);
@@ -3602,12 +3826,17 @@ where
                 tabu_hits += 1;
             }
         }
+        // The energy bias is one function on every rung, so its factor and its
+        // deposits read one temperature whichever rung fills the sample or
+        // deposits: the one the coldest rung hops at from the state it holds,
+        // at which (gamma - 1) T is the sample's spread. Each rung reads the
+        // bias over its own temperature.
         if cfg.energy_bias {
             let occupied = if accept { e_new } else { e };
             if occupied.is_finite() {
                 match ebias.as_mut() {
                     Some(b) => {
-                        b.deposit(occupied, temperature);
+                        b.deposit(occupied, bias_temperature);
                         if std::env::var("EBIAS_TRACE").is_ok() && b.deposits % 200 == 0 {
                             eprintln!("ebias deposits {} peak {:.4}", b.deposits, b.peak());
                         }
@@ -3617,7 +3846,7 @@ where
                         if flat_seen.len() >= flat_sweep {
                             ebias = crate::dos::EnergyBias::from_sample(
                                 &flat_seen,
-                                temperature,
+                                bias_temperature,
                                 crate::dos::BINS,
                             );
                             flat_seen.clear();
@@ -3626,7 +3855,17 @@ where
                 }
             }
         }
-        if cfg.flat_histogram || cfg.statistical_temperature {
+        // Under the statistical temperature only the ratio-one rungs record. A
+        // rung walking at r times the entropy's slope stands with weight
+        // exp(-S/r), which is not the occupancy the estimator fits, so its
+        // counts bias the estimate. Measured on a two-rung LJ13 ladder ten
+        // times hotter at the top, they heated every rung: the hot rung's
+        // energies widened the window the first sweep sets, to bins about twice
+        // as wide, and the fitted entropy came out flatter where the coldest
+        // rung stands, its estimate 0.27 against 0.11 after one refresh.
+        if (cfg.flat_histogram || cfg.statistical_temperature)
+            && (ratios[rep] == 1.0 || !cfg.statistical_temperature)
+        {
             // The histogram is over where the chain *stands*, so a rejected
             // trial records the state it stayed in. Recording the proposal
             // instead would measure the move library rather than the
@@ -3889,7 +4128,13 @@ where
             // the raw energy difference. The bias is part of the barrier the
             // chain faces, and estimating the barrier without it measures a
             // landscape the chain is not walking on.
-            law.observe_rejection(delta);
+            //
+            // Divided by the rung's ratio, because the law sets the coldest
+            // rung's temperature: a rise declined at `r T` weighs what one `r`
+            // times smaller does at `T`, so the escape floor asks each rung to
+            // clear, at its own temperature, what it is failing to cross. The
+            // larger rises a hot rung declines would otherwise heat every rung.
+            law.observe_rejection(delta / ratios[rep]);
         }
         bias.deposit(bias.cv(x.view()).view(), temperature);
         // Visits other chains made to the minimum this quench reached, paid
@@ -5031,6 +5276,7 @@ where
             }
             r
         }),
+        energy_bias: ebias,
     }
 }
 
@@ -6421,6 +6667,215 @@ mod tests {
             optimize(&cfg, &mut ledger, &mut relax, seed).best
         };
         assert_eq!(run_once(7), run_once(7), "same seed must give same result");
+    }
+
+    #[test]
+    fn rung_ratios_run_geometrically_from_one_to_the_top() {
+        assert_eq!(rung_ratios(1, 4.0), vec![1.0]);
+        assert_eq!(rung_ratios(0, 4.0), vec![1.0]);
+        let ratios = rung_ratios(4, 4.0);
+        assert_eq!(ratios.len(), 4);
+        assert_eq!(ratios[0], 1.0);
+        assert_eq!(ratios[3], 4.0);
+        for pair in ratios.windows(2) {
+            assert!((pair[1] / pair[0] - 4.0_f64.cbrt()).abs() < 1e-12);
+        }
+    }
+
+    /// Whatever a single chain would hop at, the coldest rung hops at it and
+    /// the others at their ratio times it. The statistical estimate is clamped
+    /// to its band before the ratio, so the band moves up the ladder with the
+    /// rung rather than cutting the hot end off.
+    #[test]
+    fn each_rung_hops_at_its_ratio_times_the_single_chain_temperature() {
+        let mut cfg = Config::for_cluster(13);
+        let ratios = rung_ratios(4, 4.0);
+        for held in [cfg.temperature, 0.037] {
+            for &r in &ratios {
+                assert_eq!(rung_temperature(&cfg, r, held, None, -40.0), held * r);
+            }
+        }
+
+        // An entropy rising half a nat per unit energy, so the estimate is
+        // finite and positive.
+        let mut dos = crate::dos::DensityOfStates::new(-45.0, -30.0, 30);
+        for k in 0..30 {
+            let visits = (2000.0 * (0.5 * (dos.centre(k) + 30.0)).exp()).round() as usize;
+            for _ in 0..visits.max(1) {
+                dos.observe(dos.centre(k));
+            }
+        }
+        let e = -36.0;
+        cfg.statistical_temperature = true;
+        assert_eq!(
+            rung_temperature(&cfg, 2.0, 0.037, Some(&dos), e),
+            0.037 * 2.0
+        );
+        assert!(dos.refresh());
+        let (estimate, _) = dos.temperature(e);
+        assert!(
+            estimate.is_finite() && estimate > 0.0,
+            "estimate {estimate}"
+        );
+
+        for (temperature, single) in [
+            (estimate, estimate),
+            (estimate / 50.0, 5.0 * estimate / 50.0),
+            (estimate * 50.0, 0.2 * estimate * 50.0),
+        ] {
+            cfg.temperature = temperature;
+            for &r in &ratios {
+                let t = rung_temperature(&cfg, r, cfg.temperature, Some(&dos), e);
+                assert!(
+                    (t - single * r).abs() <= 1e-12 * single * r,
+                    "rung at {r} hopped at {t}, wanted {}",
+                    single * r
+                );
+            }
+        }
+        cfg.statistical_temperature = false;
+        assert_eq!(
+            rung_temperature(&cfg, 2.0, 0.037, Some(&dos), e),
+            0.037 * 2.0
+        );
+    }
+
+    /// Scaled by rung, a deposit weighs the same against the temperature each
+    /// rung hops at, and the hottest carries the configured height.
+    #[test]
+    fn rung_heights_follow_the_rung_temperatures() {
+        let mut cfg = Config::for_cluster(13);
+        let ratios = rung_ratios(4, cfg.ladder_top);
+        assert!(
+            ratios
+                .iter()
+                .all(|&r| rung_height(&cfg, 4, r) == cfg.bias_height)
+        );
+        cfg.bias_by_rung = true;
+        assert_eq!(rung_height(&cfg, 1, 1.0), cfg.bias_height);
+        let weight = |r: f64| {
+            rung_height(&cfg, 4, r) / rung_temperature(&cfg, r, cfg.temperature, None, 0.0)
+        };
+        for &r in &ratios {
+            assert!((weight(r) / weight(1.0) - 1.0).abs() < 1e-12);
+        }
+        assert!((rung_height(&cfg, 4, ratios[3]) - cfg.bias_height).abs() < 1e-12);
+        assert!(rung_height(&cfg, 4, ratios[0]) < cfg.bias_height);
+    }
+
+    /// With one bias on both rungs and nothing shared the swap is the
+    /// Metropolis exchange. What every rung shares drops out of a flat ladder
+    /// and otherwise weighs as if it were part of each rung's own bias.
+    #[test]
+    fn the_swap_weighs_shared_biases_by_the_temperature_difference() {
+        use crate::exchange::{Exchange, MetropolisExchange};
+        let (t_k, t_j) = (0.8, 2.0);
+        let (u_k, u_j) = (-40.0, -38.5);
+        let log_a = swap_log_acceptance([u_k, u_j], [u_j, u_k], [0.0, 0.0], t_k, t_j);
+        let metropolis: f64 = MetropolisExchange.swap_accept_prob(u_k, t_k, u_j, t_j);
+        assert!(metropolis < 1.0);
+        assert!((log_a.exp() - metropolis).abs() < 1e-12);
+
+        let own_k = [-40.0, -38.0];
+        let own_j = [-37.5, -39.0];
+        let shared = [3.0, -2.0];
+        assert_eq!(
+            swap_log_acceptance(own_k, own_j, shared, 1.3, 1.3),
+            swap_log_acceptance(own_k, own_j, [0.0, 0.0], 1.3, 1.3)
+        );
+        let folded = swap_log_acceptance(
+            [own_k[0] + shared[0], own_k[1] + shared[1]],
+            [own_j[0] + shared[1], own_j[1] + shared[0]],
+            [0.0, 0.0],
+            t_k,
+            t_j,
+        );
+        let split = swap_log_acceptance(own_k, own_j, shared, t_k, t_j);
+        assert!((folded - split).abs() < 1e-12 * folded.abs().max(1.0));
+        assert!(
+            (split - swap_log_acceptance(own_k, own_j, [0.0, 0.0], t_k, t_j)).abs() > 1.0,
+            "the shared terms should matter between two temperatures"
+        );
+    }
+
+    /// The swap is the ratio of the weights the rungs' acceptance applies, at
+    /// the states exchanged and at the states held. Under the flat-histogram
+    /// cost the energies leave it, so states whose biases agree swap freely
+    /// between two temperatures however far apart their energies are.
+    #[test]
+    fn the_swap_exchanges_the_weight_each_rung_hops_by() {
+        let mut cfg = Config::recommended(13);
+        assert_eq!(RungWeight::of(&cfg, true), RungWeight::Boltzmann);
+        cfg.flat_histogram = true;
+        assert_eq!(RungWeight::of(&cfg, false), RungWeight::FirstSweep);
+        assert_eq!(RungWeight::of(&cfg, true), RungWeight::Flat);
+        cfg.minima_hopping = true;
+        assert_eq!(RungWeight::of(&cfg, true), RungWeight::Boltzmann);
+
+        let mut dos = crate::dos::DensityOfStates::new(-45.0, -30.0, 30);
+        for k in 0..30 {
+            let visits = (2000.0 * (0.5 * (dos.centre(k) + 30.0)).exp()).round() as usize;
+            for _ in 0..visits.max(1) {
+                dos.observe(dos.centre(k));
+            }
+        }
+        assert!(dos.refresh());
+        let flat = crate::dos::CutWeight {
+            weight: dos.mean_weight(),
+            cut: -38.0,
+            width: 0.7,
+        };
+        let mut rng = StdRng::seed_from_u64(11);
+        let draw = |rng: &mut StdRng| HopTerms {
+            energy: rng.random_range(-44.0..-31.0),
+            funnel: rng.random_range(0.0..2.0),
+            pile: rng.random_range(0.0..3.0),
+            energy_bias: rng.random_range(0.0..1.5),
+        };
+        for _ in 0..200 {
+            let (at_k, at_j) = (draw(&mut rng), draw(&mut rng));
+            let own_k = [rng.random_range(0.0..2.0), rng.random_range(0.0..2.0)];
+            let own_j = [rng.random_range(0.0..2.0), rng.random_range(0.0..2.0)];
+            let (t_k, t_j) = (rng.random_range(0.1..1.0), rng.random_range(1.0..4.0));
+            for weight in [
+                RungWeight::Boltzmann,
+                RungWeight::FirstSweep,
+                RungWeight::Flat,
+            ] {
+                // Minus the log of the weight a rung at temperature `t` with
+                // its own bias `v` applies at a state.
+                let cost = |at: HopTerms, v: f64, t: f64| match weight {
+                    RungWeight::Boltzmann => {
+                        (at.energy + v + at.funnel + at.pile + at.energy_bias) / t
+                    }
+                    RungWeight::FirstSweep => (at.energy + v + at.funnel + at.pile) / t,
+                    RungWeight::Flat => flat.cost(at.energy) + (v + at.funnel) / t,
+                };
+                let expected = cost(at_k, own_k[0], t_k) + cost(at_j, own_j[0], t_j)
+                    - cost(at_j, own_k[1], t_k)
+                    - cost(at_k, own_j[1], t_j);
+                let log_a = exchange_log_acceptance(weight, at_k, at_j, own_k, own_j, t_k, t_j);
+                assert!(
+                    (log_a - expected).abs() <= 1e-9 * expected.abs().max(1.0),
+                    "{weight:?}: {log_a} against {expected}"
+                );
+            }
+        }
+
+        let low = HopTerms {
+            energy: -44.0,
+            funnel: 0.5,
+            pile: 1.0,
+            energy_bias: 0.2,
+        };
+        let high = HopTerms {
+            energy: -32.0,
+            ..low
+        };
+        let swap =
+            |weight| exchange_log_acceptance(weight, low, high, [0.3; 2], [0.6; 2], 0.2, 2.0);
+        assert_eq!(swap(RungWeight::Flat), 0.0);
+        assert!(swap(RungWeight::Boltzmann) < -40.0);
     }
 
     #[test]

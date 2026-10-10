@@ -84,15 +84,31 @@ impl BudgetWindowTemperature {
     /// Temperature for a chain `gap` above its incumbent with `remaining` left.
     pub fn temperature(&mut self, gap: f64, remaining: usize) -> f64 {
         self.calls += 1;
+        let (t, forced) = self.window(gap, remaining);
+        if forced {
+            self.escape_forced += 1;
+        }
+        t
+    }
+
+    /// As [`Self::temperature`], without counting the evaluation.
+    ///
+    /// For reading the temperature a chain would be given without it being a
+    /// step that chain took: a replica swap reads it for a rung that is not
+    /// hopping, and `calls` and `escape_forced` stay counts of steps.
+    pub fn peek(&self, gap: f64, remaining: usize) -> f64 {
+        self.window(gap, remaining).0
+    }
+
+    fn window(&self, gap: f64, remaining: usize) -> (f64, bool) {
         let g = gap.max(1e-12);
         let hi = 2.0 * g / self.dim;
         let lo = self.barrier / ((remaining.max(1) as f64) + E).ln();
         let design = self.theta * g / self.dim;
         if lo < hi {
-            design.clamp(lo, hi)
+            (design.clamp(lo, hi), false)
         } else {
-            self.escape_forced += 1;
-            lo.max(self.floor_temp)
+            (lo.max(self.floor_temp), true)
         }
     }
 }
@@ -425,11 +441,7 @@ pub fn beta_draw<R: Rng + ?Sized>(a: f64, b: f64, rng: &mut R) -> f64 {
 fn sample_beta<R: Rng + ?Sized>(a: f64, b: f64, rng: &mut R) -> f64 {
     let x = sample_gamma(a, rng);
     let y = sample_gamma(b, rng);
-    if x + y <= 0.0 {
-        0.5
-    } else {
-        x / (x + y)
-    }
+    if x + y <= 0.0 { 0.5 } else { x / (x + y) }
 }
 
 /// Marsaglia and Tsang's Gamma sampler, with the shape boost below one.
@@ -488,7 +500,7 @@ mod discovery_accounting_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rand::{rngs::StdRng, SeedableRng};
+    use rand::{SeedableRng, rngs::StdRng};
 
     #[test]
     fn temperature_respects_the_descent_boundary() {
@@ -522,6 +534,22 @@ mod tests {
         law.observe_rejection(0.0);
         law.observe_rejection(f64::NAN);
         assert_eq!(law.barrier(), 0.0);
+    }
+
+    #[test]
+    fn peeking_gives_the_temperature_without_counting_a_step() {
+        let mut law = BudgetWindowTemperature::new(30, 0.5);
+        for _ in 0..500 {
+            law.observe_rejection(5.0);
+        }
+        for (gap, remaining) in [(300.0, 1000), (0.01, 1000), (0.5, 10)] {
+            let (calls, forced) = (law.calls, law.escape_forced);
+            let peeked = law.peek(gap, remaining);
+            assert_eq!((law.calls, law.escape_forced), (calls, forced));
+            assert_eq!(peeked.to_bits(), law.temperature(gap, remaining).to_bits());
+            assert_eq!(law.calls, calls + 1);
+        }
+        assert!(law.escape_forced > 0, "no case reached the empty window");
     }
 
     #[test]
@@ -854,8 +882,8 @@ fn student_t<R: Rng + ?Sized>(nu: f64, rng: &mut R) -> f64 {
 #[cfg(test)]
 mod depth_allocator_tests {
     use super::*;
-    use rand::rngs::StdRng;
     use rand::SeedableRng;
+    use rand::rngs::StdRng;
 
     #[test]
     fn sufficient_statistics_reconstruct_every_posterior_parameter() {
