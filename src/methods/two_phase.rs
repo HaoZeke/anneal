@@ -350,7 +350,8 @@ pub fn penalty_axes(
                     axes[0] * d[0] * d[0] + axes[1] * d[1] * d[1] + axes[2] * d[2] * d[2] - d2;
                 if excess > 0.0 {
                     e += beta * excess * excess;
-                    let coef = 2.0 * beta * excess;
+                    // d(excess^2)/d x_k = 2 * excess * 2 * axes_k * d_k.
+                    let coef = 4.0 * beta * excess;
                     for k in 0..3 {
                         let force = coef * axes[k] * d[k];
                         g[3 * i + k] += force;
