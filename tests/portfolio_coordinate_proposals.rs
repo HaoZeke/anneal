@@ -94,7 +94,7 @@ fn replica_origin(replica: usize) -> Array1<f64> {
     }
     let replica_seed = SEED ^ (replica as u64).wrapping_mul(0x9E37_79B9);
     let mut rng = StdRng::seed_from_u64(replica_seed);
-    Array1::from_shape_fn(DIM, |axis| -2.0 + 4.0 * rng.random::<f64>())
+    Array1::from_shape_fn(DIM, |_| -2.0 + 4.0 * rng.random::<f64>())
 }
 
 fn gsa_seed(replica: usize) -> u64 {
