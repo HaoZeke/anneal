@@ -103,7 +103,9 @@ took once its slices slow leaves it behind and costs ``ackS30@5000``. With
 phases that keep the turn while they still find lower basins, the fifth-slice
 lend also trails the form the two were added to on ``ackS30@20000``, 8.6e-7
 against 6.3e-7 (12/1/27, p 0.048), and on ``ackley10@5000`` without ``x0``,
-4.1e-11 against 3.2e-11 (6/23/11), with its -1e4 copy and two controls.
+4.1e-11 against 3.2e-11 (6/23/11); from ``x0`` that row is level with that
+form (8/28/4), but its -1e4 copy and two controls, which start from ``x0``,
+trail it.
 Rotated ellipsoids short of the opening budget trail an earlier form of the
 loop: ``ellR50@1000`` 1.38e5 against 4.79e4, ``ellR50@5000`` 37.7 against
 9.20, ``ellR100@20000`` 2.48 against 0.633 and ``ellR30@1000`` 5589 against

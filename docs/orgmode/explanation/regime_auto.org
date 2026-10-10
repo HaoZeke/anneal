@@ -310,10 +310,12 @@ rule back costs the rows named with it:
   basins, the fifth-slice lend also trails the form the two were added
   to on =ackS30@20000=, 8.6e-7 against 6.3e-7 (12/1/27, =p= 0.048;
   3.9e-7 with lending from any slow slice), and on =ackley10@5000=
-  without =x0=, 4.1e-11 against 3.2e-11 (6/23/11), with its =-1e4=
-  copy (1.8e-10 against 2.0e-10, 6/26/8) and its =+1e4= and =-1e4=
-  controls (2.1e-11 against 3.2e-11, 5/27/8 each): longer =gsa= phases
-  leave the cone at Ackley's minimum unrefined on a few seeds.
+  without =x0=, 4.1e-11 against 3.2e-11 (6/23/11). From =x0= that row
+  is level with that form (8/28/4), but its =-1e4= copy (1.8e-10
+  against 2.0e-10, 6/26/8) and its =+1e4= and =-1e4= controls (2.1e-11
+  against 3.2e-11, 5/27/8 each), which start from =x0= as every copy
+  does, trail it through the same two rules: longer =gsa= phases leave
+  the cone at Ackley's minimum unrefined on a few seeds.
 - Rotated ellipsoids short of the opening budget trail an earlier form
   of this loop by three to four times, =ellR50@1000= 1.38e5 against
   4.79e4, =ellR50@5000= 37.7 against 9.20 and =ellR100@20000= 2.48
