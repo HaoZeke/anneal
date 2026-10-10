@@ -427,10 +427,13 @@ const QN_AFFORDABLE_GRADIENTS: usize = 5;
 /// quenched visits settle separable multimodal objectives one coordinate
 /// at a time, only part of one.
 const GSA_LAST_SLICES: usize = 3;
-/// Factor by which a values-only phase's gain per evaluation must fall
-/// below its best slice's before the phase lends the other phase's arm a
-/// slice.
+/// Factor by which a values-only GSA phase's gain per evaluation must fall
+/// below its best slice's before the phase lends CMA-ES a slice.
 const PHASE_SLOWDOWN: f64 = 8.0;
+/// Most values-only phases before the bandit rounds. GSA's phase and
+/// CMA-ES's come first; the two then alternate while a phase hands the
+/// other the turn or ends one that CMA-ES took from GSA.
+const PHASE_TURNS: usize = 8;
 /// Opening slices whose gains set the bar for the next: the values-only
 /// opening ends at the first slice that gains no more than
 /// [`IMPROVEMENT_RTOL`] times the largest of the last this many gains from
@@ -1544,6 +1547,18 @@ impl DescentPace {
         }
         false
     }
+}
+
+/// How a values-only phase begins.
+#[derive(Clone, Copy, Debug)]
+enum PhaseTurn {
+    /// On its own.
+    Fresh,
+    /// CMA-ES takes the turn from GSA with a lent slice that gained `gain`,
+    /// faster per evaluation than the `pace` it had to beat.
+    Taken { gain: f64, pace: f64 },
+    /// GSA resumes after CMA-ES took the turn from it.
+    Resumed,
 }
 
 fn scheduler_success_threshold(arm: ArmKind, ledger: &BudgetLedger) -> f64 {
@@ -3395,17 +3410,26 @@ fn values_only_slice(dim: usize, budget: usize) -> usize {
 /// GSA's first slice falls short, the descent keeps the turn until the run
 /// has used twice the evaluations it had, and the hand-over repeats until
 /// the descent stops paying or only the reserve is left. From there GSA
-/// and then CMA-ES each keep the turn while they
-/// pay: a phase ends once it has gone [`ROUNDS_PER_ARM`] slices without
-/// lowering the incumbent, or as long as its last gain took if that is
-/// longer. GSA's phase also ends once its gain per evaluation since it
-/// began is no more than that of the descent's last timed slice (at its
-/// first slice if neither gained anything), and a slice
-/// that gains less than `1 / PHASE_SLOWDOWN` of the phase's best per
-/// evaluation lends the other phase's arm a slice, which ends the phase if
-/// it gains faster ([`PHASE_SLOWDOWN`]). A phase leaves the closing
-/// reserve and one slice for each other arm not yet played (short of the
-/// opening budget, one for DE only while it has not played). Bandit rounds
+/// and then CMA-ES each keep the turn while they pay: a phase ends once it
+/// has gone [`ROUNDS_PER_ARM`] slices without a success that gains more
+/// than [`IMPROVEMENT_RTOL`] times the phase's largest gain, or as long as
+/// the last such success took if that is longer. GSA's first phase also
+/// ends once its gain per evaluation since it began is no more than that
+/// of the descent's last timed slice (at its first slice if neither gained
+/// anything). A GSA slice that gains less than `1 / PHASE_SLOWDOWN` of the
+/// phase's best per evaluation lends CMA-ES a slice, and CMA-ES takes the
+/// turn if that slice gains faster than both the GSA slice and
+/// `1 / PHASE_SLOWDOWN` of the phase's gain per evaluation so far
+/// ([`PHASE_SLOWDOWN`]); GSA lends no other slice until the run has used
+/// twice the evaluations it had, and none after a lent slice that gained
+/// nothing. A phase CMA-ES took likewise lends GSA a slice when its last
+/// two slices gain less per evaluation than its lent slice had to beat,
+/// and hands the turn back if GSA's slice gains faster than those two did.
+/// The two alternate while a phase hands the other the turn, GSA resuming
+/// after a phase CMA-ES took from it, up to [`PHASE_TURNS`] phases. A
+/// phase leaves the closing reserve and one slice for each other arm not
+/// yet played (short of the opening budget, one for DE only while it has
+/// not played). Bandit rounds
 /// over [`VALUES_ONLY_ARMS`] follow until only the closing reserve remains.
 /// As in the main bandit, each arm not yet played takes one slice first, in
 /// list order, while a slice beyond the reserve is left. A descent's turn
@@ -3713,32 +3737,70 @@ where
             }
         }
     }
-    // A phase keeps the turn while its arm pays: it ends once the arm has
-    // gone `ROUNDS_PER_ARM` slices without lowering the incumbent, or as long
-    // as its last gain took if that is longer, or at `reserve`. GSA's phase
-    // also ends once its gain per evaluation since the phase began is no
-    // more than the descent's last (`displaced`), which is nothing when the
-    // descent's last slice converged or kicked, so a phase that has gained
-    // nothing then ends at its first slice. A slice that gains less than
-    // `1 / PHASE_SLOWDOWN` of the phase's best per evaluation lends a slice
-    // to the other phase's arm: the phase ends if the lent slice gains
-    // faster, and lends no other until the run has used twice the
-    // evaluations it had.
+    // After an opening a phase that keeps paying must still leave the
+    // warm-up round a slice for every other arm not yet played, the next
+    // phase's included. Short of the opening budget, slices held for the
+    // surrogate and the restart arm cost the phases more than those arms
+    // return there, and DE keeps one until it has played.
+    let hold = |choice: usize, posteriors: &[ArmPosterior]| {
+        let unplayed = posteriors
+            .iter()
+            .enumerate()
+            .filter(|&(i, posterior)| i != choice && posterior.pulls == 0)
+            .count();
+        if opened {
+            polish + unplayed * slice
+        } else if posteriors[index(ArmKind::De)].pulls == 0 {
+            polish + slice
+        } else {
+            polish
+        }
+    };
+    // A phase keeps the turn while its arm pays. It ends at the reserve
+    // `hold` leaves, or once the arm has gone `ROUNDS_PER_ARM` slices
+    // without a success that gains more than `IMPROVEMENT_RTOL` times the
+    // phase's largest gain, or as long as the last such success took if
+    // that is longer. A GSA phase that begins on its own also ends once its
+    // gain per evaluation since it began is no more than the descent's last
+    // (`displaced`), which is nothing when the descent's last slice
+    // converged or kicked, so a phase that has gained nothing then ends at
+    // its first slice. A GSA slice that gains less than `1 / PHASE_SLOWDOWN`
+    // of the phase's best per evaluation lends CMA-ES a slice, and CMA-ES
+    // takes the turn if that slice gains faster than both the GSA slice and
+    // `1 / PHASE_SLOWDOWN` of the phase's gain per evaluation so far, so a
+    // lent slice that gains a little while GSA's records pause does not
+    // take it. GSA lends no other slice until the run has used
+    // twice the evaluations it had, and none after a lent slice that gained
+    // nothing. Once CMA-ES has taken the turn, its phase likewise lends GSA
+    // a slice when its last two slices gain less per evaluation than its
+    // lent slice had to beat, and hands the turn back if GSA's slice gains
+    // faster than those two did.
     let phase = |choice: usize,
-                 reserve: usize,
+                 turn: PhaseTurn,
                  states: &mut ArmStates,
                  rng: &mut StdRng,
                  posteriors: &mut [ArmPosterior],
                  round: &mut usize,
-                 winner: &mut Option<usize>| {
+                 winner: &mut Option<usize>|
+     -> Option<PhaseTurn> {
         let start = ledger.used_get();
         let mut last_gain = start;
         let gsa = arms[choice] == ArmKind::Gsa;
         let other = index(if gsa { ArmKind::Cma } else { ArmKind::Gsa });
+        let limit = matches!(turn, PhaseTurn::Fresh).then_some(displaced);
+        let (mut largest, pace) = match turn {
+            PhaseTurn::Taken { gain, pace } => (gain, Some(pace)),
+            _ => (0.0f64, None),
+        };
         let mut peak = 0.0f64;
         let mut lend_from = 0usize;
         let (mut phase_gain, mut phase_used) = (0.0f64, 0usize);
-        while ledger.remaining() >= reserve + 8 {
+        let mut previous = (0.0f64, 0usize);
+        loop {
+            let reserve = hold(choice, posteriors);
+            if ledger.remaining() < reserve + 8 {
+                break;
+            }
             let idle = ledger.used_get() - last_gain;
             if idle >= (ROUNDS_PER_ARM * slice).max(last_gain - start) {
                 break;
@@ -3748,76 +3810,103 @@ where
             let (from, spent) = (ledger.best_get(), ledger.used_get());
             let gained = play(choice, take, reserve, states, rng, posteriors, None);
             let (to, used) = (ledger.best_get(), ledger.used_get() - spent);
-            let rate = gain_rate(from, to, used);
+            let mut rate = gain_rate(from, to, used);
             peak = peak.max(rate);
+            let gain = if from.is_finite() && to.is_finite() {
+                (from - to).max(0.0)
+            } else {
+                0.0
+            };
             if gsa {
-                if from.is_finite() && to.is_finite() {
-                    phase_gain += (from - to).max(0.0);
-                }
+                phase_gain += gain;
                 phase_used += used;
                 let average = if phase_used > 0 {
                     phase_gain / phase_used as f64
                 } else {
                     0.0
                 };
-                if average <= displaced {
+                if limit.is_some_and(|limit| average <= limit) {
                     *winner = gained.then_some(choice);
                     break;
                 }
+            } else {
+                let (two, over) = (previous.0 + gain, previous.1 + used);
+                rate = if over > 0 { two / over as f64 } else { 0.0 };
+                previous = (gain, used);
             }
-            if gained {
+            largest = largest.max(gain);
+            if gained && gain > IMPROVEMENT_RTOL * largest {
                 last_gain = ledger.used_get();
             }
             *winner = gained.then_some(choice);
-            if rate < peak / PHASE_SLOWDOWN
-                && ledger.used_get() >= lend_from
-                && ledger.remaining() >= reserve + 8
-            {
+            let lend = if gsa {
+                rate < peak / PHASE_SLOWDOWN
+            } else {
+                pace.is_some_and(|pace| rate < pace)
+            };
+            if lend && ledger.used_get() >= lend_from && ledger.remaining() >= reserve + 8 {
+                let reference = if gsa && phase_used > 0 {
+                    rate.max(phase_gain / phase_used as f64 / PHASE_SLOWDOWN)
+                } else {
+                    rate
+                };
                 *round += 1;
                 let take = slice.min(ledger.remaining() - reserve);
                 let (from, spent) = (ledger.best_get(), ledger.used_get());
                 let won = play(other, take, reserve, states, rng, posteriors, None);
-                let lent = gain_rate(from, ledger.best_get(), ledger.used_get() - spent);
+                let to = ledger.best_get();
+                let lent = gain_rate(from, to, ledger.used_get() - spent);
                 *winner = won.then_some(other);
-                if lent > rate {
-                    break;
+                if lent > reference {
+                    if !gsa {
+                        return Some(PhaseTurn::Resumed);
+                    }
+                    let gain = if from.is_finite() && to.is_finite() {
+                        (from - to).max(0.0)
+                    } else {
+                        0.0
+                    };
+                    return Some(PhaseTurn::Taken {
+                        gain,
+                        pace: reference,
+                    });
                 }
-                lend_from = 2 * ledger.used_get();
+                lend_from = if gsa && lent == 0.0 {
+                    usize::MAX
+                } else {
+                    2 * ledger.used_get()
+                };
             }
         }
+        None
     };
     // GSA records and CMA-ES gains come in bursts (records as the anneal
     // cools, a run per covariance) that single slices of the rounds below
-    // would not see.
-    const PHASES: [ArmKind; 2] = [ArmKind::Gsa, ArmKind::Cma];
-    for arm in PHASES {
-        let choice = index(arm);
-        // After an opening a phase that keeps paying must still leave the
-        // warm-up round a slice for every other arm, the next phase's
-        // included. Short of the opening budget, slices held for the
-        // surrogate and the restart arm cost the phases more than those
-        // arms return there, and DE keeps one.
-        let unplayed = posteriors
-            .iter()
-            .enumerate()
-            .filter(|&(i, posterior)| i != choice && posterior.pulls == 0)
-            .count();
-        let reserve = if opened {
-            polish + unplayed * slice
-        } else if posteriors[index(ArmKind::De)].pulls == 0 {
-            polish + slice
+    // would not see. GSA's phase comes first and CMA-ES's second; the two
+    // then alternate while a phase hands the other the turn, and GSA
+    // resumes after a phase CMA-ES took from it, up to `PHASE_TURNS`.
+    let mut turn = PhaseTurn::Fresh;
+    for at in 0..PHASE_TURNS {
+        let arm = if at % 2 == 0 {
+            ArmKind::Gsa
         } else {
-            polish
+            ArmKind::Cma
         };
-        phase(
-            choice,
-            reserve,
+        let next = phase(
+            index(arm),
+            turn,
             states,
             &mut rng,
             &mut posteriors,
             &mut round,
             &mut winner,
         );
+        turn = match (next, turn) {
+            (Some(next), _) => next,
+            (None, PhaseTurn::Taken { .. }) => PhaseTurn::Resumed,
+            (None, _) if at == 0 => PhaseTurn::Fresh,
+            (None, _) => break,
+        };
     }
     // Explore and GSA skip slices shorter than eight evaluations; the polish
     // takes such a remainder.
@@ -6577,11 +6666,12 @@ mod tests {
 
     #[test]
     fn values_only_phases_lend_the_other_arm_a_slice_once_they_slow() {
-        // Far out on Ackley CMA-ES's phase gains less per evaluation as its
-        // runs converge. A slice under an eighth of the phase's best lends
-        // GSA one; GSA's does not gain faster, so CMA-ES keeps the turn and
-        // lends the next only once the run has used twice the evaluations
-        // it had after the last.
+        // Far out on Ackley CMA-ES takes the turn from GSA with a lent slice,
+        // and its phase gains less per evaluation as its runs converge. Once
+        // its last two slices gain less per evaluation than the lent slice
+        // had to beat it lends GSA one; GSA's does not gain faster, so
+        // CMA-ES keeps the turn and lends the next only once the run has
+        // used twice the evaluations it had after the last.
         use ArmKind::{Cma, Gsa};
         let (dim, budget) = (4usize, 2000usize);
         let obj = Traced::new(-32.768, 32.768, dim, ackley);
