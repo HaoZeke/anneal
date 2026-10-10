@@ -2427,17 +2427,7 @@ fn run_arm<O, G>(
     let drawn = rng.random::<u64>();
     // Quenched GSA is a function of the portfolio seed. The shared draw
     // is consumed so later arms keep the same sequence.
-    let seed = if matches!(arm, ArmKind::DmcPop)
-        && states.values_only
-        && let Some(stream) = states.values_stream
-    {
-        // Fourth draw of the portfolio seed: the population warmup.
-        let mut naming = StdRng::seed_from_u64(stream);
-        (1..=4)
-            .map(|index| naming.random::<u64>() ^ index)
-            .last()
-            .unwrap_or(stream)
-    } else if matches!(arm, ArmKind::Gsa)
+    let seed = if matches!(arm, ArmKind::Gsa)
         && states.values_only
         && states.gsa.is_none()
         && let Some(stream) = states.values_stream
@@ -3640,44 +3630,18 @@ where
         let take = slice.min(ledger.remaining() - polish);
         winner = play(choice, take, polish, states, &mut rng, &mut posteriors).then_some(choice);
     }
-    // One population slice on the width-selected allowance, before the
-    // closing descent spends what remains.
-    let mut dmc_pulls = 0usize;
-    if ledger.remaining() >= 49 {
-        let before = ledger.used_get();
-        ledger.cap_set((before + 49).min(budget));
-        run_arm::<O, G>(
-            ArmKind::DmcPop,
-            obj,
-            None,
-            ledger,
-            states,
-            &mut rng,
-            49,
-            budget,
-        );
-        ledger.cap_set(budget);
-        dmc_pulls = usize::from(ledger.used_get() > before);
-    }
     let qn = index(ArmKind::Qn);
     while ledger.remaining() > 0 {
         play(qn, slice, budget, states, &mut rng, &mut posteriors);
     }
-    let mut stats: Vec<_> = arms
-        .iter()
+    arms.iter()
         .zip(posteriors.iter())
         .map(|(arm, posterior)| ArmStat {
             name: arm.name(),
             pulls: posterior.pulls,
             successes: posterior.successes,
         })
-        .collect();
-    stats.push(ArmStat {
-        name: "dmc_pop",
-        pulls: dmc_pulls,
-        successes: 0,
-    });
-    stats
+        .collect()
 }
 
 fn arm_kind_from_name(name: &str) -> Option<ArmKind> {
