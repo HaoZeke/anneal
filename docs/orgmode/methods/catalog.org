@@ -1406,11 +1406,11 @@ budget rather than being hand-tuned.
 
 Values-only loop: under =PortfolioPolicy::Auto= a run with no gradient
 and no declared noise goes, before any regime routing, to
-=run_values_only_portfolio= (src/methods/portfolio.rs:3464), a bandit
-over =VALUES_ONLY_ARMS= (portfolio.rs:3368: =cma=, =qn=, =gsa=, =de=,
+=run_values_only_portfolio= (src/methods/portfolio.rs:3477), a bandit
+over =VALUES_ONLY_ARMS= (portfolio.rs:3381: =cma=, =qn=, =gsa=, =de=,
 =surrogate=, =explore=) in slices of
 =max(4(d+1), min(budget/48, sqrt(4(d+1) budget)))= evaluations
-(=values_only_slice=, portfolio.rs:3383). Without =x0= it starts from
+(=values_only_slice=, portfolio.rs:3396). Without =x0= it starts from
 the best of a seeded design of =d+1= points; when the budget affords
 five gradients per coordinate, an opening finite-difference descent
 runs while its slices succeed, gain more than =1e-4= times the largest
@@ -1525,7 +1525,7 @@ log-ratios of consecutive polish improvements); the endgame
 projected-gradient cycle helper (portfolio.rs:146) and its work-unit to
 =max_fevals= converter (portfolio.rs:134); a coordinate pattern-search
 fallback (portfolio.rs:182); the values-only =SuccessScale=
-(portfolio.rs:1431) and =DescentPace= (portfolio.rs:1507).
+(portfolio.rs:1439) and =DescentPace= (portfolio.rs:1515).
 
 Constants and defaults: =SLICE_GRAD_EQUIVALENTS = 4= (a slice must
 afford a few gradient-descent steps); =ROUNDS_PER_ARM = 8=;
@@ -1535,13 +1535,13 @@ tau=1e-3 to a 1e-9 win tolerance crosses six decimal orders)
 of remaining budget when no jittered restart has run yet, half of
 remaining otherwise, always capped at remaining (portfolio.rs:115).
 Values-only loop: =IMPROVEMENT_RTOL = 1e-4= (portfolio.rs:344);
-=QN_FTOL = 8 eps= (portfolio.rs:419); =QN_AFFORDABLE_GRADIENTS = 5=
-(portfolio.rs:422); =GSA_LAST_SLICES = 3= (portfolio.rs:429);
-=PHASE_SLOWDOWN = 8= (portfolio.rs:432); =PHASE_TURNS = 8=
-(portfolio.rs:436); =OPENING_GAINS = 3= (portfolio.rs:442);
-=OPENING_SPAN = 4= (portfolio.rs:450); closing descent of =10(d+1)=
-evaluations, at most 40% of the budget, skipped below =3(d+1)=
-(portfolio.rs:452-457).
+=QN_FTOL = 8 eps= (portfolio.rs:419); =QN_FATOL_RTOL = 1e-7=
+(portfolio.rs:427); =QN_AFFORDABLE_GRADIENTS = 5= (portfolio.rs:430);
+=GSA_LAST_SLICES = 3= (portfolio.rs:437); =PHASE_SLOWDOWN = 8=
+(portfolio.rs:440); =PHASE_TURNS = 8= (portfolio.rs:444);
+=OPENING_GAINS = 3= (portfolio.rs:450); =OPENING_SPAN = 4=
+(portfolio.rs:458); closing descent of =10(d+1)= evaluations, at most
+40% of the budget, skipped below =3(d+1)= (portfolio.rs:460-465).
 
 Feeds/consumes: consumes =crate::methods::regime= for arm priors and
 exploit probability, and the typed-algebra kernels
@@ -1979,7 +1979,7 @@ Key types and functions: =CmaEs= (src/methods/cma_es.rs:119);
 =covariance_learning_evaluations= (cma_es.rs:111, the horizon
 \(\lambda/(c_1 + c_\mu)\)); =Bipop= and =CmaRegime=
 (cma_es.rs:642/621); the portfolio's =CmaArmState= and =run_cma_arm=
-(src/methods/portfolio.rs:970/3218).
+(src/methods/portfolio.rs:978/3226).
 
 Constants and defaults: =default_lambda= \(4 + \lfloor 3 \ln n
 \rfloor\) (cma_es.rs:82). In the portfolio every run is centred on the
@@ -2047,18 +2047,21 @@ does not depend on the objective's scale. A descent ends on a slow
 iteration, a projected-gradient tolerance when one is set, or a failed
 line search.
 
-Key types and functions: =FdBfgs= (src/methods/fd_bfgs.rs:148);
+Key types and functions: =FdBfgs= (src/methods/fd_bfgs.rs:152);
 =FdBfgsOptions= (fd_bfgs.rs:76); the portfolio's =QnArmState= and
-=run_qn_arm= (src/methods/portfolio.rs:1059/3292).
+=run_qn_arm= (src/methods/portfolio.rs:1067/3300).
 
 Constants and defaults: =ARMIJO = 1e-4=, =MAX_LINE_TRIALS = 40=,
 =FIRST_STEP_FRACTION = 0.05=, =CENTRAL_INTERVAL_FRACTION = 0.1=,
 =INTERVAL_MOVE = 2=, =MAX_REDIFFERENCES = 2= (fd_bfgs.rs:50-72). The
 default options have =ftol = 1e-12=, three slow iterations of
 patience, the value floor =f64::MIN_POSITIVE= in the slow-iteration
-test and no gradient tolerance; the portfolio's values-only descents
-use =ftol = 8 eps= (=QN_FTOL=), so they stop on the resolution of their
-values.
+test, no absolute floor on it (=fatol = 0=) and no gradient tolerance;
+the portfolio's values-only descents use =ftol = 8 eps= (=QN_FTOL=)
+and, from each slice, =fatol= at =1e-7= of the success threshold
+(=QN_FATOL_RTOL=, set through =FdBfgs::set_fatol=), so an iteration is
+slow once it gains no more than the resolution of its value or that
+floor, whichever is larger.
 
 Feeds/consumes: the =qn= arm of the portfolio's values-only loop (its
 opening and closing descents, and descents kicked from the incumbent
