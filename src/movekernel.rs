@@ -17,6 +17,14 @@ pub trait MoveKernel<T: Float>: Send + Sync {
     /// Draws a proposal point from the kernel at temperature `t`.
     fn propose<R: Rng + ?Sized>(&self, i: ArrayView1<T>, t: T, rng: &mut R) -> Array1<T>;
 
+    /// For a kernel that proposes `i + d` with a step `d` drawn independently of
+    /// `i`, draws `d` for a point of `dim` coordinates exactly as `propose`
+    /// would, so that [`Reflected`] can mirror a sum `i + d` that overflows.
+    /// `None`, the default, for any other kernel.
+    fn displacement<R: Rng + ?Sized>(&self, _dim: usize, _t: T, _rng: &mut R) -> Option<Array1<T>> {
+        None
+    }
+
     /// Witnesses L2: returns `true` iff `supp(propose) subseteq n` over the
     /// implementor's declared domain. Sampled validation also exercises the
     /// proposal behavior. Default `false`.
@@ -40,12 +48,25 @@ impl Gaussian {
         assert!(sigma > 0.0, "sigma must be positive");
         Self { sigma }
     }
+
+    fn step<R: Rng + ?Sized>(&self, dim: usize, rng: &mut R) -> Array1<f64> {
+        let dist = NormalDist::new(0.0, self.sigma).expect("sigma > 0");
+        Array1::from_iter((0..dim).map(|_| dist.sample(rng)))
+    }
 }
 
 impl MoveKernel<f64> for Gaussian {
     fn propose<R: Rng + ?Sized>(&self, i: ArrayView1<f64>, _t: f64, rng: &mut R) -> Array1<f64> {
-        let dist = NormalDist::new(0.0, self.sigma).expect("sigma > 0");
-        Array1::from_iter(i.iter().map(|&xi| xi + dist.sample(rng)))
+        self.step(i.len(), rng) + &i
+    }
+
+    fn displacement<R: Rng + ?Sized>(
+        &self,
+        dim: usize,
+        _t: f64,
+        rng: &mut R,
+    ) -> Option<Array1<f64>> {
+        Some(self.step(dim, rng))
     }
 
     fn supports_in<N: Neighborhood<f64>>(&self, _n: &N) -> bool {
@@ -72,12 +93,25 @@ impl Cauchy {
         assert!(gamma > 0.0, "gamma must be positive");
         Self { gamma }
     }
+
+    fn step<R: Rng + ?Sized>(&self, dim: usize, rng: &mut R) -> Array1<f64> {
+        let dist = CauchyDist::new(0.0, self.gamma).expect("gamma > 0");
+        Array1::from_iter((0..dim).map(|_| dist.sample(rng)))
+    }
 }
 
 impl MoveKernel<f64> for Cauchy {
     fn propose<R: Rng + ?Sized>(&self, i: ArrayView1<f64>, _t: f64, rng: &mut R) -> Array1<f64> {
-        let dist = CauchyDist::new(0.0, self.gamma).expect("gamma > 0");
-        Array1::from_iter(i.iter().map(|&xi| xi + dist.sample(rng)))
+        self.step(i.len(), rng) + &i
+    }
+
+    fn displacement<R: Rng + ?Sized>(
+        &self,
+        dim: usize,
+        _t: f64,
+        rng: &mut R,
+    ) -> Option<Array1<f64>> {
+        Some(self.step(dim, rng))
     }
 
     fn supports_in<N: Neighborhood<f64>>(&self, _n: &N) -> bool {
@@ -240,8 +274,9 @@ impl MoveKernel<f64> for TsallisVisit {
 /// in it keeps the proposal symmetric: `q(x -> y) = q(y -> x)`. The Metropolis
 /// test therefore still targets the box-restricted Gibbs measure with no
 /// Hastings correction (manuscript law L1 holds for the reflected proposal).
-/// A box with one infinite wall, or a finite box whose period overflows,
-/// mirrors across the wall the point crossed.
+/// A finite box whose period overflows folds across the wall that was crossed.
+/// An infinite wall folds as `+-f64::MAX`. An offset `x - lo` that overflows,
+/// or an infinite `x`, is folded at quarter scale; a NaN goes to `lo`.
 pub fn reflect_coord(x: f64, lo: f64, hi: f64) -> f64 {
     let w = hi - lo;
     if w.is_nan() || w <= 0.0 {
@@ -253,13 +288,19 @@ pub fn reflect_coord(x: f64, lo: f64, hi: f64) -> f64 {
         return x;
     }
     let period = 2.0 * w;
-    if !period.is_finite() {
-        // The box is wider than half the f64 range, or one wall is infinite,
-        // so the triangle-wave period is not a finite f64. Fold the overshoot
-        // across the wall it crossed. A finite overshoot is below `2 w` after
-        // one fold, so at most one more fold, across the other wall, remains.
-        // An infinite overshoot makes the fold NaN; `max`/`min` then stop on
-        // the wall that was crossed.
+    let offset = x - lo;
+    if period.is_finite() && offset.is_finite() {
+        let mut y = offset.rem_euclid(period);
+        if y > w {
+            y = period - y;
+        }
+        // `hi - lo` and `lo + y` both round, so the sum can land one ulp past `hi`.
+        return (lo + y).max(lo).min(hi);
+    }
+    // Both walls are finite and the offset is finite, so the period is the
+    // part that overflowed. One fold across the crossed wall, then at most
+    // one more across the other, stays exact.
+    if lo.is_finite() && hi.is_finite() && offset.is_finite() {
         let fold = |d: f64| if d < w { d } else { w - (d - w) };
         return if x < lo {
             (lo + fold(lo - x)).max(lo).min(hi)
@@ -267,13 +308,31 @@ pub fn reflect_coord(x: f64, lo: f64, hi: f64) -> f64 {
             (hi - fold(x - hi)).min(hi).max(lo)
         };
     }
-    let mut y = (x - lo).rem_euclid(period);
-    if y > w {
-        y = period - y;
+    reflect_quarter(0.25 * x, lo, hi)
+}
+
+/// [`reflect_coord`] of `4 x4`, which need not be representable, for a point
+/// outside the box whose offset overflows or whose wall is infinite, folded
+/// at quarter scale: differences of quarters of values within `+-f64::MAX`
+/// are finite, and scaling by a power of two is exact above the subnormals.
+/// The overshoot is measured from the crossed wall, so a small one stays
+/// exact. An infinite wall folds as `+-f64::MAX`.
+fn reflect_quarter(x4: f64, lo: f64, hi: f64) -> f64 {
+    let (lo, hi) = (lo.max(f64::MIN), hi.min(f64::MAX));
+    let (lo4, hi4) = (0.25 * lo, 0.25 * hi);
+    let w = hi4 - lo4;
+    let fold = |d: f64| {
+        let r = d % (2.0 * w);
+        if r < w { r } else { w - (r - w) }
+    };
+    // A subnormal point just past `hi` can round onto `hi4` and must still fold
+    // from `hi`. An infinite overshoot folds to NaN, which clamping against the
+    // crossed wall first sends to that wall.
+    if x4 >= hi4 {
+        (4.0 * (hi4 - fold(x4 - hi4))).min(hi).max(lo)
+    } else {
+        (4.0 * (lo4 + fold(lo4 - x4))).max(lo).min(hi)
     }
-    // `hi - lo` and `lo + y` both round, so the sum can land one ulp past
-    // `hi`. A non-finite `x` leaves `y` NaN, and `max` sends that to `lo`.
-    (lo + y).max(lo).min(hi)
 }
 
 /// [`reflect_coord`] together with its slope there: `1` where the fold keeps
@@ -288,14 +347,30 @@ pub fn reflect_coord_with_slope(x: f64, lo: f64, hi: f64) -> (f64, f64) {
         return (x, 1.0);
     }
     let period = 2.0 * w;
-    if !period.is_finite() {
+    let offset = x - lo;
+    if period.is_finite() && offset.is_finite() {
+        let y = offset.rem_euclid(period);
+        let slope = if y > w { -1.0 } else { 1.0 };
+        return (reflect_coord(x, lo, hi), slope);
+    }
+    if lo.is_finite() && hi.is_finite() && offset.is_finite() {
         let d = if x < lo { lo - x } else { x - hi };
         let slope = if d < w { -1.0 } else { 1.0 };
         return (reflect_coord(x, lo, hi), slope);
     }
-    let y = (x - lo).rem_euclid(period);
-    let slope = if y > w { -1.0 } else { 1.0 };
-    (reflect_coord(x, lo, hi), slope)
+    let image = reflect_coord(x, lo, hi);
+    let (lo_c, hi_c) = (lo.max(f64::MIN), hi.min(f64::MAX));
+    let (lo4, hi4) = (0.25 * lo_c, 0.25 * hi_c);
+    let w4 = hi4 - lo4;
+    let x4 = 0.25 * x;
+    let d = if x4 >= hi4 { x4 - hi4 } else { lo4 - x4 };
+    let r = if w4 > 0.0 && d.is_finite() {
+        d % (2.0 * w4)
+    } else {
+        f64::NAN
+    };
+    let slope = if !r.is_finite() || r < w4 { -1.0 } else { 1.0 };
+    (image, slope)
 }
 
 /// Mirror-reflects every coordinate of `x` into `bounds` (see
@@ -317,7 +392,10 @@ pub fn reflect_into_box(x: ArrayView1<f64>, bounds: &Bounds<f64>) -> Array1<f64>
 /// keeps the proposal symmetric, so `Reflected<M>` is safe to pair with
 /// [`BoxConstrained`](crate::neigh::BoxConstrained) and satisfies L1/L2 without
 /// a Hastings term whenever the inner kernel `M` is symmetric (`Gaussian`,
-/// `Cauchy`, `TsallisVisit`).
+/// `Cauchy`, `TsallisVisit`). When `M` exposes its step `d` through
+/// [`MoveKernel::displacement`], a sum `i + d` that overflows `f64` is mirrored
+/// as the exact sum would be, and a coordinate whose step is itself infinite
+/// stays put; neither depends on `i`, so the proposal stays symmetric.
 #[derive(Clone, Debug)]
 pub struct Reflected<M> {
     /// Inner symmetric move kernel.
@@ -335,9 +413,27 @@ impl<M> Reflected<M> {
 
 impl<M: MoveKernel<f64>> MoveKernel<f64> for Reflected<M> {
     fn propose<R: Rng + ?Sized>(&self, i: ArrayView1<f64>, t: f64, rng: &mut R) -> Array1<f64> {
-        let mut p = self.inner.propose(i, t, rng);
+        let step = self.inner.displacement(i.len(), t, rng);
+        let mut p = match &step {
+            Some(d) => d + &i,
+            None => self.inner.propose(i, t, rng),
+        };
         for (k, pk) in p.iter_mut().enumerate() {
-            *pk = reflect_coord(*pk, self.bounds.low[k], self.bounds.high[k]);
+            let (lo, hi) = (self.bounds.low[k], self.bounds.high[k]);
+            if let Some(d) = &step
+                && !pk.is_finite()
+                && i[k].is_finite()
+            {
+                *pk = if d[k].is_finite() {
+                    reflect_quarter(0.25 * i[k] + 0.25 * d[k], lo, hi)
+                } else {
+                    i[k]
+                };
+            } else if !(lo..=hi).contains(pk) {
+                // `reflect_coord` rebuilds an in-box value as `lo + (x - lo)`,
+                // which rounds, so only coordinates outside the box are folded.
+                *pk = reflect_coord(*pk, lo, hi);
+            }
         }
         p
     }
@@ -401,20 +497,8 @@ mod tests {
     }
 
     #[test]
-    fn reflect_coord_is_involution_on_a_wall() {
-        // Reflecting twice across a single wall returns the original value when
-        // the point lands within one period of it.
-        let lo = -2.0;
-        let hi = 3.0;
-        for &x in &[3.4_f64, 2.9, -1.5, 0.0, 4.99] {
-            let r = reflect_coord(x, lo, hi);
-            assert!(r >= lo - 1e-12 && r <= hi + 1e-12, "{r} not in box");
-        }
-    }
-
-    #[test]
     fn reflect_coord_stays_in_the_closed_box_under_rounding() {
-        // `0.3 - (-1.0)` rounds up to 1.3, so an unguarded fold returned
+        // `0.3 - (-1.0)` rounds up to 1.3, so the unguarded fold returned
         // `-1.0 + 1.3 = 0.30000000000000004` for a point on the upper wall.
         assert_eq!(reflect_coord(0.3, -1.0, 0.3), 0.3);
         for x in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
@@ -426,15 +510,47 @@ mod tests {
     #[test]
     fn reflect_coord_mirrors_when_twice_the_width_overflows() {
         let near = |a: f64, b: f64| (a - b).abs() <= 1e-12 * b.abs();
+        // Finite boxes wider than half the f64 range, then one whose width
+        // itself overflows.
         assert!(near(reflect_coord(6.1e307, -6e307, 6e307), 5.9e307));
         assert!(near(reflect_coord(-6.1e307, -6e307, 6e307), -5.9e307));
+        // More than the width past `hi`, so it also folds off `lo`.
         let (lo, hi) = (-f64::MAX, 1e308 - f64::MAX);
         assert!(near(reflect_coord(5e307, lo, hi), -1.5e308));
         assert!(near(reflect_coord(1.5e308, -1e308, 1e308), 0.5e308));
         assert!(near(reflect_coord(-1.5e308, -1e308, 1e308), -0.5e308));
         assert_eq!(reflect_coord(0.5e308, -1e308, 1e308), 0.5e308);
+        // An infinite overshoot stops on the wall it crossed.
         assert_eq!(reflect_coord(f64::INFINITY, -1e308, 1e308), 1e308);
         assert_eq!(reflect_coord(f64::NEG_INFINITY, -6e307, 6e307), -6e307);
+    }
+
+    #[test]
+    fn reflect_coord_mirrors_when_the_offset_from_lo_overflows() {
+        let near = |a: f64, b: f64| (a - b).abs() <= 1e-12 * b.abs();
+        let m = f64::MAX;
+        // `x - lo` overflows although twice the width is finite.
+        assert!(near(reflect_coord(8.5e307, -1e308, -9e307), -9.5e307));
+        assert!(near(reflect_coord(-9.5e307, 9e307, 1e308), 9.5e307));
+        assert!(near(reflect_coord(0.5 * m, -0.6 * m, -0.1 * m), -0.5 * m));
+        // Twice the width overflows too.
+        assert!(near(reflect_coord(m, -m, -0.45 * m), -0.8 * m));
+        // The infinite wall of a half-infinite box mirrors as `+-f64::MAX`.
+        assert!(near(
+            reflect_coord(-0.25 * m, 0.5 * m, f64::INFINITY),
+            0.75 * m
+        ));
+        assert!(near(
+            reflect_coord(0.25 * m, f64::NEG_INFINITY, -0.5 * m),
+            -0.75 * m
+        ));
+        // An infinite `x` stops on the wall it crossed, whatever the width.
+        assert_eq!(reflect_coord(f64::INFINITY, 1e308, 1.7e308), 1.7e308);
+        assert_eq!(reflect_coord(f64::INFINITY, -1.0, 0.3), 0.3);
+        assert_eq!(reflect_coord(f64::NEG_INFINITY, -1.0, 0.3), -1.0);
+        // A subnormal point just past `hi` stays by `hi` at quarter scale.
+        let r = reflect_coord(f64::from_bits(2025), -m, f64::from_bits(2024));
+        assert!(r >= f64::from_bits(2023), "{r:e}");
     }
 
     #[test]
@@ -447,6 +563,18 @@ mod tests {
         assert_eq!(reflect_coord(7.0, 0.0, inf), 7.0);
         assert_eq!(reflect_coord(-inf, 0.0, inf), 0.0);
         assert_eq!(reflect_coord(inf, -inf, 0.0), 0.0);
+    }
+
+    #[test]
+    fn reflect_coord_is_involution_on_a_wall() {
+        // Reflecting twice across a single wall returns the original value when
+        // the point lands within one period of it.
+        let lo = -2.0;
+        let hi = 3.0;
+        for &x in &[3.4_f64, 2.9, -1.5, 0.0, 4.99] {
+            let r = reflect_coord(x, lo, hi);
+            assert!(r >= lo - 1e-12 && r <= hi + 1e-12, "{r} not in box");
+        }
     }
 
     #[test]
@@ -544,6 +672,46 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// Proposes `i + step` on every coordinate.
+    struct Step(f64);
+
+    impl MoveKernel<f64> for Step {
+        fn propose<R: Rng + ?Sized>(
+            &self,
+            i: ArrayView1<f64>,
+            _t: f64,
+            _rng: &mut R,
+        ) -> Array1<f64> {
+            i.mapv(|x| x + self.0)
+        }
+
+        fn displacement<R: Rng + ?Sized>(
+            &self,
+            dim: usize,
+            _t: f64,
+            _rng: &mut R,
+        ) -> Option<Array1<f64>> {
+            Some(Array1::from_elem(dim, self.0))
+        }
+    }
+
+    #[test]
+    fn reflected_mirrors_a_sum_that_overflows() {
+        let near = |a: f64, b: f64| (a - b).abs() <= 1e-12 * b.abs();
+        let (m, inf) = (f64::MAX, f64::INFINITY);
+        let mut rng = StdRng::seed_from_u64(1);
+        let mut propose = |step: f64, x: f64, lo: f64, hi: f64| {
+            let kernel = Reflected::new(Step(step), Bounds::new(array![lo], array![hi], 0.0));
+            kernel.propose(array![x].view(), 1.0, &mut rng)[0]
+        };
+        assert!(near(propose(0.5 * m, 0.9 * m, 0.0, m), 0.6 * m));
+        assert!(near(propose(-0.6 * m, -0.6 * m, -m, -0.5 * m), -0.8 * m));
+        assert!(near(propose(0.5 * m, 0.9 * m, 0.5 * m, inf), 0.6 * m));
+        // An infinite step has no mirror image, so the coordinate stays put.
+        assert_eq!(propose(inf, 0.25, 0.0, 1.0), 0.25);
+        assert_eq!(propose(-inf, 0.25, 0.0, 1.0), 0.25);
     }
 }
 

@@ -482,7 +482,7 @@ no dedicated Beta sampler.
 Constants and defaults: config knob =allocate_moves=
 (config.rs:92). Portfolio-side scheduler constants derived from the
 problem rather than tuned: =SLICE_GRAD_EQUIVALENTS = 4=,
-=ROUNDS_PER_ARM = 8= (src/methods/portfolio.rs:83-89).
+=ROUNDS_PER_ARM = 8= (src/methods/portfolio.rs:88-91).
 
 Feeds/consumes: selects among the =MoveLibrary= kernels each hop when
 =allocate_moves= is set; reused conceptually by the portfolio driver's
@@ -1427,65 +1427,141 @@ budget rather than being hand-tuned.
 
 Values-only loop: under =PortfolioPolicy::Auto= a run with no gradient
 and no declared noise goes, before any regime routing, to
-=run_values_only_portfolio= (src/methods/portfolio.rs:3169), a bandit
-over =VALUES_ONLY_ARMS= (portfolio.rs:3110: =cma=, =qn=, =gsa=, =de=,
+=run_values_only_portfolio= (src/methods/portfolio.rs:3464), a bandit
+over =VALUES_ONLY_ARMS= (portfolio.rs:3368: =cma=, =qn=, =gsa=, =de=,
 =surrogate=, =explore=) in slices of
 =max(4(d+1), min(budget/48, sqrt(4(d+1) budget)))= evaluations
-(=values_only_slice=, portfolio.rs:3125). Without =x0= it starts from
+(=values_only_slice=, portfolio.rs:3383). Without =x0= it starts from
 the best of a seeded design of =d+1= points; when the budget affords
 five gradients per coordinate, an opening finite-difference descent
-runs while its slices succeed, up to convergence, and =qn= then rejoins
-the ranking on the prior. With less, =cma= and the descent take one
-slice each from the start, =gsa= the next =WARM_UP_GSA_SLICES= (two)
-from the incumbent, and a descent turn settles the basin it reached.
-From there =gsa= and then =cma= each keep the turn until they have gone
-=ROUNDS_PER_ARM= slices without lowering the incumbent (or as long as
-their last gain took, if longer), stopping short of the closing descent
-plus a slice for each other arm not yet played (without an opening, for
-=de= only). Every unplayed arm then takes one turn while a slice beyond
-the closing reserve is left (a descent's turn holds back only that
-reserve), after which rounds pick uniformly with probability
-=1/round=, replay the arm whose last turn succeeded, or take a
-discounted Thompson draw. The descent closes the run with the rest of
-the budget, ten gradients' worth of evaluations held back for it,
-going on with its current descent unless another arm has lowered the
-incumbent since =qn= last played, in which case it restarts there. A
-turn is one slice, except that =qn= keeps it while each slice lowers
-its descent's value by more than the success threshold, until that
-descent converges; a turn succeeds when it lowers the incumbent by more
-than =1e-4 max(|f|, s)= (=values_only_threshold=), where =s= is the
-resolution =eps |f|= of the start's value (=values_only_floor=), so
-every threshold of the run scales with the objective. The GSA arm
-starts one chain at the incumbent
-and runs it quenched, without a local search: each temperature step
-visits every coordinate once and keeps only improvements. The DE arm
-keeps one population member at the incumbent. The floor the restart
-guarantee needs is asymptotic: the opening, the phases and the
-descent's turns run only while they pay by the success threshold, which
-cannot last on a bounded objective, and the number of slices grows with
-the budget, so every arm keeps a uniform share and is pulled infinitely
-often as the budget grows.
+runs while its slices succeed, gain more than =1e-4= times the largest
+of the opening's last =OPENING_GAINS= gains, and leave its last
+=OPENING_SPAN= slices with more, together, than that times its largest
+gain, up to convergence (the first slice from below the start is held
+to the gain from the start); until the descent has
+lowered its own value from below the start's, a slice in which it
+stalls short of convergence or stops at the start's value gives =cma=
+one slice, once per run, and the opening goes on from the incumbent
+=cma= leaves, where the descent restarts, and =qn= then rejoins the
+ranking on the prior. With less, =cma= takes one slice from the start,
+the descent keeps the turn until a slice gains less per evaluation
+than the one before (=DescentPace=), and =gsa= then keeps it while each
+of its slices gains at least as fast as the descent would have gone on
+to (its last gain per evaluation times the ratio to the one before);
+until =gsa= has played the descent also hands it the turn once fewer
+than =GSA_LAST_SLICES= slices are left beyond the closing reserve, and
+if =gsa='s first slice falls short the descent keeps the turn until the
+run has used twice the evaluations it had. From there =gsa= and then
+=cma= each keep the turn until they have gone =ROUNDS_PER_ARM= slices
+without a success that gains more than =1e-4= times the phase's largest
+gain (or as long as the last one took, if longer); =gsa='s first phase
+also ends once its gain per evaluation since it began is no more than
+the descent's last, and a =cma= phase that follows it without taking
+the turn likewise from its =ROUNDS_PER_ARM=-th slice. A =gsa= slice
+past the phase's first =ROUNDS_PER_ARM / 2= that gains less than
+=1/PHASE_SLOWDOWN= of the phase's best per evaluation lends =cma= a
+slice, which takes the turn if it gains faster than both that slice and
+=1/PHASE_SLOWDOWN= of the phase's gain per evaluation so far; =gsa=
+lends no other slice until the run has used twice the evaluations it
+had, and none after a lent slice that gained nothing. A phase =cma=
+took lends =gsa= a slice when its last two slices gain less per
+evaluation than its lent slice had to beat, and hands the turn back if
+=gsa='s slice gains faster than those two did; the two alternate, =gsa=
+resuming after a phase =cma= took from it, for up to =PHASE_TURNS=
+phases. If the bar on the first slice from below the start ended the
+opening before the descent converged and =gsa='s first phase ends at
+its first slice, the descent takes a turn before =cma='s phase. The
+phases, and that turn, stop short of the closing descent plus a slice
+for each other arm not yet played, counted again at every slice
+(without an opening, for =de= only, until it has played). Every
+unplayed arm then
+takes one turn while eight evaluations beyond the closing reserve are
+left (a descent's turn holds back only that reserve), after which
+rounds pick uniformly with probability =1/round=, replay the arm whose
+last turn succeeded, or take a discounted Thompson draw. The descent
+closes the run with the rest of the budget, ten gradients' worth of
+evaluations held back for it, going on with its current descent unless
+another arm has lowered the incumbent since =qn= last played, in which
+case it restarts there. A turn is one slice, except that =qn= keeps it
+while each slice lowers its descent's value by more than the success
+threshold, until that descent converges; a turn succeeds when it
+lowers the incumbent by more than the threshold in force when it
+began, =1e-4 max(g, s)= (=SuccessScale=): =g= is the gain of the last
+slice that lowered the incumbent from below the start's value, and =s=
+the resolution =eps |f|= of the first value found below the start's,
+never less than =f64::MIN_POSITIVE=, which it is until one is found.
+Gains are differences of values, so a constant added to the objective
+moves the threshold only through the resolution of the shifted values
+(the rounding of each gain, and =s=), a power of two multiplying it
+multiplies every threshold exactly, and the start's value enters
+neither =g= nor =s=. The GSA arm runs one chain from 10 dimensions and,
+below, one per eight evaluations of its first slice, between two and
+four; the first starts at the incumbent, the others at seeded
+low-discrepancy points, and once another arm has lowered the incumbent
+below every chain the worst one goes on from there. Chains run
+quenched, without a local search: each temperature step visits every
+coordinate once and keeps only improvements. The DE arm keeps one
+population member at the incumbent. The surrogate and the restart arm
+take values in the run's unit, the power of two at or below the
+threshold (=SuccessScale::unit=): the surrogate fits values, and sets
+its temperatures and their floors, in it, and the restart arm's
+annealing chains weigh each rise in it against a temperature that
+starts at one, so a power of two multiplying the objective leaves the
+whole run unchanged, short of overflow and underflow. The floor the
+restart guarantee needs is asymptotic in the budget: the opening, the
+phases and the descent's turns run only while they lower the
+incumbent, or the descent's value, by more than the success threshold,
+whose positive floor =s= changes at most once, so on a bounded
+objective they last a number of slices that does not grow with the
+budget, while the number of slices does, and every arm keeps a uniform
+share and is pulled infinitely often as the budget grows.
+
+Measured costs, over 40 paired seeds against the rule each replaced
+(medians; every row, and what putting the replaced rule back costs, in
+[[file:../explanation/regime_auto.org::*Measured costs][the regime notes]]):
+the rate hand-over trails two fixed =gsa= slices on =ellS30@1000=,
+=ellS50@5000=, =ellS100@5000=, =ellS100@20000= (1.17 against 0.0282),
+=ellR100@20000=, =rosen100@20000=, =stybR30@1000=, =levy100@20000=,
+=rast100_shift@20000= and =rastS100@20000=; the opening's bar trails an
+opening that goes on while each slice succeeds on =ellS30@5000= and
+=rosen30@5000= (22.2 against 16.2), with that row's copies and
+controls, and on the =ellR30@5000= offset controls; the =8 eps=
+resolution test trails a =1e-12= tolerance on =fit6@1000= (-4.78
+against -4.89) with its copies and controls, on =ellR30@20000=,
+=ellR50@20000= and the =x1e-6= control of =ellR30@5000=, and together
+with the bar on =ellR30@5000= (3.4e-8 against 0) and its scaled
+copies; the last-gain threshold trails =1e-4 max(|f|, s)= on
+=rastR100@20000= (870 against 833) and the =+1e2= copy of
+=levy30@5000=; the fifth-slice lend trails on =mich10@5000= (-9.655
+against -9.66, =p= 0.021). Rotated ellipsoids short of the opening
+budget trail an earlier form of the loop by up to four times, and
+rotated Rastrigin and Levy trail 0.10.0.
 
 Key types and functions: top-level module doc at
-src/methods/portfolio.rs:1-44; =ContractionPosterior=
-(src/methods/portfolio.rs:270, Normal-Inverse-Gamma posterior over the
+src/methods/portfolio.rs:1-46; =ContractionPosterior=
+(src/methods/portfolio.rs:272, Normal-Inverse-Gamma posterior over the
 per-work-unit polish log-contraction rate, fit from work-normalized
 log-ratios of consecutive polish improvements); the endgame
-projected-gradient cycle helper (portfolio.rs:144) and its work-unit to
-=max_fevals= converter (portfolio.rs:132); a coordinate pattern-search
-fallback (portfolio.rs:180).
+projected-gradient cycle helper (portfolio.rs:146) and its work-unit to
+=max_fevals= converter (portfolio.rs:134); a coordinate pattern-search
+fallback (portfolio.rs:182); the values-only =SuccessScale=
+(portfolio.rs:1431) and =DescentPace= (portfolio.rs:1507).
 
 Constants and defaults: =SLICE_GRAD_EQUIVALENTS = 4= (a slice must
 afford a few gradient-descent steps); =ROUNDS_PER_ARM = 8=;
 =ENDGAME_WU_PER_ITER = 4=; =NEAR_BEST_ORDERS = 6.0= (Dolan-More
 tau=1e-3 to a 1e-9 win tolerance crosses six decimal orders)
-(src/methods/portfolio.rs:86-96). Endgame polish schedule: two-thirds
+(src/methods/portfolio.rs:88-98). Endgame polish schedule: two-thirds
 of remaining budget when no jittered restart has run yet, half of
-remaining otherwise, always capped at remaining (portfolio.rs:113).
-Values-only loop: =QN_AFFORDABLE_GRADIENTS = 5= (portfolio.rs:414);
-=WARM_UP_GSA_SLICES = 2= (portfolio.rs:416); closing descent of
-=10(d+1)= evaluations, at most 40% of the budget, skipped below
-=3(d+1)= (portfolio.rs:418-423).
+remaining otherwise, always capped at remaining (portfolio.rs:115).
+Values-only loop: =IMPROVEMENT_RTOL = 1e-4= (portfolio.rs:344);
+=QN_FTOL = 8 eps= (portfolio.rs:419); =QN_AFFORDABLE_GRADIENTS = 5=
+(portfolio.rs:422); =GSA_LAST_SLICES = 3= (portfolio.rs:429);
+=PHASE_SLOWDOWN = 8= (portfolio.rs:432); =PHASE_TURNS = 8=
+(portfolio.rs:436); =OPENING_GAINS = 3= (portfolio.rs:442);
+=OPENING_SPAN = 4= (portfolio.rs:450); closing descent of =10(d+1)=
+evaluations, at most 40% of the budget, skipped below =3(d+1)=
+(portfolio.rs:452-457).
 
 Feeds/consumes: consumes =crate::methods::regime= for arm priors and
 exploit probability, and the typed-algebra kernels
@@ -1938,20 +2014,24 @@ grow by \((n+2)/3\), and a candidate costs linear time and memory.
 the default up to a cap, with small local runs, by spent budget.
 
 Key types and functions: =CmaEs= (src/methods/cma_es.rs:119);
-=CmaEs::separable=, =CmaEs::with_tol_fun_hist=, =CmaEs::with_elite=
-(cma_es.rs:238/256/280); =CmaStop= (cma_es.rs:59);
+=CmaEs::separable=, =CmaEs::with_tol_fun_hist=,
+=CmaEs::set_tol_fun_hist= (the tolerance from the next generation on),
+=CmaEs::tol_fun_hist=, =CmaEs::with_elite=
+(cma_es.rs:238/256/263/269/291); =CmaStop= (cma_es.rs:59);
 =covariance_learning_evaluations= (cma_es.rs:111, the horizon
 \(\lambda/(c_1 + c_\mu)\)); =Bipop= and =CmaRegime=
-(cma_es.rs:631/610); the portfolio's =CmaArmState= and =run_cma_arm=
-(src/methods/portfolio.rs:914/2991).
+(cma_es.rs:642/621); the portfolio's =CmaArmState= and =run_cma_arm=
+(src/methods/portfolio.rs:970/3218).
 
 Constants and defaults: =default_lambda= \(4 + \lfloor 3 \ln n
 \rfloor\) (cma_es.rs:82). In the portfolio every run is centred on the
 incumbent; the first is local, with step 0.025 of each side, and large
-runs use step 0.3 (portfolio.rs:391-392). Runs keep the full covariance
-up to =CMA_FULL_MAX_DIM = 100= (portfolio.rs:401) and only when the
-budget exceeds the learning horizon; each run's =tolfunhist= is the
-values-only success threshold at its start (=values_only_threshold=).
+runs use step 0.3 (portfolio.rs:393-394). Runs keep the full covariance
+up to =CMA_FULL_MAX_DIM = 100= (portfolio.rs:403) and only when the
+budget exceeds the learning horizon; in the values-only loop each run's
+=tolfunhist= is the success threshold in force (=SuccessScale=), set
+again at every slice the arm plays, so a run stops once its recent
+best values span less than the threshold in force at its latest slice.
 
 Feeds/consumes: the =cma= arm of the portfolio's values-only loop,
 which reads the ledger incumbent for every run's mean.
@@ -2010,14 +2090,17 @@ iteration, a projected-gradient tolerance when one is set, or a failed
 line search.
 
 Key types and functions: =FdBfgs= (src/methods/fd_bfgs.rs:148);
-=FdBfgsOptions= (fd_bfgs.rs:74); the portfolio's =QnArmState= and
-=run_qn_arm= (src/methods/portfolio.rs:1003/3042).
+=FdBfgsOptions= (fd_bfgs.rs:76); the portfolio's =QnArmState= and
+=run_qn_arm= (src/methods/portfolio.rs:1059/3292).
 
 Constants and defaults: =ARMIJO = 1e-4=, =MAX_LINE_TRIALS = 40=,
 =FIRST_STEP_FRACTION = 0.05=, =CENTRAL_INTERVAL_FRACTION = 0.1=,
 =INTERVAL_MOVE = 2=, =MAX_REDIFFERENCES = 2= (fd_bfgs.rs:50-72). The
-default options have the value floor =f64::MIN_POSITIVE= in the
-slow-iteration test and no gradient tolerance.
+default options have =ftol = 1e-12=, three slow iterations of
+patience, the value floor =f64::MIN_POSITIVE= in the slow-iteration
+test and no gradient tolerance; the portfolio's values-only descents
+use =ftol = 8 eps= (=QN_FTOL=), so they stop on the resolution of their
+values.
 
 Feeds/consumes: the =qn= arm of the portfolio's values-only loop (its
 opening and closing descents, and descents kicked from the incumbent

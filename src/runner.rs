@@ -7,8 +7,27 @@ use rand::rngs::StdRng;
 
 use crate::cool::Cooling;
 use crate::history::{EpochLine, History, State};
-use crate::sampler::Sampler;
+use crate::sampler::{Sampler, improves};
 use crate::variant::SaVariant;
+
+/// The Halton points of `bounds`, except that an axis with an infinite wall,
+/// which has no uniform measure, holds every point on its finite wall, or at
+/// zero when both walls are infinite.
+fn qmc_starts(bounds: &eindir_core::Bounds<f64>, n: usize, skip: u64) -> ndarray::Array2<f64> {
+    let (low, high): (Vec<f64>, Vec<f64>) = bounds
+        .low
+        .iter()
+        .zip(&bounds.high)
+        .map(|(&lo, &hi)| match (lo.is_finite(), hi.is_finite()) {
+            (true, true) => (lo, hi),
+            (true, false) => (lo, lo),
+            (false, true) => (hi, hi),
+            (false, false) => (0.0, 0.0),
+        })
+        .unzip();
+    let finite = eindir_core::Bounds::new(low.into(), high.into(), 0.0);
+    eindir_core::low_discrepancy_points(&finite, n, skip)
+}
 
 /// Deterministic positive Halton skip derived from a run seed.
 pub fn qmc_skip_from_seed(seed: u64) -> u64 {
@@ -277,11 +296,7 @@ where
 {
     let cooling = variant.cool.clone();
     let n_starts = n_starts.max(1);
-    let mut starts = eindir_core::low_discrepancy_points(
-        variant.obj.bounds(),
-        n_starts,
-        qmc_skip_from_seed(seed),
-    );
+    let mut starts = qmc_starts(variant.obj.bounds(), n_starts, qmc_skip_from_seed(seed));
     if let Some(x0) = x0 {
         starts.row_mut(0).assign(&x0);
     }
@@ -310,7 +325,7 @@ where
         );
         if best_history
             .as_ref()
-            .is_none_or(|best: &History| history.best.val < best.best.val)
+            .is_none_or(|best: &History| improves(history.best.val, best.best.val))
         {
             best_history = Some(history);
         }
