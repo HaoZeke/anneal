@@ -3368,7 +3368,6 @@ fn certify_ride_connection(
             &counted_evaluate,
             identity,
             &connection.saddle,
-            Some(&mut scientific.posted_descriptor_len),
         )?;
         let endpoints = [
             validate_candidate(
