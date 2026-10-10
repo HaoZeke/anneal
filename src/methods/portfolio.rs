@@ -430,10 +430,10 @@ const QN_FATOL_RTOL: f64 = 1e-7;
 const QN_AFFORDABLE_GRADIENTS: usize = 5;
 /// Short of the opening budget, until GSA has played, a descent turn ends
 /// once fewer than this many slices are left beyond the closing reserve,
-/// and GSA takes over. At twenty to twenty-six evaluations per gradient a
-/// descent that kept the turn to the last slice would leave GSA, whose
-/// quenched visits settle separable multimodal objectives one coordinate
-/// at a time, only part of one.
+/// and GSA takes over. At twenty to twenty-six evaluations per d+1 (twenty
+/// to twenty-six gradients) a descent that kept the turn to the last slice
+/// would leave GSA, whose quenched visits settle separable multimodal
+/// objectives one coordinate at a time, only part of one.
 const GSA_LAST_SLICES: usize = 3;
 /// Factor by which a values-only GSA phase's gain per evaluation must fall
 /// below its best slice's before the phase lends CMA-ES a slice.
