@@ -3368,6 +3368,37 @@ where
     let bounds = obj.bounds().clone();
     let dim = bounds.dims;
     let gradient = dim + 1;
+    // A budget below one stencil cannot fund an arm. One checkpoint
+    // exchanges the incumbent, and the rest is prepared global candidates,
+    // which is what a direct-neighbour sample count measures.
+    if budget < 8 {
+        if ledger.incumbent_value().is_none() {
+            let candidate = ledger.incumbent(&bounds);
+            let _ = obj.eval(candidate.view());
+        }
+        if !ledger.exhausted() {
+            ledger.checkpoint(&bounds);
+        }
+        let mut rng = StdRng::seed_from_u64(seed);
+        while !ledger.exhausted() {
+            let mut candidate = Array1::from_iter(bounds.low.iter().zip(bounds.high.iter()).map(
+                |(&low, &high)| {
+                    let fraction = rng.random::<f64>();
+                    ((1.0 - fraction) * low + fraction * high).clamp(low, high)
+                },
+            ));
+            obj.prepare_proposal(None, &mut candidate);
+            let _ = obj.eval(candidate.view());
+        }
+        return VALUES_ONLY_ARMS
+            .iter()
+            .map(|arm| ArmStat {
+                name: arm.name(),
+                pulls: 0,
+                successes: 0,
+            })
+            .collect();
+    }
     states.values_only = true;
     states.values_stream = Some(seed);
     if ledger.incumbent_value().is_none() {
@@ -3382,11 +3413,7 @@ where
             if ledger.exhausted() {
                 break;
             }
-            // A peer records a prepared point. The opening design is a
-            // paid sample, so it joins that queue before it is evaluated.
-            let mut pos = bounds.clip(row);
-            obj.prepare_proposal(None, &mut pos);
-            let _ = obj.eval(pos.view());
+            let _ = obj.eval(bounds.clip(row).view());
         }
     }
     states.success_floor = values_only_floor(ledger.incumbent_value());
