@@ -87,13 +87,13 @@ pub struct BankConfig {
     /// offer several children without starting a chain slice for each.
     pub mix_images: usize,
     /// Independent random kicks of a seed in a mixing round, quenched
-    /// like the splice images. Lee, Lee and Scheraga draw twenty
+    /// like the splice images. Lee, Lee and Lee draw twenty
     /// splices and ten random perturbations a seed.
     pub random_images: usize,
     /// Complete passes over the bank before a deadlock enlargement.
     ///
     /// One pass is every member used once as a seed. After this many
-    /// passes Lee, Lee and Scheraga add random minima to both banks
+    /// passes Lee, Lee and Lee add random minima to both banks
     /// and reset `Dcut` to `Dave/2`.
     pub deadlock_iters: usize,
     /// Random minima injected on deadlock. Zero turns the enlargement off.
@@ -436,7 +436,7 @@ where
         // the shared ledger, so a bank of k does not spend k times the budget.
         if bank.len() >= 2 && rng.random::<f64>() < bank_cfg.mix_fraction {
             // The partner comes from the working bank or from the first bank,
-            // as in Lee, Lee and Scheraga. Drawing only from the working bank
+            // as in Lee, Lee and Lee. Drawing only from the working bank
             // is what let every partner end up in the same funnel as every
             // member; the first bank is the half of the population that cannot
             // collapse.
@@ -476,7 +476,7 @@ where
                     mix_below_both += 1;
                 }
             }
-            // Lee, Lee and Scheraga also draw random perturbations of
+            // Lee, Lee and Lee also draw random perturbations of
             // the seed, not only splices. Small kicks, then the same
             // quench and the same replacement rule.
             for _ in 0..bank_cfg.random_images {
@@ -594,7 +594,7 @@ pub fn spectrum_distance(n_points: usize) -> impl FnMut(ArrayView1<f64>, ArrayVi
     }
 }
 
-/// Lee, Lee and Scheraga coordination-histogram distance.
+/// Lee, Lee and Lee coordination-histogram distance.
 ///
 /// First- and second-neighbour shells at `r1` and `r2` (1.35 and 1.70
 /// in reduced LJ units). \(H(s,n)\) is how many atoms have \(n\)
@@ -926,7 +926,7 @@ mod tests {
         y
     }
 
-    /// Lee, Lee and Scheraga eq. (2): a structure is zero from itself,
+    /// Lee, Lee and Lee eq. (2): a structure is zero from itself,
     /// and two closed packings are not.
     #[test]
     fn published_d_vanishes_on_a_copy_and_separates_packings() {

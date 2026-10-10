@@ -262,7 +262,7 @@ struct Slot {
     state: Vec<f64>,
     best_energy: f64,
     best_state: Vec<f64>,
-    /// First quenched structure this chain published. Lee, Lee and Scheraga
+    /// First quenched structure this chain published. Lee, Lee and Lee
     /// keep that bank frozen and draw mix partners from it, so a later
     /// collapse of the live population still has something outside the funnel.
     first_energy: f64,
@@ -335,7 +335,7 @@ struct ExchangeConfig {
     /// member it resembles, or the worst member when it resembles none.
     pbh: bool,
     /// `Dcut` starts at this multiple of the first bank's mean pairwise
-    /// distance. Lee, Lee and Scheraga use one half (`PBH_DCUT`, default
+    /// distance. Lee, Lee and Lee use one half (`PBH_DCUT`, default
     /// 0.5). The schedule then carries the cutoff to one fifth of that mean.
     pbh_dcut_scale: f64,
     /// Whether chains share a table of visited core keys and restart when

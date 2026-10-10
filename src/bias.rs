@@ -799,7 +799,7 @@ impl<F: Fingerprint> BasinBias<F> {
     /// Sets the distance below which two descriptors are one basin.
     ///
     /// Exposed because this is a schedule rather than a setting. Lee, Lee and
-    /// Scheraga show the threshold plays the role of a temperature and is
+    /// Lee show the threshold plays the role of a temperature and is
     /// annealed from wide to narrow, and their method solves the cluster sizes
     /// a fixed threshold does not. See [`crate::diversity`].
     pub fn set_merge_radius(&mut self, radius: f64) {
