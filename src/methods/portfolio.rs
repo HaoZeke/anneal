@@ -1367,10 +1367,11 @@ fn arm_success_threshold(arm: ArmKind, before: f64) -> f64 {
 /// at or above the start's value record nothing, so neither the start's
 /// value nor the drop from it sets the scale. `s` is `f64::MIN_POSITIVE`
 /// until the run first finds a value below the start's and the resolution
-/// `eps |f|` of that value from then on (`f64::MIN_POSITIVE` again if it is
-/// zero): positive and fixed once set, it bounds the number of successes on
-/// a bounded objective as the unit floor of [`arm_success_threshold`] does,
-/// and it scales with the objective.
+/// `eps |f|` of that value from then on, but never less than
+/// `f64::MIN_POSITIVE` (which it stays if that value is zero): positive and
+/// fixed once set, it bounds the number of successes on a bounded objective
+/// as the unit floor of [`arm_success_threshold`] does, and it scales with
+/// the objective.
 #[derive(Clone, Debug)]
 struct SuccessScale {
     /// The start's value, infinite when there is none or it is not finite.
@@ -1417,9 +1418,7 @@ impl SuccessScale {
         }
         if !self.fixed {
             self.fixed = true;
-            if after != 0.0 {
-                self.floor = f64::EPSILON * after.abs();
-            }
+            self.floor = (f64::EPSILON * after.abs()).max(f64::MIN_POSITIVE);
         }
         if before < self.start && after < before {
             self.gain = before - after;
@@ -7178,9 +7177,11 @@ mod tests {
         scale.record(-3000.0, -3000.0);
         assert_eq!(scale.floor, f64::EPSILON * 250.0);
         assert_eq!(scale.threshold(), IMPROVEMENT_RTOL * 2750.0);
-        let mut zero = SuccessScale::new(Some(1.0));
-        zero.record(1.0, 0.0);
-        assert_eq!(zero.floor, f64::MIN_POSITIVE);
+        for first in [0.0, -0.0, 1e-300, -5e-324] {
+            let mut tiny = SuccessScale::new(Some(1.0));
+            tiny.record(1.0, first);
+            assert_eq!(tiny.floor, f64::MIN_POSITIVE, "{first:e}");
+        }
         for start in [None, Some(f64::NAN), Some(f64::INFINITY)] {
             let mut scale = SuccessScale::new(start);
             scale.record(5.0, 4.0);
