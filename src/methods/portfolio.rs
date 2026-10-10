@@ -1531,9 +1531,13 @@ where
 
 /// Central finite differences through a budgeted objective (dual_annealing
 /// L-BFGS-B without analytic jac). Each stencil pair charges real evals.
+///
+/// A coordinate whose bounds coincide, or whose two stencil points round to
+/// the same value, keeps a zero component and costs no evaluation.
 struct BudgetedFiniteDiffGradient<'a, O: Objective<f64>> {
     obj: &'a BudgetedObjective<'a, O>,
-    /// Relative step: h_i = h_frac * box_width_i (clamped).
+    /// Relative step: h_i = h_frac * box_width_i, at least 1e-8 and at most
+    /// a twentieth of the width.
     h_frac: f64,
 }
 
@@ -1547,32 +1551,31 @@ impl<O: Objective<f64>> Gradient<f64> for BudgetedFiniteDiffGradient<'_, O> {
         let bounds = self.obj.bounds();
         let mut g = Array1::zeros(dim);
         for i in 0..dim {
-            if bounds.low[i] == bounds.high[i] {
+            let (low, high) = (bounds.low[i], bounds.high[i]);
+            let w = high - low;
+            if !(w > 0.0) {
                 continue;
             }
             if self.obj.ledger.exhausted() {
                 return Array1::from_elem(dim, f64::NAN);
             }
-            let w = bounds.high[i] - bounds.low[i];
+            // The cap wins over the floor: on a box narrower than 2e-7 the
+            // 1e-8 floor is wider than a twentieth of the box.
             let h = (self.h_frac * w).max(1e-8).min(0.05 * w);
             let mut xp = x.to_owned();
             let mut xm = x.to_owned();
-            // A positive-width axis needs a distinct feasible stencil,
+            // A positive-width direction needs a distinct feasible stencil,
             // even when the requested displacement rounds to its centre.
-            xp[i] = (x[i] + h).max(x[i].next_up()).min(bounds.high[i]);
-            xm[i] = (x[i] - h).min(x[i].next_down()).max(bounds.low[i]);
+            xp[i] = (x[i] + h).max(x[i].next_up()).clamp(low, high);
+            xm[i] = (x[i] - h).min(x[i].next_down()).clamp(low, high);
             let den = xp[i] - xm[i];
-            if !den.is_finite() || den <= 0.0 {
-                return Array1::from_elem(dim, f64::NAN);
+            if !den.is_finite() || !(den > 0.0) {
+                continue;
             }
             let fp = self.obj.eval(xp.view());
             let fm = self.obj.eval(xm.view());
-            if !fp.is_finite() || !fm.is_finite() {
-                return Array1::from_elem(dim, f64::NAN);
-            }
-            g[i] = (fp - fm) / den;
-            if !g[i].is_finite() {
-                return Array1::from_elem(dim, f64::NAN);
+            if fp.is_finite() && fm.is_finite() {
+                g[i] = (fp - fm) / den;
             }
         }
         g
@@ -5059,6 +5062,125 @@ mod tests {
             "FD dual-style LS should refine quadratic; start {f0} best {f1}"
         );
         assert!(ledger.used_get() <= 400);
+    }
+
+    /// A sphere about the centre of any box, recording every point it is
+    /// called at.
+    struct RecordingSphere {
+        bounds: Bounds<f64>,
+        seen: Mutex<Vec<Array1<f64>>>,
+    }
+
+    impl RecordingSphere {
+        fn new(low: Vec<f64>, high: Vec<f64>) -> Self {
+            Self {
+                bounds: Bounds::new(Array1::from_vec(low), Array1::from_vec(high), 0.0),
+                seen: Mutex::new(Vec::new()),
+            }
+        }
+
+        /// Number of calls, after checking that each one lay inside the box.
+        fn calls_inside_box(&self) -> usize {
+            let seen = self.seen.lock().expect("recording lock");
+            for x in seen.iter() {
+                for (i, &v) in x.iter().enumerate() {
+                    let (low, high) = (self.bounds.low[i], self.bounds.high[i]);
+                    assert!(
+                        low <= v && v <= high,
+                        "call at x[{i}] = {v:e} outside [{low:e}, {high:e}]"
+                    );
+                }
+            }
+            seen.len()
+        }
+    }
+
+    impl Objective<f64> for RecordingSphere {
+        fn dim(&self) -> usize {
+            self.bounds.dims
+        }
+
+        fn bounds(&self) -> &Bounds<f64> {
+            &self.bounds
+        }
+
+        fn eval(&self, x: ArrayView1<f64>) -> f64 {
+            self.seen.lock().expect("recording lock").push(x.to_owned());
+            x.iter()
+                .enumerate()
+                .map(|(i, v)| {
+                    let d = v - 0.5 * (self.bounds.low[i] + self.bounds.high[i]);
+                    d * d
+                })
+                .sum()
+        }
+    }
+
+    #[test]
+    fn finite_difference_gradient_steps_inside_narrow_and_fixed_coordinates() {
+        // Widths 2e-8 (narrower than the 1e-8 step floor allows), 0 and 2.
+        let obj = RecordingSphere::new(vec![-1e-8, 0.5, -1.0], vec![1e-8, 0.5, 1.0]);
+        let ledger = BudgetLedger::new(100, 3);
+        let budgeted = BudgetedObjective {
+            inner: &obj,
+            ledger: &ledger,
+        };
+        let fd = BudgetedFiniteDiffGradient {
+            obj: &budgeted,
+            h_frac: 1e-5,
+        };
+        let narrow = fd.grad(Array1::from_vec(vec![5e-9, 0.5, 0.0]).view());
+        let wide = fd.grad(Array1::from_vec(vec![0.0, 0.5, 0.25]).view());
+        assert!(
+            (narrow[0] - 1e-8).abs() < 1e-12,
+            "slope at 5e-9, got {}",
+            narrow[0]
+        );
+        assert!(
+            (wide[2] - 0.5).abs() < 1e-6,
+            "slope at 0.25, got {}",
+            wide[2]
+        );
+        assert_eq!(
+            (narrow[1], wide[1]),
+            (0.0, 0.0),
+            "a fixed coordinate has no slope"
+        );
+        // Two calls for each coordinate with room to move, none for the fixed one.
+        assert_eq!(obj.calls_inside_box(), 8);
+        assert_eq!(ledger.used_get(), 8);
+    }
+
+    #[test]
+    fn finite_difference_gradient_skips_a_stencil_that_rounds_onto_itself() {
+        // Near 1e9 adjacent doubles are 1.2e-7 apart, so x +/- 1e-8 is x.
+        let obj = RecordingSphere::new(vec![1e9 - 1e-7, -1.0], vec![1e9 + 1e-7, 1.0]);
+        let ledger = BudgetLedger::new(100, 2);
+        let budgeted = BudgetedObjective {
+            inner: &obj,
+            ledger: &ledger,
+        };
+        let fd = BudgetedFiniteDiffGradient {
+            obj: &budgeted,
+            h_frac: 1e-5,
+        };
+        let g = fd.grad(Array1::from_vec(vec![1e9, 0.25]).view());
+        assert_eq!(g[0], 0.0);
+        assert!(
+            (g[1] - 0.5).abs() < 1e-6,
+            "slope of x^2 at 0.25, got {}",
+            g[1]
+        );
+        assert_eq!(obj.calls_inside_box(), 2);
+    }
+
+    #[test]
+    fn portfolio_stays_inside_a_box_narrower_than_the_step_floor() {
+        let obj = RecordingSphere::new(vec![-1e-8, -1.0], vec![1e-8, 1.0]);
+        let result = portfolio_optimize::<_, ShiftQuadratic>(&obj, None, 200, 0, None);
+        assert!(result.n_evals <= 200);
+        assert!(obj.calls_inside_box() <= 200);
+        assert!(result.best_val.is_finite());
     }
 
     #[test]

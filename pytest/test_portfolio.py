@@ -56,6 +56,22 @@ def test_global_optimize_rejects_nonfinite_bounds():
         anneal.global_optimize(fn, bad, high, budget=50, seed=0)
 
 
+def test_portfolio_runs_inside_a_box_narrower_than_its_difference_step():
+    low = np.array([-1e-8, -1.0, 0.25])
+    high = np.array([1e-8, 1.0, 0.25 + 1e-12])
+    seen = []
+
+    def fn(x):
+        seen.append(np.array(x, copy=True))
+        return float(np.sum((np.asarray(x) - 0.5) ** 2))
+
+    out = anneal.global_optimize(fn, low, high, budget=300, seed=0)
+    assert seen
+    for x in seen:
+        assert np.all(x >= low) and np.all(x <= high)
+    assert out["n_evals"] <= 300
+
+
 def test_budget_respected_without_gradients():
     dim = 4
     fn, _, low, high = _rastrigin(dim)
