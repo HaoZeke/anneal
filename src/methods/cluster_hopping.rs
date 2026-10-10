@@ -4159,7 +4159,9 @@ where
                 .saturating_sub(1)
                 .min(cfg.shared_deposits as u64);
             for _ in 0..foreign {
-                bias.deposit_scaled_n(cv.view(), temperature, 1.0, 1);
+                // Counted as this chain's own visits: the rung owes what the
+                // other rung recorded while this bias was parked.
+                bias.deposit(cv.view(), temperature);
                 shared_deposits += 1;
             }
             *seen = report.visits;
