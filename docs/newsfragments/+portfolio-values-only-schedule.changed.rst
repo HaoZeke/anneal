@@ -62,4 +62,54 @@ on only while they lower the incumbent, or the descent's value, by more than
 the success threshold, whose positive floor changes at most once, so on a
 bounded objective they last a number of slices that does not grow with the
 budget, and every arm keeps a uniform share and is pulled infinitely often as
-the budget grows.
+the budget grows. Measured over 40 paired seeds against the rules they
+replaced (medians, "A against B" with A's wins/ties/losses, rows named
+``problem@budget`` from ``x0`` as in the regime notes), these rules trail on
+the following rows, and putting a replaced rule back costs the rows named with
+it. The rate hand-over short of the opening budget, against two fixed GSA
+slices after the descent's first: ``ellS30@1000`` 1673 against 711 (7/0/33),
+``ellS50@5000`` 6.88 against 1.52 (2/0/38), ``ellS100@5000`` 1839 against 1110
+(2/0/38), ``ellS100@20000`` 1.17 against 0.0282 (0/0/40), ``ellR100@20000``
+2.48 against 2.41 (19/0/21), ``rosen100@20000`` 74.9 against 72.0 (17/0/23),
+``stybR30@1000`` -1057 against -1057 (4/18/18), ``levy100@20000`` 0.0416
+against 1.0e-11 (5/15/20), ``rast100_shift@20000`` 9.95 against 7.96 (9/3/28)
+and ``rastS100@20000`` 10.9 against 7.96 (8/3/29); the two slices back cost
+``ackS50@5000`` 4.31 against 2.94 and ``ackS100@5000`` 13.2 against 5.94
+(1/0/39 each), ``ellR30@1000`` 12557 against 5589 (3/0/37), ``ellR100@5000``
+20110 against 15750 (5/0/35) and ``rosen100@5000`` 252 against 168 (7/0/33).
+The opening's bar on its recent gains, against an opening that goes on while
+each slice is a success: ``ellS30@5000`` 0.0626 against 0 (0/13/27),
+``rosen30@5000`` 22.2 against 16.2 (2/1/37) with its copies and controls (22.0
+to 22.5 against 15.9 to 16.7), and the ``ellR30@5000`` controls for +1e2, +1e4
+and -1e4 (2.8e-11, 2.3e-4 and 8.7e-4 against 3.2e-12, 1.4e-5 and 1.2e-5);
+dropping the bar costs ``ackS30@5000`` 3.8e-6 against 6.2e-7 (1/18/21),
+``levyR30@5000`` 3.51 against 0.544 (5/0/35) and ``levy30@5000`` 7.2e-7
+against 4.5e-10 (6/17/17). ``ellR30@5000``, 3.4e-8 against 0 (0/19/21), and
+its x1e-6 and x2^-20 copies come level only with both the opening without its
+bar and the descent's ``1e-12`` tolerance (0, 0/38/2), at the costs of each.
+Lending from a GSA phase's fifth slice: ``mich10@5000`` -9.655 against -9.66
+(3/28/9, p 0.021), which no tried rule brings level without putting other rows
+behind: lending from any slow slice puts ``mich10@5000`` without ``x0``,
+``rast10_shift@1000`` and ``styb10_45@1000`` without ``x0`` behind, from the
+fourth slice ``rast10_fixed@1000`` and ``schwefel10_cec@1000``, a lent slice
+held to a quarter of the phase's pace ``ackley10@1000`` (1.16 against 0.0694),
+and ending a phase CMA-ES took once its slices slow ``ackS30@5000``. With
+phases that keep the turn while they still find lower basins, the fifth-slice
+lend also costs ``ackS30@20000``, 8.6e-7 against 6.3e-7 (12/1/27, p 0.048),
+and ``ackley10@5000`` without ``x0``, 4.1e-11 against 3.2e-11 (6/23/11), with
+its -1e4 copy and two controls. Rotated ellipsoids short of the opening budget
+trail an earlier form of the loop: ``ellR50@1000`` 1.38e5 against 4.79e4,
+``ellR50@5000`` 37.7 against 9.20, ``ellR100@20000`` 2.48 against 0.633 and
+``ellR30@1000`` 5589 against 2987; letting the descent keep the turn while it
+pays brings ``ellR50@5000`` to 17.4 and ``ellR100@20000`` to 0.890 but costs
+``ellR30@1000`` (20880), ``ellR100@5000`` (41370), ``ackS50@5000`` (3.26),
+``ackS100@5000`` (9.86), ``levy100@5000``, ``rosen50@5000`` and
+``stybS100@5000``. Against 0.10.0 the loop trails on rotated Rastrigin and
+Levy: ``rastR30@1000`` 281 against 173 (3/0/37), ``rastR50@5000`` 427 against
+296 (1/0/39), ``rastR100@5000`` 893 against 650 (9/0/31), ``rastR100@20000``
+870 against 470 (1/0/39), ``levyR50@5000`` 98.8 against 69.8 (8/0/32) and
+``levyR100@20000`` 203 against 108 (0/0/40); the diffusion population in DE's
+place and a rotation-invariant DE leave each of them behind, and CMA-ES
+restarting each phase with four times its population brings ``rastR50@5000``
+level (313) and ``rastR100@20000`` to 749 but costs ``ackS30@5000`` (2.01
+against 6.2e-7).

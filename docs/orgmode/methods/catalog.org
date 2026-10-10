@@ -1495,6 +1495,27 @@ objective they last a number of slices that does not grow with the
 budget, while the number of slices does, and every arm keeps a uniform
 share and is pulled infinitely often as the budget grows.
 
+Measured costs, over 40 paired seeds against the rule each replaced
+(medians; every row, and what putting the replaced rule back costs, in
+[[file:../explanation/regime_auto.org::*Measured costs][the regime notes]]):
+the rate hand-over trails two fixed =gsa= slices on =ellS30@1000=,
+=ellS50@5000=, =ellS100@5000=, =ellS100@20000= (1.17 against 0.0282),
+=ellR100@20000=, =rosen100@20000=, =stybR30@1000=, =levy100@20000=,
+=rast100_shift@20000= and =rastS100@20000=; the opening's bar trails an
+opening that goes on while each slice succeeds on =ellS30@5000= and
+=rosen30@5000= (22.2 against 16.2), with that row's copies and
+controls, and on the =ellR30@5000= offset controls; the =8 eps=
+resolution test trails a =1e-12= tolerance on =fit6@1000= (-4.78
+against -4.89) with its copies and controls, on =ellR30@20000=,
+=ellR50@20000= and the =x1e-6= control of =ellR30@5000=, and together
+with the bar on =ellR30@5000= (3.4e-8 against 0) and its scaled
+copies; the last-gain threshold trails =1e-4 max(|f|, s)= on
+=rastR100@20000= (870 against 833) and the =+1e2= copy of
+=levy30@5000=; the fifth-slice lend trails on =mich10@5000= (-9.655
+against -9.66, =p= 0.021). Rotated ellipsoids short of the opening
+budget trail an earlier form of the loop by up to four times, and
+rotated Rastrigin and Levy trail 0.10.0.
+
 Key types and functions: top-level module doc at
 src/methods/portfolio.rs:1-46; =ContractionPosterior=
 (src/methods/portfolio.rs:272, Normal-Inverse-Gamma posterior over the
