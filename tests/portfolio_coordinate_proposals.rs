@@ -96,15 +96,18 @@ fn replica_origin(replica: usize) -> Array1<f64> {
     Array1::from_shape_fn(DIM, |_| -2.0 + 4.0 * rng.random::<f64>())
 }
 
-fn gsa_seed(replica: usize) -> u64 {
-    // The opening pays one CMA-ES slice before the first quenched chain.
-    // Each arm call draws once. The chain seed is that second draw mixed
-    // with the call count.
+fn arm_seeds(replica: usize) -> Vec<u64> {
+    // Each arm call draws once from the replica seed and mixes the draw
+    // with the call count. The quenched chain is one of the first calls:
+    // CMA-ES, the descent's paying slices, then GSA.
     let replica_seed = SEED ^ (replica as u64).wrapping_mul(0x9E37_79B9);
     let mut rng = StdRng::seed_from_u64(replica_seed);
-    let _cma = rng.random::<u64>();
-    let drawn = rng.random::<u64>();
-    drawn ^ 2
+    (1..=8)
+        .map(|call| {
+            let drawn = rng.random::<u64>();
+            drawn ^ call
+        })
+        .collect()
 }
 
 /// Quenched dual-annealing strategy: the all-coordinate half is skipped,
@@ -177,27 +180,32 @@ fn strategy_start(
     replica: usize,
 ) -> (usize, usize, u64, Vec<Array1<f64>>) {
     let origin = replica_origin(replica);
-    let seed = gsa_seed(replica);
-    let replay = quenched_replay(&origin, seed, REPLAY_LEN);
-    let found: Vec<_> = traces
-        .iter()
-        .enumerate()
-        .filter_map(|(trace, positions)| {
-            if positions.first() != Some(&origin) {
-                return None;
-            }
-            positions
-                .windows(DIM)
-                .position(|window| window == &replay[..DIM])
-                .map(|index| (trace, index))
-        })
-        .collect();
+    let mut hits = Vec::new();
+    for seed in arm_seeds(replica) {
+        let replay = quenched_replay(&origin, seed, REPLAY_LEN);
+        let found: Vec<_> = traces
+            .iter()
+            .enumerate()
+            .filter_map(|(trace, positions)| {
+                if positions.first() != Some(&origin) {
+                    return None;
+                }
+                positions
+                    .windows(DIM)
+                    .position(|window| window == &replay[..DIM])
+                    .map(|index| (trace, index))
+            })
+            .collect();
+        if found.len() == 1 {
+            hits.push((found[0], seed, replay));
+        }
+    }
     assert_eq!(
-        found.len(),
+        hits.len(),
         1,
         "replica {replica}: the quenched GSA epoch must be uniquely identified"
     );
-    let (trace, index) = found[0];
+    let ((trace, index), seed, replay) = hits.remove(0);
     assert!(index + REPLAY_LEN < traces[trace].len());
     (trace, index, seed, replay)
 }
