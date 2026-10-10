@@ -5091,28 +5091,6 @@ where
         }
     }
 
-    // The cap exits before the next due check, so a finished interval
-    // would never reach the callback. An unfinished interval stays local.
-    if matches!(
-        (checkpoint_interval, next_checkpoint),
-        (Some(_), Some(threshold)) if hops > checkpoint_hops && ledger.spent() >= threshold
-    ) {
-        let snapshot = ChainCheckpoint {
-            current_state: x.view(),
-            current_energy: e,
-            current_gradient: current_validation_gradient.as_ref().map(|g| g.view()),
-            best_state: ledger.best_state.as_ref().map(|state| state.view()),
-            best_energy: ledger.best,
-            quench_boundaries: &ledger.quench_boundaries[checkpoint_quench_start..],
-            accepted_transitions: &accepted_transitions[checkpoint_transition_start..],
-            charged: ledger.spent(),
-            remaining: ledger.remaining(),
-            hops,
-            bias: Some(&bias),
-        };
-        let _ = checkpoint(snapshot);
-    }
-
     let n_basins = bias.n_basins();
     // Per-rung sampler diagnostics, with the active rung put back at its own
     // index so the report reads in ladder order.
