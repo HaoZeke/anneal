@@ -1184,28 +1184,69 @@ pub fn first_encounter(out: &Outcome, target: f64, tolerance: f64, spent: usize)
 /// `None` when more than half the runs are censored, which is the honest answer:
 /// the median has not been observed, and quoting the mean of the successes
 /// instead reports a number that improves as the method gets worse.
+///
+/// The survival is kept as an exact ratio of products of at-risk counts. It is
+/// exactly a half whenever half the runs are found before any is censored, and
+/// a floating-point product of the same factors can round to either side of a
+/// half, which moves the median by a whole encounter.
 pub fn median_encounter(runs: &[Encounter]) -> Option<usize> {
-    if runs.is_empty() {
-        return None;
-    }
     let mut events: Vec<(usize, bool)> = runs.iter().map(|e| (e.charged(), e.found())).collect();
     events.sort_by_key(|(c, _)| *c);
 
-    let mut at_risk = events.len() as f64;
-    let mut survival = 1.0_f64;
+    // survival = left / entered, the products of the at-risk counts after and
+    // before each encounter, so it is at most a half when 2 left <= entered.
+    let mut twice_left = Natural(vec![2]);
+    let mut entered = Natural(vec![1]);
+    let mut at_risk = events.len();
     for (c, found) in events {
         if found {
-            survival *= 1.0 - 1.0 / at_risk;
-            if survival <= 0.5 {
+            twice_left.scale(at_risk - 1);
+            entered.scale(at_risk);
+            if twice_left <= entered {
                 return Some(c);
             }
         }
-        at_risk -= 1.0;
-        if at_risk <= 0.0 {
-            break;
-        }
+        at_risk -= 1;
     }
     None
+}
+
+/// A natural number in base-2^32 limbs, least significant first, with no high
+/// zero limb above the first.
+#[derive(PartialEq, Eq)]
+struct Natural(Vec<u32>);
+
+impl Natural {
+    fn scale(&mut self, k: usize) {
+        let mut carry = 0_u128;
+        for limb in &mut self.0 {
+            let v = u128::from(*limb) * k as u128 + carry;
+            *limb = v as u32;
+            carry = v >> 32;
+        }
+        while carry > 0 {
+            self.0.push(carry as u32);
+            carry >>= 32;
+        }
+        while self.0.len() > 1 && self.0.last() == Some(&0) {
+            self.0.pop();
+        }
+    }
+}
+
+impl Ord for Natural {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.0
+            .len()
+            .cmp(&other.0.len())
+            .then_with(|| self.0.iter().rev().cmp(other.0.iter().rev()))
+    }
+}
+
+impl PartialOrd for Natural {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
 }
 
 /// Checks that a reported result is what it claims to be.
@@ -1420,6 +1461,55 @@ mod tests {
         let a = median_encounter(&clean).unwrap();
         let b = median_encounter(&with_censor).unwrap();
         assert!(b >= a, "censoring moved the median from {a} down to {b}");
+    }
+
+    /// The survival as a floating-point product over the at-risk counts of
+    /// successive encounters.
+    fn float_survival(at_risk: impl Iterator<Item = usize>) -> f64 {
+        at_risk.fold(1.0, |s, r| s * (1.0 - 1.0 / r as f64))
+    }
+
+    /// Half the runs found before any is censored puts the survival on a half
+    /// exactly, so the median is the last of them. At these counts the
+    /// floating-point product rounds above a half, and at 196 the exact
+    /// products run past one limb.
+    #[test]
+    fn the_median_is_the_middle_encounter_at_even_counts() {
+        for n in [24_usize, 28, 30, 38, 196] {
+            let float = float_survival((n / 2 + 1..=n).rev());
+            assert!(float > 0.5, "float survival {float} at {n} runs");
+            let runs: Vec<Encounter> = (1..=n)
+                .map(|c| Encounter::Found {
+                    charged: c,
+                    hops: c,
+                })
+                .collect();
+            assert_eq!(median_encounter(&runs), Some(n / 2), "{n} runs");
+        }
+    }
+
+    /// Censoring before the total can put the survival on a half too: two of
+    /// thirty censored first leave 28 at risk, and five of fifteen found, two
+    /// censored and two more found leave 2/3 * 7/8 * 6/7. The floating-point
+    /// product rounds above a half in both.
+    #[test]
+    fn censoring_before_the_total_keeps_the_median_exact() {
+        let found = |c: usize| Encounter::Found {
+            charged: c,
+            hops: 1,
+        };
+        let cens = |c: usize| Encounter::Censored { charged: c };
+
+        assert!(float_survival((15..=28).rev()) > 0.5);
+        let mut early = vec![cens(1), cens(2)];
+        early.extend((10..38).map(found));
+        assert_eq!(median_encounter(&early), Some(23));
+
+        assert!(float_survival([15, 14, 13, 12, 11, 8, 7].into_iter()) > 0.5);
+        let mut between: Vec<Encounter> = (1..=5).map(found).collect();
+        between.extend([cens(6), cens(7)]);
+        between.extend((8..=15).map(found));
+        assert_eq!(median_encounter(&between), Some(9));
     }
 
     /// LJ13 is the case with one answer everyone agrees on, so it is the one
