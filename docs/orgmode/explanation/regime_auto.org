@@ -286,28 +286,34 @@ rule back costs the rows named with it:
   against -9.66 (3/28/9, =p= 0.021). Four seeds lose the closing
   polish by 1.6e-8 to 4.8e-6, three lose the basin after =cma= takes
   the turn from a lent slice and converges in a side basin, and two end
-  in a nearby basin. No tried rule keeps it and the other rows level.
-  Lending from any slow slice brings it level (6/22/12) but puts
-  =mich10@5000= without =x0= (6/20/14, =p= 0.045), =rast10_shift@1000=
-  (2/32/6, =p= 0.043) and =styb10_45@1000= without =x0= (0/35/5, =p=
-  0.031) behind; lending from the fourth slice leaves it behind
-  (4/28/8, =p= 0.046) with =rast10_fixed@1000= and
-  =schwefel10_cec@1000= behind too, and from the sixth (5/25/10) with
-  five Rastrigin rows behind; holding the lent slice to a quarter of
-  the phase's gain per evaluation brings it level (4/26/10, =p= 0.052)
-  but =ackley10@1000= to 1.16 against 0.0694; a fifth, a sixth or a
-  half leave it behind (3/27/10, 3/27/10, 4/25/11), and so does ending
-  a phase =cma= took once its last two slices gain less than an eighth
-  or a 64th of its bar (4/25/11, 4/27/9), which also costs
-  =ackS30@5000= (1.2e-5 and 1.4e-6 against 6.2e-7). With phases that
-  keep the turn while they still find lower basins, the fifth-slice
-  lend also trails the form the two were added to on =ackS30@20000=,
-  8.6e-7 against 6.3e-7 (12/1/27, =p= 0.048; 3.9e-7 with lending from
-  any slow slice), and on =ackley10@5000= without =x0=, 4.1e-11
-  against 3.2e-11 (6/23/11), with its =-1e4= copy (1.8e-10 against
-  2.0e-10, 6/26/8) and its =+1e4= and =-1e4= controls (2.1e-11 against
-  3.2e-11, 5/27/8 each): longer =gsa= phases leave the cone at
-  Ackley's minimum unrefined on a few seeds.
+  in a nearby basin. Two tried rules bring it level, each at a cost.
+  Lending from any slow slice (6/22/12) puts =mich10@5000= without
+  =x0= (6/20/14, =p= 0.045), =rast10_shift@1000= (2/32/6, =p= 0.043)
+  and =styb10_45@1000= without =x0= (0/35/5, =p= 0.031) behind.
+  Holding the lent slice to a quarter of the phase's gain per
+  evaluation (4/26/10, =p= 0.052) puts none of the other rows measured
+  with it behind, but ends =ackley10@1000= at 1.155 against the loop's
+  0.0694 (1/28/11, =p= 0.0007): still ahead of the form before these
+  rules (2.81, 31/2/7) and of 0.10.0, its target (17.1, 40/0/0), but
+  behind the form the lend and phase rules were added to (0.0080,
+  8/11/21, =p= 0.0018), with which the loop is level; it also leaves
+  =ackley10@5000= without =x0= further behind that form than the loop
+  is (5/21/14, =p= 0.0023, against 6/23/11). Lending from the fourth
+  slice leaves it behind (4/28/8, =p= 0.046) with =rast10_fixed@1000=
+  and =schwefel10_cec@1000= behind too, and from the sixth (5/25/10)
+  with five Rastrigin rows behind; a lent slice held to a fifth, a
+  sixth or a half of that gain leaves it behind (3/27/10, 3/27/10,
+  4/25/11), and so does ending a phase =cma= took once its last two
+  slices gain less than an eighth or a 64th of its bar (4/25/11,
+  4/27/9), which also costs =ackS30@5000= (1.2e-5 and 1.4e-6 against
+  6.2e-7). With phases that keep the turn while they still find lower
+  basins, the fifth-slice lend also trails the form the two were added
+  to on =ackS30@20000=, 8.6e-7 against 6.3e-7 (12/1/27, =p= 0.048;
+  3.9e-7 with lending from any slow slice), and on =ackley10@5000=
+  without =x0=, 4.1e-11 against 3.2e-11 (6/23/11), with its =-1e4=
+  copy (1.8e-10 against 2.0e-10, 6/26/8) and its =+1e4= and =-1e4=
+  controls (2.1e-11 against 3.2e-11, 5/27/8 each): longer =gsa= phases
+  leave the cone at Ackley's minimum unrefined on a few seeds.
 - Rotated ellipsoids short of the opening budget trail an earlier form
   of this loop by three to four times, =ellR50@1000= 1.38e5 against
   4.79e4, =ellR50@5000= 37.7 against 9.20 and =ellR100@20000= 2.48
