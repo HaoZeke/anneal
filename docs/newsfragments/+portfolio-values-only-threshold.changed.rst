@@ -14,8 +14,8 @@ shifted values: the rounding of each gain, and ``s``. ``s`` changes at most
 once and never falls below that positive floor, so a bounded objective still
 allows only a bounded number of successes, as the restart guarantee needs.
 The values-only descent likewise stops on the resolution of its values, an
-iteration that lowers its value by less than ``8 eps`` of it, or by less than
-``1e-7`` of the success threshold, being slow, and until a curvature pair
+iteration that lowers its value by no more than ``8 eps`` of it, or by no more
+than ``1e-7`` of the success threshold, being slow, and until a curvature pair
 scales the inverse Hessian each line search of a finite-difference descent
 starts with a trial whose largest move is 5% of a side whatever the
 gradient's size, where a small gradient used to shorten it.
