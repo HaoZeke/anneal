@@ -144,10 +144,15 @@ multiplies every threshold exactly. The descent likewise stops on the
 resolution of its values: an iteration is slow when it lowers its value
 by less than =8 eps= of it, a few units in the last place, and its
 first trial moves at most 5% of a side whatever the gradient's size.
-Multiplying the objective by a power of two therefore leaves a
-run unchanged until the surrogate or the restart arm plays, whose
-temperatures are absolute. The main bandit's threshold scales with
-=|f|= instead and floors at 1, turning absolute below it.
+The surrogate and the restart arm take values in the run's unit, the
+power of two at or below the threshold in force when they play: the
+surrogate fits values, and sets its temperatures and their floors, in
+that unit, and the restart arm's chains weigh each rise in it against
+a temperature that starts at one, so they all but never take a rise as
+large as the last gain. Multiplying the objective by a power of two
+therefore leaves a run unchanged, short of overflow and underflow. The
+main bandit's threshold scales with =|f|= instead and floors at 1,
+turning absolute below it.
 
 The descent closes the run with the reserve and whatever shorter than
 eight evaluations is left before it. It goes on with its current

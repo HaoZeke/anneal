@@ -1406,11 +1406,11 @@ budget rather than being hand-tuned.
 
 Values-only loop: under =PortfolioPolicy::Auto= a run with no gradient
 and no declared noise goes, before any regime routing, to
-=run_values_only_portfolio= (src/methods/portfolio.rs:3355), a bandit
-over =VALUES_ONLY_ARMS= (portfolio.rs:3278: =cma=, =qn=, =gsa=, =de=,
+=run_values_only_portfolio= (src/methods/portfolio.rs:3409), a bandit
+over =VALUES_ONLY_ARMS= (portfolio.rs:3332: =cma=, =qn=, =gsa=, =de=,
 =surrogate=, =explore=) in slices of
 =max(4(d+1), min(budget/48, sqrt(4(d+1) budget)))= evaluations
-(=values_only_slice=, portfolio.rs:3293). Without =x0= it starts from
+(=values_only_slice=, portfolio.rs:3347). Without =x0= it starts from
 the best of a seeded design of =d+1= points; when the budget affords
 five gradients per coordinate, an opening finite-difference descent
 runs while its slices succeed and gain more than =1e-4= times the
@@ -1462,14 +1462,20 @@ low-discrepancy points, and once another arm has lowered the incumbent
 below every chain the worst one goes on from there. Chains run
 quenched, without a local search: each temperature step visits every
 coordinate once and keeps only improvements. The DE arm keeps one
-population member at the incumbent. The floor the restart guarantee
-needs is asymptotic in the budget: the opening, the phases and the
-descent's turns run only while they lower the incumbent, or the
-descent's value, by more than the success threshold, whose positive
-floor =s= changes at most once, so on a bounded objective they last a
-number of slices that does not grow with the budget, while the number
-of slices does, and every arm keeps a uniform share and is pulled
-infinitely often as the budget grows.
+population member at the incumbent. The surrogate and the restart arm
+take values in the run's unit, the power of two at or below the
+threshold (=SuccessScale::unit=): the surrogate fits values, and sets
+its temperatures and their floors, in it, and the restart arm's
+annealing chains weigh each rise in it against a temperature that
+starts at one, so a power of two multiplying the objective leaves the
+whole run unchanged, short of overflow and underflow. The floor the
+restart guarantee needs is asymptotic in the budget: the opening, the
+phases and the descent's turns run only while they lower the
+incumbent, or the descent's value, by more than the success threshold,
+whose positive floor =s= changes at most once, so on a bounded
+objective they last a number of slices that does not grow with the
+budget, while the number of slices does, and every arm keeps a uniform
+share and is pulled infinitely often as the budget grows.
 
 Key types and functions: top-level module doc at
 src/methods/portfolio.rs:1-46; =ContractionPosterior=
@@ -1479,7 +1485,7 @@ log-ratios of consecutive polish improvements); the endgame
 projected-gradient cycle helper (portfolio.rs:146) and its work-unit to
 =max_fevals= converter (portfolio.rs:134); a coordinate pattern-search
 fallback (portfolio.rs:182); the values-only =SuccessScale=
-(portfolio.rs:1379) and =DescentPace= (portfolio.rs:1448).
+(portfolio.rs:1407) and =DescentPace= (portfolio.rs:1483).
 
 Constants and defaults: =SLICE_GRAD_EQUIVALENTS = 4= (a slice must
 afford a few gradient-descent steps); =ROUNDS_PER_ARM = 8=;
@@ -1930,7 +1936,7 @@ Key types and functions: =CmaEs= (src/methods/cma_es.rs:119);
 =covariance_learning_evaluations= (cma_es.rs:111, the horizon
 \(\lambda/(c_1 + c_\mu)\)); =Bipop= and =CmaRegime=
 (cma_es.rs:642/621); the portfolio's =CmaArmState= and =run_cma_arm=
-(src/methods/portfolio.rs:924/3128).
+(src/methods/portfolio.rs:946/3182).
 
 Constants and defaults: =default_lambda= \(4 + \lfloor 3 \ln n
 \rfloor\) (cma_es.rs:82). In the portfolio every run is centred on the
@@ -2000,7 +2006,7 @@ line search.
 
 Key types and functions: =FdBfgs= (src/methods/fd_bfgs.rs:148);
 =FdBfgsOptions= (fd_bfgs.rs:76); the portfolio's =QnArmState= and
-=run_qn_arm= (src/methods/portfolio.rs:1013/3202).
+=run_qn_arm= (src/methods/portfolio.rs:1035/3256).
 
 Constants and defaults: =ARMIJO = 1e-4=, =MAX_LINE_TRIALS = 40=,
 =FIRST_STEP_FRACTION = 0.05=, =CENTRAL_INTERVAL_FRACTION = 0.1=,
