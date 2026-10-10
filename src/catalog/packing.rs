@@ -12,9 +12,9 @@
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 
-use ndarray::Array1;
+use ndarray::{Array1, ArrayView1};
 
-use crate::soap::SoapSpec;
+use crate::soap::{SoapSpec, local_nu3_z};
 
 mod preparation;
 use preparation::packing_rows;
@@ -90,6 +90,8 @@ pub struct PackingBook {
     /// copies of the first quench and is not a packing Good--Turing
     /// draw.
     well_visits: Vec<u64>,
+    /// Single-linkage parent of each packing cell.
+    community_parent: Vec<usize>,
     histogram_cache: RefCell<Vec<CachedHistogram>>,
     /// SOAP+ACE spec of every row in this book. [`SoapSpec::default`]
     /// matches [`PACKING_SPEC`]. A measurement book can raise `l_max`

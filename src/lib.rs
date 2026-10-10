@@ -232,7 +232,6 @@ pub mod surface_evidence;
 pub mod spectral;
 pub mod structure;
 pub mod superbasin;
-pub mod surface_evidence;
 /// How a leftover chain uses the shared packing catalog.
 pub mod swarm;
 pub mod sym_hessian;

@@ -632,12 +632,9 @@ impl SurfacePortfolio {
                 })
             })
             .collect::<Vec<_>>();
-        let evidence_schema = format!("surface-depth-v1/{block}/{parameters:?}");
+        let _ = parameters;
         Self {
             allocator: DepthAllocator::new(arms.len()),
-            own_moments: vec![RewardMoments::default(); arms.len()],
-            peer_moments: None,
-            evidence_schema,
             arms,
             shared: None,
             occupied: None,

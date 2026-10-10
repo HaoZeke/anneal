@@ -838,6 +838,9 @@ mod tests {
             maximum_steps: 20,
             geometry: MdEscapeGeometry::Euclidean,
             softening: None,
+            minimum_rise: 0.0,
+            max_rms: f64::INFINITY,
+            min_well_rms: 0.0,
         };
         // The first three samples contain a one-step wiggle. The final five
         // contain two decreases into the minimum and two increases out of it.
@@ -867,6 +870,9 @@ mod tests {
             maximum_steps: 12,
             geometry: MdEscapeGeometry::Euclidean,
             softening: None,
+            minimum_rise: 0.0,
+            max_rms: f64::INFINITY,
+            min_well_rms: 0.0,
         };
         for slope in [0.0, -1.0, 1.0] {
             let mut evaluations = 0;
@@ -895,6 +901,9 @@ mod tests {
             maximum_steps: 20,
             geometry: MdEscapeGeometry::Euclidean,
             softening: None,
+            minimum_rise: 0.0,
+            max_rms: f64::INFINITY,
+            min_well_rms: 0.0,
         };
         let energies = [99.0, 3.0, 2.0, 1.0, 2.0, 3.0, 2.0, 1.0, 2.0, 3.0];
         let mut evaluations = 0;
@@ -919,6 +928,9 @@ mod tests {
             maximum_steps: 200,
             geometry: MdEscapeGeometry::Euclidean,
             softening: None,
+            minimum_rise: 0.0,
+            max_rms: f64::INFINITY,
+            min_well_rms: 0.0,
         };
         let mut evaluate = |x: ArrayView1<f64>| Some((0.5 * x.dot(&x), x.to_owned()));
         let mut rng = StdRng::seed_from_u64(17);
@@ -942,6 +954,8 @@ mod tests {
             softening_evaluations: 0,
             potential_energy_span: 2.0,
             total_energy_span: 0.01,
+            far_position: Array1::zeros(3),
+            far_rms: 0.0,
         };
 
         assert!((feedback.observe(&report) - 0.084).abs() < 1e-12);
@@ -1180,6 +1194,9 @@ mod tests {
                     steps: softening_steps,
                     ..Default::default()
                 }),
+                minimum_rise: 0.0,
+                max_rms: f64::INFINITY,
+                min_well_rms: 0.0,
             }
         }
 
