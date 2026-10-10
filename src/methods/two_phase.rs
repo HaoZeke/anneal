@@ -847,6 +847,55 @@ impl SurfacePortfolio {
     pub fn arms(&self) -> &[Option<TwoPhase>] {
         &self.arms
     }
+
+    /// Cumulative observations this chain produced for the occupied source.
+    ///
+    /// Imports are not included. With no occupied source every arm count is
+    /// zero, so a coordinator exchange still names one schema and one arm count.
+    pub fn report(&self) -> SurfaceReport {
+        let arms = self
+            .occupied
+            .as_ref()
+            .and_then(|key| self.own_by_source.get(key).cloned())
+            .unwrap_or_else(|| vec![RewardMoments::default(); self.arms.len()]);
+        SurfaceReport {
+            schema: self.evidence_schema(),
+            arms,
+        }
+    }
+
+    /// Replace peer evidence for the occupied source.
+    ///
+    /// The held arm, local rewards, and random stream stay as they are.
+    pub fn import_peers(&mut self, report: SurfaceReport) -> Result<(), &'static str> {
+        report.validate()?;
+        if self.shared.is_some()
+            || report.schema != self.evidence_schema()
+            || report.arms.len() != self.arms.len()
+        {
+            return Err("incompatible surface evidence");
+        }
+        let Some(key) = self.occupied.clone() else {
+            return Err("incompatible surface evidence");
+        };
+        self.peer_by_source.insert(key, report.arms);
+        Ok(())
+    }
+
+    fn evidence_schema(&self) -> String {
+        match &self.occupied {
+            Some(key) => format!(
+                "source:{}/{}/r{}/{}/{}/b{}",
+                key.descriptor_schema,
+                key.descriptor_version,
+                key.region,
+                key.proposal,
+                key.quench_schema,
+                key.block
+            ),
+            None => format!("private-block:{}", self.block),
+        }
+    }
 }
 
 #[cfg(test)]
