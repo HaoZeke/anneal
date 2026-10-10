@@ -49,6 +49,15 @@ pub(super) fn refine_with_ledger<O: Objective<f64>>(
     }
     result.best_pos = best;
     result.best_val = value;
+    if result
+        .best_grad
+        .as_ref()
+        .is_some_and(|gradient| gradient.iter().any(|component| !component.is_finite()))
+    {
+        result.best_grad = None;
+        result.projected_grad_norm = f64::INFINITY;
+        result.projected_stationary = false;
+    }
     result.n_evals = obj.ledger.n_evals.load(Ordering::Relaxed) - before;
     result.n_grads = 0;
     result
