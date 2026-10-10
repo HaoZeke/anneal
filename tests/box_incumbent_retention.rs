@@ -86,9 +86,9 @@ fn check_incumbent_retention(with_gradient: bool) {
     let evaluations = objective.evaluations.lock().unwrap();
     let gradients = objective.gradients.load(Ordering::Relaxed);
     // The gradient hop is one analytic step on each replica. The values
-    // quench stops when the stencil is unfunded, which is 14 hops and 48
-    // evaluations on this budget.
-    let expected_work = if with_gradient { (4, 4) } else { (48, 0) };
+    // quench does 14 hops and then spends the unfunded remainder, which
+    // is the whole budget of 56 evaluations.
+    let expected_work = if with_gradient { (4, 4) } else { (56, 0) };
     let expected_hops = if with_gradient { 2 } else { 14 };
     assert_eq!((evaluations.len(), gradients), expected_work);
     assert_eq!((result.n_evals, result.n_grads), expected_work);

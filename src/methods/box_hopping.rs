@@ -541,6 +541,13 @@ where
             // paid value can improve the incumbent and supply peer coverage.
             let depth = values_search_depth(dim, remaining, needs_certificate);
             if remaining < 4 || depth == 0 {
+                // The stencil is unfunded. The remaining evaluations still
+                // belong to the budget, and they are not coverage hops.
+                while replica.work < replica.budget {
+                    let _ = obj.eval(replica.x.view());
+                    replica.work += 1;
+                    n_evals += 1;
+                }
                 continue;
             }
             progressed = true;
