@@ -4909,7 +4909,11 @@ fn ring_profile_memo(coordinates: &[f64]) -> Option<(usize, usize, usize)> {
 }
 
 fn occupancy_floor(scientific: &mut ScientificState) -> usize {
-    if crate::env::parsed("CATALOG_MIN_FAMILIES").is_some_and(|count: usize| count >= 1) {
+    if std::env::var("CATALOG_MIN_FAMILIES")
+        .ok()
+        .and_then(|text| text.parse::<usize>().ok())
+        .is_some_and(|count| count >= 1)
+    {
         return occupancy_min_families();
     }
     if let Some((at, held)) = scientific.floor_hold

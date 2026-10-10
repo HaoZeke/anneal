@@ -3800,7 +3800,8 @@ fn occupancy_retire_phase(
         }
         return Some(certificate.as_str().to_owned());
     }
-    if !announced.putative {
+    let mut announced_putative = announced.putative;
+    if !announced_putative {
         println!(
             "  putative {}  hops {}  best {:.6}",
             certificate.as_str(),
@@ -3808,7 +3809,8 @@ fn occupancy_retire_phase(
             snapshot.best_energy()
         );
         let _ = std::io::stdout().flush();
-        announced.putative = true;
+        announced_putative = true;
+        announced.putative = announced_putative;
     }
     None
 }
@@ -3990,92 +3992,6 @@ impl Default for HearState {
     }
 }
 
-/// Hear phase: whether a structure another replica published should be
-/// adopted at this checkpoint.
-///
-/// Adoption is off unless `CATALOG_HEAR` is set: `CATALOG_HEAR=1` adopts an
-/// incumbent deeper than the own best by 1e-3, `CATALOG_HEAR=family` adopts
-/// the coordinator's sparsest-family entry only after `CATALOG_HEAR_STALL`
-/// hops without an own improvement, whatever its energy, and never the
-/// incumbent draw; `CATALOG_NO_HEAR=1` forces it off. Off is the default
-/// because handing the incumbent to stalled replicas resets the ensemble's
-/// independent starts to one funnel: measured 1 of 48 ensembles at Marks
-/// against 16 of 48 with adoption off and 23 of 48 for private chains
-/// (LJ75, 48 replicas of 5e4, 2026-09-07), the branching scheme Procacci
-/// (2015) rejects for the same reason in nonequilibrium work averages.
-/// Sampled candidates are registered as packing references either way.
-/// Returns the candidate to adopt; the caller records the trace and fires
-/// the phase.
-fn hear_phase(
-    state: &mut HearState,
-    cooperative: &mut anneal_core::cooperative_search::CooperativeRun,
-    replica: u32,
-    snapshot: &ChainCheckpoint<'_>,
-    checkpoint_sequence: u64,
-    hear_enabled: bool,
-) -> Option<anneal_core::catalog_rpc::CatalogCandidate> {
-    use anneal_core::catalog_rpc::{INCUMBENT_SAMPLE_DRAW, SPARSE_SAMPLE_DRAW};
-    use anneal_core::cooperative_search::CatalogSampleOutcome;
-    let floor_energy = snapshot.best_energy();
-    let current_len = snapshot.current_state().len();
-    let family_mode = std::env::var("CATALOG_HEAR").is_ok_and(|v| v == "family");
-    let hear_stall: usize = anneal_core::env::parsed("CATALOG_HEAR_STALL").unwrap_or(5000);
-    if snapshot.best_energy() < state.last_best - 1e-9 {
-        state.last_best = snapshot.best_energy();
-        state.last_best_hop = snapshot.hops();
-    }
-    let stalled = snapshot.hops().saturating_sub(state.last_best_hop) >= hear_stall;
-    // After a hear, one line every ten checkpoints: where the walk is.
-    if let Some(adopted) = state.heard_structure.as_ref()
-        && checkpoint_sequence.is_multiple_of(10)
-    {
-        let same_family = snapshot
-            .current_state()
-            .as_slice()
-            .is_some_and(|here| !anneal_core::catalog::different_packing_family(here, adopted));
-        println!(
-            "  walk hops {}  energy {:.6}  best {:.6}  in-adopted-family {}",
-            snapshot.hops(),
-            snapshot.current_energy(),
-            snapshot.best_energy(),
-            same_family
-        );
-    }
-    if !hear_enabled {
-        return None;
-    }
-    for draw in [INCUMBENT_SAMPLE_DRAW, SPARSE_SAMPLE_DRAW] {
-        if family_mode && draw == INCUMBENT_SAMPLE_DRAW {
-            continue;
-        }
-        let outcome = cooperative.try_sample_candidate(replica, draw);
-        let _ = cooperative.try_sample_candidate(replica, draw);
-        if let Ok(CatalogSampleOutcome::Candidate(held)) = outcome {
-            if held.coordinates.len() != current_len {
-                continue;
-            }
-            anneal_core::catalog::include_packing_reference(&held.coordinates);
-            anneal_core::catalog::offer_known_minimum(held.energy, &held.coordinates);
-            // Mid-hop current energy sits above the ico floor. Comparing
-            // against it yanks every walk back onto ico.
-            let deeper = held.energy < floor_energy - 1e-3;
-            if family_mode {
-                if !stalled {
-                    continue;
-                }
-            } else if !deeper {
-                continue;
-            }
-            let elsewhere = snapshot.current_state().as_slice().is_none_or(|here| {
-                anneal_core::catalog::different_packing_family(here, &held.coordinates)
-            });
-            if elsewhere || (!family_mode && draw == INCUMBENT_SAMPLE_DRAW) {
-                return Some(held);
-            }
-        }
-    }
-    None
-}
 
 /// One independently budgeted LJ replica against an isolated descriptor catalog.
 fn run_capnp_catalog(
@@ -4732,6 +4648,92 @@ fn run_capnp_catalog(
     // mechanism that never fires is visible as zero rather than assumed.
     let mut phases = PhaseTally::default();
     let mut checkpoint = |snapshot: ChainCheckpoint<'_>| {
+        /// Hear phase: whether a structure another replica published should be
+        /// adopted at this checkpoint.
+        ///
+        /// Adoption is off unless `CATALOG_HEAR` is set: `CATALOG_HEAR=1` adopts an
+        /// incumbent deeper than the own best by 1e-3, `CATALOG_HEAR=family` adopts
+        /// the coordinator's sparsest-family entry only after `CATALOG_HEAR_STALL`
+        /// hops without an own improvement, whatever its energy, and never the
+        /// incumbent draw; `CATALOG_NO_HEAR=1` forces it off. Off is the default
+        /// because handing the incumbent to stalled replicas resets the ensemble's
+        /// independent starts to one funnel: measured 1 of 48 ensembles at Marks
+        /// against 16 of 48 with adoption off and 23 of 48 for private chains
+        /// (LJ75, 48 replicas of 5e4, 2026-09-07), the branching scheme Procacci
+        /// (2015) rejects for the same reason in nonequilibrium work averages.
+        /// Sampled candidates are registered as packing references either way.
+        /// Returns the candidate to adopt; the caller records the trace and fires
+        /// the phase.
+        fn hear_phase(
+            state: &mut HearState,
+            cooperative: &mut anneal_core::cooperative_search::CooperativeRun,
+            replica: u32,
+            snapshot: &ChainCheckpoint<'_>,
+            checkpoint_sequence: u64,
+            hear_enabled: bool,
+        ) -> Option<anneal_core::catalog_rpc::CatalogCandidate> {
+            use anneal_core::catalog_rpc::{INCUMBENT_SAMPLE_DRAW, SPARSE_SAMPLE_DRAW};
+            use anneal_core::cooperative_search::CatalogSampleOutcome;
+            let floor_energy = snapshot.best_energy();
+            let current_len = snapshot.current_state().len();
+            let family_mode = std::env::var("CATALOG_HEAR").is_ok_and(|v| v == "family");
+            let hear_stall: usize = anneal_core::env::parsed("CATALOG_HEAR_STALL").unwrap_or(5000);
+            if snapshot.best_energy() < state.last_best - 1e-9 {
+                state.last_best = snapshot.best_energy();
+                state.last_best_hop = snapshot.hops();
+            }
+            let stalled = snapshot.hops().saturating_sub(state.last_best_hop) >= hear_stall;
+            // After a hear, one line every ten checkpoints: where the walk is.
+            if let Some(adopted) = state.heard_structure.as_ref()
+                && checkpoint_sequence.is_multiple_of(10)
+            {
+                let same_family = snapshot
+                    .current_state()
+                    .as_slice()
+                    .is_some_and(|here| !anneal_core::catalog::different_packing_family(here, adopted));
+                println!(
+                    "  walk hops {}  energy {:.6}  best {:.6}  in-adopted-family {}",
+                    snapshot.hops(),
+                    snapshot.current_energy(),
+                    snapshot.best_energy(),
+                    same_family
+                );
+            }
+            if !hear_enabled {
+                return None;
+            }
+            for draw in [INCUMBENT_SAMPLE_DRAW, SPARSE_SAMPLE_DRAW] {
+                if family_mode && draw == INCUMBENT_SAMPLE_DRAW {
+                    continue;
+                }
+                let outcome = cooperative.try_sample_candidate(replica, draw);
+                let _ = cooperative.try_sample_candidate(replica, draw);
+                if let Ok(CatalogSampleOutcome::Candidate(held)) = outcome {
+                    if held.coordinates.len() != current_len {
+                        continue;
+                    }
+                    anneal_core::catalog::include_packing_reference(&held.coordinates);
+                    anneal_core::catalog::offer_known_minimum(held.energy, &held.coordinates);
+                    // Mid-hop current energy sits above the ico floor. Comparing
+                    // against it yanks every walk back onto ico.
+                    let deeper = held.energy < floor_energy - 1e-3;
+                    if family_mode {
+                        if !stalled {
+                            continue;
+                        }
+                    } else if !deeper {
+                        continue;
+                    }
+                    let elsewhere = snapshot.current_state().as_slice().is_none_or(|here| {
+                        anneal_core::catalog::different_packing_family(here, &held.coordinates)
+                    });
+                    if elsewhere || (!family_mode && draw == INCUMBENT_SAMPLE_DRAW) {
+                        return Some(held);
+                    }
+                }
+            }
+            None
+        }
         let action = with_pending_deposits(
             &mut pending_deposits,
             shared_bias_enabled,
