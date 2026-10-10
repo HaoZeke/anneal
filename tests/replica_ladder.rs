@@ -8,11 +8,13 @@
 
 use anneal_core::dos::EnergyBias;
 use anneal_core::methods::cluster_hopping::{
-    Config, Ledger, Outcome, optimize, optimize_with_gradient,
+    Config, Ledger, MoveLibrary, Outcome, optimize, optimize_with_gradient, run,
 };
 use anneal_core::methods::warm_lbfgs::WarmLbfgs;
 use anneal_core::potentials::PairPotential;
 use ndarray::{Array1, ArrayView1};
+use rand::SeedableRng;
+use rand::rngs::StdRng;
 
 const BUDGET: usize = 30_000;
 const SEEDS: u64 = 8;
@@ -195,6 +197,84 @@ fn a_rung_switch_brings_each_state_its_own_basin() {
         ladder >= 0.9 * single,
         "the ladder counted {ladder:.3} of its quenches as returns against {single:.3} on a single chain"
     );
+}
+
+/// A rung that resumes from a parked state measures its next quench against
+/// that state's basin, counted exactly. Every quench here returns, so a rung
+/// that kept the basin the previous rung stood in would count a return after
+/// a refused swap as a known or a new basin.
+///
+/// Each quench goes back to the structure its trial was drawn from, told apart
+/// by size: a compact one for the coldest rung's start and a spread one for
+/// the rungs that start from random clusters in the wide container. The
+/// compact one is lower, so the coldest rung refuses the spread state its
+/// neighbours hold and a switch changes the state.
+#[test]
+fn a_resumed_rung_measures_returns_against_its_own_basin() {
+    let mut cfg = Config::for_cluster(6);
+    cfg.replicas = 3;
+    cfg.swap_period = 3;
+    cfg.minima_hopping = true;
+    cfg.move_library = MoveLibrary::WalesDoye;
+    cfg.container = 100.0;
+    // A screened trial counts as a return whatever the chain holds, so every
+    // trial is quenched.
+    cfg.screen_margin = 100.0;
+    let compact = octahedron();
+    let spread = &compact * 30.0;
+    let mut relax = |ledger: &mut Ledger, x: ArrayView1<f64>, steps: usize| {
+        for _ in 0..steps {
+            if !ledger.charge() {
+                break;
+            }
+        }
+        if gyration(x) < 8.0 {
+            (-5.0, compact.clone())
+        } else {
+            (0.0, spread.clone())
+        }
+    };
+    let mut ledger = Ledger::new(BUDGET);
+    let mut rng = StdRng::seed_from_u64(31);
+
+    let out = run(&cfg, compact.view(), &mut ledger, &mut relax, &mut rng);
+
+    let (same, known, new) = out.visit_counts;
+    assert!(
+        out.swaps_accepted < out.swaps_tried && same > 0,
+        "no swap was refused: {} of {} accepted, {same} returns",
+        out.swaps_accepted,
+        out.swaps_tried
+    );
+    assert_eq!(
+        (known, new),
+        (0, 0),
+        "quenches that all returned were counted as {known} known and {new} new basins"
+    );
+}
+
+/// Six points on the axes, 1.1 apart along each edge.
+fn octahedron() -> Array1<f64> {
+    let a = 1.1 / std::f64::consts::SQRT_2;
+    Array1::from(vec![
+        a, 0.0, 0.0, -a, 0.0, 0.0, 0.0, a, 0.0, 0.0, -a, 0.0, 0.0, 0.0, a, 0.0, 0.0, -a,
+    ])
+}
+
+/// Root-mean-square distance of a cluster's points from their centroid.
+fn gyration(x: ArrayView1<f64>) -> f64 {
+    let points = x.len() / 3;
+    let centre: Vec<f64> = (0..3)
+        .map(|k| (0..points).map(|i| x[3 * i + k]).sum::<f64>() / points as f64)
+        .collect();
+    let squares = (0..points)
+        .map(|i| {
+            (0..3)
+                .map(|k| (x[3 * i + k] - centre[k]).powi(2))
+                .sum::<f64>()
+        })
+        .sum::<f64>();
+    (squares / points as f64).sqrt()
 }
 
 /// The energy bias is one function on every rung, so its tempering factor is
