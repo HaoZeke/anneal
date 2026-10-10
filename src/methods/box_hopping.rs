@@ -539,10 +539,10 @@ where
             }
             // One scalar proposal needs no full quench or certificate. Its
             // paid value can improve the incumbent and supply peer coverage.
+            // A later unfunded tail is spent without further hops.
             let depth = values_search_depth(dim, remaining, needs_certificate);
-            if remaining < 4 || depth == 0 {
-                // The stencil is unfunded. The remaining evaluations still
-                // belong to the budget, and they are not coverage hops.
+            let opening = replica.hops == 0 && remaining > 0;
+            if (remaining < 4 || depth == 0) && !opening {
                 while replica.work < replica.budget {
                     let _ = obj.eval(replica.x.view());
                     replica.work += 1;
@@ -569,7 +569,7 @@ where
                 &mut replica.rng,
             );
             let launch = FirstEvaluation::new(obj);
-            let polish = values_quench_polish(&launch, replica.trial.clone(), depth);
+            let polish = values_quench_polish(&launch, replica.trial.clone(), depth.max(1));
             if let Some(energy) = launch.energy() {
                 coverage.sample(index, replica.trial.view(), energy);
             }

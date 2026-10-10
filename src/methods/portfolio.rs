@@ -3382,7 +3382,11 @@ where
             if ledger.exhausted() {
                 break;
             }
-            let _ = obj.eval(bounds.clip(row).view());
+            // A peer records a prepared point. The opening design is a
+            // paid sample, so it joins that queue before it is evaluated.
+            let mut pos = bounds.clip(row);
+            obj.prepare_proposal(None, &mut pos);
+            let _ = obj.eval(pos.view());
         }
     }
     states.success_floor = values_only_floor(ledger.incumbent_value());
