@@ -233,9 +233,10 @@ records one hop in R, so the estimate learns about R times slower and
 first takes over after about R times =flat_sweep= hops: at hop 750
 rather than 400 on two rungs at the default sweep. The energy bias is
 one function every rung reads over its own temperature; its tempering
-factor and its deposits read the temperature a single chain would hop
-at, so =(gamma - 1) T = sigma= holds whichever rung fills the sample or
-deposits.
+factor and its deposits read the temperature the coldest rung would hop
+at from the state it holds, so neither depends on which rung fills the
+sample or deposits, and =(gamma - 1) T = sigma= holds at the
+temperature the sample was filled at.
 
 ** Stall escapes
 

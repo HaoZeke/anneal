@@ -198,8 +198,9 @@ fn a_rung_switch_brings_each_state_its_own_basin() {
 }
 
 /// The energy bias is one function on every rung, so its tempering factor is
-/// set at the temperature a single chain hops at, whichever rung fills its
-/// first sample, and `(gamma - 1) T` is the sample's spread on any ladder.
+/// set at the temperature the coldest rung hops at, whichever rung fills its
+/// first sample. Under a held temperature that is `temperature` on any ladder,
+/// and `(gamma - 1) T` is the sample's spread.
 #[test]
 fn the_energy_bias_tempers_alike_whichever_rung_fills_its_sample() {
     let mut cfg = Config::recommended(13);
@@ -222,6 +223,55 @@ fn the_energy_bias_tempers_alike_whichever_rung_fills_its_sample() {
             "swap period {swap_period}: (gamma - 1) T is {tempered} against a spread of {spread}"
         );
     }
+}
+
+/// Under the budget window a temperature follows the gap of the state it is
+/// read at, so a factor set at the temperature of whichever rung fills the
+/// sample would follow that rung. Set at the coldest rung's, from the state
+/// that rung holds, it is set at one temperature whether the cold rung hands
+/// over before the hop that fills the sample or holds through it.
+///
+/// The sample fills on hop 32, with the cold rung holding the state it reached
+/// on hop 31: the hot rung fills it when the cold one offers a swap after 31
+/// hops and is refused, and the cold rung when it holds for 32. Measured over
+/// these seeds, the five whose swap is refused fill at one temperature to
+/// rounding, where the filling rung's temperatures are up to 2.2 times apart.
+#[test]
+fn the_energy_bias_tempers_at_the_coldest_rung_under_the_budget_window() {
+    let mut cfg = Config::derived(13);
+    assert!(cfg.budget_window && !cfg.statistical_temperature && !cfg.flat_histogram);
+    cfg.replicas = 2;
+    cfg.ladder_top = 10.0;
+    cfg.energy_bias = true;
+    cfg.flat_sweep = 32;
+    cfg.max_hops = Some(32);
+    let fill = |swap_period: usize, seed: u64| {
+        let mut cfg = cfg.clone();
+        cfg.swap_period = swap_period;
+        let out = lj_run_with(&cfg, seed, 5_000, false);
+        let bias = out.energy_bias.expect("the sample fills on the last hop");
+        (
+            bias.w0 * EnergyBias::FILL_DEPOSITS / (bias.gamma - 1.0),
+            out.swaps_accepted,
+        )
+    };
+    let mut compared = 0;
+    for seed in 0..SEEDS {
+        let (handed, swapped) = fill(31, seed);
+        if swapped > 0 {
+            continue;
+        }
+        let (held, _) = fill(32, seed);
+        assert!(
+            (handed - held).abs() <= 1e-9 * held,
+            "seed {seed}: the hot rung filled the sample at {handed} and the cold one at {held}"
+        );
+        compared += 1;
+    }
+    assert!(
+        compared >= SEEDS / 2,
+        "only {compared} seeds refused the swap"
+    );
 }
 
 /// A hop the surrogate decides is tested on the bare energy and one it
