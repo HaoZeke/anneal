@@ -341,8 +341,8 @@ replaced rule back costs the rows named with it:
 
 Of the 88 offset and =x1e-6= copies, five trail their control at
 =p < 0.05=, where chance alone gives about four and none passes a
-correction for the 88 tests: =fit6@1000= with =+1e2= (-4.82 against
--4.82, 16/0/24), =ackS30@5000= with =+1e2= (1.05e-6 against 6.9e-7,
+correction for the 88 tests: =fit6@1000= with =+1e2= (-4.825 against
+-4.821, 16/0/24), =ackS30@5000= with =+1e2= (1.05e-6 against 6.9e-7,
 11/8/21), =ellR30@1000= with =-1e4= (5589 against 5589, 12/0/28, the
 runs differing by about =1e-6= of the value) and =rosen30= with
 =x1e-6= at 1000 (74.1 against 74.1, 12/1/27) and at 5000 (22.1 against
