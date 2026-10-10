@@ -134,7 +134,10 @@ pub struct Config {
     /// they do under [`Config::budget_window`]. Under minima hopping, and under
     /// the flat-histogram rule once its window exists, a hop is accepted
     /// without a temperature, so there the ratio reaches only the swap and the
-    /// bias terms.
+    /// bias terms. The swap exchanges the weight the acceptance applies: the
+    /// flat-histogram cost cancels from it (see [`Config::flat_histogram`]),
+    /// and minima hopping, whose threshold has no weight, swaps by the
+    /// Metropolis factor.
     ///
     /// This is the standard non-local mechanism for a multi-funnel landscape
     /// and the measurements here say why it is the right one to reach for: no
@@ -314,6 +317,13 @@ pub struct Config {
     /// sampled energy histogram flat, so the deep and rare energies get the
     /// same share of the run as the shallow and abundant ones. See
     /// [`crate::dos`].
+    ///
+    /// On a replica ladder every rung reads the one cost and none divides it
+    /// by its temperature, so the rungs' acceptance differs only in how it
+    /// weighs the biases, and a swap is accepted on the biases alone: the cost
+    /// cancels from the factor and takes the energies with it. The first sweep,
+    /// before the cost exists, swaps by the Metropolis factor without the
+    /// energy bias, which that sweep does not read.
     pub flat_histogram: bool,
     /// Trials between weight refreshes. The weight is frozen across a sweep so
     /// each sweep is an exact chain for its own target rather than an adaptive

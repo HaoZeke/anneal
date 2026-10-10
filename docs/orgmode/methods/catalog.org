@@ -1458,7 +1458,10 @@ so the factor evaluates each rung's bias at both states, at the
 temperatures the two rungs would hop at from the states they hold, and
 the funnel bias, the packing pile and the energy bias all rungs share
 enter through the difference of the two inverse temperatures. It
-reduces to the =MetropolisExchange= rule when the biases are equal. A
+reduces to the =MetropolisExchange= rule when the biases are equal.
+Under =flat_histogram= every rung reads the one flat-histogram cost
+and none divides it by its temperature, so the cost cancels from the
+factor with the energies and a swap is accepted on the biases alone. A
 state carries its basin and its validation gradient from rung to rung,
 so the first step a rung takes after its turn comes round is recorded
 from the state it holds, and the swap reads the pile at that basin.
