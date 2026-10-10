@@ -98,11 +98,14 @@ fn replica_origin(replica: usize) -> Array1<f64> {
 }
 
 fn gsa_seed(replica: usize) -> u64 {
-    // The values-only GSA chain is this mix of the replica seed. It does
-    // not follow the shared arm generator.
+    // The opening pays one CMA-ES slice before the first quenched chain.
+    // Each arm call draws once. The chain seed is that second draw mixed
+    // with the call count.
     let replica_seed = SEED ^ (replica as u64).wrapping_mul(0x9E37_79B9);
-    let front = (replica_seed ^ 0xBEEF).wrapping_add(2);
-    StdRng::seed_from_u64(front).random::<u64>() ^ 2
+    let mut rng = StdRng::seed_from_u64(replica_seed);
+    let _cma = rng.random::<u64>();
+    let drawn = rng.random::<u64>();
+    drawn ^ 2
 }
 
 /// Quenched dual-annealing strategy: the all-coordinate half is skipped,

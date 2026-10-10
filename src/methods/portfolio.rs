@@ -1233,11 +1233,6 @@ struct ArmStates {
     /// the DE population starts with the incumbent, as SciPy's
     /// differential_evolution places its `x0`.
     values_only: bool,
-    /// Portfolio seed while the values-only loop owns the arms. The first
-    /// quenched GSA chain is mixed from this seed alone, so a coordinate
-    /// replay can name that chain after other arms have drawn the shared
-    /// generator.
-    values_stream: Option<u64>,
     /// The values-only loop's scale of success, started once the start is
     /// evaluated and fed every slice.
     success: SuccessScale,
@@ -2658,18 +2653,10 @@ fn run_arm<O, G>(
     let dim = bounds.dims;
     states.seed_counter += 1;
     let drawn = rng.random::<u64>();
-    // Quenched GSA is a function of the portfolio seed. The shared draw
-    // is consumed so later arms keep the same sequence.
-    let seed = if matches!(arm, ArmKind::Gsa)
-        && states.values_only
-        && states.gsa.is_none()
-        && let Some(stream) = states.values_stream
-    {
-        let front = (stream ^ 0xBEEF).wrapping_add(2);
-        StdRng::seed_from_u64(front).random::<u64>() ^ 2
-    } else {
-        drawn ^ states.seed_counter
-    };
+    // One draw per arm call. Later arms keep the same sequence, and the
+    // first quenched chain is this draw, so a replay names it by taking
+    // the same draws the opening took.
+    let seed = drawn ^ states.seed_counter;
     match arm {
         ArmKind::Explore => {
             // QMC restart arm: screened Cranley-Patterson Halton starts,
@@ -3739,7 +3726,6 @@ where
             .collect();
     }
     states.values_only = true;
-    states.values_stream = Some(seed);
     if ledger.incumbent_value().is_none() {
         let count = gradient.min(budget.div_ceil(10));
         let design = eindir_core::shifted_low_discrepancy_points(
