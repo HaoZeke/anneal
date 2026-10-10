@@ -1028,30 +1028,23 @@ impl Config {
 
     /// Settings for `n_points` at the campaign's measured defaults.
     ///
-    /// The frozen arm is [`Config::for_cluster`] plus Thompson allocation,
-    /// the return screen, and orbit completion on a new basin, which is the
-    /// `thompson,rscreen,orbit` stack the campaigns were measured under. At
-    /// the paper budgets, one chain a seed: LJ38 \(4\times 10^{5}\) 24/24,
-    /// LJ55 \(1\times 10^{6}\) 24/24, LJ75 \(4\times 10^{6}\) 31/48 Marks,
-    /// LJ98 \(4\times 10^{6}\) 30/48 Leary.
-    ///
-    /// The earlier stack — LeanBurst, depth-rewarded Thompson, tabu and
-    /// symmetrisation on stall — is not this arm and is not a default. Depth
-    /// reward is what costs LJ75: `thompson,rscreen` alone reaches Marks in
-    /// 18/48, depth reward alone in 6/48, and the two together in 4/48.
-    /// Orbit completion is what recovers it. Those flags remain settable and
-    /// the stack is reachable through [`Config::packing_superbasin`]; it is
-    /// no longer what a caller who wants answers starts from.
-    ///
-    /// [`Config::for_cluster`] remains the plain Wales-Doye protocol, kept as
-    /// the comparison baseline.
-    ///
-    /// Basin identity stays the measured pair-spectrum merge at 0.7.
+    /// LeanBurst carries the observed-cloud SOAP pullback. Thompson
+    /// allocates that arm with surface, single, burst, and sym. The return
+    /// screen is on, and a stall takes tabu and symmetrisation. Basin
+    /// identity stays the measured pair-spectrum merge at 0.7.
+    /// [`Config::for_cluster`] remains the plain Wales-Doye baseline.
+    /// [`Config::packing_superbasin`] adds the unmeasured SOAP-packing key
+    /// and adaptive height.
     pub fn recommended(n_points: usize) -> Self {
         let mut cfg = Self::for_cluster(n_points);
+        cfg.move_library = MoveLibrary::LeanBurst;
         cfg.allocate_moves = true;
+        cfg.depth_reward = true;
+        cfg.tabu_on_stall = true;
         cfg.return_screen = true;
-        cfg.orbit_complete_on_new = true;
+        cfg.symmetrise_on_stall = true;
+        cfg.soap_class_residual = false;
+        cfg.soap_mode = SoapProposalMode::Flexible;
         cfg
     }
 
@@ -1099,10 +1092,8 @@ impl Config {
     /// twenty revisits. Hit rates are not the recommended LJ38/LJ75
     /// campaign numbers.
     ///
-    /// The LeanBurst flags are set here rather than inherited: the occupancy
-    /// campaigns were measured on that stack, and [`Config::recommended`] is
-    /// now the `thompson,rscreen,orbit` arm. Naming them keeps those harvests
-    /// meaning what they meant when they were run.
+    /// The LeanBurst flags are named here rather than left to inheritance,
+    /// so the occupancy harvests keep the stack they were measured on.
     pub fn packing_superbasin(n_points: usize) -> Self {
         let mut cfg = Self::for_cluster(n_points);
         cfg.move_library = MoveLibrary::LeanBurst;
