@@ -67,17 +67,20 @@ these rules (medians, "A against B" with A's wins/ties/losses, two runs tying
 when their values differ by at most ``1e-9 max(1, |b|)`` with ``b`` B's, rows
 named ``problem@budget`` from ``x0`` as in the regime notes), the loop trails
 on the following rows, and putting a replaced rule back, with the other rules
-in place, costs the rows named with it. The rate hand-over short of the
-opening budget, against two fixed GSA slices after the descent's first:
-``ellS30@1000`` 1673 against 711 (7/0/33), ``ellS50@5000`` 6.88 against 1.52
-(2/0/38), ``ellS100@5000`` 1839 against 1110 (2/0/38), ``ellS100@20000`` 1.17
-against 0.0282 (0/0/40), ``ellR100@20000`` 2.48 against 2.41 (19/0/21),
-``rosen100@20000`` 74.9 against 72.0 (17/0/23), ``stybR30@1000`` -1057 against
--1057 (4/18/18), ``levy100@20000`` 0.0416 against 1.0e-11 (5/15/20),
-``rast100_shift@20000`` 9.95 against 7.96 (9/3/28) and ``rastS100@20000`` 10.9
-against 7.96 (8/3/29); the two slices back cost ``ackS50@5000`` 4.31 against
-2.94 and ``ackS100@5000`` 13.2 against 5.94 (1/0/39 each), ``ellR30@1000``
-12557 against 5589 (3/0/37), ``ellR100@5000`` 20110 against 15750 (5/0/35) and
+in place, costs the rows named with it. The opening's bar and lending from any
+slow slice or at a quarter of the phase's pace were measured on the loop as it
+is, the other rules put back and alternatives before the descent's slow test
+had its floor. The rate hand-over short of the opening budget, against two
+fixed GSA slices after the descent's first: ``ellS30@1000`` 1673 against 711
+(7/0/33), ``ellS50@5000`` 6.88 against 1.52 (2/0/38), ``ellS100@5000`` 1839
+against 1110 (2/0/38), ``ellS100@20000`` 1.17 against 0.0282 (0/0/40),
+``ellR100@20000`` 2.48 against 2.41 (19/0/21), ``rosen100@20000`` 74.9 against
+72.0 (17/0/23), ``stybR30@1000`` -1057 against -1057 (4/18/18),
+``levy100@20000`` 0.0416 against 1.0e-11 (5/15/20), ``rast100_shift@20000``
+9.95 against 7.96 (9/3/28) and ``rastS100@20000`` 9.95 against 7.96 (9/3/28);
+the two slices back cost ``ackS50@5000`` 4.31 against 2.94 and
+``ackS100@5000`` 13.2 against 5.94 (1/0/39 each), ``ellR30@1000`` 12557
+against 5589 (3/0/37), ``ellR100@5000`` 20110 against 15750 (5/0/35) and
 ``rosen100@5000`` 252 against 168 (7/0/33).
 The opening's bar on its recent gains, against an opening that goes on while
 each slice is a success: ``ellS30@5000`` 0.0626 against 0 (0/13/27),
@@ -89,20 +92,19 @@ bar brings these level, ``ellR30@5000`` and its copies at 0 (0/38/2), but
 costs ``ackS30@5000`` 3.8e-6 against 6.2e-7 (1/18/21), ``levyR30@5000`` 3.51
 against 0.544 (5/0/35) and ``levy30@5000`` 7.2e-7 against 4.5e-10 (6/17/17).
 Lending from a GSA phase's fifth slice: ``mich10@5000`` -9.655 against -9.66
-(3/28/9, p 0.021). Lending from any slow slice brings it level but puts
-``mich10@5000`` without ``x0``, ``rast10_shift@1000`` and ``styb10_45@1000``
-without ``x0`` behind; a lent slice held to a quarter of the phase's pace
-brings it level (4/26/10, p 0.052) and puts none of the other rows measured
-with it behind, but ends ``ackley10@1000`` at 1.155 against the loop's 0.0694
-(1/28/11), still ahead of the form before these rules (2.81) and of 0.10.0
-(17.1) but behind the form the lend and phase rules were added to (0.0080,
-8/11/21); from the fourth slice the lend leaves it behind with
-``rast10_fixed@1000`` and ``schwefel10_cec@1000``, and ending a phase CMA-ES
-took once its slices slow leaves it behind and costs ``ackS30@5000``. With
+(1/31/8, p 0.020). Lending from any slow slice brings it level but puts
+``styb10_45@1000`` and ``mich10@1000`` without ``x0`` behind; a lent slice
+held to a quarter of the phase's pace leaves it behind (2/28/10, p 0.039) and
+ends ``ackley10@1000`` at 1.155 against the loop's 0.0694 (1/28/11), still
+ahead of the form before these rules (2.81) and of 0.10.0 (17.1) but behind
+the form the lend and phase rules were added to (0.0080, 8/11/21). On the loop
+without the descent's floor, the lend from the fourth slice left it behind
+with ``rast10_fixed@1000`` and ``schwefel10_cec@1000``, and ending a phase
+CMA-ES took once its slices slow left it behind and cost ``ackS30@5000``. With
 phases that keep the turn while they still find lower basins, the fifth-slice
-lend also trails the form the two were added to on ``ackS30@20000``, 8.6e-7
-against 6.3e-7 (12/1/27, p 0.048), and on ``ackley10@5000`` without ``x0``,
-4.1e-11 against 3.2e-11 (6/23/11); from ``x0`` that row is level with that
+lend also trails the form the two were added to on ``ackS30@20000``, 9.1e-7
+against 6.3e-7 (12/1/27, p 0.045), and on ``ackley10@5000`` without ``x0``,
+4.0e-11 against 3.2e-11 (6/24/10); from ``x0`` that row is level with that
 form (8/28/4), but its -1e4 copy and two controls, which start from ``x0``,
 trail it.
 Rotated ellipsoids short of the opening budget trail an earlier form of the
@@ -112,7 +114,7 @@ loop: ``ellR50@1000`` 1.38e5 against 4.79e4, ``ellR50@5000`` 37.7 against
 to 17.4 and ``ellR100@20000`` to 0.890 but costs ``ellR30@1000`` (20880),
 ``ellR100@5000`` (41370), ``ackS50@5000`` (3.26), ``ackS100@5000`` (9.86),
 ``levy100@5000``, ``rosen50@5000`` and ``stybS100@5000``. Against 0.10.0 the
-loop trails on rotated Rastrigin and Levy: ``rastR30@1000`` 281 against 173
+loop trails on rotated Rastrigin and Levy: ``rastR30@1000`` 280 against 173
 (3/0/37), ``rastR50@5000`` 427 against 296 (1/0/39), ``rastR100@5000`` 893
 against 650 (9/0/31), ``rastR100@20000`` 870 against 470 (1/0/39),
 ``levyR50@5000`` 98.8 against 69.8 (8/0/32) and ``levyR100@20000`` 203 against
