@@ -942,7 +942,10 @@ where
             on_known && sat,
             stall,
         );
-        if adopt_bank && catalog_best < best - 1e-6 && let Some(c) = client.as_mut() {
+        if adopt_bank
+            && catalog_best < best - 1e-6
+            && let Some(c) = client.as_mut()
+        {
             match c.sample(u64::MAX) {
                 Ok(Some((reported_energy, x)))
                     if x.len() == expected
