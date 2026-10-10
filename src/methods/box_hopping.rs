@@ -539,12 +539,10 @@ where
             }
             // One scalar proposal needs no full quench or certificate. Its
             // paid value can improve the incumbent and supply peer coverage.
-            // A remainder that cannot fund the stencil is still measured, so
-            // the incumbent sees it, but it is not a coverage hop.
-            let funded = values_search_depth(dim, remaining, needs_certificate);
-            let depth = funded.max(1);
+            let depth = values_search_depth(dim, remaining, needs_certificate).max(1);
             progressed = true;
             replica.generation += 1;
+            replica.hops += 1;
             let temp = temperatures.at(index, replica.generation);
             coverage.hear(index, temp);
             let escape = replica.feedback.escape();
@@ -604,10 +602,6 @@ where
                 }
                 continue;
             };
-            if funded == 0 {
-                continue;
-            }
-            replica.hops += 1;
             if report.is_none()
                 && let Some(launch_cv) = launch
                     .energy()
