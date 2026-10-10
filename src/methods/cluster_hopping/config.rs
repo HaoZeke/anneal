@@ -92,6 +92,17 @@ pub struct Config {
     /// sphere-model descent boundary. Must lie strictly below two.
     pub theta: f64,
     /// Set the temperature by the budget-window law rather than holding it.
+    ///
+    /// On a replica ladder the law sets the coldest rung's temperature, read
+    /// at the gap of whichever rung is asking, and every rung hops at its
+    /// [`Config::ladder_top`] ratio times it. The law's window comes from the
+    /// gap and the remaining budget, so it moves by orders of magnitude over a
+    /// run; a ladder held at fixed multiples of `temperature` would drift
+    /// above and below it, and one left to the law alone would be flat. Each
+    /// declined rise reaches the barrier estimate divided by the declining
+    /// rung's ratio, so the escape floor asks every rung to clear, at its own
+    /// temperature, what it fails to cross, and the larger rises a hot rung
+    /// declines do not heat the coldest one.
     pub budget_window: bool,
     /// Choose the move kernel by discounted Thompson allocation.
     pub allocate_moves: bool,
@@ -104,9 +115,23 @@ pub struct Config {
     pub max_hops: Option<usize>,
     /// Replicas run on a temperature ladder, with periodic swaps.
     ///
-    /// One is the plain chain. Above one, the driver runs a ladder and offers
-    /// swaps through [`crate::exchange::Exchange`], which is the crate's own
-    /// operator and satisfies detailed balance by construction.
+    /// One is the plain chain. Above one, the driver runs a ladder on the one
+    /// budget: rung `k` hops at its [`Config::ladder_top`] ratio times the
+    /// temperature a single chain would hop at, one rung at a time, each with
+    /// its own bias. Every [`Config::swap_period`] hops the active rung offers
+    /// to exchange states with the next one up, the hottest with the coldest,
+    /// and that rung hops next. The offer is accepted by the bias-exchange
+    /// factor that each rung's bias evaluated at both states gives, at the
+    /// temperatures the two rungs would hop at from the states they hold; with
+    /// equal biases it is the Metropolis exchange of
+    /// [`crate::exchange::MetropolisExchange`].
+    ///
+    /// A rung's temperature is what its acceptance, its deposits and the swap
+    /// read; proposals keep the move scale `temperature` sets on every rung, as
+    /// they do under [`Config::budget_window`]. Under minima hopping, and under
+    /// the flat-histogram rule once its window exists, a hop is accepted
+    /// without a temperature, so there the ratio reaches only the swap and the
+    /// bias terms.
     ///
     /// This is the standard non-local mechanism for a multi-funnel landscape
     /// and the measurements here say why it is the right one to reach for: no
@@ -301,6 +326,15 @@ pub struct Config {
     /// The Metropolis rule and the basin bias both measure well and both stand;
     /// what this replaces is the one hand-set number they sit on. See
     /// [`crate::dos::DensityOfStates::temperature`].
+    ///
+    /// On a replica ladder the estimate, clamped to its band around
+    /// `temperature`, is the coldest rung's temperature and every rung hops at
+    /// its [`Config::ladder_top`] ratio times it, so each rung's band sits
+    /// around its own ladder temperature. The estimate is the temperature at
+    /// which a chain at that energy is just mobile, which is the coldest rung's
+    /// job; the ratio keeps the hotter rungs that many times above it. Clamping
+    /// every rung to the one band instead would cut the top of the ladder off
+    /// wherever the estimate runs high.
     pub statistical_temperature: bool,
     /// Deposit a well-tempered bias in quenched energy.
     ///
@@ -439,17 +473,26 @@ pub struct Config {
     ///
     /// A bias pushes a chain out of where it sits and a low temperature keeps
     /// it in, so a cold rung carrying a full bias is evicted from good basins
-    /// and cannot return. Measured on LJ75, that inverts the ladder: the
-    /// coldest rung held -391.3 while the hottest held -396.0, where a working
-    /// ladder has the deepest structure at the cold end.
+    /// and cannot return. Measured on LJ75 with every rung hopping at
+    /// `temperature`, that inverted the ladder: the coldest rung held -391.3
+    /// while the hottest held -396.0, where a working ladder has the deepest
+    /// structure at the cold end. With each rung at its own temperature a
+    /// deposit of height `h` weighs `h / T_k` in the acceptance, so one height
+    /// on every rung pushes the coldest [`Config::ladder_top`] times as hard
+    /// as the hottest.
     ///
-    /// Scaling the height by the rung's temperature ratio leaves the coldest
-    /// rung nearly a plain hopping chain, which polishes, and the hottest
-    /// carrying the full bias, which crosses. The swap then moves a crossing
-    /// down to a chain that can refine it, which is the division of labour the
-    /// ladder exists for.
+    /// Scaling the height by the rung's temperature ratio makes `h_k / T_k`
+    /// the same on every rung: the hottest carries the configured height and
+    /// the coldest a `1 / ladder_top` share, so no rung is pushed out of good
+    /// basins harder than another and the coldest can polish while the hottest
+    /// crosses. The swap then moves a crossing down to a chain that can refine
+    /// it, which is the division of labour the ladder exists for.
     pub bias_by_rung: bool,
-    /// Hottest temperature on the ladder, as a multiple of `temperature`.
+    /// Hottest rung's temperature as a multiple of the coldest's.
+    ///
+    /// Rung `k` of `R` hops at `ladder_top^(k/(R-1))` times the temperature a
+    /// single chain would hop at: `temperature`, or the adaptive one under
+    /// [`Config::budget_window`] or [`Config::statistical_temperature`].
     pub ladder_top: f64,
     /// Abandon a trial whose short relaxation is heading back to the current
     /// basin, before paying for the full one.
