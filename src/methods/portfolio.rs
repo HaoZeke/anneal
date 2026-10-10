@@ -424,6 +424,13 @@ const QN_AFFORDABLE_GRADIENTS: usize = 5;
 /// below its best slice's before the phase lends the other phase's arm a
 /// slice.
 const PHASE_SLOWDOWN: f64 = 8.0;
+/// Opening slices whose gains set the bar for the next: the values-only
+/// opening ends at the first slice that gains no more than
+/// [`IMPROVEMENT_RTOL`] times the largest of the last this many gains from
+/// below the start's value. One steep slice early on then does not end an
+/// opening whose descent still pays at the slower pace of a narrow valley,
+/// and a descent that gains a little less on every slice still ends.
+const OPENING_GAINS: usize = 3;
 /// Fewest gradients worth a closing finite-difference polish.
 const QN_MIN_POLISH_GRADIENTS: usize = 3;
 /// The values-only loop holds this many gradients back for its closing
@@ -3359,7 +3366,8 @@ fn values_only_slice(dim: usize, budget: usize) -> usize {
 /// ([`QN_AFFORDABLE_GRADIENTS`]), a finite-difference descent from the
 /// incumbent opens the run and goes on, up to convergence, while each
 /// slice succeeds and gains more than [`IMPROVEMENT_RTOL`] times the
-/// largest gain an opening slice has made from below the start's value.
+/// largest of the last [`OPENING_GAINS`] gains opening slices have made
+/// from below the start's value.
 /// Short of that budget the descent would converge only by
 /// taking most of the run: CMA-ES takes one slice from the start, the
 /// descent keeps the turn until a slice gains less per evaluation than the
@@ -3541,9 +3549,9 @@ where
         // A descent that gains a little less on every slice would hold the
         // whole run, since each gain beats a threshold scaled by the one
         // before it: the opening also ends at the first slice that gains
-        // no more than `IMPROVEMENT_RTOL` times its largest gain from
-        // below the start's value.
-        let mut largest = 0.0f64;
+        // no more than `IMPROVEMENT_RTOL` times the largest of its last
+        // `OPENING_GAINS` gains from below the start's value.
+        let mut gains: Vec<f64> = Vec::new();
         let (mut descended, mut retried) = (false, false);
         while ledger.remaining() > 0 {
             round += 1;
@@ -3560,9 +3568,14 @@ where
             let after = ledger.best_get();
             states.success.record(before, after);
             let improved = after.is_finite() && after < before - threshold;
+            let largest = gains
+                .iter()
+                .rev()
+                .take(OPENING_GAINS)
+                .fold(0.0f64, |largest, &gain| largest.max(gain));
             let keep = improved && before - after > IMPROVEMENT_RTOL * largest;
             if states.success.below_start(before) && after.is_finite() {
-                largest = largest.max(before - after);
+                gains.push((before - after).max(0.0));
             }
             posteriors[qn].update(improved);
             winner = improved.then_some(qn);
@@ -7370,10 +7383,11 @@ mod tests {
     }
 
     #[test]
-    fn values_only_opening_ends_once_a_slice_gains_a_sliver_of_its_largest() {
+    fn values_only_opening_ends_once_a_slice_gains_a_sliver_of_its_recent_gains() {
         // Along Rosenbrock's valley each slice gains a little less than the
         // one before, so every slice would beat the success threshold that
-        // its predecessor sets until the descent converged.
+        // its predecessor sets until the descent converged. The bar is the
+        // largest of the last few gains from below the start's value.
         let (dim, budget) = (10usize, 2000usize);
         let obj = Traced::new(-2.0, 2.0, dim, rosenbrock);
         let ledger = BudgetLedger::new(budget, dim);
@@ -7395,12 +7409,14 @@ mod tests {
             .map(|from| best(from) - best(from + slice))
             .collect();
         let (last, kept) = gains[1..].split_last().expect("two opening slices");
-        let mut largest = 0.0f64;
+        let bar = |k: usize| {
+            let recent = &kept[k.saturating_sub(OPENING_GAINS)..k];
+            IMPROVEMENT_RTOL * recent.iter().copied().fold(0.0f64, f64::max)
+        };
         for (k, &gain) in kept.iter().enumerate() {
-            assert!(gain > IMPROVEMENT_RTOL * largest, "slice {k} kept {gain}");
-            largest = largest.max(gain);
+            assert!(gain > bar(k), "slice {k} kept {gain}");
         }
-        assert!(*last <= IMPROVEMENT_RTOL * largest, "ended on {last}");
+        assert!(*last <= bar(kept.len()), "ended on {last}");
         assert!(*last > 0.0, "the last slice still gained");
     }
 
