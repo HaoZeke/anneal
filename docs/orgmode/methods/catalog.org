@@ -1495,8 +1495,9 @@ objective they last a number of slices that does not grow with the
 budget, while the number of slices does, and every arm keeps a uniform
 share and is pulled infinitely often as the budget grows.
 
-Measured costs, over 40 paired seeds against the rule each replaced
-(medians; every row, and what putting the replaced rule back costs, in
+Measured costs, over 40 paired seeds against the loop's form before
+these rules (medians; every row, and what putting the replaced rule
+back costs with the other rules in place, in
 [[file:../explanation/regime_auto.org::*Measured costs][the regime notes]]):
 the rate hand-over trails two fixed =gsa= slices on =ellS30@1000=,
 =ellS50@5000=, =ellS100@5000=, =ellS100@20000= (1.17 against 0.0282),

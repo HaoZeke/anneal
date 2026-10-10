@@ -19,9 +19,9 @@ until a curvature pair scales the inverse Hessian each line search of a
 finite-difference descent starts with a trial whose largest move is 5% of a
 side whatever the gradient's size, where a small gradient used to shorten it.
 Multiplying the objective by a power of two multiplies every threshold
-exactly. Measured over 40 paired seeds against the rules they replaced
-(medians, "A against B" with A's wins/ties/losses, two runs tying when their
-values differ by at most ``1e-9 max(1, |b|)`` with ``b`` B's, rows named
+exactly. Measured over 40 paired seeds against the loop's form before these
+rules (medians, "A against B" with A's wins/ties/losses, two runs tying when
+their values differ by at most ``1e-9 max(1, |b|)`` with ``b`` B's, rows named
 ``problem@budget`` from ``x0`` as in the regime notes), the descent's
 resolution test trails a fixed ``1e-12`` tolerance on ``fit6@1000``, -4.78
 against -4.89 (3/20/17) and without ``x0`` -3.334 against -3.334 (1/32/7),
