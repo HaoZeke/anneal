@@ -1268,6 +1268,27 @@ def global_optimize(
     every scheduler quantity derives from the budget, the dimension,
     and the arm count.
 
+    With ``policy="auto"``, no ``grad_fn`` and no ``noise_sigma``, the
+    run takes a values-only loop instead, whatever the box: CMA-ES, a
+    finite-difference quasi-Newton descent, generalized simulated
+    annealing quenched to one-coordinate improvements, differential
+    evolution, the additive surrogate, and the QMC restart arm. When the
+    budget lets a descent converge, one from the start opens the run
+    while it pays; with less, CMA-ES and the descent take one slice each,
+    annealing two, and a descent turn settles what annealing found. From
+    there annealing and then CMA-ES each keep the turn while they lower
+    the incumbent. Arms not yet played then take a turn, while the budget
+    holds one beyond the closing descent's reserve, before the
+    allocation ranks them, and the same decaying uniform floor follows;
+    a turn is one slice, except that the descent keeps it while it pays,
+    until it converges. The descent closes the run, going on with its
+    current descent, or restarting at the incumbent if another arm has
+    lowered it since the descent last played. The floor the guarantee
+    needs is asymptotic: the opening runs while it improves by the
+    success threshold, which cannot last on a bounded objective, and
+    after that every arm keeps a uniform share and is pulled infinitely
+    often as the budget grows.
+
     Args:
       obj_fn: callable ``f(numpy.ndarray) -> float``.
       low, high: box bounds.
@@ -1288,7 +1309,14 @@ def global_optimize(
       policy: ``"auto"`` (default; feature-based regime routing) or
         ``"legacy"`` (flat arm order, uninformative priors; A/B only).
       x0: optional starting point. It is clipped onto the box, then charged
-        as the first evaluation and the first incumbent.
+        as the first evaluation and the first incumbent. It stays the
+        incumbent until a lower value is found (if its value is not finite,
+        until any finite value is). The values-only loop starts its
+        descents, CMA-ES, one annealing chain and the first evolution member
+        there; with ``grad_fn`` or ``noise_sigma``, arms that read the
+        incumbent do, such as the trust-region poll and the population arm,
+        and with ``grad_fn`` also basin hopping and HMC. Without ``x0`` the
+        values-only loop starts from the best of a small seeded design.
       replicas: persistent portfolio controllers sharing the aggregate budget.
         One retains the single-controller behavior. Multiple replicas use
         native worker threads; no caller Jacobian is required.
