@@ -15,19 +15,21 @@
 //! quasi-Newton descent, GSA, DE, the additive surrogate and the restart
 //! arm. An opening descent from the start, then GSA and CMA-ES phases
 //! from its minimum, run while they pay; short of the budget the opening
-//! needs, CMA-ES, the descent and GSA take the first slices and a descent
-//! turn settles the basin GSA reached before the phases. Each arm not yet
-//! played then takes a turn while the budget holds one beyond the closing
-//! reserve, later rounds keep the same decaying floor, and the descent
-//! closes the run, going on with its current descent unless another arm
-//! has lowered the incumbent since it last played, in which case it
-//! restarts there. In this loop the floor the guarantee needs is
-//! asymptotic. The opening runs while it improves by the success
-//! threshold, which cannot last on a bounded objective, and after that
-//! every arm keeps a uniform share and is pulled infinitely often as the
-//! budget grows. The phases and the descent's turns stop for the same
-//! reason, and the number of slices keeps growing with the budget
-//! (`values_only_slice`).
+//! needs, CMA-ES takes a slice from the start, the descent keeps the turn
+//! until its gain per evaluation falls, and GSA then keeps it while it
+//! gains as fast as the descent would have gone on to, before the
+//! phases. Each arm not yet played then takes a turn while the budget
+//! holds one beyond the closing reserve, later rounds keep the same
+//! decaying floor, and the descent closes the run, going on with its
+//! current descent unless another arm has lowered the incumbent since it
+//! last played, in which case it restarts there. In this loop the floor
+//! the guarantee needs is asymptotic in the budget: the opening, the
+//! phases and the descent's turns go on only while they lower the
+//! incumbent, or the descent's value, by the success threshold, which a
+//! positive resolution fixed early in the run floors, so on a bounded
+//! objective they last a number of slices that does not grow with the
+//! budget, while the number of slices does (`values_only_slice`), and
+//! every arm keeps a uniform share and is pulled infinitely often.
 //!
 //! Scheduler quantities derive from the problem and the budget rather
 //! than from tuning knobs: the slice size affords a few gradient-
@@ -418,11 +420,43 @@ const START_STREAM: u64 = 0x9AE1_6A3B_2F90_404F;
 const QN_KICK0: f64 = 0.05;
 const QN_KICK_MIN: f64 = 1e-3;
 const QN_KICK_MAX: f64 = 0.5;
+/// Relative decrease per iteration below which an iteration of the
+/// values-only descent is slow: a few units in the last place of its value,
+/// so the descent turns to central differences and stops on the resolution
+/// of its values rather than on a fraction of their size, which a constant
+/// added to the objective would change.
+const QN_FTOL: f64 = 8.0 * f64::EPSILON;
 /// Gradients per dimension a finite-difference descent needs to converge;
 /// the values-only loop opens with one only when the budget affords it.
 const QN_AFFORDABLE_GRADIENTS: usize = 5;
-/// Slices of GSA's warm-up turn in a values-only run short of that budget.
-const WARM_UP_GSA_SLICES: usize = 2;
+/// Short of the opening budget, until GSA has played, a descent turn ends
+/// once fewer than this many slices are left beyond the closing reserve,
+/// and GSA takes over. At twenty to twenty-six evaluations per gradient a
+/// descent that kept the turn to the last slice would leave GSA, whose
+/// quenched visits settle separable multimodal objectives one coordinate
+/// at a time, only part of one.
+const GSA_LAST_SLICES: usize = 3;
+/// Factor by which a values-only GSA phase's gain per evaluation must fall
+/// below its best slice's before the phase lends CMA-ES a slice.
+const PHASE_SLOWDOWN: f64 = 8.0;
+/// Most values-only phases before the bandit rounds. GSA's phase and
+/// CMA-ES's come first; the two then alternate while a phase hands the
+/// other the turn or ends one that CMA-ES took from GSA.
+const PHASE_TURNS: usize = 8;
+/// Opening slices whose gains set the bar for the next: the values-only
+/// opening ends at the first slice that gains no more than
+/// [`IMPROVEMENT_RTOL`] times the largest of the last this many gains from
+/// below the start's value. One steep slice early on then does not end an
+/// opening whose descent still pays at the slower pace of a narrow valley.
+const OPENING_GAINS: usize = 3;
+/// Opening slices judged together: the values-only opening also ends at
+/// the first slice after which the last this many slices have gained no
+/// more, together, than [`IMPROVEMENT_RTOL`] times the largest gain an
+/// opening slice has made from below the start's value. A descent whose
+/// every slice gains a little less than the few before it, as one that
+/// creeps along the floor of a side basin does, beats the bar those few
+/// set until it converges; this ends it.
+const OPENING_SPAN: usize = 4;
 /// Fewest gradients worth a closing finite-difference polish.
 const QN_MIN_POLISH_GRADIENTS: usize = 3;
 /// The values-only loop holds this many gradients back for its closing
@@ -776,6 +810,28 @@ impl<O: Objective<f64>> Objective<f64> for LocalBoxBudgetedObjective<'_, O> {
     }
 }
 
+/// Objective proxy reporting the inner objective's values in a unit, a
+/// power of two, so that each reported value is the inner value rescaled
+/// without rounding.
+struct UnitObjective<'a, O: Objective<f64>> {
+    inner: &'a O,
+    unit: f64,
+}
+
+impl<O: Objective<f64>> Objective<f64> for UnitObjective<'_, O> {
+    fn dim(&self) -> usize {
+        self.inner.dim()
+    }
+
+    fn bounds(&self) -> &Bounds<f64> {
+        self.inner.bounds()
+    }
+
+    fn eval(&self, x: ArrayView1<f64>) -> f64 {
+        self.inner.eval(x) / self.unit
+    }
+}
+
 /// Gradient of `x -> f(reflect_into_box(x))`, the function the budgeted
 /// objective evaluates: the caller's gradient at the reflected point, with the
 /// sign of each coordinate the fold reverses flipped. The caller's gradient is
@@ -1007,7 +1063,7 @@ impl CmaArmState {
     /// first restart searches the whole box; large-population restarts are
     /// never elitist. Runs are separable above [`CMA_FULL_MAX_DIM`] or when
     /// the budget is shorter than the full covariance's learning horizon.
-    /// `floor` is the run's floor on the success threshold's scale.
+    /// `threshold` is the success threshold the first run stops at.
     fn new(
         ledger: &BudgetLedger,
         bounds: &Bounds<f64>,
@@ -1015,7 +1071,7 @@ impl CmaArmState {
         seed: u64,
         sigma: f64,
         elitist: bool,
-        floor: f64,
+        threshold: f64,
     ) -> Self {
         let dim = bounds.dims;
         let lambda = default_lambda(dim);
@@ -1030,7 +1086,7 @@ impl CmaArmState {
             &unit,
             seed ^ CMA_STREAM,
             separable,
-            values_only_threshold(ledger.best_get(), floor),
+            threshold,
         );
         if elitist {
             es = es.with_elite(mean.view(), ledger.best_get());
@@ -1052,8 +1108,8 @@ impl CmaArmState {
     }
 
     /// One run from the incumbent. It ends once its recent best values span
-    /// less than `threshold`, the success threshold at the incumbent's
-    /// value: past that point no slice of it can count as a success.
+    /// less than `threshold`, the success threshold: past that point no
+    /// slice of it can count as a success.
     fn run(
         mean: ArrayView1<f64>,
         sigma: f64,
@@ -1095,17 +1151,16 @@ struct QnArmState {
 }
 
 impl QnArmState {
-    /// Whether the descent has lowered its value by more than the success
-    /// threshold, floored at `floor`, since the last check. A new descent
-    /// pays its first check once it has a finite value; a converged one
-    /// never pays, nor does the descent that replaced it inside the same
-    /// slice.
-    fn paid(&mut self, floor: f64) -> bool {
+    /// Whether the descent has lowered its value by more than `threshold`
+    /// since the last check. A new descent pays its first check once it has
+    /// a finite value; a converged one never pays, nor does the descent
+    /// that replaced it inside the same slice.
+    fn paid(&mut self, threshold: f64) -> bool {
         let value = self.engine.value();
         let paid = !self.engine.is_done()
             && !self.replaced
             && value.is_finite()
-            && value < self.checked - values_only_threshold(self.checked, floor);
+            && value < self.checked - threshold;
         self.checked = value;
         self.replaced = false;
         paid
@@ -1173,18 +1228,19 @@ struct ArmStates {
     /// Persistent finite-difference quasi-Newton descent.
     qn: Option<QnArmState>,
     /// Set by the values-only loop. Without a gradient, the GSA arm then
-    /// starts one chain at the incumbent and runs it quenched, without a
-    /// local search, and the DE population starts with the incumbent, as
-    /// SciPy's differential_evolution places its `x0`.
+    /// starts its first chain (the only one from 10 dimensions) at the
+    /// incumbent and runs its chains quenched, without a local search, and
+    /// the DE population starts with the incumbent, as SciPy's
+    /// differential_evolution places its `x0`.
     values_only: bool,
     /// Portfolio seed while the values-only loop owns the arms. The first
     /// quenched GSA chain is mixed from this seed alone, so a coordinate
     /// replay can name that chain after other arms have drawn the shared
     /// generator.
     values_stream: Option<u64>,
-    /// The values-only loop's floor on the scale of its success threshold
-    /// ([`values_only_floor`]), set once the start is evaluated.
-    success_floor: f64,
+    /// The values-only loop's scale of success, started once the start is
+    /// evaluated and fed every slice.
+    success: SuccessScale,
     /// Evaluation counts before and after each values-only turn, with its
     /// arm.
     #[cfg(test)]
@@ -1382,6 +1438,12 @@ fn ladder_temperature(temp0: f64, generation: usize) -> f64 {
 }
 
 fn archive_temp0(ledger: &BudgetLedger) -> f64 {
+    archive_temp0_in(ledger, 1.0)
+}
+
+/// [`archive_temp0`] in units of `unit`, a power of two, with its floor and
+/// its fallback in that unit.
+fn archive_temp0_in(ledger: &BudgetLedger, unit: f64) -> f64 {
     let inner = ledger.inner.lock().expect("ledger lock");
     let mut finite: Vec<f64> = inner
         .archive_y
@@ -1398,7 +1460,7 @@ fn archive_temp0(ledger: &BudgetLedger) -> f64 {
     // variance overflows to infinity on them).
     let q25 = finite[finite.len() / 4];
     let q75 = finite[(3 * finite.len()) / 4];
-    let spread = q75 - q25;
+    let spread = (q75 - q25) / unit;
     if spread.is_finite() && spread > 0.0 {
         spread.max(1e-6)
     } else {
@@ -1432,28 +1494,154 @@ fn arm_success_threshold(arm: ArmKind, before: f64) -> f64 {
     rtol * scale.max(1.0)
 }
 
-/// Success threshold of the values-only loop: [`IMPROVEMENT_RTOL`] times
-/// `|before|`, floored at the run's `floor` ([`values_only_floor`]) where
-/// [`arm_success_threshold`] floors at 1, so rescaling the objective
-/// rescales every threshold of the run.
-fn values_only_threshold(before: f64, floor: f64) -> f64 {
-    let scale = if before.is_finite() {
-        before.abs()
-    } else {
-        0.0
-    };
-    IMPROVEMENT_RTOL * scale.max(floor)
+/// Scale of success in the values-only loop. A gain counts once it exceeds
+/// [`IMPROVEMENT_RTOL`] times the gain of the last slice that lowered the
+/// incumbent, floored at the run's resolution `s`, where
+/// [`arm_success_threshold`] scales with `|f|` and floors at 1.
+///
+/// Gains are differences of values, so a constant added to the objective
+/// changes them only by the rounding of the shifted values, and a power of
+/// two multiplying it multiplies every threshold exactly. Slices that begin
+/// at or above the start's value record nothing, so neither the start's
+/// value nor the drop from it sets the scale. `s` is `f64::MIN_POSITIVE`
+/// until the run first finds a value below the start's and the resolution
+/// `eps |f|` of that value from then on, but never less than
+/// `f64::MIN_POSITIVE` (which it stays if that value is zero): positive and
+/// fixed once set, it bounds the number of successes on a bounded objective
+/// as the unit floor of [`arm_success_threshold`] does, and it scales with
+/// the objective.
+#[derive(Clone, Debug)]
+struct SuccessScale {
+    /// The start's value, infinite when there is none or it is not finite.
+    start: f64,
+    /// The run's resolution `s`.
+    floor: f64,
+    /// Whether `floor` has been set from a value below the start's.
+    fixed: bool,
+    /// Gain of the last slice that lowered the incumbent from below the
+    /// start's value; zero before the first.
+    gain: f64,
 }
 
-/// Floor on the scale of the values-only success threshold: the resolution
-/// `eps |f|` of the start's value. Fixed for the run and positive, it bounds
-/// the number of successes on a bounded objective as the unit floor of
-/// [`arm_success_threshold`] does, and it scales with the objective.
-fn values_only_floor(start: Option<f64>) -> f64 {
-    match start {
-        Some(value) if value.is_finite() && value != 0.0 => f64::EPSILON * value.abs(),
-        _ => f64::MIN_POSITIVE,
+impl Default for SuccessScale {
+    fn default() -> Self {
+        Self::new(None)
     }
+}
+
+impl SuccessScale {
+    fn new(start: Option<f64>) -> Self {
+        Self {
+            start: start.filter(|v| v.is_finite()).unwrap_or(f64::INFINITY),
+            floor: f64::MIN_POSITIVE,
+            fixed: false,
+            gain: 0.0,
+        }
+    }
+
+    /// The least drop of the incumbent that counts as a success.
+    fn threshold(&self) -> f64 {
+        IMPROVEMENT_RTOL * self.gain.max(self.floor)
+    }
+
+    /// The power of two at or below [`Self::threshold`], but at least
+    /// `f64::MIN_POSITIVE`: a unit of value that scales with the objective
+    /// and that a value divides by without rounding, short of overflow.
+    fn unit(&self) -> f64 {
+        f64::from_bits(self.threshold().to_bits() & 0x7ff0_0000_0000_0000).max(f64::MIN_POSITIVE)
+    }
+
+    /// Whether `value` lies below the start's value.
+    fn below_start(&self, value: f64) -> bool {
+        value < self.start
+    }
+
+    /// Records a slice that moved the incumbent from `before` to `after`.
+    fn record(&mut self, before: f64, after: f64) {
+        if !after.is_finite() || after >= self.start {
+            return;
+        }
+        if !self.fixed {
+            self.fixed = true;
+            self.floor = (f64::EPSILON * after.abs()).max(f64::MIN_POSITIVE);
+        }
+        if before < self.start && after < before {
+            self.gain = before - after;
+        }
+    }
+}
+
+/// Gain per evaluation of a slice that took a value from `before` to
+/// `after` in `used` evaluations; zero if it used none or either value is
+/// not finite.
+fn gain_rate(before: f64, after: f64, used: usize) -> f64 {
+    if used > 0 && before.is_finite() && after.is_finite() {
+        (before - after).max(0.0) / used as f64
+    } else {
+        0.0
+    }
+}
+
+/// Pace of the values-only descent short of the opening budget, timed slice
+/// by slice on the descent's own values (a kick climbs before it descends,
+/// so its gains count from where it starts). It decides when the descent
+/// hands the turn to GSA and how fast GSA must gain to keep it.
+#[derive(Clone, Copy, Debug, Default)]
+struct DescentPace {
+    /// Gain per evaluation of the last timed slice of the current turn.
+    last: f64,
+    /// Slices timed in the current turn.
+    slices: usize,
+    /// Whether the current turn ended because the descent slowed.
+    slowed: bool,
+    /// Gain per evaluation the descent would make on its next slice if it
+    /// went on slowing as it did: `last` times its ratio to the slice
+    /// before.
+    next: f64,
+    /// Evaluations of the run before which a slowing descent keeps the turn.
+    hold: usize,
+    /// Whether GSA has had a turn.
+    handed: bool,
+}
+
+impl DescentPace {
+    /// Starts timing a descent turn.
+    fn begin(&mut self) {
+        self.last = 0.0;
+        self.slices = 0;
+        self.slowed = false;
+    }
+
+    /// Times a slice that took the descent's value from `from` to `to` in
+    /// `used` evaluations, the run having used `spent` by its end, and
+    /// returns whether the descent slowed past its hold: a slice gaining
+    /// less per evaluation than the one before, from the second slice of
+    /// the turn on.
+    fn time(&mut self, from: f64, to: f64, used: usize, spent: usize) -> bool {
+        if used == 0 || !from.is_finite() || !to.is_finite() {
+            return false;
+        }
+        let rate = (from - to).max(0.0) / used as f64;
+        let previous = std::mem::replace(&mut self.last, rate);
+        self.slices += 1;
+        if self.slices >= 2 && previous > 0.0 && rate < previous && spent >= self.hold {
+            self.next = rate * rate / previous;
+            return true;
+        }
+        false
+    }
+}
+
+/// How a values-only phase begins.
+#[derive(Clone, Copy, Debug)]
+enum PhaseTurn {
+    /// On its own.
+    Fresh,
+    /// CMA-ES takes the turn from GSA with a lent slice that gained `gain`,
+    /// faster per evaluation than the `pace` it had to beat.
+    Taken { gain: f64, pace: f64 },
+    /// GSA resumes after CMA-ES took the turn from it.
+    Resumed,
 }
 
 fn scheduler_success_threshold(arm: ArmKind, ledger: &BudgetLedger) -> f64 {
@@ -2522,11 +2710,22 @@ fn run_arm<O, G>(
             }
             if slice >= 8 {
                 let chains = (slice / 8).clamp(2, 4 * dim.max(1));
+                // Tsallis acceptance weighs a rise against a temperature that
+                // starts at one. A values-only run measures the rise in its
+                // unit, so the chains move alike on the objective times a
+                // power of two, and a rise as large as the last gain is all
+                // but never taken.
+                let unit = if states.values_only {
+                    states.success.unit()
+                } else {
+                    1.0
+                };
                 let prepare = |anchor: ArrayView1<f64>, proposal: &mut Array1<f64>| {
                     obj.prepare_proposal(Some(anchor), proposal)
                 };
+                let scaled = UnitObjective { inner: obj, unit };
                 let res = crate::methods::local_polish::qmc_gsa_global_search_with_proposals(
-                    obj,
+                    &scaled,
                     slice,
                     seed,
                     chains,
@@ -2541,7 +2740,7 @@ fn run_arm<O, G>(
                 );
                 states
                     .basins
-                    .register(res.best_pos.view(), res.best_val, &bounds);
+                    .register(res.best_pos.view(), res.best_val * unit, &bounds);
             }
         }
         ArmKind::Shift => {
@@ -2635,7 +2834,14 @@ fn run_arm<O, G>(
                 return;
             }
             let x_arr = Array2::from_shape_vec((ys.len(), dim), xs).expect("archive shape");
-            let y_arr = Array1::from_vec(ys);
+            // A values-only run fits and anneals in its unit, so the fit, the
+            // temperatures and their floors scale with the objective.
+            let unit = if states.values_only {
+                states.success.unit()
+            } else {
+                1.0
+            };
+            let y_arr = Array1::from_vec(ys) / unit;
             let surr = AdditiveSurrogate::fit(
                 x_arr.view(),
                 y_arr.view(),
@@ -2661,10 +2867,10 @@ fn run_arm<O, G>(
             // regime regardless of how often the arm is pulled.
             let progress = ledger.used_get() as f64 / budget.max(1) as f64;
             let exponent = (12.0 * progress) as i32 + states.surrogate_gen as i32;
-            let temp = (archive_temp0(ledger) * 0.5_f64.powi(exponent)).max(1e-12);
+            let temp = (archive_temp0_in(ledger, unit) * 0.5_f64.powi(exponent)).max(1e-12);
             let proposals = surr.sample(slice, temp, SURROGATE_GRID, rng);
             let mut f_cur = ledger.best_get();
-            let noise_sigma = states.noise_sigma;
+            let noise_sigma = states.noise_sigma.map(|sigma| sigma / unit);
             for i in 0..proposals.nrows() {
                 if ledger.exhausted() {
                     break;
@@ -2674,8 +2880,8 @@ fn run_arm<O, G>(
                 let ft = obj.eval(trial.view());
                 let accepted = accept_move(
                     noise_sigma,
-                    |_r| energy_delta(obj.eval(trial.view()), f_cur),
-                    energy_delta(ft, f_cur),
+                    |_r| energy_delta(obj.eval(trial.view()), f_cur) / unit,
+                    energy_delta(ft, f_cur) / unit,
                     temp,
                     rng,
                 );
@@ -2850,6 +3056,26 @@ fn run_arm<O, G>(
                     None
                 };
                 states.gsa = initialize_gsa_state(obj, slice, seed, anchor, values_only);
+            } else if values_only
+                && let (Some(state), Some(value)) = (states.gsa.as_mut(), ledger.incumbent_value())
+            {
+                // Once another arm has lowered the incumbent below every
+                // chain, the worst chain (one not finite first) goes on from
+                // there, so the quenched visits leave the run's best basin
+                // and not only the basins the chains reached.
+                let lowest = state.vals.iter().copied().fold(f64::INFINITY, f64::min);
+                if value < lowest {
+                    let worst = (0..state.vals.len()).fold(0, |worst, i| {
+                        let v = state.vals[i];
+                        if !(v <= state.vals[worst]) || !v.is_finite() {
+                            i
+                        } else {
+                            worst
+                        }
+                    });
+                    state.xs[worst] = ledger.incumbent(&bounds);
+                    state.vals[worst] = value;
+                }
             }
             if let Some(state) = states.gsa.as_mut() {
                 // Keep T₀ at box scale (do not re-inflate from |f|).
@@ -3233,10 +3459,33 @@ fn run_cma_arm<O>(
 {
     let bounds = obj.bounds();
     let dim = bounds.dims;
-    let floor = states.success_floor;
+    let values_only = states.values_only;
+    let success = states.success.threshold();
+    let threshold = |best: f64| {
+        if values_only {
+            success
+        } else if best.is_finite() {
+            IMPROVEMENT_RTOL * best.abs()
+        } else {
+            0.0
+        }
+    };
     let state = states.cma.get_or_insert_with(|| {
-        CmaArmState::new(ledger, bounds, budget, seed, CMA_FIRST_SIGMA, true, floor)
+        CmaArmState::new(
+            ledger,
+            bounds,
+            budget,
+            seed,
+            CMA_FIRST_SIGMA,
+            true,
+            threshold(ledger.best_get()),
+        )
     });
+    // The values-only scale of success moves with every slice, so the run
+    // stops at the threshold in force when it plays.
+    if values_only && state.es.stop_reason().is_none() {
+        state.es.set_tol_fun_hist(success);
+    }
     let start = ledger.used_get();
     while ledger.used_get() - start < slice && ledger.remaining() > 0 {
         if state.es.stop_reason().is_some() {
@@ -3251,7 +3500,7 @@ fn run_cma_arm<O>(
                 &state.unit,
                 run_seed,
                 state.separable,
-                values_only_threshold(ledger.best_get(), floor),
+                threshold(ledger.best_get()),
             );
             if state.elitist && plan.regime == CmaRegime::Small {
                 es = es.with_elite(mean.view(), ledger.best_get());
@@ -3284,6 +3533,14 @@ fn run_qn_arm<O>(
 {
     let bounds = obj.bounds();
     let best = ledger.best_get();
+    let options = if states.values_only {
+        FdBfgsOptions {
+            ftol: QN_FTOL,
+            ..FdBfgsOptions::default()
+        }
+    } else {
+        FdBfgsOptions::default()
+    };
     // An evaluated incumbent is not evaluated again; one whose value is not
     // finite ends the descent at once, so the first slice kicks from it.
     let state = states.qn.get_or_insert_with(|| QnArmState {
@@ -3291,7 +3548,7 @@ fn run_qn_arm<O>(
             ledger.incumbent(bounds).view(),
             ledger.incumbent_value(),
             bounds,
-            FdBfgsOptions::default(),
+            options,
         ),
         kick: QN_KICK0,
         base_val: best,
@@ -3368,31 +3625,68 @@ fn values_only_slice(dim: usize, budget: usize) -> usize {
 /// `dim + 1` points (one gradient's worth, at most a tenth of the budget),
 /// so seeds vary it. When the budget affords one
 /// ([`QN_AFFORDABLE_GRADIENTS`]), a finite-difference descent from the
-/// incumbent opens the run and goes on while its slices succeed, up to
-/// convergence. Short of that budget the descent would converge only by
-/// taking most of the run: CMA-ES and the descent take one slice each,
-/// GSA up to [`WARM_UP_GSA_SLICES`] from the incumbent, and a descent turn
-/// then settles the basin GSA reached. From there GSA and then CMA-ES each
-/// keep the turn while they pay: a phase ends once it has gone
-/// [`ROUNDS_PER_ARM`] slices without lowering the incumbent, or as long as
-/// its last gain took if that is longer, and it leaves the closing reserve
-/// and one slice for each other arm not yet played (short of the opening
-/// budget, one for DE only). Bandit rounds over [`VALUES_ONLY_ARMS`]
-/// follow until only the closing reserve remains. As in the main bandit,
-/// each arm not yet played takes one slice first, in list order, while a
-/// slice beyond the reserve is left. A descent's turn holds back only the
-/// reserve, so a short budget or a descent that keeps paying can leave an
-/// arm without a turn: on Lennard-Jones positions at 39 dimensions and
-/// 1000 evaluations the first turns leave only the reserve, and DE, the
-/// surrogate and the restart arm do not play. After the warm-up a round
-/// picks uniformly with probability `1/round` (rounds counted from the
-/// opening); otherwise the arm whose last turn succeeded plays again, and
-/// failing that a discounted Thompson draw picks. A turn is one slice,
-/// except that the descent keeps the turn, short of the closing reserve,
-/// while each slice lowers its own value by more than the success
-/// threshold, until it converges ([`QnArmState::paid`]). A turn succeeds
-/// when it lowers the incumbent by more than [`values_only_threshold`],
-/// whose floor scales with the start's value.
+/// incumbent opens the run and goes on, up to convergence, while each
+/// slice succeeds, gains more than [`IMPROVEMENT_RTOL`] times the largest
+/// of the last [`OPENING_GAINS`] gains opening slices have made from below
+/// the start's value, and leaves the last [`OPENING_SPAN`] slices with more,
+/// together, than that times the largest such gain (the first slice from
+/// below the start is held to the gain from the start).
+/// Short of that budget the descent would converge only by
+/// taking most of the run: CMA-ES takes one slice from the start, the
+/// descent keeps the turn until a slice gains less per evaluation than the
+/// one before ([`DescentPace`]), and GSA then keeps it while each of its
+/// slices gains at least as fast as the descent would have gone on to (its
+/// last gain per evaluation times the ratio to the one before). Until GSA
+/// has played, the descent also hands it the turn once fewer than
+/// [`GSA_LAST_SLICES`] slices are left beyond the closing reserve. If
+/// GSA's first slice falls short, the descent keeps the turn until the run
+/// has used twice the evaluations it had, and the hand-over repeats until
+/// the descent stops paying or only the reserve is left. From there GSA
+/// and then CMA-ES each keep the turn while they pay: a phase ends once it
+/// has gone [`ROUNDS_PER_ARM`] slices without a success that gains more
+/// than [`IMPROVEMENT_RTOL`] times the phase's largest gain, or as long as
+/// the last such success took if that is longer. GSA's first phase also
+/// ends once its gain per evaluation since it began is no more than that
+/// of the descent's last timed slice (at its first slice if neither gained
+/// anything), and a CMA-ES phase that follows it without taking the turn
+/// ends the same way from its [`ROUNDS_PER_ARM`]-th slice on. A GSA slice
+/// past the phase's first `ROUNDS_PER_ARM / 2` that gains less than
+/// `1 / PHASE_SLOWDOWN` of the phase's best per evaluation lends CMA-ES a
+/// slice, and CMA-ES takes the turn if that slice gains faster than both
+/// the GSA slice and `1 / PHASE_SLOWDOWN` of the phase's gain per
+/// evaluation so far ([`PHASE_SLOWDOWN`]); GSA lends no other slice until
+/// the run has used twice the evaluations it had, and none after a lent
+/// slice that gained nothing. A phase CMA-ES took likewise lends GSA a
+/// slice when its last two slices gain less per evaluation than its lent
+/// slice had to beat, and hands the turn back if GSA's slice gains faster
+/// than those two did.
+/// The two alternate while a phase hands the other the turn, GSA resuming
+/// after a phase CMA-ES took from it, up to [`PHASE_TURNS`] phases. If the
+/// bar on the first slice from below the start ended the opening before
+/// the descent converged, and GSA's first phase ends at its first slice,
+/// the descent takes a turn before CMA-ES's phase. A phase, and that turn,
+/// leave the closing reserve and one slice for each other arm not yet
+/// played (short of the opening budget, a phase leaves one for DE only
+/// while it has not played). Bandit rounds over [`VALUES_ONLY_ARMS`]
+/// follow until only the closing reserve remains.
+/// As in the main bandit, each arm not yet played takes one slice first, in
+/// list order, while a slice beyond the reserve is left. A descent's turn
+/// holds back only the reserve, so a short budget or a descent that keeps
+/// paying can leave an arm without a turn: on Lennard-Jones positions at 39
+/// dimensions and 1000 evaluations the first turns leave only the reserve,
+/// and DE, the surrogate and the restart arm do not play. After the warm-up
+/// a round picks uniformly with probability `1/round` (rounds counted from
+/// the run's first slice); otherwise the arm whose last turn succeeded
+/// plays again, and failing that a discounted Thompson draw picks. A turn
+/// is one slice, except that the descent keeps the turn, short of the
+/// closing reserve, while each slice lowers its own value by more than the
+/// success threshold, until it converges ([`QnArmState::paid`]). A turn
+/// succeeds when it lowers the incumbent by more than the success threshold
+/// in force when it began: [`IMPROVEMENT_RTOL`] times the gain of the last
+/// slice that lowered the incumbent from below the start's value, floored
+/// at the run's resolution ([`SuccessScale`]), so the start's value sets no
+/// threshold and a constant added to the objective moves one only through
+/// the resolution of the shifted values.
 /// The descent closes the run with what is left, a reserve of the
 /// evaluations one descent needs to converge
 /// ([`LOCAL_FIRST_POLISH_GRADIENTS`]) when the budget affords it. It goes
@@ -3461,7 +3755,7 @@ where
             let _ = obj.eval(bounds.clip(row).view());
         }
     }
-    states.success_floor = values_only_floor(ledger.incumbent_value());
+    states.success = SuccessScale::new(ledger.incumbent_value());
 
     let arms = VALUES_ONLY_ARMS;
     let k = arms.len();
@@ -3476,22 +3770,50 @@ where
     let mut rng = StdRng::seed_from_u64(seed);
     let mut round = 0usize;
     let mut winner = None;
+    // The value the descent goes on from: the incumbent if another arm has
+    // lowered it below the descent since the descent last played (the
+    // descent restarts there), the descent's own value otherwise.
+    let descent_value = |states: &ArmStates| match states.qn.as_ref() {
+        None => ledger.best_get(),
+        Some(qn) => {
+            let best = ledger.best_get();
+            if best < qn.seen_best && best < qn.engine.value() {
+                best
+            } else {
+                qn.engine.value()
+            }
+        }
+    };
+    let qn_value = |states: &ArmStates| states.qn.as_ref().map_or(f64::NAN, |qn| qn.engine.value());
+    // With a `pace`, a descent turn is timed and also ends once the descent
+    // slows, or, until GSA has played, once fewer than `GSA_LAST_SLICES`
+    // slices are left beyond `reserve`.
     let play = |choice: usize,
                 take: usize,
                 reserve: usize,
                 states: &mut ArmStates,
                 rng: &mut StdRng,
-                posteriors: &mut [ArmPosterior]|
+                posteriors: &mut [ArmPosterior],
+                mut pace: Option<&mut DescentPace>|
      -> bool {
         let arm = arms[choice];
         let before = ledger.best_get();
+        let threshold = states.success.threshold();
         #[cfg(test)]
         let used = ledger.used_get();
         let mut take = take;
+        if arm == ArmKind::Qn
+            && let Some(pace) = pace.as_deref_mut()
+        {
+            pace.begin();
+        }
         loop {
+            let from = ledger.best_get();
+            let (spent, descent) = (ledger.used_get(), descent_value(states));
             ledger.cap_set((ledger.used_get() + take).min(budget));
             run_arm::<O, G>(arm, obj, None, ledger, states, rng, take, budget);
             ledger.cap_set(budget);
+            states.success.record(from, ledger.best_get());
             // A kicked descent climbs before it can beat the incumbent, and
             // one from a poor start takes many slices to settle: the turn
             // is scored on the basin the descent reaches once it stops
@@ -3499,44 +3821,126 @@ where
             if arm != ArmKind::Qn {
                 break;
             }
-            let floor = states.success_floor;
-            if !states.qn.as_mut().is_some_and(|qn| qn.paid(floor)) {
+            let slowed = pace.as_deref_mut().is_some_and(|pace| {
+                let spent_now = ledger.used_get();
+                pace.time(descent, qn_value(states), spent_now - spent, spent_now)
+            });
+            let paying = states.success.threshold();
+            if !states.qn.as_mut().is_some_and(|qn| qn.paid(paying)) {
                 break;
             }
             if ledger.remaining() < reserve + 8 {
                 break;
+            }
+            if let Some(pace) = pace.as_deref_mut() {
+                let last = !pace.handed && ledger.remaining() - reserve < GSA_LAST_SLICES * slice;
+                if slowed || last {
+                    pace.slowed = true;
+                    if !slowed {
+                        pace.next = 0.0;
+                    }
+                    break;
+                }
             }
             take = take.min(ledger.remaining() - reserve);
         }
         #[cfg(test)]
         states.turns.push((arm, used, ledger.used_get()));
         let after = ledger.best_get();
-        let improved = after.is_finite()
-            && after < before - values_only_threshold(before, states.success_floor);
+        let improved = after.is_finite() && after < before - threshold;
         posteriors[choice].update(improved);
         improved
     };
 
     let opened = budget >= QN_AFFORDABLE_GRADIENTS * dim * gradient;
+    // Gain per evaluation of the descent's last timed slice before the
+    // phases: GSA's phase keeps the turn only while it gains as fast.
+    let mut displaced = 0.0f64;
+    // Whether the bar on the first slice from below the start's value ended
+    // the opening before the descent converged.
+    let mut barred = false;
     if opened {
         let qn = index(ArmKind::Qn);
+        // A descent that gains a little less on every slice would hold the
+        // whole run, since each gain beats a threshold scaled by the one
+        // before it: the opening also ends at the first slice that gains no
+        // more than `IMPROVEMENT_RTOL` times the largest of its last
+        // `OPENING_GAINS` gains from below the start's value, or after which
+        // its last `OPENING_SPAN` slices have gained no more, together, than
+        // that times its largest such gain. The first slice from below the
+        // start is held to the gain of the slice from the start, which a
+        // descent into a side basin of a multimodal objective makes nearly
+        // all at once. From a far start on a curved valley the slice from
+        // the start can also gain more than `1 / IMPROVEMENT_RTOL` times the
+        // next, though the descent is far from converged; the phases below
+        // hand such a descent the turn back.
+        let mut gains: Vec<f64> = Vec::new();
+        let mut from_start = None;
+        let (mut descended, mut retried) = (false, false);
         while ledger.remaining() > 0 {
             round += 1;
             let before = ledger.best_get();
+            let threshold = states.success.threshold();
+            let (spent, descent) = (ledger.used_get(), descent_value(states));
             ledger.cap_set((ledger.used_get() + slice).min(budget));
             run_qn_arm(obj, ledger, states, slice, seed, true);
             ledger.cap_set(budget);
+            let (used, to) = (ledger.used_get() - spent, qn_value(states));
+            if used > 0 && descent.is_finite() && to.is_finite() {
+                displaced = gain_rate(descent, to, used);
+            }
             let after = ledger.best_get();
-            let improved = after.is_finite()
-                && after < before - values_only_threshold(before, states.success_floor);
+            states.success.record(before, after);
+            let improved = after.is_finite() && after < before - threshold;
+            let largest = |gains: &[f64]| {
+                if gains.is_empty() {
+                    from_start.unwrap_or(0.0)
+                } else {
+                    gains.iter().copied().fold(0.0f64, f64::max)
+                }
+            };
+            let recent = largest(&gains[gains.len().saturating_sub(OPENING_GAINS)..]);
+            let all = largest(&gains);
+            let first_below = gains.is_empty() && from_start.is_some();
+            if from_start.is_none() && before.is_finite() && after.is_finite() {
+                from_start = Some((before - after).max(0.0));
+            }
+            let span = gains[gains.len().saturating_sub(OPENING_SPAN - 1)..]
+                .iter()
+                .sum::<f64>()
+                + (before - after);
+            let keep = improved
+                && before - after > IMPROVEMENT_RTOL * recent
+                && span > IMPROVEMENT_RTOL * all;
+            if states.success.below_start(before) && after.is_finite() {
+                gains.push((before - after).max(0.0));
+            }
             posteriors[qn].update(improved);
             winner = improved.then_some(qn);
-            if !improved
-                || states
-                    .qn
-                    .as_ref()
-                    .is_none_or(|state| state.engine.is_done())
-            {
+            let done = states
+                .qn
+                .as_ref()
+                .is_none_or(|state| state.engine.is_done());
+            // A descent whose first curvature pair spans a steep wall stalls
+            // short of convergence, and one from a start whose neighbours all
+            // share its value (a sentinel) stops there. Until the descent has
+            // lowered its own value from below the start's, either means it
+            // has not descended at all: CMA-ES then takes the slice it takes
+            // first short of the opening budget, and the opening goes on
+            // from the incumbent it leaves, where the descent restarts.
+            let stuck =
+                !descended && to >= descent && (!done || !states.success.below_start(after));
+            descended |= states.success.below_start(descent) && to < descent;
+            if stuck && !retried && ledger.remaining() >= 8 {
+                retried = true;
+                round += 1;
+                let cma = index(ArmKind::Cma);
+                let take = slice.min(ledger.remaining());
+                winner = play(cma, take, 0, states, &mut rng, &mut posteriors, None).then_some(cma);
+                continue;
+            }
+            if !keep || done {
+                barred = first_below && improved && !done;
                 break;
             }
         }
@@ -3554,103 +3958,256 @@ where
     } else {
         0
     };
-    // A phase keeps the turn while its arm pays: it ends once the arm has
-    // gone `ROUNDS_PER_ARM` slices without lowering the incumbent, or as long
-    // as its last gain took if that is longer, or at `reserve`.
+    if !opened {
+        // Short of the opening budget a descent from the start converges
+        // only by taking most of the run. CMA-ES takes a slice from the
+        // start, the descent keeps the turn until its gain per evaluation
+        // falls, and GSA's quenched visits, which leave the descent's basin
+        // one coordinate at a time, take over while each of their slices
+        // gains at least as fast as the descent would have gone on to. If
+        // GSA's first slice falls short, the descent goes on with its own
+        // descent, not restarting at what GSA found, and keeps the turn
+        // until the run has used twice the evaluations it had.
+        let (cma, qn, gsa) = (index(ArmKind::Cma), index(ArmKind::Qn), index(ArmKind::Gsa));
+        if ledger.remaining() >= polish + 8 {
+            round += 1;
+            let take = slice.min(ledger.remaining() - polish);
+            winner =
+                play(cma, take, polish, states, &mut rng, &mut posteriors, None).then_some(cma);
+        }
+        let mut pace = DescentPace::default();
+        while ledger.remaining() >= polish + 8 {
+            round += 1;
+            let take = slice.min(ledger.remaining() - polish);
+            winner = play(
+                qn,
+                take,
+                polish,
+                states,
+                &mut rng,
+                &mut posteriors,
+                Some(&mut pace),
+            )
+            .then_some(qn);
+            displaced = pace.last;
+            if !pace.slowed {
+                break;
+            }
+            let mut first = true;
+            while ledger.remaining() >= polish + 8 {
+                round += 1;
+                let take = slice.min(ledger.remaining() - polish);
+                let (from, spent) = (ledger.best_get(), ledger.used_get());
+                let gained = play(gsa, take, polish, states, &mut rng, &mut posteriors, None);
+                winner = gained.then_some(gsa);
+                pace.handed = true;
+                let rate = gain_rate(from, ledger.best_get(), ledger.used_get() - spent);
+                if rate <= 0.0 || rate < pace.next {
+                    if first {
+                        pace.hold = 2 * ledger.used_get();
+                        if let Some(qn) = states.qn.as_mut() {
+                            qn.seen_best = ledger.best_get();
+                        }
+                    }
+                    break;
+                }
+                first = false;
+            }
+        }
+    }
+    // After an opening a phase that keeps paying must still leave the
+    // warm-up round a slice for every other arm not yet played, the next
+    // phase's included. Short of the opening budget, slices held for the
+    // surrogate and the restart arm cost the phases more than those arms
+    // return there, and DE keeps one until it has played.
+    let hold = |choice: usize, posteriors: &[ArmPosterior]| {
+        let unplayed = posteriors
+            .iter()
+            .enumerate()
+            .filter(|&(i, posterior)| i != choice && posterior.pulls == 0)
+            .count();
+        if opened {
+            polish + unplayed * slice
+        } else if posteriors[index(ArmKind::De)].pulls == 0 {
+            polish + slice
+        } else {
+            polish
+        }
+    };
+    // A phase keeps the turn while its arm pays. It ends at the reserve
+    // `hold` leaves, or once the arm has gone `ROUNDS_PER_ARM` slices
+    // without a success that gains more than `IMPROVEMENT_RTOL` times the
+    // phase's largest gain, or as long as the last such success took if
+    // that is longer. A GSA phase that begins on its own also ends once its
+    // gain per evaluation since it began is no more than the descent's last
+    // (`displaced`), which is nothing when the descent's last slice
+    // converged or kicked, so a phase that has gained nothing then ends at
+    // its first slice. A CMA-ES phase that begins on its own ends the same
+    // way, but only from its `ROUNDS_PER_ARM`-th slice: on a rotated
+    // objective CMA-ES gains nothing until its step size and covariance
+    // have adapted, which takes it a few slices. A GSA slice past the
+    // phase's first `ROUNDS_PER_ARM / 2` that gains less than
+    // `1 / PHASE_SLOWDOWN` of the phase's best per evaluation lends CMA-ES a
+    // slice, and CMA-ES takes the turn if that slice gains faster than both
+    // the GSA slice and `1 / PHASE_SLOWDOWN` of the phase's gain per
+    // evaluation so far, so a lent slice that gains a little while GSA's
+    // records pause does not take it. Records come in bursts and the slice
+    // after one often gains nothing, while a CMA-ES slice from a record just
+    // made gains by refining it: lent early in the phase, such a slice
+    // would end a phase still finding lower basins, as on separable
+    // multimodal objectives at 10 dimensions. GSA lends no other
+    // slice until the run has used twice the evaluations it had, and none
+    // after a lent slice that gained nothing. Once CMA-ES has taken the
+    // turn, its phase likewise lends GSA a slice when its last two slices
+    // gain less per evaluation than its lent slice had to beat, and hands
+    // the turn back if GSA's slice gains faster than those two did.
     let phase = |choice: usize,
-                 reserve: usize,
+                 turn: PhaseTurn,
                  states: &mut ArmStates,
                  rng: &mut StdRng,
                  posteriors: &mut [ArmPosterior],
                  round: &mut usize,
-                 winner: &mut Option<usize>| {
+                 winner: &mut Option<usize>|
+     -> Option<PhaseTurn> {
         let start = ledger.used_get();
         let mut last_gain = start;
-        while ledger.remaining() >= reserve + 8 {
+        let gsa = arms[choice] == ArmKind::Gsa;
+        let other = index(if gsa { ArmKind::Cma } else { ArmKind::Gsa });
+        let limit = matches!(turn, PhaseTurn::Fresh).then_some(displaced);
+        let (mut largest, pace) = match turn {
+            PhaseTurn::Taken { gain, pace } => (gain, Some(pace)),
+            _ => (0.0f64, None),
+        };
+        let mut peak = 0.0f64;
+        let mut lend_from = 0usize;
+        let (mut phase_gain, mut phase_used, mut slices) = (0.0f64, 0usize, 0usize);
+        let mut previous = (0.0f64, 0usize);
+        loop {
+            let reserve = hold(choice, posteriors);
+            if ledger.remaining() < reserve + 8 {
+                break;
+            }
             let idle = ledger.used_get() - last_gain;
             if idle >= (ROUNDS_PER_ARM * slice).max(last_gain - start) {
                 break;
             }
             *round += 1;
             let take = slice.min(ledger.remaining() - reserve);
-            let gained = play(choice, take, reserve, states, rng, posteriors);
-            if gained {
+            let (from, spent) = (ledger.best_get(), ledger.used_get());
+            let gained = play(choice, take, reserve, states, rng, posteriors, None);
+            let (to, used) = (ledger.best_get(), ledger.used_get() - spent);
+            let mut rate = gain_rate(from, to, used);
+            peak = peak.max(rate);
+            let gain = if from.is_finite() && to.is_finite() {
+                (from - to).max(0.0)
+            } else {
+                0.0
+            };
+            phase_gain += gain;
+            phase_used += used;
+            slices += 1;
+            let average = if phase_used > 0 {
+                phase_gain / phase_used as f64
+            } else {
+                0.0
+            };
+            if (gsa || slices >= ROUNDS_PER_ARM) && limit.is_some_and(|limit| average <= limit) {
+                *winner = gained.then_some(choice);
+                break;
+            }
+            if !gsa {
+                let (two, over) = (previous.0 + gain, previous.1 + used);
+                rate = if over > 0 { two / over as f64 } else { 0.0 };
+                previous = (gain, used);
+            }
+            largest = largest.max(gain);
+            if gained && gain > IMPROVEMENT_RTOL * largest {
                 last_gain = ledger.used_get();
             }
             *winner = gained.then_some(choice);
+            let lend = if gsa {
+                slices > ROUNDS_PER_ARM / 2 && rate < peak / PHASE_SLOWDOWN
+            } else {
+                pace.is_some_and(|pace| rate < pace)
+            };
+            if lend && ledger.used_get() >= lend_from && ledger.remaining() >= reserve + 8 {
+                let reference = if gsa && phase_used > 0 {
+                    rate.max(phase_gain / phase_used as f64 / PHASE_SLOWDOWN)
+                } else {
+                    rate
+                };
+                *round += 1;
+                let take = slice.min(ledger.remaining() - reserve);
+                let (from, spent) = (ledger.best_get(), ledger.used_get());
+                let won = play(other, take, reserve, states, rng, posteriors, None);
+                let to = ledger.best_get();
+                let lent = gain_rate(from, to, ledger.used_get() - spent);
+                *winner = won.then_some(other);
+                if lent > reference {
+                    if !gsa {
+                        return Some(PhaseTurn::Resumed);
+                    }
+                    let gain = if from.is_finite() && to.is_finite() {
+                        (from - to).max(0.0)
+                    } else {
+                        0.0
+                    };
+                    return Some(PhaseTurn::Taken {
+                        gain,
+                        pace: reference,
+                    });
+                }
+                lend_from = if gsa && lent == 0.0 {
+                    usize::MAX
+                } else {
+                    2 * ledger.used_get()
+                };
+            }
         }
+        None
     };
-    if !opened {
-        // Short of the opening budget a descent from the start converges
-        // only by taking most of the run. CMA-ES and the descent take a
-        // slice each from the start, then GSA's quenched visits leave the
-        // start's basin one coordinate at a time, and a descent turn
-        // settles the basin they reach, keeping the turn while it pays.
-        let (cma, qn, gsa) = (index(ArmKind::Cma), index(ArmKind::Qn), index(ArmKind::Gsa));
-        if ledger.remaining() >= polish + 8 {
-            round += 1;
-            let take = slice.min(ledger.remaining() - polish);
-            winner = play(cma, take, polish, states, &mut rng, &mut posteriors).then_some(cma);
-        }
-        if ledger.remaining() >= polish + 8 {
-            round += 1;
-            let take = slice.min(ledger.remaining() - polish);
-            // Reserving all but the slice ends the turn with it.
-            let reserve = ledger.remaining() - take;
-            winner = play(qn, take, reserve, states, &mut rng, &mut posteriors).then_some(qn);
-        }
-        let reserve = polish.max(
-            ledger
-                .remaining()
-                .saturating_sub(WARM_UP_GSA_SLICES * slice),
-        );
-        phase(
-            gsa,
-            reserve,
-            states,
-            &mut rng,
-            &mut posteriors,
-            &mut round,
-            &mut winner,
-        );
-        if ledger.remaining() >= polish + 8 {
-            round += 1;
-            let take = slice.min(ledger.remaining() - polish);
-            winner = play(qn, take, polish, states, &mut rng, &mut posteriors).then_some(qn);
-        }
-    }
     // GSA records and CMA-ES gains come in bursts (records as the anneal
     // cools, a run per covariance) that single slices of the rounds below
-    // would not see.
-    const PHASES: [ArmKind; 2] = [ArmKind::Gsa, ArmKind::Cma];
-    for arm in PHASES {
-        let choice = index(arm);
-        // After an opening a phase that keeps paying must still leave the
-        // warm-up round a slice for every other arm, the next phase's
-        // included. Short of the opening budget, slices held for the
-        // surrogate and the restart arm cost the phases more than those
-        // arms return there, and DE keeps one.
-        let unplayed = posteriors
-            .iter()
-            .enumerate()
-            .filter(|&(i, posterior)| i != choice && posterior.pulls == 0)
-            .count();
-        let reserve = if opened {
-            polish + unplayed * slice
-        } else if posteriors[index(ArmKind::De)].pulls == 0 {
-            polish + slice
+    // would not see. GSA's phase comes first and CMA-ES's second; the two
+    // then alternate while a phase hands the other the turn, and GSA
+    // resumes after a phase CMA-ES took from it, up to `PHASE_TURNS`. If the
+    // bar on the first slice from below the start ended the opening before
+    // the descent converged, and GSA's first phase ends at its first slice,
+    // gaining less per evaluation than the descent's last slice, the
+    // descent takes a turn before CMA-ES's phase.
+    let mut turn = PhaseTurn::Fresh;
+    for at in 0..PHASE_TURNS {
+        let arm = if at % 2 == 0 {
+            ArmKind::Gsa
         } else {
-            polish
+            ArmKind::Cma
         };
-        phase(
-            choice,
-            reserve,
+        let pulls = posteriors[index(arm)].pulls;
+        let next = phase(
+            index(arm),
+            turn,
             states,
             &mut rng,
             &mut posteriors,
             &mut round,
             &mut winner,
         );
+        if at == 0 && barred && next.is_none() && posteriors[index(arm)].pulls == pulls + 1 {
+            let qn = index(ArmKind::Qn);
+            let reserve = hold(qn, &posteriors);
+            if ledger.remaining() >= reserve + 8 {
+                round += 1;
+                let take = slice.min(ledger.remaining() - reserve);
+                winner =
+                    play(qn, take, reserve, states, &mut rng, &mut posteriors, None).then_some(qn);
+            }
+        }
+        turn = match (next, turn) {
+            (Some(next), _) => next,
+            (None, PhaseTurn::Taken { .. }) => PhaseTurn::Resumed,
+            (None, _) if at == 0 => PhaseTurn::Fresh,
+            (None, _) => break,
+        };
     }
     // Explore and GSA skip slices shorter than eight evaluations; the polish
     // takes such a remainder.
@@ -3673,7 +4230,16 @@ where
             best.0
         };
         let take = slice.min(ledger.remaining() - polish);
-        winner = play(choice, take, polish, states, &mut rng, &mut posteriors).then_some(choice);
+        winner = play(
+            choice,
+            take,
+            polish,
+            states,
+            &mut rng,
+            &mut posteriors,
+            None,
+        )
+        .then_some(choice);
     }
     // Arms the polish floor never reached still take one slice. A
     // high-dimensional central stencil is held back from that slice.
@@ -3714,7 +4280,7 @@ where
     }
     let qn = index(ArmKind::Qn);
     while ledger.remaining() > 0 {
-        play(qn, slice, budget, states, &mut rng, &mut posteriors);
+        play(qn, slice, budget, states, &mut rng, &mut posteriors, None);
     }
     arms.iter()
         .zip(posteriors.iter())
@@ -6662,8 +7228,9 @@ mod tests {
 
     #[test]
     fn values_only_phases_leave_every_arm_a_slice() {
-        // Far out on Ackley GSA records keep paying, so its phase runs into
-        // the reserve; CMA-ES, DE, the surrogate and explore still take one.
+        // Far out on Ackley the turn passes from GSA's records to CMA-ES's
+        // runs, which keep paying, so CMA-ES's phase runs into the reserve;
+        // DE, the surrogate and explore still take one.
         for (dim, budget) in [(4usize, 2000usize), (10, 5000)] {
             let start = Array1::from_shape_fn(dim, |i| if i % 2 == 0 { 20.0 } else { -20.0 });
             for seed in [0u64, 1] {
@@ -6678,8 +7245,8 @@ mod tests {
                     Some(start.view()),
                 );
                 assert_eq!(obj.points().len(), budget);
-                let gsa = result.arm_stats.iter().find(|s| s.name == "gsa");
-                assert!(gsa.is_some_and(|s| s.pulls > ROUNDS_PER_ARM));
+                let cma = result.arm_stats.iter().find(|s| s.name == "cma");
+                assert!(cma.is_some_and(|s| s.pulls > ROUNDS_PER_ARM));
                 for stat in &result.arm_stats {
                     assert!(
                         stat.pulls > 0,
@@ -6687,6 +7254,91 @@ mod tests {
                         stat.name
                     );
                 }
+            }
+        }
+    }
+
+    #[test]
+    fn values_only_phases_lend_the_other_arm_a_slice_once_they_slow() {
+        // Far out on Ackley CMA-ES takes the turn from GSA with a lent slice,
+        // and its phase gains less per evaluation as its runs converge. Once
+        // its last two slices gain less per evaluation than the lent slice
+        // had to beat it lends GSA one; GSA's does not gain faster, so
+        // CMA-ES keeps the turn and lends the next only once the run has
+        // used twice the evaluations it had after the last.
+        use ArmKind::{Cma, Gsa};
+        let (dim, budget) = (4usize, 1500usize);
+        let obj = Traced::new(-32.768, 32.768, dim, ackley);
+        let ledger = BudgetLedger::new(budget, dim);
+        let budgeted = BudgetedObjective {
+            inner: &obj,
+            ledger: &ledger,
+        };
+        let start = Array1::from_shape_fn(dim, |i| if i % 2 == 0 { 20.0 } else { -20.0 });
+        budgeted.eval(start.view());
+        let mut states = ArmStates::default();
+        run_values_only_portfolio::<_, ShiftQuadratic>(&budgeted, &ledger, &mut states, 0, budget);
+        let turns = &states.turns;
+        let lent: Vec<usize> = (1..turns.len() - 1)
+            .filter(|&k| turns[k].0 == Gsa && turns[k - 1].0 == Cma && turns[k + 1].0 == Cma)
+            .collect();
+        assert!(lent.len() >= 2, "turns {turns:?}");
+        for pair in lent.windows(2) {
+            let (_, _, after) = turns[pair[0]];
+            let (_, from, _) = turns[pair[1]];
+            assert!(from >= 2 * after, "lent at {from} after {after}");
+            assert!(turns[pair[0] + 1..pair[1]].iter().all(|turn| turn.0 == Cma));
+        }
+    }
+
+    #[test]
+    fn values_only_gsa_phase_that_gains_nothing_ends_at_its_first_slice() {
+        // Inside an ill-conditioned ellipsoid the objective is zero, its
+        // least value, and outside it is the quadratic form less one. The
+        // descent reaches zero, and its last timed slice, which kicks a new
+        // descent (or, after an opening, only confirms convergence), gains
+        // nothing. Nothing lowers zero, so GSA's phase gives CMA-ES the turn
+        // after one slice instead of running out its idle slices.
+        use ArmKind::{Cma, Gsa, Qn};
+        fn clipped(x: ArrayView1<f64>) -> f64 {
+            let last = (x.len() - 1) as f64;
+            let form: f64 = x
+                .iter()
+                .enumerate()
+                .map(|(i, v)| 10f64.powf(2.0 * i as f64 / last) * v * v)
+                .sum();
+            (form - 1.0).max(0.0)
+        }
+        for (dim, budget, start) in [(20usize, 2000usize, 3.0), (30, 4000, 3.0), (20, 4000, 2.0)] {
+            let obj = Traced::new(-5.12, 5.12, dim, clipped);
+            let ledger = BudgetLedger::new(budget, dim);
+            let budgeted = BudgetedObjective {
+                inner: &obj,
+                ledger: &ledger,
+            };
+            budgeted.eval(Array1::from_elem(dim, start).view());
+            let mut states = ArmStates::default();
+            run_values_only_portfolio::<_, ShiftQuadratic>(
+                &budgeted,
+                &ledger,
+                &mut states,
+                0,
+                budget,
+            );
+            let case = format!("{dim}-D at {budget}");
+            assert_eq!(ledger.best_get(), 0.0, "{case}");
+            let arms: Vec<ArmKind> = states.turns.iter().map(|turn| turn.0).collect();
+            let phase = arms
+                .iter()
+                .skip(1)
+                .position(|&arm| arm == Cma)
+                .map(|at| at + 1)
+                .unwrap_or_else(|| panic!("{case}: no CMA-ES phase in {arms:?}"));
+            assert_eq!(arms[phase - 1], Gsa, "{case}: {arms:?}");
+            if budget < QN_AFFORDABLE_GRADIENTS * dim * (dim + 1) {
+                assert_eq!(arms[phase - 2], Qn, "{case}: {arms:?}");
+            } else {
+                assert_eq!(phase, 1, "{case}: {arms:?}");
             }
         }
     }
@@ -6878,10 +7530,12 @@ mod tests {
     #[test]
     fn values_only_gsa_turns_are_quenched_coordinate_visits() {
         // Replays every evaluation of the loop's GSA turns on the one chain
-        // the arm keeps from ten dimensions up. Each moves one coordinate of
-        // the chain's point and is kept only when lower, except box-wide
-        // reseeds, one at most every five temperature steps of `dim`
-        // visits; nothing else (a local search's trials) runs in a turn.
+        // the arm keeps from ten dimensions up. A turn starts the chain at
+        // the incumbent if another arm has lowered it below the chain. Each
+        // evaluation moves one coordinate of the chain's point and is kept
+        // only when lower, except box-wide reseeds, one at most every five
+        // temperature steps of `dim` visits; nothing else (a local search's
+        // trials) runs in a turn.
         for (dim, budget, seed) in [(10usize, 2000usize, 0u64), (10, 2000, 1), (12, 5000, 2)] {
             let obj = Traced::new(-5.12, 5.12, dim, rastrigin);
             let ledger = BudgetLedger::new(budget, dim);
@@ -6918,6 +7572,12 @@ mod tests {
             let (mut x, mut fx) = (points[chain].clone(), values[chain]);
             let (mut visits, mut reseeds) = (0usize, 0usize);
             for &(used, after) in &turns {
+                let best = (0..used)
+                    .min_by(|&a, &b| values[a].total_cmp(&values[b]))
+                    .expect("evaluations before the turn");
+                if values[best] < fx {
+                    (x, fx) = (points[best].clone(), values[best]);
+                }
                 for i in used..after {
                     let moved = (0..dim).filter(|&k| points[i][k] != x[k]).count();
                     if moved <= 1 {
@@ -6942,13 +7602,29 @@ mod tests {
     }
 
     #[test]
-    fn values_only_gsa_and_de_play_short_of_the_opening_budget() {
+    fn values_only_descent_hands_gsa_the_turn_once_it_slows() {
         // Short of the opening budget a descent from the start would take
-        // most of the run. CMA-ES and the descent take one slice each, GSA
-        // the next two, a descent turn settles the basin GSA reached, and
-        // DE still gets a turn.
+        // most of the run. CMA-ES takes one slice and the descent the next.
+        // From a side basin of Rastrigin the descent's second slice gains
+        // less per evaluation than its first, and GSA takes the turn. When
+        // the descent's first slice leaves fewer than `GSA_LAST_SLICES`
+        // slices beyond the closing reserve, GSA takes the turn there if
+        // eight evaluations or more are left (171 at 30-D and 700, 15 at
+        // 30-D and 440, 16 at 100-D and 1375), a slice at a time, and does
+        // not play otherwise (30-D at 420, 100-D at 1000). DE plays once
+        // the hand-over leaves a slice beyond the reserve; at 10-D and 500
+        // GSA's visits keep the turn up to it.
         use ArmKind::{Cma, De, Gsa, Qn};
-        for (dim, budget) in [(10usize, 500usize), (20, 2000), (30, 4000)] {
+        for (dim, budget, tail, de) in [
+            (10usize, 500usize, None, false),
+            (20, 2000, None, true),
+            (30, 4000, None, true),
+            (30, 700, Some(171usize), false),
+            (30, 440, Some(15), false),
+            (30, 420, Some(0), false),
+            (100, 1375, Some(16), false),
+            (100, 1000, Some(0), false),
+        ] {
             assert!(budget < QN_AFFORDABLE_GRADIENTS * dim * (dim + 1));
             let obj = Traced::new(-5.12, 5.12, dim, rastrigin);
             let ledger = BudgetLedger::new(budget, dim);
@@ -6968,13 +7644,117 @@ mod tests {
             );
             assert_eq!(obj.points().len(), budget);
             let slice = values_only_slice(dim, budget);
+            let polish = (LOCAL_FIRST_POLISH_GRADIENTS * (dim + 1))
+                .min((budget as f64 * LOCAL_FIRST_POLISH_MAX_SHARE).round() as usize);
+            let polish = if polish >= QN_MIN_POLISH_GRADIENTS * (dim + 1) {
+                polish
+            } else {
+                0
+            };
+            let case = format!("{dim}-D at {budget}");
             let arms: Vec<ArmKind> = states.turns.iter().map(|turn| turn.0).collect();
-            assert_eq!(arms[..5], [Cma, Qn, Gsa, Gsa, Qn], "{dim}-D at {budget}");
-            for &(arm, used, after) in &states.turns[..4] {
-                assert_eq!(after - used, slice, "{} in {dim}-D at {budget}", arm.name());
+            assert_eq!(arms[..2], [Cma, Qn], "{case}");
+            assert_eq!(
+                states.turns[0].2 - states.turns[0].1,
+                slice.min(budget - 1 - polish),
+                "{case}"
+            );
+            let first_gsa = arms.iter().position(|&arm| arm == Gsa);
+            match tail {
+                Some(0) => {
+                    assert!(first_gsa.is_none(), "{case}: turns {arms:?}");
+                    assert!(arms.iter().all(|&arm| arm == Cma || arm == Qn), "{case}");
+                }
+                _ => {
+                    let at = first_gsa.unwrap_or_else(|| panic!("{case}: turns {arms:?}"));
+                    let (_, qn_from, qn_to) = states.turns[at - 1];
+                    let (_, gsa_from, gsa_to) = states.turns[at];
+                    assert_eq!(arms[at - 1], Qn, "{case}");
+                    if let Some(left) = tail {
+                        assert_eq!(budget - qn_to - polish, left, "{case}");
+                        assert_eq!(gsa_to - gsa_from, left.min(slice), "{case}");
+                    } else {
+                        assert!(qn_to - qn_from >= 2 * slice, "{case}: the descent slowed");
+                    }
+                }
             }
-            assert!(arms.contains(&De), "{dim}-D at {budget}: turns {arms:?}");
+            assert_eq!(arms.contains(&De), de, "{case}: turns {arms:?}");
         }
+    }
+
+    #[test]
+    fn descent_pace_slows_once_a_slice_gains_less_per_evaluation() {
+        let mut pace = DescentPace::default();
+        pace.begin();
+        // A turn's first slice never slows it, nor does a faster one.
+        assert!(!pace.time(10.0, 6.0, 4, 5));
+        assert!(!pace.time(6.0, 2.0, 2, 7));
+        assert_eq!((pace.last, pace.slices), (2.0, 2));
+        // A slower slice slows it, and GSA must then gain as fast as the
+        // descent would on its next slice if it went on slowing so.
+        assert!(pace.time(2.0, 1.0, 1, 8));
+        assert_eq!(pace.next, 0.5);
+        // A slice that used nothing or ends on a value that is not finite
+        // is not timed.
+        assert!(!pace.time(1.0, f64::NAN, 4, 12));
+        assert!(!pace.time(1.0, 0.5, 0, 12));
+        assert_eq!((pace.last, pace.slices), (1.0, 3));
+        // Inside its hold a slowing descent keeps the turn; the next turn
+        // is timed afresh.
+        pace.hold = 100;
+        pace.begin();
+        assert!(!pace.time(4.0, 2.0, 1, 50));
+        assert!(!pace.time(2.0, 1.5, 1, 51));
+        assert!(pace.time(1.5, 1.25, 1, 100));
+        assert_eq!(pace.next, 0.125);
+    }
+
+    #[test]
+    fn values_only_gsa_moves_its_worst_chain_to_a_lower_incumbent() {
+        // Once another arm lowers the incumbent below every chain, the
+        // worst chain goes on from there; quenched, it stays at Rastrigin's
+        // minimum while the others visit.
+        let dim = 4;
+        let obj = Traced::new(-5.12, 5.12, dim, rastrigin);
+        let ledger = BudgetLedger::new(400, dim);
+        let budgeted = BudgetedObjective {
+            inner: &obj,
+            ledger: &ledger,
+        };
+        budgeted.eval(Array1::from_elem(dim, 2.5).view());
+        let mut states = ArmStates {
+            values_only: true,
+            ..ArmStates::default()
+        };
+        let mut rng = StdRng::seed_from_u64(5);
+        let mut pull = |states: &mut ArmStates| {
+            run_arm::<_, ShiftQuadratic>(
+                ArmKind::Gsa,
+                &budgeted,
+                None,
+                &ledger,
+                states,
+                &mut rng,
+                40,
+                400,
+            )
+        };
+        pull(&mut states);
+        let before = states.gsa.as_ref().expect("chains").vals.clone();
+        assert!(
+            before.len() >= 2 && before.iter().all(|&v| v > 0.0),
+            "{before:?}"
+        );
+        budgeted.eval(Array1::zeros(dim).view());
+        pull(&mut states);
+        let state = states.gsa.as_ref().expect("chains");
+        let at: Vec<usize> = (0..state.vals.len())
+            .filter(|&i| state.vals[i] == 0.0)
+            .collect();
+        assert_eq!(at.len(), 1, "{:?}", state.vals);
+        assert_eq!(state.xs[at[0]], Array1::<f64>::zeros(dim));
+        let worst = (0..before.len()).fold(0, |w, i| if before[i] > before[w] { i } else { w });
+        assert_eq!(at[0], worst, "{before:?}");
     }
 
     #[test]
@@ -7075,7 +7855,11 @@ mod tests {
         // default-population run with the box-wide step. A run ends once
         // its recent bests span less than the success threshold, so that
         // restart comes as soon as the local run has converged to the
-        // resolution the portfolio scores. The minimum value 10 keeps the
+        // resolution the portfolio scores, the threshold at the incumbent,
+        // after 259 evaluations. The bound of 400 catches a run held to a
+        // threshold a million times finer (525 evaluations) or one that
+        // goes on to the plain stop (602), not one held to a threshold up
+        // to ten thousand times finer (399). The minimum value 10 keeps the
         // threshold well above the relative tolerance of a plain stop.
         use crate::methods::cma_es::CmaStop;
         let (dim, budget, seed) = (4usize, 4000usize, 7u64);
@@ -7088,6 +7872,7 @@ mod tests {
             ledger: &ledger,
         };
         budgeted.eval(Array1::from_elem(dim, 0.5).view());
+        let threshold = IMPROVEMENT_RTOL * ledger.best_get().abs();
         let mut states = ArmStates::default();
         let stop = loop {
             assert!(ledger.remaining() > 0, "the local first run never stopped");
@@ -7105,6 +7890,12 @@ mod tests {
             "the local first run stopped after {} evaluations",
             first.es.evaluations()
         );
+        assert_eq!(first.es.tol_fun_hist(), threshold);
+        assert!(
+            first.es.evaluations() <= 400,
+            "the local first run stopped after {} evaluations",
+            first.es.evaluations()
+        );
         run_cma_arm(&budgeted, &ledger, &mut states, 1, seed, budget);
         let restart = states.cma.as_ref().expect("cma state");
         assert_eq!(restart.regime, CmaRegime::Large);
@@ -7113,29 +7904,119 @@ mod tests {
     }
 
     #[test]
-    fn values_only_threshold_floors_at_the_start_resolution() {
-        let floor = values_only_floor(Some(-250.0));
-        assert_eq!(floor, f64::EPSILON * 250.0);
-        assert_eq!(values_only_threshold(-3.0, floor), IMPROVEMENT_RTOL * 3.0);
-        assert_eq!(values_only_threshold(0.0, floor), IMPROVEMENT_RTOL * floor);
-        assert_eq!(
-            values_only_threshold(f64::INFINITY, floor),
-            IMPROVEMENT_RTOL * floor
-        );
-        for start in [None, Some(0.0), Some(f64::NAN), Some(f64::INFINITY)] {
-            assert_eq!(values_only_floor(start), f64::MIN_POSITIVE, "{start:?}");
+    fn values_only_cma_runs_stop_at_the_threshold_in_force() {
+        // In the values-only loop the success threshold moves with every
+        // slice, and a live run's history tolerance follows it: the run
+        // stops once its recent bests span less than the threshold in force
+        // when it plays, and a restart starts at that threshold.
+        use crate::methods::cma_es::CmaStop;
+        let (dim, budget, seed) = (4usize, 4000usize, 7u64);
+        let obj = Traced::new(-2.0, 2.0, dim, |x| {
+            10.0 + x.iter().map(|v| (v - 0.3) * (v - 0.3)).sum::<f64>()
+        });
+        let ledger = BudgetLedger::new(budget, dim);
+        let budgeted = BudgetedObjective {
+            inner: &obj,
+            ledger: &ledger,
+        };
+        budgeted.eval(Array1::from_elem(dim, 0.5).view());
+        let start = ledger.best_get();
+        let mut states = ArmStates {
+            values_only: true,
+            success: SuccessScale::new(Some(start)),
+            ..ArmStates::default()
+        };
+        states.success.record(start - 0.125, start - 0.25);
+        run_cma_arm(&budgeted, &ledger, &mut states, 1, seed, budget);
+        let tolerance =
+            |states: &ArmStates| states.cma.as_ref().expect("cma state").es.tol_fun_hist();
+        assert_eq!(tolerance(&states), states.success.threshold());
+        states.success.record(start - 0.25, start - 0.25 - 0.015625);
+        let stop = loop {
+            assert!(ledger.remaining() > 0, "the first run never stopped");
+            run_cma_arm(&budgeted, &ledger, &mut states, 1, seed, budget);
+            assert_eq!(tolerance(&states), states.success.threshold());
+            let state = states.cma.as_ref().expect("cma state");
+            if let Some(reason) = state.es.stop_reason() {
+                break reason;
+            }
+        };
+        assert_eq!(stop, CmaStop::TolFunHist);
+        states.success.record(start - 0.5, start - 0.5 - 0.0625);
+        run_cma_arm(&budgeted, &ledger, &mut states, 1, seed, budget);
+        assert_eq!(tolerance(&states), states.success.threshold());
+    }
+
+    #[test]
+    fn success_scale_follows_gains_not_offsets_or_the_start() {
+        // Dyadic values keep every difference exact, so a shifted or
+        // rescaled copy records the same gains.
+        let slices = [(3.0, 2.5), (2.5, 2.5), (2.5, 2.25), (2.25, 2.375)];
+        let thresholds = |start: f64, factor: f64, shift: f64| {
+            let at = |v: f64| v * factor + shift;
+            let mut scale = SuccessScale::new(Some(at(start)));
+            scale.record(at(start), at(3.0));
+            slices
+                .iter()
+                .map(|&(before, after)| {
+                    scale.record(at(before), at(after));
+                    scale.threshold()
+                })
+                .collect::<Vec<_>>()
+        };
+        let plain = thresholds(4.0, 1.0, 0.0);
+        let half = IMPROVEMENT_RTOL * 0.5;
+        let quarter = IMPROVEMENT_RTOL * 0.25;
+        assert_eq!(plain, [half, half, quarter, quarter]);
+        // The drop from the start records nothing, however large.
+        assert_eq!(thresholds(1e30, 1.0, 0.0), plain);
+        assert_eq!(thresholds(4.0, 1.0, 1024.0), plain);
+        assert_eq!(thresholds(4.0, 1.0, -1024.0), plain);
+        let small = 2f64.powi(-20);
+        let scaled: Vec<f64> = plain.iter().map(|t| t * small).collect();
+        assert_eq!(thresholds(4.0, small, 0.0), scaled);
+    }
+
+    #[test]
+    fn success_scale_floors_at_the_first_value_below_the_start() {
+        let mut scale = SuccessScale::new(Some(-2.0));
+        assert_eq!(scale.floor, f64::MIN_POSITIVE);
+        scale.record(-2.0, f64::NAN);
+        scale.record(-2.0, -1.0);
+        assert_eq!(scale.threshold(), IMPROVEMENT_RTOL * f64::MIN_POSITIVE);
+        scale.record(-2.0, -250.0);
+        assert_eq!(scale.floor, f64::EPSILON * 250.0);
+        assert_eq!(scale.threshold(), IMPROVEMENT_RTOL * scale.floor);
+        scale.record(-250.0, -3000.0);
+        scale.record(-3000.0, -3000.0);
+        assert_eq!(scale.floor, f64::EPSILON * 250.0);
+        assert_eq!(scale.threshold(), IMPROVEMENT_RTOL * 2750.0);
+        for first in [0.0, -0.0, 1e-300, -5e-324] {
+            let mut tiny = SuccessScale::new(Some(1.0));
+            tiny.record(1.0, first);
+            assert_eq!(tiny.floor, f64::MIN_POSITIVE, "{first:e}");
+        }
+        for start in [None, Some(f64::NAN), Some(f64::INFINITY)] {
+            let mut scale = SuccessScale::new(start);
+            scale.record(5.0, 4.0);
+            assert_eq!(scale.floor, f64::EPSILON * 4.0, "{start:?}");
+            assert_eq!(scale.threshold(), IMPROVEMENT_RTOL, "{start:?}");
         }
     }
 
     #[test]
     fn values_only_run_ignores_the_scale_of_the_objective() {
-        // A power of two rescales every value exactly. The success threshold
-        // scales with the start's value and a descent's first trial with the
-        // box, so a rescaled run asks the same points, at least until the
-        // restart arm, whose chains anneal at a fixed temperature, or the
-        // surrogate, whose temperature has an absolute floor, plays.
+        // A power of two rescales every value, and so every gain, success
+        // threshold and the run's unit, exactly; a descent's first trial
+        // follows the box, and the restart arm and the surrogate take values
+        // in the unit, so a rescaled run asks the same points to the end of
+        // its budget. At 2^-40 the archive's spread lies below the
+        // surrogate's floor in absolute terms.
         fn small(x: ArrayView1<f64>) -> f64 {
             rastrigin(x) * 2f64.powi(-20)
+        }
+        fn tiny(x: ArrayView1<f64>) -> f64 {
+            rastrigin(x) * 2f64.powi(-40)
         }
         fn large(x: ArrayView1<f64>) -> f64 {
             rastrigin(x) * 2f64.powi(20)
@@ -7160,23 +8041,181 @@ mod tests {
             (obj.points(), states.turns)
         };
         // Short of the opening budget at 20 dimensions, past it at 10.
+        let mut arms = Vec::new();
         for (dim, budget) in [(10usize, 1000usize), (20, 2000)] {
             let (plain, turns) = trace(rastrigin, dim, budget);
-            let cut = turns
-                .iter()
-                .find(|turn| matches!(turn.0, ArmKind::Explore | ArmKind::Surrogate))
-                .map_or(budget, |turn| turn.1);
-            assert!(cut > budget / 2, "{dim}-D at {budget}: compared {cut}");
-            for f in [small as fn(ArrayView1<f64>) -> f64, large] {
+            arms.extend(turns.iter().map(|turn| turn.0));
+            for f in [small as fn(ArrayView1<f64>) -> f64, tiny, large] {
                 let (points, scaled_turns) = trace(f, dim, budget);
-                assert_eq!(points[..cut], plain[..cut], "{dim}-D at {budget}");
-                let before = |turns: &[(ArmKind, usize, usize)]| {
-                    turns.iter().filter(|turn| turn.1 < cut).count()
-                };
-                let n = before(&turns);
-                assert_eq!(before(&scaled_turns), n, "{dim}-D at {budget}");
-                assert_eq!(scaled_turns[..n], turns[..n], "{dim}-D at {budget}");
+                assert_eq!(points, plain, "{dim}-D at {budget}");
+                assert_eq!(scaled_turns, turns, "{dim}-D at {budget}");
             }
+        }
+        for arm in [ArmKind::Explore, ArmKind::Surrogate] {
+            assert!(arms.contains(&arm), "no {arm:?} turn");
+        }
+    }
+
+    #[test]
+    fn values_only_descent_converges_as_deep_under_an_added_constant() {
+        // The slow test compares each decrease with a few units in the last
+        // place of the value, so a constant that makes the values larger
+        // coarsens the depth only to their resolution. The Hessian of this
+        // bowl vanishes at its minimum, so the decreases shrink slowly there.
+        fn valley(x: ArrayView1<f64>) -> f64 {
+            x.iter()
+                .enumerate()
+                .map(|(i, v)| (1 + i) as f64 * (v - 0.3).abs().powf(1.5))
+                .sum()
+        }
+        fn shifted(x: ArrayView1<f64>) -> f64 {
+            16384.0 + valley(x)
+        }
+        let depth = |f: fn(ArrayView1<f64>) -> f64, shift: f64| {
+            let dim = 4;
+            let obj = Traced::new(-2.0, 2.0, dim, f);
+            let ledger = BudgetLedger::new(4000, dim);
+            let budgeted = BudgetedObjective {
+                inner: &obj,
+                ledger: &ledger,
+            };
+            let start = Array1::from_shape_fn(dim, |i| if i % 2 == 0 { -1.2 } else { 1.0 });
+            budgeted.eval(start.view());
+            let mut states = ArmStates {
+                values_only: true,
+                ..ArmStates::default()
+            };
+            while ledger.remaining() > 0 && states.qn.as_ref().is_none_or(|qn| !qn.engine.is_done())
+            {
+                run_qn_arm(&budgeted, &ledger, &mut states, 50, 3, true);
+            }
+            assert!(ledger.remaining() > 0, "shift {shift}: never converged");
+            ledger.best_get() - shift
+        };
+        for (f, shift) in [
+            (valley as fn(ArrayView1<f64>) -> f64, 0.0),
+            (shifted, 16384.0),
+        ] {
+            let gap = depth(f, shift);
+            let resolution = f64::EPSILON * shift.max(1.0);
+            assert!(
+                gap <= 16.0 * resolution,
+                "shift {shift}: stopped {gap} above the minimum"
+            );
+        }
+    }
+
+    #[test]
+    fn values_only_opening_ends_once_its_recent_gains_fall_to_a_sliver() {
+        // Along Rosenbrock's valley each slice gains a little less than the
+        // one before, so every slice would beat the success threshold that
+        // its predecessor sets until the descent converged. The opening
+        // ends at the first slice that gains no more than a sliver of the
+        // largest of its last few gains from below the start's value, or
+        // after which its last few slices together gain no more than a
+        // sliver of its largest such gain; the first slice from below the
+        // start is held to the gain from it. A slice that gains less than
+        // a sliver of the largest gain does not end it while the slices
+        // just before it gained more.
+        let (dim, budget) = (10usize, 2000usize);
+        let obj = Traced::new(-2.0, 2.0, dim, rosenbrock);
+        let ledger = BudgetLedger::new(budget, dim);
+        let budgeted = BudgetedObjective {
+            inner: &obj,
+            ledger: &ledger,
+        };
+        let start = Array1::from_shape_fn(dim, |i| if i % 2 == 0 { -1.2 } else { 1.0 });
+        budgeted.eval(start.view());
+        let mut states = ArmStates::default();
+        run_values_only_portfolio::<_, ShiftQuadratic>(&budgeted, &ledger, &mut states, 3, budget);
+        let slice = values_only_slice(dim, budget);
+        let end = states.turns[0].1;
+        assert_eq!((end - 1) % slice, 0, "the opening converged at {end}");
+        let values: Vec<f64> = obj.points().iter().map(|x| rosenbrock(x.view())).collect();
+        let best = |n: usize| values[..n].iter().copied().fold(f64::INFINITY, f64::min);
+        let gains: Vec<f64> = (1..end)
+            .step_by(slice)
+            .map(|from| best(from) - best(from + slice))
+            .collect();
+        let (from_start, rest) = gains.split_first().expect("an opening slice");
+        let (last, kept) = rest.split_last().expect("two opening slices");
+        let largest = |gains: &[f64]| match gains {
+            [] => *from_start,
+            gains => gains.iter().copied().fold(0.0f64, f64::max),
+        };
+        let recent =
+            |k: usize| IMPROVEMENT_RTOL * largest(&kept[k.saturating_sub(OPENING_GAINS)..k]);
+        let all = |k: usize| IMPROVEMENT_RTOL * largest(&kept[..k]);
+        let span = |k: usize, gain: f64| {
+            kept[k.saturating_sub(OPENING_SPAN - 1)..k]
+                .iter()
+                .sum::<f64>()
+                + gain
+        };
+        for (k, &gain) in kept.iter().enumerate() {
+            assert!(gain > recent(k), "slice {k} kept {gain}");
+            assert!(span(k, gain) > all(k), "slice {k} kept after a creep");
+        }
+        assert!(
+            kept.iter().enumerate().any(|(k, &gain)| gain <= all(k)),
+            "no slow slice was kept"
+        );
+        let n = kept.len();
+        assert!(
+            *last <= recent(n) || span(n, *last) <= all(n),
+            "ended on {last}"
+        );
+        assert!(*last > 0.0, "the last slice still gained");
+    }
+
+    #[test]
+    fn values_only_opening_goes_on_from_where_cma_leaves_a_stuck_start() {
+        // From behind a sentinel every neighbour of the start shares its
+        // value and the descent stops at once; from behind a steep wall its
+        // first curvature pair spans the wall and it stalls, though a
+        // stencil point may still lower the incumbent a little. CMA-ES
+        // takes a slice before any phase, and the opening then converges
+        // from the incumbent it leaves as it does from a regular start.
+        fn sentinel(x: ArrayView1<f64>) -> f64 {
+            if x[0] > 1.8 { 1e30 } else { rosenbrock(x) }
+        }
+        fn wall(x: ArrayView1<f64>) -> f64 {
+            1e22 * (x[0] - 1.8).max(0.0).powi(2) + rosenbrock(x)
+        }
+        let dim = 10usize;
+        let start = Array1::from_shape_fn(dim, |i| match i {
+            0 => 2.0,
+            _ if i % 2 == 0 => -1.2,
+            _ => 1.0,
+        });
+        let starts: [(&str, fn(ArrayView1<f64>) -> f64); 2] =
+            [("sentinel", sentinel), ("wall", wall)];
+        for ((name, f), budget) in starts.into_iter().flat_map(|s| [(s, 1000usize), (s, 5000)]) {
+            assert!(budget >= QN_AFFORDABLE_GRADIENTS * dim * (dim + 1));
+            let slice = values_only_slice(dim, budget);
+            let obj = Traced::new(-2.0, 2.0, dim, f);
+            let ledger = BudgetLedger::new(budget, dim);
+            let budgeted = BudgetedObjective {
+                inner: &obj,
+                ledger: &ledger,
+            };
+            budgeted.eval(start.view());
+            let mut states = ArmStates::default();
+            run_values_only_portfolio::<_, ShiftQuadratic>(
+                &budgeted,
+                &ledger,
+                &mut states,
+                3,
+                budget,
+            );
+            let (arm, from, _) = states.turns[0];
+            assert_eq!(arm, ArmKind::Cma, "{name} at {budget}");
+            assert!(
+                from <= 1 + 2 * slice,
+                "{name} at {budget}: CMA-ES first played at {from}"
+            );
+            let best = ledger.best_get();
+            assert!(best < 1e-8, "{name} at {budget}: {best}");
         }
     }
 }
