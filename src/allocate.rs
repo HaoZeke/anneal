@@ -425,11 +425,7 @@ pub fn beta_draw<R: Rng + ?Sized>(a: f64, b: f64, rng: &mut R) -> f64 {
 fn sample_beta<R: Rng + ?Sized>(a: f64, b: f64, rng: &mut R) -> f64 {
     let x = sample_gamma(a, rng);
     let y = sample_gamma(b, rng);
-    if x + y <= 0.0 {
-        0.5
-    } else {
-        x / (x + y)
-    }
+    if x + y <= 0.0 { 0.5 } else { x / (x + y) }
 }
 
 /// Marsaglia and Tsang's Gamma sampler, with the shape boost below one.
@@ -488,7 +484,7 @@ mod discovery_accounting_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rand::{rngs::StdRng, SeedableRng};
+    use rand::{SeedableRng, rngs::StdRng};
 
     #[test]
     fn temperature_respects_the_descent_boundary() {
@@ -854,8 +850,8 @@ fn student_t<R: Rng + ?Sized>(nu: f64, rng: &mut R) -> f64 {
 #[cfg(test)]
 mod depth_allocator_tests {
     use super::*;
-    use rand::rngs::StdRng;
     use rand::SeedableRng;
+    use rand::rngs::StdRng;
 
     /// The allocator has to find the arm that reaches deeper, which is the
     /// whole point of rewarding depth instead of acceptance.
