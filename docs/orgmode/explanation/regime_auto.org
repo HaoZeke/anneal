@@ -204,7 +204,10 @@ trails, not what that rule alone costs. The figures for putting the
 replaced rule back, and for the alternatives tried, change that one
 rule and hold the loop's other rules in place: they are set against
 the loop where they cost a row, and against its form before these
-rules where they bring a row level or put one behind. A comparison
+rules where they bring a row level or put one behind. Those for the
+descent's resolution test, the opening's bar and lending from any slow
+slice or at a quarter of the phase's pace were taken on the loop as it
+is, the rest before the descent's slow test had its floor. A comparison
 reads /A against B (W/T/L)/: medians, and the seeds on which A wins,
 ties and loses, two runs tying when their values differ by at most
 =1e-9 max(1, |b|)=, =b= being B's (an absolute =1e-9= below one); a
@@ -231,7 +234,7 @@ replaced rule back costs the rows named with it:
   (19/0/21), =rosen100@20000= 74.9 against 72.0 (17/0/23),
   =stybR30@1000= -1057 against -1057 (4/18/18), =levy100@20000=
   0.0416 against 1.0e-11 (5/15/20), =rast100_shift@20000= 9.95 against
-  7.96 (9/3/28) and =rastS100@20000= 10.9 against 7.96 (8/3/29). With
+  7.96 (9/3/28) and =rastS100@20000= 9.95 against 7.96 (9/3/28). With
   the two slices back each comes level, but =ackS50@5000= is 4.31
   against 2.94 and =ackS100@5000= 13.2 against 5.94 (1/0/39 each),
   =ellR30@1000= 12557 against 5589 (3/0/37), =ellR100@5000= 20110
@@ -289,39 +292,39 @@ replaced rule back costs the rows named with it:
   -6.16 against -12.6 (1/1/38), and =ellR30@5000= with =+1e4= 4.4e-3
   against 2.9e-4 (0/6/34).
 - Lending from a =gsa= phase's fifth slice: =mich10@5000= -9.655
-  against -9.66 (3/28/9, =p= 0.021). Four seeds lose the closing
-  polish by 1.6e-8 to 4.8e-6, three lose the basin after =cma= takes
-  the turn from a lent slice and converges in a side basin, and two end
-  in a nearby basin. Two tried rules bring it level, each at a cost.
-  Lending from any slow slice (6/22/12) puts =mich10@5000= without
-  =x0= (6/20/14, =p= 0.045), =rast10_shift@1000= (2/32/6, =p= 0.043)
-  and =styb10_45@1000= without =x0= (0/35/5, =p= 0.031) behind.
-  Holding the lent slice to a quarter of the phase's gain per
-  evaluation (4/26/10, =p= 0.052) puts none of the other rows measured
-  with it behind, but ends =ackley10@1000= at 1.155 against the loop's
-  0.0694 (1/28/11, =p= 0.0007): still ahead of the form before these
-  rules (2.81, 31/2/7) and of 0.10.0, its target (17.1, 40/0/0), but
-  behind the form the lend and phase rules were added to (0.0080,
-  8/11/21, =p= 0.0018), with which the loop is level; it also leaves
-  =ackley10@5000= without =x0= further behind that form than the loop
-  is (5/21/14, =p= 0.0023, against 6/23/11). Lending from the fourth
-  slice leaves it behind (4/28/8, =p= 0.046) with =rast10_fixed@1000=
-  and =schwefel10_cec@1000= behind too, and from the sixth (5/25/10)
-  with five Rastrigin rows behind; a lent slice held to a fifth, a
-  sixth or a half of that gain leaves it behind (3/27/10, 3/27/10,
-  4/25/11), and so does ending a phase =cma= took once its last two
-  slices gain less than an eighth or a 64th of its bar (4/25/11,
-  4/27/9), which also costs =ackS30@5000= (1.2e-5 and 1.4e-6 against
-  6.2e-7). With phases that keep the turn while they still find lower
-  basins, the fifth-slice lend also trails the form the two were added
-  to on =ackS30@20000=, 8.6e-7 against 6.3e-7 (12/1/27, =p= 0.048;
-  3.9e-7 with lending from any slow slice), and on =ackley10@5000=
-  without =x0=, 4.1e-11 against 3.2e-11 (6/23/11). From =x0= that row
-  is level with that form (8/28/4), but its =-1e4= copy (1.8e-10
-  against 2.0e-10, 6/26/8) and its =+1e4= and =-1e4= controls (2.1e-11
-  against 3.2e-11, 5/27/8 each), which start from =x0= as every copy
-  does, trail it through the same two rules: longer =gsa= phases leave
-  the cone at Ackley's minimum unrefined on a few seeds.
+  against -9.66 (1/31/8, =p= 0.020). Two seeds lose the closing polish
+  by 3.4e-6 and 4.8e-6, four lose the basin after =cma= takes the turn
+  from a lent slice and converges in a side basin, and two end in a
+  nearby basin. Lending from any slow slice brings it level (5/25/10)
+  but puts =styb10_45@1000= without =x0= (0/35/5, =p= 0.031) and
+  =mich10@1000= without =x0= (2/31/7, =p= 0.049) behind. Holding the
+  lent slice to a quarter of the phase's gain per evaluation leaves it
+  behind (2/28/10, =p= 0.039; level without the floor, 4/26/10), puts
+  none of the other rows measured with it behind, and ends
+  =ackley10@1000= at 1.155 against the loop's 0.0694 (1/28/11,
+  =p= 0.0007): still ahead of the form before these rules (2.81,
+  31/2/7) and of 0.10.0, its target (17.1, 40/0/0), but behind the form
+  the lend and phase rules were added to (0.0080, 8/11/21, =p= 0.0018),
+  with which the loop is level; it also leaves =ackley10@5000= without
+  =x0= further behind that form than the loop is (5/22/13, =p= 0.0038,
+  against 6/24/10). On the loop without the floor, lending from the
+  fourth slice left it behind (4/28/8, =p= 0.046) with
+  =rast10_fixed@1000= and =schwefel10_cec@1000= behind too, and from
+  the sixth (5/25/10) with five Rastrigin rows behind; a lent slice
+  held to a fifth, a sixth or a half of that gain left it behind
+  (3/27/10, 3/27/10, 4/25/11), and so did ending a phase =cma= took
+  once its last two slices gain less than an eighth or a 64th of its
+  bar (4/25/11, 4/27/9), which also cost =ackS30@5000= (1.2e-5 and
+  1.4e-6 against 6.2e-7). With phases that keep the turn while they
+  still find lower basins, the fifth-slice lend also trails the form
+  the two were added to on =ackS30@20000=, 9.1e-7 against 6.3e-7
+  (12/1/27, =p= 0.045; 3.9e-7 with lending from any slow slice), and on
+  =ackley10@5000= without =x0=, 4.0e-11 against 3.2e-11 (6/24/10). From
+  =x0= that row is level with that form (8/28/4), but its =-1e4= copy
+  (1.8e-10 against 2.0e-10, 6/26/8) and its =+1e4= and =-1e4= controls
+  (2.3e-11 against 3.2e-11, 5/27/8 each), which start from =x0= as
+  every copy does, trail it through the same two rules: longer =gsa=
+  phases leave the cone at Ackley's minimum unrefined on a few seeds.
 - Rotated ellipsoids short of the opening budget trail an earlier form
   of this loop by three to four times, =ellR50@1000= 1.38e5 against
   4.79e4, =ellR50@5000= 37.7 against 9.20 and =ellR100@20000= 2.48
@@ -336,24 +339,24 @@ replaced rule back costs the rows named with it:
   against 40.1 (5/0/35), and =stybS100@5000=, -3860 against -3902
   (4/2/34).
 
-Of the 88 offset and =x1e-6= copies, six trail their control at
+Of the 88 offset and =x1e-6= copies, five trail their control at
 =p < 0.05=, where chance alone gives about four and none passes a
 correction for the 88 tests: =fit6@1000= with =+1e2= (-4.82 against
--4.79, 16/0/24), =ackS30@5000= with =+1e2= (1.05e-6 against 6.9e-7,
-11/8/21), =ackley10@5000= with =+1e4= (1.6e-10 against 2.1e-11,
-2/32/6), =ellR30@1000= with =-1e4= (5589 against 5589, 12/0/28, the
+-4.82, 16/0/24), =ackS30@5000= with =+1e2= (1.05e-6 against 6.9e-7,
+11/8/21), =ellR30@1000= with =-1e4= (5589 against 5589, 12/0/28, the
 runs differing by about =1e-6= of the value) and =rosen30= with
 =x1e-6= at 1000 (74.1 against 74.1, 12/1/27) and at 5000 (22.1 against
-22.0, 14/0/26). This holds with the ties above. With exact ties nine
-copies trail, and =ackley10@5000= with =+1e4= passes the correction,
-8/4/28 (=p= 0.00015), its runs ending near =1.6e-10= and its
-control's near =2.1e-11=. Every =x2^-20= copy repeats its plain
-row run for run, and the Lennard-Jones starts with overlapping atoms
-or a =1e30= sentinel stay level with their control starts.
+22.0, 14/0/26). With exact ties nine copies trail and none passes the
+correction either (least =p= 0.00089); one of the four this adds,
+=ackley10@5000= with =+1e4=, trails at 10/4/26 (=p= 0.0017), its runs
+ending near =1.6e-10= and its control's near =2.3e-11=. Every
+=x2^-20= copy repeats its plain row run for run, and the
+Lennard-Jones starts with overlapping atoms or a =1e30= sentinel stay
+level with their control starts.
 
 On rotated multimodal objectives the loop trails 0.10.0, whose
 diffusion Monte Carlo population follows the landscape's global trend
-before anything has descended: =rastR30@1000= 281 against 173
+before anything has descended: =rastR30@1000= 280 against 173
 (3/0/37), =rastR50@5000= 427 against 296 (1/0/39), =rastR100@5000=
 893 against 650 (9/0/31), =rastR100@20000= 870 against 470 (1/0/39),
 =levyR50@5000= 98.8 against 69.8 (8/0/32) and =levyR100@20000= 203

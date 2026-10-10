@@ -40,17 +40,17 @@ x1e-6 control of ``ellR30@5000``; the floor brings each level (``fit6@1000``
 -12.94 against -12.83 (15/10/15). The threshold on the last gain trails
 ``1e-4 max(|f|, s)`` on ``rastR100@20000``, 870 against 833 (4/18/18), and on
 the +1e2 copy of ``levy30@5000``, 6.4e-11 against 4.3e-12 (5/22/13); the
-``|f|``-scaled threshold brings both level but costs the offset copies: +1e4
-``rosen10@1000`` is 5.40 against 1.2e-10 (0/0/40), +1e4 ``fit6@1000`` is
--0.847 against -4.67 (1/0/39) and at 5000 -6.16 against -12.6 (1/1/38), and
-+1e4 ``ellR30@5000`` is 4.4e-3 against 2.9e-4 (0/6/34). Of the 88 offset and
-x1e-6 copies, six trail their rounding-only control at p < 0.05, about as many
-as chance gives and none past a correction for the 88 tests: +1e2
-``fit6@1000`` (-4.82 against -4.79, 16/0/24), +1e2 ``ackS30@5000`` (1.05e-6
-against 6.9e-7, 11/8/21), +1e4 ``ackley10@5000`` (1.6e-10 against 2.1e-11,
-2/32/6), -1e4 ``ellR30@1000`` (5589 against 5589, 12/0/28) and x1e-6
-``rosen30`` at 1000 and 5000 (74.1 against 74.1, 12/1/27; 22.1 against 22.0,
-14/0/26). This holds with those ties. With exact ties nine copies trail, and
-+1e4 ``ackley10@5000`` passes the correction (8/4/28, p 0.00015), its runs
-ending near 1.6e-10 and its control's near 2.1e-11. Every x2^-20 copy repeats
-its plain row run for run.
+``|f|``-scaled threshold, measured before the descent's slow test had its
+floor, brings both level but costs the offset copies: +1e4 ``rosen10@1000`` is
+5.40 against 1.2e-10 (0/0/40), +1e4 ``fit6@1000`` is -0.847 against -4.67
+(1/0/39) and at 5000 -6.16 against -12.6 (1/1/38), and +1e4 ``ellR30@5000`` is
+4.4e-3 against 2.9e-4 (0/6/34). Of the 88 offset and x1e-6 copies, five trail
+their rounding-only control at p < 0.05, about as many as chance gives and
+none past a correction for the 88 tests: +1e2 ``fit6@1000`` (-4.82 against
+-4.82, 16/0/24), +1e2 ``ackS30@5000`` (1.05e-6 against 6.9e-7, 11/8/21), -1e4
+``ellR30@1000`` (5589 against 5589, 12/0/28) and x1e-6 ``rosen30`` at 1000 and
+5000 (74.1 against 74.1, 12/1/27; 22.1 against 22.0, 14/0/26). With exact ties
+nine trail and none passes the correction either (least p 0.00089); +1e4
+``ackley10@5000``, one of the four this adds, trails at 10/4/26 (p 0.0017),
+its runs ending near 1.6e-10 and its control's near 2.3e-11. Every x2^-20 copy
+repeats its plain row run for run.

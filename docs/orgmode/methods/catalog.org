@@ -1511,7 +1511,7 @@ trails a =1e-12= tolerance on =griewank10@5000= without =x0= (0.0308
 against 0.0221, =p= 0.049); the last-gain threshold trails
 =1e-4 max(|f|, s)= on =rastR100@20000= (870 against 833) and the
 =+1e2= copy of =levy30@5000=; the fifth-slice lend trails on
-=mich10@5000= (-9.655 against -9.66, =p= 0.021). Rotated ellipsoids
+=mich10@5000= (-9.655 against -9.66, =p= 0.020). Rotated ellipsoids
 short of the opening budget trail an earlier form of the loop by up to
 four times, and rotated Rastrigin and Levy trail 0.10.0.
 
