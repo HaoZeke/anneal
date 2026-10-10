@@ -45,9 +45,16 @@ When the budget affords five finite-difference gradients per
 coordinate, =5d(d+1)= evaluations, a descent from the start opens the
 run and continues, up to convergence, while each slice lowers the
 incumbent by more than the success threshold and by more than =1e-4=
-times the largest gain an opening slice has made from below the start's
-value, since a descent that gains a little less on every slice would
-otherwise hold the whole run. Until the descent has lowered its own
+times the largest of the last three gains opening slices have made from
+below the start's value, and while its last four slices have gained
+more, together, than =1e-4= times the largest such gain. One steep slice
+early on then does not end an opening whose descent still pays at the
+slower pace of a narrow valley (Rosenbrock on a wide box), while a
+descent that creeps along the floor of a side basin, gaining a little
+less on every slice, still ends instead of holding the whole run. The
+first slice from below the start is held to the gain of the slice from
+the start, which ends a descent into a side basin of a multimodal
+objective. Until the descent has lowered its own
 value from below the start's, a slice in which it stalls short of
 convergence, as when its first curvature pair spans a steep wall, or
 stops at the start's value, as when every neighbour of a start behind
@@ -67,7 +74,10 @@ quenched visits leave the descent's basin one coordinate at a time,
 takes over while each of its slices gains at least as fast as the
 descent would have gone on to: the descent's last gain per evaluation
 times its ratio to the one before. Until =gsa= has played, the descent
-also hands it the last slice short of the closing reserve. If =gsa='s
+also hands it the turn once fewer than three slices are left beyond the
+closing reserve: handing over only the last slice left =gsa= part of
+one at twenty to twenty-six evaluations per =d+1=, where the separable
+multimodal objectives need its slices. If =gsa='s
 first slice falls short, the descent goes on with its own descent, not
 restarting at what =gsa= found, and keeps the turn until the run has
 used twice the evaluations it had; the hand-over repeats until the
@@ -78,25 +88,46 @@ partial turn that takes what is left beyond the reserve (16 evaluations
 at 100 dimensions and 1375, 15 at 30 and 440).
 
 From there =gsa= and then =cma= each keep the turn while they pay. A
-phase ends once it has gone eight slices without lowering the
-incumbent by more than the success threshold, or as long as its last
-gain took if that is longer. =gsa='s phase also ends once its gain per
-evaluation since the phase began is no more than that of the descent's
-last timed slice; when that slice kicked a converged descent or only
-confirmed convergence it gained nothing, and a phase that has gained
-nothing ends at its first slice. A phase slice that gains less than an
-eighth of the phase's best per evaluation lends the other phase's arm a
-slice: the phase ends if the lent slice gains faster per evaluation,
-and otherwise lends again only once the run has used twice the
-evaluations it had. After an opening a phase stops short of the closing
-reserve plus one slice for each other arm not yet played, the next
-phase's included; without one, short of the closing reserve plus one
-slice for =de= until it has played, since slices held there for the
-surrogate and the restart arm cost the phases more than those arms
-return. Against a descended incumbent a GSA record is a lower basin and
-a CMA-ES gain a better point of the same one; both come in bursts
-(records as the anneal cools, a run per covariance) that single slices
-would not see.
+phase ends once it has gone eight slices without a success that gains
+more than =1e-4= times the phase's largest gain, or as long as the last
+such success took if that is longer, so slices that gain crumbs do not
+keep it. =gsa='s first phase also ends once its gain per evaluation
+since the phase began is no more than that of the descent's last timed
+slice; when that slice kicked a converged descent or only confirmed
+convergence it gained nothing, and a phase that has gained nothing ends
+at its first slice. A =cma= phase that follows it without taking the
+turn ends the same way, but only from its eighth slice: on a rotated
+objective CMA-ES gains nothing until its step size and covariance have
+adapted, while on a smooth valley it would otherwise play slice after
+slice that gains a little where the descent had gained faster.
+
+From its fifth slice on, a =gsa= slice that gains less than an eighth
+of the phase's best per evaluation lends =cma= a slice, and =cma= takes
+the turn if that slice gains faster per evaluation than both the =gsa=
+slice and an eighth of the phase's gain per evaluation so far. =gsa=
+then lends again only once the run has used twice the evaluations it
+had, and never after a lent slice that gained nothing. GSA's records
+come in bursts and the slice after one often gains nothing, while a
+=cma= slice lent from a record just made gains by refining it: lent
+early in a phase, or judged against the one slow slice alone, such a
+slice ended phases still finding lower basins (Rastrigin at 10
+dimensions). A phase =cma= took likewise lends =gsa= a slice when its
+last two slices gain less per evaluation than its lent slice had to
+beat, and hands the turn back if =gsa='s slice gains faster than those
+two did. The two alternate while a phase hands the other the turn, and
+=gsa= resumes after a phase =cma= took from it, for up to eight phases.
+If the bar on the first slice from below the start ended the opening
+before the descent converged, as from a far start on a curved valley,
+and =gsa='s first phase ends at its first slice, the descent takes a
+turn before =cma='s phase and keeps it while it pays. After an opening
+a phase, and that turn, stop short of the closing reserve plus one
+slice for each other arm not yet played, counted again at every slice;
+without one, short of the closing reserve plus one slice for =de= until
+it has played, since slices held there for the surrogate and the
+restart arm cost the phases more than those arms return. Against a
+descended incumbent a GSA record is a lower basin and a CMA-ES gain a
+better point of the same one; both come in bursts (records as the
+anneal cools, a run per covariance) that single slices would not see.
 
 Each arm not yet played then takes a turn, in the table's order (the
 warm-up round, as in the main bandit), while the budget holds eight
@@ -192,7 +223,8 @@ The rows are tested in this order, so a wide box with a gradient is
   the guarantee needs is asymptotic in the budget. From the opening
   budget on, the opening goes on only while its slices succeed, a phase
   ends once it has gone eight slices, or as long as its last gain took,
-  without a success, and a descent keeps its turn only while each slice
+  without a success, at most eight phases play, and a descent keeps its
+  turn only while each slice
   lowers its value by more than the success threshold. Every success
   lowers the incumbent, and every slice that extends a descent's turn
   lowers that descent's value, by more than =1e-4 s=, and the resolution
@@ -203,8 +235,9 @@ The rows are tested in this order, so a wide box with a gradient is
   with the budget, while the number of slices does. The =1/round=
   picks, whose sum diverges, then reach every arm. At a given budget
   nothing is reserved for the floor. Short of the opening budget =gsa=
-  takes the turn when the descent's gain per evaluation falls, with the
-  last slice short of the closing reserve, or after a descent that
+  takes the turn when the descent's gain per evaluation falls, once
+  fewer than three slices are left beyond the closing reserve, or after
+  a descent that
   converges first, whenever eight evaluations are left beyond that
   reserve. The warm-up round gives =de=, =surrogate= and =explore= a
   slice each when the budget left after the first turns, the phases and
@@ -212,8 +245,8 @@ The rows are tested in this order, so a wide box with a gradient is
   phases leave room for all of them after an opening and for =de=
   without one; a descent's turn does not. On Lennard-Jones positions at
   39 dimensions and 1000 evaluations =cma= takes the first slice, the
-  descent the next turn and =gsa= one turn of what is left short of the
-  closing reserve, the closing descent takes the rest, and =de=,
+  descent the next and =gsa= the two left short of the closing reserve
+  (279 evaluations), the closing descent takes the rest, and =de=,
   =surrogate= and =explore= do not play.
 - Unknown features fall to =Default= (safe fallback).
 - Policy biases Beta priors and arm *order*, not hard exclusion (except
