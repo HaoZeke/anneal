@@ -6989,7 +6989,9 @@ mod tests {
         // default-population run with the box-wide step. A run ends once
         // its recent bests span less than the success threshold, so that
         // restart comes as soon as the local run has converged to the
-        // resolution the portfolio scores. The minimum value 10 keeps the
+        // resolution the portfolio scores, the threshold at the incumbent,
+        // after 259 evaluations; a run that went on to a finer resolution
+        // would take about twice as many. The minimum value 10 keeps the
         // threshold well above the relative tolerance of a plain stop.
         use crate::methods::cma_es::CmaStop;
         let (dim, budget, seed) = (4usize, 4000usize, 7u64);
@@ -7002,6 +7004,7 @@ mod tests {
             ledger: &ledger,
         };
         budgeted.eval(Array1::from_elem(dim, 0.5).view());
+        let threshold = IMPROVEMENT_RTOL * ledger.best_get().abs();
         let mut states = ArmStates::default();
         let stop = loop {
             assert!(ledger.remaining() > 0, "the local first run never stopped");
@@ -7019,11 +7022,61 @@ mod tests {
             "the local first run stopped after {} evaluations",
             first.es.evaluations()
         );
+        assert_eq!(first.es.tol_fun_hist(), threshold);
+        assert!(
+            first.es.evaluations() <= 400,
+            "the local first run stopped after {} evaluations",
+            first.es.evaluations()
+        );
         run_cma_arm(&budgeted, &ledger, &mut states, 1, seed, budget);
         let restart = states.cma.as_ref().expect("cma state");
         assert_eq!(restart.regime, CmaRegime::Large);
         assert_eq!(restart.es.sigma(), CMA_LARGE_SIGMA);
         assert_eq!(restart.es.lambda(), default_lambda(dim));
+    }
+
+    #[test]
+    fn values_only_cma_runs_stop_at_the_threshold_in_force() {
+        // In the values-only loop the success threshold moves with every
+        // slice, and a live run's history tolerance follows it: the run
+        // stops once its recent bests span less than the threshold in force
+        // when it plays, and a restart starts at that threshold.
+        use crate::methods::cma_es::CmaStop;
+        let (dim, budget, seed) = (4usize, 4000usize, 7u64);
+        let obj = Traced::new(-2.0, 2.0, dim, |x| {
+            10.0 + x.iter().map(|v| (v - 0.3) * (v - 0.3)).sum::<f64>()
+        });
+        let ledger = BudgetLedger::new(budget, dim);
+        let budgeted = BudgetedObjective {
+            inner: &obj,
+            ledger: &ledger,
+        };
+        budgeted.eval(Array1::from_elem(dim, 0.5).view());
+        let start = ledger.best_get();
+        let mut states = ArmStates {
+            values_only: true,
+            success: SuccessScale::new(Some(start)),
+            ..ArmStates::default()
+        };
+        states.success.record(start - 0.125, start - 0.25);
+        run_cma_arm(&budgeted, &ledger, &mut states, 1, seed, budget);
+        let tolerance =
+            |states: &ArmStates| states.cma.as_ref().expect("cma state").es.tol_fun_hist();
+        assert_eq!(tolerance(&states), states.success.threshold());
+        states.success.record(start - 0.25, start - 0.25 - 0.015625);
+        let stop = loop {
+            assert!(ledger.remaining() > 0, "the first run never stopped");
+            run_cma_arm(&budgeted, &ledger, &mut states, 1, seed, budget);
+            assert_eq!(tolerance(&states), states.success.threshold());
+            let state = states.cma.as_ref().expect("cma state");
+            if let Some(reason) = state.es.stop_reason() {
+                break reason;
+            }
+        };
+        assert_eq!(stop, CmaStop::TolFunHist);
+        states.success.record(start - 0.5, start - 0.5 - 0.0625);
+        run_cma_arm(&budgeted, &ledger, &mut states, 1, seed, budget);
+        assert_eq!(tolerance(&states), states.success.threshold());
     }
 
     #[test]
