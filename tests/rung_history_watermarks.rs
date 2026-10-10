@@ -139,13 +139,14 @@ fn each_rung_accounts_for_foreign_history_visits_in_its_own_bias() {
     }
 
     for (membership, checkpoints, shared_deposits) in results {
-        // Checkpoints expose the destination rung after each slice. The hot
+        // Checkpoints expose the destination rung after each completed
+        // interval. The hop cap leaves the last hop uncheckpointed. The hot
         // initialization has no own hill; its first hop owes the cold rung's
         // initialization and first hop. On returning, each rung also owes
         // visits made by the other rung while its own bias was parked.
         assert_eq!(
             checkpoints,
-            vec![(1, 3, 0), (2, 4, 1), (3, 5, 3), (4, 6, 4)],
+            vec![(1, 3, 0), (2, 4, 1), (3, 5, 3)],
             "{membership:?}: each bias must retain its own history watermark"
         );
         assert_eq!(
