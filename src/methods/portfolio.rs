@@ -1959,16 +1959,6 @@ where
             xs.push(pos);
             vals.push(value);
         }
-    } else if quenched && !obj.ledger.exhausted() {
-        // The only chain is the incumbent. One named low-discrepancy
-        // start is still paid, and it is not a second chain.
-        let starts =
-            eindir_core::shifted_low_discrepancy_points(&bounds, 1, qmc_skip_from_seed(seed), seed);
-        if let Some(start) = starts.rows().into_iter().next() {
-            let mut pos = bounds.clip(start);
-            obj.prepare_proposal(None, &mut pos);
-            let _ = obj.eval(pos.view());
-        }
     }
 
     // SciPy dual_annealing default initial_temp=5230 (translation-invariant).

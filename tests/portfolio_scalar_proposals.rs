@@ -3,9 +3,8 @@
 use std::sync::Mutex;
 
 use anneal_core::{PortfolioEnsembleConfig, portfolio_values_ensemble_optimize};
-use eindir_core::{Bounds, Objective, shifted_low_discrepancy_points};
+use eindir_core::{Bounds, Objective};
 use ndarray::{Array1, ArrayView1};
-use rand::{Rng, SeedableRng, rngs::StdRng};
 
 struct ScalarSamples {
     bounds: Bounds<f64>,
@@ -165,7 +164,10 @@ fn sub_stencil_private_and_zero_height_controls_keep_the_same_positions() {
 }
 
 #[test]
-fn gsa_initial_population_uses_peer_corrected_measured_positions() {
+fn shared_scalar_proposals_differ_from_the_private_trace() {
+    // From ten dimensions the quenched chain starts at the incumbent, so
+    // there is no separate low-discrepancy population to correct. Sharing
+    // still moves later proposals.
     let mut config = PortfolioEnsembleConfig {
         replicas: 2,
         budget: 2_048,
@@ -182,31 +184,9 @@ fn gsa_initial_population_uses_peer_corrected_measured_positions() {
     assert_eq!(result.n_evals, config.budget);
     assert_eq!(result.n_grads, 0);
     assert_eq!(result.best_val, 1.0);
-    let private_positions = private.positions();
-    let shared_positions = shared.positions();
-    assert_eq!(private_positions.len(), config.budget);
-    assert_eq!(shared_positions.len(), config.budget);
-    for replica in 0..config.replicas {
-        // The front-loaded DE and GSA arms have independent seeded streams.
-        // Identify GSA initialization by its generating stream, not a callback index.
-        let replica_seed = 17 ^ (replica as u64).wrapping_mul(0x9E37_79B9);
-        let mut naming = StdRng::seed_from_u64(replica_seed);
-        let _cma = naming.random::<u64>();
-        let gsa_seed = naming.random::<u64>() ^ 2;
-        let starts = shifted_low_discrepancy_points(
-            &private.bounds,
-            1,
-            anneal_core::runner::qmc_skip_from_seed(gsa_seed),
-            gsa_seed,
-        );
-        let start: Vec<u64> = starts.row(0).iter().map(|v| v.to_bits()).collect();
-        assert!(
-            private_positions.contains(&start),
-            "GSA initialization must be exercised"
-        );
-        assert!(
-            !shared_positions.contains(&start),
-            "GSA must evaluate its corrected start"
-        );
-    }
+    assert_eq!(private.positions().len(), config.budget);
+    assert_eq!(shared.positions().len(), config.budget);
+    assert_ne!(private.positions(), shared.positions());
+    assert!(result.coverage.applied_foreign_samples > 0);
+    assert!(result.coverage.repelled_proposals > 0);
 }
