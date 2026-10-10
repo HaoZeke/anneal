@@ -4205,10 +4205,45 @@ where
     }
     // One central finite-difference stencil, plus and minus on every
     // coordinate and one trial, when the remainder can pay it. Forward
-    // differences do not produce that block. The polish reserve and the
-    // closing descent keep the remainder; an arm the phases did not play
-    // does not spend it.
+    // differences do not produce that block. Below 64 dimensions the
+    // polish reserve and the closing descent keep the remainder. At
+    // higher dimension an arm the phases did not play takes one slice
+    // from what is left above that stencil.
     let stencil = dim.saturating_mul(2).saturating_add(2);
+    if dim >= 64 {
+        let pending: Vec<usize> = posteriors
+            .iter()
+            .enumerate()
+            .filter(|(_, posterior)| posterior.pulls == 0)
+            .map(|(index, _)| index)
+            .collect();
+        if !pending.is_empty() {
+            let keep = if ledger.remaining() >= stencil {
+                stencil
+            } else {
+                0
+            };
+            let room = ledger.remaining().saturating_sub(keep);
+            if room >= pending.len() {
+                let take = (room / pending.len()).min(slice).max(1);
+                for choice in pending {
+                    if ledger.remaining() <= keep {
+                        break;
+                    }
+                    let afford = ledger.remaining() - keep;
+                    play(
+                        choice,
+                        take.min(afford),
+                        keep,
+                        states,
+                        &mut rng,
+                        &mut posteriors,
+                        None,
+                    );
+                }
+            }
+        }
+    }
     if dim >= 64 && ledger.remaining() >= stencil {
         let start = ledger.incumbent(&bounds);
         let _ = values_local_polish(obj, start, stencil, 1.0, 1e-12);
