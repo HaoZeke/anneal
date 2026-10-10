@@ -868,20 +868,29 @@ def global_optimize(
     annealing quenched to one-coordinate improvements, differential
     evolution, the additive surrogate, and the QMC restart arm. When the
     budget lets a descent converge, one from the start opens the run
-    while it pays; with less, CMA-ES and the descent take one slice each,
-    annealing two, and a descent turn settles what annealing found. From
-    there annealing and then CMA-ES each keep the turn while they lower
-    the incumbent. Arms not yet played then take a turn, while the budget
-    holds one beyond the closing descent's reserve, before the
-    allocation ranks them, and the same decaying uniform floor follows;
-    a turn is one slice, except that the descent keeps it while it pays,
-    until it converges. The descent closes the run, going on with its
-    current descent, or restarting at the incumbent if another arm has
-    lowered it since the descent last played. The floor the guarantee
-    needs is asymptotic: the opening runs while it improves by the
-    success threshold, which cannot last on a bounded objective, and
-    after that every arm keeps a uniform share and is pulled infinitely
-    often as the budget grows.
+    while it pays. With less, CMA-ES takes one slice from the start, the
+    descent keeps the turn until its gain per evaluation falls, and
+    annealing then keeps it while each slice gains as fast as the
+    descent would have gone on to, the descent taking it back when one
+    falls short. From there annealing and then CMA-ES each keep the turn
+    while they lower the incumbent, annealing only while it gains faster
+    per evaluation than the descent last did, and either one lends the
+    other a slice once it slows, ending its turn if the lent slice gains
+    faster. Arms not yet played then take a turn, while the budget holds
+    one beyond the closing descent's reserve, before the allocation
+    ranks them, and the same decaying uniform floor follows; a turn is
+    one slice, except that the descent keeps it while it pays, until it
+    converges. A turn pays when it lowers the incumbent by more than
+    ``1e-4`` times the incumbent's last gain from below the start's
+    value, floored at the resolution of the run's values, so the start's
+    value sets no threshold and an added constant moves one only through
+    the rounding of the shifted values. The descent closes the run,
+    going on with its current descent, or restarting at the incumbent if
+    another arm has lowered it since the descent last played. The floor
+    the guarantee needs is asymptotic in the budget: the opening, the
+    phases and the descent's turns go on only while they pay, which
+    cannot last on a bounded objective, and after that every arm keeps a
+    uniform share and is pulled infinitely often as the budget grows.
 
     Args:
       obj_fn: callable ``f(numpy.ndarray) -> float``.
@@ -905,12 +914,13 @@ def global_optimize(
       x0: optional starting point inside the box, same size as ``low``. It is
         the first charged evaluation and the incumbent until a lower value
         is found (if its value is not finite, until any finite value is).
-        The values-only loop starts its descents, CMA-ES, one annealing
-        chain and the first evolution member there; with ``grad_fn`` or
-        ``noise_sigma``, arms that read the incumbent do, such as the
-        trust-region poll and the population arm, and with ``grad_fn``
-        also basin hopping and HMC. Without ``x0`` the values-only loop
-        starts from the best of a small seeded design.
+        The values-only loop starts its descents, its CMA-ES runs, the
+        first annealing chain and the first evolution member at the
+        incumbent, so at ``x0`` until a lower value is found; with
+        ``grad_fn`` or ``noise_sigma``, arms that read the incumbent do,
+        such as the trust-region poll and the population arm, and with
+        ``grad_fn`` also basin hopping and HMC. Without ``x0`` the
+        values-only loop starts from the best of a small seeded design.
 
     ``obj_fn`` and ``grad_fn`` are only called inside ``[low, high]``: a
     point an arm proposes outside is mirror-reflected into the box, and the

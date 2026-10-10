@@ -15,19 +15,21 @@
 //! quasi-Newton descent, GSA, DE, the additive surrogate and the restart
 //! arm. An opening descent from the start, then GSA and CMA-ES phases
 //! from its minimum, run while they pay; short of the budget the opening
-//! needs, CMA-ES, the descent and GSA take the first slices and a descent
-//! turn settles the basin GSA reached before the phases. Each arm not yet
-//! played then takes a turn while the budget holds one beyond the closing
-//! reserve, later rounds keep the same decaying floor, and the descent
-//! closes the run, going on with its current descent unless another arm
-//! has lowered the incumbent since it last played, in which case it
-//! restarts there. In this loop the floor the guarantee needs is
-//! asymptotic. The opening runs while it improves by the success
-//! threshold, which cannot last on a bounded objective, and after that
-//! every arm keeps a uniform share and is pulled infinitely often as the
-//! budget grows. The phases and the descent's turns stop for the same
-//! reason, and the number of slices keeps growing with the budget
-//! (`values_only_slice`).
+//! needs, CMA-ES takes a slice from the start, the descent keeps the turn
+//! until its gain per evaluation falls, and GSA then keeps it while it
+//! gains as fast as the descent would have gone on to, before the
+//! phases. Each arm not yet played then takes a turn while the budget
+//! holds one beyond the closing reserve, later rounds keep the same
+//! decaying floor, and the descent closes the run, going on with its
+//! current descent unless another arm has lowered the incumbent since it
+//! last played, in which case it restarts there. In this loop the floor
+//! the guarantee needs is asymptotic in the budget: the opening, the
+//! phases and the descent's turns go on only while they lower the
+//! incumbent, or the descent's value, by the success threshold, which a
+//! positive resolution fixed early in the run floors, so on a bounded
+//! objective they last a number of slices that does not grow with the
+//! budget, while the number of slices does (`values_only_slice`), and
+//! every arm keeps a uniform share and is pulled infinitely often.
 //!
 //! Scheduler quantities derive from the problem and the budget rather
 //! than from tuning knobs: the slice size affords a few gradient-
@@ -1102,9 +1104,10 @@ struct ArmStates {
     /// Persistent finite-difference quasi-Newton descent.
     qn: Option<QnArmState>,
     /// Set by the values-only loop. Without a gradient, the GSA arm then
-    /// starts one chain at the incumbent and runs it quenched, without a
-    /// local search, and the DE population starts with the incumbent, as
-    /// SciPy's differential_evolution places its `x0`.
+    /// starts its first chain (the only one from 10 dimensions) at the
+    /// incumbent and runs its chains quenched, without a local search, and
+    /// the DE population starts with the incumbent, as SciPy's
+    /// differential_evolution places its `x0`.
     values_only: bool,
     /// The values-only loop's scale of success, started once the start is
     /// evaluated and fed every slice.
@@ -3323,25 +3326,26 @@ fn values_only_slice(dim: usize, budget: usize) -> usize {
 /// evaluation lends the other phase's arm a slice, which ends the phase if
 /// it gains faster ([`PHASE_SLOWDOWN`]). A phase leaves the closing
 /// reserve and one slice for each other arm not yet played (short of the
-/// opening budget, one for DE only). Bandit rounds over
-/// [`VALUES_ONLY_ARMS`] follow until only the closing reserve remains. As in the main bandit,
-/// each arm not yet played takes one slice first, in list order, while a
-/// slice beyond the reserve is left. A descent's turn holds back only the
-/// reserve, so a short budget or a descent that keeps paying can leave an
-/// arm without a turn: on Lennard-Jones positions at 39 dimensions and
-/// 1000 evaluations the first turns leave only the reserve, and DE, the
-/// surrogate and the restart arm do not play. After the warm-up a round
-/// picks uniformly with probability `1/round` (rounds counted from the
-/// opening); otherwise the arm whose last turn succeeded plays again, and
-/// failing that a discounted Thompson draw picks. A turn is one slice,
-/// except that the descent keeps the turn, short of the closing reserve,
-/// while each slice lowers its own value by more than the success
-/// threshold, until it converges ([`QnArmState::paid`]). A turn succeeds
-/// when it lowers the incumbent by more than the success threshold in force
-/// when it began: [`IMPROVEMENT_RTOL`] times the gain of the last slice
-/// that lowered the incumbent, floored at the run's resolution
-/// ([`SuccessScale`]), so neither a constant added to the objective nor the
-/// start's value moves it.
+/// opening budget, one for DE only while it has not played). Bandit rounds
+/// over [`VALUES_ONLY_ARMS`] follow until only the closing reserve remains.
+/// As in the main bandit, each arm not yet played takes one slice first, in
+/// list order, while a slice beyond the reserve is left. A descent's turn
+/// holds back only the reserve, so a short budget or a descent that keeps
+/// paying can leave an arm without a turn: on Lennard-Jones positions at 39
+/// dimensions and 1000 evaluations the first turns leave only the reserve,
+/// and DE, the surrogate and the restart arm do not play. After the warm-up
+/// a round picks uniformly with probability `1/round` (rounds counted from
+/// the run's first slice); otherwise the arm whose last turn succeeded
+/// plays again, and failing that a discounted Thompson draw picks. A turn
+/// is one slice, except that the descent keeps the turn, short of the
+/// closing reserve, while each slice lowers its own value by more than the
+/// success threshold, until it converges ([`QnArmState::paid`]). A turn
+/// succeeds when it lowers the incumbent by more than the success threshold
+/// in force when it began: [`IMPROVEMENT_RTOL`] times the gain of the last
+/// slice that lowered the incumbent from below the start's value, floored
+/// at the run's resolution ([`SuccessScale`]), so the start's value sets no
+/// threshold and a constant added to the objective moves one only through
+/// the resolution of the shifted values.
 /// The descent closes the run with what is left, a reserve of the
 /// evaluations one descent needs to converge
 /// ([`LOCAL_FIRST_POLISH_GRADIENTS`]) when the budget affords it. It goes
