@@ -553,6 +553,9 @@ pub struct Outcome {
     pub path_improvements: usize,
     /// Total depth gained from paths, in energy units.
     pub path_gain: f64,
+    /// The energy bias as the run left it, under [`Config::energy_bias`] once
+    /// its first sample has filled.
+    pub energy_bias: Option<crate::dos::EnergyBias>,
 }
 
 /// Relaxes `x`, charging every evaluation, and stopping when the budget ends.
@@ -860,22 +863,17 @@ fn rung_ratios(replicas: usize, ladder_top: f64) -> Vec<f64> {
         .collect()
 }
 
-/// The temperature a rung at `ratio` hops at from a state at energy `e`, given
-/// the one the budget-window law or the configuration holds a single chain at.
-///
-/// The ratio multiplies what a single chain standing there would hop at, so
-/// the coldest rung is that chain whichever temperature rule is in force.
+/// The temperature a single chain hops at from a state at energy `e`, given the
+/// one the budget-window law or the configuration holds it at.
 ///
 /// Under [`Config::statistical_temperature`] the entropy's slope where the
 /// chain stands takes over once the density of states has been refreshed,
 /// clamped to a band around the configured value so a slope estimated from few
 /// counts cannot freeze the chain or boil it. The band is wide enough that the
 /// adaptation has somewhere to go and narrow enough that a bad estimate is
-/// survivable. The clamp comes before the ratio, so each rung's band sits
-/// around its own ladder temperature.
-fn rung_temperature(
+/// survivable.
+fn single_chain_temperature(
     cfg: &Config,
-    ratio: f64,
     held: f64,
     dos: Option<&crate::dos::DensityOfStates>,
     e: f64,
@@ -890,7 +888,24 @@ fn rung_temperature(
             single = t.clamp(0.2 * cfg.temperature, 5.0 * cfg.temperature);
         }
     }
-    single * ratio
+    single
+}
+
+/// The temperature a rung at `ratio` hops at from a state at energy `e`, given
+/// the one the budget-window law or the configuration holds a single chain at.
+///
+/// The ratio multiplies what a single chain standing there would hop at, so
+/// the coldest rung is that chain whichever temperature rule is in force. The
+/// statistical temperature's clamp comes before the ratio, so each rung's band
+/// sits around its own ladder temperature.
+fn rung_temperature(
+    cfg: &Config,
+    ratio: f64,
+    held: f64,
+    dos: Option<&crate::dos::DensityOfStates>,
+    e: f64,
+) -> f64 {
+    single_chain_temperature(cfg, held, dos, e) * ratio
 }
 
 /// Deposit height on a rung at `ratio` of a ladder of `n_rep`.
@@ -1863,7 +1878,8 @@ where
         } else {
             cfg.temperature
         };
-        let temperature = rung_temperature(cfg, ratios[rep], held, dos.as_ref(), e);
+        let single = single_chain_temperature(cfg, held, dos.as_ref(), e);
+        let temperature = single * ratios[rep];
 
         if cfg.anneal_diversity {
             let progress = 1.0 - (ledger.remaining() as f64 / ledger.budget() as f64);
@@ -2751,12 +2767,16 @@ where
                 tabu_hits += 1;
             }
         }
+        // The energy bias is one function on every rung, so its factor and its
+        // deposits read the temperature a single chain would hop at, which
+        // keeps (gamma - 1) T at the sample's spread whichever rung fills the
+        // sample or deposits. Each rung reads the bias over its own temperature.
         if cfg.energy_bias {
             let occupied = if accept { e_new } else { e };
             if occupied.is_finite() {
                 match ebias.as_mut() {
                     Some(b) => {
-                        b.deposit(occupied, temperature);
+                        b.deposit(occupied, single);
                         if std::env::var("EBIAS_TRACE").is_ok() && b.deposits % 200 == 0 {
                             eprintln!("ebias deposits {} peak {:.4}", b.deposits, b.peak());
                         }
@@ -2766,7 +2786,7 @@ where
                         if flat_seen.len() >= flat_sweep {
                             ebias = crate::dos::EnergyBias::from_sample(
                                 &flat_seen,
-                                temperature,
+                                single,
                                 crate::dos::BINS,
                             );
                             flat_seen.clear();
@@ -3710,6 +3730,7 @@ where
         path_escapes,
         path_improvements,
         path_gain,
+        energy_bias: ebias,
     }
 }
 

@@ -355,6 +355,11 @@ pub struct Config {
     /// a funnel holding exponentially many basins. Energy separates the funnel
     /// where a coordinate length cannot. All scales come from the run's own
     /// quenched-energy distribution. See [`crate::dos::EnergyBias`].
+    ///
+    /// On a replica ladder the bias is one function every rung reads over its
+    /// own temperature. Its tempering factor and its deposits read the
+    /// temperature a single chain would hop at, so `(gamma - 1) T` is the
+    /// sample's spread whichever rung fills the first sample or deposits.
     pub energy_bias: bool,
     /// Reward move arms by the depth they reach, not by acceptance.
     ///
