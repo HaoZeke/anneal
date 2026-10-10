@@ -3644,7 +3644,7 @@ where
     // coordinate and one trial, when the remainder can pay it. Forward
     // differences do not produce that block.
     let stencil = dim.saturating_mul(2).saturating_add(2);
-    if ledger.remaining() >= stencil {
+    if dim >= 64 && ledger.remaining() >= stencil {
         let start = ledger.incumbent(&bounds);
         let _ = values_local_polish(obj, start, stencil, 1.0, 1e-12);
     }
