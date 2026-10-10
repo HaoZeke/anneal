@@ -868,18 +868,24 @@ def global_optimize(
     annealing quenched to one-coordinate improvements, differential
     evolution, the additive surrogate, and the QMC restart arm. When the
     budget lets a descent converge, one from the start opens the run
-    while it pays; if it stalls short of convergence, or stops at the
-    start's value, before it has lowered its own value from below that
-    one, CMA-ES takes one slice, once per run, and the opening goes
-    on from there. With less, CMA-ES takes one slice from the start,
-    the descent keeps the turn until its gain per evaluation falls,
-    and annealing then keeps it while each slice gains as fast as the
-    descent would have gone on to, the descent taking it back when one
-    falls short. From there annealing and then CMA-ES each keep the turn
-    while they lower the incumbent, annealing only while it gains faster
-    per evaluation than the descent last did, and either one lends the
-    other a slice once it slows, ending its turn if the lent slice gains
-    faster. Arms not yet played then take a turn, while the budget holds
+    while it pays at the pace of its last few slices; if it stalls short
+    of convergence, or stops at the start's value, before it has lowered
+    its own value from below that one, CMA-ES takes one slice, once per
+    run, and the opening goes on from there. With less, CMA-ES takes one
+    slice from the start, the descent keeps the turn until its gain per
+    evaluation falls or fewer than three slices are left before the
+    closing descent's reserve, and annealing then keeps it while each
+    slice gains as fast as the descent would have gone on to, the
+    descent taking it back when one falls short. From there annealing
+    and then CMA-ES each keep the turn while they lower the incumbent;
+    the first annealing phase only while it gains faster per evaluation
+    than the descent last did, and a CMA-ES phase that follows it on its
+    own likewise from its eighth slice. Once an annealing phase has
+    slowed past its fourth slice it lends CMA-ES a slice, which takes the
+    turn only if it gains faster than both the slow slice and an eighth
+    of the phase's pace so far; a phase CMA-ES took lends annealing a
+    slice the same way, and the two alternate for up to eight phases.
+    Arms not yet played then take a turn, while the budget holds
     one beyond the closing descent's reserve, before the allocation
     ranks them, and the same decaying uniform floor follows; a turn is
     one slice, except that the descent keeps it while it pays, until it
