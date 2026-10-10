@@ -1034,10 +1034,6 @@ struct GsaState {
     t_init: f64,
     /// Strategy-chain step counter (dual_annealing uses T/(step+1) accept).
     strategy_step: usize,
-    /// Next move in the flattened chain/coordinate strategy, retained on yield.
-    strategy_cursor: usize,
-    /// Occupied values at the start of the strategy for epoch-end improvement.
-    strategy_start_vals: Vec<f64>,
     /// Chains keep only improvements and visit one coordinate at a time.
     quenched: bool,
 }
@@ -1971,8 +1967,6 @@ where
         rng: StdRng::seed_from_u64(seed),
         t_init,
         strategy_step: 0,
-        strategy_cursor: 0,
-        strategy_start_vals: Vec::new(),
         quenched,
     })
 }
@@ -2211,8 +2205,8 @@ fn dual_accept_prob(delta: f64, temperature_step: f64, accept_param: f64) -> f64
 /// a few hundred evaluations per coordinate uphill, and an all-coordinate
 /// visit from a good point in many dimensions almost never improves it,
 /// while a single-coordinate visit can drop that coordinate into a lower
-/// basin without disturbing the others. The strategy cursor still yields
-/// between moves, including the skipped all-coordinate slots.
+/// basin without disturbing the others. A slice that ends mid-strategy
+/// finishes the temperature step and the next slice starts the next one.
 fn run_persistent_gsa<O, G>(
     obj: &BudgetedObjective<'_, O>,
     grad: Option<&BudgetedGradient<'_, G>>,
@@ -2229,83 +2223,76 @@ fn run_persistent_gsa<O, G>(
     let visit = TsallisVisit::new(GSA_Q_V);
     let start_used = obj.ledger.used_get();
     let reanneal_floor = t0 * DUAL_RESTART_TEMP_RATIO;
-    let n_strategy = (2 * dim).max(2);
-
     while obj.ledger.used_get().saturating_sub(start_used) < slice && !obj.ledger.exhausted() {
         let mut temp = cooling.temperature(state.epoch).max(1e-300);
-        if state.strategy_cursor == 0 {
-            // Reannealing starts a strategy, not a resumed allocation slice.
-            if temp < reanneal_floor {
-                state.epoch = 0;
-                state.strategy_step = 0;
-                temp = cooling.temperature(0).max(1e-300);
-            }
-            state.strategy_step = state.strategy_step.saturating_add(1);
-            state.strategy_start_vals.clone_from(&state.vals);
+        // dual_annealing reannealing when T drops below initial * ratio.
+        if temp < reanneal_floor {
+            state.epoch = 0;
+            state.strategy_step = 0;
+            temp = cooling.temperature(0).max(1e-300);
         }
         // dual_annealing: temperature_step = T / (step+1) for acceptance.
+        state.strategy_step = state.strategy_step.saturating_add(1);
         let t_accept = (temp / (state.strategy_step as f64)).max(1e-300);
+        let mut improved = false;
 
-        // A slice can yield between any two moves without changing the strategy.
-        while state.strategy_cursor < n_strategy * state.xs.len() {
+        for chain in 0..state.xs.len() {
             if obj.ledger.used_get().saturating_sub(start_used) >= slice || obj.ledger.exhausted() {
-                return;
+                break;
             }
-            let chain = state.strategy_cursor / n_strategy;
-            let j = state.strategy_cursor % n_strategy;
-            if state.quenched && j < dim {
-                state.strategy_cursor += 1;
-                continue;
+            let before = state.vals[chain];
+            // Strategy chain length 2*dim (all-dim + each single coord), dual_annealing.
+            let n_strategy = (2 * dim).max(2);
+            let first = if state.quenched { dim } else { 0 };
+            for j in first..n_strategy {
+                if obj.ledger.used_get().saturating_sub(start_used) >= slice
+                    || obj.ledger.exhausted()
+                {
+                    break;
+                }
+                let x = &state.xs[chain];
+                let mut proposal = if j < dim {
+                    // All coordinates: full Tsallis visit in physical space.
+                    let y = visit.propose(x.view(), temp, &mut state.rng);
+                    crate::movekernel::reflect_into_box(y.view(), &bounds)
+                } else {
+                    // Single coordinate j-dim (dual strategy chain second half).
+                    let axis = j - dim;
+                    let y1 = visit.propose(
+                        ArrayView1::from(std::slice::from_ref(&x[axis])),
+                        temp,
+                        &mut state.rng,
+                    );
+                    let mut y = x.clone();
+                    y[axis] = y1[0];
+                    crate::movekernel::reflect_into_box(y.view(), &bounds)
+                };
+                if j < dim {
+                    obj.prepare_proposal(Some(x.view()), &mut proposal);
+                } else {
+                    obj.prepare_coordinate_proposal(x.view(), &mut proposal, j - dim);
+                }
+                let proposal_val = obj.eval(proposal.view());
+                let accepted = if !proposal_val.is_finite() {
+                    false
+                } else if !state.vals[chain].is_finite() {
+                    true
+                } else if state.quenched {
+                    proposal_val < state.vals[chain]
+                } else {
+                    let delta = proposal_val - state.vals[chain];
+                    // dual_annealing accept_reject (accept=-5), not Tsallis q_a.
+                    state.rng.random::<f64>() < dual_accept_prob(delta, t_accept, DUAL_ACCEPT_PARAM)
+                };
+                if accepted {
+                    state.xs[chain] = proposal;
+                    state.vals[chain] = proposal_val;
+                }
             }
-            let x = &state.xs[chain];
-            let mut proposal = if j < dim {
-                // All coordinates: full Tsallis visit in physical space.
-                let y = visit.propose(x.view(), temp, &mut state.rng);
-                crate::movekernel::reflect_into_box(y.view(), &bounds)
-            } else {
-                // Single coordinate j-dim (dual strategy chain second half).
-                let axis = j - dim;
-                let y1 = visit.propose(
-                    ArrayView1::from(std::slice::from_ref(&x[axis])),
-                    temp,
-                    &mut state.rng,
-                );
-                let mut y = x.clone();
-                y[axis] = y1[0];
-                crate::movekernel::reflect_into_box(y.view(), &bounds)
-            };
-            if j < dim {
-                obj.prepare_proposal(Some(x.view()), &mut proposal);
-            } else {
-                obj.prepare_coordinate_proposal(x.view(), &mut proposal, j - dim);
+            if state.vals[chain].is_finite() && state.vals[chain] < before {
+                improved = true;
             }
-            let proposal_val = obj.eval(proposal.view());
-            let accepted = if !proposal_val.is_finite() {
-                false
-            } else if !state.vals[chain].is_finite() {
-                true
-            } else if state.quenched {
-                proposal_val < state.vals[chain]
-            } else {
-                let delta = proposal_val - state.vals[chain];
-                // dual_annealing accept_reject (accept=-5), not Tsallis q_a.
-                state.rng.random::<f64>() < dual_accept_prob(delta, t_accept, DUAL_ACCEPT_PARAM)
-            };
-            if accepted {
-                state.xs[chain] = proposal;
-                state.vals[chain] = proposal_val;
-            }
-            state.strategy_cursor += 1;
         }
-        // Completed strategies retain pending epoch-end work across a yield.
-        if obj.ledger.used_get().saturating_sub(start_used) >= slice || obj.ledger.exhausted() {
-            return;
-        }
-        let improved = state
-            .vals
-            .iter()
-            .zip(&state.strategy_start_vals)
-            .any(|(value, before)| value.is_finite() && value < before);
         // dual_annealing local_search when energy improved this temperature step.
         if improved
             && let Some(g) = grad
@@ -2379,7 +2366,6 @@ fn run_persistent_gsa<O, G>(
             }
         }
         state.epoch += 1;
-        state.strategy_cursor = 0;
     }
 }
 
