@@ -946,6 +946,82 @@ fn swap_log_acceptance(
         + (shared[0] - shared[1]) * (1.0 / t_k - 1.0 / t_j)
 }
 
+/// What a rung's acceptance can read at one state besides the rung's own bias.
+#[derive(Clone, Copy, Debug)]
+struct HopTerms {
+    energy: f64,
+    funnel: f64,
+    pile: f64,
+    energy_bias: f64,
+}
+
+/// What every rung's acceptance weighs a state by, and so what a swap between
+/// two of them has to exchange.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum RungWeight {
+    /// `exp(-(E + V_k + F + P + B) / T_k)`, with `V_k` the rung's own bias,
+    /// `F` the funnel bias, `P` the packing pile and `B` the energy bias: the
+    /// Metropolis rule. Minima hopping's threshold has no weight of its own,
+    /// and its ladder is swapped by this one.
+    Boltzmann,
+    /// `exp(-(E + V_k + F + P) / T_k)`: the flat-histogram rule's first sweep,
+    /// before its cost exists, which does not read the energy bias.
+    FirstSweep,
+    /// `exp(-c(E) - (V_k + F) / T_k)`, with `c` the flat-histogram cost, one
+    /// function of the energy that every rung reads and none divides by its
+    /// temperature.
+    Flat,
+}
+
+impl RungWeight {
+    /// The weight the acceptance test applies, given whether the
+    /// flat-histogram cost exists yet.
+    fn of(cfg: &Config, flat_cost: bool) -> Self {
+        if !cfg.flat_histogram || cfg.minima_hopping {
+            Self::Boltzmann
+        } else if flat_cost {
+            Self::Flat
+        } else {
+            Self::FirstSweep
+        }
+    }
+}
+
+/// Log acceptance of rungs `k` and `j` exchanging the states they hold, for
+/// rungs that weigh a state by `weight`.
+///
+/// `at_k` is what the weight can read at the state rung `k` holds and `at_j`
+/// at the one rung `j` holds; `own_k` is `V_k` at those two states and `own_j`
+/// is `V_j` at rung `j`'s state and at rung `k`'s. The flat cost is the same
+/// on both rungs at either state, so it cancels from the factor and takes the
+/// energy with it: under that weight a swap exchanges the biases alone.
+fn exchange_log_acceptance(
+    weight: RungWeight,
+    at_k: HopTerms,
+    at_j: HopTerms,
+    own_k: [f64; 2],
+    own_j: [f64; 2],
+    t_k: f64,
+    t_j: f64,
+) -> f64 {
+    let energy = |at: HopTerms| match weight {
+        RungWeight::Flat => 0.0,
+        RungWeight::Boltzmann | RungWeight::FirstSweep => at.energy,
+    };
+    let shared = |at: HopTerms| match weight {
+        RungWeight::Boltzmann => at.funnel + at.pile + at.energy_bias,
+        RungWeight::FirstSweep => at.funnel + at.pile,
+        RungWeight::Flat => at.funnel,
+    };
+    swap_log_acceptance(
+        [energy(at_k) + own_k[0], energy(at_j) + own_k[1]],
+        [energy(at_j) + own_j[0], energy(at_k) + own_j[1]],
+        [shared(at_k), shared(at_j)],
+        t_k,
+        t_j,
+    )
+}
+
 fn run_full<'g, R, H>(
     cfg: &Config,
     start: ArrayView1<f64>,
@@ -3364,6 +3440,13 @@ where
                     // carries, looked up here if it never was, as a hop reads
                     // it at the basin the chain stands in.
                     //
+                    // Under the flat-histogram cost a rung samples
+                    // exp(-c(E) - (V_k + F)/T_k) instead. The cost is the same
+                    // on every rung and is not divided by a temperature, so it
+                    // cancels: U_k is V_k alone and S is the funnel bias, the
+                    // one shared term that rule reads. The sweep before the
+                    // cost exists reads S without the energy bias.
+                    //
                     // T_k is the temperature rung k would hop at from the
                     // state it holds, by the same rule as a hop and without
                     // counting a step of the law, so the factor weighs the
@@ -3403,18 +3486,21 @@ where
                     };
                     let pile_k = pile(&mut chains[k]);
                     let pile_j = pile(&mut chains[j]);
-                    let shared = |state: &Array1<f64>, energy: f64, pile: f64| {
-                        spectral
+                    let terms = |state: &Array1<f64>, energy: f64, pile: f64| HopTerms {
+                        energy,
+                        funnel: spectral
                             .as_ref()
                             .map(|sp| sp.potential(sp.cv(state.view()).view()))
-                            .unwrap_or(0.0)
-                            + pile
-                            + ebias.as_ref().map(|b| b.at(energy)).unwrap_or(0.0)
+                            .unwrap_or(0.0),
+                        pile,
+                        energy_bias: ebias.as_ref().map(|b| b.at(energy)).unwrap_or(0.0),
                     };
-                    let log_a = swap_log_acceptance(
-                        [ek + vk_xk, ej + vk_xj],
-                        [ej + vj_xj, ek + vj_xk],
-                        [shared(&xk, ek, pile_k), shared(&xj, ej, pile_j)],
+                    let log_a = exchange_log_acceptance(
+                        RungWeight::of(cfg, flat_weight.is_some()),
+                        terms(&xk, ek, pile_k),
+                        terms(&xj, ej, pile_j),
+                        [vk_xk, vk_xj],
+                        [vj_xj, vj_xk],
                         temperature_of(k, ek).max(1e-12),
                         temperature_of(j, ej).max(1e-12),
                     );
@@ -4670,6 +4756,86 @@ mod tests {
             (split - swap_log_acceptance(own_k, own_j, [0.0, 0.0], t_k, t_j)).abs() > 1.0,
             "the shared terms should matter between two temperatures"
         );
+    }
+
+    /// The swap is the ratio of the weights the rungs' acceptance applies, at
+    /// the states exchanged and at the states held. Under the flat-histogram
+    /// cost the energies leave it, so states whose biases agree swap freely
+    /// between two temperatures however far apart their energies are.
+    #[test]
+    fn the_swap_exchanges_the_weight_each_rung_hops_by() {
+        let mut cfg = Config::recommended(13);
+        assert_eq!(RungWeight::of(&cfg, true), RungWeight::Boltzmann);
+        cfg.flat_histogram = true;
+        assert_eq!(RungWeight::of(&cfg, false), RungWeight::FirstSweep);
+        assert_eq!(RungWeight::of(&cfg, true), RungWeight::Flat);
+        cfg.minima_hopping = true;
+        assert_eq!(RungWeight::of(&cfg, true), RungWeight::Boltzmann);
+
+        let mut dos = crate::dos::DensityOfStates::new(-45.0, -30.0, 30);
+        for k in 0..30 {
+            let visits = (2000.0 * (0.5 * (dos.centre(k) + 30.0)).exp()).round() as usize;
+            for _ in 0..visits.max(1) {
+                dos.observe(dos.centre(k));
+            }
+        }
+        assert!(dos.refresh());
+        let flat = crate::dos::CutWeight {
+            weight: dos.mean_weight(),
+            cut: -38.0,
+            width: 0.7,
+        };
+        let mut rng = StdRng::seed_from_u64(11);
+        let draw = |rng: &mut StdRng| HopTerms {
+            energy: rng.random_range(-44.0..-31.0),
+            funnel: rng.random_range(0.0..2.0),
+            pile: rng.random_range(0.0..3.0),
+            energy_bias: rng.random_range(0.0..1.5),
+        };
+        for _ in 0..200 {
+            let (at_k, at_j) = (draw(&mut rng), draw(&mut rng));
+            let own_k = [rng.random_range(0.0..2.0), rng.random_range(0.0..2.0)];
+            let own_j = [rng.random_range(0.0..2.0), rng.random_range(0.0..2.0)];
+            let (t_k, t_j) = (rng.random_range(0.1..1.0), rng.random_range(1.0..4.0));
+            for weight in [
+                RungWeight::Boltzmann,
+                RungWeight::FirstSweep,
+                RungWeight::Flat,
+            ] {
+                // Minus the log of the weight a rung at temperature `t` with
+                // its own bias `v` applies at a state.
+                let cost = |at: HopTerms, v: f64, t: f64| match weight {
+                    RungWeight::Boltzmann => {
+                        (at.energy + v + at.funnel + at.pile + at.energy_bias) / t
+                    }
+                    RungWeight::FirstSweep => (at.energy + v + at.funnel + at.pile) / t,
+                    RungWeight::Flat => flat.cost(at.energy) + (v + at.funnel) / t,
+                };
+                let expected = cost(at_k, own_k[0], t_k) + cost(at_j, own_j[0], t_j)
+                    - cost(at_j, own_k[1], t_k)
+                    - cost(at_k, own_j[1], t_j);
+                let log_a = exchange_log_acceptance(weight, at_k, at_j, own_k, own_j, t_k, t_j);
+                assert!(
+                    (log_a - expected).abs() <= 1e-9 * expected.abs().max(1.0),
+                    "{weight:?}: {log_a} against {expected}"
+                );
+            }
+        }
+
+        let low = HopTerms {
+            energy: -44.0,
+            funnel: 0.5,
+            pile: 1.0,
+            energy_bias: 0.2,
+        };
+        let high = HopTerms {
+            energy: -32.0,
+            ..low
+        };
+        let swap =
+            |weight| exchange_log_acceptance(weight, low, high, [0.3; 2], [0.6; 2], 0.2, 2.0);
+        assert_eq!(swap(RungWeight::Flat), 0.0);
+        assert!(swap(RungWeight::Boltzmann) < -40.0);
     }
 
     #[test]
