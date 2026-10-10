@@ -408,9 +408,12 @@ where
     let origin = start.to_owned();
     let mut session = SamdSession::new(samd_config, origin.clone(), velocity, &surface)?;
     let noise = Array1::zeros(origin.len());
-    let mut older_energy = None;
     let mut previous_energy = None;
     let mut minima = 0usize;
+    let mut down = 0u32;
+    let mut up = 0u32;
+    let mut bottom_energy = f64::INFINITY;
+    let mut bottom_position = origin.clone();
     let mut last_energy = f64::NAN;
     let mut last_kinetic = initial_kinetic;
     let mut peak = f64::NEG_INFINITY;
@@ -464,29 +467,51 @@ where
         if last_energy > peak {
             peak = last_energy;
         }
-        if let (Some(older), Some(previous)) = (older_energy, previous_energy)
-            && previous < older
-            && previous <= report.energy
-            && peak - previous >= config.minimum_rise
-        {
-            minima += 1;
-            // `previous` is the bottom, and it was measured at `at_previous`.
-            let mut from_launch = 0.0;
-            for (there, here) in at_previous.iter().zip(origin.iter()) {
-                let delta = there - here;
-                from_launch += delta * delta;
-            }
-            let well_rms = (from_launch / n_atoms).sqrt();
-            peak = previous;
-            let far_enough = config.min_well_rms > 0.0 && well_rms + 1.0e-12 >= config.min_well_rms;
-            let counted_enough = config.min_well_rms <= 0.0 && minima >= config.potential_minima;
-            if far_enough || counted_enough {
-                well = Some(at_previous.clone());
-                break;
+        if let Some(previous) = previous_energy {
+            if report.energy < previous {
+                if up > 0 {
+                    down = 1;
+                    up = 0;
+                    bottom_energy = report.energy;
+                    bottom_position = session.position().to_owned();
+                } else {
+                    down += 1;
+                    if report.energy < bottom_energy {
+                        bottom_energy = report.energy;
+                        bottom_position = session.position().to_owned();
+                    }
+                }
+            } else if report.energy > previous {
+                up += 1;
+                // One down and one up is a wiggle. A valley is two
+                // decreases into the bottom and two increases out of it.
+                if down >= 2 && up >= 2 && peak - bottom_energy >= config.minimum_rise {
+                    minima += 1;
+                    let saved_energy = bottom_energy;
+                    let saved_position = bottom_position.clone();
+                    let mut from_launch = 0.0;
+                    for (there, here) in saved_position.iter().zip(origin.iter()) {
+                        let delta = there - here;
+                        from_launch += delta * delta;
+                    }
+                    let well_rms = (from_launch / n_atoms).sqrt();
+                    down = 0;
+                    up = 0;
+                    bottom_energy = f64::INFINITY;
+                    peak = report.energy;
+                    let far_enough =
+                        config.min_well_rms > 0.0 && well_rms + 1.0e-12 >= config.min_well_rms;
+                    let counted_enough =
+                        config.min_well_rms <= 0.0 && minima >= config.potential_minima;
+                    if far_enough || counted_enough {
+                        well = Some(saved_position);
+                        last_energy = saved_energy;
+                        break;
+                    }
+                }
             }
         }
         at_previous = session.position().to_owned();
-        older_energy = previous_energy;
         previous_energy = Some(report.energy);
     }
 
