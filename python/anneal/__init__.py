@@ -1274,20 +1274,57 @@ def global_optimize(
     annealing quenched to one-coordinate improvements, differential
     evolution, the additive surrogate, and the QMC restart arm. When the
     budget lets a descent converge, one from the start opens the run
-    while it pays; with less, CMA-ES and the descent take one slice each,
-    annealing two, and a descent turn settles what annealing found. From
-    there annealing and then CMA-ES each keep the turn while they lower
-    the incumbent. Arms not yet played then take a turn, while the budget
-    holds one beyond the closing descent's reserve, before the
-    allocation ranks them, and the same decaying uniform floor follows;
-    a turn is one slice, except that the descent keeps it while it pays,
-    until it converges. The descent closes the run, going on with its
-    current descent, or restarting at the incumbent if another arm has
-    lowered it since the descent last played. The floor the guarantee
-    needs is asymptotic: the opening runs while it improves by the
-    success threshold, which cannot last on a bounded objective, and
-    after that every arm keeps a uniform share and is pulled infinitely
-    often as the budget grows.
+    while it pays at the pace of its last few slices; if it stalls short
+    of convergence, or stops at the start's value, before it has lowered
+    its own value from below that one, CMA-ES takes one slice, once per
+    run, and the opening goes on from there. With less, CMA-ES takes one
+    slice from the start, the descent keeps the turn until its gain per
+    evaluation falls or fewer than three slices are left before the
+    closing descent's reserve, and annealing then keeps it while each
+    slice gains as fast as the descent would have gone on to, the
+    descent taking it back when one falls short. From there annealing
+    and then CMA-ES each keep the turn while they lower the incumbent;
+    the first annealing phase only while it gains faster per evaluation
+    than the descent last did, and a CMA-ES phase that follows it on its
+    own likewise from its eighth slice. Once an annealing phase has
+    slowed past its fourth slice it lends CMA-ES a slice, which takes the
+    turn only if it gains faster than both the slow slice and an eighth
+    of the phase's pace so far; a phase CMA-ES took lends annealing a
+    slice the same way, and the two alternate for up to eight phases.
+    Arms not yet played then take a turn, while the budget holds
+    one beyond the closing descent's reserve, before the allocation
+    ranks them, and the same decaying uniform floor follows; a turn is
+    one slice, except that the descent keeps it while it pays, until it
+    converges. A turn pays when it lowers the incumbent by more than
+    ``1e-4`` times the incumbent's last gain from below the start's
+    value, floored at the resolution of the run's values, so the start's
+    value sets no threshold and an added constant moves one only through
+    the rounding of the shifted values. The descent closes the run,
+    going on with its current descent, or restarting at the incumbent if
+    another arm has lowered it since the descent last played. The floor
+    the guarantee needs is asymptotic in the budget: the opening, the
+    phases and the descent's turns go on only while they pay, which
+    cannot last on a bounded objective, and after that every arm keeps a
+    uniform share and is pulled infinitely often as the budget grows.
+
+    Measured over 40 paired seeds, these rules trail the ones they
+    replaced on some rows, each listed with its numbers, and with what
+    the replaced rule costs elsewhere, in the documentation's regime
+    auto-selection notes: the short-budget hand-over on shifted
+    ellipsoids at 30 dimensions and 1000 evaluations, 50 and 100 at 5000
+    and 100 at 20000, on the 100-dimensional rotated ellipsoid,
+    Rosenbrock, Levy and shifted Rastrigin rows at 20000 and on rotated
+    Styblinski-Tang at 30 and 1000; the opening's bar on the shifted
+    ellipsoid and Rosenbrock at 30 dimensions and 5000; the descent's
+    resolution test on the six-parameter fit at 1000 and on rotated
+    ellipsoids at 30 and 50 dimensions and 20000, and together with the
+    bar on the 30-dimensional one at 5000; the threshold on the last
+    gain on rotated Rastrigin at 100 dimensions and 20000 and on Levy
+    at 30 and 5000 with 100 added to it; lending from an annealing
+    phase's fifth slice on Michalewicz at 10 dimensions and 5000; and
+    copies and controls of these rows. Rotated ellipsoids short of the
+    opening budget trail an earlier form of the loop, and rotated
+    Rastrigin and Levy trail 0.10.0.
 
     Args:
       obj_fn: callable ``f(numpy.ndarray) -> float``.
