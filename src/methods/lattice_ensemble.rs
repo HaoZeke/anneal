@@ -3,12 +3,14 @@
 //! Each chain owns an equal share of the force budget on its own [`Ledger`]
 //! and spends it one trial at a time. A trial starts from a random cluster,
 //! from a bank member with a few surface atoms placed on vacant hollow sites,
-//! or from a cut-and-splice of two members. It is quenched and taken down the
-//! dynamic lattice descent of [`crate::methods::lattice_search`], and the
-//! minimum it ends in is offered to the bank under the conformational space
-//! annealing rule: it replaces the member it resembles when it is lower, and
-//! otherwise displaces the highest member when it resembles none and is lower
-//! than that member.
+//! or from a cut-and-splice of two members (Deaven and Ho, Phys. Rev. Lett.
+//! 75, 288 (1995)). It is quenched and taken down the lattice descent of
+//! [`crate::methods::lattice_search`], and the minimum it ends in is offered
+//! to a bank of conformational space annealing (Lee, Scheraga and Rackovsky,
+//! J. Comput. Chem. 18, 1222 (1997)) under the rule of Lee, Lee and Lee,
+//! Phys. Rev. Lett. 91, 080201 (2003), arXiv cond-mat/0307690: it replaces
+//! the member it resembles when it is lower, and otherwise displaces the
+//! highest member when it resembles none and is lower than that member.
 //!
 //! [`Sharing::Shared`] gives the chains one bank of `chains * slots` members,
 //! so a funnel any chain enters is refined by every chain and splices mix
@@ -31,9 +33,11 @@
 //!
 //! Resemblance is the mean absolute difference between the sorted distances
 //! of the atoms from their centroid. The merge distance is a fraction of the
-//! mean pairwise resemblance of the first full bank. It may shrink linearly as
-//! the budget is spent; by default it holds, because a shrinking cutoff lets
-//! the variants of one funnel fill the bank as distinct members.
+//! mean pairwise resemblance of the first full bank, by default a half, the
+//! D_ave/2 of Lee, Lee and Lee. Conformational space annealing shrinks it as
+//! the search goes on, and here it may shrink linearly as the budget is spent;
+//! by default it holds, because a shrinking cutoff lets the variants of one
+//! funnel fill the bank as distinct members.
 //!
 //! Parents are drawn least-used first, and a member that improves is fresh
 //! again, so the effort follows the funnels that are still descending. A
@@ -43,6 +47,11 @@
 //! start higher than its worst member, which on a funnelled surface is nearly
 //! every start. Nothing in the run reads a reference energy or a structure
 //! class.
+//!
+//! The retirement rule, the radial resemblance key, the held merge distance
+//! and the counted accounting are this work's. The bank rule, cut-and-splice
+//! and the lattice search are the cited methods, the last in the variant
+//! [`crate::methods::lattice_search`] describes.
 
 use ndarray::ArrayView1;
 use rand::rngs::StdRng;

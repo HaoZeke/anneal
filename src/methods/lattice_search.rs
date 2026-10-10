@@ -119,7 +119,8 @@ fn rms(g: &[f64]) -> f64 {
     (dot(g, g) / g.len().max(1) as f64).sqrt()
 }
 
-/// Limited-memory quasi-Newton quench in the form GMIN uses for clusters.
+/// L-BFGS quench (Liu and Nocedal, Math. Program. 45, 503 (1989)) in the
+/// step-capped form of Wales's GMIN.
 ///
 /// No line search: the step along `-H g` is capped in length and shortened
 /// tenfold while the energy rises, so an iteration usually costs one
