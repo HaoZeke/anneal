@@ -143,7 +143,9 @@ pub struct Config {
     /// there the ratio reaches only the swap and the bias terms. The swap
     /// exchanges the weight the acceptance applies: the flat-histogram cost
     /// cancels from it (see [`Config::flat_histogram`]), and minima hopping,
-    /// whose threshold has no weight, swaps by the Metropolis factor.
+    /// whose threshold has no weight, swaps by the Metropolis factor. Delayed
+    /// acceptance applies no one weight, so a ladder refuses it (see
+    /// [`Config::delayed_acceptance`]).
     ///
     /// This is the standard non-local mechanism for a multi-funnel landscape
     /// and the measurements here say why it is the right one to reach for: no
@@ -668,6 +670,14 @@ pub struct Config {
     /// so a poor one costs acceptance rate rather than correctness. This is
     /// what the screen was reaching for and does not have. See
     /// [`crate::delayed`].
+    ///
+    /// Needs a single chain: a run with [`Config::replicas`] above one refuses
+    /// it before spending anything. A hop the surrogate decides is tested on
+    /// the bare quenched energy, while one it abstains on, which is every hop
+    /// before its warmup and any whose predictive spread exceeds
+    /// [`Config::surrogate_tolerance`], takes the ordinary acceptance with the
+    /// biases. A rung under it therefore hops by no one weight, and no swap
+    /// factor can balance an exchange between two such rungs.
     pub delayed_acceptance: bool,
     /// Candidates built and scored per growth proposal.
     ///

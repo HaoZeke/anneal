@@ -573,7 +573,9 @@ surrogate for the quenched energy (one evaluation, no gradient); only
 survivors are quenched, and a second stage subtracts the surrogate
 difference back out, making the composite step exactly reversible with
 respect to the true target for *any* surrogate. A poor surrogate costs
-acceptance rate, never correctness.
+acceptance rate, never correctness. It needs a single chain: a
+cluster-hopping ladder refuses it (see
+[[file:catalog.org::*Parallel tempering / replica exchange][the parallel tempering entry]]).
 
 Key types and functions: =crate::delayed::Surrogate= and its
 =predict_at= method (src/delayed.rs).
@@ -1482,6 +1484,9 @@ factor with the energies and a swap is accepted on the biases alone. A
 state carries its basin and its validation gradient from rung to rung,
 so the first step a rung takes after its turn comes round is recorded
 from the state it holds, and the swap reads the pile at that basin.
+The ladder refuses =delayed_acceptance=: a hop the surrogate decides is
+tested on the bare energy and one it abstains on with the biases, so a
+rung under it keeps no one weight for the swap to exchange.
 
 ** Warm L-BFGS
 

@@ -16,4 +16,7 @@ hop at, so which rung fills its first sample no longer sets its factor. A state
 keeps its basin and its validation gradient as it moves between rungs, so the
 first step a rung takes after a switch is recorded from the state that rung
 holds, and every rung's starting quench is validated before it is recorded. A
-single chain is unchanged.
+ladder refuses ``delayed_acceptance``: a hop its surrogate decides is tested on
+the bare energy and one it abstains on with the biases, so no swap factor can
+balance an exchange between rungs that hop by two weights. A single chain is
+unchanged.
