@@ -2746,6 +2746,26 @@ fn run_arm<O, G>(
                     None
                 };
                 states.gsa = initialize_gsa_state(obj, slice, seed, anchor, values_only);
+            } else if values_only
+                && let (Some(state), Some(value)) = (states.gsa.as_mut(), ledger.incumbent_value())
+            {
+                // Once another arm has lowered the incumbent below every
+                // chain, the worst chain (one not finite first) goes on from
+                // there, so the quenched visits leave the run's best basin
+                // and not only the basins the chains reached.
+                let lowest = state.vals.iter().copied().fold(f64::INFINITY, f64::min);
+                if value < lowest {
+                    let worst = (0..state.vals.len()).fold(0, |worst, i| {
+                        let v = state.vals[i];
+                        if !(v <= state.vals[worst]) || !v.is_finite() {
+                            i
+                        } else {
+                            worst
+                        }
+                    });
+                    state.xs[worst] = ledger.incumbent(&bounds);
+                    state.vals[worst] = value;
+                }
             }
             if let Some(state) = states.gsa.as_mut() {
                 // Keep T₀ at box scale (do not re-inflate from |f|).
@@ -6651,10 +6671,12 @@ mod tests {
     #[test]
     fn values_only_gsa_turns_are_quenched_coordinate_visits() {
         // Replays every evaluation of the loop's GSA turns on the one chain
-        // the arm keeps from ten dimensions up. Each moves one coordinate of
-        // the chain's point and is kept only when lower, except box-wide
-        // reseeds, one at most every five temperature steps of `dim`
-        // visits; nothing else (a local search's trials) runs in a turn.
+        // the arm keeps from ten dimensions up. A turn starts the chain at
+        // the incumbent if another arm has lowered it below the chain. Each
+        // evaluation moves one coordinate of the chain's point and is kept
+        // only when lower, except box-wide reseeds, one at most every five
+        // temperature steps of `dim` visits; nothing else (a local search's
+        // trials) runs in a turn.
         for (dim, budget, seed) in [(10usize, 2000usize, 0u64), (10, 2000, 1), (12, 5000, 2)] {
             let obj = Traced::new(-5.12, 5.12, dim, rastrigin);
             let ledger = BudgetLedger::new(budget, dim);
@@ -6691,6 +6713,12 @@ mod tests {
             let (mut x, mut fx) = (points[chain].clone(), values[chain]);
             let (mut visits, mut reseeds) = (0usize, 0usize);
             for &(used, after) in &turns {
+                let best = (0..used)
+                    .min_by(|&a, &b| values[a].total_cmp(&values[b]))
+                    .expect("evaluations before the turn");
+                if values[best] < fx {
+                    (x, fx) = (points[best].clone(), values[best]);
+                }
                 for i in used..after {
                     let moved = (0..dim).filter(|&k| points[i][k] != x[k]).count();
                     if moved <= 1 {
@@ -6818,6 +6846,54 @@ mod tests {
         assert!(!pace.time(2.0, 1.5, 1, 51));
         assert!(pace.time(1.5, 1.25, 1, 100));
         assert_eq!(pace.next, 0.125);
+    }
+
+    #[test]
+    fn values_only_gsa_moves_its_worst_chain_to_a_lower_incumbent() {
+        // Once another arm lowers the incumbent below every chain, the
+        // worst chain goes on from there; quenched, it stays at Rastrigin's
+        // minimum while the others visit.
+        let dim = 4;
+        let obj = Traced::new(-5.12, 5.12, dim, rastrigin);
+        let ledger = BudgetLedger::new(400, dim);
+        let budgeted = BudgetedObjective {
+            inner: &obj,
+            ledger: &ledger,
+        };
+        budgeted.eval(Array1::from_elem(dim, 2.5).view());
+        let mut states = ArmStates {
+            values_only: true,
+            ..ArmStates::default()
+        };
+        let mut rng = StdRng::seed_from_u64(5);
+        let mut pull = |states: &mut ArmStates| {
+            run_arm::<_, ShiftQuadratic>(
+                ArmKind::Gsa,
+                &budgeted,
+                None,
+                &ledger,
+                states,
+                &mut rng,
+                40,
+                400,
+            )
+        };
+        pull(&mut states);
+        let before = states.gsa.as_ref().expect("chains").vals.clone();
+        assert!(
+            before.len() >= 2 && before.iter().all(|&v| v > 0.0),
+            "{before:?}"
+        );
+        budgeted.eval(Array1::zeros(dim).view());
+        pull(&mut states);
+        let state = states.gsa.as_ref().expect("chains");
+        let at: Vec<usize> = (0..state.vals.len())
+            .filter(|&i| state.vals[i] == 0.0)
+            .collect();
+        assert_eq!(at.len(), 1, "{:?}", state.vals);
+        assert_eq!(state.xs[at[0]], Array1::<f64>::zeros(dim));
+        let worst = (0..before.len()).fold(0, |w, i| if before[i] > before[w] { i } else { w });
+        assert_eq!(at[0], worst, "{before:?}");
     }
 
     #[test]
