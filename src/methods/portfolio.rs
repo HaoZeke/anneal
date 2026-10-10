@@ -1840,12 +1840,19 @@ impl<O: Objective<f64>> Gradient<f64> for BudgetedFiniteDiffGradient<'_, O> {
             let mut plus = x[i] + h;
             let mut minus = x[i] - h;
             // A nominal step that rounds onto the centre still has a
-            // neighbour in the float grid. Use that neighbour.
+            // neighbour in the float grid. Use it when it lies inside the
+            // open box; a neighbour on the bound is not an interior step.
             if plus == x[i] {
-                plus = x[i].next_up();
+                let neighbour = x[i].next_up();
+                if neighbour > low && neighbour < high {
+                    plus = neighbour;
+                }
             }
             if minus == x[i] {
-                minus = x[i].next_down();
+                let neighbour = x[i].next_down();
+                if neighbour > low && neighbour < high {
+                    minus = neighbour;
+                }
             }
             if plus == x[i] || minus == x[i] {
                 continue;
