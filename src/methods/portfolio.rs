@@ -418,8 +418,6 @@ const QN_FTOL: f64 = 8.0 * f64::EPSILON;
 /// Gradients per dimension a finite-difference descent needs to converge;
 /// the values-only loop opens with one only when the budget affords it.
 const QN_AFFORDABLE_GRADIENTS: usize = 5;
-/// Slices of GSA's warm-up turn in a values-only run short of that budget.
-const WARM_UP_GSA_SLICES: usize = 2;
 /// Fewest gradients worth a closing finite-difference polish.
 const QN_MIN_POLISH_GRADIENTS: usize = 3;
 /// The values-only loop holds this many gradients back for its closing
@@ -1427,6 +1425,67 @@ impl SuccessScale {
         if before < self.start && after < before {
             self.gain = before - after;
         }
+    }
+}
+
+/// Gain per evaluation of a slice that took a value from `before` to
+/// `after` in `used` evaluations; zero if it used none or either value is
+/// not finite.
+fn gain_rate(before: f64, after: f64, used: usize) -> f64 {
+    if used > 0 && before.is_finite() && after.is_finite() {
+        (before - after).max(0.0) / used as f64
+    } else {
+        0.0
+    }
+}
+
+/// Pace of the values-only descent short of the opening budget, timed slice
+/// by slice on the descent's own values (a kick climbs before it descends,
+/// so its gains count from where it starts). It decides when the descent
+/// hands the turn to GSA and how fast GSA must gain to keep it.
+#[derive(Clone, Copy, Debug, Default)]
+struct DescentPace {
+    /// Gain per evaluation of the last timed slice of the current turn.
+    last: f64,
+    /// Slices timed in the current turn.
+    slices: usize,
+    /// Whether the current turn ended because the descent slowed.
+    slowed: bool,
+    /// Gain per evaluation the descent would make on its next slice if it
+    /// went on slowing as it did: `last` times its ratio to the slice
+    /// before.
+    next: f64,
+    /// Evaluations of the run before which a slowing descent keeps the turn.
+    hold: usize,
+    /// Whether GSA has had a turn.
+    handed: bool,
+}
+
+impl DescentPace {
+    /// Starts timing a descent turn.
+    fn begin(&mut self) {
+        self.last = 0.0;
+        self.slices = 0;
+        self.slowed = false;
+    }
+
+    /// Times a slice that took the descent's value from `from` to `to` in
+    /// `used` evaluations, the run having used `spent` by its end, and
+    /// returns whether the descent slowed past its hold: a slice gaining
+    /// less per evaluation than the one before, from the second slice of
+    /// the turn on.
+    fn time(&mut self, from: f64, to: f64, used: usize, spent: usize) -> bool {
+        if used == 0 || !from.is_finite() || !to.is_finite() {
+            return false;
+        }
+        let rate = (from - to).max(0.0) / used as f64;
+        let previous = std::mem::replace(&mut self.last, rate);
+        self.slices += 1;
+        if self.slices >= 2 && previous > 0.0 && rate < previous && spent >= self.hold {
+            self.next = rate * rate / previous;
+            return true;
+        }
+        false
     }
 }
 
@@ -3227,14 +3286,20 @@ fn values_only_slice(dim: usize, budget: usize) -> usize {
 /// slice succeeds and gains more than [`IMPROVEMENT_RTOL`] times the
 /// largest gain an opening slice has made from below the start's value.
 /// Short of that budget the descent would converge only by
-/// taking most of the run: CMA-ES and the descent take one slice each,
-/// GSA up to [`WARM_UP_GSA_SLICES`] from the incumbent, and a descent turn
-/// then settles the basin GSA reached. From there GSA and then CMA-ES each
-/// keep the turn while they pay: a phase ends once it has gone
-/// [`ROUNDS_PER_ARM`] slices without lowering the incumbent, or as long as
-/// its last gain took if that is longer, and it leaves the closing reserve
-/// and one slice for each other arm not yet played (short of the opening
-/// budget, one for DE only). Bandit rounds over [`VALUES_ONLY_ARMS`]
+/// taking most of the run: CMA-ES takes one slice from the start, the
+/// descent keeps the turn until a slice gains less per evaluation than the
+/// one before ([`DescentPace`]), and GSA then keeps it while each of its
+/// slices gains at least as fast as the descent would have gone on to (its
+/// last gain per evaluation times the ratio to the one before). Until GSA
+/// has played, the descent also hands it the last slice short of the
+/// closing reserve. If GSA's first slice falls short, the descent keeps
+/// the turn until the run has used twice the evaluations it had, and the
+/// hand-over repeats until the descent stops paying or only the reserve
+/// is left. From there GSA and then CMA-ES each keep the turn while they
+/// pay: a phase ends once it has gone [`ROUNDS_PER_ARM`] slices without
+/// lowering the incumbent, or as long as its last gain took if that is
+/// longer, and it leaves the closing reserve and one slice for each other
+/// arm not yet played (short of the opening budget, one for DE only). Bandit rounds over [`VALUES_ONLY_ARMS`]
 /// follow until only the closing reserve remains. As in the main bandit,
 /// each arm not yet played takes one slice first, in list order, while a
 /// slice beyond the reserve is left. A descent's turn holds back only the
@@ -3304,12 +3369,30 @@ where
     let mut rng = StdRng::seed_from_u64(seed);
     let mut round = 0usize;
     let mut winner = None;
+    // The value the descent goes on from: the incumbent if another arm has
+    // lowered it below the descent since the descent last played (the
+    // descent restarts there), the descent's own value otherwise.
+    let descent_value = |states: &ArmStates| match states.qn.as_ref() {
+        None => ledger.best_get(),
+        Some(qn) => {
+            let best = ledger.best_get();
+            if best < qn.seen_best && best < qn.engine.value() {
+                best
+            } else {
+                qn.engine.value()
+            }
+        }
+    };
+    let qn_value = |states: &ArmStates| states.qn.as_ref().map_or(f64::NAN, |qn| qn.engine.value());
+    // With a `pace`, a descent turn is timed and also ends once the descent
+    // slows, or, until GSA has played, at the last slice short of `reserve`.
     let play = |choice: usize,
                 take: usize,
                 reserve: usize,
                 states: &mut ArmStates,
                 rng: &mut StdRng,
-                posteriors: &mut [ArmPosterior]|
+                posteriors: &mut [ArmPosterior],
+                mut pace: Option<&mut DescentPace>|
      -> bool {
         let arm = arms[choice];
         let before = ledger.best_get();
@@ -3317,8 +3400,14 @@ where
         #[cfg(test)]
         let used = ledger.used_get();
         let mut take = take;
+        if arm == ArmKind::Qn
+            && let Some(pace) = pace.as_deref_mut()
+        {
+            pace.begin();
+        }
         loop {
             let from = ledger.best_get();
+            let (spent, descent) = (ledger.used_get(), descent_value(states));
             ledger.cap_set((ledger.used_get() + take).min(budget));
             run_arm::<O, G>(arm, obj, None, ledger, states, rng, take, budget);
             ledger.cap_set(budget);
@@ -3330,12 +3419,26 @@ where
             if arm != ArmKind::Qn {
                 break;
             }
+            let slowed = pace.as_deref_mut().is_some_and(|pace| {
+                let spent_now = ledger.used_get();
+                pace.time(descent, qn_value(states), spent_now - spent, spent_now)
+            });
             let paying = states.success.threshold();
             if !states.qn.as_mut().is_some_and(|qn| qn.paid(paying)) {
                 break;
             }
             if ledger.remaining() < reserve + 8 {
                 break;
+            }
+            if let Some(pace) = pace.as_deref_mut() {
+                let last = !pace.handed && ledger.remaining() - reserve < slice;
+                if slowed || last {
+                    pace.slowed = true;
+                    if !slowed {
+                        pace.next = 0.0;
+                    }
+                    break;
+                }
             }
             take = take.min(ledger.remaining() - reserve);
         }
@@ -3395,6 +3498,62 @@ where
     } else {
         0
     };
+    if !opened {
+        // Short of the opening budget a descent from the start converges
+        // only by taking most of the run. CMA-ES takes a slice from the
+        // start, the descent keeps the turn until its gain per evaluation
+        // falls, and GSA's quenched visits, which leave the descent's basin
+        // one coordinate at a time, take over while each of their slices
+        // gains at least as fast as the descent would have gone on to. If
+        // GSA's first slice falls short, the descent goes on with its own
+        // descent, not restarting at what GSA found, and keeps the turn
+        // until the run has used twice the evaluations it had.
+        let (cma, qn, gsa) = (index(ArmKind::Cma), index(ArmKind::Qn), index(ArmKind::Gsa));
+        if ledger.remaining() >= polish + 8 {
+            round += 1;
+            let take = slice.min(ledger.remaining() - polish);
+            winner =
+                play(cma, take, polish, states, &mut rng, &mut posteriors, None).then_some(cma);
+        }
+        let mut pace = DescentPace::default();
+        while ledger.remaining() >= polish + 8 {
+            round += 1;
+            let take = slice.min(ledger.remaining() - polish);
+            winner = play(
+                qn,
+                take,
+                polish,
+                states,
+                &mut rng,
+                &mut posteriors,
+                Some(&mut pace),
+            )
+            .then_some(qn);
+            if !pace.slowed {
+                break;
+            }
+            let mut first = true;
+            while ledger.remaining() >= polish + 8 {
+                round += 1;
+                let take = slice.min(ledger.remaining() - polish);
+                let (from, spent) = (ledger.best_get(), ledger.used_get());
+                let gained = play(gsa, take, polish, states, &mut rng, &mut posteriors, None);
+                winner = gained.then_some(gsa);
+                pace.handed = true;
+                let rate = gain_rate(from, ledger.best_get(), ledger.used_get() - spent);
+                if rate <= 0.0 || rate < pace.next {
+                    if first {
+                        pace.hold = 2 * ledger.used_get();
+                        if let Some(qn) = states.qn.as_mut() {
+                            qn.seen_best = ledger.best_get();
+                        }
+                    }
+                    break;
+                }
+                first = false;
+            }
+        }
+    }
     // A phase keeps the turn while its arm pays: it ends once the arm has
     // gone `ROUNDS_PER_ARM` slices without lowering the incumbent, or as long
     // as its last gain took if that is longer, or at `reserve`.
@@ -3414,52 +3573,13 @@ where
             }
             *round += 1;
             let take = slice.min(ledger.remaining() - reserve);
-            let gained = play(choice, take, reserve, states, rng, posteriors);
+            let gained = play(choice, take, reserve, states, rng, posteriors, None);
             if gained {
                 last_gain = ledger.used_get();
             }
             *winner = gained.then_some(choice);
         }
     };
-    if !opened {
-        // Short of the opening budget a descent from the start converges
-        // only by taking most of the run. CMA-ES and the descent take a
-        // slice each from the start, then GSA's quenched visits leave the
-        // start's basin one coordinate at a time, and a descent turn
-        // settles the basin they reach, keeping the turn while it pays.
-        let (cma, qn, gsa) = (index(ArmKind::Cma), index(ArmKind::Qn), index(ArmKind::Gsa));
-        if ledger.remaining() >= polish + 8 {
-            round += 1;
-            let take = slice.min(ledger.remaining() - polish);
-            winner = play(cma, take, polish, states, &mut rng, &mut posteriors).then_some(cma);
-        }
-        if ledger.remaining() >= polish + 8 {
-            round += 1;
-            let take = slice.min(ledger.remaining() - polish);
-            // Reserving all but the slice ends the turn with it.
-            let reserve = ledger.remaining() - take;
-            winner = play(qn, take, reserve, states, &mut rng, &mut posteriors).then_some(qn);
-        }
-        let reserve = polish.max(
-            ledger
-                .remaining()
-                .saturating_sub(WARM_UP_GSA_SLICES * slice),
-        );
-        phase(
-            gsa,
-            reserve,
-            states,
-            &mut rng,
-            &mut posteriors,
-            &mut round,
-            &mut winner,
-        );
-        if ledger.remaining() >= polish + 8 {
-            round += 1;
-            let take = slice.min(ledger.remaining() - polish);
-            winner = play(qn, take, polish, states, &mut rng, &mut posteriors).then_some(qn);
-        }
-    }
     // GSA records and CMA-ES gains come in bursts (records as the anneal
     // cools, a run per covariance) that single slices of the rounds below
     // would not see.
@@ -3514,11 +3634,20 @@ where
             best.0
         };
         let take = slice.min(ledger.remaining() - polish);
-        winner = play(choice, take, polish, states, &mut rng, &mut posteriors).then_some(choice);
+        winner = play(
+            choice,
+            take,
+            polish,
+            states,
+            &mut rng,
+            &mut posteriors,
+            None,
+        )
+        .then_some(choice);
     }
     let qn = index(ArmKind::Qn);
     while ledger.remaining() > 0 {
-        play(qn, slice, budget, states, &mut rng, &mut posteriors);
+        play(qn, slice, budget, states, &mut rng, &mut posteriors, None);
     }
     arms.iter()
         .zip(posteriors.iter())
@@ -6490,13 +6619,27 @@ mod tests {
     }
 
     #[test]
-    fn values_only_gsa_and_de_play_short_of_the_opening_budget() {
+    fn values_only_descent_hands_gsa_the_turn_once_it_slows() {
         // Short of the opening budget a descent from the start would take
-        // most of the run. CMA-ES and the descent take one slice each, GSA
-        // the next two, a descent turn settles the basin GSA reached, and
-        // DE still gets a turn.
+        // most of the run. CMA-ES takes one slice and the descent the next.
+        // From a side basin of Rastrigin the descent's second slice gains
+        // less per evaluation than its first, and GSA takes the turn. When
+        // the descent's first slice leaves less than a slice beyond the
+        // closing reserve, GSA takes what is left if that is eight
+        // evaluations or more (15 at 30-D and 440, 16 at 100-D and 1375)
+        // and does not play otherwise (30-D at 420, 100-D at 1000). DE
+        // plays once the hand-over leaves a slice beyond the reserve; at
+        // 10-D and 500 GSA's visits keep the turn up to it.
         use ArmKind::{Cma, De, Gsa, Qn};
-        for (dim, budget) in [(10usize, 500usize), (20, 2000), (30, 4000)] {
+        for (dim, budget, tail, de) in [
+            (10usize, 500usize, None, false),
+            (20, 2000, None, true),
+            (30, 4000, None, true),
+            (30, 440, Some(15usize), false),
+            (30, 420, Some(0), false),
+            (100, 1375, Some(16), false),
+            (100, 1000, Some(0), false),
+        ] {
             assert!(budget < QN_AFFORDABLE_GRADIENTS * dim * (dim + 1));
             let obj = Traced::new(-5.12, 5.12, dim, rastrigin);
             let ledger = BudgetLedger::new(budget, dim);
@@ -6516,13 +6659,69 @@ mod tests {
             );
             assert_eq!(obj.points().len(), budget);
             let slice = values_only_slice(dim, budget);
+            let polish = (LOCAL_FIRST_POLISH_GRADIENTS * (dim + 1))
+                .min((budget as f64 * LOCAL_FIRST_POLISH_MAX_SHARE).round() as usize);
+            let polish = if polish >= QN_MIN_POLISH_GRADIENTS * (dim + 1) {
+                polish
+            } else {
+                0
+            };
+            let case = format!("{dim}-D at {budget}");
             let arms: Vec<ArmKind> = states.turns.iter().map(|turn| turn.0).collect();
-            assert_eq!(arms[..5], [Cma, Qn, Gsa, Gsa, Qn], "{dim}-D at {budget}");
-            for &(arm, used, after) in &states.turns[..4] {
-                assert_eq!(after - used, slice, "{} in {dim}-D at {budget}", arm.name());
+            assert_eq!(arms[..2], [Cma, Qn], "{case}");
+            assert_eq!(
+                states.turns[0].2 - states.turns[0].1,
+                slice.min(budget - 1 - polish),
+                "{case}"
+            );
+            let first_gsa = arms.iter().position(|&arm| arm == Gsa);
+            match tail {
+                Some(0) => {
+                    assert!(first_gsa.is_none(), "{case}: turns {arms:?}");
+                    assert!(arms.iter().all(|&arm| arm == Cma || arm == Qn), "{case}");
+                }
+                _ => {
+                    let at = first_gsa.unwrap_or_else(|| panic!("{case}: turns {arms:?}"));
+                    let (_, qn_from, qn_to) = states.turns[at - 1];
+                    let (_, gsa_from, gsa_to) = states.turns[at];
+                    assert_eq!(arms[at - 1], Qn, "{case}");
+                    if let Some(left) = tail {
+                        assert_eq!(budget - qn_to - polish, left, "{case}");
+                        assert_eq!(gsa_to - gsa_from, left, "{case}");
+                    } else {
+                        assert!(qn_to - qn_from >= 2 * slice, "{case}: the descent slowed");
+                    }
+                }
             }
-            assert!(arms.contains(&De), "{dim}-D at {budget}: turns {arms:?}");
+            assert_eq!(arms.contains(&De), de, "{case}: turns {arms:?}");
         }
+    }
+
+    #[test]
+    fn descent_pace_slows_once_a_slice_gains_less_per_evaluation() {
+        let mut pace = DescentPace::default();
+        pace.begin();
+        // A turn's first slice never slows it, nor does a faster one.
+        assert!(!pace.time(10.0, 6.0, 4, 5));
+        assert!(!pace.time(6.0, 2.0, 2, 7));
+        assert_eq!((pace.last, pace.slices), (2.0, 2));
+        // A slower slice slows it, and GSA must then gain as fast as the
+        // descent would on its next slice if it went on slowing so.
+        assert!(pace.time(2.0, 1.0, 1, 8));
+        assert_eq!(pace.next, 0.5);
+        // A slice that used nothing or ends on a value that is not finite
+        // is not timed.
+        assert!(!pace.time(1.0, f64::NAN, 4, 12));
+        assert!(!pace.time(1.0, 0.5, 0, 12));
+        assert_eq!((pace.last, pace.slices), (1.0, 3));
+        // Inside its hold a slowing descent keeps the turn; the next turn
+        // is timed afresh.
+        pace.hold = 100;
+        pace.begin();
+        assert!(!pace.time(4.0, 2.0, 1, 50));
+        assert!(!pace.time(2.0, 1.5, 1, 51));
+        assert!(pace.time(1.5, 1.25, 1, 100));
+        assert_eq!(pace.next, 0.125);
     }
 
     #[test]
