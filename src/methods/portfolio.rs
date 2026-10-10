@@ -421,9 +421,9 @@ const QN_FTOL: f64 = 8.0 * f64::EPSILON;
 /// values-only descent is slow even where [`QN_FTOL`] would not call it so:
 /// near a minimum whose value is small against the gains that set the
 /// threshold, units in the last place would keep the descent going long
-/// after its gains stopped counting. Gains and thresholds are differences
-/// of values, so neither a constant added to the objective nor a power of
-/// two multiplying it moves the floor.
+/// after its gains stopped counting. The floor follows the threshold: a
+/// constant added to the objective moves it only through rounding, and a
+/// power of two multiplying the objective multiplies it exactly.
 const QN_FATOL_RTOL: f64 = 1e-7;
 /// Gradients per dimension a finite-difference descent needs to converge;
 /// the values-only loop opens with one only when the budget affords it.
