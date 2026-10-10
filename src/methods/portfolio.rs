@@ -409,6 +409,12 @@ const START_STREAM: u64 = 0x9AE1_6A3B_2F90_404F;
 const QN_KICK0: f64 = 0.05;
 const QN_KICK_MIN: f64 = 1e-3;
 const QN_KICK_MAX: f64 = 0.5;
+/// Relative decrease per iteration below which an iteration of the
+/// values-only descent is slow: a few units in the last place of its value,
+/// so the descent turns to central differences and stops on the resolution
+/// of its values rather than on a fraction of their size, which a constant
+/// added to the objective would change.
+const QN_FTOL: f64 = 8.0 * f64::EPSILON;
 /// Gradients per dimension a finite-difference descent needs to converge;
 /// the values-only loop opens with one only when the budget affords it.
 const QN_AFFORDABLE_GRADIENTS: usize = 5;
@@ -3120,6 +3126,14 @@ fn run_qn_arm<O>(
 {
     let bounds = obj.bounds();
     let best = ledger.best_get();
+    let options = if states.values_only {
+        FdBfgsOptions {
+            ftol: QN_FTOL,
+            ..FdBfgsOptions::default()
+        }
+    } else {
+        FdBfgsOptions::default()
+    };
     // An evaluated incumbent is not evaluated again; one whose value is not
     // finite ends the descent at once, so the first slice kicks from it.
     let state = states.qn.get_or_insert_with(|| QnArmState {
@@ -3127,7 +3141,7 @@ fn run_qn_arm<O>(
             ledger.incumbent(bounds).view(),
             ledger.incumbent_value(),
             bounds,
-            FdBfgsOptions::default(),
+            options,
         ),
         kick: QN_KICK0,
         base_val: best,
@@ -6734,6 +6748,55 @@ mod tests {
                 assert_eq!(before(&scaled_turns), n, "{dim}-D at {budget}");
                 assert_eq!(scaled_turns[..n], turns[..n], "{dim}-D at {budget}");
             }
+        }
+    }
+
+    #[test]
+    fn values_only_descent_converges_as_deep_under_an_added_constant() {
+        // The slow test compares each decrease with a few units in the last
+        // place of the value, so a constant that makes the values larger
+        // coarsens the depth only to their resolution. The Hessian of this
+        // bowl vanishes at its minimum, so the decreases shrink slowly there.
+        fn valley(x: ArrayView1<f64>) -> f64 {
+            x.iter()
+                .enumerate()
+                .map(|(i, v)| (1 + i) as f64 * (v - 0.3).abs().powf(1.5))
+                .sum()
+        }
+        fn shifted(x: ArrayView1<f64>) -> f64 {
+            16384.0 + valley(x)
+        }
+        let depth = |f: fn(ArrayView1<f64>) -> f64, shift: f64| {
+            let dim = 4;
+            let obj = Traced::new(-2.0, 2.0, dim, f);
+            let ledger = BudgetLedger::new(4000, dim);
+            let budgeted = BudgetedObjective {
+                inner: &obj,
+                ledger: &ledger,
+            };
+            let start = Array1::from_shape_fn(dim, |i| if i % 2 == 0 { -1.2 } else { 1.0 });
+            budgeted.eval(start.view());
+            let mut states = ArmStates {
+                values_only: true,
+                ..ArmStates::default()
+            };
+            while ledger.remaining() > 0 && states.qn.as_ref().is_none_or(|qn| !qn.engine.is_done())
+            {
+                run_qn_arm(&budgeted, &ledger, &mut states, 50, 3, true);
+            }
+            assert!(ledger.remaining() > 0, "shift {shift}: never converged");
+            ledger.best_get() - shift
+        };
+        for (f, shift) in [
+            (valley as fn(ArrayView1<f64>) -> f64, 0.0),
+            (shifted, 16384.0),
+        ] {
+            let gap = depth(f, shift);
+            let resolution = f64::EPSILON * shift.max(1.0);
+            assert!(
+                gap <= 16.0 * resolution,
+                "shift {shift}: stopped {gap} above the minimum"
+            );
         }
     }
 }
