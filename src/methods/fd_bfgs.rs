@@ -90,6 +90,9 @@ pub struct FdBfgsOptions {
     /// Infinity norm of the projected gradient at or below which the descent
     /// ends; zero disables the test. L-BFGS-B's `pgtol`.
     pub gtol: f64,
+    /// Decrease per iteration at or below which an iteration is slow
+    /// whatever the value's scale; zero leaves only the relative test.
+    pub fatol: f64,
 }
 
 impl Default for FdBfgsOptions {
@@ -102,6 +105,7 @@ impl Default for FdBfgsOptions {
             refine: true,
             value_floor: f64::MIN_POSITIVE,
             gtol: 0.0,
+            fatol: 0.0,
         }
     }
 }
@@ -247,6 +251,11 @@ impl FdBfgs {
     /// True once the descent has converged or exhausted its options.
     pub fn is_done(&self) -> bool {
         matches!(self.phase, Phase::Done)
+    }
+
+    /// Sets [`FdBfgsOptions::fatol`] for the iterations that follow.
+    pub fn set_fatol(&mut self, fatol: f64) {
+        self.options.fatol = fatol;
     }
 
     /// Current iterate, the best point the descent has accepted.
@@ -629,7 +638,7 @@ impl FdBfgs {
             .abs()
             .max(value.abs())
             .max(self.options.value_floor);
-        if (previous - value) <= self.options.ftol * scale {
+        if (previous - value) <= (self.options.ftol * scale).max(self.options.fatol) {
             if self.scheme == FdScheme::Forward && self.options.refine {
                 // A forward-difference direction that only buys a sliver of
                 // decrease is usually its truncation error talking.
@@ -886,6 +895,37 @@ mod tests {
         assert!(
             floored_used < raw_used,
             "floored {floored_used} evaluations against {raw_used}"
+        );
+    }
+
+    #[test]
+    fn absolute_slow_floor_ends_descents_sooner() {
+        // Rosenbrock-4 converges to 0, where the relative test alone keeps
+        // the descent going down to the last units in the last place.
+        let bounds = boxed(-2.0, 2.0, 4);
+        let rosenbrock = |x: ArrayView1<f64>| {
+            (0..3)
+                .map(|i| 100.0 * (x[i + 1] - x[i] * x[i]).powi(2) + (1.0 - x[i]).powi(2))
+                .sum::<f64>()
+        };
+        let start = Array1::from_vec(vec![-1.2, 1.0, -1.2, 1.0]);
+        let mut plain = FdBfgs::new(start.view(), None, &bounds, FdBfgsOptions::default());
+        let plain_used = drive(&mut plain, rosenbrock, 5000, &bounds);
+        let mut floored = FdBfgs::new(
+            start.view(),
+            None,
+            &bounds,
+            FdBfgsOptions {
+                fatol: 1e-6,
+                ..FdBfgsOptions::default()
+            },
+        );
+        let floored_used = drive(&mut floored, rosenbrock, 5000, &bounds);
+        assert!(plain.is_done() && floored.is_done());
+        assert!(floored.value() < 1e-3, "value {}", floored.value());
+        assert!(
+            floored_used < plain_used,
+            "floored {floored_used} evaluations against {plain_used}"
         );
     }
 
