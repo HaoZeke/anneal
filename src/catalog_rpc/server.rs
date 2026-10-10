@@ -3177,7 +3177,7 @@ fn validate_candidate<F>(
     evaluate: &F,
     identity: &CatalogIdentity,
     candidate: &CatalogCandidate,
-    posted_descriptor_len: Option<&mut Option<usize>>,
+    mut posted_descriptor_len: Option<&mut Option<usize>>,
 ) -> Result<ValidatedCandidate, ()>
 where
     F: Fn(&[f64]) -> Result<FreshEvaluation, String> + Send + Sync + ?Sized,
