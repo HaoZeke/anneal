@@ -542,7 +542,6 @@ where
             let depth = values_search_depth(dim, remaining, needs_certificate).max(1);
             progressed = true;
             replica.generation += 1;
-            replica.hops += 1;
             let temp = temperatures.at(index, replica.generation);
             coverage.hear(index, temp);
             let escape = replica.feedback.escape();
@@ -602,6 +601,8 @@ where
                 }
                 continue;
             };
+            // A trial with no finite feasible descriptor is not a coverage hop.
+            replica.hops += 1;
             if report.is_none()
                 && let Some(launch_cv) = launch
                     .energy()
