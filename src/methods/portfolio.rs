@@ -711,6 +711,28 @@ impl<O: Objective<f64>> Objective<f64> for LocalBoxBudgetedObjective<'_, O> {
     }
 }
 
+/// Objective proxy reporting the inner objective's values in a unit, a
+/// power of two, so that each reported value is the inner value rescaled
+/// without rounding.
+struct UnitObjective<'a, O: Objective<f64>> {
+    inner: &'a O,
+    unit: f64,
+}
+
+impl<O: Objective<f64>> Objective<f64> for UnitObjective<'_, O> {
+    fn dim(&self) -> usize {
+        self.inner.dim()
+    }
+
+    fn bounds(&self) -> &Bounds<f64> {
+        self.inner.bounds()
+    }
+
+    fn eval(&self, x: ArrayView1<f64>) -> f64 {
+        self.inner.eval(x) / self.unit
+    }
+}
+
 /// Gradient of `x -> f(reflect_into_box(x))`, the function the budgeted
 /// objective evaluates: the caller's gradient at the reflected point, with the
 /// sign of each coordinate the fold reverses flipped. The caller's gradient is
@@ -1309,6 +1331,12 @@ fn ladder_temperature(temp0: f64, generation: usize) -> f64 {
 }
 
 fn archive_temp0(ledger: &BudgetLedger) -> f64 {
+    archive_temp0_in(ledger, 1.0)
+}
+
+/// [`archive_temp0`] in units of `unit`, a power of two, with its floor and
+/// its fallback in that unit.
+fn archive_temp0_in(ledger: &BudgetLedger, unit: f64) -> f64 {
     let inner = ledger.inner.lock().expect("ledger lock");
     let mut finite: Vec<f64> = inner
         .archive_y
@@ -1325,7 +1353,7 @@ fn archive_temp0(ledger: &BudgetLedger) -> f64 {
     // variance overflows to infinity on them).
     let q25 = finite[finite.len() / 4];
     let q75 = finite[(3 * finite.len()) / 4];
-    let spread = q75 - q25;
+    let spread = (q75 - q25) / unit;
     if spread.is_finite() && spread > 0.0 {
         spread.max(1e-6)
     } else {
@@ -1407,6 +1435,13 @@ impl SuccessScale {
     /// The least drop of the incumbent that counts as a success.
     fn threshold(&self) -> f64 {
         IMPROVEMENT_RTOL * self.gain.max(self.floor)
+    }
+
+    /// The power of two at or below [`Self::threshold`], but at least
+    /// `f64::MIN_POSITIVE`: a unit of value that scales with the objective
+    /// and that a value divides by without rounding, short of overflow.
+    fn unit(&self) -> f64 {
+        f64::from_bits(self.threshold().to_bits() & 0x7ff0_0000_0000_0000).max(f64::MIN_POSITIVE)
     }
 
     /// Whether `value` lies below the start's value.
@@ -2437,10 +2472,22 @@ fn run_arm<O, G>(
             }
             if slice >= 8 {
                 let chains = (slice / 8).clamp(2, 4 * dim.max(1));
-                let res = qmc_gsa_global_search(obj, slice, seed, chains, 1.0, GSA_Q_V, GSA_Q_A);
+                // Tsallis acceptance weighs a rise against a temperature that
+                // starts at one. A values-only run measures the rise in its
+                // unit, so the chains move alike on the objective times a
+                // power of two, and a rise as large as the last gain is all
+                // but never taken.
+                let unit = if states.values_only {
+                    states.success.unit()
+                } else {
+                    1.0
+                };
+                let scaled = UnitObjective { inner: obj, unit };
+                let res =
+                    qmc_gsa_global_search(&scaled, slice, seed, chains, 1.0, GSA_Q_V, GSA_Q_A);
                 states
                     .basins
-                    .register(res.best_pos.view(), res.best_val, &bounds);
+                    .register(res.best_pos.view(), res.best_val * unit, &bounds);
             }
         }
         ArmKind::Shift => {
@@ -2532,7 +2579,14 @@ fn run_arm<O, G>(
                 return;
             }
             let x_arr = Array2::from_shape_vec((ys.len(), dim), xs).expect("archive shape");
-            let y_arr = Array1::from_vec(ys);
+            // A values-only run fits and anneals in its unit, so the fit, the
+            // temperatures and their floors scale with the objective.
+            let unit = if states.values_only {
+                states.success.unit()
+            } else {
+                1.0
+            };
+            let y_arr = Array1::from_vec(ys) / unit;
             let surr = AdditiveSurrogate::fit(
                 x_arr.view(),
                 y_arr.view(),
@@ -2557,10 +2611,10 @@ fn run_arm<O, G>(
             // regime regardless of how often the arm is pulled.
             let progress = ledger.used_get() as f64 / budget.max(1) as f64;
             let exponent = (12.0 * progress) as i32 + states.surrogate_gen as i32;
-            let temp = (archive_temp0(ledger) * 0.5_f64.powi(exponent)).max(1e-12);
+            let temp = (archive_temp0_in(ledger, unit) * 0.5_f64.powi(exponent)).max(1e-12);
             let proposals = surr.sample(slice, temp, SURROGATE_GRID, rng);
             let mut f_cur = ledger.best_get();
-            let noise_sigma = states.noise_sigma;
+            let noise_sigma = states.noise_sigma.map(|sigma| sigma / unit);
             for i in 0..proposals.nrows() {
                 if ledger.exhausted() {
                     break;
@@ -2569,8 +2623,8 @@ fn run_arm<O, G>(
                 let ft = obj.eval(trial.view());
                 let accepted = accept_move(
                     noise_sigma,
-                    |_r| energy_delta(obj.eval(trial.view()), f_cur),
-                    energy_delta(ft, f_cur),
+                    |_r| energy_delta(obj.eval(trial.view()), f_cur) / unit,
+                    energy_delta(ft, f_cur) / unit,
                     temp,
                     rng,
                 );
@@ -7214,13 +7268,17 @@ mod tests {
 
     #[test]
     fn values_only_run_ignores_the_scale_of_the_objective() {
-        // A power of two rescales every value, and so every gain and success
-        // threshold, exactly, and a descent's first trial follows the box,
-        // so a rescaled run asks the same points, at least until the
-        // restart arm, whose chains anneal at a fixed temperature, or the
-        // surrogate, whose temperature has an absolute floor, plays.
+        // A power of two rescales every value, and so every gain, success
+        // threshold and the run's unit, exactly; a descent's first trial
+        // follows the box, and the restart arm and the surrogate take values
+        // in the unit, so a rescaled run asks the same points to the end of
+        // its budget. At 2^-40 the archive's spread lies below the
+        // surrogate's floor in absolute terms.
         fn small(x: ArrayView1<f64>) -> f64 {
             rastrigin(x) * 2f64.powi(-20)
+        }
+        fn tiny(x: ArrayView1<f64>) -> f64 {
+            rastrigin(x) * 2f64.powi(-40)
         }
         fn large(x: ArrayView1<f64>) -> f64 {
             rastrigin(x) * 2f64.powi(20)
@@ -7245,23 +7303,18 @@ mod tests {
             (obj.points(), states.turns)
         };
         // Short of the opening budget at 20 dimensions, past it at 10.
+        let mut arms = Vec::new();
         for (dim, budget) in [(10usize, 1000usize), (20, 2000)] {
             let (plain, turns) = trace(rastrigin, dim, budget);
-            let cut = turns
-                .iter()
-                .find(|turn| matches!(turn.0, ArmKind::Explore | ArmKind::Surrogate))
-                .map_or(budget, |turn| turn.1);
-            assert!(cut > budget / 2, "{dim}-D at {budget}: compared {cut}");
-            for f in [small as fn(ArrayView1<f64>) -> f64, large] {
+            arms.extend(turns.iter().map(|turn| turn.0));
+            for f in [small as fn(ArrayView1<f64>) -> f64, tiny, large] {
                 let (points, scaled_turns) = trace(f, dim, budget);
-                assert_eq!(points[..cut], plain[..cut], "{dim}-D at {budget}");
-                let before = |turns: &[(ArmKind, usize, usize)]| {
-                    turns.iter().filter(|turn| turn.1 < cut).count()
-                };
-                let n = before(&turns);
-                assert_eq!(before(&scaled_turns), n, "{dim}-D at {budget}");
-                assert_eq!(scaled_turns[..n], turns[..n], "{dim}-D at {budget}");
+                assert_eq!(points, plain, "{dim}-D at {budget}");
+                assert_eq!(scaled_turns, turns, "{dim}-D at {budget}");
             }
+        }
+        for arm in [ArmKind::Explore, ArmKind::Surrogate] {
+            assert!(arms.contains(&arm), "no {arm:?} turn");
         }
     }
 
