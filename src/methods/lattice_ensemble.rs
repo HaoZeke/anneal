@@ -1,10 +1,11 @@
 //! Lattice-searching chains that pool their funnel bottoms in one bank.
 //!
-//! Each chain owns an equal share of the force budget on its own [`Ledger`]
-//! and spends it one trial at a time. A trial starts from a random cluster,
-//! from a bank member with a few surface atoms placed on vacant hollow sites,
-//! or from a cut-and-splice of two members (Deaven and Ho, Phys. Rev. Lett.
-//! 75, 288 (1995)). It is quenched and taken down the lattice descent of
+//! Each chain owns an equal share of the force budget on its own
+//! [`Ledger`](crate::methods::cluster_hopping::Ledger) and spends it one trial
+//! at a time. A trial starts from a random cluster, from a bank member with a
+//! few surface atoms placed on vacant hollow sites, or from a cut-and-splice of
+//! two members (Deaven and Ho, Phys. Rev. Lett. 75, 288 (1995)). It is
+//! quenched and taken down the lattice descent of
 //! [`crate::methods::lattice_search`], and the minimum it ends in is offered
 //! to a bank of conformational space annealing (Lee, Scheraga and Rackovsky,
 //! J. Comput. Chem. 18, 1222 (1997)) under the rule of Lee, Lee and Lee,
@@ -12,19 +13,21 @@
 //! the member it resembles when it is lower, and otherwise displaces the
 //! highest member when it resembles none and is lower than that member.
 //!
-//! [`Sharing::Shared`] gives the chains one bank of `chains * slots` members,
-//! so a funnel any chain enters is refined by every chain and splices mix
-//! structures found by different chains. [`Sharing::Private`] gives each chain
-//! a bank of `slots` members, with the same trial rules, budget shares and
-//! stream seeds. A one-slot private bank never splices and never draws the
-//! splice coin, so a chain's random stream parts from its stream under
-//! [`Sharing::Shared`] at its first bank draw, or sooner if the shared bank is
-//! not yet full when the private one is, since only a full bank draws the coin
-//! for a random start. With one slot the private ablation therefore removes
-//! cross-chain splicing together with the exchange of members. A margin over
-//! another method that the private ablation matches belongs to what the two
-//! share, the trial rules, the lattice descent and its quench, and not to
-//! communication between chains.
+//! [`Sharing::Shared`](crate::methods::lattice_ensemble::Sharing::Shared)
+//! gives the chains one bank of `chains * slots` members, so a funnel any
+//! chain enters is refined by every chain and splices mix structures found by
+//! different chains.
+//! [`Sharing::Private`](crate::methods::lattice_ensemble::Sharing::Private)
+//! gives each chain a bank of `slots` members, with the same trial rules,
+//! budget shares and stream seeds. A one-slot private bank never splices and
+//! never draws the splice coin, so a chain's random stream parts from its
+//! stream under `Sharing::Shared` at its first bank draw, or sooner if the
+//! shared bank is not yet full when the private one is, since only a full bank
+//! draws the coin for a random start. With one slot the private ablation
+//! therefore removes cross-chain splicing together with the exchange of
+//! members. A margin over another method that the private ablation matches
+//! belongs to what the two share, the trial rules, the lattice descent and its
+//! quench, and not to communication between chains.
 //!
 //! Chains advance in synchronous generations. Parents are drawn and offers
 //! admitted in chain order between generations; only the trials run in
@@ -41,12 +44,13 @@
 //!
 //! Parents are drawn least-used first, and a member that improves is fresh
 //! again, so the effort follows the funnels that are still descending. A
-//! member drawn [`Plan::retire`] times without improving gives its slot to the
-//! next random start that resembles no member, whatever that start's energy.
-//! Without it, a bank whose members have all stopped descending rejects every
-//! start higher than its worst member, which on a funnelled surface is nearly
-//! every start. Nothing in the run reads a reference energy or a structure
-//! class.
+//! member drawn
+//! [`Plan::retire`](crate::methods::lattice_ensemble::Plan::retire) times
+//! without improving gives its slot to the next random start that resembles
+//! no member, whatever that start's energy. Without it, a bank whose members
+//! have all stopped descending rejects every start higher than its worst
+//! member, which on a funnelled surface is nearly every start. Nothing in the
+//! run reads a reference energy or a structure class.
 //!
 //! The retirement rule, the radial resemblance key, the held merge distance
 //! and the counted accounting are this work's. The bank rule, cut-and-splice

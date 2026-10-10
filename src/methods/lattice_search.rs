@@ -12,11 +12,14 @@
 //! it in four ways:
 //!
 //! - the sites are geometric, at the pair-well distance over every triangle of
-//!   atoms with edges under [`Lattice::hollow_cutoff`], and no site is relaxed;
+//!   atoms with edges under
+//!   [`Lattice::hollow_cutoff`](crate::methods::lattice_search::Lattice::hollow_cutoff),
+//!   and no site is relaxed;
 //! - every atom with fewer than twelve bonds is movable;
 //! - one deterministic greedy pass runs from the current structure, each move
-//!   chosen over the [`Lattice::candidates`] highest-energy movable atoms
-//!   against all sites;
+//!   chosen over the
+//!   [`Lattice::candidates`](crate::methods::lattice_search::Lattice::candidates)
+//!   highest-energy movable atoms against all sites;
 //! - one quench follows each search.
 //!
 //! Costs here are force calls. The local minimisations per hit that the paper
@@ -31,13 +34,16 @@
 //! Every value-and-gradient call is charged as one call; lattice pair terms
 //! are charged at their fraction of the n(n-1)/2 pairs of a full evaluation
 //! and settled in whole calls; under one call per chain can be outstanding at
-//! a first hit or at the end of a run. Each chain has its own [`Ledger`], and
-//! the pair terms go through [`Ledger::charge_frac`]. A search pays for its
-//! atom and site energies and for each move before computing them, and for the
-//! scan that chooses a move just after it. A ledger that runs dry paying for a
-//! dearer scan can leave more than a call of it unpaid, so the bound needs k m
-//! to be at most n(n-1)/2, for k candidate atoms and m vacant sites. Building
-//! the lattice and choosing sites is geometry and calls no potential.
+//! a first hit or at the end of a run. Each chain has its own
+//! [`Ledger`](crate::methods::cluster_hopping::Ledger), and the pair terms go
+//! through
+//! [`Ledger::charge_frac`](crate::methods::cluster_hopping::Ledger::charge_frac).
+//! A search pays for its atom and site energies and for each move before
+//! computing them, and for the scan that chooses a move just after it. A
+//! ledger that runs dry paying for a dearer scan can leave more than a call of
+//! it unpaid, so the bound needs k m to be at most n(n-1)/2, for k candidate
+//! atoms and m vacant sites. Building the lattice and choosing sites is
+//! geometry and calls no potential.
 
 use std::collections::VecDeque;
 
