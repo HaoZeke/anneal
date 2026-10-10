@@ -5,7 +5,7 @@
 //! problem, and treating it as one is why three separate calibrations of it
 //! failed to find a value that transferred.
 //!
-//! Lee, Lee and Scheraga make the case directly (Conformational space annealing,
+//! Lee, Lee and Lee make the case directly (Conformational space annealing,
 //! arXiv cond-mat/0307690). Their `Dcut` "plays the role of the temperature in
 //! simulated annealing": the diversity of sampling is controlled by comparing a
 //! distance between two configurations against it, and "the value of `Dcut` is
