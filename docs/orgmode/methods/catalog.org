@@ -410,8 +410,8 @@ Feeds/consumes: constructed and driven by
 =cluster_hopping::run_with_gradient= (=EscapeFeedback::new= at
 cluster_hopping.rs:1351, =feedback.observe= at
 1801/1853/2638/2644/3381, =feedback.escape()= scaling the library move
-at 2000-2004 and the soft-mode climb's overshoot at 3310-3314,
-=feedback.accept= gating uphill trials at 2608), documented as a
+at 2037-2041 and the soft-mode climb's overshoot at 3348-3352,
+=feedback.accept= gating uphill trials at 2645), documented as a
 black-box call site under
 [[file:catalog.org::*Stall escapes][stall escapes]] above; this
 section documents the feedback mechanism itself.
