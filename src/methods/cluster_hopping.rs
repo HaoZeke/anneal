@@ -2797,8 +2797,12 @@ where
         }
         // Under the statistical temperature only the ratio-one rungs record. A
         // rung walking at r times the entropy's slope stands with weight
-        // exp(-S/r), which is not the occupancy the estimator fits, and its
-        // counts would steepen the shared entropy and cool every rung.
+        // exp(-S/r), which is not the occupancy the estimator fits, so its
+        // counts bias the estimate. Measured on a two-rung LJ13 ladder ten
+        // times hotter at the top, they heated every rung: the hot rung's
+        // energies widened the window the first sweep sets, to bins about twice
+        // as wide, and the fitted entropy came out flatter where the coldest
+        // rung stands, its estimate 0.27 against 0.11 after one refresh.
         if (cfg.flat_histogram || cfg.statistical_temperature)
             && (ratios[rep] == 1.0 || !cfg.statistical_temperature)
         {
