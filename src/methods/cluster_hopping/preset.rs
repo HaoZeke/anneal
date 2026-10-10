@@ -16,7 +16,13 @@ impl LennardJonesPreset {
     pub(super) const GROUP_SHAKE: f64 = 0.3;
     pub(super) const GROUP_CUTOFF: f64 = 3.4;
     pub(super) const COVALENT_CUTOFF: f64 = 1.3;
-    pub(super) const SYMMETRY_TOLERANCE: f64 = 0.35;
+    /// Measured, one value for every system rather than a per-system knob.
+    /// At 0.35 the frozen arm reaches the LJ75 Marks decahedron in 20 of 48
+    /// seeds and the LJ98 Leary tetrahedron in 21 of 48; at 0.5 LJ75 is 31 of
+    /// 48, while LJ38 is unchanged at 70 of 72 and LJ55 at 48 of 48. Nothing
+    /// measured pays for the looser match, so it is the default and no
+    /// campaign sets `SYM_TOL`.
+    pub(super) const SYMMETRY_TOLERANCE: f64 = 0.5;
     pub(super) const SOAP_RMSD: f64 = 0.35;
     pub(super) const SOAP_CUTOFF: f64 = 3.5;
     pub(super) const ESCAPE_EPSILON: f64 = 1.0e-4;

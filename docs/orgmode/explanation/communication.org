@@ -1,0 +1,971 @@
+#+TITLE: Communication and search-state contracts
+#+OPTIONS: toc:2 num:nil author:nil
+
+Communication changes what a search knows, what it penalizes, or where it
+searches. These are separate operations. Sharing a minimum's identity does not
+copy its coordinates into another chain; averaging a bias table does not
+average structures; selecting a population parent can change a chain's
+coordinates. A comparison must name the operation and the driver that consumes
+it.
+
+This document describes the implementation paths and the invariants their
+regressions check. It does not define another solver or benchmark. Numerical
+certification, message delivery, and comparison outcomes are distinct claims;
+source code and test definitions alone do not establish a passing run or a
+performance advantage.
+
+* Coverage history is not minimum identity
+
+The generic global-minimization mechanism is repulsion from explored regions.
+A descriptor maps a search state into a geometry in which nearby observations
+can share a bias. A feasible evaluated state can contribute coverage without
+being stationary. The search evaluates its exploration penalty in descriptor
+space while retaining its incumbent according to the original objective,
+not the objective plus that penalty.
+
+=BasinBias= and =SharedDeposits= implement this descriptor/count path without
+requesting a gradient or a minimum certificate. Despite the =BasinBias= name,
+its fingerprint and distance rule can describe regions around general search
+states. The coverage radius controls the reach of repulsion; it is not a
+claim that all states inside that radius quench to the same minimum.
+
+Minimum identity is a separate, optional statement. A basin-hopping worker
+can use certified quenches to distinguish a return to its own minimum from
+a minimum found by another worker. Requiring such a certificate for that
+statement does not justify requiring stationarity for every coverage deposit.
+The box entry points record finite feasible initial and trial search
+boundaries, including rejected trials and unfinished quenches. Inner
+line-search evaluations do not each make another coverage deposit. Minimum
+reports do not duplicate those deposits. The atomic shared-deposit channel
+likewise does not require a minimum certificate.
+
+Imported visits change what a chain knows, not how much local exploration it
+has performed. The bias tracks total local-plus-imported deposits for its
+visit-dependent height, while the descriptor index counts only local
+arrivals. Only those local arrival deltas are publishable. Repeated exchanges
+therefore cannot manufacture coverage by circulating the same observations.
+
+* Occupied state and the global archive
+
+The portfolio's gradient-enabled hop arm retains an =eindir_core::FPair=:
+coordinates and their cached raw objective value. An accepted transition
+replaces both members. A lower archive value from another arm does not
+change the occupied pair; otherwise a downhill hop can be compared against
+an energy that does not belong to its starting position.
+
+The native =PortfolioResult.hop_state= reports this terminal occupied pair
+separately from =best_pos= and =best_val=, which retain the best raw evaluated
+candidate across all arms. Copying the diagnostic adds no objective calls
+or random draws. It is not a resumable checkpoint, and a values-only run
+has no gradient-enabled hop state and reports =None=. The native
+=portfolio_hop_state= regression checks cached energy against the occupied
+coordinates, raw-incumbent retention and actual callback accounting.
+
+* Entry points and channels
+
+The [[file:../../../src/methods/ensemble.rs][atomic ensemble runner]], the
+[[file:../../../src/methods/box_hopping.rs][box ensemble runner]], and the
+[[file:../../../examples/lj_cluster_search.rs][cooperative LJ driver]] do not
+have interchangeable communication configurations.
+
+| Path | Information exchanged | Consumer and direct effect |
+|------+-----------------------+----------------------------|
+| =methods::ensemble::run_ensemble= | Exact-history reports, descriptor visit deltas, optional well tables and occupied structures | History feedback and local bias updates; optional two-choice restart constructs a fresh start |
+| =box_ensemble_optimize= | Evaluated-region descriptor/count events, bounded paid-sample descriptors; optional certified minimum reports | Nearby samples repel Gaussian/Langevin proposals; coverage changes acceptance and escape scale; gradient polish uses the raw objective |
+| =box_values_ensemble_optimize= | Same coverage and sample streams; optional finite-difference minimum reports | Nearby samples repel kicks; coverage changes acceptance and escape scale; budgeted quasi-Newton refinement uses scalar values without a user gradient |
+| =portfolio_ensemble_optimize= | Bounded paid global-proposal samples and checkpoint incumbents | Frozen peer geometry separates global proposals; full controller state and raw-objective refinement remain private |
+| =CensusBus= live-minimum messages | Replica, hop count, energy, Cartesian coordinates | Nearby-peer count, packing references and optionally remote bias deposits; no direct coordinate adoption |
+| Census-bus well messages | Descriptor centres and accumulated well depths | A =MergeBias= checkpoint action updates local well depths |
+| Catalog coordinator | Validated candidates, policy state, population plans and work records | Hearing, population and other boundary policies can construct or adopt coordinates |
+
+The [[file:../../../src/python.rs][Python binding]] dispatches
+=ensemble_optimize= through =ensemble_hop_optimize=. With a gradient it uses
+the box-gradient path. Without a gradient, two or more replicas use the
+values-only box path; one replica uses the portfolio and has no minimum-history
+table. Box replicas are stepped by the box runner's loops, not by the atomic
+runner's scoped threads. The atomic runner constructs an objective per thread,
+so an external potential handle need not be shared between replicas.
+
+** Persistent portfolio replicas
+
+The [[file:../../../src/methods/portfolio/ensemble.rs][portfolio ensemble]]
+keeps one uninterrupted multi-arm controller per replica. Its bandit,
+populations, occupied states, local archive and random stream remain private.
+Replica count splits one aggregate objective-plus-gradient allowance; it does
+not restart the controller at every exchange. =coverage.shared=false= is the
+communication-off control with the same starts, seeds and per-replica budgets.
+
+Rust scalar clients use =portfolio_values_ensemble_optimize= with an
+=eindir_core::Objective<f64>= implementation. No gradient trait or dummy
+gradient type is required:
+
+#+begin_src rust
+use anneal_core::{PortfolioEnsembleConfig, portfolio_values_ensemble_optimize};
+
+// objective implements only eindir_core::Objective<f64> on a positive-width box.
+let config = PortfolioEnsembleConfig {
+    budget: 2003,
+    replicas: 4,
+    ..PortfolioEnsembleConfig::default()
+};
+let result = portfolio_values_ensemble_optimize(&objective, 17, None, &config);
+assert_eq!(result.n_grads, 0);
+assert!(result.n_evals <= config.budget);
+#+end_src
+
+The =portfolio_values_api= regression supplies a concrete objective-only
+client and checks actual calls for both one and four replicas.
+
+The Python =global_optimize= wrapper selects this driver when =replicas > 1=.
+For example, a parameter loss can expose only values:
+
+#+begin_src python
+import anneal
+import numpy as np
+
+result = anneal.global_optimize(
+    lambda x: float(np.sum((x - 0.371) ** 2)),
+    low=[-2.0] * 5,
+    high=[2.0] * 5,
+    budget=2003,
+    seed=17,
+    replicas=4,
+    coverage_shared=True,
+)
+assert result["n_grads"] == 0
+assert result["n_evals"] == result["charged"] <= 2003
+assert len(result["replicas"]) == 4
+#+end_src
+
+The portfolio requires finite positive-width intervals. Fixed-axis box search
+uses the separate convenience domain mapping described below. A caller-owned
+native objective handle passed to =global_optimize_objective= retains its
+single-portfolio interface. ChemFit's =fit_anneal(jac=False)= calls =minimize=;
+it does not implicitly select the portfolio ensemble shown here.
+
+At arm checkpoints, replicas publish paid feasible positions and receive peers'
+bounded sample clouds. Each chain freezes its received cloud for a slice and
+performs distance calculations under its own lock, not the exchange lock.
+Proposal counters merge at checkpoints and retirement. Unfunded replicas do
+not join the barrier; completed or unwinding replicas release their reader
+obligation. Objective callbacks execute outside exchange locks.
+Scalar residual batches have a funded checkpoint even when their allowance
+cannot pay for a derivative stencil; communication consumes no objective calls.
+
+The consumers are QMC exploration starts and steps, gradient-hop launches,
+surrogate candidates, differential-evolution initialization and mutations,
+persistent GSA initialization, steps and reseeds, scalar residual global
+candidates, population-diffusion starts and moves, and local-search restart seeds. Local
+derivative stencils and line searches evaluate the raw objective without
+geometric displacement. A prepared proposal is publishable only when a real
+callback evaluates its finite feasible value. Other portfolio arm internals
+do not acquire peer steering merely by being present in the library.
+
+The population-diffusion arm (=dmc_pop=) uses continuous refinement rather
+than an assumed integer lattice. Its scalar regression translates the box
+and initial point together and checks corresponding paid positions. This
+coordinate-origin contract is separate from peer steering. Its population
+starts, walker moves, control reseeds, recombination and global escape
+launches consume the same frozen peer cloud as the other integrated arms.
+Correction precedes scalar or batch evaluation, and the corrected coordinates
+also enter walker state. The supplied incumbent is retained; local axial
+polls, derivative stencils and line searches are not displaced. Opposition
+launches preserve their active coordinate. =portfolio_dmc_proposals= locates
+population starts by their seeded generator and compares shared correction
+with private and zero-height paid-position controls.
+
+GSA's coordinate strategy carries its active axis through this boundary.
+Peer correction moves only that coordinate; all other physical coordinates
+retain their values. Distance and radius still use the full normalized
+parameter space. Both radial separation and its feasible fallback respect
+the move support and the same displacement cap. Coordinate proposals still
+publish their paid samples. =portfolio_coordinate_proposals= checks private
+strategy replay and effective shared correction without a caller gradient;
+=box_repulsion_support= checks immobile and empty-support cases.
+
+Allocation boundaries retain GSA's active chain and strategy coordinate as
+well as its random stream. An unfinished strategy resumes at the same
+temperature; cooling advances only after the strategy and its epoch-end
+work. The scalar continuation regression replays a partial strategy across
+intervening portfolio arms. It checks that slicing optimization work does
+not itself restart the private proposal sequence.
+
+QMC exploration composes =TsallisVisit= with =Reflected= in normalized box
+coordinates. It maps the reflected point into physical coordinates before
+peer separation and evaluation. Heavy-tailed excursions retain their reflected
+position instead of accumulating on box faces. The scalar-only
+=qmc_visiting_boundary= regressions verify this composition, including
+anisotropic intervals and fixed coordinates; local derivative probes are
+not displaced by this global-proposal adapter.
+
+The =portfolio_scalar_proposals= regressions exercise the initialization and
+residual paths through the objective-only API. They identify GSA's initial
+candidate by its generating random stream and check every paid position in
+sub-stencil allowances, with private and zero-height controls.
+
+The values-only controller protects a refinement reserve across search slices,
+including enlarged warmup slices. A scalar refinement start needs its base
+value, a complete central stencil and a trial: =2 * dimension + 2= callbacks.
+Scalar warmup also protects the untried active arms: each requested slice is
+capped by its share of the remaining exploration work. Preferred multipliers
+cannot consume another warmup arm's share or the refinement reserve.
+The =portfolio_warmup_funding= regression checks a four-replica,
+128-dimensional scalar run without a caller gradient.
+Both local admission and restart count respect the complete-start cost.
+A smaller residual
+allowance bypasses local search without spending calls or random draws, so
+the global proposal loop can evaluate and communicate feasible positions.
+Every numerical probe counts as an objective call, not a caller-gradient
+call. This is allocation of optimization work, not
+physical-time integration or a certificate that the objective is smooth.
+The public =values_local_polish= API retains its terminal partial-probe
+contract; global-start admission does not change that local refinement API.
+
+This exchange is in-process. =BoxCoverageConfig.neighbors= selects its direct
+graph: zero is all-to-all; positive =k= admits cyclic replica-index distances
+up to =k=. The Python keyword is =coverage_neighbors=. It does not read the
+=CensusBus= environment settings or use the NNG minimum-history transport.
+It changes proposals, not
+acceptance energies or occupied states by peer adoption. Coverage height gates
+sample separation but supplies no well-depth bias to this driver. A radius is
+an explicit geometric setting, not a universal diversity or quality guarantee.
+
+** Direct neighbours across scalar and gradient clients
+
+The shared receiver rule restricts both paid-sample delivery and coverage-
+deposit delivery. Box scalar hops, gradient hops and portfolio replicas use
+the same =BoxCoverageConfig.neighbors=. For five live chains, =neighbors=1=
+gives each chain two direct peers, including the edge between chain zero and
+chain four. Saturating the radius yields all-to-all without duplicate edges.
+Retiring a reader does not renumber the ring or discard its producer history
+for live neighbours. Private or zero-weight coverage delivers nothing.
+
+=global_optimize= defaults =coverage_neighbors= to zero. =minimize= and
+=ensemble_optimize= default it to =None= to preserve their convenience
+dispatch; specifying it selects configured hop coverage, like an explicit
+sharing or radius control. It requires no Jacobian or force callback.
+
+The graph restricts coverage, not the optional exact minimum ledger. Receivers
+do not republish imported samples or visits. These are direct subscriptions,
+not forwarded gossip, and a ring supplies no logarithmic global mixing
+guarantee. The generic exchange still uses in-process storage and retains the
+portfolio checkpoint barrier; a lower payload-delivery count does not prove
+lower synchronization cost or better optimization. The atomic =CensusBus=
+uses the same adjacency predicate with its own =CENSUS_BUS_NEIGHBORS= setting
+and retains its TCP/IPC transports.
+
+The native =shared_bias_topology= regression identifies producers in both
+streams and checks small/saturated rings, repeat reads and retirement.
+=portfolio_coverage_topology= and the Python =test_coverage_topology.py=
+exercise scalar public entry points, actual callback counts and private
+controls. =census_bus_topology= requires =bank-rpc= and exercises TCP and IPC.
+
+** Common Python result and domain
+
+=minimize(fun, x0, bounds, jac=None, budget=..., replicas=...)= delegates to
+=ensemble_optimize= and retains its complete result dictionary under
+=result.diagnostics=. It does not select atomic geometry from vector length
+or introduce a separate optimization loop.
+
+The declared box contains finite closed intervals. Equal endpoints fix an
+axis while every objective and gradient callback retains the full design
+dimension. The one-replica values portfolio searches the free coordinates
+through a compact index map; fixed axes require no dense basis matrix.
+A fully fixed one-replica values box has one possible point and evaluates
+it once. The box hop paths preserve fixed axes directly.
+
+The generic Rust result and Python dictionary retain =n_evals=, =n_grads=,
+=charged=, =hops=, =history_observations= and the coverage diagnostics.
+The convenience result names objective calls =nfev= and gradient calls
+=njev=, with =charged = nfev + njev=. No callback is added to construct
+these diagnostics. Minimum counts cannot substitute for any of those work
+or coverage counters.
+
+#+begin_src python
+import anneal
+import numpy as np
+
+result = anneal.minimize(
+    lambda x: float(np.dot(x, x)),
+    x0=[1.0, 0.0, 1.0],
+    bounds=[(-2.0, 2.0), (0.0, 0.0), (-2.0, 2.0)],
+    jac=lambda x: 2.0 * x,
+    budget=256,
+    replicas=4,
+    seed=7,
+)
+assert result.x.shape == (3,)
+assert result.x[1] == 0.0
+assert result.charged == result.nfev + result.njev <= 256
+assert len(result.diagnostics["coverage_regions_per_chain"]) == 4
+#+end_src
+
+=success= means a finite feasible candidate was returned. It is not a local
+convergence test or a global-optimality certificate. The optional parameter
+store is a result archive and starting-point source, not serialized chain
+state or a persisted coverage table.
+
+** Configure box coverage independently
+
+=box_ensemble_optimize_with_coverage= and
+=box_values_ensemble_optimize_with_coverage= accept =BoxCoverageConfig= in
+addition to the ensemble configuration. Setting the minimum history to
+=HistoryMode::None= does not disable explicitly shared coverage:
+
+#+begin_src rust
+use anneal_core::methods::box_hopping::{
+    BoxCoverageConfig, BoxEnsembleConfig, box_ensemble_optimize_with_coverage,
+};
+use anneal_core::methods::ensemble::HistoryMode;
+
+let ensemble = BoxEnsembleConfig {
+    history: HistoryMode::None,
+    ..BoxEnsembleConfig::default()
+};
+let coverage = BoxCoverageConfig {
+    shared: true,
+    radius: 0.05,
+    ..BoxCoverageConfig::default()
+};
+// objective and gradient provide the callbacks; start is a feasible design.
+let result = box_ensemble_optimize_with_coverage(
+    &objective, &gradient, 7, Some(start.view()), &ensemble, &coverage,
+);
+assert_eq!(result.history_minima, 0);
+assert!(result.n_evals + result.n_grads <= ensemble.budget);
+#+end_src
+
+The box descriptor divides each free coordinate by its box width and scales
+by the inverse square root of the number of free coordinates. Its Euclidean
+distance is therefore the RMS normalized-coordinate distance. Fixed
+coordinates contribute zero. =coverage.radius= sets repulsion reach;
+=ensemble.identity_tol= sets the separate minimum witness tolerance.
+
+The coverage defaults are radius 0.05, initial height 0.1 in objective units,
+well-tempering factor 5 and peer weight 1. They are explicit search settings,
+not universally calibrated choices. Each chain applies peer deposits at a
+funded hop boundary and decides acceptance against the existing penalty;
+its own evaluated trial is recorded after that decision. The
+=shared_deposits= control caps imported visits per receiving region per
+boundary; excess visits are counted and discarded, not replayed. Zero
+disables incoming deposits. Without explicit coverage controls, the convenience
+entry points enable sharing when their history mode is =Shared= and this cap
+is positive. Local coverage does not require a minimum ledger in any mode.
+
+=result.coverage= separates local observations, published visits, applied
+foreign visits, capped foreign visits and each chain's region count.
+Imported regions can occur in multiple chains, so those counts must not be
+summed as a unique ensemble census. =result.shared_deposits= is the applied
+foreign coverage count. The current box coverage exchange is in-process;
+the NNG history transport below carries minimum reports, not this stream.
+
+** Parameter fitting with values only
+
+A scalar loss over a parameter vector needs no objective Jacobian or forces.
+The Rust =box_values_ensemble_optimize_with_coverage= accepts only the
+=Objective= capability. Its local refinement uses the same Rust budgeted
+finite-difference quasi-Newton implementation as the values-only portfolio,
+without calling a gradient provider. Every stencil and line-search probe
+counts against the objective allowance and remains eligible for the raw
+incumbent. Fixed coordinates need no stencil probes; incomplete or nonfinite
+stencils do not certify stationarity. Minimum certificates are a separate
+optional consumer, not a prerequisite for sharing evaluated regions.
+
+A values-only hop reserves terminal exploration and optional certificate
+work before setting its local allowance. When the remaining budget permits,
+the quench can use half that budget instead of being limited to a short
+coordinate-scaled burst. The local refiner stops on its own convergence or
+unavailable-derivative checks, leaving unspent work for subsequent hops.
+
+The values-only portfolio also keeps a local solver's unused allowance
+available to the global search. It repeats scalar refinement batches while
+they consume work, then evaluates feasible global candidates under any
+residual allowance too small for local refinement. Every added evaluation
+uses the same ledger and can improve the raw incumbent. A fully fixed
+one-replica domain retains its single-evaluation shortcut.
+
+The common Python entries expose this distinction directly. For a supplied
+scalar =loss=, parameter vector =x0= and finite =bounds=:
+
+#+begin_src python
+result = anneal.minimize(
+    loss, x0, bounds,
+    jac=None, replicas=4, budget=8000,
+    history="none", coverage_shared=True,
+)
+assert result.njev == 0
+assert result.diagnostics["history_minima"] == 0
+assert result.charged == result.nfev <= 8000
+#+end_src
+
+=coverage_radius= optionally changes normalized parameter-space reach.
+It is finite and positive; it does not request a Jacobian, change atom counts
+or set minimum identity. Omitted coverage controls preserve the convenience
+defaults. Explicit coverage controls select native hop chains even for one
+values-only replica. =ensemble_optimize= accepts the same controls and
+returns the underlying diagnostics dictionary.
+
+** Nearby sampled regions repel proposals directly
+
+Paid initial local-search launches, terminal escape launches and retained
+boundaries supply an additional geometric sample stream. A launch remains
+useful when different excursions quench to the same point. These samples
+need no certificate and do not add coverage visits or objective callbacks.
+Each producer and receiving cloud holds at most 32 samples per producer;
+consecutive duplicates need no transmission. Slow readers can miss old
+samples in this bounded stream, but sample retention does not discard the
+separate visit deltas. Received samples retain their producer and are never
+republished. The stream uses the same in-process exchange component, not
+the minimum-report NNG transport.
+
+A Gaussian candidate or Langevin position update within =coverage.radius=
+of a held peer sample receives a radial displacement away from its nearest
+sample. The normalized free-coordinate metric supplies both the direction
+and radius. The displacement closes the separation deficit, multiplied by
+=min(peer_weight, 1)=, and is clipped to the box. It is retained only when
+the nearest distance across the held peer cloud increases. A coincident
+candidate uses its proposal direction, or an independent random direction
+when that is zero. Distant samples do not alter the proposal. Private
+coverage, zero height, zero peer weight and zero incoming allowance disable
+this correction; they do not disable the underlying escape mechanism.
+
+If the radial endpoint does not improve clearance, the correction tests
+positive and negative free-coordinate directions within the same displacement
+limit. The first feasible endpoint farther from the entire held cloud is
+retained. This permits sideways separation when a box face clips the radial
+push. Fixed coordinates stay fixed. These are geometric distance queries,
+not objective or gradient evaluations, and they add no random draws. Failure
+of these finite direction tests is reported as constrained; it is not proof
+that no separating direction exists in the box.
+
+Langevin applies this correction before the raw gradient and objective
+callbacks, keeping its cached force consistent with the evaluated point.
+Colored auxiliary state stays with the chain. Local polishing uses the
+unmodified objective and gradient, and the incumbent uses raw evaluated
+values even for rejected moves. This is optimization steering, not an
+equilibrium-sampling or physical-time guarantee. Box normalization is not
+a substitute for an atomic descriptor pullback or a manifold retraction.
+
+The coverage result reports =published_samples=, =applied_foreign_samples=,
+=sample_overlaps=, =repelled_proposals= and =constrained_repulsions=.
+The last two sum to =sample_overlaps=. Langevin can correct several
+positions within one hop, so these are proposal counts, not hop counts.
+Python forwards the fields with a =coverage_= prefix. The Rust comparison
+example emits the same counters; private/shared outcomes measure whether
+the directional correction helps the search.
+
+The same result distinguishes occupied-position proximity from proposal
+proximity. =sample_peer_checks= counts enabled, feasible proposal checks
+against a nonempty foreign sample cloud. =sample_anchor_overlaps= counts
+checks whose occupied chain position is within the same interaction radius;
+=sample_anchor_only_overlaps= counts those whose proposal is outside that
+radius of every held peer sample. These fields also receive the =coverage_=
+prefix in Python. They add a geometric distance query, not objective calls
+or random draws, and do not change the correction or its radius.
+
+A zero =sample_overlaps= count does not establish that occupied chains are
+distinct: their kicks can leave a shared region while local refinement
+returns to it. Conversely, zero occupied-position overlaps only describes
+the held sample cloud and chosen radius, not distinct attraction basins.
+These are proposal-opportunity counts, including each Langevin inner step,
+not an exact census of simultaneously occupied minima.
+
+** Coverage arrivals inform escape without minimum identity
+
+A paid pre-polish launch outside a known coverage region followed by a
+retained quench endpoint inside it supplies recrossing evidence. When no
+minimum report supplies feedback, this return updates the existing bounded
+=EscapeFeedback= controller. A return to the occupied region uses its
+same-return rate; a return to another known region uses its known-return
+rate and admitted local-plus-peer visit count. Coverage IDs never enter
+the minimum-identity map. A certified report supplies one authoritative
+update, not an additional coverage update.
+
+The check uses the actual return-region ball, so overlapping regions cannot
+manufacture a departure merely by selecting different IDs. Staying inside
+a region, reaching an unknown region, and flat motion without a quench
+return do not supply this evidence. Zero coverage height disables the
+additional feedback. The update changes the next Gaussian width or the
+next Langevin excitation through the existing scale control; persistent
+noise state is retained. No extra objective call, gradient call, random
+draw or coverage deposit is required.
+
+=result.coverage.recrossings= counts these uncertified return updates;
+=peer_recrossings= identifies return regions containing admitted foreign
+visits, and =peer_only_recrossings= identifies those without local arrivals
+in the selected region. These are conditional counts under the actual
+region map, not a private-chain replay. =escape_updates= counts changes to
+the bounded scale, excluding returns at its ceiling. They are distinct
+from the terminal-acceptance influence measurements below.
+
+An evaluated trial outside every held region supplies the complementary
+novel-arrival response, including a rejected trial. It contracts the
+existing escape scale with =beta_new=, without registering a minimum.
+Initial observations do not update escape, and a region imported from a
+peer is known rather than novel. =novel_arrivals= counts those events and
+=novelty_updates= counts their bounded scale changes. Gaussian width can
+range from one quarter to four times its initial scale. Langevin uses
+one to four times its calibrated excitation: novelty relaxes a return
+boost but cannot undercut the temperature learned from raw energy gaps.
+
+Python forwards these six counters under their =coverage_= prefixed names;
+=minimize= retains them in =diagnostics=. The one-replica values portfolio
+does not use box coverage feedback and reports zero for all six.
+
+** Measure delivery separately from decision influence
+
+=result.coverage_decisions= records the acceptance comparisons that consume
+coverage. Python returns the same fields under ="coverage_decisions"=;
+=minimize= retains that dictionary in =result.diagnostics=. The one-replica
+values-only portfolio has no box acceptance comparisons and reports zeros.
+
+The measurement subtracts the actual imported-height difference from each
+biased energy difference. It holds the actual endpoints, region map,
+temperature and local deposit heights fixed. This conditional comparison
+does not replay a private chain: peer-created centres and their effect on
+local well-tempering remain part of the conditioning. Separate matched
+private/shared runs measure the resulting search outcomes.
+
+| Field | Meaning |
+|-------+---------|
+| =comparisons=, =accepted= | Terminal acceptance decisions and actual accepted trials |
+| =unresolved= | Comparisons excluded from influence measures because arithmetic is nonfinite |
+| =peer_overlap= | Either selected endpoint region contains imported visits |
+| =peer_delta_changes= | Imported endpoint heights differ |
+| =probability_changes= | Removing that difference changes the acceptance probability |
+| =drawn_comparisons=, =drawn_disagreements= | Actual uniform draws and conditional decisions that disagree under those draws |
+| =probability_change_sum=, =max_probability_change= | Sum and maximum absolute conditional probability changes |
+| =max_abs_peer_delta=, =max_abs_peer_delta_over_temperature= | Largest absolute imported-height difference, in objective units and divided by acceptance temperature |
+
+No extra objective calls or random draws are used. Actual downhill decisions
+short-circuit without drawing; their probabilities are compared, but they
+cannot contribute a realized draw disagreement. Imported visits can produce
+zero direct influence: zero-height deposits have no penalty, and a region
+covering both endpoints contributes the same penalty to both sides.
+
+The comparison example =box_noise_comparison= emits these diagnostics in
+each JSON result. =experiments/scripts/verify_box_coverage_influence.py=
+checks zero-height, whole-box and finite-overlap controls, exact charged
+work, and optionally matching outcomes against a retained reference file.
+These checks establish measurement invariants, not an optimization benefit.
+
+* Certification, identity and packing families
+
+Three different questions require three different checks.
+
+1. /Is this an admissible minimum report?/ A
+   [[file:../../../src/methods/cluster_hopping.rs][=QuenchBoundary=]] carries
+   the energy, coordinates and fresh validation gradient. =MinimumHistory=
+   requires a valid boundary and a maximum absolute gradient component below
+   its configured tolerance. The atomic runner also has its own relaxation
+   certificate. The box paths use a history tolerance of =1e-3=; the
+   values-only path pays for a base objective and a distinct feasible
+   one-sided probe on each nonfixed coordinate when a history consumer is
+   enabled. Coverage-only scalar-refinement hops neither reserve nor spend
+   that certificate work. An initial allowance too small for a funded
+   local quench retains its terminal finite-difference fallback; every
+   measured probe remains a raw-incumbent candidate. Both box paths project
+   certificates onto feasible bound directions. These are numerical
+   admission rules, not a proof of global optimality or a positive-definite
+   Hessian.
+2. /Is this the same minimum?/ The
+   [[file:../../../src/methods/minima_hopping/history.rs][minimum history]]
+   delegates identity to =PesNetwork= and the configured
+   [[file:../../../src/pes_exploration.rs][=ExactStructureWitness=]]. A
+   descriptor orders comparisons; descriptor proximity alone does not
+   identify a minimum. The box witness compares each coordinate difference
+   against =identity_tol * max(box_width, 1e-12)=, with default
+   =identity_tol=1e-3=. Here "exact history" means witness-based identity
+   under this declared numerical rule, not exact real arithmetic.
+3. /Are the structures nearby packings?/ The
+   [[file:../../../src/catalog/packing.rs][packing map]] uses leader-clustered
+   local environments and normalized class histograms. =nearby_packing=
+   constructs a pairwise book and tests histogram L1 distance against
+   =PACKING_LINK=0.35=. Community calculations can connect structures through
+   other references; that is distinct from this pairwise test and from the
+   =PACKING_MERGE=0.20= book-cell grain. None of these radii guarantees one
+   population group per energy funnel.
+
+Catalog admission is another boundary. A
+[[file:../../../src/catalog/validator.rs][=CandidateRecord=]] includes the
+[[file:../../../src/catalog/signature.rs][system signature]], producer
+forces and convergence status, descriptor schema, coordinates and provenance.
+The validator checks compatibility and a fresh receiving-side potential
+evaluation. This signature-checked catalog protocol must not be attributed to
+the live-minimum bus: its frame does not carry that certificate or signature.
+The LJ producer checks its local gradient before publishing; the receiver
+decodes the frame and relies on the configured peer namespace.
+
+* Exact history returns information, not an adoption command
+
+=HistoryHook::observe= returns a =HistoryReport= containing an identity,
+membership-relative novelty and visit counts. It returns no proposed
+coordinates. =mark_accepted= publishes a separate fact: a chain adopted that
+identity. An observation refused by the hook is no history information; it is
+not, by itself, a command to reject a finite trial.
+
+=HistoryMembership::Accepted= distinguishes archived certified proposals from
+minima accepted by a chain. An unaccepted archived identity can still be new
+for exclusion purposes. =Observed= counts every certified observation and is
+reported as =observed-exclusion=. Their visit counts are not interchangeable.
+
+The [[file:../../../src/methods/minima_hopping.rs][escape controller]]
+distinguishes =Same=, =Known= and =New=. =Same= requires that the reached
+identity be the identity of the occupied coordinates. A minimum known only
+through another replica is =Known=, even if the local controller has never
+visited it. Therefore adopting coordinates without a certified history report
+must clear the occupied identity; retaining the identity of the structure
+left behind changes subsequent escape feedback.
+
+=SharedMinimumHistory= and =SharedDesignHistory= serialize observation and the
+membership read under a mutex. =mark_accepted= acquires the lock separately:
+this hook interface does not make observation, local acceptance and acceptance
+publication one atomic transaction.
+
+The hand-written NVE comparison in
+[[file:../../../examples/lj_joint_optimum.rs][=lj_joint_optimum=]] uses a
+different path: =observe_history= holds the history guard while its callback
+classifies the visit, decides threshold acceptance and calls =mark_accepted=.
+That broader transaction must not be inferred for the generic hook wrappers.
+
+With the =history-nng= feature, box shared history can use
+[[file:../../../src/history_nng.rs][=HistoryNngClient=]] and its request/reply
+server instead of the in-process mutex table. =HISTORY_NNG= selects the
+endpoint and =HISTORY_NNG_SERVE=1= requests a local server. The client sends
+energy, design coordinates, gradient and box widths, and receives identity
+and counts. Observation and acceptance publication are separate requests, not
+one atomic adoption transaction. It does not receive a coordinate proposal.
+These messages are neither census pub/sub nor catalog RPC. Requested transport
+setup failures are fatal to the infallible box entry points; a build without
+=history-nng= rejects an explicit =HISTORY_NNG= request in shared mode. Private
+and disabled history do not request that transport. The client distinguishes
+scientific refusals from request failures through =try_observe=,
+=try_mark_accepted= and =try_minimum_count=. Its generic =HistoryHook= methods
+panic on transport or protocol failure; an absent report means scientific
+refusal, not a successful fallback to private history. Unknown identities
+cannot receive acceptance acknowledgments. The hook reports observation and
+refusal counts plus request elapsed time. Box results and their generic
+conversion retain =history_cost= as attempts, refusals and summed operation
+seconds. Python exposes =history_refusals= and =history_seconds=. This elapsed
+sum includes validation, lock waits and server processing; it is not
+network-only latency or ensemble wall time. Connection setup is excluded.
+Disabled history and the single-replica values-only portfolio report zero.
+The accounting does not add PES calls. Client sends and reply waits each have a five-second limit;
+=HistoryNngClient::dial_with_timeout= accepts another positive duration. Those
+limits do not cover synchronous endpoint resolution. Automatic request replay
+is disabled because observing or accepting a minimum increments counters. A
+lost acknowledgment leaves the mutation's outcome unknown; the caller must
+not interpret that error as proof that the server did nothing or blindly
+repeat it. There is no application-level deduplication or exactly-once
+guarantee.
+
+** Catalog byte-stream carrier
+
+The [[file:../../../src/nng_rpc.rs][catalog carrier]] transports the Cap'n Proto
+conversation over an NNG Pair socket. Its =ANIO= version-one framing is
+separate from the catalog schema, the history request/reply protocol and
+census pub/sub. Both stream endpoints must speak that framing version.
+
+DATA frames carry ordered offsets and at most 64 KiB of payload. Each stream
+direction has a one-MiB queue bound. Peer-accepted offsets satisfy flush;
+peer-consumed offsets release receive-window credit. A slow application
+therefore cannot make acknowledgment enqueue an unbounded byte stream. FIN
+and its acknowledgments close the write half while retaining the opposite
+read direction. Dropping the owner leaves a bounded-lifetime pump to drain
+accepted writes and negotiate close. A successful NNG send alone does not
+establish peer acceptance.
+
+Pending writes, flushes and close operations have a 30-second carrier limit;
+an idle read does not time out merely because a peer is computing. Catalog
+request deadlines are a separate client contract. The pair-hello endpoint
+can be TCP, but the pair binding is IPC: this carrier path is same-node and
+does not establish cross-host catalog transport.
+
+The catalogue's request cache is separate from carrier delivery. A committed
+request replay reuses its accepted operation payload and returns a snapshot
+of the live coordinator state without repeating candidate validation.
+Campaign, ensemble and system identity checks precede cache lookup; conflicting
+content at an occupied replica/sequence key is rejected. Application rechecks
+these guards under the coordinator lock because other requests can commit
+during asynchronous validation. Two concurrent requests that both miss the
+cache can still perform separate validations.
+
+* Live minima, well tables and deposits
+
+** Live-minimum census
+
+[[file:../../../src/census_bus.rs][=CensusBus=]] stores the latest record for
+each directly heard peer. Changed coordinates or energy make a fresh
+observation; hop-only refreshes update retained state without another fresh
+event. A changed minimum publishes at an eligible checkpoint, and an unchanged
+minimum refreshes every eight eligible checkpoints. Send and receive are
+best-effort and nonblocking. Retained peers are the latest heard states, not a
+synchronized population snapshot.
+
+=CENSUS_BUS_BASE= identifies the endpoint namespace. =CENSUS_BUS_NEIGHBORS=0=
+subscribes to every peer; a positive value restricts subscriptions to cyclic
+neighbors within that distance. =CENSUS_BUS_IPC=1= selects local IPC rather
+than loopback TCP. Peers do not forward live-minimum records. A ring supplies
+a local census, not a globally mixed aggregate, and does not restrict the
+coordinator's hearing or parent selection. In the LJ driver, private sharing
+and =CATALOG_EVIDENCE_ONLY= disable the bus.
+
+The LJ helper =census_nearby_updates= invalidates packing classification when
+the occupied coordinates change, including equal-energy changes, or a peer
+has fresh geometry. It also replaces a separate live-peer view, retaining one
+entry per admitted peer even when several peers occupy identical coordinates.
+The =PackingPeerScope= restores the caller's view when that chain exits.
+
+The archive remains capped at 64; =include_packing_reference= avoids another
+arrival credit for a matching well, and over-cap admission evicts the oldest
+member of the largest community. Replacing live occupancy does not erase that
+history. The archive's entry count is not a live crowd count.
+
+** Directional packing separation
+
+=ClusterMove::SoapRepel= selects the nearest reference mean and requests the
+normalized difference =mean(current) - mean(peer)=. The native analytic
+pullback maps this difference to Cartesian coordinates. A bounded halving
+search reuses that displacement until nearest-reference descriptor clearance
+increases, subject to the requested Cartesian RMSD cap. It makes no objective
+or gradient calls; descriptor preparation still contributes wall cost.
+
+With a live view installed, the proposal rechecks =nearby_packing= against its
+actual occupied geometry. Distant peers and archived positions cannot supply
+live crowding. =REPEL_MIN_REFS= defaults to one; an explicitly larger value
+requires that many nearby peers. An empty live neighborhood, coincident means
+or an unusable pullback selects the independent escape. Without an installed
+live view the arm can use archived references for history-directed search.
+Reference means are cached by complete coordinate bits and the descriptor
+parameters, including the physical cutoff.
+
+The packing-neighborhood classifier requires at least 13 atoms. That
+chemistry-specific classification is distinct from generic box proximity and
+from the SOAP pullback's mathematical domain. Repulsion changes exploration;
+it neither changes the raw incumbent criterion nor proves a global-search
+advantage over independent chains.
+
+** Well-table gossip
+
+A well table contains descriptor centres and bias depths, not live structures
+to adopt. [[file:../../../src/bias.rs][=BasinBias::merge_wells=]] applies
+=(1-weight)*local_depth + weight*peer_depth= to matching wells and opens
+unmatched peer wells at =weight*peer_depth=. A complete table treats absent
+local wells as zero on the peer and attenuates them; a top-k table does not.
+The operation does not merge arrival counts.
+
+The atomic runner reads a ring neighbor or a randomly selected peer mailbox
+at its configured gossip interval. The LJ coordinator path uses the census
+transport's =wells/= messages, enabled by a nonempty =GOSSIP= setting and
+controlled by =GOSSIP_INTERVAL=, =GOSSIP_WEIGHT= and =GOSSIP_TOP=. These are
+different dispatch paths. A receive-side merge changes only the receiver;
+it does not simultaneously update both peers. Dynamic well tables, ongoing
+deposits, truncation and asynchronous checkpoint selection prevent treating
+this implementation as a fixed, symmetric average-consensus algorithm with
+automatic conservation or convergence guarantees.
+
+** Shared deposits
+
+The atomic runner's [[file:../../../src/shared_bias.rs][=SharedDeposits=]]
+exchanges descriptor-centre visit deltas. Each reader has a cursor, excludes
+its own publications and drains each retained foreign batch once; pruning
+waits for all readers. =DepositDescriptors= applies the counts to the local
+bias with a configured weight. This exchange does not transport candidate
+energies or prescribe coordinate adoption.
+
+Box ensembles use the same =SharedDeposits= component through their coverage
+controller, with a separate exchange instance for each ensemble. They publish
+evaluated-region visits and bounded paid-position samples, independently of
+minimum history. =BoxEnsembleConfig::shared_deposits= caps incoming coverage
+visits per receiving region and boundary. The width-normalized RMS descriptor
+distance differs from the minimum witness's width-scaled max norm.
+
+The LJ catalog path uses =CATALOG_SHARED_BIAS=1= and =DepositRemote=. Fresh bus
+minima are admitted only when =nearby_packing= holds unless
+=CENSUS_BUS_UNBOUNDED=1=. The switch covers those bus observations only:
+population-parent and own-visit deposits have separate admission paths.
+Depositing history changes subsequent biased acceptance and repulsion; it is
+not attractive coordinate consensus.
+
+* Configuration geometry and solver ownership
+
+Three different contracts govern a communicating search. The communication
+graph selects which replicas exchange information. The configuration geometry
+defines valid states, tangent directions, retractions and vector transport.
+The identity geometry defines which feasible stationary structures represent
+the same minimum. A ring subscription changes only the first contract.
+
+The pinned rgmin dependency contains the Manopt-derived =Manifold= contract
+and the =Solver::set_manifold= interface. Linking that dependency does not
+select a manifold for the host's search. The production call paths are:
+
+| Search path | Numerical integration | Configuration contract |
+|-------------+-----------------------+------------------------|
+| Atomic quench | =WarmLbfgs= delegates to =rgmin::Lbfgs= | Ambient coordinates; the objective adapter supplies frozen-force handling |
+| Box quench | =local_polish::projected_gradient_polish= | In-tree bounded L-BFGS, clipping and active-bound stationarity |
+| NVE escape | =rgsaddle::SamdSession= | Euclidean, rigid quotient, or the hopping loop's frozen-atom constraint chart; =step_on= projects, retracts and transports |
+| Saddle refinement | =rgsaddle::SellaSaddleSession= | Euclidean or Cartesian constraint chart selected by the PES adapter |
+| Rigid SOAP proposal | Groupwise Kabsch retraction | Preserves declared intragroup distances for that proposal, not every subsequent quench |
+
+The ordinary atomic hop constructs Euclidean NVE controls and passes its
+frozen-atom mask. A nonempty frozen set supplies rgsaddle Cartesian translation
+constraints for launch projection, optional softening and every trajectory
+step. Those fixed atoms define the frame; this chart is not combined with a
+rigid-quotient projector. Without fixed atoms, the configured geometry retains
+its stepping path. The =lj_joint_optimum= comparison selects the rigid quotient
+explicitly for its cluster arm. General box search does not expose the rgmin manifold setter.
+Its quadratic tests named =Sphere= are objectives inside a box, not searches
+constrained to a unit sphere.
+
+An isolated flexible cluster's =RigidQuotient= removes whole-system rigid
+motion; it does not freeze molecular bonds. A product of rigid molecular
+bodies is a different configuration space. The SO(3) and SE(3) ports consume
+rotation-matrix packings, not arbitrary 3N Cartesian arrays. Selecting one
+of those tokens for Cartesian atoms is not a valid integration. Flexible
+water must retain its internal degrees of freedom.
+
+Stationarity must use the declared feasible directions. A valid box-boundary
+minimum may have a nonzero raw gradient, so its history certificate must
+agree with the local solver's active-bound projection. Similarly, zeroing
+a frozen atom's force does not remove its initial MD velocity. Frozen
+coordinates must be preserved throughout proposal evaluation, not merely
+restored after a trajectory has evaluated a different surface.
+
+=StructureContext= carries species, masses, descriptor cell/PBC and a caller
+identity domain. A wrapper around an exact witness must preserve its
+contextual dispatch, not fall back to a coordinate-only comparison. Cell
+metadata alone does not turn a finite-cluster matcher into a periodic
+fixed-substrate matcher; both descriptor construction and exact identity
+must implement the declared periodic and frozen-coordinate equivalences.
+
+* Colored-noise state and search ownership
+
+The [[file:../../../src/methods/gle_langevin.rs][GLE driver]] is a standalone
+annealing method and an arm of the gradient-enabled portfolio. It is not a
+move in the communicating atomic or box-hop loops. The thermostat's physical
+momentum and auxiliary rows form one correlated state. Temperature changes
+rescale that entire state by =sqrt(T_new/T_old)= without drawing a new state;
+discarding the auxiliaries removes information required by subsequent steps.
+Independent driver calls initialize independent thermostat states, including
+separate portfolio arm invocations.
+
+Scalar frequency-calibration probes share the driver's gradient allowance.
+=n_evals= counts gradients here, while =n_preconditioner_grads= identifies
+gradient-only calibration work; neither counter is the box driver's combined
+objective-plus-gradient charge. Correct thermostat state and accounting do not
+establish improved global-minimum discovery. That requires measured starts,
+seeds, objectives and charged work for the compared search configurations.
+
+* Coordinate-changing actions and checkpoint arbitration
+
+Local kicks, quenches and acceptance continue to generate and select states
+in both box paths. In the atomic runner, two-choice family crowding can return
+=ExternalAdopt= with a fresh start from =StartFactory=. This is a
+coordinate-changing restart, even though the information that triggers it is
+an occupied-family observation rather than a transmitted parent structure.
+
+The [[file:../../../src/catalog_rpc/server.rs][catalog coordinator]] and the
+[[file:../../../examples/lj_cluster_search.rs][LJ checkpoint handler]] also
+support hearing, population assignments and catalog-derived boundary
+proposals. Population synchronization can return a parent and rejuvenation
+plan; the receiving driver constructs a proposal and routes it through a
+typed checkpoint action. =BoundaryProposal=, =ExternalProposal= and
+=ExternalAdopt= are not equivalent to a history report or a bias deposit.
+Coordinate changes must maintain energy, validation-gradient and occupied-ID
+consistency regardless of which action produces them.
+
+Each live checkpoint returns one state action, optionally accompanied by
+ordered =BiasUpdate= values in =CheckpointAction::WithBiasUpdates=. The chain
+applies those updates before the state action, including explicit retirement.
+Nested wrappers apply from outside inward. Standalone =MergeBias= and
+=DepositDescriptors= actions use the same implementation.
+
+The atomic runner collects a due gossip merge, then foreign visit deposits,
+without suppressing either when it selects a two-choice restart. The LJ
+handler wraps its selected action with the received well-table merge;
+Cartesian deposit queues keep their separate continuation policy. None of
+these bias updates charges an objective call, needs a gradient provider or
+manufactures a local arrival.
+
+The terminal checkpoint observation flushes publication and reporting, but
+its returned action is not executed as another search step. Publication,
+receipt and application therefore remain distinct counters. Receiving a
+table does not by itself establish that the search used its bias.
+
+* Work accounting
+
+=EnsembleConfig::budget= and =BoxEnsembleConfig::budget= are aggregate budgets
+divided among replicas, with the remainder assigned to low replica indices.
+Adding replicas does not multiply them. A process campaign can instead accept
+a per-replica budget and multiply it explicitly; that convention must appear
+in its manifest.
+
+The atomic =EnsembleProblem::callbacks_per_objective= distinguishes a combined
+analytic energy/gradient call from two Python callbacks. The box-gradient
+runner reports objective and gradient work separately. Values-only local
+refinement and finite-difference certification consume objective calls;
+the absence of a user gradient does not make those probes free. Numerical
+derivative estimates do not increment the count of user gradient callbacks.
+
+The [[file:../../../src/cooperative_search/ledger.rs][cooperative ledger]]
+charges quench work, fresh validation, retries, auxiliary potential calls,
+basin escapes and saddle rides. Descriptor evaluation, Cartesian proposal
+construction and communication fallback markers carry no potential calls.
+This is an objective-work convention, not a claim that descriptors, history
+matching, networking or synchronization have zero elapsed cost. External
+proposal work must enter the ledger even when the proposal is not adopted.
+
+Atomic first-target reporting samples aggregate work at checkpoints, with a
+terminal check. Its checkpoint resolution is not an exact physical discovery
+time. Trajectory integration creates optimization proposals; these records
+do not establish kinetic rates or residence times.
+
+* Failure boundaries and regression checks
+
+The following invariants are under regression, not a claim of passing
+execution. Test definitions identify the observable contract; benchmark
+results remain a separate requirement.
+
+- Polling one message class must preserve unread notifications of the other.
+  The census =poll_wells= path shares =drain= with live-minimum polling, so
+  updating =latest= is insufficient if the fresh-event return is discarded.
+  [[file:../../../tests/census_bus_delivery.rs][Census delivery regressions]]
+  include =polling_wells_preserves_a_fresh_minimum_until_it_is_polled_once=
+  and =interleaved_wells_and_minima_retain_each_notification_once=.
+- Accepted coordinates without a history report must not retain the occupied
+  ID of another structure. The
+  [[file:../../../src/methods/box_hopping.rs][box adoption regressions]] include
+  =accepted_uncertified_trial_clears_the_occupied_history_identity= and
+  =return_after_uncertified_adoption_uses_population_known_feedback=, with
+  companion certified-adoption and rejected-trial checks. The same invariant
+  applies to atomic adoption and restart paths; box coverage does not prove
+  those paths correct.
+- Pending bias updates must accompany a state action without loss or replay.
+  =checkpoint_bias_updates= tests ordered and nested updates, adoption,
+  retirement, unchanged standalone behavior and gradient-free callback
+  accounting. The LJ helper's =pending_bias_tests= exercise its arbitration
+  against proposals, deposits, external work and retirement.
+- Live peer occupancy is independent of bounded archive multiplicity.
+  =packing_peer_view= tests repeated nearby peers, current-geometry locality,
+  replacement and scoped restoration. A populated archive cannot substitute
+  for an installed empty census view, including for strided coordinates.
+
+* Evidence required for a performance claim
+
+Shared versus private history, bus topology, bounded deposits, gossip,
+coordinator adoption and restart rules are separate experimental factors.
+Changing several together measures their combination, not the causal effect
+of one channel. An efficacy comparison can retain adoption, but must say so;
+a topology-only diagnostic must identify other paths by which information or
+coordinates cross replica boundaries.
+
+Use a system-specific, matched-start comparison with declared aggregate
+objective work, solver and potential identities, seeds, validation rules,
+resolved channel settings, failure statuses and the actual competitor.
+Report optimization outcomes separately from descriptor coverage, network
+discovery and communication overhead. A ring, a consensus analogy or a
+bounded-confidence radius supplies no performance guarantee. The
+[[file:../methods/catalog.org][method catalog]] and
+[[file:../methods/composition.org][composition guide]] describe mechanisms;
+system-specific matched benchmark artifacts must establish whether those
+mechanisms help.

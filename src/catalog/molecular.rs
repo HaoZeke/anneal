@@ -288,8 +288,8 @@ pub fn descriptor_space(species: &[u32]) -> Result<DescriptorSpace, MolecularCat
             ],
         )
         .map_err(|_| MolecularCatalogPresetError::DescriptorDimension)?;
-        return DescriptorSpace::from_provider(geometry, provider)
-            .map_err(|_| MolecularCatalogPresetError::DescriptorDimension);
+        DescriptorSpace::from_provider(geometry, provider)
+            .map_err(|_| MolecularCatalogPresetError::DescriptorDimension)
     }
     #[cfg(not(feature = "featomic"))]
     {

@@ -446,7 +446,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut move_allocator = FlooredThompson::new(escape_moves.len());
     let mut escape_feedback = EscapeFeedback::new(1.0, hopping.temperature.max(1e-6));
     if let Some(basin) = live_basin {
-        escape_feedback.observe(None, basin as usize);
+        escape_feedback.register_initial(basin as usize);
     }
     let mut ride_available = true;
     let mut producer_event_sequence = 2_u64;
@@ -735,8 +735,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     producer_calls + 1,
                 );
                 move_allocator.update(move_index, discovered);
-                let visit = reached_basin.map(|basin| {
-                    escape_feedback.observe(live_basin.map(|value| value as usize), basin as usize)
+                let visit = offer.catalog.as_ref().map(|mutation| {
+                    escape_feedback.observe_shared(
+                        live_basin.map(|value| value as usize),
+                        mutation.basin_id as usize,
+                        mutation.new_basin,
+                        mutation.basin_visits,
+                    )
                 });
                 let accepted = reached_basin.is_some()
                     && escape_feedback.accept(record.minimum.energy - live_energy);

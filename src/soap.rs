@@ -1032,6 +1032,106 @@ pub fn packing_step_nu3(
     scale_to_cap(x, dr, rmsd)
 }
 
+/// Increase packing-map separation from the nearest supplied neighbour.
+///
+/// The descriptor difference is pulled back through the analytic map. A
+/// proposal must increase clearance from every supplied packing, within
+/// the Cartesian RMSD cap. Coincident descriptors supply no direction.
+pub fn push_away_clouds(
+    x: ArrayView1<f64>,
+    neighbors: &[Vec<f64>],
+    spec: SoapSpec,
+    rmsd: f64,
+) -> Option<Array1<f64>> {
+    let means: Vec<Vec<f64>> = neighbors
+        .iter()
+        .filter(|neighbor| {
+            neighbor.len() == x.len()
+                && neighbor.len() % 3 == 0
+                && neighbor.iter().all(|value| value.is_finite())
+        })
+        .map(|neighbor| {
+            packing_mean_nu3(ArrayView1::from(neighbor.as_slice()), spec, None, None).to_vec()
+        })
+        .collect();
+    push_away_means(x, &means, spec, rmsd)
+}
+
+/// [`push_away_clouds`] with the neighbours' packing means already
+/// computed. The means of the population's reference structures change
+/// only when the coordinates or descriptor parameters change. A caller
+/// caches them to avoid recomputing every reference for each proposal.
+pub fn push_away_means(
+    x: ArrayView1<f64>,
+    neighbor_means: &[Vec<f64>],
+    spec: SoapSpec,
+    rmsd: f64,
+) -> Option<Array1<f64>> {
+    if x.is_empty()
+        || !x.len().is_multiple_of(3)
+        || !x.iter().all(|value| value.is_finite())
+        || !rmsd.is_finite()
+        || rmsd <= 0.0
+    {
+        return None;
+    }
+    let here = packing_mean_nu3(x, spec, None, None);
+    if here.is_empty() || !here.iter().all(|value| value.is_finite()) {
+        return None;
+    }
+    let peers: Vec<&[f64]> = neighbor_means
+        .iter()
+        .filter(|held| held.len() == here.len() && held.iter().all(|value| value.is_finite()))
+        .map(Vec::as_slice)
+        .collect();
+    let distance = |point: ArrayView1<f64>, peer: &[f64]| {
+        point
+            .iter()
+            .zip(peer)
+            .fold(0.0_f64, |norm, (a, b)| norm.hypot(a - b))
+    };
+    let (nearest, clearance) = peers
+        .iter()
+        .map(|peer| (*peer, distance(here.view(), peer)))
+        .min_by(|a, b| a.1.total_cmp(&b.1))?;
+    if !clearance.is_finite() || clearance == 0.0 {
+        return None;
+    }
+    let direction: Vec<f64> = here
+        .iter()
+        .zip(nearest)
+        .map(|(a, b)| (a - b) / clearance)
+        .collect();
+    let stepped = packing_step_nu3(x, spec, &direction, rmsd, None, None);
+    let mut displacement = &stepped - &x;
+    let size = displacement
+        .iter()
+        .fold(0.0_f64, |norm, value| norm.hypot(*value))
+        / (x.len() as f64 / 3.0).sqrt();
+    if !size.is_finite() || size == 0.0 {
+        return None;
+    }
+    displacement *= (rmsd / size).min(1.0);
+    // The packing map is nonlinear. Reuse one pullback while shrinking a
+    // step that approaches another occupied packing or reverses direction.
+    for _ in 0..8 {
+        let candidate = &x + &displacement;
+        if candidate.iter().all(|value| value.is_finite()) {
+            let moved = packing_mean_nu3(candidate.view(), spec, None, None);
+            if moved.len() == here.len()
+                && moved.iter().all(|value| value.is_finite())
+                && peers
+                    .iter()
+                    .all(|peer| distance(moved.view(), peer) > clearance)
+            {
+                return Some(candidate);
+            }
+        }
+        displacement *= 0.5;
+    }
+    None
+}
+
 /// Mean per-centre \(\nu=3\) row: the DECAF packing mean \(\mu\).
 pub fn packing_mean_nu3(
     x: ArrayView1<f64>,
@@ -1061,6 +1161,78 @@ pub fn packing_mean_nu3(
         mu /= count;
     }
     mu
+}
+
+/// Fraction of packing leftover the active volume must hold.
+///
+/// Xu, Osetsky and Stoller (*Phys. Rev. B* **84**, 132103 (2011);
+/// <https://doi.org/10.1103/PhysRevB.84.132103>) restrict saddle
+/// search to an active volume around the defect. Full-system searches
+/// fail or find high-barrier junk. The leftover \(\|h_i-\mu\|\) is
+/// that defect: centres unlike the occupied packing.
+pub const ACTIVE_VOLUME_MASS: f64 = 0.80;
+
+/// Smallest active volume, in atoms.
+pub const ACTIVE_VOLUME_MIN: usize = 8;
+
+/// Atoms that carry the packing leftover: the SEAKMC active volume.
+///
+/// Ranked by per-centre \(\|h_i-\mu\|\). The volume is the smallest
+/// prefix that holds [`ACTIVE_VOLUME_MASS`] of that leftover, at least
+/// [`ACTIVE_VOLUME_MIN`] and at most half the cluster. Outside it the
+/// packing increment is frozen. Béland, Osetsky, Stoller and Xu
+/// (arXiv:1409.1253) launch several searches in that volume and flush
+/// the catalog after one event; occupancy is not kMC, so the extra
+/// starts of one Leave are discarded after the adopt.
+pub fn packing_active_volume(
+    x: ArrayView1<f64>,
+    spec: SoapSpec,
+    species: Option<&[u32]>,
+) -> Vec<usize> {
+    let loc = local_nu3_z(x, spec, species);
+    let n_at = loc.nrows();
+    if n_at == 0 {
+        return Vec::new();
+    }
+    let mu = packing_mean_nu3(x, spec, species, None);
+    if mu.is_empty() {
+        return (0..n_at).collect();
+    }
+    let mut weight = vec![0.0; n_at];
+    let mut total = 0.0;
+    for i in 0..n_at {
+        let mut s = 0.0;
+        for t in 0..mu.len() {
+            let d = loc[[i, t]] - mu[t];
+            s += d * d;
+        }
+        weight[i] = s;
+        total += s;
+    }
+    let mut order: Vec<usize> = (0..n_at).collect();
+    order.sort_by(|a, b| {
+        weight[*b]
+            .partial_cmp(&weight[*a])
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    if !(total.is_finite() && total > 0.0) {
+        return order
+            .into_iter()
+            .take(n_at.min(ACTIVE_VOLUME_MIN.max(1)))
+            .collect();
+    }
+    let cap = n_at.max(1) / 2;
+    let floor = ACTIVE_VOLUME_MIN.min(n_at);
+    let mut kept = Vec::with_capacity(floor);
+    let mut mass = 0.0;
+    for i in order {
+        kept.push(i);
+        mass += weight[i];
+        if kept.len() >= floor && (mass >= ACTIVE_VOLUME_MASS * total || kept.len() >= cap) {
+            break;
+        }
+    }
+    kept
 }
 
 fn soap_dist2(a: ArrayView1<f64>, b: &[f64]) -> f64 {
@@ -3127,6 +3299,24 @@ mod tests {
             "O and H cloud means must differ, rms {}",
             d2.sqrt()
         );
+    }
+
+    #[test]
+    fn packing_active_volume_is_a_proper_subset_of_ico13() {
+        let x = ico13();
+        let spec = SoapSpec {
+            n_max: 3,
+            l_max: 6,
+            rcut_nn: 1.4,
+        };
+        let mobile = packing_active_volume(x.view(), spec, None);
+        assert!(!mobile.is_empty());
+        assert!(
+            mobile.len() < 13,
+            "active volume must freeze the core, got {}",
+            mobile.len()
+        );
+        assert!(mobile.iter().all(|&i| i < 13));
     }
 
     #[test]

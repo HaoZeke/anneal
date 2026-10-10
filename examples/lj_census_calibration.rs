@@ -128,6 +128,11 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut pairs = BufWriter::new(fs::File::create(pair_path)?);
     let mut accepted = 0usize;
     let mut attempt = 0u64;
+    // For the two-sample radius: the same-minimum distances of every pair,
+    // and each source minimum's energy and descriptor, so the nearest
+    // distinct minimum's distance can be taken afterwards.
+    let mut same_distances: Vec<f64> = Vec::new();
+    let mut sources: Vec<(f64, anneal_core::descriptor_space::DescriptorVector)> = Vec::new();
     let mut source_rejections = 0u64;
     let mut quench_rejections = 0u64;
     let mut identity_rejections = 0u64;
@@ -218,6 +223,11 @@ fn main() -> Result<(), Box<dyn Error>> {
         let right_descriptor =
             descriptor.describe(right.state.view(), Some(&signature.atomic_numbers))?;
         let distance = left_descriptor.distance(&right_descriptor)?;
+        same_distances.push(distance);
+        sources.push((
+            source.energy,
+            descriptor.describe(source.state.view(), Some(&signature.atomic_numbers))?,
+        ));
         let pair_id = format!("lj{n_points}-pair-{accepted:04}");
         let minimum_id = discovered_minimum_id(n_points, source_seed, source.energy);
         writeln!(
@@ -272,6 +282,45 @@ fn main() -> Result<(), Box<dyn Error>> {
         .into());
     }
 
+    // Nearest distinct minimum per source: distinct by the identity
+    // contract's energy tolerance, which excludes re-found sources without
+    // an exact match per pair. The two-sample radius is the geometric mean
+    // of the same-minimum tail and the nearest-distinct tail
+    // (src/catalog/calibration.rs); the one-sample 0.99 quantile of the
+    // same-minimum distances alone is the re-quench noise floor that made
+    // every visit-keyed policy inert.
+    let mut distinct_distances: Vec<f64> = Vec::new();
+    for (i, (energy, descriptor_i)) in sources.iter().enumerate() {
+        let mut nearest = f64::INFINITY;
+        for (j, (other_energy, descriptor_j)) in sources.iter().enumerate() {
+            if i == j || (energy - other_energy).abs() <= 1e-7 {
+                continue;
+            }
+            nearest = nearest.min(descriptor_i.distance(descriptor_j)?);
+        }
+        if nearest.is_finite() {
+            distinct_distances.push(nearest);
+        }
+    }
+    let two_sample = anneal_core::catalog::calibration::calibrate_census_radius_two_sample(
+        &same_distances,
+        &distinct_distances,
+    );
+    let two_sample_json = match &two_sample {
+        Ok(radius) => format!(
+            concat!(
+                "{{\"same_tail\": {:.17e}, \"distinct_tail\": {:.17e}, ",
+                "\"census_radius\": {:.17e}, \"same_count\": {}, \"distinct_count\": {}, ",
+                "\"distinct_rule\": \"energy_abs_difference>1e-7\"}}"
+            ),
+            radius.same_tail,
+            radius.distinct_tail,
+            radius.census_radius,
+            same_distances.len(),
+            distinct_distances.len()
+        ),
+        Err(error) => format!("{{\"error\": \"{error}\"}}"),
+    };
     let mut manifest = BufWriter::new(fs::File::create(manifest_path)?);
     writeln!(
         manifest,
@@ -286,7 +335,8 @@ fn main() -> Result<(), Box<dyn Error>> {
             "\n  \"attempt_count\": {},\n  \"source_rejections\": {},",
             "\n  \"quench_rejections\": {},",
             "\n  \"identity_rejections\": {},\n  \"base_seed\": {},",
-            "\n  \"perturbation_sigma\": {:.17e}\n}}"
+            "\n  \"perturbation_sigma\": {:.17e},",
+            "\n  \"two_sample_calibration\": {}\n}}"
         ),
         n_points,
         signature_digest,
@@ -300,10 +350,19 @@ fn main() -> Result<(), Box<dyn Error>> {
         identity_rejections,
         base_seed,
         perturbation_sigma,
+        two_sample_json,
     )?;
     manifest.flush()?;
-    println!(
-        "CALIBRATION_OK lj{n_points} pairs={accepted} attempts={attempt} signature={signature_digest}"
-    );
+    match &two_sample {
+        Ok(radius) => println!(
+            "CALIBRATION_OK lj{n_points} pairs={accepted} attempts={attempt} signature={signature_digest} \
+             same_tail={:.3e} distinct_tail={:.3e} two_sample_radius={:.3e}",
+            radius.same_tail, radius.distinct_tail, radius.census_radius
+        ),
+        Err(error) => println!(
+            "CALIBRATION_OK lj{n_points} pairs={accepted} attempts={attempt} signature={signature_digest} \
+             two_sample=unavailable ({error})"
+        ),
+    }
     Ok(())
 }

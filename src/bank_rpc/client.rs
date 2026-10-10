@@ -5,46 +5,48 @@
 //! node under IRA load, the walk continues. A refused connect is
 //! not a panic; a hung snapshot is a dropped client, not a blocked hop.
 
-use std::io::Write;
-use std::net::{TcpStream, ToSocketAddrs};
+use std::io::Cursor;
 use std::time::Duration;
 
-use capnp::message::{Builder, HeapAllocator, ReaderOptions};
+use capnp::message::{Builder, ReaderOptions};
 use capnp::serialize;
 use ndarray::{Array1, ArrayView1};
+use nng::options::{Options, RecvTimeout, SendTimeout};
+use nng::{Protocol, Socket};
 
 use crate::Bank_capnp::{bank_reply, bank_request};
+use crate::nng_rpc::{self, nng_io};
 
 const CONNECT: Duration = Duration::from_secs(2);
 const IO: Duration = Duration::from_secs(5);
 
 /// One connection to the shared bank.
 pub struct BankClient {
-    stream: TcpStream,
+    socket: Socket,
 }
 
 impl BankClient {
-    /// Connect to `host:port` with a short timeout.
+    /// Dial `host:port` or an nng URL with a short timeout.
     pub fn connect(addr: impl AsRef<str>) -> std::io::Result<Self> {
-        let addr = addr.as_ref();
-        let sock = addr.to_socket_addrs()?.next().ok_or_else(|| {
-            std::io::Error::new(
-                std::io::ErrorKind::NotFound,
-                format!("no address for {addr}"),
-            )
-        })?;
-        let stream = TcpStream::connect_timeout(&sock, CONNECT)?;
-        stream.set_nodelay(true)?;
-        stream.set_read_timeout(Some(IO))?;
-        stream.set_write_timeout(Some(IO))?;
-        Ok(Self { stream })
+        let socket = Socket::new(Protocol::Req0).map_err(nng_io)?;
+        let _ = socket.set_opt::<RecvTimeout>(Some(CONNECT));
+        let _ = socket.set_opt::<SendTimeout>(Some(CONNECT));
+        socket.dial(&nng_rpc::url(addr.as_ref())).map_err(nng_io)?;
+        let _ = socket.set_opt::<RecvTimeout>(Some(IO));
+        let _ = socket.set_opt::<SendTimeout>(Some(IO));
+        Ok(Self { socket })
     }
 
     fn call(&mut self, build: impl FnOnce(bank_request::Builder<'_>)) -> Result<Reply, String> {
         let mut message = Builder::new_default();
         build(message.init_root::<bank_request::Builder>());
-        write_msg(&mut self.stream, &message)?;
-        let reader = serialize::read_message(&mut self.stream, ReaderOptions::new())
+        let mut frame = Vec::new();
+        serialize::write_message(&mut frame, &message).map_err(|e| format!("bank write: {e}"))?;
+        self.socket
+            .send(&frame)
+            .map_err(|(_, e)| format!("bank send: {e}"))?;
+        let reply = self.socket.recv().map_err(|e| format!("bank reply: {e}"))?;
+        let reader = serialize::read_message(Cursor::new(&reply[..]), ReaderOptions::new())
             .map_err(|e| format!("bank reply: {e}"))?;
         let r = reader
             .get_root::<bank_reply::Reader>()
@@ -211,12 +213,6 @@ fn fill_list(mut b: capnp::primitive_list::Builder<'_, f64>, xs: &[f64]) {
 
 fn list_f64(r: capnp::primitive_list::Reader<'_, f64>) -> Array1<f64> {
     Array1::from_iter(r.iter())
-}
-
-fn write_msg(stream: &mut TcpStream, message: &Builder<HeapAllocator>) -> Result<(), String> {
-    serialize::write_message(&mut *stream, message).map_err(|e| format!("bank write: {e}"))?;
-    stream.flush().map_err(|e| format!("bank flush: {e}"))?;
-    Ok(())
 }
 
 #[cfg(test)]

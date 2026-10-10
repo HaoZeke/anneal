@@ -10,7 +10,7 @@ use rand::{Rng, SeedableRng};
 
 use crate::accept::{AcceptRule, TsallisAccept};
 use crate::cool::{Cooling, TsallisCool};
-use crate::movekernel::{MoveKernel, TsallisVisit};
+use crate::movekernel::{MoveKernel, Reflected, TsallisVisit};
 
 const ARMIJO_SUFFICIENT_DECREASE: f64 = 1e-4;
 const BACKTRACK_SHRINK: f64 = 0.5;
@@ -33,6 +33,8 @@ pub struct LocalPolishResult {
     pub projected_grad_norm: f64,
     /// Whether the projected gradient satisfies the requested tolerance.
     pub projected_stationary: bool,
+    /// Unprojected gradient at [`LocalPolishResult::best_pos`], when paid.
+    pub best_grad: Option<Array1<f64>>,
 }
 
 /// Result of QMC-seeded bounded local refinement.
@@ -79,7 +81,7 @@ fn sample_two_indices_excluding<R: Rng + ?Sized>(
     (first, second)
 }
 
-fn projected_gradient(
+pub(super) fn projected_gradient(
     x: &Array1<f64>,
     grad: &Array1<f64>,
     low: &Array1<f64>,
@@ -191,24 +193,6 @@ fn vector_norm(x: &Array1<f64>) -> f64 {
     x.iter().map(|v| v * v).sum::<f64>().sqrt()
 }
 
-fn projected_grad_norm<G>(
-    gradient: &G,
-    x: &Array1<f64>,
-    low: &Array1<f64>,
-    high: &Array1<f64>,
-) -> Option<f64>
-where
-    G: Gradient<f64>,
-{
-    let grad = gradient.grad(x.view());
-    if grad.len() != x.len() || grad.iter().any(|v| !v.is_finite()) {
-        return None;
-    }
-    let pgrad = projected_gradient(x, &grad, low, high);
-    let norm = vector_norm(&pgrad);
-    norm.is_finite().then_some(norm)
-}
-
 fn box_diagonal(low: &Array1<f64>, high: &Array1<f64>) -> f64 {
     low.iter()
         .zip(high.iter())
@@ -296,6 +280,7 @@ where
     let mut prev_pgrad = None;
     let mut final_projected_grad_norm = f64::INFINITY;
     let mut final_grad_matches_x = false;
+    let mut best_grad: Option<Array1<f64>> = None;
     // Stall-recovery scale: each failed line search restarts the memory two
     // orders finer from the best point instead of abandoning the remaining
     // budget. The floor ties to machine precision at the incumbent scale.
@@ -310,6 +295,7 @@ where
         let pgrad = projected_gradient(&x, &grad, low, high);
         final_projected_grad_norm = vector_norm(&pgrad);
         final_grad_matches_x = true;
+        best_grad = Some(grad);
         if final_projected_grad_norm <= grad_tol {
             break;
         }
@@ -412,8 +398,15 @@ where
 
     if !final_grad_matches_x {
         n_grads += 1;
-        final_projected_grad_norm =
-            projected_grad_norm(gradient, &best_pos, low, high).unwrap_or(f64::INFINITY);
+        let grad = gradient.grad(best_pos.view());
+        if grad.len() == best_pos.len() && grad.iter().all(|v| v.is_finite()) {
+            let pgrad = projected_gradient(&best_pos, &grad, low, high);
+            final_projected_grad_norm = vector_norm(&pgrad);
+            best_grad = Some(grad);
+        } else {
+            final_projected_grad_norm = f64::INFINITY;
+            best_grad = None;
+        }
     }
     let projected_stationary =
         final_projected_grad_norm.is_finite() && final_projected_grad_norm <= grad_tol;
@@ -425,6 +418,7 @@ where
         n_grads,
         projected_grad_norm: final_projected_grad_norm,
         projected_stationary,
+        best_grad,
     }
 }
 
@@ -439,6 +433,35 @@ pub fn qmc_projected_gradient_polish<O, G>(
     step0: f64,
     grad_tol: f64,
     top_k: usize,
+) -> QmcPolishResult
+where
+    O: Objective<f64>,
+    G: Gradient<f64>,
+{
+    qmc_projected_gradient_polish_with_proposals(
+        obj,
+        gradient,
+        n_starts,
+        max_fevals_per_start,
+        seed,
+        step0,
+        grad_tol,
+        top_k,
+        None,
+    )
+}
+
+#[allow(clippy::too_many_arguments, clippy::type_complexity)]
+pub(crate) fn qmc_projected_gradient_polish_with_proposals<O, G>(
+    obj: &O,
+    gradient: &G,
+    n_starts: usize,
+    max_fevals_per_start: usize,
+    seed: u64,
+    step0: f64,
+    grad_tol: f64,
+    top_k: usize,
+    prepare: Option<&dyn Fn(ndarray::ArrayView1<f64>, &mut Array1<f64>) -> bool>,
 ) -> QmcPolishResult
 where
     O: Objective<f64>,
@@ -459,7 +482,10 @@ where
     // Clip starts into a dense matrix, then batch-evaluate in parallel.
     let mut clipped = Array2::<f64>::zeros((n_starts, bounds.dims));
     for (i, start) in starts.outer_iter().enumerate() {
-        let pos = bounds.clip(start);
+        let mut pos = bounds.clip(start);
+        if let Some(prepare) = prepare {
+            prepare(start, &mut pos);
+        }
         clipped.row_mut(i).assign(&pos);
     }
     // Trait eval_batch: Python overrides for single-GIL / process-pool walkers;
@@ -663,6 +689,24 @@ pub fn qmc_gsa_global_search_from<O>(
 where
     O: Objective<f64>,
 {
+    qmc_gsa_global_search_with_proposals(obj, max_evals, seed, n_chains, t_init, q_v, q_a, x0, None)
+}
+
+#[allow(clippy::too_many_arguments, clippy::type_complexity)]
+pub(crate) fn qmc_gsa_global_search_with_proposals<O>(
+    obj: &O,
+    max_evals: usize,
+    seed: u64,
+    n_chains: usize,
+    t_init: f64,
+    q_v: f64,
+    q_a: f64,
+    x0: Option<ArrayView1<f64>>,
+    prepare: Option<&dyn Fn(ndarray::ArrayView1<f64>, &mut Array1<f64>) -> bool>,
+) -> QmcPolishResult
+where
+    O: Objective<f64>,
+{
     assert!(max_evals > 0, "max_evals must be positive");
     assert!(n_chains > 0, "n_chains must be positive");
     assert!(
@@ -691,7 +735,10 @@ where
     }
     let mut rng = StdRng::seed_from_u64(seed);
     let cooling = TsallisCool::new(t_init, q_v);
-    let visit = TsallisVisit::new(q_v);
+    let visit = Reflected::new(
+        TsallisVisit::new(q_v),
+        Bounds::new(Array1::zeros(dim), Array1::ones(dim), 0.0),
+    );
     let accept = TsallisAccept::new(q_a);
     let mut units = Vec::with_capacity(chain_count);
     let mut values = Vec::with_capacity(chain_count);
@@ -700,7 +747,10 @@ where
     let mut n_evals = 0usize;
 
     for start in starts.outer_iter() {
-        let pos = bounds.clip(start);
+        let mut pos = bounds.clip(start);
+        if let Some(prepare) = prepare {
+            prepare(start, &mut pos);
+        }
         let unit = Array1::from_iter(
             (0..dim).map(|axis| unit_coordinate(pos[axis], bounds.low[axis], bounds.high[axis])),
         );
@@ -723,10 +773,16 @@ where
             if n_evals >= global_budget {
                 break;
             }
-            let proposal_unit = visit
-                .propose(units[chain].view(), temp, &mut rng)
-                .mapv(|value| value.clamp(0.0, 1.0));
-            let proposal_pos = unit_to_box(&proposal_unit, &bounds.low, &bounds.high);
+            let mut proposal_unit = visit.propose(units[chain].view(), temp, &mut rng);
+            let mut proposal_pos = unit_to_box(&proposal_unit, &bounds.low, &bounds.high);
+            if let Some(prepare) = prepare {
+                let anchor = unit_to_box(&units[chain], &bounds.low, &bounds.high);
+                if prepare(anchor.view(), &mut proposal_pos) {
+                    proposal_unit = Array1::from_iter((0..dim).map(|axis| {
+                        unit_coordinate(proposal_pos[axis], bounds.low[axis], bounds.high[axis])
+                    }));
+                }
+            }
             let proposal_val = obj.eval(proposal_pos.view());
             n_evals += 1;
             if proposal_val.is_finite() && proposal_val < best_val {

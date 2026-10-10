@@ -74,7 +74,10 @@ pub enum OptimizationRegime {
     HighDimIllConditioned,
     /// Caller declared objective noise: OSA accept required.
     StochasticNoise,
-    /// No gradient; multimodal / elongated box: DE / GSA / surrogate.
+    /// No gradient, no declared noise, and dim ≥ 5 or an elongated box.
+    /// The portfolio driver never runs this regime's arm order: under the
+    /// Auto policy every such run goes to its values-only loop, which reads
+    /// no regime, and Legacy always selects `Default`.
     MultimodalNoGrad,
     /// Large design box (Schwefel-class): global GSA/DE first even with grads.
     /// dual_annealing wins the synthetic protocol when LowDimSmooth starves GSA.

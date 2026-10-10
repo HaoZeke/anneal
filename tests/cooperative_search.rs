@@ -200,6 +200,47 @@ fn server() -> CatalogServer {
     server_with_capacity(2)
 }
 
+#[test]
+fn asynchronous_surface_exchange_preserves_private_history_and_work() {
+    use anneal_core::methods::two_phase::{SurfacePortfolio, TwoPhase};
+    use std::sync::{Arc, Mutex};
+    let server = server();
+    let mut run = CooperativeRun::new([0, 1], 400).unwrap();
+    for replica in [0, 1] {
+        run.attach_client(
+            replica,
+            CatalogClient::connect(
+                server.addr(),
+                identity(replica, signature().digest()),
+                ClientConfig::default(),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+    }
+    let transform = TwoPhase::diameter(2.0, 1.0);
+    let teacher = Arc::new(Mutex::new(SurfacePortfolio::with_block(&[transform], 7, 1)));
+    for _ in 0..20 {
+        let mut portfolio = teacher.lock().unwrap();
+        portfolio.begin(true);
+        portfolio.observe(false, -1.0, -1.0);
+    }
+    let learner = Arc::new(Mutex::new(SurfacePortfolio::with_block(
+        &[transform],
+        79,
+        1,
+    )));
+    let private = learner.lock().unwrap().report();
+    run.post_surface_evidence(0, teacher).unwrap();
+    run.flush(0).unwrap();
+    run.post_surface_evidence(1, Arc::clone(&learner)).unwrap();
+    run.flush(1).unwrap();
+    let learner = learner.lock().unwrap();
+    assert_eq!(learner.report(), private);
+    assert_eq!(learner.peer_observations(), 19);
+    assert_eq!(run.ledger().ensemble_total(), 0);
+}
+
 fn server_with_capacity(capacity: usize) -> CatalogServer {
     server_with_region_evidence(capacity, 8)
 }
@@ -659,6 +700,8 @@ fn coordinator_credits_exact_basin_novelty_only_once_across_replicas() {
     assert!(discovery.new_basin);
     assert!(!revisit.new_basin);
     assert_eq!(discovery.basin_id, revisit.basin_id);
+    assert_eq!(discovery.basin_visits, 1);
+    assert_eq!(revisit.basin_visits, 2);
 }
 
 #[test]
@@ -1896,6 +1939,43 @@ fn attraction_region_evidence_threshold_is_explicit() {
 }
 
 #[test]
+fn rejected_posted_source_does_not_attach_an_edge_to_the_occupied_basin() {
+    let server = server();
+    let digest = signature().digest();
+    let mut run = CooperativeRun::new([0, 1], 100).unwrap();
+    run.attach_client(
+        0,
+        CatalogClient::connect(server.addr(), identity(0, digest), ClientConfig::default())
+            .unwrap(),
+    )
+    .unwrap();
+    run.attach_client(
+        1,
+        CatalogClient::connect(server.addr(), identity(1, digest), ClientConfig::default())
+            .unwrap(),
+    )
+    .unwrap();
+    let source = candidate(0, 1, 1.2);
+    run.record_current(0, source.clone()).unwrap();
+    let mut invalid = candidate(0, 2, 2.0);
+    invalid.energy = 1.0e9;
+    run.post_record_current(0, invalid).unwrap();
+    run.post_record_transition(
+        0,
+        "probe",
+        TransitionDestination::Resolved(candidate(0, 3, 4.0)),
+        true,
+    )
+    .unwrap();
+    run.flush(0).unwrap();
+    assert_eq!(
+        run.boundary_crossing(1, source.descriptor, 71).unwrap(),
+        CatalogBoundaryOutcome::Empty,
+        "a rejected source must not turn the last occupied basin into the probe origin"
+    );
+}
+
+#[test]
 fn observed_adopted_crossing_is_available_to_another_replica() {
     let server = server();
     let digest = signature().digest();
@@ -2123,6 +2203,17 @@ fn cooperative_run_traces_explicit_transition_records() {
 }
 
 #[test]
+fn failed_probe_trace_is_unresolved_and_has_no_terminal_energy() {
+    let mut run = CooperativeRun::new([0], 100).unwrap();
+    run.record_executed_transition(0, 1, "probe", -1.0, f64::NAN, false)
+        .unwrap();
+    let transition = run.events().last().unwrap().transition.as_ref().unwrap();
+    assert!(!transition.resolved);
+    assert_eq!(transition.to_energy, None);
+    assert!(!transition.adopted);
+}
+
+#[test]
 fn cooperative_run_traces_local_execution_without_a_coordinator() {
     let mut run = CooperativeRun::new([0], 100).unwrap();
 
@@ -2340,6 +2431,24 @@ fn coordinator_closes_population_epoch_only_after_all_replicas_submit() {
         assert_eq!(plan.parents, vec![0, 1, 2, 3]);
     }
     assert_eq!(clients[0].snapshot(4).unwrap().census_visits, 4);
+}
+
+#[test]
+fn registering_minima_does_not_invent_a_transition_between_them() {
+    let server = server();
+    let digest = signature().digest();
+    let mut client =
+        CatalogClient::connect(server.addr(), identity(0, digest), ClientConfig::default())
+            .unwrap();
+    client.record_visit(1, candidate(0, 1, 1.2)).unwrap();
+    client.record_visit(2, candidate(0, 2, 4.0)).unwrap();
+    let status = client.observer_status(3).unwrap();
+    assert_eq!(status.landscape_basins, 2);
+    assert_eq!(
+        status.seam.unwrap().conductance,
+        0.0,
+        "registration contains no perturb-quench transition evidence"
+    );
 }
 
 #[test]

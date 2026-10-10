@@ -11,32 +11,144 @@
 // evidence explicit at their call sites so campaign accounting stays visible.
 #![allow(clippy::type_complexity, clippy::too_many_arguments)]
 
+#[cfg(feature = "bank-rpc")]
+#[path = "common/checkpoint_deposits.rs"]
+mod checkpoint_deposits;
+#[path = "common/ensemble_report.rs"]
+mod ensemble_report;
+#[cfg(feature = "bank-rpc")]
+use checkpoint_deposits::{with_pending_bias_update, with_pending_deposits};
+
+#[cfg(feature = "bank-rpc")]
+use anneal_core::methods::cluster_hopping::BiasUpdate;
+
 use anneal_core::bias::BasinBias;
+use anneal_core::catalog::euclidean_gradient_norm;
 #[cfg(feature = "bank-rpc")]
 use anneal_core::catalog::{
     ACTION_EXPLORE, ACTION_LEAVE, ACTION_LOCAL, LEAVE_REFUSAL_DWELL, LeavePath,
     OccupancyLeaveTarget, credit_action, leftover_birth_probability, occupancy_complete_at,
     occupancy_is_cluster, occupancy_leave_by_birth, occupancy_retire_at, published_energy_score,
 };
-use anneal_core::catalog::{
-    euclidean_gradient_norm, hops_per_core_hour, leave_crossing_slices, leave_defers,
-};
+#[cfg(feature = "bank-rpc")]
+use anneal_core::catalog::{hops_per_core_hour, leave_crossing_slices, leave_defers};
+#[cfg(feature = "bank-rpc")]
+use anneal_core::methods::cluster_hopping::{AcceptedTransition, run_with_bias};
 use anneal_core::methods::cluster_hopping::{
-    AcceptedTransition, ChainCheckpoint, CheckpointAction, ClusterFingerprint, Config, Keying,
-    Ledger, MoveLibrary, Outcome, QuenchStatus, random_cluster, run_with_bias,
-    run_with_bias_at_checkpoints,
+    ChainCheckpoint, CheckpointAction, ClusterFingerprint, Config, Keying, LadderMode, Ledger,
+    MoveLibrary, Outcome, QuenchStatus, random_cluster, run_with_bias_at_checkpoints,
 };
 use anneal_core::methods::csa_cluster::{self, BankConfig};
 use anneal_core::methods::warm_lbfgs::WarmLbfgs;
 use anneal_core::terminate::Terminator;
 use ndarray::{Array1, ArrayView1};
 use std::io::{self, Write};
+use std::sync::{Arc, Mutex};
+#[cfg(feature = "bank-rpc")]
 use std::time::Instant;
 
+#[cfg(feature = "bank-rpc")]
+const EVIDENCE_ONLY_WORK_KIND: anneal_core::cooperative_search::ledger::ChargeKind =
+    anneal_core::cooperative_search::ledger::ChargeKind::BasinEscape;
+
+#[cfg(feature = "bank-rpc")]
+fn unsettled_objective_calls(charged: usize, recorded: usize) -> Option<u64> {
+    let remainder = charged
+        .checked_sub(recorded)
+        .expect("cumulative objective work cannot decrease");
+    (remainder > 0).then(|| u64::try_from(remainder).expect("objective charge must fit u64"))
+}
+
+#[cfg(all(feature = "ira", any(test, not(feature = "bank-rpc"))))]
+use anneal_core::shape::IraMetric;
 #[cfg(feature = "ira")]
-use anneal_core::shape::{IraMetric, IraStructureWitness};
+use anneal_core::shape::IraStructureWitness;
 
 fn apply_boolean_options(cfg: &mut Config, opts: &[&str]) {
+    for option in opts {
+        assert!(
+            matches!(
+                *option,
+                // The paper's control arm. It sets nothing: naming it leaves
+                // the plain Wales-Doye `for_cluster` protocol in place, and it
+                // stays accepted so the deposited `lj*_base_*.out` campaigns
+                // can be reproduced by the command line that produced them.
+                "base"
+                    | "rec"
+                    | "askmc"
+                    | "shape"
+                    | "bfwt"
+                    | "thompson"
+                    | "height"
+                    | "noheight"
+                    | "climb"
+                    | "noclimb"
+                    | "sym"
+                    | "nosym"
+                    | "csa"
+                    | "corekey"
+                    | "reocc"
+                    | "coreclass"
+                    | "twophase"
+                    | "aniso"
+                    | "surfaces"
+                    | "path"
+                    | "trail"
+                    | "rscreen"
+                    | "soapclass"
+                    | "soapmean"
+                    | "mh"
+                    | "mhmd"
+                    | "orbit"
+                    | "recognition"
+                    | "comm"
+                    | "communicating"
+                    | "calib"
+                    | "restart"
+                    | "angular"
+                    | "psym"
+                    | "psymnew"
+                    | "novel"
+                    | "sbkey"
+                    | "repel"
+                    | "jump"
+                    | "psymall"
+                    | "tabu"
+                    | "bayes"
+                    | "flat"
+                    | "stemp"
+                    | "ebias"
+                    | "visit"
+                    | "reseed"
+                    | "selfseed"
+                    | "learncon"
+                    | "lean"
+                    | "burst"
+                    | "hollow"
+                    | "fill"
+                    | "twin"
+                    | "gtwin"
+                    | "depth"
+                    | "softsub"
+                    | "covper"
+                    | "staged"
+                    | "ctx"
+                    | "sites"
+                    | "canon"
+                    | "indep"
+                    | "nrpt"
+                    | "rpt"
+                    | "ptt"
+                    | "pt"
+                    | "rungbias"
+                    | "bank"
+                    | "acq"
+                    | "early"
+                    | "catalog"
+            ),
+            "unknown search mechanism: {option}"
+        );
+    }
     let height = opts.contains(&"height");
     let noheight = opts.contains(&"noheight");
     assert!(
@@ -59,12 +171,23 @@ fn apply_boolean_options(cfg: &mut Config, opts: &[&str]) {
 /// Occupancy catalog: leftover-SOAP packing key plus AS-KMC height
 /// on the occupied well. Not the paper-budget recommended hop, and
 /// not applied on CATALOG_RPC startup.
+#[cfg(test)]
 fn apply_occupancy_superbasin(cfg: &mut Config, n: usize) {
     let sb = Config::packing_superbasin(n);
     cfg.adaptive_height = sb.adaptive_height;
     cfg.height_revisits = sb.height_revisits;
     cfg.keying = sb.keying;
     cfg.merge_radius = sb.merge_radius;
+    // Landfold aims in the packing book. A raw quench is the identity
+    // projector onto the occupied funnel, so the aim is undone. The
+    // diameter first phase reweights catchment; the portfolio keeps
+    // the plain surface as an arm. Kappa 0.7 is the measured fastest
+    // relative cutoff that still crosses on 38 and 75.
+    if cfg.surfaces.is_empty() && cfg.two_phase.is_none() {
+        cfg.surfaces = vec![anneal_core::methods::two_phase::TwoPhase::relative(
+            0.7, 1.0,
+        )];
+    }
 }
 
 /// Lennard-Jones value and gradient in reduced units, no cutoff.
@@ -113,6 +236,87 @@ impl anneal_core::pes_exploration::PesSurface for LjRideSurface {
 mod option_tests {
     use super::*;
 
+    #[cfg(feature = "bank-rpc")]
+    #[test]
+    fn evidence_only_work_kind_accepts_charged_objective_calls() {
+        let mut run = anneal_core::cooperative_search::CooperativeRun::new([0], 1_000).unwrap();
+        run.record_work(0, EVIDENCE_ONLY_WORK_KIND, 509).unwrap();
+        run.record_work(0, EVIDENCE_ONLY_WORK_KIND, 491).unwrap();
+        assert_eq!(run.events().last().unwrap().aggregate_charged, 1_000);
+    }
+
+    #[cfg(feature = "bank-rpc")]
+    #[test]
+    fn settled_objective_work_has_no_duplicate_terminal_charge() {
+        assert_eq!(unsettled_objective_calls(509, 0), Some(509));
+        assert_eq!(unsettled_objective_calls(1_000, 509), Some(491));
+        assert_eq!(unsettled_objective_calls(1_000, 1_000), None);
+        assert_eq!(unsettled_objective_calls(0, 0), None);
+        assert!(std::panic::catch_unwind(|| unsettled_objective_calls(508, 509)).is_err());
+    }
+
+    #[test]
+    fn zero_step_queries_preserve_geometry_and_charge_one_objective() {
+        let state = Array1::from_vec(vec![0.0, 0.0, 0.0, 1.3, 0.0, 0.0]);
+        let mut ledger = Ledger::new(1);
+        let (energy, returned) = evaluate_without_quenching(&mut ledger, state.view());
+        assert_eq!(energy, lj(state.view()).0);
+        assert_eq!(returned, state);
+        assert_eq!(ledger.spent(), 1);
+        assert!(ledger.quench_boundaries().is_empty());
+        let (exhausted, returned) = evaluate_without_quenching(&mut ledger, state.view());
+        assert_eq!(exhausted, f64::INFINITY);
+        assert_eq!(returned, state);
+        assert_eq!(ledger.spent(), 1);
+    }
+
+    #[test]
+    fn production_zero_step_queries_bypass_surface_learning() {
+        let source = include_str!("lj_cluster_search.rs");
+        let callback = source
+            .rsplit_once("let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, iters: usize| {")
+            .unwrap()
+            .1;
+        let query = callback
+            .find("return evaluate_without_quenching(led, x)")
+            .unwrap();
+        assert!(query < callback.find("opt.forget()").unwrap());
+        assert!(callback[..query].contains("if iters == 0"));
+    }
+
+    #[test]
+    fn production_reports_and_learns_the_validated_objective_not_the_search_transform() {
+        let source = include_str!("lj_cluster_search.rs");
+        let callback = source
+            .rsplit_once("let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, iters: usize| {")
+            .unwrap()
+            .1;
+        let callback = &callback[..callback
+            .find("// The gradient the soft-mode escape needs")
+            .unwrap()];
+        assert!(callback.contains(".observe(screening_pass, boundary_energy, led.best)"));
+        assert!(callback.contains("(boundary_energy, xr)"));
+        assert!(
+            callback.contains("let mut boundary_energy = f64::INFINITY"),
+            "an exhausted ledger cannot certify a transformed energy as an objective value"
+        );
+        let charged = source.rsplit_once("fn charged(led:").unwrap().1;
+        let charged = &charged[..charged.find("fn charged_noisy").unwrap()];
+        assert!(
+            charged.contains("led.is_diagnostic_quench()"),
+            "diagnostic objectives must bypass the armed adaptive transform"
+        );
+    }
+
+    #[test]
+    fn unknown_mechanism_is_rejected_before_search() {
+        let result = std::panic::catch_unwind(|| {
+            let mut cfg = Config::recommended(75);
+            apply_boolean_options(&mut cfg, &["rec", "unknown_mechanism"]);
+        });
+        assert!(result.is_err(), "an unknown mechanism must not label a run");
+    }
+
     #[test]
     fn unrelated_recommended_options_preserve_default_true_mechanisms() {
         let mut cfg = Config::recommended(75);
@@ -145,6 +349,8 @@ mod option_tests {
         apply_occupancy_superbasin(&mut cfg, 75);
         assert!(cfg.adaptive_height);
         assert_eq!(cfg.height_revisits, 20.0);
+        assert_eq!(cfg.surfaces.len(), 1);
+        assert!(cfg.surfaces[0].is_active());
         #[cfg(feature = "featomic")]
         assert_eq!(cfg.keying, Keying::SoapPacking);
     }
@@ -592,6 +798,47 @@ mod option_tests {
 
     #[cfg(feature = "bank-rpc")]
     #[test]
+    fn failed_probe_builds_a_source_and_an_unresolved_record() {
+        let signature = anneal_core::catalog::lj::system_signature(2).unwrap();
+        let descriptor_space = anneal_core::catalog::lj::descriptor_space();
+        let separation = 2.0_f64.powf(1.0 / 6.0);
+        let source = Array1::from(vec![0.0, 0.0, 0.0, separation, 0.0, 0.0]);
+        let (energy, gradient) = lj(source.view());
+        let transition = AcceptedTransition {
+            hop: 3,
+            action: "probe".into(),
+            from_energy: energy,
+            to_energy: f64::INFINITY,
+            from_state: source.clone(),
+            from_gradient: Some(gradient),
+            to_state: source,
+            to_gradient: None,
+            validated: false,
+            adopted: false,
+        };
+        let mut sequence = 20;
+        let operations = adaptive_catalog_operations(
+            &descriptor_space,
+            &signature.atomic_numbers,
+            0,
+            &mut sequence,
+            71,
+            400,
+            &[transition],
+        );
+        assert_eq!(
+            operations.len(),
+            2,
+            "failed probe must retain its source and outcome"
+        );
+        assert!(matches!(
+            operations[0],
+            AdaptiveCatalogOperation::RegisterCurrent(_)
+        ));
+    }
+
+    #[cfg(feature = "bank-rpc")]
+    #[test]
     fn contiguous_adaptive_path_registers_one_source_then_adopts_each_edge() {
         let signature = anneal_core::catalog::lj::system_signature(2).unwrap();
         let descriptor_space = anneal_core::catalog::lj::descriptor_space();
@@ -943,11 +1190,23 @@ mod option_tests {
 
 /// Value and gradient, charged to the ledger, or `None` when it is spent.
 fn charged(led: &mut Ledger, x: ArrayView1<f64>) -> Option<(f64, Array1<f64>)> {
-    if !led.charge() {
-        return None;
-    }
-    let (energy, grad) = lj(x);
-    Some(anneal_core::known_basin::effective(x, energy, grad))
+    let (energy, grad) = charged_physical(led, x)?;
+    Some(if led.is_diagnostic_quench() {
+        (energy, grad)
+    } else {
+        anneal_core::known_basin::effective(x, energy, grad)
+    })
+}
+
+/// Physical value and gradient, independent of every adaptive search field.
+fn charged_physical(led: &mut Ledger, x: ArrayView1<f64>) -> Option<(f64, Array1<f64>)> {
+    led.charge().then(|| lj(x))
+}
+
+/// One physical-objective query, without optimization or quench evidence.
+fn evaluate_without_quenching(led: &mut Ledger, x: ArrayView1<f64>) -> (f64, Array1<f64>) {
+    let energy = charged_physical(led, x).map_or(f64::INFINITY, |(energy, _)| energy);
+    (energy, x.to_owned())
 }
 
 /// The objective with isotropic noise on the gradient, for the screening pass.
@@ -1057,10 +1316,7 @@ fn main() {
     // Where the seed numbering starts, so a campaign can put one seed on each
     // core instead of walking them in one process. Seeds are the same runs
     // either way: seed 5 of one process and seed 5 of another are identical.
-    let seed0: u64 = std::env::var("SEED_OFFSET")
-        .ok()
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(0);
+    let seed0: u64 = anneal_core::env::parsed("SEED_OFFSET").unwrap_or(0);
 
     let reference = reference(n);
     // Random structure search: the evaluation-matched baseline. Random starts,
@@ -1120,6 +1376,46 @@ fn main() {
             );
         }
         println!("{solved}/{seeds} solved (rss)");
+        return;
+    }
+    // Dynamic lattice search: construct from the structure's own hollow
+    // sites, relax, restart on stall. The evaluation-matched published
+    // baseline for the hard sizes, run under the same ledger.
+    if std::env::args()
+        .nth(4)
+        .map(|v| v.split(',').any(|t| t == "dls"))
+        .unwrap_or(false)
+    {
+        use anneal_core::methods::lattice_search::{LatticeSearchConfig, run as lattice_run};
+        let lcfg = LatticeSearchConfig::lennard_jones(n);
+        let mut solved = 0usize;
+        for seed in seed0..(seed0 + seeds) {
+            let mut ledger = Ledger::new(budget);
+            let mut opt = WarmLbfgs::default();
+            let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, iters: usize| {
+                opt.forget();
+                let (f, xr, _) = opt.minimize(x, iters, |v| charged(led, v));
+                (f, xr)
+            };
+            let out = lattice_run(&lcfg, &mut ledger, &mut relax, seed);
+            let hit = reference.map(|r| out.best < r + 1e-4).unwrap_or(false);
+            if hit {
+                solved += 1;
+            }
+            println!(
+                "  seed {seed}: best {:.6}  constructions {}  restarts {}  improvements {}  charged {}{}",
+                out.best,
+                out.hops,
+                out.basins,
+                out.returned,
+                out.charged,
+                if hit { "  SOLVED" } else { "" }
+            );
+            if let Some((_, spent, _, e)) = out.improvements.first() {
+                println!("      best {e:.6} reached at charged {spent}");
+            }
+        }
+        println!("{solved}/{seeds} solved (dls)");
         return;
     }
     // Archive-ratchet mode: the minima network explored from a permanent
@@ -1390,7 +1686,14 @@ fn main() {
     // The temperature and step come from Wales and Doye's protocol for basin
     // hopping on the quenched surface, a reduced temperature of 0.8 and a step
     // between 0.36 and 0.40, rather than from tuning here.
-    let mut cfg = if args.get(4).map(|v| v.contains("rec")).unwrap_or(false) {
+    let named: Vec<&str> = args
+        .get(4)
+        .map(|v| v.split(',').collect())
+        .unwrap_or_default();
+    let mut cfg = if named.iter().any(|o| *o == "comm" || *o == "communicating") {
+        println!("  communicating configuration");
+        Config::communicating(n)
+    } else if named.iter().any(|o| *o == "rec" || *o == "recommended") {
         println!("  recommended configuration");
         Config::recommended(n)
     } else {
@@ -1427,6 +1730,23 @@ fn main() {
         cfg.merge_radius = 0.5;
         println!("  keying on the core ring-graph key, merge radius 0.5");
     }
+    // Reoccupation move on the lattice grown from the interior;
+    // REOCCUPY_INTERVAL sets the charged calls between moves.
+    if opts.contains(&"reocc") {
+        cfg.reoccupy =
+            Some(anneal_core::methods::lattice_search::LatticeSearchConfig::lennard_jones(n));
+        cfg.reoccupy_interval = anneal_core::env::parsed("REOCCUPY_INTERVAL").unwrap_or(5_000);
+        println!(
+            "  reoccupation move every {} charged calls",
+            cfg.reoccupy_interval
+        );
+    }
+    let coreclass = opts.contains(&"coreclass");
+    let core_patience = anneal_core::env::parsed("CORE_PATIENCE").unwrap_or(10_000);
+    let core_trial = anneal_core::env::parsed("CORE_TRIAL").unwrap_or(2_000);
+    if coreclass {
+        println!("  core-class table: patience {core_patience}, trial {core_trial}");
+    }
     // Two-phase relaxation on the compacted surface (Locatelli and Schoen;
     // Doye). TWO_PHASE_KAPPA sets a relative cutoff, TWO_PHASE_D a fixed
     // one in pair-well units, TWO_PHASE_BETA the penalty strength and
@@ -1453,8 +1773,17 @@ fn main() {
             cutoff,
             beta,
             mu: envf("TWO_PHASE_MU", 0.0),
+            anisotropic: false,
         });
         println!("  two-phase relaxation: {:?}", cfg.two_phase);
+    }
+    // The ellipsoidal metric read from the entering structure's own gyration
+    // tensor, so the compaction keeps the walker's aspect.
+    if opts.contains(&"aniso")
+        && let Some(two) = cfg.two_phase.as_mut()
+    {
+        two.anisotropic = true;
+        println!("  two-phase relaxation in the entering structure's own metric");
     }
     // A learned portfolio of relaxation surfaces: SURFACES names the arms
     // beside the plain one, comma-separated, as `mu:5`, `d:3.5` (pair-well
@@ -1476,6 +1805,7 @@ fn main() {
                     cutoff: anneal_core::methods::two_phase::Cutoff::Fixed(0.0),
                     beta: 0.0,
                     mu: value,
+                    anisotropic: false,
                 },
                 "d" => anneal_core::methods::two_phase::TwoPhase::diameter(value * unit, beta),
                 "kappa" => anneal_core::methods::two_phase::TwoPhase::relative(value, beta),
@@ -1488,8 +1818,7 @@ fn main() {
     cfg.path_on_stall = opts.contains(&"path");
     // Stall exits through the recorded basin entry, named so it is
     // measurable against the Lanczos climb rather than replacing it.
-    cfg.trail_on_stall = opts.contains(&"trail")
-        || std::env::var("CLUSTER_TRAIL_EXIT").is_ok_and(|value| value == "1");
+    cfg.trail_on_stall = opts.contains(&"trail") || anneal_core::env::flag("CLUSTER_TRAIL_EXIT");
     // Do not clobber Config::recommended: that hop already turns the
     // return screen on. The flag only adds it to for_cluster.
     if opts.contains(&"rscreen") {
@@ -1521,13 +1850,109 @@ fn main() {
         #[cfg(not(feature = "featomic"))]
         println!("  SOAP hop: in-crate leftover (rebuild with --features featomic)");
     }
-    cfg.minima_hopping = opts.contains(&"mh");
+    cfg.minima_hopping = opts.contains(&"mh") || opts.contains(&"mhmd");
+    // Goedecker's MD escape under the controller; MD_DT and MD_KINETIC
+    // set the time step and the kinetic energy per unit escape scale.
+    cfg.md_escape = opts.contains(&"mhmd");
+    cfg.orbit_complete_on_new = cfg.orbit_complete_on_new || opts.contains(&"orbit");
+    if opts.contains(&"recognition") {
+        cfg.shared_visit_policy =
+            anneal_core::methods::minima_hopping::SharedVisitPolicy::Recognition;
+        cfg.shared_deposits = 0;
+    }
+    if let Some(dt) = anneal_core::env::parsed("MD_DT") {
+        cfg.md_escape_dt = dt;
+    }
+    if let Some(k) = anneal_core::env::parsed("MD_KINETIC") {
+        cfg.md_escape_kinetic = k;
+    }
+    if let Some(m) = anneal_core::env::parsed("MD_MINIMA") {
+        cfg.md_escape_minima = m;
+    }
+    if let Some(m) = anneal_core::env::parsed("MD_STEPS") {
+        cfg.md_escape_max_steps = m;
+    }
+    if let Some(m) = anneal_core::env::parsed("MD_SOFTEN") {
+        cfg.md_escape_soften = m;
+    }
     // The radius read off the search's own step length rather than swept.
     cfg.calibrate_radius = opts.contains(&"calib");
     // The walker restarted, the landscape memory kept.
     cfg.restart_on_stall = opts.contains(&"restart");
+    // RESTART_PATIENCE sets the charged calls without a new best before a
+    // stalled chain restarts from a fresh random cluster.
+    if let Some(patience) = anneal_core::env::parsed::<usize>("RESTART_PATIENCE") {
+        cfg.restart_patience = patience.max(1);
+        println!("  restart patience {} charged calls", cfg.restart_patience);
+    }
+    // STALL_PATIENCE sets the hops without improvement before a stall.
+    if let Some(patience) = anneal_core::env::parsed::<usize>("STALL_PATIENCE") {
+        cfg.stall_patience = patience.max(1);
+        println!("  stall patience {} hops", cfg.stall_patience);
+    }
     // Wales and Doye's angular move on the worst-bound point.
     cfg.angular_moves = opts.contains(&"angular");
+    // Oakley-Johnston-Wales point-group symmetrisation as a proposal arm.
+    cfg.point_symmetrise = opts.contains(&"psym");
+    // Core symmetrisation once per new basin (Oakley-Johnston-Wales), quenched.
+    cfg.point_symmetrise_on_new = opts.contains(&"psymnew");
+    // Population repulsion in SOAP space, pulled back through the Jacobian.
+    cfg.soap_repel = opts.contains(&"repel");
+    // Occasional jumping on stagnation (Iwamatsu-Okabe).
+    cfg.jump_on_stall = opts.contains(&"jump");
+    if let Some(p) = anneal_core::env::parsed::<usize>("JUMP_PATIENCE") {
+        cfg.jump_patience = p;
+    }
+    if let Some(k) = anneal_core::env::parsed::<usize>("JUMP_STEPS") {
+        cfg.jump_steps = k;
+    }
+    if let Some(h) = anneal_core::env::parsed::<f64>("JUMP_STEP") {
+        cfg.jump_step = h * cfg.length_scale;
+    }
+    if cfg.jump_on_stall {
+        println!(
+            "  occasional jumping: patience {} hops, {} steps of half-width {}",
+            cfg.jump_patience, cfg.jump_steps, cfg.jump_step
+        );
+    }
+    // Heard structures face the receiving chain's biased-energy filter
+    // unless unconditional adoption is requested explicitly.
+    cfg.exchange_metropolis = !anneal_core::env::flag("CATALOG_HEAR_UNCONDITIONAL");
+    if let Some(g) = anneal_core::env::parsed::<f64>("BIAS_GAMMA") {
+        cfg.bias_gamma = g;
+        println!("  bias gamma {g}");
+    }
+    if let Some(frac) = anneal_core::env::parsed::<f64>("PSYM_CORE") {
+        cfg.symmetrise_core_fraction = frac;
+        println!("  symmetrise core fraction {frac}");
+    }
+    if let Some(tol) = anneal_core::env::parsed::<f64>("SYM_TOL") {
+        cfg.symmetry_tolerance = tol * cfg.length_scale;
+        println!("  symmetry tolerance {tol}");
+    }
+    cfg.point_symmetrise_every_accept = opts.contains(&"psymall");
+    if cfg.point_symmetrise_every_accept {
+        cfg.point_symmetrise_on_new = true;
+    }
+    // Allocator rewarded by accepted new basins rather than by acceptance.
+    cfg.novel_reward = opts.contains(&"novel");
+    // Key the per-basin bias on the SOAP packing family instead of the
+    // pair spectrum, with adaptive height: every shelf isomer deposits into
+    // one well, so a chain absorbed on a family is pushed off the family
+    // rather than off one minimum. Nothing else of the occupancy stack.
+    if opts.contains(&"sbkey") {
+        #[cfg(feature = "featomic")]
+        {
+            cfg.keying = Keying::SoapPacking;
+            cfg.merge_radius = anneal_core::featomic_hop::SOAP_PACK_MERGE;
+        }
+        cfg.adaptive_height = true;
+        cfg.height_revisits = anneal_core::env::parsed::<f64>("HEIGHT_REVISITS").unwrap_or(20.0);
+        println!(
+            "  packing-family keyed bias, merge {}, adaptive height N_f={}",
+            cfg.merge_radius, cfg.height_revisits
+        );
+    }
     // The funnel forbidden rather than penalised.
     cfg.tabu_on_stall = cfg.tabu_on_stall || opts.contains(&"tabu");
     // The relaxation decision taken under a posterior.
@@ -1545,6 +1970,8 @@ fn main() {
         ("learncon", MoveLibrary::LearnedReseed),
         ("lean", MoveLibrary::Lean),
         ("burst", MoveLibrary::LeanBurst),
+        ("hollow", MoveLibrary::LeanBurstHollow),
+        ("fill", MoveLibrary::LeanBurstFill),
         ("twin", MoveLibrary::Twin),
         ("gtwin", MoveLibrary::GrowthAndTwin),
     ];
@@ -1582,6 +2009,18 @@ fn main() {
         cfg.screen_steps = k;
         println!("  screen steps {k}");
     }
+    if let Ok(v) = std::env::var("RELAX_STEPS")
+        && let Ok(k) = v.parse::<usize>()
+    {
+        cfg.relax_steps = k;
+        println!("  relax steps {k}");
+    }
+    if let Ok(v) = std::env::var("SCREEN_MARGIN")
+        && let Ok(m) = v.parse::<f64>()
+    {
+        cfg.screen_margin = m * cfg.energy_scale;
+        println!("  screen margin {m}");
+    }
     if let Ok(v) = std::env::var("FLAT_QUANTILE")
         && let Ok(q) = v.parse::<f64>()
     {
@@ -1606,10 +2045,43 @@ fn main() {
             cfg.merge_radius
         );
     }
-    if opts.contains(&"pt") {
-        // A ladder sharing one budget, not four budgets. The comparison is
-        // against a single chain at the same total cost.
-        cfg.replicas = 4;
+    // A ladder sharing one budget, not four budgets. The comparison is against
+    // a single chain at the same total cost. The four names are the four arms:
+    // the ladder as it ran, the same ladder with each rung actually at its own
+    // temperature, whole parity classes with a coin-flipped parity, and the
+    // non-reversible sweep on a ladder placed by the measured barrier.
+    let ladder_mode = if opts.contains(&"indep") {
+        Some(LadderMode::Independent)
+    } else if opts.contains(&"nrpt") {
+        Some(LadderMode::NonReversible)
+    } else if opts.contains(&"rpt") {
+        Some(LadderMode::Reversible)
+    } else if opts.contains(&"ptt") {
+        Some(LadderMode::Cyclic)
+    } else if opts.contains(&"pt") {
+        Some(LadderMode::Shipped)
+    } else {
+        None
+    };
+    if let Some(mode) = ladder_mode {
+        cfg.replicas = anneal_core::env::parsed("REPLICAS").unwrap_or(4);
+        cfg.ladder_mode = mode;
+        // The swap period is the ladder's unit of time and the budget decides
+        // how many units there are: at LJ38 with 4e5 charged evaluations a run
+        // takes about six thousand hops, so a period of 50 over four rungs
+        // buys thirty sweeps and a period of 10 buys a hundred and fifty. A
+        // ladder cannot transport anything in thirty sweeps, which is why the
+        // period is on the command line rather than fixed.
+        if let Ok(p) = std::env::var("SWAP_PERIOD")
+            && let Ok(v) = p.parse::<usize>()
+        {
+            cfg.swap_period = v.max(1);
+        }
+        if let Ok(a) = std::env::var("LADDER_ACCEPT")
+            && let Ok(v) = a.parse::<f64>()
+        {
+            cfg.ladder_target_accept = v.clamp(0.01, 0.95);
+        }
         cfg.bias_by_rung = opts.contains(&"rungbias");
         // The top is a knob with a ceiling, not a free win: the ladder
         // pays exactly while the hot rung still crosses more often than
@@ -1619,9 +2091,7 @@ fn main() {
         // acceptance has grown tenfold and the rung still freezes back;
         // at the default 4.0 the two upper rungs of a 0.8 chain run at
         // 2.0 and 3.2, which is liquid.
-        if let Some(top) = std::env::var("PT_LADDER_TOP")
-            .ok()
-            .and_then(|value| value.parse::<f64>().ok())
+        if let Some(top) = anneal_core::env::parsed::<f64>("PT_LADDER_TOP")
             .filter(|value| value.is_finite() && *value > 1.0)
         {
             cfg.ladder_top = top;
@@ -1646,6 +2116,11 @@ fn main() {
     {
         cfg.merge_radius = r;
         println!("  merge radius {r}");
+    }
+    // Acceptance temperature in energy units; Wales--Doye's 0.8 is the preset.
+    if let Some(t) = anneal_core::env::parsed::<f64>("TEMPERATURE") {
+        cfg.temperature = t * cfg.energy_scale;
+        println!("  acceptance temperature {t} E0");
     }
     if let Ok(h) = std::env::var("BIAS_HEIGHT")
         && let Ok(v) = h.parse::<f64>()
@@ -1707,14 +2182,8 @@ fn main() {
         acquisition: opts.contains(&"acq"),
         slice: env("BANK_SLICE", 3_000),
         seeding: capacity,
-        dcut_floor: std::env::var("BANK_DCUT_FLOOR")
-            .ok()
-            .and_then(|v| v.parse().ok())
-            .unwrap_or(0.4),
-        mix_fraction: std::env::var("BANK_MIX")
-            .ok()
-            .and_then(|v| v.parse().ok())
-            .unwrap_or(0.0),
+        dcut_floor: anneal_core::env::parsed("BANK_DCUT_FLOOR").unwrap_or(0.4),
+        mix_fraction: anneal_core::env::parsed("BANK_MIX").unwrap_or(0.0),
         mix_images: env("BANK_MIX_IMAGES", 20),
         random_images: env("BANK_RANDOM", 10),
         deadlock_iters: env("BANK_DEADLOCK_ITERS", 3),
@@ -1735,6 +2204,20 @@ fn main() {
         );
     }
 
+    // Thread-replica ensembles sharing one exact minimum history, under the
+    // contract of the NVE escape-history comparison: identical replica seeds
+    // and starts in both arms, one aggregate budget, first-discovery
+    // aggregate calls on the record.
+    if let Some(replicas) = anneal_core::env::parsed::<usize>("HISTORY_REPLICAS") {
+        run_history_ensembles(&cfg, n, budget, seed0, seeds, reference, replicas, &opts);
+        return;
+    }
+    let core_table = coreclass.then(|| {
+        Arc::new(Mutex::new(anneal_core::coreclass::CoreClassTable::new(
+            core_patience,
+            core_trial,
+        )))
+    });
     let mut solved = 0usize;
     let mut deepest = f64::INFINITY;
     let mut total_hops = 0usize;
@@ -1761,27 +2244,28 @@ fn main() {
         let screen_steps = cfg.screen_steps;
         // Noise on the screening descent, as a fraction of the local gradient.
         // Zero reproduces the clean quench exactly.
-        let noise_eta: f64 = std::env::var("QUENCH_NOISE")
-            .ok()
-            .and_then(|v| v.parse().ok())
-            .unwrap_or(0.0);
+        let noise_eta: f64 = anneal_core::env::parsed("QUENCH_NOISE").unwrap_or(0.0);
         let mut qrng = <rand::rngs::StdRng as rand::SeedableRng>::seed_from_u64(
             seed.wrapping_mul(0x9E3779B97F4A7C15).wrapping_add(17),
         );
         let two_phase = cfg.two_phase.filter(|two| two.is_active());
-        let surface_block = std::env::var("SURFACE_BLOCK")
-            .ok()
-            .and_then(|v| v.parse().ok())
+        let surface_block = anneal_core::env::parsed("SURFACE_BLOCK")
             .unwrap_or(anneal_core::methods::two_phase::DEFAULT_SURFACE_BLOCK);
-        let mut surfaces = (!cfg.surfaces.is_empty()).then(|| {
-            anneal_core::methods::two_phase::SurfacePortfolio::with_block(
-                &cfg.surfaces,
-                seed,
-                surface_block,
-            )
+        let surfaces = (!cfg.surfaces.is_empty()).then(|| {
+            Arc::new(Mutex::new(
+                anneal_core::methods::two_phase::SurfacePortfolio::with_block(
+                    &cfg.surfaces,
+                    seed,
+                    surface_block,
+                ),
+            ))
         });
         let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, iters: usize| {
+            if iters == 0 {
+                return evaluate_without_quenching(led, x);
+            }
             let charged_before = led.spent();
+            let diagnostic = led.is_diagnostic_quench();
             // Curvature is not carried between relaxations: measured on this
             // problem, retaining it across a structural change costs more than
             // it saves.
@@ -1795,20 +2279,18 @@ fn main() {
             // the escape controller, where 94 relaxations in 3148 reached a
             // minimum and the curvature it steered by came back negative at a
             // point being treated as one.
-            if early_stop && iters <= screen_steps {
+            if !diagnostic && early_stop && iters <= screen_steps {
                 let mut term = Terminator::default();
                 let mut cur = x.to_owned();
-                let mut f = f64::INFINITY;
                 let mut done = 0usize;
                 // Four at a time: enough for the ratio estimate to move, small
                 // enough that the saving is not given back.
                 while done < iters {
                     let take = 4.min(iters - done);
                     let (fi, xi, _) = opt.minimize(cur.view(), take, |v| charged(led, v));
-                    f = fi;
                     cur = xi;
                     done += take;
-                    term.observe(f);
+                    term.observe(fi);
                     if term.settled_above(led.best) {
                         early_stopped += 1;
                         early_saved += iters - done;
@@ -1816,6 +2298,7 @@ fn main() {
                     }
                 }
                 capped += 1;
+                let (f, cur) = evaluate_without_quenching(led, cur.view());
                 led.record_quench_boundary(charged_before, f, cur.clone(), None);
                 return (f, cur);
             }
@@ -1823,17 +2306,30 @@ fn main() {
             // whose minimum the plain relaxation below starts from.
             let compacted;
             let screening_pass = iters <= screen_steps;
-            let surface = match surfaces.as_mut() {
-                Some(portfolio) => portfolio.begin(screening_pass),
-                None => two_phase,
+            let surface = if diagnostic {
+                None
+            } else {
+                match surfaces.as_ref() {
+                    Some(portfolio) => portfolio
+                        .lock()
+                        .expect("surface portfolio")
+                        .begin(screening_pass),
+                    None => two_phase,
+                }
             };
             let x = match surface {
                 Some(two) => {
                     let cutoff = two.cutoff_for(x);
+                    let shape = two.shape_for(x);
                     let (_, phase_one, _) = opt.minimize(x, iters, |v| {
                         let (e, g) = charged(led, v)?;
-                        let (pe, pg) =
-                            anneal_core::methods::two_phase::penalty(v, cutoff, two.beta, two.mu);
+                        let (pe, pg) = anneal_core::methods::two_phase::penalty_shaped(
+                            v,
+                            cutoff,
+                            two.beta,
+                            two.mu,
+                            shape.as_ref(),
+                        );
                         Some((e + pe, g + pg))
                     });
                     opt.forget();
@@ -1842,19 +2338,16 @@ fn main() {
                 }
                 None => x,
             };
-            let (f, xr, _) = if anneal_core::known_basin::is_armed() {
+            let (_, xr, _) = if !diagnostic && anneal_core::known_basin::is_armed() {
                 let (f, xr) =
                     anneal_core::known_basin::step_rgmin(&mut opt, x, iters, |v| charged(led, v));
                 (f, xr, 0)
-            } else if noise_eta > 0.0 && iters <= screen_steps {
+            } else if !diagnostic && noise_eta > 0.0 && iters <= screen_steps {
                 opt.minimize(x, iters, |v| charged_noisy(led, v, noise_eta, &mut qrng))
             } else {
                 opt.minimize(x, iters, |v| charged(led, v))
             };
-            if let Some(portfolio) = surfaces.as_mut() {
-                portfolio.observe(screening_pass, f, led.best);
-            }
-            let mut boundary_energy = f;
+            let mut boundary_energy = f64::INFINITY;
             let mut validated_gradient = None;
             let mut xr = xr;
             if led.charge() {
@@ -1878,8 +2371,8 @@ fn main() {
                     // still, which is the difference between the plateau a
                     // whisker above the bound and crossing it.
                     opt.forget();
-                    let (fc, xc, _) = opt.minimize(xr.view(), 500, |v| charged(led, v));
-                    boundary_energy = fc;
+                    let (_, xc, _) = opt.minimize(xr.view(), 500, |v| charged_physical(led, v));
+                    boundary_energy = f64::INFINITY;
                     xr = xc;
                     if !led.charge() {
                         break;
@@ -1924,13 +2417,17 @@ fn main() {
             } else {
                 capped += 1;
             }
+            if !diagnostic && let Some(portfolio) = surfaces.as_ref() {
+                let mut portfolio = portfolio.lock().expect("surface portfolio");
+                portfolio.observe(screening_pass, boundary_energy, led.best);
+            }
             led.record_quench_boundary(
                 charged_before,
                 boundary_energy,
                 xr.clone(),
                 validated_gradient,
             );
-            (f, xr)
+            (boundary_energy, xr)
         };
         // The gradient the soft-mode escape needs, charged like everything
         // else: a Lanczos pass is two evaluations per step and the escape
@@ -1948,7 +2445,7 @@ fn main() {
             .ok()
             .filter(|value| !value.is_empty());
         let catalog_control = opts.contains(&"catalog");
-        let mut out = if catalog_rpc.is_some() || catalog_control {
+        let out = if catalog_rpc.is_some() || catalog_control {
             #[cfg(feature = "bank-rpc")]
             {
                 if let Some(endpoint) = catalog_rpc.as_deref() {
@@ -1963,6 +2460,8 @@ fn main() {
                     &mut grad,
                     seed,
                     catalog_rpc.as_deref(),
+                    coreclass.then_some((core_patience, core_trial)),
+                    surfaces.as_ref().map(Arc::clone),
                 )
             }
             #[cfg(not(feature = "bank-rpc"))]
@@ -2016,11 +2515,7 @@ fn main() {
                     &bank_cfg,
                     &mut ledger,
                     &mut relax,
-                    if cfg.minima_hopping || cfg.escape_on_stall || cfg.soft_perturb {
-                        Some(&mut grad)
-                    } else {
-                        None
-                    },
+                    Some(&mut grad),
                     &mut dist,
                     seed,
                 );
@@ -2054,6 +2549,52 @@ fn main() {
                     ..Outcome::default()
                 }
             }
+        } else if let Some(table) = core_table.as_ref() {
+            use anneal_core::coreclass::CoreVerdict;
+            use anneal_core::corekey::motif_class;
+            use rand::SeedableRng;
+            let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
+            let start = random_cluster(n, 0.7, cfg.min_separation, &mut rng);
+            let mut bias = BasinBias::new(
+                ClusterFingerprint::for_keying(n, cfg.shape_keyed),
+                cfg.merge_radius,
+                cfg.bias_height,
+                cfg.bias_gamma,
+            );
+            let table = Arc::clone(table);
+            let mut adopt_rng = rand::rngs::StdRng::seed_from_u64(seed ^ 0xC0A1);
+            let interval = anneal_core::env::parsed("CHECKPOINT").unwrap_or(500).max(1);
+            let mut checkpoint = |snapshot: ChainCheckpoint<'_>| {
+                let class = motif_class(snapshot.current_state()).index();
+                let mut table = table.lock().expect("core-class table");
+                match table.report(
+                    seed as usize,
+                    class,
+                    snapshot.current_energy(),
+                    snapshot.charged(),
+                ) {
+                    CoreVerdict::Restart => {
+                        let fresh = random_cluster(n, 0.7, cfg.min_separation, &mut adopt_rng);
+                        CheckpointAction::ExternalAdopt {
+                            state: fresh,
+                            action: "coreclass".to_owned(),
+                            external_calls: 0,
+                        }
+                    }
+                    CoreVerdict::Continue => CheckpointAction::Continue,
+                }
+            };
+            run_with_bias_at_checkpoints(
+                &cfg,
+                start.view(),
+                &mut ledger,
+                &mut relax,
+                Some(&mut grad),
+                &mut bias,
+                &mut rng,
+                interval,
+                &mut checkpoint,
+            )
         } else {
             {
                 // The settle stage: steepest descent of the moved atoms in the
@@ -2113,11 +2654,7 @@ fn main() {
                     &cfg,
                     &mut ledger,
                     &mut relax,
-                    if cfg.minima_hopping || cfg.escape_on_stall || cfg.soft_perturb {
-                        Some(&mut grad)
-                    } else {
-                        None
-                    },
+                    Some(&mut grad),
                     if cfg.staged_quench {
                         Some(&mut settle)
                     } else {
@@ -2128,10 +2665,8 @@ fn main() {
             }
         };
 
-        // The reported value is checked against a fresh evaluation of the
-        // structure it claims to come from, off the ledger and outside the
-        // driver. A search that reports a number its own answer does not have
-        // is the failure worth catching, and nothing else here would catch it.
+        // A read-only audit checks the returned coordinates and objective.
+        // It cannot optimize coordinates or change the charged search answer.
         let verified = match out.best_state.as_ref() {
             Some(x) => {
                 assert_eq!(
@@ -2142,31 +2677,21 @@ fn main() {
                 );
                 let (e, g) = lj(x.view());
                 let gmax = g.iter().fold(0.0_f64, |a, v| a.max(v.abs()));
-                // A hop quench can stop short of a minimum and still be
-                // recorded when the driver did not pass a gradient to the
-                // recordable guard. Finish the relaxation off the ledger
-                // and report the minimum that structure actually is.
-                let (e, gmax) = if gmax >= 1e-3 {
-                    let mut opt = WarmLbfgs::default();
-                    let (er, xr, _) = opt.minimize(x.view(), 2000, |v| Some(lj(v)));
-                    let (_, gr) = lj(xr.view());
-                    let gm = gr.iter().fold(0.0_f64, |a, v| a.max(v.abs()));
-                    (er, gm)
-                } else {
-                    (e, gmax)
-                };
                 assert!(
-                    gmax < 1e-3,
+                    e.is_finite() && (e - out.best).abs() < 1e-6,
+                    "seed {seed} reports {} but its returned coordinates have energy {e}",
+                    out.best
+                );
+                assert!(
+                    g.iter().all(|v| v.is_finite()) && gmax < 1e-3,
                     "seed {seed} returned a structure with gradient {gmax:.2e}, \
                      which is not a minimum"
                 );
+                println!("ANSWER_AUDIT seed {seed} objective_calls 1 read_only true");
                 Some((e, gmax))
             }
             None => None,
         };
-        if let Some((e, _)) = verified {
-            out.best = e;
-        }
         let hit = reference.map(|r| out.best < r + 1e-4).unwrap_or(false);
         if hit {
             solved += 1;
@@ -2226,15 +2751,21 @@ fn main() {
             }
         }
         if let Some(r) = reference {
-            if let Some((h, _, b, e)) = out.improvements.iter().find(|(_, _, _, e)| *e < r + 1e-4) {
+            // A record carries the hop, the evaluations charged by then, the
+            // basins open and the energy. The spend is what the budget is
+            // denominated in, so it is printed alongside the hop rather than
+            // dropped.
+            if let Some((h, spent, b, e)) =
+                out.improvements.iter().find(|(_, _, _, e)| *e < r + 1e-4)
+            {
                 println!(
-                    "      crossed at hop {h} of {} ({:.1}% in), {b} basins, {e:.6}",
+                    "      crossed at hop {h} of {} ({:.1}% in), {spent} charged, {b} basins, {e:.6}",
                     out.hops,
                     100.0 * *h as f64 / out.hops.max(1) as f64
                 );
-            } else if let Some((h, _, b, e)) = out.improvements.last() {
+            } else if let Some((h, spent, b, e)) = out.improvements.last() {
                 println!(
-                    "      last improvement at hop {h} of {} ({:.1}% in), {b} basins, {e:.6}",
+                    "      last improvement at hop {h} of {} ({:.1}% in), {spent} charged, {b} basins, {e:.6}",
                     out.hops,
                     100.0 * *h as f64 / out.hops.max(1) as f64
                 );
@@ -2246,13 +2777,45 @@ fn main() {
                 println!("      rung T={t:.3}  basins {b:>5}  energy {en:>11.4}");
             }
         }
+        // Transport, on every seed, because it is the quantity the ladder is
+        // supposed to change and a solve count cannot report it. A scheme can
+        // move configurations across the ladder far better and still not find
+        // the minimum, and both halves belong in the record.
+        if let Some((trips, sw, barrier)) = out.transport {
+            let per_tag = if trips > 0 {
+                out.rungs.len() as f64 * sw as f64 / trips as f64
+            } else {
+                f64::INFINITY
+            };
+            println!(
+                "      seed {seed}: round trips {trips} in {sw} sweeps \
+                 (rate {:.4}/sweep, {per_tag:.0} sweeps per tag), barrier {barrier:.2}",
+                trips as f64 / sw.max(1) as f64
+            );
+        }
+        // Per-arm draws, accepts and deepest quench, so whether an arm fires
+        // and whether it ever deepens is on the seed record rather than
+        // inferred from a solve count.
+        for (name, draws, accepts, best) in &out.arms {
+            println!("    arm {name:<10} draws {draws:>7}  accepts {accepts:>7}  best {best:.6}");
+        }
         total_hops += out.hops;
         total_charged += ledger.spent();
+        if let Some(portfolio) = surfaces.as_ref() {
+            let portfolio = portfolio.lock().expect("surface portfolio");
+            println!(
+                "SURFACE_EVIDENCE seed {seed} local_blocks {} peer_blocks {} local_draws {:?} local_means {:?}",
+                portfolio.draws().iter().sum::<usize>(),
+                portfolio.peer_observations(),
+                portfolio.draws(),
+                portfolio.means()
+            );
+        }
         println!(
             "  seed {seed}: best {:.6}  hops {}  screened {}  charged {}  \
              basins {} ({:.1} hops each)  returned {}  \
              swaps {}/{}  paths {} improved {} gain {:.3}  \
-             escape {:.3} thr {:.4} same/known/new {}/{}/{} soft {}/{} sub {}/{} lmin {:.4} climbs {} gain {:.2} radius {:.3} step {:.3} restarts {} angular {}/{} R {:.3} tabu {} vetoed {} screen {}/{} expl {} obs {} ctx {:?}  \
+             escape {:.3} thr {:.4} same/known/new {}/{}/{} soft {}/{} sub {}/{} lmin {:.4} climbs {} gain {:.2} radius {:.3} step {:.3} restarts {} xrefused {} jumps {} angular {}/{} R {:.3} tabu {} vetoed {} screen {}/{} expl {} obs {} ctx {:?} sym {}/{:.2} orbits {}/{:.2}  \
              relaxed {converged}/{} converged  early {early_stopped} saved {early_saved}  \
              verified {}{}",
             out.best,
@@ -2282,6 +2845,8 @@ fn main() {
             out.merge_radius,
             out.mean_step,
             out.restarts,
+            out.exchanges_refused,
+            out.jumps,
             out.angular.1,
             out.angular.0,
             out.angular.2,
@@ -2292,6 +2857,10 @@ fn main() {
             out.screen.2,
             out.screen.3,
             out.contextual.0,
+            out.symmetrised.0,
+            out.symmetrised.1,
+            out.orbits.0,
+            out.orbits.1,
             converged + capped,
             verified
                 .map(|(e, gmax)| format!("{e:.6} |g| {gmax:.1e}"))
@@ -2377,7 +2946,7 @@ fn leave_known_packing<R: rand::Rng + ?Sized>(
     cfg: &Config,
     wells: &[Array1<f64>],
     ledger: &mut Ledger,
-    relax: &mut dyn FnMut(&mut Ledger, ArrayView1<f64>, usize) -> (f64, Array1<f64>),
+    relax: &mut (dyn FnMut(&mut Ledger, ArrayView1<f64>, usize) -> (f64, Array1<f64>) + Send),
     rng: &mut R,
 ) -> Array1<f64> {
     #[cfg(feature = "featomic")]
@@ -2468,6 +3037,7 @@ fn remember_packing_well(
 /// structure, not a length. When the quench still lands in the same packing
 /// the hop loop walks the rest of the ladder rather than drawing another
 /// hole of the same size.
+#[cfg(feature = "bank-rpc")]
 fn leave_packing_state<R: rand::Rng + ?Sized>(
     x: ArrayView1<f64>,
     energy: f64,
@@ -2484,13 +3054,15 @@ fn leave_packing_state<R: rand::Rng + ?Sized>(
     // They are not charged, because the checkpoint path holds no ledger, and
     // they are the price of a step sized by the structure instead of by a
     // length that suits one cluster and melts another.
+    let mobile =
+        anneal_core::soap::packing_active_volume(x, anneal_core::catalog::PACKING_SPEC, species);
     anneal_core::known_basin::leave_packing_rung_to(
         x,
         cover_index,
         anneal_core::known_basin::rung_barrier(depth, 0),
         &anneal_core::catalog::packing_references(),
         species,
-        None,
+        Some(mobile.as_slice()),
         |v: ArrayView1<f64>| Some(lj(v).0),
     )
 }
@@ -2499,6 +3071,7 @@ fn leave_packing_state<R: rand::Rng + ?Sized>(
 /// same extra. Plasencia Gutiérrez, Argáez, Jónsson, *J. Chem. Theory
 /// Comput.* **2017**, *13* (1), 125-134.
 /// <https://doi.org/10.1021/acs.jctc.5b01216>
+#[cfg(feature = "bank-rpc")]
 fn archive_cover_index(replica: u32, leave: usize) -> usize {
     use anneal_core::catalog::{cover_arm_count, pick_leave_cover};
     use rand::SeedableRng;
@@ -2510,62 +3083,7 @@ fn archive_cover_index(replica: u32, leave: usize) -> usize {
     pick_leave_cover(n, &mut rng)
 }
 
-/// Walk coordinates so leftover-SOAP / ACE follows the coordinator hole
-/// in the shared occupied cloud. That hole is the ensemble superbasin
-/// list, not this replica's private well trail.
 #[cfg(feature = "bank-rpc")]
-fn step_toward_catalog_hole(
-    x: ArrayView1<f64>,
-    target: &[f64],
-    space: &anneal_core::descriptor_space::DescriptorSpace,
-    species: Option<&[u32]>,
-    length_scale: f64,
-) -> Option<Array1<f64>> {
-    use anneal_core::catalog_policy::proposal::pullback_increment;
-    use anneal_core::descriptor_space::pullback::{PullbackConfig, PullbackConstraints};
-    if target.is_empty() || !length_scale.is_finite() || length_scale <= 0.0 {
-        return None;
-    }
-    let mut cur = x.to_owned();
-    let constraints = PullbackConstraints {
-        frozen_coordinates: vec![false; cur.len()],
-        rigid_group_labels: Vec::new(),
-        remove_translation: true,
-    };
-    let config = PullbackConfig {
-        damping: 1e-3,
-        trust_radius: 2.0,
-        length_scale,
-    };
-    let weights = Array1::ones(target.len());
-    let target = Array1::from(target.to_vec());
-    let mut moved = false;
-    for _ in 0..8 {
-        let desc = space.describe(cur.view(), species).ok()?;
-        if desc.values().len() != target.len() {
-            return None;
-        }
-        let increment = &target - &Array1::from(desc.values().to_vec());
-        let inc_norm = increment.iter().map(|z| z * z).sum::<f64>().sqrt();
-        if inc_norm < 1e-8 {
-            break;
-        }
-        let jacobian = space.jacobian_analytic(cur.view(), species).ok()?;
-        let pulled = pullback_increment(
-            jacobian.view(),
-            increment.view(),
-            weights.view(),
-            Some(cur.view()),
-            &constraints,
-            config,
-        )
-        .ok()?;
-        cur = &cur + pulled.step();
-        moved = true;
-    }
-    moved.then_some(cur)
-}
-
 fn packing_of(x: ArrayView1<f64>, cfg: &Config) -> Array1<f64> {
     #[cfg(feature = "featomic")]
     {
@@ -2636,6 +3154,7 @@ fn class_histogram(
 }
 
 /// Normalized L1 distance between two class histograms.
+#[cfg(feature = "bank-rpc")]
 fn histogram_l1(
     a: &std::collections::BTreeMap<usize, usize>,
     b: &std::collections::BTreeMap<usize, usize>,
@@ -2653,6 +3172,7 @@ fn histogram_l1(
         .sum()
 }
 
+#[cfg(feature = "bank-rpc")]
 fn fixed_probe_trial<R: rand::Rng + ?Sized>(
     current: ArrayView1<f64>,
     scale: f64,
@@ -2739,7 +3259,7 @@ fn boundary_crossing_trial<R: rand::Rng + ?Sized>(
     .ok()
 }
 
-#[cfg(feature = "bank-rpc")]
+#[cfg(all(test, feature = "bank-rpc"))]
 fn population_boundary_trial(
     current: ArrayView1<f64>,
     crossing: &anneal_core::catalog_rpc::BoundaryCrossingRecord,
@@ -2751,7 +3271,7 @@ fn population_boundary_trial(
     boundary_crossing_trial(current, crossing, noise_scale, trust_radius, &mut rng)
 }
 
-#[cfg(feature = "bank-rpc")]
+#[cfg(all(test, feature = "bank-rpc"))]
 fn population_region_trial(
     current: ArrayView1<f64>,
     crossing: Option<&anneal_core::catalog_rpc::BoundaryCrossingRecord>,
@@ -3142,29 +3662,358 @@ fn complete_checkpoint_trace<T>(
     result
 }
 
-/// One independently budgeted LJ replica against an isolated descriptor catalog.
+/// Records one population-phase reconfiguration slice and returns the
+/// boundary proposal that adopts `state`. The three population outcomes
+/// (hyperband reseed of a surplus replica, adoption of a better isomer of
+/// the same packing from a foreign parent, and the leave of a replica
+/// whose parent is foreign) differ only in role, reason, family and the
+/// state they hand back; the trace bookkeeping is one thing.
 #[cfg(feature = "bank-rpc")]
+fn population_reconfiguration(
+    cooperative: &mut anneal_core::cooperative_search::CooperativeRun,
+    replica: u32,
+    slice_sequence: &mut u64,
+    checkpoint_charged: usize,
+    snapshot: &ChainCheckpoint<'_>,
+    sampled_basin: Option<u64>,
+    policy_role: anneal_core::cooperative_search::PolicyRole,
+    policy_reason: &'static str,
+    proposal_family: anneal_core::cooperative_search::ProposalFamily,
+    state: Array1<f64>,
+) -> CheckpointAction {
+    use anneal_core::cooperative_search::{
+        SliceAdoption, SliceQuench, SliceTrace, SliceValidation,
+    };
+
+    *slice_sequence = slice_sequence
+        .checked_add(1)
+        .expect("slice sequence must fit u64");
+    let reconfiguration = SliceTrace {
+        slice: *slice_sequence,
+        current_basin: None,
+        active_relation: None,
+        policy_role,
+        policy_reason,
+        proposal_family,
+        sampled_basin,
+        descriptor_step_norm: None,
+        cartesian_step_norm: Some(vector_distance(
+            snapshot
+                .current_state()
+                .as_slice()
+                .expect("LJ state is contiguous"),
+            state.as_slice().expect("LJ proposal is contiguous"),
+        )),
+        validation: SliceValidation::Accepted,
+        quench: SliceQuench::Converged,
+        adoption: SliceAdoption::Adopted,
+        novelty: None,
+        energy: finite_trace_energy(snapshot.best_energy()),
+        charged_work: u64::try_from(checkpoint_charged).expect("checkpoint charge must fit u64"),
+    };
+    cooperative
+        .record_slice(replica, reconfiguration)
+        .expect("population checkpoint trace must remain complete");
+    CheckpointAction::BoundaryProposal {
+        state,
+        action: policy_reason.to_owned(),
+    }
+}
+
+#[cfg(feature = "bank-rpc")]
+/// Counts which phase of the cooperative checkpoint took each checkpoint.
+///
+/// The closure returns from a dozen places (probe, core-class restart,
+/// ride, population barrier, hear, invert, leave gate, policy, jump, the
+/// decision itself); a phase with zero firings over a run is inert, which
+/// is what every mechanism that "did nothing" turned out to be. The tally
+/// is printed on the seed record; a smoke run that expects a mechanism
+/// asserts its count is positive.
+#[derive(Default)]
+struct PhaseTally {
+    counts: std::collections::BTreeMap<&'static str, usize>,
+}
+
+impl PhaseTally {
+    fn fire(&mut self, phase: &'static str) {
+        *self.counts.entry(phase).or_insert(0) += 1;
+    }
+
+    fn report(&self) -> String {
+        self.counts
+            .iter()
+            .map(|(phase, count)| format!("{phase}={count}"))
+            .collect::<Vec<_>>()
+            .join(" ")
+    }
+}
+
+/// Which occupancy certificates this replica has already printed.
+#[derive(Default)]
+struct RetireAnnouncements {
+    putative: bool,
+    done: bool,
+}
+
+/// Occupancy retire phase: when the coordinator's policy evidence certifies
+/// the ensemble's coverage (certified attractor, saturated packing census,
+/// leftover dwell, occupied families at the measured floor) and the
+/// retire rule accepts it for a cluster-shaped putative structure, the
+/// replica retires with the certificate as its reason. A certificate
+/// that is complete but not yet retirable is announced once as putative.
+#[cfg(feature = "bank-rpc")]
+fn occupancy_retire_phase(
+    announced: &mut RetireAnnouncements,
+    policy: &anneal_core::catalog_policy::CatalogPolicyInput,
+    snapshot: &ChainCheckpoint<'_>,
+) -> Option<String> {
+    let n_occupied_families = policy.occupied_family_count;
+    let certificate = occupancy_complete_at(
+        policy.mixing.certified_attractor,
+        policy.packing_saturated,
+        policy.leftover_dwell,
+        n_occupied_families,
+        policy.min_families,
+    )?;
+    let putative = snapshot
+        .best_state()
+        .map(|state| state.to_vec())
+        .unwrap_or_else(|| snapshot.current_state().to_vec());
+    if occupancy_retire_at(
+        certificate,
+        policy.packing_saturated,
+        policy.leftover_dwell,
+        policy.ei_exhausted,
+        n_occupied_families,
+        policy.min_families,
+    ) && occupancy_is_cluster(&putative)
+    {
+        if !announced.done {
+            println!(
+                "  done {}  hops {}  best {:.6}",
+                certificate.as_str(),
+                snapshot.hops(),
+                snapshot.best_energy()
+            );
+            let _ = std::io::stdout().flush();
+            announced.done = true;
+        }
+        return Some(certificate.as_str().to_owned());
+    }
+    let mut announced_putative = announced.putative;
+    if !announced_putative {
+        println!(
+            "  putative {}  hops {}  best {:.6}",
+            certificate.as_str(),
+            snapshot.hops(),
+            snapshot.best_energy()
+        );
+        let _ = std::io::stdout().flush();
+        announced_putative = true;
+        announced.putative = announced_putative;
+    }
+    None
+}
+
+/// Whether odd replicas take the APE ridge-seed path at checkpoints
+/// (`CATALOG_APE_SEEDS`, default on; `0` turns it off). The armed leave
+/// quench needs the SOAP Jacobian at every force evaluation and runs at
+/// about ten seconds a hop on LJ75, so a cooperative ensemble's wall is
+/// the odd half's; turning the seeds off gives a coordinator-only
+/// comparison against private chains at equal wall.
+#[cfg(feature = "bank-rpc")]
+fn ape_seeds_enabled() -> bool {
+    static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ENABLED.get_or_init(|| !std::env::var("CATALOG_APE_SEEDS").is_ok_and(|v| v == "0"))
+}
+
+/// The checkpoint takes no action: the tally counts a "continue", the
+/// trace is completed for the slice, and the chain goes on.
+#[cfg(feature = "bank-rpc")]
+fn continue_checkpoint(
+    phases: &mut PhaseTally,
+    cooperative: &mut anneal_core::cooperative_search::CooperativeRun,
+    replica: u32,
+    slice_sequence: &mut u64,
+    checkpoint_charged: usize,
+    best_energy: f64,
+) -> CheckpointAction {
+    phases.fire("continue");
+    complete_checkpoint_trace(
+        cooperative,
+        replica,
+        slice_sequence,
+        checkpoint_charged,
+        best_energy,
+        |_cooperative, _slice_sequence| CheckpointAction::Continue,
+    )
+}
+
+/// State of the census restart phase across checkpoints.
+#[derive(Default)]
+struct RestartState {
+    /// Hop of the last restart, for the quiet cooldown.
+    last_hop: usize,
+    /// Restarts taken.
+    restarts: usize,
+}
+
+/// Population stopping rule (=CATALOG_RESTART_VISITS=k=,
+/// =CATALOG_RESTART_QUIET=q=): a region `k` other replicas have reached
+/// that this replica has not deepened from for `q` hops is dead by the
+/// ensemble's count, and the replica hands its remaining budget to a
+/// fresh random start. Measured on LJ75 a shelf-absorbed chain crosses at
+/// about 8.5e-7 per hop and a fresh chain at about 5e-6, so the exchange
+/// pays six to one once the region is known dead. Returns the fresh
+/// start; `hear` is told the best-hop clock restarted.
+#[cfg(feature = "bank-rpc")]
+#[allow(clippy::too_many_arguments)]
+fn census_restart_phase(
+    state: &mut RestartState,
+    hear: &mut HearState,
+    replica: u32,
+    snapshot: &ChainCheckpoint<'_>,
+    checkpoint_sequence: u64,
+    crowd: u64,
+    quiet_now: usize,
+    run_cfg: &Config,
+) -> Option<Array1<f64>> {
+    use rand::SeedableRng;
+    let visits: u64 = anneal_core::env::parsed("CATALOG_RESTART_VISITS").unwrap_or(0);
+    let quiet: usize = anneal_core::env::parsed("CATALOG_RESTART_QUIET").unwrap_or(20_000);
+    if visits == 0
+        || crowd < visits
+        || quiet_now < quiet
+        || snapshot.hops().saturating_sub(state.last_hop) < quiet
+    {
+        return None;
+    }
+    let mut restart_rng = rand::rngs::StdRng::seed_from_u64(
+        (u64::from(replica) << 41) ^ checkpoint_sequence.wrapping_mul(0xD6E8_FEB8_6659_FD93),
+    );
+    let fresh = random_cluster(
+        run_cfg.n_points,
+        0.7,
+        run_cfg.min_separation,
+        &mut restart_rng,
+    );
+    state.last_hop = snapshot.hops();
+    hear.last_best_hop = snapshot.hops();
+    state.restarts += 1;
+    println!(
+        "  census restart hops {}  crowd {}  restarts {}",
+        snapshot.hops(),
+        crowd,
+        state.restarts
+    );
+    let _ = std::io::stdout().flush();
+    Some(fresh)
+}
+
+/// State of the census jump phase across checkpoints.
+#[derive(Default)]
+struct JumpState {
+    /// Hop of the last jump, for the cooldown.
+    last_hop: usize,
+    /// Jumps taken.
+    jumps: usize,
+}
+
+/// Census jump phase (Iwamatsu and Okabe): when the ensemble census has
+/// visited this replica's basin at least `CATALOG_JUMP_VISITS` times and
+/// the cooldown of `CATALOG_JUMP_COOLDOWN` hops has passed, a short
+/// unquenched walk of `JUMP_STEPS` steps of half-width `JUMP_STEP` times
+/// the length scale leaves the region. The shared visit count is the
+/// population's, so a region many replicas exhausted is left by all of
+/// them without any being handed a structure. Returns the walked state.
+fn census_jump_phase(
+    state: &mut JumpState,
+    replica: u32,
+    snapshot: &ChainCheckpoint<'_>,
+    checkpoint_sequence: u64,
+    local_basin_visits: u64,
+    length_scale: f64,
+) -> Option<Vec<f64>> {
+    use rand::{Rng, SeedableRng};
+    let census_jump_visits: u64 = anneal_core::env::parsed("CATALOG_JUMP_VISITS").unwrap_or(0);
+    let census_jump_cooldown: usize =
+        anneal_core::env::parsed("CATALOG_JUMP_COOLDOWN").unwrap_or(2000);
+    if census_jump_visits == 0
+        || local_basin_visits < census_jump_visits
+        || snapshot.hops().saturating_sub(state.last_hop) < census_jump_cooldown
+    {
+        return None;
+    }
+    let state_view = snapshot.current_state();
+    let here = state_view.as_slice()?;
+    let mut jump_rng = rand::rngs::StdRng::seed_from_u64(
+        (u64::from(replica) << 40) ^ checkpoint_sequence.wrapping_mul(0x9E37_79B9_7F4A_7C15),
+    );
+    let steps: usize = anneal_core::env::parsed("JUMP_STEPS").unwrap_or(10);
+    let half: f64 = anneal_core::env::parsed("JUMP_STEP").unwrap_or(0.38) * length_scale;
+    let mut jumped = here.to_vec();
+    for _ in 0..steps.max(1) {
+        for v in jumped.iter_mut() {
+            *v += jump_rng.random_range(-half..half);
+        }
+    }
+    state.last_hop = snapshot.hops();
+    state.jumps += 1;
+    println!(
+        "  census jump hops {}  visits {}  jumps {}",
+        snapshot.hops(),
+        local_basin_visits,
+        state.jumps
+    );
+    let _ = std::io::stdout().flush();
+    Some(jumped)
+}
+
+/// State of the hear phase across checkpoints.
+struct HearState {
+    /// Best energy at the last hear clock reset.
+    last_best: f64,
+    /// Hop of the last own improvement or adoption.
+    last_best_hop: usize,
+    /// The structure last adopted, for the post-hear walk trace.
+    heard_structure: Option<Vec<f64>>,
+    /// Adoptions of another family's structure.
+    other_family: usize,
+}
+
+impl Default for HearState {
+    fn default() -> Self {
+        Self {
+            last_best: f64::INFINITY,
+            last_best_hop: 0,
+            heard_structure: None,
+            other_family: 0,
+        }
+    }
+}
+
+
+/// One independently budgeted LJ replica against an isolated descriptor catalog.
 fn run_capnp_catalog(
     cfg: &Config,
     ledger: &mut Ledger,
-    relax: &mut dyn FnMut(&mut Ledger, ArrayView1<f64>, usize) -> (f64, Array1<f64>),
-    grad: &mut dyn FnMut(&mut Ledger, ArrayView1<f64>) -> Option<Array1<f64>>,
+    relax: &mut (dyn FnMut(&mut Ledger, ArrayView1<f64>, usize) -> (f64, Array1<f64>) + Send),
+    grad: &mut (dyn FnMut(&mut Ledger, ArrayView1<f64>) -> Option<Array1<f64>> + Send),
     seed: u64,
     endpoint: Option<&str>,
+    core_class: Option<(usize, usize)>,
+    surfaces: Option<Arc<Mutex<anneal_core::methods::two_phase::SurfacePortfolio>>>,
 ) -> Outcome {
     use anneal_core::catalog::lj::{descriptor_space, system_signature};
     use anneal_core::catalog_policy::{ActiveCatalogRelation, PolicyAction, PolicyReason};
     use anneal_core::catalog_rpc::client::{CatalogClient, ClientConfig};
     use anneal_core::catalog_rpc::{BridgeAssignmentRecord, BridgeCrossingRecord};
-    use anneal_core::catalog_rpc::{
-        CatalogIdentity, INCUMBENT_SAMPLE_DRAW, SPARSE_SAMPLE_DRAW, TransitionDestination,
-    };
+    use anneal_core::catalog_rpc::{CatalogIdentity, INCUMBENT_SAMPLE_DRAW, SPARSE_SAMPLE_DRAW};
     use anneal_core::cooperative_search::ledger::ChargeKind;
     use anneal_core::cooperative_search::{
-        CatalogBoundaryOutcome, CatalogBridgeOutcome, CatalogHoleOutcome, CatalogSampleOutcome,
-        CatalogSamplesOutcome, CooperativeRun, PolicyEvidenceOutcome, PolicyRole,
-        PopulationSynchronizationOutcome, ProposalFamily, RunManifest, SliceAdoption, SliceQuench,
-        SliceTrace, SliceValidation, TransitionRecordOutcome,
+        CatalogBridgeOutcome, CatalogHoleOutcome, CatalogSampleOutcome, CatalogSamplesOutcome,
+        CooperativeRun, PolicyEvidenceOutcome, PolicyRole, PopulationSynchronizationOutcome,
+        ProposalFamily, RunManifest, SliceAdoption, SliceQuench, SliceTrace, SliceValidation,
     };
     #[cfg(feature = "ira")]
     use anneal_core::cooperative_search::{RideClaimOutcome, RideReportOutcome};
@@ -3187,6 +4036,10 @@ fn run_capnp_catalog(
         endpoint.is_some(),
     )
     .unwrap_or_else(|error| panic!("{error}"));
+    let evidence_only = anneal_core::env::flag("CATALOG_EVIDENCE_ONLY");
+    if evidence_only {
+        println!("  catalog channels: surface evidence only; geometry policy disabled");
+    }
     let replica = required_catalog_env("CATALOG_REPLICA")
         .parse::<u32>()
         .expect("CATALOG_REPLICA must be an unsigned integer");
@@ -3198,6 +4051,9 @@ fn run_capnp_catalog(
         u64::try_from(ledger.budget()).expect("LJ budget must fit the cooperative ledger"),
     )
     .expect("single-replica local ledger must be valid");
+    if let Some((patience, trial)) = core_class {
+        cooperative.enable_core_class(patience, trial);
+    }
     if let Some(endpoint) = endpoint {
         let address = endpoint
             .parse()
@@ -3237,10 +4093,11 @@ fn run_capnp_catalog(
     #[cfg(feature = "bank-rpc")]
     let brain_stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
     #[cfg(feature = "bank-rpc")]
-    let brain_handle = if let (Ok(listen), Ok(peers_raw)) = (
-        std::env::var("CATALOG_BRAIN_LISTEN"),
-        std::env::var("CATALOG_BRAIN_PEERS"),
-    ) {
+    let brain_handle = if !evidence_only
+        && let (Ok(listen), Ok(peers_raw)) = (
+            std::env::var("CATALOG_BRAIN_LISTEN"),
+            std::env::var("CATALOG_BRAIN_PEERS"),
+        ) {
         use anneal_core::raft::wire::{
             ExplorationDecree, assign_seam_work, decode_decree, encode_decree,
         };
@@ -3385,9 +4242,7 @@ fn run_capnp_catalog(
     // funnel problem, so it is available here, opt-in: the recommended
     // protocol leaves the temperature alone and the published runs used
     // it that way, so this only applies when a ladder top is named.
-    if let Some(top) = std::env::var("CATALOG_TEMP_LADDER")
-        .ok()
-        .and_then(|value| value.parse::<f64>().ok())
+    if let Some(top) = anneal_core::env::parsed::<f64>("CATALOG_TEMP_LADDER")
         .filter(|value| value.is_finite() && *value > 0.0)
     {
         let rungs = std::env::var("CATALOG_BRAIN_PEERS")
@@ -3434,12 +4289,11 @@ fn run_capnp_catalog(
     // deposit into this chain's own well-tempered bias, so acceptance
     // feels what the ensemble has visited continuously rather than only
     // at steering decisions. Gated until the paired smoke measures it.
-    let shared_bias_enabled = std::env::var("CATALOG_SHARED_BIAS").is_ok_and(|v| v == "1");
+    let shared_bias_enabled = anneal_core::env::flag("CATALOG_SHARED_BIAS");
     // The ensemble frontier ladder ships raw doorway states through the
     // coordinator at checkpoint cadence; the hop loop queues and folds,
     // this layer only moves the mail.
-    let frontier_exchange_enabled =
-        std::env::var("CATALOG_FRONTIER_EXCHANGE").is_ok_and(|v| v == "1");
+    let frontier_exchange_enabled = anneal_core::env::flag("CATALOG_FRONTIER_EXCHANGE");
     // Bridge segments: when the coordinator has commissioned a bridge
     // across the referee's seam, this replica takes a region assignment,
     // jumps to a stored entry state when one exists, and reports every
@@ -3447,7 +4301,7 @@ fn run_capnp_catalog(
     // recorded rather than moves rejected, so the weights and the
     // committor surrogate accumulate without touching the acceptance
     // rule. Gated until the paired smoke measures it.
-    let bridge_enabled = std::env::var("CATALOG_BRIDGE").is_ok_and(|v| v == "1");
+    let bridge_enabled = anneal_core::env::flag("CATALOG_BRIDGE");
     // Histogram screen: on stall, candidate escape perturbations are
     // ranked by the novelty of their per-center class histogram against
     // the chain's own visited histograms, and the most novel one is
@@ -3456,10 +4310,21 @@ fn run_capnp_catalog(
     // counts alone, so distance in histogram space is exactly the
     // direction a funnel exchange must move, named without naming any
     // structure. Gated until the paired smoke measures it.
-    let histo_screen = std::env::var("CATALOG_HISTO_SCREEN").is_ok_and(|v| v == "1");
-    let histo_radius = std::env::var("CATALOG_HISTO_RADIUS")
-        .ok()
-        .and_then(|value| value.parse::<f64>().ok())
+    let histo_screen = anneal_core::env::flag("CATALOG_HISTO_SCREEN");
+    // Difficulty retargeting, the proof-of-work governor transplanted:
+    // a blockchain holds its block rate constant by adjusting the
+    // difficulty against measured production; here the measured
+    // quantity is ensemble basin discovery per force evaluation, from
+    // the exact census counters every policy reply already carries.
+    // When discovery dries up against the run's own history the
+    // exploration gain rises, scaling escape perturbations; recovery
+    // decays it back toward one. Self-relative, no structural prior,
+    // no protocol change. Gated until the paired smoke measures it.
+    let difficulty_enabled = anneal_core::env::flag("CATALOG_DIFFICULTY");
+    let mut difficulty_gain = 1.0_f64;
+    let mut governor_last: Option<(u64, u64)> = None;
+    let mut governor_ema: Option<f64> = None;
+    let histo_radius = anneal_core::env::parsed::<f64>("CATALOG_HISTO_RADIUS")
         .filter(|value| value.is_finite() && *value > 0.0)
         .unwrap_or(1.4);
     let mut histo_leaders: Vec<Array1<f64>> = Vec::new();
@@ -3489,18 +4354,41 @@ fn run_capnp_catalog(
         }
         engine
     });
-    let md_steps = std::env::var("CATALOG_MD_STEPS")
-        .ok()
-        .and_then(|value| value.parse::<usize>().ok())
+    let md_steps = anneal_core::env::parsed::<usize>("CATALOG_MD_STEPS")
         .unwrap_or(500)
         .max(1);
-    let md_temperature = std::env::var("CATALOG_MD_TEMP")
-        .ok()
-        .and_then(|value| value.parse::<f64>().ok())
+    let md_temperature = anneal_core::env::parsed::<f64>("CATALOG_MD_TEMP")
         .filter(|value| value.is_finite() && *value > 0.0)
         .unwrap_or(1.2);
     let mut active_bridge: Option<BridgeAssignmentRecord> = None;
     let mut pending_deposits: Vec<Array1<f64>> = Vec::new();
+    // Peer-to-peer census over nng (CENSUS_BUS_BASE=port, CATALOG_REPLICAS=n):
+    // every replica's live minimum, no coordinator in the loop.
+    let configured_census_base = std::env::var("CENSUS_BUS_BASE").ok();
+    let mut census_bus: Option<anneal_core::census_bus::CensusBus> =
+        census_bus_base(sharing, evidence_only, configured_census_base.as_deref()).and_then(
+            |base| {
+                let n: u32 = anneal_core::env::parsed("CATALOG_REPLICAS").unwrap_or(0);
+                if n == 0 {
+                    return None;
+                }
+                match anneal_core::census_bus::CensusBus::new(replica, base, n) {
+                    Ok(bus) => {
+                        println!("  census bus: nng pub/sub, base port {base}, {n} replicas");
+                        Some(bus)
+                    }
+                    Err(error) => {
+                        println!("  census bus unavailable: {error}");
+                        None
+                    }
+                }
+            },
+        );
+    let _packing_peer_scope =
+        anneal_core::catalog::packing::PackingPeerScope::new(census_bus.is_some());
+    let mut peer_crowd: usize = 0;
+    let mut bus_received: usize = 0;
+    let mut bus_last_minimum: Option<(f64, Vec<f64>)> = None;
     let mut shared_wells: Vec<Array1<f64>> = Vec::new();
     let coop_rcut = 3.5 * run_cfg.length_scale;
     let coop_species = run_cfg.species.clone();
@@ -3517,43 +4405,26 @@ fn run_capnp_catalog(
         .and_then(|value| value.parse::<usize>().ok())
         .unwrap_or(500)
         .max(1);
-    let probe_interval = std::env::var("CATALOG_PROBE_INTERVAL")
-        .ok()
-        .and_then(|value| value.parse::<u64>().ok())
+    let probe_interval = anneal_core::env::parsed::<u64>("CATALOG_PROBE_INTERVAL")
         .unwrap_or(8)
         .max(1);
-    let probe_scale = std::env::var("CATALOG_PROBE_SCALE")
-        .ok()
-        .and_then(|value| value.parse::<f64>().ok())
+    let probe_scale = anneal_core::env::parsed::<f64>("CATALOG_PROBE_SCALE")
         .filter(|value| value.is_finite() && *value > 0.0)
         .unwrap_or(0.2 * run_cfg.length_scale);
-    let transport_noise = std::env::var("CATALOG_TRANSPORT_NOISE")
-        .ok()
-        .and_then(|value| value.parse::<f64>().ok())
+    let transport_noise = anneal_core::env::parsed::<f64>("CATALOG_TRANSPORT_NOISE")
         .filter(|value| value.is_finite() && *value >= 0.0)
         .unwrap_or(0.05 * run_cfg.length_scale);
-    let transport_radius = std::env::var("CATALOG_TRANSPORT_RADIUS")
-        .ok()
-        .and_then(|value| value.parse::<f64>().ok())
-        .filter(|value| value.is_finite() && *value > 0.0)
-        .unwrap_or(run_cfg.length_scale * (run_cfg.n_points as f64).sqrt());
     let minimum_population_interval = checkpoint_interval
         .checked_mul(2)
         .and_then(|value| value.checked_add(2))
         .expect("catalog checkpoint must admit a charged-work population interval");
-    let population_interval = std::env::var("CATALOG_POPULATION_INTERVAL")
-        .ok()
-        .and_then(|value| value.parse::<usize>().ok())
+    let population_interval = anneal_core::env::parsed::<usize>("CATALOG_POPULATION_INTERVAL")
         .unwrap_or(50_000)
         .max(minimum_population_interval);
-    let md_interval = std::env::var("CATALOG_MD_INTERVAL")
-        .ok()
-        .and_then(|value| value.parse::<u64>().ok())
+    let md_interval = anneal_core::env::parsed::<u64>("CATALOG_MD_INTERVAL")
         .unwrap_or(32)
         .max(1);
-    let bridge_interval = std::env::var("CATALOG_BRIDGE_INTERVAL")
-        .ok()
-        .and_then(|value| value.parse::<u64>().ok())
+    let bridge_interval = anneal_core::env::parsed::<u64>("CATALOG_BRIDGE_INTERVAL")
         .unwrap_or(64)
         .max(1);
     #[cfg(not(feature = "ira"))]
@@ -3565,27 +4436,19 @@ fn run_capnp_catalog(
         .ok()
         .map_or(endpoint.is_some(), |value| value != "0");
     #[cfg(feature = "ira")]
-    let ride_interval = std::env::var("CATALOG_RIDE_INTERVAL")
-        .ok()
-        .and_then(|value| value.parse::<u64>().ok())
+    let ride_interval = anneal_core::env::parsed::<u64>("CATALOG_RIDE_INTERVAL")
         .unwrap_or(8)
         .max(1);
     #[cfg(feature = "ira")]
-    let ride_budget_cap = std::env::var("CATALOG_RIDE_BUDGET")
-        .ok()
-        .and_then(|value| value.parse::<u64>().ok())
+    let ride_budget_cap = anneal_core::env::parsed::<u64>("CATALOG_RIDE_BUDGET")
         .unwrap_or(5_000)
         .max(1);
     #[cfg(feature = "ira")]
-    let ride_localization_radius = std::env::var("CATALOG_RIDE_LOCAL_RADIUS")
-        .ok()
-        .and_then(|value| value.parse::<f64>().ok())
+    let ride_localization_radius = anneal_core::env::parsed::<f64>("CATALOG_RIDE_LOCAL_RADIUS")
         .filter(|value| value.is_finite() && *value > 0.0)
         .unwrap_or(1.5 * run_cfg.length_scale);
     #[cfg(feature = "ira")]
-    let ride_identity_radius = std::env::var("CATALOG_RIDE_IDENTITY_RADIUS")
-        .ok()
-        .and_then(|value| value.parse::<f64>().ok())
+    let ride_identity_radius = anneal_core::env::parsed::<f64>("CATALOG_RIDE_IDENTITY_RADIUS")
         .filter(|value| value.is_finite() && *value > 0.0)
         .unwrap_or(anneal_core::catalog::lj::CALIBRATION_IRA_TOLERANCE * run_cfg.length_scale);
     #[cfg(feature = "ira")]
@@ -3649,11 +4512,11 @@ fn run_capnp_catalog(
     // file holds an xyz body: a count line, a comment line, then one
     // element and three coordinates per line.
     let seeded_start = std::env::var("CATALOG_START_FILE").ok().filter(|_| {
-        std::env::var("CATALOG_START_REPLICA")
-            .ok()
-            .and_then(|value| value.parse::<u32>().ok())
-            .unwrap_or(0)
-            == replica
+        match std::env::var("CATALOG_START_REPLICA").as_deref() {
+            Ok("all") | Ok("*") => true,
+            Ok(value) => value.parse::<u32>().ok() == Some(replica),
+            Err(_) => replica == 0,
+        }
     });
     let start = match seeded_start {
         Some(path) => {
@@ -3682,8 +4545,12 @@ fn run_capnp_catalog(
             &mut local_rng,
         ),
     };
+    if let Some(coordinates) = start.as_slice() {
+        anneal_core::catalog::remember_packing_reference(coordinates);
+    }
     let mut candidate_sequence = 0u64;
     let mut checkpoint_sequence = 0u64;
+    let mut probe_due = false;
     let mut slice_sequence = 0u64;
     let mut last_charged = 0usize;
     #[cfg(feature = "ira")]
@@ -3692,8 +4559,7 @@ fn run_capnp_catalog(
     let mut best_at_checkpoint = f64::INFINITY;
     let mut announced_score = false;
     let mut announced_personal = None;
-    let mut announced_putative = false;
-    let mut announced_done = false;
+    let mut announced = RetireAnnouncements::default();
     let mut population_progress = PopulationEpochProgress::default();
     let mut stall = 0u32;
     #[cfg(feature = "bank-rpc")]
@@ -3733,574 +4599,991 @@ fn run_capnp_catalog(
     // measurable from a worker log instead of inferred from silence:
     // Leaves decided, exchanges adopted, walks kept, holes drawn.
     let mut count_leave = 0usize;
-    let mut count_other_family = 0usize;
+    // Own-progress clock for family hearing: the hop at which this replica
+    // last deepened its own best. A replica that has not deepened for
+    // CATALOG_HEAR_STALL hops is stalled in its packing.
+    // The structure last adopted by hearing, kept so the walk after a hear
+    // can be reported: whether the replica is still in the adopted packing
+    // family or has slid back to where it was.
+    let mut hear_state = HearState::default();
+    // Last minimum registered and last candidate offered, so an unchanged
+    // occupied state does not cost the coordinator another validation.
+    let mut last_registered: Option<(f64, Vec<f64>)> = None;
+    let mut last_offered: Option<(f64, Vec<f64>)> = None;
+    // Census jumps: the population's visit count of this replica's basin,
+    // not this replica's own stall, triggers an occasional jump.
+    let mut jump_state = JumpState::default();
+    let mut restart_state = RestartState::default();
     let mut count_walk = 0usize;
     let mut count_hole = 0usize;
-    let mut count_boundary = 0usize;
+    let mut extra_cover = 0usize;
     let mut last_policy_action = ACTION_LOCAL;
-    let mut checkpoint = |snapshot: ChainCheckpoint<'_>| {
-        checkpoint_sequence = checkpoint_sequence
-            .checked_add(1)
-            .expect("checkpoint sequence must fit u64");
-        // Quiet-stretch bookkeeping for the Leave gate: an improvement ends
-        // the stretch and records how long the replica took to come back.
-        if snapshot.best_energy() < leave_best - 1e-10 {
-            credit_action(last_policy_action, true);
-            leave_best = snapshot.best_energy();
-            leave_patience = leave_patience.max(leave_quiet);
-            leave_quiet = 0;
-        } else {
-            credit_action(last_policy_action, false);
-            leave_quiet += 1;
-        }
-        let boundary_charged = snapshot
-            .quench_boundaries()
-            .iter()
-            .map(|boundary| boundary.charged_calls())
-            .sum::<usize>();
-        let mut checkpoint_work = Vec::with_capacity(snapshot.quench_boundaries().len() + 1);
-        for boundary in snapshot.quench_boundaries() {
-            checkpoint_work.push((
-                ChargeKind::BasinEscape,
-                u64::try_from(boundary.charged_calls()).expect("quench charge must fit u64"),
-            ));
-        }
-        let checkpoint_charged = snapshot.charged().saturating_sub(last_charged);
-        let auxiliary_charged = checkpoint_charged
-            .checked_sub(boundary_charged)
-            .expect("quench boundaries cannot exceed checkpoint work");
-        if auxiliary_charged > 0 {
-            checkpoint_work.push((
-                ChargeKind::AuxiliaryEvaluation,
-                u64::try_from(auxiliary_charged).expect("auxiliary charge must fit u64"),
-            ));
-        } else if checkpoint_charged == 0 {
-            checkpoint_work.push((ChargeKind::LocalProposal, 0));
-        }
-        cooperative
-            .record_work_batch(replica, checkpoint_work)
-            .expect("checkpoint work batch must enter the cooperative ledger");
-        last_charged = snapshot.charged();
-
-        for transition in snapshot.accepted_transitions() {
-            if !transition.validated {
-                continue;
-            }
-            cooperative
-                .record_executed_transition(
-                    replica,
-                    u64::try_from(transition.hop).expect("transition hop must fit u64"),
-                    transition.action.clone(),
-                    transition.from_energy,
-                    transition.to_energy,
-                    transition.adopted,
-                )
-                .expect("validated local transition execution must remain traceable");
-        }
-
-        let operations = adaptive_catalog_operations(
-            &descriptor_space,
-            &signature.atomic_numbers,
-            replica,
-            &mut candidate_sequence,
-            seed,
-            snapshot.charged(),
-            snapshot.accepted_transitions(),
-        );
-        let mut path_active = false;
-        for operation in operations {
-            match operation {
-                AdaptiveCatalogOperation::RegisterCurrent(candidate) => {
-                    cooperative
-                        .record_work(replica, ChargeKind::DescriptorEvaluation, 0)
-                        .expect("source descriptor work must enter the cooperative ledger");
-                    path_active = matches!(
-                        cooperative.record_current(replica, candidate),
-                        Ok(TransitionRecordOutcome::Recorded)
-                    );
-                }
-                AdaptiveCatalogOperation::Adopt {
-                    action,
-                    destination,
-                    adopted,
-                } if path_active => {
-                    cooperative
-                        .record_work(replica, ChargeKind::DescriptorEvaluation, 0)
-                        .expect("destination descriptor work must enter the cooperative ledger");
-                    path_active = matches!(
-                        cooperative.record_transition(
-                            replica,
-                            action,
-                            TransitionDestination::Resolved(destination),
-                            adopted,
-                        ),
-                        Ok(TransitionRecordOutcome::Recorded)
-                    );
-                }
-                AdaptiveCatalogOperation::Unresolved { action } if path_active => {
-                    path_active = matches!(
-                        cooperative.record_transition(
-                            replica,
-                            action,
-                            TransitionDestination::Unresolved,
-                            false,
-                        ),
-                        Ok(TransitionRecordOutcome::Recorded)
-                    );
-                }
-                AdaptiveCatalogOperation::Adopt { .. }
-                | AdaptiveCatalogOperation::Unresolved { .. } => {}
-            }
-        }
-
-        let mut boundary_candidates = Vec::new();
-        let mut descriptor_work = Vec::new();
-        for boundary in snapshot
-            .quench_boundaries()
-            .iter()
-            .filter(|boundary| boundary.status() == QuenchStatus::Validated)
-        {
-            let Some(gradient) = boundary.gradient() else {
-                continue;
-            };
-            candidate_sequence = candidate_sequence
-                .checked_add(1)
-                .expect("candidate sequence must fit u64");
-            descriptor_work.push((ChargeKind::DescriptorEvaluation, 0));
-            if let Some(candidate) = lj_catalog_candidate(
-                &descriptor_space,
-                &signature.atomic_numbers,
-                replica,
-                candidate_sequence,
-                seed,
-                snapshot.charged(),
-                boundary.energy(),
-                boundary.state(),
-                gradient,
-            ) {
-                boundary_candidates.push(candidate);
-            }
-        }
-        cooperative
-            .record_work_batch(replica, descriptor_work)
-            .expect("quench descriptor batch must enter the cooperative ledger");
-        let mut freshest_boundary = None;
-        for candidate in boundary_candidates {
-            let _ = cooperative.post_offer_candidate(replica, candidate.clone());
-            freshest_boundary = Some(candidate);
-        }
-
-        #[cfg(feature = "ira")]
-        if rides_enabled
-            && discovery_role_allows_ride(assigned_discovery_role)
-            && checkpoint_sequence.is_multiple_of(ride_interval)
-            && let Some(maximum_evaluations) = ride_producer_budget(
-                snapshot.remaining(),
-                ride_receiver_reserve,
-                ride_proposal_reserve,
-                ride_budget_cap,
+    // Gossip over the census bus: at every GOSSIP_INTERVAL charged calls
+    // publish the GOSSIP_TOP deepest wells (0 for the whole table) and step
+    // toward the latest peer table by GOSSIP_WEIGHT. The peer set is the
+    // bus subscription, so CENSUS_BUS_NEIGHBORS=k is the ring topology.
+    let coop_gossip: Option<(usize, f64, Option<usize>)> = std::env::var("GOSSIP")
+        .ok()
+        .filter(|v| !v.is_empty())
+        .map(|_| {
+            let parsed = |name: &str| std::env::var(name).ok().and_then(|v| v.parse::<f64>().ok());
+            (
+                parsed("GOSSIP_INTERVAL")
+                    .map_or(20_000, |v| v as usize)
+                    .max(1),
+                parsed("GOSSIP_WEIGHT").unwrap_or(0.5),
+                match parsed("GOSSIP_TOP").map(|v| v as usize) {
+                    Some(0) => None,
+                    Some(k) => Some(k),
+                    None => Some(64),
+                },
             )
-            && let RideClaimOutcome::Work(work) = cooperative
-                .claim_ride(replica, ride_rng.random())
-                .expect("ride claim must preserve cooperative invariants")
-        {
-            let producer_event_sequence = candidate_sequence
-                .checked_add(1)
-                .expect("ride event sequence must fit u64");
-            candidate_sequence = candidate_sequence
-                .checked_add(3)
-                .expect("ride event sequence must fit u64");
-            let execution = CatalogRideExecutionConfig {
-                exploration: ride_exploration.clone(),
-                localization_radius: ride_localization_radius,
-                maximum_evaluations,
-                producer_event_sequence,
-                producer_charged_work: u64::try_from(snapshot.charged())
-                    .expect("LJ charged work must fit u64"),
-            };
-            let report = execute_catalog_ride(
-                &ride_surface,
-                &descriptor_space,
-                &work,
-                &signature.atomic_numbers,
-                ride_masses.view(),
-                &ride_frozen,
-                &execution,
-                &ride_witness,
-            );
-            let producer_calls = report.charged_evaluations;
-            let destination = connected_destination(&work, &report, &ride_witness)
-                .map(|candidate| Array1::from(candidate.coordinates));
-            let cartesian_step_norm = destination.as_ref().map(|state| {
-                vector_distance(
-                    snapshot
-                        .current_state()
-                        .as_slice()
-                        .expect("LJ state is contiguous"),
-                    state.as_slice().expect("LJ ride endpoint is contiguous"),
-                )
-            });
-            let report_outcome = cooperative
-                .report_ride(replica, report)
-                .expect("ride report must preserve cooperative invariants");
-            let ride_calls = ride_total_charged_calls(report_outcome, producer_calls);
-            let settled_ride_calls = settled_external_calls(ride_calls, snapshot.remaining());
-            if settled_ride_calls > 0 {
-                cooperative
-                    .record_work(replica, ChargeKind::SaddleRide, settled_ride_calls)
-                    .expect("ride work must enter the cooperative ledger");
-                last_charged = snapshot
-                    .charged()
-                    .saturating_add(usize::try_from(settled_ride_calls).unwrap_or(usize::MAX));
+        });
+    let mut next_gossip = coop_gossip.map_or(usize::MAX, |(interval, _, _)| interval);
+    let sync_policy = anneal_core::env::flag("CATALOG_SYNC_POLICY");
+    let mut gossip_published = 0usize;
+    let mut gossip_merged = 0usize;
+    let mut gossip_merge: Option<BiasUpdate> = None;
+    // Which phase took each checkpoint; printed on the seed record so a
+    // mechanism that never fires is visible as zero rather than assumed.
+    let mut phases = PhaseTally::default();
+    let mut checkpoint = |snapshot: ChainCheckpoint<'_>| {
+        /// Hear phase: whether a structure another replica published should be
+        /// adopted at this checkpoint.
+        ///
+        /// Adoption is off unless `CATALOG_HEAR` is set: `CATALOG_HEAR=1` adopts an
+        /// incumbent deeper than the own best by 1e-3, `CATALOG_HEAR=family` adopts
+        /// the coordinator's sparsest-family entry only after `CATALOG_HEAR_STALL`
+        /// hops without an own improvement, whatever its energy, and never the
+        /// incumbent draw; `CATALOG_NO_HEAR=1` forces it off. Off is the default
+        /// because handing the incumbent to stalled replicas resets the ensemble's
+        /// independent starts to one funnel: measured 1 of 48 ensembles at Marks
+        /// against 16 of 48 with adoption off and 23 of 48 for private chains
+        /// (LJ75, 48 replicas of 5e4, 2026-09-07), the branching scheme Procacci
+        /// (2015) rejects for the same reason in nonequilibrium work averages.
+        /// Sampled candidates are registered as packing references either way.
+        /// Returns the candidate to adopt; the caller records the trace and fires
+        /// the phase.
+        fn hear_phase(
+            state: &mut HearState,
+            cooperative: &mut anneal_core::cooperative_search::CooperativeRun,
+            replica: u32,
+            snapshot: &ChainCheckpoint<'_>,
+            checkpoint_sequence: u64,
+            hear_enabled: bool,
+        ) -> Option<anneal_core::catalog_rpc::CatalogCandidate> {
+            use anneal_core::catalog_rpc::{INCUMBENT_SAMPLE_DRAW, SPARSE_SAMPLE_DRAW};
+            use anneal_core::cooperative_search::CatalogSampleOutcome;
+            let floor_energy = snapshot.best_energy();
+            let current_len = snapshot.current_state().len();
+            let family_mode = std::env::var("CATALOG_HEAR").is_ok_and(|v| v == "family");
+            let hear_stall: usize = anneal_core::env::parsed("CATALOG_HEAR_STALL").unwrap_or(5000);
+            if snapshot.best_energy() < state.last_best - 1e-9 {
+                state.last_best = snapshot.best_energy();
+                state.last_best_hop = snapshot.hops();
             }
-            let (policy_reason, validation, quench, adoption, novelty) = match report_outcome {
-                RideReportOutcome::Credited(credit)
-                    if credit.certified_connection && destination.is_some() =>
-                {
-                    (
-                        "ride_certified",
-                        SliceValidation::Accepted,
-                        SliceQuench::Converged,
-                        SliceAdoption::NotAttempted,
-                        Some(if credit.novel_saddle || credit.novel_edge {
-                            1.0
-                        } else {
-                            0.0
-                        }),
-                    )
-                }
-                RideReportOutcome::Credited(credit) if credit.degenerate_rearrangement => (
-                    "ride_degenerate_rearrangement",
-                    SliceValidation::Accepted,
-                    SliceQuench::Converged,
-                    SliceAdoption::NotAttempted,
-                    Some(if credit.novel_saddle { 1.0 } else { 0.0 }),
-                ),
-                RideReportOutcome::Credited(credit) => {
-                    let reason = credit
-                        .failure
-                        .map(ride_failure_reason)
-                        .unwrap_or("ride_destination_unavailable");
-                    (
-                        reason,
-                        SliceValidation::Rejected,
-                        SliceQuench::Rejected,
-                        SliceAdoption::Rejected,
-                        Some(0.0),
-                    )
-                }
-                RideReportOutcome::Rejected => (
-                    "ride_report_rejected",
-                    SliceValidation::Rejected,
-                    SliceQuench::NotAttempted,
-                    SliceAdoption::Rejected,
-                    None,
-                ),
-                RideReportOutcome::LocalFallback => (
-                    "ride_report_fallback",
-                    SliceValidation::NotAttempted,
-                    SliceQuench::NotAttempted,
-                    SliceAdoption::Rejected,
-                    None,
-                ),
-                RideReportOutcome::SharingDisabled => (
-                    "ride_sharing_disabled",
-                    SliceValidation::NotAttempted,
-                    SliceQuench::NotAttempted,
-                    SliceAdoption::Rejected,
-                    None,
-                ),
-            };
-            slice_sequence = slice_sequence
-                .checked_add(1)
-                .expect("slice sequence must fit u64");
-            cooperative
-                .record_slice(
-                    replica,
-                    SliceTrace {
-                        slice: slice_sequence,
-                        current_basin: None,
-                        active_relation: None,
-                        policy_role: PolicyRole::Explore,
-                        policy_reason,
-                        proposal_family: ProposalFamily::TransitionRide,
-                        sampled_basin: work.source.census_basin,
-                        descriptor_step_norm: None,
-                        cartesian_step_norm,
-                        validation,
-                        quench,
-                        adoption,
-                        novelty,
-                        energy: finite_trace_energy(snapshot.best_energy()),
-                        charged_work: settled_ride_calls,
-                    },
-                )
-                .expect("ride checkpoint trace must remain complete");
-            return ride_checkpoint_action(report_outcome, destination, producer_calls);
-        }
-
-        let local_deepened = snapshot.best_energy() < best_at_checkpoint - 1e-10;
-        if local_deepened {
-            best_at_checkpoint = snapshot.best_energy();
-            stall = 0;
-            let jump =
-                announced_personal.is_none_or(|previous| snapshot.best_energy() < previous - 1e-3);
-            if jump {
+            let stalled = snapshot.hops().saturating_sub(state.last_best_hop) >= hear_stall;
+            // After a hear, one line every ten checkpoints: where the walk is.
+            if let Some(adopted) = state.heard_structure.as_ref()
+                && checkpoint_sequence.is_multiple_of(10)
+            {
+                let same_family = snapshot
+                    .current_state()
+                    .as_slice()
+                    .is_some_and(|here| !anneal_core::catalog::different_packing_family(here, adopted));
                 println!(
-                    "  personal best {:.6}  hops {}  refs {}  leaves {} other {} walk {} hole {}",
-                    snapshot.best_energy(),
+                    "  walk hops {}  energy {:.6}  best {:.6}  in-adopted-family {}",
                     snapshot.hops(),
-                    // Packings this chain's quench is repelled from. Own
-                    // history plus every structure the coordinator has
-                    // handed over, which is the interaction at the
-                    // minimisation level and the thing chain count is
-                    // supposed to scale.
-                    anneal_core::catalog::packing_references().len(),
-                    count_leave,
-                    count_other_family,
-                    count_walk,
-                    count_hole
+                    snapshot.current_energy(),
+                    snapshot.best_energy(),
+                    same_family
                 );
-                let _ = std::io::stdout().flush();
-                announced_personal = Some(snapshot.best_energy());
             }
-        } else {
-            stall = stall.saturating_add(1);
-        }
-        if !announced_score
-            && published_energy_score(snapshot.best_energy(), reference(cfg.n_points))
-        {
-            println!(
-                "  score {:.6}  hops {}",
-                snapshot.best_energy(),
-                snapshot.hops()
-            );
-            let _ = std::io::stdout().flush();
-            announced_score = true;
-        }
-        // The population barrier is serviced before any local gate. A
-        // checkpoint often finds the chain mid-hop with nothing that passes
-        // candidate validation; that must not silence its participation and
-        // must never block the chain. Membership is joined by reference to
-        // the best candidate the coordinator has already validated for this
-        // replica; a replica with nothing on file abstains so the epoch
-        // completes without it; a pending or rejected join is answered by
-        // returning to local work until the next checkpoint rather than by
-        // polling in place or retiring, which is what left one replica
-        // asleep for its whole budget.
-        let mut population_assignment = None;
-        loop {
-            let outcome = match active_population_action(
-                &population_progress,
-                snapshot.charged(),
-                snapshot.remaining(),
-                population_interval,
-                true,
-            ) {
-                PopulationEpochAction::Submit => population_call(
-                    cooperative.join_population(replica, population_progress.epoch()),
-                ),
-                PopulationEpochAction::Poll => population_call(
-                    cooperative.poll_population(replica, population_progress.epoch()),
-                ),
-                PopulationEpochAction::Abstain => population_call(
-                    cooperative.abstain_population(replica, population_progress.epoch()),
-                ),
-                PopulationEpochAction::LocalWork => break,
-            };
-            match outcome {
-                PopulationSynchronizationOutcome::Pending { .. }
-                | PopulationSynchronizationOutcome::Rejected => {
-                    population_progress.observe_pending();
-                    break;
-                }
-                PopulationSynchronizationOutcome::Ready { parent, plan } => {
-                    let completed_epoch = population_progress.epoch();
-                    population_progress.observe_ready();
-                    population_assignment = Some((completed_epoch, parent, plan));
-                }
-                PopulationSynchronizationOutcome::Unaddressed => {
-                    population_progress.observe_ready();
-                }
-                PopulationSynchronizationOutcome::LocalFallback
-                | PopulationSynchronizationOutcome::SharingDisabled => break,
+            if !hear_enabled {
+                return None;
             }
-        }
-        if let Some((completed_epoch, parent, plan)) = population_assignment
-            && snapshot.remaining() > 0
-        {
-            let family = population_family_position(&plan.destinations, &plan.parents, replica)
-                .expect("validated population plan must address this replica");
-            let draw =
-                population_rejuvenation_draw(seed, completed_epoch, replica, family.ordinal());
-            if shared_bias_enabled {
-                pending_deposits.push(Array1::from(parent.coordinates.clone()));
-            }
-            if coop_wells_enabled {
-                #[cfg(feature = "featomic")]
-                {
-                    let well = anneal_core::featomic_hop::soap_cloud_mean(
-                        ndarray::ArrayView1::from(parent.coordinates.as_slice()),
-                        coop_rcut,
-                        coop_species.as_deref(),
-                        None,
-                    );
-                    let known = shared_wells.iter().any(|w| {
-                        w.iter()
-                            .zip(well.iter())
-                            .map(|(a, b)| (a - b) * (a - b))
-                            .sum::<f64>()
-                            .sqrt()
-                            < anneal_core::featomic_hop::SOAP_PACK_MERGE
+            for draw in [INCUMBENT_SAMPLE_DRAW, SPARSE_SAMPLE_DRAW] {
+                if family_mode && draw == INCUMBENT_SAMPLE_DRAW {
+                    continue;
+                }
+                let outcome = cooperative.try_sample_candidate(replica, draw);
+                let _ = cooperative.try_sample_candidate(replica, draw);
+                if let Ok(CatalogSampleOutcome::Candidate(held)) = outcome {
+                    if held.coordinates.len() != current_len {
+                        continue;
+                    }
+                    anneal_core::catalog::include_packing_reference(&held.coordinates);
+                    anneal_core::catalog::offer_known_minimum(held.energy, &held.coordinates);
+                    // Mid-hop current energy sits above the ico floor. Comparing
+                    // against it yanks every walk back onto ico.
+                    let deeper = held.energy < floor_energy - 1e-3;
+                    if family_mode {
+                        if !stalled {
+                            continue;
+                        }
+                    } else if !deeper {
+                        continue;
+                    }
+                    let elsewhere = snapshot.current_state().as_slice().is_none_or(|here| {
+                        anneal_core::catalog::different_packing_family(here, &held.coordinates)
                     });
-                    if !known {
-                        shared_wells.push(well);
-                        if shared_wells.len() > 30 {
-                            shared_wells.remove(0);
-                        }
-                        anneal_core::featomic_hop::set_packing_archive(shared_wells.clone());
+                    if elsewhere || (!family_mode && draw == INCUMBENT_SAMPLE_DRAW) {
+                        return Some(held);
                     }
                 }
             }
-            // Occupancy: champion stays; kept extra may take a better
-            // isomer of the same packing; leftover extras reseed.
-            // A deeper different funnel is never copied.
-            let live_state = snapshot.current_state();
-            let live = live_state.as_slice().expect("LJ state is contiguous");
-            let extra_of_occupied_packing = plan.parent_candidates.iter().any(|candidate| {
-                candidate.producer_replica != replica
-                    && candidate.energy < snapshot.current_energy() - 1e-10
-                    && same_packing_coordinates(live, &candidate.coordinates)
-            });
-            if parent.producer_replica == replica && extra_of_occupied_packing {
-                let left: Option<Array1<f64>> = {
-                    #[cfg(feature = "featomic")]
-                    {
-                        anneal_core::featomic_hop::surplus_reseed(
-                            live_state,
-                            &shared_wells,
-                            coop_rcut,
-                            coop_species.as_deref(),
-                            None,
-                            &mut transport_rng,
-                        )
-                    }
-                    #[cfg(not(feature = "featomic"))]
-                    {
-                        None
-                    }
-                };
-                if let Some(left) = left {
-                    slice_sequence = slice_sequence
-                        .checked_add(1)
-                        .expect("slice sequence must fit u64");
-                    let reconfiguration = SliceTrace {
-                        slice: slice_sequence,
-                        current_basin: None,
-                        active_relation: None,
-                        policy_role: PolicyRole::Explore,
-                        policy_reason: "population_reseed",
-                        proposal_family: ProposalFamily::HyperbandReseed,
-                        sampled_basin: parent.census_basin,
-                        descriptor_step_norm: None,
-                        cartesian_step_norm: Some(vector_distance(
-                            live,
-                            left.as_slice().expect("LJ proposal is contiguous"),
-                        )),
-                        validation: SliceValidation::Accepted,
-                        quench: SliceQuench::Converged,
-                        adoption: SliceAdoption::Adopted,
-                        novelty: None,
-                        energy: finite_trace_energy(snapshot.best_energy()),
-                        charged_work: u64::try_from(checkpoint_charged)
-                            .expect("checkpoint charge must fit u64"),
-                    };
+            None
+        }
+        let action = with_pending_deposits(
+            &mut pending_deposits,
+            shared_bias_enabled,
+            |pending_deposits| {
+                if sharing && let Some(portfolio) = surfaces.as_ref() {
                     cooperative
-                        .record_slice(replica, reconfiguration)
-                        .expect("population checkpoint trace must remain complete");
-                    return CheckpointAction::BoundaryProposal {
-                        state: left,
-                        action: "population_reseed".to_owned(),
-                    };
+                        .post_surface_evidence(replica, Arc::clone(portfolio))
+                        .expect("surface exchange must name the live replica");
                 }
-            }
-            let foreign_parent = parent.producer_replica != replica;
-            if foreign_parent && parent.coordinates.len() == live_state.len() {
-                let live = live_state.as_slice().expect("LJ state is contiguous");
-                let better_isomer = same_packing_coordinates(live, &parent.coordinates)
-                    && parent.energy < snapshot.current_energy() - 1e-10;
-                if better_isomer {
-                    let mut state = Array1::from(parent.coordinates.clone());
-                    let atoms = state.len() / 3;
-                    if atoms > 0 {
-                        let mut jitter = rand::rngs::StdRng::seed_from_u64(draw);
-                        for coordinate in state.iter_mut() {
-                            *coordinate += transport_noise * (jitter.random::<f64>() - 0.5);
+                if evidence_only {
+                    if let Some(charged) =
+                        unsettled_objective_calls(snapshot.charged(), last_charged)
+                    {
+                        cooperative
+                            .record_work(replica, EVIDENCE_ONLY_WORK_KIND, charged)
+                            .expect("evidence-only work must enter the cooperative ledger");
+                    }
+                    last_charged = snapshot.charged();
+                    phases.fire("continue");
+                    return CheckpointAction::Continue;
+                }
+                checkpoint_sequence = checkpoint_sequence
+                    .checked_add(1)
+                    .expect("checkpoint sequence must fit u64");
+                probe_due |= checkpoint_sequence.is_multiple_of(probe_interval);
+                // Census bus: publish this replica's minimum, read every peer's.
+                // Peers on this side of the packing map become repulsion
+                // references and the crowd the stopping rule reads; every fresh
+                // peer minimum is a shared-bias deposit when shared bias is on.
+                if let Some(bus) = census_bus.as_mut()
+                    && let Some(here) = snapshot.current_state().as_slice()
+                {
+                    if lj_catalog_gradient_norm(
+                        snapshot.current_energy(),
+                        snapshot.current_state(),
+                        snapshot.current_gradient(),
+                    )
+                    .is_some()
+                    {
+                        bus.publish(snapshot.hops() as u64, snapshot.current_energy(), here);
+                    }
+                    let fresh = bus.poll();
+                    bus_received += fresh.len();
+                    if let Some((interval, weight, top)) = coop_gossip
+                        && snapshot.charged() >= next_gossip
+                        && let Some(bias) = snapshot.bias()
+                    {
+                        next_gossip = snapshot.charged() + interval;
+                        let table = match top {
+                            Some(count) => bias.deepest_wells(count),
+                            None => bias.wells(),
+                        };
+                        if bus.publish_wells(&table) {
+                            gossip_published += 1;
                         }
-                        for axis in 0..3 {
-                            let mean = (0..atoms).map(|atom| state[3 * atom + axis]).sum::<f64>()
-                                / atoms as f64;
-                            for atom in 0..atoms {
-                                state[3 * atom + axis] -= mean;
+                        if let Some((_, wells)) = bus.poll_wells().into_iter().last() {
+                            gossip_merged += 1;
+                            gossip_merge = Some(BiasUpdate::MergeWells {
+                                wells,
+                                weight,
+                                complete: top.is_none(),
+                            });
+                        }
+                    }
+                    // Locality-limited repulsive history: admit bus deposits from
+                    // nearby packings. This does not average coordinates or guarantee
+                    // one cluster per funnel. CENSUS_BUS_UNBOUNDED=1 admits distant
+                    // bus observations for a controlled comparison. Population-parent
+                    // and own-visit deposits retain their separate admission rules.
+                    let unbounded = anneal_core::env::flag("CENSUS_BUS_UNBOUNDED");
+                    if shared_bias_enabled {
+                        for peer in &fresh {
+                            if peer.coordinates.len() == here.len()
+                                && (unbounded
+                                    || anneal_core::catalog::nearby_packing(
+                                        here,
+                                        &peer.coordinates,
+                                    ))
+                            {
+                                pending_deposits.push(Array1::from(peer.coordinates.clone()));
                             }
                         }
                     }
-                    if state
-                        .iter()
-                        .zip(snapshot.current_state().iter())
-                        .any(|(a, b)| (a - b).abs() > 1e-12)
+                    // Recompute the nearby flags only for peers whose minimum
+                    // changed, or for all peers when this replica's own minimum
+                    // changed; otherwise reuse them. This keeps the bus at the cost
+                    // of the messages, not of 47 packing comparisons a checkpoint.
+                    let peers: Vec<_> = bus.peers().collect();
+                    let (updates, crowd) = census_nearby_updates(
+                        &mut bus_last_minimum,
+                        checkpoint_sequence,
+                        snapshot.current_energy(),
+                        here,
+                        &peers,
+                        &fresh,
+                        &bus.nearby,
+                    );
+                    bus.nearby.extend(updates);
+                    peer_crowd = crowd;
+                    if anneal_core::env::flag("CATALOG_CENSUS_TRACE")
+                        && checkpoint_sequence.is_multiple_of(7)
                     {
-                        slice_sequence = slice_sequence
-                            .checked_add(1)
-                            .expect("slice sequence must fit u64");
-                        let reconfiguration = SliceTrace {
-                            slice: slice_sequence,
-                            current_basin: None,
-                            active_relation: None,
-                            policy_role: PolicyRole::Exploit,
-                            policy_reason: "population_assignment",
-                            proposal_family: ProposalFamily::PopulationReconfiguration,
-                            sampled_basin: parent.census_basin,
-                            descriptor_step_norm: None,
-                            cartesian_step_norm: Some(vector_distance(
-                                snapshot
-                                    .current_state()
-                                    .as_slice()
-                                    .expect("LJ state is contiguous"),
-                                state.as_slice().expect("LJ proposal is contiguous"),
-                            )),
-                            validation: SliceValidation::Accepted,
-                            quench: SliceQuench::Converged,
-                            adoption: SliceAdoption::Adopted,
-                            novelty: None,
-                            energy: finite_trace_energy(snapshot.best_energy()),
-                            charged_work: u64::try_from(checkpoint_charged)
-                                .expect("checkpoint charge must fit u64"),
-                        };
-                        cooperative
-                            .record_slice(replica, reconfiguration)
-                            .expect("population checkpoint trace must remain complete");
-                        return CheckpointAction::BoundaryProposal {
-                            state,
-                            action: "population_parent".to_owned(),
-                        };
+                        println!(
+                            "  bus hops {}  peers {}  crowd {}  received {}  gossip published {} merged {}",
+                            snapshot.hops(),
+                            bus.peer_count(),
+                            peer_crowd,
+                            bus_received,
+                            gossip_published,
+                            gossip_merged
+                        );
                     }
                 }
-            }
-            if foreign_parent {
-                let live = snapshot.current_state();
-                let left = {
-                    #[cfg(feature = "featomic")]
-                    {
-                        anneal_core::featomic_hop::surplus_reseed(
-                            live,
-                            &shared_wells,
-                            coop_rcut,
-                            coop_species.as_deref(),
-                            None,
-                            &mut transport_rng,
+                // Quiet-stretch bookkeeping for the Leave gate: an improvement ends
+                // the stretch and records how long the replica took to come back.
+                if snapshot.best_energy() < leave_best - 1e-10 {
+                    credit_action(last_policy_action, true);
+                    leave_best = snapshot.best_energy();
+                    leave_patience = leave_patience.max(leave_quiet);
+                    leave_quiet = 0;
+                } else {
+                    credit_action(last_policy_action, false);
+                    leave_quiet += 1;
+                }
+                let boundary_charged = snapshot
+                    .quench_boundaries()
+                    .iter()
+                    .map(|boundary| boundary.charged_calls())
+                    .sum::<usize>();
+                let mut checkpoint_work =
+                    Vec::with_capacity(snapshot.quench_boundaries().len() + 1);
+                for boundary in snapshot.quench_boundaries() {
+                    checkpoint_work.push((
+                        ChargeKind::BasinEscape,
+                        u64::try_from(boundary.charged_calls())
+                            .expect("quench charge must fit u64"),
+                    ));
+                }
+                let checkpoint_charged = snapshot.charged().saturating_sub(last_charged);
+                let auxiliary_charged = checkpoint_charged
+                    .checked_sub(boundary_charged)
+                    .expect("quench boundaries cannot exceed checkpoint work");
+                if auxiliary_charged > 0 {
+                    checkpoint_work.push((
+                        ChargeKind::AuxiliaryEvaluation,
+                        u64::try_from(auxiliary_charged).expect("auxiliary charge must fit u64"),
+                    ));
+                } else if checkpoint_charged == 0 {
+                    checkpoint_work.push((ChargeKind::LocalProposal, 0));
+                }
+                cooperative
+                    .record_work_batch(replica, checkpoint_work)
+                    .expect("checkpoint work batch must enter the cooperative ledger");
+                last_charged = snapshot.charged();
+
+                for transition in snapshot.accepted_transitions() {
+                    cooperative
+                        .record_executed_transition(
+                            replica,
+                            u64::try_from(transition.hop).expect("transition hop must fit u64"),
+                            transition.action.clone(),
+                            transition.from_energy,
+                            if transition.validated {
+                                transition.to_energy
+                            } else {
+                                f64::NAN
+                            },
+                            transition.adopted,
                         )
-                        .unwrap_or_else(|| {
+                        .expect("validated local transition execution must remain traceable");
+                }
+
+                // Diagnostic probes define comparable return evidence. Adaptive
+                // accepted hops remain discovery records, not samples of this kernel.
+                let probes = snapshot
+                    .accepted_transitions()
+                    .iter()
+                    .filter(|transition| transition.action == "probe" && !transition.adopted)
+                    .cloned()
+                    .collect::<Vec<_>>();
+                let operations = adaptive_catalog_operations(
+                    &descriptor_space,
+                    &signature.atomic_numbers,
+                    replica,
+                    &mut candidate_sequence,
+                    seed,
+                    snapshot.charged(),
+                    &probes,
+                );
+                // The mailbox preserves source/outcome ordering without blocking the
+                // hop. Publication is bounded by the diagnostic probe cadence.
+                for operation in operations {
+                    match operation {
+                        AdaptiveCatalogOperation::RegisterCurrent(candidate) => {
+                            let _ = cooperative.post_record_current(replica, candidate);
+                        }
+                        AdaptiveCatalogOperation::Adopt {
+                            action,
+                            destination,
+                            adopted,
+                        } => {
+                            let _ = cooperative.post_record_transition(
+                                replica,
+                                action,
+                                anneal_core::catalog_rpc::TransitionDestination::Resolved(
+                                    destination,
+                                ),
+                                adopted,
+                            );
+                        }
+                        AdaptiveCatalogOperation::Unresolved { action } => {
+                            let _ = cooperative.post_record_transition(
+                                replica,
+                                action,
+                                anneal_core::catalog_rpc::TransitionDestination::Unresolved,
+                                false,
+                            );
+                        }
+                    }
+                }
+                // A checkpoint registers its occupied minimum, not the origin of a
+                // sampled trajectory segment. Registration does not invent an edge.
+                // Coalesced: a chain sits in one minimum for hundreds of checkpoints,
+                // and every registration costs the coordinator a validation (0.28 s
+                // on LJ75, measured); re-sending an unchanged minimum is what
+                // saturated it with 48 replicas. Only a changed minimum is sent.
+                let occupied_changed = snapshot.current_gradient().is_some()
+                    && last_registered.as_ref().is_none_or(|(energy, state)| {
+                        (energy - snapshot.current_energy()).abs() > 1e-9
+                            || Some(state.as_slice()) != snapshot.current_state().as_slice()
+                    });
+                if let Some(gradient) = snapshot.current_gradient()
+                    && occupied_changed
+                {
+                    last_registered =
+                        Some((snapshot.current_energy(), snapshot.current_state().to_vec()));
+                    candidate_sequence += 1;
+                    if let Some(candidate) = lj_catalog_candidate(
+                        &descriptor_space,
+                        &signature.atomic_numbers,
+                        replica,
+                        candidate_sequence,
+                        seed,
+                        snapshot.charged(),
+                        snapshot.current_energy(),
+                        snapshot.current_state(),
+                        gradient,
+                    ) {
+                        cooperative
+                            .record_work(replica, ChargeKind::DescriptorEvaluation, 0)
+                            .expect("source descriptor work must enter the cooperative ledger");
+                        let _ = cooperative.post_record_current(replica, candidate);
+                    }
+                }
+
+                let mut boundary_candidates = Vec::new();
+                let mut descriptor_work = Vec::new();
+                for boundary in snapshot
+                    .quench_boundaries()
+                    .iter()
+                    .filter(|boundary| boundary.status() == QuenchStatus::Validated)
+                {
+                    let Some(gradient) = boundary.gradient() else {
+                        continue;
+                    };
+                    candidate_sequence = candidate_sequence
+                        .checked_add(1)
+                        .expect("candidate sequence must fit u64");
+                    descriptor_work.push((ChargeKind::DescriptorEvaluation, 0));
+                    if let Some(candidate) = lj_catalog_candidate(
+                        &descriptor_space,
+                        &signature.atomic_numbers,
+                        replica,
+                        candidate_sequence,
+                        seed,
+                        snapshot.charged(),
+                        boundary.energy(),
+                        boundary.state(),
+                        gradient,
+                    ) {
+                        boundary_candidates.push(candidate);
+                    }
+                }
+                cooperative
+                    .record_work_batch(replica, descriptor_work)
+                    .expect("quench descriptor batch must enter the cooperative ledger");
+                // One offer per checkpoint. A slice can hold hundreds of validated
+                // quenches; each offer runs coordinator DECAF and parks the ensemble.
+                let freshest_boundary = boundary_candidates.into_iter().min_by(|left, right| {
+                    left.energy
+                        .total_cmp(&right.energy)
+                        .then_with(|| left.event_sequence.cmp(&right.event_sequence))
+                });
+                // One offer per checkpoint, and only for a minimum not offered
+                // before: the offer is the other validated request kind.
+                if let Some(candidate) = freshest_boundary.as_ref()
+                    && last_offered.as_ref().is_none_or(|(energy, coordinates)| {
+                        (energy - candidate.energy).abs() > 1e-9
+                            || coordinates != &candidate.coordinates
+                    })
+                {
+                    last_offered = Some((candidate.energy, candidate.coordinates.clone()));
+                    let _ = cooperative.post_offer_candidate(replica, candidate.clone());
+                }
+
+                // Bookkeeping and the position report run on every checkpoint,
+                // before any phase that can take the checkpoint: a probe, a ride or
+                // a hear must not silence the stall clock or the census position.
+                let local_deepened = snapshot.best_energy() < best_at_checkpoint - 1e-10;
+                if local_deepened {
+                    best_at_checkpoint = snapshot.best_energy();
+                    stall = 0;
+                    let jump = announced_personal
+                        .is_none_or(|previous| snapshot.best_energy() < previous - 1e-3);
+                    if jump {
+                        println!(
+                            "  personal best {:.6}  hops {}  refs {}  leaves {} other {} walk {} hole {}",
+                            snapshot.best_energy(),
+                            snapshot.hops(),
+                            // Packings this chain's quench is repelled from. Own
+                            // history plus every structure the coordinator has
+                            // handed over, which is the interaction at the
+                            // minimisation level and the thing chain count is
+                            // supposed to scale.
+                            anneal_core::catalog::packing_references().len(),
+                            count_leave,
+                            hear_state.other_family,
+                            count_walk,
+                            count_hole
+                        );
+                        let _ = std::io::stdout().flush();
+                        announced_personal = Some(snapshot.best_energy());
+                    }
+                } else {
+                    stall = stall.saturating_add(1);
+                }
+                if snapshot.hops() > 0 && snapshot.hops().is_multiple_of(500) {
+                    println!(
+                        "  occupancy hops {} best {:.6} refs {} leaves {} other {} walk {} hole {}",
+                        snapshot.hops(),
+                        snapshot.best_energy(),
+                        anneal_core::catalog::packing_references().len(),
+                        count_leave,
+                        hear_state.other_family,
+                        count_walk,
+                        count_hole
+                    );
+                    let _ = std::io::stdout().flush();
+                }
+                if !announced_score
+                    && published_energy_score(snapshot.best_energy(), reference(cfg.n_points))
+                {
+                    println!(
+                        "  score {:.6}  hops {}",
+                        snapshot.best_energy(),
+                        snapshot.hops()
+                    );
+                    if cfg.n_points == 75 {
+                        println!(
+                            "  Marks {:.6}  hops {}",
+                            snapshot.best_energy(),
+                            snapshot.hops()
+                        );
+                    }
+                    let _ = std::io::stdout().flush();
+                    announced_score = true;
+                }
+                // Conversation is not identity. A position report every checkpoint
+                // is how the chains talk: the descriptor of wherever the chain
+                // stands, mid-hop or not, asked against the census the validated
+                // registrations have built, with no purity gate, because reporting
+                // a position claims nothing about minimality. The identity tier,
+                // the census and catalog entries themselves, stays fed exclusively
+                // by share-grade validated states through the offer loop above.
+                let _ = freshest_boundary;
+                candidate_sequence = candidate_sequence
+                    .checked_add(1)
+                    .expect("candidate sequence must fit u64");
+                cooperative
+                    .record_work(replica, ChargeKind::DescriptorEvaluation, 0)
+                    .expect("current descriptor work must enter the cooperative ledger");
+                let Ok(position) = descriptor_space
+                    .describe(snapshot.current_state(), Some(&signature.atomic_numbers))
+                else {
+                    return continue_checkpoint(
+                        &mut phases,
+                        &mut cooperative,
+                        replica,
+                        &mut slice_sequence,
+                        checkpoint_charged,
+                        snapshot.best_energy(),
+                    );
+                };
+                let descriptor = position.values().to_vec();
+                #[cfg(feature = "bank-rpc")]
+                let decree_assignment = decree_slot
+                    .try_lock()
+                    .ok()
+                    .and_then(|held| held.clone())
+                    .and_then(|decree| {
+                        decree
+                            .assignments
+                            .into_iter()
+                            .find(|assignment| assignment.replica == replica)
+                    });
+                // Due probes wait for a validated origin and precede adaptive
+                // checkpoint actions. Their unresolved outcomes remain observations,
+                // not reasons to change the declared perturb-quench kernel.
+                if sharing
+                    && checkpoint_sequence.is_multiple_of(probe_interval)
+                    && snapshot.remaining() > run_cfg.relax_steps.saturating_add(2)
+                {
+                    let draw = checkpoint_sequence.wrapping_mul(0x9E37_79B9_7F4A_7C15)
+                        ^ u64::from(replica);
+                    if let anneal_core::cooperative_search::CatalogBoundaryOutcome::Crossing(
+                        crossing,
+                    ) = cooperative
+                        .boundary_crossing(replica, snapshot.current_state().to_vec(), draw)
+                        .expect("boundary crossing poll must preserve local execution")
+                        && let Some(state) = boundary_crossing_trial(
+                            snapshot.current_state(),
+                            &crossing,
+                            0.0,
+                            10.0,
+                            &mut probe_rng,
+                        )
+                    {
+                        phases.fire("boundary");
+                        return complete_checkpoint_trace(
+                            &mut cooperative,
+                            replica,
+                            &mut slice_sequence,
+                            snapshot.charged(),
+                            snapshot.best_energy(),
+                            |_, _| CheckpointAction::ProbeProposal {
+                                state,
+                                action: "boundary".to_owned(),
+                            },
+                        );
+                    }
+                }
+                if probe_due
+                    && snapshot.current_gradient().is_some()
+                    && snapshot.remaining() > run_cfg.relax_steps.saturating_add(2)
+                    && let Some(state) =
+                        fixed_probe_trial(snapshot.current_state(), probe_scale, &mut probe_rng)
+                {
+                    probe_due = false;
+                    phases.fire("probe");
+                    return complete_checkpoint_trace(
+                        &mut cooperative,
+                        replica,
+                        &mut slice_sequence,
+                        snapshot.charged(),
+                        snapshot.best_energy(),
+                        |_, _| CheckpointAction::ProbeProposal {
+                            state,
+                            action: "probe".to_owned(),
+                        },
+                    );
+                }
+
+                if core_class.is_some() {
+                    let class = anneal_core::corekey::motif_class(snapshot.current_state()).index();
+                    let verdict = cooperative
+                        .report_core_class(
+                            replica,
+                            class,
+                            snapshot.current_energy(),
+                            snapshot.charged(),
+                        )
+                        .expect("core-class report must stay on the cooperative ledger");
+                    if verdict == anneal_core::coreclass::CoreVerdict::Restart {
+                        let mut adopt_rng = rand::rngs::StdRng::seed_from_u64(
+                            seed.wrapping_add(u64::from(replica))
+                                .wrapping_add(snapshot.charged() as u64),
+                        );
+                        let fresh =
+                            random_cluster(cfg.n_points, 0.7, cfg.min_separation, &mut adopt_rng);
+                        phases.fire("coreclass");
+                        return complete_checkpoint_trace(
+                            &mut cooperative,
+                            replica,
+                            &mut slice_sequence,
+                            snapshot.charged(),
+                            snapshot.best_energy(),
+                            |_, _| CheckpointAction::ExternalAdopt {
+                                state: fresh,
+                                action: "coreclass".to_owned(),
+                                external_calls: 0,
+                            },
+                        );
+                    }
+                }
+
+                #[cfg(feature = "ira")]
+                if rides_enabled
+                    && discovery_role_allows_ride(assigned_discovery_role)
+                    && checkpoint_sequence.is_multiple_of(ride_interval)
+                    && let Some(maximum_evaluations) = ride_producer_budget(
+                        snapshot.remaining(),
+                        ride_receiver_reserve,
+                        ride_proposal_reserve,
+                        ride_budget_cap,
+                    )
+                    && let RideClaimOutcome::Work(work) = cooperative
+                        .claim_ride(replica, ride_rng.random())
+                        .expect("ride claim must preserve cooperative invariants")
+                {
+                    let producer_event_sequence = candidate_sequence
+                        .checked_add(1)
+                        .expect("ride event sequence must fit u64");
+                    candidate_sequence = candidate_sequence
+                        .checked_add(3)
+                        .expect("ride event sequence must fit u64");
+                    let execution = CatalogRideExecutionConfig {
+                        exploration: ride_exploration.clone(),
+                        localization_radius: ride_localization_radius,
+                        maximum_evaluations,
+                        producer_event_sequence,
+                        producer_charged_work: u64::try_from(snapshot.charged())
+                            .expect("LJ charged work must fit u64"),
+                    };
+                    let report = execute_catalog_ride(
+                        &ride_surface,
+                        &descriptor_space,
+                        &work,
+                        &signature.atomic_numbers,
+                        ride_masses.view(),
+                        &ride_frozen,
+                        &execution,
+                        &ride_witness,
+                    );
+                    let producer_calls = report.charged_evaluations;
+                    let destination = connected_destination(&work, &report, &ride_witness)
+                        .map(|candidate| Array1::from(candidate.coordinates));
+                    let cartesian_step_norm = destination.as_ref().map(|state| {
+                        vector_distance(
+                            snapshot
+                                .current_state()
+                                .as_slice()
+                                .expect("LJ state is contiguous"),
+                            state.as_slice().expect("LJ ride endpoint is contiguous"),
+                        )
+                    });
+                    let report_outcome = cooperative
+                        .report_ride(replica, report)
+                        .expect("ride report must preserve cooperative invariants");
+                    let ride_calls = ride_total_charged_calls(report_outcome, producer_calls);
+                    let settled_ride_calls =
+                        settled_external_calls(ride_calls, snapshot.remaining());
+                    if settled_ride_calls > 0 {
+                        cooperative
+                            .record_work(replica, ChargeKind::SaddleRide, settled_ride_calls)
+                            .expect("ride work must enter the cooperative ledger");
+                        last_charged = snapshot.charged().saturating_add(
+                            usize::try_from(settled_ride_calls).unwrap_or(usize::MAX),
+                        );
+                    }
+                    let (policy_reason, validation, quench, adoption, novelty) =
+                        match report_outcome {
+                            RideReportOutcome::Credited(credit)
+                                if credit.certified_connection && destination.is_some() =>
+                            {
+                                (
+                                    "ride_certified",
+                                    SliceValidation::Accepted,
+                                    SliceQuench::Converged,
+                                    SliceAdoption::NotAttempted,
+                                    Some(if credit.novel_saddle || credit.novel_edge {
+                                        1.0
+                                    } else {
+                                        0.0
+                                    }),
+                                )
+                            }
+                            RideReportOutcome::Credited(credit)
+                                if credit.degenerate_rearrangement =>
+                            {
+                                (
+                                    "ride_degenerate_rearrangement",
+                                    SliceValidation::Accepted,
+                                    SliceQuench::Converged,
+                                    SliceAdoption::NotAttempted,
+                                    Some(if credit.novel_saddle { 1.0 } else { 0.0 }),
+                                )
+                            }
+                            RideReportOutcome::Credited(credit) => {
+                                let reason = credit
+                                    .failure
+                                    .map(ride_failure_reason)
+                                    .unwrap_or("ride_destination_unavailable");
+                                (
+                                    reason,
+                                    SliceValidation::Rejected,
+                                    SliceQuench::Rejected,
+                                    SliceAdoption::Rejected,
+                                    Some(0.0),
+                                )
+                            }
+                            RideReportOutcome::Rejected => (
+                                "ride_report_rejected",
+                                SliceValidation::Rejected,
+                                SliceQuench::NotAttempted,
+                                SliceAdoption::Rejected,
+                                None,
+                            ),
+                            RideReportOutcome::LocalFallback => (
+                                "ride_report_fallback",
+                                SliceValidation::NotAttempted,
+                                SliceQuench::NotAttempted,
+                                SliceAdoption::Rejected,
+                                None,
+                            ),
+                            RideReportOutcome::SharingDisabled => (
+                                "ride_sharing_disabled",
+                                SliceValidation::NotAttempted,
+                                SliceQuench::NotAttempted,
+                                SliceAdoption::Rejected,
+                                None,
+                            ),
+                        };
+                    slice_sequence = slice_sequence
+                        .checked_add(1)
+                        .expect("slice sequence must fit u64");
+                    cooperative
+                        .record_slice(
+                            replica,
+                            SliceTrace {
+                                slice: slice_sequence,
+                                current_basin: None,
+                                active_relation: None,
+                                policy_role: PolicyRole::Explore,
+                                policy_reason,
+                                proposal_family: ProposalFamily::TransitionRide,
+                                sampled_basin: work.source.census_basin,
+                                descriptor_step_norm: None,
+                                cartesian_step_norm,
+                                validation,
+                                quench,
+                                adoption,
+                                novelty,
+                                energy: finite_trace_energy(snapshot.best_energy()),
+                                charged_work: settled_ride_calls,
+                            },
+                        )
+                        .expect("ride checkpoint trace must remain complete");
+                    phases.fire("ride");
+                    return ride_checkpoint_action(report_outcome, destination, producer_calls);
+                }
+
+                // The population barrier is serviced before any local gate. A
+                // checkpoint often finds the chain mid-hop with nothing that passes
+                // candidate validation; that must not silence its participation and
+                // must never block the chain. Membership is joined by reference to
+                // the best candidate the coordinator has already validated for this
+                // replica; a replica with nothing on file abstains so the epoch
+                // completes without it; a pending or rejected join is answered by
+                // returning to local work until the next checkpoint rather than by
+                // polling in place or retiring, which is what left one replica
+                // asleep for its whole budget.
+                let mut population_assignment = None;
+                loop {
+                    let outcome = match active_population_action(
+                        &population_progress,
+                        snapshot.charged(),
+                        snapshot.remaining(),
+                        population_interval,
+                        true,
+                    ) {
+                        PopulationEpochAction::Submit => population_call(
+                            cooperative.join_population(replica, population_progress.epoch()),
+                        ),
+                        PopulationEpochAction::Poll => population_call(
+                            cooperative.poll_population(replica, population_progress.epoch()),
+                        ),
+                        PopulationEpochAction::Abstain => population_call(
+                            cooperative.abstain_population(replica, population_progress.epoch()),
+                        ),
+                        PopulationEpochAction::LocalWork => break,
+                    };
+                    match outcome {
+                        PopulationSynchronizationOutcome::Pending { .. }
+                        | PopulationSynchronizationOutcome::Rejected => {
+                            population_progress.observe_pending();
+                            break;
+                        }
+                        PopulationSynchronizationOutcome::Ready { parent, plan } => {
+                            let completed_epoch = population_progress.epoch();
+                            population_progress.observe_ready();
+                            population_assignment = Some((completed_epoch, parent, plan));
+                        }
+                        PopulationSynchronizationOutcome::Unaddressed => {
+                            population_progress.observe_ready();
+                        }
+                        PopulationSynchronizationOutcome::LocalFallback
+                        | PopulationSynchronizationOutcome::SharingDisabled => break,
+                    }
+                }
+                if let Some((completed_epoch, parent, plan)) = population_assignment
+                    && snapshot.remaining() > 0
+                {
+                    let family =
+                        population_family_position(&plan.destinations, &plan.parents, replica)
+                            .expect("validated population plan must address this replica");
+                    let draw = population_rejuvenation_draw(
+                        seed,
+                        completed_epoch,
+                        replica,
+                        family.ordinal(),
+                    );
+                    if shared_bias_enabled {
+                        pending_deposits.push(Array1::from(parent.coordinates.clone()));
+                    }
+                    if coop_wells_enabled {
+                        #[cfg(feature = "featomic")]
+                        {
+                            let well = anneal_core::featomic_hop::soap_cloud_mean(
+                                ndarray::ArrayView1::from(parent.coordinates.as_slice()),
+                                coop_rcut,
+                                coop_species.as_deref(),
+                                None,
+                            );
+                            let known = shared_wells.iter().any(|w| {
+                                w.iter()
+                                    .zip(well.iter())
+                                    .map(|(a, b)| (a - b) * (a - b))
+                                    .sum::<f64>()
+                                    .sqrt()
+                                    < anneal_core::featomic_hop::SOAP_PACK_MERGE
+                            });
+                            if !known {
+                                shared_wells.push(well);
+                                if shared_wells.len() > 30 {
+                                    shared_wells.remove(0);
+                                }
+                                anneal_core::featomic_hop::set_packing_archive(
+                                    shared_wells.clone(),
+                                );
+                            }
+                        }
+                    }
+                    // Occupancy: champion stays; kept extra may take a better
+                    // isomer of the same packing; leftover extras reseed.
+                    // A deeper different funnel is never copied.
+                    let live_state = snapshot.current_state();
+                    let live = live_state.as_slice().expect("LJ state is contiguous");
+                    let extra_of_occupied_packing =
+                        plan.parent_candidates.iter().any(|candidate| {
+                            candidate.producer_replica != replica
+                                && candidate.energy < snapshot.current_energy() - 1e-10
+                                && same_packing_coordinates(live, &candidate.coordinates)
+                        });
+                    if parent.producer_replica == replica && extra_of_occupied_packing {
+                        let left: Option<Array1<f64>> = {
+                            #[cfg(feature = "featomic")]
+                            {
+                                anneal_core::featomic_hop::surplus_reseed(
+                                    live_state,
+                                    &shared_wells,
+                                    coop_rcut,
+                                    coop_species.as_deref(),
+                                    None,
+                                    &mut transport_rng,
+                                )
+                            }
+                            #[cfg(not(feature = "featomic"))]
+                            {
+                                None
+                            }
+                        };
+                        if let Some(left) = left {
+                            phases.fire("population_reseed");
+                            return population_reconfiguration(
+                                &mut cooperative,
+                                replica,
+                                &mut slice_sequence,
+                                checkpoint_charged,
+                                &snapshot,
+                                parent.census_basin,
+                                PolicyRole::Explore,
+                                "population_reseed",
+                                ProposalFamily::HyperbandReseed,
+                                left,
+                            );
+                        }
+                    }
+                    let foreign_parent = parent.producer_replica != replica;
+                    if foreign_parent && parent.coordinates.len() == live_state.len() {
+                        let live = live_state.as_slice().expect("LJ state is contiguous");
+                        let better_isomer = same_packing_coordinates(live, &parent.coordinates)
+                            && parent.energy < snapshot.current_energy() - 1e-10;
+                        if better_isomer {
+                            let mut state = Array1::from(parent.coordinates.clone());
+                            let atoms = state.len() / 3;
+                            if atoms > 0 {
+                                let mut jitter = rand::rngs::StdRng::seed_from_u64(draw);
+                                for coordinate in state.iter_mut() {
+                                    *coordinate += transport_noise * (jitter.random::<f64>() - 0.5);
+                                }
+                                for axis in 0..3 {
+                                    let mean =
+                                        (0..atoms).map(|atom| state[3 * atom + axis]).sum::<f64>()
+                                            / atoms as f64;
+                                    for atom in 0..atoms {
+                                        state[3 * atom + axis] -= mean;
+                                    }
+                                }
+                            }
+                            if state
+                                .iter()
+                                .zip(snapshot.current_state().iter())
+                                .any(|(a, b)| (a - b).abs() > 1e-12)
+                            {
+                                phases.fire("population_parent");
+                                return population_reconfiguration(
+                                    &mut cooperative,
+                                    replica,
+                                    &mut slice_sequence,
+                                    checkpoint_charged,
+                                    &snapshot,
+                                    parent.census_basin,
+                                    PolicyRole::Exploit,
+                                    "population_assignment",
+                                    ProposalFamily::PopulationReconfiguration,
+                                    state,
+                                );
+                            }
+                        }
+                    }
+                    if foreign_parent {
+                        let live = snapshot.current_state();
+                        let reseed = {
+                            #[cfg(feature = "featomic")]
+                            {
+                                anneal_core::featomic_hop::surplus_reseed(
+                                    live,
+                                    &shared_wells,
+                                    coop_rcut,
+                                    coop_species.as_deref(),
+                                    None,
+                                    &mut transport_rng,
+                                )
+                            }
+                            #[cfg(not(feature = "featomic"))]
+                            {
+                                None::<Array1<f64>>
+                            }
+                        };
+                        let left = reseed.unwrap_or_else(|| {
                             let index = archive_cover_index(replica, archive_hole_count);
                             archive_hole_count += 1;
                             leave_packing_state(
@@ -4312,908 +5595,1043 @@ fn run_capnp_catalog(
                                 index,
                                 &mut transport_rng,
                             )
-                        })
+                        });
+                        if left
+                            .iter()
+                            .zip(live.iter())
+                            .all(|(a, b)| (a - b).abs() <= 1e-12)
+                        {
+                            return continue_checkpoint(
+                                &mut phases,
+                                &mut cooperative,
+                                replica,
+                                &mut slice_sequence,
+                                checkpoint_charged,
+                                snapshot.best_energy(),
+                            );
+                        }
+                        phases.fire("population_reseed");
+                        return population_reconfiguration(
+                            &mut cooperative,
+                            replica,
+                            &mut slice_sequence,
+                            checkpoint_charged,
+                            &snapshot,
+                            parent.census_basin,
+                            PolicyRole::Explore,
+                            "population_reseed",
+                            ProposalFamily::HyperbandReseed,
+                            left,
+                        );
                     }
-                    #[cfg(not(feature = "featomic"))]
-                    {
-                        let index = archive_cover_index(replica, archive_hole_count);
-                        archive_hole_count += 1;
-                        leave_packing_state(
-                            live,
-                            snapshot.current_energy(),
-                            &shared_wells,
-                            coop_rcut,
-                            coop_species.as_deref(),
-                            index,
-                            &mut transport_rng,
-                        )
-                    }
-                };
-                if left
-                    .iter()
-                    .zip(live.iter())
-                    .all(|(a, b)| (a - b).abs() <= 1e-12)
+                }
+                // The decree steers without touching any chain-local law: a
+                // replica under decree screens escapes more aggressively (the
+                // leader has seen a seam this chain cannot see locally), and
+                // bridge duty turns bridge polling on for exactly the replicas
+                // the leader named.
+                #[cfg(feature = "bank-rpc")]
+                let (decree_stall_floor, decree_bridge_duty) = decree_assignment
+                    .as_ref()
+                    .map_or((4u32, false), |assignment| (2u32, assignment.bridge_duty));
+                #[cfg(not(feature = "bank-rpc"))]
+                let (decree_stall_floor, decree_bridge_duty) = (4u32, false);
+                if (bridge_enabled || decree_bridge_duty)
+                    && let Some(assignment) = &active_bridge
                 {
+                    match bridge_region_of(
+                        &assignment.images,
+                        descriptor.len(),
+                        &descriptor,
+                        assignment.tube_radius,
+                    ) {
+                        Some(region) if region != assignment.region as usize => {
+                            cooperative
+                                .bridge_crossing(
+                                    replica,
+                                    BridgeCrossingRecord {
+                                        bridge: assignment.bridge,
+                                        from_region: assignment.region,
+                                        to_region: u32::try_from(region)
+                                            .expect("bridge region is bounded by image count"),
+                                        descriptor: descriptor.clone(),
+                                        state: snapshot.current_state().to_vec(),
+                                        energy: snapshot.current_energy(),
+                                    },
+                                )
+                                .expect("bridge crossing report must preserve local execution");
+                            active_bridge = None;
+                        }
+                        Some(_) => {}
+                        None => {
+                            // Off the bridge tube entirely: the segment is over.
+                            active_bridge = None;
+                        }
+                    }
+                }
+                // Hear a packing another replica published. Hops stay silent;
+                // this is the message that moves a chain onto a deeper well
+                // the ensemble already holds. PolicyState Leave is not that
+                // channel, and catalog_leave would refuse Marks if the
+                // throwaway book chained it to ico. catalog_incumbent adopts
+                // on energy. post_offer_candidate above is the publish.
+                let hear_enabled = std::env::var("CATALOG_HEAR").is_ok()
+                    && !anneal_core::env::flag("CATALOG_NO_HEAR");
+                let heard = hear_phase(
+                    &mut hear_state,
+                    &mut cooperative,
+                    replica,
+                    &snapshot,
+                    checkpoint_sequence,
+                    hear_enabled,
+                );
+                if let Some(held) = heard {
+                    hear_state.other_family += 1;
+                    // The new packing gets a full stall window before the next hear.
+                    hear_state.last_best_hop = snapshot.hops();
+                    hear_state.heard_structure = Some(held.coordinates.clone());
+                    println!(
+                        "  hear {:.6}  hops {}  refs {}  other {}",
+                        held.energy,
+                        snapshot.hops(),
+                        anneal_core::catalog::packing_references().len(),
+                        hear_state.other_family
+                    );
+                    let _ = std::io::stdout().flush();
+                    phases.fire("catalog_incumbent");
                     return complete_checkpoint_trace(
                         &mut cooperative,
                         replica,
                         &mut slice_sequence,
                         checkpoint_charged,
                         snapshot.best_energy(),
-                        |_cooperative, _slice_sequence| CheckpointAction::Continue,
+                        |_cooperative, _slice_sequence| CheckpointAction::BoundaryProposal {
+                            state: Array1::from(held.coordinates),
+                            action: "catalog_incumbent".to_owned(),
+                        },
                     );
                 }
+                // Single-ended invert against nearby chains only, at checkpoint
+                // cadence. Far packings are a hear. jacobian_nu3 is not a
+                // per-hop all-to-all: the Householder stays armed for the slice.
+                if let Some(here) = snapshot.current_state().as_slice() {
+                    let neighbor_draws =
+                        (0..anneal_core::catalog::INVERT_NEIGHBOR_DRAWS).map(|step| {
+                            ((u64::from(replica) << 33)
+                                ^ checkpoint_sequence.wrapping_mul(0xBF58_476D_1CE4_E5B9)
+                                ^ (step as u64).wrapping_mul(0x94D0_049B_B133_111E))
+                                & (u64::MAX >> 2)
+                        });
+                    if let Ok(CatalogSamplesOutcome::Candidates(held)) =
+                        cooperative.try_sample_candidates(replica, neighbor_draws)
+                    {
+                        for held in held {
+                            if held.coordinates.len() != here.len() {
+                                continue;
+                            }
+                            if anneal_core::catalog::nearby_packing(here, &held.coordinates) {
+                                anneal_core::catalog::include_packing_reference(&held.coordinates);
+                            }
+                        }
+                    }
+                    let neighbors = anneal_core::catalog::nearby_packing_book(here);
+                    // Population stopping rule (CATALOG_RESTART_VISITS=k,
+                    // CATALOG_RESTART_QUIET=q). The crowd is the number of other
+                    // replicas' minima on this replica's side of the packing map, the
+                    // same references the repulsion arm reads; a region k replicas
+                    // have reached that this replica has not deepened from for q hops
+                    // is dead by the ensemble's count, and the replica hands its
+                    // remaining budget to a fresh random start. Measured on LJ75 a
+                    // shelf-absorbed chain crosses at about 8.5e-7 per hop and a fresh
+                    // chain at about 5e-6, so the exchange pays six to one once the
+                    // region is known dead. This runs before the coordinator-gated
+                    // policy section so it fires on every checkpoint.
+                    let crowd = if census_bus.is_some() {
+                        peer_crowd as u64
+                    } else {
+                        neighbors.len() as u64
+                    };
+                    if snapshot.best_energy() < hear_state.last_best - 1e-9 {
+                        hear_state.last_best = snapshot.best_energy();
+                        hear_state.last_best_hop = snapshot.hops();
+                    }
+                    let quiet_now = snapshot.hops().saturating_sub(hear_state.last_best_hop);
+                    if anneal_core::env::flag("CATALOG_CENSUS_TRACE")
+                        && checkpoint_sequence.is_multiple_of(7)
+                    {
+                        println!(
+                            "  census hops {}  crowd {}  quiet {}  energy {:.6}",
+                            snapshot.hops(),
+                            crowd,
+                            quiet_now,
+                            snapshot.current_energy()
+                        );
+                    }
+                    if let Some(fresh) = census_restart_phase(
+                        &mut restart_state,
+                        &mut hear_state,
+                        replica,
+                        &snapshot,
+                        checkpoint_sequence,
+                        crowd,
+                        quiet_now,
+                        &run_cfg,
+                    ) {
+                        phases.fire("census_restart");
+                        return complete_checkpoint_trace(
+                            &mut cooperative,
+                            replica,
+                            &mut slice_sequence,
+                            checkpoint_charged,
+                            snapshot.best_energy(),
+                            |_cooperative, _slice_sequence| CheckpointAction::BoundaryProposal {
+                                state: fresh,
+                                action: "census_restart".to_owned(),
+                            },
+                        );
+                    }
+                    if neighbors.is_empty() || !ape_seeds_enabled() {
+                        anneal_core::known_basin::disarm();
+                    } else if replica % 2 == 1 {
+                        // Occupied local environments. APE queues a dimer on
+                        // one classified atom. The destination family is not
+                        // a target. A residual that exists on this structure
+                        // (fivefold or otherwise) is an offered seed, not a
+                        // named morphology.
+                        anneal_core::known_basin::arm_leave_free(
+                            snapshot.current_state(),
+                            anneal_core::known_basin::LEAVE_RUNG_RMSD,
+                            &neighbors,
+                            run_cfg.temperature,
+                            run_cfg.temperature,
+                        );
+                        extra_cover = extra_cover.saturating_add(1);
+                        let queue = anneal_core::catalog::ape_highlight_queue(here);
+                        if queue.is_empty() {
+                            anneal_core::known_basin::disarm();
+                        } else {
+                            let (atom, class) = queue[(extra_cover - 1) % queue.len()];
+                            anneal_core::known_basin::arm_leave_cover(atom);
+                            let offered =
+                                if anneal_core::soap::fivefold_axis_count(snapshot.current_state())
+                                    >= 2
+                                {
+                                    let mut residual_rng = rand::rngs::StdRng::seed_from_u64(
+                                        (u64::from(replica) << 17)
+                                            ^ checkpoint_sequence
+                                                .wrapping_mul(0x9E37_79B9_7F4A_7C15)
+                                            ^ extra_cover as u64,
+                                    );
+                                    anneal_core::soap::step_away_fivefold(
+                                        snapshot.current_state(),
+                                        anneal_core::known_basin::LEAVE_RUNG_RMSD,
+                                        &mut residual_rng,
+                                    )
+                                } else {
+                                    snapshot.current_state().to_owned()
+                                };
+                            println!(
+                                "  ape seed atom {} class {} hops {} neighbors {}",
+                                atom,
+                                class,
+                                snapshot.hops(),
+                                neighbors.len()
+                            );
+                            let _ = std::io::stdout().flush();
+                            phases.fire("catalog_ridge");
+                            return complete_checkpoint_trace(
+                                &mut cooperative,
+                                replica,
+                                &mut slice_sequence,
+                                checkpoint_charged,
+                                snapshot.best_energy(),
+                                |_cooperative, _slice_sequence| {
+                                    CheckpointAction::BoundaryProposal {
+                                        state: offered,
+                                        action: "catalog_ridge".to_owned(),
+                                    }
+                                },
+                            );
+                        }
+                    }
+                }
+                if leave_defers(leave_quiet, leave_patience, leave_crossing) {
+                    // Still inside the recovered quiet stretch or the
+                    // measured crossing floor (LEAVE_CROSSING_HOPS). Policy
+                    // RPC is the measured hop-cost gap; census still sees
+                    // posted minima.
+                    return continue_checkpoint(
+                        &mut phases,
+                        &mut cooperative,
+                        replica,
+                        &mut slice_sequence,
+                        checkpoint_charged,
+                        snapshot.best_energy(),
+                    );
+                }
+                // The asynchronous request returns LocalFallback until the
+                // next checkpoint, so a decision acts on a slice-old snapshot
+                // and half the checkpoints skip the policy. CATALOG_SYNC_POLICY=1
+                // waits for the reply under the client's io timeout instead,
+                // which is the measured hop-cost gap paid for a current decision.
+                let policy_outcome = if sync_policy {
+                    cooperative.policy_input_with_lambda(
+                        replica,
+                        descriptor.clone(),
+                        snapshot.current_energy(),
+                        leave_path.max_lambda(),
+                        stall,
+                        local_deepened,
+                    )
+                } else {
+                    cooperative.try_policy_input_with_lambda(
+                        replica,
+                        descriptor.clone(),
+                        snapshot.current_energy(),
+                        leave_path.max_lambda(),
+                        stall,
+                        local_deepened,
+                    )
+                };
+                let policy = match policy_outcome
+                    .expect("coordinator policy evidence must preserve local invariants")
+                {
+                    PolicyEvidenceOutcome::Remote(input) => {
+                        if cooperative
+                            .events()
+                            .last()
+                            .and_then(|event| event.policy)
+                            .is_some_and(|policy| policy.retired)
+                        {
+                            phases.fire("retire");
+                            return complete_checkpoint_trace(
+                                &mut cooperative,
+                                replica,
+                                &mut slice_sequence,
+                                checkpoint_charged,
+                                snapshot.best_energy(),
+                                |_cooperative, _slice_sequence| CheckpointAction::Retire {
+                                    reason: "halving".to_owned(),
+                                },
+                            );
+                        }
+                        input
+                    }
+                    PolicyEvidenceOutcome::Rejected
+                    | PolicyEvidenceOutcome::LocalFallback
+                    | PolicyEvidenceOutcome::SharingDisabled => {
+                        return continue_checkpoint(
+                            &mut phases,
+                            &mut cooperative,
+                            replica,
+                            &mut slice_sequence,
+                            checkpoint_charged,
+                            snapshot.best_energy(),
+                        );
+                    }
+                };
+                leave_path.push(
+                    snapshot.current_state().to_vec(),
+                    descriptor.clone(),
+                    policy.leftover_lambda,
+                );
+                if let Some(reason) = occupancy_retire_phase(&mut announced, &policy, &snapshot) {
+                    complete_checkpoint_trace(
+                        &mut cooperative,
+                        replica,
+                        &mut slice_sequence,
+                        checkpoint_charged,
+                        snapshot.best_energy(),
+                        |_cooperative, _slice_sequence| (),
+                    );
+                    phases.fire("retire");
+                    return CheckpointAction::Retire { reason };
+                }
+                let policy_trace = cooperative
+                    .events()
+                    .last()
+                    .and_then(|event| event.policy)
+                    .expect("registered policy evidence must remain attached to its snapshot");
+                #[cfg(feature = "ira")]
+                {
+                    assigned_discovery_role = Some(policy_trace.discovery_role);
+                }
+                if difficulty_enabled && checkpoint_sequence.is_multiple_of(32) {
+                    let charged = policy.progress.charged();
+                    let singles = policy.census.singleton_basins();
+                    if let Some((last_charged, last_singles)) = governor_last
+                        && charged > last_charged
+                    {
+                        let rate = singles.saturating_sub(last_singles) as f64
+                            / (charged - last_charged) as f64;
+                        let ema = governor_ema.get_or_insert(rate);
+                        if rate < 0.25 * *ema {
+                            difficulty_gain = (difficulty_gain * 1.5).min(4.0);
+                        } else {
+                            difficulty_gain = 1.0 + (difficulty_gain - 1.0) * 0.5;
+                        }
+                        *ema = 0.9 * *ema + 0.1 * rate;
+                    }
+                    governor_last = Some((charged, singles));
+                }
+                // CATALOG_JUMP_VISITS=k: when the ensemble census has visited this
+                // replica's basin at least k times, the replica takes an
+                // Iwamatsu-Okabe jump (a short unquenched walk, then a quench) with
+                // a cooldown of CATALOG_JUMP_COOLDOWN hops. The shared visit history
+                // is what Goedecker's minima hopping keeps per chain to escalate its
+                // escapes; here it is the population's, so a region many replicas
+                // have exhausted is left by all of them without any of them being
+                // handed a structure.
+                if let Some(jumped) = census_jump_phase(
+                    &mut jump_state,
+                    replica,
+                    &snapshot,
+                    checkpoint_sequence,
+                    policy.census.local_basin_visits(),
+                    run_cfg.length_scale,
+                ) {
+                    phases.fire("census_jump");
+                    return complete_checkpoint_trace(
+                        &mut cooperative,
+                        replica,
+                        &mut slice_sequence,
+                        checkpoint_charged,
+                        snapshot.best_energy(),
+                        |_cooperative, _slice_sequence| CheckpointAction::BoundaryProposal {
+                            state: Array1::from(jumped),
+                            action: "census_jump".to_owned(),
+                        },
+                    );
+                }
+                let decision = cooperative
+                    .decide(replica, policy)
+                    .expect("policy decision must name the configured replica");
+                last_policy_action = match decision.action {
+                    PolicyAction::ContinueLocal | PolicyAction::Exploit { .. } => ACTION_LOCAL,
+                    PolicyAction::Explore => ACTION_EXPLORE,
+                    PolicyAction::Leave => ACTION_LEAVE,
+                };
                 slice_sequence = slice_sequence
                     .checked_add(1)
                     .expect("slice sequence must fit u64");
-                let reconfiguration = SliceTrace {
+                let mut trace = SliceTrace {
                     slice: slice_sequence,
-                    current_basin: None,
-                    active_relation: None,
-                    policy_role: PolicyRole::Explore,
-                    policy_reason: "population_reseed",
-                    proposal_family: ProposalFamily::HyperbandReseed,
-                    sampled_basin: parent.census_basin,
+                    current_basin: policy_trace.local_basin,
+                    active_relation: Some(policy_trace.relation),
+                    policy_role: PolicyRole::Local,
+                    policy_reason: decision.reason.code(),
+                    proposal_family: ProposalFamily::Local,
+                    sampled_basin: None,
                     descriptor_step_norm: None,
-                    cartesian_step_norm: Some(vector_distance(
-                        snapshot
-                            .current_state()
-                            .as_slice()
-                            .expect("LJ state is contiguous"),
-                        left.as_slice().expect("LJ proposal is contiguous"),
-                    )),
+                    cartesian_step_norm: None,
                     validation: SliceValidation::Accepted,
                     quench: SliceQuench::Converged,
-                    adoption: SliceAdoption::Adopted,
-                    novelty: None,
+                    adoption: SliceAdoption::NotAttempted,
+                    novelty: Some(policy_trace.novelty),
                     energy: finite_trace_energy(snapshot.best_energy()),
                     charged_work: u64::try_from(checkpoint_charged)
                         .expect("checkpoint charge must fit u64"),
                 };
-                cooperative
-                    .record_slice(replica, reconfiguration)
-                    .expect("population checkpoint trace must remain complete");
-                return CheckpointAction::BoundaryProposal {
-                    state: left,
-                    action: "population_reseed".to_owned(),
-                };
-            }
-        }
-        // Conversation is not identity. A position report every checkpoint
-        // is how the chains talk: the descriptor of wherever the chain
-        // stands, mid-hop or not, asked against the census the validated
-        // registrations have built, with no purity gate, because reporting
-        // a position claims nothing about minimality. The identity tier,
-        // the census and catalog entries themselves, stays fed exclusively
-        // by share-grade validated states through the offer loop above.
-        let _ = freshest_boundary;
-        candidate_sequence = candidate_sequence
-            .checked_add(1)
-            .expect("candidate sequence must fit u64");
-        cooperative
-            .record_work(replica, ChargeKind::DescriptorEvaluation, 0)
-            .expect("current descriptor work must enter the cooperative ledger");
-        let Ok(position) =
-            descriptor_space.describe(snapshot.current_state(), Some(&signature.atomic_numbers))
-        else {
-            return complete_checkpoint_trace(
-                &mut cooperative,
-                replica,
-                &mut slice_sequence,
-                checkpoint_charged,
-                snapshot.best_energy(),
-                |_cooperative, _slice_sequence| CheckpointAction::Continue,
-            );
-        };
-        let descriptor = position.values().to_vec();
-        #[cfg(feature = "bank-rpc")]
-        let decree_assignment = decree_slot
-            .try_lock()
-            .ok()
-            .and_then(|held| held.clone())
-            .and_then(|decree| {
-                decree
-                    .assignments
-                    .into_iter()
-                    .find(|assignment| assignment.replica == replica)
-            });
-        // The decree steers without touching any chain-local law: a
-        // replica under decree screens escapes more aggressively (the
-        // leader has seen a seam this chain cannot see locally), and
-        // bridge duty turns bridge polling on for exactly the replicas
-        // the leader named.
-        #[cfg(feature = "bank-rpc")]
-        let (decree_stall_floor, decree_bridge_duty) = decree_assignment
-            .as_ref()
-            .map_or((4u32, false), |assignment| (2u32, assignment.bridge_duty));
-        #[cfg(not(feature = "bank-rpc"))]
-        let (decree_stall_floor, decree_bridge_duty) = (4u32, false);
-        if (bridge_enabled || decree_bridge_duty)
-            && let Some(assignment) = &active_bridge
-        {
-            match bridge_region_of(
-                &assignment.images,
-                descriptor.len(),
-                &descriptor,
-                assignment.tube_radius,
-            ) {
-                Some(region) if region != assignment.region as usize => {
+                if snapshot.remaining() == 0 {
                     cooperative
-                        .bridge_crossing(
-                            replica,
-                            BridgeCrossingRecord {
-                                bridge: assignment.bridge,
-                                from_region: assignment.region,
-                                to_region: u32::try_from(region)
-                                    .expect("bridge region is bounded by image count"),
-                                descriptor: descriptor.clone(),
-                                state: snapshot.current_state().to_vec(),
-                                energy: snapshot.current_energy(),
-                            },
-                        )
-                        .expect("bridge crossing report must preserve local execution");
-                    active_bridge = None;
+                        .record_slice(replica, trace)
+                        .expect("terminal checkpoint trace must remain complete");
+                    phases.fire("continue");
+                    return CheckpointAction::Continue;
                 }
-                Some(_) => {}
-                None => {
-                    // Off the bridge tube entirely: the segment is over.
-                    active_bridge = None;
-                }
-            }
-        }
-        if leave_defers(leave_quiet, leave_patience, leave_crossing) {
-            // Still inside the recovered quiet stretch or the
-            // measured crossing floor (LEAVE_CROSSING_HOPS). Policy
-            // RPC is the measured hop-cost gap; census still sees
-            // posted minima.
-            return complete_checkpoint_trace(
-                &mut cooperative,
-                replica,
-                &mut slice_sequence,
-                checkpoint_charged,
-                snapshot.best_energy(),
-                |_cooperative, _slice_sequence| CheckpointAction::Continue,
-            );
-        }
-        let policy = match cooperative
-            .try_policy_input_with_lambda(
-                replica,
-                descriptor.clone(),
-                snapshot.current_energy(),
-                leave_path.max_lambda(),
-                stall,
-                local_deepened,
-            )
-            .expect("coordinator policy evidence must preserve local invariants")
-        {
-            PolicyEvidenceOutcome::Remote(input) => {
-                if cooperative
-                    .events()
-                    .last()
-                    .and_then(|event| event.policy)
-                    .is_some_and(|policy| policy.retired)
-                {
-                    return complete_checkpoint_trace(
-                        &mut cooperative,
-                        replica,
-                        &mut slice_sequence,
-                        checkpoint_charged,
-                        snapshot.best_energy(),
-                        |_cooperative, _slice_sequence| CheckpointAction::Retire {
-                            reason: "halving".to_owned(),
-                        },
-                    );
-                }
-                input
-            }
-            PolicyEvidenceOutcome::Rejected
-            | PolicyEvidenceOutcome::LocalFallback
-            | PolicyEvidenceOutcome::SharingDisabled => {
-                return complete_checkpoint_trace(
-                    &mut cooperative,
-                    replica,
-                    &mut slice_sequence,
-                    checkpoint_charged,
-                    snapshot.best_energy(),
-                    |_cooperative, _slice_sequence| CheckpointAction::Continue,
-                );
-            }
-        };
-        leave_path.push(
-            snapshot.current_state().to_vec(),
-            descriptor.clone(),
-            policy.leftover_lambda,
-        );
-        let n_occupied_families = policy.occupied_family_count;
-        if let Some(certificate) = occupancy_complete_at(
-            policy.mixing.certified_attractor,
-            policy.packing_saturated,
-            policy.leftover_dwell,
-            n_occupied_families,
-            policy.min_families,
-        ) {
-            let saturated = policy.packing_saturated;
-            let putative = snapshot
-                .best_state()
-                .map(|state| state.to_vec())
-                .unwrap_or_else(|| snapshot.current_state().to_vec());
-            if occupancy_retire_at(
-                certificate,
-                saturated,
-                policy.leftover_dwell,
-                policy.ei_exhausted,
-                n_occupied_families,
-                policy.min_families,
-            ) && occupancy_is_cluster(&putative)
-            {
-                if !announced_done {
-                    println!(
-                        "  done {}  hops {}  best {:.6}",
-                        certificate.as_str(),
-                        snapshot.hops(),
-                        snapshot.best_energy()
-                    );
-                    let _ = std::io::stdout().flush();
-                    announced_done = true;
-                }
-                return complete_checkpoint_trace(
-                    &mut cooperative,
-                    replica,
-                    &mut slice_sequence,
-                    checkpoint_charged,
-                    snapshot.best_energy(),
-                    |_cooperative, _slice_sequence| {
-                        return CheckpointAction::Retire {
-                            reason: certificate.as_str().to_owned(),
-                        };
-                    },
-                );
-            }
-            if !announced_putative {
-                println!(
-                    "  putative {}  hops {}  best {:.6}",
-                    certificate.as_str(),
-                    snapshot.hops(),
-                    snapshot.best_energy()
-                );
-                let _ = std::io::stdout().flush();
-                announced_putative = true;
-            }
-        }
-        let policy_trace = cooperative
-            .events()
-            .last()
-            .and_then(|event| event.policy)
-            .expect("registered policy evidence must remain attached to its snapshot");
-        #[cfg(feature = "ira")]
-        {
-            assigned_discovery_role = Some(policy_trace.discovery_role);
-        }
-        let decision = cooperative
-            .decide(replica, policy)
-            .expect("policy decision must name the configured replica");
-        last_policy_action = match decision.action {
-            PolicyAction::ContinueLocal | PolicyAction::Exploit { .. } => ACTION_LOCAL,
-            PolicyAction::Explore => ACTION_EXPLORE,
-            PolicyAction::Leave => ACTION_LEAVE,
-        };
-        slice_sequence = slice_sequence
-            .checked_add(1)
-            .expect("slice sequence must fit u64");
-        let mut trace = SliceTrace {
-            slice: slice_sequence,
-            current_basin: policy_trace.local_basin,
-            active_relation: Some(policy_trace.relation),
-            policy_role: PolicyRole::Local,
-            policy_reason: decision.reason.code(),
-            proposal_family: ProposalFamily::Local,
-            sampled_basin: None,
-            descriptor_step_norm: None,
-            cartesian_step_norm: None,
-            validation: SliceValidation::Accepted,
-            quench: SliceQuench::Converged,
-            adoption: SliceAdoption::NotAttempted,
-            novelty: Some(policy_trace.novelty),
-            energy: finite_trace_energy(snapshot.best_energy()),
-            charged_work: u64::try_from(checkpoint_charged)
-                .expect("checkpoint charge must fit u64"),
-        };
-        if snapshot.remaining() == 0 {
-            cooperative
-                .record_slice(replica, trace)
-                .expect("terminal checkpoint trace must remain complete");
-            return CheckpointAction::Continue;
-        }
-        match decree_anchor_action(
-            applied_decree,
-            decree_assignment.as_ref(),
-            policy_trace.local_basin,
-        ) {
-            DecreeAnchorAction::Ignore => {}
-            DecreeAnchorAction::MarkApplied { snapshot, basin } => {
-                applied_decree = Some(AppliedDecree { snapshot, basin });
-            }
-            DecreeAnchorAction::Fetch {
-                snapshot: decree_snapshot,
-                basin,
-            } => {
-                if let CatalogSampleOutcome::Candidate(candidate) = cooperative
-                    .try_sample_basin(replica, basin)
-                    .expect("seam-anchor access must preserve local execution")
-                    && candidate.census_basin == Some(basin)
-                    && candidate.coordinates.len() == snapshot.current_state().len()
-                {
-                    cooperative
-                        .record_work(replica, ChargeKind::RemoteProposal, 0)
-                        .expect("seam-anchor transfer must enter the cooperative ledger");
-                    anneal_core::catalog::include_packing_reference(&candidate.coordinates);
-                    anneal_core::catalog::offer_known_minimum(
-                        candidate.energy,
-                        &candidate.coordinates,
-                    );
-                    applied_decree = Some(AppliedDecree {
+                match decree_anchor_action(
+                    applied_decree,
+                    decree_assignment.as_ref(),
+                    policy_trace.local_basin,
+                ) {
+                    DecreeAnchorAction::Ignore => {}
+                    DecreeAnchorAction::MarkApplied { snapshot, basin } => {
+                        applied_decree = Some(AppliedDecree { snapshot, basin });
+                    }
+                    DecreeAnchorAction::Fetch {
                         snapshot: decree_snapshot,
                         basin,
-                    });
-                    println!(
-                        "{}",
-                        applied_decree_audit_line(replica, decree_snapshot, basin)
-                    );
-                    let _ = io::stdout().flush();
-                    trace.policy_role = PolicyRole::Explore;
-                    trace.policy_reason = "spectral_anchor";
-                    trace.proposal_family = ProposalFamily::CatalogSample;
-                    trace.sampled_basin = Some(basin);
-                    trace.adoption = SliceAdoption::Adopted;
-                    cooperative
-                        .record_slice(replica, trace)
-                        .expect("seam-anchor checkpoint trace must remain complete");
-                    return CheckpointAction::BoundaryProposal {
-                        state: Array1::from(candidate.coordinates),
-                        action: "spectral_anchor".to_owned(),
-                    };
+                    } => {
+                        if let CatalogSampleOutcome::Candidate(candidate) = cooperative
+                            .try_sample_basin(replica, basin)
+                            .expect("seam-anchor access must preserve local execution")
+                            && candidate.census_basin == Some(basin)
+                            && candidate.coordinates.len() == snapshot.current_state().len()
+                        {
+                            cooperative
+                                .record_work(replica, ChargeKind::RemoteProposal, 0)
+                                .expect("seam-anchor transfer must enter the cooperative ledger");
+                            anneal_core::catalog::include_packing_reference(&candidate.coordinates);
+                            anneal_core::catalog::offer_known_minimum(
+                                candidate.energy,
+                                &candidate.coordinates,
+                            );
+                            applied_decree = Some(AppliedDecree {
+                                snapshot: decree_snapshot,
+                                basin,
+                            });
+                            println!(
+                                "{}",
+                                applied_decree_audit_line(replica, decree_snapshot, basin)
+                            );
+                            let _ = io::stdout().flush();
+                            trace.policy_role = PolicyRole::Explore;
+                            trace.policy_reason = "spectral_anchor";
+                            trace.proposal_family = ProposalFamily::CatalogSample;
+                            trace.sampled_basin = Some(basin);
+                            trace.adoption = SliceAdoption::Adopted;
+                            cooperative
+                                .record_slice(replica, trace)
+                                .expect("seam-anchor checkpoint trace must remain complete");
+                            phases.fire("spectral_anchor");
+                            return CheckpointAction::BoundaryProposal {
+                                state: Array1::from(candidate.coordinates),
+                                action: "spectral_anchor".to_owned(),
+                            };
+                        }
+                    }
                 }
-            }
-        }
-        if histo_screen {
-            cooperative
-                .record_work(replica, ChargeKind::DescriptorEvaluation, 0)
-                .expect("histogram descriptor work must enter the cooperative ledger");
-            let own = class_histogram(snapshot.current_state(), &mut histo_leaders, histo_radius);
-            let novel_here = histo_history
-                .iter()
-                .map(|past| histogram_l1(&own, past))
-                .fold(f64::INFINITY, f64::min);
-            histo_history.push_back(own);
-            if histo_history.len() > 256 {
-                histo_history.pop_front();
-            }
-            // Screen when stalled. Familiarity was a third gate here
-            // and measured out: thermal fluctuation alone moves a
-            // 75-atom histogram by a few flips per checkpoint, so the
-            // familiar-neighborhood test almost never passed and the
-            // mechanism fired once or twice per forty thousand
-            // evaluations. The stall counter is the gate.
-            let _ = novel_here;
-            if stall >= decree_stall_floor
-                && checkpoint_sequence.is_multiple_of(8)
-                && snapshot.remaining() > run_cfg.relax_steps.saturating_add(2)
-            {
-                let mut best: Option<(f64, Array1<f64>)> = None;
-                for _ in 0..6 {
-                    let Some(candidate) = fixed_probe_trial(
-                        snapshot.current_state(),
-                        2.0 * probe_scale,
-                        &mut histo_rng,
-                    ) else {
-                        continue;
-                    };
+                if histo_screen {
                     cooperative
                         .record_work(replica, ChargeKind::DescriptorEvaluation, 0)
-                        .expect("histogram screen work must enter the cooperative ledger");
-                    let histogram =
-                        class_histogram(candidate.view(), &mut histo_leaders, histo_radius);
-                    let novelty = histo_history
+                        .expect("histogram descriptor work must enter the cooperative ledger");
+                    let own =
+                        class_histogram(snapshot.current_state(), &mut histo_leaders, histo_radius);
+                    let novel_here = histo_history
                         .iter()
-                        .map(|past| histogram_l1(&histogram, past))
+                        .map(|past| histogram_l1(&own, past))
                         .fold(f64::INFINITY, f64::min);
-                    if best.as_ref().is_none_or(|(kept, _)| novelty > *kept) {
-                        best = Some((novelty, candidate));
+                    histo_history.push_back(own);
+                    if histo_history.len() > 256 {
+                        histo_history.pop_front();
                     }
-                }
-                if let Some((novelty, candidate)) = best
-                    && novelty > 0.0
-                {
-                    cooperative
-                        .record_slice(replica, trace)
-                        .expect("histogram checkpoint trace must remain complete");
-                    // Adoption, not a diagnostic probe: a screen that
-                    // cannot move the live chain contributes records
-                    // and no exploration, which the paired smokes
-                    // measured as bit-identical endpoints at every
-                    // gate setting.
-                    return CheckpointAction::BoundaryProposal {
-                        state: candidate,
-                        action: "histo".to_owned(),
-                    };
-                }
-            }
-        }
-        if let Some(engine) = md_engine.as_ref()
-            && checkpoint_sequence.is_multiple_of(md_interval)
-            && snapshot.remaining()
-                > md_steps
-                    .saturating_add(run_cfg.relax_steps)
-                    .saturating_add(2)
-        {
-            match engine.propagate(
-                snapshot.current_state(),
-                md_steps,
-                md_temperature,
-                md_rng.random(),
-            ) {
-                Ok(state) if state.len() == snapshot.current_state().len() => {
-                    cooperative
-                        .record_work(
-                            replica,
-                            ChargeKind::AuxiliaryEvaluation,
-                            u64::try_from(md_steps).expect("md steps fit u64"),
-                        )
-                        .expect("md segment work must enter the cooperative ledger");
-                    cooperative
-                        .record_slice(replica, trace)
-                        .expect("md checkpoint trace must remain complete");
-                    return CheckpointAction::ExternalProposal {
-                        state,
-                        action: format!("md_{}", engine.name()),
-                        external_calls: md_steps,
-                    };
-                }
-                Ok(_) => {}
-                Err(error) => {
-                    eprintln!("md segment failed, local search continues: {error}");
-                }
-            }
-        }
-        if (bridge_enabled || decree_bridge_duty)
-            && active_bridge.is_none()
-            && checkpoint_sequence.is_multiple_of(bridge_interval)
-            && snapshot.remaining() > run_cfg.relax_steps.saturating_add(2)
-            && let CatalogBridgeOutcome::Assignment(assignment) = cooperative
-                .bridge_assignment(replica, bridge_rng.random())
-                .expect("bridge assignment poll must preserve local execution")
-        {
-            let entry = assignment
-                .entry
-                .clone()
-                .filter(|state| state.len() == snapshot.current_state().len());
-            active_bridge = Some(assignment);
-            if let Some(state) = entry {
-                cooperative
-                    .record_slice(replica, trace)
-                    .expect("bridge checkpoint trace must remain complete");
-                return CheckpointAction::ProbeProposal {
-                    state: Array1::from(state),
-                    action: "bridge".to_owned(),
-                };
-            }
-        }
-        if frontier_exchange_enabled {
-            for (gap, energy, coordinates) in anneal_core::catalog::take_frontier_posts() {
-                let post = anneal_core::catalog_rpc::CatalogFrontierPost {
-                    gap,
-                    energy,
-                    coordinates,
-                    producer_replica: replica,
-                    posted_sequence: checkpoint_sequence,
-                };
-                let _ = cooperative.offer_frontier(replica, post);
-            }
-            // A deterministic draw untangled from every sampling stream:
-            // the checkpoint index hashed with the replica identity.
-            let draw = checkpoint_sequence.wrapping_mul(0x9E37_79B9_7F4A_7C15) ^ u64::from(replica);
-            if let Ok(Some(post)) = cooperative.draw_frontier(replica, draw)
-                && post.producer_replica != replica
-            {
-                anneal_core::catalog::deliver_frontier_post(
-                    post.gap,
-                    post.energy,
-                    post.coordinates,
-                );
-            }
-        }
-        if sharing
-            && checkpoint_sequence.is_multiple_of(probe_interval)
-            && snapshot.remaining() > run_cfg.relax_steps.saturating_add(2)
-        {
-            // The draw is the checkpoint and the replica. It stays off the
-            // probe stream, so an empty answer leaves that stream where it was.
-            let draw = checkpoint_sequence.wrapping_mul(0x9E37_79B9_7F4A_7C15) ^ u64::from(replica);
-            if let CatalogBoundaryOutcome::Crossing(crossing) = cooperative
-                .boundary_crossing(replica, snapshot.current_state().to_vec(), draw)
-                .expect("boundary crossing poll must preserve local execution")
-                && let Some(state) = boundary_crossing_trial(
-                    snapshot.current_state(),
-                    &crossing,
-                    transport_noise,
-                    transport_radius,
-                    &mut probe_rng,
-                )
-            {
-                trace.proposal_family = ProposalFamily::BoundaryTransport;
-                cooperative
-                    .record_slice(replica, trace)
-                    .expect("boundary checkpoint trace must remain complete");
-                count_boundary += 1;
-                return CheckpointAction::ProbeProposal {
-                    state,
-                    action: "boundary".to_owned(),
-                };
-            }
-        }
-        if checkpoint_sequence.is_multiple_of(probe_interval)
-            && snapshot.remaining() > run_cfg.relax_steps.saturating_add(2)
-            && let Some(state) =
-                fixed_probe_trial(snapshot.current_state(), probe_scale, &mut probe_rng)
-        {
-            cooperative
-                .record_slice(replica, trace)
-                .expect("probe checkpoint trace must remain complete");
-            return CheckpointAction::ProbeProposal {
-                state,
-                action: "probe".to_owned(),
-            };
-        }
-        match decision.action {
-            PolicyAction::ContinueLocal => {}
-            PolicyAction::Exploit { win_only } => {
-                trace.policy_role = PolicyRole::Exploit;
-                trace.proposal_family = ProposalFamily::CatalogSample;
-                if let CatalogSampleOutcome::Candidate(candidate) = cooperative
-                    .try_sample_candidate(replica, INCUMBENT_SAMPLE_DRAW)
-                    .expect("incumbent sample must preserve local execution")
-                {
-                    // Every structure the catalog hands over is another
-                    // chain's packing. The invert repels this chain's quench
-                    // from the packings it holds, so a sample is worth
-                    // keeping whether or not this arm adopts it: that is the
-                    // interaction at the minimisation level, and without it
-                    // the reference cloud is only ever this chain's own
-                    // history and the chains do not talk during the quench.
-                    anneal_core::catalog::include_packing_reference(&candidate.coordinates);
-                    anneal_core::catalog::offer_known_minimum(
-                        candidate.energy,
-                        &candidate.coordinates,
-                    );
-                    let improves = candidate.energy < snapshot.current_energy() - 1e-10;
-                    if candidate.coordinates.len() == snapshot.current_state().len()
-                        && (!win_only || improves)
+                    // Screen when stalled. Familiarity was a third gate here
+                    // and measured out: thermal fluctuation alone moves a
+                    // 75-atom histogram by a few flips per checkpoint, so the
+                    // familiar-neighborhood test almost never passed and the
+                    // mechanism fired once or twice per forty thousand
+                    // evaluations. The stall counter is the gate.
+                    let _ = novel_here;
+                    if stall >= decree_stall_floor
+                        && checkpoint_sequence.is_multiple_of(8)
+                        && snapshot.remaining() > run_cfg.relax_steps.saturating_add(2)
                     {
-                        trace.sampled_basin = candidate.census_basin;
-                        trace.energy = Some(snapshot.best_energy());
-                        trace.adoption = SliceAdoption::Adopted;
-                        cooperative
-                            .record_slice(replica, trace)
-                            .expect("checkpoint trace must remain complete");
-                        return CheckpointAction::BoundaryProposal {
-                            state: Array1::from(candidate.coordinates),
-                            action: "catalog_incumbent".to_owned(),
-                        };
-                    }
-                    trace.adoption = if win_only && !improves {
-                        SliceAdoption::NotImproved
-                    } else {
-                        SliceAdoption::Rejected
-                    };
-                } else {
-                    trace.adoption = SliceAdoption::Rejected;
-                }
-            }
-            PolicyAction::Leave => {
-                trace.policy_role = PolicyRole::Leave;
-                if leave_defers(leave_quiet, leave_patience, leave_crossing) {
-                    // Still inside the recovered quiet stretch or the
-                    // measured crossing floor. Keep walking.
-                    trace.adoption = SliceAdoption::Rejected;
-                    cooperative
-                        .record_slice(replica, trace)
-                        .expect("checkpoint trace must remain complete");
-                    return CheckpointAction::Continue;
-                }
-                // Did the last Leave install anything? The anchor is the
-                // packing this replica stood on when it last decided to
-                // Leave, so standing in the same one now is a refusal
-                // whatever the Leave reported at the time.
-                if let Some(here) = snapshot.current_state().as_slice() {
-                    match leave_anchor.as_deref() {
-                        Some(anchor)
-                            if !anneal_core::catalog::different_packing_family(anchor, here) =>
-                        {
-                            leave_refused += 1;
-                        }
-                        _ => leave_refused = 0,
-                    }
-                    leave_anchor = Some(here.to_vec());
-                }
-                if leave_refused >= LEAVE_REFUSAL_DWELL {
-                    // This replica has asked for a packing it did not get,
-                    // this many times running. Plain hopping is what found
-                    // Marks in the serial runs, and it is what the
-                    // checkpoint spends its budget on instead of drawing
-                    // another hole in the packing it is already in.
-                    trace.adoption = SliceAdoption::Rejected;
-                    cooperative
-                        .record_slice(replica, trace)
-                        .expect("checkpoint trace must remain complete");
-                    return CheckpointAction::Continue;
-                }
-                // Chains interact during minimisation only through the
-                // reference cloud the packing invert repels the quench
-                // from, and the cloud was fed one catalog structure per
-                // checkpoint. That rate is the same whatever the ensemble
-                // size, so forty-eight chains pushed on each other exactly
-                // as hard as one did and "more chains reach Marks sooner"
-                // had no mechanism under it. What the others are standing
-                // on is already in the shared catalog, whose size does
-                // grow with the ensemble, so the arm reads several entries
-                // at once.
-                let reference_draws =
-                    (0..anneal_core::catalog::PACKING_REFERENCE_DRAWS).map(|step| {
-                        // Any draw that is neither sentinel indexes an entry
-                        // modulo the catalog length; masking the top bits
-                        // keeps it off INCUMBENT_SAMPLE_DRAW and
-                        // SPARSE_SAMPLE_DRAW, which mean a policy rather than
-                        // a slot.
-                        ((u64::from(replica) << 40)
-                            ^ (checkpoint_sequence as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15)
-                            ^ (step as u64).wrapping_mul(0x85EB_CA6B))
-                            & (u64::MAX >> 2)
-                    });
-                if let Ok(CatalogSamplesOutcome::Candidates(held)) =
-                    cooperative.try_sample_candidates(replica, reference_draws)
-                {
-                    for held in held {
-                        if held.coordinates.len() != snapshot.current_state().len() {
-                            continue;
-                        }
-                        anneal_core::catalog::include_packing_reference(&held.coordinates);
-                        anneal_core::catalog::offer_known_minimum(held.energy, &held.coordinates);
-                    }
-                }
-                // Energy landscape paving, with occupancy for the
-                // histogram. Standing on a packing another replica owns
-                // deposits under the replica's own feet, so the funnel
-                // it keeps quenching back into becomes expensive to it
-                // and the pile stops re-forming after each Leave.
-                // Nothing else makes an occupied funnel unattractive to
-                // the replica already in it, only to the coordinator
-                // watching. One deposit per checkpoint spent here is
-                // the count: the repetition is the histogram.
-                if shared_bias_enabled && policy.relation == ActiveCatalogRelation::SameBasin {
-                    pending_deposits.push(snapshot.current_state().to_owned());
-                }
-                if decision.reason == PolicyReason::HyperbandPruned {
-                    if coop_wells_enabled {
-                        remember_packing_well(
-                            snapshot.current_state(),
-                            coop_rcut,
-                            coop_species.as_deref(),
-                            &mut shared_wells,
-                        );
-                    }
-                    let left = {
-                        #[cfg(feature = "featomic")]
-                        {
-                            anneal_core::featomic_hop::surplus_reseed(
+                        let mut best: Option<(f64, Array1<f64>)> = None;
+                        for _ in 0..6 {
+                            let Some(candidate) = fixed_probe_trial(
                                 snapshot.current_state(),
-                                &shared_wells,
-                                coop_rcut,
-                                coop_species.as_deref(),
-                                None,
-                                &mut transport_rng,
-                            )
+                                2.0 * probe_scale * difficulty_gain,
+                                &mut histo_rng,
+                            ) else {
+                                continue;
+                            };
+                            cooperative
+                                .record_work(replica, ChargeKind::DescriptorEvaluation, 0)
+                                .expect("histogram screen work must enter the cooperative ledger");
+                            let histogram =
+                                class_histogram(candidate.view(), &mut histo_leaders, histo_radius);
+                            let novelty = histo_history
+                                .iter()
+                                .map(|past| histogram_l1(&histogram, past))
+                                .fold(f64::INFINITY, f64::min);
+                            if best.as_ref().is_none_or(|(kept, _)| novelty > *kept) {
+                                best = Some((novelty, candidate));
+                            }
                         }
-                        #[cfg(not(feature = "featomic"))]
+                        if let Some((novelty, candidate)) = best
+                            && novelty > 0.0
                         {
-                            None
+                            cooperative
+                                .record_slice(replica, trace)
+                                .expect("histogram checkpoint trace must remain complete");
+                            // Adoption, not a diagnostic probe: a screen that
+                            // cannot move the live chain contributes records
+                            // and no exploration, which the paired smokes
+                            // measured as bit-identical endpoints at every
+                            // gate setting.
+                            phases.fire("histo");
+                            return CheckpointAction::BoundaryProposal {
+                                state: candidate,
+                                action: "histo".to_owned(),
+                            };
                         }
-                    };
-                    if let Some(state) = left {
-                        trace.proposal_family = ProposalFamily::HyperbandReseed;
-                        trace.adoption = SliceAdoption::Adopted;
-                        leave_path.clear();
+                    }
+                }
+                if let Some(engine) = md_engine.as_ref()
+                    && checkpoint_sequence.is_multiple_of(md_interval)
+                    && snapshot.remaining()
+                        > md_steps
+                            .saturating_add(run_cfg.relax_steps)
+                            .saturating_add(2)
+                {
+                    match engine.propagate(
+                        snapshot.current_state(),
+                        md_steps,
+                        md_temperature,
+                        md_rng.random(),
+                    ) {
+                        Ok(state) if state.len() == snapshot.current_state().len() => {
+                            cooperative
+                                .record_work(
+                                    replica,
+                                    ChargeKind::AuxiliaryEvaluation,
+                                    u64::try_from(md_steps).expect("md steps fit u64"),
+                                )
+                                .expect("md segment work must enter the cooperative ledger");
+                            cooperative
+                                .record_slice(replica, trace)
+                                .expect("md checkpoint trace must remain complete");
+                            phases.fire("externalproposal");
+                            return CheckpointAction::ExternalProposal {
+                                state,
+                                action: format!("md_{}", engine.name()),
+                                external_calls: md_steps,
+                            };
+                        }
+                        Ok(_) => {}
+                        Err(error) => {
+                            eprintln!("md segment failed, local search continues: {error}");
+                        }
+                    }
+                }
+                if (bridge_enabled || decree_bridge_duty)
+                    && active_bridge.is_none()
+                    && checkpoint_sequence.is_multiple_of(bridge_interval)
+                    && snapshot.remaining() > run_cfg.relax_steps.saturating_add(2)
+                    && let CatalogBridgeOutcome::Assignment(assignment) = cooperative
+                        .bridge_assignment(replica, bridge_rng.random())
+                        .expect("bridge assignment poll must preserve local execution")
+                {
+                    let entry = assignment
+                        .entry
+                        .clone()
+                        .filter(|state| state.len() == snapshot.current_state().len());
+                    active_bridge = Some(assignment);
+                    if let Some(state) = entry {
                         cooperative
                             .record_slice(replica, trace)
-                            .expect("checkpoint trace must remain complete");
-                        return CheckpointAction::BoundaryProposal {
-                            state,
-                            action: "hyperband_reseed".to_owned(),
+                            .expect("bridge checkpoint trace must remain complete");
+                        phases.fire("bridge");
+                        return CheckpointAction::ProbeProposal {
+                            state: Array1::from(state),
+                            action: "bridge".to_owned(),
                         };
                     }
                 }
-                // Funnel exchange first when Fiedler F>=2: a
-                // representative of another packing community. F=1
-                // leftover wells are the champion walk. Extra
-                // ArchiveHole is leftover-orthogonal to the occupied
-                // packing and archive. Occupancy extras do not draw a
-                // random cluster.
-                let other_family = {
-                    if let CatalogSampleOutcome::Candidate(sparse) = cooperative
-                        .try_sample_candidate(replica, SPARSE_SAMPLE_DRAW)
-                        .expect("catalog sample access must preserve local execution")
-                        && sparse.coordinates.len() == snapshot.current_state().len()
+                if frontier_exchange_enabled {
+                    for (gap, energy, coordinates) in anneal_core::catalog::take_frontier_posts() {
+                        let post = anneal_core::catalog_rpc::CatalogFrontierPost {
+                            gap,
+                            energy,
+                            coordinates,
+                            producer_replica: replica,
+                            posted_sequence: checkpoint_sequence,
+                        };
+                        let _ = cooperative.offer_frontier(replica, post);
+                    }
+                    // A deterministic draw untangled from every sampling stream:
+                    // the checkpoint index hashed with the replica identity.
+                    let draw = checkpoint_sequence.wrapping_mul(0x9E37_79B9_7F4A_7C15)
+                        ^ u64::from(replica);
+                    if let Ok(Some(post)) = cooperative.draw_frontier(replica, draw)
+                        && post.producer_replica != replica
                     {
-                        // Another packing, not another book cell: a draw
-                        // that only clears the cell grain hands the extra
-                        // an isomer of the packing it is trying to leave.
-                        anneal_core::catalog::include_packing_reference(&sparse.coordinates);
-                        anneal_core::catalog::offer_known_minimum(
-                            sparse.energy,
-                            &sparse.coordinates,
+                        anneal_core::catalog::deliver_frontier_post(
+                            post.gap,
+                            post.energy,
+                            post.coordinates,
                         );
-                        let elsewhere = snapshot.current_state().as_slice().is_none_or(|here| {
-                            anneal_core::catalog::different_packing_family(
-                                here,
-                                &sparse.coordinates,
-                            )
-                        });
-                        elsewhere.then_some(sparse)
-                    } else {
-                        None
                     }
-                };
-                let p_new = leftover_birth_probability(
-                    policy.census.total_visits(),
-                    policy.census.singleton_basins().max(1),
-                );
-                let birth_draw = {
-                    // leave_quiet stands where the cloud-feed loop's step
-                    // index cannot reach: it counts checkpoints this
-                    // replica has spent without improving, so it advances
-                    // once per Leave decision and gives the draw a stream
-                    // that varies between consecutive Leaves from one
-                    // replica rather than only between replicas.
-                    let bits = (u64::from(replica) << 17)
-                        ^ (checkpoint_sequence as u64).wrapping_mul(0xBF58_476D_1CE4_E5B9)
-                        ^ (leave_quiet as u64).wrapping_mul(0x94D0_49BB_1331_11EB);
-                    (bits as f64) / (u64::MAX as f64)
-                };
-                count_leave += 1;
-                match occupancy_leave_by_birth(
-                    other_family.is_some(),
-                    policy.packing_saturated,
-                    policy.occupied_family_count as usize,
-                    policy.ei_exhausted,
-                    p_new,
-                    birth_draw,
-                    policy.leftover_dwell,
-                ) {
-                    OccupancyLeaveTarget::Walk => {
-                        count_walk += 1;
-                        // Nothing on the book to divide. The extra keeps
-                        // walking and the shared bias, deposited above,
-                        // holds it off the basins the others are on. That
-                        // is what coordination buys here; standing still
-                        // against one funnel is not.
-                        trace.adoption = SliceAdoption::Rejected;
-                        cooperative
-                            .record_slice(replica, trace)
-                            .expect("checkpoint trace must remain complete");
-                        return CheckpointAction::Continue;
-                    }
-                    OccupancyLeaveTarget::OtherFamily => {
-                        count_other_family += 1;
-                        let sparse = other_family.expect("other family is on file");
-                        anneal_core::catalog::include_packing_reference(&sparse.coordinates);
+                }
+                match decision.action {
+                    PolicyAction::ContinueLocal => {}
+                    PolicyAction::Exploit { win_only } => {
+                        trace.policy_role = PolicyRole::Exploit;
                         trace.proposal_family = ProposalFamily::CatalogSample;
-                        trace.adoption = SliceAdoption::Adopted;
-                        leave_path.clear();
-                        cooperative
-                            .record_slice(replica, trace)
-                            .expect("checkpoint trace must remain complete");
-                        return CheckpointAction::BoundaryProposal {
-                            state: Array1::from(sparse.coordinates.clone()),
-                            action: "catalog_leave".to_owned(),
-                        };
-                    }
-                    OccupancyLeaveTarget::ArchiveHole => {
-                        count_hole += 1;
-                        trace.proposal_family = ProposalFamily::DescriptorHole;
-                        if coop_wells_enabled {
-                            remember_packing_well(
-                                snapshot.current_state(),
-                                coop_rcut,
-                                coop_species.as_deref(),
-                                &mut shared_wells,
-                            );
-                        }
-                        let live = snapshot.current_state();
-                        let live_slice = live.as_slice().unwrap_or(&[]);
-                        let shoot_coords = leave_path.shoot_coordinates().unwrap_or(live_slice);
-                        // Leftover holes of the occupied packing are the
-                        // champion walk. Extra ArchiveHole is the first rung
-                        // of the packing ladder: a covering direction of the
-                        // DECAF feature pointed away from the packings on
-                        // file. The hop loop walks the rest of the ladder
-                        // when the quench lands back in the same packing.
-                        let index = archive_cover_index(replica, archive_hole_count);
-                        archive_hole_count += 1;
-                        let left = leave_packing_state(
-                            ArrayView1::from(shoot_coords),
-                            snapshot.current_energy(),
-                            &shared_wells,
-                            coop_rcut,
-                            coop_species.as_deref(),
-                            index,
-                            &mut transport_rng,
-                        );
-                        if left
-                            .iter()
-                            .zip(snapshot.current_state().iter())
-                            .any(|(a, b)| (a - b).abs() > 1e-12)
+                        if let CatalogSampleOutcome::Candidate(candidate) = cooperative
+                            .try_sample_candidate(replica, INCUMBENT_SAMPLE_DRAW)
+                            .expect("incumbent sample must preserve local execution")
                         {
-                            trace.adoption = SliceAdoption::Adopted;
-                            leave_path.clear();
+                            // Every structure the catalog hands over is another
+                            // chain's packing. The invert repels this chain's quench
+                            // from the packings it holds, so a sample is worth
+                            // keeping whether or not this arm adopts it: that is the
+                            // interaction at the minimisation level, and without it
+                            // the reference cloud is only ever this chain's own
+                            // history and the chains do not talk during the quench.
+                            anneal_core::catalog::include_packing_reference(&candidate.coordinates);
+                            anneal_core::catalog::offer_known_minimum(
+                                candidate.energy,
+                                &candidate.coordinates,
+                            );
+                            let improves = candidate.energy < snapshot.current_energy() - 1e-10;
+                            if candidate.coordinates.len() == snapshot.current_state().len()
+                                && (!win_only || improves)
+                            {
+                                trace.sampled_basin = candidate.census_basin;
+                                trace.energy = Some(snapshot.best_energy());
+                                trace.adoption = SliceAdoption::Adopted;
+                                cooperative
+                                    .record_slice(replica, trace)
+                                    .expect("checkpoint trace must remain complete");
+                                phases.fire("catalog_incumbent");
+                                return CheckpointAction::BoundaryProposal {
+                                    state: Array1::from(candidate.coordinates),
+                                    action: "catalog_incumbent".to_owned(),
+                                };
+                            }
+                            trace.adoption = if win_only && !improves {
+                                SliceAdoption::NotImproved
+                            } else {
+                                SliceAdoption::Rejected
+                            };
+                        } else {
+                            trace.adoption = SliceAdoption::Rejected;
+                        }
+                    }
+                    PolicyAction::Leave => {
+                        trace.policy_role = PolicyRole::Leave;
+                        if leave_defers(leave_quiet, leave_patience, leave_crossing) {
+                            // Still inside the recovered quiet stretch or the
+                            // measured crossing floor. Keep walking.
+                            trace.adoption = SliceAdoption::Rejected;
                             cooperative
                                 .record_slice(replica, trace)
                                 .expect("checkpoint trace must remain complete");
-                            return CheckpointAction::BoundaryProposal {
-                                state: left,
-                                action: "catalog_leave".to_owned(),
+                            phases.fire("continue");
+                            return CheckpointAction::Continue;
+                        }
+                        // Did the last Leave install anything? The anchor is the
+                        // packing this replica stood on when it last decided to
+                        // Leave, so standing in the same one now is a refusal
+                        // whatever the Leave reported at the time.
+                        if let Some(here) = snapshot.current_state().as_slice() {
+                            match leave_anchor.as_deref() {
+                                Some(anchor)
+                                    if !anneal_core::catalog::different_packing_family(
+                                        anchor, here,
+                                    ) =>
+                                {
+                                    leave_refused += 1;
+                                }
+                                _ => leave_refused = 0,
+                            }
+                            leave_anchor = Some(here.to_vec());
+                        }
+                        if leave_refused >= LEAVE_REFUSAL_DWELL {
+                            // This replica has asked for a packing it did not get,
+                            // this many times running. Plain hopping is what found
+                            // Marks in the serial runs, and it is what the
+                            // checkpoint spends its budget on instead of drawing
+                            // another hole in the packing it is already in.
+                            trace.adoption = SliceAdoption::Rejected;
+                            cooperative
+                                .record_slice(replica, trace)
+                                .expect("checkpoint trace must remain complete");
+                            phases.fire("continue");
+                            return CheckpointAction::Continue;
+                        }
+                        // Chains interact during minimisation only through the
+                        // reference cloud the packing invert repels the quench
+                        // from, and the cloud was fed one catalog structure per
+                        // checkpoint. That rate is the same whatever the ensemble
+                        // size, so forty-eight chains pushed on each other exactly
+                        // as hard as one did and "more chains reach Marks sooner"
+                        // had no mechanism under it. What the others are standing
+                        // on is already in the shared catalog, whose size does
+                        // grow with the ensemble, so the arm reads several entries
+                        // at once.
+                        let reference_draws = (0..anneal_core::catalog::PACKING_REFERENCE_DRAWS)
+                            .map(|step| {
+                                // Any draw that is neither sentinel indexes an entry
+                                // modulo the catalog length; masking the top bits
+                                // keeps it off INCUMBENT_SAMPLE_DRAW and
+                                // SPARSE_SAMPLE_DRAW, which mean a policy rather than
+                                // a slot.
+                                ((u64::from(replica) << 40)
+                                    ^ checkpoint_sequence.wrapping_mul(0x9E37_79B9_7F4A_7C15)
+                                    ^ (step as u64).wrapping_mul(0x85EB_CA6B))
+                                    & (u64::MAX >> 2)
+                            });
+                        if let Ok(CatalogSamplesOutcome::Candidates(held)) =
+                            cooperative.try_sample_candidates(replica, reference_draws)
+                        {
+                            for held in held {
+                                if held.coordinates.len() != snapshot.current_state().len() {
+                                    continue;
+                                }
+                                anneal_core::catalog::include_packing_reference(&held.coordinates);
+                                anneal_core::catalog::offer_known_minimum(
+                                    held.energy,
+                                    &held.coordinates,
+                                );
+                            }
+                        }
+                        // Energy landscape paving, with occupancy for the
+                        // histogram. Standing on a packing another replica owns
+                        // deposits under the replica's own feet, so the funnel
+                        // it keeps quenching back into becomes expensive to it
+                        // and the pile stops re-forming after each Leave.
+                        // Nothing else makes an occupied funnel unattractive to
+                        // the replica already in it, only to the coordinator
+                        // watching. One deposit per checkpoint spent here is
+                        // the count: the repetition is the histogram.
+                        if shared_bias_enabled
+                            && policy.relation == ActiveCatalogRelation::SameBasin
+                        {
+                            pending_deposits.push(snapshot.current_state().to_owned());
+                        }
+                        if decision.reason == PolicyReason::HyperbandPruned {
+                            if coop_wells_enabled {
+                                remember_packing_well(
+                                    snapshot.current_state(),
+                                    coop_rcut,
+                                    coop_species.as_deref(),
+                                    &mut shared_wells,
+                                );
+                            }
+                            let left = {
+                                #[cfg(feature = "featomic")]
+                                {
+                                    anneal_core::featomic_hop::surplus_reseed(
+                                        snapshot.current_state(),
+                                        &shared_wells,
+                                        coop_rcut,
+                                        coop_species.as_deref(),
+                                        None,
+                                        &mut transport_rng,
+                                    )
+                                }
+                                #[cfg(not(feature = "featomic"))]
+                                {
+                                    None
+                                }
                             };
+                            if let Some(state) = left {
+                                trace.proposal_family = ProposalFamily::HyperbandReseed;
+                                trace.adoption = SliceAdoption::Adopted;
+                                leave_path.clear();
+                                cooperative
+                                    .record_slice(replica, trace)
+                                    .expect("checkpoint trace must remain complete");
+                                phases.fire("hyperband_reseed");
+                                return CheckpointAction::BoundaryProposal {
+                                    state,
+                                    action: "hyperband_reseed".to_owned(),
+                                };
+                            }
+                        }
+                        // Funnel exchange first when Fiedler F>=2: a
+                        // representative of another packing community. A
+                        // one-community book with open EI aims in landfold
+                        // (ArchiveHole) and the hop quench is compacted.
+                        // Occupancy extras do not draw a random cluster.
+                        let other_family = {
+                            if let CatalogSampleOutcome::Candidate(sparse) = cooperative
+                                .try_sample_candidate(replica, SPARSE_SAMPLE_DRAW)
+                                .expect("catalog sample access must preserve local execution")
+                                && sparse.coordinates.len() == snapshot.current_state().len()
+                            {
+                                // Another packing, not another book cell: a draw
+                                // that only clears the cell grain hands the extra
+                                // an isomer of the packing it is trying to leave.
+                                anneal_core::catalog::include_packing_reference(
+                                    &sparse.coordinates,
+                                );
+                                anneal_core::catalog::offer_known_minimum(
+                                    sparse.energy,
+                                    &sparse.coordinates,
+                                );
+                                let elsewhere =
+                                    snapshot.current_state().as_slice().is_none_or(|here| {
+                                        anneal_core::catalog::different_packing_family(
+                                            here,
+                                            &sparse.coordinates,
+                                        )
+                                    });
+                                let deeper = sparse.energy < snapshot.current_energy() - 1e-3;
+                                (elsewhere && deeper).then_some(sparse)
+                            } else {
+                                None
+                            }
+                        };
+                        let p_new = leftover_birth_probability(
+                            policy.census.total_visits(),
+                            policy.census.singleton_basins().max(1),
+                        );
+                        let birth_draw = {
+                            // leave_quiet stands where the cloud-feed loop's step
+                            // index cannot reach: it counts checkpoints this
+                            // replica has spent without improving, so it advances
+                            // once per Leave decision and gives the draw a stream
+                            // that varies between consecutive Leaves from one
+                            // replica rather than only between replicas.
+                            let bits = (u64::from(replica) << 17)
+                                ^ checkpoint_sequence.wrapping_mul(0xBF58_476D_1CE4_E5B9)
+                                ^ (leave_quiet as u64).wrapping_mul(0x94D0_49BB_1331_11EB);
+                            (bits as f64) / (u64::MAX as f64)
+                        };
+                        count_leave += 1;
+                        match occupancy_leave_by_birth(
+                            other_family.is_some(),
+                            policy.packing_saturated,
+                            policy.occupied_family_count,
+                            policy.ei_exhausted,
+                            p_new,
+                            birth_draw,
+                            policy.leftover_dwell,
+                        ) {
+                            OccupancyLeaveTarget::Walk => {
+                                count_walk += 1;
+                                trace.adoption = SliceAdoption::Rejected;
+                                cooperative
+                                    .record_slice(replica, trace)
+                                    .expect("checkpoint trace must remain complete");
+                                phases.fire("continue");
+                                return CheckpointAction::Continue;
+                            }
+                            OccupancyLeaveTarget::Ridge => {
+                                if replica % 2 == 0 {
+                                    count_walk += 1;
+                                    trace.adoption = SliceAdoption::Rejected;
+                                    cooperative
+                                        .record_slice(replica, trace)
+                                        .expect("checkpoint trace must remain complete");
+                                    phases.fire("catalog_ridge");
+                                    return CheckpointAction::Continue;
+                                }
+                                count_hole += 1;
+                                trace.proposal_family = ProposalFamily::DescriptorHole;
+                                trace.adoption = SliceAdoption::Adopted;
+                                leave_path.clear();
+                                cooperative
+                                    .record_slice(replica, trace)
+                                    .expect("checkpoint trace must remain complete");
+                                phases.fire("catalog_ridge");
+                                return CheckpointAction::BoundaryProposal {
+                                    state: snapshot.current_state().to_owned(),
+                                    action: "catalog_ridge".to_owned(),
+                                };
+                            }
+                            OccupancyLeaveTarget::OtherFamily => {
+                                hear_state.other_family += 1;
+                                let sparse = other_family.expect("other family is on file");
+                                anneal_core::catalog::include_packing_reference(
+                                    &sparse.coordinates,
+                                );
+                                trace.proposal_family = ProposalFamily::CatalogSample;
+                                trace.adoption = SliceAdoption::Adopted;
+                                leave_path.clear();
+                                cooperative
+                                    .record_slice(replica, trace)
+                                    .expect("checkpoint trace must remain complete");
+                                phases.fire("catalog_leave");
+                                return CheckpointAction::BoundaryProposal {
+                                    state: Array1::from(sparse.coordinates.clone()),
+                                    action: "catalog_leave".to_owned(),
+                                };
+                            }
+                            OccupancyLeaveTarget::ArchiveHole => {
+                                count_hole += 1;
+                                trace.proposal_family = ProposalFamily::DescriptorHole;
+                                if coop_wells_enabled {
+                                    remember_packing_well(
+                                        snapshot.current_state(),
+                                        coop_rcut,
+                                        coop_species.as_deref(),
+                                        &mut shared_wells,
+                                    );
+                                }
+                                let live = snapshot.current_state();
+                                let live_slice = live.as_slice().unwrap_or(&[]);
+                                let shoot_coords =
+                                    leave_path.shoot_coordinates().unwrap_or(live_slice);
+                                // Landfold covering start. The hop quench applies
+                                // the compacted first phase, then polishes on the
+                                // plain potential; landfold names the landing.
+                                let index = archive_cover_index(replica, archive_hole_count);
+                                archive_hole_count += 1;
+                                let left = leave_packing_state(
+                                    ArrayView1::from(shoot_coords),
+                                    snapshot.current_energy(),
+                                    &shared_wells,
+                                    coop_rcut,
+                                    coop_species.as_deref(),
+                                    index,
+                                    &mut transport_rng,
+                                );
+                                if left
+                                    .iter()
+                                    .zip(snapshot.current_state().iter())
+                                    .any(|(a, b)| (a - b).abs() > 1e-12)
+                                {
+                                    trace.adoption = SliceAdoption::Adopted;
+                                    leave_path.clear();
+                                    cooperative
+                                        .record_slice(replica, trace)
+                                        .expect("checkpoint trace must remain complete");
+                                    phases.fire("catalog_leave");
+                                    return CheckpointAction::BoundaryProposal {
+                                        state: left,
+                                        action: "catalog_leave".to_owned(),
+                                    };
+                                }
+                                trace.adoption = SliceAdoption::Rejected;
+                            }
+                        }
+                    }
+                    PolicyAction::Explore => {
+                        trace.policy_role = PolicyRole::Explore;
+                        trace.proposal_family = ProposalFamily::DescriptorHole;
+                        if let CatalogHoleOutcome::Proposal(_) = cooperative
+                            .descriptor_hole(
+                                replica,
+                                descriptor.clone(),
+                                128,
+                                transport_rng.random(),
+                            )
+                            .expect("descriptor-hole access must preserve local execution")
+                        {
+                            let left = anneal_core::soap::step_away_cloud(
+                                snapshot.current_state(),
+                                anneal_core::soap::SoapSpec {
+                                    n_max: 3,
+                                    l_max: 6,
+                                    rcut_nn: coop_rcut,
+                                },
+                                0.35,
+                                coop_species.as_deref(),
+                                None,
+                                None,
+                                &mut transport_rng,
+                            );
+                            if left
+                                .iter()
+                                .zip(snapshot.current_state().iter())
+                                .any(|(a, b)| (a - b).abs() > 1e-12)
+                            {
+                                trace.proposal_family = ProposalFamily::DescriptorHole;
+                                trace.adoption = SliceAdoption::Adopted;
+                                cooperative
+                                    .record_slice(replica, trace)
+                                    .expect("checkpoint trace must remain complete");
+                                phases.fire("catalog_explore");
+                                return CheckpointAction::BoundaryProposal {
+                                    state: left,
+                                    action: "catalog_explore".to_owned(),
+                                };
+                            }
                         }
                         trace.adoption = SliceAdoption::Rejected;
                     }
                 }
-            }
-            PolicyAction::Explore => {
-                trace.policy_role = PolicyRole::Explore;
-                trace.proposal_family = ProposalFamily::DescriptorHole;
-                if let CatalogHoleOutcome::Proposal(_) = cooperative
-                    .descriptor_hole(replica, descriptor.clone(), 128, transport_rng.random())
-                    .expect("descriptor-hole access must preserve local execution")
-                {
-                    let left = anneal_core::soap::step_away_cloud(
-                        snapshot.current_state(),
-                        anneal_core::soap::SoapSpec {
-                            n_max: 3,
-                            l_max: 6,
-                            rcut_nn: coop_rcut,
-                        },
-                        0.35,
-                        coop_species.as_deref(),
-                        None,
-                        None,
-                        &mut transport_rng,
-                    );
-                    if left
-                        .iter()
-                        .zip(snapshot.current_state().iter())
-                        .any(|(a, b)| (a - b).abs() > 1e-12)
-                    {
-                        trace.proposal_family = ProposalFamily::DescriptorHole;
-                        trace.adoption = SliceAdoption::Adopted;
-                        cooperative
-                            .record_slice(replica, trace)
-                            .expect("checkpoint trace must remain complete");
-                        return CheckpointAction::BoundaryProposal {
-                            state: left,
-                            action: "catalog_explore".to_owned(),
-                        };
-                    }
-                }
-                trace.adoption = SliceAdoption::Rejected;
-            }
-        }
-        cooperative
-            .record_slice(replica, trace)
-            .expect("checkpoint trace must remain complete");
-        if shared_bias_enabled && !pending_deposits.is_empty() {
-            return CheckpointAction::DepositRemote {
-                states: std::mem::take(&mut pending_deposits),
-            };
-        }
-        CheckpointAction::Continue
+                cooperative
+                    .record_slice(replica, trace)
+                    .expect("checkpoint trace must remain complete");
+                CheckpointAction::Continue
+            },
+        );
+        with_pending_bias_update(action, &mut gossip_merge)
     };
     let outcome = run_with_bias_at_checkpoints(
         &run_cfg,
@@ -5226,12 +6644,20 @@ fn run_capnp_catalog(
         checkpoint_interval,
         &mut checkpoint,
     );
+    println!("  checkpoint phases {}", phases.report());
+    if evidence_only && let Some(charged) = unsettled_objective_calls(ledger.spent(), last_charged)
+    {
+        cooperative
+            .record_work(replica, EVIDENCE_ONLY_WORK_KIND, charged)
+            .expect("terminal evidence-only work must enter the cooperative ledger");
+    }
     // The policy layer's own tally, printed where the run ends rather
     // than only on improvement lines: Leaves fire mostly in the quiet
     // stretches after the last improvement, so a count carried on the
     // personal-best line systematically misses the tail.
     println!(
-        "  policy: leaves {count_leave} other {count_other_family} walk {count_walk} hole {count_hole} boundary {count_boundary} refused {leave_refused}"
+        "  policy: leaves {count_leave} other {} walk {count_walk} hole {count_hole} refused {leave_refused}",
+        hear_state.other_family
     );
     let wall = occupancy_started.elapsed().as_secs_f64();
     if let Some(rate) = hops_per_core_hour(outcome.hops as u64, wall, 1) {
@@ -5310,6 +6736,369 @@ fn required_catalog_env(name: &str) -> String {
 }
 
 #[cfg(feature = "bank-rpc")]
+fn census_bus_base(sharing: bool, evidence_only: bool, configured: Option<&str>) -> Option<u16> {
+    if !sharing || evidence_only {
+        return None;
+    }
+    configured?.parse().ok()
+}
+
+#[cfg(feature = "bank-rpc")]
+fn census_nearby_updates(
+    last_minimum: &mut Option<(f64, Vec<f64>)>,
+    _checkpoint_sequence: u64,
+    energy: f64,
+    here: &[f64],
+    peers: &[&anneal_core::census_bus::PeerMinimum],
+    fresh: &[anneal_core::census_bus::PeerMinimum],
+    nearby: &std::collections::HashMap<u32, bool>,
+) -> (Vec<(u32, bool)>, usize) {
+    // Latest admitted peers are live occupancy, not an archive count. Keep
+    // distant peers available for classification if this chain changes family.
+    let mut ordered_peers = peers.to_vec();
+    ordered_peers.sort_unstable_by_key(|peer| peer.replica);
+    anneal_core::catalog::packing::set_packing_peers(
+        ordered_peers
+            .iter()
+            .map(|peer| peer.coordinates.clone())
+            .collect(),
+    );
+    // Packing classification depends on coordinates, not objective values.
+    let own_moved = last_minimum
+        .as_ref()
+        .is_none_or(|(_, coordinates)| coordinates != here);
+    if own_moved || last_minimum.is_none() {
+        *last_minimum = Some((energy, here.to_vec()));
+    }
+    let fresh_ids: Vec<u32> = fresh.iter().map(|peer| peer.replica).collect();
+    let mut updates = Vec::new();
+    let mut crowd = 0;
+    for peer in peers {
+        if peer.coordinates.len() != here.len() {
+            updates.push((peer.replica, false));
+            continue;
+        }
+        let stale =
+            own_moved || fresh_ids.contains(&peer.replica) || !nearby.contains_key(&peer.replica);
+        let near = if stale {
+            let near = anneal_core::catalog::nearby_packing(here, &peer.coordinates);
+            // Register the peer's structure as a repulsion reference only
+            // when it becomes nearby or its minimum changed; the registry
+            // rebuilds its packing book over every held reference on each
+            // call, which at forty references was the remaining cost.
+            let was_near = nearby.get(&peer.replica).copied().unwrap_or(false);
+            if near && (!was_near || fresh_ids.contains(&peer.replica)) {
+                anneal_core::catalog::include_packing_reference(&peer.coordinates);
+            }
+            updates.push((peer.replica, near));
+            near
+        } else {
+            nearby[&peer.replica]
+        };
+        crowd += usize::from(near);
+    }
+    (updates, crowd)
+}
+
+#[cfg(feature = "bank-rpc")]
+fn lj_catalog_gradient_norm(
+    energy: f64,
+    coordinates: ArrayView1<f64>,
+    gradient: Option<ArrayView1<f64>>,
+) -> Option<f64> {
+    let gradient = gradient?;
+    if !energy.is_finite()
+        || coordinates.is_empty()
+        || !coordinates.len().is_multiple_of(3)
+        || gradient.len() != coordinates.len()
+        || coordinates.iter().any(|value| !value.is_finite())
+    {
+        return None;
+    }
+    let norm = euclidean_gradient_norm(gradient.as_slice()?);
+    (norm.is_finite() && norm <= 1e-5).then_some(norm)
+}
+
+#[cfg(all(test, feature = "bank-rpc"))]
+mod census_policy_tests {
+    use super::{census_bus_base, census_nearby_updates, lj_catalog_gradient_norm};
+    use anneal_core::census_bus::PeerMinimum;
+    use ndarray::{arr1, array};
+
+    fn packing_coordinates(text: &str) -> Vec<f64> {
+        text.lines()
+            .skip(2)
+            .filter(|line| !line.trim().is_empty())
+            .flat_map(|line| line.split_whitespace().skip(1).take(3))
+            .map(|value| value.parse().unwrap())
+            .collect()
+    }
+
+    #[test]
+    fn crowd_cache_tracks_own_geometry_even_at_equal_energy() {
+        let ico = packing_coordinates(include_str!("../tests/fixtures/lj75_ico.xyz"));
+        let marks = packing_coordinates(include_str!("../tests/fixtures/lj75_marks.xyz"));
+        let peer = PeerMinimum {
+            replica: 1,
+            hops: 7,
+            energy: -396.0,
+            coordinates: ico.clone(),
+        };
+        let mut anchor = None;
+        let mut nearby = std::collections::HashMap::new();
+        let (updates, crowd) =
+            census_nearby_updates(&mut anchor, 4, -396.0, &ico, &[&peer], &[], &nearby);
+        nearby.extend(updates);
+        assert_eq!(crowd, 1);
+        let (updates, crowd) =
+            census_nearby_updates(&mut anchor, 4, -396.0, &marks, &[&peer], &[], &nearby);
+        assert_eq!(
+            crowd, 0,
+            "changed local geometry invalidates the crowd cache"
+        );
+        assert_eq!(updates, vec![(1, false)]);
+    }
+
+    #[test]
+    fn every_checkpoint_phase_classifies_the_occupied_geometry() {
+        let ico = packing_coordinates(include_str!("../tests/fixtures/lj75_ico.xyz"));
+        let marks = packing_coordinates(include_str!("../tests/fixtures/lj75_marks.xyz"));
+        let peer = PeerMinimum {
+            replica: 1,
+            hops: 7,
+            energy: -396.0,
+            coordinates: ico.clone(),
+        };
+        for checkpoint_sequence in 1..=8 {
+            let mut anchor = None;
+            let mut nearby = std::collections::HashMap::new();
+            let (updates, crowd) =
+                census_nearby_updates(&mut anchor, 0, -396.0, &ico, &[&peer], &[], &nearby);
+            nearby.extend(updates);
+            assert_eq!(crowd, 1);
+            let (updates, crowd) = census_nearby_updates(
+                &mut anchor,
+                checkpoint_sequence,
+                -396.0,
+                &marks,
+                &[&peer],
+                &[],
+                &nearby,
+            );
+            assert_eq!(
+                crowd, 0,
+                "checkpoint {checkpoint_sequence} cannot reuse another occupied geometry's crowd"
+            );
+            assert_eq!(updates, vec![(1, false)]);
+        }
+    }
+
+    #[test]
+    fn incompatible_peer_geometry_cannot_remain_in_the_crowd() {
+        let ico = packing_coordinates(include_str!("../tests/fixtures/lj75_ico.xyz"));
+        let mut peer = PeerMinimum {
+            replica: 1,
+            hops: 7,
+            energy: -396.0,
+            coordinates: ico.clone(),
+        };
+        let mut anchor = None;
+        let mut nearby = std::collections::HashMap::new();
+        let (updates, crowd) =
+            census_nearby_updates(&mut anchor, 4, -396.0, &ico, &[&peer], &[], &nearby);
+        nearby.extend(updates);
+        assert_eq!(crowd, 1);
+        peer.coordinates.truncate(6);
+        let (updates, crowd) = census_nearby_updates(
+            &mut anchor,
+            4,
+            -396.0,
+            &ico,
+            &[&peer],
+            std::slice::from_ref(&peer),
+            &nearby,
+        );
+        assert_eq!(crowd, 0, "an incompatible peer cannot be a nearby packing");
+        assert_eq!(updates, vec![(1, false)]);
+    }
+
+    #[test]
+    fn private_controls_cannot_activate_an_inherited_census_port() {
+        assert_eq!(census_bus_base(false, false, Some("32000")), None);
+        assert_eq!(census_bus_base(false, true, Some("32000")), None);
+    }
+
+    #[test]
+    fn evidence_only_exchange_cannot_activate_geometry_census() {
+        assert_eq!(census_bus_base(true, true, Some("32000")), None);
+    }
+
+    #[test]
+    fn shared_geometry_exchange_requires_a_valid_configured_port() {
+        assert_eq!(census_bus_base(true, false, Some("32000")), Some(32000));
+        for configured in [None, Some(""), Some("invalid"), Some("65536")] {
+            assert_eq!(census_bus_base(true, false, configured), None);
+        }
+    }
+
+    #[test]
+    fn publication_requires_matching_finite_gradient_evidence() {
+        let coordinates = array![0.0, 0.0, 0.0, 1.0, 0.0, 0.0];
+        assert_eq!(
+            lj_catalog_gradient_norm(-1.0, coordinates.view(), None),
+            None
+        );
+        for gradient in [
+            array![],
+            arr1(&[0.0; 3]),
+            arr1(&[f64::NAN; 6]),
+            arr1(&[f64::INFINITY; 6]),
+        ] {
+            assert_eq!(
+                lj_catalog_gradient_norm(-1.0, coordinates.view(), Some(gradient.view())),
+                None
+            );
+        }
+        let gradient = arr1(&[0.0; 6]);
+        assert_eq!(
+            lj_catalog_gradient_norm(-1.0, coordinates.view(), Some(gradient.view())),
+            Some(0.0)
+        );
+        assert_eq!(
+            lj_catalog_gradient_norm(f64::NAN, coordinates.view(), Some(gradient.view())),
+            None
+        );
+        let invalid = arr1(&[f64::NAN; 6]);
+        assert_eq!(
+            lj_catalog_gradient_norm(-1.0, invalid.view(), Some(gradient.view())),
+            None
+        );
+    }
+
+    #[test]
+    fn census_stationarity_uses_the_catalog_norm_not_the_answer_component_limit() {
+        let coordinates = array![0.0, 0.0, 0.0, 1.0, 0.0, 0.0];
+        let too_large = array![8e-6, 8e-6, 0.0, 0.0, 0.0, 0.0];
+        assert_eq!(
+            lj_catalog_gradient_norm(-1.0, coordinates.view(), Some(too_large.view())),
+            None
+        );
+        let boundary = array![1e-5, 0.0, 0.0, 0.0, 0.0, 0.0];
+        assert_eq!(
+            lj_catalog_gradient_norm(-1.0, coordinates.view(), Some(boundary.view())),
+            Some(1e-5)
+        );
+    }
+}
+
+#[cfg(all(test, feature = "bank-rpc"))]
+mod census_repulsion_tests {
+    use super::census_nearby_updates;
+    use anneal_core::catalog::{nearby_packing, packing_references, set_packing_references};
+    use anneal_core::census_bus::PeerMinimum;
+    use anneal_core::methods::cluster_hopping::ClusterMove;
+    use anneal_core::soap::{SoapSpec, push_away_clouds, step_away_cloud};
+    use ndarray::{Array1, array};
+    use rand::{SeedableRng, rngs::StdRng};
+    use std::collections::HashMap;
+
+    fn structure() -> Array1<f64> {
+        array![0.0, 0.0, 0.0, 1.1, 0.0, 0.0, 0.0, 1.2, 0.0, 0.0, 0.0, 1.3]
+    }
+
+    #[test]
+    fn a_nearby_ring_peer_activates_separation_even_when_archive_entries_merge() {
+        let x = structure();
+        let peer = &x * 1.0001;
+        assert!(nearby_packing(
+            x.as_slice().unwrap(),
+            peer.as_slice().unwrap()
+        ));
+        let spec = SoapSpec::default();
+        let cap = 1e-4;
+        let expected = push_away_clouds(x.view(), &[peer.to_vec()], spec, cap).unwrap();
+        for count in 1..=3 {
+            set_packing_references(Vec::new());
+            let peers: Vec<_> = (1..=count)
+                .map(|replica| PeerMinimum {
+                    replica,
+                    hops: 7,
+                    energy: -1.0,
+                    coordinates: peer.to_vec(),
+                })
+                .collect();
+            let (_, crowd) = census_nearby_updates(
+                &mut None,
+                1,
+                -1.0,
+                x.as_slice().unwrap(),
+                &peers.iter().collect::<Vec<_>>(),
+                &peers,
+                &HashMap::new(),
+            );
+            assert_eq!(crowd, count as usize);
+            assert_eq!(
+                packing_references().len(),
+                1,
+                "history merges one occupied well"
+            );
+            let proposed = ClusterMove::SoapRepel {
+                rmsd: cap,
+                cutoff: spec.rcut_nn,
+            }
+            .propose(x.view(), 1.0, &mut StdRng::seed_from_u64(53));
+            assert_eq!(
+                proposed, expected,
+                "{count} nearby peers supply directed separation"
+            );
+        }
+    }
+
+    #[test]
+    fn empty_live_census_cannot_repel_from_archived_peer_positions() {
+        let x = structure();
+        let peer = &x * 1.03;
+        let archive = vec![peer.to_vec(); 3];
+        set_packing_references(archive.clone());
+        let (_, crowd) = census_nearby_updates(
+            &mut None,
+            1,
+            -1.0,
+            x.as_slice().unwrap(),
+            &[],
+            &[],
+            &HashMap::new(),
+        );
+        assert_eq!(crowd, 0);
+        assert_eq!(
+            packing_references(),
+            archive,
+            "live occupancy does not erase history"
+        );
+        let spec = SoapSpec::default();
+        let cap = 1e-4;
+        let expected = step_away_cloud(
+            x.view(),
+            spec,
+            cap,
+            None,
+            None,
+            None,
+            &mut StdRng::seed_from_u64(53),
+        );
+        let proposed = ClusterMove::SoapRepel {
+            rmsd: cap,
+            cutoff: spec.rcut_nn,
+        }
+        .propose(x.view(), 1.0, &mut StdRng::seed_from_u64(53));
+        assert_eq!(
+            proposed, expected,
+            "no live crowd means the independent escape"
+        );
+    }
+}
+
+#[cfg(feature = "bank-rpc")]
 fn lj_catalog_candidate(
     descriptor_space: &anneal_core::descriptor_space::DescriptorSpace,
     species: &[u32],
@@ -5321,14 +7110,7 @@ fn lj_catalog_candidate(
     coordinates: ArrayView1<f64>,
     gradient: ArrayView1<f64>,
 ) -> Option<anneal_core::catalog_rpc::CatalogCandidate> {
-    let gradient_norm = euclidean_gradient_norm(
-        gradient
-            .as_slice()
-            .expect("validated LJ gradient is contiguous"),
-    );
-    if !energy.is_finite() || !gradient_norm.is_finite() || gradient_norm > 1e-5 {
-        return None;
-    }
+    let gradient_norm = lj_catalog_gradient_norm(energy, coordinates, Some(gradient))?;
     let descriptor = descriptor_space.describe(coordinates, Some(species)).ok()?;
     Some(anneal_core::catalog_rpc::CatalogCandidate {
         producer_replica: replica,
@@ -5519,6 +7301,13 @@ fn adaptive_catalog_operations(
             *candidate_sequence = source_sequence;
             operations.push(AdaptiveCatalogOperation::RegisterCurrent(source));
         }
+        if !transition.validated || transition.to_gradient.is_none() {
+            operations.push(AdaptiveCatalogOperation::Unresolved {
+                action: transition.action.clone(),
+            });
+            registered_state = Some(transition.from_state.clone());
+            continue;
+        }
         let destination_sequence = candidate_sequence
             .checked_add(1)
             .expect("candidate sequence must fit u64");
@@ -5560,8 +7349,8 @@ fn adaptive_catalog_operations(
 fn run_capnp_bank(
     cfg: &Config,
     ledger: &mut Ledger,
-    relax: &mut dyn FnMut(&mut Ledger, ArrayView1<f64>, usize) -> (f64, Array1<f64>),
-    grad: &mut dyn FnMut(&mut Ledger, ArrayView1<f64>) -> Option<Array1<f64>>,
+    relax: &mut (dyn FnMut(&mut Ledger, ArrayView1<f64>, usize) -> (f64, Array1<f64>) + Send),
+    grad: &mut (dyn FnMut(&mut Ledger, ArrayView1<f64>) -> Option<Array1<f64>> + Send),
     seed: u64,
     sock: &str,
 ) -> Outcome {
@@ -5580,9 +7369,7 @@ fn run_capnp_bank(
             None
         }
     };
-    let sync_every = std::env::var("BANK_SYNC")
-        .ok()
-        .and_then(|v| v.parse().ok())
+    let sync_every = anneal_core::env::parsed("BANK_SYNC")
         .unwrap_or(8usize)
         .max(1);
     let mut bias = BasinBias::new(
@@ -5591,10 +7378,7 @@ fn run_capnp_bank(
         cfg.bias_height,
         cfg.bias_gamma,
     );
-    let slice = std::env::var("BANK_SLICE")
-        .ok()
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(500);
+    let slice = anneal_core::env::parsed("BANK_SLICE").unwrap_or(500);
     let mut rng = <rand::rngs::StdRng as rand::SeedableRng>::seed_from_u64(seed);
     let mut best = f64::INFINITY;
     let mut best_state: Option<Array1<f64>> = None;
@@ -5779,4 +7563,99 @@ fn run_capnp_bank(
         returned,
         ..Outcome::default()
     }
+}
+
+/// Thread replicas of the production hop loop over the channels the
+/// environment names, under the comparison contract: identical replica
+/// seeds and starts in every arm, one aggregate budget per seed equal to
+/// `budget`, the first-discovery aggregate call count on the record and
+/// the executable digest on the header.
+fn run_history_ensembles(
+    cfg: &Config,
+    n: usize,
+    budget: usize,
+    seed0: u64,
+    seeds: u64,
+    reference: Option<f64>,
+    replicas: usize,
+    opts: &[&str],
+) {
+    use anneal_core::methods::cluster_hopping::random_cluster_in_radius;
+    use anneal_core::methods::ensemble::{EnsembleProblem, ObjectiveFactory, StartFactory};
+    #[cfg(feature = "ira")]
+    use anneal_core::methods::minima_hopping::SerializedWitness;
+    use anneal_core::pes_exploration::StructureContext;
+    use ensemble_report::{
+        config_from_env, print_header, run_seeds, sorted_pairs_witness, witness_name,
+    };
+
+    let ens = config_from_env(replicas, budget, reference.map(|r| r + 1e-4));
+    let mut cfg = cfg.clone();
+    if let Some(cap) = anneal_core::env::parsed::<usize>("SHARED_DEPOSITS") {
+        cfg.shared_deposits = cap;
+    }
+    ens.validate(&cfg).unwrap_or_else(|error| panic!("{error}"));
+    let pair_cache_bytes: usize =
+        anneal_core::env::parsed("HISTORY_PAIR_CACHE_BYTES").unwrap_or(128 * 1024 * 1024);
+    let descriptor = anneal_core::catalog::lj::descriptor_space();
+    let ira_radius = anneal_core::catalog::lj::CALIBRATION_IRA_TOLERANCE;
+    #[cfg(feature = "ira")]
+    let witness = SerializedWitness(Mutex::new(
+        IraStructureWitness {
+            kmax_factor: if n >= 55 { 2.5 } else { 1.8 },
+            radius: ira_radius,
+        }
+        .with_pair_cache(pair_cache_bytes),
+    ));
+    #[cfg(not(feature = "ira"))]
+    let witness = {
+        let _ = pair_cache_bytes;
+        sorted_pairs_witness(n, ira_radius)
+    };
+    let witness_name = witness_name();
+    let context = StructureContext::new(Some(vec![18; n]), None, Some(format!("lj-reduced-n{n}")));
+    let objective: ObjectiveFactory<'_> = &|_| Box::new(|x: ArrayView1<f64>| lj(x));
+    let start: StartFactory<'_> =
+        &|_, rng| random_cluster_in_radius(n, cfg.start_radius(), cfg.min_separation, rng);
+    let same_family = |a: &[f64], b: &[f64]| !anneal_core::catalog::different_packing_family(a, b);
+    let problem = EnsembleProblem {
+        objective,
+        start,
+        descriptor: &descriptor,
+        context: &context,
+        witness: &witness,
+        same_family: &same_family,
+        // The share bound and the answer bound of the LJ campaign, in
+        // reduced units.
+        certificate: 1e-5,
+        polish_below: 1e-3,
+        callbacks_per_objective: 1,
+    };
+    print_header(
+        &ens,
+        witness_name,
+        &opts.join(","),
+        &format!("shared deposits {},", cfg.shared_deposits),
+    );
+    // The read-only answer audit of the seed loop, per replica.
+    let verify = |replica: usize, x: &Array1<f64>, reported: f64| {
+        assert_eq!(
+            x.len(),
+            3 * n,
+            "replica {replica} returned {} coordinates",
+            x.len()
+        );
+        let (e, g) = lj(x.view());
+        let gmax = g.iter().fold(0.0_f64, |a, v| a.max(v.abs()));
+        assert!(
+            e.is_finite() && (e - reported).abs() < 1e-6,
+            "replica {replica} reports {reported} but its coordinates have energy {e}"
+        );
+        assert!(
+            g.iter().all(|v| v.is_finite()) && gmax < 1e-3,
+            "replica {replica} returned a structure with gradient {gmax:.2e}"
+        );
+        (e, gmax)
+    };
+    run_seeds(&cfg, &ens, seed0, seeds, &problem, "", &verify, reference);
 }

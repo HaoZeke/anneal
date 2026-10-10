@@ -18,6 +18,7 @@ fn main() {
             "cpu_cell_list.cpp",
             "verlet.cpp",
             "shared_libraries.cpp",
+            "threadpool.cpp",
             "vesin_cuda_stub.cpp",
         ] {
             build.file(format!("{base}/src/{f}"));
@@ -48,5 +49,18 @@ fn main() {
         println!("cargo:rustc-link-lib=dylib=ira");
         println!("cargo:rustc-link-arg=-Wl,-rpath,{dir}");
         println!("cargo:rerun-if-env-changed=IRA_LIB_DIR");
+    }
+
+    // The `gpr` feature links gpr_optim's C API, which carries the
+    // gradient-enhanced Gaussian process. Same rule as IRA: the location is a
+    // build input, and the rpath is emitted so a linked binary runs without the
+    // caller having to set LD_LIBRARY_PATH by hand.
+    if std::env::var("CARGO_FEATURE_GPR").is_ok() {
+        let dir = std::env::var("GPR_OPTIM_LIB_DIR")
+            .expect("feature `gpr` requires GPR_OPTIM_LIB_DIR pointing at libgpr_optim");
+        println!("cargo:rustc-link-search=native={dir}");
+        println!("cargo:rustc-link-lib=dylib=gpr_optim");
+        println!("cargo:rustc-link-arg=-Wl,-rpath,{dir}");
+        println!("cargo:rerun-if-env-changed=GPR_OPTIM_LIB_DIR");
     }
 }

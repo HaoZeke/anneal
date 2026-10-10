@@ -21,7 +21,10 @@ use std::os::raw::{c_double, c_int};
 
 use ndarray::{Array1, ArrayView1};
 
-use crate::bias::{BasinMetric, Fingerprint};
+use crate::bias::{BasinMetric, Fingerprint, SortedPairs};
+
+mod pair_cache;
+pub use pair_cache::{CachedIraStructureWitness, PairCacheStats};
 
 unsafe extern "C" {
     /// `libira_try_mat` from `src/library_sofi.f90`.
@@ -259,9 +262,36 @@ impl crate::bias::Fingerprint for CanonicalOrder {
     /// coordinates, which are *not* comparable with canonicalised ones. Use
     /// [`CanonicalOrder::canonicalise`] directly and handle `None` unless the
     /// caller has established that matching succeeds for every structure it
-    /// will see. Against libira at 3cb0c29 it does not: the permutation comes
-    /// back non-bijective even for a structure matched to a relabelled copy of
-    /// itself.
+    /// will see.
+    ///
+    /// # An inherited claim and a measured one, kept apart
+    ///
+    /// INHERITED, not reproduced here: a note in this position said that
+    /// against libira at 3cb0c29 the permutation comes back non-bijective even
+    /// for a structure matched to a relabelled copy of itself. That claim is
+    /// part of why IRA has been treated as unreliable in this crate, so it is
+    /// recorded as something once observed rather than deleted.
+    ///
+    /// MEASURED, on the libira in use now, across two cases that are not the
+    /// same question:
+    ///
+    /// - A relabelling of the *reference itself*, in
+    ///   [`tests::a_canonical_order_absorbs_relabelling`]. The easy case: the
+    ///   structure being matched is the one the order is defined against.
+    /// - A relabelling of a structure that *differs from the reference by a
+    ///   real distortion*, in
+    ///   [`tests::canonicalising_a_relabelled_copy_of_a_distorted_structure`].
+    ///   This is what a search actually produces and the only case that bears
+    ///   on whether a coordinate-space model can be trusted. A jittered cluster
+    ///   and a relabelled copy of it canonicalise to the same coordinates at
+    ///   2.7e-16 root-mean-square on 13 points and 2.9e-16 on 38, costing 2.4
+    ///   ms per structure warm.
+    ///
+    /// Only the first case was covered before. The hard case succeeds to
+    /// machine precision here. Whether the inherited observation came from a
+    /// different libira, a different input shape or a different call is not
+    /// established, and nothing here establishes it, so the `None` path stays
+    /// and callers should still handle it.
     fn describe(&self, x: ArrayView1<f64>) -> Array1<f64> {
         // Scaled by 1/sqrt(n), so Euclidean distance between two descriptors is
         // a root-mean-square displacement per point rather than a total.
@@ -524,6 +554,21 @@ pub struct IraStructureWitness {
     pub radius: f64,
 }
 
+fn pair_distance_bound(left: ArrayView1<f64>, right: ArrayView1<f64>) -> Option<f64> {
+    SortedPairs {
+        n_points: left.len() / 3,
+    }
+    .bottleneck_lower_bound(left, right)
+}
+
+fn pair_distance_exceeds(left: ArrayView1<f64>, right: ArrayView1<f64>, radius: f64) -> bool {
+    SortedPairs {
+        n_points: left.len() / 3,
+    }
+    .bottleneck_exceeds(left, right, radius)
+    .unwrap_or(false)
+}
+
 fn exact_relation_from_match(
     left: ArrayView1<f64>,
     right: ArrayView1<f64>,
@@ -570,12 +615,8 @@ fn exact_relation_from_match(
     }
 }
 
-impl crate::pes_exploration::ExactStructureWitness for IraStructureWitness {
-    fn equivalent(&self, left: ArrayView1<f64>, right: ArrayView1<f64>) -> bool {
-        self.relation(left, right).is_equivalent()
-    }
-
-    fn relation(
+impl IraStructureWitness {
+    fn native_relation(
         &self,
         left: ArrayView1<f64>,
         right: ArrayView1<f64>,
@@ -588,15 +629,7 @@ impl crate::pes_exploration::ExactStructureWitness for IraStructureWitness {
         )
     }
 
-    fn equivalent_structures(
-        &self,
-        left: crate::pes_exploration::StructureView<'_>,
-        right: crate::pes_exploration::StructureView<'_>,
-    ) -> bool {
-        self.relation_structures(left, right).is_equivalent()
-    }
-
-    fn relation_structures(
+    fn native_relation_structures(
         &self,
         left: crate::pes_exploration::StructureView<'_>,
         right: crate::pes_exploration::StructureView<'_>,
@@ -619,15 +652,130 @@ impl crate::pes_exploration::ExactStructureWitness for IraStructureWitness {
                 ),
                 self.radius,
             ),
-            (None, None) => self.relation(left.coordinates, right.coordinates),
+            (None, None) => self.native_relation(left.coordinates, right.coordinates),
             _ => ExactStructureRelation::Distinct,
         }
+    }
+}
+
+impl crate::pes_exploration::ExactStructureWitness for IraStructureWitness {
+    fn equivalent(&self, left: ArrayView1<f64>, right: ArrayView1<f64>) -> bool {
+        self.relation(left, right).is_equivalent()
+    }
+
+    fn relation(
+        &self,
+        left: ArrayView1<f64>,
+        right: ArrayView1<f64>,
+    ) -> crate::pes_exploration::ExactStructureRelation {
+        if pair_distance_exceeds(left, right, self.radius) {
+            return crate::pes_exploration::ExactStructureRelation::Distinct;
+        }
+        self.native_relation(left, right)
+    }
+
+    fn equivalent_structures(
+        &self,
+        left: crate::pes_exploration::StructureView<'_>,
+        right: crate::pes_exploration::StructureView<'_>,
+    ) -> bool {
+        self.relation_structures(left, right).is_equivalent()
+    }
+
+    fn relation_structures(
+        &self,
+        left: crate::pes_exploration::StructureView<'_>,
+        right: crate::pes_exploration::StructureView<'_>,
+    ) -> crate::pes_exploration::ExactStructureRelation {
+        if left.context != right.context
+            || pair_distance_exceeds(left.coordinates, right.coordinates, self.radius)
+        {
+            return crate::pes_exploration::ExactStructureRelation::Distinct;
+        }
+        self.native_relation_structures(left, right)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A jittered cluster on a shell, the shape a quench actually produces.
+    fn shell(n: usize, jitter: f64, seed: u64) -> Array1<f64> {
+        let mut s = seed | 1;
+        let mut rnd = || {
+            s ^= s >> 12;
+            s ^= s << 25;
+            s ^= s >> 27;
+            ((s.wrapping_mul(0x2545_F491_4F6C_DD1D) >> 11) as f64) / (1u64 << 53) as f64 - 0.5
+        };
+        let mut v = Array1::<f64>::zeros(3 * n);
+        for i in 0..n {
+            let t = i as f64 * 2.399_963;
+            let z = 1.0 - 2.0 * (i as f64 + 0.5) / n as f64;
+            let r = (1.0 - z * z).max(0.0).sqrt();
+            v[3 * i] = 1.2 * r * t.cos() + jitter * rnd();
+            v[3 * i + 1] = 1.2 * r * t.sin() + jitter * rnd();
+            v[3 * i + 2] = 1.2 * z + jitter * rnd();
+        }
+        v
+    }
+
+    /// Does canonicalisation undo a relabelling of a structure that is *not*
+    /// the reference, and what does it cost?
+    ///
+    /// [`a_canonical_order_absorbs_relabelling`] already covers the easy case,
+    /// a relabelling of the reference itself. The case that decides whether a
+    /// coordinate-space kernel is usable for cluster search is the other one: a
+    /// structure the search actually produced, which differs from the reference
+    /// by a real distortion, against a relabelled copy of itself.
+    ///
+    /// It matters because the inverse-distance kernel in `gpr_optim` compares
+    /// pair `(i, j)` of one structure with pair `(i, j)` of another, so a
+    /// relabelled copy reads as a different structure. Measured through that
+    /// model on 13 points: the posterior mean moved by 218 standard deviations
+    /// and the reported standard deviation rose from 1.42e-4 to 9.74e-1, a
+    /// factor of 6900. Canonicalising every structure before it enters the
+    /// model is the cheapest proposed fix, and it is only a fix if it is exact
+    /// on structures away from the reference.
+    #[cfg(feature = "ira")]
+    #[test]
+    fn canonicalising_a_relabelled_copy_of_a_distorted_structure() {
+        for n in [13usize, 38] {
+            let reference = shell(n, 0.0, 11);
+            let canon = CanonicalOrder::new(reference.clone(), 1.8);
+            let x = shell(n, 0.08, 4242);
+            let xp = relabel(x.view(), 5);
+
+            // Warm first: the first call into libira pays library
+            // initialisation, which at 13 points read as 40 ms against 2 ms
+            // for the 38-point call that followed it. Timing the cold call is
+            // timing the loader.
+            let _ = canon.canonicalise(x.view());
+            let reps = 20;
+            let t0 = std::time::Instant::now();
+            for _ in 0..reps {
+                let _ = canon.canonicalise(x.view());
+            }
+            let cost_us = t0.elapsed().as_secs_f64() * 1e6 / f64::from(reps);
+            let a = canon.canonicalise(x.view());
+            let b = canon.canonicalise(xp.view());
+
+            match (a, b) {
+                (Some(a), Some(b)) => println!(
+                    "n={n}: canonicalisation {cost_us:.1} us per structure, rmsd between \
+                     a distorted structure and its relabelled copy {:.4e}",
+                    rms(a.view(), b.view())
+                ),
+                (a, b) => println!(
+                    "n={n}: canonicalisation {cost_us:.1} us per structure, refused: \
+                     as labelled {}, relabelled {}",
+                    if a.is_some() { "ok" } else { "None" },
+                    if b.is_some() { "ok" } else { "None" }
+                ),
+            }
+        }
+    }
 
     /// Regular octahedron, flattened.
     fn octahedron() -> Array1<f64> {
@@ -1184,6 +1332,15 @@ impl BasinMetric for IraMetric {
     /// basins. That is the safe direction: merging on a distance that was never
     /// computed empties the bias that separating them exists for.
     fn distance(&self, a: ArrayView1<f64>, b: ArrayView1<f64>) -> f64 {
+        IraMetric::distance(self, a, b)
+    }
+
+    fn distance_bounded(&self, a: ArrayView1<f64>, b: ArrayView1<f64>, bound: f64) -> f64 {
+        if let Some(lower) = pair_distance_bound(a, b)
+            && lower > bound
+        {
+            return lower;
+        }
         IraMetric::distance(self, a, b)
     }
 }

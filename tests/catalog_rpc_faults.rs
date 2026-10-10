@@ -12,6 +12,7 @@ use anneal_core::catalog_rpc::client::{
 };
 use anneal_core::catalog_rpc::server::{CatalogServer, ServerConfig};
 use anneal_core::catalog_rpc::{CatalogCandidate, CatalogIdentity, PROTOCOL_VERSION};
+use anneal_core::nng_rpc::{self, NngIo, PairSession};
 use capnp::capability::Promise;
 use capnp_rpc::RpcSystem;
 use capnp_rpc::rpc_twoparty_capnp::Side;
@@ -110,16 +111,14 @@ impl session::Server for CannedSession {
     }
 }
 
-fn serve_canned_snapshot(stream: std::net::TcpStream, sequences: Rc<RefCell<Vec<u64>>>) {
-    stream.set_nonblocking(true).unwrap();
+fn serve_canned_snapshot(pair: PairSession, sequences: Rc<RefCell<Vec<u64>>>) {
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
         .unwrap();
     let local = tokio::task::LocalSet::new();
     local.block_on(&runtime, async move {
-        let stream = tokio::net::TcpStream::from_std(stream).unwrap();
-        let _ = stream.set_nodelay(true);
+        let stream = NngIo::new(pair).unwrap();
         let (reader, writer) = TokioAsyncReadCompatExt::compat(stream).split();
         let network = VatNetwork::new(
             futures::io::BufReader::new(reader),
@@ -177,15 +176,13 @@ fn delayed_reply_times_out_into_the_same_local_fallback() {
 
 #[test]
 fn timed_out_request_reconnects_and_replays_before_returning() {
-    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-    let addr = listener.local_addr().unwrap();
+    let bound = nng_rpc::listen(nng::Protocol::Rep0, "127.0.0.1:0").unwrap();
+    let addr = bound.addr.expect("tcp");
     let sequences = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
     let peer_sequences = std::sync::Arc::clone(&sequences);
     let peer = thread::spawn(move || {
-        let (first, _) = listener.accept().unwrap();
-        drop(first);
-
-        let (replay, _) = listener.accept().unwrap();
+        let _ = nng_rpc::accept_pair(&bound.socket);
+        let replay = nng_rpc::accept_pair(&bound.socket).unwrap();
         let recorded = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
         serve_canned_snapshot(replay, std::rc::Rc::clone(&recorded));
         *peer_sequences.lock().unwrap() = recorded.borrow().clone();

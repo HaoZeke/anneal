@@ -158,22 +158,23 @@ impl CampaignConfig {
     /// how every existing read site tests them; the banner still names
     /// the off channels explicitly.
     pub fn env_pairs(&self) -> Vec<(String, String)> {
-        let mut pairs: Vec<(String, String)> = Vec::new();
-        pairs.push(("CATALOG_CAMPAIGN".into(), self.campaign.clone()));
-        pairs.push((
-            "CATALOG_REPLICAS".into(),
-            self.ensemble.replicas.to_string(),
-        ));
-        pairs.push(("CATALOG_WAVE".into(), self.ensemble.wave.to_string()));
-        pairs.push(("CATALOG_SLICE".into(), self.ensemble.slice.to_string()));
-        pairs.push((
-            "CATALOG_MAX_HOPS".into(),
-            self.ensemble.max_hops.to_string(),
-        ));
-        pairs.push((
-            "CATALOG_POPULATION_INTERVAL".into(),
-            self.ensemble.population_interval.to_string(),
-        ));
+        let mut pairs = vec![
+            ("CATALOG_CAMPAIGN".into(), self.campaign.clone()),
+            (
+                "CATALOG_REPLICAS".into(),
+                self.ensemble.replicas.to_string(),
+            ),
+            ("CATALOG_WAVE".into(), self.ensemble.wave.to_string()),
+            ("CATALOG_SLICE".into(), self.ensemble.slice.to_string()),
+            (
+                "CATALOG_MAX_HOPS".into(),
+                self.ensemble.max_hops.to_string(),
+            ),
+            (
+                "CATALOG_POPULATION_INTERVAL".into(),
+                self.ensemble.population_interval.to_string(),
+            ),
+        ];
         for (name, on) in self.channel_states() {
             if on {
                 pairs.push((name.to_string(), "1".into()));
@@ -228,25 +229,24 @@ impl CampaignConfig {
     pub fn collisions(&self) -> Vec<String> {
         let mut out = Vec::new();
         for (k, v) in self.env_pairs() {
-            if let Ok(existing) = std::env::var(&k) {
-                if existing != v {
-                    out.push(format!(
-                        "{k} is {existing:?} in the environment but {v:?} in the campaign file"
-                    ));
-                }
+            if let Ok(existing) = std::env::var(&k)
+                && existing != v
+            {
+                out.push(format!(
+                    "{k} is {existing:?} in the environment but {v:?} in the campaign file"
+                ));
             }
         }
         // A channel the file turns OFF that the environment turns on
         // is also a collision, even though off exports nothing.
         for (name, on) in self.channel_states() {
-            if !on {
-                if let Ok(existing) = std::env::var(name) {
-                    if existing == "1" {
-                        out.push(format!(
-                            "{name} is on in the environment but off in the campaign file"
-                        ));
-                    }
-                }
+            if !on
+                && let Ok(existing) = std::env::var(name)
+                && existing == "1"
+            {
+                out.push(format!(
+                    "{name} is on in the environment but off in the campaign file"
+                ));
             }
         }
         out

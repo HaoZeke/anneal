@@ -1,0 +1,335 @@
+use std::sync::Mutex;
+
+use anneal_core::methods::box_hopping::{
+    BoxCoverageConfig, BoxEnsembleConfig, BoxEnsembleResult, BoxEscape, GleEscapeConfig,
+    box_ensemble_optimize_with_coverage, box_values_ensemble_optimize_with_coverage,
+};
+use anneal_core::methods::ensemble::HistoryMode;
+use anneal_core::methods::gle_langevin::GleNoise;
+use eindir_core::{Bounds, Gradient, Objective};
+use ndarray::{Array1, ArrayView1, array};
+
+struct Bowl {
+    bounds: Bounds<f64>,
+    flat: bool,
+    objectives: Mutex<Vec<Array1<f64>>>,
+    gradients: Mutex<usize>,
+}
+
+impl Objective<f64> for Bowl {
+    fn eval(&self, x: ArrayView1<f64>) -> f64 {
+        assert_eq!(x.len(), 1);
+        assert!(x[0].is_finite() && (-1.0..=1.0).contains(&x[0]));
+        self.objectives.lock().unwrap().push(x.to_owned());
+        if self.flat { 0.0 } else { 0.5 * x.dot(&x) }
+    }
+
+    fn dim(&self) -> usize {
+        1
+    }
+
+    fn bounds(&self) -> &Bounds<f64> {
+        &self.bounds
+    }
+}
+
+impl Gradient<f64> for Bowl {
+    fn grad(&self, x: ArrayView1<f64>) -> Array1<f64> {
+        *self.gradients.lock().unwrap() += 1;
+        if self.flat { array![0.0] } else { x.to_owned() }
+    }
+
+    fn dim(&self) -> usize {
+        1
+    }
+}
+
+fn run(
+    values: bool,
+    flat: bool,
+    escape: BoxEscape,
+    history: HistoryMode,
+    radius: f64,
+    height: f64,
+) -> (BoxEnsembleResult, Vec<Array1<f64>>) {
+    let objective = Bowl {
+        bounds: Bounds::new(array![-1.0], array![1.0], 0.0),
+        flat,
+        objectives: Mutex::new(Vec::new()),
+        gradients: Mutex::new(0),
+    };
+    let config = BoxEnsembleConfig {
+        replicas: 1,
+        budget: 512,
+        history,
+        escape,
+        ..BoxEnsembleConfig::default()
+    };
+    let coverage = BoxCoverageConfig {
+        shared: false,
+        radius,
+        height,
+        ..BoxCoverageConfig::default()
+    };
+    let start = array![0.0];
+    let result = if values {
+        box_values_ensemble_optimize_with_coverage(
+            &objective,
+            7,
+            Some(start.view()),
+            &config,
+            &coverage,
+        )
+    } else {
+        box_ensemble_optimize_with_coverage(
+            &objective,
+            &objective,
+            7,
+            Some(start.view()),
+            &config,
+            &coverage,
+        )
+    };
+    let trace = objective.objectives.into_inner().unwrap();
+    assert_eq!(result.n_evals, trace.len());
+    assert_eq!(result.n_grads, objective.gradients.into_inner().unwrap());
+    assert!(result.n_evals + result.n_grads <= config.budget);
+    assert!(result.hops >= 4);
+    assert_eq!(result.best_val, 0.0);
+    assert_eq!(result.best_pos, start);
+    assert_eq!(result.coverage.local_observations, result.hops + 1);
+    if matches!(history, HistoryMode::None) {
+        assert_eq!(result.history_minima, 0);
+        assert_eq!(result.history_observations, 0);
+        assert_eq!(result.history_cost, (0, 0, 0.0));
+    }
+    (result, trace)
+}
+
+fn mechanisms() -> [BoxEscape; 3] {
+    [
+        BoxEscape::Gaussian,
+        BoxEscape::Langevin(GleEscapeConfig::default()),
+        BoxEscape::Langevin(GleEscapeConfig {
+            noise: GleNoise::White { friction: 4.0 },
+            ..GleEscapeConfig::default()
+        }),
+    ]
+}
+
+#[test]
+fn gradient_recrossing_changes_escape_without_a_minimum_report() {
+    for escape in mechanisms() {
+        let (_, inactive) = run(false, false, escape, HistoryMode::None, 0.01, 0.0);
+        let (result, active) = run(false, false, escape, HistoryMode::None, 0.01, 0.1);
+        assert_eq!(
+            active[1], inactive[1],
+            "the first launch has no return feedback"
+        );
+        assert_eq!(result.coverage_decisions.accepted, result.hops);
+        assert_ne!(
+            active, inactive,
+            "{escape:?}: a raw launch followed by return to covered zero must inform escape"
+        );
+    }
+}
+
+#[test]
+fn values_recrossing_changes_escape_without_a_minimum_report() {
+    let (_, inactive) = run(
+        true,
+        false,
+        BoxEscape::Gaussian,
+        HistoryMode::None,
+        0.05,
+        0.0,
+    );
+    let (result, active) = run(
+        true,
+        false,
+        BoxEscape::Gaussian,
+        HistoryMode::None,
+        0.05,
+        0.1,
+    );
+    assert_eq!(result.coverage_decisions.accepted, result.hops);
+    assert_ne!(
+        active, inactive,
+        "covered pattern-search returns must inform escape"
+    );
+}
+
+#[test]
+fn coverage_without_a_departure_preserves_the_escape_trace() {
+    for flat in [false, true] {
+        for escape in mechanisms() {
+            let (_, inactive) = run(false, flat, escape, HistoryMode::None, 2.0, 0.0);
+            let (_, active) = run(false, flat, escape, HistoryMode::None, 2.0, 0.1);
+            assert_eq!(
+                active, inactive,
+                "{escape:?}: no departure is no recrossing"
+            );
+        }
+    }
+}
+
+#[test]
+fn certified_feedback_is_not_counted_twice_as_coverage_feedback() {
+    for escape in mechanisms() {
+        let (_, inactive) = run(false, false, escape, HistoryMode::Private, 0.01, 0.0);
+        let (result, active) = run(false, false, escape, HistoryMode::Private, 0.01, 0.1);
+        assert!(result.history_observations > 1);
+        assert_eq!(
+            active, inactive,
+            "{escape:?}: one feedback update per return"
+        );
+    }
+}
+
+#[test]
+fn return_counters_match_paid_geometry_and_bounded_scale_changes() {
+    let radius = 0.01;
+    let (result, trace) = run(
+        false,
+        false,
+        BoxEscape::Gaussian,
+        HistoryMode::None,
+        radius,
+        0.1,
+    );
+    assert_eq!(trace.len(), 1 + 2 * result.hops);
+    let mut recrossings = 0;
+    let mut updates = 0;
+    let mut scale = 1.0_f64;
+    for hop in trace[1..].chunks_exact(2) {
+        assert_eq!(hop[1], array![0.0]);
+        if hop[0][0].abs() / 2.0 > radius {
+            recrossings += 1;
+            let increased = (scale * 1.05).min(4.0);
+            updates += usize::from(increased != scale);
+            scale = increased;
+        }
+    }
+    assert_eq!(result.coverage.recrossings, recrossings);
+    assert_eq!(result.coverage.escape_updates, updates);
+    assert_eq!(result.coverage.peer_recrossings, 0);
+    assert_eq!(result.coverage.peer_only_recrossings, 0);
+    assert!(recrossings > updates);
+    assert_eq!(scale, 4.0);
+}
+
+#[test]
+fn novel_coverage_balances_escape_without_a_minimum_report() {
+    let radius = 1e-12;
+    let (_, inactive) = run(
+        false,
+        true,
+        BoxEscape::Gaussian,
+        HistoryMode::None,
+        radius,
+        0.0,
+    );
+    let (result, active) = run(
+        false,
+        true,
+        BoxEscape::Gaussian,
+        HistoryMode::None,
+        radius,
+        0.1,
+    );
+    assert_eq!(active.len(), result.hops + 1);
+    for (index, point) in active.iter().enumerate() {
+        assert!(
+            active[..index]
+                .iter()
+                .all(|known| (point[0] - known[0]).abs() / 2.0 > radius)
+        );
+    }
+    assert_eq!(
+        active[1], inactive[1],
+        "initial coverage does not update escape"
+    );
+    assert_ne!(
+        active[2], inactive[2],
+        "the controller must consume novel coverage as well as repeated returns"
+    );
+}
+
+#[test]
+fn novel_arrivals_match_boundaries_and_respect_the_escape_floor() {
+    for values in [false, true] {
+        let (result, _) = run(
+            values,
+            true,
+            BoxEscape::Gaussian,
+            HistoryMode::None,
+            1e-12,
+            0.1,
+        );
+        let mut updates = 0;
+        let mut scale = 1.0_f64;
+        for _ in 0..result.hops {
+            let reduced = (scale / 1.05).max(0.25);
+            updates += usize::from(reduced != scale);
+            scale = reduced;
+        }
+        assert_eq!(result.coverage.novel_arrivals, result.hops);
+        assert_eq!(result.coverage.novelty_updates, updates);
+        assert_eq!(result.coverage.recrossings, 0);
+        assert_eq!(result.coverage.escape_updates, 0);
+    }
+}
+
+#[test]
+fn langevin_novelty_preserves_the_calibrated_excitation_floor() {
+    for noise in [GleNoise::Colored, GleNoise::White { friction: 4.0 }] {
+        let mut traces = Vec::new();
+        for height in [0.0, 0.1] {
+            let objective = Bowl {
+                bounds: Bounds::new(array![-1.0], array![1.0], 0.0),
+                flat: true,
+                objectives: Mutex::new(Vec::new()),
+                gradients: Mutex::new(0),
+            };
+            let config = BoxEnsembleConfig {
+                replicas: 1,
+                budget: 12,
+                history: HistoryMode::None,
+                escape: BoxEscape::Langevin(GleEscapeConfig {
+                    steps: 1,
+                    noise,
+                    ..GleEscapeConfig::default()
+                }),
+                ..BoxEnsembleConfig::default()
+            };
+            let coverage = BoxCoverageConfig {
+                shared: false,
+                radius: 1e-12,
+                height,
+                ..BoxCoverageConfig::default()
+            };
+            let result = box_ensemble_optimize_with_coverage(
+                &objective,
+                &objective,
+                7,
+                Some(array![0.0].view()),
+                &config,
+                &coverage,
+            );
+            let trace = objective.objectives.into_inner().unwrap();
+            assert_eq!(result.hops, 2);
+            assert_eq!(result.n_evals, trace.len());
+            assert_eq!(result.n_grads, objective.gradients.into_inner().unwrap());
+            assert_eq!(result.n_evals + result.n_grads, config.budget);
+            assert_eq!(result.coverage.recrossings, 0);
+            if height > 0.0 {
+                assert_eq!(result.coverage.novel_arrivals, 2);
+            }
+            traces.push(trace);
+        }
+        assert_eq!(
+            traces[0], traces[1],
+            "{noise:?}: novelty relaxes revisit boosts without undercutting the learned temperature"
+        );
+    }
+}

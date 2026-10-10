@@ -12,7 +12,7 @@ use anneal_core::methods::cluster_search::{search_from_maybe_bank, verify};
 use common::efficiency::{apply_two_phase, bank_label, report_eval_wall, report_trace};
 use eindir_core::gradient::DifferentiableObjective;
 use common::rgpot_eindir::{RgpotObjective, emit_engine_manifest};
-use ndarray::Array1;
+use ndarray::{Array1, ArrayView1};
 use rand::SeedableRng;
 use rand::rngs::StdRng;
 use std::io::Write;
@@ -49,10 +49,7 @@ fn main() {
     let m: usize = args.get(1).and_then(|v| v.parse().ok()).unwrap_or(2);
     let budget: usize = args.get(2).and_then(|v| v.parse().ok()).unwrap_or(400);
     let seeds: u64 = args.get(3).and_then(|v| v.parse().ok()).unwrap_or(1);
-    let seed0: u64 = std::env::var("SEED_OFFSET")
-        .ok()
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(0);
+    let seed0: u64 = anneal_core::env::parsed("SEED_OFFSET").unwrap_or(0);
     let n = 3 * m;
     let atmnrs: Vec<i32> = (0..m).flat_map(|_| [8i32, 1, 1]).collect();
     let species: Vec<u32> = (0..m).flat_map(|_| [8, 1, 1]).collect();
@@ -60,7 +57,20 @@ fn main() {
     let pot = RgpotObjective::xtb(&atmnrs, [60.0, 0.0, 0.0, 0.0, 60.0, 0.0, 0.0, 0.0, 60.0]);
     emit_engine_manifest("xtb");
     let obj = pot.wrapper();
-    let mut cfg = Config::recommended_molecular(species, groups.clone(), 1.0);
+    let mut cfg = Config::recommended_molecular(species.clone(), groups.clone(), 1.0);
+    let named: Vec<&str> = args
+        .get(4)
+        .map(|v| v.split(',').collect())
+        .unwrap_or_default();
+    if named.iter().any(|o| *o == "comm" || *o == "communicating") {
+        // Channel only: orbit plus Recognition. Keep the molecular library.
+        cfg.depth_reward = false;
+        cfg.orbit_complete_on_new = true;
+        cfg.shared_deposits = 0;
+        cfg.shared_visit_policy =
+            anneal_core::methods::minima_hopping::SharedVisitPolicy::Recognition;
+        cfg.jump_on_stall = false;
+    }
     cfg.move_library = MoveLibrary::Molecular {
         groups: groups.clone(),
         reactive: false,
@@ -73,6 +83,13 @@ fn main() {
         bank_label(),
         seed0 + seeds
     );
+    if let Some(replicas) = anneal_core::env::parsed::<usize>("HISTORY_REPLICAS") {
+        drop(obj);
+        run_water_ensembles(
+            &cfg, m, budget, seed0, seeds, replicas, &atmnrs, &species, &groups,
+        );
+        return;
+    }
     for seed in seed0..seed0 + seeds {
         let mut rng = StdRng::seed_from_u64(seed.wrapping_mul(0x9E37).wrapping_add(1));
         let mut template = Array1::zeros(3 * n);
@@ -136,4 +153,110 @@ fn main() {
             println!("  wrote {path}");
         }
     }
+}
+
+/// Rigid water template placed by the group repacker.
+fn water_template(n: usize, groups: &[Vec<usize>]) -> Array1<f64> {
+    let mut template = Array1::zeros(3 * n);
+    for atoms in groups {
+        for (a, &idx) in atoms.iter().enumerate() {
+            for k in 0..3 {
+                template[3 * idx + k] = WATER[a][k];
+            }
+        }
+    }
+    template
+}
+
+/// Thread replicas of the water search under the ensemble contract, with
+/// one xtb engine per replica (the handle is `Send`, not `Sync`).
+#[allow(clippy::too_many_arguments)]
+fn run_water_ensembles(
+    cfg: &Config,
+    m: usize,
+    budget: usize,
+    seed0: u64,
+    seeds: u64,
+    replicas: usize,
+    atmnrs: &[i32],
+    species: &[u32],
+    groups: &[Vec<usize>],
+) {
+    use anneal_core::methods::cluster_hopping::repack_rigid_groups;
+    use anneal_core::methods::ensemble::{EnsembleProblem, ObjectiveFactory, StartFactory};
+    #[cfg(feature = "ira")]
+    use anneal_core::methods::minima_hopping::SerializedWitness;
+    use anneal_core::pes_exploration::StructureContext;
+    use common::ensemble_report::{config_from_env, print_header, run_seeds, sorted_pairs_witness};
+    use eindir_core::gradient::DifferentiableObjective;
+    #[cfg(feature = "ira")]
+    use std::sync::Mutex;
+
+    let n = 3 * m;
+    let ens = config_from_env(replicas, budget, None);
+    ens.validate(cfg).unwrap_or_else(|error| panic!("{error}"));
+    let descriptor = anneal_core::catalog::molecular::descriptor_space(species)
+        .unwrap_or_else(|error| panic!("water descriptor space: {error:?}"));
+    let context = StructureContext::new(
+        Some(species.to_vec()),
+        None,
+        Some(format!("water-gfn2-m{m}")),
+    );
+    // Exact identity in angstrom; the molecular calibration radius.
+    let radius = 1e-4;
+    #[cfg(feature = "ira")]
+    let witness = SerializedWitness(Mutex::new(
+        anneal_core::shape::IraStructureWitness {
+            kmax_factor: 1.8,
+            radius,
+        }
+        .with_pair_cache(128 * 1024 * 1024),
+    ));
+    #[cfg(not(feature = "ira"))]
+    let witness = sorted_pairs_witness(n, radius);
+    let box_ = [60.0, 0.0, 0.0, 0.0, 60.0, 0.0, 0.0, 0.0, 60.0];
+    let objective: ObjectiveFactory<'_> = &|_| {
+        let pot = RgpotObjective::xtb(atmnrs, box_);
+        Box::new(move |x: ArrayView1<f64>| pot.wrapper().value_and_gradient(x))
+    };
+    let template = water_template(n, groups);
+    let start: StartFactory<'_> =
+        &|_, rng| repack_rigid_groups(template.view(), groups, cfg.length_scale, rng);
+    // Packing families are a cluster notion; no two-choice crowding here.
+    let same_family = |_: &[f64], _: &[f64]| false;
+    let problem = EnsembleProblem {
+        objective,
+        start,
+        descriptor: &descriptor,
+        context: &context,
+        witness: &witness,
+        same_family: &same_family,
+        // The engine's gradient noise (GFN2 at accuracy 0.01) sits far
+        // above the LJ share bound, so the record criterion itself is the
+        // certificate here and the polish window runs one decade above it.
+        certificate: cfg.record_gradient,
+        polish_below: 10.0 * cfg.record_gradient,
+        callbacks_per_objective: 1,
+    };
+    print_header(
+        &ens,
+        if cfg!(feature = "ira") {
+            "ira-cached"
+        } else {
+            "sorted-pairs-fallback"
+        },
+        "water-gfn2",
+        &format!("record gradient {:.2e},", cfg.record_gradient),
+    );
+    let audit = RgpotObjective::xtb(atmnrs, box_);
+    let verify = |replica: usize, x: &Array1<f64>, reported: f64| {
+        let (e, g) = audit.wrapper().value_and_gradient(x.view());
+        let gmax = g.iter().fold(0.0_f64, |a, v| a.max(v.abs()));
+        assert!(
+            e.is_finite() && (e - reported).abs() < 1e-5,
+            "replica {replica} reports {reported} but its coordinates have energy {e}"
+        );
+        (e, gmax)
+    };
+    run_seeds(cfg, &ens, seed0, seeds, &problem, " eV", &verify, None);
 }

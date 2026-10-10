@@ -1,12 +1,13 @@
 use anneal_core::catalog::{
-    OccupancyCertificate, OccupancyFold, PACKING_LINK, PACKING_MERGE, PACKING_MOVE_EPS,
-    PackingBook, different_decaf_family, include_packing_reference, leaves_packing,
-    lens_ring_displacement, occupancy_fes_delta, occupancy_fes_from_histograms,
-    occupancy_landfold_floor, occupancy_leave_new_class, occupancy_leave_new_packing,
-    occupancy_map_fold, occupancy_retire_at, occupancy_ring_census, occupancy_ring_floor,
-    occupancy_ring_profile, occupancy_sparsify_packing, packing_community_count, packing_distance,
-    packing_fingerprint, packing_link_labels, packing_reference_book, remember_packing_reference,
-    ring_leave_weight, same_packing, set_packing_references,
+    OccupancyCertificate, PACKING_LINK, PACKING_MERGE, PACKING_MOVE_EPS, PackingBook,
+    ape_highlight_queue, ape_local_seed, different_decaf_family, include_packing_reference,
+    leaves_packing, lens_ring_displacement, nearby_packing, occupancy_fes_delta,
+    occupancy_fes_from_histograms, occupancy_landfold_floor, occupancy_leave_new_class,
+    occupancy_leave_new_packing, occupancy_retire_at, occupancy_ring_census, occupancy_ring_floor,
+    occupancy_ring_profile, occupancy_sparsify_packing, occupied_unseen_share,
+    packing_community_count, packing_distance, packing_fingerprint, packing_link_labels,
+    packing_reference_book, remember_packing_reference, ring_leave_weight, same_packing,
+    set_packing_references,
 };
 use anneal_core::methods::warm_lbfgs::WarmLbfgs;
 use anneal_core::potentials::{PairKind, PairPotential};
@@ -64,6 +65,50 @@ fn different_decaf_family_is_ico_versus_marks_not_an_ico_isomer() {
     let marks = marks.as_slice().unwrap();
     assert!(different_decaf_family(ico, marks));
     assert!(!different_decaf_family(ico, ico));
+}
+
+#[test]
+fn ape_queue_highlights_ico_atoms_by_decaf_class() {
+    let ico = load_xyz(include_str!("fixtures/lj75_ico.xyz"));
+    let ico = ico.as_slice().unwrap();
+    let queue = ape_highlight_queue(ico);
+    assert!(
+        !queue.is_empty(),
+        "APE must queue local environment classes on the sealed ico minimum"
+    );
+    assert_eq!(queue.len(), 75);
+    let seed = ape_local_seed(ico, queue[0].0, 0.2, 0);
+    let moved = (0..3)
+        .map(|k| {
+            let d = seed[3 * queue[0].0 + k] - ico[3 * queue[0].0 + k];
+            d * d
+        })
+        .sum::<f64>()
+        .sqrt();
+    assert!(
+        (moved - 0.2).abs() < 1e-9,
+        "APE seed moves only the highlighted atom"
+    );
+    set_packing_references(Vec::new());
+    remember_packing_reference(ico);
+    assert_eq!(
+        occupied_unseen_share(ico),
+        0.0,
+        "the occupied structure has no unseen local classes against itself"
+    );
+}
+
+#[test]
+fn invert_neighbours_are_nearby_in_the_packing_map() {
+    let ico = load_xyz(include_str!("fixtures/lj75_ico.xyz"));
+    let marks = load_xyz(include_str!("fixtures/lj75_marks.xyz"));
+    let ico = ico.as_slice().unwrap();
+    let marks = marks.as_slice().unwrap();
+    assert!(nearby_packing(ico, ico));
+    assert!(
+        !nearby_packing(ico, marks),
+        "a far packing pair is a hear, not an invert neighbour"
+    );
 }
 
 #[test]
@@ -526,10 +571,13 @@ fn a_second_look_at_the_same_ico_does_not_open_a_family() {
     let ico = load_xyz(include_str!("fixtures/lj75_ico.xyz"));
     let mut book = PackingBook::default();
     let first = book.observe(ico.as_slice().unwrap()).unwrap();
+    let version = book.version();
     let second = book.observe(ico.as_slice().unwrap()).unwrap();
     assert_eq!(first, second);
     assert_eq!(book.visits(first), 2);
+    assert_eq!(book.version(), version);
     assert_eq!(book.occupied_family_count(), 1);
+    assert_eq!(book.occupied_packing_count(), 1);
     assert_eq!(
         book.novelty(&book.histogram(ico.as_slice().unwrap()).unwrap()),
         0.0
@@ -578,6 +626,33 @@ fn a_query_histogram_does_not_change_what_the_book_learns() {
     );
     assert_eq!(queried.visits(direct_family), direct.visits(direct_family));
     assert_eq!(queried.occupied_family_count(), 2);
+    assert_eq!(queried.occupied_packing_count(), 2);
+}
+
+#[test]
+fn a_query_inherits_the_cached_packing_community() {
+    let ico = load_xyz(include_str!("fixtures/lj75_ico.xyz"));
+    let marks = load_xyz(include_str!("fixtures/lj75_marks.xyz"));
+    let ico = ico.as_slice().unwrap();
+    let marks = marks.as_slice().unwrap();
+    let mut book = PackingBook::default();
+    let family = book.observe(ico).expect("LJ75 ico has a class histogram");
+    let histogram = book.histogram(ico).expect("ico histogram");
+    assert_eq!(book.families_sharing_community(&histogram), vec![family]);
+    assert_eq!(
+        book.occupied_packing_count(),
+        book.occupied_packing_count(),
+        "the community fold is stable for an unchanged book"
+    );
+    let marks_family = book.observe(marks).expect("Marks opens a family");
+    assert_ne!(family, marks_family);
+    assert_eq!(book.occupied_packing_count(), 2);
+    let marks_histogram = book.histogram(marks).expect("Marks histogram");
+    assert_eq!(
+        book.families_sharing_community(&marks_histogram),
+        vec![marks_family],
+        "Marks stays in its own packing community"
+    );
 }
 
 #[test]
@@ -593,7 +668,7 @@ fn switch_saturates_far_l1_asinh_does_not() {
     let d_far = packing_distance(&a, &far) + packing_distance(&b, &c);
     assert!(d_far > d_near);
     let sigma = d_near;
-    let sw_near = 1.0 - 1.0 / (1.0 + (d_near / sigma).powi(2));
+    let _sw_near = 1.0 - 1.0 / (1.0 + (d_near / sigma).powi(2));
     let sw_far = 1.0 - 1.0 / (1.0 + ((10.0 * d_near) / sigma).powi(2));
     let sw_farer = 1.0 - 1.0 / (1.0 + ((20.0 * d_near) / sigma).powi(2));
     assert!(

@@ -32,6 +32,137 @@ const GLE_FREQUENCY_FLOOR: f64 = 1e-12;
 /// Final annealing temperature as a fraction of the initial temperature.
 const GLE_ANNEAL_TEMPERATURE_FLOOR_RATIO: f64 = 1e-3;
 
+/// Noise law for a Langevin optimization trajectory.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum GleNoise {
+    /// Fitted extended-state thermostat across the configured frequency band.
+    Colored,
+    /// Scalar Langevin friction, with no auxiliary momentum rows.
+    White {
+        /// Positive finite damping rate for the physical momentum.
+        friction: f64,
+    },
+}
+
+impl GleNoise {
+    pub(crate) fn validate(self) {
+        if let Self::White { friction } = self {
+            assert!(
+                friction.is_finite() && friction > 0.0,
+                "friction must be finite and positive"
+            );
+        }
+    }
+
+    fn drift(self, omega0: f64) -> Array2<f64> {
+        match self {
+            Self::Colored => optimal_sampling_drift(omega0),
+            Self::White { friction } => Array2::from_elem((1, 1), friction),
+        }
+    }
+}
+
+/// Persistent optimization noise; positions and raw forces belong to the caller.
+/// Segment boundaries do not redraw physical or auxiliary momenta. A caller
+/// that changes its position through quench or rejection supplies a fresh force.
+pub(crate) struct LangevinStepper {
+    drift: Array2<f64>,
+    thermostat: GleThermostat,
+    momentum: Array2<f64>,
+    scale: Array1<f64>,
+    rng: StdRng,
+    temperature: f64,
+    pub(crate) dt: f64,
+}
+
+impl LangevinStepper {
+    pub(crate) fn new(
+        noise: GleNoise,
+        omega0: f64,
+        dt: f64,
+        temperature: f64,
+        scale: Array1<f64>,
+        seed: u64,
+    ) -> Self {
+        noise.validate();
+        assert!(
+            omega0.is_finite() && omega0 > 0.0,
+            "omega0 must be finite and positive"
+        );
+        assert!(dt.is_finite() && dt > 0.0, "dt must be finite and positive");
+        assert!(
+            scale.iter().all(|s| s.is_finite() && *s > 0.0),
+            "scale must be finite and positive"
+        );
+        let dt = dt
+            .min(GLE_TIMESTEP_RESOLUTION / (GLE_BAND_RATIO * omega0).max(GLE_FREQUENCY_FLOOR))
+            .max(GLE_MIN_TIMESTEP);
+        let drift = noise.drift(omega0);
+        let thermostat = GleThermostat::canonical(&drift, dt, temperature, 1.0);
+        let covariance = Array2::<f64>::eye(drift.nrows()) * temperature;
+        let mut rng = StdRng::seed_from_u64(seed);
+        let momentum = thermostat.sample_stationary(&covariance, scale.len(), 1.0, &mut rng);
+        Self {
+            drift,
+            thermostat,
+            momentum,
+            scale,
+            rng,
+            temperature,
+            dt,
+        }
+    }
+
+    pub(crate) fn set_temperature(&mut self, temperature: f64) {
+        if temperature == self.temperature {
+            return;
+        }
+        self.momentum *= (temperature / self.temperature).sqrt();
+        self.thermostat = GleThermostat::canonical(&self.drift, self.dt, temperature, 1.0);
+        self.temperature = temperature;
+    }
+
+    /// One BAB step and thermostat update: exactly one gradient and objective.
+    /// The boundary operation is box clipping, not a manifold retraction.
+    pub(crate) fn step<O: Objective<f64>, G: Gradient<f64>>(
+        &mut self,
+        obj: &O,
+        grad: &G,
+        x: &mut Array1<f64>,
+        raw_gradient: &mut Array1<f64>,
+    ) -> f64 {
+        self.step_with_proposal(obj, grad, x, raw_gradient, |_| {})
+    }
+
+    /// Correct a feasible position before raw force evaluation, so cached
+    /// forces always belong to the positions the objective actually samples.
+    pub(crate) fn step_with_proposal<
+        O: Objective<f64>,
+        G: Gradient<f64>,
+        P: FnMut(&mut Array1<f64>),
+    >(
+        &mut self,
+        obj: &O,
+        grad: &G,
+        x: &mut Array1<f64>,
+        raw_gradient: &mut Array1<f64>,
+        mut proposal: P,
+    ) -> f64 {
+        let mut p = self.momentum.row(0).to_owned();
+        p = &p - &(&(&*raw_gradient * &self.scale) * (0.5 * self.dt));
+        *x = &*x + &(&(&p * &self.scale) * self.dt);
+        *x = obj.bounds().clip(x.view());
+        proposal(x);
+        *raw_gradient = grad.grad(x.view());
+        let value = obj.eval(x.view());
+        p = &p - &(&(&*raw_gradient * &self.scale) * (0.5 * self.dt));
+        self.momentum.row_mut(0).assign(&p);
+        self.thermostat
+            .step(&mut self.momentum.view_mut(), &mut self.rng);
+        value
+    }
+}
+
 /// Result of a GLE-Langevin annealing run.
 #[derive(Clone, Debug)]
 pub struct GleLangevinResult {
@@ -47,7 +178,7 @@ pub struct GleLangevinResult {
     pub dt: f64,
     /// Diagonal entries of the position-space preconditioning matrix.
     pub preconditioner_diag: Vec<f64>,
-    /// Gradient probes spent estimating the preconditioner.
+    /// Gradient probes spent calibrating the frequency or diagonal preconditioner.
     pub n_preconditioner_grads: usize,
 }
 
@@ -190,7 +321,10 @@ where
     }
 
     if used == 0 {
-        return unit_gle_preconditioner(dim, fallback);
+        return GlePreconditioner {
+            n_grads,
+            ..unit_gle_preconditioner(dim, fallback)
+        };
     }
     let curvature = curvature_sum.mapv(|value| (value / used as f64).abs());
 
@@ -200,7 +334,10 @@ where
         .filter(|value| value.is_finite() && *value > GLE_FREQUENCY_FLOOR)
         .collect();
     if positive.is_empty() {
-        return unit_gle_preconditioner(dim, fallback);
+        return GlePreconditioner {
+            n_grads,
+            ..unit_gle_preconditioner(dim, fallback)
+        };
     }
     positive.sort_by(|left, right| left.total_cmp(right));
     let reference = positive[positive.len() / 2].max(GLE_FREQUENCY_FLOOR);
@@ -226,10 +363,22 @@ where
     O: Objective<f64>,
     G: Gradient<f64>,
 {
+    estimate_gle_omega0_with_probe_budget(obj, grad, obj.bounds().dims).0
+}
+
+fn estimate_gle_omega0_with_probe_budget<O, G>(
+    obj: &O,
+    grad: &G,
+    max_probe_pairs: usize,
+) -> (f64, usize)
+where
+    O: Objective<f64>,
+    G: Gradient<f64>,
+{
     let bounds = obj.bounds();
     let dim = bounds.dims;
     if dim == 0 {
-        return DEFAULT_GLE_OMEGA0;
+        return (DEFAULT_GLE_OMEGA0, 0);
     }
     let low = &bounds.low;
     let high = &bounds.high;
@@ -237,7 +386,11 @@ where
     let rel_step = f64::EPSILON.cbrt();
     let min_step = f64::EPSILON.sqrt();
     let mut frequencies = Vec::with_capacity(dim);
+    let mut n_grads = 0;
     for axis in 0..dim {
+        if n_grads / 2 >= max_probe_pairs {
+            break;
+        }
         let width = high[axis] - low[axis];
         if !width.is_finite() || width <= 0.0 {
             continue;
@@ -253,6 +406,7 @@ where
         }
         let gp = grad.grad(xp.view());
         let gm = grad.grad(xm.view());
+        n_grads += 2;
         if gp.len() != dim
             || gm.len() != dim
             || gp.iter().any(|v| !v.is_finite())
@@ -266,10 +420,11 @@ where
         }
     }
     frequencies.sort_by(|left, right| left.total_cmp(right));
-    frequencies
+    let omega0 = frequencies
         .into_iter()
         .find(|omega| omega.is_finite() && *omega > 0.0)
-        .unwrap_or_else(|| fallback_gle_omega0(low, high))
+        .unwrap_or_else(|| fallback_gle_omega0(low, high));
+    (omega0, n_grads)
 }
 
 /// Run GLE-thermostatted Langevin annealing on `obj` with gradient `grad`.
@@ -338,15 +493,12 @@ where
     let bounds = obj.bounds().clone();
     let dim = bounds.dims;
     assert_eq!(scale.len(), dim, "scale length must match dimension");
-    let mut rng = StdRng::seed_from_u64(seed);
 
     // Resolve the fastest fitted frequency with the configured timestep fraction.
     let omega_hi = GLE_BAND_RATIO * omega0;
     let dt = dt
         .min(GLE_TIMESTEP_RESOLUTION / omega_hi.max(GLE_FREQUENCY_FLOOR))
         .max(GLE_MIN_TIMESTEP);
-    let drift = optimal_sampling_drift(omega0);
-    let ns = drift.nrows() - 1;
 
     // Start from the supplied anchor or the box centre.
     let mut x: Array1<f64> = x0
@@ -355,7 +507,7 @@ where
         })
         .map(|candidate| bounds.clip(candidate.view()))
         .unwrap_or_else(|| (&bounds.low + &bounds.high) * 0.5);
-    let mut fx = obj.eval(x.view());
+    let fx = obj.eval(x.view());
     let mut best_val = fx;
     let mut best_pos = x.clone();
 
@@ -365,9 +517,6 @@ where
     let n_epochs = n_epochs.clamp(1, dynamics_budget);
     let steps = (dynamics_budget / n_epochs).max(1);
 
-    // Auxiliary GLE state: (ns+1) x dim, row 0 is the physical momentum; the
-    // per-epoch loop reseeds it at the current temperature.
-    let mut s: Array2<f64>;
     let mut g = grad.grad(x.view());
     let mut n_evals = n_preconditioner_grads + 1;
     if n_evals >= max_fevals {
@@ -382,42 +531,24 @@ where
         };
     }
 
+    let mut stepper =
+        LangevinStepper::new(GleNoise::Colored, omega0, dt, t_hi, scale.clone(), seed);
     'outer: for epoch in 0..n_epochs {
         let frac = epoch as f64 / (n_epochs.max(2) - 1) as f64;
         let temperature = t_hi * (t_lo / t_hi).powf(frac);
-        let gle = GleThermostat::canonical(&drift, dt, temperature, 1.0);
-        // reseed the physical momentum at this temperature
-        {
-            let c = Array2::<f64>::eye(ns + 1) * temperature;
-            s = gle.sample_stationary(&c, dim, 1.0, &mut rng);
-        }
+        stepper.set_temperature(temperature);
         for _ in 0..steps {
-            // B: half momentum kick from the force (mass = 1)
-            let mut p: Array1<f64> = s.row(0).to_owned();
-            p = &p - &(&(&g * scale) * (0.5 * dt));
-            // A: drift the position, clip to the box
-            x = &x + &(&(&p * scale) * dt);
-            x = bounds.clip(x.view());
-            g = grad.grad(x.view());
+            let fy = stepper.step(obj, grad, &mut x, &mut g);
             n_evals += 1;
-            let fy = obj.eval(x.view());
             if fy < best_val {
                 best_val = fy;
                 best_pos = x.clone();
             }
-            fx = fy;
-            // B: second half kick
-            p = &p - &(&(&g * scale) * (0.5 * dt));
-            // O: GLE colored-noise thermostat on the momentum
-            s.row_mut(0).assign(&p);
-            gle.step(&mut s.view_mut(), &mut rng);
             if n_evals >= max_fevals {
                 break 'outer;
             }
         }
     }
-    let _ = fx;
-
     GleLangevinResult {
         best_pos: best_pos.to_vec(),
         best_val,
@@ -482,8 +613,25 @@ where
     O: Objective<f64>,
     G: Gradient<f64>,
 {
-    let omega0 = estimate_gle_omega0(obj, grad);
-    gle_langevin_sa(obj, grad, seed, max_fevals, omega0, dt, n_epochs, x0)
+    assert!(max_fevals > 0, "max_fevals must be positive");
+    let dim = obj.bounds().dims;
+    // Complete probe pairs share the gradient allowance with initialization.
+    let max_probe_pairs = ((max_fevals - 1) / 2).min(dim);
+    let (omega0, n_probe_grads) = estimate_gle_omega0_with_probe_budget(obj, grad, max_probe_pairs);
+    let scale = Array1::from_elem(dim, 1.0);
+    run_gle_langevin_scaled_sa(
+        obj,
+        grad,
+        seed,
+        max_fevals,
+        omega0,
+        dt,
+        n_epochs,
+        x0,
+        &scale,
+        Array1::from_elem(dim, 1.0),
+        n_probe_grads,
+    )
 }
 
 #[cfg(test)]
@@ -749,5 +897,303 @@ mod tests {
         assert_eq!(res.n_preconditioner_grads, 2 * dim);
         assert_eq!(res.preconditioner_diag.len(), dim);
         assert!(res.n_evals <= 300);
+    }
+
+    #[test]
+    fn gle_short_temperature_epochs_preserve_colored_memory() {
+        use std::sync::Mutex;
+
+        struct FlatTrace {
+            bounds: Bounds<f64>,
+            objective_points: Mutex<Vec<Array1<f64>>>,
+            gradient_points: Mutex<Vec<Array1<f64>>>,
+        }
+
+        impl Objective<f64> for FlatTrace {
+            fn eval(&self, x: ArrayView1<f64>) -> f64 {
+                self.objective_points.lock().unwrap().push(x.to_owned());
+                0.0
+            }
+
+            fn bounds(&self) -> &Bounds<f64> {
+                &self.bounds
+            }
+
+            fn dim(&self) -> usize {
+                self.bounds.dims
+            }
+        }
+
+        impl Gradient<f64> for FlatTrace {
+            fn grad(&self, x: ArrayView1<f64>) -> Array1<f64> {
+                self.gradient_points.lock().unwrap().push(x.to_owned());
+                Array1::zeros(x.len())
+            }
+
+            fn dim(&self) -> usize {
+                self.bounds.dims
+            }
+        }
+
+        let dim = 2;
+        let seed = 0x6c65;
+        let omega0 = 0.2;
+        let dt = 0.01;
+        let hot_temperature = 1.0;
+        let cold_temperature = 1e-3;
+        let start = Array1::zeros(dim);
+        let drift = optimal_sampling_drift(omega0);
+        let hot = GleThermostat::canonical(&drift, dt, hot_temperature, 1.0);
+        let covariance = Array2::<f64>::eye(drift.nrows()) * hot_temperature;
+        let mut oracle_rng = StdRng::seed_from_u64(seed);
+        let mut retained = hot.sample_stationary(&covariance, dim, 1.0, &mut oracle_rng);
+        let first = &start + &(retained.row(0).to_owned() * dt);
+        hot.step(&mut retained.view_mut(), &mut oracle_rng);
+        retained *= (cold_temperature / hot_temperature).sqrt();
+        let second = &first + &(retained.row(0).to_owned() * dt);
+        let surface = FlatTrace {
+            bounds: Bounds::new(
+                Array1::from_elem(dim, -1e6),
+                Array1::from_elem(dim, 1e6),
+                0.0,
+            ),
+            objective_points: Mutex::new(Vec::new()),
+            gradient_points: Mutex::new(Vec::new()),
+        };
+
+        let result = gle_langevin_sa(
+            &surface,
+            &surface,
+            seed,
+            3,
+            omega0,
+            0.2,
+            2,
+            Some(start.clone()),
+        );
+
+        let objectives = surface.objective_points.lock().unwrap();
+        let gradients = surface.gradient_points.lock().unwrap();
+        assert_eq!(result.n_evals, 3);
+        assert_eq!(result.dt, dt);
+        assert_eq!(objectives.len(), 3);
+        assert_eq!(gradients.len(), 3);
+        assert_eq!(*gradients, *objectives);
+        assert_eq!(objectives[0], start);
+        assert_eq!(objectives[1], first);
+        assert_eq!(
+            objectives[2], second,
+            "temperature changes retain and rescale the thermostat-updated state"
+        );
+    }
+
+    #[test]
+    fn adaptive_gle_counts_frequency_probes_inside_the_gradient_budget() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        struct CountedGradient {
+            inner: IllGrad,
+            calls: AtomicUsize,
+        }
+
+        impl Gradient<f64> for CountedGradient {
+            fn grad(&self, x: ArrayView1<f64>) -> Array1<f64> {
+                self.calls.fetch_add(1, Ordering::Relaxed);
+                self.inner.grad(x)
+            }
+
+            fn dim(&self) -> usize {
+                self.inner.dim()
+            }
+        }
+
+        let a = Array1::from_vec(vec![1.0, 3.0, 9.0]);
+        let objective = IllConditioned {
+            bounds: Bounds::new(Array1::from_elem(3, -5.0), Array1::from_elem(3, 5.0), 0.0),
+            a: a.clone(),
+        };
+        let anchor = Array1::from_vec(vec![1.0, -0.5, 0.25]);
+        let mut observations = Vec::new();
+        for budget in [1, 4, 13] {
+            let gradient = CountedGradient {
+                inner: IllGrad { a: a.clone() },
+                calls: AtomicUsize::new(0),
+            };
+            let result = gle_langevin_adaptive_sa(
+                &objective,
+                &gradient,
+                17,
+                budget,
+                0.2,
+                2,
+                Some(anchor.clone()),
+            );
+            observations.push((
+                budget,
+                gradient.calls.load(Ordering::Relaxed),
+                result.n_evals,
+            ));
+        }
+
+        for (budget, actual_calls, reported_calls) in observations {
+            assert!(
+                actual_calls <= budget,
+                "gradient budget {budget} permits no uncharged frequency probes: actual {actual_calls}"
+            );
+            assert_eq!(
+                reported_calls, actual_calls,
+                "gradient accounting must include frequency probes at budget {budget}"
+            );
+        }
+    }
+
+    struct FlatGleTrace {
+        bounds: Bounds<f64>,
+        gradient_value: f64,
+        objective_points: std::sync::Mutex<Vec<Array1<f64>>>,
+        gradient_points: std::sync::Mutex<Vec<Array1<f64>>>,
+    }
+
+    impl FlatGleTrace {
+        fn new(dim: usize, gradient_value: f64) -> Self {
+            Self {
+                bounds: Bounds::new(
+                    Array1::from_elem(dim, -1e6),
+                    Array1::from_elem(dim, 1e6),
+                    0.0,
+                ),
+                gradient_value,
+                objective_points: std::sync::Mutex::new(Vec::new()),
+                gradient_points: std::sync::Mutex::new(Vec::new()),
+            }
+        }
+    }
+
+    impl Objective<f64> for FlatGleTrace {
+        fn eval(&self, x: ArrayView1<f64>) -> f64 {
+            self.objective_points.lock().unwrap().push(x.to_owned());
+            0.0
+        }
+
+        fn bounds(&self) -> &Bounds<f64> {
+            &self.bounds
+        }
+
+        fn dim(&self) -> usize {
+            self.bounds.dims
+        }
+    }
+
+    impl Gradient<f64> for FlatGleTrace {
+        fn grad(&self, x: ArrayView1<f64>) -> Array1<f64> {
+            self.gradient_points.lock().unwrap().push(x.to_owned());
+            Array1::from_elem(x.len(), self.gradient_value)
+        }
+
+        fn dim(&self) -> usize {
+            self.bounds.dims
+        }
+    }
+
+    #[test]
+    fn preconditioner_fallback_counts_every_consumed_gradient_probe() {
+        let mut probe_counts = Vec::new();
+        for gradient_value in [0.0, f64::NAN] {
+            let surface = FlatGleTrace::new(3, gradient_value);
+            let preconditioner = estimate_gle_preconditioner(&surface, &surface, 19, 2);
+            let actual = surface.gradient_points.lock().unwrap().len();
+            assert_eq!(preconditioner.scale, Array1::from_elem(3, 1.0));
+            assert_eq!(preconditioner.diag, Array1::from_elem(3, 1.0));
+            probe_counts.push((gradient_value.is_nan(), actual, preconditioner.n_grads));
+        }
+
+        let surface = FlatGleTrace::new(3, 0.0);
+        let result = gle_langevin_preconditioned_sa(
+            &surface,
+            &surface,
+            19,
+            5,
+            0.2,
+            2,
+            Some(Array1::from_vec(vec![0.25, -0.5, 0.75])),
+            Some(2),
+        );
+        let actual = surface.gradient_points.lock().unwrap().len();
+
+        assert_eq!(
+            probe_counts,
+            vec![(false, 4, 4), (true, 4, 4)],
+            "flat and rejected curvature probes remain charged when the metric falls back"
+        );
+        assert!(
+            actual <= 5,
+            "five gradient units cannot pay for {actual} calls"
+        );
+        assert_eq!(result.n_evals, actual);
+        assert_eq!(result.n_preconditioner_grads, 4);
+    }
+
+    #[test]
+    fn gle_temperature_changes_retain_auxiliary_rows() {
+        let dim = 2;
+        let seed = 0x617578;
+        let dt = 0.01;
+        let drift = optimal_sampling_drift(0.2);
+        let hot = GleThermostat::canonical(&drift, dt, 1.0, 1.0);
+        let cold = GleThermostat::canonical(&drift, dt, 1e-3, 1.0);
+        let covariance = Array2::<f64>::eye(drift.nrows());
+        let mut oracle_rng = StdRng::seed_from_u64(seed);
+        let mut retained = hot.sample_stationary(&covariance, dim, 1.0, &mut oracle_rng);
+        let mut position = Array1::<f64>::zeros(dim);
+        let mut expected = vec![position.clone()];
+        for _ in 0..2 {
+            position = &position + &(retained.row(0).to_owned() * dt);
+            expected.push(position.clone());
+            hot.step(&mut retained.view_mut(), &mut oracle_rng);
+        }
+
+        let temperature_scale = 1e-3_f64.sqrt();
+        let mut physical_only = Array2::<f64>::zeros(retained.raw_dim());
+        physical_only
+            .row_mut(0)
+            .assign(&(retained.row(0).to_owned() * temperature_scale));
+        let mut physical_only_rng = oracle_rng.clone();
+        let mut physical_only_position = position.clone();
+        retained *= temperature_scale;
+        for step in 0..2 {
+            position = &position + &(retained.row(0).to_owned() * dt);
+            expected.push(position.clone());
+            physical_only_position =
+                &physical_only_position + &(physical_only.row(0).to_owned() * dt);
+            if step == 0 {
+                assert_eq!(physical_only_position, position);
+            }
+            cold.step(&mut retained.view_mut(), &mut oracle_rng);
+            cold.step(&mut physical_only.view_mut(), &mut physical_only_rng);
+        }
+        assert_ne!(
+            physical_only_position, position,
+            "the trajectory distinguishes full auxiliary memory from physical momentum alone"
+        );
+
+        let surface = FlatGleTrace::new(dim, 0.0);
+        let result = gle_langevin_sa(
+            &surface,
+            &surface,
+            seed,
+            5,
+            0.2,
+            0.2,
+            2,
+            Some(Array1::zeros(dim)),
+        );
+        let objectives = surface.objective_points.lock().unwrap();
+        let gradients = surface.gradient_points.lock().unwrap();
+        assert_eq!(result.n_evals, 5);
+        assert_eq!(result.dt, dt);
+        assert_eq!(objectives.len(), 5);
+        assert_eq!(gradients.len(), 5);
+        assert_eq!(*objectives, expected);
+        assert_eq!(*gradients, expected);
     }
 }

@@ -1,4 +1,4 @@
-//! Shared CSA bank + packing superbasin over Cap'n Proto (TCP).
+//! Shared CSA bank + packing superbasin over Cap'n Proto (nng Req/Rep).
 //!
 //! Usage: bank_server [host:port] [capacity]
 

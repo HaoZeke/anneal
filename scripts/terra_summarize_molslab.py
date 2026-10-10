@@ -91,7 +91,7 @@ def main() -> int:
     print("=== two-phase vs plain ===")
     print("m  arm  n_at_global_best  median_charged_to_it  best_seen")
     for m in range(6, 11):
-        arms = ["plain"] + [
+        arms = ["plain", "k0.7"] + [
             f"k{kappa}_m{mu}" for kappa in ("0.7", "0.8") for mu in ("2.5", "5")
         ]
         parsed: dict[str, list[dict]] = {}
@@ -100,6 +100,7 @@ def main() -> int:
             directory = out / name
             if directory.is_dir():
                 parsed[arm], _ = parse_arm(directory)
+        arms = [arm for arm in arms if arm in parsed]
         all_bests = [
             row["best"]
             for rows in parsed.values()

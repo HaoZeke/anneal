@@ -366,7 +366,7 @@ fn relax_cover<R: rand::Rng + ?Sized>(points: &mut [Vec<f64>], max_iter: usize, 
             let older = energy[iter.saturating_sub(3)];
             d_e = (older - u_now) / 10.0;
         }
-        if iter % 20 == 0 {
+        if iter.is_multiple_of(20) {
             step.fill(A_MAX);
         }
     }

@@ -28,22 +28,34 @@
 //! a revisit should be a harder push rather than a higher potential where the
 //! chain needs to pass.
 //!
-//! The escape scale grows geometrically while a chain revisits, which is the
-//! guarantee that no funnel is permanent: a chain that keeps returning keeps
-//! escalating until it leaves. Schoenborn, Goedecker, Roy and Oganov,
+//! Revisits increase the escape scale up to the configured ceiling; this
+//! bounded feedback does not guarantee departure from every funnel. Shared
+//! history can increase the penalty for rediscovering another chain's minimum
+//! without replacing the receiving chain's state or random stream.
+//! Schoenborn, Goedecker, Roy and Oganov,
 //! J. Chem. Phys. 130, 144108 (2009), multiply the known-minimum update by
 //! `1 + c ln(N)` for visit count `N`, and report that this finds the LJ75 Marks
 //! decahedron where a cut-and-splice evolutionary algorithm does not.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::sync::Mutex;
 
 use ndarray::{Array1, ArrayView1};
 use rand::Rng;
 use rand_distr::{Distribution, StandardNormal};
 use rgmin::{Manifold, ManifoldKind};
+use rgsaddle::internal::{CartAxis, Translation};
 use rgsaddle::{
-    PointSurface, SaddleError, SamdConfig, SamdSession, VelocitySofteningConfig, soften_velocity_on,
+    Constraints, PointSurface, SaddleError, SamdConfig, SamdSession, VelocitySofteningConfig,
+    soften_velocity_on,
+};
+
+#[path = "minima_hopping/history.rs"]
+mod history;
+pub use history::{
+    HistoryHook, HistoryMembership, HistoryObservation, HistoryReport, MinimumHistory,
+    MinimumHistoryError, SerializedWitness, SharedDesignHistory, SharedMinimumHistory,
+    history_feedback_membership,
 };
 
 /// Geometry on which an MD escape evolves.
@@ -112,10 +124,74 @@ pub struct MdEscapeReport {
     pub kinetic: f64,
     /// Force evaluations used to soften the launch direction.
     pub softening_evaluations: usize,
+    /// Difference between the largest and smallest potential energy sampled.
+    pub potential_energy_span: f64,
+    /// Difference between the largest and smallest total energy sampled.
+    pub total_energy_span: f64,
     /// Geometry farthest from the launch, by root-mean-square displacement.
     pub far_position: Array1<f64>,
     /// Root-mean-square displacement of [`Self::far_position`] from the launch.
     pub far_rms: f64,
+}
+
+impl MdEscapeReport {
+    /// Relative NVE drift used by the established minima-hopping step control.
+    pub fn energy_conservation_ratio(&self) -> f64 {
+        if self.potential_energy_span.is_finite() && self.potential_energy_span > 0.0 {
+            self.total_energy_span / self.potential_energy_span
+        } else {
+            f64::INFINITY
+        }
+    }
+}
+
+/// Energy-conservation feedback for the Verlet step between escape attempts.
+///
+/// The update follows the production minima-hopping controller: a trajectory
+/// with total-energy drift below one percent of its potential-energy excursion
+/// grows the step by 1.05; any other trajectory shrinks it by the same factor.
+#[derive(Debug, Clone, Copy)]
+pub struct MdTimeStepFeedback {
+    time_step: f64,
+    minimum_time_step: f64,
+}
+
+impl MdTimeStepFeedback {
+    /// Start the controller at `time_step` with a hard stability floor.
+    pub fn new(time_step: f64, minimum_time_step: f64) -> Self {
+        assert!(time_step.is_finite() && time_step > 0.0);
+        assert!(minimum_time_step.is_finite() && minimum_time_step > 0.0);
+        assert!(minimum_time_step <= time_step);
+        Self {
+            time_step,
+            minimum_time_step,
+        }
+    }
+
+    /// Current Verlet step.
+    pub fn time_step(&self) -> f64 {
+        self.time_step
+    }
+
+    /// Observe one NVE report and return the step for the next escape.
+    pub fn observe(&mut self, report: &MdEscapeReport) -> f64 {
+        const FACTOR: f64 = 1.05;
+        const CONSERVATION_TOLERANCE: f64 = 1e-2;
+        if report.energy_conservation_ratio() < CONSERVATION_TOLERANCE {
+            self.time_step *= FACTOR;
+        } else {
+            self.time_step = (self.time_step / FACTOR).max(self.minimum_time_step);
+        }
+        self.time_step
+    }
+}
+
+fn sampled_energy_span(minimum: f64, maximum: f64) -> f64 {
+    if minimum.is_finite() && maximum.is_finite() && maximum >= minimum {
+        maximum - minimum
+    } else {
+        0.0
+    }
 }
 
 struct CallbackSurface<'a, F> {
@@ -153,7 +229,34 @@ where
     F: for<'a> FnMut(ArrayView1<'a, f64>) -> Option<(f64, Array1<f64>)> + Send,
     R: Rng + ?Sized,
 {
-    nve_escape_seeded(start, initial_kinetic, None, config, evaluate, rng)
+    nve_escape_with_frozen(start, initial_kinetic, config, evaluate, rng, None)
+}
+
+/// Escape with the hopping loop's frozen Cartesian frame.
+///
+/// Fixed atoms define the frame instead of the rigid quotient. An absent or
+/// all-mobile mask keeps the configured geometry and its stepping path.
+pub(crate) fn nve_escape_with_frozen<F, R>(
+    start: ArrayView1<f64>,
+    initial_kinetic: f64,
+    config: &MdEscapeConfig,
+    evaluate: &mut F,
+    rng: &mut R,
+    frozen_atoms: Option<&[bool]>,
+) -> Result<MdEscapeReport, SaddleError>
+where
+    F: for<'a> FnMut(ArrayView1<'a, f64>) -> Option<(f64, Array1<f64>)> + Send,
+    R: Rng + ?Sized,
+{
+    nve_escape_launch(
+        start,
+        initial_kinetic,
+        None,
+        config,
+        evaluate,
+        rng,
+        frozen_atoms,
+    )
 }
 
 /// Same escape as [`nve_escape`], with the launch velocity seeded by
@@ -170,6 +273,30 @@ pub fn nve_escape_seeded<F, R>(
     config: &MdEscapeConfig,
     evaluate: &mut F,
     rng: &mut R,
+) -> Result<MdEscapeReport, SaddleError>
+where
+    F: for<'a> FnMut(ArrayView1<'a, f64>) -> Option<(f64, Array1<f64>)> + Send,
+    R: Rng + ?Sized,
+{
+    nve_escape_launch(
+        start,
+        initial_kinetic,
+        seed_direction,
+        config,
+        evaluate,
+        rng,
+        None,
+    )
+}
+
+fn nve_escape_launch<F, R>(
+    start: ArrayView1<f64>,
+    initial_kinetic: f64,
+    seed_direction: Option<ArrayView1<f64>>,
+    config: &MdEscapeConfig,
+    evaluate: &mut F,
+    rng: &mut R,
+    frozen_atoms: Option<&[bool]>,
 ) -> Result<MdEscapeReport, SaddleError>
 where
     F: for<'a> FnMut(ArrayView1<'a, f64>) -> Option<(f64, Array1<f64>)> + Send,
@@ -193,9 +320,40 @@ where
         ));
     }
 
-    let manifold = match config.geometry {
+    let frozen_chart = match frozen_atoms {
+        Some(frozen) => {
+            if !start.len().is_multiple_of(3) || frozen.len() != start.len() / 3 {
+                return Err(SaddleError::Shape(
+                    "frozen NVE escape needs one mask entry per Cartesian atom".into(),
+                ));
+            }
+            if frozen.iter().any(|fixed| *fixed) {
+                let mut chart = Constraints::new(frozen.len())?;
+                for (atom, fixed) in frozen.iter().copied().enumerate() {
+                    if fixed {
+                        for axis in CartAxis::ALL {
+                            chart.fix_translation(
+                                Translation::new(vec![atom], axis)?,
+                                start,
+                                None,
+                            )?;
+                        }
+                    }
+                }
+                Some(chart)
+            } else {
+                None
+            }
+        }
+        None => None,
+    };
+    let configured_manifold = match config.geometry {
         MdEscapeGeometry::Euclidean => ManifoldKind::Euclidean,
         MdEscapeGeometry::RigidQuotient => ManifoldKind::RigidQuotient,
+    };
+    let manifold: &dyn Manifold = match frozen_chart.as_ref() {
+        Some(chart) => chart,
+        None => &configured_manifold,
     };
     let mut velocity = if let Some(direction) = seed_direction.filter(|d| d.len() == start.len()) {
         let mut mixed = direction.to_owned();
@@ -224,7 +382,7 @@ where
         evaluate: Mutex::new(evaluate),
     };
     let softening_evaluations = if let Some(softening) = config.softening {
-        let report = soften_velocity_on(&manifold, start, velocity.view(), &surface, softening)?;
+        let report = soften_velocity_on(manifold, start, velocity.view(), &surface, softening)?;
         velocity = report.direction;
         report.evaluations
     } else {
@@ -250,9 +408,12 @@ where
     let origin = start.to_owned();
     let mut session = SamdSession::new(samd_config, origin.clone(), velocity, &surface)?;
     let noise = Array1::zeros(origin.len());
-    let mut older_energy = None;
     let mut previous_energy = None;
     let mut minima = 0usize;
+    let mut down = 0u32;
+    let mut up = 0u32;
+    let mut bottom_energy = f64::INFINITY;
+    let mut bottom_position = origin.clone();
     let mut last_energy = f64::NAN;
     let mut last_kinetic = initial_kinetic;
     let mut peak = f64::NEG_INFINITY;
@@ -263,17 +424,33 @@ where
     // Position at which `previous_energy` was measured.
     let mut at_previous = origin.clone();
     let mut well: Option<Array1<f64>> = None;
+    let mut minimum_potential = f64::INFINITY;
+    let mut maximum_potential = f64::NEG_INFINITY;
+    let mut minimum_total = f64::INFINITY;
+    let mut maximum_total = f64::NEG_INFINITY;
 
     for steps in 1..=config.maximum_steps {
-        let report = match config.geometry {
-            MdEscapeGeometry::Euclidean => session.step(&surface, noise.view())?,
-            MdEscapeGeometry::RigidQuotient => {
-                session.step_on(&manifold, &surface, noise.view())?
-            }
+        let report = match frozen_chart.as_ref() {
+            Some(chart) => session.step_on(chart, &surface, noise.view())?,
+            None => match config.geometry {
+                MdEscapeGeometry::Euclidean => session.step(&surface, noise.view())?,
+                MdEscapeGeometry::RigidQuotient => {
+                    session.step_on(&configured_manifold, &surface, noise.view())?
+                }
+            },
         };
         completed = steps;
         last_energy = report.energy;
         last_kinetic = report.kinetic;
+        if report.energy.is_finite() {
+            minimum_potential = minimum_potential.min(report.energy);
+            maximum_potential = maximum_potential.max(report.energy);
+        }
+        let total_energy = report.energy + report.kinetic;
+        if total_energy.is_finite() {
+            minimum_total = minimum_total.min(total_energy);
+            maximum_total = maximum_total.max(total_energy);
+        }
         let mut shift = 0.0;
         for (there, here) in session.position().iter().zip(origin.iter()) {
             let delta = there - here;
@@ -290,29 +467,51 @@ where
         if last_energy > peak {
             peak = last_energy;
         }
-        if let (Some(older), Some(previous)) = (older_energy, previous_energy)
-            && previous < older
-            && previous <= report.energy
-            && peak - previous >= config.minimum_rise
-        {
-            minima += 1;
-            // `previous` is the bottom, and it was measured at `at_previous`.
-            let mut from_launch = 0.0;
-            for (there, here) in at_previous.iter().zip(origin.iter()) {
-                let delta = there - here;
-                from_launch += delta * delta;
-            }
-            let well_rms = (from_launch / n_atoms).sqrt();
-            peak = previous;
-            let far_enough = config.min_well_rms > 0.0 && well_rms + 1.0e-12 >= config.min_well_rms;
-            let counted_enough = config.min_well_rms <= 0.0 && minima >= config.potential_minima;
-            if far_enough || counted_enough {
-                well = Some(at_previous.clone());
-                break;
+        if let Some(previous) = previous_energy {
+            if report.energy < previous {
+                if up > 0 {
+                    down = 1;
+                    up = 0;
+                    bottom_energy = report.energy;
+                    bottom_position = session.position().to_owned();
+                } else {
+                    down += 1;
+                    if report.energy < bottom_energy {
+                        bottom_energy = report.energy;
+                        bottom_position = session.position().to_owned();
+                    }
+                }
+            } else if report.energy > previous {
+                up += 1;
+                // One down and one up is a wiggle. A valley is two
+                // decreases into the bottom and two increases out of it.
+                if down >= 2 && up >= 2 && peak - bottom_energy >= config.minimum_rise {
+                    minima += 1;
+                    let saved_energy = bottom_energy;
+                    let saved_position = bottom_position.clone();
+                    let mut from_launch = 0.0;
+                    for (there, here) in saved_position.iter().zip(origin.iter()) {
+                        let delta = there - here;
+                        from_launch += delta * delta;
+                    }
+                    let well_rms = (from_launch / n_atoms).sqrt();
+                    down = 0;
+                    up = 0;
+                    bottom_energy = f64::INFINITY;
+                    peak = report.energy;
+                    let far_enough =
+                        config.min_well_rms > 0.0 && well_rms + 1.0e-12 >= config.min_well_rms;
+                    let counted_enough =
+                        config.min_well_rms <= 0.0 && minima >= config.potential_minima;
+                    if far_enough || counted_enough {
+                        well = Some(saved_position);
+                        last_energy = saved_energy;
+                        break;
+                    }
+                }
             }
         }
         at_previous = session.position().to_owned();
-        older_energy = previous_energy;
         previous_energy = Some(report.energy);
     }
 
@@ -323,6 +522,8 @@ where
         energy: last_energy,
         kinetic: last_kinetic,
         softening_evaluations,
+        potential_energy_span: sampled_energy_span(minimum_potential, maximum_potential),
+        total_energy_span: sampled_energy_span(minimum_total, maximum_total),
         far_position,
         far_rms,
     })
@@ -382,12 +583,33 @@ pub struct EscapeFeedback {
     /// zero and freeze the search.
     pub escape_floor: f64,
     visits: HashMap<usize, u32>,
+    /// Driver-local basin IDs are independent of the catalog's numeric IDs.
+    driver_local_visits: HashMap<usize, u32>,
     /// Counts of each outcome, for reporting.
     pub n_same: usize,
     /// Quenches that landed in a known other basin.
     pub n_known: usize,
     /// Quenches that opened a new basin.
     pub n_new: usize,
+}
+
+/// How a shared-history report drives this chain's escape and acceptance.
+///
+/// [`SharedVisitPolicy::Tabu`] is Schoenborn sharing: a basin another chain
+/// already holds is known here, and the visit count inflates the escape.
+/// Measured on hist75 that loses to a matched single chain (12-14/48 against
+/// 16/48). [`SharedVisitPolicy::Recognition`] keeps the catalog for identity
+/// and quench refunds (certified minima fill the screen stand-in bank);
+/// the controller stays on this chain's own standing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SharedVisitPolicy {
+    /// Peer visits classify the basin as known and inflate escape.
+    #[default]
+    Tabu,
+    /// Peer visits identify the basin only. Escape stays local; certified
+    /// quenches fill the screen stand-in bank.
+    Recognition,
 }
 
 impl EscapeFeedback {
@@ -407,6 +629,7 @@ impl EscapeFeedback {
             escape_ceiling: escape * 4.0,
             escape_floor: escape / 4.0,
             visits: HashMap::new(),
+            driver_local_visits: HashMap::new(),
             n_same: 0,
             n_known: 0,
             n_new: 0,
@@ -456,19 +679,101 @@ impl EscapeFeedback {
     /// Records a quench and updates the escape scale.
     ///
     /// Returns what the quench was. The scale rises on a revisit and falls on a
-    /// discovery, which is the feedback: a chain that keeps returning escalates
-    /// until it leaves, and one that keeps finding new structures settles down
-    /// to explore them.
+    /// discovery, subject to the configured scale bounds. A chain that keeps
+    /// returning escalates toward its ceiling, and one that keeps finding new
+    /// structures settles down to explore them.
     pub fn observe(&mut self, current: Option<usize>, reached: usize) -> Visit {
         let visit = self.classify(current, reached);
+        let prior_visits = self.visits(reached).max(1) as f64;
+        self.apply_escape_feedback(visit, prior_visits);
+        *self.visits.entry(reached).or_insert(0) += 1;
+        visit
+    }
+
+    /// Register an occupied driver-local basin without applying feedback.
+    pub(crate) fn register_driver_local_initial(&mut self, basin: usize) {
+        self.register_initial(basin);
+        self.driver_local_visits.entry(basin).or_insert(1);
+    }
+
+    /// Retain a local observation whose feedback uses an authoritative report.
+    pub(crate) fn remember_driver_local(&mut self, basin: usize) {
+        *self.driver_local_visits.entry(basin).or_insert(0) += 1;
+    }
+
+    /// Apply local feedback without treating catalog IDs as local evidence.
+    pub(crate) fn observe_driver_local(&mut self, current: Option<usize>, reached: usize) -> Visit {
+        let prior_visits = self.driver_local_visits.get(&reached).copied();
+        let visit = if current == Some(reached) {
+            Visit::Same
+        } else if prior_visits.is_some() {
+            Visit::Known
+        } else {
+            Visit::New
+        };
+        self.apply_escape_feedback(visit, prior_visits.unwrap_or(0).max(1) as f64);
+        self.remember_driver_local(reached);
+        *self.visits.entry(reached).or_insert(0) += 1;
+        visit
+    }
+
+    /// Records a quench using the authoritative same-PES catalog history.
+    ///
+    /// `basin_visits` includes this observation. A basin first found by a
+    /// different replica is therefore known even when this controller's local
+    /// map has not seen it. The global count also drives enhanced feedback.
+    ///
+    /// This is [`SharedVisitPolicy::Tabu`]. Recognition keeps the catalog
+    /// report off the controller: call [`Self::observe_driver_local`] with
+    /// this chain's own basin ids.
+    pub fn observe_shared(
+        &mut self,
+        current: Option<usize>,
+        reached: usize,
+        new_basin: bool,
+        basin_visits: u64,
+    ) -> Visit {
+        let visit = if current == Some(reached) {
+            Visit::Same
+        } else if new_basin {
+            Visit::New
+        } else {
+            Visit::Known
+        };
+        let prior_visits = basin_visits.saturating_sub(1).max(1) as f64;
+        self.apply_escape_feedback(visit, prior_visits);
+        let observed = u32::try_from(basin_visits.max(1)).unwrap_or(u32::MAX);
+        self.visits
+            .entry(reached)
+            .and_modify(|visits| *visits = (*visits).max(observed))
+            .or_insert(observed);
+        visit
+    }
+
+    /// Increase escape after polishing returns from outside a covered region.
+    ///
+    /// Coverage-region IDs and counts are independent of minimum identity.
+    /// The caller supplies prior admitted visits without registering a minimum
+    /// or duplicating an authoritative minimum-history feedback update.
+    pub(crate) fn observe_coverage_return(&mut self, same: bool, prior_visits: u64) {
+        let visit = if same { Visit::Same } else { Visit::Known };
+        self.apply_escape_feedback(visit, prior_visits.max(1) as f64);
+    }
+
+    /// Settle the bounded escape scale after reaching an unexplored region.
+    /// Region novelty supplies no stationary-point identity or minimum record.
+    pub(crate) fn observe_coverage_discovery(&mut self) {
+        self.apply_escape_feedback(Visit::New, 1.0);
+    }
+
+    fn apply_escape_feedback(&mut self, visit: Visit, prior_visits: f64) {
         match visit {
             Visit::Same => {
                 self.escape *= self.beta_same;
                 self.n_same += 1;
             }
             Visit::Known => {
-                let visits = self.visits(reached).max(1) as f64;
-                self.escape *= self.beta_known * (1.0 + self.visits_coeff * visits.ln());
+                self.escape *= self.beta_known * (1.0 + self.visits_coeff * prior_visits.ln());
                 self.n_known += 1;
             }
             Visit::New => {
@@ -477,8 +782,6 @@ impl EscapeFeedback {
             }
         }
         self.escape = self.escape.clamp(self.escape_floor, self.escape_ceiling);
-        *self.visits.entry(reached).or_insert(0) += 1;
-        visit
     }
 
     /// Whether to accept a move of energy rise `delta`, updating the threshold.
@@ -549,6 +852,144 @@ mod tests {
         assert!(report.steps < config.maximum_steps);
         assert_eq!(evaluations, report.steps + 1);
         assert_eq!(report.position.len(), 5);
+    }
+
+    #[test]
+    fn nve_escape_requires_sustained_turning_point_and_returns_its_frame() {
+        let start = Array1::zeros(5);
+        let config = MdEscapeConfig {
+            dt: 0.01,
+            potential_minima: 1,
+            maximum_steps: 20,
+            geometry: MdEscapeGeometry::Euclidean,
+            softening: None,
+            minimum_rise: 0.0,
+            max_rms: f64::INFINITY,
+            min_well_rms: 0.0,
+        };
+        // The first three samples contain a one-step wiggle. The final five
+        // contain two decreases into the minimum and two increases out of it.
+        let energies = [99.0, 3.0, 2.0, 3.0, 2.0, 1.0, 2.0, 3.0];
+        let mut evaluations = 0usize;
+        let mut evaluate = |x: ArrayView1<f64>| {
+            let energy = energies[evaluations];
+            evaluations += 1;
+            Some((energy, Array1::zeros(x.len())))
+        };
+        let mut rng = StdRng::seed_from_u64(17);
+
+        let report = nve_escape(start.view(), 0.5, &config, &mut evaluate, &mut rng).unwrap();
+
+        assert_eq!(report.steps, 7);
+        assert_eq!(report.potential_minima, 1);
+        assert_eq!(report.energy, 1.0);
+        assert!((report.position.dot(&report.position).sqrt() - 0.05).abs() < 1e-12);
+    }
+
+    #[test]
+    fn flat_and_monotonic_paths_do_not_count_as_potential_minima() {
+        let start = Array1::zeros(5);
+        let config = MdEscapeConfig {
+            dt: 0.01,
+            potential_minima: 2,
+            maximum_steps: 12,
+            geometry: MdEscapeGeometry::Euclidean,
+            softening: None,
+            minimum_rise: 0.0,
+            max_rms: f64::INFINITY,
+            min_well_rms: 0.0,
+        };
+        for slope in [0.0, -1.0, 1.0] {
+            let mut evaluations = 0;
+            let mut evaluate = |x: ArrayView1<f64>| {
+                let energy = slope * evaluations as f64;
+                evaluations += 1;
+                Some((energy, Array1::zeros(x.len())))
+            };
+            let mut rng = StdRng::seed_from_u64(17);
+            let report = nve_escape(start.view(), 0.5, &config, &mut evaluate, &mut rng).unwrap();
+            assert_eq!(
+                report.potential_minima, 0,
+                "slope {slope} has no turning point"
+            );
+            assert_eq!(report.steps, config.maximum_steps);
+            assert_eq!(evaluations, report.steps + 1);
+        }
+    }
+
+    #[test]
+    fn separated_sustained_valleys_count_once_each() {
+        let start = Array1::zeros(5);
+        let config = MdEscapeConfig {
+            dt: 0.01,
+            potential_minima: 2,
+            maximum_steps: 20,
+            geometry: MdEscapeGeometry::Euclidean,
+            softening: None,
+            minimum_rise: 0.0,
+            max_rms: f64::INFINITY,
+            min_well_rms: 0.0,
+        };
+        let energies = [99.0, 3.0, 2.0, 1.0, 2.0, 3.0, 2.0, 1.0, 2.0, 3.0];
+        let mut evaluations = 0;
+        let mut evaluate = |x: ArrayView1<f64>| {
+            let energy = energies[evaluations];
+            evaluations += 1;
+            Some((energy, Array1::zeros(x.len())))
+        };
+        let mut rng = StdRng::seed_from_u64(17);
+        let report = nve_escape(start.view(), 0.5, &config, &mut evaluate, &mut rng).unwrap();
+        assert_eq!(report.potential_minima, 2);
+        assert_eq!(report.steps, 9);
+        assert_eq!(report.energy, 1.0);
+    }
+
+    #[test]
+    fn nve_escape_reports_the_energy_spans_needed_for_step_control() {
+        let start = Array1::zeros(5);
+        let config = MdEscapeConfig {
+            dt: 0.01,
+            potential_minima: 1,
+            maximum_steps: 200,
+            geometry: MdEscapeGeometry::Euclidean,
+            softening: None,
+            minimum_rise: 0.0,
+            max_rms: f64::INFINITY,
+            min_well_rms: 0.0,
+        };
+        let mut evaluate = |x: ArrayView1<f64>| Some((0.5 * x.dot(&x), x.to_owned()));
+        let mut rng = StdRng::seed_from_u64(17);
+
+        let report = nve_escape(start.view(), 0.5, &config, &mut evaluate, &mut rng).unwrap();
+
+        assert!(report.potential_energy_span > 0.0);
+        assert!(report.total_energy_span >= 0.0);
+        assert!(report.energy_conservation_ratio() < 0.01);
+    }
+
+    #[test]
+    fn time_step_feedback_tracks_relative_nve_energy_conservation() {
+        let mut feedback = MdTimeStepFeedback::new(0.08, 0.001);
+        let mut report = MdEscapeReport {
+            position: Array1::zeros(3),
+            steps: 5,
+            potential_minima: 1,
+            energy: 0.0,
+            kinetic: 1.0,
+            softening_evaluations: 0,
+            potential_energy_span: 2.0,
+            total_energy_span: 0.01,
+            far_position: Array1::zeros(3),
+            far_rms: 0.0,
+        };
+
+        assert!((feedback.observe(&report) - 0.084).abs() < 1e-12);
+        report.total_energy_span = 0.04;
+        assert!((feedback.observe(&report) - 0.08).abs() < 1e-12);
+        for _ in 0..200 {
+            feedback.observe(&report);
+        }
+        assert!(feedback.time_step() >= 0.001);
     }
 
     #[test]
@@ -677,6 +1118,43 @@ mod tests {
     }
 
     #[test]
+    fn shared_history_marks_another_replicas_basin_as_known() {
+        let mut feedback = EscapeFeedback::new(1.0, 1.0);
+        feedback.register_initial(3);
+
+        let before = feedback.escape();
+        let visit = feedback.observe_shared(Some(3), 9, false, 8);
+
+        assert_eq!(visit, Visit::Known);
+        let expected = feedback.beta_known * (1.0 + feedback.visits_coeff * 7.0_f64.ln());
+        assert!((feedback.escape() / before - expected).abs() < 1e-12);
+        assert_eq!(feedback.visits(9), 8);
+    }
+
+    #[test]
+    fn recognition_keeps_a_peer_basin_new_for_this_chain() {
+        let mut tabu = EscapeFeedback::new(1.0, 1.0);
+        tabu.register_initial(3);
+        let tabu_before = tabu.escape();
+        assert_eq!(tabu.observe_shared(Some(3), 9, false, 8), Visit::Known);
+        let tabu_ratio = tabu.escape() / tabu_before;
+
+        let mut rec = EscapeFeedback::new(1.0, 1.0);
+        rec.register_driver_local_initial(3);
+        let rec_before = rec.escape();
+        assert_eq!(rec.observe_driver_local(Some(3), 9), Visit::New);
+        let rec_ratio = rec.escape() / rec_before;
+
+        assert!(
+            rec_ratio < tabu_ratio,
+            "recognition must not inherit the peer visit penalty: {rec_ratio} against {tabu_ratio}"
+        );
+        assert_eq!(rec.n_new, 1);
+        assert_eq!(rec.n_known, 0);
+        assert_eq!(SharedVisitPolicy::default(), SharedVisitPolicy::Tabu);
+    }
+
+    #[test]
     fn the_threshold_settles_near_half_acceptance() {
         let mut f = EscapeFeedback::new(1.0, 1.0);
         // A stream of rises drawn from a fixed distribution; the threshold
@@ -720,5 +1198,205 @@ mod tests {
         f.observe(Some(1), 2);
         assert_eq!(f.classify(Some(1), 2), Visit::Known);
         assert_eq!(f.classify(Some(2), 2), Visit::Same);
+    }
+
+    mod geometry_controls {
+        use super::super::{
+            MdEscapeConfig, MdEscapeGeometry, MdEscapeReport, nve_escape, nve_escape_with_frozen,
+        };
+        use ndarray::{Array1, ArrayView1, array};
+        use rand::rngs::StdRng;
+        use rand::{Rng, SeedableRng};
+        use rgsaddle::{SaddleError, VelocitySofteningConfig};
+
+        fn config(geometry: MdEscapeGeometry, softening_steps: usize) -> MdEscapeConfig {
+            MdEscapeConfig {
+                dt: 0.01,
+                potential_minima: 1,
+                maximum_steps: 6,
+                geometry,
+                softening: (softening_steps > 0).then_some(VelocitySofteningConfig {
+                    steps: softening_steps,
+                    ..Default::default()
+                }),
+                minimum_rise: 0.0,
+                max_rms: f64::INFINITY,
+                min_well_rms: 0.0,
+            }
+        }
+
+        fn reaction_surface(x: ArrayView1<f64>, reference: ArrayView1<f64>) -> (f64, Array1<f64>) {
+            let delta = &x - &reference;
+            let reaction = [2.0, -3.0, 4.0];
+            let mut gradient = delta.clone();
+            let mut energy = 0.5 * delta.iter().skip(3).map(|value| value * value).sum::<f64>();
+            for coordinate in 0..3 {
+                energy += reaction[coordinate] * delta[coordinate];
+                gradient[coordinate] = reaction[coordinate];
+            }
+            (energy, gradient)
+        }
+
+        #[test]
+        fn frozen_frames_constrain_softening_and_md_with_nonzero_reaction_forces() {
+            let start = array![0.3, -0.7, 1.2, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0];
+            for softening_steps in [0, 4] {
+                let config = config(MdEscapeGeometry::Euclidean, softening_steps);
+                let mut frames = Vec::new();
+                let mut evaluate = |x: ArrayView1<f64>| {
+                    frames.push(x.to_owned());
+                    Some(reaction_surface(x, start.view()))
+                };
+                let mut rng = StdRng::seed_from_u64(17);
+                let report = nve_escape_with_frozen(
+                    start.view(),
+                    0.05,
+                    &config,
+                    &mut evaluate,
+                    &mut rng,
+                    Some(&[true, false, false]),
+                )
+                .unwrap();
+
+                assert_eq!(report.steps, config.maximum_steps);
+                assert_eq!(report.softening_evaluations, softening_steps);
+                assert_eq!(frames.len(), report.steps + 1 + softening_steps);
+                assert!(frames.iter().any(|x| {
+                    x.iter()
+                        .zip(start.iter())
+                        .skip(3)
+                        .any(|(actual, initial)| actual.to_bits() != initial.to_bits())
+                }));
+                for frame in &frames {
+                    for coordinate in 0..3 {
+                        assert_eq!(
+                            frame[coordinate].to_bits(),
+                            start[coordinate].to_bits(),
+                            "fixed coordinate {coordinate} moved with {softening_steps} softening probes"
+                        );
+                    }
+                }
+                assert_eq!(
+                    report.energy.to_bits(),
+                    reaction_surface(report.position.view(), start.view())
+                        .0
+                        .to_bits()
+                );
+            }
+        }
+
+        #[test]
+        fn all_frozen_frames_fail_without_evaluating_the_surface() {
+            let start = array![-1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0];
+            for geometry in [MdEscapeGeometry::Euclidean, MdEscapeGeometry::RigidQuotient] {
+                for softening_steps in [0, 4] {
+                    let config = config(geometry, softening_steps);
+                    let mut evaluations = 0;
+                    let mut evaluate = |x: ArrayView1<f64>| {
+                        evaluations += 1;
+                        Some((0.0, Array1::<f64>::zeros(x.len())))
+                    };
+                    let mut rng = StdRng::seed_from_u64(17);
+                    let result = nve_escape_with_frozen(
+                        start.view(),
+                        0.05,
+                        &config,
+                        &mut evaluate,
+                        &mut rng,
+                        Some(&[true; 3]),
+                    );
+
+                    assert!(matches!(result, Err(SaddleError::Solver(_))));
+                    assert_eq!(evaluations, 0);
+                }
+            }
+        }
+
+        fn pair_surface(x: ArrayView1<f64>) -> (f64, Array1<f64>) {
+            let reference = array![-1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0];
+            let mut energy = 0.0;
+            let mut gradient = Array1::<f64>::zeros(x.len());
+            for i in 0..3 {
+                for j in i + 1..3 {
+                    let mut residual = 0.0;
+                    for axis in 0..3 {
+                        let delta = x[3 * i + axis] - x[3 * j + axis];
+                        let target = reference[3 * i + axis] - reference[3 * j + axis];
+                        residual += delta * delta - target * target;
+                    }
+                    energy += 0.25 * residual * residual;
+                    for axis in 0..3 {
+                        let force = residual * (x[3 * i + axis] - x[3 * j + axis]);
+                        gradient[3 * i + axis] += force;
+                        gradient[3 * j + axis] -= force;
+                    }
+                }
+            }
+            (energy, gradient)
+        }
+
+        fn report_bits(report: &MdEscapeReport) -> Vec<u64> {
+            report
+                .position
+                .iter()
+                .copied()
+                .chain([
+                    report.energy,
+                    report.kinetic,
+                    report.potential_energy_span,
+                    report.total_energy_span,
+                ])
+                .map(f64::to_bits)
+                .collect()
+        }
+
+        #[test]
+        fn all_mobile_masks_preserve_unconstrained_traces_reports_and_rng() {
+            let start = array![-1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0];
+            for geometry in [MdEscapeGeometry::Euclidean, MdEscapeGeometry::RigidQuotient] {
+                for softening_steps in [0, 4] {
+                    let config = config(geometry, softening_steps);
+                    let mut direct_frames = Vec::new();
+                    let mut direct_surface = |x: ArrayView1<f64>| {
+                        direct_frames
+                            .push(x.iter().map(|value| value.to_bits()).collect::<Vec<_>>());
+                        Some(pair_surface(x))
+                    };
+                    let mut direct_rng = StdRng::seed_from_u64(17);
+                    let direct = nve_escape(
+                        start.view(),
+                        0.05,
+                        &config,
+                        &mut direct_surface,
+                        &mut direct_rng,
+                    )
+                    .unwrap();
+                    let mut masked_frames = Vec::new();
+                    let mut masked_surface = |x: ArrayView1<f64>| {
+                        masked_frames
+                            .push(x.iter().map(|value| value.to_bits()).collect::<Vec<_>>());
+                        Some(pair_surface(x))
+                    };
+                    let mut masked_rng = StdRng::seed_from_u64(17);
+                    let masked = nve_escape_with_frozen(
+                        start.view(),
+                        0.05,
+                        &config,
+                        &mut masked_surface,
+                        &mut masked_rng,
+                        Some(&[false; 3]),
+                    )
+                    .unwrap();
+
+                    assert_eq!(direct_frames, masked_frames);
+                    assert_eq!(report_bits(&direct), report_bits(&masked));
+                    assert_eq!(direct.steps, masked.steps);
+                    assert_eq!(direct.potential_minima, masked.potential_minima);
+                    assert_eq!(direct.softening_evaluations, masked.softening_evaluations);
+                    assert_eq!(direct_frames.len(), direct.steps + 1 + softening_steps);
+                    assert_eq!(direct_rng.random::<u64>(), masked_rng.random::<u64>());
+                }
+            }
+        }
     }
 }

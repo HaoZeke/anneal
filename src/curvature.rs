@@ -257,6 +257,33 @@ where
         project(&mut w);
         let beta: f64 = w.iter().map(|z| z * z).sum::<f64>().sqrt();
         if beta <= 1e-10 {
+            // An invariant Krylov block is resolved, not invalid. Continue
+            // in its orthogonal complement so an exact starting eigenvector
+            // cannot hide softer modes or discard a degenerate spectrum.
+            let restart = (basis.len() < steps)
+                .then(|| {
+                    (0..dim).find_map(|axis| {
+                        let mut candidate = Array1::zeros(dim);
+                        candidate[axis] = 1.0;
+                        project(&mut candidate);
+                        for _ in 0..2 {
+                            for vector in &basis {
+                                let component = candidate.dot(vector);
+                                candidate.scaled_add(-component, vector);
+                            }
+                            project(&mut candidate);
+                        }
+                        let norm = candidate.dot(&candidate).sqrt();
+                        (norm > 1e-10).then(|| candidate / norm)
+                    })
+                })
+                .flatten();
+            if let Some(restart) = restart {
+                betas.push(0.0);
+                q_prev = None;
+                q = restart;
+                continue;
+            }
             break;
         }
         betas.push(beta);
@@ -602,6 +629,33 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn lanczos_restarts_orthogonally_after_an_exact_eigenvector() {
+        let start = Array1::from(vec![1.0, 0.0, 0.0]);
+        let diagonal = Array1::from(vec![9.0, 1.0, 4.0]);
+        let mut evaluations = 0;
+        let (alpha, beta, basis) = lanczos_tridiag(
+            &start,
+            3,
+            &mut |point| {
+                evaluations += 1;
+                Some(point * &diagonal)
+            },
+            &|_| {},
+        )
+        .expect("an invariant Krylov block is a valid eigenspace");
+        let (values, _) = ritz(&alpha, &beta).unwrap();
+        assert_eq!(values, vec![1.0, 4.0, 9.0]);
+        assert_eq!(evaluations, 3);
+        assert_eq!(basis.len(), 3);
+        for (i, left) in basis.iter().enumerate() {
+            for (j, right) in basis.iter().enumerate() {
+                let expected = f64::from(i == j);
+                assert!((left.dot(right) - expected).abs() < 1e-12);
+            }
+        }
+    }
 
     /// A three-dimensional arrangement of `n` points, not collinear.
     ///

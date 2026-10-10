@@ -30,7 +30,9 @@ pip     = "*"
 array-api-compat = ">=1.12"
 
 [feature.python.tasks]
-python-build = "maturin develop --features python"
+# The testing extra goes in through pip, as numpy does. As a pixi dependency,
+# array-api-strict would take the numpy<2 that verify pins in the solve group.
+python-build = "maturin develop --features python --extras testing"
 python-test  = { cmd = "pytest pytest/", depends-on = ["python-build"] }
 
 [feature.gpu]

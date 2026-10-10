@@ -169,7 +169,9 @@ fn run_gfn2_water_coordinator() -> Result<(), Box<dyn std::error::Error>> {
         .values()
         .len();
     let signature = system_signature(n_molecules, digest)?;
-    let evaluate: Box<dyn Fn(&[f64]) -> Result<FreshEvaluation, String> + Send + Sync + 'static> = {
+    type FreshEvaluator =
+        Box<dyn Fn(&[f64]) -> Result<FreshEvaluation, String> + Send + Sync + 'static>;
+    let evaluate: FreshEvaluator = {
         #[cfg(feature = "rgpot-ex")]
         {
             use common::rgpot_eindir::RgpotObjective;

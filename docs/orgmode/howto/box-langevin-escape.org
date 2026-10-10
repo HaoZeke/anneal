@@ -1,0 +1,220 @@
+#+TITLE: Persistent colored-noise escape in communicating box chains
+
+* Select the escape mechanism
+
+The native =ensemble_hop_optimize_with_config= entry accepts the existing box
+and coverage configurations, selecting the engine from the supplied gradient
+capability. The gradient box ensemble accepts =BoxEscape::Langevin=.
+This replaces the proposal segment while retaining the bounded quench,
+minimum certificate, history, escape feedback and acceptance rule. It is a
+global-minimisation proposal mechanism, not a physical-time simulation.
+The default is =BoxEscape::Gaussian=, the reflected Gaussian kick.
+
+#+begin_src rust
+use anneal_core::methods::{
+    BoxCoverageConfig, BoxEnsembleConfig, BoxEscape, GleEscapeConfig,
+    ensemble_hop_optimize_with_config,
+};
+use anneal_core::methods::ensemble::HistoryMode;
+
+let config = BoxEnsembleConfig {
+    replicas: 4,
+    budget: 8_000,
+    history: HistoryMode::None,
+    escape: BoxEscape::Langevin(GleEscapeConfig::default()),
+    ..BoxEnsembleConfig::default()
+};
+let coverage = BoxCoverageConfig::default();
+// objective supplies Objective<f64>; gradient supplies Gradient<f64>.
+let result = ensemble_hop_optimize_with_config(
+    &objective, Some(&gradient), 7, Some(start.view()), &config, &coverage,
+);
+assert_eq!(result.charged, result.n_evals + result.n_grads);
+assert!(result.charged <= config.budget);
+#+end_src
+
+Coverage sharing in this configuration is independent of the disabled
+minimum ledger. The native entry forwards both configurations without a
+separate policy loop. Without a gradient, select Gaussian escape to run the
+values-only chains. An explicit one-replica configuration retains its hop
+and coverage semantics; the scalar-argument =ensemble_hop_optimize=
+convenience entry selects the values-only portfolio for that case.
+
+=GleEscapeConfig= contains the maximum number of steps per escape, the lower
+frequency =omega0= of the fitted band, the requested =dt=, and the noise law.
+The defaults are 16 steps, =omega0= 0.2, =dt= 0.01 and colored noise. The
+effective timestep resolves the same upper band frequency for both noise
+laws. These are controls, not established optimal settings for every PES.
+
+Each chain owns its physical momentum, auxiliary momentum rows and noise
+generator. Segment boundaries preserve them. The optimization temperature
+uses the box temperature schedule multiplied by the square of the history
+escape scale; a temperature change rescales every momentum row together.
+A fresh raw gradient is paid at each occupied launch point. A quench's
+projected stationarity certificate cannot substitute for that force.
+
+Shared paid-sample history supplies a direction as well as coverage's scalar
+feedback. A position update that overlaps a peer's sampled region is pushed
+away in normalized free-coordinate space before its objective and raw
+gradient are evaluated. The correction must increase clearance from the
+held peer cloud and remain inside the box. It adds no callbacks, leaves
+the persistent noise state attached to its chain, and vanishes for distant
+samples or disabled sharing. The coverage radius sets its finite reach.
+The sample stream includes pre-polish launches, so it does not reduce every
+excursion to a minimum. It is separate from counted coverage visits.
+
+Coverage feedback needs no minimum report. A quench returning from outside
+a known descriptor region increases the existing escape scale; a trial
+arriving outside every held region supplies its novelty contraction.
+The Gaussian multiplier is bounded to [0.25, 4]. The Langevin multiplier
+is bounded to [1, 4], so novelty relaxes a revisit boost without cooling
+below the calibrated base temperature. Minimum reports supply an
+authoritative update instead of a second coverage update. Initial
+observations do not change the scale; zero coverage height disables these
+coverage-driven changes.
+
+The temperature scale comes from paid raw energy excursions, not the
+absolute objective value. Each chain initializes its scale from the energy
+drop of its initial relaxation, when positive. A Langevin escape contributes
+its largest finite raw trajectory energy relative to the occupied energy;
+a Gaussian or values-only escape contributes its pre-polish launch energy.
+The existing =AdaptiveHeight= estimator tracks these positive gaps. One
+escape supplies one sample, including a rejected escape. Without positive
+gap evidence the scale is one.
+
+Hearing, acceptance and excitation use one fixed schedule value for a funded
+boundary. Its raw excursion updates the scale for the following boundary.
+An additive constant in the objective therefore supplies no temperature
+evidence. Near-equal quenched endpoints cannot erase the raw energy variation
+that the proposal has already explored. Launch values and trajectory energies
+are retained from existing callbacks; calibration adds no evaluations.
+
+* Account for the complete search
+
+A segment consumes one launch gradient and one gradient plus one objective
+per integration step. Its length shortens to reserve two combined work
+units for a terminal evaluation/gradient quench. Quench depth uses the actual residual allowance.
+A replica without a funded step and quench stops; it does not silently switch
+to the Gaussian control. Values-only search rejects this gradient-dependent
+selection before evaluating the objective.
+
+Each gradient chain starts with a dimension-based quench allowance. If a
+quench exhausts that allowance with a finite, still-uncertified projected
+gradient, the chain doubles its allowance for subsequent quenches. Numerical
+failures do not supply this evidence. The polisher can finish before the
+allowance is spent; every request remains capped by the residual combined
+work budget. This rule applies to Gaussian and Langevin escapes and to all
+history modes. It changes relaxation effort, not the certificate tolerance.
+
+The terminal trajectory point feeds the quench even when the trajectory
+visits a lower objective elsewhere. Independently, the result retains the
+best finite feasible objective evaluation, including trajectory points and
+quench trials. Finite feasible initial and trial search boundaries supply
+coverage repulsion whether accepted, rejected or uncertified. Only certified
+quenches reach minimum history. Thus search occupancy, coverage, certified
+minimum visits and the returned incumbent are distinct. The
+[[file:../explanation/communication.org][communication contract]] describes the independent coverage configuration.
+
+The thermostat uses the same stepping implementation as standalone GLE.
+Its boundary rule is clipping in a Cartesian box, not a Manopt retraction.
+Atomic and molecular point-set constraints require their geometric path;
+the box option does not supply an atomic GLE escape by itself.
+
+* Run matched noise and communication controls
+
+The optimizer and its primary contracts are Rust. The native regression
+targets cover objective-origin invariance, coverage influence and sustained
+Langevin exploration:
+
+#+begin_src sh
+cargo test --locked --test box_configured_dispatch --test box_search_contract --test box_langevin_exploration --test box_coverage_escape --test box_optional_certificate --test box_sample_repulsion --test shared_sample_ownership
+#+end_src
+
+The dispatch target checks exact native entry-versus-engine callback traces,
+configuration propagation, fixed coordinates and capability rejection.
+The search-contract target compares full callback traces for shifted flat
+objectives under Gaussian, values-only, white and colored search. The
+exploration target checks an
+evaluation-matched Rastrigin exploration bound. These test the native engine
+without Python bindings; Python checks cover binding conformance separately.
+
+For scalar-white noise, keep the same configuration and select
+=GleNoise::White { friction: 4.0 }= as the noise law. The comparison example
+=box_noise_comparison= runs Gaussian, scalar-white and colored proposals,
+each with private and shared in-process coverage. Its default comparison also
+switches the minimum ledger between private and shared; the =coverage= mode
+disables that ledger in both arms to isolate coverage delivery. All replicas use
+seeded uniform starts matched across controls, with an independent stream
+for the first replica's explicitly recorded position. Equal-coordinate starts
+can make initial line searches solve a separable objective without testing
+global exploration. The Rastrigin and conditioned-quadratic objectives have
+nonzero values at the recorded starts.
+
+#+begin_src sh
+cargo run --locked --example box_noise_comparison -- 32 8000 4 16
+cargo run --locked --example box_noise_comparison -- 32 8000 4 16 coverage 0.05 0.1
+cargo run --locked --example box_noise_comparison -- 32 8000 4 16 coverage 0.05 0.1 values
+#+end_src
+
+The ninth positional argument sets the direct coverage neighbourhood: zero
+is all-to-all; one is the adjacent-chain ring. It applies to both samples and
+deposits, and every result records =coverage_neighbors=. For a matched scalar
+portfolio/hopping comparison, =controllers-peers= uses argument eight as the
+first seed and argument nine as the neighbourhood. Run each graph with the
+same dimension, aggregate budget, seed range, radius and height:
+
+#+begin_src sh
+cargo run --release --locked --example box_noise_comparison -- 32 8000 16 16 controllers-peers 0.4 0.1 32 0
+cargo run --release --locked --example box_noise_comparison -- 32 8000 16 16 controllers-peers 0.4 0.1 32 1
+#+end_src
+
+Records include =initial_positions=, =replica_budgets=, actual =n_evals= and
+=n_grads=, raw =best_value= with =verified_value=, and delivered sample counts.
+The scalar comparison requires no gradient. Configuration and delivery counts
+identify the experiment; only the paired objective results measure its benefit.
+
+The arguments are dimension, aggregate work budget, number of seeds and
+maximum Langevin steps. The =coverage= mode additionally accepts radius,
+deposit height and an optional =values= or =gradient= capability; =gradient=
+is the default. Values-only mode uses the existing Gaussian/pattern-search
+engine and does not spend funded search work on unused minimum certificates.
+Each JSON result reports the objective and gradient
+counts, best value, hop count, history observations/refusals, shared deposits,
+coverage observations/publications/applied and capped foreign visits,
+per-chain coverage-region counts, summed history operation seconds and elapsed
+seconds. The configuration record names the comparison, coverage metric,
+radius, height, well-tempering, peer weight and objective capability.
+Recrossing, peer-region, novelty and bounded-scale counters separate
+coverage-to-proposal actions from its conditional acceptance influence.
+Sample publication, delivery, overlap, actual displacement and constrained
+correction counts expose direct geometric separation independently of those
+scalar feedback and acceptance measurements.
+Private history size
+is the largest replica-local table; shared size is one ensemble-wide table.
+Those sizes are not interchangeable coverage measurements. The example
+rejects =HISTORY_NNG= so its communication comparison cannot be mislabeled
+as a network-transport measurement. These controls test integration and
+exploration; they are not a paper-wide state-of-the-art qualification.
+
+* Diagnose an empty history
+
+The comparison executable's =quench= control mode measures whether the
+conditioned-quadratic surface can supply the unchanged history certificate
+with a larger objective-call allowance:
+
+#+begin_src sh
+cargo run --locked --example box_noise_comparison -- 8 8000 1 16 quench
+#+end_src
+
+The control uses the same seeded start for each allowance and reports actual
+objective/gradient work and the maximum projected gradient. Representative
+seed-zero results are:
+
+| Objective allowance | Objectives used | Gradients used | Maximum projected gradient | History certificate |
+|---------------------+-----------------+----------------+----------------------------+---------------------|
+|                  24 |              24 |             21 |                    3.28594 | No                  |
+|                  48 |              48 |             42 |                 0.00379649 | No                  |
+|                  96 |              70 |             59 |                 7.26373e-9 | Yes                 |
+
+The certificate threshold is =1e-3=. These are standalone relaxation
+controls; their budgets are not an ensemble success-rate measurement.

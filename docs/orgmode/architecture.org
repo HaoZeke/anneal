@@ -157,7 +157,7 @@ Source: =src/methods/additive_independence.rs=.
 
 ** Local / QMC / shifted-QMC polish (local_polish.rs)
 
-Slots: Cool (deterministic schedule to zero), Move (projected-gradient backtracking Armijo on a bounded box), Accept (Armijo test).
+Slots: Cool (deterministic schedule to zero), Move (bounded L-BFGS two-loop with Armijo backtrack and active-set projection), Accept (Armijo test).
 QMC version screens low-discrepancy starts (or shifted replicates), sends top-k to polish.
 Exposed as the deterministic last mile after any stochastic driver.
 On the output of a short Bayesian mixer run the polish typically recovers another 1-2 digits.

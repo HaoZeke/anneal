@@ -16,6 +16,131 @@ Simulated-annealing components on the [eindir](https://github.com/HaoZeke/eindir
 | Paper reproducibility | https://github.com/HaoZeke/anneal_repro — Zenodo [10.5281/zenodo.20672620](https://doi.org/10.5281/zenodo.20672620) |
 | History | Continuous development since **2023-02** (see git log); multi-author `CITATION.cff` |
 
+## Generic global minimization
+
+The primary optimizers are implemented in Rust. Objective and gradient capabilities
+come from `eindir`. Box chains compose bounded local polishing, the native
+Langevin stepper, descriptor coverage and shared-deposit exchange. Their
+projected polisher has its own L-BFGS memory; `rgmin` backs the separate
+`WarmLbfgs` integration, not every local-improvement path. The Python
+`minimize` binding and C interfaces call Rust. The optional Array API backend
+uses one Rust controller for single and batched preset runs. Cooling,
+acceptance and GSA visiting parameters come from the native components;
+Python supplies array/device adapters and result containers. Arrays remain
+in their backend namespace. These batched preset chains are independent:
+they do not consume box coverage or census messages.
+
+Device results distinguish `n_evals` (objective callbacks) from
+`evaluated_points` (callbacks times the batch size), and retain the best finite
+evaluated candidate even when its transition is rejected. Device proposals
+are clipped to the declared box; this is not a manifold retraction or the
+unconstrained domain of the classical scalar presets.
+
+The Rust [box search and noise guide](docs/orgmode/howto/box-langevin-escape.org)
+shows the typed configuration and its common work contract. Native regression
+targets `box_search_contract` and `box_langevin_exploration` check energy-origin
+invariance, effective coverage and sustained exploration. The
+[communication contract](docs/orgmode/explanation/communication.org) separates
+coverage from optional minimum certification and coordinate adoption.
+
+For a scalar objective on a finite box, the configurable Rust entry is
+`ensemble_hop_optimize_with_config`. It selects the existing engine from the
+gradient capability and retains the requested escape and coverage settings.
+Here `objective` supplies `eindir_core::Objective<f64>` and `gradient` supplies
+`eindir_core::Gradient<f64>` on the same declared box:
+
+```rust
+use anneal_core::methods::{
+    BoxCoverageConfig, BoxEnsembleConfig, BoxEscape, GleEscapeConfig,
+    ensemble_hop_optimize_with_config,
+};
+use anneal_core::methods::ensemble::HistoryMode;
+
+let config = BoxEnsembleConfig {
+    budget: 8_000,
+    replicas: 4,
+    history: HistoryMode::None,
+    escape: BoxEscape::Langevin(GleEscapeConfig::default()),
+    ..BoxEnsembleConfig::default()
+};
+let coverage = BoxCoverageConfig::default();
+let result = ensemble_hop_optimize_with_config(
+    &objective, Some(&gradient), 7, None, &config, &coverage,
+);
+assert_eq!(result.charged, result.n_evals + result.n_grads);
+assert!(result.charged <= config.budget);
+```
+
+Coverage sharing in this example requires no minimum ledger. The native
+`box_configured_dispatch` tests compare complete callback traces and results
+against the directly selected engines, including white/colored noise and
+values-only chains.
+
+Python exposes the default policy through the optional `minimize` binding.
+Every callback receives the declared design dimension, including fixed
+coordinates. A vector length divisible by three does not select atomic geometry.
+
+```python
+import anneal
+
+result = anneal.minimize(
+    lambda x: float(x @ x),
+    x0=[1.0, 0.0, 1.0, 1.0, 1.0],
+    bounds=[(-2.0, 2.0), (0.0, 0.0), (-2.0, 2.0), (-2.0, 2.0), (-2.0, 2.0)],
+    jac=lambda x: 2.0 * x,
+    budget=256,
+    replicas=4,
+    seed=7,
+)
+assert result.charged == result.nfev + result.njev <= 256
+assert result.x[1] == 0.0
+coverage = result.diagnostics["coverage_regions_per_chain"]
+```
+
+With a gradient, replicas propose and locally improve candidates. Without a
+gradient, multiple replicas use values-only hop chains; one replica uses the
+values-only portfolio. Shared coverage records explored regions without
+requiring stationary points. Certified-minimum history is separate information,
+not the definition of exploration. The returned incumbent uses the original
+objective, independently of the exploration penalty and occupied chain state.
+
+Both values-only engines use the same Rust budgeted quasi-Newton local refiner.
+It estimates local derivatives from scalar values; no Jacobian or force callback
+is required. Every stencil and line-search probe counts as an objective call,
+including rejected probes, and can improve the returned raw incumbent. This
+local refinement does not make the two global controllers identical or certify
+global optimality.
+
+To compare cooperation without changing controllers, use
+`methods::portfolio::portfolio_ensemble_optimize`, or Python
+`global_optimize(..., replicas=4, coverage_shared=True)`. Every replica keeps
+one uninterrupted portfolio; `coverage_shared=False` gives the same controller
+and work split without peer samples. This differs from `minimize`'s documented
+one-portfolio/multiple-hop convenience policy. Peer samples move nearby global
+proposals in normalized box coordinates, without a Jacobian, force callback,
+minimum certificate, or replacement of the raw objective. The
+[portfolio interaction contract](docs/orgmode/explanation/communication.org)
+names the proposal paths, budget rules, and transport limits.
+
+`coverage_neighbors=1` restricts generic coverage to adjacent chains on a ring;
+`0` is all-to-all. Rust exposes the same rule as `BoxCoverageConfig.neighbors`.
+Both paid samples and coverage deposits follow the graph, without gradients
+or minimum certificates. This does not restrict the optional minimum ledger
+or remove the portfolio checkpoint barrier.
+
+`nfev` and `njev` count actual objective and gradient calls; `charged` is their
+sum. `diagnostics` preserves the underlying work, history, and coverage fields.
+`success` means a finite feasible candidate was returned, not that global
+optimality was certified. An optional parameter store archives results and
+supplies a starting candidate; it does not serialize chain or coverage state.
+
+The [communication contract](docs/orgmode/explanation/communication.org) maps
+these interfaces to their actual channels. The Rust box configuration also
+selects [persistent white or colored-noise escape](docs/orgmode/howto/box-langevin-escape.org)
+through the same box search. Atomic symmetry-aware proposals and constrained
+geometry use explicit specialized entry points; box clipping does not provide
+a manifold retraction.
+
 ## Cluster search and cooperative production
 
 `Config::recommended(n)` composes surface relocations that pay one acceptance
@@ -44,6 +169,47 @@ their own evidence, while nested sampling remains a matched-budget comparison
 with separate live-point weights. Shared-catalogue and one-private-catalogue-
 per-replica ensembles form the causal communication comparison.
 
+The optional census bus exchanges current validated minima directly between
+same-node replicas, independently of coordinator-mediated adoption:
+
+| Setting | Effect |
+| --- | --- |
+| `CENSUS_BUS_BASE` | Enables the bus and selects its endpoint namespace. Use a distinct value for each concurrent ensemble. |
+| `CENSUS_BUS_NEIGHBORS=0` | Subscribes to every peer; the default. |
+| `CENSUS_BUS_NEIGHBORS=k` | Subscribes only to cyclic neighbours within positive ring distance `k`. |
+| `CENSUS_BUS_IPC=1` | Uses Unix-domain IPC; the default transport is loopback TCP. |
+| `CATALOG_SHARED_BIAS=1` | Enables shared repulsive bias deposits. |
+| `CENSUS_BUS_UNBOUNDED=1` | Admits distant bus minima into that bias; the default admits only nearby packings. |
+
+Changed minima publish immediately at eligible checkpoints; unchanged minima
+refresh every eight eligible checkpoints. Hop-only refreshes update retained
+state without duplicating deposits. Checkpoint spacing is controlled by
+`CATALOG_SLICE`, in charged objective calls, not physical time.
+
+The bus retains direct neighbours without forwarding their messages. A ring
+therefore supplies a local census, not a globally mixed gossip aggregate, and
+does not restrict the coordinator's parent selection or hearing. The packing
+gate uses `nearby_packing` with histogram L1 distance at most `PACKING_LINK`
+(0.35); it is distinct from exact-basin merge radii and supplies no guarantee
+of one population cluster per energy funnel. The bounded/unbounded switch
+applies to bus observations, not population-parent or own-visit history.
+
+Packing comparisons reuse descriptor rows only when every ordered coordinate
+bit matches. A process-wide cache shared by validation and request threads
+retains at most 8 MiB of coordinate-key and descriptor payloads; bookkeeping
+and caller-held references are additional. Pairwise
+codebooks and histograms remain separate, so reuse does not introduce a shared
+classification map or delay census invalidation when an occupied minimum moves.
+
+The [communication contracts](docs/orgmode/explanation/communication.org)
+map the atomic, box-gradient and values-only entry points to their history,
+bias, census and coordinate-adoption channels, including certificate and
+charged-work boundaries.
+
+The [persistent box escape guide](docs/orgmode/howto/box-langevin-escape.org)
+connects colored or scalar-white Langevin proposals to that same quench and
+history path, with per-chain noise memory and combined callback accounting.
+
 ```rust
 use anneal_core::methods::cluster_hopping::{optimize, Config, Ledger};
 
@@ -51,6 +217,58 @@ let cfg = Config::recommended(38);
 let mut ledger = Ledger::new(400_000);
 // supply `relax` closing over your objective; see examples/lj_cluster_search.rs
 ```
+
+The `lj_joint_optimum` release example also provides a controlled NVE
+minima-hopping communication comparison. With the `ira` feature enabled,
+`mh-communication` runs both private-history and shared-history ensembles:
+
+```bash
+ANNEAL_MH_REPLICAS=4 ./target/release/examples/lj_joint_optimum \
+  75 200000 2 mh-communication
+```
+
+Here 200,000 is the total objective-call budget for each ensemble, divided
+among four replicas; two seeds give two paired comparisons. Both arms use
+matched starting coordinates, replica seeds, and escape controls. Shared
+history changes escape effort on rediscovery without copying coordinates
+or pooling acceptance thresholds. Descriptors order exact minimum-identity
+checks, and only freshly validated quenches enter the history. Trajectory
+integration constructs optimization proposals, not kinetic rates or physical
+residence times. JSON reports include aggregate first-discovery work,
+per-replica work by stage, history overhead, and ensemble wall time. Private
+minimum counts sum replica-local identities; shared counts describe one
+common history. These counts are not interchangeable measures of coverage.
+
+The structural archive retains rejected proposals, but the default exclusion
+history contains only accepted minima. An energy-rejected proposal remains eligible
+for another threshold trial. Shared classification and acceptance publication
+are atomic; an unresolved quench contributes charged work, not a basin visit.
+
+For an alternative exploration policy, set
+`ANNEAL_MH_HISTORY_POLICY=observed-exclusion` on an ensemble run. Every certified
+observation then enters exclusion history, including energy-rejected proposals,
+and rediscovery feedback uses total observation counts. This policy is distinct
+from accepted-minimum history; its output arm names carry `-observed-exclusion`.
+`accepted` is the default, and unrecognized policy names are rejected.
+
+Exact matching uses a per-ensemble cache of immutable pair-distance spectra,
+keyed by complete coordinates. It only prunes impossible matches; survivors
+retain native matching and identity-context checks. The default coordinate-key
+and spectrum payload limit is 128 MiB, with map metadata additional. Set
+`ANNEAL_MH_PAIR_CACHE_BYTES=0` to disable storage for a controlled comparison.
+Each relation applies its pair screen once; rejection stops at the first
+sufficient distance discrepancy, and survivors reuse the prepared screening
+work without changing the native identity decision.
+Ensemble records retain each replica's best coordinates for independent audits.
+
+For a controlled escape probe, `ANNEAL_START_COORDINATES` selects a plain
+coordinate file containing one finite `x y z` triplet per atom, without an
+XYZ header or element labels. Every replica starts from that structure;
+the seed still controls its proposals. The configuration record reports
+`start_protocol: "fixed-coordinate-file"` and embeds the input coordinates.
+This input cannot be combined with `ANNEAL_OPTBENCH_STARTS`: a diagnostic
+shelf structure is not a published random-start archive. The `mh-private-soft`
+and `mh-shared-soft` selectors add velocity softening to the same comparison.
 
 External potentials use the same optimizer driver. The molecular-cluster and
 slab examples share one persistent in-process profile adapter; selecting
@@ -70,6 +288,27 @@ The shared adapter is
 two consumers are
 [`examples/molecular_cluster.rs`](examples/molecular_cluster.rs) and
 [`examples/slab_adsorption.rs`](examples/slab_adsorption.rs).
+
+Rigid TIP4P water is a first-class objective, not an example-local potential.
+Each molecule is a rigid body (centre of mass plus an exponential-map
+rotation vector) with Jorgensen parameters, no cutoff, and an analytic
+gradient assembled from site forces and torques. Basin hopping uses a
+Wales--Hodges translation/rotation kernel rather than the atomic Cartesian
+moves. Compare putative global minima against Wales and Hodges,
+*Chem. Phys. Lett.* **286**, 65 (1998):
+
+```bash
+cargo run --locked --release --example water_tip4p -- 6 20000 4
+```
+
+The `vesin-nl` feature compiles vesin's own cell-list sources into the
+neighbour list instead of the crate's reimplementation. Its build script
+reads `VESIN_SRC`, a checkout of [vesin](https://github.com/Luthaf/vesin),
+so `cargo test --all-features` needs it set:
+
+```bash
+VESIN_SRC=/path/to/vesin cargo test --locked --all-features
+```
 
 ## Install
 
@@ -122,7 +361,7 @@ makes `1 + n_epochs * steps_per_epoch` evaluations.
 
 ## ChemFit
 
-Gradient-free fits go through `anneal.chemfit`. The chain starts at the fitter's initial parameters, and every candidate stays inside the box. `fit_anneal` and `fit_chemfit` speak `init` / `ask` / `tell` / `finish`. `run_benchmark` also accepts `evaluate` / `step`. `driver="portfolio"` (the default) is the budget-only global optimizer. `driver="boltzmann"`, `"fast"`, and `"gsa"` are the classical presets.
+Gradient-free fits go through `anneal.chemfit`. The chain starts at the fitter's initial parameters, and every candidate stays inside the box. `fit_anneal`, `fit_chemfit`, `run_benchmark`, and `run_fitter` drive the fitter's session: `init`, then `evaluate` / `step` on current ChemFit or `ask` / `tell` on ChemFit 3.1, then `finish` with the best evaluated parameters. A fitter with neither pair is refused before `init`, and so is any invalid argument; `run_benchmark` with `evaluate` or `ask` alone, and the few calls 0.10.0 accepted while ignoring an argument, still run with a `FutureWarning`. The first exception the fitter raises, or a loss that is not a real number, stops the fit and reaches the caller without `finish`. `driver="portfolio"` (the default) is the budget-only global optimizer. `driver="boltzmann"`, `"fast"`, and `"gsa"` are the classical presets.
 
 ```python
 from anneal.chemfit import run_benchmark
@@ -136,7 +375,7 @@ def run_anneal(benchmark_context):
     )
 ```
 
-A scalar `low` or `high` is broadcast across the flattened parameters. Bounds may also live on `benchmark_context["bounds"]` or `fitter.bounds`.
+A scalar `low` or `high` is broadcast across the flattened parameters. Bounds may also live on `benchmark_context["bounds"]` or `fitter.bounds`, as `(lower, upper)` pairs mirroring the parameters; each side is a scalar or an array of the parameter's shape. A parameter whose two bounds are equal is held fixed.
 
 ## Optional arms (additive independence + QMC polish)
 

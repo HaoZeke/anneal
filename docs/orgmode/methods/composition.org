@@ -170,7 +170,7 @@ checkpoint. It runs, in order:
 Separately from the checkpoint cadence, =Config.polish_records= extends
 the relaxation of any trial that improves the run's *record* (not every
 hop) to the shared-catalog convergence tolerance
-(src/methods/cluster_hopping/config.rs:561-570). This bounds the extra
+(src/methods/cluster_hopping/config.rs:652-661). This bounds the extra
 cost to the number of record improvements -- a few hundred evaluations
 each over tens of events across a campaign budget -- rather than paying
 full precision on every accepted hop. Only states polished to this

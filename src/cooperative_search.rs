@@ -5,6 +5,7 @@ pub mod ledger;
 #[cfg(feature = "bank-rpc")]
 mod run {
     use std::collections::BTreeMap;
+    use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::{Arc, Mutex};
 
     use crate::catalog::MixingEvidence;
@@ -23,6 +24,7 @@ mod run {
         TransitionDestination,
     };
     use crate::compatibility::EngineDescriptor;
+    use crate::coreclass::{CoreClassTable, CoreVerdict};
     use crate::discovery_roster::DiscoveryRole;
     use crate::methods::feynman_kac::population_family_position;
     use crate::pes_exploration::RideMethod;
@@ -67,6 +69,8 @@ mod run {
         RideClaim,
         /// One charged transition-search result accepted by the coordinator.
         RideReport,
+        /// This replica left the live roster and told the coordinator why.
+        Retire,
     }
 
     impl TraceKind {
@@ -89,6 +93,7 @@ mod run {
                 Self::TransitionExecution => "transition_execution",
                 Self::RideClaim => "ride_claim",
                 Self::RideReport => "ride_report",
+                Self::Retire => "retire",
             }
         }
     }
@@ -732,6 +737,8 @@ mod run {
         rpc_sequence: u64,
         cumulative_charged: u64,
         client: Option<CatalogMailbox>,
+        posted_source_valid: Arc<Mutex<bool>>,
+        surface_pending: Arc<AtomicBool>,
         snapshot: Option<CatalogSnapshot>,
         last_slice: u64,
         policy_slot: Arc<Mutex<Option<Result<PolicyStateReceipt, CatalogClientError>>>>,
@@ -758,6 +765,8 @@ mod run {
         ledger: CooperativeLedger,
         replicas: BTreeMap<u32, ReplicaState>,
         events: Vec<TraceEvent>,
+        on_published_prize: bool,
+        core_class: CoreClassTable,
     }
 
     impl CooperativeRun {
@@ -779,6 +788,8 @@ mod run {
                             rpc_sequence: 0,
                             cumulative_charged: 0,
                             client: None,
+                            posted_source_valid: Arc::new(Mutex::new(true)),
+                            surface_pending: Arc::new(AtomicBool::new(false)),
                             snapshot: None,
                             last_slice: 0,
                             policy_slot: Arc::new(Mutex::new(None)),
@@ -809,6 +820,8 @@ mod run {
                 ledger,
                 replicas,
                 events: Vec::new(),
+                on_published_prize: false,
+                core_class: CoreClassTable::default(),
             })
         }
 
@@ -828,6 +841,7 @@ mod run {
             let state = self.replica_mut(replica)?;
             state.rpc_sequence = state.rpc_sequence.max(used_sequence);
             state.client = Some(CatalogMailbox::spawn(client));
+            state.surface_pending = Arc::new(AtomicBool::new(false));
             state.policy_pending = false;
             state.policy_request = None;
             *state.policy_slot.lock().expect("policy slot") = None;
@@ -846,6 +860,78 @@ mod run {
             state.crossing_request = None;
             *state.crossing_slot.lock().expect("crossing slot") = None;
             Ok(())
+        }
+
+        /// Exchange surface rewards on the catalog I/O thread without moving a chain.
+        ///
+        /// At most one exchange is pending per replica. Only peer observations
+        /// are imported; local block rewards can accumulate while I/O proceeds.
+        /// An unavailable coordinator leaves local learning authoritative.
+        pub fn post_surface_evidence(
+            &mut self,
+            replica: u32,
+            portfolio: Arc<Mutex<crate::methods::two_phase::SurfacePortfolio>>,
+        ) -> Result<(), CooperativeRunError> {
+            let pending = {
+                let state = self.replica_mut(replica)?;
+                if state.client.is_none() || state.surface_pending.load(Ordering::Acquire) {
+                    return Ok(());
+                }
+                Arc::clone(&state.surface_pending)
+            };
+            let sequence = self.next_rpc_sequence(replica)?;
+            let report = portfolio.lock().expect("surface portfolio").report();
+            pending.store(true, Ordering::Release);
+            if let Some(mailbox) = self.replica_mut(replica)?.client.as_ref() {
+                mailbox.post(move |client| {
+                    if let Ok(peers) = client.exchange_surface_evidence(sequence, report) {
+                        let _ = portfolio
+                            .lock()
+                            .expect("surface portfolio")
+                            .import_peers(peers);
+                    }
+                    pending.store(false, Ordering::Release);
+                });
+            }
+            Ok(())
+        }
+
+        /// Configure the in-process motif-class table.
+        pub fn enable_core_class(&mut self, patience: usize, trial: usize) {
+            self.core_class = CoreClassTable::new(patience, trial);
+        }
+
+        /// Report one replica's motif class and energy.
+        ///
+        /// A connected coordinator holds the shared table. Without a
+        /// client the in-process table answers, so a single chain still
+        /// applies the stall and trial rules.
+        pub fn report_core_class(
+            &mut self,
+            replica: u32,
+            class: u8,
+            energy: f64,
+            charged: usize,
+        ) -> Result<CoreVerdict, CooperativeRunError> {
+            let rpc_sequence = self.next_rpc_sequence(replica)?;
+            let charged_u64 =
+                u64::try_from(charged).map_err(|_| CooperativeRunError::CounterOverflow)?;
+            let remote = {
+                let state = self.replica_mut(replica)?;
+                state.client.as_ref().map(|mailbox| {
+                    mailbox.exec(move |client| {
+                        client.report_core_class(rpc_sequence, class, energy, charged_u64)
+                    })
+                })
+            };
+            match remote {
+                Some(Ok(verdict)) => Ok(verdict),
+                Some(Err(_)) | None => {
+                    Ok(self
+                        .core_class
+                        .report(replica as usize, class, energy, charged))
+                }
+            }
         }
 
         /// Record one exact local work boundary in the aggregate ledger.
@@ -1016,6 +1102,11 @@ mod run {
                     mailbox.exec(move |client| client.record_visit(rpc_sequence, candidate))
                 })
             };
+            *self
+                .replica_mut(replica)?
+                .posted_source_valid
+                .lock()
+                .expect("posted source status") = matches!(result, Some(Ok(_)));
             self.handle_transition_record(
                 replica,
                 "register_current".to_owned(),
@@ -1079,9 +1170,11 @@ mod run {
                 return Ok(TransitionRecordOutcome::SharingDisabled);
             }
             let rpc_sequence = self.next_rpc_sequence(replica)?;
+            let source_valid = Arc::clone(&self.replica_mut(replica)?.posted_source_valid);
             if let Some(mailbox) = self.replica_mut(replica)?.client.as_ref() {
                 mailbox.post(move |client| {
-                    let _ = client.record_visit(rpc_sequence, candidate);
+                    let accepted = client.record_visit(rpc_sequence, candidate).is_ok();
+                    *source_valid.lock().expect("posted source status") = accepted;
                 });
             }
             Ok(TransitionRecordOutcome::LocalFallback)
@@ -1100,15 +1193,28 @@ mod run {
             }
             let rpc_sequence = self.next_rpc_sequence(replica)?;
             let action = action.into();
+            let source_valid = Arc::clone(&self.replica_mut(replica)?.posted_source_valid);
             if let Some(mailbox) = self.replica_mut(replica)?.client.as_ref() {
                 mailbox.post(move |client| {
-                    let _ = client.record_transition(rpc_sequence, action, destination, adopted);
+                    // A failed source registration leaves the coordinator on
+                    // another minimum. It cannot anchor this observation.
+                    if !*source_valid.lock().expect("posted source status") {
+                        return;
+                    }
+                    if client
+                        .record_transition(rpc_sequence, action, destination, adopted)
+                        .is_err()
+                        && adopted
+                    {
+                        *source_valid.lock().expect("posted source status") = false;
+                    }
                 });
             }
             Ok(TransitionRecordOutcome::LocalFallback)
         }
 
-        /// Record one validated local perturb--quench independently of RPC registration.
+        /// Record a local perturb--quench independently of RPC registration.
+        /// A non-finite terminal energy denotes an unresolved outcome.
         pub fn record_executed_transition(
             &mut self,
             replica: u32,
@@ -1125,9 +1231,9 @@ mod run {
                 .transition = Some(TransitionTrace {
                 action: action.into(),
                 hop: Some(hop),
-                from_energy: Some(from_energy),
-                to_energy: Some(to_energy),
-                resolved: true,
+                from_energy: from_energy.is_finite().then_some(from_energy),
+                to_energy: to_energy.is_finite().then_some(to_energy),
+                resolved: from_energy.is_finite() && to_energy.is_finite(),
                 adopted,
             });
             Ok(())
@@ -2067,6 +2173,45 @@ mod run {
                 })
             };
             self.handle_population_result(replica, epoch, result)
+        }
+
+        /// Remove this replica from the live roster and record why.
+        pub fn detach(
+            &mut self,
+            replica: u32,
+            reason: &'static str,
+        ) -> Result<(), CooperativeRunError> {
+            let rpc_sequence = self.next_rpc_sequence(replica)?;
+            let result = {
+                let state = self.replica_mut(replica)?;
+                state
+                    .client
+                    .as_ref()
+                    .map(|mailbox| mailbox.exec(move |client| client.detach(rpc_sequence, reason)))
+            };
+            match result {
+                None => {
+                    self.push_event(replica, TraceKind::SharingDisabled, None, None)?;
+                    Ok(())
+                }
+                Some(Ok(_)) => {
+                    self.push_event(replica, TraceKind::Retire, None, Some(reason))?;
+                    Ok(())
+                }
+                Some(Err(CatalogClientError::Rejected(rej))) => {
+                    self.push_event(
+                        replica,
+                        TraceKind::Rejection,
+                        None,
+                        Some(rejection_code(rej)),
+                    )?;
+                    Ok(())
+                }
+                Some(Err(_)) => {
+                    self.push_event(replica, TraceKind::RpcFallback, None, None)?;
+                    Ok(())
+                }
+            }
         }
 
         /// Decline this epoch so the replicas waiting on it are released.
@@ -3069,7 +3214,13 @@ mod run {
             interface_threshold: state.interface_threshold,
             occupied_family_count: state.occupied_family_count as usize,
             packing_saturated: state.packing_saturated,
-            leftover_dwell: state.leftover_dwell,
+            // CATALOG_FORCE_DWELL=1 treats the leftover census as settled, so
+            // the Leave arms of the policy are reachable on a landscape where
+            // leftover SOAP never saturates inside the budget (LJ75: 0 Leave
+            // in 48 replicas of ensemble 0021). A measurement switch, not a
+            // default.
+            leftover_dwell: state.leftover_dwell
+                || std::env::var("CATALOG_FORCE_DWELL").is_ok_and(|v| v == "1"),
             ei_exhausted: state.ei_exhausted,
             min_families: state.min_families as usize,
             on_published_prize: false,

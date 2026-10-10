@@ -49,6 +49,7 @@ dependencies = [
  "eindir-core",
  "featomic",
  "futures",
+ "libc",
  "libloading",
  "linkcell 0.3.11",
  "metatensor",
@@ -1276,8 +1277,6 @@ dependencies = [
 [[package]]
 name = "nng"
 version = "1.0.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "20a18ed7ec1c8ff1658bcfea2ce76dcedf8be21dd9e8dd2e9762ba9632d16203"
 dependencies = [
  "log",
  "nng-sys",
@@ -1286,8 +1285,6 @@ dependencies = [
 [[package]]
 name = "nng-sys"
 version = "1.4.0-rc.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "50d0e7f39a8fd1792a710da9351320e864dc799cf439960e332c977b2f876da6"
 dependencies = [
  "cmake",
  "version_check",
@@ -2220,6 +2217,7 @@ version = "1.53.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "202caea871b69668250d242070849eb495be178ed697a3e98aebce5bc81a0bed"
 dependencies = [
+ "bytes",
  "libc",
  "mio",
  "pin-project-lite",

@@ -116,8 +116,8 @@ def test_fit_anneal_classical_drivers_respect_bounds_and_budget():
         positions = np.asarray(out["positions"])
         assert np.all(positions >= -3.0) and np.all(positions <= 3.0)
         assert 0.5 <= out["eps"] <= 3.0
-        # 400 evals for the chain plus the seeded start.
-        assert fitter.tells <= 401
+        # The budget counts the seeded start.
+        assert fitter.tells <= 400
         start_loss = float(np.sum(np.array([[2.5, 0.0, -1.0]]) ** 2) + 1.0)
         got_loss = float(np.sum(positions**2) + (out["eps"] - 1.0) ** 2)
         assert got_loss < start_loss

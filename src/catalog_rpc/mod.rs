@@ -7,23 +7,26 @@ use capnp::serialize;
 
 use crate::Catalog_capnp::{
     CatalogMutationKind as WireCatalogMutationKind, CatalogRelation as WireCatalogRelation,
-    DiscoveryRole as WireDiscoveryRole, QuenchStatus as WireQuenchStatus, RejectionKind,
-    RideDirection as WireRideDirection, RideFailure as WireRideFailure,
-    RideMethod as WireRideMethod, accepted_reply, bridge_assignment, candidate_record,
-    catalog_identity, catalog_mutation_reply, catalog_reply, catalog_request, coordinator_event,
-    coordinator_status, policy_state_reply, population_epoch_reply, ride_report_reply,
-    ride_report_request, roster_reply, transition_record,
+    CoreVerdict as WireCoreVerdict, DiscoveryRole as WireDiscoveryRole,
+    QuenchStatus as WireQuenchStatus, RejectionKind, RideDirection as WireRideDirection,
+    RideFailure as WireRideFailure, RideMethod as WireRideMethod, accepted_reply,
+    bridge_assignment, candidate_record, catalog_identity, catalog_mutation_reply, catalog_reply,
+    catalog_request, coordinator_event, coordinator_status, policy_state_reply,
+    population_epoch_reply, ride_report_reply, ride_report_request, roster_reply,
+    transition_record,
 };
+use crate::coreclass::CoreVerdict;
 use crate::discovery_roster::DiscoveryRole;
 use crate::pes_exploration::RideMethod;
 use crate::ride_ledger::{RideCredit, RideDirection, RideFailure, RideWorkOrder};
+use crate::surface_evidence::SurfaceReport;
 
 pub mod client;
 pub mod mailbox;
 pub mod server;
 
 /// Wire protocol version accepted by this release.
-pub const PROTOCOL_VERSION: u16 = 28;
+pub const PROTOCOL_VERSION: u16 = 29;
 /// `Sample` draw that returns the active-catalog incumbent.
 pub const INCUMBENT_SAMPLE_DRAW: u64 = u64::MAX;
 
@@ -225,6 +228,8 @@ pub struct CatalogMutation {
     pub basin_id: u64,
     /// Whether the exact witness opened this fixed-census basin.
     pub new_basin: bool,
+    /// Same-PES fixed-census count including this observation.
+    pub basin_visits: u64,
     /// Exact admission or rejection class.
     pub kind: CatalogMutationKind,
     /// Fixed-census basins removed from the active catalog.
@@ -379,6 +384,20 @@ pub enum CatalogOperation {
     Scale {
         /// Desired number of live replicas.
         live_target: u32,
+    },
+    /// Report one chain's motif class and energy to the shared table.
+    ReportCoreClass {
+        /// [`crate::corekey::MotifClass::index`] of the live state.
+        class: u8,
+        /// Current energy of the reporting chain.
+        energy: f64,
+        /// Charged calls on the reporting chain.
+        charged: u64,
+    },
+    /// Publish cumulative local surface rewards and retrieve peer evidence.
+    ExchangeSurfaceEvidence {
+        /// Observations produced by the requesting replica only.
+        report: SurfaceReport,
     },
 }
 
@@ -776,6 +795,10 @@ pub enum AcceptedPayload {
     RideCredit(RideCredit),
     /// Versioned live roster after attach, detach, tick, or scale.
     Roster(RosterReply),
+    /// Shared core-class table verdict for the reporting chain.
+    CoreVerdict(CoreVerdict),
+    /// Cumulative surface evidence excluding the requesting replica.
+    SurfaceEvidence(SurfaceReport),
 }
 
 /// Accepted coordinator response.
@@ -1055,6 +1078,19 @@ pub(crate) fn fill_request(
         }
         CatalogOperation::Tick { millis } => operation.set_tick(*millis),
         CatalogOperation::Scale { live_target } => operation.set_scale(*live_target),
+        CatalogOperation::ReportCoreClass {
+            class,
+            energy,
+            charged,
+        } => {
+            let mut report = operation.init_report_core_class();
+            report.set_class(*class);
+            report.set_energy(*energy);
+            report.set_charged(*charged);
+        }
+        CatalogOperation::ExchangeSurfaceEvidence { report } => {
+            fill_surface_report(operation.init_exchange_surface_evidence(), report);
+        }
     }
     Ok(())
 }
@@ -1250,6 +1286,19 @@ pub(crate) fn decode_request_reader(
         },
         catalog_request::operation::Tick(millis) => CatalogOperation::Tick { millis },
         catalog_request::operation::Scale(live_target) => CatalogOperation::Scale { live_target },
+        catalog_request::operation::ReportCoreClass(report) => {
+            let report = report.map_err(wire_error)?;
+            CatalogOperation::ReportCoreClass {
+                class: report.get_class(),
+                energy: report.get_energy(),
+                charged: report.get_charged(),
+            }
+        }
+        catalog_request::operation::ExchangeSurfaceEvidence(report) => {
+            CatalogOperation::ExchangeSurfaceEvidence {
+                report: read_surface_report(report.map_err(wire_error)?)?,
+            }
+        }
     };
     Ok(CatalogRequest {
         protocol_version,
@@ -1532,6 +1581,7 @@ pub(crate) fn fill_reply(
                     let mut output = payload.init_catalog_mutation();
                     output.set_basin_id(mutation.basin_id);
                     output.set_new_basin(mutation.new_basin);
+                    output.set_basin_visits(mutation.basin_visits);
                     output.set_kind(mutation.kind.into());
                     fill_u64(
                         output
@@ -1544,6 +1594,12 @@ pub(crate) fn fill_reply(
                         Some(identifier) => incumbent.set_present(identifier),
                         None => incumbent.set_absent(()),
                     }
+                }
+                AcceptedPayload::CoreVerdict(verdict) => {
+                    payload.set_core_verdict(WireCoreVerdict::from(*verdict));
+                }
+                AcceptedPayload::SurfaceEvidence(report) => {
+                    fill_surface_report(payload.init_surface_evidence(), report);
                 }
             }
         }
@@ -1817,10 +1873,19 @@ pub(crate) fn decode_reply_reader(
                     AcceptedPayload::CatalogMutation(CatalogMutation {
                         basin_id: mutation.get_basin_id(),
                         new_basin: mutation.get_new_basin(),
+                        basin_visits: mutation.get_basin_visits(),
                         kind: mutation.get_kind().map_err(wire_error)?.into(),
                         evicted: list_u64(mutation.get_evicted().map_err(wire_error)?),
                         incumbent_basin,
                     })
+                }
+                accepted_reply::payload::CoreVerdict(verdict) => {
+                    AcceptedPayload::CoreVerdict(verdict.map_err(wire_error)?.into())
+                }
+                accepted_reply::payload::SurfaceEvidence(report) => {
+                    AcceptedPayload::SurfaceEvidence(read_surface_report(
+                        report.map_err(wire_error)?,
+                    )?)
                 }
             };
             Ok(CatalogReply::Accepted(AcceptedReply {
@@ -1874,6 +1939,62 @@ impl From<RejectionKind> for ProtocolRejection {
             RejectionKind::SequenceRegression => Self::SequenceRegression,
             RejectionKind::SnapshotRegression => Self::SnapshotRegression,
             RejectionKind::ValidationRejected => Self::ValidationRejected,
+        }
+    }
+}
+
+fn fill_surface_report(
+    mut output: crate::Catalog_capnp::surface_report::Builder<'_>,
+    report: &SurfaceReport,
+) {
+    output.set_schema(report.schema.as_str());
+    let mut arms = output.init_arms(report.arms.len() as u32);
+    for (index, moment) in report.arms.iter().enumerate() {
+        let mut arm = arms.reborrow().get(index as u32);
+        arm.set_count(moment.count);
+        arm.set_mean(moment.mean);
+        arm.set_m2(moment.m2);
+    }
+}
+
+fn read_surface_report(
+    input: crate::Catalog_capnp::surface_report::Reader<'_>,
+) -> Result<SurfaceReport, ProtocolError> {
+    let arms = input.get_arms().map_err(wire_error)?;
+    if arms.is_empty() || arms.len() > 64 {
+        return Err(ProtocolError::Malformed("invalid surface arm count".into()));
+    }
+    let report = SurfaceReport {
+        schema: text_value(input.get_schema().map_err(wire_error)?)?,
+        arms: arms
+            .iter()
+            .map(|arm| crate::allocate::RewardMoments {
+                count: arm.get_count(),
+                mean: arm.get_mean(),
+                m2: arm.get_m2(),
+            })
+            .collect(),
+    };
+    report
+        .validate()
+        .map_err(|error| ProtocolError::Malformed(error.into()))?;
+    Ok(report)
+}
+
+impl From<CoreVerdict> for WireCoreVerdict {
+    fn from(value: CoreVerdict) -> Self {
+        match value {
+            CoreVerdict::Continue => Self::Continue,
+            CoreVerdict::Restart => Self::Restart,
+        }
+    }
+}
+
+impl From<WireCoreVerdict> for CoreVerdict {
+    fn from(value: WireCoreVerdict) -> Self {
+        match value {
+            WireCoreVerdict::Continue => Self::Continue,
+            WireCoreVerdict::Restart => Self::Restart,
         }
     }
 }

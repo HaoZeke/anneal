@@ -1,6 +1,15 @@
 #+TITLE: Presets and Advanced Drivers
 #+OPTIONS: toc:nil todo:nil num:nil author:nil title:nil ^:nil
 
+* Search surfaces
+
+- =cluster_search(obj, grad, n, budget, seed=0, recommended=True, derived=False, *, ras=False)= :: \(3N\) point set. Always needs a gradient or force.
+- =ensemble_optimize(obj, low, high, budget, ..., grad_fn=None)= :: design box. Gradient → hop and quench; no gradient → portfolio.
+- =box_ensemble_optimize(...)= :: hop primitive. Requires =grad_fn=.
+- =global_optimize(obj, low, high, budget, ...)= :: portfolio arms when the caller does not want hops.
+
+See [[file:../howto/choose-driver.org][choose a driver]].
+
 * Classical (values only)
 
 - =Boltzmann(t_init, sigma)= :: Logarithmic cooling + Gaussian + Metropolis.

@@ -1,5 +1,6 @@
-//! Occupancy extras Leave OtherFamily or ArchiveHole. A same-family
-//! quench is Refuse, then a packing hole; it is not a box start.
+//! Occupancy extras Leave by drawing another packing or they Walk.
+//! A same-family quench is Refuse. Leave is not a covering of the
+//! occupied tangent and it is not a box start.
 
 #[test]
 fn catalog_min_families_override_requires_a_parsed_floor() {
@@ -249,32 +250,100 @@ fn occupancy_leave_action_does_not_fall_back_to_a_random_cluster() {
         .expect("Leave arm must end at Explore");
     assert!(
         !arm.contains("random_cluster"),
-        "occupancy extras Leave OtherFamily or ArchiveHole, not a random cluster"
-    );
-    assert!(
-        arm.contains("packing_saturated") || arm.contains("policy.packing_saturated"),
-        "after packing sat Leave must see packing_saturated and choose ArchiveHole"
+        "occupancy extras Leave OtherFamily or Walk, not a random cluster"
     );
     assert!(
         arm.contains("occupied_family_count"),
-        "OtherFamily is landfold communities on the sparsified book, not DECAF isomer bins"
+        "OtherFamily draws another occupied DECAF family, not an isomer bin"
     );
     assert!(
-        arm.contains("leave_archive_hole") || arm.contains("leave_packing_state"),
-        "ArchiveHole is leftover-orthogonal, not a leftover hole"
+        arm.contains("current_energy"),
+        "OtherFamily adopts a deeper packing, not an amorphous cell above the live well"
+    );
+    assert!(
+        arm.contains("OccupancyLeaveTarget::Ridge"),
+        "a book with one packing climbs the ridge"
+    );
+    assert!(
+        !arm.contains("step_away_fivefold"),
+        "Leave is not a named morphology hop"
     );
     let server = include_str!("../src/catalog_rpc/server.rs");
+    assert!(
+        server.contains("scientific.packing.occupied_packing_count()"),
+        "PolicyState occupied_family_count is occupied packing communities, not DECAF cells"
+    );
+    let policy_state = server
+        .split("CatalogOperation::PolicyState")
+        .nth(1)
+        .and_then(|chunk| chunk.split("CatalogOperation::PopulationSubmit").next())
+        .expect("PolicyState arm must exist");
+    assert!(
+        !policy_state.contains("report_occupancy_gt"),
+        "PolicyState must not fold, floor, or report GT on the hop path"
+    );
+    assert!(
+        !policy_state.contains("occupancy_floor("),
+        "PolicyState must not recompute the occupancy floor"
+    );
+    assert!(
+        !policy_state.contains("occupancy_funnel_ei_exhausted("),
+        "PolicyState must not feed the funnel"
+    );
+    let basin = server
+        .split("fn exact_basin_for(")
+        .nth(1)
+        .and_then(|chunk| chunk.split("fn query_basin_for_descriptor(").next())
+        .expect("exact_basin_for must exist");
+    let packing = basin
+        .find("basin_for_packing_community")
+        .expect("packing-community short-circuit");
+    let ira = basin
+        .find("equivalent_structures")
+        .expect("IRA remains the novel-packing witness");
+    assert!(
+        packing < ira,
+        "same packing reuses the basin; IRA is only for a new family"
+    );
+    assert!(
+        basin.contains("occupied_packing_count() <= 1"),
+        "a one-packing book does not IRA every icosahedral isomer"
+    );
     assert!(
         server.contains("q_ei_family_entry"),
         "WAVE OtherFamily draws cycle q-EI, not a single highest-EI family"
     );
     assert!(
-        arm.contains("archive_cover_index") || arm.contains("cover_index"),
-        "ArchiveHole is a SoftSaddle covering direction, not a random nu3 kick"
+        server.contains("let same_basin = previous == Some(observation.basin_id)")
+            && server.contains("if !same_basin && observe_ride_source"),
+        "a repeat visit of the same basin must not rebuild the ride source"
     );
+    let offer = server
+        .split("Catalog offers are search evidence")
+        .nth(1)
+        .and_then(|chunk| chunk.split("CatalogOperation::RecordTransition").next())
+        .expect("OfferCandidate arm must exist");
     assert!(
-        !arm.contains("step_away_fivefold"),
-        "ArchiveHole is not the serial fivefold morphology hop"
+        offer.contains("packing.version()") && offer.contains("refresh_occupancy_diagnostics"),
+        "OfferCandidate folds only when the packing book moves"
+    );
+    let refresh = server
+        .split("fn refresh_occupancy_diagnostics(")
+        .nth(1)
+        .and_then(|chunk| chunk.split("fn report_occupancy_gt_throttled(").next())
+        .expect("refresh_occupancy_diagnostics must exist");
+    assert!(
+        refresh.contains("fold_hold") && refresh.contains("return"),
+        "a live fold hold must not start another occupancy fold on admission"
+    );
+    let community = server
+        .split("fn basin_for_packing_community(")
+        .nth(1)
+        .and_then(|chunk| chunk.split("fn candidate_from_validated(").next())
+        .expect("basin_for_packing_community must exist");
+    assert!(
+        community.contains("families_sharing_community"),
+        "visit identity uses the cached book fold, not a fresh single-linkage"
     );
 }
 
@@ -301,51 +370,63 @@ fn leave_quench_keeps_the_walk_off_mu_k() {
         "leftover-SOAP requench is a projector onto the occupied packing"
     );
     assert!(
-        body.contains("leave_packing_starts") || body.contains("leave_packing_ladder"),
-        "a Leave that quenched back into its packing widens the ladder"
+        !body.contains("leave_packing_ridge") && !body.contains("leave_packing_starts"),
+        "Leave does not cover the occupied packing tangent"
     );
     assert!(
-        body.contains("leave_packing_rung_to"),
-        "a rung is sized by the barrier it must clear, measured on the potential"
+        body.contains("relax(ledger, state.view()"),
+        "Leave quenches the offered destination"
     );
     assert!(
-        body.contains("leave_packing_ridge"),
-        "a Leave that the ladder refuses accumulates the packing increment"
-    );
-    // A min-mode climb on the raw surface is the surface rumple: a closed
-    // shell has no soft mode, the climb reports curvatures of -1e13 and
-    // calls the ridge behind after one step. On E+V the shell is not
-    // closed, the deposit having put fifty eps into it, and the same climb
-    // measures a curvature of 0.5218 and leaves the packing 3 times in 16
-    // where every displacement along a cover direction leaves 0 in 16. So
-    // the bar is not that no climb appears, it is that no climb runs on
-    // the raw surface.
-    if body.contains("activate_from_origin") {
-        let climb = body
-            .split("activate_from_origin")
-            .next()
-            .expect("text precedes the climb");
-        assert!(
-            climb.contains("with_hill_only"),
-            "a Leave climb runs on E+V; the min mode of a closed shell is a surface rumple"
-        );
-    }
-    assert!(
-        !body.contains("with_hill_only") || body.contains("with_disarmed"),
-        "a climb on E+V still needs the raw minimum below it to name the packing"
+        body.contains("leave_av_walk"),
+        "Leave walks packing hops from the live well, not a cover of the occupied tangent"
     );
     assert!(
-        body.contains("LEAVE_WALK_CLIMB"),
-        "a crossing above the climb ceiling is a crushed cluster, not a saddle"
-    );
-    assert!(
-        body.contains("with_disarmed"),
-        "the walk stops on a ridge, so the chain takes the raw minimum below it"
+        !body.contains("shs_av_starts") && !body.contains("farthest_packing_cover"),
+        "sphere covers quench back into the occupied funnel"
     );
 }
 
 #[test]
-fn a_one_packing_book_walks_rather_than_drawing_a_hole() {
+fn leave_climb_evaluates_curvature_at_the_offered_seed() {
+    use anneal_core::methods::activation::{Activation, activate_from_origin};
+    use ndarray::array;
+
+    let origin = array![
+        -0.4, -0.4, -0.4, 0.4, 0.4, -0.4, 0.4, -0.4, 0.4, -0.4, 0.4, 0.4
+    ];
+    let seed = &origin * 1.3;
+    let config = Activation {
+        max_steps: 0,
+        ..Activation::default()
+    };
+    let mut evaluated = Vec::new();
+    let result = activate_from_origin(
+        seed.view(),
+        origin.view(),
+        |point| {
+            evaluated.push(point.to_owned());
+            Some(point.mapv(|value| 3.0 * value))
+        },
+        &config,
+    )
+    .expect("the offered seed has non-rigid curvature modes");
+
+    assert!(!evaluated.is_empty());
+    assert_eq!(result.evaluations, evaluated.len());
+    assert_eq!(result.state, seed);
+    assert_eq!(result.steps, 0);
+    assert!((result.lambda - 3.0).abs() < 1e-7);
+    for point in evaluated {
+        let from_seed = (&point - &seed).mapv(|value| value * value).sum().sqrt();
+        let from_origin = (&point - &origin).mapv(|value| value * value).sum().sqrt();
+        assert!(from_seed <= config.epsilon * 1.01);
+        assert!(from_origin > 0.4);
+    }
+}
+
+#[test]
+fn a_one_packing_book_climbs_the_ridge() {
     let source = include_str!("../examples/lj_cluster_search.rs");
     let leave = source
         .split("PolicyAction::Leave =>")
@@ -357,27 +438,94 @@ fn a_one_packing_book_walks_rather_than_drawing_a_hole() {
         .next()
         .expect("Leave arm must end at Explore");
     assert!(
-        arm.contains("occupancy_leave_by_birth"),
-        "Walk vs ArchiveHole follows FunnelModel EI plus leftover birth, not only the community count"
+        arm.contains("OccupancyLeaveTarget::Ridge"),
+        "a one-packing book sends extras up the ridge, not around the ico shelf"
     );
     assert!(
-        arm.contains("OccupancyLeaveTarget::Walk"),
-        "a book with one packing has nothing to divide, so the extra keeps walking"
+        arm.contains("catalog_ridge"),
+        "the hop loop must see a ridge action"
     );
-    let walk = arm
-        .split("OccupancyLeaveTarget::Walk =>")
+    let hop = include_str!("../src/methods/cluster_hopping.rs");
+    assert!(
+        hop.contains("catalog_ridge") && hop.contains("ape_local_seed"),
+        "catalog_ridge is an APE dimer seeded on a highlighted atom"
+    );
+    assert!(
+        hop.contains("occupied_unseen_share"),
+        "an overshoot with unseen local classes is kept; the other packing is not a target"
+    );
+    assert!(
+        hop.contains("action == \"soap_push\"") && hop.contains("activate("),
+        "a SOAP push follows the ridge from the pulled-back geometry"
+    );
+}
+
+#[test]
+fn catalog_incumbent_installs_without_a_mid_hop_gradient() {
+    let source = include_str!("../src/methods/cluster_hopping.rs");
+    let body = source
+        .split("let published_prize = action == \"catalog_incumbent\"")
         .nth(1)
-        .expect("Walk arm must exist")
-        .split("OccupancyLeaveTarget::OtherFamily =>")
+        .expect("published prize adopt must exist");
+    let recordable = body
+        .split("if recordable {")
         .next()
-        .expect("Walk arm ends at OtherFamily");
+        .expect("recordable gate must follow the prize bit");
     assert!(
-        walk.contains("CheckpointAction::Continue"),
-        "Walk keeps the replica on its own trajectory"
+        recordable.contains("published_prize"),
+        "a heard catalog prize installs even when the chain is mid-hop"
+    );
+}
+
+#[test]
+fn checkpoint_hears_the_book_before_leave_defers() {
+    let source = include_str!("../examples/lj_cluster_search.rs");
+    let checkpoint = source
+        .split("fn run_capnp_catalog(")
+        .nth(1)
+        .expect("catalog replica driver must exist")
+        .split("let mut checkpoint = |snapshot: ChainCheckpoint<'_>| {")
+        .nth(1)
+        .expect("catalog checkpoint callback must exist")
+        .split("let outcome = run_with_bias_at_checkpoints")
+        .next()
+        .expect("catalog checkpoint callback must end at the run");
+    let hear = checkpoint
+        .split("if leave_defers(leave_quiet, leave_patience, leave_crossing)")
+        .next()
+        .expect("leave_defers must exist");
+    assert!(
+        hear.contains("INCUMBENT_SAMPLE_DRAW") && hear.contains("SPARSE_SAMPLE_DRAW"),
+        "a replica hears the catalog prize and a sparse packing before Leave is allowed"
     );
     assert!(
-        !walk.contains("leave_packing_state"),
-        "Walk does not draw a hole: measured on LJ75, no rung from 1.32 to 42.3 eps leaves the packing"
+        hear.contains("catalog_incumbent"),
+        "a deeper heard packing is adopted without PolicyState Leave"
+    );
+    assert!(
+        !hear.contains("\"catalog_leave\""),
+        "catalog_leave refuses a Marks landing the throwaway book chains to ico"
+    );
+    assert!(
+        hear.contains("nearby_packing") && hear.contains("ape_highlight_queue"),
+        "an extra in an occupied region queues local environment classes"
+    );
+    assert!(
+        hear.contains("ape seed atom") && hear.contains("catalog_ridge"),
+        "the extra seeds a dimer on a highlighted atom"
+    );
+    assert!(
+        !hear.contains("occupied_superbasin") && !hear.contains("detach"),
+        "an occupied extra is the Leave, not a roster retire"
+    );
+    assert!(
+        hear.contains("best_energy()") && hear.contains("1e-3"),
+        "hear compares the published prize to the replica floor, not the mid-hop energy"
+    );
+    let compact: String = hear.split_whitespace().collect();
+    assert!(
+        !compact.contains("current_energy()-1e-3") && !compact.contains("current_energy()- 1e-3"),
+        "mid-hop current energy sits above the ico floor and would yank every walk back"
     );
 }
 
@@ -427,6 +575,9 @@ fn putative_saturated_does_not_latch_the_done_line() {
 fn slice_diagnostics_report_the_validated_local_best() {
     let source = include_str!("../examples/lj_cluster_search.rs");
     let checkpoint = source
+        .split("fn run_capnp_catalog(")
+        .nth(1)
+        .expect("catalog replica driver must exist")
         .split("let mut checkpoint = |snapshot: ChainCheckpoint<'_>| {")
         .nth(1)
         .expect("catalog checkpoint callback must exist")

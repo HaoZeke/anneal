@@ -1974,6 +1974,144 @@ def _gle_cutest_work_units(result):
     return int(gradient_units + dynamics_grads)
 
 
+class _GleWorkCounter:
+    """Bound objective and native-gradient callbacks with one shared allowance."""
+
+    def __init__(self, prob, grad_fn, grad_kind, max_work):
+        self.prob = prob
+        self.max_work = int(max_work)
+        self.n_work = 0
+        self.best_val = float("inf")
+        self.callback_error = None
+        self.native_gradient = grad_kind == "native"
+        self.gradient_cost = 1 if self.native_gradient else int(prob.dim) + 1
+        self.grad_fn = (
+            grad_fn if self.native_gradient else _finite_difference_gradient(self)
+        )
+
+    def _require(self, work):
+        if self.n_work + work > self.max_work:
+            raise _BudgetExhausted("GLE objective-plus-gradient work budget exhausted")
+
+    def fn(self, x):
+        self._require(1)
+        self.n_work += 1
+        try:
+            value = float(self.prob.fn(x))
+        except Exception as exc:
+            self.callback_error = exc
+            raise
+        if np.isfinite(value):
+            self.best_val = min(self.best_val, value)
+        return value
+
+    def grad(self, x):
+        # A finite-difference gradient must fit as a complete callback group.
+        # Its constituent objective calls charge this counter individually.
+        self._require(self.gradient_cost)
+        if self.native_gradient:
+            self.n_work += 1
+        try:
+            return self.grad_fn(x)
+        except Exception as exc:
+            self.callback_error = exc
+            raise
+
+
+def _run_cutest_standalone_gle_langevin(
+    anneal_module,
+    prob,
+    grad_fn,
+    grad_kind,
+    seed,
+    n_epochs,
+    k_per_epoch,
+):
+    """Run every requested temperature level under a shared callback budget."""
+    if n_epochs < 1 or k_per_epoch < 1:
+        raise ValueError("GLE epochs and per-epoch work must be positive")
+    if grad_kind not in ("native", "finite-difference"):
+        raise ValueError(f"Unsupported GLE gradient kind: {grad_kind}")
+    if not _has_finite_design_box(prob):
+        raise ValueError("GLE requires a finite design box")
+
+    has_objective = all(
+        hasattr(anneal_module, name) for name in ("Bounds", "PyObjective")
+    )
+    routes = (
+        ("gle_langevin_preconditioned_objective", True, True),
+        ("gle_langevin_objective", True, False),
+        ("gle_langevin_preconditioned", False, True),
+        ("gle_langevin", False, False),
+    )
+    for name, native_objective, preconditioned in routes:
+        if hasattr(anneal_module, name) and (not native_objective or has_objective):
+            backend = getattr(anneal_module, name)
+            break
+    else:
+        raise ImportError("No GLE Langevin backend is available")
+
+    work = _GleWorkCounter(
+        prob, grad_fn, grad_kind, 1 + int(n_epochs) * int(k_per_epoch)
+    )
+    design_low, design_high = _design_bounds(prob)
+    centre = 0.5 * (design_low + design_high)
+    dynamics_cost = 1 + work.gradient_cost
+    if work.max_work < dynamics_cost:
+        return work.fn(centre), work.n_work
+    kwargs = {"seed": int(seed), "n_epochs": int(n_epochs), "x0": centre}
+
+    # Scalar calibration reserves one dynamics evaluation and charges its
+    # gradient probes before the dynamics allowance is calculated.
+    calibration_cost = 2 * int(prob.dim) * work.gradient_cost
+    if (
+        not preconditioned
+        and hasattr(anneal_module, "estimate_gle_omega0")
+        and calibration_cost + dynamics_cost <= work.max_work
+    ):
+        omega0 = float(
+            anneal_module.estimate_gle_omega0(
+                work.fn, work.grad, design_low, design_high
+            )
+        )
+        if work.callback_error is not None:
+            raise work.callback_error
+        if np.isfinite(omega0) and omega0 > 0.0:
+            kwargs["omega0"] = omega0
+
+    gle_fevals = (work.max_work - work.n_work) // dynamics_cost
+    if gle_fevals < 1:
+        raise _BudgetExhausted("GLE calibration left no dynamics work allowance")
+    if preconditioned:
+        kwargs["preconditioner_probes"] = _gle_preconditioner_probe_count(
+            prob.dim, gle_fevals
+        )
+    try:
+        if native_objective:
+            bounds = anneal_module.Bounds(
+                design_low, design_high, CUTEST_NATIVE_BOUNDS_SLACK
+            )
+            objective = anneal_module.PyObjective(work.fn, bounds, grad_fn=work.grad)
+            result = backend(objective, int(gle_fevals), **kwargs)
+        else:
+            result = backend(
+                work.fn,
+                work.grad,
+                design_low,
+                design_high,
+                int(gle_fevals),
+                **kwargs,
+            )
+        best_val = float(result["best_val"])
+    except _BudgetExhausted:
+        best_val = work.best_val
+    if work.callback_error is not None:
+        raise work.callback_error
+    if not np.isfinite(best_val):
+        raise ValueError("GLE Langevin returned no finite objective value")
+    return best_val, work.n_work
+
+
 def _run_cutest_gle_langevin(
     anneal_module,
     prob,
@@ -3401,18 +3539,16 @@ def main():
             try:
                 import anneal as _anneal_mod
 
-                gle_budget = 1 + args.n_epochs * args.k_fixed
-                gle_grad_fn, _gk = _cutest_gradient(prob)
-                gle_low, gle_high = _design_bounds(prob)
-                gle_out = _anneal_mod.gle_langevin(
-                    prob.fn,
+                gle_grad_fn, gle_grad_kind = _cutest_gradient(prob)
+                bv, nc = _run_cutest_standalone_gle_langevin(
+                    _anneal_mod,
+                    prob,
                     gle_grad_fn,
-                    np.asarray(gle_low, dtype=np.float64),
-                    np.asarray(gle_high, dtype=np.float64),
-                    int(gle_budget),
-                    seed=int(seed),
+                    gle_grad_kind,
+                    seed,
+                    args.n_epochs,
+                    args.k_fixed,
                 )
-                bv, nc = float(gle_out["best_val"]), int(gle_out["n_evals"])
             except Exception as exc:
                 print(
                     f"    gle_langevin failed on {prob.name} seed {seed}: "

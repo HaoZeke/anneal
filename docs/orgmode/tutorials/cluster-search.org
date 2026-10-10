@@ -38,11 +38,10 @@ def lj_g(x):
 cfg = Config.recommended(38)
 out = cluster_search(lj, lj_g, cfg.n_points, 4000, seed=0, recommended=True)
 print(out["hops"], round(out["best_energy"], 3), len(out["best"]))
+# derived=True selects Config.derived(n). ras=True is residual archive search.
 #+end_src
 
-Expected output (seed 0)::
-
-    PLACEHOLDER
+A design box is [[file:box-search.org][box search]], not this page.
 
 * Direct quantum-chemistry profiles
 

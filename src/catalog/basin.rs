@@ -338,6 +338,23 @@ impl BasinCatalog {
         self.packing_threshold
     }
 
+    /// Removes one entry by census id. Returns whether an entry was removed.
+    ///
+    /// The diversity-preserving admission on the coordinator uses this to
+    /// make room in a full catalog by evicting the highest-energy member of
+    /// the most crowded packing family, so a candidate from a family the
+    /// catalog does not hold is admitted even when it is not lower than the
+    /// catalog's worst entry.
+    pub fn evict(&mut self, basin_id: BasinId) -> bool {
+        let before = self.entries.len();
+        self.entries.retain(|entry| entry.census_id != basin_id);
+        let removed = self.entries.len() != before;
+        if removed {
+            self.note_mutation();
+        }
+        removed
+    }
+
     fn replace_indices(&mut self, indices: &[usize], replacement: ActiveBasinEntry) {
         let mut remove = indices.iter().copied();
         let mut next = remove.next();

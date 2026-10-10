@@ -12,6 +12,21 @@
 
 use ndarray::{Array1, Array2, ArrayView1};
 
+#[cfg(test)]
+mod pair_threshold_tests;
+
+#[cfg(test)]
+std::thread_local! {
+    static PAIR_SPECTRUM_PREPARATIONS: std::cell::Cell<usize> = const {
+        std::cell::Cell::new(0)
+    };
+}
+
+#[cfg(test)]
+pub(crate) fn pair_spectrum_preparation_count() -> usize {
+    PAIR_SPECTRUM_PREPARATIONS.with(std::cell::Cell::get)
+}
+
 /// Cost-augmenting bias on a low-dimensional collective variable `s = phi(x)`.
 /// Implementors maintain internal state that is updated by `deposit`
 /// and read by `potential`.
@@ -233,6 +248,43 @@ mod tests {
     }
 
     #[test]
+    fn a_gossip_step_moves_two_biases_toward_their_average() {
+        let f = SortedPairs { n_points: 2 };
+        let mut a = BasinBias::new(f, 0.05, 1.0, 10.0);
+        let mut b = BasinBias::new(SortedPairs { n_points: 2 }, 0.05, 1.0, 10.0);
+        let p = ndarray::array![0.0, 0.0, 0.0, 1.0, 0.0, 0.0];
+        let q = ndarray::array![0.0, 0.0, 0.0, 2.0, 0.0, 0.0];
+        for _ in 0..4 {
+            a.deposit(a.cv(p.view()).view(), 1.0);
+        }
+        b.deposit(b.cv(p.view()).view(), 1.0);
+        b.deposit(b.cv(q.view()).view(), 1.0);
+        let va = a.well_depth(0);
+        let vb = b.well_depth(0);
+        let vq = b.well_depth(1);
+        let theirs = b.wells();
+        a.merge_wells(&theirs, 0.5, true);
+        assert!((a.well_depth(0) - 0.5 * (va + vb)).abs() < 1e-12);
+        assert_eq!(a.n_basins(), 2, "the well only b held opens in a");
+        assert!((a.well_depth(1) - 0.5 * vq).abs() < 1e-12);
+        // A stubborn step keeps most of the own view.
+        let before = a.well_depth(0);
+        a.merge_wells(&[(a.cv(p.view()), 0.0)], 0.1, true);
+        assert!((a.well_depth(0) - 0.9 * before).abs() < 1e-12);
+        // Out-of-range weights are refused, not clamped.
+        a.merge_wells(&theirs, 1.5, true);
+        assert!((a.well_depth(0) - 0.9 * before).abs() < 1e-12);
+        // A sparsified table leaves unmatched local wells alone and comes
+        // deepest first.
+        let top = b.deepest_wells(1);
+        assert_eq!(top.len(), 1);
+        assert!((top[0].1 - b.well_depth(0).max(b.well_depth(1))).abs() < 1e-12);
+        let untouched = a.well_depth(1);
+        a.merge_wells(&[(a.cv(p.view()), a.well_depth(0))], 0.5, false);
+        assert!((a.well_depth(1) - untouched).abs() < 1e-12);
+    }
+
+    #[test]
     fn deposit_increases_potential_at_centre() {
         let mut b = identity_projector_2d();
         let s = array![1.0, 1.0];
@@ -268,46 +320,46 @@ mod tests {
     }
 }
 
-/// Well-tempered bias keyed on discrete basin identity rather than on a
-/// collective variable.
+/// Well-tempered repulsion over fingerprint-defined search regions.
 ///
-/// A grid bias has to be told which projection to watch. That works when the
-/// competing structures separate along the chosen axis and fails silently when
-/// they do not: on the 38-atom Lennard-Jones cluster the close-packed and
-/// icosahedral funnels differ by 0.19 in the fourth Steinhardt parameter, while
-/// at 75 atoms the decahedral and icosahedral minima differ by 0.023, which is
-/// narrower than a sensible deposition width. The bias then fills a region that
-/// contains both competitors and the search never leaves.
+/// Descriptors within `merge_radius` share a history penalty. The fingerprint,
+/// metric and radius define coverage granularity; proximity does not prove
+/// that two states belong to the same minimum or energy funnel. Deposits do
+/// not require gradients, quenches or stationary-point certificates.
 ///
-/// Keying on identity removes the choice. Two states are the same basin when
-/// their fingerprints lie within `merge_radius`, so there is no axis to be
-/// blind along. Revisiting a basin raises its bias, which is the superbasin
-/// escape acceleration of Chatterjee and Voter (J Chem Phys 132, 194101, 2010)
-/// with the Barducci well-tempered weight on top.
+/// Local visits and imported visits both raise the penalty, discouraging
+/// redundant exploration. Only local arrivals enter publishable visit deltas;
+/// imported information must not circulate as newly performed search work.
+/// A driver retains its best state under the original objective separately
+/// from the bias used to choose exploration moves.
 ///
-/// The fingerprint must be invariant to whatever the objective is invariant
-/// under, or the same physical state registers as many basins. [`SortedPairs`]
-/// is the default for point sets: invariant to permutation, translation and
-/// rotation, and free of external dependencies.
+/// The fingerprint should respect the objective's declared symmetries when
+/// equivalent states are intended to share coverage. [`SortedPairs`] provides
+/// translation-, rotation- and permutation-invariant features for point sets;
+/// arbitrary design spaces can supply their own [`Fingerprint`] and metric.
 pub struct BasinBias<F: Fingerprint> {
     index: BasinIndex<F>,
     w0: f64,
     gamma: f64,
     v: Vec<f64>,
+    /// Local and imported deposits, used by the visit-dependent height.
+    /// The index counts only this bias owner's actual search arrivals.
+    deposit_counts: Vec<u64>,
     /// Whether each deposit carries the configurational entropy of the
     /// basin it lands on, \(T\ln n\) for a basin reached \(n\) ways.
     pub entropic: bool,
 }
 
-/// Which basin a state is in, with no potential attached.
+/// Which fingerprint-defined region a state occupies, with no potential attached.
 ///
-/// The identity half of [`BasinBias`], split out because more than one
+/// The region-indexing half of [`BasinBias`], split out because more than one
 /// mechanism needs to ask "have I been here before" and only one of them
 /// answers by depositing. History-conditioned escape uses the same rule to
 /// decide how hard to push next, and reading that off a bias would tie the two
 /// together: under replica exchange each rung owns its own bias, so the basin
 /// numbering of one rung means nothing in another, while a controller
-/// following one chain needs a numbering that outlives the swap.
+/// following one chain needs a numbering that outlives the swap. These region
+/// identifiers are not minimum certificates or proofs of structural equivalence.
 pub struct BasinIndex<F: Fingerprint> {
     fingerprint: F,
     metric: Box<dyn BasinMetric>,
@@ -418,6 +470,11 @@ impl<F: Fingerprint> BasinIndex<F> {
         self.centres.len()
     }
 
+    /// Descriptor centre of basin `i`.
+    pub fn centre(&self, i: usize) -> ArrayView1<'_, f64> {
+        self.centres[i].view()
+    }
+
     /// Times basin `i` has been recorded.
     pub fn visits(&self, i: usize) -> u64 {
         self.visits.get(i).copied().unwrap_or(0)
@@ -521,10 +578,13 @@ impl BasinMetric for EuclideanMetric {
     }
 }
 
-/// Maps a state to a vector that compares equal for states in the same basin.
+/// Maps a state into descriptor space for coverage lookup and repulsion.
+///
+/// The descriptor, metric and radius define which observations share a region;
+/// descriptor proximity alone does not certify a common stationary minimum.
 pub trait Fingerprint: Send + Sync {
-    /// Descriptor of `x`. Two states in the same basin must map to vectors
-    /// within the bias's merge radius, and states in different basins must not.
+    /// Descriptor of `x`, respecting the declared state-space symmetries when
+    /// equivalent states are intended to share coverage.
     fn describe(&self, x: ArrayView1<f64>) -> Array1<f64>;
 }
 
@@ -533,9 +593,121 @@ pub trait Fingerprint: Send + Sync {
 /// Invariant to permutation of the points and to rigid motions, which are the
 /// symmetries of a cluster energy. Sorting is what supplies permutation
 /// invariance and is also why the descriptor is cheap.
+///
+/// The invariance is incomplete, and known to be: a multiset of distances has
+/// thrown away which of them share a vertex, so homometric point sets share it
+/// without being congruent.
+/// [`crate::tensor_id::TripletSpectrum`] carries these distances unchanged and
+/// appends the part a multiset cannot hold.
 pub struct SortedPairs {
     /// Points per state; the state length must be `3 * n_points`.
     pub n_points: usize,
+}
+
+impl SortedPairs {
+    /// Lower bound on maximum atomic displacement under any rigid permutation.
+    ///
+    /// A match moving each atom by at most `r` changes each corresponding
+    /// pair distance by at most `2r`. Sorting minimizes the bottleneck error
+    /// over pair assignments, so half the largest sorted-pair discrepancy is
+    /// a necessary lower bound. A zero bound does not establish identity:
+    /// homometric structures still require an exact witness.
+    ///
+    /// Invalid dimensions or nonfinite arithmetic return no certificate.
+    pub fn bottleneck_lower_bound(
+        &self,
+        left: ArrayView1<f64>,
+        right: ArrayView1<f64>,
+    ) -> Option<f64> {
+        self.prepare(left)?
+            .bottleneck_lower_bound(&self.prepare(right)?)
+    }
+
+    /// Whether the conservative displacement bound strictly exceeds `radius`.
+    /// Invalid inputs provide no certificate, regardless of the radius.
+    #[cfg(any(feature = "ira", test))]
+    pub(crate) fn bottleneck_exceeds(
+        &self,
+        left: ArrayView1<f64>,
+        right: ArrayView1<f64>,
+        radius: f64,
+    ) -> Option<bool> {
+        self.prepare(left)?
+            .bottleneck_exceeds(&self.prepare(right)?, radius)
+    }
+
+    pub(crate) fn prepare(&self, coordinates: ArrayView1<f64>) -> Option<PreparedPairSpectrum> {
+        #[cfg(test)]
+        PAIR_SPECTRUM_PREPARATIONS.with(|count| count.set(count.get() + 1));
+        let dimension = self.n_points.checked_mul(3)?;
+        if self.n_points == 0
+            || coordinates.len() != dimension
+            || coordinates.iter().any(|value| !value.is_finite())
+        {
+            return None;
+        }
+        let distances = self.describe(coordinates);
+        if distances.iter().any(|value| !value.is_finite()) {
+            return None;
+        }
+        Some(PreparedPairSpectrum {
+            n_points: self.n_points,
+            distances,
+            coordinate_scale: coordinates
+                .iter()
+                .map(|value| value.abs())
+                .fold(1.0, f64::max),
+        })
+    }
+}
+
+/// Validated immutable geometry for a conservative rigid-match rejection.
+pub(crate) struct PreparedPairSpectrum {
+    n_points: usize,
+    distances: Array1<f64>,
+    coordinate_scale: f64,
+}
+
+impl PreparedPairSpectrum {
+    /// Reject as soon as one sorted-pair discrepancy proves the radius exceeded.
+    #[cfg(any(feature = "ira", test))]
+    pub(crate) fn bottleneck_exceeds(&self, right: &Self, radius: f64) -> Option<bool> {
+        if self.n_points != right.n_points {
+            return None;
+        }
+        let roundoff = 64.0 * f64::EPSILON * self.coordinate_scale.max(right.coordinate_scale);
+        // The zero clamp also applies to a one-atom spectrum with no pairs.
+        // Preserve the bound's rounded expression at every radius boundary.
+        Some(
+            0.0 > radius
+                || self
+                    .distances
+                    .iter()
+                    .zip(&right.distances)
+                    .any(|(left, right)| (0.5 * (left - right).abs() - roundoff).max(0.0) > radius),
+        )
+    }
+
+    #[cfg(feature = "ira")]
+    pub(crate) fn payload_bytes(&self) -> usize {
+        self.distances.len() * std::mem::size_of::<f64>()
+    }
+
+    pub(crate) fn bottleneck_lower_bound(&self, right: &Self) -> Option<f64> {
+        if self.n_points != right.n_points {
+            return None;
+        }
+        let discrepancy = self
+            .distances
+            .iter()
+            .zip(&right.distances)
+            .map(|(left, right)| (left - right).abs())
+            .fold(0.0, f64::max);
+        // Subtraction, three-dimensional norms, and the final difference all
+        // contribute roundoff. The allowance weakens rejection near the radius.
+        let roundoff = 64.0 * f64::EPSILON * self.coordinate_scale.max(right.coordinate_scale);
+        Some((0.5 * discrepancy - roundoff).max(0.0))
+    }
 }
 
 /// Sorted per-point pair energies of a flattened `(n, 3)` point set.
@@ -607,7 +779,7 @@ impl Fingerprint for SortedPairs {
 
 impl<F: Fingerprint> BasinBias<F> {
     /// Requires `gamma > 1`, `w0 >= 0` and `merge_radius > 0`.
-    /// A zero height retains basin identity while leaving the energy unbiased.
+    /// A zero height retains the region index without the fixed-height penalty.
     pub fn new(fingerprint: F, merge_radius: f64, w0: f64, gamma: f64) -> Self {
         assert!(gamma > 1.0, "gamma must be > 1");
         assert!(w0.is_finite() && w0 >= 0.0, "w0 must be finite and >= 0");
@@ -616,6 +788,7 @@ impl<F: Fingerprint> BasinBias<F> {
             w0,
             gamma,
             v: Vec::new(),
+            deposit_counts: Vec::new(),
             // Off by default: a fixed height is what every measurement in
             // this crate was taken against, and the entropic term changes
             // the deposit on every basin.
@@ -626,7 +799,7 @@ impl<F: Fingerprint> BasinBias<F> {
     /// Sets the distance below which two descriptors are one basin.
     ///
     /// Exposed because this is a schedule rather than a setting. Lee, Lee and
-    /// Scheraga show the threshold plays the role of a temperature and is
+    /// Lee show the threshold plays the role of a temperature and is
     /// annealed from wide to narrow, and their method solves the cluster sizes
     /// a fixed threshold does not. See [`crate::diversity`].
     pub fn set_merge_radius(&mut self, radius: f64) {
@@ -638,8 +811,10 @@ impl<F: Fingerprint> BasinBias<F> {
         self.index.merge_radius()
     }
 
-    /// The identity half, for a mechanism that keys on basins without
-    /// depositing.
+    /// The descriptor index and this owner's local arrival counts.
+    ///
+    /// Imported wells participate in lookup, but imported deposits do not
+    /// increment these counts or become publishable local search effort.
     pub fn index(&self) -> &BasinIndex<F> {
         &self.index
     }
@@ -713,6 +888,87 @@ impl<F: Fingerprint> BasinBias<F> {
         self.v.iter().copied().fold(0.0, f64::max)
     }
 
+    /// Accumulated well-tempered depth of basin `i`.
+    pub fn well_depth(&self, i: usize) -> f64 {
+        self.v[i]
+    }
+
+    /// Every well as `(centre, depth)`, the state a gossip round exchanges.
+    pub fn wells(&self) -> Vec<(Array1<f64>, f64)> {
+        (0..self.n_basins())
+            .map(|i| (self.index.centre(i).to_owned(), self.v[i]))
+            .collect()
+    }
+
+    /// The `count` deepest wells, deepest first.
+    ///
+    /// Sparsified gossip: what another walker needs to know is where the
+    /// bias has accumulated, which is a few wells out of hundreds. Sending
+    /// the whole table makes every receiver's index the union of every
+    /// walker's basins and slows each of its own lookups by that factor.
+    pub fn deepest_wells(&self, count: usize) -> Vec<(Array1<f64>, f64)> {
+        let mut order: Vec<usize> = (0..self.n_basins()).collect();
+        order.sort_by(|a, b| self.v[*b].total_cmp(&self.v[*a]));
+        order
+            .into_iter()
+            .take(count)
+            .map(|i| (self.index.centre(i).to_owned(), self.v[i]))
+            .collect()
+    }
+
+    /// DeGroot step toward another walker's wells.
+    ///
+    /// Every depth becomes `(1 - weight) * own + weight * theirs`, with a
+    /// missing well counted as zero on either side, so the two walkers'
+    /// biases move toward their average; a well only they hold opens here
+    /// at `weight` times their depth. Repeated over a connected graph this
+    /// converges to the population average at the rate of the weight
+    /// matrix's spectral gap (Xiao and Boyd 2004); at `weight` below one
+    /// half a walker keeps part of its own view, the stubborn agent of
+    /// Friedkin and Johnsen, and disagreement between walkers persists.
+    /// Visit counts are not merged: they are this walker's own arrivals.
+    ///
+    /// `complete` says `theirs` is the peer's whole table, so a local well
+    /// absent from it is one the peer holds at zero and decays toward it.
+    /// A sparsified table ([`BasinBias::deepest_wells`]) is not complete:
+    /// absence says nothing, and only the wells sent are averaged.
+    pub fn merge_wells(&mut self, theirs: &[(Array1<f64>, f64)], weight: f64, complete: bool) {
+        if !(0.0..=1.0).contains(&weight) || weight == 0.0 {
+            return;
+        }
+        let mut matched = vec![false; self.v.len()];
+        let mut opened = Vec::new();
+        for (centre, depth) in theirs {
+            if !depth.is_finite() || *depth < 0.0 || centre.is_empty() {
+                continue;
+            }
+            match self.lookup(centre.view()) {
+                Some(i) => {
+                    if i < matched.len() {
+                        matched[i] = true;
+                    }
+                    self.v[i] = (1.0 - weight) * self.v[i] + weight * depth;
+                }
+                None => opened.push((centre.clone(), weight * depth)),
+            }
+        }
+        if complete {
+            for (i, was_matched) in matched.iter().enumerate() {
+                if !was_matched {
+                    self.v[i] *= 1.0 - weight;
+                }
+            }
+        }
+        for (centre, depth) in opened {
+            // Opened after the scan so a foreign well cannot match itself.
+            if self.lookup(centre.view()).is_none() {
+                self.index.push(centre);
+                self.v.push(depth);
+                self.deposit_counts.push(0);
+            }
+        }
+    }
+
     /// Merge a packing well found by another chain.
     ///
     /// The descriptor is already a fingerprint (unit mean SOAP), not raw
@@ -731,14 +987,15 @@ impl<F: Fingerprint> BasinBias<F> {
             None => {
                 self.index.push(descriptor);
                 self.v.push(height);
+                self.deposit_counts.push(0);
             }
         }
     }
 }
 
 impl<F: Fingerprint> Bias for BasinBias<F> {
-    /// The fingerprint itself is the collective variable: identity, not a
-    /// projection onto a chosen axis.
+    /// The complete fingerprint is the collective variable; its geometry
+    /// determines coverage lookup without proving minimum identity.
     fn cv(&self, x: ArrayView1<f64>) -> Array1<f64> {
         self.index.describe(x)
     }
@@ -748,41 +1005,80 @@ impl<F: Fingerprint> Bias for BasinBias<F> {
     }
 
     fn deposit(&mut self, s: ArrayView1<f64>, temp: f64) {
+        self.deposit_scaled(s, temp, 1.0);
+    }
+}
+
+impl<F: Fingerprint> BasinBias<F> {
+    /// One local arrival at `scale` times the configured height.
+    ///
+    /// This visit enters the owner's publishable history. Imported visits
+    /// use [`Self::deposit_scaled_n`] so communication cannot echo them as
+    /// fresh local exploration.
+    pub fn deposit_scaled(&mut self, s: ArrayView1<f64>, temp: f64, scale: f64) {
+        self.deposit_counted(s, temp, scale, 1, true);
+    }
+
+    /// `count` scaled deposits at `s` with one basin lookup.
+    ///
+    /// A batch of foreign visits lands on one centre; looking the centre
+    /// up once and applying the well-tempered increment `count` times is
+    /// the same sequence of deposits at a fraction of the metric work.
+    /// The visits raise repulsion, including the visit-dependent height,
+    /// without incrementing this owner's local arrival counts.
+    pub fn deposit_scaled_n(&mut self, s: ArrayView1<f64>, temp: f64, scale: f64, count: u64) {
+        self.deposit_counted(s, temp, scale, count, false);
+    }
+
+    fn deposit_counted(
+        &mut self,
+        s: ArrayView1<f64>,
+        temp: f64,
+        scale: f64,
+        count: u64,
+        local: bool,
+    ) {
+        if count == 0 {
+            return;
+        }
         let denom = (self.gamma - 1.0) * temp;
-        match self.lookup(s) {
-            Some(i) => {
-                // Barducci well-tempered weight: deposition slows where the
-                // bias is already deep, so a basin fills to a finite depth.
-                //
-                // The entropic term prices the basin by how many ways the
-                // run has reached it. A fixed height treats a cell arrived
-                // at once and a cell arrived at a thousand times as equally
-                // expensive to sit in, and what holds a chain on the LJ75
-                // icosahedral shelf is that there are so many ways to be
-                // there: F = E - TS, and only E is in a fixed height.
-                //
-                // It is added here, at the cell grain, rather than on the
-                // packing community. Paving the whole community is measured
-                // to lose Marks that plain hopping finds, because the
-                // icosahedral funnel is the ground the search crosses to
-                // reach the decahedron rather than only a trap to be made
-                // expensive.
-                let arrivals = self.index.visits(i).max(1);
-                let entropy = if self.entropic && temp > 0.0 {
-                    temp * (arrivals as f64).ln()
-                } else {
-                    0.0
-                };
-                let w = (self.w0 + entropy) * (-self.v[i] / denom).exp();
-                self.v[i] += w;
-                self.index.bump(i);
-            }
+        let i = match self.lookup(s) {
+            Some(i) => i,
             None => {
                 self.index.push(s.to_owned());
-                self.v.push(self.w0);
+                self.v.push(scale * self.w0);
+                self.deposit_counts.push(1);
                 let i = self.index.n_basins() - 1;
-                self.index.bump(i);
+                if local {
+                    self.index.bump(i);
+                }
+                if count == 1 {
+                    return;
+                }
+                for _ in 1..count {
+                    self.increment(i, denom, temp, scale, local);
+                }
+                return;
             }
+        };
+        for _ in 0..count {
+            self.increment(i, denom, temp, scale, local);
+        }
+    }
+
+    /// One well-tempered increment on basin `i`.
+    fn increment(&mut self, i: usize, denom: f64, temp: f64, scale: f64, local: bool) {
+        let arrivals = self.deposit_counts[i].max(1);
+        let entropy = if self.entropic && temp > 0.0 {
+            temp * (arrivals as f64).ln()
+        } else {
+            0.0
+        };
+        let w = scale * (self.w0 + entropy) * (-self.v[i] / denom).exp();
+        self.v[i] += w;
+        self.deposit_counts[i] += 1;
+        if local {
+            self.index.bump(i);
         }
     }
 }
