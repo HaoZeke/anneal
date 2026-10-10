@@ -101,6 +101,18 @@ fn run(
     (result, samples)
 }
 
+fn earliest_near_pair(trace: &[Array1<f64>], radius: f64) -> Option<(usize, usize)> {
+    for proposal in 1..trace.len() {
+        for peer in 0..proposal {
+            let distance = (trace[proposal][0] - trace[peer][0]).abs() / 2.0;
+            if distance > 1e-8 && distance < radius * 0.75 {
+                return Some((peer, proposal));
+            }
+        }
+    }
+    None
+}
+
 fn mechanisms() -> [BoxEscape; 3] {
     [
         BoxEscape::Gaussian,
@@ -119,14 +131,24 @@ fn nearby_peer_displaces_the_paid_proposal_in_each_native_escape() {
             if values && !matches!(escape, BoxEscape::Gaussian) {
                 continue;
             }
-            let peer_index = if values { 19 } else { 1 };
-            let proposal_index = if values { 38 } else { 2 };
             let radius = 0.1;
-            let (seed, private, distance) = (0..64)
+            let (seed, private, peer_index, proposal_index, distance) = (0..64)
                 .find_map(|seed| {
                     let (_, trace) = run(seed, values, true, escape, false, radius);
-                    let distance = (trace[proposal_index][0] - trace[peer_index][0]).abs() / 2.0;
-                    (distance > 1e-8 && distance < radius * 0.75).then_some((seed, trace, distance))
+                    let (peer_index, proposal_index) = if values {
+                        earliest_near_pair(&trace, radius)?
+                    } else {
+                        (1, 2)
+                    };
+                    let distance =
+                        (trace[proposal_index][0] - trace[peer_index][0]).abs() / 2.0;
+                    (distance > 1e-8 && distance < radius * 0.75).then_some((
+                        seed,
+                        trace,
+                        peer_index,
+                        proposal_index,
+                        distance,
+                    ))
                 })
                 .expect("a reproducible near-peer proposal");
             let (_, shared) = run(seed, values, true, escape, true, radius);
