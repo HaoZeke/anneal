@@ -77,10 +77,8 @@ fn run(shared: bool, height: f64) -> Vec<Vec<u64>> {
 
 #[test]
 fn shared_scalar_positions_differ_when_coverage_height_is_positive() {
-    let start: Vec<u64> = Array1::from_elem(DIM, 0.1875)
-        .iter()
-        .map(|value| value.to_bits())
-        .collect();
+    let start_point: Array1<f64> = Array1::from_elem(DIM, 0.1875);
+    let start: Vec<u64> = start_point.iter().map(|value| value.to_bits()).collect();
     let private = run(false, 0.1);
     let shared = run(true, 0.1);
     assert!(private.contains(&start) && shared.contains(&start));
