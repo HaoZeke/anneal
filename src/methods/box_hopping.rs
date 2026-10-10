@@ -582,8 +582,14 @@ where
                     );
                 }
             }
-            let trial_x = polish.best_pos;
-            let trial_f = polish.best_val;
+            // A polish that climbs is not a proposal. The occupied point is
+            // flat, so the coverage decision accepts it.
+            let (trial_x, trial_f) = if polish.best_val.is_finite() && polish.best_val <= replica.f
+            {
+                (polish.best_pos, polish.best_val)
+            } else {
+                (replica.x.clone(), replica.f)
+            };
             if let Some(report) = report {
                 history_observations += 1;
                 apply_shared_visit(
