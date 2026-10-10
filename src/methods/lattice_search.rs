@@ -1,14 +1,32 @@
-//! Dynamic lattice search on a Lennard-Jones cluster, with a counted quench.
+//! A variant of dynamic lattice search on a Lennard-Jones cluster, with a
+//! counted quench.
 //!
-//! Shao, Cheng and Cai (J. Comput. Chem. 25, 1693, 2004) optimise the surface
-//! of a cluster on a lattice the cluster itself defines. The vacant sites are
-//! the hollows over its own surface triangles, and atoms move from the
-//! highest-energy occupied positions to the lowest-energy vacant sites before
-//! one quench settles the result. The lattice is rebuilt from the quenched
-//! structure and the descent repeats while it improves. Nothing about the
-//! answer enters: the sites are read off whatever structure the search stands
-//! on, so a decahedral core grows a decahedral surface and an icosahedral core
-//! an icosahedral one.
+//! The search optimises the surface of a cluster on a lattice the cluster
+//! itself defines. Vacant sites sit over the cluster's own triangles, atoms
+//! move greedily from high-energy positions to low-energy vacant sites, and one
+//! quench settles the result. The lattice is rebuilt from the quenched
+//! structure and the descent repeats while the quenched energy falls.
+//!
+//! It is a variant of the dynamic lattice search of Shao, Cheng and Cai,
+//! J. Comput. Chem. 25, 1693 (2004), doi 10.1002/jcc.20096, and departs from
+//! it in four ways:
+//!
+//! - the sites are geometric, at the pair-well distance over every triangle of
+//!   atoms with edges under [`Lattice::hollow_cutoff`], and no site is relaxed;
+//! - every atom with fewer than twelve bonds is movable;
+//! - one deterministic greedy pass runs from the current structure, each move
+//!   chosen over the [`Lattice::candidates`] highest-energy movable atoms
+//!   against all sites;
+//! - one quench follows each search.
+//!
+//! Costs here are force calls. The local minimisations per hit that the paper
+//! reports count its own procedure and do not convert to them.
+//!
+//! Nothing about the answer enters: the sites are read off whatever structure
+//! the search stands on, so a decahedral core grows a decahedral surface and an
+//! icosahedral core an icosahedral one. The lattice needs a pair potential with
+//! one well distance, since every site sits at that distance from the three
+//! atoms of its triangle.
 //!
 //! Every potential evaluation is charged to a [`Ledger`]. A quench step is one
 //! value-and-gradient call. A lattice step evaluates pair terms only and is
@@ -294,7 +312,8 @@ pub struct Lattice {
     pub merge_distance: f64,
     /// Atoms with at least this many bonds are interior and do not move.
     pub interior_coordination: usize,
-    /// Highest-energy atoms and lowest-energy sites paired per move.
+    /// Highest-energy movable atoms weighed per move, each against every
+    /// vacant site.
     pub candidates: usize,
     /// Moves per search; zero means one per atom.
     pub max_moves: usize,
@@ -464,8 +483,11 @@ impl Lattice {
         sites
     }
 
-    /// One greedy search: the highest-energy movable atom goes to the
-    /// lowest-energy vacant site while that lowers the unrelaxed energy.
+    /// One greedy pass. Each move makes the exchange that lowers the unrelaxed
+    /// energy most among the [`Lattice::candidates`] highest-energy movable
+    /// atoms and every vacant site, and the position the atom leaves becomes a
+    /// site. The pass ends when no such exchange lowers the energy or after
+    /// [`Lattice::max_moves`] moves.
     ///
     /// Returns `None` when the ledger cannot pay for the site energies.
     pub fn search(&self, x: &[f64], ledger: &mut Ledger) -> Option<LatticeMoves> {
