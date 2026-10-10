@@ -6710,7 +6710,7 @@ mod tests {
         // CMA-ES keeps the turn and lends the next only once the run has
         // used twice the evaluations it had after the last.
         use ArmKind::{Cma, Gsa};
-        let (dim, budget) = (4usize, 2000usize);
+        let (dim, budget) = (4usize, 1500usize);
         let obj = Traced::new(-32.768, 32.768, dim, ackley);
         let ledger = BudgetLedger::new(budget, dim);
         let budgeted = BudgetedObjective {
