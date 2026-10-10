@@ -539,7 +539,13 @@ where
             }
             // One scalar proposal needs no full quench or certificate. Its
             // paid value can improve the incumbent and supply peer coverage.
-            let depth = values_search_depth(dim, remaining, needs_certificate).max(1);
+            // A remainder that cannot fund the stencil is not a hop: a raw
+            // kick would be an uphill trial the coverage rule then rejects.
+            let depth = values_search_depth(dim, remaining, needs_certificate);
+            if depth == 0 {
+                coverage.retire_reader(index);
+                continue;
+            }
             progressed = true;
             replica.generation += 1;
             let temp = temperatures.at(index, replica.generation);
@@ -582,14 +588,8 @@ where
                     );
                 }
             }
-            // A polish that climbs is not a proposal. The occupied point is
-            // flat, so the coverage decision accepts it.
-            let (trial_x, trial_f) = if polish.best_val.is_finite() && polish.best_val <= replica.f
-            {
-                (polish.best_pos, polish.best_val)
-            } else {
-                (replica.x.clone(), replica.f)
-            };
+            let trial_x = polish.best_pos;
+            let trial_f = polish.best_val;
             if let Some(report) = report {
                 history_observations += 1;
                 apply_shared_visit(
