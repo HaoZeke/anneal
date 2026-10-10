@@ -23,7 +23,7 @@ dimension, goes to one values-only loop over six arms.
 | Arm | Starts from |
 |-----+-------------|
 | =cma= | BIPOP CMA-ES centred on the incumbent: local runs with short steps, large-population runs with a box-wide step; separable above 100 dimensions or when the budget is shorter than the covariance learning horizon; a run stops once its recent best values span less than the success threshold in force |
-| =qn= | finite-difference projected BFGS from the incumbent, stopping on the resolution of its values, kicked from the incumbent once converged |
+| =qn= | finite-difference projected BFGS from the incumbent, stopping on the resolution of its values or a fraction of the success threshold, kicked from the incumbent once converged |
 | =gsa= | one chain from 10 dimensions, and below that one for every eight evaluations of its first slice, between two and four (the first at the incumbent as dual_annealing's =x0=, the others at seeded low-discrepancy points); quenched: each temperature step visits every coordinate once at the cooling visit scale, box-wide early and local late, and keeps only improvements; no local search; once another arm has lowered the incumbent below every chain, the worst chain goes on from there |
 | =de= | best/1/bin with the incumbent as the first population member (differential_evolution's =x0=) and the others at seeded low-discrepancy points over the box |
 | =surrogate= | an additive model fitted to every evaluation so far: one evaluation tests its per-coordinate minimum, then tempered samples from its marginals |
@@ -173,8 +173,12 @@ of the shifted values (the rounding of each gain, and =s=), the start's
 value sets none, and multiplying the objective by a power of two
 multiplies every threshold exactly. The descent likewise stops on the
 resolution of its values: an iteration is slow when it lowers its value
-by less than =8 eps= of it, a few units in the last place, and its
-first trial moves at most 5% of a side whatever the gradient's size.
+by less than =8 eps= of it, a few units in the last place, or by less
+than =1e-7= of the threshold as it stood when the slice began, so that
+near a minimum whose value is small against the gains that set the
+threshold the descent stops well before its gains shrink to units in
+the last place. Its first trial moves at most 5% of a side whatever
+the gradient's size.
 The surrogate and the restart arm take values in the run's unit, the
 power of two at or below the threshold in force when they play: the
 surrogate fits values, and sets its temperatures and their floors, in
