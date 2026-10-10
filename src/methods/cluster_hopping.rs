@@ -1068,6 +1068,12 @@ where
     // measured that way an LJ38 run registered 18 basins instead of about 200.
     let n_rep = cfg.replicas.max(1);
     let ratios = rung_ratios(n_rep, cfg.ladder_top);
+    assert!(
+        !(cfg.delayed_acceptance && n_rep > 1),
+        "delayed acceptance needs a single chain: a hop its surrogate decides \
+         weighs the bare energy and one it abstains on weighs the biases, so \
+         no swap between rungs can be balanced"
+    );
     // The first quench supplies a stable canonical reference before the bias
     // is built. Reporting it as a minimum additionally requires the same
     // geometry and gradient contract as every subsequent quench.

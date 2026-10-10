@@ -18,6 +18,10 @@ const BUDGET: usize = 30_000;
 const SEEDS: u64 = 8;
 
 fn lj_run_with(cfg: &Config, seed: u64, budget: usize, gradient: bool) -> Outcome {
+    lj_run_on(cfg, seed, &mut Ledger::new(budget), gradient)
+}
+
+fn lj_run_on(cfg: &Config, seed: u64, ledger: &mut Ledger, gradient: bool) -> Outcome {
     let pot = PairPotential::lennard_jones(cfg.n_points);
     let mut opt = WarmLbfgs::default();
     let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, iters: usize| {
@@ -35,7 +39,6 @@ fn lj_run_with(cfg: &Config, seed: u64, budget: usize, gradient: bool) -> Outcom
         );
         (f, xr)
     };
-    let mut ledger = Ledger::new(budget);
     if gradient {
         let mut grad = |led: &mut Ledger, x: ArrayView1<f64>| -> Option<Array1<f64>> {
             if !led.charge() {
@@ -43,9 +46,9 @@ fn lj_run_with(cfg: &Config, seed: u64, budget: usize, gradient: bool) -> Outcom
             }
             Some(pot.value_and_gradient(x).1)
         };
-        optimize_with_gradient(cfg, &mut ledger, &mut relax, Some(&mut grad), seed)
+        optimize_with_gradient(cfg, ledger, &mut relax, Some(&mut grad), seed)
     } else {
-        optimize(cfg, &mut ledger, &mut relax, seed)
+        optimize(cfg, ledger, &mut relax, seed)
     }
 }
 
@@ -168,4 +171,40 @@ fn the_energy_bias_tempers_alike_whichever_rung_fills_its_sample() {
             "swap period {swap_period}: (gamma - 1) T is {tempered} against a spread of {spread}"
         );
     }
+}
+
+/// A hop the surrogate decides is tested on the bare energy and one it
+/// abstains on with the biases, so a rung under delayed acceptance hops by no
+/// one weight for a swap to exchange. A single chain runs it; a ladder refuses
+/// it before the ledger is charged.
+#[test]
+fn a_ladder_refuses_delayed_acceptance() {
+    let mut cfg = Config::recommended(13);
+    cfg.delayed_acceptance = true;
+    let single = lj_run_with(&cfg, 0, 2_000, false);
+    assert!(
+        single.hops > 0 && single.delayed.is_some(),
+        "a single chain under delayed acceptance did not run"
+    );
+    cfg.replicas = 2;
+    let mut ledger = Ledger::new(2_000);
+    let refused = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        lj_run_on(&cfg, 0, &mut ledger, false)
+    }))
+    .err()
+    .expect("a ladder ran under delayed acceptance");
+    let message = refused
+        .downcast_ref::<&str>()
+        .map(|s| s.to_string())
+        .or_else(|| refused.downcast_ref::<String>().cloned())
+        .unwrap_or_default();
+    assert!(
+        message.starts_with("delayed acceptance needs a single chain"),
+        "refused with {message:?}"
+    );
+    assert_eq!(
+        ledger.spent(),
+        0,
+        "the ledger was charged before the refusal"
+    );
 }
