@@ -452,7 +452,7 @@ fn an_infinite_value_beats_a_nan() {
         }
     }
     let variant = boltzmann_in_box(nan_then_inf(), 1.0, 0.5).unwrap();
-    let history = run_rs_qmc_variant_from(variant, 3, 1, 0, 1, Some(x0), None);
+    let history = run_rs_qmc_variant_from(variant, 3, 1, 0, 1, Some(x0.clone()), None);
     assert_eq!(history.best.val, f64::INFINITY);
     assert_ne!(history.best.pos, x0);
 }
