@@ -4241,40 +4241,12 @@ where
         )
         .then_some(choice);
     }
-    // Arms the polish floor never reached still take one slice. A
-    // high-dimensional central stencil is held back from that slice.
-    let stencil = dim.saturating_mul(2).saturating_add(2);
-    let hold = if dim >= 64 { stencil } else { 0 };
-    let pending: Vec<usize> = posteriors
-        .iter()
-        .enumerate()
-        .filter(|(_, posterior)| posterior.pulls == 0)
-        .map(|(index, _)| index)
-        .collect();
-    if !pending.is_empty() {
-        let room = ledger.remaining().saturating_sub(hold);
-        if room >= pending.len() {
-            let take = (room / pending.len()).min(slice).max(1);
-            for choice in pending {
-                if ledger.remaining() <= hold {
-                    break;
-                }
-                let afford = ledger.remaining() - hold;
-                play(
-                    choice,
-                    take.min(afford),
-                    hold,
-                    states,
-                    &mut rng,
-                    &mut posteriors,
-                    None,
-                );
-            }
-        }
-    }
     // One central finite-difference stencil, plus and minus on every
     // coordinate and one trial, when the remainder can pay it. Forward
-    // differences do not produce that block.
+    // differences do not produce that block. The polish reserve and the
+    // closing descent keep the remainder; an arm the phases did not play
+    // does not spend it.
+    let stencil = dim.saturating_mul(2).saturating_add(2);
     if dim >= 64 && ledger.remaining() >= stencil {
         let start = ledger.incumbent(&bounds);
         let _ = values_local_polish(obj, start, stencil, 1.0, 1e-12);
