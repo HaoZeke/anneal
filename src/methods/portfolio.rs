@@ -1408,6 +1408,11 @@ impl SuccessScale {
         self.floor
     }
 
+    /// Whether `value` lies below the start's value.
+    fn below_start(&self, value: f64) -> bool {
+        value < self.start
+    }
+
     /// Records a slice that moved the incumbent from `before` to `after`.
     fn record(&mut self, before: f64, after: f64) {
         if !after.is_finite() || after >= self.start {
@@ -3218,8 +3223,10 @@ fn values_only_slice(dim: usize, budget: usize) -> usize {
 /// `dim + 1` points (one gradient's worth, at most a tenth of the budget),
 /// so seeds vary it. When the budget affords one
 /// ([`QN_AFFORDABLE_GRADIENTS`]), a finite-difference descent from the
-/// incumbent opens the run and goes on while its slices succeed, up to
-/// convergence. Short of that budget the descent would converge only by
+/// incumbent opens the run and goes on, up to convergence, while each
+/// slice succeeds and gains more than [`IMPROVEMENT_RTOL`] times the
+/// largest gain an opening slice has made from below the start's value.
+/// Short of that budget the descent would converge only by
 /// taking most of the run: CMA-ES and the descent take one slice each,
 /// GSA up to [`WARM_UP_GSA_SLICES`] from the incumbent, and a descent turn
 /// then settles the basin GSA reached. From there GSA and then CMA-ES each
@@ -3343,6 +3350,12 @@ where
     let opened = budget >= QN_AFFORDABLE_GRADIENTS * dim * gradient;
     if opened {
         let qn = index(ArmKind::Qn);
+        // A descent that gains a little less on every slice would hold the
+        // whole run, since each gain beats a threshold scaled by the one
+        // before it: the opening also ends at the first slice that gains
+        // no more than `IMPROVEMENT_RTOL` times its largest gain from
+        // below the start's value.
+        let mut largest = 0.0f64;
         while ledger.remaining() > 0 {
             round += 1;
             let before = ledger.best_get();
@@ -3353,9 +3366,13 @@ where
             let after = ledger.best_get();
             states.success.record(before, after);
             let improved = after.is_finite() && after < before - threshold;
+            let keep = improved && before - after > IMPROVEMENT_RTOL * largest;
+            if states.success.below_start(before) && after.is_finite() {
+                largest = largest.max(before - after);
+            }
             posteriors[qn].update(improved);
             winner = improved.then_some(qn);
-            if !improved
+            if !keep
                 || states
                     .qn
                     .as_ref()
@@ -6798,5 +6815,40 @@ mod tests {
                 "shift {shift}: stopped {gap} above the minimum"
             );
         }
+    }
+
+    #[test]
+    fn values_only_opening_ends_once_a_slice_gains_a_sliver_of_its_largest() {
+        // Along Rosenbrock's valley each slice gains a little less than the
+        // one before, so every slice would beat the success threshold that
+        // its predecessor sets until the descent converged.
+        let (dim, budget) = (10usize, 2000usize);
+        let obj = Traced::new(-2.0, 2.0, dim, rosenbrock);
+        let ledger = BudgetLedger::new(budget, dim);
+        let budgeted = BudgetedObjective {
+            inner: &obj,
+            ledger: &ledger,
+        };
+        let start = Array1::from_shape_fn(dim, |i| if i % 2 == 0 { -1.2 } else { 1.0 });
+        budgeted.eval(start.view());
+        let mut states = ArmStates::default();
+        run_values_only_portfolio::<_, ShiftQuadratic>(&budgeted, &ledger, &mut states, 3, budget);
+        let slice = values_only_slice(dim, budget);
+        let end = states.turns[0].1;
+        assert_eq!((end - 1) % slice, 0, "the opening converged at {end}");
+        let values: Vec<f64> = obj.points().iter().map(|x| rosenbrock(x.view())).collect();
+        let best = |n: usize| values[..n].iter().copied().fold(f64::INFINITY, f64::min);
+        let gains: Vec<f64> = (1..end)
+            .step_by(slice)
+            .map(|from| best(from) - best(from + slice))
+            .collect();
+        let (last, kept) = gains[1..].split_last().expect("two opening slices");
+        let mut largest = 0.0f64;
+        for (k, &gain) in kept.iter().enumerate() {
+            assert!(gain > IMPROVEMENT_RTOL * largest, "slice {k} kept {gain}");
+            largest = largest.max(gain);
+        }
+        assert!(*last <= IMPROVEMENT_RTOL * largest, "ended on {last}");
+        assert!(*last > 0.0, "the last slice still gained");
     }
 }
