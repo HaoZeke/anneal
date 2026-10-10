@@ -92,7 +92,7 @@ fn scalar_hops_restrict_samples_and_deposits_with_no_minimum_history() {
             budget: 30,
             history: HistoryMode::None,
             shared_deposits: usize::MAX,
-            shared_visit_policy: crate::methods::minima_hopping::SharedVisitPolicy::Tabu,
+            shared_visit_policy: anneal_core::methods::minima_hopping::SharedVisitPolicy::Tabu,
             ..Default::default()
         };
         let coverage = BoxCoverageConfig {
