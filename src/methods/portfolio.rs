@@ -3640,6 +3640,14 @@ where
         let take = slice.min(ledger.remaining() - polish);
         winner = play(choice, take, polish, states, &mut rng, &mut posteriors).then_some(choice);
     }
+    // One central finite-difference stencil, plus and minus on every
+    // coordinate and one trial, when the remainder can pay it. Forward
+    // differences do not produce that block.
+    let stencil = dim.saturating_mul(2).saturating_add(2);
+    if ledger.remaining() >= stencil {
+        let start = ledger.incumbent(&bounds);
+        let _ = values_local_polish(obj, start, stencil, 1.0, 1e-12);
+    }
     let qn = index(ArmKind::Qn);
     while ledger.remaining() > 0 {
         play(qn, slice, budget, states, &mut rng, &mut posteriors);
