@@ -3358,10 +3358,11 @@ where
                     // the biases are equal, which is what Exchange supplies
                     // and what this generalises.
                     //
-                    // S is the funnel bias and the energy bias, which take the
-                    // deposits of whichever rung is hopping. The packing pile
-                    // is keyed on the basin a chain stands in, which a parked
-                    // rung does not carry, and is left out.
+                    // S is the funnel bias, the packing pile and the energy
+                    // bias, which take the deposits of whichever rung is
+                    // hopping. The pile is read at the basin a parked state
+                    // carries, looked up here if it never was, as a hop reads
+                    // it at the basin the chain stands in.
                     //
                     // T_k is the temperature rung k would hop at from the
                     // state it holds, by the same rule as a hop and without
@@ -3384,17 +3385,36 @@ where
                     let vk_xj = biases[k].potential(biases[k].cv(xj.view()).view());
                     let vj_xj = biases[j].potential(biases[j].cv(xj.view()).view());
                     let vj_xk = biases[j].potential(biases[j].cv(xk.view()).view());
-                    let shared = |state: &Array1<f64>, energy: f64| {
+                    let mut pile = |parked: &mut Parked| match pave.as_mut() {
+                        Some(pave) => {
+                            let id = *parked
+                                .basin
+                                .get_or_insert_with(|| identity.basin_of(parked.state.view()));
+                            parked
+                                .state
+                                .as_slice()
+                                .map(|slice| {
+                                    pave.community(id as u64, slice);
+                                    pave.potential(id as u64)
+                                })
+                                .unwrap_or(0.0)
+                        }
+                        None => 0.0,
+                    };
+                    let pile_k = pile(&mut chains[k]);
+                    let pile_j = pile(&mut chains[j]);
+                    let shared = |state: &Array1<f64>, energy: f64, pile: f64| {
                         spectral
                             .as_ref()
                             .map(|sp| sp.potential(sp.cv(state.view()).view()))
                             .unwrap_or(0.0)
+                            + pile
                             + ebias.as_ref().map(|b| b.at(energy)).unwrap_or(0.0)
                     };
                     let log_a = swap_log_acceptance(
                         [ek + vk_xk, ej + vk_xj],
                         [ej + vj_xj, ek + vj_xk],
-                        [shared(&xk, ek), shared(&xj, ej)],
+                        [shared(&xk, ek, pile_k), shared(&xj, ej, pile_j)],
                         temperature_of(k, ek).max(1e-12),
                         temperature_of(j, ej).max(1e-12),
                     );

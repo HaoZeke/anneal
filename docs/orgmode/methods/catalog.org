@@ -1456,12 +1456,12 @@ computes its swap inline rather than routing through =Exchange= or
 =Sampler= drivers. Each rung samples its own bias-tilted distribution,
 so the factor evaluates each rung's bias at both states, at the
 temperatures the two rungs would hop at from the states they hold, and
-the funnel and energy biases all rungs share enter through the
-difference of the two inverse temperatures. It reduces to the
-=MetropolisExchange= rule when the biases are equal. A state carries
-its basin and its validation gradient from rung to rung, so the first
-step a rung takes after its turn comes round is recorded from the state
-it holds.
+the funnel bias, the packing pile and the energy bias all rungs share
+enter through the difference of the two inverse temperatures. It
+reduces to the =MetropolisExchange= rule when the biases are equal. A
+state carries its basin and its validation gradient from rung to rung,
+so the first step a rung takes after its turn comes round is recorded
+from the state it holds, and the swap reads the pile at that basin.
 
 ** Warm L-BFGS
 
