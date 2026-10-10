@@ -361,7 +361,7 @@ makes `1 + n_epochs * steps_per_epoch` evaluations.
 
 ## ChemFit
 
-Gradient-free fits go through `anneal.chemfit`. The chain starts at the fitter's initial parameters, and every candidate stays inside the box. `fit_anneal` and `fit_chemfit` speak `init` / `ask` / `tell` / `finish`. `run_benchmark` also accepts `evaluate` / `step`. `driver="portfolio"` (the default) is the budget-only global optimizer. `driver="boltzmann"`, `"fast"`, and `"gsa"` are the classical presets.
+Gradient-free fits go through `anneal.chemfit`. The chain starts at the fitter's initial parameters, and every candidate stays inside the box. `fit_anneal`, `fit_chemfit`, `run_benchmark`, and `run_fitter` drive the fitter's session: `init`, then `evaluate` / `step` on current ChemFit or `ask` / `tell` on ChemFit 3.1, then `finish` with the best evaluated parameters. A fitter with neither pair is refused before `init`, and so is any invalid argument; `run_benchmark` with `evaluate` or `ask` alone, and the few calls 0.10.0 accepted while ignoring an argument, still run with a `FutureWarning`. The first exception the fitter raises, or a loss that is not a real number, stops the fit and reaches the caller without `finish`. `driver="portfolio"` (the default) is the budget-only global optimizer. `driver="boltzmann"`, `"fast"`, and `"gsa"` are the classical presets.
 
 ```python
 from anneal.chemfit import run_benchmark
@@ -375,7 +375,7 @@ def run_anneal(benchmark_context):
     )
 ```
 
-A scalar `low` or `high` is broadcast across the flattened parameters. Bounds may also live on `benchmark_context["bounds"]` or `fitter.bounds`.
+A scalar `low` or `high` is broadcast across the flattened parameters. Bounds may also live on `benchmark_context["bounds"]` or `fitter.bounds`, as `(lower, upper)` pairs mirroring the parameters; each side is a scalar or an array of the parameter's shape. A parameter whose two bounds are equal is held fixed.
 
 ## Optional arms (additive independence + QMC polish)
 
