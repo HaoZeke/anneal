@@ -3318,7 +3318,8 @@ fn values_only_slice(dim: usize, budget: usize) -> usize {
 /// pay: a phase ends once it has gone [`ROUNDS_PER_ARM`] slices without
 /// lowering the incumbent, or as long as its last gain took if that is
 /// longer. GSA's phase also ends once its gain per evaluation since it
-/// began falls below that of the descent's last timed slice, and a slice
+/// began is no more than that of the descent's last timed slice (at its
+/// first slice if neither gained anything), and a slice
 /// that gains less than `1 / PHASE_SLOWDOWN` of the phase's best per
 /// evaluation lends the other phase's arm a slice, which ends the phase if
 /// it gains faster ([`PHASE_SLOWDOWN`]). A phase leaves the closing
@@ -3590,8 +3591,10 @@ where
     // A phase keeps the turn while its arm pays: it ends once the arm has
     // gone `ROUNDS_PER_ARM` slices without lowering the incumbent, or as long
     // as its last gain took if that is longer, or at `reserve`. GSA's phase
-    // also ends once its gain per evaluation since the phase began falls
-    // below the descent's last (`displaced`). A slice that gains less than
+    // also ends once its gain per evaluation since the phase began is no
+    // more than the descent's last (`displaced`), which is nothing when the
+    // descent's last slice converged or kicked, so a phase that has gained
+    // nothing then ends at its first slice. A slice that gains less than
     // `1 / PHASE_SLOWDOWN` of the phase's best per evaluation lends a slice
     // to the other phase's arm: the phase ends if the lent slice gains
     // faster, and lends no other until the run has used twice the
@@ -3632,7 +3635,7 @@ where
                 } else {
                     0.0
                 };
-                if average < displaced {
+                if average <= displaced {
                     *winner = gained.then_some(choice);
                     break;
                 }
@@ -6476,6 +6479,58 @@ mod tests {
             let (_, from, _) = turns[pair[1]];
             assert!(from >= 2 * after, "lent at {from} after {after}");
             assert!(turns[pair[0] + 1..pair[1]].iter().all(|turn| turn.0 == Cma));
+        }
+    }
+
+    #[test]
+    fn values_only_gsa_phase_that_gains_nothing_ends_at_its_first_slice() {
+        // Inside an ill-conditioned ellipsoid the objective is zero, its
+        // least value, and outside it is the quadratic form less one. The
+        // descent reaches zero, and its last timed slice, which kicks a new
+        // descent (or, after an opening, only confirms convergence), gains
+        // nothing. Nothing lowers zero, so GSA's phase gives CMA-ES the turn
+        // after one slice instead of running out its idle slices.
+        use ArmKind::{Cma, Gsa, Qn};
+        fn clipped(x: ArrayView1<f64>) -> f64 {
+            let last = (x.len() - 1) as f64;
+            let form: f64 = x
+                .iter()
+                .enumerate()
+                .map(|(i, v)| 10f64.powf(2.0 * i as f64 / last) * v * v)
+                .sum();
+            (form - 1.0).max(0.0)
+        }
+        for (dim, budget, start) in [(20usize, 2000usize, 3.0), (30, 4000, 3.0), (20, 4000, 2.0)] {
+            let obj = Traced::new(-5.12, 5.12, dim, clipped);
+            let ledger = BudgetLedger::new(budget, dim);
+            let budgeted = BudgetedObjective {
+                inner: &obj,
+                ledger: &ledger,
+            };
+            budgeted.eval(Array1::from_elem(dim, start).view());
+            let mut states = ArmStates::default();
+            run_values_only_portfolio::<_, ShiftQuadratic>(
+                &budgeted,
+                &ledger,
+                &mut states,
+                0,
+                budget,
+            );
+            let case = format!("{dim}-D at {budget}");
+            assert_eq!(ledger.best_get(), 0.0, "{case}");
+            let arms: Vec<ArmKind> = states.turns.iter().map(|turn| turn.0).collect();
+            let phase = arms
+                .iter()
+                .skip(1)
+                .position(|&arm| arm == Cma)
+                .map(|at| at + 1)
+                .unwrap_or_else(|| panic!("{case}: no CMA-ES phase in {arms:?}"));
+            assert_eq!(arms[phase - 1], Gsa, "{case}: {arms:?}");
+            if budget < QN_AFFORDABLE_GRADIENTS * dim * (dim + 1) {
+                assert_eq!(arms[phase - 2], Qn, "{case}: {arms:?}");
+            } else {
+                assert_eq!(phase, 1, "{case}: {arms:?}");
+            }
         }
     }
 
