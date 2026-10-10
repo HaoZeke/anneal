@@ -292,8 +292,7 @@ fn a_ladder_refuses_delayed_acceptance() {
     let refused = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         lj_run_on(&cfg, 0, &mut ledger, false)
     }))
-    .err()
-    .expect("a ladder ran under delayed acceptance");
+    .expect_err("a ladder ran under delayed acceptance");
     let message = refused
         .downcast_ref::<&str>()
         .map(|s| s.to_string())
