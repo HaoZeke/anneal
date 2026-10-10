@@ -420,6 +420,13 @@ const QN_FTOL: f64 = 8.0 * f64::EPSILON;
 /// Gradients per dimension a finite-difference descent needs to converge;
 /// the values-only loop opens with one only when the budget affords it.
 const QN_AFFORDABLE_GRADIENTS: usize = 5;
+/// Short of the opening budget, until GSA has played, a descent turn ends
+/// once fewer than this many slices are left beyond the closing reserve,
+/// and GSA takes over. At twenty to twenty-six evaluations per gradient a
+/// descent that kept the turn to the last slice would leave GSA, whose
+/// quenched visits settle separable multimodal objectives one coordinate
+/// at a time, only part of one.
+const GSA_LAST_SLICES: usize = 3;
 /// Factor by which a values-only phase's gain per evaluation must fall
 /// below its best slice's before the phase lends the other phase's arm a
 /// slice.
@@ -3374,11 +3381,12 @@ fn values_only_slice(dim: usize, budget: usize) -> usize {
 /// one before ([`DescentPace`]), and GSA then keeps it while each of its
 /// slices gains at least as fast as the descent would have gone on to (its
 /// last gain per evaluation times the ratio to the one before). Until GSA
-/// has played, the descent also hands it the last slice short of the
-/// closing reserve. If GSA's first slice falls short, the descent keeps
-/// the turn until the run has used twice the evaluations it had, and the
-/// hand-over repeats until the descent stops paying or only the reserve
-/// is left. From there GSA and then CMA-ES each keep the turn while they
+/// has played, the descent also hands it the turn once fewer than
+/// [`GSA_LAST_SLICES`] slices are left beyond the closing reserve. If
+/// GSA's first slice falls short, the descent keeps the turn until the run
+/// has used twice the evaluations it had, and the hand-over repeats until
+/// the descent stops paying or only the reserve is left. From there GSA
+/// and then CMA-ES each keep the turn while they
 /// pay: a phase ends once it has gone [`ROUNDS_PER_ARM`] slices without
 /// lowering the incumbent, or as long as its last gain took if that is
 /// longer. GSA's phase also ends once its gain per evaluation since it
@@ -3475,7 +3483,8 @@ where
     };
     let qn_value = |states: &ArmStates| states.qn.as_ref().map_or(f64::NAN, |qn| qn.engine.value());
     // With a `pace`, a descent turn is timed and also ends once the descent
-    // slows, or, until GSA has played, at the last slice short of `reserve`.
+    // slows, or, until GSA has played, once fewer than `GSA_LAST_SLICES`
+    // slices are left beyond `reserve`.
     let play = |choice: usize,
                 take: usize,
                 reserve: usize,
@@ -3521,7 +3530,7 @@ where
                 break;
             }
             if let Some(pace) = pace.as_deref_mut() {
-                let last = !pace.handed && ledger.remaining() - reserve < slice;
+                let last = !pace.handed && ledger.remaining() - reserve < GSA_LAST_SLICES * slice;
                 if slowed || last {
                     pace.slowed = true;
                     if !slowed {
@@ -6886,18 +6895,20 @@ mod tests {
         // most of the run. CMA-ES takes one slice and the descent the next.
         // From a side basin of Rastrigin the descent's second slice gains
         // less per evaluation than its first, and GSA takes the turn. When
-        // the descent's first slice leaves less than a slice beyond the
-        // closing reserve, GSA takes what is left if that is eight
-        // evaluations or more (15 at 30-D and 440, 16 at 100-D and 1375)
-        // and does not play otherwise (30-D at 420, 100-D at 1000). DE
-        // plays once the hand-over leaves a slice beyond the reserve; at
-        // 10-D and 500 GSA's visits keep the turn up to it.
+        // the descent's first slice leaves fewer than `GSA_LAST_SLICES`
+        // slices beyond the closing reserve, GSA takes the turn there if
+        // eight evaluations or more are left (171 at 30-D and 700, 15 at
+        // 30-D and 440, 16 at 100-D and 1375), a slice at a time, and does
+        // not play otherwise (30-D at 420, 100-D at 1000). DE plays once
+        // the hand-over leaves a slice beyond the reserve; at 10-D and 500
+        // GSA's visits keep the turn up to it.
         use ArmKind::{Cma, De, Gsa, Qn};
         for (dim, budget, tail, de) in [
             (10usize, 500usize, None, false),
             (20, 2000, None, true),
             (30, 4000, None, true),
-            (30, 440, Some(15usize), false),
+            (30, 700, Some(171usize), false),
+            (30, 440, Some(15), false),
             (30, 420, Some(0), false),
             (100, 1375, Some(16), false),
             (100, 1000, Some(0), false),
@@ -6949,7 +6960,7 @@ mod tests {
                     assert_eq!(arms[at - 1], Qn, "{case}");
                     if let Some(left) = tail {
                         assert_eq!(budget - qn_to - polish, left, "{case}");
-                        assert_eq!(gsa_to - gsa_from, left, "{case}");
+                        assert_eq!(gsa_to - gsa_from, left.min(slice), "{case}");
                     } else {
                         assert!(qn_to - qn_from >= 2 * slice, "{case}: the descent slowed");
                     }
