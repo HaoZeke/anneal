@@ -6038,9 +6038,9 @@ mod tests {
     }
 
     #[test]
-    fn finite_difference_gradient_uses_the_next_representable_step() {
+    fn finite_difference_gradient_has_no_slope_when_the_neighbour_leaves_the_box() {
         // Near 1e9 adjacent doubles are 1.2e-7 apart, so x +/- 1e-8 is x.
-        // The stencil steps to that neighbour.
+        // Those neighbours also lie outside this 2e-7 box.
         let obj = RecordingSphere::new(vec![1e9 - 1e-7, -1.0], vec![1e9 + 1e-7, 1.0]);
         let ledger = BudgetLedger::new(100, 2);
         let budgeted = BudgetedObjective {
@@ -6052,17 +6052,13 @@ mod tests {
             h_frac: 1e-5,
         };
         let g = fd.grad(Array1::from_vec(vec![1e9, 0.25]).view());
-        assert!(
-            g[0].is_finite() && g[0] != 0.0,
-            "a one-ulp step of x^2 at 1e9 has a slope, got {}",
-            g[0]
-        );
+        assert_eq!(g[0], 0.0);
         assert!(
             (g[1] - 0.5).abs() < 1e-6,
             "slope of x^2 at 0.25, got {}",
             g[1]
         );
-        assert_eq!(obj.calls_inside_box(), 4);
+        assert_eq!(obj.calls_inside_box(), 2);
     }
 
     #[test]
