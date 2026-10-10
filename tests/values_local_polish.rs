@@ -171,5 +171,10 @@ fn rounded_stencil_steps_use_distinct_representable_points() {
     assert_eq!(result.n_evals, surface.observed.lock().unwrap().len());
     assert!(result.n_evals <= 128);
     assert!(result.projected_stationary);
-    assert!((result.best_grad.unwrap()[0] - 1.0).abs() < 1e-12);
+    let slope = result.best_grad.unwrap()[0];
+    assert!(
+        (slope - 1.0).abs() < 1e-12,
+        "slope {slope} at {:?}",
+        result.best_pos
+    );
 }
