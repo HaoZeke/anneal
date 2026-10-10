@@ -929,7 +929,7 @@ impl CmaArmState {
     /// first restart searches the whole box; large-population restarts are
     /// never elitist. Runs are separable above [`CMA_FULL_MAX_DIM`] or when
     /// the budget is shorter than the full covariance's learning horizon.
-    /// `floor` is the run's floor on the success threshold's scale.
+    /// `threshold` is the success threshold the first run stops at.
     fn new(
         ledger: &BudgetLedger,
         bounds: &Bounds<f64>,
@@ -937,7 +937,7 @@ impl CmaArmState {
         seed: u64,
         sigma: f64,
         elitist: bool,
-        floor: f64,
+        threshold: f64,
     ) -> Self {
         let dim = bounds.dims;
         let lambda = default_lambda(dim);
@@ -952,7 +952,7 @@ impl CmaArmState {
             &unit,
             seed ^ CMA_STREAM,
             separable,
-            values_only_threshold(ledger.best_get(), floor),
+            threshold,
         );
         if elitist {
             es = es.with_elite(mean.view(), ledger.best_get());
@@ -974,8 +974,8 @@ impl CmaArmState {
     }
 
     /// One run from the incumbent. It ends once its recent best values span
-    /// less than `threshold`, the success threshold at the incumbent's
-    /// value: past that point no slice of it can count as a success.
+    /// less than `threshold`, the success threshold: past that point no
+    /// slice of it can count as a success.
     fn run(
         mean: ArrayView1<f64>,
         sigma: f64,
@@ -1017,17 +1017,16 @@ struct QnArmState {
 }
 
 impl QnArmState {
-    /// Whether the descent has lowered its value by more than the success
-    /// threshold, floored at `floor`, since the last check. A new descent
-    /// pays its first check once it has a finite value; a converged one
-    /// never pays, nor does the descent that replaced it inside the same
-    /// slice.
-    fn paid(&mut self, floor: f64) -> bool {
+    /// Whether the descent has lowered its value by more than `threshold`
+    /// since the last check. A new descent pays its first check once it has
+    /// a finite value; a converged one never pays, nor does the descent
+    /// that replaced it inside the same slice.
+    fn paid(&mut self, threshold: f64) -> bool {
         let value = self.engine.value();
         let paid = !self.engine.is_done()
             && !self.replaced
             && value.is_finite()
-            && value < self.checked - values_only_threshold(self.checked, floor);
+            && value < self.checked - threshold;
         self.checked = value;
         self.replaced = false;
         paid
@@ -1099,9 +1098,9 @@ struct ArmStates {
     /// local search, and the DE population starts with the incumbent, as
     /// SciPy's differential_evolution places its `x0`.
     values_only: bool,
-    /// The values-only loop's floor on the scale of its success threshold
-    /// ([`values_only_floor`]), set once the start is evaluated.
-    success_floor: f64,
+    /// The values-only loop's scale of success, started once the start is
+    /// evaluated and fed every slice.
+    success: SuccessScale,
     /// Evaluation counts before and after each values-only turn, with its
     /// arm.
     #[cfg(test)]
@@ -1349,27 +1348,74 @@ fn arm_success_threshold(arm: ArmKind, before: f64) -> f64 {
     rtol * scale.max(1.0)
 }
 
-/// Success threshold of the values-only loop: [`IMPROVEMENT_RTOL`] times
-/// `|before|`, floored at the run's `floor` ([`values_only_floor`]) where
-/// [`arm_success_threshold`] floors at 1, so rescaling the objective
-/// rescales every threshold of the run.
-fn values_only_threshold(before: f64, floor: f64) -> f64 {
-    let scale = if before.is_finite() {
-        before.abs()
-    } else {
-        0.0
-    };
-    IMPROVEMENT_RTOL * scale.max(floor)
+/// Scale of success in the values-only loop. A gain counts once it exceeds
+/// [`IMPROVEMENT_RTOL`] times the gain of the last slice that lowered the
+/// incumbent, floored at the run's resolution `s`, where
+/// [`arm_success_threshold`] scales with `|f|` and floors at 1.
+///
+/// Gains are differences of values, so a constant added to the objective
+/// changes them only by the rounding of the shifted values, and a power of
+/// two multiplying it multiplies every threshold exactly. Slices that begin
+/// at or above the start's value record nothing, so neither the start's
+/// value nor the drop from it sets the scale. `s` is `f64::MIN_POSITIVE`
+/// until the run first finds a value below the start's and the resolution
+/// `eps |f|` of that value from then on (`f64::MIN_POSITIVE` again if it is
+/// zero): positive and fixed once set, it bounds the number of successes on
+/// a bounded objective as the unit floor of [`arm_success_threshold`] does,
+/// and it scales with the objective.
+#[derive(Clone, Debug)]
+struct SuccessScale {
+    /// The start's value, infinite when there is none or it is not finite.
+    start: f64,
+    /// The run's resolution `s`.
+    floor: f64,
+    /// Whether `floor` has been set from a value below the start's.
+    fixed: bool,
+    /// Gain of the last slice that lowered the incumbent from below the
+    /// start's value; zero before the first.
+    gain: f64,
 }
 
-/// Floor on the scale of the values-only success threshold: the resolution
-/// `eps |f|` of the start's value. Fixed for the run and positive, it bounds
-/// the number of successes on a bounded objective as the unit floor of
-/// [`arm_success_threshold`] does, and it scales with the objective.
-fn values_only_floor(start: Option<f64>) -> f64 {
-    match start {
-        Some(value) if value.is_finite() && value != 0.0 => f64::EPSILON * value.abs(),
-        _ => f64::MIN_POSITIVE,
+impl Default for SuccessScale {
+    fn default() -> Self {
+        Self::new(None)
+    }
+}
+
+impl SuccessScale {
+    fn new(start: Option<f64>) -> Self {
+        Self {
+            start: start.filter(|v| v.is_finite()).unwrap_or(f64::INFINITY),
+            floor: f64::MIN_POSITIVE,
+            fixed: false,
+            gain: 0.0,
+        }
+    }
+
+    /// The least drop of the incumbent that counts as a success.
+    fn threshold(&self) -> f64 {
+        IMPROVEMENT_RTOL * self.gain.max(self.floor)
+    }
+
+    /// The run's resolution `s`.
+    fn floor(&self) -> f64 {
+        self.floor
+    }
+
+    /// Records a slice that moved the incumbent from `before` to `after`.
+    fn record(&mut self, before: f64, after: f64) {
+        if !after.is_finite() || after >= self.start {
+            return;
+        }
+        if !self.fixed {
+            self.fixed = true;
+            if after != 0.0 {
+                self.floor = f64::EPSILON * after.abs();
+            }
+        }
+        if before < self.start && after < before {
+            self.gain = before - after;
+        }
     }
 }
 
@@ -3000,10 +3046,33 @@ fn run_cma_arm<O>(
 {
     let bounds = obj.bounds();
     let dim = bounds.dims;
-    let floor = states.success_floor;
+    let values_only = states.values_only;
+    let success = states.success.threshold();
+    let threshold = |best: f64| {
+        if values_only {
+            success
+        } else if best.is_finite() {
+            IMPROVEMENT_RTOL * best.abs()
+        } else {
+            0.0
+        }
+    };
     let state = states.cma.get_or_insert_with(|| {
-        CmaArmState::new(ledger, bounds, budget, seed, CMA_FIRST_SIGMA, true, floor)
+        CmaArmState::new(
+            ledger,
+            bounds,
+            budget,
+            seed,
+            CMA_FIRST_SIGMA,
+            true,
+            threshold(ledger.best_get()),
+        )
     });
+    // The values-only scale of success moves with every slice, so the run
+    // stops at the threshold in force when it plays.
+    if values_only && state.es.stop_reason().is_none() {
+        state.es.set_tol_fun_hist(success);
+    }
     let start = ledger.used_get();
     while ledger.used_get() - start < slice && ledger.remaining() > 0 {
         if state.es.stop_reason().is_some() {
@@ -3018,7 +3087,7 @@ fn run_cma_arm<O>(
                 &state.unit,
                 run_seed,
                 state.separable,
-                values_only_threshold(ledger.best_get(), floor),
+                threshold(ledger.best_get()),
             );
             if state.elitist && plan.regime == CmaRegime::Small {
                 es = es.with_elite(mean.view(), ledger.best_get());
@@ -3158,8 +3227,11 @@ fn values_only_slice(dim: usize, budget: usize) -> usize {
 /// except that the descent keeps the turn, short of the closing reserve,
 /// while each slice lowers its own value by more than the success
 /// threshold, until it converges ([`QnArmState::paid`]). A turn succeeds
-/// when it lowers the incumbent by more than [`values_only_threshold`],
-/// whose floor scales with the start's value.
+/// when it lowers the incumbent by more than the success threshold in force
+/// when it began: [`IMPROVEMENT_RTOL`] times the gain of the last slice
+/// that lowered the incumbent, floored at the run's resolution
+/// ([`SuccessScale`]), so neither a constant added to the objective nor the
+/// start's value moves it.
 /// The descent closes the run with what is left, a reserve of the
 /// evaluations one descent needs to converge
 /// ([`LOCAL_FIRST_POLISH_GRADIENTS`]) when the budget affords it. It goes
@@ -3196,7 +3268,7 @@ where
             let _ = obj.eval(bounds.clip(row).view());
         }
     }
-    states.success_floor = values_only_floor(ledger.incumbent_value());
+    states.success = SuccessScale::new(ledger.incumbent_value());
 
     let arms = VALUES_ONLY_ARMS;
     let k = arms.len();
@@ -3220,13 +3292,16 @@ where
      -> bool {
         let arm = arms[choice];
         let before = ledger.best_get();
+        let threshold = states.success.threshold();
         #[cfg(test)]
         let used = ledger.used_get();
         let mut take = take;
         loop {
+            let from = ledger.best_get();
             ledger.cap_set((ledger.used_get() + take).min(budget));
             run_arm::<O, G>(arm, obj, None, ledger, states, rng, take, budget);
             ledger.cap_set(budget);
+            states.success.record(from, ledger.best_get());
             // A kicked descent climbs before it can beat the incumbent, and
             // one from a poor start takes many slices to settle: the turn
             // is scored on the basin the descent reaches once it stops
@@ -3234,8 +3309,8 @@ where
             if arm != ArmKind::Qn {
                 break;
             }
-            let floor = states.success_floor;
-            if !states.qn.as_mut().is_some_and(|qn| qn.paid(floor)) {
+            let paying = states.success.threshold();
+            if !states.qn.as_mut().is_some_and(|qn| qn.paid(paying)) {
                 break;
             }
             if ledger.remaining() < reserve + 8 {
@@ -3246,8 +3321,7 @@ where
         #[cfg(test)]
         states.turns.push((arm, used, ledger.used_get()));
         let after = ledger.best_get();
-        let improved = after.is_finite()
-            && after < before - values_only_threshold(before, states.success_floor);
+        let improved = after.is_finite() && after < before - threshold;
         posteriors[choice].update(improved);
         improved
     };
@@ -3258,12 +3332,13 @@ where
         while ledger.remaining() > 0 {
             round += 1;
             let before = ledger.best_get();
+            let threshold = states.success.threshold();
             ledger.cap_set((ledger.used_get() + slice).min(budget));
             run_qn_arm(obj, ledger, states, slice, seed, true);
             ledger.cap_set(budget);
             let after = ledger.best_get();
-            let improved = after.is_finite()
-                && after < before - values_only_threshold(before, states.success_floor);
+            states.success.record(before, after);
+            let improved = after.is_finite() && after < before - threshold;
             posteriors[qn].update(improved);
             winner = improved.then_some(qn);
             if !improved
@@ -6555,25 +6630,65 @@ mod tests {
     }
 
     #[test]
-    fn values_only_threshold_floors_at_the_start_resolution() {
-        let floor = values_only_floor(Some(-250.0));
-        assert_eq!(floor, f64::EPSILON * 250.0);
-        assert_eq!(values_only_threshold(-3.0, floor), IMPROVEMENT_RTOL * 3.0);
-        assert_eq!(values_only_threshold(0.0, floor), IMPROVEMENT_RTOL * floor);
-        assert_eq!(
-            values_only_threshold(f64::INFINITY, floor),
-            IMPROVEMENT_RTOL * floor
-        );
-        for start in [None, Some(0.0), Some(f64::NAN), Some(f64::INFINITY)] {
-            assert_eq!(values_only_floor(start), f64::MIN_POSITIVE, "{start:?}");
+    fn success_scale_follows_gains_not_offsets_or_the_start() {
+        // Dyadic values keep every difference exact, so a shifted or
+        // rescaled copy records the same gains.
+        let slices = [(3.0, 2.5), (2.5, 2.5), (2.5, 2.25), (2.25, 2.375)];
+        let thresholds = |start: f64, factor: f64, shift: f64| {
+            let at = |v: f64| v * factor + shift;
+            let mut scale = SuccessScale::new(Some(at(start)));
+            scale.record(at(start), at(3.0));
+            slices
+                .iter()
+                .map(|&(before, after)| {
+                    scale.record(at(before), at(after));
+                    scale.threshold()
+                })
+                .collect::<Vec<_>>()
+        };
+        let plain = thresholds(4.0, 1.0, 0.0);
+        let half = IMPROVEMENT_RTOL * 0.5;
+        let quarter = IMPROVEMENT_RTOL * 0.25;
+        assert_eq!(plain, [half, half, quarter, quarter]);
+        // The drop from the start records nothing, however large.
+        assert_eq!(thresholds(1e30, 1.0, 0.0), plain);
+        assert_eq!(thresholds(4.0, 1.0, 1024.0), plain);
+        assert_eq!(thresholds(4.0, 1.0, -1024.0), plain);
+        let small = 2f64.powi(-20);
+        let scaled: Vec<f64> = plain.iter().map(|t| t * small).collect();
+        assert_eq!(thresholds(4.0, small, 0.0), scaled);
+    }
+
+    #[test]
+    fn success_scale_floors_at_the_first_value_below_the_start() {
+        let mut scale = SuccessScale::new(Some(-2.0));
+        assert_eq!(scale.floor(), f64::MIN_POSITIVE);
+        scale.record(-2.0, f64::NAN);
+        scale.record(-2.0, -1.0);
+        assert_eq!(scale.threshold(), IMPROVEMENT_RTOL * f64::MIN_POSITIVE);
+        scale.record(-2.0, -250.0);
+        assert_eq!(scale.floor(), f64::EPSILON * 250.0);
+        assert_eq!(scale.threshold(), IMPROVEMENT_RTOL * scale.floor());
+        scale.record(-250.0, -3000.0);
+        scale.record(-3000.0, -3000.0);
+        assert_eq!(scale.floor(), f64::EPSILON * 250.0);
+        assert_eq!(scale.threshold(), IMPROVEMENT_RTOL * 2750.0);
+        let mut zero = SuccessScale::new(Some(1.0));
+        zero.record(1.0, 0.0);
+        assert_eq!(zero.floor(), f64::MIN_POSITIVE);
+        for start in [None, Some(f64::NAN), Some(f64::INFINITY)] {
+            let mut scale = SuccessScale::new(start);
+            scale.record(5.0, 4.0);
+            assert_eq!(scale.floor(), f64::EPSILON * 4.0, "{start:?}");
+            assert_eq!(scale.threshold(), IMPROVEMENT_RTOL, "{start:?}");
         }
     }
 
     #[test]
     fn values_only_run_ignores_the_scale_of_the_objective() {
-        // A power of two rescales every value exactly. The success threshold
-        // scales with the start's value and a descent's first trial with the
-        // box, so a rescaled run asks the same points, at least until the
+        // A power of two rescales every value, and so every gain and success
+        // threshold, exactly, and a descent's first trial follows the box,
+        // so a rescaled run asks the same points, at least until the
         // restart arm, whose chains anneal at a fixed temperature, or the
         // surrogate, whose temperature has an absolute floor, plays.
         fn small(x: ArrayView1<f64>) -> f64 {
