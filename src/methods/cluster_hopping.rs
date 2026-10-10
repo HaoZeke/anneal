@@ -906,6 +906,25 @@ fn rung_height(cfg: &Config, n_rep: usize, ratio: f64) -> f64 {
     }
 }
 
+/// A rung waiting for its turn: the state it holds, and what the driver knows
+/// about that state.
+///
+/// Everything past the state describes the state rather than the rung, so a
+/// swap moves it with the state and a switch restores it with the state. Left
+/// behind, it would attribute the next hop to whatever the previous rung held.
+struct Parked {
+    energy: f64,
+    state: Array1<f64>,
+    /// Basin of the state in the shared identity map, once looked up.
+    basin: Option<usize>,
+    /// Fresh validation gradient retained for the state, when any.
+    gradient: Option<Array1<f64>>,
+    /// The surrogate's value at the state, under delayed acceptance.
+    surrogate: Option<f64>,
+    /// Screen state of the trial that entered the state's basin.
+    entry: Option<Array1<f64>>,
+}
+
 /// Log acceptance of rungs `k` and `j` exchanging the states they hold.
 ///
 /// Rung `k` hops on `exp(-(E + V_k + S) / T_k)`, with `V_k` its own bias and
@@ -1004,7 +1023,7 @@ where
         }
         None => (biases.remove(0), None),
     };
-    let mut chains: Vec<(f64, Array1<f64>)> = Vec::new();
+    let mut chains: Vec<Parked> = Vec::new();
     #[cfg(feature = "ira")]
     if cfg.shape_keyed {
         bias = bias.with_metric(Box::new(crate::shape::IraMetric::default()));
@@ -1252,11 +1271,35 @@ where
     let mut path_improvements = 0usize;
     let mut path_gain = 0.0_f64;
 
+    // Every rung's start is held to the first one's contract before it is
+    // recorded, and keeps its validation gradient for the first step the rung
+    // takes from it.
     for _ in 1..n_rep {
         let s0 = random_cluster_in_radius(n, cfg.start_radius(), cfg.min_separation, rng);
         let (e0, x0) = relax(ledger, s0.view(), cfg.relax_steps);
-        ledger.record(e0, x0.view());
-        chains.push((e0, x0));
+        let sane = quench_is_sane(cfg, e0, x0.view());
+        let gradient = sane
+            .then(|| {
+                grad.as_deref_mut().and_then(|g| {
+                    g(ledger, x0.view()).filter(|values| {
+                        values.iter().fold(0.0_f64, |a, q| a.max(q.abs())) < cfg.record_gradient
+                    })
+                })
+            })
+            .flatten();
+        if sane && (!gradient_required || gradient.is_some()) {
+            ledger.record(e0, x0.view());
+        } else {
+            unconverged_records += 1;
+        }
+        chains.push(Parked {
+            energy: e0,
+            state: x0,
+            basin: None,
+            gradient,
+            surrogate: None,
+            entry: None,
+        });
     }
     let mut screened_out = 0usize;
     let mut returned = 0usize;
@@ -3264,7 +3307,17 @@ where
                 // that one active. Each rung keeps its own bias and its own
                 // temperature; only the states move, so a hot rung's crossing
                 // lands in a cold rung that can polish it.
-                chains.insert(rep, (e, x.clone()));
+                chains.insert(
+                    rep,
+                    Parked {
+                        energy: e,
+                        state: x.clone(),
+                        basin: here,
+                        gradient: current_validation_gradient.take(),
+                        surrogate: surrogate_here,
+                        entry: basin_entry.take(),
+                    },
+                );
                 // A placeholder only; the destination rung's own bias is taken
                 // below, so this is never deposited into.
                 biases.insert(
@@ -3325,8 +3378,8 @@ where
                         };
                         rung_temperature(cfg, ratios[rung], held, dos.as_ref(), energy)
                     };
-                    let (ek, xk) = (chains[k].0, chains[k].1.clone());
-                    let (ej, xj) = (chains[j].0, chains[j].1.clone());
+                    let (ek, xk) = (chains[k].energy, chains[k].state.clone());
+                    let (ej, xj) = (chains[j].energy, chains[j].state.clone());
                     let vk_xk = biases[k].potential(biases[k].cv(xk.view()).view());
                     let vk_xj = biases[k].potential(biases[k].cv(xj.view()).view());
                     let vj_xj = biases[j].potential(biases[j].cv(xj.view()).view());
@@ -3352,9 +3405,13 @@ where
                     }
                 }
                 rep = j;
-                let (ne, nx) = chains.remove(rep);
-                e = ne;
-                x = nx;
+                let next = chains.remove(rep);
+                e = next.energy;
+                x = next.state;
+                here = next.basin;
+                current_validation_gradient = next.gradient;
+                surrogate_here = next.surrogate;
+                basin_entry = next.entry;
                 bias = biases.remove(rep);
             }
         }
@@ -3512,7 +3569,7 @@ where
             // back in place before reporting.
             let mut all: Vec<(f64, usize, f64)> = Vec::with_capacity(n_rep);
             let mut parked = biases.iter().map(|b| b.n_basins());
-            let mut energies = chains.iter().map(|(en, _)| *en);
+            let mut energies = chains.iter().map(|parked| parked.energy);
             for k in 0..n_rep {
                 if k == rep {
                     all.push((temps[k], n_basins, e));

@@ -124,8 +124,10 @@ pub struct Config {
     /// factor that each rung's bias evaluated at both states gives, at the
     /// temperatures the two rungs would hop at from the states they hold, and
     /// the funnel and energy biases every rung shares weigh in by the
-    /// difference of the two inverse temperatures. With equal biases it is the
-    /// Metropolis exchange of [`crate::exchange::MetropolisExchange`].
+    /// difference of the two inverse temperatures. A state carries its basin
+    /// and its validation gradient with it from rung to rung. With equal
+    /// biases it is the Metropolis exchange of
+    /// [`crate::exchange::MetropolisExchange`].
     ///
     /// A rung's temperature is what its acceptance, its deposits and the swap
     /// read; proposals keep the move scale `temperature` sets on every rung, as
