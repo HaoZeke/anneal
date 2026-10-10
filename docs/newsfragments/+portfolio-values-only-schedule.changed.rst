@@ -82,13 +82,12 @@ against 7.96 (8/3/29); the two slices back cost ``ackS50@5000`` 4.31 against
 The opening's bar on its recent gains, against an opening that goes on while
 each slice is a success: ``ellS30@5000`` 0.0626 against 0 (0/13/27),
 ``rosen30@5000`` 22.2 against 16.2 (2/1/37) with its copies and controls (22.0
-to 22.5 against 15.9 to 16.7), and the ``ellR30@5000`` controls for +1e2, +1e4
-and -1e4 (2.8e-11, 2.3e-4 and 8.7e-4 against 3.2e-12, 1.4e-5 and 1.2e-5);
-dropping the bar costs ``ackS30@5000`` 3.8e-6 against 6.2e-7 (1/18/21),
-``levyR30@5000`` 3.51 against 0.544 (5/0/35) and ``levy30@5000`` 7.2e-7
-against 4.5e-10 (6/17/17). ``ellR30@5000``, 3.4e-8 against 0 (0/19/21), and
-its x1e-6 and x2^-20 copies come level only with both the opening without its
-bar and the descent's ``1e-12`` tolerance (0, 0/38/2), at the costs of each.
+to 22.5 against 15.9 to 16.7), and ``ellR30@5000`` 4.8e-23 against 0 (0/29/11)
+with its x1e-6 and x2^-20 copies and its controls for +1e2, +1e4 and -1e4
+(2.8e-11, 2.3e-4 and 8.7e-4 against 3.2e-12, 1.4e-5 and 1.2e-5); dropping the
+bar brings these level, ``ellR30@5000`` and its copies at 0 (0/38/2), but
+costs ``ackS30@5000`` 3.8e-6 against 6.2e-7 (1/18/21), ``levyR30@5000`` 3.51
+against 0.544 (5/0/35) and ``levy30@5000`` 7.2e-7 against 4.5e-10 (6/17/17).
 Lending from a GSA phase's fifth slice: ``mich10@5000`` -9.655 against -9.66
 (3/28/9, p 0.021). Lending from any slow slice brings it level but puts
 ``mich10@5000`` without ``x0``, ``rast10_shift@1000`` and ``styb10_45@1000``
