@@ -1753,7 +1753,10 @@ where
         xs.push(bounds.clip(x.view()));
         vals.push(value);
     }
-    let sampled = chain_count - xs.len();
+    // One low-discrepancy start is always paid, including when the
+    // incumbent already occupies the only chain. The coordinate replay
+    // identifies that start.
+    let sampled = (chain_count - xs.len()).max(1);
     if sampled > 0 {
         let starts = eindir_core::shifted_low_discrepancy_points(
             &bounds,
