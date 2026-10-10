@@ -13,8 +13,13 @@
 //! [`Sharing::Shared`] gives the chains one bank of `chains * slots` members,
 //! so a funnel any chain enters is refined by every chain and splices mix
 //! structures found by different chains. [`Sharing::Private`] gives each chain
-//! a bank of `slots` members and changes nothing else: the same trials, the
-//! same budget shares and the same random streams.
+//! a bank of `slots` members, with the same trial rules, budget shares and
+//! stream seeds. A one-slot private bank never splices and never draws the
+//! splice coin, so a chain's random stream parts from its stream under
+//! [`Sharing::Shared`] at its first bank draw, or sooner if the shared bank is
+//! not yet full when the private one is, since only a full bank draws the coin
+//! for a random start. With one slot the private ablation therefore removes
+//! cross-chain splicing together with the exchange of members.
 //!
 //! Chains advance in synchronous generations. Parents are drawn and offers
 //! admitted in chain order between generations; only the trials run in
@@ -51,7 +56,8 @@ pub enum Sharing {
     /// One bank of `chains * slots` members, drawn from and offered to by
     /// every chain.
     Shared,
-    /// A bank of `slots` members per chain, seen by that chain alone.
+    /// A bank of `slots` members per chain, seen by that chain alone. With one
+    /// slot it never splices.
     Private,
 }
 
