@@ -74,8 +74,8 @@ fn check_incumbent_retention(with_gradient: bool) {
         shared_visit_policy: anneal_core::methods::minima_hopping::SharedVisitPolicy::Tabu,
         ..BoxEnsembleConfig::default()
     };
-    // Both replicas have exactly one hop. The energy scale makes the first
-    // unbiased uphill acceptance probability round to one throughout the box.
+    // The energy scale makes the first unbiased uphill acceptance
+    // probability round to one throughout the box.
     assert_eq!((-1e-18_f64 / 5.0).exp(), 1.0);
     let result = if with_gradient {
         box_ensemble_optimize(&objective, &objective, 7, Some(start.view()), &config)
@@ -85,11 +85,15 @@ fn check_incumbent_retention(with_gradient: bool) {
 
     let evaluations = objective.evaluations.lock().unwrap();
     let gradients = objective.gradients.load(Ordering::Relaxed);
-    let expected_work = if with_gradient { (4, 4) } else { (52, 0) };
+    // The gradient hop is one analytic step on each replica. The values
+    // quench stops when the stencil is unfunded, which is 14 hops and 48
+    // evaluations on this budget.
+    let expected_work = if with_gradient { (4, 4) } else { (48, 0) };
+    let expected_hops = if with_gradient { 2 } else { 14 };
     assert_eq!((evaluations.len(), gradients), expected_work);
     assert_eq!((result.n_evals, result.n_grads), expected_work);
     assert!(result.n_evals + result.n_grads <= config.budget);
-    assert_eq!(result.hops, 2);
+    assert_eq!(result.hops, expected_hops);
     assert_eq!(evaluations[0], (-1.0, 0.0));
     assert!(evaluations.iter().any(|(_, value)| *value > 0.0));
 
