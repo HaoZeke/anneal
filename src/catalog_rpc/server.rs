@@ -3249,23 +3249,30 @@ where
         reject("posted descriptor version or values do not match the schema");
         return Err(());
     }
-    // The schema's dimension is learned from the first recomputation on
-    // this server and every posted descriptor is held to it afterwards.
-    if let Some(dimension) = posted_descriptor_len.as_ref().and_then(|slot| **slot)
+    // The schema's dimension is learned from the first posted vector on
+    // this server. That post is not recomputed: a worker's leftover
+    // descriptor is the one the catalog merges. Later posts are held to
+    // the learned length, and recomputed on the verification period.
+    let known = posted_descriptor_len.as_ref().and_then(|slot| **slot);
+    if let Some(dimension) = known
         && posted.len() != dimension
     {
         reject("posted descriptor length does not match the schema");
         return Err(());
     }
     let verify_every = descriptor_verification_period();
-    let verify = posted_descriptor_len
-        .as_ref()
-        .is_none_or(|slot| slot.is_none())
-        || match verify_every {
+    let verify = match posted_descriptor_len.as_deref_mut() {
+        None => true,
+        Some(slot) if slot.is_none() => {
+            *slot = Some(posted.len());
+            false
+        }
+        Some(_) => match verify_every {
             Some(0) => false,
             Some(period) => candidate.event_sequence.is_multiple_of(period),
             None => true,
-        };
+        },
+    };
     if verify {
         let descriptor = descriptor_space
             .describe(
