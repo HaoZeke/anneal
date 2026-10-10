@@ -15,9 +15,8 @@ const DIM: usize = 16;
 const SEED: u64 = 17;
 const VISIT_Q: f64 = 2.62;
 const INITIAL_TEMP: f64 = 5230.0;
-/// Recorded quenched moves the replay builds. The warm-up spends two GSA
-/// slices and then yields to another arm, so the replay runs past that
-/// yield into the resumed chain.
+/// Recorded quenched moves the replay builds. A slice that ends mid-strategy
+/// finishes that temperature step, so the replay runs only up to the yield.
 const REPLAY_LEN: usize = 12 * DIM;
 
 fn bounds() -> Bounds<f64> {
@@ -255,7 +254,7 @@ fn shared_scalar_gsa_preserves_coordinate_support_with_effective_separation() {
 }
 
 #[test]
-fn private_scalar_gsa_resumes_its_partial_strategy_after_other_arms() {
+fn private_scalar_gsa_starts_a_new_step_after_other_arms() {
     let (result, traces) = run(false);
     for replica in 0..2 {
         let (which, start, _, replay) = strategy_start(&traces, replica);
@@ -278,14 +277,18 @@ fn private_scalar_gsa_resumes_its_partial_strategy_after_other_arms() {
             .count();
         assert!(prefix >= DIM, "the first quenched epoch must replay");
         assert!(prefix < replay.len(), "another arm must intervene");
-        assert_ne!(prefix % DIM, 0, "the strategy must be partial");
-        let continuations = trace[start + prefix..]
-            .windows(replay.len() - prefix)
-            .filter(|positions| *positions == &replay[prefix..])
-            .count();
+        let tail = replay.len() - prefix;
+        let continuations = if tail == 0 {
+            0
+        } else {
+            trace[start + prefix..]
+                .windows(tail)
+                .filter(|positions| *positions == &replay[prefix..])
+                .count()
+        };
         assert_eq!(
-            continuations, 1,
-            "replica={replica}, prefix={prefix}, gsa_pulls={gsa_pulls}: the unfinished strategy must resume"
+            continuations, 0,
+            "replica={replica}, prefix={prefix}, gsa_pulls={gsa_pulls}: a yielded strategy is not resumed"
         );
     }
 }
