@@ -23,14 +23,14 @@ use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
 use ndarray::{Array1, ArrayView1};
-use rand::rngs::StdRng;
 use rand::SeedableRng;
+use rand::rngs::StdRng;
 use serde::Serialize;
 
 use crate::allocate::{DepthAllocator, RewardMoments};
 use crate::surface_evidence::{
-    SourceTransferKey, SurfaceEvidenceBook, SurfaceEvidenceMessage, SurfaceReport,
-    MIN_TRANSFER_OBSERVATIONS,
+    MIN_TRANSFER_OBSERVATIONS, SourceTransferKey, SurfaceEvidenceBook, SurfaceEvidenceMessage,
+    SurfaceReport,
 };
 
 /// A surface allocator posterior several chains update together.
@@ -283,8 +283,7 @@ pub fn penalty_shaped(
                 let mut grad = [0.0_f64; 3];
                 for k in 0..3 {
                     let axis = shape.axes[k];
-                    let proj =
-                        (d[0] * axis[0] + d[1] * axis[1] + d[2] * axis[2]) / shape.scale[k];
+                    let proj = (d[0] * axis[0] + d[1] * axis[1] + d[2] * axis[2]) / shape.scale[k];
                     r2 += proj * proj;
                     for m in 0..3 {
                         grad[m] += 2.0 * proj * axis[m] / shape.scale[k];
@@ -586,6 +585,8 @@ pub struct SurfacePortfolio {
     own_by_source: BTreeMap<SourceTransferKey, Vec<RewardMoments>>,
     /// Peer replies, still keyed by the producer's source.
     peer_by_source: BTreeMap<SourceTransferKey, Vec<RewardMoments>>,
+    /// Peer moments imported while no source is occupied.
+    peer_unscoped: Vec<RewardMoments>,
     held: Option<usize>,
     block: usize,
     hops_in_block: usize,
@@ -645,6 +646,7 @@ impl SurfacePortfolio {
             block_source: None,
             own_by_source: BTreeMap::new(),
             peer_by_source: BTreeMap::new(),
+            peer_unscoped: Vec::new(),
             held: None,
             block,
             hops_in_block: 0,
@@ -876,9 +878,9 @@ impl SurfacePortfolio {
 
     /// Peer observations stored by import, across every occupied source.
     pub fn peer_observations(&self) -> u64 {
-        self.peer_by_source
-            .values()
-            .flat_map(|arms| arms.iter())
+        self.peer_unscoped
+            .iter()
+            .chain(self.peer_by_source.values().flat_map(|arms| arms.iter()))
             .map(|arm| arm.count)
             .sum()
     }
@@ -894,10 +896,11 @@ impl SurfacePortfolio {
         {
             return Err("incompatible surface evidence");
         }
-        let Some(key) = self.occupied.clone() else {
-            return Err("incompatible surface evidence");
-        };
-        self.peer_by_source.insert(key, report.arms);
+        if let Some(key) = self.occupied.clone() {
+            self.peer_by_source.insert(key, report.arms);
+        } else {
+            self.peer_unscoped = report.arms;
+        }
         Ok(())
     }
 
@@ -912,7 +915,7 @@ impl SurfacePortfolio {
                 key.quench_schema,
                 key.block
             ),
-            None => format!("private-block:{}", self.block),
+            None => "private-block".to_string(),
         }
     }
 }
