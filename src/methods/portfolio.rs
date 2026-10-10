@@ -1822,12 +1822,16 @@ impl<O: Objective<f64>> Gradient<f64> for BudgetedFiniteDiffGradient<'_, O> {
             // The cap wins over the floor: on a box narrower than 2e-7 the
             // 1e-8 floor is wider than a twentieth of the box.
             let h = (self.h_frac * w).max(1e-8).min(0.05 * w);
+            let plus = x[i] + h;
+            let minus = x[i] - h;
+            // A step that rounds onto the centre is not a derivative.
+            if plus == x[i] || minus == x[i] {
+                continue;
+            }
             let mut xp = x.to_owned();
             let mut xm = x.to_owned();
-            // A positive-width direction needs a distinct feasible stencil,
-            // even when the requested displacement rounds to its centre.
-            xp[i] = (x[i] + h).max(x[i].next_up()).clamp(low, high);
-            xm[i] = (x[i] - h).min(x[i].next_down()).clamp(low, high);
+            xp[i] = plus.clamp(low, high);
+            xm[i] = minus.clamp(low, high);
             let den = xp[i] - xm[i];
             if !den.is_finite() || !(den > 0.0) {
                 continue;
