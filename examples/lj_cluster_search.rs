@@ -4012,13 +4012,12 @@ fn hear_phase(
     replica: u32,
     snapshot: &ChainCheckpoint<'_>,
     checkpoint_sequence: u64,
+    hear_enabled: bool,
 ) -> Option<anneal_core::catalog_rpc::CatalogCandidate> {
     use anneal_core::catalog_rpc::{INCUMBENT_SAMPLE_DRAW, SPARSE_SAMPLE_DRAW};
     use anneal_core::cooperative_search::CatalogSampleOutcome;
     let floor_energy = snapshot.best_energy();
     let current_len = snapshot.current_state().len();
-    let hear_enabled =
-        std::env::var("CATALOG_HEAR").is_ok() && !anneal_core::env::flag("CATALOG_NO_HEAR");
     let family_mode = std::env::var("CATALOG_HEAR").is_ok_and(|v| v == "family");
     let hear_stall: usize = anneal_core::env::parsed("CATALOG_HEAR_STALL").unwrap_or(5000);
     if snapshot.best_energy() < state.last_best - 1e-9 {
@@ -5141,6 +5140,39 @@ fn run_capnp_catalog(
                 // Due probes wait for a validated origin and precede adaptive
                 // checkpoint actions. Their unresolved outcomes remain observations,
                 // not reasons to change the declared perturb-quench kernel.
+                if sharing
+                    && checkpoint_sequence.is_multiple_of(probe_interval)
+                    && snapshot.remaining() > run_cfg.relax_steps.saturating_add(2)
+                {
+                    let draw = checkpoint_sequence.wrapping_mul(0x9E37_79B9_7F4A_7C15)
+                        ^ u64::from(replica);
+                    if let anneal_core::cooperative_search::CatalogBoundaryOutcome::Crossing(
+                        crossing,
+                    ) = cooperative
+                        .boundary_crossing(replica, snapshot.current_state().to_vec(), draw)
+                        .expect("boundary crossing poll must preserve local execution")
+                        && let Some(state) = boundary_crossing_trial(
+                            snapshot.current_state(),
+                            &crossing,
+                            0.0,
+                            10.0,
+                            &mut probe_rng,
+                        )
+                    {
+                        phases.fire("boundary");
+                        return complete_checkpoint_trace(
+                            &mut cooperative,
+                            replica,
+                            &mut slice_sequence,
+                            snapshot.charged(),
+                            snapshot.best_energy(),
+                            |_, _| CheckpointAction::ProbeProposal {
+                                state,
+                                action: "boundary".to_owned(),
+                            },
+                        );
+                    }
+                }
                 if probe_due
                     && snapshot.current_gradient().is_some()
                     && snapshot.remaining() > run_cfg.relax_steps.saturating_add(2)
@@ -5641,12 +5673,15 @@ fn run_capnp_catalog(
                 // channel, and catalog_leave would refuse Marks if the
                 // throwaway book chained it to ico. catalog_incumbent adopts
                 // on energy. post_offer_candidate above is the publish.
+                let hear_enabled = std::env::var("CATALOG_HEAR").is_ok()
+                    && !anneal_core::env::flag("CATALOG_NO_HEAR");
                 let heard = hear_phase(
                     &mut hear_state,
                     &mut cooperative,
                     replica,
                     &snapshot,
                     checkpoint_sequence,
+                    hear_enabled,
                 );
                 if let Some(held) = heard {
                     hear_state.other_family += 1;
