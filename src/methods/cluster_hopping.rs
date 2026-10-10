@@ -2656,7 +2656,13 @@ where
                 }
             }
         }
-        if cfg.flat_histogram || cfg.statistical_temperature {
+        // Under the statistical temperature only the ratio-one rungs record. A
+        // rung walking at r times the entropy's slope stands with weight
+        // exp(-S/r), which is not the occupancy the estimator fits, and its
+        // counts would steepen the shared entropy and cool every rung.
+        if (cfg.flat_histogram || cfg.statistical_temperature)
+            && (ratios[rep] == 1.0 || !cfg.statistical_temperature)
+        {
             // The histogram is over where the chain *stands*, so a rejected
             // trial records the state it stayed in. Recording the proposal
             // instead would measure the move library rather than the
