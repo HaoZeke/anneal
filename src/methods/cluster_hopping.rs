@@ -527,7 +527,8 @@ pub struct Outcome {
     /// few basins and a deep one. A ladder where every rung looks alike is a
     /// ladder whose spread is too narrow to be worth its cost.
     pub rungs: Vec<(f64, usize, f64)>,
-    /// Swap attempts between adjacent replicas.
+    /// Swap attempts, each from the active rung to the next one up, the
+    /// hottest offering to the coldest.
     pub swaps_tried: usize,
     /// Hops the acceptance rule took, before any veto.
     pub accepted: usize,
