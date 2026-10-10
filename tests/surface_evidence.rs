@@ -108,16 +108,29 @@ fn merged_moments_reproduce_sequential_normal_gamma_updates() {
 #[test]
 fn imported_rewards_inform_choices_but_never_become_local_observations() {
     use anneal_core::methods::two_phase::{SurfacePortfolio, TwoPhase};
+    use anneal_core::surface_evidence::{SourceTransferKey, SurfaceEvidenceMessage};
     let transform = TwoPhase::diameter(2.0, 1.0);
     let mut learner = SurfacePortfolio::with_block(&[transform], 79, 1);
-    let local_before = learner.report();
-    let peer = SurfaceReport {
-        schema: local_before.schema.clone(),
-        arms: vec![moments(&[-10.0; 100]), moments(&[10.0; 100])],
+    let source = SourceTransferKey {
+        descriptor_schema: "universal".into(),
+        descriptor_version: 1,
+        region: 2,
+        proposal: "hop".into(),
+        quench_schema: "lbfgs".into(),
+        block: 1,
     };
-    learner.import_peers(peer.clone()).unwrap();
-    learner.import_peers(peer).unwrap();
-    assert_eq!(learner.report(), local_before);
+    learner.set_occupied_source(source.clone()).unwrap();
+    let draws_before = learner.draws().to_vec();
+    let peer = SurfaceEvidenceMessage {
+        producer: 3,
+        key: source.clone(),
+        arms: vec![moments(&[-10.0; 100]), moments(&[10.0; 100])],
+        incumbent_gap: 1.0,
+        charged_work: 100,
+    };
+    learner.import_evidence(peer.clone()).unwrap();
+    learner.import_evidence(peer).unwrap();
+    assert_eq!(learner.draws(), draws_before.as_slice());
     let mut learned = 0;
     for _ in 0..40 {
         learned += usize::from(learner.begin(true) == Some(transform));
@@ -127,16 +140,16 @@ fn imported_rewards_inform_choices_but_never_become_local_observations() {
         learned >= 35,
         "imported depth evidence chose the deeper surface {learned}/40 times"
     );
-    assert_eq!(
-        learner
-            .report()
-            .arms
-            .iter()
-            .map(|arm| arm.count)
-            .sum::<u64>(),
-        39
-    );
     assert_eq!(learner.draws().iter().sum::<usize>(), 39);
-    let incompatible = SurfacePortfolio::with_block(&[transform], 79, 100).report();
-    assert!(learner.import_peers(incompatible).is_err());
+    let incompatible = SurfaceEvidenceMessage {
+        producer: 3,
+        key: SourceTransferKey {
+            block: 100,
+            ..source
+        },
+        arms: vec![moments(&[0.0]), moments(&[0.0])],
+        incumbent_gap: 1.0,
+        charged_work: 100,
+    };
+    assert!(learner.import_evidence(incompatible).is_err());
 }
