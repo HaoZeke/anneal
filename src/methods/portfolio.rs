@@ -3416,15 +3416,17 @@ fn values_only_slice(dim: usize, budget: usize) -> usize {
 /// the last such success took if that is longer. GSA's first phase also
 /// ends once its gain per evaluation since it began is no more than that
 /// of the descent's last timed slice (at its first slice if neither gained
-/// anything). A GSA slice that gains less than `1 / PHASE_SLOWDOWN` of the
-/// phase's best per evaluation lends CMA-ES a slice, and CMA-ES takes the
-/// turn if that slice gains faster than both the GSA slice and
-/// `1 / PHASE_SLOWDOWN` of the phase's gain per evaluation so far
-/// ([`PHASE_SLOWDOWN`]); GSA lends no other slice until the run has used
-/// twice the evaluations it had, and none after a lent slice that gained
-/// nothing. A phase CMA-ES took likewise lends GSA a slice when its last
-/// two slices gain less per evaluation than its lent slice had to beat,
-/// and hands the turn back if GSA's slice gains faster than those two did.
+/// anything), and a CMA-ES phase that follows it without taking the turn
+/// ends the same way from its [`ROUNDS_PER_ARM`]-th slice on. A GSA slice
+/// that gains less than `1 / PHASE_SLOWDOWN` of the phase's best per
+/// evaluation lends CMA-ES a slice, and CMA-ES takes the turn if that
+/// slice gains faster than both the GSA slice and `1 / PHASE_SLOWDOWN` of
+/// the phase's gain per evaluation so far ([`PHASE_SLOWDOWN`]); GSA lends
+/// no other slice until the run has used twice the evaluations it had, and
+/// none after a lent slice that gained nothing. A phase CMA-ES took
+/// likewise lends GSA a slice when its last two slices gain less per
+/// evaluation than its lent slice had to beat, and hands the turn back if
+/// GSA's slice gains faster than those two did.
 /// The two alternate while a phase hands the other the turn, GSA resuming
 /// after a phase CMA-ES took from it, up to [`PHASE_TURNS`] phases. A
 /// phase leaves the closing reserve and one slice for each other arm not
@@ -3764,17 +3766,20 @@ where
     // gain per evaluation since it began is no more than the descent's last
     // (`displaced`), which is nothing when the descent's last slice
     // converged or kicked, so a phase that has gained nothing then ends at
-    // its first slice. A GSA slice that gains less than `1 / PHASE_SLOWDOWN`
-    // of the phase's best per evaluation lends CMA-ES a slice, and CMA-ES
-    // takes the turn if that slice gains faster than both the GSA slice and
-    // `1 / PHASE_SLOWDOWN` of the phase's gain per evaluation so far, so a
-    // lent slice that gains a little while GSA's records pause does not
-    // take it. GSA lends no other slice until the run has used
-    // twice the evaluations it had, and none after a lent slice that gained
-    // nothing. Once CMA-ES has taken the turn, its phase likewise lends GSA
-    // a slice when its last two slices gain less per evaluation than its
-    // lent slice had to beat, and hands the turn back if GSA's slice gains
-    // faster than those two did.
+    // its first slice. A CMA-ES phase that begins on its own ends the same
+    // way, but only from its `ROUNDS_PER_ARM`-th slice: on a rotated
+    // objective CMA-ES gains nothing until its step size and covariance
+    // have adapted, which takes it a few slices. A GSA slice that gains
+    // less than `1 / PHASE_SLOWDOWN` of the phase's best per evaluation
+    // lends CMA-ES a slice, and CMA-ES takes the turn if that slice gains
+    // faster than both the GSA slice and `1 / PHASE_SLOWDOWN` of the
+    // phase's gain per evaluation so far, so a lent slice that gains a
+    // little while GSA's records pause does not take it. GSA lends no other
+    // slice until the run has used twice the evaluations it had, and none
+    // after a lent slice that gained nothing. Once CMA-ES has taken the
+    // turn, its phase likewise lends GSA a slice when its last two slices
+    // gain less per evaluation than its lent slice had to beat, and hands
+    // the turn back if GSA's slice gains faster than those two did.
     let phase = |choice: usize,
                  turn: PhaseTurn,
                  states: &mut ArmStates,
@@ -3794,7 +3799,7 @@ where
         };
         let mut peak = 0.0f64;
         let mut lend_from = 0usize;
-        let (mut phase_gain, mut phase_used) = (0.0f64, 0usize);
+        let (mut phase_gain, mut phase_used, mut slices) = (0.0f64, 0usize, 0usize);
         let mut previous = (0.0f64, 0usize);
         loop {
             let reserve = hold(choice, posteriors);
@@ -3817,19 +3822,19 @@ where
             } else {
                 0.0
             };
-            if gsa {
-                phase_gain += gain;
-                phase_used += used;
-                let average = if phase_used > 0 {
-                    phase_gain / phase_used as f64
-                } else {
-                    0.0
-                };
-                if limit.is_some_and(|limit| average <= limit) {
-                    *winner = gained.then_some(choice);
-                    break;
-                }
+            phase_gain += gain;
+            phase_used += used;
+            slices += 1;
+            let average = if phase_used > 0 {
+                phase_gain / phase_used as f64
             } else {
+                0.0
+            };
+            if (gsa || slices >= ROUNDS_PER_ARM) && limit.is_some_and(|limit| average <= limit) {
+                *winner = gained.then_some(choice);
+                break;
+            }
+            if !gsa {
                 let (two, over) = (previous.0 + gain, previous.1 + used);
                 rate = if over > 0 { two / over as f64 } else { 0.0 };
                 previous = (gain, used);
