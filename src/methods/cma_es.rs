@@ -254,9 +254,20 @@ impl CmaEs {
     /// stops within ten generations of its last improvement larger than
     /// `tol`. Zero (the default) disables it.
     pub fn with_tol_fun_hist(mut self, tol: f64) -> Self {
+        self.set_tol_fun_hist(tol);
+        self
+    }
+
+    /// Replaces the [`CmaStop::TolFunHist`] tolerance from the next
+    /// generation on, as [`CmaEs::with_tol_fun_hist`] sets it.
+    pub fn set_tol_fun_hist(&mut self, tol: f64) {
         assert!(tol >= 0.0 && tol.is_finite(), "tol_fun_hist must be finite");
         self.tol_fun_hist = tol;
-        self
+    }
+
+    /// The [`CmaStop::TolFunHist`] tolerance; zero when disabled.
+    pub fn tol_fun_hist(&self) -> f64 {
+        self.tol_fun_hist
     }
 
     /// Whether the run keeps only the diagonal of its covariance.
@@ -847,6 +858,46 @@ mod tests {
             "history tolerance {hist_evals} against default {plain_evals}"
         );
         assert!(hist_best - 5.0 < 1e-3, "best {hist_best}");
+    }
+
+    #[test]
+    fn history_tolerance_set_mid_run_acts_as_if_set_at_the_start() {
+        // The tolerance only decides when the run stops, so setting it
+        // before the run would have stopped changes nothing else.
+        let n = 10;
+        let bounds = unit_box(n, 1.0);
+        let f = |x: ArrayView1<f64>| 5.0 + x.iter().map(|v| (v - 0.3).powi(2)).sum::<f64>();
+        let new = || {
+            CmaEs::new(
+                Array1::from_elem(n, 0.31).view(),
+                0.01,
+                default_lambda(n),
+                &bounds,
+                3,
+            )
+        };
+        let finish = |mut es: CmaEs, mut evals: usize| {
+            while es.stop_reason().is_none() {
+                let x = es.ask();
+                es.tell(f(x.view()));
+                evals += 1;
+            }
+            (evals, es.stop_reason(), es.best().1)
+        };
+        let from_start = finish(new().with_tol_fun_hist(5e-4), 0);
+        let mut es = new();
+        assert_eq!(es.tol_fun_hist(), 0.0);
+        let early = 5 * es.lambda();
+        for _ in 0..early {
+            let x = es.ask();
+            es.tell(f(x.view()));
+        }
+        assert_eq!(es.stop_reason(), None);
+        es.set_tol_fun_hist(5e-4);
+        assert_eq!(es.tol_fun_hist(), 5e-4);
+        assert!(early < from_start.0);
+        assert_eq!(finish(es, early), from_start);
+        assert_eq!(from_start.1, Some(CmaStop::TolFunHist));
     }
 
     #[test]

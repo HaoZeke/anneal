@@ -22,10 +22,10 @@ dimension, goes to one values-only loop over six arms.
 
 | Arm | Starts from |
 |-----+-------------|
-| =cma= | BIPOP CMA-ES centred on the incumbent: local runs with short steps, large-population runs with a box-wide step; separable above 100 dimensions or when the budget is shorter than the covariance learning horizon |
-| =qn= | finite-difference projected BFGS from the incumbent, kicked from it once converged |
-| =gsa= | one chain at the incumbent (dual_annealing's =x0=), quenched: each temperature step visits every coordinate once at the cooling visit scale, box-wide early and local late, and keeps only improvements; no local search |
-| =de= | best/1/bin with the incumbent as the first population member (differential_evolution's =x0=) |
+| =cma= | BIPOP CMA-ES centred on the incumbent: local runs with short steps, large-population runs with a box-wide step; separable above 100 dimensions or when the budget is shorter than the covariance learning horizon; a run stops once its recent best values span less than the success threshold in force |
+| =qn= | finite-difference projected BFGS from the incumbent, stopping on the resolution of its values, kicked from the incumbent once converged |
+| =gsa= | one chain from 10 dimensions, and below that one for every eight evaluations of its first slice, between two and four (the first at the incumbent as dual_annealing's =x0=, the others at seeded low-discrepancy points); quenched: each temperature step visits every coordinate once at the cooling visit scale, box-wide early and local late, and keeps only improvements; no local search; once another arm has lowered the incumbent below every chain, the worst chain goes on from there |
+| =de= | best/1/bin with the incumbent as the first population member (differential_evolution's =x0=) and the others at seeded low-discrepancy points over the box |
 | =surrogate= | an additive model fitted to every evaluation so far: one evaluation tests its per-coordinate minimum, then tempered samples from its marginals |
 | =explore= | QMC restarts over the whole box |
 
@@ -36,56 +36,314 @@ Without =x0= the start is the best of a seeded low-discrepancy design of
 larger, but at most the geometric mean of the budget and four gradients'
 worth: past 48 times 48 four-gradient slices the number of slices keeps
 growing, as the square root of the budget, instead of stopping at 48.
+The closing descent's reserve is ten gradients' worth of evaluations,
+=10(d+1)=, enough for a descent to converge, but at most 40% of the
+budget, and none when that leaves fewer than three gradients' worth.
+Turns shorter than eight evaluations are not played.
+
 When the budget affords five finite-difference gradients per
-coordinate, a descent from the start opens the run and continues while
-its slices lower the incumbent, up to convergence; its successes
-describe the start, so =qn= then rejoins the ranking on the prior.
+coordinate, =5d(d+1)= evaluations, a descent from the start opens the
+run and continues, up to convergence, while each slice lowers the
+incumbent by more than the success threshold and by more than =1e-4=
+times the largest of the last three gains opening slices have made from
+below the start's value, and while its last four slices have gained
+more, together, than =1e-4= times the largest such gain. One steep slice
+early on then does not end an opening whose descent still pays at the
+slower pace of a narrow valley (Rosenbrock on a wide box), while a
+descent that creeps along the floor of a side basin, gaining a little
+less on every slice, still ends instead of holding the whole run. The
+first slice from below the start is held to the gain of the slice from
+the start, which ends a descent into a side basin of a multimodal
+objective. Until the descent has lowered its own
+value from below the start's, a slice in which it stalls short of
+convergence, as when its first curvature pair spans a steep wall, or
+stops at the start's value, as when every neighbour of a start behind
+a sentinel shares it, gives =cma= the slice it takes first short of
+the opening budget, once per run, and the opening goes on from the
+incumbent =cma= leaves, where the descent restarts. The opening's
+successes describe the start, so =qn= then rejoins the ranking on the
+prior.
 
 With less, a descent from the start converges only by taking most of
 the run, which would leave =gsa= and =de= no turn, and separable
 multimodal objectives (shifted Rastrigin, Styblinski-Tang, Levy) need
-theirs. Such a run opens instead with one slice each of =cma= and the
-descent from the start, then two slices of =gsa= from the incumbent,
-whose quenched visits leave the start's basin one coordinate at a time,
-and then a descent turn that settles the basin they reach and, as in
-the rounds, keeps the turn while it pays.
+theirs. Such a run opens instead with one slice of =cma= from the
+start. The descent then keeps the turn until a slice, from its second
+on, gains less per evaluation than the one before, and =gsa=, whose
+quenched visits leave the descent's basin one coordinate at a time,
+takes over while each of its slices gains at least as fast as the
+descent would have gone on to: the descent's last gain per evaluation
+times its ratio to the one before. Until =gsa= has played, the descent
+also hands it the turn once fewer than three slices are left beyond the
+closing reserve: handing over only the last slice left =gsa= part of
+one at twenty to twenty-six evaluations per =d+1=, where the separable
+multimodal objectives need its slices. If =gsa='s
+first slice falls short, the descent goes on with its own descent, not
+restarting at what =gsa= found, and keeps the turn until the run has
+used twice the evaluations it had; the hand-over repeats until the
+descent stops paying or only the closing reserve is left. With =x0=,
+=gsa= therefore gets no turn below about =13.3(d+1) + 15= evaluations
+(100 dimensions at 1000 evaluations, 30 at 420) and, just above, one
+partial turn that takes what is left beyond the reserve (16 evaluations
+at 100 dimensions and 1375, 15 at 30 and 440).
 
 From there =gsa= and then =cma= each keep the turn while they pay. A
-phase ends once it has gone eight slices without lowering the
-incumbent, or as long as its last gain took if that is longer. After an
-opening it stops short of the closing descent plus one slice for each
-other arm not yet played, the next phase's included; without one, short
-of the closing descent plus one slice for =de= until it has played, since
-slices held there for the surrogate and the restart arm cost the phases
-more than those arms return. Against a descended incumbent a GSA record
-is a lower basin and a CMA-ES gain a better point of the same one; both
-come in bursts (records as the anneal cools, a run per covariance) that
-single slices would not see.
+phase ends once it has gone eight slices without a success that gains
+more than =1e-4= times the phase's largest gain, or as long as the last
+such success took if that is longer, so slices that gain crumbs do not
+keep it. =gsa='s first phase also ends once its gain per evaluation
+since the phase began is no more than that of the descent's last timed
+slice; when that slice kicked a converged descent or only confirmed
+convergence it gained nothing, and a phase that has gained nothing ends
+at its first slice. A =cma= phase that follows it without taking the
+turn ends the same way, but only from its eighth slice: on a rotated
+objective CMA-ES gains nothing until its step size and covariance have
+adapted, while on a smooth valley it would otherwise play slice after
+slice that gains a little where the descent had gained faster.
 
-Each arm not yet played then takes a turn (the warm-up round, as in
-the main bandit), after which a round picks uniformly with probability
-=1/round=, otherwise replays the arm whose last turn lowered the
-incumbent, and otherwise takes a discounted Thompson draw. A turn is one
-slice, except that =qn= keeps the turn while each slice lowers its
-descent's value by more than the success threshold, until that descent
-converges and short of the closing descent: a kicked descent climbs
-before it can beat the incumbent, and one from a poor start
-(Lennard-Jones positions with overlapping atoms) takes many slices to
-settle, so the turn is scored on the basin the descent reaches. A turn
-succeeds when it lowers the incumbent by more than =1e-4 max(|f|, s)=,
-where =s= is the resolution =eps |f|= of the start's value, fixed for
-the run. The main bandit's threshold floors at 1 instead and turns
-absolute below it; this one scales with the objective, as does a
-descent's first trial, whose largest move is 5% of a side whatever the
-gradient's size. Multiplying the objective by a power of two therefore
-leaves a run unchanged until the surrogate or the restart arm plays,
-whose temperatures are absolute, while a constant added to it still
-coarsens the threshold. The descent closes the run with the rest of the
-budget, which holds ten gradients' worth of evaluations back for it (at
-most 40% of the budget), enough for a descent to converge. It goes on
-with its current descent, which may be a kick from the incumbent, and
-restarts at the incumbent only if another arm has lowered it since =qn=
-last played.
+From its fifth slice on, a =gsa= slice that gains less than an eighth
+of the phase's best per evaluation lends =cma= a slice, and =cma= takes
+the turn if that slice gains faster per evaluation than both the =gsa=
+slice and an eighth of the phase's gain per evaluation so far. =gsa=
+then lends again only once the run has used twice the evaluations it
+had, and never after a lent slice that gained nothing. GSA's records
+come in bursts and the slice after one often gains nothing, while a
+=cma= slice lent from a record just made gains by refining it: lent
+early in a phase, or judged against the one slow slice alone, such a
+slice ended phases still finding lower basins (Rastrigin at 10
+dimensions). A phase =cma= took likewise lends =gsa= a slice when its
+last two slices gain less per evaluation than its lent slice had to
+beat, and hands the turn back if =gsa='s slice gains faster than those
+two did. The two alternate while a phase hands the other the turn, and
+=gsa= resumes after a phase =cma= took from it, for up to eight phases.
+If the bar on the first slice from below the start ended the opening
+before the descent converged, as from a far start on a curved valley,
+and =gsa='s first phase ends at its first slice, the descent takes a
+turn before =cma='s phase and keeps it while it pays. After an opening
+a phase, and that turn, stop short of the closing reserve plus one
+slice for each other arm not yet played, counted again at every slice;
+without one, short of the closing reserve plus one slice for =de= until
+it has played, since slices held there for the surrogate and the
+restart arm cost the phases more than those arms return. Against a
+descended incumbent a GSA record is a lower basin and a CMA-ES gain a
+better point of the same one; both come in bursts (records as the
+anneal cools, a run per covariance) that single slices would not see.
+
+Each arm not yet played then takes a turn, in the table's order (the
+warm-up round, as in the main bandit), while the budget holds eight
+evaluations beyond the closing reserve, so the last of them may be
+short. After it a round picks uniformly with probability =1/round=
+(rounds counted from the run's first slice), otherwise replays the arm
+whose last turn lowered the incumbent, and otherwise takes a discounted
+Thompson draw. A turn is one slice, except that =qn= keeps the turn
+while each slice lowers its descent's value by more than the success
+threshold, until that descent converges and short of the closing
+reserve: a kicked descent climbs before it can beat the incumbent, and
+one from a poor start (Lennard-Jones positions with overlapping atoms)
+takes many slices to settle, so the turn is scored on the basin the
+descent reaches.
+
+So short of the opening budget =cma= plays first, the descent next and
+=gsa= when the descent hands it the turn; after an opening =gsa='s
+phase plays first and =cma='s next. Where the budget left cannot hold
+a phase and the slices it leaves, the warm-up round gives each arm not
+yet played a turn in the table's order, as far as the budget goes. =de=
+plays in the warm-up round unless the hand-over between the descent and
+=gsa= has run into the closing reserve first (Rastrigin at 10
+dimensions and 500 evaluations, Lennard-Jones positions at 39 dimensions
+and 1000 evaluations), and afterwards mostly when a uniform pick falls
+on it. It seldom lowers the incumbent: its population spans the box,
+and a turn evolves it a few generations, too few to beat an incumbent
+the descent has settled, while on separable objectives =gsa='s
+one-coordinate visits make the moves its crossover would, and sooner.
+
+A turn succeeds when it lowers the incumbent by more than the success
+threshold in force when it began, =1e-4 max(g, s)=. =g= is the gain of
+the last slice that lowered the incumbent from below the start's value.
+=s=, the run's resolution, is =eps |f|= of the first value the run
+finds below the start's, but never less than =f64::MIN_POSITIVE=, which
+it is until then (when the start's value is not finite, every finite
+value is below it). The same threshold decides whether the opening goes
+on, whether a descent keeps its turn, whether a phase has gained, and
+when a CMA-ES run stops: =cma= sets each run's history tolerance to the
+threshold in force at every slice it plays. Gains are differences of
+values and slices from the start's value record nothing, so a constant
+added to the objective changes a threshold only through the resolution
+of the shifted values (the rounding of each gain, and =s=), the start's
+value sets none, and multiplying the objective by a power of two
+multiplies every threshold exactly. The descent likewise stops on the
+resolution of its values: an iteration is slow when it lowers its value
+by less than =8 eps= of it, a few units in the last place, and its
+first trial moves at most 5% of a side whatever the gradient's size.
+The surrogate and the restart arm take values in the run's unit, the
+power of two at or below the threshold in force when they play: the
+surrogate fits values, and sets its temperatures and their floors, in
+that unit, and the restart arm's chains weigh each rise in it against
+a temperature that starts at one, so they all but never take a rise as
+large as the last gain. Multiplying the objective by a power of two
+therefore leaves a run unchanged, short of overflow and underflow. The
+main bandit's threshold scales with =|f|= instead and floors at 1,
+turning absolute below it.
+
+The descent closes the run with the reserve and whatever shorter than
+eight evaluations is left before it. It goes on with its current
+descent, which may be a kick from the incumbent, and restarts at the
+incumbent only if another arm has lowered it since =qn= last played.
+
+** Measured costs
+
+Each rule above was measured over 40 paired seeds, with the loop's
+other rules in place, against the rule it replaced and against the
+alternatives tried for the rows it costs. A comparison reads
+/A against B (W/T/L)/: medians, and the seeds on which A wins, ties
+and loses; a row trails when a one-sided Wilcoxon test gives
+=p < 0.05=. Rows read =problem@budget= and start from =x0= unless
+marked: =ellS=, =rastS= and =stybS= are the shifted ellipsoid
+(conditioning =1e6=), Rastrigin and Styblinski-Tang, =ellR=, =rastR=,
+=stybR= and =levyR= rotated forms, =ackS= shifted Ackley, =levy=,
+=rosen=, =ackley= and =mich= Levy, Rosenbrock, Ackley and
+Michalewicz, =rast100_shift=, =rast10_shift=, =rast10_fixed=,
+=styb10_45= and =schwefel10_cec= further Rastrigin, Styblinski-Tang
+and CEC Schwefel variants, and =fit6= a six-parameter fit, each with
+its dimension. A suffix =+1e2=, =+1e4= or =-1e4= adds a constant to
+the objective and =x1e-6= or =x2^-20= multiplies it, values mapped
+back; a /control/ carries the same rounding without the change, as
+=(f + c) - c=. The loop trails on these rows, and putting the replaced
+rule back costs the rows named with it:
+
+- The rate hand-over short of the opening budget, against two fixed
+  =gsa= slices after the descent's first: =ellS30@1000= 1673 against
+  711 (7/0/33), =ellS50@5000= 6.88 against 1.52 (2/0/38),
+  =ellS100@5000= 1839 against 1110 (2/0/38), =ellS100@20000= 1.17
+  against 0.0282 (0/0/40), =ellR100@20000= 2.48 against 2.41
+  (19/0/21), =rosen100@20000= 74.9 against 72.0 (17/0/23),
+  =stybR30@1000= -1057 against -1057 (4/18/18), =levy100@20000=
+  0.0416 against 1.0e-11 (5/15/20), =rast100_shift@20000= 9.95 against
+  7.96 (9/3/28) and =rastS100@20000= 10.9 against 7.96 (8/3/29). With
+  the two slices back each comes level, but =ackS50@5000= is 4.31
+  against 2.94 and =ackS100@5000= 13.2 against 5.94 (1/0/39 each),
+  =ellR30@1000= 12557 against 5589 (3/0/37), =ellR100@5000= 20110
+  against 15750 (5/0/35) and =rosen100@5000= 252 against 168 (7/0/33).
+  Handing over once a descent slice gains less than an eighth of the
+  descent's best rate, instead of less than the slice before, narrows
+  =ellS30@1000= to 1235 and =ellS100@20000= to 0.291 but costs
+  =ellR30@1000=, 8339 against 5589 (0/28/12), and =ackS100@5000=, 6.22
+  against 5.94 (7/17/16). Leaving =gsa='s chain where it is when
+  another arm lowers the incumbent below it narrows =ellS50@5000= to
+  4.09 and =ellS100@20000= to 0.156 but costs =ackS50@5000=, 2.99
+  against 2.94 (0/29/11).
+- The opening's bar on its recent gains, against an opening that goes
+  on while each slice is a success: =ellS30@5000= 0.0626 against 0
+  (0/13/27) and =rosen30@5000= 22.2 against 16.2 (2/1/37), with that
+  row's copies (=+1e2= 22.5 against 16.7, 8/1/31; =x1e-6= 22.1 against
+  16.3 and =x2^-20= 22.2 against 16.2, 2/1/37 each) and controls (22.0
+  to 22.4 against 15.9 to 16.3, 2/1/37 each), and the =ellR30@5000=
+  controls for =+1e2= (2.8e-11 against 3.2e-12, 1/25/14), =+1e4=
+  (2.3e-4 against 1.4e-5, 2/17/21) and =-1e4= (8.7e-4 against 1.2e-5,
+  6/15/19). Without the bar these come level, but =ackS30@5000= is
+  3.8e-6 against 6.2e-7 (1/18/21), =levyR30@5000= 3.51 against 0.544
+  (5/0/35) and =levy30@5000= 7.2e-7 against 4.5e-10 (6/17/17).
+- The descent's resolution test, against a fixed =1e-12= tolerance:
+  =fit6@1000= -4.78 against -4.89 (3/20/17), and without =x0= -3.334
+  against -3.334 (1/32/7), with its =x2^-20= copy (the plain row's
+  runs), its =x1e-6= copy (-4.84 against -4.81, 6/19/15) and its
+  =+1e2= and =x1e-6= controls (-4.79 against -4.85 and -4.84 against
+  -4.88, 4/18/18 each); =ellR30@20000= and =ellR50@20000=, where five
+  and six seeds stop short of 0 (0/35/5, 0/34/6); and the =x1e-6=
+  control of =ellR30@5000= (1.2e-6 against 0, 2/19/19). With the
+  tolerance these come level, but the offset copies of =fit6@5000=
+  give back what the test won, =+1e2= -11.6 against -12.8 (9/9/22),
+  =+1e4= -9.33 against -12.6 (0/17/23) and =-1e4= -8.15 against -12.8
+  (0/24/16), and =fit6@5000= itself is -12.78 against -12.83
+  (12/10/18). A slow test at a fraction of the success threshold
+  brings the same rows level at a larger cost: =fit6@5000= -6.79
+  against -12.83, and its =+1e2= copy -7.94, behind the replaced
+  rules' -11.2.
+- Both of these: =ellR30@5000= 3.4e-8 against 0 (0/19/21), with its
+  =x1e-6= copy (9.2e-7 against 0, 0/17/23) and its =x2^-20= copy (the
+  plain row's runs), comes level only with both replaced rules back (0,
+  0/38/2, for the row and its =x1e-6= copy), at both sets of costs;
+  either alone leaves it behind (4.5e-25, 0/27/13, without the bar;
+  4.8e-23, 0/29/11, with the tolerance).
+- The success threshold on the last gain, against =1e-4 max(|f|, s)=:
+  =rastR100@20000= 870 against 833 (4/18/18) and the =+1e2= copy of
+  =levy30@5000=, 6.4e-11 against 4.3e-12 (5/22/13). With the
+  =|f|=-scaled threshold both come level (825, 9/21/10; 1.1e-12,
+  8/29/3), but the offset copies lose what the last-gain threshold won:
+  =rosen10@1000= with =+1e4= is 5.40 against 1.2e-10 (0/0/40),
+  =fit6@1000= with =+1e4= -0.847 against -4.67 (1/0/39) and at 5000
+  -6.16 against -12.6 (1/1/38), and =ellR30@5000= with =+1e4= 4.4e-3
+  against 2.9e-4 (0/6/34).
+- Lending from a =gsa= phase's fifth slice: =mich10@5000= -9.655
+  against -9.66 (3/28/9, =p= 0.021). Four seeds lose the closing
+  polish by 1.6e-8 to 4.8e-6, three lose the basin after =cma= takes
+  the turn from a lent slice and converges in a side basin, and two end
+  in a nearby basin. No tried rule keeps it and the other rows level.
+  Lending from any slow slice brings it level (6/22/12) but puts
+  =mich10@5000= without =x0= (6/20/14, =p= 0.045), =rast10_shift@1000=
+  (2/32/6, =p= 0.043) and =styb10_45@1000= without =x0= (0/35/5, =p=
+  0.031) behind; lending from the fourth slice leaves it behind
+  (4/28/8, =p= 0.046) with =rast10_fixed@1000= and
+  =schwefel10_cec@1000= behind too, and from the sixth (5/25/10) with
+  five Rastrigin rows behind; holding the lent slice to a quarter of
+  the phase's gain per evaluation brings it level (4/26/10, =p= 0.052)
+  but =ackley10@1000= to 1.16 against 0.0694; a fifth, a sixth or a
+  half leave it behind (3/27/10, 3/27/10, 4/25/11), and so does ending
+  a phase =cma= took once its last two slices gain less than an eighth
+  or a 64th of its bar (4/25/11, 4/27/9), which also costs
+  =ackS30@5000= (1.2e-5 and 1.4e-6 against 6.2e-7). The fifth-slice
+  lend and phases that keep the turn while they still find lower
+  basins also trail the rules they replaced on =ackS30@20000=, 8.6e-7
+  against 6.3e-7 (12/1/27, =p= 0.048; 3.9e-7 with lending from any
+  slow slice), and on =ackley10@5000= without =x0=, 4.1e-11 against
+  3.2e-11 (6/23/11), with its =-1e4= copy (1.8e-10 against 2.0e-10,
+  6/26/8) and its =+1e4= and =-1e4= controls (2.1e-11 against 3.2e-11,
+  5/27/8 each): longer =gsa= phases leave the cone at Ackley's minimum
+  unrefined on a few seeds.
+- Rotated ellipsoids short of the opening budget trail an earlier form
+  of this loop by three to four times, =ellR50@1000= 1.38e5 against
+  4.79e4, =ellR50@5000= 37.7 against 9.20 and =ellR100@20000= 2.48
+  against 0.633, and by two on =ellR30@1000=, 5589 against 2987.
+  Letting the descent keep the turn
+  while it pays brings =ellR50@5000= to 17.4 and
+  =ellR100@20000= to 0.890 (40/0/0 each) and leaves =ellR50@1000=
+  where it is, but costs =ellR30@1000=, 20880 against 5589 (0/7/33),
+  =ellR100@5000=, 41370 against 15750 (5/0/35), =ackS50@5000=, 3.26
+  against 2.94 (11/0/29), =ackS100@5000=, 9.86 against 5.94 (1/0/39),
+  =levy100@5000=, 8.83 against 2.765 (2/0/38), =rosen50@5000=, 43.8
+  against 40.1 (5/0/35), and =stybS100@5000=, -3860 against -3902
+  (4/2/34).
+
+Of the 88 offset and =x1e-6= copies, six trail their control at
+=p < 0.05=, where chance alone gives about four and none passes a
+correction for the 88 tests: =fit6@1000= with =+1e2= (-4.82 against
+-4.79, 16/0/24), =ackS30@5000= with =+1e2= (1.05e-6 against 6.9e-7,
+11/8/21), =ackley10@5000= with =+1e4= (1.6e-10 against 2.1e-11,
+2/32/6), =ellR30@1000= with =-1e4= (5589 against 5589, 12/0/28, the
+runs differing by about =1e-6= of the value) and =rosen30= with
+=x1e-6= at 1000 (74.1 against 74.1, 12/1/27) and at 5000 (22.1 against
+22.0, 14/0/26). Every =x2^-20= copy repeats its plain row run for run,
+and the Lennard-Jones starts with overlapping atoms or a =1e30=
+sentinel stay level with their control starts.
+
+On rotated multimodal objectives the loop trails 0.10.0, whose
+diffusion Monte Carlo population follows the landscape's global trend
+before anything has descended: =rastR30@1000= 281 against 173
+(3/0/37), =rastR50@5000= 427 against 296 (1/0/39), =rastR100@5000=
+893 against 650 (9/0/31), =rastR100@20000= 870 against 470 (1/0/39),
+=levyR50@5000= 98.8 against 69.8 (8/0/32) and =levyR100@20000= 203
+against 108 (0/0/40). One-coordinate visits seldom improve a rotated
+landscape. That population arm in =de='s place moves at most three
+seeds on any of these rows and leaves each behind; =de= with crossover
+rate one, whose moves a rotation leaves unchanged, and with the
+incumbent in place of its worst member before each turn, repeats the
+loop's results to within the last bit. Starting a =cma= run with four
+times the default population and a box-wide step at each phase brings
+=rastR50@5000= level (313, 20/0/20) and =rastR100@20000= to 749
+(15/0/25, =p= 0.25), leaves the other four rows behind, and costs
+=ackS30@5000=, 2.01 against 6.2e-7 (1/5/34). The =|f|=-scaled
+threshold brings =rastR100@20000= to 825, still behind (5/0/35), and
+two fixed =gsa= slices short of the opening budget leave it at 873.
 
 * Regimes → preferred portfolio arms / kernels
 
@@ -108,26 +366,34 @@ The rows are tested in this order, so a wide box with a gradient is
 
 - In the main bandit the restart arm (=explore=) always remains first so
   Borel–Cantelli restart still fires. In the values-only loop the floor
-  the guarantee needs is asymptotic. The opening runs while it improves
-  by the success threshold, which cannot last on a bounded objective,
-  and after that every arm keeps a uniform share and is pulled infinitely
-  often as the budget grows. The phases and the descent's turns stop for
-  the same reason: each success lowers the incumbent, and each slice that
-  extends a turn lowers its descent, by at least =1e-4 s=, where the
-  floor =s= is positive and fixed once the start is evaluated, so a
-  bounded objective allows a number of them that does not grow with the
-  budget, while the number of slices does. The =1/round= picks, whose sum
-  diverges, then reach every arm. At a given budget nothing is reserved
-  for the floor. Short of the opening budget =gsa= plays right after the
-  descent's first slice whenever a slice is left beyond the closing
-  descent. The warm-up round gives =de=, =surrogate= and =explore= (and,
-  after an opening, =gsa=) a slice each when the budget left after the
-  opening or the first turns, the phases and the descent's turns holds
-  those slices and the closing descent. The phases leave room for all of
-  them after an opening and for =de= without one; a descent's turn does
-  not. On Lennard-Jones positions at 39 dimensions and 1000 evaluations
-  =gsa= takes the two turns after the descent's first slice, the closing
-  descent the rest, and =de=, =surrogate= and =explore= do not play.
+  the guarantee needs is asymptotic in the budget. From the opening
+  budget on, the opening goes on only while its slices succeed, a phase
+  ends once it has gone eight slices, or as long as its last gain took,
+  without a success, at most eight phases play, and a descent keeps its
+  turn only while each slice
+  lowers its value by more than the success threshold. Every success
+  lowers the incumbent, and every slice that extends a descent's turn
+  lowers that descent's value, by more than =1e-4 s=, and the resolution
+  =s= is positive, changes at most once (when the run first finds a
+  value below the start's) and never falls below =f64::MIN_POSITIVE=, so
+  a bounded objective allows a number of them, and so a length of the
+  opening, of each phase and of each descent's turn, that does not grow
+  with the budget, while the number of slices does. The =1/round=
+  picks, whose sum diverges, then reach every arm. At a given budget
+  nothing is reserved for the floor. Short of the opening budget =gsa=
+  takes the turn when the descent's gain per evaluation falls, once
+  fewer than three slices are left beyond the closing reserve, or after
+  a descent that
+  converges first, whenever eight evaluations are left beyond that
+  reserve. The warm-up round gives =de=, =surrogate= and =explore= a
+  slice each when the budget left after the first turns, the phases and
+  the descent's turns holds those slices and the closing descent. The
+  phases leave room for all of them after an opening and for =de=
+  without one; a descent's turn does not. On Lennard-Jones positions at
+  39 dimensions and 1000 evaluations =cma= takes the first slice, the
+  descent the next and =gsa= the two left short of the closing reserve
+  (279 evaluations), the closing descent takes the rest, and =de=,
+  =surrogate= and =explore= do not play.
 - Unknown features fall to =Default= (safe fallback).
 - Policy biases Beta priors and arm *order*, not hard exclusion (except
   noise-aware accept requirement under =StochasticNoise=).

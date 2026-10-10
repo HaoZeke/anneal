@@ -15,9 +15,8 @@ const DIM: usize = 16;
 const SEED: u64 = 17;
 const VISIT_Q: f64 = 2.62;
 const INITIAL_TEMP: f64 = 5230.0;
-/// Recorded quenched moves the replay builds. The warm-up spends two GSA
-/// slices and then yields to another arm, so the replay runs past that
-/// yield into the resumed chain.
+/// Recorded quenched moves the replay builds. A slice that ends mid-strategy
+/// finishes that temperature step, so the replay runs only up to the yield.
 const REPLAY_LEN: usize = 12 * DIM;
 
 fn bounds() -> Bounds<f64> {
@@ -97,12 +96,18 @@ fn replica_origin(replica: usize) -> Array1<f64> {
     Array1::from_shape_fn(DIM, |_| -2.0 + 4.0 * rng.random::<f64>())
 }
 
-fn gsa_seed(replica: usize) -> u64 {
-    // The values-only GSA chain is this mix of the replica seed. It does
-    // not follow the shared arm generator.
+fn arm_seeds(replica: usize) -> Vec<u64> {
+    // Each arm call draws once from the replica seed and mixes the draw
+    // with the call count. The quenched chain is one of the first calls:
+    // CMA-ES, the descent's paying slices, then GSA.
     let replica_seed = SEED ^ (replica as u64).wrapping_mul(0x9E37_79B9);
-    let front = (replica_seed ^ 0xBEEF).wrapping_add(2);
-    StdRng::seed_from_u64(front).random::<u64>() ^ 2
+    let mut rng = StdRng::seed_from_u64(replica_seed);
+    (1..=8)
+        .map(|call| {
+            let drawn = rng.random::<u64>();
+            drawn ^ call
+        })
+        .collect()
 }
 
 /// Quenched dual-annealing strategy: the all-coordinate half is skipped,
@@ -175,27 +180,32 @@ fn strategy_start(
     replica: usize,
 ) -> (usize, usize, u64, Vec<Array1<f64>>) {
     let origin = replica_origin(replica);
-    let seed = gsa_seed(replica);
-    let replay = quenched_replay(&origin, seed, REPLAY_LEN);
-    let found: Vec<_> = traces
-        .iter()
-        .enumerate()
-        .filter_map(|(trace, positions)| {
-            if positions.first() != Some(&origin) {
-                return None;
-            }
-            positions
-                .windows(DIM)
-                .position(|window| window == &replay[..DIM])
-                .map(|index| (trace, index))
-        })
-        .collect();
+    let mut hits = Vec::new();
+    for seed in arm_seeds(replica) {
+        let replay = quenched_replay(&origin, seed, REPLAY_LEN);
+        let found: Vec<_> = traces
+            .iter()
+            .enumerate()
+            .filter_map(|(trace, positions)| {
+                if positions.first() != Some(&origin) {
+                    return None;
+                }
+                positions
+                    .windows(DIM)
+                    .position(|window| window == &replay[..DIM])
+                    .map(|index| (trace, index))
+            })
+            .collect();
+        if found.len() == 1 {
+            hits.push((found[0], seed, replay));
+        }
+    }
     assert_eq!(
-        found.len(),
+        hits.len(),
         1,
         "replica {replica}: the quenched GSA epoch must be uniquely identified"
     );
-    let (trace, index) = found[0];
+    let ((trace, index), seed, replay) = hits.remove(0);
     assert!(index + REPLAY_LEN < traces[trace].len());
     (trace, index, seed, replay)
 }
@@ -252,7 +262,7 @@ fn shared_scalar_gsa_preserves_coordinate_support_with_effective_separation() {
 }
 
 #[test]
-fn private_scalar_gsa_resumes_its_partial_strategy_after_other_arms() {
+fn private_scalar_gsa_does_not_resume_a_slice_that_gained_nothing() {
     let (result, traces) = run(false);
     for replica in 0..2 {
         let (which, start, _, replay) = strategy_start(&traces, replica);
@@ -263,9 +273,9 @@ fn private_scalar_gsa_resumes_its_partial_strategy_after_other_arms() {
             .find(|arm| arm.name == "gsa")
             .unwrap()
             .pulls;
-        assert!(
-            gsa_pulls > 1,
-            "the quenched GSA must be pulled again after its first slice"
+        assert_eq!(
+            gsa_pulls, 1,
+            "a quenched slice that gains nothing ends that phase"
         );
 
         let prefix = replay
@@ -275,14 +285,18 @@ fn private_scalar_gsa_resumes_its_partial_strategy_after_other_arms() {
             .count();
         assert!(prefix >= DIM, "the first quenched epoch must replay");
         assert!(prefix < replay.len(), "another arm must intervene");
-        assert_ne!(prefix % DIM, 0, "the strategy must be partial");
-        let continuations = trace[start + prefix..]
-            .windows(replay.len() - prefix)
-            .filter(|positions| *positions == &replay[prefix..])
-            .count();
+        let tail = replay.len() - prefix;
+        let continuations = if tail == 0 {
+            0
+        } else {
+            trace[start + prefix..]
+                .windows(tail)
+                .filter(|positions| *positions == &replay[prefix..])
+                .count()
+        };
         assert_eq!(
-            continuations, 1,
-            "replica={replica}, prefix={prefix}, gsa_pulls={gsa_pulls}: the unfinished strategy must resume"
+            continuations, 0,
+            "replica={replica}, prefix={prefix}, gsa_pulls={gsa_pulls}: a yielded strategy is not resumed"
         );
     }
 }

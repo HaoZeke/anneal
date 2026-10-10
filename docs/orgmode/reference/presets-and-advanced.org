@@ -24,7 +24,7 @@ evaluation, so a run makes =1 + n_epochs * steps_per_epoch= calls.
 =run_qmc= and =global_optimize= take =x0= as well.
 =low=, =high= and =x0= may be any array-like of one shape, flattened in C order.
 A coordinate with =low == high= stays fixed. A NaN objective value counts as
-worse than every finite value, so it is never kept as the best.
+worse than every number, =+inf= included, so it is never kept as the best.
 
 * Pilot and low-discrepancy
 
