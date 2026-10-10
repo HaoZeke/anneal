@@ -165,8 +165,8 @@ global trend before anything has descended: rotated Rastrigin at 30
 dimensions and 1000 evaluations, at 50 and 5000 and at 100 and 5000 or
 20000, and rotated Levy at 50 dimensions and 5000 and at 100 and 20000.
 One-coordinate visits seldom improve a rotated landscape, and that
-population arm, tried in =de='s place, gets a turn or two, each from a
-descended incumbent, and gains nothing in them.
+population arm, tried in =de='s place, gets at most a turn or two, each
+from a descended incumbent, and seldom lowers it.
 
 * Regimes → preferred portfolio arms / kernels
 
