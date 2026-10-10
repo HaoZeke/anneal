@@ -122,9 +122,10 @@ pub struct Config {
     /// to exchange states with the next one up, the hottest with the coldest,
     /// and that rung hops next. The offer is accepted by the bias-exchange
     /// factor that each rung's bias evaluated at both states gives, at the
-    /// temperatures the two rungs would hop at from the states they hold; with
-    /// equal biases it is the Metropolis exchange of
-    /// [`crate::exchange::MetropolisExchange`].
+    /// temperatures the two rungs would hop at from the states they hold, and
+    /// the funnel and energy biases every rung shares weigh in by the
+    /// difference of the two inverse temperatures. With equal biases it is the
+    /// Metropolis exchange of [`crate::exchange::MetropolisExchange`].
     ///
     /// A rung's temperature is what its acceptance, its deposits and the swap
     /// read; proposals keep the move scale `temperature` sets on every rung, as

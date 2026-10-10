@@ -906,6 +906,27 @@ fn rung_height(cfg: &Config, n_rep: usize, ratio: f64) -> f64 {
     }
 }
 
+/// Log acceptance of rungs `k` and `j` exchanging the states they hold.
+///
+/// Rung `k` hops on `exp(-(E + V_k + S) / T_k)`, with `V_k` its own bias and
+/// `S` the biases every rung shares. `own_k` is `E + V_k` at the state rung
+/// `k` holds and at the one rung `j` holds, `own_j` is `E + V_j` at the state
+/// rung `j` holds and at rung `k`'s, and `shared` is `S` at rung `k`'s state
+/// and at rung `j`'s. `S` is one function on every rung, so it enters only
+/// through the difference of the inverse temperatures and drops out of a flat
+/// ladder.
+fn swap_log_acceptance(
+    own_k: [f64; 2],
+    own_j: [f64; 2],
+    shared: [f64; 2],
+    t_k: f64,
+    t_j: f64,
+) -> f64 {
+    (own_k[0] - own_k[1]) / t_k
+        + (own_j[0] - own_j[1]) / t_j
+        + (shared[0] - shared[1]) * (1.0 / t_k - 1.0 / t_j)
+}
+
 fn run_full<'g, R, H>(
     cfg: &Config,
     start: ArrayView1<f64>,
@@ -3271,10 +3292,17 @@ where
                     //
                     //   ln a = (1/T_k)[U_k(x_k) - U_k(x_j)]
                     //        + (1/T_j)[U_j(x_j) - U_j(x_k)]
+                    //        + (1/T_k - 1/T_j)[S(x_k) - S(x_j)]
                     //
-                    // with U_k(x) = E(x) + V_k(x). It reduces to the plain
-                    // Metropolis swap when the biases are equal, which is what
-                    // Exchange supplies and what this generalises.
+                    // with U_k(x) = E(x) + V_k(x) and S the biases every rung
+                    // hops on. It reduces to the plain Metropolis swap when
+                    // the biases are equal, which is what Exchange supplies
+                    // and what this generalises.
+                    //
+                    // S is the funnel bias and the energy bias, which take the
+                    // deposits of whichever rung is hopping. The packing pile
+                    // is keyed on the basin a chain stands in, which a parked
+                    // rung does not carry, and is left out.
                     //
                     // T_k is the temperature rung k would hop at from the
                     // state it holds, by the same rule as a hop and without
@@ -3297,8 +3325,20 @@ where
                     let vk_xj = biases[k].potential(biases[k].cv(xj.view()).view());
                     let vj_xj = biases[j].potential(biases[j].cv(xj.view()).view());
                     let vj_xk = biases[j].potential(biases[j].cv(xk.view()).view());
-                    let log_a = ((ek + vk_xk) - (ej + vk_xj)) / temperature_of(k, ek).max(1e-12)
-                        + ((ej + vj_xj) - (ek + vj_xk)) / temperature_of(j, ej).max(1e-12);
+                    let shared = |state: &Array1<f64>, energy: f64| {
+                        spectral
+                            .as_ref()
+                            .map(|sp| sp.potential(sp.cv(state.view()).view()))
+                            .unwrap_or(0.0)
+                            + ebias.as_ref().map(|b| b.at(energy)).unwrap_or(0.0)
+                    };
+                    let log_a = swap_log_acceptance(
+                        [ek + vk_xk, ej + vk_xj],
+                        [ej + vj_xj, ek + vj_xk],
+                        [shared(&xk, ek), shared(&xj, ej)],
+                        temperature_of(k, ek).max(1e-12),
+                        temperature_of(j, ej).max(1e-12),
+                    );
                     let p = if log_a >= 0.0 { 1.0 } else { log_a.exp() };
                     if rng.random::<f64>() < p {
                         swaps_accepted += 1;
@@ -4512,6 +4552,41 @@ mod tests {
         }
         assert!((rung_height(&cfg, 4, ratios[3]) - cfg.bias_height).abs() < 1e-12);
         assert!(rung_height(&cfg, 4, ratios[0]) < cfg.bias_height);
+    }
+
+    /// With one bias on both rungs and nothing shared the swap is the
+    /// Metropolis exchange. What every rung shares drops out of a flat ladder
+    /// and otherwise weighs as if it were part of each rung's own bias.
+    #[test]
+    fn the_swap_weighs_shared_biases_by_the_temperature_difference() {
+        use crate::exchange::{Exchange, MetropolisExchange};
+        let (t_k, t_j) = (0.8, 2.0);
+        let (u_k, u_j) = (-40.0, -38.5);
+        let log_a = swap_log_acceptance([u_k, u_j], [u_j, u_k], [0.0, 0.0], t_k, t_j);
+        let metropolis: f64 = MetropolisExchange.swap_accept_prob(u_k, t_k, u_j, t_j);
+        assert!(metropolis < 1.0);
+        assert!((log_a.exp() - metropolis).abs() < 1e-12);
+
+        let own_k = [-40.0, -38.0];
+        let own_j = [-37.5, -39.0];
+        let shared = [3.0, -2.0];
+        assert_eq!(
+            swap_log_acceptance(own_k, own_j, shared, 1.3, 1.3),
+            swap_log_acceptance(own_k, own_j, [0.0, 0.0], 1.3, 1.3)
+        );
+        let folded = swap_log_acceptance(
+            [own_k[0] + shared[0], own_k[1] + shared[1]],
+            [own_j[0] + shared[1], own_j[1] + shared[0]],
+            [0.0, 0.0],
+            t_k,
+            t_j,
+        );
+        let split = swap_log_acceptance(own_k, own_j, shared, t_k, t_j);
+        assert!((folded - split).abs() < 1e-12 * folded.abs().max(1.0));
+        assert!(
+            (split - swap_log_acceptance(own_k, own_j, [0.0, 0.0], t_k, t_j)).abs() > 1.0,
+            "the shared terms should matter between two temperatures"
+        );
     }
 
     #[test]

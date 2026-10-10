@@ -441,7 +441,7 @@ Key types and functions: =BudgetWindowTemperature= (src/allocate.rs:34).
 
 Constants and defaults: config knob =theta= (must lie strictly below 2),
 =budget_window= toggle (config.rs:94-106). =Config::derived= sets
-=theta = 0.5=, i.e. the midpoint of the descent window (config.rs:766-780).
+=theta = 0.5=, i.e. the midpoint of the descent window (config.rs:767-781).
 
 Feeds/consumes: replaces the fixed =temperature= field when enabled; the
 gap is measured against the incumbent and the barrier estimated from
@@ -1431,11 +1431,11 @@ What it is: the classical-SA replica-exchange mechanism, a geometric
 temperature ladder with periodic swap attempts satisfying detailed
 balance by construction, generic over the =Exchange= trait's swap rule.
 Distinct from cluster hopping's own =replicas=/=swap_period= ladder
-(src/methods/cluster_hopping/config.rs:116-144), which drives the
+(src/methods/cluster_hopping/config.rs:116-145), which drives the
 cluster-specific chain rather than the typed-algebra =Sampler=. There
 one rung hops at a time on the shared budget, each with its own basin
 bias, and rung =k= of =R= hops at =ladder_top^(k/(R-1))= times the
-temperature a single chain would hop at (config.rs:491-496): the fixed
+temperature a single chain would hop at (config.rs:492-497): the fixed
 =temperature=, the budget-window law's temperature, or the statistical
 estimate clamped to its band around =temperature=. Every =swap_period=
 hops the active rung offers to exchange states with the next one up,
@@ -1456,7 +1456,9 @@ computes its swap inline rather than routing through =Exchange= or
 =Sampler= drivers. Each rung samples its own bias-tilted distribution,
 so the factor evaluates each rung's bias at both states, at the
 temperatures the two rungs would hop at from the states they hold, and
-reduces to the =MetropolisExchange= rule when the biases are equal.
+the funnel and energy biases all rungs share enter through the
+difference of the two inverse temperatures. It reduces to the
+=MetropolisExchange= rule when the biases are equal.
 
 ** Warm L-BFGS
 
