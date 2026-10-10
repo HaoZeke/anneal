@@ -1854,7 +1854,25 @@ impl<O: Objective<f64>> Gradient<f64> for BudgetedFiniteDiffGradient<'_, O> {
                     minus = neighbour;
                 }
             }
+            if plus == x[i] && minus == x[i] {
+                continue;
+            }
             if plus == x[i] || minus == x[i] {
+                // One neighbour remains inside the box. The difference is
+                // one-sided from the centre.
+                let probe = if plus != x[i] { plus } else { minus };
+                let mut xs = x.to_owned();
+                xs[i] = probe.clamp(low, high);
+                if xs[i] == x[i] {
+                    continue;
+                }
+                let fs = self.obj.eval(xs.view());
+                let fc = self.obj.eval(x);
+                if fs.is_finite() && fc.is_finite() {
+                    g[i] = (fs - fc) / (xs[i] - x[i]);
+                } else {
+                    g[i] = f64::NAN;
+                }
                 continue;
             }
             let mut xp = x.to_owned();
