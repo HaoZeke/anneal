@@ -573,6 +573,8 @@ pub fn penalty_groups(
 pub struct SurfacePortfolio {
     arms: Vec<Option<TwoPhase>>,
     allocator: DepthAllocator,
+    /// Local rewards when no occupied source is set. Imports do not write here.
+    own_moments: Vec<RewardMoments>,
     /// When set, draws and credits for the occupied source go through this book.
     shared: Option<SharedSurfaceAllocator>,
     /// Validated source occupied when the current block opened.
@@ -635,6 +637,7 @@ impl SurfacePortfolio {
         let _ = parameters;
         Self {
             allocator: DepthAllocator::new(arms.len()),
+            own_moments: vec![RewardMoments::default(); arms.len()],
             arms,
             shared: None,
             occupied: None,
@@ -731,6 +734,9 @@ impl SurfacePortfolio {
     }
 
     fn credit_arm(&mut self, arm: usize, reward: f64) {
+        if self.own_moments[arm].observe(reward).is_err() {
+            return;
+        }
         self.allocator.update(arm, reward);
     }
 
@@ -853,15 +859,27 @@ impl SurfacePortfolio {
     /// Imports are not included. With no occupied source every arm count is
     /// zero, so a coordinator exchange still names one schema and one arm count.
     pub fn report(&self) -> SurfaceReport {
-        let arms = self
-            .occupied
-            .as_ref()
-            .and_then(|key| self.own_by_source.get(key).cloned())
-            .unwrap_or_else(|| vec![RewardMoments::default(); self.arms.len()]);
+        let arms = if let Some(key) = &self.occupied {
+            self.own_by_source
+                .get(key)
+                .cloned()
+                .unwrap_or_else(|| vec![RewardMoments::default(); self.arms.len()])
+        } else {
+            self.own_moments.clone()
+        };
         SurfaceReport {
             schema: self.evidence_schema(),
             arms,
         }
+    }
+
+    /// Peer observations stored by import, across every occupied source.
+    pub fn peer_observations(&self) -> u64 {
+        self.peer_by_source
+            .values()
+            .flat_map(|arms| arms.iter())
+            .map(|arm| arm.count)
+            .sum()
     }
 
     /// Replace peer evidence for the occupied source.
