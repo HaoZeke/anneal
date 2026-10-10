@@ -7120,8 +7120,10 @@ mod tests {
         // its recent bests span less than the success threshold, so that
         // restart comes as soon as the local run has converged to the
         // resolution the portfolio scores, the threshold at the incumbent,
-        // after 259 evaluations; a run that went on to a finer resolution
-        // would take about twice as many. The minimum value 10 keeps the
+        // after 259 evaluations. The bound of 400 catches a run held to a
+        // threshold a million times finer (525 evaluations) or one that
+        // goes on to the plain stop (602), not one held to a threshold up
+        // to ten thousand times finer (399). The minimum value 10 keeps the
         // threshold well above the relative tolerance of a plain stop.
         use crate::methods::cma_es::CmaStop;
         let (dim, budget, seed) = (4usize, 4000usize, 7u64);
