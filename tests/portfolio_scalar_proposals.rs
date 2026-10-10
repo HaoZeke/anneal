@@ -190,8 +190,9 @@ fn gsa_initial_population_uses_peer_corrected_measured_positions() {
         // The front-loaded DE and GSA arms have independent seeded streams.
         // Identify GSA initialization by its generating stream, not a callback index.
         let replica_seed = 17 ^ (replica as u64).wrapping_mul(0x9E37_79B9);
-        let front_seed = (replica_seed ^ 0xBEEF).wrapping_add(2);
-        let gsa_seed = StdRng::seed_from_u64(front_seed).random::<u64>() ^ 2;
+        let mut naming = StdRng::seed_from_u64(replica_seed);
+        let _cma = naming.random::<u64>();
+        let gsa_seed = naming.random::<u64>() ^ 2;
         let starts = shifted_low_discrepancy_points(
             &private.bounds,
             1,
