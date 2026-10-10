@@ -192,11 +192,17 @@ incumbent only if another arm has lowered it since =qn= last played.
 
 ** Measured costs
 
-Each rule above was measured over 40 paired seeds, with the loop's
-other rules in place, against the rule it replaced and against the
-alternatives tried for the rows it costs. A comparison reads
-/A against B (W/T/L)/: medians, and the seeds on which A wins, ties
-and loses, two runs tying when their values differ by at most
+Each rule above was measured over 40 paired seeds. The first figures
+under each rule set the loop against its form before these rules,
+which differs from it in every rule, or, where said, against the form
+the lend and phase rules were added to; they show what the loop
+trails, not what that rule alone costs. The figures for putting the
+replaced rule back, and for the alternatives tried, change that one
+rule and hold the loop's other rules in place: they are set against
+the loop where they cost a row, and against its form before these
+rules where they bring a row level or put one behind. A comparison
+reads /A against B (W/T/L)/: medians, and the seeds on which A wins,
+ties and loses, two runs tying when their values differ by at most
 =1e-9 max(1, |b|)=, =b= being B's (an absolute =1e-9= below one); a
 row trails when a one-sided Wilcoxon test on the seeds that do not tie
 gives =p < 0.05=. Rows read =problem@budget= and start from =x0= unless
@@ -293,15 +299,15 @@ rule back costs the rows named with it:
   half leave it behind (3/27/10, 3/27/10, 4/25/11), and so does ending
   a phase =cma= took once its last two slices gain less than an eighth
   or a 64th of its bar (4/25/11, 4/27/9), which also costs
-  =ackS30@5000= (1.2e-5 and 1.4e-6 against 6.2e-7). The fifth-slice
-  lend and phases that keep the turn while they still find lower
-  basins also trail the rules they replaced on =ackS30@20000=, 8.6e-7
-  against 6.3e-7 (12/1/27, =p= 0.048; 3.9e-7 with lending from any
-  slow slice), and on =ackley10@5000= without =x0=, 4.1e-11 against
-  3.2e-11 (6/23/11), with its =-1e4= copy (1.8e-10 against 2.0e-10,
-  6/26/8) and its =+1e4= and =-1e4= controls (2.1e-11 against 3.2e-11,
-  5/27/8 each): longer =gsa= phases leave the cone at Ackley's minimum
-  unrefined on a few seeds.
+  =ackS30@5000= (1.2e-5 and 1.4e-6 against 6.2e-7). With phases that
+  keep the turn while they still find lower basins, the fifth-slice
+  lend also trails the form the two were added to on =ackS30@20000=,
+  8.6e-7 against 6.3e-7 (12/1/27, =p= 0.048; 3.9e-7 with lending from
+  any slow slice), and on =ackley10@5000= without =x0=, 4.1e-11
+  against 3.2e-11 (6/23/11), with its =-1e4= copy (1.8e-10 against
+  2.0e-10, 6/26/8) and its =+1e4= and =-1e4= controls (2.1e-11 against
+  3.2e-11, 5/27/8 each): longer =gsa= phases leave the cone at
+  Ackley's minimum unrefined on a few seeds.
 - Rotated ellipsoids short of the opening budget trail an earlier form
   of this loop by three to four times, =ellR50@1000= 1.38e5 against
   4.79e4, =ellR50@5000= 37.7 against 9.20 and =ellR100@20000= 2.48

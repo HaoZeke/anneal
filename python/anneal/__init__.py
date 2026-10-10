@@ -901,9 +901,9 @@ def global_optimize(
     cannot last on a bounded objective, and after that every arm keeps a
     uniform share and is pulled infinitely often as the budget grows.
 
-    Measured over 40 paired seeds, these rules trail the ones they
-    replaced on some rows, each listed with its numbers, and with what
-    the replaced rule costs elsewhere, in the documentation's regime
+    Measured over 40 paired seeds, the loop trails its form before these
+    rules on some rows, each listed with its numbers and what the
+    replaced rule costs elsewhere, in the documentation's regime
     auto-selection notes: the short-budget hand-over on shifted
     ellipsoids at 30 dimensions and 1000 evaluations, 50 and 100 at 5000
     and 100 at 20000, on the 100-dimensional rotated ellipsoid,
