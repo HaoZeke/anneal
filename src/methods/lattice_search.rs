@@ -28,11 +28,16 @@
 //! one well distance, since every site sits at that distance from the three
 //! atoms of its triangle.
 //!
-//! Every potential evaluation is charged to a [`Ledger`]. A quench step is one
-//! value-and-gradient call. A lattice step evaluates pair terms only and is
-//! charged the fraction of a full evaluation its pair count represents, the
-//! convention [`Ledger::charge_frac`] documents. Building the lattice and
-//! choosing sites is geometry and calls no potential.
+//! Every value-and-gradient call is charged as one call; lattice pair terms
+//! are charged at their fraction of the n(n-1)/2 pairs of a full evaluation
+//! and settled in whole calls; under one call per chain can be outstanding at
+//! a first hit or at the end of a run. Each chain has its own [`Ledger`], and
+//! the pair terms go through [`Ledger::charge_frac`]. A search pays for its
+//! atom and site energies and for each move before computing them, and for the
+//! scan that chooses a move just after it. A ledger that runs dry paying for a
+//! dearer scan can leave more than a call of it unpaid, so the bound needs k m
+//! to be at most n(n-1)/2, for k candidate atoms and m vacant sites. Building
+//! the lattice and choosing sites is geometry and calls no potential.
 
 use std::collections::VecDeque;
 

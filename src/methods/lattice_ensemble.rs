@@ -382,7 +382,8 @@ impl FunnelBank {
 #[derive(Debug, Clone, Copy)]
 pub struct Record {
     /// Ensemble force calls up to and including the trial that found it,
-    /// counting the trials of one generation in chain order.
+    /// counting the trials of one generation in chain order. Lattice pair work
+    /// not yet settled into whole calls, under one call per chain, is not in it.
     pub charged: usize,
     /// Energy of the new best.
     pub energy: f64,
