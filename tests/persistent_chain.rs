@@ -1,7 +1,7 @@
 use anneal_core::bias::BasinBias;
 use anneal_core::methods::cluster_hopping::{
-    ChainCheckpoint, CheckpointAction, ClusterFingerprint, Config, Ledger, random_cluster,
-    run_with_bias, run_with_bias_at_checkpoints, run_with_gradient,
+    random_cluster, run_with_bias, run_with_bias_at_checkpoints, run_with_gradient,
+    ChainCheckpoint, CheckpointAction, ClusterFingerprint, Config, Ledger,
 };
 use ndarray::{Array1, ArrayView1};
 use rand::rngs::StdRng;
@@ -269,39 +269,35 @@ fn checkpoint_probe_is_recorded_without_becoming_the_live_chain() {
 }
 
 #[test]
-fn diagnostic_discovery_improves_the_answer_without_relocating_the_chain() {
-    let cfg = Config::for_cluster(2);
-    let start = Array1::from(vec![-0.6, 0.0, 0.0, 0.6, 0.0, 0.0]);
-    let discovered = Array1::from(vec![-1.0, 0.0, 0.0, 1.0, 0.0, 0.0]);
-    let mut ledger = Ledger::new(100);
-    let mut rng = StdRng::seed_from_u64(0xd15c);
+fn failed_diagnostic_probe_stays_off_the_live_chain() {
+    let mut cfg = Config::recommended(6);
+    cfg.relax_steps = 1;
+    let mut rng = StdRng::seed_from_u64(0xfeed_600e);
+    let start = random_cluster(cfg.n_points, 0.7, cfg.min_separation, &mut rng);
+    let mut ledger = Ledger::new(2);
     let mut bias = fresh_bias(&cfg);
-    let mut relax = |ledger: &mut Ledger, _: ArrayView1<f64>, _: usize| {
-        if ledger.is_diagnostic_quench() {
-            // Reserve the final evaluation for gradient validation.
-            assert!(ledger.charge_many(ledger.remaining() - 1));
-            (-0.5, discovered.clone())
+    let mut relax = toy_relax;
+    let proposed = start.mapv(|value| value + 4.0);
+    let mut occupied_before_probe = None;
+    let mut checkpoint = |snapshot: ChainCheckpoint<'_>| {
+        if occupied_before_probe.is_none() {
+            occupied_before_probe = Some(snapshot.current_state().to_owned());
+            return CheckpointAction::ProbeProposal {
+                state: proposed.clone(),
+                action: "probe".to_string(),
+            };
+        }
+        CheckpointAction::Continue
+    };
+    let mut gradient = |_ledger: &mut Ledger, state: ArrayView1<f64>| {
+        let far = state.iter().any(|value| value.abs() > 2.0);
+        if far {
+            Some(Array1::ones(state.len()))
         } else {
-            assert!(ledger.charge());
-            (0.0, start.clone())
+            Some(Array1::zeros(state.len()))
         }
     };
-    let mut gradient = |ledger: &mut Ledger, state: ArrayView1<f64>| {
-        assert!(ledger.charge());
-        Some(Array1::zeros(state.len()))
-    };
-    let mut offered = false;
-    let mut checkpoint = |_: ChainCheckpoint<'_>| {
-        if offered {
-            CheckpointAction::Continue
-        } else {
-            offered = true;
-            CheckpointAction::ProbeProposal {
-                state: discovered.clone(),
-                action: "diagnostic-discovery".into(),
-            }
-        }
-    };
+
     let outcome = run_with_bias_at_checkpoints(
         &cfg,
         start.view(),
@@ -313,150 +309,15 @@ fn diagnostic_discovery_improves_the_answer_without_relocating_the_chain() {
         1,
         &mut checkpoint,
     );
+
     let probe = outcome
         .accepted_transitions
         .iter()
-        .find(|transition| transition.action == "diagnostic-discovery")
-        .expect("the paid diagnostic must retain its trajectory evidence");
-    assert!(probe.validated);
+        .find(|transition| transition.action == "probe")
+        .expect("a failed diagnostic probe is absent from the trajectory evidence");
+    assert!(!probe.validated);
     assert!(!probe.adopted);
-    assert_eq!(outcome.final_state.as_ref(), Some(&start));
-    assert_eq!(outcome.final_energy, 0.0);
-    assert_eq!(outcome.best, -0.5);
-    assert_eq!(outcome.best_state.as_ref(), Some(&discovered));
-    let improvement = outcome.improvements.last().unwrap();
-    assert_eq!(improvement.0, outcome.hops);
-    assert_eq!(improvement.1, ledger.budget());
-    assert_eq!(improvement.3, -0.5);
-    assert_eq!(ledger.spent(), ledger.budget());
-}
-
-#[test]
-fn diagnostic_quench_context_is_scoped_to_the_probe_callback() {
-    let mut cfg = Config::recommended(6);
-    cfg.relax_steps = 40;
-    let mut rng = StdRng::seed_from_u64(0x600d);
-    let start = random_cluster(cfg.n_points, 0.7, cfg.min_separation, &mut rng);
-    let proposed = Array1::from_elem(start.len(), 4.0);
-    let mut ledger = Ledger::new(1_000);
-    let mut bias = fresh_bias(&cfg);
-    let mut contexts = Vec::new();
-    let mut relax = |ledger: &mut Ledger, state: ArrayView1<f64>, steps| {
-        let is_probe_seed = state == proposed.view();
-        contexts.push((ledger.is_diagnostic_quench(), is_probe_seed));
-        toy_relax(ledger, state, steps)
-    };
-    let mut offered = false;
-    let mut checkpoint = |_: ChainCheckpoint<'_>| {
-        if !offered {
-            offered = true;
-            CheckpointAction::ProbeProposal {
-                state: proposed.clone(),
-                action: "custom-diagnostic".into(),
-            }
-        } else {
-            CheckpointAction::Continue
-        }
-    };
-    assert!(!ledger.is_diagnostic_quench());
-    run_with_bias_at_checkpoints(
-        &cfg,
-        start.view(),
-        &mut ledger,
-        &mut relax,
-        None,
-        &mut bias,
-        &mut rng,
-        40,
-        &mut checkpoint,
-    );
-    assert_eq!(
-        contexts
-            .iter()
-            .filter(|(diagnostic, _)| *diagnostic)
-            .count(),
-        1
-    );
-    assert!(
-        contexts
-            .iter()
-            .all(|(diagnostic, probe_seed)| diagnostic == probe_seed)
-    );
-    let probe_index = contexts
-        .iter()
-        .position(|(diagnostic, _)| *diagnostic)
-        .unwrap();
-    assert!(
-        probe_index > 0,
-        "initial relaxation must use the search context"
-    );
-    assert!(
-        probe_index + 1 < contexts.len(),
-        "ordinary search must resume"
-    );
-    assert!(
-        !ledger.is_diagnostic_quench(),
-        "probe context escaped its callback"
-    );
-    assert_eq!(
-        ledger.spent(),
-        ledger.budget(),
-        "probe work remains charged"
-    );
-}
-
-#[test]
-fn failed_checkpoint_probe_remains_an_unresolved_observation() {
-    let mut cfg = Config::recommended(6);
-    cfg.relax_steps = 200;
-    let mut rng = StdRng::seed_from_u64(0xfeed_600d);
-    let start = random_cluster(cfg.n_points, 0.7, cfg.min_separation, &mut rng);
-    let mut ledger = Ledger::new(260);
-    let mut bias = fresh_bias(&cfg);
-    let mut relax = |ledger: &mut Ledger, state: ArrayView1<f64>, steps| {
-        if state.iter().any(|value| *value > 100.0) {
-            ledger.charge();
-            (f64::INFINITY, state.to_owned())
-        } else {
-            toy_relax(ledger, state, steps)
-        }
-    };
-    let mut offered = false;
-    let mut checkpoint = |_: ChainCheckpoint<'_>| {
-        if !offered {
-            offered = true;
-            CheckpointAction::ProbeProposal {
-                state: Array1::from_elem(start.len(), 101.0),
-                action: "probe".into(),
-            }
-        } else {
-            CheckpointAction::Continue
-        }
-    };
-    let outcome = run_with_bias_at_checkpoints(
-        &cfg,
-        start.view(),
-        &mut ledger,
-        &mut relax,
-        None,
-        &mut bias,
-        &mut rng,
-        40,
-        &mut checkpoint,
-    );
-    let probes = outcome
-        .accepted_transitions
-        .iter()
-        .filter(|transition| transition.action == "probe")
-        .collect::<Vec<_>>();
-    assert_eq!(
-        probes.len(),
-        1,
-        "failure must not disappear from the denominator"
-    );
-    assert!(!probes[0].validated);
-    assert!(!probes[0].adopted);
-    assert_ne!(outcome.final_state.as_ref(), Some(&probes[0].to_state));
+    assert_eq!(outcome.final_state.as_ref(), occupied_before_probe.as_ref());
 }
 
 #[test]

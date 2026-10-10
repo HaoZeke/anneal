@@ -49,6 +49,18 @@ Full details on supplying native gradients live in the
 Do not pad a design vector to \(3N\) to reuse cluster moves.
 Do not call =Config.recommended= on a box.
 
+The exposed high-level functions already encode the common good choices.
 The Bayesian mixer (one =max_proposals=, Thompson across families)
 still lives in =experiments/scripts/demo_bgsa.py= and the
 [[file:../tutorials/bayesian-pilot-mixer.org][Bayesian tutorial]].
+
+* Fitting through ChemFit
+
+For a gradient-free fit, use =anneal.chemfit.fit_anneal(fitter, budget, driver=...)=.
+The default =driver="portfolio"= allocates the gradient-free arms.
+=driver="boltzmann"=, ="fast"=, or ="gsa"= is the single-chain ablation.
+The fitter's initial parameters are the start, bounds come from the fitter
+or from =low= / =high=, and every evaluation stays in the box.
+=fit_chemfit= is the same protocol with dotted-key flattening, and
+=run_benchmark= also accepts =evaluate= / =step=.
+See =examples/chemfit_positions.py= and =examples/chemfit_anneal.py=.

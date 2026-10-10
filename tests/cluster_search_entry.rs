@@ -89,3 +89,10 @@ fn recommended_differs_from_for_cluster() {
     assert!(!(base.allocate_moves || base.depth_reward || base.tabu_on_stall));
     assert!(!base.escape_on_stall);
 }
+
+#[test]
+fn recommended_relaxation_is_the_plain_energy() {
+    let rec = Config::recommended(75);
+    assert!(rec.two_phase.is_none());
+    assert!(rec.surfaces.is_empty());
+}

@@ -80,6 +80,18 @@ pub struct MdEscapeConfig {
     pub geometry: MdEscapeGeometry,
     /// Published finite modified-dimer softening of the Gaussian direction.
     pub softening: Option<VelocitySofteningConfig>,
+    /// A time-series minimum counts only after the energy has fallen by
+    /// at least this much from the highest point since the previous
+    /// counted minimum. Zero keeps every wiggle. A positive value is the
+    /// barrier the escape has to cross before it is allowed to stop.
+    pub minimum_rise: f64,
+    /// Stop once the root-mean-square displacement from the launch reaches
+    /// this value. Infinite disables the cap.
+    pub max_rms: f64,
+    /// A potential minimum counts as the end of the escape only when its
+    /// root-mean-square displacement from the launch is at least this large.
+    /// Zero keeps every minimum.
+    pub min_well_rms: f64,
 }
 
 impl Default for MdEscapeConfig {
@@ -90,6 +102,9 @@ impl Default for MdEscapeConfig {
             maximum_steps: 2_000,
             geometry: MdEscapeGeometry::Euclidean,
             softening: None,
+            minimum_rise: 0.0,
+            max_rms: f64::INFINITY,
+            min_well_rms: 0.0,
         }
     }
 }
@@ -113,6 +128,10 @@ pub struct MdEscapeReport {
     pub potential_energy_span: f64,
     /// Difference between the largest and smallest total energy sampled.
     pub total_energy_span: f64,
+    /// Geometry farthest from the launch, by root-mean-square displacement.
+    pub far_position: Array1<f64>,
+    /// Root-mean-square displacement of [`Self::far_position`] from the launch.
+    pub far_rms: f64,
 }
 
 impl MdEscapeReport {
@@ -229,6 +248,60 @@ where
     F: for<'a> FnMut(ArrayView1<'a, f64>) -> Option<(f64, Array1<f64>)> + Send,
     R: Rng + ?Sized,
 {
+    nve_escape_launch(
+        start,
+        initial_kinetic,
+        None,
+        config,
+        evaluate,
+        rng,
+        frozen_atoms,
+    )
+}
+
+/// Same escape as [`nve_escape`], with the launch velocity seeded by
+/// `seed_direction` when that vector has the right length.
+///
+/// The seed is the covering displacement. Softening, when the config
+/// asks for it, mixes the seed toward the softest direction. A small
+/// Gaussian part remains so two nearby covers do not collapse onto one
+/// trajectory. `None` is the unbiased Gaussian launch.
+pub fn nve_escape_seeded<F, R>(
+    start: ArrayView1<f64>,
+    initial_kinetic: f64,
+    seed_direction: Option<ArrayView1<f64>>,
+    config: &MdEscapeConfig,
+    evaluate: &mut F,
+    rng: &mut R,
+) -> Result<MdEscapeReport, SaddleError>
+where
+    F: for<'a> FnMut(ArrayView1<'a, f64>) -> Option<(f64, Array1<f64>)> + Send,
+    R: Rng + ?Sized,
+{
+    nve_escape_launch(
+        start,
+        initial_kinetic,
+        seed_direction,
+        config,
+        evaluate,
+        rng,
+        None,
+    )
+}
+
+fn nve_escape_launch<F, R>(
+    start: ArrayView1<f64>,
+    initial_kinetic: f64,
+    seed_direction: Option<ArrayView1<f64>>,
+    config: &MdEscapeConfig,
+    evaluate: &mut F,
+    rng: &mut R,
+    frozen_atoms: Option<&[bool]>,
+) -> Result<MdEscapeReport, SaddleError>
+where
+    F: for<'a> FnMut(ArrayView1<'a, f64>) -> Option<(f64, Array1<f64>)> + Send,
+    R: Rng + ?Sized,
+{
     if start.is_empty()
         || !config.dt.is_finite()
         || config.dt <= 0.0
@@ -282,10 +355,28 @@ where
         Some(chart) => chart,
         None => &configured_manifold,
     };
-    let mut velocity = Array1::from_iter(start.iter().map(|_| {
-        let draw: f64 = StandardNormal.sample(rng);
-        draw
-    }));
+    let mut velocity = if let Some(direction) = seed_direction.filter(|d| d.len() == start.len()) {
+        let mut mixed = direction.to_owned();
+        // A per-coordinate draw of fixed width is larger than a unit seed
+        // once the dimension is high, and the covering direction disappears.
+        // The noise is a quarter of the seed's own length.
+        let seed_norm = mixed.dot(&mixed).sqrt().max(1.0e-12);
+        let mut noise = Array1::<f64>::zeros(mixed.len());
+        for slot in noise.iter_mut() {
+            *slot = StandardNormal.sample(rng);
+        }
+        let noise_norm = noise.dot(&noise).sqrt().max(1.0e-12);
+        let mix = 0.25 * seed_norm / noise_norm;
+        for (slot, draw) in mixed.iter_mut().zip(noise.iter()) {
+            *slot += mix * *draw;
+        }
+        mixed
+    } else {
+        Array1::from_iter(start.iter().map(|_| {
+            let draw: f64 = StandardNormal.sample(rng);
+            draw
+        }))
+    };
     velocity = manifold.project(&start.to_owned(), &velocity);
     let surface = CallbackSurface {
         evaluate: Mutex::new(evaluate),
@@ -314,12 +405,22 @@ where
         ngen: config.maximum_steps,
         exponential: false,
     };
-    let mut session = SamdSession::new(samd_config, start.to_owned(), velocity, &surface)?;
-    let noise = Array1::zeros(start.len());
-    let mut turning_window = VecDeque::<(f64, f64, Array1<f64>)>::with_capacity(5);
+    let origin = start.to_owned();
+    let mut session = SamdSession::new(samd_config, origin.clone(), velocity, &surface)?;
+    let noise = Array1::zeros(origin.len());
+    let mut older_energy = None;
+    let mut previous_energy = None;
     let mut minima = 0usize;
     let mut last_energy = f64::NAN;
     let mut last_kinetic = initial_kinetic;
+    let mut peak = f64::NEG_INFINITY;
+    let mut completed = 0usize;
+    let n_atoms = (origin.len() / 3).max(1) as f64;
+    let mut far_position = origin.clone();
+    let mut far_rms = 0.0;
+    // Position at which `previous_energy` was measured.
+    let mut at_previous = origin.clone();
+    let mut well: Option<Array1<f64>> = None;
     let mut minimum_potential = f64::INFINITY;
     let mut maximum_potential = f64::NEG_INFINITY;
     let mut minimum_total = f64::INFINITY;
@@ -335,6 +436,7 @@ where
                 }
             },
         };
+        completed = steps;
         last_energy = report.energy;
         last_kinetic = report.kinetic;
         if report.energy.is_finite() {
@@ -346,47 +448,59 @@ where
             minimum_total = minimum_total.min(total_energy);
             maximum_total = maximum_total.max(total_energy);
         }
-        turning_window.push_back((report.energy, report.kinetic, session.position().to_owned()));
-        if turning_window.len() > 5 {
-            turning_window.pop_front();
+        let mut shift = 0.0;
+        for (there, here) in session.position().iter().zip(origin.iter()) {
+            let delta = there - here;
+            shift += delta * delta;
         }
-        // A sustained turning point requires actual descent and ascent;
-        // a flat trajectory does not certify passage through a potential well.
-        let passed_minimum = turning_window.len() == 5
-            && turning_window[0].0 > turning_window[1].0
-            && turning_window[1].0 > turning_window[2].0
-            && turning_window[2].0 < turning_window[3].0
-            && turning_window[3].0 < turning_window[4].0;
-        if passed_minimum {
+        let rms = (shift / n_atoms).sqrt();
+        if rms > far_rms {
+            far_rms = rms;
+            far_position = session.position().to_owned();
+        }
+        if config.max_rms.is_finite() && far_rms >= config.max_rms {
+            break;
+        }
+        if last_energy > peak {
+            peak = last_energy;
+        }
+        if let (Some(older), Some(previous)) = (older_energy, previous_energy)
+            && previous < older
+            && previous <= report.energy
+            && peak - previous >= config.minimum_rise
+        {
             minima += 1;
-            if minima >= config.potential_minima {
-                let (energy, kinetic, position) = turning_window[2].clone();
-                return Ok(MdEscapeReport {
-                    position,
-                    steps,
-                    potential_minima: minima,
-                    energy,
-                    kinetic,
-                    softening_evaluations,
-                    potential_energy_span: sampled_energy_span(
-                        minimum_potential,
-                        maximum_potential,
-                    ),
-                    total_energy_span: sampled_energy_span(minimum_total, maximum_total),
-                });
+            // `previous` is the bottom, and it was measured at `at_previous`.
+            let mut from_launch = 0.0;
+            for (there, here) in at_previous.iter().zip(origin.iter()) {
+                let delta = there - here;
+                from_launch += delta * delta;
+            }
+            let well_rms = (from_launch / n_atoms).sqrt();
+            peak = previous;
+            let far_enough = config.min_well_rms > 0.0 && well_rms + 1.0e-12 >= config.min_well_rms;
+            let counted_enough = config.min_well_rms <= 0.0 && minima >= config.potential_minima;
+            if far_enough || counted_enough {
+                well = Some(at_previous.clone());
+                break;
             }
         }
+        at_previous = session.position().to_owned();
+        older_energy = previous_energy;
+        previous_energy = Some(report.energy);
     }
 
     Ok(MdEscapeReport {
-        position: session.position().to_owned(),
-        steps: config.maximum_steps,
+        position: well.unwrap_or_else(|| session.position().to_owned()),
+        steps: completed,
         potential_minima: minima,
         energy: last_energy,
         kinetic: last_kinetic,
         softening_evaluations,
         potential_energy_span: sampled_energy_span(minimum_potential, maximum_potential),
         total_energy_span: sampled_energy_span(minimum_total, maximum_total),
+        far_position,
+        far_rms,
     })
 }
 
@@ -696,6 +810,9 @@ mod tests {
             maximum_steps: 200,
             geometry: MdEscapeGeometry::Euclidean,
             softening: None,
+            minimum_rise: 0.0,
+            max_rms: f64::INFINITY,
+            min_well_rms: 0.0,
         };
         let mut evaluations = 0usize;
         let mut evaluate = |x: ArrayView1<f64>| {
@@ -849,6 +966,9 @@ mod tests {
                 displacement: 0.1,
                 mixing: 0.15,
             }),
+            minimum_rise: 0.0,
+            max_rms: f64::INFINITY,
+            min_well_rms: 0.0,
         };
         let mut evaluations = 0usize;
         let mut evaluate = |x: ArrayView1<f64>| {

@@ -3,7 +3,7 @@
 use eindir_core::{Bounds, Gradient, Objective};
 use ndarray::{Array1, ArrayView1};
 
-use crate::methods::portfolio::{PortfolioPolicy, PortfolioResult, portfolio_optimize_seeded};
+use crate::methods::portfolio::{PortfolioPolicy, PortfolioResult, portfolio_optimize_from};
 
 /// Search free axes without changing the dimension seen by the objective.
 pub(super) fn values_portfolio<O, G>(
@@ -27,7 +27,7 @@ where
         .filter(|&i| bounds.low[i] != bounds.high[i])
         .collect();
     if free.len() == bounds.dims {
-        return portfolio_optimize_seeded::<_, G>(
+        return portfolio_optimize_from::<_, G>(
             obj,
             None,
             budget,
@@ -69,7 +69,7 @@ where
         free,
     };
     let start = x0.map(|x| Array1::from_iter(reduced.free.iter().map(|&i| x[i])));
-    let mut result = portfolio_optimize_seeded::<_, G>(
+    let mut result = portfolio_optimize_from::<_, G>(
         &reduced,
         None,
         budget,

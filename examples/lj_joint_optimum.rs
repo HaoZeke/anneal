@@ -525,7 +525,7 @@ fn run_minima_hopping_with_history<'a>(
         charged,
     } = options;
     let hopping = HoppingConfig::for_cluster(n);
-    let escape_config = MdEscapeConfig {
+    let mut escape_config = MdEscapeConfig {
         dt: 0.005,
         potential_minima: 2,
         maximum_steps: 2_000,
@@ -539,6 +539,9 @@ fn run_minima_hopping_with_history<'a>(
             displacement: MH_SOFTENING_DISPLACEMENT,
             mixing: MH_SOFTENING_MIXING,
         }),
+        minimum_rise: 0.0,
+        max_rms: f64::INFINITY,
+        min_well_rms: 0.0,
     };
     let mut ledger = Ledger::new(budget);
     let mut optimizer = WarmLbfgs::default();
@@ -595,32 +598,11 @@ fn run_minima_hopping_with_history<'a>(
 
     ledger.record(energy, state.view());
     let mut minima = vec![state.clone()];
-    let history_start = Instant::now();
-    let descriptor = history.map(|_| lj::descriptor_space());
-    let context = StructureContext::new(Some(vec![18; n]), None, Some(format!("lj-reduced-n{n}")));
-    let mut current_basin = if let (Some(history), Some(descriptor)) = (history, &descriptor) {
-        observe_history(
-            history,
-            &ledger,
-            descriptor,
-            &context,
-            witness,
-            |history, observation| {
-                history
-                    .mark_accepted(observation.minimum.id)
-                    .map_err(|error| error.to_string())
-            },
-        )?
-        .0
-        .minimum
-        .id
-    } else {
-        0
-    };
-    let mut history_seconds = history_start.elapsed().as_secs_f64();
-    let mut local_basins = HashSet::from([current_basin]);
-    let mut accepted_visits = HashMap::from([(current_basin, 1_u64)]);
-    let mut observed_visits = HashMap::from([(current_basin, 1_u64)]);
+    let mut current_basin = 0usize;
+    if let Some(softening) = escape_config.softening.as_mut() {
+        softening.displacement =
+            anneal_core::methods::activation::softening_displacement(state.view());
+    }
     let mut feedback = EscapeFeedback::new(hopping.energy_scale, 0.5 * hopping.energy_scale);
     if !options.bound_escape {
         feedback.escape_floor = f64::MIN_POSITIVE;

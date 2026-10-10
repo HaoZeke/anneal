@@ -227,6 +227,8 @@ pub mod soap;
 pub mod soap_gp;
 /// Budgeted perturb--quench source generation for hybrid PES exploration.
 pub mod source_escape;
+/// Source-keyed relaxation-surface rewards exchanged between chains.
+pub mod surface_evidence;
 pub mod spectral;
 pub mod structure;
 pub mod superbasin;
@@ -294,8 +296,10 @@ pub use methods::{
     estimate_gle_preconditioner, exact_accept_allowed, fit_laplace, geometric_ladder,
     gle_langevin_adaptive_sa, gle_langevin_preconditioned_sa, gle_langevin_sa, order_arms,
     pilot_draws, pilot_draws_qmc, population_control, portfolio_ensemble_optimize,
-    portfolio_optimize, portfolio_optimize_with_policy, portfolio_values_ensemble_optimize,
-    preferred_arm_tail, projected_gradient_polish, qmc_best1bin_scout, qmc_gsa_global_search,
+    portfolio_optimize, portfolio_optimize_from, portfolio_optimize_seeded,
+    portfolio_optimize_with_policy, portfolio_values_ensemble_optimize, preferred_arm_tail,
+    projected_gradient_polish, qmc_best1bin_scout, qmc_gsa_global_search,
+    qmc_gsa_global_search_from,
     qmc_projected_gradient_polish, qmc_trust_region_poll, regime_exploit_prob,
     regime_exploit_width, require_accept_compatible, run_dmc_population, select_regime,
     shifted_qmc_projected_gradient_polish, walker_weight,
@@ -304,7 +308,10 @@ pub use movekernel::{MoveKernel, Reflected};
 pub use neigh::Neighborhood;
 pub use noise_accept::{OsaAccept, OsaResult};
 pub use runner::{
-    qmc_skip_from_seed, run_rs, run_rs_qmc_variant, run_rs_variant, run_rs_variant_resumed,
+    qmc_skip_from_seed, run_rs, run_rs_qmc_variant, run_rs_qmc_variant_from,
+    run_rs_qmc_variant_from_position, run_rs_qmc_variant_start, run_rs_variant, run_rs_variant_at,
+    run_rs_variant_from, run_rs_variant_from_position, run_rs_variant_resumed,
+    run_rs_variant_start,
 };
 pub use sampler::Sampler;
 pub use tempering::{

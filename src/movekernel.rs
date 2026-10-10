@@ -85,9 +85,12 @@ impl MoveKernel<f64> for Cauchy {
     }
 }
 
-/// Lanczos approximation (g = 7, n = 9) to the Gamma function for real `x > 0`,
-/// accurate to ~1e-13. Used for the visiting-distribution normalization constant.
-fn gamma_fn(x: f64) -> f64 {
+/// `ln Gamma(x)` for real `x > 0`: the Lanczos approximation (g = 7, n = 9,
+/// accurate to ~1e-13) summed in logarithms, so it stays finite where
+/// `Gamma(x)` itself overflows (`x` beyond about 171). Near `q_v = 1` the
+/// visiting scale needs `ln Gamma(1 / (q_v - 1) - 1/2)` for arguments in the
+/// thousands.
+fn ln_gamma(x: f64) -> f64 {
     const G: f64 = 7.0;
     const C: [f64; 9] = [
         0.999_999_999_999_809_9,
@@ -101,16 +104,16 @@ fn gamma_fn(x: f64) -> f64 {
         1.505_632_735_149_311_6e-7,
     ];
     if x < 0.5 {
-        std::f64::consts::PI / ((std::f64::consts::PI * x).sin() * gamma_fn(1.0 - x))
-    } else {
-        let x = x - 1.0;
-        let mut a = C[0];
-        let t = x + G + 0.5;
-        for (i, &c) in C.iter().enumerate().skip(1) {
-            a += c / (x + i as f64);
-        }
-        (2.0 * std::f64::consts::PI).sqrt() * t.powf(x + 0.5) * (-t).exp() * a
+        let pi = std::f64::consts::PI;
+        return pi.ln() - (pi * x).sin().abs().ln() - ln_gamma(1.0 - x);
     }
+    let x = x - 1.0;
+    let mut a = C[0];
+    let t = x + G + 0.5;
+    for (i, &c) in C.iter().enumerate().skip(1) {
+        a += c / (x + i as f64);
+    }
+    0.5 * (2.0 * std::f64::consts::PI).ln() + (x + 0.5) * t.ln() - t + a.ln()
 }
 
 /// Generalized (Tsallis) simulated-annealing visiting kernel
@@ -160,22 +163,35 @@ impl TsallisVisit {
         Self { q_v }
     }
 
-    /// Prepare the native visiting transform at the supplied temperature.
-    pub fn parameters(&self, t: f64) -> TsallisVisitParameters {
+    /// `ln sigma(T, q_v)` of the visiting scale. Near `q_v = 3` the scale
+    /// itself underflows to zero while `|y|^{-exponent}` overflows, and their
+    /// product is NaN; the step is formed from logarithms instead.
+    fn log_sigma(&self, t: f64) -> f64 {
         let qv = self.q_v;
         // SciPy dual_annealing VisitingDistribution constants (qv-dependent).
-        let factor2 = (qv - 1.0).powf(4.0 - qv);
-        let factor3 = 2.0_f64.powf((2.0 - qv) / (qv - 1.0));
-        let factor4_p = std::f64::consts::PI.sqrt() * factor2 / (factor3 * (3.0 - qv));
+        let ln_factor2 = (4.0 - qv) * (qv - 1.0).ln();
+        let ln_factor3 = (2.0 - qv) / (qv - 1.0) * std::f64::consts::LN_2;
+        let ln_factor4_p =
+            0.5 * std::f64::consts::PI.ln() + ln_factor2 - ln_factor3 - (3.0 - qv).ln();
         // factor6 = pi (1-f5) / sin(pi(1-f5)) / Gamma(2-f5) = Gamma(f5) by Euler reflection.
         let factor5 = 1.0 / (qv - 1.0) - 0.5;
-        let factor6 = gamma_fn(factor5);
-        let factor1 = t.powf(1.0 / (qv - 1.0));
-        let factor4 = factor4_p * factor1;
+        let ln_factor6 = ln_gamma(factor5);
+        let ln_factor1 = t.ln() / (qv - 1.0);
         let exponent = (qv - 1.0) / (3.0 - qv);
-        let sigma = (factor4 / factor6).powf(exponent);
+        exponent * (ln_factor4_p + ln_factor1 - ln_factor6)
+    }
+
+    /// Prepare the native visiting transform at the supplied temperature.
+    pub fn parameters(&self, t: f64) -> TsallisVisitParameters {
+        let exponent = (self.q_v - 1.0) / (3.0 - self.q_v);
+        let ln_sigma = self.log_sigma(t);
+        let scale = if ln_sigma.is_finite() {
+            ln_sigma.exp()
+        } else {
+            0.0
+        };
         TsallisVisitParameters {
-            scale: sigma,
+            scale,
             exponent,
             tail_limit: VISIT_TAIL_LIMIT,
         }
@@ -184,18 +200,23 @@ impl TsallisVisit {
 
 impl MoveKernel<f64> for TsallisVisit {
     fn propose<R: Rng + ?Sized>(&self, i: ArrayView1<f64>, t: f64, rng: &mut R) -> Array1<f64> {
-        let parameters = self.parameters(t);
+        let qv = self.q_v;
+        let exponent = (qv - 1.0) / (3.0 - qv);
+        let ln_sigma = self.log_sigma(t);
+        let ln_tail = VISIT_TAIL_LIMIT.ln();
         let normal = NormalDist::new(0.0, 1.0).expect("std normal");
         Array1::from_iter(i.iter().map(|&xi| {
             let x: f64 = normal.sample(rng);
             let y: f64 = normal.sample(rng);
-            let mut v = parameters.scale * x / y.abs().powf(parameters.exponent);
-            if v > parameters.tail_limit {
-                v = parameters.tail_limit * rng.random::<f64>();
-            } else if v < -parameters.tail_limit {
-                v = -parameters.tail_limit * rng.random::<f64>();
-            }
-            xi + v
+            let ln_v = ln_sigma + x.abs().ln() - exponent * y.abs().ln();
+            // A step past the tail limit, or one the logarithms cannot
+            // resolve, is redrawn uniformly inside the limit (SciPy's rule).
+            let v = if ln_v.is_nan() || ln_v > ln_tail {
+                VISIT_TAIL_LIMIT * rng.random::<f64>()
+            } else {
+                ln_v.exp()
+            };
+            xi + v.copysign(x)
         }))
     }
 
@@ -210,17 +231,62 @@ impl MoveKernel<f64> for TsallisVisit {
 /// in it keeps the proposal symmetric: `q(x -> y) = q(y -> x)`. The Metropolis
 /// test therefore still targets the box-restricted Gibbs measure with no
 /// Hastings correction (manuscript law L1 holds for the reflected proposal).
+/// A box with one infinite wall, or a finite box whose period overflows,
+/// mirrors across the wall the point crossed.
 pub fn reflect_coord(x: f64, lo: f64, hi: f64) -> f64 {
     let w = hi - lo;
     if w.is_nan() || w <= 0.0 {
         return lo;
     }
+    // A point already in the box is its own image. Folding it anyway can
+    // round `lo + (x - lo)` past `hi` by an ulp.
+    if (lo..=hi).contains(&x) {
+        return x;
+    }
     let period = 2.0 * w;
+    if !period.is_finite() {
+        // The box is wider than half the f64 range, or one wall is infinite,
+        // so the triangle-wave period is not a finite f64. Fold the overshoot
+        // across the wall it crossed. A finite overshoot is below `2 w` after
+        // one fold, so at most one more fold, across the other wall, remains.
+        // An infinite overshoot makes the fold NaN; `max`/`min` then stop on
+        // the wall that was crossed.
+        let fold = |d: f64| if d < w { d } else { w - (d - w) };
+        return if x < lo {
+            (lo + fold(lo - x)).max(lo).min(hi)
+        } else {
+            (hi - fold(x - hi)).min(hi).max(lo)
+        };
+    }
     let mut y = (x - lo).rem_euclid(period);
     if y > w {
         y = period - y;
     }
-    lo + y
+    // `hi - lo` and `lo + y` both round, so the sum can land one ulp past
+    // `hi`. A non-finite `x` leaves `y` NaN, and `max` sends that to `lo`.
+    (lo + y).max(lo).min(hi)
+}
+
+/// [`reflect_coord`] together with its slope there: `1` where the fold keeps
+/// the direction (an even number of reflections), `-1` where it reverses it.
+/// The chain rule for `x -> f(reflect(x))` multiplies `df` by this slope.
+pub fn reflect_coord_with_slope(x: f64, lo: f64, hi: f64) -> (f64, f64) {
+    let w = hi - lo;
+    if w.is_nan() || w <= 0.0 {
+        return (lo, 0.0);
+    }
+    if (lo..=hi).contains(&x) {
+        return (x, 1.0);
+    }
+    let period = 2.0 * w;
+    if !period.is_finite() {
+        let d = if x < lo { lo - x } else { x - hi };
+        let slope = if d < w { -1.0 } else { 1.0 };
+        return (reflect_coord(x, lo, hi), slope);
+    }
+    let y = (x - lo).rem_euclid(period);
+    let slope = if y > w { -1.0 } else { 1.0 };
+    (reflect_coord(x, lo, hi), slope)
 }
 
 /// Mirror-reflects every coordinate of `x` into `bounds` (see
@@ -334,6 +400,122 @@ mod tests {
         for &x in &[3.4_f64, 2.9, -1.5, 0.0, 4.99] {
             let r = reflect_coord(x, lo, hi);
             assert!(r >= lo - 1e-12 && r <= hi + 1e-12, "{r} not in box");
+        }
+    }
+
+    #[test]
+    fn reflect_coord_stays_in_the_closed_box_under_rounding() {
+        // `0.3 - (-1.0)` rounds up to 1.3, so an unguarded fold returned
+        // `-1.0 + 1.3 = 0.30000000000000004` for a point on the upper wall.
+        assert_eq!(reflect_coord(0.3, -1.0, 0.3), 0.3);
+        for x in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            let r = reflect_coord(x, -1.0, 0.3);
+            assert!((-1.0..=0.3).contains(&r), "{x} folded to {r}");
+        }
+    }
+
+    #[test]
+    fn reflect_coord_mirrors_when_twice_the_width_overflows() {
+        let near = |a: f64, b: f64| (a - b).abs() <= 1e-12 * b.abs();
+        assert!(near(reflect_coord(6.1e307, -6e307, 6e307), 5.9e307));
+        assert!(near(reflect_coord(-6.1e307, -6e307, 6e307), -5.9e307));
+        let (lo, hi) = (-f64::MAX, 1e308 - f64::MAX);
+        assert!(near(reflect_coord(5e307, lo, hi), -1.5e308));
+        assert!(near(reflect_coord(1.5e308, -1e308, 1e308), 0.5e308));
+        assert!(near(reflect_coord(-1.5e308, -1e308, 1e308), -0.5e308));
+        assert_eq!(reflect_coord(0.5e308, -1e308, 1e308), 0.5e308);
+        assert_eq!(reflect_coord(f64::INFINITY, -1e308, 1e308), 1e308);
+        assert_eq!(reflect_coord(f64::NEG_INFINITY, -6e307, 6e307), -6e307);
+    }
+
+    #[test]
+    fn reflect_coord_mirrors_across_the_finite_wall_of_a_half_infinite_box() {
+        let inf = f64::INFINITY;
+        assert_eq!(reflect_coord(-0.5, 0.0, inf), 0.5);
+        assert_eq!(reflect_coord(-3.0, 0.0, inf), 3.0);
+        assert_eq!(reflect_coord(0.5, -inf, 0.0), -0.5);
+        assert_eq!(reflect_coord(2.0, -inf, -1.0), -4.0);
+        assert_eq!(reflect_coord(7.0, 0.0, inf), 7.0);
+        assert_eq!(reflect_coord(-inf, 0.0, inf), 0.0);
+        assert_eq!(reflect_coord(inf, -inf, 0.0), 0.0);
+    }
+
+    #[test]
+    fn reflect_coord_leaves_a_point_in_the_box_unchanged() {
+        for &x in &[-3.0, -1.2345678901234567, 0.0, 0.7] {
+            assert_eq!(reflect_coord(x, -3.0, 0.7).to_bits(), x.to_bits());
+        }
+        for &x in &[0.7000000000000001, 1.3, 4.4, -6.7, 12.1] {
+            let r = reflect_coord(x, -3.0, 0.7);
+            assert!((-3.0..=0.7).contains(&r), "{x} folded to {r}");
+        }
+    }
+
+    #[test]
+    fn reflect_slope_flips_on_odd_folds() {
+        assert_eq!(reflect_coord_with_slope(0.5, 0.0, 1.0), (0.5, 1.0));
+        let (y, s) = reflect_coord_with_slope(1.25, 0.0, 1.0);
+        assert!((y - 0.75).abs() < 1e-12 && s == -1.0);
+        let (y, s) = reflect_coord_with_slope(-0.25, 0.0, 1.0);
+        assert!((y - 0.25).abs() < 1e-12 && s == -1.0);
+        let (y, s) = reflect_coord_with_slope(2.25, 0.0, 1.0);
+        assert!((y - 0.25).abs() < 1e-12 && s == 1.0);
+    }
+
+    #[test]
+    fn ln_gamma_matches_gamma_and_survives_overflow() {
+        // Reference values of ln Gamma(x) from libm's lgamma.
+        let reference = [
+            (0.1, 2.252712651734206),
+            (0.5, 0.5723649429247001),
+            (1.0, 0.0),
+            (2.5, 0.2846828704729192),
+            (7.0, 6.579251212010101),
+            (30.0, 71.257038967168),
+            (150.0, 600.0094705553274),
+            (2000.0, 13198.923448054265),
+        ];
+        for (x, expected) in reference {
+            let got = ln_gamma(x);
+            assert!(
+                (got - expected).abs() < 1e-10 * (1.0 + expected.abs()),
+                "ln_gamma({x}) = {got}, expected {expected}"
+            );
+        }
+    }
+
+    #[test]
+    fn tsallis_visit_moves_near_q_v_one() {
+        // The light-tailed limit: steps are finite, nonzero, and not tail redraws.
+        let mut rng = StdRng::seed_from_u64(13);
+        let x = array![0.0, 0.0, 0.0];
+        for q_v in [1.0001, 1.001, 1.005, 1.01] {
+            let kernel = TsallisVisit::new(q_v);
+            let mut moved = 0;
+            for _ in 0..500 {
+                let p = kernel.propose(x.view(), 1.0, &mut rng);
+                assert!(
+                    p.iter().all(|v| v.is_finite() && v.abs() < 1e3),
+                    "q_v {q_v}: {p}"
+                );
+                moved += usize::from(p.iter().any(|v| *v != 0.0));
+            }
+            assert_eq!(moved, 500, "q_v {q_v}");
+        }
+    }
+
+    #[test]
+    fn tsallis_visit_is_finite_near_q_v_three() {
+        let mut rng = StdRng::seed_from_u64(11);
+        let x = array![0.0, 0.0, 0.0];
+        for q_v in [2.9, 2.99, 2.999, 2.9999] {
+            let kernel = TsallisVisit::new(q_v);
+            for t in [1e-3, 1.0, 50.0] {
+                for _ in 0..500 {
+                    let p = kernel.propose(x.view(), t, &mut rng);
+                    assert!(p.iter().all(|v| v.is_finite()), "q_v {q_v} t {t}: {p}");
+                }
+            }
         }
     }
 

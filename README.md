@@ -354,6 +354,29 @@ h = run(rastrigin, low, high, Boltzmann(t_init=5.0, sigma=0.5),
 print(h.best_val)
 ```
 
+Every proposal is reflected into `[low, high]`, so `obj_fn` is only ever
+called inside the box. Pass `x0=` to start the walk from a known point
+(`global_optimize` and `run_qmc` take it too). The start costs one call: a run
+makes `1 + n_epochs * steps_per_epoch` evaluations.
+
+## ChemFit
+
+Gradient-free fits go through `anneal.chemfit`. The chain starts at the fitter's initial parameters, and every candidate stays inside the box. `fit_anneal` and `fit_chemfit` speak `init` / `ask` / `tell` / `finish`. `run_benchmark` also accepts `evaluate` / `step`. `driver="portfolio"` (the default) is the budget-only global optimizer. `driver="boltzmann"`, `"fast"`, and `"gsa"` are the classical presets.
+
+```python
+from anneal.chemfit import run_benchmark
+
+def run_anneal(benchmark_context):
+    return run_benchmark(
+        benchmark_context,
+        method="portfolio",
+        low=-3.0,
+        high=3.0,
+    )
+```
+
+A scalar `low` or `high` is broadcast across the flattened parameters. Bounds may also live on `benchmark_context["bounds"]` or `fitter.bounds`.
+
 ## Optional arms (additive independence + QMC polish)
 
 ```python

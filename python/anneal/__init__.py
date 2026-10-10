@@ -5,16 +5,20 @@ Search splits on geometry, then on gradient:
   - cluster_search(obj, grad, n, budget, ...): 3N point set.
     recommended / derived / ras select the hop preset.
   - ensemble_optimize(obj, low, high, budget, grad_fn=None, ...): design box.
-    Gradient → hop and quench; no gradient → values-only search.
+    Gradient means hop and quench; no gradient means a values-only search.
   - minimize(fun, x0, bounds, jac=None, budget=..., replicas=4, store=...):
     SciPy/ChemFit shape. replicas is the communicating-chain count.
     store is an existing HDF5 file or a readcon-db campaign directory.
   - box_ensemble_optimize(...): hop primitive. Requires grad_fn.
   - global_optimize(...): portfolio arms when the caller does not want hops.
+  - run(obj_fn, low, high, preset, n_epochs, steps_per_epoch, seed, x0): SA
+    loop. Every proposal is reflected into [low, high] and the walk starts
+    at x0 when one is given.
+  - fit_anneal, fit_chemfit, run_benchmark: gradient-free ChemFit bridges.
 
 SA algebra (Cool / Move / Accept) stays on run / run_device / run_ensemble
 with Boltzmann, Fast, and Gsa. Last mile is polish / qmc_polish
-(bounded L-BFGS). Cluster quench is WarmLbfgs → rgmin::Lbfgs.
+(bounded L-BFGS). Cluster quench is WarmLbfgs to rgmin::Lbfgs.
 
 The IISE composition laws L1-L4 are enforced in SaVariant::checked.
 """
@@ -62,9 +66,9 @@ from anneal._core import (
     box_ensemble_optimize as _core_box_ensemble_optimize,
     ensemble_optimize as _core_ensemble_optimize,
     bfwt_optimize as _core_bfwt_optimize,
-    run,
-    run_hmc,
-    run_qmc,
+    run as _core_run,
+    run_hmc as _core_run_hmc,
+    run_qmc as _core_run_qmc,
 )
 from anneal.device import DeviceHistory, EnsembleHistory, run_device, run_ensemble
 from anneal.tvm_ffi import (
@@ -73,6 +77,150 @@ from anneal.tvm_ffi import (
     tvm_ffi_tensor_metadata,
     tvm_ffi_tensors_from_history,
 )
+
+
+def _flat(value):
+    """A contiguous float64 vector from any array-like, flattened in C order."""
+    return np.ascontiguousarray(np.asarray(value, dtype=np.float64).reshape(-1))
+
+
+def _flat_or_none(value):
+    return None if value is None else _flat(value)
+
+
+def _count(name, value, minimum):
+    """A whole number of at least ``minimum``, or a ValueError naming it."""
+    count = int(value)
+    if count != value or count < minimum:
+        msg = f"{name} must be a whole number of at least {minimum}, got {value!r}"
+        raise ValueError(msg)
+    return count
+
+
+def _max_evals(value):
+    """``None``, or a positive whole number of objective calls."""
+    if value is None:
+        return None
+    count = int(value)
+    if count != value or count < 1:
+        msg = f"max_evals must be a whole number of calls, at least 1, got {value!r}"
+        raise ValueError(msg)
+    return count
+
+
+def run(
+    obj_fn,
+    low,
+    high,
+    preset,
+    n_epochs: int = 100,
+    steps_per_epoch: int = 200,
+    seed: int = 42,
+    x0=None,
+    max_evals: int | None = None,
+):
+    """Simulated annealing inside the box ``[low, high]``.
+
+    Every proposal is mirror-reflected into the box, so ``obj_fn`` is only
+    called inside it and ``best_pos`` lies inside it.
+
+    Args:
+      obj_fn: callable ``f(numpy.ndarray) -> float`` on the flat vector.
+      low, high: box bounds, any array-like of one shape; flattened in C order.
+      preset: ``Boltzmann()``, ``Fast()`` or ``Gsa()``.
+      n_epochs, steps_per_epoch: the cooling schedule and its length.
+      seed: RNG seed.
+      x0: optional start inside the box, same size as ``low``; a uniform draw
+        otherwise.
+      max_evals: optional cap on calls to ``obj_fn``, the start included. The
+        cooling schedule still spans ``n_epochs``; the cap ends the run inside
+        the epoch where it falls.
+
+    The start costs one call, so a run makes ``1 + n_epochs * steps_per_epoch``
+    calls, or ``max_evals`` when that is smaller. An ordinary exception raised
+    by ``obj_fn`` is scored as ``+inf`` and reported once as a
+    ``RuntimeWarning``; ``KeyboardInterrupt`` ends the run and is re-raised, as
+    is a ``TypeError`` when ``obj_fn`` returns something that is not a number.
+    """
+    return _core_run(
+        obj_fn,
+        _flat(low),
+        _flat(high),
+        preset,
+        _count("n_epochs", n_epochs, 0),
+        _count("steps_per_epoch", steps_per_epoch, 0),
+        int(seed),
+        _flat_or_none(x0),
+        _max_evals(max_evals),
+    )
+
+
+def run_qmc(
+    obj_fn,
+    low,
+    high,
+    preset,
+    n_starts: int = 8,
+    n_epochs: int = 100,
+    steps_per_epoch: int = 200,
+    seed: int = 42,
+    x0=None,
+    max_evals: int | None = None,
+):
+    """``run`` from a low-discrepancy multistart design inside the box.
+
+    ``x0``, when given, replaces the first design point. ``max_evals``, when
+    given, is split as evenly as possible over the starts and caps the total
+    number of calls; otherwise a run makes
+    ``n_starts * (1 + n_epochs * steps_per_epoch)`` calls.
+    """
+    return _core_run_qmc(
+        obj_fn,
+        _flat(low),
+        _flat(high),
+        preset,
+        _count("n_starts", n_starts, 1),
+        _count("n_epochs", n_epochs, 0),
+        _count("steps_per_epoch", steps_per_epoch, 0),
+        int(seed),
+        _flat_or_none(x0),
+        _max_evals(max_evals),
+    )
+
+
+def run_hmc(
+    obj_fn,
+    grad_fn,
+    low,
+    high,
+    t_init: float = 5.0,
+    epsilon: float = 0.05,
+    l_steps: int = 5,
+    q: float = 1.0,
+    n_epochs: int = 100,
+    steps_per_epoch: int = 50,
+    seed: int = 42,
+    x0=None,
+):
+    """HMC-driven simulated annealing inside the box ``[low, high]``.
+
+    ``low``, ``high`` and ``x0`` may be any array-like of one shape; they are
+    flattened in C order and the callables receive the flat vector.
+    """
+    return _core_run_hmc(
+        obj_fn,
+        grad_fn,
+        _flat(low),
+        _flat(high),
+        float(t_init),
+        float(epsilon),
+        int(l_steps),
+        float(q),
+        int(n_epochs),
+        int(steps_per_epoch),
+        int(seed),
+        _flat_or_none(x0),
+    )
 
 
 def cluster_search(
@@ -136,8 +284,8 @@ def cluster_search(
 
 def low_discrepancy_points(low, high, n: int, skip: int = 1):
     """Return bounded low-discrepancy points as a NumPy array."""
-    low_arr = np.asarray(low, dtype=np.float64)
-    high_arr = np.asarray(high, dtype=np.float64)
+    low_arr = _flat(low)
+    high_arr = _flat(high)
     return np.asarray(
         _core_low_discrepancy_points(low_arr, high_arr, int(n), int(skip)),
         dtype=np.float64,
@@ -163,9 +311,9 @@ def polish(
     out = _core_polish(
         obj_fn,
         grad_fn,
-        np.asarray(low, dtype=np.float64),
-        np.asarray(high, dtype=np.float64),
-        np.asarray(x0, dtype=np.float64),
+        _flat(low),
+        _flat(high),
+        _flat(x0),
         int(max_fevals),
         float(step0),
         float(grad_tol),
@@ -190,8 +338,8 @@ def qmc_polish(
     out = _core_qmc_polish(
         obj_fn,
         grad_fn,
-        np.asarray(low, dtype=np.float64),
-        np.asarray(high, dtype=np.float64),
+        _flat(low),
+        _flat(high),
         int(n_starts),
         int(max_fevals_per_start),
         int(seed),
@@ -240,8 +388,8 @@ def qmc_best1bin_scout(
     """Run a QMC best/1/bin differential-evolution scout."""
     out = _core_qmc_best1bin_scout(
         obj_fn,
-        np.asarray(low, dtype=np.float64),
-        np.asarray(high, dtype=np.float64),
+        _flat(low),
+        _flat(high),
         int(max_evals),
         int(seed),
         int(population_size),
@@ -286,18 +434,23 @@ def qmc_gsa_global_search(
     t_init: float = 1.0,
     q_v: float = 2.62,
     q_a: float = 1.7,
+    x0=None,
 ):
-    """Run bounded QMC-initialized generalized simulated annealing."""
+    """Run bounded QMC-initialized generalized simulated annealing.
+
+    ``x0``, when given, replaces the first chain's low-discrepancy start.
+    """
     out = _core_qmc_gsa_global_search(
         obj_fn,
-        np.asarray(low, dtype=np.float64),
-        np.asarray(high, dtype=np.float64),
+        _flat(low),
+        _flat(high),
         int(max_evals),
         int(seed),
         int(n_chains),
         float(t_init),
         float(q_v),
         float(q_a),
+        _flat_or_none(x0),
     )
     out["best_pos"] = np.asarray(out["best_pos"], dtype=np.float64)
     return out
@@ -311,6 +464,7 @@ def qmc_gsa_global_search_objective(
     t_init: float = 1.0,
     q_v: float = 2.62,
     q_a: float = 1.7,
+    x0=None,
 ):
     """Run bounded QMC-initialized GSA with a native objective handle."""
     out = _core_qmc_gsa_global_search_objective(
@@ -321,6 +475,7 @@ def qmc_gsa_global_search_objective(
         float(t_init),
         float(q_v),
         float(q_a),
+        _flat_or_none(x0),
     )
     out["best_pos"] = np.asarray(out["best_pos"], dtype=np.float64)
     return out
@@ -340,9 +495,9 @@ def qmc_trust_region_poll(
     """Run a local shifted-QMC trust-region poll."""
     out = _core_qmc_trust_region_poll(
         obj_fn,
-        np.asarray(low, dtype=np.float64),
-        np.asarray(high, dtype=np.float64),
-        np.asarray(center, dtype=np.float64),
+        _flat(low),
+        _flat(high),
+        _flat(center),
         int(max_evals),
         int(seed),
         float(radius_fraction),
@@ -365,7 +520,7 @@ def qmc_trust_region_poll_objective(
     """Run a local shifted-QMC trust-region poll with a native objective handle."""
     out = _core_qmc_trust_region_poll_objective(
         objective,
-        np.asarray(center, dtype=np.float64),
+        _flat(center),
         int(max_evals),
         int(seed),
         float(radius_fraction),
@@ -393,8 +548,8 @@ def shifted_qmc_polish(
     out = _core_shifted_qmc_polish(
         obj_fn,
         grad_fn,
-        np.asarray(low, dtype=np.float64),
-        np.asarray(high, dtype=np.float64),
+        _flat(low),
+        _flat(high),
         int(n_starts),
         int(max_fevals_per_start),
         int(seed),
@@ -429,8 +584,8 @@ def additive_independence(
     """
     out = _core_additive_independence(
         obj_fn,
-        np.asarray(low, dtype=np.float64),
-        np.asarray(high, dtype=np.float64),
+        _flat(low),
+        _flat(high),
         int(max_fevals),
         int(seed),
         int(degree),
@@ -449,8 +604,8 @@ def estimate_gle_omega0(obj_fn, grad_fn, low, high):
         _core_estimate_gle_omega0(
             obj_fn,
             grad_fn,
-            np.asarray(low, dtype=np.float64),
-            np.asarray(high, dtype=np.float64),
+            _flat(low),
+            _flat(high),
         )
     )
 
@@ -482,14 +637,14 @@ def gle_langevin(
     out = _core_gle_langevin(
         obj_fn,
         grad_fn,
-        np.asarray(low, dtype=np.float64),
-        np.asarray(high, dtype=np.float64),
+        _flat(low),
+        _flat(high),
         int(max_fevals),
         int(seed),
         omega_arg,
         float(dt),
         int(n_epochs),
-        None if x0 is None else np.asarray(x0, dtype=np.float64),
+        _flat_or_none(x0),
     )
     out["best_pos"] = np.asarray(out["best_pos"], dtype=np.float64)
     out["preconditioner_diag"] = np.asarray(
@@ -517,7 +672,7 @@ def gle_langevin_objective(
         omega_arg,
         float(dt),
         int(n_epochs),
-        None if x0 is None else np.asarray(x0, dtype=np.float64),
+        _flat_or_none(x0),
     )
     out["best_pos"] = np.asarray(out["best_pos"], dtype=np.float64)
     out["preconditioner_diag"] = np.asarray(
@@ -546,14 +701,14 @@ def gle_langevin_preconditioned(
     out = _core_gle_langevin_preconditioned(
         obj_fn,
         grad_fn,
-        np.asarray(low, dtype=np.float64),
-        np.asarray(high, dtype=np.float64),
+        _flat(low),
+        _flat(high),
         int(max_fevals),
         int(seed),
         omega_arg,
         float(dt),
         int(n_epochs),
-        None if x0 is None else np.asarray(x0, dtype=np.float64),
+        _flat_or_none(x0),
         probe_arg,
     )
     out["best_pos"] = np.asarray(out["best_pos"], dtype=np.float64)
@@ -584,7 +739,7 @@ def gle_langevin_preconditioned_objective(
         omega_arg,
         float(dt),
         int(n_epochs),
-        None if x0 is None else np.asarray(x0, dtype=np.float64),
+        _flat_or_none(x0),
         probe_arg,
     )
     out["best_pos"] = np.asarray(out["best_pos"], dtype=np.float64)
@@ -609,9 +764,9 @@ def gpmd_optimize(
     Implementation helper / portfolio arm material — not a global SOTA
     solver. See docs/derivations/gpmd_algorithm.org.
     """
-    low_arr = np.asarray(low, dtype=np.float64)
-    high_arr = np.asarray(high, dtype=np.float64)
-    x0_arr = None if x0 is None else np.asarray(x0, dtype=np.float64)
+    low_arr = _flat(low)
+    high_arr = _flat(high)
+    x0_arr = _flat_or_none(x0)
     out = _core_gpmd_optimize(
         obj_fn,
         low_arr,
@@ -641,9 +796,9 @@ def amsa_optimize(
     IPOP-style reseeds on stagnation, and a stall-recovering projected
     quasi-Newton polish tail when ``grad_fn`` is supplied.
     """
-    low_arr = np.asarray(low, dtype=np.float64)
-    high_arr = np.asarray(high, dtype=np.float64)
-    x0_arr = None if x0 is None else np.asarray(x0, dtype=np.float64)
+    low_arr = _flat(low)
+    high_arr = _flat(high)
+    x0_arr = _flat_or_none(x0)
     return _core_amsa_optimize(
         obj_fn,
         low_arr,
@@ -1030,9 +1185,9 @@ def bfwt_optimize(
     driver; competitive wins use ``global_optimize`` (portfolio). See
     docs/derivations/bfwt_d11.md.
     """
-    low_arr = np.asarray(low, dtype=np.float64)
-    high_arr = np.asarray(high, dtype=np.float64)
-    x0_arr = None if x0 is None else np.asarray(x0, dtype=np.float64)
+    low_arr = _flat(low)
+    high_arr = _flat(high)
+    x0_arr = _flat_or_none(x0)
     out = _core_bfwt_optimize(
         obj_fn,
         low_arr,
@@ -1066,14 +1221,14 @@ def dmc_population_optimize(
     """
     out = _core_dmc_population_optimize(
         obj_fn,
-        np.asarray(low, dtype=np.float64),
-        np.asarray(high, dtype=np.float64),
+        _flat(low),
+        _flat(high),
         int(budget),
         int(seed),
         grad_fn,
         int(target_n),
         int(steps_per_control),
-        None if x0 is None else np.asarray(x0, dtype=np.float64),
+        _flat_or_none(x0),
     )
     out["best_pos"] = np.asarray(out["best_pos"], dtype=np.float64)
     return out
@@ -1088,6 +1243,7 @@ def global_optimize(
     grad_fn=None,
     noise_sigma=None,
     policy: str = "auto",
+    x0=None,
     *,
     replicas: int = 1,
     coverage_shared: bool = True,
@@ -1129,6 +1285,8 @@ def global_optimize(
         (out of regime).
       policy: ``"auto"`` (default; feature-based regime routing) or
         ``"legacy"`` (flat arm order, uninformative priors; A/B only).
+      x0: optional starting point. It is clipped onto the box, then charged
+        as the first evaluation and the first incumbent.
       replicas: persistent portfolio controllers sharing the aggregate budget.
         One retains the single-controller behavior. Multiple replicas use
         native worker threads; no caller Jacobian is required.
@@ -1139,27 +1297,28 @@ def global_optimize(
         one admits the two adjacent chain identities without forwarding samples.
         This does not remove the shared arm-checkpoint barrier.
 
-    Peer separation moves global candidates, not derivative stencils or raw
-    objective values. Internal scalar-refinement probes count in ``n_evals``.
-    The modified proposal law is for optimization, not equilibrium sampling.
-
-    Returns a dict with ``best_pos``, ``best_val``, ``n_evals``,
-    ``n_grads``, ``arm_pulls``, and ``arm_successes``. Multiple replicas also
-    report individual results, ``charged`` work and coverage sample counters.
+    ``obj_fn`` and ``grad_fn`` are only called inside ``[low, high]``: a
+    point an arm proposes outside is mirror-reflected into the box, and the
+    gradient there is reflected with it. Peer separation moves global
+    candidates, not derivative stencils or raw objective values. Returns a
+    dict with ``best_pos``, ``best_val``, ``n_evals``, ``n_grads``,
+    ``arm_pulls``, and ``arm_successes``. Multiple replicas also report
+    individual results, ``charged`` work and coverage sample counters.
     """
     out = _core_global_optimize(
         obj_fn,
-        np.asarray(low, dtype=np.float64),
-        np.asarray(high, dtype=np.float64),
+        _flat(low),
+        _flat(high),
         int(budget),
         int(seed),
         grad_fn,
         noise_sigma if noise_sigma is None else float(noise_sigma),
         str(policy),
+        _flat_or_none(x0),
         replicas=int(replicas),
         coverage_shared=bool(coverage_shared),
         coverage_radius=float(coverage_radius),
-        coverage_neighbors=coverage_neighbors,
+        coverage_neighbors=int(coverage_neighbors),
     )
     out["best_pos"] = np.asarray(out["best_pos"], dtype=np.float64)
     return out
@@ -1170,6 +1329,7 @@ def global_optimize_objective(
     budget: int,
     seed: int = 0,
     use_gradient: bool = True,
+    x0=None,
 ):
     """Portfolio global optimizer over a native ``PyObjective`` handle."""
     out = _core_global_optimize_objective(
@@ -1177,6 +1337,8 @@ def global_optimize_objective(
         int(budget),
         int(seed),
         bool(use_gradient),
+        None,
+        _flat_or_none(x0),
     )
     out["best_pos"] = np.asarray(out["best_pos"], dtype=np.float64)
     return out
@@ -1230,6 +1392,14 @@ __all__ = [
     "bfwt_optimize",
     "global_optimize",
     "global_optimize_objective",
+    "ChemFitVector",
+    "chemfit_box",
+    "fit_anneal",
+    "fit_chemfit",
+    "flatten_parameters",
+    "run_benchmark",
+    "run_fitter",
+    "unflatten_parameters",
     "run",
     "run_device",
     "run_ensemble",
@@ -1239,6 +1409,17 @@ __all__ = [
     "tvm_ffi_tensor_metadata",
     "tvm_ffi_tensors_from_history",
 ]
+
+from anneal.chemfit import (  # noqa: E402
+    ChemFitVector,
+    chemfit_box,
+    fit_anneal,
+    fit_chemfit,
+    flatten_parameters,
+    run_benchmark,
+    run_fitter,
+    unflatten_parameters,
+)
 
 
 def __getattr__(name):

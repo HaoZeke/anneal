@@ -74,10 +74,30 @@ impl DiversityAnnealer {
     /// Returns `None` when fewer than two members are supplied, or when every
     /// pair is at zero distance, since neither gives a scale and a threshold
     /// invented at that point would be the hand-set constant this replaces.
-    pub fn from_population<D>(members: &[usize], mut distance: D) -> Option<Self>
+    pub fn from_population<D>(members: &[usize], distance: D) -> Option<Self>
     where
         D: FnMut(usize, usize) -> f64,
     {
+        Self::scaled_from_population(members, distance, 0.5)
+    }
+
+    /// Threshold starting at `factor` times the mean pairwise distance.
+    ///
+    /// [`Self::from_population`] is the factor one half. A caller with a
+    /// different published factor, such as 1.5, uses this and passes that
+    /// factor through. The mean is still taken over all pairs.
+    pub fn scaled_from_population<D>(
+        members: &[usize],
+        mut distance: D,
+        factor: f64,
+    ) -> Option<Self>
+    where
+        D: FnMut(usize, usize) -> f64,
+    {
+        assert!(
+            factor > 0.0 && factor.is_finite(),
+            "a diversity factor must be positive, got {factor}"
+        );
         if members.len() < 2 {
             return None;
         }
@@ -99,11 +119,12 @@ impl DiversityAnnealer {
         if !(mean > 0.0) {
             return None;
         }
+        let initial = factor * mean;
         Some(Self {
-            initial: 0.5 * mean,
+            initial,
             final_fraction: 0.1,
             anneal_fraction: 0.8,
-            current: 0.5 * mean,
+            current: initial,
             queries: 0,
         })
     }
@@ -173,6 +194,30 @@ mod tests {
         assert!(
             (a.initial() - 1.0).abs() < 1e-12,
             "start {} should be half the mean of 2",
+            a.initial()
+        );
+    }
+
+    #[test]
+    fn lee_bank_starts_at_half_the_mean_and_ends_at_one_fifth() {
+        // Mean pairwise distance is 2. Dave/2 is 1. Dave/5 is 0.4, which is
+        // a final fraction 0.4 of the starting threshold.
+        let pts = [0.0, 1.0, 3.0];
+        let mut schedule = DiversityAnnealer::from_population(&[0, 1, 2], line_distance(&pts))
+            .unwrap()
+            .with_final_fraction(0.4);
+        assert!((schedule.threshold(0.0) - 1.0).abs() < 1e-12);
+        assert!((schedule.threshold(1.0) - 0.4).abs() < 1e-12);
+    }
+
+    #[test]
+    fn a_caller_scale_multiplies_the_mean_pairwise_distance() {
+        let pts = [0.0, 1.0, 3.0];
+        let a = DiversityAnnealer::scaled_from_population(&[0, 1, 2], line_distance(&pts), 1.5)
+            .unwrap();
+        assert!(
+            (a.initial() - 3.0).abs() < 1e-12,
+            "start {} should be 1.5 times the mean of 2",
             a.initial()
         );
     }

@@ -29,6 +29,8 @@ pub mod ensemble;
 /// Archive-ratcheted exploration of the minima network.
 #[cfg(feature = "graphkey")]
 pub mod ffs;
+/// Cover, minimum-mode climb, and plain quench from one starting structure.
+pub mod floor_exit;
 /// Spectral referee over the explored landscape's transition graph.
 pub mod landscape_graph;
 /// Cut-and-splice mixing of two quenched clusters.
@@ -100,15 +102,15 @@ pub use gpmd::{
 };
 pub use local_polish::{
     LocalPolishResult, QmcPolishResult, projected_gradient_polish, qmc_best1bin_scout,
-    qmc_gsa_global_search, qmc_projected_gradient_polish, qmc_trust_region_poll,
-    shifted_qmc_projected_gradient_polish,
+    qmc_gsa_global_search, qmc_gsa_global_search_from, qmc_projected_gradient_polish,
+    qmc_trust_region_poll, shifted_qmc_projected_gradient_polish,
 };
 pub use mcmc_sa::{GelmanRubin, MultiChainResult, MultiChainSampler, MultiChainState};
 pub use parallel_tempering::{ParallelTemperingSampler, PtChainState, PtResult, geometric_ladder};
 pub use portfolio::{
     ArmStat, PortfolioEnsembleConfig, PortfolioEnsembleResult, PortfolioPolicy, PortfolioResult,
-    portfolio_ensemble_optimize, portfolio_optimize, portfolio_optimize_with_policy,
-    portfolio_values_ensemble_optimize,
+    portfolio_ensemble_optimize, portfolio_optimize, portfolio_optimize_from,
+    portfolio_optimize_seeded, portfolio_optimize_with_policy, portfolio_values_ensemble_optimize,
 };
 pub use regime::{
     OptimizationRegime, ProblemFeatures, RegimeError, arm_prior_boost, arm_slice_multiplier,

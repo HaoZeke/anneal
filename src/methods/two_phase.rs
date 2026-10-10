@@ -19,28 +19,31 @@
 //! <https://doi.org/10.1007/s10107-006-0006-3>; Doye, J. P. K. *Phys. Rev.
 //! E* **2000**, *62*, 8753 <https://doi.org/10.1103/PhysRevE.62.8753>.
 
+use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
 use ndarray::{Array1, ArrayView1};
-use rand::SeedableRng;
 use rand::rngs::StdRng;
+use rand::SeedableRng;
 use serde::Serialize;
 
 use crate::allocate::{DepthAllocator, RewardMoments};
-use crate::surface_evidence::SurfaceReport;
+use crate::surface_evidence::{
+    SourceTransferKey, SurfaceEvidenceBook, SurfaceEvidenceMessage, SurfaceReport,
+    MIN_TRANSFER_OBSERVATIONS,
+};
 
 /// A surface allocator posterior several chains update together.
 ///
-/// Pooled evidence is the cooperative channel that never touches a walk:
-/// every chain draws its arm from the same Normal-Gamma posterior and
-/// credits its block back to it. Independent draws preserve distinct walks;
-/// sharing evidence does not relocate a chain or guarantee a discovery gain.
-pub type SharedSurfaceAllocator = Arc<Mutex<DepthAllocator>>;
+/// Evidence is keyed by the occupied validated source. Chains that share a
+/// key draw from that key's posterior. Importing a peer reply does not
+/// replace a walk's coordinates, held arm, local rewards, or random stream.
+pub type SharedSurfaceAllocator = Arc<Mutex<SurfaceEvidenceBook>>;
 
 /// A fresh shared posterior over the plain surface plus `transforms`.
 pub fn shared_surface_allocator(transforms: &[TwoPhase]) -> SharedSurfaceAllocator {
     let arms = 1 + transforms.iter().filter(|two| two.is_active()).count();
-    Arc::new(Mutex::new(DepthAllocator::new(arms)))
+    Arc::new(Mutex::new(SurfaceEvidenceBook::new(arms)))
 }
 
 /// How the diameter cutoff is chosen for one relaxation.
@@ -247,13 +250,13 @@ pub fn largest_pair_distance(x: ArrayView1<f64>) -> f64 {
 /// The centroid contributes no gradient of its own because displacements
 /// from it sum to zero.
 pub fn penalty(x: ArrayView1<f64>, cutoff: f64, beta: f64, mu: f64) -> (f64, Array1<f64>) {
-    penalty_shaped(x, cutoff, beta, mu, None)
+    penalty_axes(x, cutoff, beta, mu, [1.0, 1.0, 1.0])
 }
 
-/// [`penalty`] with the diameter term measured in an ellipsoidal metric:
-/// a pair displacement `d` counts as `sum_k (d . e_k / s_k)^2`, so pairs
-/// along a long axis are penalized later than pairs along a short one and
-/// the structure keeps its own aspect while it compacts.
+/// [`penalty`] with the diameter term measured in an ellipsoidal metric.
+///
+/// A pair displacement `d` counts as `sum_k (d . e_k / s_k)^2`, so pairs
+/// along a long axis are penalized later than pairs along a short one.
 pub fn penalty_shaped(
     x: ArrayView1<f64>,
     cutoff: f64,
@@ -261,6 +264,9 @@ pub fn penalty_shaped(
     mu: f64,
     shape: Option<&Shape>,
 ) -> (f64, Array1<f64>) {
+    let Some(shape) = shape else {
+        return penalty_axes(x, cutoff, beta, mu, [1.0, 1.0, 1.0]);
+    };
     let n = x.len() / 3;
     let mut e = 0.0;
     let mut g = Array1::zeros(x.len());
@@ -273,27 +279,17 @@ pub fn penalty_shaped(
                     x[3 * i + 1] - x[3 * j + 1],
                     x[3 * i + 2] - x[3 * j + 2],
                 ];
-                // Metric distance and its gradient with respect to d.
-                let (r2, grad) = match shape {
-                    None => (
-                        d[0] * d[0] + d[1] * d[1] + d[2] * d[2],
-                        [2.0 * d[0], 2.0 * d[1], 2.0 * d[2]],
-                    ),
-                    Some(shape) => {
-                        let mut r2 = 0.0;
-                        let mut grad = [0.0_f64; 3];
-                        for k in 0..3 {
-                            let axis = shape.axes[k];
-                            let proj =
-                                (d[0] * axis[0] + d[1] * axis[1] + d[2] * axis[2]) / shape.scale[k];
-                            r2 += proj * proj;
-                            for m in 0..3 {
-                                grad[m] += 2.0 * proj * axis[m] / shape.scale[k];
-                            }
-                        }
-                        (r2, grad)
+                let mut r2 = 0.0;
+                let mut grad = [0.0_f64; 3];
+                for k in 0..3 {
+                    let axis = shape.axes[k];
+                    let proj =
+                        (d[0] * axis[0] + d[1] * axis[1] + d[2] * axis[2]) / shape.scale[k];
+                    r2 += proj * proj;
+                    for m in 0..3 {
+                        grad[m] += 2.0 * proj * axis[m] / shape.scale[k];
                     }
-                };
+                }
                 let excess = r2 - d2;
                 if excess > 0.0 {
                     e += beta * excess * excess;
@@ -322,6 +318,125 @@ pub fn penalty_shaped(
                 e += mu * d * d;
                 g[3 * i + k] += 2.0 * mu * d;
             }
+        }
+    }
+    (e, g)
+}
+
+/// Diameter penalty with axis weights on the squared pair components.
+///
+/// The spherical penalty is weights `[1, 1, 1]`. A prolate or oblate
+/// penalty uses other positive weights on the y and z components.
+pub fn penalty_axes(
+    x: ArrayView1<f64>,
+    cutoff: f64,
+    beta: f64,
+    mu: f64,
+    axes: [f64; 3],
+) -> (f64, Array1<f64>) {
+    let n = x.len() / 3;
+    let mut e = 0.0;
+    let mut g = Array1::zeros(x.len());
+    if beta > 0.0 && cutoff > 0.0 {
+        let d2 = cutoff * cutoff;
+        for i in 0..n {
+            for j in (i + 1)..n {
+                let d = [
+                    x[3 * i] - x[3 * j],
+                    x[3 * i + 1] - x[3 * j + 1],
+                    x[3 * i + 2] - x[3 * j + 2],
+                ];
+                let excess =
+                    axes[0] * d[0] * d[0] + axes[1] * d[1] * d[1] + axes[2] * d[2] * d[2] - d2;
+                if excess > 0.0 {
+                    e += beta * excess * excess;
+                    let coef = 2.0 * beta * excess;
+                    for k in 0..3 {
+                        let force = coef * axes[k] * d[k];
+                        g[3 * i + k] += force;
+                        g[3 * j + k] -= force;
+                    }
+                }
+            }
+        }
+    }
+    if mu > 0.0 && n > 0 {
+        let mut cm = [0.0_f64; 3];
+        for i in 0..n {
+            for k in 0..3 {
+                cm[k] += x[3 * i + k];
+            }
+        }
+        for value in cm.iter_mut() {
+            *value /= n as f64;
+        }
+        for i in 0..n {
+            for k in 0..3 {
+                let d = x[3 * i + k] - cm[k];
+                e += mu * d * d;
+                g[3 * i + k] += 2.0 * mu * d;
+            }
+        }
+    }
+    (e, g)
+}
+
+/// Axis-weighted diameter penalty in the inertia frame of `x`.
+///
+/// The weights are applied in order of increasing inertia eigenvalue, so the
+/// first weight lies on the longest principal axis of the structure being
+/// relaxed. The frame is rebuilt from those coordinates.
+pub fn penalty_body(
+    x: ArrayView1<f64>,
+    cutoff: f64,
+    beta: f64,
+    mu: f64,
+    axes: [f64; 3],
+) -> (f64, Array1<f64>) {
+    let n = x.len() / 3;
+    if n < 2 {
+        return penalty_axes(x, cutoff, beta, mu, axes);
+    }
+    let mut cm = [0.0; 3];
+    for i in 0..n {
+        for k in 0..3 {
+            cm[k] += x[3 * i + k];
+        }
+    }
+    let scale = n as f64;
+    for value in cm.iter_mut() {
+        *value /= scale;
+    }
+    let mut tensor = ndarray::Array2::<f64>::zeros((3, 3));
+    for i in 0..n {
+        let v = [x[3 * i] - cm[0], x[3 * i + 1] - cm[1], x[3 * i + 2] - cm[2]];
+        let r2 = v[0] * v[0] + v[1] * v[1] + v[2] * v[2];
+        for a in 0..3 {
+            for b in 0..3 {
+                tensor[[a, b]] += if a == b { r2 } else { 0.0 } - v[a] * v[b];
+            }
+        }
+    }
+    let (_, vecs) = crate::spectral::symmetric_eigen(tensor.view(), 32);
+    let mut y = Array1::zeros(x.len());
+    for i in 0..n {
+        for a in 0..3 {
+            let mut acc = 0.0;
+            for b in 0..3 {
+                acc += vecs[[b, a]] * (x[3 * i + b] - cm[b]);
+            }
+            y[3 * i + a] = acc;
+        }
+    }
+    let (e, gy) = penalty_axes(y.view(), cutoff, beta, mu, axes);
+    let mut g = Array1::zeros(x.len());
+    for i in 0..n {
+        for b in 0..3 {
+            let mut acc = 0.0;
+            for a in 0..3 {
+                acc += vecs[[b, a]] * gy[3 * i + a];
+            }
+            g[3 * i + b] = acc;
         }
     }
     (e, g)
@@ -458,12 +573,16 @@ pub fn penalty_groups(
 pub struct SurfacePortfolio {
     arms: Vec<Option<TwoPhase>>,
     allocator: DepthAllocator,
-    own_moments: Vec<RewardMoments>,
-    peer_moments: Option<Vec<RewardMoments>>,
-    evidence_schema: String,
-    /// When set, draws and credits go through this posterior instead of
-    /// the private one, which then only mirrors this chain's own draws.
+    /// When set, draws and credits for the occupied source go through this book.
     shared: Option<SharedSurfaceAllocator>,
+    /// Validated source occupied when the current block opened.
+    occupied: Option<SourceTransferKey>,
+    /// Source fixed at block open. Later occupancy does not rewrite it.
+    block_source: Option<SourceTransferKey>,
+    /// Rewards this chain credited, by source. Imports do not write here.
+    own_by_source: BTreeMap<SourceTransferKey, Vec<RewardMoments>>,
+    /// Peer replies, still keyed by the producer's source.
+    peer_by_source: BTreeMap<SourceTransferKey, Vec<RewardMoments>>,
     held: Option<usize>,
     block: usize,
     hops_in_block: usize,
@@ -521,6 +640,10 @@ impl SurfacePortfolio {
             evidence_schema,
             arms,
             shared: None,
+            occupied: None,
+            block_source: None,
+            own_by_source: BTreeMap::new(),
+            peer_by_source: BTreeMap::new(),
             held: None,
             block,
             hops_in_block: 0,
@@ -532,93 +655,123 @@ impl SurfacePortfolio {
     }
 
     /// Draw from and credit a posterior shared with other chains.
-    pub fn sharing(mut self, shared: SharedSurfaceAllocator) -> Self {
-        assert!(
-            self.peer_moments.is_none(),
-            "surface evidence has one sharing transport"
-        );
+    ///
+    /// `source` is the key the credit writes and the draw reads. A book
+    /// with no source stays empty, and every chain keeps a private allocator.
+    pub fn sharing(
+        mut self,
+        shared: SharedSurfaceAllocator,
+        source: SourceTransferKey,
+    ) -> Result<Self, &'static str> {
         let arms = shared.lock().expect("shared surface allocator").arms();
-        assert_eq!(
-            arms,
-            self.arms.len(),
-            "a shared surface allocator must cover the same arms"
-        );
+        if arms != self.arms.len() {
+            return Err("a shared surface allocator must cover the same arms");
+        }
+        self.set_occupied_source(source)?;
         self.shared = Some(shared);
-        self
+        Ok(self)
     }
 
+    /// Record the occupied validated source. A mismatched block interval is refused.
+    pub fn set_occupied_source(&mut self, source: SourceTransferKey) -> Result<(), &'static str> {
+        if source.block != self.block
+            || source.descriptor_schema.is_empty()
+            || source.descriptor_version == 0
+            || source.proposal.is_empty()
+            || source.quench_schema.is_empty()
+        {
+            return Err("occupied source does not match the declared block");
+        }
+        self.occupied = Some(source);
+        Ok(())
+    }
+
+    /// Adopt a checkpoint only when its interval is this portfolio's block.
+    pub fn adopt_checkpoint(
+        &mut self,
+        interval: usize,
+        source: SourceTransferKey,
+    ) -> Result<(), &'static str> {
+        if interval != self.block {
+            return Err("checkpoint interval is not the occupied source");
+        }
+        self.set_occupied_source(source)
+    }
+
+    /// The relaxation input is not a source and does not replace occupancy.
+    pub fn note_perturbed_input(&mut self, _perturbed: &SourceTransferKey) {}
+
     fn select_arm(&mut self) -> usize {
-        if let Some(peers) = self.peer_moments.as_ref() {
-            let moments = self
-                .own_moments
-                .iter()
-                .zip(peers)
-                .map(|(own, peer)| own.merge(*peer))
-                .collect::<Result<Vec<_>, _>>();
-            if let Ok(allocator) =
-                moments.and_then(|moments| DepthAllocator::from_moments(&moments))
-            {
+        if let Some(key) = self.block_source.clone() {
+            if let Some(shared) = self.shared.as_ref() {
+                let book = shared.lock().expect("shared surface allocator");
+                if let Some(allocator) = book.decision_allocator(&key) {
+                    return allocator.select(&mut self.rng);
+                }
+            } else if let Some(allocator) = self.local_decision(&key) {
                 return allocator.select(&mut self.rng);
             }
+            return DepthAllocator::new(self.arms.len()).select(&mut self.rng);
         }
-        match self.shared.as_ref() {
-            Some(shared) => shared
-                .lock()
-                .expect("shared surface allocator")
-                .select(&mut self.rng),
-            None => self.allocator.select(&mut self.rng),
+        self.allocator.select(&mut self.rng)
+    }
+
+    fn local_decision(&self, key: &SourceTransferKey) -> Option<DepthAllocator> {
+        let mut moments = self
+            .own_by_source
+            .get(key)
+            .cloned()
+            .unwrap_or_else(|| vec![RewardMoments::default(); self.arms.len()]);
+        if let Some(peers) = self.peer_by_source.get(key) {
+            for (slot, peer) in moments.iter_mut().zip(peers) {
+                *slot = slot.merge(*peer).ok()?;
+            }
         }
+        if moments.iter().map(|arm| arm.count).sum::<u64>() < MIN_TRANSFER_OBSERVATIONS {
+            return None;
+        }
+        DepthAllocator::from_moments(&moments).ok()
     }
 
     fn credit_arm(&mut self, arm: usize, reward: f64) {
-        if self.own_moments[arm].observe(reward).is_err() {
-            return;
-        }
-        if let Some(shared) = self.shared.as_ref() {
-            shared
-                .lock()
-                .expect("shared surface allocator")
-                .update(arm, reward);
-        }
         self.allocator.update(arm, reward);
     }
 
-    /// Cumulative observations produced by this chain, excluding every import.
-    pub fn report(&self) -> SurfaceReport {
-        SurfaceReport {
-            schema: self.evidence_schema.clone(),
-            arms: self.own_moments.clone(),
+    fn credit_source(&mut self, key: SourceTransferKey, arm: usize, reward: f64) {
+        if !reward.is_finite() {
+            return;
         }
+        let moments = self
+            .own_by_source
+            .entry(key.clone())
+            .or_insert_with(|| vec![RewardMoments::default(); self.arms.len()]);
+        if moments[arm].observe(reward).is_err() {
+            return;
+        }
+        let charged_work = u64::try_from(self.block).unwrap_or(u64::MAX).max(1);
+        if let Some(shared) = self.shared.as_ref() {
+            let _ = shared.lock().expect("shared surface allocator").observe(
+                0,
+                &key,
+                arm,
+                reward,
+                reward,
+                charged_work,
+            );
+        }
+        self.allocator.draws[arm] += 1;
     }
 
-    /// Peer-produced blocks informing the portfolio's choices.
-    pub fn peer_observations(&self) -> u64 {
-        self.peer_moments
-            .as_ref()
-            .map_or(0, |arms| arms.iter().map(|arm| arm.count).sum())
-    }
-
-    /// Replace peer evidence without changing the held arm, local history, or RNG.
-    pub fn import_peers(&mut self, report: SurfaceReport) -> Result<(), &'static str> {
-        report.validate()?;
-        if self.shared.is_some()
-            || report.schema != self.evidence_schema
-            || report.arms.len() != self.arms.len()
-        {
+    /// Store a peer reply under its original key.
+    ///
+    /// Local rewards, the held arm, and the random stream stay as they are.
+    /// Coordinates are not portfolio state and are not an argument.
+    pub fn import_evidence(&mut self, message: SurfaceEvidenceMessage) -> Result<(), &'static str> {
+        if self.shared.is_some() || message.key.block != self.block {
             return Err("incompatible surface evidence");
         }
-        let aggregate = self
-            .own_moments
-            .iter()
-            .zip(&report.arms)
-            .map(|(own, peer)| own.merge(*peer))
-            .collect::<Result<Vec<_>, _>>()?;
-        DepthAllocator::from_moments(&aggregate)?;
-        self.peer_moments = report
-            .arms
-            .iter()
-            .any(|arm| arm.count > 0)
-            .then_some(report.arms);
+        message.validate(self.arms.len())?;
+        self.peer_by_source.insert(message.key, message.arms);
         Ok(())
     }
 
@@ -635,6 +788,7 @@ impl SurfacePortfolio {
             self.hops_in_block += 1;
         }
         if self.held.is_none() {
+            self.block_source = self.occupied.clone();
             self.held = Some(self.select_arm());
             self.hops_in_block = self.hops_in_block.max(1);
             self.block_start_best = self.latest_best;
@@ -672,7 +826,11 @@ impl SurfacePortfolio {
             } else {
                 0.0
             };
-            self.credit_arm(arm, reward);
+            if let Some(key) = self.block_source.take() {
+                self.credit_source(key, arm, reward);
+            } else {
+                self.credit_arm(arm, reward);
+            }
         }
         self.block_lowest = f64::INFINITY;
         self.hops_in_block = 0;
@@ -697,6 +855,7 @@ impl SurfacePortfolio {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rand::Rng;
 
     fn cluster() -> Array1<f64> {
         Array1::from(vec![
@@ -800,7 +959,17 @@ mod tests {
     fn chains_sharing_a_posterior_learn_from_each_other_s_blocks() {
         let deep = TwoPhase::diameter(2.0, 1.0);
         let shared = shared_surface_allocator(&[deep]);
-        let mut teacher = SurfacePortfolio::with_block(&[deep], 1, 2).sharing(Arc::clone(&shared));
+        let source = crate::surface_evidence::SourceTransferKey {
+            descriptor_schema: "lj".into(),
+            descriptor_version: 1,
+            region: 1,
+            proposal: "hop".into(),
+            quench_schema: "lbfgs".into(),
+            block: 2,
+        };
+        let mut teacher = SurfacePortfolio::with_block(&[deep], 1, 2)
+            .sharing(Arc::clone(&shared), source.clone())
+            .unwrap();
         let mut best = 0.0_f64;
         for _ in 0..200 {
             let arm = teacher.begin(true);
@@ -812,7 +981,9 @@ mod tests {
             best = best.min(reached);
             teacher.observe(false, reached, best);
         }
-        let mut student = SurfacePortfolio::with_block(&[deep], 2, 2).sharing(Arc::clone(&shared));
+        let mut student = SurfacePortfolio::with_block(&[deep], 2, 2)
+            .sharing(Arc::clone(&shared), source)
+            .unwrap();
         let deep_draws = (0..40)
             .filter(|_| {
                 let arm = student.begin(true);
@@ -827,6 +998,63 @@ mod tests {
         assert!(
             student.draws().iter().sum::<usize>() > 0,
             "the private mirror records draws"
+        );
+    }
+
+    #[test]
+    fn imported_surface_evidence_keeps_the_held_arm_local_rewards_and_rng() {
+        let deep = TwoPhase::diameter(2.0, 1.0);
+        let mut portfolio = SurfacePortfolio::with_block(&[deep], 5, 4);
+        let source = crate::surface_evidence::SourceTransferKey {
+            descriptor_schema: "universal".into(),
+            descriptor_version: 1,
+            region: 2,
+            proposal: "hop".into(),
+            quench_schema: "lbfgs".into(),
+            block: 4,
+        };
+        portfolio.set_occupied_source(source.clone()).unwrap();
+        assert!(portfolio.adopt_checkpoint(9, source.clone()).is_err());
+        let held = portfolio.begin(true);
+        let perturbed = crate::surface_evidence::SourceTransferKey {
+            region: 9,
+            ..source.clone()
+        };
+        portfolio.note_perturbed_input(&perturbed);
+        assert_eq!(portfolio.occupied.as_ref(), Some(&source));
+        let coordinates = [0.0_f64, 1.0, 2.0];
+        let before_rng = portfolio.rng.clone();
+        let before_held = portfolio.held;
+        let before_local = portfolio.own_by_source.clone();
+        let message = crate::surface_evidence::SurfaceEvidenceMessage {
+            producer: 7,
+            key: source,
+            arms: vec![
+                crate::allocate::RewardMoments {
+                    count: 20,
+                    mean: 1.0,
+                    m2: 0.0,
+                },
+                crate::allocate::RewardMoments {
+                    count: 20,
+                    mean: -1.0,
+                    m2: 0.0,
+                },
+            ],
+            incumbent_gap: -1.0,
+            charged_work: 20,
+        };
+        portfolio.import_evidence(message).unwrap();
+        assert_eq!(portfolio.held, before_held);
+        assert_eq!(portfolio.own_by_source, before_local);
+        assert_eq!(portfolio.begin(false), held);
+        assert_eq!(coordinates, [0.0, 1.0, 2.0]);
+        let mut expected = before_rng;
+        let mut actual = portfolio.rng.clone();
+        assert_eq!(
+            expected.random::<u64>(),
+            actual.random::<u64>(),
+            "import replaced the random stream"
         );
     }
 

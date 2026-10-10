@@ -191,7 +191,7 @@ pub struct CatalogPolicyInput {
     pub ei_exhausted: bool,
     /// Measured Fiedler-and-DECAF family floor for this hop graph.
     pub min_families: usize,
-    /// Legacy reporting flag; search decisions do not use reference energies.
+    /// Published-energy score. Work selection does not read it.
     pub on_published_prize: bool,
 }
 

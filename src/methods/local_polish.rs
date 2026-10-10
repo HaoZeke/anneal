@@ -4,7 +4,7 @@
 use eindir_core::Bounds;
 use eindir_core::Gradient;
 use eindir_core::Objective;
-use ndarray::{Array1, Array2};
+use ndarray::{Array1, Array2, ArrayView1};
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 
@@ -214,11 +214,11 @@ fn unit_coordinate(pos: f64, low: f64, high: f64) -> f64 {
 }
 
 fn unit_to_box(unit: &Array1<f64>, low: &Array1<f64>, high: &Array1<f64>) -> Array1<f64> {
-    Array1::from_iter(
-        unit.iter()
-            .enumerate()
-            .map(|(axis, value)| low[axis] + (high[axis] - low[axis]) * (*value).clamp(0.0, 1.0)),
-    )
+    // `low + (high - low) * 1` can round past `high`, as on [-3, 0.7].
+    Array1::from_iter(unit.iter().enumerate().map(|(axis, value)| {
+        (low[axis] + (high[axis] - low[axis]) * (*value).clamp(0.0, 1.0))
+            .clamp(low[axis], high[axis])
+    }))
 }
 
 fn initial_line_search_step(direction: &Array1<f64>, low: &Array1<f64>, high: &Array1<f64>) -> f64 {
@@ -670,7 +670,26 @@ pub fn qmc_gsa_global_search<O>(
 where
     O: Objective<f64>,
 {
-    qmc_gsa_global_search_with_proposals(obj, max_evals, seed, n_chains, t_init, q_v, q_a, None)
+    qmc_gsa_global_search_from(obj, max_evals, seed, n_chains, t_init, q_v, q_a, None)
+}
+
+/// [`qmc_gsa_global_search`] with `x0`, when supplied, in place of the first
+/// chain's low-discrepancy start.
+#[allow(clippy::too_many_arguments)]
+pub fn qmc_gsa_global_search_from<O>(
+    obj: &O,
+    max_evals: usize,
+    seed: u64,
+    n_chains: usize,
+    t_init: f64,
+    q_v: f64,
+    q_a: f64,
+    x0: Option<ArrayView1<f64>>,
+) -> QmcPolishResult
+where
+    O: Objective<f64>,
+{
+    qmc_gsa_global_search_with_proposals(obj, max_evals, seed, n_chains, t_init, q_v, q_a, x0, None)
 }
 
 #[allow(clippy::too_many_arguments, clippy::type_complexity)]
@@ -682,6 +701,7 @@ pub(crate) fn qmc_gsa_global_search_with_proposals<O>(
     t_init: f64,
     q_v: f64,
     q_a: f64,
+    x0: Option<ArrayView1<f64>>,
     prepare: Option<&dyn Fn(ndarray::ArrayView1<f64>, &mut Array1<f64>) -> bool>,
 ) -> QmcPolishResult
 where
@@ -703,12 +723,16 @@ where
     let dim = bounds.dims;
     assert!(dim > 0, "objective dimension must be positive");
     let chain_count = n_chains.min(max_evals).max(1);
-    let starts = eindir_core::shifted_low_discrepancy_points(
+    let mut starts = eindir_core::shifted_low_discrepancy_points(
         bounds,
         chain_count,
         crate::runner::qmc_skip_from_seed(seed),
         seed,
     );
+    if let Some(x0) = x0 {
+        assert_eq!(x0.len(), dim, "x0 must have the objective's dimension");
+        starts.row_mut(0).assign(&x0);
+    }
     let mut rng = StdRng::seed_from_u64(seed);
     let cooling = TsallisCool::new(t_init, q_v);
     let visit = Reflected::new(

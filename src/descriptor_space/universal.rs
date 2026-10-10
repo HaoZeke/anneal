@@ -4,8 +4,8 @@ use super::{
     CONTRACTIVE_L2_NORMALIZATION_SCHEMA, DescriptorBlockKind, DescriptorBlockMetadata,
     DescriptorBlockSpec, DescriptorError, DescriptorSchema, DescriptorSpace, DescriptorVector,
 };
+use crate::neighbors::{cutoff_pairs, open_cutoff_pairs};
 use crate::soap::central_spectrum_from_displacements;
-use linkcell::Cell;
 use ndarray::{Array2, ArrayView1};
 use std::f64::consts::{PI, TAU};
 
@@ -74,6 +74,8 @@ impl DescriptorGeometry {
         self.periodic
     }
 
+    /// Fractional minimum-image of one Cartesian difference, in descriptor
+    /// length units. A periodic neighbour list does not use this wrap.
     pub(crate) fn displacement(self, delta: [f64; 3]) -> [f64; 3] {
         let mut displacement = delta;
         if let Some(cell) = self.cell
@@ -309,6 +311,86 @@ struct NeighborImage {
     distance: f64,
 }
 
+/// Neighbour list used by the universal descriptor.
+///
+/// Coordinates and the cell are divided by the geometry length scale, so
+/// the search runs in descriptor lengths. The cutoff is already in those
+/// units. A periodic geometry is [`cutoff_pairs`]. A free cluster is
+/// [`open_cutoff_pairs`]. Each entry is `(atom, displacement)`.
+pub fn descriptor_cutoff_neighbours(
+    geometry: DescriptorGeometry,
+    coordinates: ArrayView1<f64>,
+    cutoff: f64,
+) -> Result<Vec<Vec<(usize, [f64; 3])>>, DescriptorError> {
+    let images = neighbour_images(geometry, coordinates, cutoff)?;
+    Ok(images
+        .into_iter()
+        .map(|row| {
+            row.into_iter()
+                .map(|image| (image.atom, image.displacement))
+                .collect()
+        })
+        .collect())
+}
+
+fn neighbour_images(
+    geometry: DescriptorGeometry,
+    coordinates: ArrayView1<f64>,
+    maximum_cutoff: f64,
+) -> Result<Vec<Vec<NeighborImage>>, DescriptorError> {
+    let atoms = coordinates.len() / 3;
+    let positions = (0..atoms)
+        .map(|atom| {
+            [
+                coordinates[3 * atom],
+                coordinates[3 * atom + 1],
+                coordinates[3 * atom + 2],
+            ]
+        })
+        .collect::<Vec<_>>();
+    let scale = geometry.length_scale;
+    let positions = positions
+        .iter()
+        .map(|point| [point[0] / scale, point[1] / scale, point[2] / scale])
+        .collect::<Vec<_>>();
+    let rows = if geometry.periodic.iter().any(|&axis| axis) {
+        let cell = geometry.cell.expect("periodic geometry has a cell");
+        let vectors = [
+            [cell[0] / scale, cell[1] / scale, cell[2] / scale],
+            [cell[3] / scale, cell[4] / scale, cell[5] / scale],
+            [cell[6] / scale, cell[7] / scale, cell[8] / scale],
+        ];
+        cutoff_pairs(&positions, vectors, geometry.periodic, maximum_cutoff)
+            .map_err(|_| DescriptorError::NeighborSearch)?
+    } else {
+        open_cutoff_pairs(&positions, maximum_cutoff, false)
+    };
+    let mut neighbors = vec![Vec::new(); atoms];
+    for (centre, row) in rows.into_iter().enumerate() {
+        for neighbour in row {
+            let displacement = neighbour.displacement;
+            let distance = neighbour.distance;
+            if distance <= 1e-12 || distance >= maximum_cutoff {
+                continue;
+            }
+            neighbors[centre].push(NeighborImage {
+                atom: neighbour.index,
+                displacement,
+                distance,
+            });
+        }
+        neighbors[centre].sort_by(|left, right| {
+            left.distance
+                .total_cmp(&right.distance)
+                .then_with(|| left.atom.cmp(&right.atom))
+                .then_with(|| left.displacement[0].total_cmp(&right.displacement[0]))
+                .then_with(|| left.displacement[1].total_cmp(&right.displacement[1]))
+                .then_with(|| left.displacement[2].total_cmp(&right.displacement[2]))
+        });
+    }
+    Ok(neighbors)
+}
+
 impl Environment {
     fn new(
         geometry: DescriptorGeometry,
@@ -317,109 +399,14 @@ impl Environment {
         maximum_cutoff: f64,
     ) -> Result<Self, DescriptorError> {
         let atoms = coordinates.len() / 3;
-        let positions = (0..atoms)
-            .map(|atom| {
-                [
-                    coordinates[3 * atom],
-                    coordinates[3 * atom + 1],
-                    coordinates[3 * atom + 2],
-                ]
-            })
-            .collect::<Vec<_>>();
-        let periodic_cell = if geometry.periodic.iter().any(|&axis| axis) {
-            let cell = geometry.cell.expect("fully periodic geometry has a cell");
-            Some(
-                Cell::from_vectors(
-                    [cell[0], cell[1], cell[2]],
-                    [cell[3], cell[4], cell[5]],
-                    [cell[6], cell[7], cell[8]],
-                    [0.0; 3],
-                )
-                .map_err(|_| DescriptorError::NeighborSearch)?,
-            )
-        } else {
-            None
-        };
-        let image_bounds = periodic_cell
-            .as_ref()
-            .map(|cell| periodic_image_bounds(cell, geometry, maximum_cutoff))
-            .transpose()?
-            .unwrap_or([0; 3]);
-        let mut neighbors = vec![Vec::new(); atoms];
-        for centre in 0..atoms {
-            for target in 0..atoms {
-                let delta = [
-                    positions[target][0] - positions[centre][0],
-                    positions[target][1] - positions[centre][1],
-                    positions[target][2] - positions[centre][2],
-                ];
-                let base = geometry.displacement(delta);
-                for na in -image_bounds[0]..=image_bounds[0] {
-                    for nb in -image_bounds[1]..=image_bounds[1] {
-                        for nc in -image_bounds[2]..=image_bounds[2] {
-                            if centre == target && na == 0 && nb == 0 && nc == 0 {
-                                continue;
-                            }
-                            let shift = periodic_cell
-                                .as_ref()
-                                .map(|cell| cell.lattice_shift(na, nb, nc))
-                                .unwrap_or([0.0; 3]);
-                            let displacement = [
-                                base[0] + shift[0] / geometry.length_scale,
-                                base[1] + shift[1] / geometry.length_scale,
-                                base[2] + shift[2] / geometry.length_scale,
-                            ];
-                            let distance = dot(displacement, displacement).sqrt();
-                            if distance <= 1e-12 || distance >= maximum_cutoff {
-                                continue;
-                            }
-                            neighbors[centre].push(NeighborImage {
-                                atom: target,
-                                displacement,
-                                distance,
-                            });
-                        }
-                    }
-                }
-            }
-            neighbors[centre].sort_by(|left, right| {
-                left.distance
-                    .total_cmp(&right.distance)
-                    .then_with(|| left.atom.cmp(&right.atom))
-                    .then_with(|| left.displacement[0].total_cmp(&right.displacement[0]))
-                    .then_with(|| left.displacement[1].total_cmp(&right.displacement[1]))
-                    .then_with(|| left.displacement[2].total_cmp(&right.displacement[2]))
-            });
-        }
         Ok(Self {
             atoms,
             species: species
                 .map(<[u32]>::to_vec)
                 .unwrap_or_else(|| vec![0; atoms]),
-            neighbors,
+            neighbors: neighbour_images(geometry, coordinates, maximum_cutoff)?,
         })
     }
-}
-
-fn periodic_image_bounds(
-    cell: &Cell,
-    geometry: DescriptorGeometry,
-    maximum_cutoff: f64,
-) -> Result<[i32; 3], DescriptorError> {
-    let physical_cutoff = maximum_cutoff * geometry.length_scale;
-    let widths = cell.widths();
-    let mut bounds = [0; 3];
-    for axis in 0..3 {
-        if !geometry.periodic[axis] {
-            continue;
-        }
-        let bound = (physical_cutoff / widths[axis] + 0.5).ceil();
-        if !bound.is_finite() || bound > i32::MAX as f64 {
-            return Err(DescriptorError::NeighborSearch);
-        }
-        bounds[axis] = bound as i32;
-    }
-    Ok(bounds)
 }
 
 fn pair_radial(environment: &Environment, block: DescriptorBlockSpec) -> Vec<f64> {

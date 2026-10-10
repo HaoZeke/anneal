@@ -624,22 +624,31 @@ pub fn coordination_histogram_distance(
 }
 
 fn shell_histograms(x: ArrayView1<f64>, r1: f64, r2: f64) -> (Vec<usize>, Vec<usize>) {
+    coordination_shell_counts(x, r1, r2)
+}
+
+/// First- and second-shell occupancy of a free cluster.
+///
+/// The neighbours are the open-axis cutoff at `r2`: Cartesian pairs, not a
+/// periodic wrap. `H(s, n)` counts atoms with `n` neighbours in shell `s`.
+pub fn coordination_shell_counts(x: ArrayView1<f64>, r1: f64, r2: f64) -> (Vec<usize>, Vec<usize>) {
     let n = x.len() / 3;
+    let positions = (0..n)
+        .map(|atom| [x[3 * atom], x[3 * atom + 1], x[3 * atom + 2]])
+        .collect::<Vec<_>>();
+    let rows = crate::neighbors::open_cutoff_pairs(&positions, r2, true);
     let r1sq = r1 * r1;
     let r2sq = r2 * r2;
     let mut h1 = vec![0usize; n];
     let mut h2 = vec![0usize; n];
-    for i in 0..n {
+    for row in rows.iter().take(n) {
         let mut n1 = 0usize;
         let mut n2 = 0usize;
-        for j in 0..n {
-            if i == j {
-                continue;
-            }
-            let dx = x[3 * i] - x[3 * j];
-            let dy = x[3 * i + 1] - x[3 * j + 1];
-            let dz = x[3 * i + 2] - x[3 * j + 2];
-            let r2ij = dx * dx + dy * dy + dz * dz;
+        for neighbour in row {
+            let r2ij = {
+                let d = neighbour.displacement;
+                d[0] * d[0] + d[1] * d[1] + d[2] * d[2]
+            };
             if r2ij <= r1sq {
                 n1 += 1;
             } else if r2ij <= r2sq {

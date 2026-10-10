@@ -152,8 +152,7 @@ fn dump_xyz(path: &str, x: ArrayView1<f64>, e: f64) {
     }
 }
 
-fn load_xyz(path: &str) -> Array1<f64> {
-    let text = std::fs::read_to_string(path).expect(path);
+fn coords_from_text(text: &str) -> Array1<f64> {
     let mut vals = Vec::new();
     for line in text.lines() {
         let t = line.trim();
@@ -176,16 +175,61 @@ fn load_xyz(path: &str) -> Array1<f64> {
             }
         }
     }
-    assert_eq!(
-        vals.len(),
-        225,
-        "{path} has {} coords, want 225",
-        vals.len()
-    );
+    assert_eq!(vals.len(), 225, "xyz has {} coords, want 225", vals.len());
     Array1::from(vals)
 }
 
+fn load_xyz(path: &str) -> Array1<f64> {
+    let text = std::fs::read_to_string(path).expect(path);
+    coords_from_text(&text)
+}
+
+fn run_floor_search(hops: usize, seeds: u64) {
+    let raw = coords_from_text(include_str!("../tests/fixtures/lj75_ico.xyz"));
+    let (e0, x0) = relax(raw.view(), 800);
+    let bond = anneal_core::lattice::nearest_neighbour_scale(x0.view());
+    println!(
+        "{{\"kind\":\"floor_start\",\"energy\":{e0:.9},\"energy_6\":{e0:.6},\"hops\":{hops},\"bond\":{bond:.6}}}"
+    );
+    let mut best_e = e0;
+    for seed in 1u64..=seeds.max(1) {
+        let e = anneal_core::methods::floor_exit::search(
+            x0.view(),
+            bond,
+            hops,
+            seed,
+            |v| lj(v),
+            |v| relax(v, 600).1,
+        );
+        if e < best_e {
+            best_e = e;
+        }
+        println!("{{\"kind\":\"floor_seed\",\"seed\":{seed},\"start\":{e0:.9},\"best\":{e:.9}}}");
+        let floor = (e0 * 1.0e6).round() / 1.0e6;
+        if best_e < floor {
+            break;
+        }
+    }
+    let floor = (e0 * 1.0e6).round() / 1.0e6;
+    println!(
+        "{{\"kind\":\"floor_exit\",\"start\":{e0:.9},\"best\":{best_e:.9},\"below_start\":{}}}",
+        best_e < floor
+    );
+}
+
 fn main() {
+    if std::env::args().nth(1).as_deref() == Some("search") {
+        let hops = std::env::args()
+            .nth(2)
+            .and_then(|value| value.parse().ok())
+            .unwrap_or_else(anneal_core::hypersphere::default_cover_size);
+        let seeds = std::env::args()
+            .nth(3)
+            .and_then(|value| value.parse().ok())
+            .unwrap_or(1);
+        run_floor_search(hops, seeds);
+        return;
+    }
     let path = std::env::args().nth(1);
     let (e0, x0) = if let Some(ref p) = path {
         if std::path::Path::new(p).is_file() {

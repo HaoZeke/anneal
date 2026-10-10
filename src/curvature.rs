@@ -543,6 +543,89 @@ where
     Some((lambdas, modes, evaluations))
 }
 
+/// Non-rigid eigenpair nearest to `seed`.
+///
+/// Unshifted Lanczos is started on `seed`. The Ritz vector with the largest
+/// overlap on that seed is kept, so a climb can follow one mode after a
+/// softer direction has appeared beside it. A seed that is already an
+/// eigenvector comes back with its Rayleigh quotient.
+pub fn tracked_mode<G>(
+    x: ArrayView1<f64>,
+    seed: ArrayView1<f64>,
+    steps: usize,
+    epsilon: f64,
+    mut grad: G,
+) -> Option<(f64, Array1<f64>)>
+where
+    G: FnMut(ArrayView1<f64>) -> Option<Array1<f64>>,
+{
+    let dim = x.len();
+    if dim < 6 || seed.len() != dim || !(epsilon > 0.0) {
+        return None;
+    }
+    let rigid = rigid_basis(x);
+    let mut hv = |v: &Array1<f64>| -> Option<Array1<f64>> {
+        let mut d = v.clone();
+        project_rigid_with(&mut d, &rigid);
+        let mut xp = x.to_owned();
+        let mut xm = x.to_owned();
+        for i in 0..dim {
+            xp[i] += epsilon * d[i];
+            xm[i] -= epsilon * d[i];
+        }
+        let gp = grad(xp.view())?;
+        let gm = grad(xm.view())?;
+        let mut out = Array1::<f64>::zeros(dim);
+        for i in 0..dim {
+            out[i] = (gp[i] - gm[i]) / (2.0 * epsilon);
+        }
+        project_rigid_with(&mut out, &rigid);
+        Some(out)
+    };
+    let mut q0 = seed.to_owned();
+    project_rigid_with(&mut q0, &rigid);
+    let n0 = q0.iter().map(|z| z * z).sum::<f64>().sqrt();
+    if n0 <= 1.0e-12 {
+        return None;
+    }
+    q0 /= n0;
+    let Some((alphas, betas, basis)) = lanczos_tridiag(&q0, steps.max(2), &mut hv, &|v| {
+        project_rigid_with(v, &rigid)
+    }) else {
+        let w = hv(&q0)?;
+        let lambda: f64 = w.iter().zip(q0.iter()).map(|(a, b)| a * b).sum();
+        return lambda.is_finite().then_some((lambda, q0));
+    };
+    let (vals, vecs) = ritz(&alphas, &betas)?;
+    let mut best_j = 0usize;
+    let mut best_overlap = -1.0_f64;
+    for j in 0..vals.len() {
+        let overlap = vecs[[0, j]].abs();
+        if overlap > best_overlap {
+            best_overlap = overlap;
+            best_j = j;
+        }
+    }
+    let mut mode = Array1::<f64>::zeros(dim);
+    for (row, basis_vec) in basis.iter().enumerate().take(vals.len()) {
+        let coeff = vecs[[row, best_j]];
+        for i in 0..dim {
+            mode[i] += coeff * basis_vec[i];
+        }
+    }
+    project_rigid_with(&mut mode, &rigid);
+    let norm = mode.iter().map(|z| z * z).sum::<f64>().sqrt();
+    if norm <= 1.0e-12 || !vals[best_j].is_finite() {
+        return None;
+    }
+    mode /= norm;
+    let align: f64 = mode.iter().zip(q0.iter()).map(|(a, b)| a * b).sum();
+    if align < 0.0 {
+        mode *= -1.0;
+    }
+    Some((vals[best_j], mode))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
