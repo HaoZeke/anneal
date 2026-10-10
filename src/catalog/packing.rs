@@ -458,6 +458,14 @@ impl PackingBook {
         histogram.last().copied()
     }
 
+    fn descriptor_rows(&self, coordinates: &[f64]) -> ndarray::Array2<f64> {
+        if self.spec == PACKING_SPEC {
+            (*packing_rows(coordinates)).clone()
+        } else {
+            local_nu3_z(ArrayView1::from(coordinates), self.spec, None)
+        }
+    }
+
     fn assign_histogram(&self, coordinates: &[f64]) -> Option<Vec<f64>> {
         if !coordinates.len().is_multiple_of(3) {
             return None;
@@ -466,7 +474,7 @@ impl PackingBook {
         if atoms < MINIMUM_PACKING_ATOMS {
             return None;
         }
-        let loc = local_nu3_z(ArrayView1::from(coordinates), self.spec, None);
+        let loc = self.descriptor_rows(coordinates);
         if loc.nrows() == 0 || loc.ncols() == 0 {
             return None;
         }
@@ -490,7 +498,7 @@ impl PackingBook {
         if atoms < MINIMUM_PACKING_ATOMS {
             return None;
         }
-        let loc = local_nu3_z(ArrayView1::from(coordinates), self.spec, None);
+        let loc = self.descriptor_rows(coordinates);
         if loc.nrows() == 0 || loc.ncols() == 0 {
             return None;
         }
