@@ -1188,10 +1188,12 @@ pub fn first_encounter(out: &Outcome, target: f64, tolerance: f64, spent: usize)
 /// The survival is kept as an exact ratio of products of at-risk counts. It is
 /// exactly a half whenever half the runs are found before any is censored, and
 /// a floating-point product of the same factors can round to either side of a
-/// half, which moves the median by a whole encounter.
+/// half, which moves the median by a whole encounter. A run censored at the
+/// time of an encounter is still at risk at it, as Kaplan and Meier count it,
+/// so the median does not depend on the order of `runs`.
 pub fn median_encounter(runs: &[Encounter]) -> Option<usize> {
     let mut events: Vec<(usize, bool)> = runs.iter().map(|e| (e.charged(), e.found())).collect();
-    events.sort_by_key(|(c, _)| *c);
+    events.sort_by_key(|&(c, found)| (c, !found));
 
     // survival = left / entered, the products of the at-risk counts after and
     // before each encounter, so it is at most a half when 2 left <= entered.
@@ -1510,6 +1512,20 @@ mod tests {
         between.extend([cens(6), cens(7)]);
         between.extend((8..=15).map(found));
         assert_eq!(median_encounter(&between), Some(9));
+    }
+
+    /// A run censored at the time of an encounter is still at risk at it, in
+    /// whatever order the runs come: of three, one found and one censored at
+    /// 5 leave the survival at 2/3, so the median is the encounter at 9.
+    #[test]
+    fn a_run_censored_at_an_encounter_is_still_at_risk() {
+        let found = |c: usize| Encounter::Found {
+            charged: c,
+            hops: 1,
+        };
+        let cens = |c: usize| Encounter::Censored { charged: c };
+        assert_eq!(median_encounter(&[cens(5), found(5), found(9)]), Some(9));
+        assert_eq!(median_encounter(&[found(5), cens(5), found(9)]), Some(9));
     }
 
     /// LJ13 is the case with one answer everyone agrees on, so it is the one
