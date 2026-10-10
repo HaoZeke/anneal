@@ -31,6 +31,14 @@
 //! outstanding at a first hit or at the end of a run, while choosing a move
 //! costs at most one call ([`anneal_core::methods::lattice_search`]).
 //!
+//! `shared` against `private` holds the trial rules, the lattice descent and
+//! its quench fixed and measures the bank: the exchange of members and, at
+//! one slot, splicing between chains. A lattice arm against a recommended arm
+//! changes the search itself, quench included: the step-capped L-BFGS of the
+//! GMIN form against the strong Wolfe L-BFGS of [`WarmLbfgs`]. A margin over
+//! the recommended arms that `private` matches is the lattice search's, not
+//! communication's.
+//!
 //! The lattice arms read `CHAINS`, `SLOTS`, `FRESH`, `SPLICE`, `MOVED_MIN`,
 //! `MOVED_MAX`, `MERGE_START`, `MERGE_END`, `RETIRE`, `DENSITY`, `QUENCH_STEP`,
 //! `QUENCH_TOL`, `QUENCH_MEMORY` and `LATTICE_CANDIDATES`.
