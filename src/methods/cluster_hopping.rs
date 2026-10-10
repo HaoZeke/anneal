@@ -1149,7 +1149,6 @@ where
     let frontier_exchange =
         std::env::var("CATALOG_FRONTIER_EXCHANGE").is_ok_and(|value| value == "1");
     let mut screen_bank: Vec<(Array1<f64>, f64, Array1<f64>)> = Vec::new();
-    let mut known_hits = 0usize;
     // The run's own environment codebook, grown from every accepted
     // recordable structure, so the trace can report each arrival's
     // unseen-environment share before the arrival is added.
@@ -1458,8 +1457,10 @@ where
                     // the climb starts, and a min-mode search finds its
                     // own.
                     let climbed = crate::known_basin::with_hill_only(|| {
-                        let mut activation = crate::methods::activation::Activation::default();
-                        activation.step = crate::known_basin::LEAVE_WALK_STEP;
+                        let activation = crate::methods::activation::Activation {
+                            step: crate::known_basin::LEAVE_WALK_STEP,
+                            ..Default::default()
+                        };
                         grad.as_deref_mut().and_then(|g| {
                             crate::methods::activation::activate_from_origin(
                                 from_state.view(),
@@ -1536,7 +1537,7 @@ where
                 // minimum below it: a minimum of \(E+V\) is not a minimum
                 // of the potential, and a hill this Leave put there is not
                 // part of the landscape.
-                let (mut candidate_energy, mut candidate) = if leave_action {
+                let (candidate_energy, candidate) = if leave_action {
                     crate::known_basin::with_disarmed(|| {
                         relax(ledger, quenched.1.view(), cfg.relax_steps)
                     })
@@ -2136,9 +2137,6 @@ where
         } else {
             None
         };
-        if known_stand_in.is_some() {
-            known_hits += 1;
-        }
         let returning = cfg.return_screen && {
             let ds = bias.cv(x_screen.view());
             let dc = bias.cv(x.view());
