@@ -90,12 +90,16 @@ against 4.5e-10 (6/17/17). ``ellR30@5000``, 3.4e-8 against 0 (0/19/21), and
 its x1e-6 and x2^-20 copies come level only with both the opening without its
 bar and the descent's ``1e-12`` tolerance (0, 0/38/2), at the costs of each.
 Lending from a GSA phase's fifth slice: ``mich10@5000`` -9.655 against -9.66
-(3/28/9, p 0.021), which no tried rule brings level without putting other rows
-behind: lending from any slow slice puts ``mich10@5000`` without ``x0``,
-``rast10_shift@1000`` and ``styb10_45@1000`` without ``x0`` behind, from the
-fourth slice ``rast10_fixed@1000`` and ``schwefel10_cec@1000``, a lent slice
-held to a quarter of the phase's pace ``ackley10@1000`` (1.16 against 0.0694),
-and ending a phase CMA-ES took once its slices slow ``ackS30@5000``. With
+(3/28/9, p 0.021). Lending from any slow slice brings it level but puts
+``mich10@5000`` without ``x0``, ``rast10_shift@1000`` and ``styb10_45@1000``
+without ``x0`` behind; a lent slice held to a quarter of the phase's pace
+brings it level (4/26/10, p 0.052) and puts none of the other rows measured
+with it behind, but ends ``ackley10@1000`` at 1.155 against the loop's 0.0694
+(1/28/11), still ahead of the form before these rules (2.81) and of 0.10.0
+(17.1) but behind the form the lend and phase rules were added to (0.0080,
+8/11/21); from the fourth slice the lend leaves it behind with
+``rast10_fixed@1000`` and ``schwefel10_cec@1000``, and ending a phase CMA-ES
+took once its slices slow leaves it behind and costs ``ackS30@5000``. With
 phases that keep the turn while they still find lower basins, the fifth-slice
 lend also trails the form the two were added to on ``ackS30@20000``, 8.6e-7
 against 6.3e-7 (12/1/27, p 0.048), and on ``ackley10@5000`` without ``x0``,
