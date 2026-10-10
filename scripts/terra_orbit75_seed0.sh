@@ -28,7 +28,7 @@ export OPENBLAS_NUM_THREADS=${OPENBLAS_NUM_THREADS:-1}
 export MKL_NUM_THREADS=${MKL_NUM_THREADS:-1}
 cargo build --release --features featomic,ira,bank-rpc --example lj_cluster_search
 BIN=$CARGO_TARGET_DIR/release/examples/lj_cluster_search
-ldd "$BIN" | head
+ldd "$BIN"
 export SEED_OFFSET=${SEED_OFFSET:-0}
 echo "RUN $BIN 75 4000000 1 thompson,rscreen,orbit SEED_OFFSET=$SEED_OFFSET"
 "$BIN" 75 4000000 1 thompson,rscreen,orbit | tee "$CARGO_TARGET_DIR/orbit75_seed${SEED_OFFSET}.out"
