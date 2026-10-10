@@ -146,6 +146,57 @@ fn a_rung_switch_brings_each_state_its_own_gradient() {
     assert!(checked >= 50, "only {checked} steps carried a gradient");
 }
 
+/// Quenches minima hopping counted as returns to the basin the chain stood in,
+/// as a fraction of all it classified, and swaps refused and tried, over the
+/// seeds.
+fn returns(cfg: &Config) -> (f64, usize, usize) {
+    let (mut same, mut classified, mut refused, mut tried) = (0, 0, 0, 0);
+    for seed in 0..SEEDS {
+        let out = lj_run_with(cfg, seed, 20_000, false);
+        let (s, k, n) = out.visit_counts;
+        same += s;
+        classified += s + k + n;
+        refused += out.swaps_tried - out.swaps_accepted;
+        tried += out.swaps_tried;
+    }
+    (same as f64 / classified as f64, refused, tried)
+}
+
+/// A rung that takes over the chain takes over the basin its state stands in,
+/// so minima hopping counts a quench back into that basin as a return, the
+/// first after a switch included.
+///
+/// Only a refused swap resumes a rung on a state other than the one that has
+/// just hopped, so this ladder refuses most: its rungs deposit by their
+/// temperatures, which keeps the cold rung settled and pushes the hot one
+/// above it, and it is steep enough that the energies decide the swap. With
+/// the screens off no trial is counted without its quench, so every one is
+/// classified by the basin it reaches. Measured over these seeds, the ladder
+/// counts 0.50 of its quenches as returns and a single chain 0.46, against a
+/// bar of 0.41, and a ladder whose rung keeps the basin of the one that hopped
+/// before it 0.30.
+#[test]
+fn a_rung_switch_brings_each_state_its_own_basin() {
+    let mut cfg = Config::for_cluster(13);
+    assert!(!cfg.return_screen && !cfg.bayes_screen);
+    cfg.minima_hopping = true;
+    cfg.screen_margin = f64::INFINITY;
+    cfg.ladder_top = 100.0;
+    cfg.bias_by_rung = true;
+    cfg.swap_period = 1;
+    let (single, _, _) = returns(&cfg);
+    cfg.replicas = 2;
+    let (ladder, refused, tried) = returns(&cfg);
+    assert!(
+        2 * refused >= tried,
+        "the ladder refused {refused} of {tried} swaps, too few to resume rungs on their own states"
+    );
+    assert!(
+        ladder >= 0.9 * single,
+        "the ladder counted {ladder:.3} of its quenches as returns against {single:.3} on a single chain"
+    );
+}
+
 /// The energy bias is one function on every rung, so its tempering factor is
 /// set at the temperature a single chain hops at, whichever rung fills its
 /// first sample, and `(gamma - 1) T` is the sample's spread on any ladder.
