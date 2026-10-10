@@ -19,7 +19,10 @@
 //! [`Sharing::Shared`] at its first bank draw, or sooner if the shared bank is
 //! not yet full when the private one is, since only a full bank draws the coin
 //! for a random start. With one slot the private ablation therefore removes
-//! cross-chain splicing together with the exchange of members.
+//! cross-chain splicing together with the exchange of members. A margin over
+//! another method that the private ablation matches belongs to what the two
+//! share, the trial rules, the lattice descent and its quench, and not to
+//! communication between chains.
 //!
 //! Chains advance in synchronous generations. Parents are drawn and offers
 //! admitted in chain order between generations; only the trials run in
