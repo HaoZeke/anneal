@@ -136,7 +136,8 @@ value sets none, and multiplying the objective by a power of two
 multiplies every threshold exactly. The descent likewise stops on the
 resolution of its values: an iteration is slow when it lowers its value
 by less than =8 eps= of it, a few units in the last place, and its
-first trial moves at most 5% of a side whatever the gradient's size. Multiplying the objective by a power of two therefore leaves a
+first trial moves at most 5% of a side whatever the gradient's size.
+Multiplying the objective by a power of two therefore leaves a
 run unchanged until the surrogate or the restart arm plays, whose
 temperatures are absolute. The main bandit's threshold scales with
 =|f|= instead and floors at 1, turning absolute below it.
