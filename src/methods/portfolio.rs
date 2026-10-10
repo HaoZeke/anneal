@@ -4267,6 +4267,7 @@ where
                     states,
                     &mut rng,
                     &mut posteriors,
+                    None,
                 );
             }
         }
