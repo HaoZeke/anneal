@@ -3,8 +3,9 @@ Shao, Cheng and Cai, J. Comput. Chem. 25, 1693 (2004), doi 10.1002/jcc.20096,
 on a Lennard-Jones cluster. Its sites are geometric, at the pair-well distance
 over the cluster's own triangles, and no site is relaxed; every atom with fewer
 than twelve bonds is movable; one deterministic greedy pass weighs the
-highest-energy movable atoms against all sites; and one step-capped L-BFGS
-quench follows each search. The lattice needs a pair potential with one well
+highest-energy movable atoms against all sites; and one L-BFGS quench (Liu and
+Nocedal, Math. Program. 45, 503 (1989)) in the step-capped form of Wales's
+GMIN follows each search. The lattice needs a pair potential with one well
 distance.
 Every value-and-gradient call is charged as one call; lattice pair terms are
 charged at their fraction of the n(n-1)/2 pairs of a full evaluation and
