@@ -323,7 +323,10 @@ pub struct Config {
     /// weighs the biases, and a swap is accepted on the biases alone: the cost
     /// cancels from the factor and takes the energies with it. The first sweep,
     /// before the cost exists, swaps by the Metropolis factor without the
-    /// energy bias, which that sweep does not read.
+    /// energy bias, which that sweep does not read. Every rung feeds the
+    /// window and its sweeps unless [`Config::statistical_temperature`] is on
+    /// as well, when only the rungs at ratio one do and the sweeps come about
+    /// `R` times further apart on a ladder of `R` rungs.
     pub flat_histogram: bool,
     /// Trials between weight refreshes. The weight is frozen across a sweep so
     /// each sweep is an exact chain for its own target rather than an adaptive
@@ -348,6 +351,17 @@ pub struct Config {
     /// job; the ratio keeps the hotter rungs that many times above it. Clamping
     /// every rung to the one band instead would cut the top of the ladder off
     /// wherever the estimate runs high.
+    ///
+    /// Only the rungs at ratio one feed the density of states the estimate is
+    /// read from, which is the coldest rung alone unless the ladder is flat,
+    /// and with [`Config::flat_histogram`] on as well the flat-histogram window
+    /// and its sweeps come from that rung alone too. A hotter rung stands with
+    /// another weight than the one the estimator fits, so its counts would
+    /// bias the estimate; measured on LJ13, they heated every rung. The cost
+    /// is evidence: on a ladder of `R` rungs taking turns the density of states
+    /// records one hop in `R`, so the estimate learns about `R` times slower
+    /// and first takes over after about `R` times [`Config::flat_sweep`] hops,
+    /// at hop 750 rather than 400 on two rungs at the default sweep.
     pub statistical_temperature: bool,
     /// Deposit a well-tempered bias in quenched energy.
     ///
