@@ -1414,7 +1414,11 @@ over =VALUES_ONLY_ARMS= (portfolio.rs:3278: =cma=, =qn=, =gsa=, =de=,
 the best of a seeded design of =d+1= points; when the budget affords
 five gradients per coordinate, an opening finite-difference descent
 runs while its slices succeed and gain more than =1e-4= times the
-opening's largest gain, up to convergence, and =qn= then rejoins the
+opening's largest gain, up to convergence; until the descent has
+lowered its own value from below the start's, a slice in which it
+stalls short of convergence or stops at the start's value gives =cma=
+one slice, once per run, and the opening goes on from the incumbent
+=cma= leaves, where the descent restarts, and =qn= then rejoins the
 ranking on the prior. With less, =cma= takes one slice from the start,
 the descent keeps the turn until a slice gains less per evaluation
 than the one before (=DescentPace=), and =gsa= then keeps it while each

@@ -47,8 +47,15 @@ run and continues, up to convergence, while each slice lowers the
 incumbent by more than the success threshold and by more than =1e-4=
 times the largest gain an opening slice has made from below the start's
 value, since a descent that gains a little less on every slice would
-otherwise hold the whole run. Its successes describe the start, so
-=qn= then rejoins the ranking on the prior.
+otherwise hold the whole run. Until the descent has lowered its own
+value from below the start's, a slice in which it stalls short of
+convergence, as when its first curvature pair spans a steep wall, or
+stops at the start's value, as when every neighbour of a start behind
+a sentinel shares it, gives =cma= the slice it takes first short of
+the opening budget, once per run, and the opening goes on from the
+incumbent =cma= leaves, where the descent restarts. The opening's
+successes describe the start, so =qn= then rejoins the ranking on the
+prior.
 
 With less, a descent from the start converges only by taking most of
 the run, which would leave =gsa= and =de= no turn, and separable
