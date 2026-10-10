@@ -221,7 +221,11 @@ same icosahedral-funnel floor energy (src/dos.rs:947-956).
 Feeds/consumes: an alternative/complementary acceptance and deposit
 target to =BasinBias=, wired into the same hop loop
 (src/methods/cluster_hopping.rs:1958-2050 region shows the deposit and
-sweep-refresh logic inline).
+sweep-refresh logic inline). On a replica ladder the energy bias is one
+function every rung reads over its own temperature; its tempering
+factor and its deposits read the temperature a single chain would hop
+at, so =(gamma - 1) T = sigma= holds whichever rung fills the sample or
+deposits.
 
 ** Stall escapes
 

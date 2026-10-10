@@ -6,6 +6,7 @@
 //! adopts. Counted here as adopted steps that climb more than one well depth,
 //! on LJ13 at a temperature where a single chain seldom climbs that far.
 
+use anneal_core::dos::EnergyBias;
 use anneal_core::methods::cluster_hopping::{
     Config, Ledger, Outcome, optimize, optimize_with_gradient,
 };
@@ -128,4 +129,31 @@ fn a_rung_switch_brings_each_state_its_own_gradient() {
         }
     }
     assert!(checked >= 50, "only {checked} steps carried a gradient");
+}
+
+/// The energy bias is one function on every rung, so its tempering factor is
+/// set at the temperature a single chain hops at, whichever rung fills its
+/// first sample, and `(gamma - 1) T` is the sample's spread on any ladder.
+#[test]
+fn the_energy_bias_tempers_alike_whichever_rung_fills_its_sample() {
+    let mut cfg = Config::recommended(13);
+    assert!(!cfg.budget_window && !cfg.statistical_temperature);
+    cfg.replicas = 2;
+    cfg.ladder_top = 10.0;
+    cfg.energy_bias = true;
+    cfg.flat_sweep = 32;
+    // The sample fills on about the 32nd hop: on the hot rung when the cold
+    // one hands over after 20 hops, and on the cold rung when it holds for 40.
+    for swap_period in [20, 40] {
+        cfg.swap_period = swap_period;
+        let bias = lj_run_with(&cfg, 0, 5_000, false)
+            .energy_bias
+            .expect("the sample fills well inside the run");
+        let spread = bias.w0 * EnergyBias::FILL_DEPOSITS;
+        let tempered = (bias.gamma - 1.0) * cfg.temperature;
+        assert!(
+            (tempered - spread).abs() <= 1e-9 * spread,
+            "swap period {swap_period}: (gamma - 1) T is {tempered} against a spread of {spread}"
+        );
+    }
 }

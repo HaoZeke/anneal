@@ -10,8 +10,10 @@ swap factor reads each rung's temperature from the state it holds and weighs
 the funnel bias, the packing pile and the energy bias every rung shares by the
 difference of the two inverse temperatures. Under ``flat_histogram`` it weighs
 the biases alone, since the flat-histogram cost is the same on every rung and
-cancels from the factor with the energies. A state keeps its basin and its
-validation gradient as it moves between rungs, so the first step a rung takes
-after a switch is recorded from the state that rung holds, and every rung's
-starting quench is validated before it is recorded. A single chain is
-unchanged.
+cancels from the factor with the energies. Under ``energy_bias`` the bias's
+tempering factor and its deposits read the temperature a single chain would
+hop at, so which rung fills its first sample no longer sets its factor. A state
+keeps its basin and its validation gradient as it moves between rungs, so the
+first step a rung takes after a switch is recorded from the state that rung
+holds, and every rung's starting quench is validated before it is recorded. A
+single chain is unchanged.
