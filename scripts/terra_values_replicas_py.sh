@@ -17,7 +17,8 @@ echo "host=$(hostname) job=$SLURM_JOB_ID"
 echo "maturin=$(maturin --version)"
 mkdir -p "$ROOT/wheels"
 maturin build --release --features python --out "$ROOT/wheels"
-WHEEL=$(ls -t "$ROOT/wheels"/anneal-*.whl | head -1)
+wheels=$(ls -t "$ROOT/wheels"/anneal-*.whl)
+WHEEL=${wheels%%$'\n'*}
 echo "wheel=$WHEEL"
 mkdir -p "$DEMO/anneal_pkg"
 "$VERIFY/bin/python" -m pip install --force-reinstall --no-deps --target "$DEMO/anneal_pkg" "$WHEEL"
