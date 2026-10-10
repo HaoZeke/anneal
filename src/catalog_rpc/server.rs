@@ -1347,6 +1347,7 @@ async fn precompute_validation_async(
             bits.3.as_ref(),
             &identity,
             &candidate,
+            None,
         );
         let _ = tx.send(result);
     });
@@ -3164,7 +3165,7 @@ fn resolve_validation(
             scientific.evaluate.as_ref(),
             identity,
             candidate,
-            &mut scientific.posted_descriptor_len,
+            Some(&mut scientific.posted_descriptor_len),
         )
     })
 }
@@ -3176,7 +3177,7 @@ fn validate_candidate<F>(
     evaluate: &F,
     identity: &CatalogIdentity,
     candidate: &CatalogCandidate,
-    posted_descriptor_len: &mut Option<usize>,
+    posted_descriptor_len: Option<&mut Option<usize>>,
 ) -> Result<ValidatedCandidate, ()>
 where
     F: Fn(&[f64]) -> Result<FreshEvaluation, String> + Send + Sync + ?Sized,
@@ -3250,14 +3251,16 @@ where
     }
     // The schema's dimension is learned from the first recomputation on
     // this server and every posted descriptor is held to it afterwards.
-    if let Some(dimension) = *posted_descriptor_len
+    if let Some(dimension) = posted_descriptor_len.as_ref().and_then(|slot| **slot)
         && posted.len() != dimension
     {
         reject("posted descriptor length does not match the schema");
         return Err(());
     }
     let verify_every = descriptor_verification_period();
-    let verify = posted_descriptor_len.is_none()
+    let verify = posted_descriptor_len
+        .as_ref()
+        .is_none_or(|slot| slot.is_none())
         || match verify_every {
             Some(0) => false,
             Some(period) => candidate.event_sequence.is_multiple_of(period),
@@ -3294,7 +3297,9 @@ where
             );
             return Err(());
         }
-        *posted_descriptor_len = Some(descriptor.values().len());
+        if let Some(slot) = posted_descriptor_len {
+            *slot = Some(descriptor.values().len());
+        }
         validated.candidate.descriptor = descriptor.values().to_vec();
         validated.candidate.descriptor_schema_version = descriptor.schema_version();
     }
@@ -3363,6 +3368,7 @@ fn certify_ride_connection(
             &counted_evaluate,
             identity,
             &connection.saddle,
+            Some(&mut scientific.posted_descriptor_len),
         )?;
         let endpoints = [
             validate_candidate(
@@ -3372,6 +3378,7 @@ fn certify_ride_connection(
                 &counted_evaluate,
                 identity,
                 &connection.endpoints[0],
+                Some(&mut scientific.posted_descriptor_len),
             )
             .map_err(|_| crate::ride_ledger::RideFailure::Surface)?,
             validate_candidate(
@@ -3381,6 +3388,7 @@ fn certify_ride_connection(
                 &counted_evaluate,
                 identity,
                 &connection.endpoints[1],
+                Some(&mut scientific.posted_descriptor_len),
             )
             .map_err(|_| crate::ride_ledger::RideFailure::Surface)?,
         ];
@@ -3494,6 +3502,7 @@ where
         evaluate,
         identity,
         candidate,
+        None,
     )
     .map_err(|_| crate::ride_ledger::RideFailure::Surface)?;
     let config = PesExplorationConfig::default();
