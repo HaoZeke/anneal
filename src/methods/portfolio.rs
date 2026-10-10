@@ -3490,6 +3490,7 @@ where
         // no more than `IMPROVEMENT_RTOL` times its largest gain from
         // below the start's value.
         let mut largest = 0.0f64;
+        let (mut descended, mut retried) = (false, false);
         while ledger.remaining() > 0 {
             round += 1;
             let before = ledger.best_get();
@@ -3511,12 +3512,29 @@ where
             }
             posteriors[qn].update(improved);
             winner = improved.then_some(qn);
-            if !keep
-                || states
-                    .qn
-                    .as_ref()
-                    .is_none_or(|state| state.engine.is_done())
-            {
+            let done = states
+                .qn
+                .as_ref()
+                .is_none_or(|state| state.engine.is_done());
+            // A descent whose first curvature pair spans a steep wall stalls
+            // short of convergence, and one from a start whose neighbours all
+            // share its value (a sentinel) stops there. Until the descent has
+            // lowered its own value from below the start's, either means it
+            // has not descended at all: CMA-ES then takes the slice it takes
+            // first short of the opening budget, and the opening goes on
+            // from the incumbent it leaves, where the descent restarts.
+            let stuck =
+                !descended && to >= descent && (!done || !states.success.below_start(after));
+            descended |= states.success.below_start(descent) && to < descent;
+            if stuck && !retried && ledger.remaining() >= 8 {
+                retried = true;
+                round += 1;
+                let cma = index(ArmKind::Cma);
+                let take = slice.min(ledger.remaining());
+                winner = play(cma, take, 0, states, &mut rng, &mut posteriors, None).then_some(cma);
+                continue;
+            }
+            if !keep || done {
                 break;
             }
         }
@@ -7329,5 +7347,56 @@ mod tests {
         }
         assert!(*last <= IMPROVEMENT_RTOL * largest, "ended on {last}");
         assert!(*last > 0.0, "the last slice still gained");
+    }
+
+    #[test]
+    fn values_only_opening_goes_on_from_where_cma_leaves_a_stuck_start() {
+        // From behind a sentinel every neighbour of the start shares its
+        // value and the descent stops at once; from behind a steep wall its
+        // first curvature pair spans the wall and it stalls, though a
+        // stencil point may still lower the incumbent a little. CMA-ES
+        // takes a slice before any phase, and the opening then converges
+        // from the incumbent it leaves as it does from a regular start.
+        fn sentinel(x: ArrayView1<f64>) -> f64 {
+            if x[0] > 1.8 { 1e30 } else { rosenbrock(x) }
+        }
+        fn wall(x: ArrayView1<f64>) -> f64 {
+            1e22 * (x[0] - 1.8).max(0.0).powi(2) + rosenbrock(x)
+        }
+        let dim = 10usize;
+        let start = Array1::from_shape_fn(dim, |i| match i {
+            0 => 2.0,
+            _ if i % 2 == 0 => -1.2,
+            _ => 1.0,
+        });
+        let starts: [(&str, fn(ArrayView1<f64>) -> f64); 2] =
+            [("sentinel", sentinel), ("wall", wall)];
+        for ((name, f), budget) in starts.into_iter().flat_map(|s| [(s, 1000usize), (s, 5000)]) {
+            assert!(budget >= QN_AFFORDABLE_GRADIENTS * dim * (dim + 1));
+            let slice = values_only_slice(dim, budget);
+            let obj = Traced::new(-2.0, 2.0, dim, f);
+            let ledger = BudgetLedger::new(budget, dim);
+            let budgeted = BudgetedObjective {
+                inner: &obj,
+                ledger: &ledger,
+            };
+            budgeted.eval(start.view());
+            let mut states = ArmStates::default();
+            run_values_only_portfolio::<_, ShiftQuadratic>(
+                &budgeted,
+                &ledger,
+                &mut states,
+                3,
+                budget,
+            );
+            let (arm, from, _) = states.turns[0];
+            assert_eq!(arm, ArmKind::Cma, "{name} at {budget}");
+            assert!(
+                from <= 1 + 2 * slice,
+                "{name} at {budget}: CMA-ES first played at {from}"
+            );
+            let best = ledger.best_get();
+            assert!(best < 1e-8, "{name} at {budget}: {best}");
+        }
     }
 }
