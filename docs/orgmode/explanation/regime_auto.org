@@ -213,15 +213,15 @@ gives =p < 0.05=. Rows read =problem@budget= and start from =x0= unless
 marked: =ellS=, =rastS= and =stybS= are the shifted ellipsoid
 (conditioning =1e6=), Rastrigin and Styblinski-Tang, =ellR=, =rastR=,
 =stybR= and =levyR= rotated forms, =ackS= shifted Ackley, =levy=,
-=rosen=, =ackley= and =mich= Levy, Rosenbrock, Ackley and
-Michalewicz, =rast100_shift=, =rast10_shift=, =rast10_fixed=,
-=styb10_45= and =schwefel10_cec= further Rastrigin, Styblinski-Tang
-and CEC Schwefel variants, and =fit6= a six-parameter fit, each with
-its dimension. A suffix =+1e2=, =+1e4= or =-1e4= adds a constant to
-the objective and =x1e-6= or =x2^-20= multiplies it, values mapped
-back; a /control/ carries the same rounding without the change, as
-=(f + c) - c=. The loop trails on these rows, and putting the replaced
-rule back costs the rows named with it:
+=rosen=, =ackley=, =mich= and =griewank= Levy, Rosenbrock, Ackley,
+Michalewicz and Griewank, =rast100_shift=, =rast10_shift=,
+=rast10_fixed=, =styb10_45= and =schwefel10_cec= further Rastrigin,
+Styblinski-Tang and CEC Schwefel variants, and =fit6= a six-parameter
+fit, each with its dimension. A suffix =+1e2=, =+1e4= or =-1e4= adds a
+constant to the objective and =x1e-6= or =x2^-20= multiplies it, values
+mapped back; a /control/ carries the same rounding without the change,
+as =(f + c) - c=. The loop trails on these rows, and putting the
+replaced rule back costs the rows named with it:
 
 - The rate hand-over short of the opening budget, against two fixed
   =gsa= slices after the descent's first: =ellS30@1000= 1673 against
@@ -246,37 +246,39 @@ rule back costs the rows named with it:
   against 2.94 (0/29/11).
 - The opening's bar on its recent gains, against an opening that goes
   on while each slice is a success: =ellS30@5000= 0.0626 against 0
-  (0/13/27) and =rosen30@5000= 22.2 against 16.2 (2/1/37), with that
-  row's copies (=+1e2= 22.5 against 16.7, 8/1/31; =x1e-6= 22.1 against
-  16.3 and =x2^-20= 22.2 against 16.2, 2/1/37 each) and controls (22.0
-  to 22.4 against 15.9 to 16.3, 2/1/37 each), and the =ellR30@5000=
-  controls for =+1e2= (2.8e-11 against 3.2e-12, 1/25/14), =+1e4=
-  (2.3e-4 against 1.4e-5, 2/17/21) and =-1e4= (8.7e-4 against 1.2e-5,
-  6/15/19). Without the bar these come level, but =ackS30@5000= is
-  3.8e-6 against 6.2e-7 (1/18/21), =levyR30@5000= 3.51 against 0.544
-  (5/0/35) and =levy30@5000= 7.2e-7 against 4.5e-10 (6/17/17).
-- The descent's resolution test, against a fixed =1e-12= tolerance:
-  =fit6@1000= -4.78 against -4.89 (3/20/17), and without =x0= -3.334
-  against -3.334 (1/32/7), with its =x2^-20= copy (the plain row's
-  runs), its =x1e-6= copy (-4.84 against -4.81, 6/19/15) and its
-  =+1e2= and =x1e-6= controls (-4.79 against -4.85 and -4.84 against
-  -4.88, 4/18/18 each); =ellR30@20000= and =ellR50@20000=, where five
-  and six seeds stop short of 0 (0/35/5, 0/34/6); and the =x1e-6=
-  control of =ellR30@5000= (1.2e-6 against 0, 2/19/19). With the
-  tolerance these come level, but the offset copies of =fit6@5000=
-  give back what the test won, =+1e2= -11.6 against -12.8 (9/9/22),
-  =+1e4= -9.33 against -12.6 (0/17/23) and =-1e4= -8.15 against -12.8
-  (0/24/16), and =fit6@5000= itself is -12.78 against -12.83
-  (12/10/18). A slow test at a fraction of the success threshold
-  brings the same rows level at a larger cost: =fit6@5000= -6.79
-  against -12.83, and its =+1e2= copy -7.94, behind the replaced
-  rules' -11.2.
-- Both of these: =ellR30@5000= 3.4e-8 against 0 (0/19/21), with its
-  =x1e-6= copy (9.2e-7 against 0, 0/17/23) and its =x2^-20= copy (the
-  plain row's runs), comes level only with both replaced rules back (0,
-  0/38/2, for the row and its =x1e-6= copy), at both sets of costs;
-  either alone leaves it behind (4.5e-25, 0/27/13, without the bar;
-  4.8e-23, 0/29/11, with the tolerance).
+  (0/13/27), =rosen30@5000= 22.2 against 16.2 (2/1/37), with that row's
+  copies (=+1e2= 22.5 against 16.7, 8/1/31; =x1e-6= 22.1 against 16.3
+  and =x2^-20= 22.2 against 16.2, 2/1/37 each) and controls (22.0 to
+  22.4 against 15.9 to 16.3, 2/1/37 each), and =ellR30@5000= 4.8e-23
+  against 0 (0/29/11), with its =x1e-6= copy (2.5e-24 against 0,
+  0/30/10), its =x2^-20= copy (the plain row's runs) and its controls
+  for =+1e2= (2.8e-11 against 3.2e-12, 1/25/14), =+1e4= (2.3e-4 against
+  1.4e-5, 2/17/21) and =-1e4= (8.7e-4 against 1.2e-5, 6/15/19). Without
+  the bar these come level (=ellR30@5000= and its two copies at 0,
+  0/38/2), but =ackS30@5000= is 3.8e-6 against 6.2e-7 (1/18/21),
+  =levyR30@5000= 3.51 against 0.544 (5/0/35) and =levy30@5000= 7.2e-7
+  against 4.5e-10 (6/17/17).
+- The descent's resolution test and the floor on it, against a fixed
+  =1e-12= tolerance: =griewank10@5000= without =x0=, 0.0308 against
+  0.0221 (3/31/6, =p= 0.049); the loop without the floor is level there
+  (0.0271, 3/32/5), and the floor leaves it level with that loop
+  (2/34/4). With the tolerance the row comes level (0.0221, 3/33/4),
+  but from =x0= it falls behind (0.0382 against 0.0295, 2/29/9,
+  =p= 0.021), and the offset copies of =fit6@5000= give back what the
+  test won, =+1e2= -11.6 against -12.6 (0/23/17), =+1e4= -9.33 against
+  -12.6 (0/17/23) and =-1e4= -8.15 against -12.8 (0/24/16), as do its
+  =x1e-6= copy (-12.59 against -12.86, 0/33/7) and =+1e2= control
+  (-12.47 against -12.77, 1/34/5), while =fit6@5000= itself loses four
+  seeds (-12.78 against -12.94, 0/36/4). Without the floor the test
+  left behind =fit6@1000=, -4.78 against -4.89 (3/20/17), and without
+  =x0= (1/32/7), with that row's =x2^-20= and =x1e-6= copies and its
+  =+1e2= and =x1e-6= controls; =ellR30@20000= and =ellR50@20000=, where
+  five and six seeds stopped short of 0 (0/35/5, 0/34/6); and the
+  =x1e-6= control of =ellR30@5000= (2/19/19). The floor brings each
+  level (=fit6@1000= -4.82, 4/30/6; both =ellR= rows 0, 0/40/0; that
+  control 1.2e-21, 2/30/8), puts no row behind the loop without it, and
+  leaves =fit6@5000= level with that loop, -12.94 against -12.83
+  (15/10/15).
 - The success threshold on the last gain, against =1e-4 max(|f|, s)=:
   =rastR100@20000= 870 against 833 (4/18/18) and the =+1e2= copy of
   =levy30@5000=, 6.4e-11 against 4.3e-12 (5/22/13). With the

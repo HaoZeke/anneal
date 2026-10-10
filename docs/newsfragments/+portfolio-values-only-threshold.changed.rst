@@ -24,19 +24,20 @@ exactly. Measured over 40 paired seeds against the loop's form before these
 rules (medians, "A against B" with A's wins/ties/losses, two runs tying when
 their values differ by at most ``1e-9 max(1, |b|)`` with ``b`` B's, rows named
 ``problem@budget`` from ``x0`` as in the regime notes), the descent's
-resolution test trails a fixed ``1e-12`` tolerance on ``fit6@1000``, -4.78
-against -4.89 (3/20/17) and without ``x0`` -3.334 against -3.334 (1/32/7),
-with its x1e-6 and x2^-20 copies and its +1e2 and x1e-6 controls, on
-``ellR30@20000`` and ``ellR50@20000``, where five and six seeds stop short of
-0 (0/35/5, 0/34/6), and on the x1e-6 control of ``ellR30@5000`` (1.2e-6
-against 0, 2/19/19). With the tolerance these come level, but the offset
-copies of ``fit6@5000`` fall back, +1e2 to -11.6 against -12.8 (9/9/22),
-+1e4 to -9.33 against -12.6 (0/17/23) and -1e4 to -8.15 against -12.8
-(0/24/16), and ``fit6@5000`` itself is -12.78 against -12.83 (12/10/18); a
-slow test at a fraction of the threshold costs more (``fit6@5000`` -6.79).
-``ellR30@5000``, 3.4e-8 against 0 (0/19/21), and its x1e-6 and x2^-20 copies
-come level only with the tolerance and the opening without its bar on recent
-gains together (0, 0/38/2). The threshold on the last gain trails
+resolution test with its floor trails a fixed ``1e-12`` tolerance on
+``griewank10@5000`` without ``x0``, 0.0308 against 0.0221 (3/31/6, p 0.049),
+where the loop without the floor is level (3/32/5). The tolerance brings that
+row level but puts ``griewank10@5000`` from ``x0`` behind (0.0382 against
+0.0295, 2/29/9, p 0.021), and the offset copies of ``fit6@5000`` fall back,
++1e2 to -11.6 against -12.6 (0/23/17), +1e4 to -9.33 against -12.6 (0/17/23)
+and -1e4 to -8.15 against -12.8 (0/24/16), with its x1e-6 copy and +1e2
+control behind too. Without the floor the test trails the tolerance on
+``fit6@1000``, -4.78 against -4.89 (3/20/17), and without ``x0``, with its
+x1e-6 and x2^-20 copies and its +1e2 and x1e-6 controls, on ``ellR30@20000``
+and ``ellR50@20000``, where five and six seeds stop short of 0, and on the
+x1e-6 control of ``ellR30@5000``; the floor brings each level (``fit6@1000``
+-4.82, 4/30/6) and puts no row behind the loop without it, ``fit6@5000`` being
+-12.94 against -12.83 (15/10/15). The threshold on the last gain trails
 ``1e-4 max(|f|, s)`` on ``rastR100@20000``, 870 against 833 (4/18/18), and on
 the +1e2 copy of ``levy30@5000``, 6.4e-11 against 4.3e-12 (5/22/13); the
 ``|f|``-scaled threshold brings both level but costs the offset copies: +1e4
