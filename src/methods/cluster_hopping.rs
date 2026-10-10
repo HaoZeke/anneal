@@ -1480,7 +1480,7 @@ where
                     let climbed = crate::known_basin::with_hill_only(|| {
                         let activation = crate::methods::activation::Activation {
                             step: crate::known_basin::LEAVE_WALK_STEP,
-                            ..Default::default()
+                            ..crate::methods::activation::Activation::default()
                         };
                         grad.as_deref_mut().and_then(|g| {
                             crate::methods::activation::activate_from_origin(
