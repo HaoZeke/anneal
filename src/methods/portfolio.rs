@@ -1765,7 +1765,8 @@ where
             if obj.ledger.exhausted() {
                 break;
             }
-            let pos = bounds.clip(start);
+            let mut pos = bounds.clip(start);
+            obj.prepare_proposal(None, &mut pos);
             let value = obj.eval(pos.view());
             xs.push(pos);
             vals.push(value);
