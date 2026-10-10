@@ -19,6 +19,18 @@
 //! changes nothing. Ensemble `s` seeds chain `c` with `s * 0x9E3779B9 + c + 7`
 //! in every arm, so the arms are paired by ensemble.
 //!
+//! First-hit cost is in force calls of the whole ensemble. `serial` reports
+//! its chain's ledger at the first hit; `indep` reports `CHAINS` times the
+//! earliest chain's ledger at its hit, since the chains run side by side; a
+//! lattice arm reports the calls of every earlier generation and of the
+//! hitting generation's trials up to and including the hitting one, in chain
+//! order, which any other order within that generation moves by less than one
+//! generation's cost. Every value-and-gradient call is charged as one call;
+//! lattice pair terms are charged at their fraction of the n(n-1)/2 pairs of a
+//! full evaluation and settled in whole calls; under one call per chain can be
+//! outstanding at a first hit or at the end of a run, while choosing a move
+//! costs at most one call ([`anneal_core::methods::lattice_search`]).
+//!
 //! The lattice arms read `CHAINS`, `SLOTS`, `FRESH`, `SPLICE`, `MOVED_MIN`,
 //! `MOVED_MAX`, `MERGE_START`, `MERGE_END`, `RETIRE`, `DENSITY`, `QUENCH_STEP`,
 //! `QUENCH_TOL`, `QUENCH_MEMORY` and `LATTICE_CANDIDATES`.
