@@ -105,7 +105,8 @@ fn earliest_near_pair(trace: &[Array1<f64>], radius: f64) -> Option<(usize, usiz
     for proposal in 1..trace.len() {
         for peer in 0..proposal {
             let distance = (trace[proposal][0] - trace[peer][0]).abs() / 2.0;
-            if distance > 1e-8 && distance < radius * 0.75 {
+            // A finite-difference stencil is 2e-5, not a peer.
+            if distance > 1e-4 && distance < radius * 0.75 {
                 return Some((peer, proposal));
             }
         }
