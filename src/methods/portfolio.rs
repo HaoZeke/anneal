@@ -417,6 +417,14 @@ const QN_KICK_MAX: f64 = 0.5;
 /// of its values rather than on a fraction of their size, which a constant
 /// added to the objective would change.
 const QN_FTOL: f64 = 8.0 * f64::EPSILON;
+/// Fraction of the success threshold at or below which an iteration of the
+/// values-only descent is slow even where [`QN_FTOL`] would not call it so:
+/// near a minimum whose value is small against the gains that set the
+/// threshold, units in the last place would keep the descent going long
+/// after its gains stopped counting. Gains and thresholds are differences
+/// of values, so neither a constant added to the objective nor a power of
+/// two multiplying it moves the floor.
+const QN_FATOL_RTOL: f64 = 1e-7;
 /// Gradients per dimension a finite-difference descent needs to converge;
 /// the values-only loop opens with one only when the budget affords it.
 const QN_AFFORDABLE_GRADIENTS: usize = 5;
@@ -3325,6 +3333,11 @@ fn run_qn_arm<O>(
         checked: f64::INFINITY,
         replaced: false,
     });
+    if states.values_only {
+        state
+            .engine
+            .set_fatol(QN_FATOL_RTOL * states.success.threshold());
+    }
     if best < state.seen_best && best < state.engine.value() {
         state
             .engine
