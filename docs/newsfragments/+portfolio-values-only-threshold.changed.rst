@@ -49,7 +49,7 @@ floor, brings both level but costs the offset copies: +1e4 ``rosen10@1000`` is
 ``ellR30@5000`` is 4.4e-3 against 2.9e-4 (0/6/34). Of the 88 offset and x1e-6
 copies, five trail their rounding-only control at p < 0.05, about as many as
 chance gives and none past a correction for the 88 tests: +1e2 ``fit6@1000``
-(-4.82 against -4.82, 16/0/24), +1e2 ``ackS30@5000`` (1.05e-6 against 6.9e-7,
+(-4.825 against -4.821, 16/0/24), +1e2 ``ackS30@5000`` (1.05e-6 against 6.9e-7,
 11/8/21), -1e4 ``ellR30@1000`` (5589 against 5589, 12/0/28) and x1e-6
 ``rosen30`` at 1000 and 5000 (74.1 against 74.1, 12/1/27; 22.1 against 22.0,
 14/0/26). With exact ties nine trail and none passes the correction either
