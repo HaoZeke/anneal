@@ -5,7 +5,11 @@ of the regime-routed Thompson allocation and its DE/GSA front-load. Without
 seeds vary the start. When the budget lets it converge, five finite-difference
 gradients per coordinate, a descent from the start opens the run and goes on
 while each slice lowers the incumbent by more than the success threshold and
-by more than ``1e-4`` times the opening's largest gain. With less, as for a
+by more than ``1e-4`` times the opening's largest gain. Until that descent has
+lowered its own value from below the start's, a slice in which it stalls short
+of convergence, as when its first curvature pair spans a steep wall, or stops
+at the start's value, as behind a sentinel, gives CMA-ES one slice, once, and
+the opening goes on from the incumbent CMA-ES leaves. With less, as for a
 30-dimensional problem under 4650 evaluations, CMA-ES takes one slice from the
 start, the descent keeps the turn until a slice gains less per evaluation than
 the one before, and GSA then keeps it while each of its slices gains at least

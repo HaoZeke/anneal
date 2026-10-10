@@ -868,9 +868,12 @@ def global_optimize(
     annealing quenched to one-coordinate improvements, differential
     evolution, the additive surrogate, and the QMC restart arm. When the
     budget lets a descent converge, one from the start opens the run
-    while it pays. With less, CMA-ES takes one slice from the start, the
-    descent keeps the turn until its gain per evaluation falls, and
-    annealing then keeps it while each slice gains as fast as the
+    while it pays; if it stalls short of convergence, or stops at the
+    start's value, before it has lowered its own value from below that
+    one, CMA-ES takes one slice, once per run, and the opening goes
+    on from there. With less, CMA-ES takes one slice from the start,
+    the descent keeps the turn until its gain per evaluation falls,
+    and annealing then keeps it while each slice gains as fast as the
     descent would have gone on to, the descent taking it back when one
     falls short. From there annealing and then CMA-ES each keep the turn
     while they lower the incumbent, annealing only while it gains faster
