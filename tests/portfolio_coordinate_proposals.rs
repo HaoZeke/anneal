@@ -262,7 +262,7 @@ fn shared_scalar_gsa_preserves_coordinate_support_with_effective_separation() {
 }
 
 #[test]
-fn private_scalar_gsa_starts_a_new_step_after_other_arms() {
+fn private_scalar_gsa_does_not_resume_a_slice_that_gained_nothing() {
     let (result, traces) = run(false);
     for replica in 0..2 {
         let (which, start, _, replay) = strategy_start(&traces, replica);
@@ -273,9 +273,9 @@ fn private_scalar_gsa_starts_a_new_step_after_other_arms() {
             .find(|arm| arm.name == "gsa")
             .unwrap()
             .pulls;
-        assert!(
-            gsa_pulls > 1,
-            "the quenched GSA must be pulled again after its first slice"
+        assert_eq!(
+            gsa_pulls, 1,
+            "a quenched slice that gains nothing ends that phase"
         );
 
         let prefix = replay
