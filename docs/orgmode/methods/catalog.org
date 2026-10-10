@@ -1353,7 +1353,7 @@ SOAP leftover with =featomic=, CNA fractions otherwise); =BankConfig=
 (csa_cluster.rs:262, generic over a caller-supplied =distance= closure);
 =spectrum_distance= (csa_cluster.rs:581, default sorted-pairwise-
 distance-spectrum Euclidean metric); =coordination_histogram_distance=
-(csa_cluster.rs:606, Lee-Lee-Scheraga coordination-histogram distance
+(csa_cluster.rs:606, Lee-Lee-Lee coordination-histogram distance
 at shells =r1=1.35=, =r2=1.70=). Those shell counts come from the
 unwrapped cutoff. The weights are unchanged.
 
@@ -1560,7 +1560,7 @@ concrete quasi-Newton engine.
 ** CSA bank population (=Bank=)
 
 What it is: the diversity-held population under the conformational-
-space-annealing replacement rule (Lee, Lee and Scheraga,
+space-annealing replacement rule (Lee, Lee and Lee,
 arXiv:cond-mat/0307690): a candidate is compared to the bank member it
 most resembles, not the worst member, so a near-copy can only displace
 its own kind and a bank cannot collapse onto one funnel. A frozen

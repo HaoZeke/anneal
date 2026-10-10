@@ -1,10 +1,12 @@
 //! Cut-and-splice mixing of two quenched clusters.
 //!
-//! Lee, Lee and Scheraga, arXiv cond-mat/0307690. The published conformational
-//! space annealing hit rates rest on this operator: a random plane through the
-//! centroid region takes one side from parent A and the complementary side from
-//! parent B, then repairs the atom count so N is preserved. The bank in
-//! [`crate::methods::bank`] decides what to keep; this module is the mix.
+//! The operator is that of Deaven and Ho, Phys. Rev. Lett. 75, 288 (1995).
+//! The conformational space annealing hit rates of Lee, Lee and Lee, Phys.
+//! Rev. Lett. 91, 080201 (2003), arXiv cond-mat/0307690, rest on it: a random
+//! plane through the centroid region takes one side from parent A and the
+//! complementary side from parent B, then repairs the atom count so N is
+//! preserved. The bank in [`crate::methods::bank`] decides what to keep; this
+//! module is the mix.
 //!
 //! The result is a 3N trial, not a minimum. The caller quenches.
 

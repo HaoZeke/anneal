@@ -538,10 +538,14 @@ impl Ledger {
     /// of the system.
     ///
     /// A k-atom partial evaluation computes k of the n(n-1)/2 pair rows, so
-    /// its honest price is a fraction of a full evaluation. The fraction
-    /// accumulates as exact debt and is settled into whole charged units as it
-    /// crosses one: deterministic, auditable, and never cheaper than the work
-    /// done because the residue is still owed when the run ends.
+    /// its honest price is a fraction of a full evaluation. The fractions
+    /// accumulate and are charged as a whole unit each time their sum crosses
+    /// one, which keeps the count deterministic and auditable. A residue
+    /// under one unit is never charged, so [`Ledger::spent`] can fall up to
+    /// one evaluation short of the work done, mid-run and when the run ends.
+    /// Charging stops at the budget and the rest of a charge that reaches it
+    /// goes unpaid, so work charged after it is done can fall more than one
+    /// unit short when the ledger runs dry inside one charge.
     pub fn charge_frac(&mut self, frac: f64) -> bool {
         if !(frac > 0.0) || !frac.is_finite() {
             return self.spent < self.budget;
