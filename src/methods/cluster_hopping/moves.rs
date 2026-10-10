@@ -18,6 +18,12 @@ pub enum MoveLibrary {
     Lean,
     /// Productive atomic arms plus composed surface relocation.
     LeanBurst,
+    /// The lean burst library with the hollow-site relocation as one more
+    /// arm for the allocator.
+    LeanBurstHollow,
+    /// The lean burst library with the greedy hollow-site fill as one more
+    /// arm.
+    LeanBurstFill,
     /// Atomic moves plus the heavy-tailed visiting kernel.
     Visit,
     /// Atomic moves plus twinning.
@@ -37,6 +43,41 @@ pub enum MoveLibrary {
         /// Keep atomic moves reachable for bond breaking and formation.
         reactive: bool,
     },
+    /// Separate centre-of-mass translation and rotation, Wales--Hodges style.
+    ///
+    /// The state is `6 n` rigid-body coordinates, not `3 n` Cartesian atoms.
+    /// Atomic kernels would treat the rotation vectors as positions.
+    RigidBody {
+        /// Waters (or other rigid bodies) in the state.
+        n_molecules: usize,
+        /// Half-width of a uniform centre-of-mass displacement, in length units.
+        translate_step: f64,
+        /// Half-width of a uniform rotation-vector displacement, in radians.
+        rotate_step: f64,
+    },
+}
+
+thread_local! {
+    static REPEL_MEAN_CACHE: std::cell::RefCell<std::collections::HashMap<RepelMeanKey, Vec<f64>>> =
+        std::cell::RefCell::new(std::collections::HashMap::new());
+}
+
+/// A cached mean belongs to both the coordinates and the descriptor map.
+#[derive(PartialEq, Eq, Hash)]
+struct RepelMeanKey {
+    coordinates: Vec<u64>,
+    n_max: usize,
+    l_max: usize,
+    cutoff: u64,
+}
+
+fn repel_mean_key(coordinates: &[f64], spec: crate::soap::SoapSpec) -> RepelMeanKey {
+    RepelMeanKey {
+        coordinates: coordinates.iter().map(|value| value.to_bits()).collect(),
+        n_max: spec.n_max,
+        l_max: spec.l_max,
+        cutoff: spec.rcut_nn.to_bits(),
+    }
 }
 
 impl MoveLibrary {
@@ -71,11 +112,11 @@ impl MoveLibrary {
                 cfg.symmetrise_cutoff,
             )
         };
-        match self {
+        let mut kernels = match self {
             Self::WalesDoye => wales_doye(),
             Self::Atomic => atomic(),
             Self::Lean => lean(),
-            Self::LeanBurst => {
+            Self::LeanBurst | Self::LeanBurstHollow | Self::LeanBurstFill => {
                 let mut kernels = lean();
                 kernels.push(ClusterMove::Burst {
                     n_points: cfg.n_points,
@@ -83,6 +124,19 @@ impl MoveLibrary {
                 });
                 if cfg.soap_mode != SoapProposalMode::Off {
                     kernels.push(soap_arm(cfg, None, None));
+                }
+                if matches!(self, Self::LeanBurstHollow) {
+                    kernels.push(ClusterMove::HollowRelocate(HollowRelocate {
+                        n_points: cfg.n_points,
+                        neighbour_cutoff: cfg.neighbour_cutoff,
+                    }));
+                }
+                if matches!(self, Self::LeanBurstFill) {
+                    kernels.push(ClusterMove::HollowFill(HollowFill {
+                        n_points: cfg.n_points,
+                        neighbour_cutoff: cfg.neighbour_cutoff,
+                        max_moves: 12,
+                    }));
                 }
                 kernels
             }
@@ -148,7 +202,36 @@ impl MoveLibrary {
                 }
                 kernels
             }
+            Self::RigidBody {
+                n_molecules,
+                translate_step,
+                rotate_step,
+            } => vec![
+                ClusterMove::RigidTranslate {
+                    n_molecules: *n_molecules,
+                    step: *translate_step,
+                },
+                ClusterMove::RigidRotate {
+                    n_molecules: *n_molecules,
+                    step: *rotate_step,
+                },
+            ],
+        };
+        if cfg.soap_repel {
+            kernels.push(ClusterMove::SoapRepel {
+                rmsd: LennardJonesPreset::SOAP_RMSD * cfg.length_scale,
+                cutoff: LennardJonesPreset::SOAP_CUTOFF * cfg.length_scale,
+            });
         }
+        if cfg.point_symmetrise {
+            kernels.push(ClusterMove::PointSymmetrise {
+                n_points: cfg.n_points,
+                tolerance: cfg.symmetry_tolerance,
+                pair_cutoff: cfg.symmetry_merge_radius,
+                fallback_step: LennardJonesPreset::SINGLE_POINT_STEP * cfg.length_scale,
+            });
+        }
+        kernels
     }
 
     /// Whether the library asks the construction posterior to select growth.
@@ -159,6 +242,11 @@ impl MoveLibrary {
     /// Whether the library contains rigid molecular proposal arms.
     pub fn is_molecular(&self) -> bool {
         matches!(self, Self::Molecular { .. })
+    }
+
+    /// Whether the library operates on centre-of-mass plus rotation coordinates.
+    pub fn is_rigid_body(&self) -> bool {
+        matches!(self, Self::RigidBody { .. })
     }
 
     /// Reactive setting carried by a molecular library.
@@ -272,10 +360,49 @@ pub enum ClusterMove {
     },
     /// Relocate the least-coordinated point onto the surface.
     SurfaceRelocate(SurfaceRelocate),
+    /// Relocate the least-coordinated point into the structure's best hollow
+    /// site, the dynamic-lattice move.
+    HollowRelocate(HollowRelocate),
+    /// Greedy fill of hollow sites as one proposal, the dynamic-lattice sweep.
+    HollowFill(HollowFill),
     /// Rotate the outer shell against the core.
     ShellRotate(ShellRotate),
     /// Enforce an approximate rotational symmetry.
     Symmetrise(Symmetrise),
+    /// Push the structure onto the point group it nearly has, as a proposal.
+    ///
+    /// Oakley, Johnston and Wales, Phys. Chem. Chem. Phys. 15, 3965 (2013):
+    /// the approximate symmetries of the current minimum are measured, closed
+    /// into a group, and the structure is made exactly symmetric under that
+    /// group before the quench. Unlike [`ClusterMove::Symmetrise`] nothing is
+    /// random about the axis, and unlike the stall-gated symmetrisation this
+    /// is an ordinary arm drawn every hop the allocator chooses it, on any
+    /// packing. A structure with no approximate symmetry falls back to a
+    /// single-point displacement so the arm is never a no-op.
+    PointSymmetrise {
+        /// Points in a state.
+        n_points: usize,
+        /// Largest RMS deviation at which an operation counts as approximate.
+        tolerance: f64,
+        /// Largest separation at which a point and an image are partners.
+        pair_cutoff: f64,
+        /// Half-width of the fallback single-point displacement.
+        fallback_step: f64,
+    },
+    /// Step away, in descriptor space, from the packings the population
+    /// occupies, pulled back to Cartesian displacements through the SOAP
+    /// Jacobian.
+    ///
+    /// The direction is this structure's packing mean minus its nearest
+    /// reference mean. An installed live-peer view supplies nearby peers;
+    /// otherwise [`crate::catalog::packing_references`] supplies history.
+    /// With no usable separation direction the independent escape applies.
+    SoapRepel {
+        /// Cap on the Cartesian RMSD of one step.
+        rmsd: f64,
+        /// SOAP neighbour cutoff.
+        cutoff: f64,
+    },
     /// Twin the structure across one of its dense planes.
     ///
     /// The move between a displacement, which never leaves the funnel, and a
@@ -337,6 +464,20 @@ pub enum ClusterMove {
         length_scale: f64,
         /// Lennard-Jones energy scale used by the binding criterion.
         energy_scale: f64,
+    },
+    /// Translate every rigid-body centre of mass, leaving orientations fixed.
+    RigidTranslate {
+        /// Rigid bodies in the state.
+        n_molecules: usize,
+        /// Half-width of the per-coordinate displacement.
+        step: f64,
+    },
+    /// Add a rotation-vector increment to every rigid body.
+    RigidRotate {
+        /// Rigid bodies in the state.
+        n_molecules: usize,
+        /// Half-width of the per-component rotation-vector increment, radians.
+        step: f64,
     },
     /// Step in the SOAP power spectrum and pull back through \(J = \partial p/\partial R\).
     ///
@@ -476,13 +617,84 @@ pub fn worst_bound_scaled(
     }
 }
 
+fn substrate_indices(n: usize, groups: &[Vec<usize>]) -> Vec<usize> {
+    let mut grouped = vec![false; n];
+    for atoms in groups {
+        for &a in atoms {
+            if a < n {
+                grouped[a] = true;
+            }
+        }
+    }
+    (0..n).filter(|&i| !grouped[i]).collect()
+}
+
+fn group_relocate_on_slab<R: Rng + ?Sized>(
+    x: ArrayView1<f64>,
+    groups: &[Vec<usize>],
+    substrate: &[usize],
+    contacts: &[usize],
+    rng: &mut R,
+) -> Array1<f64> {
+    let mut out = x.to_owned();
+    let n = x.len() / 3;
+    let z_top = substrate
+        .iter()
+        .map(|&i| x[3 * i + 2])
+        .fold(f64::NEG_INFINITY, f64::max);
+    let mut lo = [f64::INFINITY; 2];
+    let mut hi = [f64::NEG_INFINITY; 2];
+    for &i in substrate {
+        for k in 0..2 {
+            lo[k] = lo[k].min(x[3 * i + k]);
+            hi[k] = hi[k].max(x[3 * i + k]);
+        }
+    }
+    if !z_top.is_finite() || !lo[0].is_finite() || hi[0] <= lo[0] || hi[1] <= lo[1] {
+        return out;
+    }
+    let worst = (0..groups.len()).min_by_key(|&g| contacts[g]).unwrap_or(0);
+    let atoms = &groups[worst];
+    let gc = group_centroid(x, atoms);
+    let mut target = [0.0; 3];
+    for _ in 0..256 {
+        target = [
+            lo[0] + rng.random::<f64>() * (hi[0] - lo[0]),
+            lo[1] + rng.random::<f64>() * (hi[1] - lo[1]),
+            z_top + 2.0 + rng.random::<f64>() * 1.5,
+        ];
+        let ok = groups.iter().enumerate().all(|(g, other)| {
+            if g == worst {
+                return true;
+            }
+            let oc = group_centroid(x, other);
+            let dx = target[0] - oc[0];
+            let dy = target[1] - oc[1];
+            dx * dx + dy * dy >= 1.5 * 1.5
+        });
+        if ok {
+            break;
+        }
+    }
+    for &a in atoms {
+        if a >= n {
+            continue;
+        }
+        for k in 0..3 {
+            out[3 * a + k] = x[3 * a + k] - gc[k] + target[k];
+        }
+    }
+    out
+}
+
 /// Rigidly relocates the least-bound group of a molecular cluster.
 ///
 /// Contacts are counted between atoms of different groups only, so a tightly
-/// bonded molecule does not read as well-bound by its own bonds. The chosen
-/// group is translated so its centroid lands on a random direction at the
-/// cluster's surface radius and rotated rigidly about its centroid by a
-/// uniform random rotation, preserving intra-group geometry exactly.
+/// bonded molecule does not read as well-bound by its own bonds. On a free
+/// cluster the chosen group lands on a random direction at the surface
+/// radius. When ungrouped atoms are a majority they are the substrate:
+/// the group is placed above that face instead of on a sphere about the
+/// all-atom centroid, which sits inside the metal.
 pub(super) fn group_relocate<R: Rng + ?Sized>(
     x: ArrayView1<f64>,
     groups: &[Vec<usize>],
@@ -521,6 +733,10 @@ pub(super) fn group_relocate<R: Rng + ?Sized>(
                 contacts[owner[j]] += 1;
             }
         }
+    }
+    let substrate = substrate_indices(n, groups);
+    if substrate.len() * 2 >= n {
+        return group_relocate_on_slab(x, groups, &substrate, &contacts, rng);
     }
     let worst = (0..groups.len()).min_by_key(|&g| contacts[g]).unwrap_or(0);
     // Cluster centroid and surface radius from group centroids.
@@ -1054,17 +1270,23 @@ impl ClusterMove {
             ClusterMove::AllPoints { .. } => "all".into(),
             ClusterMove::SinglePoint { .. } => "single".into(),
             ClusterMove::SurfaceRelocate(_) => "surface".into(),
+            ClusterMove::HollowRelocate(_) => "hollow".into(),
+            ClusterMove::HollowFill(_) => "fill".into(),
             ClusterMove::GroupRelocate { .. } => "gsurface".into(),
             ClusterMove::GroupShake { .. } => "gshake".into(),
             ClusterMove::GroupBurst { .. } => "gburst".into(),
             ClusterMove::Burst { .. } => "burst".into(),
             ClusterMove::ShellRotate(_) => "shell".into(),
             ClusterMove::Symmetrise(_) => "sym".into(),
+            ClusterMove::PointSymmetrise { .. } => "psym".into(),
+            ClusterMove::SoapRepel { .. } => "repel".into(),
             ClusterMove::Visit { .. } => "visit".into(),
             ClusterMove::Angular { .. } => "angular".into(),
             ClusterMove::Twin { .. } => "twin".into(),
             ClusterMove::Soap { .. } => "soap".into(),
             ClusterMove::Reseed { source, .. } => format!("grow:{}", source.name()),
+            ClusterMove::RigidTranslate { .. } => "rtrans".into(),
+            ClusterMove::RigidRotate { .. } => "rrot".into(),
         }
     }
 
@@ -1104,7 +1326,53 @@ impl ClusterMove {
                 }
                 y
             }
-            ClusterMove::Twin { n_points } => crate::twin::propose(x, *n_points, rng),
+            ClusterMove::Twin { n_points } => crate::packing::propose_twin(x, *n_points, rng),
+            ClusterMove::SoapRepel { rmsd, cutoff } => {
+                let spec = crate::soap::SoapSpec {
+                    rcut_nn: *cutoff,
+                    ..Default::default()
+                };
+                // Live occupancy overrides archived history, including an
+                // empty neighborhood. One nearby peer supplies a difference;
+                // a larger threshold is an explicit crowding policy.
+                let min_refs: usize = std::env::var("REPEL_MIN_REFS")
+                    .ok()
+                    .and_then(|v| v.parse().ok())
+                    .unwrap_or(1);
+                let refs = crate::catalog::packing::nearby_packing_peers(&x.to_vec())
+                    .unwrap_or_else(crate::catalog::packing_references);
+                if refs.len() >= min_refs {
+                    // Coordinate and map keys keep retained reference means
+                    // valid when chains use different physical cutoffs.
+                    let means: Vec<Vec<f64>> = REPEL_MEAN_CACHE.with(|cache| {
+                        let mut cache = cache.borrow_mut();
+                        if cache.len() > 4096 {
+                            cache.clear();
+                        }
+                        refs.iter()
+                            .map(|r| {
+                                let key = repel_mean_key(r, spec);
+                                cache
+                                    .entry(key)
+                                    .or_insert_with(|| {
+                                        crate::soap::packing_mean_nu3(
+                                            ArrayView1::from(r.as_slice()),
+                                            spec,
+                                            None,
+                                            None,
+                                        )
+                                        .to_vec()
+                                    })
+                                    .clone()
+                            })
+                            .collect()
+                    });
+                    if let Some(y) = crate::soap::push_away_means(x, &means, spec, *rmsd) {
+                        return y;
+                    }
+                }
+                crate::soap::step_away_cloud(x, spec, *rmsd, None, None, None, rng)
+            }
             ClusterMove::Reseed { n_points, source } => {
                 // Both the order and the length scale are read off the current
                 // structure, so the move carries no knowledge of the potential
@@ -1252,8 +1520,90 @@ impl ClusterMove {
                 cur
             }
             ClusterMove::SurfaceRelocate(k) => k.propose(x, t, rng),
+            ClusterMove::HollowRelocate(k) => k.propose(x, t, rng),
+            ClusterMove::HollowFill(k) => k.propose(x, t, rng),
             ClusterMove::ShellRotate(k) => k.propose(x, t, rng),
             ClusterMove::Symmetrise(k) => k.propose(x, t, rng),
+            ClusterMove::PointSymmetrise {
+                n_points,
+                tolerance,
+                pair_cutoff,
+                fallback_step,
+            } => {
+                let n = *n_points;
+                if n >= 3 {
+                    let cands = crate::symmetrise::detect_all(x, n, &[2, 3, 4, 5, 6], *tolerance);
+                    if !cands.is_empty() {
+                        // One generator per distinct axis, lowest deviation
+                        // first, at most three: two generate every axial and
+                        // cubic group the hard minima carry, and more only
+                        // manufactures a spurious closure the pair cutoff then
+                        // has to reject.
+                        let mut gens: Vec<crate::symmetrise::Candidate> = Vec::new();
+                        for c in &cands {
+                            let seen = gens.iter().any(|g| {
+                                let dot = g.axis[0] * c.axis[0]
+                                    + g.axis[1] * c.axis[1]
+                                    + g.axis[2] * c.axis[2];
+                                dot.abs() > 0.995 && g.improper == c.improper
+                            });
+                            if !seen {
+                                gens.push(*c);
+                            }
+                            if gens.len() >= 3 {
+                                break;
+                            }
+                        }
+                        let group = crate::symmetrise::generate_group(&gens, 48);
+                        let y = if group.len() > 1 {
+                            crate::symmetrise::symmetrise_group(x, n, &group, *pair_cutoff)
+                        } else {
+                            crate::symmetrise::symmetrise(x, n, &cands[0], *pair_cutoff)
+                        };
+                        // An exactly symmetric structure comes back as itself;
+                        // proposing the incumbent wastes a quench, so fall
+                        // through to the displacement.
+                        let moved = y.iter().zip(x.iter()).any(|(a, b)| (a - b).abs() > 1e-9);
+                        if moved {
+                            return y;
+                        }
+                    }
+                }
+                let mut y = x.to_owned();
+                if n > 0 {
+                    let i = rng.random_range(0..n);
+                    let h = fallback_step * scale;
+                    for k in 0..3 {
+                        y[3 * i + k] += rng.random_range(-h..h);
+                    }
+                }
+                y
+            }
+            ClusterMove::RigidTranslate { n_molecules, step } => {
+                let mut y = x.to_owned();
+                let h = step * scale;
+                for i in 0..*n_molecules {
+                    for k in 0..3 {
+                        y[3 * i + k] += rng.random_range(-h..h);
+                    }
+                }
+                y
+            }
+            ClusterMove::RigidRotate { n_molecules, step } => {
+                let mut y = x.to_owned();
+                let h = step * scale;
+                let n = *n_molecules;
+                for i in 0..n {
+                    let base = 3 * n + 3 * i;
+                    for k in 0..3 {
+                        y[base + k] += rng.random_range(-h..h);
+                    }
+                }
+                if let Some(slice) = y.as_slice_mut() {
+                    crate::potentials::fold_rotation_vectors(n, slice);
+                }
+                y
+            }
             ClusterMove::Soap {
                 rmsd,
                 cutoff,
@@ -1398,6 +1748,20 @@ mod move_scaling_tests {
         assert_eq!(kernels.len(), 1);
         assert!(matches!(kernels[0], ClusterMove::AllPoints { .. }));
         assert_eq!(kernels[0].name(), "all");
+    }
+
+    #[test]
+    fn tip4p_library_is_separate_translation_and_rotation() {
+        let cfg = Config::for_tip4p(6);
+        let names: Vec<String> = cfg
+            .move_library
+            .kernels(&cfg)
+            .iter()
+            .map(|k| k.name())
+            .collect();
+        assert_eq!(names, ["rtrans", "rrot"]);
+        assert!(cfg.move_library.is_rigid_body());
+        assert_eq!(cfg.n_points, 6);
     }
 
     /// The escape scale has to reach the step, which is the whole mechanism.

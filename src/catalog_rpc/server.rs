@@ -4,13 +4,13 @@ use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
-use std::net::{SocketAddr, TcpListener};
+use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use capnp::capability::Promise;
 use capnp_rpc::RpcSystem;
@@ -19,6 +19,7 @@ use capnp_rpc::rpc_twoparty_capnp::Side;
 use capnp_rpc::twoparty::VatNetwork;
 use futures::AsyncReadExt;
 use ndarray::{Array1, ArrayView1};
+use nng::options::Options;
 use rand::SeedableRng;
 use tokio_util::compat::TokioAsyncReadCompatExt;
 
@@ -40,15 +41,15 @@ use crate::catalog::{
     QuenchStatus, REDUCTION_FACTOR, SystemSignature, ValidatedCandidate, ValidatorConfig,
     WalkRecord, euclidean_gradient_norm, explore_must_leave, invert_mixing,
     leftover_dwell_from_census, leftover_esty_stable, leftover_esty_upper, leftover_lambda,
-    occupancy_ei_exhausted, occupancy_family_floor, occupancy_fes_delta, occupancy_landfold_split,
-    occupancy_min_families, occupancy_ring_profile, occupancy_ring_split,
-    occupancy_sparsify_packing, occupant_rhat, packing_role, promote_one_sided, prune,
-    retis_exchange_adjacent, same_packing, seat_extras,
+    occupancy_ei_exhausted, occupancy_family_floor, occupancy_fes_delta, occupancy_min_families,
+    occupancy_ring_profile, occupancy_ring_split, occupancy_sparsify_packing, occupant_rhat,
+    packing_role, promote_one_sided, prune, retis_exchange_adjacent, same_packing, seat_extras,
 };
 use crate::catalog_policy::proposal::farthest_hole;
 use crate::cooperative_search::ledger::{
     ChargeKind, ChargeSummary, CooperativeLedger, ReplicaLedgerEvent,
 };
+use crate::coreclass::CoreClassTable;
 use crate::descriptor_space::{DescriptorSpace, UNIVERSAL_LOCAL_ENVIRONMENT_RADIUS};
 use crate::discovery_roster::{DiscoveryRole, assign_discovery_batch};
 use crate::methods::feynman_kac::{
@@ -60,6 +61,7 @@ use crate::methods::neus_bridge::{BridgeString, EntryLists, WeightLedger};
 use crate::minimum_information::{
     MinimumInformationSearch, SearchActionCandidate, SearchMechanism,
 };
+use crate::nng_rpc::{self, NngIo};
 use crate::pes_exploration::{
     ExactStructureRelation, ExactStructureWitness, PesExplorationConfig, PesSurface, RideMethod,
     StationaryIndex, StructureContext, StructureView, stationary_index_cartesian,
@@ -88,6 +90,8 @@ pub struct ServerConfig {
     state_directory: Option<PathBuf>,
     quorum: Option<(f64, u64)>,
     halving: Option<SuccessiveHalving>,
+    core_patience: usize,
+    core_trial: usize,
 }
 
 #[derive(Clone)]
@@ -129,7 +133,17 @@ impl ServerConfig {
             state_directory: None,
             quorum: None,
             halving: None,
+            core_patience: 10_000,
+            core_trial: 2_000,
         })
+    }
+
+    /// Shared motif-class stall and trial budgets used by
+    /// [`CatalogOperation::ReportCoreClass`].
+    pub fn with_core_class(mut self, patience: usize, trial: usize) -> Self {
+        self.core_patience = patience;
+        self.core_trial = trial;
+        self
     }
 
     /// Close population epochs on `quorum` of the live roster once
@@ -364,6 +378,8 @@ struct CertifiedRideSaddle {
 struct ScientificState {
     signature: SystemSignature,
     descriptor_space: DescriptorSpace,
+    /// Length learned from the first recomputed descriptor on this server.
+    posted_descriptor_len: Option<usize>,
     structure_context: StructureContext,
     exact_witness: Arc<StructuralWitness>,
     validator: CandidateValidator,
@@ -391,6 +407,8 @@ struct ScientificState {
     discovery_roles: BTreeMap<u32, DiscoveryRole>,
     discovery_ride_assignments: BTreeMap<u32, RideArm>,
     discovery_plan_model_version: Option<u64>,
+    /// Request clock at which the discovery plan was last rebuilt.
+    discovery_plan_hold: Option<u64>,
     discovery_assignment_epoch: u64,
     ride_candidates: BTreeMap<u64, CatalogCandidate>,
     ride_saddles: BTreeMap<u64, CertifiedRideSaddle>,
@@ -451,6 +469,23 @@ struct ScientificState {
     /// split clones every occupied histogram and runs a Torgerson MDS,
     /// and occupancy_floor asks for it once per policy request.
     landfold: Option<(u64, (usize, usize, usize))>,
+    /// A landfold being folded off the lock for the named book version.
+    /// The fold is a Torgerson MDS over every occupied histogram; measured
+    /// at 304 s under the lock on a 48-replica LJ75 run, which froze the
+    /// ensemble. It now runs on the rayon pool from a clone of the book
+    /// and the last finished split is served until it lands.
+    landfold_pending: Option<(u64, Arc<std::sync::Mutex<Option<(usize, usize, usize)>>>)>,
+    /// Last time the folded book, landfold, and worthwhile count were
+    /// rebuilt. The book version moves on every arrival; folding on that
+    /// cadence parks the workers on the coordinator.
+    fold_hold: Option<u64>,
+    floor_hold: Option<(u64, usize)>,
+    ei_hold: Option<(u64, bool)>,
+    /// Request counter the holds are measured against. Holds were wall-clock
+    /// (five seconds), which made an ensemble's decisions depend on machine
+    /// speed and load; a count of requests is the same throttle and is
+    /// reproducible.
+    hold_clock: u64,
     last_gt_report: Option<OccupancyGtKey>,
     /// Leftover occupancy sample whose saturation state has been counted
     /// toward the retirement dwell.
@@ -514,6 +549,9 @@ struct CoordinatorState {
     halving: Option<SuccessiveHalving>,
     /// Raw frontier excursion posts, shared across every replica.
     frontier: std::collections::VecDeque<crate::catalog_rpc::CatalogFrontierPost>,
+    /// Shared motif-class table for cooperative restarts.
+    core_class: CoreClassTable,
+    surface_evidence: crate::surface_evidence::SurfaceReportBook,
     /// A journal append failed after the live state had already moved,
     /// so a replay of the log no longer reproduces this coordinator.
     journal_broken: bool,
@@ -532,6 +570,7 @@ impl CoordinatorState {
                 Ok::<ScientificState, CatalogServerError>(ScientificState {
                     signature: scientific.signature.clone(),
                     descriptor_space: scientific.descriptor_space.clone(),
+                    posted_descriptor_len: None,
                     structure_context: StructureContext::new(
                         Some(scientific.signature.atomic_numbers.clone()),
                         scientific.descriptor_space.geometry(),
@@ -608,6 +647,7 @@ impl CoordinatorState {
                     discovery_roles: BTreeMap::new(),
                     discovery_ride_assignments: BTreeMap::new(),
                     discovery_plan_model_version: None,
+                    discovery_plan_hold: None,
                     discovery_assignment_epoch: 0,
                     ride_candidates: BTreeMap::new(),
                     ride_saddles: BTreeMap::new(),
@@ -630,6 +670,11 @@ impl CoordinatorState {
                     worthwhile: None,
                     fed_from: None,
                     landfold: None,
+                    landfold_pending: None,
+                    fold_hold: None,
+                    floor_hold: None,
+                    ei_hold: None,
+                    hold_clock: 0,
                     last_gt_report: None,
                     last_leftover_dwell_sample: None,
                     leftover_sat_streak: 0,
@@ -655,6 +700,8 @@ impl CoordinatorState {
             roster: CoordinatorRoster::new(config.replicas.iter().copied()),
             halving: config.halving.clone(),
             frontier: std::collections::VecDeque::new(),
+            core_class: CoreClassTable::new(config.core_patience, config.core_trial),
+            surface_evidence: crate::surface_evidence::SurfaceReportBook::default(),
             journal_broken: false,
         })
     }
@@ -780,9 +827,13 @@ impl CatalogServer {
     pub fn start(addr: &str, config: ServerConfig) -> Result<Self, CatalogServerError> {
         let mut initial_state = CoordinatorState::new(&config)?;
         replay_journal(&config, &mut initial_state)?;
-        let listener = TcpListener::bind(addr)?;
-        listener.set_nonblocking(true)?;
-        let addr = listener.local_addr()?;
+        let bound = nng_rpc::listen(nng::Protocol::Rep0, addr)?;
+        let addr = bound.addr.ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::AddrNotAvailable,
+                "catalog nng bind must be tcp:// so addr() stays a SocketAddr",
+            )
+        })?;
         let header = ServerHeader {
             campaign: config.campaign.clone(),
             ensemble: config.ensemble.clone(),
@@ -808,27 +859,50 @@ impl CatalogServer {
                     .build()
                     .expect("catalog RPC runtime starts");
                 let local = tokio::task::LocalSet::new();
+                let (incoming, mut accepted) = tokio::sync::mpsc::unbounded_channel();
+                let accept_stop = Arc::clone(&thread_stop);
+                std::thread::Builder::new()
+                    .name("catalog-nng-accept".to_owned())
+                    .spawn(move || {
+                        let _listener = bound.listener;
+                        let accept = bound.socket;
+                        let _ = accept
+                            .set_opt::<nng::options::RecvTimeout>(Some(Duration::from_millis(50)));
+                        while !accept_stop.load(Ordering::Acquire) {
+                            match nng_rpc::accept_pair(&accept) {
+                                Ok(pair) => {
+                                    if incoming.send(pair).is_err() {
+                                        break;
+                                    }
+                                }
+                                // A refused hello does not invalidate the listener.
+                                Err(error)
+                                    if matches!(
+                                        error.kind(),
+                                        std::io::ErrorKind::TimedOut
+                                            | std::io::ErrorKind::InvalidData
+                                    ) => {}
+                                Err(_) => break,
+                            }
+                        }
+                    })
+                    .expect("catalog nng accept starts");
                 local.block_on(&runtime, async move {
-                    let listener = match tokio::net::TcpListener::from_std(listener) {
-                        Ok(listener) => listener,
-                        Err(_) => return,
-                    };
                     let shared = Rc::new(RefCell::new(CoordinatorShared {
                         config,
                         state: accept_state,
                         subscribers: Vec::new(),
                     }));
                     while !thread_stop.load(Ordering::Acquire) {
-                        match tokio::time::timeout(Duration::from_millis(50), listener.accept())
-                            .await
+                        match tokio::time::timeout(Duration::from_millis(50), accepted.recv()).await
                         {
-                            Ok(Ok((stream, _))) => {
+                            Ok(Some(pair)) => {
                                 let shared = Rc::clone(&shared);
                                 tokio::task::spawn_local(async move {
-                                    let _ = serve_connection(stream, shared).await;
+                                    let _ = serve_connection(pair, shared).await;
                                 });
                             }
-                            Ok(Err(_)) => break,
+                            Ok(None) => break,
                             Err(_) => {}
                         }
                     }
@@ -955,12 +1029,10 @@ struct SessionImpl {
 }
 
 async fn serve_connection(
-    stream: tokio::net::TcpStream,
+    pair: nng_rpc::PairSession,
     shared: Rc<RefCell<CoordinatorShared>>,
 ) -> Result<(), String> {
-    stream
-        .set_nodelay(true)
-        .map_err(|error| error.to_string())?;
+    let stream = NngIo::new(pair).map_err(|error| error.to_string())?;
     let (reader, writer) = TokioAsyncReadCompatExt::compat(stream).split();
     let network = VatNetwork::new(
         futures::io::BufReader::new(reader),
@@ -1116,21 +1188,49 @@ impl session::Server for SessionImpl {
         }
         let shared = Rc::clone(&self.shared);
         Promise::from_future(async move {
-            let precomputed = match candidate_needing_validation(&request.operation) {
-                Some(candidate) => {
+            let label = operation_label(&request.operation);
+            let validation_started = std::time::Instant::now();
+            let needs_validation = {
+                let shared = shared.borrow();
+                let state = lock_state(&shared.state);
+                known_request_reply(&shared.config, &state, &request)
+                    .map_err(capnp::Error::failed)?
+                    .is_none()
+            };
+            let precomputed = match (
+                needs_validation,
+                candidate_needing_validation(&request.operation),
+            ) {
+                (true, Some(candidate)) => {
                     Some(precompute_validation_async(&shared, &request.identity, candidate).await)
                 }
-                None => None,
+                _ => None,
             };
+            let validation_seconds = validation_started.elapsed().as_secs_f64();
             let (reply, events) = {
                 let shared = shared.borrow_mut();
                 let mut state = lock_state(&shared.state);
                 let epoch_before = open_population_epoch(&state);
                 let config = shared.config.clone();
+                let apply_started = std::time::Instant::now();
+                in_flight_begin(label);
                 let reply = process_request(&config, &mut state, request.clone(), precomputed)
-                    .map_err(capnp::Error::failed)?;
+                    .map_err(capnp::Error::failed);
+                in_flight_end();
+                let reply = reply?;
+                profile_request(
+                    label,
+                    validation_seconds,
+                    apply_started.elapsed().as_secs_f64(),
+                );
                 let mut events = Vec::new();
-                if matches!(reply, CatalogReply::Accepted(_)) {
+                if matches!(
+                    reply,
+                    CatalogReply::Accepted(AcceptedReply {
+                        duplicate: false,
+                        ..
+                    })
+                ) {
                     match &request.operation {
                         CatalogOperation::Attach => {
                             if let CatalogReply::Accepted(accepted) = &reply
@@ -1240,6 +1340,7 @@ async fn precompute_validation_async(
     let candidate = candidate.clone();
     let (tx, rx) = futures::channel::oneshot::channel();
     rayon::spawn(move || {
+        let mut posted_len = None;
         let result = validate_candidate(
             &bits.0,
             &bits.1,
@@ -1247,10 +1348,156 @@ async fn precompute_validation_async(
             bits.3.as_ref(),
             &identity,
             &candidate,
+            Some(&mut posted_len),
         );
         let _ = tx.send(result);
     });
     rx.await.unwrap_or(Err(()))
+}
+
+/// Short label of an operation for the coordinator's cost profile.
+fn operation_label(operation: &CatalogOperation) -> &'static str {
+    match operation {
+        CatalogOperation::Snapshot => "snapshot",
+        CatalogOperation::RecordVisit { .. } => "record_visit",
+        CatalogOperation::OfferCandidate { .. } => "offer",
+        CatalogOperation::Sample { .. } => "sample",
+        CatalogOperation::SampleBasin { .. } => "sample_basin",
+        CatalogOperation::DescriptorHole { .. } => "hole",
+        CatalogOperation::BoundaryCrossing { .. } => "boundary",
+        CatalogOperation::PolicyState { .. } => "policy",
+        CatalogOperation::LedgerEvent { .. } | CatalogOperation::LedgerBatch { .. } => "ledger",
+        CatalogOperation::PopulationSubmit { .. }
+        | CatalogOperation::PopulationPlan { .. }
+        | CatalogOperation::PopulationAbstain { .. }
+        | CatalogOperation::PopulationJoin { .. } => "population",
+        CatalogOperation::ObserverStatus => "status",
+        CatalogOperation::RecordTransition { .. } => "transition",
+        _ => "other",
+    }
+}
+
+/// Per-operation cost of the coordinator: validation off-thread and the
+/// serialised apply under the state lock.
+///
+/// Printed to stderr every 2000 requests under `CATALOG_SERVER_PROFILE=1`.
+/// The apply column is the serialised clock of the whole ensemble: with
+/// 48 replicas checkpointing every 500 charged calls, whatever dominates
+/// it is what every chain waits on.
+/// Laps of one request's phases, printed on drop when the request was
+/// slow and profiling is on: "coordinator policy phases total 14.2s:
+/// discovery 13.9 coverage 0.2 ...". Names the step behind a watchdog
+/// line without a perf session on the node.
+struct PhaseClock {
+    started: Instant,
+    last: Instant,
+    laps: Vec<(&'static str, f64)>,
+}
+
+impl PhaseClock {
+    fn new() -> Self {
+        let now = Instant::now();
+        Self {
+            started: now,
+            last: now,
+            laps: Vec::new(),
+        }
+    }
+
+    fn lap(&mut self, name: &'static str) {
+        let now = Instant::now();
+        self.laps
+            .push((name, now.duration_since(self.last).as_secs_f64()));
+        self.last = now;
+    }
+}
+
+impl Drop for PhaseClock {
+    fn drop(&mut self) {
+        let total = self.started.elapsed().as_secs_f64();
+        if total < 2.0 || !crate::env::flag("CATALOG_SERVER_PROFILE") {
+            return;
+        }
+        let mut laps = self.laps.clone();
+        laps.sort_by(|a, b| b.1.total_cmp(&a.1));
+        let line = laps
+            .iter()
+            .take(6)
+            .map(|(name, seconds)| format!("{name} {seconds:.1}"))
+            .collect::<Vec<_>>()
+            .join(" ");
+        eprintln!("coordinator policy phases total {total:.1}s: {line}");
+    }
+}
+
+/// The request the coordinator's thread is applying right now, for the
+/// watchdog. A coordinator that freezes shows its replicas parked and its
+/// one thread at full CPU with nothing on stderr; the watchdog names the
+/// operation and how long it has held the state, every minute, so the
+/// stall is diagnosed from the log rather than with perf on the node.
+static IN_FLIGHT: Mutex<Option<(&'static str, Instant)>> = Mutex::new(None);
+
+fn in_flight_begin(label: &'static str) {
+    static WATCHDOG: std::sync::OnceLock<()> = std::sync::OnceLock::new();
+    WATCHDOG.get_or_init(|| {
+        let _ = thread::Builder::new()
+            .name("catalog-watchdog".to_owned())
+            .spawn(|| {
+                let mut reported = 0u64;
+                loop {
+                    thread::sleep(Duration::from_secs(10));
+                    let held = IN_FLIGHT.lock().ok().and_then(|guard| *guard);
+                    let Some((label, since)) = held else {
+                        reported = 0;
+                        continue;
+                    };
+                    let seconds = since.elapsed().as_secs();
+                    if seconds >= 30 && (reported == 0 || seconds >= reported + 60) {
+                        eprintln!(
+                            "coordinator slow request: {label} held the state for {seconds}s"
+                        );
+                        reported = seconds.max(1);
+                    }
+                }
+            });
+    });
+    if let Ok(mut guard) = IN_FLIGHT.lock() {
+        *guard = Some((label, Instant::now()));
+    }
+}
+
+fn in_flight_end() {
+    if let Ok(mut guard) = IN_FLIGHT.lock() {
+        *guard = None;
+    }
+}
+
+fn profile_request(label: &'static str, validation_seconds: f64, apply_seconds: f64) {
+    use std::collections::BTreeMap;
+    use std::sync::{Mutex, OnceLock};
+    static ENABLED: OnceLock<bool> = OnceLock::new();
+    static PROFILE: Mutex<Option<(u64, BTreeMap<&'static str, (u64, f64, f64)>)>> =
+        Mutex::new(None);
+    if !*ENABLED.get_or_init(|| crate::env::flag("CATALOG_SERVER_PROFILE")) {
+        return;
+    }
+    let mut guard = PROFILE.lock().expect("coordinator profile");
+    let (total, table) = guard.get_or_insert_with(|| (0, BTreeMap::new()));
+    *total += 1;
+    let entry = table.entry(label).or_insert((0, 0.0, 0.0));
+    entry.0 += 1;
+    entry.1 += validation_seconds;
+    entry.2 += apply_seconds;
+    if total.is_multiple_of(2000) {
+        let line = table
+            .iter()
+            .map(|(name, (count, validate, apply))| {
+                format!("{name}:{count}/{validate:.1}s/{apply:.1}s")
+            })
+            .collect::<Vec<_>>()
+            .join(" ");
+        eprintln!("coordinator profile requests {total} (kind:count/validate/apply) {line}");
+    }
 }
 
 /// The candidate one request's operation will send through
@@ -1270,12 +1517,15 @@ fn candidate_needing_validation(operation: &CatalogOperation) -> Option<&Catalog
     }
 }
 
-fn process_request(
+/// Replies that require no candidate evaluation or state mutation. Both the
+/// validation preflight and the serialized application use these guards: a
+/// committed replay needs no fresh evaluation, and asynchronous validation
+/// must not make the application rely on an unlocked state snapshot.
+fn known_request_reply(
     config: &ServerConfig,
-    state: &mut CoordinatorState,
-    request: CatalogRequest,
-    precomputed: Option<Result<ValidatedCandidate, ()>>,
-) -> Result<CatalogReply, String> {
+    state: &CoordinatorState,
+    request: &CatalogRequest,
+) -> Result<Option<CatalogReply>, String> {
     if state.journal_broken {
         return Err("catalog request journal is behind the coordinator state".to_owned());
     }
@@ -1285,21 +1535,25 @@ fn process_request(
         // An observer need not occupy a replica slot, but it must identify the
         // same system as the coordinator so live state cannot cross PESes.
         if let Some(reason) = system_identity_rejection(config, &request.identity) {
-            return Ok(rejected(state, request.event_sequence, reason));
+            return Ok(Some(rejected(state, request.event_sequence, reason)));
         }
-        return Ok(observer_status_reply(config, state, request.event_sequence));
+        return Ok(Some(observer_status_reply(
+            config,
+            state,
+            request.event_sequence,
+        )));
     }
     // Identity before the replay cache. The cache is keyed by replica
     // and sequence alone, so a caller from another campaign or ensemble
     // that happens to share a replica id collides with a stored request
     // and is told its sequence replayed rather than that it is talking
     // to the wrong coordinator.
-    if let Some(reason) = identity_rejection(config, state, &request) {
-        return Ok(rejected(state, request.event_sequence, reason));
+    if let Some(reason) = identity_rejection(config, state, request) {
+        return Ok(Some(rejected(state, request.event_sequence, reason)));
     }
     let key = (request.identity.replica, request.event_sequence);
     if let Some((stored, payload)) = state.requests.get(&key) {
-        return Ok(if stored == &request {
+        return Ok(Some(if stored == request {
             accepted_with_payload(state, request.event_sequence, true, payload.clone())
         } else {
             rejected(
@@ -1307,7 +1561,19 @@ fn process_request(
                 request.event_sequence,
                 ProtocolRejection::SequenceReplay,
             )
-        });
+        }));
+    }
+    Ok(None)
+}
+
+fn process_request(
+    config: &ServerConfig,
+    state: &mut CoordinatorState,
+    request: CatalogRequest,
+    precomputed: Option<Result<ValidatedCandidate, ()>>,
+) -> Result<CatalogReply, String> {
+    if let Some(reply) = known_request_reply(config, state, &request)? {
+        return Ok(reply);
     }
     // Every operation applies straight to the live state now, not to a
     // clone taken up front and conditionally swapped in. That clone used
@@ -1342,6 +1608,9 @@ fn apply_request(
     request: CatalogRequest,
     mut precomputed: Option<Result<ValidatedCandidate, ()>>,
 ) -> CatalogReply {
+    if let Some(scientific) = state.scientific.as_mut() {
+        scientific.hold_clock = scientific.hold_clock.saturating_add(1);
+    }
     let rejection = identity_rejection(config, state, &request).or_else(|| {
         (request.snapshot_version > state.snapshot_version)
             .then_some(ProtocolRejection::SnapshotRegression)
@@ -1398,11 +1667,7 @@ fn apply_request(
                     }
                 };
                 if bridge.ledger.launch(region).is_err() {
-                    return rejected(
-                        state,
-                        request.event_sequence,
-                        ProtocolRejection::ValidationRejected,
-                    );
+                    return validation_rejected(state, &request);
                 }
                 let entry = bridge
                     .entries
@@ -1431,18 +1696,10 @@ fn apply_request(
         }
         CatalogOperation::BridgeCrossing { crossing } => {
             let Some(scientific) = state.scientific.as_mut() else {
-                return rejected(
-                    state,
-                    request.event_sequence,
-                    ProtocolRejection::ValidationRejected,
-                );
+                return validation_rejected(state, &request);
             };
             let Some(bridge) = scientific.bridges.get_mut(&crossing.bridge) else {
-                return rejected(
-                    state,
-                    request.event_sequence,
-                    ProtocolRejection::ValidationRejected,
-                );
+                return validation_rejected(state, &request);
             };
             let from = crossing.from_region as usize;
             let to = crossing.to_region as usize;
@@ -1452,18 +1709,10 @@ fn apply_request(
                     .push(to, ndarray::Array1::from(crossing.state.clone()))
                     .is_err()
             {
-                return rejected(
-                    state,
-                    request.event_sequence,
-                    ProtocolRejection::ValidationRejected,
-                );
+                return validation_rejected(state, &request);
             }
             let Some(snapshot_version) = state.snapshot_version.checked_add(1) else {
-                return rejected(
-                    state,
-                    request.event_sequence,
-                    ProtocolRejection::ValidationRejected,
-                );
+                return validation_rejected(state, &request);
             };
             state.snapshot_version = snapshot_version;
         }
@@ -1549,11 +1798,7 @@ fn apply_request(
             draw,
         } => {
             let Some(scientific) = state.scientific.as_ref() else {
-                return rejected(
-                    state,
-                    request.event_sequence,
-                    ProtocolRejection::ValidationRejected,
-                );
+                return validation_rejected(state, &request);
             };
             let catalog = scientific
                 .catalog
@@ -1562,11 +1807,7 @@ fn apply_request(
                 .map(|entry| Array1::from_vec(entry.descriptor().to_vec()))
                 .collect::<Vec<_>>();
             let Ok(sample_count) = usize::try_from(*samples) else {
-                return rejected(
-                    state,
-                    request.event_sequence,
-                    ProtocolRejection::ValidationRejected,
-                );
+                return validation_rejected(state, &request);
             };
             let mut rng = rand::rngs::StdRng::seed_from_u64(*draw);
             let Ok(hole) = farthest_hole(
@@ -1575,11 +1816,7 @@ fn apply_request(
                 sample_count,
                 &mut rng,
             ) else {
-                return rejected(
-                    state,
-                    request.event_sequence,
-                    ProtocolRejection::ValidationRejected,
-                );
+                return validation_rejected(state, &request);
             };
             payload = AcceptedPayload::DescriptorHole(DescriptorHoleProposal {
                 target: hole.target().to_vec(),
@@ -1589,11 +1826,7 @@ fn apply_request(
         }
         CatalogOperation::BoundaryCrossing { current, draw } => {
             let Some(scientific) = state.scientific.as_ref() else {
-                return rejected(
-                    state,
-                    request.event_sequence,
-                    ProtocolRejection::ValidationRejected,
-                );
+                return validation_rejected(state, &request);
             };
             if let Some(crossing) =
                 sample_boundary_crossing(scientific, request.identity.replica, current, *draw)
@@ -1641,29 +1874,20 @@ fn apply_request(
                 }
             }
             let Some(scientific) = state.scientific.as_mut() else {
-                return rejected(
-                    state,
-                    request.event_sequence,
-                    ProtocolRejection::ValidationRejected,
-                );
+                return validation_rejected(state, &request);
             };
             if !energy.is_finite() {
-                return rejected(
-                    state,
-                    request.event_sequence,
-                    ProtocolRejection::ValidationRejected,
-                );
+                return validation_rejected(state, &request);
             }
             if scientific.census.validate_descriptor(descriptor).is_err() {
-                return rejected(
-                    state,
-                    request.event_sequence,
-                    ProtocolRejection::ValidationRejected,
-                );
+                return validation_rejected(state, &request);
             }
+            let mut clock = PhaseClock::new();
             let local_basin =
                 query_basin_for_descriptor(scientific, request.identity.replica, descriptor);
+            clock.lap("basin");
             let packing = replica_packing(scientific, request.identity.replica);
+            clock.lap("packing");
             let local_basin_visits = packing
                 .as_ref()
                 .and_then(|fp| scientific.packing.family_of(fp))
@@ -1684,25 +1908,19 @@ fn apply_request(
                 .ok()
                 .flatten();
             if local_basin.is_some() && assigned_class.is_none() {
-                return rejected(
-                    state,
-                    request.event_sequence,
-                    ProtocolRejection::ValidationRejected,
-                );
+                return validation_rejected(state, &request);
             }
             let Ok(coverage) = scientific
                 .coverage
                 .evidence_values(descriptor, assigned_class)
             else {
-                return rejected(
-                    state,
-                    request.event_sequence,
-                    ProtocolRejection::ValidationRejected,
-                );
+                return validation_rejected(state, &request);
             };
+            clock.lap("coverage");
             let novelty = coverage.acquisition;
             let transition_uncertainty =
                 local_basin.map_or_else(|| 1.0, |id| transition_uncertainty(scientific, id));
+            clock.lap("transition");
             let basin_unseen_mass_upper = diagnostic_unseen_mass_upper(
                 scientific.census.total_visits(),
                 PRODUCTION_MINIMUM_VISITS,
@@ -1734,16 +1952,15 @@ fn apply_request(
                     basin_action_cost,
                     ride_action_cost,
                 ) else {
-                    return rejected(
-                        state,
-                        request.event_sequence,
-                        ProtocolRejection::ValidationRejected,
-                    );
+                    return validation_rejected(state, &request);
                 };
                 assignment
             };
+            clock.lap("discovery");
             let mut mixing = mixing_from_state(scientific);
+            clock.lap("mixing");
             mixing.pruned = hyperband_prune(scientific, request.identity.replica);
+            clock.lap("hyperband");
             let relation = packing_or_region_relation(
                 scientific,
                 request.identity.replica,
@@ -1761,20 +1978,16 @@ fn apply_request(
                     .mark_live(request.identity.replica)
                     .is_err()
             {
-                return rejected(
-                    state,
-                    request.event_sequence,
-                    ProtocolRejection::ValidationRejected,
-                );
+                return validation_rejected(state, &request);
             }
-            // Fold the book once for this response; the four consumers
-            // below would otherwise each pay for it.
-            // Packings an extra can actually be sent to: communities a walk
-            // has arrived in. The raw community count reaches two at the
-            // second cell, which is single linkage on a pair rather than on
-            // a cloud, and it sends extras between icosahedral cells that
-            // have simply not chained yet.
-            let occupied_packing_communities = worthwhile_communities(scientific);
+            // Occupied packing communities on the book, not landfold
+            // cells and not the FunnelModel EI subset. Landfold splits
+            // icosahedral cells before they chain; cell count on the
+            // LJ75 ico shelf is tens of wells of one funnel. Either
+            // gate keeps extras walking one packing while the shared
+            // book already holds another.
+            clock.lap("relation");
+            let occupied_packing_communities = scientific.packing.occupied_packing_count();
             let (seat, frame_lambda) = assign_leftover_interfaces(
                 scientific,
                 request.identity.replica,
@@ -1812,10 +2025,21 @@ fn apply_request(
                     .filter(|seat| seat.rank != CHAMPION_RANK)
                     .count() as u32,
                 occupied_family_count: occupied_packing_communities as u32,
-                packing_saturated: packing_census_saturated(scientific),
-                leftover_dwell: leftover_census_dwell(scientific),
-                ei_exhausted: occupancy_funnel_ei_exhausted(scientific),
-                min_families: occupancy_floor(scientific) as u32,
+                packing_saturated: scientific
+                    .sparsified
+                    .as_ref()
+                    .is_some_and(|(_, map)| !map.holes),
+                leftover_dwell: {
+                    clock.lap("interfaces");
+                    let dwell = leftover_census_dwell(scientific);
+                    clock.lap("dwell");
+                    dwell
+                },
+                ei_exhausted: scientific
+                    .ei_hold
+                    .map(|(_, verdict)| verdict)
+                    .unwrap_or(false),
+                min_families: scientific.floor_hold.map(|(_, floor)| floor).unwrap_or(1) as u32,
                 discovery_role,
                 discovery_epoch,
                 basin_unseen_mass_upper,
@@ -1827,31 +2051,18 @@ fn apply_request(
                 saddle_coverage_saturated: saddle_coverage.saturated,
                 retired,
             });
-            report_occupancy_gt(scientific);
         }
         CatalogOperation::PopulationSubmit { epoch, candidate } => {
             let Some(scientific) = state.scientific.as_mut() else {
-                return rejected(
-                    state,
-                    request.event_sequence,
-                    ProtocolRejection::ValidationRejected,
-                );
+                return validation_rejected(state, &request);
             };
             let Ok(validated) =
                 resolve_validation(&mut precomputed, scientific, &request.identity, candidate)
             else {
-                return rejected(
-                    state,
-                    request.event_sequence,
-                    ProtocolRejection::ValidationRejected,
-                );
+                return validation_rejected(state, &request);
             };
             let Some(basin_id) = exact_basin_for(scientific, &validated) else {
-                return rejected(
-                    state,
-                    request.event_sequence,
-                    ProtocolRejection::ValidationRejected,
-                );
+                return validation_rejected(state, &request);
             };
             observe_packing(
                 scientific,
@@ -1865,49 +2076,21 @@ fn apply_request(
             // been rather than where a box was drawn.
             observe_descriptor(scientific, &validated.candidate.descriptor);
             record_energy(scientific, request.identity.replica, validated.fresh.energy);
-            let packing = scientific
-                .packing
-                .histogram(&validated.candidate.coordinates);
-            let basin_visits = packing
-                .as_ref()
-                .and_then(|fp| scientific.packing.family_of(fp))
-                .map_or_else(
-                    || {
-                        scientific
-                            .census
-                            .entry(basin_id)
-                            .expect("classified census basin exists")
-                            .visits()
-                    },
-                    |family| scientific.packing.visits(family),
-                );
-            let novelty = packing.as_ref().map_or_else(
-                || {
-                    nearest_other_census_distance(
-                        &scientific.census,
-                        basin_id,
-                        &validated.candidate.descriptor,
-                    )
-                },
-                |fp| scientific.packing.novelty(fp),
+            let (basin_visits, novelty) = member_evidence(
+                scientific,
+                &validated.candidate.coordinates,
+                &validated.candidate.descriptor,
+                basin_id,
             );
             let canonical = candidate_from_validated(&validated, Some(basin_id));
             if observe_ride_source(scientific, &canonical).is_err() {
-                return rejected(
-                    state,
-                    request.event_sequence,
-                    ProtocolRejection::ValidationRejected,
-                );
+                return validation_rejected(state, &request);
             }
             let epoch_candidates = scientific.population_candidates.entry(*epoch).or_default();
             let inserted = match epoch_candidates.get(&request.identity.replica) {
                 Some(stored) if stored == &canonical => false,
                 Some(_) => {
-                    return rejected(
-                        state,
-                        request.event_sequence,
-                        ProtocolRejection::ValidationRejected,
-                    );
+                    return validation_rejected(state, &request);
                 }
                 None => {
                     epoch_candidates.insert(request.identity.replica, canonical);
@@ -1920,56 +2103,22 @@ fn apply_request(
                 novelty,
                 basin_visits as f64,
             ) else {
-                return rejected(
-                    state,
-                    request.event_sequence,
-                    ProtocolRejection::ValidationRejected,
-                );
+                return validation_rejected(state, &request);
             };
             let Ok(outcome) = scientific.population.submit(*epoch, member) else {
-                return rejected(
-                    state,
-                    request.event_sequence,
-                    ProtocolRejection::ValidationRejected,
-                );
+                return validation_rejected(state, &request);
             };
-            payload = match outcome {
-                EpochSubmissionOutcome::Pending {
-                    submitted,
-                    required,
-                    ..
-                } => AcceptedPayload::PopulationEpoch(PopulationEpochState {
-                    epoch: *epoch,
-                    submitted: u32::try_from(submitted)
-                        .expect("submission count is bounded by replica count"),
-                    required: u32::try_from(required)
-                        .expect("requirement is bounded by replica count"),
-                    plan: None,
-                }),
-                EpochSubmissionOutcome::Ready(plan) => {
-                    let participants = u32::try_from(plan.destinations().len())
-                        .expect("participants are bounded by replica count");
-                    realize_population_plan(scientific, config, *epoch, &plan, participants)
-                }
-            };
+            payload = population_epoch_payload(scientific, config, *epoch, outcome);
             if inserted {
                 let Some(snapshot_version) = state.snapshot_version.checked_add(1) else {
-                    return rejected(
-                        state,
-                        request.event_sequence,
-                        ProtocolRejection::ValidationRejected,
-                    );
+                    return validation_rejected(state, &request);
                 };
                 state.snapshot_version = snapshot_version;
             }
         }
         CatalogOperation::PopulationJoin { epoch } => {
             let Some(scientific) = state.scientific.as_mut() else {
-                return rejected(
-                    state,
-                    request.event_sequence,
-                    ProtocolRejection::ValidationRejected,
-                );
+                return validation_rejected(state, &request);
             };
             // Barrier membership is a lookup: the member is formed from the
             // best candidate this coordinator has already fresh-validated for
@@ -1989,46 +2138,20 @@ fn apply_request(
                     .get(&request.identity.replica)
                     .cloned()
             }) else {
-                return rejected(
-                    state,
-                    request.event_sequence,
-                    ProtocolRejection::ValidationRejected,
-                );
+                return validation_rejected(state, &request);
             };
             let Some(basin_id) = member_candidate
                 .census_basin
                 .map(BasinId::from_raw)
                 .filter(|basin| scientific.census.entry(*basin).is_some())
             else {
-                return rejected(
-                    state,
-                    request.event_sequence,
-                    ProtocolRejection::ValidationRejected,
-                );
+                return validation_rejected(state, &request);
             };
-            let packing = scientific.packing.histogram(&member_candidate.coordinates);
-            let basin_visits = packing
-                .as_ref()
-                .and_then(|fp| scientific.packing.family_of(fp))
-                .map_or_else(
-                    || {
-                        scientific
-                            .census
-                            .entry(basin_id)
-                            .expect("classified census basin exists")
-                            .visits()
-                    },
-                    |family| scientific.packing.visits(family),
-                );
-            let novelty = packing.as_ref().map_or_else(
-                || {
-                    nearest_other_census_distance(
-                        &scientific.census,
-                        basin_id,
-                        &member_candidate.descriptor,
-                    )
-                },
-                |fp| scientific.packing.novelty(fp),
+            let (basin_visits, novelty) = member_evidence(
+                scientific,
+                &member_candidate.coordinates,
+                &member_candidate.descriptor,
+                basin_id,
             );
             let Ok(member) = PopulationMember::new(
                 request.identity.replica,
@@ -2036,11 +2159,7 @@ fn apply_request(
                 novelty,
                 basin_visits as f64,
             ) else {
-                return rejected(
-                    state,
-                    request.event_sequence,
-                    ProtocolRejection::ValidationRejected,
-                );
+                return validation_rejected(state, &request);
             };
             scientific
                 .population_candidates
@@ -2053,85 +2172,29 @@ fn apply_request(
                 .mark_live(request.identity.replica)
                 .is_err()
             {
-                return rejected(
-                    state,
-                    request.event_sequence,
-                    ProtocolRejection::ValidationRejected,
-                );
+                return validation_rejected(state, &request);
             }
             let Ok(outcome) = scientific.population.submit(*epoch, member) else {
-                return rejected(
-                    state,
-                    request.event_sequence,
-                    ProtocolRejection::ValidationRejected,
-                );
+                return validation_rejected(state, &request);
             };
-            payload = match outcome {
-                EpochSubmissionOutcome::Pending {
-                    submitted,
-                    required,
-                    ..
-                } => AcceptedPayload::PopulationEpoch(PopulationEpochState {
-                    epoch: *epoch,
-                    submitted: u32::try_from(submitted)
-                        .expect("submission count is bounded by replica count"),
-                    required: u32::try_from(required)
-                        .expect("requirement is bounded by replica count"),
-                    plan: None,
-                }),
-                EpochSubmissionOutcome::Ready(plan) => {
-                    let participants = u32::try_from(plan.destinations().len())
-                        .expect("participants are bounded by replica count");
-                    realize_population_plan(scientific, config, *epoch, &plan, participants)
-                }
-            };
+            payload = population_epoch_payload(scientific, config, *epoch, outcome);
         }
         CatalogOperation::PopulationAbstain { epoch } => {
             let Some(scientific) = state.scientific.as_mut() else {
-                return rejected(
-                    state,
-                    request.event_sequence,
-                    ProtocolRejection::ValidationRejected,
-                );
+                return validation_rejected(state, &request);
             };
             let Ok(outcome) = scientific
                 .population
                 .abstain(*epoch, request.identity.replica)
             else {
-                return rejected(
-                    state,
-                    request.event_sequence,
-                    ProtocolRejection::ValidationRejected,
-                );
+                return validation_rejected(state, &request);
             };
             let _ = scientific.population.retire(request.identity.replica);
-            payload = match outcome {
-                EpochSubmissionOutcome::Pending {
-                    submitted,
-                    required,
-                    ..
-                } => AcceptedPayload::PopulationEpoch(PopulationEpochState {
-                    epoch: *epoch,
-                    submitted: u32::try_from(submitted)
-                        .expect("submission count is bounded by replica count"),
-                    required: u32::try_from(required)
-                        .expect("requirement is bounded by replica count"),
-                    plan: None,
-                }),
-                EpochSubmissionOutcome::Ready(plan) => {
-                    let participants = u32::try_from(plan.destinations().len())
-                        .expect("participants are bounded by replica count");
-                    realize_population_plan(scientific, config, *epoch, &plan, participants)
-                }
-            };
+            payload = population_epoch_payload(scientific, config, *epoch, outcome);
         }
         CatalogOperation::PopulationPlan { epoch } => {
             let Some(scientific) = state.scientific.as_ref() else {
-                return rejected(
-                    state,
-                    request.event_sequence,
-                    ProtocolRejection::ValidationRejected,
-                );
+                return validation_rejected(state, &request);
             };
             if let Some(plan) = scientific.population_plans.get(epoch) {
                 // A completed epoch's population is its participants, which
@@ -2170,11 +2233,7 @@ fn apply_request(
                     plan: None,
                 });
             } else {
-                return rejected(
-                    state,
-                    request.event_sequence,
-                    ProtocolRejection::ValidationRejected,
-                );
+                return validation_rejected(state, &request);
             }
         }
         CatalogOperation::RecordVisit { candidate } => {
@@ -2182,45 +2241,19 @@ fn apply_request(
                 let Ok(validated) =
                     resolve_validation(&mut precomputed, scientific, &request.identity, candidate)
                 else {
-                    return rejected(
-                        state,
-                        request.event_sequence,
-                        ProtocolRejection::ValidationRejected,
-                    );
+                    return validation_rejected(state, &request);
                 };
                 let Ok(observation) = observe_exact_basin(scientific, &validated) else {
-                    return rejected(
-                        state,
-                        request.event_sequence,
-                        ProtocolRejection::ValidationRejected,
-                    );
+                    return validation_rejected(state, &request);
                 };
                 let previous = scientific
                     .last_basin_by_replica
                     .insert(request.identity.replica, observation.basin_id);
-                // The census-visit stream is the referee's evidence: one
-                // replica occupying basin A and then basin B is one
-                // observed transition across their seam.
+                // Registration establishes occupancy, not reachability.
+                // Only an explicit transition can connect two minima.
                 scientific
                     .landscape
                     .observe_basin(observation.basin_id.as_raw());
-                if let Some(previous) = previous
-                    && previous != observation.basin_id
-                {
-                    scientific.landscape.observe_crossing(
-                        previous.as_raw(),
-                        observation.basin_id.as_raw(),
-                        1.0,
-                    );
-                    if connect_coverage_classes(scientific, previous, observation.basin_id).is_err()
-                    {
-                        return rejected(
-                            state,
-                            request.event_sequence,
-                            ProtocolRejection::ValidationRejected,
-                        );
-                    }
-                }
                 let canonical = candidate_from_validated(&validated, Some(observation.basin_id));
                 let deeper = scientific
                     .best_candidate_by_replica
@@ -2231,12 +2264,9 @@ fn apply_request(
                         .best_candidate_by_replica
                         .insert(request.identity.replica, canonical.clone());
                 }
-                if observe_ride_source(scientific, &canonical).is_err() {
-                    return rejected(
-                        state,
-                        request.event_sequence,
-                        ProtocolRejection::ValidationRejected,
-                    );
+                let same_basin = previous == Some(observation.basin_id);
+                if !same_basin && observe_ride_source(scientific, &canonical).is_err() {
+                    return validation_rejected(state, &request);
                 }
                 remember_candidate(scientific, request.identity.replica, canonical);
                 let arrival = scientific
@@ -2260,30 +2290,18 @@ fn apply_request(
                     .mark_live(request.identity.replica)
                     .is_err()
                 {
-                    return rejected(
-                        state,
-                        request.event_sequence,
-                        ProtocolRejection::ValidationRejected,
-                    );
+                    return validation_rejected(state, &request);
                 }
                 let _ = transition_node(scientific, observation.basin_id);
                 observation.total_visits
             } else {
                 let Some(census_visits) = state.census_visits.checked_add(1) else {
-                    return rejected(
-                        state,
-                        request.event_sequence,
-                        ProtocolRejection::ValidationRejected,
-                    );
+                    return validation_rejected(state, &request);
                 };
                 census_visits
             };
             let Some(snapshot_version) = state.snapshot_version.checked_add(1) else {
-                return rejected(
-                    state,
-                    request.event_sequence,
-                    ProtocolRejection::ValidationRejected,
-                );
+                return validation_rejected(state, &request);
             };
             state.census_visits = census_visits;
             state.snapshot_version = snapshot_version;
@@ -2295,18 +2313,10 @@ fn apply_request(
                 let Ok(validated) =
                     resolve_validation(&mut precomputed, scientific, &request.identity, candidate)
                 else {
-                    return rejected(
-                        state,
-                        request.event_sequence,
-                        ProtocolRejection::ValidationRejected,
-                    );
+                    return validation_rejected(state, &request);
                 };
                 let Ok(observation) = observe_exact_basin(scientific, &validated) else {
-                    return rejected(
-                        state,
-                        request.event_sequence,
-                        ProtocolRejection::ValidationRejected,
-                    );
+                    return validation_rejected(state, &request);
                 };
                 // An offer is validated exactly as a visit is, so it also
                 // refreshes the best candidate the population join reads;
@@ -2323,11 +2333,7 @@ fn apply_request(
                         .insert(request.identity.replica, canonical.clone());
                 }
                 if observe_ride_source(scientific, &canonical).is_err() {
-                    return rejected(
-                        state,
-                        request.event_sequence,
-                        ProtocolRejection::ValidationRejected,
-                    );
+                    return validation_rejected(state, &request);
                 }
                 // Catalog offers are search evidence, not adoption events.
                 // An uninitialized replica may bootstrap from an offer, but
@@ -2348,6 +2354,7 @@ fn apply_request(
                     .arrival_basin_by_replica
                     .insert(request.identity.replica, observation.basin_id)
                     != Some(observation.basin_id);
+                let book_before = scientific.packing.version();
                 observe_packing(
                     scientific,
                     request.identity.replica,
@@ -2365,11 +2372,61 @@ fn apply_request(
                     .mark_live(request.identity.replica)
                     .is_err()
                 {
-                    return rejected(
-                        state,
-                        request.event_sequence,
-                        ProtocolRejection::ValidationRejected,
-                    );
+                    return validation_rejected(state, &request);
+                }
+                // CATALOG_FAMILY_ARCHIVE=1: keep the catalog family-diverse.
+                // Admission is by energy, so on a landscape with one deep
+                // wide funnel a full catalog is thirty isomers of that funnel
+                // and the sparsest-family draw has nothing else to hand out
+                // (measured on LJ75: one hear in 48 replicas). When the
+                // catalog is full and the candidate's packing family is not
+                // represented, evict the highest-energy non-incumbent entry
+                // of the most crowded family first.
+                if crate::env::flag("CATALOG_FAMILY_ARCHIVE")
+                    && scientific.catalog.len() >= scientific.catalog.capacity()
+                    && let Some(new_hist) = scientific
+                        .packing
+                        .histogram(&validated.candidate.coordinates)
+                    && let Some(new_family) = scientific.packing.family_of(&new_hist)
+                {
+                    let families: Vec<Option<usize>> = scientific
+                        .catalog
+                        .entries()
+                        .iter()
+                        .map(|entry| {
+                            scientific
+                                .packing
+                                .histogram(entry.coordinates())
+                                .and_then(|h| scientific.packing.family_of(&h))
+                        })
+                        .collect();
+                    let represented = families.contains(&Some(new_family));
+                    if !represented {
+                        let mut counts: std::collections::BTreeMap<usize, usize> =
+                            std::collections::BTreeMap::new();
+                        for f in families.iter().flatten() {
+                            *counts.entry(*f).or_insert(0) += 1;
+                        }
+                        if let Some((&crowded, &n_crowd)) = counts.iter().max_by_key(|(_, n)| **n)
+                            && n_crowd >= 2
+                        {
+                            let incumbent_id =
+                                scientific.catalog.incumbent().map(|e| e.census_id());
+                            let victim = scientific
+                                .catalog
+                                .entries()
+                                .iter()
+                                .zip(families.iter())
+                                .filter(|(entry, f)| {
+                                    **f == Some(crowded) && Some(entry.census_id()) != incumbent_id
+                                })
+                                .max_by(|(a, _), (b, _)| a.energy().total_cmp(&b.energy()))
+                                .map(|(entry, _)| entry.census_id());
+                            if let Some(victim) = victim {
+                                scientific.catalog.evict(victim);
+                            }
+                        }
+                    }
                 }
                 let outcome = scientific.catalog.admit(
                     observation.basin_id,
@@ -2396,6 +2453,9 @@ fn apply_request(
                         scientific.archive.reward(family);
                     }
                 }
+                if scientific.packing.version() != book_before {
+                    refresh_occupancy_diagnostics(scientific);
+                }
                 let incumbent = scientific
                     .catalog
                     .incumbent()
@@ -2408,32 +2468,21 @@ fn apply_request(
                         outcome,
                         observation.basin_id,
                         observation.created,
+                        observation.basin_visits,
                         incumbent,
                     )),
                 )
             } else {
                 let Some(active_entries) = state.active_entries.checked_add(1) else {
-                    return rejected(
-                        state,
-                        request.event_sequence,
-                        ProtocolRejection::ValidationRejected,
-                    );
+                    return validation_rejected(state, &request);
                 };
                 let Some(census_visits) = state.census_visits.checked_add(1) else {
-                    return rejected(
-                        state,
-                        request.event_sequence,
-                        ProtocolRejection::ValidationRejected,
-                    );
+                    return validation_rejected(state, &request);
                 };
                 (census_visits, active_entries, None)
             };
             let Some(snapshot_version) = state.snapshot_version.checked_add(1) else {
-                return rejected(
-                    state,
-                    request.event_sequence,
-                    ProtocolRejection::ValidationRejected,
-                );
+                return validation_rejected(state, &request);
             };
             state.census_visits = census_visits;
             state.active_entries = active_entries;
@@ -2448,36 +2497,20 @@ fn apply_request(
             adopted,
         } => {
             let Some(scientific) = state.scientific.as_mut() else {
-                return rejected(
-                    state,
-                    request.event_sequence,
-                    ProtocolRejection::ValidationRejected,
-                );
+                return validation_rejected(state, &request);
             };
             if action.is_empty() {
-                return rejected(
-                    state,
-                    request.event_sequence,
-                    ProtocolRejection::ValidationRejected,
-                );
+                return validation_rejected(state, &request);
             }
             let Some(source_basin) = scientific
                 .last_basin_by_replica
                 .get(&request.identity.replica)
                 .copied()
             else {
-                return rejected(
-                    state,
-                    request.event_sequence,
-                    ProtocolRejection::ValidationRejected,
-                );
+                return validation_rejected(state, &request);
             };
             let Some(source_node) = transition_node(scientific, source_basin) else {
-                return rejected(
-                    state,
-                    request.event_sequence,
-                    ProtocolRejection::ValidationRejected,
-                );
+                return validation_rejected(state, &request);
             };
             let source_candidate = scientific
                 .last_candidate_by_replica
@@ -2495,36 +2528,20 @@ fn apply_request(
                         &request.identity,
                         candidate,
                     ) else {
-                        return rejected(
-                            state,
-                            request.event_sequence,
-                            ProtocolRejection::ValidationRejected,
-                        );
+                        return validation_rejected(state, &request);
                     };
                     let Ok(observation) = observe_exact_basin(scientific, &validated) else {
-                        return rejected(
-                            state,
-                            request.event_sequence,
-                            ProtocolRejection::ValidationRejected,
-                        );
+                        return validation_rejected(state, &request);
                     };
                     let Some(destination_node) = transition_node(scientific, observation.basin_id)
                     else {
-                        return rejected(
-                            state,
-                            request.event_sequence,
-                            ProtocolRejection::ValidationRejected,
-                        );
+                        return validation_rejected(state, &request);
                     };
                     let destination_candidate =
                         candidate_from_validated(&validated, Some(observation.basin_id));
                     let terminal_energy = destination_candidate.energy;
                     if observe_ride_source(scientific, &destination_candidate).is_err() {
-                        return rejected(
-                            state,
-                            request.event_sequence,
-                            ProtocolRejection::ValidationRejected,
-                        );
+                        return validation_rejected(state, &request);
                     }
                     if *adopted {
                         scientific
@@ -2573,11 +2590,7 @@ fn apply_request(
                         && connect_coverage_classes(scientific, source_basin, observation.basin_id)
                             .is_err()
                     {
-                        return rejected(
-                            state,
-                            request.event_sequence,
-                            ProtocolRejection::ValidationRejected,
-                        );
+                        return validation_rejected(state, &request);
                     }
                     (
                         TransitionOutcome::Resolved(destination_node),
@@ -2590,11 +2603,7 @@ fn apply_request(
                 .observe(action.clone(), source_node, outcome)
                 .is_err()
             {
-                return rejected(
-                    state,
-                    request.event_sequence,
-                    ProtocolRejection::ValidationRejected,
-                );
+                return validation_rejected(state, &request);
             }
             if let (Some(source), Some(terminal_energy)) =
                 (source_candidate.as_ref(), terminal_energy)
@@ -2608,28 +2617,16 @@ fn apply_request(
                     )
                     .is_err()
             {
-                return rejected(
-                    state,
-                    request.event_sequence,
-                    ProtocolRejection::ValidationRejected,
-                );
+                return validation_rejected(state, &request);
             }
             let Some(snapshot_version) = state.snapshot_version.checked_add(1) else {
-                return rejected(
-                    state,
-                    request.event_sequence,
-                    ProtocolRejection::ValidationRejected,
-                );
+                return validation_rejected(state, &request);
             };
             state.snapshot_version = snapshot_version;
         }
         CatalogOperation::ClaimRide { seed } => {
             let Some(scientific) = state.scientific.as_mut() else {
-                return rejected(
-                    state,
-                    request.event_sequence,
-                    ProtocolRejection::ValidationRejected,
-                );
+                return validation_rejected(state, &request);
             };
             let mut ride_ledger = scientific.ride_ledger.clone();
             let order = match scientific.discovery_roles.get(&request.identity.replica) {
@@ -2650,11 +2647,7 @@ fn apply_request(
                     .get(&order.arm.source_basin)
                     .cloned()
                 else {
-                    return rejected(
-                        state,
-                        request.event_sequence,
-                        ProtocolRejection::ValidationRejected,
-                    );
+                    return validation_rejected(state, &request);
                 };
                 let avoid_saddles = scientific
                     .ride_saddles
@@ -2663,11 +2656,7 @@ fn apply_request(
                     .map(|saddle| saddle.candidate.clone())
                     .collect();
                 let Some(snapshot_version) = state.snapshot_version.checked_add(1) else {
-                    return rejected(
-                        state,
-                        request.event_sequence,
-                        ProtocolRejection::ValidationRejected,
-                    );
+                    return validation_rejected(state, &request);
                 };
                 scientific.ride_ledger = ride_ledger;
                 scientific
@@ -2683,36 +2672,20 @@ fn apply_request(
         }
         CatalogOperation::ReportRide { report } => {
             let Some(scientific) = state.scientific.as_mut() else {
-                return rejected(
-                    state,
-                    request.event_sequence,
-                    ProtocolRejection::ValidationRejected,
-                );
+                return validation_rejected(state, &request);
             };
             let mut next_scientific = scientific.clone();
             let Some(order) = next_scientific.ride_ledger.active_order(report.work) else {
-                return rejected(
-                    state,
-                    request.event_sequence,
-                    ProtocolRejection::ValidationRejected,
-                );
+                return validation_rejected(state, &request);
             };
             if order.replica != request.identity.replica {
-                return rejected(
-                    state,
-                    request.event_sequence,
-                    ProtocolRejection::ValidationRejected,
-                );
+                return validation_rejected(state, &request);
             }
             let source_basin = order.arm.source_basin;
             let Some((ride_feature, source_energy)) =
                 ride_action_feature(&next_scientific, &order.arm)
             else {
-                return rejected(
-                    state,
-                    request.event_sequence,
-                    ProtocolRejection::ValidationRejected,
-                );
+                return validation_rejected(state, &request);
             };
             let (outcome, receiving_evaluations) = match &report.outcome {
                 CatalogRideOutcome::Certified(connection) => certify_ride_connection(
@@ -2733,11 +2706,7 @@ fn apply_request(
                 .charged_evaluations
                 .checked_add(receiving_evaluations)
             else {
-                return rejected(
-                    state,
-                    request.event_sequence,
-                    ProtocolRejection::ValidationRejected,
-                );
+                return validation_rejected(state, &request);
             };
             let Ok(credit) = next_scientific.ride_ledger.report(
                 request.identity.replica,
@@ -2745,11 +2714,7 @@ fn apply_request(
                 charged_evaluations,
                 outcome.clone(),
             ) else {
-                return rejected(
-                    state,
-                    request.event_sequence,
-                    ProtocolRejection::ValidationRejected,
-                );
+                return validation_rejected(state, &request);
             };
             let terminal_energy = match &outcome {
                 RideOutcome::Certified { endpoints, .. } => endpoints
@@ -2769,11 +2734,7 @@ fn apply_request(
                 )
                 .is_err()
             {
-                return rejected(
-                    state,
-                    request.event_sequence,
-                    ProtocolRejection::ValidationRejected,
-                );
+                return validation_rejected(state, &request);
             }
             if let RideOutcome::Certified { endpoints, .. } = &outcome
                 && endpoints[0] != endpoints[1]
@@ -2781,18 +2742,10 @@ fn apply_request(
                 let left = BasinId::from_raw(endpoints[0]);
                 let right = BasinId::from_raw(endpoints[1]);
                 let Some(left_node) = transition_node(&mut next_scientific, left) else {
-                    return rejected(
-                        state,
-                        request.event_sequence,
-                        ProtocolRejection::ValidationRejected,
-                    );
+                    return validation_rejected(state, &request);
                 };
                 let Some(right_node) = transition_node(&mut next_scientific, right) else {
-                    return rejected(
-                        state,
-                        request.event_sequence,
-                        ProtocolRejection::ValidationRejected,
-                    );
+                    return validation_rejected(state, &request);
                 };
                 if next_scientific
                     .transition_graph
@@ -2811,29 +2764,17 @@ fn apply_request(
                         )
                         .is_err()
                 {
-                    return rejected(
-                        state,
-                        request.event_sequence,
-                        ProtocolRejection::ValidationRejected,
-                    );
+                    return validation_rejected(state, &request);
                 }
                 next_scientific
                     .landscape
                     .observe_crossing(endpoints[0], endpoints[1], 1.0);
                 if connect_coverage_classes(&mut next_scientific, left, right).is_err() {
-                    return rejected(
-                        state,
-                        request.event_sequence,
-                        ProtocolRejection::ValidationRejected,
-                    );
+                    return validation_rejected(state, &request);
                 }
             }
             let Some(snapshot_version) = state.snapshot_version.checked_add(1) else {
-                return rejected(
-                    state,
-                    request.event_sequence,
-                    ProtocolRejection::ValidationRejected,
-                );
+                return validation_rejected(state, &request);
             };
             let census_visits = next_scientific.census.total_visits();
             let active_entries = u32::try_from(next_scientific.catalog.len())
@@ -2850,18 +2791,10 @@ fn apply_request(
             cumulative_charged,
         } => {
             let Some(kind) = ChargeKind::from_wire_code(*kind) else {
-                return rejected(
-                    state,
-                    request.event_sequence,
-                    ProtocolRejection::ValidationRejected,
-                );
+                return validation_rejected(state, &request);
             };
             let Some(ledger) = state.ledger.as_mut() else {
-                return rejected(
-                    state,
-                    request.event_sequence,
-                    ProtocolRejection::ValidationRejected,
-                );
+                return validation_rejected(state, &request);
             };
             if ledger
                 .record(ReplicaLedgerEvent {
@@ -2873,11 +2806,7 @@ fn apply_request(
                 })
                 .is_err()
             {
-                return rejected(
-                    state,
-                    request.event_sequence,
-                    ProtocolRejection::ValidationRejected,
-                );
+                return validation_rejected(state, &request);
             }
             let aggregate_charged = ledger.ensemble_total();
             if let Some(scientific) = state.scientific.as_mut() {
@@ -2887,11 +2816,7 @@ fn apply_request(
                 }
             }
             let Some(snapshot_version) = state.snapshot_version.checked_add(1) else {
-                return rejected(
-                    state,
-                    request.event_sequence,
-                    ProtocolRejection::ValidationRejected,
-                );
+                return validation_rejected(state, &request);
             };
             state.snapshot_version = snapshot_version;
             feed_halving(
@@ -2917,28 +2842,16 @@ fn apply_request(
                     .last()
                     .is_some_and(|event| event.sequence == request.event_sequence);
             if !ordered {
-                return rejected(
-                    state,
-                    request.event_sequence,
-                    ProtocolRejection::ValidationRejected,
-                );
+                return validation_rejected(state, &request);
             }
             let Some(ledger) = state.ledger.as_ref() else {
-                return rejected(
-                    state,
-                    request.event_sequence,
-                    ProtocolRejection::ValidationRejected,
-                );
+                return validation_rejected(state, &request);
             };
             let mut staged = ledger.clone();
             let mut discovery_cost_changed = false;
             for event in events {
                 let Some(kind) = ChargeKind::from_wire_code(event.kind) else {
-                    return rejected(
-                        state,
-                        request.event_sequence,
-                        ProtocolRejection::ValidationRejected,
-                    );
+                    return validation_rejected(state, &request);
                 };
                 discovery_cost_changed |=
                     matches!(kind, ChargeKind::BasinEscape | ChargeKind::SaddleRide);
@@ -2952,27 +2865,15 @@ fn apply_request(
                     })
                     .is_err()
                 {
-                    return rejected(
-                        state,
-                        request.event_sequence,
-                        ProtocolRejection::ValidationRejected,
-                    );
+                    return validation_rejected(state, &request);
                 }
             }
             let aggregate_charged = staged.ensemble_total();
             let Ok(event_count) = u64::try_from(events.len()) else {
-                return rejected(
-                    state,
-                    request.event_sequence,
-                    ProtocolRejection::ValidationRejected,
-                );
+                return validation_rejected(state, &request);
             };
             let Some(snapshot_version) = state.snapshot_version.checked_add(event_count) else {
-                return rejected(
-                    state,
-                    request.event_sequence,
-                    ProtocolRejection::ValidationRejected,
-                );
+                return validation_rejected(state, &request);
             };
             state.ledger = Some(staged);
             if let Some(scientific) = state.scientific.as_mut() {
@@ -2994,21 +2895,13 @@ fn apply_request(
         }
         CatalogOperation::Attach => {
             if admit_replica(state, request.identity.replica).is_err() {
-                return rejected(
-                    state,
-                    request.event_sequence,
-                    ProtocolRejection::ValidationRejected,
-                );
+                return validation_rejected(state, &request);
             }
             payload = AcceptedPayload::Roster(state.roster.reply());
         }
         CatalogOperation::Detach { reason } => {
             if retire_replica(config, state, request.identity.replica, reason).is_err() {
-                return rejected(
-                    state,
-                    request.event_sequence,
-                    ProtocolRejection::ValidationRejected,
-                );
+                return validation_rejected(state, &request);
             }
             payload = AcceptedPayload::Roster(state.roster.reply());
         }
@@ -3042,11 +2935,7 @@ fn apply_request(
                     }),
                     Ok(None) => AcceptedPayload::Roster(roster),
                     Err(_) => {
-                        return rejected(
-                            state,
-                            request.event_sequence,
-                            ProtocolRejection::ValidationRejected,
-                        );
+                        return validation_rejected(state, &request);
                     }
                 },
                 None => AcceptedPayload::Roster(roster),
@@ -3066,6 +2955,41 @@ fn apply_request(
             if let Some(snapshot_version) = state.snapshot_version.checked_add(1) {
                 state.snapshot_version = snapshot_version;
             }
+        }
+        CatalogOperation::ExchangeSurfaceEvidence { report } => {
+            let Some(version) = state.snapshot_version.checked_add(1) else {
+                return validation_rejected(state, &request);
+            };
+            match state
+                .surface_evidence
+                .exchange(request.identity.replica, report.clone())
+            {
+                Ok(peers) => payload = AcceptedPayload::SurfaceEvidence(peers),
+                Err(_) => {
+                    return validation_rejected(state, &request);
+                }
+            }
+            state.snapshot_version = version;
+        }
+        CatalogOperation::ReportCoreClass {
+            class,
+            energy,
+            charged,
+        } => {
+            let Ok(charged) = usize::try_from(*charged) else {
+                return validation_rejected(state, &request);
+            };
+            let verdict = state.core_class.report(
+                request.identity.replica as usize,
+                *class,
+                *energy,
+                charged,
+            );
+            payload = AcceptedPayload::CoreVerdict(verdict);
+            let Some(snapshot_version) = state.snapshot_version.checked_add(1) else {
+                return validation_rejected(state, &request);
+            };
+            state.snapshot_version = snapshot_version;
         }
     }
     state
@@ -3230,11 +3154,11 @@ fn rejection_for_protocol_error(error: &ProtocolError) -> ProtocolRejection {
 /// it does not already pay and stays correct without one.
 fn resolve_validation(
     precomputed: &mut Option<Result<ValidatedCandidate, ()>>,
-    scientific: &ScientificState,
+    scientific: &mut ScientificState,
     identity: &CatalogIdentity,
     candidate: &CatalogCandidate,
 ) -> Result<ValidatedCandidate, ()> {
-    precomputed.take().unwrap_or_else(|| {
+    let validated = precomputed.take().unwrap_or_else(|| {
         validate_candidate(
             &scientific.signature,
             &scientific.descriptor_space,
@@ -3242,8 +3166,17 @@ fn resolve_validation(
             scientific.evaluate.as_ref(),
             identity,
             candidate,
+            Some(&mut scientific.posted_descriptor_len),
         )
-    })
+    })?;
+    match scientific.posted_descriptor_len {
+        Some(dimension) if validated.candidate.descriptor.len() != dimension => Err(()),
+        Some(_) => Ok(validated),
+        None => {
+            scientific.posted_descriptor_len = Some(validated.candidate.descriptor.len());
+            Ok(validated)
+        }
+    }
 }
 
 fn validate_candidate<F>(
@@ -3253,6 +3186,7 @@ fn validate_candidate<F>(
     evaluate: &F,
     identity: &CatalogIdentity,
     candidate: &CatalogCandidate,
+    mut posted_descriptor_len: Option<&mut Option<usize>>,
 ) -> Result<ValidatedCandidate, ()>
 where
     F: Fn(&[f64]) -> Result<FreshEvaluation, String> + Send + Sync + ?Sized,
@@ -3307,26 +3241,103 @@ where
                 identity.replica, candidate.event_sequence
             );
         })?;
-    let descriptor = descriptor_space
-        .describe(
-            ArrayView1::from(&validated.candidate.coordinates),
-            Some(&signature.atomic_numbers),
-        )
-        .map_err(|error| {
-            eprintln!(
-                "catalog candidate rejected: replica={} event={} reason=descriptor recomputation failed: {error}",
-                identity.replica, candidate.event_sequence
-            );
-        })?;
-    if descriptor.values().len() != validated.candidate.descriptor.len()
-        || descriptor.schema_version() != signature.descriptor.version
+    // The descriptor recomputation is the coordinator's cost: 0.28 s per
+    // candidate on LJ75 (profiled), against milliseconds for the rest of
+    // the validation. The worker computed the same descriptor under the
+    // same schema; recomputing every one serialised the ensemble behind
+    // one SOAP call per registration. CATALOG_VERIFY_DESCRIPTOR sets how
+    // many candidates are recomputed: every (the old behaviour), one in N
+    // (default 16, a mismatch beyond 1e-6 is a rejection and a line on
+    // stderr), or none. A posted descriptor must still have the schema's
+    // length, version, and finite values.
+    let posted = &validated.candidate.descriptor;
+    if validated.candidate.descriptor_schema_version != signature.descriptor.version
+        || posted.is_empty()
+        || posted.iter().any(|value| !value.is_finite())
     {
-        reject("recomputed descriptor shape does not match candidate record");
+        reject("posted descriptor version or values do not match the schema");
         return Err(());
     }
-    validated.candidate.descriptor = descriptor.values().to_vec();
-    validated.candidate.descriptor_schema_version = descriptor.schema_version();
+    // The schema's dimension is learned from the first posted vector on
+    // this server. That post is not recomputed: a worker's leftover
+    // descriptor is the one the catalog merges. Later posts are held to
+    // the learned length, and recomputed on the verification period.
+    let known = posted_descriptor_len.as_ref().and_then(|slot| **slot);
+    if let Some(dimension) = known
+        && posted.len() != dimension
+    {
+        reject("posted descriptor length does not match the schema");
+        return Err(());
+    }
+    let verify_every = descriptor_verification_period();
+    let verify = match posted_descriptor_len.as_deref_mut() {
+        None => true,
+        Some(slot) if slot.is_none() => {
+            *slot = Some(posted.len());
+            false
+        }
+        Some(_) => match verify_every {
+            Some(0) => false,
+            Some(period) => candidate.event_sequence.is_multiple_of(period),
+            None => true,
+        },
+    };
+    if verify {
+        let descriptor = descriptor_space
+            .describe(
+                ArrayView1::from(&validated.candidate.coordinates),
+                Some(&signature.atomic_numbers),
+            )
+            .map_err(|error| {
+                eprintln!(
+                    "catalog candidate rejected: replica={} event={} reason=descriptor recomputation failed: {error}",
+                    identity.replica, candidate.event_sequence
+                );
+            })?;
+        if descriptor.values().len() != posted.len()
+            || descriptor.schema_version() != signature.descriptor.version
+        {
+            reject("recomputed descriptor shape does not match candidate record");
+            return Err(());
+        }
+        let drift = descriptor
+            .values()
+            .iter()
+            .zip(posted.iter())
+            .map(|(a, b)| (a - b).abs())
+            .fold(0.0_f64, f64::max);
+        if drift > 1e-6 {
+            eprintln!(
+                "catalog candidate rejected: replica={} event={} reason=posted descriptor drifts {drift:.3e} from recomputation",
+                identity.replica, candidate.event_sequence
+            );
+            return Err(());
+        }
+        if let Some(slot) = posted_descriptor_len {
+            *slot = Some(descriptor.values().len());
+        }
+        validated.candidate.descriptor = descriptor.values().to_vec();
+        validated.candidate.descriptor_schema_version = descriptor.schema_version();
+    }
+    // Prepare the packing rows here, on the validation pool, so the
+    // packing book's observe under the state lock is a cache hit.
+    crate::catalog::packing::prepare_rows(&validated.candidate.coordinates);
     Ok(validated)
+}
+
+/// How often a posted descriptor is recomputed: `None` for every candidate,
+/// `Some(n)` for every n-th event sequence (0 for never).
+fn descriptor_verification_period() -> Option<u64> {
+    use std::sync::OnceLock;
+    static PERIOD: OnceLock<Option<u64>> = OnceLock::new();
+    *PERIOD.get_or_init(
+        || match std::env::var("CATALOG_VERIFY_DESCRIPTOR").as_deref() {
+            Ok("every") => None,
+            Ok("none") => Some(0),
+            Ok(value) => value.parse::<u64>().ok().or(Some(16)),
+            Err(_) => Some(16),
+        },
+    )
 }
 
 struct ReceivingRideSurface<'a, F: ?Sized>(&'a F);
@@ -3382,6 +3393,7 @@ fn certify_ride_connection(
                 &counted_evaluate,
                 identity,
                 &connection.endpoints[0],
+                Some(&mut scientific.posted_descriptor_len),
             )
             .map_err(|_| crate::ride_ledger::RideFailure::Surface)?,
             validate_candidate(
@@ -3391,6 +3403,7 @@ fn certify_ride_connection(
                 &counted_evaluate,
                 identity,
                 &connection.endpoints[1],
+                Some(&mut scientific.posted_descriptor_len),
             )
             .map_err(|_| crate::ride_ledger::RideFailure::Surface)?,
         ];
@@ -3504,6 +3517,7 @@ where
         evaluate,
         identity,
         candidate,
+        None,
     )
     .map_err(|_| crate::ride_ledger::RideFailure::Surface)?;
     let config = PesExplorationConfig::default();
@@ -3626,6 +3640,30 @@ fn exact_basin_for(
     scientific: &ScientificState,
     validated: &ValidatedCandidate,
 ) -> Option<BasinId> {
+    let query = scientific
+        .packing
+        .histogram(&validated.candidate.coordinates);
+    if let Some(query) = query.as_ref() {
+        if let Some(basin) = basin_for_packing_community(scientific, query) {
+            return Some(basin);
+        }
+        if scientific.packing.occupied_packing_count() <= 1 {
+            if let Some((&basin, _)) = scientific.ride_candidates.iter().next() {
+                return Some(BasinId::from_raw(basin));
+            }
+            if let Some(basin) = scientific.last_basin_by_replica.values().next() {
+                return Some(*basin);
+            }
+        }
+        for (&basin, stored) in &scientific.ride_candidates {
+            let Some(stored) = scientific.packing.histogram(&stored.coordinates) else {
+                continue;
+            };
+            if same_packing(&stored, query) {
+                return Some(BasinId::from_raw(basin));
+            }
+        }
+    }
     let mut representatives = scientific
         .ride_candidates
         .iter()
@@ -3691,6 +3729,58 @@ fn query_basin_for_descriptor(
     matches.next().is_none().then_some(basin)
 }
 
+/// Census basin of a structure that already sits in an occupied packing.
+///
+/// Cell grain (`same_packing`) splits the LJ75 icosahedral shelf into
+/// tens of wells. IRA then compares the new isomer to every stored
+/// minimum. Packing community is the identity the hop path may reuse;
+/// IRA remains the witness only when the book has no community for the
+/// query.
+fn basin_for_packing_community(scientific: &ScientificState, query: &[f64]) -> Option<BasinId> {
+    let same: BTreeSet<usize> = scientific
+        .packing
+        .families_sharing_community(query)
+        .into_iter()
+        .collect();
+    if same.is_empty() {
+        return None;
+    }
+    for (replica, history) in &scientific.family_history {
+        if history
+            .back()
+            .is_some_and(|cell| same.contains(&(*cell as usize)))
+            && let Some(basin) = scientific.last_basin_by_replica.get(replica)
+        {
+            return Some(*basin);
+        }
+    }
+    for (replica, candidate) in &scientific.last_candidate_by_replica {
+        let Some(histogram) = scientific.packing.histogram(&candidate.coordinates) else {
+            continue;
+        };
+        let Some(family) = scientific.packing.family_of(&histogram) else {
+            continue;
+        };
+        if same.contains(&family)
+            && let Some(basin) = scientific.last_basin_by_replica.get(replica)
+        {
+            return Some(*basin);
+        }
+    }
+    for (&basin, stored) in &scientific.ride_candidates {
+        let Some(histogram) = scientific.packing.histogram(&stored.coordinates) else {
+            continue;
+        };
+        let Some(family) = scientific.packing.family_of(&histogram) else {
+            continue;
+        };
+        if same.contains(&family) {
+            return Some(BasinId::from_raw(basin));
+        }
+    }
+    None
+}
+
 fn candidate_from_validated(
     validated: &ValidatedCandidate,
     census_basin: Option<BasinId>,
@@ -3716,6 +3806,7 @@ fn catalog_mutation(
     outcome: AdmissionOutcome,
     offered_basin: BasinId,
     new_basin: bool,
+    basin_visits: u64,
     incumbent_basin: Option<BasinId>,
 ) -> CatalogMutation {
     let (kind, evicted) = match outcome {
@@ -3744,6 +3835,7 @@ fn catalog_mutation(
     CatalogMutation {
         basin_id: offered_basin.as_raw(),
         new_basin,
+        basin_visits,
         kind,
         evicted,
         incumbent_basin: incumbent_basin.map(BasinId::as_raw),
@@ -3807,6 +3899,15 @@ fn invalidate_discovery_plan(scientific: &mut ScientificState) {
     }
 }
 
+/// Ride arms a discovery plan scores: `CATALOG_RIDE_CANDIDATES`, or four
+/// per discovery replica (at least 16).
+fn ride_candidate_limit(replicas: usize) -> usize {
+    static LIMIT: std::sync::OnceLock<Option<usize>> = std::sync::OnceLock::new();
+    LIMIT
+        .get_or_init(|| crate::env::parsed("CATALOG_RIDE_CANDIDATES"))
+        .unwrap_or_else(|| (4 * replicas).max(16))
+}
+
 fn minimum_information_role(
     scientific: &mut ScientificState,
     query_replica: u32,
@@ -3816,7 +3917,14 @@ fn minimum_information_role(
     ride_cost: f64,
 ) -> Option<(DiscoveryRole, u64)> {
     let model_version = scientific.minimum_information.version();
-    if scientific.discovery_plan_model_version == Some(model_version) {
+    // The model version moves on every visit and offer, so with 48
+    // replicas the plan was rebuilt on nearly every policy request. It is
+    // held for HOLD_REQUESTS like the other book-derived summaries and the
+    // held roles served meanwhile.
+    if scientific.discovery_plan_model_version == Some(model_version)
+        || (scientific.discovery_plan_model_version.is_some()
+            && hold_active(scientific, scientific.discovery_plan_hold))
+    {
         return scientific
             .discovery_roles
             .get(&query_replica)
@@ -3845,7 +3953,13 @@ fn minimum_information_role(
             },
         ));
     }
-    let claimable = scientific.ride_ledger.claimable_arms();
+    // The joint posterior behind the plan is quadratic in the candidate
+    // count and each entry is a kernel over the SOAP feature; every
+    // claimable arm (thousands) made one plan 42 to 78 s under the lock
+    // (phase clock). At most CATALOG_RIDE_CANDIDATES arms (default four
+    // per replica) enter, least attempted and deepest first.
+    let limit = ride_candidate_limit(scientific.discovery_replicas.len());
+    let claimable = scientific.ride_ledger.claimable_arms_ranked(limit);
     let mut ride_actions = Vec::<SearchActionCandidate>::new();
     let mut ride_arms = Vec::<RideArm>::new();
     for (arm, _) in &claimable {
@@ -3905,6 +4019,7 @@ fn minimum_information_role(
     scientific.ride_information_scores = ride_rates;
     scientific.discovery_ride_assignments = ride_assignments;
     scientific.discovery_plan_model_version = Some(model_version);
+    scientific.discovery_plan_hold = Some(scientific.hold_clock);
     scientific
         .discovery_roles
         .get(&query_replica)
@@ -4470,15 +4585,24 @@ fn q_ei_family_entry(scientific: &mut ScientificState, replica: u32) -> Option<(
 }
 
 /// The folded book, recomputed only when the book has changed.
+/// Requests a cached occupancy diagnostic is held for before recomputation.
+const HOLD_REQUESTS: u64 = 128;
+
+fn hold_active(scientific: &ScientificState, at: Option<u64>) -> bool {
+    at.is_some_and(|at| scientific.hold_clock.saturating_sub(at) < HOLD_REQUESTS)
+}
+
 fn sparsified_book(scientific: &mut ScientificState) -> &crate::catalog::OccupancyBookMap {
     let version = scientific.packing.version();
+    let held = hold_active(scientific, scientific.fold_hold);
     let stale = scientific
         .sparsified
         .as_ref()
-        .is_none_or(|(held, _)| *held != version);
+        .is_none_or(|(seen, _)| *seen != version && !held);
     if stale {
         let folded = occupancy_sparsify_packing(&scientific.packing);
         scientific.sparsified = Some((version, folded));
+        scientific.fold_hold = Some(scientific.hold_clock);
     }
     &scientific
         .sparsified
@@ -4516,9 +4640,9 @@ fn packing_census_saturated(scientific: &mut ScientificState) -> bool {
 fn worthwhile_communities(scientific: &mut ScientificState) -> usize {
     let book = scientific.packing.version();
     let funnel = scientific.funnel.version();
+    let held = hold_active(scientific, scientific.fold_hold);
     if let Some((held_book, held_funnel, count)) = scientific.worthwhile
-        && held_book == book
-        && held_funnel == funnel
+        && ((held_book == book && held_funnel == funnel) || held)
     {
         return count;
     }
@@ -4549,7 +4673,23 @@ fn worthwhile_communities(scientific: &mut ScientificState) -> usize {
     count
 }
 
+/// Largest number of sites the funnel model keeps, `CATALOG_FUNNEL_RANK`
+/// (default 512).
+fn funnel_rank() -> usize {
+    static RANK: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
+    *RANK.get_or_init(|| {
+        crate::env::parsed("CATALOG_FUNNEL_RANK")
+            .filter(|rank: &usize| *rank >= 8)
+            .unwrap_or(512)
+    })
+}
+
 fn occupancy_funnel_ei_exhausted(scientific: &mut ScientificState) -> bool {
+    if let Some((at, verdict)) = scientific.ei_hold
+        && hold_active(scientific, Some(at))
+    {
+        return verdict;
+    }
     let sizes = (
         scientific.last_candidate_by_replica.len(),
         scientific.best_candidate_by_replica.len(),
@@ -4559,6 +4699,7 @@ fn occupancy_funnel_ei_exhausted(scientific: &mut ScientificState) -> bool {
         && let Some((held, verdict)) = scientific.ei_verdict
         && held == scientific.funnel.version()
     {
+        scientific.ei_hold = Some((scientific.hold_clock, verdict));
         return verdict;
     }
     scientific.fed_from = Some(sizes);
@@ -4597,15 +4738,25 @@ fn occupancy_funnel_ei_exhausted(scientific: &mut ScientificState) -> bool {
             .funnel
             .observe(ndarray::Array1::from(histogram.clone()).view(), *energy);
     }
+    // Bound the model: every fit is cubic and every prediction quadratic
+    // in the sites held, and the sites are the packing families the book
+    // has named, which grow for the life of the run. Pivoted Cholesky
+    // keeps the incumbent and the most informative of the rest.
+    let rank = funnel_rank();
+    if scientific.funnel.len() > rank {
+        let _ = scientific.funnel.compress(rank);
+    }
     let version = scientific.funnel.version();
     if let Some((held, verdict)) = scientific.ei_verdict
         && held == version
     {
+        scientific.ei_hold = Some((scientific.hold_clock, verdict));
         return verdict;
     }
     let max_ei = scientific.funnel.max_expected_improvement_at_data();
     let verdict = occupancy_ei_exhausted(max_ei, scientific.funnel.len(), scientific.funnel.noise);
     scientific.ei_verdict = Some((version, verdict));
+    scientific.ei_hold = Some((scientific.hold_clock, verdict));
     verdict
 }
 
@@ -4677,24 +4828,41 @@ fn occupancy_seam_floor(
 
 fn occupancy_landfold_from_book(scientific: &mut ScientificState) -> (usize, usize, usize) {
     let version = scientific.packing.version();
-    if let Some((held, split)) = scientific.landfold
-        && held == version
+    // Collect a finished fold first, whatever version asked for it.
+    if let Some((folded_version, slot)) = scientific.landfold_pending.as_ref()
+        && let Some(split) = slot.lock().ok().and_then(|held| *held)
+    {
+        let folded_version = *folded_version;
+        scientific.landfold = Some((folded_version, split));
+        scientific.landfold_pending = None;
+    }
+    let held = hold_active(scientific, scientific.fold_hold);
+    if let Some((seen, split)) = scientific.landfold
+        && (seen == version || held)
     {
         return split;
     }
-    let split = occupancy_landfold_uncached(scientific);
-    scientific.landfold = Some((version, split));
-    split
-}
-
-fn occupancy_landfold_uncached(scientific: &ScientificState) -> (usize, usize, usize) {
-    let occupied = scientific.packing.occupied_histograms();
-    let histograms: Vec<Vec<f64>> = occupied
-        .iter()
-        .map(|(_, histogram)| histogram.clone())
-        .collect();
-    let families: Vec<usize> = occupied.iter().map(|(index, _)| *index).collect();
-    occupancy_landfold_split(&histograms, &families)
+    // Fold the current book off the lock unless one is already folding;
+    // serve the last finished split meanwhile, or the empty split before
+    // the first one lands. Nothing waits on the coordinator for it.
+    if scientific
+        .landfold_pending
+        .as_ref()
+        .is_none_or(|(pending_version, _)| *pending_version != version)
+        && scientific.landfold_pending.is_none()
+    {
+        let book = scientific.packing.clone();
+        let slot = Arc::new(std::sync::Mutex::new(None));
+        let writer = Arc::clone(&slot);
+        rayon::spawn(move || {
+            let map = occupancy_sparsify_packing(&book);
+            if let Ok(mut held) = writer.lock() {
+                *held = Some((map.floor, map.left, map.right));
+            }
+        });
+        scientific.landfold_pending = Some((version, slot));
+    }
+    scientific.landfold.map_or((0, 0, 0), |(_, split)| split)
 }
 
 fn occupancy_ring_from_book(scientific: &ScientificState) -> (usize, usize, usize) {
@@ -4736,20 +4904,53 @@ fn occupancy_ring_from_book(scientific: &ScientificState) -> (usize, usize, usiz
     }
     let mut profiles = Vec::new();
     for (coordinates, _) in best.values() {
-        if let Some(profile) = occupancy_ring_profile(coordinates) {
+        if let Some(profile) = ring_profile_memo(coordinates) {
             profiles.push(profile);
         }
     }
     occupancy_ring_split(&profiles)
 }
 
+/// The Franzblau ring profile of a structure, memoised on its coordinate
+/// bits. The occupancy report asks for the profile of the best structure
+/// of every occupied family on every refresh, and those structures change
+/// rarely; the census itself was 13 percent of the request thread (perf,
+/// 48 replicas).
+fn ring_profile_memo(coordinates: &[f64]) -> Option<(usize, usize, usize)> {
+    const CAPACITY: usize = 256;
+    static MEMO: Mutex<std::collections::VecDeque<(Box<[u64]>, Option<(usize, usize, usize)>)>> =
+        Mutex::new(std::collections::VecDeque::new());
+    let key: Box<[u64]> = coordinates.iter().map(|value| value.to_bits()).collect();
+    if let Ok(memo) = MEMO.lock()
+        && let Some((_, profile)) = memo.iter().find(|(held, _)| *held == key)
+    {
+        return *profile;
+    }
+    let profile = occupancy_ring_profile(coordinates);
+    if let Ok(mut memo) = MEMO.lock() {
+        if memo.len() >= CAPACITY {
+            memo.pop_front();
+        }
+        memo.push_back((key, profile));
+    }
+    profile
+}
+
 fn occupancy_floor(scientific: &mut ScientificState) -> usize {
     if std::env::var("CATALOG_MIN_FAMILIES")
         .ok()
-        .and_then(|value| value.parse().ok())
-        .is_some_and(|count: usize| count >= 1)
+        .and_then(|text| {
+            let parsed: Result<usize, _> = text.parse();
+            parsed.ok()
+        })
+        .is_some_and(|count| count >= 1)
     {
         return occupancy_min_families();
+    }
+    if let Some((at, held)) = scientific.floor_hold
+        && hold_active(scientific, Some(at))
+    {
+        return held;
     }
     let fiedler = occupancy_seam_floor(scientific).0;
     let landfold = occupancy_landfold_from_book(scientific).0;
@@ -4759,7 +4960,9 @@ fn occupancy_floor(scientific: &mut ScientificState) -> usize {
     // ensemble to occupy every packing the book has ever recorded is a floor
     // no run can meet.
     let peeled = sparsified_book(scientific).communities.clamp(1, 2);
-    fiedler.max(landfold).max(peeled)
+    let floor = fiedler.max(landfold).max(peeled);
+    scientific.floor_hold = Some((scientific.hold_clock, floor));
+    floor
 }
 
 fn leftover_census_dwell(scientific: &mut ScientificState) -> bool {
@@ -4784,6 +4987,28 @@ fn leftover_census_dwell(scientific: &mut ScientificState) -> bool {
         scientific.leftover_sat_streak,
     );
     scientific.leftover_dwell
+}
+
+fn refresh_occupancy_diagnostics(scientific: &mut ScientificState) {
+    if hold_active(scientific, scientific.fold_hold) {
+        return;
+    }
+    let _ = occupancy_floor(scientific);
+    let _ = occupancy_funnel_ei_exhausted(scientific);
+    let _ = packing_census_saturated(scientific);
+    report_occupancy_gt_throttled(scientific);
+}
+
+fn report_occupancy_gt_throttled(scientific: &mut ScientificState) {
+    static LAST: Mutex<Option<Instant>> = Mutex::new(None);
+    let Ok(mut last) = LAST.lock() else {
+        return;
+    };
+    if last.is_some_and(|at| at.elapsed() < Duration::from_secs(5)) {
+        return;
+    }
+    *last = Some(Instant::now());
+    report_occupancy_gt(scientific);
 }
 
 fn report_occupancy_gt(scientific: &mut ScientificState) {
@@ -4949,9 +5174,7 @@ fn record_energy(scientific: &mut ScientificState, replica: u32, energy: f64) {
 }
 
 fn hyperband_max_resource() -> u64 {
-    std::env::var("CATALOG_MAX_HOPS")
-        .ok()
-        .and_then(|value| value.parse().ok())
+    crate::env::parsed("CATALOG_MAX_HOPS")
         .filter(|&hops| hops >= crate::catalog::MIN_RESOURCE)
         .unwrap_or(crate::catalog::DEFAULT_MAX_RESOURCE)
 }
@@ -5572,6 +5795,76 @@ fn accepted_with_payload(
         },
         payload,
     })
+}
+
+/// A barrier member's evidence: the visit count of its packing family (or
+/// of its census basin when the structure has no packing histogram) and
+/// its novelty (the packing book's, or the distance to the nearest other
+/// census basin).
+fn member_evidence(
+    scientific: &ScientificState,
+    coordinates: &[f64],
+    descriptor: &[f64],
+    basin_id: BasinId,
+) -> (u64, f64) {
+    let packing = scientific.packing.histogram(coordinates);
+    let basin_visits = packing
+        .as_ref()
+        .and_then(|fp| scientific.packing.family_of(fp))
+        .map_or_else(
+            || {
+                scientific
+                    .census
+                    .entry(basin_id)
+                    .expect("classified census basin exists")
+                    .visits()
+            },
+            |family| scientific.packing.visits(family),
+        );
+    let novelty = packing.as_ref().map_or_else(
+        || nearest_other_census_distance(&scientific.census, basin_id, descriptor),
+        |fp| scientific.packing.novelty(fp),
+    );
+    (basin_visits, novelty)
+}
+
+/// The reply payload after a barrier submission: the epoch's progress
+/// while members are still arriving, or the realised plan once the epoch
+/// is complete. Submit, join and abstain all end here.
+fn population_epoch_payload(
+    scientific: &mut ScientificState,
+    config: &ServerConfig,
+    epoch: u64,
+    outcome: EpochSubmissionOutcome,
+) -> AcceptedPayload {
+    match outcome {
+        EpochSubmissionOutcome::Pending {
+            submitted,
+            required,
+            ..
+        } => AcceptedPayload::PopulationEpoch(PopulationEpochState {
+            epoch,
+            submitted: u32::try_from(submitted)
+                .expect("submission count is bounded by replica count"),
+            required: u32::try_from(required).expect("requirement is bounded by replica count"),
+            plan: None,
+        }),
+        EpochSubmissionOutcome::Ready(plan) => {
+            let participants = u32::try_from(plan.destinations().len())
+                .expect("participants are bounded by replica count");
+            realize_population_plan(scientific, config, epoch, &plan, participants)
+        }
+    }
+}
+
+/// The reply to a request the coordinator will not apply: the commonest
+/// rejection, spelled once.
+fn validation_rejected(state: &CoordinatorState, request: &CatalogRequest) -> CatalogReply {
+    rejected(
+        state,
+        request.event_sequence,
+        ProtocolRejection::ValidationRejected,
+    )
 }
 
 fn rejected(

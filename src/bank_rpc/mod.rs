@@ -4,7 +4,8 @@
 //! bias on unit mean-SOAP packings, and start from the bank. The
 //! server serialises admission so Dcut and the first bank stay one
 //! object. IRA/SOFI remain on the hop; this wire carries known
-//! packings.
+//! packings. The carrier is nng Req/Rep (`host:port` becomes
+//! `tcp://host:port`).
 
 pub mod client;
 pub mod server;

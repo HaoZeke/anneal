@@ -1,10 +1,17 @@
 //! Does an occupancy Leave actually install a packing from the LJ75 ico well?
 //!
-//!     leave_packing_probe [LEAVES] [RELAX_STEPS]
+//!     leave_packing_probe [LEAVES] [RELAX_STEPS] [MODE]
 //!
-//! Three generators are run from the same icosahedral minimum, each `LEAVES`
-//! times, and each result is classified against the two sealed fixtures by
-//! single linkage at [`anneal_core::catalog::PACKING_LINK`]:
+//! `MODE=av` runs leftover sphere and AFIR starts (they quench back to
+//! the icosahedral floor). `MODE=pack` runs one-shot hollow / fill /
+//! surface / shell from the floor. `MODE=walk` twists the shell and
+//! compacts, then walks packing hops from each landing, installing
+//! only a quench that leaves and is at or below the icosahedral floor.
+//!
+//! Without `MODE`, the older generators are run from the same icosahedral
+//! minimum, each `LEAVES` times, and each result is classified against
+//! the two sealed fixtures by single linkage at
+//! [`anneal_core::catalog::PACKING_LINK`]:
 //!
 //! * `cartesian`, the old Leave: a SoftSaddle covering direction placed at
 //!   Cartesian RMSD 0.35, quenched raw.
@@ -25,8 +32,10 @@ use rand::SeedableRng;
 use anneal_core::known_basin;
 use anneal_core::methods::activation::{Activation, activate_from_origin};
 use anneal_core::methods::warm_lbfgs::WarmLbfgs;
+use anneal_core::movekernel::MoveKernel;
 use anneal_core::potentials::{PairKind, PairPotential};
 use ndarray::{Array1, ArrayView1};
+use rand::SeedableRng;
 
 fn load_xyz(text: &str) -> Array1<f64> {
     let coordinates = text
@@ -221,11 +230,11 @@ fn main() {
         ..Tally::default()
     };
 
-    let mut classify = |label: &str,
-                        index: usize,
-                        tally: &mut Tally,
-                        trial: &Array1<f64>,
-                        rung: Option<usize>| {
+    let classify = |label: &str,
+                    index: usize,
+                    tally: &mut Tally,
+                    trial: &Array1<f64>,
+                    rung: Option<usize>| {
         let Some(slice) = trial.as_slice() else {
             return;
         };

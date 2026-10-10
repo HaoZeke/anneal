@@ -1,7 +1,8 @@
 //! A population held apart by an annealed distance, after conformational space
 //! annealing.
 //!
-//! Lee, Lee and Scheraga, arXiv cond-mat/0307690.
+//! Lee, Lee and Lee, Phys. Rev. Lett. 91, 080201 (2003), arXiv
+//! cond-mat/0307690.
 //!
 //! This is the mechanism behind the only published results that solve the hard
 //! Lennard-Jones sizes reliably: ten independent runs finding every known global
@@ -64,7 +65,7 @@ pub struct Bank {
     members: Vec<Member>,
     /// The seeding population, kept unchanged for the whole run.
     ///
-    /// Lee, Lee and Scheraga keep a copy of the first bank and draw
+    /// Lee, Lee and Lee keep a copy of the first bank and draw
     /// perturbation partners from "either the first bank or the bank". It is
     /// not a detail. Without it every member is free to descend, and at 75
     /// points a bank of thirty ended holding structures between -396.28 and
@@ -296,7 +297,7 @@ impl Bank {
 
     /// Raises the cap so a deadlock injection can enlarge both banks.
     ///
-    /// Lee, Lee and Scheraga add fifty random minima to the bank *and*
+    /// Lee, Lee and Lee add fifty random minima to the bank *and*
     /// the first bank after three idle iterations, and reset `Dcut` to
     /// `Dave/2`. The first bank has to grow with the working bank or
     /// the injection is only a working-set refresh.

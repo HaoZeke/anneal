@@ -63,6 +63,8 @@ pub mod adapter;
 /// Cost-augmenting bias operators (well-tempered metadynamics, etc.).
 /// Proposal allocation and the budget-window temperature law.
 pub mod allocate;
+/// Dense minimum-cost bipartite assignment.
+pub mod assignment;
 /// Same-PES atomistic basin and ridge exploration by joint-optimum information.
 pub mod atomistic_hybrid;
 pub mod bias;
@@ -79,14 +81,21 @@ pub mod catalog_policy;
 /// Versioned cooperative catalog protocol.
 #[cfg(feature = "bank-rpc")]
 pub mod catalog_rpc;
+/// nng pub/sub census bus between the replicas of one cooperative run.
+#[cfg(feature = "bank-rpc")]
+pub mod census_bus;
 /// Versioned objective bridge compatibility descriptors.
 pub mod compatibility;
 /// Collective variables from the spectrum of the visited-basin graph.
 pub mod construct;
 /// The cooling-schedule trait: `epoch -> temperature`.
 pub mod contextual;
+/// Continuous-symmetry projections for non-periodic atomic clusters.
+pub mod continuous_symmetry;
 pub mod cool;
 pub mod cooperative_search;
+/// Shared core-class table for cooperative cluster chains.
+pub mod coreclass;
 pub mod corekey;
 pub mod curvature;
 /// Transport for consensus traffic between server brains.
@@ -102,6 +111,8 @@ pub mod diversity;
 /// A posterior over the density of minima, and acceptance by entropy rather
 /// than by energy.
 pub mod dos;
+/// Environment knobs read one way everywhere.
+pub mod env;
 /// Error variants returned by `anneal-core`.
 pub mod error;
 /// Parallel-tempering exchange operator for multi-temperature ensembles.
@@ -109,6 +120,8 @@ pub mod exchange;
 /// featomic SOAP power-spectrum leftover hop.
 #[cfg(feature = "featomic")]
 pub mod featomic_hop;
+/// First-passage mixture model for splitting a budget over independent chains.
+pub mod first_passage;
 /// Energy-floor flicker components and record EI.
 pub mod floors;
 /// Free-energy estimators (Bennett's BAR + descendants).
@@ -116,12 +129,20 @@ pub mod free_energy;
 /// First-derivative interface for HMC-style samplers.
 pub mod funnel_bo;
 pub mod funnel_spectral;
+/// The gradient-enhanced Gaussian process of gpr_optim, over its C API.
+#[cfg(feature = "gpr")]
+pub mod gpr;
 pub mod grad;
 /// Exact basin identity by canonical contact-graph labelling (nauty).
 #[cfg(feature = "graphkey")]
 pub mod graphkey;
+/// Calibrate the model Hessian on a run's own descents.
+pub mod hessian_fit;
 /// Per-epoch run history returned by `run_rs`.
 pub mod history;
+/// nng REQ/REP for [`MinimumHistory`] observe / mark_accepted.
+#[cfg(feature = "history-nng")]
+pub mod history_nng;
 /// Hamiltonian Monte Carlo inside SA (Method B Phase 1).
 pub mod hmc;
 /// Thomson covering of \(S^{d-1}\).
@@ -149,6 +170,9 @@ pub mod methods;
 pub mod minima_db;
 pub mod minimum_information;
 pub mod model_hessian;
+/// Morphology collective variables: Steinhardt bond order, a SOAP projection
+/// and a coordination kernel density estimate, on featomic's descriptors.
+pub mod morphology;
 /// The move-kernel trait: temperature-indexed proposal sampling.
 pub mod movekernel;
 /// Cooperative basin and ridge exploration on one arbitrary-dimensional PES.
@@ -157,8 +181,13 @@ pub mod nd_hybrid;
 pub mod neigh;
 /// Incremental neighbour table shared across the hop.
 pub mod neighbors;
+/// nng carrier for Cap'n catalog and bank sockets.
+#[cfg(feature = "bank-rpc")]
+pub mod nng_rpc;
 /// Noise-aware acceptance (Ball, Branke & Meisel 2018 sequential OSA rule).
 pub mod noise_accept;
+/// Packing mutates: twin a dense plane, or close orbits on a new basin.
+pub mod packing;
 /// The pure-Rust SA driver loop.
 /// Multi-step paths between minima, where one hop cannot cross.
 pub mod path;
@@ -181,6 +210,7 @@ pub mod residual_field;
 pub mod ride_execution;
 /// Shared same-system scheduling evidence for minimum-mode transition searches.
 pub mod ride_ledger;
+pub mod rigid_body;
 /// Deterministic provenance records for engine-backed runs.
 pub mod run_manifest;
 pub mod runner;
@@ -193,15 +223,26 @@ pub mod scaling;
 pub mod screen;
 /// SOAP power spectrum and Cartesian pullback through `∂p/∂R`.
 pub mod soap;
+/// Gradient-enhanced Gaussian process over structures, with a SOAP kernel.
+pub mod soap_gp;
 /// Budgeted perturb--quench source generation for hybrid PES exploration.
 pub mod source_escape;
 /// Source-keyed relaxation-surface rewards exchanged between chains.
 pub mod surface_evidence;
 pub mod spectral;
 pub mod structure;
+pub mod superbasin;
 /// How a leftover chain uses the shared packing catalog.
 pub mod swarm;
+pub mod sym_hessian;
 pub mod symmetrise;
+/// Endpoint of the quenched-energy distribution, by peaks over threshold.
+pub mod tail;
+/// Replica exchange: the bias-aware swap ratio, the non-reversible sweep, and
+/// a ladder placed by the communication barrier the run measures.
+pub mod tempering;
+/// Permutation invariants from a three-body tensor, for basin identity.
+pub mod tensor_id;
 pub mod terminate;
 /// Action-conditioned structural transition evidence.
 pub mod transition_graph;
@@ -221,6 +262,7 @@ pub mod ffi;
 /// pyo3 module entry point exposed as `anneal._core`.
 #[cfg(feature = "ira")]
 pub mod shape;
+pub mod shared_bias;
 
 #[cfg(feature = "python")]
 pub mod python;
@@ -240,20 +282,23 @@ pub use hmc::{
 };
 pub use laws::LawViolation;
 pub use methods::{
-    AmsaResult, ArmStat, BayesianMixingResult, BayesianMixingSampler, DEFAULT_ALPHA, DEFAULT_BETA0,
-    DEFAULT_GAMMA, DEFAULT_STEPS_PER_CONTROL, DEFAULT_TARGET_WALKERS, DmcPopulationResult,
-    GelmanRubin, GleLangevinResult, GlePreconditioner, LaplacePosterior, LocalPolishResult,
-    MultiChainResult, MultiChainSampler, MultiChainState, OptimizationRegime,
-    ParallelTemperingSampler, PilotObservation, PilotPrior, Population, PortfolioPolicy,
-    PortfolioResult, ProblemFeatures, PtChainState, PtResult, Q_V_MAX, Q_V_MIN, QmcPolishResult,
-    RegimeError, ShootDirection, TARGET_ACCEPT_RATE, TpeCategorical, TpeContinuous1d, Walker,
-    amsa_optimize, arm_prior_boost, arm_slice_multiplier, check_accept_path, default_sigma,
-    diffusion_displace, dmc_population_optimize, estimate_gle_omega0, estimate_gle_preconditioner,
-    exact_accept_allowed, fit_laplace, geometric_ladder, gle_langevin_adaptive_sa,
-    gle_langevin_preconditioned_sa, gle_langevin_sa, order_arms, pilot_draws, pilot_draws_qmc,
-    population_control, portfolio_optimize, portfolio_optimize_from, portfolio_optimize_seeded,
-    portfolio_optimize_with_policy, preferred_arm_tail, projected_gradient_polish,
-    qmc_best1bin_scout, qmc_gsa_global_search, qmc_gsa_global_search_from,
+    AmsaResult, ArmStat, BayesianMixingResult, BayesianMixingSampler, BoxEnsembleConfig,
+    BoxEnsembleResult, DEFAULT_ALPHA, DEFAULT_BETA0, DEFAULT_GAMMA, DEFAULT_STEPS_PER_CONTROL,
+    DEFAULT_TARGET_WALKERS, DmcPopulationResult, EnsembleHopResult, GelmanRubin, GleLangevinResult,
+    GlePreconditioner, LaplacePosterior, LocalPolishResult, MultiChainResult, MultiChainSampler,
+    MultiChainState, OptimizationRegime, ParallelTemperingSampler, PilotObservation, PilotPrior,
+    Population, PortfolioEnsembleConfig, PortfolioEnsembleResult, PortfolioPolicy, PortfolioResult,
+    ProblemFeatures, PtChainState, PtResult, Q_V_MAX, Q_V_MIN, QmcPolishResult, RegimeError,
+    ShootDirection, TARGET_ACCEPT_RATE, TpeCategorical, TpeContinuous1d, Walker, amsa_optimize,
+    arm_prior_boost, arm_slice_multiplier, box_ensemble_optimize, check_accept_path, default_sigma,
+    diffusion_displace, dmc_population_optimize, ensemble_hop_optimize, estimate_gle_omega0,
+    estimate_gle_preconditioner, exact_accept_allowed, fit_laplace, geometric_ladder,
+    gle_langevin_adaptive_sa, gle_langevin_preconditioned_sa, gle_langevin_sa, order_arms,
+    pilot_draws, pilot_draws_qmc, population_control, portfolio_ensemble_optimize,
+    portfolio_optimize, portfolio_optimize_from, portfolio_optimize_seeded,
+    portfolio_optimize_with_policy, portfolio_values_ensemble_optimize, preferred_arm_tail,
+    projected_gradient_polish, qmc_best1bin_scout, qmc_gsa_global_search,
+    qmc_gsa_global_search_from,
     qmc_projected_gradient_polish, qmc_trust_region_poll, regime_exploit_prob,
     regime_exploit_width, require_accept_compatible, run_dmc_population, select_regime,
     shifted_qmc_projected_gradient_polish, walker_weight,
@@ -268,5 +313,9 @@ pub use runner::{
     run_rs_variant_start,
 };
 pub use sampler::Sampler;
+pub use tempering::{
+    IndexProcess, Ladder, ReplicaMove, ReplicaTarget, SwapScheme, TARGET_SWAP_ACCEPT,
+    beta_step_for_acceptance, biased_swap_log_ratio, swap_log_ratio, swap_probability,
+};
 pub use variant::SaVariant;
 pub use version::ANNEAL_VERSION;

@@ -34,6 +34,8 @@
 use std::sync::{Arc, Mutex};
 
 use anneal_core::bias::BasinBias;
+use anneal_core::coreclass::{CoreClassTable, CoreVerdict};
+use anneal_core::corekey::motif_class;
 use anneal_core::diversity::DiversityAnnealer;
 use anneal_core::methods::bank::{Admission, Bank};
 use anneal_core::methods::cluster_hopping::{
@@ -41,6 +43,7 @@ use anneal_core::methods::cluster_hopping::{
     MoveLibrary, Outcome, random_cluster, run_with_bias_at_checkpoints,
 };
 use anneal_core::methods::cluster_search::{Encounter, median_encounter};
+use anneal_core::methods::lattice_search::{LatticeSearchConfig, reoccupy};
 use anneal_core::methods::csa_cluster::coordination_histogram_distance;
 use anneal_core::methods::splice::cut_and_splice;
 use anneal_core::methods::two_phase::{
@@ -259,7 +262,7 @@ struct Slot {
     state: Vec<f64>,
     best_energy: f64,
     best_state: Vec<f64>,
-    /// First quenched structure this chain published. Lee, Lee and Scheraga
+    /// First quenched structure this chain published. Lee, Lee and Lee
     /// keep that bank frozen and draw mix partners from it, so a later
     /// collapse of the live population still has something outside the funnel.
     first_energy: f64,
@@ -332,9 +335,29 @@ struct ExchangeConfig {
     /// member it resembles, or the worst member when it resembles none.
     pbh: bool,
     /// `Dcut` starts at this multiple of the first bank's mean pairwise
-    /// distance. Lee, Lee and Scheraga use one half (`PBH_DCUT`, default
+    /// distance. Lee, Lee and Lee use one half (`PBH_DCUT`, default
     /// 0.5). The schedule then carries the cutoff to one fifth of that mean.
     pbh_dcut_scale: f64,
+    /// Whether chains share a table of visited core keys and restart when
+    /// the core they sit in has gone `core_patience` calls without any
+    /// chain improving on it.
+    core_tabu: bool,
+    /// Calls a core is allowed without improvement before a chain in it
+    /// restarts from a fresh random cluster.
+    core_patience: usize,
+    /// Calls a core class is allowed without any chain improving on it
+    /// before chains in it that do not hold its best restart.
+    core_tabu_calls: usize,
+    /// Calls a chain spends in a fresh core before its best there is ranked
+    /// against the trials of other chains in the same core class; below the
+    /// median it continues, above it restarts. Zero disables the trial.
+    core_trial: usize,
+    /// Whether the chain rebuilds its surface from its interior on the
+    /// lattice grown from that interior at every `reoccupy_interval` calls,
+    /// quenches the rebuilt structure and adopts it when it is lower.
+    reoccupy: bool,
+    /// Calls between reoccupation attempts.
+    reoccupy_interval: usize,
 }
 
 /// Ratio of the largest inertia eigenvalue to the smallest.
@@ -724,6 +747,7 @@ fn parse_surfaces(spec: &str) -> Vec<TwoPhase> {
                     cutoff: Cutoff::Fixed(0.0),
                     beta: 0.0,
                     mu: value,
+                    anisotropic: false,
                 },
                 "d" => TwoPhase::diameter(value * unit, beta),
                 "kappa" => TwoPhase::relative(value, beta),
@@ -745,6 +769,7 @@ fn run_chain(
     resume: Option<Array1<f64>>,
     shared_surfaces: Option<SharedSurfaceAllocator>,
     population: Option<Arc<Mutex<Population>>>,
+    cores: Option<Arc<Mutex<CoreClassTable>>>,
 ) -> ChainReport {
     let mut cfg = Config::recommended(n);
     if std::env::var("MOVE").ok().as_deref() == Some("wales") {
@@ -761,7 +786,7 @@ fn run_chain(
     let surface_kind = Surface::from_environment(n);
     let child_surface = surface_kind.clone();
     let mut rng = StdRng::seed_from_u64(seed);
-    let mut exchange_rng = StdRng::seed_from_u64(seed ^ 0x5711_ce);
+    let mut exchange_rng = StdRng::seed_from_u64(seed ^ 0x0057_11ce);
     let start = resume.unwrap_or_else(|| random_cluster(n, 0.7, cfg.min_separation, &mut rng));
     let mut ledger = Ledger::new(budget);
     let mut opt = WarmLbfgs::default();
@@ -862,6 +887,11 @@ fn run_chain(
     );
     let mut tally = ExchangeTally::default();
     let mut next_attempt = exchange.interval;
+    let mut next_reoccupy = exchange.reoccupy_interval;
+    let lattice_cfg = match &surface_kind {
+        Surface::LennardJones => LatticeSearchConfig::lennard_jones(n),
+        Surface::Morse(_, rho) => LatticeSearchConfig::morse(n, *rho),
+    };
     let relax_steps = cfg.relax_steps;
     let temperature = cfg.temperature;
     let min_separation = cfg.min_separation;
@@ -894,6 +924,45 @@ fn run_chain(
                     slot.first_energy = slot.energy;
                 }
             }
+        }
+        if exchange.reoccupy && snapshot.charged() >= next_reoccupy {
+            next_reoccupy = snapshot.charged() + exchange.reoccupy_interval;
+            let mut private = Ledger::new(usize::MAX / 2);
+            let rebuilt = reoccupy(&lattice_cfg, &mut private, snapshot.current_state());
+            let mut external_calls = private.spent();
+            child_opt.forget();
+            let (energy, relaxed, _) = child_opt.minimize(rebuilt.view(), relax_steps, |v| {
+                external_calls += 1;
+                Some(child_surface.energy(v))
+            });
+            tally.attempts += 1;
+            tally.external_calls += external_calls;
+            if energy.is_finite() && energy < snapshot.current_energy() - 1e-6 {
+                tally.adopted += 1;
+                tally.below_current += 1;
+                return CheckpointAction::ExternalAdopt {
+                    state: relaxed,
+                    action: "reoccupy".to_owned(),
+                    external_calls,
+                };
+            }
+            return CheckpointAction::ExternalWork { external_calls };
+        }
+        if let Some(cores) = cores.as_ref() {
+            let class = motif_class(snapshot.current_state()).index();
+            let mut table = cores.lock().expect("core table");
+            let verdict = table.report(chain, class, snapshot.current_energy(), snapshot.charged());
+            if verdict == CoreVerdict::Continue {
+                return CheckpointAction::Continue;
+            }
+            drop(table);
+            tally.adopted += 1;
+            let fresh = random_cluster(n, 0.7, min_separation, &mut exchange_rng);
+            return CheckpointAction::ExternalAdopt {
+                state: fresh,
+                action: "coretabu".to_owned(),
+                external_calls: 0,
+            };
         }
         if let Some(population) = population.as_ref() {
             let mut population = population.lock().expect("population");
@@ -1248,7 +1317,7 @@ fn run_chain(
             .iter()
             .filter(|t| t.to_energy < reference + 1e-4)
             .min_by_key(|t| t.hop)
-            .is_some_and(|t| t.action == "splice" || t.action == "pbh")
+            .is_some_and(|t| t.action == "splice" || t.action == "pbh" || t.action == "reoccupy")
     });
     ChainReport {
         charged: ledger.spent(),
@@ -1268,10 +1337,12 @@ fn main() {
     let mode = args.get(5).cloned().unwrap_or_else(|| "indep".to_owned());
     let seed0: u64 = args.get(6).and_then(|v| v.parse().ok()).unwrap_or(0);
     let enabled = match mode.as_str() {
-        "indep" | "halving" | "shared" | "pbh" => false,
+        "indep" | "halving" | "shared" | "pbh" | "coretabu" => false,
         "splice" => true,
         other => {
-            eprintln!("unknown mode {other:?}: expected indep, splice, halving, shared or pbh");
+            eprintln!(
+                "unknown mode {other:?}: expected indep, splice, halving, shared, pbh or coretabu"
+            );
             std::process::exit(2);
         }
     };
@@ -1303,6 +1374,12 @@ fn main() {
         portfolio_split: env_usize("SURFACES_SPLIT", 0) == 1,
         pbh: mode == "pbh",
         pbh_dcut_scale: env_f64("PBH_DCUT", 0.5),
+        core_tabu: mode == "coretabu",
+        core_patience: env_usize("CORE_PATIENCE", 20_000),
+        core_tabu_calls: env_usize("CORE_TABU", 50_000),
+        core_trial: env_usize("CORE_TRIAL", 0),
+        reoccupy: env_usize("REOCCUPY", 0) == 1,
+        reoccupy_interval: env_usize("REOCCUPY_INTERVAL", 5_000),
     };
     let surface = Surface::from_environment(n);
     let target = surface.reference(n);
@@ -1361,12 +1438,20 @@ fn main() {
         let population = exchange
             .pbh
             .then(|| Arc::new(Mutex::new(Population::new(chains))));
+        let cores = exchange.core_tabu.then(|| {
+            Arc::new(Mutex::new(
+                CoreClassTable::new(exchange.core_patience, exchange.core_trial)
+                    .with_class_tabu(exchange.core_tabu_calls)
+                    .with_visit_charge(exchange.checkpoint),
+            ))
+        });
         let reports: Vec<ChainReport> = std::thread::scope(|scope| {
             let handles: Vec<_> = (0..chains)
                 .map(|chain| {
                     let board = Arc::clone(&board);
                     let shared = shared.clone();
                     let population = population.clone();
+                    let cores = cores.clone();
                     let exchange = exchange.clone();
                     let seed = ensemble
                         .wrapping_mul(0x9E37_79B9)
@@ -1375,7 +1460,7 @@ fn main() {
                     scope.spawn(move || {
                         run_chain(
                             n, budget, seed, chain, &board, exchange, target, None, shared,
-                            population,
+                            population, cores,
                         )
                     })
                 })
@@ -1408,6 +1493,24 @@ fn main() {
             if r.hit_by_splice {
                 splice_hits += 1;
             }
+        }
+        if let Some(cores) = cores.as_ref() {
+            let table = cores.lock().expect("core table");
+            let mut deepest: Vec<(f64, usize)> = table
+                .stats()
+                .map(|(_, stat)| (stat.best, stat.visits))
+                .collect();
+            deepest.sort_by(|a, b| a.0.total_cmp(&b.0));
+            println!(
+                "      coretabu: {} cores seen, {} restarts, deepest cores {:?}",
+                table.class_count(),
+                table.restarts(),
+                deepest
+                    .iter()
+                    .take(5)
+                    .map(|(e, v)| format!("{e:.3}x{v}"))
+                    .collect::<Vec<_>>()
+            );
         }
         if let Some(population) = population.as_ref() {
             let population = population.lock().expect("population");
@@ -1566,7 +1669,7 @@ fn run_halving(
                             scope.spawn(move || {
                                 run_chain(
                                     n, per_chain, seed, chain, &board, exchange, target, resume,
-                                    None, None,
+                                    None, None, None,
                                 )
                             })
                         })

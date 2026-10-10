@@ -1,0 +1,375 @@
+#+TITLE: The quenched-energy sample does not carry a usable floor
+#+OPTIONS: toc:2 num:t
+
+* Status
+
+Branch =feat/tail-endpoint=, commits =969e663= through =5060ae0=, not merged
+and not pushed. =src/tail.rs= carries the construction and its sixteen tests,
+=examples/tail_classifier.rs= the retrospective measurement,
+=Outcome::quenched= and =Config::trace_quenched= the recorder. This note draws
+them into one place. The finding is negative and the negative is the result.
+
+* Abstract
+
+A basin-hopping run pays for one local minimisation per hop and reads a single
+number off each. It keeps the running minimum and discards the rest, which is a
+sample from the density of states of minima in whatever region the chain
+occupies. That sample was put to a question the running minimum cannot answer,
+namely whether the occupied region contains a minimum as deep as the target,
+and the question needs no collective variable, no template and no knowledge of
+the target morphology.
+
+Peaks over threshold on the negated energies gives a generalised Pareto law
+whose shape decides the matter: negative shape means a finite floor at
+=u + sigma/(-xi)=, non-negative means no floor the sample can see. A posterior
+over =(sigma, xi)= by grid quadrature turns that floor into a decision with an
+interval on it.
+
+Measured at 38 points over 96 seeds and 400000 charged evaluations, the
+decision carries no information. The probability that a run which failed
+carries a higher exclusion probability than one which succeeded is 0.43 to 0.56
+with 95 per cent bootstrap intervals spanning 0.5 at every prefix of the
+budget, and the Bayes factor for unequal exclusion rates against one shared
+rate is 0.19 to 0.47, favouring equality by four to five to one. The reason is
+not that the shape comes out non-negative. It is that the generalised Pareto
+approximation has not taken hold anywhere in the range 900 quenched minima
+resolve: the endpoint drifts monotonically deeper as the threshold rises and
+never stabilises, and the moment endpoint the same data imply sits above an
+energy the run had already reached in 543 of 576 threshold fits.
+
+* 1 The construction
+
+** 1.1 Model
+
+Write the quenched energies as =e_1, ..., e_m=, negate them, =y_i = -e_i=, so
+the deepest minimum is the largest =y=. Let =F= be the distribution of =Y= and
+=y_F = sup{y : F(y) < 1}= its upper endpoint. Pickands' theorem, and
+independently Balkema and de Haan's, says =F= lies in the maximum domain of
+attraction of an extreme value law if and only if the conditional excess
+distribution
+
+: F_u(y) = P(Y - u <= y | Y > u)
+
+converges uniformly, as =u -> y_F=, to a generalised Pareto law
+
+: G(y; sigma, xi) = 1 - (1 + xi y / sigma)^(-1/xi),   xi != 0
+: G(y; sigma, 0)  = 1 - exp(-y / sigma)
+
+supported on =y >= 0= for =xi >= 0= and on =0 <= y <= sigma/(-xi)= for =xi < 0=.
+Pickands, /Statistical inference using extreme order statistics/, Ann. Statist.
+3 (1975) 119-131, [[https://doi.org/10.1214/aos/1176343003][doi:10.1214/aos/1176343003]]; Balkema and de Haan, /Residual
+life time at great age/, Ann. Probab. 2 (1974) 792-804,
+[[https://doi.org/10.1214/aop/1176996548][doi:10.1214/aop/1176996548]]. Both DOIs resolve.
+
+With =xi < 0= the fitted law has upper endpoint =theta_Y = u + sigma/(-xi)=,
+which on the energy scale is the lower endpoint
+
+: theta_E = e_u - sigma/(-xi),      e_u = -u,
+
+the deepest minimum the sampled region contains.
+
+** 1.2 Why a posterior
+
+=theta_E= is a ratio of the two parameters and diverges as =xi -> 0-=, so its
+sampling distribution is skewed however large the sample is and a plug-in
+=sigma_hat / (-xi_hat)= inherits none of that skew. Smith, /Maximum likelihood
+estimation in a class of nonregular cases/, Biometrika 72 (1985) 67-90,
+[[https://doi.org/10.1093/biomet/72.1.67][doi:10.1093/biomet/72.1.67]], shows the likelihood theory itself fails: the
+maximum likelihood estimator is asymptotically normal only for =xi > -1/2=, has
+a non-normal limit on =-1 < xi <= -1/2=, and does not exist for =xi <= -1=,
+which is exactly the range where the floor is sharpest. The likelihood remains
+a likelihood throughout; it is the point summary that stops meaning anything.
+
+** 1.3 Prior
+
+In =(log sigma, xi)= coordinates,
+
+: pi(log sigma, xi) propto exp(-xi^2 / (2 tau^2)) . 1[-1 < xi < 2],   tau = 0.5.
+
+Two separate choices. The scale carries =pi(sigma) propto 1/sigma=, flat in
+=log sigma=, the right-Haar prior for a scale parameter and the only one under
+which the endpoint posterior is equivariant: reporting in units of the pair
+well depth or in kJ/mol then gives the same answer rescaled rather than two
+different answers. The shape carries a normal centred at zero, because zero is
+the boundary between a region with a floor and a region without one, so
+centring there commits to neither; =tau = 0.5= puts 95 per cent of the mass on
+=|xi| < 0.98=, covering the range shape estimates are reported in. The lower
+truncation at =-1= is where the likelihood stops being bounded and discards
+prior mass 2.275e-2; the upper truncation discards 3.17e-5 and exists only to
+bound the quadrature box. The prior is proper, so nothing rests on the
+propriety arguments needed for improper reference priors (Northrop and
+Attalides, Statist. Sinica 26 (2016) 721-743, [[https://doi.org/10.5705/ss.2014.034][doi:10.5705/ss.2014.034]]).
+
+=TailPosterior::p_xi_floor= reports posterior mass against the lower
+truncation, so a fit the truncation is driving is visible as such. Over the
+measured runs it is below 1e-13 wherever the shape is identified, and the one
+configuration where it was not, the first recorder, is in Section 3.
+
+** 1.4 Quadrature
+
+The posterior is computed on a grid rather than sampled, so there is no chain
+to diagnose. A coarse 97 by 121 pass locates the box holding everything within
+30 log units of the peak; a refined 161 by 161 pass over that box carries the
+weights. Equal spacing in =(log sigma, xi)= makes the scale prior a constant,
+so the rectangle rule reduces to weights proportional to the exponentiated log
+posterior. Two containment numbers are reported rather than assumed:
+=box_leak=, the coarse mass outside the refined box, measured below 1.3e-13 on
+the campaign fits, and a grid-doubling test asserting the reported quantiles
+move less than 5e-3 between 81 and 321 nodes per axis.
+
+* 2 Tests against closed forms
+
+Sixteen tests, ten against closed forms.
+
+| Identity                                          | Test                                    |
+|---------------------------------------------------+-----------------------------------------|
+| density integrates to the cdf on a bounded window | =gpd_is_a_distribution=, 2e-5           |
+| quantile inverts the cdf                          | same, 1e-10                             |
+| endpoint =sigma/(-xi)=, mean =sigma/(1-xi)=       | =gpd_closed_forms=, 1e-12               |
+| =sigma_1 = sigma_0 + xi (u_1 - u_0)=              | =threshold_invariance_of_the_endpoint=  |
+| endpoint invariant under threshold raise          | same, 1e-12                             |
+| conditional excess law equals the raised law      | same, 1e-12                             |
+| =xi = 0= posterior is InvGamma(k, S)              | =exponential_slice_is_inverse_gamma=    |
+| =xi = -1= posterior is Pareto(y_max, k)           | =uniform_slice_gives_a_pareto_endpoint= |
+| mean excess slope is =xi / (1 - xi)=              | =mean_excess_slope_returns_the_shape=   |
+| moment endpoint recovers the true one             | same, 6 per cent                        |
+
+The inverse-gamma test pins the quadrature mean to 1e-6 relative and the
+variance to 1e-4 relative against =S/(k-1)= and =S^2/((k-1)^2 (k-2))=. The
+Pareto test pins the endpoint quantiles to 1e-4 relative against
+=y_max (1-q)^(-1/k)=, at four quantiles.
+
+Three further tests exercise the whole construction rather than a piece.
+=endpoint_intervals_cover= draws 120 synthetic samples of 400 from
+GPD(1, -0.3) and requires the nominal 90 per cent credible interval to cover
+the true endpoint between 0.80 and 0.98, three binomial standard errors either
+side. =refuses_an_endpoint_when_there_is_none= is the false-positive control:
+2000 exponential draws must return =P(xi >= 0) > 0.2= and a shape mean inside
+0.1 of zero, so the machinery cannot manufacture a floor.
+=endpoint_never_sits_above_the_deepest_sample= walks every quadrature node and
+requires the support constraint to hold at each.
+
+* 3 What the recorder had to be
+
+The first recorder kept 342 rows from a run of 12000 hops and its fits piled
+against the shape truncation at =xi= near =-0.97=. Two separate defects, both
+worth stating because both are invisible in a summary log.
+
+The screen truncates 97 per cent of trials at a 25-step partial descent, and a
+partial energy lands wherever the descent stopped, so it is a draw from the
+stopping rule rather than from the density of states. No threshold excludes
+such a value. Gating the recorder on the full-relaxation branch leaves 363
+minima per run at 38 points, and =SCREEN_MARGIN= above the energy range turns
+the screen off for a comparator that pays 254 charged evaluations per hop
+against 33 and returns 1587.
+
+The second defect is ties. A chain in a funnel re-quenches to the same
+structure repeatedly: 1589 relaxations return 934 distinct energies and the
+deepest value of a run arrives six to nineteen times. A tie at the sample
+maximum is what a generalised Pareto fit reads as a hard cutoff, and it drove
+the shape to the prior floor with the endpoint pinned at the value already
+found. Deduplicating to distinct minima, two agreeing to 1e-6 being the same
+minimum where the deepest four at 38 points are separated by 0.68 and more, is
+the correct sample: the question is a property of the set of minima the region
+contains, not of how often the chain visits each.
+
+The gate itself is a selection on energy, since the screen relaxes only trials
+whose partial energy sits within the margin of the incumbent. That removes deep
+minima reached from poor starts and pushes a fitted endpoint upward, which is
+the direction that would make the classifier look better. Both arms were
+therefore measured and both are reported.
+
+* 4 Threshold stability
+
+Under the model the endpoint does not depend on the threshold, by the identity
+of Section 2. So the endpoint posterior computed along a ladder must agree
+wherever the approximation has taken hold and disagree below it, and that is
+the diagnostic, in place of a percentile picked by convention. The rule
+=select_threshold= takes the lowest rung whose endpoint posterior overlaps
+every higher rung by at least 0.5, the top rung being the least biased and most
+diffuse; the whole ladder is reported so the rule can be second-guessed.
+
+One failed run at 400000 charged evaluations, deepest minimum =-173.2524=:
+
+| q    |        u |   k |   mexc |   E[xi] |  endpoint |     97.5% | P(unb) |
+|------+----------+-----+--------+---------+-----------+-----------+--------|
+| 0.50 | -168.137 | 453 | 1.3659 | -0.3118 | -173.7647 | -173.3782 |  0.000 |
+| 0.35 | -168.875 | 317 | 1.0616 | -0.2300 | -174.4731 | -173.5726 |  0.000 |
+| 0.25 | -169.312 | 227 | 0.9663 | -0.2179 | -174.6119 | -173.5815 |  0.001 |
+| 0.15 | -169.975 | 136 | 0.7709 | -0.1354 | -176.1598 | -173.7991 |  0.055 |
+| 0.10 | -170.316 |  91 | 0.7314 | -0.1385 | -176.0388 | -173.6804 |  0.089 |
+| 0.06 | -170.827 |  54 | 0.5611 | +0.0755 |      -inf | -174.5019 |  0.653 |
+
+The endpoint drifts monotonically deeper by 2.4 energy units across the ladder
+and then dissolves; no lower rung overlaps the top rung by more than 0.44. A
+second failed run drifts from =-173.36= to =-180.43=, a third from =-173.60= to
+=-179.83=. This is not a threshold that has been chosen badly. It is a sequence
+with no stable region to choose from.
+
+* 5 The model refuted by the data it was fitted to
+
+The mean excess is the model-free discriminant and needs no prior, no
+quadrature and no fit. For generalised Pareto excesses with =xi < 1=,
+
+: E[Y - u | Y > u] = (sigma + xi (u - u_0)) / (1 - xi),
+
+linear in the threshold with slope =xi / (1 - xi)=. Least squares over the
+ladder gives an implied shape of median =-0.4197= over the 62 failed runs, 5th
+to 95th percentile =[-0.5426, -0.3294]=, and =-0.4676= over the 34 solved,
+=[-0.5923, -0.4016]=. Clearly negative, and clearly at odds with the fitted
+=E[xi]= of the table above, which runs from =-0.31= at the deepest threshold to
+=+0.08= at the shallowest tail.
+
+Inverting the same first moment for the scale gives the moment endpoint
+
+: theta_E = u - m (1 - xi) / (-xi),
+
+a floor the model asserts, carrying no support constraint because no likelihood
+was involved. In 543 of 576 threshold fits that floor sits above an energy the
+run had already reached, the worst by 1.9984 in energy units against a
+funnel-to-funnel gap of 0.68. The model is refuted at the thresholds where it
+has the most data.
+
+The likelihood fit hides this because its support constraint forbids an
+endpoint above an observed minimum. The 97.5 per cent quantile of the endpoint
+posterior sits a median 0.3470 below the deepest sampled energy, 5th to 95th
+percentile =[0.0821, 2.9902]=. The posterior is pinned by the constraint rather
+than located by the tail's shape, which is why the decision statistic tracks
+the running minimum: the thing it was meant to improve on.
+
+* 6 The classifier
+
+The falsifiable claim was: for runs that fail, does the endpoint posterior
+exclude the reference =-173.928427=, and for runs that succeed, does it include
+it.
+
+The prefix is what makes this a prediction rather than arithmetic. A run that
+succeeds has the reference in its own sample, and the support constraint then
+forces the endpoint at or below it, so a call on the whole trace of a
+successful run is a tautology. Successful runs contribute only at prefixes
+ending before their first encounter, which is why the solved column thins from
+30 to 0 as the prefix grows.
+
+96 seeds, LJ38, 400000 charged evaluations, screen off, 34 solved and 62
+failed, distinct minima, decision bar =P(endpoint above reference) > 0.95=.
+
+| prefix | excl given failed |     95% credible | incl given solved |     95% credible |
+|--------+-------------------+------------------+-------------------+------------------|
+|   0.20 | 21/62 = 0.341     | [0.230,  0.462]  | 18/30 = 0.597     | [0.422,  0.760]  |
+|   0.30 | 15/62 = 0.246     | [0.149,  0.359]  | 20/28 = 0.707     | [0.532,  0.855]  |
+|   0.40 | 13/62 = 0.214     | [0.123,  0.323]  | 21/26 = 0.796     | [0.629,  0.923]  |
+|   0.50 |  7/62 = 0.119     | [0.052,  0.209]  | 16/19 = 0.825     | [0.636,  0.953]  |
+|   0.60 |  7/62 = 0.119     | [0.052,  0.209]  | 10/11 = 0.875     | [0.647,  0.990]  |
+|   0.80 |  7/62 = 0.119     | [0.052,  0.209]  |   6/6 = 0.929     | [0.670,  1.000]  |
+
+Jeffreys Beta(1/2, 1/2) posteriors, the convention of
+=rewrite_2026/scripts/posterior.py=. The specificity column looks strong and
+means nothing on its own: a rule that never excludes anything scores 1.0 there.
+The pair has to be read together, and the pairing is what the next two tables
+do.
+
+** 6.1 Discrimination, and the control it has to beat
+
+A single decision bar hides the shape of the statistic, so the whole ordering
+is reported: the probability that a run which failed carries a higher exclusion
+probability than one which succeeded, over all pairs, ties at a half, chance
+0.5. The interval is a bootstrap over runs rather than a Beta posterior on a
+concordance count, because the pairs are not independent and a Beta interval
+would be several times too narrow.
+
+The control is the same quantity for the deepest energy found so far. The
+endpoint posterior is anchored just below that value by the support constraint
+and would look informative merely by restating it, so a construction that does
+not beat this control has bought nothing.
+
+| prefix | n_fail | n_solve | endpoint |   95% bootstrap | best-so-far |   95% bootstrap |
+|--------+--------+---------+----------+-----------------+-------------+-----------------|
+|   0.20 |     62 |      30 |    0.430 | [0.312,  0.552] |       0.573 | [0.441,  0.700] |
+|   0.30 |     62 |      28 |    0.472 | [0.345,  0.597] |       0.528 | [0.396,  0.656] |
+|   0.40 |     62 |      26 |    0.516 | [0.385,  0.648] |       0.457 | [0.340,  0.582] |
+|   0.50 |     62 |      19 |    0.563 | [0.412,  0.717] |       0.475 | [0.340,  0.615] |
+|   0.60 |     62 |      11 |    0.494 | [0.295,  0.700] |       0.435 | [0.267,  0.602] |
+|   0.80 |     62 |       6 |    0.548 | [0.261,  0.857] |       0.461 | [0.230,  0.708] |
+
+Every interval spans 0.5. The endpoint posterior does not discriminate, and
+neither does the running minimum, so there is no prefix at which the call
+becomes reliable.
+
+The exclusion rate against the decision bar, swept over five bars, says the
+same thing without the ranking summary. At prefix 0.40 the rate given failure
+runs 0.66, 0.32, 0.23, 0.21, 0.08 across bars 0.50 to 0.99, and given success
+0.62, 0.35, 0.27, 0.19, 0.12. The two curves lie on top of each other. No bar
+separates them.
+
+** 6.2 Posteriors and Bayes factors
+
+Through =posterior.py=, treatment = failed runs, control = solved runs, both
+rates being exclusion rates:
+
+| arm            | treat | ctrl  | P(t>c) |   diff |    95% credible |   BF |
+|----------------+-------+-------+--------+--------+-----------------+------|
+| excl-at-0.20   | 21/62 | 12/30 | 0.2811 | -0.062 | [-0.270, 0.140] | 0.21 |
+| excl-at-0.30   | 15/62 |  8/28 | 0.3265 | -0.047 | [-0.248, 0.140] | 0.20 |
+| excl-at-0.40   | 13/62 |  5/26 | 0.5628 | +0.010 | [-0.181, 0.180] | 0.19 |
+| excl-at-0.50   |  7/62 |  3/19 | 0.2874 | -0.056 | [-0.258, 0.103] | 0.23 |
+| excl-at-0.60   |  7/62 |  1/11 | 0.5433 | -0.006 | [-0.245, 0.150] | 0.25 |
+| excl-at-0.80   |  7/62 |  0/6  | 0.7743 | +0.048 | [-0.219, 0.184] | 0.47 |
+
+Every Bayes factor is below one and four of the six are below 0.25, so the data
+favour one shared exclusion rate over two by four to five to one. This is
+evidence of no difference rather than an absence of evidence of one, which is
+the distinction the p-value the campaign no longer reports cannot draw.
+
+** 6.3 The production configuration
+
+With the screen on, 363 relaxations per run leave too few distinct minima for
+the ladder: only 15 whole-trace fits and 9 usable mean-excess slopes survive
+the sample-size gate across 96 seeds. What survives agrees. Implied shape
+median =-0.3086= failed against =-0.2284= solved; the moment endpoint sits
+above an energy already reached in 22 of 47 threshold fits; the discrimination
+runs 0.25 to 0.68 with every bootstrap interval spanning 0.5. The unscreened
+arm is the evidence and this is the consistency check.
+
+* 7 Verdict
+
+The claim is false as stated and the reason is not the one offered as the
+likely failure.
+
+The shape does not come out non-negative. Three independent routes put it near
+=-0.4=: the mean-excess slope over the whole trace, =-0.42= for failed runs and
+=-0.47= for solved; the fitted posterior at the lowest threshold, =-0.31= to
+=-0.43=; and the direction of the drift. The energies do behave, over the bulk,
+like a distribution with a floor.
+
+The generalised Pareto approximation has not taken hold at these sample sizes.
+The endpoint drifts monotonically deeper by 2.4 energy units across the
+threshold ladder and dissolves into unbounded at the top rung; no lower rung
+overlaps the top by more than 0.44; and the moment endpoint the same data imply
+sits above a minimum the run already found in 94 per cent of threshold fits.
+Nine hundred distinct minima per run at 38 points is not enough to reach the
+regime the limit theorem describes, and the campaign's largest samples are of
+that order.
+
+What the fitted posterior reports instead is the support constraint. Its 97.5
+per cent quantile sits a median 0.347 below the deepest sampled energy, so the
+decision statistic is a re-expression of the running minimum, and the running
+minimum at half budget does not separate the two funnels either: 0.475 by the
+same ranking measure, interval =[0.340, 0.615]=.
+
+The construction is worth keeping. It is tested against ten closed forms, it
+reports its own containment error, its shape-truncation mass and its
+threshold-stability diagnostic, and every one of those diagnostics fired
+correctly on data where the model does not hold. That is what a diagnostic is
+for. The two defects it exposed in the recorder, partial-descent energies and
+funnel-revisit ties, are both properties of how a basin-hopping run reads its
+own landscape, and both would have silently produced a confident wrong answer.
+
+What it does not license is a stopping rule. Nothing here should be built into
+the search.
+
+* 8 Placement
+
+=src/tail.rs=, alongside =src/terminate.rs=, which is the other module that
+decides when to stop. The recorder belongs where it is, on
+=cluster_hopping::Config= and =Outcome=, because the trace has to be a prefix
+of the run to be a prediction, and only the driver can make it one.

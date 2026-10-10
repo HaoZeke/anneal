@@ -17,12 +17,15 @@ pub mod activation;
 #[cfg(feature = "graphkey")]
 pub mod archive_search;
 pub mod bank;
+/// Box search split on gradient (hop-and-quench vs values-only portfolio).
+pub mod box_hopping;
 /// Basin hopping over quenched minima with a basin-keyed bias.
 pub mod cluster_hopping;
 pub mod cluster_search;
 /// Population resampled by estimated probability of improvement.
 pub mod committor_pop;
 pub mod csa_cluster;
+pub mod ensemble;
 /// Archive-ratcheted exploration of the minima network.
 #[cfg(feature = "graphkey")]
 pub mod ffs;
@@ -30,6 +33,10 @@ pub mod ffs;
 pub mod floor_exit;
 /// Spectral referee over the explored landscape's transition graph.
 pub mod landscape_graph;
+/// Lattice-searching chains pooling their funnel bottoms in one bank.
+pub mod lattice_ensemble;
+/// Dynamic lattice search with a counted quench, for Lennard-Jones clusters.
+pub mod lattice_search;
 pub mod minima_hopping;
 /// Nested search: population under a descending energy ceiling.
 pub mod nested;
@@ -45,7 +52,11 @@ pub mod amsa;
 pub mod bayesian_mixing;
 pub mod bayesian_pilot;
 pub mod bfwt;
+/// Resumable box-constrained CMA-ES with BIPOP restart planning.
+pub mod cma_es;
 pub mod dmc_population;
+/// Resumable projected BFGS on finite-difference gradients.
+pub mod fd_bfgs;
 /// Target-free Feynman--Kac reconfiguration for cooperative search chains.
 pub mod feynman_kac;
 pub mod gle_langevin;
@@ -76,6 +87,13 @@ pub use bfwt::{
     BfwtMode, BfwtResult, EULER_E, THETA_STAR as BFWT_THETA_STAR, bfwt_optimize,
     budget_feasible_temp, t_des, t_hi, t_lo, window_nonempty,
 };
+pub use box_hopping::{
+    BoxCoverageConfig, BoxEnsembleConfig, BoxEnsembleResult, BoxEscape, CoverageDecisionStats,
+    CoverageStats, EnsembleHopResult, GleEscapeConfig, box_ensemble_optimize,
+    box_ensemble_optimize_with_coverage, box_values_ensemble_optimize,
+    box_values_ensemble_optimize_with_coverage, ensemble_hop_optimize,
+    ensemble_hop_optimize_with_config,
+};
 pub use dmc_population::{
     DEFAULT_BETA0, DEFAULT_STEPS_PER_CONTROL, DEFAULT_TARGET_WALKERS, DmcPopulationResult,
     Population, Walker, default_sigma, diffusion_displace, dmc_population_optimize,
@@ -97,8 +115,9 @@ pub use local_polish::{
 pub use mcmc_sa::{GelmanRubin, MultiChainResult, MultiChainSampler, MultiChainState};
 pub use parallel_tempering::{ParallelTemperingSampler, PtChainState, PtResult, geometric_ladder};
 pub use portfolio::{
-    ArmStat, PortfolioPolicy, PortfolioResult, portfolio_optimize, portfolio_optimize_from,
-    portfolio_optimize_seeded, portfolio_optimize_with_policy,
+    ArmStat, PortfolioEnsembleConfig, PortfolioEnsembleResult, PortfolioPolicy, PortfolioResult,
+    portfolio_ensemble_optimize, portfolio_optimize, portfolio_optimize_from,
+    portfolio_optimize_seeded, portfolio_optimize_with_policy, portfolio_values_ensemble_optimize,
 };
 pub use regime::{
     OptimizationRegime, ProblemFeatures, RegimeError, arm_prior_boost, arm_slice_multiplier,

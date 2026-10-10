@@ -32,7 +32,7 @@ allowed (three decrements is the minimum to fit a rate and a residual);
 beyond the fitted uncertainty (src/quench.rs:115-123).
 
 Feeds/consumes: wired into the driver's =adaptive_screen= config flag
-(src/methods/cluster_hopping/config.rs:554) and the staged/screened
+(src/methods/cluster_hopping/config.rs:640) and the staged/screened
 relaxation logic inside =run_with_gradient= in
 src/methods/cluster_hopping.rs. Complementary to, and separately switched
 from, the Bayesian screen below.
@@ -58,10 +58,10 @@ is full relax steps; for the measured hop (=S=25=, =R=200=) this is
 =7/15= (src/screen.rs:38-45). Ridge prior precision =1e-3 * I=,
 inverse-gamma =a0 = b0 = 1e-3= (src/screen.rs:97-99). Config-side knobs:
 =bayes_screen=, =bayes_exploration=, =bayes_threshold=, =bayes_warmup=
-(src/methods/cluster_hopping/config.rs:275, 377-383).
+(src/methods/cluster_hopping/config.rs:315, 454-460).
 =Config::derived= sets =bayes_threshold= from
 =cost_asymmetric_threshold(screen_steps, relax_steps)=
-(src/methods/cluster_hopping/config.rs:710-717).
+(src/methods/cluster_hopping/config.rs:824-831).
 
 Feeds/consumes: gates whether a trial proceeds to full relaxation inside
 the hop loop; independent of, and switchable alongside, the quench
@@ -75,12 +75,12 @@ a deep minimum roughly nineteen proposals in twenty return, so most of
 the budget otherwise buys relaxations into the basin already occupied.
 
 Key types and functions: config flags =return_screen=, =return_polish=,
-=return_polish_after= (src/methods/cluster_hopping/config.rs:459-479).
+=return_polish_after= (src/methods/cluster_hopping/config.rs:545-565).
 
 Constants and defaults: measured separation on a shape distance after a
 partial relaxation, returns vs. escapes: 0.160 vs. 1.846, 97% of pairs
-ordered correctly at thirty iterations (config.rs:452-458). On by
-default in =Config::recommended= (src/methods/cluster_hopping/config.rs:674).
+ordered correctly at thirty iterations (config.rs:547-549). On by
+default in =Config::recommended= (src/methods/cluster_hopping/config.rs:768).
 
 Feeds/consumes: complements the Bayesian screen; both exist to spend
 charged evaluations only where they are likely to pay.
@@ -91,10 +91,10 @@ What it is: before the full screening relaxation, settles only the
 moved atoms (one to three, for the measured-productive moves) in their
 frozen environment. A k-atom settle costs a fraction of the full
 =n(n-1)/2= pair evaluation, charged fractionally through
-=Ledger::charge_frac= (src/methods/cluster_hopping.rs:289).
+=Ledger::charge_frac= (src/methods/cluster_hopping.rs:341).
 
 Key types and functions: config flags =staged_quench=, =settle_iters=
-(src/methods/cluster_hopping/config.rs:349-351).
+(src/methods/cluster_hopping/config.rs:426-428).
 
 Feeds/consumes: cheapens the first stage the screening quench predictor
 and Bayesian screen both act on.
@@ -151,7 +151,7 @@ Constants and defaults: =LennardJonesPreset= and =MolecularPreset=
 coefficients (e.g. =MERGE_RADIUS = 0.7=, =TEMPERATURE = 0.8=,
 =BIAS_HEIGHT = 0.25=, =SOAP_RMSD = 0.35=, =SOAP_CUTOFF = 3.5=,
 =MIN_SEPARATION = 0.85=) multiplied by declared length/energy scales.
-=Config::recommended= (config.rs:661) selects =MoveLibrary::LeanBurst=
+=Config::recommended= (config.rs:755) selects =MoveLibrary::LeanBurst=
 with the SOAP arm and Thompson allocation over the arms.
 
 Feeds/consumes: selected per-config by =MoveLibrary::kernels=; chosen
@@ -180,7 +180,7 @@ permutation/translation/rotation-invariant fingerprint for point sets.
 Constants and defaults: deposit rule
 =w_k = w_0 * exp(-V_{k-1}(s_k) / ((gamma - 1) * T))=; config knobs
 =bias_height=, =bias_gamma=, =merge_radius=, =adaptive_height=,
-=height_revisits= (config.rs:75-94, 508-510). Measured motivation: at 38
+=height_revisits= (config.rs:75-94, 599-601). Measured motivation: at 38
 points the ico/decahedral fourth Steinhardt parameter separates by 0.19,
 at 75 points by only 0.023 (narrower than a sensible deposition width),
 which motivates keying on identity instead (src/bias.rs:271-291).
@@ -213,44 +213,59 @@ one-standard-deviation well (src/dos.rs:993); tempering set by
 =(gamma - 1) T = sigma= and =w0 = sigma / FILL_DEPOSITS=, so no scale is
 system-specific. Config knobs: =flat_histogram=, =flat_sweep=,
 =flat_quantile=, =statistical_temperature=, =energy_bias=
-(config.rs:284-306). Measured: at 38 points, flat-over-visited-range
+(config.rs:321-388). Measured: at 38 points, flat-over-visited-range
 solved 3/24 seeds vs. 15/24 for plain Metropolis (src/dos.rs:594-616);
 per-basin bias alone left 12 of 17 failing seeds stuck at exactly the
 same icosahedral-funnel floor energy (src/dos.rs:947-956).
 
 Feeds/consumes: an alternative/complementary acceptance and deposit
 target to =BasinBias=, wired into the same hop loop
-(src/methods/cluster_hopping.rs:1958-2050 region shows the deposit and
-sweep-refresh logic inline).
+(src/methods/cluster_hopping.rs:2808-2913 region shows the deposit and
+sweep-refresh logic inline). On a replica ladder under
+=statistical_temperature= only the rungs at ratio one feed
+=DensityOfStates=, the coldest rung alone unless the ladder is flat,
+and with =flat_histogram= on as well the flat-histogram window and its
+sweeps come from that rung alone too: a hotter rung stands with another
+weight than the one the estimator fits, and its counts would bias the
+estimate (measured on LJ13, they heated every rung). The cost is
+evidence. On a ladder of R rungs taking turns the density of states
+records one hop in R, so the estimate learns about R times slower and
+first takes over after about R times =flat_sweep= hops: at hop 750
+rather than 400 on two rungs at the default sweep. The energy bias is
+one function every rung reads over its own temperature; its tempering
+factor and its deposits read the temperature the coldest rung would hop
+at from the state it holds, so neither depends on which rung fills the
+sample or deposits, and =(gamma - 1) T = sigma= holds at the
+temperature the sample was filled at.
 
 ** Stall escapes
 
 What it is: a family of mechanisms triggered only when the chain has
 stopped improving, each answering a different way of being stuck.
 
-- Soft-mode climb (=escape_on_stall=, config.rs:156): Lanczos
+- Soft-mode climb (=escape_on_stall=, config.rs:196): Lanczos
   soft-mode estimate, then climbs past the saddle with feedback
   overshoot. Escalates over =minima_hopping='s always-on scaled move.
   Costs ~637 charged evaluations vs. ~30 for a plain hop; run only on
-  stall it costs a few percent of budget (config.rs:147-155).
-- Trail-on-stall (=trail_on_stall=, config.rs:165): re-enters the
+  stall it costs a few percent of budget (config.rs:187-195).
+- Trail-on-stall (=trail_on_stall=, config.rs:205): re-enters the
   basin's *entry point* (the accepted trial partway down from the
   ridge) with an outward push, cheaper than re-climbing.
-- Tabu quarantine (=tabu_on_stall=, config.rs:403): outright rejects
+- Tabu quarantine (=tabu_on_stall=, config.rs:480): outright rejects
   states within the merge radius of a quarantined structure,
   replacing a soft well-tempered penalty that measurably failed to
-  outrun the entropic lockout (config.rs:384-402).
-- Restart-on-stall (=restart_on_stall=, config.rs:420): restarts the
+  outrun the entropic lockout (config.rs:461-479).
+- Restart-on-stall (=restart_on_stall=, config.rs:497): restarts the
   walker from a fresh random configuration but *keeps the bias*, so
   the landscape memory (not the walker) survives.
-- Path-on-stall (=path_on_stall=, config.rs:487; src/path.rs):
+- Path-on-stall (=path_on_stall=, config.rs:573; src/path.rs):
   =transverse_path= (src/path.rs:110) relaxes images perpendicular to
   the path tangent between the current structure and an archive
   member, so the corridor between funnels is sampled instead of
   jumped; =interpolate_path= (src/path.rs:188) relaxes interpolated
   images; =StallDetector= (src/path.rs:246) decides when hopping has
   stalled enough to justify the expense.
-- Symmetrise-on-stall (=symmetrise_on_stall=, config.rs:219;
+- Symmetrise-on-stall (=symmetrise_on_stall=, config.rs:259;
   src/symmetrise.rs): =detect= (src/symmetrise.rs:202) finds the best
   approximate rotational symmetry over axes derived from the inertia
   tensor and centroid-to-point/pair-midpoint directions;
@@ -258,7 +273,7 @@ stopped improving, each answering a different way of being stuck.
   orbit; withheld when the structure is already icosahedrally
   dominated (=ih_dominated=, src/soap.rs:1088), so the mechanism never
   invents a packing the observed cloud does not have.
-- Funnel tracking (=track_funnels=, config.rs:204; src/funnel_spectral.rs):
+- Funnel tracking (=track_funnels=, config.rs:244; src/funnel_spectral.rs):
   builds a transition graph on accepted hops keyed by basin identity;
   =Partition= (src/funnel_spectral.rs:43) and =FunnelSpectrum=
   (src/funnel_spectral.rs:85) compute the Fiedler vector of the
@@ -267,7 +282,7 @@ stopped improving, each answering a different way of being stuck.
 
 Constants and defaults: escape trigger is
 =escape_stall_factor= times the longest quiet stretch already survived,
-not a fixed patience (config.rs:166-182, measured: fixed patience 400
+not a fixed patience (config.rs:206-222, measured: fixed patience 400
 scored 2/8 seeds vs. 9/16 without it). =STALL_LEAVE=-style thresholds
 recur elsewhere in the crate at value 8 (see
 [[file:catalog.org::*Catalog policy][catalog policy]] and [[file:catalog.org::*Cooperative wells and swarm role][swarm role]]).
@@ -291,9 +306,9 @@ Key types and functions: =StepCalibrator= (src/calibrate.rs:34);
 
 Constants and defaults: config knobs =calibrate_radius=,
 =calibrate_quantile=, =calibrate_warmup=, =diversity_floor=
-(config.rs:428-432, 499-507). Measured: annealing 0.7 down to 0.07 took
+(config.rs:505-509, 585-593). Measured: annealing 0.7 down to 0.07 took
 a run from 250 basins at 25 revisits to 4423 basins at 2.6 revisits, and
-the best found from -396.282 to -394.629 (config.rs:503-506).
+the best found from -396.282 to -394.629 (config.rs:589-592).
 
 Feeds/consumes: sets =merge_radius= consumed by =BasinBias= and by the
 [[file:catalog.org::*Population methods][CSA bank]]'s admission threshold.
@@ -337,7 +352,7 @@ Feeds/consumes: consumes =crate::curvature::curvature_features= for
 the Lanczos mode and shares the perpendicular-projection convention
 with =crate::path= (activation.rs:27-30); called from
 =cluster_hopping='s soft-mode-climb stall response
-(cluster_hopping.rs:40, 2475-2478), documented as a black-box call
+(cluster_hopping.rs:40, 3353-3362), documented as a black-box call
 site under [[file:catalog.org::*Stall escapes][stall escapes]] above
 ("Soft-mode climb ... Escalates over =minima_hopping='s always-on
 scaled move"); this section documents the climb mechanism itself.
@@ -393,10 +408,11 @@ prices itself out of the budget is not escalation" (minima_hopping.rs:84-88).
 
 Feeds/consumes: constructed and driven by
 =cluster_hopping::run_with_gradient= (=EscapeFeedback::new= at
-cluster_hopping.rs:1032, =feedback.observe= at
-1169/1861/1869/2497, =feedback.escape()= scaling the library move at
-1344-1348 and 2465, =feedback.accept= gating uphill trials at 1870),
-documented as a black-box call site under
+cluster_hopping.rs:1351, =feedback.observe= at
+1801/1853/2638/2644/3381, =feedback.escape()= scaling the library move
+at 2037-2041 and the soft-mode climb's overshoot at 3348-3352,
+=feedback.accept= gating uphill trials at 2645), documented as a
+black-box call site under
 [[file:catalog.org::*Stall escapes][stall escapes]] above; this
 section documents the feedback mechanism itself.
 
@@ -440,12 +456,15 @@ which the law reports as escape-forced rather than hiding.
 Key types and functions: =BudgetWindowTemperature= (src/allocate.rs:34).
 
 Constants and defaults: config knob =theta= (must lie strictly below 2),
-=budget_window= toggle (config.rs:86-90). =Config::derived= sets
-=theta = 0.5=, i.e. the midpoint of the descent window (config.rs:703-711).
+=budget_window= toggle (config.rs:94-106). =Config::derived= sets
+=theta = 0.5=, i.e. the midpoint of the descent window (config.rs:817-831).
 
 Feeds/consumes: replaces the fixed =temperature= field when enabled; the
 gap is measured against the incumbent and the barrier estimated from
-uphill steps the chain actually failed to take.
+uphill steps the chain actually failed to take. On a cluster-hopping
+replica ladder it sets the coldest rung's temperature, every rung hops
+at its ladder ratio times it, and a rise a rung declines enters the
+barrier divided by that rung's ratio.
 
 ** Floored Thompson move allocator
 
@@ -455,15 +474,15 @@ reachable and the divergent-harmonic-mass restart guarantee (Robbins-
 Monro style) holds. Evidence is discounted so the allocator tracks a
 landscape whose best move changes as the search moves through it.
 
-Key types and functions: =FlooredThompson= (src/allocate.rs:108);
-=beta_draw= (src/allocate.rs:195), a Beta draw built from two Gamma
-draws via Marsaglia-Tsang (src/allocate.rs:205), since the crate carries
+Key types and functions: =FlooredThompson= (src/allocate.rs:124);
+=beta_draw= (src/allocate.rs:437), a Beta draw built from two Gamma
+draws via Marsaglia-Tsang (src/allocate.rs:447), since the crate carries
 no dedicated Beta sampler.
 
 Constants and defaults: config knob =allocate_moves=
 (config.rs:92). Portfolio-side scheduler constants derived from the
 problem rather than tuned: =SLICE_GRAD_EQUIVALENTS = 4=,
-=ROUNDS_PER_ARM = 8= (src/methods/portfolio.rs:61-64).
+=ROUNDS_PER_ARM = 8= (src/methods/portfolio.rs:83-89).
 
 Feeds/consumes: selects among the =MoveLibrary= kernels each hop when
 =allocate_moves= is set; reused conceptually by the portfolio driver's
@@ -481,12 +500,12 @@ under acceptance-only reward. Each arm carries a Normal-Gamma posterior
 over depth with unknown mean and precision, drawn from via the Student-t
 posterior predictive.
 
-Key types and functions: =DepthAllocator= (src/allocate.rs:388).
+Key types and functions: =DepthAllocator= (src/allocate.rs:770).
 
-Constants and defaults: config knob =depth_reward= (config.rs:307-310);
+Constants and defaults: config knob =depth_reward= (config.rs:389-392);
 weakly informative prior =kappa = 1e-6=, =alpha = beta = 1.0=
-(src/allocate.rs:401-407). On by default in =Config::recommended=
-(config.rs:665).
+(src/allocate.rs:812-814). On by default in =Config::recommended=
+(config.rs:759).
 
 Feeds/consumes: alternative reward signal for the same arm-selection
 slot =FlooredThompson= occupies; selected instead of it when
@@ -507,7 +526,7 @@ conjugate Bayesian linear model sampled from (distinct from
 probability); =ContextualAllocator= (src/contextual.rs:107).
 
 Constants and defaults: config knobs =contextual_moves=,
-=contextual_floor= (config.rs:264-266).
+=contextual_floor= (config.rs:304-306).
 
 Feeds/consumes: a third alternative in the same arm-selection slot,
 context-conditioned rather than global or depth-conditioned.
@@ -517,15 +536,19 @@ context-conditioned rather than global or depth-conditioned.
 What it is: classifies a problem's measurable features (box width,
 geometry) into a named optimization regime and biases the portfolio's
 arm priors and exploitation probability toward the arms known to suit
-that regime, without removing exploration.
+that regime, without removing exploration. Values-only runs under the
+Auto policy (no gradient, no declared noise) bypass it for the
+portfolio's values-only loop, so the driver never runs the
+=MultimodalNoGrad= arm settings; only the regime functions themselves
+still read them.
 
 Key types and functions: =ProblemFeatures= (src/methods/regime.rs:16);
 =OptimizationRegime= enum and =select_regime=
-(src/methods/regime.rs:70/107); =preferred_arm_tail=
-(src/methods/regime.rs:132); =arm_prior_boost=
-(src/methods/regime.rs:239); =regime_exploit_prob=/=regime_exploit_width=
-(src/methods/regime.rs:257/271); =check_accept_path=/
-=require_accept_compatible= (src/methods/regime.rs:306/319), which
+(src/methods/regime.rs:70/110); =preferred_arm_tail=
+(src/methods/regime.rs:135); =arm_prior_boost=
+(src/methods/regime.rs:242); =regime_exploit_prob=/=regime_exploit_width=
+(src/methods/regime.rs:260/274); =check_accept_path=/
+=require_accept_compatible= (src/methods/regime.rs:325/309), which
 *refuse* exact Metropolis acceptance under
 =OptimizationRegime::StochasticNoise= (GJQ-style regime gate).
 
@@ -555,13 +578,15 @@ surrogate for the quenched energy (one evaluation, no gradient); only
 survivors are quenched, and a second stage subtracts the surrogate
 difference back out, making the composite step exactly reversible with
 respect to the true target for *any* surrogate. A poor surrogate costs
-acceptance rate, never correctness.
+acceptance rate, never correctness. It needs a single chain: a
+cluster-hopping ladder refuses it (see
+[[file:catalog.org::*Parallel tempering / replica exchange][the parallel tempering entry]]).
 
 Key types and functions: =crate::delayed::Surrogate= and its
 =predict_at= method (src/delayed.rs).
 
 Constants and defaults: config knobs =delayed_acceptance=,
-=surrogate_tolerance= (config.rs:571-585).
+=surrogate_tolerance= (config.rs:657-671).
 
 Feeds/consumes: an alternative to the plain screen for the
 acceptance-uncertainty tradeoff, generalizing what the screen was
@@ -702,7 +727,7 @@ the IRA return code when a point set spans fewer than two dimensions
 and has no basis to build a frame from.
 
 Feeds/consumes: an alternative =Fingerprint= for =BasinBias= (config
-=shape_keyed= / =Keying::Canonical=, config.rs:511-517) and the
+=shape_keyed= / =Keying::Canonical=, config.rs:597-603) and the
 =distance= argument to =csa_cluster::run= (below) when the =ira= feature
 is enabled, transferring a =Dcut= threshold between cluster sizes in a
 way a descriptor-space threshold cannot.
@@ -1179,7 +1204,7 @@ call sequence. Gated behind =#[cfg(feature = "bank-rpc")]=
 
 What it is: replay-safe, idempotent aggregate charged-work accounting
 across an isolated ensemble of replicas, distinct from each replica's
-own local =Ledger= (src/methods/cluster_hopping.rs:246). Boundaries are
+own local =Ledger= (src/methods/cluster_hopping.rs:298). Boundaries are
 typed (=ChargeKind=) so a caller cannot silently double-charge or
 mis-tag work, and a repeated identical event is a no-op rather than an
 error.
@@ -1328,7 +1353,7 @@ SOAP leftover with =featomic=, CNA fractions otherwise); =BankConfig=
 (csa_cluster.rs:262, generic over a caller-supplied =distance= closure);
 =spectrum_distance= (csa_cluster.rs:581, default sorted-pairwise-
 distance-spectrum Euclidean metric); =coordination_histogram_distance=
-(csa_cluster.rs:606, Lee-Lee-Scheraga coordination-histogram distance
+(csa_cluster.rs:606, Lee-Lee-Lee coordination-histogram distance
 at shells =r1=1.35=, =r2=1.70=). Those shell counts come from the
 unwrapped cutoff. The weights are unchanged.
 
@@ -1400,22 +1425,67 @@ by a discounted Beta-Bernoulli posterior. Scheduler quantities
 (slice size, active-arm cap, discount) all derive from the problem and
 budget rather than being hand-tuned.
 
+Values-only loop: under =PortfolioPolicy::Auto= a run with no gradient
+and no declared noise goes, before any regime routing, to
+=run_values_only_portfolio= (src/methods/portfolio.rs:3169), a bandit
+over =VALUES_ONLY_ARMS= (portfolio.rs:3110: =cma=, =qn=, =gsa=, =de=,
+=surrogate=, =explore=) in slices of
+=max(4(d+1), min(budget/48, sqrt(4(d+1) budget)))= evaluations
+(=values_only_slice=, portfolio.rs:3125). Without =x0= it starts from
+the best of a seeded design of =d+1= points; when the budget affords
+five gradients per coordinate, an opening finite-difference descent
+runs while its slices succeed, up to convergence, and =qn= then rejoins
+the ranking on the prior. With less, =cma= and the descent take one
+slice each from the start, =gsa= the next =WARM_UP_GSA_SLICES= (two)
+from the incumbent, and a descent turn settles the basin it reached.
+From there =gsa= and then =cma= each keep the turn until they have gone
+=ROUNDS_PER_ARM= slices without lowering the incumbent (or as long as
+their last gain took, if longer), stopping short of the closing descent
+plus a slice for each other arm not yet played (without an opening, for
+=de= only). Every unplayed arm then takes one turn while a slice beyond
+the closing reserve is left (a descent's turn holds back only that
+reserve), after which rounds pick uniformly with probability
+=1/round=, replay the arm whose last turn succeeded, or take a
+discounted Thompson draw. The descent closes the run with the rest of
+the budget, ten gradients' worth of evaluations held back for it,
+going on with its current descent unless another arm has lowered the
+incumbent since =qn= last played, in which case it restarts there. A
+turn is one slice, except that =qn= keeps it while each slice lowers
+its descent's value by more than the success threshold, until that
+descent converges; a turn succeeds when it lowers the incumbent by more
+than =1e-4 max(|f|, s)= (=values_only_threshold=), where =s= is the
+resolution =eps |f|= of the start's value (=values_only_floor=), so
+every threshold of the run scales with the objective. The GSA arm
+starts one chain at the incumbent
+and runs it quenched, without a local search: each temperature step
+visits every coordinate once and keeps only improvements. The DE arm
+keeps one population member at the incumbent. The floor the restart
+guarantee needs is asymptotic: the opening, the phases and the
+descent's turns run only while they pay by the success threshold, which
+cannot last on a bounded objective, and the number of slices grows with
+the budget, so every arm keeps a uniform share and is pulled infinitely
+often as the budget grows.
+
 Key types and functions: top-level module doc at
-src/methods/portfolio.rs:1-23; =ContractionPosterior=
-(src/methods/portfolio.rs:252, Normal-Inverse-Gamma posterior over the
+src/methods/portfolio.rs:1-44; =ContractionPosterior=
+(src/methods/portfolio.rs:270, Normal-Inverse-Gamma posterior over the
 per-work-unit polish log-contraction rate, fit from work-normalized
 log-ratios of consecutive polish improvements); the endgame
-projected-gradient cycle helper (portfolio.rs:111) and its work-unit to
-=max_fevals= converter (portfolio.rs:103); a coordinate pattern-search
-fallback (portfolio.rs:151).
+projected-gradient cycle helper (portfolio.rs:144) and its work-unit to
+=max_fevals= converter (portfolio.rs:132); a coordinate pattern-search
+fallback (portfolio.rs:180).
 
 Constants and defaults: =SLICE_GRAD_EQUIVALENTS = 4= (a slice must
 afford a few gradient-descent steps); =ROUNDS_PER_ARM = 8=;
 =ENDGAME_WU_PER_ITER = 4=; =NEAR_BEST_ORDERS = 6.0= (Dolan-More
 tau=1e-3 to a 1e-9 win tolerance crosses six decimal orders)
-(src/methods/portfolio.rs:58-71). Endgame polish schedule: two-thirds
+(src/methods/portfolio.rs:86-96). Endgame polish schedule: two-thirds
 of remaining budget when no jittered restart has run yet, half of
-remaining otherwise, always capped at remaining (portfolio.rs:73-86).
+remaining otherwise, always capped at remaining (portfolio.rs:113).
+Values-only loop: =QN_AFFORDABLE_GRADIENTS = 5= (portfolio.rs:414);
+=WARM_UP_GSA_SLICES = 2= (portfolio.rs:416); closing descent of
+=10(d+1)= evaluations, at most 40% of the budget, skipped below
+=3(d+1)= (portfolio.rs:418-423).
 
 Feeds/consumes: consumes =crate::methods::regime= for arm priors and
 exploit probability, and the typed-algebra kernels
@@ -1428,9 +1498,17 @@ What it is: the classical-SA replica-exchange mechanism, a geometric
 temperature ladder with periodic swap attempts satisfying detailed
 balance by construction, generic over the =Exchange= trait's swap rule.
 Distinct from cluster hopping's own =replicas=/=swap_period= ladder
-(config.rs:100-114), which shares the same underlying =Exchange=
-operator but drives the cluster-specific chain rather than the typed-
-algebra =Sampler=.
+(src/methods/cluster_hopping/config.rs:117-159), which drives the
+cluster-specific chain rather than the typed-algebra =Sampler=. There
+one rung hops at a time on the shared budget, each with its own basin
+bias, and rung =k= of =R= hops at =ladder_top^(k/(R-1))= times the
+temperature a single chain would hop at (config.rs:534-539): the fixed
+=temperature=, the budget-window law's temperature, or the statistical
+estimate clamped to its band around =temperature=, which only the
+rungs at ratio one feed and so takes over later on a ladder (see
+[[file:catalog.org::*Density-of-states, flat histogram, and energy bias][the density-of-states entry]]). Every =swap_period=
+hops the active rung offers to exchange states with the next one up,
+the hottest with the coldest, and that rung hops next.
 
 Key types and functions: =Exchange<T>= trait (src/exchange.rs:23);
 =MetropolisExchange= (exchange.rs:40, canonical swap rule,
@@ -1442,9 +1520,23 @@ Metropolis at =q=1=); =PtChainState=/=PtResult=
 (parallel_tempering.rs:61).
 
 Feeds/consumes: cluster hopping's own ladder (=Config.replicas > 1=)
-uses =crate::exchange::Exchange= directly rather than routing through
+computes its swap inline rather than routing through =Exchange= or
 =ParallelTemperingSampler=, which is reserved for the typed-algebra
-=Sampler= drivers.
+=Sampler= drivers. Each rung samples its own bias-tilted distribution,
+so the factor evaluates each rung's bias at both states, at the
+temperatures the two rungs would hop at from the states they hold, and
+the funnel bias, the packing pile and the energy bias all rungs share
+enter through the difference of the two inverse temperatures. It
+reduces to the =MetropolisExchange= rule when the biases are equal.
+Under =flat_histogram= every rung reads the one flat-histogram cost
+and none divides it by its temperature, so the cost cancels from the
+factor with the energies and a swap is accepted on the biases alone. A
+state carries its basin and its validation gradient from rung to rung,
+so the first step a rung takes after its turn comes round is recorded
+from the state it holds, and the swap reads the pile at that basin.
+The ladder refuses =delayed_acceptance=: a hop the surrogate decides is
+tested on the bare energy and one it abstains on with the biases, so a
+rung under it keeps no one weight for the swap to exchange.
 
 ** Warm L-BFGS
 
@@ -1468,7 +1560,7 @@ concrete quasi-Newton engine.
 ** CSA bank population (=Bank=)
 
 What it is: the diversity-held population under the conformational-
-space-annealing replacement rule (Lee, Lee and Scheraga,
+space-annealing replacement rule (Lee, Lee and Lee,
 arXiv:cond-mat/0307690): a candidate is compared to the bank member it
 most resembles, not the worst member, so a near-copy can only displace
 its own kind and a bank cannot collapse onto one funnel. A frozen
@@ -1653,9 +1745,9 @@ at an identical, evaluation-matched charged-work budget, reported as
 solved-seed counts with a Bayes factor rather than a bare percentage.
 Examples throughout this catalog: =Config::recommended='s
 "LJ75 49/144 against 17/144, Bayes factor 3104" and "LJ98 40/72 against
-20/72, Bayes factor 43.8" (src/methods/cluster_hopping/config.rs:642-648);
+20/72, Bayes factor 43.8" (src/methods/cluster_hopping/config.rs:749-752);
 the escape-on-stall patience comparison "2 seeds in 8 against 9 in 16"
-(config.rs:174-179); the CSA bank's "budget is split, not multiplied"
+(config.rs:214-219); the CSA bank's "budget is split, not multiplied"
 principle (src/methods/csa_cluster.rs:18-20); the README's
 "sealed, evaluation-matched ensembles rather than reference energies or
 morphology labels."
@@ -1832,6 +1924,38 @@ Key types and functions: =BfwtMode= (bfwt.rs:33); =BfwtResult=
 Feeds/consumes: consumed by =amsa= (above) as the temperature law
 inside its adaptive chain, and by =portfolio= as its own arm.
 
+** CMA-ES with BIPOP restarts (=cma_es=, =cma= arm)
+
+What it is: a resumable ask/tell \((\mu/\mu_w, \lambda)\)-CMA-ES in
+the unit box, with cumulative step-size adaptation, rank-one plus
+rank-\(\mu\) covariance updates, candidates mirror-reflected into the
+box, and the usual stop tests (TolHistFun, TolX, NoEffectAxis/Coord,
+ConditionCov, stagnation, divergence) plus pycma's optional absolute
+=tolfunhist=. =CmaEs::separable= turns a run into sep-CMA-ES (Ros and
+Hansen 2008): the covariance keeps its diagonal, the learning rates
+grow by \((n+2)/3\), and a candidate costs linear time and memory.
+=Bipop= alternates large-population runs, whose population doubles from
+the default up to a cap, with small local runs, by spent budget.
+
+Key types and functions: =CmaEs= (src/methods/cma_es.rs:119);
+=CmaEs::separable=, =CmaEs::with_tol_fun_hist=, =CmaEs::with_elite=
+(cma_es.rs:238/256/280); =CmaStop= (cma_es.rs:59);
+=covariance_learning_evaluations= (cma_es.rs:111, the horizon
+\(\lambda/(c_1 + c_\mu)\)); =Bipop= and =CmaRegime=
+(cma_es.rs:631/610); the portfolio's =CmaArmState= and =run_cma_arm=
+(src/methods/portfolio.rs:914/2991).
+
+Constants and defaults: =default_lambda= \(4 + \lfloor 3 \ln n
+\rfloor\) (cma_es.rs:82). In the portfolio every run is centred on the
+incumbent; the first is local, with step 0.025 of each side, and large
+runs use step 0.3 (portfolio.rs:391-392). Runs keep the full covariance
+up to =CMA_FULL_MAX_DIM = 100= (portfolio.rs:401) and only when the
+budget exceeds the learning horizon; each run's =tolfunhist= is the
+values-only success threshold at its start (=values_only_threshold=).
+
+Feeds/consumes: the =cma= arm of the portfolio's values-only loop,
+which reads the ledger incumbent for every run's mean.
+
 ** Population-controlled diffusion search (=dmc_population=, =DmcPop=)
 
 What it is: a budgeted multi-walker global search borrowing diffusion
@@ -1861,6 +1985,43 @@ the elite refine step and =accept::TsallisAccept=/
 =movekernel::TsallisVisit=; consumed by =portfolio= as the =DmcPop=
 arm and exposed through =src/python.rs= as
 =anneal.dmc_population_optimize=.
+
+** Finite-difference projected BFGS (=fd_bfgs=, =qn= arm)
+
+What it is: a resumable ask/tell quasi-Newton descent on
+finite-difference gradients inside a box. Stencils step inward at the
+bounds and forward differences give way to central ones when they
+stall. After the first central stencil at a coordinate, its interval is
+a tenth of the distance \(|g_i / c_i|\) to the minimum of the quadratic
+through the stencil, between the rounding limit and the
+\(\epsilon^{1/3}\) rule, so a valley narrower than that rule is not
+straddled; a failed central line search re-differences once an interval
+has moved by more than a factor of two, at most twice per iterate.
+Directions come from a projected BFGS inverse Hessian, with
+curvature-checked updates, followed by a projected backtracking Armijo
+line search that may extrapolate once. The initial inverse Hessian is
+the box metric \(D = \mathrm{diag}(w^2)\), scaled to
+\((s^\top y / y^\top D y) D\) by the first accepted pair, so sides that
+span decades move as far, relative to their width, as unit ones. Until
+then each line search's first trial moves the coordinate that moves
+most by 5% of its side, whatever the gradient's size, so the descent
+does not depend on the objective's scale. A descent ends on a slow
+iteration, a projected-gradient tolerance when one is set, or a failed
+line search.
+
+Key types and functions: =FdBfgs= (src/methods/fd_bfgs.rs:148);
+=FdBfgsOptions= (fd_bfgs.rs:74); the portfolio's =QnArmState= and
+=run_qn_arm= (src/methods/portfolio.rs:1003/3042).
+
+Constants and defaults: =ARMIJO = 1e-4=, =MAX_LINE_TRIALS = 40=,
+=FIRST_STEP_FRACTION = 0.05=, =CENTRAL_INTERVAL_FRACTION = 0.1=,
+=INTERVAL_MOVE = 2=, =MAX_REDIFFERENCES = 2= (fd_bfgs.rs:50-72). The
+default options have the value floor =f64::MIN_POSITIVE= in the
+slow-iteration test and no gradient tolerance.
+
+Feeds/consumes: the =qn= arm of the portfolio's values-only loop (its
+opening and closing descents, and descents kicked from the incumbent
+once one converges).
 
 ** GLE-thermostatted Langevin annealing (=gle_langevin=)
 
@@ -1920,9 +2081,11 @@ through =src/python.rs=.
 ** Bounded local refinement (=local_polish=)
 
 What it is: the deterministic polish stage run after a stochastic
-annealing or pilot phase: projected-gradient descent with Armijo
-backtracking inside the box, plus QMC-seeded variants that screen a
-batch of low-discrepancy starts before polishing the best.
+annealing or pilot phase: bounded L-BFGS (two-loop, Armijo
+backtracking, active-set projection) inside the box, plus QMC-seeded
+variants that screen a batch of low-discrepancy starts before
+polishing the best. Cluster hops quench through =WarmLbfgs= / rgmin,
+not this function.
 
 Key types and functions: =LocalPolishResult=
 (src/methods/local_polish.rs:23); =QmcPolishResult=

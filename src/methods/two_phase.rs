@@ -23,13 +23,14 @@ use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
 use ndarray::{Array1, ArrayView1};
-use rand::rngs::StdRng;
 use rand::SeedableRng;
+use rand::rngs::StdRng;
 use serde::Serialize;
 
 use crate::allocate::{DepthAllocator, RewardMoments};
 use crate::surface_evidence::{
-    SourceTransferKey, SurfaceEvidenceBook, SurfaceEvidenceMessage, MIN_TRANSFER_OBSERVATIONS,
+    MIN_TRANSFER_OBSERVATIONS, SourceTransferKey, SurfaceEvidenceBook, SurfaceEvidenceMessage,
+    SurfaceReport,
 };
 
 /// A surface allocator posterior several chains update together.
@@ -63,15 +64,126 @@ pub struct TwoPhase {
     pub beta: f64,
     /// Strength of the centroid compression; zero leaves it off.
     pub mu: f64,
+    /// Measure pair distances in the ellipsoidal metric of the entering
+    /// structure's own gyration tensor, so a prolate walker is compacted
+    /// prolately; the aspect comes from the structure, never from a target.
+    #[serde(default)]
+    pub anisotropic: bool,
+}
+
+/// Principal axes and relative gyration radii of a structure.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Shape {
+    /// Orthonormal principal axes, rows.
+    pub axes: [[f64; 3]; 3],
+    /// Gyration radius along each axis divided by the geometric mean of the
+    /// three, so the metric preserves volume.
+    pub scale: [f64; 3],
+}
+
+/// The shape of `x` from its gyration tensor about the centroid, or none when
+/// the structure is degenerate.
+pub fn inertia_shape(x: ArrayView1<f64>) -> Option<Shape> {
+    let n = x.len() / 3;
+    if n < 4 {
+        return None;
+    }
+    let mut c = [0.0_f64; 3];
+    for i in 0..n {
+        for k in 0..3 {
+            c[k] += x[3 * i + k];
+        }
+    }
+    for value in c.iter_mut() {
+        *value /= n as f64;
+    }
+    let mut t = [[0.0_f64; 3]; 3];
+    for i in 0..n {
+        let d = [x[3 * i] - c[0], x[3 * i + 1] - c[1], x[3 * i + 2] - c[2]];
+        for a in 0..3 {
+            for b in 0..3 {
+                t[a][b] += d[a] * d[b] / n as f64;
+            }
+        }
+    }
+    let (values, vectors) = symmetric_eigen(t);
+    if values.iter().any(|v| !(v.is_finite() && *v > 1e-12)) {
+        return None;
+    }
+    let radii = values.map(f64::sqrt);
+    let mean = (radii[0] * radii[1] * radii[2]).cbrt();
+    Some(Shape {
+        axes: vectors,
+        scale: radii.map(|r| r / mean),
+    })
+}
+
+/// Jacobi eigen decomposition of a symmetric 3x3 matrix: eigenvalues and
+/// the matching unit eigenvectors as rows.
+fn symmetric_eigen(mut a: [[f64; 3]; 3]) -> ([f64; 3], [[f64; 3]; 3]) {
+    let mut v = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+    for _ in 0..50 {
+        let (mut p, mut q, mut largest) = (0, 1, 0.0_f64);
+        for i in 0..3 {
+            for j in (i + 1)..3 {
+                if a[i][j].abs() > largest {
+                    largest = a[i][j].abs();
+                    p = i;
+                    q = j;
+                }
+            }
+        }
+        if largest < 1e-14 {
+            break;
+        }
+        let theta = 0.5 * (a[q][q] - a[p][p]) / a[p][q];
+        let t = theta.signum() / (theta.abs() + (theta * theta + 1.0).sqrt());
+        let cs = 1.0 / (t * t + 1.0).sqrt();
+        let sn = t * cs;
+        for k in 0..3 {
+            let (akp, akq) = (a[k][p], a[k][q]);
+            a[k][p] = cs * akp - sn * akq;
+            a[k][q] = sn * akp + cs * akq;
+        }
+        for k in 0..3 {
+            let (apk, aqk) = (a[p][k], a[q][k]);
+            a[p][k] = cs * apk - sn * aqk;
+            a[q][k] = sn * apk + cs * aqk;
+        }
+        for k in 0..3 {
+            let (vkp, vkq) = (v[k][p], v[k][q]);
+            v[k][p] = cs * vkp - sn * vkq;
+            v[k][q] = sn * vkp + cs * vkq;
+        }
+    }
+    let values = [a[0][0], a[1][1], a[2][2]];
+    // Columns of v are the eigenvectors; return them as rows.
+    let vectors = [
+        [v[0][0], v[1][0], v[2][0]],
+        [v[0][1], v[1][1], v[2][1]],
+        [v[0][2], v[1][2], v[2][2]],
+    ];
+    (values, vectors)
 }
 
 impl TwoPhase {
+    /// The shape the penalty measures distances in for a relaxation entering
+    /// at `x`, when the anisotropic form is on.
+    pub fn shape_for(&self, x: ArrayView1<f64>) -> Option<Shape> {
+        if self.anisotropic {
+            inertia_shape(x)
+        } else {
+            None
+        }
+    }
+
     /// A diameter penalty at a fixed cutoff, no centroid compression.
     pub fn diameter(cutoff: f64, beta: f64) -> Self {
         Self {
             cutoff: Cutoff::Fixed(cutoff),
             beta,
             mu: 0.0,
+            anisotropic: false,
         }
     }
 
@@ -81,6 +193,18 @@ impl TwoPhase {
             cutoff: Cutoff::Relative(kappa),
             beta,
             mu: 0.0,
+            anisotropic: false,
+        }
+    }
+
+    /// The relative penalty measured in the entering structure's own
+    /// ellipsoidal metric.
+    pub fn relative_anisotropic(kappa: f64, beta: f64) -> Self {
+        Self {
+            cutoff: Cutoff::Relative(kappa),
+            beta,
+            mu: 0.0,
+            anisotropic: true,
         }
     }
 
@@ -129,6 +253,75 @@ pub fn penalty(x: ArrayView1<f64>, cutoff: f64, beta: f64, mu: f64) -> (f64, Arr
     penalty_axes(x, cutoff, beta, mu, [1.0, 1.0, 1.0])
 }
 
+/// [`penalty`] with the diameter term measured in an ellipsoidal metric.
+///
+/// A pair displacement `d` counts as `sum_k (d . e_k / s_k)^2`, so pairs
+/// along a long axis are penalized later than pairs along a short one.
+pub fn penalty_shaped(
+    x: ArrayView1<f64>,
+    cutoff: f64,
+    beta: f64,
+    mu: f64,
+    shape: Option<&Shape>,
+) -> (f64, Array1<f64>) {
+    let Some(shape) = shape else {
+        return penalty_axes(x, cutoff, beta, mu, [1.0, 1.0, 1.0]);
+    };
+    let n = x.len() / 3;
+    let mut e = 0.0;
+    let mut g = Array1::zeros(x.len());
+    if beta > 0.0 && cutoff > 0.0 {
+        let d2 = cutoff * cutoff;
+        for i in 0..n {
+            for j in (i + 1)..n {
+                let d = [
+                    x[3 * i] - x[3 * j],
+                    x[3 * i + 1] - x[3 * j + 1],
+                    x[3 * i + 2] - x[3 * j + 2],
+                ];
+                let mut r2 = 0.0;
+                let mut grad = [0.0_f64; 3];
+                for k in 0..3 {
+                    let axis = shape.axes[k];
+                    let proj = (d[0] * axis[0] + d[1] * axis[1] + d[2] * axis[2]) / shape.scale[k];
+                    r2 += proj * proj;
+                    for m in 0..3 {
+                        grad[m] += 2.0 * proj * axis[m] / shape.scale[k];
+                    }
+                }
+                let excess = r2 - d2;
+                if excess > 0.0 {
+                    e += beta * excess * excess;
+                    let coef = 2.0 * beta * excess;
+                    for k in 0..3 {
+                        g[3 * i + k] += coef * grad[k];
+                        g[3 * j + k] -= coef * grad[k];
+                    }
+                }
+            }
+        }
+    }
+    if mu > 0.0 && n > 0 {
+        let mut cm = [0.0_f64; 3];
+        for i in 0..n {
+            for k in 0..3 {
+                cm[k] += x[3 * i + k];
+            }
+        }
+        for value in cm.iter_mut() {
+            *value /= n as f64;
+        }
+        for i in 0..n {
+            for k in 0..3 {
+                let d = x[3 * i + k] - cm[k];
+                e += mu * d * d;
+                g[3 * i + k] += 2.0 * mu * d;
+            }
+        }
+    }
+    (e, g)
+}
+
 /// Diameter penalty with axis weights on the squared pair components.
 ///
 /// The spherical penalty is weights `[1, 1, 1]`. A prolate or oblate
@@ -156,6 +349,7 @@ pub fn penalty_axes(
                     axes[0] * d[0] * d[0] + axes[1] * d[1] * d[1] + axes[2] * d[2] * d[2] - d2;
                 if excess > 0.0 {
                     e += beta * excess * excess;
+                    // d(excess^2)/d x_k = 2 * excess * 2 * axes_k * d_k.
                     let coef = 4.0 * beta * excess;
                     for k in 0..3 {
                         let force = coef * axes[k] * d[k];
@@ -373,11 +567,14 @@ pub fn penalty_groups(
 /// surface and a walk on the plain one visit different minima, and
 /// alternating them every hop is a walk on neither. A screening relaxation
 /// opens a hop; every `block` hops the arm is redrawn, and the block's reward
-/// is the energy its walk took off the run's best, zero when it took none.
+/// is the signed gap between the entering incumbent and the block's lowest
+/// energy. A block that cannot reach the incumbent receives negative credit.
 #[derive(Debug, Clone)]
 pub struct SurfacePortfolio {
     arms: Vec<Option<TwoPhase>>,
     allocator: DepthAllocator,
+    /// Local rewards when no occupied source is set. Imports do not write here.
+    own_moments: Vec<RewardMoments>,
     /// When set, draws and credits for the occupied source go through this book.
     shared: Option<SharedSurfaceAllocator>,
     /// Validated source occupied when the current block opened.
@@ -388,6 +585,8 @@ pub struct SurfacePortfolio {
     own_by_source: BTreeMap<SourceTransferKey, Vec<RewardMoments>>,
     /// Peer replies, still keyed by the producer's source.
     peer_by_source: BTreeMap<SourceTransferKey, Vec<RewardMoments>>,
+    /// Peer moments imported while no source is occupied.
+    peer_unscoped: Vec<RewardMoments>,
     held: Option<usize>,
     block: usize,
     hops_in_block: usize,
@@ -417,16 +616,39 @@ impl SurfacePortfolio {
                 .filter(|two| two.is_active())
                 .map(Some),
         );
+        let block = block.max(1);
+        // Bit patterns keep every transform parameter distinct, including
+        // invalid floating-point inputs that a text serializer maps to null.
+        let parameters = arms
+            .iter()
+            .map(|arm| {
+                arm.map(|two| {
+                    let cutoff = match two.cutoff {
+                        Cutoff::Fixed(value) => (0, value.to_bits()),
+                        Cutoff::Relative(value) => (1, value.to_bits()),
+                    };
+                    (
+                        cutoff,
+                        two.beta.to_bits(),
+                        two.mu.to_bits(),
+                        two.anisotropic,
+                    )
+                })
+            })
+            .collect::<Vec<_>>();
+        let _ = parameters;
         Self {
             allocator: DepthAllocator::new(arms.len()),
+            own_moments: vec![RewardMoments::default(); arms.len()],
             arms,
             shared: None,
             occupied: None,
             block_source: None,
             own_by_source: BTreeMap::new(),
             peer_by_source: BTreeMap::new(),
+            peer_unscoped: Vec::new(),
             held: None,
-            block: block.max(1),
+            block,
             hops_in_block: 0,
             block_start_best: f64::INFINITY,
             latest_best: f64::INFINITY,
@@ -515,6 +737,9 @@ impl SurfacePortfolio {
     }
 
     fn credit_arm(&mut self, arm: usize, reward: f64) {
+        if self.own_moments[arm].observe(reward).is_err() {
+            return;
+        }
         self.allocator.update(arm, reward);
     }
 
@@ -630,6 +855,68 @@ impl SurfacePortfolio {
     /// The arms, the plain surface first.
     pub fn arms(&self) -> &[Option<TwoPhase>] {
         &self.arms
+    }
+
+    /// Cumulative observations this chain produced for the occupied source.
+    ///
+    /// Imports are not included. With no occupied source every arm count is
+    /// zero, so a coordinator exchange still names one schema and one arm count.
+    pub fn report(&self) -> SurfaceReport {
+        let arms = if let Some(key) = &self.occupied {
+            self.own_by_source
+                .get(key)
+                .cloned()
+                .unwrap_or_else(|| vec![RewardMoments::default(); self.arms.len()])
+        } else {
+            self.own_moments.clone()
+        };
+        SurfaceReport {
+            schema: self.evidence_schema(),
+            arms,
+        }
+    }
+
+    /// Peer observations stored by import, across every occupied source.
+    pub fn peer_observations(&self) -> u64 {
+        self.peer_unscoped
+            .iter()
+            .chain(self.peer_by_source.values().flat_map(|arms| arms.iter()))
+            .map(|arm| arm.count)
+            .sum()
+    }
+
+    /// Replace peer evidence for the occupied source.
+    ///
+    /// The held arm, local rewards, and random stream stay as they are.
+    pub fn import_peers(&mut self, report: SurfaceReport) -> Result<(), &'static str> {
+        report.validate()?;
+        if self.shared.is_some()
+            || report.schema != self.evidence_schema()
+            || report.arms.len() != self.arms.len()
+        {
+            return Err("incompatible surface evidence");
+        }
+        if let Some(key) = self.occupied.clone() {
+            self.peer_by_source.insert(key, report.arms);
+        } else {
+            self.peer_unscoped = report.arms;
+        }
+        Ok(())
+    }
+
+    fn evidence_schema(&self) -> String {
+        match &self.occupied {
+            Some(key) => format!(
+                "source:{}/{}/r{}/{}/{}/b{}",
+                key.descriptor_schema,
+                key.descriptor_version,
+                key.region,
+                key.proposal,
+                key.quench_schema,
+                key.block
+            ),
+            None => "private-block".to_string(),
+        }
     }
 }
 
@@ -944,5 +1231,64 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn the_shaped_penalty_matches_finite_differences_and_reads_the_aspect() {
+        // A prolate cloud along x.
+        let mut x = Vec::new();
+        for i in 0..12 {
+            let t = i as f64;
+            x.extend_from_slice(&[
+                3.0 * (t * 0.7).sin() * 1.5,
+                (t * 1.3).cos(),
+                (t * 0.9).sin() * 0.5,
+            ]);
+        }
+        let x = Array1::from(x);
+        let shape = inertia_shape(x.view()).expect("a cloud has a shape");
+        let longest = (0..3)
+            .max_by(|a, b| shape.scale[*a].total_cmp(&shape.scale[*b]))
+            .unwrap();
+        assert!(
+            shape.axes[longest][0].abs() > 0.9,
+            "the longest axis follows x: {:?}",
+            shape.axes[longest]
+        );
+        let product: f64 = shape.scale.iter().product();
+        assert!(
+            (product - 1.0).abs() < 1e-9,
+            "volume-preserving scales: {product}"
+        );
+        let (cutoff, beta, mu) = (1.5, 0.6, 0.2);
+        let (_, g) = penalty_shaped(x.view(), cutoff, beta, mu, Some(&shape));
+        let h = 1e-6;
+        for i in 0..x.len() {
+            let mut plus = x.clone();
+            let mut minus = x.clone();
+            plus[i] += h;
+            minus[i] -= h;
+            let fd = (penalty_shaped(plus.view(), cutoff, beta, mu, Some(&shape)).0
+                - penalty_shaped(minus.view(), cutoff, beta, mu, Some(&shape)).0)
+                / (2.0 * h);
+            assert!(
+                (fd - g[i]).abs() < 1e-5,
+                "component {i}: {fd} against {}",
+                g[i]
+            );
+        }
+        let isotropic = Shape {
+            axes: [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
+            scale: [1.0; 3],
+        };
+        let plain = penalty(x.view(), cutoff, beta, mu);
+        let same = penalty_shaped(x.view(), cutoff, beta, mu, Some(&isotropic));
+        assert!((plain.0 - same.0).abs() < 1e-12);
+        assert!(!TwoPhase::relative(0.7, 1.0).shape_for(x.view()).is_some());
+        assert!(
+            TwoPhase::relative_anisotropic(0.7, 1.0)
+                .shape_for(x.view())
+                .is_some()
+        );
     }
 }

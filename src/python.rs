@@ -7,6 +7,13 @@
 //! adapter that re-acquires the GIL per `eval`. This is acceptable when
 //! evaluation cost dominates the per-call GIL overhead (~hundreds of ns),
 //! which is true for any non-toy objective.
+//!
+//! Replica-spawning pyfunctions must [`with_replica_threads`] so this
+//! frame is not still holding the GIL when workers attach. Holding it
+//! deadlocks: workers wait for the GIL, this frame waits for
+//! `thread::scope` to join. Box search ([`ensemble_optimize`]) drops
+//! the GIL around the native hop so a Python objective can be called
+//! back.
 
 // Python-callable signatures mirror stable keyword APIs.
 #![allow(clippy::too_many_arguments)]
@@ -24,11 +31,29 @@ use eindir_core::{Bounds, Objective};
 use crate::history::History;
 use crate::variant::{boltzmann_in_box, fast_in_box, gsa_in_box};
 
-/// Reject empty, non-finite, or inverted box bounds before `Bounds::new`.
+mod device;
+mod portfolio_peers;
+
+/// Drop the GIL before native search that may call back into Python.
 ///
-/// `eindir::Bounds::new` only checks equal length; `mkpoint` panics when
-/// `low[i] >= high[i]`. Surface a clear `ValueError` at the Python boundary.
+/// [`CallableObjective::eval`] attaches the GIL on the worker thread.
+/// If this frame still holds it, every worker blocks in `attach` and
+/// the caller blocks in `join`.
+fn with_replica_threads<F, T>(py: Python<'_>, f: F) -> T
+where
+    F: FnOnce() -> T + Send,
+    T: Send,
+{
+    py.detach(f)
+}
+
+/// Validate a box for methods that sample every coordinate uniformly.
 fn validate_box_bounds(low: &[f64], high: &[f64]) -> PyResult<()> {
+    validate_box_domain(low, high, false)
+}
+
+/// Fixed coordinates are valid only for drivers that preserve those axes.
+fn validate_box_domain(low: &[f64], high: &[f64], allow_fixed: bool) -> PyResult<()> {
     if low.len() != high.len() {
         return Err(PyValueError::new_err(
             "low and high must have the same length",
@@ -54,13 +79,115 @@ fn validate_box_bounds(low: &[f64], high: &[f64]) -> PyResult<()> {
                 "the box is too wide: the sum of its widths is not finite",
             ));
         }
-        if lo.partial_cmp(&hi) != Some(std::cmp::Ordering::Less) {
+        if lo > hi || (!allow_fixed && lo == hi) {
+            let relation = if allow_fixed {
+                "less than or equal to"
+            } else {
+                "strictly less than"
+            };
             return Err(PyValueError::new_err(format!(
-                "low[{i}] must be strictly less than high[{i}] (got {lo} >= {hi})"
+                "low[{i}] must be {relation} high[{i}] (got {lo}, {hi})"
             )));
         }
     }
     Ok(())
+}
+
+fn py_view1<'py>(py: Python<'py>, x: ArrayView1<f64>) -> Bound<'py, PyArray1<f64>> {
+    match x.as_slice() {
+        Some(sl) => PyArray1::from_slice(py, sl),
+        None => PyArray1::from_vec(py, x.iter().copied().collect()),
+    }
+}
+
+fn require_positive_budget(budget: usize) -> PyResult<()> {
+    if budget == 0 {
+        Err(PyValueError::new_err("budget must be positive"))
+    } else {
+        Ok(())
+    }
+}
+
+/// Shared box parse: finite ordered bounds and an optional start.
+fn parse_box(
+    low: PyReadonlyArray1<'_, f64>,
+    high: PyReadonlyArray1<'_, f64>,
+    x0: Option<PyReadonlyArray1<'_, f64>>,
+) -> PyResult<(Bounds<f64>, usize, Option<Array1<f64>>)> {
+    parse_box_domain(low, high, x0, false)
+}
+
+fn parse_box_domain(
+    low: PyReadonlyArray1<'_, f64>,
+    high: PyReadonlyArray1<'_, f64>,
+    x0: Option<PyReadonlyArray1<'_, f64>>,
+    allow_fixed: bool,
+) -> PyResult<(Bounds<f64>, usize, Option<Array1<f64>>)> {
+    let low_vec = low.as_slice()?.to_vec();
+    let high_vec = high.as_slice()?.to_vec();
+    validate_box_domain(&low_vec, &high_vec, allow_fixed)?;
+    let dim = low_vec.len();
+    let x0 = if let Some(x0) = x0 {
+        let sl = x0.as_slice()?;
+        if sl.len() != dim {
+            return Err(PyValueError::new_err(format!(
+                "x0 length {} does not match dimension {}",
+                sl.len(),
+                dim
+            )));
+        }
+        Some(Array1::from_vec(sl.to_vec()))
+    } else {
+        None
+    };
+    Ok((
+        Bounds::new(Array1::from_vec(low_vec), Array1::from_vec(high_vec), 1e-9),
+        dim,
+        x0,
+    ))
+}
+
+struct ParsedBoxSearch {
+    bounds: Bounds<f64>,
+    dim: usize,
+    x0: Option<Array1<f64>>,
+    history: crate::methods::ensemble::HistoryMode,
+    membership: crate::methods::minima_hopping::HistoryMembership,
+}
+
+fn parse_box_search(
+    low: PyReadonlyArray1<'_, f64>,
+    high: PyReadonlyArray1<'_, f64>,
+    budget: usize,
+    replicas: usize,
+    x0: Option<PyReadonlyArray1<'_, f64>>,
+    history: &str,
+    membership: &str,
+) -> PyResult<ParsedBoxSearch> {
+    require_positive_budget(budget)?;
+    if replicas == 0 {
+        return Err(PyValueError::new_err("replicas must be positive"));
+    }
+    let (bounds, dim, x0) = parse_box_domain(low, high, x0, true)?;
+    let history = match history {
+        "none" | "no" => crate::methods::ensemble::HistoryMode::None,
+        "private" => crate::methods::ensemble::HistoryMode::Private,
+        "shared" => crate::methods::ensemble::HistoryMode::Shared,
+        other => {
+            return Err(PyValueError::new_err(format!(
+                "history must be none, private, or shared, got {other:?}"
+            )));
+        }
+    };
+    let membership = crate::methods::minima_hopping::HistoryMembership::parse(Some(membership))
+        .map_err(PyValueError::new_err)?;
+    Ok(ParsedBoxSearch {
+        bounds,
+        dim,
+        x0,
+        history,
+        membership,
+    })
 }
 
 fn validate_max_evals(max_evals: Option<usize>) -> PyResult<()> {
@@ -508,8 +635,7 @@ impl Objective<f64> for CallableObjective {
             return f64::INFINITY;
         }
         Python::attach(|py| {
-            let owned: Vec<f64> = x.iter().copied().collect();
-            let py_arr = PyArray1::from_vec(py, owned);
+            let py_arr = py_view1(py, x);
             match self.fn_.call1(py, (py_arr,)) {
                 Ok(r) => self.errors.float(py, &r),
                 Err(err) => {
@@ -637,8 +763,7 @@ impl eindir_core::Gradient<f64> for CallablePyGradient {
             return Array1::zeros(self.dim);
         }
         Python::attach(|py| {
-            let owned: Vec<f64> = x.iter().copied().collect();
-            let py_arr = PyArray1::from_vec(py, owned);
+            let py_arr = py_view1(py, x);
             match self.fn_.call1(py, (py_arr,)) {
                 Ok(r) => match as_float_vector(py, &r) {
                     Some(values) if values.len() == self.dim => Array1::from(values),
@@ -761,7 +886,7 @@ fn run_hmc(
     Ok(PyHistory::from(history))
 }
 
-/// Refines a supplied starting point with bounded projected-gradient polish.
+/// Refines a supplied starting point with bounded L-BFGS polish.
 #[pyfunction]
 #[pyo3(signature = (obj_fn, grad_fn, low, high, x0, max_fevals = 200, step0 = 1.0, grad_tol = 1e-8))]
 fn polish(
@@ -818,7 +943,7 @@ fn polish(
     Ok(out.into())
 }
 
-/// Refines QMC starts with bounded projected-gradient polish.
+/// Refines QMC starts with bounded L-BFGS polish.
 #[pyfunction]
 #[pyo3(signature = (obj_fn, grad_fn, low, high, n_starts, max_fevals_per_start, seed = 0, step0 = 1.0, grad_tol = 1e-8, top_k = 0))]
 fn qmc_polish(
@@ -1271,7 +1396,7 @@ fn qmc_trust_region_poll_objective(
     qmc_polish_result_to_dict(py, result)
 }
 
-/// Refines shifted QMC starts with bounded projected-gradient polish.
+/// Refines shifted QMC starts with bounded L-BFGS polish.
 #[pyfunction]
 #[pyo3(signature = (obj_fn, grad_fn, low, high, n_starts, max_fevals_per_start, seed = 0, n_replicates = 1, step0 = 1.0, grad_tol = 1e-8, top_k = 0))]
 fn shifted_qmc_polish(
@@ -1703,27 +1828,8 @@ fn dmc_population_optimize(
     steps_per_control: usize,
     x0: Option<PyReadonlyArray1<'_, f64>>,
 ) -> PyResult<Py<PyDict>> {
-    let low_vec = low.as_slice()?.to_vec();
-    let high_vec = high.as_slice()?.to_vec();
-    validate_box_bounds(&low_vec, &high_vec)?;
-    if budget == 0 {
-        return Err(PyValueError::new_err("budget must be positive"));
-    }
-    let dim = low_vec.len();
-    let bounds = Bounds::new(Array1::from_vec(low_vec), Array1::from_vec(high_vec), 1e-9);
-    let seed_arr = if let Some(x0) = x0 {
-        let sl = x0.as_slice()?;
-        if sl.len() != dim {
-            return Err(PyValueError::new_err(format!(
-                "x0 length {} does not match dimension {}",
-                sl.len(),
-                dim
-            )));
-        }
-        Some(Array1::from_vec(sl.to_vec()))
-    } else {
-        None
-    };
+    require_positive_budget(budget)?;
+    let (bounds, dim, seed_arr) = parse_box(low, high, x0)?;
     let seed_view = seed_arr.as_ref().map(|a| a.view());
     let obj = CallableObjective::new(obj_fn, bounds);
     let errors = obj.errors();
@@ -1759,10 +1865,7 @@ fn dmc_population_optimize(
     };
     let out = PyDict::new(py);
     out.set_item("best_val", result.best_val)?;
-    out.set_item(
-        "best_pos",
-        PyArray1::from_slice(py, result.best_pos.as_slice().unwrap()),
-    )?;
+    out.set_item("best_pos", py_view1(py, result.best_pos.view()))?;
     out.set_item("n_evals", result.n_evals)?;
     out.set_item("n_grads", result.n_grads)?;
     out.set_item("final_population", result.final_population)?;
@@ -1789,27 +1892,8 @@ fn gpmd_optimize(
     grad_fn: Option<Py<PyAny>>,
     x0: Option<PyReadonlyArray1<'_, f64>>,
 ) -> PyResult<Py<PyDict>> {
-    let low_vec = low.as_slice()?.to_vec();
-    let high_vec = high.as_slice()?.to_vec();
-    validate_box_bounds(&low_vec, &high_vec)?;
-    if budget == 0 {
-        return Err(PyValueError::new_err("budget must be positive"));
-    }
-    let dim = low_vec.len();
-    let bounds = Bounds::new(Array1::from_vec(low_vec), Array1::from_vec(high_vec), 1e-9);
-    let seed_arr = if let Some(x0) = x0 {
-        let sl = x0.as_slice()?;
-        if sl.len() != dim {
-            return Err(PyValueError::new_err(format!(
-                "x0 length {} does not match dimension {}",
-                sl.len(),
-                dim
-            )));
-        }
-        Some(Array1::from_vec(sl.to_vec()))
-    } else {
-        None
-    };
+    require_positive_budget(budget)?;
+    let (bounds, dim, seed_arr) = parse_box(low, high, x0)?;
     let seed_view = seed_arr.as_ref().map(|a| a.view());
     let obj = CallableObjective::new(obj_fn, bounds);
     let errors = obj.errors();
@@ -1824,10 +1908,7 @@ fn gpmd_optimize(
     };
     let out = PyDict::new(py);
     out.set_item("best_val", result.best_val)?;
-    out.set_item(
-        "best_pos",
-        PyArray1::from_slice(py, result.best_pos.as_slice().unwrap()),
-    )?;
+    out.set_item("best_pos", py_view1(py, result.best_pos.view()))?;
     out.set_item("n_evals", result.n_evals)?;
     out.set_item("n_grads", result.n_grads)?;
     out.set_item("n_accept", result.n_accept)?;
@@ -1856,27 +1937,8 @@ fn amsa_optimize(
     grad_fn: Option<Py<PyAny>>,
     x0: Option<PyReadonlyArray1<'_, f64>>,
 ) -> PyResult<Py<PyDict>> {
-    let low_vec = low.as_slice()?.to_vec();
-    let high_vec = high.as_slice()?.to_vec();
-    validate_box_bounds(&low_vec, &high_vec)?;
-    if budget == 0 {
-        return Err(PyValueError::new_err("budget must be positive"));
-    }
-    let dim = low_vec.len();
-    let bounds = Bounds::new(Array1::from_vec(low_vec), Array1::from_vec(high_vec), 1e-9);
-    let seed_arr = if let Some(x0) = x0 {
-        let sl = x0.as_slice()?;
-        if sl.len() != dim {
-            return Err(PyValueError::new_err(format!(
-                "x0 length {} does not match dimension {}",
-                sl.len(),
-                dim
-            )));
-        }
-        Some(Array1::from_vec(sl.to_vec()))
-    } else {
-        None
-    };
+    require_positive_budget(budget)?;
+    let (bounds, dim, seed_arr) = parse_box(low, high, x0)?;
     let seed_view = seed_arr.as_ref().map(|a| a.view());
     let obj = CallableObjective::new(obj_fn, bounds);
     let errors = obj.errors();
@@ -1891,14 +1953,309 @@ fn amsa_optimize(
     };
     let out = PyDict::new(py);
     out.set_item("best_val", result.best_val)?;
-    out.set_item(
-        "best_pos",
-        PyArray1::from_slice(py, result.best_pos.as_slice().unwrap()),
-    )?;
+    out.set_item("best_pos", py_view1(py, result.best_pos.view()))?;
     out.set_item("n_evals", result.n_evals)?;
     out.set_item("n_grads", result.n_grads)?;
     out.set_item("n_reseeds", result.n_reseeds)?;
     errors.finish(py)?;
+    Ok(out.into())
+}
+
+fn coverage_decisions_dict<'py>(
+    py: Python<'py>,
+    stats: &crate::methods::box_hopping::CoverageDecisionStats,
+) -> PyResult<Bound<'py, PyDict>> {
+    let out = PyDict::new(py);
+    out.set_item("comparisons", stats.comparisons)?;
+    out.set_item("unresolved", stats.unresolved)?;
+    out.set_item("accepted", stats.accepted)?;
+    out.set_item("peer_overlap", stats.peer_overlap)?;
+    out.set_item("peer_delta_changes", stats.peer_delta_changes)?;
+    out.set_item("probability_changes", stats.probability_changes)?;
+    out.set_item("drawn_comparisons", stats.drawn_comparisons)?;
+    out.set_item("drawn_disagreements", stats.drawn_disagreements)?;
+    out.set_item("probability_change_sum", stats.probability_change_sum)?;
+    out.set_item("max_probability_change", stats.max_probability_change)?;
+    out.set_item("max_abs_peer_delta", stats.max_abs_peer_delta)?;
+    out.set_item(
+        "max_abs_peer_delta_over_temperature",
+        stats.max_abs_peer_delta_over_temperature,
+    )?;
+    Ok(out)
+}
+
+/// Communicating box hops: Gaussian kick, quench, shared Euclidean history.
+///
+/// Four (or `replicas`) algebraic hops divide one work-unit budget. They
+/// share a Euclidean minimum history and Goedecker escape feedback. This is
+/// not cluster hopping: the move is a reflected Gaussian on the box.
+#[pyfunction]
+#[pyo3(signature = (obj_fn, low, high, budget, seed = 0, grad_fn = None, x0 = None,
+                    replicas = 4, history = "shared", membership = "accepted"))]
+#[allow(clippy::too_many_arguments)]
+fn box_ensemble_optimize(
+    py: Python<'_>,
+    obj_fn: Py<PyAny>,
+    low: PyReadonlyArray1<'_, f64>,
+    high: PyReadonlyArray1<'_, f64>,
+    budget: usize,
+    seed: u64,
+    grad_fn: Option<Py<PyAny>>,
+    x0: Option<PyReadonlyArray1<'_, f64>>,
+    replicas: usize,
+    history: &str,
+    membership: &str,
+) -> PyResult<Py<PyDict>> {
+    let parsed = parse_box_search(low, high, budget, replicas, x0, history, membership)?;
+    let seed_view = parsed.x0.as_ref().map(|a| a.view());
+    let config = crate::methods::box_hopping::BoxEnsembleConfig {
+        replicas,
+        budget,
+        history: parsed.history,
+        membership: parsed.membership,
+        identity_tol: crate::methods::box_hopping::IDENTITY_TOL,
+        shared_deposits: 8,
+        shared_visit_policy: crate::methods::minima_hopping::SharedVisitPolicy::Tabu,
+        ..crate::methods::box_hopping::BoxEnsembleConfig::default()
+    };
+    let Some(grad_fn) = grad_fn else {
+        return Err(PyValueError::new_err(
+            "box_ensemble_optimize requires grad_fn; use ensemble_optimize without a gradient",
+        ));
+    };
+    let obj = CallableObjective {
+        fn_: obj_fn,
+        bounds: parsed.bounds,
+    };
+    let dim = parsed.dim;
+    let grad = CallablePyGradient { fn_: grad_fn, dim };
+    let result = with_replica_threads(py, || {
+        crate::methods::box_hopping::box_ensemble_optimize(&obj, &grad, seed, seed_view, &config)
+    });
+    let out = PyDict::new(py);
+    out.set_item("best_val", result.best_val)?;
+    out.set_item("best_pos", py_view1(py, result.best_pos.view()))?;
+    out.set_item("n_evals", result.n_evals)?;
+    out.set_item("n_grads", result.n_grads)?;
+    out.set_item("hops", result.hops)?;
+    out.set_item("history_observations", result.history_observations)?;
+    out.set_item("history_minima", result.history_minima)?;
+    out.set_item("history_refusals", result.history_cost.1)?;
+    out.set_item("history_seconds", result.history_cost.2)?;
+    out.set_item("shared_deposits", result.shared_deposits)?;
+    out.set_item("coverage_observations", result.coverage.local_observations)?;
+    out.set_item("coverage_published", result.coverage.published_visits)?;
+    out.set_item(
+        "coverage_applied_foreign",
+        result.coverage.applied_foreign_visits,
+    )?;
+    out.set_item(
+        "coverage_capped_foreign",
+        result.coverage.capped_foreign_visits,
+    )?;
+    out.set_item(
+        "coverage_regions_per_chain",
+        result.coverage.per_chain_regions,
+    )?;
+    out.set_item("coverage_recrossings", result.coverage.recrossings)?;
+    out.set_item(
+        "coverage_peer_recrossings",
+        result.coverage.peer_recrossings,
+    )?;
+    out.set_item(
+        "coverage_peer_only_recrossings",
+        result.coverage.peer_only_recrossings,
+    )?;
+    out.set_item("coverage_escape_updates", result.coverage.escape_updates)?;
+    out.set_item("coverage_novel_arrivals", result.coverage.novel_arrivals)?;
+    out.set_item("coverage_novelty_updates", result.coverage.novelty_updates)?;
+    out.set_item(
+        "coverage_published_samples",
+        result.coverage.published_samples,
+    )?;
+    out.set_item(
+        "coverage_applied_foreign_samples",
+        result.coverage.applied_foreign_samples,
+    )?;
+    out.set_item(
+        "coverage_sample_peer_checks",
+        result.coverage.sample_peer_checks,
+    )?;
+    out.set_item(
+        "coverage_sample_anchor_overlaps",
+        result.coverage.sample_anchor_overlaps,
+    )?;
+    out.set_item(
+        "coverage_sample_anchor_only_overlaps",
+        result.coverage.sample_anchor_only_overlaps,
+    )?;
+    out.set_item("coverage_sample_overlaps", result.coverage.sample_overlaps)?;
+    out.set_item(
+        "coverage_repelled_proposals",
+        result.coverage.repelled_proposals,
+    )?;
+    out.set_item(
+        "coverage_constrained_repulsions",
+        result.coverage.constrained_repulsions,
+    )?;
+    out.set_item(
+        "coverage_decisions",
+        coverage_decisions_dict(py, &result.coverage_decisions)?,
+    )?;
+    Ok(out.into())
+}
+
+/// Box search split on gradient: hop-and-quench, or the values-only portfolio.
+#[pyfunction]
+#[pyo3(signature = (obj_fn, low, high, budget, seed = 0, grad_fn = None, x0 = None,
+                    replicas = 4, history = "shared", membership = "accepted", *,
+                    coverage_shared = None, coverage_radius = None, coverage_neighbors = None))]
+#[allow(clippy::too_many_arguments)]
+fn ensemble_optimize(
+    py: Python<'_>,
+    obj_fn: Py<PyAny>,
+    low: PyReadonlyArray1<'_, f64>,
+    high: PyReadonlyArray1<'_, f64>,
+    budget: usize,
+    seed: u64,
+    grad_fn: Option<Py<PyAny>>,
+    x0: Option<PyReadonlyArray1<'_, f64>>,
+    replicas: usize,
+    history: &str,
+    membership: &str,
+    coverage_shared: Option<bool>,
+    coverage_radius: Option<f64>,
+    coverage_neighbors: Option<usize>,
+) -> PyResult<Py<PyDict>> {
+    let parsed = parse_box_search(low, high, budget, replicas, x0, history, membership)?;
+    if coverage_radius.is_some_and(|radius| !radius.is_finite() || radius <= 0.0) {
+        return Err(PyValueError::new_err(
+            "coverage radius must be finite and positive",
+        ));
+    }
+    let seed_view = parsed.x0.as_ref().map(|a| a.view());
+    let obj = CallableObjective {
+        fn_: obj_fn,
+        bounds: parsed.bounds,
+    };
+    let dim = parsed.dim;
+    let history_mode = parsed.history;
+    let membership = parsed.membership;
+    let coverage =
+        (coverage_shared.is_some() || coverage_radius.is_some() || coverage_neighbors.is_some())
+            .then(|| {
+                let defaults = crate::methods::box_hopping::BoxCoverageConfig::default();
+                crate::methods::box_hopping::BoxCoverageConfig {
+                    shared: coverage_shared.unwrap_or(matches!(
+                        history_mode,
+                        crate::methods::ensemble::HistoryMode::Shared
+                    )),
+                    radius: coverage_radius.unwrap_or(defaults.radius),
+                    neighbors: coverage_neighbors.unwrap_or(defaults.neighbors),
+                    ..defaults
+                }
+            });
+    let result = with_replica_threads(py, || {
+        let grad = grad_fn.map(|fn_| CallablePyGradient { fn_, dim });
+        if let Some(coverage) = coverage.as_ref() {
+            let config = crate::methods::box_hopping::BoxEnsembleConfig {
+                replicas,
+                budget,
+                history: history_mode,
+                membership,
+                ..Default::default()
+            };
+            crate::methods::box_hopping::ensemble_hop_optimize_with_config(
+                &obj,
+                grad.as_ref(),
+                seed,
+                seed_view,
+                &config,
+                coverage,
+            )
+        } else {
+            crate::methods::box_hopping::ensemble_hop_optimize(
+                &obj,
+                grad.as_ref(),
+                seed,
+                seed_view,
+                budget,
+                replicas,
+                history_mode,
+                membership,
+            )
+        }
+    });
+    let out = PyDict::new(py);
+    out.set_item("best_val", result.best_val)?;
+    out.set_item("best_pos", py_view1(py, result.best_pos.view()))?;
+    out.set_item("charged", result.charged)?;
+    out.set_item("n_evals", result.n_evals)?;
+    out.set_item("n_grads", result.n_grads)?;
+    out.set_item("hops", result.hops)?;
+    out.set_item("history_observations", result.history_observations)?;
+    out.set_item("history_minima", result.history_minima)?;
+    out.set_item("history_refusals", result.history_cost.1)?;
+    out.set_item("history_seconds", result.history_cost.2)?;
+    out.set_item("coverage_observations", result.coverage.local_observations)?;
+    out.set_item("coverage_published", result.coverage.published_visits)?;
+    out.set_item(
+        "coverage_applied_foreign",
+        result.coverage.applied_foreign_visits,
+    )?;
+    out.set_item(
+        "coverage_capped_foreign",
+        result.coverage.capped_foreign_visits,
+    )?;
+    out.set_item(
+        "coverage_regions_per_chain",
+        result.coverage.per_chain_regions,
+    )?;
+    out.set_item("coverage_recrossings", result.coverage.recrossings)?;
+    out.set_item(
+        "coverage_peer_recrossings",
+        result.coverage.peer_recrossings,
+    )?;
+    out.set_item(
+        "coverage_peer_only_recrossings",
+        result.coverage.peer_only_recrossings,
+    )?;
+    out.set_item("coverage_escape_updates", result.coverage.escape_updates)?;
+    out.set_item("coverage_novel_arrivals", result.coverage.novel_arrivals)?;
+    out.set_item("coverage_novelty_updates", result.coverage.novelty_updates)?;
+    out.set_item(
+        "coverage_published_samples",
+        result.coverage.published_samples,
+    )?;
+    out.set_item(
+        "coverage_applied_foreign_samples",
+        result.coverage.applied_foreign_samples,
+    )?;
+    out.set_item(
+        "coverage_sample_peer_checks",
+        result.coverage.sample_peer_checks,
+    )?;
+    out.set_item(
+        "coverage_sample_anchor_overlaps",
+        result.coverage.sample_anchor_overlaps,
+    )?;
+    out.set_item(
+        "coverage_sample_anchor_only_overlaps",
+        result.coverage.sample_anchor_only_overlaps,
+    )?;
+    out.set_item("coverage_sample_overlaps", result.coverage.sample_overlaps)?;
+    out.set_item(
+        "coverage_repelled_proposals",
+        result.coverage.repelled_proposals,
+    )?;
+    out.set_item(
+        "coverage_constrained_repulsions",
+        result.coverage.constrained_repulsions,
+    )?;
+    out.set_item(
+        "coverage_decisions",
+        coverage_decisions_dict(py, &result.coverage_decisions)?,
+    )?;
     Ok(out.into())
 }
 
@@ -1921,32 +2278,13 @@ fn bfwt_optimize(
     grad_fn: Option<Py<PyAny>>,
     x0: Option<PyReadonlyArray1<'_, f64>>,
 ) -> PyResult<Py<PyDict>> {
-    let low_vec = low.as_slice()?.to_vec();
-    let high_vec = high.as_slice()?.to_vec();
-    validate_box_bounds(&low_vec, &high_vec)?;
-    if budget == 0 {
-        return Err(PyValueError::new_err("budget must be positive"));
-    }
+    require_positive_budget(budget)?;
     if !barrier_hat.is_finite() || barrier_hat < 0.0 {
         return Err(PyValueError::new_err(
             "barrier_hat must be a finite non-negative float",
         ));
     }
-    let dim = low_vec.len();
-    let bounds = Bounds::new(Array1::from_vec(low_vec), Array1::from_vec(high_vec), 1e-9);
-    let seed_arr = if let Some(x0) = x0 {
-        let sl = x0.as_slice()?;
-        if sl.len() != dim {
-            return Err(PyValueError::new_err(format!(
-                "x0 length {} does not match dimension {}",
-                sl.len(),
-                dim
-            )));
-        }
-        Some(Array1::from_vec(sl.to_vec()))
-    } else {
-        None
-    };
+    let (bounds, dim, seed_arr) = parse_box(low, high, x0)?;
     let seed_view = seed_arr.as_ref().map(|a| a.view());
     let obj = CallableObjective::new(obj_fn, bounds);
     let errors = obj.errors();
@@ -1973,10 +2311,7 @@ fn bfwt_optimize(
     };
     let out = PyDict::new(py);
     out.set_item("best_val", result.best_val)?;
-    out.set_item(
-        "best_pos",
-        PyArray1::from_slice(py, result.best_pos.as_slice().unwrap()),
-    )?;
+    out.set_item("best_pos", py_view1(py, result.best_pos.view()))?;
     out.set_item("n_evals", result.n_evals)?;
     out.set_item("n_grads", result.n_grads)?;
     out.set_item("n_accept", result.n_accept)?;
@@ -2008,7 +2343,7 @@ fn bfwt_optimize(
 ///   grad_fn: optional gradient callable; enables the gradient arms
 ///            and the final polish.
 #[pyfunction]
-#[pyo3(signature = (obj_fn, low, high, budget, seed = 0, grad_fn = None, noise_sigma = None, policy = "auto", x0 = None))]
+#[pyo3(signature = (obj_fn, low, high, budget, seed = 0, grad_fn = None, noise_sigma = None, policy = "auto", x0 = None, *, replicas = 1, coverage_shared = true, coverage_radius = 0.05, coverage_neighbors = 0))]
 fn global_optimize(
     py: Python<'_>,
     obj_fn: Py<PyAny>,
@@ -2020,6 +2355,10 @@ fn global_optimize(
     noise_sigma: Option<f64>,
     policy: &str,
     x0: Option<PyReadonlyArray1<'_, f64>>,
+    replicas: usize,
+    coverage_shared: bool,
+    coverage_radius: f64,
+    coverage_neighbors: usize,
 ) -> PyResult<Py<PyDict>> {
     let low_vec = low.as_slice()?.to_vec();
     let high_vec = high.as_slice()?.to_vec();
@@ -2048,7 +2387,33 @@ fn global_optimize(
             )));
         }
     };
+    if replicas == 0 {
+        return Err(PyValueError::new_err("replicas must be positive"));
+    }
+    if !coverage_radius.is_finite() || coverage_radius <= 0.0 {
+        return Err(PyValueError::new_err(
+            "coverage_radius must be positive and finite",
+        ));
+    }
     let x0_view = start.as_ref().map(|x| x.view());
+    if replicas > 1 {
+        let config = crate::methods::portfolio::PortfolioEnsembleConfig {
+            replicas,
+            budget,
+            noise_sigma,
+            policy: pol,
+            coverage: crate::methods::BoxCoverageConfig {
+                shared: coverage_shared,
+                radius: coverage_radius,
+                neighbors: coverage_neighbors,
+                ..crate::methods::BoxCoverageConfig::default()
+            },
+        };
+        let grad = grad_fn.map(|fn_| CallablePyGradient::new(fn_, dim, &errors));
+        let out = portfolio_peers::run(py, &obj, grad.as_ref(), seed, &config);
+        errors.finish(py)?;
+        return out;
+    }
     let result = match grad_fn {
         Some(grad_fn) => {
             let grad = CallablePyGradient::new(grad_fn, dim, &errors);
@@ -2446,6 +2811,18 @@ impl PyClusterConfig {
         })
     }
 
+    /// Communicating paper arm: orbit kernel plus recognition, not recommended.
+    #[staticmethod]
+    fn communicating(n: usize) -> PyResult<Self> {
+        if n < 2 {
+            return Err(PyValueError::new_err("n must be at least 2"));
+        }
+        Ok(Self {
+            inner: crate::methods::cluster_hopping::Config::communicating(n),
+            recommended: false,
+        })
+    }
+
     /// Recommended flags with the cost-asymmetric screen and budget-window
     /// temperature. Not the measured configuration.
     #[staticmethod]
@@ -2498,6 +2875,21 @@ impl PyClusterConfig {
         self.inner.depth_reward
     }
 
+    /// Orbit completion once per newly entered basin.
+    #[getter]
+    fn orbit_complete_on_new(&self) -> bool {
+        self.inner.orbit_complete_on_new
+    }
+
+    /// Shared-history visit policy: `tabu` or `recognition`.
+    #[getter]
+    fn shared_visit_policy(&self) -> &'static str {
+        match self.inner.shared_visit_policy {
+            crate::methods::minima_hopping::SharedVisitPolicy::Tabu => "tabu",
+            crate::methods::minima_hopping::SharedVisitPolicy::Recognition => "recognition",
+        }
+    }
+
     /// Quarantine the stalled funnel.
     #[getter]
     fn tabu_on_stall(&self) -> bool {
@@ -2519,6 +2911,14 @@ impl PyClusterConfig {
     fn __repr__(&self) -> String {
         if self.inner.bayes_screen && self.inner.budget_window {
             format!("Config.derived({})", self.inner.n_points)
+        } else if !self.inner.surfaces.is_empty()
+            && self.inner.orbit_complete_on_new
+            && matches!(
+                self.inner.shared_visit_policy,
+                crate::methods::minima_hopping::SharedVisitPolicy::Recognition
+            )
+        {
+            format!("Config.communicating({})", self.inner.n_points)
         } else if self.recommended {
             format!("Config.recommended({})", self.inner.n_points)
         } else {
@@ -2600,8 +3000,7 @@ impl Objective<f64> for CallableDiffObjective {
             return f64::INFINITY;
         }
         Python::attach(|py| {
-            let owned: Vec<f64> = x.iter().copied().collect();
-            let py_arr = PyArray1::from_vec(py, owned);
+            let py_arr = py_view1(py, x);
             match self.fn_.call1(py, (py_arr,)) {
                 Ok(r) => self.errors.float(py, &r),
                 Err(err) => {
@@ -2620,8 +3019,7 @@ impl eindir_core::gradient::Gradient<f64> for CallableDiffObjective {
             return Array1::zeros(dim);
         }
         Python::attach(|py| {
-            let owned: Vec<f64> = x.iter().copied().collect();
-            let py_arr = PyArray1::from_vec(py, owned);
+            let py_arr = py_view1(py, x);
             match self.grad_fn.call1(py, (py_arr,)) {
                 Ok(r) => match as_float_vector(py, &r) {
                     Some(values) if values.len() == dim => Array1::from_iter(
@@ -2755,14 +3153,22 @@ fn cluster_gradient_scale(
     })
 }
 
-fn cluster_bounds(n: usize) -> Bounds<f64> {
-    let extent = 4.0 * 2.0_f64.powf(1.0 / 6.0) * (n as f64).cbrt();
+fn cluster_bounds(n: usize, length_scale: f64) -> Bounds<f64> {
+    let extent = 4.0 * 2.0_f64.powf(1.0 / 6.0) * (n as f64).cbrt() * length_scale;
     let dim = 3 * n;
     Bounds::new(
         Array1::from_elem(dim, -extent),
         Array1::from_elem(dim, extent),
         0.0,
     )
+}
+
+fn recommended_with_scale(n: usize, length_scale: f64) -> crate::methods::cluster_hopping::Config {
+    let mut cfg = crate::methods::cluster_hopping::Config::with_scales(n, length_scale, 1.0);
+    cfg.allocate_moves = true;
+    cfg.return_screen = true;
+    cfg.orbit_complete_on_new = true;
+    cfg
 }
 
 /// Residual archive search on the measured recommended preset.
@@ -2860,10 +3266,11 @@ fn cluster_archive_search(
 /// Runs the measured cluster-search layer on a user energy and gradient.
 ///
 /// `recommended=True` uses `Config.recommended(n)`; otherwise
-/// `Config.for_cluster(n)`. A charged central-difference probe distinguishes
-/// gradients from force-valued callbacks when the budget can cover it. Every
-/// objective or gradient evaluation is charged to a ledger of `budget` units.
-/// Returns `{best, best_energy, hops}`.
+/// `Config.for_cluster(n)`. `communicating=True` uses
+/// `Config.communicating(n)` and overrides both. A charged central-difference
+/// probe distinguishes gradients from force-valued callbacks when the budget
+/// can cover it. Every objective or gradient evaluation is charged to a ledger
+/// of `budget` units. Returns `{best, best_energy, hops}`.
 /// `ras=True` runs residual archive search on `Config.recommended(n)` and
 /// also reports `charged`, `floors`, `returned`, and `events`.
 ///
@@ -2876,10 +3283,16 @@ fn cluster_archive_search(
 ///   recommended: measured stack when true, Wales-Doye baseline when false.
 ///   derived: cost-asymmetric Bayes screen and budget-window temperature
 ///     on top of the measured flags. Overrides `recommended` when true.
+///   communicating: orbit plus recognition. Overrides `recommended` and
+///     `derived` when true. Not `Config.recommended`.
 ///   ras: residual archive search on the recommended preset. Keyword-only;
 ///     default false. Does not change `Config.recommended`.
+///   start: optional flat `3n` start. When set, hops use [`search_from`]
+///     instead of seeding a random compact cluster.
+///   length_scale: optional physical length. When set with the recommended
+///     preset, hops use `with_scales` instead of the reduced LJ container.
 #[pyfunction]
-#[pyo3(signature = (obj_fn, grad_fn, n, budget, seed = 0, recommended = true, derived = false, *, ras = false))]
+#[pyo3(signature = (obj_fn, grad_fn, n, budget, seed = 0, recommended = true, derived = false, communicating = false, *, ras = false, start = None, length_scale = None))]
 fn cluster_search(
     py: Python<'_>,
     obj_fn: Py<PyAny>,
@@ -2889,7 +3302,10 @@ fn cluster_search(
     seed: u64,
     recommended: bool,
     derived: bool,
+    communicating: bool,
     ras: bool,
+    start: Option<PyReadonlyArray1<'_, f64>>,
+    length_scale: Option<f64>,
 ) -> PyResult<Py<PyDict>> {
     if n < 2 {
         return Err(PyValueError::new_err("n must be at least 2"));
@@ -2897,12 +3313,28 @@ fn cluster_search(
     if budget < 1 {
         return Err(PyValueError::new_err("budget must be positive"));
     }
+    if let Some(scale) = length_scale {
+        if !scale.is_finite() || scale <= 0.0 {
+            return Err(PyValueError::new_err(
+                "length_scale must be finite and positive",
+            ));
+        }
+    }
+    let scale = length_scale.unwrap_or(1.0);
     let cfg = if ras {
         crate::methods::cluster_hopping::Config::recommended(n)
+    } else if communicating {
+        crate::methods::cluster_hopping::Config::communicating(n)
     } else if derived {
         crate::methods::cluster_hopping::Config::derived(n)
     } else if recommended {
-        crate::methods::cluster_hopping::Config::recommended(n)
+        if length_scale.is_some() {
+            recommended_with_scale(n, scale)
+        } else {
+            crate::methods::cluster_hopping::Config::recommended(n)
+        }
+    } else if length_scale.is_some() {
+        crate::methods::cluster_hopping::Config::with_scales(n, scale, 1.0)
     } else {
         crate::methods::cluster_hopping::Config::for_cluster(n)
     };
@@ -2920,7 +3352,7 @@ fn cluster_search(
     let obj = CallableDiffObjective {
         fn_: obj_fn,
         grad_fn,
-        bounds: cluster_bounds(n),
+        bounds: cluster_bounds(n, scale),
         gradient_scale,
         errors: std::sync::Arc::clone(&errors),
     };
@@ -2929,7 +3361,20 @@ fn cluster_search(
         errors.finish(py)?;
         return out;
     }
-    let (out, _) = crate::methods::cluster_search::search(&obj, &cfg, &mut ledger, seed);
+    let (out, _) = if let Some(start) = start {
+        let sl = start.as_slice()?;
+        if sl.len() != 3 * n {
+            return Err(PyValueError::new_err(format!(
+                "start length {} must be 3*n = {}",
+                sl.len(),
+                3 * n
+            )));
+        }
+        let start = Array1::from_vec(sl.to_vec());
+        crate::methods::cluster_search::search_from(&obj, &cfg, &mut ledger, start.view(), seed)
+    } else {
+        crate::methods::cluster_search::search(&obj, &cfg, &mut ledger, seed)
+    };
     errors.finish(py)?;
     let dim = 3 * n;
     let best = out
@@ -2951,6 +3396,7 @@ fn cluster_search(
 #[pymodule]
 fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("__version__", crate::version::ANNEAL_VERSION)?;
+    device::register(m)?;
     m.add_class::<PyBasinBias>()?;
     m.add_class::<PyBoltzmann>()?;
     m.add_class::<PyFast>()?;
@@ -2987,6 +3433,8 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(dmc_population_optimize, m)?)?;
     m.add_function(wrap_pyfunction!(gpmd_optimize, m)?)?;
     m.add_function(wrap_pyfunction!(amsa_optimize, m)?)?;
+    m.add_function(wrap_pyfunction!(box_ensemble_optimize, m)?)?;
+    m.add_function(wrap_pyfunction!(ensemble_optimize, m)?)?;
     m.add_function(wrap_pyfunction!(bfwt_optimize, m)?)?;
     m.add_function(wrap_pyfunction!(global_optimize, m)?)?;
     m.add_function(wrap_pyfunction!(global_optimize_objective, m)?)?;

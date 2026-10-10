@@ -1,20 +1,22 @@
 """Gradient-free ChemFit fitting with anneal (corrected review-response driver).
 
-The snippet in the bug report had four defects:
+The snippet in the bug report drove ``fitter.evaluate`` / ``fitter.step``,
+which is current ChemFit's session protocol; ChemFit 3.1 named the pair
+``ask`` / ``tell``. :func:`anneal.chemfit.fit_chemfit` drives whichever pair
+the fitter has: ``init()``, one evaluation per candidate, step notices, then
+``finish(best)``. The first exception the fitter raises reaches the caller.
+The snippet had three defects:
 
-1. ``fitter.evaluate`` / ``fitter.step`` do not exist. ChemFit's protocol
-   is ``fitter.init()`` -> ``fitter.ask(params)`` per candidate ->
-   ``fitter.tell()`` per step -> ``fitter.finish(best)``.
-2. ``positions.reshape(...)`` without assignment is a no-op, so the
+1. ``positions.reshape(...)`` without assignment is a no-op, so the
    reported loss never matched the evaluated geometry.
-3. ``anneal.run`` took no initial parameters, so ChemFit's
+2. ``anneal.run`` took no initial parameters, so ChemFit's
    ``initial_params`` never reached the chain.
-4. The classical presets ran on the unconstrained neighborhood, so nothing
+3. The classical presets ran on the unconstrained neighborhood, so nothing
    kept proposals inside ``[low, high]``. They now run reflected on the
    box; every evaluation is in-bounds.
 
 This module keeps the ``run_anneal(benchmark_context)`` shape and fixes
-all four by delegating to :func:`anneal.chemfit.fit_chemfit`.
+all three by delegating to :func:`anneal.chemfit.fit_chemfit`.
 """
 
 from typing import Any

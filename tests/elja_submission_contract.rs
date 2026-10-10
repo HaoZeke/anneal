@@ -683,6 +683,101 @@ fn causal_lj_array_has_no_kinetic_graph_brain() {
 }
 
 #[test]
+fn occupancy_driver_compiles_brains_into_the_bank_rpc_build() {
+    let driver = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("examples")
+        .join("lj_cluster_search.rs");
+    let source = fs::read_to_string(&driver)
+        .unwrap_or_else(|error| panic!("failed to read {}: {error}", driver.display()));
+
+    let listen = source
+        .find(r#"std::env::var("CATALOG_BRAIN_LISTEN")"#)
+        .expect("worker must read CATALOG_BRAIN_LISTEN");
+    let prelude = &source[listen.saturating_sub(250)..listen];
+    assert!(
+        prelude.contains(r#"#[cfg(feature = "bank-rpc")]"#),
+        "occupancy is featomic,ira,bank-rpc; brains gated on nng-transport never start"
+    );
+    assert!(
+        !prelude.contains("nng-transport"),
+        "nng-transport is not an occupancy feature; brains must not require it"
+    );
+}
+
+#[test]
+fn diagnostic_probe_scale_is_independent_of_adaptive_search_difficulty() {
+    let source = include_str!("../examples/lj_cluster_search.rs");
+    let probe_action = source
+        .find("action: \"probe\".to_owned(),")
+        .expect("production must schedule diagnostic probes");
+    let proposal = &source[..probe_action];
+    let arguments = &proposal[proposal.rfind("fixed_probe_trial(").unwrap()..];
+    assert!(
+        !arguments.contains("difficulty_gain"),
+        "fixed-probe return counts require one proposal distribution"
+    );
+}
+
+#[test]
+fn diagnostic_probes_precede_adaptive_checkpoint_actions_and_require_a_minimum() {
+    let source = include_str!("../examples/lj_cluster_search.rs");
+    let checkpoint = &source[source
+        .find("let mut checkpoint = |snapshot: ChainCheckpoint<'_>|")
+        .unwrap()..];
+    let action = checkpoint.find("action: \"probe\".to_owned(),").unwrap();
+    for competing_action in [
+        "if core_class.is_some()",
+        "if rides_enabled",
+        "let hear_enabled",
+    ] {
+        assert!(
+            action < checkpoint.find(competing_action).unwrap(),
+            "a due diagnostic must not be starved by {competing_action}"
+        );
+    }
+    let scheduling = &checkpoint[..action];
+    let due = &scheduling[scheduling
+        .rfind("if probe_due")
+        .expect("retain a due probe until it can execute")..];
+    assert!(
+        due.contains("snapshot.current_gradient().is_some()"),
+        "return evidence needs a validated source minimum"
+    );
+    assert!(
+        due.contains("probe_due = false"),
+        "execution must clear the pending probe"
+    );
+    assert!(
+        checkpoint.contains("probe_due |= checkpoint_sequence.is_multiple_of(probe_interval)"),
+        "an invalid source must not lose the due diagnostic"
+    );
+}
+
+#[test]
+fn evidence_only_ablation_bypasses_catalog_geometry_policy() {
+    let source = include_str!("../examples/lj_cluster_search.rs");
+    assert!(source.contains("CATALOG_EVIDENCE_ONLY"));
+    let checkpoint = source
+        .rsplit_once("let mut checkpoint = |snapshot: ChainCheckpoint<'_>|")
+        .unwrap()
+        .1;
+    let evidence = checkpoint.find("if evidence_only {").unwrap();
+    let ordinary = checkpoint
+        .find("checkpoint_sequence = checkpoint_sequence")
+        .unwrap();
+    let body = &checkpoint[evidence..ordinary];
+    assert!(
+        body.contains(".record_work("),
+        "ablation must charge every local objective call"
+    );
+    assert!(body.contains("last_charged = snapshot.charged()"));
+    assert!(body.contains("return CheckpointAction::Continue"));
+    assert!(checkpoint[..evidence].contains(".post_surface_evidence("));
+    assert!(!body.contains("BoundaryProposal"));
+    assert!(!body.contains("ProbeProposal"));
+}
+
+#[test]
 fn production_lj_driver_does_not_consume_kinetic_boundary_crossings() {
     let driver = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("examples")

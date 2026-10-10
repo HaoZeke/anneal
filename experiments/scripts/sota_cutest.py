@@ -262,6 +262,62 @@ def portfolio_legacy(counter, low, high, dim, grad, rng, anchor=None):
     return portfolio(counter, low, high, dim, grad, rng, anchor=anchor, policy="legacy")
 
 
+def _ensemble_hop_arm(counter, low, high, grad, rng, anchor, history):
+    """Four box hops; only the history channel changes.
+
+    This is ``ensemble_optimize``: with a gradient, kick/quench and
+    ``SharedDesignHistory`` over ``MinimumHistory``; without, the
+    values-only portfolio. Frozen CUTEst cells pass ``counted_grad``.
+    """
+    import anneal
+
+    remaining = counter.budget - counter.n
+    if remaining <= 0:
+        return counter.best
+    jac = counter.counted_grad(grad) if grad is not None else None
+    try:
+        out = anneal.ensemble_optimize(
+            counter,
+            low,
+            high,
+            budget=remaining,
+            seed=int(rng.integers(1 << 31)),
+            grad_fn=jac,
+            x0=anchor,
+            replicas=4,
+            history=history,
+            membership="accepted",
+        )
+        best = float(out.get("best_val", float("inf")))
+        pos = np.asarray(out.get("best_pos", []), dtype=float).reshape(-1)
+        if pos.size == low.size:
+            if np.any(pos < low - 1e-8) or np.any(pos > high + 1e-8):
+                best = float("inf")
+        if math.isfinite(best) and best < counter.best:
+            counter.best = best
+    except _Budget:
+        pass
+    return counter.best
+
+
+def comm_hop(counter, low, high, dim, grad, rng, anchor=None):
+    """Four box hops sharing one MinimumHistory via SharedDesignHistory."""
+    del dim
+    return _ensemble_hop_arm(counter, low, high, grad, rng, anchor, "shared")
+
+
+def comm_hop_private(counter, low, high, dim, grad, rng, anchor=None):
+    """Same hop and budget split; each replica keeps a private history."""
+    del dim
+    return _ensemble_hop_arm(counter, low, high, grad, rng, anchor, "private")
+
+
+def comm_hop_none(counter, low, high, dim, grad, rng, anchor=None):
+    """Same hop and budget split; no minimum history at all."""
+    del dim
+    return _ensemble_hop_arm(counter, low, high, grad, rng, anchor, "none")
+
+
 def dmc_pop(counter, low, high, dim, grad, rng, anchor=None):
     """Population-controlled diffusion arm under the shared work-unit budget."""
     del dim
@@ -752,6 +808,9 @@ def cma_es_ipop(counter, low, high, dim, grad, rng, anchor=None):
 METHODS = {
     "portfolio": portfolio,
     "portfolio_legacy": portfolio_legacy,
+    "comm_hop": comm_hop,
+    "comm_hop_private": comm_hop_private,
+    "comm_hop_none": comm_hop_none,
     "dmc_pop": dmc_pop,
     "gpmd": gpmd,
     "amsa": amsa,

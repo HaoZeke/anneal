@@ -30,16 +30,25 @@ def lj_grad(x: np.ndarray) -> np.ndarray:
 def test_config_recommended_and_for_cluster():
     rec = Config.recommended(38)
     base = Config.for_cluster(38)
+    comm = Config.communicating(38)
     assert rec.n_points == 38
     assert base.n_points == 38
     assert rec.burst_moves
     assert rec.allocate_moves
     assert rec.depth_reward
     assert rec.tabu_on_stall
+    assert rec.shared_visit_policy == "tabu"
+    assert not rec.orbit_complete_on_new
     assert not base.burst_moves
     assert not base.allocate_moves
     assert not base.depth_reward
     assert not base.tabu_on_stall
+    assert not comm.burst_moves
+    assert comm.allocate_moves
+    assert not comm.depth_reward
+    assert comm.orbit_complete_on_new
+    assert comm.shared_visit_policy == "recognition"
+    assert rec.shared_visit_policy == "tabu"
 
 
 def test_config_rejects_tiny_n():
@@ -80,6 +89,23 @@ def test_cluster_search_rejects_bad_n_and_budget():
         cluster_search(lj_energy, lj_grad, 1, 100, seed=0)
     with pytest.raises(ValueError, match="positive"):
         cluster_search(lj_energy, lj_grad, 4, 0, seed=0)
+
+
+def test_cluster_search_start_kwarg():
+    import inspect
+
+    from anneal._core import cluster_search as core_cluster_search
+
+    if "start" not in inspect.signature(core_cluster_search).parameters:
+        pytest.skip("rebuild the extension for cluster_search start=")
+    n = 4
+    start = np.array(
+        [0.0, 0.0, 0.0, 1.1, 0.0, 0.0, 0.0, 1.1, 0.0, 0.0, 0.0, 1.1],
+        dtype=np.float64,
+    )
+    out = cluster_search(lj_energy, lj_grad, n, 200, seed=0, start=start)
+    assert np.asarray(out["best"]).shape == (3 * n,)
+    assert np.isfinite(out["best_energy"])
 
 
 def test_cluster_search_ras_flag_exists_and_recommended_defaults():

@@ -9,6 +9,65 @@ use super::*;
 /// the lever: at 75 points the merge radius on a distance spectrum is sharply
 /// sensitive, 13 seeds in 24 at 0.7 against 0 in 8 at 0.95, and a descriptor
 /// that separates distinct structures more cleanly is what would widen that.
+/// How the replica ladder offers swaps and where its rungs sit. The swap
+/// ratio is the bias-aware form of [`crate::tempering`] under every mode;
+/// what changes is which pairs are offered per sweep, whether the rungs
+/// move, and whether a rung's own temperature reaches its acceptance rule.
+/// Measured at LJ38 (4e5 charged, 96 seeds, four rungs) no mode beats a
+/// single chain at the same budget; the table is in the vault survey.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize)]
+pub enum LadderMode {
+    /// One cyclic adjacent pair per swap period, every rung running the
+    /// Metropolis rule at [`Config::temperature`] rather than its own.
+    #[default]
+    Shipped,
+    /// One cyclic adjacent pair per swap period, each rung at its own
+    /// temperature on the geometric schedule.
+    Cyclic,
+    /// Rungs at their own temperatures, sharing the budget, never exchanging:
+    /// the ladder with the exchange removed and nothing else changed.
+    Independent,
+    /// Whole parity classes offered per sweep with the parity drawn from a
+    /// coin, each rung at its own temperature, geometric schedule.
+    Reversible,
+    /// Whole parity classes with the parity alternating deterministically,
+    /// the rungs placed from the cold chain's measured energy fluctuation and
+    /// moved afterwards to equalise the communication barrier.
+    NonReversible,
+}
+
+impl LadderMode {
+    /// Whether a rung's own temperature reaches its acceptance rule.
+    pub fn tempers(&self) -> bool {
+        !matches!(self, LadderMode::Shipped)
+    }
+
+    /// The sweep scheme, for the modes that offer parity classes.
+    pub fn scheme(&self) -> crate::tempering::SwapScheme {
+        match self {
+            LadderMode::NonReversible => crate::tempering::SwapScheme::DeterministicEvenOdd,
+            _ => crate::tempering::SwapScheme::StochasticEvenOdd,
+        }
+    }
+
+    /// Whether the ladder is placed and moved by the barrier estimator.
+    pub fn adapts(&self) -> bool {
+        matches!(self, LadderMode::NonReversible)
+    }
+
+    /// Whether swaps go through the sweep machinery rather than the cyclic
+    /// pair.
+    pub fn sweeps(&self) -> bool {
+        matches!(self, LadderMode::Reversible | LadderMode::NonReversible)
+    }
+
+    /// Whether any exchange is offered at all.
+    pub fn exchanges(&self) -> bool {
+        !matches!(self, LadderMode::Independent)
+    }
+}
+
+/// Descriptor representation used to distinguish occupied search basins.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Keying {
@@ -46,6 +105,48 @@ pub enum Keying {
     /// Chatterjee-Voter move under a force ledger: many recrossings
     /// of the occupied packing, then an exit. No clock, no FPTA.
     SoapPacking,
+    /// Sorted distances with the kernel spectra of
+    /// [`crate::tensor_id::TripletSpectrum`] appended: strictly richer than
+    /// [`Keying::Distances`], adding the weighted triangle sum a multiset of
+    /// distances cannot hold, with no reference structure and no chosen
+    /// coordinate. Its merge radius is a different number from the distance
+    /// keying's, larger by the length of the appended block.
+    Triplet,
+    /// Steinhardt Q4 of the whole cluster: a morphology coordinate, so a
+    /// bias on it deposits on shape rather than on basin identity. Its merge
+    /// radius is a deposition width in bond-order units; global Q4 separates
+    /// the icosahedral and fcc funnels of LJ38 by about 0.15.
+    Q4,
+    /// Steinhardt Q4 and Q6 as a two-component coordinate.
+    Q4Q6,
+    /// Leading principal component of the SOAP power spectrum, fitted online
+    /// from the structures the run has visited.
+    Soap,
+    /// Kernel density estimate over per-site coordination numbers.
+    Coordination,
+}
+
+impl Keying {
+    /// Whether this keying deposits on morphology rather than on basin
+    /// identity.
+    pub fn is_morphology(self) -> bool {
+        matches!(
+            self,
+            Keying::Q4 | Keying::Q4Q6 | Keying::Soap | Keying::Coordination
+        )
+    }
+
+    /// The deposition width these coordinates want, in their own units; a
+    /// merge radius carried over from the distance spectrum would put a
+    /// whole run into one bin of a coordinate that lives in `[0, 1]`.
+    pub fn default_merge_radius(self) -> Option<f64> {
+        match self {
+            Keying::Q4 | Keying::Q4Q6 => Some(0.01),
+            Keying::Soap => Some(0.25),
+            Keying::Coordination => Some(0.5),
+            _ => None,
+        }
+    }
 }
 
 /// Constraint applied to SOAP proposals on grouped systems.
@@ -60,10 +161,29 @@ pub enum SoapProposalMode {
     Off,
 }
 
+/// Deterministic continuous-symmetry proposal inserted into basin hopping.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize)]
+#[serde(tag = "group", rename_all = "snake_case")]
+pub enum ContinuousSymmetry {
+    /// No continuous-symmetry proposal.
+    #[default]
+    Off,
+    /// Project onto the inversion group `C_i` at quench indices divisible by
+    /// `interval`, quench the group average, and adopt it only when it is
+    /// lower. The supplied minimum is quench one and each projection quench
+    /// advances the same counter as an ordinary hopping quench.
+    Inversion {
+        /// Divisor of the basin-hopping quench count.
+        interval: usize,
+    },
+}
+
 /// Driver settings.
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct Config {
-    /// Points in a state; the state length must be `3 * n_points`.
+    /// Points in a state. Cartesian libraries use length `3 * n_points`.
+    /// [`MoveLibrary::RigidBody`] appends a rotation vector per point, so
+    /// the objective dimension is `6 * n_points`.
     pub n_points: usize,
     /// Declared coordinate length scale.
     pub length_scale: f64,
@@ -71,6 +191,8 @@ pub struct Config {
     pub energy_scale: f64,
     /// Proposal library hosted by this configuration.
     pub move_library: MoveLibrary,
+    /// Actual site geometry for descriptors of center-and-rotation states.
+    pub rigid_body_geometry: Option<crate::rigid_body::RigidBodyGeometry>,
     /// Separation below which two points count as neighbours.
     pub neighbour_cutoff: f64,
     /// Pair cutoff used by the symmetry proposal.
@@ -88,10 +210,31 @@ pub struct Config {
     /// descriptor space with no physical meaning; against a shape distance it
     /// is a length.
     pub merge_radius: f64,
+    /// Kernel width for [`Keying::Triplet`], in the units of the coordinates.
+    ///
+    /// Ignored by every other keying. Defaults to the Lennard-Jones value; a
+    /// potential with a different pair minimum needs it scaled the way
+    /// `container` and `min_separation` are.
+    pub keying_sigma: f64,
+    /// Length scale of the potential, as `r_min / 2^(1/6)`: 1 for
+    /// Lennard-Jones. Only the morphology keyings read it, since their
+    /// cutoffs sit between the first and second neighbour shells.
+    pub morphology_scale: f64,
     /// Design point for the budget-window temperature, as a fraction of the
     /// sphere-model descent boundary. Must lie strictly below two.
     pub theta: f64,
     /// Set the temperature by the budget-window law rather than holding it.
+    ///
+    /// On a replica ladder the law sets the coldest rung's temperature, read
+    /// at the gap of whichever rung is asking, and every rung hops at its
+    /// [`Config::ladder_top`] ratio times it. The law's window comes from the
+    /// gap and the remaining budget, so it moves by orders of magnitude over a
+    /// run; a ladder held at fixed multiples of `temperature` would drift
+    /// above and below it, and one left to the law alone would be flat. Each
+    /// declined rise reaches the barrier estimate divided by the declining
+    /// rung's ratio, so the escape floor asks every rung to clear, at its own
+    /// temperature, what it fails to cross, and the larger rises a hot rung
+    /// declines do not heat the coldest one.
     pub budget_window: bool,
     /// Choose the move kernel by discounted Thompson allocation.
     pub allocate_moves: bool,
@@ -99,14 +242,43 @@ pub struct Config {
     pub adaptive_height: bool,
     /// Hops a single `run` may take before returning, when set.
     ///
-    /// Used by the replica ladder to advance one chain by a slice; a plain run
-    /// leaves it unset and stops only when the ledger does.
+    /// A plain run leaves it unset and stops only when the ledger does. The
+    /// replica ladder does not slice with it: every rung runs inside the one
+    /// call, and a cap counts the hops of all of them.
     pub max_hops: Option<usize>,
     /// Replicas run on a temperature ladder, with periodic swaps.
     ///
-    /// One is the plain chain. Above one, the driver runs a ladder and offers
-    /// swaps through [`crate::exchange::Exchange`], which is the crate's own
-    /// operator and satisfies detailed balance by construction.
+    /// One is the plain chain. Above one, the driver runs a ladder on the one
+    /// budget: rung `k` hops at its [`Config::ladder_top`] ratio times the
+    /// temperature a single chain would hop at, one rung at a time, each with
+    /// its own bias. Every [`Config::swap_period`] hops the active rung offers
+    /// to exchange states with the next one up, the hottest with the coldest,
+    /// and that rung hops next. The offer is accepted by the bias-exchange
+    /// factor that each rung's bias evaluated at both states gives, at the
+    /// temperatures the two rungs would hop at from the states they hold, and
+    /// the funnel bias, the packing pile and the energy bias every rung shares
+    /// weigh in by the difference of the two inverse temperatures. A state
+    /// carries its basin and its validation gradient with it from rung to
+    /// rung. With equal biases it is the Metropolis exchange of
+    /// [`crate::exchange::MetropolisExchange`].
+    ///
+    /// A rung's temperature is what its acceptance, its own bias's deposits,
+    /// the funnel bias's visits and the swap read; proposals keep the move
+    /// scale `temperature` sets on every rung, as they do under
+    /// [`Config::budget_window`]. The energy bias is built and filled at the
+    /// temperature the coldest rung would hop at from the state it holds (see
+    /// [`Config::energy_bias`]).
+    /// The packing pile deposits at `temperature` itself, as do the deposits
+    /// that come with a checkpoint's proposals and remote states, which never
+    /// happen on a ladder: the runs that take a checkpoint or a shared bias
+    /// refuse one. Under minima hopping, and under the flat-histogram rule
+    /// once its window exists, a hop is accepted without a temperature, so
+    /// there the ratio reaches only the swap and the bias terms. The swap
+    /// exchanges the weight the acceptance applies: the flat-histogram cost
+    /// cancels from it (see [`Config::flat_histogram`]), and minima hopping,
+    /// whose threshold has no weight, swaps by the Metropolis factor. Delayed
+    /// acceptance applies no one weight, so a ladder refuses it (see
+    /// [`Config::delayed_acceptance`]).
     ///
     /// This is the standard non-local mechanism for a multi-funnel landscape
     /// and the measurements here say why it is the right one to reach for: no
@@ -134,6 +306,27 @@ pub struct Config {
     /// hops from 200k, which is not a search. The controller and the climb are
     /// complementary and must stay separable.
     pub minima_hopping: bool,
+    /// Under [`Config::minima_hopping`], propose by Goedecker's escape: a
+    /// short NVE trajectory launched with kinetic energy
+    /// [`Config::md_escape_kinetic`] times the controller's escape scale,
+    /// stopped after two potential-energy minima along the path, then
+    /// quenched like any trial. Every MD step charges an energy and a
+    /// gradient. Off, the controller scales the ordinary kick instead.
+    pub md_escape: bool,
+    /// Time step of the escape trajectory in the run's reduced units.
+    pub md_escape_dt: f64,
+    /// Kinetic energy per unit escape scale, in the objective's units.
+    pub md_escape_kinetic: f64,
+    /// Potential-energy minima along the trajectory before it stops
+    /// (Goedecker's mdmin); two is his default, more travels further.
+    pub md_escape_minima: usize,
+    /// Cap on integration steps per escape.
+    pub md_escape_max_steps: usize,
+    /// Velocity-softening probes before the escape (Goedecker's softening):
+    /// each probe costs one evaluation and turns the initial velocity toward
+    /// the soft modes, which is what carries the trajectory out of the well
+    /// instead of into hard vibrations. Zero is no softening.
+    pub md_escape_soften: usize,
     /// Lanczos steps for the soft-mode escape.
     ///
     /// Each costs two gradient evaluations, charged. Eight resolves the softest
@@ -222,6 +415,68 @@ pub struct Config {
     /// approximate symmetry and lands the structure on it, or finds none and
     /// leaves the chain alone. See [`crate::symmetrise`].
     pub symmetrise_on_stall: bool,
+    /// Add the detected point-group symmetrisation as an ordinary proposal
+    /// arm ([`ClusterMove::PointSymmetrise`]) to whatever move library is
+    /// selected.
+    ///
+    /// The published scheme runs on every step, not on a stall: a nearly
+    /// symmetric minimum met anywhere in the walk is pushed onto its symmetry
+    /// and quenched while the chain is still there.
+    pub point_symmetrise: bool,
+    /// Core symmetrisation once per newly entered basin, after Oakley,
+    /// Johnston and Wales: when an accepted hop lands in a basin the chain
+    /// was not in, the innermost [`Config::symmetrise_core_fraction`] of the
+    /// points is pushed onto its approximate point group, the result is
+    /// quenched, and the quench is offered to the acceptance rule. One
+    /// attempt per new basin, so a chain sitting still never pays twice.
+    pub point_symmetrise_on_new: bool,
+    /// Whole-cluster orbit completion under the core's point group on
+    /// entering a new basin (Oakley, Johnston and Wales 2013, the scheme
+    /// they report as productive on 98 points): every atom is placed on
+    /// the group's site set, surface atoms onto empty orbit positions, then
+    /// quenched and offered to the acceptance rule. With
+    /// [`Config::point_symmetrise_on_new`] both are attempted, core first.
+    pub orbit_complete_on_new: bool,
+    /// Add the population-repulsion SOAP step ([`ClusterMove::SoapRepel`])
+    /// as a proposal arm.
+    pub soap_repel: bool,
+    /// Filter a heard structure by this chain's biased energy difference.
+    /// This unilateral relocation heuristic does not certify equilibrium
+    /// sampling or the product-ensemble balance of a paired replica swap.
+    pub exchange_metropolis: bool,
+    /// Most bias deposits paid per certified quench on behalf of other
+    /// chains' visits to the reached minimum, when the run has a minimum
+    /// history. Zero leaves the history informational. Only the default
+    /// acceptance rule uses it; [`Config::minima_hopping`] feeds the same
+    /// counts to its escape controller instead.
+    pub shared_deposits: usize,
+    /// Whether shared-history visit counts drive escape and acceptance.
+    ///
+    /// Tabu is the hist75 loss. Recognition keeps walks on their own standing.
+    pub shared_visit_policy: crate::methods::minima_hopping::SharedVisitPolicy,
+    /// Basin hopping with occasional jumping: on stagnation, a short walk of
+    /// unquenched, unconditionally accepted collective displacements, then a
+    /// quench.
+    pub jump_on_stall: bool,
+    /// Hops without improvement before a jump (and between jumps).
+    pub jump_patience: usize,
+    /// Displacements in one jump.
+    pub jump_steps: usize,
+    /// Half-width of each displacement, in length units.
+    pub jump_step: f64,
+    /// Fraction of points, by distance from the centroid, that count as the
+    /// core for [`Config::point_symmetrise_on_new`].
+    pub symmetrise_core_fraction: f64,
+    /// Symmetrise after every accepted hop, not only on entering a new basin.
+    pub point_symmetrise_every_accept: bool,
+    /// Published continuous-symmetry move, independent of stall detection.
+    ///
+    /// This is distinct from [`Config::symmetrise_on_stall`]. The
+    /// continuous-symmetry construction solves a global atom assignment for
+    /// each group image and quenches the averaged geometry on a fixed
+    /// schedule. The current implementation provides `C_i`, whose inversion
+    /// operation makes the orientation objective rotation independent.
+    pub continuous_symmetry: ContinuousSymmetry,
     /// Largest deviation at which an approximate symmetry is worth using.
     pub symmetry_tolerance: f64,
     /// Coordinate-space radius used to merge points after symmetrisation.
@@ -286,6 +541,16 @@ pub struct Config {
     /// sampled energy histogram flat, so the deep and rare energies get the
     /// same share of the run as the shallow and abundant ones. See
     /// [`crate::dos`].
+    ///
+    /// On a replica ladder every rung reads the one cost and none divides it
+    /// by its temperature, so the rungs' acceptance differs only in how it
+    /// weighs the biases, and a swap is accepted on the biases alone: the cost
+    /// cancels from the factor and takes the energies with it. The first sweep,
+    /// before the cost exists, swaps by the Metropolis factor without the
+    /// energy bias, which that sweep does not read. Every rung feeds the
+    /// window and its sweeps unless [`Config::statistical_temperature`] is on
+    /// as well, when only the rungs at ratio one do and the sweeps come about
+    /// `R` times further apart on a ladder of `R` rungs.
     pub flat_histogram: bool,
     /// Trials between weight refreshes. The weight is frozen across a sweep so
     /// each sweep is an exact chain for its own target rather than an adaptive
@@ -301,6 +566,26 @@ pub struct Config {
     /// The Metropolis rule and the basin bias both measure well and both stand;
     /// what this replaces is the one hand-set number they sit on. See
     /// [`crate::dos::DensityOfStates::temperature`].
+    ///
+    /// On a replica ladder the estimate, clamped to its band around
+    /// `temperature`, is the coldest rung's temperature and every rung hops at
+    /// its [`Config::ladder_top`] ratio times it, so each rung's band sits
+    /// around its own ladder temperature. The estimate is the temperature at
+    /// which a chain at that energy is just mobile, which is the coldest rung's
+    /// job; the ratio keeps the hotter rungs that many times above it. Clamping
+    /// every rung to the one band instead would cut the top of the ladder off
+    /// wherever the estimate runs high.
+    ///
+    /// Only the rungs at ratio one feed the density of states the estimate is
+    /// read from, which is the coldest rung alone unless the ladder is flat,
+    /// and with [`Config::flat_histogram`] on as well the flat-histogram window
+    /// and its sweeps come from that rung alone too. A hotter rung stands with
+    /// another weight than the one the estimator fits, so its counts would
+    /// bias the estimate; measured on LJ13, they heated every rung. The cost
+    /// is evidence: on a ladder of `R` rungs taking turns the density of states
+    /// records one hop in `R`, so the estimate learns about `R` times slower
+    /// and first takes over after about `R` times [`Config::flat_sweep`] hops,
+    /// at hop 750 rather than 400 on two rungs at the default sweep.
     pub statistical_temperature: bool,
     /// Deposit a well-tempered bias in quenched energy.
     ///
@@ -308,11 +593,28 @@ pub struct Config {
     /// a funnel holding exponentially many basins. Energy separates the funnel
     /// where a coordinate length cannot. All scales come from the run's own
     /// quenched-energy distribution. See [`crate::dos::EnergyBias`].
+    ///
+    /// On a replica ladder the bias is one function every rung reads over its
+    /// own temperature. Its tempering factor and its deposits read the
+    /// temperature the coldest rung would hop at from the state it holds, so
+    /// neither depends on which rung fills the first sample or deposits, and
+    /// `(gamma - 1) T` is the sample's spread at the temperature the sample
+    /// was filled at.
     pub energy_bias: bool,
     /// Reward move arms by the depth they reach, not by acceptance.
     ///
     /// See [`crate::allocate::DepthAllocator`].
     pub depth_reward: bool,
+    /// Reward the move allocator only for accepted hops that land in a new
+    /// basin, not for accepted returns.
+    ///
+    /// With acceptance as the reward, an arm whose proposals quench back
+    /// into the incumbent is rewarded every time: measured on 75 points,
+    /// symmetrisation arms took over half the draws at 60 to 77 per cent
+    /// acceptance while contributing no crossing. Novelty is the quantity a
+    /// search wants from a proposal arm and it is free: the return screen
+    /// already says whether a trial came home.
+    pub novel_reward: bool,
     /// Perturb in the soft subspace of the incumbent's own curvature.
     ///
     /// An isotropic step in `3n` dimensions puts nearly all of its norm on
@@ -423,6 +725,9 @@ pub struct Config {
     /// spends nothing and discards nothing: the bias the old chain built is
     /// what steers the new one away from where the old one was.
     pub restart_on_stall: bool,
+    /// Charged calls without a new best before a stalled chain restarts
+    /// from a fresh random cluster.
+    pub restart_patience: usize,
     /// Set the merge radius from how far an accepted hop actually reaches.
     ///
     /// A radius chosen by hand does not transfer: one calibrated at 38 points
@@ -439,18 +744,36 @@ pub struct Config {
     ///
     /// A bias pushes a chain out of where it sits and a low temperature keeps
     /// it in, so a cold rung carrying a full bias is evicted from good basins
-    /// and cannot return. Measured on LJ75, that inverts the ladder: the
-    /// coldest rung held -391.3 while the hottest held -396.0, where a working
-    /// ladder has the deepest structure at the cold end.
+    /// and cannot return. Measured on LJ75 with every rung hopping at
+    /// `temperature`, that inverted the ladder: the coldest rung held -391.3
+    /// while the hottest held -396.0, where a working ladder has the deepest
+    /// structure at the cold end. With each rung at its own temperature a
+    /// deposit of height `h` weighs `h / T_k` in the acceptance, so one height
+    /// on every rung pushes the coldest [`Config::ladder_top`] times as hard
+    /// as the hottest.
     ///
-    /// Scaling the height by the rung's temperature ratio leaves the coldest
-    /// rung nearly a plain hopping chain, which polishes, and the hottest
-    /// carrying the full bias, which crosses. The swap then moves a crossing
-    /// down to a chain that can refine it, which is the division of labour the
-    /// ladder exists for.
+    /// Scaling the height by the rung's temperature ratio makes `h_k / T_k`
+    /// the same on every rung: the hottest carries the configured height and
+    /// the coldest a `1 / ladder_top` share, so no rung is pushed out of good
+    /// basins harder than another and the coldest can polish while the hottest
+    /// crosses. The swap then moves a crossing down to a chain that can refine
+    /// it, which is the division of labour the ladder exists for.
     pub bias_by_rung: bool,
-    /// Hottest temperature on the ladder, as a multiple of `temperature`.
+    /// Hottest rung's temperature as a multiple of the coldest's.
+    ///
+    /// Rung `k` of `R` hops at `ladder_top^(k/(R-1))` times the temperature a
+    /// single chain would hop at: `temperature`, or the adaptive one under
+    /// [`Config::budget_window`] or [`Config::statistical_temperature`].
     pub ladder_top: f64,
+    /// Which pairs a swap offers, and where the rungs sit; see [`LadderMode`].
+    pub ladder_mode: LadderMode,
+    /// Sweeps between ladder adaptations under [`LadderMode::NonReversible`].
+    pub ladder_window: usize,
+    /// Hops the cold rung runs before the ladder is built from its energy
+    /// fluctuation, under [`LadderMode::NonReversible`].
+    pub ladder_pilot: usize,
+    /// Swap acceptance the adapted ladder is placed and held at.
+    pub ladder_target_accept: f64,
     /// Abandon a trial whose short relaxation is heading back to the current
     /// basin, before paying for the full one.
     ///
@@ -563,6 +886,11 @@ pub struct Config {
     /// comes back near 1e-6, and tight enough to bar a partial quench, which
     /// comes back near 1e-1 or worse.
     pub record_gradient: f64,
+    /// Whether every quenched energy is kept, not only the improving ones:
+    /// the sample [`crate::tail`] fits an endpoint to. Truncated by
+    /// [`Config::screen_margin`], since the full relaxation runs only where
+    /// the partial energy sits within the margin of the incumbent.
+    pub trace_quenched: bool,
     /// Extra relaxation steps spent polishing a new best to share tolerance.
     ///
     /// Screened hopping's economy is that almost no hop is fully relaxed, so
@@ -587,6 +915,14 @@ pub struct Config {
     /// so a poor one costs acceptance rate rather than correctness. This is
     /// what the screen was reaching for and does not have. See
     /// [`crate::delayed`].
+    ///
+    /// Needs a single chain: a run with [`Config::replicas`] above one refuses
+    /// it before spending anything. A hop the surrogate decides is tested on
+    /// the bare quenched energy, while one it abstains on, which is every hop
+    /// before its warmup and any whose predictive spread exceeds
+    /// [`Config::surrogate_tolerance`], takes the ordinary acceptance with the
+    /// biases. A rung under it therefore hops by no one weight, and no swap
+    /// factor can balance an exchange between two such rungs.
     pub delayed_acceptance: bool,
     /// Candidates built and scored per growth proposal.
     ///
@@ -614,6 +950,16 @@ pub struct Config {
     /// surface first, then on the plain potential from that minimum, judging
     /// the plain energy. `None` relaxes on the plain potential only.
     pub two_phase: Option<crate::methods::two_phase::TwoPhase>,
+    /// Reoccupation move: every `reoccupy_interval` charged calls the chain
+    /// rebuilds its surface on the lattice grown from its interior with
+    /// [`crate::methods::lattice_search::reoccupy`], relaxes the result and
+    /// adopts it when it is lower than the current minimum. `None` disables
+    /// the move; the lattice settings name the pair form the site energies
+    /// are read from.
+    #[serde(skip)]
+    pub reoccupy: Option<crate::methods::lattice_search::LatticeSearchConfig>,
+    /// Charged calls between reoccupation moves.
+    pub reoccupy_interval: usize,
     /// Learned portfolio of relaxation surfaces: the plain surface plus every
     /// transform listed, one drawn per hop by depth-rewarded Thompson
     /// sampling. Empty leaves the choice to `two_phase`.
@@ -622,6 +968,38 @@ pub struct Config {
     pub container: f64,
     /// Closest approach enforced before a trial is relaxed.
     pub min_separation: f64,
+    /// Cut the move library down to the uniform displacement alone: the
+    /// control a Hamiltonian proposal is measured against, since the default
+    /// library also carries moves that change a packing rather than displace
+    /// it.
+    pub displacement_only: bool,
+    /// Report the superbasin hierarchy the run's own transitions imply: one
+    /// basin lookup per hop and no evaluations. See [`crate::superbasin`].
+    pub superbasin_report: bool,
+    /// Jump out of a superbasin by solving the absorbing chain over the
+    /// visited basins, on a period; turns the report on. The exit
+    /// distribution is supported on basins already visited, so it changes
+    /// the speed of reaching them and not what the search can reach.
+    pub superbasin_escape: bool,
+    /// Hops between superbasin escapes.
+    pub superbasin_period: usize,
+    /// Record every fully quenched energy the run produces, in order, as a
+    /// sample from the density of states of the region the chain is in.
+    pub energy_trace: bool,
+    /// Rebuild the transition graph with basin identity taken modulo the
+    /// symmetry orbit at the end of the run (needs `ira`), and report the
+    /// difference.
+    pub superbasin_quotient: bool,
+    /// Measure whether the coarse states the transitions imply are separable
+    /// by structure, at the end of the run and off the ledger.
+    pub superbasin_features: bool,
+    /// Propose by a Hamiltonian trajectory instead of a displacement. The
+    /// trajectory runs on the underlying potential and its endpoint is
+    /// quenched, so the acceptance test is unchanged. Needs value and
+    /// gradient together through `run_with_energy_gradient`, one charge per
+    /// leapfrog leaf; every parameter is adapted, see [`crate::hmc::hop`].
+    #[serde(skip)]
+    pub hmc: Option<crate::hmc::hop::HopConfig>,
 }
 
 impl Config {
@@ -649,32 +1027,14 @@ impl Config {
     }
 
     /// Settings for `n_points` at the campaign's measured defaults.
-    /// The measured configuration: the stack every layer of which beat or
-    /// matched its paired control across four cluster morphologies.
     ///
-    /// Composed surface relocations paying one acceptance test (LJ75 49/144
-    /// against 17/144, Bayes factor 3104 with the arm allocator), Normal-Gamma
-    /// Thompson allocation rewarded by depth, and tabu on stall (LJ98 40/72
-    /// against 20/72, Bayes factor 43.8). Neutral where its mechanisms are not
-    /// needed: 55/72 against 55/72 on the 38-point double funnel and 47-48 of
-    /// 48 on the 55-point single funnel. Reference GMIN at matched
-    /// potential-call budgets: 37/48, 0/48, 0/48.
-    ///
-    /// [`Config::for_cluster`] remains the plain Wales-Doye protocol, kept as
-    /// the comparison baseline; this is what a caller who wants answers should
-    /// start from.
-    ///
-    /// LeanBurst includes the SOAP pullback (analytic \(J^{+}\) of stacked
-    /// local power spectra). The hop target is the observed-cloud residual
-    /// `2p − μ`, the same map used on molecules and slabs: partitioned by
-    /// observed species, never by a CNA class or an fcc prototype.
-    /// Thompson allocates SOAP with surface, single, burst and sym. The
-    /// return screen and stall symmetrisation are on; Ih-dominated stalls
-    /// withhold symmetrise rather than invent a missing packing.
-    ///
-    /// Basin identity stays the measured pair-spectrum merge at 0.7.
-    /// [`Config::packing_superbasin`] is the unmeasured SOAP-packing
-    /// keying and adaptive-height stack.
+    /// LeanBurst carries the observed-cloud SOAP pullback. Thompson
+    /// allocates that arm with surface, single, burst, and sym. The return
+    /// screen is on, and a stall takes tabu and symmetrisation. Basin
+    /// identity stays the measured pair-spectrum merge at 0.7.
+    /// [`Config::for_cluster`] remains the plain Wales-Doye baseline.
+    /// [`Config::packing_superbasin`] adds the unmeasured SOAP-packing key
+    /// and adaptive height.
     pub fn recommended(n_points: usize) -> Self {
         let mut cfg = Self::for_cluster(n_points);
         cfg.move_library = MoveLibrary::LeanBurst;
@@ -688,13 +1048,67 @@ impl Config {
         cfg
     }
 
-    /// Unmeasured SOAP-packing superbasin on top of [`Config::recommended`].
+    /// Communicating paper arm: orbit kernel plus Recognition.
+    ///
+    /// This is the measured single-chain orbit arm (`for_cluster` plus
+    /// Thompson, the return screen, and orbit completion: 31/48 Marks,
+    /// 30/48 Leary), not [`Self::recommended`] (LeanBurst, SOAP leftover
+    /// as a burst library, tabu-on-stall, stall jump). Peer visit counts
+    /// stay off the escape controller. Two-phase relative 0.7 stays on
+    /// below 98 (occupancy-measured on 38 and 75; 18/48 Leary when left
+    /// on at 98). Grosso replacement is not installed.
+    pub fn communicating(n_points: usize) -> Self {
+        let mut cfg = Self::for_cluster(n_points);
+        cfg.allocate_moves = true;
+        cfg.return_screen = true;
+        cfg.orbit_complete_on_new = true;
+        cfg.shared_deposits = 0;
+        cfg.shared_visit_policy = crate::methods::minima_hopping::SharedVisitPolicy::Recognition;
+        if n_points < 98 {
+            cfg.surfaces = vec![crate::methods::two_phase::TwoPhase::relative(0.7, 1.0)];
+        }
+        cfg
+    }
+
+    /// The packing-mutate flags as one record. Twin is a library arm;
+    /// orbit and psym fire after a new basin; angular is the Wales--Doye
+    /// worst-bound relocation.
+    pub fn packing_surface(&self) -> crate::packing::PackingSurface {
+        let twin_as_move = matches!(
+            self.move_library,
+            super::MoveLibrary::Twin | super::MoveLibrary::GrowthAndTwin
+        );
+        crate::packing::PackingSurface::from_hop_flags(
+            twin_as_move,
+            self.orbit_complete_on_new,
+            self.angular_moves,
+            self.point_symmetrise_on_new,
+        )
+    }
+
+    /// Unmeasured SOAP-packing superbasin on the LeanBurst stack.
     ///
     /// Unit high-`l` mean SOAP merge 0.10 plus adaptive height with
     /// twenty revisits. Hit rates are not the recommended LJ38/LJ75
     /// campaign numbers.
+    ///
+    /// The LeanBurst flags are named here rather than left to inheritance,
+    /// so the occupancy harvests keep the stack they were measured on.
     pub fn packing_superbasin(n_points: usize) -> Self {
-        let mut cfg = Self::recommended(n_points);
+        let mut cfg = Self::for_cluster(n_points);
+        cfg.move_library = MoveLibrary::LeanBurst;
+        cfg.allocate_moves = true;
+        cfg.depth_reward = true;
+        cfg.tabu_on_stall = true;
+        cfg.return_screen = true;
+        cfg.symmetrise_on_stall = true;
+        cfg.soap_class_residual = false;
+        cfg.soap_mode = SoapProposalMode::Flexible;
+        // The occupancy deposits were measured before the preset tolerance
+        // moved to 0.5, so this stack keeps the 0.35 it was run under. Every
+        // flag that decides those harvests is named here rather than
+        // inherited, for the same reason the LeanBurst flags above are.
+        cfg.symmetry_tolerance = 0.35 * cfg.length_scale;
         // One deposit of 0.25 exceeds the measured LJ75 intra-funnel
         // gap (~0.09-0.18). That empties a basin on the first revisit
         // and the next start is another ico draw. Adaptive height with
@@ -718,6 +1132,7 @@ impl Config {
             && self.active_region.is_none()
             && self.frozen.is_none()
             && !self.move_library.is_molecular()
+            && !self.move_library.is_rigid_body()
     }
 
     /// Recommended flags, with the two hand-set scalars replaced by
@@ -760,6 +1175,7 @@ impl Config {
             length_scale,
             energy_scale,
             move_library: MoveLibrary::Atomic,
+            rigid_body_geometry: None,
             neighbour_cutoff: LennardJonesPreset::NEIGHBOUR_CUTOFF * length_scale,
             symmetrise_cutoff: LennardJonesPreset::SYMMETRISE_CUTOFF * length_scale,
             temperature: LennardJonesPreset::TEMPERATURE * energy_scale,
@@ -772,6 +1188,8 @@ impl Config {
             // The multiplier separates a return from a genuinely different
             // minimum while remaining proportional to the declared scale.
             merge_radius: LennardJonesPreset::MERGE_RADIUS * length_scale,
+            keying_sigma: 2.5 * length_scale,
+            morphology_scale: length_scale,
             shape_keyed: false,
             theta: 0.5,
             budget_window: false,
@@ -791,6 +1209,7 @@ impl Config {
             statistical_temperature: false,
             energy_bias: false,
             depth_reward: false,
+            novel_reward: false,
             soft_perturb: false,
             soft_modes: 6,
             soft_steps: 30,
@@ -809,6 +1228,26 @@ impl Config {
             track_funnels: false,
             funnel_period: 20_000,
             symmetrise_on_stall: false,
+            point_symmetrise: false,
+            point_symmetrise_on_new: false,
+            orbit_complete_on_new: false,
+            soap_repel: false,
+            exchange_metropolis: false,
+            md_escape: false,
+            md_escape_dt: 0.005,
+            md_escape_kinetic: 1.0,
+            md_escape_minima: 2,
+            md_escape_max_steps: 2_000,
+            md_escape_soften: 0,
+            shared_deposits: 8,
+            shared_visit_policy: crate::methods::minima_hopping::SharedVisitPolicy::Tabu,
+            jump_on_stall: false,
+            jump_patience: 5_000,
+            jump_steps: 10,
+            jump_step: LennardJonesPreset::ALL_POINTS_STEP * length_scale,
+            symmetrise_core_fraction: 0.6,
+            point_symmetrise_every_accept: false,
+            continuous_symmetry: ContinuousSymmetry::Off,
             symmetry_tolerance: LennardJonesPreset::SYMMETRY_TOLERANCE * length_scale,
             symmetry_merge_radius: LennardJonesPreset::SYMMETRY_MERGE_RADIUS * length_scale,
             symmetrise_patience: 2_000,
@@ -817,6 +1256,7 @@ impl Config {
             angular_moves: false,
             angular_target: 0.5,
             restart_on_stall: false,
+            restart_patience: 5_000,
             calibrate_radius: false,
             calibrate_quantile: 0.9,
             calibrate_warmup: 200,
@@ -831,6 +1271,10 @@ impl Config {
             escape_stall_patience: 5_000,
             escape_stall_factor: 2.0,
             ladder_top: 4.0,
+            ladder_mode: LadderMode::Shipped,
+            ladder_window: 10,
+            ladder_pilot: 200,
+            ladder_target_accept: crate::tempering::TARGET_SWAP_ACCEPT,
             return_screen: false,
             soap_class_residual: false,
             soap_mode: SoapProposalMode::Flexible,
@@ -846,6 +1290,7 @@ impl Config {
             screen_steps: 25,
             adaptive_screen: false,
             record_gradient: LennardJonesPreset::RECORD_GRADIENT * energy_scale / length_scale,
+            trace_quenched: false,
             polish_records: 0,
             surrogate_tolerance: 0.5,
             delayed_acceptance: false,
@@ -855,6 +1300,8 @@ impl Config {
             quench_confidence: 2.0,
             relax_steps: 200,
             two_phase: None,
+            reoccupy: None,
+            reoccupy_interval: 5_000,
             surfaces: Vec::new(),
             // Calibrated against published minima: the largest atomic distance
             // from the centre of mass divides by N^(1/3) to between 0.46 and
@@ -863,7 +1310,54 @@ impl Config {
                 * length_scale
                 * (n_points as f64).cbrt(),
             min_separation: LennardJonesPreset::MIN_SEPARATION * length_scale,
+            displacement_only: false,
+            superbasin_report: false,
+            superbasin_escape: false,
+            superbasin_period: 2_000,
+            energy_trace: false,
+            superbasin_quotient: false,
+            superbasin_features: false,
+            hmc: None,
         }
+    }
+
+    /// Basin-hopping settings for a rigid TIP4P water cluster.
+    ///
+    /// `n_molecules` is the number of waters. The state is six coordinates
+    /// per molecule (centre of mass plus an exponential-map rotation). The
+    /// move library is Wales--Hodges translation and rotation, each with
+    /// its own step, not the atomic Cartesian kernels.
+    pub fn for_tip4p(n_molecules: usize) -> Self {
+        assert!(
+            n_molecules >= 2,
+            "a TIP4P cluster needs at least two waters"
+        );
+        let length_scale = crate::potentials::SIGMA;
+        let mut cfg = Self::with_scales(n_molecules, length_scale, 1.0);
+        cfg.move_library = MoveLibrary::RigidBody {
+            n_molecules,
+            translate_step: 0.35,
+            rotate_step: 0.40,
+        };
+        cfg.rigid_body_geometry =
+            Some(crate::potentials::Tip4pCluster::new(n_molecules).rigid_geometry());
+        // Accepted returns to the same well do not explore the landscape.
+        // Basin-return feedback expands the rigid displacement until it exits.
+        cfg.minima_hopping = true;
+        cfg.temperature = 2.0;
+        cfg.bias_height = 2.0;
+        cfg.screen_margin = 25.0;
+        cfg.merge_radius = 0.6;
+        cfg.record_gradient = 1.0e-3;
+        cfg.neighbour_cutoff = 3.5;
+        cfg.min_separation = 2.70;
+        cfg.container = 3.5 * 2.75 * (n_molecules as f64).cbrt();
+        cfg.soap_mode = SoapProposalMode::Off;
+        cfg.angular_moves = false;
+        cfg.allocate_moves = true;
+        cfg.relax_steps = 80;
+        cfg.screen_steps = 15;
+        cfg
     }
 
     /// Species-aware molecular preset with rigid groups.

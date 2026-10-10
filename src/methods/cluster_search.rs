@@ -21,7 +21,7 @@ use crate::methods::cluster_hopping::OVERLAP_SEPARATION;
 use crate::methods::cluster_hopping::min_pair_distance;
 #[cfg(any(feature = "bank-rpc", test))]
 use crate::methods::cluster_hopping::structure_is_sane;
-use crate::methods::cluster_hopping::{Config, Ledger, Outcome, optimize_with_gradient};
+use crate::methods::cluster_hopping::{Config, Ledger, Outcome, optimize_with_energy_gradient};
 use crate::methods::warm_lbfgs::WarmLbfgs;
 use crate::quench::{QuenchPredictor, Verdict};
 use eindir_core::gradient::DifferentiableObjective;
@@ -107,10 +107,11 @@ fn two_phase_penalty(
     cutoff: f64,
     beta: f64,
     mu: f64,
+    shape: Option<&crate::methods::two_phase::Shape>,
 ) -> (f64, Array1<f64>) {
     match groups.filter(|declared| !declared.is_empty()) {
         Some(groups) => crate::methods::two_phase::penalty_groups(x, groups, cutoff, beta, mu),
-        None => crate::methods::two_phase::penalty(x, cutoff, beta, mu),
+        None => crate::methods::two_phase::penalty_shaped(x, cutoff, beta, mu, shape),
     }
 }
 
@@ -121,26 +122,16 @@ fn gradient_is_converged(gradient: ArrayView1<f64>, threshold: f64) -> bool {
         < threshold
 }
 
-/// Runs a cluster search on `objective` under `ledger`.
-///
-/// The relaxation is this crate's warm-started quasi-Newton one, and its
-/// curvature is deliberately not carried between calls: measured on a cluster,
-/// retaining it across a structural change costs more than it saves.
-pub fn search<O>(
-    objective: &O,
-    cfg: &Config,
-    ledger: &mut Ledger,
+fn warm_relax<'a, O>(
+    objective: &'a O,
+    cfg: &'a Config,
+    stats: &'a mut RelaxStats,
     seed: u64,
-) -> (Outcome, RelaxStats)
+) -> impl FnMut(&mut Ledger, ArrayView1<f64>, usize) -> (f64, Array1<f64>) + 'a
 where
     O: DifferentiableObjective<f64> + ?Sized,
 {
-    let mut stats = RelaxStats::default();
     let mut opt = WarmLbfgs::default();
-
-    // Split deliberately: the relaxation needs the optimizer mutably, the
-    // gradient needs only the objective. Sharing the objective by reference is
-    // what lets both closures exist at once.
     // The driver calls the screening pass with `screen_steps` and the full one
     // with `relax_steps`, so the iteration count identifies which is which.
     let screen_iters = cfg.screen_steps;
@@ -148,7 +139,7 @@ where
     let probe = cfg.probe_screen;
     let mut surfaces = (!cfg.surfaces.is_empty())
         .then(|| crate::methods::two_phase::SurfacePortfolio::new(&cfg.surfaces, seed));
-    let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, iters: usize| {
+    move |led, x, iters| {
         opt.forget();
         let before = led.spent();
         let screening = iters <= screen_iters;
@@ -171,6 +162,7 @@ where
         let x = match surface {
             Some(two) => {
                 let cutoff = two.cutoff_for(x);
+                let shape = two.shape_for(x);
                 let (_, phase_one, _) = opt.minimize(x, iters, |v| {
                     if !led.charge() {
                         return None;
@@ -182,6 +174,7 @@ where
                         cutoff,
                         two.beta,
                         two.mu,
+                        shape.as_ref(),
                     );
                     Some((e + pe, g + pg))
                 });
@@ -287,15 +280,57 @@ where
             stats.capped += 1;
         }
         (f, xr)
-    };
-    let mut grad = |led: &mut Ledger, x: ArrayView1<f64>| -> Option<Array1<f64>> {
-        if !led.charge() {
-            return None;
-        }
-        Some(objective.grad(x))
-    };
+    }
+}
 
-    let out = optimize_with_gradient(cfg, ledger, &mut relax, Some(&mut grad), seed);
+/// Runs a cluster search on `objective` under `ledger`.
+///
+/// The relaxation is this crate's warm-started quasi-Newton one, and its
+/// curvature is deliberately not carried between calls: measured on a cluster,
+/// retaining it across a structural change costs more than it saves.
+pub fn search<O>(
+    objective: &O,
+    cfg: &Config,
+    ledger: &mut Ledger,
+    seed: u64,
+) -> (Outcome, RelaxStats)
+where
+    O: DifferentiableObjective<f64> + ?Sized,
+{
+    let mut stats = RelaxStats::default();
+
+    // Split deliberately: the relaxation needs the optimizer mutably, the
+    // gradient needs only the objective. Sharing the objective by reference is
+    // what lets both closures exist at once.
+    let out = {
+        let mut relax = warm_relax(objective, cfg, &mut stats, seed);
+        let mut grad = |led: &mut Ledger, x: ArrayView1<f64>| -> Option<Array1<f64>> {
+            if !led.charge() {
+                return None;
+            }
+            Some(objective.grad(x))
+        };
+
+        // Value and gradient in one charge, which is what a Hamiltonian leapfrog
+        // leaf needs. On a pairwise potential both come out of one pass over the
+        // pairs, so charging twice would understate the arm by a factor of two.
+        let mut energy_grad =
+            |led: &mut Ledger, x: ArrayView1<f64>| -> Option<(f64, Array1<f64>)> {
+                if !led.charge() {
+                    return None;
+                }
+                Some(objective.value_and_gradient(x))
+            };
+
+        optimize_with_energy_gradient(
+            cfg,
+            ledger,
+            &mut relax,
+            Some(&mut grad),
+            Some(&mut energy_grad),
+            seed,
+        )
+    };
     (out, stats)
 }
 
@@ -314,134 +349,24 @@ where
     O: DifferentiableObjective<f64> + ?Sized,
 {
     let mut stats = RelaxStats::default();
-    let mut opt = WarmLbfgs::default();
-    let screen_iters = cfg.screen_steps;
-    let adaptive = cfg.adaptive_screen;
-    let probe = cfg.probe_screen;
-    let mut surfaces = (!cfg.surfaces.is_empty())
-        .then(|| crate::methods::two_phase::SurfacePortfolio::new(&cfg.surfaces, seed));
-    let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, iters: usize| {
-        opt.forget();
-        let before = led.spent();
-        let screening = iters <= screen_iters;
-        let mut pred = QuenchPredictor::new();
-        pred.warmup = cfg.quench_warmup;
-        pred.confidence = cfg.quench_confidence;
-        let mut early = false;
-        let mut probe_at: Option<(usize, f64)> = None;
-        let target = led.best;
-        // Phase one, when configured: relax on the compacted surface and hand
-        // that minimum to the plain relaxation below. Both phases charge.
-        let compacted;
-        let surface = match surfaces.as_mut() {
-            Some(portfolio) => portfolio.begin(screening),
-            None => cfg.two_phase.filter(|two| two.is_active()),
-        };
-        let x = match surface {
-            Some(two) => {
-                let cutoff = two.cutoff_for(x);
-                let (_, phase_one, _) = opt.minimize(x, iters, |v| {
-                    if !led.charge() {
-                        return None;
-                    }
-                    let (e, g) = objective.value_and_gradient(v);
-                    let (pe, pg) = two_phase_penalty(
-                        v,
-                        cfg.move_library.declared_groups(),
-                        cutoff,
-                        two.beta,
-                        two.mu,
-                    );
-                    Some((e + pe, g + pg))
-                });
-                opt.forget();
-                compacted = phase_one;
-                compacted.view()
-            }
-            None => x,
-        };
-        let (f, xr, _) = opt.minimize_watched(
-            x,
-            iters,
-            |v| {
-                if !led.charge() {
-                    return None;
-                }
-                Some(objective.value_and_gradient(v))
-            },
-            |_, fv| {
-                if screening && probe {
-                    pred.observe(fv);
-                    if probe_at.is_none() && pred.verdict(target) == Verdict::Hopeless {
-                        probe_at = pred.predict().map(|p| (pred.len(), p.limit));
-                    }
-                    return true;
-                }
-                if !(screening && adaptive) {
-                    return true;
-                }
-                pred.observe(fv);
-                if pred.verdict(target) != Verdict::Hopeless {
-                    return true;
-                }
-                early = true;
-                false
-            },
-        );
-        if let Some((at, claim)) = probe_at {
-            stats.probe_stops += 1;
-            stats.probe_steps += at;
-            stats.probe_error += (claim - f).abs();
-        }
-        let cost = led.spent() - before;
-        if screening {
-            stats.screen_charged += cost;
-            stats.screen_steps_taken += pred.len();
-            stats.screens += 1;
-        } else {
-            stats.full_charged += cost;
-        }
-        let f = if early {
-            pred.stopped_energy(target, f)
-        } else {
-            f
-        };
-        if let Some(portfolio) = surfaces.as_mut() {
-            portfolio.observe(screening, f, target);
-        }
-        if early {
-            stats.capped += 1;
-            return (f, xr);
-        }
-        let converged = if led.charge() {
-            stats.check_charged += 1;
-            let g = objective.grad(xr.view());
-            gradient_is_converged(g.view(), cfg.record_gradient)
-        } else {
-            false
-        };
-        if converged {
-            stats.converged += 1;
-        } else {
-            stats.capped += 1;
-        }
-        (f, xr)
-    };
-    let mut grad = |led: &mut Ledger, x: ArrayView1<f64>| -> Option<Array1<f64>> {
-        if !led.charge() {
-            return None;
-        }
-        Some(objective.grad(x))
-    };
     let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
-    let out = crate::methods::cluster_hopping::run_with_gradient(
-        cfg,
-        start,
-        ledger,
-        &mut relax,
-        Some(&mut grad),
-        &mut rng,
-    );
+    let out = {
+        let mut relax = warm_relax(objective, cfg, &mut stats, seed);
+        let mut grad = |led: &mut Ledger, x: ArrayView1<f64>| -> Option<Array1<f64>> {
+            if !led.charge() {
+                return None;
+            }
+            Some(objective.grad(x))
+        };
+        crate::methods::cluster_hopping::run_with_gradient(
+            cfg,
+            start,
+            ledger,
+            &mut relax,
+            Some(&mut grad),
+            &mut rng,
+        )
+    };
     (out, stats)
 }
 
@@ -477,7 +402,7 @@ where
 }
 
 /// Keep adsorbate atoms above the frozen slab after a SOAP hole step.
-#[cfg(feature = "bank-rpc")]
+#[cfg(all(feature = "bank-rpc", feature = "featomic"))]
 fn pin_adsorbate_above_slab(x: &mut Array1<f64>, cfg: &Config) {
     let Some((seeds, _)) = cfg.active_region.as_ref() else {
         return;
@@ -512,7 +437,7 @@ fn sane_sep(_cfg: &Config) -> f64 {
 }
 
 /// Mobile atom indices: the active region, or the complement of `frozen`.
-#[cfg(feature = "bank-rpc")]
+#[cfg(all(feature = "bank-rpc", feature = "featomic"))]
 fn mobile_of(cfg: &Config) -> Option<Vec<usize>> {
     if let Some((seeds, _)) = cfg.active_region.as_ref() {
         return Some(seeds.clone());
@@ -714,119 +639,7 @@ where
 
     let mut stats = RelaxStats::default();
     let mut bank_validation_charged = 0usize;
-    let mut opt = WarmLbfgs::default();
-    let screen_iters = cfg.screen_steps;
-    let adaptive = cfg.adaptive_screen;
-    let probe = cfg.probe_screen;
-    let mut surfaces = (!cfg.surfaces.is_empty())
-        .then(|| crate::methods::two_phase::SurfacePortfolio::new(&cfg.surfaces, seed));
-    let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, iters: usize| {
-        opt.forget();
-        let before = led.spent();
-        let screening = iters <= screen_iters;
-        let mut pred = QuenchPredictor::new();
-        pred.warmup = cfg.quench_warmup;
-        pred.confidence = cfg.quench_confidence;
-        let mut early = false;
-        let mut probe_at: Option<(usize, f64)> = None;
-        let target = led.best;
-        // Phase one, when configured: relax on the compacted surface and hand
-        // that minimum to the plain relaxation below. Both phases charge.
-        let compacted;
-        let surface = match surfaces.as_mut() {
-            Some(portfolio) => portfolio.begin(screening),
-            None => cfg.two_phase.filter(|two| two.is_active()),
-        };
-        let x = match surface {
-            Some(two) => {
-                let cutoff = two.cutoff_for(x);
-                let (_, phase_one, _) = opt.minimize(x, iters, |v| {
-                    if !led.charge() {
-                        return None;
-                    }
-                    let (e, g) = objective.value_and_gradient(v);
-                    let (pe, pg) = two_phase_penalty(
-                        v,
-                        cfg.move_library.declared_groups(),
-                        cutoff,
-                        two.beta,
-                        two.mu,
-                    );
-                    Some((e + pe, g + pg))
-                });
-                opt.forget();
-                compacted = phase_one;
-                compacted.view()
-            }
-            None => x,
-        };
-        let (f, xr, _) = opt.minimize_watched(
-            x,
-            iters,
-            |v| {
-                if !led.charge() {
-                    return None;
-                }
-                Some(objective.value_and_gradient(v))
-            },
-            |_, fv| {
-                if screening && probe {
-                    pred.observe(fv);
-                    if probe_at.is_none() && pred.verdict(target) == Verdict::Hopeless {
-                        probe_at = pred.predict().map(|p| (pred.len(), p.limit));
-                    }
-                    return true;
-                }
-                if !(screening && adaptive) {
-                    return true;
-                }
-                pred.observe(fv);
-                if pred.verdict(target) != Verdict::Hopeless {
-                    return true;
-                }
-                early = true;
-                false
-            },
-        );
-        if let Some((at, claim)) = probe_at {
-            stats.probe_stops += 1;
-            stats.probe_steps += at;
-            stats.probe_error += (claim - f).abs();
-        }
-        let cost = led.spent() - before;
-        if screening {
-            stats.screen_charged += cost;
-            stats.screen_steps_taken += pred.len();
-            stats.screens += 1;
-        } else {
-            stats.full_charged += cost;
-        }
-        let f = if early {
-            pred.stopped_energy(target, f)
-        } else {
-            f
-        };
-        if let Some(portfolio) = surfaces.as_mut() {
-            portfolio.observe(screening, f, target);
-        }
-        if early {
-            stats.capped += 1;
-            return (f, xr);
-        }
-        let converged = if led.charge() {
-            stats.check_charged += 1;
-            let g = objective.grad(xr.view());
-            gradient_is_converged(g.view(), cfg.record_gradient)
-        } else {
-            false
-        };
-        if converged {
-            stats.converged += 1;
-        } else {
-            stats.capped += 1;
-        }
-        (f, xr)
-    };
+    let mut relax = warm_relax(objective, cfg, &mut stats, seed);
     let mut grad = |led: &mut Ledger, x: ArrayView1<f64>| -> Option<Array1<f64>> {
         if !led.charge() {
             return None;
@@ -942,7 +755,10 @@ where
             on_known && sat,
             stall,
         );
-        if adopt_bank && catalog_best < best - 1e-6 && let Some(c) = client.as_mut() {
+        if adopt_bank
+            && catalog_best < best - 1e-6
+            && let Some(c) = client.as_mut()
+        {
             match c.sample(u64::MAX) {
                 Ok(Some((reported_energy, x)))
                     if x.len() == expected
@@ -1088,6 +904,7 @@ where
     println!(
         "      capnp bank: {slices} slices, {null_starts} archive-null starts, best {best:.6}"
     );
+    drop(relax);
     stats.check_charged += bank_validation_charged;
     let out = Outcome {
         best,
@@ -1181,28 +998,71 @@ pub fn first_encounter(out: &Outcome, target: f64, tolerance: f64, spent: usize)
 /// `None` when more than half the runs are censored, which is the honest answer:
 /// the median has not been observed, and quoting the mean of the successes
 /// instead reports a number that improves as the method gets worse.
+///
+/// The survival is kept as an exact ratio of products of at-risk counts. It is
+/// exactly a half whenever half the runs are found before any is censored, and
+/// a floating-point product of the same factors can round to either side of a
+/// half, which moves the median by a whole encounter. A run censored at the
+/// time of an encounter is still at risk at it, as Kaplan and Meier count it,
+/// so the median does not depend on the order of `runs`.
 pub fn median_encounter(runs: &[Encounter]) -> Option<usize> {
-    if runs.is_empty() {
-        return None;
-    }
     let mut events: Vec<(usize, bool)> = runs.iter().map(|e| (e.charged(), e.found())).collect();
-    events.sort_by_key(|(c, _)| *c);
+    events.sort_by_key(|&(c, found)| (c, !found));
 
-    let mut at_risk = events.len() as f64;
-    let mut survival = 1.0_f64;
+    // survival = left / entered, the products of the at-risk counts after and
+    // before each encounter, so it is at most a half when 2 left <= entered.
+    let mut twice_left = Natural(vec![2]);
+    let mut entered = Natural(vec![1]);
+    let mut at_risk = events.len();
     for (c, found) in events {
         if found {
-            survival *= 1.0 - 1.0 / at_risk;
-            if survival <= 0.5 {
+            twice_left.scale(at_risk - 1);
+            entered.scale(at_risk);
+            if twice_left <= entered {
                 return Some(c);
             }
         }
-        at_risk -= 1.0;
-        if at_risk <= 0.0 {
-            break;
-        }
+        at_risk -= 1;
     }
     None
+}
+
+/// A natural number in base-2^32 limbs, least significant first, with no high
+/// zero limb above the first.
+#[derive(PartialEq, Eq)]
+struct Natural(Vec<u32>);
+
+impl Natural {
+    fn scale(&mut self, k: usize) {
+        let mut carry = 0_u128;
+        for limb in &mut self.0 {
+            let v = u128::from(*limb) * k as u128 + carry;
+            *limb = v as u32;
+            carry = v >> 32;
+        }
+        while carry > 0 {
+            self.0.push(carry as u32);
+            carry >>= 32;
+        }
+        while self.0.len() > 1 && self.0.last() == Some(&0) {
+            self.0.pop();
+        }
+    }
+}
+
+impl Ord for Natural {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.0
+            .len()
+            .cmp(&other.0.len())
+            .then_with(|| self.0.iter().rev().cmp(other.0.iter().rev()))
+    }
+}
+
+impl PartialOrd for Natural {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
 }
 
 /// Checks that a reported result is what it claims to be.
@@ -1417,6 +1277,69 @@ mod tests {
         let a = median_encounter(&clean).unwrap();
         let b = median_encounter(&with_censor).unwrap();
         assert!(b >= a, "censoring moved the median from {a} down to {b}");
+    }
+
+    /// The survival as a floating-point product over the at-risk counts of
+    /// successive encounters.
+    fn float_survival(at_risk: impl Iterator<Item = usize>) -> f64 {
+        at_risk.fold(1.0, |s, r| s * (1.0 - 1.0 / r as f64))
+    }
+
+    /// Half the runs found before any is censored puts the survival on a half
+    /// exactly, so the median is the last of them. At these counts the
+    /// floating-point product rounds above a half, and at 196 the exact
+    /// products run past one limb.
+    #[test]
+    fn the_median_is_the_middle_encounter_at_even_counts() {
+        for n in [24_usize, 28, 30, 38, 196] {
+            let float = float_survival((n / 2 + 1..=n).rev());
+            assert!(float > 0.5, "float survival {float} at {n} runs");
+            let runs: Vec<Encounter> = (1..=n)
+                .map(|c| Encounter::Found {
+                    charged: c,
+                    hops: c,
+                })
+                .collect();
+            assert_eq!(median_encounter(&runs), Some(n / 2), "{n} runs");
+        }
+    }
+
+    /// Censoring before the total can put the survival on a half too: two of
+    /// thirty censored first leave 28 at risk, and five of fifteen found, two
+    /// censored and two more found leave 2/3 * 7/8 * 6/7. The floating-point
+    /// product rounds above a half in both.
+    #[test]
+    fn censoring_before_the_total_keeps_the_median_exact() {
+        let found = |c: usize| Encounter::Found {
+            charged: c,
+            hops: 1,
+        };
+        let cens = |c: usize| Encounter::Censored { charged: c };
+
+        assert!(float_survival((15..=28).rev()) > 0.5);
+        let mut early = vec![cens(1), cens(2)];
+        early.extend((10..38).map(found));
+        assert_eq!(median_encounter(&early), Some(23));
+
+        assert!(float_survival([15, 14, 13, 12, 11, 8, 7].into_iter()) > 0.5);
+        let mut between: Vec<Encounter> = (1..=5).map(found).collect();
+        between.extend([cens(6), cens(7)]);
+        between.extend((8..=15).map(found));
+        assert_eq!(median_encounter(&between), Some(9));
+    }
+
+    /// A run censored at the time of an encounter is still at risk at it, in
+    /// whatever order the runs come: of three, one found and one censored at
+    /// 5 leave the survival at 2/3, so the median is the encounter at 9.
+    #[test]
+    fn a_run_censored_at_an_encounter_is_still_at_risk() {
+        let found = |c: usize| Encounter::Found {
+            charged: c,
+            hops: 1,
+        };
+        let cens = |c: usize| Encounter::Censored { charged: c };
+        assert_eq!(median_encounter(&[cens(5), found(5), found(9)]), Some(9));
+        assert_eq!(median_encounter(&[found(5), cens(5), found(9)]), Some(9));
     }
 
     /// LJ13 is the case with one answer everyone agrees on, so it is the one

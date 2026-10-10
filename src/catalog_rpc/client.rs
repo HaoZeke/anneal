@@ -24,21 +24,36 @@ use super::{
 };
 use crate::Catalog_capnp::{coordinator, session, subscriber};
 use crate::cooperative_search::ledger::ChargeKind;
+use crate::coreclass::CoreVerdict;
+use crate::nng_rpc::{self, NngIo};
 
 /// Connection and I/O deadlines for a catalog client.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ClientConfig {
-    /// TCP connection deadline.
+    /// nng dial / pair-hello deadline.
     pub connect_timeout: Duration,
     /// Read and write deadline.
     pub io_timeout: Duration,
 }
 
 impl Default for ClientConfig {
+    /// Deadlines from `CATALOG_CONNECT_TIMEOUT_SECS` (default 2) and
+    /// `CATALOG_IO_TIMEOUT_SECS` (default 30). The I/O deadline was five
+    /// seconds, under which every request queued behind one slow
+    /// coordinator request timed out, reconnected and retried, so a
+    /// 14-second policy hold cost 47 reconnects and 47 duplicate requests
+    /// on top of itself.
     fn default() -> Self {
+        let seconds = |name: &str, fallback: u64| {
+            std::env::var(name)
+                .ok()
+                .and_then(|value| value.parse::<u64>().ok())
+                .filter(|value| *value > 0)
+                .unwrap_or(fallback)
+        };
         Self {
-            connect_timeout: Duration::from_secs(2),
-            io_timeout: Duration::from_secs(5),
+            connect_timeout: Duration::from_secs(seconds("CATALOG_CONNECT_TIMEOUT_SECS", 2)),
+            io_timeout: Duration::from_secs(seconds("CATALOG_IO_TIMEOUT_SECS", 30)),
         }
     }
 }
@@ -46,7 +61,7 @@ impl Default for ClientConfig {
 /// Transport, wire, or typed coordinator rejection.
 #[derive(Debug, thiserror::Error)]
 pub enum CatalogClientError {
-    /// TCP or stream I/O failed.
+    /// nng or stream I/O failed.
     #[error("catalog transport failed: {0}")]
     Transport(#[from] std::io::Error),
     /// Cap'n Proto encoding or decoding failed.
@@ -413,7 +428,9 @@ impl CatalogClient {
             | AcceptedPayload::FrontierPost(_)
             | AcceptedPayload::RideWork(_)
             | AcceptedPayload::RideCredit(_)
-            | AcceptedPayload::Roster(_) => {
+            | AcceptedPayload::Roster(_)
+            | AcceptedPayload::SurfaceEvidence(_)
+            | AcceptedPayload::CoreVerdict(_) => {
                 return Err(ProtocolError::Malformed(
                     "catalog offer returned an incompatible payload".into(),
                 )
@@ -485,6 +502,54 @@ impl CatalogClient {
         }
     }
 
+    /// Exchange cumulative local surface rewards for peer-only evidence.
+    pub fn exchange_surface_evidence(
+        &mut self,
+        event_sequence: u64,
+        report: crate::surface_evidence::SurfaceReport,
+    ) -> Result<crate::surface_evidence::SurfaceReport, CatalogClientError> {
+        match self
+            .call(
+                event_sequence,
+                CatalogOperation::ExchangeSurfaceEvidence { report },
+            )?
+            .payload
+        {
+            AcceptedPayload::SurfaceEvidence(report) => Ok(report),
+            _ => Err(ProtocolError::Malformed(
+                "surface exchange returned an incompatible payload".into(),
+            )
+            .into()),
+        }
+    }
+
+    /// Report one chain's motif class and energy to the shared table.
+    pub fn report_core_class(
+        &mut self,
+        event_sequence: u64,
+        class: u8,
+        energy: f64,
+        charged: u64,
+    ) -> Result<CoreVerdict, CatalogClientError> {
+        match self
+            .call(
+                event_sequence,
+                CatalogOperation::ReportCoreClass {
+                    class,
+                    energy,
+                    charged,
+                },
+            )?
+            .payload
+        {
+            AcceptedPayload::CoreVerdict(verdict) => Ok(verdict),
+            _ => Err(ProtocolError::Malformed(
+                "core-class report returned an incompatible payload".into(),
+            )
+            .into()),
+        }
+    }
+
     /// Submit one exact replay-safe charged-work boundary.
     pub fn record_ledger_event(
         &mut self,
@@ -546,7 +611,9 @@ impl CatalogClient {
             | AcceptedPayload::FrontierPost(_)
             | AcceptedPayload::RideWork(_)
             | AcceptedPayload::RideCredit(_)
-            | AcceptedPayload::Roster(_) => Err(ProtocolError::Malformed(
+            | AcceptedPayload::Roster(_)
+            | AcceptedPayload::SurfaceEvidence(_)
+            | AcceptedPayload::CoreVerdict(_) => Err(ProtocolError::Malformed(
                 "sample returned an incompatible payload".into(),
             )
             .into()),
@@ -575,7 +642,9 @@ impl CatalogClient {
             | AcceptedPayload::FrontierPost(_)
             | AcceptedPayload::RideWork(_)
             | AcceptedPayload::RideCredit(_)
-            | AcceptedPayload::Roster(_) => Err(ProtocolError::Malformed(
+            | AcceptedPayload::Roster(_)
+            | AcceptedPayload::SurfaceEvidence(_)
+            | AcceptedPayload::CoreVerdict(_) => Err(ProtocolError::Malformed(
                 "basin sample returned an incompatible payload".into(),
             )
             .into()),
@@ -650,7 +719,9 @@ impl CatalogClient {
             | AcceptedPayload::FrontierPost(_)
             | AcceptedPayload::RideWork(_)
             | AcceptedPayload::RideCredit(_)
-            | AcceptedPayload::Roster(_) => Err(ProtocolError::Malformed(
+            | AcceptedPayload::Roster(_)
+            | AcceptedPayload::SurfaceEvidence(_)
+            | AcceptedPayload::CoreVerdict(_) => Err(ProtocolError::Malformed(
                 "descriptor-hole request returned an incompatible payload".into(),
             )
             .into()),
@@ -683,7 +754,9 @@ impl CatalogClient {
             | AcceptedPayload::FrontierPost(_)
             | AcceptedPayload::RideWork(_)
             | AcceptedPayload::RideCredit(_)
-            | AcceptedPayload::Roster(_) => Err(ProtocolError::Malformed(
+            | AcceptedPayload::Roster(_)
+            | AcceptedPayload::SurfaceEvidence(_)
+            | AcceptedPayload::CoreVerdict(_) => Err(ProtocolError::Malformed(
                 "boundary-crossing request returned an incompatible payload".into(),
             )
             .into()),
@@ -744,7 +817,9 @@ impl CatalogClient {
             | AcceptedPayload::FrontierPost(_)
             | AcceptedPayload::RideWork(_)
             | AcceptedPayload::RideCredit(_)
-            | AcceptedPayload::Roster(_) => Err(ProtocolError::Malformed(
+            | AcceptedPayload::Roster(_)
+            | AcceptedPayload::SurfaceEvidence(_)
+            | AcceptedPayload::CoreVerdict(_) => Err(ProtocolError::Malformed(
                 "policy-state request returned an incompatible payload".into(),
             )
             .into()),
@@ -1007,6 +1082,14 @@ struct ClientSession {
     snapshot_version: Arc<Mutex<u64>>,
     addr: SocketAddr,
     config: ClientConfig,
+    /// The connection's RPC pump. Dropping the handle would leave the
+    /// task, and the TCP connection, alive after a reconnect: a
+    /// 48-replica coordinator under a slow policy request accumulated
+    /// 900 open connections from the clients' timeout-and-reconnect
+    /// cycles. Reconnect aborts it.
+    rpc_task: Option<tokio::task::JoinHandle<Result<(), capnp::Error>>>,
+    /// Consecutive reconnects, for the backoff.
+    reconnects: u32,
 }
 
 fn run_client_executor(
@@ -1037,6 +1120,8 @@ fn run_client_executor(
                 snapshot_version,
                 addr,
                 config,
+                rpc_task: None,
+                reconnects: 0,
             },
         };
         while let Some(job) = jobs.recv().await {
@@ -1079,18 +1164,9 @@ async fn open_rpc(
     config: ClientConfig,
     events: Arc<Mutex<Vec<CoordinatorEvent>>>,
 ) -> Result<ClientSession, CatalogClientError> {
-    let stream = tokio::time::timeout(config.connect_timeout, tokio::net::TcpStream::connect(addr))
-        .await
-        .map_err(|_| {
-            CatalogClientError::Transport(std::io::Error::new(
-                std::io::ErrorKind::TimedOut,
-                "catalog connect timed out",
-            ))
-        })?
+    let pair = nng_rpc::dial_pair(&addr.to_string(), config.connect_timeout)
         .map_err(CatalogClientError::Transport)?;
-    stream
-        .set_nodelay(true)
-        .map_err(CatalogClientError::Transport)?;
+    let stream = NngIo::new(pair).map_err(CatalogClientError::Transport)?;
     let (reader, writer) = TokioAsyncReadCompatExt::compat(stream).split();
     let network = VatNetwork::new(
         futures::io::BufReader::new(reader),
@@ -1100,7 +1176,7 @@ async fn open_rpc(
     );
     let mut rpc = RpcSystem::new(Box::new(network), None);
     let coordinator: coordinator::Client = rpc.bootstrap(Side::Server);
-    tokio::task::spawn_local(rpc);
+    let rpc_task = tokio::task::spawn_local(rpc);
     Ok(ClientSession {
         coordinator,
         session: None,
@@ -1110,19 +1186,34 @@ async fn open_rpc(
         snapshot_version: Arc::new(Mutex::new(0)),
         addr,
         config,
+        rpc_task: Some(rpc_task),
+        reconnects: 0,
     })
 }
 
+/// Replace the connection. The old RPC pump is aborted so its connection
+/// closes; consecutive reconnects back off exponentially (50 ms doubling
+/// to 2 s, jittered by the address) so 48 clients that all timed out on
+/// one slow request do not reconnect as one herd against the listener's
+/// accept queue.
 async fn reconnect(session: &mut ClientSession) -> Result<(), CatalogClientError> {
     let events = Arc::clone(&session.events);
     let snapshot_version = Arc::clone(&session.snapshot_version);
     let addr = session.addr;
     let config = session.config;
     let attached = session.attached.clone();
+    let reconnects = session.reconnects.saturating_add(1);
+    if let Some(task) = session.rpc_task.take() {
+        task.abort();
+    }
+    let base = 50u64.saturating_mul(1u64 << reconnects.min(6));
+    let jitter = u64::from(addr.port()) % 37;
+    tokio::time::sleep(Duration::from_millis(base.min(2_000) + jitter)).await;
     *session = open_rpc(addr, config, events).await?;
     session.snapshot_version = snapshot_version;
     session.attached = attached;
     session.connected = true;
+    session.reconnects = reconnects;
     Ok(())
 }
 
@@ -1218,7 +1309,10 @@ async fn call_session(
     request: CatalogRequest,
 ) -> Result<AcceptedReply, CatalogClientError> {
     match call_session_once(session, &request).await {
-        Ok(reply) => Ok(reply),
+        Ok(reply) => {
+            session.reconnects = 0;
+            Ok(reply)
+        }
         Err(error @ CatalogClientError::Rejected(_)) => Err(error),
         Err(_) => {
             reconnect(session).await?;
@@ -1351,7 +1445,9 @@ fn population_epoch_payload(
         | AcceptedPayload::FrontierPost(_)
         | AcceptedPayload::RideWork(_)
         | AcceptedPayload::RideCredit(_)
-        | AcceptedPayload::Roster(_) => Err(ProtocolError::Malformed(format!(
+        | AcceptedPayload::Roster(_)
+        | AcceptedPayload::SurfaceEvidence(_)
+        | AcceptedPayload::CoreVerdict(_) => Err(ProtocolError::Malformed(format!(
             "{operation} returned an incompatible payload"
         ))
         .into()),

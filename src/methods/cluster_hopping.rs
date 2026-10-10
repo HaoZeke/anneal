@@ -38,8 +38,10 @@ use crate::contextual::ContextualAllocator;
 use crate::diversity::DiversityAnnealer;
 use crate::exchange::MetropolisExchange;
 use crate::methods::activation::{Activation, activate};
-use crate::methods::minima_hopping::EscapeFeedback;
-use crate::movekernel::{MoveKernel, ShellRotate, SurfaceRelocate, Symmetrise};
+use crate::methods::minima_hopping::{EscapeFeedback, HistoryHook, HistoryReport, Visit};
+use crate::movekernel::{
+    HollowFill, HollowRelocate, MoveKernel, ShellRotate, SurfaceRelocate, Symmetrise,
+};
 use crate::path::{StallDetector, interpolate_path};
 use crate::screen::Screen;
 
@@ -47,7 +49,8 @@ mod config;
 mod moves;
 mod preset;
 
-pub use config::{Config, Keying, SoapProposalMode};
+pub use crate::methods::minima_hopping::SharedVisitPolicy;
+pub use config::{Config, ContinuousSymmetry, Keying, LadderMode, SoapProposalMode};
 pub use moves::*;
 
 #[cfg(test)]
@@ -77,7 +80,7 @@ pub struct QuenchBoundary {
     gradient: Option<Array1<f64>>,
 }
 
-/// One state-changing perturb--quench step taken by the live chain.
+/// One perturb--quench outcome from the live chain or a diagnostic probe.
 ///
 /// The record is deliberately separate from the best-minimum ledger. Funnel
 /// entry commonly requires accepted uphill motion, so a history containing
@@ -91,7 +94,7 @@ pub struct AcceptedTransition {
     pub action: String,
     /// Quenched energy at the source occupied by the chain.
     pub from_energy: f64,
-    /// Quenched energy adopted by the chain.
+    /// Trial energy; non-finite when a diagnostic quench fails.
     pub to_energy: f64,
     /// Quenched source coordinates.
     pub from_state: Array1<f64>,
@@ -105,6 +108,45 @@ pub struct AcceptedTransition {
     pub validated: bool,
     /// Whether the destination became the state occupied by the live chain.
     pub adopted: bool,
+}
+
+/// Coordinates and their paid evidence travel together through adoption and
+/// ladder scheduling. A shared identity belongs only to this exact occupancy.
+struct OccupiedMinimum {
+    energy: f64,
+    coordinates: Array1<f64>,
+    gradient: Option<Array1<f64>>,
+    history_minimum: Option<usize>,
+    local_minimum: Option<usize>,
+    generation: u64,
+    pending_initial: bool,
+}
+
+impl OccupiedMinimum {
+    fn into_live(
+        self,
+    ) -> (
+        f64,
+        Array1<f64>,
+        Option<Array1<f64>>,
+        Option<usize>,
+        u64,
+        Option<usize>,
+    ) {
+        (
+            self.energy,
+            self.coordinates,
+            self.gradient,
+            self.history_minimum,
+            self.generation,
+            self.local_minimum,
+        )
+    }
+}
+
+enum AdoptionHistory {
+    Fresh,
+    Observed(Option<HistoryReport>),
 }
 
 /// Read-only scientific state exposed at a charged-work checkpoint.
@@ -122,9 +164,19 @@ pub struct ChainCheckpoint<'a> {
     charged: usize,
     remaining: usize,
     hops: usize,
+    bias: Option<&'a BasinBias<ClusterFingerprint>>,
 }
 
 impl<'a> ChainCheckpoint<'a> {
+    /// The live chain's per-basin bias, for a caller that shares deposits.
+    ///
+    /// Read-only: centres and visit counts are what a multiple-walker
+    /// scheme exports. Foreign deposits come back through
+    /// [`CheckpointAction::DepositDescriptors`], never by writing here.
+    pub fn bias(&self) -> Option<&'a BasinBias<ClusterFingerprint>> {
+        self.bias
+    }
+
     /// Quenched state occupied by the live chain.
     pub fn current_state(&self) -> ArrayView1<'a, f64> {
         self.current_state
@@ -176,11 +228,70 @@ impl<'a> ChainCheckpoint<'a> {
     }
 }
 
+/// A bias-only communication update, independent of the chain's state action.
+#[derive(Debug, Clone, PartialEq)]
+pub enum BiasUpdate {
+    /// Import other walkers' descriptor visits without publishing them as local.
+    DepositDescriptors {
+        /// Descriptor centres and their foreign visit counts.
+        deposits: Vec<(Array1<f64>, u64)>,
+        /// Height relative to one local deposit.
+        weight: f64,
+    },
+    /// Average local wells toward a peer's table.
+    MergeWells {
+        /// Peer descriptor centres and well depths.
+        wells: Vec<(Array1<f64>, f64)>,
+        /// Step toward the peer's depth, in `(0, 1]`.
+        weight: f64,
+        /// Whether omitted wells have zero depth in a complete peer table.
+        complete: bool,
+    },
+}
+
+impl BiasUpdate {
+    fn apply(
+        self,
+        bias: &mut BasinBias<ClusterFingerprint>,
+        temperature: f64,
+        shared_deposits: &mut usize,
+        gossip_rounds: &mut usize,
+    ) {
+        match self {
+            Self::DepositDescriptors { deposits, weight } => {
+                for (centre, count) in &deposits {
+                    bias.deposit_scaled_n(centre.view(), temperature, weight, *count);
+                    *shared_deposits += usize::try_from(*count).unwrap_or(usize::MAX);
+                }
+            }
+            Self::MergeWells {
+                wells,
+                weight,
+                complete,
+            } => {
+                bias.merge_wells(&wells, weight, complete);
+                *gossip_rounds += 1;
+            }
+        }
+    }
+}
+
 /// Action returned after observing a live-chain checkpoint.
 #[derive(Debug, Clone, PartialEq)]
 pub enum CheckpointAction {
     /// Leave the live chain and every adaptive controller unchanged.
     Continue,
+    /// Apply communication in order, then process one state action.
+    ///
+    /// Bias updates cost no objective calls and do not require a gradient or
+    /// a minimum certificate. Wrappers compose from outside inward, so a
+    /// caller can add communication without replacing a proposal or retirement.
+    WithBiasUpdates {
+        /// Ordered updates to the receiving chain's own bias.
+        updates: Vec<BiasUpdate>,
+        /// The action to process after every update in this wrapper.
+        action: Box<CheckpointAction>,
+    },
     /// Quench and adopt a target-blind boundary perturbation.
     BoundaryProposal {
         /// Cartesian proposal produced from shared region-boundary evidence.
@@ -253,6 +364,33 @@ pub enum CheckpointAction {
         /// Cartesian minima received from the ensemble.
         states: Vec<Array1<f64>>,
     },
+    /// Deposit other walkers' visits, by descriptor centre and count.
+    ///
+    /// Multiple-walker sharing of one bias (Raiteri et al. 2006), with the
+    /// synchronisation lag of the checkpoint interval: every walker
+    /// deposits its own hops as it makes them and the others' at the next
+    /// checkpoint, under the same well-tempered weight and merge radius.
+    DepositDescriptors {
+        /// Descriptor centres with the number of visits to deposit at each.
+        deposits: Vec<(Array1<f64>, u64)>,
+        /// Height of each foreign deposit relative to the chain's own; 1/N
+        /// holds the total deposition rate of N walkers at one walker's.
+        weight: f64,
+    },
+    /// One gossip step: move this chain's wells toward another walker's.
+    ///
+    /// DeGroot averaging over whatever graph the caller draws peers from;
+    /// see [`BasinBias::merge_wells`]. Conserves the population's bias
+    /// mass where [`CheckpointAction::DepositDescriptors`] multiplies it.
+    MergeBias {
+        /// The peer's wells as `(centre, depth)`.
+        wells: Vec<(Array1<f64>, f64)>,
+        /// Step toward the peer, one half for a pairwise average.
+        weight: f64,
+        /// Whether `wells` is the peer's whole table; see
+        /// [`BasinBias::merge_wells`].
+        complete: bool,
+    },
     /// Occupancy certificate: stop this replica.
     ///
     /// Occupancy MixingCertified conjuncts. CatalogSaturated is
@@ -292,6 +430,28 @@ impl QuenchBoundary {
     pub fn gradient(&self) -> Option<ArrayView1<'_, f64>> {
         self.gradient.as_ref().map(|gradient| gradient.view())
     }
+
+    /// A validated boundary assembled from fresh evidence the caller holds.
+    ///
+    /// For a history that receives energy, state and validation gradient
+    /// directly from the live chain rather than reading the ledger. The same
+    /// finiteness and dimension rules as [`Ledger::record_quench_boundary`]
+    /// apply; anything failing them is not a certificate and returns `None`.
+    /// No charged work is attributed to it.
+    pub fn validated(energy: f64, state: Array1<f64>, gradient: Array1<f64>) -> Option<Self> {
+        let certified = energy.is_finite()
+            && !state.is_empty()
+            && state.iter().all(|v| v.is_finite())
+            && gradient.len() == state.len()
+            && gradient.iter().all(|v| v.is_finite());
+        certified.then_some(Self {
+            status: QuenchStatus::Validated,
+            charged_calls: 0,
+            energy,
+            state,
+            gradient: Some(gradient),
+        })
+    }
 }
 
 /// Charged objective-work ledger with optional per-relaxation evidence.
@@ -306,6 +466,32 @@ pub struct Ledger {
     /// State attaining [`Ledger::best`].
     pub best_state: Option<Array1<f64>>,
     quench_boundaries: Vec<QuenchBoundary>,
+    diagnostic_quench: bool,
+}
+
+struct DiagnosticQuench<'a> {
+    ledger: &'a mut Ledger,
+    previous: bool,
+}
+
+impl std::ops::Deref for DiagnosticQuench<'_> {
+    type Target = Ledger;
+
+    fn deref(&self) -> &Self::Target {
+        self.ledger
+    }
+}
+
+impl std::ops::DerefMut for DiagnosticQuench<'_> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        self.ledger
+    }
+}
+
+impl Drop for DiagnosticQuench<'_> {
+    fn drop(&mut self) {
+        self.ledger.diagnostic_quench = self.previous;
+    }
 }
 
 impl Ledger {
@@ -318,6 +504,24 @@ impl Ledger {
             best: f64::INFINITY,
             best_state: None,
             quench_boundaries: Vec::new(),
+            diagnostic_quench: false,
+        }
+    }
+
+    /// Whether the relaxation serves a non-adopting diagnostic probe.
+    ///
+    /// Diagnostic callbacks must use the declared, fixed relaxation kernel:
+    /// no adaptive surface, search bias, noise, or portfolio reward credit.
+    /// Objective work and discovered values still belong to this ledger.
+    pub fn is_diagnostic_quench(&self) -> bool {
+        self.diagnostic_quench
+    }
+
+    fn diagnostic_scope(&mut self) -> DiagnosticQuench<'_> {
+        let previous = std::mem::replace(&mut self.diagnostic_quench, true);
+        DiagnosticQuench {
+            ledger: self,
+            previous,
         }
     }
 
@@ -334,10 +538,14 @@ impl Ledger {
     /// of the system.
     ///
     /// A k-atom partial evaluation computes k of the n(n-1)/2 pair rows, so
-    /// its honest price is a fraction of a full evaluation. The fraction
-    /// accumulates as exact debt and is settled into whole charged units as it
-    /// crosses one: deterministic, auditable, and never cheaper than the work
-    /// done because the residue is still owed when the run ends.
+    /// its honest price is a fraction of a full evaluation. The fractions
+    /// accumulate and are charged as a whole unit each time their sum crosses
+    /// one, which keeps the count deterministic and auditable. A residue
+    /// under one unit is never charged, so [`Ledger::spent`] can fall up to
+    /// one evaluation short of the work done, mid-run and when the run ends.
+    /// Charging stops at the budget and the rest of a charge that reaches it
+    /// goes unpaid, so work charged after it is done can fall more than one
+    /// unit short when the ledger runs dry inside one charge.
     pub fn charge_frac(&mut self, frac: f64) -> bool {
         if !(frac > 0.0) || !frac.is_finite() {
             return self.spent < self.budget;
@@ -391,8 +599,10 @@ impl Ledger {
     /// Record one charged relaxation after its caller-owned convergence check.
     ///
     /// `gradient` is fresh validated evidence. Its absence classifies the
-    /// boundary as rejected. An invocation that consumed no potential calls is
-    /// not a quench boundary and returns `false`.
+    /// boundary as rejected. Nonfinite energy, coordinates, or gradient and a
+    /// mismatched gradient dimension also produce a rejected boundary while
+    /// retaining its charged work. An invocation that consumed no potential
+    /// calls is not a quench boundary and returns `false`.
     pub fn record_quench_boundary(
         &mut self,
         charged_before: usize,
@@ -406,6 +616,13 @@ impl Ledger {
         if charged_calls == 0 {
             return false;
         }
+        let gradient = gradient.filter(|values| {
+            energy.is_finite()
+                && !state.is_empty()
+                && state.iter().all(|v| v.is_finite())
+                && values.len() == state.len()
+                && values.iter().all(|v| v.is_finite())
+        });
         let status = if gradient.is_some() {
             QuenchStatus::Validated
         } else {
@@ -484,6 +701,38 @@ pub struct Outcome {
     /// improves ten thousand times is descending, and the tail of that is not
     /// what anyone is asking about.
     pub improvements: Vec<(usize, usize, usize, f64)>,
+    /// Charged count, basin count, energy and convergence flag at every hop
+    /// that ran a full relaxation.
+    ///
+    /// Empty unless [`Config::trace_quenched`] is set. Ordered by hop, so a
+    /// prefix of it is what the run had seen at a given point in its budget,
+    /// which is what makes a call read off it a prediction rather than a
+    /// summary.
+    ///
+    /// Hops the screen or the return test stopped are absent, because their
+    /// energy comes off a 25-step partial descent and is not a draw from the
+    /// distribution of minima at all; no threshold keeps such a value out of
+    /// the exceedances, since it lands wherever the descent stopped. That
+    /// exclusion is itself a selection on energy, since the screen refuses
+    /// exactly the trials whose partial energy sits above `best +
+    /// screen_margin`, and the note on [`Config::trace_quenched`] says what
+    /// that costs.
+    ///
+    /// The flag is the gradient guard the ledger records under. False means
+    /// the relaxation stopped at its iteration cap, which leaves the energy a
+    /// little above the minimum it was heading for rather than somewhere else
+    /// entirely.
+    pub quenched: Vec<(usize, usize, f64, bool)>,
+    /// The superbasin hierarchy the transitions imply, and what the escape
+    /// did with it; present whenever the graph was recorded.
+    pub superbasin: Option<crate::superbasin::SuperbasinReport>,
+    /// The recorded transition counts, when the quotient analysis is asked
+    /// for.
+    pub superbasin_counts: Option<crate::superbasin::HopCounts>,
+    /// The archived structures, as `(basin, energy, state)`.
+    pub superbasin_archive: Option<Vec<(usize, f64, Array1<f64>)>>,
+    /// Every fully quenched energy the run produced, in the order produced.
+    pub energy_trace: Option<Vec<f64>>,
     /// Merge radius at the end of the run, calibrated or as configured.
     pub merge_radius: f64,
     /// Mean accepted-hop step length, which the radius is a quantile of.
@@ -505,8 +754,28 @@ pub struct Outcome {
     pub funnel: Option<(usize, usize, f64)>,
     /// Symmetrisations attempted, and the energy they gained.
     pub symmetrised: (usize, f64),
+    /// Orbit completions attempted, and the energy they gained.
+    pub orbits: (usize, f64),
+    /// Continuous-symmetry quenches attempted, and downhill energy gained.
+    pub continuous_symmetry: (usize, f64),
     /// Restarts triggered by a stall.
     pub restarts: usize,
+    /// Heard structures refused by the exchange acceptance.
+    pub exchanges_refused: usize,
+    /// Occasional jumps taken on stagnation.
+    pub jumps: usize,
+    /// Certified quenches reported to the minimum history, and how many of
+    /// them the history called new under its membership policy.
+    pub history_visits: (usize, usize),
+    /// Bias deposits made on behalf of other chains' visits.
+    pub shared_deposits: usize,
+    /// Gossip averaging steps applied to the bias.
+    pub gossip_rounds: usize,
+    /// MD escapes attempted, integration steps taken, and attempts that
+    /// found no second potential minimum or ran out of budget.
+    pub md_escape: (usize, usize, usize),
+    /// Seconds the chain spent inside the history, lock waits included.
+    pub history_seconds: f64,
     /// Climbs triggered by a stall.
     pub stall_escapes: usize,
     /// Stall exits taken through the recorded basin entry.
@@ -515,15 +784,30 @@ pub struct Outcome {
     pub stall_escape_gain: f64,
     /// Mean softest eigenvalue over those proposals.
     pub soft_lambda: f64,
-    /// Per-rung temperature, basin count and best energy.
+    /// Per-rung temperature, basin count and the energy the rung ends on.
+    ///
+    /// The temperature is `temperature` times the rung's ratio. Under
+    /// [`Config::budget_window`] or [`Config::statistical_temperature`] a rung
+    /// hops at that ratio times the adaptive temperature instead, and this is
+    /// the ladder's nominal value.
     ///
     /// What says whether a ladder is doing its job rather than merely swapping:
     /// a hot rung should register many basins and a poor energy, a cold rung
     /// few basins and a deep one. A ladder where every rung looks alike is a
     /// ladder whose spread is too narrow to be worth its cost.
     pub rungs: Vec<(f64, usize, f64)>,
-    /// Swap attempts between adjacent replicas.
+    /// Swap attempts, each from the active rung to the next one up, the
+    /// hottest offering to the coldest.
     pub swaps_tried: usize,
+    /// What the ladder transported: round trips, sweeps, and the communication
+    /// barrier at the end of the run. `None` for a single chain.
+    ///
+    /// A round trip is one tagged configuration reaching the hottest rung from
+    /// the coldest and returning, counted across every tag. Swap counts do not
+    /// say this: a ladder can accept swaps at any rate and still shuffle the
+    /// same two rungs forever, which is a different failure from a ladder that
+    /// never swaps and looks the same in the solve count.
+    pub transport: Option<(usize, usize, f64)>,
     /// Hops the acceptance rule took, before any veto.
     pub accepted: usize,
     /// Structures barred from the ledger for not being minima.
@@ -548,6 +832,19 @@ pub struct Outcome {
     pub path_improvements: usize,
     /// Total depth gained from paths, in energy units.
     pub path_gain: f64,
+    /// Sampler diagnostics per rung, when the Hamiltonian proposal is used.
+    ///
+    /// One entry per replica, because each rung adapts its own step size and
+    /// its own metric. The counters are the result rather than an error path:
+    /// a divergence rate says which configurations the sampler cannot traverse,
+    /// a cap rate near one says the no-U-turn criterion is being truncated, and
+    /// a metric condition near one says an adapted metric is carrying no
+    /// anisotropy at all.
+    pub hmc: Vec<crate::hmc::hop::HopDiagnostics>,
+
+    /// The energy bias as the run left it, under [`Config::energy_bias`] once
+    /// its first sample has filled.
+    pub energy_bias: Option<crate::dos::EnergyBias>,
 }
 
 /// Relaxes `x`, charging every evaluation, and stopping when the budget ends.
@@ -555,7 +852,8 @@ pub struct Outcome {
 /// The relaxation is supplied by the caller because the objective, its
 /// gradient and the minimiser are the caller's: this module owns the search,
 /// not the numerics under it.
-pub type Relax<'a> = &'a mut dyn FnMut(&mut Ledger, ArrayView1<f64>, usize) -> (f64, Array1<f64>);
+pub type Relax<'a> =
+    &'a mut (dyn FnMut(&mut Ledger, ArrayView1<f64>, usize) -> (f64, Array1<f64>) + Send);
 
 /// Partial relaxation of the listed atoms in the frozen environment.
 ///
@@ -567,9 +865,19 @@ pub type Settle<'a> =
 
 /// Gradient of the objective, charged to the ledger by the caller.
 ///
-/// Optional because only the soft-mode escape needs it: everything else in this
-/// driver works from relaxations alone.
-pub type GradFn<'g> = dyn FnMut(&mut Ledger, ArrayView1<f64>) -> Option<Array1<f64>> + 'g;
+/// A supplied callback certifies candidate answers and supports soft-mode
+/// escape. Gradient-free callers own their relaxation convergence contract.
+pub type GradFn<'g> = dyn FnMut(&mut Ledger, ArrayView1<f64>) -> Option<Array1<f64>> + Send + 'g;
+
+/// Value and gradient together, charged to the ledger by the caller.
+///
+/// Separate from [`GradFn`] because the Hamiltonian proposal needs both at
+/// every leapfrog leaf and, on a pairwise potential, both come out of one pass
+/// over the pairs. Charging twice for one pass would make the arm look half as
+/// efficient as it is, which is exactly the kind of miscalibrated comparison
+/// this campaign has already made once.
+pub type EnergyGradFn<'g> =
+    dyn FnMut(&mut Ledger, ArrayView1<f64>) -> Option<(f64, Array1<f64>)> + 'g;
 
 /// A borrow of one, for a caller that has a gradient to lend.
 ///
@@ -687,6 +995,42 @@ fn quench_is_sane(cfg: &Config, energy: f64, x: ArrayView1<f64>) -> bool {
     energy.is_finite() && structure_is_sane(x, minimum)
 }
 
+fn gradient_is_converged(gradient: ArrayView1<f64>, dimensions: usize, tolerance: f64) -> bool {
+    dimensions > 0
+        && gradient.len() == dimensions
+        && gradient
+            .iter()
+            .all(|v| v.is_finite() && v.abs() < tolerance)
+}
+
+/// Records an auxiliary quench without restricting exploratory adoption.
+fn record_quenched_answer(
+    cfg: &Config,
+    ledger: &mut Ledger,
+    grad: &mut Option<&mut GradFn<'_>>,
+    energy: f64,
+    state: ArrayView1<f64>,
+    unresolved: &mut usize,
+) -> Option<Array1<f64>> {
+    let sane = !state.is_empty() && quench_is_sane(cfg, energy, state);
+    let required = grad.is_some();
+    let gradient = if sane {
+        grad.as_deref_mut().and_then(|evaluate| {
+            evaluate(ledger, state).filter(|values| {
+                gradient_is_converged(values.view(), state.len(), cfg.record_gradient)
+            })
+        })
+    } else {
+        None
+    };
+    if sane && (!required || gradient.is_some()) {
+        ledger.record(energy, state);
+    } else {
+        *unresolved += 1;
+    }
+    gradient
+}
+
 /// Runs the driver until the ledger is spent.
 ///
 /// `start` is a starting configuration and `relax` performs a relaxation of the
@@ -723,7 +1067,9 @@ pub fn run_with_gradient_settle<'g, R: Rng + ?Sized>(
         relax,
         grad,
         None,
+        None,
         settle,
+        None,
         None,
         &mut checkpoint,
         rng,
@@ -746,6 +1092,36 @@ pub fn run_with_gradient<'g, R: Rng + ?Sized>(
         ledger,
         relax,
         grad,
+        None,
+        None,
+        None,
+        None,
+        None,
+        &mut checkpoint,
+        rng,
+    )
+}
+
+/// As [`run_with_gradient`], with value and gradient together, which is
+/// what [`Config::hmc`] needs: one charge per leapfrog leaf.
+pub fn run_with_energy_gradient<'g, R: Rng + ?Sized>(
+    cfg: &Config,
+    start: ArrayView1<f64>,
+    ledger: &mut Ledger,
+    relax: Relax<'_>,
+    grad: Option<&mut GradFn<'g>>,
+    energy_grad: Option<&mut EnergyGradFn<'g>>,
+    rng: &mut R,
+) -> Outcome {
+    let mut checkpoint = continue_without_checkpoint;
+    run_full(
+        cfg,
+        start,
+        ledger,
+        relax,
+        grad,
+        energy_grad,
+        None,
         None,
         None,
         None,
@@ -788,7 +1164,9 @@ pub fn run_with_bias<'g, R: Rng + ?Sized>(
         ledger,
         relax,
         grad,
+        None,
         Some(bias),
+        None,
         None,
         None,
         &mut checkpoint,
@@ -828,11 +1206,273 @@ where
         ledger,
         relax,
         grad,
+        None,
         Some(bias),
+        None,
         None,
         Some(checkpoint_interval),
         checkpoint,
         rng,
+    )
+}
+
+/// As [`run_with_gradient_settle`], reporting every certified quench and
+/// every adoption to a minimum history, with periodic observations.
+///
+/// The history is the communication channel of a cooperating ensemble: a
+/// private one is the isolated control, and one shared behind a lock is the
+/// communicating arm. The chain keeps its coordinates, random stream,
+/// allocator and bias; what it receives is exact identity and visit counts,
+/// which feed the escape controller under [`Config::minima_hopping`] and the
+/// per-basin deposits otherwise ([`Config::shared_deposits`]).
+pub fn run_with_history_at_checkpoints<'g, R, H>(
+    cfg: &Config,
+    start: ArrayView1<f64>,
+    ledger: &mut Ledger,
+    relax: Relax<'_>,
+    grad: Option<&mut GradFn<'g>>,
+    settle: Option<Settle<'_>>,
+    history: Option<&mut dyn HistoryHook>,
+    rng: &mut R,
+    checkpoint_interval: usize,
+    checkpoint: &mut H,
+) -> Outcome
+where
+    R: Rng + ?Sized,
+    H: for<'a> FnMut(ChainCheckpoint<'a>) -> CheckpointAction,
+{
+    assert!(
+        checkpoint_interval > 0,
+        "checkpoint interval must be positive"
+    );
+    run_full(
+        cfg,
+        start,
+        ledger,
+        relax,
+        grad,
+        None,
+        None,
+        settle,
+        history,
+        Some(checkpoint_interval),
+        checkpoint,
+        rng,
+    )
+}
+
+/// Each rung's temperature as a multiple of the one a single chain would hop
+/// at: `ladder_top^(k/(R-1))` for rung `k` of `R`, and exactly one for a
+/// single chain.
+///
+/// Geometric, so swap acceptance is spaced evenly along the ladder rather than
+/// bunched at one end.
+fn rung_ratios(replicas: usize, ladder_top: f64) -> Vec<f64> {
+    let n_rep = replicas.max(1);
+    (0..n_rep)
+        .map(|k| {
+            if n_rep == 1 {
+                1.0
+            } else {
+                ladder_top.powf(k as f64 / (n_rep - 1) as f64)
+            }
+        })
+        .collect()
+}
+
+/// The temperature a single chain hops at from a state at energy `e`, given the
+/// one the budget-window law or the configuration holds it at.
+///
+/// Under [`Config::statistical_temperature`] the entropy's slope where the
+/// chain stands takes over once the density of states has been refreshed,
+/// clamped to a band around the configured value so a slope estimated from few
+/// counts cannot freeze the chain or boil it. The band is wide enough that the
+/// adaptation has somewhere to go and narrow enough that a bad estimate is
+/// survivable.
+fn single_chain_temperature(
+    cfg: &Config,
+    held: f64,
+    dos: Option<&crate::dos::DensityOfStates>,
+    e: f64,
+) -> f64 {
+    let mut single = held;
+    if cfg.statistical_temperature
+        && let Some(d) = dos
+        && d.refreshes > 0
+    {
+        let (t, _) = d.temperature(e);
+        if t.is_finite() && t > 0.0 {
+            single = t.clamp(0.2 * cfg.temperature, 5.0 * cfg.temperature);
+        }
+    }
+    single
+}
+
+/// The temperature a rung at `ratio` hops at from a state at energy `e`, given
+/// the one the budget-window law or the configuration holds a single chain at.
+///
+/// The ratio multiplies what a single chain standing there would hop at, so
+/// the coldest rung is that chain whichever temperature rule is in force. The
+/// statistical temperature's clamp comes before the ratio, so each rung's band
+/// sits around its own ladder temperature.
+fn rung_temperature(
+    cfg: &Config,
+    ratio: f64,
+    held: f64,
+    dos: Option<&crate::dos::DensityOfStates>,
+    e: f64,
+) -> f64 {
+    single_chain_temperature(cfg, held, dos, e) * ratio
+}
+
+/// The temperature a rung at `ratio` would hop at from a state at energy `e`,
+/// by the rule a hop uses and without counting a step of the law.
+///
+/// For a rung that is not hopping: the swap weighs each state at the
+/// temperature its rung would hop at, and the energy bias is built and filled
+/// at the coldest rung's.
+fn standing_temperature(
+    cfg: &Config,
+    law: &BudgetWindowTemperature,
+    ledger: &Ledger,
+    ratio: f64,
+    dos: Option<&crate::dos::DensityOfStates>,
+    e: f64,
+) -> f64 {
+    let held = if cfg.budget_window {
+        law.peek((e - ledger.best).abs().max(1e-12), ledger.remaining())
+    } else {
+        cfg.temperature
+    };
+    rung_temperature(cfg, ratio, held, dos, e)
+}
+
+/// Deposit height on a rung at `ratio` of a ladder of `n_rep`.
+///
+/// Under [`Config::bias_by_rung`] it follows the rung's temperature, so a
+/// deposit weighs the same against the temperature each rung hops at and the
+/// hottest carries the configured height.
+fn rung_height(cfg: &Config, n_rep: usize, ratio: f64) -> f64 {
+    if cfg.bias_by_rung && n_rep > 1 {
+        cfg.bias_height * ratio / cfg.ladder_top
+    } else {
+        cfg.bias_height
+    }
+}
+
+/// A rung waiting for its turn: the state it holds, and what the driver knows
+/// about that state.
+///
+/// Everything past the state describes the state rather than the rung, so a
+/// swap moves it with the state and a switch restores it with the state. Left
+/// behind, it would attribute the next hop to whatever the previous rung held.
+struct Parked {
+    energy: f64,
+    state: Array1<f64>,
+    /// Basin of the state in the shared identity map, once looked up.
+    basin: Option<usize>,
+    /// Fresh validation gradient retained for the state, when any.
+    gradient: Option<Array1<f64>>,
+    /// The surrogate's value at the state, under delayed acceptance.
+    surrogate: Option<f64>,
+    /// Screen state of the trial that entered the state's basin.
+    entry: Option<Array1<f64>>,
+}
+
+/// Log acceptance of rungs `k` and `j` exchanging the states they hold.
+///
+/// Rung `k` hops on `exp(-(E + V_k + S) / T_k)`, with `V_k` its own bias and
+/// `S` the biases every rung shares. `own_k` is `E + V_k` at the state rung
+/// `k` holds and at the one rung `j` holds, `own_j` is `E + V_j` at the state
+/// rung `j` holds and at rung `k`'s, and `shared` is `S` at rung `k`'s state
+/// and at rung `j`'s. `S` is one function on every rung, so it enters only
+/// through the difference of the inverse temperatures and drops out of a flat
+/// ladder.
+fn swap_log_acceptance(
+    own_k: [f64; 2],
+    own_j: [f64; 2],
+    shared: [f64; 2],
+    t_k: f64,
+    t_j: f64,
+) -> f64 {
+    (own_k[0] - own_k[1]) / t_k
+        + (own_j[0] - own_j[1]) / t_j
+        + (shared[0] - shared[1]) * (1.0 / t_k - 1.0 / t_j)
+}
+
+/// What a rung's acceptance can read at one state besides the rung's own bias.
+#[derive(Clone, Copy, Debug)]
+struct HopTerms {
+    energy: f64,
+    funnel: f64,
+    pile: f64,
+    energy_bias: f64,
+}
+
+/// What every rung's acceptance weighs a state by, and so what a swap between
+/// two of them has to exchange.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum RungWeight {
+    /// `exp(-(E + V_k + F + P + B) / T_k)`, with `V_k` the rung's own bias,
+    /// `F` the funnel bias, `P` the packing pile and `B` the energy bias: the
+    /// Metropolis rule. Minima hopping's threshold has no weight of its own,
+    /// and its ladder is swapped by this one.
+    Boltzmann,
+    /// `exp(-(E + V_k + F + P) / T_k)`: the flat-histogram rule's first sweep,
+    /// before its cost exists, which does not read the energy bias.
+    FirstSweep,
+    /// `exp(-c(E) - (V_k + F) / T_k)`, with `c` the flat-histogram cost, one
+    /// function of the energy that every rung reads and none divides by its
+    /// temperature.
+    Flat,
+}
+
+impl RungWeight {
+    /// The weight the acceptance test applies, given whether the
+    /// flat-histogram cost exists yet.
+    fn of(cfg: &Config, flat_cost: bool) -> Self {
+        if !cfg.flat_histogram || cfg.minima_hopping {
+            Self::Boltzmann
+        } else if flat_cost {
+            Self::Flat
+        } else {
+            Self::FirstSweep
+        }
+    }
+}
+
+/// Log acceptance of rungs `k` and `j` exchanging the states they hold, for
+/// rungs that weigh a state by `weight`.
+///
+/// `at_k` is what the weight can read at the state rung `k` holds and `at_j`
+/// at the one rung `j` holds; `own_k` is `V_k` at those two states and `own_j`
+/// is `V_j` at rung `j`'s state and at rung `k`'s. The flat cost is the same
+/// on both rungs at either state, so it cancels from the factor and takes the
+/// energy with it: under that weight a swap exchanges the biases alone.
+fn exchange_log_acceptance(
+    weight: RungWeight,
+    at_k: HopTerms,
+    at_j: HopTerms,
+    own_k: [f64; 2],
+    own_j: [f64; 2],
+    t_k: f64,
+    t_j: f64,
+) -> f64 {
+    let energy = |at: HopTerms| match weight {
+        RungWeight::Flat => 0.0,
+        RungWeight::Boltzmann | RungWeight::FirstSweep => at.energy,
+    };
+    let shared = |at: HopTerms| match weight {
+        RungWeight::Boltzmann => at.funnel + at.pile + at.energy_bias,
+        RungWeight::FirstSweep => at.funnel + at.pile,
+        RungWeight::Flat => at.funnel,
+    };
+    swap_log_acceptance(
+        [energy(at_k) + own_k[0], energy(at_j) + own_k[1]],
+        [energy(at_j) + own_j[0], energy(at_k) + own_j[1]],
+        [shared(at_k), shared(at_j)],
+        t_k,
+        t_j,
     )
 }
 
@@ -842,8 +1482,10 @@ fn run_full<'g, R, H>(
     ledger: &mut Ledger,
     relax: Relax<'_>,
     mut grad: Option<&mut GradFn<'g>>,
+    mut energy_grad: Option<&mut EnergyGradFn<'g>>,
     external_bias: Option<&mut BasinBias<ClusterFingerprint>>,
     mut settle: Option<Settle<'_>>,
+    mut history: Option<&mut dyn HistoryHook>,
     checkpoint_interval: Option<usize>,
     checkpoint: &mut H,
     rng: &mut R,
@@ -853,6 +1495,26 @@ where
     H: for<'a> FnMut(ChainCheckpoint<'a>) -> CheckpointAction,
 {
     let n = cfg.n_points;
+    let continuous_symmetry_classes = match cfg.continuous_symmetry {
+        ContinuousSymmetry::Off => None,
+        ContinuousSymmetry::Inversion { interval } => {
+            assert!(
+                interval > 0,
+                "continuous-symmetry interval must be positive"
+            );
+            assert!(
+                cfg.active_region.is_none() && cfg.frozen.is_none(),
+                "continuous-symmetry projection requires a free non-periodic point set"
+            );
+            let classes = cfg.species.clone().unwrap_or_else(|| vec![0; n]);
+            assert_eq!(
+                classes.len(),
+                n,
+                "continuous-symmetry classes must match n_points"
+            );
+            Some(classes)
+        }
+    };
     // The descriptor and the metric have to agree. A shape distance is
     // computed from coordinates, so keying on it means passing coordinates
     // through rather than reducing them to a sorted distance spectrum first;
@@ -865,13 +1527,13 @@ where
     // well-tempered bias rebuilt every fifty hops has nothing to accumulate:
     // measured that way an LJ38 run registered 18 basins instead of about 200.
     let n_rep = cfg.replicas.max(1);
-    let rung_temp = |k: usize| -> f64 {
-        if n_rep == 1 {
-            cfg.temperature
-        } else {
-            cfg.temperature * cfg.ladder_top.powf(k as f64 / (n_rep - 1) as f64)
-        }
-    };
+    let ratios = rung_ratios(n_rep, cfg.ladder_top);
+    assert!(
+        !(cfg.delayed_acceptance && n_rep > 1),
+        "delayed acceptance needs a single chain: a hop its surrogate decides \
+         weighs the bare energy and one it abstains on weighs the biases, so \
+         no swap between rungs can be balanced"
+    );
     // The first quench supplies a stable canonical reference before the bias
     // is built. Reporting it as a minimum additionally requires the same
     // geometry and gradient contract as every subsequent quench.
@@ -880,9 +1542,8 @@ where
     let gradient_required = grad.is_some();
     let initial_validation_gradient = initial_sane.then(|| {
         grad.as_deref_mut().and_then(|g| {
-            g(ledger, x.view()).filter(|values| {
-                values.iter().fold(0.0_f64, |a, q| a.max(q.abs())) < cfg.record_gradient
-            })
+            g(ledger, x.view())
+                .filter(|values| gradient_is_converged(values.view(), x.len(), cfg.record_gradient))
         })
     });
     let initial_validation_gradient = initial_validation_gradient.flatten();
@@ -893,26 +1554,35 @@ where
     }
     let mut current_validation_gradient = initial_validation_gradient;
     let canonical_reference = x.clone();
-    let mut biases: Vec<BasinBias<ClusterFingerprint>> = (0..n_rep)
-        .map(|k| {
-            // The coldest rung keeps a token bias so it still recognises
-            // revisits; the hottest carries the configured height.
-            let h = if cfg.bias_by_rung && n_rep > 1 {
-                cfg.bias_height * (rung_temp(k) / cfg.temperature) / cfg.ladder_top
-            } else {
-                cfg.bias_height
-            };
+    let mut biases: Vec<BasinBias<ClusterFingerprint>> = ratios
+        .iter()
+        .map(|&ratio| {
             BasinBias::new(
                 ClusterFingerprint::of_config(cfg, &canonical_reference),
                 cfg.merge_radius,
-                h,
+                rung_height(cfg, n_rep, ratio),
                 cfg.bias_gamma,
             )
         })
         .collect();
     // Geometric ladder, so swap acceptance is spaced evenly rather than
     // bunched at one end.
-    let temps: Vec<f64> = (0..n_rep).map(rung_temp).collect();
+    let mut temps: Vec<f64> = ratios.iter().map(|r| cfg.temperature * r).collect();
+    // Under `LadderMode::NonReversible` the geometric schedule is a
+    // placeholder that the pilot replaces with a ladder built from the
+    // measured energy fluctuation, and the barrier estimator moves afterwards.
+    let mut ladder = (n_rep > 1 && cfg.ladder_mode.sweeps())
+        .then(|| crate::tempering::Ladder::from_temperatures(&temps, cfg.ladder_mode.scheme()));
+    // The index process runs under every mode, so the arms are compared on
+    // transport and not only on swap counts.
+    let mut transport = (n_rep > 1).then(|| crate::tempering::IndexProcess::new(n_rep));
+    let mut sweeps = 0usize;
+    let mut cyclic_offers = 0usize;
+    let mut adaptations = 0usize;
+    // Welford accumulator over the cold rung's energies, which the first
+    // ladder is built from.
+    let mut pilot: (u64, f64, f64) = (0, 0.0, 0.0);
+    let mut ladder_built = !cfg.ladder_mode.adapts();
     let _exchange = MetropolisExchange;
     let mut swaps_tried = 0usize;
     let mut swaps_accepted = 0usize;
@@ -927,7 +1597,22 @@ where
         }
         None => (biases.remove(0), None),
     };
-    let mut chains: Vec<(f64, Array1<f64>)> = Vec::new();
+    let mut chains: Vec<OccupiedMinimum> = Vec::new();
+    // One sampler per rung, parked and taken alongside the bias.
+    //
+    // Per chain and not global. A hot rung crosses barriers a cold rung cannot
+    // and its trajectories see a differently conditioned region, so the two
+    // converge to different step sizes and different metric estimates. A swap
+    // moves configurations between rungs; the adaptation stays with the
+    // temperature it was learned at, which is why this is parked with the bias
+    // rather than carried with the state.
+    let mut hop_parked: Vec<crate::hmc::hop::HopChain> = Vec::new();
+    let mut hop = cfg.hmc.as_ref().map(crate::hmc::hop::HopChain::new);
+    if let Some(hmc) = cfg.hmc.as_ref() {
+        for _ in 1..n_rep {
+            hop_parked.push(crate::hmc::hop::HopChain::new(hmc));
+        }
+    }
     #[cfg(feature = "ira")]
     if cfg.shape_keyed {
         bias = bias.with_metric(Box::new(crate::shape::IraMetric::default()));
@@ -940,6 +1625,9 @@ where
     );
 
     let mut kernels = cfg.move_library.kernels(cfg);
+    if cfg.displacement_only {
+        kernels = vec![ClusterMove::AllPoints { step: 0.38 }];
+    }
     // Which kernel to propose from is learned rather than drawn uniformly. The
     // useful move changes as the search moves through the landscape, so the
     // evidence is discounted and a decaying floor keeps every kernel reachable.
@@ -967,6 +1655,7 @@ where
     let mut surrogate_here: Option<f64> = None;
     let mut unconverged_records = usize::from(!initial_recordable);
     let mut pending_raw: Option<(f64, f64)> = None;
+    let mut pending_design: Option<Array1<f64>> = None;
     // A posterior over what to build, consulted when a growth move is drawn.
     // The allocator decides which move; this decides the move's parameters,
     // which is the one place a model can change what a hop reaches rather than
@@ -995,6 +1684,20 @@ where
     let mut diversity =
         DiversityAnnealer::from_initial(cfg.merge_radius).with_final_fraction(cfg.diversity_floor);
     let mut stall = StallDetector::new(cfg.stall_patience);
+    let mut quenched: Vec<(usize, usize, f64, bool)> = Vec::new();
+    // The transition graph the absorbing-chain escape solves, and the archive
+    // it lands on; allocated only when asked for.
+    let mut superbasin = if cfg.superbasin_report || cfg.superbasin_escape {
+        Some(crate::superbasin::SuperbasinEscape::new())
+    } else {
+        None
+    };
+    let mut sb_last_jump = 0usize;
+    let mut trace: Option<Vec<f64>> = if cfg.energy_trace {
+        Some(Vec::new())
+    } else {
+        None
+    };
     let mut improvements: Vec<(usize, usize, usize, f64)> = Vec::new();
     if initial_recordable {
         improvements.push((0, ledger.spent(), 0, e));
@@ -1085,7 +1788,12 @@ where
     // structure) so the return screen can recognise a descent into any of
     // them. Recognition is monotone in this set and the acceptance still
     // sees a real quenched energy, so widening it can only refund cost.
-    let shared_screen = std::env::var("CATALOG_SHARED_SCREEN").is_ok_and(|value| value == "1");
+    // The env var is the catalog exchange path. Recognition also fills
+    // this bank from certified quenches on this chain, which is the
+    // Pedersen skip analog: abort a descent into a basin already on file.
+    let recognition_skip = matches!(cfg.shared_visit_policy, SharedVisitPolicy::Recognition);
+    let shared_screen =
+        recognition_skip || std::env::var("CATALOG_SHARED_SCREEN").is_ok_and(|value| value == "1");
     // The ensemble frontier ladder: raw doorway states ship out to the
     // coordinator, and other chains' posts fold into this chain's seam
     // bank, so the ladder holds population at every occupied stage of
@@ -1093,14 +1801,18 @@ where
     let frontier_exchange =
         std::env::var("CATALOG_FRONTIER_EXCHANGE").is_ok_and(|value| value == "1");
     let mut screen_bank: Vec<(Array1<f64>, f64, Array1<f64>)> = Vec::new();
-    let mut known_hits = 0usize;
     // The run's own environment codebook, grown from every accepted
     // recordable structure, so the trace can report each arrival's
     // unseen-environment share before the arrival is added.
     let mut trace_book = seam_trace.then(crate::catalog::PackingBook::default);
     let mut restarts = 0usize;
+    let mut exchanges_refused = 0usize;
+    let mut jumps = 0usize;
     let mut symmetrised = 0usize;
     let mut symmetry_gain = 0.0_f64;
+    let mut continuous_symmetry_attempts = 0usize;
+    let mut continuous_symmetry_quenches = 0usize;
+    let mut continuous_symmetry_gain = 0.0_f64;
     let mut quiet = 0usize;
     let mut longest_quiet = 0usize;
     let mut stall_escapes = 0usize;
@@ -1123,7 +1835,13 @@ where
     let stall_arms: Vec<&'static str> = [
         cfg.trail_on_stall.then_some("trail"),
         cfg.escape_on_stall.then_some("climb"),
-        cfg.restart_on_stall.then_some("restart"),
+        // RESTART_STALL_ARM=0 keeps the restart out of the stall allocator,
+        // so a restart happens only on the charged-patience rule. Measured:
+        // with the stall arm in, a chain restarted 9 to 16 times a run
+        // whatever RESTART_PATIENCE said, every 5 to 8k hops, shorter than
+        // the descent to the shelf.
+        (cfg.restart_on_stall && !std::env::var("RESTART_STALL_ARM").is_ok_and(|v| v == "0"))
+            .then_some("restart"),
     ]
     .into_iter()
     .flatten()
@@ -1166,6 +1884,147 @@ where
         ClusterFingerprint::of_config(cfg, &canonical_reference),
         cfg.merge_radius,
     );
+    if cfg.minima_hopping {
+        let initial_basin = identity.basin_of(x.view());
+        feedback.register_driver_local_initial(initial_basin);
+        here = Some(initial_basin);
+    }
+    // The history's identity of the occupied minimum, numbered by the history
+    // and not by `identity`: under a shared history the numbering is the
+    // population's, and this chain's local index means nothing to it.
+    let mut history_here: Option<usize> = None;
+    let mut occupancy_generation = 0u64;
+    // Global visit count of each history minimum at this chain's last look,
+    // so a later look deposits only what other chains added in between.
+    let mut history_seen: std::collections::HashMap<usize, u64> = std::collections::HashMap::new();
+    // Deposit cursors belong to bias owners, not to the coordinates that
+    // exchange between rungs. Parked maps have the same ordering as biases.
+    let mut parked_history_seen: Vec<std::collections::HashMap<usize, u64>> = (1..n_rep)
+        .map(|_| std::collections::HashMap::new())
+        .collect();
+    let mut history_observations = 0usize;
+    let mut history_new = 0usize;
+    let mut shared_deposits = 0usize;
+    let mut gossip_rounds = 0usize;
+    let mut md_attempts = 0usize;
+    let mut md_steps = 0usize;
+    let mut md_failed = 0usize;
+    let mut orbits_completed = 0usize;
+    let mut orbit_gain = 0.0_f64;
+    let mut accepted_transitions = Vec::new();
+    // All live-state replacement consumes one complete destination record.
+    // Ordinary hops supply their paid history report; auxiliary adoptions
+    // observe their paid certificate once without issuing another PES call.
+    macro_rules! adopt_minimum {
+        ($energy:expr, $state:expr, $gradient:expr, $local_minimum:expr, $evidence:expr,
+         $local_feedback:expr, $action:expr, $hop:expr) => {{
+            let mut destination = OccupiedMinimum {
+                energy: $energy,
+                coordinates: $state,
+                gradient: $gradient,
+                history_minimum: None,
+                local_minimum: $local_minimum,
+                generation: occupancy_generation
+                    .checked_add(1)
+                    .expect("occupancy generation"),
+                pending_initial: false,
+            };
+            let evidence = $evidence;
+            let local_feedback: Option<(Option<usize>, usize)> = $local_feedback;
+            let action: Option<&str> = $action;
+            let fresh = matches!(&evidence, AdoptionHistory::Fresh);
+            let report = match evidence {
+                AdoptionHistory::Fresh => {
+                    match (history.as_deref_mut(), destination.gradient.as_ref()) {
+                        (Some(h), Some(g)) => {
+                            h.observe(destination.energy, destination.coordinates.view(), g.view())
+                        }
+                        _ => None,
+                    }
+                }
+                AdoptionHistory::Observed(report) => report,
+            };
+            if fresh {
+                if let Some(report) = report {
+                    history_observations += 1;
+                    history_new += usize::from(report.is_new);
+                    if cfg.minima_hopping {
+                        let reached = match destination.local_minimum {
+                            Some(reached) => reached,
+                            None => identity.basin_of(destination.coordinates.view()),
+                        };
+                        destination.local_minimum = Some(reached);
+                        match cfg.shared_visit_policy {
+                            SharedVisitPolicy::Tabu => {
+                                feedback.remember_driver_local(reached);
+                                feedback.observe_shared(
+                                    history_here,
+                                    report.minimum,
+                                    report.is_new,
+                                    report.visits,
+                                );
+                            }
+                            SharedVisitPolicy::Recognition => {
+                                feedback.observe_driver_local(here, reached);
+                            }
+                        }
+                    } else if let Some((from, reached)) = local_feedback {
+                        feedback.observe_driver_local(from, reached);
+                    }
+                } else if let Some((from, reached)) = local_feedback {
+                    feedback.observe_driver_local(from, reached);
+                }
+            }
+            if let (Some(h), Some(report)) = (history.as_deref_mut(), report) {
+                h.mark_accepted(report.minimum);
+                destination.history_minimum = Some(report.minimum);
+                if fresh {
+                    let seen = history_seen.entry(report.minimum).or_insert(0);
+                    *seen = seen.saturating_add(1).min(report.visits.max(1));
+                } else if report.visits == 0 {
+                    history_seen.insert(report.minimum, 1);
+                }
+            }
+            if let Some(action) = action {
+                accepted_transitions.push(AcceptedTransition {
+                    hop: $hop,
+                    action: String::from(action),
+                    from_energy: e,
+                    from_state: x.clone(),
+                    from_gradient: current_validation_gradient.clone(),
+                    to_energy: destination.energy,
+                    to_state: destination.coordinates.clone(),
+                    to_gradient: destination.gradient.clone(),
+                    validated: quench_is_sane(
+                        cfg,
+                        destination.energy,
+                        destination.coordinates.view(),
+                    ) && (!gradient_required || destination.gradient.is_some()),
+                    adopted: true,
+                });
+            }
+            (
+                e,
+                x,
+                current_validation_gradient,
+                history_here,
+                occupancy_generation,
+                here,
+            ) = destination.into_live();
+        }};
+    }
+    if let (Some(h), Some(g)) = (history.as_deref_mut(), current_validation_gradient.as_ref()) {
+        // The start is part of the history even though no hop reached it,
+        // exactly as the controller registers it: a later return to it must
+        // classify as known.
+        if let Some(report) = h.observe(e, x.view(), g.view()) {
+            h.mark_accepted(report.minimum);
+            history_here = Some(report.minimum);
+            // Own start visit is seen; every other chain's visit to this
+            // minimum is owed and paid at the first look that reaches it.
+            history_seen.insert(report.minimum, 1);
+        }
+    }
     // Structures kept for path endpoints. Only ones far from every member are
     // added, because interpolating between two structures in one funnel lands
     // back in it, which is what archive-based escape moves holding a single
@@ -1176,67 +2035,184 @@ where
     let mut path_improvements = 0usize;
     let mut path_gain = 0.0_f64;
 
+    // Every rung's start is held to the first one's contract before it is
+    // recorded, and keeps its validation gradient for the first step the rung
+    // takes from it.
     for _ in 1..n_rep {
         let s0 = random_cluster_in_radius(n, cfg.start_radius(), cfg.min_separation, rng);
         let (e0, x0) = relax(ledger, s0.view(), cfg.relax_steps);
-        ledger.record(e0, x0.view());
-        chains.push((e0, x0));
+        let gradient = record_quenched_answer(
+            cfg,
+            ledger,
+            &mut grad,
+            e0,
+            x0.view(),
+            &mut unconverged_records,
+        );
+        chains.push(OccupiedMinimum {
+            energy: e0,
+            coordinates: x0,
+            gradient,
+            history_minimum: None,
+            local_minimum: None,
+            generation: 0,
+            pending_initial: true,
+        });
     }
     let mut screened_out = 0usize;
     let mut returned = 0usize;
     let mut accepted = 0usize;
-    let mut accepted_transitions = Vec::new();
     let mut hops = 0usize;
     let mut checkpoint_hops = 0usize;
     let mut checkpoint_quench_start = 0usize;
     let mut checkpoint_transition_start = 0usize;
     let mut next_checkpoint = checkpoint_interval;
+    let mut next_reoccupy = cfg.reoccupy_interval;
+    let mut best_seen = ledger.best;
+    let mut charged_at_best = ledger.spent();
 
     loop {
-        if let (Some(interval), Some(threshold)) = (checkpoint_interval, next_checkpoint)
-            && hops > checkpoint_hops
-            && ledger.spent() >= threshold
+        if ledger.best < best_seen - 1e-9 {
+            best_seen = ledger.best;
+            charged_at_best = ledger.spent();
+        }
+        // The reoccupation move runs inside the chain and charges the
+        // ledger directly; its result enters the same adoption path as an
+        // external proposal.
+        let mut internal_action: Option<CheckpointAction> = None;
+        if let Some(lattice) = cfg.reoccupy.as_ref()
+            && hops > 0
+            && ledger.spent() >= next_reoccupy
         {
-            let snapshot = ChainCheckpoint {
-                current_state: x.view(),
-                current_energy: e,
-                current_gradient: current_validation_gradient.as_ref().map(|g| g.view()),
-                best_state: ledger.best_state.as_ref().map(|state| state.view()),
-                best_energy: ledger.best,
-                quench_boundaries: &ledger.quench_boundaries[checkpoint_quench_start..],
-                accepted_transitions: &accepted_transitions[checkpoint_transition_start..],
-                charged: ledger.spent(),
-                remaining: ledger.remaining(),
-                hops,
+            next_reoccupy = ledger.spent().saturating_add(cfg.reoccupy_interval.max(1));
+            let rebuilt = crate::methods::lattice_search::reoccupy(lattice, ledger, x.view());
+            let (energy, relaxed) = relax(ledger, rebuilt.view(), cfg.relax_steps);
+            if energy.is_finite() && energy < e - 1e-9 && relaxed.len() == x.len() {
+                internal_action = Some(CheckpointAction::ExternalAdopt {
+                    state: relaxed,
+                    action: "reoccupy".to_owned(),
+                    external_calls: 0,
+                });
+            }
+        }
+        // A stalled chain restarts from a fresh random cluster; the bias it
+        // built stays and steers the new walk away from where it was.
+        if internal_action.is_none()
+            && cfg.restart_on_stall
+            && hops > 0
+            && ledger.spent().saturating_sub(charged_at_best) >= cfg.restart_patience.max(1)
+        {
+            let fresh = random_cluster(x.len() / 3, 0.7, cfg.min_separation, rng);
+            let (energy, relaxed) = relax(ledger, fresh.view(), cfg.relax_steps);
+            charged_at_best = ledger.spent();
+            best_seen = ledger.best;
+            if energy.is_finite() && relaxed.len() == x.len() {
+                internal_action = Some(CheckpointAction::ExternalAdopt {
+                    state: relaxed,
+                    action: "restart".to_owned(),
+                    external_calls: 0,
+                });
+            }
+        }
+        let checkpoint_due = matches!(
+            (checkpoint_interval, next_checkpoint),
+            (Some(_), Some(threshold)) if hops > checkpoint_hops && ledger.spent() >= threshold
+        );
+        if checkpoint_due || internal_action.is_some() {
+            let mut checkpoint_action = if let Some(action) = internal_action.take() {
+                action
+            } else {
+                let interval = checkpoint_interval.expect("a due checkpoint has an interval");
+                let snapshot = ChainCheckpoint {
+                    current_state: x.view(),
+                    current_energy: e,
+                    current_gradient: current_validation_gradient.as_ref().map(|g| g.view()),
+                    best_state: ledger.best_state.as_ref().map(|state| state.view()),
+                    best_energy: ledger.best,
+                    quench_boundaries: &ledger.quench_boundaries[checkpoint_quench_start..],
+                    accepted_transitions: &accepted_transitions[checkpoint_transition_start..],
+                    charged: ledger.spent(),
+                    remaining: ledger.remaining(),
+                    hops,
+                    bias: Some(&bias),
+                };
+                let checkpoint_action = checkpoint(snapshot);
+                checkpoint_hops = hops;
+                checkpoint_quench_start = ledger.quench_boundaries.len();
+                checkpoint_transition_start = accepted_transitions.len();
+                next_checkpoint = ledger
+                    .spent()
+                    .checked_div(interval)
+                    .and_then(|completed| completed.checked_add(1))
+                    .and_then(|next| next.checked_mul(interval));
+                checkpoint_action
             };
-            let checkpoint_action = checkpoint(snapshot);
-            checkpoint_hops = hops;
-            checkpoint_quench_start = ledger.quench_boundaries.len();
-            checkpoint_transition_start = accepted_transitions.len();
-            next_checkpoint = ledger
-                .spent()
-                .checked_div(interval)
-                .and_then(|completed| completed.checked_add(1))
-                .and_then(|next| next.checked_mul(interval));
+            while let CheckpointAction::WithBiasUpdates { updates, action } = checkpoint_action {
+                for update in updates {
+                    update.apply(
+                        &mut bias,
+                        cfg.temperature,
+                        &mut shared_deposits,
+                        &mut gossip_rounds,
+                    );
+                }
+                checkpoint_action = *action;
+            }
             if let CheckpointAction::Retire { .. } = checkpoint_action {
                 break;
             }
+            let diagnostic_quench =
+                matches!(&checkpoint_action, CheckpointAction::ProbeProposal { .. });
             let proposal = match checkpoint_action {
                 CheckpointAction::Continue => None,
                 CheckpointAction::Retire { .. } => unreachable!("retire breaks before this match"),
+                CheckpointAction::WithBiasUpdates { .. } => {
+                    unreachable!("bias wrappers are applied before the state action")
+                }
                 CheckpointAction::DepositRemote { states } => {
                     for remote in &states {
                         if remote.len() == x.len() {
-                            bias.deposit(bias.cv(remote.view()).view(), cfg.temperature);
+                            bias.deposit_scaled_n(
+                                bias.cv(remote.view()).view(),
+                                cfg.temperature,
+                                1.0,
+                                1,
+                            );
                         }
                     }
                     None
                 }
+                CheckpointAction::MergeBias {
+                    wells,
+                    weight,
+                    complete,
+                } => {
+                    BiasUpdate::MergeWells {
+                        wells,
+                        weight,
+                        complete,
+                    }
+                    .apply(
+                        &mut bias,
+                        cfg.temperature,
+                        &mut shared_deposits,
+                        &mut gossip_rounds,
+                    );
+                    None
+                }
+                CheckpointAction::DepositDescriptors { deposits, weight } => {
+                    BiasUpdate::DepositDescriptors { deposits, weight }.apply(
+                        &mut bias,
+                        cfg.temperature,
+                        &mut shared_deposits,
+                        &mut gossip_rounds,
+                    );
+                    None
+                }
                 CheckpointAction::BoundaryProposal { state, action } => {
-                    // The boundary start is taken as offered. Occupancy
-                    // Leave already walked the leftover-SOAP hole, and
-                    // re-walking it from the live well throws that shoot
-                    // away and quenches back onto the occupied family.
+                    // The boundary start is the Leave. Re-walking from
+                    // the live well is a function of the occupied
+                    // tangent and quenches back onto the occupied family.
                     Some((state, action, true))
                 }
                 CheckpointAction::ProbeProposal { state, action } => Some((state, action, false)),
@@ -1278,10 +2254,16 @@ where
                 let from_energy = e;
                 let from_state = x.clone();
                 let mut from_gradient = current_validation_gradient.clone();
-                if !adopt && from_gradient.is_none() {
+                let published_prize = action == "catalog_incumbent";
+                let soap_push = action == "soap_push";
+                if from_gradient.is_none() && (published_prize || soap_push || !adopt) {
                     from_gradient = grad.as_deref_mut().and_then(|g| {
                         g(ledger, from_state.view()).filter(|values| {
-                            values.iter().fold(0.0_f64, |a, q| a.max(q.abs())) < cfg.record_gradient
+                            gradient_is_converged(
+                                values.view(),
+                                from_state.len(),
+                                cfg.record_gradient,
+                            )
                         })
                     });
                 }
@@ -1297,189 +2279,144 @@ where
                 } else {
                     Vec::new()
                 };
-                // The hill the invert raises has the width of the step the
-                // first rung takes, which is the step that reaches the first
-                // barrier at the softest curvature of this well. Goedecker's
-                // argument is the same one: an isotropic displacement has no
-                // preference for low barriers, and a length that suits one
-                // structure melts another.
-                let leave_depth = from_energy.abs() / (x.len() / 3).max(1) as f64;
-                let leave_sigma = if leave_action {
-                    grad.as_deref_mut()
-                        .and_then(|g| {
-                            crate::curvature::curvature_features(
-                                from_state.view(),
-                                |y| g(ledger, y),
-                                cfg.escape_lanczos_steps,
-                                cfg.escape_epsilon,
-                            )
-                        })
-                        .and_then(|features| {
-                            crate::known_basin::rung_rmsd(
-                                features.lambda_min,
-                                x.len() / 3,
-                                crate::known_basin::rung_barrier(leave_depth, 0),
-                            )
-                        })
-                        .unwrap_or(crate::known_basin::LEAVE_RUNG_RMSD)
-                } else {
-                    crate::known_basin::LEAVE_RUNG_RMSD
-                };
-                if leave_action {
-                    // Free energy, not depth. The cloud carries how often
-                    // this run has arrived on each packing, and the log of
-                    // that count times the temperature is the entropic half
-                    // of what holds a chain in a funnel. On LJ75 it is the
-                    // half that decides: the icosahedral shelf outnumbers
-                    // the decahedral well by orders of magnitude, so the
-                    // 1.21 eps the Marks structure wins on potential energy
-                    // is already lost at T = 0.8.
-                    //
-                    // The tempering scale is the temperature itself, which
-                    // makes the converged pile half the free energy and
-                    // leaves no knob that is not a temperature.
-                    let book = crate::catalog::packing_reference_book();
-                    crate::known_basin::arm_leave_free(
-                        from_state.view(),
-                        leave_sigma,
-                        &book,
-                        cfg.temperature,
-                        cfg.temperature,
-                    );
-                }
-                // Cover by FunnelModel EI of unquenched packing
-                // histograms, Thompson until the funnel has two
-                // landings. The fivefold residual is the last arm.
-                let leave_cover = if leave_action {
-                    let n = crate::catalog::cover_arm_count();
-                    let probes = crate::known_basin::propose_leave_covers(
-                        from_state.view(),
-                        &references,
-                        leave_depth,
-                        cfg.species.as_deref(),
-                        crate::catalog::LEAVE_EI_PROBES,
-                        rng,
-                        |trial| Some(relax(ledger, trial, 0).0),
-                    );
-                    crate::catalog::pick_leave_cover_ei(&probes, n, rng)
-                } else {
-                    hops
-                };
-                // The barrier ladder is the Leave that leaves. Measured
-                // from the sealed LJ75 icosahedral minimum: 32 of 32
-                // covering starts quenched to novel packings between
-                // -371 and -391. A Hessian min-mode climb from the same
-                // well is a surface rumple and returns to ico. The
-                // accumulated ridge is the second try when the ladder
-                // refuses; its ceiling is LEAVE_WALK_CLIMB times the
-                // depth per atom.
-                let quenched = if leave_action && leave_cover == crate::catalog::fivefold_arm() {
-                    let start =
-                        crate::soap::step_away_fivefold_measured(from_state.view(), leave_sigma);
-                    relax(ledger, start.view(), cfg.relax_steps)
-                } else if leave_action {
-                    // The climb on E+V is the Leave that leaves.
-                    //
-                    // Measured from the sealed LJ75 icosahedral minimum,
-                    // sixteen trials each: displacement along a packing
-                    // cover direction leaves 0 of 16 at any deposit from
-                    // 0.029 to 50.35 eps and any width up to the grain,
-                    // and twenty-four raw quenches dropped along one such
-                    // trajectory, which reaches 1.87 in DECAF distance
-                    // against a Marks separation of 0.4267, all returned
-                    // to the floor. The min-mode climb on the same biased
-                    // surface leaves 3 of 16, reaching 0.5333, past both
-                    // the grain and the road to Marks.
-                    //
-                    // A climb on the *raw* surface is the surface rumple:
-                    // it reports curvatures of -1e13 and calls the ridge
-                    // behind after one step, because a closed shell has no
-                    // soft mode to follow. On E+V the shell is not closed,
-                    // the deposit having put fifty eps into it, and the
-                    // curvature at the end of the climb measures 0.5218.
-                    // The Householder is suppressed for the duration: it
-                    // inverts the force along a direction guessed before
-                    // the climb starts, and a min-mode search finds its
-                    // own.
-                    let climbed = crate::known_basin::with_hill_only(|| {
-                        let mut activation = crate::methods::activation::Activation::default();
-                        activation.step = crate::known_basin::LEAVE_WALK_STEP;
-                        grad.as_deref_mut().and_then(|g| {
-                            crate::methods::activation::activate_from_origin(
-                                from_state.view(),
-                                from_state.view(),
-                                |v| {
-                                    let raw = g(ledger, v)?;
-                                    let energy = relax(ledger, v, 0).0;
-                                    Some(crate::known_basin::effective(v, energy, raw).1)
-                                },
-                                &activation,
-                            )
-                        })
-                    });
-                    let climbed = climbed.and_then(|outcome| {
-                        let (energy, landed) = crate::known_basin::with_disarmed(|| {
-                            relax(ledger, outcome.state.view(), cfg.relax_steps)
-                        });
-                        let left = from_state.as_slice().zip(landed.as_slice()).is_some_and(
-                            |(origin, trial)| {
-                                crate::catalog::leaves_packing(origin, trial, &references)
-                            },
-                        );
-                        left.then_some((energy, landed))
-                    });
-                    if let Some(found) = climbed {
-                        found
+                // OtherFamily is a catalog draw. Ridge is APE: classify
+                // local environments, seed a dimer on a highlighted
+                // atom, climb under an energy ceiling. An offered
+                // residual is the seed when the checkpoint moved.
+                let quenched = if diagnostic_quench {
+                    let mut scope = ledger.diagnostic_scope();
+                    relax(&mut scope, state.view(), cfg.relax_steps)
+                } else if action == "catalog_ridge" {
+                    let atoms = from_state.len() / 3;
+                    let depth = from_energy.abs() / atoms.max(1) as f64;
+                    let ceiling = from_energy + crate::known_basin::LEAVE_WALK_CLIMB * depth;
+                    let offered = state
+                        .iter()
+                        .zip(from_state.iter())
+                        .any(|(a, b)| (a - b).abs() > 1e-12);
+                    let seed = if offered {
+                        state.clone()
                     } else {
-                        let ladder = {
-                            let mut starts = Vec::with_capacity(crate::known_basin::LEAVE_RUNGS);
-                            for rung in 0..crate::known_basin::LEAVE_RUNGS {
-                                starts.push(crate::known_basin::leave_packing_rung_to(
-                                    from_state.view(),
-                                    leave_cover,
-                                    crate::known_basin::rung_barrier(leave_depth, rung),
-                                    &references,
-                                    cfg.species.as_deref(),
-                                    None,
-                                    |trial| Some(relax(ledger, trial, 0).0),
-                                ));
-                            }
-                            let mut quench =
-                                |trial: ArrayView1<f64>| relax(ledger, trial, cfg.relax_steps);
-                            crate::known_basin::leave_packing_starts(
-                                from_state.view(),
-                                &starts,
-                                &references,
-                                &mut quench,
-                            )
-                        };
-                        if let Some((energy, landed, _)) = ladder {
-                            (energy, landed)
-                        } else if let Some((energy, landed, _)) =
-                            crate::known_basin::leave_packing_ridge(
-                                from_state.view(),
-                                leave_cover,
-                                &references,
-                                cfg.species.as_deref(),
-                                None,
-                                leave_depth,
-                                cfg.relax_steps,
-                                |trial, steps| relax(ledger, trial, steps),
-                            )
-                        {
-                            (energy, landed)
+                        let queue = from_state
+                            .as_slice()
+                            .map(crate::catalog::ape_highlight_queue)
+                            .unwrap_or_default();
+                        let atom = crate::known_basin::take_leave_cover().unwrap_or(0);
+                        let atom = if queue.iter().any(|(held, _)| *held == atom) {
+                            atom
                         } else {
-                            relax(ledger, state.view(), cfg.relax_steps)
-                        }
+                            queue.first().map(|(held, _)| *held).unwrap_or(0)
+                        };
+                        from_state.as_slice().map_or_else(
+                            || from_state.to_owned(),
+                            |here| {
+                                Array1::from(crate::catalog::ape_local_seed(
+                                    here,
+                                    atom,
+                                    cfg.escape_amplitude.max(0.2),
+                                    hops,
+                                ))
+                            },
+                        )
+                    };
+                    if let Some(g) = grad.as_deref_mut() {
+                        let act = crate::methods::activation::Activation {
+                            step: cfg.escape_amplitude.max(0.15),
+                            max_steps: cfg.escape_max_climb.max(48),
+                            overshoot: cfg.escape_overshoot.max(1.0),
+                            ..crate::methods::activation::Activation::default()
+                        };
+                        crate::methods::activation::activate_from_origin(
+                            seed.view(),
+                            from_state.view(),
+                            |y| {
+                                let (energy, _) = relax(ledger, y, 0);
+                                if energy.is_finite() && energy <= ceiling {
+                                    g(ledger, y)
+                                } else {
+                                    None
+                                }
+                            },
+                            &act,
+                        )
+                        .and_then(|o| {
+                            if !o.crossed {
+                                return None;
+                            }
+                            let (rise, _) = relax(ledger, o.state.view(), 0);
+                            if !(rise.is_finite() && rise <= ceiling) {
+                                return None;
+                            }
+                            let quenched = relax(ledger, o.state.view(), cfg.relax_steps);
+                            let left = from_state
+                                .as_slice()
+                                .zip(quenched.1.as_slice())
+                                .is_some_and(|(origin, trial)| {
+                                    crate::catalog::leaves_packing(origin, trial, &references)
+                                });
+                            if left {
+                                Some(quenched)
+                            } else if o.state.as_slice().is_some_and(|overshoot| {
+                                crate::catalog::occupied_unseen_share(overshoot) > 0.0
+                            }) {
+                                // Quench is the occupied packing projector.
+                                // Unseen local classes on the overshoot are
+                                // the Leave. The destination packing is not
+                                // a target.
+                                Some(relax(ledger, o.state.view(), 0))
+                            } else {
+                                None
+                            }
+                        })
+                    } else {
+                        None
                     }
+                    .unwrap_or_else(|| relax(ledger, from_state.view(), 0))
+                } else if action == "soap_push" {
+                    // Off the occupied packing mean, then follow the
+                    // ridge until the mode force flips. A quench of the
+                    // SOAP step alone is the occupied packing projector.
+                    if let Some(g) = grad.as_deref_mut() {
+                        let act = crate::methods::activation::Activation {
+                            step: cfg.escape_amplitude.max(0.15),
+                            max_steps: cfg.escape_max_climb.max(16),
+                            overshoot: cfg.escape_overshoot.max(1.0),
+                            ..crate::methods::activation::Activation::default()
+                        };
+                        crate::methods::activation::activate(
+                            state.view(),
+                            |y| g(ledger, y),
+                            &act,
+                            1.0,
+                        )
+                        .and_then(|o| {
+                            if !o.crossed {
+                                return None;
+                            }
+                            let quenched = relax(ledger, o.state.view(), cfg.relax_steps);
+                            let home = from_state
+                                .as_slice()
+                                .zip(quenched.1.as_slice())
+                                .is_some_and(|(origin, trial)| {
+                                    !crate::catalog::leaves_packing(
+                                        origin,
+                                        trial,
+                                        &crate::catalog::packing_references(),
+                                    )
+                                });
+                            if home {
+                                Some(relax(ledger, o.state.view(), 0))
+                            } else {
+                                Some(quenched)
+                            }
+                        })
+                    } else {
+                        None
+                    }
+                    .unwrap_or_else(|| relax(ledger, state.view(), 0))
                 } else {
                     relax(ledger, state.view(), cfg.relax_steps)
                 };
-                // The armed walk ends on a ridge, not in a well. What names
-                // the packing, and what the chain may move onto, is the raw
-                // minimum below it: a minimum of \(E+V\) is not a minimum
-                // of the potential, and a hill this Leave put there is not
-                // part of the landscape.
                 let (mut candidate_energy, mut candidate) = if leave_action {
                     crate::known_basin::with_disarmed(|| {
                         relax(ledger, quenched.1.view(), cfg.relax_steps)
@@ -1495,7 +2432,30 @@ where
                             crate::catalog::leaves_packing(origin, trial, &references)
                         })
                 };
-                let walked_off = leave_action && left_packing(&candidate);
+                // SEAKMC: several searches in the active volume, then
+                // flush. The first quench is the offered start. Further
+                // starts are packing leftovers restricted to the atoms
+                // that carry \(\|h_i-\mu\|\), compacted then polished.
+                // Unused starts are discarded. This is not Xu confidence
+                // and not a campaign stop.
+                if leave_action
+                    && !left_packing(&candidate)
+                    && let Some((energy, landed, _)) = crate::known_basin::leave_av_walk(
+                        from_state.view(),
+                        cfg.neighbour_cutoff,
+                        crate::known_basin::LEAVE_WALK_HOPS,
+                        from_energy,
+                        rng,
+                        |trial| relax(ledger, trial, cfg.relax_steps),
+                    )
+                {
+                    candidate_energy = energy;
+                    candidate = landed;
+                }
+                let novel = candidate
+                    .as_slice()
+                    .is_some_and(|trial| crate::catalog::occupied_unseen_share(trial) > 0.0);
+                let walked_off = leave_action && (left_packing(&candidate) || novel);
                 if leave_action {
                     if let Some(trial) = candidate.as_slice() {
                         let mut book = crate::catalog::PackingBook::default();
@@ -1506,7 +2466,7 @@ where
                             crate::catalog::observe_leave(
                                 &histogram,
                                 candidate_energy,
-                                Some(leave_cover),
+                                None,
                                 walked_off,
                             );
                         }
@@ -1515,17 +2475,6 @@ where
                         crate::catalog::ACTION_LEAVE,
                         walked_off || candidate_energy < from_energy - 1e-6,
                     );
-                    // What this Leave actually left standing on the packing
-                    // it started from. The amplitude is set on the first
-                    // transformed evaluation, not at arm time, so it can
-                    // only be read once the walk has happened. The next
-                    // Leave from the same well scales its hill by it.
-                    if let Some((amplitude, _)) = crate::known_basin::lift()
-                        && let Some(here) = from_state.as_slice()
-                    {
-                        crate::catalog::credit_packing_deposit(here, amplitude);
-                    }
-                    crate::known_basin::disarm();
                 }
                 let (proposal_energy, proposal_state) = (candidate_energy, candidate);
                 #[cfg(not(feature = "featomic"))]
@@ -1554,15 +2503,27 @@ where
                         continue;
                     }
                     hops += 1;
-                    ledger.record(hole_energy, hole_state.view());
+                    let hole_gradient = record_quenched_answer(
+                        cfg,
+                        ledger,
+                        &mut grad,
+                        hole_energy,
+                        hole_state.view(),
+                        &mut unconverged_records,
+                    );
                     let reached = identity.basin_of(hole_state.view());
                     let from = here.unwrap_or_else(|| identity.basin_of(from_state.view()));
-                    feedback.observe(Some(from), reached);
-                    here = Some(reached);
-                    e = hole_energy;
-                    x = hole_state;
+                    adopt_minimum!(
+                        hole_energy,
+                        hole_state,
+                        hole_gradient,
+                        Some(reached),
+                        AdoptionHistory::Fresh,
+                        Some((Some(from), reached)),
+                        None,
+                        hops
+                    );
                     accepted += 1;
-                    current_validation_gradient = None;
                     bias.deposit(x.view(), cfg.temperature);
                     accepted_transitions.push(AcceptedTransition {
                         hop: hops,
@@ -1572,8 +2533,8 @@ where
                         from_state,
                         from_gradient,
                         to_state: x.clone(),
-                        to_gradient: None,
-                        validated: false,
+                        to_gradient: current_validation_gradient.clone(),
+                        validated: current_validation_gradient.is_some(),
                         adopted: true,
                     });
                     continue;
@@ -1593,37 +2554,73 @@ where
                 let validation_gradient = if proposal_sane {
                     grad.as_deref_mut().and_then(|g| {
                         g(ledger, proposal_state.view()).filter(|values| {
-                            values.iter().fold(0.0_f64, |a, q| a.max(q.abs())) < cfg.record_gradient
+                            gradient_is_converged(
+                                values.view(),
+                                proposal_state.len(),
+                                cfg.record_gradient,
+                            )
                         })
                     })
                 } else {
                     None
                 };
+                // A published catalog prize is already a validated
+                // minimum. Mid-hop from_gradient is often missing, and
+                // that gate left every hear of Marks on the ico chain.
                 let recordable = proposal_sane
-                    && (!gradient_required || from_gradient.is_some())
-                    && (!gradient_required || validation_gradient.is_some());
+                    && (published_prize
+                        || soap_push
+                        || !gradient_required
+                        || from_gradient.is_some())
+                    && (published_prize
+                        || soap_push
+                        || !gradient_required
+                        || validation_gradient.is_some());
+                // Catalog hearing relocates one chain; it does not swap a
+                // pair of replica states. This receiving-field Metropolis
+                // filter is a global-search heuristic, not an equilibrium
+                // witness: catalog selection need not be symmetric, and the
+                // rule has neither proposal-density nor sender-field terms.
+                // Its utility is measured by ensemble discovery and retained
+                // search diversity, not by the number of copied minima.
+                let exchange_accept = if published_prize && cfg.exchange_metropolis && proposal_sane
+                {
+                    let v_here = bias.potential(bias.cv(from_state.view()).view());
+                    let v_there = bias.potential(bias.cv(proposal_state.view()).view());
+                    let d = ((proposal_energy + v_there) - (from_energy + v_here))
+                        / cfg.temperature.max(1e-12);
+                    d <= 0.0 || rng.random::<f64>() < (-d).exp()
+                } else {
+                    true
+                };
+                if published_prize && !exchange_accept {
+                    exchanges_refused += 1;
+                }
+                let adopt = adopt && exchange_accept;
                 if recordable {
+                    // A validated discovery belongs to the answer even when
+                    // the live chain does not adopt the diagnostic endpoint.
+                    let improved = proposal_energy < ledger.best - 1e-10;
+                    ledger.record(proposal_energy, proposal_state.view());
                     if adopt {
                         hops += 1;
-                        let improved = proposal_energy < ledger.best - 1e-10;
-                        ledger.record(proposal_energy, proposal_state.view());
                         let reached = identity.basin_of(proposal_state.view());
                         let from = here.unwrap_or_else(|| identity.basin_of(from_state.view()));
-                        feedback.observe(Some(from), reached);
-                        here = Some(reached);
-                        e = proposal_energy;
-                        x = proposal_state.clone();
-                        current_validation_gradient = validation_gradient.clone();
+                        adopt_minimum!(
+                            proposal_energy,
+                            proposal_state.clone(),
+                            validation_gradient.clone(),
+                            Some(reached),
+                            AdoptionHistory::Fresh,
+                            Some((Some(from), reached)),
+                            None,
+                            hops
+                        );
                         accepted += 1;
                         bias.deposit(x.view(), cfg.temperature);
-                        if improved && improvements.len() < 512 {
-                            improvements.push((
-                                hops,
-                                ledger.spent(),
-                                bias.n_basins(),
-                                proposal_energy,
-                            ));
-                        }
+                    }
+                    if improved && improvements.len() < 512 {
+                        improvements.push((hops, ledger.spent(), bias.n_basins(), proposal_energy));
                     }
                     accepted_transitions.push(AcceptedTransition {
                         hop: hops,
@@ -1641,6 +2638,9 @@ where
                     unconverged_records += 1;
                     bias.deposit(x.view(), cfg.temperature);
                 } else if action == "probe" {
+                    // Failed diagnostics are part of the probe denominator.
+                    // They carry no validated destination and cannot move the
+                    // live chain or certify that its region is exhausted.
                     accepted_transitions.push(AcceptedTransition {
                         hop: hops,
                         action,
@@ -1659,27 +2659,120 @@ where
         if ledger.remaining() == 0 {
             break;
         }
+        let continuous_symmetry_due = match cfg.continuous_symmetry {
+            ContinuousSymmetry::Off => false,
+            ContinuousSymmetry::Inversion { interval } => {
+                let quench_index = 1usize
+                    .saturating_add(hops)
+                    .saturating_add(continuous_symmetry_quenches);
+                quench_index.is_multiple_of(interval)
+            }
+        };
+        if continuous_symmetry_due {
+            continuous_symmetry_attempts += 1;
+            let classes = continuous_symmetry_classes
+                .as_deref()
+                .expect("enabled continuous symmetry has equivalence classes");
+            if let Some(projection) =
+                crate::continuous_symmetry::project_inversion(x.view(), classes)
+            {
+                continuous_symmetry_quenches += 1;
+                let from_energy = e;
+                let from_state = x.clone();
+                let from_gradient = current_validation_gradient.clone();
+                let (candidate_energy, candidate) =
+                    relax(ledger, projection.coordinates.view(), cfg.relax_steps);
+                let candidate_sane = quench_is_sane(cfg, candidate_energy, candidate.view());
+                let gradient_required = grad.is_some();
+                let candidate_gradient = candidate_sane.then(|| {
+                    grad.as_deref_mut().and_then(|gradient| {
+                        gradient(ledger, candidate.view()).filter(|values| {
+                            gradient_is_converged(
+                                values.view(),
+                                candidate.len(),
+                                cfg.record_gradient,
+                            )
+                        })
+                    })
+                });
+                let candidate_gradient = candidate_gradient.flatten();
+                let recordable =
+                    candidate_sane && (!gradient_required || candidate_gradient.is_some());
+                let improved = recordable && candidate_energy < ledger.best - 1e-10;
+                if recordable {
+                    ledger.record(candidate_energy, candidate.view());
+                } else {
+                    unconverged_records += 1;
+                }
+                let adopted = recordable && candidate_energy < e - 1e-10;
+                if adopted {
+                    continuous_symmetry_gain += e - candidate_energy;
+                    let from_basin = here.unwrap_or_else(|| identity.basin_of(x.view()));
+                    let reached = identity.basin_of(candidate.view());
+                    adopt_minimum!(
+                        candidate_energy,
+                        candidate.clone(),
+                        candidate_gradient.clone(),
+                        Some(reached),
+                        AdoptionHistory::Fresh,
+                        Some((Some(from_basin), reached)),
+                        None,
+                        hops
+                    );
+                    soft_cache = None;
+                    basin_entry = None;
+                    quiet = 0;
+                    if improved && improvements.len() < 512 {
+                        improvements.push((
+                            hops,
+                            ledger.spent(),
+                            bias.n_basins(),
+                            candidate_energy,
+                        ));
+                    }
+                }
+                if recordable {
+                    accepted_transitions.push(AcceptedTransition {
+                        hop: hops,
+                        action: "continuous-symmetry-ci".to_owned(),
+                        from_energy,
+                        to_energy: candidate_energy,
+                        from_state,
+                        from_gradient,
+                        to_state: candidate,
+                        to_gradient: candidate_gradient,
+                        validated: true,
+                        adopted,
+                    });
+                }
+            }
+            if ledger.remaining() == 0 {
+                break;
+            }
+        }
         // Gap to the incumbent, which is what the law scales the window by.
         let gap = (e - ledger.best).abs().max(1e-12);
-        let mut temperature = if cfg.budget_window {
+        let held = if cfg.budget_window {
             law.temperature(gap, ledger.remaining())
         } else {
             cfg.temperature
         };
-        // The entropy's slope where the chain stands, clamped to a band around
-        // the configured value so a slope estimated from few counts cannot
-        // freeze the chain or boil it. The band is wide enough that the
-        // adaptation has somewhere to go and narrow enough that a bad estimate
-        // is survivable.
-        if cfg.statistical_temperature
-            && let Some(d) = dos.as_ref()
-            && d.refreshes > 0
-        {
-            let (t, _) = d.temperature(e);
-            if t.is_finite() && t > 0.0 {
-                temperature = t.clamp(0.2 * cfg.temperature, 5.0 * cfg.temperature);
-            }
-        }
+        let single = single_chain_temperature(cfg, held, dos.as_ref(), e);
+        let scale = if n_rep > 1 && cfg.ladder_mode.tempers() {
+            temps[rep] / cfg.temperature.max(1e-12)
+        } else {
+            ratios[rep]
+        };
+        let temperature = single * scale;
+        // The coldest rung's temperature from the state it holds, which the
+        // energy bias is built and filled at. Read here, where that rung's own
+        // hop reads its temperature, so the reading is the same whichever rung
+        // is hopping.
+        let bias_temperature = if rep == 0 || !cfg.energy_bias || chains.is_empty() {
+            single
+        } else {
+            standing_temperature(cfg, &law, ledger, ratios[0], dos.as_ref(), chains[0].energy)
+        };
 
         if cfg.anneal_diversity {
             let progress = 1.0 - (ledger.remaining() as f64 / ledger.budget() as f64);
@@ -1805,7 +2898,95 @@ where
         // mode climbs live under `escape_on_stall` below; they are a few per
         // cent of the budget when the chain has stopped improving, not the
         // default proposal.
-        let mut trial = if cov_fire {
+        // The Hamiltonian proposal replaces the displacement rather than
+        // competing with it as one arm among many: the comparison is between
+        // a trajectory and a kick at equal charge.
+        let hamiltonian = cfg.hmc.is_some() && energy_grad.is_some() && !angular;
+        let mut hmc_trial: Option<Array1<f64>> = None;
+        // Goedecker's escape: an NVE trajectory from the occupied minimum,
+        // launched with the controller's escape scale as kinetic energy and
+        // stopped after two potential minima, replaces the kick. Its end
+        // point enters the same screen and quench as any trial, so the
+        // comparison is trajectory against kick at equal charge.
+        if cfg.minima_hopping
+            && cfg.md_escape
+            && !angular
+            && hmc_trial.is_none()
+            && let Some(g) = grad.as_deref_mut()
+        {
+            let md_config = crate::methods::minima_hopping::MdEscapeConfig {
+                dt: cfg.md_escape_dt,
+                potential_minima: cfg.md_escape_minima.max(1),
+                maximum_steps: cfg.md_escape_max_steps.max(1),
+                softening: (cfg.md_escape_soften > 0).then_some(
+                    rgsaddle::VelocitySofteningConfig {
+                        steps: cfg.md_escape_soften,
+                        ..Default::default()
+                    },
+                ),
+                ..Default::default()
+            };
+            let kinetic = (cfg.md_escape_kinetic * feedback.escape()).max(f64::MIN_POSITIVE);
+            let mut evaluate = |p: ArrayView1<f64>| -> Option<(f64, Array1<f64>)> {
+                let (energy, _) = relax(ledger, p, 0);
+                let gradient = g(ledger, p)?;
+                energy.is_finite().then_some((energy, gradient))
+            };
+            md_attempts += 1;
+            match crate::methods::minima_hopping::nve_escape_with_frozen(
+                x.view(),
+                kinetic,
+                &md_config,
+                &mut evaluate,
+                rng,
+                hop_frozen.as_deref(),
+            ) {
+                Ok(report) if report.potential_minima >= md_config.potential_minima => {
+                    md_steps += report.steps;
+                    if md_attempts <= 8 && std::env::var("MD_TRACE").is_ok_and(|v| v == "1") {
+                        let displacement = (&report.position - &x).mapv(|d| d * d).sum().sqrt();
+                        eprintln!(
+                            "md_escape attempt {md_attempts}: kinetic {kinetic:.3} steps {} minima {} \
+                             endpoint energy {:.4} from {e:.4} span {:.4} conservation {:.3} displacement {displacement:.3}",
+                            report.steps,
+                            report.potential_minima,
+                            report.energy,
+                            report.potential_energy_span,
+                            report.energy_conservation_ratio()
+                        );
+                    }
+                    hmc_trial = Some(report.position);
+                }
+                Ok(report) => {
+                    md_steps += report.steps;
+                    md_failed += 1;
+                }
+                Err(_) => {
+                    md_failed += 1;
+                }
+            }
+            if ledger.remaining() == 0 {
+                break;
+            }
+        }
+        if hamiltonian {
+            let hc = cfg.hmc.as_ref().expect("hamiltonian implies a config");
+            let chain = hop.as_mut().expect("hamiltonian implies a sampler");
+            let eg = energy_grad
+                .as_deref_mut()
+                .expect("hamiltonian implies energies");
+            let mut eg_ref: crate::hmc::hop::Energy<'_> = eg;
+            hmc_trial = chain
+                .propose(hc, ledger, x.view(), e, &mut eg_ref, rng)
+                .map(|p| p.x);
+            if hmc_trial.is_none() {
+                // The ledger ran out inside the trajectory.
+                break;
+            }
+        }
+        let mut trial = if let Some(t) = hmc_trial {
+            t
+        } else if cov_fire {
             let dim = x.len();
             let m = cov_buf.len();
             // Evidence weight: nothing at a cold start, most of the draw once
@@ -1995,15 +3176,19 @@ where
             // it will fall: in a locally quadratic basin the depth goes as
             // |g|^2 / 2 lambda. One evaluation against the twenty-five a
             // quench costs.
-            let gnorm = match grad.as_deref_mut().and_then(|g| g(ledger, trial.view())) {
-                Some(v) => v.iter().fold(0.0_f64, |a, q| a + q * q).sqrt(),
-                None => 0.0,
+            let gvec = match grad.as_deref_mut().and_then(|g| g(ledger, trial.view())) {
+                Some(v) => v.to_owned(),
+                None => Array1::zeros(trial.len()),
             };
+            let gnorm = gvec.iter().fold(0.0_f64, |a, q| a + q * q).sqrt();
             pending_raw = Some((raw_y, gnorm));
+            let design =
+                crate::delayed::features_with_depth(trial.view(), n, raw_y, gvec.view(), x.view());
+            pending_design = Some(design.clone());
             // The first stage speaks only where the posterior is sharp against
             // the temperature that scales the acceptance ratio.
             let tol = cfg.surrogate_tolerance * temperature;
-            match sur.predict_full(trial.view(), n, raw_y, gnorm, tol) {
+            match sur.predict_features(design.view(), raw_y, tol) {
                 None => sur.abstained += 1,
                 Some(pred_y) => {
                     let pred_x = match surrogate_here {
@@ -2093,9 +3278,6 @@ where
         } else {
             None
         };
-        if known_stand_in.is_some() {
-            known_hits += 1;
-        }
         let returning = cfg.return_screen && {
             let ds = bias.cv(x_screen.view());
             let dc = bias.cv(x.view());
@@ -2189,7 +3371,11 @@ where
         // Every quench trains the surrogate, including the ones taken before
         // it had an opinion. This is where its training data comes from.
         if let (Some(sur), Some((raw_y, gnorm))) = (surrogate.as_mut(), pending_raw.take()) {
-            sur.observe_full(trial.view(), n, raw_y, gnorm, e_new);
+            if let Some(design) = pending_design.take() {
+                sur.observe_features(design.view(), raw_y, e_new);
+            } else {
+                sur.observe_full(trial.view(), n, raw_y, gnorm, e_new);
+            }
             // And the relaxed end of the same quench, whose depth is zero.
             //
             // Without it the model sees only unrelaxed structures and is asked
@@ -2232,17 +3418,46 @@ where
         } else {
             grad.as_deref_mut().and_then(|g| {
                 g(ledger, x_new.view()).filter(|values| {
-                    values.iter().fold(0.0_f64, |a, q| a.max(q.abs())) < cfg.record_gradient
+                    gradient_is_converged(values.view(), x_new.len(), cfg.record_gradient)
                 })
             })
         };
         let recordable = !unquenched && (!gradient_required || validation_gradient.is_some());
+        // Every certified quench is reported, adopted or not: the history's
+        // membership policy decides what counts, not the chain.
+        let history_report = match (history.as_deref_mut(), validation_gradient.as_ref()) {
+            (Some(h), Some(g)) if recordable => h.observe(e_new, x_new.view(), g.view()),
+            _ => None,
+        };
+        // The reached minimum's bias key, taken before an acceptance moves
+        // the coordinates into the chain.
+        let history_cv = history_report.map(|_| bias.cv(x_new.view()));
+        if let Some(report) = history_report {
+            history_observations += 1;
+            if report.is_new {
+                history_new += 1;
+            }
+        }
         if recordable {
             ledger.record(e_new, x_new.view());
+            // Recognition refunds the rest of a later descent into this
+            // basin. HistoryHook still returns identity only; the bank
+            // holds coordinates the loop already paid to certify.
+            if recognition_skip && screen_bank.len() < 512 {
+                screen_bank.push((bias.cv(x_new.view()), e_new, x_new.clone()));
+                if let Some(coords) = x_new.as_slice() {
+                    crate::catalog::offer_known_minimum(e_new, coords);
+                }
+            }
         } else {
             unconverged_records += 1;
         }
         hops += 1;
+        // Only where a full relaxation actually ran: a screened or returning
+        // trial carries the energy of a partial descent.
+        if cfg.trace_quenched && !unquenched && !screened_this && !returning {
+            quenched.push((ledger.spent(), bias.n_basins(), e_new, recordable));
+        }
         if recordable && improved && improvements.len() < 512 {
             improvements.push((hops, ledger.spent(), bias.n_basins(), e_new));
             // The anatomy of the draw that produced a new best, for the
@@ -2331,7 +3546,7 @@ where
         // Where the chain stands before the acceptance test, so an accepted
         // hop can be recorded as an edge from here to there. Taken only when
         // the tracker is on, since it costs a descriptor and a lookup.
-        let here_before = if cfg.track_funnels {
+        let here_before = if cfg.track_funnels || superbasin.is_some() {
             Some(*here.get_or_insert_with(|| identity.basin_of(x.view())))
         } else {
             None
@@ -2373,6 +3588,27 @@ where
         };
         let s_old = bias.cv(x.view());
         let s_new = bias.cv(x_new.view());
+        // A draw from the region's density of states, recorded before the
+        // acceptance rule reweights it towards the low tail.
+        if let (Some(t), false) = (trace.as_mut(), unquenched) {
+            t.push(e_new);
+        }
+        // The transition this proposal represents for the unbiased chain,
+        // weighted by the acceptance it would have had with no deposits: the
+        // move kernel never sees the deposits, so only the acceptance is
+        // bias-dependent, and this replaces it rather than corrects it.
+        if let (Some(sb), Some(from)) = (superbasin.as_mut(), here_before) {
+            if unquenched {
+                sb.observe(from, Some(from), 0.0);
+            } else {
+                let a = if e_new <= e {
+                    1.0
+                } else {
+                    (-(e_new - e) / temperature.max(1e-12)).exp()
+                };
+                sb.observe(from, identity.lookup(x_new.view()), a);
+            }
+        }
         // Biased rise. The bias is part of the landscape the chain walks; a
         // threshold or Metropolis on raw energy alone ignores the deposits and
         // re-enters filled basins freely. Measured: MH accepting on raw delta
@@ -2397,19 +3633,43 @@ where
         // which is how the measured LJ38 run discovers basins from a
         // 25-step screen. Gating accept on recordable froze that path
         // at fifteen basins.
+        let mut trial_local_minimum = here;
         let accept = if cfg.minima_hopping {
             let from = *here.get_or_insert_with(|| identity.basin_of(x.view()));
             if unquenched {
-                feedback.observe(Some(from), from);
+                feedback.observe_driver_local(Some(from), from);
                 false
             } else {
                 // Threshold on the *biased* rise. Adapts like Goedecker's E_diff
-                // while still feeling the per-basin deposits.
+                // while still feeling the per-basin deposits. A self-return
+                // updates escape strength but is not an acceptance trial.
                 let reached = identity.basin_of(x_new.view());
-                feedback.observe(Some(from), reached);
-                let ok = feedback.accept(delta);
+                let ok = if let Some(report) = history_report {
+                    // The population's identity and counts drive the
+                    // controller: a minimum first found by another chain is
+                    // known here too, and only a minimum new under the
+                    // membership policy is offered to the threshold.
+                    let visit = match cfg.shared_visit_policy {
+                        SharedVisitPolicy::Tabu => {
+                            feedback.remember_driver_local(reached);
+                            feedback.observe_shared(
+                                history_here,
+                                report.minimum,
+                                report.is_new,
+                                report.visits,
+                            )
+                        }
+                        SharedVisitPolicy::Recognition => {
+                            feedback.observe_driver_local(Some(from), reached)
+                        }
+                    };
+                    visit == Visit::New && feedback.accept(delta)
+                } else {
+                    feedback.observe_driver_local(Some(from), reached);
+                    reached != from && feedback.accept(delta)
+                };
                 if ok {
-                    here = Some(reached);
+                    trial_local_minimum = Some(reached);
                 }
                 ok
             }
@@ -2570,12 +3830,17 @@ where
                 tabu_hits += 1;
             }
         }
+        // The energy bias is one function on every rung, so its factor and its
+        // deposits read one temperature whichever rung fills the sample or
+        // deposits: the one the coldest rung hops at from the state it holds,
+        // at which (gamma - 1) T is the sample's spread. Each rung reads the
+        // bias over its own temperature.
         if cfg.energy_bias {
             let occupied = if accept { e_new } else { e };
             if occupied.is_finite() {
                 match ebias.as_mut() {
                     Some(b) => {
-                        b.deposit(occupied, temperature);
+                        b.deposit(occupied, bias_temperature);
                         if std::env::var("EBIAS_TRACE").is_ok() && b.deposits % 200 == 0 {
                             eprintln!("ebias deposits {} peak {:.4}", b.deposits, b.peak());
                         }
@@ -2585,7 +3850,7 @@ where
                         if flat_seen.len() >= flat_sweep {
                             ebias = crate::dos::EnergyBias::from_sample(
                                 &flat_seen,
-                                temperature,
+                                bias_temperature,
                                 crate::dos::BINS,
                             );
                             flat_seen.clear();
@@ -2594,7 +3859,17 @@ where
                 }
             }
         }
-        if cfg.flat_histogram || cfg.statistical_temperature {
+        // Under the statistical temperature only the ratio-one rungs record. A
+        // rung walking at r times the entropy's slope stands with weight
+        // exp(-S/r), which is not the occupancy the estimator fits, so its
+        // counts bias the estimate. Measured on a two-rung LJ13 ladder ten
+        // times hotter at the top, they heated every rung: the hot rung's
+        // energies widened the window the first sweep sets, to bins about twice
+        // as wide, and the fitted entropy came out flatter where the coldest
+        // rung stands, its estimate 0.27 against 0.11 after one refresh.
+        if (cfg.flat_histogram || cfg.statistical_temperature)
+            && (ratios[rep] == 1.0 || !cfg.statistical_temperature)
+        {
             // The histogram is over where the chain *stands*, so a rejected
             // trial records the state it stayed in. Recording the proposal
             // instead would measure the move library rather than the
@@ -2700,7 +3975,7 @@ where
                 // because its size says how deep rather than merely whether.
                 depth_allocator.update(k, -(e_new - ledger.best));
             }
-            allocator.update(k, improved || accept);
+            allocator.update(k, improved || (accept && !(cfg.novel_reward && returning)));
             arm_draws[k] += 1;
             if accept {
                 arm_accepts[k] += 1;
@@ -2842,17 +4117,153 @@ where
                 basin_entry = Some(snapshot);
             }
             moved_basin = !returning;
-            e = e_new;
-            x = x_new;
-            current_validation_gradient = validation_gradient;
+            adopt_minimum!(
+                e_new,
+                x_new,
+                validation_gradient,
+                trial_local_minimum,
+                AdoptionHistory::Observed(history_report),
+                None,
+                None,
+                hops
+            );
         } else if cfg.budget_window {
             // The biased delta, which is what the chain actually declined, not
             // the raw energy difference. The bias is part of the barrier the
             // chain faces, and estimating the barrier without it measures a
             // landscape the chain is not walking on.
-            law.observe_rejection(delta);
+            //
+            // Divided by the rung's ratio, because the law sets the coldest
+            // rung's temperature: a rise declined at `r T` weighs what one `r`
+            // times smaller does at `T`, so the escape floor asks each rung to
+            // clear, at its own temperature, what it is failing to cross. The
+            // larger rises a hot rung declines would otherwise heat every rung.
+            law.observe_rejection(delta / ratios[rep]);
         }
         bias.deposit(bias.cv(x.view()).view(), temperature);
+        // Visits other chains made to the minimum this quench reached, paid
+        // into this chain's bias as if it had made them. The count is under
+        // the history's membership policy, so with accepted membership only
+        // minima some chain stood in are filled. Capped per look, because a
+        // shelf the population has sat on for a hundred thousand hops is
+        // filled well before the cap and an uncapped loop is pure cost.
+        if !cfg.minima_hopping
+            && cfg.shared_deposits > 0
+            && let (Some(report), Some(cv)) = (history_report, history_cv.as_ref())
+        {
+            let seen = history_seen.entry(report.minimum).or_insert(0);
+            // This chain's own observation is already in its hop deposits.
+            let foreign = report
+                .visits
+                .saturating_sub(*seen)
+                .saturating_sub(1)
+                .min(cfg.shared_deposits as u64);
+            for _ in 0..foreign {
+                // Counted as this chain's own visits: the rung owes what the
+                // other rung recorded while this bias was parked.
+                bias.deposit(cv.view(), temperature);
+                shared_deposits += 1;
+            }
+            *seen = report.visits;
+            // Under accepted membership this chain's own adoption raises the
+            // count from zero to one after the look; that visit is its own.
+            if accept && report.visits == 0 {
+                *seen = 1;
+            }
+        }
+        // Core symmetrisation of a newly entered basin (Oakley, Johnston,
+        // Wales 2013), quenched and offered to the same acceptance rule as a
+        // hop. Once per new basin: the arm form of this move was measured to
+        // take half of all draws at 83 per cent acceptance on 75 points,
+        // because a symmetric minimum re-symmetrises to itself and an
+        // accepted return is still an accept.
+        if cfg.point_symmetrise_on_new
+            && accept
+            && (moved_basin || cfg.point_symmetrise_every_accept)
+            && let Some(y) = crate::symmetrise::symmetrise_core(
+                x.view(),
+                n,
+                cfg.symmetry_tolerance,
+                cfg.symmetry_merge_radius,
+                cfg.symmetrise_core_fraction,
+            )
+        {
+            let (es, xs) = relax(ledger, y.view(), cfg.relax_steps);
+            if es.is_finite() && xs.len() == x.len() {
+                let sym_gradient = record_quenched_answer(
+                    cfg,
+                    ledger,
+                    &mut grad,
+                    es,
+                    xs.view(),
+                    &mut unconverged_records,
+                );
+                hops += 1;
+                symmetrised += 1;
+                let d = (es - e) / temperature.max(1e-12);
+                if d < 0.0 || rng.random::<f64>() < (-d).exp() {
+                    if es < e {
+                        symmetry_gain += e - es;
+                    }
+                    adopt_minimum!(
+                        es,
+                        xs,
+                        sym_gradient,
+                        None,
+                        AdoptionHistory::Fresh,
+                        None,
+                        Some("point-symmetrise"),
+                        hops
+                    );
+                }
+            }
+        }
+        // Orbit completion of a newly entered basin: the core's point group
+        // applied to the whole cluster, so surface atoms move onto the empty
+        // orbit positions the core implies. Same terms as the core
+        // symmetrisation above: once per new basin, quenched, offered.
+        if cfg.packing_surface().orbit_on_new
+            && accept
+            && (moved_basin || cfg.point_symmetrise_every_accept)
+            && let Some(y) = crate::packing::on_new_basin(
+                x.view(),
+                n,
+                cfg.symmetry_tolerance,
+                cfg.symmetry_merge_radius,
+                cfg.symmetrise_core_fraction,
+                cfg.min_separation,
+            )
+        {
+            let (es, xs) = relax(ledger, y.view(), cfg.relax_steps);
+            if es.is_finite() && xs.len() == x.len() {
+                let sym_gradient = record_quenched_answer(
+                    cfg,
+                    ledger,
+                    &mut grad,
+                    es,
+                    xs.view(),
+                    &mut unconverged_records,
+                );
+                hops += 1;
+                orbits_completed += 1;
+                let d = (es - e) / temperature.max(1e-12);
+                if d < 0.0 || rng.random::<f64>() < (-d).exp() {
+                    if es < e {
+                        orbit_gain += e - es;
+                    }
+                    adopt_minimum!(
+                        es,
+                        xs,
+                        sym_gradient,
+                        None,
+                        AdoptionHistory::Fresh,
+                        None,
+                        Some("orbit-completion"),
+                        hops
+                    );
+                }
+            }
+        }
         // Graph edge + Fiedler deposit at the chain's current basin. Called
         // every hop (accepted or not) so the coordinate tracks occupation;
         // only accepted moves grow the graph (visit records last→current).
@@ -2881,14 +4292,76 @@ where
             >= cfg
                 .escape_stall_patience
                 .max((cfg.escape_stall_factor * longest_quiet as f64) as usize);
+        // Basin hopping with occasional jumping (Iwamatsu and Okabe, Chem.
+        // Phys. Lett. 399, 396 (2004)): after `jump_patience` hops without
+        // improvement, take `jump_steps` collective displacements with no
+        // quench and no acceptance test, then quench and continue from
+        // wherever that lands. The walk keeps most of the structure, so the
+        // landing is a neighbouring region rather than a random start,
+        // which is what the measured shelf needs: the control at ten times
+        // the budget left the icosahedral shelf about once per several
+        // hundred thousand hops, and a fresh random start pays the descent
+        // again and lands on the shelf with the same odds.
+        if cfg.jump_on_stall
+            && cfg.jump_patience > 0
+            && quiet >= cfg.jump_patience
+            && quiet.is_multiple_of(cfg.jump_patience)
+        {
+            let mut y = x.clone();
+            for _ in 0..cfg.jump_steps.max(1) {
+                for v in y.iter_mut() {
+                    *v += rng.random_range(-cfg.jump_step..cfg.jump_step);
+                }
+            }
+            let (ej, xj) = relax(ledger, y.view(), cfg.relax_steps);
+            if ej.is_finite() && xj.len() == x.len() && quench_is_sane(cfg, ej, xj.view()) {
+                let jump_gradient = record_quenched_answer(
+                    cfg,
+                    ledger,
+                    &mut grad,
+                    ej,
+                    xj.view(),
+                    &mut unconverged_records,
+                );
+                hops += 1;
+                jumps += 1;
+                adopt_minimum!(
+                    ej,
+                    xj,
+                    jump_gradient,
+                    None,
+                    AdoptionHistory::Fresh,
+                    None,
+                    Some("stall-jump"),
+                    hops
+                );
+                longest_quiet = longest_quiet.max(quiet);
+                quiet = 0;
+            }
+        }
+        // Where the chain stands after the acceptance test, computed once for
+        // every consumer that wants it.
+        let landed = if accept && here_before.is_some() {
+            let now = identity.basin_of(x.view());
+            here = Some(now);
+            Some(now)
+        } else {
+            None
+        };
+        if let (Some(sb), Some(from), Some(now)) = (superbasin.as_mut(), here_before, landed) {
+            sb.observe_accepted(from, now);
+            // Every accepted state is a landing point: the chain is standing
+            // on it and continuing from it.
+            if !unquenched {
+                sb.keep(now, e, x.view());
+            }
+        }
         if cfg.track_funnels {
             // Accepted hops only. A rejected proposal says the chain declined
             // to move, which is a statement about the acceptance rule rather
             // than about reachability.
-            if accept && let Some(prev) = here_before {
-                let now = identity.basin_of(x.view());
+            if let (Some(prev), Some(now)) = (here_before, landed) {
                 funnels.record(prev, now);
-                here = Some(now);
             }
             if funnels.pending() >= cfg.funnel_period && funnels.len() >= 8 {
                 funnel_split = funnels.split().ok();
@@ -2908,10 +4381,16 @@ where
                 bank.restart(0.25, rng.random::<f64>())
             && frontier_state.len() == x.len()
         {
-            x = Array1::from(frontier_state.to_vec());
-            e = frontier_energy;
-            here = None;
-            current_validation_gradient = None;
+            adopt_minimum!(
+                frontier_energy,
+                Array1::from(frontier_state.to_vec()),
+                None,
+                None,
+                AdoptionHistory::Fresh,
+                None,
+                Some("seam-frontier"),
+                hops
+            );
             quiet = 0;
             longest_quiet = 0;
             restarts += 1;
@@ -2981,14 +4460,28 @@ where
                 };
                 if let Some(y) = symmetrised_state {
                     let (es, xs) = relax(ledger, y.view(), cfg.relax_steps);
-                    ledger.record(es, xs.view());
+                    let sym_gradient = record_quenched_answer(
+                        cfg,
+                        ledger,
+                        &mut grad,
+                        es,
+                        xs.view(),
+                        &mut unconverged_records,
+                    );
                     hops += 1;
                     symmetrised += 1;
                     if es < e {
                         symmetry_gain += e - es;
-                        e = es;
-                        x = xs;
-                        here = None;
+                        adopt_minimum!(
+                            es,
+                            xs,
+                            sym_gradient,
+                            None,
+                            AdoptionHistory::Fresh,
+                            None,
+                            Some("stall-symmetrise"),
+                            hops
+                        );
                     }
                 }
             }
@@ -3039,12 +4532,26 @@ where
                 random_cluster_in_radius(n, cfg.start_radius(), cfg.min_separation, rng)
             };
             let (ef, xf) = relax(ledger, fresh.view(), cfg.relax_steps);
-            ledger.record(ef, xf.view());
+            let restart_gradient = record_quenched_answer(
+                cfg,
+                ledger,
+                &mut grad,
+                ef,
+                xf.view(),
+                &mut unconverged_records,
+            );
             hops += 1;
             restarts += 1;
-            e = ef;
-            x = xf;
-            here = None;
+            adopt_minimum!(
+                ef,
+                xf,
+                restart_gradient,
+                None,
+                AdoptionHistory::Fresh,
+                None,
+                Some("stall-restart"),
+                hops
+            );
             stall_outcome = Some(stalled_from - e);
         }
         if stall_response.map(|arm| stall_arms[arm] == "trail") == Some(true)
@@ -3071,7 +4578,14 @@ where
                 *value += cfg.escape_amplitude * (0.5 * along + rng.random::<f64>() - 0.5);
             }
             let (ee, xe) = relax(ledger, exit.view(), cfg.relax_steps);
-            ledger.record(ee, xe.view());
+            let trail_gradient = record_quenched_answer(
+                cfg,
+                ledger,
+                &mut grad,
+                ee,
+                xe.view(),
+                &mut unconverged_records,
+            );
             hops += 1;
             stall_escapes += 1;
             trail_escapes += 1;
@@ -3080,9 +4594,16 @@ where
             }
             // Taken whatever its energy, exactly as the climb below: the
             // chain has shown it cannot improve from where it stands.
-            e = ee;
-            x = xe;
-            here = None;
+            adopt_minimum!(
+                ee,
+                xe,
+                trail_gradient,
+                None,
+                AdoptionHistory::Fresh,
+                None,
+                Some("stall-trail"),
+                hops
+            );
             stall_outcome = Some(stalled_from - e);
         }
         if stall_response.map(|arm| stall_arms[arm] == "climb") == Some(true) {
@@ -3110,7 +4631,14 @@ where
                     }
                     soft_lambda += o.lambda;
                     let (ee, xe) = relax(ledger, o.state.view(), cfg.relax_steps);
-                    ledger.record(ee, xe.view());
+                    let escape_gradient = record_quenched_answer(
+                        cfg,
+                        ledger,
+                        &mut grad,
+                        ee,
+                        xe.view(),
+                        &mut unconverged_records,
+                    );
                     hops += 1;
                     stall_escapes += 1;
                     if ee < e {
@@ -3119,17 +4647,23 @@ where
                     // Taken whatever its energy. The chain has already shown it
                     // cannot improve from where it is, so the value of the new
                     // structure is that it is somewhere else.
-                    if cfg.minima_hopping {
-                        let from = *here.get_or_insert_with(|| identity.basin_of(x.view()));
+                    let local_feedback = if cfg.minima_hopping {
+                        let from = here.unwrap_or_else(|| identity.basin_of(x.view()));
                         let reached = identity.basin_of(xe.view());
-                        feedback.observe(Some(from), reached);
-                        here = Some(reached);
-                    }
-                    e = ee;
-                    x = xe;
-                    if !cfg.minima_hopping {
-                        here = None;
-                    }
+                        Some((Some(from), reached))
+                    } else {
+                        None
+                    };
+                    adopt_minimum!(
+                        ee,
+                        xe,
+                        escape_gradient,
+                        local_feedback.map(|(_, reached)| reached),
+                        AdoptionHistory::Fresh,
+                        local_feedback,
+                        Some("stall-climb"),
+                        hops
+                    );
                     stall_outcome = Some(stalled_from - e);
                 }
             }
@@ -3177,20 +4711,104 @@ where
                     spent = ledger.spent(),
                 );
             }
-            if polished_energy <= ledger.best {
-                ledger.record(polished_energy, polished_state.view());
+            if polished_energy < ledger.best
+                && quench_is_sane(cfg, polished_energy, polished_state.view())
+            {
+                let validated = match grad.as_deref_mut() {
+                    Some(gradient) => gradient(ledger, polished_state.view()).is_some_and(|g| {
+                        gradient_is_converged(g.view(), polished_state.len(), cfg.record_gradient)
+                    }),
+                    None => true,
+                };
+                if validated {
+                    ledger.record(polished_energy, polished_state.view());
+                    if improvements.len() < 512 {
+                        improvements.push((hops, ledger.spent(), bias.n_basins(), polished_energy));
+                    }
+                } else {
+                    unconverged_records += 1;
+                }
+            }
+        }
+
+        // Offered on a period rather than behind the energy stall the other
+        // escapes use, because this mechanism carries its own trapping test and
+        // that test is sharper. A stall detector says the chain has stopped
+        // improving; the absorbing chain says the chain revisits its own states
+        // ten times more than crossing them would need, which is the condition
+        // being escaped. Stacking the two makes the move rare for a reason
+        // unrelated to whether it applies, and this crate has one mechanism
+        // already catalogued as inert rather than ineffective for that shape of
+        // reason.
+        if cfg.superbasin_escape && hops >= sb_last_jump + cfg.superbasin_period {
+            sb_last_jump = hops;
+            let from = *here.get_or_insert_with(|| identity.basin_of(x.view()));
+            if let Some(sb) = superbasin.as_mut() {
+                // Refusal is the normal outcome and is not a failure: the
+                // algebra declines when the graph is too small, too well mixed,
+                // or has no exit with a structure stored, and each of those is
+                // a case where jumping would push the chain out of a region it
+                // has not finished.
+                if let Ok(j) = sb.propose(from, rng) {
+                    quiet = 0;
+                    longest_quiet = 0;
+                    // No charged evaluations and no hop. The structure was
+                    // quenched and recorded when the run first reached it, so
+                    // the ledger has already paid for it, and counting a hop
+                    // here would make the charged-per-hop figure describe a
+                    // move that costs nothing.
+                    if j.energy < e {
+                        sb.observe_gain(e - j.energy);
+                    }
+                    adopt_minimum!(
+                        j.energy,
+                        j.state,
+                        None,
+                        Some(j.basin),
+                        AdoptionHistory::Fresh,
+                        None,
+                        Some("superbasin-exit"),
+                        hops
+                    );
+                }
             }
         }
 
         if n_rep > 1 {
+            if !ladder_built && rep == 0 {
+                // Welford over the cold rung's energies. This is the whole
+                // input to the first ladder: a spread in the units of the
+                // objective, rather than a multiple of the cold temperature
+                // that means something different for every potential.
+                pilot.0 += 1;
+                let d = e - pilot.1;
+                pilot.1 += d / pilot.0 as f64;
+                pilot.2 += d * (e - pilot.1);
+            }
             since_swap += 1;
-            if since_swap >= cfg.swap_period {
+            let slice = if ladder_built {
+                cfg.swap_period
+            } else {
+                cfg.ladder_pilot.max(cfg.swap_period)
+            };
+            if since_swap >= slice {
                 since_swap = 0;
                 // Park the active rung, offer a swap with the next, then make
                 // that one active. Each rung keeps its own bias and its own
                 // temperature; only the states move, so a hot rung's crossing
                 // lands in a cold rung that can polish it.
-                chains.insert(rep, (e, x.clone()));
+                chains.insert(
+                    rep,
+                    OccupiedMinimum {
+                        energy: e,
+                        coordinates: x.clone(),
+                        gradient: current_validation_gradient.take(),
+                        history_minimum: history_here,
+                        local_minimum: here,
+                        generation: occupancy_generation,
+                        pending_initial: false,
+                    },
+                );
                 // A placeholder only; the destination rung's own bias is taken
                 // below, so this is never deposited into.
                 biases.insert(
@@ -3205,48 +4823,166 @@ where
                         ),
                     ),
                 );
-                let k = rep;
-                let j = (rep + 1) % n_rep;
-                if k != j {
-                    swaps_tried += 1;
-                    // Bias exchange, not plain parallel tempering.
-                    //
-                    // Each rung carries its own accumulating bias, so each
-                    // samples exp(-(E + V_k)/T_k) rather than exp(-E/T_k), and
-                    // a swap acceptance built from raw energies is exchanging
-                    // between distributions neither chain is sampling. The
-                    // measured symptom was a ladder that never stratified:
-                    // four rungs with 141 to 179 basins each and energies not
-                    // ordered by temperature at all.
-                    //
-                    // The correct factor evaluates each rung's bias at both
-                    // states (Piana and Laio):
-                    //
-                    //   ln a = (1/T_k)[U_k(x_k) - U_k(x_j)]
-                    //        + (1/T_j)[U_j(x_j) - U_j(x_k)]
-                    //
-                    // with U_k(x) = E(x) + V_k(x). It reduces to the plain
-                    // Metropolis swap when the biases are equal, which is what
-                    // Exchange supplies and what this generalises.
-                    let (ek, xk) = (chains[k].0, chains[k].1.clone());
-                    let (ej, xj) = (chains[j].0, chains[j].1.clone());
-                    let vk_xk = biases[k].potential(biases[k].cv(xk.view()).view());
-                    let vk_xj = biases[k].potential(biases[k].cv(xj.view()).view());
-                    let vj_xj = biases[j].potential(biases[j].cv(xj.view()).view());
-                    let vj_xk = biases[j].potential(biases[j].cv(xk.view()).view());
-                    let log_a = ((ek + vk_xk) - (ej + vk_xj)) / temps[k].max(1e-12)
-                        + ((ej + vj_xj) - (ek + vj_xk)) / temps[j].max(1e-12);
-                    let p = if log_a >= 0.0 { 1.0 } else { log_a.exp() };
-                    if rng.random::<f64>() < p {
-                        swaps_accepted += 1;
-                        chains.swap(k, j);
-                    }
+                parked_history_seen.insert(rep, std::mem::take(&mut history_seen));
+                if let (Some(h), Some(hc)) = (hop.take(), cfg.hmc.as_ref()) {
+                    // The adaptation stays with the rung, not the state; the
+                    // destination rung's own sampler is taken below.
+                    hop_parked.insert(rep.min(hop_parked.len()), h);
+                    hop = Some(crate::hmc::hop::HopChain::new(hc));
                 }
-                rep = j;
-                let (ne, nx) = chains.remove(rep);
-                e = ne;
-                x = nx;
+                if !ladder_built {
+                    // The ladder the run's own energy scale implies, from the
+                    // spread of the energies the cold chain visits.
+                    let sigma = if pilot.0 > 1 {
+                        (pilot.2 / (pilot.0 - 1) as f64).sqrt()
+                    } else {
+                        0.0
+                    };
+                    let built = crate::tempering::Ladder::from_fluctuation(
+                        cfg.temperature,
+                        sigma,
+                        n_rep,
+                        cfg.ladder_target_accept,
+                        cfg.ladder_mode.scheme(),
+                    );
+                    temps = built.temperatures();
+                    if cfg.bias_by_rung {
+                        let top = temps[n_rep - 1];
+                        for (k, b) in biases.iter_mut().enumerate() {
+                            b.set_height(cfg.bias_height * temps[k] / top);
+                        }
+                    }
+                    ladder = Some(built);
+                    ladder_built = true;
+                }
+                if cfg.ladder_mode.sweeps() {
+                    // Every rung is advanced by one slice before any pair is
+                    // offered, so a sweep is a sweep.
+                    rep += 1;
+                    if rep >= n_rep {
+                        rep = 0;
+                        let l = ladder.as_mut().expect("a sweep mode builds a ladder");
+                        let before = l.swap_counts();
+                        let taken = {
+                            let ch = &chains;
+                            let bi = &biases;
+                            let tp = &temps;
+                            l.offer(&mut *rng, |k| {
+                                let (ek, xk) = (ch[k].energy, ch[k].coordinates.view());
+                                let (ej, xj) = (ch[k + 1].energy, ch[k + 1].coordinates.view());
+                                let vk_xk = bi[k].potential(bi[k].cv(xk).view());
+                                let vk_xj = bi[k].potential(bi[k].cv(xj).view());
+                                let vj_xj = bi[k + 1].potential(bi[k + 1].cv(xj).view());
+                                let vj_xk = bi[k + 1].potential(bi[k + 1].cv(xk).view());
+                                let log_a = crate::tempering::biased_swap_log_ratio(
+                                    tp[k],
+                                    tp[k + 1],
+                                    ek + vk_xk,
+                                    ej + vk_xj,
+                                    ej + vj_xj,
+                                    ek + vj_xk,
+                                );
+                                if log_a >= 0.0 { 1.0 } else { log_a.exp() }
+                            })
+                        };
+                        for k in taken {
+                            chains.swap(k, k + 1);
+                        }
+                        let after = l.swap_counts();
+                        swaps_tried += (after.0 - before.0) as usize;
+                        swaps_accepted += (after.1 - before.1) as usize;
+                        sweeps += 1;
+                        if cfg.ladder_mode.adapts()
+                            && sweeps.is_multiple_of(cfg.ladder_window.max(1))
+                        {
+                            adaptations += 1;
+                            // The interior is moved by the barrier estimator;
+                            // every third adaptation the endpoint controller
+                            // gets a turn.
+                            if adaptations.is_multiple_of(3) {
+                                l.retune_top(1.0 - cfg.ladder_target_accept, 0.5);
+                            } else {
+                                l.equalise();
+                            }
+                            temps = l.temperatures();
+                            if cfg.bias_by_rung {
+                                let top = temps[n_rep - 1];
+                                for (k, b) in biases.iter_mut().enumerate() {
+                                    b.set_height(cfg.bias_height * temps[k] / top);
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    let k = rep;
+                    let j = (rep + 1) % n_rep;
+                    if k != j && cfg.ladder_mode.exchanges() {
+                        swaps_tried += 1;
+                        // Bias exchange, not plain parallel tempering: each
+                        // rung samples exp(-(E + V_k)/T_k), so the factor
+                        // evaluates each rung's bias at both states (Piana and
+                        // Laio), which is what biased_swap_log_ratio does.
+                        let (ek, xk) = (chains[k].energy, chains[k].coordinates.clone());
+                        let (ej, xj) = (chains[j].energy, chains[j].coordinates.clone());
+                        let vk_xk = biases[k].potential(biases[k].cv(xk.view()).view());
+                        let vk_xj = biases[k].potential(biases[k].cv(xj.view()).view());
+                        let vj_xj = biases[j].potential(biases[j].cv(xj.view()).view());
+                        let vj_xk = biases[j].potential(biases[j].cv(xk.view()).view());
+                        let log_a = crate::tempering::biased_swap_log_ratio(
+                            temps[k],
+                            temps[j],
+                            ek + vk_xk,
+                            ej + vk_xj,
+                            ej + vj_xj,
+                            ek + vj_xk,
+                        );
+                        let p = if log_a >= 0.0 { 1.0 } else { log_a.exp() };
+                        if rng.random::<f64>() < p {
+                            swaps_accepted += 1;
+                            chains.swap(k, j);
+                            if let Some(t) = transport.as_mut() {
+                                t.swap(k, j);
+                            }
+                        }
+                        if let Some(t) = transport.as_mut() {
+                            t.observe_ends();
+                        }
+                        // A sweep under this scheme is n_rep offers, one per
+                        // rung, so round trips per sweep compare across schemes.
+                        cyclic_offers += 1;
+                        if cyclic_offers.is_multiple_of(n_rep) {
+                            sweeps += 1;
+                        }
+                    }
+                    rep = j;
+                }
+                history_seen = parked_history_seen.remove(rep);
+                let mut next = chains.remove(rep);
+                if next.pending_initial {
+                    if let (Some(h), Some(g)) = (history.as_deref_mut(), next.gradient.as_ref()) {
+                        if let Some(report) =
+                            h.observe(next.energy, next.coordinates.view(), g.view())
+                        {
+                            h.mark_accepted(report.minimum);
+                            next.history_minimum = Some(report.minimum);
+                            let seen = history_seen.entry(report.minimum).or_insert(0);
+                            *seen = seen.saturating_add(1);
+                        }
+                    }
+                    next.pending_initial = false;
+                }
+                (
+                    e,
+                    x,
+                    current_validation_gradient,
+                    history_here,
+                    occupancy_generation,
+                    here,
+                ) = next.into_live();
                 bias = biases.remove(rep);
+                if cfg.hmc.is_some() && rep < hop_parked.len() {
+                    hop = Some(hop_parked.remove(rep));
+                }
             }
         }
 
@@ -3293,6 +5029,7 @@ where
                 if let Some(t) = target {
                     paths_run += 1;
                     let start_cv = bias.cv(x.view());
+                    let mut path_certificates = Vec::new();
                     let out = interpolate_path(
                         x.view(),
                         t.view(),
@@ -3302,7 +5039,15 @@ where
                                 return None;
                             }
                             let (ev, xv) = relax(ledger, img, cfg.relax_steps);
-                            ledger.record(ev, xv.view());
+                            let certificate = record_quenched_answer(
+                                cfg,
+                                ledger,
+                                &mut grad,
+                                ev,
+                                xv.view(),
+                                &mut unconverged_records,
+                            );
+                            path_certificates.push((ev, xv.clone(), certificate));
                             Some((ev, xv))
                         },
                         |st| {
@@ -3322,8 +5067,23 @@ where
                         if esc.energy < e {
                             path_improvements += 1;
                             path_gain += e - esc.energy;
-                            e = esc.energy;
-                            x = esc.state.clone();
+                            let certificate = path_certificates.iter().rev().find_map(
+                                |(energy, state, gradient)| {
+                                    (*energy == esc.energy && *state == esc.state)
+                                        .then(|| gradient.clone())
+                                        .flatten()
+                                },
+                            );
+                            adopt_minimum!(
+                                esc.energy,
+                                esc.state.clone(),
+                                certificate,
+                                None,
+                                AdoptionHistory::Fresh,
+                                None,
+                                Some("path-escape"),
+                                hops
+                            );
                         }
                     }
                 }
@@ -3331,23 +5091,17 @@ where
         }
     }
 
-    if checkpoint_interval.is_some() && hops > checkpoint_hops {
-        let snapshot = ChainCheckpoint {
-            current_state: x.view(),
-            current_energy: e,
-            current_gradient: current_validation_gradient.as_ref().map(|g| g.view()),
-            best_state: ledger.best_state.as_ref().map(|state| state.view()),
-            best_energy: ledger.best,
-            quench_boundaries: &ledger.quench_boundaries[checkpoint_quench_start..],
-            accepted_transitions: &accepted_transitions[checkpoint_transition_start..],
-            charged: ledger.spent(),
-            remaining: ledger.remaining(),
-            hops,
-        };
-        let _ = checkpoint(snapshot);
-    }
-
     let n_basins = bias.n_basins();
+    // Per-rung sampler diagnostics, with the active rung put back at its own
+    // index so the report reads in ladder order.
+    let hmc_diag: Vec<crate::hmc::hop::HopDiagnostics> = match hop {
+        Some(active) => {
+            let mut v: Vec<_> = hop_parked.iter().map(|h| h.diag.clone()).collect();
+            v.insert(rep.min(v.len()), active.diag.clone());
+            v
+        }
+        None => Vec::new(),
+    };
     let final_radius = bias.merge_radius();
     if let Some(slot) = carried {
         // Handed back so the next chain inherits what this one learned.
@@ -3373,6 +5127,7 @@ where
         soft_escapes,
         soft_crossed,
         improvements,
+        quenched,
         angular: (angular_tried, angular_accepted, angular_ratio),
         contextual: (contextual.picks.clone(), contextual.forced),
         screen: (
@@ -3381,13 +5136,23 @@ where
             screen.explored,
             screen.observations(),
         ),
+        hmc: hmc_diag,
         tabu: (tabu.len(), tabu_hits),
         funnel: funnel_split.as_ref().map(|p| {
             let (a, b) = p.sizes();
             (a, b, p.connectivity)
         }),
         symmetrised: (symmetrised, symmetry_gain),
+        orbits: (orbits_completed, orbit_gain),
+        continuous_symmetry: (continuous_symmetry_attempts, continuous_symmetry_gain),
         restarts,
+        exchanges_refused,
+        jumps,
+        history_visits: (history_observations, history_new),
+        shared_deposits,
+        gossip_rounds,
+        md_escape: (md_attempts, md_steps, md_failed),
+        history_seconds: history.as_deref().map_or(0.0, |h| h.cost().2),
         merge_radius: final_radius,
         mean_step: radius.mean_step(),
         stall_escapes,
@@ -3403,7 +5168,7 @@ where
             // back in place before reporting.
             let mut all: Vec<(f64, usize, f64)> = Vec::with_capacity(n_rep);
             let mut parked = biases.iter().map(|b| b.n_basins());
-            let mut energies = chains.iter().map(|(en, _)| *en);
+            let mut energies = chains.iter().map(|minimum| minimum.energy);
             for k in 0..n_rep {
                 if k == rep {
                     all.push((temps[k], n_basins, e));
@@ -3418,6 +5183,17 @@ where
             all
         },
         swaps_tried,
+        transport: match (&ladder, &transport) {
+            (Some(l), _) => Some((l.index().round_trips(), l.sweeps(), l.barrier())),
+            (None, Some(t)) => Some((
+                t.round_trips(),
+                sweeps,
+                // The barrier a cyclic ladder implies from its one acceptance
+                // rate; it does not resolve the profile per pair.
+                (n_rep - 1) as f64 * (1.0 - swaps_accepted as f64 / swaps_tried.max(1) as f64),
+            )),
+            _ => None,
+        },
         accepted,
         unconverged_records,
         delayed: surrogate.as_ref().map(|s| {
@@ -3438,6 +5214,58 @@ where
         path_escapes,
         path_improvements,
         path_gain,
+        energy_trace: trace,
+        superbasin_counts: superbasin
+            .as_ref()
+            .filter(|_| cfg.superbasin_quotient)
+            .map(|sb| sb.counts.clone()),
+        superbasin_archive: superbasin
+            .as_ref()
+            .filter(|_| cfg.superbasin_quotient)
+            .map(|sb| sb.archive_entries()),
+        superbasin: superbasin.as_ref().map(|sb| {
+            let mut r = sb.report();
+            if cfg.superbasin_quotient {
+                #[cfg(feature = "ira")]
+                {
+                    // Zero for a structure against its own relabelling and
+                    // rotation, order one between different minima: measured
+                    // 2.7e-16 for a relabelled copy at 13 points and 2.9e-16 at
+                    // 38, against 1.58 for a different basin. The threshold sits
+                    // in a gap of fifteen orders of magnitude, and the report
+                    // carries the largest accepted and smallest rejected
+                    // distance so it can be checked rather than trusted.
+                    let metric = crate::shape::IraMetric::default();
+                    // The energy filter is wide on purpose. An orbit is a
+                    // level set of the energy for exact minima, but the archive
+                    // holds accepted chain states and 181 of 12287 relaxations
+                    // reach a gradient of 1e-3 within the step cap, so two
+                    // members of one orbit can sit further apart in energy than
+                    // a converged pair would. 1e-2 is fifty times below the
+                    // 0.5 spacing between distinct minima on this landscape, so
+                    // it cannot miss a true pair, and the shape distance does
+                    // the discriminating.
+                    r.quotient = Some(sb.quotient(|a, b| metric.distance(a, b), 1e-3, 1e-2, 16));
+                }
+                #[cfg(not(feature = "ira"))]
+                {
+                    // Without a shape distance the only usable test is exact
+                    // energy degeneracy, which merges accidental degeneracies
+                    // along with real orbits. Refused rather than reported as
+                    // if it were the same measurement.
+                    r.quotient = None;
+                }
+            }
+            if cfg.superbasin_features {
+                // Polyhedral template fractions, the same descriptor the
+                // benchmark reports a run's morphology with, so a separability
+                // measured here and a morphology quoted there mean the same
+                // thing.
+                r.separability = sb.separability(|st| crate::structure::ptm_fractions(st, n, 0.12));
+            }
+            r
+        }),
+        energy_bias: ebias,
     }
 }
 
@@ -3600,6 +5428,29 @@ pub fn optimize_with_gradient<'g>(
     run_with_gradient(cfg, start.view(), ledger, relax, grad, &mut rng)
 }
 
+/// As [`optimize_with_gradient`], with value and gradient together for
+/// [`Config::hmc`].
+pub fn optimize_with_energy_gradient<'g>(
+    cfg: &Config,
+    ledger: &mut Ledger,
+    relax: Relax<'_>,
+    grad: Option<&mut GradFn<'g>>,
+    energy_grad: Option<&mut EnergyGradFn<'g>>,
+    seed: u64,
+) -> Outcome {
+    let mut rng = StdRng::seed_from_u64(seed);
+    let start = random_cluster(cfg.n_points, 0.7, cfg.min_separation, &mut rng);
+    run_with_energy_gradient(
+        cfg,
+        start.view(),
+        ledger,
+        relax,
+        grad,
+        energy_grad,
+        &mut rng,
+    )
+}
+
 #[cfg(test)]
 mod bond_matrix_tests {
     use super::*;
@@ -3712,6 +5563,52 @@ mod group_move_tests {
         }
         assert_eq!(moved_groups, 1, "moved {moved_groups} groups, wanted 1");
     }
+
+    /// A majority-ungrouped frame is a slab: the adsorbate is placed
+    /// above the substrate, not on a sphere about the all-atom centroid
+    /// (which sits inside the metal).
+    #[test]
+    fn group_relocate_on_a_slab_stays_above_the_substrate() {
+        let n_cu = 8usize;
+        let n_h = 2usize;
+        let n = n_cu + n_h;
+        let mut x = Array1::zeros(3 * n);
+        for i in 0..n_cu {
+            x[3 * i] = (i % 4) as f64;
+            x[3 * i + 1] = (i / 4) as f64;
+            x[3 * i + 2] = 0.0;
+        }
+        x[3 * n_cu] = 0.5;
+        x[3 * n_cu + 1] = 0.5;
+        x[3 * n_cu + 2] = 2.3;
+        x[3 * (n_cu + 1)] = 2.5;
+        x[3 * (n_cu + 1) + 1] = 0.5;
+        x[3 * (n_cu + 1) + 2] = 2.3;
+        let groups = vec![vec![n_cu], vec![n_cu + 1]];
+        let mut rng = StdRng::seed_from_u64(3);
+        let y = group_relocate(x.view(), &groups, 1.6, &mut rng);
+        for i in 0..n_cu {
+            for k in 0..3 {
+                assert_eq!(y[3 * i + k], x[3 * i + k], "substrate atom {i} moved");
+            }
+        }
+        let z_top = (0..n_cu)
+            .map(|i| x[3 * i + 2])
+            .fold(f64::NEG_INFINITY, f64::max);
+        let mut moved_h = 0;
+        for i in n_cu..n {
+            let dz = y[3 * i + 2] - z_top;
+            assert!(
+                dz >= 1.5,
+                "hydrogen {i} at z={} is not above the substrate (z_top={z_top})",
+                y[3 * i + 2]
+            );
+            if (0..3).any(|k| (y[3 * i + k] - x[3 * i + k]).abs() > 1e-9) {
+                moved_h += 1;
+            }
+        }
+        assert_eq!(moved_h, 1, "moved {moved_h} hydrogens, wanted 1");
+    }
 }
 
 #[cfg(test)]
@@ -3763,6 +5660,40 @@ mod tests {
         let want = crate::screen::cost_asymmetric_threshold(der.screen_steps, der.relax_steps);
         assert!((der.bayes_threshold - want).abs() < 1e-12);
         assert!((der.bayes_threshold - 7.0 / 15.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn communicating_is_orbit_without_depth_reward() {
+        let rec = Config::recommended(75);
+        let comm = Config::communicating(75);
+        assert!(rec.depth_reward);
+        assert!(!rec.orbit_complete_on_new);
+        assert_eq!(rec.shared_visit_policy, SharedVisitPolicy::Tabu);
+        assert!(!comm.depth_reward);
+        assert!(comm.orbit_complete_on_new);
+        assert_eq!(comm.shared_deposits, 0);
+        assert_eq!(comm.shared_visit_policy, SharedVisitPolicy::Recognition);
+        assert!(comm.allocate_moves && comm.return_screen);
+        assert!(!comm.jump_on_stall);
+        assert!(!comm.tabu_on_stall);
+        assert!(!matches!(comm.move_library, MoveLibrary::LeanBurst));
+        assert!(matches!(rec.move_library, MoveLibrary::LeanBurst));
+        assert_eq!(comm.surfaces.len(), 1);
+        assert!(comm.surfaces[0].is_active());
+        assert!(rec.surfaces.is_empty());
+        assert!(Config::communicating(98).surfaces.is_empty());
+    }
+
+    #[test]
+    fn packing_surface_names_twin_and_orbit_together() {
+        let mut cfg = Config::recommended(13);
+        assert!(!cfg.packing_surface().orbit_on_new);
+        assert!(!cfg.packing_surface().twin_as_move);
+        cfg.orbit_complete_on_new = true;
+        cfg.move_library = MoveLibrary::Twin;
+        let surface = cfg.packing_surface();
+        assert!(surface.orbit_on_new);
+        assert!(surface.twin_as_move);
     }
 
     /// The claim the bank rests on: a bias handed to one chain and then to the
@@ -4069,6 +6000,249 @@ mod tests {
         (e, cur)
     }
 
+    /// One well at a fixed tetrahedron; every relaxation converges onto it
+    /// and certifies the result with the analytic gradient.
+    fn well_relax(
+        target: &Array1<f64>,
+        ledger: &mut Ledger,
+        x: ArrayView1<f64>,
+        steps: usize,
+    ) -> (f64, Array1<f64>) {
+        let before = ledger.spent();
+        let mut cur = x.to_owned();
+        for _ in 0..steps {
+            if !ledger.charge() {
+                break;
+            }
+            cur = target + &((&cur - target) * 0.85);
+        }
+        let d = &cur - target;
+        let e = d.iter().map(|v| v * v).sum::<f64>();
+        if steps > 1 {
+            ledger.record_quench_boundary(before, e, cur.clone(), Some(2.0 * d));
+        }
+        (e, cur)
+    }
+
+    /// Two chains over one history: the second pays deposits for the visits
+    /// the first made, and both report their observations. A chain alone
+    /// pays nothing on anyone's behalf, and one well is one identity.
+    #[test]
+    fn a_shared_history_pays_deposits_for_the_other_chains_visits() {
+        use crate::descriptor_space::{DescriptorGeometry, universal_descriptor_space};
+        use crate::methods::minima_hopping::{
+            HistoryHook, HistoryMembership, MinimumHistory, SerializedWitness, SharedMinimumHistory,
+        };
+        use crate::pes_exploration::StructureContext;
+        use std::sync::Mutex;
+
+        let n = 4;
+        let mut cfg = Config::for_cluster(n);
+        cfg.max_hops = Some(40);
+        cfg.screen_steps = 1;
+        // Enough contraction that the certified gradient meets the record
+        // tolerance, which is what makes a quench observable.
+        cfg.relax_steps = 120;
+        cfg.screen_margin = f64::INFINITY;
+        cfg.return_screen = false;
+        cfg.shared_deposits = 8;
+        let target = Array1::from(vec![
+            1.0, 1.0, 1.0, 1.0, -1.0, -1.0, -1.0, 1.0, -1.0, -1.0, -1.0, 1.0,
+        ]);
+        let descriptor = universal_descriptor_space(DescriptorGeometry::finite(1.0).unwrap());
+        let context = StructureContext::new(Some(vec![18; n]), None, Some("well".into()));
+        let witness = SerializedWitness(Mutex::new(|l: ArrayView1<f64>, r: ArrayView1<f64>| {
+            l.iter()
+                .zip(r.iter())
+                .map(|(a, b)| (a - b) * (a - b))
+                .sum::<f64>()
+                .sqrt()
+                < 0.5
+        }));
+        let history = Mutex::new(MinimumHistory::new(10.0).unwrap());
+        let mut rng = StdRng::seed_from_u64(7);
+        let start = random_cluster(n, 0.7, cfg.min_separation, &mut rng);
+        let run = |seed: u64, hook: &mut dyn HistoryHook| {
+            let mut ledger = Ledger::new(12_000);
+            let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, steps: usize| {
+                well_relax(&target, led, x, steps)
+            };
+            let mut grad = |led: &mut Ledger, x: ArrayView1<f64>| -> Option<Array1<f64>> {
+                led.charge().then(|| 2.0 * (&x - &target))
+            };
+            let mut rng = StdRng::seed_from_u64(seed);
+            let mut checkpoint = |_: ChainCheckpoint<'_>| CheckpointAction::Continue;
+            run_with_history_at_checkpoints(
+                &cfg,
+                start.view(),
+                &mut ledger,
+                &mut relax,
+                Some(&mut grad),
+                None,
+                Some(hook),
+                &mut rng,
+                500,
+                &mut checkpoint,
+            )
+        };
+        let mut first = SharedMinimumHistory::new(
+            &history,
+            &descriptor,
+            context.clone(),
+            &witness,
+            HistoryMembership::Accepted,
+        );
+        let out1 = run(1, &mut first);
+        assert!(
+            out1.history_visits.0 > 0,
+            "the first chain reported nothing"
+        );
+        assert_eq!(
+            out1.shared_deposits, 0,
+            "alone, nothing is paid on another chain's behalf"
+        );
+        let prior = history.lock().unwrap().total_visits();
+        let mut second = SharedMinimumHistory::new(
+            &history,
+            &descriptor,
+            context,
+            &witness,
+            HistoryMembership::Accepted,
+        );
+        let out2 = run(2, &mut second);
+        assert!(
+            out2.history_visits.0 > 0,
+            "the second chain reported nothing"
+        );
+        assert!(
+            out2.shared_deposits > 0,
+            "the second chain paid nothing for {prior} prior visits"
+        );
+        assert_eq!(
+            history.lock().unwrap().minimum_count(),
+            1,
+            "one well is one identity"
+        );
+    }
+
+    #[test]
+    fn recognition_does_not_count_a_peer_well_as_known_escape() {
+        use crate::descriptor_space::{DescriptorGeometry, universal_descriptor_space};
+        use crate::methods::minima_hopping::{
+            HistoryHook, HistoryMembership, MinimumHistory, SerializedWitness, SharedMinimumHistory,
+        };
+        use crate::pes_exploration::StructureContext;
+        use std::sync::Mutex;
+
+        let n = 4;
+        let mut cfg = Config::for_cluster(n);
+        cfg.max_hops = Some(20);
+        cfg.screen_steps = 1;
+        cfg.relax_steps = 120;
+        cfg.screen_margin = f64::INFINITY;
+        cfg.return_screen = false;
+        cfg.minima_hopping = true;
+        cfg.shared_deposits = 0;
+        cfg.shared_visit_policy = SharedVisitPolicy::Recognition;
+        let target = Array1::from(vec![
+            1.0, 1.0, 1.0, 1.0, -1.0, -1.0, -1.0, 1.0, -1.0, -1.0, -1.0, 1.0,
+        ]);
+        let descriptor = universal_descriptor_space(DescriptorGeometry::finite(1.0).unwrap());
+        let context = StructureContext::new(Some(vec![18; n]), None, Some("well".into()));
+        let witness = SerializedWitness(Mutex::new(|l: ArrayView1<f64>, r: ArrayView1<f64>| {
+            l.iter()
+                .zip(r.iter())
+                .map(|(a, b)| (a - b) * (a - b))
+                .sum::<f64>()
+                .sqrt()
+                < 0.5
+        }));
+        let history = Mutex::new(MinimumHistory::new(10.0).unwrap());
+        let mut rng = StdRng::seed_from_u64(7);
+        let start = random_cluster(n, 0.7, cfg.min_separation, &mut rng);
+        let run = |seed: u64, hook: &mut dyn HistoryHook| {
+            let mut ledger = Ledger::new(12_000);
+            let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, steps: usize| {
+                well_relax(&target, led, x, steps)
+            };
+            let mut grad = |led: &mut Ledger, x: ArrayView1<f64>| -> Option<Array1<f64>> {
+                led.charge().then(|| 2.0 * (&x - &target))
+            };
+            let mut rng = StdRng::seed_from_u64(seed);
+            let mut checkpoint = |_: ChainCheckpoint<'_>| CheckpointAction::Continue;
+            run_with_history_at_checkpoints(
+                &cfg,
+                start.view(),
+                &mut ledger,
+                &mut relax,
+                Some(&mut grad),
+                None,
+                Some(hook),
+                &mut rng,
+                500,
+                &mut checkpoint,
+            )
+        };
+        let mut first = SharedMinimumHistory::new(
+            &history,
+            &descriptor,
+            context.clone(),
+            &witness,
+            HistoryMembership::Accepted,
+        );
+        let _ = run(1, &mut first);
+        let mut second = SharedMinimumHistory::new(
+            &history,
+            &descriptor,
+            context,
+            &witness,
+            HistoryMembership::Accepted,
+        );
+        let out2 = run(2, &mut second);
+        assert_eq!(
+            out2.visit_counts.1, 0,
+            "recognition must not inherit the peer well as known: {:?}",
+            out2.visit_counts
+        );
+        assert_eq!(out2.shared_deposits, 0);
+        assert_eq!(second.cost().1, 0, "no certified quench was refused");
+    }
+
+    #[test]
+    fn recognition_refunds_a_second_descent_into_the_same_well() {
+        let n = 4;
+        let mut cfg = Config::for_cluster(n);
+        cfg.max_hops = Some(6);
+        cfg.screen_steps = 1;
+        cfg.relax_steps = 80;
+        cfg.screen_margin = f64::INFINITY;
+        cfg.return_screen = false;
+        cfg.merge_radius = 1.0e3;
+        cfg.shared_visit_policy = SharedVisitPolicy::Recognition;
+        let target = Array1::from(vec![
+            1.0, 1.0, 1.0, 1.0, -1.0, -1.0, -1.0, 1.0, -1.0, -1.0, -1.0, 1.0,
+        ]);
+        let mut full = 0usize;
+        let mut screen = 0usize;
+        let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, steps: usize| {
+            if steps >= 80 {
+                full += 1;
+            } else {
+                screen += 1;
+            }
+            well_relax(&target, led, x, steps)
+        };
+        let mut rng = StdRng::seed_from_u64(7);
+        let start = random_cluster(n, 0.7, cfg.min_separation, &mut rng);
+        let mut ledger = Ledger::new(8_000);
+        let _ = run(&cfg, start.view(), &mut ledger, &mut relax, &mut rng);
+        assert!(full >= 1, "the first descent must certify the well");
+        assert!(
+            full < 6,
+            "later descents into the same well must stand in: full={full} screen={screen}"
+        );
+    }
+
     #[test]
     fn overlapping_quench_is_not_recorded_or_reported_as_an_improvement() {
         let mut cfg = Config::for_cluster(2);
@@ -4210,6 +6384,59 @@ mod tests {
         );
     }
 
+    /// Each rung adapts its own step size and metric, and a swap moves
+    /// configurations without moving the adaptation.
+    #[test]
+    fn every_rung_adapts_its_own_sampler() {
+        let mut cfg = Config::for_cluster(6);
+        cfg.replicas = 3;
+        cfg.swap_period = 5;
+        let mut h = crate::hmc::hop::HopConfig::new(6, crate::hmc::metric::MetricKind::Identity);
+        h.warmup_hops = 20;
+        h.max_depth = 2;
+        cfg.hmc = Some(h);
+        let mut ledger = Ledger::new(40_000);
+        let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, n: usize| toy_relax(led, x, n);
+        let mut eg = |led: &mut Ledger, x: ArrayView1<f64>| -> Option<(f64, Array1<f64>)> {
+            if !led.charge() {
+                return None;
+            }
+            let e = x.iter().map(|v| v * v).sum::<f64>();
+            Some((e, x.mapv(|v| 2.0 * v)))
+        };
+        let mut rng = StdRng::seed_from_u64(11);
+        let start = random_cluster(6, 0.7, cfg.min_separation, &mut rng);
+        let out = run_with_energy_gradient(
+            &cfg,
+            start.view(),
+            &mut ledger,
+            &mut relax,
+            None,
+            Some(&mut eg),
+            &mut rng,
+        );
+        assert_eq!(
+            out.hmc.len(),
+            3,
+            "a three-rung ladder reported {} samplers",
+            out.hmc.len()
+        );
+        for (k, d) in out.hmc.iter().enumerate() {
+            assert!(d.proposals > 0, "rung {k} made no proposals");
+            assert!(
+                d.epsilon_final > 0.0 && d.epsilon_final.is_finite(),
+                "rung {k} froze at a step size of {}",
+                d.epsilon_final
+            );
+        }
+        let eps: Vec<f64> = out.hmc.iter().map(|d| d.epsilon_final).collect();
+        assert!(
+            eps.iter().any(|v| (v - eps[0]).abs() > 0.0),
+            "all three rungs froze at exactly {}",
+            eps[0]
+        );
+    }
+
     #[test]
     fn respects_the_ledger() {
         let cfg = Config::for_cluster(6);
@@ -4346,6 +6573,80 @@ mod tests {
         assert!(out.basins >= 1, "at least the starting basin must register");
     }
 
+    /// A single chain has no ladder, so there is nothing to report about
+    /// transport and the field says so rather than reporting a zero that reads
+    /// like a ladder that failed.
+    #[test]
+    fn a_single_chain_reports_no_transport() {
+        let cfg = Config::for_cluster(6);
+        let mut ledger = Ledger::new(4000);
+        let mut relax = toy_relax;
+        let out = optimize(&cfg, &mut ledger, &mut relax, 3);
+        assert!(out.transport.is_none());
+    }
+
+    /// The instrument that says whether the ladder does its job. A swap count
+    /// cannot: a ladder that shuffles one pair for the whole run and a ladder
+    /// that carries configurations from the hottest rung to the coldest report
+    /// the same swaps and the same solve count.
+    #[test]
+    fn the_ladder_reports_what_it_transported() {
+        let mut cfg = Config::for_cluster(6);
+        cfg.replicas = 4;
+        cfg.ladder_mode = LadderMode::NonReversible;
+        cfg.swap_period = 2;
+        cfg.ladder_pilot = 20;
+        let mut ledger = Ledger::new(60_000);
+        let mut relax = toy_relax;
+        let out = optimize(&cfg, &mut ledger, &mut relax, 5);
+        let (trips, sweeps, barrier) = out.transport.expect("a ladder reports transport");
+        assert!(sweeps > 20, "only {sweeps} sweeps; the ladder never ran");
+        assert!(trips > 0, "no round trip in {sweeps} sweeps");
+        assert!(
+            (0.0..=3.0).contains(&barrier),
+            "barrier {barrier} outside [0, rungs - 1]"
+        );
+        assert_eq!(out.rungs.len(), 4);
+    }
+
+    /// The adapted ladder is placed by the run and not by the schedule, so its
+    /// rungs have to differ from the geometric ones it started at.
+    #[test]
+    fn the_adapted_ladder_leaves_the_geometric_schedule() {
+        let mut base = Config::for_cluster(6);
+        base.replicas = 4;
+        base.swap_period = 2;
+        base.ladder_pilot = 20;
+        let run = |mode: LadderMode| {
+            let mut c = base.clone();
+            c.ladder_mode = mode;
+            let mut ledger = Ledger::new(60_000);
+            let mut relax = toy_relax;
+            let out = optimize(&c, &mut ledger, &mut relax, 5);
+            out.rungs.iter().map(|(t, _, _)| *t).collect::<Vec<f64>>()
+        };
+        let geometric = run(LadderMode::Reversible);
+        let adapted = run(LadderMode::NonReversible);
+        assert!(
+            (geometric[0] - base.temperature).abs() < 1e-12
+                && (adapted[0] - base.temperature).abs() < 1e-12,
+            "the cold rung is the configured temperature under both"
+        );
+        let moved = geometric
+            .iter()
+            .zip(&adapted)
+            .any(|(g, a)| (g - a).abs() > 1e-6 * g.abs().max(1.0));
+        assert!(
+            moved,
+            "adapted ladder {adapted:?} is the geometric one {geometric:?}; \
+             nothing was derived from the run"
+        );
+        assert!(
+            adapted.windows(2).all(|w| w[1] > w[0]),
+            "adapted ladder {adapted:?} is not ordered by temperature"
+        );
+    }
+
     #[test]
     fn seeds_are_reproducible() {
         let cfg = Config::for_cluster(6);
@@ -4355,6 +6656,215 @@ mod tests {
             optimize(&cfg, &mut ledger, &mut relax, seed).best
         };
         assert_eq!(run_once(7), run_once(7), "same seed must give same result");
+    }
+
+    #[test]
+    fn rung_ratios_run_geometrically_from_one_to_the_top() {
+        assert_eq!(rung_ratios(1, 4.0), vec![1.0]);
+        assert_eq!(rung_ratios(0, 4.0), vec![1.0]);
+        let ratios = rung_ratios(4, 4.0);
+        assert_eq!(ratios.len(), 4);
+        assert_eq!(ratios[0], 1.0);
+        assert_eq!(ratios[3], 4.0);
+        for pair in ratios.windows(2) {
+            assert!((pair[1] / pair[0] - 4.0_f64.cbrt()).abs() < 1e-12);
+        }
+    }
+
+    /// Whatever a single chain would hop at, the coldest rung hops at it and
+    /// the others at their ratio times it. The statistical estimate is clamped
+    /// to its band before the ratio, so the band moves up the ladder with the
+    /// rung rather than cutting the hot end off.
+    #[test]
+    fn each_rung_hops_at_its_ratio_times_the_single_chain_temperature() {
+        let mut cfg = Config::for_cluster(13);
+        let ratios = rung_ratios(4, 4.0);
+        for held in [cfg.temperature, 0.037] {
+            for &r in &ratios {
+                assert_eq!(rung_temperature(&cfg, r, held, None, -40.0), held * r);
+            }
+        }
+
+        // An entropy rising half a nat per unit energy, so the estimate is
+        // finite and positive.
+        let mut dos = crate::dos::DensityOfStates::new(-45.0, -30.0, 30);
+        for k in 0..30 {
+            let visits = (2000.0 * (0.5 * (dos.centre(k) + 30.0)).exp()).round() as usize;
+            for _ in 0..visits.max(1) {
+                dos.observe(dos.centre(k));
+            }
+        }
+        let e = -36.0;
+        cfg.statistical_temperature = true;
+        assert_eq!(
+            rung_temperature(&cfg, 2.0, 0.037, Some(&dos), e),
+            0.037 * 2.0
+        );
+        assert!(dos.refresh());
+        let (estimate, _) = dos.temperature(e);
+        assert!(
+            estimate.is_finite() && estimate > 0.0,
+            "estimate {estimate}"
+        );
+
+        for (temperature, single) in [
+            (estimate, estimate),
+            (estimate / 50.0, 5.0 * estimate / 50.0),
+            (estimate * 50.0, 0.2 * estimate * 50.0),
+        ] {
+            cfg.temperature = temperature;
+            for &r in &ratios {
+                let t = rung_temperature(&cfg, r, cfg.temperature, Some(&dos), e);
+                assert!(
+                    (t - single * r).abs() <= 1e-12 * single * r,
+                    "rung at {r} hopped at {t}, wanted {}",
+                    single * r
+                );
+            }
+        }
+        cfg.statistical_temperature = false;
+        assert_eq!(
+            rung_temperature(&cfg, 2.0, 0.037, Some(&dos), e),
+            0.037 * 2.0
+        );
+    }
+
+    /// Scaled by rung, a deposit weighs the same against the temperature each
+    /// rung hops at, and the hottest carries the configured height.
+    #[test]
+    fn rung_heights_follow_the_rung_temperatures() {
+        let mut cfg = Config::for_cluster(13);
+        let ratios = rung_ratios(4, cfg.ladder_top);
+        assert!(
+            ratios
+                .iter()
+                .all(|&r| rung_height(&cfg, 4, r) == cfg.bias_height)
+        );
+        cfg.bias_by_rung = true;
+        assert_eq!(rung_height(&cfg, 1, 1.0), cfg.bias_height);
+        let weight = |r: f64| {
+            rung_height(&cfg, 4, r) / rung_temperature(&cfg, r, cfg.temperature, None, 0.0)
+        };
+        for &r in &ratios {
+            assert!((weight(r) / weight(1.0) - 1.0).abs() < 1e-12);
+        }
+        assert!((rung_height(&cfg, 4, ratios[3]) - cfg.bias_height).abs() < 1e-12);
+        assert!(rung_height(&cfg, 4, ratios[0]) < cfg.bias_height);
+    }
+
+    /// With one bias on both rungs and nothing shared the swap is the
+    /// Metropolis exchange. What every rung shares drops out of a flat ladder
+    /// and otherwise weighs as if it were part of each rung's own bias.
+    #[test]
+    fn the_swap_weighs_shared_biases_by_the_temperature_difference() {
+        use crate::exchange::{Exchange, MetropolisExchange};
+        let (t_k, t_j) = (0.8, 2.0);
+        let (u_k, u_j) = (-40.0, -38.5);
+        let log_a = swap_log_acceptance([u_k, u_j], [u_j, u_k], [0.0, 0.0], t_k, t_j);
+        let metropolis: f64 = MetropolisExchange.swap_accept_prob(u_k, t_k, u_j, t_j);
+        assert!(metropolis < 1.0);
+        assert!((log_a.exp() - metropolis).abs() < 1e-12);
+
+        let own_k = [-40.0, -38.0];
+        let own_j = [-37.5, -39.0];
+        let shared = [3.0, -2.0];
+        assert_eq!(
+            swap_log_acceptance(own_k, own_j, shared, 1.3, 1.3),
+            swap_log_acceptance(own_k, own_j, [0.0, 0.0], 1.3, 1.3)
+        );
+        let folded = swap_log_acceptance(
+            [own_k[0] + shared[0], own_k[1] + shared[1]],
+            [own_j[0] + shared[1], own_j[1] + shared[0]],
+            [0.0, 0.0],
+            t_k,
+            t_j,
+        );
+        let split = swap_log_acceptance(own_k, own_j, shared, t_k, t_j);
+        assert!((folded - split).abs() < 1e-12 * folded.abs().max(1.0));
+        assert!(
+            (split - swap_log_acceptance(own_k, own_j, [0.0, 0.0], t_k, t_j)).abs() > 1.0,
+            "the shared terms should matter between two temperatures"
+        );
+    }
+
+    /// The swap is the ratio of the weights the rungs' acceptance applies, at
+    /// the states exchanged and at the states held. Under the flat-histogram
+    /// cost the energies leave it, so states whose biases agree swap freely
+    /// between two temperatures however far apart their energies are.
+    #[test]
+    fn the_swap_exchanges_the_weight_each_rung_hops_by() {
+        let mut cfg = Config::recommended(13);
+        assert_eq!(RungWeight::of(&cfg, true), RungWeight::Boltzmann);
+        cfg.flat_histogram = true;
+        assert_eq!(RungWeight::of(&cfg, false), RungWeight::FirstSweep);
+        assert_eq!(RungWeight::of(&cfg, true), RungWeight::Flat);
+        cfg.minima_hopping = true;
+        assert_eq!(RungWeight::of(&cfg, true), RungWeight::Boltzmann);
+
+        let mut dos = crate::dos::DensityOfStates::new(-45.0, -30.0, 30);
+        for k in 0..30 {
+            let visits = (2000.0 * (0.5 * (dos.centre(k) + 30.0)).exp()).round() as usize;
+            for _ in 0..visits.max(1) {
+                dos.observe(dos.centre(k));
+            }
+        }
+        assert!(dos.refresh());
+        let flat = crate::dos::CutWeight {
+            weight: dos.mean_weight(),
+            cut: -38.0,
+            width: 0.7,
+        };
+        let mut rng = StdRng::seed_from_u64(11);
+        let draw = |rng: &mut StdRng| HopTerms {
+            energy: rng.random_range(-44.0..-31.0),
+            funnel: rng.random_range(0.0..2.0),
+            pile: rng.random_range(0.0..3.0),
+            energy_bias: rng.random_range(0.0..1.5),
+        };
+        for _ in 0..200 {
+            let (at_k, at_j) = (draw(&mut rng), draw(&mut rng));
+            let own_k = [rng.random_range(0.0..2.0), rng.random_range(0.0..2.0)];
+            let own_j = [rng.random_range(0.0..2.0), rng.random_range(0.0..2.0)];
+            let (t_k, t_j) = (rng.random_range(0.1..1.0), rng.random_range(1.0..4.0));
+            for weight in [
+                RungWeight::Boltzmann,
+                RungWeight::FirstSweep,
+                RungWeight::Flat,
+            ] {
+                // Minus the log of the weight a rung at temperature `t` with
+                // its own bias `v` applies at a state.
+                let cost = |at: HopTerms, v: f64, t: f64| match weight {
+                    RungWeight::Boltzmann => {
+                        (at.energy + v + at.funnel + at.pile + at.energy_bias) / t
+                    }
+                    RungWeight::FirstSweep => (at.energy + v + at.funnel + at.pile) / t,
+                    RungWeight::Flat => flat.cost(at.energy) + (v + at.funnel) / t,
+                };
+                let expected = cost(at_k, own_k[0], t_k) + cost(at_j, own_j[0], t_j)
+                    - cost(at_j, own_k[1], t_k)
+                    - cost(at_k, own_j[1], t_j);
+                let log_a = exchange_log_acceptance(weight, at_k, at_j, own_k, own_j, t_k, t_j);
+                assert!(
+                    (log_a - expected).abs() <= 1e-9 * expected.abs().max(1.0),
+                    "{weight:?}: {log_a} against {expected}"
+                );
+            }
+        }
+
+        let low = HopTerms {
+            energy: -44.0,
+            funnel: 0.5,
+            pile: 1.0,
+            energy_bias: 0.2,
+        };
+        let high = HopTerms {
+            energy: -32.0,
+            ..low
+        };
+        let swap =
+            |weight| exchange_log_acceptance(weight, low, high, [0.3; 2], [0.6; 2], 0.2, 2.0);
+        assert_eq!(swap(RungWeight::Flat), 0.0);
+        assert!(swap(RungWeight::Boltzmann) < -40.0);
     }
 
     #[test]
@@ -4402,6 +6912,13 @@ mod tests {
 /// A shape metric quotients out those symmetries itself and needs the
 /// coordinates, so the two cannot be mixed.
 pub enum ClusterFingerprint {
+    /// Actual rigid-body site distances, separated by chemical species.
+    RigidBodies {
+        /// Number of centers and rotation vectors in the state.
+        molecules: usize,
+        /// Body-frame geometry used by the objective.
+        geometry: crate::rigid_body::RigidBodyGeometry,
+    },
     /// Sorted pairwise distances, compared by Euclidean distance.
     Spectrum(SortedPairs),
     /// Coordinates, for a metric that does its own matching.
@@ -4409,6 +6926,17 @@ pub enum ClusterFingerprint {
     /// Sorted per-point pair energies, keying on how well each point is bound
     /// rather than on how far apart the points are.
     Sites(SiteEnergies),
+    /// Sorted distances with the two-body and three-body kernel spectra
+    /// appended, compared by Euclidean distance.
+    Triplet(Box<crate::tensor_id::TripletSpectrum>),
+    /// Per-site coordination numbers, smoothed into a kernel density estimate.
+    Coordination(Box<crate::morphology::CoordinationKde>),
+    /// Steinhardt bond-order parameters of the whole cluster.
+    #[cfg(feature = "featomic")]
+    Steinhardt(Box<crate::morphology::SteinhardtQ>),
+    /// Leading principal component of the SOAP power spectrum, fitted online.
+    #[cfg(feature = "featomic")]
+    SoapProjection(Box<crate::morphology::SoapProjection>),
     /// Coordinates put in a canonical order against a fixed reference, so
     /// Euclidean distance between two of them is a shape distance.
     #[cfg(feature = "ira")]
@@ -4460,15 +6988,86 @@ impl ClusterFingerprint {
         Self::of_with(n_points, keying, &Array1::zeros(0))
     }
 
-    /// The descriptor for a named keying, against `reference`.
+    /// The descriptor for a named keying, against `reference`, with the
+    /// [`Keying::Triplet`] kernel width at its Lennard-Jones default.
     pub fn of_with(n_points: usize, keying: Keying, reference: &Array1<f64>) -> Self {
+        Self::of_tuned(n_points, keying, reference, 2.5)
+    }
+
+    /// The descriptor for a named keying, against `reference`, with the kernel
+    /// width `sigma` for [`Keying::Triplet`]. `sigma` carries the length units
+    /// of the coordinates.
+    pub fn of_tuned(n_points: usize, keying: Keying, reference: &Array1<f64>, sigma: f64) -> Self {
+        Self::of_full(n_points, keying, reference, sigma, 1.0)
+    }
+
+    /// The descriptor for a named keying at a length scale of `scale`, the
+    /// potential's `r_min` over `2^(1/6)`, which moves the neighbour shells
+    /// the morphology descriptors cut between.
+    pub fn of_scaled(n_points: usize, keying: Keying, reference: &Array1<f64>, scale: f64) -> Self {
+        Self::of_full(n_points, keying, reference, 2.5, scale)
+    }
+
+    /// Every named keying, with the triplet kernel width and the length scale.
+    pub fn of_full(
+        n_points: usize,
+        keying: Keying,
+        reference: &Array1<f64>,
+        sigma: f64,
+        scale: f64,
+    ) -> Self {
         #[cfg(not(feature = "ira"))]
         let _ = reference;
+        #[cfg(not(feature = "featomic"))]
+        let _ = scale;
         match keying {
+            Keying::Coordination => {
+                let mut kde = crate::morphology::CoordinationKde::for_lj(n_points, scale);
+                // The bin centres are a measurement; COORD_BINS and
+                // COORD_SIGMA override them without a rebuild.
+                if let Ok(v) = std::env::var("COORD_BINS") {
+                    let bins: Vec<f64> = v
+                        .split(',')
+                        .filter_map(|t| t.trim().parse::<f64>().ok())
+                        .collect();
+                    if !bins.is_empty() {
+                        kde.bins = bins;
+                    }
+                }
+                if let Ok(v) = std::env::var("COORD_SIGMA")
+                    && let Ok(sg) = v.parse::<f64>()
+                    && sg > 0.0
+                {
+                    kde.sigma = sg;
+                }
+                ClusterFingerprint::Coordination(Box::new(kde))
+            }
+            #[cfg(feature = "featomic")]
+            Keying::Q4 => ClusterFingerprint::Steinhardt(Box::new(
+                crate::morphology::SteinhardtQ::q4(n_points, scale),
+            )),
+            #[cfg(feature = "featomic")]
+            Keying::Q4Q6 => ClusterFingerprint::Steinhardt(Box::new(
+                crate::morphology::SteinhardtQ::q4q6(n_points, scale),
+            )),
+            #[cfg(feature = "featomic")]
+            Keying::Soap => ClusterFingerprint::SoapProjection(Box::new(
+                crate::morphology::SoapProjection::new(n_points, scale),
+            )),
+            // Without featomic there is no spherical expansion; falling back
+            // to the distance spectrum would run an arm that reports itself as
+            // a Q4 bias and is not one.
+            #[cfg(not(feature = "featomic"))]
+            Keying::Q4 | Keying::Q4Q6 | Keying::Soap => {
+                panic!("keying {keying:?} needs the `featomic` feature")
+            }
             Keying::Shape => ClusterFingerprint::Coordinates,
             Keying::Core => ClusterFingerprint::Core { species: None },
             Keying::Distances => ClusterFingerprint::Spectrum(SortedPairs { n_points }),
             Keying::Sites => ClusterFingerprint::Sites(SiteEnergies { n_points }),
+            Keying::Triplet => ClusterFingerprint::Triplet(Box::new(
+                crate::tensor_id::TripletSpectrum::new(n_points).with_sigma(sigma),
+            )),
             Keying::SoapPacking => ClusterFingerprint::Spectrum(SortedPairs { n_points }),
             #[cfg(feature = "ira")]
             Keying::Canonical => {
@@ -4489,6 +7088,15 @@ impl ClusterFingerprint {
     /// Descriptor from the live config, so SOAP packing carries cutoff
     /// and species.
     pub fn of_config(cfg: &Config, reference: &Array1<f64>) -> Self {
+        if cfg.move_library.is_rigid_body()
+            && effective_keying(cfg) == Keying::Distances
+            && let Some(geometry) = cfg.rigid_body_geometry.as_ref()
+        {
+            return Self::RigidBodies {
+                molecules: cfg.n_points,
+                geometry: geometry.clone(),
+            };
+        }
         match effective_keying(cfg) {
             Keying::Core => ClusterFingerprint::Core {
                 species: cfg.species.clone(),
@@ -4508,7 +7116,13 @@ impl ClusterFingerprint {
                     })
                 }
             }
-            other => Self::of_with(cfg.n_points, other, reference),
+            other => Self::of_full(
+                cfg.n_points,
+                other,
+                reference,
+                cfg.keying_sigma,
+                cfg.morphology_scale,
+            ),
         }
     }
 }
@@ -4516,6 +7130,10 @@ impl ClusterFingerprint {
 impl Fingerprint for ClusterFingerprint {
     fn describe(&self, x: ArrayView1<f64>) -> Array1<f64> {
         match self {
+            ClusterFingerprint::RigidBodies {
+                molecules,
+                geometry,
+            } => geometry.describe(*molecules, x),
             ClusterFingerprint::Spectrum(s) => s.describe(x),
             ClusterFingerprint::Coordinates => x.to_owned(),
             ClusterFingerprint::Core { species } => {
@@ -4527,6 +7145,12 @@ impl Fingerprint for ClusterFingerprint {
                 Array1::from(key.coordinates().to_vec())
             }
             ClusterFingerprint::Sites(s) => s.describe(x),
+            ClusterFingerprint::Triplet(t) => t.describe(x),
+            ClusterFingerprint::Coordination(c) => c.describe(x),
+            #[cfg(feature = "featomic")]
+            ClusterFingerprint::Steinhardt(s) => s.describe(x),
+            #[cfg(feature = "featomic")]
+            ClusterFingerprint::SoapProjection(s) => s.describe(x),
             #[cfg(feature = "ira")]
             ClusterFingerprint::Canonical(c) => c.describe(x),
             #[cfg(feature = "featomic")]

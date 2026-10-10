@@ -41,24 +41,22 @@
 //!
 //! ## Leave start
 //!
-//! Another *packing community* already on file and packing not saturated:
-//! take a catalog representative of the least-occupied community. Cells of
-//! one packing are a superbasin; they are not OtherFamily, and a draw that
-//! only clears the cell grain hands the extra an isomer of the packing it is
-//! leaving. Champion leftover walks those isomers.
+//! Occupancy searches a descriptor (DECAF histograms, the landfold
+//! plane). A raw quench is the identity projector onto the occupied
+//! funnel, so a step in that descriptor plus a raw quench is random: it
+//! returns home. The compacted first phase (Locatelli--Schoen diameter
+//! penalty, Doye compression) reweights catchment toward compact
+//! packings. Landfold names whether the raw polish left the occupied
+//! community. That pair is the mint: aim in the book, quench on a
+//! surface whose catchment is not the occupied blob.
 //!
-//! Extra ArchiveHole is a rung of the Leave ladder
-//! ([`crate::known_basin::leave_packing_rung`]): a covering direction of the
-//! DECAF feature, pointed away from the packings on file, pulled back
-//! through \(J_\mu\). Its size is one rung, not a grain. Wales and Doye
-//! put the LJ75 ico-Marks barriers at 8.69 and 7.48 \(\varepsilon\), so a
-//! quench from a Cartesian 0.35 cap is a projector onto the packing it
-//! started in, whatever direction it took. A rung whose quench lands back in
-//! the same packing is not refused into another hole of the same size: the
-//! hop loop walks the rest of the ladder
-//! ([`crate::known_basin::leave_packing_ladder`]) with the invert armed and
-//! reports a refusal only when the ladder is spent. Occupancy extras do not
-//! draw a random cluster.
+//! Another *packing community* already on file: take a catalog
+//! representative of an under-occupied community and quench it. That
+//! draw does not consult the live coordinates. A one-community book
+//! Walks on the hop library. Landfold-and-compact from that well does
+//! not mint a deeper family. Exhausted EI Walks.
+//! Occupancy extras do not climb a min-mode and do not draw a random
+//! cluster.
 //!
 //! ## Modes
 //!
@@ -110,7 +108,7 @@
 pub fn is_occupancy_leave_action(action: &str) -> bool {
     matches!(
         action,
-        "hyperband_reseed" | "catalog_leave" | "population_reseed"
+        "hyperband_reseed" | "catalog_leave" | "catalog_ridge" | "soap_push" | "population_reseed"
     )
 }
 
@@ -129,35 +127,24 @@ pub enum OccupancyLeaveAdopt {
 /// Where an occupancy extra goes when it Leaves.
 ///
 /// OtherFamily is a draw from another packing community on the sparsified
-/// book. That is how Leave divides the surface once there is something to
-/// divide, and the draw has to clear the packing grain: a candidate that
+/// book. The draw does not consult the live structure. A candidate that
 /// only clears the cell grain is an isomer of the packing the extra is
-/// leaving. ArchiveHole is a rung of the packing ladder in the DECAF
-/// \(\nu=3\) feature (the same `local_nu3_z` rows as packing identity),
-/// not SOAP leftover \(p_i-\mu\) and not a named morphology.
+/// leaving.
 ///
-/// Walk is what a one-packing book asks for. An extra Leaves so the
-/// ensemble stops spending two replicas on one funnel, and that trade is
-/// only worth making when the Leave has somewhere to go. Measured on the
-/// sealed LJ75 icosahedral minimum: a packing-ladder rung, sized by
-/// bisection to spend exactly its barrier, quenches back to the floor it
-/// started on at every rung from 1.32 to 42.3 \(\varepsilon\), which is
-/// five times the ico-Marks barrier in one displacement. So with one
-/// community on the book an ArchiveHole is a move with no measured yield,
-/// and the replica taking it is not exploring, it is idling. Meanwhile the
-/// walk does cross: 3 of 64 independent LJ75 walks at 400k evaluations
-/// reached the Marks minimum, each at hop 4160, 6226 and 4411 of about
-/// 11000. Coordination earns its keep by keeping walks off each other's
-/// basins through the shared bias and the catalog, not by standing 47 of
-/// 48 replicas still against a single funnel.
+/// Walk is the champion filling the occupied packing. Ridge is the
+/// extra climbing the local mode until the force flips, then quenching
+/// the overshoot: that is the barrier between fills. ArchiveHole is a
+/// landfold-away start. OtherFamily is a draw from a community already
+/// on file.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OccupancyLeaveTarget {
     /// Coordinator has a representative of a different packing community.
     OtherFamily,
-    /// First rung of the packing ladder in the DECAF \(\nu=3\) feature.
+    /// Landfold covering start, compacted quench, landfold identity.
     ArchiveHole,
-    /// Nothing to divide yet: keep walking, and let the shared bias hold
-    /// this replica off the basins the others are on.
+    /// Climb the local ridge (ART / dimer / Quapp) and quench the far side.
+    Ridge,
+    /// Keep walking on the hop library.
     Walk,
 }
 
@@ -271,11 +258,10 @@ pub fn leftover_birth_probability(n: u64, k: u64) -> f64 {
 }
 
 /// Leave destination. OtherFamily is a draw from another packing
-/// community on the sparsified book (`communities >= 2`). Leftover
-/// wells of one packing (`communities < 2`) stay ArchiveHole even
-/// when DECAF split them. After packing saturation OtherFamily only
-/// rematches communities on file. Packing saturation does not
-/// disable that draw: ArchiveHole is only for a one-community book.
+/// community on the sparsified book. A one-community book Walks on
+/// the hop library: landfold-and-compact and one-shot leftover
+/// starts do not mint a deeper family from the occupied well.
+/// Exhausted EI Walks. Unsaturated leftover Walks.
 pub fn occupancy_leave_target(
     other_family_in_catalog: bool,
     packing_saturated: bool,
@@ -292,12 +278,10 @@ pub fn occupancy_leave_target(
 
 /// [`occupancy_leave_target`] with the FunnelModel EI bit.
 ///
-/// A one-community book is Walk only once EI on the seen packings is
-/// exhausted: the hole then has no remaining improvement to chase.
-/// While leftover SOAP is still hatching, extras Walk: Marks is a
-/// long uninterrupted walk, not an ArchiveHole or OtherFamily draw.
-/// Two communities with exhausted EI Walk: amorphous packings above
-/// the floor are not worth occupying.
+/// A second community already on file is communicated. One packing
+/// on the book is a fill without a barrier: extras climb the ridge
+/// rather than walk another ico isomer. A named morphology is not a
+/// destination.
 pub fn occupancy_leave_by_ei(
     other_family_in_catalog: bool,
     packing_saturated: bool,
@@ -305,31 +289,18 @@ pub fn occupancy_leave_by_ei(
     ei_exhausted: bool,
     leftover_dwell: bool,
 ) -> OccupancyLeaveTarget {
-    let _ = packing_saturated;
-    if !leftover_dwell {
-        return OccupancyLeaveTarget::Walk;
+    let _ = (packing_saturated, ei_exhausted, leftover_dwell);
+    if other_family_in_catalog && packing_communities >= 2 {
+        return OccupancyLeaveTarget::OtherFamily;
     }
-    if packing_communities < 2 {
-        if ei_exhausted {
-            return OccupancyLeaveTarget::Walk;
-        }
-        return OccupancyLeaveTarget::ArchiveHole;
-    }
-    if ei_exhausted {
-        return OccupancyLeaveTarget::Walk;
-    }
-    if other_family_in_catalog {
-        OccupancyLeaveTarget::OtherFamily
-    } else {
-        OccupancyLeaveTarget::ArchiveHole
-    }
+    OccupancyLeaveTarget::Ridge
 }
 
 /// [`occupancy_leave_by_ei`] with a leftover birth draw.
 ///
-/// Birth reopens ArchiveHole only after leftover SOAP has hatched.
-/// While leftover is unsaturated the extra Walks: a Pitman--Yor
-/// draw must not interrupt the long chain that finds Marks.
+/// Birth does not reopen a covering of the occupied tangent. The
+/// hop library is the mint; interrupting it to push off the live
+/// structure does not enlarge the support of the Leave.
 pub fn occupancy_leave_by_birth(
     other_family_in_catalog: bool,
     packing_saturated: bool,
@@ -339,18 +310,14 @@ pub fn occupancy_leave_by_birth(
     draw: f64,
     leftover_dwell: bool,
 ) -> OccupancyLeaveTarget {
-    let target = occupancy_leave_by_ei(
+    let _ = (p_new, draw);
+    occupancy_leave_by_ei(
         other_family_in_catalog,
         packing_saturated,
         packing_communities,
         ei_exhausted,
         leftover_dwell,
-    );
-    if leftover_dwell && target == OccupancyLeaveTarget::Walk && draw < p_new.clamp(0.0, 1.0) {
-        OccupancyLeaveTarget::ArchiveHole
-    } else {
-        target
-    }
+    )
 }
 
 /// Franzblau (1991), *Phys. Rev. B* 44:4925: a new ring class is a
@@ -401,7 +368,7 @@ pub fn occupancy_leave_adopt(action: &str, walked_off: bool) -> Option<Occupancy
     if !is_occupancy_leave_action(action) {
         return None;
     }
-    if action == "catalog_leave" && !walked_off {
+    if matches!(action, "catalog_leave" | "catalog_ridge" | "soap_push") && !walked_off {
         Some(OccupancyLeaveAdopt::Refuse)
     } else {
         Some(OccupancyLeaveAdopt::Quench)
@@ -481,7 +448,7 @@ pub fn occupancy_family_floor(
         return DEFAULT_MIN_OCCUPIED_FAMILIES;
     }
     match (conductance, algebraic_connectivity) {
-        (Some(c), _) if c == 0.0 => 2,
+        (Some(0.0), _) => 2,
         (Some(c), Some(lambda)) if lambda.is_finite() && c < lambda => 2,
         _ => DEFAULT_MIN_OCCUPIED_FAMILIES,
     }
@@ -827,11 +794,25 @@ pub fn occupancy_sparsify_book(
             wells: wells[i],
         });
     }
-    let weights: Vec<f64> = wells.iter().map(|&count| count.max(1) as f64).collect();
-    let fes = occupancy_fes(&xy, Some(&weights)).unwrap_or(OccupancyFes {
-        minima: 1,
-        delta: None,
-    });
+    // Leftover-well density, not hop re-observes. The ico shelf opens
+    // hundreds of cells with well_visits 0; mean-shift from every cell
+    // is quadratic in that count and parks the coordinator.
+    let fes = {
+        let credited: Vec<usize> = (0..n).filter(|&i| wells[i] > 0).collect();
+        if credited.is_empty() {
+            OccupancyFes {
+                minima: 1,
+                delta: None,
+            }
+        } else {
+            let fes_xy: Vec<[f64; 2]> = credited.iter().map(|&i| xy[i]).collect();
+            let fes_w: Vec<f64> = credited.iter().map(|&i| wells[i] as f64).collect();
+            occupancy_fes(&fes_xy, Some(&fes_w)).unwrap_or(OccupancyFes {
+                minima: 1,
+                delta: None,
+            })
+        }
+    };
     let occupied_communities = community_wells.iter().filter(|&&wells| wells > 0).count();
     OccupancyBookMap {
         points,
@@ -850,7 +831,7 @@ pub fn occupancy_sparsify_book(
 
 /// Landfold-sparsify the occupied packing book.
 pub fn occupancy_sparsify_packing(book: &super::packing::PackingBook) -> OccupancyBookMap {
-    let occupied = book.occupied_histograms();
+    let (occupied, labels) = book.occupied_community_labels();
     let histograms: Vec<Vec<f64>> = occupied
         .iter()
         .map(|(_, histogram)| histogram.clone())
@@ -860,6 +841,22 @@ pub fn occupancy_sparsify_packing(book: &super::packing::PackingBook) -> Occupan
         .iter()
         .map(|&index| book.well_visits_of(index))
         .collect();
+    // Well-credited cells plus one empty representative per community.
+    // The ico shelf opens hundreds of uncredited cells; folding all of
+    // them is the hop-path park.
+    let mut keep: Vec<usize> = Vec::new();
+    let mut empty_rep = std::collections::BTreeSet::new();
+    for (i, well) in wells.iter().copied().enumerate() {
+        if well > 0 || empty_rep.insert(labels.get(i).copied().unwrap_or(i)) {
+            keep.push(i);
+        }
+    }
+    if keep.len() == occupied.len() {
+        return occupancy_sparsify_book(&histograms, &family, &wells);
+    }
+    let histograms: Vec<Vec<f64>> = keep.iter().map(|&i| histograms[i].clone()).collect();
+    let family: Vec<usize> = keep.iter().map(|&i| family[i]).collect();
+    let wells: Vec<u64> = keep.iter().map(|&i| wells[i]).collect();
     occupancy_sparsify_book(&histograms, &family, &wells)
 }
 
@@ -1160,7 +1157,7 @@ impl OccupancyCompact {
 
     /// One component, a forest, no primitive ring: a path or a tree.
     pub fn is_pathlike(&self) -> bool {
-        self.components == 1 && self.rings == 0 && self.edges + 1 <= self.n
+        self.components == 1 && self.rings == 0 && self.edges < self.n
     }
 }
 
@@ -1977,6 +1974,9 @@ pub fn promote_one_sided(seats: &mut [InterfaceSeat]) -> bool {
 /// leftover-SOAP hatches are intra-well and do not block. Live rematch of
 /// last candidates after extras Leave is not that count. A one-community
 /// Fiedler floor with many DECAF packings is not that case.
+/// Leftover-SOAP hatches are the champion isomer walk of a seen
+/// packing. They block retire while leftover has not dwelt and the
+/// book holds more than one family.
 /// `ei_exhausted` is Jones remaining improvement on observed
 /// FunnelModel morphologies, not a far-field GP probe.
 /// `n_occupied_families` is the packing-book occupied-family count
@@ -2051,7 +2051,7 @@ mod tests {
             cells: crate::catalog::GoodTuringSample::from_counts(counts.iter().copied()),
             fes_minima: 0,
             fes_delta: None,
-            holes: counts.iter().any(|count| *count == 0),
+            holes: counts.contains(&0),
         }
     }
 
@@ -2112,23 +2112,25 @@ mod tests {
         assert!(is_occupancy_leave_action("population_reseed"));
         assert!(is_occupancy_leave_action("hyperband_reseed"));
         assert!(is_occupancy_leave_action("catalog_leave"));
+        assert!(is_occupancy_leave_action("catalog_ridge"));
+        assert!(is_occupancy_leave_action("soap_push"));
         assert!(!is_occupancy_leave_action("catalog_incumbent"));
         assert!(!is_occupancy_leave_action("bridge"));
     }
 
     #[test]
-    fn occupancy_leave_is_another_family_or_an_archive_hole() {
+    fn occupancy_leave_is_a_draw_or_a_walk() {
         assert_eq!(
             occupancy_leave_by_ei(true, false, 2, false, true),
             OccupancyLeaveTarget::OtherFamily
         );
         assert_eq!(
             occupancy_leave_by_ei(false, false, 2, false, true),
-            OccupancyLeaveTarget::ArchiveHole
+            OccupancyLeaveTarget::Ridge
         );
         assert_eq!(
             occupancy_leave_target(true, false, 2),
-            OccupancyLeaveTarget::Walk
+            OccupancyLeaveTarget::OtherFamily
         );
     }
 
@@ -2136,11 +2138,11 @@ mod tests {
     fn leftover_unsaturated_walks_like_serial() {
         assert_eq!(
             occupancy_leave_by_ei(true, false, 2, false, false),
-            OccupancyLeaveTarget::Walk
+            OccupancyLeaveTarget::OtherFamily
         );
         assert_eq!(
             occupancy_leave_by_birth(true, false, 2, false, 0.9, 0.0, false),
-            OccupancyLeaveTarget::Walk
+            OccupancyLeaveTarget::OtherFamily
         );
         assert_eq!(
             occupancy_leave_by_ei(true, false, 2, false, true),
@@ -2152,11 +2154,11 @@ mod tests {
     fn exhausted_ei_walks_even_with_two_communities() {
         assert_eq!(
             occupancy_leave_by_ei(true, false, 2, true, true),
-            OccupancyLeaveTarget::Walk
+            OccupancyLeaveTarget::OtherFamily
         );
         assert_eq!(
             occupancy_leave_by_ei(true, true, 2, true, true),
-            OccupancyLeaveTarget::Walk
+            OccupancyLeaveTarget::OtherFamily
         );
         assert_eq!(
             occupancy_leave_by_ei(true, false, 2, false, true),
@@ -2165,14 +2167,14 @@ mod tests {
     }
 
     #[test]
-    fn open_ei_on_one_packing_still_archive_holes() {
+    fn a_one_packing_book_climbs_the_ridge() {
         assert_eq!(
             occupancy_leave_by_ei(false, false, 1, false, true),
-            OccupancyLeaveTarget::ArchiveHole
+            OccupancyLeaveTarget::Ridge
         );
         assert_eq!(
             occupancy_leave_by_ei(true, false, 1, true, true),
-            OccupancyLeaveTarget::Walk
+            OccupancyLeaveTarget::Ridge
         );
         assert_eq!(
             occupancy_leave_by_ei(true, false, 2, false, true),
@@ -2190,14 +2192,14 @@ mod tests {
     }
 
     #[test]
-    fn leftover_birth_reopens_a_walk_when_the_draw_hits() {
+    fn leftover_birth_does_not_reopen_a_covering() {
         assert_eq!(
             occupancy_leave_by_birth(false, true, 1, true, 0.8, 0.1, true),
-            OccupancyLeaveTarget::ArchiveHole
+            OccupancyLeaveTarget::Ridge
         );
         assert_eq!(
             occupancy_leave_by_birth(false, true, 1, true, 0.8, 0.9, true),
-            OccupancyLeaveTarget::Walk
+            OccupancyLeaveTarget::Ridge
         );
         assert_eq!(
             occupancy_leave_by_birth(true, false, 2, false, 0.9, 0.0, true),
@@ -2205,25 +2207,26 @@ mod tests {
         );
     }
 
+    #[test]
     fn one_packing_on_the_book_is_nothing_to_divide() {
         // A Leave trades a replica's walk for coverage. With one community
         // there is no second packing to cover, and the hole that would be
         // drawn has no measured yield on LJ75, so the trade is a loss.
         assert_eq!(
             occupancy_leave_target(true, false, 1),
-            OccupancyLeaveTarget::Walk
+            OccupancyLeaveTarget::Ridge
         );
         assert_eq!(
             occupancy_leave_target(false, false, 1),
-            OccupancyLeaveTarget::Walk
+            OccupancyLeaveTarget::Ridge
         );
         assert_eq!(
             occupancy_leave_target(true, false, 0),
-            OccupancyLeaveTarget::Walk
+            OccupancyLeaveTarget::Ridge
         );
         assert_eq!(
             occupancy_leave_target(true, false, 2),
-            OccupancyLeaveTarget::Walk
+            OccupancyLeaveTarget::OtherFamily
         );
     }
 
@@ -2235,15 +2238,15 @@ mod tests {
         );
         assert_eq!(
             occupancy_leave_target(true, true, 2),
-            OccupancyLeaveTarget::Walk
+            OccupancyLeaveTarget::OtherFamily
         );
         assert_eq!(
             occupancy_leave_target(false, true, 1),
-            OccupancyLeaveTarget::Walk
+            OccupancyLeaveTarget::Ridge
         );
         assert_eq!(
             occupancy_leave_by_ei(false, false, 2, false, true),
-            OccupancyLeaveTarget::ArchiveHole
+            OccupancyLeaveTarget::Ridge
         );
     }
 
@@ -2251,6 +2254,14 @@ mod tests {
     fn catalog_leave_refuses_a_same_family_hole() {
         assert_eq!(
             occupancy_leave_adopt("catalog_leave", false),
+            Some(OccupancyLeaveAdopt::Refuse)
+        );
+        assert_eq!(
+            occupancy_leave_adopt("catalog_ridge", false),
+            Some(OccupancyLeaveAdopt::Refuse)
+        );
+        assert_eq!(
+            occupancy_leave_adopt("soap_push", false),
             Some(OccupancyLeaveAdopt::Refuse)
         );
         assert_eq!(
@@ -2421,10 +2432,12 @@ mod tests {
 
     #[test]
     fn leave_defers_through_the_measured_crossing() {
-        assert!(
-            LEAVE_CROSSING_HOPS >= 6226,
-            "floor {LEAVE_CROSSING_HOPS} expires before the latest named Marks crossing"
-        );
+        const {
+            assert!(
+                LEAVE_CROSSING_HOPS >= 6226,
+                "floor expires before the latest named Marks crossing"
+            );
+        }
         assert_eq!(leave_crossing_slices(500), 22);
         assert!(leave_defers(1, 0, 22));
         assert!(leave_defers(22, 0, 22));
@@ -2439,6 +2452,36 @@ mod tests {
         assert_eq!(hops_per_core_hour(200, 3600.0, 1), Some(200.0));
         assert_eq!(hops_per_core_hour(100, 0.0, 1), None);
         assert_eq!(hops_per_core_hour(100, 10.0, 0), None);
+    }
+
+    #[test]
+    fn leftover_soap_requires_dwell_when_two_families() {
+        assert!(!leftover_sat_dwell(&[false]));
+        assert!(!leftover_sat_dwell(&[true]));
+        assert!(!occupancy_retire_at(
+            OccupancyCertificate::MixingCertified,
+            true,
+            false,
+            true,
+            2,
+            2
+        ));
+        assert!(occupancy_retire_at(
+            OccupancyCertificate::MixingCertified,
+            true,
+            false,
+            true,
+            1,
+            1
+        ));
+        assert!(!occupancy_retire_at(
+            OccupancyCertificate::CatalogSaturated,
+            true,
+            false,
+            true,
+            2,
+            2
+        ));
     }
 
     #[test]
@@ -2700,6 +2743,19 @@ mod tests {
         let ico = vec![1.0, 0.0];
         let oh = vec![0.0, 1.0];
         assert_eq!(occupancy_landfold_floor(&[ico, oh], &[0, 1]), 2);
+    }
+
+    #[test]
+    fn occupancy_fes_ignores_zero_well_hop_cells() {
+        let ico = vec![1.0, 0.0];
+        let histograms = vec![ico; 64];
+        let family: Vec<usize> = (0..64).collect();
+        let mut wells = vec![0u64; 64];
+        wells[0] = 20;
+        let map = occupancy_sparsify_book(&histograms, &family, &wells);
+        assert_eq!(map.communities, 1);
+        assert_eq!(map.fes_minima, 1);
+        assert_eq!(map.community_wells, vec![20]);
     }
 
     #[test]

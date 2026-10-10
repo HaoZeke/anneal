@@ -16,6 +16,12 @@ use ndarray::{Array1, ArrayView1};
 
 use crate::soap::{SoapSpec, local_nu3_z};
 
+mod preparation;
+use preparation::packing_rows;
+pub use preparation::prepare_rows;
+mod peers;
+pub use peers::{PackingPeerScope, nearby_packing_peers, set_packing_peers};
+
 /// Leader-clustering radius on per-center `local_nu3_z` rows. Same number
 /// as `examples/decaf_local_classes.rs` and `rewrite_2026/data/decaf/decaf_r14.txt`.
 pub const ENVIRONMENT_RADIUS: f64 = 1.4;
@@ -84,6 +90,8 @@ pub struct PackingBook {
     /// copies of the first quench and is not a packing Good--Turing
     /// draw.
     well_visits: Vec<u64>,
+    /// Single-linkage parent of each packing cell.
+    community_parent: Vec<usize>,
     histogram_cache: RefCell<Vec<CachedHistogram>>,
     /// SOAP+ACE spec of every row in this book. [`SoapSpec::default`]
     /// matches [`PACKING_SPEC`]. A measurement book can raise `l_max`
@@ -124,7 +132,6 @@ impl PackingBook {
             && let Some(index) = self.family_of(&histogram)
         {
             self.visits[index] = self.visits[index].saturating_add(1);
-            self.version = self.version.wrapping_add(1);
             return Some(index);
         }
         let histogram = self.assign_growing(coordinates)?;
@@ -137,8 +144,11 @@ impl PackingBook {
         self.families.push(histogram);
         self.visits.push(1);
         self.well_visits.push(0);
+        let index = self.families.len() - 1;
+        self.community_parent.push(index);
+        self.union_new_cell(index);
         self.version = self.version.wrapping_add(1);
-        Some(self.families.len() - 1)
+        Some(index)
     }
 
     /// Credit one leftover-SOAP well arrival to this packing family.
@@ -223,10 +233,91 @@ impl PackingBook {
         self.visits.get(family).copied().unwrap_or(0)
     }
 
-    /// Occupied DECAF families on file. Visit count, not leftover-SOAP
+    /// Occupied DECAF cells on file. Visit count, not leftover-SOAP
     /// basin count. Empty until `observe` records a histogram.
+    ///
+    /// A live LJ75 icosahedral shelf holds tens of these. Packing
+    /// identity is [`Self::occupied_packing_count`].
     pub fn occupied_family_count(&self) -> usize {
         self.visits.iter().filter(|&&visits| visits > 0).count()
+    }
+
+    /// Occupied packing communities on file, at [`PACKING_LINK`].
+    ///
+    /// Cell count is not this: isomers of one packing open many cells,
+    /// and treating each as a family sends extras between icosahedral
+    /// wells that are not a second funnel.
+    pub fn occupied_packing_count(&self) -> usize {
+        self.occupied_community_labels()
+            .1
+            .into_iter()
+            .max()
+            .map_or(0, |last| last + 1)
+    }
+
+    fn find_community(&self, mut node: usize) -> usize {
+        let n = self.community_parent.len();
+        if n == 0 || node >= n {
+            return node;
+        }
+        while self.community_parent[node] != node {
+            node = self.community_parent[node];
+        }
+        node
+    }
+
+    fn union_new_cell(&mut self, index: usize) {
+        for other in 0..index {
+            if self.visits.get(other).copied().unwrap_or(0) == 0 {
+                continue;
+            }
+            if packing_distance(&self.families[index], &self.families[other]) > PACKING_LINK {
+                continue;
+            }
+            let a = self.find_community(index);
+            let b = self.find_community(other);
+            if a != b {
+                self.community_parent[a] = b;
+            }
+        }
+    }
+
+    /// Occupied cells and their incremental packing-community labels.
+    pub fn occupied_community_labels(&self) -> (Vec<(usize, Vec<f64>)>, Vec<usize>) {
+        let occupied = self.occupied_histograms();
+        let raw: Vec<usize> = occupied
+            .iter()
+            .map(|(index, _)| self.find_community(*index))
+            .collect();
+        let mut seen: BTreeMap<usize, usize> = BTreeMap::new();
+        let labels = raw
+            .into_iter()
+            .map(|root| {
+                let next = seen.len();
+                *seen.entry(root).or_insert(next)
+            })
+            .collect();
+        (occupied, labels)
+    }
+
+    /// Family indices in the same packing community as `query`.
+    ///
+    /// The book fold is cached. The query is assigned by one single-linkage
+    /// step onto that fold: a cell at or below [`PACKING_LINK`] inherits
+    /// its community. A query that does not chain is not a new fold.
+    pub fn families_sharing_community(&self, query: &[f64]) -> Vec<usize> {
+        let (occupied, labels) = self.occupied_community_labels();
+        let Some(label) = occupied.iter().enumerate().find_map(|(i, (_, histogram))| {
+            (packing_distance(query, histogram) <= PACKING_LINK).then_some(labels[i])
+        }) else {
+            return Vec::new();
+        };
+        occupied
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| labels[*i] == label)
+            .map(|(_, (index, _))| *index)
+            .collect()
     }
 
     /// Histogram of each occupied packing family, in family-index order.
@@ -367,6 +458,14 @@ impl PackingBook {
         histogram.last().copied()
     }
 
+    fn descriptor_rows(&self, coordinates: &[f64]) -> ndarray::Array2<f64> {
+        if self.spec == PACKING_SPEC {
+            (*packing_rows(coordinates)).clone()
+        } else {
+            local_nu3_z(ArrayView1::from(coordinates), self.spec, None)
+        }
+    }
+
     fn assign_histogram(&self, coordinates: &[f64]) -> Option<Vec<f64>> {
         if !coordinates.len().is_multiple_of(3) {
             return None;
@@ -375,7 +474,7 @@ impl PackingBook {
         if atoms < MINIMUM_PACKING_ATOMS {
             return None;
         }
-        let loc = local_nu3_z(ArrayView1::from(coordinates), self.spec, None);
+        let loc = self.descriptor_rows(coordinates);
         if loc.nrows() == 0 || loc.ncols() == 0 {
             return None;
         }
@@ -399,7 +498,7 @@ impl PackingBook {
         if atoms < MINIMUM_PACKING_ATOMS {
             return None;
         }
-        let loc = local_nu3_z(ArrayView1::from(coordinates), self.spec, None);
+        let loc = self.descriptor_rows(coordinates);
         if loc.nrows() == 0 || loc.ncols() == 0 {
             return None;
         }
@@ -547,6 +646,94 @@ pub fn packing_vector(coordinates: &[f64]) -> Array1<f64> {
 pub fn packing_fingerprint(coordinates: &[f64]) -> Option<Vec<f64>> {
     let mut book = PackingBook::default();
     book.assign_growing(coordinates)
+}
+
+/// Per-atom DECAF class under a throwaway leader book of this structure.
+///
+/// Lai, Poths, Matera, Scheurer and Reuter (*Phys. Rev. Lett.* **134**,
+/// 096201 (2025)): APE classifies local environments and queues dimer
+/// searches on a highlighted atom, not a global packing-mean cover.
+pub fn atom_decaf_classes(coordinates: &[f64]) -> Vec<usize> {
+    if !coordinates.len().is_multiple_of(3) {
+        return Vec::new();
+    }
+    let loc = packing_rows(coordinates);
+    let n_at = loc.nrows();
+    if n_at == 0 {
+        return Vec::new();
+    }
+    let mut leaders: Vec<Vec<f64>> = Vec::new();
+    let mut classes = vec![0usize; n_at];
+    for i in 0..n_at {
+        let row = loc.row(i).to_vec();
+        match nearest_leader(&leaders, &row) {
+            Some(class) => classes[i] = class,
+            None => {
+                leaders.push(row);
+                classes[i] = leaders.len() - 1;
+            }
+        }
+    }
+    classes
+}
+
+/// APE to-do list: atoms grouped by DECAF class, most occupied class first.
+///
+/// One queue entry per local environment class. The extra walks this
+/// list; each Leave highlights one atom and seeds a dimer there.
+pub fn ape_highlight_queue(coordinates: &[f64]) -> Vec<(usize, usize)> {
+    let classes = atom_decaf_classes(coordinates);
+    if classes.is_empty() {
+        return Vec::new();
+    }
+    let mut buckets: BTreeMap<usize, Vec<usize>> = BTreeMap::new();
+    for (atom, class) in classes.iter().copied().enumerate() {
+        buckets.entry(class).or_default().push(atom);
+    }
+    let mut order: Vec<(usize, Vec<usize>)> = buckets.into_iter().collect();
+    order.sort_by(|left, right| {
+        right
+            .1
+            .len()
+            .cmp(&left.1.len())
+            .then_with(|| left.0.cmp(&right.0))
+    });
+    order
+        .into_iter()
+        .flat_map(|(class, atoms)| atoms.into_iter().map(move |atom| (atom, class)))
+        .collect()
+}
+
+/// APE seed: displace the highlighted atom along a 3-space cover.
+pub fn ape_local_seed(coordinates: &[f64], atom: usize, amplitude: f64, draw: usize) -> Vec<f64> {
+    let mut out = coordinates.to_vec();
+    let n_at = out.len() / 3;
+    if atom >= n_at || !(amplitude.is_finite() && amplitude > 0.0) {
+        return out;
+    }
+    let direction = crate::hypersphere::cover_direction(8, 3, draw % 8);
+    let norm = direction.iter().map(|v| v * v).sum::<f64>().sqrt();
+    if !(norm.is_finite() && norm > 0.0) {
+        return out;
+    }
+    let scale = amplitude / norm;
+    for k in 0..3 {
+        out[3 * atom + k] += scale * direction[k];
+    }
+    out
+}
+
+/// Fraction of atoms whose local DECAF class is absent from the occupied book.
+///
+/// APE reclassifies the search endpoint against environments already on
+/// file. A positive share is a new local environment. The other packing
+/// is not a target and is not named.
+pub fn occupied_unseen_share(trial: &[f64]) -> f64 {
+    let mut book = PackingBook::default();
+    for reference in packing_references() {
+        book.observe(&reference);
+    }
+    book.unseen_share(trial).unwrap_or(0.0)
 }
 
 fn nearest_leader(leaders: &[Vec<f64>], row: &[f64]) -> Option<usize> {
@@ -893,6 +1080,39 @@ pub fn leaves_packing(origin: &[f64], trial: &[f64], references: &[Vec<f64>]) ->
 /// [`leaves_packing`] against the packings this replica holds on file.
 pub fn different_packing_family(origin: &[f64], trial: &[f64]) -> bool {
     leaves_packing(origin, trial, &packing_references())
+}
+
+/// Catalog slots drawn at a checkpoint to find nearby chains.
+///
+/// The invert is not a per-hop all-to-all. A checkpoint already talks
+/// to the catalog; these draws are the only extra mail, and only a
+/// neighbour in the map is armed.
+pub const INVERT_NEIGHBOR_DRAWS: usize = 4;
+
+/// Whether two structures sit on the same side of the packing map.
+///
+/// Pairwise L1 at [`PACKING_LINK`], no chaining through a third well.
+/// A far packing is a hear, not an invert neighbour. The predicate
+/// names no morphology.
+pub fn nearby_packing(here: &[f64], other: &[f64]) -> bool {
+    if here.len() != other.len() || here.is_empty() {
+        return false;
+    }
+    let mut book = PackingBook::default();
+    book.observe(here);
+    book.observe(other);
+    match (book.histogram(here), book.histogram(other)) {
+        (Some(a), Some(b)) => packing_distance(&a, &b) <= PACKING_LINK,
+        _ => false,
+    }
+}
+
+/// Reference-cloud entries that are invert neighbours of `here`.
+pub fn nearby_packing_book(here: &[f64]) -> Vec<PackingReference> {
+    packing_reference_book()
+        .into_iter()
+        .filter(|reference| nearby_packing(here, &reference.coordinates))
+        .collect()
 }
 
 /// Paving pile kept per packing community rather than per basin.

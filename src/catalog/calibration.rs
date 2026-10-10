@@ -186,3 +186,123 @@ pub fn calibrate_census_radius(
         census_radius,
     })
 }
+
+/// Two-sample census radius: between the re-quench scatter of one minimum
+/// and the separation of distinct minima.
+///
+/// The one-sample calibration takes the 0.99 quantile of the descriptor
+/// distance between two re-quenches of the *same* minimum, which is the
+/// numerical noise floor of a converged quench (about 1e-8 on LJ75). A
+/// census at that radius merges only reproductions of one geometry, so the
+/// visit count every population policy reads stays at zero. The radius
+/// has to sit above that floor and below the nearest distance between
+/// distinct minima; this places it at the geometric mean of the two tails
+/// and refuses when the tails overlap.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct TwoSampleCensusRadius {
+    /// 0.99 quantile of same-minimum re-quench distances.
+    pub same_tail: f64,
+    /// 0.01 quantile of distinct-minimum distances.
+    pub distinct_tail: f64,
+    /// Geometric mean of the two tails.
+    pub census_radius: f64,
+}
+
+/// Reasons the two distance samples cannot define a census radius.
+#[derive(Debug, thiserror::Error, PartialEq)]
+pub enum TwoSampleCalibrationError {
+    /// At least one sample contains fewer than the required number of distances.
+    #[error(
+        "need at least {minimum} distances in each sample, got {same} same and {distinct} distinct"
+    )]
+    InsufficientSamples {
+        /// Minimum number of distances required in each sample.
+        minimum: usize,
+        /// Number of same-minimum distances supplied.
+        same: usize,
+        /// Number of distinct-minimum distances supplied.
+        distinct: usize,
+    },
+    /// The upper same-minimum tail is not below the lower distinct-minimum tail.
+    #[error("same-minimum tail {same_tail} is not below the distinct-minimum tail {distinct_tail}")]
+    TailsOverlap {
+        /// Upper quantile of the same-minimum sample.
+        same_tail: f64,
+        /// Lower quantile of the distinct-minimum sample.
+        distinct_tail: f64,
+    },
+    /// A sample contains a nonfinite or negative distance.
+    #[error("non-finite or negative distance in the samples")]
+    BadDistance,
+}
+
+fn nearest_rank_quantile(sorted: &[f64], q: f64) -> f64 {
+    let rank = ((q * sorted.len() as f64).ceil() as usize).clamp(1, sorted.len());
+    sorted[rank - 1]
+}
+
+/// Estimate a census radius between same-minimum and distinct-minimum tails.
+///
+/// Each sample must contain at least 20 finite, nonnegative distances. The
+/// nearest-rank 0.99 same-minimum quantile must lie below the nearest-rank 0.01
+/// distinct-minimum quantile; their geometric mean defines the radius.
+pub fn calibrate_census_radius_two_sample(
+    same_minimum: &[f64],
+    distinct_minima: &[f64],
+) -> Result<TwoSampleCensusRadius, TwoSampleCalibrationError> {
+    const MINIMUM: usize = 20;
+    if same_minimum.len() < MINIMUM || distinct_minima.len() < MINIMUM {
+        return Err(TwoSampleCalibrationError::InsufficientSamples {
+            minimum: MINIMUM,
+            same: same_minimum.len(),
+            distinct: distinct_minima.len(),
+        });
+    }
+    if same_minimum
+        .iter()
+        .chain(distinct_minima.iter())
+        .any(|d| !d.is_finite() || *d < 0.0)
+    {
+        return Err(TwoSampleCalibrationError::BadDistance);
+    }
+    let mut same = same_minimum.to_vec();
+    let mut distinct = distinct_minima.to_vec();
+    same.sort_by(|a, b| a.total_cmp(b));
+    distinct.sort_by(|a, b| a.total_cmp(b));
+    let same_tail = nearest_rank_quantile(&same, 0.99);
+    let distinct_tail = nearest_rank_quantile(&distinct, 0.01);
+    if !(same_tail < distinct_tail) {
+        return Err(TwoSampleCalibrationError::TailsOverlap {
+            same_tail,
+            distinct_tail,
+        });
+    }
+    Ok(TwoSampleCensusRadius {
+        same_tail,
+        distinct_tail,
+        census_radius: (same_tail * distinct_tail).sqrt(),
+    })
+}
+
+#[cfg(test)]
+mod two_sample_tests {
+    use super::*;
+
+    #[test]
+    fn radius_sits_between_the_tails() {
+        let same: Vec<f64> = (0..50).map(|i| 1e-9 * (1.0 + i as f64 / 10.0)).collect();
+        let distinct: Vec<f64> = (0..50).map(|i| 1e-2 * (1.0 + i as f64 / 10.0)).collect();
+        let r = calibrate_census_radius_two_sample(&same, &distinct).unwrap();
+        assert!(r.same_tail < r.census_radius && r.census_radius < r.distinct_tail);
+    }
+
+    #[test]
+    fn overlapping_tails_are_refused() {
+        let same: Vec<f64> = (0..50).map(|i| 1e-3 * (1.0 + i as f64)).collect();
+        let distinct: Vec<f64> = (0..50).map(|i| 1e-3 * (1.0 + i as f64)).collect();
+        assert!(matches!(
+            calibrate_census_radius_two_sample(&same, &distinct),
+            Err(TwoSampleCalibrationError::TailsOverlap { .. })
+        ));
+    }
+}

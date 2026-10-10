@@ -26,11 +26,12 @@
 //! DECAF family, a raw-\(E\) polish sits on a true minimum of that
 //! well.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 
 use ndarray::{Array1, Array2, ArrayView1};
 
 use crate::catalog::packing::{MINIMUM_PACKING_ATOMS, PACKING_SPEC};
+use crate::movekernel::MoveKernel;
 use crate::soap::{jacobian_nu3, local_nu3_z};
 
 struct Well {
@@ -58,10 +59,26 @@ struct Armed {
     /// \(\Delta T\) of the well-tempered scaling. Zero disables it and
     /// leaves every hill at full height.
     delta_t: f64,
+    /// Neighbour invert lifted at arm. Hops apply this \(P\) until the
+    /// next arm; they do not rebuild \(J\).
+    frozen: bool,
+    /// \((k,\hat P,r_\varphi,\|P\|)\) at arm, used when [`Self::frozen`].
+    frozen_modes: Vec<(usize, Array1<f64>, f64, f64)>,
 }
 
 thread_local! {
     static ARMED: RefCell<Option<Armed>> = const { RefCell::new(None) };
+    static LEAVE_COVER: Cell<Option<usize>> = const { Cell::new(None) };
+}
+
+/// Arm the covering index the next `catalog_ridge` hop walks.
+pub fn arm_leave_cover(index: usize) {
+    LEAVE_COVER.with(|slot| slot.set(Some(index)));
+}
+
+/// Take the covering index armed for this Leave, if any.
+pub fn take_leave_cover() -> Option<usize> {
+    LEAVE_COVER.with(|slot| slot.take())
 }
 
 /// Arm the transformed quench for one occupancy Leave.
@@ -172,6 +189,7 @@ pub fn arm_leave_free(
             first.deposit = own.deposit.max(0.0);
         }
     }
+    let frozen_modes = freeze_packing_modes(origin, &wells);
     ARMED.with(|slot| {
         *slot.borrow_mut() = Some(Armed {
             wells,
@@ -179,9 +197,14 @@ pub fn arm_leave_free(
             sigma_rmsd: sigma_rmsd.max(1e-6),
             lift: None,
             sigma_phi: None,
-            mode_x: None,
-            modes: Vec::new(),
+            mode_x: Some(origin.to_owned()),
+            modes: frozen_modes
+                .iter()
+                .map(|(index, p, _, p_norm)| (*index, p.clone(), *p_norm))
+                .collect(),
             delta_t: delta_t.max(0.0),
+            frozen: !frozen_modes.is_empty(),
+            frozen_modes,
         });
     });
 }
@@ -194,6 +217,20 @@ pub fn disarm() {
 /// Whether a Leave quench is currently transformed.
 pub fn is_armed() -> bool {
     ARMED.with(|slot| slot.borrow().is_some())
+}
+
+/// Whether hops apply the \(P\) lifted at arm, without rebuilding \(J\).
+pub fn invert_is_frozen() -> bool {
+    ARMED.with(|slot| slot.borrow().as_ref().is_some_and(|armed| armed.frozen))
+}
+
+/// How many neighbour SOAP modes the hop Householder actually holds.
+pub fn invert_frozen_count() -> usize {
+    ARMED.with(|slot| {
+        slot.borrow()
+            .as_ref()
+            .map_or(0, |armed| armed.frozen_modes.len())
+    })
 }
 
 /// Hill amplitude \(A\) and width \(\sigma_\varphi\) of the armed
@@ -450,10 +487,150 @@ fn transform(
     energy: f64,
     grad: Array1<f64>,
 ) -> (f64, Array1<f64>) {
+    if armed.frozen && !armed.frozen_modes.is_empty() {
+        return apply_packing_modes(armed, energy, grad);
+    }
     if armed.wells.iter().any(|well| well.packing_mean.is_some()) {
         return transform_packing(armed, x, energy, grad);
     }
     transform_cartesian(armed, x, energy, grad)
+}
+
+/// Lift neighbour modes once, at arm. The hop applies this \(P\).
+///
+/// The packing mean is silent when two wells share a funnel. The
+/// stacked local SOAP+\(\nu=3\) residual is not: that is the region
+/// another chain occupies, pulled back with \(J^\top\).
+fn freeze_packing_modes(
+    origin: ArrayView1<f64>,
+    wells: &[Well],
+) -> Vec<(usize, Array1<f64>, f64, f64)> {
+    let j = jacobian_nu3(origin, PACKING_SPEC, None);
+    let mu = packing_mean(origin);
+    wells
+        .iter()
+        .enumerate()
+        .filter_map(|(index, well)| {
+            if well.coords.len() != origin.len() {
+                return None;
+            }
+            if same_point(well.coords.view(), origin) {
+                return None;
+            }
+            if let (Some(mu), Some(mu_k)) = (mu.as_ref(), well.packing_mean.as_ref())
+                && let Some(lifted) = lift_packing_mode(origin, mu.view(), mu_k.view(), &j)
+            {
+                return Some((index, lifted.0, lifted.1, lifted.2));
+            }
+            let (p, r_phi, p_norm) = lift_local_residual(origin, well.coords.view(), &j)?;
+            Some((index, p, r_phi, p_norm))
+        })
+        .collect()
+}
+
+/// \(P=J^\top(s-s_k)\) from stacked local SOAP+\(\nu=3\), not the means.
+fn lift_local_residual(
+    origin: ArrayView1<f64>,
+    other: ArrayView1<f64>,
+    j: &Array2<f64>,
+) -> Option<(Array1<f64>, f64, f64)> {
+    let loc_a = local_nu3_z(origin, PACKING_SPEC, None);
+    let loc_b = local_nu3_z(other, PACKING_SPEC, None);
+    if loc_a.nrows() != loc_b.nrows() || loc_a.ncols() != loc_b.ncols() {
+        return None;
+    }
+    let n_at = loc_a.nrows();
+    let dim = loc_a.ncols();
+    if n_at == 0 || dim == 0 || j.nrows() != n_at * dim || j.ncols() != origin.len() {
+        return None;
+    }
+    let mut dp = Array1::<f64>::zeros(n_at * dim);
+    for i in 0..n_at {
+        for t in 0..dim {
+            dp[i * dim + t] = loc_a[[i, t]] - loc_b[[i, t]];
+        }
+    }
+    let r_phi = dp.iter().map(|v| v * v).sum::<f64>().sqrt();
+    if r_phi < 1e-15 {
+        return None;
+    }
+    for item in dp.iter_mut() {
+        *item /= r_phi;
+    }
+    let mut p = Array1::<f64>::zeros(origin.len());
+    for k in 0..origin.len() {
+        let mut s = 0.0;
+        for row in 0..n_at * dim {
+            s += j[[row, k]] * dp[row];
+        }
+        p[k] = s;
+    }
+    strip_com(&mut p);
+    let p_norm = p.iter().map(|v| v * v).sum::<f64>().sqrt();
+    if p_norm < 1e-15 {
+        return None;
+    }
+    for item in p.iter_mut() {
+        *item /= p_norm;
+    }
+    Some((p, r_phi, p_norm))
+}
+
+fn apply_packing_modes(armed: &mut Armed, energy: f64, grad: Array1<f64>) -> (f64, Array1<f64>) {
+    if armed.lift.is_none() {
+        let grain = crate::catalog::PACKING_LINK;
+        let mut amplitude = 0.0;
+        for (_, p, r_phi, p_norm) in &armed.frozen_modes {
+            if *r_phi < 1e-12 || *p_norm < 1e-15 {
+                continue;
+            }
+            let slope = dot(&grad, p) / p_norm;
+            if slope > 0.0 {
+                let curvature = slope / r_phi;
+                let trial = 0.5 * curvature * grain * grain;
+                if trial > amplitude {
+                    amplitude = trial;
+                }
+            }
+        }
+        armed.lift = Some(amplitude);
+        armed.sigma_phi = Some(grain);
+    }
+    let amplitude = armed.lift.unwrap_or(0.0);
+    let sigma_phi = armed.sigma_phi.unwrap_or(0.0);
+    let delta_t = armed.delta_t;
+    let mut grad = if householder_suppressed() {
+        grad
+    } else {
+        householder_packing(&armed.frozen_modes, sigma_phi, grad)
+    };
+    if sigma_phi <= 1e-12 {
+        return (energy, grad);
+    }
+    let mut potential = 0.0;
+    for (well, p, r_phi, p_norm) in &armed.frozen_modes {
+        if *r_phi < 1e-12 {
+            continue;
+        }
+        let entropy = armed.wells.get(*well).map_or(0.0, |held| held.entropy);
+        let free = amplitude + entropy;
+        if free <= 0.0 {
+            continue;
+        }
+        let standing = armed.wells.get(*well).map_or(0.0, |held| held.deposit);
+        let tempered = if delta_t > 1e-12 {
+            free * (-standing / delta_t).exp()
+        } else {
+            free
+        };
+        let gauss = (-0.5 * (r_phi / sigma_phi) * (r_phi / sigma_phi)).exp();
+        potential += tempered * gauss;
+        let scale = -tempered * gauss * r_phi / (sigma_phi * sigma_phi) * p_norm;
+        for (g, pk) in grad.iter_mut().zip(p.iter()) {
+            *g += scale * *pk;
+        }
+    }
+    (energy + potential, grad)
 }
 
 fn transform_packing(
@@ -808,6 +985,7 @@ fn packing_mean(x: ArrayView1<f64>) -> Option<Array1<f64>> {
 ///
 /// Returns \((\hat P, \|\mu-\mu_k\|, \|P\|)\) so the hill gradient
 /// can reconstruct \(\nabla_x r_\varphi=\|P\|\hat P\).
+#[cfg(test)]
 fn packing_pullback(x: ArrayView1<f64>, mu_k: ArrayView1<f64>) -> Option<(Array1<f64>, f64, f64)> {
     let mu = packing_mean(x)?;
     let j = jacobian_nu3(x, PACKING_SPEC, None);
@@ -984,6 +1162,16 @@ pub fn rung_barrier(depth_per_atom: f64, rung: usize) -> f64 {
 
 /// Rungs a single Leave walks before it reports a refusal.
 pub const LEAVE_RUNGS: usize = 6;
+
+/// Independent covering starts launched in the packing active volume
+/// on one Leave.
+///
+/// Xu, Osetsky and Stoller (*Phys. Rev. B* **84**, 132103 (2011))
+/// run several dimer searches per active volume. Béland, Osetsky,
+/// Stoller and Xu (arXiv:1409.1253): SEAKMC samples tens of events
+/// then flushes the catalog after one is executed. Occupancy is not
+/// kMC and does not keep the unused starts.
+pub const LEAVE_AV_SEARCHES: usize = 8;
 
 /// Rungs walked past the first escape before the best of them is taken.
 ///
@@ -1199,6 +1387,576 @@ where
     leave_packing_rung_to_dir(x, &direction, barrier, species, mobile, energy)
 }
 
+/// Cover index whose packing-mean increment is farthest from every
+/// occupied packing mean.
+///
+/// Anelli, Engel, Pickard and Ceriotti (*Phys. Rev. Materials* **2**,
+/// 103804 (2018), <https://doi.org/10.1103/PhysRevMaterials.2.103804>):
+/// farthest-point sampling in a learned descriptor, not a random
+/// cover. Occupancy already has [`crate::catalog_policy::proposal::farthest_hole`]
+/// on the unit sphere; this is the same rule on the packing-mean
+/// sphere the Leave actually walks.
+pub fn farthest_packing_cover(
+    x: ArrayView1<f64>,
+    references: &[Vec<f64>],
+    n_cover: usize,
+) -> usize {
+    let Some(mu) = packing_mean(x) else {
+        return 0;
+    };
+    let occupied: Vec<Array1<f64>> = references
+        .iter()
+        .filter_map(|reference| packing_mean(ArrayView1::from(reference.as_slice())))
+        .filter(|mean| mean.len() == mu.len())
+        .collect();
+    let mut best_i = 0usize;
+    let mut best_d = f64::NEG_INFINITY;
+    for index in 0..n_cover.max(1) {
+        let Some(direction) = packing_cover_direction(x, index, references) else {
+            continue;
+        };
+        if direction.len() != mu.len() {
+            continue;
+        }
+        let dmin = if occupied.is_empty() {
+            direction.iter().map(|v| v * v).sum::<f64>().sqrt()
+        } else {
+            occupied
+                .iter()
+                .map(|occ| {
+                    direction
+                        .iter()
+                        .zip(mu.iter().zip(occ.iter()))
+                        .map(|(d, (m, o))| {
+                            let t = m + d - o;
+                            t * t
+                        })
+                        .sum::<f64>()
+                        .sqrt()
+                })
+                .fold(f64::INFINITY, f64::min)
+        };
+        if dmin > best_d {
+            best_d = dmin;
+            best_i = index;
+        }
+    }
+    best_i
+}
+
+/// Energy minima on a sphere supported on the active volume.
+///
+/// Ohno and Maeda (*Chem. Phys. Lett.* **384**, 277 (2004),
+/// <https://doi.org/10.1016/j.cplett.2003.12.030>): reaction
+/// channels are anharmonic downward distortions, found as energy
+/// minima on the scaled hypersphere around the equilibrium. A
+/// uniform covering is not that. This scan evaluates the potential
+/// on a sphere of radius `radius` in the mobile coordinates and
+/// returns the `keep` lowest-energy points. Later SEAKMC builds
+/// used the same SHS start (Xu *et al.*, *Comput. Mater. Sci.*
+/// **194**, 110390 (2021)).
+pub fn shs_av_starts<E>(
+    x: ArrayView1<f64>,
+    mobile: &[usize],
+    radius: f64,
+    samples: usize,
+    keep: usize,
+    mut energy: E,
+) -> Vec<Array1<f64>>
+where
+    E: FnMut(ArrayView1<f64>) -> Option<f64>,
+{
+    let n_at = x.len() / 3;
+    if n_at == 0 || mobile.is_empty() || !(radius.is_finite() && radius > 0.0) || samples == 0 {
+        return Vec::new();
+    }
+    let dim = 3 * mobile.len();
+    let mut scored: Vec<(f64, Array1<f64>)> = Vec::with_capacity(samples);
+    for index in 0..samples {
+        let direction = crate::hypersphere::cover_direction(samples, dim, index);
+        if direction.len() != dim {
+            continue;
+        }
+        let norm = direction.iter().map(|v| v * v).sum::<f64>().sqrt();
+        if !(norm.is_finite() && norm > 0.0) {
+            continue;
+        }
+        let scale = radius / norm;
+        let mut trial = x.to_owned();
+        for (slot, &atom) in mobile.iter().enumerate() {
+            if atom >= n_at {
+                continue;
+            }
+            for k in 0..3 {
+                trial[3 * atom + k] += scale * direction[3 * slot + k];
+            }
+        }
+        let Some(e) = energy(trial.view()) else {
+            continue;
+        };
+        if e.is_finite() {
+            scored.push((e, trial));
+        }
+    }
+    scored.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+    scored
+        .into_iter()
+        .take(keep.max(1))
+        .map(|(_, state)| state)
+        .collect()
+}
+
+/// Inverse-power in Maeda's pair weight \(\omega_{ij}=[(R_i+R_j)/r_{ij}]^p\).
+pub const AFIR_P: i32 = 6;
+
+/// Collision radius when no species table applies: one Lennard-Jones
+/// \(\sigma\). Occupancy Leave is run in reduced units.
+pub const AFIR_DEFAULT_RADIUS: f64 = 1.0;
+
+/// Pair radii for the AFIR weight. Occupancy Leave is in reduced units,
+/// so every centre is one \(\sigma\) whether or not a species list is
+/// supplied.
+pub fn afir_radii(n_at: usize, _species: Option<&[u32]>) -> Vec<f64> {
+    vec![AFIR_DEFAULT_RADIUS; n_at]
+}
+
+/// Maeda AFIR term and Cartesian gradient.
+///
+/// Maeda, Taketsugu and Morokuma (*J. Comput. Chem.* **35**, 166 (2014),
+/// <https://doi.org/10.1002/jcc.23481>):
+/// \(F_{\mathrm{AFIR}}=E+\rho\alpha\sum_{i\in A}\sum_{j\in B}\omega_{ij}r_{ij}/\sum\omega_{ij}\)
+/// with \(\omega_{ij}=[(R_i+R_j)/r_{ij}]^6\). \(\rho=+1\) pushes the
+/// fragments together; \(\rho=-1\) peels them. Occupancy takes
+/// \(A\) as the packing active volume and \(B\) as its complement, so
+/// the fragments are leftover versus core, not a named morphology.
+pub fn afir_term(
+    x: ArrayView1<f64>,
+    fragment_a: &[usize],
+    fragment_b: &[usize],
+    rho: f64,
+    alpha: f64,
+    radii: &[f64],
+) -> Option<(f64, Array1<f64>)> {
+    let n_at = x.len() / 3;
+    if n_at == 0
+        || fragment_a.is_empty()
+        || fragment_b.is_empty()
+        || radii.len() < n_at
+        || !rho.is_finite()
+        || !alpha.is_finite()
+    {
+        return None;
+    }
+    let p = f64::from(AFIR_P);
+    let mut num = 0.0;
+    let mut den = 0.0;
+    let mut pairs: Vec<(usize, usize, f64, f64, [f64; 3])> = Vec::new();
+    for &i in fragment_a {
+        if i >= n_at {
+            continue;
+        }
+        for &j in fragment_b {
+            if j >= n_at || i == j {
+                continue;
+            }
+            let mut u = [0.0; 3];
+            let mut r2 = 0.0;
+            for k in 0..3 {
+                let d = x[3 * i + k] - x[3 * j + k];
+                u[k] = d;
+                r2 += d * d;
+            }
+            if !(r2.is_finite() && r2 > 1e-16) {
+                continue;
+            }
+            let r = r2.sqrt();
+            let rij = radii[i] + radii[j];
+            if !(rij.is_finite() && rij > 0.0) {
+                continue;
+            }
+            let ratio = rij / r;
+            let omega = ratio.powi(AFIR_P);
+            if !omega.is_finite() {
+                continue;
+            }
+            num += omega * r;
+            den += omega;
+            pairs.push((i, j, r, omega, u));
+        }
+    }
+    if !(den.is_finite() && den > 0.0 && num.is_finite()) {
+        return None;
+    }
+    let mean = num / den;
+    let value = rho * alpha * mean;
+    if !value.is_finite() {
+        return None;
+    }
+    let mut grad = Array1::zeros(x.len());
+    let scale = rho * alpha / (den * den);
+    for (i, j, r, omega, u) in pairs {
+        // ω = (R/r)^p, ωr = R^p r^{1-p}
+        // d(ωr)/dr = (1-p) ω, dω/dr = -p ω / r
+        let dnum = (1.0 - p) * omega;
+        let dden = -p * omega / r;
+        let dmean = scale * (dnum * den - num * dden);
+        if !dmean.is_finite() {
+            continue;
+        }
+        for k in 0..3 {
+            let component = dmean * u[k] / r;
+            grad[3 * i + k] += component;
+            grad[3 * j + k] -= component;
+        }
+    }
+    if grad.iter().any(|g: &f64| !g.is_finite()) {
+        return None;
+    }
+    Some((value, grad))
+}
+
+/// \(\alpha\) that puts \(|V_{\mathrm{AFIR}}|\) on `barrier` at `x`.
+///
+/// Maeda sizes \(\alpha\) from an Ar–Ar collision energy. Occupancy
+/// works in reduced units and sizes \(\alpha\) so the artificial term
+/// at the live well equals one Leave rung, which keeps the start on
+/// the landscape instead of crushing the pair wall.
+pub fn afir_alpha_for_barrier(
+    x: ArrayView1<f64>,
+    fragment_a: &[usize],
+    fragment_b: &[usize],
+    barrier: f64,
+    radii: &[f64],
+) -> Option<f64> {
+    if !(barrier.is_finite() && barrier > 0.0) {
+        return None;
+    }
+    let (mean, _) = afir_term(x, fragment_a, fragment_b, 1.0, 1.0, radii)?;
+    let width = mean.abs();
+    if !(width.is_finite() && width > 1e-12) {
+        return None;
+    }
+    Some(barrier / width)
+}
+
+/// SC-AFIR starts on the packing active volume.
+///
+/// Minimize \(E+\rho\alpha\langle r\rangle_{A,B}\) from the live well
+/// for \(\rho=\pm 1\), then drop the force. The two geometries are
+/// starts; the real PES decides the path (Maeda *et al.*,
+/// <https://doi.org/10.1002/jcc.23481>; GRRM17,
+/// <https://doi.org/10.1002/jcc.25106>). \(A\) is `mobile`, \(B\) is
+/// the complement.
+pub fn afir_av_starts<F>(
+    x: ArrayView1<f64>,
+    mobile: &[usize],
+    barrier: f64,
+    steps: usize,
+    species: Option<&[u32]>,
+    mut energy_grad: F,
+) -> Vec<Array1<f64>>
+where
+    F: FnMut(ArrayView1<f64>) -> Option<(f64, Array1<f64>)>,
+{
+    let n_at = x.len() / 3;
+    if n_at == 0 || mobile.is_empty() || steps == 0 {
+        return Vec::new();
+    }
+    let mut in_a = vec![false; n_at];
+    for &i in mobile {
+        if i < n_at {
+            in_a[i] = true;
+        }
+    }
+    let fragment_a: Vec<usize> = (0..n_at).filter(|&i| in_a[i]).collect();
+    let fragment_b: Vec<usize> = (0..n_at).filter(|&i| !in_a[i]).collect();
+    if fragment_a.is_empty() || fragment_b.is_empty() {
+        return Vec::new();
+    }
+    let radii = afir_radii(n_at, species);
+    let Some(alpha) = afir_alpha_for_barrier(x, &fragment_a, &fragment_b, barrier, &radii) else {
+        return Vec::new();
+    };
+    let mut starts = Vec::with_capacity(2);
+    for rho in [1.0_f64, -1.0] {
+        let mut opt = crate::methods::warm_lbfgs::WarmLbfgs::default();
+        let (_, trial, _) = opt.minimize(x, steps, |trial| {
+            let (energy, gradient) = energy_grad(trial)?;
+            let (bias, bias_g) = afir_term(trial, &fragment_a, &fragment_b, rho, alpha, &radii)?;
+            let total_e = energy + bias;
+            let total_g = gradient + bias_g;
+            if total_e.is_finite() && total_g.iter().all(|g: &f64| g.is_finite()) {
+                Some((total_e, total_g))
+            } else {
+                None
+            }
+        });
+        if trial.len() == x.len() && trial.iter().all(|v: &f64| v.is_finite()) {
+            starts.push(trial);
+        }
+    }
+    starts
+}
+
+/// Neighbour cutoff the hop uses in reduced Lennard-Jones units.
+pub const LEAVE_NEIGHBOUR_CUTOFF: f64 = 1.6;
+
+fn coordination(x: ArrayView1<f64>, cutoff: f64) -> Vec<usize> {
+    let n = x.len() / 3;
+    let cut2 = cutoff * cutoff;
+    let mut coord = vec![0usize; n];
+    for a in 0..n {
+        for b in (a + 1)..n {
+            let mut d2 = 0.0;
+            for k in 0..3 {
+                let d = x[3 * a + k] - x[3 * b + k];
+                d2 += d * d;
+            }
+            if d2 < cut2 {
+                coord[a] += 1;
+                coord[b] += 1;
+            }
+        }
+    }
+    coord
+}
+
+fn worst_mobile(mobile: &[usize], coord: &[usize]) -> Option<usize> {
+    mobile
+        .iter()
+        .copied()
+        .filter(|&a| a < coord.len())
+        .min_by_key(|&a| coord[a])
+}
+
+fn unit3<R: rand::Rng + ?Sized>(rng: &mut R) -> [f64; 3] {
+    loop {
+        let x = rng.random::<f64>() * 2.0 - 1.0;
+        let y = rng.random::<f64>() * 2.0 - 1.0;
+        let z = rng.random::<f64>() * 2.0 - 1.0;
+        let n2 = x * x + y * y + z * z;
+        if n2 > 1e-12 {
+            let n = n2.sqrt();
+            return [x / n, y / n, z / n];
+        }
+    }
+}
+
+/// Least-coordinated leftover atom placed on the outer shell.
+///
+/// This is [`crate::movekernel::SurfaceRelocate`] with the mover taken
+/// from the packing active volume, not from the whole cluster.
+pub fn leave_av_surface<R: rand::Rng + ?Sized>(
+    x: ArrayView1<f64>,
+    mobile: &[usize],
+    neighbour_cutoff: f64,
+    rng: &mut R,
+) -> Array1<f64> {
+    let n = x.len() / 3;
+    let Some(mover) = worst_mobile(mobile, &coordination(x, neighbour_cutoff)) else {
+        return x.to_owned();
+    };
+    if n < 2 || mover >= n {
+        return x.to_owned();
+    }
+    let mut c = [0.0; 3];
+    for a in 0..n {
+        for k in 0..3 {
+            c[k] += x[3 * a + k];
+        }
+    }
+    let inv = 1.0 / n as f64;
+    for k in 0..3 {
+        c[k] *= inv;
+    }
+    let mut shell: f64 = 0.0;
+    for a in 0..n {
+        if a == mover {
+            continue;
+        }
+        let mut d2 = 0.0;
+        for k in 0..3 {
+            let d = x[3 * a + k] - c[k];
+            d2 += d * d;
+        }
+        shell = shell.max(d2.sqrt());
+    }
+    let dir = unit3(rng);
+    let r = shell * (0.85 + 0.20 * rng.random::<f64>());
+    let mut out = x.to_owned();
+    for k in 0..3 {
+        out[3 * mover + k] = c[k] + dir[k] * r;
+    }
+    out
+}
+
+/// Least-coordinated leftover atom moved onto the best hollow site.
+///
+/// Shao, Cheng and Cai (*J. Comput. Chem.* **25**, 1693 (2004),
+/// <https://doi.org/10.1002/jcc.20096>): the lattice is read off the
+/// live structure. Occupancy only restricts which atom may move.
+pub fn leave_av_hollow<R: rand::Rng + ?Sized>(
+    x: ArrayView1<f64>,
+    mobile: &[usize],
+    neighbour_cutoff: f64,
+    rng: &mut R,
+) -> Array1<f64> {
+    let n = x.len() / 3;
+    let Some(mover) = worst_mobile(mobile, &coordination(x, neighbour_cutoff)) else {
+        return x.to_owned();
+    };
+    let kernel = crate::movekernel::HollowRelocate {
+        n_points: n,
+        neighbour_cutoff,
+    };
+    let sites = kernel.sites(x, mover);
+    let Some(best) = sites.iter().map(|(_, c)| *c).max() else {
+        return leave_av_surface(x, mobile, neighbour_cutoff, rng);
+    };
+    let candidates: Vec<&([f64; 3], usize)> = sites.iter().filter(|(_, c)| *c == best).collect();
+    let pick = candidates[rng.random_range(0..candidates.len())].0;
+    let mut out = x.to_owned();
+    for k in 0..3 {
+        out[3 * mover + k] = pick[k];
+    }
+    out
+}
+
+/// Repeated hollow moves of leftover atoms until the surface saturates.
+pub fn leave_av_fill<R: rand::Rng + ?Sized>(
+    x: ArrayView1<f64>,
+    mobile: &[usize],
+    neighbour_cutoff: f64,
+    max_moves: usize,
+    rng: &mut R,
+) -> Array1<f64> {
+    let n = x.len() / 3;
+    if n < 4 || mobile.is_empty() {
+        return leave_av_hollow(x, mobile, neighbour_cutoff, rng);
+    }
+    let kernel = crate::movekernel::HollowRelocate {
+        n_points: n,
+        neighbour_cutoff,
+    };
+    let mut cur = x.to_owned();
+    let mut moved = false;
+    for _ in 0..max_moves.max(1) {
+        let coord = coordination(cur.view(), neighbour_cutoff);
+        let Some(mover) = worst_mobile(mobile, &coord) else {
+            break;
+        };
+        let sites = kernel.sites(cur.view(), mover);
+        let Some(best) = sites.iter().map(|(_, c)| *c).max() else {
+            break;
+        };
+        if best <= coord[mover] {
+            break;
+        }
+        let candidates: Vec<&([f64; 3], usize)> =
+            sites.iter().filter(|(_, c)| *c == best).collect();
+        let pick = candidates[rng.random_range(0..candidates.len())].0;
+        for k in 0..3 {
+            cur[3 * mover + k] = pick[k];
+        }
+        moved = true;
+    }
+    if moved {
+        cur
+    } else {
+        leave_av_hollow(x, mobile, neighbour_cutoff, rng)
+    }
+}
+
+/// One packing-changing step on the leftover. `kind` cycles hollow,
+/// fill, surface, shell.
+pub fn leave_av_step<R: rand::Rng + ?Sized>(
+    x: ArrayView1<f64>,
+    mobile: &[usize],
+    neighbour_cutoff: f64,
+    kind: usize,
+    rng: &mut R,
+) -> Array1<f64> {
+    let n = x.len() / 3;
+    match kind % 4 {
+        0 => leave_av_hollow(x, mobile, neighbour_cutoff, rng),
+        1 => leave_av_fill(x, mobile, neighbour_cutoff, 12, rng),
+        2 => leave_av_surface(x, mobile, neighbour_cutoff, rng),
+        _ => crate::movekernel::ShellRotate { n_points: n }.propose(x, 0.0, rng),
+    }
+}
+
+/// Packing-changing Leave starts on the leftover: hollow, fill, surface,
+/// then a shell twist. Sphere covers and AFIR stay available; they do
+/// not leave this funnel under a raw quench.
+pub fn leave_av_packing_starts<R: rand::Rng + ?Sized>(
+    x: ArrayView1<f64>,
+    mobile: &[usize],
+    neighbour_cutoff: f64,
+    count: usize,
+    rng: &mut R,
+) -> Vec<Array1<f64>> {
+    (0..count)
+        .map(|k| leave_av_step(x, mobile, neighbour_cutoff, k, rng))
+        .collect()
+}
+
+/// Hops one Leave walks, adopting ico-isomers so the next move is not
+/// from the same geometry. Serial finds Marks on this library after
+/// thousands of accepted hops; eight independent starts from the floor
+/// do not.
+pub const LEAVE_WALK_HOPS: usize = 32;
+
+/// Hop temperature used for the walk accept. Same number as the LJ
+/// cluster search preset.
+pub const LEAVE_WALK_TEMPERATURE: f64 = 0.8;
+
+/// Walk packing-changing hops from `origin`. Each hop rebuilds the
+/// leftover on the *current* landing, proposes, quenches, and Metropolis-
+/// accepts at [`LEAVE_WALK_TEMPERATURE`]. The return is the lowest-energy
+/// quench that leaves the origin packing and is at or below the origin
+/// energy. High-energy packings are walked through, not installed.
+pub fn leave_av_walk<Q, R>(
+    origin: ArrayView1<f64>,
+    neighbour_cutoff: f64,
+    hops: usize,
+    origin_energy: f64,
+    rng: &mut R,
+    mut quench: Q,
+) -> Option<(f64, Array1<f64>, usize)>
+where
+    Q: FnMut(ArrayView1<f64>) -> (f64, Array1<f64>),
+    R: rand::Rng + ?Sized,
+{
+    let origin_slice = origin.as_slice()?;
+    let mut current = origin.to_owned();
+    let mut current_energy = origin_energy;
+    let mut best: Option<(f64, Array1<f64>, usize)> = None;
+    for hop in 0..hops.max(1) {
+        let mobile = crate::soap::packing_active_volume(current.view(), PACKING_SPEC, None);
+        let start = leave_av_step(current.view(), &mobile, neighbour_cutoff, hop, rng);
+        let (energy, landed) = quench(start.view());
+        if !energy.is_finite() || landed.len() != origin.len() {
+            continue;
+        }
+        let left = landed
+            .as_slice()
+            .is_some_and(|trial| crate::catalog::leaves_packing(origin_slice, trial, &[]));
+        if left
+            && energy <= origin_energy + 1e-6
+            && best.as_ref().is_none_or(|(held, _, _)| energy < *held)
+        {
+            best = Some((energy, landed.clone(), hop));
+        }
+        let delta = energy - current_energy;
+        let take = delta <= 0.0 || rng.random::<f64>() < (-delta / LEAVE_WALK_TEMPERATURE).exp();
+        if take {
+            current = landed;
+            current_energy = energy;
+        }
+    }
+    best
+}
+
 /// [`leave_packing_rung_to`] along a packed feature direction already in hand.
 pub fn leave_packing_rung_to_dir<E>(
     x: ArrayView1<f64>,
@@ -1215,7 +1973,7 @@ where
         return x.to_owned();
     };
     let atoms = x.len() / 3;
-    let mut rise = |rmsd: f64, energy: &mut E| -> Option<(f64, Array1<f64>)> {
+    let rise = |rmsd: f64, energy: &mut E| -> Option<(f64, Array1<f64>)> {
         let trial =
             crate::soap::packing_step_nu3(x, PACKING_SPEC, direction, rmsd, species, mobile);
         let value = energy(trial.view())?;
@@ -1447,9 +2205,7 @@ where
     R: FnMut(ArrayView1<f64>, usize) -> (f64, Array1<f64>),
     S: FnMut(ArrayView1<f64>, &mut dyn FnMut(ArrayView1<f64>) -> Option<f64>) -> Array1<f64>,
 {
-    let Some(origin_slice) = origin.as_slice() else {
-        return None;
-    };
+    let origin_slice = origin.as_slice()?;
     let (base, _) = eval(origin, 0);
     if !base.is_finite() {
         return None;
@@ -1603,6 +2359,7 @@ where
 mod tests {
     use super::*;
     use ndarray::Array1;
+    use rand::SeedableRng;
 
     #[test]
     fn unarmed_effective_is_the_raw_surface() {
@@ -1611,6 +2368,105 @@ mod tests {
         let (e, gt) = effective(x.view(), 3.0, g.clone());
         assert_eq!(e, 3.0);
         assert_eq!(gt, g);
+    }
+
+    #[test]
+    fn shs_av_starts_pick_the_downward_distortion() {
+        let x = Array1::zeros(6);
+        let starts = shs_av_starts(x.view(), &[0], 0.2, 8, 1, |trial| Some(trial[0]));
+        assert_eq!(starts.len(), 1);
+        assert!(
+            starts[0][0] < -0.05,
+            "ADD channel must lower the coordinate that carries the energy, got {}",
+            starts[0][0]
+        );
+    }
+
+    #[test]
+    fn farthest_packing_cover_is_in_range() {
+        let x = Array1::from(vec![0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0]);
+        let index = farthest_packing_cover(x.view(), &[], 7);
+        assert!(index < 7);
+    }
+
+    #[test]
+    fn leave_av_walk_refuses_a_high_energy_leave() {
+        let origin = Array1::from(vec![0.0, 0.0, 0.0, 1.0, 0.0, 0.0]);
+        let mut rng = rand::rngs::StdRng::seed_from_u64(2);
+        let found = leave_av_walk(origin.view(), 1.6, 4, 0.0, &mut rng, |trial| {
+            let e = trial.iter().map(|v| v * v).sum::<f64>();
+            (e + 10.0, trial.to_owned())
+        });
+        assert!(
+            found.is_none(),
+            "a landing above the origin energy must not be installed"
+        );
+    }
+
+    #[test]
+    fn leave_av_surface_moves_the_leftover_atom() {
+        let x = Array1::from(vec![
+            0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.5, 0.87, 0.0, 0.5, 0.29, 0.82, 4.0, 0.0, 0.0,
+        ]);
+        let mut rng = rand::rngs::StdRng::seed_from_u64(1);
+        let start = leave_av_surface(x.view(), &[4], 1.6, &mut rng);
+        let moved = (0..3)
+            .map(|k| {
+                let d = start[12 + k] - x[12 + k];
+                d * d
+            })
+            .sum::<f64>()
+            .sqrt();
+        assert!(
+            moved > 0.1,
+            "leftover atom must be relocated, moved={moved}"
+        );
+    }
+
+    #[test]
+    fn afir_term_is_the_weighted_mean_distance() {
+        let x = Array1::from(vec![0.0, 0.0, 0.0, 2.0, 0.0, 0.0]);
+        let (value, grad) = afir_term(x.view(), &[0], &[1], 1.0, 1.0, &[1.0, 1.0])
+            .expect("two-atom AFIR is defined");
+        assert!(
+            (value - 2.0).abs() < 1e-12,
+            "ω cancels for one pair, V must be r, got {value}"
+        );
+        assert!(
+            grad[0] < 0.0 && grad[3] > 0.0,
+            "push gradient must point the atoms together, g0={} g1x={}",
+            grad[0],
+            grad[3]
+        );
+    }
+
+    #[test]
+    fn afir_push_and_peel_move_opposite_ways() {
+        let x = Array1::from(vec![0.0, 0.0, 0.0, 2.0, 0.0, 0.0]);
+        let origin = x.clone();
+        let starts = afir_av_starts(x.view(), &[0], 0.2, 16, None, |trial| {
+            let mut g = Array1::zeros(trial.len());
+            let mut e = 0.0;
+            for i in 0..trial.len() {
+                let d = trial[i] - origin[i];
+                e += 0.5 * d * d;
+                g[i] = d;
+            }
+            Some((e, g))
+        });
+        assert_eq!(starts.len(), 2);
+        let pair = |state: &Array1<f64>| {
+            let dx = state[0] - state[3];
+            let dy = state[1] - state[4];
+            let dz = state[2] - state[5];
+            (dx * dx + dy * dy + dz * dz).sqrt()
+        };
+        let push = pair(&starts[0]);
+        let peel = pair(&starts[1]);
+        assert!(
+            push < 2.0 && peel > 2.0,
+            "push must compress and peel must open, push={push} peel={peel}"
+        );
     }
 
     #[test]
@@ -1825,6 +2681,34 @@ mod tests {
         let proj = gt.iter().zip(p.iter()).map(|(a, b)| a * b).sum::<f64>();
         disarm();
         assert!(proj < 0.0, "packing Householder must flip g·P, got {proj}");
+    }
+
+    #[test]
+    fn neighbour_invert_freezes_p_at_arm() {
+        let origin = ico13();
+        let mut other = origin.clone();
+        other[0] += 0.2;
+        arm_leave_free(
+            origin.view(),
+            0.35,
+            &[crate::catalog::PackingReference {
+                coordinates: other.to_vec(),
+                visits: 1,
+                deposit: 0.0,
+            }],
+            0.8,
+            0.8,
+        );
+        assert!(is_armed());
+        assert!(
+            invert_is_frozen(),
+            "neighbour invert must lift P once at arm"
+        );
+        assert!(
+            invert_frozen_count() >= 1,
+            "a displaced neighbour must give a SOAP mode, not an empty freeze"
+        );
+        disarm();
     }
 
     #[test]

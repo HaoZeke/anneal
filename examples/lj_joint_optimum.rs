@@ -8,25 +8,39 @@
 //! coordinates, seeds, target, and charged-call ceiling.
 //!
 //! Usage:
-//! `lj_joint_optimum <N> <budget> <seeds> [all|adaptive|ridge|basin|bh|bh-sym|mh|mh-soft|mh-bounded|mh-bounded-soft|feedback] [gs2|morokuma|both] [seed0]`
+//! `lj_joint_optimum <N> <budget> <seeds> [all|adaptive|ridge|basin|bh|bh-sym|bh-csm-ci|mh|mh-soft|mh-bounded|mh-bounded-soft|mh-communication|feedback] [gs2|morokuma|both] [seed0]`
+//!
+//! `mh-communication` pairs private and shared minimum histories at one total
+//! budget, divided among `ANNEAL_MH_REPLICAS` replicas (default four). History
+//! changes escape effort, never coordinates. `mh-private`, `mh-shared`,
+//! `mh-private-soft`, and `mh-shared-soft` select individual ensemble arms.
+//! `ANNEAL_START_COORDINATES` supplies one fixed plain Cartesian input for
+//! escape probes; its coordinates are embedded in the configuration record.
 
+use std::collections::{HashMap, HashSet};
 use std::error::Error;
 use std::path::{Path, PathBuf};
+use std::sync::{Mutex, atomic::AtomicUsize, atomic::Ordering};
+use std::time::Instant;
 
 use anneal_core::atomistic_hybrid::{
     AtomisticHybridConfig, AtomisticHybridPolicy, AtomisticSystem, explore_atomistic_with_policy,
 };
 use anneal_core::catalog::lj;
+use anneal_core::descriptor_space::DescriptorSpace;
 use anneal_core::methods::cluster_hopping::{
-    Config as HoppingConfig, Ledger, MoveLibrary, Outcome, random_cluster, run, run_with_gradient,
+    Config as HoppingConfig, ContinuousSymmetry, Ledger, MoveLibrary, Outcome, random_cluster, run,
+    run_with_gradient,
 };
 use anneal_core::methods::cluster_search::{Encounter, first_encounter, median_encounter};
 use anneal_core::methods::minima_hopping::{
-    EscapeFeedback, MdEscapeConfig, MdEscapeGeometry, Visit, nve_escape,
+    EscapeFeedback, HistoryObservation, MdEscapeConfig, MdEscapeGeometry, MdTimeStepFeedback,
+    MinimumHistory, Visit, nve_escape,
 };
 use anneal_core::methods::warm_lbfgs::WarmLbfgs;
 use anneal_core::pes_exploration::{
-    ExactStructureWitness, IrcKind, PesExplorationConfig, RideMethod,
+    ExactStructureWitness, IrcKind, PesExplorationConfig, RideMethod, StructureContext,
+    StructureView,
 };
 use anneal_core::potentials::{PairKind, PairPotential};
 use anneal_core::shape::IraStructureWitness;
@@ -39,6 +53,7 @@ const TARGET_TOLERANCE: f64 = 1e-3;
 const MH_SOFTENING_STEPS: usize = 20;
 const MH_SOFTENING_DISPLACEMENT: f64 = 0.1;
 const MH_SOFTENING_MIXING: f64 = 0.15;
+const CSM_INTERVAL: usize = 10;
 
 #[derive(Clone, Copy, Debug)]
 enum Arm {
@@ -47,14 +62,26 @@ enum Arm {
     Basin,
     BasinHopping,
     BasinHoppingSymmetry,
+    BasinHoppingCsmCi,
     MinimaHopping,
     MinimaHoppingSoftened,
     MinimaHoppingBounded,
     MinimaHoppingBoundedSoftened,
+    MinimaHoppingEnsemble { shared: bool, soften: bool },
     MinimaFeedback,
 }
 
 impl Arm {
+    fn label_with_history(self, policy: HistoryExclusion) -> String {
+        if matches!(self, Self::MinimaHoppingEnsemble { .. })
+            && policy == HistoryExclusion::Observed
+        {
+            format!("{}-observed-exclusion", self.label())
+        } else {
+            self.label()
+        }
+    }
+
     fn label(self) -> String {
         match self {
             Self::Adaptive(kind) => format!("adaptive-{}", irc_name(kind)),
@@ -62,10 +89,16 @@ impl Arm {
             Self::Basin => "basin-ablation".into(),
             Self::BasinHopping => "basin-hopping".into(),
             Self::BasinHoppingSymmetry => "basin-hopping-stall-symmetry".into(),
+            Self::BasinHoppingCsmCi => "basin-hopping-csm-ci".into(),
             Self::MinimaHopping => "minima-hopping".into(),
             Self::MinimaHoppingSoftened => "minima-hopping-softened".into(),
             Self::MinimaHoppingBounded => "minima-hopping-bounded".into(),
             Self::MinimaHoppingBoundedSoftened => "minima-hopping-bounded-softened".into(),
+            Self::MinimaHoppingEnsemble { shared, soften } => format!(
+                "minima-hopping-{}-history{}",
+                if shared { "shared" } else { "private" },
+                if soften { "-softened" } else { "" },
+            ),
             Self::MinimaFeedback => "minima-feedback".into(),
         }
     }
@@ -102,6 +135,17 @@ impl Summary {
         self.saddles += saddles as u128;
         self.failures += failures as u128;
     }
+}
+
+struct MinimaHoppingRun {
+    outcome: Outcome,
+    initial_quench_calls: usize,
+    dynamics_calls: usize,
+    dynamics_steps: usize,
+    proposal_quench_calls: usize,
+    final_time_step: f64,
+    history_seconds: f64,
+    aggregate_improvements: Vec<(usize, f64)>,
 }
 
 fn reference(n: usize) -> Option<f64> {
@@ -143,6 +187,7 @@ fn selected_arms(selector: &str, irc: &[IrcKind]) -> Result<Vec<Arm>, String> {
                 Arm::Basin,
                 Arm::BasinHopping,
                 Arm::BasinHoppingSymmetry,
+                Arm::BasinHoppingCsmCi,
                 Arm::MinimaHopping,
                 Arm::MinimaHoppingSoftened,
                 Arm::MinimaHoppingBounded,
@@ -155,14 +200,31 @@ fn selected_arms(selector: &str, irc: &[IrcKind]) -> Result<Vec<Arm>, String> {
         "basin" => arms.push(Arm::Basin),
         "bh" => arms.push(Arm::BasinHopping),
         "bh-sym" => arms.push(Arm::BasinHoppingSymmetry),
+        "bh-csm-ci" => arms.push(Arm::BasinHoppingCsmCi),
         "mh" => arms.push(Arm::MinimaHopping),
         "mh-soft" => arms.push(Arm::MinimaHoppingSoftened),
         "mh-bounded" => arms.push(Arm::MinimaHoppingBounded),
         "mh-bounded-soft" => arms.push(Arm::MinimaHoppingBoundedSoftened),
+        "mh-private" | "mh-shared" | "mh-private-soft" | "mh-shared-soft" => {
+            arms.push(Arm::MinimaHoppingEnsemble {
+                shared: selector.contains("shared"),
+                soften: selector.ends_with("-soft"),
+            });
+        }
+        "mh-communication" => arms.extend([
+            Arm::MinimaHoppingEnsemble {
+                shared: false,
+                soften: false,
+            },
+            Arm::MinimaHoppingEnsemble {
+                shared: true,
+                soften: false,
+            },
+        ]),
         "feedback" => arms.push(Arm::MinimaFeedback),
         _ => {
             return Err(
-                "arm must be all, adaptive, ridge, basin, bh, bh-sym, mh, mh-soft, mh-bounded, mh-bounded-soft, or feedback"
+                "arm must be all, adaptive, ridge, basin, bh, bh-sym, bh-csm-ci, mh, mh-soft, mh-bounded, mh-bounded-soft, mh-communication, mh-private[-soft], mh-shared[-soft], or feedback"
                     .into(),
             );
         }
@@ -217,20 +279,26 @@ fn hybrid_config(n: usize, budget: u64, irc_kind: IrcKind) -> AtomisticHybridCon
     }
 }
 
+struct HoppingMoves {
+    minima_hopping: bool,
+    symmetrise_on_stall: bool,
+    continuous_symmetry: ContinuousSymmetry,
+}
+
 fn run_hopping(
     potential: &PairPotential,
     initial: ArrayView1<'_, f64>,
     n: usize,
     budget: usize,
     seed: u64,
-    minima_hopping: bool,
-    symmetrise_on_stall: bool,
+    moves: HoppingMoves,
 ) -> Outcome {
     let mut config = HoppingConfig::for_cluster(n);
     config.bias_height = 0.0;
     config.move_library = MoveLibrary::WalesDoye;
-    config.minima_hopping = minima_hopping;
-    config.symmetrise_on_stall = symmetrise_on_stall;
+    config.minima_hopping = moves.minima_hopping;
+    config.symmetrise_on_stall = moves.symmetrise_on_stall;
+    config.continuous_symmetry = moves.continuous_symmetry;
     let mut ledger = Ledger::new(budget);
     let mut optimizer = WarmLbfgs::default();
     let mut relax = |ledger: &mut Ledger, start: ArrayView1<'_, f64>, steps: usize| {
@@ -248,7 +316,7 @@ fn run_hopping(
             .then(|| potential.value_and_gradient(point).1)
     };
     let mut rng = StdRng::seed_from_u64(seed);
-    if minima_hopping {
+    if moves.minima_hopping || !matches!(moves.continuous_symmetry, ContinuousSymmetry::Off) {
         run_with_gradient(
             &config,
             initial,
@@ -262,6 +330,21 @@ fn run_hopping(
     }
 }
 
+fn charged_evaluate(
+    potential: &PairPotential,
+    ledger: &mut Ledger,
+    point: ArrayView1<'_, f64>,
+    charged: Option<&AtomicUsize>,
+) -> Option<(f64, ndarray::Array1<f64>)> {
+    if !ledger.charge() {
+        return None;
+    }
+    if let Some(charged) = charged {
+        charged.fetch_add(1, Ordering::SeqCst);
+    }
+    Some(potential.value_and_gradient(point))
+}
+
 fn quench_minimum(
     potential: &PairPotential,
     optimizer: &mut WarmLbfgs,
@@ -269,19 +352,26 @@ fn quench_minimum(
     start: ArrayView1<'_, f64>,
     steps: usize,
     gradient_tolerance: f64,
+    charged: Option<&AtomicUsize>,
 ) -> Option<(f64, ndarray::Array1<f64>, bool)> {
     if ledger.remaining() == 0 {
         return None;
     }
     let before = ledger.spent();
     optimizer.forget();
-    let (energy, state, _) = optimizer.minimize(start, steps, |point| {
-        ledger.charge().then(|| potential.value_and_gradient(point))
+    let (_, state, _) = optimizer.minimize(start, steps, |point| {
+        // A line search cannot consume the final minimum-certificate call.
+        if ledger.remaining() > 1 {
+            charged_evaluate(potential, ledger, point, charged)
+        } else {
+            None
+        }
     });
-    let gradient = ledger.charge().then(|| {
-        let (_, gradient) = potential.value_and_gradient(state.view());
-        gradient
-    });
+    let final_evaluation = charged_evaluate(potential, ledger, state.view(), charged);
+    let (energy, gradient) = final_evaluation
+        .map_or((f64::INFINITY, None), |(energy, gradient)| {
+            (energy, Some(gradient))
+        });
     let validated = energy.is_finite()
         && gradient.as_ref().is_some_and(|values| {
             values
@@ -307,6 +397,93 @@ fn exact_basin(
         .position(|minimum| witness.equivalent(minimum.view(), candidate))
 }
 
+struct MinimaHoppingOptions {
+    soften: bool,
+    bound_escape: bool,
+}
+
+struct HistoryRunOptions<'a> {
+    moves: MinimaHoppingOptions,
+    history: Option<&'a Mutex<MinimumHistory>>,
+    charged: Option<&'a AtomicUsize>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum HistoryExclusion {
+    Accepted,
+    Observed,
+}
+
+impl HistoryExclusion {
+    fn name(self) -> &'static str {
+        match self {
+            Self::Accepted => "accepted",
+            Self::Observed => "observed-exclusion",
+        }
+    }
+}
+
+fn parse_history_exclusion(value: Option<&str>) -> Result<HistoryExclusion, String> {
+    match value {
+        None | Some("accepted") => Ok(HistoryExclusion::Accepted),
+        Some("observed-exclusion") => Ok(HistoryExclusion::Observed),
+        Some(other) => Err(format!(
+            "invalid NVE history policy {other:?}; expected accepted or observed-exclusion"
+        )),
+    }
+}
+
+struct HistoryPolicy<T> {
+    options: T,
+    exclusion: HistoryExclusion,
+}
+
+impl<T> From<T> for HistoryPolicy<T> {
+    fn from(options: T) -> Self {
+        Self {
+            options,
+            exclusion: HistoryExclusion::Accepted,
+        }
+    }
+}
+
+fn history_feedback_membership(
+    policy: HistoryExclusion,
+    first_observation: bool,
+    observed_visits: u64,
+    accepted_visits: u64,
+) -> (bool, u64) {
+    match policy {
+        HistoryExclusion::Accepted => (accepted_visits == 0, accepted_visits),
+        HistoryExclusion::Observed => (first_observation, observed_visits),
+    }
+}
+
+fn observe_history<T>(
+    history: &Mutex<MinimumHistory>,
+    ledger: &Ledger,
+    descriptor: &DescriptorSpace,
+    context: &StructureContext,
+    witness: &impl ExactStructureWitness,
+    decide: impl FnOnce(&mut MinimumHistory, HistoryObservation) -> Result<T, String>,
+) -> Result<(HistoryObservation, T), String> {
+    let minimum = ledger
+        .quench_boundaries()
+        .last()
+        .ok_or("missing quench certificate")?;
+    let description = descriptor
+        .describe(minimum.state(), context.species())
+        .map_err(|error| error.to_string())?;
+    let mut history = history
+        .lock()
+        .map_err(|_| "minimum history lock poisoned".to_string())?;
+    let observation = history
+        .observe(minimum, description, context.clone(), witness)
+        .map_err(|error| error.to_string())?;
+    let decision = decide(&mut history, observation)?;
+    Ok((observation, decision))
+}
+
 fn run_minima_hopping(
     potential: &PairPotential,
     initial: ArrayView1<'_, f64>,
@@ -314,16 +491,50 @@ fn run_minima_hopping(
     budget: usize,
     seed: u64,
     witness: &impl ExactStructureWitness,
-    soften: bool,
-    bound_escape: bool,
-) -> Outcome {
+    options: MinimaHoppingOptions,
+) -> MinimaHoppingRun {
+    run_minima_hopping_with_history(
+        potential,
+        initial,
+        n,
+        budget,
+        seed,
+        witness,
+        HistoryRunOptions {
+            moves: options,
+            history: None,
+            charged: None,
+        },
+    )
+    .expect("private minima hopping has no fallible history service")
+}
+
+fn run_minima_hopping_with_history<'a>(
+    potential: &PairPotential,
+    initial: ArrayView1<'_, f64>,
+    n: usize,
+    budget: usize,
+    seed: u64,
+    witness: &impl ExactStructureWitness,
+    options: impl Into<HistoryPolicy<HistoryRunOptions<'a>>>,
+) -> Result<MinimaHoppingRun, String> {
+    let HistoryPolicy { options, exclusion } = options.into();
+    let HistoryRunOptions {
+        moves: options,
+        history,
+        charged,
+    } = options;
     let hopping = HoppingConfig::for_cluster(n);
     let mut escape_config = MdEscapeConfig {
         dt: 0.005,
         potential_minima: 2,
         maximum_steps: 2_000,
-        geometry: MdEscapeGeometry::RigidQuotient,
-        softening: soften.then_some(VelocitySofteningConfig {
+        geometry: if n >= 3 {
+            MdEscapeGeometry::RigidQuotient
+        } else {
+            MdEscapeGeometry::Euclidean
+        },
+        softening: options.soften.then_some(VelocitySofteningConfig {
             steps: MH_SOFTENING_STEPS,
             displacement: MH_SOFTENING_DISPLACEMENT,
             mixing: MH_SOFTENING_MIXING,
@@ -334,32 +545,55 @@ fn run_minima_hopping(
     };
     let mut ledger = Ledger::new(budget);
     let mut optimizer = WarmLbfgs::default();
-    let Some((mut energy, mut state, initial_valid)) = quench_minimum(
+    let initial_quench_start = ledger.spent();
+    let initial_quench_steps = ledger.remaining().saturating_sub(1);
+    let initial = quench_minimum(
         potential,
         &mut optimizer,
         &mut ledger,
         initial,
-        hopping.relax_steps,
+        initial_quench_steps,
         hopping.record_gradient,
-    ) else {
-        return Outcome {
-            best: ledger.best,
-            best_state: ledger.best_state.clone(),
-            final_energy: f64::INFINITY,
-            charged: ledger.spent(),
-            ..Outcome::default()
-        };
+        charged,
+    );
+    let initial_quench_calls = ledger.spent().saturating_sub(initial_quench_start);
+    let Some((mut energy, mut state, initial_valid)) = initial else {
+        return Ok(MinimaHoppingRun {
+            outcome: Outcome {
+                best: ledger.best,
+                best_state: ledger.best_state.clone(),
+                final_energy: f64::INFINITY,
+                charged: ledger.spent(),
+                ..Outcome::default()
+            },
+            initial_quench_calls,
+            dynamics_calls: 0,
+            dynamics_steps: 0,
+            proposal_quench_calls: 0,
+            final_time_step: escape_config.dt,
+            history_seconds: 0.0,
+            aggregate_improvements: Vec::new(),
+        });
     };
     if !initial_valid {
-        return Outcome {
-            best: ledger.best,
-            best_state: ledger.best_state.clone(),
-            final_state: Some(state),
-            final_energy: energy,
-            charged: ledger.spent(),
-            unconverged_records: 1,
-            ..Outcome::default()
-        };
+        return Ok(MinimaHoppingRun {
+            outcome: Outcome {
+                best: ledger.best,
+                best_state: ledger.best_state.clone(),
+                final_state: Some(state),
+                final_energy: energy,
+                charged: ledger.spent(),
+                unconverged_records: 1,
+                ..Outcome::default()
+            },
+            initial_quench_calls,
+            dynamics_calls: 0,
+            dynamics_steps: 0,
+            proposal_quench_calls: 0,
+            final_time_step: escape_config.dt,
+            history_seconds: 0.0,
+            aggregate_improvements: Vec::new(),
+        });
     }
 
     ledger.record(energy, state.view());
@@ -370,72 +604,143 @@ fn run_minima_hopping(
             anneal_core::methods::activation::softening_displacement(state.view());
     }
     let mut feedback = EscapeFeedback::new(hopping.energy_scale, 0.5 * hopping.energy_scale);
-    if !bound_escape {
+    if !options.bound_escape {
         feedback.escape_floor = f64::MIN_POSITIVE;
         feedback.escape_ceiling = f64::MAX;
     }
     feedback.register_initial(current_basin);
+    let mut time_step = MdTimeStepFeedback::new(escape_config.dt, escape_config.dt / 100.0);
     let mut rng = StdRng::seed_from_u64(seed);
     let mut hops = 0usize;
     let mut accepted = 0usize;
     let mut unconverged = 0usize;
+    let mut dynamics_calls = 0usize;
+    let mut dynamics_steps = 0usize;
+    let mut proposal_quench_calls = 0usize;
     let mut improvements = vec![(0, ledger.spent(), minima.len(), energy)];
+    let mut aggregate_improvements = vec![(
+        charged.map_or(ledger.spent(), |counter| counter.load(Ordering::SeqCst)),
+        energy,
+    )];
 
     while ledger.remaining() > 0 {
-        let mut evaluate =
-            |point: ArrayView1<f64>| ledger.charge().then(|| potential.value_and_gradient(point));
-        let escape = nve_escape(
-            state.view(),
-            feedback.escape(),
-            &escape_config,
-            &mut evaluate,
-            &mut rng,
-        );
-        drop(evaluate);
+        let mut attempt_config = escape_config;
+        attempt_config.dt = time_step.time_step();
+        let dynamics_start = ledger.spent();
+        let escape = {
+            let mut evaluate =
+                |point: ArrayView1<f64>| charged_evaluate(potential, &mut ledger, point, charged);
+            nve_escape(
+                state.view(),
+                feedback.escape(),
+                &attempt_config,
+                &mut evaluate,
+                &mut rng,
+            )
+        };
+        dynamics_calls += ledger.spent().saturating_sub(dynamics_start);
         hops += 1;
         let Ok(escape) = escape else {
             unconverged += 1;
             if ledger.remaining() == 0 {
                 break;
             }
-            feedback.observe(Some(current_basin), current_basin);
             continue;
         };
+        dynamics_steps += escape.steps;
+        time_step.observe(&escape);
         if escape.potential_minima < escape_config.potential_minima {
-            feedback.observe(Some(current_basin), current_basin);
+            unconverged += 1;
             continue;
         }
-        let Some((candidate_energy, candidate, validated)) = quench_minimum(
+        let proposal_quench_start = ledger.spent();
+        let quenched = quench_minimum(
             potential,
             &mut optimizer,
             &mut ledger,
             escape.position.view(),
             hopping.relax_steps,
             hopping.record_gradient,
-        ) else {
+            charged,
+        );
+        proposal_quench_calls += ledger.spent().saturating_sub(proposal_quench_start);
+        let Some((candidate_energy, candidate, validated)) = quenched else {
             break;
         };
         if !validated {
             unconverged += 1;
-            feedback.observe(Some(current_basin), current_basin);
+            // An unresolved quench provides no minimum identity. Escape
+            // feedback responds only to certified basin observations.
             continue;
         }
 
-        if let Some(reached) = exact_basin(witness, &minima, candidate.view()) {
-            feedback.observe(Some(current_basin), reached);
-            continue;
-        }
-
-        let reached = minima.len();
-        minima.push(candidate.clone());
-        let visit = feedback.observe(Some(current_basin), reached);
-        debug_assert_eq!(visit, Visit::New);
+        let history_start = Instant::now();
+        let (reached, adopt) = if let (Some(history), Some(descriptor)) = (history, &descriptor) {
+            let (observation, adopt) = observe_history(
+                history,
+                &ledger,
+                descriptor,
+                &context,
+                witness,
+                |history, observation| {
+                    let reached = observation.minimum.id;
+                    let visits = history
+                        .accepted_visits(reached)
+                        .ok_or("missing admitted minimum")?;
+                    let (is_new, visits) = history_feedback_membership(
+                        exclusion,
+                        observation.minimum.is_new,
+                        observation.visits,
+                        visits,
+                    );
+                    let visit =
+                        feedback.observe_shared(Some(current_basin), reached, is_new, visits);
+                    let adopt = visit == Visit::New && feedback.accept(candidate_energy - energy);
+                    if adopt {
+                        history
+                            .mark_accepted(reached)
+                            .map_err(|error| error.to_string())?;
+                    }
+                    Ok(adopt)
+                },
+            )?;
+            let reached = observation.minimum.id;
+            if local_basins.insert(reached) {
+                minima.push(candidate.clone());
+            }
+            (reached, adopt)
+        } else {
+            let reached = exact_basin(witness, &minima, candidate.view()).unwrap_or_else(|| {
+                let reached = minima.len();
+                minima.push(candidate.clone());
+                reached
+            });
+            let visits = accepted_visits.get_mut(&reached).map_or(0, |visits| {
+                *visits = visits.saturating_add(1);
+                *visits
+            });
+            let observed = observed_visits.entry(reached).or_insert(0);
+            *observed = observed.saturating_add(1);
+            let (is_new, visits) =
+                history_feedback_membership(exclusion, *observed == 1, *observed, visits);
+            let visit = feedback.observe_shared(Some(current_basin), reached, is_new, visits);
+            let adopt = visit == Visit::New && feedback.accept(candidate_energy - energy);
+            if adopt {
+                accepted_visits.insert(reached, 1);
+            }
+            (reached, adopt)
+        };
+        history_seconds += history_start.elapsed().as_secs_f64();
         let improved = candidate_energy < ledger.best;
         ledger.record(candidate_energy, candidate.view());
         if improved {
             improvements.push((hops, ledger.spent(), minima.len(), candidate_energy));
+            aggregate_improvements.push((
+                charged.map_or(ledger.spent(), |counter| counter.load(Ordering::SeqCst)),
+                candidate_energy,
+            ));
         }
-        if feedback.accept(candidate_energy - energy) {
+        if adopt {
             current_basin = reached;
             energy = candidate_energy;
             state = candidate;
@@ -443,22 +748,163 @@ fn run_minima_hopping(
         }
     }
 
-    Outcome {
-        best: ledger.best,
-        best_state: ledger.best_state.clone(),
-        final_state: Some(state),
-        final_energy: energy,
-        hops,
-        basins: minima.len(),
-        charged: ledger.spent(),
-        escape_scale: feedback.escape(),
-        escape_threshold: feedback.threshold(),
-        visit_counts: (feedback.n_same, feedback.n_known, feedback.n_new),
-        improvements,
-        accepted,
-        unconverged_records: unconverged,
-        ..Outcome::default()
+    Ok(MinimaHoppingRun {
+        outcome: Outcome {
+            best: ledger.best,
+            best_state: ledger.best_state.clone(),
+            final_state: Some(state),
+            final_energy: energy,
+            hops,
+            basins: minima.len(),
+            charged: ledger.spent(),
+            escape_scale: feedback.escape(),
+            escape_threshold: feedback.threshold(),
+            visit_counts: (feedback.n_same, feedback.n_known, feedback.n_new),
+            improvements,
+            accepted,
+            unconverged_records: unconverged,
+            ..Outcome::default()
+        },
+        initial_quench_calls,
+        dynamics_calls,
+        dynamics_steps,
+        proposal_quench_calls,
+        final_time_step: time_step.time_step(),
+        history_seconds,
+        aggregate_improvements,
+    })
+}
+
+struct SerializedWitness<W>(Mutex<W>);
+
+impl<W: ExactStructureWitness> ExactStructureWitness for SerializedWitness<W> {
+    fn equivalent(&self, left: ArrayView1<f64>, right: ArrayView1<f64>) -> bool {
+        self.0
+            .lock()
+            .expect("exact witness lock poisoned")
+            .equivalent(left, right)
     }
+
+    fn equivalent_structures(&self, left: StructureView<'_>, right: StructureView<'_>) -> bool {
+        self.0
+            .lock()
+            .expect("exact witness lock poisoned")
+            .equivalent_structures(left, right)
+    }
+}
+
+#[derive(Clone, Copy)]
+struct EnsembleOptions {
+    replicas: usize,
+    shared: bool,
+    soften: bool,
+}
+
+struct MinimaHoppingEnsemble {
+    runs: Vec<MinimaHoppingRun>,
+    budgets: Vec<usize>,
+    seeds: Vec<u64>,
+    charged: usize,
+    minimum_count: usize,
+    wall_seconds: f64,
+}
+
+fn run_minima_hopping_ensemble<W: ExactStructureWitness + Send>(
+    potential: &PairPotential,
+    initial: ArrayView1<'_, f64>,
+    n: usize,
+    budget: usize,
+    seed: u64,
+    witness: W,
+    options: impl Into<HistoryPolicy<EnsembleOptions>>,
+) -> Result<MinimaHoppingEnsemble, String> {
+    let HistoryPolicy { options, exclusion } = options.into();
+    if options.replicas == 0 || budget < options.replicas {
+        return Err("ensemble needs positive replicas and at least one call per replica".into());
+    }
+    let started = Instant::now();
+    let budgets = (0..options.replicas)
+        .map(|replica| budget / options.replicas + usize::from(replica < budget % options.replicas))
+        .collect::<Vec<_>>();
+    let seeds = (0..options.replicas)
+        .map(|replica| seed.wrapping_add((replica as u64).wrapping_mul(0x9e37_79b9_7f4a_7c15)))
+        .collect::<Vec<_>>();
+    let history_count = if options.shared { 1 } else { options.replicas };
+    let tolerance = HoppingConfig::for_cluster(n).record_gradient;
+    let histories = (0..history_count)
+        .map(|_| {
+            MinimumHistory::new(tolerance)
+                .map(Mutex::new)
+                .map_err(|error| error.to_string())
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let charged = AtomicUsize::new(0);
+    // Both arms serialize foreign exact matching without serializing their PES work.
+    let witness = SerializedWitness(Mutex::new(witness));
+    let runs = std::thread::scope(|scope| {
+        let handles = budgets
+            .iter()
+            .zip(&seeds)
+            .enumerate()
+            .map(|(replica, (&budget, &seed))| {
+                let history = &histories[if options.shared { 0 } else { replica }];
+                let charged = &charged;
+                let witness = &witness;
+                scope.spawn(move || {
+                    run_minima_hopping_with_history(
+                        potential,
+                        initial,
+                        n,
+                        budget,
+                        seed,
+                        witness,
+                        HistoryPolicy {
+                            options: HistoryRunOptions {
+                                moves: MinimaHoppingOptions {
+                                    soften: options.soften,
+                                    bound_escape: false,
+                                },
+                                history: Some(history),
+                                charged: Some(charged),
+                            },
+                            exclusion,
+                        },
+                    )
+                })
+            })
+            .collect::<Vec<_>>();
+        handles
+            .into_iter()
+            .map(|handle| {
+                handle
+                    .join()
+                    .map_err(|_| "NVE replica panicked".to_string())?
+            })
+            .collect::<Result<Vec<_>, String>>()
+    })?;
+    let charged = charged.load(Ordering::SeqCst);
+    if charged != runs.iter().map(|run| run.outcome.charged).sum::<usize>() {
+        return Err("ensemble and per-replica charged counters disagree".into());
+    }
+    let minimum_count = histories
+        .iter()
+        .map(|history| {
+            history
+                .lock()
+                .map(|history| history.minimum_count())
+                .map_err(|_| "minimum history lock poisoned".to_string())
+        })
+        .collect::<Result<Vec<_>, _>>()?
+        .into_iter()
+        .sum();
+    Ok(MinimaHoppingEnsemble {
+        runs,
+        budgets,
+        seeds,
+        charged,
+        minimum_count,
+        wall_seconds: started.elapsed().as_secs_f64(),
+    })
 }
 
 fn wilson_interval(hits: usize, total: usize) -> (f64, f64) {
@@ -559,6 +1005,28 @@ fn optbench_archive_digest(n: usize) -> Option<&'static str> {
     }
 }
 
+struct StartArchiveProvenance {
+    expected: Option<&'static str>,
+    verified: Option<&'static str>,
+}
+
+fn start_archive_provenance(n: usize, optbench: bool) -> StartArchiveProvenance {
+    // A directory layout identifies an input format, not an archive's contents.
+    StartArchiveProvenance {
+        expected: optbench.then(|| optbench_archive_digest(n)).flatten(),
+        verified: None,
+    }
+}
+
+fn start_protocol_name(optbench: bool, fixed: bool) -> Result<&'static str, String> {
+    match (optbench, fixed) {
+        (false, false) => Ok("random-cluster"),
+        (true, false) => Ok("optbench-fixed"),
+        (false, true) => Ok("fixed-coordinate-file"),
+        (true, true) => Err("OptBench and fixed-coordinate starts are mutually exclusive".into()),
+    }
+}
+
 fn main() -> Result<(), Box<dyn Error>> {
     let arguments = std::env::args().collect::<Vec<_>>();
     let n = arguments
@@ -580,11 +1048,28 @@ fn main() -> Result<(), Box<dyn Error>> {
         .and_then(|value| value.parse().ok())
         .unwrap_or(0);
     let optbench_root = std::env::var_os("ANNEAL_OPTBENCH_STARTS").map(PathBuf::from);
+    let fixed_path = std::env::var_os("ANNEAL_START_COORDINATES").map(PathBuf::from);
     if n < 2 || budget == 0 || seeds == 0 {
         return Err("N must be at least two and budget/seeds must be positive".into());
     }
+    let start_protocol = start_protocol_name(optbench_root.is_some(), fixed_path.is_some())?;
+    let archive_provenance = start_archive_provenance(n, optbench_root.is_some());
+    let fixed_initial = fixed_path
+        .as_ref()
+        .map(|path| {
+            let contents = std::fs::read_to_string(path)
+                .map_err(|error| format!("read {}: {error}", path.display()))?;
+            parse_plain_coordinates(&contents, n)
+        })
+        .transpose()?;
     let target = reference(n).ok_or("no published LJ target is registered for this size")?;
     let arms = selected_arms(selector, &irc_kinds(irc_selector)?)?;
+    let replicas =
+        std::env::var("ANNEAL_MH_REPLICAS").map_or(Ok(4), |value| value.parse::<usize>())?;
+    let pair_cache_bytes = std::env::var("ANNEAL_MH_PAIR_CACHE_BYTES")
+        .map_or(Ok(128 * 1024 * 1024), |value| value.parse::<usize>())?;
+    let history_exclusion =
+        parse_history_exclusion(std::env::var("ANNEAL_MH_HISTORY_POLICY").ok().as_deref())?;
     let descriptor_space = lj::descriptor_space();
     let potential = PairPotential::lennard_jones(n);
     let witness = IraStructureWitness {
@@ -612,8 +1097,21 @@ fn main() -> Result<(), Box<dyn Error>> {
             "seed0": seed0,
             "target": target,
             "target_tolerance": TARGET_TOLERANCE,
-            "start_protocol": if optbench_root.is_some() { "optbench-fixed" } else { "random-cluster" },
-            "start_archive_sha256": optbench_root.as_ref().and_then(|_| optbench_archive_digest(n)),
+            "start_protocol": start_protocol,
+            "fixed_coordinates": fixed_initial.as_ref().map(|state| state.to_vec()),
+            "start_archive_sha256": archive_provenance.verified,
+            "expected_start_archive_sha256": archive_provenance.expected,
+            "start_archive_verified": archive_provenance.verified.is_some(),
+            "nve_ensemble": {
+                "replicas": replicas,
+                "budget_semantics": "aggregate-per-ensemble",
+                "start_semantics": "common-matched-coordinates",
+                "exchange": "validated-minimum-history-only",
+                "exact_witness": "serialized-in-both-arms",
+                "pair_cache_payload_bytes": pair_cache_bytes,
+                "pair_cache_scope": "per-ensemble-coordinate-content",
+                "history_policy": history_exclusion.name(),
+            },
             "minima_hopping": {
                 "integrator": "rgsaddle-samd-nve",
                 "dt": 0.005,
@@ -629,12 +1127,22 @@ fn main() -> Result<(), Box<dyn Error>> {
                     "mixing": MH_SOFTENING_MIXING,
                 },
             },
-            "arms": arms.iter().copied().map(Arm::label).collect::<Vec<_>>(),
+            "continuous_symmetry": {
+                "arm": "basin-hopping-csm-ci",
+                "group": "Ci",
+                "interval": CSM_INTERVAL,
+                "assignment": "minimum-cost-bijection",
+                "orientation": "rotation-independent",
+                "adoption": "downhill",
+            },
+            "arms": arms.iter().copied().map(|arm| arm.label_with_history(history_exclusion)).collect::<Vec<_>>(),
         })
     );
 
     for seed in seed0..seed0.saturating_add(seeds) {
-        let initial = if let Some(root) = optbench_root.as_deref() {
+        let initial = if let Some(fixed) = &fixed_initial {
+            fixed.clone()
+        } else if let Some(root) = optbench_root.as_deref() {
             read_optbench_start(
                 root,
                 n,
@@ -646,8 +1154,100 @@ fn main() -> Result<(), Box<dyn Error>> {
             random_cluster(n, 0.7, hopping.min_separation, &mut initial_rng)
         };
         for (arm_index, arm) in arms.iter().copied().enumerate() {
-            let label = arm.label();
+            let label = arm.label_with_history(history_exclusion);
             match arm {
+                Arm::MinimaHoppingEnsemble { shared, soften } => {
+                    let ensemble = run_minima_hopping_ensemble(
+                        &potential,
+                        initial.view(),
+                        n,
+                        usize::try_from(budget).map_err(|_| "ensemble budget overflow")?,
+                        seed,
+                        IraStructureWitness {
+                            kmax_factor: witness.kmax_factor,
+                            radius: witness.radius,
+                        }
+                        .with_pair_cache(pair_cache_bytes),
+                        HistoryPolicy {
+                            options: EnsembleOptions {
+                                replicas,
+                                shared,
+                                soften,
+                            },
+                            exclusion: history_exclusion,
+                        },
+                    )?;
+                    let first = ensemble
+                        .runs
+                        .iter()
+                        .flat_map(|run| {
+                            run.aggregate_improvements
+                                .iter()
+                                .zip(&run.outcome.improvements)
+                                .map(|((charged, energy), (hops, _, _, _))| {
+                                    (*charged, *energy, *hops)
+                                })
+                        })
+                        .filter(|(_, energy, _)| *energy <= target + TARGET_TOLERANCE)
+                        .min_by_key(|(charged, _, _)| *charged);
+                    let encounter = first.map_or(
+                        Encounter::Censored {
+                            charged: ensemble.charged,
+                        },
+                        |(charged, _, hops)| Encounter::Found { charged, hops },
+                    );
+                    let best = ensemble
+                        .runs
+                        .iter()
+                        .map(|run| run.outcome.best)
+                        .fold(f64::INFINITY, f64::min);
+                    let failures = ensemble
+                        .runs
+                        .iter()
+                        .map(|run| run.outcome.unconverged_records)
+                        .sum();
+                    println!(
+                        "{}",
+                        json!({
+                            "kind": "lj_joint_optimum_ensemble",
+                            "arm": label, "seed": seed, "target_found": first.is_some(),
+                            "history_policy": history_exclusion.name(),
+                            "first_aggregate_charged": first.map(|(charged, _, _)| charged),
+                            "first_replica_hop": first.map(|(_, _, hops)| hops),
+                            "charged": ensemble.charged,
+                            "best_energy": best, "gap": best - target,
+                            "minimum_count": ensemble.minimum_count,
+                            "minimum_count_semantics": if shared { "shared-exact-identities" } else { "sum-private-identities" },
+                            "wall_seconds": ensemble.wall_seconds,
+                            "replicas": ensemble.runs.iter().enumerate().map(|(replica, run)| json!({
+                                "replica": replica, "seed": ensemble.seeds[replica],
+                                "budget": ensemble.budgets[replica], "charged": run.outcome.charged,
+                                "best_energy": run.outcome.best, "hops": run.outcome.hops,
+                                "best_coordinates": run.outcome.best_state.as_ref().map(|state| state.to_vec()),
+                                "minima": run.outcome.basins, "accepted": run.outcome.accepted,
+                                "visit_counts": run.outcome.visit_counts,
+                                "failed_actions": run.outcome.unconverged_records,
+                                "escape_kinetic": run.outcome.escape_scale,
+                                "acceptance_threshold": run.outcome.escape_threshold,
+                                "final_time_step": run.final_time_step,
+                                "initial_quench_calls": run.initial_quench_calls,
+                                "dynamics_calls": run.dynamics_calls,
+                                "dynamics_steps": run.dynamics_steps,
+                                "proposal_quench_calls": run.proposal_quench_calls,
+                                "history_seconds": run.history_seconds,
+                                "aggregate_improvements": run.aggregate_improvements,
+                            })).collect::<Vec<_>>(),
+                        })
+                    );
+                    summaries[arm_index].observe(
+                        encounter,
+                        best,
+                        ensemble.charged as u64,
+                        ensemble.minimum_count,
+                        0,
+                        failures,
+                    );
+                }
                 Arm::Adaptive(irc_kind) | Arm::Ridge(irc_kind) => {
                     let policy = if matches!(arm, Arm::Adaptive(_)) {
                         AtomisticHybridPolicy::Adaptive
@@ -752,6 +1352,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                 }
                 Arm::BasinHopping
                 | Arm::BasinHoppingSymmetry
+                | Arm::BasinHoppingCsmCi
                 | Arm::MinimaHopping
                 | Arm::MinimaHoppingSoftened
                 | Arm::MinimaHoppingBounded
@@ -773,26 +1374,50 @@ fn main() -> Result<(), Box<dyn Error>> {
                         arm,
                         Arm::MinimaHoppingBounded | Arm::MinimaHoppingBoundedSoftened
                     );
-                    let outcome = if minima_hopping {
-                        run_minima_hopping(
+                    let (outcome, minima_hopping_work) = if minima_hopping {
+                        let run = run_minima_hopping(
                             &potential,
                             initial.view(),
                             n,
                             budget,
                             seed,
                             &witness,
-                            softened,
-                            bound_escape,
-                        )
+                            MinimaHoppingOptions {
+                                soften: softened,
+                                bound_escape,
+                            },
+                        );
+                        let work = json!({
+                            "initial_quench_calls": run.initial_quench_calls,
+                            "dynamics_calls": run.dynamics_calls,
+                            "dynamics_steps": run.dynamics_steps,
+                            "proposal_quench_calls": run.proposal_quench_calls,
+                            "final_time_step": run.final_time_step,
+                            "history_seconds": run.history_seconds,
+                            "aggregate_improvements": run.aggregate_improvements,
+                        });
+                        (run.outcome, Some(work))
                     } else {
-                        run_hopping(
-                            &potential,
-                            initial.view(),
-                            n,
-                            budget,
-                            seed,
-                            matches!(arm, Arm::MinimaFeedback),
-                            matches!(arm, Arm::BasinHoppingSymmetry),
+                        (
+                            run_hopping(
+                                &potential,
+                                initial.view(),
+                                n,
+                                budget,
+                                seed,
+                                HoppingMoves {
+                                    minima_hopping: matches!(arm, Arm::MinimaFeedback),
+                                    symmetrise_on_stall: matches!(arm, Arm::BasinHoppingSymmetry),
+                                    continuous_symmetry: if matches!(arm, Arm::BasinHoppingCsmCi) {
+                                        ContinuousSymmetry::Inversion {
+                                            interval: CSM_INTERVAL,
+                                        }
+                                    } else {
+                                        ContinuousSymmetry::Off
+                                    },
+                                },
+                            ),
+                            None,
                         )
                     };
                     let encounter =
@@ -818,8 +1443,11 @@ fn main() -> Result<(), Box<dyn Error>> {
                             "velocity_softened": softened,
                             "acceptance_threshold": outcome.escape_threshold,
                             "visit_counts": outcome.visit_counts,
+                            "minima_hopping_work": minima_hopping_work,
                             "symmetrised_attempts": outcome.symmetrised.0,
                             "symmetry_energy_gain": outcome.symmetrised.1,
+                            "continuous_symmetry_attempts": outcome.continuous_symmetry.0,
+                            "continuous_symmetry_energy_gain": outcome.continuous_symmetry.1,
                             "failed_actions": outcome.unconverged_records,
                         })
                     );
@@ -848,7 +1476,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             "{}",
             json!({
                 "kind": "lj_joint_optimum_summary",
-                "arm": arm.label(),
+                "arm": arm.label_with_history(history_exclusion),
                 "runs": total,
                 "hits": hits,
                 "hit_probability": hits as f64 / total as f64,
@@ -869,8 +1497,8 @@ fn main() -> Result<(), Box<dyn Error>> {
 #[cfg(test)]
 mod tests {
     use super::{
-        Arm, ExactStructureWitness, PairPotential, optbench_start_path, parse_plain_coordinates,
-        run_minima_hopping, selected_arms,
+        Arm, ExactStructureWitness, MinimaHoppingOptions, PairPotential, optbench_start_path,
+        parse_plain_coordinates, run_minima_hopping, selected_arms,
     };
     use ndarray::{Array1, ArrayView1};
     use std::path::Path;
@@ -948,23 +1576,494 @@ mod tests {
     }
 
     #[test]
+    fn continuous_symmetry_selector_names_the_ci_csm_algorithm() {
+        let arms = selected_arms("bh-csm-ci", &[]).unwrap();
+
+        assert!(matches!(arms.as_slice(), [Arm::BasinHoppingCsmCi]));
+        assert_eq!(arms[0].label(), "basin-hopping-csm-ci");
+    }
+
+    #[test]
     fn exhausted_initial_quench_cannot_report_zero_as_a_minimum() {
         let potential = PairPotential::lennard_jones(2);
         let initial = Array1::from(vec![0.0, 0.0, 0.0, 1.2, 0.0, 0.0]);
 
-        let outcome = run_minima_hopping(
+        let run = run_minima_hopping(
             &potential,
             initial.view(),
             2,
             0,
             7,
             &DistinctWitness,
-            false,
-            false,
+            MinimaHoppingOptions {
+                soften: false,
+                bound_escape: false,
+            },
         );
 
-        assert_eq!(outcome.best, f64::INFINITY);
-        assert!(outcome.best_state.is_none());
-        assert_eq!(outcome.charged, 0);
+        assert_eq!(run.outcome.best, f64::INFINITY);
+        assert!(run.outcome.best_state.is_none());
+        assert_eq!(run.outcome.charged, 0);
+    }
+
+    #[test]
+    fn a_single_call_certifies_an_already_minimized_start() {
+        let potential = PairPotential::lennard_jones(2);
+        let distance = 2.0_f64.powf(1.0 / 6.0);
+        let initial = Array1::from(vec![0.0, 0.0, 0.0, distance, 0.0, 0.0]);
+        let run = run_minima_hopping(
+            &potential,
+            initial.view(),
+            2,
+            1,
+            7,
+            &DistinctWitness,
+            MinimaHoppingOptions {
+                soften: false,
+                bound_escape: false,
+            },
+        );
+
+        assert!((run.outcome.best + 1.0).abs() < 1e-12);
+        assert_eq!(run.outcome.charged, 1);
+        assert_eq!(run.initial_quench_calls, 1);
+        assert_eq!(run.dynamics_calls, 0);
+        assert_eq!(run.outcome.best_state.as_ref(), Some(&initial));
+    }
+
+    #[test]
+    fn minima_hopping_accounts_for_adaptive_escape_work_by_stage() {
+        let potential = PairPotential::lennard_jones(2);
+        let initial = Array1::from(vec![0.0, 0.0, 0.0, 1.2, 0.0, 0.0]);
+
+        let run = run_minima_hopping(
+            &potential,
+            initial.view(),
+            2,
+            2_000,
+            7,
+            &DistinctWitness,
+            MinimaHoppingOptions {
+                soften: false,
+                bound_escape: false,
+            },
+        );
+
+        assert_eq!(
+            run.initial_quench_calls + run.dynamics_calls + run.proposal_quench_calls,
+            run.outcome.charged
+        );
+        assert!(run.dynamics_steps > 0);
+        assert_ne!(run.final_time_step, 0.005);
+    }
+
+    #[test]
+    fn minima_hopping_bootstrap_establishes_a_minimum_within_the_available_budget() {
+        use rand::{SeedableRng, rngs::StdRng};
+
+        let n = 75;
+        let config = super::HoppingConfig::for_cluster(n);
+        let mut initial_rng = StdRng::seed_from_u64(7);
+        let initial = super::random_cluster(n, 0.7, config.min_separation, &mut initial_rng);
+        let potential = PairPotential::lennard_jones(n);
+        let budget = 4_000;
+
+        let run = run_minima_hopping(
+            &potential,
+            initial.view(),
+            n,
+            budget,
+            0,
+            &DistinctWitness,
+            MinimaHoppingOptions {
+                soften: false,
+                bound_escape: false,
+            },
+        );
+
+        assert!(
+            run.outcome.best.is_finite(),
+            "bootstrap must establish a minimum"
+        );
+        assert!(run.initial_quench_calls > config.relax_steps);
+        assert!(
+            run.dynamics_calls > 0,
+            "available work must reach the escape operator"
+        );
+        assert!(run.outcome.charged <= budget);
+        assert_eq!(
+            run.initial_quench_calls + run.dynamics_calls + run.proposal_quench_calls,
+            run.outcome.charged
+        );
+    }
+
+    #[test]
+    fn a_private_history_preserves_the_nve_trajectory_and_counts_every_call() {
+        use std::sync::{Mutex, atomic::AtomicUsize, atomic::Ordering};
+
+        let potential = PairPotential::lennard_jones(2);
+        let initial = Array1::from(vec![0.0, 0.0, 0.0, 1.2, 0.0, 0.0]);
+        let local = run_minima_hopping(
+            &potential,
+            initial.view(),
+            2,
+            2_000,
+            7,
+            &DistinctWitness,
+            MinimaHoppingOptions {
+                soften: false,
+                bound_escape: false,
+            },
+        );
+        let history = Mutex::new(super::MinimumHistory::new(1e-3).unwrap());
+        let charged = AtomicUsize::new(0);
+        let observed = super::run_minima_hopping_with_history(
+            &potential,
+            initial.view(),
+            2,
+            2_000,
+            7,
+            &DistinctWitness,
+            super::HistoryRunOptions {
+                moves: MinimaHoppingOptions {
+                    soften: false,
+                    bound_escape: false,
+                },
+                history: Some(&history),
+                charged: Some(&charged),
+            },
+        )
+        .unwrap();
+
+        assert_eq!(observed.outcome.best, local.outcome.best);
+        assert_eq!(observed.outcome.final_state, local.outcome.final_state);
+        assert_eq!(observed.outcome.accepted, local.outcome.accepted);
+        assert_eq!(observed.outcome.visit_counts, local.outcome.visit_counts);
+        assert_eq!(observed.dynamics_steps, local.dynamics_steps);
+        assert_eq!(observed.outcome.charged, local.outcome.charged);
+        assert_eq!(charged.load(Ordering::SeqCst), observed.outcome.charged);
+        assert!(history.lock().unwrap().total_visits() > 0);
+    }
+
+    #[test]
+    fn an_unconverged_bootstrap_does_not_publish_shared_history() {
+        use std::sync::Mutex;
+
+        let potential = PairPotential::lennard_jones(2);
+        let initial = Array1::from(vec![0.0, 0.0, 0.0, 1.2, 0.0, 0.0]);
+        let history = Mutex::new(super::MinimumHistory::new(1e-3).unwrap());
+        let run = super::run_minima_hopping_with_history(
+            &potential,
+            initial.view(),
+            2,
+            1,
+            7,
+            &DistinctWitness,
+            super::HistoryRunOptions {
+                moves: MinimaHoppingOptions {
+                    soften: false,
+                    bound_escape: false,
+                },
+                history: Some(&history),
+                charged: None,
+            },
+        )
+        .unwrap();
+
+        assert_eq!(run.outcome.best, f64::INFINITY);
+        assert_eq!(run.outcome.charged, 1);
+        assert_eq!(history.lock().unwrap().total_visits(), 0);
+    }
+
+    #[test]
+    fn communicating_replicas_share_identity_without_copying_states_or_multiplying_budget() {
+        struct EqualWitness;
+        impl super::ExactStructureWitness for EqualWitness {
+            fn equivalent(
+                &self,
+                left: ndarray::ArrayView1<f64>,
+                right: ndarray::ArrayView1<f64>,
+            ) -> bool {
+                left == right
+            }
+        }
+
+        let potential = PairPotential::lennard_jones(2);
+        let distance = 2.0_f64.powf(1.0 / 6.0);
+        let initial = Array1::from(vec![0.0, 0.0, 0.0, distance, 0.0, 0.0]);
+        for shared in [false, true] {
+            let ensemble = super::run_minima_hopping_ensemble(
+                &potential,
+                initial.view(),
+                2,
+                3,
+                7,
+                EqualWitness,
+                super::EnsembleOptions {
+                    replicas: 2,
+                    shared,
+                    soften: false,
+                },
+            )
+            .unwrap();
+
+            assert_eq!(ensemble.charged, 3);
+            assert_eq!(ensemble.budgets, vec![2, 1]);
+            assert_eq!(ensemble.runs.len(), 2);
+            assert_eq!(ensemble.minimum_count, if shared { 1 } else { 2 });
+            assert_eq!(
+                ensemble
+                    .runs
+                    .iter()
+                    .map(|run| run.outcome.charged)
+                    .sum::<usize>(),
+                3
+            );
+            for run in ensemble.runs {
+                assert_eq!(run.outcome.final_state.as_ref(), Some(&initial));
+                assert_eq!(run.outcome.accepted, 0);
+                assert!((run.outcome.best + 1.0).abs() < 1e-12);
+            }
+        }
+    }
+
+    #[test]
+    fn communication_selector_pairs_shared_and_private_history() {
+        let arms = selected_arms("mh-communication", &[]).unwrap();
+        let labels = arms.into_iter().map(|arm| arm.label()).collect::<Vec<_>>();
+        assert_eq!(
+            labels,
+            vec![
+                "minima-hopping-private-history",
+                "minima-hopping-shared-history"
+            ]
+        );
+    }
+
+    #[test]
+    fn fixed_coordinates_have_explicit_provenance_and_cannot_impersonate_optbench() {
+        assert_eq!(
+            super::start_protocol_name(false, false).unwrap(),
+            "random-cluster"
+        );
+        assert_eq!(
+            super::start_protocol_name(true, false).unwrap(),
+            "optbench-fixed"
+        );
+        assert_eq!(
+            super::start_protocol_name(false, true).unwrap(),
+            "fixed-coordinate-file"
+        );
+        assert!(super::start_protocol_name(true, true).is_err());
+    }
+
+    #[test]
+    fn unresolved_nve_actions_do_not_count_as_verified_basin_visits() {
+        use rand::SeedableRng;
+
+        struct OneBasin;
+        impl ExactStructureWitness for OneBasin {
+            fn equivalent(&self, _: ArrayView1<f64>, _: ArrayView1<f64>) -> bool {
+                true
+            }
+        }
+        let n = 75;
+        let potential = PairPotential::lennard_jones(n);
+        let mut rng = rand::rngs::StdRng::seed_from_u64(7);
+        let hopping = super::HoppingConfig::for_cluster(n);
+        let start = super::random_cluster(n, 0.7, hopping.min_separation, &mut rng);
+        let run = super::run_minima_hopping(
+            &potential,
+            start.view(),
+            n,
+            50_000,
+            0,
+            &OneBasin,
+            MinimaHoppingOptions {
+                soften: false,
+                bound_escape: false,
+            },
+        );
+        let outcome = run.outcome;
+        let (same, known, new) = outcome.visit_counts;
+        assert!(
+            outcome.unconverged_records > 1,
+            "the fixture exercises failed proposals"
+        );
+        assert!(
+            same + known + new + outcome.unconverged_records <= outcome.hops,
+            "failed proposals cannot simultaneously be verified visits: {:?}",
+            (
+                outcome.visit_counts,
+                outcome.unconverged_records,
+                outcome.hops
+            )
+        );
+        assert_eq!(known, 0);
+        assert_eq!(new, 0);
+        assert_eq!(outcome.charged, 50_000);
+    }
+
+    #[test]
+    fn observed_exclusion_retains_the_all_observation_feedback_policy() {
+        use super::{HistoryExclusion, history_feedback_membership};
+
+        let mut accepted = super::EscapeFeedback::new(1.0, 0.8);
+        let mut observed = super::EscapeFeedback::new(1.0, 0.8);
+        accepted.register_initial(0);
+        observed.register_initial(0);
+        let mut accepted_trials = 0;
+        let mut observed_trials = 0;
+        for visit_number in 1..=6 {
+            let first_observation = visit_number == 1;
+            let (is_new, visits) = history_feedback_membership(
+                HistoryExclusion::Accepted,
+                first_observation,
+                visit_number,
+                0,
+            );
+            assert_eq!(
+                accepted.observe_shared(Some(0), 1, is_new, visits),
+                super::Visit::New
+            );
+            accepted_trials += 1;
+            assert_eq!(accepted.accept(1.0), visit_number == 6);
+
+            let (is_new, visits) = history_feedback_membership(
+                HistoryExclusion::Observed,
+                first_observation,
+                visit_number,
+                0,
+            );
+            let before = observed.threshold();
+            let classification = observed.observe_shared(Some(0), 1, is_new, visits);
+            if first_observation {
+                assert_eq!(classification, super::Visit::New);
+                observed_trials += 1;
+                assert!(!observed.accept(1.0));
+            } else {
+                assert_eq!(classification, super::Visit::Known);
+                assert_eq!(observed.threshold(), before);
+            }
+        }
+        assert_eq!(accepted_trials, 6);
+        assert_eq!(observed_trials, 1);
+        assert_eq!(
+            history_feedback_membership(HistoryExclusion::Accepted, false, 9, 2),
+            (false, 2)
+        );
+        assert_eq!(
+            history_feedback_membership(HistoryExclusion::Observed, false, 9, 2),
+            (false, 9)
+        );
+    }
+
+    #[test]
+    fn an_expected_archive_digest_is_not_a_verified_input_digest() {
+        let declared = super::start_archive_provenance(75, true);
+        assert_eq!(
+            declared.expected,
+            Some("8590a6fddf96a8673d0e4b53aae2385b5d222a9200217d722bb017d23fc5fdb3")
+        );
+        assert_eq!(declared.verified, None);
+        let diagnostic = super::start_archive_provenance(75, false);
+        assert_eq!(diagnostic.expected, None);
+        assert_eq!(diagnostic.verified, None);
+    }
+
+    #[test]
+    fn history_policy_names_are_strict_and_alternative_labels_are_distinct() {
+        use super::{HistoryExclusion, parse_history_exclusion};
+
+        assert_eq!(
+            parse_history_exclusion(None).unwrap(),
+            HistoryExclusion::Accepted
+        );
+        assert_eq!(
+            parse_history_exclusion(Some("accepted")).unwrap(),
+            HistoryExclusion::Accepted
+        );
+        assert_eq!(
+            parse_history_exclusion(Some("observed-exclusion")).unwrap(),
+            HistoryExclusion::Observed
+        );
+        assert!(parse_history_exclusion(Some("observed")).is_err());
+        let arm = Arm::MinimaHoppingEnsemble {
+            shared: true,
+            soften: true,
+        };
+        assert_eq!(
+            arm.label_with_history(HistoryExclusion::Accepted),
+            arm.label()
+        );
+        assert_eq!(
+            arm.label_with_history(HistoryExclusion::Observed),
+            "minima-hopping-shared-history-softened-observed-exclusion"
+        );
+    }
+
+    #[test]
+    fn shared_first_acceptance_is_atomic_with_history_classification() {
+        use std::sync::{Barrier, Mutex};
+
+        struct SameCoordinates;
+        impl ExactStructureWitness for SameCoordinates {
+            fn equivalent(&self, left: ArrayView1<f64>, right: ArrayView1<f64>) -> bool {
+                left == right
+            }
+        }
+        let history = Mutex::new(super::MinimumHistory::new(1e-3).unwrap());
+        let barrier = Barrier::new(2);
+        let accepted = std::thread::scope(|scope| {
+            let handles = (0..2)
+                .map(|_| {
+                    scope.spawn(|| {
+                        let point = ndarray::array![0.0, 0.0, 0.0, 1.2, 0.0, 0.0];
+                        let mut ledger = super::Ledger::new(1);
+                        assert!(ledger.charge());
+                        assert!(ledger.record_quench_boundary(
+                            0,
+                            -1.0,
+                            point,
+                            Some(Array1::zeros(6))
+                        ));
+                        let descriptor = super::lj::descriptor_space();
+                        let context = super::StructureContext::new(Some(vec![18; 2]), None, None);
+                        let mut feedback = super::EscapeFeedback::new(1.0, 0.8);
+                        barrier.wait();
+                        super::observe_history(
+                            &history,
+                            &ledger,
+                            &descriptor,
+                            &context,
+                            &SameCoordinates,
+                            |history, observation| {
+                                let reached = observation.minimum.id;
+                                let visits = history.accepted_visits(reached).unwrap();
+                                let visit =
+                                    feedback.observe_shared(None, reached, visits == 0, visits);
+                                let accept = visit == super::Visit::New && feedback.accept(-1.0);
+                                if accept {
+                                    history.mark_accepted(reached).unwrap();
+                                }
+                                Ok(accept)
+                            },
+                        )
+                        .unwrap()
+                        .1
+                    })
+                })
+                .collect::<Vec<_>>();
+            handles
+                .into_iter()
+                .map(|handle| usize::from(handle.join().unwrap()))
+                .sum::<usize>()
+        });
+        assert_eq!(accepted, 1);
+        let history = history.lock().unwrap();
+        assert_eq!(history.minimum_count(), 1);
+        assert_eq!(history.accepted_count(), 1);
+        assert_eq!(history.accepted_visits(0), Some(2));
+        assert_eq!(history.total_visits(), 2);
     }
 }
