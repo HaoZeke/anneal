@@ -1432,9 +1432,15 @@ incumbent since =qn= last played, in which case it restarts there. A
 turn is one slice, except that =qn= keeps it while each slice lowers
 its descent's value by more than the success threshold, until that
 descent converges; a turn succeeds when it lowers the incumbent by more
-than =1e-4 max(|f|, s)= (=values_only_threshold=), where =s= is the
-resolution =eps |f|= of the start's value (=values_only_floor=), so
-every threshold of the run scales with the objective. The GSA arm
+than the threshold in force when it began, =1e-4 max(g, s)=
+(=SuccessScale=): =g= is the gain of the last slice that lowered the
+incumbent from below the start's value, and =s= the resolution
+=eps |f|= of the first value found below the start's
+(=f64::MIN_POSITIVE= before one is found or when it is zero). Gains
+are differences of values, so a constant added to the objective moves
+the threshold only by the rounding of the shifted values, a power of
+two multiplying it multiplies every threshold exactly, and the start's
+value enters neither =g= nor =s=. The GSA arm
 starts one chain at the incumbent
 and runs it quenched, without a local search: each temperature step
 visits every coordinate once and keeps only improvements. The DE arm
@@ -1907,8 +1913,9 @@ Constants and defaults: =default_lambda= \(4 + \lfloor 3 \ln n
 incumbent; the first is local, with step 0.025 of each side, and large
 runs use step 0.3 (portfolio.rs:391-392). Runs keep the full covariance
 up to =CMA_FULL_MAX_DIM = 100= (portfolio.rs:401) and only when the
-budget exceeds the learning horizon; each run's =tolfunhist= is the
-values-only success threshold at its start (=values_only_threshold=).
+budget exceeds the learning horizon; in the values-only loop each run's
+=tolfunhist= is the success threshold in force (=SuccessScale=), reset
+at every slice the arm plays.
 
 Feeds/consumes: the =cma= arm of the portfolio's values-only loop,
 which reads the ledger incumbent for every run's mean.
