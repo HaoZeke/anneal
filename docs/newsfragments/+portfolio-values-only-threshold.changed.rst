@@ -20,7 +20,8 @@ finite-difference descent starts with a trial whose largest move is 5% of a
 side whatever the gradient's size, where a small gradient used to shorten it.
 Multiplying the objective by a power of two multiplies every threshold
 exactly. Measured over 40 paired seeds against the rules they replaced
-(medians, "A against B" with A's wins/ties/losses, rows named
+(medians, "A against B" with A's wins/ties/losses, two runs tying when their
+values differ by at most ``1e-9 max(1, |b|)`` with ``b`` B's, rows named
 ``problem@budget`` from ``x0`` as in the regime notes), the descent's
 resolution test trails a fixed ``1e-12`` tolerance on ``fit6@1000``, -4.78
 against -4.89 (3/20/17) and without ``x0`` -3.334 against -3.334 (1/32/7),
@@ -47,4 +48,7 @@ as chance gives and none past a correction for the 88 tests: +1e2
 against 6.9e-7, 11/8/21), +1e4 ``ackley10@5000`` (1.6e-10 against 2.1e-11,
 2/32/6), -1e4 ``ellR30@1000`` (5589 against 5589, 12/0/28) and x1e-6
 ``rosen30`` at 1000 and 5000 (74.1 against 74.1, 12/1/27; 22.1 against 22.0,
-14/0/26). Every x2^-20 copy repeats its plain row run for run.
+14/0/26). This holds with those ties. With exact ties nine copies trail, and
++1e4 ``ackley10@5000`` passes the correction (8/4/28, p 0.00015), its runs
+ending near 1.6e-10 and its control's near 2.1e-11. Every x2^-20 copy repeats
+its plain row run for run.

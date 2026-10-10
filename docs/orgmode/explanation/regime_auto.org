@@ -196,8 +196,10 @@ Each rule above was measured over 40 paired seeds, with the loop's
 other rules in place, against the rule it replaced and against the
 alternatives tried for the rows it costs. A comparison reads
 /A against B (W/T/L)/: medians, and the seeds on which A wins, ties
-and loses; a row trails when a one-sided Wilcoxon test gives
-=p < 0.05=. Rows read =problem@budget= and start from =x0= unless
+and loses, two runs tying when their values differ by at most
+=1e-9 max(1, |b|)=, =b= being B's (an absolute =1e-9= below one); a
+row trails when a one-sided Wilcoxon test on the seeds that do not tie
+gives =p < 0.05=. Rows read =problem@budget= and start from =x0= unless
 marked: =ellS=, =rastS= and =stybS= are the shifted ellipsoid
 (conditioning =1e6=), Rastrigin and Styblinski-Tang, =ellR=, =rastR=,
 =stybR= and =levyR= rotated forms, =ackS= shifted Ackley, =levy=,
@@ -322,9 +324,12 @@ correction for the 88 tests: =fit6@1000= with =+1e2= (-4.82 against
 2/32/6), =ellR30@1000= with =-1e4= (5589 against 5589, 12/0/28, the
 runs differing by about =1e-6= of the value) and =rosen30= with
 =x1e-6= at 1000 (74.1 against 74.1, 12/1/27) and at 5000 (22.1 against
-22.0, 14/0/26). Every =x2^-20= copy repeats its plain row run for run,
-and the Lennard-Jones starts with overlapping atoms or a =1e30=
-sentinel stay level with their control starts.
+22.0, 14/0/26). This holds with the ties above. With exact ties nine
+copies trail, and =ackley10@5000= with =+1e4= passes the correction,
+8/4/28 (=p= 0.00015), its runs ending near =1.6e-10= and its
+control's near =2.1e-11=. Every =x2^-20= copy repeats its plain
+row run for run, and the Lennard-Jones starts with overlapping atoms
+or a =1e30= sentinel stay level with their control starts.
 
 On rotated multimodal objectives the loop trails 0.10.0, whose
 diffusion Monte Carlo population follows the landscape's global trend

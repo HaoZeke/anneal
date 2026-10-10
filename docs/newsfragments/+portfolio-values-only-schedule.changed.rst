@@ -63,7 +63,8 @@ the success threshold, whose positive floor changes at most once, so on a
 bounded objective they last a number of slices that does not grow with the
 budget, and every arm keeps a uniform share and is pulled infinitely often as
 the budget grows. Measured over 40 paired seeds against the rules they
-replaced (medians, "A against B" with A's wins/ties/losses, rows named
+replaced (medians, "A against B" with A's wins/ties/losses, two runs tying when
+their values differ by at most ``1e-9 max(1, |b|)`` with ``b`` B's, rows named
 ``problem@budget`` from ``x0`` as in the regime notes), these rules trail on
 the following rows, and putting a replaced rule back costs the rows named with
 it. The rate hand-over short of the opening budget, against two fixed GSA
