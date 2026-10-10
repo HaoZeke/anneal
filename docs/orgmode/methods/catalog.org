@@ -32,7 +32,7 @@ allowed (three decrements is the minimum to fit a rate and a residual);
 beyond the fitted uncertainty (src/quench.rs:115-123).
 
 Feeds/consumes: wired into the driver's =adaptive_screen= config flag
-(src/methods/cluster_hopping/config.rs:554) and the staged/screened
+(src/methods/cluster_hopping/config.rs:635) and the staged/screened
 relaxation logic inside =run_with_gradient= in
 src/methods/cluster_hopping.rs. Complementary to, and separately switched
 from, the Bayesian screen below.
@@ -58,10 +58,10 @@ is full relax steps; for the measured hop (=S=25=, =R=200=) this is
 =7/15= (src/screen.rs:38-45). Ridge prior precision =1e-3 * I=,
 inverse-gamma =a0 = b0 = 1e-3= (src/screen.rs:97-99). Config-side knobs:
 =bayes_screen=, =bayes_exploration=, =bayes_threshold=, =bayes_warmup=
-(src/methods/cluster_hopping/config.rs:275, 377-383).
+(src/methods/cluster_hopping/config.rs:312, 449-455).
 =Config::derived= sets =bayes_threshold= from
 =cost_asymmetric_threshold(screen_steps, relax_steps)=
-(src/methods/cluster_hopping/config.rs:710-717).
+(src/methods/cluster_hopping/config.rs:811-818).
 
 Feeds/consumes: gates whether a trial proceeds to full relaxation inside
 the hop loop; independent of, and switchable alongside, the quench
@@ -75,12 +75,12 @@ a deep minimum roughly nineteen proposals in twenty return, so most of
 the budget otherwise buys relaxations into the basin already occupied.
 
 Key types and functions: config flags =return_screen=, =return_polish=,
-=return_polish_after= (src/methods/cluster_hopping/config.rs:459-479).
+=return_polish_after= (src/methods/cluster_hopping/config.rs:540-560).
 
 Constants and defaults: measured separation on a shape distance after a
 partial relaxation, returns vs. escapes: 0.160 vs. 1.846, 97% of pairs
-ordered correctly at thirty iterations (config.rs:452-458). On by
-default in =Config::recommended= (src/methods/cluster_hopping/config.rs:674).
+ordered correctly at thirty iterations (config.rs:542-544). On by
+default in =Config::recommended= (src/methods/cluster_hopping/config.rs:755).
 
 Feeds/consumes: complements the Bayesian screen; both exist to spend
 charged evaluations only where they are likely to pay.
@@ -91,10 +91,10 @@ What it is: before the full screening relaxation, settles only the
 moved atoms (one to three, for the measured-productive moves) in their
 frozen environment. A k-atom settle costs a fraction of the full
 =n(n-1)/2= pair evaluation, charged fractionally through
-=Ledger::charge_frac= (src/methods/cluster_hopping.rs:289).
+=Ledger::charge_frac= (src/methods/cluster_hopping.rs:341).
 
 Key types and functions: config flags =staged_quench=, =settle_iters=
-(src/methods/cluster_hopping/config.rs:349-351).
+(src/methods/cluster_hopping/config.rs:421-423).
 
 Feeds/consumes: cheapens the first stage the screening quench predictor
 and Bayesian screen both act on.
@@ -151,7 +151,7 @@ Constants and defaults: =LennardJonesPreset= and =MolecularPreset=
 coefficients (e.g. =MERGE_RADIUS = 0.7=, =TEMPERATURE = 0.8=,
 =BIAS_HEIGHT = 0.25=, =SOAP_RMSD = 0.35=, =SOAP_CUTOFF = 3.5=,
 =MIN_SEPARATION = 0.85=) multiplied by declared length/energy scales.
-=Config::recommended= (config.rs:661) selects =MoveLibrary::LeanBurst=
+=Config::recommended= (config.rs:742) selects =MoveLibrary::LeanBurst=
 with the SOAP arm and Thompson allocation over the arms.
 
 Feeds/consumes: selected per-config by =MoveLibrary::kernels=; chosen
@@ -180,7 +180,7 @@ permutation/translation/rotation-invariant fingerprint for point sets.
 Constants and defaults: deposit rule
 =w_k = w_0 * exp(-V_{k-1}(s_k) / ((gamma - 1) * T))=; config knobs
 =bias_height=, =bias_gamma=, =merge_radius=, =adaptive_height=,
-=height_revisits= (config.rs:75-94, 508-510). Measured motivation: at 38
+=height_revisits= (config.rs:75-94, 594-596). Measured motivation: at 38
 points the ico/decahedral fourth Steinhardt parameter separates by 0.19,
 at 75 points by only 0.023 (narrower than a sensible deposition width),
 which motivates keying on identity instead (src/bias.rs:271-291).
@@ -213,14 +213,14 @@ one-standard-deviation well (src/dos.rs:993); tempering set by
 =(gamma - 1) T = sigma= and =w0 = sigma / FILL_DEPOSITS=, so no scale is
 system-specific. Config knobs: =flat_histogram=, =flat_sweep=,
 =flat_quantile=, =statistical_temperature=, =energy_bias=
-(config.rs:284-306). Measured: at 38 points, flat-over-visited-range
+(config.rs:318-383). Measured: at 38 points, flat-over-visited-range
 solved 3/24 seeds vs. 15/24 for plain Metropolis (src/dos.rs:594-616);
 per-basin bias alone left 12 of 17 failing seeds stuck at exactly the
 same icosahedral-funnel floor energy (src/dos.rs:947-956).
 
 Feeds/consumes: an alternative/complementary acceptance and deposit
 target to =BasinBias=, wired into the same hop loop
-(src/methods/cluster_hopping.rs:1958-2050 region shows the deposit and
+(src/methods/cluster_hopping.rs:2771-2875 region shows the deposit and
 sweep-refresh logic inline). On a replica ladder under
 =statistical_temperature= only the rungs at ratio one feed
 =DensityOfStates=, the coldest rung alone unless the ladder is flat,
@@ -242,29 +242,29 @@ deposits.
 What it is: a family of mechanisms triggered only when the chain has
 stopped improving, each answering a different way of being stuck.
 
-- Soft-mode climb (=escape_on_stall=, config.rs:156): Lanczos
+- Soft-mode climb (=escape_on_stall=, config.rs:193): Lanczos
   soft-mode estimate, then climbs past the saddle with feedback
   overshoot. Escalates over =minima_hopping='s always-on scaled move.
   Costs ~637 charged evaluations vs. ~30 for a plain hop; run only on
-  stall it costs a few percent of budget (config.rs:147-155).
-- Trail-on-stall (=trail_on_stall=, config.rs:165): re-enters the
+  stall it costs a few percent of budget (config.rs:184-192).
+- Trail-on-stall (=trail_on_stall=, config.rs:202): re-enters the
   basin's *entry point* (the accepted trial partway down from the
   ridge) with an outward push, cheaper than re-climbing.
-- Tabu quarantine (=tabu_on_stall=, config.rs:403): outright rejects
+- Tabu quarantine (=tabu_on_stall=, config.rs:475): outright rejects
   states within the merge radius of a quarantined structure,
   replacing a soft well-tempered penalty that measurably failed to
-  outrun the entropic lockout (config.rs:384-402).
-- Restart-on-stall (=restart_on_stall=, config.rs:420): restarts the
+  outrun the entropic lockout (config.rs:456-474).
+- Restart-on-stall (=restart_on_stall=, config.rs:492): restarts the
   walker from a fresh random configuration but *keeps the bias*, so
   the landscape memory (not the walker) survives.
-- Path-on-stall (=path_on_stall=, config.rs:487; src/path.rs):
+- Path-on-stall (=path_on_stall=, config.rs:568; src/path.rs):
   =transverse_path= (src/path.rs:110) relaxes images perpendicular to
   the path tangent between the current structure and an archive
   member, so the corridor between funnels is sampled instead of
   jumped; =interpolate_path= (src/path.rs:188) relaxes interpolated
   images; =StallDetector= (src/path.rs:246) decides when hopping has
   stalled enough to justify the expense.
-- Symmetrise-on-stall (=symmetrise_on_stall=, config.rs:219;
+- Symmetrise-on-stall (=symmetrise_on_stall=, config.rs:256;
   src/symmetrise.rs): =detect= (src/symmetrise.rs:202) finds the best
   approximate rotational symmetry over axes derived from the inertia
   tensor and centroid-to-point/pair-midpoint directions;
@@ -272,7 +272,7 @@ stopped improving, each answering a different way of being stuck.
   orbit; withheld when the structure is already icosahedrally
   dominated (=ih_dominated=, src/soap.rs:1088), so the mechanism never
   invents a packing the observed cloud does not have.
-- Funnel tracking (=track_funnels=, config.rs:204; src/funnel_spectral.rs):
+- Funnel tracking (=track_funnels=, config.rs:241; src/funnel_spectral.rs):
   builds a transition graph on accepted hops keyed by basin identity;
   =Partition= (src/funnel_spectral.rs:43) and =FunnelSpectrum=
   (src/funnel_spectral.rs:85) compute the Fiedler vector of the
@@ -281,7 +281,7 @@ stopped improving, each answering a different way of being stuck.
 
 Constants and defaults: escape trigger is
 =escape_stall_factor= times the longest quiet stretch already survived,
-not a fixed patience (config.rs:166-182, measured: fixed patience 400
+not a fixed patience (config.rs:203-219, measured: fixed patience 400
 scored 2/8 seeds vs. 9/16 without it). =STALL_LEAVE=-style thresholds
 recur elsewhere in the crate at value 8 (see
 [[file:catalog.org::*Catalog policy][catalog policy]] and [[file:catalog.org::*Cooperative wells and swarm role][swarm role]]).
@@ -305,9 +305,9 @@ Key types and functions: =StepCalibrator= (src/calibrate.rs:34);
 
 Constants and defaults: config knobs =calibrate_radius=,
 =calibrate_quantile=, =calibrate_warmup=, =diversity_floor=
-(config.rs:428-432, 499-507). Measured: annealing 0.7 down to 0.07 took
+(config.rs:500-504, 580-588). Measured: annealing 0.7 down to 0.07 took
 a run from 250 basins at 25 revisits to 4423 basins at 2.6 revisits, and
-the best found from -396.282 to -394.629 (config.rs:503-506).
+the best found from -396.282 to -394.629 (config.rs:584-587).
 
 Feeds/consumes: sets =merge_radius= consumed by =BasinBias= and by the
 [[file:catalog.org::*Population methods][CSA bank]]'s admission threshold.
@@ -351,7 +351,7 @@ Feeds/consumes: consumes =crate::curvature::curvature_features= for
 the Lanczos mode and shares the perpendicular-projection convention
 with =crate::path= (activation.rs:27-30); called from
 =cluster_hopping='s soft-mode-climb stall response
-(cluster_hopping.rs:40, 2475-2478), documented as a black-box call
+(cluster_hopping.rs:40, 3315-3324), documented as a black-box call
 site under [[file:catalog.org::*Stall escapes][stall escapes]] above
 ("Soft-mode climb ... Escalates over =minima_hopping='s always-on
 scaled move"); this section documents the climb mechanism itself.
@@ -407,10 +407,11 @@ prices itself out of the budget is not escalation" (minima_hopping.rs:84-88).
 
 Feeds/consumes: constructed and driven by
 =cluster_hopping::run_with_gradient= (=EscapeFeedback::new= at
-cluster_hopping.rs:1032, =feedback.observe= at
-1169/1861/1869/2497, =feedback.escape()= scaling the library move at
-1344-1348 and 2465, =feedback.accept= gating uphill trials at 1870),
-documented as a black-box call site under
+cluster_hopping.rs:1323, =feedback.observe= at
+1773/1825/2601/2607/3343, =feedback.escape()= scaling the library move
+at 2000-2004 and the soft-mode climb's overshoot at 3310-3314,
+=feedback.accept= gating uphill trials at 2608), documented as a
+black-box call site under
 [[file:catalog.org::*Stall escapes][stall escapes]] above; this
 section documents the feedback mechanism itself.
 
@@ -455,7 +456,7 @@ Key types and functions: =BudgetWindowTemperature= (src/allocate.rs:34).
 
 Constants and defaults: config knob =theta= (must lie strictly below 2),
 =budget_window= toggle (config.rs:94-106). =Config::derived= sets
-=theta = 0.5=, i.e. the midpoint of the descent window (config.rs:767-781).
+=theta = 0.5=, i.e. the midpoint of the descent window (config.rs:804-818).
 
 Feeds/consumes: replaces the fixed =temperature= field when enabled; the
 gap is measured against the incumbent and the barrier estimated from
@@ -472,9 +473,9 @@ reachable and the divergent-harmonic-mass restart guarantee (Robbins-
 Monro style) holds. Evidence is discounted so the allocator tracks a
 landscape whose best move changes as the search moves through it.
 
-Key types and functions: =FlooredThompson= (src/allocate.rs:108);
-=beta_draw= (src/allocate.rs:195), a Beta draw built from two Gamma
-draws via Marsaglia-Tsang (src/allocate.rs:205), since the crate carries
+Key types and functions: =FlooredThompson= (src/allocate.rs:124);
+=beta_draw= (src/allocate.rs:437), a Beta draw built from two Gamma
+draws via Marsaglia-Tsang (src/allocate.rs:447), since the crate carries
 no dedicated Beta sampler.
 
 Constants and defaults: config knob =allocate_moves=
@@ -498,12 +499,12 @@ under acceptance-only reward. Each arm carries a Normal-Gamma posterior
 over depth with unknown mean and precision, drawn from via the Student-t
 posterior predictive.
 
-Key types and functions: =DepthAllocator= (src/allocate.rs:388).
+Key types and functions: =DepthAllocator= (src/allocate.rs:770).
 
-Constants and defaults: config knob =depth_reward= (config.rs:307-310);
+Constants and defaults: config knob =depth_reward= (config.rs:384-387);
 weakly informative prior =kappa = 1e-6=, =alpha = beta = 1.0=
-(src/allocate.rs:401-407). On by default in =Config::recommended=
-(config.rs:665).
+(src/allocate.rs:812-814). On by default in =Config::recommended=
+(config.rs:746).
 
 Feeds/consumes: alternative reward signal for the same arm-selection
 slot =FlooredThompson= occupies; selected instead of it when
@@ -524,7 +525,7 @@ conjugate Bayesian linear model sampled from (distinct from
 probability); =ContextualAllocator= (src/contextual.rs:107).
 
 Constants and defaults: config knobs =contextual_moves=,
-=contextual_floor= (config.rs:264-266).
+=contextual_floor= (config.rs:301-303).
 
 Feeds/consumes: a third alternative in the same arm-selection slot,
 context-conditioned rather than global or depth-conditioned.
@@ -578,7 +579,7 @@ Key types and functions: =crate::delayed::Surrogate= and its
 =predict_at= method (src/delayed.rs).
 
 Constants and defaults: config knobs =delayed_acceptance=,
-=surrogate_tolerance= (config.rs:571-585).
+=surrogate_tolerance= (config.rs:652-666).
 
 Feeds/consumes: an alternative to the plain screen for the
 acceptance-uncertainty tradeoff, generalizing what the screen was
@@ -719,7 +720,7 @@ the IRA return code when a point set spans fewer than two dimensions
 and has no basis to build a frame from.
 
 Feeds/consumes: an alternative =Fingerprint= for =BasinBias= (config
-=shape_keyed= / =Keying::Canonical=, config.rs:511-517) and the
+=shape_keyed= / =Keying::Canonical=, config.rs:592-598) and the
 =distance= argument to =csa_cluster::run= (below) when the =ira= feature
 is enabled, transferring a =Dcut= threshold between cluster sizes in a
 way a descriptor-space threshold cannot.
@@ -1196,7 +1197,7 @@ call sequence. Gated behind =#[cfg(feature = "bank-rpc")]=
 
 What it is: replay-safe, idempotent aggregate charged-work accounting
 across an isolated ensemble of replicas, distinct from each replica's
-own local =Ledger= (src/methods/cluster_hopping.rs:246). Boundaries are
+own local =Ledger= (src/methods/cluster_hopping.rs:298). Boundaries are
 typed (=ChargeKind=) so a caller cannot silently double-charge or
 mis-tag work, and a repeated identical event is a no-op rather than an
 error.
@@ -1445,11 +1446,11 @@ What it is: the classical-SA replica-exchange mechanism, a geometric
 temperature ladder with periodic swap attempts satisfying detailed
 balance by construction, generic over the =Exchange= trait's swap rule.
 Distinct from cluster hopping's own =replicas=/=swap_period= ladder
-(src/methods/cluster_hopping/config.rs:116-145), which drives the
+(src/methods/cluster_hopping/config.rs:117-156), which drives the
 cluster-specific chain rather than the typed-algebra =Sampler=. There
 one rung hops at a time on the shared budget, each with its own basin
 bias, and rung =k= of =R= hops at =ladder_top^(k/(R-1))= times the
-temperature a single chain would hop at (config.rs:492-497): the fixed
+temperature a single chain would hop at (config.rs:529-534): the fixed
 =temperature=, the budget-window law's temperature, or the statistical
 estimate clamped to its band around =temperature=, which only the
 rungs at ratio one feed and so takes over later on a ladder (see
@@ -1689,9 +1690,9 @@ at an identical, evaluation-matched charged-work budget, reported as
 solved-seed counts with a Bayes factor rather than a bare percentage.
 Examples throughout this catalog: =Config::recommended='s
 "LJ75 49/144 against 17/144, Bayes factor 3104" and "LJ98 40/72 against
-20/72, Bayes factor 43.8" (src/methods/cluster_hopping/config.rs:642-648);
+20/72, Bayes factor 43.8" (src/methods/cluster_hopping/config.rs:736-739);
 the escape-on-stall patience comparison "2 seeds in 8 against 9 in 16"
-(config.rs:174-179); the CSA bank's "budget is split, not multiplied"
+(config.rs:211-216); the CSA bank's "budget is split, not multiplied"
 principle (src/methods/csa_cluster.rs:18-20); the README's
 "sealed, evaluation-matched ensembles rather than reference energies or
 morphology labels."
