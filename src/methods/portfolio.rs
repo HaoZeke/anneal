@@ -1837,9 +1837,16 @@ impl<O: Objective<f64>> Gradient<f64> for BudgetedFiniteDiffGradient<'_, O> {
             // The cap wins over the floor: on a box narrower than 2e-7 the
             // 1e-8 floor is wider than a twentieth of the box.
             let h = (self.h_frac * w).max(1e-8).min(0.05 * w);
-            let plus = x[i] + h;
-            let minus = x[i] - h;
-            // A step that rounds onto the centre is not a derivative.
+            let mut plus = x[i] + h;
+            let mut minus = x[i] - h;
+            // A nominal step that rounds onto the centre still has a
+            // neighbour in the float grid. Use that neighbour.
+            if plus == x[i] {
+                plus = x[i].next_up();
+            }
+            if minus == x[i] {
+                minus = x[i].next_down();
+            }
             if plus == x[i] || minus == x[i] {
                 continue;
             }
@@ -1855,6 +1862,9 @@ impl<O: Objective<f64>> Gradient<f64> for BudgetedFiniteDiffGradient<'_, O> {
             let fm = self.obj.eval(xm.view());
             if fp.is_finite() && fm.is_finite() {
                 g[i] = (fp - fm) / den;
+            } else {
+                // A non-finite probe is not a zero slope.
+                g[i] = f64::NAN;
             }
         }
         g
@@ -6028,8 +6038,9 @@ mod tests {
     }
 
     #[test]
-    fn finite_difference_gradient_skips_a_stencil_that_rounds_onto_itself() {
+    fn finite_difference_gradient_uses_the_next_representable_step() {
         // Near 1e9 adjacent doubles are 1.2e-7 apart, so x +/- 1e-8 is x.
+        // The stencil steps to that neighbour.
         let obj = RecordingSphere::new(vec![1e9 - 1e-7, -1.0], vec![1e9 + 1e-7, 1.0]);
         let ledger = BudgetLedger::new(100, 2);
         let budgeted = BudgetedObjective {
@@ -6041,13 +6052,17 @@ mod tests {
             h_frac: 1e-5,
         };
         let g = fd.grad(Array1::from_vec(vec![1e9, 0.25]).view());
-        assert_eq!(g[0], 0.0);
+        assert!(
+            g[0].is_finite() && g[0] != 0.0,
+            "a one-ulp step of x^2 at 1e9 has a slope, got {}",
+            g[0]
+        );
         assert!(
             (g[1] - 0.5).abs() < 1e-6,
             "slope of x^2 at 0.25, got {}",
             g[1]
         );
-        assert_eq!(obj.calls_inside_box(), 2);
+        assert_eq!(obj.calls_inside_box(), 4);
     }
 
     #[test]
