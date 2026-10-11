@@ -229,6 +229,36 @@ def test_counts_are_the_calls_made_when_the_centre_cannot_be_used(centre, budget
     assert out["n_evals"] + out["n_grads"] <= budget
 
 
+# Each of four replicas runs on a quarter of the budget, the first ones taking
+# one more each while the remainder lasts, and opens with the probe once its
+# share reaches 96 evaluations: none of them at 380, three at 383, all at 384.
+@pytest.mark.parametrize("budget", [380, 383, 384])
+@pytest.mark.parametrize("centre", UNUSABLE_AT_THE_CENTRE)
+def test_counts_are_the_calls_made_when_each_replica_probes_the_centre(centre, budget):
+    fn, grad = UNUSABLE_AT_THE_CENTRE[centre]
+    wrapped, calls = _recorded(fn)
+    grads = []
+
+    def grad_fn(x):
+        grads.append(1)
+        return grad(x)
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", RuntimeWarning)
+        out = anneal.global_optimize(
+            wrapped,
+            [-2.0, -2.0],
+            [2.0, 2.0],
+            budget,
+            grad_fn=grad_fn,
+            x0=[1.0, -0.5],
+            replicas=4,
+        )
+    assert out["n_evals"] == len(calls)
+    assert out["n_grads"] == len(grads)
+    assert out["n_evals"] + out["n_grads"] <= budget
+
+
 def test_values_only_rosenbrock_descends_from_x0():
     dim = 10
     fn, _, low, high = _rosenbrock(dim)
