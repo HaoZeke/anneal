@@ -27,6 +27,7 @@ from chemfit_doubles import (  # noqa: E402
     ReleasedFitter,
     WorkersFitter,
     drive,
+    installed_fitter_type,
     same_params,
     sum_of_squares,
 )
@@ -53,7 +54,7 @@ def _installed_fitter():
     ``num_workers``. ChemFit's source has ``evaluate`` and ``step`` from
     commit c57d6f5 and an ``init`` that takes ``batch_size`` from 3b65fe0.
     """
-    fitter_type = pytest.importorskip("chemfit.fitter").Fitter
+    fitter_type = installed_fitter_type()
     init = getattr(fitter_type, "init", None)
     takes = callable(init) and "batch_size" in inspect.signature(init).parameters
     lacks = [] if takes else ["an init that takes batch_size"]
