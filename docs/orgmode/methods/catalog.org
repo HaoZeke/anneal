@@ -482,7 +482,7 @@ no dedicated Beta sampler.
 Constants and defaults: config knob =allocate_moves=
 (config.rs:92). Portfolio-side scheduler constants derived from the
 problem rather than tuned: =SLICE_GRAD_EQUIVALENTS = 4=,
-=ROUNDS_PER_ARM = 8= (src/methods/portfolio.rs:88-91).
+=ROUNDS_PER_ARM = 8= (src/methods/portfolio.rs:104-107).
 
 Feeds/consumes: selects among the =MoveLibrary= kernels each hop when
 =allocate_moves= is set; reused conceptually by the portfolio driver's
@@ -1427,11 +1427,11 @@ budget rather than being hand-tuned.
 
 Values-only loop: under =PortfolioPolicy::Auto= a run with no gradient
 and no declared noise goes, before any regime routing, to
-=run_values_only_portfolio= (src/methods/portfolio.rs:3477), a bandit
-over =VALUES_ONLY_ARMS= (portfolio.rs:3381: =cma=, =qn=, =gsa=, =de=,
+=run_values_only_portfolio= (src/methods/portfolio.rs:3728), a bandit
+over =VALUES_ONLY_ARMS= (portfolio.rs:3632: =cma=, =qn=, =gsa=, =de=,
 =surrogate=, =explore=) in slices of
 =max(4(d+1), min(budget/48, sqrt(4(d+1) budget)))= evaluations
-(=values_only_slice=, portfolio.rs:3396). Without =x0= it starts from
+(=values_only_slice=, portfolio.rs:3647). Without =x0= it starts from
 the best of a seeded design of =d+1= points; when the budget affords
 five gradients per coordinate, an opening finite-difference descent
 runs while its slices succeed, gain more than =1e-4= times the largest
@@ -1537,30 +1537,30 @@ short of the opening budget trail an earlier form of the loop by up to
 four times, and rotated Rastrigin and Levy trail 0.10.0.
 
 Key types and functions: top-level module doc at
-src/methods/portfolio.rs:1-46; =ContractionPosterior=
-(src/methods/portfolio.rs:272, Normal-Inverse-Gamma posterior over the
+src/methods/portfolio.rs:1-49; =ContractionPosterior=
+(src/methods/portfolio.rs:288, Normal-Inverse-Gamma posterior over the
 per-work-unit polish log-contraction rate, fit from work-normalized
 log-ratios of consecutive polish improvements); the endgame
-projected-gradient cycle helper (portfolio.rs:146) and its work-unit to
-=max_fevals= converter (portfolio.rs:134); a coordinate pattern-search
-fallback (portfolio.rs:182); the values-only =SuccessScale=
-(portfolio.rs:1439) and =DescentPace= (portfolio.rs:1515).
+projected-gradient cycle helper (portfolio.rs:162) and its work-unit to
+=max_fevals= converter (portfolio.rs:150); a coordinate pattern-search
+fallback (portfolio.rs:198); the values-only =SuccessScale=
+(portfolio.rs:1567) and =DescentPace= (portfolio.rs:1643).
 
 Constants and defaults: =SLICE_GRAD_EQUIVALENTS = 4= (a slice must
 afford a few gradient-descent steps); =ROUNDS_PER_ARM = 8=;
 =ENDGAME_WU_PER_ITER = 4=; =NEAR_BEST_ORDERS = 6.0= (Dolan-More
 tau=1e-3 to a 1e-9 win tolerance crosses six decimal orders)
-(src/methods/portfolio.rs:88-98). Endgame polish schedule: two-thirds
+(src/methods/portfolio.rs:104-114). Endgame polish schedule: two-thirds
 of remaining budget when no jittered restart has run yet, half of
-remaining otherwise, always capped at remaining (portfolio.rs:115).
-Values-only loop: =IMPROVEMENT_RTOL = 1e-4= (portfolio.rs:344);
-=QN_FTOL = 8 eps= (portfolio.rs:419); =QN_FATOL_RTOL = 1e-7=
-(portfolio.rs:427); =QN_AFFORDABLE_GRADIENTS = 5= (portfolio.rs:430);
-=GSA_LAST_SLICES = 3= (portfolio.rs:437); =PHASE_SLOWDOWN = 8=
-(portfolio.rs:440); =PHASE_TURNS = 8= (portfolio.rs:444);
-=OPENING_GAINS = 3= (portfolio.rs:450); =OPENING_SPAN = 4=
-(portfolio.rs:458); closing descent of =10(d+1)= evaluations, at most
-40% of the budget, skipped below =3(d+1)= (portfolio.rs:460-465).
+remaining otherwise, always capped at remaining (portfolio.rs:131).
+Values-only loop: =IMPROVEMENT_RTOL = 1e-4= (portfolio.rs:360);
+=QN_FTOL = 8 eps= (portfolio.rs:435); =QN_FATOL_RTOL = 1e-7=
+(portfolio.rs:443); =QN_AFFORDABLE_GRADIENTS = 5= (portfolio.rs:446);
+=GSA_LAST_SLICES = 3= (portfolio.rs:453); =PHASE_SLOWDOWN = 8=
+(portfolio.rs:456); =PHASE_TURNS = 8= (portfolio.rs:460);
+=OPENING_GAINS = 3= (portfolio.rs:466); =OPENING_SPAN = 4=
+(portfolio.rs:474); closing descent of =10(d+1)= evaluations, at most
+40% of the budget, skipped below =3(d+1)= (portfolio.rs:476-481).
 
 Feeds/consumes: consumes =crate::methods::regime= for arm priors and
 exploit probability, and the typed-algebra kernels
@@ -2020,13 +2020,13 @@ Key types and functions: =CmaEs= (src/methods/cma_es.rs:119);
 =covariance_learning_evaluations= (cma_es.rs:111, the horizon
 \(\lambda/(c_1 + c_\mu)\)); =Bipop= and =CmaRegime=
 (cma_es.rs:642/621); the portfolio's =CmaArmState= and =run_cma_arm=
-(src/methods/portfolio.rs:978/3226).
+(src/methods/portfolio.rs:1104/3475).
 
 Constants and defaults: =default_lambda= \(4 + \lfloor 3 \ln n
 \rfloor\) (cma_es.rs:82). In the portfolio every run is centred on the
 incumbent; the first is local, with step 0.025 of each side, and large
-runs use step 0.3 (portfolio.rs:393-394). Runs keep the full covariance
-up to =CMA_FULL_MAX_DIM = 100= (portfolio.rs:403) and only when the
+runs use step 0.3 (portfolio.rs:409-410). Runs keep the full covariance
+up to =CMA_FULL_MAX_DIM = 100= (portfolio.rs:419) and only when the
 budget exceeds the learning horizon; in the values-only loop each run's
 =tolfunhist= is the success threshold in force (=SuccessScale=), set
 again at every slice the arm plays, so a run stops once its recent
@@ -2088,9 +2088,9 @@ does not depend on the objective's scale. A descent ends on a slow
 iteration, a projected-gradient tolerance when one is set, or a failed
 line search.
 
-Key types and functions: =FdBfgs= (src/methods/fd_bfgs.rs:152);
+Key types and functions: =FdBfgs= (src/methods/fd_bfgs.rs:154);
 =FdBfgsOptions= (fd_bfgs.rs:76); the portfolio's =QnArmState= and
-=run_qn_arm= (src/methods/portfolio.rs:1067/3300).
+=run_qn_arm= (src/methods/portfolio.rs:1193/3549).
 
 Constants and defaults: =ARMIJO = 1e-4=, =MAX_LINE_TRIALS = 40=,
 =FIRST_STEP_FRACTION = 0.05=, =CENTRAL_INTERVAL_FRACTION = 0.1=,
