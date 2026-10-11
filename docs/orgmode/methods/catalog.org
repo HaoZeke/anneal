@@ -1427,11 +1427,11 @@ budget rather than being hand-tuned.
 
 Values-only loop: under =PortfolioPolicy::Auto= a run with no gradient
 and no declared noise goes, before any regime routing, to
-=run_values_only_portfolio= (src/methods/portfolio.rs:3464), a bandit
-over =VALUES_ONLY_ARMS= (portfolio.rs:3368: =cma=, =qn=, =gsa=, =de=,
+=run_values_only_portfolio= (src/methods/portfolio.rs:3477), a bandit
+over =VALUES_ONLY_ARMS= (portfolio.rs:3381: =cma=, =qn=, =gsa=, =de=,
 =surrogate=, =explore=) in slices of
 =max(4(d+1), min(budget/48, sqrt(4(d+1) budget)))= evaluations
-(=values_only_slice=, portfolio.rs:3383). Without =x0= it starts from
+(=values_only_slice=, portfolio.rs:3396). Without =x0= it starts from
 the best of a seeded design of =d+1= points; when the budget affords
 five gradients per coordinate, an opening finite-difference descent
 runs while its slices succeed, gain more than =1e-4= times the largest
@@ -1516,26 +1516,25 @@ objective they last a number of slices that does not grow with the
 budget, while the number of slices does, and every arm keeps a uniform
 share and is pulled infinitely often as the budget grows.
 
-Measured costs, over 40 paired seeds against the rule each replaced
-(medians; every row, and what putting the replaced rule back costs, in
+Measured costs, over 40 paired seeds against the loop's form before
+these rules (medians; every row, and what putting the replaced rule
+back costs with the other rules in place, in
 [[file:../explanation/regime_auto.org::*Measured costs][the regime notes]]):
 the rate hand-over trails two fixed =gsa= slices on =ellS30@1000=,
 =ellS50@5000=, =ellS100@5000=, =ellS100@20000= (1.17 against 0.0282),
 =ellR100@20000=, =rosen100@20000=, =stybR30@1000=, =levy100@20000=,
-=rast100_shift@20000= and =rastS100@20000=; the opening's bar trails an
-opening that goes on while each slice succeeds on =ellS30@5000= and
+=rast100_shift@20000= and =rastS100@20000=; the opening's bar trails
+an opening that goes on while each slice succeeds on =ellS30@5000=,
 =rosen30@5000= (22.2 against 16.2), with that row's copies and
-controls, and on the =ellR30@5000= offset controls; the =8 eps=
-resolution test trails a =1e-12= tolerance on =fit6@1000= (-4.78
-against -4.89) with its copies and controls, on =ellR30@20000=,
-=ellR50@20000= and the =x1e-6= control of =ellR30@5000=, and together
-with the bar on =ellR30@5000= (3.4e-8 against 0) and its scaled
-copies; the last-gain threshold trails =1e-4 max(|f|, s)= on
-=rastR100@20000= (870 against 833) and the =+1e2= copy of
-=levy30@5000=; the fifth-slice lend trails on =mich10@5000= (-9.655
-against -9.66, =p= 0.021). Rotated ellipsoids short of the opening
-budget trail an earlier form of the loop by up to four times, and
-rotated Rastrigin and Levy trail 0.10.0.
+controls, and =ellR30@5000= (4.8e-23 against 0), with its scaled
+copies and offset controls; the =8 eps= resolution test with its floor
+trails a =1e-12= tolerance on =griewank10@5000= without =x0= (0.0308
+against 0.0221, =p= 0.049); the last-gain threshold trails
+=1e-4 max(|f|, s)= on =rastR100@20000= (870 against 833) and the
+=+1e2= copy of =levy30@5000=; the fifth-slice lend trails on
+=mich10@5000= (-9.655 against -9.66, =p= 0.020). Rotated ellipsoids
+short of the opening budget trail an earlier form of the loop by up to
+four times, and rotated Rastrigin and Levy trail 0.10.0.
 
 Key types and functions: top-level module doc at
 src/methods/portfolio.rs:1-46; =ContractionPosterior=
@@ -1545,7 +1544,7 @@ log-ratios of consecutive polish improvements); the endgame
 projected-gradient cycle helper (portfolio.rs:146) and its work-unit to
 =max_fevals= converter (portfolio.rs:134); a coordinate pattern-search
 fallback (portfolio.rs:182); the values-only =SuccessScale=
-(portfolio.rs:1431) and =DescentPace= (portfolio.rs:1507).
+(portfolio.rs:1439) and =DescentPace= (portfolio.rs:1515).
 
 Constants and defaults: =SLICE_GRAD_EQUIVALENTS = 4= (a slice must
 afford a few gradient-descent steps); =ROUNDS_PER_ARM = 8=;
@@ -1555,13 +1554,13 @@ tau=1e-3 to a 1e-9 win tolerance crosses six decimal orders)
 of remaining budget when no jittered restart has run yet, half of
 remaining otherwise, always capped at remaining (portfolio.rs:115).
 Values-only loop: =IMPROVEMENT_RTOL = 1e-4= (portfolio.rs:344);
-=QN_FTOL = 8 eps= (portfolio.rs:419); =QN_AFFORDABLE_GRADIENTS = 5=
-(portfolio.rs:422); =GSA_LAST_SLICES = 3= (portfolio.rs:429);
-=PHASE_SLOWDOWN = 8= (portfolio.rs:432); =PHASE_TURNS = 8=
-(portfolio.rs:436); =OPENING_GAINS = 3= (portfolio.rs:442);
-=OPENING_SPAN = 4= (portfolio.rs:450); closing descent of =10(d+1)=
-evaluations, at most 40% of the budget, skipped below =3(d+1)=
-(portfolio.rs:452-457).
+=QN_FTOL = 8 eps= (portfolio.rs:419); =QN_FATOL_RTOL = 1e-7=
+(portfolio.rs:427); =QN_AFFORDABLE_GRADIENTS = 5= (portfolio.rs:430);
+=GSA_LAST_SLICES = 3= (portfolio.rs:437); =PHASE_SLOWDOWN = 8=
+(portfolio.rs:440); =PHASE_TURNS = 8= (portfolio.rs:444);
+=OPENING_GAINS = 3= (portfolio.rs:450); =OPENING_SPAN = 4=
+(portfolio.rs:458); closing descent of =10(d+1)= evaluations, at most
+40% of the budget, skipped below =3(d+1)= (portfolio.rs:460-465).
 
 Feeds/consumes: consumes =crate::methods::regime= for arm priors and
 exploit probability, and the typed-algebra kernels
@@ -2021,7 +2020,7 @@ Key types and functions: =CmaEs= (src/methods/cma_es.rs:119);
 =covariance_learning_evaluations= (cma_es.rs:111, the horizon
 \(\lambda/(c_1 + c_\mu)\)); =Bipop= and =CmaRegime=
 (cma_es.rs:642/621); the portfolio's =CmaArmState= and =run_cma_arm=
-(src/methods/portfolio.rs:970/3218).
+(src/methods/portfolio.rs:978/3226).
 
 Constants and defaults: =default_lambda= \(4 + \lfloor 3 \ln n
 \rfloor\) (cma_es.rs:82). In the portfolio every run is centred on the
@@ -2089,18 +2088,21 @@ does not depend on the objective's scale. A descent ends on a slow
 iteration, a projected-gradient tolerance when one is set, or a failed
 line search.
 
-Key types and functions: =FdBfgs= (src/methods/fd_bfgs.rs:148);
+Key types and functions: =FdBfgs= (src/methods/fd_bfgs.rs:152);
 =FdBfgsOptions= (fd_bfgs.rs:76); the portfolio's =QnArmState= and
-=run_qn_arm= (src/methods/portfolio.rs:1059/3292).
+=run_qn_arm= (src/methods/portfolio.rs:1067/3300).
 
 Constants and defaults: =ARMIJO = 1e-4=, =MAX_LINE_TRIALS = 40=,
 =FIRST_STEP_FRACTION = 0.05=, =CENTRAL_INTERVAL_FRACTION = 0.1=,
 =INTERVAL_MOVE = 2=, =MAX_REDIFFERENCES = 2= (fd_bfgs.rs:50-72). The
 default options have =ftol = 1e-12=, three slow iterations of
 patience, the value floor =f64::MIN_POSITIVE= in the slow-iteration
-test and no gradient tolerance; the portfolio's values-only descents
-use =ftol = 8 eps= (=QN_FTOL=), so they stop on the resolution of their
-values.
+test, no absolute floor on it (=fatol = 0=) and no gradient tolerance;
+the portfolio's values-only descents use =ftol = 8 eps= (=QN_FTOL=)
+and, from each slice, =fatol= at =1e-7= of the success threshold
+(=QN_FATOL_RTOL=, set through =FdBfgs::set_fatol=), so an iteration is
+slow once it gains no more than the resolution of its value or that
+floor, whichever is larger.
 
 Feeds/consumes: the =qn= arm of the portfolio's values-only loop (its
 opening and closing descents, and descents kicked from the incumbent

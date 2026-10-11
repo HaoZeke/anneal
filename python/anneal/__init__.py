@@ -1307,18 +1307,17 @@ def global_optimize(
     cannot last on a bounded objective, and after that every arm keeps a
     uniform share and is pulled infinitely often as the budget grows.
 
-    Measured over 40 paired seeds, these rules trail the ones they
-    replaced on some rows, each listed with its numbers, and with what
-    the replaced rule costs elsewhere, in the documentation's regime
+    Measured over 40 paired seeds, the loop trails its form before these
+    rules on some rows, each listed with its numbers and what the
+    replaced rule costs elsewhere, in the documentation's regime
     auto-selection notes: the short-budget hand-over on shifted
     ellipsoids at 30 dimensions and 1000 evaluations, 50 and 100 at 5000
     and 100 at 20000, on the 100-dimensional rotated ellipsoid,
     Rosenbrock, Levy and shifted Rastrigin rows at 20000 and on rotated
     Styblinski-Tang at 30 and 1000; the opening's bar on the shifted
-    ellipsoid and Rosenbrock at 30 dimensions and 5000; the descent's
-    resolution test on the six-parameter fit at 1000 and on rotated
-    ellipsoids at 30 and 50 dimensions and 20000, and together with the
-    bar on the 30-dimensional one at 5000; the threshold on the last
+    and rotated ellipsoids and Rosenbrock at 30 dimensions and 5000;
+    the descent's resolution test and its floor on Griewank at 10
+    dimensions and 5000 without ``x0``; the threshold on the last
     gain on rotated Rastrigin at 100 dimensions and 20000 and on Levy
     at 30 and 5000 with 100 added to it; lending from an annealing
     phase's fifth slice on Michalewicz at 10 dimensions and 5000; and
