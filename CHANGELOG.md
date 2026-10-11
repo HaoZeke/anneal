@@ -6,6 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 <!-- towncrier release notes start -->
 
+## [0.11.1](https://github.com/HaoZeke/anneal/tree/v0.11.1) - 2026-10-11
+
+### Fixed
+
+- The box ensemble drivers keep the callback error record the other
+  drivers already keep, and a callback exception ends the call the same
+  way.
+
+
 ## [0.11.0](https://github.com/HaoZeke/anneal/tree/v0.11.0) - 2026-10-11
 
 ### Deprecated
