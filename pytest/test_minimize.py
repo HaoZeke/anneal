@@ -469,6 +469,7 @@ def test_keywords_without_an_effect_warn_and_leave_the_run_alone(keyword, value,
         ({"coverage_radius": "wide"}, TypeError),
         ({"coverage_neighbors": -1}, ValueError),
         ({"coverage_neighbors": 1.5}, TypeError),
+        ({"coverage_neighbors": 2**64}, OverflowError),
         ({"coverage_shared": "yes"}, TypeError),
     ],
 )
