@@ -9,7 +9,7 @@ call for call, and the result reports ``n_batches``. There
 ``coverage_radius`` and ``coverage_neighbors``, which now default to
 ``None``, have nothing to act on and give a ``FutureWarning`` when given, as
 they do in ``minimize``. Over 40 paired seeds at equal evaluations on 16
-cells, four of which draw the start near the minimum, four batch replicas
+cells, eight of which draw the start near the minimum, four batch replicas
 ended ahead of the run that dropped the start on 13 cells and level on
 three, and ahead of four persistent replicas with replica 0 at ``x0`` on 10
 cells and level on six. Without ``x0``, or with a gradient, declared noise
