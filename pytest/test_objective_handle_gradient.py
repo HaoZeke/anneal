@@ -59,10 +59,12 @@ class Recorded:
         g = 2.0 * (np.asarray(x, dtype=float) - CENTRE)
         return g if self.layout is None else self.layout(g)
 
-    def handle(self, make=anneal.PyObjective):
+    def handle(self, make=anneal.PyObjective, gradient=True):
         bounds = anneal.Bounds(LOW, HIGH)
         if make is CorePyObjective:
             bounds = bounds._core
+        if not gradient:
+            return make(self.value, bounds)
         return make(self.value, bounds, grad_fn=self.gradient)
 
 
@@ -128,3 +130,52 @@ def test_a_gradient_that_is_not_numbers_is_a_type_error(entry):
     with pytest.raises(TypeError, match="grad_fn must return numbers, got str"):
         RUNS[entry](objective.handle())
     assert objective.calls[-1] == "gradient"
+
+
+@pytest.mark.parametrize("make", [anneal.PyObjective, CorePyObjective])
+@pytest.mark.parametrize("entry", RUNS)
+def test_a_handle_without_grad_fn_ends_the_run_saying_what_to_pass(entry, make):
+    def refuse(g):
+        raise NoGradient("no gradient here")
+
+    raising = Recorded(refuse)
+    with pytest.raises(NoGradient):
+        RUNS[entry](raising.handle(make))
+    without = Recorded()
+    with pytest.raises(ValueError) as caught:
+        RUNS[entry](without.handle(make, gradient=False))
+    instead = ""
+    if entry == "global_optimize_objective":
+        instead = ", or pass use_gradient=False to run on values alone"
+    assert str(caught.value) == (
+        f"{entry} reads gradients, and this PyObjective has no grad_fn: build it"
+        f" with grad_fn, a callable returning the gradient of fn_{instead}"
+    )
+    assert raising.calls[-1] == "gradient"
+    assert without.calls == raising.calls[:-1]
+
+
+@pytest.mark.parametrize("make", [anneal.PyObjective, CorePyObjective])
+def test_use_gradient_false_runs_a_handle_without_grad_fn(make):
+    plain, without = Recorded(), Recorded()
+    expected = anneal.global_optimize_objective(
+        plain.handle(make), 120, seed=3, use_gradient=False
+    )
+    out = anneal.global_optimize_objective(
+        without.handle(make, gradient=False), 120, seed=3, use_gradient=False
+    )
+    _same_run(out, expected)
+    assert without.calls == plain.calls
+    assert "gradient" not in plain.calls
+
+
+@pytest.mark.parametrize("make", [anneal.PyObjective, CorePyObjective])
+@pytest.mark.parametrize("entry", RUNS)
+def test_a_value_error_from_grad_fn_is_raised_as_it_is(entry, make):
+    def refuse(g):
+        raise ValueError("no gradient at this point")
+
+    objective = Recorded(refuse)
+    with pytest.raises(ValueError, match="^no gradient at this point$"):
+        RUNS[entry](objective.handle(make))
+    assert objective.calls.count("gradient") == 1
