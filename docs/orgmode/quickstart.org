@@ -219,7 +219,7 @@ Pass CuPy arrays instead of NumPy and the kernels stay on GPU (see device.org).
 
 * Next steps
 
-- Full step-by-step: [[file:tutorials.org][tutorials]] (legacy) and the new per-family tutorials (classical, Bayesian pilot+mixer, GLE colored noise, polish+device).
+- Full step-by-step: the per-family tutorials, [[file:tutorials/classical-and-presets.org][classical]], [[file:tutorials/bayesian-pilot-mixer.org][Bayesian pilot+mixer]], [[file:tutorials/gle-colored-noise.org][GLE colored noise]] and [[file:tutorials/polish-device-scale.org][polish+device]].
 - Why the algebra lets one change serve all drivers: [[file:architecture.org][architecture]] and [[file:explanation/algebra.org][algebra]] (T4).
 - Practical recipes: [[file:faq.org][faq]] and how-to guides (T4).
 - The typed specification and TLA+ invariants: [[file:spec.org][spec]].

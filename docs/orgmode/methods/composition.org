@@ -330,7 +330,7 @@ digraph composition {
 * Corrections and precise terminology
 
 Three points in the narrative above use looser language than the code
-supports. Stated precisely, with the file:line evidence.
+supports. Stated precisely, with the =file:line= evidence.
 
 ** The five-fold typed design
 
