@@ -116,8 +116,9 @@ pub use mcmc_sa::{GelmanRubin, MultiChainResult, MultiChainSampler, MultiChainSt
 pub use parallel_tempering::{ParallelTemperingSampler, PtChainState, PtResult, geometric_ladder};
 pub use portfolio::{
     ArmStat, PortfolioEnsembleConfig, PortfolioEnsembleResult, PortfolioPolicy, PortfolioResult,
-    portfolio_ensemble_optimize, portfolio_optimize, portfolio_optimize_from,
-    portfolio_optimize_seeded, portfolio_optimize_with_policy, portfolio_values_ensemble_optimize,
+    ReplicaArchive, ReplicaResult, portfolio_ensemble_optimize, portfolio_optimize,
+    portfolio_optimize_from, portfolio_optimize_seeded, portfolio_optimize_with_policy,
+    portfolio_replicas, portfolio_values_ensemble_optimize,
 };
 pub use regime::{
     OptimizationRegime, ProblemFeatures, RegimeError, arm_prior_boost, arm_slice_multiplier,

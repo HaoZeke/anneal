@@ -44,6 +44,13 @@
 //! budget. The additive surrogate is fit from the archive of already-
 //! charged evaluations, so its proposals cost only their acceptance
 //! tests.
+//!
+//! [`portfolio_replicas`] runs several values-only loops as one batched
+//! search from a start point, with one archive between them or one each.
+
+mod replicas;
+
+pub use replicas::{ReplicaArchive, ReplicaResult, portfolio_replicas};
 
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
@@ -1276,6 +1283,8 @@ struct ArmStates {
     cma: Option<CmaArmState>,
     /// Persistent finite-difference quasi-Newton descent.
     qn: Option<QnArmState>,
+    /// Coordinate the descent's gradients difference first.
+    qn_first: usize,
     /// Set by the values-only loop. Without a gradient, the GSA arm then
     /// starts its first chain (the only one from 10 dimensions) at the
     /// incumbent and runs its chains quenched, without a local search, and
@@ -3557,6 +3566,7 @@ fn run_qn_arm<O>(
     } else {
         FdBfgsOptions::default()
     };
+    let first = states.qn_first;
     // An evaluated incumbent is not evaluated again; one whose value is not
     // finite ends the descent at once, so the first slice kicks from it.
     let state = states.qn.get_or_insert_with(|| QnArmState {
@@ -3565,7 +3575,8 @@ fn run_qn_arm<O>(
             ledger.incumbent_value(),
             bounds,
             options,
-        ),
+        )
+        .with_first_coordinate(first),
         kick: QN_KICK0,
         base_val: best,
         seen_best: best,
