@@ -376,6 +376,82 @@ behind 0.10.0, and costs =ackS30@5000=, 2.01 against the loop's 6.2e-7
 still behind 0.10.0 (5/0/35), and two fixed =gsa= slices short of the
 opening budget leave it at 873.
 
+** Batch replicas
+
+=anneal.minimize= is the front end for runs from a start point. With one
+replica it calls =global_optimize= with =x0=, and the run is the loop
+above, call for call. With =replicas=R= it runs =portfolio_replicas=:
+=x0= is evaluated once, as a batch of one, and =R= copies of the loop
+start from it, each with an even share of the rest of the budget and its
+own seed (replica 0 keeps the run's), and each plays the loop as a solo
+run of its share and the start would. At each step every replica still
+running proposes one point; the points are evaluated as one batch,
+through =fun.eval_batch= when there is one, and recorded before any
+replica goes on, so a run repeats with its seed.
+
+With the default shared history the replicas keep one archive and so one
+incumbent. Arms that start from the incumbent start from the best point
+any replica has found, the surrogate fits every replica's evaluations,
+and a point another replica has evaluated costs nothing, once per
+replica. Replicas that open with a descent from =x0=, or restart one at a
+common incumbent, would ask for the same stencil points in the same
+order, so replica =r= differences each gradient from coordinate =r d / R=
+on instead: the replicas ask for different points of one gradient, which
+then takes about =d / R= batches. Replicas that ask for one point in the
+same batch share its row, paid for by the one with the most of its share
+left, so no replica spends its share on a common descent before the
+others, and a step in which they follow one line search is a batch of
+fewer than =R= points. With =history="private"= every replica keeps its
+own archive, as =R= independent runs of a share each batched together
+would: the control for what sharing is worth.
+
+Measured over 40 paired seeds at 1000 and 5000 evaluations on four
+ChemFit-shaped cells, every run seen through one ChemFit =Fitter=
+session that receives each batch as one =evaluate= of a list and one
+=step=: 13-atom Lennard-Jones positions (=lj13=, 39 coordinates), a
+six-parameter binary Lennard-Jones fit (=binary_lj_fit=, the base-10
+logarithm of a mean squared energy error), and Rastrigin and Rosenbrock
+in 10 dimensions, each run starting from a point its seed draws in the
+box. Four shared replicas beat four private ones at =p < 1e-6= on
+=lj13@1000= (40/0/0, medians -25.7 against -20.8), =lj13@5000= (39/0/1,
+-39.6 against -35.3), =binary_lj_fit@1000= (40/0/0, -4.91 against
+-1.02), =binary_lj_fit@5000= (40/0/0, -12.5 against -5.35),
+=rastrigin10@5000= (31/8/1, 0 against 1.99) and =rosenbrock10@1000=
+(40/0/0, 0.86 against 6.64), and at 1000 with three coordinates of
+=lj13= fixed (39/0/1) or one parameter of =binary_lj_fit= fixed
+(39/1/0). =rosenbrock10@5000= ties (3/37/0), and =rastrigin10@1000= is
+level (16/3/21, 14.4 against 12.9, =p= 0.17 that sharing trails). No
+seed gives the two the same run. A shared run takes from a quarter to
+half as many batches as evaluations at 1000 (medians of 264 on =lj13=
+and 504 on =binary_lj_fit=) and from 0.27 to 0.41 of them at 5000, a
+private one a quarter.
+
+Against one replica with the same total budget, four shared replicas
+win =binary_lj_fit@1000= (20/17/3, =p= 1.3e-5) and are level at 5000 on
+every cell, but trail at 1000 on =lj13= (1/0/39, -25.7 against -31.6),
+where a share of 250 evaluations plays little more than one slice of at
+least =4(d+1)= = 160, and on =rastrigin10= (0/0/40, 14.4 against 3.98)
+and =rosenbrock10= (2/1/37, 0.86 against 1.7e-16), where it falls short
+of the 550 evaluations, =5d(d+1)=, from which one replica opens with a
+descent from the start. So =minimize= runs one replica by default.
+Replicas pay where a batch takes about as long as one evaluation: four
+shared replicas take a quarter to half as many sequential steps, and
+reach a better point for the same number of evaluations only on the fit
+at 1000.
+
+Against nevergrad's =NgIohTuned=, asked and told one point at a time
+from the same start for the same number of evaluations, one replica wins
+all four =lj13= and =binary_lj_fit= cells (36/0/4 and 27/1/12 on =lj13=
+at 1000 and 5000, 36/0/4 and 33/0/7 on the fit), and four shared
+replicas win three and trail on =lj13@1000= (12/0/28, -25.7 against
+-26.8). =ensemble_optimize= at its defaults, four values-only hop chains
+sharing their history, from the same start with the same budget ends
+behind both on all eight cells, 40/0/0 each: at 1000 its medians are
+-3.93 on =lj13=, 1.89 on =binary_lj_fit=, 66.7 on =rastrigin10= and 13.4
+on =rosenbrock10=, against one replica's -31.6, -4.82, 3.98 and 1.7e-16,
+and at 5000 they are -6.94, -1.31, 47.8 and 2.61 against -39.7, -12.9, 0
+and 2.9e-27.
+
 * Regimes → preferred portfolio arms / kernels
 
 These rows govern runs with a gradient or a declared noise scale; Legacy

@@ -140,8 +140,10 @@ assert len(result["replicas"]) == 4
 The portfolio requires finite positive-width intervals. Fixed-axis box search
 uses the separate convenience domain mapping described below. A caller-owned
 native objective handle passed to =global_optimize_objective= retains its
-single-portfolio interface. ChemFit's =fit_anneal(jac=False)= calls =minimize=;
-it does not implicitly select the portfolio ensemble shown here.
+single-portfolio interface. ChemFit's =fit_anneal=, on its default portfolio
+driver, runs =global_optimize= from the fitter's start, or batch replicas of
+=minimize= with =batch_size= above one; it does not implicitly select the
+portfolio ensemble shown here.
 
 At arm checkpoints, replicas publish paid feasible positions and receive peers'
 bounded sample clouds. Each chain freezes its received cloud for a slice and
@@ -240,10 +242,11 @@ chain four. Saturating the radius yields all-to-all without duplicate edges.
 Retiring a reader does not renumber the ring or discard its producer history
 for live neighbours. Private or zero-weight coverage delivers nothing.
 
-=global_optimize= defaults =coverage_neighbors= to zero. =minimize= and
-=ensemble_optimize= default it to =None= to preserve their convenience
-dispatch; specifying it selects configured hop coverage, like an explicit
-sharing or radius control. It requires no Jacobian or force callback.
+=global_optimize= defaults =coverage_neighbors= to zero. =ensemble_optimize=
+defaults it to =None= to preserve its convenience dispatch; specifying it
+selects configured hop coverage, like an explicit sharing or radius control.
+It requires no Jacobian or force callback. =minimize= runs no hop chains and
+accepts the setting with a =FutureWarning=.
 
 The graph restricts coverage, not the optional exact minimum ledger. Receivers
 do not republish imported samples or visits. These are direct subscriptions,
@@ -262,10 +265,11 @@ controls. =census_bus_topology= requires =bank-rpc= and exercises TCP and IPC.
 
 ** Common Python result and domain
 
-=minimize(fun, x0, bounds, jac=None, budget=..., replicas=...)= delegates to
-=ensemble_optimize= and retains its complete result dictionary under
-=result.diagnostics=. It does not select atomic geometry from vector length
-or introduce a separate optimization loop.
+=minimize(fun, x0, bounds, jac=None, budget=..., replicas=...)= runs
+=global_optimize= from =x0= with one replica and batch replicas of the
+values-only portfolio with more, and retains the engine's result dictionary
+under =result.diagnostics=. It does not select atomic geometry from vector
+length or introduce a separate optimization loop.
 
 The declared box contains finite closed intervals. Equal endpoints fix an
 axis while every objective and gradient callback retains the full design
@@ -291,13 +295,12 @@ result = anneal.minimize(
     bounds=[(-2.0, 2.0), (0.0, 0.0), (-2.0, 2.0)],
     jac=lambda x: 2.0 * x,
     budget=256,
-    replicas=4,
     seed=7,
 )
 assert result.x.shape == (3,)
 assert result.x[1] == 0.0
 assert result.charged == result.nfev + result.njev <= 256
-assert len(result.diagnostics["coverage_regions_per_chain"]) == 4
+assert result.diagnostics["best_pos"].shape == (3,)
 #+end_src
 
 =success= means a finite feasible candidate was returned. It is not a local
@@ -384,26 +387,27 @@ residual allowance too small for local refinement. Every added evaluation
 uses the same ledger and can improve the raw incumbent. A fully fixed
 one-replica domain retains its single-evaluation shortcut.
 
-The common Python entries expose this distinction directly. For a supplied
-scalar =loss=, parameter vector =x0= and finite =bounds=:
+The Python =ensemble_optimize= entry exposes this distinction directly. For a
+supplied scalar =loss=, parameter vector =x0= and finite =low= and =high=:
 
 #+begin_src python
-result = anneal.minimize(
-    loss, x0, bounds,
-    jac=None, replicas=4, budget=8000,
+result = anneal.ensemble_optimize(
+    loss, low, high, x0=x0,
+    grad_fn=None, replicas=4, budget=8000,
     history="none", coverage_shared=True,
 )
-assert result.njev == 0
-assert result.diagnostics["history_minima"] == 0
-assert result.charged == result.nfev <= 8000
+assert result["n_grads"] == 0
+assert result["history_minima"] == 0
+assert result["charged"] == result["n_evals"] <= 8000
 #+end_src
 
 =coverage_radius= optionally changes normalized parameter-space reach.
 It is finite and positive; it does not request a Jacobian, change atom counts
 or set minimum identity. Omitted coverage controls preserve the convenience
 defaults. Explicit coverage controls select native hop chains even for one
-values-only replica. =ensemble_optimize= accepts the same controls and
-returns the underlying diagnostics dictionary.
+values-only replica. =minimize= runs no hop chains: its =coverage_shared=
+chooses whether batch replicas keep one archive, and it accepts
+=coverage_radius= and =coverage_neighbors= with a =FutureWarning=.
 
 ** Nearby sampled regions repel proposals directly
 
@@ -508,16 +512,16 @@ range from one quarter to four times its initial scale. Langevin uses
 one to four times its calibrated excitation: novelty relaxes a return
 boost but cannot undercut the temperature learned from raw energy gaps.
 
-Python forwards these six counters under their =coverage_= prefixed names;
-=minimize= retains them in =diagnostics=. The one-replica values portfolio
-does not use box coverage feedback and reports zero for all six.
+Python's =ensemble_optimize= forwards these six counters under their
+=coverage_= prefixed names. The one-replica values portfolio does not use box
+coverage feedback and reports zero for all six.
 
 ** Measure delivery separately from decision influence
 
 =result.coverage_decisions= records the acceptance comparisons that consume
-coverage. Python returns the same fields under ="coverage_decisions"=;
-=minimize= retains that dictionary in =result.diagnostics=. The one-replica
-values-only portfolio has no box acceptance comparisons and reports zeros.
+coverage. Python's =ensemble_optimize= returns the same fields under
+="coverage_decisions"=. The one-replica values-only portfolio has no box
+acceptance comparisons and reports zeros.
 
 The measurement subtracts the actual imported-height difference from each
 biased energy difference. It holds the actual endpoints, region map,

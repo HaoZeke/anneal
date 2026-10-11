@@ -1516,6 +1516,32 @@ objective they last a number of slices that does not grow with the
 budget, while the number of slices does, and every arm keeps a uniform
 share and is pulled infinitely often as the budget grows.
 
+Batch replicas: =portfolio_replicas= (src/methods/portfolio/replicas.rs:379)
+runs =R= copies of the values-only loop from =x0= under one total budget.
+=x0= is evaluated once, as a batch of one, and the rest of the budget is
+split as evenly as it goes; replica =r= runs the loop as the solo run of
+its share from =x0= would, seeded with =seed= mixed with =r=, its descent
+differencing each gradient from coordinate =r d / R= on
+(=FdBfgs::with_first_coordinate=, fd_bfgs.rs:232), and replica 0 keeps
+=seed= and coordinate 0. Each replica plays on a scoped thread, and the
+coordinator on the calling thread (=coordinate=, replicas.rs:242) gathers
+one point from every replica still running, evaluates them as one batch
+through =Objective::eval_batch= and records them while every replica
+waits, so a run depends on its seed alone. With =ReplicaArchive::Shared=
+the replicas keep one archive and one incumbent: a point another replica
+has evaluated is answered once per replica with no call and no charge
+(=Seen=, replicas.rs:214), and replicas that ask for one point in the
+same batch share its row, charged to the one with the most of its share
+left, so descents that meet pay for each point once and a gradient takes
+about =d / R= batches. =ReplicaArchive::Private= keeps one archive per
+replica, the control for what sharing is worth. Over 40 paired seeds on
+four ChemFit-shaped cells at 1000 and 5000 evaluations, four shared
+replicas beat four private ones on six of the eight cells and trail on
+none, and against one replica with the same budget they win
+=binary_lj_fit@1000=, trail on the other three cells at 1000 and are
+level on all four at 5000
+([[file:../explanation/regime_auto.org::*Batch replicas][every row in the regime notes]]).
+
 Measured costs, over 40 paired seeds against the loop's form before
 these rules (medians; every row, and what putting the replaced rule
 back costs with the other rules in place, in
@@ -1544,7 +1570,9 @@ log-ratios of consecutive polish improvements); the endgame
 projected-gradient cycle helper (portfolio.rs:162) and its work-unit to
 =max_fevals= converter (portfolio.rs:150); a coordinate pattern-search
 fallback (portfolio.rs:198); the values-only =SuccessScale=
-(portfolio.rs:1567) and =DescentPace= (portfolio.rs:1643).
+(portfolio.rs:1567) and =DescentPace= (portfolio.rs:1643); the batch
+replicas' module doc at src/methods/portfolio/replicas.rs:1-29,
+=ReplicaArchive= (replicas.rs:45) and =ReplicaResult= (replicas.rs:56).
 
 Constants and defaults: =SLICE_GRAD_EQUIVALENTS = 4= (a slice must
 afford a few gradient-descent steps); =ROUNDS_PER_ARM = 8=;
@@ -1565,7 +1593,11 @@ Values-only loop: =IMPROVEMENT_RTOL = 1e-4= (portfolio.rs:360);
 Feeds/consumes: consumes =crate::methods::regime= for arm priors and
 exploit probability, and the typed-algebra kernels
 (=crate::movekernel=, =crate::exchange=, =crate::accept=, =crate::cool=,
-=crate::neigh=) rather than the cluster-specific move library.
+=crate::neigh=) rather than the cluster-specific move library. Feeds the
+Python front end =anneal.minimize= (python/anneal/__init__.py:1197),
+which runs =global_optimize= with one replica and the batch replicas,
+through =global_optimize_replicas= (src/python.rs:2509), with more, and
+=anneal.chemfit='s portfolio driver with =batch_size= above one.
 
 ** Parallel tempering / replica exchange
 

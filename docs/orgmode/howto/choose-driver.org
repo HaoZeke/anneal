@@ -25,10 +25,15 @@ Ask in order:
      portfolio. Default =replicas=4= without a gradient is a
      communicating values-only chain. Use =global_optimize= when you
      want portfolio arms rather than hops.
+   - From a start point, =anneal.minimize= runs the portfolio with a
+     SciPy shape: one replica by default, or batch replicas whose
+     proposals are evaluated together. See
+     [[file:minimize.org][Minimize from a start point]].
 
-   ChemFit is a design box. Call =anneal.minimize= with =replicas=
-   and =store= (HDF5 file or an existing readcon-db campaign directory).
-   See [[file:chemfit.org][ChemFit]]. Do not use =cluster_search=.
+   ChemFit is a design box. Fit through =anneal.chemfit= (below), or call
+   =anneal.minimize= on the flattened parameters with =store= (HDF5 file or
+   an existing readcon-db campaign directory) to start from and record to
+   an archive. See [[file:chemfit.org][ChemFit]]. Do not use =cluster_search=.
 
 3. Do you want the typed SA algebra (Cool / Move / Accept) on a box?
    - Values only → =run= with Boltzmann / Fast / Gsa.
@@ -70,4 +75,9 @@ bridge (=fit_anneal=, =fit_chemfit=, =run_benchmark=, =run_fitter=) drives
 =evaluate= / =step= on current ChemFit and =ask= / =tell= on ChemFit 3.1,
 and the first exception the fitter raises stops the fit and reaches the
 caller without =finish=.
+With =batch_size= above one, =fit_anneal=, =fit_chemfit= and
+=run_benchmark= run the portfolio as batch replicas and hand each batch of
+candidates to one =evaluate= of a list and one =step=;
+[[file:minimize.org][Minimize from a start point]] shows =anneal.minimize=
+itself, with bounds, replicas and such a fit.
 See =examples/chemfit_positions.py= and =examples/chemfit_anneal.py=.

@@ -1,0 +1,144 @@
+#+TITLE: Minimize from a Start Point
+#+OPTIONS: toc:nil todo:nil num:nil author:nil title:nil ^:nil
+
+* A SciPy-shaped call
+
+=anneal.minimize(fun, x0, bounds, jac=None, *, budget=None, seed=0,
+replicas=1, history="shared", store=None, ...)= runs the start-aware
+portfolio of =global_optimize= from =x0= inside a box. =x0= must be finite
+and inside the box; it is the run's first evaluation, made once.
+
+#+begin_src python
+import numpy as np
+import anneal
+
+
+def rosen(x):
+    return float(np.sum(100.0 * (x[1:] - x[:-1] ** 2) ** 2 + (1.0 - x[:-1]) ** 2))
+
+
+x0 = np.full(6, -1.0)
+result = anneal.minimize(rosen, x0, [(-2.0, 2.0)] * 6, budget=2000, seed=0)
+print(result.x, result.fun, result.nfev, result.message)
+#+end_src
+
+=bounds= takes the forms SciPy does: a =scipy.optimize.Bounds= (or anything
+with =lb= and =ub=, scalars broadcast), an =(n, 2)= array, or =n= pairs
+=(low, high)=. Every end must be finite. A coordinate whose two ends are equal
+is fixed: the search runs in the free coordinates and =fun= still receives
+full-length vectors.
+
+#+begin_src python
+bounds = [(-2.0, 2.0)] * 5 + [(1.0, 1.0)]
+x0 = np.array([-1.0, -1.0, -1.0, -1.0, -1.0, 1.0])
+result = anneal.minimize(rosen, x0, bounds, budget=2000, seed=0)
+assert result.x[5] == 1.0
+#+end_src
+
+The budget counts every call, objective and gradient together: =nfev + njev=
+never exceeds it. Without one, =minimize= takes =max(1000, 10 n (n + 1))= for
+=n= free coordinates, twice the budget from which the portfolio opens with a
+finite-difference descent from =x0=. A =jac= callable takes the gradient route
+of =global_optimize= instead and counts its calls in =njev=. The same seed and
+budget repeat a run, and with =replicas=1=, the default, the run is the one
+=global_optimize(fun, low, high, budget, seed=seed, grad_fn=jac, x0=x0)=
+makes on the free coordinates, call for call.
+
+The result carries =x=, =fun=, =nfev=, =njev=, =charged= (=nfev + njev=),
+=nit=, =success= (=fun= is finite), =message= and =diagnostics=, the engine's
+result dictionary. SciPy is not needed. An exception =fun= raises is scored
+as the worst value and reported in one warning when the run ends;
+=KeyboardInterrupt= ends the run.
+
+* Batch replicas
+
+With =replicas=R= and no =jac=, =R= values-only portfolios start from =x0=
+and split the rest of the budget. At each step every replica still running
+proposes one point, and the points go to =fun= as one batch of at most =R=.
+When =fun= has a method =eval_batch(X)= that takes a 2-D array, one point
+per row, and returns their values, the batch is one call; otherwise
+=minimize= calls =fun= on each row.
+
+#+begin_src python
+class Rosen:
+    def __call__(self, x):
+        return rosen(x)
+
+    def eval_batch(self, X):
+        # One call per step: a process pool or a device evaluates the rows together.
+        return np.array([rosen(x) for x in X])
+
+
+result = anneal.minimize(Rosen(), np.full(6, -1.0), [(-2.0, 2.0)] * 6,
+                         budget=2000, seed=0, replicas=4)
+print(result.nfev, result.nit)  # evaluations, and the batches they took
+#+end_src
+
+=budget= stays the total over every replica, and =nit= counts batches, the
+sequential steps the run took. By default the replicas share one archive and
+one incumbent (=history="shared"=): arms that start from the incumbent start
+from the best point any replica has found, a point one replica has evaluated
+costs another nothing, and replicas that descend from the same point each
+difference the gradient from a different coordinate, so the gradient takes
+about =n / R= batches and the budget pays for it once. =history="private"=
+gives each replica its own archive, as independent runs batched together
+would have; it is the control for what sharing is worth. =history="none"=
+is private too, and =coverage_shared=True= or =False=, when given, chooses
+shared or private over =history=.
+
+Replicas buy fewer sequential steps, which pays when a batch takes about as
+long as one evaluation; they seldom buy a better point for the same number
+of evaluations. On the four problems of the
+[[file:../explanation/regime_auto.org::*Batch replicas][regime notes]], four
+shared replicas trail one replica of the same budget on three at 1000
+evaluations, lead on a binary Lennard-Jones fit at 1000 and are level on
+all four at 5000, hence the default of one. =jac= runs one replica: with
+=jac=, =replicas= above one gives a =FutureWarning=.
+
+* Archives and the remaining keywords
+
+=store= is an existing parameter archive: an =.h5= / =.hdf5= or =.jsonl=
+path, a campaign directory that already holds a readcon-db corpus, or an
+object with =observations()= and =record(x, f)=. When it holds a finite
+observation inside the box, the run starts from the best such one instead
+of =x0=, and the result is recorded back.
+
+=membership=, =coverage_radius= and =coverage_neighbors= controlled the hop
+chains of =ensemble_optimize=, which =minimize= does not run. They are
+checked as before and accepted with a =FutureWarning= that says what they
+no longer do; they will raise in a future release.
+
+* A ChemFit fit
+
+=anneal.chemfit.fit_anneal= drives a ChemFit =Fitter= through its session
+API, =init=, =evaluate=, =step= and =finish=, from the fitter's initial
+parameters and inside its bounds. With =batch_size= above one, the portfolio
+runs that many batch replicas of =minimize=: the fitter is initialised with
+=init(batch_size=batch_size)=, and each batch of candidates goes to one
+=fitter.evaluate([...])= and one =fitter.step()=.
+
+#+begin_src python
+import chemfit
+from anneal.chemfit import fit_anneal
+
+
+def loss(params):
+    return (params["a"] - 1.0) ** 2 + 10.0 * (params["b"] + 0.5) ** 2
+
+
+fitter = chemfit.Fitter(
+    loss,
+    initial_params={"a": 3.0, "b": 2.0},
+    bounds={"a": (-4.0, 4.0), "b": (-4.0, 4.0)},
+)
+best = fit_anneal(fitter, 400, seed=0, batch_size=4)
+#+end_src
+
+A =Fitter= built on a prepared schedule that runs candidates concurrently
+evaluates each batch at once; with the default serial schedule the
+candidates run one after another and the fit counts one ChemFit step per
+batch. The budget is the total number of evaluations either way, and the
+default =batch_size=1= keeps the single-candidate path. =fit_chemfit(fitter,
+budget, batch_size=4)= and =run_benchmark(context, method="portfolio",
+batch_size=4)= do the same; a batch needs the portfolio and a fitter with
+=evaluate= and =step=.

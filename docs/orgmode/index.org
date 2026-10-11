@@ -57,6 +57,7 @@ See the [[file:architecture.org][architecture]] page for the five signatures and
 
 - [[file:quickstart.org][Quickstart]] shows the smallest Python workflow.
 - [[file:howto/choose-driver.org][Choose a driver]] maps geometry and gradient to =cluster_search= or =ensemble_optimize=.
+- [[file:howto/minimize.org][Minimize from a start point]] shows =anneal.minimize=, the SciPy-shaped front end, with bounds and batch replicas.
 - [[file:reference/presets-and-advanced.org][Presets and advanced drivers]] gives the parameter surface.
 - The generated Rust API starts at [[file:reference/rust-api.org][Rust API Reference]] and follows the =anneal-core= crate modules.
 - [[file:used_by.org][Used by]] links the reproducibility harness that regenerates the CUTEst tables and figures.
@@ -83,6 +84,7 @@ See the [[file:architecture.org][architecture]] page for the five signatures and
 
    howto/install
    howto/choose-driver
+   howto/minimize
    howto/chemfit
    howto/precision-policy
    howto/rgmin-lbfgs
