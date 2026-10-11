@@ -1,8 +1,9 @@
-//! Every FILE:LINE reference in the org docs points at the item its sentence
+//! Every FILE:LINE reference in the org docs points at the items its sentence
 //! names. The names are the =verbatim= and ~code~ spans written before the
 //! reference in its clause, back to the previous reference, a `;` or the start
-//! of the paragraph. Each cited line or range holds one of them as a whole
-//! word, or is module notes when one of them is the file's stem.
+//! of the paragraph. Every name is a whole word on a cited line, apart from the
+//! file's stem, which the file holds, and each cited line or range holds one of
+//! them as a whole word, or is module notes when one of them is the file's stem.
 
 use std::collections::HashMap;
 use std::fs;
@@ -364,47 +365,59 @@ fn check(
         .file_stem()
         .and_then(|stem| stem.to_str())
         .unwrap_or("");
-    let names_module = citation.names.iter().any(|name| name == stem);
-    let missing: Vec<String> = ranges(&citation.spec)
+    let cited: Vec<(String, &[&str])> = ranges(&citation.spec)
         .into_iter()
-        .filter(|&(first, last)| {
-            let cited = if 1 <= first && first <= last && last <= lines.len() {
+        .map(|(first, last)| {
+            let label = if first == last {
+                first.to_string()
+            } else {
+                format!("{first}-{last}")
+            };
+            let held = if 1 <= first && first <= last && last <= lines.len() {
                 &lines[first - 1..last]
             } else {
                 &[][..]
             };
-            let notes = names_module
-                && !cited.is_empty()
-                && cited
-                    .iter()
-                    .all(|line| line.trim_start().starts_with("//!"));
-            !notes
-                && !citation
-                    .names
-                    .iter()
-                    .any(|name| cited.iter().any(|line| holds_word(line, name)))
-        })
-        .map(|(first, last)| {
-            if first == last {
-                first.to_string()
-            } else {
-                format!("{first}-{last}")
-            }
+            (label, held)
         })
         .collect();
-    if missing.is_empty() {
+    let holds = |held: &[&str], name: &str| {
+        held.iter().any(|line| holds_word(line, name))
+            || (name == stem
+                && !held.is_empty()
+                && held.iter().all(|line| line.trim_start().starts_with("//!")))
+    };
+    let idle: Vec<&str> = cited
+        .iter()
+        .filter(|(_, held)| !citation.names.iter().any(|name| holds(held, name)))
+        .map(|(label, _)| label.as_str())
+        .collect();
+    let unheld: Vec<&str> = citation
+        .names
+        .iter()
+        .filter(|name| *name != stem && !cited.iter().any(|(_, held)| holds(held, name)))
+        .map(String::as_str)
+        .collect();
+    let mut reasons = Vec::new();
+    if !idle.is_empty() {
+        reasons.push(format!(
+            "{} holds none of {}",
+            idle.join(", "),
+            citation.names.join(", ")
+        ));
+    }
+    if !unheld.is_empty() {
+        reasons.push(format!("no cited line holds {}", unheld.join(", ")));
+    }
+    if reasons.is_empty() {
         Ok(())
     } else {
-        Err(format!(
-            "{} holds none of {}",
-            missing.join(", "),
-            citation.names.join(", ")
-        ))
+        Err(reasons.join("; "))
     }
 }
 
 #[test]
-fn every_org_line_reference_holds_the_item_it_names() {
+fn every_org_line_reference_holds_every_item_it_names() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let mut files = Vec::new();
     walk(root, &mut files);
