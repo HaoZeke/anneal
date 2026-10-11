@@ -19,8 +19,8 @@
 //! # The model
 //!
 //! Write the decrements as `d_k = E_k - E_{k+1}`. Under a geometric decay
-//! `d_k = d_0 r^k` with `0 < r < 1`, the energy remaining below `E_k` is the
-//! tail `sum_{j>=k} d_j = d_k r / (1 - r)`, so the limit is
+//! `d_k = d_0 r^k` with ``0 < r < 1``, the energy remaining below `E_k` is the
+//! tail ``sum_{j>=k} d_j = d_k r / (1 - r)``, so the limit is
 //!
 //! ```text
 //! E_inf = E_k - d_k * r / (1 - r)

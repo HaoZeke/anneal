@@ -36,8 +36,8 @@
 //! Depths span orders of magnitude across a run, so the residual is taken in
 //! logarithms: `l_i = ln(predicted_i) - ln(observed_i)`, which treats a factor
 //! of two too large and a factor of two too small as the same error, where a
-//! plain relative residual does not. The scale sets the centre, `ln k0 =
-//! median(l)`, and what is minimised is `median(|l_i - median(l)|)`.
+//! plain relative residual does not. The scale sets the centre,
+//! `ln k0 = median(l)`, and what is minimised is `median(|l_i - median(l)|)`.
 //!
 //! The median rather than the mean, because the harmonic form is exact only
 //! near the minimum. A perturbation large enough to change basin recovers

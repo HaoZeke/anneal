@@ -154,8 +154,9 @@ fn ln_gamma(x: f64) -> f64 {
 /// (doi:10.1016/S0378-4371(96)00271-3), tail index `q_v in (1, 3)`.
 ///
 /// Sampled by the Schuur/Xiang transform used by the de-facto-standard GenSA and
-/// SciPy `dual_annealing` implementations: per coordinate, with `x_k, y_k ~
-/// N(0, 1)` drawn independently,
+/// SciPy `dual_annealing` implementations: per coordinate, with
+/// `x_k, y_k ~ N(0, 1)` drawn independently,
+///
 /// ```text
 ///   dx_k = sigma(T, q_v) * x_k / |y_k|^{(q_v-1)/(3-q_v)},
 /// ```
@@ -337,7 +338,7 @@ fn reflect_quarter(x4: f64, lo: f64, hi: f64) -> f64 {
 
 /// [`reflect_coord`] together with its slope there: `1` where the fold keeps
 /// the direction (an even number of reflections), `-1` where it reverses it.
-/// The chain rule for `x -> f(reflect(x))` multiplies `df` by this slope.
+/// The chain rule for ``x -> f(reflect(x))`` multiplies `df` by this slope.
 pub fn reflect_coord_with_slope(x: f64, lo: f64, hi: f64) -> (f64, f64) {
     let w = hi - lo;
     if w.is_nan() || w <= 0.0 {

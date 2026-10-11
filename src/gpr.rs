@@ -54,8 +54,8 @@
 //! # Measured cost, and why this model does not fit LJ38
 //!
 //! All figures on rg.terra, one core, from
-//! `what_the_model_costs_at_the_size_the_campaign_runs`, which is `#[ignore]`d
-//! because it takes 96 seconds.
+//! `what_the_model_costs_at_the_size_the_campaign_runs`, which is marked
+//! `#[ignore]` because it takes 96 seconds.
 //!
 //! At 38 points with 20 observations, so 2300 rows in the joint system:
 //! training 31.7 s, prediction with variance 3116 ms, prediction of the mean

@@ -23,9 +23,10 @@
 //! # The swap ratio
 //!
 //! Let rung `k` target `pi_k` on a common state space, and let the ladder hold
-//! `x_k` at rung `k`. The product measure is `pi(x_0, ..., x_{N-1}) = prod_k
-//! pi_k(x_k)`. A proposal that exchanges the occupants of rungs `i` and `j` is
-//! its own inverse and has unit Jacobian, so the Metropolis-Hastings ratio is
+//! `x_k` at rung `k`. The product measure is
+//! `pi(x_0, ..., x_{N-1}) = prod_k pi_k(x_k)`. A proposal that exchanges the
+//! occupants of rungs `i` and `j` is its own inverse and has unit Jacobian, so
+//! the Metropolis-Hastings ratio is
 //!
 //! ```text
 //!   a = [pi_i(x_j) pi_j(x_i)] / [pi_i(x_i) pi_j(x_j)]

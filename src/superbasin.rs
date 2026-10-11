@@ -54,7 +54,7 @@
 //!
 //! # Conditioning, exactly rather than by rule of thumb
 //!
-//! `N >= 0` elementwise, so `||N||_inf` is exactly `max_i t_i`, and therefore
+//! ``N >= 0`` elementwise, so `||N||_inf` is exactly `max_i t_i`, and therefore
 //!
 //! ```text
 //!   cond_inf(I - Q) = ||I - Q||_inf * max_i t_i,   with ||I - Q||_inf <= 2.
@@ -1007,8 +1007,8 @@ impl Canonical {
     /// Gauss-Seidel on `(I - Q) u = 1`.
     ///
     /// Returned with the largest update of the last sweep and the sweeps taken.
-    /// `Q >= 0` and the diagonal of the jump chain is zero, so iterating
-    /// `u_i <- 1 + sum_j Q_ij u_j` from `u = 0` increases monotonically towards
+    /// ``Q >= 0`` and the diagonal of the jump chain is zero, so iterating
+    /// ``u_i <- 1 + sum_j Q_ij u_j`` from `u = 0` increases monotonically towards
     /// the solution and can only underestimate it. That makes the reported
     /// residual one-sided rather than hopeful, and makes this the honest
     /// instrument for how hard the system is: convergence stalls in proportion
@@ -1042,7 +1042,7 @@ impl Canonical {
 
     /// Infinity-norm condition number of `I - Q`.
     ///
-    /// `N = (I - Q)^-1 >= 0` elementwise, so `||N||_inf = max_i (N 1)_i`, which
+    /// ``N = (I - Q)^-1 >= 0`` elementwise, so `||N||_inf = max_i (N 1)_i`, which
     /// is the expected-jumps vector. The identity is exact, not a bound, and it
     /// says the conditioning of the escape problem *is* the trapping it
     /// describes.
