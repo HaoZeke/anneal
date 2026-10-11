@@ -4,9 +4,8 @@ import anneal
 import pytest
 
 
-@pytest.mark.parametrize("entry", ["ensemble_optimize", "minimize"])
 @pytest.mark.parametrize("shared", [False, True])
-def test_scalar_entries_report_peer_geometry_without_user_derivatives(entry, shared):
+def test_scalar_entries_report_peer_geometry_without_user_derivatives(shared):
     observed = []
 
     def value_only(x):
@@ -15,15 +14,9 @@ def test_scalar_entries_report_peer_geometry_without_user_derivatives(entry, sha
         return 0.5 * x[0] * x[0]
 
     options = dict(budget=512, replicas=2, seed=7, history="none", coverage_shared=shared)
-    if entry == "minimize":
-        result = anneal.minimize(value_only, [0.0], [(-1.0, 1.0)], jac=None, **options)
-        statistics = result.diagnostics
-        assert result.nfev == len(observed)
-        assert result.njev == 0
-    else:
-        statistics = anneal.ensemble_optimize(
-            value_only, [-1.0], [1.0], x0=[0.0], grad_fn=None, **options
-        )
+    statistics = anneal.ensemble_optimize(
+        value_only, [-1.0], [1.0], x0=[0.0], grad_fn=None, **options
+    )
     assert statistics["n_evals"] == len(observed) == 512
     assert statistics["n_grads"] == 0
     assert statistics["history_observations"] == 0

@@ -91,11 +91,10 @@ def test_private_control_ignores_neighbourhood():
     assert traces[0] == traces[1]
 
 
-@pytest.mark.parametrize("entry", ["ensemble_optimize", "minimize"])
-def test_scalar_hop_clients_accept_same_neighbourhood_control(entry):
+def test_scalar_hop_clients_accept_same_neighbourhood_control():
     calls = []
     result = scalar_run(
-        entry,
+        "ensemble_optimize",
         calls,
         budget=500,
         history="none",

@@ -1,5 +1,8 @@
 """anneal.minimize is the SciPy/ChemFit box entry."""
 
+import json
+import warnings
+
 import numpy as np
 import pytest
 
@@ -50,3 +53,478 @@ def test_minimize_jsonl_store_round_trips(tmp_path):
     assert second.fun <= first.fun + 1e-12
     rows = anneal.JsonlParameterStore(store).observations()
     assert len(rows) >= 2
+
+
+def _rosenbrock(x):
+    x = np.asarray(x, dtype=np.float64)
+    return float(np.sum(100.0 * (x[1:] - x[:-1] ** 2) ** 2 + (1.0 - x[:-1]) ** 2))
+
+
+def _rosenbrock_grad(x):
+    x = np.asarray(x, dtype=np.float64)
+    g = np.zeros_like(x)
+    g[:-1] = -400.0 * x[:-1] * (x[1:] - x[:-1] ** 2) - 2.0 * (1.0 - x[:-1])
+    g[1:] += 200.0 * (x[1:] - x[:-1] ** 2)
+    return g
+
+
+class Recorder:
+    """An uncapped wrapper that keeps every point ``fun`` is called with."""
+
+    def __init__(self, fun=_rosenbrock):
+        self.fun = fun
+        self.points = []
+
+    def __call__(self, x):
+        self.points.append(np.array(x, dtype=np.float64))
+        return self.fun(x)
+
+
+class BatchRecorder(Recorder):
+    """A recorder that also evaluates batches, noting each batch's size."""
+
+    def __init__(self, fun=_rosenbrock):
+        super().__init__(fun)
+        self.batches = []
+        self.single_calls = 0
+
+    def __call__(self, x):
+        self.single_calls += 1
+        return super().__call__(x)
+
+    def eval_batch(self, rows):
+        rows = np.asarray(rows, dtype=np.float64)
+        self.batches.append(rows.shape[0])
+        values = []
+        for row in rows:
+            self.points.append(row.copy())
+            values.append(self.fun(row))
+        return np.asarray(values)
+
+
+class DuckBounds:
+    """SciPy ``Bounds`` without SciPy: anything with ``lb`` and ``ub``."""
+
+    def __init__(self, lb, ub):
+        self.lb = lb
+        self.ub = ub
+
+
+X0 = np.array([1.5, -1.2, 0.8, 1.9])
+LOW = np.full(4, -2.0)
+HIGH = np.full(4, 2.0)
+BOX = list(zip(LOW, HIGH))
+
+
+def _run(bounds, **kwargs):
+    fun = Recorder()
+    result = anneal.minimize(fun, X0, bounds, budget=300, seed=4, **kwargs)
+    return fun, result
+
+
+def _same_points(first, second):
+    return len(first) == len(second) and all(
+        np.array_equal(a, b) for a, b in zip(first, second)
+    )
+
+
+def test_every_bounds_form_gives_the_same_run():
+    forms = [
+        DuckBounds(LOW, HIGH),
+        DuckBounds(-2.0, 2.0),
+        np.column_stack([LOW, HIGH]),
+        BOX,
+        tuple(BOX),
+    ]
+    runs = [_run(form) for form in forms]
+    first_fun, first = runs[0]
+    for fun, result in runs[1:]:
+        assert np.array_equal(result.x, first.x)
+        assert result.fun == first.fun
+        assert result.nfev == first.nfev
+        assert _same_points(fun.points, first_fun.points)
+
+
+def test_scipy_bounds_are_read_through_lb_and_ub():
+    optimize = pytest.importorskip("scipy.optimize")
+    _, ours = _run(np.column_stack([LOW, HIGH]))
+    _, theirs = _run(optimize.Bounds(LOW, HIGH))
+    assert np.array_equal(ours.x, theirs.x)
+    assert ours.fun == theirs.fun
+
+
+@pytest.mark.parametrize(
+    "bounds",
+    [
+        np.column_stack([LOW, HIGH])[:3],
+        np.stack([LOW, HIGH]),
+        [(-2.0, 2.0)] * 3 + [(-2.0, None)],
+        [(-2.0, 2.0)] * 3 + [(-np.inf, 2.0)],
+        [(-2.0, 2.0)] * 3 + [(2.0, -2.0)],
+        DuckBounds(LOW[:3], HIGH[:3]),
+        "box",
+    ],
+)
+def test_bounds_that_are_not_a_finite_box_for_x0_are_refused(bounds):
+    with pytest.raises(ValueError):
+        anneal.minimize(_rosenbrock, X0, bounds, budget=50)
+
+
+@pytest.mark.parametrize(
+    "x0",
+    [X0[:3], np.array([1.5, -1.2, np.nan, 1.9]), np.array([1.5, -1.2, 0.8, 2.5]), []],
+)
+def test_a_start_of_the_wrong_length_not_finite_or_outside_the_box_is_refused(x0):
+    with pytest.raises(ValueError):
+        anneal.minimize(_rosenbrock, x0, BOX, budget=50)
+
+
+@pytest.mark.parametrize("replicas", [1, 3])
+def test_fixed_coordinates_never_move(replicas):
+    low = np.array([-2.0, 0.7, -2.0, -2.0, -0.3])
+    high = np.array([2.0, 0.7, 2.0, 2.0, -0.3])
+    x0 = np.array([1.5, 0.7, 0.8, -1.0, -0.3])
+    fun = Recorder()
+    result = anneal.minimize(
+        fun, x0, list(zip(low, high)), budget=400, seed=1, replicas=replicas
+    )
+    assert fun.points
+    for point in fun.points:
+        assert point.shape == (5,)
+        assert point[1] == 0.7 and point[4] == -0.3
+        assert np.all(point >= low) and np.all(point <= high)
+    assert result.x.shape == (5,)
+    assert result.x[1] == 0.7 and result.x[4] == -0.3
+    assert result.fun == _rosenbrock(result.x)
+
+
+def test_fixed_coordinates_run_the_free_ones_as_global_optimize_would():
+    low = np.array([-2.0, 0.7, -2.0])
+    high = np.array([2.0, 0.7, 2.0])
+    x0 = np.array([1.5, 0.7, -1.0])
+    fun = Recorder()
+    result = anneal.minimize(fun, x0, list(zip(low, high)), budget=300, seed=2)
+
+    free = Recorder(lambda z: _rosenbrock(np.array([z[0], 0.7, z[1]])))
+    expected = anneal.global_optimize(
+        free, low[[0, 2]], high[[0, 2]], 300, seed=2, x0=x0[[0, 2]]
+    )
+    assert len(fun.points) == len(free.points)
+    for full, part in zip(fun.points, free.points):
+        assert np.array_equal(full[[0, 2]], part)
+    assert np.array_equal(result.x[[0, 2]], expected["best_pos"])
+    assert result.fun == expected["best_val"]
+
+
+def test_every_coordinate_fixed_is_one_evaluation_of_the_start():
+    x0 = np.array([0.5, -0.5])
+    fun = Recorder()
+    result = anneal.minimize(fun, x0, [(0.5, 0.5), (-0.5, -0.5)])
+    assert len(fun.points) == 1
+    assert np.array_equal(result.x, x0)
+    assert result.nfev == 1 and result.success
+
+
+@pytest.mark.parametrize(
+    ("replicas", "history"),
+    [(1, "shared"), (2, "shared"), (4, "shared"), (4, "private"), (7, "private")],
+)
+def test_the_budget_is_the_total_over_every_replica(replicas, history):
+    fun = Recorder()
+    result = anneal.minimize(
+        fun, X0, BOX, budget=401, seed=3, replicas=replicas, history=history
+    )
+    assert result.nfev == len(fun.points) <= 401
+    assert result.njev == 0
+    assert np.all([np.all((p >= LOW) & (p <= HIGH)) for p in fun.points])
+
+
+def test_the_default_budget_follows_the_number_of_free_coordinates():
+    fun = Recorder()
+    result = anneal.minimize(fun, X0, BOX, seed=0)
+    assert len(fun.points) == result.nfev == 1000
+
+    x0 = np.zeros(12)
+    fun = Recorder(lambda x: float(np.sum(x**2)))
+    bounds = [(-1.0, 1.0)] * 11 + [(0.0, 0.0)]
+    result = anneal.minimize(fun, x0, bounds, seed=0, replicas=2)
+    assert result.nfev == len(fun.points) <= 10 * 11 * 12
+
+
+@pytest.mark.parametrize(
+    ("replicas", "history"), [(1, "shared"), (4, "shared"), (4, "private")]
+)
+def test_x0_is_the_first_evaluation_and_made_once(replicas, history):
+    fun = Recorder()
+    anneal.minimize(fun, X0, BOX, budget=500, seed=5, replicas=replicas, history=history)
+    assert np.array_equal(fun.points[0], X0)
+    assert sum(np.array_equal(p, X0) for p in fun.points) == 1
+
+
+def test_the_result_carries_scipy_fields():
+    result = anneal.minimize(_rosenbrock, X0, BOX, budget=200, seed=0)
+    assert isinstance(result, anneal.MinimizeResult)
+    assert isinstance(result.x, np.ndarray) and result.x.shape == (4,)
+    assert result.fun == _rosenbrock(result.x) < _rosenbrock(X0)
+    assert result.nfev == 200 and result.njev == 0 and result.nit == 200
+    assert result.charged == 200
+    assert result.success is True
+    assert "not certified" in result.message
+    assert "fun=" in repr(result) and "nit=200" in repr(result)
+    with pytest.raises(AttributeError):
+        result.hess_inv
+
+
+def test_a_run_without_a_finite_value_is_not_a_success():
+    result = anneal.minimize(lambda x: np.inf, X0, BOX, budget=30)
+    assert result.success is False
+    assert result.message == "No finite feasible objective value was found."
+    assert np.all((result.x >= LOW) & (result.x <= HIGH))
+
+
+@pytest.mark.parametrize(("budget", "seed"), [(200, 0), (1000, 3)])
+def test_one_replica_repeats_global_optimize_call_for_call(budget, seed):
+    fun = Recorder()
+    result = anneal.minimize(fun, X0, BOX, budget=budget, seed=seed)
+    solo = Recorder()
+    expected = anneal.global_optimize(solo, LOW, HIGH, budget, seed=seed, x0=X0)
+    assert _same_points(fun.points, solo.points)
+    assert np.array_equal(result.x, expected["best_pos"])
+    assert result.fun == expected["best_val"]
+    assert result.nfev == expected["n_evals"]
+
+
+def test_jac_takes_the_gradient_route_and_counts_its_calls():
+    grads = []
+
+    def jac(x):
+        grads.append(np.array(x))
+        return _rosenbrock_grad(x)
+
+    fun = Recorder()
+    result = anneal.minimize(fun, X0, BOX, jac, budget=400, seed=1)
+    assert result.njev == len(grads) > 0
+    assert result.nfev == len(fun.points)
+    assert result.nfev + result.njev <= 400
+
+    expected = anneal.global_optimize(
+        _rosenbrock, LOW, HIGH, 400, seed=1, grad_fn=_rosenbrock_grad, x0=X0
+    )
+    assert np.array_equal(result.x, expected["best_pos"])
+    assert result.njev == expected["n_grads"]
+
+
+def test_jac_sees_full_vectors_and_gives_back_the_free_part():
+    low = np.array([-2.0, 0.7, -2.0])
+    high = np.array([2.0, 0.7, 2.0])
+    seen = []
+
+    def jac(x):
+        seen.append(np.array(x))
+        return _rosenbrock_grad(x)
+
+    result = anneal.minimize(
+        _rosenbrock, np.array([1.5, 0.7, -1.0]), list(zip(low, high)), jac, budget=200
+    )
+    assert seen and all(p.shape == (3,) and p[1] == 0.7 for p in seen)
+    assert result.x[1] == 0.7
+
+
+def test_jac_with_more_replicas_warns_and_runs_one():
+    fun = Recorder()
+    with pytest.warns(FutureWarning, match="replicas=1"):
+        result = anneal.minimize(fun, X0, BOX, _rosenbrock_grad, budget=200, replicas=2)
+    solo = Recorder()
+    expected = anneal.minimize(solo, X0, BOX, _rosenbrock_grad, budget=200)
+    assert _same_points(fun.points, solo.points)
+    assert result.fun == expected.fun and result.njev == expected.njev
+    with pytest.raises(TypeError):
+        anneal.minimize(_rosenbrock, X0, BOX, "2-point", budget=50)
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [{"replicas": 0}, {"replicas": 1.5}, {"history": "all"}, {"budget": 0}],
+)
+def test_replicas_history_and_budget_are_checked(kwargs):
+    with pytest.raises(ValueError):
+        anneal.minimize(_rosenbrock, X0, BOX, **{"budget": 50, **kwargs})
+
+
+@pytest.mark.parametrize("history", ["shared", "private"])
+def test_eval_batch_takes_batches_of_the_replica_count_and_matches_one_by_one(history):
+    x0 = np.linspace(1.5, 0.15, 10)
+    bounds = [(-2.0, 2.0)] * 10
+    batched = BatchRecorder()
+    result = anneal.minimize(
+        batched, x0, bounds, budget=1201, seed=0, replicas=4, history=history
+    )
+    assert batched.single_calls == 0
+    assert batched.batches[0] == 1
+    assert all(1 <= size <= 4 for size in batched.batches)
+    full = sum(size for size in batched.batches if size == 4)
+    if history == "private":
+        assert full == 1200
+    else:
+        # Steps where the replicas follow one descent, such as its line
+        # searches, and the end of the run, once some replicas have spent
+        # their shares, ask for fewer points than there are replicas.
+        assert 3 * full > 2 * result.nfev
+    assert result.nit == len(batched.batches)
+    assert result.nfev == sum(batched.batches) == len(batched.points)
+
+    single = Recorder()
+    expected = anneal.minimize(
+        single, x0, bounds, budget=1201, seed=0, replicas=4, history=history
+    )
+    assert _same_points(single.points, batched.points)
+    assert np.array_equal(result.x, expected.x)
+    assert result.fun == expected.fun
+    assert result.nit == expected.nit
+
+
+def test_eval_batch_sees_full_vectors_when_coordinates_are_fixed():
+    batched = BatchRecorder()
+    bounds = [(-2.0, 2.0), (0.7, 0.7), (-2.0, 2.0), (-2.0, 2.0)]
+    x0 = np.array([1.5, 0.7, 0.8, -1.0])
+    anneal.minimize(batched, x0, bounds, budget=200, seed=0, replicas=3)
+    assert batched.single_calls == 0
+    assert all(p.shape == (4,) and p[1] == 0.7 for p in batched.points)
+
+
+@pytest.mark.parametrize("history", ["shared", "private"])
+def test_a_seed_replays_a_replica_run(history):
+    runs = []
+    for _ in range(2):
+        fun = Recorder()
+        result = anneal.minimize(
+            fun, X0, BOX, budget=600, seed=8, replicas=4, history=history
+        )
+        runs.append((fun.points, result))
+    (first, a), (second, b) = runs
+    assert _same_points(first, second)
+    assert np.array_equal(a.x, b.x) and a.fun == b.fun
+
+
+def _replica_points(**kwargs):
+    fun = Recorder()
+    anneal.minimize(fun, X0, BOX, budget=600, seed=8, replicas=4, **kwargs)
+    return fun.points
+
+
+def test_shared_and_private_histories_run_differently():
+    shared = _replica_points(history="shared")
+    private = _replica_points(history="private")
+    assert not _same_points(shared, private)
+
+
+def test_history_none_keeps_the_evaluations_private_and_coverage_shared_overrides():
+    shared = _replica_points(history="shared")
+    private = _replica_points(history="private")
+    assert _same_points(_replica_points(history="none"), private)
+    assert _same_points(_replica_points(history="none", coverage_shared=True), shared)
+    assert _same_points(_replica_points(history="shared", coverage_shared=False), private)
+    assert _same_points(_replica_points(history="private", coverage_shared=True), shared)
+
+
+@pytest.mark.parametrize(
+    ("keyword", "value"),
+    [
+        ("membership", "accepted"),
+        ("membership", "observed-exclusion"),
+        ("coverage_radius", 0.5),
+        ("coverage_neighbors", 0),
+        ("coverage_neighbors", 1),
+    ],
+)
+@pytest.mark.parametrize("history", ["shared", "private"])
+def test_keywords_without_an_effect_warn_and_leave_the_run_alone(keyword, value, history):
+    with pytest.warns(FutureWarning, match=f"{keyword} has no effect"):
+        points = _replica_points(history=history, **{keyword: value})
+    assert _same_points(points, _replica_points(history=history))
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "error"),
+    [
+        ({"membership": "everything"}, ValueError),
+        ({"coverage_radius": 0.0}, ValueError),
+        ({"coverage_radius": float("nan")}, ValueError),
+        ({"coverage_radius": "wide"}, TypeError),
+        ({"coverage_neighbors": -1}, ValueError),
+        ({"coverage_neighbors": 1.5}, TypeError),
+        ({"coverage_shared": "yes"}, TypeError),
+    ],
+)
+def test_keywords_without_an_effect_are_still_checked_before_any_call(kwargs, error):
+    fun = Recorder()
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        with pytest.raises(error):
+            anneal.minimize(fun, X0, BOX, budget=50, replicas=2, **kwargs)
+    assert fun.points == []
+
+
+def test_a_flat_objective_keeps_the_start_and_the_fixed_coordinate():
+    low = np.array([-2.0, 0.0, 100.0, -1.0, 0.001])
+    high = np.array([2.0, 0.0, 120.0, 1.0, 0.1])
+    start = (low + high) / 2.0
+    fun = Recorder(lambda x: 0.0)
+    result = anneal.minimize(
+        fun, start, np.column_stack((low, high)), budget=512, replicas=4, seed=0
+    )
+    points = np.asarray(fun.points)
+    assert 0 < len(points) == result.nfev == result.charged <= 512
+    assert np.all(points >= low) and np.all(points <= high)
+    np.testing.assert_array_equal(points[:, 1], 0.0)
+    np.testing.assert_array_equal(points[0], start)
+    assert result.fun == 0.0
+    np.testing.assert_array_equal(result.x, start)
+
+
+def test_a_store_starts_the_run_from_its_best_observation_inside_the_box(tmp_path):
+    store = tmp_path / "params.jsonl"
+    rows = [
+        {"x": [0.5, 0.5, 0.5, 0.5], "f": 3.0},
+        {"x": [3.0, 1.0, 1.0, 1.0], "f": -1.0},
+        {"x": [1.0, 1.0, 1.0], "f": -2.0},
+        {"x": [0.9, 0.8, 0.7, 0.6], "f": float("nan")},
+        {"x": [1.0, 1.0, 1.0, 1.1], "f": 0.5},
+    ]
+    store.write_text("".join(json.dumps(row) + "\n" for row in rows))
+    fun = Recorder()
+    result = anneal.minimize(fun, X0, BOX, budget=100, seed=0, store=store)
+    np.testing.assert_array_equal(fun.points[0], [1.0, 1.0, 1.0, 1.1])
+    assert not any(np.array_equal(p, X0) for p in fun.points)
+    stored = anneal.JsonlParameterStore(store).observations()
+    assert len(stored) == len(rows) + 1
+    np.testing.assert_array_equal(stored[-1][0], result.x)
+    assert stored[-1][1] == result.fun
+
+
+def test_an_exception_in_a_replica_step_is_scored_and_warned_once():
+    def fun(x):
+        if x[0] > 1.0:
+            raise ValueError("outside the model's range")
+        return _rosenbrock(x)
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        result = anneal.minimize(fun, X0 * [0.5, 1, 1, 1], BOX, budget=300, replicas=3)
+    assert result.success
+    assert result.x[0] <= 1.0
+    assert sum(issubclass(w.category, RuntimeWarning) for w in caught) == 1
+
+
+def test_keyboard_interrupt_ends_a_replica_run_without_another_call():
+    calls = []
+
+    def fun(x):
+        calls.append(1)
+        if len(calls) == 30:
+            raise KeyboardInterrupt
+        return _rosenbrock(x)
+
+    with pytest.raises(KeyboardInterrupt):
+        anneal.minimize(fun, X0, BOX, budget=300, replicas=3)
+    assert len(calls) == 30

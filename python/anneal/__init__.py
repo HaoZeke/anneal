@@ -6,9 +6,10 @@ Search splits on geometry, then on gradient:
     recommended / derived / ras select the hop preset.
   - ensemble_optimize(obj, low, high, budget, grad_fn=None, ...): design box.
     Gradient means hop and quench; no gradient means a values-only search.
-  - minimize(fun, x0, bounds, jac=None, budget=..., replicas=4, store=...):
-    SciPy/ChemFit shape. replicas is the communicating-chain count.
-    store is an existing HDF5 file or a readcon-db campaign directory.
+  - minimize(fun, x0, bounds, jac=None, budget=..., replicas=1, store=...):
+    SciPy/ChemFit shape over the portfolio from x0; more replicas run as
+    batch replicas evaluated together. store is an existing HDF5 file or a
+    readcon-db campaign directory.
   - box_ensemble_optimize(...): hop primitive. Requires grad_fn.
   - global_optimize(...): portfolio arms when the caller does not want hops.
   - run(obj_fn, low, high, preset, n_epochs, steps_per_epoch, seed, x0): SA
@@ -27,6 +28,7 @@ The IISE composition laws L1-L4 are enforced in SaVariant::checked.
 
 import json
 import operator
+import warnings
 
 import numpy as np
 
@@ -63,6 +65,7 @@ from anneal._core import (
     gle_langevin_preconditioned_objective as _core_gle_langevin_preconditioned_objective,
     global_optimize as _core_global_optimize,
     global_optimize_objective as _core_global_optimize_objective,
+    global_optimize_replicas as _core_global_optimize_replicas,
     dmc_population_optimize as _core_dmc_population_optimize,
     gpmd_optimize as _core_gpmd_optimize,
     amsa_optimize as _core_amsa_optimize,
@@ -915,10 +918,11 @@ class MinimizeResult:
     """SciPy-shaped result from :func:`minimize`.
 
     ``nfev`` counts objective calls, ``njev`` counts gradient calls, and
-    ``charged`` is their combined budget cost. ``diagnostics`` retains the
-    full engine result, including coverage and optional minimum history.
-    ``success`` means a finite feasible candidate was returned; it does not
-    certify local convergence or global optimality.
+    ``charged`` is their combined budget cost. ``nit`` counts sequential
+    evaluation steps: every call with one replica, every batch with more.
+    ``diagnostics`` retains the engine's result dict, with ``best_pos`` at
+    full length. ``success`` means a finite feasible candidate was
+    returned; it does not certify local convergence or global optimality.
     """
 
     __slots__ = (
@@ -926,17 +930,21 @@ class MinimizeResult:
         "fun",
         "nfev",
         "njev",
+        "nit",
         "charged",
         "success",
         "message",
         "diagnostics",
     )
 
-    def __init__(self, x, fun, nfev, success, message, *, njev=0, diagnostics=None):
+    def __init__(
+        self, x, fun, nfev, success, message, *, njev=0, nit=0, diagnostics=None
+    ):
         self.x = np.asarray(x, dtype=np.float64)
         self.fun = float(fun)
         self.nfev = int(nfev)
         self.njev = int(njev)
+        self.nit = int(nit)
         self.charged = self.nfev + self.njev
         self.success = bool(success)
         self.message = str(message)
@@ -945,7 +953,8 @@ class MinimizeResult:
     def __repr__(self):
         return (
             f"MinimizeResult(fun={self.fun!r}, nfev={self.nfev}, "
-            f"njev={self.njev}, charged={self.charged}, success={self.success})"
+            f"njev={self.njev}, nit={self.nit}, charged={self.charged}, "
+            f"success={self.success})"
         )
 
 
@@ -1055,21 +1064,134 @@ def open_parameter_store(store):
 
 
 def _scipy_bounds_to_low_high(bounds, dim):
-    """Accept SciPy ``Bounds``, a (dim, 2) array, or a sequence of pairs."""
+    """``(low, high)`` from SciPy ``Bounds``, a ``(dim, 2)`` array or ``dim`` pairs."""
     if hasattr(bounds, "lb") and hasattr(bounds, "ub"):
-        low = np.asarray(bounds.lb, dtype=np.float64).reshape(-1)
-        high = np.asarray(bounds.ub, dtype=np.float64).reshape(-1)
+        try:
+            low = np.broadcast_to(np.asarray(bounds.lb, dtype=np.float64), (dim,))
+            high = np.broadcast_to(np.asarray(bounds.ub, dtype=np.float64), (dim,))
+        except ValueError as err:
+            msg = f"bounds.lb and bounds.ub must have length {dim}, the length of x0"
+            raise ValueError(msg) from err
     else:
-        arr = np.asarray(bounds, dtype=np.float64)
-        if arr.ndim == 2 and arr.shape == (dim, 2):
-            low, high = arr[:, 0].copy(), arr[:, 1].copy()
-        elif arr.ndim == 1 and arr.size == dim:
-            raise ValueError("bounds must be pairs (low, high) per coordinate")
-        else:
-            raise ValueError(f"bounds shape {arr.shape} does not match dimension {dim}")
-    if low.size != dim or high.size != dim:
-        raise ValueError(f"bounds length {low.size} does not match x0 length {dim}")
+        try:
+            pairs = np.asarray(bounds, dtype=np.float64)
+        except (TypeError, ValueError) as err:
+            raise ValueError("bounds must be (low, high) pairs of numbers") from err
+        if pairs.shape != (dim, 2):
+            msg = (
+                f"bounds must be {dim} (low, high) pairs, one per coordinate of x0, "
+                f"got shape {pairs.shape}"
+            )
+            raise ValueError(msg)
+        low, high = pairs[:, 0], pairs[:, 1]
+    low = np.array(low, dtype=np.float64)
+    high = np.array(high, dtype=np.float64)
+    for i in range(dim):
+        if not (np.isfinite(low[i]) and np.isfinite(high[i])):
+            raise ValueError(f"bounds must be finite, at coordinate {i}")
+        if low[i] > high[i]:
+            msg = f"bounds at coordinate {i} have low {low[i]} above high {high[i]}"
+            raise ValueError(msg)
     return low, high
+
+
+class _FreeCoordinates:
+    """``fun`` seen from the free coordinates of a box with fixed ones.
+
+    Each point is completed with the fixed values before ``fun`` sees it, and
+    ``eval_batch`` is offered only when ``fun`` has one.
+    """
+
+    def __init__(self, fun, template, free):
+        self._fun = fun
+        self._template = template
+        self._free = free
+        if callable(getattr(fun, "eval_batch", None)):
+            self.eval_batch = self._eval_batch
+
+    def full(self, z):
+        x = self._template.copy()
+        x[self._free] = z
+        return x
+
+    def __call__(self, z):
+        return self._fun(self.full(z))
+
+    def _eval_batch(self, rows):
+        rows = np.asarray(rows, dtype=np.float64)
+        full = np.repeat(self._template[None, :], rows.shape[0], axis=0)
+        full[:, self._free] = rows
+        return self._fun.eval_batch(full)
+
+    def gradient(self, jac):
+        def grad(z):
+            g = np.asarray(jac(self.full(z)), dtype=np.float64).reshape(-1)
+            return g[self._free]
+
+        return grad
+
+
+def _stored_start(archive, low, high):
+    """The best finite observation of ``archive`` inside the box, or ``None``."""
+    best = None
+    for x, f in archive.observations():
+        x = np.asarray(x, dtype=np.float64).reshape(-1)
+        f = float(f)
+        if not np.isfinite(f) or x.size != low.size:
+            continue
+        if not (np.all(x >= low) and np.all(x <= high)):
+            continue
+        if best is None or f < best[1]:
+            best = (x.copy(), f)
+    return None if best is None else best[0]
+
+
+def _replica_archive(history, coverage_shared):
+    """``"shared"`` or ``"private"``: whether batch replicas pool their evaluations."""
+    if history not in ("shared", "private", "none", "no"):
+        raise ValueError(f"history must be none, private, or shared, got {history!r}")
+    if coverage_shared is None:
+        return "shared" if history == "shared" else "private"
+    if not isinstance(coverage_shared, (bool, np.bool_)):
+        msg = f"coverage_shared must be True, False or None, got {coverage_shared!r}"
+        raise TypeError(msg)
+    return "shared" if coverage_shared else "private"
+
+
+def _ignored_minimize_keywords(membership, coverage_radius, coverage_neighbors):
+    """Check the keywords minimize no longer uses, and warn for each one given."""
+    ignored = []
+    if membership is not None:
+        if membership not in ("accepted", "observed-exclusion"):
+            msg = (
+                f"invalid history policy {membership!r}; "
+                "expected accepted or observed-exclusion"
+            )
+            raise ValueError(msg)
+        ignored.append(
+            "membership has no effect: minimize keeps no ledger of certified "
+            "minima for it to select"
+        )
+    if coverage_radius is not None:
+        if isinstance(coverage_radius, (str, bytes, bool, np.bool_)):
+            raise TypeError(f"coverage_radius must be a number, got {coverage_radius!r}")
+        radius = float(coverage_radius)
+        if not (np.isfinite(radius) and radius > 0.0):
+            raise ValueError("coverage radius must be finite and positive")
+        ignored.append(
+            "coverage_radius has no effect: batch replicas share evaluated points "
+            "through their archive and do not repel each other's proposals"
+        )
+    if coverage_neighbors is not None:
+        neighbors = operator.index(coverage_neighbors)
+        if neighbors < 0:
+            msg = f"coverage_neighbors must be at least 0, got {coverage_neighbors!r}"
+            raise ValueError(msg)
+        ignored.append(
+            "coverage_neighbors has no effect: batch replicas pool their "
+            "evaluations between all of them or keep them each to itself"
+        )
+    return ignored
 
 
 def minimize(
@@ -1080,92 +1202,183 @@ def minimize(
     *,
     budget=None,
     seed=0,
-    replicas=4,
+    replicas=1,
     history="shared",
-    membership="accepted",
+    membership=None,
     store=None,
     coverage_shared=None,
     coverage_radius=None,
     coverage_neighbors=None,
 ):
-    """Box search with a SciPy ``minimize`` shape.
+    """Minimize ``fun`` over a box from the start point ``x0``.
 
-    The search-specific controls are:
+    A SciPy-shaped front end over the portfolio of :func:`global_optimize`.
 
-    - ``replicas``: communicating hop chains. One replica and no
-      ``jac`` is the values-only portfolio. Two or more replicas
-      without ``jac`` still hop and exchange evaluated-region coverage.
-    - ``history``: shared, private, or no minimum ledger. Its default also
-      selects shared coverage; coverage itself needs no minimum certificate.
-    - ``membership``: which certified observations enter the minimum ledger.
-    - ``coverage_shared``, ``coverage_radius`` and ``coverage_neighbors``:
-      sharing, normalized distance and direct ring-neighbourhood controls.
-      Zero neighbours selects all-to-all; one selects the adjacent chains.
-      Use ``history="none", coverage_shared=True`` to communicate
-      sampled parameter regions without requesting minimum certificates.
-    - ``store``: existing parameter archive. An ``.h5`` / ``.hdf5`` path,
-      a campaign directory that already holds a readcon-db corpus (params
-      are written beside it, never padded into CON frames), or an object
-      with ``observations()`` and ``record(x, f)``.
+    Args:
+      fun: callable ``fun(x) -> float`` on vectors of the length of ``x0``.
+        When it has a method ``eval_batch(X)`` that takes a 2-D array, one
+        point per row, and returns their values, batch replicas evaluate
+        each step's points through it.
+      x0: start point, finite and inside ``bounds``. It is the run's first
+        evaluation, made once whatever the number of replicas.
+      bounds: the box, as SciPy ``Bounds`` (anything with ``lb`` and ``ub``;
+        scalars broadcast), an ``(n, 2)`` array, or ``n`` pairs
+        ``(low, high)``, all finite. A coordinate whose two ends are equal
+        is fixed: the search runs in the free coordinates, and ``fun`` and
+        ``jac`` still receive full-length vectors.
+      jac: optional gradient callable ``jac(x) -> array`` of the length of
+        ``x0``. It takes the gradient route of :func:`global_optimize`
+        (``grad_fn``), which runs one replica; its calls count in ``njev``.
+      budget: total evaluations, objective and gradient calls together,
+        over all replicas: ``nfev + njev <= budget``. The default is
+        ``max(1000, 10 * n * (n + 1))`` for ``n`` free coordinates, twice
+        the budget from which the portfolio opens with a descent from ``x0``
+        that can converge, and at least 1000.
+      seed: RNG seed. The same seed and budget repeat a run.
+      replicas: portfolio instances run together. With one, the default,
+        ``minimize`` runs ``global_optimize(fun, low, high, budget,
+        seed=seed, grad_fn=jac, x0=x0)`` on the free coordinates and repeats
+        it call for call. With ``R > 1`` and no ``jac``, ``R`` values-only
+        portfolios start from ``x0`` and split the rest of the budget as
+        evenly as it goes; at each step every replica still running
+        proposes one point, and the points are evaluated as one batch of at
+        most ``R``, through ``fun.eval_batch`` when ``fun`` has it and one
+        by one otherwise. Replica 0 keeps ``seed`` and the others mix their
+        index into it. Replica ``r`` also differences its descent's
+        gradients from coordinate ``r * n / R`` on, which leaves each
+        gradient unchanged but has replicas that descend from one point ask
+        for different stencil points. With ``jac``, ``replicas`` above one
+        gives a ``FutureWarning`` and one replica runs.
+      history: with replicas, ``"shared"`` (the default) keeps one archive
+        and one incumbent for all of them: arms that start at the incumbent
+        start at the best point any replica has found, and the additive
+        surrogate fits every replica's evaluations. A point another replica
+        has already evaluated is answered without a call, once per replica,
+        and replicas that propose one point at the same step share one row
+        of the batch, charged to the one with the most of its share left,
+        so a descent they follow together costs the budget once and takes
+        about ``n / R`` batches per gradient. ``"private"`` gives each
+        replica its own archive, as independent runs batched together would
+        have, and so does ``"none"``: ``minimize`` keeps no ledger of
+        certified minima for it to switch off.
+      membership: accepted and checked, with a ``FutureWarning``: it chose
+        which certified minima entered that ledger.
+      store: parameter archive: an ``.h5`` / ``.hdf5`` or ``.jsonl`` path, a
+        campaign directory that already holds a readcon-db corpus (params
+        are written beside it, never padded into CON frames), or an object
+        with ``observations()`` and ``record(x, f)``. When it holds a
+        finite observation inside ``bounds``, the run starts from the best
+        such one instead of ``x0``; the result is recorded back.
+      coverage_shared: whether batch replicas pool their evaluations; when
+        given it overrides ``history``, so ``history="none",
+        coverage_shared=True`` keeps one archive.
+      coverage_radius, coverage_neighbors: accepted and checked, with a
+        ``FutureWarning``: batch replicas pool their evaluations between
+        all of them or none, and do not repel each other's proposals within
+        a radius.
 
-    If ``store`` already has finite observations, the walk starts from the
-    stored best instead of ``x0``. The result is recorded back.
+    Returns:
+      A :class:`MinimizeResult` with ``x`` (full length), ``fun``, ``nfev``,
+      ``njev``, ``charged`` (``nfev + njev``), ``nit`` (sequential
+      evaluation steps: every call with one replica, every batch with
+      more), ``success`` (``fun`` is finite; not a certificate of a global
+      minimum), ``message`` and ``diagnostics``, the engine's result dict
+      with ``best_pos`` at full length.
 
-    Bounds are finite closed intervals; equal endpoints fix that coordinate.
-    Every callback receives the full design vector. The aggregate ``budget``
-    pays for objective and gradient calls, including local improvement and
-    validation. The result separates those counts and retains the engine's
-    coverage diagnostics. ``success`` is not a global-optimality certificate.
-
-    This uses box geometry. Atomic symmetry-aware proposals are selected
-    explicitly through ``cluster_search``, not inferred from vector length.
+    ``fun`` and ``jac`` are only called inside the box: a point an arm
+    proposes outside it is mirror-reflected in. As in :func:`global_optimize`,
+    an exception ``fun`` raises is scored as the worst value and reported in
+    one warning when the run ends, and ``KeyboardInterrupt`` ends the run.
+    Atomic symmetry-aware proposals are selected explicitly through
+    ``cluster_search``, not inferred from vector length.
     """
-    x0_arr = np.asarray(x0, dtype=np.float64).reshape(-1)
-    dim = int(x0_arr.size)
-    if dim < 1:
-        raise ValueError("x0 must be nonempty")
-    low, high = _scipy_bounds_to_low_high(bounds, dim)
+    start = _flat(x0)
+    n = start.size
+    if n == 0:
+        raise ValueError("x0 must hold at least one coordinate")
+    low, high = _scipy_bounds_to_low_high(bounds, n)
+    for i, value in enumerate(start):
+        if not np.isfinite(value):
+            raise ValueError(f"x0[{i}] is not finite")
+        if value < low[i] or value > high[i]:
+            raise ValueError(f"x0[{i}] = {value} lies outside [{low[i]}, {high[i]}]")
+    replicas = _count("replicas", replicas, 1)
+    archive_mode = _replica_archive(history, coverage_shared)
+    ignored = _ignored_minimize_keywords(membership, coverage_radius, coverage_neighbors)
+    if jac is not None and not callable(jac):
+        raise TypeError("jac must be a callable returning the gradient of fun, or None")
+    free = low < high
+    n_free = int(np.count_nonzero(free))
     if budget is None:
-        budget = max(32, 80 * dim)
-    if replicas < 1:
-        raise ValueError("replicas must be positive")
+        budget = max(1000, 10 * n_free * (n_free + 1))
+    budget = _count("budget", budget, 1)
+    seed = int(seed)
+    if jac is not None and replicas > 1:
+        ignored.append(
+            f"replicas={replicas} has no effect with jac: the gradient route runs "
+            "one replica; pass replicas=1 with jac"
+        )
+        replicas = 1
+    for reason in ignored:
+        message = f"{reason}. It will raise in a future release."
+        warnings.warn(message, FutureWarning, stacklevel=2)
     archive = open_parameter_store(store)
     if archive is not None:
-        observed = [
-            (np.asarray(x, dtype=np.float64).reshape(-1), float(f))
-            for x, f in archive.observations()
-            if np.isfinite(f) and np.asarray(x).size == dim
-        ]
-        if observed:
-            x0_arr = min(observed, key=lambda item: item[1])[0]
-    out = ensemble_optimize(
-        fun,
-        low,
-        high,
-        budget=int(budget),
-        seed=int(seed),
-        grad_fn=jac,
-        x0=x0_arr,
-        replicas=int(replicas),
-        history=str(history),
-        membership=str(membership),
-        coverage_shared=coverage_shared,
-        coverage_radius=coverage_radius,
-        coverage_neighbors=coverage_neighbors,
-    )
-    fun_v = float(out["best_val"])
-    best = np.asarray(out["best_pos"], dtype=np.float64)
-    if archive is not None and np.isfinite(fun_v):
-        archive.record(best, fun_v)
+        stored = _stored_start(archive, low, high)
+        if stored is not None:
+            start = stored
+
+    if n_free == 0:
+        value = float(fun(start.copy()))
+        value = np.inf if np.isnan(value) else value
+        out = {"best_pos": np.empty(0), "best_val": value, "n_evals": 1, "n_grads": 0}
+        nit = 1
+    else:
+        if n_free == n:
+            objective, gradient = fun, jac
+        else:
+            objective = _FreeCoordinates(fun, start, free)
+            gradient = None if jac is None else objective.gradient(jac)
+        if replicas == 1:
+            out = global_optimize(
+                objective,
+                low[free],
+                high[free],
+                budget,
+                seed=seed,
+                grad_fn=gradient,
+                x0=start[free],
+            )
+            nit = out["n_evals"] + out["n_grads"]
+        else:
+            out = _core_global_optimize_replicas(
+                objective,
+                low[free],
+                high[free],
+                budget,
+                start[free],
+                seed,
+                replicas,
+                archive_mode,
+            )
+            nit = out["n_batches"]
+
+    x = start.copy()
+    x[free] = np.asarray(out["best_pos"], dtype=np.float64)
+    out["best_pos"] = x.copy()
+    value = float(out["best_val"])
+    if archive is not None and np.isfinite(value):
+        archive.record(x, value)
     return MinimizeResult(
-        x=best,
-        fun=fun_v,
+        x=x,
+        fun=value,
         nfev=int(out["n_evals"]),
         njev=int(out["n_grads"]),
-        success=bool(np.isfinite(fun_v)),
+        nit=int(nit),
+        success=bool(np.isfinite(value)),
         message=(
             "Finite evaluated candidate returned; global optimality is not certified."
-            if np.isfinite(fun_v)
+            if np.isfinite(value)
             else "No finite feasible objective value was found."
         ),
         diagnostics=out,

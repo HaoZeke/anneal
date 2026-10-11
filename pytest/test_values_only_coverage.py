@@ -5,9 +5,8 @@ import numpy as np
 import pytest
 
 
-@pytest.mark.parametrize("entry", ["ensemble_optimize", "minimize"])
 @pytest.mark.parametrize("shared", [False, True])
-def test_parameter_positions_communicate_without_derivatives_or_minima(entry, shared):
+def test_parameter_positions_communicate_without_derivatives_or_minima(shared):
     low = np.array([-2.0, 0.0, 100.0, -1.0, 0.001])
     high = np.array([2.0, 0.0, 120.0, 1.0, 0.1])
     start = (low + high) / 2.0
@@ -25,17 +24,9 @@ def test_parameter_positions_communicate_without_derivatives_or_minima(entry, sh
         coverage_shared=shared,
         coverage_radius=1.0,
     )
-    if entry == "minimize":
-        result = anneal.minimize(
-            value_only, start, np.column_stack((low, high)), jac=None, **options
-        )
-        diagnostics = result.diagnostics
-        assert result.nfev == len(evaluated)
-        assert result.njev == 0
-    else:
-        diagnostics = anneal.ensemble_optimize(
-            value_only, low, high, x0=start, grad_fn=None, **options
-        )
+    diagnostics = anneal.ensemble_optimize(
+        value_only, low, high, x0=start, grad_fn=None, **options
+    )
 
     points = np.asarray(evaluated)
     assert points.shape == (diagnostics["n_evals"], 5)
