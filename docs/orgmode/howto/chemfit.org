@@ -8,11 +8,11 @@ The state is a flattened parameter vector with box bounds, not a
 \(3N\) point set. Use =anneal.minimize=, not =cluster_search=.
 
 Only the scalar loss is required. No objective Jacobian, atomic forces,
-descriptor Jacobian or stationary-point certificate is needed to exchange
-sampled parameter regions. All search and separation operations run in
-Rust; Python adapts the parameter dictionary and callback.
+descriptor Jacobian or stationary-point certificate is needed: batch
+replicas share the points they have evaluated, not minima. All search runs
+in Rust; Python adapts the parameter dictionary and callback.
 
-* Flatten parameters and share evaluated regions
+* Flatten parameters and share evaluated points
 
 The example uses a scalar quadratic loss in two named parameters. Replace
 =loss_by_name= with the fitting loss; its only return value is a number.
@@ -40,60 +40,62 @@ def f_scipy(x):
     observed.append(value)
     return value
 
-res = minimize(
-    f_scipy, x0, bounds=bounds, jac=None,
-    budget=256, seed=0, replicas=4,
-    history="none", coverage_shared=True,
-)
+res = minimize(f_scipy, x0, bounds=bounds, jac=None, budget=256, seed=0, replicas=4)
 opt_params = dict(zip(keys, res.x))
 assert res.nfev == len(observed) == res.charged <= 256
 assert res.njev == 0
 assert res.fun == min(observed)
-assert res.diagnostics["history_observations"] == 0
-assert res.diagnostics["coverage_applied_foreign_samples"] > 0
-print(res.nfev, res.njev, res.diagnostics["history_observations"])
+assert res.nit < res.nfev
+print(res.nfev, res.njev, res.nit)
 #+end_src
 
-The three output fields are objective calls, gradient calls and certified
-minimum reports. They are =256 0 0= for this example. The coverage assertion
-checks actual received peer samples, not merely a requested replica count.
+The three output fields are objective calls, gradient calls and batches.
+They are =256 0 89= for this example: four replicas spent the budget in 89
+sequential steps. =f_scipy= has no =eval_batch=, so each batch is evaluated
+one row after another; a loss object with an =eval_batch(X)= method gets
+each batch, one point per row, in one call.
 
 =jac=None= means no caller-supplied derivatives. Scalar local refinement
 can still estimate derivatives through function evaluations; every such
 probe is included in =res.nfev= and the aggregate budget. This is not a
 promise of a derivative-free proposal law or reliable numerical derivatives
 on a noisy or discontinuous loss. The returned =res.fun= is the lowest raw
-value actually observed, not the biased acceptance score, and =success=
-does not certify a global minimum.
+value actually observed, and =success= does not certify a global minimum.
 
 * Replica and history controls
 
-With =jac=None= and no explicit coverage controls, =replicas=1= selects the
-scalar portfolio; two or more replicas select scalar hop chains. Explicit
-=coverage_shared=, =coverage_radius= or =coverage_neighbors= selects hop chains even at one
-replica. Replicas divide one aggregate budget; adding replicas does not
-multiply the number of paid calls. Comparing one portfolio against several
-hopping chains changes the controller as well as communication.
+With =replicas=1=, the default, =minimize= runs =global_optimize= from =x0=
+and repeats it call for call. With =replicas=R= and =jac=None=, =R=
+values-only portfolios start from =x0= and split one aggregate budget; at
+each step every replica still running proposes one point, and the points
+are evaluated as one batch. Adding replicas does not multiply the number of
+paid calls, nor does it often buy a better loss for the same calls: on the
+four problems of [[file:../explanation/regime_auto.org::*Batch replicas][the regime notes]],
+four shared replicas trail one replica of the same budget on three at 1000
+evaluations, lead on a binary Lennard-Jones fit at 1000, and are level on
+all four at 5000. Replicas pay when a batch is evaluated concurrently,
+since they take a quarter to half as many sequential steps.
 
-=history="none", coverage_shared=True= communicates evaluated parameter
-regions without a minimum ledger. The independent =coverage_radius= sets
-normalized RMS distance in parameter space. Fixed coordinates contribute
-zero distance and remain fixed in every callback. Nearby peer samples can
-repel proposals; neither distance nor repulsion requires forces. See
-[[file:../explanation/communication.org][the communication contract]] for the geometry, budget and counter definitions.
+=history="shared"=, the default, keeps one archive and one incumbent for all
+replicas: a point one replica has evaluated costs the others nothing, and
+arms that start from the incumbent start from the best point any replica
+has found. =history="private"= keeps one archive per replica, the control
+for what sharing is worth, and =history="none"= does the same, since
+=minimize= keeps no ledger of certified minima. =coverage_shared=, when
+given, overrides =history=: =True= keeps one archive and =False= one per
+replica. Fixed coordinates contribute nothing to the search and remain
+fixed in every callback.
 
-=coverage_neighbors=1= limits both sampled-position and coverage-deposit
-delivery to adjacent chain identities on a ring. Zero selects all-to-all;
-omitting the setting preserves the convenience policy above. This does not
-restrict the optional minimum ledger or forward received observations. The
-same native setting is available to scalar =global_optimize= portfolio
-replicas. A sparse graph is an experimental diversity control, not evidence
-that a fitting run reaches a better loss.
+=coverage_radius=, =coverage_neighbors= and =membership= are accepted with a
+=FutureWarning= and change nothing: batch replicas share their evaluations
+with every replica or with none, never within a radius or along a ring, and
+there is no minimum ledger for =membership= to fill. The hop chains those
+settings control remain available through =ensemble_optimize=; see
+[[file:../explanation/communication.org][the communication contract]].
 
-With a supplied =jac=, the same entry selects gradient-capable box search.
-Langevin escapes require a gradient; their force requirement is not imposed
-on the scalar Gaussian path. Parameter coverage is an in-process exchange;
-the optional NNG minimum-history transport is a separate channel.
+With a supplied =jac=, =minimize= takes the gradient route of
+=global_optimize= with one replica; =replicas= above one gives a
+=FutureWarning= and runs one.
 
 * Optional parameter archives
 
@@ -108,8 +110,8 @@ res = minimize(
     jac=None,
     budget=8000,
     seed=0,
-    replicas=4,           # communicating chains
-    history="shared",     # or "private" / "none"
+    replicas=4,           # batch replicas
+    history="shared",     # or "private"
     store=campaign_dir,   # existing readcon-db root, or fit.h5
 )
 #+end_src
@@ -120,7 +122,8 @@ res = minimize(
     =anneal_params.h5= (or =.jsonl=) *beside* the LMDB, never as CON
     frames (those require length \(3N\))
   - an object with =observations()= and =record(x, f)=
-- If the store already has rows, the walk starts from the stored best.
+- If the store holds a finite row inside =bounds=, the run starts from the
+  best such row instead of =x0=. The result is recorded back.
 
 readcon-db stays the structure corpus. HDF5 (or JSONL next to it) is
 the parameter corpus. Do not pad a force-field vector to \(3N\) to
@@ -128,9 +131,27 @@ reuse =MinimaCorpus::record=.
 
 * Adapter boundary
 
-A fitting adapter flattens the parameter dictionary, calls
+=anneal.chemfit= is such an adapter for a ChemFit =Fitter=. =fit_anneal=,
+=fit_chemfit= and =run_benchmark= flatten its parameters, drive its session
+(=init=, =evaluate=, =step=, =finish=) from its initial parameters inside its
+bounds, and return the best parameters with each leaf's type. With
+=batch_size= above one they run the portfolio as that many batch replicas of
+=minimize=: the fitter is initialised with =init(batch_size=batch_size)=, and
+each batch goes to one =evaluate= of a list, which ChemFit's schedule may run
+concurrently, and one =step=. The budget stays the total number of
+evaluations. With =loss_by_name=, =initial= and =parameter_bounds= as above:
+
+#+begin_src python
+import chemfit
+from anneal.chemfit import fit_chemfit
+
+fitter = chemfit.Fitter(loss_by_name, initial_params=initial, bounds=parameter_bounds)
+best = fit_chemfit(fitter, 256, batch_size=4)
+#+end_src
+
+A hand-written adapter flattens the parameter dictionary, calls
 =anneal.minimize=, and unflattens =res.x=. It forwards =replicas=,
-=history=, coverage settings and =store= explicitly. For an energy-only
-loss it forwards =jac=None=; it need not construct a Jacobian callback.
-Bounds must be finite closed intervals. This guide uses Anneal's public
-entry directly and does not require a particular ChemFit backend release.
+=history= and =store= explicitly. For an energy-only loss it forwards
+=jac=None=; it need not construct a Jacobian callback. Bounds must be
+finite closed intervals. The =minimize= examples above use Anneal's public
+entry directly and do not require a particular ChemFit release.

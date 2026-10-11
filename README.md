@@ -76,25 +76,26 @@ Coverage sharing in this example requires no minimum ledger. The native
 against the directly selected engines, including white/colored noise and
 values-only chains.
 
-Python exposes the default policy through the optional `minimize` binding.
-Every callback receives the declared design dimension, including fixed
-coordinates. A vector length divisible by three does not select atomic geometry.
+Python exposes the default policy through `ensemble_optimize`. Every callback
+receives the declared design dimension, including fixed coordinates. A vector
+length divisible by three does not select atomic geometry.
 
 ```python
 import anneal
 
-result = anneal.minimize(
+result = anneal.ensemble_optimize(
     lambda x: float(x @ x),
+    low=[-2.0, 0.0, -2.0, -2.0, -2.0],
+    high=[2.0, 0.0, 2.0, 2.0, 2.0],
     x0=[1.0, 0.0, 1.0, 1.0, 1.0],
-    bounds=[(-2.0, 2.0), (0.0, 0.0), (-2.0, 2.0), (-2.0, 2.0), (-2.0, 2.0)],
-    jac=lambda x: 2.0 * x,
+    grad_fn=lambda x: 2.0 * x,
     budget=256,
     replicas=4,
     seed=7,
 )
-assert result.charged == result.nfev + result.njev <= 256
-assert result.x[1] == 0.0
-coverage = result.diagnostics["coverage_regions_per_chain"]
+assert result["charged"] == result["n_evals"] + result["n_grads"] <= 256
+assert result["best_pos"][1] == 0.0
+coverage = result["coverage_regions_per_chain"]
 ```
 
 With a gradient, replicas propose and locally improve candidates. Without a
@@ -111,11 +112,21 @@ including rejected probes, and can improve the returned raw incumbent. This
 local refinement does not make the two global controllers identical or certify
 global optimality.
 
+`minimize(fun, x0, bounds, jac=None, *, budget=None, seed=0, replicas=1, ...)`
+is the SciPy-shaped front end for a run from a start point. With one replica,
+the default, it repeats `global_optimize(..., x0=x0)` call for call, taking the
+gradient route when `jac` is given. Without `jac`, `replicas=4` runs four
+values-only portfolios from `x0` under one total budget and evaluates their
+proposals as one batch per step, through `fun.eval_batch` when `fun` has it;
+they share one archive and incumbent (`history="shared"`) or keep one each
+(`history="private"`). See
+[Minimize from a start point](docs/orgmode/howto/minimize.org).
+
 To compare cooperation without changing controllers, use
 `methods::portfolio::portfolio_ensemble_optimize`, or Python
 `global_optimize(..., replicas=4, coverage_shared=True)`. Every replica keeps
 one uninterrupted portfolio; `coverage_shared=False` gives the same controller
-and work split without peer samples. This differs from `minimize`'s documented
+and work split without peer samples. This differs from `ensemble_optimize`'s
 one-portfolio/multiple-hop convenience policy. Peer samples move nearby global
 proposals in normalized box coordinates, without a Jacobian, force callback,
 minimum certificate, or replacement of the raw objective. The
