@@ -14,7 +14,6 @@ use crate::shared_bias::SharedDeposits;
 use super::BoxEnsembleConfig;
 use super::repulsion::PeerSamples;
 
-#[path = "coverage/field.rs"]
 mod field;
 pub(crate) use field::{RepulsionSnapshot, RepulsionStats};
 

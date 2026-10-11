@@ -3,24 +3,27 @@
 use std::sync::{Arc, Mutex, mpsc};
 use std::time::Duration;
 
-use anneal_core::methods::box_hopping::BoxEnsembleConfig;
 use anneal_core::{bias, descriptor_space, pes_exploration, shared_bias};
 use eindir_core::Bounds;
 use ndarray::{Array1, array};
 use rand::{Rng, SeedableRng, rngs::StdRng};
 
-#[path = "../src/methods/minima_hopping.rs"]
-pub mod minima_hopping_source;
-mod methods {
-    pub use crate::minima_hopping_source as minima_hopping;
+// A file loaded through its own #[path] looks for its submodules beside
+// it; reached through the directory, as in the library, it looks in the
+// directory named after it. Public, so what the library exports from these
+// files is not reported as dead code here.
+#[path = "../src/methods"]
+pub mod methods {
     pub use anneal_core::methods::{cluster_hopping, ensemble};
-}
+    pub mod minima_hopping;
 
-#[path = "../src/methods/box_hopping/coverage.rs"]
-mod coverage;
-#[path = "../src/methods/box_hopping/repulsion.rs"]
-mod repulsion;
-use coverage::{BoxCoverageConfig, Coverage};
+    pub mod box_hopping {
+        pub use anneal_core::methods::box_hopping::BoxEnsembleConfig;
+        pub mod coverage;
+        pub mod repulsion;
+    }
+}
+use methods::box_hopping::coverage::{BoxCoverageConfig, Coverage};
 
 fn cloud() -> Coverage {
     let bounds = Bounds::new(array![0.0, 7.0, 0.0], array![1.0, 7.0, 1.0], 0.0);
