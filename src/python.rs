@@ -3366,12 +3366,12 @@ fn cluster_search(
     if budget < 1 {
         return Err(PyValueError::new_err("budget must be positive"));
     }
-    if let Some(scale) = length_scale {
-        if !scale.is_finite() || scale <= 0.0 {
-            return Err(PyValueError::new_err(
-                "length_scale must be finite and positive",
-            ));
-        }
+    if let Some(scale) = length_scale
+        && (!scale.is_finite() || scale <= 0.0)
+    {
+        return Err(PyValueError::new_err(
+            "length_scale must be finite and positive",
+        ));
     }
     let scale = length_scale.unwrap_or(1.0);
     let cfg = if ras {
