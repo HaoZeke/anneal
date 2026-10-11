@@ -1294,11 +1294,27 @@ def _scipy_bounds_to_low_high(bounds, dim):
     return low, high
 
 
+class _EndRun(BaseException):
+    """Carries ``error`` out of a callback so that it ends the run.
+
+    The drivers score an ``Exception`` from a callback as the worst value or
+    a zero gradient and go on; anything else ends the run, and the driver
+    raises it when it returns.
+    """
+
+    def __init__(self, error):
+        super().__init__(error)
+        self.error = error
+
+
 class _FreeCoordinates:
     """``fun`` seen from the free coordinates of a box with fixed ones.
 
     Each point is completed with the fixed values before ``fun`` sees it, and
-    ``eval_batch`` is offered only when ``fun`` has one.
+    ``eval_batch`` is offered only when ``fun`` has one. The gradient is read
+    at full length, as ``global_optimize`` reads it, before its free part is
+    taken: one that is not numbers or has another length ends the run with
+    ``global_optimize``'s ``TypeError``, carried in an :class:`_EndRun`.
     """
 
     def __init__(self, fun, template, free):
@@ -1323,8 +1339,16 @@ class _FreeCoordinates:
         return self._fun.eval_batch(full)
 
     def gradient(self, jac):
+        n = self._template.size
+
         def grad(z):
-            g = np.asarray(jac(self.full(z)), dtype=np.float64).reshape(-1)
+            value = jac(self.full(z))
+            try:
+                g = np.asarray(value, dtype=np.float64).reshape(-1)
+            except Exception:
+                g = None
+            if g is None or g.size != n:
+                raise _EndRun(TypeError(f"grad_fn must return {n} numbers"))
             return g[self._free]
 
         return grad
@@ -1536,15 +1560,18 @@ def minimize(
             objective = _FreeCoordinates(fun, start, free)
             gradient = None if jac is None else objective.gradient(jac)
         if replicas == 1:
-            out = global_optimize(
-                objective,
-                low[free],
-                high[free],
-                budget,
-                seed=seed,
-                grad_fn=gradient,
-                x0=start[free],
-            )
+            try:
+                out = global_optimize(
+                    objective,
+                    low[free],
+                    high[free],
+                    budget,
+                    seed=seed,
+                    grad_fn=gradient,
+                    x0=start[free],
+                )
+            except _EndRun as stop:
+                raise stop.error from None
             nit = out["n_evals"] + out["n_grads"]
         else:
             out = _core_global_optimize_replicas(
