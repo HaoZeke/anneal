@@ -49,7 +49,7 @@ well-tempered bias, off unless set to =1=)
 drives the ordinary perturb-quench chain against a =BasinBias= keyed on
 =ClusterFingerprint= (examples/lj_cluster_search.rs:4502-4507), calling
 back into the closure below every =checkpoint_interval= charged
-evaluations (default 500, or =CATALOG_SLICE=/=BANK_SLICE=,
+evaluations (default 500, or =CATALOG_SLICE= / =BANK_SLICE=,
 examples/lj_cluster_search.rs:4402-4407). Inside each hop, before the
 checkpoint fires:
 
@@ -99,8 +99,8 @@ checkpoint. It runs, in order:
    (examples/lj_cluster_search.rs:4917-4925) turns the snapshot's
    accepted diagnostic probes (accepted transitions with action
    =probe= that were not adopted, examples/lj_cluster_search.rs:4911-4916)
-   into =RegisterCurrent=/=Adopt= operations posted to
-   =CooperativeRun::post_record_current=/=post_record_transition=
+   into =RegisterCurrent= / =Adopt= operations posted to
+   =CooperativeRun::post_record_current= / =post_record_transition=
    (examples/lj_cluster_search.rs:4928-4956), building the same
    append-only transition evidence
    =crate::transition_graph::TransitionGraph= consumes elsewhere.
@@ -346,7 +346,7 @@ temperature-indexed proposal kernel, law L2: support contained in the
 neighborhood), =Accept : R x R_>0 -> [0,1]= (src/accept.rs:1,
 acceptance rule, law L3: downhill always accepted, law L4: acceptance
 non-decreasing in temperature), plus the implicit objective (Obj).
-=SaVariant::checked=/=checked_with_sweep= (src/laws.rs:1-7) validate a
+=SaVariant::checked= / =checked_with_sweep= (src/laws.rs:1-7) validate a
 concrete tuple of components against all four composition laws, the
 first three as Boolean witnesses and all four as executable proptest
 sweeps. This is the README's "same five-component algebra" of =Obj=,
@@ -372,7 +372,7 @@ the journal. What is actually there:
   =CoordinatorEvent= values to every attached subscriber when an
   epoch closes, when the roster changes, and when a replica retires.
 - Durability: a single append-only request journal
-  (=append_journal=/=replay_journal=), replayed at startup and keyed
+  (=append_journal= / =replay_journal=), replayed at startup and keyed
   by =(replica, event_sequence)= so a restarted coordinator recovers
   the same state a live one would have, and a resent request after a
   dropped reply is a no-op rather than a double-charge. This is crash
