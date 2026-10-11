@@ -1,5 +1,5 @@
 #+TITLE: Regime auto-selection policy (GJQ-style)
-#+OPTIONS: toc:nil num:nil author:nil title:nil
+#+OPTIONS: toc:nil num:nil author:nil
 
 Policy is *documented, safe, not oracle-optimal* (same stance as
 =GaussJacobiQuad= =select_method_auto=).
