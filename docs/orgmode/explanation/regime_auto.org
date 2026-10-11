@@ -488,8 +488,9 @@ both reach the minimum (0/40/0). The start pays most where it is good: at
 
 Without a budget, =minimize= takes =max(1000, 10 n (n + 1))= for =n= free
 coordinates, twice the =5 n (n + 1)= from which the loop opens with a
-descent from =x0=. Measured against the former default, =max(32, 80 n)=,
-over 20 seeds with one replica from a start each seed draws in the box,
+descent from =x0=. Measured against the former default, =max(32, 80 n)=
+with =n= counting fixed coordinates as well (none of these problems has
+one), over 20 seeds with one replica from a start each seed draws in the box,
 every run spending its whole budget (W/T/L counts the new default's wins,
 =p= is the one-sided Wilcoxon probability that it is not better, and the
 wall times are medians per run):
