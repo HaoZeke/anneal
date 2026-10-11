@@ -23,6 +23,15 @@ upper bounds are equal is held fixed. Every evaluation lies inside the box,
 the first one is the start, and the budget counts it. The default driver is
 the Thompson-allocated portfolio.
 
+With ``batch_size`` above one, :func:`fit_anneal`, :func:`fit_chemfit` and
+:func:`run_benchmark` run the portfolio as that many batch replicas of
+:func:`anneal.minimize`, which share one archive and incumbent. The fitter
+is initialised with ``init(batch_size=batch_size)``, and each batch of at
+most ``batch_size`` candidates is one ``evaluate`` of a list, which
+ChemFit's schedule may run concurrently, and one ``step``; the start is a
+batch of one. Batches need the portfolio and a fitter with ``evaluate``
+and ``step``.
+
 Every argument is checked before ``fitter.init()``. The first exception the
 fitter raises, or a loss that is not a real number, ends the drive: the
 fitter is not called again, ``finish`` is skipped, and the exception reaches
@@ -359,10 +368,34 @@ def _protocol(fitter: Any, *, without_step: str | None = None):
     return evaluate, step
 
 
-def _init(fitter: Any) -> None:
+def _init(fitter: Any, batch_size: int = 1) -> None:
     init = getattr(fitter, "init", None)
     if callable(init):
-        init()
+        if batch_size > 1:
+            init(batch_size=batch_size)
+        else:
+            init()
+
+
+def _batch_size(value: Any, driver: str, fitter: Any) -> int:
+    """``batch_size`` as a positive whole number, checked against the drive.
+
+    Above one it needs the portfolio, the one driver that runs batch
+    replicas, and a fitter driven through ``evaluate`` and ``step``, whose
+    ``evaluate`` takes a list of candidates.
+    """
+    size = _whole("batch_size", value, 1)
+    if size > 1 and driver != "portfolio":
+        raise ValueError(
+            "batch_size above one needs the portfolio, the one driver that runs "
+            f"batch replicas; {driver} runs one chain"
+        )
+    if size > 1 and not all(callable(getattr(fitter, name, None)) for name in _PROTOCOLS[0]):
+        raise TypeError(
+            "batch_size above one needs a fitter with evaluate and step, whose "
+            f"evaluate takes a list of candidates; {type(fitter).__name__} lacks one"
+        )
+    return size
 
 
 def _finish(fitter: Any, params: dict[str, Any]) -> Any:
@@ -395,6 +428,23 @@ def _loss_value(value: Any) -> float:
             "a loss must be one real number"
         )
     return float(number)
+
+
+def _batch_losses(value: Any, n: int) -> list[float]:
+    """The ``n`` losses ``evaluate`` returned for a batch, each one real number."""
+    items = None
+    if not isinstance(value, (Mapping, str, bytes)):
+        try:
+            items = list(value)
+        except TypeError:
+            items = None
+    if items is None or len(items) != n:
+        got = f"{len(items)} losses" if items is not None else type(value).__name__
+        raise TypeError(
+            f"the fitter returned {got} for a batch of {n}; a batch needs one "
+            "loss per candidate"
+        )
+    return [_loss_value(item) for item in items]
 
 
 # ---------------------------------------------------------------------------
@@ -836,15 +886,58 @@ class _Session:
             point = np.array(x, dtype=np.float64)
             loss = _loss_value(self._evaluate(self.problem.candidate(point)))
             self.count += 1
-            rank = math.inf if math.isnan(loss) else loss
-            if self.best is None or rank < self.best_loss:
-                self.best, self.best_loss = point, rank
+            self._keep(point, loss)
             if self.count % self.step_every == 0:
                 self._step()
         except BaseException as error:
             self.error = error
             raise _Stop from None
         return loss
+
+    def _keep(self, point: np.ndarray, loss: float) -> None:
+        rank = math.inf if math.isnan(loss) else loss
+        if self.best is None or rank < self.best_loss:
+            self.best, self.best_loss = point, rank
+
+
+class _BatchSession(_Session):
+    """A session that batch replicas drive: one ``evaluate`` of a list per batch.
+
+    Each batch the driver hands over is one ``evaluate`` of its candidates
+    as a list, which the fitter's schedule may run concurrently, and one
+    step notice, as ChemFit's own batch loop runs them. A single point is a
+    batch of one.
+    """
+
+    def __init__(self, problem: _Problem, evaluate, step, budget: int, batch_size: int):
+        super().__init__(problem, evaluate, step, budget, step_every=1)
+        self.batch_size = batch_size
+
+    def __call__(self, x) -> float:
+        return self.eval_batch([x])[0]
+
+    def eval_batch(self, rows) -> list[float]:
+        points = np.array(rows, dtype=np.float64)
+        if self.error is not None or self.count + len(points) > self.budget:
+            raise _Stop
+        try:
+            candidates = [self.problem.candidate(point) for point in points]
+            losses = _batch_losses(self._evaluate(candidates), len(points))
+            self.count += len(points)
+            for point, loss in zip(points, losses):
+                self._keep(point, loss)
+            self._step()
+        except BaseException as error:
+            self.error = error
+            raise _Stop from None
+        return losses
+
+
+def _session(problem: _Problem, evaluate, step, budget: int, step_every: int, batch_size: int):
+    """The objective of the drive: a :class:`_BatchSession` above one per batch."""
+    if batch_size > 1:
+        return _BatchSession(problem, evaluate, step, budget, batch_size)
+    return _Session(problem, evaluate, step, budget, step_every)
 
 
 def _drive(
@@ -856,9 +949,12 @@ def _drive(
 ) -> dict[str, Any]:
     """Run ``driver`` over the free coordinates and return the best parameters.
 
-    The first fitter exception is raised here, after the driver has returned.
+    A :class:`_BatchSession` runs the portfolio as batch replicas of
+    :func:`anneal.minimize`, one per candidate of a batch, sharing one
+    archive. The first fitter exception is raised here, after the driver has
+    returned.
     """
-    from anneal import global_optimize, run
+    from anneal import global_optimize, minimize, run
 
     problem, budget = session.problem, session.budget
     free = problem.free
@@ -866,6 +962,15 @@ def _drive(
     try:
         if not free.any():
             session(start)
+        elif driver == "portfolio" and isinstance(session, _BatchSession):
+            minimize(
+                session,
+                start,
+                np.column_stack([low, high]),
+                budget=budget,
+                seed=seed,
+                replicas=session.batch_size,
+            )
         elif driver == "portfolio":
             global_optimize(session, low, high, budget, seed=seed, x0=start)
         else:
@@ -1090,6 +1195,7 @@ def fit_anneal(
     bound_span: float = 3.0,
     steps_per_epoch: int = 100,
     preset_kwargs: dict[str, Any] | None = None,
+    batch_size: int = 1,
 ) -> dict[str, Any]:
     """Fit a ChemFit ``Fitter`` with an anneal gradient-free optimizer.
 
@@ -1097,7 +1203,8 @@ def fit_anneal(
       fitter: ChemFit ``Fitter``, duck-typed: ``initial_parameters``,
         ``bounds``, ``init``, ``finish``, and either ``evaluate`` and
         ``step`` (current ChemFit) or ``ask`` and ``tell`` (ChemFit 3.1).
-        Each evaluation is followed by one ``step`` (or ``tell``).
+        Each evaluation, or each batch when ``batch_size`` is above one,
+        is followed by one ``step`` (or ``tell``).
       budget: total objective-evaluation budget, the start included; it is
         never exceeded.
       driver: ``"portfolio"`` (default; Thompson-allocated SOTA driver
@@ -1129,6 +1236,15 @@ def fit_anneal(
         (e.g. ``{"t_init": 5.0}``); classical drivers only. Under the
         portfolio they are ignored with a FutureWarning, and will raise in
         a future release.
+      batch_size: candidates the fitter evaluates together. Above one, the
+        portfolio runs that many batch replicas of :func:`anneal.minimize`,
+        sharing one archive and incumbent: the fitter is initialised with
+        ``init(batch_size=batch_size)``, and each batch, at most
+        ``batch_size`` candidates, goes to one ``evaluate`` of a list and
+        one ``step``, so a fitter whose schedule runs candidates
+        concurrently evaluates them together. ``budget`` stays the total
+        number of evaluations. Needs the portfolio and a fitter with
+        ``evaluate`` and ``step``.
 
     Every argument is checked before ``fitter.init()``. Returns what
     ``fitter.finish`` returns for the best evaluated parameters (ChemFit
@@ -1147,6 +1263,7 @@ def fit_anneal(
         bound_span=bound_span,
         steps_per_epoch=steps_per_epoch,
         preset_kwargs=preset_kwargs,
+        batch_size=batch_size,
     )
 
 
@@ -1162,6 +1279,7 @@ def _fit_anneal(
     bound_span: float = 3.0,
     steps_per_epoch: int = 100,
     preset_kwargs: Any = None,
+    batch_size: Any = 1,
     preset: Any = None,
     caller: str = "fit_anneal",
 ) -> Any:
@@ -1179,6 +1297,7 @@ def _fit_anneal(
     budget = _whole("budget", budget, 1)
     seed = _whole("seed", seed, 0, _SEED_LIMIT)
     steps = min(_whole("steps_per_epoch", steps_per_epoch, 1), budget)
+    size = _batch_size(batch_size, name, fitter)
     with _Strings(caller):
         span = _positive("bound_span", bound_span)
         kwargs = _preset_kwargs(preset_kwargs)
@@ -1221,9 +1340,9 @@ def _fit_anneal(
         # such as zeros is pulled onto the box before the first evaluation.
         problem = _Problem(layout, *_settle(layout, *box), start)
 
-    # The fitter owns bookkeeping; every evaluation is one optimizer step.
-    _init(fitter)
-    session = _Session(problem, evaluate, step, budget, step_every=1)
+    # The fitter owns bookkeeping; every evaluation, or batch, is one optimizer step.
+    _init(fitter, size)
+    session = _session(problem, evaluate, step, budget, 1, size)
     return _finish(fitter, _drive(session, name, seed, preset, steps))
 
 
@@ -1401,6 +1520,8 @@ def fit_chemfit(
     default_span: float = 3.0,
     tell_every: int = 50,
     steps_per_epoch: int = 100,
+    *,
+    batch_size: int = 1,
     **preset_kwargs: Any,
 ) -> dict[str, Any]:
     """Fit ChemFit parameters with a gradient-free anneal driver.
@@ -1427,10 +1548,20 @@ def fit_chemfit(
             ChemFit leaves unbounded. Bounds read as in :func:`chemfit_box`,
             except that a parameter with equal bounds is held fixed.
         tell_every: portfolio evaluations between step notices (``step`` or
-            ``tell``) so registered callbacks still fire.
+            ``tell``) so registered callbacks still fire. With ``batch_size``
+            above one, every batch is followed by one ``step`` instead.
         steps_per_epoch: classical-chain evaluations per epoch, and per
             step notice; the chain runs ``max(1, budget // steps_per_epoch)``
             epochs and stops when the budget is spent.
+        batch_size: candidates the fitter evaluates together. Above one, the
+            portfolio runs that many batch replicas of
+            :func:`anneal.minimize`, sharing one archive and incumbent: the
+            fitter is initialised with ``init(batch_size=batch_size)``, and
+            each batch, at most ``batch_size`` candidates, goes to one
+            ``evaluate`` of a list and one ``step``, as ChemFit's own batch
+            loop runs them. ``budget`` stays the total number of
+            evaluations. Needs ``method="portfolio"`` and a fitter with
+            ``evaluate`` and ``step``.
         **preset_kwargs: ``t_init`` / ``sigma`` (boltzmann), ``t_init`` /
             ``gamma`` (fast), ``t_init`` / ``q_v`` / ``q_a`` (gsa) for the
             classical preset constructors. One of these that the method
@@ -1454,6 +1585,7 @@ def fit_chemfit(
         )
     budget = _whole("budget", budget, 1)
     seed = _whole("seed", seed, 0, _SEED_LIMIT)
+    size = _batch_size(batch_size, name, fitter)
     with _Strings("fit_chemfit"):
         span = _positive("default_span", default_span)
         tell_every = _whole("tell_every", tell_every, 1)
@@ -1468,9 +1600,9 @@ def fit_chemfit(
         box = _mapped_box(layout, getattr(fitter, "bounds", None), vector.x0, span)
         problem = _Problem(layout, *_settle(layout, *box), vector.x0)
 
-    _init(fitter)
+    _init(fitter, size)
     every = tell_every if name == "portfolio" else steps
-    session = _Session(problem, evaluate, step, budget, step_every=every)
+    session = _session(problem, evaluate, step, budget, every, size)
     return _finish(fitter, _drive(session, name, seed, preset, steps))
 
 
@@ -1647,6 +1779,7 @@ def run_benchmark(
     low: Any = None,
     high: Any = None,
     preset: Any = None,
+    batch_size: int = 1,
 ) -> Any:
     """Minimize a ChemFit fitter with a gradient-free anneal driver.
 
@@ -1671,6 +1804,13 @@ def run_benchmark(
     ``fitter.bounds``. A coordinate whose two bounds are equal is held fixed.
     Every argument is checked before ``fitter.init()``; the first exception
     raised by the fitter is raised without calling ``finish``.
+
+    ``batch_size`` above one runs the portfolio as that many batch replicas
+    of :func:`anneal.minimize` sharing one archive and incumbent, as in
+    :func:`fit_anneal`: the fitter is initialised with
+    ``init(batch_size=batch_size)``, and each batch, at most ``batch_size``
+    candidates, goes to one ``evaluate`` of a list and one ``step``. The
+    budget stays the total, and the fitter needs ``evaluate`` and ``step``.
     """
     fitter = benchmark_context["fitter"]
     evaluate, step = _protocol(fitter, without_step="run_benchmark")
@@ -1683,6 +1823,7 @@ def run_benchmark(
     seed = _whole("seed", seed, 0, _SEED_LIMIT)
     steps = min(_whole("steps_per_epoch", steps_per_epoch, 1), budget)
     name, preset = _benchmark_preset(key, preset)
+    size = _batch_size(batch_size, name, fitter)
 
     initial = benchmark_context["initial_params"]
     if not isinstance(initial, Mapping):
@@ -1701,8 +1842,8 @@ def run_benchmark(
         )
         problem = _Problem(layout, *box, start)
 
-    _init(fitter)
-    session = _Session(problem, evaluate, step, budget, step_every=1)
+    _init(fitter, size)
+    session = _session(problem, evaluate, step, budget, 1, size)
     return _finish(fitter, _drive(session, name, seed, preset, steps))
 
 
