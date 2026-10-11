@@ -58,8 +58,11 @@ myst-parser                = ">=4.0.0, <5"
 sphinx-sitemap             = ">=2.7.0, <3"
 
 [feature.docs.tasks]
-# Keep the rustdoc generator inside the checked-out Pixi docs prefix.
-setup-rustdocgen = "test -x .pixi/envs/docs/bin/sphinx-rustdocgen || cargo install --root .pixi/envs/docs sphinx-rustdocgen"
+# Keep the rustdoc generator inside the checked-out Pixi docs prefix, pinned
+# with the dependencies it was published with: docbld fails on any warning, so
+# a new sphinx-rustdocgen comes in only by moving this version. cargo keeps a
+# prefix that holds it and replaces any other version there.
+setup-rustdocgen = "cargo install --locked --root .pixi/envs/docs sphinx-rustdocgen --version 1.2.1"
 orgbld           = "emacs --batch -l docs/export.el"
 docbld           = { cmd = "python -m sphinx docs/source docs/build -b html -W --keep-going", depends-on = ["orgbld", "setup-rustdocgen"] }
 
