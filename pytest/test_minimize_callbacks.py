@@ -43,21 +43,25 @@ BAD_GRADIENTS = {
     "None": lambda g: None,
     "text": lambda g: "steep",
 }
+BAD_GRADIENT_MESSAGES = {
+    "short": "grad_fn must return 3 numbers, got 2",
+    "long": "grad_fn must return 3 numbers, got 4",
+    "None": "grad_fn must return 3 numbers, got 1",
+    "text": "grad_fn must return 3 numbers",
+}
 
 
 @pytest.mark.parametrize("gradient", BAD_GRADIENTS)
 def test_a_bad_jac_ends_the_run_as_it_does_with_no_fixed_coordinate(gradient):
-    messages = {}
-    for box, bounds in BOXES.items():
+    for bounds in BOXES.values():
         logged = Logged(BAD_GRADIENTS[gradient])
         with warnings.catch_warnings():
             warnings.simplefilter("error")
-            with pytest.raises(TypeError, match="grad_fn must return 3 numbers") as caught:
+            with pytest.raises(TypeError) as caught:
                 anneal.minimize(logged.fun, X0, bounds, logged.jac, budget=200)
         assert logged.calls.count("gradient") == 1
         assert logged.calls[-1] == "gradient"
-        messages[box] = str(caught.value)
-    assert messages["one fixed"] == messages["free"]
+        assert str(caught.value) == BAD_GRADIENT_MESSAGES[gradient]
 
 
 def _scored_warnings(run):

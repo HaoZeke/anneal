@@ -897,6 +897,52 @@ def test_cluster_search_rejects_a_non_number_energy():
         cluster_search(lambda x: None, lj_cluster_gradient, 13, 200, seed=0)
 
 
+WRONG_GRADIENTS = {
+    "one short": (lambda g: g[:-1], ", got {short}"),
+    "one long": (lambda g: np.append(g, 0.0), ", got {long}"),
+    "text": (lambda g: "steep", ""),
+}
+
+
+def _wrong_gradient_message(kind, n):
+    held = WRONG_GRADIENTS[kind][1].format(short=n - 1, long=n + 1)
+    return f"grad_fn must return {n} numbers{held}"
+
+
+@pytest.mark.parametrize("kind", WRONG_GRADIENTS)
+def test_global_optimize_gives_the_length_of_a_wrong_gradient(kind):
+    reshape = WRONG_GRADIENTS[kind][0]
+    gradient = Recorder(lambda x: reshape(2.0 * (x - 1.0)))
+    with pytest.raises(TypeError) as caught:
+        global_optimize(
+            lambda x: float(np.sum((x - 1.0) ** 2)),
+            np.full(4, -3.0),
+            np.full(4, 3.0),
+            budget=400,
+            seed=0,
+            grad_fn=gradient,
+        )
+    assert str(caught.value) == _wrong_gradient_message(kind, 4)
+    assert len(gradient.points) == 1
+
+
+@pytest.mark.parametrize("first_wrong", [1, 2])
+@pytest.mark.parametrize("kind", WRONG_GRADIENTS)
+def test_cluster_search_gives_the_length_of_a_wrong_gradient(kind, first_wrong):
+    reshape = WRONG_GRADIENTS[kind][0]
+    calls = []
+
+    def gradient(x):
+        calls.append(1)
+        g = lj_cluster_gradient(x)
+        return reshape(g) if len(calls) >= first_wrong else g
+
+    with pytest.raises(TypeError) as caught:
+        cluster_search(lj_cluster_energy, gradient, 13, 200, seed=0)
+    assert str(caught.value) == _wrong_gradient_message(kind, 39)
+    assert len(calls) == first_wrong
+
+
 def test_global_optimize_keeps_x0_when_nothing_is_finite():
     x0 = np.random.default_rng(6).uniform(-1.0, 1.0, 39)
     for budget in (1, 2, 50):

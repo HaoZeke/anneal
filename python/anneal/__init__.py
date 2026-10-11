@@ -1391,8 +1391,10 @@ class _FreeCoordinates:
                 g = np.asarray(value, dtype=np.float64).reshape(-1)
             except Exception:
                 g = None
-            if g is None or g.size != n:
+            if g is None:
                 raise _EndRun(TypeError(f"grad_fn must return {n} numbers"))
+            if g.size != n:
+                raise _EndRun(TypeError(f"grad_fn must return {n} numbers, got {g.size}"))
             return g[self._free]
 
         return grad
