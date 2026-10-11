@@ -303,6 +303,20 @@ def _count(name, value, minimum):
     return count
 
 
+def _seed(value):
+    """``seed`` as a whole number the engine holds.
+
+    The engine reads a ``u64`` and refuses a seed outside it with an
+    ``OverflowError``; this refuses it the same way, also on a box with every
+    coordinate fixed, where the engine never runs.
+    """
+    seed = int(value)
+    largest = 2**64 - 1
+    if not 0 <= seed <= largest:
+        raise OverflowError(f"seed must be from 0 to {largest}, got {value!r}")
+    return seed
+
+
 def _coverage_radius(value):
     """``None``, or ``coverage_radius`` as a finite positive float."""
     if value is None:
@@ -1455,6 +1469,15 @@ def _ignored_by_batch_replicas(coverage_radius, coverage_neighbors):
     return ignored
 
 
+def _future_warnings(reasons):
+    """The ``FutureWarning`` message for each keyword that changes nothing yet.
+
+    They are given once every argument has been accepted, by the native
+    driver when one runs, so that a refused call raises without one first.
+    """
+    return [f"{reason}. It will raise in a future release." for reason in reasons]
+
+
 def minimize(
     fun,
     x0,
@@ -1497,7 +1520,8 @@ def minimize(
         ``max(1000, 10 * n * (n + 1))`` for ``n`` free coordinates, twice
         the budget from which the portfolio opens with a descent from ``x0``
         that can converge, and at least 1000.
-      seed: RNG seed. The same seed and budget repeat a run.
+      seed: RNG seed, from 0 to ``2**64 - 1``; one outside that range
+        raises ``OverflowError``. The same seed and budget repeat a run.
       replicas: portfolio instances run together. With one, the default,
         ``minimize`` runs ``global_optimize(fun, low, high, budget,
         seed=seed, grad_fn=jac, x0=x0)`` on the free coordinates and repeats
@@ -1543,7 +1567,9 @@ def minimize(
       coverage_radius, coverage_neighbors: accepted and checked, with a
         ``FutureWarning``: batch replicas pool their evaluations between
         all of them or none, and do not repel each other's proposals within
-        a radius.
+        a radius. This warning, like those for ``membership`` and for
+        ``replicas`` with ``jac``, comes once every argument has been
+        accepted, so a call refused for any argument raises without one.
 
     Returns:
       A :class:`MinimizeResult` with ``x`` (full length), ``fun``, ``nfev``,
@@ -1580,16 +1606,14 @@ def minimize(
     if budget is None:
         budget = max(1000, 10 * n_free * (n_free + 1))
     budget = _count("budget", budget, 1)
-    seed = int(seed)
+    seed = _seed(seed)
     if jac is not None and replicas > 1:
         ignored.append(
             f"replicas={replicas} has no effect with jac: the gradient route runs "
             "one replica; pass replicas=1 with jac"
         )
         replicas = 1
-    for reason in ignored:
-        message = f"{reason}. It will raise in a future release."
-        warnings.warn(message, FutureWarning, stacklevel=2)
+    deferred = _future_warnings(ignored)
     archive = open_parameter_store(store)
     if archive is not None:
         stored = _stored_start(archive, low, high)
@@ -1597,6 +1621,8 @@ def minimize(
             start = stored
 
     if n_free == 0:
+        for message in deferred:
+            warnings.warn(message, FutureWarning, stacklevel=2)
         value = _scored_value(fun, start.copy())
         out = {"best_pos": np.empty(0), "best_val": value, "n_evals": 1, "n_grads": 0}
         nit = 1
@@ -1608,14 +1634,15 @@ def minimize(
             gradient = None if jac is None else objective.gradient(jac)
         if replicas == 1:
             try:
-                out = global_optimize(
+                out = _core_global_optimize(
                     objective,
                     low[free],
                     high[free],
                     budget,
-                    seed=seed,
-                    grad_fn=gradient,
+                    seed,
+                    gradient,
                     x0=start[free],
+                    future_warnings=deferred,
                 )
             except _EndRun as stop:
                 raise stop.error from None
@@ -1630,6 +1657,7 @@ def minimize(
                 seed,
                 replicas,
                 archive_mode,
+                future_warnings=deferred,
             )
             nit = out["n_batches"]
 
@@ -1849,7 +1877,7 @@ def global_optimize(
         replicas=R)`` on the same box repeats the run call for call. As in
         :func:`minimize`, ``coverage_radius`` and ``coverage_neighbors``
         have nothing to act on in these replicas and give a
-        ``FutureWarning`` when given.
+        ``FutureWarning`` when given, once every argument has been accepted.
         Otherwise ``R`` persistent portfolio
         controllers split the budget on native worker threads; no caller
         Jacobian is required. ``x0`` is then evaluated before any of them
@@ -1893,10 +1921,7 @@ def global_optimize(
         and noise_sigma is None
         and str(policy) in ("auto", "Auto", "")
     )
-    if batch:
-        for reason in _ignored_by_batch_replicas(**coverage):
-            message = f"{reason}. It will raise in a future release."
-            warnings.warn(message, FutureWarning, stacklevel=2)
+    ignored = _ignored_by_batch_replicas(**coverage) if batch else []
     out = _core_global_optimize(
         obj_fn,
         _flat(low),
@@ -1909,6 +1934,7 @@ def global_optimize(
         _flat_or_none(x0),
         replicas=int(replicas),
         coverage_shared=bool(coverage_shared),
+        future_warnings=_future_warnings(ignored),
         **{key: value for key, value in coverage.items() if value is not None},
     )
     out["best_pos"] = np.asarray(out["best_pos"], dtype=np.float64)

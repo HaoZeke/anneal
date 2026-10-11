@@ -482,6 +482,88 @@ def test_keywords_without_an_effect_are_still_checked_before_any_call(kwargs, er
     assert fun.points == []
 
 
+def _square(x):
+    return float(np.sum(np.asarray(x, dtype=np.float64) ** 2))
+
+
+SQUARE = {"x0": [0.5, 0.5], "bounds": [(-1.0, 1.0), (-1.0, 1.0)], "budget": 40}
+REFUSED = {
+    "x0 of length 3": ({"x0": [0.5, 0.5, 0.5]}, ValueError),
+    "x0 not finite": ({"x0": [np.nan, 0.5]}, ValueError),
+    "x0 outside the box": ({"x0": [1.5, 0.5]}, ValueError),
+    "negative budget": ({"budget": -1}, ValueError),
+    "zero budget": ({"budget": 0}, ValueError),
+    "budget not a number": ({"budget": "abc"}, ValueError),
+    "budget too large": ({"budget": 2**64}, OverflowError),
+    "negative seed": ({"seed": -1}, OverflowError),
+    "seed too large": ({"seed": 2**64}, OverflowError),
+    "low above high": ({"bounds": [(2.0, 1.0), (-1.0, 1.0)]}, ValueError),
+    "three pairs": ({"bounds": [(-1.0, 1.0)] * 3}, ValueError),
+    "low not finite": ({"bounds": [(np.nan, 1.0), (-1.0, 1.0)]}, ValueError),
+    "box too wide": ({"bounds": [(-1e308, 1e308), (-1.0, 1.0)]}, ValueError),
+    "store not a store": ({"store": 12}, TypeError),
+}
+
+
+@pytest.mark.parametrize("replicas", [1, 4])
+@pytest.mark.parametrize("case", REFUSED)
+def test_a_refused_call_raises_without_a_keyword_warning_first(case, replicas):
+    change, error = REFUSED[case]
+    args = {**SQUARE, **change}
+    fun = Recorder(_square)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        with pytest.raises(error):
+            anneal.minimize(
+                fun,
+                args.pop("x0"),
+                args.pop("bounds"),
+                replicas=replicas,
+                coverage_radius=0.2,
+                **args,
+            )
+    assert fun.points == []
+
+
+@pytest.mark.parametrize("seed", [-1, 2**64])
+def test_a_seed_out_of_range_is_refused_with_every_coordinate_fixed(seed):
+    fun = Recorder(_square)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        with pytest.raises(OverflowError, match="seed"):
+            anneal.minimize(
+                fun, [0.5, 0.5], [(0.5, 0.5), (0.5, 0.5)], seed=seed, coverage_radius=0.2
+            )
+    assert fun.points == []
+
+
+WARNING_ROUTES = {
+    "every coordinate fixed": ({"bounds": [(0.5, 0.5), (0.5, 0.5)]}, 1),
+    "one replica": ({}, 1),
+    "batch replicas": ({"replicas": 4}, 1),
+    "jac with replicas": ({"jac": lambda x: 2.0 * np.asarray(x), "replicas": 4}, 2),
+}
+
+
+@pytest.mark.parametrize("route", WARNING_ROUTES)
+def test_keyword_warnings_come_from_the_caller_before_the_first_call(route):
+    change, count = WARNING_ROUTES[route]
+    args = {**SQUARE, **change}
+    x0, bounds = args.pop("x0"), args.pop("bounds")
+    fun = Recorder(_square)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        with pytest.raises(FutureWarning, match="coverage_radius has no effect"):
+            anneal.minimize(fun, x0, bounds, coverage_radius=0.2, **args)
+    assert fun.points == []
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        anneal.minimize(Recorder(_square), x0, bounds, coverage_radius=0.2, **args)
+    future = [w for w in caught if issubclass(w.category, FutureWarning)]
+    assert len(future) == count
+    assert all(w.filename == __file__ for w in future)
+
+
 def test_a_flat_objective_keeps_the_start_and_the_fixed_coordinate():
     low = np.array([-2.0, 0.0, 100.0, -1.0, 0.001])
     high = np.array([2.0, 0.0, 120.0, 1.0, 0.1])

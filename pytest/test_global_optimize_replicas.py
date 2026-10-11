@@ -152,3 +152,50 @@ def test_batch_replicas_still_check_the_coverage_keywords(keywords, error):
         with pytest.raises(error):
             anneal.global_optimize(fun, LOW, HIGH, 100, x0=X0, replicas=3, **keywords)
     assert fun.points == []
+
+
+SQUARE = dict(low=[-1.0, -1.0], high=[1.0, 1.0], budget=40, seed=0, x0=[0.5, 0.5])
+REFUSED = {
+    "x0 of length 3": ({"x0": [0.5, 0.5, 0.5]}, ValueError, "x0 has length 3"),
+    "x0 not finite": ({"x0": [np.nan, 0.5]}, ValueError, "is not finite"),
+    "x0 outside the box": ({"x0": [1.5, 0.5]}, ValueError, "lies outside"),
+    "negative budget": ({"budget": -1}, OverflowError, None),
+    "zero budget": ({"budget": 0}, ValueError, "budget must be positive"),
+    "budget not a number": ({"budget": "abc"}, ValueError, "invalid literal"),
+    "negative seed": ({"seed": -1}, OverflowError, None),
+    "low above high": ({"low": [2.0, -1.0]}, ValueError, "strictly less than"),
+    "low of length 3": ({"low": [-1.0, -1.0, -1.0]}, ValueError, "same length"),
+    "low not finite": ({"low": [np.nan, -1.0]}, ValueError, "must be finite"),
+}
+
+
+@pytest.mark.parametrize("case", REFUSED)
+def test_batch_replicas_refuse_a_bad_argument_without_warning_first(case):
+    change, error, message = REFUSED[case]
+    args = {**SQUARE, **change}
+    fun = Counted(batched=True)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        with pytest.raises(error, match=message):
+            anneal.global_optimize(
+                fun,
+                args["low"],
+                args["high"],
+                args["budget"],
+                args["seed"],
+                x0=args["x0"],
+                replicas=4,
+                coverage_radius=0.2,
+            )
+    assert fun.points == []
+
+
+def test_batch_replicas_warn_before_their_first_call():
+    fun = Counted(batched=True)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        with pytest.raises(FutureWarning, match="coverage_radius has no effect"):
+            anneal.global_optimize(
+                fun, LOW, HIGH, 40, x0=X0, replicas=4, coverage_radius=0.2
+            )
+    assert fun.points == []
