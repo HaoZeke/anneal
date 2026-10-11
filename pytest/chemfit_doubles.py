@@ -4,7 +4,9 @@
 ``finish``; ``ReleasedFitter`` speaks ChemFit 3.1's ``init`` / ``ask`` /
 ``tell`` / ``finish``. Both log every protocol call and keep a deep copy of
 each evaluated parameter dict, so a test can check what a bridge sent, in
-which order, and what ``finish`` received.
+which order, and what ``finish`` received. ``BatchFitter`` adds current
+ChemFit's batches: ``init(batch_size=...)``, and ``evaluate`` of a list of
+at most that many candidates returning their losses.
 """
 
 import copy
@@ -82,6 +84,40 @@ class NextFitter(Recorder):
 
     def step(self, step=None):
         self._record("step")
+
+
+class BatchFitter(NextFitter):
+    """Current ChemFit with batches; ``batches`` logs each list's length.
+
+    A list is one logged ``evaluate``, as one call to ChemFit's schedule;
+    more candidates than ``init`` allowed is a ValueError, as in ChemFit.
+    """
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.batch_size = None
+        self.batches = []
+
+    def init(self, batch_size=1):
+        self.calls.append("init")
+        self.batch_size = batch_size
+
+    def evaluate(self, parameters, context_index=0):
+        if not isinstance(parameters, list):
+            return super().evaluate(parameters, context_index)
+        if len(parameters) > self.batch_size:
+            raise ValueError(
+                "a batch cannot contain more candidates than the configured "
+                f"batch_size ({self.batch_size})"
+            )
+        self._record("evaluate")
+        self.batches.append(len(parameters))
+        losses = []
+        for params in parameters:
+            self.evaluated.append(copy.deepcopy(params))
+            losses.append(self.loss(params))
+        self.losses.extend(losses)
+        return losses
 
 
 class ReleasedFitter(Recorder):
