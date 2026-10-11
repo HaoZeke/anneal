@@ -26,6 +26,7 @@ The IISE composition laws L1-L4 are enforced in SaVariant::checked.
 """
 
 import json
+import operator
 
 import numpy as np
 
@@ -1384,7 +1385,7 @@ def global_optimize(
         replicas=int(replicas),
         coverage_shared=bool(coverage_shared),
         coverage_radius=float(coverage_radius),
-        coverage_neighbors=int(coverage_neighbors),
+        coverage_neighbors=operator.index(coverage_neighbors),
     )
     out["best_pos"] = np.asarray(out["best_pos"], dtype=np.float64)
     return out
