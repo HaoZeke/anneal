@@ -3,8 +3,12 @@
 With ``batch_size`` above one, ``fit_anneal``, ``fit_chemfit`` and
 ``run_benchmark`` run the portfolio as that many batch replicas of
 ``anneal.minimize``: the fitter is initialised with ``init(batch_size=...)``
-and each batch is one ``evaluate`` of a list and one ``step``.
+and each batch is one ``evaluate`` of a list and one ``step``. On an installed
+ChemFit whose ``Fitter`` lacks either method, as 3.1.1 lacks both, a batch is
+refused before ``init`` and ``batch_size=1`` still fits.
 """
+
+import re
 
 import numpy as np
 import pytest
@@ -208,11 +212,8 @@ def test_the_first_fitter_exception_in_a_batch_stops_the_fit(entry):
     assert fitter.calls[-1] == "evaluate"
 
 
-@pytest.mark.parametrize("entry", BATCH_ENTRIES)
-def test_a_chemfit_fitter_evaluates_each_batch_through_its_schedule(entry):
-    fitter_type, missing = _installed_fitter()
-    if missing:
-        pytest.skip(f"the installed ChemFit Fitter lacks {' and '.join(missing)}, which batches need")
+def _chemfit_problem(fitter_type):
+    """A real ``Fitter`` on a box, its start, and the points its objective saw."""
     start = np.array([0.4, -0.3, 0.8, 0.1])
     seen = []
 
@@ -221,8 +222,52 @@ def test_a_chemfit_fitter_evaluates_each_batch_through_its_schedule(entry):
         return sum_of_squares(params)
 
     fitter = fitter_type(objective, initial_params={"x": start}, bounds={"x": (-1.0, 1.0)})
+    return fitter, start, seen
+
+
+@pytest.mark.parametrize("entry", BATCH_ENTRIES)
+def test_a_chemfit_fitter_evaluates_each_batch_through_its_schedule(entry):
+    fitter_type, missing = _installed_fitter()
+    if missing:
+        pytest.skip(f"the installed ChemFit Fitter lacks {' and '.join(missing)}, which batches need")
+    fitter, start, seen = _chemfit_problem(fitter_type)
     result = drive(entry, fitter, 120, batch_size=4)
     assert seen[0].tobytes() == start.tobytes()
     assert len(seen) <= 120
+    assert sum(context.n_evals for context in fitter.contexts) == len(seen)
+    assert sum_of_squares(result) == min(sum_of_squares({"x": x}) for x in seen)
+
+
+@pytest.mark.parametrize("entry", BATCH_ENTRIES)
+def test_a_chemfit_fitter_without_evaluate_and_step_refuses_a_batch_before_init(entry):
+    fitter_type, missing = _installed_fitter()
+    if not missing:
+        pytest.skip("the installed ChemFit Fitter has evaluate and step, so it takes batches")
+    fitter, _, seen = _chemfit_problem(fitter_type)
+    inits = []
+    init = fitter.init
+
+    def recorded_init(*args, **kwargs):
+        inits.append(kwargs)
+        return init(*args, **kwargs)
+
+    fitter.init = recorded_init
+    message = (
+        "batch_size above one needs a fitter with evaluate and step, whose evaluate "
+        f"takes a list of candidates; {fitter_type.__name__} lacks one"
+    )
+    with pytest.raises(TypeError, match=re.escape(message)):
+        drive(entry, fitter, 120, batch_size=4)
+    assert inits == []
+    assert seen == []
+
+
+@pytest.mark.parametrize("entry", BATCH_ENTRIES)
+def test_batch_size_one_fits_with_the_installed_chemfit_fitter(entry):
+    fitter_type, _ = _installed_fitter()
+    fitter, start, seen = _chemfit_problem(fitter_type)
+    result = drive(entry, fitter, 120, batch_size=1)
+    assert seen[0].tobytes() == start.tobytes()
+    assert 0 < len(seen) <= 120
     assert sum(context.n_evals for context in fitter.contexts) == len(seen)
     assert sum_of_squares(result) == min(sum_of_squares({"x": x}) for x in seen)
