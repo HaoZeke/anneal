@@ -214,6 +214,36 @@ def _count(name, value, minimum):
     return count
 
 
+def _coverage_radius(value):
+    """``None``, or ``coverage_radius`` as a finite positive float."""
+    if value is None:
+        return None
+    if isinstance(value, (str, bytes, bool, np.bool_)):
+        raise TypeError(f"coverage_radius must be a number, got {value!r}")
+    radius = float(value)
+    if not (np.isfinite(radius) and radius > 0.0):
+        raise ValueError(f"coverage_radius must be finite and positive, got {value!r}")
+    return radius
+
+
+def _coverage_neighbors(value):
+    """``None``, or ``coverage_neighbors`` as a whole number of at least 0."""
+    if value is None:
+        return None
+    neighbors = operator.index(value)
+    if neighbors < 0:
+        raise ValueError(f"coverage_neighbors must be at least 0, got {value!r}")
+    return neighbors
+
+
+def _membership(value):
+    """``membership`` itself, if it names a policy."""
+    if value not in ("accepted", "observed-exclusion"):
+        msg = f"membership must be accepted or observed-exclusion, got {value!r}"
+        raise ValueError(msg)
+    return value
+
+
 def _max_evals(value):
     """``None``, or a positive whole number of objective calls."""
     if value is None:
@@ -960,7 +990,7 @@ def box_ensemble_optimize(
         x0_arr,
         int(replicas),
         str(history),
-        str(membership),
+        _membership(membership),
     )
     out["best_pos"] = np.asarray(out["best_pos"], dtype=np.float64)
     return out
@@ -1021,10 +1051,10 @@ def ensemble_optimize(
         x0_arr,
         int(replicas),
         str(history),
-        str(membership),
+        _membership(membership),
         coverage_shared=coverage_shared,
-        coverage_radius=coverage_radius,
-        coverage_neighbors=coverage_neighbors,
+        coverage_radius=_coverage_radius(coverage_radius),
+        coverage_neighbors=_coverage_neighbors(coverage_neighbors),
     )
     out["best_pos"] = np.asarray(out["best_pos"], dtype=np.float64)
     return out
@@ -1278,31 +1308,17 @@ def _ignored_minimize_keywords(membership, coverage_radius, coverage_neighbors):
     """Check the keywords minimize no longer uses, and warn for each one given."""
     ignored = []
     if membership is not None:
-        if membership not in ("accepted", "observed-exclusion"):
-            msg = (
-                f"invalid history policy {membership!r}; "
-                "expected accepted or observed-exclusion"
-            )
-            raise ValueError(msg)
+        _membership(membership)
         ignored.append(
             "membership has no effect: minimize keeps no ledger of certified "
             "minima for it to select"
         )
-    if coverage_radius is not None:
-        if isinstance(coverage_radius, (str, bytes, bool, np.bool_)):
-            raise TypeError(f"coverage_radius must be a number, got {coverage_radius!r}")
-        radius = float(coverage_radius)
-        if not (np.isfinite(radius) and radius > 0.0):
-            raise ValueError("coverage radius must be finite and positive")
+    if _coverage_radius(coverage_radius) is not None:
         ignored.append(
             "coverage_radius has no effect: batch replicas share evaluated points "
             "through their archive and do not repel each other's proposals"
         )
-    if coverage_neighbors is not None:
-        neighbors = operator.index(coverage_neighbors)
-        if neighbors < 0:
-            msg = f"coverage_neighbors must be at least 0, got {coverage_neighbors!r}"
-            raise ValueError(msg)
+    if _coverage_neighbors(coverage_neighbors) is not None:
         ignored.append(
             "coverage_neighbors has no effect: batch replicas pool their "
             "evaluations between all of them or keep them each to itself"
@@ -1738,8 +1754,8 @@ def global_optimize(
         _flat_or_none(x0),
         replicas=int(replicas),
         coverage_shared=bool(coverage_shared),
-        coverage_radius=float(coverage_radius),
-        coverage_neighbors=operator.index(coverage_neighbors),
+        coverage_radius=_coverage_radius(coverage_radius),
+        coverage_neighbors=_coverage_neighbors(coverage_neighbors),
     )
     out["best_pos"] = np.asarray(out["best_pos"], dtype=np.float64)
     return out

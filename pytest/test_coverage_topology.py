@@ -110,10 +110,16 @@ def test_scalar_hop_clients_accept_same_neighbourhood_control():
 
 
 @pytest.mark.parametrize("entry", ["global_optimize", "ensemble_optimize", "minimize"])
-@pytest.mark.parametrize("neighbors", [-1, 1.5])
-def test_invalid_neighbourhood_costs_no_callbacks(entry, neighbors):
+@pytest.mark.parametrize(
+    ("neighbors", "error", "message"),
+    [
+        (-1, ValueError, "coverage_neighbors must be at least 0, got -1"),
+        (1.5, TypeError, "cannot be interpreted as an integer"),
+    ],
+)
+def test_invalid_neighbourhood_costs_no_callbacks(entry, neighbors, error, message):
     require_control(entry)
     calls = []
-    with pytest.raises((TypeError, ValueError, OverflowError)):
+    with pytest.raises(error, match=message):
         scalar_run(entry, calls, coverage_neighbors=neighbors)
     assert not calls

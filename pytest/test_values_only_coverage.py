@@ -51,7 +51,7 @@ def test_parameter_positions_communicate_without_derivatives_or_minima(shared):
         assert diagnostics["coverage_repelled_proposals"] == 0
 
 
-@pytest.mark.parametrize("entry", ["ensemble_optimize", "minimize"])
+@pytest.mark.parametrize("entry", ["global_optimize", "ensemble_optimize", "minimize"])
 @pytest.mark.parametrize("radius", [0.0, -1.0, float("nan"), float("inf")])
 def test_invalid_coverage_radius_is_rejected_before_evaluation(entry, radius):
     evaluated = []
@@ -60,12 +60,29 @@ def test_invalid_coverage_radius_is_rejected_before_evaluation(entry, radius):
         evaluated.append(parameters.copy())
         return 0.0
 
-    options = dict(
-        budget=32, history="none", coverage_shared=True, coverage_radius=radius
-    )
-    with pytest.raises(ValueError, match="coverage radius"):
+    options = dict(budget=32, coverage_shared=True, coverage_radius=radius)
+    if entry != "global_optimize":
+        options["history"] = "none"
+    with pytest.raises(ValueError, match="coverage_radius must be finite and positive"):
         if entry == "minimize":
             anneal.minimize(value_only, [0.0], [(-1.0, 1.0)], **options)
         else:
-            anneal.ensemble_optimize(value_only, [-1.0], [1.0], **options)
+            getattr(anneal, entry)(value_only, [-1.0], [1.0], **options)
+    assert evaluated == []
+
+
+@pytest.mark.parametrize("entry", ["global_optimize", "ensemble_optimize", "minimize"])
+def test_a_coverage_radius_that_is_not_a_number_is_a_type_error(entry):
+    evaluated = []
+
+    def value_only(parameters):
+        evaluated.append(parameters.copy())
+        return 0.0
+
+    with pytest.raises(TypeError, match="coverage_radius must be a number, got 'wide'"):
+        if entry == "minimize":
+            anneal.minimize(value_only, [0.0], [(-1.0, 1.0)], coverage_radius="wide")
+        else:
+            run = getattr(anneal, entry)
+            run(value_only, [-1.0], [1.0], 32, coverage_radius="wide")
     assert evaluated == []
