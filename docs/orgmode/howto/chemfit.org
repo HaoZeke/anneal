@@ -76,11 +76,11 @@ evaluations, lead on a binary Lennard-Jones fit at 1000, and are level on
 all four at 5000. Replicas pay when a batch is evaluated concurrently,
 since they take a quarter to half as many sequential steps.
 
-=history="shared"=, the default, keeps one archive and one incumbent for all
+~history="shared"~, the default, keeps one archive and one incumbent for all
 replicas: a point one replica has evaluated costs the others nothing, and
 arms that start from the incumbent start from the best point any replica
-has found. =history="private"= keeps one archive per replica, the control
-for what sharing is worth, and =history="none"= does the same, since
+has found. ~history="private"~ keeps one archive per replica, the control
+for what sharing is worth, and ~history="none"~ does the same, since
 =minimize= keeps no ledger of certified minima. =coverage_shared=, when
 given, overrides =history=: =True= keeps one archive and =False= one per
 replica. Fixed coordinates contribute nothing to the search and remain

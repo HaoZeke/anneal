@@ -3,8 +3,8 @@
 
 * A SciPy-shaped call
 
-=anneal.minimize(fun, x0, bounds, jac=None, *, budget=None, seed=0,
-replicas=1, history="shared", store=None, ...)= runs the start-aware
+~anneal.minimize(fun, x0, bounds, jac=None, *, budget=None, seed=0,
+replicas=1, history="shared", store=None, ...)~ runs the start-aware
 portfolio of =global_optimize= from =x0= inside a box. =x0= must be finite
 and inside the box; it is the run's first evaluation, made once.
 
@@ -76,13 +76,13 @@ print(result.nfev, result.nit)  # evaluations, and the batches they took
 
 =budget= stays the total over every replica, and =nit= counts batches, the
 sequential steps the run took. By default the replicas share one archive and
-one incumbent (=history="shared"=): arms that start from the incumbent start
+one incumbent (~history="shared"~): arms that start from the incumbent start
 from the best point any replica has found, a point one replica has evaluated
 costs another nothing, and replicas that descend from the same point each
 difference the gradient from a different coordinate, so the gradient takes
-about =n / R= batches and the budget pays for it once. =history="private"=
+about =n / R= batches and the budget pays for it once. ~history="private"~
 gives each replica its own archive, as independent runs batched together
-would have; it is the control for what sharing is worth. =history="none"=
+would have; it is the control for what sharing is worth. ~history="none"~
 is private too, and =coverage_shared=True= or =False=, when given, chooses
 shared or private over =history=.
 
@@ -100,7 +100,7 @@ no =grad_fn= or =noise_sigma= runs these batch replicas too, its
 =coverage_shared= standing for =history= and its =coverage_radius= and
 =coverage_neighbors= giving the same =FutureWarning= as in =minimize=, and
 =minimize= on a box with no fixed coordinate repeats it call for call.
-Without =x0=, or with =grad_fn=, =noise_sigma= or =policy="legacy"=, its
+Without =x0=, or with =grad_fn=, =noise_sigma= or ~policy="legacy"~, its
 replicas are persistent portfolio controllers on threads instead, each with
 its own archive and an even share of the budget, exchanging paid proposal
 positions. From a start, at equal evaluations, four of those, replica 0
@@ -157,8 +157,8 @@ evaluates each batch at once; with the default serial schedule the
 candidates run one after another and the fit counts one ChemFit step per
 batch. The budget is the total number of evaluations either way, and the
 default =batch_size=1= keeps the single-candidate path. =fit_chemfit(fitter,
-budget, batch_size=4)= and =run_benchmark(context, method="portfolio",
-batch_size=4)= do the same; a batch needs the portfolio and a fitter with
+budget, batch_size=4)= and ~run_benchmark(context, method="portfolio",
+batch_size=4)~ do the same; a batch needs the portfolio and a fitter with
 =evaluate= and =step= whose =init= takes =batch_size=, which ChemFit built
 from its source at commit 3b65fe0 or later has but no ChemFit release has
 yet, so on ChemFit 3.1.1 the example fits one candidate at a time.

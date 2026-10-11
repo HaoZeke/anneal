@@ -17,7 +17,7 @@ Ask in order:
    - No, it is a design box → 2.
 
 2. Do you have a native gradient on that box?
-   - Yes → =ensemble_optimize(..., grad_fn=...)=.
+   - Yes → ~ensemble_optimize(..., grad_fn=...)~.
      Kick, quench, shared Euclidean =MinimumHistory=.
      The hop primitive is =box_ensemble_optimize= (requires =grad_fn=).
      See [[file:../tutorials/box-search.org][box search]].
@@ -61,9 +61,9 @@ still lives in =experiments/scripts/demo_bgsa.py= and the
 
 * Fitting through ChemFit
 
-For a gradient-free fit, use =anneal.chemfit.fit_anneal(fitter, budget, driver=...)=.
-The default =driver="portfolio"= allocates the gradient-free arms.
-=driver="boltzmann"=, ="fast"=, or ="gsa"= is the single-chain ablation.
+For a gradient-free fit, use ~anneal.chemfit.fit_anneal(fitter, budget, driver=...)~.
+The default ~driver="portfolio"~ allocates the gradient-free arms.
+~driver="boltzmann"~, ="fast"=, or ="gsa"= is the single-chain ablation.
 The fitter's initial parameters are the start, bounds come from the fitter
 or from =low= / =high=, and every evaluation stays in the box.
 =fit_chemfit= reads parameters and bounds the same way, but takes no =x0=,

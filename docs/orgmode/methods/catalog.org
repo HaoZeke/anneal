@@ -2344,7 +2344,7 @@ own depth scale
 and-offset invariant by construction).
 
 Key types and functions: =RoutingProbe= (routing_probe.rs:19,
-=multimodal= is =distinct_basins >= 2=); =multimodality_probe=
+=multimodal= is ~distinct_basins >= 2~); =multimodality_probe=
 (routing_probe.rs:74).
 
 Feeds/consumes: consumes =local_polish::projected_gradient_polish=;
