@@ -14,7 +14,7 @@ See [[file:../howto/choose-driver.org][choose a driver]].
 
 - =Boltzmann(t_init, sigma)= :: Logarithmic cooling + Gaussian + Metropolis.
 - =Fast(t_init, gamma)= :: Reciprocal cooling + Cauchy + Metropolis.
-- =Gsa(t_init, =q_v=, q_a)= :: =Tsallis= cooling + =Tsallis= visit + =Tsallis= accept.
+- =Gsa(t_init, q_v, q_a)= :: =Tsallis= cooling + =Tsallis= visit + =Tsallis= accept.
 
 All called via =run(obj, low, high, preset, n_epochs, steps_per_epoch, seed, x0=None)=.
 Each move is mirror-reflected into =[low, high]= and the neighbourhood is the
@@ -23,7 +23,7 @@ point; without it the start is a uniform draw. The start costs one
 evaluation, so a run makes =1 + n_epochs * steps_per_epoch= calls.
 =run_qmc= and =global_optimize= take =x0= as well.
 =low=, =high= and =x0= may be any array-like of one shape, flattened in C order.
-A coordinate with =low == high= stays fixed. A NaN objective value counts as
+A coordinate with ~low == high~ stays fixed. A NaN objective value counts as
 worse than every number, =+inf= included, so it is never kept as the best.
 
 * Pilot and low-discrepancy
