@@ -1,8 +1,10 @@
 """Both ChemFit session protocols through every bridge, and the first error.
 
-Current ChemFit drives a ``Fitter`` with ``evaluate`` / ``step``; ChemFit 3.1
-with ``ask`` / ``tell``. Every bridge must speak whichever pair the fitter
-has, and refuse a fitter with neither before starting its session; only
+ChemFit 3.1.1, the first release with a session, drives a ``Fitter`` with
+``ask`` / ``tell``; ChemFit's source from commit c57d6f5, in no release yet,
+with ``evaluate`` / ``step``. Every bridge must speak whichever pair the
+fitter has, and refuse a fitter with neither, as ChemFit 3.1.0's is, before
+starting its session, by a message naming where each pair ships; only
 ``run_benchmark`` still drives half a pair, as anneal 0.10.0 did. An
 exception raised by the fitter, or a loss that is not a real number, must
 reach the caller unchanged, with no further fitter call and no ``finish``.
@@ -86,12 +88,29 @@ class _AskWithoutTell(Recorder):
         return self._evaluate("ask", parameters)
 
 
+class _Sessionless:
+    """ChemFit 3.1.0's ``Fitter``: parameters and bounds, and no session methods."""
+
+    def __init__(self, initial_parameters, bounds=None):
+        self.initial_parameters = initial_parameters
+        self.bounds = {} if bounds is None else bounds
+        self.calls = []
+
+
+def _neither_pair(name):
+    return (
+        "the fitter needs ask and tell, which ChemFit first released in 3.1.1, or "
+        "evaluate and step, which ChemFit's source has from commit c57d6f5 and no "
+        f"release has yet; {name} has neither pair"
+    )
+
+
 # run_benchmark still drives half a pair; test_chemfit_compat.py covers it.
 REFUSED = [
     (entry, fitter_type)
     for entry in ENTRIES
-    for fitter_type in (Recorder, _EvaluateWithoutStep, _AskWithoutTell)
-    if entry != "run_benchmark" or fitter_type is Recorder
+    for fitter_type in (Recorder, _Sessionless, _EvaluateWithoutStep, _AskWithoutTell)
+    if entry != "run_benchmark" or fitter_type in (Recorder, _Sessionless)
 ]
 
 
@@ -102,8 +121,9 @@ REFUSED = [
 )
 def test_a_fitter_without_a_whole_protocol_is_refused_before_init(entry, fitter_type):
     fitter = fitter_type(*_problem())
-    with pytest.raises(TypeError, match="evaluate"):
+    with pytest.raises(TypeError) as refused:
         drive(entry, fitter, 50)
+    assert str(refused.value) == _neither_pair(fitter_type.__name__)
     assert fitter.calls == []
 
 
@@ -344,6 +364,29 @@ def test_a_nan_loss_scores_as_the_worst_value(entry, protocol):
 
 def _chemfit_fitter_type():
     return pytest.importorskip("chemfit.fitter").Fitter
+
+
+@pytest.mark.parametrize("entry", ENTRIES)
+def test_an_installed_chemfit_fitter_with_neither_pair_is_refused_before_it_runs(entry):
+    fitter_type = _chemfit_fitter_type()
+    for pair in (("ask", "tell"), ("evaluate", "step")):
+        if all(callable(getattr(fitter_type, name, None)) for name in pair):
+            pytest.skip(f"the installed ChemFit Fitter has {' and '.join(pair)}")
+    calls = []
+
+    def objective(params):
+        calls.append(1)
+        return 0.0
+
+    fitter = fitter_type(
+        objective,
+        initial_params={"x": np.array([0.5, -0.5])},
+        bounds={"x": (-1.0, 1.0)},
+    )
+    with pytest.raises(TypeError) as refused:
+        drive(entry, fitter, 40)
+    assert str(refused.value) == _neither_pair(fitter_type.__name__)
+    assert calls == []
 
 
 @pytest.mark.parametrize("driver", ["portfolio", "boltzmann"])

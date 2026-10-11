@@ -1,13 +1,15 @@
 """Recording doubles for the two ChemFit ``Fitter`` session protocols.
 
-``NextFitter`` speaks current ChemFit's ``init`` / ``evaluate`` / ``step`` /
-``finish``; ``ReleasedFitter`` speaks ChemFit 3.1's ``init`` / ``ask`` /
-``tell`` / ``finish``. Both log every protocol call and keep a deep copy of
-each evaluated parameter dict, so a test can check what a bridge sent, in
-which order, and what ``finish`` received. ``BatchFitter`` adds current
-ChemFit's batches: ``init(batch_size=...)``, and ``evaluate`` of a list of
-at most that many candidates returning their losses. ``WorkersFitter`` has
-the same ``evaluate`` but an ``init`` that takes ``num_workers`` instead.
+``NextFitter`` speaks the ``init`` / ``evaluate`` / ``step`` / ``finish`` of
+ChemFit's source from commit c57d6f5, which no release has yet;
+``ReleasedFitter`` speaks the ``init`` / ``ask`` / ``tell`` / ``finish`` of
+ChemFit 3.1.1, the first release with a session. Both log every protocol
+call and keep a deep copy of each evaluated parameter dict, so a test can
+check what a bridge sent, in which order, and what ``finish`` received.
+``BatchFitter`` adds the batches of ChemFit's source from commit 3b65fe0:
+``init(batch_size=...)``, and ``evaluate`` of a list of at most that many
+candidates returning their losses. ``WorkersFitter`` has the same
+``evaluate`` but an ``init`` that takes ``num_workers`` instead.
 """
 
 import copy
@@ -78,7 +80,7 @@ class Recorder:
 
 
 class NextFitter(Recorder):
-    """Current ChemFit: ``evaluate`` per candidate, ``step`` per optimizer step."""
+    """ChemFit's source from c57d6f5: ``evaluate`` per candidate, ``step`` per step."""
 
     def evaluate(self, parameters, context_index=0):
         return self._evaluate("evaluate", parameters)
@@ -88,7 +90,7 @@ class NextFitter(Recorder):
 
 
 class BatchFitter(NextFitter):
-    """Current ChemFit with batches; ``batches`` logs each list's length.
+    """ChemFit's source from 3b65fe0, with batches; ``batches`` logs their lengths.
 
     A list is one logged ``evaluate``, as one call to ChemFit's schedule;
     more candidates than ``init`` allowed is a ValueError, as in ChemFit.
@@ -134,7 +136,7 @@ class WorkersFitter(BatchFitter):
 
 
 class ReleasedFitter(Recorder):
-    """ChemFit 3.1: ``ask`` per candidate, ``tell`` per optimizer step."""
+    """ChemFit 3.1.1: ``ask`` per candidate, ``tell`` per optimizer step."""
 
     def ask(self, parameters, context_index=0):
         return self._evaluate("ask", parameters)

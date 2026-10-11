@@ -1,6 +1,6 @@
 """What the ChemFit bridges promise about leaves, bounds, arguments and the budget.
 
-The doubles speak ChemFit 3.1's ``ask`` / ``tell`` unless the protocol is
+The doubles speak ChemFit 3.1.1's ``ask`` / ``tell`` unless the protocol is
 what a test is about; ``test_chemfit_protocol.py`` covers both protocols.
 """
 

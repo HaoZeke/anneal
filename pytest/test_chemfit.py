@@ -37,7 +37,7 @@ def test_scalar_bounds_broadcast_and_mirrored_bounds_match_the_fitter():
 
 
 class _Session:
-    """Current ChemFit session: init / ask / tell / finish."""
+    """ChemFit 3.1.1's session: init / ask / tell / finish."""
 
     def __init__(self, bounds):
         self.bounds = bounds
