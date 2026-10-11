@@ -52,3 +52,33 @@ def test_box_ensemble_requires_a_gradient():
     fn, _, low, high = _two_well()
     with pytest.raises(ValueError, match="grad_fn"):
         anneal.box_ensemble_optimize(fn, low, high, budget=20)
+
+
+@pytest.mark.parametrize(
+    "entry, replicas",
+    [("box_ensemble_optimize", 2), ("ensemble_optimize", 2), ("ensemble_optimize", 1)],
+)
+def test_box_ensembles_take_bounds_and_start_given_as_views(entry, replicas):
+    fn, grad, low, high = _two_well()
+    box = np.column_stack((low, high))
+    starts = np.array([[1.0, 3.0], [-0.5, 3.0]])
+    views = (box[:, 0], box[:, 1], starts[:, 0])
+    assert not any(view.flags.c_contiguous for view in views)
+    options = dict(seed=3, replicas=replicas)
+    if entry == "box_ensemble_optimize":
+        options["grad_fn"] = grad
+    runs = []
+    for low_in, high_in, x0 in (views, tuple(view.copy() for view in views)):
+        points = []
+
+        def recorded(x, points=points):
+            points.append(np.array(x, copy=True))
+            return fn(x)
+
+        out = getattr(anneal, entry)(recorded, low_in, high_in, 64, x0=x0, **options)
+        runs.append((np.asarray(points), out))
+    (view_points, view_out), (copy_points, copy_out) = runs
+    assert len(view_points) > 0
+    np.testing.assert_array_equal(view_points, copy_points)
+    assert view_out["best_val"] == copy_out["best_val"]
+    np.testing.assert_array_equal(view_out["best_pos"], copy_out["best_pos"])
