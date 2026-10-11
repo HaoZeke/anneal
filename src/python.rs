@@ -757,6 +757,16 @@ fn as_float_vector(py: Python<'_>, value: &Py<PyAny>) -> Option<Vec<f64>> {
     Some(arr.as_array().iter().copied().collect())
 }
 
+/// The `TypeError` for a gradient that is not `dim` numbers, given how many
+/// it held, or `None` when it could not be read as numbers.
+fn gradient_length_error(dim: usize, held: Option<usize>) -> PyErr {
+    let message = match held {
+        Some(held) => format!("grad_fn must return {dim} numbers, got {held}"),
+        None => format!("grad_fn must return {dim} numbers"),
+    };
+    pyo3::exceptions::PyTypeError::new_err(message)
+}
+
 impl eindir_core::Gradient<f64> for CallablePyGradient {
     fn grad(&self, x: ArrayView1<f64>) -> Array1<f64> {
         if self.errors.aborted() {
@@ -767,12 +777,9 @@ impl eindir_core::Gradient<f64> for CallablePyGradient {
             match self.fn_.call1(py, (py_arr,)) {
                 Ok(r) => match as_float_vector(py, &r) {
                     Some(values) if values.len() == self.dim => Array1::from(values),
-                    _ => {
+                    read => {
                         self.errors
-                            .abort(pyo3::exceptions::PyTypeError::new_err(format!(
-                                "grad_fn must return {} numbers",
-                                self.dim
-                            )));
+                            .abort(gradient_length_error(self.dim, read.map(|v| v.len())));
                         Array1::zeros(self.dim)
                     }
                 },
@@ -894,13 +901,7 @@ impl eindir_core::Gradient<f64> for HandleCallbacks<'_> {
                 .map_err(|err| self.gradient_error(py, err))
                 .and_then(|value| match as_float_vector(py, &value) {
                     Some(values) if values.len() == dim => Ok(Array1::from(values)),
-                    Some(values) => Err(pyo3::exceptions::PyTypeError::new_err(format!(
-                        "grad_fn must return {dim} numbers, got {}",
-                        values.len()
-                    ))),
-                    None => Err(pyo3::exceptions::PyTypeError::new_err(format!(
-                        "grad_fn must return {dim} numbers"
-                    ))),
+                    read => Err(gradient_length_error(dim, read.map(|v| v.len()))),
                 });
             read.unwrap_or_else(|err| {
                 self.errors.abort(err);
@@ -3235,11 +3236,9 @@ impl eindir_core::gradient::Gradient<f64> for CallableDiffObjective {
                     Some(values) if values.len() == dim => Array1::from_iter(
                         values.into_iter().map(|value| self.gradient_scale * value),
                     ),
-                    _ => {
+                    read => {
                         self.errors
-                            .abort(pyo3::exceptions::PyTypeError::new_err(format!(
-                                "grad_fn must return {dim} numbers"
-                            )));
+                            .abort(gradient_length_error(dim, read.map(|v| v.len())));
                         Array1::zeros(dim)
                     }
                 },
@@ -3314,12 +3313,7 @@ fn cluster_gradient_scale(
     };
     let gradient = match as_float_vector(py, &gradient_result) {
         Some(values) if values.len() == probe.len() => values,
-        _ => {
-            return Err(pyo3::exceptions::PyTypeError::new_err(format!(
-                "grad_fn must return {} numbers",
-                probe.len()
-            )));
-        }
+        read => return Err(gradient_length_error(probe.len(), read.map(|v| v.len()))),
     };
     if gradient.iter().any(|value| !value.is_finite()) {
         return Ok(1.0);
