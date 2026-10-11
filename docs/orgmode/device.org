@@ -17,6 +17,9 @@ The algebra is what makes one kernel serve every driver on every backend.
 import cupy as cp
 from anneal import Boltzmann, run_device
 
+def objective(x):
+    return cp.sum(x * x)
+
 low = cp.full(2, -5.0)
 high = cp.full(2, 5.0)
 history = run_device(objective, low, high, Boltzmann(t_init=5.0, sigma=0.5),
@@ -28,10 +31,14 @@ history = run_device(objective, low, high, Boltzmann(t_init=5.0, sigma=0.5),
 
 A single chain underuses a GPU: one vector per step is kernel-launch bound.
 =anneal.run_ensemble= runs ``n_chains`` independent chains as one batched kernel, with state shape ``(n_chains, dim)`` and the objective evaluated over the whole batch, so the ensemble width saturates the device.
+The objective returns one value per chain, shape ``(n_chains,)``.
 The transition kernel is the same as =run_device=; only a leading batch axis is added, and the same call drives every preset.
 
 #+begin_src python
 from anneal import Fast, run_ensemble
+
+def batched_objective(x):
+    return cp.sum(x * x, axis=-1)
 
 history = run_ensemble(batched_objective, low, high, Fast(t_init=5.0, gamma=0.5),
                        n_chains=16384, n_epochs=40, steps_per_epoch=150, seed=0)
