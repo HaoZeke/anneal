@@ -1,3 +1,4 @@
+import logging
 import os
 
 # -- Project information -----------------------------------------------------
@@ -24,6 +25,23 @@ intersphinx_mapping = {
     "numpy": ("https://numpy.org/doc/stable", None),
     "eindir": ("https://eindir.rgoswami.me", None),
 }
+
+
+def _report_unfetched_inventory(record: logging.LogRecord) -> bool:
+    # docbld fails on any warning, but an inventory that cannot be fetched says
+    # nothing about these pages: it is logged as information instead, and the
+    # references into that project stay plain text. Sphinx gives this warning
+    # no type that suppress_warnings could name, so its text picks it out.
+    if record.levelno == logging.WARNING and record.getMessage().startswith(
+        "failed to reach any of the inventories"
+    ):
+        record.levelno, record.levelname = logging.INFO, "INFO"
+    return True
+
+
+logging.getLogger("sphinx.sphinx.ext.intersphinx").addFilter(
+    _report_unfetched_inventory
+)
 
 # -- sphinxcontrib-rust configuration ----------------------------------------
 rust_crates = {
