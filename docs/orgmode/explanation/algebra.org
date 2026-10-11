@@ -1,5 +1,5 @@
 #+TITLE: The Typed Component Algebra and the Four Laws
-#+OPTIONS: toc:nil todo:nil num:nil author:nil title:nil ^:nil
+#+OPTIONS: toc:nil todo:nil num:nil author:nil ^:nil
 
 #+begin_export rst
 .. admonition:: Reference
