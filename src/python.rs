@@ -791,12 +791,15 @@ impl eindir_core::Gradient<f64> for CallablePyGradient {
 
 /// An `eindir` objective handle as a driver's objective and gradient.
 ///
-/// The handle's own gradient panics when `grad_fn` raises or returns
-/// anything but a contiguous float64 array. This adapter reads the gradient
-/// through the handle's Python `grad` method instead and copies it whatever
-/// its strides. A gradient of another length, or an exception, ends the
-/// run: no further callback is made, and the driver call raises it when it
-/// returns. Values come from the handle itself.
+/// The handle's native `Objective` and `Gradient` panic when its callable
+/// raises or returns something that is not a number, or when `grad_fn`
+/// raises or returns anything but a contiguous float64 array. This adapter
+/// reads values and gradients through the handle's Python `eval` and
+/// `grad` methods instead, and copies a gradient whatever its strides. An
+/// exception, a value that is not a number, or a gradient of another length
+/// ends the run: no further callback is made, and the driver call raises it
+/// when it returns. A NaN value is scored as the worst value, as
+/// `global_optimize` scores it.
 struct HandleCallbacks<'a> {
     native: &'a PyObjective,
     handle: Py<PyObjective>,
@@ -826,7 +829,18 @@ impl Objective<f64> for HandleCallbacks<'_> {
         if self.errors.aborted() {
             return f64::INFINITY;
         }
-        <PyObjective as Objective<f64>>::eval(self.native, x)
+        Python::attach(|py| {
+            match self
+                .handle
+                .call_method1(py, pyo3::intern!(py, "eval"), (py_view1(py, x),))
+            {
+                Ok(value) => self.errors.float(py, &value),
+                Err(err) => {
+                    self.errors.abort(err);
+                    f64::INFINITY
+                }
+            }
+        })
     }
 }
 
@@ -1224,7 +1238,7 @@ fn qmc_best1bin_scout(
 #[pyo3(signature = (objective, max_evals, seed = 0, population_size = 30, weight_min = 0.5, weight_span = 0.5, crossover_rate = 0.7))]
 fn qmc_best1bin_scout_objective(
     py: Python<'_>,
-    objective: PyRef<'_, PyObjective>,
+    objective: Bound<'_, PyObjective>,
     max_evals: usize,
     seed: u64,
     population_size: usize,
@@ -1257,8 +1271,10 @@ fn qmc_best1bin_scout_objective(
         return Err(PyValueError::new_err("crossover_rate must be in [0, 1]"));
     }
 
+    let native = objective.borrow();
+    let callbacks = HandleCallbacks::new(&objective, &native);
     let result = crate::qmc_best1bin_scout(
-        &*objective,
+        &callbacks,
         max_evals,
         seed,
         population_size,
@@ -1266,6 +1282,7 @@ fn qmc_best1bin_scout_objective(
         weight_span,
         crossover_rate,
     );
+    callbacks.errors.finish(py)?;
     qmc_polish_result_to_dict(py, result)
 }
 
@@ -1343,7 +1360,7 @@ fn qmc_gsa_global_search(
 #[pyo3(signature = (objective, max_evals, seed = 0, n_chains = 30, t_init = 1.0, q_v = 2.62, q_a = 1.7, x0 = None))]
 fn qmc_gsa_global_search_objective(
     py: Python<'_>,
-    objective: PyRef<'_, PyObjective>,
+    objective: Bound<'_, PyObjective>,
     max_evals: usize,
     seed: u64,
     n_chains: usize,
@@ -1353,15 +1370,17 @@ fn qmc_gsa_global_search_objective(
     x0: Option<PyReadonlyArray1<'_, f64>>,
 ) -> PyResult<Py<PyDict>> {
     validate_qmc_gsa_global_search_args(max_evals, n_chains, t_init, q_v, q_a)?;
-    let bounds = <PyObjective as Objective<f64>>::bounds(&objective);
+    let native = objective.borrow();
+    let bounds = <PyObjective as Objective<f64>>::bounds(&native);
     let start = read_x0(
         x0,
         bounds.low.as_slice().expect("contiguous bounds"),
         bounds.high.as_slice().expect("contiguous bounds"),
     )?;
 
+    let callbacks = HandleCallbacks::new(&objective, &native);
     let result = crate::qmc_gsa_global_search_from(
-        &*objective,
+        &callbacks,
         max_evals,
         seed,
         n_chains,
@@ -1370,6 +1389,7 @@ fn qmc_gsa_global_search_objective(
         q_a,
         start.as_ref().map(|x| x.view()),
     );
+    callbacks.errors.finish(py)?;
     qmc_polish_result_to_dict(py, result)
 }
 
@@ -1434,7 +1454,7 @@ fn qmc_trust_region_poll(
 #[pyo3(signature = (objective, center, max_evals, seed = 0, radius_fraction = 0.0, n_levels = 3, points_per_level = 0))]
 fn qmc_trust_region_poll_objective(
     py: Python<'_>,
-    objective: PyRef<'_, PyObjective>,
+    objective: Bound<'_, PyObjective>,
     center: PyReadonlyArray1<'_, f64>,
     max_evals: usize,
     seed: u64,
@@ -1443,7 +1463,8 @@ fn qmc_trust_region_poll_objective(
     points_per_level: usize,
 ) -> PyResult<Py<PyDict>> {
     let center_vec = center.as_slice()?.to_vec();
-    if center_vec.len() != objective.dim() {
+    let native = objective.borrow();
+    if center_vec.len() != native.dim() {
         return Err(PyValueError::new_err(
             "center dimension must match objective bounds",
         ));
@@ -1460,8 +1481,9 @@ fn qmc_trust_region_poll_objective(
         return Err(PyValueError::new_err("n_levels must be positive"));
     }
 
+    let callbacks = HandleCallbacks::new(&objective, &native);
     let result = crate::qmc_trust_region_poll(
-        &*objective,
+        &callbacks,
         Array1::from_vec(center_vec),
         max_evals,
         seed,
@@ -1469,6 +1491,7 @@ fn qmc_trust_region_poll_objective(
         n_levels,
         points_per_level,
     );
+    callbacks.errors.finish(py)?;
     qmc_polish_result_to_dict(py, result)
 }
 

@@ -202,6 +202,12 @@ class PyObjective(metaclass=_ExtensionAlias):
     ``*_objective`` functions a gradient of another length, or an exception
     from ``grad_fn``, ends the run, and the function raises that exception,
     or a ``TypeError`` giving the length, when it returns.
+
+    ``fn_`` returns a number, anything ``global_optimize`` takes as a value.
+    In the ``*_objective`` functions an exception from ``fn_`` ends the run
+    and is raised when the function returns, and a value that is not a
+    number ends it with the ``TypeError`` ``global_optimize`` raises. A NaN
+    value is scored as ``+inf``, as ``global_optimize`` scores it.
     """
 
     _extension = _CorePyObjective
@@ -211,7 +217,31 @@ class PyObjective(metaclass=_ExtensionAlias):
             bounds = bounds._core
         if grad_fn is not None:
             grad_fn = _float_gradient(grad_fn)
-        return _CorePyObjective(fn_, bounds, grad_fn)
+        return _CorePyObjective(_float_value(fn_), bounds, grad_fn)
+
+
+def _float_value(fn_):
+    """``fn_`` with what it returns read as a float, as ``global_optimize`` reads it.
+
+    A number is what float conversion takes without parsing text: a value
+    with ``__float__`` or ``__index__``.
+    """
+
+    def value(x):
+        result = fn_(x)
+        kind = type(result)
+        if kind is float:
+            return result
+        cause = None
+        if hasattr(kind, "__float__") or hasattr(kind, "__index__"):
+            try:
+                return float(result)
+            except Exception as err:
+                cause = err
+        msg = f"obj_fn must return a float, got {kind.__name__}"
+        raise TypeError(msg) from cause
+
+    return value
 
 
 def _float_gradient(grad_fn):
