@@ -426,15 +426,23 @@ const QN_KICK_MAX: f64 = 0.5;
 /// of its values rather than on a fraction of their size, which a constant
 /// added to the objective would change.
 const QN_FTOL: f64 = 8.0 * f64::EPSILON;
+/// Fraction of the success threshold at or below which an iteration of the
+/// values-only descent is slow even where [`QN_FTOL`] would not call it so:
+/// near a minimum whose value is small against the gains that set the
+/// threshold, units in the last place would keep the descent going long
+/// after its gains stopped counting. The floor follows the threshold: a
+/// constant added to the objective moves it only through rounding, and a
+/// power of two multiplying the objective multiplies it exactly.
+const QN_FATOL_RTOL: f64 = 1e-7;
 /// Gradients per dimension a finite-difference descent needs to converge;
 /// the values-only loop opens with one only when the budget affords it.
 const QN_AFFORDABLE_GRADIENTS: usize = 5;
 /// Short of the opening budget, until GSA has played, a descent turn ends
 /// once fewer than this many slices are left beyond the closing reserve,
-/// and GSA takes over. At twenty to twenty-six evaluations per gradient a
-/// descent that kept the turn to the last slice would leave GSA, whose
-/// quenched visits settle separable multimodal objectives one coordinate
-/// at a time, only part of one.
+/// and GSA takes over. At twenty to twenty-six evaluations per d+1 (twenty
+/// to twenty-six gradients) a descent that kept the turn to the last slice
+/// would leave GSA, whose quenched visits settle separable multimodal
+/// objectives one coordinate at a time, only part of one.
 const GSA_LAST_SLICES: usize = 3;
 /// Factor by which a values-only GSA phase's gain per evaluation must fall
 /// below its best slice's before the phase lends CMA-ES a slice.
@@ -3520,6 +3528,11 @@ fn run_qn_arm<O>(
         checked: f64::INFINITY,
         replaced: false,
     });
+    if states.values_only {
+        state
+            .engine
+            .set_fatol(QN_FATOL_RTOL * states.success.threshold());
+    }
     if best < state.seen_best && best < state.engine.value() {
         state
             .engine
