@@ -380,39 +380,39 @@ cut-and-splice evolutionary algorithm does not.
 
 Governing update: on a revisit, escape scale
 \(s \mathrel{*}= \beta_{same}\) (same basin) or
-\(s \mathrel{*}= \beta_{known}(1+c\,v)\) (a different basin seen \(v\)
+\(s \mathrel{*}= \beta_{known}(1+c\ln v)\) (a different basin seen \(v\)
 times before, the Schoenborn enhancement); on a discovery,
 \(s \mathrel{*}= \beta_{new} = 1/\beta_{same}\); \(s\) is clamped to
 its floor/ceiling on every update (=observe=,
-src/methods/minima_hopping.rs:162, defaults
+src/methods/minima_hopping.rs:681, defaults
 \(\beta_{same}=\beta_{known}=1.05\), \(c=0.1\)). Acceptance of an
 energy rise \(\delta\): accept iff \(\delta < \tau\), then
 \(\tau \mathrel{*}= \alpha_{accept}=1/1.05\) on acceptance or
 \(\tau \mathrel{*}= \alpha_{reject}=1.05\) on rejection, clamped to
-\([10^{-9}, 10^6]\) (=accept=, minima_hopping.rs:192) -- an adaptive
+\([10^{-9}, 10^6]\) (=accept=, minima_hopping.rs:791) -- an adaptive
 threshold rather than a Metropolis temperature, since "a temperature
 cold enough to polish cannot cross and one hot enough to cross cannot
-polish" (minima_hopping.rs:188-191).
+polish" (minima_hopping.rs:787-790).
 
-Key types and functions: =Visit= (minima_hopping.rs:42, =Same=/
-=Known=/=New=); =EscapeFeedback= (minima_hopping.rs:58); =observe=
-(minima_hopping.rs:162); =accept= (minima_hopping.rs:192);
-=discovery_rate= (minima_hopping.rs:210).
+Key types and functions: =Visit= (minima_hopping.rs:530, =Same=/
+=Known=/=New=); =EscapeFeedback= (minima_hopping.rs:546); =observe=
+(minima_hopping.rs:681); =accept= (minima_hopping.rs:791);
+=discovery_rate= (minima_hopping.rs:809).
 
 Constants and defaults: =escape_ceiling = 4x= the starting scale
-(minima_hopping.rs:89), priced by measurement: at a ceiling of 64 an
+(minima_hopping.rs:577), priced by measurement: at a ceiling of 64 an
 LJ38 run paid 138 charged evaluations per hop against 39 without the
 controller, buying 2173 hops instead of 7775 at the same budget and
 solving 1 seed in 8 where the plain chain solved 8 -- "escalation that
-prices itself out of the budget is not escalation" (minima_hopping.rs:84-88).
+prices itself out of the budget is not escalation" (minima_hopping.rs:572-576).
 
 Feeds/consumes: constructed and driven by
 =cluster_hopping::run_with_gradient= (=EscapeFeedback::new= at
-cluster_hopping.rs:1351, =feedback.observe= at
-1801/1853/2638/2644/3381, =feedback.escape()= scaling the library move
-at 2037-2041 and the soft-mode climb's overshoot at 3348-3352,
-=feedback.accept= gating uphill trials at 2645), documented as a
-black-box call site under
+cluster_hopping.rs:1854, =feedback.observe_shared= at 1960/3655 and
+=feedback.observe_driver_local= at 1968/1972/1975/3640/3663/3668,
+=feedback.escape()= scaling the library move at 2892-2896 and the
+soft-mode climb's overshoot at 4613-4617, =feedback.accept= gating
+uphill trials at 3666/3669), documented as a black-box call site under
 [[file:catalog.org::*Stall escapes][stall escapes]] above; this
 section documents the feedback mechanism itself.
 
