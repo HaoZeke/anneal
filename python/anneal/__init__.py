@@ -191,9 +191,15 @@ class Bounds(metaclass=_ExtensionAlias):
 class PyObjective(metaclass=_ExtensionAlias):
     """A Python callable as a native objective over ``bounds``.
 
-    ``grad_fn``, when given, is its native gradient; without one, callers
-    difference values. ``bounds`` is a :class:`Bounds`. The object made is
-    the extension's own ``PyObjective``, the handle the ``*_objective``
+    ``grad_fn``, when given, is its native gradient: ``qmc_polish_objective``,
+    ``gle_langevin_objective``, ``gle_langevin_preconditioned_objective``
+    and ``global_optimize_objective`` read their gradients through it, and
+    the other ``*_objective`` functions read values only. Given a handle
+    built without ``grad_fn``, those four end the run at the first gradient
+    they ask for and raise a ``ValueError`` saying so;
+    ``global_optimize_objective`` runs on values alone with
+    ``use_gradient=False``. ``bounds`` is a :class:`Bounds`. The object made
+    is the extension's own ``PyObjective``, the handle the ``*_objective``
     functions take, and counts as a ``PyObjective``.
 
     ``grad_fn`` may return any array-like of ``bounds.dims`` numbers, as

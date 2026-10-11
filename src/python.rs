@@ -804,7 +804,12 @@ struct HandleCallbacks<'a> {
     native: &'a PyObjective,
     handle: Py<PyObjective>,
     errors: CallbackErrors,
+    without_grad_fn: Option<String>,
 }
+
+/// How the `ValueError` begins that an `eindir` handle built without
+/// `grad_fn` raises when asked for a gradient.
+const EINDIR_WITHOUT_GRAD_FN: &str = "PyObjective was constructed without a grad_fn";
 
 impl<'a> HandleCallbacks<'a> {
     fn new(handle: &Bound<'_, PyObjective>, native: &'a PyObjective) -> Self {
@@ -812,6 +817,38 @@ impl<'a> HandleCallbacks<'a> {
             native,
             handle: handle.clone().unbind(),
             errors: CallbackErrors::default(),
+            without_grad_fn: None,
+        }
+    }
+
+    /// These callbacks for `function`, which reads gradients. A handle built
+    /// without `grad_fn` cannot be told apart before it is asked for a
+    /// gradient, so the first gradient asked for ends the run with a
+    /// `ValueError` that names `function` and says to build the handle with
+    /// `grad_fn`, followed by `instead`; eindir's own message advises a
+    /// wrapper anneal does not have.
+    fn reading_gradients(mut self, function: &str, instead: &str) -> Self {
+        self.without_grad_fn = Some(format!(
+            "{function} reads gradients, and this PyObjective has no grad_fn: build it \
+             with grad_fn, a callable returning the gradient of fn_{instead}"
+        ));
+        self
+    }
+
+    /// `err` from the handle's `grad` method, or the refusal for a handle
+    /// built without `grad_fn`.
+    fn gradient_error(&self, py: Python<'_>, err: PyErr) -> PyErr {
+        match &self.without_grad_fn {
+            Some(message)
+                if err.is_instance_of::<PyValueError>(py)
+                    && err
+                        .value(py)
+                        .to_string()
+                        .starts_with(EINDIR_WITHOUT_GRAD_FN) =>
+            {
+                PyValueError::new_err(message.clone())
+            }
+            _ => err,
         }
     }
 }
@@ -854,6 +891,7 @@ impl eindir_core::Gradient<f64> for HandleCallbacks<'_> {
             let read = self
                 .handle
                 .call_method1(py, pyo3::intern!(py, "grad"), (py_view1(py, x),))
+                .map_err(|err| self.gradient_error(py, err))
                 .and_then(|value| match as_float_vector(py, &value) {
                     Some(values) if values.len() == dim => Ok(Array1::from(values)),
                     Some(values) => Err(pyo3::exceptions::PyTypeError::new_err(format!(
@@ -1150,7 +1188,8 @@ fn qmc_polish_objective(
     }
 
     let native = objective.borrow();
-    let callbacks = HandleCallbacks::new(&objective, &native);
+    let callbacks =
+        HandleCallbacks::new(&objective, &native).reading_gradients("qmc_polish_objective", "");
     let result = crate::qmc_projected_gradient_polish(
         &callbacks,
         &callbacks,
@@ -1814,7 +1853,8 @@ fn gle_langevin_objective(
     validate_gle_args(max_fevals, omega0)?;
     let native = objective.borrow();
     let x0 = gle_langevin_x0(x0, native.dim())?;
-    let callbacks = HandleCallbacks::new(&objective, &native);
+    let callbacks =
+        HandleCallbacks::new(&objective, &native).reading_gradients("gle_langevin_objective", "");
     let result = if let Some(omega0) = omega0 {
         crate::methods::gle_langevin_sa(
             &callbacks, &callbacks, seed, max_fevals, omega0, dt, n_epochs, x0,
@@ -1847,7 +1887,8 @@ fn gle_langevin_preconditioned_objective(
     validate_gle_args(max_fevals, omega0)?;
     let native = objective.borrow();
     let x0 = gle_langevin_x0(x0, native.dim())?;
-    let callbacks = HandleCallbacks::new(&objective, &native);
+    let callbacks = HandleCallbacks::new(&objective, &native)
+        .reading_gradients("gle_langevin_preconditioned_objective", "");
     let result = if let Some(omega0) = omega0 {
         crate::methods::gle_langevin_sa(
             &callbacks, &callbacks, seed, max_fevals, omega0, dt, n_epochs, x0,
@@ -2567,7 +2608,10 @@ fn global_optimize_objective(
     )?;
     let x0_view = start.as_ref().map(|x| x.view());
     let policy = crate::PortfolioPolicy::Auto;
-    let callbacks = HandleCallbacks::new(&objective, &native);
+    let callbacks = HandleCallbacks::new(&objective, &native).reading_gradients(
+        "global_optimize_objective",
+        ", or pass use_gradient=False to run on values alone",
+    );
     let result = if use_gradient {
         crate::portfolio_optimize_from(
             &callbacks,
