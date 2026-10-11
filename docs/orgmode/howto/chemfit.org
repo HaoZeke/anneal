@@ -142,15 +142,18 @@ concurrently, and one =step=. The budget stays the total number of
 evaluations.
 
 Batches need a =Fitter= with =evaluate= and =step= whose =init= takes
-=batch_size=, which no ChemFit release has yet. ChemFit 3.1.1, the latest
-release, has =ask= and =tell=: the bridges drive it one candidate at a time
-and refuse =batch_size= above one before =init=. ChemFit built from its
-source at commit 3b65fe0 or later takes batches, though it still reports
-version 3.1.1, so the version number does not tell the two apart; the
-parameters of =Fitter.init= do. Both have =Fitter= in =chemfit.fitter=,
-and 3.1.1 has no =chemfit.Fitter=. With =loss_by_name=, =initial= and
-=parameter_bounds= as above, this fits in batches of four where the
-installed ChemFit takes them and one candidate at a time on 3.1.1:
+=batch_size=, which no ChemFit release has yet; for any other fitter the
+bridges refuse =batch_size= above one before =init=, naming what it lacks.
+ChemFit 3.1.1, the latest release, has =ask= and =tell=, which the bridges
+drive one candidate at a time, and ChemFit's source has =evaluate= and
+=step= from commit c57d6f5 but an =init= that takes =num_workers= until
+3b65fe0. ChemFit built from its source at commit 3b65fe0 or later takes
+batches. All of them report version 3.1.1, so the version number does not
+tell them apart; the parameters of =Fitter.init= do. All have =Fitter= in
+=chemfit.fitter=, and 3.1.1 has no =chemfit.Fitter=. With =loss_by_name=,
+=initial= and =parameter_bounds= as above, this fits in batches of four
+where the installed ChemFit takes them, and one candidate at a time on
+3.1.1 and on its source from commit c57d6f5 until 3b65fe0:
 
 #+begin_src python
 import inspect
