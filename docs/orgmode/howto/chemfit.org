@@ -146,15 +146,21 @@ Batches need a =Fitter= with =evaluate= and =step= whose =init= takes
 release, has =ask= and =tell=: the bridges drive it one candidate at a time
 and refuse =batch_size= above one before =init=. ChemFit built from its
 source at commit 3b65fe0 or later takes batches, though it still reports
-version 3.1.1, so the version number does not tell the two apart. With
-=loss_by_name=, =initial= and =parameter_bounds= as above, on such a build:
+version 3.1.1, so the version number does not tell the two apart; the
+parameters of =Fitter.init= do. Both have =Fitter= in =chemfit.fitter=,
+and 3.1.1 has no =chemfit.Fitter=. With =loss_by_name=, =initial= and
+=parameter_bounds= as above, this fits in batches of four where the
+installed ChemFit takes them and one candidate at a time on 3.1.1:
 
 #+begin_src python
-import chemfit
-from anneal.chemfit import fit_chemfit
+import inspect
 
-fitter = chemfit.Fitter(loss_by_name, initial_params=initial, bounds=parameter_bounds)
-best = fit_chemfit(fitter, 256, batch_size=4)
+from anneal.chemfit import fit_chemfit
+from chemfit.fitter import Fitter
+
+fitter = Fitter(loss_by_name, initial_params=initial, bounds=parameter_bounds)
+takes_batches = "batch_size" in inspect.signature(fitter.init).parameters
+best = fit_chemfit(fitter, 256, batch_size=4 if takes_batches else 1)
 #+end_src
 
 A hand-written adapter flattens the parameter dictionary, calls

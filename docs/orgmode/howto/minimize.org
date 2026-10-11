@@ -123,27 +123,33 @@ no longer do; they will raise in a future release.
 * A ChemFit fit
 
 =anneal.chemfit.fit_anneal= drives a ChemFit =Fitter= through its session
-API, =init=, =evaluate=, =step= and =finish=, from the fitter's initial
-parameters and inside its bounds. With =batch_size= above one, the portfolio
-runs that many batch replicas of =minimize=: the fitter is initialised with
-=init(batch_size=batch_size)=, and each batch of candidates goes to one
-=fitter.evaluate([...])= and one =fitter.step()=.
+API, =init=, then =evaluate= and =step= (=ask= and =tell= on ChemFit 3.1.1),
+then =finish=, from the fitter's initial parameters and inside its bounds.
+With =batch_size= above one, the portfolio runs that many batch replicas of
+=minimize=: the fitter is initialised with =init(batch_size=batch_size)=,
+and each batch of candidates goes to one =fitter.evaluate([...])= and one
+=fitter.step()=. The example imports =Fitter= from =chemfit.fitter=, where
+ChemFit 3.1.1 and ChemFit's source both have it, and asks for batches only
+where =init= takes =batch_size=.
 
 #+begin_src python
-import chemfit
+import inspect
+
 from anneal.chemfit import fit_anneal
+from chemfit.fitter import Fitter
 
 
 def loss(params):
     return (params["a"] - 1.0) ** 2 + 10.0 * (params["b"] + 0.5) ** 2
 
 
-fitter = chemfit.Fitter(
+fitter = Fitter(
     loss,
     initial_params={"a": 3.0, "b": 2.0},
     bounds={"a": (-4.0, 4.0), "b": (-4.0, 4.0)},
 )
-best = fit_anneal(fitter, 400, seed=0, batch_size=4)
+takes_batches = "batch_size" in inspect.signature(fitter.init).parameters
+best = fit_anneal(fitter, 400, seed=0, batch_size=4 if takes_batches else 1)
 #+end_src
 
 A =Fitter= built on a prepared schedule that runs candidates concurrently
@@ -153,6 +159,6 @@ batch. The budget is the total number of evaluations either way, and the
 default =batch_size=1= keeps the single-candidate path. =fit_chemfit(fitter,
 budget, batch_size=4)= and =run_benchmark(context, method="portfolio",
 batch_size=4)= do the same; a batch needs the portfolio and a fitter with
-=evaluate= and =step=, which ChemFit built from its source at commit 3b65fe0
-or later has but no ChemFit release has yet. On ChemFit 3.1.1 leave
-=batch_size= at one.
+=evaluate= and =step= whose =init= takes =batch_size=, which ChemFit built
+from its source at commit 3b65fe0 or later has but no ChemFit release has
+yet, so on ChemFit 3.1.1 the example fits one candidate at a time.
