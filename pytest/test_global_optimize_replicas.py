@@ -138,12 +138,17 @@ def test_only_the_batch_replicas_warn_about_the_coverage_keywords(route):
 
 
 @pytest.mark.parametrize(
-    "keywords", [{"coverage_radius": 0.0}, {"coverage_neighbors": -1}]
+    ("keywords", "error"),
+    [
+        ({"coverage_radius": 0.0}, ValueError),
+        ({"coverage_neighbors": -1}, ValueError),
+        ({"coverage_neighbors": 2**64}, OverflowError),
+    ],
 )
-def test_batch_replicas_still_check_the_coverage_keywords(keywords):
+def test_batch_replicas_still_check_the_coverage_keywords(keywords, error):
     fun = Counted(batched=True)
     with warnings.catch_warnings():
         warnings.simplefilter("error")
-        with pytest.raises(ValueError):
+        with pytest.raises(error):
             anneal.global_optimize(fun, LOW, HIGH, 100, x0=X0, replicas=3, **keywords)
     assert fun.points == []

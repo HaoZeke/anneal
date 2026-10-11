@@ -115,6 +115,11 @@ def test_scalar_hop_clients_accept_same_neighbourhood_control():
     [
         (-1, ValueError, "coverage_neighbors must be at least 0, got -1"),
         (1.5, TypeError, "cannot be interpreted as an integer"),
+        (
+            2**64,
+            OverflowError,
+            f"coverage_neighbors must be at most {np.iinfo(np.uintp).max}, got",
+        ),
     ],
 )
 def test_invalid_neighbourhood_costs_no_callbacks(entry, neighbors, error, message):

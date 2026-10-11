@@ -316,12 +316,20 @@ def _coverage_radius(value):
 
 
 def _coverage_neighbors(value):
-    """``None``, or ``coverage_neighbors`` as a whole number of at least 0."""
+    """``None``, or ``coverage_neighbors`` as a whole number the engine holds.
+
+    The engine reads a ``usize``; a larger number is refused with the
+    ``OverflowError`` the engine raises, before any warning about the keyword.
+    """
     if value is None:
         return None
     neighbors = operator.index(value)
     if neighbors < 0:
         raise ValueError(f"coverage_neighbors must be at least 0, got {value!r}")
+    largest = int(np.iinfo(np.uintp).max)
+    if neighbors > largest:
+        msg = f"coverage_neighbors must be at most {largest}, got {value!r}"
+        raise OverflowError(msg)
     return neighbors
 
 
