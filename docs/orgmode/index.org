@@ -88,6 +88,7 @@ See the [[file:architecture.org][architecture]] page for the five signatures and
    howto/chemfit
    howto/precision-policy
    howto/rgmin-lbfgs
+   howto/box-langevin-escape
    howto/faq
    faq
 #+end_export
@@ -99,8 +100,19 @@ See the [[file:architecture.org][architecture]] page for the five signatures and
 
    architecture
    explanation/algebra
+   explanation/communication
    explanation/bayesian-details
    explanation/gle-mechanics
+   explanation/regime_auto
+#+end_export
+
+#+begin_export rst
+.. toctree::
+   :maxdepth: 1
+   :caption: Methods
+
+   methods/catalog
+   methods/composition
 #+end_export
 
 #+begin_export rst
