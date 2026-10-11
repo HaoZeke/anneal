@@ -3,11 +3,15 @@
 With ``batch_size`` above one, ``fit_anneal``, ``fit_chemfit`` and
 ``run_benchmark`` run the portfolio as that many batch replicas of
 ``anneal.minimize``: the fitter is initialised with ``init(batch_size=...)``
-and each batch is one ``evaluate`` of a list and one ``step``. On an installed
-ChemFit whose ``Fitter`` lacks either method, as 3.1.1 lacks both, a batch is
-refused before ``init`` and ``batch_size=1`` still fits.
+and each batch is one ``evaluate`` of a list and one ``step``. A fitter that
+lacks any of the three, as ChemFit 3.1.1's lacks all of them and the one of
+ChemFit's source from commit c57d6f5 until 3b65fe0 lacks an ``init`` that
+takes ``batch_size``, has its batch refused before ``init`` by a message
+naming what it lacks, and ``batch_size=1`` still fits.
 """
 
+import functools
+import inspect
 import re
 
 import numpy as np
@@ -21,6 +25,7 @@ from chemfit_doubles import (  # noqa: E402
     BatchFitter,
     NextFitter,
     ReleasedFitter,
+    WorkersFitter,
     drive,
     same_params,
     sum_of_squares,
@@ -29,15 +34,31 @@ from chemfit_doubles import (  # noqa: E402
 BATCH_ENTRIES = ("fit_anneal", "fit_chemfit", "run_benchmark")
 
 
-def _installed_fitter():
-    """The installed ChemFit ``Fitter`` and the batch methods it lacks.
+def _listed(names):
+    return names[0] if len(names) == 1 else f"{', '.join(names[:-1])} and {names[-1]}"
 
-    ChemFit 3.1.1 has ``ask`` and ``tell`` but neither ``evaluate`` nor
-    ``step``, so the bridges refuse its batches.
+
+def _refusal(name, lacks):
+    return (
+        "batch_size above one needs a fitter with an init that takes batch_size, "
+        "an evaluate that takes a list of candidates, and step, which ChemFit's "
+        f"source has from commit 3b65fe0 and no release has yet; {name} lacks {lacks}"
+    )
+
+
+def _installed_fitter():
+    """The installed ChemFit ``Fitter`` and what it lacks of a batch.
+
+    ChemFit 3.1.1 has ``ask`` and ``tell`` and an ``init`` that takes
+    ``num_workers``. ChemFit's source has ``evaluate`` and ``step`` from
+    commit c57d6f5 and an ``init`` that takes ``batch_size`` from 3b65fe0.
     """
     fitter_type = pytest.importorskip("chemfit.fitter").Fitter
-    missing = [name for name in ("evaluate", "step") if not callable(getattr(fitter_type, name, None))]
-    return fitter_type, missing
+    init = getattr(fitter_type, "init", None)
+    takes = callable(init) and "batch_size" in inspect.signature(init).parameters
+    lacks = [] if takes else ["an init that takes batch_size"]
+    lacks += [name for name in ("evaluate", "step") if not callable(getattr(fitter_type, name, None))]
+    return fitter_type, lacks
 
 
 def _fitter(kind=BatchFitter, **kwargs):
@@ -169,11 +190,40 @@ def test_batches_need_the_portfolio(entry, driver):
     assert fitter.calls == []
 
 
+@pytest.mark.parametrize(
+    "kind, lacks",
+    [
+        (ReleasedFitter, "an init that takes batch_size, evaluate and step"),
+        (NextFitter, "an init that takes batch_size"),
+        (WorkersFitter, "an init that takes batch_size"),
+    ],
+)
 @pytest.mark.parametrize("entry", BATCH_ENTRIES)
-def test_batches_need_a_fitter_with_evaluate_and_step(entry):
-    fitter = _fitter(ReleasedFitter)
-    with pytest.raises(TypeError, match="needs a fitter with evaluate and step"):
+def test_a_batch_is_refused_before_init_naming_what_the_fitter_lacks(entry, kind, lacks):
+    fitter = _fitter(kind)
+    with pytest.raises(TypeError, match=re.escape(_refusal(kind.__name__, lacks))):
         drive(entry, fitter, 50, batch_size=2)
+    assert fitter.calls == []
+
+
+def test_run_benchmark_refuses_a_batch_from_a_fitter_without_step():
+    class EvaluateOnly(BatchFitter):
+        step = None
+
+    fitter = _fitter(EvaluateOnly)
+    with pytest.warns(FutureWarning), pytest.raises(TypeError) as refused:
+        drive("run_benchmark", fitter, 50, batch_size=2)
+    assert str(refused.value) == _refusal("EvaluateOnly", "step")
+    assert fitter.calls == []
+
+
+def test_a_fitter_without_init_cannot_take_a_batch():
+    class NoInit(BatchFitter):
+        init = None
+
+    fitter = _fitter(NoInit)
+    with pytest.raises(TypeError, match=re.escape(_refusal("NoInit", "an init that takes batch_size"))):
+        fit_anneal(fitter, 50, batch_size=2)
     assert fitter.calls == []
 
 
@@ -227,9 +277,9 @@ def _chemfit_problem(fitter_type):
 
 @pytest.mark.parametrize("entry", BATCH_ENTRIES)
 def test_a_chemfit_fitter_evaluates_each_batch_through_its_schedule(entry):
-    fitter_type, missing = _installed_fitter()
-    if missing:
-        pytest.skip(f"the installed ChemFit Fitter lacks {' and '.join(missing)}, which batches need")
+    fitter_type, lacks = _installed_fitter()
+    if lacks:
+        pytest.skip(f"the installed ChemFit Fitter lacks {_listed(lacks)}, which batches need")
     fitter, start, seen = _chemfit_problem(fitter_type)
     result = drive(entry, fitter, 120, batch_size=4)
     assert seen[0].tobytes() == start.tobytes()
@@ -239,24 +289,21 @@ def test_a_chemfit_fitter_evaluates_each_batch_through_its_schedule(entry):
 
 
 @pytest.mark.parametrize("entry", BATCH_ENTRIES)
-def test_a_chemfit_fitter_without_evaluate_and_step_refuses_a_batch_before_init(entry):
-    fitter_type, missing = _installed_fitter()
-    if not missing:
-        pytest.skip("the installed ChemFit Fitter has evaluate and step, so it takes batches")
+def test_a_chemfit_fitter_that_cannot_take_batches_refuses_one_before_init(entry):
+    fitter_type, lacks = _installed_fitter()
+    if not lacks:
+        pytest.skip("the installed ChemFit Fitter takes batches")
     fitter, _, seen = _chemfit_problem(fitter_type)
     inits = []
     init = fitter.init
 
+    @functools.wraps(init)
     def recorded_init(*args, **kwargs):
         inits.append(kwargs)
         return init(*args, **kwargs)
 
     fitter.init = recorded_init
-    message = (
-        "batch_size above one needs a fitter with evaluate and step, whose evaluate "
-        f"takes a list of candidates; {fitter_type.__name__} lacks one"
-    )
-    with pytest.raises(TypeError, match=re.escape(message)):
+    with pytest.raises(TypeError, match=re.escape(_refusal(fitter_type.__name__, _listed(lacks)))):
         drive(entry, fitter, 120, batch_size=4)
     assert inits == []
     assert seen == []

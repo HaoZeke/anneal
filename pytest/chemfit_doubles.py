@@ -6,7 +6,8 @@
 each evaluated parameter dict, so a test can check what a bridge sent, in
 which order, and what ``finish`` received. ``BatchFitter`` adds current
 ChemFit's batches: ``init(batch_size=...)``, and ``evaluate`` of a list of
-at most that many candidates returning their losses.
+at most that many candidates returning their losses. ``WorkersFitter`` has
+the same ``evaluate`` but an ``init`` that takes ``num_workers`` instead.
 """
 
 import copy
@@ -118,6 +119,18 @@ class BatchFitter(NextFitter):
             losses.append(self.loss(params))
         self.losses.extend(losses)
         return losses
+
+
+class WorkersFitter(BatchFitter):
+    """ChemFit's source from commit c57d6f5 until 3b65fe0, as at b41faa4.
+
+    ``evaluate`` takes a list and ``step`` follows, but ``init`` takes
+    ``num_workers`` and ``contexts``, not ``batch_size``.
+    """
+
+    def init(self, num_workers=1, contexts=None):
+        self.calls.append("init")
+        self.batch_size = num_workers
 
 
 class ReleasedFitter(Recorder):
