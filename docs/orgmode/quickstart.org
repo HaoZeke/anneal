@@ -134,7 +134,7 @@ instead.
 
 * Pilot draws for Bayesian warm-start
 
-= pilot_draws_qmc= returns (n,3) draws of (T0, sigma, q_v) from the BGSA pilot prior (log-normal on scale quantities, truncated on q_v).
+=pilot_draws_qmc= returns (n,3) draws of (T0, sigma, q_v) from the BGSA pilot prior (log-normal on scale quantities, truncated on q_v).
 These are the "no-tuning" entry point.
 
 #+begin_src python

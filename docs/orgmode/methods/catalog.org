@@ -143,7 +143,7 @@ enum (moves.rs:267) with variants =AllPoints=, =SinglePoint=, =Visit=,
 =SurfaceRelocate=, =ShellRotate=, =Symmetrise=, =Twin= (reflect across a
 dense plane), =Reseed= (regrow a local order from a template, the only
 kernel that crosses a funnel boundary in one step; see
-[[file:catalog.org::*Descriptors and identity][descriptors]]/=crate::lattice=), =Angular= (Wales-Doye worst-bound-point
+[[file:catalog.org::*Descriptors and identity][descriptors]] and =crate::lattice=), =Angular= (Wales-Doye worst-bound-point
 move), =Soap= (descriptor-space pullback step; see the SOAP entry below).
 =worst_bound=/=worst_bound_scaled= (moves.rs:578/589) decide when a point
 is loose enough for the angular move. =connectivity_groups=
