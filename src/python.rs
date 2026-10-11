@@ -789,6 +789,79 @@ impl eindir_core::Gradient<f64> for CallablePyGradient {
     }
 }
 
+/// An `eindir` objective handle as a driver's objective and gradient.
+///
+/// The handle's own gradient panics when `grad_fn` raises or returns
+/// anything but a contiguous float64 array. This adapter reads the gradient
+/// through the handle's Python `grad` method instead and copies it whatever
+/// its strides. A gradient of another length, or an exception, ends the
+/// run: no further callback is made, and the driver call raises it when it
+/// returns. Values come from the handle itself.
+struct HandleCallbacks<'a> {
+    native: &'a PyObjective,
+    handle: Py<PyObjective>,
+    errors: CallbackErrors,
+}
+
+impl<'a> HandleCallbacks<'a> {
+    fn new(handle: &Bound<'_, PyObjective>, native: &'a PyObjective) -> Self {
+        Self {
+            native,
+            handle: handle.clone().unbind(),
+            errors: CallbackErrors::default(),
+        }
+    }
+}
+
+impl Objective<f64> for HandleCallbacks<'_> {
+    fn dim(&self) -> usize {
+        <PyObjective as Objective<f64>>::dim(self.native)
+    }
+
+    fn bounds(&self) -> &Bounds<f64> {
+        <PyObjective as Objective<f64>>::bounds(self.native)
+    }
+
+    fn eval(&self, x: ArrayView1<f64>) -> f64 {
+        if self.errors.aborted() {
+            return f64::INFINITY;
+        }
+        <PyObjective as Objective<f64>>::eval(self.native, x)
+    }
+}
+
+impl eindir_core::Gradient<f64> for HandleCallbacks<'_> {
+    fn grad(&self, x: ArrayView1<f64>) -> Array1<f64> {
+        let dim = <PyObjective as Objective<f64>>::dim(self.native);
+        if self.errors.aborted() {
+            return Array1::zeros(dim);
+        }
+        Python::attach(|py| {
+            let read = self
+                .handle
+                .call_method1(py, pyo3::intern!(py, "grad"), (py_view1(py, x),))
+                .and_then(|value| match as_float_vector(py, &value) {
+                    Some(values) if values.len() == dim => Ok(Array1::from(values)),
+                    Some(values) => Err(pyo3::exceptions::PyTypeError::new_err(format!(
+                        "grad_fn must return {dim} numbers, got {}",
+                        values.len()
+                    ))),
+                    None => Err(pyo3::exceptions::PyTypeError::new_err(format!(
+                        "grad_fn must return {dim} numbers"
+                    ))),
+                });
+            read.unwrap_or_else(|err| {
+                self.errors.abort(err);
+                Array1::zeros(dim)
+            })
+        })
+    }
+
+    fn dim(&self) -> usize {
+        <PyObjective as Objective<f64>>::dim(self.native)
+    }
+}
+
 /// Runs HMC-driven SA with a user-supplied gradient and returns a `History`.
 ///
 /// The trajectory kernel uses the Omelyan minimum-norm integrator.
@@ -1039,7 +1112,7 @@ fn qmc_polish_result_to_dict(
 #[pyo3(signature = (objective, n_starts, max_fevals_per_start, seed = 0, step0 = 1.0, grad_tol = 1e-8, top_k = 0))]
 fn qmc_polish_objective(
     py: Python<'_>,
-    objective: PyRef<'_, PyObjective>,
+    objective: Bound<'_, PyObjective>,
     n_starts: usize,
     max_fevals_per_start: usize,
     seed: u64,
@@ -1062,9 +1135,11 @@ fn qmc_polish_objective(
         return Err(PyValueError::new_err("grad_tol must be non-negative"));
     }
 
+    let native = objective.borrow();
+    let callbacks = HandleCallbacks::new(&objective, &native);
     let result = crate::qmc_projected_gradient_polish(
-        &*objective,
-        &*objective,
+        &callbacks,
+        &callbacks,
         n_starts,
         max_fevals_per_start,
         seed,
@@ -1072,6 +1147,7 @@ fn qmc_polish_objective(
         grad_tol,
         top_k,
     );
+    callbacks.errors.finish(py)?;
     qmc_polish_result_to_dict(py, result)
 }
 
@@ -1704,7 +1780,7 @@ fn gle_langevin_preconditioned(
 #[allow(clippy::too_many_arguments)]
 fn gle_langevin_objective(
     py: Python<'_>,
-    objective: PyRef<'_, PyObjective>,
+    objective: Bound<'_, PyObjective>,
     max_fevals: usize,
     seed: u64,
     omega0: Option<f64>,
@@ -1713,29 +1789,19 @@ fn gle_langevin_objective(
     x0: Option<PyReadonlyArray1<'_, f64>>,
 ) -> PyResult<Py<PyDict>> {
     validate_gle_args(max_fevals, omega0)?;
-    let x0 = gle_langevin_x0(x0, objective.dim())?;
+    let native = objective.borrow();
+    let x0 = gle_langevin_x0(x0, native.dim())?;
+    let callbacks = HandleCallbacks::new(&objective, &native);
     let result = if let Some(omega0) = omega0 {
         crate::methods::gle_langevin_sa(
-            &*objective,
-            &*objective,
-            seed,
-            max_fevals,
-            omega0,
-            dt,
-            n_epochs,
-            x0,
+            &callbacks, &callbacks, seed, max_fevals, omega0, dt, n_epochs, x0,
         )
     } else {
         crate::methods::gle_langevin_adaptive_sa(
-            &*objective,
-            &*objective,
-            seed,
-            max_fevals,
-            dt,
-            n_epochs,
-            x0,
+            &callbacks, &callbacks, seed, max_fevals, dt, n_epochs, x0,
         )
     };
+    callbacks.errors.finish(py)?;
     gle_langevin_result_to_dict(py, result)
 }
 
@@ -1746,7 +1812,7 @@ fn gle_langevin_objective(
 #[allow(clippy::too_many_arguments)]
 fn gle_langevin_preconditioned_objective(
     py: Python<'_>,
-    objective: PyRef<'_, PyObjective>,
+    objective: Bound<'_, PyObjective>,
     max_fevals: usize,
     seed: u64,
     omega0: Option<f64>,
@@ -1756,22 +1822,17 @@ fn gle_langevin_preconditioned_objective(
     preconditioner_probes: Option<usize>,
 ) -> PyResult<Py<PyDict>> {
     validate_gle_args(max_fevals, omega0)?;
-    let x0 = gle_langevin_x0(x0, objective.dim())?;
+    let native = objective.borrow();
+    let x0 = gle_langevin_x0(x0, native.dim())?;
+    let callbacks = HandleCallbacks::new(&objective, &native);
     let result = if let Some(omega0) = omega0 {
         crate::methods::gle_langevin_sa(
-            &*objective,
-            &*objective,
-            seed,
-            max_fevals,
-            omega0,
-            dt,
-            n_epochs,
-            x0,
+            &callbacks, &callbacks, seed, max_fevals, omega0, dt, n_epochs, x0,
         )
     } else {
         crate::methods::gle_langevin_preconditioned_sa(
-            &*objective,
-            &*objective,
+            &callbacks,
+            &callbacks,
             seed,
             max_fevals,
             dt,
@@ -1780,6 +1841,7 @@ fn gle_langevin_preconditioned_objective(
             preconditioner_probes,
         )
     };
+    callbacks.errors.finish(py)?;
     gle_langevin_result_to_dict(py, result)
 }
 
@@ -2456,7 +2518,7 @@ fn global_optimize(
 #[pyo3(signature = (objective, budget, seed = 0, use_gradient = true, noise_sigma = None, x0 = None))]
 fn global_optimize_objective(
     py: Python<'_>,
-    objective: PyRef<'_, PyObjective>,
+    objective: Bound<'_, PyObjective>,
     budget: usize,
     seed: u64,
     use_gradient: bool,
@@ -2473,7 +2535,8 @@ fn global_optimize_objective(
             "noise_sigma must be positive and finite",
         ));
     }
-    let bounds = <PyObjective as Objective<f64>>::bounds(&objective);
+    let native = objective.borrow();
+    let bounds = <PyObjective as Objective<f64>>::bounds(&native);
     let start = read_x0(
         x0,
         bounds.low.as_slice().expect("contiguous bounds"),
@@ -2481,10 +2544,11 @@ fn global_optimize_objective(
     )?;
     let x0_view = start.as_ref().map(|x| x.view());
     let policy = crate::PortfolioPolicy::Auto;
+    let callbacks = HandleCallbacks::new(&objective, &native);
     let result = if use_gradient {
         crate::portfolio_optimize_from(
-            &*objective,
-            Some(&*objective),
+            &callbacks,
+            Some(&callbacks),
             budget,
             seed,
             noise_sigma,
@@ -2492,8 +2556,8 @@ fn global_optimize_objective(
             x0_view,
         )
     } else {
-        crate::portfolio_optimize_from::<_, PyObjective>(
-            &*objective,
+        crate::portfolio_optimize_from::<_, HandleCallbacks>(
+            &callbacks,
             None,
             budget,
             seed,
@@ -2502,6 +2566,7 @@ fn global_optimize_objective(
             x0_view,
         )
     };
+    callbacks.errors.finish(py)?;
     portfolio_result_to_dict(py, result)
 }
 

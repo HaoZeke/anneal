@@ -195,6 +195,13 @@ class PyObjective(metaclass=_ExtensionAlias):
     difference values. ``bounds`` is a :class:`Bounds`. The object made is
     the extension's own ``PyObjective``, the handle the ``*_objective``
     functions take, and counts as a ``PyObjective``.
+
+    ``grad_fn`` may return any array-like of ``bounds.dims`` numbers, as
+    ``global_optimize`` takes its gradients: a strided view, a list, a
+    column or another dtype is read as a contiguous float64 vector. In the
+    ``*_objective`` functions a gradient of another length, or an exception
+    from ``grad_fn``, ends the run, and the function raises that exception,
+    or a ``TypeError`` giving the length, when it returns.
     """
 
     _extension = _CorePyObjective
@@ -202,7 +209,23 @@ class PyObjective(metaclass=_ExtensionAlias):
     def __new__(cls, fn_, bounds, grad_fn=None):
         if isinstance(bounds, Bounds) and not isinstance(bounds, _CoreBounds):
             bounds = bounds._core
+        if grad_fn is not None:
+            grad_fn = _float_gradient(grad_fn)
         return _CorePyObjective(fn_, bounds, grad_fn)
+
+
+def _float_gradient(grad_fn):
+    """``grad_fn`` with what it returns read as a contiguous float64 vector."""
+
+    def gradient(x):
+        value = grad_fn(x)
+        try:
+            return _flat(value)
+        except (TypeError, ValueError) as err:
+            msg = f"grad_fn must return numbers, got {type(value).__name__}"
+            raise TypeError(msg) from err
+
+    return gradient
 
 
 def _count(name, value, minimum):
