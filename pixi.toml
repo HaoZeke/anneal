@@ -66,8 +66,10 @@ setup-rustdocgen = "cargo install --locked --root .pixi/envs/docs sphinx-rustdoc
 orgbld           = "emacs --batch -l docs/export.el"
 docbld           = { cmd = "python -m sphinx docs/source docs/build -b html -W --keep-going", depends-on = ["orgbld", "setup-rustdocgen"] }
 
-# rgpycrumbs/rsx-rs aligned named tasks for docs (Task 1 infra).
-# These are the entry points used by the plan verify commands and CI.
+# rgpycrumbs/rsx-rs aligned named tasks for docs (Task 1 infra). These are the
+# entry points used by the plan verify commands and the local build README.md
+# and the install guide give; CI runs docbld, which unlike docs-build fails on
+# any warning.
 docs-export = "emacs --batch -l docs/export.el"
 docs-build = { cmd = "cd docs && python -m sphinx -b html source build -E -q", depends-on = ["docs-export", "setup-rustdocgen"] }
 docs-clean = "rm -rf docs/build docs/source/*.rst docs/source/*/*.rst"
