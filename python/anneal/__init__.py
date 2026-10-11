@@ -35,14 +35,14 @@ import numpy as np
 from anneal._core import (
     BasinBias,
     Boltzmann,
-    Bounds,
+    Bounds as _CoreBounds,
     Config,
     EpochLine,
     Fast,
     Gsa,
     History,
     Ledger,
-    PyObjective,
+    PyObjective as _CorePyObjective,
     __version__,
     cluster_search as _core_cluster_search,
     low_discrepancy_points as _core_low_discrepancy_points,
@@ -92,6 +92,117 @@ def _flat(value):
 
 def _flat_or_none(value):
     return None if value is None else _flat(value)
+
+
+class _ExtensionAlias(type):
+    """Metaclass of a Python class standing in for an extension class.
+
+    ``isinstance`` and ``issubclass`` against the class itself, though not
+    against its subclasses, also admit the extension class, whose instances
+    the extension itself returns.
+    """
+
+    def __instancecheck__(cls, instance):
+        if type.__instancecheck__(cls, instance):
+            return True
+        extension = cls.__dict__.get("_extension")
+        return extension is not None and isinstance(instance, extension)
+
+    def __subclasscheck__(cls, subclass):
+        if type.__subclasscheck__(cls, subclass):
+            return True
+        extension = cls.__dict__.get("_extension")
+        return extension is not None and issubclass(subclass, extension)
+
+
+class Bounds(metaclass=_ExtensionAlias):
+    """The box ``low <= x <= high``, widened by ``slack`` in :meth:`contains`.
+
+    ``low``, ``high`` and the points :meth:`contains` and :meth:`clip` take
+    may be any array-likes of one size, strided views, transposes and the
+    columns of a ``(dim, 2)`` array included; each is flattened in C order
+    into a float64 copy, as ``global_optimize`` takes its vectors.
+    ``PyObjective.bounds`` returns the extension's own box, which counts as a
+    ``Bounds`` too.
+    """
+
+    _extension = _CoreBounds
+    __slots__ = ("_core", "_high", "_low")
+
+    def __init__(self, low, high, slack=1e-6):
+        low = _flat(low).copy()
+        high = _flat(high).copy()
+        slack = float(slack)
+        if low.size != high.size:
+            msg = f"low and high must have one size, got {low.size} and {high.size}"
+            raise ValueError(msg)
+        if not slack >= 0.0:
+            raise ValueError(f"slack must be at least 0, got {slack!r}")
+        above = np.flatnonzero(low > high)
+        if above.size:
+            i = above[0]
+            raise ValueError(f"coordinate {i} has low {low[i]} above high {high[i]}")
+        low.flags.writeable = False
+        high.flags.writeable = False
+        self._low = low
+        self._high = high
+        self._core = _CoreBounds(low, high, slack)
+
+    @property
+    def dims(self):
+        """Number of coordinates."""
+        return self._core.dims
+
+    @property
+    def slack(self):
+        """How far beyond a face :meth:`contains` still admits a point."""
+        return self._core.slack
+
+    @property
+    def low(self):
+        """The lower faces, as a read-only float64 vector."""
+        return self._low
+
+    @property
+    def high(self):
+        """The upper faces, as a read-only float64 vector."""
+        return self._high
+
+    def contains(self, x):
+        """True if ``x`` has ``dims`` coordinates, each within ``slack`` of the box."""
+        return self._core.contains(_flat(x))
+
+    def clip(self, x):
+        """``x`` with each coordinate clipped onto ``[low, high]``."""
+        x = _flat(x)
+        if x.size != self.dims:
+            raise ValueError(f"x must have {self.dims} coordinates, got {x.size}")
+        return self._core.clip(x)
+
+    def __repr__(self):
+        low, high = self._low.tolist(), self._high.tolist()
+        name = type(self).__name__
+        return f"{name}(low={low!r}, high={high!r}, slack={self.slack!r})"
+
+    def __reduce__(self):
+        return (type(self), (self._low, self._high, self.slack))
+
+
+class PyObjective(metaclass=_ExtensionAlias):
+    """A Python callable as a native objective over ``bounds``.
+
+    ``grad_fn``, when given, is its native gradient; without one, callers
+    difference values. ``bounds`` is a :class:`Bounds`. The object made is
+    the extension's own ``PyObjective``, the handle the ``*_objective``
+    functions take, and counts as a ``PyObjective``.
+    """
+
+    _extension = _CorePyObjective
+
+    def __new__(cls, fn_, bounds, grad_fn=None):
+        if isinstance(bounds, Bounds) and not isinstance(bounds, _CoreBounds):
+            bounds = bounds._core
+        return _CorePyObjective(fn_, bounds, grad_fn)
 
 
 def _count(name, value, minimum):
