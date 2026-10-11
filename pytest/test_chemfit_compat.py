@@ -44,6 +44,7 @@ from chemfit_doubles import (  # noqa: E402
     Recorder,
     ReleasedFitter,
     drive,
+    installed_fitter_type,
     protocol_names,
     same_params,
 )
@@ -823,7 +824,7 @@ def test_the_helpers_read_numeric_strings_with_a_future_warning(
 
 @pytest.mark.parametrize("entry", ENTRIES)
 def test_the_installed_chemfit_fitter_runs_on_bounds_read_from_yaml(entry):
-    fitter_type = pytest.importorskip("chemfit.fitter").Fitter
+    fitter_type = installed_fitter_type()
 
     def run(bounds):
         calls = []
@@ -857,7 +858,7 @@ def test_the_installed_chemfit_fitter_runs_on_bounds_read_from_yaml(entry):
 
 @pytest.mark.parametrize("entry", ENTRIES)
 def test_the_installed_chemfit_fitter_runs_on_decimal_and_fraction_parameters(entry):
-    fitter_type = pytest.importorskip("chemfit.fitter").Fitter
+    fitter_type = installed_fitter_type()
 
     def run(initial):
         calls = []
@@ -881,7 +882,7 @@ def test_the_installed_chemfit_fitter_runs_on_decimal_and_fraction_parameters(en
 
 @pytest.mark.parametrize("kind", list(_PAIRS))
 def test_fit_chemfit_reads_the_pairs_a_chemfit_3_1_fitter_keeps(kind):
-    fitter_type = pytest.importorskip("chemfit.fitter").Fitter
+    fitter_type = installed_fitter_type()
     params = {"a": 0.5, "b": 0.1}
     bounds = {"a": (0.0, 1.0), "b": (0.0, 1.0)}
     try:

@@ -4,13 +4,14 @@ Thirteen Lennard-Jones atoms with their positions flattened into the
 optimizer vector, a (-3, 3) box, a budget of 2000 and the default portfolio.
 ChemFit 3.1.1 is driven through ``ask`` / ``tell`` and ChemFit's source from
 commit c57d6f5 through ``evaluate`` / ``step``; the test runs against
-whichever is installed and is skipped when ChemFit is not.
+whichever is installed, and is skipped when ChemFit is not installed or,
+as with ChemFit 3.1.0, its ``Fitter`` has neither pair.
 """
 
 import numpy as np
 import pytest
 
-fitter_module = pytest.importorskip("chemfit.fitter")
+pytest.importorskip("chemfit.fitter")
 
 from anneal.chemfit import (  # noqa: E402
     fit_anneal,
@@ -18,6 +19,7 @@ from anneal.chemfit import (  # noqa: E402
     run_benchmark,
     run_fitter,
 )
+from chemfit_doubles import installed_fitter_type  # noqa: E402
 
 BUDGET = 2000
 
@@ -47,6 +49,7 @@ def _fit(entry, fitter, initial):
     "entry", ["fit_anneal", "fit_chemfit", "run_benchmark", "run_fitter"]
 )
 def test_thirteen_atoms_fit_inside_the_box_within_the_budget(entry, shape):
+    fitter_type = installed_fitter_type()
     start = np.random.default_rng(0).uniform(-1.5, 1.5, size=(13, 3)).reshape(shape)
     seen = []
 
@@ -56,7 +59,7 @@ def test_thirteen_atoms_fit_inside_the_box_within_the_budget(entry, shape):
         return lennard_jones(positions)
 
     initial = {"positions": start}
-    fitter = fitter_module.Fitter(
+    fitter = fitter_type(
         objective, initial_params=initial, bounds={"positions": (-3.0, 3.0)}
     )
     out = _fit(entry, fitter, initial)

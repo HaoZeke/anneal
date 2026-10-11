@@ -24,6 +24,7 @@ from chemfit_doubles import (  # noqa: E402
     NextFitter,
     Recorder,
     drive,
+    installed_fitter_type,
     protocol_names,
     same_params,
     sum_of_squares,
@@ -362,13 +363,9 @@ def test_a_nan_loss_scores_as_the_worst_value(entry, protocol):
     assert fitter.finished_with["cell"]["a"] <= 1.0
 
 
-def _chemfit_fitter_type():
-    return pytest.importorskip("chemfit.fitter").Fitter
-
-
 @pytest.mark.parametrize("entry", ENTRIES)
 def test_an_installed_chemfit_fitter_with_neither_pair_is_refused_before_it_runs(entry):
-    fitter_type = _chemfit_fitter_type()
+    fitter_type = pytest.importorskip("chemfit.fitter").Fitter
     for pair in (("ask", "tell"), ("evaluate", "step")):
         if all(callable(getattr(fitter_type, name, None)) for name in pair):
             pytest.skip(f"the installed ChemFit Fitter has {' and '.join(pair)}")
@@ -392,7 +389,7 @@ def test_an_installed_chemfit_fitter_with_neither_pair_is_refused_before_it_runs
 @pytest.mark.parametrize("driver", ["portfolio", "boltzmann"])
 @pytest.mark.parametrize("entry", ENTRIES)
 def test_the_installed_chemfit_fitter_is_driven_through_its_protocol(entry, driver):
-    fitter_type = _chemfit_fitter_type()
+    fitter_type = installed_fitter_type()
     calls = []
 
     def objective(params):
@@ -416,7 +413,7 @@ def test_the_installed_chemfit_fitter_is_driven_through_its_protocol(entry, driv
 
 @pytest.mark.parametrize("entry", ENTRIES)
 def test_an_objective_error_inside_chemfit_reaches_the_caller(entry):
-    fitter_type = _chemfit_fitter_type()
+    fitter_type = installed_fitter_type()
     error = RuntimeError("objective failed")
     calls = []
 

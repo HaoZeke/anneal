@@ -10,11 +10,14 @@ check what a bridge sent, in which order, and what ``finish`` received.
 ``init(batch_size=...)``, and ``evaluate`` of a list of at most that many
 candidates returning their losses. ``WorkersFitter`` has the same
 ``evaluate`` but an ``init`` that takes ``num_workers`` instead.
+``installed_fitter_type`` gives the tests that run on the installed ChemFit
+its ``Fitter``, and skips them where the bridges refuse it.
 """
 
 import copy
 
 import numpy as np
+import pytest
 
 from anneal.chemfit import fit_anneal, fit_chemfit, run_benchmark, run_fitter
 
@@ -146,6 +149,22 @@ class ReleasedFitter(Recorder):
 
 
 PROTOCOLS = (NextFitter, ReleasedFitter)
+
+
+def installed_fitter_type():
+    """The installed ChemFit ``Fitter``; skip without ChemFit or a session pair.
+
+    ChemFit 3.1.0 and earlier have neither ``ask`` and ``tell`` nor
+    ``evaluate`` and ``step``, so the bridges refuse their ``Fitter``.
+    """
+    fitter_type = pytest.importorskip("chemfit.fitter").Fitter
+    for pair in (("ask", "tell"), ("evaluate", "step")):
+        if all(callable(getattr(fitter_type, name, None)) for name in pair):
+            return fitter_type
+    pytest.skip(
+        "the installed ChemFit Fitter has neither ask and tell, first released in "
+        "3.1.1, nor evaluate and step, so the bridges refuse it"
+    )
 
 
 def protocol_names(fitter_type):
