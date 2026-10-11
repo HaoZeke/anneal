@@ -1190,11 +1190,12 @@ is attached), recording a complete, replayable, newline-delimited JSON
 trace of every decision.
 
 Key types and functions: =TraceKind= (src/cooperative_search.rs:37,
-sixteen stable event classifications: =LocalWork=, =Admission=,
+eighteen stable event classifications: =LocalWork=, =Admission=,
 =Rejection=, =SnapshotRefresh=, =PolicyLocal=, =PolicyExploit=,
 =PolicyExplore=, =PolicyLeave=, =PopulationPending=, =PopulationReady=,
 =RpcFallback=, =SharingDisabled=, =Slice=, =Transition=,
-=TransitionExecution=); =TraceEvent= (cooperative_search.rs:103);
+=TransitionExecution=, =RideClaim=, =RideReport=, =Retire=);
+=TraceEvent= (cooperative_search.rs:103);
 =TransitionTrace=/=PolicyTrace=/=SliceTrace=/=PopulationTrace=
 (cooperative_search.rs:237/254/368/403); =RunManifest=
 (cooperative_search.rs:420); =CooperativeRunError=
