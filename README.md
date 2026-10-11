@@ -356,7 +356,7 @@ Runnable copies:
 
 - Script: [`examples/quickstart_portfolio.py`](examples/quickstart_portfolio.py)
 - Notebook: [`examples/notebooks/01_quickstart.md`](examples/notebooks/01_quickstart.md), kept as MyST; `uvx jupytext --to ipynb examples/notebooks/01_quickstart.md` writes the notebook beside it
-- Website quickstart + four tutorials: https://anneal.rgoswami.me
+- Website quickstart + tutorials: https://anneal.rgoswami.me
 
 ## Classical presets (same driver, different slots)
 
@@ -415,7 +415,7 @@ refined = qmc_polish(rastrigin, grad_rastrigin, low, high,
 print(refined["best_val"])
 ```
 
-Full docs, tutorials (classical, Bayesian pilot+mixer, GLE, polish+device), algebra, how-tos, and reference at https://anneal.rgoswami.me .
+Full docs, tutorials, algebra, how-tos, and reference at https://anneal.rgoswami.me .
 
 ## Method catalog
 
