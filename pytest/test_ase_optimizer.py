@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import sys
+import types
+
 import numpy as np
 import pytest
 
@@ -183,14 +186,11 @@ def test_trajectory_write_is_not_swallowed(monkeypatch, tmp_path):
     def fake_write(path, _atoms, append=False):
         written.append((str(path), bool(append)))
 
-    monkeypatch.setattr("ase.io.write", fake_write, raising=False)
-    import types
-    import sys
-
+    # Anneal imports ase.io at each write, so it gets this stand-in whether or
+    # not ASE is installed; sys.modules is restored when the test ends.
     ase_io = types.ModuleType("ase.io")
     ase_io.write = fake_write
-    sys.modules.setdefault("ase", types.ModuleType("ase"))
-    sys.modules["ase.io"] = ase_io
+    monkeypatch.setitem(sys.modules, "ase.io", ase_io)
     dest = tmp_path / "opt.xyz"
     opt = Anneal(atoms, logfile=None, trajectory=str(dest))
     opt.run(fmax=0.05, steps=2)
