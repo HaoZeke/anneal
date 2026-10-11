@@ -2,13 +2,17 @@
 //! Org opens such a span at a marker after a space or one of -('"{ and before
 //! a non-space, and ends it at the first marker after a non-space that comes
 //! before a space, a quote or punctuation, so =history="shared"= ends after
-//! history and =cap >= 50000= after the greater-than sign. A span cut short or
-//! never opened shows in one of two ways: a span runs straight into a quoted
-//! word, as history runs into "shared", or a marker placed like a closing one,
-//! after a letter, a digit, a closing bracket or a quote and before a space or
+//! history and =cap >= 50000= after the greater-than sign, while
+//! =worst_bound=/=worst_bound_scaled= stays one span, since Org ends no span
+//! before a slash and opens none after one. A span cut short or never opened
+//! shows in one of two ways: a span runs straight into a quoted word, as
+//! history runs into "shared", or a marker placed like a closing one, after a
+//! letter, a digit, a closing bracket or a quote and before a space or
 //! punctuation, closes no span, as the last equals sign of =cap >= 50000=
-//! does. A marker inside a span that comes before a letter or digit, as in
-//! =batch_size=1=, does not end it.
+//! does. Spans run together show as a span that holds its own marker after a
+//! non-space and before a separator and then, past any spaces, the marker
+//! again before a non-space. A marker inside a span that comes before a letter
+//! or digit, as in =batch_size=1=, does not end it.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -42,6 +46,13 @@ fn relative(root: &Path, path: &Path) -> String {
         .map(|part| part.to_string_lossy())
         .collect();
     parts.join("/")
+}
+
+fn run_end(text: &[char], from: usize, keep: impl Fn(char) -> bool) -> usize {
+    text[from..]
+        .iter()
+        .position(|&c| !keep(c))
+        .map_or(text.len(), |offset| from + offset)
 }
 
 fn is_word(c: char) -> bool {
@@ -165,9 +176,29 @@ fn spans(text: &[char]) -> Vec<(usize, usize)> {
     out
 }
 
-/// Where `text` shows a span that Org ends early or never opens, and how: a
-/// span running into a quoted word other than a possessive 's, or a marker
-/// placed like a closing one that closes no span.
+/// How often `body`, the inside of a span, holds the end of one span and the
+/// start of the next: its marker after a non-space and before a run of
+/// characters other than letters, digits, spaces and the marker, then past any
+/// spaces the marker again before a non-space, as =a=/=b= does.
+fn joins(body: &[char], marker: char) -> usize {
+    (1..body.len())
+        .filter(|&at| body[at] == marker && !body[at - 1].is_whitespace())
+        .filter(|&at| {
+            let separator = run_end(body, at + 1, |c| {
+                !is_word(c) && !c.is_whitespace() && c != marker
+            });
+            let next = run_end(body, separator, char::is_whitespace);
+            separator > at + 1
+                && body.get(next) == Some(&marker)
+                && body.get(next + 1).is_some_and(|c| !c.is_whitespace())
+        })
+        .count()
+}
+
+/// Where `text` shows a span that Org ends early, never opens or runs into the
+/// next, and how: a span running into a quoted word other than a possessive
+/// 's, a span holding the end of one span and the start of another, or a
+/// marker placed like a closing one that closes no span.
 fn findings(text: &str) -> Vec<(usize, String)> {
     let chars: Vec<char> = text.chars().collect();
     let masked = mask(&chars);
@@ -191,6 +222,11 @@ fn findings(text: &str) -> Vec<(usize, String)> {
         };
         if quoted {
             let what = format!("{} runs into {}", shown(start, end), shown(end, end + 12));
+            out.push((start, what));
+        }
+        let joined = joins(&masked[start + 1..end - 1], masked[start]);
+        if joined > 0 {
+            let what = format!("{} runs {} spans into one", shown(start, end), joined + 1);
             out.push((start, what));
         }
     }
@@ -231,7 +267,7 @@ fn every_org_span_ends_where_it_is_written() {
     assert!(checked > 0, "no spans found under docs/orgmode");
     assert!(
         failures.is_empty(),
-        "{} places under docs/orgmode show a span Org ends early or never opens:\n{}",
+        "{} places under docs/orgmode show a span Org ends early, never opens or runs on:\n{}",
         failures.len(),
         failures.join("\n")
     );
@@ -254,6 +290,29 @@ fn a_span_org_ends_early_or_never_opens_is_refused() {
         "=batch_size=1= or =coverage_shared=True= and alpha=[4,1]",
         "the \"=HmcSaSampler=\", =gsa='s step and T(k+1) <= T(k)",
         "the fragment \\(f(x)= 2\\) is LaTeX",
+    ] {
+        assert!(findings(text).is_empty(), "{text}: {:?}", findings(text));
+    }
+}
+
+#[test]
+fn spans_org_runs_together_across_a_separator_are_refused() {
+    for text in [
+        "=worst_bound=/=worst_bound_scaled= decide",
+        "=check_accept_path=/\n=require_accept_compatible= and",
+        "~ask~/~tell~ on 3.1.1",
+        "=a=+=b= or =c=&=d=",
+    ] {
+        assert!(!findings(text).is_empty(), "{text} passes");
+    }
+    assert_eq!(
+        findings("(=Same=/ =Known=/=New=);"),
+        [(1, "=Same=/ =Known=/=New= runs 3 spans into one".to_string())]
+    );
+    for text in [
+        "=worst_bound= / =worst_bound_scaled= decide",
+        "=check_accept_path= /\n=require_accept_compatible= and",
+        "=worst_bound/worst_bound_scaled= and =s/=/x/=",
     ] {
         assert!(findings(text).is_empty(), "{text}: {:?}", findings(text));
     }
