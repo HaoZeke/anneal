@@ -2,9 +2,9 @@
 #+OPTIONS: toc:nil todo:nil num:nil author:nil title:nil ^:nil
 
 #+begin_export rst
-=============
+==============
 Cluster Search
-=============
+==============
 #+end_export
 
 Install the package, then run a 38-point Lennard-Jones search with the measured configuration.
