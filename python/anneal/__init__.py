@@ -1313,6 +1313,12 @@ def _ignored_minimize_keywords(membership, coverage_radius, coverage_neighbors):
             "membership has no effect: minimize keeps no ledger of certified "
             "minima for it to select"
         )
+    return ignored + _ignored_by_batch_replicas(coverage_radius, coverage_neighbors)
+
+
+def _ignored_by_batch_replicas(coverage_radius, coverage_neighbors):
+    """Check the coverage keywords, and say why batch replicas ignore each one given."""
+    ignored = []
     if _coverage_radius(coverage_radius) is not None:
         ignored.append(
             "coverage_radius has no effect: batch replicas share evaluated points "
@@ -1382,8 +1388,9 @@ def minimize(
         for different stencil points. These are the replicas
         ``global_optimize(fun, low, high, budget, seed=seed, x0=x0,
         replicas=R)`` runs, its ``coverage_shared`` standing for
-        ``history``, and ``minimize`` repeats it call for call on the free
-        coordinates. With ``jac``, ``replicas`` above one gives a
+        ``history`` and its ``coverage_radius`` and ``coverage_neighbors``
+        warning as they do here, and ``minimize`` repeats it call for call
+        on the free coordinates. With ``jac``, ``replicas`` above one gives a
         ``FutureWarning`` and one replica runs.
       history: with replicas, ``"shared"`` (the default) keeps one archive
         and one incumbent for all of them: arms that start at the incumbent
@@ -1599,8 +1606,8 @@ def global_optimize(
     *,
     replicas: int = 1,
     coverage_shared: bool = True,
-    coverage_radius: float = 0.05,
-    coverage_neighbors: int = 0,
+    coverage_radius=None,
+    coverage_neighbors=None,
 ):
     """Thompson-allocated portfolio global optimizer.
 
@@ -1712,7 +1719,10 @@ def global_optimize(
         ``x0``, evaluated once and shared, and step together, each step's
         points going to ``obj_fn.eval_batch`` when it has one, so
         ``minimize(obj_fn, x0, bounds, budget=budget, seed=seed,
-        replicas=R)`` on the same box repeats the run call for call.
+        replicas=R)`` on the same box repeats the run call for call. As in
+        :func:`minimize`, ``coverage_radius`` and ``coverage_neighbors``
+        have nothing to act on in these replicas and give a
+        ``FutureWarning`` when given.
         Otherwise ``R`` persistent portfolio
         controllers split the budget on native worker threads; no caller
         Jacobian is required. ``x0`` is then evaluated before any of them
@@ -1726,11 +1736,14 @@ def global_optimize(
         False gives independent portfolios with the same starts and work split.
         Batch replicas keep one archive and incumbent with True and one each
         with False, as ``history`` chooses in :func:`minimize`.
-      coverage_radius: interaction radius in normalized RMS box coordinates.
-      coverage_neighbors: direct cyclic neighbourhood radius. Zero is all-to-all;
-        one admits the two adjacent chain identities without forwarding samples.
-        This does not remove the shared arm-checkpoint barrier. Neither has an
-        effect on batch replicas.
+      coverage_radius: interaction radius in normalized RMS box coordinates;
+        ``None``, the default, is 0.05.
+      coverage_neighbors: direct cyclic neighbourhood radius; ``None``, the
+        default, is zero, which is all-to-all. One admits the two adjacent
+        chain identities without forwarding samples. This does not remove
+        the shared arm-checkpoint barrier. Batch replicas neither repel each
+        other's proposals nor share within a neighbourhood, so either keyword
+        given with them changes nothing and gives a ``FutureWarning``.
 
     ``obj_fn`` and ``grad_fn`` are only called inside ``[low, high]``: a
     point an arm proposes outside is mirror-reflected into the box, and the
@@ -1742,6 +1755,21 @@ def global_optimize(
     batch replicas ``n_batches``, the batches evaluated, the start's
     included.
     """
+    coverage = {
+        "coverage_radius": _coverage_radius(coverage_radius),
+        "coverage_neighbors": _coverage_neighbors(coverage_neighbors),
+    }
+    batch = (
+        x0 is not None
+        and int(replicas) > 1
+        and grad_fn is None
+        and noise_sigma is None
+        and str(policy) in ("auto", "Auto", "")
+    )
+    if batch:
+        for reason in _ignored_by_batch_replicas(**coverage):
+            message = f"{reason}. It will raise in a future release."
+            warnings.warn(message, FutureWarning, stacklevel=2)
     out = _core_global_optimize(
         obj_fn,
         _flat(low),
@@ -1754,8 +1782,7 @@ def global_optimize(
         _flat_or_none(x0),
         replicas=int(replicas),
         coverage_shared=bool(coverage_shared),
-        coverage_radius=_coverage_radius(coverage_radius),
-        coverage_neighbors=_coverage_neighbors(coverage_neighbors),
+        **{key: value for key, value in coverage.items() if value is not None},
     )
     out["best_pos"] = np.asarray(out["best_pos"], dtype=np.float64)
     return out

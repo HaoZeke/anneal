@@ -253,11 +253,14 @@ chain four. Saturating the radius yields all-to-all without duplicate edges.
 Retiring a reader does not renumber the ring or discard its producer history
 for live neighbours. Private or zero-weight coverage delivers nothing.
 
-=global_optimize= defaults =coverage_neighbors= to zero. =ensemble_optimize=
-defaults it to =None= to preserve its convenience dispatch; specifying it
-selects configured hop coverage, like an explicit sharing or radius control.
-It requires no Jacobian or force callback. =minimize= runs no hop chains and
-accepts the setting with a =FutureWarning=.
+=global_optimize= reads an omitted =coverage_neighbors= as zero. Its batch
+replicas, run from =x0= with more than one replica, no =grad_fn= or
+=noise_sigma= and the =auto= policy, have no neighbourhood and accept the
+setting with a =FutureWarning=. =ensemble_optimize= defaults it to =None= to
+preserve its convenience dispatch; specifying it selects configured hop
+coverage, like an explicit sharing or radius control. It requires no
+Jacobian or force callback. =minimize= runs no hop chains and accepts the
+setting with a =FutureWarning=.
 
 The graph restricts coverage, not the optional exact minimum ledger. Receivers
 do not republish imported samples or visits. These are direct subscriptions,

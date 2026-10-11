@@ -13,7 +13,7 @@ def require_control(entry):
     )
     assert parameter is not None, f"{entry} must expose native coverage topology"
     assert parameter.kind is inspect.Parameter.KEYWORD_ONLY
-    assert parameter.default == (0 if entry == "global_optimize" else None)
+    assert parameter.default is None
 
 
 def scalar_run(entry, calls, *, replicas=5, budget=10, **settings):
