@@ -42,7 +42,7 @@
 //!
 //! with `d = pA . pB`. Both were verified symbolically against `diff` of the
 //! kernel for zeta in 2, 3, 4 and 6, residual exactly zero, before any of this
-//! was written. `zeta >= 2` because of the `zeta - 2` power.
+//! was written. ``zeta >= 2`` because of the `zeta - 2` power.
 //!
 //! # Directional conditioning
 //!

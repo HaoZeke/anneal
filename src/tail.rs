@@ -28,8 +28,8 @@
 //! G(y; sigma, 0)  = 1 - exp(-y / sigma)
 //! ```
 //!
-//! supported on `y >= 0` when `xi >= 0` and on `0 <= y <= sigma / (-xi)` when
-//! `xi < 0`. See Pickands, *Statistical inference using extreme order
+//! supported on ``y >= 0`` when ``xi >= 0`` and on ``0 <= y <= sigma / (-xi)`` when
+//! ``xi < 0``. See Pickands, *Statistical inference using extreme order
 //! statistics*, Ann. Statist. 3 (1975) 119-131,
 //! [doi:10.1214/aos/1176343003](https://doi.org/10.1214/aos/1176343003), and
 //! Balkema and de Haan, *Residual life time at great age*, Ann. Probab. 2
@@ -54,14 +54,14 @@
 //!
 //! # Why a posterior rather than a maximum likelihood point
 //!
-//! `theta_E` is a ratio of the two parameters and diverges as `xi -> 0-`, so
+//! `theta_E` is a ratio of the two parameters and diverges as ``xi -> 0-``, so
 //! its sampling distribution is skewed however large the sample is, and a
 //! plug-in `sigma_hat / (-xi_hat)` inherits none of that skew. Smith,
 //! *Maximum likelihood estimation in a class of nonregular cases*, Biometrika
 //! 72 (1985) 67-90, [doi:10.1093/biomet/72.1.67](https://doi.org/10.1093/biomet/72.1.67),
 //! shows the likelihood theory itself fails here: the maximum likelihood
-//! estimator is asymptotically normal only for `xi > -1/2`, has a non-normal
-//! limit on `-1 < xi <= -1/2`, and does not exist at all for `xi <= -1`, which
+//! estimator is asymptotically normal only for ``xi > -1/2``, has a non-normal
+//! limit on ``-1 < xi <= -1/2``, and does not exist at all for ``xi <= -1``, which
 //! is precisely the range where the endpoint is sharpest. The likelihood
 //! remains a perfectly good likelihood throughout; it is the point summary
 //! that stops meaning anything. The posterior is computed by deterministic

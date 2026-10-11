@@ -1,6 +1,7 @@
 //! Transition-path / shooting moves adapted from pnastps (TYCeTS / PNAS 2019).
 //!
 //! Source algorithm (`pnastps-master/code/tps-only_pnas/main.cpp`):
+//!
 //! 1. Maintain a path of `K+1` frames connecting reactant basin A to product
 //!    basin B, distinguished by an order parameter with thresholds
 //!    (`structOP_a`, `structOP_b`).
@@ -11,6 +12,7 @@
 //!    reactivity.
 //!
 //! Continuous-box analogue for black-box optimization (no LAMMPS / MD):
+//!
 //! - Path frames are points in the box; the path is a linear (or noisy)
 //!   interpolation between two archived endpoints from distinct basins.
 //! - Order parameter defaults to true objective value along the path
@@ -67,7 +69,7 @@ pub fn path_is_reactive(ops: &[f64], basin_a_max: f64, basin_b_min: f64) -> bool
 
 /// Reactivity when the order parameter is the objective (lower is better).
 ///
-/// Path starts "bad" (`ops[0] >= a`) and ends "good" (`ops[last] <= b`)
+/// Path starts "bad" (``ops[0] >= a``) and ends "good" (``ops[last] <= b``)
 /// with `a > b` (high-to-low).
 pub fn path_reactive_objective(ops: &[f64], high_threshold: f64, low_threshold: f64) -> bool {
     if ops.len() < 2 || high_threshold.partial_cmp(&low_threshold) != Some(Ordering::Greater) {

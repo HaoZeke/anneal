@@ -2349,13 +2349,13 @@ path is a linear (or noised) interpolation between two archived
 basin endpoints, the order parameter defaults to the true objective
 value along the path (or a geometric near-seed test), and shooting
 re-propagates half-paths by isotropic noise plus optional local
-descent (tps_shoot.rs:1-27).
+descent (tps_shoot.rs:1-29).
 
-Key types and functions: =linear_path= (src/methods/tps_shoot.rs:35);
-=path_is_reactive= (tps_shoot.rs:59, classical OP-threshold
-reactivity); =path_reactive_objective= (tps_shoot.rs:72, objective-as-
+Key types and functions: =linear_path= (src/methods/tps_shoot.rs:37);
+=path_is_reactive= (tps_shoot.rs:61, classical OP-threshold
+reactivity); =path_reactive_objective= (tps_shoot.rs:74, objective-as-
 OP variant, lower is better); =path_reactive_geometric=
-(tps_shoot.rs:82, endpoint-proximity variant); =ShootDirection=,
+(tps_shoot.rs:84, endpoint-proximity variant); =ShootDirection=,
 =apply_shoot=, =accept_reactive_shoot=, =pick_shoot_direction=,
 =pick_shoot_index=, =best_frame_index= (re-exported
 src/methods/mod.rs:106-109).

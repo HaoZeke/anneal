@@ -92,7 +92,7 @@
 //! | 1.649-2.359  | 0.725-0.888 | 0.786-0.886             | 0.981-0.996   |
 //!
 //! Transport is mechanically sound and degrades about linearly, near `6 d` for
-//! `d < 0.1`, saturating past `d ~ 0.15`. It beats rebuilding the model at every
+//! ``d < 0.1``, saturating past `d ~ 0.15`. It beats rebuilding the model at every
 //! distance measured, which is the result the operator norm supports.
 //!
 //! ## Why it is not worth wiring in anyway

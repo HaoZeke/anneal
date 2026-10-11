@@ -778,7 +778,7 @@ impl Fingerprint for SortedPairs {
 }
 
 impl<F: Fingerprint> BasinBias<F> {
-    /// Requires `gamma > 1`, `w0 >= 0` and `merge_radius > 0`.
+    /// Requires ``gamma > 1``, ``w0 >= 0`` and ``merge_radius > 0``.
     /// A zero height retains the region index without the fixed-height penalty.
     pub fn new(fingerprint: F, merge_radius: f64, w0: f64, gamma: f64) -> Self {
         assert!(gamma > 1.0, "gamma must be > 1");

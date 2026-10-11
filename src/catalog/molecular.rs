@@ -11,6 +11,7 @@
 //!
 //! A complete visit still needs a loaded rgpot engine. Required engine
 //! fields:
+//!
 //! - `kind`: [`ENGINE_KIND`]
 //! - `config_digest`: SHA-256 of the declared GFN2 handle
 //!   (`method=3`, `accuracy=0.01`, `etemp=300`, `maxiter=500`,

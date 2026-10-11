@@ -8,8 +8,8 @@
 //! mean of per-center [`crate::soap::local_nu3_z`] (SOAP plus ACE
 //! \(\nu=3\)) at [`crate::catalog::packing::PACKING_SPEC`]. For the
 //! nearest archived packing \(\mu_k\),
-//! \(\hat u_\varphi=(\mu-\mu_k)/\|\mu-\mu_k\|\) and
-//! \(P=J_\mu^{\mathsf T}\hat u_\varphi\) is the Cartesian pullback
+//! \(\hat u_{\varphi}=(\mu-\mu_k)/\|\mu-\mu_k\|\) and
+//! \(P=J_{\mu}^{\mathsf T}\hat u_{\varphi}\) is the Cartesian pullback
 //! through the analytic stacked Jacobian: the same increment-on-every-center
 //! lift as [`crate::soap::kick_packing_nu3`]. Then
 //! \(g\leftarrow g-2(g\cdot\hat P)\hat P\) when \(g\cdot P>0\).
@@ -1615,7 +1615,7 @@ pub fn afir_term(
     Some((value, grad))
 }
 
-/// \(\alpha\) that puts \(|V_{\mathrm{AFIR}}|\) on `barrier` at `x`.
+/// \(\alpha\) that puts \(\lvert V_{\mathrm{AFIR}}\rvert\) on `barrier` at `x`.
 ///
 /// Maeda sizes \(\alpha\) from an Ar–Ar collision energy. Occupancy
 /// works in reduced units and sizes \(\alpha\) so the artificial term

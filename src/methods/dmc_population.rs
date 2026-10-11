@@ -259,7 +259,7 @@ pub fn softmax_entropy(energies: &[f64], beta: f64) -> f64 {
 }
 
 /// Shannon entropy of an arbitrary positive mass vector (normalized in-place
-/// for the sum). Used to audit residual weight laws against \(H_\star\).
+/// for the sum). Used to audit residual weight laws against \(H_{\star}\).
 pub fn mass_entropy(weights: &[f64]) -> f64 {
     let total: f64 = weights
         .iter()
@@ -280,7 +280,7 @@ pub fn mass_entropy(weights: &[f64]) -> f64 {
 }
 
 /// Progress-linked target entropy (D8.5):
-/// \(H_\star(\rho)=(1-\rho)\log N+\rho\log(\max\{1,f_{\mathrm{elite}}\})\).
+/// \(H_{\star}(\rho)=(1-\rho)\log N+\rho\log(\max\{1,f_{\mathrm{elite}}\})\).
 ///
 /// `elite_floor` is the elite count in entropy units (default 2).
 pub fn target_entropy(n: usize, progress: f64, elite_floor: f64) -> f64 {
@@ -305,7 +305,7 @@ pub fn beta_search_max(energies: &[f64]) -> f64 {
     20.0 * (finite.len() as f64).ln() / r
 }
 
-/// Unique \(\beta^\star=H^{-1}(H_\star)\) by bisection (Corollary D8.4).
+/// Unique \(\beta^\star=H^{-1}(H_{\star})\) by bisection (Corollary D8.4).
 pub fn calibrate_beta(energies: &[f64], h_star: f64) -> f64 {
     let finite: Vec<f64> = energies.iter().copied().filter(|e| e.is_finite()).collect();
     let n = finite.len();
@@ -470,7 +470,7 @@ pub fn population_control<R: Rng>(
 }
 
 /// D8 ECIT residual masses: pure softmax \(p_i^\star(\beta^\star)\) (D8.2) at the
-/// entropy-calibrated \(\beta^\star=H^{-1}(H_\star(\rho))\).
+/// entropy-calibrated \(\beta^\star=H^{-1}(H_{\star}(\rho))\).
 ///
 /// Returns `(normalized_probs, beta_star, h_star)`. These are the **exact**
 /// residual weight law used by [`population_control_ecit`] (not the soft-ref
@@ -487,7 +487,7 @@ pub fn ecit_residual_probs(
     (probs, beta_star, h_star)
 }
 
-/// D8 ECIT residual control: calibrate \(\beta^\star\) to \(H_\star(\rho)\), form
+/// D8 ECIT residual control: calibrate \(\beta^\star\) to \(H_{\star}(\rho)\), form
 /// pure D8.2 softmax masses, residual-resample. Returns `(offspring, beta_star)`.
 pub fn population_control_ecit<R: Rng>(
     walkers: &[Walker],
@@ -506,7 +506,7 @@ pub fn population_control_ecit<R: Rng>(
 ///
 /// `sigma` is per-coordinate Gaussian scale. Optional Langevin drift uses
 /// a crude Euler–Maruyama step when `grad` is provided:  
-/// `x <- x - 0.5 * dt * g + sigma * z` with `dt = sigma^2`.
+/// ``x <- x - 0.5 * dt * g + sigma * z`` with `dt = sigma^2`.
 pub fn diffusion_displace(
     x: ArrayView1<f64>,
     bounds: &Bounds<f64>,

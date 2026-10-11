@@ -935,8 +935,8 @@ pub fn pullback_nu3(
 /// basis plus learned mixing; occupancy Leave uses the invertible
 /// contractions, not an energy model's last layer. The Leave quench
 /// invert ([`crate::known_basin`]) applies the dimer Householder to
-/// the same increment-on-every-center pullback \(J_\mu^{\mathsf T}
-/// \hat u_\varphi\).
+/// the same increment-on-every-center pullback \(J_{\mu}^{\mathsf T}
+/// \hat u_{\varphi}\).
 pub fn kick_packing_nu3<R: Rng + ?Sized>(
     x: ArrayView1<f64>,
     spec: SoapSpec,
@@ -1925,9 +1925,9 @@ pub struct FivefoldProbe {
     pub gated: bool,
     /// True when the residual vanished and the step is a pentagon break.
     pub used_pentagon: bool,
-    /// Share of residual power on the five atoms with the largest |dr_i|.
+    /// Share of residual power on the five atoms with the largest `|dr_i|`.
     pub top5_share: f64,
-    /// Share of residual power on the twelve atoms with the largest |dr_i|.
+    /// Share of residual power on the twelve atoms with the largest `|dr_i|`.
     pub top12_share: f64,
     /// Proposed coordinates after the cap.
     pub y: Array1<f64>,

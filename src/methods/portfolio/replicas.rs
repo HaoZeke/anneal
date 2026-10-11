@@ -375,7 +375,7 @@ fn coordinate<O: Objective<f64>>(
 /// # Panics
 ///
 /// If `budget` or `replicas` is zero, if the bounds are not finite with
-/// `low < high`, or if `x0` has the wrong length or lies outside them.
+/// ``low < high``, or if `x0` has the wrong length or lies outside them.
 pub fn portfolio_replicas<O>(
     obj: &O,
     budget: usize,

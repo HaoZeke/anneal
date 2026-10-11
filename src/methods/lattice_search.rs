@@ -9,7 +9,7 @@
 //! random cluster when the construction stops improving. The lattice is a
 //! function of the current structure, so nothing here is a template.
 //!
-//! Site energies are single-atom pair sums, one `N`th of a full evaluation,
+//! Site energies are single-atom pair sums, one `N`-th of a full evaluation,
 //! and are charged to the ledger at that fraction so the reported cost is
 //! comparable with every other method in the crate.
 
