@@ -6,6 +6,530 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 <!-- towncrier release notes start -->
 
+## [0.11.0](https://github.com/HaoZeke/anneal/tree/v0.11.0) - 2026-10-11
+
+### Deprecated
+
+- The ChemFit bridges still run these calls anneal 0.10.0 took, and give a
+  ``FutureWarning`` that says what to pass instead; each will raise in a future
+  release. Preset keywords under the portfolio are ignored: ``preset_kwargs`` in
+  ``fit_anneal`` and ``run_fitter``, the preset keywords of ``fit_chemfit``, and
+  ``preset`` in ``run_benchmark`` and ``run_fitter``. So is a ``fit_chemfit``
+  preset keyword of another method, so one set of keywords still sweeps
+  ``boltzmann``, ``fast`` and ``gsa``, and a ``run_fitter`` preset of another
+  kind than its classical ``method`` (``method="sa"`` runs the preset).
+  ``run_benchmark`` runs a preset of another method, or one given with
+  ``method="sa"``, as that preset's own method. A numeric string given for a
+  parameter value, a bound, ``bound_span``, ``default_span`` or a preset keyword
+  a ``fit_chemfit`` method takes, such as a bounds pair PyYAML reads from
+  ``[1e-3, 1e1]`` or an item of an object array, is read as a number, with one
+  warning per call, and a string parameter comes back as the float it reads as.
+  An ``x0`` dict leaf with its parameter's size but another shape is read in C
+  order, and one ``x0`` value for the fitter's only parameter fills it where
+  ``fitter.bounds`` gives both of its sides and ``low`` and ``high`` are
+  omitted. ``fit_chemfit`` reads a fitter's ``initial_parameters`` given as
+  ``(key, value)`` pairs, which ChemFit 3.1 keeps as given, as the dict they
+  make, whether a list, a tuple, ``d.items()``, a zip or a generator; as in
+  0.10.0 they are read once, so a zip or a generator is spent after one fit.
+  ``run_benchmark`` drives a fitter that has ``evaluate`` but no ``step``, or
+  ``ask`` but no ``tell``, with its ``tell`` or ``step`` as the step notice, or
+  with no step notices when it has neither.
+
+### Added
+
+- `tensor_id`: basin identity from a three-body tensor invariant.
+  `SortedPairs` identifies a basin by the multiset of pairwise distances, which
+  fixes `tr A^2` of the Gaussian kernel `A` and leaves `tr A^3`, the weighted
+  triangle sum, free to differ; Bloom's homometric pair `{0,1,4,10,12,17}` and
+  `{0,1,8,11,13,17}` share the multiset and are not congruent. `TripletSpectrum`
+  appends the spectra of `A` and of the mode-3 contraction
+  `M = A .* (A A)` of the triangle tensor `T_ijk = A_ij A_jk A_ik`, both exactly
+  invariant to relabelling and to rigid motions, to the sorted distances it
+  leaves unchanged. Worst-case separation over all pairs of distinct quenched
+  Lennard-Jones minima, in units of the descriptor's own response to a 0.02
+  jitter, goes from 0.85 to 1.17 at 38 points and from 0.87 to 1.11 at 55, both
+  from below 1 where no merge radius separates the closest pair at all, and the
+  homometric pair from exactly 0 to 10.3. At 13 points, where the distance
+  descriptor was not failing, it does not move. The cost is 91.1 us at 38 points
+  and 1.05 ms at 98, against 2.45 us and 17.8 us for one Lennard-Jones gradient
+  of which a hop spends thirty-one, and no potential evaluations at all. The
+  Tucker core is not a descriptor: it is invariant only up to a block-orthogonal
+  gauge, and the full `N^4` mode spectrum separates no better than the `N^3`
+  contraction. ([#tensor_id](https://github.com/HaoZeke/anneal/issues/tensor_id))
+- A ``cma`` arm for values-only portfolio runs (``policy="auto"``, no
+  ``grad_fn``, no ``noise_sigma``): resumable (mu/mu_w, lambda)-CMA-ES with
+  cumulative step-size adaptation, rank-one plus rank-mu covariance updates, and
+  BIPOP restarts. Every run is centred on the incumbent, which is ``x0`` until a
+  lower point is found; the first run is local, and the first restart after it
+  has the default population and a box-wide step size. A run ends once its
+  recent best values span less than the portfolio's success threshold in force
+  when the arm last took a slice, which ``CmaEs::set_tol_fun_hist`` sets between
+  generations (``CmaEs::tol_fun_hist`` reads it). Above 100 dimensions, or when
+  the budget is shorter than the covariance's learning horizon, runs keep only
+  the diagonal (sep-CMA-ES), so a candidate costs linear time and memory.
+  Candidates are mirror-reflected into the box and each one is a single charged
+  evaluation.
+- A ``qn`` arm for values-only portfolio runs: projected BFGS on
+  finite-difference gradients from the incumbent, with a projected backtracking
+  line search and stencils that step inward at the bounds. The initial inverse
+  Hessian is the box metric ``diag(w^2)``, so sides that span decades descend as
+  fast as unit ones. A descent that begins at an incumbent already evaluated,
+  ``x0`` included, reuses its value. Forward differences give way to central ones
+  when they stall, a converged descent is kicked from the incumbent with draws
+  independent of the CMA-ES arm's, and every stencil point and trial is a single
+  charged evaluation.
+- A rigid Jorgensen TIP4P water objective, with an exponential-map
+  rotation chart and a Wales--Hodges translation/rotation move library,
+  so water clusters can be searched against the published putative
+  minima.
+- Added ``from anneal.ase import Anneal``. Same ``run(fmax=...)`` call site
+  as ASE ``BFGS`` / ``LBFGS`` / ``FIRE``. Default ``mode="local"`` is a
+  quench only. ``mode="search"`` hops from the current geometry
+  (``search_from``, length scale from nearest neighbours) then quenches;
+  ``mode="auto"`` hops when there are four or more free atoms. Not a local-optimizer rename: hops leave the
+  starting basin. Hop ``seed`` and ``budget`` are explicit. Periodic
+  cells and cell filters are refused on hop.
+- Box-constrained communicating hops share a Euclidean minimum history
+  and Goedecker escape feedback. The move is a reflected Gaussian plus
+  quench, not a 3N cluster kick.
+- Chains share a motif-class table. A chain restarts when its own best
+  in the class has not improved for ``CORE_PATIENCE`` charged calls, or
+  when a finished trial sits above the class median. The in-process
+  cooperative catalog and the Cap'n Proto coordinator expose the same
+  ``report`` operation.
+- Cu(111) multi-adsorbate fixture: ``scripts/make_cuh2_fcc_slab.py --hydrogens 6``
+  writes ``examples/fixtures/cuh2_fcc_slab_h6.con``, a 4x4, 4-layer slab with
+  the bottom two layers frozen and six randomly placed hydrogens.
+- Dynamic lattice search (``methods::lattice_search``) keeps two readers of a
+  pair cluster. One builds hollow sites over the triangles and squares of the
+  current structure, grows an interior lattice that carries both stackings of
+  every facet, places the surface around the kept interior, and walks
+  occupations until no relocation lowers a point. The ``dls`` driver token
+  uses it, and the restoration tests cover the LJ98 and LJ104 minima.
+  The other is a variant of the dynamic lattice search of Shao, Cheng and Cai,
+  J. Comput. Chem. 25, 1693 (2004), doi 10.1002/jcc.20096. Its sites sit at the
+  pair-well distance over the cluster's own triangles and are not relaxed;
+  every atom with fewer than twelve bonds is movable; one deterministic greedy
+  pass weighs the highest-energy movable atoms against all sites; and one
+  L-BFGS quench in the step-capped form used by GMIN follows each search. The
+  lattice needs a pair potential with one well distance. Every value-and-gradient
+  call is charged as one call. Lattice pair terms are charged at their fraction
+  of the n(n-1)/2 pairs of a full evaluation and settled in whole calls. Under
+  one call per chain can be outstanding at a first hit or at the end of a run,
+  while choosing a move costs at most one call. ``examples/lj_lattice_probe.rs``
+  reports the cost and end energies of random starts taken down the descent.
+- Leave extra starts are SHS downward distortions on the active-volume sphere and farthest-point packing covers.
+- Occupancy Leave searches an active volume of packing leftover, several times, and discards unused starts.
+- Python ``ensemble_optimize`` is the box search entry: with a
+  gradient it hops and quenches; without one it is the values-only
+  portfolio. Each Python eval and grad callback spends one ledger unit.
+  The design vector is never treated as a point set.
+- Reoccupation move inside the chain (``Config::reoccupy`` and
+  ``reoccupy_interval``, driver token ``reocc``): every interval of charged
+  calls the chain rebuilds its surface on the lattice grown from its interior,
+  relaxes it and adopts the result when lower, charging all of the work to the
+  ledger. Takes LJ104 from 0 to 23 of 32 seeds and LJ102 from 59 to 117 of 128
+  chains at 400k evaluations.
+- ``examples/lj_lattice_ensemble.rs`` compares the shared and private lattice
+  ensembles with the serial recommended chain and forty independent recommended
+  chains at one ensemble force total, on paired seeds and at most the requested
+  number of threads. Its recommended arms reproduce ``lj_ensemble_splice`` in
+  ``indep`` mode bit for bit.
+- ``global_optimize`` and ``global_optimize_objective`` accept ``x0``, a start
+  point inside the box that is evaluated first and becomes the first incumbent.
+  ``portfolio_optimize_from`` is the Rust entry point. An invalid start raises
+  ``ValueError``.
+- ``methods::lattice_ensemble`` runs chains that split one force budget and pool
+  the minima their lattice descents reach in a bank held apart by a radial
+  resemblance cutoff, under the bank rule of conformational space annealing
+  (Lee, Scheraga and Rackovsky, J. Comput. Chem. 18, 1222 (1997)) with the
+  D_ave/2 merge distance of Lee, Lee and Lee, Phys. Rev. Lett. 91, 080201
+  (2003), arXiv cond-mat/0307690. Trials start from random clusters, from members
+  with surface atoms moved onto vacant hollows, or from cut-and-splice pairs of
+  members (Deaven and Ho, Phys. Rev. Lett. 75, 288 (1995)). A member drawn twenty
+  times without improving gives its slot to the next random start that resembles
+  no member, so the bank keeps taking in new funnels after its first members stop
+  descending. The retirement rule, the radial resemblance key, the held merge
+  distance and the counted accounting are this work's. ``Sharing::Private``
+  gives each chain its own bank. A one-slot private bank never splices and never
+  draws the splice coin, so its random streams part from the shared arm's at the
+  first bank draw, if not sooner, and the private ablation removes cross-chain
+  splicing together with the exchange of members. Chains advance in synchronous
+  generations with parents drawn and offers admitted in chain order, so a run
+  replays bit for bit at any thread count.
+
+### Changed
+
+- Central differences in the values-only finite-difference descents (the ``qn``
+  arm and the closing polish) adapt their interval to the curvature each stencil
+  measures. After the first central stencil at a coordinate, its next interval is
+  a tenth of the distance ``|g / c|`` to the minimum of the quadratic through the
+  stencil, never above the ``eps^(1/3)`` rule and never below ``eps^(2/3)`` times
+  the coordinate's scale or the rounding limit ``sqrt(eps |f| / |c|)``. A failed
+  central line search re-differences at the same point when an interval has
+  moved by more than a factor of two, at most twice per iterate. Fits whose
+  valleys are narrower than the ``eps^(1/3)`` interval, such as
+  ``binary_lj_fit``, now descend to the noise floor instead of stalling where the
+  stencil straddles the valley.
+- In values-only portfolio runs the GSA arm runs one chain from 10 dimensions,
+  and below that one for every eight evaluations of its first slice, between two
+  and four. The first chain starts at the incumbent, as dual_annealing starts
+  from ``x0``, and the others at seeded low-discrepancy points; once another arm
+  has lowered the incumbent below every chain, the worst chain goes on from
+  there. Chains run quenched, without a local search: each temperature step
+  visits every coordinate once, with dual_annealing's visiting distribution
+  cooling from box-wide steps to local ones, and keeps only improvements.
+  Without a local search, Metropolis moves at dual_annealing's temperatures
+  spent most of a short budget uphill, and on separable multimodal objectives
+  (shifted Rastrigin, Styblinski-Tang, Levy) a one-coordinate visit drops that
+  coordinate into a lower basin where a visit to every coordinate at once almost
+  never improves a good point. The DE arm's population starts with the
+  incumbent, as SciPy's differential_evolution places ``x0``, and its first slice
+  evolves the population once it is seeded.
+- In values-only portfolio runs the additive surrogate and the QMC restart arm
+  take values in the run's unit, the power of two at or below the success
+  threshold, where their temperatures and floors were absolute. The surrogate
+  fits values, and sets its temperatures and their floors, in that unit, and the
+  restart arm's annealing chains weigh each rise in it against a temperature
+  that starts at one, so they all but never take a rise as large as the last
+  gain. Multiplying the objective by a power of two now leaves a whole
+  values-only run unchanged, short of overflow and underflow, where a run used
+  to depart from the unscaled one once the surrogate or the restart arm played.
+- In values-only portfolio runs the success threshold, which decides whether the
+  opening descent goes on, whether a descent keeps its turn, whether a GSA or
+  CMA-ES phase has gained and when a CMA-ES run stops, is ``1e-4 max(g, s)`` in
+  place of ``1e-4 max(|f|, 1)``, which turned absolute below ``|f| = 1`` and
+  coarsened when a constant was added to the objective. ``g`` is the gain of the
+  last slice that lowered the incumbent from below the start's value, and ``s``
+  the run's resolution: ``eps |f|`` of the first value the run finds below the
+  start's, but never less than the smallest positive normal double, which it is
+  until such a value is found (when the start's value is not finite, every
+  finite value is below it). Gains are differences of values and a slice from
+  the start's value records none, so the start's value sets no threshold, and a
+  constant added to the objective changes one only through the resolution of the
+  shifted values: the rounding of each gain, and ``s``. ``s`` changes at most
+  once and never falls below that positive floor, so a bounded objective still
+  allows only a bounded number of successes, as the restart guarantee needs.
+  The values-only descent likewise stops on the resolution of its values, an
+  iteration that lowers its value by less than ``8 eps`` of it being slow, and
+  until a curvature pair scales the inverse Hessian each line search of a
+  finite-difference descent starts with a trial whose largest move is 5% of a
+  side whatever the gradient's size, where a small gradient used to shorten it.
+  Multiplying the objective by a power of two multiplies every threshold
+  exactly. Measured over 40 paired seeds against the rules they replaced
+  (medians, "A against B" with A's wins/ties/losses, rows named
+  ``problem@budget`` from ``x0`` as in the regime notes), the descent's
+  resolution test trails a fixed ``1e-12`` tolerance on ``fit6@1000``, -4.78
+  against -4.89 (3/20/17) and without ``x0`` -3.334 against -3.334 (1/32/7),
+  with its x1e-6 and x2^-20 copies and its +1e2 and x1e-6 controls, on
+  ``ellR30@20000`` and ``ellR50@20000``, where five and six seeds stop short of
+  0 (0/35/5, 0/34/6), and on the x1e-6 control of ``ellR30@5000`` (1.2e-6
+  against 0, 2/19/19). With the tolerance these come level, but the offset
+  copies of ``fit6@5000`` fall back, +1e2 to -11.6 against -12.8 (9/9/22),
+  +1e4 to -9.33 against -12.6 (0/17/23) and -1e4 to -8.15 against -12.8
+  (0/24/16), and ``fit6@5000`` itself is -12.78 against -12.83 (12/10/18); a
+  slow test at a fraction of the threshold costs more (``fit6@5000`` -6.79).
+  ``ellR30@5000``, 3.4e-8 against 0 (0/19/21), and its x1e-6 and x2^-20 copies
+  come level only with the tolerance and the opening without its bar on recent
+  gains together (0, 0/38/2). The threshold on the last gain trails
+  ``1e-4 max(|f|, s)`` on ``rastR100@20000``, 870 against 833 (4/18/18), and on
+  the +1e2 copy of ``levy30@5000``, 6.4e-11 against 4.3e-12 (5/22/13); the
+  ``|f|``-scaled threshold brings both level but costs the offset copies: +1e4
+  ``rosen10@1000`` is 5.40 against 1.2e-10 (0/0/40), +1e4 ``fit6@1000`` is
+  -0.847 against -4.67 (1/0/39) and at 5000 -6.16 against -12.6 (1/1/38), and
+  +1e4 ``ellR30@5000`` is 4.4e-3 against 2.9e-4 (0/6/34). Of the 88 offset and
+  x1e-6 copies, six trail their rounding-only control at p < 0.05, about as many
+  as chance gives and none past a correction for the 88 tests: +1e2
+  ``fit6@1000`` (-4.82 against -4.79, 16/0/24), +1e2 ``ackS30@5000`` (1.05e-6
+  against 6.9e-7, 11/8/21), +1e4 ``ackley10@5000`` (1.6e-10 against 2.1e-11,
+  2/32/6), -1e4 ``ellR30@1000`` (5589 against 5589, 12/0/28) and x1e-6
+  ``rosen30`` at 1000 and 5000 (74.1 against 74.1, 12/1/27; 22.1 against 22.0,
+  14/0/26). Every x2^-20 copy repeats its plain row run for run.
+- Periodic cutoff lists keep every linkcell image inside the cutoff, after
+  dividing coordinates and the cell by the descriptor length scale. Where one
+  direction is not periodic, the list keeps one shortest image and does not
+  wrap that direction. Free-cluster shell counts use that unwrapped cutoff.
+- The ChemFit bridges now raise, before ``fitter.init()``, on arguments anneal
+  0.10.0 coerced or ignored without a word. A fractional ``budget`` or ``seed``
+  raises instead of passing through ``int()`` (a budget of 60.5 ran 60
+  evaluations), and a negative seed, or one of ``2**64`` or more, raises
+  ``ValueError`` where it raised ``OverflowError`` after ``init``. A string or
+  bool ``budget``, ``seed``, ``steps_per_epoch`` or ``tell_every``, a bool
+  ``bound_span`` or ``default_span``, and a string one that is not a number,
+  raise ``TypeError``, where 0.10.0 passed them through ``int()`` or
+  ``float()``, reading ``"60"`` as 60 and ``True`` as 1, or did not read them.
+  Each of these settings, and each preset keyword of ``fit_chemfit``, may be a
+  ``Decimal`` or a one-element array, read as the number it holds, as 0.10.0's
+  ``int()`` and ``float()`` read it; a one-element ``array_api_strict`` array
+  with dimensions, which they refused, is read the same way. ``tell_every`` and
+  ``steps_per_epoch`` must be positive whole numbers under every method: where
+  the method uses one, 0 ran as 1 and 2.5 as 2, and where it does not
+  (``tell_every`` under the classical methods, ``steps_per_epoch`` under the
+  portfolio), any value ran. ``bound_span`` must be positive and finite beside
+  ``low`` and ``high`` too, and ``default_span`` when the fitter bounds every
+  parameter, where 0.10.0 did not read them. ``fit_chemfit`` raises
+  ``TypeError`` on a keyword no preset takes, such as ``t_inti`` or
+  ``tell_evry``, which it ignored, and on a preset keyword of its method that is
+  not a number, such as ``True`` or ``"hot"``, which it passed through
+  ``float()`` after ``init``. A ``preset_kwargs`` that is not a dict, and a
+  ``preset`` that is not ``Boltzmann()``, ``Fast()`` or ``Gsa()``, raise
+  ``TypeError`` under the portfolio too. ``run_benchmark`` raises ``ValueError``
+  on an unknown method, where it ran the preset it was given or raised
+  ``KeyError`` after ``init``. A bounds entry that is not one ``(lower, upper)``
+  pair, such as a 3-tuple or a list of three per-element pairs, or that holds a
+  non-numeric string, raises in ``fit_chemfit`` and ``chemfit_box``, which
+  ignored it in favour of ``default_span``; a two-item list is that pair, each
+  side a scalar or an array of the leaf's shape. ``fit_chemfit`` and
+  ``chemfit_box`` now read bounds pairs they ignored in favour of
+  ``default_span``: one with per-element sides, such as a NumPy array of two
+  rows, and a NumPy pair that does not hold numbers, such as
+  ``np.array(["0", "0.8"])``, which is read as ``[0, 0.8]`` with the
+  ``FutureWarning`` for numeric strings. An entry that is not one pair raises in
+  ``run_benchmark``'s context bounds and the ``context_bounds`` of
+  ``resolve_bounds`` too, where 0.10.0 fell back to ``fitter.bounds``, and in
+  ``bounds_from_fitter``, which returned ``None``. A NumPy pair there is now
+  read where 0.10.0 ignored it, and so are bounds held in a mapping other than a
+  dict, such as a ``MappingProxyType``, there and in ``fit_anneal`` and
+  ``run_fitter``. A parameter that is not finite or holds ``None``, which 0.10.0
+  read as NaN, raises in ``ChemFitVector``, in ``fit_chemfit``, whose portfolio
+  ignored it, and in ``run_benchmark``, which moved an infinite start to the
+  nearer bound and raised on NaN after ``init``. A complex leaf, or a NumPy
+  complex number in an object array, raises instead of losing its imaginary
+  part. Each ``x0`` dict leaf must have its parameter's size, apart from one
+  value for the fitter's only parameter where ``fitter.bounds`` gives both of
+  its sides and ``low`` and ``high`` are omitted: 0.10.0 read the leaves flat,
+  so leaves of the wrong sizes with the right total moved values across
+  parameters (``{"a": 0.3, "b": [0.6, 0.7]}`` started ``a`` at ``[0.3, 0.6]``).
+  ``resolve_bounds`` and ``bounds_from_fitter`` raise on an infinite or NaN
+  bound, a box too wide for a float, or a lower bound above the upper, and
+  ``chemfit_box`` on an infinite bound or a box too wide for a float, where each
+  returned the box. ``fit_chemfit`` and ``run_fitter`` now read method names in
+  any case, as ``fit_anneal`` and ``run_benchmark`` did.
+- With ``policy="auto"``, no ``grad_fn`` and no ``noise_sigma``,
+  ``global_optimize`` runs one values-only loop whatever the box width, in place
+  of the regime-routed Thompson allocation and its DE/GSA front-load. Without
+  ``x0`` it starts from the best of a seeded design of ``dim + 1`` points, so
+  seeds vary the start. When the budget lets it converge, five finite-difference
+  gradients per coordinate, a descent from the start opens the run and goes on
+  while each slice lowers the incumbent by more than the success threshold and
+  by more than ``1e-4`` times the largest of the opening's last three gains,
+  and while its last four slices have gained more, together, than ``1e-4``
+  times its largest gain; the first slice from below the start is held to the
+  gain of the slice from the start. Until that descent has
+  lowered its own value from below the start's, a slice in which it stalls short
+  of convergence, as when its first curvature pair spans a steep wall, or stops
+  at the start's value, as behind a sentinel, gives CMA-ES one slice, once, and
+  the opening goes on from the incumbent CMA-ES leaves. With less, as for a
+  30-dimensional problem under 4650 evaluations, CMA-ES takes one slice from the
+  start, the descent keeps the turn until a slice gains less per evaluation than
+  the one before, and GSA then keeps it while each of its slices gains at least
+  as fast as the descent would have gone on to (its last gain per evaluation
+  times the ratio to the one before). Until GSA has played, the descent also
+  hands it the turn once fewer than three slices are left beyond the closing
+  reserve; if GSA's first slice falls short, the descent keeps the turn until
+  the run has used twice the evaluations it had. From there GSA and then CMA-ES
+  each keep the turn while they pay: a phase ends once it has gone eight slices
+  (or as long as its last such gain took) without lowering the incumbent by
+  more than the success threshold and by more than ``1e-4`` times the phase's
+  largest gain, GSA's first phase also once its gain per evaluation since it
+  began is no more than the descent's last, and a CMA-ES phase that follows it
+  without taking the turn likewise from its eighth slice. From its fifth slice
+  on, a GSA slice that gains less than an eighth of the phase's best per
+  evaluation lends CMA-ES a slice, which takes the turn if it gains faster than
+  both that slice and an eighth of the phase's gain per evaluation so far; GSA
+  lends no other slice until the run has used twice the evaluations it had, and
+  none after a lent slice that gained nothing. A phase CMA-ES took lends GSA a
+  slice when its last two slices gain less per evaluation than its lent slice
+  had to beat, and hands the turn back if GSA's slice gains faster; the two
+  alternate for up to eight phases. If the bar on the first slice from below
+  the start ended the opening before the descent converged and GSA's first
+  phase ends at its first slice, the descent takes a turn before CMA-ES's
+  phase. After an opening the phases, and that turn, stop short of the closing
+  reserve plus a slice for each other arm not yet played, counted again at
+  every slice, and without one short of a slice for DE while it has not played.
+  CMA-ES, the descent, GSA,
+  DE, the additive surrogate and the QMC restart arm then each take a turn if
+  they have not yet and the budget left holds eight evaluations beyond the
+  closing reserve; later rounds pick uniformly with probability ``1/round``,
+  otherwise replay an arm whose last turn lowered the incumbent, and otherwise
+  draw by discounted Thompson sampling. A turn is one slice, but the descent
+  keeps the turn while each slice lowers its value by more than the success
+  threshold, until it converges, so a kicked descent, or a long one from a poor
+  start, is scored on the basin it reaches. The descent closes the run with a
+  reserve of the ten gradients' worth of evaluations a descent needs to converge
+  (at most 40% of the budget, and none when that leaves fewer than three
+  gradients' worth), going on with its current descent unless another arm has
+  lowered the incumbent since it last played, in which case it restarts there.
+  A slice is four gradients' worth of evaluations or a 48th of the budget,
+  whichever is larger, but at most the geometric mean of the budget and four
+  gradients' worth, so past 48 times 48 four-gradient slices the number of
+  slices keeps growing with the budget. The floor the restart guarantee needs is
+  asymptotic in the budget: the opening, the phases and the descent's turns go
+  on only while they lower the incumbent, or the descent's value, by more than
+  the success threshold, whose positive floor changes at most once, so on a
+  bounded objective they last a number of slices that does not grow with the
+  budget, and every arm keeps a uniform share and is pulled infinitely often as
+  the budget grows. Measured over 40 paired seeds against the rules they
+  replaced (medians, "A against B" with A's wins/ties/losses, rows named
+  ``problem@budget`` from ``x0`` as in the regime notes), these rules trail on
+  the following rows, and putting a replaced rule back costs the rows named with
+  it. The rate hand-over short of the opening budget, against two fixed GSA
+  slices after the descent's first: ``ellS30@1000`` 1673 against 711 (7/0/33),
+  ``ellS50@5000`` 6.88 against 1.52 (2/0/38), ``ellS100@5000`` 1839 against 1110
+  (2/0/38), ``ellS100@20000`` 1.17 against 0.0282 (0/0/40), ``ellR100@20000``
+  2.48 against 2.41 (19/0/21), ``rosen100@20000`` 74.9 against 72.0 (17/0/23),
+  ``stybR30@1000`` -1057 against -1057 (4/18/18), ``levy100@20000`` 0.0416
+  against 1.0e-11 (5/15/20), ``rast100_shift@20000`` 9.95 against 7.96 (9/3/28)
+  and ``rastS100@20000`` 10.9 against 7.96 (8/3/29); the two slices back cost
+  ``ackS50@5000`` 4.31 against 2.94 and ``ackS100@5000`` 13.2 against 5.94
+  (1/0/39 each), ``ellR30@1000`` 12557 against 5589 (3/0/37), ``ellR100@5000``
+  20110 against 15750 (5/0/35) and ``rosen100@5000`` 252 against 168 (7/0/33).
+  The opening's bar on its recent gains, against an opening that goes on while
+  each slice is a success: ``ellS30@5000`` 0.0626 against 0 (0/13/27),
+  ``rosen30@5000`` 22.2 against 16.2 (2/1/37) with its copies and controls (22.0
+  to 22.5 against 15.9 to 16.7), and the ``ellR30@5000`` controls for +1e2, +1e4
+  and -1e4 (2.8e-11, 2.3e-4 and 8.7e-4 against 3.2e-12, 1.4e-5 and 1.2e-5);
+  dropping the bar costs ``ackS30@5000`` 3.8e-6 against 6.2e-7 (1/18/21),
+  ``levyR30@5000`` 3.51 against 0.544 (5/0/35) and ``levy30@5000`` 7.2e-7
+  against 4.5e-10 (6/17/17). ``ellR30@5000``, 3.4e-8 against 0 (0/19/21), and
+  its x1e-6 and x2^-20 copies come level only with both the opening without its
+  bar and the descent's ``1e-12`` tolerance (0, 0/38/2), at the costs of each.
+  Lending from a GSA phase's fifth slice: ``mich10@5000`` -9.655 against -9.66
+  (3/28/9, p 0.021), which no tried rule brings level without putting other rows
+  behind: lending from any slow slice puts ``mich10@5000`` without ``x0``,
+  ``rast10_shift@1000`` and ``styb10_45@1000`` without ``x0`` behind, from the
+  fourth slice ``rast10_fixed@1000`` and ``schwefel10_cec@1000``, a lent slice
+  held to a quarter of the phase's pace ``ackley10@1000`` (1.16 against 0.0694),
+  and ending a phase CMA-ES took once its slices slow ``ackS30@5000``. With
+  phases that keep the turn while they still find lower basins, the fifth-slice
+  lend also costs ``ackS30@20000``, 8.6e-7 against 6.3e-7 (12/1/27, p 0.048),
+  and ``ackley10@5000`` without ``x0``, 4.1e-11 against 3.2e-11 (6/23/11), with
+  its -1e4 copy and two controls. Rotated ellipsoids short of the opening budget
+  trail an earlier form of the loop: ``ellR50@1000`` 1.38e5 against 4.79e4,
+  ``ellR50@5000`` 37.7 against 9.20, ``ellR100@20000`` 2.48 against 0.633 and
+  ``ellR30@1000`` 5589 against 2987; letting the descent keep the turn while it
+  pays brings ``ellR50@5000`` to 17.4 and ``ellR100@20000`` to 0.890 but costs
+  ``ellR30@1000`` (20880), ``ellR100@5000`` (41370), ``ackS50@5000`` (3.26),
+  ``ackS100@5000`` (9.86), ``levy100@5000``, ``rosen50@5000`` and
+  ``stybS100@5000``. Against 0.10.0 the loop trails on rotated Rastrigin and
+  Levy: ``rastR30@1000`` 281 against 173 (3/0/37), ``rastR50@5000`` 427 against
+  296 (1/0/39), ``rastR100@5000`` 893 against 650 (9/0/31), ``rastR100@20000``
+  870 against 470 (1/0/39), ``levyR50@5000`` 98.8 against 69.8 (8/0/32) and
+  ``levyR100@20000`` 203 against 108 (0/0/40); the diffusion population in DE's
+  place and a rotation-invariant DE leave each of them behind, and CMA-ES
+  restarting each phase with four times its population brings ``rastR50@5000``
+  level (313) and ``rastR100@20000`` to 749 but costs ``ackS30@5000`` (2.01
+  against 6.2e-7).
+- ``run_fitter`` now runs the ``preset`` it is given and passes ``x0``,
+  ``low``, ``high``, ``bound_span``, ``steps_per_epoch`` and
+  ``preset_kwargs`` on to ``fit_anneal``. anneal 0.10.0 dropped them all, so
+  the same call can give a different fit: ``method="sa"`` with
+  ``preset=Fast()`` runs Fast where 0.10.0 ran Boltzmann, a classical
+  ``method`` runs a preset of its own kind, and ``x0``, ``low`` and ``high``
+  set the start and the box. A forwarded value that ``fit_anneal`` refuses
+  raises, and any other keyword, such as ``n_epochs`` or ``tell_every``,
+  raises a ``TypeError`` that names ``run_fitter``.
+
+### Fixed
+
+- Continuous population search does not round candidates to absolute integers
+  or select integer-neighborhood jumps. Its scalar refinement uses box-relative
+  opposition and continuous axial and diffusion moves, without a caller gradient.
+- Occupancy ArchiveHole aims in the landfold book and quenches on a compacted surface, then names the landing by landfold.
+- Occupancy Leave is a catalog draw or a walk. It is not a covering or a min-mode climb of the occupied structure.
+- Scalar portfolio warmup reserves exploration work for untried active arms
+  before applying preferred slice sizes. Enlarged slices cannot consume those
+  shares or the protected scalar-refinement reserve.
+- The ChemFit bridges ``fit_anneal``, ``fit_chemfit``, ``run_benchmark`` and
+  ``run_fitter`` drive ``evaluate`` / ``step`` when the fitter has them and
+  ``ask`` / ``tell`` otherwise, and refuse a fitter with neither pair before
+  ``init``; only ``run_benchmark`` still drives ``evaluate`` or ``ask`` without
+  its partner, with a ``FutureWarning``. On current ChemFit, ``fit_anneal``,
+  ``fit_chemfit`` and ``run_fitter`` called the missing ``ask``, scored every
+  candidate as ``+inf`` with the ``AttributeError`` swallowed, and handed
+  ``finish`` a point that was never evaluated. The first exception the fitter
+  raises, or a loss that is not one real number, now ends the fit: the fitter is
+  not called again, ``finish`` is skipped, and the exception reaches the caller.
+  anneal 0.10.0 read a numeric string, a bool or the real part of a NumPy
+  complex number as the loss, and scored a loss it could not read, such as an
+  array of two values, as the worst value. Every bridge reads a ``Decimal`` loss
+  as its value, and a one-element list, tuple or array of any shape, an
+  ``np.matrix`` or another library's array included, as its element. 0.10.0 read
+  such a list only from ``ask`` in ``fit_chemfit`` and ``run_benchmark``, and
+  such an array only where ``float()`` reads it, which for a NumPy array of one
+  or more dimensions gives NumPy's ``DeprecationWarning``.
+- The ChemFit bridges evaluate the start first, bit for bit, count it against
+  the budget, and never exceed the budget. Every parameter leaf comes back in
+  its own type: a Python number, a ``Decimal`` included, as a ``float``, a NumPy
+  scalar or array with its shape and floating dtype (integer, bool and object
+  leaves as float64), and a list or tuple as a list or tuple nested the same
+  way. The bounds of a ``float32`` or ``float16`` leaf are rounded inward so the
+  cast candidate stays inside them, and a floating leaf wider than float64, such
+  as an x86 ``longdouble``, raises ``TypeError`` naming it. Bounds may be NumPy
+  pairs or per-element arrays, and a bound that is not finite, is inverted, or
+  is too wide for a float raises ``ValueError`` naming the parameter element. A
+  parameter whose two bounds are equal is held fixed, and every argument is
+  checked before ``fitter.init()``.
+- The documentation of ``Ledger::charge_frac`` says what it charges. Fractions
+  accumulate and are charged as a whole call each time their sum crosses one;
+  a residue under one call is never charged, so a ledger can report up to one
+  call less than the work done, mid-run and at the end, and a charge that runs
+  into the budget leaves the rest of its work unpaid. It had said the residue
+  was still owed when the run ended, and nothing collected it.
+- The portfolio population-diffusion arm applies shared peer geometry to global
+  proposals before evaluation and stores the corrected walker coordinates.
+  Scalar objectives need no gradient callback; local refinement remains raw.
+  Private and zero-height controls bypass the proposal adapter.
+- With ``replicas`` above one, every rung of the cluster-hopping ladder hopped
+  at ``temperature``, so the ladder's temperatures reached only the swap test.
+  Rung ``k`` of ``R`` now hops at ``ladder_top^(k/(R-1))`` times the temperature
+  a single chain would hop at. Under ``budget_window`` the law sets the coldest
+  rung's temperature, and a rise a rung declines enters the barrier estimate
+  divided by that rung's ratio. Under ``statistical_temperature`` the estimate is
+  clamped to its band around ``temperature`` before the ratio multiplies it, and
+  only the rungs at ratio one feed the density of states it is read from. The
+  swap factor reads each rung's temperature from the state it holds and weighs
+  the funnel bias, the packing pile and the energy bias every rung shares by the
+  difference of the two inverse temperatures. Under ``flat_histogram`` it weighs
+  the biases alone, since the flat-histogram cost is the same on every rung and
+  cancels from the factor with the energies. Under ``energy_bias`` the bias's
+  tempering factor and its deposits read the temperature the coldest rung would
+  hop at from the state it holds, so which rung fills its first sample or
+  deposits no longer sets them. A state keeps its basin and its validation
+  gradient as it moves between rungs, so the first step a rung takes after a
+  switch is recorded from the state that rung holds, and every rung's starting
+  quench is validated before it is recorded. A ladder refuses
+  ``delayed_acceptance``: a hop its surrogate decides is tested on the bare
+  energy and one it abstains on with the biases, so no swap factor can balance an
+  exchange between rungs that hop by two weights. A single chain is unchanged.
+- ``Reflected`` mirrors a proposal whose offset or sum overflows ``f64``
+  instead of placing it on a wall. The step comes from
+  ``MoveKernel::displacement``, which ``Gaussian`` and ``Cauchy`` implement.
+  ``run_rs_qmc_variant`` starts its chains on the finite wall of an axis with
+  an infinite wall. In the Rust sampler a NaN objective value counts as worse
+  than every number, ``+inf`` included, so a chain no longer stalls at a NaN
+  start and a NaN never beats a number. A Python objective that returns NaN
+  is still scored as ``+inf``, the same value an ordinary exception receives.
+  The unbounded ``boltzmann``, ``fast`` and ``gsa`` constructors stay on
+  ``R^dim``; the boxed presets are ``boltzmann_in_box``, ``fast_in_box`` and
+  ``gsa_in_box``.
+- ``global_optimize``, and with it the default ChemFit portfolio, no longer
+  panics on a box narrower than about ``2e-7`` in some coordinate. The gradient
+  arm bounded its central-difference step with ``clamp(1e-8, 0.05 * width)``,
+  whose floor exceeds its cap on such a coordinate; the step now stays within a
+  twentieth of the width.
+- ``methods::cluster_search::median_encounter`` decides the Kaplan-Meier median
+  in exact integer arithmetic. The survival is exactly a half once half the runs
+  are found before any is censored, and the floating-point product it replaces
+  rounded above a half at some even run counts, 24, 28, 30 and 38 among them, so
+  the median came back one encounter late: the sixteenth first encounter of
+  thirty instead of the fifteenth. A run censored at the time of an encounter
+  is still at risk at it, so the median no longer depends on the order the runs
+  are given in.
+- ``occupancy_retire_at`` honours leftover dwell unless the packing
+  book has one family, matching ``Hop.leftover_unsaturated_does_not_retire``.
+
+
 ## [0.10.0](https://github.com/HaoZeke/anneal/tree/v0.10.0) - 2026-10-09
 
 ### Added
