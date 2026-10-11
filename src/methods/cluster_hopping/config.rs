@@ -220,7 +220,7 @@ pub struct Config {
     /// Lennard-Jones. Only the morphology keyings read it, since their
     /// cutoffs sit between the first and second neighbour shells.
     pub morphology_scale: f64,
-    /// Design point for the budget-window temperature, as a fraction of the
+    /// Design point for the budget-window temperature, in units of half the
     /// sphere-model descent boundary. Must lie strictly below two.
     pub theta: f64,
     /// Set the temperature by the budget-window law rather than holding it.

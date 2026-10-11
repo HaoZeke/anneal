@@ -34,7 +34,7 @@ use rand::Rng;
 pub struct BudgetWindowTemperature {
     /// Problem dimension, `d` in the law.
     pub dim: f64,
-    /// Design point as a fraction of the descent boundary; must be under two.
+    /// Design point in units of half the descent boundary; must be under two.
     pub theta: f64,
     /// Decay of the barrier estimate, in `(0, 1)`.
     pub decay: f64,
