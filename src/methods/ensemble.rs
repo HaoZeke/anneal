@@ -11,6 +11,11 @@
 //! The private and shared arms of a comparison differ only in the channel,
 //! never in seeds, starts, budgets or lookups, which is the contract the
 //! campaign records are read under.
+//!
+//! A chain reads a channel when it reaches a checkpoint, and finds there
+//! what its peers have published by then, wherever their threads have got
+//! to. A run with any channel, the two-choice restart included, therefore
+//! depends on thread timing; a run with none repeats from its seed.
 
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -101,7 +106,9 @@ pub struct EnsembleConfig {
     /// Gossip averaging of the wells.
     pub gossip: Option<GossipConfig>,
     /// Two-choice family restart after this many charged calls without
-    /// improvement (Azar, Broder, Karlin, Upfal 1999).
+    /// improvement (Azar, Broder, Karlin, Upfal 1999). The restart reads
+    /// the states two peers last posted, so it is a channel: a run with it
+    /// depends on thread timing.
     pub two_choice_stall: Option<usize>,
     /// Charged calls between checkpoints, which is the exchange lag and
     /// the resolution of the first-target record.
@@ -811,8 +818,11 @@ mod tests {
         assert_eq!(shared.histories.len(), 1);
         assert!(shared.histories[0].2 > 0);
         assert!(shared.solved(Some(-0.4)));
-        let private =
-            run_ensemble(&cfg, &ensemble(HistoryMode::None, None, None), 3, &problem).unwrap();
+        let quiet = EnsembleConfig {
+            two_choice_stall: None,
+            ..ensemble(HistoryMode::None, None, None)
+        };
+        let private = run_ensemble(&cfg, &quiet, 3, &problem).unwrap();
         assert!(private.histories.is_empty());
         assert_eq!(private.exchange, (0, 0));
         assert!(
@@ -831,12 +841,12 @@ mod tests {
             private
                 .replicas
                 .iter()
-                .all(|r| r.history_cost == (0, 0, 0.0))
+                .all(|r| r.history_cost == (0, 0, 0.0) && r.two_choice_restarts == 0)
         );
         // No channel means the same seed reproduces the same chains: the
-        // determinism the private controls of every comparison rest on.
-        let again =
-            run_ensemble(&cfg, &ensemble(HistoryMode::None, None, None), 3, &problem).unwrap();
+        // determinism the private controls of every comparison rest on. The
+        // two-choice restart is a channel, so the control runs without it.
+        let again = run_ensemble(&cfg, &quiet, 3, &problem).unwrap();
         for (a, b) in private.replicas.iter().zip(&again.replicas) {
             assert_eq!(a.outcome.best.to_bits(), b.outcome.best.to_bits());
             assert_eq!(a.outcome.hops, b.outcome.hops);
