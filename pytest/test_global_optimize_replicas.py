@@ -1,5 +1,7 @@
 """Batch replicas of the values-only portfolio through the native binding."""
 
+import warnings
+
 import numpy as np
 import pytest
 
@@ -81,4 +83,67 @@ def test_invalid_settings_raise_before_any_call(budget, x0, replicas, archive):
     fun = Counted(batched=True)
     with pytest.raises(ValueError):
         global_optimize_replicas(fun, LOW, HIGH, budget, x0, 0, replicas, archive)
+    assert fun.points == []
+
+
+def _sphere_gradient(x):
+    return 2.0 * (np.asarray(x, dtype=float) - 0.3)
+
+
+ROUTES = {
+    "batch": dict(x0=X0, replicas=3),
+    "no start": dict(replicas=3),
+    "gradient": dict(x0=X0, replicas=3, grad_fn=_sphere_gradient),
+    "noise": dict(x0=X0, replicas=3, noise_sigma=0.01),
+    "legacy": dict(x0=X0, replicas=3, policy="legacy"),
+    "one replica": dict(x0=X0, replicas=1),
+}
+
+
+@pytest.mark.parametrize(
+    "keyword,value", [("coverage_radius", 0.2), ("coverage_neighbors", 1)]
+)
+@pytest.mark.parametrize("shared", [True, False])
+def test_batch_replicas_warn_that_coverage_keywords_change_nothing(
+    keyword, value, shared
+):
+    plain, given = Counted(batched=True), Counted(batched=True)
+    options = dict(seed=4, x0=X0, replicas=3, coverage_shared=shared)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        expected = anneal.global_optimize(plain, LOW, HIGH, 160, **options)
+    options[keyword] = value
+    message = f"{keyword} has no effect: batch replicas"
+    with pytest.warns(FutureWarning, match=message) as caught:
+        out = anneal.global_optimize(given, LOW, HIGH, 160, **options)
+    assert len(caught) == 1 and caught[0].filename == __file__
+    np.testing.assert_array_equal(np.asarray(given.points), np.asarray(plain.points))
+    assert given.batches == plain.batches
+    assert out["best_val"] == expected["best_val"]
+    assert out["n_batches"] == expected["n_batches"]
+
+
+@pytest.mark.parametrize("route", ROUTES)
+def test_only_the_batch_replicas_warn_about_the_coverage_keywords(route):
+    fun = Counted(batched=False)
+    coverage = dict(coverage_radius=0.2, coverage_neighbors=1)
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        out = anneal.global_optimize(
+            fun, LOW, HIGH, 120, seed=2, **coverage, **ROUTES[route]
+        )
+    future = [w for w in caught if issubclass(w.category, FutureWarning)]
+    assert ("n_batches" in out) == (route == "batch")
+    assert len(future) == (2 if route == "batch" else 0)
+
+
+@pytest.mark.parametrize(
+    "keywords", [{"coverage_radius": 0.0}, {"coverage_neighbors": -1}]
+)
+def test_batch_replicas_still_check_the_coverage_keywords(keywords):
+    fun = Counted(batched=True)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        with pytest.raises(ValueError):
+            anneal.global_optimize(fun, LOW, HIGH, 100, x0=X0, replicas=3, **keywords)
     assert fun.points == []
