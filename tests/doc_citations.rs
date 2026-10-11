@@ -205,7 +205,8 @@ fn citation_at(text: &[char], start: usize) -> Option<(String, String, usize)> {
 }
 
 /// The item a span names: the last segment of its leading path, unless the
-/// path goes on as a file path.
+/// span goes on as a file path, reaching a `/` through word characters,
+/// hyphens and dots alone, as =pnastps-master/code= does.
 fn item_name(span: &[char]) -> Option<String> {
     let span = span
         .strip_prefix(&['#', '!', '['])
@@ -232,7 +233,8 @@ fn item_name(span: &[char]) -> Option<String> {
         start = end + separator;
         end = next;
     }
-    (span.get(end) != Some(&'/')).then(|| span[start..end].iter().collect())
+    let path_end = run_end(span, end, |c| is_path(c) || c == '.');
+    (span.get(path_end) != Some(&'/')).then(|| span[start..end].iter().collect())
 }
 
 /// Org renders =a=/=b= as one span; each part names its own item.
@@ -460,4 +462,15 @@ fn every_org_line_reference_holds_every_item_it_names() {
         failures.len(),
         failures.join("\n")
     );
+}
+
+#[test]
+fn a_span_that_goes_on_as_a_file_path_names_no_item() {
+    let name = |span: &str| item_name(&span.chars().collect::<Vec<_>>());
+    assert_eq!(name("pnastps-master/code/tps-only_pnas/main.cpp"), None);
+    assert_eq!(name("v0.10.0-rc1/notes"), None);
+    assert_eq!(name("src/methods/tps_shoot.rs"), None);
+    assert_eq!(name("tps_shoot"), Some("tps_shoot".into()));
+    assert_eq!(name("Config::theta"), Some("theta".into()));
+    assert_eq!(name("anneal.minimize(replicas=4)"), Some("minimize".into()));
 }
