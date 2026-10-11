@@ -221,27 +221,57 @@ class PyObjective(metaclass=_ExtensionAlias):
 
 
 def _float_value(fn_):
-    """``fn_`` with what it returns read as a float, as ``global_optimize`` reads it.
+    """``fn_`` with what it returns read as a float, as ``global_optimize`` reads it."""
+
+    def value(x):
+        return _read_value(fn_(x))
+
+    return value
+
+
+def _read_value(result):
+    """What an objective returned as a float, or ``global_optimize``'s ``TypeError``.
 
     A number is what float conversion takes without parsing text: a value
     with ``__float__`` or ``__index__``.
     """
+    kind = type(result)
+    if kind is float:
+        return result
+    cause = None
+    if hasattr(kind, "__float__") or hasattr(kind, "__index__"):
+        try:
+            return float(result)
+        except Exception as err:
+            cause = err
+    msg = f"obj_fn must return a float, got {kind.__name__}"
+    raise TypeError(msg) from cause
 
-    def value(x):
-        result = fn_(x)
-        kind = type(result)
-        if kind is float:
-            return result
-        cause = None
-        if hasattr(kind, "__float__") or hasattr(kind, "__index__"):
-            try:
-                return float(result)
-            except Exception as err:
-                cause = err
-        msg = f"obj_fn must return a float, got {kind.__name__}"
-        raise TypeError(msg) from cause
 
-    return value
+def _scored_value(fun, x):
+    """``fun(x)`` scored as the drivers score one evaluation.
+
+    An ``Exception`` from ``fun`` is scored as ``+inf`` and reported in the
+    warning the drivers give when a run ends; anything else ``fun`` raises
+    propagates. The value is read by :func:`_read_value`, and NaN is scored
+    as ``+inf``.
+    """
+    try:
+        result = fun(x)
+    except Exception as err:
+        try:
+            text = str(err)
+        except Exception:
+            text = "<exception str() failed>"
+        message = (
+            "a callback raised 1 exception(s): an objective call that raised was "
+            "scored as the worst value and a gradient call as zero; the first was: "
+            f"{type(err).__qualname__}: {text}"
+        )
+        warnings.warn(message, RuntimeWarning, stacklevel=3)
+        return np.inf
+    value = _read_value(result)
+    return np.inf if np.isnan(value) else value
 
 
 def _float_gradient(grad_fn):
@@ -1440,7 +1470,9 @@ def minimize(
         scalars broadcast), an ``(n, 2)`` array, or ``n`` pairs
         ``(low, high)``, all finite. A coordinate whose two ends are equal
         is fixed: the search runs in the free coordinates, and ``fun`` and
-        ``jac`` still receive full-length vectors.
+        ``jac`` still receive full-length vectors. With every coordinate
+        fixed, the run is one evaluation of ``fun`` at the start, and
+        ``jac`` is not called.
       jac: optional gradient callable ``jac(x) -> array`` of the length of
         ``x0``. It takes the gradient route of :func:`global_optimize`
         (``grad_fn``), which runs one replica; its calls count in ``njev``.
@@ -1549,8 +1581,7 @@ def minimize(
             start = stored
 
     if n_free == 0:
-        value = float(fun(start.copy()))
-        value = np.inf if np.isnan(value) else value
+        value = _scored_value(fun, start.copy())
         out = {"best_pos": np.empty(0), "best_val": value, "n_evals": 1, "n_grads": 0}
         nit = 1
     else:
