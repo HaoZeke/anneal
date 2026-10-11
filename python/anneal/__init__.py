@@ -267,7 +267,7 @@ def cluster_search(
     Returns a dict with ``best`` (flat ``3n`` coordinates), ``best_energy``,
     and ``hops``.
     """
-    start_arr = None if start is None else np.asarray(start, dtype=np.float64).reshape(-1)
+    start_arr = _flat_or_none(start)
     args = (
         obj_fn,
         grad_fn,
@@ -832,10 +832,13 @@ def box_ensemble_optimize(
 
     Requires ``grad_fn``. Kick and quench in the box. Without a gradient
     use ``ensemble_optimize`` (portfolio). Not cluster hopping.
+
+    ``low``, ``high`` and ``x0`` may be any array-like of one shape; they are
+    flattened in C order and the callables receive the flat vector.
     """
-    low_arr = np.asarray(low, dtype=np.float64)
-    high_arr = np.asarray(high, dtype=np.float64)
-    x0_arr = None if x0 is None else np.asarray(x0, dtype=np.float64)
+    low_arr = _flat(low)
+    high_arr = _flat(high)
+    x0_arr = _flat_or_none(x0)
     out = _core_box_ensemble_optimize(
         obj_fn,
         low_arr,
@@ -891,10 +894,12 @@ def ensemble_optimize(
 
     Coordinates are design variables regardless of dimension. Atomic
     symmetry-aware proposals require the explicit ``cluster_search`` adapter.
+    ``low``, ``high`` and ``x0`` may be any array-like of one shape; they are
+    flattened in C order and the callables receive the flat vector.
     """
-    low_arr = np.asarray(low, dtype=np.float64)
-    high_arr = np.asarray(high, dtype=np.float64)
-    x0_arr = None if x0 is None else np.asarray(x0, dtype=np.float64)
+    low_arr = _flat(low)
+    high_arr = _flat(high)
+    x0_arr = _flat_or_none(x0)
     out = _core_ensemble_optimize(
         obj_fn,
         low_arr,

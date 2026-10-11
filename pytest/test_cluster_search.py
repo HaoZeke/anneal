@@ -108,6 +108,21 @@ def test_cluster_search_start_kwarg():
     assert np.isfinite(out["best_energy"])
 
 
+def test_cluster_search_takes_a_start_given_as_a_view():
+    n = 4
+    start = np.array(
+        [0.0, 0.0, 0.0, 1.1, 0.0, 0.0, 0.0, 1.1, 0.0, 0.0, 0.0, 1.1],
+        dtype=np.float64,
+    )
+    wide = np.zeros((3 * n, 2))
+    wide[:, 0] = start
+    assert not wide[:, 0].flags.c_contiguous
+    from_view = cluster_search(lj_energy, lj_grad, n, 200, seed=0, start=wide[:, 0])
+    from_copy = cluster_search(lj_energy, lj_grad, n, 200, seed=0, start=start)
+    assert from_view["best_energy"] == from_copy["best_energy"]
+    np.testing.assert_array_equal(from_view["best"], from_copy["best"])
+
+
 def test_cluster_search_ras_flag_exists_and_recommended_defaults():
     import inspect
 
