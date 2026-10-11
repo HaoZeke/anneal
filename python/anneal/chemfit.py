@@ -1532,7 +1532,7 @@ def fit_chemfit(
     """Fit ChemFit parameters with a gradient-free anneal driver.
 
     Args:
-        fitter: a :class:`chemfit.Fitter` with ``initial_parameters`` and
+        fitter: a :class:`chemfit.fitter.Fitter` with ``initial_parameters`` and
             optional ``bounds``. Only the session protocol is used, so
             gradient-free drivers never need forces: ``init``, ``finish``,
             and ``evaluate`` / ``step`` (current ChemFit) or ``ask`` /
