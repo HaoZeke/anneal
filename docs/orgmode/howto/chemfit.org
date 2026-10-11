@@ -139,7 +139,15 @@ bounds, and return the best parameters with each leaf's type. With
 =minimize=: the fitter is initialised with =init(batch_size=batch_size)=, and
 each batch goes to one =evaluate= of a list, which ChemFit's schedule may run
 concurrently, and one =step=. The budget stays the total number of
-evaluations. With =loss_by_name=, =initial= and =parameter_bounds= as above:
+evaluations.
+
+Batches need a =Fitter= with =evaluate= and =step= whose =init= takes
+=batch_size=, which no ChemFit release has yet. ChemFit 3.1.1, the latest
+release, has =ask= and =tell=: the bridges drive it one candidate at a time
+and refuse =batch_size= above one before =init=. ChemFit built from its
+source at commit 3b65fe0 or later takes batches, though it still reports
+version 3.1.1, so the version number does not tell the two apart. With
+=loss_by_name=, =initial= and =parameter_bounds= as above, on such a build:
 
 #+begin_src python
 import chemfit

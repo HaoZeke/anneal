@@ -153,4 +153,6 @@ batch. The budget is the total number of evaluations either way, and the
 default =batch_size=1= keeps the single-candidate path. =fit_chemfit(fitter,
 budget, batch_size=4)= and =run_benchmark(context, method="portfolio",
 batch_size=4)= do the same; a batch needs the portfolio and a fitter with
-=evaluate= and =step=.
+=evaluate= and =step=, which ChemFit built from its source at commit 3b65fe0
+or later has but no ChemFit release has yet. On ChemFit 3.1.1 leave
+=batch_size= at one.
