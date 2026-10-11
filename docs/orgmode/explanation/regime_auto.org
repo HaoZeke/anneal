@@ -483,6 +483,35 @@ the medians on the near cells are -44.3 against -8.62 on =lj13_near=,
 -9.05 against -1.20 on =binary_lj_fit_near=, 0 against 14.9 on
 =rastrigin10_near= and 6.9e-22 against 6.17 on =rosenbrock10_near=.
 
+** The default budget of =minimize=
+
+Without a budget, =minimize= takes =max(1000, 10 n (n + 1))= for =n= free
+coordinates, twice the =5 n (n + 1)= from which the loop opens with a
+descent from =x0=. Measured against the former default, =max(32, 80 n)=,
+over 20 seeds with one replica from a start each seed draws in the box,
+every run spending its whole budget (W/T/L counts the new default's wins,
+and =p= is the one-sided Wilcoxon probability that it is not better):
+
+| Problem | n | Budget, old / new | Opening from | Opened, old / new | Median, old | Median, new | W/T/L | p | Wall s, old / new |
+|---------+---+-------------------+--------------+-------------------+-------------+-------------+-------+---+-------------------|
+| Rosenbrock | 3 | 240 / 1000 | 60 | 20 / 20 | 2.0e-27 | 1.8e-27 | 0/20/0 | 1 | 0.002 / 0.010 |
+| Rastrigin | 3 | 240 / 1000 | 60 | 20 / 20 | 1.99 | 7.1e-15 | 18/2/0 | 9.7e-5 | 0.002 / 0.009 |
+| =binary_lj_fit= | 6 | 480 / 1000 | 210 | 20 / 20 | -1.79 | -4.83 | 20/0/0 | 9.5e-7 | 0.29 / 0.61 |
+| =rosenbrock10= | 10 | 800 / 1100 | 550 | 20 / 20 | 8.7e-4 | 1.7e-18 | 14/6/0 | 6.1e-5 | 0.007 / 0.010 |
+| =rastrigin10= | 10 | 800 / 1100 | 550 | 20 / 20 | 5.97 | 3.98 | 16/2/2 | 9.1e-4 | 0.007 / 0.010 |
+| =lj13= | 39 | 3120 / 15600 | 7800 | 0 / 20 | -39.4 | -40.7 | 13/0/7 | 0.045 | 0.08 / 0.60 |
+
+Up to 15 free coordinates both defaults open with the descent, and the
+rise buys more of the same run: a better point on every problem but the
+3-dimensional Rosenbrock, which both solve, for 1.4 to 4.2 times the
+evaluations. On =lj13= the old default falls short of the opening and the
+new one plays it: the median improves from -39.4 to -40.7 (quartiles -41.4
+to -39.1 against -40.6 to -38.2) for five times the evaluations. The new
+default stays: its median is the better one on five problems, at =p=
+below 0.05 on each, and level on the sixth, and from 16 coordinates on it
+is what lets the opening run at all. A caller who wants fewer evaluations
+passes =budget=.
+
 * Regimes → preferred portfolio arms / kernels
 
 These rows govern runs with a gradient or a declared noise scale; Legacy

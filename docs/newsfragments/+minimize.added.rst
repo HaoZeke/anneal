@@ -24,4 +24,15 @@ engine's ``diagnostics``. One replica is the default: over 40 paired seeds
 at equal evaluations, four shared replicas ended worse than one on 13-atom
 Lennard-Jones and on ten-dimensional Rastrigin and Rosenbrock at 1000
 evaluations, better on a binary Lennard-Jones parameter fit at 1000, and
-level with one on all four problems at 5000.
+level with one on all four problems at 5000. The default budget replaces
+``max(32, 80 n)``. Over 20 seeds from a start drawn in the box, every run
+spending its budget, it ended better on three-dimensional Rastrigin (median
+7.1e-15 against 1.99, 1000 evaluations against 240), the six-parameter fit
+(-4.83 against -1.79, 1000 against 480), ten-dimensional Rastrigin (3.98
+against 5.97) and Rosenbrock (1.7e-18 against 8.7e-4, 1100 against 800 for
+both) and 13-atom Lennard-Jones (-40.7 against -39.4, 15600 against 3120),
+at a one-sided Wilcoxon ``p`` below 0.05 on each, and level on
+three-dimensional Rosenbrock, which both solve. Both open with the
+finite-difference descent from ``x0`` up to 15 free coordinates; on the 39
+of Lennard-Jones only the new default reaches the ``5 n (n + 1)``
+evaluations the opening needs.
