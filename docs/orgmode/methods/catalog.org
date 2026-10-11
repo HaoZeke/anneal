@@ -1427,11 +1427,11 @@ budget rather than being hand-tuned.
 
 Values-only loop: under =PortfolioPolicy::Auto= a run with no gradient
 and no declared noise goes, before any regime routing, to
-=run_values_only_portfolio= (src/methods/portfolio.rs:3737), a bandit
-over =VALUES_ONLY_ARMS= (portfolio.rs:3641: =cma=, =qn=, =gsa=, =de=,
+=run_values_only_portfolio= (src/methods/portfolio.rs:3749), a bandit
+over =VALUES_ONLY_ARMS= (portfolio.rs:3653: =cma=, =qn=, =gsa=, =de=,
 =surrogate=, =explore=) in slices of
 =max(4(d+1), min(budget/48, sqrt(4(d+1) budget)))= evaluations
-(=values_only_slice=, portfolio.rs:3656). Without =x0= it starts from
+(=values_only_slice=, portfolio.rs:3668). Without =x0= it starts from
 the best of a seeded design of =d+1= points; when the budget affords
 five gradients per coordinate, an opening finite-difference descent
 runs while its slices succeed, gain more than =1e-4= times the largest
@@ -1570,7 +1570,7 @@ log-ratios of consecutive polish improvements); the endgame
 projected-gradient cycle helper (portfolio.rs:162) and its work-unit to
 =max_fevals= converter (portfolio.rs:150); a coordinate pattern-search
 fallback (portfolio.rs:198); the values-only =SuccessScale=
-(portfolio.rs:1576) and =DescentPace= (portfolio.rs:1652); the batch
+(portfolio.rs:1582) and =DescentPace= (portfolio.rs:1658); the batch
 replicas' module doc at src/methods/portfolio/replicas.rs:1-29,
 =ReplicaArchive= (replicas.rs:45) and =ReplicaResult= (replicas.rs:56).
 
@@ -1594,11 +1594,11 @@ Feeds/consumes: consumes =crate::methods::regime= for arm priors and
 exploit probability, and the typed-algebra kernels
 (=crate::movekernel=, =crate::exchange=, =crate::accept=, =crate::cool=,
 =crate::neigh=) rather than the cluster-specific move library. Feeds the
-Python front end =anneal.minimize= (python/anneal/__init__.py:1313),
+Python front end =anneal.minimize= (python/anneal/__init__.py:1481),
 which runs =global_optimize= with one replica and the batch replicas,
-through =global_optimize_replicas= (src/python.rs:2521), with more;
+through =global_optimize_replicas= (src/python.rs:2677), with more;
 =global_optimize= itself, which runs them for =replicas= above one from
-=x0= with values only (src/python.rs:2398); and =anneal.chemfit='s
+=x0= with values only (src/python.rs:2546); and =anneal.chemfit='s
 portfolio driver with =batch_size= above one.
 
 ** Parallel tempering / replica exchange
@@ -2054,7 +2054,7 @@ Key types and functions: =CmaEs= (src/methods/cma_es.rs:119);
 =covariance_learning_evaluations= (cma_es.rs:111, the horizon
 \(\lambda/(c_1 + c_\mu)\)); =Bipop= and =CmaRegime=
 (cma_es.rs:642/621); the portfolio's =CmaArmState= and =run_cma_arm=
-(src/methods/portfolio.rs:1113/3484).
+(src/methods/portfolio.rs:1119/3496).
 
 Constants and defaults: =default_lambda= \(4 + \lfloor 3 \ln n
 \rfloor\) (cma_es.rs:82). In the portfolio every run is centred on the
@@ -2124,7 +2124,7 @@ line search.
 
 Key types and functions: =FdBfgs= (src/methods/fd_bfgs.rs:154);
 =FdBfgsOptions= (fd_bfgs.rs:76); the portfolio's =QnArmState= and
-=run_qn_arm= (src/methods/portfolio.rs:1202/3558).
+=run_qn_arm= (src/methods/portfolio.rs:1208/3570).
 
 Constants and defaults: =ARMIJO = 1e-4=, =MAX_LINE_TRIALS = 40=,
 =FIRST_STEP_FRACTION = 0.05=, =CENTRAL_INTERVAL_FRACTION = 0.1=,
