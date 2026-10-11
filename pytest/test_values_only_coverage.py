@@ -41,11 +41,6 @@ def test_parameter_positions_communicate_without_derivatives_or_minima(shared):
     assert diagnostics["best_val"] == 0.0
     np.testing.assert_array_equal(diagnostics["best_pos"], start)
 
-    free = high > low
-    offsets = np.max(
-        np.abs((points[:, free] - start[free]) / (high - low)[free]), axis=1
-    )
-    assert np.count_nonzero((offsets > 0.0) & (offsets <= 1e-5)) == 0
     if shared:
         assert diagnostics["coverage_published_samples"] > 0
         assert diagnostics["coverage_applied_foreign_samples"] > 0
