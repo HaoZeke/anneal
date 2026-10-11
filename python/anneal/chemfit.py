@@ -30,7 +30,10 @@ is initialised with ``init(batch_size=batch_size)``, and each batch of at
 most ``batch_size`` candidates is one ``evaluate`` of a list, which
 ChemFit's schedule may run concurrently, and one ``step``; the start is a
 batch of one. Batches need the portfolio and a fitter with ``evaluate``
-and ``step``.
+and ``step`` whose ``init`` takes ``batch_size``, which no ChemFit release
+has yet: 3.1.1, the latest, has ``ask`` and ``tell``, so its batches are
+refused before ``init``. ChemFit built from its source at commit 3b65fe0
+or later takes them, though it still reports version 3.1.1.
 
 Every argument is checked before ``fitter.init()``. The first exception the
 fitter raises, or a loss that is not a real number, ends the drive: the
@@ -1244,7 +1247,9 @@ def fit_anneal(
         one ``step``, so a fitter whose schedule runs candidates
         concurrently evaluates them together. ``budget`` stays the total
         number of evaluations. Needs the portfolio and a fitter with
-        ``evaluate`` and ``step``.
+        ``evaluate`` and ``step``: ChemFit built from its source at commit
+        3b65fe0 or later, not ChemFit 3.1.1, the latest release, which has
+        ``ask`` and ``tell``.
 
     Every argument is checked before ``fitter.init()``. Returns what
     ``fitter.finish`` returns for the best evaluated parameters (ChemFit
@@ -1561,7 +1566,9 @@ def fit_chemfit(
             ``evaluate`` of a list and one ``step``, as ChemFit's own batch
             loop runs them. ``budget`` stays the total number of
             evaluations. Needs ``method="portfolio"`` and a fitter with
-            ``evaluate`` and ``step``.
+            ``evaluate`` and ``step``: ChemFit built from its source at
+            commit 3b65fe0 or later, not ChemFit 3.1.1, the latest release,
+            which has ``ask`` and ``tell``.
         **preset_kwargs: ``t_init`` / ``sigma`` (boltzmann), ``t_init`` /
             ``gamma`` (fast), ``t_init`` / ``q_v`` / ``q_a`` (gsa) for the
             classical preset constructors. One of these that the method
@@ -1810,7 +1817,9 @@ def run_benchmark(
     :func:`fit_anneal`: the fitter is initialised with
     ``init(batch_size=batch_size)``, and each batch, at most ``batch_size``
     candidates, goes to one ``evaluate`` of a list and one ``step``. The
-    budget stays the total, and the fitter needs ``evaluate`` and ``step``.
+    budget stays the total, and the fitter needs ``evaluate`` and ``step``:
+    ChemFit built from its source at commit 3b65fe0 or later, not ChemFit
+    3.1.1, the latest release, which has ``ask`` and ``tell``.
     """
     fitter = benchmark_context["fitter"]
     evaluate, step = _protocol(fitter, without_step="run_benchmark")
