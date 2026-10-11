@@ -2023,12 +2023,10 @@ fn box_ensemble_optimize(
             "box_ensemble_optimize requires grad_fn; use ensemble_optimize without a gradient",
         ));
     };
-    let obj = CallableObjective {
-        fn_: obj_fn,
-        bounds: parsed.bounds,
-    };
+    let obj = CallableObjective::new(obj_fn, parsed.bounds);
+    let errors = obj.errors();
     let dim = parsed.dim;
-    let grad = CallablePyGradient { fn_: grad_fn, dim };
+    let grad = CallablePyGradient::new(grad_fn, dim, &errors);
     let result = with_replica_threads(py, || {
         crate::methods::box_hopping::box_ensemble_optimize(&obj, &grad, seed, seed_view, &config)
     });
@@ -2102,6 +2100,7 @@ fn box_ensemble_optimize(
         "coverage_decisions",
         coverage_decisions_dict(py, &result.coverage_decisions)?,
     )?;
+    errors.finish(py)?;
     Ok(out.into())
 }
 
@@ -2134,10 +2133,8 @@ fn ensemble_optimize(
         ));
     }
     let seed_view = parsed.x0.as_ref().map(|a| a.view());
-    let obj = CallableObjective {
-        fn_: obj_fn,
-        bounds: parsed.bounds,
-    };
+    let obj = CallableObjective::new(obj_fn, parsed.bounds);
+    let errors = obj.errors();
     let dim = parsed.dim;
     let history_mode = parsed.history;
     let membership = parsed.membership;
@@ -2156,7 +2153,7 @@ fn ensemble_optimize(
                 }
             });
     let result = with_replica_threads(py, || {
-        let grad = grad_fn.map(|fn_| CallablePyGradient { fn_, dim });
+        let grad = grad_fn.map(|fn_| CallablePyGradient::new(fn_, dim, &errors));
         if let Some(coverage) = coverage.as_ref() {
             let config = crate::methods::box_hopping::BoxEnsembleConfig {
                 replicas,
@@ -2256,6 +2253,7 @@ fn ensemble_optimize(
         "coverage_decisions",
         coverage_decisions_dict(py, &result.coverage_decisions)?,
     )?;
+    errors.finish(py)?;
     Ok(out.into())
 }
 
