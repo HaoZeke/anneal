@@ -97,6 +97,17 @@ def test_a_raising_jac_is_scored_as_a_zero_gradient_as_global_optimize_scores_it
     assert warned[0].endswith("the first was: ZeroDivisionError: division by zero")
 
 
+@pytest.mark.parametrize("budget", [50, 100, 200, 400])
+@pytest.mark.parametrize("box", BOXES)
+def test_a_raising_jac_leaves_nfev_and_njev_the_calls_made(box, budget):
+    logged = Logged(_raise)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", RuntimeWarning)
+        result = anneal.minimize(logged.fun, X0, BOXES[box], logged.jac, budget=budget)
+    assert result.nfev == logged.calls.count("value")
+    assert result.njev == logged.calls.count("gradient")
+
+
 @pytest.mark.parametrize("gradient", BAD_GRADIENTS)
 def test_every_coordinate_fixed_never_calls_jac(gradient):
     logged = Logged(BAD_GRADIENTS[gradient])

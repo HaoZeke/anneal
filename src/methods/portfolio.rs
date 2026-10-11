@@ -721,9 +721,15 @@ impl BudgetLedger {
         if !self.try_charge(work) {
             return false;
         }
+        self.count(n_evals, n_grads);
+        true
+    }
+
+    /// Counts calls made on work already reserved with
+    /// [`BudgetLedger::try_charge`].
+    fn count(&self, n_evals: usize, n_grads: usize) {
         self.n_evals.fetch_add(n_evals, Ordering::Relaxed);
         self.n_grads.fetch_add(n_grads, Ordering::Relaxed);
-        true
     }
 
     /// Records an evaluation in the archive ([`Archive::record`]) unless a
@@ -1834,11 +1840,16 @@ where
     G: Gradient<f64>,
 {
     let center = (&bounds.low + &bounds.high) * 0.5;
-    if !obj.ledger.charge_probe(2, 1) {
+    // Both evaluations and the gradient are reserved together, but an
+    // unusable centre leaves the second evaluation unmade, so each call is
+    // counted only once it is made.
+    let work = 2 * OBJECTIVE_WORK_UNIT + GRADIENT_WORK_UNIT;
+    if !obj.ledger.try_charge(work) {
         return None;
     }
     let value = obj.inner.eval(center.view());
     let gradient = grad.inner.grad(center.view());
+    obj.ledger.count(1, 1);
     if !value.is_finite() {
         return None;
     }
@@ -1864,6 +1875,7 @@ where
     }
     let probe = bounds.clip(probe.view());
     let probe_value = obj.inner.eval(probe.view());
+    obj.ledger.count(1, 0);
     let value_scale = energy_delta(probe_value, value).abs();
     let ratio = if value_scale > 0.0 && value_scale.is_finite() {
         scaled_grad_norm / value_scale
@@ -6682,6 +6694,50 @@ mod tests {
                 })
                 .sum()
         }
+    }
+
+    /// The same gradient at every point.
+    struct ConstantGradient(Array1<f64>);
+
+    impl Gradient<f64> for ConstantGradient {
+        fn grad(&self, _x: ArrayView1<f64>) -> Array1<f64> {
+            self.0.clone()
+        }
+
+        fn dim(&self) -> usize {
+            self.0.len()
+        }
+    }
+
+    #[test]
+    fn center_probe_counts_only_the_calls_it_makes() {
+        let probe = |gradient: Vec<f64>| {
+            let sphere = RecordingSphere::new(vec![-1.0, -1.0], vec![1.0, 3.0]);
+            let gradient = ConstantGradient(Array1::from_vec(gradient));
+            let ledger = BudgetLedger::new(10, 2);
+            let objective = BudgetedObjective {
+                inner: &sphere,
+                ledger: &ledger,
+            };
+            let budgeted = BudgetedGradient {
+                inner: &gradient,
+                ledger: &ledger,
+            };
+            scaled_center_probe(&objective, &budgeted, sphere.bounds());
+            (
+                sphere.calls_inside_box(),
+                ledger.n_evals.load(Ordering::Relaxed),
+                ledger.n_grads.load(Ordering::Relaxed),
+                ledger.used_get(),
+            )
+        };
+        // A zero gradient is what the binding reads from a gradient callable
+        // that raised. It, a non-finite one and one of the wrong length end the
+        // probe after its first evaluation, on the work reserved for two.
+        assert_eq!(probe(vec![0.0, 0.0]), (1, 1, 1, 3));
+        assert_eq!(probe(vec![f64::NAN, 1.0]), (1, 1, 1, 3));
+        assert_eq!(probe(vec![1.0, 1.0, 1.0]), (1, 1, 1, 3));
+        assert_eq!(probe(vec![1.0, -2.0]), (2, 2, 1, 3));
     }
 
     #[test]
