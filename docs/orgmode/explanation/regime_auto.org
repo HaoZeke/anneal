@@ -406,13 +406,14 @@ own archive, as =R= independent runs of a share each batched together
 would: the control for what sharing is worth.
 
 Measured over 40 paired seeds at 1000 and 5000 evaluations on four
-ChemFit-shaped cells, every run seen through one ChemFit =Fitter=
+ChemFit-shaped problems, every run seen through one ChemFit =Fitter=
 session that receives each batch as one =evaluate= of a list and one
 =step=: 13-atom Lennard-Jones positions (=lj13=, 39 coordinates), a
 six-parameter binary Lennard-Jones fit (=binary_lj_fit=, the base-10
 logarithm of a mean squared energy error), and Rastrigin and Rosenbrock
 in 10 dimensions, each run starting from a point its seed draws in the
-box. Four shared replicas beat four private ones at =p < 1e-6= on
+box. A cell is one problem at one budget, such as =lj13@1000=. Four
+shared replicas beat four private ones at =p < 1e-6= on
 =lj13@1000= (40/0/0, medians -25.7 against -20.8), =lj13@5000= (39/0/1,
 -39.6 against -35.3), =binary_lj_fit@1000= (40/0/0, -4.91 against
 -1.02), =binary_lj_fit@5000= (40/0/0, -12.5 against -5.35),
@@ -464,22 +465,22 @@ persistent controllers keep private archives, so started all from =x0=
 they play one opening descent =R= times: over the same 40 paired seeds
 that trails the run that dropped =x0= on =binary_lj_fit= at 1000
 (14/0/26, =p= 0.019) and 5000 (12/0/28, =p= 0.0018) and on
-=rosenbrock10@1000= (17/0/23, =p= 0.0096). The comparison adds four cells
-whose seeds draw the start near the minimum: the 13-atom icosahedron with
-noise of 0.05 on each coordinate (=lj13_near=), the fit's true parameters
-within 5% (=binary_lj_fit_near=), and Rastrigin within 0.3 of its minimum
-and Rosenbrock with noise of 0.1 about its own (=rastrigin10_near=,
-=rosenbrock10_near=). On those 16 cells four batch replicas beat four
-persistent ones with replica 0 alone at =x0= on 10, among them
-=lj13@1000= (40/0/0, -25.7 against -19.0), =binary_lj_fit@5000= (36/0/4,
--12.5 against -6.02), =rosenbrock10@1000= (39/0/1, 0.86 against 6.40) and
-=rosenbrock10_near@1000= (40/0/0, 6.9e-22 against 5.3e-5), and are level
-on the other six, =rastrigin10@1000= among them (17/2/21, 14.4 against
-13.9, =p= 0.27 that they trail). Against the run that dropped =x0= they
-win 13 cells and are level on =rastrigin10@1000= (19/2/19, 14.4 against
-14.9) and on =rosenbrock10= and =rosenbrock10_near= at 5000, where both
-reach the minimum (0/40/0). The start pays most where it is good: at 1000
-the medians on the near cells are -44.3 against -8.62 on =lj13_near=,
+=rosenbrock10@1000= (17/0/23, =p= 0.0096). The comparison adds four
+problems whose seeds draw the start near the minimum: the 13-atom
+icosahedron with noise of 0.05 on each coordinate (=lj13_near=), the
+fit's true parameters within 5% (=binary_lj_fit_near=), and Rastrigin
+within 0.3 of its minimum and Rosenbrock with noise of 0.1 about its own
+(=rastrigin10_near=, =rosenbrock10_near=). On its 16 cells four batch
+replicas beat four persistent ones with replica 0 alone at =x0= on 10,
+among them =lj13@1000= (40/0/0, -25.7 against -19.0), =binary_lj_fit@5000=
+(36/0/4, -12.5 against -6.02), =rosenbrock10@1000= (39/0/1, 0.86 against
+6.40) and =rosenbrock10_near@1000= (40/0/0, 6.9e-22 against 5.3e-5), and
+are level on the other six, =rastrigin10@1000= among them (17/2/21, 14.4
+against 13.9, =p= 0.27 that they trail). Against the run that dropped =x0=
+they win 13 cells and are level on =rastrigin10@1000= (19/2/19, 14.4
+against 14.9) and on =rosenbrock10= and =rosenbrock10_near= at 5000, where
+both reach the minimum (0/40/0). The start pays most where it is good: at
+1000 the medians on the near cells are -44.3 against -8.62 on =lj13_near=,
 -9.05 against -1.20 on =binary_lj_fit_near=, 0 against 14.9 on
 =rastrigin10_near= and 6.9e-22 against 6.17 on =rosenbrock10_near=.
 
@@ -490,16 +491,17 @@ coordinates, twice the =5 n (n + 1)= from which the loop opens with a
 descent from =x0=. Measured against the former default, =max(32, 80 n)=,
 over 20 seeds with one replica from a start each seed draws in the box,
 every run spending its whole budget (W/T/L counts the new default's wins,
-and =p= is the one-sided Wilcoxon probability that it is not better):
+=p= is the one-sided Wilcoxon probability that it is not better, and the
+wall times are medians per run):
 
 | Problem | n | Budget, old / new | Opening from | Opened, old / new | Median, old | Median, new | W/T/L | p | Wall s, old / new |
 |---------+---+-------------------+--------------+-------------------+-------------+-------------+-------+---+-------------------|
 | Rosenbrock | 3 | 240 / 1000 | 60 | 20 / 20 | 2.0e-27 | 1.8e-27 | 0/20/0 | 1 | 0.002 / 0.010 |
-| Rastrigin | 3 | 240 / 1000 | 60 | 20 / 20 | 1.99 | 7.1e-15 | 18/2/0 | 9.7e-5 | 0.002 / 0.009 |
-| =binary_lj_fit= | 6 | 480 / 1000 | 210 | 20 / 20 | -1.79 | -4.83 | 20/0/0 | 9.5e-7 | 0.29 / 0.61 |
+| Rastrigin | 3 | 240 / 1000 | 60 | 20 / 20 | 1.99 | 7.1e-15 | 18/2/0 | 9.7e-5 | 0.002 / 0.008 |
+| =binary_lj_fit= | 6 | 480 / 1000 | 210 | 20 / 20 | -1.78 | -4.83 | 20/0/0 | 9.5e-7 | 0.295 / 0.613 |
 | =rosenbrock10= | 10 | 800 / 1100 | 550 | 20 / 20 | 8.7e-4 | 1.7e-18 | 14/6/0 | 6.1e-5 | 0.007 / 0.010 |
-| =rastrigin10= | 10 | 800 / 1100 | 550 | 20 / 20 | 5.97 | 3.98 | 16/2/2 | 9.1e-4 | 0.007 / 0.010 |
-| =lj13= | 39 | 3120 / 15600 | 7800 | 0 / 20 | -39.4 | -40.7 | 13/0/7 | 0.045 | 0.08 / 0.60 |
+| =rastrigin10= | 10 | 800 / 1100 | 550 | 20 / 20 | 5.97 | 3.98 | 16/2/2 | 9.1e-4 | 0.008 / 0.010 |
+| =lj13= | 39 | 3120 / 15600 | 7800 | 0 / 20 | -39.4 | -40.7 | 13/0/7 | 0.045 | 0.0845 / 0.585 |
 
 Up to 15 free coordinates both defaults open with the descent, and the
 rise buys more of the same run: a better point on every problem but the

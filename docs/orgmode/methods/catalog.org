@@ -1535,7 +1535,7 @@ same batch share its row, charged to the one with the most of its share
 left, so descents that meet pay for each point once and a gradient takes
 about =d / R= batches. =ReplicaArchive::Private= keeps one archive per
 replica, the control for what sharing is worth. Over 40 paired seeds on
-four ChemFit-shaped cells at 1000 and 5000 evaluations, four shared
+four ChemFit-shaped problems at 1000 and 5000 evaluations, four shared
 replicas beat four private ones on six of the eight cells and trail on
 none, and against one replica with the same budget they win
 =binary_lj_fit@1000=, trail on the other three cells at 1000 and are
