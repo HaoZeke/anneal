@@ -108,6 +108,23 @@ fn require_positive_budget(budget: usize) -> PyResult<()> {
     }
 }
 
+/// Gives each of `messages` as a `FutureWarning` attributed to the caller of
+/// the Python function that called the binding, as `stacklevel=2` there
+/// would. A binding calls this once it has accepted its arguments, so that a
+/// call it refuses raises without a warning first.
+fn give_future_warnings(py: Python<'_>, messages: &[String]) -> PyResult<()> {
+    let messages = messages
+        .iter()
+        .map(|message| std::ffi::CString::new(message.as_str()))
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|_| PyValueError::new_err("future_warnings must not hold a NUL character"))?;
+    let category = py.get_type::<pyo3::exceptions::PyFutureWarning>();
+    for message in &messages {
+        PyErr::warn(py, category.as_any(), message, 2)?;
+    }
+    Ok(())
+}
+
 /// Shared box parse: finite ordered bounds and an optional start.
 fn parse_box(
     low: PyReadonlyArray1<'_, f64>,
@@ -2467,8 +2484,10 @@ fn bfwt_optimize(
 ///   seed: RNG seed.
 ///   grad_fn: optional gradient callable; enables the gradient arms
 ///            and the final polish.
+///   future_warnings: messages given as a `FutureWarning` each once the
+///            arguments are accepted, before the first evaluation.
 #[pyfunction]
-#[pyo3(signature = (obj_fn, low, high, budget, seed = 0, grad_fn = None, noise_sigma = None, policy = "auto", x0 = None, *, replicas = 1, coverage_shared = true, coverage_radius = 0.05, coverage_neighbors = 0))]
+#[pyo3(signature = (obj_fn, low, high, budget, seed = 0, grad_fn = None, noise_sigma = None, policy = "auto", x0 = None, *, replicas = 1, coverage_shared = true, coverage_radius = 0.05, coverage_neighbors = 0, future_warnings = Vec::new()))]
 fn global_optimize(
     py: Python<'_>,
     obj_fn: Py<PyAny>,
@@ -2484,6 +2503,7 @@ fn global_optimize(
     coverage_shared: bool,
     coverage_radius: f64,
     coverage_neighbors: usize,
+    future_warnings: Vec<String>,
 ) -> PyResult<Py<PyDict>> {
     let low_vec = low.as_slice()?.to_vec();
     let high_vec = high.as_slice()?.to_vec();
@@ -2520,6 +2540,7 @@ fn global_optimize(
             "coverage_radius must be positive and finite",
         ));
     }
+    give_future_warnings(py, &future_warnings)?;
     let x0_view = start.as_ref().map(|x| x.view());
     if replicas > 1 {
         if let Some(x0) = x0_view
@@ -2645,12 +2666,14 @@ fn global_optimize_objective(
 /// replica still running asks for one point and the points are evaluated
 /// together: through `obj_fn.eval_batch(X)` when `obj_fn` has that method,
 /// one by one otherwise. With `archive="shared"` the replicas keep one
-/// archive and incumbent; with `"private"`, one each.
+/// archive and incumbent; with `"private"`, one each. Each of
+/// `future_warnings` is given as a `FutureWarning` once the arguments are
+/// accepted, before `x0` is evaluated.
 ///
 /// Returns the dict `global_optimize` does, plus `n_batches`, the number of
 /// batches evaluated, the start's included.
 #[pyfunction]
-#[pyo3(signature = (obj_fn, low, high, budget, x0, seed = 0, replicas = 2, archive = "shared"))]
+#[pyo3(signature = (obj_fn, low, high, budget, x0, seed = 0, replicas = 2, archive = "shared", *, future_warnings = Vec::new()))]
 fn global_optimize_replicas(
     py: Python<'_>,
     obj_fn: Py<PyAny>,
@@ -2661,6 +2684,7 @@ fn global_optimize_replicas(
     seed: u64,
     replicas: usize,
     archive: &str,
+    future_warnings: Vec<String>,
 ) -> PyResult<Py<PyDict>> {
     let low_vec = low.as_slice()?.to_vec();
     let high_vec = high.as_slice()?.to_vec();
@@ -2681,6 +2705,7 @@ fn global_optimize_replicas(
         }
     };
     let start = read_x0(Some(x0), &low_vec, &high_vec)?.expect("x0 is given");
+    give_future_warnings(py, &future_warnings)?;
     let bounds = Bounds::new(Array1::from_vec(low_vec), Array1::from_vec(high_vec), 1e-9);
     let obj = CallableObjective::new(obj_fn, bounds);
     batch_replicas(py, &obj, budget, seed, start.view(), replicas, mode)
