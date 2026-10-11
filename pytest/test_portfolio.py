@@ -1,6 +1,7 @@
 """Tests for the native Thompson-allocated portfolio driver."""
 
 import math
+import warnings
 
 import numpy as np
 import pytest
@@ -185,6 +186,47 @@ def test_x0_is_the_first_evaluation_with_a_gradient(problem, dim):
     assert len(calls) == out["n_evals"]
     assert out["n_evals"] + out["n_grads"] <= 600
     assert out["best_val"] <= fn(x0)
+
+
+def _raise(x):
+    raise ZeroDivisionError("division by zero")
+
+
+def _infinite_at_the_origin(x):
+    return math.inf if not np.any(x) else float(np.sum((x - 0.3) ** 2))
+
+
+# What the probe at the centre of a low-dimensional box cannot use: a value
+# there that is not finite, or a gradient that is not finite or is zero, as
+# it is for a function whose minimum is the centre and as a gradient that
+# raises is read.
+UNUSABLE_AT_THE_CENTRE = {
+    "infinite value": (_infinite_at_the_origin, lambda x: 2.0 * (x - 0.3)),
+    "raising": (lambda x: float(np.sum((x - 0.3) ** 2)), _raise),
+    "not finite": (lambda x: float(np.sum((x - 0.3) ** 2)), lambda x: x * np.nan),
+    "zero": (lambda x: float(np.sum(x**2)), lambda x: 2.0 * x),
+}
+
+
+@pytest.mark.parametrize("budget", [50, 100, 200, 400])
+@pytest.mark.parametrize("centre", UNUSABLE_AT_THE_CENTRE)
+def test_counts_are_the_calls_made_when_the_centre_cannot_be_used(centre, budget):
+    fn, grad = UNUSABLE_AT_THE_CENTRE[centre]
+    wrapped, calls = _recorded(fn)
+    grads = []
+
+    def grad_fn(x):
+        grads.append(1)
+        return grad(x)
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", RuntimeWarning)
+        out = anneal.global_optimize(
+            wrapped, [-2.0, -2.0], [2.0, 2.0], budget, grad_fn=grad_fn, x0=[1.0, -0.5]
+        )
+    assert out["n_evals"] == len(calls)
+    assert out["n_grads"] == len(grads)
+    assert out["n_evals"] + out["n_grads"] <= budget
 
 
 def test_values_only_rosenbrock_descends_from_x0():
