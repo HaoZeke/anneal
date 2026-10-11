@@ -109,5 +109,42 @@ def test_invalid_portfolio_peer_settings_cost_no_callbacks(settings):
     assert not calls
 
 
+@pytest.mark.parametrize("route", ["gradient", "legacy"])
+@pytest.mark.parametrize("budget", [1, 3, 801])
+def test_portfolio_peers_evaluate_x0_first_and_once(route, budget):
+    x0 = np.array([0.5, -1.25, 1.75])
+    calls = []
+    gradients = []
+
+    def value(x):
+        return float(np.sum((x - 0.375) ** 2))
+
+    def objective(x):
+        calls.append(x.copy())
+        return value(x)
+
+    def gradient(x):
+        gradients.append(x.copy())
+        return 2.0 * (x - 0.375)
+
+    keywords = {"grad_fn": gradient} if route == "gradient" else {"policy": "legacy"}
+    result = anneal.global_optimize(
+        objective, np.full(3, -2.0), np.full(3, 2.0), budget=budget, seed=5,
+        x0=x0, replicas=4, **keywords,
+    )
+    points = np.asarray(calls)
+    np.testing.assert_array_equal(points[0], x0)
+    assert np.count_nonzero(np.all(points == x0, axis=1)) == 1
+    assert np.all(np.abs(points) <= 2.0)
+    assert result["n_evals"] == len(calls)
+    assert result["n_grads"] == len(gradients)
+    assert result["charged"] == len(calls) + len(gradients) <= budget
+    assert result["best_val"] == min(value(x) for x in points) <= value(x0)
+    assert len(result["replicas"]) == min(4, budget)
+    assert result["replicas"][0]["best_val"] <= value(x0)
+    if budget == 1:
+        np.testing.assert_array_equal(result["best_pos"], x0)
+
+
 if __name__ == "__main__":
     _probe(bool(int(sys.argv[1])))

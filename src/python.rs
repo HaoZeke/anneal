@@ -2395,6 +2395,18 @@ fn global_optimize(
     }
     let x0_view = start.as_ref().map(|x| x.view());
     if replicas > 1 {
+        if let Some(x0) = x0_view
+            && grad_fn.is_none()
+            && noise_sigma.is_none()
+            && pol == crate::PortfolioPolicy::Auto
+        {
+            let archive = if coverage_shared {
+                crate::ReplicaArchive::Shared
+            } else {
+                crate::ReplicaArchive::Private
+            };
+            return batch_replicas(py, &obj, budget, seed, x0, replicas, archive);
+        }
         let config = crate::methods::portfolio::PortfolioEnsembleConfig {
             replicas,
             budget,
@@ -2408,7 +2420,7 @@ fn global_optimize(
             },
         };
         let grad = grad_fn.map(|fn_| CallablePyGradient::new(fn_, dim, &errors));
-        let out = portfolio_peers::run(py, &obj, grad.as_ref(), seed, &config);
+        let out = portfolio_peers::run(py, &obj, grad.as_ref(), seed, x0_view, &config);
         errors.finish(py)?;
         return out;
     }
@@ -2538,11 +2550,24 @@ fn global_optimize_replicas(
     let start = read_x0(Some(x0), &low_vec, &high_vec)?.expect("x0 is given");
     let bounds = Bounds::new(Array1::from_vec(low_vec), Array1::from_vec(high_vec), 1e-9);
     let obj = CallableObjective::new(obj_fn, bounds);
-    let errors = obj.errors();
+    batch_replicas(py, &obj, budget, seed, start.view(), replicas, mode)
+}
+
+/// Runs [`crate::portfolio_replicas`] with the interpreter lock released and
+/// returns the portfolio dict with `n_batches` added.
+fn batch_replicas(
+    py: Python<'_>,
+    obj: &CallableObjective,
+    budget: usize,
+    seed: u64,
+    x0: ArrayView1<f64>,
+    replicas: usize,
+    archive: crate::ReplicaArchive,
+) -> PyResult<Py<PyDict>> {
     let result = with_replica_threads(py, || {
-        crate::portfolio_replicas(&obj, budget, seed, start.view(), replicas, mode)
+        crate::portfolio_replicas(obj, budget, seed, x0, replicas, archive)
     });
-    errors.finish(py)?;
+    obj.errors().finish(py)?;
     let out = portfolio_result_to_dict(py, result.portfolio)?;
     out.bind(py).set_item("n_batches", result.batches)?;
     Ok(out)

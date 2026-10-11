@@ -69,18 +69,20 @@ fn run(shared: bool) -> (PortfolioEnsembleResult, Vec<Vec<Array1<f64>>>) {
     config.coverage.radius = 0.8;
     let start = Array1::from_elem(DIM, -0.125);
     let result = portfolio_values_ensemble_optimize(&objective, SEED, Some(start.view()), &config);
-    let traces: Vec<_> = objective
-        .traces
-        .into_inner()
-        .unwrap()
-        .into_values()
-        .collect();
+    let mut traces = objective.traces.into_inner().unwrap();
+    // The ensemble evaluates the start on the calling thread and charges it
+    // to replica zero, whose own thread then makes one call fewer.
+    let opening = traces.remove(&std::thread::current().id());
+    assert_eq!(opening, Some(vec![start.clone()]));
+    let share = config.budget / config.replicas;
+    let mut traces: Vec<_> = traces.into_values().collect();
     assert_eq!(traces.len(), config.replicas);
-    assert!(
-        traces
-            .iter()
-            .all(|trace| trace.len() == config.budget / config.replicas)
-    );
+    for trace in &mut traces {
+        if trace.len() == share - 1 {
+            trace.insert(0, start.clone());
+        }
+    }
+    assert!(traces.iter().all(|trace| trace.len() == share));
     assert_eq!(result.n_evals, config.budget);
     assert_eq!(result.n_grads, 0);
     assert_eq!(result.best_val, 1.0);
