@@ -20,11 +20,13 @@ row level but puts ``griewank10@5000`` from ``x0`` behind (0.0382 against
 -12.6 (0/17/23) and -1e4 to -8.15 against -12.8 (0/24/16), with its x1e-6
 copy and +1e2 control behind the loop too, though all five still lead the
 loop's form before the rules that changelog describes. The figures for the
-``|f|``-scaled threshold were measured before the floor. With the floor five
-of the 88 offset and x1e-6 copies trail their rounding-only control at
-p < 0.05, where that changelog counted six, and none past a correction for
-the 88 tests: +1e4 ``ackley10@5000`` is no longer among them, and +1e2
-``fit6@1000`` is -4.825 against -4.821 (16/0/24). With exact ties nine trail
-and none passes the correction either (least p 0.00089); +1e4
+``|f|``-scaled threshold were measured before the floor, and its costs on the
+offset copies are against the loop, not the rules replaced, +1e4
+``rosen10@1000`` being 5.40 against the loop's 1.2e-10 (0/0/40). With the
+floor five of the 88 offset and x1e-6 copies trail their rounding-only
+control at p < 0.05, where that changelog counted six, and none past a
+correction for the 88 tests: +1e4 ``ackley10@5000`` is no longer among them,
+and +1e2 ``fit6@1000`` is -4.825 against -4.821 (16/0/24). With exact ties
+nine trail and none passes the correction either (least p 0.00089); +1e4
 ``ackley10@5000``, one of the four this adds, trails at 10/4/26 (p 0.0017),
 its runs ending near 1.6e-10 and its control's near 2.3e-11.
