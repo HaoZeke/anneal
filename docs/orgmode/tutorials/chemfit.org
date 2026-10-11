@@ -72,8 +72,8 @@ the budget. Mirror reflection keeps every position inside =low= and =high=.
 The expression =positions.reshape((n_atoms * 3))= without assignment has no
 effect and is not needed.
 
-The feature check supports both lifecycles: =evaluate=/=step= in current
-ChemFit and =ask=/=tell= in ChemFit 3.1. An exception from =evaluate= inside
+The feature check supports both lifecycles: =evaluate= / =step= in current
+ChemFit and =ask= / =tell= in ChemFit 3.1. An exception from =evaluate= inside
 =run= is scored as the worst value and reported once as a =RuntimeWarning=.
 
 For a general nested parameter dictionary, flatten =fitter.initial_parameters=

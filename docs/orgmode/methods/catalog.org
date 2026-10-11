@@ -139,13 +139,13 @@ with variants =Atomic=, =Lean=, =LeanBurst=, =Visit=, =Twin=,
 its =kernels= method (moves.rs:93) composes the concrete arms. =ClusterMove=
 enum (moves.rs:267) with variants =AllPoints=, =SinglePoint=, =Visit=,
 =Burst= (composed surface relocations, one acceptance test per excursion),
-=GroupRelocate=/=GroupBurst=/=GroupShake= (rigid molecular analogues),
+=GroupRelocate= / =GroupBurst= / =GroupShake= (rigid molecular analogues),
 =SurfaceRelocate=, =ShellRotate=, =Symmetrise=, =Twin= (reflect across a
 dense plane), =Reseed= (regrow a local order from a template, the only
 kernel that crosses a funnel boundary in one step; see
 [[file:catalog.org::*Descriptors and identity][descriptors]] and =crate::lattice=), =Angular= (Wales-Doye worst-bound-point
 move), =Soap= (descriptor-space pullback step; see the SOAP entry below).
-=worst_bound=/=worst_bound_scaled= (moves.rs:578/589) decide when a point
+=worst_bound= / =worst_bound_scaled= (moves.rs:578/589) decide when a point
 is loose enough for the angular move. =connectivity_groups=
 (moves.rs:821) derives rigid molecular groups from the current bonding
 rather than a fixed declaration.
@@ -195,7 +195,7 @@ the 75-point figure survives in the =morphology= module notes
 
 Feeds/consumes: consumed by the hop loop's acceptance/tabu logic in
 =run_with_gradient=; the fingerprint can be =SortedPairs= (descriptor
-space) or, with the =ira= feature, =IraPassthrough=/=IraMetric= from
+space) or, with the =ira= feature, =IraPassthrough= / =IraMetric= from
 [[file:catalog.org::*IRA/SOFI canonical order and shape distance][the shape module]].
 
 ** Density-of-states, flat histogram, and energy bias
@@ -410,8 +410,8 @@ threshold rather than a Metropolis temperature, since "a temperature
 cold enough to polish cannot cross and one hot enough to cross cannot
 polish" (documented on =accept=, minima_hopping.rs:787-791).
 
-Key types and functions: =Visit= (minima_hopping.rs:530, =Same=/
-=Known=/=New=); =EscapeFeedback= (minima_hopping.rs:546); =observe=
+Key types and functions: =Visit= (minima_hopping.rs:530, =Same= /
+=Known= / =New=); =EscapeFeedback= (minima_hopping.rs:546); =observe=
 (minima_hopping.rs:681); =accept= (minima_hopping.rs:791);
 =discovery_rate= (minima_hopping.rs:809).
 
@@ -566,8 +566,8 @@ Key types and functions: =ProblemFeatures= (src/methods/regime.rs:16);
 =OptimizationRegime= enum and =select_regime=
 (src/methods/regime.rs:70/110); =preferred_arm_tail=
 (src/methods/regime.rs:135); =arm_prior_boost=
-(src/methods/regime.rs:242); =regime_exploit_prob=/=regime_exploit_width=
-(src/methods/regime.rs:260/274); =check_accept_path=/
+(src/methods/regime.rs:242); =regime_exploit_prob= / =regime_exploit_width=
+(src/methods/regime.rs:260/274); =check_accept_path= /
 =require_accept_compatible= (src/methods/regime.rs:325/309), which
 *refuse* exact Metropolis acceptance under
 =OptimizationRegime::StochasticNoise= (GJQ-style regime gate).
@@ -630,7 +630,7 @@ class.
 Key types and functions: =SoapSpec= (src/soap.rs:37); =power_spectrum=
 (src/soap.rs:118); =local_spectra_z= (src/soap.rs:140), species-aware
 per-atom spectra; =local_nu3_z= (src/soap.rs:173), SOAP plus the two
-4-body triple invariants; =jacobian_z=/=jacobian_nu3=
+4-body triple invariants; =jacobian_z= / =jacobian_nu3=
 (src/soap.rs:682/653), analytic Jacobians; =pullback_z=
 (src/soap.rs:810), the Cartesian step realizing a SOAP residual, with
 frozen-atom and mobile-mask support; =pullback_nu3= (src/soap.rs:877);
@@ -662,7 +662,7 @@ Key types and functions: =CALCULATOR = "soap_power_spectrum"=,
 (src/featomic_hop.rs:67); =atom_leftover_rms= (src/featomic_hop.rs:366);
 =soap_cloud_mean= (src/featomic_hop.rs:403), the packing label used
 cooperatively (see composition doc); =soap_morphology=
-(src/featomic_hop.rs:413); =soap_bank_distance=/=soap_bank_distance_lmin=
+(src/featomic_hop.rs:413); =soap_bank_distance= / =soap_bank_distance_lmin=
 (src/featomic_hop.rs:428/440); =leftover_profile_distance=
 (src/featomic_hop.rs:465, retained only so a regression test can name
 the failure it replaced -- must not be called by the bank);
@@ -758,7 +758,7 @@ way a descriptor-space threshold cannot.
 
 Covered under [[file:catalog.org::*Stall escapes][stall escapes]]
 (=crate::symmetrise=); listed here as an identity mechanism because
-=detect=/=detect_all= (src/symmetrise.rs:202/226) and =mirror_matrix=
+=detect= / =detect_all= (src/symmetrise.rs:202/226) and =mirror_matrix=
 (src/symmetrise.rs:264) also underlie the point-group diagnostics used
 in the archive search's near-miss push (=symmetry_polish=,
 src/methods/archive_search.rs:122-124).
@@ -807,7 +807,7 @@ catalog.
 Key types and functions: =SignatureDigest= (src/catalog/signature.rs:10);
 =EngineSignature= (src/catalog/signature.rs:14); =DescriptorSignature=
 (src/catalog/signature.rs:25); =SystemSignature=
-(src/catalog/signature.rs:38) with =canonical_bytes=/=digest=
+(src/catalog/signature.rs:38) with =canonical_bytes= / =digest=
 (src/catalog/signature.rs:67/102); =CandidateRecord=
 (src/catalog/validator.rs:16); =FreshEvaluation=
 (src/catalog/validator.rs:47); =ValidatorConfig=
@@ -821,7 +821,7 @@ gradient/energy-mismatch failures); =ValidatedCandidate=
 Constants and defaults: signature wire prefix
 =b"ANNEAL\0SYSTEM_SIGNATURE\0"=, =SIGNATURE_ENCODING_VERSION = 1=
 (src/catalog/signature.rs:6-7). LJ-specific signature and validator
-config: =crate::catalog::lj::system_signature=/=validator_config=
+config: =crate::catalog::lj::system_signature= / =validator_config=
 (src/catalog/lj.rs:163/237).
 
 Feeds/consumes: every =CatalogRequest= on the wire carries a
@@ -841,8 +841,8 @@ ever evicted here.
 Key types and functions: =BasinId= (src/catalog/census.rs:34); =CensusEntry=
 (src/catalog/census.rs:50); =CensusObservation=
 (src/catalog/census.rs:75); =BasinCensus= (src/catalog/census.rs:122),
-=observe= (census.rs:148), =singleton_count=/=unseen_mass=
-(census.rs:259/281), =is_saturated=/=saturated_at=
+=observe= (census.rs:148), =singleton_count= / =unseen_mass=
+(census.rs:259/281), =is_saturated= / =saturated_at=
 (census.rs:286/291).
 
 Constants and defaults: =PRODUCTION_MINIMUM_VISITS = 20=,
@@ -866,7 +866,7 @@ population's own half-mean pair distance, floored at =max(census_radius,
 packing as the ensemble's aggregate charged work advances.
 
 Key types and functions: =BasinCatalogError=
-(src/catalog/basin.rs:7); =AdmissionRejection=/=AdmissionOutcome=
+(src/catalog/basin.rs:7); =AdmissionRejection= / =AdmissionOutcome=
 (src/catalog/basin.rs:21/32); =ActiveBasinEntry=
 (src/catalog/basin.rs:66); =BasinCatalog= (src/catalog/basin.rs:116),
 =admit= (basin.rs:173), =incumbent= (basin.rs:296), =update_threshold=
@@ -881,7 +881,7 @@ tracks.
 
 Feeds/consumes: the coordinator-owned single source of truth consulted
 by =CatalogPolicy::decide= (relation to catalog, incumbent status) and
-returned to replicas as =PolicyState=/=CatalogSnapshot= over the wire.
+returned to replicas as =PolicyState= / =CatalogSnapshot= over the wire.
 
 ** Local-topology event catalog
 
@@ -894,9 +894,9 @@ recycled event, not a new discovery.
 
 Key types and functions: =Event= (src/catalog/event.rs:15);
 =TopologyRecord= (src/catalog/event.rs:26) with
-=search_entitlement=/=due=/=unsaturated= (event.rs:37/45/50);
-=EventCatalog= (src/catalog/event.rs:65), =observe_visit=/=observe_bag=
-(event.rs:76/81), =record_search= (event.rs:110), =known=/=due_key=/
+=search_entitlement= / =due= / =unsaturated= (event.rs:37/45/50);
+=EventCatalog= (src/catalog/event.rs:65), =observe_visit= / =observe_bag=
+(event.rs:76/81), =record_search= (event.rs:110), =known= / =due_key= /
 =keys_due= (event.rs:128/150/158). =crate::catalog::Catalog= is a
 compatibility alias for =EventCatalog= (src/catalog.rs:103).
 
@@ -918,7 +918,7 @@ trace reason. Explore-role mixing forces =Leave=. A certified attractor
 competitor) stays occupied and is taken from elsewhere.
 
 Key types and functions: =ActiveCatalogRelation= (src/catalog_policy.rs:14,
-=Empty=/=Incumbent=/=SameBasin=/=Unrelated{lower_energy_anchor}=);
+=Empty= / =Incumbent= / =SameBasin= / =Unrelated{lower_energy_anchor}=);
 =ValidationState= (catalog_policy.rs:30); =CensusEvidence=
 (catalog_policy.rs:39); =AggregateProgress= (catalog_policy.rs:104,
 =win_only= true once half the aggregate budget is spent);
@@ -934,7 +934,7 @@ visits, =LOCAL_STALL_LEAVE = 8= consecutive nondeepening slices
 
 Feeds/consumes: the decision core the cooperative example's checkpoint
 closure calls every checkpoint via =CooperativeRun::decide=
-(src/cooperative_search.rs:2254); its =Explore=/=Leave= outputs route to
+(src/cooperative_search.rs:2254); its =Explore= / =Leave= outputs route to
 =boundary_crossing= and the target-free proposal primitives below; its
 =Exploit= output routes to the active catalog's incumbent.
 
@@ -961,7 +961,7 @@ Constants and defaults: differential scale must lie in =(0, 1]=
 
 Feeds/consumes: =farthest_hole= is what a =Leave= policy decision spends
 (descriptor-space "hole" step, distinct from =crate::featomic_hop='s
-Cartesian leftover hole); =catalog_differential=/=attraction_differential=
+Cartesian leftover hole); =catalog_differential= / =attraction_differential=
 feed =Explore=; both ultimately produce a descriptor increment that
 =pullback_increment= turns into a Cartesian proposal.
 
@@ -1029,7 +1029,7 @@ Key types and functions: =TransitionOutcome=
 =observe= (transition_graph.rs:108), =posterior_matrix=
 (transition_graph.rs:177), =uncertainty= (transition_graph.rs:204),
 =attraction_regions= (transition_graph.rs:219, diffusion + complete
-linkage); =matrix_power=/=complete_linkage_regions=
+linkage); =matrix_power= / =complete_linkage_regions=
 (transition_graph.rs:275/292, private).
 
 Feeds/consumes: region identity here is what =region_assignment.rs=
@@ -1046,8 +1046,8 @@ runs: three questions -- am I the occupant of the deepest published
 packing, on another packing that may be worth adopting, or on a packing
 exhausted for me -- answered from catalog rank and a stall counter.
 
-Key types and functions: =Role= (src/swarm.rs:21, =Occupant=/=Other=/
-=Leave=); =LedgerHalf= (src/swarm.rs:32, =Open=/=Closed=, first vs.
+Key types and functions: =Role= (src/swarm.rs:21, =Occupant= / =Other= /
+=Leave=); =LedgerHalf= (src/swarm.rs:32, =Open= / =Closed=, first vs.
 second half of the charged budget); =Decision= (src/swarm.rs:41);
 =ledger_half= (src/swarm.rs:55); =catalog_role= (src/swarm.rs:64);
 =policy= (src/swarm.rs:85).
@@ -1081,13 +1081,13 @@ Key types and functions: =BasinEvidence= (src/methods/feynman_kac.rs:69);
 fractional ranks via =ascending_fractional_ranks=, feynman_kac.rs:897);
 =SelectionCoefficients= (feynman_kac.rs:241); =GenealogyDiagnostics=
 (feynman_kac.rs:286, Kish effective sample size, unique parents, max
-family size, offspring variance); =ReconfigurationPlan=/
+family size, offspring variance); =ReconfigurationPlan= /
 =PopulationEpochPlan= (feynman_kac.rs:299/307); =population_family_position=
 (feynman_kac.rs:345); =population_rejuvenation_draw=
 (feynman_kac.rs:383, deterministic per-destination-per-family-ordinal
 seed so cloned offspring never request the same catalog perturbation);
 =SynchronousPopulation= (feynman_kac.rs:446), the coordinator-owned
-barrier: =submit=/=abstain=/=complete_open_epoch=
+barrier: =submit= / =abstain= / =complete_open_epoch=
 (feynman_kac.rs:748/713/807); =reconfiguration_plan=
 (feynman_kac.rs:938, builds the bounded log-weight potential, applies
 systematic resampling via =systematic_parents=, feynman_kac.rs:992, and
@@ -1126,11 +1126,11 @@ worker to return =CheckpointAction::Retire { reason: "halving" }=.
 and launches one worker per pending spawn.
 
 Key types and functions: =RosterReply= (src/catalog_rpc/mod.rs);
-=CatalogOperation::Attach=/=Detach=/=Tick=/=Scale=; =SuccessiveHalving=
+=CatalogOperation::Attach= / =Detach= / =Tick= / =Scale=; =SuccessiveHalving=
 (src/scaling.rs) with =observe= and =set_target=; =ServerConfig::with_quorum=
 and =with_halving=; =CatalogServer::with_clock=; =CooperativeLedger::attach=
 (src/cooperative_search/ledger.rs). Schema fields:
-=CoordinatorStatus.rosterVersion=/=liveReplicas=/=ticks=/=spawnRequested=,
+=CoordinatorStatus.rosterVersion= / =liveReplicas= / =ticks= / =spawnRequested=,
 =PolicyStateReply.retired=, =AcceptedReply.payload.roster=.
 
 Constants and defaults: Tick identity is replica =u32::MAX= with its
@@ -1166,13 +1166,13 @@ closed, roster changed, retire, spawn, tick) to every attached
 subscriber.
 
 Key types and functions: =PROTOCOL_VERSION= (src/catalog_rpc/mod.rs);
-=CatalogIdentity=; =CatalogCandidate=; =CatalogOperation=/=CatalogRequest=;
+=CatalogIdentity=; =CatalogCandidate=; =CatalogOperation= / =CatalogRequest=;
 =ProtocolRejection=; =CatalogSnapshot=; =CoordinatorStatus=;
-=AcceptedReply=/=CatalogReply=; =RosterReply=; =CoordinatorEvent=.
+=AcceptedReply= / =CatalogReply=; =RosterReply=; =CoordinatorEvent=.
 Server: =ServerConfig=; =CatalogServer::start=, which runs one
 =RpcSystem= accept loop on a dedicated =LocalSet= thread. Client:
 =CatalogClient::connect= keeps its synchronous signature and posts
-onto that executor; sequenced =attach=/=detach=/=tick=/=scale=,
+onto that executor; sequenced =attach= / =detach= / =tick= / =scale=,
 =observe=, and =events= are the RPC surface drivers use besides the
 existing catalog methods.
 Schema: schema/Catalog.capnp defines the request/reply structs 1:1
@@ -1206,22 +1206,22 @@ eighteen stable event classifications: =LocalWork=, =Admission=,
 =RpcFallback=, =SharingDisabled=, =Slice=, =Transition=,
 =TransitionExecution=, =RideClaim=, =RideReport=, =Retire=);
 =TraceEvent= (cooperative_search.rs:103);
-=TransitionTrace=/=PolicyTrace=/=SliceTrace=/=PopulationTrace=
+=TransitionTrace= / =PolicyTrace= / =SliceTrace= / =PopulationTrace=
 (cooperative_search.rs:237/254/368/403); =RunManifest=
 (cooperative_search.rs:420); =CooperativeRunError=
 (cooperative_search.rs:613); =CooperativeRun=
-(cooperative_search.rs:764) with =new=/=attach_client=
+(cooperative_search.rs:764) with =new= / =attach_client=
 (cooperative_search.rs:774/835), =record_work=
 (cooperative_search.rs:938), =offer_candidate=
 (cooperative_search.rs:1026),
-=record_current=/=record_transition=/=record_executed_transition=
+=record_current= / =record_transition= / =record_executed_transition=
 (cooperative_search.rs:1093/1120/1218), =synchronize=
-(cooperative_search.rs:1243), =policy_input=/
+(cooperative_search.rs:1243), =policy_input= /
 =registered_policy_input= (cooperative_search.rs:1278/1497),
 =sample_candidate= (cooperative_search.rs:1523), =descriptor_hole=
 (cooperative_search.rs:1873), =boundary_crossing=
 (cooperative_search.rs:1981),
-=submit_population=/=join_population=/=abstain_population=/
+=submit_population= / =join_population= / =abstain_population= /
 =poll_population= (cooperative_search.rs:2140/2161/2218/2236),
 =decide= (cooperative_search.rs:2254), =record_slice=
 (cooperative_search.rs:2281), =json_lines=
@@ -1286,7 +1286,7 @@ observed fraction of launches from region \(j\) that reached \(j+1\)
 
 Key types and functions: =BridgeString= (src/methods/neus_bridge.rs:49,
 image chain with fixed endpoints); =chord= (neus_bridge.rs:56, initial
-equal-spacing construction); =assign=/=chord_distance=
+equal-spacing construction); =assign= / =chord_distance=
 (neus_bridge.rs:86/104, Voronoi region membership and tube-distance
 test); =update= (neus_bridge.rs:119, drift toward walker means, three-
 point smoothing, equal-arc-length reparametrization, endpoints
@@ -1317,7 +1317,7 @@ boundary -- is the ensemble confined, where is the seam, which pair of
 basins deserves a bridge, is local work still worth its price
 (=landscape_graph= module notes, landscape_graph.rs:8-11). Same
 Fiedler-vector mathematics as =crate::spectral=
-(=TransitionGraph=/=DiffusionDirection=), but a different use:
+(=TransitionGraph= / =DiffusionDirection=), but a different use:
 =spectral= drives a chain-side bias collective variable from one
 replica's own visited landscape, while =landscape_graph= is the
 coordinator's server-side referee over the whole ensemble's shared
@@ -1341,10 +1341,10 @@ price at infinity by construction, since reachability is separated by
 a frontier search before the linear solve.
 
 Key types and functions: =LandscapeGraph= (landscape_graph.rs:58);
-=observe_basin=/=observe_crossing= (landscape_graph.rs:81/98,
+=observe_basin= / =observe_crossing= (landscape_graph.rs:81/98,
 undirected accumulation: confinement is a property of the seam, not
 the direction it was crossed in); =SpectralSplit=
-(landscape_graph.rs:40, =algebraic_connectivity=, =left=/=right=
+(landscape_graph.rs:40, =algebraic_connectivity=, =left= / =right=
 basin sets, =conductance=, =representatives= -- the highest-degree
 anchor on each side).
 
@@ -1660,7 +1660,7 @@ What it is: the classical-SA replica-exchange mechanism, a geometric
 temperature ladder with periodic swap attempts satisfying detailed
 balance by construction, generic over the =Exchange= trait's swap rule
 (src/exchange.rs:23). Distinct from cluster hopping's own
-=replicas=/=swap_period= ladder
+=replicas= / =swap_period= ladder
 (src/methods/cluster_hopping/config.rs:249-291), which drives the
 cluster-specific chain rather than the typed-algebra =Sampler=
 (src/sampler.rs:30). There
@@ -1678,7 +1678,7 @@ Key types and functions: =Exchange<T>= trait (src/exchange.rs:23);
 =MetropolisExchange= (exchange.rs:38, canonical swap rule,
 =min(1, exp((1/T_i - 1/T_j)(F_i - F_j)))=); =TsallisExchange<T>=
 (exchange.rs:66, q-deformed GSA-matching swap rule, reduces to
-Metropolis at =q=1=); =PtChainState=/=PtResult=
+Metropolis at =q=1=); =PtChainState= / =PtResult=
 (src/methods/parallel_tempering.rs:21/30); =geometric_ladder=
 (parallel_tempering.rs:93); =ParallelTemperingSampler=
 (parallel_tempering.rs:108).
@@ -1714,7 +1714,7 @@ is empty at the end of every relaxation (line-search failure at
 built never actually engages; kept as a correct L-BFGS regardless.
 
 Key types and functions: =WarmLbfgs= (src/methods/warm_lbfgs.rs:54),
-=forget=/=len=/=is_empty= (warm_lbfgs.rs:96/101/106), =minimize=/
+=forget= / =len= / =is_empty= (warm_lbfgs.rs:96/101/106), =minimize= /
 =minimize_watched= (warm_lbfgs.rs:125/167).
 
 Feeds/consumes: the =Relax= closure most examples and =csa_cluster=
@@ -1735,7 +1735,7 @@ bank.rs:66-76).
 
 Governing rule: for a candidate at distance \(d\) from its nearest bank
 member under threshold \(D_{cut}\): if \(d \leq D_{cut}\), keep the
-lower-energy of the two (=Improved=/=Duplicate=); otherwise the
+lower-energy of the two (=Improved= / =Duplicate=); otherwise the
 candidate is novel and either fills a free slot (=Added=), displaces
 the current worst member if it is better (=Displaced=), or is rejected
 (=Rejected=). \(D_{cut}\) is supplied externally by
@@ -1744,7 +1744,7 @@ and narrows over the run.
 
 Key types and functions: =Bank= (src/methods/bank.rs:64); =Admission=
 (bank.rs:39, the five outcomes above); =offer= (bank.rs:149, the
-replacement rule); =seed=/=inject= (bank.rs:207/318, unconditional
+replacement rule); =seed= / =inject= (bank.rs:207/318, unconditional
 adds that also write the frozen first bank); =next_start=
 (bank.rs:250, least-used-first selection so starts spread over the
 bank rather than concentrating on the incumbent); =grow=
@@ -1846,7 +1846,7 @@ threshold (=VolumeCurve=, nested.rs:300-316).
 Key types and functions: =NestedConfig= (src/methods/nested.rs:69,
 =live=32=, =walk=8=); =NestedOutcome= (nested.rs:47);
 =nested_search= (nested.rs:107); =VolumeCurve= (nested.rs:316,
-=record=/=log_volume=/=slope=/=mass_below=, the volume-energy
+=record= / =log_volume= / =slope= / =mass_below=, the volume-energy
 posterior).
 
 Feeds/consumes: consumes =crate::methods::cluster_hopping::{ClusterMove,
@@ -1870,8 +1870,8 @@ nine variants: =LocalProposal=, =RemoteProposal=,
 =DescriptorEvaluation= -- all uncharged, no potential call --
 =AcceptedQuench=, =RejectedQuench=, =FreshValidation=, =Retry=,
 =AuxiliaryEvaluation= -- all charged -- and =RpcFallback=, uncharged);
-=wire_code=/=from_wire_code= (ledger.rs:34/51); =ReplicaLedgerEvent=
-(ledger.rs:93); =LedgerUpdate= (ledger.rs:108, =Recorded=/=Duplicate=);
+=wire_code= / =from_wire_code= (ledger.rs:34/51); =ReplicaLedgerEvent=
+(ledger.rs:93); =LedgerUpdate= (ledger.rs:108, =Recorded= / =Duplicate=);
 =LedgerError= (ledger.rs:117, nine failure modes including
 =ConflictingReplay=, =BudgetExceeded=, =CounterRegression=);
 =FirstEncounter= (ledger.rs:199, counter vector frozen at first
@@ -1891,7 +1891,7 @@ Bayes-factor comparisons).
 ** Basin census Good-Turing accounting
 
 Covered under [[file:catalog.org::*Basin census][basin census]] above;
-=singleton_count=/=unseen_mass=/=is_saturated= are the accounting
+=singleton_count= / =unseen_mass= / =is_saturated= are the accounting
 surface a policy or an operator consults to answer "has this ensemble
 seen most of what it will see."
 
@@ -2088,7 +2088,7 @@ bfwt.rs:65); \(T_{lo} = \max(\hat b, 0)/\ln(\max(B_{rem},0)+e)\)
 (=t_lo=, bfwt.rs:72); window nonempty iff
 \(\hat b\, d < 2\,\mathrm{gap}\,\ln(B_{rem}+e)\) (=window_nonempty=,
 bfwt.rs:79); mode selection and clamp (=budget_feasible_temp=,
-bfwt.rs:87-109, returns one of =Design=/=EscapeFloor=/=DescentCap=/
+bfwt.rs:87-109, returns one of =Design= / =EscapeFloor= / =DescentCap= /
 =EscapeForced=).
 
 Key types and functions: =BfwtMode= (bfwt.rs:33); =BfwtResult=
@@ -2148,7 +2148,7 @@ inverse temperature; elites are refined by a dual-style visit to
 L-BFGS polish or derivative-free local search (=dmc_population= module
 notes, dmc_population.rs:1-16).
 
-Key types and functions: =Walker=/=Population=
+Key types and functions: =Walker= / =Population=
 (src/methods/dmc_population.rs:93/102); =dmc_population_optimize=,
 =run_dmc_population= (re-exported src/methods/mod.rs:97-101);
 =population_control= (D8 entropy-calibrated resampling);
@@ -2161,7 +2161,7 @@ Constants and defaults: =DEFAULT_TARGET_WALKERS = 24=,
 (dmc_population.rs:29-33).
 
 Feeds/consumes: consumes =local_polish::projected_gradient_polish= for
-the elite refine step and =accept::TsallisAccept=/
+the elite refine step and =accept::TsallisAccept= /
 =movekernel::TsallisVisit=; consumed by =portfolio= as the =DmcPop=
 arm and exposed through =src/python.rs= as
 =anneal.dmc_population_optimize=.
@@ -2313,7 +2313,7 @@ SA practice converges on the worst-mixing coordinate
 (=GelmanRubin::compute=, src/methods/mcmc_sa.rs:45).
 
 Key types and functions: =MultiChainState= (mcmc_sa.rs:24);
-=GelmanRubin= (mcmc_sa.rs:40); =MultiChainSampler=/=MultiChainResult=
+=GelmanRubin= (mcmc_sa.rs:40); =MultiChainSampler= / =MultiChainResult=
 (re-exported src/methods/mod.rs:115).
 
 Feeds/consumes: generic over any =Sampler<f64>= impl; re-exported at
