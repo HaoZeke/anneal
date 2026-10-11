@@ -80,10 +80,12 @@ the box faces, and an optional =x0= supplies the first point.
 
 Flatten only at the optimizer boundary, and pass the initial positions as
 =x0=. =fit_anneal=, =fit_chemfit=, =run_benchmark= and =run_fitter= do that
-for a fitter. They drive =evaluate= / =step= on current ChemFit and =ask= /
-=tell= on ChemFit 3.1, and the first exception the fitter raises stops the
-fit and reaches the caller without =finish=. A positions-only objective is
-the same loop as their Boltzmann driver:
+for a fitter. They drive =ask= / =tell= on ChemFit 3.1.1, the first release
+that has them, and =evaluate= / =step= on ChemFit's source from commit
+c57d6f5, which no release has yet; ChemFit 3.1.0 has neither pair. The
+first exception the fitter raises stops the fit and reaches the caller
+without =finish=. A positions-only objective is the same loop as their
+Boltzmann driver:
 
 #+begin_src python
 import numpy as np
@@ -99,7 +101,7 @@ def fit_positions(fitter, initial_positions, budget):
     high = np.full(initial.size, 3.0)
     if hasattr(fitter, "evaluate"):
         evaluate, advance = fitter.evaluate, fitter.step
-    else:  # ChemFit 3.1
+    else:  # ChemFit 3.1.1
         evaluate, advance = fitter.ask, fitter.tell
 
     def objective(flat_positions):

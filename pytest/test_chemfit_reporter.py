@@ -2,9 +2,9 @@
 
 Thirteen Lennard-Jones atoms with their positions flattened into the
 optimizer vector, a (-3, 3) box, a budget of 2000 and the default portfolio.
-Current ChemFit is driven through ``evaluate`` / ``step`` and ChemFit 3.1
-through ``ask`` / ``tell``; the test runs against whichever is installed and
-is skipped when ChemFit is not.
+ChemFit 3.1.1 is driven through ``ask`` / ``tell`` and ChemFit's source from
+commit c57d6f5 through ``evaluate`` / ``step``; the test runs against
+whichever is installed and is skipped when ChemFit is not.
 """
 
 import numpy as np

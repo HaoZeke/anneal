@@ -2,10 +2,12 @@
 
 ChemFit's ``Fitter`` runs a session that the caller drives: ``init``, one
 evaluation per candidate, one notice per optimizer step, then ``finish``.
-Current ChemFit names the middle two ``evaluate`` and ``step``; ChemFit 3.1
-named them ``ask`` and ``tell``. Every bridge here drives ``evaluate`` and
-``step`` when the fitter has both, ``ask`` and ``tell`` otherwise, and refuses
-a fitter with neither pair before calling ``init``; only :func:`run_benchmark`
+ChemFit 3.1.1, the first release with this session, names the middle two
+``ask`` and ``tell``; ChemFit's source names them ``evaluate`` and ``step``
+from commit c57d6f5, which no release has yet, and ChemFit 3.1.0 and earlier
+have neither pair. Every bridge here drives ``evaluate`` and ``step`` when
+the fitter has both, ``ask`` and ``tell`` otherwise, and refuses a fitter
+with neither pair before calling ``init``; only :func:`run_benchmark`
 still drives ``evaluate`` or ``ask`` without its partner, as anneal 0.10.0
 did, with a FutureWarning, and sends the step notices to the other pair's
 ``tell`` or ``step`` when the fitter has one. ``finish`` receives the best
@@ -354,8 +356,9 @@ def _protocol(fitter: Any, *, without_step: str | None = None):
     else:
         if without_step is None or half is None:
             raise TypeError(
-                "the fitter needs evaluate and step (ChemFit) or ask and tell "
-                f"(ChemFit 3.1); {name} has neither pair"
+                "the fitter needs ask and tell, which ChemFit first released in "
+                "3.1.1, or evaluate and step, which ChemFit's source has from "
+                f"commit c57d6f5 and no release has yet; {name} has neither pair"
             )
         evaluate_name, step_name, evaluate = half
         step = None
@@ -1237,7 +1240,9 @@ def fit_anneal(
     Args:
       fitter: ChemFit ``Fitter``, duck-typed: ``initial_parameters``,
         ``bounds``, ``init``, ``finish``, and either ``evaluate`` and
-        ``step`` (current ChemFit) or ``ask`` and ``tell`` (ChemFit 3.1).
+        ``step`` (ChemFit's source from commit c57d6f5, in no release yet)
+        or ``ask`` and ``tell`` (ChemFit 3.1.1, the first release with
+        them).
         Each evaluation, or each batch when ``batch_size`` is above one,
         is followed by one ``step`` (or ``tell``).
       budget: total objective-evaluation budget, the start included; it is
@@ -1569,12 +1574,13 @@ def fit_chemfit(
         fitter: a :class:`chemfit.fitter.Fitter` with ``initial_parameters`` and
             optional ``bounds``. Only the session protocol is used, so
             gradient-free drivers never need forces: ``init``, ``finish``,
-            and ``evaluate`` / ``step`` (current ChemFit) or ``ask`` /
-            ``tell`` (ChemFit 3.1). ``initial_parameters`` given as
-            ``(key, value)`` pairs, such as a list, ``d.items()``, a zip or
-            a generator, which ChemFit 3.1 keeps, is read once as the dict
-            they make, as in anneal 0.10.0, with a FutureWarning; it will
-            raise in a future release.
+            and ``evaluate`` / ``step`` (ChemFit's source from commit
+            c57d6f5, in no release yet) or ``ask`` / ``tell`` (ChemFit
+            3.1.1, the first release with them). ``initial_parameters``
+            given as ``(key, value)`` pairs, such as a list, ``d.items()``,
+            a zip or a generator, which ChemFit 3.1 keeps, is read once as
+            the dict they make, as in anneal 0.10.0, with a FutureWarning;
+            it will raise in a future release.
         budget: total objective evaluations, the start included; it is
             never exceeded.
         method: ``"portfolio"`` (default; Thompson-allocated SOTA including

@@ -2,9 +2,10 @@
 
 This is the corrected form of the ``run_anneal(benchmark_context)`` snippet
 from the ChemFit review thread. Its ``fitter.evaluate`` / ``fitter.step``
-loop is current ChemFit's protocol; ChemFit 3.1 named the pair ``ask`` /
-``tell``, and :func:`anneal.chemfit.fit_anneal` drives whichever pair the
-fitter has. Two things were wrong there:
+loop is the protocol of ChemFit's source from commit c57d6f5, which no
+release has yet; ChemFit 3.1.1, the first release with a session, names the
+pair ``ask`` / ``tell``, and :func:`anneal.chemfit.fit_anneal` drives
+whichever pair the fitter has. Two things were wrong there:
 
 1. ``anneal.run`` used to drive an unconstrained variant, so proposals left
    ``[low, high]``. It now mirror-reflects every proposal into the box, and
@@ -32,7 +33,7 @@ class StubFitter:
     """Minimal duck-typed stand-in for ``chemfit.Fitter``.
 
     Harmonic wells pull each atom toward a hidden target; the loss is the
-    squared deviation. Implements ChemFit 3.1's user-driven protocol
+    squared deviation. Implements ChemFit 3.1.1's user-driven protocol
     (``init``/``ask``/``tell``/``finish``) with ChemFit's best-seen
     tracking semantics; ``fit_anneal`` drives ``evaluate``/``step`` the
     same way.

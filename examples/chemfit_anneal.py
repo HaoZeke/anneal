@@ -1,10 +1,12 @@
 """Gradient-free ChemFit fitting with anneal (corrected review-response driver).
 
 The snippet in the bug report drove ``fitter.evaluate`` / ``fitter.step``,
-which is current ChemFit's session protocol; ChemFit 3.1 named the pair
-``ask`` / ``tell``. :func:`anneal.chemfit.fit_chemfit` drives whichever pair
-the fitter has: ``init()``, one evaluation per candidate, step notices, then
-``finish(best)``. The first exception the fitter raises reaches the caller.
+the session protocol of ChemFit's source from commit c57d6f5, which no
+release has yet; ChemFit 3.1.1, the first release with a session, names the
+pair ``ask`` / ``tell``. :func:`anneal.chemfit.fit_chemfit` drives
+whichever pair the fitter has: ``init()``, one evaluation per candidate,
+step notices, then ``finish(best)``. The first exception the fitter raises
+reaches the caller.
 The snippet had three defects:
 
 1. ``positions.reshape(...)`` without assignment is a no-op, so the
