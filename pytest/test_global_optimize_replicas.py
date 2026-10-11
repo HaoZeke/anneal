@@ -1,0 +1,84 @@
+"""Batch replicas of the values-only portfolio through the native binding."""
+
+import numpy as np
+import pytest
+
+anneal = pytest.importorskip("anneal")
+from anneal._core import global_optimize_replicas  # noqa: E402
+
+LOW = np.full(3, -1.0)
+HIGH = np.full(3, 1.0)
+X0 = np.array([0.9, -0.5, 0.1])
+
+
+class Counted:
+    """A shifted sphere that records each point and, if batched, each batch."""
+
+    def __init__(self, batched):
+        self.points = []
+        self.batches = []
+        if batched:
+            self.eval_batch = self._eval_batch
+
+    def __call__(self, x):
+        self.points.append(np.array(x, dtype=float, copy=True))
+        return float(np.sum((np.asarray(x) - 0.3) ** 2))
+
+    def _eval_batch(self, rows):
+        rows = np.asarray(rows, dtype=float)
+        self.batches.append(rows.shape[0])
+        return [self(row) for row in rows]
+
+
+@pytest.mark.parametrize("archive", ["shared", "private"])
+def test_replicas_evaluate_the_start_first_then_batches_of_their_count(archive):
+    fun = Counted(batched=True)
+    out = global_optimize_replicas(fun, LOW, HIGH, 200, X0, 3, 4, archive)
+    np.testing.assert_array_equal(fun.points[0], X0)
+    assert fun.batches[0] == 1
+    assert max(fun.batches) <= 4
+    assert out["n_batches"] == len(fun.batches)
+    assert out["n_evals"] == len(fun.points) <= 200
+    assert out["n_grads"] == 0
+    points = np.asarray(fun.points)
+    assert np.all(points >= LOW) and np.all(points <= HIGH)
+    values = [fun(p) for p in points]
+    assert out["best_val"] == min(values)
+    np.testing.assert_array_equal(out["best_pos"], points[int(np.argmin(values))])
+
+
+def test_one_replica_repeats_global_optimize_from_x0():
+    solo, replica = Counted(batched=False), Counted(batched=False)
+    expected = anneal.global_optimize(solo, LOW, HIGH, 150, seed=5, x0=X0)
+    out = global_optimize_replicas(replica, LOW, HIGH, 150, X0, 5, 1, "shared")
+    np.testing.assert_array_equal(np.asarray(replica.points), np.asarray(solo.points))
+    assert out["best_val"] == expected["best_val"]
+    assert out["n_evals"] == expected["n_evals"]
+    assert out["n_batches"] == len(replica.points)
+
+
+def test_batched_and_unbatched_callables_see_the_same_points():
+    batched, plain = Counted(batched=True), Counted(batched=False)
+    first = global_optimize_replicas(batched, LOW, HIGH, 120, X0, 9, 3, "shared")
+    second = global_optimize_replicas(plain, LOW, HIGH, 120, X0, 9, 3, "shared")
+    np.testing.assert_array_equal(np.asarray(batched.points), np.asarray(plain.points))
+    assert first["best_val"] == second["best_val"]
+    assert first["n_batches"] == second["n_batches"] == len(batched.batches)
+
+
+@pytest.mark.parametrize(
+    "budget,x0,replicas,archive",
+    [
+        (0, X0, 2, "shared"),
+        (50, X0, 0, "shared"),
+        (50, X0, 2, "none"),
+        (50, np.array([1.5, 0.0, 0.0]), 2, "shared"),
+        (50, np.array([np.nan, 0.0, 0.0]), 2, "shared"),
+        (50, np.zeros(2), 2, "shared"),
+    ],
+)
+def test_invalid_settings_raise_before_any_call(budget, x0, replicas, archive):
+    fun = Counted(batched=True)
+    with pytest.raises(ValueError):
+        global_optimize_replicas(fun, LOW, HIGH, budget, x0, 0, replicas, archive)
+    assert fun.points == []

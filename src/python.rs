@@ -2493,6 +2493,61 @@ fn global_optimize_objective(
     portfolio_result_to_dict(py, result)
 }
 
+/// Runs batch replicas of the values-only portfolio from `x0`.
+///
+/// `replicas` instances of the values-only loop share one `budget` and
+/// start from `x0`, which is evaluated first, once. At each step every
+/// replica still running asks for one point and the points are evaluated
+/// together: through `obj_fn.eval_batch(X)` when `obj_fn` has that method,
+/// one by one otherwise. With `archive="shared"` the replicas keep one
+/// archive and incumbent; with `"private"`, one each.
+///
+/// Returns the dict `global_optimize` does, plus `n_batches`, the number of
+/// batches evaluated, the start's included.
+#[pyfunction]
+#[pyo3(signature = (obj_fn, low, high, budget, x0, seed = 0, replicas = 2, archive = "shared"))]
+fn global_optimize_replicas(
+    py: Python<'_>,
+    obj_fn: Py<PyAny>,
+    low: PyReadonlyArray1<'_, f64>,
+    high: PyReadonlyArray1<'_, f64>,
+    budget: usize,
+    x0: PyReadonlyArray1<'_, f64>,
+    seed: u64,
+    replicas: usize,
+    archive: &str,
+) -> PyResult<Py<PyDict>> {
+    let low_vec = low.as_slice()?.to_vec();
+    let high_vec = high.as_slice()?.to_vec();
+    validate_box_bounds(&low_vec, &high_vec)?;
+    if budget == 0 {
+        return Err(PyValueError::new_err("budget must be positive"));
+    }
+    if replicas == 0 {
+        return Err(PyValueError::new_err("replicas must be positive"));
+    }
+    let mode = match archive {
+        "shared" => crate::ReplicaArchive::Shared,
+        "private" => crate::ReplicaArchive::Private,
+        other => {
+            return Err(PyValueError::new_err(format!(
+                "archive must be 'shared' or 'private', got {other:?}"
+            )));
+        }
+    };
+    let start = read_x0(Some(x0), &low_vec, &high_vec)?.expect("x0 is given");
+    let bounds = Bounds::new(Array1::from_vec(low_vec), Array1::from_vec(high_vec), 1e-9);
+    let obj = CallableObjective::new(obj_fn, bounds);
+    let errors = obj.errors();
+    let result = with_replica_threads(py, || {
+        crate::portfolio_replicas(&obj, budget, seed, start.view(), replicas, mode)
+    });
+    errors.finish(py)?;
+    let out = portfolio_result_to_dict(py, result.portfolio)?;
+    out.bind(py).set_item("n_batches", result.batches)?;
+    Ok(out)
+}
+
 // ---------------------------------------------------------------------------
 // Preset enum + dispatch.
 // ---------------------------------------------------------------------------
@@ -3436,5 +3491,6 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(bfwt_optimize, m)?)?;
     m.add_function(wrap_pyfunction!(global_optimize, m)?)?;
     m.add_function(wrap_pyfunction!(global_optimize_objective, m)?)?;
+    m.add_function(wrap_pyfunction!(global_optimize_replicas, m)?)?;
     Ok(())
 }
