@@ -3,6 +3,7 @@
 use std::collections::BTreeMap;
 
 use eindir_core::{Gradient, Objective};
+use ndarray::ArrayView1;
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 
@@ -13,6 +14,7 @@ pub(super) fn run<O, G>(
     obj: &O,
     grad: Option<&G>,
     seed: u64,
+    x0: Option<ArrayView1<f64>>,
     config: &PortfolioEnsembleConfig,
 ) -> PyResult<Py<PyDict>>
 where
@@ -20,7 +22,7 @@ where
     G: Gradient<f64>,
 {
     let result = super::with_replica_threads(py, || {
-        portfolio_ensemble_optimize(obj, grad, seed, None, config)
+        portfolio_ensemble_optimize(obj, grad, seed, x0, config)
     });
     let mut totals = BTreeMap::new();
     for replica in &result.replicas {

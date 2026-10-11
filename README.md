@@ -131,7 +131,8 @@ one-portfolio/multiple-hop convenience policy. Peer samples move nearby global
 proposals in normalized box coordinates, without a Jacobian, force callback,
 minimum certificate, or replacement of the raw objective. The
 [portfolio interaction contract](docs/orgmode/explanation/communication.org)
-names the proposal paths, budget rules, and transport limits.
+names the proposal paths, budget rules, and transport limits. From `x0` with
+values only, `global_optimize` runs the batch replicas of `minimize` instead.
 
 `coverage_neighbors=1` restricts generic coverage to adjacent chains on a ring;
 `0` is all-to-all. Rust exposes the same rule as `BoxCoverageConfig.neighbors`.

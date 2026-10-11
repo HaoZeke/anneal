@@ -737,6 +737,15 @@ impl BudgetLedger {
         }
     }
 
+    /// Charges and records, as this ledger's own, an evaluation of a point
+    /// inside `bounds` made before its run began, as
+    /// [`BudgetedObjective`]'s `eval` would have had it made the call.
+    fn charge_evaluated(&self, x: ArrayView1<f64>, value: f64, bounds: &Bounds<f64>) {
+        if self.charge_probe(1, 0) {
+            self.record(x, value, bounds);
+        }
+    }
+
     fn incumbent(&self, bounds: &Bounds<f64>) -> Array1<f64> {
         self.archive.incumbent(bounds)
     }
@@ -4837,7 +4846,56 @@ where
     O: Objective<f64>,
     G: Gradient<f64>,
 {
-    portfolio_optimize_interacting(obj, grad, budget, seed, noise_sigma, policy, x0, None)
+    let start = x0.map_or(Start::None, Start::Point);
+    portfolio_optimize_interacting(obj, grad, budget, seed, noise_sigma, policy, start, None)
+}
+
+/// Where a portfolio run starts.
+#[derive(Clone, Copy)]
+enum Start<'a> {
+    /// With no start point.
+    None,
+    /// From a point the run evaluates first.
+    Point(ArrayView1<'a, f64>),
+    /// From a point already evaluated, with this value, before the run
+    /// began; the run charges it as its first evaluation without calling
+    /// the objective there.
+    Evaluated(ArrayView1<'a, f64>, f64),
+}
+
+/// `x0` clipped onto `bounds`, once its length and values are checked.
+fn checked_start(x0: ArrayView1<f64>, bounds: &Bounds<f64>) -> Array1<f64> {
+    assert_eq!(
+        x0.len(),
+        bounds.dims,
+        "x0 must have the objective's dimension"
+    );
+    assert!(
+        x0.iter().all(|value| value.is_finite()),
+        "x0 must be finite"
+    );
+    bounds.clip(x0)
+}
+
+/// Panics unless a portfolio can run on `bounds` with `noise_sigma`.
+fn assert_runnable(noise_sigma: Option<f64>, bounds: &Bounds<f64>) {
+    if let Some(sigma) = noise_sigma {
+        assert!(
+            sigma > 0.0 && sigma.is_finite(),
+            "noise_sigma must be positive and finite"
+        );
+    }
+    assert!(bounds.dims > 0, "objective dimension must be positive");
+    for i in 0..bounds.dims {
+        assert!(
+            bounds.low[i].is_finite() && bounds.high[i].is_finite(),
+            "bounds must be finite at dimension {i}"
+        );
+        assert!(
+            bounds.low[i] < bounds.high[i],
+            "low[{i}] must be strictly less than high[{i}]"
+        );
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -4848,7 +4906,7 @@ fn portfolio_optimize_interacting<O, G>(
     seed: u64,
     noise_sigma: Option<f64>,
     policy: PortfolioPolicy,
-    x0: Option<ArrayView1<f64>>,
+    start: Start<'_>,
     peer: Option<ensemble::Peer>,
 ) -> PortfolioResult
 where
@@ -4856,25 +4914,9 @@ where
     G: Gradient<f64>,
 {
     assert!(budget > 0, "budget must be positive");
-    if let Some(sigma) = noise_sigma {
-        assert!(
-            sigma > 0.0 && sigma.is_finite(),
-            "noise_sigma must be positive and finite"
-        );
-    }
+    assert_runnable(noise_sigma, obj.bounds());
     let bounds = obj.bounds().clone();
     let dim = bounds.dims;
-    assert!(dim > 0, "objective dimension must be positive");
-    for i in 0..dim {
-        assert!(
-            bounds.low[i].is_finite() && bounds.high[i].is_finite(),
-            "bounds must be finite at dimension {i}"
-        );
-        assert!(
-            bounds.low[i] < bounds.high[i],
-            "low[{i}] must be strictly less than high[{i}]"
-        );
-    }
 
     // GJQ-style regime refusal on the shipped accept path: declared noise
     // forbids exact-only Metropolis. The portfolio always uses OSA when
@@ -4910,14 +4952,14 @@ where
         inner: g,
         ledger: &ledger,
     });
-    if let Some(x0) = x0 {
-        assert_eq!(x0.len(), dim, "x0 must have the objective's dimension");
-        assert!(
-            x0.iter().all(|value| value.is_finite()),
-            "x0 must be finite"
-        );
-        let start = bounds.clip(x0);
-        let _ = budgeted_obj.eval(start.view());
+    match start {
+        Start::None => {}
+        Start::Point(x0) => {
+            let _ = budgeted_obj.eval(checked_start(x0, &bounds).view());
+        }
+        Start::Evaluated(x0, value) => {
+            ledger.charge_evaluated(checked_start(x0, &bounds).view(), value, &bounds);
+        }
     }
 
     if policy == PortfolioPolicy::Auto && grad.is_none() && noise_sigma.is_none() {

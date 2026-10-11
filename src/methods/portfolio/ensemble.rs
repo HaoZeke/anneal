@@ -11,7 +11,7 @@ use rand::{Rng, SeedableRng};
 use crate::methods::box_hopping::coverage::{Coverage, RepulsionSnapshot};
 use crate::methods::box_hopping::{BoxCoverageConfig, CoverageStats};
 
-use super::{PortfolioPolicy, PortfolioResult, portfolio_optimize_interacting};
+use super::{PortfolioPolicy, PortfolioResult, Start, portfolio_optimize_interacting};
 
 /// Complete portfolio replicas under one aggregate work allowance.
 #[derive(Clone, Debug)]
@@ -92,11 +92,17 @@ pub fn portfolio_values_ensemble_optimize<O: Objective<f64>>(
 /// indices. Seeds use `seed ^ (replica * 0x9E37_79B9)`. With no `x0`, each
 /// replica exactly retains its ordinary portfolio initialization. With `x0`,
 /// replica zero uses it and other replicas use seeded uniform box starts.
+/// `x0` is clipped onto the box and evaluated first, once, on the calling
+/// thread, before any replica starts. Replica zero holds that evaluation as
+/// its first, charged to its allowance, and as its first incumbent, as a
+/// portfolio started from `x0` ([`super::portfolio_optimize_from`]) would,
+/// without calling the objective there again.
 ///
-/// Callbacks run on scoped replica threads and outside exchange locks. A
-/// language binding holding an interpreter lock must release it around this
-/// call. `None` for `grad` requires no caller Jacobian or force implementation;
-/// internal scalar refinement charges its probes as objective calls.
+/// Other callbacks run on scoped replica threads and outside exchange
+/// locks. A language binding holding an interpreter lock must release it
+/// around this call. `None` for `grad` requires no caller Jacobian or force
+/// implementation; internal scalar refinement charges its probes as
+/// objective calls.
 pub fn portfolio_ensemble_optimize<O, G>(
     obj: &O,
     grad: Option<&G>,
@@ -112,6 +118,13 @@ where
     assert!(config.budget > 0, "budget must be positive");
     let count = config.replicas.min(config.budget);
     let bounds = obj.bounds();
+    let start = x0.map(|x0| {
+        super::assert_runnable(config.noise_sigma, bounds);
+        let start = super::checked_start(x0, bounds);
+        let value = obj.eval(start.view());
+        (start, value)
+    });
+    let start = start.as_ref();
     let enabled = config.coverage.shared
         && config.coverage.height > 0.0
         && config.coverage.peer_weight > 0.0
@@ -141,17 +154,17 @@ where
                     }
                 });
                 scope.spawn(move || {
-                    let start = x0.map(|x| {
-                        if replica == 0 {
-                            x.to_owned()
-                        } else {
-                            let mut rng = StdRng::seed_from_u64(replica_seed);
-                            Array1::from_shape_fn(bounds.dims, |j| {
-                                bounds.low[j]
-                                    + (bounds.high[j] - bounds.low[j]) * rng.random::<f64>()
-                            })
-                        }
+                    let uniform = start.filter(|_| replica > 0).map(|_| {
+                        let mut rng = StdRng::seed_from_u64(replica_seed);
+                        Array1::from_shape_fn(bounds.dims, |j| {
+                            bounds.low[j] + (bounds.high[j] - bounds.low[j]) * rng.random::<f64>()
+                        })
                     });
+                    let start = match (start, &uniform) {
+                        (None, _) => Start::None,
+                        (Some(_), Some(point)) => Start::Point(point.view()),
+                        (Some((x0, value)), None) => Start::Evaluated(x0.view(), *value),
+                    };
                     portfolio_optimize_interacting(
                         obj,
                         grad,
@@ -159,7 +172,7 @@ where
                         replica_seed,
                         config.noise_sigma,
                         config.policy,
-                        start.as_ref().map(|x| x.view()),
+                        start,
                         peer,
                     )
                 })

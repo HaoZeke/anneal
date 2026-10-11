@@ -95,6 +95,17 @@ evaluations, lead on a binary Lennard-Jones fit at 1000 and are level on
 all four at 5000, hence the default of one. =jac= runs one replica: with
 =jac=, =replicas= above one gives a =FutureWarning=.
 
+=global_optimize(fun, low, high, budget, seed=seed, x0=x0, replicas=R)= with
+no =grad_fn= or =noise_sigma= runs these batch replicas too, its
+=coverage_shared= standing for =history=, and =minimize= on a box with no
+fixed coordinate repeats it call for call. Without =x0=, or with =grad_fn=,
+=noise_sigma= or =policy="legacy"=, its replicas are persistent portfolio
+controllers on threads instead, each with its own archive and an even share
+of the budget, exchanging paid proposal positions. From a start, at equal
+evaluations, four of those, replica 0 going on from =x0=, ended behind four
+batch replicas on 10 of the 16 cells in the regime notes and level on the
+rest.
+
 * Archives and the remaining keywords
 
 =store= is an existing parameter archive: an =.h5= / =.hdf5= or =.jsonl=

@@ -294,6 +294,22 @@ def test_one_replica_repeats_global_optimize_call_for_call(budget, seed):
     assert result.nfev == expected["n_evals"]
 
 
+@pytest.mark.parametrize(("history", "coverage_shared"), [("shared", True), ("private", False)])
+def test_replicas_repeat_global_optimize_from_x0_call_for_call(history, coverage_shared):
+    fun = BatchRecorder()
+    result = anneal.minimize(fun, X0, BOX, budget=600, seed=8, replicas=4, history=history)
+    direct = BatchRecorder()
+    expected = anneal.global_optimize(
+        direct, LOW, HIGH, 600, seed=8, x0=X0, replicas=4, coverage_shared=coverage_shared
+    )
+    assert _same_points(fun.points, direct.points)
+    assert fun.batches == direct.batches and direct.single_calls == 0
+    assert np.array_equal(result.x, expected["best_pos"])
+    assert result.fun == expected["best_val"]
+    assert result.nfev == expected["n_evals"]
+    assert result.nit == expected["n_batches"]
+
+
 def test_jac_takes_the_gradient_route_and_counts_its_calls():
     grads = []
 

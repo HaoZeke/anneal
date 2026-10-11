@@ -116,8 +116,19 @@ assert!(result.n_evals <= config.budget);
 The =portfolio_values_api= regression supplies a concrete objective-only
 client and checks actual calls for both one and four replicas.
 
-The Python =global_optimize= wrapper selects this driver when =replicas > 1=.
-For example, a parameter loss can expose only values:
+With =x0= the driver evaluates it first, once, on the calling thread, before
+any replica starts; replica zero holds that evaluation as its first and its
+first incumbent, and the other replicas start from seeded uniform points.
+
+The Python =global_optimize= wrapper selects this driver when =replicas > 1=
+and the run has no =x0=, or has a =grad_fn=, a =noise_sigma= or
+=policy="legacy"=. A values-only run from =x0= under the auto policy takes the
+batch replicas of =minimize= instead, described below. Persistent replicas
+keep private archives, so a start every replica shares would cost one opening
+descent per replica; from a start the batch replicas reached better points
+for the same evaluations (see the
+[[file:regime_auto.org::*Batch replicas][regime notes]]).
+For example, a parameter loss without a start can expose only values:
 
 #+begin_src python
 import anneal
@@ -270,6 +281,15 @@ controls. =census_bus_topology= requires =bank-rpc= and exercises TCP and IPC.
 values-only portfolio with more, and retains the engine's result dictionary
 under =result.diagnostics=. It does not select atomic geometry from vector
 length or introduce a separate optimization loop.
+
+The two =replicas= keywords meet where both apply. =global_optimize(...,
+x0=x0, replicas=R)= with no =grad_fn= or =noise_sigma= under the auto policy
+runs the same batch replicas, its =coverage_shared= standing for =history=,
+so =minimize= on a box with no fixed coordinate repeats it call for call,
+as it repeats =global_optimize= with one replica. Its other replica runs are
+the persistent controllers above, which split the budget between private
+archives and exchange paid proposal positions; =minimize= has no such mode,
+and with =jac= it runs one replica.
 
 The declared box contains finite closed intervals. Equal endpoints fix an
 axis while every objective and gradient callback retains the full design

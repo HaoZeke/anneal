@@ -1252,8 +1252,12 @@ def minimize(
         index into it. Replica ``r`` also differences its descent's
         gradients from coordinate ``r * n / R`` on, which leaves each
         gradient unchanged but has replicas that descend from one point ask
-        for different stencil points. With ``jac``, ``replicas`` above one
-        gives a ``FutureWarning`` and one replica runs.
+        for different stencil points. These are the replicas
+        ``global_optimize(fun, low, high, budget, seed=seed, x0=x0,
+        replicas=R)`` runs, its ``coverage_shared`` standing for
+        ``history``, and ``minimize`` repeats it call for call on the free
+        coordinates. With ``jac``, ``replicas`` above one gives a
+        ``FutureWarning`` and one replica runs.
       history: with replicas, ``"shared"`` (the default) keeps one archive
         and one incumbent for all of them: arms that start at the incumbent
         start at the best point any replica has found, and the additive
@@ -1572,23 +1576,44 @@ def global_optimize(
         incumbent do, such as the trust-region poll and the population arm,
         and with ``grad_fn`` also basin hopping and HMC. Without ``x0`` the
         values-only loop starts from the best of a small seeded design.
-      replicas: persistent portfolio controllers sharing the aggregate budget.
-        One retains the single-controller behavior. Multiple replicas use
-        native worker threads; no caller Jacobian is required.
+        With ``replicas`` above one, ``x0`` is still the first evaluation,
+        made once whatever their number.
+      replicas: portfolio instances sharing the aggregate budget. One, the
+        default, is the single controller. With ``x0``, no ``grad_fn``, no
+        ``noise_sigma`` and ``policy="auto"``, ``R`` replicas are the batch
+        replicas of :func:`minimize`: ``R`` values-only loops start from
+        ``x0``, evaluated once and shared, and step together, each step's
+        points going to ``obj_fn.eval_batch`` when it has one, so
+        ``minimize(obj_fn, x0, bounds, budget=budget, seed=seed,
+        replicas=R)`` on the same box repeats the run call for call.
+        Otherwise ``R`` persistent portfolio
+        controllers split the budget on native worker threads; no caller
+        Jacobian is required. ``x0`` is then evaluated before any of them
+        starts, replica 0 goes on from it and the others start from seeded
+        uniform points. Persistent replicas keep private archives, so
+        starting every one from ``x0`` repeats one opening descent ``R``
+        times. From a start, at equal evaluations, the batch replicas beat
+        persistent ones with replica 0 at ``x0`` on 10 of the 16 cells of
+        the regime auto-selection notes and were level on the rest.
       coverage_shared: share paid global proposal positions at arm checkpoints.
         False gives independent portfolios with the same starts and work split.
+        Batch replicas keep one archive and incumbent with True and one each
+        with False, as ``history`` chooses in :func:`minimize`.
       coverage_radius: interaction radius in normalized RMS box coordinates.
       coverage_neighbors: direct cyclic neighbourhood radius. Zero is all-to-all;
         one admits the two adjacent chain identities without forwarding samples.
-        This does not remove the shared arm-checkpoint barrier.
+        This does not remove the shared arm-checkpoint barrier. Neither has an
+        effect on batch replicas.
 
     ``obj_fn`` and ``grad_fn`` are only called inside ``[low, high]``: a
     point an arm proposes outside is mirror-reflected into the box, and the
     gradient there is reflected with it. Peer separation moves global
     candidates, not derivative stencils or raw objective values. Returns a
     dict with ``best_pos``, ``best_val``, ``n_evals``, ``n_grads``,
-    ``arm_pulls``, and ``arm_successes``. Multiple replicas also report
-    individual results, ``charged`` work and coverage sample counters.
+    ``arm_pulls``, and ``arm_successes``. Persistent replicas also report
+    individual results, ``charged`` work and coverage sample counters, and
+    batch replicas ``n_batches``, the batches evaluated, the start's
+    included.
     """
     out = _core_global_optimize(
         obj_fn,
